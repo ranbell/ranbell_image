@@ -1,0 +1,34 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "models/sdxl_base.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncodeSDXL",
+    "inputs": {
+      "text_g": "masterpiece, best quality, 1girl",
+      "text_l": "long hair, blue eyes"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncodeSDXL",
+    "inputs": {
+      "text_g": "lowres, bad anatomy",
+      "text_l": "lowres, bad anatomy"
+    }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "positive": [2, 0],
+      "negative": [3, 0],
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "steps": 30,
+      "cfg": 7.5,
+      "seed": 100
+    }
+  }
+}

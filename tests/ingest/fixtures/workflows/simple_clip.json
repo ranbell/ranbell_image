@@ -1,0 +1,32 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "models/v1-5-pruned.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "1girl, masterpiece, best quality, long hair"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "lowres, bad anatomy, bad hands, worst quality"
+    }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "positive": [2, 0],
+      "negative": [3, 0],
+      "sampler_name": "euler_a",
+      "scheduler": "normal",
+      "steps": 20,
+      "cfg": 7.0,
+      "seed": 42
+    }
+  }
+}

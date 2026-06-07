@@ -1,0 +1,27 @@
+{
+  "1": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "lowres, bad anatomy, bad hands"
+    }
+  },
+  "2": {
+    "class_type": "ImpactWildcardEncode",
+    "inputs": {
+      "wildcard_text": "__hairstyle__ girl, masterpiece",
+      "populated_text": "long hair girl, masterpiece"
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "positive": [2, 0],
+      "negative": [1, 0],
+      "sampler_name": "euler_a",
+      "scheduler": "normal",
+      "steps": 20,
+      "cfg": 7.0,
+      "seed": 99
+    }
+  }
+}

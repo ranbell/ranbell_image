@@ -1,0 +1,33 @@
+{
+  "1": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "lowres, bad anatomy"
+    }
+  },
+  "2": {
+    "class_type": "StringConcat",
+    "inputs": {
+      "string_a": "1girl, masterpiece",
+      "string_b": ", best quality"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": [2, 0]
+    }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "positive": [3, 0],
+      "negative": [1, 0],
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "steps": 20,
+      "cfg": 7.0,
+      "seed": 1
+    }
+  }
+}

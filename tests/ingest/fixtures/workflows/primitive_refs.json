@@ -1,0 +1,70 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "models/v1-5-pruned.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "1girl, masterpiece"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "lowres, bad anatomy"
+    }
+  },
+  "90": {
+    "class_type": "PrimitiveNode",
+    "_meta": {"title": "seed"},
+    "inputs": {
+      "value": 12345
+    }
+  },
+  "93": {
+    "class_type": "PrimitiveNode",
+    "_meta": {"title": "cfg"},
+    "inputs": {
+      "value": 7.5
+    }
+  },
+  "94": {
+    "class_type": "PrimitiveNode",
+    "_meta": {"title": "steps"},
+    "inputs": {
+      "value": 20
+    }
+  },
+  "95": {
+    "class_type": "PrimitiveNode",
+    "_meta": {"title": "steps_chain"},
+    "inputs": {
+      "value": ["94", 0]
+    }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "model": ["1", 0],
+      "latent_image": ["5", 0],
+      "sampler_name": "euler_a",
+      "scheduler": "normal",
+      "steps": ["94", 0],
+      "cfg": 4.0,
+      "seed": ["90", 0]
+    }
+  },
+  "5": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "batch_size": 1
+    }
+  }
+}

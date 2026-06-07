@@ -1,0 +1,304 @@
+{
+  "_note": "Tag classification data for inspire.py inversion system. Edit this file to add/remove tags without touching Python code.",
+
+  "content_rating": [
+    "general", "sensitive", "explicit", "safe", "nsfw",
+    "questionable", "rating_safe", "rating_explicit", "rating_general"
+  ],
+
+  "always_fixed": {
+    "count": [
+      "1girl", "2girls", "3girls", "4girls", "5girls",
+      "6+girls", "7+girls",
+      "1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", "7+boys",
+      "1other", "solo", "duo", "couple", "group",
+      "multiple_girls", "multiple_boys", "harem", "solo_focus",
+      "everyone", "mixed_gender", "twins", "triplets", "siblings"
+    ],
+    "eye_shapes": [
+      "tareme", "tsurime", "heterochromia", "sanpaku", "slit_pupils",
+      "glowing_eyes", "half-closed_eyes",
+      "ringed_eyes", "spiral_eyes", "heart-shaped_pupils",
+      "star-shaped_pupils", "x_eyes", "round_eyes", "sharp_eyes",
+      "heavy_eyelids", "wide_eyes", "asymmetrical_eyes", "empty_eyes",
+      "tired_eyes", "sparkling_eyes"
+    ],
+    "body": [
+      "large_breasts", "huge_breasts", "medium_breasts", "small_breasts",
+      "flat_chest", "gigantic_breasts", "perky_breasts",
+      "slim", "slender", "athletic", "muscular", "abs", "toned",
+      "plump", "chubby", "curvy", "voluptuous", "petite",
+      "tall", "short_stature", "chibi", "loli",
+      "thick_thighs", "long_legs", "wide_hips", "narrow_waist",
+      "buxom", "lean", "thin", "heavyset", "stocky", "lanky"
+    ],
+    "skin_face": [
+      "pale_skin", "dark_skin", "tan", "tanned", "light_skin", "brown_skin",
+      "freckles", "mole", "beauty_mark", "scar", "facial_scar", "face_tattoo",
+      "blush_stickers", "birthmark", "lipstick", "eyeshadow", "mascara",
+      "heavy_makeup", "dark_lips",
+      "rosy_cheeks", "high_cheekbones", "round_face", "mature_face",
+      "young_face", "androgynous", "fair_skin", "dark_circles",
+      "sweat", "wet_face"
+    ],
+    "race": [
+      "cat_ears", "nekomimi", "kemonomimi", "dog_ears", "fox_ears", "bunny_ears",
+      "wolf_ears", "elf_ears", "pointy_ears", "animal_ears",
+      "cat_tail", "fox_tail", "dog_tail", "wolf_tail", "bunny_tail",
+      "rabbit_ears", "rabbit_tail", "rabbit_girl", "rabbit_boy",
+      "bunny_girl", "bunny_boy",
+      "demon_tail", "tail",
+      "angel_wings", "demon_wings", "dragon_wings", "fairy_wings", "wings",
+      "horns", "demon_horns", "oni_horns", "dragon_horns", "unicorn_horn",
+      "halo", "angel_halo",
+      "scales", "fur", "feathers", "claws", "fangs", "vampire_fangs",
+      "tiger_ears", "tiger_tail", "lion_ears", "horse_ears", "horse_tail",
+      "fish_tail", "mermaid_tail", "sheep_horns", "bull_horns",
+      "cybernetic_eye", "prosthetic_arm", "robot_girl", "android"
+    ],
+    "composition": [
+      "cowboy_shot", "close_up", "portrait", "bust", "upper_body", "lower_body",
+      "full_body", "head_only", "from_above", "from_below", "from_side",
+      "from_behind", "dutch_angle", "looking_at_viewer", "looking_away",
+      "looking_back", "face_only", "profile",
+      "three-quarter_view", "two-shot", "wide_shot", "extreme_close_up",
+      "aerial_view", "worm_eye_view", "symmetrical", "over_the_shoulder",
+      "pov", "selfie", "multiple_views", "character_sheet"
+    ],
+    "props": [
+      "pencil", "pen", "marker", "chalk", "eraser",
+      "book", "notebook", "paper", "letter", "note", "scroll",
+      "sword", "katana", "spear", "axe", "arrow",
+      "gun", "pistol", "rifle", "shield", "dagger",
+      "cup", "teacup", "coffee_cup", "mug", "bottle", "can", "glass",
+      "umbrella", "parasol", "fan", "lantern", "candle", "torch",
+      "phone", "cellphone", "camera", "mirror",
+      "bag", "backpack", "briefcase", "suitcase", "purse",
+      "flower", "rose", "bouquet", "leaf", "branch",
+      "food", "cake", "candy", "cookie", "fruit", "apple",
+      "key", "coin", "gem", "jewel", "orb", "crystal",
+      "wand", "staff", "rod", "broom",
+      "chopsticks", "fork", "knife", "lunch_box", "tray",
+      "pillow", "stuffed_animal", "balloon",
+      "sword_sheath", "shopping_bag",
+      "gaming_controller", "binoculars", "compass", "map",
+      "musical_instrument", "guitar", "violin", "flute",
+      "paintbrush", "magnifying_glass", "hourglass"
+    ]
+  },
+
+  "axis_hair": [
+    "twintails", "twin_tails", "ponytail", "side_ponytail", "high_ponytail",
+    "twin_drills", "drill_hair", "braid", "braided_hair", "french_braid",
+    "side_braid", "sidetail", "short_twintails", "one_side_up", "two_side_up",
+    "bob_cut", "hime_cut", "pixie_cut", "undercut", "hair_bun", "double_bun",
+    "crown_braid", "ahoge", "hair_intakes", "bangs", "blunt_bangs",
+    "swept_bangs", "parted_bangs", "hair_over_one_eye", "hair_over_eyes",
+    "hair_between_eyes",
+    "short_hair", "medium_hair", "long_hair", "very_long_hair",
+    "absurdly_long_hair", "hair_past_waist", "hair_past_shoulders",
+    "hair_over_shoulder",
+    "wavy_hair", "curly_hair", "straight_hair", "messy_hair",
+    "floating_hair", "wet_hair", "hair_spread_out", "flipped_hair",
+    "braided_bangs", "low_twintails", "low_ponytail", "wolf_cut"
+  ],
+
+  "axis_emotion": [
+    "smile", "smiling", "grin", "laugh", "laughing", "happy", "joyful",
+    "sad", "crying", "tears", "teary_eyes", "teary-eyed", "watery_eyes", "sobbing",
+    "expressionless", "neutral", "calm", "serious", "stoic",
+    "angry", "annoyed", "frustrated", "glaring", "frowning", "frown",
+    "blush", "blushing", "red_cheeks",
+    "surprised", "shocked", "open_mouth", "gasp",
+    "closed_mouth", "half_open_mouth",
+    "closed_eyes", "half-closed_eyes", "winking", "one_eye_closed",
+    "pout", "pouting", "smirk", "wink", "worried", "embarrassed", "shy",
+    "nervous", "confused", "flustered", "sleepy", "dazed",
+    "excited", "cheerful", "content", "satisfied", "reluctant",
+    "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
+    "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
+    "ecstatic", "horrified", "panicked", "relieved", "focused"
+  ],
+
+  "axis_action": [
+    "standing", "slouching", "leaning_forward", "leaning_back",
+    "leaning_on_object", "sitting_on_floor",
+    "sitting", "kneeling", "lying_down", "crouching", "squatting",
+    "lying_on_back", "lying_on_side", "lying_on_stomach",
+    "v_arms", "crossed_arms", "arm_stretch",
+    "looking_down", "looking_up", "bowing", "curtsy",
+    "jumping_up", "spinning", "stretching",
+    "arms_behind_back", "arms_up",
+    "arms_at_sides", "arms_behind_head", "arm_up",
+    "hand_on_hip", "hands_on_hips",
+    "hand_on_own_chin", "hand_on_own_cheek", "hand_on_own_face",
+    "hand_to_mouth", "finger_to_mouth", "finger_to_lips",
+    "hands_clasped", "hands_together", "interlocked_fingers",
+    "reaching_out", "outstretched_arm", "outstretched_hand",
+    "spread_arms", "arm_behind_head",
+    "v", "peace_sign", "ok_sign", "thumbs_up", "thumbs_down",
+    "pointing", "pointing_at_viewer", "pointing_at_self",
+    "hand_up", "hands_up", "index_finger_raised",
+    "waving", "salute", "fist",
+    "head_tilt", "head_back",
+    "seiza", "wariza", "prayer", "praying",
+    "hugging_own_legs", "knees_up", "knees_to_chest",
+    "crossed_legs", "leg_up", "legs_apart", "contrapposto",
+    "all_fours", "on_back", "on_stomach", "curled_up"
+  ],
+
+  "axis_clothing_explicit": [
+    "jacket", "coat", "shirt", "blouse", "blazer", "cardigan", "vest",
+    "sweater", "hoodie", "pullover", "turtleneck", "top",
+    "skirt", "pants", "jeans", "leggings", "tights", "trousers", "shorts",
+    "socks", "stockings", "pantyhose", "thigh_highs", "over-knee_socks",
+    "ribbon", "bow", "tie", "bowtie", "necktie",
+    "collar", "choker", "scarf", "belt", "suspenders",
+    "earrings", "necklace", "bracelet", "ring", "crown", "tiara",
+    "hairpin", "hairclip",
+    "shoes", "boots", "heels", "sandals", "sneakers",
+    "maid", "sailor", "apron", "cape", "cloak", "mantle", "veil",
+    "obi", "hakama", "haori", "cheongsam",
+    "tracksuit", "jersey", "leotard", "tutu",
+    "fingerless_gloves", "elbow_gloves",
+    "overall", "beret", "hood",
+    "school_uniform", "military_uniform",
+    "dress"
+  ],
+
+  "axis_accessories": [
+    "glasses", "sunglasses", "monocle", "goggles", "eyepatch",
+    "reading_glasses", "round_glasses", "square_glasses",
+    "headphones", "earphones", "earbuds", "wireless_headphones",
+    "mask", "surgical_mask", "gas_mask", "face_mask",
+    "bandage", "bandaged", "bandages", "bandaid", "bandage_on_nose",
+    "wristwatch", "watch",
+    "hair_ornament", "hairband", "headband",
+    "hair_flower", "hair_bow", "hair_ribbon", "hair_clip", "hair_scrunchie",
+    "tattoo", "body_tattoo", "tribal_tattoo", "arm_tattoo",
+    "collar_bell", "bell_collar"
+  ],
+
+  "axis_parts": [
+    "bare_shoulders", "bare_arms", "bare_legs", "bare_back", "bare_midriff",
+    "bare_chest", "bare_feet", "bare_ankles", "exposed_shoulders",
+    "off_shoulder", "off-shoulder",
+    "collarbone", "navel", "cleavage", "sideboob", "underboob",
+    "see-through", "wet", "wet_clothes",
+    "thigh", "thighs", "thigh_gap", "hip", "waist", "stomach",
+    "arm", "wrist", "neck", "shoulder",
+    "shiny_skin", "pale_arms"
+  ],
+
+  "axis_art_style": {
+    "always_fixed": [
+      "retro_anime", "cel_shading", "rough_sketch", "manga_style",
+      "colored_pencil", "watercolor"
+    ],
+    "volatile": [
+      "sketch", "flat_color", "linework", "oil_painting", "digital_art",
+      "gouache", "pastel_art", "acrylic_paint", "crayon", "airbrush",
+      "ink", "cross-hatching", "ukiyo-e", "impressionist", "chibi_style",
+      "pixel_art", "3d", "cg_art", "realistic", "semi-realistic",
+      "monochrome"
+    ]
+  },
+
+  "axis_environment": {
+    "visual_lighting": [
+      "shadow", "darkness", "bright", "dim", "gloomy",
+      "backlight", "rim_light", "lens_flare",
+      "bokeh", "haze_effect", "volumetric_light",
+      "warm_colors", "cool_colors", "vibrant_color", "pastel_colors",
+      "monochrome", "warm_tone", "cold_tone", "color_palette",
+      "dramatic_sky", "particle_effects"
+    ],
+    "time_weather": [
+      "day", "daytime", "night", "nighttime", "morning", "afternoon",
+      "evening", "dusk", "dawn", "noon", "midnight",
+      "sunrise", "sunset", "twilight", "golden_hour", "blue_hour",
+      "sky", "blue_sky", "cloudy_sky", "night_sky", "starry_sky",
+      "clear_sky", "overcast",
+      "sun", "sunlight", "sunbeam", "ray_of_light", "god_rays", "light_rays",
+      "moon", "full_moon", "crescent_moon", "half_moon", "moonlight",
+      "stars", "star", "shooting_star",
+      "clouds", "cloud",
+      "fog", "mist", "haze", "rain", "drizzle", "snow", "snowfall",
+      "sunny", "windy", "storm", "lightning", "thunder", "rainbow",
+      "spring", "summer", "autumn", "fall", "winter",
+      "cherry_blossoms", "sakura", "autumn_leaves", "fallen_leaves",
+      "aurora", "northern_lights", "eclipse", "thunderstorm",
+      "harvest_moon", "midnight_sun", "petals_falling",
+      "first_snow"
+    ]
+  },
+
+  "axis_background": {
+    "abstract": [
+      "simple_background", "gradient_background",
+      "white_background", "black_background"
+    ],
+    "location": [
+      "desk", "school_desk", "chair", "school_chair", "table", "bench",
+      "sofa", "couch", "bed", "bookshelf", "shelf", "locker",
+      "window", "door", "stairs", "staircase", "curtains", "ceiling", "floor",
+      "classroom", "library", "office", "bedroom", "living_room", "bathroom",
+      "kitchen", "dining_room", "hallway", "corridor",
+      "chalkboard", "blackboard", "whiteboard", "bulletin_board",
+      "park", "garden", "street", "road", "plaza", "rooftop", "balcony",
+      "beach", "forest", "mountain", "meadow", "field", "riverside",
+      "castle", "ruins", "temple", "shrine", "cafe", "restaurant",
+      "alley", "bridge", "dock", "harbor",
+      "indoors", "outdoors", "inside", "outside", "urban", "rural",
+      "scenery", "cityscape", "landscape",
+      "school_hallway", "gymnasium", "music_room", "science_lab",
+      "amusement_park", "shopping_mall", "station_platform", "train_interior",
+      "hospital_room", "church", "cathedral", "palace", "dungeon",
+      "cave", "void", "underwater", "outer_space",
+      "nature", "lake", "river", "waterfall", "cliff",
+      "tree", "grass", "bush", "lawn", "hedge",
+      "flower_field", "flower_garden",
+      "pink_flower", "white_flower", "yellow_flower"
+    ]
+  },
+
+  "_note_display": "display_category_map defines how FIXED tags are grouped for UI display. Order matters — first match wins for exact lookups. Suffix/keyword patterns are handled in Python code.",
+  "display_category_map": [
+    {"label": "count",        "source": "always_fixed.count"},
+    {"label": "eyes",         "source": "always_fixed.eye_shapes"},
+    {"label": "body",         "source": "always_fixed.body"},
+    {"label": "skin_face",    "source": "always_fixed.skin_face"},
+    {"label": "race",         "source": "always_fixed.race"},
+    {"label": "composition",  "source": "always_fixed.composition"},
+    {"label": "props",        "source": "always_fixed.props"},
+    {"label": "hair",         "source": "axis_hair"},
+    {"label": "emotion",      "source": "axis_emotion"},
+    {"label": "action",       "source": "axis_action"},
+    {"label": "clothing",     "source": "axis_clothing_explicit"},
+    {"label": "accessories",  "source": "axis_accessories"},
+    {"label": "parts",        "source": "axis_parts"},
+    {"label": "style",        "source": "axis_art_style.volatile"},
+    {"label": "style",        "source": "axis_art_style.always_fixed"},
+    {"label": "time_weather", "source": "axis_environment.time_weather"},
+    {"label": "visual",       "source": "axis_environment.visual_lighting"},
+    {"label": "location",     "source": "axis_background.location"},
+    {"label": "abstract_bg",  "source": "axis_background.abstract"}
+  ],
+
+  "patterns": {
+    "clothing_suffixes": [
+      "_uniform", "_outfit", "_dress", "_suit", "_armor", "_robe", "_costume",
+      "_hat", "_cap", "_shoes", "_boots", "_socks", "_stockings",
+      "_skirt", "_jacket", "_shirt", "_coat", "_pants", "_shorts",
+      "_gloves", "_scarf", "_apron", "_bikini", "_swimsuit",
+      "_kimono", "_yukata", "_ribbon", "_sleeves", "_collar",
+      "_top", "_bottom", "_leotard", "_tights"
+    ],
+    "action_keywords": [
+      "drinking", "eating", "holding_", "holding", "running", "sleeping",
+      "reading", "dancing", "fighting", "walking",
+      "jumping", "kneeling", "lying", "crawling",
+      "looking_back", "looking_away", "riding", "riding_"
+    ]
+  }
+}

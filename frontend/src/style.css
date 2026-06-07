@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Low-Power / GPU-Saving Animations Override ── */
+/* Loop opacity in 2 steps over 3 seconds to avoid continuous 60 FPS painting */
+.animate-pulse {
+  animation: pulse-lowpower 3s steps(2, start) infinite !important;
+}
+@keyframes pulse-lowpower {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.95; }
+}
+
+/* Rotate in 8 discrete steps over 4 seconds (2 steps per second) to drop GPU compositor load */
+.animate-spin {
+  animation: spin-lowpower 4s steps(8, end) infinite !important;
+}
+@keyframes spin-lowpower {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+

@@ -1,0 +1,15 @@
+.env
+.venv/
+docker-compose.override.yml
+docker-data/
+data/
+qdrant_data/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.DS_Store
+.claude
+private/
+.pytest_cache/
+.vscode/

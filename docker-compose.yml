@@ -1,0 +1,47 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    restart: unless-stopped
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+
+  backend:
+    image: ghcr.io/ranbell/ranbell-image-backend:latest
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - thumbnails_cache:/mnt/thumbnails
+      - ./backend/app:/app/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "8001"
+    depends_on:
+      qdrant:
+        condition: service_started
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
+
+  frontend:
+    image: ghcr.io/ranbell/ranbell-image-frontend:latest
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3100:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  thumbnails_cache:
