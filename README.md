@@ -91,7 +91,9 @@ Choose your output style to match your model:
 
 - **One-click ComfyUI submit** — the synthesized prompt is auto-injected into your workflow and queued for generation
 - **Streaming output** — watch the prompt form in real time, including the model's chain-of-thought
-- **Alignment scoring** — after generation, the VLM grades how well the produced image matches the prompt (0–1.0 score)
+- **Alignment scoring** — after generation, the VLM grades how well the produced image matches the prompt (0–100%)
+
+> 📖 [Creator's Guide — Prompt Alchemy](docs/guide/prompt-alchemy.md) · [Technical Reference](docs/tech/prompt-alchemy.md)
 
 ---
 
@@ -101,7 +103,7 @@ Choose your output style to match your model:
 
 When you know the vibe but not the destination, the Inspire panel helps you navigate your collection in ways that go far beyond search.
 
-**→ [Full technical reference: docs/tech/inspire-brainstorm.md](docs/tech/inspire-brainstorm.md)**
+> 📖 [Creator's Guide — Inspire & Brainstorm](docs/guide/inspire-brainstorm.md) · [Technical Reference](docs/tech/inspire-brainstorm.md)
 
 | Mode | You provide | Engine | Best for |
 |---|---|---|---|
@@ -143,6 +145,25 @@ Every image plotted in three-dimensional L\*a\*b\* color space by its dominant c
 
 **Tag Network**
 A force-directed graph where nodes are tags and edges represent co-occurrence. Dense clusters reveal the visual vocabulary at the heart of your collection. Sparse nodes are outliers. Click any tag to search.
+
+---
+
+## Documentation
+
+Two entry points for each major feature — pick whichever matches your goal:
+
+| Feature | I want to use it | I want to understand how it works |
+|---|---|---|
+| **Inspire & Brainstorm** | [Creator's Guide →](docs/guide/inspire-brainstorm.md) | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
+| **Prompt Alchemy** | [Creator's Guide →](docs/guide/prompt-alchemy.md) | [Technical Reference →](docs/tech/prompt-alchemy.md) |
+
+The **Creator's Guides** explain what each mode does, when to use it, and how inputs map to outputs — with diagrams, no implementation details.
+
+The **Technical References** cover the full algorithm specifications: pseudocode, mathematical foundations (L2 normalization, iterative normalization, LERP, sign inversion), Qdrant query patterns (DiscoverQuery, GroupBy, MRL two-phase), and the VLM 3-stage pipeline.
+
+Additional reference: 
+- [Qdrant collection design →](docs/tech/qdrant.md) 
+- [Job Spooler & Task Scheduling →](docs/tech/spooler.md)
 
 ---
 
