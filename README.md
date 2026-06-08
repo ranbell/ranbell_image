@@ -223,6 +223,115 @@ Every embedding, every image analysis, every synthesized prompt, and every align
 
 ---
 
+## Architecture
+
+### System Overview
+
+```mermaid
+graph LR
+    User(("User"))
+
+    subgraph FE ["Frontend · Vue 3 / Vite"]
+        UI["Control Room"]
+        IP["Inspire Panel"]
+    end
+
+    subgraph BE ["Backend · FastAPI"]
+        API["FastAPI"]
+    end
+
+    subgraph SP ["Job Spooler · spooler.py"]
+        Spl["JobSpooler"]
+        SYNC["SYNC"]
+        EMBED["EMBED"]
+        GEN_L["GEN"]
+        PROMPT_L["PROMPT"]
+        EVAL_L["EVAL"]
+    end
+
+    subgraph INF ["Local Inference"]
+        EMB["Ollama<br/>(embeddings)"]
+        VLM_N["Ollama (VLM)"]
+        WD14_N["WD14 Tagger"]
+        LAB_N["Color Extractor<br/>(CIE L*a*b*)"]
+        UMAP_N["UMAP"]
+    end
+
+    COMFY_N["ComfyUI"]
+
+    subgraph DB ["Qdrant · Vector DB"]
+        QC["AsyncQdrantClient"]
+        IMG[("'images'<br/>768d + 256d + 3d")]
+        ALN[("'alignment'")]
+        CFG[("'app_config'")]
+    end
+
+    User -->|"clicks"| UI
+    UI & IP -- "REST /api" --> API
+    API -- "SSE /api/jobs/stream" --> UI
+    API -- "spooler.submit()" --> Spl
+    Spl --> SYNC & EMBED & GEN_L & PROMPT_L & EVAL_L
+    SYNC --> QC
+    EMBED --> EMB & WD14_N & LAB_N
+    GEN_L -- "POST /prompt" --> COMFY_N
+    PROMPT_L & EVAL_L --> VLM_N
+    EMB & WD14_N & LAB_N & UMAP_N --> QC
+    VLM_N --> QC
+    COMFY_N -.->|"generated image → SYNC"| SYNC
+    QC --> IMG & ALN & CFG
+
+    classDef fe fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+    classDef api fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef spooler fill:#faf5ff,stroke:#7c3aed,color:#581c87
+    classDef lane fill:#ede9fe,stroke:#7c3aed,color:#3b0764
+    classDef infer fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
+    classDef gen fill:#ffedd5,stroke:#c2410c,color:#7c2d12
+    classDef db fill:#f0fdf4,stroke:#15803d,color:#14532d
+
+    class UI,IP fe
+    class API api
+    class Spl spooler
+    class SYNC,EMBED,GEN_L,PROMPT_L,EVAL_L lane
+    class EMB,VLM_N,WD14_N,LAB_N,UMAP_N infer
+    class COMFY_N gen
+    class QC,IMG,ALN,CFG db
+```
+
+### Job Orchestration
+
+```mermaid
+graph TD
+    subgraph Spooler ["JobSpooler · in-memory singleton"]
+        PQ["Priority Queue<br/>(one per lane)"]
+        AP["Auto-Pause Logic"]
+    end
+
+    GPU{"GPU Semaphore<br/>concurrency = 1"}
+
+    subgraph Workers ["Lane Workers · asyncio tasks"]
+        sw["SYNC"]
+        ew["EMBED"]
+        gw["GEN"]
+        pw["PROMPT"]
+        ev["EVAL"]
+    end
+
+    PQ --> sw & ew & gw & pw & ev
+    gw & ew -->|"async with semaphore"| GPU
+    AP -.->|"Tier 1 · pause when GEN / PROMPT active"| ew
+    AP -.->|"Tier 1+2 · pause when GEN / PROMPT / EMBED active"| ev
+
+    classDef worker fill:#ede9fe,stroke:#7c3aed,color:#3b0764
+    classDef spooler fill:#faf5ff,stroke:#7c3aed,color:#581c87
+    classDef gpu fill:#fef3c7,stroke:#d97706,color:#78350f
+
+    class sw,ew,gw,pw,ev worker
+    class PQ,AP spooler
+    class GPU gpu
+```
+
+---
+
 ## Japanese Documentation
 
 詳しい日本語の説明は **[README.ja.md](README.ja.md)** をご覧ください。
