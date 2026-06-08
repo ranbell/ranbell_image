@@ -2,15 +2,14 @@
 
 **Ranbell Image v0.1.0**
 
-This document covers the technical design of the Inspire panel and the Brainstorm feature: what each mode does, which technologies it uses, and how the underlying mechanisms work.
-
 ---
 
 ## Table of Contents
 
-1. [The Core Idea — Images as Semantic Coordinates](#1-the-core-idea--images-as-semantic-coordinates)
-2. [Technology at a Glance](#2-technology-at-a-glance)
-3. [Mode-by-Mode Reference](#3-mode-by-mode-reference)
+1. [Embedding Infrastructure](#1-embedding-infrastructure)
+2. [Mathematical Foundations](#2-mathematical-foundations)
+3. [Technology at a Glance](#3-technology-at-a-glance)
+4. [Mode Algorithms — Full Specification](#4-mode-algorithms--full-specification)
    - [Serendipity](#serendipity-)
    - [Alchemy](#alchemy-)
    - [Morph](#morph-)
@@ -20,341 +19,863 @@ This document covers the technical design of the Inspire panel and the Brainstor
    - [Group Search](#group-search-)
    - [Blend](#blend-)
    - [Outlier](#outlier-)
-4. [Brainstorm](#4-brainstorm-)
-5. [The Complete Creative Pipeline](#5-the-complete-creative-pipeline)
-6. [Vector Operations — What's Actually Happening](#6-vector-operations--whats-actually-happening)
+5. [Brainstorm — LLM Tag Pipeline](#5-brainstorm--llm-tag-pipeline)
+6. [Qdrant Query Patterns](#6-qdrant-query-patterns)
+7. [VLM 3-Stage Pipeline (Inversion Deep-Dive)](#7-vlm-3-stage-pipeline-inversion-deep-dive)
+8. [The Complete Creative Pipeline](#8-the-complete-creative-pipeline)
 
 ---
 
-## 1. The Core Idea — Images as Semantic Coordinates
+## 1. Embedding Infrastructure
 
-Every image in Ranbell Image is converted into a **high-dimensional embedding vector** — a sequence of numbers (768 dimensions) that encodes the visual meaning of the image: its composition, color palette, style, mood, subject matter, and atmosphere, all compressed into a single mathematical object.
+### 1.1 Embedding model and dimensions
 
-Once images are represented this way, they can be treated as **coordinates in a meaning space**. Images with similar visual meaning sit close together; images with entirely different worlds sit far apart.
-
-This transformation is what makes the Inspire modes possible. Instead of asking "which images have this filename?" or "which images are tagged with this keyword?", the system can ask questions like:
-
-| Question | What it means mathematically |
+| Parameter | Value |
 |---|---|
-| "Find images similar to this one" | Find nearby coordinates |
-| "Add concept A, subtract concept B" | Compute A + B − C, find the nearest image to the result |
-| "Show images between A and B" | Interpolate along the line from A to B |
-| "Find the opposite of this" | Negate the vector, find the nearest result |
-| "Find the most unusual image in my collection" | Find the coordinate most isolated from all others |
+| Vector dimensions | 768 |
+| MRL prefix dimensions | 256 |
+| Similarity metric | Cosine (dot product on normalized vectors) |
+| Qdrant collection | `images` |
 
-Three different "readings" of an image are used depending on the mode:
+### 1.2 Qdrant vector layout (MRL)
 
-- **As a vector** — the full embedding; encodes everything at once
-- **As tags** (WD14) — Danbooru category labels; the visual vocabulary as language
-- **As a coordinate** (UMAP) — a 2D position in the projected map of the collection
+Each image document holds two named vectors.
+
+```
+Qdrant point {
+  id:      sha256 hash (string)
+  vectors: {
+    "full":    float[768]   ← full-precision vector (for reranking)
+    "mrl256":  float[256]   ← MRL prefix (for prefetch)
+  }
+  payload: {
+    path:             string
+    wd14_tags:        string[]
+    wd14_tags_scores: float[]
+    umap_x:           float     ← used by Isolated Outlier mode
+    umap_y:           float
+    model_name:       string    ← used by Group Search
+    extension:        string
+    ...
+  }
+}
+```
+
+### 1.3 Two-phase MRL search
+
+All Qdrant searches execute in two phases.
+
+```
+Phase 1: Prefetch
+  Query (mrl256) × full collection (mrl256)
+  → top N×k candidate set (fast, lower precision)
+
+Phase 2: Rerank
+  Candidate set × query (full) × candidates (full)
+  → top k results at full precision
+
+N = prefetch multiplier (typically 5–10)
+k = final result count
+```
 
 ---
 
-## 2. Technology at a Glance
+## 2. Mathematical Foundations
+
+### 2.1 L2 normalization
+
+```
+norm(v) = v / ‖v‖₂
+
+‖v‖₂ = √(v₁² + v₂² + ... + vₙ²)
+
+After normalization: ‖norm(v)‖₂ = 1.0
+```
+
+All embeddings are projected onto the unit sphere before comparison. This ensures similarity is measured by **direction (angle)** rather than magnitude.
+
+### 2.2 Cosine similarity and dot product equivalence
+
+```
+cos(θ) = (u · v) / (‖u‖₂ × ‖v‖₂)
+
+When u and v are unit vectors:
+  cos(θ) = u · v
+
+∴ Qdrant dot product search ≡ cosine similarity search (on normalized vectors)
+```
+
+### 2.3 Iterative normalization
+
+Used when adding multiple vectors. Without it, repeated addition causes magnitude to grow (≈ √n per step), making later additions proportionally less influential.
+
+```
+Iterative normalization algorithm:
+  v₀ = norm(a₁)
+  vᵢ = norm(vᵢ₋₁ + norm(aᵢ₊₁))   ← re-normalize after each addition
+
+vs. naive sum:
+  v_naive = a₁ + a₂ + ... + aₙ    ← ‖v_naive‖ grows to ≈ √n
+```
+
+### 2.4 Linear interpolation (LERP)
+
+```
+LERP(A, B, t) = (1 − t) · A + t · B,  t ∈ [0, 1]
+
+Morph mode implementation:
+  for t in [0.2, 0.4, 0.6, 0.8, 1.0]:
+    v(t) = norm(LERP(norm(A), norm(B), t))
+    → Qdrant nearest-neighbor search
+```
+
+### 2.5 Weighted linear combination (Blend)
+
+```
+v_blend = norm( Σᵢ wᵢ · norm(aᵢ) )
+
+wᵢ ∈ [−1.0, +1.0]
+
+  wᵢ > 0: pull toward this direction
+  wᵢ < 0: push away (pseudo-subtraction)
+  wᵢ ≈ 0: negligible influence
+```
+
+### 2.6 Vector sign inversion (Outlier — Antipode)
+
+```
+Centroid computation:
+  v_centroid = norm( Σᵢ norm(xᵢ) / N )   ← mean over all images
+
+Antipode:
+  v_antipode = −v_centroid     ← multiply every element by −1
+
+Meaning: the direction in high-dimensional space most opposite to
+         the "typical" image in the collection.
+```
+
+---
+
+## 3. Technology at a Glance
 
 ### Mode × Technology Matrix
 
-| Mode | Vector averaging | Iterative normalization | Linear interpolation (LERP) | Weighted composition | Vector sign inversion | Qdrant standard search | Qdrant DiscoverQuery | Qdrant GroupBy | LLM tag generation | VLM image analysis | VLM 3-stage pipeline | WD14 tags | UMAP density | SSE streaming | No reference needed |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| ✨ Serendipity | ● | — | — | — | — | ● | — | — | — | — | — | — | — | — | — |
-| ⚗️ Alchemy | — | ● | — | — | — | ● | — | — | — | — | — | — | — | — | — |
-| 🌊 Morph | — | ● | ● | — | — | ● | — | — | — | — | — | — | — | — | — |
-| ⚡ Anomaly | ● | — | — | — | — | ● | — | — | ● | — | — | ● | — | — | — |
-| 🪞 Inversion | ● | — | — | — | — | ● | — | — | — | ● | ● | ● | — | ● | — |
-| 🧭 Discovery | — | — | — | — | — | — | ● | — | — | — | — | — | — | — | — |
-| 🗂️ Group Search | — | — | — | — | — | — | — | ● | — | — | — | — | — | — | ● |
-| ⚖️ Blend | — | — | — | ● | — | ● | — | — | — | — | — | — | — | — | — |
-| 🌌 Outlier (Antipode) | ● | — | — | — | ● | ● | — | — | — | — | — | — | — | — | ● |
-| 🌌 Outlier (Isolated) | — | — | — | — | — | ◐ | — | — | — | — | — | — | ● | — | ● |
-| 💡 Brainstorm | — | — | — | — | — | — | — | — | ● | — | — | ● | — | ● | — |
+| Mode | Vector avg | Iterative norm | LERP | Weighted sum | Sign inversion | Qdrant std | DiscoverQuery | GroupBy | LLM tags | VLM 3-stage | WD14 tags | UMAP density | SSE |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| ✨ Serendipity | ● | — | — | — | — | ● | — | — | — | — | — | — | — |
+| ⚗️ Alchemy | — | ● | — | — | — | ● | — | — | — | — | — | — | — |
+| 🌊 Morph | — | ● | ● | — | — | ● | — | — | — | — | — | — | — |
+| ⚡ Anomaly | ● | — | — | — | — | ● | — | — | ● | — | ● | — | — |
+| 🪞 Inversion | ● | — | — | — | — | ● | — | — | — | ● | ● | — | ● |
+| 🧭 Discovery | — | — | — | — | — | — | ● | — | — | — | — | — | — |
+| 🗂️ Group Search | — | — | — | — | — | — | — | ● | — | — | — | — | — |
+| ⚖️ Blend | — | — | — | ● | — | ● | — | — | — | — | — | — | — |
+| 🌌 Outlier (Antipode) | ● | — | — | — | ● | ● | — | — | — | — | — | — | — |
+| 🌌 Outlier (Isolated) | — | — | — | — | — | ◐ | — | — | — | — | — | ● | — |
+| 💡 Brainstorm | — | — | — | — | — | — | — | — | ● | — | ● | — | ● |
 
 ● = core technology · ◐ = conditional · — = not used
 
-### Complexity Classification
+### Processing cost classification
 
 ```
-Pure vector math — fast, deterministic
-  ├── Alchemy       — vector addition/subtraction only
-  ├── Morph         — linear interpolation only
-  └── Blend         — weighted linear combination only
+Pure vector math (microsecond–millisecond, deterministic)
+  Alchemy / Morph / Blend
 
-Vector math + probabilistic elements
-  ├── Serendipity   — random sampling from a percentile band
-  └── Outlier       — sign inversion or density analysis
+Vector math + Qdrant advanced features
+  Serendipity (percentile sampling)
+  Outlier (centroid or density scan)
+  Discovery (DiscoverQuery)
+  Group Search (GroupBy)
 
-Vector math + advanced Qdrant features
-  ├── Discovery     — DiscoverQuery
-  └── Group Search  — GroupBy + text embedding
-
-LLM/VLM integration — slower, non-deterministic, expressive
-  ├── Anomaly       — LLM tag generation (lightweight)
-  ├── Brainstorm    — LLM text generation (medium)
-  └── Inversion     — VLM 3-stage pipeline (heaviest)
+LLM/VLM integration (seconds–10s, non-deterministic)
+  Anomaly    — 1 LLM call (temperature 0.7)
+  Brainstorm — 1 LLM call, SSE streaming
+  Inversion  — 2–3 VLM calls, SSE streaming  ← heaviest
 ```
 
 ---
 
-## 3. Mode-by-Mode Reference
+## 4. Mode Algorithms — Full Specification
 
 ---
 
 ### Serendipity ✨
 
-**What you can do:** Find images that are similar to your reference but not *too* similar — the sweet spot between "already familiar" and "completely unrelated".
+**Pseudocode:**
 
-**What you provide:** 1–6 reference images.
+```python
+def serendipity(ref_sha256s: list[str], k: int = 20) -> list[Image]:
+    # 1. Build query vector
+    vecs = [get_embedding(sha) for sha in ref_sha256s]
+    q = norm(mean(vecs))
 
-**How it works:**
+    # 2. Retrieve top 1,000 nearest neighbors (MRL two-phase)
+    results = qdrant.search(
+        collection="images",
+        query=q,
+        limit=1000,
+        with_payload=False,
+        using="full",
+        prefetch=Prefetch(query=q[:256], limit=5000, using="mrl256")
+    )
+    scores = [r.score for r in results]
 
-The reference images' embeddings are averaged into a single query vector. Qdrant returns the top 1,000 nearest neighbors by cosine similarity, ranked by score. The system then computes the 25th and 75th percentile scores of those results, and samples randomly from the band between P25 and P75 — the "moderately similar" zone.
+    # 3. Compute percentile boundaries
+    p25 = percentile(scores, 25)
+    p75 = percentile(scores, 75)
 
-This percentile-based approach automatically adapts to the score distribution of whatever embedding model is in use. The result is always "interestingly different but contextually related" regardless of absolute score values.
+    # 4. Filter to the P25–P75 band
+    band = [r for r in results if p25 <= r.score <= p75]
 
-**Why percentiles matter:** A fixed similarity threshold (e.g., 0.5–0.7) fails because different embedding models produce very different score distributions. Percentile bands anchor to the *actual* distribution of your collection, not an arbitrary constant.
+    # 5. Random sample from the band
+    return random.sample(band, min(k, len(band)))
+```
 
-**Best for:** Breaking out of creative ruts. Discovering images you forgot you had. Getting a fresh angle on a familiar theme.
+**Why percentile bands instead of fixed thresholds:**
+
+A fixed threshold (e.g., 0.5–0.7) fails in practice because different embedding models produce very different score distributions. Percentile bands **automatically anchor to the real distribution of your collection** and consistently deliver the "moderately similar" zone regardless of absolute score magnitudes.
 
 ---
 
 ### Alchemy ⚗️
 
-**What you can do:** Combine or subtract visual concepts using actual vector arithmetic. "The color palette of image A, plus the composition of image B, minus the urban setting of image C."
+**Pseudocode:**
 
-**What you provide:** Images to add (up to 3) and images to subtract (up to 3).
+```python
+def alchemy(
+    add_sha256s: list[str],   # up to 3
+    sub_sha256s: list[str],   # up to 3
+    k: int = 20
+) -> list[Image]:
+    # 1. Iteratively normalize-add the positive images
+    q = norm(get_embedding(add_sha256s[0]))
+    for sha in add_sha256s[1:]:
+        q = norm(q + norm(get_embedding(sha)))   # re-normalize after each add
 
-**How it works:**
+    # 2. Iteratively normalize-add the negative images, then subtract
+    if sub_sha256s:
+        s = norm(get_embedding(sub_sha256s[0]))
+        for sha in sub_sha256s[1:]:
+            s = norm(s + norm(get_embedding(sha)))
+        q = norm(q - s)                           # re-normalize after subtract
 
-Each image's embedding vector is individually normalized to unit length before being added or subtracted. Normalization happens at every step (not just at the end) — this is called **iterative normalization**, and it prevents any single image from dominating the result simply because its embedding happens to have a larger magnitude.
+    # 3. Qdrant search
+    return qdrant.search(collection="images", query=q, limit=k)
+```
 
-The resulting composite vector points toward the region of the embedding space that best satisfies the combination you specified. Qdrant then finds the images nearest to that region.
+**Numerical effect of iterative normalization:**
 
-**The key insight:** Once every image is a coordinate, vector addition and subtraction are real operations with real effects. Subtracting "outdoor scenes" from "fashion photographs" actually moves the query vector away from the outdoor cluster and toward the indoor fashion cluster.
+```
+Image A magnitude = 1.0 (already normalized)
+Image B magnitude = 1.0 (already normalized)
 
-**Best for:** Expressing creative intent that's hard to describe in words. "I want something like this, with some of that, but without the other thing."
+Naive addition:         A + B → ‖A + B‖ ≈ 1.41  (magnitude drift)
+Iterative normalize:    norm(norm(A) + norm(B)) = 1.0  (magnitude fixed)
+```
 
 ---
 
 ### Morph 🌊
 
-**What you can do:** See the five images in your collection that form the most natural gradient between two concepts — the intermediate stages from image A to image B.
+**Pseudocode:**
 
-**What you provide:** 2 images (A and B).
+```python
+MORPH_STEPS = [0.2, 0.4, 0.6, 0.8, 1.0]
+IMAGES_PER_STEP = 4
 
-**How it works:**
+def morph(sha_a: str, sha_b: str) -> list[list[Image]]:
+    va = norm(get_embedding(sha_a))
+    vb = norm(get_embedding(sha_b))
+    results = []
 
-Linear interpolation (LERP) is computed at five evenly spaced steps between the two embedding vectors: t = 0.2, 0.4, 0.6, 0.8, and the endpoint. At each step, the interpolated vector is normalized, then used to search Qdrant for the nearest images in the collection.
+    for t in MORPH_STEPS:
+        # LERP → normalize
+        v_interp = norm((1 - t) * va + t * vb)
 
-The result is a timeline of 5 steps × 4 images per step, showing how the collection transitions from the aesthetic world of A to the aesthetic world of B.
+        # Exclude the two endpoint images from results
+        step_results = qdrant.search(
+            collection="images",
+            query=v_interp,
+            limit=IMAGES_PER_STEP,
+            filter=must_not([sha_a, sha_b])
+        )
+        results.append(step_results)
 
-**Best for:** Transition aesthetics — moving from day scenes to night scenes, from quiet to energetic, from realistic to stylized. Useful for finding what visually bridges two very different images you like.
+    return results   # 5 steps × 4 images = up to 20 images
+```
+
+**Geometric interpretation of LERP:**
+
+```
+va and vb are two points on the unit sphere.
+  t = 0.0 → direction of va (images near A)
+  t = 0.5 → midpoint direction (the "blend" of A and B)
+  t = 1.0 → direction of vb (images near B)
+
+Note: this is linear interpolation, not SLERP (spherical linear).
+LERP is used because the post-normalization difference is negligible
+and computation is simpler.
+```
 
 ---
 
 ### Anomaly ⚡
 
-**What you can do:** Find images that contain unexpected, rare element combinations relative to your selection — surprises that are contextually grounded, not just random.
+**Pseudocode:**
 
-**What you provide:** 1–6 reference images.
+```python
+ANOMALY_TAG_COUNT = 30    # top tags fed to LLM
+ANOMALY_INJECT_N  = 3     # tags LLM proposes
 
-**How it works:**
+def anomaly(ref_sha256s: list[str], k: int = 20) -> AnomalyResult:
+    # 1. Count WD14 tag frequencies
+    tag_freq: Counter = Counter()
+    for sha in ref_sha256s:
+        doc = db.get(sha)
+        tag_freq.update(doc["wd14_tags"])
 
-The top 30 WD14 tags from the reference images are collected and their frequencies counted. These common tags are sent to the LLM (Ollama) with a prompt that says, in effect: "given these dominant tags, suggest 3 Danbooru-compatible tags that would be rare or unexpected in this context." The LLM proposes anomaly tags that are semantically plausible but statistically unusual given the reference.
+    # 2. Extract top tags
+    top_tags = [t for t, _ in tag_freq.most_common(ANOMALY_TAG_COUNT)]
 
-The original tags plus the 3 anomaly tags are concatenated and embedded as a text query, then used for vector search. The result surfaces images containing those unusual element combinations. The response includes the anomaly tags so you can see what the LLM injected.
+    # 3. Ask LLM for rare-but-plausible anomaly tags (temperature 0.7)
+    prompt = (
+        f"Given these dominant tags from an image collection:\n{top_tags}\n\n"
+        f"Suggest exactly {ANOMALY_INJECT_N} Danbooru-compatible tags "
+        "that would be RARE or UNEXPECTED in this context "
+        "but semantically plausible. Return only tags, comma-separated."
+    )
+    anomaly_tags_str = ollama.generate(prompt, temperature=0.7)
+    anomaly_tags = parse_tags(anomaly_tags_str)
 
-**Best for:** Creative surprises that make sense in context. Breaking compositional habits. Finding images with unexpected elements that still relate to your starting point.
+    # 4. Concatenate and embed as a text query
+    combined_text = ", ".join(top_tags + anomaly_tags)
+    q = norm(ollama.embed(combined_text))
+
+    # 5. Qdrant search
+    images = qdrant.search(collection="images", query=q, limit=k)
+
+    return AnomalyResult(images=images, anomaly_tags=anomaly_tags)
+```
+
+**Non-determinism is intentional:**
+
+`temperature=0.7` means different anomaly tags are proposed on every call for the same reference images. Running Anomaly multiple times produces a different "surprise" each time — by design.
 
 ---
 
 ### Inversion 🪞
 
-**What you can do:** Design a semantically opposite version of your reference image's world along five axes — and find images in your collection that inhabit that opposite world.
+See [§7 VLM 3-Stage Pipeline](#7-vlm-3-stage-pipeline-inversion-deep-dive) for the full pipeline.
 
-**What you provide:** 1–3 reference images.
+**Algorithm outline:**
 
-**The five inversion axes:**
+```python
+def inversion(ref_sha256s: list[str]) -> AsyncIterator[SSEEvent]:
+    # Build tile image (visual context for VLM)
+    tile = create_tile_image([read_bytes(sha) for sha in ref_sha256s])
 
-| Axis | What gets inverted |
-|---|---|
-| **Visual** | Light ↔ dark, warm ↔ cool, dense ↔ sparse, interior ↔ exterior |
-| **Mood** | Calm ↔ chaotic, joyful ↔ melancholy, active ↔ still |
-| **Subject** | Age, expression, posture, number of figures |
-| **Style** | Detailed ↔ minimal, saturation shifts |
-| **Narrative** | Everyday ↔ fantastical, familiar ↔ alien |
+    # Stage 1: Generation (SSE "think" + "token" events)
+    stage1_output = yield from vlm_stage1(tile)
 
-**Constraint:** Character-defining features (hair color, eye color, specific persons) are *not* inverted. The world changes; the character remains.
+    # Stage 2: Validation
+    issues = yield from vlm_stage2(stage1_output)
 
-**How it works — 3-stage VLM pipeline:**
+    # Stage 3: Refinement (only if issues found)
+    if issues:
+        final = yield from vlm_stage3(stage1_output, issues)
+    else:
+        final = stage1_output
 
-This is the most compute-intensive mode. It runs three sequential LLM/VLM passes, streamed to the browser via Server-Sent Events:
-
-**Stage 1 — Generation:** The VLM analyzes the reference images and generates:
-- A narrative (300–500 words) describing the inverted world
-- 100–150 Danbooru/WD14 tags for the inverted concept
-- A natural-language prose prompt (150–200 words)
-- 20–40 negative tags (elements of the original to exclude)
-
-**Stage 2 — Validation:** A second VLM pass reviews the Stage 1 output for internal consistency and safety. It produces a structured report of any issues found.
-
-**Stage 3 — Refinement** (only if Stage 2 found issues): A third VLM pass rewrites the output to address the validation feedback.
-
-The final tags and prose are embedded and used to search Qdrant for matching images.
-
-**Why the 3-stage pipeline?** Without validation, VLM outputs sometimes contradict themselves (e.g., inverting "outdoor" to "indoor" but keeping outdoor-specific tags). The self-correction loop produces significantly more coherent results without any human review.
-
-**Best for:** "What if the world in this image were completely different?" Creative direction exploration. Finding visual counterparts to images you already like.
+    # Embed final output → Qdrant search → SSE "done"
+    q = norm(ollama.embed(final.tags + final.prose))
+    images = qdrant.search(collection="images", query=q, limit=20)
+    yield SSEEvent("done", images=images,
+                   inversion_tags=final.tags,
+                   inversion_prose=final.prose,
+                   negative_tags=final.negative_tags)
+```
 
 ---
 
 ### Discovery 🧭
 
-**What you can do:** Explore a direction in the collection using complex intent — "close to this target, leaning toward this kind of image, and away from that kind."
+**Pseudocode:**
 
-**What you provide:** A target image, plus additional images marked as positive (desired direction) or negative (direction to avoid).
+```python
+def discovery(
+    target_sha: str,
+    positive_pairs: list[tuple[str, str]],   # [(pos_sha, neg_sha), ...]
+    k: int = 20
+) -> list[Image]:
+    target_vec = norm(get_embedding(target_sha))
 
-**How it works:**
+    context = [
+        ContextPair(
+            positive=norm(get_embedding(pos)),
+            negative=norm(get_embedding(neg))
+        )
+        for pos, neg in positive_pairs
+    ]
 
-This mode uses Qdrant's `DiscoverQuery` — a special query type that optimizes for both proximity to the target *and* the directional context implied by the positive/negative pairs.
+    return qdrant.discover(
+        collection="images",
+        target=target_vec,
+        context=context,
+        limit=k,
+        using="full",
+        prefetch=Prefetch(
+            query=target_vec[:256],
+            limit=k * 5,
+            using="mrl256"
+        )
+    )
+```
 
-Where standard search asks "what's nearest to X?", DiscoverQuery asks "what's nearest to X *while also being more like P than like N*?" Each positive/negative pair you provide contributes additional directional pressure on the results.
+**DiscoverQuery optimization objective:**
 
-**Best for:** Controlled exploration. When you want to search near a target but nudge the results in a specific direction without doing full vector arithmetic manually.
+```
+Standard search:   argmax_x  sim(x, target)
+
+DiscoverQuery:     argmax_x  sim(x, target)
+                   subject to: sim(x, pos) > sim(x, neg)  ∀ pairs
+
+Each positive/negative pair applies directional pressure.
+Adding more pairs narrows the exploration further.
+```
 
 ---
 
 ### Group Search 🗂️
 
-**What you can do:** Run a natural-language semantic query and see results grouped by generation model, file type, or other collection attributes — comparing how different models interpreted the same concept.
+**Pseudocode:**
 
-**What you provide:** A text query.
+```python
+def group_search(
+    query_text: str,
+    group_by: str = "model_name",
+    group_size: int = 3,
+    max_groups: int = 10
+) -> dict[str, list[Image]]:
+    q = norm(ollama.embed(query_text))
 
-**How it works:**
+    return qdrant.search_groups(
+        collection="images",
+        query=q,
+        group_by=group_by,
+        group_size=group_size,
+        limit=max_groups,
+        using="full",
+        prefetch=Prefetch(
+            query=q[:256],
+            limit=max_groups * group_size * 5,
+            using="mrl256"
+        )
+    )
+```
 
-The query text is embedded by Ollama into a vector, which is used to search Qdrant via the `GroupBy` API. Results are partitioned into groups (by model name, file extension, etc.) and returned as `{group_id: [images]}` — typically 3 images per group, up to 10 groups.
+**GroupBy internals:**
 
-**Best for:** Cross-model comparison. "How did DreamShaper, SDXL Turbo, and Anima each interpret 'twilight on the beach'?" Useful for choosing which model to use for a specific style direction.
+After the ANN search, Qdrant partitions results by the specified payload field and returns up to `group_size` images per group. Intra-group deduplication is applied; cross-group diversity follows naturally from the search ranking.
 
 ---
 
 ### Blend ⚖️
 
-**What you can do:** Mix visual concepts from multiple images with precise per-image weight control, from −1.0 (strongly subtracted) to +1.0 (strongly included).
+**Pseudocode:**
 
-**What you provide:** 2–4 images, each with a weight slider.
+```python
+BLEND_EXCLUDE_THRESHOLD = 0.5
 
-**How it works:**
+def blend(
+    images_weights: list[tuple[str, float]],   # (sha256, weight)
+    k: int = 20
+) -> list[Image]:
+    # Exclude images that are "strongly included" (return related, not themselves)
+    exclude = [sha for sha, w in images_weights if w > BLEND_EXCLUDE_THRESHOLD]
 
-Each image's embedding is normalized to unit length, then scaled by its weight before being summed. The final sum is normalized again and used to search Qdrant. Images with weight > 0.5 are excluded from the results (since the point is to find something *related to* them, not the images themselves).
+    # Weighted linear combination
+    q = zeros(768)
+    for sha, w in images_weights:
+        q += w * norm(get_embedding(sha))
+    q = norm(q)
 
-**Blend vs. Alchemy:**
-- Alchemy assigns binary roles (+1 or −1) and uses iterative normalization to prevent magnitude drift
-- Blend allows continuous weights anywhere in [−1.0, +1.0] and uses a weighted linear combination
+    return qdrant.search(
+        collection="images",
+        query=q,
+        limit=k,
+        filter=must_not(exclude)
+    )
+```
 
-Use Alchemy for clear conceptual addition/subtraction. Use Blend when you want to express "60% of A, 30% of B, 10% of C" — nuanced, proportional mixing.
+**Mathematical distinction from Alchemy:**
 
-**Best for:** Fine-grained mood mixing. Composing a specific target aesthetic from multiple reference images with individual tuning.
+```
+Alchemy (iterative normalization):
+  q₀ = norm(a₁)
+  q₁ = norm(q₀ + norm(a₂))
+  q₂ = norm(q₁ − norm(s₁))
+  Every input snapped to the unit sphere at each step
+  → all inputs have equal voting power regardless of count
+
+Blend (weighted linear combination):
+  q = norm( w₁·norm(a₁) + w₂·norm(a₂) + w₃·norm(a₃) )
+  Weights flow through to the final direction
+  → "60% A, 30% B, 10% C" maps directly onto the result
+```
 
 ---
 
 ### Outlier 🌌
 
-**What you can do:** Find the most extreme or isolated images in your collection — the ones that are semantically furthest from everything else.
+#### Antipode (mathematical opposite)
 
-**What you provide:** Nothing (no reference needed) — this mode characterizes the collection itself.
+**Pseudocode:**
 
-**Two sub-modes:**
+```python
+def outlier_antipode(k: int = 20) -> list[Image]:
+    # Compute centroid of all embeddings
+    all_vecs = [get_embedding(sha) for sha in get_all_sha256s()]
+    centroid = norm(mean(all_vecs))
 
-**Antipode (mathematical opposite):**
-All images in the collection are averaged into a single centroid vector representing the "typical" image. This centroid vector is sign-inverted (every element multiplied by −1), pointing toward the mathematical opposite of the average. The images nearest to this antipodal point are the ones furthest from the collection's center of gravity.
+    # Negate → points to the mathematical opposite direction
+    antipode = -centroid
 
-**Isolated (density-based):**
-UMAP 2D coordinates stored in each image's metadata are used to compute a local density for every image — the count of other images within a radius of 2.0 units. Images with the lowest density (fewest neighbors in 2D semantic space) are identified as isolated. A random sample from the lowest-density candidates is returned.
-
-Fallback: if UMAP coordinates haven't been computed yet, random sampling is used.
-
-**Best for:** Discovering your most unique or experimental work. Finding images that don't fit any cluster. Surfacing the outliers that represent creative experiments or stylistic departures.
-
----
-
-## 4. Brainstorm 💡
-
-**What you can do:** Take a set of discovered images and ask the LLM to generate 3–5 creative scene ideas that build on what those images suggest — then send any idea directly to the Synthesis studio.
-
-**What you provide:** Images you've discovered through any Inspire mode (selected as brainstorm input). If Anomaly or Inversion was used, their generated tags are also automatically included.
-
-**How it works:**
-
-WD14 tags from the selected images are collected and merged with any extra tags from previous Anomaly or Inversion runs. This combined tag vocabulary is sent to the LLM (Ollama) with a prompt requesting 3–5 creative, visually distinct scene proposals in Markdown format.
-
-The response streams back to the browser via Server-Sent Events — you see the ideas form in real time. Each generated scene can be selected and sent directly to the Synthesis studio, where it becomes the starting instruction for prompt generation.
-
-**Language:** Brainstorm supports both English and Japanese output.
-
-**Best for:** The gap between "I found something interesting" and "I know what to create next." Brainstorm converts visual inspiration into actionable creative direction.
-
----
-
-## 5. The Complete Creative Pipeline
-
-The Inspire modes and Brainstorm are not isolated tools — they form a connected pipeline from discovery to generation:
-
-```
-Discovery
-  └── Serendipity / Anomaly / Inversion / Outlier / ...
-      Find images you didn't know you were looking for
-
-        ↓
-
-Analysis  (automatic)
-  └── WD14 tags collected from results
-      Extra tags from Anomaly / Inversion injected
-      Visual vocabulary translated into language
-
-        ↓
-
-Ideation
-  └── Brainstorm
-      LLM generates 3–5 scene proposals from the tag vocabulary
-      Results streamed in real time
-
-        ↓
-
-Refinement
-  └── Synthesis Studio
-      Reference images + brainstorm idea → VLM generates a full prompt
-      Output style: Danbooru / natural language / hybrid
-
-        ↓
-
-Generation
-  └── ComfyUI (one-click submit)
-      Generated image added to collection
-      Collection grows → future Inspire searches become richer
+    return qdrant.search(collection="images", query=antipode, limit=k)
 ```
 
-Each generated image is indexed back into the collection, increasing the density and richness of the semantic map for future exploration.
+**Why sign inversion gives the "most different" image:**
+
+```
+The centroid c (unit sphere) is the direction of the "typical" image.
+−c points in exactly the opposite direction in the same high-dim space.
+Images nearest to −c are those furthest from the collection's center of gravity.
+
+Note: −c is a virtual point not in the collection.
+      The ANN search finds the nearest real image to that virtual point.
+```
+
+#### Isolated (density-based)
+
+**Pseudocode:**
+
+```python
+ISOLATION_RADIUS  = 2.0   # neighbor radius in UMAP 2D space
+ISOLATION_SAMPLE  = 20    # final sample count
+
+def outlier_isolated(k: int = ISOLATION_SAMPLE) -> list[Image]:
+    docs = db.get_all_with_umap()
+
+    if not docs:
+        # Fallback: UMAP not yet computed
+        return random.sample(get_all_images(), k)
+
+    coords = [(doc["umap_x"], doc["umap_y"]) for doc in docs]
+
+    # Compute local density for each image
+    densities = []
+    for i, (x, y) in enumerate(coords):
+        count = sum(
+            1 for j, (x2, y2) in enumerate(coords)
+            if i != j and euclidean(x, y, x2, y2) < ISOLATION_RADIUS
+        )
+        densities.append((docs[i], count))
+
+    # Sort ascending by density (fewest neighbors first)
+    densities.sort(key=lambda d: d[1])
+
+    # Random sample from the lowest-density candidates
+    candidates = [d[0] for d in densities[:k * 3]]
+    return random.sample(candidates, min(k, len(candidates)))
+```
+
+**When UMAP coordinates are updated:**
+
+UMAP projects all image embeddings to 2D. It is recomputed asynchronously in a batch job when new images are added. Images added after the last UMAP run lack `umap_x`/`umap_y` and fall through to the random-sample fallback path.
 
 ---
 
-## 6. Vector Operations — What's Actually Happening
+## 5. Brainstorm — LLM Tag Pipeline
 
-### Why normalization matters
+**Pseudocode:**
 
-All embedding vectors are normalized to unit length before comparison. This ensures that similarity is measured by **direction** (the angle between vectors in the high-dimensional space), not by magnitude. Without normalization, a vector that happens to have a large magnitude would dominate in addition operations even if its semantic content is less relevant.
+```python
+def brainstorm(
+    selected_sha256s: list[str],
+    extra_tags: list[str] = [],         # from Anomaly / Inversion
+    lang: Literal["ja", "en"] = "en",
+    idea_count: int = 5
+) -> AsyncIterator[SSEEvent]:
+    # 1. Collect WD14 tags from selected images
+    all_tags: set[str] = set()
+    for sha in selected_sha256s:
+        doc = db.get(sha)
+        all_tags.update(doc["wd14_tags"][:50])   # top 50 tags
 
-### Iterative normalization (Alchemy, Morph)
+    # 2. Merge Anomaly / Inversion tags (if present)
+    all_tags.update(extra_tags)
 
-In modes that add multiple vectors together, re-normalizing after each addition prevents "magnitude drift" — the tendency for the sum to grow in magnitude with each addition, causing later additions to have proportionally less effect. By normalizing at every step, every image contributes equally regardless of how many were added before it.
+    # 3. Build LLM prompt
+    lang_directive = "in Japanese" if lang == "ja" else "in English"
+    prompt = (
+        f"Given these image tags: {', '.join(sorted(all_tags))}\n\n"
+        f"Generate {idea_count} creative, visually distinct scene proposals "
+        f"{lang_directive}. Each proposal should:\n"
+        "- Be 2-3 sentences describing a complete scene\n"
+        "- Be visually specific (lighting, mood, composition)\n"
+        "- Be distinct from the others\n"
+        "Format as a Markdown numbered list."
+    )
 
-### Cosine similarity and dot product equivalence
+    # 4. SSE streaming generation
+    async for token in ollama.generate_stream(prompt, temperature=0.8):
+        yield SSEEvent("token", text=token)
 
-Qdrant performs searches using dot product on normalized vectors. Since both the stored vectors and the query vectors are normalized to unit length, the dot product equals the cosine similarity. This means the search returns images in order of semantic angle distance — the most geometrically close in meaning first.
+    yield SSEEvent("done")
+```
 
-### MRL — Two-phase search
+**Tag priority in the merged vocabulary:**
 
-Ranbell Image uses Matryoshka Representation Learning (MRL) for all Qdrant searches. A compact 256-dim prefix of each embedding is stored alongside the full 768-dim vector. Searches run in two phases:
+```
+WD14 tags (selected images)
+  + anomaly tags from LLM           ← preserves exploration context
+  + inversion tags from VLM         ← preserves the inverted-world concept
+  = brainstorm vocabulary → fed to LLM for scene proposals
+```
 
-1. **Prefetch** — the 256-dim vectors scan the full collection quickly, returning a candidate set
-2. **Rerank** — the full 768-dim vectors score the candidates precisely
+**SSE event types (Brainstorm):**
 
-This two-phase design makes search fast on large collections without sacrificing accuracy.
+| type | When | Fields |
+|---|---|---|
+| `token` | Incremental text token | `text: str` |
+| `done` | Generation complete | — |
+| `error` | Error | `message: str` |
+
+---
+
+## 6. Qdrant Query Patterns
+
+### 6.1 Standard vector search (MRL two-phase)
+
+```python
+# Base pattern for Serendipity, Alchemy, Morph, Blend, etc.
+qdrant.query_points(
+    collection_name="images",
+    prefetch=[
+        Prefetch(
+            query=q_mrl256,          # 256-dim prefix
+            using="mrl256",
+            limit=prefetch_limit,    # k × 5–10
+        )
+    ],
+    query=q_full,                    # 768-dim full vector
+    using="full",
+    limit=k,
+    query_filter=QdrantFilter(...),
+    with_payload=True,
+)
+```
+
+### 6.2 DiscoverQuery (Discovery mode)
+
+```python
+qdrant.discover_points(
+    collection_name="images",
+    target=target_vec,
+    context=[
+        ContextExamplePair(
+            positive=pos_vec,
+            negative=neg_vec,
+        )
+        for pos_vec, neg_vec in context_pairs
+    ],
+    limit=k,
+    using="full",
+    prefetch=Prefetch(
+        query=target_vec[:256],
+        limit=k * 5,
+        using="mrl256",
+    ),
+)
+```
+
+### 6.3 GroupBy (Group Search mode)
+
+```python
+qdrant.query_points_groups(
+    collection_name="images",
+    prefetch=[
+        Prefetch(
+            query=q_mrl256,
+            using="mrl256",
+            limit=prefetch_limit,
+        )
+    ],
+    query=q_full,
+    using="full",
+    group_by="model_name",           # payload field to group by
+    limit=max_groups,
+    group_size=images_per_group,
+)
+```
+
+---
+
+## 7. VLM 3-Stage Pipeline (Inversion Deep-Dive)
+
+### Stage 1 — Generation prompt (key directives)
+
+```
+System instruction (summary):
+  "You are a creative AI specializing in semantic image inversion.
+   Invert the world along five axes (Visual/Mood/Subject/Style/Narrative).
+   DO NOT invert character-defining features (hair, eyes, specific persons).
+   The world changes; character identity remains constant."
+
+Output schema (JSON):
+  {
+    "narrative":       str,      // 300–500 words describing the inverted world
+    "inversion_tags":  str[],    // 100–150 Danbooru/WD14 tags
+    "inversion_prose": str,      // 150–200 word natural-language prompt
+    "negative_tags":   str[]     // 20–40 tags to exclude (elements of original)
+  }
+```
+
+### Stage 2 — Validation prompt (key directives)
+
+```
+Input: full Stage 1 output
+
+Checks performed:
+  - Internal contradictions (e.g., inverted to "indoor" but sky/tree tags remain)
+  - Whether all five axes were actually inverted
+  - Prohibited elements (character-defining features) not present
+  - Consistency between tags and prose
+
+Output:
+  {
+    "issues":   str[],                         // empty list = no issues
+    "severity": "none" | "minor" | "major"
+  }
+```
+
+### Stage 3 — Refinement prompt (key directives)
+
+```
+Condition: only runs if issues is non-empty
+
+Input: Stage 1 output + Stage 2 issues list
+
+Directive: "Revise the output to address each issue while preserving
+            the inverted world concept. Maintain all non-character inversions."
+
+Output: same JSON schema as Stage 1 (corrected)
+```
+
+### SSE event types (Inversion)
+
+| type | When | Fields |
+|---|---|---|
+| `think` | VLM extended thinking (compatible models) | `text: str` |
+| `stage` | Stage transition | `stage: 1\|2\|3`, `label: str` |
+| `token` | Generated text token | `text: str` |
+| `done` | All stages complete | `images`, `inversion_tags`, `inversion_prose`, `negative_tags`, `inversion_negative_tags` |
+| `error` | Error | `message: str` |
+
+### Full pipeline diagram
+
+```
+Reference images (1–3)
+    │
+    ├─── Tile image composition (tile_image.py)
+    │        Multiple images → single mood board
+    │
+    └─── Mean embedding vector (context reference)
+
+    ↓
+
+Stage 1: Generation (VLM call)
+    VLM ← tile image + inversion instruction prompt
+    Output: narrative + tags(100–150) + prose(150–200) + neg_tags
+    SSE: think + token events streamed in real time
+
+    ↓
+
+Stage 2: Validation (VLM call)
+    VLM ← Stage 1 output
+    Output: issues[]
+    SSE: stage event ("Validating...")
+
+    ↓ if issues empty → skip Stage 3
+
+Stage 3: Refinement (VLM call)
+    VLM ← Stage 1 output + issues
+    Output: corrected tags + prose
+    SSE: token events
+
+    ↓
+
+Text embedding (Ollama)
+    tags + prose → 768-dim vector
+
+    ↓
+
+Qdrant search (MRL two-phase)
+    → top k matching images
+
+    ↓
+
+SSE: done event (images + full prompt payload)
+```
+
+**Why three stages?**
+
+Without validation, VLM outputs sometimes contain internal contradictions — inverting "outdoor" to "indoor" conceptually while leaving `tree`, `sky`, `outdoor` tags in the list. The self-correction loop eliminates these inconsistencies without human review, raising output coherence significantly for the most compute-expensive mode.
+
+---
+
+## 8. The Complete Creative Pipeline
+
+```
+Discovery (9 Inspire modes)
+  ├── Pure vector math: Alchemy / Morph / Blend
+  │     └── sub-millisecond, deterministic
+  ├── Vector + sampling: Serendipity / Outlier
+  │     └── milliseconds, stochastic
+  ├── Qdrant advanced: Discovery / Group Search
+  │     └── milliseconds
+  └── LLM/VLM integration: Anomaly / Inversion
+        └── seconds–10s, non-deterministic
+
+  ↓ discovered images + tag payload
+
+Analysis (automatic)
+  WD14 tag collection
+  Anomaly / Inversion tag merging
+  Vocabulary set construction
+
+  ↓
+
+Ideation (Brainstorm)
+  LLM generates 3–5 scene proposals from vocabulary set
+  SSE streaming; English and Japanese supported
+
+  ↓
+
+Refinement (Prompt Alchemy)
+  Reference images (up to 6) + brainstorm idea text
+  → WD14 score classification (≥0.70 must / <0.70 reference)
+  → Tile composition → VLM generation → post-processing pipeline
+  Style: natural / danbooru / detailed
+
+  ↓
+
+Generation (ComfyUI)
+  auto_submit or one-click submit
+  Generated image → added to collection by sha256
+  WD14 tagging + embedding → indexed into Qdrant
+
+  ↓
+
+Back to next Discovery cycle (collection grows richer)
+```
