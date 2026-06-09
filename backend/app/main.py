@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI):
 
     startup_warnings: list[str] = []
     _check_generated_dir(startup_warnings)
+    if not settings.source_images_dir.exists():
+        startup_warnings.append(
+            f"source_images_dir '{settings.source_images_dir}' does not exist — no images will be found. "
+            "Mount a source directory in docker-compose.override.yml."
+        )
     app.state.startup_warnings = startup_warnings
 
     db = QdrantDBClient()
@@ -98,12 +103,6 @@ async def lifespan(app: FastAPI):
             "auto_pause_lanes", _rc_defaults["auto_pause_lanes"]
         ),
     )
-
-    if not _settings.source_images_dir.exists():
-        startup_warnings.append(
-            f"source_images_dir '{_settings.source_images_dir}' does not exist — no images will be found. "
-            "Mount a source directory in docker-compose.override.yml."
-        )
 
     watcher = ImageDirectoryWatcher(
         db, ollama, spooler,
