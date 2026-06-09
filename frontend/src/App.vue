@@ -37,6 +37,7 @@ const hasMore = ref(true)
 // ── Backend readiness ─────────────────────────────────────────────────────────
 const backendStatus = ref('connecting') // 'connecting' | 'starting' | 'ready'
 const backendActivity = ref(null)       // { job, scan } from /health when running
+const dismissedWarnings = ref(false)
 
 async function waitForBackend() {
   while (true) {
@@ -2666,6 +2667,27 @@ onUnmounted(() => {
       </svg>
       <span v-if="backendStatus === 'connecting'">{{ $t('header.connecting') }}</span>
       <span v-else>{{ $t('header.starting') }}</span>
+    </div>
+
+    <!-- ── Startup warnings banner ── -->
+    <div v-if="!dismissedWarnings && backendActivity?.warnings?.length"
+      class="px-4 py-3 bg-amber-900/80 border-b border-amber-700 text-sm text-amber-200">
+      <div class="flex items-start justify-between gap-3 max-w-4xl mx-auto">
+        <div class="flex items-start gap-2 min-w-0">
+          <svg class="w-4 h-4 mt-0.5 shrink-0 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          </svg>
+          <ul class="space-y-1 min-w-0">
+            <li v-for="(w, i) in backendActivity.warnings" :key="i" class="break-words">{{ w }}</li>
+          </ul>
+        </div>
+        <button @click="dismissedWarnings = true"
+          class="shrink-0 text-amber-400 hover:text-amber-200 transition-colors">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- ── Grid ── -->

@@ -27,12 +27,22 @@ from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 
 
-def _check_generated_dir_writable() -> None:
-    """Abort startup if generated_images_dir is not writable."""
+def _check_generated_dir(warnings: list[str]) -> None:
+    """Abort startup if generated_images_dir is missing or not writable."""
+    import os, tempfile
     from .config import settings
-    import tempfile
     gen_dir = settings.generated_images_dir
-    gen_dir.mkdir(parents=True, exist_ok=True)
+    if not gen_dir.exists():
+        raise RuntimeError(
+            f"generated_images_dir '{gen_dir}' does not exist. "
+            "Mount a writable host directory to this path in docker-compose.override.yml and restart."
+        )
+    if not os.path.ismount(gen_dir):
+        warnings.append(
+            f"generated_images_dir '{gen_dir}' is not a mount point — "
+            "data will be lost on container restart. "
+            "Mount a host directory to this path in docker-compose.override.yml."
+        )
     try:
         with tempfile.NamedTemporaryFile(dir=gen_dir, delete=True):
             pass
@@ -47,7 +57,9 @@ def _check_generated_dir_writable() -> None:
 async def lifespan(app: FastAPI):
     import asyncio
 
-    _check_generated_dir_writable()
+    startup_warnings: list[str] = []
+    _check_generated_dir(startup_warnings)
+    app.state.startup_warnings = startup_warnings
 
     db = QdrantDBClient()
     await db.start()
@@ -86,6 +98,12 @@ async def lifespan(app: FastAPI):
             "auto_pause_lanes", _rc_defaults["auto_pause_lanes"]
         ),
     )
+
+    if not _settings.source_images_dir.exists():
+        startup_warnings.append(
+            f"source_images_dir '{_settings.source_images_dir}' does not exist — no images will be found. "
+            "Mount a source directory in docker-compose.override.yml."
+        )
 
     watcher = ImageDirectoryWatcher(
         db, ollama, spooler,
@@ -152,6 +170,7 @@ async def get_token():
 async def health(request: Request):
     ready = getattr(request.app.state, "ready", False)
     result: dict = {"status": "ok" if ready else "starting", "ready": ready}
+    result["warnings"] = getattr(request.app.state, "startup_warnings", [])
     if ready:
         spooler = request.app.state.spooler
         running_jobs = [
