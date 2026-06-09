@@ -38,10 +38,12 @@ def _check_generated_dir(warnings: list[str]) -> None:
             "Mount a writable host directory to this path in docker-compose.override.yml and restart."
         )
     if not os.path.ismount(gen_dir):
-        warnings.append(
-            f"generated_images_dir '{gen_dir}' is not a mount point — "
-            "data will be lost on container restart. "
-            "Mount a host directory to this path in docker-compose.override.yml."
+        raise RuntimeError(
+            f"generated_images_dir '{gen_dir}' exists but is not a mount point — "
+            "it was created inside the container (ephemeral). "
+            "Mount a writable host directory to this path in docker-compose.override.yml and restart. "
+            "If the ephemeral directory is blocking startup, remove it first: "
+            "docker compose run --rm backend rm -rf /mnt/image/generated"
         )
     try:
         with tempfile.NamedTemporaryFile(dir=gen_dir, delete=True):
