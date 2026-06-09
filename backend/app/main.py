@@ -28,10 +28,10 @@ from .api.alignment import router as alignment_router
 
 
 def _abort(msg: str) -> None:
-    import sys
+    import sys, os
     sep = "=" * 60
     print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
-    sys.exit(1)
+    os._exit(1)
 
 
 def _check_generated_dir(warnings: list[str]) -> None:
