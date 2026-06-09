@@ -31,7 +31,7 @@ def _abort(msg: str) -> None:
     import sys, os, signal
     sep = "=" * 60
     print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
-    os.kill(1, signal.SIGTERM)  # stop the reloader (PID 1) so the container exits
+    os.kill(1, signal.SIGKILL)  # force-kill the reloader (PID 1) so the container exits
     os._exit(1)
 
 
