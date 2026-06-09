@@ -1020,8 +1020,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   </div>
                   <div v-if="!info.source_images_dir_exists || !info.generated_images_dir_exists"
                     class="text-[11px] text-amber-400 bg-amber-950/40 border border-amber-800/40 rounded-lg p-2.5 mt-1">
-                    Mount the volume in docker-compose.override.yml.<br>
-                    Check <code class="text-amber-300">docker compose logs backend</code> for error details.
+                    Mount the volume in docker-compose.override.yml and restart.
                   </div>
                 </div>
               </template>
