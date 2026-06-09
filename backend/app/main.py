@@ -27,32 +27,40 @@ from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 
 
+def _abort(msg: str) -> None:
+    import sys
+    sep = "=" * 60
+    print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
+    sys.exit(1)
+
+
 def _check_generated_dir(warnings: list[str]) -> None:
-    """Abort startup if generated_images_dir is missing or not writable."""
     import os, tempfile
-    from .config import settings
     gen_dir = settings.generated_images_dir
     if not gen_dir.exists():
-        raise RuntimeError(
-            f"generated_images_dir '{gen_dir}' does not exist. "
-            "Mount a writable host directory to this path in docker-compose.override.yml and restart."
+        _abort(
+            f"generated_images_dir '{gen_dir}' does not exist.\n"
+            "  Fix: mount a writable host directory in docker-compose.override.yml\n"
+            "       volumes:\n"
+            "         - /your/ai_output:/mnt/image/generated"
         )
     if not os.path.ismount(gen_dir):
-        raise RuntimeError(
-            f"generated_images_dir '{gen_dir}' exists but is not a mount point — "
-            "it was created inside the container (ephemeral). "
-            "Mount a writable host directory to this path in docker-compose.override.yml and restart. "
-            "If the ephemeral directory is blocking startup, remove it first: "
-            "docker compose run --rm backend rm -rf /mnt/image/generated"
+        _abort(
+            f"generated_images_dir '{gen_dir}' is not a mount point (ephemeral).\n"
+            "  Fix: mount a writable host directory in docker-compose.override.yml\n"
+            "       volumes:\n"
+            "         - /your/ai_output:/mnt/image/generated\n"
+            "  Then remove the ephemeral directory:\n"
+            "       docker compose run --rm backend rm -rf /mnt/image/generated"
         )
     try:
         with tempfile.NamedTemporaryFile(dir=gen_dir, delete=True):
             pass
     except Exception as e:
-        raise RuntimeError(
-            f"generated_images_dir '{gen_dir}' is not writable: {e}. "
-            "Mount it as a read-write volume and restart."
-        ) from e
+        _abort(
+            f"generated_images_dir '{gen_dir}' is not writable: {e}\n"
+            "  Fix: ensure the mounted directory has write permissions"
+        )
 
 
 @asynccontextmanager
