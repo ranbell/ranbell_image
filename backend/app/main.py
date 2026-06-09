@@ -28,11 +28,12 @@ from .api.alignment import router as alignment_router
 
 
 def _abort(msg: str) -> None:
-    import sys, os, signal
+    import sys, time
     sep = "=" * 60
     print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
-    os.kill(1, signal.SIGKILL)  # force-kill the reloader (PID 1) so the container exits
-    os._exit(1)
+    print("Fix the config above, then: docker compose restart backend", file=sys.stderr, flush=True)
+    # Block here — HTTP server never starts, container stays alive without restart-looping.
+    time.sleep(float("inf"))
 
 
 def _check_generated_dir(warnings: list[str]) -> None:
