@@ -167,9 +167,38 @@ Additional reference:
 
 ---
 
+## System Requirements
+
+> ⚠️ **These three external services must be installed and running on your machine before starting Ranbell Image.**
+
+### Required Services
+
+| Service | Role | Default endpoint |
+|---|---|---|
+| **Docker + Docker Compose v2** | Runs the app backend and Qdrant | — |
+| **[Ollama](https://ollama.ai/)** | Local LLM / VLM inference — prompt synthesis, image analysis, embeddings | `http://localhost:11434` |
+| **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** | Image generation backend | `http://localhost:8188` |
+
+A **NVIDIA GPU with 16 GB VRAM** is strongly recommended (required for comfortable VLM and generation performance).
+
+### Verified Models (Ollama)
+
+The following models were used during development and are confirmed to work:
+
+| Role | Model | Install |
+|---|---|---|
+| VLM — image analysis & prompt synthesis | `gemma4:e2b` | `ollama pull gemma4:e2b` |
+| Embedding — semantic search | `embeddinggemma:300m` ⚠️ required | `ollama pull embeddinggemma:300m` |
+
+> ⚠️ **`embeddinggemma:300m` is required for the embedding model.** The system relies on Matryoshka embeddings for multi-resolution semantic search; standard embedding models do not support this and cannot be used as a substitute.
+>
+> Other Ollama-compatible models may work for VLM but have not been tested.
+
+---
+
 ## Quick Start
 
-**Prerequisites:** Docker + Docker Compose v2, NVIDIA GPU (16GB VRAM recommended)
+**Prerequisites:** see [System Requirements](#system-requirements) above.
 
 ```bash
 git clone https://github.com/ranbell/ranbell_image.git

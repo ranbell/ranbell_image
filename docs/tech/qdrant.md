@@ -1,8 +1,66 @@
 # Qdrant Usage in Ranbell Image
 
-This document describes every Qdrant feature used in the ranbell_image project, covering collections, named vectors, payload schema, search patterns, job-status management, and advanced capabilities.
+## Design Philosophy: Why Qdrant Holds Everything
 
-Qdrant is not simply a vector search engine here. It serves as the **single source of truth** for the entire application: image metadata, AI processing status, user data, application configuration, and evaluation results all live exclusively in Qdrant. No relational database is used.
+Most vector search deployments pair Qdrant with a relational database: Qdrant stores embeddings, the relational DB stores everything else. This project does not. Qdrant is the only persistence layer — no SQL database, no Redis, no JSON config files. Here is why that choice is correct for this domain.
+
+### Immutable source, recomputable projections
+
+This architecture follows the same principle as **event-sourced systems** and the **Kappa Architecture**: the image files on disk are the immutable source of record; the Qdrant payload is a recomputable derived view. In manufacturing terms, raw materials are permanent and precious — finished goods are expendable and re-manufacturable. Here, images are the raw material; WD14 tags, semantic embeddings, color palettes, VLM evaluations, UMAP coordinates, and alignment scores are the finished goods.
+
+"Why is the image file alone sufficient?" — AI-generated images embed their full generation parameters in the PNG metadata alongside the pixel data:
+
+- **Positive / negative prompts** — the text instructions used for generation
+- **Model** — checkpoint name, LoRA, etc.
+- **Seed** — the reproducible random seed
+- **CFG scale** — prompt adherence strength
+- **Other generation parameters** — sampler, step count, etc.
+
+Because all of this is embedded in the file itself, wiping Qdrant entirely and rebuilding from the image files recovers identical information.
+
+Because every piece of information stored in Qdrant is derived from images by running an AI model or a deterministic algorithm, Qdrant is operationally a sophisticated, queryable, pipeline-driving, status-tracking, config-persisting cache. If it were wiped tomorrow, a single rebuild sequence would restore it entirely.
+
+This reframing eliminates an entire class of bugs: the sync bugs that appear when a relational DB and a vector store accumulate divergent state.
+
+### AI model churn makes rebuilds routine, not catastrophic
+
+Embedding models and taggers turn over roughly every six months before a better one appears. When that happens, the correct response is to rebuild the index with the new model — not to preserve vectors computed by an outdated one. Because every write path is idempotent and all state lives in Qdrant, a full rebuild is:
+
+1. Call `reset_scope()` to flip all `embedding_status` fields back to `"pending"`.
+2. Restart the pipeline.
+
+No ETL, no schema migration, no external job orchestration. The same idempotent startup sequence that handles a fresh install handles a full index rebuild.
+
+### Stateless pipeline workers with Qdrant as the only state
+
+The standard AI pipeline pattern is: relational DB tracks job state → Redis/Celery manages the queue → vector store holds results. That is three services, three failure domains, and a synchronization contract between them.
+
+Here, `embedding_status` (KEYWORD-indexed) on each image point *is* the queue. Pipeline workers are stateless: they scroll Qdrant for `embedding_status = "pending"`, process each image, and write `embedding_status = "done"` back. No in-memory job state is held; a crashed worker leaves no orphaned state — the next worker picks up from `"pending"` naturally. The `alignment` collection uses an identical `status` lifecycle. Runtime configuration lives as a single fixed point in the `app_config` collection, not in JSON files or environment sidecars.
+
+One service, one failure domain, zero sync contracts.
+
+### Qdrant's filter API covers the relational access patterns
+
+The objection to this design is: "Qdrant is a vector search engine, not a relational database — you will miss JOINs and transactions."
+
+In practice, every access pattern here is one of:
+
+- **Exact match on indexed payload field** — `model_name`, `batch_category`, `star_rating`, `embedding_status`, `wd14_tags`
+- **Full-text search** — `positive_prompt` (TEXT/WORD-indexed)
+- **Numeric or datetime range** — `palette_hues`, `avg_saturation`, `score`
+- **Combined filter + vector search** — the dominant pattern; a relational DB would need to pipe IDs back to Qdrant anyway
+
+Payload indexes handle all of these. The filter, the vector search, and the results land in one round-trip rather than two.
+
+### The rebuild guarantee as fail-safe design
+
+If the Qdrant database ever becomes corrupt, inconsistent, or simply outdated, the recovery path is total deletion and a fresh rebuild from the image files. Every write path is idempotent; the startup sequence creates missing collections and runs migrations automatically. The system goes from zero to fully operational with no data backup required.
+
+This is only possible because the true source of record — the images on disk — never lives inside Qdrant.
+
+---
+
+This document describes every Qdrant feature used in the ranbell_image project, covering collections, named vectors, payload schema, search patterns, job-status management, and advanced capabilities.
 
 - **Qdrant version:** 1.18.0
 - **Client:** `AsyncQdrantClient` from the `qdrant-client` Python SDK
@@ -31,7 +89,7 @@ The `images` collection uses **three named vectors** per point. Each vector addr
 
 ### `embedding` — Semantic Embedding (768-dim, COSINE)
 
-The primary semantic representation of each image, generated by `nomic-embed-text` via Ollama. This is the full-dimension vector used for final-stage reranking in all semantic searches.
+The primary semantic representation of each image, generated by `embeddinggemma:300m` via Ollama. This is the full-dimension vector used for final-stage reranking in all semantic searches.
 
 - **Dimensions:** 768 (configurable via `embed_dim`)
 - **Distance:** COSINE

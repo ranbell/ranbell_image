@@ -8,22 +8,17 @@
 
 "I want to recreate this feeling." Prompt Alchemy translates that instinct into an image generation prompt for you.
 
-```
-Your reference images
-  ┌──────────┐  ┌─────────┐  ┌────────┐
-  │ 　　 Image A       │  │     Image B      │  │    Image C     │
-  │   　　(60%)        │  │      (30%)       │  │    (10%)       │
-  └────┬─────┘  └────┬────┘  └───┬────┘
-            └────────────┼──────────┘
-                                      │  AI reads & interprets
-                                      ▼
-            ┌───────────────────────┐
-            │               Generation prompt              │
-            │               (complete)                     │
-            └───────────────────────┘
-                                      │
-                                      ▼
-                           ComfyUI image generation
+```mermaid
+graph TB
+  A["Image A (60%)"]
+  B["Image B (30%)"]
+  C["Image C (10%)"]
+  P["Generation prompt (complete)"]
+  G["ComfyUI image generation"]
+  A -->|"AI reads & interprets"| P
+  B --> P
+  C --> P
+  P --> G
 ```
 
 Pick up to **6 reference images**, set how much each one should influence the result, and the AI writes the prompt for you.
@@ -36,14 +31,13 @@ Pick up to **6 reference images**, set how much each one should influence the re
 
 Each image slot has a slider. Set it from 0 to 100 to control how strongly that image shapes the output.
 
-```
+```text
 Example: two reference images with weights set
 
-  ┌─────────────────────────┐
-  │ Image A (forest at dusk)   ██████████  70        │
-  │ Image B (red dress)        ████░░░░░░  30  │
-  └─────────────────────────┘
-                    ↓ AI reads
+  Image A (forest at dusk)   ██████████  70
+  Image B (red dress)        ████░░░░░░  30
+
+  ↓ AI reads
   Prompt strongly weighted toward the dusk forest mood,
   with the red dress as a complement
 ```
@@ -56,28 +50,19 @@ Example: two reference images with weights set
 
 There's more than one way to extract information from a reference image. Alchemy **combines three perspectives** to build the prompt.
 
-```
-  ┌──────────────────────────────────────────┐
-  │                                 Reference image(s)                                 │
-  └──────┬──────────────┬─────────────┬──────┘
-                │                            │                          │
-                ▼                            ▼                          ▼
-  ┌────────────┐  ┌───────────┐  ┌────────────┐
-  │         Layer 1:       │  │        Layer 2:      │  │        Layer 3:        │
-  │           VLM          │  │          WD14        │  │         Weights        │
-  │                        │  │                      │  │                        │
-  │         Reads          │  │        High-conf     │  │        Per-image       │
-  │      composition       │  │        tags →       │  │         influence      │
-  │      color tone        │  │        must keep     │  │                        │
-  │      style &           │  │                      │  │           Your         │
-  │      mood into         │  │        Low-conf      │  │         creative       │
-  │      words             │  │        tags →       │  │          intent        │
-  │                        │  │        reference     │  │                        │
-  └──────┬─────┘  └─────┬─────┘  └──────┬─────┘
-                └─────────────┴──────────────┘
-                                            │
-                                            ▼
-                          A prompt that reflects your creative intent
+```mermaid
+graph TB
+  ref["Reference image(s)"]
+  v1["Layer 1: VLM\nReads composition,\ncolor tone, style &\nmood into words"]
+  v2["Layer 2: WD14\nHigh-conf tags → must keep\nLow-conf tags → reference"]
+  v3["Layer 3: Weights\nPer-image influence\nYour creative intent"]
+  out["A prompt that reflects\nyour creative intent"]
+  ref --> v1
+  ref --> v2
+  ref --> v3
+  v1 --> out
+  v2 --> out
+  v3 --> out
 ```
 
 The result isn't just a description of the images — it carries **your decision about what matters most**.
@@ -104,22 +89,20 @@ Pick the style that matches the generation model you're using.
 
 Output is always **2 blocks**.
 
-```
-┌───────────────────────────┐
-│ BLOCK 1 — tag line (40–60 tags)                     │
-│                                                      │
-│ 1girl, long hair, auburn hair, blue eyes, smile,     │
-│ school uniform, outdoor, cherry blossoms,            │
-│ warm lighting, golden hour, bokeh, masterpiece, ...  │
-│                                                      │
-│ ──────────────── (blank line) ──   │
-│                                                      │
-│ BLOCK 2 — prose paragraph (80–120 words)            │
-│                                                      │
-│ A young girl with flowing auburn hair stands in      │
-│ warm afternoon sunlight, her navy school uniform     │
-│ catching the golden hour glow...                     │
-└───────────────────────────┘
+```text
+BLOCK 1 — tag line (40–60 tags)
+
+1girl, long hair, auburn hair, blue eyes, smile,
+school uniform, outdoor, cherry blossoms,
+warm lighting, golden hour, bokeh, masterpiece, ...
+
+(blank line)
+
+BLOCK 2 — prose paragraph (80–120 words)
+
+A young girl with flowing auburn hair stands in
+warm afternoon sunlight, her navy school uniform
+catching the golden hour glow...
 ```
 
 ---
@@ -128,13 +111,11 @@ Output is always **2 blocks**.
 
 Outputs a flat tag list only.
 
-```
-┌───────────────────────────┐
-│ 1girl, solo, long_hair, auburn_hair, blue_eyes,      │
-│ smile, school_uniform, sailor_collar, outdoor,       │
-│ cherry_blossoms, golden_hour, bokeh,                 │
-│ masterpiece, best_quality, ultra-detailed, ...       │
-└───────────────────────────┘
+```text
+1girl, solo, long_hair, auburn_hair, blue_eyes,
+smile, school_uniform, sailor_collar, outdoor,
+cherry_blossoms, golden_hour, bokeh,
+masterpiece, best_quality, ultra-detailed, ...
 ```
 
 ---
@@ -143,22 +124,20 @@ Outputs a flat tag list only.
 
 Describes the scene across 8 named sections.
 
-```
-┌───────────────────────────┐
-│ Core Subject & Scene Setting:                        │
-│   Female student in a sun-lit cherry blossom garden  │
-│                                                      │
-│ Characters & Composition:                            │
-│   1girl, auburn hair, blue eyes, school uniform ...  │
-│                                                      │
-│ Lighting & Atmosphere:                               │
-│   Golden hour, soft amber cast, bokeh ...            │
-│                                                      │
-│ Style & Artistic Influence:                          │
-│   Anime illustration, cel-shading ...                │
-│                                                      │
-│ (4 more sections follow)                             │
-└───────────────────────────┘
+```text
+Core Subject & Scene Setting:
+  Female student in a sun-lit cherry blossom garden
+
+Characters & Composition:
+  1girl, auburn hair, blue eyes, school uniform ...
+
+Lighting & Atmosphere:
+  Golden hour, soft amber cast, bokeh ...
+
+Style & Artistic Influence:
+  Anime illustration, cel-shading ...
+
+(4 more sections follow)
 ```
 
 ---
@@ -196,14 +175,10 @@ Final prompt: text "RANBELL", top_text, text_on_image, 1girl, ...
 
 When you open the alchemy studio from Inversion results or generation history, a high-quality prompt already exists. In that case, the VLM is **skipped completely** and the prompt is forwarded to ComfyUI instantly.
 
-```
-Inversion result
-(tags / prose)
-       │
-       │ ⚡ Direct Bypass
-       │   no VLM inference → completes immediately
-       ▼
-  ComfyUI generation
+```mermaid
+graph TB
+  inv["Inversion result\n(tags / prose)"]
+  inv -->|"⚡ Direct Bypass\nno VLM inference"| gen["ComfyUI generation"]
 ```
 
 | Source | What gets forwarded |
@@ -218,14 +193,11 @@ Inversion result
 
 Enable this option to have ComfyUI start automatically the moment alchemy finishes. Set a workflow and ComfyUI node IDs in advance, and the job fires without any extra click.
 
-```
-🔮 Alchemy → prompt complete
-              │ auto_submit = ON
-              ▼
-         ComfyUI starts automatically
-              │
-              ▼
-         Generation done → added to collection
+```mermaid
+graph TB
+  alch["🔮 Alchemy\n→ prompt complete"]
+  alch -->|"auto_submit = ON"| gen["ComfyUI starts automatically"]
+  gen --> done["Generation done\n→ added to collection"]
 ```
 
 ---
@@ -244,30 +216,18 @@ Tokens stream in real time as the prompt is generated. You can cancel at any poi
 
 Alchemy sits at the **center** of the collection-driven creative loop.
 
-```
-  ┌──────────────────────────┐
-  │                                                    │
-  │  Collection (your image library)                   │
-  │         │                          ▲             │
-  │         │ Inspiration              │ added back  │
-  │         │ (discover similar)       │             │
-  │         ▼                          │             │
-  │    Interesting image found          │             │
-  │         │                          │             │
-  │         │ Brainstorm               │             │
-  │         │ (receive scene ideas)    │             │
-  │         ▼                          │             │
-  │    Ideas put into words             │             │
-  │         │                          │             │
-  │         │ 🔮 Prompt Alchemy       │              │
-  │         │ (reference → prompt)    │             │
-  │         ▼                          │             │
-  │    High-quality prompt ready        │             │
-  │         │                          │             │
-  │         │ ComfyUI generation       │             │
-  │         └─────────────┘             │
-  │                                                    │
-  └──────────────────────────┘
+```mermaid
+graph TB
+  coll["Collection\n(your image library)"]
+  insp["Inspiration\n(discover similar images)"]
+  find["Interesting image found"]
+  brs["Brainstorm\n(receive scene ideas)"]
+  idea["Ideas put into words"]
+  alch["🔮 Prompt Alchemy\n(reference → prompt)"]
+  prom["High-quality prompt ready"]
+  gen["ComfyUI generation"]
+
+  coll --> insp --> find --> brs --> idea --> alch --> prom --> gen --> coll
 ```
 
 Every generated image is added back to the collection and becomes **material for the next round of exploration**. The more you use it, the richer the collection grows.

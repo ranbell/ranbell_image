@@ -91,12 +91,16 @@ Top 1,000 results ranked by similarity score
 **Input:** Images to add (up to 3) + images to subtract (up to 3)  
 **Output:** Images nearest to the resulting composite coordinate
 
-```
-  Image A (sunset beach)         ┐
-  Image B (fashion photograph)   ├──→  A + B − C coordinate
-  Image C (outdoor setting)      ┘          ↓
-   ↑ add               ↑ subtract   Indoor fashion with a sunset
-                                    atmosphere → nearest images
+```mermaid
+graph LR
+  A["Image A (sunset beach)"]
+  B["Image B (fashion photo)"]
+  C["Image C (outdoor setting)"]
+  R["A + B − C coordinate\n→ Indoor fashion with sunset\natmosphere → nearest images"]
+
+  A -->|"add"| R
+  B -->|"add"| R
+  C -->|"subtract"| R
 ```
 
 **Best for:**
@@ -292,30 +296,18 @@ Output language can be English or Japanese.
 
 ## The Full Creative Cycle
 
-```
-  ┌──────────────────────────────────────────────────────────┐
-  │                                                          │
-  │  Collection (your image library)                         │
-  │       │                              ▲                  │
-  │       │  Inspire                     │ added back       │
-  │       │  (9 modes of exploration)    │                  │
-  │       ▼                              │                  │
-  │   Interesting image found            │                  │
-  │       │                              │                  │
-  │       │  💡 Brainstorm               │                  │
-  │       │  (tags → LLM → ideas)        │                  │
-  │       ▼                              │                  │
-  │   Ideas put into words               │                  │
-  │       │                              │                  │
-  │       │  🔮 Prompt Alchemy           │                  │
-  │       │  (reference → prompt)        │                  │
-  │       ▼                              │                  │
-  │   High-quality prompt ready          │                  │
-  │       │                              │                  │
-  │       │  ComfyUI generation          │                  │
-  │       └──────────────────────────────┘                  │
-  │                                                          │
-  └──────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+  coll["Collection\n(your image library)"]
+  insp["Inspire exploration\n(9 modes)"]
+  find["Interesting image found"]
+  brs["💡 Brainstorm\n(tags → LLM → ideas)"]
+  idea["Ideas put into words"]
+  alch["🔮 Prompt Alchemy\n(reference → prompt)"]
+  prom["High-quality prompt ready"]
+  gen["ComfyUI generation"]
+
+  coll --> insp --> find --> brs --> idea --> alch --> prom --> gen --> coll
 ```
 
 Every generated image is added back to the collection, increasing the density and richness of the semantic map for future exploration.

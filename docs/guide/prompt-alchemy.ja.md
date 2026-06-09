@@ -8,21 +8,17 @@
 
 「この雰囲気をもう一度作りたい」——その感覚を、プロンプトに変換してくれる機能です。
 
-```
-あなたの参照画像
-  ┌──────────┐  ┌──────────┐  ┌──────────┐
-  │       画像 A       │  │       画像 B       │  │       画像 C       │
-  │       (60%)        │  │       (30%)        │  │       (10%)        │
-  └────┬─────┘  └────┬─────┘  └────┬─────┘
-            └────────────┼────────────┘
-                                      │  AI が読み解く
-                                      ▼
-             ┌────────────────────────┐
-             │               生成プロンプト（完成）           │
-             └────────────────────────┘
-                                      │
-                                      ▼
-                               ComfyUI で画像生成
+```mermaid
+graph TB
+  A["画像 A (60%)"]
+  B["画像 B (30%)"]
+  C["画像 C (10%)"]
+  P["生成プロンプト（完成）"]
+  G["ComfyUI で画像生成"]
+  A -->|"AI が読み解く"| P
+  B --> P
+  C --> P
+  P --> G
 ```
 
 参照画像を最大 **6枚** 選んで、それぞれの「影響度」を設定するだけ。あとは AI が自動でプロンプトを書いてくれます。
@@ -35,14 +31,13 @@
 
 各画像スロットにスライダーがあり、「この画像をどれくらい重視するか」を 0〜100 で設定できます。
 
-```
+```text
 例：2枚の参照画像でウェイトを設定した場合
 
-  ┌────────────────────────┐
-  │ 画像 A（夕暮れの森）    ██████████        70   │
-  │ 画像 B（赤いドレス）    ████░░░░░░  30   │
-  └────────────────────────┘
-                         ↓ AI が読む
+  画像 A（夕暮れの森）    ██████████  70
+  画像 B（赤いドレス）    ████░░░░░░  30
+
+  ↓ AI が読む
   「夕暮れの森の雰囲気を強く、赤いドレスを添えた」プロンプト
 ```
 
@@ -54,25 +49,19 @@
 
 参照画像から情報を引き出す方法は 1 つではありません。錬成は **3 つの視点を重ね合わせて** プロンプトを作ります。
 
-```
-  ┌──────────────────────────────────────────┐
-  │                                     参照画像                                       │
-  └──────┬─────────────┬──────────────┬──────┘
-                │                          │                            │
-                ▼                          ▼                            ▼
-  ┌────────────┐  ┌────────────┐  ┌────────────┐
-  │       層 1: VLM        │  │      層 2: WD14        │  │    層 3: ウェイト      │
-  │                        │  │                        │  │                        │
-  │      構図・色調        │  │      高確信タグ        │  │     画像ごとの         │
-  │      スタイル          │  │      → 必ず含める     │  │     影響度             │
-  │      雰囲気を          │  │                        │  │                        │
-  │      言語化            │  │      低確信タグ        │  │     ユーザーの         │
-  │                        │  │      → 参考情報       │  │     創作意図           │
-  └─────┬──────┘  └──────┬─────┘  └──────┬─────┘
-              └───────────────┴──────────────┘
-                                              │
-                                              ▼
-                            あなたの意図が反映されたプロンプト
+```mermaid
+graph TB
+  ref["参照画像"]
+  v1["層 1: VLM\n構図・色調・スタイル\n雰囲気を言語化"]
+  v2["層 2: WD14\n高確信タグ → 必ず含める\n低確信タグ → 参考情報"]
+  v3["層 3: ウェイト\n画像ごとの影響度\nユーザーの創作意図"]
+  out["あなたの意図が\n反映されたプロンプト"]
+  ref --> v1
+  ref --> v2
+  ref --> v3
+  v1 --> out
+  v2 --> out
+  v3 --> out
 ```
 
 単なる「画像の説明」ではなく、**どの画像を重視するか**という創作の意思が込められたプロンプトになります。
@@ -99,22 +88,20 @@
 
 出力は **2ブロック構成**。
 
-```
-┌────────────────────────────┐
-│ BLOCK 1 — タグ行（40〜60 タグ）                       │
-│                                                        │
-│ 1girl, long hair, auburn hair, blue eyes, smile,       │
-│ school uniform, outdoor, cherry blossoms,              │
-│ warm lighting, golden hour, bokeh, masterpiece, ...    │
-│                                                        │
-│ ───────── (空行) ────────────── │
-│                                                        │
-│ BLOCK 2 — 散文段落（80〜12 語）                       │
-│                                                        │
-│ A young girl with flowing auburn hair stands in        │
-│ warm afternoon sunlight, her navy school uniform       │
-│ catching the golden hour glow...                       │
-└────────────────────────────┘
+```text
+BLOCK 1 — タグ行（40〜60 タグ）
+
+1girl, long hair, auburn hair, blue eyes, smile,
+school uniform, outdoor, cherry blossoms,
+warm lighting, golden hour, bokeh, masterpiece, ...
+
+（空行）
+
+BLOCK 2 — 散文段落（80〜120 語）
+
+A young girl with flowing auburn hair stands in
+warm afternoon sunlight, her navy school uniform
+catching the golden hour glow...
 ```
 
 ---
@@ -123,13 +110,11 @@
 
 フラットなタグリストだけを出力します。
 
-```
-┌───────────────────────────┐
-│ 1girl, solo, long_hair, auburn_hair, blue_eyes,      │
-│ smile, school_uniform, sailor_collar, outdoor,       │
-│ cherry_blossoms, golden_hour, bokeh,                 │
-│ masterpiece, best_quality, ultra-detailed, ...       │
-└───────────────────────────┘
+```text
+1girl, solo, long_hair, auburn_hair, blue_eyes,
+smile, school_uniform, sailor_collar, outdoor,
+cherry_blossoms, golden_hour, bokeh,
+masterpiece, best_quality, ultra-detailed, ...
 ```
 
 ---
@@ -138,22 +123,20 @@
 
 8つのセクションに分けて詳しく記述します。
 
-```
-┌───────────────────────────┐
-│ Core Subject & Scene Setting:                        │
-│   桜の園に立つ女学生、懐かしい春の午後               │
-│                                                      │
-│ Characters & Composition:                            │
-│   1girl, auburn hair, blue eyes, school uniform ...  │
-│                                                      │
-│ Lighting & Atmosphere:                               │
-│   Golden hour, soft amber cast, bokeh ...            │
-│                                                      │
-│ Style & Artistic Influence:                          │
-│   Anime illustration, cel-shading ...                │
-│                                                      │
-│ （以下 4セクション続く）                             │
-└───────────────────────────┘
+```text
+Core Subject & Scene Setting:
+  桜の園に立つ女学生、懐かしい春の午後
+
+Characters & Composition:
+  1girl, auburn hair, blue eyes, school uniform ...
+
+Lighting & Atmosphere:
+  Golden hour, soft amber cast, bokeh ...
+
+Style & Artistic Influence:
+  Anime illustration, cel-shading ...
+
+（以下 4セクション続く）
 ```
 
 ---
@@ -191,14 +174,10 @@
 
 インバージョン機能や生成履歴から錬成スタジオを開いた場合、すでに高品質なプロンプトが存在します。その場合は **VLM を完全にスキップ**して即座に ComfyUI へ送れます。
 
-```
-インバージョン結果
-（タグ / 散文）
-       │
-       │ ⚡ ダイレクトバイパス
-       │   VLM 推論なし → 即座に完了
-       ▼
-  ComfyUI 生成へ
+```mermaid
+graph TB
+  inv["インバージョン結果\n（タグ / 散文）"]
+  inv -->|"⚡ ダイレクトバイパス\nVLM 推論なし"| gen["ComfyUI 生成へ"]
 ```
 
 | ソース | バイパス内容 |
@@ -213,14 +192,11 @@
 
 「錬成が終わったらすぐ ComfyUI に投入する」オプションです。ワークフローと ComfyUI ノード ID を設定しておくと、錬成完了後に自動でジョブが走ります。
 
-```
-🔮 錬成 → プロンプト完成
-              │ auto_submit = ON
-              ▼
-         ComfyUI が自動起動
-              │
-              ▼
-         生成完了 → コレクションに追加
+```mermaid
+graph TB
+  alch["🔮 錬成完了\n→ プロンプト確定"]
+  alch -->|"auto_submit = ON"| gen["ComfyUI が自動起動"]
+  gen --> done["生成完了 → コレクションに追加"]
 ```
 
 ---
@@ -239,30 +215,18 @@
 
 錬成は、コレクションを使った創作サイクルの**中心**にあります。
 
-```
-  ┌─────────────────────────────┐
-  │                                                          │
-  │  コレクション（あなたの画像ライブラリ）                  │
-  │         │                            ▲                 │
-  │         │ インスピレーション         │ 追加される      │
-  │         │ （似た画像を発見）         │                 │
-  │         ▼                            │                 │
-  │    気になる画像を発見                 │                 │
-  │         │                            │                 │
-  │         │ ブレスト                   │                 │
-  │         │ （シーン提案を受ける）     │                 │
-  │         ▼                            │                 │
-  │    アイデアが言語化される             │                 │
-  │         │                            │                 │
-  │         │ 🔮 プロンプト錬成         │                  │
-  │         │ （参照画像 → プロンプト） │                 │
-  │         ▼                            │                 │
-  │    高品質なプロンプト完成             │                 │
-  │         │                            │                 │
-  │         │ ComfyUI 生成               │                 │
-  │         └──────────────┘                 │
-  │                                                          │
-  └─────────────────────────────┘
+```mermaid
+graph TB
+  coll["コレクション\n（画像ライブラリ）"]
+  insp["インスピレーション\n（似た画像を発見）"]
+  find["気になる画像を発見"]
+  brs["ブレスト\n（シーン提案を受ける）"]
+  idea["アイデアが言語化される"]
+  alch["🔮 プロンプト錬成\n（参照画像 → プロンプト）"]
+  prom["高品質なプロンプト完成"]
+  gen["ComfyUI 生成"]
+
+  coll --> insp --> find --> brs --> idea --> alch --> prom --> gen --> coll
 ```
 
 生成した画像はコレクションに追加され、**次のインスピレーション探索の素材**になります。使えば使うほど、コレクションが豊かになっていく仕組みです。
