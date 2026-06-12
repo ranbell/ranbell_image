@@ -140,17 +140,18 @@ class OllamaClient:
         prompt: str,
         model: str | None = None,
         options: dict | None = None,
+        fmt: str | None = None,
     ) -> str:
         """Generate text without vision inputs (text-only LLM call)."""
-        r = await self._client.post(
-            f"{settings.ollama_url}/api/generate",
-            json={
-                "model": model or settings.vlm_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": options or {},
-            },
-        )
+        payload: dict = {
+            "model": model or settings.vlm_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": options or {},
+        }
+        if fmt:
+            payload["format"] = fmt
+        r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()["response"]
 
