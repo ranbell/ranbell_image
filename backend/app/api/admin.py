@@ -335,3 +335,36 @@ async def full_rescan(request: Request):
     db = request.app.state.db
     count = await db.delete_all_images()
     return {"deleted": count}
+
+
+# ── Path migration ────────────────────────────────────────────────────────────
+
+class MigratePathsBody(BaseModel):
+    old_prefix: str
+    new_prefix: str
+
+
+@router.post("/migrate-paths")
+async def migrate_paths(body: MigratePathsBody, request: Request):
+    """Rewrite stored image paths when the mount-point or base directory changes.
+
+    Replaces old_prefix with new_prefix in every image's stored path and
+    recomputes is_reference.  Run this BEFORE triggering a heal scan after
+    changing source_images_dir / generated_images_dir mounts.
+    """
+    if not body.old_prefix or not body.new_prefix:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="old_prefix and new_prefix must not be empty")
+    db = request.app.state.db
+    updated = await db.migrate_path_prefix(body.old_prefix, body.new_prefix)
+    return {"updated": updated}
+
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+
+@router.post("/cleanup/orphan-alignments")
+async def cleanup_orphan_alignments(request: Request):
+    """Remove alignment records for images that no longer exist in the database."""
+    db = request.app.state.db
+    removed = await db.cleanup_orphan_alignments()
+    return {"removed": removed}

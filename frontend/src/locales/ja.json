@@ -69,7 +69,7 @@
       "morph": "ヒント: Aには「今の雰囲気」、Bには「目指したい雰囲気」を設定すると、移行過程の中間画像が参考になります。",
       "anomaly": "ヒント: 参照画像のWD14タグが充実しているほど異常検出の精度が上がります。AIパイプライン未実行の画像は効果が低下します。",
       "inversion": "ヒント: 反転する軸を絞ると変化が明確になります。全軸反転は劇的な変化、1〜2軸だけなら微妙なバリエーションが得られます。",
-      "discover": "ヒント: スロット1枚目が自動的にターゲットになります。2枚目以降にpositive/negativeロールを割り当てて探索方向を導きます。",
+      "discover": "ヒント: 計3枚以上が必要です（ターゲット1枚 ＋ positive最低1枚 ＋ negative最低1枚）。スロット1枚目がターゲット、2枚目以降にロールを割り当てて探索方向を導きます。",
       "blend": "ヒント: スライダーを0付近にするとその画像の影響を無効化できます。マイナス値は「この要素を除いた場所」を探索します。",
       "outlier": "ヒント: 対極モードでは参照画像を2〜3枚にするとより安定した「反対方向」が定まります。孤島モードは参照画像不要です。",
       "grouped_search": "ヒント: group_byフィールドに「batch_id」を指定するとバッチ別の代表画像が、「model」を指定するとモデル別の傾向が一覧できます。"
@@ -207,9 +207,9 @@
     "inversionStrength":   "反転強度",
     "storyLanguage":       "ストーリー言語",
     "discoverTarget":      "ターゲット",
-    "discoverTargetDesc":  "スロット1枚目がターゲット。2枚目以降をpositive/negativeに分類してコンテキストを指定します。",
+    "discoverTargetDesc":  "スロット1枚目がターゲット。2枚目以降にpositive/negativeを割り当て、positive・negative各1枚以上（計3枚以上）が必要です。",
     "discoverContextImages":"コンテキスト画像",
-    "discoverNeedTwo":     "スロットに2枚以上画像をセットしてください",
+    "discoverNeedTwo":     "スロットに3枚以上必要です（ターゲット1枚 ＋ positive/negative コンテキスト各1枚）",
     "groupedSearchHeader": "グループ検索",
     "exclude":             "除外",
     "add":                 "加算",
@@ -237,6 +237,7 @@
   },
   "gallery": {
     "noImages": "画像が見つかりません。「スキャン」を押してください。",
+    "starting": "起動中…",
     "noResults": "一致する画像はありません。",
     "searchTag": "タグ「{tag}」",
     "noFolders": "フォルダが見つかりません。",
@@ -300,7 +301,8 @@
     "rawMetaCollapse": "▼ 折りたたむ",
     "rawMetaExpand": "▶ 展開する",
     "rawMetaJsonCopy": "JSON コピー",
-    "refineFromThis": "この画像から錬成"
+    "refineFromThis": "この画像から錬成",
+    "download": "ダウンロード"
   },
   "refine": {
     "title": "プロンプト錬成スタジオ",
@@ -406,7 +408,7 @@
     "refineChip": "プロンプト錬成",
     "tagListOpen": "タグ一覧を開く",
     "tagListClose": "閉じる",
-    "connecting": "バックエンドに接続中…",
+    "connecting": "データベース起動待ち中…",
     "starting": "バックエンド起動中…",
     "etaSec": "残り約 {s}秒",
     "etaMin": "残り約 {m}分{r}秒",

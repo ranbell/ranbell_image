@@ -185,9 +185,9 @@
     "inversionStrength":   "Inversion strength",
     "storyLanguage":       "Story language",
     "discoverTarget":      "Target",
-    "discoverTargetDesc":  "Slot 1 is the target. Slots 2+ are classified as positive/negative context.",
+    "discoverTargetDesc":  "Slot 1 is the target. Slots 2+ need at least one positive and one negative — 3 images minimum total.",
     "discoverContextImages":"Context images",
-    "discoverNeedTwo":     "Set 2 or more images in the slots",
+    "discoverNeedTwo":     "3 or more images needed (1 target + at least 1 positive and 1 negative context)",
     "groupedSearchHeader": "Grouped search",
     "exclude":             "Exclude",
     "add":                 "Add",
@@ -215,6 +215,7 @@
   },
   "gallery": {
     "noImages": "No images found. Press \"Scan\" to add images.",
+    "starting": "Starting up…",
     "noResults": "No matching images.",
     "searchTag": "Tag: {tag}",
     "noFolders": "No folders found.",
@@ -278,7 +279,8 @@
     "rawMetaCollapse": "▼ Collapse",
     "rawMetaExpand": "▶ Expand",
     "rawMetaJsonCopy": "Copy JSON",
-    "refineFromThis": "Refine from this image"
+    "refineFromThis": "Refine from this image",
+    "download": "Download"
   },
   "refine": {
     "title": "Prompt Refine Studio",
@@ -384,7 +386,7 @@
     "refineChip": "Prompt Refine",
     "tagListOpen": "Open tag list",
     "tagListClose": "Close",
-    "connecting": "Connecting to backend…",
+    "connecting": "Waiting for database to start…",
     "starting": "Backend starting…",
     "etaSec": "~{s}s left",
     "etaMin": "~{m}m {r}s left",

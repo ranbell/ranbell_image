@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Ollama
     ollama_url: str = "http://host.docker.internal:11434"
     embed_model: str = "nomic-embed-text"
-    vlm_model: str = "gemma3:4b"
+    vlm_model: str = "gemma4:e2b"
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"

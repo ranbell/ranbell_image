@@ -371,9 +371,15 @@ const isResultSelectionTab = computed(() =>
   ['serendipity', 'anomaly', 'inversion', 'blend', 'outlier', 'arithmetic'].includes(inspireTab.value)
 )
 
+const isBrainstormTrackingTab = computed(() =>
+  ['morph', 'discover'].includes(inspireTab.value)
+)
+
 watch(inspireResults, (newResults) => {
-  if (isResultSelectionTab.value) {
+  if (isResultSelectionTab.value || inspireTab.value === 'discover') {
     inspireResultSelection.value = new Set(newResults.slice(0, 3).map(r => r.sha256))
+  } else {
+    inspireResultSelection.value = new Set()
   }
 })
 
@@ -382,14 +388,17 @@ const brainstormBasis = computed(() => {
   const tab = inspireTab.value
 
   if (tab === 'morph') {
+    const selectedResults = [...inspireResultSelection.value].filter(
+      sha => inspireResults.value.some(r => r.sha256 === sha)
+    )
     return {
-      sha256s: [morphSlotA.value, morphSlotB.value].filter(Boolean),
+      sha256s: [...new Set([morphSlotA.value, morphSlotB.value, ...selectedResults].filter(Boolean))],
       label: t('inspire.basisMorphLabel'),
       sublabel: t('inspire.basisMorphSublabel'),
       color: 'blue',
     }
   }
-  if (['serendipity', 'anomaly', 'inversion', 'blend', 'outlier', 'arithmetic'].includes(tab) && hasResults) {
+  if (['serendipity', 'anomaly', 'inversion', 'blend', 'outlier', 'arithmetic', 'discover'].includes(tab) && hasResults) {
     return {
       sha256s: [...new Set([
         ...inspireSlots.value,
@@ -467,6 +476,19 @@ async function runBrainstorm() {
     brainstormLoading.value = false
   }
 }
+
+watch(
+  () => JSON.stringify(brainstormBasis.value.sha256s),
+  (newVal, oldVal) => {
+    if (newVal !== oldVal &&
+        isBrainstormTrackingTab.value &&
+        (brainstormText.value || brainstormStreaming.value) &&
+        inspireRightView.value === 'brainstorm' &&
+        !brainstormLoading.value) {
+      runBrainstorm()
+    }
+  }
+)
 
 function buildInspireContext() {
   const mode = inspireTab.value
@@ -1349,7 +1371,9 @@ function simpleMarkdown(text) {
                         :disabled="isResultSelectionTab && selectedSet.has(img.sha256)"
                         @click.stop="isResultSelectionTab
                           ? toggleInspireResultSelection(img.sha256)
-                          : emit('toggle-image-selection', img, $event.currentTarget)"
+                          : isBrainstormTrackingTab
+                            ? (emit('toggle-image-selection', img, $event.currentTarget), toggleInspireResultSelection(img.sha256))
+                            : emit('toggle-image-selection', img, $event.currentTarget)"
                         class="absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150 z-10"
                         :class="isResultSelectionTab
                           ? (selectedSet.has(img.sha256)
@@ -1357,12 +1381,18 @@ function simpleMarkdown(text) {
                               : (inspireResultSelection.has(img.sha256)
                                   ? 'bg-indigo-500 border-2 border-indigo-300 opacity-100 cursor-pointer'
                                   : 'bg-black/50 border-2 border-gray-400/70 opacity-40 group-hover:opacity-100 cursor-pointer'))
-                          : (selectedSet.has(img.sha256)
-                              ? 'bg-purple-500 border-2 border-purple-300 opacity-100 cursor-pointer'
-                              : 'bg-black/50 border-2 border-gray-400/70 opacity-40 group-hover:opacity-100 cursor-pointer')">
+                          : isBrainstormTrackingTab
+                            ? (inspireResultSelection.has(img.sha256)
+                                ? 'bg-indigo-500 border-2 border-indigo-300 opacity-100 cursor-pointer'
+                                : 'bg-black/50 border-2 border-gray-400/70 opacity-40 group-hover:opacity-100 cursor-pointer')
+                            : (selectedSet.has(img.sha256)
+                                ? 'bg-purple-500 border-2 border-purple-300 opacity-100 cursor-pointer'
+                                : 'bg-black/50 border-2 border-gray-400/70 opacity-40 group-hover:opacity-100 cursor-pointer')">
                         <svg v-if="isResultSelectionTab
                           ? (selectedSet.has(img.sha256) || inspireResultSelection.has(img.sha256))
-                          : selectedSet.has(img.sha256)"
+                          : isBrainstormTrackingTab
+                            ? inspireResultSelection.has(img.sha256)
+                            : selectedSet.has(img.sha256)"
                           class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
                           <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>

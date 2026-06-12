@@ -102,6 +102,15 @@ async def _dedup_paths(db: QdrantDBClient) -> int:
         actual = await loop.run_in_executor(None, _sha256_file, path)
         for sha256 in sha256s:
             if sha256 != actual:
+                old_doc = await db.get(sha256)
+                if old_doc and old_doc.get("star_rating"):
+                    new_doc = await db.get(actual)
+                    if new_doc and not new_doc.get("star_rating"):
+                        await db.set_payload(actual, {"star_rating": old_doc["star_rating"]})
+                        logger.info(
+                            "dedup: carried star_rating=%d from %s… to %s…",
+                            old_doc["star_rating"], sha256[:8], actual[:8],
+                        )
                 await db.delete(sha256)
                 removed += 1
                 logger.info("dedup: removed stale entry %s… (path=%s)", sha256[:8], path.name)
@@ -309,6 +318,7 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
             "size": stat.st_size,
             "mtime": mtime,
             "scanned_at": now,
+            "is_reference": path.is_relative_to(settings.source_images_dir),
         })
         if not thumbnail_exists(sha256):
             await ensure_thumbnail(path, sha256)

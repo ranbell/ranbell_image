@@ -579,6 +579,7 @@ const graphNavigate = ref(true)   // true = click navigates to image
 let _graphSourceImg = null
 
 async function openSimilarityGraph(img) {
+  selected.value = null
   graphLoading.value = true
   graphRootSha.value = img.sha256
   _graphSourceImg = img
@@ -609,7 +610,6 @@ function closeSimilarityGraph() {
 }
 
 function navigateToGraphNode(sha256) {
-  closeSimilarityGraph()
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
     selected.value = img
@@ -781,6 +781,19 @@ function _graphNodeAt(x, y) {
   return null
 }
 
+function _badgeAt(x, y) {
+  for (const node of _graphNodes) {
+    if (!node.x) continue
+    const isExpandedRep = !!node.clusterId && node.sha256 === node.clusterId
+    if (!node.isCluster && !isExpandedRep) continue
+    const r = node.is_root ? ROOT_RADIUS : NODE_RADIUS
+    const bx = node.x + r * 0.68, by = node.y - r * 0.68
+    const dx = x - bx, dy = y - by
+    if (dx * dx + dy * dy <= 13 * 13) return node
+  }
+  return null
+}
+
 function _savePositions() {
   _graphNodes.forEach(n => { if (n.x) _simNodePositions[n.nodeId] = { x: n.x, y: n.y } })
 }
@@ -941,22 +954,26 @@ function _startSim(canvas, data) {
       }
       ctx.stroke()
       ctx.setLineDash([])
+    }
 
-      // Collapsed cluster → count badge
+    // Badges drawn in a second pass so no node thumbnail can cover them
+    for (const node of _graphNodes) {
+      if (!node.x) continue
+      const isExpandedMemberB = !!node.clusterId
+      const isExpandedRepB = isExpandedMemberB && node.sha256 === node.clusterId
+      const rB = node.is_root ? ROOT_RADIUS : NODE_RADIUS
       if (node.isCluster) {
-        const bx = node.x + r * 0.68, by = node.y - r * 0.68, br = 13
+        const bx = node.x + rB * 0.68, by = node.y - rB * 0.68, br = 13
         ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2)
         ctx.fillStyle = '#f59e0b'; ctx.fill()
         ctx.fillStyle = '#000'; ctx.font = 'bold 11px sans-serif'
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.fillText(node.count, bx, by)
-      }
-
-      // Expanded cluster rep → collapse badge
-      if (isExpandedRep) {
-        const bx = node.x + r * 0.68, by = node.y - r * 0.68, br = 13
+      } else if (isExpandedRepB) {
+        const bx = node.x + rB * 0.68, by = node.y - rB * 0.68, br = 13
+        const isHovB = node.nodeId === _graphHoveredNodeId
         ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2)
-        ctx.fillStyle = isHovered ? '#fcd34d' : '#f59e0b'; ctx.fill()
+        ctx.fillStyle = isHovB ? '#fcd34d' : '#f59e0b'; ctx.fill()
         ctx.fillStyle = '#000'; ctx.font = 'bold 13px sans-serif'
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.fillText('×', bx, by)
@@ -1063,14 +1080,6 @@ function _startSim(canvas, data) {
     const rect = canvas.getBoundingClientRect()
     const node = _graphNodeAt(e.clientX - rect.left, e.clientY - rect.top)
     if (!node) { graphContextMenu.value = null; return }
-    // Clusters: expand/collapse on right-click too
-    if (node.isCluster || node.clusterId) {
-      _savePositions()
-      if (node.isCluster) _graphExpandedIds.add(node.clusterId)
-      else _graphExpandedIds.delete(node.clusterId)
-      _startSim(canvas, graphData.value)
-      return
-    }
     const menuW = 224, menuH = 112   // approximate context menu dimensions
     const sx = Math.min(e.clientX, window.innerWidth - menuW - 8)
     const sy = Math.min(e.clientY, window.innerHeight - menuH - 8)
@@ -1145,22 +1154,23 @@ function onGraphCanvasClick(e) {
   // Close context menu on any left-click
   if (graphContextMenu.value) { graphContextMenu.value = null; return }
   const rect = graphCanvasRef.value.getBoundingClientRect()
-  const node = _graphNodeAt(e.clientX - rect.left, e.clientY - rect.top)
+  const cx = e.clientX - rect.left, cy = e.clientY - rect.top
+  // Badge click: expand collapsed cluster or collapse expanded cluster
+  const badgeNode = _badgeAt(cx, cy)
+  if (badgeNode) {
+    _savePositions()
+    if (badgeNode.isCluster) _graphExpandedIds.add(badgeNode.clusterId)
+    else _graphExpandedIds.delete(badgeNode.clusterId)
+    _startSim(graphCanvasRef.value, graphData.value)
+    return
+  }
+  const node = _graphNodeAt(cx, cy)
   if (!node) {
     // Click on empty space → clear path highlight
     if (_pathEdges.size > 0) { _clearPath(); hasActivePath.value = false; if (_graphSim?.alpha() < 0.01) _graphSim.alpha(0.02).restart() }
     return
   }
-  if (node.isCluster) {
-    _savePositions()
-    _graphExpandedIds.add(node.clusterId)
-    _startSim(graphCanvasRef.value, graphData.value)
-  } else if (node.clusterId) {
-    _savePositions()
-    _graphExpandedIds.delete(node.clusterId)
-    _startSim(graphCanvasRef.value, graphData.value)
-  }
-  // Note: single-click on normal nodes no longer navigates — use right-click menu
+  // Note: single-click on nodes no longer navigates — use right-click menu
 }
 
 function onGraphCanvasHover(e) {
@@ -2878,8 +2888,11 @@ onUnmounted(() => {
           </template>
         </div>
         <div ref="sentinel" class="h-8" />
-        <p v-if="!loading && images.length===0 && !isSearchMode" class="text-center text-gray-600 mt-24 text-sm">
+        <p v-if="!loading && images.length===0 && !isSearchMode && backendStatus === 'ready'" class="text-center text-gray-600 mt-24 text-sm">
           {{ $t('gallery.noImages') }}
+        </p>
+        <p v-else-if="!loading && images.length===0 && !isSearchMode && backendStatus !== 'ready'" class="text-center text-gray-600 mt-24 text-sm">
+          {{ $t('gallery.starting') }}
         </p>
         <div v-if="!loading && images.length===0 && isSearchMode" class="text-center text-gray-600 mt-24 text-sm space-y-1">
           <p>{{ $t('gallery.noResults') }}</p>
@@ -2895,7 +2908,7 @@ onUnmounted(() => {
 
     <!-- ── Prompt Refine Panel (2-pane) ── -->
     <Teleport to="body">
-      <div v-if="showRefine" class="fixed inset-0 z-[65] bg-black/90 flex items-center justify-center p-3"
+      <div v-if="showRefine" class="fixed inset-0 z-[75] bg-black/90 flex items-center justify-center p-3"
         @mousedown.self="refineOverlayMousedownOnBg = true"
         @mouseup.self="if (refineOverlayMousedownOnBg) showRefine = false; refineOverlayMousedownOnBg = false"
         @mouseleave="refineOverlayMousedownOnBg = false">
@@ -3597,7 +3610,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="selected" class="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4"
+      <div v-if="selected" class="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4"
         @click.self="selected = null"
         @keydown.left.prevent="prevImage" @keydown.right.prevent="nextImage" @keydown.escape="selected = null"
         tabindex="-1">
@@ -3655,6 +3668,11 @@ onUnmounted(() => {
 
               <!-- Similar search buttons -->
               <div class="flex flex-wrap gap-2">
+                <a :href="`/api/download/${selected.sha256}`"
+                  download
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/60 hover:bg-gray-700/70 border border-gray-700/50 text-gray-300 hover:text-gray-100 rounded-lg text-xs transition-colors">
+                  ⬇ {{ $t('detail.download') }}
+                </a>
                 <button
                   @click="openRefineFromDetail(selected)"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/50 hover:bg-amber-800/70 border border-amber-700/50 text-amber-300 hover:text-amber-100 rounded-lg text-xs transition-colors">

@@ -13,7 +13,7 @@ def _compute_grid(n: int) -> tuple[int, int]:
         return 3, 2  # up to 6 images
 
 
-def create_tile_image(image_bytes_list: list[bytes], max_size: int = 1024) -> bytes:
+def create_tile_image(image_bytes_list: list[bytes], max_size: int = 1008) -> bytes:
     if not image_bytes_list:
         return b""
 

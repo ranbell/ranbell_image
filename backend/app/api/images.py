@@ -485,6 +485,24 @@ async def serve_original(sha256: str, request: Request, response: Response):
     return FileResponse(file_path, media_type=media_type)
 
 
+@router.get("/download/{sha256}")
+async def download_image(sha256: str, request: Request, response: Response):
+    doc = await _db(request).get(sha256)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Image not found")
+    file_path = Path(doc["path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not on disk")
+    media_type = MEDIA_TYPES.get(doc.get("ext", ""), "application/octet-stream")
+    filename = doc.get("name", sha256) + doc.get("ext", "")
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="attachment",
+    )
+
+
 @router.get("/images/{sha256}/raw-metadata")
 async def get_raw_metadata(sha256: str, request: Request):
     """Read PNG metadata chunks directly from the image file on disk."""

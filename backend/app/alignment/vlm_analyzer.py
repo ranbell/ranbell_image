@@ -25,14 +25,14 @@ Evaluate how well the image follows the given prompt.
 [Evaluation categories]
 {categories}
 
-Respond ONLY with a JSON object in exactly this format — no other output:
+Respond ONLY with a JSON object in exactly this format — no markdown, no code fences, no explanation:
 
 {{"summary_ja": "Concise description of mismatches in Japanese (1-2 sentences)", "summary_en": "Brief description of mismatches in English (1-2 sentences)", "matched_elements_ja": ["Prompt elements that are reflected in the image, in Japanese"], "matched_elements_en": ["Elements from the prompt reflected in the image, in English"], "unmatched_elements_ja": ["Prompt elements missing from the image, in Japanese"], "unmatched_elements_en": ["Elements from the prompt missing in the image, in English"], "categories": ["mismatch categories chosen from the list above"]}}\
 """
 
 _TRANSLATE_TEMPLATE = """\
 Translate the following image evaluation data into {lang_name}.
-Return ONLY a JSON object with exactly these keys — no other output:
+Return ONLY a JSON object with exactly these keys — no markdown, no code fences, no explanation:
 
 {{"summary": "translated summary (1-2 sentences)", "matched_elements": ["translated matched element list"], "unmatched_elements": ["translated unmatched element list"]}}
 
@@ -42,7 +42,6 @@ matched_elements: {matched_ja}
 unmatched_elements: {unmatched_ja}\
 """
 
-_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 _JP_RE = re.compile(r"[぀-ヿ一-鿿㐀-䶿]")
 
 
@@ -68,10 +67,17 @@ def _normalize_categories(cats: list) -> list[str]:
 
 
 def _extract_json(text: str) -> dict:
-    m = _JSON_RE.search(text)
+    m = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
     if m:
-        return json.loads(m.group(0))
-    raise ValueError(f"No JSON object found in LLM output: {text[:200]!r}")
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(text[start : end + 1])
+    raise ValueError(f"No JSON object found in LLM output (len={len(text)}): {text[:200]!r}")
 
 
 def _build_i18n_result(raw_result: dict) -> dict:
@@ -130,10 +136,11 @@ async def analyze_with_llm(
         categories=categories_text,
     )
 
+    _options = {"num_predict": 1024}
     last_raw = ""
     for attempt in range(max_retries):
         try:
-            raw = await ollama.generate_text(prompt, model=model)
+            raw = await ollama.generate_text(prompt, model=model, options=_options)
             last_raw = raw
             result = _extract_json(raw)
             return _build_i18n_result(result)
@@ -179,9 +186,10 @@ async def translate_to_lang(
         unmatched_ja=json.dumps(unmatched_ja, ensure_ascii=False),
     )
 
+    _options = {"num_predict": 512}
     for attempt in range(max_retries):
         try:
-            raw = await ollama.generate_text(prompt, model=model)
+            raw = await ollama.generate_text(prompt, model=model, options=_options)
             result = _extract_json(raw)
             return {
                 "summary": result.get("summary", ""),

@@ -1556,6 +1556,90 @@ class QdrantDBClient:
             offset = next_offset
         return count
 
+    async def migrate_path_prefix(self, old_prefix: str, new_prefix: str) -> int:
+        """Rewrite path payloads whose prefix changed (e.g. mount-point rename).
+
+        For each image whose stored path starts with old_prefix, replaces that
+        prefix with new_prefix and recomputes is_reference.  Returns the number
+        of updated records.
+        """
+        source_prefix = str(settings.source_images_dir)
+        count = 0
+        offset = None
+        while True:
+            points, next_offset = await self._qc.scroll(
+                IMAGES_COLLECTION,
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["sha256", "path"]),
+                with_vectors=False,
+            )
+            to_update: list[tuple[str, str, bool]] = []
+            for p in points:
+                pl = p.payload or {}
+                sha256 = pl.get("sha256")
+                old_path = pl.get("path", "")
+                if not sha256 or not old_path.startswith(old_prefix):
+                    continue
+                new_path = new_prefix + old_path[len(old_prefix):]
+                is_ref = new_path.startswith(source_prefix)
+                to_update.append((sha256, new_path, is_ref))
+            if to_update:
+                await asyncio.gather(*[
+                    self._qc.set_payload(
+                        collection_name=IMAGES_COLLECTION,
+                        payload={"path": new_path, "is_reference": is_ref},
+                        points=qm.PointIdsList(points=[sha256_to_point_id(sha256)]),
+                    )
+                    for sha256, new_path, is_ref in to_update
+                ])
+                count += len(to_update)
+                logger.info("migrate_path_prefix: %d docs updated so far", count)
+            if next_offset is None:
+                break
+            offset = next_offset
+        return count
+
+    async def cleanup_orphan_alignments(self) -> int:
+        """Delete alignment records whose image no longer exists in the images collection.
+
+        Returns the number of orphan records removed.
+        """
+        orphan_ids: list = []
+        offset = None
+        while True:
+            pts, next_offset = await self._qc.scroll(
+                collection_name=ALIGNMENT_COLLECTION,
+                limit=500,
+                with_payload=["image_id"],
+                with_vectors=False,
+                offset=offset,
+            )
+            sha256s = [p.payload["image_id"] for p in pts if p.payload and "image_id" in p.payload]
+            if sha256s:
+                existing = await self._qc.retrieve(
+                    collection_name=IMAGES_COLLECTION,
+                    ids=[sha256_to_point_id(s) for s in sha256s],
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                existing_ids = {str(p.id) for p in existing}
+                for p in pts:
+                    if not p.payload or "image_id" not in p.payload:
+                        continue
+                    if str(p.id) not in existing_ids:
+                        orphan_ids.append(p.id)
+            if next_offset is None:
+                break
+            offset = next_offset
+        if orphan_ids:
+            await self._qc.delete(
+                collection_name=ALIGNMENT_COLLECTION,
+                points_selector=qm.PointIdsList(points=orphan_ids),
+            )
+            logger.info("cleanup_orphan_alignments: removed %d orphan records", len(orphan_ids))
+        return len(orphan_ids)
+
     async def random_sample(
         self,
         n: int,
