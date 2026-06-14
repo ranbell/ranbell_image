@@ -329,6 +329,8 @@
     "negPrompt": "Negative prompt generation",
     "negPromptDesc": "Outputs inverse syntax for unwanted elements",
     "negPromptFromInversion": "Received from Concept Inversion",
+    "suppressConflictTags": "Suppress Conflict Tags",
+    "suppressConflictTagsDesc": "Remove WD14 tags that contradict the user instruction",
     "comfyAuto": "ComfyUI auto-generate",
     "comfyAutoLabel": "Auto-submit to ComfyUI after refine",
     "comfyAutoDesc": "Generated images are saved automatically",

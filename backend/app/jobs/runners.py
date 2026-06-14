@@ -13,6 +13,7 @@ Runner signature:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
@@ -778,6 +779,50 @@ async def run_brainstorm(
         await event_queue.put(None)
 
 
+async def _find_conflict_tags(
+    instruction_en: str,
+    source_tags: list[str],
+    db,
+    ollama,
+    model: str,
+) -> set[str]:
+    """Return the subset of source_tags that contradict the given instruction.
+
+    Uses semantic search to find instruction-aligned tags for context, then asks
+    the LLM (text-only, no image) to identify conflicting source tags.
+    Falls back to empty set on any error.
+    """
+    try:
+        instr_vec = await ollama.embed(instruction_en)
+    except Exception as exc:
+        logger.warning("_find_conflict_tags embed failed: %s", exc)
+        return set()
+
+    desired_names: list[str] = []
+    try:
+        desired_hits = await db.search_wd14_vocab(instr_vec, limit=40)
+        desired_names = [h["name"] for h in desired_hits]
+    except Exception as exc:
+        logger.warning("_find_conflict_tags vocab search failed: %s", exc)
+
+    prompt = (
+        f'Instruction: "{instruction_en}"\n'
+        f'Semantically aligned tags for this instruction: {", ".join(desired_names[:20])}\n'
+        f'Source tags: {", ".join(source_tags[:80])}\n\n'
+        'Which source tags DIRECTLY CONTRADICT the instruction?\n'
+        'Rules: Only list tags that conflict (e.g. wrong hair color, wrong style). '
+        'Tags unrelated to the instruction must NOT be listed.\n'
+        'Return ONLY valid JSON: {"conflict": ["tag1", "tag2"]}'
+    )
+    try:
+        resp = await ollama.generate_text(prompt, model=model, fmt="json")
+        data = json.loads(resp)
+        return set(data.get("conflict", []))
+    except Exception as exc:
+        logger.warning("_find_conflict_tags LLM call failed: %s", exc)
+        return set()
+
+
 async def run_refine_prompt(
     reporter: ProgressReporter,
     cancel: CancelToken,
@@ -848,42 +893,23 @@ async def run_refine_prompt(
         _put(None)
         return
 
-    # 1. load images
+    # 1a. load images (doc metadata only — context built after conflict detection)
     reporter.indeterminate()
-    context_parts: list[str] = []
     image_bytes_list: list[bytes] = []
     weights = _resolve_weights(body.sha256s[:6], body.weights)
-    loaded_indices: list[int] = []
+    raw_docs: list[tuple[dict, int]] = []  # (doc, original_idx)
 
     for idx, sha256 in enumerate(body.sha256s[:6]):
         cancel.raise_if_set()
         doc = await db.get(sha256)
         if not doc:
             continue
-        lines: list[str] = []
-        prompt_txt = doc.get("positive_prompt", "")
-        if prompt_txt:
-            lines.append(f"Prompt: {prompt_txt}")
-        wd14 = doc.get("wd14_tags", [])
-        wd14_scores = doc.get("wd14_tags_scores", [])
-        if wd14_scores and len(wd14_scores) == len(wd14):
-            scored_pairs = list(zip(wd14, wd14_scores))
-            must_tags = [t for t, s in scored_pairs if s >= _WD14_MUST_INCLUDE_THRESHOLD]
-            if must_tags:
-                lines.append(f"Must include these tags verbatim: {', '.join(must_tags)}")
-            remaining = [t for t, s in scored_pairs if s < _WD14_MUST_INCLUDE_THRESHOLD]
-            if remaining:
-                lines.append(f"Reference tags: {', '.join(remaining[:30])}")
-        elif wd14:
-            lines.append(f"Auto-tags: {', '.join(wd14[:40])}")
-        if lines:
-            context_parts.append("\n".join(lines))
-            loaded_indices.append(idx)
+        raw_docs.append((doc, idx))
         fp = Path(doc.get("path", ""))
         if fp.exists():
             image_bytes_list.append(fp.read_bytes())
 
-    if not context_parts and not image_bytes_list:
+    if not raw_docs and not image_bytes_list:
         _put({"type": "error", "message": "No valid images found"})
         _put(None)
         return
@@ -895,12 +921,6 @@ async def run_refine_prompt(
     # 3. build VLM prompt
     cfg = await get_runtime_config(db)
     options = {"temperature": body.temperature, "num_ctx": body.num_ctx}
-
-    annotated_parts: list[str] = []
-    for part_idx, (ctx, img_idx) in enumerate(zip(context_parts, loaded_indices)):
-        pct = round(weights[img_idx] * 100)
-        annotated_parts.append(f"[Image {part_idx + 1} — influence weight: {pct}%]\n{ctx}")
-    context = "\n\n---\n\n".join(annotated_parts)
 
     # 3a. instruction pre-processing: translate → separate literals from NL
     literals: list[dict] = []
@@ -915,6 +935,48 @@ async def run_refine_prompt(
             _, nl_instruction, literals = await _translate_and_classify(
                 body.instruction, ollama, model=cfg["vlm_model"]
             )
+
+    # 3b. conflict tag suppression: identify WD14 tags that contradict user instruction
+    conflict_tags: set[str] = set()
+    if body.suppress_conflict_tags and nl_instruction:
+        all_source_tags = [t for doc, _ in raw_docs for t in doc.get("wd14_tags", [])]
+        if all_source_tags:
+            conflict_tags = await _find_conflict_tags(
+                nl_instruction, all_source_tags, db, ollama, cfg["vlm_model"]
+            )
+            reporter.update(0.04, "Tag conflict analysis done")
+
+    # 1b. build context parts (with conflict tags excluded)
+    context_parts: list[str] = []
+    loaded_indices: list[int] = []
+    for doc, idx in raw_docs:
+        lines: list[str] = []
+        prompt_txt = doc.get("positive_prompt", "")
+        if prompt_txt:
+            lines.append(f"Prompt: {prompt_txt}")
+        wd14 = doc.get("wd14_tags", [])
+        wd14_scores = doc.get("wd14_tags_scores", [])
+        if wd14_scores and len(wd14_scores) == len(wd14):
+            scored_pairs = [(t, s) for t, s in zip(wd14, wd14_scores) if t not in conflict_tags]
+            must_tags = [t for t, s in scored_pairs if s >= _WD14_MUST_INCLUDE_THRESHOLD]
+            if must_tags:
+                lines.append(f"Must include these tags verbatim: {', '.join(must_tags)}")
+            remaining = [t for t, s in scored_pairs if s < _WD14_MUST_INCLUDE_THRESHOLD]
+            if remaining:
+                lines.append(f"Reference tags: {', '.join(remaining[:30])}")
+        elif wd14:
+            filtered = [t for t in wd14 if t not in conflict_tags]
+            if filtered:
+                lines.append(f"Auto-tags: {', '.join(filtered[:40])}")
+        if lines:
+            context_parts.append("\n".join(lines))
+            loaded_indices.append(idx)
+
+    annotated_parts: list[str] = []
+    for part_idx, (ctx, img_idx) in enumerate(zip(context_parts, loaded_indices)):
+        pct = round(weights[img_idx] * 100)
+        annotated_parts.append(f"[Image {part_idx + 1} — influence weight: {pct}%]\n{ctx}")
+    context = "\n\n---\n\n".join(annotated_parts)
 
     vlm_prompt = _build_vlm_prompt(
         context,
