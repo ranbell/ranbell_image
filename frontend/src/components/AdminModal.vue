@@ -40,11 +40,15 @@ const adminLoading = ref('')
 const adminError = ref('')
 const adminSuccess = ref('')
 const adminConfirm = ref(null)
+const vocabStatus = ref(null)   // {imported: bool, tag_count: int}
+const vocabImporting = ref(false)
 const mrlStatus = ref(null)
 const colorStatus = ref(null)
 const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
+
+const configWorkflows = ref([])
 
 // Connection tab
 const healthData = ref(null)
@@ -97,10 +101,40 @@ async function fetchAdminStats() {
   }
 }
 
+async function fetchVocabStatus() {
+  try {
+    const r = await fetch('/api/admin/invoke/vocab-status')
+    if (r.ok) vocabStatus.value = await r.json()
+  } catch {}
+}
+
+async function importVocab() {
+  vocabImporting.value = true
+  try {
+    const r = await fetch('/api/admin/invoke/import-wd14-vocab', { method: 'POST' })
+    if (r.ok) {
+      adminSuccess.value = 'WD14 vocab インポートをキューに追加しました。Control Room で進捗を確認してください。'
+      setTimeout(() => fetchVocabStatus(), 3000)
+    } else {
+      adminError.value = `Vocab import error: ${await r.text()}`
+    }
+  } catch (e) {
+    adminError.value = String(e)
+  } finally {
+    vocabImporting.value = false
+  }
+}
+
 async function fetchAdminConfig() {
   try {
     const r = await fetch('/api/admin/config')
-    if (r.ok) adminConfig.value = await r.json()
+    if (r.ok) {
+      const cfg = await r.json()
+      if (!cfg.invoke_daily_oracle_timezone || cfg.invoke_daily_oracle_timezone === 'UTC') {
+        cfg.invoke_daily_oracle_timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      }
+      adminConfig.value = cfg
+    }
   } catch {}
 }
 
@@ -118,6 +152,23 @@ async function saveAdminConfig() {
       adminConfig.value = await r.json()
       adminSuccess.value = t('admin.saveSuccess')
       setTimeout(() => { adminSuccess.value = '' }, 3000)
+    }
+  } catch (e) {
+    adminError.value = e.message
+  } finally {
+    adminLoading.value = ''
+  }
+}
+
+async function resetDailyOracle() {
+  adminLoading.value = 'oracle-reset'
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/admin/invoke/daily-oracle', { method: 'DELETE' })
+    if (r.ok) {
+      const data = await r.json()
+      adminSuccess.value = `${data.date} の実行記録を削除しました (${data.deleted} 件)`
+      setTimeout(() => { adminSuccess.value = '' }, 4000)
     }
   } catch (e) {
     adminError.value = e.message
@@ -251,6 +302,9 @@ function switchAdminTab(id) {
   adminTab.value = id
   if (id === 'connection') fetchHealth()
   if (id === 'config' && !ollamaModels.value.length) fetchOllamaModels()
+  if (id === 'config' && !configWorkflows.value.length) {
+    fetch('/api/comfy/workflows').then(r => r.ok && r.json()).then(list => { if (list) configWorkflows.value = list }).catch(() => {})
+  }
   if (id === 'info') { fetchInfo(); fetchAiStatus() }
   if (id === 'system') fetchInfo()
 }
@@ -281,7 +335,7 @@ watch(() => props.show, async (val) => {
     backendOffline.value = false
     adminStats.value = null
     adminConfig.value = null
-    await Promise.all([fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels()])
+    await Promise.all([fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus()])
   }
 })
 
@@ -424,6 +478,23 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                     class="text-xs text-amber-400 mt-1">
                     Path: {{ adminStats.wd14.model_dir }} (fix under Admin → Settings)
                   </div>
+                </div>
+              </div>
+
+              <!-- Invoke Vocab status -->
+              <div class="pt-2 border-t border-gray-700/60 space-y-2">
+                <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Invoke Vocab</p>
+                <div class="flex items-center justify-between">
+                  <span class="text-xs" :class="vocabStatus?.imported ? 'text-green-400' : 'text-amber-400'">
+                    {{ vocabStatus?.imported
+                      ? `${vocabStatus.tag_count.toLocaleString()} タグ登録済み`
+                      : '未登録 — インポートが必要' }}
+                  </span>
+                  <button @click="importVocab" :disabled="vocabImporting"
+                    class="px-2.5 py-1 rounded-lg border border-indigo-700/50 bg-indigo-900/40 hover:bg-indigo-800/50
+                           text-[10px] text-indigo-300 disabled:opacity-40 transition">
+                    {{ vocabImporting ? '...' : (vocabStatus?.imported ? '再インポート' : 'インポート実行') }}
+                  </button>
                 </div>
               </div>
 
@@ -967,6 +1038,93 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   <span class="text-gray-500 font-mono break-all text-right">{{ v }}</span>
                 </div>
               </div>
+            </div>
+
+            <!-- ── Daily Oracle ── -->
+            <div class="bg-gray-800 rounded-xl p-4 space-y-4">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.dailyOracle.title') }}</p>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-xs text-gray-300">{{ $t('admin.dailyOracle.enabled') }}</p>
+                  <p class="text-[10px] text-gray-600 mt-0.5">{{ $t('admin.dailyOracle.enabledDesc') }}</p>
+                </div>
+                <button @click="adminConfig.invoke_daily_oracle_enabled = !adminConfig.invoke_daily_oracle_enabled"
+                  :class="adminConfig.invoke_daily_oracle_enabled ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none">
+                  <span :class="adminConfig.invoke_daily_oracle_enabled ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="inline-block h-4 w-4 mt-0.5 transform rounded-full bg-white transition-transform duration-200"></span>
+                </button>
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.dailyOracle.workflow') }}</label>
+                <select v-model="adminConfig.invoke_daily_oracle_workflow"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                  <option value="">{{ $t('admin.dailyOracle.workflowNone') }}</option>
+                  <option v-for="wf in configWorkflows" :key="wf" :value="wf">{{ wf }}</option>
+                </select>
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.workflowHint') }}</p>
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <label class="text-xs text-gray-500 flex justify-between mb-1">
+                  <span>{{ $t('admin.dailyOracle.retainDays') }}</span>
+                  <span class="text-purple-400 font-mono">{{ adminConfig.invoke_daily_oracle_retain_days ?? 7 }}</span>
+                </label>
+                <input v-model.number="adminConfig.invoke_daily_oracle_retain_days" type="number" min="1" max="90"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.dailyOracle.topic') }}</label>
+                <textarea v-model="adminConfig.invoke_daily_oracle_topic" rows="2"
+                  :placeholder="$t('admin.dailyOracle.topicPlaceholder')"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500 resize-none" />
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.topicHint') }}</p>
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.dailyOracle.executionTime') }}</label>
+                <input v-model="adminConfig.invoke_daily_oracle_time" type="time"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <label class="text-xs text-gray-500 flex justify-between mb-1">
+                  <span>{{ $t('admin.dailyOracle.timezone') }}</span>
+                  <button @click="adminConfig.invoke_daily_oracle_timezone = Intl.DateTimeFormat().resolvedOptions().timeZone"
+                    class="text-[10px] text-purple-400 hover:text-purple-300">{{ $t('admin.dailyOracle.detectTz') }}</button>
+                </label>
+                <input v-model="adminConfig.invoke_daily_oracle_timezone" type="text" spellcheck="false"
+                  :placeholder="$t('admin.dailyOracle.timezonePlaceholder')"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.timezoneHint') }}</p>
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.dailyOracle.minFreeGb') }}</label>
+                <input v-model.number="adminConfig.invoke_daily_oracle_min_free_gb" type="number" min="0" step="0.5"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500" />
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.minFreeGbHint') }}</p>
+              </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled">
+                <button @click="resetDailyOracle" :disabled="adminLoading === 'oracle-reset'"
+                  class="w-full py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-xs text-gray-300 transition-colors">
+                  {{ adminLoading === 'oracle-reset' ? '削除中…' : $t('admin.dailyOracle.resetToday') }}
+                </button>
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.resetHint') }}</p>
+              </div>
+            </div>
+
+            <div class="space-y-3 border border-gray-700 rounded-lg p-3">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.disk.title') }}</p>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.disk.cautionPct') }}</label>
+                  <input v-model.number="adminConfig.disk_caution_pct" type="number" min="1" max="98" step="1"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-amber-300 focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.disk.faultPct') }}</label>
+                  <input v-model.number="adminConfig.disk_fault_pct" type="number" min="2" max="99" step="1"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-red-400 focus:outline-none focus:border-purple-500" />
+                </div>
+              </div>
+              <p class="text-[10px] text-gray-600">{{ $t('admin.disk.hint') }}</p>
             </div>
 
             <button @click="saveAdminConfig" :disabled="adminLoading === 'config'"

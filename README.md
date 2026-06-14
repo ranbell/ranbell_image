@@ -6,7 +6,7 @@
 
 **Local AI image Studio — discover by meaning, synthesize by instinct.**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/ranbell/ranbell_image/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/ranbell/ranbell_image/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
@@ -97,6 +97,30 @@ Choose your output style to match your model:
 
 ---
 
+### Invoke — Summon seeds from nothing
+
+Five spirits each receive your mood, colors, and rough intent, then generate five interpretations — in parallel, each driven by its own creative philosophy. Pick a seed, send it to the generation pipeline, or respin just that one spirit and try again.
+
+<!-- screenshot: Invoke panel with spirit cards -->
+![Invoke Panel](docs/screenshots/invoke_panel.png)
+
+| Kanji | Name | Role |
+|:-----:|------|------|
+| **映** | Mirror — Faithful | Realizes your intent without deviation; stays exactly on the axis centerline |
+| **逆** | Counter — Rebel | Shows the shadow of your desire; inverts exactly one axis to create contrast |
+| **漂** | Wander — Stranger | Weaves in rare "guest" elements that feel like they always belonged |
+| **奔** | Surge — Lunatic | Embraces the impossible; commits fully to low-co-occurrence tags |
+| **瞰** | Vantage — Oracle | Complete creative freedom; reads your intent deeply and prioritizes striking results |
+
+- **Light mode**: 39-emoji mood palette, 4-axis mood sliders (warm/cool · calm/dynamic · dense/sparse · concrete/abstract), color palette, person spec
+- **Pro mode**: Direct prompt editing, topic-to-tags conversion via Ollama, per-spirit seed control
+- **Live streaming**: SSE events surface each stage in real time — prompt composition → image generation → alignment scoring
+- **Adopt / Respin / Send to Refine**: Take the seed into your collection, regenerate just that spirit, or hand the prompt off to a full-parameter generation run
+
+> 📖 [Creator's Guide — Invoke](docs/guide/invoke.md) · [日本語版](docs/guide/invoke.ja.md)
+
+---
+
 ### ✨ Inspire — 9 Creative Exploration Modes
 
 ![Inspire](docs/screenshots/04_inspire.png)
@@ -133,7 +157,8 @@ When you know the vibe but not the destination, the Inspire panel helps you navi
 
 ### 📊 Analyze — See Your Collection as a Whole
 
-![Analyzer](docs/screenshots/06_02_analyzer.png)
+![Analyzer-1](docs/screenshots/06_02_analyzer.png)
+![Analyzer-3](docs/screenshots/06_03_analyzer.png)
 
 Three visualizations that show your collection from angles you've never seen before:
 
@@ -154,6 +179,7 @@ Two entry points for each major feature — pick whichever matches your goal:
 
 | Feature | I want to use it | I want to understand how it works |
 |---|---|---|
+| **Invoke** | [Creator's Guide →](docs/guide/invoke.md) · [JP →](docs/guide/invoke.ja.md) | Coming soon |
 | **Inspire & Brainstorm** | [Creator's Guide →](docs/guide/inspire-brainstorm.md) | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
 | **Prompt Alchemy** | [Creator's Guide →](docs/guide/prompt-alchemy.md) | [Technical Reference →](docs/tech/prompt-alchemy.md) |
 
@@ -263,6 +289,7 @@ graph LR
     subgraph FE ["Frontend · Vue 3 / Vite"]
         UI["Control Room"]
         IP["Inspire Panel"]
+        INV["Invoke Panel"]
     end
 
     subgraph BE ["Backend · FastAPI"]
@@ -296,7 +323,7 @@ graph LR
     end
 
     User -->|"clicks"| UI
-    UI & IP -- "REST /api" --> API
+    UI & IP & INV -- "REST /api" --> API
     API -- "SSE /api/jobs/stream" --> UI
     API -- "spooler.submit()" --> Spl
     Spl --> SYNC & EMBED & GEN_L & PROMPT_L & EVAL_L
@@ -317,7 +344,7 @@ graph LR
     classDef gen fill:#ffedd5,stroke:#c2410c,color:#7c2d12
     classDef db fill:#f0fdf4,stroke:#15803d,color:#14532d
 
-    class UI,IP fe
+    class UI,IP,INV fe
     class API api
     class Spl spooler
     class SYNC,EMBED,GEN_L,PROMPT_L,EVAL_L lane

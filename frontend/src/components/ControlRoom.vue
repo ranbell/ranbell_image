@@ -123,6 +123,21 @@
               {{ totalProcessed.toLocaleString() }} synthesized
             </div>
 
+            <template v-if="disks?.length">
+              <div class="cr-section-sublabel">DISK</div>
+              <div v-for="d in disks" :key="d.name" class="cr-disk-row">
+                <div class="cr-disk-header">
+                  <span class="cr-disk-name">{{ d.name }}</span>
+                  <span class="cr-disk-val">{{ d.free_gb }}G / {{ d.total_gb }}G</span>
+                </div>
+                <div class="cr-gauge-track cr-gauge-track--disk">
+                  <div class="cr-gauge-fill"
+                    :class="d.used_pct >= diskFaultPct ? 'cr-gauge--fault' : d.used_pct >= diskCautionPct ? 'cr-gauge--caution' : 'cr-gauge--nominal'"
+                    :style="{ transform: `scaleX(${d.used_pct / 100})` }" />
+                </div>
+              </div>
+            </template>
+
           </div>
         </section>
 
@@ -312,6 +327,9 @@ const props = defineProps({
   jobsMap:      { type: Object,  required: true },
   controlRoom:  { type: Object,  required: true },
   sseConnected: { type: Boolean, default: true },
+  disks:          { type: Array,   default: () => [] },
+  diskCautionPct: { type: Number,  default: 75 },
+  diskFaultPct:   { type: Number,  default: 90 },
 })
 
 const emit = defineEmits(['close', 'retry', 'cancel', 'retry-all-failed', 'cancel-all-queued', 'reopen-refine'])
@@ -551,7 +569,7 @@ function ratioClass(used, total, caution, fault) {
   box-shadow: 0 4px 40px rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column;
-  height: clamp(360px, 72vh, 960px);
+  height: clamp(400px, 82vh, 960px);
 }
 
 /* ── header ──────────────────────────────────────────────────────────────────── */
@@ -720,7 +738,7 @@ function ratioClass(used, total, caution, fault) {
 /* ── body (3-column grid) ───────────────────────────────────────────────────── */
 .cr-body {
   display: grid;
-  grid-template-columns: 220px 1fr 300px;
+  grid-template-columns: 260px 1fr 300px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -953,6 +971,47 @@ function ratioClass(used, total, caution, fault) {
 .cr-gauge--nominal { background: var(--cr-nominal); }
 .cr-gauge--caution { background: var(--cr-caution); }
 .cr-gauge--fault   { background: var(--cr-fault); }
+
+.cr-section-sublabel {
+  font-family: var(--cr-mono);
+  font-size: 10px;
+  color: var(--cr-text-label);
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  margin-top: 8px;
+  margin-bottom: 3px;
+}
+
+.cr-disk-row {
+  margin-bottom: 4px;
+}
+
+.cr-disk-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--cr-mono);
+  font-size: 11px;
+  color: var(--cr-text-dim);
+  margin-bottom: 2px;
+  gap: 4px;
+}
+
+.cr-disk-name {
+  color: var(--cr-text);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.cr-disk-val {
+  font-size: 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cr-gauge-track--disk {
+  height: 5px;
+}
 
 .cr-gauge-val {
   color: var(--cr-text-dim);

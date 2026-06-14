@@ -72,6 +72,15 @@ class OllamaClient:
         r.raise_for_status()
         return r.json()["embeddings"][0]
 
+    async def embed_batch(self, texts: list[str], model: str | None = None) -> list[list[float]]:
+        """Embed multiple texts in a single Ollama API call."""
+        r = await self._client.post(
+            f"{settings.ollama_url}/api/embed",
+            json={"model": model or settings.embed_model, "input": texts},
+        )
+        r.raise_for_status()
+        return r.json()["embeddings"]
+
     async def generate_vlm(
         self,
         prompt: str,
@@ -140,17 +149,22 @@ class OllamaClient:
         prompt: str,
         model: str | None = None,
         options: dict | None = None,
+        fmt: str | None = None,
     ) -> str:
         """Generate text without vision inputs (text-only LLM call)."""
-        r = await self._client.post(
-            f"{settings.ollama_url}/api/generate",
-            json={
-                "model": model or settings.vlm_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": options or {},
-            },
-        )
+        # num_predict=-1 means unlimited; callers can override via options.
+        # Without this, Ollama uses the model Modelfile default (often 128–512
+        # tokens) and will silently truncate structured JSON responses.
+        merged_options = {"num_predict": -1, **(options or {})}
+        payload: dict = {
+            "model": model or settings.vlm_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": merged_options,
+        }
+        if fmt:
+            payload["format"] = fmt
+        r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()["response"]
 
@@ -165,7 +179,7 @@ class OllamaClient:
         async with self._client.stream(
             "POST",
             f"{settings.ollama_url}/api/generate",
-            json={"model": model or settings.vlm_model, "prompt": prompt, "stream": True, "options": options or {}},
+            json={"model": model or settings.vlm_model, "prompt": prompt, "stream": True, "options": {"num_predict": -1, **(options or {})}},
             timeout=300.0,
         ) as resp:
             resp.raise_for_status()

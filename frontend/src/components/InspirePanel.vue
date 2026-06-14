@@ -50,6 +50,7 @@ const {
   inspireGroupedResults,
   blendWeights,
   outlierMode,
+  textSearchQuery,
   inspireResultSelection,
   toggleInspireResultSelection,
   isRunning,
@@ -73,6 +74,7 @@ const pipelineDefs = computed(() => ({
   blend:          [[t('inspire.pipeline.weightedImages'), 'source'], [t('inspire.pipeline.weightedAvgVec'), 'vec'], [t('inspire.pipeline.nearestSearch'), 'result']],
   outlier:        [[t('inspire.pipeline.refImage'), 'source'], [t('inspire.pipeline.vecNegate'), 'vec'], [t('inspire.pipeline.farthestSearch'), 'result']],
   grouped_search: [[t('inspire.pipeline.textQuery'), 'source'], [t('inspire.pipeline.vectorize'), 'vec'], [t('inspire.pipeline.groupByField'), 'result']],
+  text_search:    [[t('inspire.pipeline.textQuery'), 'source'], [t('inspire.pipeline.vectorize'), 'vec'], [t('inspire.pipeline.nearestSearch'), 'result']],
 }))
 const PIPELINE_CHIP_CLASS = {
   source: 'bg-gray-700/70 text-gray-300 border-gray-600/40',
@@ -84,6 +86,25 @@ const PIPELINE_CHIP_CLASS = {
   result: 'bg-indigo-900/60 text-indigo-300 border-indigo-700/50',
 }
 const pipelineSteps = computed(() => pipelineDefs.value[inspireTab.value] ?? [])
+
+const TABS = computed(() => [
+  { id: 'serendipity',   icon: '✨', label: t('inspire.tabs.serendipity'),   desc: t('inspire.tabs.serendipityDesc'),   badges: ['vec'],         producesResults: true,  noSlotsNeeded: false },
+  { id: 'arithmetic',    icon: '⚗️', label: t('inspire.tabs.arithmetic'),    desc: t('inspire.tabs.arithmeticDesc'),    badges: ['vec'],         producesResults: true,  noSlotsNeeded: false },
+  { id: 'morph',         icon: '🌊', label: t('inspire.tabs.morph'),         desc: t('inspire.tabs.morphDesc'),         badges: ['vec'],         producesResults: false, noSlotsNeeded: false },
+  { id: 'anomaly',       icon: '⚡', label: t('inspire.tabs.anomaly'),       desc: t('inspire.tabs.anomalyDesc'),       badges: ['WD14', 'LLM'], producesResults: true,  noSlotsNeeded: false },
+  { id: 'inversion',     icon: '🪞', label: t('inspire.tabs.inversion'),     desc: t('inspire.tabs.inversionDesc'),     badges: ['WD14', 'VLM'], producesResults: true,  noSlotsNeeded: false },
+  { id: 'discover',      icon: '🧭', label: t('inspire.tabs.discover'),      desc: t('inspire.tabs.discoverDesc'),      badges: ['vec'],         producesResults: false, noSlotsNeeded: false },
+  { id: 'grouped_search',icon: '🗂️', label: t('inspire.tabs.groupedSearch'), desc: t('inspire.tabs.groupedSearchDesc'), badges: ['vec'],         producesResults: false, noSlotsNeeded: true  },
+  { id: 'blend',         icon: '⚖️', label: t('inspire.tabs.blend'),         desc: t('inspire.tabs.blendDesc'),         badges: ['vec'],         producesResults: true,  noSlotsNeeded: false },
+  { id: 'outlier',       icon: '🌌', label: t('inspire.tabs.outlier'),       desc: t('inspire.tabs.outlierDesc'),       badges: ['vec'],         producesResults: true,  noSlotsNeeded: true  },
+  { id: 'text_search',   icon: '🔤', label: t('inspire.tabs.textSearch'),    desc: t('inspire.tabs.textSearchDesc'),    badges: ['vec'],         producesResults: true,  noSlotsNeeded: true  },
+])
+const activeTabDef = computed(() => TABS.value.find(tab => tab.id === inspireTab.value))
+const isQueryEmpty = computed(() => {
+  if (inspireTab.value === 'grouped_search') return !groupedSearchQuery.value.trim()
+  if (inspireTab.value === 'text_search') return !textSearchQuery.value.trim()
+  return false
+})
 
 const INVERSION_AXES = computed(() => [
   { id: 'visual',       icon: '👁',  label: t('inspire.axes.visual'),        desc: t('inspire.axes.visualDesc') },
@@ -359,6 +380,15 @@ async function runInspire() {
       })
       if (!r.ok) throw new Error((await r.json()).detail || `HTTP ${r.status}`)
       inspireResults.value = (await r.json()).results
+
+    } else if (inspireTab.value === 'text_search') {
+      if (!textSearchQuery.value.trim()) throw new Error('Enter search text')
+      const r = await fetch('/api/inspire/text-search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: textSearchQuery.value, n_results: 12 }),
+      })
+      if (!r.ok) throw new Error((await r.json()).detail || `HTTP ${r.status}`)
+      inspireResults.value = (await r.json()).results
     }
   } catch (e) {
     inspireError.value = e.message
@@ -367,9 +397,7 @@ async function runInspire() {
   }
 }
 
-const isResultSelectionTab = computed(() =>
-  ['serendipity', 'anomaly', 'inversion', 'blend', 'outlier', 'arithmetic'].includes(inspireTab.value)
-)
+const isResultSelectionTab = computed(() => activeTabDef.value?.producesResults ?? false)
 
 const isBrainstormTrackingTab = computed(() =>
   ['morph', 'discover'].includes(inspireTab.value)
@@ -398,7 +426,7 @@ const brainstormBasis = computed(() => {
       color: 'blue',
     }
   }
-  if (['serendipity', 'anomaly', 'inversion', 'blend', 'outlier', 'arithmetic', 'discover'].includes(tab) && hasResults) {
+  if ((isResultSelectionTab.value || tab === 'discover') && hasResults) {
     return {
       sha256s: [...new Set([
         ...inspireSlots.value,
@@ -682,17 +710,7 @@ function simpleMarkdown(text) {
               <div>
                 <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2.5">{{ $t('inspire.searchMode') }}</p>
                 <div class="space-y-1.5">
-                  <button v-for="tab in [
-                    { id: 'serendipity',   icon: '✨', label: $t('inspire.tabs.serendipity'),   desc: $t('inspire.tabs.serendipityDesc'),   badges: ['vec'] },
-                    { id: 'arithmetic',    icon: '⚗️', label: $t('inspire.tabs.arithmetic'),    desc: $t('inspire.tabs.arithmeticDesc'),    badges: ['vec'] },
-                    { id: 'morph',         icon: '🌊', label: $t('inspire.tabs.morph'),         desc: $t('inspire.tabs.morphDesc'),         badges: ['vec'] },
-                    { id: 'anomaly',       icon: '⚡', label: $t('inspire.tabs.anomaly'),       desc: $t('inspire.tabs.anomalyDesc'),       badges: ['WD14', 'LLM'] },
-                    { id: 'inversion',     icon: '🪞', label: $t('inspire.tabs.inversion'),     desc: $t('inspire.tabs.inversionDesc'),     badges: ['WD14', 'VLM'] },
-                    { id: 'discover',      icon: '🧭', label: $t('inspire.tabs.discover'),      desc: $t('inspire.tabs.discoverDesc'),      badges: ['vec'] },
-                    { id: 'grouped_search',icon: '🗂️', label: $t('inspire.tabs.groupedSearch'), desc: $t('inspire.tabs.groupedSearchDesc'), badges: ['vec'] },
-                    { id: 'blend',         icon: '⚖️', label: $t('inspire.tabs.blend'),         desc: $t('inspire.tabs.blendDesc'),         badges: ['vec'] },
-                    { id: 'outlier',       icon: '🌌', label: $t('inspire.tabs.outlier'),       desc: $t('inspire.tabs.outlierDesc'),       badges: ['vec'] },
-                  ]" :key="tab.id"
+                  <button v-for="tab in TABS" :key="tab.id"
                     @click="inspireTab = tab.id; inspireResults = []; inspireMorphTimeline = []; inspireGroupedResults = []; inspireError = ''"
                     class="w-full text-left px-3.5 py-3 rounded-xl border transition-all duration-150 cursor-pointer"
                     :class="inspireTab === tab.id
@@ -856,14 +874,22 @@ function simpleMarkdown(text) {
                 </p>
               </div>
 
+              <!-- Text search input -->
+              <div v-if="inspireTab === 'text_search'" class="space-y-2">
+                <p class="text-xs font-semibold text-indigo-400 uppercase tracking-wide">{{ $t('inspire.textSearchLabel') }}</p>
+                <textarea v-model="textSearchQuery" rows="3"
+                  :placeholder="$t('inspire.textSearchPlaceholder')"
+                  class="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/60 transition-colors resize-none" />
+              </div>
+
               <!-- Execute button -->
               <button @click="runInspire"
                 :disabled="inspireLoading
-                  || (inspireTab !== 'outlier' && inspireTab !== 'grouped_search' && inspireSlots.length === 0)
+                  || (!activeTabDef?.noSlotsNeeded && inspireSlots.length === 0)
                   || (inspireTab === 'outlier' && outlierMode === 'antipode' && inspireSlots.length === 0)
                   || (inspireTab === 'inversion' && inversionChangeTargets.length === 0)
                   || (inspireTab === 'discover' && inspireSlots.length < 2)
-                  || (inspireTab === 'grouped_search' && !groupedSearchQuery.trim())"
+                  || isQueryEmpty"
                 class="w-full py-3 rounded-xl text-sm font-semibold transition-all duration-150 disabled:opacity-40 flex items-center justify-center gap-2"
                 :class="inspireLoading
                   ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-700/40 cursor-wait'
@@ -1468,7 +1494,7 @@ function simpleMarkdown(text) {
                     <!-- Icon + title -->
                     <div class="flex items-center gap-3">
                       <div class="w-12 h-12 rounded-2xl bg-gray-800/80 border border-gray-700/50 flex items-center justify-center flex-shrink-0 text-2xl">
-                        {{ inspireTab === 'serendipity' ? '✨' : inspireTab === 'arithmetic' ? '⚗️' : inspireTab === 'morph' ? '🌊' : inspireTab === 'inversion' ? '🪞' : inspireTab === 'blend' ? '⚖️' : inspireTab === 'outlier' ? '🌌' : inspireTab === 'discover' ? '🧭' : inspireTab === 'grouped_search' ? '🗂️' : '⚡' }}
+                        {{ activeTabDef?.icon ?? '⚡' }}
                       </div>
                       <div>
                         <p class="text-sm font-semibold text-gray-300">{{ $t('inspire.emptyTitle') }}</p>

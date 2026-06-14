@@ -1061,3 +1061,510 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "seed": seed,
         },
     )
+
+
+# ── Invoke lane runners ────────────────────────────────────────────────────────
+
+async def run_invoke_axis_decompose(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    spooler,
+    session_id: str,
+    user_intent: str,
+    emoji_codes: list,
+    mood_sliders: dict,
+    color_hex: list,
+    person_gender: str = "",
+    person_count: str = "",
+    camera_shot: str = "",
+    camera_angle: str = "",
+    session_manager,
+) -> dict:
+    """PROMPT lane. Decompose user intent into structured axes."""
+    from ..invoke.axis_decomposer import decompose_axes
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    from ..invoke.vocab_bank import get_character_danbooru_hints
+    from ..invoke.axis_decomposer import _EMOJI_MEANINGS
+
+    person_present = bool(person_gender or person_count)
+    # Build a slogan approximation for hint search when user_intent is empty
+    hint_query = user_intent or " ".join(
+        _EMOJI_MEANINGS.get(e, e) for e in (emoji_codes or [])
+    )
+    try:
+        character_hints = await get_character_danbooru_hints(
+            db, ollama, slogan=hint_query, person_present=person_present
+        )
+    except Exception as _e:
+        logger.debug("[invoke] character_hints failed: %s", _e)
+        character_hints = {}
+
+    axes = await decompose_axes(
+        ollama,
+        user_intent=user_intent,
+        emoji_codes=emoji_codes,
+        mood_sliders=mood_sliders,
+        color_hex=color_hex,
+        person_gender=person_gender,
+        person_count=person_count,
+        camera_shot=camera_shot,
+        camera_angle=camera_angle,
+        character_hints=character_hints,
+    )
+    axes['_user_intent'] = user_intent
+
+    reporter.update(1.0, "Axes ready")
+    await session_manager.on_axis_done(session_id, axes)
+    return {"axes": axes}
+
+
+async def run_invoke_spirit_compose(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    session_id: str,
+    spirit_name: str,
+    axes: dict,
+    vocab_hints: dict,
+    locale: str = "en",
+    session_manager,
+) -> dict:
+    """PROMPT lane. Generate prompt for one Spirit via Ollama."""
+    import json as _json
+    import re as _re
+
+    from ..invoke.spirit_loader import load_spirit
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    spirit = load_spirit(spirit_name)
+    sys_prompt = spirit["system_prompt"]
+
+    # Localize monologue: replace the English-only schema placeholder with a Japanese instruction.
+    # A single phrase swap ("in English" → "in Japanese") is too subtle for the LLM to follow
+    # reliably, so we replace the full placeholder and add an explicit reminder in the user msg.
+    if locale == "ja":
+        sys_prompt = _re.sub(
+            r'"internal_monologue": "<[^>]*in English[^>]*>"',
+            '"internal_monologue": "<このスピリットの内なる声を日本語で1行>"',
+            sys_prompt,
+        )
+
+    # Build user message
+    style_str = ", ".join(axes.get("style", []))
+    user_msg_parts = [
+        f"slogan: {axes.get('_slogan', '')}",
+        f"user_intent: {axes.get('_user_intent', '')}",
+        f"axes:",
+        f"  subject: {axes.get('subject', '')}",
+        f"  character_detail: {axes.get('character_detail', '')}",
+        f"  action: {axes.get('action', '')}",
+        f"  scene: {axes.get('scene', '')}",
+        f"  mood: {axes.get('mood', '')}",
+        f"  lighting: {axes.get('lighting', '')}",
+        f"  composition: {axes.get('composition', '')}",
+        f"  style: [{style_str}]",
+        f"  palette: {axes.get('palette', '')}",
+        f"  accessories: {axes.get('accessories', '')}",
+    ]
+    if spirit.get("needs_vocab_hint"):
+        stranger_tags = ", ".join(vocab_hints.get("stranger", []))
+        lunatic_tags = ", ".join(vocab_hints.get("lunatic", []))
+        if spirit_name == "stranger" and stranger_tags:
+            user_msg_parts.append(f"guest_tags: [{stranger_tags}]")
+        elif spirit_name == "lunatic" and lunatic_tags:
+            user_msg_parts.append(f"wild_tags: [{lunatic_tags}]")
+
+    user_msg_parts.append(
+        "Your danbooru_tags MUST cover all axes: subject+action, scene+environment, "
+        "mood+atmosphere, lighting, palette, and style."
+    )
+    if locale == "ja":
+        user_msg_parts.append(
+            'IMPORTANT: Write the "internal_monologue" value in Japanese (日本語で書くこと). This is required.'
+        )
+
+    full_prompt = f"{sys_prompt}\n\n---\n\n" + "\n".join(user_msg_parts)
+
+    session = session_manager.get_session(session_id)
+    ollama = session.ollama if session else None
+    if not ollama:
+        await session_manager.on_spirit_error(session_id, spirit_name, "Session expired")
+        return {}
+
+    logger.debug("[invoke] spirit_compose start: %s", spirit_name)
+    try:
+        raw = await ollama.generate_text(full_prompt, fmt="json")
+    except Exception as e:
+        logger.warning("[invoke] spirit_compose ollama failed (%s): %s", spirit_name, e)
+        await session_manager.on_spirit_error(session_id, spirit_name, f"LLM error: {e}")
+        return {}
+
+    raw = _re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    raw = _re.sub(r"\s*```$", "", raw.strip())
+
+    try:
+        result = _json.loads(raw)
+    except Exception as e:
+        logger.warning("[invoke] spirit_compose JSON parse failed (%s): %s | raw=%r", spirit_name, e, raw[:200])
+        result = {
+            "spirit": spirit_name,
+            "natural_language": axes.get("subject", "a figure in a mysterious scene"),
+            "danbooru_tags": ", ".join(axes.get("style", ["anime"])),
+            "negative_supplement": "",
+            "internal_monologue": "…",
+            "inverted_axis": None,
+            "wild_tags_used": [],
+        }
+
+    # ── Content safety check on LLM output (VLM-delegated) ───────────────────
+    from ..invoke.content_guard import check_spirit_output, BLOCK_MESSAGE
+    if await check_spirit_output(result, ollama):
+        logger.warning("[invoke] content_guard blocked spirit output: %s", spirit_name)
+        await session_manager.on_spirit_error(session_id, spirit_name, BLOCK_MESSAGE)
+        return {}
+
+    logger.debug("[invoke] spirit_compose done: %s → nl=%r", spirit_name, str(result.get("natural_language", ""))[:60])
+    reporter.update(1.0, f"{spirit_name} composed")
+
+    cancel.raise_if_set()
+    await session_manager.on_spirit_composed(session_id, spirit_name, result)
+    return result
+
+
+async def _save_and_register_invoke_image(img_bytes: bytes, original_name: str, db) -> str | None:
+    """Save an invoke-generated image to generated_images_dir/invoke/ (watcher skips auto-pipeline there)."""
+    import hashlib as _hl
+    from datetime import datetime as _dt
+    from pathlib import Path as _Path
+
+    from ..config import settings as _settings
+    from ..scanner.scanner import register_image as _register_image
+
+    sha256 = _hl.sha256(img_bytes).hexdigest()
+    gen_dir = _settings.generated_images_dir / "invoke"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = _Path(original_name).suffix or ".png"
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"invoke_{ts}_{sha256[:8]}{suffix}"
+    path = gen_dir / filename
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, path.write_bytes, img_bytes)
+
+    try:
+        await _register_image(path, db)
+        logger.debug("[invoke] image registered: %s", filename)
+        return sha256
+    except Exception as exc:
+        logger.error("[invoke] register_image failed: %s", exc)
+        return None
+
+
+async def run_invoke_image_generate(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    session_id: str,
+    spirit_name: str,
+    prompt_result: dict,
+    workflow_name: str,
+    seed: int | None,
+    session_manager,
+) -> dict:
+    """GEN lane. Generate image for one Spirit via ComfyUI."""
+    import random as _random
+
+    reporter.indeterminate()
+
+    session = session_manager.get_session(session_id)
+    if not session:
+        await session_manager.on_spirit_error(session_id, spirit_name, "Session expired")
+        return {}
+    comfy = session.comfy
+    db = session.db
+
+    if not workflow_name:
+        logger.warning("[invoke] image_generate: no workflow configured for %s", spirit_name)
+        await session_manager.on_spirit_error(session_id, spirit_name, "No workflow configured")
+        return {}
+
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    prompt_mode = getattr(session, "prompt_mode", "danbooru+natural")
+    person_tags = getattr(session, "person_tags", "")
+
+    nl      = (prompt_result.get("natural_language") or "").strip()
+    db_tags = (prompt_result.get("danbooru_tags")    or "").strip()
+
+    # Treat very short natural_language as absent (Spirit fallback produces subject string only)
+    nl_usable = nl if len(nl) >= 30 else ""
+
+    if prompt_mode == "natural":
+        body_str = nl_usable or db_tags
+    elif prompt_mode == "danbooru":
+        body_str = db_tags
+    else:  # danbooru+natural (default)
+        body_str = (nl_usable + "\n" + db_tags).strip() if nl_usable else db_tags
+
+    positive = (person_tags + "\n" + body_str).strip() if person_tags else body_str
+    spirit_negative = (prompt_result.get("negative_supplement") or "").strip()
+    pro_negative = getattr(session, "pro_negative", "").strip()
+    negative = ", ".join(filter(None, [pro_negative, spirit_negative]))
+
+    logger.debug("[invoke] image_generate start: %s seed=%d wf=%s", spirit_name, seed, workflow_name)
+
+    try:
+        wf = comfy.load_workflow(workflow_name)
+        patched = comfy.patch_workflow(wf, positive.strip(), negative.strip(), "", "", 1, seed=seed)
+        prompt_id = await comfy.queue_prompt(patched)
+    except Exception as e:
+        logger.warning("[invoke] image_generate ComfyUI setup failed (%s): %s", spirit_name, e)
+        await session_manager.on_spirit_error(session_id, spirit_name, f"ComfyUI setup error: {e}")
+        return {}
+
+    reporter.update(0.0, "Waiting in ComfyUI queue...")
+
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception:
+                pass
+        try:
+            await comfy.interrupt()
+        except Exception:
+            pass
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    sha256: str | None = None
+
+    try:
+        async for event in comfy.stream_progress(prompt_id):
+            cancel.raise_if_set()
+            queued = False
+
+            if event["type"] == "comfy_progress":
+                v = event.get("value", 0)
+                m = event.get("max", 1)
+                reporter.update(v / max(m, 1), f"Step {v}/{m}")
+
+            elif event["type"] == "comfy_output":
+                for img_ref in event.get("images", []):
+                    cancel.raise_if_set()
+                    try:
+                        img_bytes = await comfy.fetch_image(
+                            img_ref["filename"],
+                            img_ref.get("subfolder", ""),
+                            img_ref.get("type", "output"),
+                        )
+                        saved = await _save_and_register_invoke_image(img_bytes, img_ref["filename"], db)
+                        if saved and not sha256:
+                            sha256 = saved
+                    except Exception as exc:
+                        logger.error("[invoke] image fetch/save error (%s): %s", spirit_name, exc)
+    except Exception as e:
+        logger.warning("[invoke] image_generate stream failed (%s): %s", spirit_name, e)
+        if not sha256:
+            await session_manager.on_spirit_error(session_id, spirit_name, f"Generation failed: {e}")
+            return {}
+
+    if sha256:
+        logger.debug("[invoke] image_generate done: %s sha256=%s", spirit_name, sha256[:12])
+        reporter.update(1.0, f"{spirit_name} image ready")
+        await session_manager.on_image_done(session_id, spirit_name, sha256)
+    else:
+        await session_manager.on_spirit_error(session_id, spirit_name, "Image generation produced no output")
+
+    return {"sha256": sha256}
+
+
+async def run_invoke_alignment_score(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    sha256: str,
+    session_id: str,
+    spirit_name: str,
+    session_manager,
+    db,
+    ollama,
+) -> dict:
+    """EVAL lane. Alignment-score one Invoke-generated image, then mark spirit done."""
+    from ..alignment.evaluator import AlignmentEvaluator
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    evaluator = AlignmentEvaluator(db, ollama)
+    score: float | None = None
+    try:
+        result = await evaluator.evaluate_one(sha256)
+        score = result.score if result.status == "done" else None
+    except Exception as e:
+        logger.warning("invoke alignment failed for %s: %s", sha256, e)
+
+    reporter.update(1.0, f"score={score:.2f}" if score is not None else "scored")
+    await session_manager.on_spirit_done(session_id, spirit_name, score)
+    return {"score": score}
+
+
+async def run_invoke_daily_oracle(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    comfy,
+    spooler,
+    session_manager,
+    daily_oracle_date: str,
+    workflow_name: str = "",
+    topic: str = "",
+) -> dict:
+    """SYNC lane (low priority). Generate today's 5 oracle images."""
+    from ..invoke.axis_decomposer import decompose_axes
+    from ..invoke.session_manager import SPIRIT_ORDER
+    from ..invoke.vocab_bank import get_recent_adopted_tags
+    from ..spooler.models import JobLane
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    context_hint = None
+    if not topic:
+        try:
+            recent = await get_recent_adopted_tags(db, days=7)
+            if recent:
+                top = sorted(recent.items(), key=lambda x: -x[1])[:5]
+                top_tags = ", ".join(t for t, _ in top)
+                context_hint = (
+                    f"The user has recently gravitated toward: {top_tags}. "
+                    f"Today, offer a striking counterpoint to this established pattern — "
+                    f"something they have not seen before."
+                )
+        except Exception as e:
+            logger.warning("daily oracle context hint failed: %s", e)
+
+    axes = await decompose_axes(ollama, user_intent=topic, context_hint=context_hint)
+    axes["_daily_oracle_date"] = daily_oracle_date
+
+    reporter.update(0.1, "Axes ready — launching oracle spirits")
+    cancel.raise_if_set()
+
+    if not workflow_name:
+        reporter.update(1.0, "Skipped: no oracle workflow configured")
+        return {"skipped": True, "reason": "no workflow"}
+
+    session = session_manager.create_session(
+        user_intent="[daily oracle]",
+        input_mode="daily_oracle",
+        workflow_name=workflow_name,
+        enabled_spirits=SPIRIT_ORDER,
+        db=db,
+        ollama=ollama,
+        comfy=comfy,
+        spooler=spooler,
+    )
+
+    await session_manager.on_axis_done(session.session_id, axes)
+    reporter.update(0.15, f"Oracle session {session.session_id} launched — awaiting spirits")
+
+    # Wait until all spirits finish (queue receives None on session_complete / all errors)
+    await session.event_queue.get()
+
+    reporter.update(1.0, "Daily oracle complete")
+    return {"session_id": session.session_id, "axes": axes}
+
+
+# ── SYNC lane: WD14 vocab import ───────────────────────────────────────────────
+
+async def run_import_wd14_vocab(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+) -> dict:
+    """Parse selected_tags.csv from the WD14 model directory, embed each tag with Ollama,
+    and upsert into the wd14_vocab Qdrant collection for semantic search.
+    """
+    import csv
+    from ..config import settings
+    from ..invoke.vocab_bank import invalidate_vocab_cache
+
+    csv_path = Path(settings.wd14_model_dir) / "selected_tags.csv"
+    if not csv_path.exists():
+        raise FileNotFoundError(f"selected_tags.csv not found at {csv_path}")
+
+    reporter.indeterminate()
+
+    # Read CSV — category 0 = General tags only
+    rows: list[dict] = []
+    max_count = 1
+    with open(csv_path, encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if int(row["category"]) != 0:
+                continue
+            count = int(row["count"])
+            rows.append({"id": int(row["tag_id"]), "name": row["name"], "count": count})
+            if count > max_count:
+                max_count = count
+
+    total = len(rows)
+    logger.info("[import_wd14_vocab] %d general tags to embed", total)
+
+    # Embed in batches of 256
+    BATCH = 256
+    done = 0
+    points: list[dict] = []
+
+    for i in range(0, total, BATCH):
+        cancel.raise_if_set()
+        batch = rows[i:i + BATCH]
+        names = [r["name"] for r in batch]
+        try:
+            vectors = await ollama.embed_batch(names)
+        except Exception as e:
+            logger.warning("[import_wd14_vocab] embed_batch failed at offset %d: %s", i, e)
+            # Retry individually to avoid dropping the whole batch
+            vectors = []
+            for name in names:
+                try:
+                    vectors.append(await ollama.embed(name))
+                except Exception:
+                    vectors.append([0.0] * len(vectors[0]) if vectors else [0.0])
+
+        for row, vec in zip(batch, vectors):
+            points.append({
+                "id":        row["id"],
+                "vector":    vec,
+                "name":      row["name"],
+                "frequency": round(row["count"] / max_count, 6),
+                "category":  0,
+                "count":     row["count"],
+            })
+
+        done += len(batch)
+        reporter.update(done / total, f"埋め込み中 {done}/{total}")
+
+    reporter.update(0.95, "Qdrantに登録中...")
+    await db.upsert_wd14_vocab(points)
+
+    invalidate_vocab_cache()
+
+    reporter.update(1.0, f"完了: {len(points)} タグを登録")
+    logger.info("[import_wd14_vocab] done: %d tags", len(points))
+    return {"imported": len(points)}

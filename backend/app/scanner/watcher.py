@@ -109,13 +109,17 @@ class ImageDirectoryWatcher:
             try:
                 if path.is_relative_to(self._generated_dir):
                     if event_type == "created":
+                        # Invoke-generated images are saved under generated_dir/invoke/
+                        # and are managed by the invoke pipeline (wd14 + alignment jobs).
+                        # Skip ai_pipeline_auto for these to avoid redundant scans on the main screen.
+                        is_invoke = path.is_relative_to(self._generated_dir / "invoke")
+
                         sha256 = await register_image(path, self._db)
                         if not sha256:
-                            # Registration by _save_and_register_comfy_image is in progress → wait for completion
                             await wait_for_registration(path)
                             logger.debug("waited for in-flight registration: %s", path.name)
-                        logger.info("Auto-registered: %s", path.name)
-                        if self._auto_ai_pipeline:
+                        logger.info("Auto-registered%s: %s", " (invoke-skip-pipeline)" if is_invoke else "", path.name)
+                        if self._auto_ai_pipeline and not is_invoke:
                             self._spooler.submit(
                                 JobLane.EMBEDDING,
                                 "ai_pipeline_auto",

@@ -17,6 +17,7 @@ IMAGES_COLLECTION = "images"
 CONFIG_COLLECTION = "app_config"
 CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
+WD14_VOCAB_COLLECTION = "wd14_vocab"
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -321,6 +322,8 @@ class QdrantDBClient:
             logger.info("Created collection: %s", ALIGNMENT_COLLECTION)
         await self._create_alignment_indexes()
 
+        await self._ensure_wd14_vocab_collection()
+
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
 
@@ -621,6 +624,7 @@ class QdrantDBClient:
         self,
         *,
         tags_include: list[str] | None = None,
+        tags_exclude: list[str] | None = None,
         tag_logic: str = "and",
         keyword: str | None = None,
         models: list[str] | None = None,
@@ -630,12 +634,15 @@ class QdrantDBClient:
     ) -> list[dict]:
         """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions."""
         must: list = []
+        must_not: list = []
         if tags_include:
             if tag_logic == "or":
                 must.append(qm.FieldCondition(key="wd14_tags", match=qm.MatchAny(any=tags_include)))
             else:
                 for t in tags_include:
                     must.append(qm.FieldCondition(key="wd14_tags", match=qm.MatchValue(value=t)))
+        if tags_exclude:
+            must_not.append(qm.FieldCondition(key="wd14_tags", match=qm.MatchAny(any=tags_exclude)))
         if keyword:
             must.append(qm.FieldCondition(key="positive_prompt", match=qm.MatchText(text=keyword)))
         if models:
@@ -647,12 +654,12 @@ class QdrantDBClient:
 
         if sha256_ids is not None:
             ids_filter = qm.HasIdCondition(has_id=[sha256_to_point_id(s) for s in sha256_ids])
-            if must:
-                scroll_filter = qm.Filter(must=must + [ids_filter])
-            else:
-                scroll_filter = qm.Filter(must=[ids_filter])
+            scroll_filter = qm.Filter(
+                must=must + [ids_filter],
+                must_not=must_not or None,
+            )
         else:
-            scroll_filter = qm.Filter(must=must) if must else None
+            scroll_filter = qm.Filter(must=must, must_not=must_not or None) if (must or must_not) else None
 
         all_docs: list[dict] = []
         offset = None
@@ -1860,6 +1867,148 @@ class QdrantDBClient:
                 points=qm.PointIdsList(points=[CONFIG_POINT_ID]),
             )
 
+    # ── Invoke / Genesis ──────────────────────────────────────────────────────────
+
+    async def set_genesis_payload(self, sha256: str, genesis: dict) -> None:
+        """Write or overwrite the genesis field on an image payload."""
+        await self.set_payload(sha256, {"genesis": genesis})
+
+    async def get_invoke_stats(self) -> dict:
+        cfg = await self.get_config()
+        return cfg.get("invoke_stats_v1") or {}
+
+    async def update_invoke_stats(self, updates: dict) -> None:
+        cfg = await self.get_config()
+        stats: dict = cfg.get("invoke_stats_v1") or {}
+        stats.update(updates)
+        await self.put_config({"invoke_stats_v1": stats})
+
+    async def get_daily_oracle(self, date_str: str) -> list[dict]:
+        """Return images generated for the given daily oracle date."""
+        results: list[dict] = []
+        offset = None
+        try:
+            while True:
+                points, next_offset = await self._qc.scroll(
+                    collection_name=IMAGES_COLLECTION,
+                    scroll_filter=qm.Filter(must=[
+                        qm.FieldCondition(
+                            key="genesis.input_mode",
+                            match=qm.MatchValue(value="daily_oracle"),
+                        ),
+                        qm.FieldCondition(
+                            key="genesis.daily_oracle_date",
+                            match=qm.MatchValue(value=date_str),
+                        ),
+                    ]),
+                    limit=10,
+                    offset=offset,
+                    with_payload=qm.PayloadSelectorInclude(
+                        include=["sha256", "genesis", "wd14_tags"]
+                    ),
+                    with_vectors=False,
+                )
+                for p in points:
+                    pl = p.payload or {}
+                    if pl.get("sha256"):
+                        results.append(pl)
+                if next_offset is None:
+                    break
+                offset = next_offset
+        except Exception as e:
+            logger.warning("get_daily_oracle failed: %s", e)
+        return results
+
+    async def delete_daily_oracle(self, date_str: str) -> int:
+        """Delete all images generated for the given daily oracle date. Returns deleted count."""
+        records = await self.get_daily_oracle(date_str)
+        if not records:
+            return 0
+        ids = [sha256_to_point_id(r["sha256"]) for r in records if r.get("sha256")]
+        if ids:
+            await self._qc.delete(
+                collection_name=IMAGES_COLLECTION,
+                points_selector=qm.PointIdsList(points=ids),
+            )
+        return len(ids)
+
+    async def scroll_genesis_images(
+        self,
+        adopted_only: bool = False,
+        limit: int = 200,
+    ) -> list[dict]:
+        """Return images that have a genesis field (Invoke-generated)."""
+        results: list[dict] = []
+        offset = None
+        try:
+            filt = qm.Filter(must_not=[
+                qm.IsNullCondition(is_null=qm.PayloadField(key="genesis"))
+            ])
+            if adopted_only:
+                filt = qm.Filter(
+                    must=[
+                        qm.FieldCondition(
+                            key="genesis.adopted_at_genesis",
+                            match=qm.MatchValue(value=True),
+                        )
+                    ]
+                )
+            while len(results) < limit:
+                points, next_offset = await self._qc.scroll(
+                    collection_name=IMAGES_COLLECTION,
+                    scroll_filter=filt,
+                    limit=min(200, limit - len(results)),
+                    offset=offset,
+                    with_payload=qm.PayloadSelectorInclude(
+                        include=["sha256", "genesis", "mtime"]
+                    ),
+                    with_vectors=False,
+                )
+                for p in points:
+                    pl = p.payload or {}
+                    if pl.get("sha256"):
+                        results.append(pl)
+                if next_offset is None:
+                    break
+                offset = next_offset
+        except Exception as e:
+            logger.warning("scroll_genesis_images failed: %s", e)
+        return results
+
+    async def get_recent_adopted_tags_db(self, days: int = 7, limit: int = 200) -> dict[str, int]:
+        """Return WD14 tag frequency from images adopted in the last N days."""
+        import time as _time
+        cutoff = _time.time() - days * 86400
+        freq: dict[str, int] = {}
+        offset = None
+        try:
+            while True:
+                points, next_offset = await self._qc.scroll(
+                    collection_name=IMAGES_COLLECTION,
+                    scroll_filter=qm.Filter(must=[
+                        qm.FieldCondition(
+                            key="genesis.adopted_at_genesis",
+                            match=qm.MatchValue(value=True),
+                        ),
+                        qm.FieldCondition(key="mtime", range=qm.Range(gte=cutoff)),
+                    ]),
+                    limit=500,
+                    offset=offset,
+                    with_payload=qm.PayloadSelectorInclude(include=["wd14_tags"]),
+                    with_vectors=False,
+                )
+                for p in points:
+                    for t in (p.payload or {}).get("wd14_tags") or []:
+                        freq[t] = freq.get(t, 0) + 1
+                        if len(freq) >= limit:
+                            return freq
+                if next_offset is None:
+                    break
+                offset = next_offset
+        except Exception as e:
+            logger.warning("get_recent_adopted_tags_db failed: %s", e)
+        return freq
+
     # ── Alignment ─────────────────────────────────────────────────────────────────
 
     async def _create_alignment_indexes(self) -> None:
@@ -1962,6 +2111,103 @@ class QdrantDBClient:
             offset = next_offset
         pairs.sort(key=lambda x: -x[0])
         return [sha256 for _, sha256 in pairs]
+
+    # ── WD14 Vocab (wd14_vocab collection) ────────────────────────────────────────
+
+    async def _ensure_wd14_vocab_collection(self) -> None:
+        if await self._qc.collection_exists(WD14_VOCAB_COLLECTION):
+            logger.info("Collection exists: %s", WD14_VOCAB_COLLECTION)
+            return
+        await self._qc.create_collection(
+            collection_name=WD14_VOCAB_COLLECTION,
+            vectors_config=qm.VectorParams(
+                size=settings.embed_dim,
+                distance=qm.Distance.COSINE,
+                quantization_config=qm.ScalarQuantization(
+                    scalar=qm.ScalarQuantizationConfig(
+                        type=qm.ScalarType.INT8,
+                        quantile=0.99,
+                        always_ram=True,
+                    )
+                ),
+            ),
+            on_disk_payload=True,
+        )
+        for field, schema in [
+            ("name",      qm.PayloadSchemaType.KEYWORD),
+            ("category",  qm.PayloadSchemaType.INTEGER),
+            ("frequency", qm.PayloadSchemaType.FLOAT),
+        ]:
+            await self._qc.create_payload_index(
+                collection_name=WD14_VOCAB_COLLECTION,
+                field_name=field,
+                field_schema=schema,
+            )
+        logger.info("Created collection: %s (embed_dim=%d)", WD14_VOCAB_COLLECTION, settings.embed_dim)
+
+    async def count_wd14_vocab(self) -> int:
+        try:
+            result = await self._qc.count(WD14_VOCAB_COLLECTION)
+            return result.count
+        except Exception:
+            return 0
+
+    async def upsert_wd14_vocab(self, points: list[dict]) -> None:
+        """Batch upsert WD14 vocab points. Each dict: {id, vector, name, frequency, category, count}."""
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i + batch_size]
+            qdrant_points = [
+                qm.PointStruct(
+                    id=p["id"],
+                    vector=p["vector"],
+                    payload={
+                        "name":      p["name"],
+                        "frequency": p["frequency"],
+                        "category":  p["category"],
+                        "count":     p["count"],
+                    },
+                )
+                for p in batch
+            ]
+            await self._qc.upsert(collection_name=WD14_VOCAB_COLLECTION, points=qdrant_points)
+
+    async def search_wd14_vocab(
+        self,
+        query_vec: list[float],
+        min_freq: float = 0.0,
+        max_freq: float = 1.0,
+        category: int = 0,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Semantic search in wd14_vocab with frequency range filter.
+
+        Returns list of {name, frequency, score}.
+        """
+        filt = qm.Filter(must=[
+            qm.FieldCondition(key="category", match=qm.MatchValue(value=category)),
+            qm.FieldCondition(key="frequency", range=qm.Range(gte=min_freq, lte=max_freq)),
+        ])
+        try:
+            result = await self._qc.query_points(
+                collection_name=WD14_VOCAB_COLLECTION,
+                query=query_vec,
+                query_filter=filt,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return [
+                {
+                    "name":      r.payload["name"],
+                    "frequency": r.payload["frequency"],
+                    "score":     round(r.score, 4),
+                }
+                for r in result.points
+            ]
+        except Exception as e:
+            logger.warning("search_wd14_vocab failed: %s", e)
+            return []
 
     async def get_aligned_sha256s(self, min_score: float) -> set[str]:
         """Return image_ids whose alignment score >= min_score."""

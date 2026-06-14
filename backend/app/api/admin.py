@@ -37,6 +37,16 @@ class ConfigBody(BaseModel):
     # Processing parallelism
     alignment_concurrency: Annotated[int, Field(ge=1, le=8)] | None = None
     pipeline_auto_continue: bool | None = None
+    # Daily Oracle
+    invoke_daily_oracle_enabled: bool | None = None
+    invoke_daily_oracle_workflow: str | None = None
+    invoke_daily_oracle_retain_days: Annotated[int, Field(ge=1, le=365)] | None = None
+    invoke_daily_oracle_time: str | None = None
+    invoke_daily_oracle_timezone: str | None = None
+    invoke_daily_oracle_topic: str | None = None
+    invoke_daily_oracle_min_free_gb: float | None = None
+    disk_caution_pct: Annotated[int, Field(ge=1, le=99)] | None = None
+    disk_fault_pct: Annotated[int, Field(ge=1, le=99)] | None = None
 
 
 @router.get("/config")
@@ -65,12 +75,20 @@ async def update_config(body: ConfigBody, request: Request):
     await db.put_config(existing)
     invalidate_cache()
 
+    spooler = request.app.state.spooler
+
     # If pause settings changed, apply them immediately to the running spooler
     if "auto_pause_on_generation" in updates or "auto_pause_lanes" in updates:
-        spooler = request.app.state.spooler
         spooler.update_pause_settings(
             auto_pause_on_priority=existing.get("auto_pause_on_generation", True),
             auto_pause_target_lanes=existing.get("auto_pause_lanes", ["embed", "eval"]),
+        )
+
+    # If disk thresholds changed, push to spooler immediately
+    if "disk_caution_pct" in updates or "disk_fault_pct" in updates:
+        spooler.set_disk_thresholds(
+            existing.get("disk_caution_pct", 75),
+            existing.get("disk_fault_pct", 90),
         )
 
     cfg = await get_runtime_config(db)
@@ -368,3 +386,42 @@ async def cleanup_orphan_alignments(request: Request):
     db = request.app.state.db
     removed = await db.cleanup_orphan_alignments()
     return {"removed": removed}
+
+
+# ── Invoke Vocab (WD14 → Qdrant) ─────────────────────────────────────────────
+
+@router.get("/invoke/vocab-status")
+async def invoke_vocab_status(request: Request):
+    db = request.app.state.db
+    count = await db.count_wd14_vocab()
+    return {"imported": count > 0, "tag_count": count}
+
+
+@router.delete("/invoke/daily-oracle")
+async def delete_daily_oracle(request: Request, date: str | None = None):
+    """Delete daily oracle images for a given date (defaults to today in configured TZ)."""
+    from ..api.invoke import _oracle_date_str
+    from ..runtime_config import get_runtime_config
+    db = request.app.state.db
+    cfg = await get_runtime_config(db)
+    target_date = date or _oracle_date_str(cfg)
+    deleted = await db.delete_daily_oracle(target_date)
+    return {"deleted": deleted, "date": target_date}
+
+
+@router.post("/invoke/import-wd14-vocab")
+async def invoke_import_wd14_vocab(request: Request):
+    """Parse selected_tags.csv from wd14_model_dir, embed with Ollama, upsert to Qdrant."""
+    from ..jobs.runners import run_import_wd14_vocab
+    from ..spooler.models import JobLane
+    spooler = request.app.state.spooler
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+    job_id = spooler.submit(
+        JobLane.SYNC,
+        "import_wd14_vocab",
+        run_import_wd14_vocab,
+        db=db,
+        ollama=ollama,
+    )
+    return {"status": "queued", "job_id": job_id}

@@ -6,10 +6,14 @@ import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } 
 import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
+import InvokePanel from './components/InvokePanel.vue'
 import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
 import { useInspireSession } from './composables/useInspireSession.js'
+import { useInvokeSession } from './composables/useInvokeSession.js'
+
+const { fetchDaily: fetchDailyOracle } = useInvokeSession()
 
 const { t, locale } = useI18n()
 function toggleLocale() {
@@ -68,6 +72,9 @@ let _jobEventSource = null
 // ── Control Room ──────────────────────────────────────────────────────────────
 const controlRoomVisible = ref(false)
 const resourcesRef = ref([])
+const disksRef = ref([])
+const diskCautionPct = ref(75)
+const diskFaultPct = ref(90)
 const jobStreamConnected = ref(false)
 const cr = useControlRoom(jobsMap, resourcesRef)
 const { masterStatus, systemStatus, ingestEvent: crIngestEvent } = cr
@@ -607,6 +614,19 @@ function closeSimilarityGraph() {
   graphData.value = null
   graphRootSha.value = null
   _graphSourceImg = null
+}
+
+function openImageFromOracle(sha256) {
+  showInvoke.value = false
+  const img = images.value.find(i => i.sha256 === sha256)
+  if (img) {
+    selected.value = img
+  } else {
+    fetch(`/api/images/${sha256}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(doc => { if (doc) selected.value = doc })
+      .catch(() => {})
+  }
 }
 
 function navigateToGraphNode(sha256) {
@@ -1233,8 +1253,13 @@ async function fetchImages(reset = false) {
       const params = new URLSearchParams({ limit: LIMIT, sort: sortOrder.value })
       if (nextCursor.value) params.set('cursor', nextCursor.value)
       if (searchQuery.value) params.set('q', searchQuery.value)
-      const includes = Object.keys(tagsFilter.value)
+      const includes = [], excludes = []
+      for (const [k, v] of Object.entries(tagsFilter.value)) {
+        if (v === 'include') includes.push(k)
+        else if (v === 'exclude') excludes.push(k)
+      }
       if (includes.length) { params.set('tags_include', includes.join(',')); }
+      if (excludes.length) { params.set('tags_exclude', excludes.join(',')); }
       if (includes.length > 1) params.set('tag_logic', tagLogic.value)
       if (activeDir.value !== null) params.set('dir', activeDir.value)
       if (activeModels.value.length) params.set('models', activeModels.value.join(','))
@@ -1396,6 +1421,11 @@ async function handleJobFinished(job) {
     }
   }
 
+  // Daily oracle complete → refresh oracle panel
+  if (job.title === 'invoke.daily_oracle') {
+    await fetchDailyOracle()
+  }
+
   // EVALUATION complete → update cache for target sha256s and remove from evaluating
   if (job.lane === 'eval') {
     const sha256s = job.meta?.sha256s || []
@@ -1490,6 +1520,9 @@ function startJobStream() {
     try {
       const data = JSON.parse(e.data)
       if (data.resources) resourcesRef.value = data.resources
+      if (data.disks) disksRef.value = data.disks
+      if (data.disk_caution_pct != null) diskCautionPct.value = data.disk_caution_pct
+      if (data.disk_fault_pct   != null) diskFaultPct.value   = data.disk_fault_pct
       crIngestEvent('resource_stats', data)
     } catch {}
   })
@@ -1674,8 +1707,10 @@ const filteredGroupedTags = computed(() => {
 })
 
 function selectTag(tag) {
-  if (tagsFilter.value[tag]) delete tagsFilter.value[tag];
-  else tagsFilter.value[tag] = 'include';
+  const cur = tagsFilter.value[tag]
+  if (!cur) tagsFilter.value[tag] = 'include'
+  else if (cur === 'include') tagsFilter.value[tag] = 'exclude'
+  else delete tagsFilter.value[tag]
   showSuggestions.value = false
   fetchImages(true)
 }
@@ -2169,6 +2204,25 @@ const refineIsRunning = computed(() =>
 
 function openInspire() { showInspire.value = true }
 
+// ── Invoke Panel ───────────────────────────────────────────────────────────────
+const showInvoke = ref(false)
+
+function handleInvokeSendToRefine(data) {
+  // data: { positive_prompt, negative_prompt, sha256, workflow_name }
+  const shas = data.sha256 ? [data.sha256] : []
+  selectedIds.value = new Set(shas)
+  pinnedShas.value = new Set(shas)
+  randomCount.value = Math.max(shas.length, 1)
+  refineInstruction.value = ''
+  refineDirectPrompt.value = data.positive_prompt || ''
+  refineDirectNegativePrompt.value = data.negative_prompt || ''
+  refineDirectPromptSource.value = 'invoke'
+  refineInspireContext.value = null
+  refineStyle.value = 'natural'
+  if (data.workflow_name) refineWorkflow.value = data.workflow_name
+  openRefine()
+}
+
 function handleSendToRefine({ shas, text, inspireContext = null }) {
   selectedIds.value = new Set(shas)
   pinnedShas.value = new Set(shas)
@@ -2219,7 +2273,7 @@ onMounted(async () => {
   observer = new IntersectionObserver(entries => {
     const entry = entries[0]
     if (entry.isIntersecting) {
-      if (!loading.value && hasMore.value && !isSearchMode.value) {
+      if (!loading.value && hasMore.value) {
         fetchImages()
       }
     }
@@ -2424,6 +2478,10 @@ onUnmounted(() => {
             class="px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs transition-colors">{{ $t('analyzer.open') }}</button>
           <button @click="openAdmin"
             class="px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs transition-colors">{{ $t('header.admin') }}</button>
+          <button @click="showInvoke = true"
+            class="px-3 py-1.5 bg-violet-900/70 hover:bg-violet-800/80 border border-violet-600/40 hover:border-violet-500/60 rounded-lg text-xs font-medium text-violet-200 transition-colors whitespace-nowrap">
+            {{ $t('header.invoke') }}
+          </button>
           <button @click="triggerScan" :disabled="scanState?.state === 'running'"
             class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
             {{ scanState?.state === 'running' ? $t('header.scan.running') : $t('header.scan.button') }}
@@ -2584,11 +2642,17 @@ onUnmounted(() => {
             class="px-2 py-0.5 border-l border-gray-700 transition-colors">OR</button>
         </div>
 
-        <!-- tag badges -->
-        <span v-for="tag in Object.keys(tagsFilter)" :key="'tag-' + tag"
-          class="flex items-center gap-1 px-2 py-0.5 bg-blue-800/60 border border-blue-600/50 rounded-full text-xs text-blue-200">
-          {{ tag }}
-          <button @click="selectTag(tag)" class="text-blue-300 hover:text-white leading-none">✕</button>
+        <!-- tag badges (include=blue, exclude=red) -->
+        <span v-for="[tag, state] in Object.entries(tagsFilter)" :key="'tag-' + tag"
+          class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs cursor-pointer select-none transition-colors"
+          :class="state === 'exclude'
+            ? 'bg-red-900/60 border border-red-600/50 text-red-200'
+            : 'bg-blue-800/60 border border-blue-600/50 text-blue-200'"
+          @click="selectTag(tag)"
+          :title="state === 'exclude' ? $t('header.filter.tagExclude') : $t('header.filter.tagInclude')">
+          <span v-if="state === 'exclude'" class="opacity-70">🚫</span>
+          <span :class="state === 'exclude' ? 'line-through opacity-70' : ''">{{ tag }}</span>
+          <button @click.stop="delete tagsFilter[tag]; fetchImages(true)" class="opacity-50 hover:opacity-100 leading-none ml-0.5">✕</button>
         </span>
 
         <!-- model badges -->
@@ -2654,9 +2718,11 @@ onUnmounted(() => {
             <div class="flex flex-wrap gap-1.5 flex-1">
               <button v-for="t in groupTags" :key="t.tag" @click="selectTag(t.tag)"
                 :class="{
-                   'bg-purple-600 border border-purple-500 text-white': tagsFilter[t.tag],
+                   'bg-purple-600 border border-purple-500 text-white': tagsFilter[t.tag] === 'include',
+                   'bg-red-700/80 border border-red-500/70 text-red-100 line-through': tagsFilter[t.tag] === 'exclude',
                    'bg-gray-800 border border-transparent text-gray-400 hover:bg-gray-700': !tagsFilter[t.tag]
                 }"
+                :title="tagsFilter[t.tag] === 'include' ? $t('header.filter.tagClickToExclude') : tagsFilter[t.tag] === 'exclude' ? $t('header.filter.tagClickToReset') : $t('header.filter.tagClickToInclude')"
                 class="flex-shrink-0 px-2.5 py-0.5 rounded-full text-xs transition-colors">
                 {{ t.tag }} <span class="opacity-60 text-[10px] ml-1">{{ t.count }}</span>
               </button>
@@ -4298,6 +4364,15 @@ onUnmounted(() => {
       @toast="showToast($event.msg, $event.type)"
     />
 
+    <!-- ── Invoke Panel ── -->
+    <InvokePanel
+      :show="showInvoke"
+      @update:show="showInvoke = $event"
+      @send-to-refine="handleInvokeSendToRefine($event)"
+      @toast="showToast($event.msg, $event.type)"
+      @select-image="openImageFromOracle($event)"
+    />
+
         <!-- ── About modal ── -->
     <Teleport to="body">
       <div v-if="showAbout" class="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4"
@@ -4351,6 +4426,9 @@ onUnmounted(() => {
           :jobsMap="jobsMap"
           :controlRoom="cr"
           :sseConnected="jobStreamConnected"
+          :disks="disksRef"
+          :diskCautionPct="diskCautionPct"
+          :diskFaultPct="diskFaultPct"
           @close="controlRoomVisible = false"
           @retry="retryJob"
           @cancel="cancelJob"

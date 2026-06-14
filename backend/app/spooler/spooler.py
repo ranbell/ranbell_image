@@ -17,7 +17,7 @@ from .models import (
     ProgressReporter,
     ResourceUnreachable,
 )
-from .resources import Resource, run_with_resource
+from .resources import Resource, disk_snapshot, run_with_resource
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,9 @@ class JobSpooler:
     ) -> None:
         self._resources = resources
         self._lane_resource = lane_resource
+        self._disk_paths: dict[str, str] = {}
+        self._disk_caution_pct: int = 75
+        self._disk_fault_pct: int = 90
         self._registry: dict[str, Job] = {}
         # Priority-ordered job queue (list[job_id], sorted descending)
         self._lane_queues: dict[JobLane, list[str]] = {lane: [] for lane in JobLane}
@@ -308,8 +311,20 @@ class JobSpooler:
             except asyncio.QueueFull:
                 pass
 
+    def set_disk_paths(self, paths: dict[str, str]) -> None:
+        self._disk_paths = paths
+
+    def set_disk_thresholds(self, caution_pct: int, fault_pct: int) -> None:
+        self._disk_caution_pct = caution_pct
+        self._disk_fault_pct = fault_pct
+
     def _push_resource_stats(self) -> None:
-        data = _sse_event("resource_stats", {"resources": self.resources_snapshot()})
+        data = _sse_event("resource_stats", {
+            "resources": self.resources_snapshot(),
+            "disks": disk_snapshot(self._disk_paths),
+            "disk_caution_pct": self._disk_caution_pct,
+            "disk_fault_pct": self._disk_fault_pct,
+        })
         for q in list(self._subscribers):
             try:
                 q.put_nowait(data)

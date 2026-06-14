@@ -25,6 +25,7 @@ from .api.inspire import router as inspire_router
 from .api.jobs import router as jobs_router
 from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
+from .api.invoke import router as invoke_router
 
 
 def _abort(msg: str) -> None:
@@ -99,6 +100,12 @@ async def lifespan(app: FastAPI):
     app.state.ready = True
     app.state.refine_token_queues: dict[str, asyncio.Queue] = {}
     app.state.inspire_event_queues: dict[str, asyncio.Queue] = {}
+    app.state.invoke_event_queues: dict[str, asyncio.Queue] = {}
+
+    from .invoke.session_manager import InvokeSessionManager
+    from .invoke.spirit_loader import preload_all as _preload_spirits
+    _preload_spirits()
+    app.state.invoke_session_manager = InvokeSessionManager()
 
     asyncio.ensure_future(db.backfill_model_name())
 
@@ -115,6 +122,19 @@ async def lifespan(app: FastAPI):
             "auto_pause_lanes", _rc_defaults["auto_pause_lanes"]
         ),
     )
+
+    spooler.set_disk_paths({
+        "generated": str(_settings.generated_images_dir),
+        "source":    str(_settings.source_images_dir),
+        "thumbnails": str(_settings.thumbnails_dir),
+    })
+    spooler.set_disk_thresholds(
+        _saved_cfg.get("disk_caution_pct", 75),
+        _saved_cfg.get("disk_fault_pct", 90),
+    )
+
+    from .invoke.oracle_scheduler import run_oracle_scheduler
+    app.state.oracle_scheduler_task = asyncio.create_task(run_oracle_scheduler(app))
 
     watcher = ImageDirectoryWatcher(
         db, ollama, spooler,
@@ -170,6 +190,7 @@ app.include_router(inspire_router)
 app.include_router(jobs_router)
 app.include_router(analyzer_router)
 app.include_router(alignment_router)
+app.include_router(invoke_router)
 
 
 @app.get("/api/token")

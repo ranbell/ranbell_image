@@ -46,6 +46,7 @@ const groupedBy               = ref('model_name')
 const inspireGroupedResults   = ref([])
 const blendWeights            = ref({})
 const outlierMode             = ref('antipode')
+const textSearchQuery         = ref('')
 
 const inversionJobId = ref(null)
 const brainstormJobId = ref(null)
@@ -120,6 +121,7 @@ function resetSession(initialSlots = []) {
   groupedBy.value               = 'model_name'
   inspireGroupedResults.value   = []
   outlierMode.value             = 'antipode'
+  textSearchQuery.value         = ''
   inspireResultSelection.value  = new Set()
   const roles = {}
   const weights = {}
@@ -191,6 +193,7 @@ export function useInspireSession() {
     inspireGroupedResults,
     blendWeights,
     outlierMode,
+    textSearchQuery,
     inspireResultSelection,
     toggleInspireResultSelection,
     isRunning,

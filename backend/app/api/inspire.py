@@ -158,6 +158,11 @@ class GroupedSearchRequest(BaseModel):
     limit: int = 10
 
 
+class TextSearchRequest(BaseModel):
+    query: str
+    n_results: int = 12
+
+
 class BlendSlot(BaseModel):
     sha256: str
     weight: float  # -1.0 to +1.0 (0 = ignore)
@@ -460,6 +465,11 @@ Write the scene description in {lang_label}. The JSON atmosphere_tags must alway
    to the character (holding, wielding, gazing at, etc.). Never isolate them.
 2. Describe how the NEW ENVIRONMENT lighting, shadows, and atmosphere affect the character.
 3. If USER REQUEST is empty, compose from CHARACTER and NEW ENVIRONMENT only.
+4. CHARACTER COUNT IS IMMUTABLE: The number of characters in your prose MUST match the
+   count tag in CHARACTER exactly.
+   "1girl" or "solo" → exactly one girl ("she", "the girl" — never "they", "girls", or plural).
+   "2girls" → exactly two girls. "multiple_girls" / "3girls" / "4girls" → three or more girls.
+   Same logic applies to boy/male tags ("1boy" → one boy only, etc.). Never contradict the count.
 
 # OUTPUT FORMAT
 Write the 6-8 sentence scene as plain prose first.
@@ -487,6 +497,10 @@ From [CONTEXT_STORY], produce two prompt forms and one negative prompt.
 6. final_positive_nl: Write a vivid English natural-language prompt (5-7 sentences) describing
    the full scene. Reference the character's FIXED attributes naturally in the prose.
    Include lighting, atmosphere, textures, and emotional tone — the more evocative, the better.
+7. CHARACTER COUNT in final_positive_nl MUST match [FIXED_TAGS] exactly.
+   "1girl"/"solo" → one girl only (use "she"/"the girl", never "girls" or plural).
+   "2girls" → two girls. "multiple_girls" → multiple girls.
+   The prose count must always agree with the danbooru count tag in [FIXED_TAGS].
 
 # INPUT
 [CONTEXT_STORY]: {context_story}
@@ -1582,6 +1596,25 @@ async def grouped_search(body: GroupedSearchRequest, request: Request):
         exclude_reference=True,
     )
     return {"groups": groups, "count": len(groups)}
+
+
+@router.post("/text-search")
+async def text_search(body: TextSearchRequest, request: Request):
+    """Semantic search within the Inspire panel using a natural language query."""
+    if not body.query.strip():
+        raise HTTPException(400, "Enter search text")
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+    cfg = await get_runtime_config(db)
+    try:
+        query_vec = await ollama.embed(body.query, model=cfg["embed_model"])
+    except Exception as e:
+        raise HTTPException(500, f"Embedding error: {e}")
+    docs = await db.search_by_vector(
+        query_vec, n_results=body.n_results * 2, exclude_reference=True
+    )
+    docs = _dedup_by_tags(docs)[:body.n_results]
+    return {"results": docs, "count": len(docs)}
 
 
 @router.post("/blend")

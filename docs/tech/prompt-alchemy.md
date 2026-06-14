@@ -1,6 +1,6 @@
 # Prompt Alchemy — Technical Reference
 
-**Ranbell Image v0.1.0**
+**Ranbell Image v0.2.0**
 
 This document covers the technical design of the Prompt Alchemy feature: how image generation prompts are produced from reference images, and how Danbooru tags and natural-language prompts are processed internally.
 

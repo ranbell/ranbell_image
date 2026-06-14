@@ -1,6 +1,6 @@
 # プロンプト錬成 — クリエイターガイド
 
-**Ranbell Image v0.1.0**
+**Ranbell Image v0.2.0**
 
 ---
 

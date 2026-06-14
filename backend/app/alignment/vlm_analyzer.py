@@ -67,16 +67,28 @@ def _normalize_categories(cats: list) -> list[str]:
 
 
 def _extract_json(text: str) -> dict:
-    m = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
-    if m:
+    # Strip opening/closing markdown fences (handles unclosed fences too)
+    stripped = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    stripped = re.sub(r"\s*```\s*$", "", stripped)
+
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end > start:
         try:
-            return json.loads(m.group(1))
+            return json.loads(stripped[start : end + 1])
         except json.JSONDecodeError:
             pass
+
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
         return json.loads(text[start : end + 1])
+
     raise ValueError(f"No JSON object found in LLM output (len={len(text)}): {text[:200]!r}")
 
 
@@ -136,11 +148,11 @@ async def analyze_with_llm(
         categories=categories_text,
     )
 
-    _options = {"num_predict": 1024}
+    _options = {"num_predict": 8192}
     last_raw = ""
     for attempt in range(max_retries):
         try:
-            raw = await ollama.generate_text(prompt, model=model, options=_options)
+            raw = await ollama.generate_text(prompt, model=model, options=_options, fmt="json")
             last_raw = raw
             result = _extract_json(raw)
             return _build_i18n_result(result)
@@ -186,10 +198,10 @@ async def translate_to_lang(
         unmatched_ja=json.dumps(unmatched_ja, ensure_ascii=False),
     )
 
-    _options = {"num_predict": 512}
+    _options = {"num_predict": 8192}
     for attempt in range(max_retries):
         try:
-            raw = await ollama.generate_text(prompt, model=model, options=_options)
+            raw = await ollama.generate_text(prompt, model=model, options=_options, fmt="json")
             result = _extract_json(raw)
             return {
                 "summary": result.get("summary", ""),

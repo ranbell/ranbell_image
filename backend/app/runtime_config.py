@@ -30,6 +30,19 @@ _defaults = {
     "prompt_removal_tags": [],
     "ollama_num_ctx":          16384,
     "frozenset_classification": True,
+    # Invoke / Genesis
+    "invoke_gold_frame_threshold":     0.85,
+    "invoke_show_monologue":           True,
+    "invoke_daily_oracle_enabled":       False,
+    "invoke_daily_oracle_workflow":      "",
+    "invoke_daily_oracle_retain_days":   7,
+    "invoke_daily_oracle_time":          "00:00",
+    "invoke_daily_oracle_timezone":      "UTC",
+    "invoke_daily_oracle_topic":         "",
+    "invoke_daily_oracle_min_free_gb":   5.0,
+    # Disk gauge thresholds (used_pct %)
+    "disk_caution_pct":                  75,
+    "disk_fault_pct":                    90,
     # GPU priority control
     "auto_pause_on_generation": True,
     "auto_pause_lanes":         ["embed", "eval"],

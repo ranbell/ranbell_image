@@ -1,6 +1,6 @@
 # Prompt Alchemy — Creator's Guide
 
-**Ranbell Image v0.1.0**
+**Ranbell Image v0.2.0**
 
 ---
 

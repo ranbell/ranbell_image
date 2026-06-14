@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import glob
 import logging
+import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -245,6 +247,30 @@ def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | 
 
     return resources, lane_resource
 
+
+def disk_snapshot(paths: dict[str, str]) -> list[dict]:
+    """Return one entry per unique filesystem device among the given named paths."""
+    seen: set[int] = set()
+    result = []
+    for name, path in paths.items():
+        try:
+            dev = os.stat(path).st_dev
+            if dev in seen:
+                continue
+            seen.add(dev)
+            u = shutil.disk_usage(path)
+            result.append({
+                "name": name,
+                "kind": "disk",
+                "path": path,
+                "total_gb": round(u.total / 1024**3, 1),
+                "used_gb":  round(u.used  / 1024**3, 1),
+                "free_gb":  round(u.free  / 1024**3, 1),
+                "used_pct": round(u.used / u.total * 100, 1),
+            })
+        except Exception:
+            pass
+    return result
 
 async def run_with_resource(
     job: Job,

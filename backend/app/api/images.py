@@ -134,6 +134,7 @@ async def list_images(
     cursor: str = "",        # opaque cursor from previous response
     q: str = "",
     tags_include: str = "",
+    tags_exclude: str = "",
     tag_logic: str = "and",  # "and" | "or"
     sort: str = "newest",
     dir: str = "",           # folder view: relative path from IMAGES_DIR
@@ -181,10 +182,11 @@ async def list_images(
                 "search_mode": True, "sort": sort}
 
     inc_list = [t.strip() for t in tags_include.split(",") if t.strip()] if tags_include else []
+    exc_list = [t.strip() for t in tags_exclude.split(",") if t.strip()] if tags_exclude else []
     keyword = q.strip() or None
     model_list = [m.strip() for m in models.split(",") if m.strip()] if models else []
 
-    is_filter = bool(keyword or inc_list or model_list or star_min is not None
+    is_filter = bool(keyword or inc_list or exc_list or model_list or star_min is not None
                      or category is not None or align_min is not None)
 
     # align_desc sort: pre-fetch alignment-ordered sha256 list, paginate with integer cursor
@@ -193,6 +195,7 @@ async def list_images(
         if is_filter:
             docs = await db.scroll_all(
                 tags_include=inc_list or None,
+                tags_exclude=exc_list or None,
                 tag_logic=tag_logic,
                 models=model_list or None,
                 keyword=keyword,
@@ -262,7 +265,7 @@ async def list_images(
                 category=category, sha256_ids=align_sha256s,
             )
             full_task = db.scroll_all(
-                tags_include=inc_list, tag_logic=tag_logic,
+                tags_include=inc_list, tags_exclude=exc_list or None, tag_logic=tag_logic,
                 models=model_list, keyword=keyword, star_min=star_min,
                 category=category, sha256_ids=align_sha256s,
             )
@@ -274,6 +277,7 @@ async def list_images(
         else:
             docs = await db.scroll_all(
                 tags_include=inc_list or None,
+                tags_exclude=exc_list or None,
                 tag_logic=tag_logic,
                 models=model_list or None,
                 keyword=keyword,
@@ -284,8 +288,20 @@ async def list_images(
 
         docs = sort_docs(docs, sort)
 
+        total = len(docs)
+        offset_idx = 0
+        if cursor:
+            try:
+                offset_idx = int(_b64.b64decode(cursor.encode()).decode())
+            except Exception:
+                offset_idx = 0
+        page = docs[offset_idx:offset_idx + limit]
+        has_more = offset_idx + limit < total
+        next_cur = _b64.b64encode(str(offset_idx + limit).encode()).decode() if has_more else None
+
         active_filters = {
             "tags_include": inc_list,
+            "tags_exclude": exc_list,
             "tag_logic": tag_logic,
             "keyword": keyword or "",
             "models": model_list,
@@ -293,9 +309,9 @@ async def list_images(
         }
 
         return {
-            "total": len(docs),
-            "next_cursor": None,
-            "images": docs,
+            "total": total,
+            "next_cursor": next_cur,
+            "images": page,
             "search_mode": True,
             "sort": sort,
             "active_filters": active_filters,
