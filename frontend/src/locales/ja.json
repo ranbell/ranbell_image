@@ -329,6 +329,8 @@
     "negPrompt": "ネガティブプロンプト生成",
     "negPromptDesc": "不要要素を逆算した構文を同時出力",
     "negPromptFromInversion": "概念の反転から受信済み",
+    "suppressConflictTags": "矛盾タグ除外",
+    "suppressConflictTagsDesc": "ユーザ指示と矛盾する WD14 タグをコンテキストから除去",
     "comfyAuto": "ComfyUI 自動生成",
     "comfyAutoLabel": "錬成後にComfyUIへ自動投入",
     "comfyAutoDesc": "生成画像はシステムに自動保存されます",

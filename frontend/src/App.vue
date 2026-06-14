@@ -302,6 +302,7 @@ const refineNumCtx = ref(16384)
 const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detailed'
 const refineInstructionMode = ref('basic')   // 'none' | 'basic' | 'enhanced'
 const refineNegative = ref(false)
+const refineSuppressConflict = ref(false)
 const refineAutoSubmit = ref(false)
 const refineBatchCount = ref(1)
 const refineWorkflow = ref('')
@@ -2055,6 +2056,7 @@ async function runRefine() {
       num_ctx: refineNumCtx.value,
       prompt_style: refineStyle.value,
       negative_prompt: refineNegative.value,
+      suppress_conflict_tags: refineSuppressConflict.value,
       auto_submit: refineAutoSubmit.value,
       batch_count: refineBatchCount.value,
       workflow_name: refineWorkflow.value,
@@ -3180,6 +3182,19 @@ onUnmounted(() => {
                         :class="refineNegative ? 'bg-purple-600' : 'bg-gray-700'"
                         class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
                         <span :class="refineNegative ? 'translate-x-5' : 'translate-x-0.5'"
+                          class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
+                      </button>
+                    </div>
+                    <!-- Conflict tag suppression -->
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <p class="text-xs text-gray-300">{{ $t('refine.suppressConflictTags') }}</p>
+                        <p class="text-xs text-gray-600 mt-0.5">{{ $t('refine.suppressConflictTagsDesc') }}</p>
+                      </div>
+                      <button @click="refineSuppressConflict = !refineSuppressConflict" :disabled="refining"
+                        :class="refineSuppressConflict ? 'bg-amber-600' : 'bg-gray-700'"
+                        class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
+                        <span :class="refineSuppressConflict ? 'translate-x-5' : 'translate-x-0.5'"
                           class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
                       </button>
                     </div>

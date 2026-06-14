@@ -46,6 +46,7 @@ class RefineRequest(BaseModel):
     direct_negative_prompt: str | None = None
     inspire_context: dict | None = None
     use_ref_seed: bool = False
+    suppress_conflict_tags: bool = False
 
 
 class SearchRequest(BaseModel):

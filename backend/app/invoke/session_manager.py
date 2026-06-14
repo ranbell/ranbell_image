@@ -16,7 +16,7 @@ SESSION_TTL = 3600  # seconds
 @dataclass
 class SpiritState:
     name: str
-    status: str = "waiting"   # waiting|composing|generating|tagging|scoring|done|error
+    status: str = "waiting"   # waiting|composing|composed|generating|tagging|scoring|done|error
     sha256: str | None = None
     prompt_result: dict | None = None
     alignment_score: float | None = None
@@ -45,6 +45,7 @@ class InvokeSession:
     created_at: float = field(default_factory=time.time)
     completed: bool = False
     cancelled: bool = False
+    finalize_submitted: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -185,8 +186,9 @@ class InvokeSessionManager:
             return
 
         spirit.prompt_result = prompt_result
-        spirit.status = "generating"
+        spirit.status = "composed"
 
+        # フロントへの通知は compose 完了ごとに逐次送信
         await self.emit(session, "spirit_composed", {
             "spirit": spirit_name,
             "monologue": prompt_result.get("internal_monologue", ""),
@@ -194,22 +196,26 @@ class InvokeSessionManager:
             "natural_language_ja": prompt_result.get("natural_language_ja", ""),
         })
 
-        from ..spooler.models import JobLane
-        from ..jobs.runners import run_invoke_image_generate
-
-        job_id = session.spooler.submit(
-            JobLane.GENERATION,
-            f"invoke.gen/{spirit_name[:3]}",
-            run_invoke_image_generate,
-            meta={"session_id": session_id, "spirit": spirit_name},
-            session_id=session_id,
-            spirit_name=spirit_name,
-            prompt_result=prompt_result,
-            workflow_name=session.workflow_name,
-            seed=None,
-            session_manager=self,
-        )
-        spirit.job_ids.append(job_id)
+        # 全 spirit が compose を終えたら generation を一括 submit
+        if all(s.status != "composing" for s in session.spirits.values()):
+            from ..spooler.models import JobLane
+            from ..jobs.runners import run_invoke_image_generate
+            for name, s in session.spirits.items():
+                if s.status == "composed":
+                    s.status = "generating"
+                    job_id = session.spooler.submit(
+                        JobLane.GENERATION,
+                        f"invoke.gen/{name[:3]}",
+                        run_invoke_image_generate,
+                        meta={"session_id": session_id, "spirit": name},
+                        session_id=session_id,
+                        spirit_name=name,
+                        prompt_result=s.prompt_result,
+                        workflow_name=session.workflow_name,
+                        seed=None,
+                        session_manager=self,
+                    )
+                    s.job_ids.append(job_id)
 
     async def on_image_done(
         self,
@@ -238,22 +244,8 @@ class InvokeSessionManager:
             "sha256": sha256,
         })
 
-        from ..spooler.models import JobLane
-        from ..jobs.runners import run_invoke_alignment_score
-
-        job_eval = session.spooler.submit(
-            JobLane.EVALUATION,
-            f"invoke.align/{spirit_name[:3]}",
-            run_invoke_alignment_score,
-            meta={"session_id": session_id, "spirit": spirit_name},
-            sha256=sha256,
-            session_id=session_id,
-            spirit_name=spirit_name,
-            session_manager=self,
-            db=session.db,
-            ollama=session.ollama,
-        )
-        spirit.job_ids.append(job_eval)
+        # 全 spirit が generation フェーズを脱したら finalize（pipeline → alignment）を一括 submit
+        _maybe_submit_finalize(session, session_id, self)
 
     async def on_spirit_done(
         self,
@@ -282,7 +274,7 @@ class InvokeSessionManager:
             await self.emit(session, "session_complete", {"session_id": session_id})
             await _update_summon_stats(session=session)
             await session.event_queue.put(None)
-            _submit_pack_pipeline(session, session_id)
+            # finalize（pipeline + alignment）は on_image_done / on_spirit_error から submit 済み
 
     async def on_spirit_error(self, session_id: str, spirit_name: str, error: str) -> None:
         session = self.get_session(session_id)
@@ -293,11 +285,13 @@ class InvokeSessionManager:
             spirit.status = "error"
         await self.emit(session, "spirit_error", {"spirit": spirit_name, "error": error})
 
+        # error で止まった spirit があっても残りが generation フェーズを脱したら finalize
+        _maybe_submit_finalize(session, session_id, self)
+
         if all(session.spirits[n].status in ("done", "error") for n in session.enabled_spirits):
             session.completed = True
             await self.emit(session, "session_complete", {"session_id": session_id})
             await session.event_queue.put(None)
-            _submit_pack_pipeline(session, session_id)
 
     async def cancel_session(self, session_id: str) -> bool:
         session = self.get_session(session_id)
@@ -350,16 +344,40 @@ class InvokeSessionManager:
         return spirit.sha256
 
 
-def _submit_pack_pipeline(session: InvokeSession, session_id: str) -> None:
-    """Submit a run_pipeline job at session end to process all pending invoke images (idempotent)."""
-    from ..jobs.runners import run_pipeline
+def _maybe_submit_finalize(session: InvokeSession, session_id: str, session_manager) -> bool:
+    """全 spirit が generation フェーズを脱したら finalize ジョブを 1 回だけ submit する。"""
+    if session.finalize_submitted:
+        return False
+    if all(
+        s.status not in ("composing", "composed", "generating")
+        for s in session.spirits.values()
+    ):
+        session.finalize_submitted = True
+        spirit_sha256s = {n: s.sha256 for n, s in session.spirits.items() if s.sha256}
+        if spirit_sha256s:
+            _submit_session_finalize(session, session_id, session_manager, spirit_sha256s)
+        return True
+    return False
+
+
+def _submit_session_finalize(
+    session: InvokeSession,
+    session_id: str,
+    session_manager,
+    spirit_sha256s: dict,
+) -> None:
+    """EMBEDDING ランに run_invoke_session_finalize を submit する。"""
+    from ..jobs.runners import run_invoke_session_finalize
     from ..spooler.models import JobLane
     session.spooler.submit(
         JobLane.EMBEDDING,
-        f"invoke.pack/{session_id[:8]}",
-        run_pipeline,
+        f"invoke.finalize/{session_id[:8]}",
+        run_invoke_session_finalize,
+        session_id=session_id,
+        spirit_sha256s=spirit_sha256s,
         db=session.db,
         ollama=session.ollama,
+        session_manager=session_manager,
     )
 
 
