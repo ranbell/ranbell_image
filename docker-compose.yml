@@ -17,7 +17,6 @@ services:
       QDRANT_URL: http://qdrant:6333
     volumes:
       - thumbnails_cache:/mnt/thumbnails
-      - ./backend/app:/app/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
