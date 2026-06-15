@@ -206,6 +206,16 @@ docker compose ps
 
 Open **http://localhost:3100** in your browser.
 
+**On first launch**, the app automatically checks your setup and opens the **Admin → Diagnostics** tab if any required component is missing or unreachable. The diagnostics tab shows:
+
+- Ollama connection status (required for embeddings and AI features)
+- ComfyUI connection status (required for image generation)
+- WD14 model files status, with a download link if missing
+- INVOKE Vocab import status (required for the Invoke/Summon feature)
+- ComfyUI workflow count
+
+If WD14 is installed and Ollama is reachable, the INVOKE Vocab import starts automatically. Use the **Refresh** button in the diagnostics tab to re-check after making changes.
+
 ### API Token
 
 The token is configured automatically. On first page load, the app fetches the token from the backend and stores it in the browser's session storage — no manual setup required.
@@ -241,9 +251,21 @@ This uses the VLM to score how well each image matches its generation prompt, pr
 
 You can **cancel at any time** from the Control Room (`/` shortcut) and resume later. There is no data loss if cancelled mid-run.
 
+### 4. Import INVOKE Vocab (required for Invoke / Summon feature)
+
+The Invoke panel requires a vocabulary of WD14 tag embeddings to perform semantic tag search. This import is **triggered automatically** on first launch if WD14 is installed and Ollama is reachable.
+
+To run it manually: open the **Admin** panel → **Diagnostics** tab → click **Import**.
+
+The import processes ~15,000 WD14 tags through the Ollama embedding model. It completes in a few minutes and appears in the Control Room job queue. It only needs to run once.
+
 ---
 
 ## 8. Troubleshooting
+
+**Run the Diagnostics tab first**
+
+Open the **Admin** panel (gear icon) and select the **Diagnostics** tab. It checks all required components — Ollama, ComfyUI, WD14 model files, INVOKE Vocab, and workflows — and shows exactly what is missing. Use the **Refresh** button after making any changes.
 
 **Ollama is unreachable from the container**
 

@@ -26,12 +26,17 @@ system_prompt: |
   - Any accessories tags from the accessories axis (e.g. hair_ribbon, glasses)
   Omitting these character tags produces vague output — include them verbatim in danbooru_tags.
 
+  LANGUAGE RULE: The input axes may contain Japanese text. Regardless of input language,
+  ALL output fields MUST be written in English — natural_language, danbooru_tags,
+  negative_supplement, and internal_monologue. The sole exception is natural_language_ja,
+  which is always Japanese. Never write Japanese in any other field.
+
   Output ONLY valid JSON, no markdown fences, no explanation. Schema:
   {
     "spirit": "Wander",
     "natural_language": "<2-3 sentence English cinematic description. Open with the specific action or frozen moment. Then weave in both the atmosphere (mood, lighting, palette) and the guest element as if they always belonged together. Every sentence serves the slogan. Write as if describing a single charged film frame to a painter.>",
     "natural_language_ja": "<同じシーンを日本語で2〜3文。natural_language と同じ内容を日本語で描写する。ユーザー表示専用であり、画像生成には使用されない。>",
-    "danbooru_tags": "<comma-separated Danbooru tags, include wild tags naturally>",
+    "danbooru_tags": "<English-only comma-separated Danbooru tags, include wild tags naturally>",
     "negative_supplement": "",
     "internal_monologue": "<one short line in English, the spirit's inner voice while composing>",
     "inverted_axis": null,

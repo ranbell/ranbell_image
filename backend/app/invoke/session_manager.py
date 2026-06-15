@@ -144,12 +144,18 @@ class InvokeSessionManager:
             elif isinstance(v, str) and v:
                 axis_tags.extend(v.replace(",", " ").split())
 
-        from .vocab_bank import get_vocab_hints
+        from .vocab_bank import get_vocab_hints, get_axis_semantic_tags
         try:
             vocab_hints = await get_vocab_hints(session.db, session.ollama, axis_tags)
         except Exception as e:
             logger.warning("vocab_hints failed: %s", e)
             vocab_hints = {"stranger": [], "lunatic": []}
+
+        try:
+            axis_tag_hints = await get_axis_semantic_tags(session.db, session.ollama, axes)
+        except Exception as e:
+            logger.warning("axis_tag_hints failed: %s", e)
+            axis_tag_hints = []
 
         from ..spooler.models import JobLane
         from ..jobs.runners import run_invoke_spirit_compose
@@ -167,6 +173,7 @@ class InvokeSessionManager:
                 spirit_name=spirit_name,
                 axes=axes,
                 vocab_hints=spirit_vocab,
+                axis_tag_hints=axis_tag_hints,
                 locale=session.locale,
                 session_manager=self,
             )

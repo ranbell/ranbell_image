@@ -405,7 +405,8 @@
     "newJob": "＋ 新規ジョブ"
   },
   "toast": {
-    "pipelineStarted": "AI処理を開始しました。"
+    "pipelineStarted": "AI処理を開始しました。",
+    "noWorkflows": "ComfyUI ワークフローが見つかりません。画像生成を利用するには少なくとも1件必要です。"
   },
   "header": {
     "invoke": "召喚",
@@ -744,6 +745,45 @@
       "sourceImages": "ソース画像 (read-only)",
       "mounted": "✓ マウント済",
       "notMounted": "✗ 未マウント"
+    },
+    "diag": {
+      "title": "診断",
+      "refresh": "↺ 再チェック",
+      "allOk": "✓ 全項目が正常です",
+      "sectionConnection": "接続",
+      "ollamaRequired": "Ollama（必須）",
+      "comfyRecommended": "ComfyUI（強く推奨）",
+      "connected": "✓ 接続済み",
+      "disconnected": "✗ 未接続",
+      "embedModel": "Embed モデル",
+      "modelPresent": "✓",
+      "modelMissing": "✗ 未インストール",
+      "sectionWD14": "WD14 Tagger モデル",
+      "modelOnnx": "model.onnx",
+      "selectedTagsCsv": "selected_tags.csv",
+      "fileOk": "✓ 正常",
+      "fileMissing": "✗ 見つからない",
+      "wd14Dir": "配置ディレクトリ",
+      "wd14DownloadHint": "Hugging Face から以下のファイルをダウンロードし、上記ディレクトリに配置してください:",
+      "wd14DownloadLink": "wd-eva02-large-tagger-v3 (SmilingWolf) ↗",
+      "wd14FilesNeeded": "必要ファイル: model.onnx / selected_tags.csv",
+      "wd14SettingsNote": "配置先は 設定 → WD14 Tagger で変更できます",
+      "sectionVocab": "INVOKE Vocab",
+      "vocabOk": "✓ {n} タグ登録済み",
+      "vocabMissing": "未登録 — 召喚（Summon）機能に必要",
+      "vocabImportBtn": "インポート実行",
+      "vocabReimportBtn": "再インポート",
+      "vocabImporting": "インポート中…",
+      "vocabHint": "WD14 のタグ名を Ollama で埋め込み、召喚がタグ意味検索できるようにします。",
+      "vocabNeedsWd14": "⚠ WD14 モデルをインストールしてからインポートしてください",
+      "sectionWorkflow": "ComfyUI ワークフロー",
+      "workflowOk": "✓ {n} 件",
+      "workflowMissing": "⚠ 0件 — 画像生成には最低1件必要",
+      "workflowHint": "ワークフロー設定ディレクトリに .json ファイルを追加してください。",
+      "sectionNextSteps": "セットアップ完了後の手順",
+      "step1": "1. データスキャン — AI管理 タブで「AIパイプライン実行（全件）」の前に「フルスキャン」を実行。画像フォルダが自動登録されます。",
+      "step2": "2. AI タグ付け — スキャン後「AI パイプライン実行（全件）」でタグ・埋め込みベクトルを生成します。",
+      "step3": "3. カラーマップ — AI タグ付け後に AI管理 タブのカラーマップバックフィルを実行すると色検索が使えます。"
     }
   },
   "colorPick": {

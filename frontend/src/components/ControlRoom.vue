@@ -96,13 +96,13 @@
 
             <div v-for="res in remoteResources" :key="res.name" class="cr-resource-remote">
               <div class="cr-resource-header">
-                <span class="cr-lamp" :class="res.reachable ? 'cr-lamp--nominal' : (res.last_ok == null ? 'cr-lamp--starting' : 'cr-lamp--fault')" />
+                <span class="cr-lamp" :class="res.reachable ? 'cr-lamp--nominal' : (res.last_checked == null ? 'cr-lamp--starting' : 'cr-lamp--fault')" />
                 <span class="cr-resource-name">{{ resourceLabel(res.name) }}</span>
                 <span class="cr-remote-version" v-if="res.version">v{{ res.version }}</span>
                 <span class="cr-remote-latency" v-if="res.reachable && res.latency_ms != null">
                   ~{{ Math.round(res.latency_ms) }}ms
                 </span>
-                <span class="cr-remote-down" v-else-if="!res.reachable && res.last_ok != null">FAULT</span>
+                <span class="cr-remote-down" v-else-if="!res.reachable && res.last_checked != null">FAULT</span>
                 <span class="cr-remote-starting" v-else-if="!res.reachable">STARTING</span>
               </div>
               <div class="cr-remote-endpoint" v-if="res.endpoint">
@@ -437,9 +437,10 @@ const queuedIdsByLane = computed(() => {
 })
 
 const RESOURCE_LABELS = {
-  'remote-qdrant': 'Qdrant',
-  'remote-ollama': 'Ollama',
-  'local-gpu0':    'GPU 0',
+  'remote-qdrant':  'Qdrant',
+  'remote-ollama':  'Ollama',
+  'remote-comfyui': 'ComfyUI',
+  'local-gpu0':     'GPU 0',
 }
 function resourceLabel(name) {
   return RESOURCE_LABELS[name] ?? name
@@ -738,7 +739,7 @@ function ratioClass(used, total, caution, fault) {
 /* ── body (3-column grid) ───────────────────────────────────────────────────── */
 .cr-body {
   display: grid;
-  grid-template-columns: 260px 1fr 300px;
+  grid-template-columns: 380px 1fr 300px;
   flex: 1;
   min-height: 0;
   overflow: hidden;

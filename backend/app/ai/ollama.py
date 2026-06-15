@@ -201,16 +201,20 @@ class OllamaClient:
         for event in parser.flush():
             yield event
 
-    async def health(self) -> bool:
+    async def health(self, url: str | None = None) -> bool:
+        base = url or settings.ollama_url
         try:
-            r = await self._client.get(f"{settings.ollama_url}/api/tags", timeout=5.0)
-            return r.status_code == 200
+            r = await self._client.get(f"{base}/api/tags", timeout=5.0)
+            if r.status_code != 200:
+                return False
+            return "models" in r.json()
         except Exception:
             return False
 
-    async def list_models(self) -> list[str]:
+    async def list_models(self, url: str | None = None) -> list[str]:
+        base = url or settings.ollama_url
         try:
-            r = await self._client.get(f"{settings.ollama_url}/api/tags", timeout=5.0)
+            r = await self._client.get(f"{base}/api/tags", timeout=5.0)
             r.raise_for_status()
             return [m["name"] for m in r.json().get("models", [])]
         except Exception:

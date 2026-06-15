@@ -21,7 +21,9 @@ class ComfyUIClient:
     async def is_available(self) -> bool:
         try:
             r = await self._http.get(f"{settings.comfyui_url}/system_stats", timeout=3.0)
-            return r.status_code == 200
+            if r.status_code != 200:
+                return False
+            return "system" in r.json()
         except Exception:
             return False
 

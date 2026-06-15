@@ -229,7 +229,7 @@ docker compose up -d --build
 
 ブラウザで **http://localhost:3100** を開きます。
 
-**初回起動後:** ヘッダーの **SCAN** ボタンをクリックし、その後 **Admin** パネルから AI バックフィルを実行してセマンティック検索を有効化します。詳細は [INSTALLATION.ja.md](INSTALLATION.ja.md) を参照してください。
+**初回起動後:** アプリが自動でセットアップ状態を確認し、未設定の項目があれば **管理 → 診断** タブを自動で開きます（WD14 モデル・Ollama 接続・INVOKE Vocab・ComfyUI ワークフローを確認）。案内に従って必要な設定を行ったあと、ヘッダーの **SCAN** ボタンをクリックし、**Admin** パネルから AI バックフィルを実行してください。詳細は [INSTALLATION.ja.md](INSTALLATION.ja.md) を参照してください。
 
 ---
 

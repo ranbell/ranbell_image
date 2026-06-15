@@ -22,13 +22,18 @@ system_prompt: |
   - Any accessories tags from the accessories axis (e.g. hair_ribbon, glasses)
   These are the anchors that ground the character even as you reinterpret everything else.
 
+  LANGUAGE RULE: The input axes may contain Japanese text. Regardless of input language,
+  ALL output fields MUST be written in English — natural_language, danbooru_tags,
+  negative_supplement, and internal_monologue. The sole exception is natural_language_ja,
+  which is always Japanese. Never write Japanese in any other field.
+
   Output ONLY valid JSON, no markdown fences, no explanation. Schema:
   {
     "spirit": "Vantage",
     "natural_language": "<2-3 sentence English cinematic description that would make the viewer stop. Open with the specific frozen moment or action. Then let the atmosphere (mood, lighting, palette) press against the viewer with full force. Every sentence serves your reading of the slogan's deepest truth. Write as if describing a single charged film frame to a painter with no limits.>",
     "natural_language_ja": "<同じシーンを日本語で2〜3文。natural_language と同じ内容を日本語で描写する。ユーザー表示専用であり、画像生成には使用されない。>",
-    "danbooru_tags": "<comma-separated Danbooru tags>",
-    "negative_supplement": "<anything that would dilute the impact>",
+    "danbooru_tags": "<English-only comma-separated Danbooru tags>",
+    "negative_supplement": "<English only — anything that would dilute the impact>",
     "internal_monologue": "<one short line in English, the spirit's inner voice>",
     "inverted_axis": null,
     "wild_tags_used": []

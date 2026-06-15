@@ -31,7 +31,7 @@ const emit = defineEmits([
 ])
 
 // ── Admin internal state ──────────────────────────────────────────────────────
-const adminTab = ref('ai')
+const adminTab = ref('diag')
 const ollamaModels = ref([])
 const showAdvanced = ref(false)
 const adminStats = ref(null)
@@ -53,6 +53,10 @@ const configWorkflows = ref([])
 // Connection tab
 const healthData = ref(null)
 const healthLoading = ref(false)
+
+// Diagnostics tab
+const diagLoading = ref(false)
+const diagData = ref(null)
 
 // Info tab (local copies — App.vue has its own for the header)
 const info = ref(null)
@@ -243,6 +247,37 @@ async function fetchHealth() {
   }
 }
 
+async function fetchDiagData() {
+  diagLoading.value = true
+  diagData.value = null
+  try {
+    const [statsRes, vocabRes, healthRes] = await Promise.all([
+      fetch('/api/admin/stats'),
+      fetch('/api/admin/invoke/vocab-status'),
+      fetch('/api/health/detail'),
+    ])
+    const stats  = statsRes.ok  ? await statsRes.json()  : null
+    const vocab  = vocabRes.ok  ? await vocabRes.json()  : null
+    const health = healthRes.ok ? await healthRes.json() : null
+    diagData.value = {
+      ollama:  health?.ollama  ?? null,
+      comfyui: health?.comfyui ?? null,
+      wd14:    stats?.wd14     ?? null,
+      vocab:   vocab           ?? null,
+    }
+    if (Array.isArray(health?.comfyui?.workflows)) {
+      emit('reload-workflows', health.comfyui.workflows)
+    }
+  } finally {
+    diagLoading.value = false
+  }
+}
+
+async function importVocabDiag() {
+  await importVocab()
+  await fetchDiagData()
+}
+
 async function fetchInfo() {
   try {
     const res = await fetch('/api/info')
@@ -300,6 +335,7 @@ const historyJobs = computed(() =>
 
 function switchAdminTab(id) {
   adminTab.value = id
+  if (id === 'diag')       fetchDiagData()
   if (id === 'connection') fetchHealth()
   if (id === 'config' && !ollamaModels.value.length) fetchOllamaModels()
   if (id === 'config' && !configWorkflows.value.length) {
@@ -331,11 +367,11 @@ function triggerFullScanProxy() {
 // Initialize on open
 watch(() => props.show, async (val) => {
   if (val) {
-    adminTab.value = 'ai'
+    adminTab.value = 'diag'
     backendOffline.value = false
     adminStats.value = null
     adminConfig.value = null
-    await Promise.all([fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus()])
+    await Promise.all([fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus()])
   }
 })
 
@@ -361,6 +397,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
 
         <div class="flex border-b border-gray-800 flex-shrink-0 px-6 overflow-x-auto">
           <button v-for="tab in [
+            { id: 'diag',        label: $t('admin.diag.title') },
             { id: 'overview',    label: $t('admin.overview.title') },
             { id: 'ai',          label: $t('admin.ai.title') },
             { id: 'config',      label: $t('admin.config.title') },
@@ -407,6 +444,147 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
         </div>
 
         <div class="flex-1 overflow-y-auto px-6 py-4">
+
+          <!-- ── 診断タブ ── -->
+          <div v-if="adminTab === 'diag'" class="space-y-4">
+            <div class="flex justify-end">
+              <button @click="fetchDiagData" :disabled="diagLoading"
+                class="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40">
+                {{ $t('admin.diag.refresh') }}
+              </button>
+            </div>
+            <div v-if="diagLoading" class="text-center text-gray-500 py-8 text-sm">{{ $t('admin.loading') }}</div>
+            <template v-else-if="diagData">
+
+              <!-- All OK + Next Steps -->
+              <template v-if="diagData.ollama?.ok && diagData.wd14?.model_ok && diagData.wd14?.tags_ok && diagData.vocab?.imported">
+                <div class="bg-green-900/30 border border-green-700/40 rounded-xl px-4 py-3 text-sm text-green-400">
+                  {{ $t('admin.diag.allOk') }}
+                </div>
+                <div class="bg-gray-800 rounded-xl p-4 space-y-2">
+                  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                    {{ $t('admin.diag.sectionNextSteps') }}
+                  </p>
+                  <p class="text-xs text-gray-400">{{ $t('admin.diag.step1') }}</p>
+                  <p class="text-xs text-gray-400">{{ $t('admin.diag.step2') }}</p>
+                  <p class="text-xs text-gray-400">{{ $t('admin.diag.step3') }}</p>
+                </div>
+              </template>
+
+              <!-- Connections (Ollama + ComfyUI) -->
+              <div class="bg-gray-800 rounded-xl p-4 space-y-2">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  {{ $t('admin.diag.sectionConnection') }}
+                </p>
+                <div class="flex justify-between text-xs">
+                  <span class="text-gray-400">{{ $t('admin.diag.ollamaRequired') }}</span>
+                  <span :class="diagData.ollama?.ok ? 'text-green-400' : 'text-red-400'">
+                    {{ diagData.ollama?.ok ? $t('admin.diag.connected') : $t('admin.diag.disconnected') }}
+                  </span>
+                </div>
+                <template v-if="diagData.ollama?.ok">
+                  <div class="flex justify-between text-xs">
+                    <span class="text-gray-400">{{ $t('admin.diag.embedModel') }}</span>
+                    <span :class="diagData.ollama.embed_model_available ? 'text-green-400' : 'text-yellow-400'">
+                      {{ diagData.ollama.embed_model }}
+                      {{ diagData.ollama.embed_model_available ? $t('admin.diag.modelPresent') : $t('admin.diag.modelMissing') }}
+                    </span>
+                  </div>
+                </template>
+                <div v-if="!diagData.ollama?.ok" class="text-xs text-red-400/80">
+                  {{ diagData.ollama?.error }}
+                </div>
+                <div class="text-[11px] text-gray-600 font-mono">{{ diagData.ollama?.url }}</div>
+
+                <div class="border-t border-gray-700/40 pt-2 mt-1 space-y-1">
+                  <div class="flex justify-between text-xs">
+                    <span class="text-gray-400">{{ $t('admin.diag.comfyRecommended') }}</span>
+                    <span :class="diagData.comfyui?.ok ? 'text-green-400' : 'text-yellow-400'">
+                      {{ diagData.comfyui?.ok ? $t('admin.diag.connected') : $t('admin.diag.disconnected') }}
+                    </span>
+                  </div>
+                  <div class="text-[11px] text-gray-600 font-mono">{{ diagData.comfyui?.url }}</div>
+                </div>
+              </div>
+
+              <!-- WD14 -->
+              <div class="bg-gray-800 rounded-xl p-4 space-y-2">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  {{ $t('admin.diag.sectionWD14') }}
+                </p>
+                <div class="flex justify-between text-xs">
+                  <span class="text-gray-400">{{ $t('admin.diag.modelOnnx') }}</span>
+                  <span :class="diagData.wd14?.model_ok ? 'text-green-400' : 'text-red-400'">
+                    {{ diagData.wd14?.model_ok ? $t('admin.diag.fileOk') : $t('admin.diag.fileMissing') }}
+                  </span>
+                </div>
+                <div class="flex justify-between text-xs">
+                  <span class="text-gray-400">{{ $t('admin.diag.selectedTagsCsv') }}</span>
+                  <span :class="diagData.wd14?.tags_ok ? 'text-green-400' : 'text-red-400'">
+                    {{ diagData.wd14?.tags_ok ? $t('admin.diag.fileOk') : $t('admin.diag.fileMissing') }}
+                  </span>
+                </div>
+                <div class="text-[11px] text-gray-600 font-mono break-all">
+                  {{ $t('admin.diag.wd14Dir') }}: {{ diagData.wd14?.model_dir ?? '—' }}
+                </div>
+                <div v-if="!diagData.wd14?.model_ok || !diagData.wd14?.tags_ok"
+                  class="mt-2 p-3 bg-amber-900/20 border border-amber-700/30 rounded-lg space-y-1.5">
+                  <p class="text-xs text-amber-300">{{ $t('admin.diag.wd14DownloadHint') }}</p>
+                  <a href="https://huggingface.co/SmilingWolf/wd-eva02-large-tagger-v3/tree/main"
+                    target="_blank" rel="noopener"
+                    class="inline-block text-xs text-indigo-400 hover:text-indigo-300 underline">
+                    {{ $t('admin.diag.wd14DownloadLink') }}
+                  </a>
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.diag.wd14FilesNeeded') }}</p>
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.diag.wd14SettingsNote') }}</p>
+                </div>
+              </div>
+
+              <!-- INVOKE Vocab -->
+              <div class="bg-gray-800 rounded-xl p-4 space-y-2">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  {{ $t('admin.diag.sectionVocab') }}
+                </p>
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-xs" :class="diagData.vocab?.imported ? 'text-green-400' : 'text-amber-400'">
+                    {{ diagData.vocab?.imported
+                        ? $t('admin.diag.vocabOk', { n: diagData.vocab.tag_count.toLocaleString() })
+                        : $t('admin.diag.vocabMissing') }}
+                  </span>
+                  <button @click="importVocabDiag" :disabled="vocabImporting"
+                    class="shrink-0 px-3 py-1 rounded-lg border border-indigo-700/50 bg-indigo-900/40
+                           hover:bg-indigo-800/50 text-xs text-indigo-300 disabled:opacity-40 transition">
+                    {{ vocabImporting ? $t('admin.diag.vocabImporting')
+                        : (diagData.vocab?.imported ? $t('admin.diag.vocabReimportBtn') : $t('admin.diag.vocabImportBtn')) }}
+                  </button>
+                </div>
+                <p class="text-[11px] text-gray-600">{{ $t('admin.diag.vocabHint') }}</p>
+                <div v-if="!diagData.wd14?.model_ok || !diagData.wd14?.tags_ok"
+                  class="text-xs text-red-400/80">{{ $t('admin.diag.vocabNeedsWd14') }}</div>
+              </div>
+
+              <!-- ComfyUI Workflows -->
+              <div class="bg-gray-800 rounded-xl p-4 space-y-2">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  {{ $t('admin.diag.sectionWorkflow') }}
+                </p>
+                <div class="text-xs" :class="diagData.comfyui?.workflows?.length ? 'text-green-400' : 'text-amber-400'">
+                  {{ diagData.comfyui?.workflows?.length
+                      ? $t('admin.diag.workflowOk', { n: diagData.comfyui.workflows.length })
+                      : $t('admin.diag.workflowMissing') }}
+                </div>
+                <div v-if="diagData.comfyui?.workflows?.length" class="flex flex-wrap gap-1">
+                  <span v-for="w in diagData.comfyui.workflows" :key="w"
+                    class="px-1.5 py-0.5 bg-gray-700 rounded text-[11px] text-gray-300 font-mono">{{ w }}</span>
+                </div>
+                <p v-if="!diagData.comfyui?.workflows?.length" class="text-[11px] text-gray-500">
+                  {{ $t('admin.diag.workflowHint') }}
+                </p>
+              </div>
+
+            </template>
+            <div v-else class="text-center text-gray-500 py-8 text-sm">{{ $t('admin.failed') }}</div>
+          </div>
 
           <!-- ── Overview tab ── -->
           <div v-if="adminTab === 'overview'" class="space-y-5">

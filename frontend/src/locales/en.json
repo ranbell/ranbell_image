@@ -405,7 +405,8 @@
     "newJob": "+ New Job"
   },
   "toast": {
-    "pipelineStarted": "AI processing started."
+    "pipelineStarted": "AI processing started.",
+    "noWorkflows": "No ComfyUI workflows found. Image generation requires at least one workflow."
   },
   "header": {
     "invoke": "Invoke",
@@ -744,6 +745,45 @@
       "sourceImages": "Source images (read-only)",
       "mounted": "✓ Mounted",
       "notMounted": "✗ Not mounted"
+    },
+    "diag": {
+      "title": "Diagnostics",
+      "refresh": "↺ Re-check",
+      "allOk": "✓ All items are ready",
+      "sectionConnection": "Connections",
+      "ollamaRequired": "Ollama (required)",
+      "comfyRecommended": "ComfyUI (strongly recommended)",
+      "connected": "✓ Connected",
+      "disconnected": "✗ Not connected",
+      "embedModel": "Embed model",
+      "modelPresent": "✓",
+      "modelMissing": "✗ Not installed",
+      "sectionWD14": "WD14 Tagger Model",
+      "modelOnnx": "model.onnx",
+      "selectedTagsCsv": "selected_tags.csv",
+      "fileOk": "✓ Found",
+      "fileMissing": "✗ Not found",
+      "wd14Dir": "Model directory",
+      "wd14DownloadHint": "Download the following files from Hugging Face and place them in the directory above:",
+      "wd14DownloadLink": "wd-eva02-large-tagger-v3 (SmilingWolf) ↗",
+      "wd14FilesNeeded": "Required files: model.onnx / selected_tags.csv",
+      "wd14SettingsNote": "The directory can be changed under Settings → WD14 Tagger",
+      "sectionVocab": "INVOKE Vocab",
+      "vocabOk": "✓ {n} tags registered",
+      "vocabMissing": "Not imported — required for Summon",
+      "vocabImportBtn": "Import Vocab",
+      "vocabReimportBtn": "Re-import",
+      "vocabImporting": "Importing…",
+      "vocabHint": "Embeds WD14 tag names via Ollama so Summon can search by tag semantics.",
+      "vocabNeedsWd14": "⚠ Install WD14 model files before importing vocab",
+      "sectionWorkflow": "ComfyUI Workflows",
+      "workflowOk": "✓ {n} workflow(s)",
+      "workflowMissing": "⚠ 0 workflows — image generation requires at least one",
+      "workflowHint": "Add .json workflow files to the configured workflows directory.",
+      "sectionNextSteps": "Next Steps After Setup",
+      "step1": "1. Data scan — Run a full scan in the AI Management tab to register your image folders.",
+      "step2": "2. AI tagging — After scanning, run \"AI Pipeline (all)\" to generate tags and embedding vectors.",
+      "step3": "3. Color map — After AI tagging, run the color map backfill in the AI Management tab to enable color search."
     }
   },
   "colorPick": {

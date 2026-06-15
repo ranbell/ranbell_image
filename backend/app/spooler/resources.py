@@ -144,8 +144,9 @@ class Resource:
     endpoint: str | None = None
     health_path: str = "/"
 
-    reachable: bool = True
+    reachable: bool = False
     last_ok: float | None = None
+    last_checked: float | None = None  # set on every probe attempt (success or failure)
     latency_ms: float | None = None
     version: str | None = None
 
@@ -172,6 +173,7 @@ class Resource:
             "endpoint": self.endpoint,
             "reachable": self.reachable,
             "last_ok": self.last_ok,
+            "last_checked": self.last_checked,
             "latency_ms": self.latency_ms,
             "version": self.version,
         }
@@ -235,6 +237,18 @@ def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | 
             concurrency=99,  # Not used in lane mapping, so semaphore is effectively a no-op
             endpoint=qdrant_url,
             health_path=getattr(settings, "resource_remote_qdrant_health_path", "/healthz"),
+            reachable=False,
+        )
+
+    # Register ComfyUI as a monitoring-only remote resource (not included in lane mapping)
+    comfyui_url = getattr(settings, "comfyui_url", None)
+    if comfyui_url:
+        resources["remote-comfyui"] = Resource(
+            name="remote-comfyui",
+            kind="remote",
+            concurrency=99,  # Not used in lane mapping, so semaphore is effectively a no-op
+            endpoint=comfyui_url,
+            health_path="/system_stats",
             reachable=False,
         )
 
@@ -313,14 +327,16 @@ async def monitor_remote_resources(
                 t0 = time.monotonic()
                 try:
                     resp = await client.get(url)
-                    ok = resp.status_code < 500
+                    ok = resp.status_code == 200
                 except Exception:
                     ok = False
                 elapsed_ms = (time.monotonic() - t0) * 1000
 
+                now = time.time()
+                res.last_checked = now
                 if ok:
                     res.reachable = True
-                    res.last_ok = time.time()
+                    res.last_ok = now
                     res.latency_ms = round(elapsed_ms, 1)
                     try:
                         body = resp.json()
@@ -380,9 +396,11 @@ async def probe_resources_on_startup(resources: dict[str, Resource]) -> None:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(url)
-                if resp.status_code < 500:
+                now = time.time()
+                res.last_checked = now
+                if resp.status_code == 200:
                     res.reachable = True
-                    res.last_ok = time.time()
+                    res.last_ok = now
                     try:
                         body = resp.json()
                         if isinstance(body, dict) and "version" in body:
@@ -391,11 +409,14 @@ async def probe_resources_on_startup(resources: dict[str, Resource]) -> None:
                         pass
                     logger.info("Resource %r is reachable at startup", res.name)
                 else:
+                    res.reachable = False
                     logger.warning(
                         "Resource %r returned %d at startup, marking unreachable",
                         res.name, resp.status_code,
                     )
         except Exception as exc:
+            res.last_checked = time.time()
+            res.reachable = False
             logger.warning(
                 "Resource %r unreachable at startup (%s), will retry in background",
                 res.name, exc,

@@ -252,7 +252,7 @@ docker compose up -d --build
 
 Open **http://localhost:3100** in your browser.
 
-**First run:** click **SCAN** in the header, then open the **Admin** panel to run AI backfill (generates embeddings for semantic search). See [INSTALLATION.md](INSTALLATION.md) for the full setup guide.
+**First run:** On first launch, the app automatically checks for required components and opens the **Admin → Diagnostics** tab if anything needs attention — WD14 model files, Ollama connection, INVOKE Vocab import, and ComfyUI workflows. Follow the guidance there, then click **SCAN** and run AI backfill from the Admin panel. See [INSTALLATION.md](INSTALLATION.md) for the full setup guide.
 
 ---
 

@@ -222,7 +222,7 @@ async def respin(body: RespinRequest, request: Request):
     spirit.prompt_result = None
     spirit.alignment_score = None
 
-    from ..invoke.vocab_bank import get_vocab_hints
+    from ..invoke.vocab_bank import get_vocab_hints, get_axis_semantic_tags
     axis_tags = []
     for v in (session.axes or {}).values():
         if isinstance(v, list):
@@ -234,6 +234,11 @@ async def respin(body: RespinRequest, request: Request):
         vocab_hints = await get_vocab_hints(session.db, session.ollama, axis_tags)
     except Exception:
         vocab_hints = {"stranger": [], "lunatic": []}
+
+    try:
+        axis_tag_hints = await get_axis_semantic_tags(session.db, session.ollama, session.axes or {})
+    except Exception:
+        axis_tag_hints = []
 
     from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_spirit_compose
@@ -249,6 +254,7 @@ async def respin(body: RespinRequest, request: Request):
         spirit_name=body.spirit_name,
         axes=session.axes or {},
         vocab_hints=spirit_vocab,
+        axis_tag_hints=axis_tag_hints,
         locale=session.locale,
         session_manager=mgr,
     )

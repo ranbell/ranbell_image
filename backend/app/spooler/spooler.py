@@ -87,8 +87,14 @@ class JobSpooler:
             monitor_remote_resources,
             probe_resources_on_startup,
         )
-        await probe_resources_on_startup(self._resources)
+        # Run the initial probe as a background task so external services
+        # (Ollama, ComfyUI) do not block the backend from becoming ready.
+        # Resources default to reachable=False and are updated by the probe.
         self._monitor_tasks = [
+            asyncio.create_task(
+                probe_resources_on_startup(self._resources),
+                name="spooler-startup-probe",
+            ),
             asyncio.create_task(
                 monitor_remote_resources(self._resources),
                 name="spooler-remote-monitor",

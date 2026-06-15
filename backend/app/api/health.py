@@ -31,13 +31,14 @@ async def detailed_health(request: Request):
     async def check_ollama():
         try:
             cfg = await get_runtime_config(db)
-            ok = await ollama.health()
-            models = await ollama.list_models() if ok else []
+            runtime_url = cfg["ollama_url"]
+            ok = await ollama.health(runtime_url)
+            models = await ollama.list_models(runtime_url) if ok else []
             embed_model = cfg["embed_model"]
             vlm_model = cfg["vlm_model"]
             return {
                 "ok": ok,
-                "url": cfg["ollama_url"],
+                "url": runtime_url,
                 "models": models,
                 "embed_model": embed_model,
                 "embed_model_available": any(
@@ -58,7 +59,7 @@ async def detailed_health(request: Request):
         try:
             c = request.app.state.comfy
             ok = await c.is_available()
-            workflows = c.list_workflows() if ok else []
+            workflows = c.list_workflows()  # reads local filesystem, independent of connection
             return {
                 "ok": ok,
                 "url": settings.comfyui_url,
@@ -67,7 +68,9 @@ async def detailed_health(request: Request):
             }
         except Exception as e:
             logger.error("ComfyUI health check failed: %s", e)
-            return {"ok": False, "error": "接続エラー", "url": settings.comfyui_url, "workflows": []}
+            c = getattr(request.app.state, "comfy", None)
+            workflows = c.list_workflows() if c else []
+            return {"ok": False, "error": "接続エラー", "url": settings.comfyui_url, "workflows": workflows}
 
     qdrant_res, ollama_res, comfy_res = await asyncio.gather(
         check_qdrant(), check_ollama(), check_comfy()

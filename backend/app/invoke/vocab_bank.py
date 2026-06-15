@@ -79,6 +79,74 @@ async def _get_library_tag_freq(db) -> dict[str, int]:
     return freq
 
 
+async def get_axis_semantic_tags(
+    db,
+    ollama,
+    axes: dict,
+    limit: int = 30,
+) -> list[str]:
+    """Embed the full axis content and return semantically close Danbooru tags.
+
+    Unlike get_vocab_hints() (which targets divergent tags for stranger/lunatic),
+    this returns the closest-matching tags to help ALL spirits accurately express
+    the user's intent in Danbooru vocabulary.
+    Falls back to [] when WD14 vocab is not imported or on any error.
+    """
+    count = await _get_vocab_count(db)
+    if count == 0:
+        return []
+
+    # Build query text from all non-private axes
+    parts: list[str] = []
+    for key, val in axes.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(val, list):
+            parts.extend(val)
+        elif isinstance(val, str) and val:
+            parts.append(val)
+    if not parts:
+        return []
+
+    query_text = " ".join(parts)
+    try:
+        vec = await ollama.embed(query_text)
+    except Exception as e:
+        logger.warning("axis_tag_hints embed failed: %s", e)
+        return []
+
+    try:
+        hits = await db.search_wd14_vocab(
+            vec, min_freq=0.01, max_freq=0.80, category=0, limit=limit * 3
+        )
+    except Exception as e:
+        logger.warning("axis_tag_hints search failed: %s", e)
+        return []
+
+    # Collect tags already present in axes (character_detail, accessories, style, etc.)
+    # so we don't redundantly re-inject them
+    existing: set[str] = set()
+    for key in ("character_detail", "accessories", "style"):
+        val = axes.get(key, "")
+        if isinstance(val, list):
+            existing.update(t.strip().lower() for t in val if t.strip())
+        elif isinstance(val, str):
+            existing.update(t.strip().lower() for t in val.replace(",", " ").split() if t.strip())
+
+    result: list[str] = []
+    for h in hits:
+        tag = h["name"]
+        if _is_species_tag(tag):
+            continue
+        if tag.lower() in existing:
+            continue
+        result.append(tag)
+        if len(result) >= limit:
+            break
+
+    return result
+
+
 async def get_vocab_hints(
     db,
     ollama,

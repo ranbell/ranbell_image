@@ -438,6 +438,40 @@ const showAdmin = ref(false)
 
 function openAdmin() { showAdmin.value = true }
 
+async function runStartupChecks() {
+  if (sessionStorage.getItem('startupChecked')) return
+  sessionStorage.setItem('startupChecked', '1')
+  try {
+    const [statsRes, vocabRes, healthRes] = await Promise.all([
+      fetch('/api/admin/stats'),
+      fetch('/api/admin/invoke/vocab-status'),
+      fetch('/api/health/detail'),
+    ])
+    const stats  = statsRes.ok  ? await statsRes.json()  : null
+    const vocab  = vocabRes.ok  ? await vocabRes.json()  : null
+    const health = healthRes.ok ? await healthRes.json() : null
+
+    const ollamaOk  = health?.ollama?.ok === true
+    const wd14Ready = stats?.wd14?.model_ok && stats?.wd14?.tags_ok
+    const vocabDone = vocab?.imported === true
+    const wfCount   = health?.comfyui?.workflows?.length ?? 0
+
+    if (wd14Ready && !vocabDone && ollamaOk) {
+      fetch('/api/admin/invoke/import-wd14-vocab', { method: 'POST' })
+    }
+
+    if (!ollamaOk || !wd14Ready || !vocabDone) {
+      showAdmin.value = true
+    }
+
+    if (wfCount === 0) {
+      showToast(t('toast.noWorkflows'), 'error', 8000)
+    }
+  } catch (e) {
+    console.warn('Startup checks failed:', e)
+  }
+}
+
 function copyWd14Tags() {
   if (!selected.value?.wd14_tags?.length) return
   copyToClipboard(selected.value.wd14_tags.join(', '))
@@ -2268,6 +2302,7 @@ onMounted(async () => {
   await waitForBackend()
 
   startJobStream()
+  runStartupChecks()
 
   // Set up observer immediately — before awaiting data fetches.
   // fetchImages() can hang for up to 30s under Qdrant load, and the observer

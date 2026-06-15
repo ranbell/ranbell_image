@@ -1194,6 +1194,7 @@ async def run_invoke_spirit_compose(
     spirit_name: str,
     axes: dict,
     vocab_hints: dict,
+    axis_tag_hints: list | None = None,
     locale: str = "en",
     session_manager,
 ) -> dict:
@@ -1244,6 +1245,11 @@ async def run_invoke_spirit_compose(
         elif spirit_name == "lunatic" and lunatic_tags:
             user_msg_parts.append(f"wild_tags: [{lunatic_tags}]")
 
+    if axis_tag_hints:
+        user_msg_parts.append(
+            f"SUGGESTED DANBOORU TAGS (semantically close to the axes — "
+            f"incorporate as many as appropriate): [{', '.join(axis_tag_hints)}]"
+        )
     user_msg_parts.append(
         "Your danbooru_tags MUST cover all axes: subject+action, scene+environment, "
         "mood+atmosphere, lighting, palette, and style."
