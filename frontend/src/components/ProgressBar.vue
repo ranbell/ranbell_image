@@ -8,6 +8,8 @@ const props = defineProps({
   eta:           { type: Number,  default: null },
   color:         { type: String,  default: 'default' },
   size:          { type: String,  default: 'sm' },
+  currentStep:   { type: Number,  default: 0 },
+  totalSteps:    { type: Number,  default: 0 },
 })
 
 function formatEta(s: number): string {
@@ -20,11 +22,15 @@ function formatEta(s: number): string {
 
 const pct = computed(() => Math.round((props.progress ?? 0) * 100))
 const label = computed(() => props.progressText ?? `${pct.value}%`)
+const hasOverlay = computed(() => props.currentStep > 0 && props.totalSteps > 0)
 </script>
 
 <template>
   <div class="pb-wrapper">
-    <div class="pb-track" :class="`pb-track--${size}`">
+    <div
+      class="pb-track"
+      :class="hasOverlay ? 'pb-track--overlay' : `pb-track--${size}`"
+    >
       <div
         class="pb-fill"
         :class="[
@@ -33,8 +39,14 @@ const label = computed(() => props.progressText ?? `${pct.value}%`)
         ]"
         :style="indeterminate ? 'width:40%' : `width:100%;transform:scaleX(${props.progress ?? 0})`"
       />
+      <!-- Step / ETA overlay inside bar -->
+      <div v-if="hasOverlay" class="pb-overlay">
+        <span class="pb-overlay-phase">{{ label }}</span>
+        <span class="pb-overlay-step">{{ currentStep }} / {{ totalSteps }}</span>
+        <span v-if="eta != null && eta > 2 && !indeterminate" class="pb-overlay-eta">残り約{{ Math.ceil(eta) }}秒</span>
+      </div>
     </div>
-    <div class="pb-meta">
+    <div v-if="!hasOverlay" class="pb-meta">
       <span class="pb-label">{{ label }}</span>
       <span v-if="eta != null && !indeterminate" class="pb-eta">{{ formatEta(eta) }} left</span>
     </div>
@@ -60,12 +72,18 @@ const label = computed(() => props.progressText ?? `${pct.value}%`)
 .pb-track--sm  { height: 4px; }
 .pb-track--md  { height: 6px; }
 .pb-track--lg  { height: 8px; }
+.pb-track--overlay {
+  height: 22px;
+  position: relative;
+  overflow: hidden;
+}
 
 .pb-fill {
   height: 100%;
   border-radius: 9999px;
   transform-origin: left center;
   will-change: transform;
+  transition: transform 0.25s ease-out;
 }
 
 .pb-fill--default {
@@ -98,6 +116,40 @@ const label = computed(() => props.progressText ?? `${pct.value}%`)
   color: #9ca3af;
   font-size: 10px;
   opacity: 0.75;
+}
+
+/* Overlay layout */
+.pb-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.pb-overlay-phase {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pb-overlay-step {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+}
+
+.pb-overlay-eta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
 }
 
 @keyframes pb-indeterminate-blink {

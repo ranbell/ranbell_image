@@ -25,6 +25,45 @@ _PRIORITY_ALIGNMENT = -10
 
 logger = logging.getLogger(__name__)
 
+# Person/subject count tags used as safety-net anchors in refine output.
+_PERSON_COUNT_TAGS = frozenset({
+    "1girl", "1boy", "solo", "2girls", "2boys", "3girls", "3boys",
+    "multiple_girls", "multiple_boys", "6+girls", "6+boys",
+    "1other", "2others", "multiple_others",
+})
+
+
+def _ensure_subject_anchor(tags_positive: str, raw_docs: list, wd14_scores_key: str = "wd14_tags_scores") -> str:
+    """If Pass 1 output lacks a subject count tag, prepend the highest-confidence one from WD14."""
+    tag_set = {t.strip().lower() for t in tags_positive.split(",") if t.strip()}
+    if tag_set & _PERSON_COUNT_TAGS:
+        return tags_positive
+    best_tag, best_score = "", 0.0
+    for doc, _idx in raw_docs:
+        wd14 = doc.get("wd14_tags", [])
+        scores = doc.get(wd14_scores_key) or []
+        for tag, score in zip(wd14, scores):
+            if tag in _PERSON_COUNT_TAGS and score > best_score:
+                best_tag, best_score = tag, score
+    if best_tag and best_score >= 0.40:
+        return f"{best_tag}, {tags_positive}"
+    return tags_positive
+
+
+# Quality meta-tags that must never appear in invoke positive/negative prompts.
+# Spirits must not generate them, but we strip as a safety net.
+_INVOKE_QUALITY_METATAG_BLOCKLIST = frozenset({
+    "masterpiece", "best_quality", "highres", "ultra_detailed", "4k", "8k", "hd", "uhd",
+    "worst_quality", "low_quality", "bad_anatomy", "extra_limbs", "extra_fingers",
+    "missing_fingers", "missing_arms", "mutated_hands", "jpeg_artifacts", "blurry",
+    "out_of_focus", "watermark", "signature", "text", "username", "error",
+})
+
+
+def _strip_quality_metatags(tags: str) -> str:
+    parts = [t.strip() for t in tags.split(",") if t.strip()]
+    return ", ".join(t for t in parts if t.lower() not in _INVOKE_QUALITY_METATAG_BLOCKLIST)
+
 
 # ── SYNC lane: scan jobs ───────────────────────────────────────────────────────
 
@@ -843,17 +882,29 @@ async def run_refine_prompt(
         _WD14_MUST_INCLUDE_THRESHOLD,
         _resolve_weights,
         _build_vlm_prompt,
+        _build_natural_tags_prompt,
+        _build_natural_prose_prompt,
+        _build_natural_visual_script_prompt,
+        _build_weighted_wd14_context,
         _clean_markdown,
         _strip_stray_negative,
         _parse_positive_negative,
+        _parse_visual_script_sections,
+        _strip_visual_script_markers,
+        _build_all_must,
+        _inject_wd14_must_tags,
+        _correct_prose_wd14_conflicts,
+        _enforce_wd14_on_cat_tags,
         _check_natural_prose,
         _remove_forced_tags,
         _translate_instruction,
         _translate_and_classify,
-        _extract_literal_directives,
-        _inject_literal_directives,
+        _extract_literal_texts,
+        _append_literal_texts,
         _parse_detailed_output,
+        _REFINE_CAT_FIELDS,
     )
+    from ..api.inspire import _parse_json_from_llm, _split_tags
     from ..ai.tile_image import create_tile_image
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
@@ -862,6 +913,10 @@ async def run_refine_prompt(
 
     def _put(event: dict | None) -> None:
         token_queue.put_nowait(event)
+
+    def _phase(code: str, progress: float, text: str) -> None:
+        reporter.update(progress, text)
+        _put({"type": "phase", "code": code})
 
     # event for cancel signal (can be set synchronously from on_cancel handler)
     _abort = asyncio.Event()
@@ -894,7 +949,7 @@ async def run_refine_prompt(
         return
 
     # 1a. load images (doc metadata only — context built after conflict detection)
-    reporter.indeterminate()
+    _phase("loadingImages", 0.02, "Loading reference images...")
     image_bytes_list: list[bytes] = []
     weights = _resolve_weights(body.sha256s[:6], body.weights)
     raw_docs: list[tuple[dict, int]] = []  # (doc, original_idx)
@@ -922,18 +977,19 @@ async def run_refine_prompt(
     cfg = await get_runtime_config(db)
     options = {"temperature": body.temperature, "num_ctx": body.num_ctx}
 
-    # 3a. instruction pre-processing: translate → separate literals from NL
-    literals: list[dict] = []
+    # 3a. instruction pre-processing: separate literals from NL
+    # LLM/VLM understands Japanese directly — translation is unnecessary overhead.
+    # basic: regex-only literal extraction (instant); enhanced: LLM classify only.
+    literal_texts: list[str] = []
     nl_instruction = body.instruction
     if body.instruction and body.instruction_mode != "none":
-        if body.instruction_mode == "basic":
-            instr_en = await _translate_instruction(
-                body.instruction, ollama, model=cfg["vlm_model"]
-            )
-            nl_instruction, literals = _extract_literal_directives(instr_en)
-        elif body.instruction_mode == "enhanced":
-            _, nl_instruction, literals = await _translate_and_classify(
-                body.instruction, ollama, model=cfg["vlm_model"]
+        # Strip text-render commands from instruction so VLM never sees them;
+        # they are appended as text "X", text_on_image at the end of post-processing.
+        literal_texts, nl_instruction = _extract_literal_texts(body.instruction)
+        if body.instruction_mode == "enhanced" and nl_instruction:
+            _phase("translatingInstruction", 0.05, "Analyzing instruction...")
+            _, nl_instruction, _ = await _translate_and_classify(
+                nl_instruction, ollama, model=cfg["vlm_model"]
             )
 
     # 3b. conflict tag suppression: identify WD14 tags that contradict user instruction
@@ -941,63 +997,168 @@ async def run_refine_prompt(
     if body.suppress_conflict_tags and nl_instruction:
         all_source_tags = [t for doc, _ in raw_docs for t in doc.get("wd14_tags", [])]
         if all_source_tags:
+            _phase("analyzingConflicts", 0.08, "Analyzing tag conflicts...")
             conflict_tags = await _find_conflict_tags(
                 nl_instruction, all_source_tags, db, ollama, cfg["vlm_model"]
             )
-            reporter.update(0.04, "Tag conflict analysis done")
 
-    # 1b. build context parts (with conflict tags excluded)
-    context_parts: list[str] = []
-    loaded_indices: list[int] = []
-    for doc, idx in raw_docs:
-        lines: list[str] = []
-        prompt_txt = doc.get("positive_prompt", "")
-        if prompt_txt:
-            lines.append(f"Prompt: {prompt_txt}")
-        wd14 = doc.get("wd14_tags", [])
-        wd14_scores = doc.get("wd14_tags_scores", [])
-        if wd14_scores and len(wd14_scores) == len(wd14):
-            scored_pairs = [(t, s) for t, s in zip(wd14, wd14_scores) if t not in conflict_tags]
-            must_tags = [t for t, s in scored_pairs if s >= _WD14_MUST_INCLUDE_THRESHOLD]
-            if must_tags:
-                lines.append(f"Must include these tags verbatim: {', '.join(must_tags)}")
-            remaining = [t for t, s in scored_pairs if s < _WD14_MUST_INCLUDE_THRESHOLD]
-            if remaining:
-                lines.append(f"Reference tags: {', '.join(remaining[:30])}")
-        elif wd14:
-            filtered = [t for t in wd14 if t not in conflict_tags]
-            if filtered:
-                lines.append(f"Auto-tags: {', '.join(filtered[:40])}")
-        if lines:
-            context_parts.append("\n".join(lines))
-            loaded_indices.append(idx)
-
-    annotated_parts: list[str] = []
-    for part_idx, (ctx, img_idx) in enumerate(zip(context_parts, loaded_indices)):
-        pct = round(weights[img_idx] * 100)
-        annotated_parts.append(f"[Image {part_idx + 1} — influence weight: {pct}%]\n{ctx}")
-    context = "\n\n---\n\n".join(annotated_parts)
-
-    vlm_prompt = _build_vlm_prompt(
-        context,
-        nl_instruction,
-        body.prompt_style,
-        body.negative_prompt,
-        instruction_framing=(body.instruction_mode != "none"),
+    # 1b. build context with common/unique WD14 tag decomposition
+    _phase("buildingPrompt", 0.10, "Building prompt context...")
+    context, wd14_analysis = _build_weighted_wd14_context(
+        raw_docs,
+        weights,
+        conflict_tags,
+        common_ratio=body.wd14_common_ratio,
+        unique_count=body.wd14_unique_count,
     )
+    instruction_framing = body.instruction_mode != "none"
 
-    # 4. Ollama stream → token_queue
-    accumulated_tokens: list[str] = []
-    reporter.update(0.05, "VLM generating...")
-    try:
+    async def _stream_vlm(
+        prompt: str,
+        phase_start: float = 0.0,
+        phase_end: float = 1.0,
+        expected_tokens: int = 200,
+        phase_text: str = "",
+    ) -> str:
+        """Run one VLM call (with images), forwarding tokens to token_queue."""
+        tokens: list[str] = []
         async for event in ollama.generate_vlm_stream(
-            vlm_prompt, images_for_vlm, model=cfg["vlm_model"], options=options
+            prompt, images_for_vlm, model=cfg["vlm_model"], options=options
         ):
             if _abort.is_set():
                 raise JobCancelled()
             _put(event)
             if event["type"] == "token":
-                accumulated_tokens.append(event["text"])
+                tokens.append(event["text"])
+                n = len(tokens)
+                if n % 8 == 0:
+                    frac = min(n / expected_tokens, 0.97)
+                    reporter.update(phase_start + (phase_end - phase_start) * frac, phase_text)
+        return "".join(tokens)
+
+    async def _stream_text(
+        prompt: str,
+        phase_start: float = 0.0,
+        phase_end: float = 1.0,
+        expected_tokens: int = 200,
+        phase_text: str = "",
+    ) -> str:
+        """Run a text-only LLM call (no images), forwarding tokens to token_queue."""
+        tokens: list[str] = []
+        async for event in ollama.generate_text_stream(
+            prompt, model=cfg["vlm_model"], options=options
+        ):
+            if _abort.is_set():
+                raise JobCancelled()
+            _put(event)
+            if event["type"] == "token":
+                tokens.append(event["text"])
+                n = len(tokens)
+                if n % 8 == 0:
+                    frac = min(n / expected_tokens, 0.97)
+                    reporter.update(phase_start + (phase_end - phase_start) * frac, phase_text)
+        return "".join(tokens)
+
+    # 4. Ollama call(s) → token_queue
+    context_story = ""
+    cat_tags: dict[str, list[str]] = {f: [] for f in _REFINE_CAT_FIELDS}
+    _all_must = _build_all_must(wd14_analysis)
+
+    try:
+        if body.prompt_style == "natural":
+            # Pass 1: tags only — a small VLM handles one focused task reliably.
+            tags_prompt = _build_natural_tags_prompt(
+                context, nl_instruction, body.negative_prompt,
+                instruction_framing=instruction_framing,
+            )
+            _phase("writingTags", 0.20, "Writing tags...")
+            tags_raw = await _stream_vlm(tags_prompt, 0.20, 0.55, 80, "Writing tags...")
+            if body.negative_prompt:
+                tags_positive, negative = _parse_positive_negative(tags_raw)
+            else:
+                tags_positive, negative = _strip_stray_negative(tags_raw), ""
+            tags_positive = _clean_markdown(tags_positive)
+            negative = _clean_markdown(negative)
+            tags_positive = _ensure_subject_anchor(tags_positive, raw_docs)
+            # Inject WD14 must_unique directly into tag line ("2回" reinforcement)
+            tags_positive = _inject_wd14_must_tags(tags_positive, wd14_analysis)
+
+            # Pass 2: Visual Script — prose with inline danbooru tags + per-category labeled sections.
+            _put({"type": "token", "text": "\n\n"})
+            vs_prompt = _build_natural_visual_script_prompt(
+                context, nl_instruction, tags_positive,
+                instruction_framing=instruction_framing,
+            )
+            _phase("writingDescription", 0.55, "Writing Visual Script...")
+            vs_raw = await _stream_text(vs_prompt, 0.55, 0.90, 500, "Writing Visual Script...")
+
+            # Parse visual script: split prose from labeled tag sections
+            context_story, vs_cat_tags = _parse_visual_script_sections(vs_raw)
+            context_story = _strip_visual_script_markers(context_story)
+
+            # Post-processing: correct WD14 conflicts in prose and category tags
+            if _all_must:
+                context_story = _correct_prose_wd14_conflicts(context_story, _all_must)
+            for _f in _REFINE_CAT_FIELDS:
+                cat_tags[_f] = vs_cat_tags.get(_f, [])
+            if _all_must:
+                cat_tags = _enforce_wd14_on_cat_tags(cat_tags, _all_must)
+
+            prose_missing = len(context_story.split()) < 30
+            positive = f"{tags_positive}\n\n{context_story}"
+        else:
+            vlm_prompt = _build_vlm_prompt(
+                context, nl_instruction, body.prompt_style, body.negative_prompt,
+                instruction_framing=instruction_framing,
+            )
+            _phase("generatingPrompt", 0.20, "VLM generating...")
+            raw_text = await _stream_vlm(vlm_prompt, 0.20, 0.90, 150, "VLM generating...")
+            prose_missing = False
+
+            if body.prompt_style == "detailed":
+                # Split off trailing per-category JSON block before parsing 8 sections
+                _cb = raw_text.rfind("```json")
+                if _cb >= 0:
+                    _sections_text = raw_text[:_cb].strip()
+                    _cat_json = _parse_json_from_llm(raw_text[_cb:])
+                    for _f in _REFINE_CAT_FIELDS:
+                        _v = _cat_json.get(_f, "")
+                        cat_tags[_f] = _split_tags(_v) if _v else []
+                else:
+                    _sections_text = raw_text
+
+                # Parse 8-section format BEFORE _clean_markdown strips ** bold markers
+                if body.negative_prompt:
+                    # Extract 8 sections from full raw text — do NOT split on POSITIVE: first,
+                    # as that would discard everything before the POSITIVE: label.
+                    parsed = _parse_detailed_output(_sections_text)
+                    if parsed:
+                        positive = _clean_markdown(parsed)
+                    else:
+                        # Fallback: no 8-section structure found — use POSITIVE: block directly
+                        positive_raw, _ = _parse_positive_negative(_sections_text)
+                        positive = _clean_markdown(positive_raw)
+                    neg_m = re.search(r"NEGATIVE:\s*(.*?)$", _sections_text, re.S | re.I)
+                    negative = _clean_markdown(neg_m.group(1).strip()) if neg_m else ""
+                else:
+                    _raw_stripped = _strip_stray_negative(_sections_text)
+                    parsed = _parse_detailed_output(_raw_stripped)
+                    positive = _clean_markdown(parsed if parsed else _raw_stripped)
+                    negative = ""
+            elif body.negative_prompt:
+                positive_raw, negative_raw = _parse_positive_negative(raw_text)
+                positive = _clean_markdown(positive_raw)
+                negative = _clean_markdown(negative_raw)
+            else:
+                positive = _clean_markdown(_strip_stray_negative(raw_text))
+                negative = ""
+            # WD14 post-processing for danbooru/detailed (mirrors natural branch)
+            if body.prompt_style == "danbooru":
+                positive = _inject_wd14_must_tags(positive, wd14_analysis)
+            if _all_must:
+                if body.prompt_style == "detailed":
+                    positive = _correct_prose_wd14_conflicts(positive, _all_must)
+                cat_tags = _enforce_wd14_on_cat_tags(cat_tags, _all_must)
     except JobCancelled:
         _put({"type": "cancelled"})
         _put(None)
@@ -1008,36 +1169,8 @@ async def run_refine_prompt(
         _put(None)
         return
 
-    # 5. parse text
-    raw_text = "".join(accumulated_tokens)
-
-    if body.prompt_style == "detailed":
-        # Parse 8-section format BEFORE _clean_markdown strips ** bold markers
-        if body.negative_prompt:
-            # Extract 8 sections from full raw text — do NOT split on POSITIVE: first,
-            # as that would discard everything before the POSITIVE: label.
-            parsed = _parse_detailed_output(raw_text)
-            if parsed:
-                positive = _clean_markdown(parsed)
-            else:
-                # Fallback: no 8-section structure found — use POSITIVE: block directly
-                positive_raw, _ = _parse_positive_negative(raw_text)
-                positive = _clean_markdown(positive_raw)
-            neg_m = re.search(r"NEGATIVE:\s*(.*?)$", raw_text, re.S | re.I)
-            negative = _clean_markdown(neg_m.group(1).strip()) if neg_m else ""
-        else:
-            raw_stripped = _strip_stray_negative(raw_text)
-            parsed = _parse_detailed_output(raw_stripped)
-            positive = _clean_markdown(parsed if parsed else raw_stripped)
-            negative = ""
-    elif body.negative_prompt:
-        positive_raw, negative_raw = _parse_positive_negative(raw_text)
-        positive = _clean_markdown(positive_raw)
-        negative = _clean_markdown(negative_raw)
-    else:
-        positive = _clean_markdown(_strip_stray_negative(raw_text))
-        negative = ""
-
+    # 5. post-process: forced-tag removal + literal directive injection
+    _phase("parsingOutput", 0.90, "Parsing output...")
     removal_tags = {t.lower().replace(' ', '_') for t in cfg.get("prompt_removal_tags", [])}
     positive, removed_tags = _remove_forced_tags(
         positive,
@@ -1045,11 +1178,9 @@ async def run_refine_prompt(
         all_lines=(body.prompt_style in ("detailed", "danbooru")),
     )
 
-    # 5b. inject literal directives (text overlays etc.) bypassing VLM
-    if literals:
-        positive = _inject_literal_directives(positive, literals)
-
-    prose_missing = body.prompt_style == "natural" and not _check_natural_prose(positive)
+    # 5b. append literal text render tags (text "X") to end of positive prompt
+    if literal_texts:
+        positive = _append_literal_texts(positive, literal_texts)
 
     _put({
         "type": "done",
@@ -1058,12 +1189,16 @@ async def run_refine_prompt(
         "auto_submit": body.auto_submit,
         "prose_missing": prose_missing,
         "removed_tags": removed_tags,
-        "injected_literals": literals,
+        "injected_literals": [{"text": t} for t in literal_texts],
+        "context_story": context_story,
+        "wd14_analysis": wd14_analysis,
+        **cat_tags,
     })
 
     # 6. auto_submit: queue a ComfyUI generation job
     if body.auto_submit and body.workflow_name:
         try:
+            _phase("queuingGeneration", 0.97, "Queuing generation job...")
             gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
         except Exception as exc:
@@ -1143,6 +1278,8 @@ async def run_invoke_axis_decompose(
     person_count: str = "",
     camera_shot: str = "",
     camera_angle: str = "",
+    pro_topic: str = "",
+    pro_sections: dict | None = None,
     session_manager,
 ) -> dict:
     """PROMPT lane. Decompose user intent into structured axes."""
@@ -1155,8 +1292,18 @@ async def run_invoke_axis_decompose(
     from ..invoke.axis_decomposer import _EMOJI_MEANINGS
 
     person_present = bool(person_gender or person_count)
-    # Build a slogan approximation for hint search when user_intent is empty
-    hint_query = user_intent or " ".join(
+
+    # Pro mode: お題テキストがあれば topic_tags + slogan を合成してから軸分解へ
+    if pro_topic:
+        from ..invoke.vocab_bank import get_topic_tags, synthesize_slogan
+        topic_tags = await get_topic_tags(db, ollama, pro_topic, pro_sections)
+        effective_slogan = await synthesize_slogan(pro_topic, pro_sections, topic_tags, ollama)
+    else:
+        topic_tags = []
+        effective_slogan = user_intent  # Light mode: determine_slogan が通常通り実行
+
+
+    hint_query = effective_slogan or " ".join(
         _EMOJI_MEANINGS.get(e, e) for e in (emoji_codes or [])
     )
     try:
@@ -1169,7 +1316,7 @@ async def run_invoke_axis_decompose(
 
     axes = await decompose_axes(
         ollama,
-        user_intent=user_intent,
+        user_intent=effective_slogan,
         emoji_codes=emoji_codes,
         mood_sliders=mood_sliders,
         color_hex=color_hex,
@@ -1178,8 +1325,20 @@ async def run_invoke_axis_decompose(
         camera_shot=camera_shot,
         camera_angle=camera_angle,
         character_hints=character_hints,
+        pro_sections=pro_sections or {},
     )
-    axes['_user_intent'] = user_intent
+    # スピリットが元の NL テキストを参照できるよう _user_intent を元お題に上書き
+    axes['_user_intent'] = pro_topic or user_intent
+    if topic_tags:
+        axes['_topic_tags'] = topic_tags
+
+    # Pro mode: スピリット別シーン多様性のため N バリアントを生成
+    if pro_topic:
+        from ..invoke.axis_decomposer import generate_scene_variants
+        _session = session_manager.get_session(session_id)
+        enabled_count = len(_session.enabled_spirits) if _session else 5
+        scene_variants = await generate_scene_variants(ollama, axes, pro_topic, n=enabled_count)
+        axes['_scene_variants'] = scene_variants
 
     reporter.update(1.0, "Axes ready")
     await session_manager.on_axis_done(session_id, axes)
@@ -1196,6 +1355,7 @@ async def run_invoke_spirit_compose(
     vocab_hints: dict,
     axis_tag_hints: list | None = None,
     locale: str = "en",
+    rebel_inversion: bool = True,
     session_manager,
 ) -> dict:
     """PROMPT lane. Generate prompt for one Spirit via Ollama."""
@@ -1259,6 +1419,13 @@ async def run_invoke_spirit_compose(
             'IMPORTANT: Write the "internal_monologue" value in Japanese (日本語で書くこと). This is required.'
         )
 
+    if spirit_name == "rebel" and not rebel_inversion:
+        user_msg_parts.append(
+            "[INVERSION OVERRIDE]: Express Counter's contrarian perspective WITHOUT inverting any axis. "
+            "Find an unexpected but beautiful angle on the theme that produces a coherent, high-quality image. "
+            "Set inverted_axis to null."
+        )
+
     full_prompt = f"{sys_prompt}\n\n---\n\n" + "\n".join(user_msg_parts)
 
     session = session_manager.get_session(session_id)
@@ -1291,6 +1458,15 @@ async def run_invoke_spirit_compose(
             "inverted_axis": None,
             "wild_tags_used": [],
         }
+
+    # ── BM25 normalize Spirit danbooru_tags against Danbooru vocabulary ──────
+    try:
+        from ..ai.wd14 import normalize_tag_string
+        raw_tags = (result.get("danbooru_tags") or "")
+        if raw_tags:
+            result["danbooru_tags"] = normalize_tag_string(raw_tags)
+    except Exception:
+        pass  # BM25 index not ready yet — skip silently
 
     # ── Content safety check on LLM output (VLM-delegated) ───────────────────
     from ..invoke.content_guard import check_spirit_output, BLOCK_MESSAGE
@@ -1372,7 +1548,7 @@ async def run_invoke_image_generate(
     person_tags = getattr(session, "person_tags", "")
 
     nl      = (prompt_result.get("natural_language") or "").strip()
-    db_tags = (prompt_result.get("danbooru_tags")    or "").strip()
+    db_tags = _strip_quality_metatags((prompt_result.get("danbooru_tags") or "").strip())
 
     # Treat very short natural_language as absent (Spirit fallback produces subject string only)
     nl_usable = nl if len(nl) >= 30 else ""
@@ -1428,6 +1604,7 @@ async def run_invoke_image_generate(
                 v = event.get("value", 0)
                 m = event.get("max", 1)
                 reporter.update(v / max(m, 1), f"Step {v}/{m}")
+                await session_manager.on_spirit_progress(session_id, spirit_name, v, m)
 
             elif event["type"] == "comfy_output":
                 for img_ref in event.get("images", []):

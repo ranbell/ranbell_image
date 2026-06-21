@@ -54,8 +54,8 @@ There's more than one way to extract information from a reference image. Alchemy
 graph TB
   ref["Reference image(s)"]
   v1["Layer 1: VLM\nReads composition,\ncolor tone, style &\nmood into words"]
-  v2["Layer 2: WD14\nHigh-conf tags → must keep\nLow-conf tags → reference"]
-  v3["Layer 3: Weights\nPer-image influence\nYour creative intent"]
+  v2["Layer 2: WD14\nCommon tags → shared style\nUnique tags → per-image budget\nConflict resolution by weight"]
+  v3["Layer 3: Weights\nTag budget allocation\nConflict priority\n(higher weight wins)"]
   out["A prompt that reflects\nyour creative intent"]
   ref --> v1
   ref --> v2
@@ -66,6 +66,15 @@ graph TB
 ```
 
 The result isn't just a description of the images — it carries **your decision about what matters most**.
+
+### How weights and WD14 interact
+
+When you raise an image's weight slider, it influences the prompt in two ways:
+
+1. **Tag budget** — that image gets proportionally more unique tags injected into the output
+2. **Conflict priority** — when two images share contradictory attributes (e.g., `blonde_hair` vs `purple_hair`), the higher-weight image's tag wins; the other is suppressed
+
+This means setting a slider to 70% doesn't just *hint* at that image — it actively defends that image's distinctive features against those of lower-weight images.
 
 ---
 
@@ -161,13 +170,19 @@ You can add extra instructions in any language and choose how the AI processes t
 
 ### Placing text inside the image
 
-Write something like "add the text 'RANBELL' at the top" and the system bypasses the VLM entirely — **the string is injected straight into the prompt**. No risk of the AI misreading or transforming the text.
+Write something like `"テキストボードに"Good!"と書いて持っている"` or `"add the text 'RANBELL'"` and the system extracts the quoted string and appends it to the end of the prompt in Anima model format — **no VLM involvement, no risk of misinterpretation**.
 
 ```
-Instruction: "Add the text 'RANBELL' at the top"
-         ↓ basic / enhanced handles it automatically
-Final prompt: text "RANBELL", top_text, text_on_image, 1girl, ...
+Instruction: "テキストボードに"Good!"って手に持っている"
+         ↓ quoted string extracted automatically
+Final prompt: 1girl, holding_sign, ..., text "Good!"
+
+Instruction: 'Add the text "RANBELL"'
+         ↓
+Final prompt: 1girl, ..., text "RANBELL"
 ```
+
+The `text "X"` tag is appended at the very end of the positive prompt, which is the format Anima and compatible models use to render text literally in the image.
 
 ---
 
@@ -242,6 +257,6 @@ Every generated image is added back to the collection and becomes **material for
 | Using Stable Diffusion | Style: **danbooru** |
 | Prioritize one reference image heavily | Raise that image's weight slider |
 | Write instructions in your own language | instruction_mode: **basic** |
-| Place text inside the image | Use basic or enhanced and write "add the text '…'" |
+| Place text inside the image | Write the text in quotes (e.g. `"Good!"`) in your instruction |
 | Send Inversion results straight to generation | **Direct Bypass** (applied automatically) |
 | Run ComfyUI right after alchemy finishes | Turn on **auto_submit** |

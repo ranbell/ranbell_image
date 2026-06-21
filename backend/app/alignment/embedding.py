@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import math
 
 from ..ai.ollama import OllamaClient
+from .bm25_matcher import normalize_tag
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -20,7 +22,11 @@ async def compute_alignment_score(
     ollama: OllamaClient,
     model: str | None = None,
 ) -> float:
-    emb_prompt = await ollama.embed(prompt, model=model)
-    emb_tags = await ollama.embed(tags_text, model=model)
+    norm_prompt = normalize_tag(prompt)
+    norm_tags = normalize_tag(tags_text)
+    emb_prompt, emb_tags = await asyncio.gather(
+        ollama.embed(norm_prompt, model=model),
+        ollama.embed(norm_tags, model=model),
+    )
     score = cosine_similarity(emb_prompt, emb_tags)
     return round(max(0.0, min(1.0, score)), 4)

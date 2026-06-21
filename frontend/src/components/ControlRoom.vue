@@ -141,7 +141,7 @@
           </div>
         </section>
 
-        <!-- ── center: active jobs ── -->
+        <!-- ── center: active jobs + waited queue ── -->
         <section class="cr-section cr-section--jobs">
           <div class="cr-section-label">ACTIVE JOBS</div>
 
@@ -157,21 +157,6 @@
                 <span class="cr-job-id-dim">{{ job.id }}</span>
                 <span class="cr-job-title">{{ job.title }}</span>
                 <div class="cr-job-actions">
-                  <!-- QUEUED: reorder buttons -->
-                  <template v-if="job.state === 'queued' && !job.held">
-                    <button
-                      class="cr-job-action-btn"
-                      :disabled="queuedIdsByLane[job.lane]?.[0] === job.id"
-                      @click="reorderJob(job.id, 1)"
-                      :title="t('controlRoom.priorityUp')"
-                    >↑</button>
-                    <button
-                      class="cr-job-action-btn"
-                      :disabled="queuedIdsByLane[job.lane]?.at(-1) === job.id"
-                      @click="reorderJob(job.id, -1)"
-                      :title="t('controlRoom.priorityDown')"
-                    >↓</button>
-                  </template>
                   <!-- RUNNING: Pause -->
                   <button
                     v-if="job.state === 'running'"
@@ -188,7 +173,7 @@
                   >▶</button>
                   <!-- Cancel -->
                   <button
-                    v-if="['running', 'paused', 'queued'].includes(job.state)"
+                    v-if="['running', 'paused'].includes(job.state)"
                     class="cr-cancel-btn"
                     @click="$emit('cancel', job.id)"
                     :title="t('controlRoom.cancel')"
@@ -222,18 +207,13 @@
               <div class="cr-job-row2 cr-job-row2--error" v-else-if="job.state === 'failed' && job.error">
                 <span class="cr-job-error" :title="job.error">{{ truncate(job.error, 60) }}</span>
               </div>
-              <div class="cr-job-row2" v-else-if="job.state === 'queued'">
-                <span v-if="job.held" class="cr-job-badge cr-job-badge--held">⏸ Held</span>
-                <span v-else class="cr-job-status">
-                  queued{{ job.priority > 0 ? ` · P${job.priority}` : '' }}
-                </span>
-              </div>
               <div v-if="job.meta?.sha256s?.length" class="cr-job-meta">
                 <div class="cr-job-thumbs">
                   <img
                     v-for="sha in job.meta.sha256s.slice(0, 4)" :key="sha"
                     :src="`/api/thumbnails/${sha}.webp`"
                     class="cr-job-thumb"
+                    @error="onThumbnailError($event)"
                   />
                 </div>
                 <span v-if="job.meta.positive_preview" class="cr-job-prompt-preview" :title="job.meta.positive_preview">
@@ -243,17 +223,59 @@
             </div>
           </div>
 
-          <div class="cr-bulk-bar" v-if="failedCount > 1 || queuedCount > 1">
-            <button
-              v-if="failedCount > 1"
-              class="cr-bulk-btn cr-bulk-btn--retry"
-              @click="$emit('retry-all-failed')"
-            >retry all {{ failedCount }}</button>
-            <button
-              v-if="queuedCount > 1"
-              class="cr-bulk-btn cr-bulk-btn--cancel"
-              @click="$emit('cancel-all-queued')"
-            >cancel queued {{ queuedCount }}</button>
+          <div v-if="failedCount > 1" class="cr-bulk-bar">
+            <button class="cr-bulk-btn cr-bulk-btn--retry" @click="$emit('retry-all-failed')">retry all {{ failedCount }}</button>
+          </div>
+
+          <!-- ── waited queue (ISA-101 style) ── -->
+          <div class="cr-waited-block">
+            <div class="cr-waited-header">
+              <span class="cr-waited-label">WAITED</span>
+              <span class="cr-waited-count" :class="{ 'cr-waited-count--caution': waitedJobs.length >= 3 }">
+                {{ waitedJobs.length }}
+              </span>
+              <button
+                v-if="waitedJobs.length > 1"
+                class="cr-bulk-btn cr-bulk-btn--cancel cr-waited-cancel-all"
+                @click="$emit('cancel-all-queued')"
+              >cancel all</button>
+            </div>
+            <div class="cr-waited-list">
+              <div v-if="waitedJobs.length === 0" class="cr-waited-empty">— queue empty —</div>
+              <div
+                v-for="(job, i) in waitedJobs"
+                :key="job.id"
+                class="cr-waited-row"
+                :class="{ 'cr-waited-row--held': job.held }"
+              >
+                <span class="cr-waited-pos">{{ String(i + 1).padStart(2, ' ') }}</span>
+                <span class="cr-waited-lane" :data-lane="job.lane">{{ laneCode(job.lane) }}</span>
+                <span class="cr-waited-title" :title="job.title">{{ job.title }}</span>
+                <span v-if="job.held" class="cr-waited-tag cr-waited-tag--held">HELD</span>
+                <span v-else-if="job.priority > 0" class="cr-waited-tag cr-waited-tag--pri">P{{ job.priority }}</span>
+                <div class="cr-waited-actions">
+                  <template v-if="!job.held">
+                    <button
+                      class="cr-waited-btn"
+                      :disabled="queuedIdsByLane[job.lane]?.[0] === job.id"
+                      @click="reorderJob(job.id, 1)"
+                      :title="t('controlRoom.priorityUp')"
+                    >↑</button>
+                    <button
+                      class="cr-waited-btn"
+                      :disabled="queuedIdsByLane[job.lane]?.at(-1) === job.id"
+                      @click="reorderJob(job.id, -1)"
+                      :title="t('controlRoom.priorityDown')"
+                    >↓</button>
+                  </template>
+                  <button
+                    class="cr-cancel-btn cr-cancel-btn--sm"
+                    @click="$emit('cancel', job.id)"
+                    :title="t('controlRoom.cancel')"
+                  >✕</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="cr-throughput">
@@ -304,6 +326,7 @@
                   v-for="sha in entry.sha256s.slice(0, 4)" :key="sha"
                   :src="`/api/thumbnails/${sha}.webp`"
                   class="cr-log-thumb"
+                  @error="onThumbnailError($event)"
                 />
               </span>
             </div>
@@ -339,6 +362,7 @@ const {
   systemStatus,
   masterStatus,
   activeJobs,
+  waitedJobs,
   eventLog,
   throughput,
   sparkline,
@@ -424,11 +448,11 @@ const MASTER_LAMP = {
 }
 const masterLampClass = computed(() => MASTER_LAMP[masterStatus.value] ?? 'cr-lamp--standby')
 
-// queued jobId list per lane (descending priority, matches activeJobs sort order)
+// queued jobId list per lane (descending priority, matches waitedJobs sort order)
 const queuedIdsByLane = computed(() => {
   const map = {}
-  for (const job of activeJobs.value) {
-    if (job.state === 'queued' && !job.held) {
+  for (const job of waitedJobs.value) {
+    if (!job.held) {
       if (!map[job.lane]) map[job.lane] = []
       map[job.lane].push(job.id)
     }
@@ -475,16 +499,27 @@ const filteredLog = computed(() => {
 
 // ── queue counts ──────────────────────────────────────────────────────────────
 
-const pendingCount = computed(() =>
-  Array.from(props.jobsMap.values()).filter(j => j.state === 'queued').length
-)
+const pendingCount = computed(() => waitedJobs.value.length)
 
 // ── bulk operations ───────────────────────────────────────────────────────────
 
 const failedCount = computed(() => activeJobs.value.filter(j => j.state === 'failed').length)
-const queuedCount = computed(() => activeJobs.value.filter(j => j.state === 'queued').length)
 
 // ── utilities ────────────────────────────────────────────────────────────────
+
+const _LANE_CODE = { gen: 'GEN', embed: 'EMB', eval: 'ALN', prompt: 'PE', sync: 'SYN' }
+function laneCode(lane) {
+  return _LANE_CODE[lane] ?? (lane ?? '').slice(0, 3).toUpperCase()
+}
+
+function onThumbnailError(event) {
+  const img = event.target
+  const retries = parseInt(img.dataset.retries || '0')
+  if (retries >= 3) return
+  img.dataset.retries = retries + 1
+  const src = img.src
+  setTimeout(() => { img.src = ''; img.src = src }, 600 * (retries + 1))
+}
 
 function truncate(str, n) {
   if (!str) return ''
@@ -1304,6 +1339,167 @@ function ratioClass(used, total, caution, fault) {
   border-top: 1px solid var(--cr-border-inner);
   flex-shrink: 0;
 }
+/* ── waited queue (ISA-101 DCS style) ────────────────────────────────────────── */
+.cr-waited-block {
+  flex-shrink: 0;
+  border-top: 1px solid var(--cr-border-inner);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cr-waited-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0 4px;
+  flex-shrink: 0;
+}
+
+.cr-waited-label {
+  font-family: var(--cr-mono);
+  font-size: var(--cr-font-label);
+  letter-spacing: 0.18em;
+  color: var(--cr-text-label);
+  font-weight: 700;
+}
+
+.cr-waited-count {
+  font-family: var(--cr-mono);
+  font-size: var(--cr-font-label);
+  color: var(--cr-text-dim);
+  min-width: 2ch;
+  font-weight: 600;
+}
+.cr-waited-count--caution {
+  color: var(--cr-caution);
+}
+
+.cr-waited-cancel-all {
+  margin-left: auto;
+  padding: 1px 8px;
+  font-size: 10px;
+}
+
+.cr-waited-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.cr-waited-empty {
+  font-family: var(--cr-mono);
+  font-size: var(--cr-font-small);
+  color: var(--cr-text-dim);
+  opacity: 0.4;
+  padding: 3px 0;
+}
+
+.cr-waited-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+  font-family: var(--cr-mono);
+  font-size: 11px;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid rgba(130, 80, 220, 0.06);
+}
+.cr-waited-row:last-child { border-bottom: none; }
+.cr-waited-row:hover { background: rgba(255, 255, 255, 0.025); }
+.cr-waited-row--held { border-left-color: #6655aa; opacity: 0.7; }
+
+.cr-waited-pos {
+  color: var(--cr-text-dim);
+  font-size: 10px;
+  min-width: 2ch;
+  text-align: right;
+  opacity: 0.5;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-waited-lane {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 1px;
+  flex-shrink: 0;
+  /* default standby */
+  background: rgba(100, 100, 130, 0.18);
+  color: #8888aa;
+  border: 1px solid rgba(100, 100, 130, 0.3);
+}
+/* per-lane color coding (ISA-101: use subdued tints, not saturated) */
+.cr-waited-lane[data-lane="gen"]    { background: rgba(74, 124, 90, 0.18);  color: #6aaa80; border-color: rgba(74, 124, 90, 0.35); }
+.cr-waited-lane[data-lane="embed"]  { background: rgba(74, 110, 180, 0.18); color: #7090cc; border-color: rgba(74, 110, 180, 0.35); }
+.cr-waited-lane[data-lane="eval"]   { background: rgba(160, 100, 200, 0.18); color: #aa80cc; border-color: rgba(160, 100, 200, 0.35); }
+.cr-waited-lane[data-lane="prompt"] { background: rgba(184, 134, 11, 0.15); color: #b89040; border-color: rgba(184, 134, 11, 0.3); }
+.cr-waited-lane[data-lane="sync"]   { background: rgba(80, 140, 160, 0.18); color: #60aacc; border-color: rgba(80, 140, 160, 0.35); }
+
+.cr-waited-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cr-text-dim);
+  font-size: 11px;
+}
+
+.cr-waited-tag {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 1px;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.cr-waited-tag--held {
+  background: rgba(102, 85, 170, 0.2);
+  color: #9988cc;
+  border: 1px solid rgba(102, 85, 170, 0.4);
+}
+.cr-waited-tag--pri {
+  background: rgba(184, 134, 11, 0.15);
+  color: #b89040;
+  border: 1px solid rgba(184, 134, 11, 0.3);
+}
+
+.cr-waited-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.cr-waited-btn {
+  background: none;
+  border: 1px solid rgba(100, 100, 130, 0.25);
+  color: var(--cr-text-dim);
+  font-size: 9px;
+  padding: 0 4px;
+  line-height: 1.7;
+  cursor: pointer;
+  border-radius: 1px;
+  opacity: 0.6;
+}
+.cr-waited-btn:hover { opacity: 1; background: rgba(255, 255, 255, 0.05); }
+.cr-waited-btn:disabled { opacity: 0.15; cursor: default; pointer-events: none; }
+
+.cr-cancel-btn--sm {
+  font-size: 9px;
+  padding: 0px 5px;
+  line-height: 1.7;
+  opacity: 0.5;
+}
+.cr-cancel-btn--sm:hover { opacity: 1; }
+
+.cr-waited-list::-webkit-scrollbar { width: 3px; }
+.cr-waited-list::-webkit-scrollbar-track { background: transparent; }
+.cr-waited-list::-webkit-scrollbar-thumb { background: var(--cr-border); border-radius: 2px; }
 
 .cr-bulk-btn {
   background: none;

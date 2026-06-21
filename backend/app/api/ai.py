@@ -47,6 +47,8 @@ class RefineRequest(BaseModel):
     inspire_context: dict | None = None
     use_ref_seed: bool = False
     suppress_conflict_tags: bool = False
+    wd14_common_ratio: float = 0.3
+    wd14_unique_count: int = 20
 
 
 class SearchRequest(BaseModel):
@@ -70,36 +72,6 @@ def _sse(data: dict) -> str:
 
 
 _STYLE_INSTRUCTIONS = {
-    "natural": (
-        "Generate an image generation prompt for FLUX / Anima models.\n"
-        "SINGLE-IMAGE SYNTHESIS RULE: When multiple reference images are provided, "
-        "you MUST synthesize and merge their elements into ONE unified, coherent scene. "
-        "Do NOT describe separate panels, collage layouts, side-by-side views, diptychs, "
-        "or reference sheets. Choose one primary subject and setting, then blend the most "
-        "compelling visual elements from all references into that single composition. "
-        "Avoid any tags or phrases implying multiple separate images (e.g. 'multiple_views', "
-        "'split_image', 'comparison', 'collage').\n\n"
-        "You MUST output EXACTLY two blocks separated by one blank line — no headers, no labels:\n\n"
-        "BLOCK 1 (tags): 40–60 comma-separated Danbooru-style tags on a single line.\n"
-        "BLOCK 2 (prose): One paragraph of 80–120 words in natural English.\n\n"
-        "Output format (STRUCTURE ONLY — derive actual content from the reference image, NOT from this template):\n"
-        "[subject_count], [hair_color]_hair, [eye_color]_eyes, [clothing], [pose], [background], [lighting], [art_style], [quality_tags], ...\n\n"
-        "[Prose paragraph: describe the subject's appearance, clothing, pose, background environment, "
-        "lighting quality and color, and overall mood — all drawn from the reference image. 80–120 words.]\n\n"
-        "--- YOUR ACTUAL OUTPUT STARTS HERE ---\n\n"
-        "TAGS block: cover subject & count, hair, eyes, face/expression, body, clothing, "
-        "accessories, footwear, pose, composition, background, lighting, atmosphere, art style, quality.\n\n"
-        "PROSE block: describe subject appearance, clothing details and colors, pose and gesture, "
-        "background environment, lighting (color temperature, direction, quality), mood, "
-        "artistic style. Be specific — no vague words like 'beautiful' or 'nice'. "
-        "Use precise terms (e.g. 'warm amber rim light' not 'nice lighting').\n\n"
-        "Both blocks are REQUIRED. Incomplete output (tags only) is unacceptable.\n"
-        "STRICT FORMATTING RULES — violating any of these is an error:\n"
-        "- Do NOT use asterisks (*), pound signs (#), underscores for bold/italic, or any markdown.\n"
-        "- Do NOT write labels like 'Tags:', 'Prompt:', 'Part 1:', 'Block 1:', 'Description:' etc.\n"
-        "- Do NOT write any sentence before the tags (no intro, no preamble).\n"
-        "- Start your response DIRECTLY with the first tag (e.g. '1girl, ...')."
-    ),
     "danbooru": (
         "Generate an image generation prompt in Danbooru / Stable Diffusion tag style.\n"
         "SINGLE-IMAGE SYNTHESIS RULE: When multiple reference images are provided, "
@@ -109,6 +81,11 @@ _STYLE_INSTRUCTIONS = {
         "before_and_after, diptych, triptych, side-by-side, panel_layout. "
         "Instead, pick one dominant composition and weave the strongest visual elements "
         "from all references into that single image.\n\n"
+        "CHARACTER-FIRST RULE: When characters are present, subject count (1girl, 1boy, "
+        "solo, 2girls, etc.) MUST be the very first tag(s) in the output. Never omit it. "
+        "If [User instruction] is a story, translate every concrete physical action "
+        "(gripping, touching, running, hugging, reaching, kneeling…) into pose/action tags "
+        "— these define the character's pose and MUST appear in the output.\n\n"
         "Target: 80–120 comma-separated English tags (approximately 150–200 words total).\n"
         "Analyze the reference image(s) and metadata exhaustively. "
         "Extract specific, concrete tags across EVERY applicable category below. "
@@ -159,6 +136,10 @@ _STYLE_INSTRUCTIONS = {
         "Generate a structured, highly detailed image generation prompt.\n"
         "SINGLE-IMAGE SYNTHESIS RULE: When multiple reference images are provided, synthesize them "
         "into ONE unified scene — not a collage, not a diptych.\n\n"
+        "CHARACTER-FIRST RULE: When characters are present, subject count (1girl, 1boy, solo, "
+        "2girls, etc.) MUST appear first in **Characters & Composition**. If [User instruction] "
+        "describes a story, translate every concrete physical action (gripping, touching, running, "
+        "hugging, reaching, kneeling…) into specific pose/action descriptions — these MUST appear.\n\n"
         "Output EXACTLY these 8 sections with bold markdown headers:\n\n"
         "**Core Subject & Scene Setting:** [subject, genre, overall mood — 1-2 sentences]\n"
         "**Characters & Composition:** [count, hair color/style, eye color, pose, framing, clothing details]\n"
@@ -168,7 +149,21 @@ _STYLE_INSTRUCTIONS = {
         "**Color Palette:** [dominant colors, accent colors, saturation, overall tone]\n"
         "**Camera & Lens Effects:** [shot type, angle, depth of field, bokeh, lens flare]\n"
         "**Refinements & Modifiers:** [comma-separated quality/detail keywords — e.g. masterpiece, volumetric lighting, hyperdetailed]\n\n"
-        "Fill each section based SOLELY on the reference image. Be specific and concrete."
+        "Fill each section based SOLELY on the reference image. Be specific and concrete.\n\n"
+        "After all 8 sections, output this JSON block — nothing else after it:\n\n"
+        "```json\n"
+        "{\n"
+        '  "subject_tags": "subject count danbooru tags, e.g. 1girl,solo",\n'
+        '  "hair_tags": "comma,separated,danbooru,tags",\n'
+        '  "expression_tags": "comma,separated,danbooru,tags",\n'
+        '  "clothing_tags": "comma,separated,danbooru,tags",\n'
+        '  "accessory_tags": "comma,separated,danbooru,tags",\n'
+        '  "pose_tags": "comma,separated,danbooru,tags",\n'
+        '  "background_tags": "comma,separated,danbooru,tags",\n'
+        '  "object_tags": "comma,separated,danbooru,tags",\n'
+        '  "lighting_tags": "comma,separated,danbooru,tags"\n'
+        "}\n"
+        "```"
     ),
 }
 
@@ -179,13 +174,28 @@ _NEGATIVE_INSTRUCTION = (
     "[your positive prompt here — tags and prose based on the reference image]\n\n"
     "NEGATIVE:\n"
     "[comma-separated negative tags — elements to avoid, based on the reference context]\n\n"
-    "RULES:\n"
-    "- Start with the literal word POSITIVE: on its own line.\n"
+    "CRITICAL RULES — violating any of these is an error:\n"
+    "- The word POSITIVE: MUST appear alone on its own line at the very start.\n"
     "- Then your positive prompt (tags + prose for natural style, tags only for danbooru).\n"
-    "- Then a blank line, then NEGATIVE: on its own line.\n"
+    "- Then a blank line, then the word NEGATIVE: alone on its own line.\n"
     "- Then the negative tags — comma-separated, no prose.\n"
-    "- No other text, headers, or explanation."
+    "- BOTH sections are MANDATORY. A response without NEGATIVE: is wrong.\n"
+    "- No other text, markdown, or explanation — only the two labeled sections."
 )
+
+
+def _format_instruction_block(instruction: str, instruction_framing: bool) -> str:
+    if not instruction:
+        return "Create a refined, high-quality image generation prompt."
+    if instruction_framing:
+        return (
+            "[PROMPT ENGINEERING DIRECTIVE — NOT NARRATIVE CONTENT]\n"
+            "Apply the following as a structural modification to the output prompt.\n"
+            "DO NOT incorporate it as scene description. DO NOT ignore it.\n"
+            "DO NOT turn text elements into character actions or props.\n\n"
+            f"Directive: {instruction}"
+        )
+    return instruction
 
 
 def _build_vlm_prompt(
@@ -195,33 +205,20 @@ def _build_vlm_prompt(
     with_negative: bool,
     instruction_framing: bool = False,
 ) -> str:
-    style_instr = _STYLE_INSTRUCTIONS.get(prompt_style, _STYLE_INSTRUCTIONS["natural"])
+    style_instr = _STYLE_INSTRUCTIONS.get(prompt_style, _STYLE_INSTRUCTIONS["danbooru"])
     neg_instr = _NEGATIVE_INSTRUCTION if with_negative else (
         "\n\nOutput the positive prompt only — no labels, no explanation, "
         "and do NOT include a negative prompt or any 'Negative:' section."
     )
-
-    if instruction:
-        if instruction_framing:
-            instr_block = (
-                "[PROMPT ENGINEERING DIRECTIVE — NOT NARRATIVE CONTENT]\n"
-                "Apply the following as a structural modification to the output prompt.\n"
-                "DO NOT incorporate it as scene description. DO NOT ignore it.\n"
-                "DO NOT turn text elements into character actions or props.\n\n"
-                f"Directive: {instruction}"
-            )
-        else:
-            instr_block = instruction
-    else:
-        instr_block = "Create a refined, high-quality image generation prompt."
+    instr_block = _format_instruction_block(instruction, instruction_framing)
 
     return (
         "You are an expert image generation prompt engineer.\n"
         "Analyze the reference image(s) and the metadata below, then craft a superior prompt.\n"
-        "CRITICAL: Derive ALL content — tags, descriptions, mood, setting — "
-        "SOLELY from the [Reference metadata] section. "
-        "Format examples in [Style directive] are for OUTPUT STRUCTURE ONLY. "
-        "Do NOT copy, echo, or draw thematic inspiration from them.\n\n"
+        "PRIMARY SOURCE: Derive visual content (art style, palette, setting) from [Reference metadata]. "
+        "Format examples in [Style directive] are for OUTPUT STRUCTURE ONLY — do not copy them. "
+        "However, [User instruction] describes the story and characters: character identity, "
+        "appearance, and concrete actions in the instruction TAKE PRIORITY and MUST be reflected.\n\n"
         "UNIFIED COMPOSITION MANDATE: Your output is a prompt for ONE SINGLE IMAGE. "
         "Regardless of how many reference images are provided, you must synthesize them "
         "into a single coherent scene — not a collage, not a diptych, not a reference sheet. "
@@ -232,6 +229,262 @@ def _build_vlm_prompt(
         f"[Reference metadata]\n{context}\n\n"
         f"[User instruction]\n{instr_block}"
         f"{neg_instr}"
+    )
+
+
+# ── Natural style: two-pass (tags → prose) prompt builders ────────────────────
+#
+# A small VLM (e.g. a 2B model) is unreliable at producing a tag line AND an
+# 80-120 word prose paragraph in one response. Splitting into two focused,
+# single-task calls — tags first, then a long descriptive paragraph seeded
+# with those tags — is far more reliable and lets the prose call target a
+# longer, more detailed result without competing with the tag-formatting task.
+
+_NATURAL_TAGS_INSTRUCTION = (
+    "Generate the TAG portion of an image generation prompt for FLUX / Anima models.\n"
+    "SINGLE-IMAGE SYNTHESIS RULE: When multiple reference images are provided, "
+    "you MUST synthesize and merge their elements into ONE unified, coherent scene. "
+    "Do NOT describe separate panels, collage layouts, side-by-side views, diptychs, "
+    "or reference sheets. Choose one primary subject and setting, then blend the most "
+    "compelling visual elements from all references into that single composition. "
+    "Avoid any tags or phrases implying multiple separate images (e.g. 'multiple_views', "
+    "'split_image', 'comparison', 'collage').\n\n"
+    "Output 40–60 comma-separated Danbooru-style tags on a single line, covering: "
+    "subject & count, hair, eyes, face/expression, body, clothing, accessories, "
+    "footwear, pose, composition, background, lighting, atmosphere, art style, quality.\n\n"
+    "STRICT FORMATTING RULES — violating any of these is an error:\n"
+    "- Output ONLY the tag line. No prose, no sentences, no markdown, no labels.\n"
+    "- Do NOT write labels like 'Tags:', 'Prompt:', 'Output:' etc.\n"
+    "- CHARACTER-FIRST RULE: When characters are present, subject count (1girl, 1boy, "
+    "solo, 2girls, etc.) MUST be the very first tag(s). Never omit subject count.\n"
+    "- ACTION RULE: All concrete physical actions from [User instruction] story MUST "
+    "appear as pose/action tags (gripping, touching, running, hugging, kneeling, etc.).\n"
+    "- EXPLICIT TAG RULE: NEVER use literary, vague, or euphemistic language for actions "
+    "or body parts. Every body part, contact point, and action MUST be expressed as an "
+    "explicit Danbooru tag. Wrong: 'intimate_gesture', 'tender_touch', 'closeness'. "
+    "Correct: 'hand_on_another's_cheek', 'gripping', 'breast_grab', 'hand_on_ass', "
+    "'lap_pillow', 'hair_grab', 'wrist_grab', 'finger_in_mouth' — use the real tag.\n"
+    "- Start your response DIRECTLY with subject count if characters are present "
+    "(e.g. '1girl, solo, gripping, ...' or '2girls, hug, ...'); "
+    "otherwise start with the primary scene element."
+)
+
+_NATURAL_TAGS_NEGATIVE_INSTRUCTION = (
+    "\n\nAlso generate a NEGATIVE PROMPT listing elements to avoid, as comma-separated tags.\n"
+    "You MUST use EXACTLY this output format — two labeled sections, nothing else:\n\n"
+    "POSITIVE:\n"
+    "[your positive tag line — 40-60 comma-separated tags]\n\n"
+    "NEGATIVE:\n"
+    "[comma-separated negative tags — elements to avoid]\n\n"
+    "CRITICAL RULES — violating any of these is an error:\n"
+    "- The word POSITIVE: MUST appear alone on its own line at the very start.\n"
+    "- Then the positive tag line (tags only, no prose, no headers).\n"
+    "- Then a blank line, then the word NEGATIVE: alone on its own line.\n"
+    "- Then the negative tags — comma-separated, no prose, no headers.\n"
+    "- BOTH sections are MANDATORY. A response without NEGATIVE: is wrong.\n"
+    "- No other text, markdown, or explanation — only the two labeled sections."
+)
+
+_NATURAL_PROSE_INSTRUCTION = (
+    "You already extracted the tag list below from the reference image(s). "
+    "Now write ONLY a long, vivid descriptive paragraph of the same single unified scene, "
+    "for use as an image generation prompt.\n\n"
+    "LENGTH: 150-250 words, written as 10-14 flowing sentences. This is a hard minimum — "
+    "a short answer is an error.\n\n"
+    "Cover ALL of the following, drawing only from the reference image and the tags below:\n"
+    "- the subject's appearance, expression, and notable physical details\n"
+    "- hair and eye details (color, length, style)\n"
+    "- clothing materials, colors, textures, and how they fit or move\n"
+    "- pose, gesture, and body language\n"
+    "- the background environment, described concretely (not just named)\n"
+    "- lighting: direction, color temperature, and quality "
+    "(e.g. 'warm amber rim light', not 'nice lighting')\n"
+    "- overall mood and atmosphere\n"
+    "- artistic style or rendering medium\n\n"
+    "Style example (tone only — do not reuse this content): "
+    "\"She stands at the edge of a rain-slicked rooftop, her long silver hair whipping "
+    "sideways in the wind as cool blue neon spills across her damp jacket, one hand "
+    "braced on the railing while she looks back over her shoulder with a wary half-smile...\" "
+    "— write in this kind of specific, sensory, multi-clause prose.\n\n"
+    "STRICT RULES — violating any of these is an error:\n"
+    "- Write ONLY flowing prose sentences. Do NOT output a comma-separated tag list.\n"
+    "- Do NOT use asterisks, pound signs, or any markdown.\n"
+    "- Do NOT write labels like 'Prose:', 'Description:', 'Paragraph:' etc.\n"
+    "- Do NOT repeat the tag list verbatim — describe the scene in your own words.\n"
+    "- Start your response DIRECTLY with the first sentence (no intro, no preamble)."
+)
+
+_NATURAL_PROSE_RETRY_PREFIX = (
+    "Your previous attempt did not follow the instructions below — it was missing, too "
+    "short, or looked like a tag list instead of prose. Try again, and this time follow "
+    "the instructions exactly: write ONLY flowing narrative sentences, at least 150 words, "
+    "describing the scene in vivid sensory detail. Do NOT output any comma-separated tag "
+    "list.\n\n"
+)
+
+_NATURAL_VISUAL_SCRIPT_INSTRUCTION = (
+    "Write a VISUAL SCRIPT for an AI image generator: flowing English prose where every concrete\n"
+    "visual element is simultaneously named in danbooru vocabulary within ASCII parentheses.\n"
+    "This text goes directly into an AI image generator — clarity and natural English are critical.\n\n"
+    "# OUTPUT FORMAT\n"
+    "Write exactly 5 flowing paragraphs (2-4 sentences each). "
+    "Do NOT label paragraphs. Do NOT write [CHARACTER], [ACTION], [SCENE], [DETAIL], [MOOD] "
+    "or any bracket markers in the output — those are INTERNAL STRUCTURAL GUIDES ONLY.\n"
+    "Embed danbooru tags inline in ASCII parentheses immediately after each element:\n"
+    "Example: \"A (1girl, solo) with (long_hair, brown_hair) grips a (sword, holding_sword) "
+    "with both hands, knuckles white. Her (school_uniform) shifts as she stands in a (park, outdoor), "
+    "bathed in (afternoon_sun, warm_light). The (green_trees, sky) frame her determined expression.\"\n\n"
+    "# INTERNAL PARAGRAPH GUIDE (do NOT echo these labels in output)\n"
+    "Paragraph 1 — APPEARANCE: subject count as very first tag (1girl/solo/2girls/1boy…), "
+    "then hair, eyes, face, expression, clothing, accessories.\n"
+    "Paragraph 2 — ACTION: pose, gesture, body language, physical interactions from the story.\n"
+    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day.\n"
+    "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction and quality.\n"
+    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression.\n\n"
+    "# RULES\n"
+    "0. SUBJECT-FIRST: The VERY FIRST parenthetical MUST be the subject count: "
+    "(1girl, solo) or (2girls) or (1boy), etc. Never start with a scene element.\n"
+    "1. ACTION-ANCHOR: All concrete physical actions from [User instruction] MUST appear as "
+    "danbooru action tags in paragraph 2. "
+    "Translate story verbs: 握る→(gripping,clenched_hand), 触れる→(touching,fingertips), "
+    "抱きしめる→(hug,arms_around_another's_neck), 手を繋ぐ→(holding_hands), "
+    "走る→(running,dynamic_pose), 跪く→(kneeling,one_knee), 手を伸ばす→(reaching,outstretched_arm).\n"
+    "2. EXPLICIT TAG RULE: NEVER use euphemistic language for actions or body parts. "
+    "WRONG: '(tender_touch)', '(intimate_gesture)', '(closeness)'. "
+    "CORRECT: '(hand_on_another's_cheek)', '(breast_grab)', '(gripping)', '(lap_pillow)', "
+    "'(hair_grab)', '(wrist_grab)', '(nape)', '(collarbone)', '(thigh_grab)'.\n"
+    "3. English only — at least 2 danbooru tags per sentence.\n"
+    "4. No vague phrases: no 'somehow', 'a sense of', 'filled with emotion'.\n"
+    "5. NEVER add quality meta-tags (masterpiece, best_quality, highres etc.).\n\n"
+    "Write the 5-paragraph prose now. Then, on a new line after the prose, output ONLY these "
+    "labeled tag lines (no JSON, no code block, no extra text):\n\n"
+    "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
+    "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
+    "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
+    "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
+    "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
+    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
+    "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
+    "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
+    "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
+)
+
+_REFINE_CAT_FIELDS = (
+    "subject_tags",
+    "hair_tags", "expression_tags", "clothing_tags", "accessory_tags",
+    "pose_tags", "background_tags", "object_tags", "lighting_tags",
+)
+
+
+def _build_natural_tags_prompt(
+    context: str,
+    instruction: str,
+    with_negative: bool,
+    instruction_framing: bool = False,
+) -> str:
+    neg_instr = _NATURAL_TAGS_NEGATIVE_INSTRUCTION if with_negative else (
+        "\n\nOutput the positive tag line only — no labels, no explanation, "
+        "and do NOT include a negative prompt or any 'Negative:' section."
+    )
+    instr_block = _format_instruction_block(instruction, instruction_framing)
+
+    character_mandate = (
+        "[CHARACTER & ACTION EXTRACTION MANDATE]\n"
+        "If [User instruction] contains a story or scenario with characters:\n\n"
+        "STEP 1 — Subject: Identify all characters present.\n"
+        "  Output their count/gender as the VERY FIRST tags (1girl, 1boy, solo, 2girls, etc.).\n"
+        "  Never omit the subject count when characters are present.\n\n"
+        "STEP 2 — Actions: Translate every concrete physical action in the story into Danbooru tags.\n"
+        "  Story verb → Danbooru action tag examples:\n"
+        "    触れる / touch      → touching, hand_on_another's_cheek, fingertips\n"
+        "    握る / grip         → gripping, clenched_hand, grabbing, holding\n"
+        "    抱きしめる / hug    → hug, embrace, arms_around_another's_neck\n"
+        "    引っ張る / pull     → pulling, grabbing, holding_another's_wrist\n"
+        "    撫でる / stroke     → petting, hand_on_another's_head\n"
+        "    走る / run          → running, dynamic_pose, leaning_forward\n"
+        "    跪く / kneel        → kneeling, one_knee\n"
+        "    手を伸ばす / reach  → reaching, outstretched_arm, hand_out\n"
+        "    手を繋ぐ / hold hands → holding_hands\n"
+        "  Include ALL action-derived tags — these define the character's pose.\n\n"
+        "STEP 3 — Appearance: Extract character visual traits from the story "
+        "(hair color/style, eye color, clothing) as Danbooru tags.\n\n"
+        "EXPLICIT TAG RULE: NEVER use literary, poetic, or euphemistic expressions for actions "
+        "or body parts. Always use the actual Danbooru tag. "
+        "WRONG: 'tender_contact', 'intimate_gesture', 'passionate_closeness'. "
+        "CORRECT: 'hand_on_another's_cheek', 'gripping', 'breast_grab', 'thigh_grab', "
+        "'hair_grab', 'wrist_grab', 'lap_pillow', 'nape', 'collarbone' — use the real tag."
+    )
+
+    return (
+        "You are an expert image generation prompt engineer.\n"
+        "Analyze the reference image(s) and the metadata below, then craft a tag list.\n"
+        "PRIMARY SOURCE: Derive visual content (art style, colors, setting) from "
+        "[Reference metadata]. However, [User instruction] describes the story and "
+        "characters — character identity, appearance, and actions in the instruction "
+        "TAKE PRIORITY and MUST be reflected in the tags.\n\n"
+        "UNIFIED COMPOSITION MANDATE: Your output is a prompt for ONE SINGLE IMAGE. "
+        "Regardless of how many reference images are provided, you must synthesize them "
+        "into a single coherent scene — not a collage, not a diptych, not a reference sheet. "
+        "If references conflict, let influence weights guide which elements take priority.\n\n"
+        f"[Style directive]\n{_NATURAL_TAGS_INSTRUCTION}\n\n"
+        f"[Reference metadata]\n{context}\n\n"
+        f"{character_mandate}\n\n"
+        f"[User instruction]\n{instr_block}"
+        f"{neg_instr}"
+    )
+
+
+def _build_natural_prose_prompt(
+    context: str,
+    instruction: str,
+    tags_text: str,
+    instruction_framing: bool = False,
+    retry: bool = False,
+) -> str:
+    instr_block = _format_instruction_block(instruction, instruction_framing)
+    style_instr = (_NATURAL_PROSE_RETRY_PREFIX if retry else "") + _NATURAL_PROSE_INSTRUCTION
+
+    return (
+        "You are an expert image generation prompt engineer.\n"
+        "Analyze the reference image(s) and the metadata below.\n\n"
+        "UNIFIED COMPOSITION MANDATE: Describe ONE SINGLE IMAGE. Regardless of how many "
+        "reference images are provided, synthesize them into a single coherent scene — "
+        "not a collage, not a diptych, not a reference sheet.\n\n"
+        f"[Style directive]\n{style_instr}\n\n"
+        f"[Reference metadata]\n{context}\n\n"
+        f"[Tags already extracted for this scene]\n{tags_text}\n\n"
+        f"[User instruction]\n{instr_block}"
+    )
+
+
+def _build_natural_visual_script_prompt(
+    context: str,
+    instruction: str,
+    tags_text: str,
+    instruction_framing: bool = False,
+) -> str:
+    instr_block = _format_instruction_block(instruction, instruction_framing)
+
+    story_mandate = (
+        "[Story → Image Mandate]\n"
+        "The [User instruction] describes a story. "
+        "The characters in that story are the PRIMARY SUBJECTS of this image. "
+        "Translate their concrete physical actions (gripping, touching, running, kneeling, etc.) "
+        "directly into embedded danbooru action tags in the [ACTION] section. "
+        "Do NOT lose or generalize the story's specific physical interactions."
+    )
+
+    return (
+        "You are an expert image analyst and creative director.\n"
+        "Analyze the reference image(s) and the metadata below.\n\n"
+        "UNIFIED COMPOSITION MANDATE: Describe ONE SINGLE IMAGE. Regardless of how many "
+        "reference images are provided, synthesize them into a single coherent scene — "
+        "not a collage, not a diptych, not a reference sheet.\n\n"
+        f"[Style directive]\n{_NATURAL_VISUAL_SCRIPT_INSTRUCTION}\n\n"
+        f"[Reference metadata]\n{context}\n\n"
+        f"[Tags already extracted for this scene — use as danbooru vocabulary anchor]\n{tags_text}\n\n"
+        f"{story_mandate}\n\n"
+        f"[User instruction]\n{instr_block}"
     )
 
 
@@ -271,15 +524,35 @@ Return JSON:
 }}"""
 
 _LITERAL_TEXT_RE = re.compile(
-    r"""(?:add|insert|put|place|show|write|display|include|render)\s+
-        (?:the\s+)?(?:text|word|words|label|watermark|title|string|letters?|caption)\s+
-        ['""“「]
-        (?P<text>[^'"”」]+)
-        ['""”」]
-        (?:[\s,]*(?:at|on|in|to)\s+
-           (?P<position>top|bottom|left|right|center|upper|lower|above|below)
-        )?""",
-    re.IGNORECASE | re.VERBOSE,
+    r"""
+    # Command syntax (highest priority): text:"X" or /text X or text:X
+    (?:^|(?<=[\s,]))
+    (?:
+      \/text\s+(?P<text_cmd1>[^\n,\"「『]+?)(?=\s*[,\n]|$)
+      |
+      text\s*:\s*['\"「](?P<text_cmd2>[^'\"」\n]+)['\"」]
+      |
+      text\s*:\s*(?P<text_cmd3>[^\n,\"「『]+?)(?=\s*[,\n]|$)
+    )
+    |
+    # English: add/write/put/show ["text"] "X"  (keyword optional)
+    (?:add|insert|put|place|show|write|display|include|render)\s+
+    (?:(?:the\s+)?(?:text|word|words|label|watermark|title|string|letters?|caption)\s+)?
+    ['\"「](?P<text>[^'\"」\n]+)['\"」]
+    |
+    # Japanese: quoted string + text-render verb (「X」という/と文字を入れて)
+    ['\"「『](?P<text_ja>[^'\"」』\n]+)['\"」』]
+    \s*(?:という|との|と|の)?
+    \s*(?:文字|テキスト|タイトル|文章|ラベル|キャプション)?
+    \s*を?\s*(?:に|で)?
+    \s*(?:入れ|描画|追加|表示|書い|記載)
+    |
+    # Context: textboard/sign with "X" (テキストボードに「X」)
+    (?:textboard|sign|banner|label|card|board|ボード|看板|テキスト)\s*
+    (?:に|で|with|saying|reading)?\s*
+    ['\"「『](?P<text_ctx>[^'\"」』\n]+)['\"」』]
+    """,
+    re.IGNORECASE | re.VERBOSE | re.MULTILINE,
 )
 
 
@@ -314,36 +587,39 @@ async def _translate_and_classify(
         return instruction, instruction, []
 
 
-def _extract_literal_directives(instruction_en: str) -> tuple[str, list[dict]]:
-    """Regex-extract literal text directives from English instruction.
-    Returns (cleaned_instruction, literals)."""
-    literals: list[dict] = []
+def _extract_literal_texts(instruction: str) -> tuple[list[str], str]:
+    """Extract text-render commands and strip them from the instruction.
 
-    def _replace(m: re.Match) -> str:
-        literals.append({
-            "type": "literal_text",
-            "text": m.group("text").strip(),
-            "position": (m.group("position") or "top").lower(),
-        })
-        return ""
+    Returns (texts, cleaned_instruction) so VLM never sees text-render directives.
+    texts: list of raw strings to render (e.g. ['Hello', 'Good!']).
+    cleaned_instruction: instruction with all text-render commands removed.
+    """
+    texts: list[str] = []
+    seen: set[str] = set()
 
-    cleaned = _LITERAL_TEXT_RE.sub(_replace, instruction_en).strip(" ,")
-    return cleaned, literals
+    def _collect(m: re.Match) -> str:
+        raw = (
+            m.group("text_cmd1") or m.group("text_cmd2") or m.group("text_cmd3")
+            or m.group("text") or m.group("text_ja") or m.group("text_ctx") or ""
+        ).strip()
+        if raw and raw.lower() not in seen:
+            texts.append(raw)
+            seen.add(raw.lower())
+        return ""  # strip from instruction
+
+    cleaned = _LITERAL_TEXT_RE.sub(_collect, instruction).strip().strip(",").strip()
+    return texts, cleaned
 
 
-def _inject_literal_directives(positive: str, literals: list[dict]) -> str:
-    """Prepend literal text directive tags to the generated positive prompt."""
-    tags: list[str] = []
-    for d in literals:
-        tags.append(f'text "{d["text"]}"')
-        pos = d.get("position", "top").lower()
-        pos_tag = {
-            "top": "top_text", "upper": "top_text", "above": "top_text",
-            "bottom": "bottom_text", "lower": "bottom_text", "below": "bottom_text",
-        }.get(pos, "overlay_text")
-        tags.append(pos_tag)
-        tags.append("text_on_image")
-    return (", ".join(tags) + ", " + positive) if tags else positive
+def _append_literal_texts(positive: str, texts: list[str]) -> str:
+    """Append literal text render tags to the end of the positive prompt.
+
+    Uses the Anima-model format: text "Laugh!", text_on_image
+    """
+    if not texts:
+        return positive
+    tags = [f'text "{t}"' for t in texts] + ["text_on_image"]
+    return positive.rstrip(", ") + ", " + ", ".join(tags)
 
 
 _DETAILED_SECTION_HEADERS = (
@@ -447,29 +723,49 @@ def _strip_stray_negative(text: str) -> str:
 
 
 def _parse_positive_negative(text: str) -> tuple[str, str]:
-    """Extract POSITIVE / NEGATIVE sections from model output when negative requested."""
-    pos_match = re.search(r"POSITIVE:\s*(.*?)(?=NEGATIVE:|$)", text, re.S | re.I)
-    neg_match = re.search(r"NEGATIVE:\s*(.*?)$", text, re.S | re.I)
-    positive = pos_match.group(1).strip() if pos_match else text.strip()
-    negative = neg_match.group(1).strip() if neg_match else ""
-    return positive, negative
+    """Extract POSITIVE / NEGATIVE sections from model output when negative requested.
+
+    Handles several output variants robustly:
+    - POSITIVE:\\n...\\nNEGATIVE:\\n...  (canonical)
+    - Missing POSITIVE: label — uses everything before NEGATIVE: as positive
+    - Fallback patterns: "Negative prompt:", "Elements to avoid:", etc.
+    """
+    pos_match = re.search(r"POSITIVE:\s*(.*?)(?=\nNEGATIVE:|\Z)", text, re.S | re.I)
+    neg_match = re.search(r"\nNEGATIVE:\s*(.*?)$", text, re.S | re.I)
+
+    if pos_match:
+        positive = pos_match.group(1).strip()
+        negative = neg_match.group(1).strip() if neg_match else ""
+        return positive, negative
+
+    # POSITIVE: label absent but NEGATIVE: present — use everything before as positive
+    if neg_match:
+        positive = text[: neg_match.start()].strip()
+        negative = neg_match.group(1).strip()
+        return positive, negative
+
+    # Fallback: looser negative-section patterns
+    for pat in [
+        r"\n(?:negative(?:\s+prompt)?)[:\s—–-]+(.+?)$",
+        r"\n(?:elements?\s+to\s+avoid|avoid|do\s+not\s+include)[:\s—–-]+(.+?)$",
+    ]:
+        m = re.search(pat, text, re.S | re.I)
+        if m:
+            return text[: m.start()].strip(), m.group(1).strip()
+
+    return text.strip(), ""
 
 
 def _check_natural_prose(text: str) -> bool:
-    """Return True if the natural-style output contains a prose paragraph after the tags block.
+    """Return True if `text` is a genuine prose paragraph rather than a tag list.
 
-    Detects prose by looking for a blank-line-separated second block that has at least
-    one long non-tag sentence (average word length > 4 chars, comma density < 0.25).
+    Detects prose by checking for enough long, non-tag-like sentences
+    (minimum word count, low comma density, average word length > 4 chars).
     """
-    blocks = [b.strip() for b in re.split(r"\n{2,}", text.strip()) if b.strip()]
-    if len(blocks) < 2:
+    words = text.strip().split()
+    if len(words) < 40:
         return False
-    # Check the last block for prose characteristics
-    prose_candidate = blocks[-1]
-    words = prose_candidate.split()
-    if len(words) < 15:
-        return False
-    commas = prose_candidate.count(",")
+    commas = text.count(",")
     comma_density = commas / max(len(words), 1)
     avg_word_len = sum(len(w.strip(".,;:")) for w in words) / max(len(words), 1)
     return comma_density < 0.25 and avg_word_len > 4.0
@@ -549,6 +845,308 @@ def _resolve_weights(sha256s: list[str], raw_weights: list[float]) -> list[float
     return [w / total for w in raw_weights]
 
 
+def _tags_conflict(tag_a: str, tag_b: str) -> bool:
+    """BM25-style: shared meaningful token (len≥3) → same category → likely conflict."""
+    if tag_a == tag_b:
+        return False  # identical = duplicate, handled separately
+    toks_a = {t for t in tag_a.split("_") if len(t) >= 3}
+    toks_b = {t for t in tag_b.split("_") if len(t) >= 3}
+    return bool(toks_a & toks_b)
+
+
+def _build_weighted_wd14_context(
+    raw_docs: list[tuple[dict, int]],
+    weights: list[float],
+    conflict_tags: set[str],
+    *,
+    common_ratio: float = 0.3,
+    unique_count: int = 20,
+    must_threshold: float = _WD14_MUST_INCLUDE_THRESHOLD,
+) -> tuple[str, dict]:
+    """Build VLM context with common/unique tag decomposition.
+
+    Returns (context_str, analysis_dict).
+    analysis_dict: common_tags, unique_by_image.
+    """
+    if not raw_docs:
+        return "", {}
+
+    # Collect scored tags per image, using correct weight by original index
+    image_scored: list[list[tuple[str, float]]] = []
+    image_tag_sets: list[set[str]] = []
+    image_weights: list[float] = []
+    image_indices: list[int] = []
+
+    for doc, img_idx in raw_docs:
+        w = weights[img_idx] if img_idx < len(weights) else 0.0
+        wd14 = doc.get("wd14_tags", [])
+        scores = doc.get("wd14_tags_scores", [])
+        if scores and len(scores) == len(wd14):
+            scored = sorted(
+                [(t, s) for t, s in zip(wd14, scores) if t not in conflict_tags],
+                key=lambda x: -x[1],
+            )
+        else:
+            scored = [(t, 0.5) for t in wd14 if t not in conflict_tags]
+        image_scored.append(scored)
+        image_tag_sets.append({t for t, _ in scored})
+        image_weights.append(w)
+        image_indices.append(img_idx)
+
+    # Pre-build weight and score-map lookups (O(1) access throughout)
+    weight_by_idx = dict(zip(image_indices, image_weights))
+    score_map_by_idx = {idx: {t: s for t, s in sc} for idx, sc in zip(image_indices, image_scored)}
+
+    # Common tags: intersection of ACTIVE (weight>0) images only
+    active_sets = [ts for ts, w in zip(image_tag_sets, image_weights) if w > 0]
+    active_scored = [sc for sc, w in zip(image_scored, image_weights) if w > 0]
+    common_set: set[str] = active_sets[0].intersection(*active_sets[1:]) if len(active_sets) > 1 else set()
+
+    # Rank common tags by average confidence across active images
+    active_score_maps = [{t: s for t, s in sc} for sc in active_scored]
+    common_with_scores = sorted(
+        [
+            (tag, sum(m.get(tag, 0.0) for m in active_score_maps) / len(active_score_maps))
+            for tag in common_set
+        ],
+        key=lambda x: -x[1],
+    )
+    n_common = max(0, round(len(common_with_scores) * common_ratio))
+    selected_common = [t for t, _ in common_with_scores[:n_common]]
+    selected_common_set = set(selected_common)
+
+    # Per-image unique tags: budget proportional to weight (weight=0 → 0 tags)
+    n_active = max(1, sum(1 for w in image_weights if w > 0))
+    raw_unique_by_idx: dict[int, list[str]] = {}
+
+    for img_idx, scored, weight in zip(image_indices, image_scored, image_weights):
+        if weight <= 0:
+            raw_unique_by_idx[img_idx] = []
+            continue
+        unique_scored = [(t, s) for t, s in scored if t not in selected_common_set]
+        budget = max(0, round(unique_count * weight * n_active))
+        must_unique = [t for t, s in unique_scored if s >= must_threshold]
+        ref_unique = [t for t, s in unique_scored if s < must_threshold]
+        raw_unique_by_idx[img_idx] = (must_unique + ref_unique)[:budget]
+
+    # Cross-image dedup + BM25 conflict resolution
+    tag_to_imgs: dict[str, list[tuple[int, float]]] = {}
+    for img_idx, tags in raw_unique_by_idx.items():
+        w = weight_by_idx.get(img_idx, 0.0)
+        for tag in tags:
+            tag_to_imgs.setdefault(tag, []).append((img_idx, w))
+
+    removal: dict[int, set[str]] = {}
+
+    # Pass 1: exact duplicates — keep only highest-weight image
+    for tag, occurrences in tag_to_imgs.items():
+        if len(occurrences) > 1:
+            best_idx = max(occurrences, key=lambda x: x[1])[0]
+            for img_idx, _ in occurrences:
+                if img_idx != best_idx:
+                    removal.setdefault(img_idx, set()).add(tag)
+
+    # Pass 2: BM25 conflicts — active images only, remove from lower-weight
+    imgs_list = [
+        (img_idx, raw_unique_by_idx[img_idx], weight_by_idx[img_idx])
+        for img_idx in image_indices
+        if weight_by_idx[img_idx] > 0
+    ]
+    for i, (idx_i, tags_i, w_i) in enumerate(imgs_list):
+        for idx_j, tags_j, w_j in imgs_list[i + 1:]:
+            lower_idx, lower_tags, higher_tags = (
+                (idx_j, tags_j, tags_i) if w_i >= w_j else (idx_i, tags_i, tags_j)
+            )
+            for tag_low in lower_tags:
+                if tag_low in removal.get(lower_idx, set()):
+                    continue
+                for tag_high in higher_tags:
+                    if _tags_conflict(tag_low, tag_high):
+                        removal.setdefault(lower_idx, set()).add(tag_low)
+                        break
+
+    # Apply removals and build per-image analysis
+    unique_by_image: dict[int, dict] = {}  # keyed as str in analysis output
+    context_parts: list[str] = []
+
+    for doc, img_idx in raw_docs:
+        weight = weight_by_idx.get(img_idx, 0.0)
+        raw_tags = raw_unique_by_idx.get(img_idx, [])
+        final_tags = [t for t in raw_tags if t not in removal.get(img_idx, set())]
+
+        sm = score_map_by_idx.get(img_idx, {})
+        must_final = [t for t in final_tags if sm.get(t, 0.0) >= must_threshold]
+        ref_final = [t for t in final_tags if t not in must_final]
+
+        unique_by_image[img_idx] = {
+            "must": must_final,
+            "ref": ref_final,
+            "weight": weight,
+            "selected_count": len(final_tags),
+            "budget": max(0, round(unique_count * weight * n_active)),
+        }
+
+        if weight <= 0:
+            continue  # weight=0 の画像はコンテキストに含めない
+
+        pct = round(weight * 100)
+        lines: list[str] = []
+        prompt_txt = doc.get("positive_prompt", "")
+        if prompt_txt:
+            lines.append(f"Prompt: {prompt_txt}")
+        all_unique = must_final + ref_final
+        if all_unique:
+            lines.append(f"Style/aesthetic reference tags (influence {pct}%): {', '.join(all_unique)}")
+        part = f"[Image {len(context_parts) + 1} — influence weight: {pct}% — distinctive elements]"
+        if lines:
+            part += "\n" + "\n".join(lines)
+        context_parts.append(part)
+
+    # Assemble context string with priority guide
+    sections: list[str] = [
+        "When image elements conflict (e.g. different hair colors), prioritize the higher influence weight image."
+    ]
+    if selected_common:
+        sections.append(
+            f"[Shared traits — present in all images]:\n{', '.join(selected_common)}"
+        )
+    sections.extend(context_parts)
+    context = "\n\n---\n\n".join(sections)
+
+    analysis = {
+        "common_tags": selected_common,
+        "common_total": len(common_with_scores),
+        "common_selected": len(selected_common),
+        "unique_by_image": {str(k): v for k, v in unique_by_image.items()},
+    }
+    return context, analysis
+
+
+# ── Visual Script parser (labeled-section format, replaces fragile JSON parse) ──
+
+_VS_LABEL_RE = re.compile(
+    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+_SECTION_MARKER_RE = re.compile(r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I)
+
+_SUBJECT_ANCHOR_TAGS = frozenset({
+    "1girl", "1boy", "2girls", "2boys", "3girls", "4girls", "6+girls",
+    "solo", "couple", "multiple_girls", "multiple_boys", "multiple girls",
+})
+
+
+def _inject_wd14_must_tags(tags_text: str, wd14_analysis: dict) -> str:
+    """Merge WD14 must_unique into the tag line after VLM Pass1.
+
+    High-budget (high-weight) images' tags are inserted first.
+    Tags already present (case-insensitive) are skipped.
+    """
+    parts = [t.strip() for t in tags_text.split(",") if t.strip()]
+    existing = {p.lower() for p in parts}
+
+    sorted_images = sorted(
+        wd14_analysis.get("unique_by_image", {}).items(),
+        key=lambda x: x[1].get("budget", 0),
+        reverse=True,
+    )
+    new_must: list[str] = []
+    for _, info in sorted_images:
+        for tag in info.get("must", []) + info.get("ref", []):
+            key = tag.lower()
+            if key not in existing:
+                new_must.append(tag)
+                existing.add(key)
+
+    if not new_must:
+        return tags_text
+
+    # Insert after every subject-anchor tag (1girl, solo, etc.), wherever they appear
+    cut = max(
+        (i + 1 for i, p in enumerate(parts) if p.lower() in _SUBJECT_ANCHOR_TAGS),
+        default=0,
+    ) or len(parts)
+
+    return ", ".join(parts[:cut] + new_must + parts[cut:])
+
+
+def _build_all_must(wd14_analysis: dict) -> list[str]:
+    """Return weight-descending deduped list of all unique tags (must+ref) for conflict resolution."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for _, info in sorted(
+        wd14_analysis.get("unique_by_image", {}).items(),
+        key=lambda x: x[1].get("weight", 0),
+        reverse=True,
+    ):
+        for t in info.get("must", []) + info.get("ref", []):
+            if t not in seen:
+                result.append(t)
+                seen.add(t)
+    return result
+
+
+def _apply_must_replacements(tags: list[str], all_must: list[str]) -> list[str]:
+    """Replace each tag with a conflicting WD14 must_unique tag (BM25-style), dedup."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for tag in tags:
+        rep = next((m for m in all_must if _tags_conflict(tag, m) and tag != m), tag)
+        if rep not in seen:
+            result.append(rep)
+            seen.add(rep)
+    return result
+
+
+def _correct_prose_wd14_conflicts(prose: str, all_must: list[str]) -> str:
+    """Replace inline (tag) groups in prose where tags conflict with WD14 must_unique.
+
+    Example: (golden_hair, long_hair) + must=[purple_hair] → (purple_hair, long_hair)
+    """
+    def _fix_group(m: re.Match) -> str:
+        tags = [t.strip() for t in m.group(1).split(",")]
+        return f"({', '.join(_apply_must_replacements(tags, all_must))})"
+
+    return re.sub(r"\(([^)]+)\)", _fix_group, prose)
+
+
+def _enforce_wd14_on_cat_tags(cat_tags: dict[str, list[str]], all_must: list[str]) -> dict[str, list[str]]:
+    """Override VLM-generated category tags with WD14 must_unique where they conflict."""
+    return {field: _apply_must_replacements(tags, all_must) for field, tags in cat_tags.items()}
+
+
+def _parse_visual_script_sections(text: str) -> tuple[str, dict[str, list[str]]]:
+    """Split visual script into prose + per-category tag dict.
+
+    Handles the labeled section format:
+        [prose...]
+        HAIR_TAGS: purple_hair, long_hair
+        POSE_TAGS: standing, arms_at_sides
+        ...
+    Falls back gracefully when labels are absent (returns full text as prose).
+    """
+    from .inspire import _split_tags  # local import to avoid circular dep
+
+    first_m = _VS_LABEL_RE.search(text)
+    if first_m:
+        prose = text[: first_m.start()].strip()
+        tags_block = text[first_m.start():]
+    else:
+        prose = text.strip()
+        tags_block = ""
+
+    cat_tags: dict[str, list[str]] = {}
+    for m in _VS_LABEL_RE.finditer(tags_block):
+        field = m.group(1).lower() + "_tags"
+        cat_tags[field] = _split_tags(m.group(2))
+
+    return prose, cat_tags
+
+
+def _strip_visual_script_markers(text: str) -> str:
+    """Remove [CHARACTER]/[ACTION]/[SCENE]/[DETAIL]/[MOOD] section markers from prose."""
+    return _SECTION_MARKER_RE.sub("", text).strip()
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────

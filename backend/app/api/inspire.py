@@ -134,9 +134,17 @@ class InversionRequest(BaseModel):
     n_results: int = 12
     change_targets: list[str] = []   # formerly: axes
     user_inject_prompt: str = ""
+    user_inject_sections: dict[str, str] = {}  # {character, background, props, action}
     custom_blacklist: list[str] = []
     lang: str = "en"                 # "ja" or "en" — story generation language
     inversion_strength: float = 1.0  # 0.1–1.0
+    skip_verifier: bool = True       # skip Step 2b inversion tag verifier for speed
+
+
+class ExpandThemeRequest(BaseModel):
+    theme: str
+    sha256s: list[str] = []
+    lang: str = "ja"
 
 
 class BrainstormRequest(BaseModel):
@@ -446,74 +454,99 @@ Pick the 1-2 MOST DEFINING source tags (from any axis) for negative prompt.
 
 _STEP3_PROMPT = """\
 # ROLE
-You are a genius storyteller of visual scene description.
+You are an art director writing a visual brief for an illustrator.
+Embed danbooru vocabulary inline within each description using parentheses.
+Every concrete element must be named in BOTH human language AND danbooru format.
 
-# TASK
-Blend the 3 ingredients into a vivid 6-8 sentence scene description.
-Then list ~5 lighting/weather tags that naturally arise from the scene.
+# MANDATE — embed danbooru tags in parentheses within the prose
+WRONG: "She wears casual clothes in the park."
+RIGHT: "She wears an (oversized_hoodie) in cream, (cuffed_track_pants) in olive, (low-top_sneakers). \
+The setting is a (park, outdoor) with a (wooden_bench, old_bench) under a mature (zelkova_tree), \
+(late-afternoon) (direct_sunlight) casting (shadow_bars) across the (grass)."
 
-# OUTPUT LANGUAGE: {lang}
-Write the scene description in {lang_label}. The JSON atmosphere_tags must always be English.
+Every noun, texture, color, action, and mood word must have a danbooru equivalent in parentheses.
 
-# INGREDIENTS
-1. CHARACTER (immutable): {fixed_tags}
-2. NEW ENVIRONMENT: {new_tags}
-3. USER REQUEST (highest priority): {user_inject_prompt}
+# INPUTS
+FIXED CHARACTER ATTRIBUTES: {fixed_tags}
+INVERTED WORLD TAGS (selected): {new_tags}
+INVERTED WORLD TAGS (full candidate pool — use for inspiration): {raw_tags_summary}
+USER CREATIVE DIRECTION (highest priority — anchor every category to this): {user_inject_prompt}
 
-# RULES
-1. If USER REQUEST contains nouns, weave them into the scene with a dynamic relationship
-   to the character (holding, wielding, gazing at, etc.). Never isolate them.
-2. Describe how the NEW ENVIRONMENT lighting, shadows, and atmosphere affect the character.
-3. If USER REQUEST is empty, compose from CHARACTER and NEW ENVIRONMENT only.
-4. CHARACTER COUNT IS IMMUTABLE: The number of characters in your prose MUST match the
-   count tag in CHARACTER exactly.
-   "1girl" or "solo" → exactly one girl ("she", "the girl" — never "they", "girls", or plural).
-   "2girls" → exactly two girls. "multiple_girls" / "3girls" / "4girls" → three or more girls.
-   Same logic applies to boy/male tags ("1boy" → one boy only, etc.). Never contradict the count.
+# CHARACTER COUNT RULE
+{char_count_rule}
 
-# OUTPUT FORMAT
-Write the 6-8 sentence scene as plain prose first.
-Then on a new line output ONLY this JSON (no other text after):
-{{"atmosphere_tags": ["tag1", "tag2", "tag3", "tag4", "tag5"]}}"""
+# OUTPUT (JSON only — all *_desc values are English prose WITH danbooru terms in parentheses)
+{{
+  "hair_desc": "prose: length/cut/color + (danbooru_hair_tag, ornament_tag, ...) embedded",
+  "face_desc": "prose: expression details + (expression_tag, eye_direction_tag, ...) embedded",
+  "clothing_desc": "prose: each garment item + (garment_tag, color_tag, material_tag) embedded",
+  "accessory_desc": "prose: jewelry/bag/props + (accessory_tag, placement) embedded",
+  "pose_desc": "prose: body position/hands + (pose_tag, gesture_tag, body_language_tag) embedded",
+  "scene_desc": "prose: location/structures + (location_tag, environment_tag, distance_tag) embedded",
+  "object_desc": "prose: objects with states + (object_tag, state_tag) embedded",
+  "lighting_desc": "prose: light source/quality + (light_source_tag, direction_tag, shadow_tag) embedded",
+  "atmosphere_desc": "prose: weather/time/mood + (weather_tag, time_tag, season_tag, mood_tag) embedded"
+}}"""
 
 _STEP4_PROMPT = """\
 # ROLE
-You are a Stable Diffusion prompt engineer generating both tag-based and natural-language prompts.
+You are a creative director writing a VISUAL SCRIPT — a scene narrative where every concrete
+element is simultaneously named in danbooru vocabulary within parentheses.
+This script serves as both a story for humans AND a precise drawing instruction for AI.
 
-# TASK
-From [CONTEXT_STORY], produce two prompt forms and one negative prompt.
+# FORMAT RULE — embed danbooru tags inline in parentheses throughout the narrative
+Every noun, pose, expression, clothing item, and visual element MUST have its danbooru tag(s) in parentheses immediately following.
+Example EN: "Kanon (brown_hair, furrowed_brow) leans forward (leaning_forward) on the weathered bench \
+(bench, park, outdoor), speaking urgently (talking_to_others, nervous_smile)."
+Example JA: \
+「花音(brown_hair, furrowed_brow)は古いベンチ(bench, park, outdoor)に腰を下ろし、\
+前に体を傾けながら(leaning_forward)、必死に話しかける(talking_to_others, nervous_smile)。」\
+Note: use ASCII parentheses ( ) for tags even when writing in Japanese.
+
+# VISUAL SPECIFICATION (art director's brief — use these as the source of all danbooru terms)
+{visual_spec_nl}
+
+# FIXED TAGS (prepend ALL verbatim in final_positive_tags)
+{fixed_tags}
+
+# NEUTRALIZER TAGS
+{neutralizer_tags}
+
+# CHARACTER COUNT RULE
+{char_count_rule}
+
+# NARRATIVE STRUCTURE — write in {lang_label} with embedded danbooru tags:
+[SCENE SETUP — (wide_shot) or (establishing_shot)]
+  Describe the environment. Embed: location, lighting, time, weather, composition tags.
+
+[CHARACTER INTRODUCTION — (medium_shot) or (cowboy_shot)]
+  Each character with appearance. Embed: hair, clothing, accessory, initial pose/expression tags.
+
+[ACTION & INTERACTION — choose: (medium_shot), (wide_shot), or (full_body) to match the movement]
+  The key story moment. Embed: action, gesture, interaction, emotion tags.
+
+[EMOTIONAL PEAK — choose the most narratively fitting: (close_up), (medium_shot), (wide_shot), or (full_body)]
+  Most charged moment. Match composition to the action: wide for movement/environment, close for intense expression. Embed: expression, pose, composition tags.
+
+[RESOLUTION — (wide_shot) or (group_shot)]
+  Return to full scene. Embed: atmosphere, final composition, mood tags.
 
 # RULES
-1. final_positive_tags: Begin with ALL [FIXED_TAGS] verbatim and in order. Then add scene tags.
-2. Convert user-added objects into verb-compound tags:
-   katana -> holding_katana, sword -> wielding_sword, flower -> holding_flower
-3. NEVER add generic quality tags: masterpiece, best_quality, highres, etc.
-4. NEGATIVE CRITICAL RULES:
-   - Include all [NEUTRALIZER_TAGS] plus: worst_quality, low_quality, bad_anatomy, extra_limbs
-   - NEVER put any [FIXED_TAGS] or their word components in NEGATIVE.
-   - Example: if FIXED has "blue_hair", then "blue", "hair", "blue_hair" must NOT appear in NEGATIVE.
-   - Example: if FIXED has "school_uniform", then "school", "uniform" must NOT appear in NEGATIVE.
-5. Include relevant [ATMOSPHERE_TAGS] in final_positive_tags.
-6. final_positive_nl: Write a vivid English natural-language prompt (5-7 sentences) describing
-   the full scene. Reference the character's FIXED attributes naturally in the prose.
-   Include lighting, atmosphere, textures, and emotional tone — the more evocative, the better.
-7. CHARACTER COUNT in final_positive_nl MUST match [FIXED_TAGS] exactly.
-   "1girl"/"solo" → one girl only (use "she"/"the girl", never "girls" or plural).
-   "2girls" → two girls. "multiple_girls" → multiple girls.
-   The prose count must always agree with the danbooru count tag in [FIXED_TAGS].
+1. Every sentence MUST embed at least 2 danbooru tags in parentheses
+2. BANNED phrases: "somehow", "a sense of", "filled with emotion", "indescribable", "the air was filled with"
+3. {char_count_rule}
+4. Language: {lang_label} — natural fluent prose, NOT stiff translated English
+5. NEVER add quality meta-tags: masterpiece, best_quality, highres
 
-# INPUT
-[CONTEXT_STORY]: {context_story}
-[FIXED_TAGS]: {fixed_tags}
-[NEUTRALIZER_TAGS]: {neutralizer_tags}
-[ATMOSPHERE_TAGS]: {atmosphere_tags}
+Write the Visual Script now. Then output ONLY this JSON code block (nothing after):
 
-# OUTPUT (JSON only)
+```json
 {{
-  "final_positive_tags": "1girl, solo, blue_hair, cowboy_shot, ...",
-  "final_positive_nl": "A vivid 5-7 sentence scene description with lighting, atmosphere, textures, and emotional tone.",
-  "final_negative": "original_scene_tags, worst_quality, low_quality, ..."
-}}"""
+  "final_positive_tags": "(fixed_tags first), (every danbooru term embedded in the script above, deduplicated)",
+  "final_positive_nl": "3-sentence ENGLISH SD prompt summary (MUST be in English regardless of story language above): lighting + character description + emotional tone",
+  "final_negative": "{neutralizer_placeholder}, worst_quality, low_quality, bad_anatomy, extra_limbs"
+}}
+```"""
 
 _SAFETY_PROMPT = """\
 # TASK
@@ -531,6 +564,155 @@ If criminal issues found, replace those tags with safe alternatives.
   "issues": [],
   "cleaned_tags": "(same as INPUT if no changes needed)"
 }}"""
+
+_EXPAND_THEME_PROMPT = """\
+# ROLE
+You are a Danbooru tag expert. Given a theme/topic, generate specific danbooru-compatible tags
+for each of four categories. Think creatively and artistically — avoid obvious/generic tags.
+Prefer visually striking, specific, non-obvious choices that create a vivid scene.
+
+# THEME
+{theme}
+
+# RULES
+- All tags must be real Danbooru tags (underscore_format, e.g. long_hair, coffee_cup)
+- CHARACTER: hair color, eye color, hair style, clothing items (5-10 tags)
+- BACKGROUND: location, time of day, weather, architectural/natural elements (5-10 tags)
+- PROPS & ACCESSORIES: held objects, worn accessories, jewelry, nearby props (4-8 tags)
+- ACTION: pose, gesture, facial expression, body language (3-6 tags)
+- Do NOT include quality meta-tags (masterpiece, best_quality, highres, etc.)
+- Do NOT repeat tags across sections
+
+# OUTPUT (JSON only)
+{{
+  "character": "tag1, tag2, ...",
+  "background": "tag1, tag2, ...",
+  "props": "tag1, tag2, ...",
+  "action": "tag1, tag2, ..."
+}}"""
+
+
+def _char_count_rule(fixed_tags: list[str]) -> str:
+    for t in fixed_tags:
+        if t in ("1girl", "solo"):
+            return "1girl/solo → use she/the girl, NEVER they/girls/plural"
+        if t == "2girls":
+            return "2girls → exactly two girls, use they/the two girls"
+        if t in ("multiple_girls", "3girls", "4girls"):
+            return "multiple girls → use they/the girls"
+        if t == "1boy":
+            return "1boy → use he/the boy, NEVER they"
+        if t == "2boys":
+            return "2boys → exactly two boys"
+    return "match the character count tag in fixed_tags exactly"
+
+
+def _format_visual_spec_nl(world_spec: dict) -> str:
+    """Convert *_desc fields from world_spec into a labeled brief for STEP4."""
+    labels = {
+        "hair_desc": "HAIR",
+        "face_desc": "FACE & EXPRESSION",
+        "clothing_desc": "CLOTHING",
+        "accessory_desc": "ACCESSORIES",
+        "pose_desc": "POSE & GESTURE",
+        "scene_desc": "SCENE",
+        "object_desc": "OBJECTS",
+        "lighting_desc": "LIGHTING",
+        "atmosphere_desc": "ATMOSPHERE",
+    }
+    return "\n".join(
+        f"[{labels[k]}] {world_spec[k].strip()}"
+        for k in labels
+        if world_spec.get(k, "").strip()
+    )
+
+
+async def _step3_world_builder(
+    fixed_tags: list[str],
+    new_tags: list[str],
+    raw_by_axis: dict[str, list[str]],
+    user_inject_prompt: str,
+    ollama,
+    model: str,
+    options: dict | None = None,
+    tile_bytes: bytes | None = None,
+    user_inject_sections: dict[str, str] | None = None,
+) -> dict:
+    """Non-streaming: expand abstract tags into a concrete per-category visual specification.
+    When tile_bytes is provided, uses VLM so the model can see all source images directly.
+    """
+    try:
+        raw_tags_summary = "\n".join(
+            f"{ax}: {', '.join(tags[:10])}"
+            for ax, tags in (raw_by_axis or {}).items()
+            if tags
+        )
+        _sections = user_inject_sections or {}
+        _has_sections = any(_sections.get(k, "").strip() for k in ("character", "background", "props", "action"))
+        if _has_sections:
+            _char  = _sections.get("character",  "").strip() or "(none)"
+            _bg    = _sections.get("background", "").strip() or "(none)"
+            _props = _sections.get("props",      "").strip() or "(none)"
+            _act   = _sections.get("action",     "").strip() or "(none)"
+            _safe_inject = (
+                "USER CREATIVE DIRECTION — per-category (highest priority):\n"
+                f"• CHARACTER / HAIR / EYES / CLOTHING: {_char}\n"
+                f"• BACKGROUND / SCENE / ENVIRONMENT: {_bg}\n"
+                f"• PROPS & ACCESSORIES (jewelry, bag, held objects): {_props}\n"
+                f"• ACTION / POSE / GESTURE: {_act}\n\n"
+                "MANDATE: For every section with user input, generate ≥5 specific danbooru tags "
+                "in parentheses. For empty sections, invent creative, artistically surprising tags. "
+                "Prioritize unexpected, visually striking choices over generic ones."
+            ).replace("{", "{{").replace("}", "}}")
+        else:
+            _safe_inject = (
+                (user_inject_prompt or "(none)") + "\n\n"
+                "MANDATE: Even without user direction, generate ≥5 specific danbooru tags in "
+                "parentheses for EACH of: accessory_desc, scene_desc, object_desc. "
+                "Prioritize artistic, non-obvious choices."
+            ).replace("{", "{{").replace("}", "}}")
+        prompt = _STEP3_PROMPT.format(
+            fixed_tags=", ".join(fixed_tags) or "(none)",
+            new_tags=", ".join(new_tags) or "(none)",
+            raw_tags_summary=raw_tags_summary or "(none)",
+            user_inject_prompt=_safe_inject,
+            char_count_rule=_char_count_rule(fixed_tags),
+        )
+        if tile_bytes:
+            raw = await ollama.generate_vlm(prompt, [tile_bytes], model=model, options=options)
+        else:
+            raw = await ollama.generate_text(prompt, model=model, options=options)
+        return _parse_json_from_llm(raw) or {}
+    except Exception as exc:
+        logger.warning("_step3_world_builder exception: %s", exc, exc_info=True)
+        return {}
+
+
+def _extract_embedded_tags(text: str) -> list[str]:
+    """Extract danbooru tags from all (parenthesized groups) in a Visual Script text."""
+    tags: list[str] = []
+    seen: set[str] = set()
+    for group in re.findall(r'\(([^)]+)\)', text):
+        for t in _split_tags(group):
+            if t not in seen:
+                tags.append(t)
+                seen.add(t)
+    return tags
+
+
+def _extract_spec_category_tags(world_spec: dict) -> dict[str, list[str]]:
+    """Per-category tag extraction from STEP3 danbooru-embedded *_desc fields."""
+    cat_map = {
+        "hair_tags":       "hair_desc",
+        "clothing_tags":   "clothing_desc",
+        "accessory_tags":  "accessory_desc",
+        "pose_tags":       "pose_desc",
+        "expression_tags": "face_desc",
+        "background_tags": "scene_desc",
+        "object_tags":     "object_desc",
+        "lighting_tags":   "lighting_desc",
+    }
+    return {cat: _extract_embedded_tags(world_spec.get(src, "")) for cat, src in cat_map.items()}
 
 
 def _parse_json_from_llm(raw: str) -> dict:
@@ -981,7 +1163,7 @@ async def _step2_semantic_inverter(
                     and (not t.endswith('_hair') or (hair_is_target and str(axis_key) == 'hair'))
                 ]
                 if tags_for_axis:
-                    selected = random.sample(tags_for_axis, min(4, len(tags_for_axis)))
+                    selected = random.sample(tags_for_axis, min(8, len(tags_for_axis)))
                     new_tags_by_axis[str(axis_key)] = selected
                     new_tags.extend(selected)
         # fallback: flat "new_tags" key (selected-axis filter not applied)
@@ -1015,32 +1197,6 @@ async def _step2_semantic_inverter(
         return [], [], {}, {}
 
 
-async def _step4_final_distiller(
-    context_story: str,
-    fixed_tags: list[str],
-    neutralizer_tags: list[str],
-    atmosphere_tags: list[str],
-    ollama,
-    model: str,
-    options: dict | None = None,
-) -> tuple[list[str], str, list[str]]:
-    prompt = _STEP4_PROMPT.format(
-        context_story=context_story or "(none)",
-        fixed_tags=", ".join(fixed_tags) or "(none)",
-        neutralizer_tags=", ".join(neutralizer_tags) or "(none)",
-        atmosphere_tags=", ".join(atmosphere_tags) or "(none)",
-    )
-    try:
-        raw = await ollama.generate_text(prompt, model=model, options=options)
-        data = _parse_json_from_llm(raw)
-        final_pos_tags = _split_tags(data.get("final_positive_tags", ""))
-        final_pos_nl = data.get("final_positive_nl", "").strip()
-        final_neg = _split_tags(data.get("final_negative", ""))
-        return final_pos_tags, final_pos_nl, final_neg
-    except Exception:
-        return list(fixed_tags), "", list(neutralizer_tags)
-
-
 async def _post_safety_guardian(
     tags: list[str],
     ollama,
@@ -1057,6 +1213,50 @@ async def _post_safety_guardian(
         return tags
     except Exception:
         return tags
+
+
+def _bm25_normalize_tags(tags: list[str]) -> list[str]:
+    """Validate/normalize VLM-extracted tags against Danbooru vocabulary via BM25."""
+    if not tags:
+        return []
+    try:
+        from ..ai.wd14 import normalize_tag_string
+    except ImportError:
+        return tags
+    normalized = normalize_tag_string(", ".join(tags))
+    return [t.strip() for t in normalized.split(",") if t.strip()]
+
+
+def _normalize_section(text: str) -> str:
+    """Normalize a comma-separated tag string against Danbooru vocabulary via BM25."""
+    if not text:
+        return text
+    try:
+        from ..ai.wd14 import normalize_tag_string
+        return normalize_tag_string(text) or text
+    except ImportError:
+        return text
+
+
+def _apply_section_overrides(
+    fixed_tags: list[str],
+    sections: dict[str, str],
+) -> list[str]:
+    """Replace WD14-detected hair/eye tags with user-specified ones from character section."""
+    char_text = sections.get("character", "")
+    if not char_text:
+        return fixed_tags
+    user_tags = [t.strip().replace(" ", "_") for t in char_text.split(",") if t.strip()]
+    user_hair = [t for t in user_tags if t.endswith("_hair")]
+    user_eyes = [t for t in user_tags if t.endswith("_eyes")]
+    result = list(fixed_tags)
+    if user_hair:
+        result = [t for t in result if not t.endswith("_hair")]
+        result.extend(user_hair)
+    if user_eyes:
+        result = [t for t in result if not t.endswith("_eyes")]
+        result.extend(user_eyes)
+    return result
 
 
 def _apply_code_fixup(
@@ -1172,6 +1372,9 @@ def _compute_color_hints(base_tags: list[str]) -> str:
 
 async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGenerator[str, None]:
     # --- Data collection ---
+    # Collect tags proportionally from each image so later images are not truncated.
+    # Budget: 15 tags per image, capped at 60 total to keep LLM context manageable.
+    per_image_limit = max(12, 60 // max(1, len(body.sha256s)))
     all_tags: list[str] = []
     image_bytes_list: list[bytes] = []
     for sha256 in body.sha256s[:4]:
@@ -1179,7 +1382,7 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
         if not doc:
             continue
         if doc.get("wd14_tags"):
-            all_tags.extend(doc["wd14_tags"])
+            all_tags.extend(doc["wd14_tags"][:per_image_limit])
         fp = Path(doc.get("path", ""))
         if fp.exists():
             image_bytes_list.append(fp.read_bytes())
@@ -1192,7 +1395,7 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     llm_options = {"num_ctx": cfg.get("ollama_num_ctx", 16384)}
     base_tags = list(dict.fromkeys(
         t.strip().lower().replace(" ", "_") for t in all_tags
-    ))[:40]
+    ))[:60]
 
     # --- Pre-Search: Visual Vocabulary ---
     yield _sse({"type": "stage", "stage": 0, "label": "Retrieving vocabulary from similar images…"})
@@ -1234,6 +1437,9 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     fixed_tags_grouped = _categorize_fixed_tags(fixed_tags, base_tags, volatile_tags)
     # Reconstruct complete fixed_tags from grouped and pass to all subsequent steps
     fixed_tags = [tag for tags in fixed_tags_grouped.values() for tag in tags]
+    # User section overrides: user-specified hair/eye tags take priority over WD14 detected ones
+    if body.user_inject_sections:
+        fixed_tags = _apply_section_overrides(fixed_tags, body.user_inject_sections)
     # Only expose groups for selected axes as volatile_tags_grouped
     volatile_tags_grouped = {ax: tags for ax, tags in all_axis_grouped.items() if ax in change_set and tags}
     yield _sse({"type": "step1_result", "fixed_tags": fixed_tags, "volatile_tags": volatile_tags,
@@ -1264,80 +1470,107 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     yield _sse({"type": "step2_result", "new_tags": new_tags, "neutralizer_tags": neutralizer_tags,
                 "new_tags_by_axis": new_tags_by_axis, "step2_raw_by_axis": step2_raw_by_axis})
 
-    # --- Step 2b: Inversion tag validation ---
-    yield _sse({"type": "stage", "stage": 2, "label": "Validating inversion tags…"})
-    try:
-        verified_new_tags = await _step2b_inversion_verifier(
-            new_tags, volatile_tags, selected_targets, ollama, cfg["vlm_model"], options=llm_options
-        )
-        # If more than 20% of tags were removed, respect Step2 output (prevents verifier from over-pruning good tags)
-        if verified_new_tags and len(verified_new_tags) >= len(new_tags) * 0.8:
-            new_tags = verified_new_tags
-        yield _sse({"type": "step2b_result", "new_tags": new_tags, "new_tags_by_axis": new_tags_by_axis,
-                    "step2_raw_by_axis": step2_raw_by_axis})
-    except Exception:
-        pass
+    # --- Step 2b: Inversion tag validation (skipped by default for speed) ---
+    if not body.skip_verifier:
+        yield _sse({"type": "stage", "stage": 2, "label": "Validating inversion tags…"})
+        try:
+            verified_new_tags = await _step2b_inversion_verifier(
+                new_tags, volatile_tags, selected_targets, ollama, cfg["vlm_model"], options=llm_options
+            )
+            # If more than 20% of tags were removed, respect Step2 output (prevents verifier from over-pruning good tags)
+            if verified_new_tags and len(verified_new_tags) >= len(new_tags) * 0.8:
+                new_tags = verified_new_tags
+            yield _sse({"type": "step2b_result", "new_tags": new_tags, "new_tags_by_axis": new_tags_by_axis,
+                        "step2_raw_by_axis": step2_raw_by_axis})
+        except Exception:
+            pass
 
-    # --- Step 3: Context Brewer (streaming) ---
-    yield _sse({"type": "stage", "stage": 3, "label": "Brewing the scene…"})
-    context_story = ""
-    atmosphere_tags: list[str] = []
     lang = body.lang if body.lang in ("ja", "en") else "en"
     lang_label = "Japanese" if lang == "ja" else "English"
+
+    # --- Step 3: Visual World Builder (VLM when tile available, text-only fallback) ---
+    yield _sse({"type": "stage", "stage": 3, "label": "Building visual specification…"})
+    world_spec = await _step3_world_builder(
+        fixed_tags, new_tags, step2_raw_by_axis,
+        body.user_inject_prompt, ollama, cfg["vlm_model"], options=llm_options,
+        tile_bytes=tile_bytes,
+        user_inject_sections=body.user_inject_sections or {},
+    )
+    # Extract per-category tags from STEP3 danbooru-embedded *_desc fields
+    ws_cat_tags = _extract_spec_category_tags(world_spec)
+    # BM25 normalize: validate/replace non-standard tags against Danbooru vocabulary
+    ws_cat_tags = {k: _bm25_normalize_tags(v) for k, v in ws_cat_tags.items()}
+    yield _sse({"type": "step3_result", **ws_cat_tags})
+
+    # --- Step 4: Visual Script Writer (streaming story → JSON) ---
+    yield _sse({"type": "stage", "stage": 4, "label": "Writing the story…"})
+    visual_spec_nl = _format_visual_spec_nl(world_spec)
+    context_story = ""
+    final_positive: list[str] = []
+    final_positive_nl = ""
+    final_negative: list[str] = []
     try:
-        prompt3 = _STEP3_PROMPT.format(
+        _safe_spec = (visual_spec_nl or "(none)").replace("{", "{{").replace("}", "}}")
+        prompt4 = _STEP4_PROMPT.format(
             lang=lang,
             lang_label=lang_label,
+            visual_spec_nl=_safe_spec,
             fixed_tags=", ".join(fixed_tags) or "(none)",
-            new_tags=", ".join(new_tags) or "(none)",
-            user_inject_prompt=body.user_inject_prompt or "(none)",
+            neutralizer_tags=", ".join(neutralizer_tags) or "(none)",
+            neutralizer_placeholder=", ".join(neutralizer_tags) if neutralizer_tags else "worst_quality",
+            char_count_rule=_char_count_rule(fixed_tags),
         )
-        buf3: list[str] = []
-        async for event in ollama.generate_text_stream(prompt3, model=cfg["vlm_model"], options=llm_options):
+        buf4: list[str] = []
+        async for event in ollama.generate_text_stream(prompt4, model=cfg["vlm_model"], options=llm_options):
             if event.get("type") == "token":
                 text = event["text"]
-                buf3.append(text)
+                buf4.append(text)
                 yield _sse({"type": "story_token", "text": text})
-        raw3 = "".join(buf3)
-        atm_match = re.search(r'\{\s*"atmosphere_tags".*?\}', raw3, re.S)
-        if atm_match:
-            try:
-                atm_data = json.loads(atm_match.group(0))
-                atmosphere_tags = [
-                    t.strip().lower().replace(" ", "_")
-                    for t in atm_data.get("atmosphere_tags", [])
-                    if t.strip()
-                ]
-            except json.JSONDecodeError:
-                pass
-            context_story = raw3[: atm_match.start()].strip()
+        raw4 = "".join(buf4)
+        data4 = _parse_json_from_llm(raw4)
+        # Split story text from terminal JSON block — try ```json fence first, then bare {
+        cb = raw4.rfind("```json")
+        if cb >= 0:
+            context_story = raw4[:cb].strip()
         else:
-            context_story = raw3.strip()
+            nj = raw4.rfind("\n{")
+            context_story = raw4[:nj].strip() if nj >= 0 else raw4.strip()
+        final_positive = _split_tags(data4.get("final_positive_tags", ""))
+        final_positive_nl = data4.get("final_positive_nl", "").strip()
+        final_negative = _split_tags(data4.get("final_negative", ""))
+        # Fallback: if JSON tags are sparse, regex-extract embedded tags from story text
+        if len(final_positive) < 10:
+            story_embedded = _extract_embedded_tags(context_story)
+            _seen_fp: set[str] = set(final_positive)
+            for t in story_embedded:
+                if t not in _seen_fp:
+                    final_positive.append(t)
+                    _seen_fp.add(t)
     except Exception as e:
-        yield _sse({"type": "error", "message": f"Step3 error: {e}"})
-        return
-    yield _sse({"type": "step3_result", "atmosphere_tags": atmosphere_tags})
-
-    # --- Step 4: Final Distiller ---
-    yield _sse({"type": "stage", "stage": 4, "label": "Refining the prompt…"})
-    try:
-        final_positive, final_positive_nl, final_negative = await _step4_final_distiller(
-            context_story, fixed_tags, neutralizer_tags, atmosphere_tags,
-            ollama, cfg["vlm_model"], options=llm_options,
-        )
-    except Exception as e:
+        logger.error("Step4 error: %s", e, exc_info=True)
         yield _sse({"type": "error", "message": f"Step4 error: {e}"})
         return
+
+    # --- Backend force-include guarantee (triple safety) ---
     final_positive = _apply_code_fixup(final_positive, fixed_tags, body.custom_blacklist)
-    # Ensure randomly selected tags (new_tags) are included in the final output
     _bl = set(body.custom_blacklist)
     _seen = set(final_positive)
+    # 1. Force-include STEP2 new_tags (existing behaviour)
     for t in new_tags:
         if t not in _seen and t not in _bl:
             final_positive.append(t)
             _seen.add(t)
+    # 2. Force-include STEP3 category tags (regex-extracted from *_desc)
+    for cat_tags in ws_cat_tags.values():
+        for t in cat_tags:
+            if t not in _seen and t not in _bl:
+                final_positive.append(t)
+                _seen.add(t)
     final_negative = _remove_fixed_from_negative(final_negative, fixed_tags)
-    yield _sse({"type": "step4_result", "final_positive": final_positive, "final_negative": final_negative})
+    # atmosphere_tags kept for backward-compat: use lighting_tags from world spec
+    atmosphere_tags: list[str] = ws_cat_tags.get("lighting_tags", [])
+    yield _sse({"type": "step4_result", "final_positive": final_positive,
+                "final_negative": final_negative, **ws_cat_tags})
 
     # --- Post: Safety Guardian ---
     yield _sse({"type": "stage", "stage": 5, "label": "Safety check…"})
@@ -1386,7 +1619,51 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
         "step2_raw_by_axis": step2_raw_by_axis,
         "atmosphere_tags": atmosphere_tags,
         "removed_tags": removed_tags,
+        **ws_cat_tags,
     })
+
+
+@router.post("/expand-theme")
+async def expand_theme(body: ExpandThemeRequest, request: Request):
+    """Use VLM to expand a free-form theme into 4-section structured Danbooru tags."""
+    if not body.theme.strip():
+        raise HTTPException(422, "theme must not be empty")
+    ollama = request.app.state.ollama
+    db     = request.app.state.db
+    cfg    = await get_runtime_config(db)
+
+    # Load reference images for VLM context if provided
+    tile_bytes: bytes | None = None
+    image_bytes_list: list[bytes] = []
+    for sha256 in body.sha256s[:4]:
+        doc = await db.get(sha256)
+        if not doc:
+            continue
+        fp = Path(doc.get("path", ""))
+        if fp.exists():
+            image_bytes_list.append(fp.read_bytes())
+    if image_bytes_list:
+        tile_bytes = create_tile_image(image_bytes_list)
+
+    safe_theme = body.theme.replace("{", "{{").replace("}", "}}")
+    prompt = _EXPAND_THEME_PROMPT.format(theme=safe_theme)
+
+    try:
+        if tile_bytes:
+            raw = await ollama.generate_vlm(prompt, [tile_bytes], model=cfg["vlm_model"])
+        else:
+            raw = await ollama.generate_text(prompt, model=cfg["vlm_model"])
+        data = _parse_json_from_llm(raw) or {}
+    except Exception as exc:
+        logger.warning("expand_theme VLM failed: %s", exc)
+        raise HTTPException(502, "VLM call failed")
+
+    return {
+        "character":  _normalize_section(data.get("character", "")),
+        "background": _normalize_section(data.get("background", "")),
+        "props":      _normalize_section(data.get("props", "")),
+        "action":     _normalize_section(data.get("action", "")),
+    }
 
 
 @router.post("/inversion")

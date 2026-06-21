@@ -16,8 +16,19 @@ Evaluate how well the image follows the given prompt.
 [Prompt (author's original input)]
 {positive_prompt}
 
+[Prompt style]
+{prompt_style}
+
 [Tags extracted from the image]
 {image_tags}
+
+[Token-level pre-analysis]
+The following concepts from the prompt were found as matching tags (verify and use as a starting point):
+Matched: {bm25_matched}
+Unmatched: {bm25_unmatched}
+
+The pre-analysis handles tag format normalization (underscores, capitalization). \
+Use your semantic understanding to verify and catch additional matches or mismatches it may have missed.
 
 [Overall score]
 {score}
@@ -138,12 +149,18 @@ async def analyze_with_llm(
     ollama: OllamaClient,
     model: str | None = None,
     max_retries: int = 3,
+    bm25_matched: list[str] | None = None,
+    bm25_unmatched: list[str] | None = None,
+    prompt_style: str = "natural",
 ) -> dict:
     tags_text = ", ".join(image_tags)
     categories_text = ", ".join(CATEGORIES)
     prompt = _PROMPT_TEMPLATE.format(
         positive_prompt=positive_prompt,
+        prompt_style=prompt_style,
         image_tags=tags_text,
+        bm25_matched=", ".join(bm25_matched) if bm25_matched else "(none)",
+        bm25_unmatched=", ".join(bm25_unmatched) if bm25_unmatched else "(none)",
         score=f"{score:.4f}",
         categories=categories_text,
     )

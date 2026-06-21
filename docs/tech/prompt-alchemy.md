@@ -211,32 +211,61 @@ Fields retrieved from each image document:
 
 ---
 
-### Step 2: WD14 Tag Score Classification
+### Step 2: WD14 Weighted Context Building
 
-Confidence scores from the WD14 tagger are used to classify tags into two tiers.
+`_build_weighted_wd14_context()` in `api/ai.py` converts per-image WD14 tag scores and influence weights into a structured context string for the VLM.
 
-| Score range | Treatment | VLM prompt text |
-|-------------|-----------|-----------------|
-| ≥ 0.70 | **Must-include tags** (`must_tags`) | `Must include these tags verbatim: tag1, tag2, ...` |
-| < 0.70 | **Reference tags** (`reference_tags`) | `Reference tags: tag1, tag2, ...` (top 30) |
+#### Pass 1 — Common / Unique split
+
+Tags present in **all active images** (weight > 0) form the `common_set` and are listed once as shared style. Tags present in only some images are `unique` and assigned to the image they come from.
 
 ```python
-# runners.py:869-879 (threshold constant = 0.70)
-scored_pairs = list(zip(wd14, wd14_scores))
-must_tags = [t for t, s in scored_pairs if s >= _WD14_MUST_INCLUDE_THRESHOLD]
-if must_tags:
-    lines.append(f"Must include these tags verbatim: {', '.join(must_tags)}")
-remaining = [t for t, s in scored_pairs if s < _WD14_MUST_INCLUDE_THRESHOLD]
-if remaining:
-    lines.append(f"Reference tags: {', '.join(remaining[:30])}")
+active_sets = [score_map_by_idx[i].keys() for i in active_indices]
+common_set  = active_sets[0].intersection(*active_sets[1:])
 ```
 
-**Why split into two tiers?**
+#### Per-image tag budget
 
-High-score tags are the essential elements that define the image, so they get a strong `verbatim` directive. Low-score tags represent context and atmosphere, so they are passed as reference information the VLM can interpret flexibly. This distinction is the key to producing prompts that preserve the "core" of the reference image while also capturing its "atmosphere."
+Each image's unique tag budget is proportional to its weight:
 
-> **Note on WD14 tag format**
-> WD14 outputs Danbooru-style tags (`blue_hair`, `1girl`, etc.), but Ranbell Image's pipeline (`wd14.py`) converts underscores to spaces before storing them (`blue_hair` → `blue hair`). Tags passed to the VLM therefore approximate space-separated natural language.
+```
+budget = round(unique_count × weight × n_active)
+```
+
+A 70% image with `n_active=2` gets a budget roughly 2.3× larger than the 30% image. Within budget, tags are ordered by confidence score; the top tags are taken as `must_final` (score ≥ 0.70) and the rest as `ref_final`.
+
+#### Pass 2 — BM25 conflict resolution
+
+Pairs of images are compared. When a unique tag from the lower-weight image shares a meaningful token with a unique tag from the higher-weight image (BM25-style token overlap, min-length 3), the lower-weight tag is suppressed:
+
+```python
+# lower-weight image's "purple_hair" conflicts with higher-weight "blonde_hair"
+# → "purple_hair" added to removal set for the lower-weight image
+```
+
+This ensures that the dominant image's appearance attributes are not contaminated by those of subordinate images.
+
+#### Context format
+
+```
+Style/aesthetic reference tags (influence 70%): purple_hair, long_hair, smile, ...
+
+---
+
+Style/aesthetic reference tags (influence 30%): school_uniform, outdoor, ...
+```
+
+Stored per-image analysis (in `unique_by_image`):
+
+| Field | Content |
+|-------|---------|
+| `must` | High-confidence unique tags (score ≥ 0.70), after conflict removal |
+| `ref` | Lower-confidence unique tags, after conflict removal |
+| `weight` | Normalized influence weight (0.0–1.0) |
+| `budget` | Allocated unique tag slots |
+
+> **WD14 tag format note**
+> WD14 outputs Danbooru-style tags (`blue_hair`, `1girl`, etc.). Ranbell Image stores them with underscores converted to spaces. The VLM therefore receives space-separated natural language approximations.
 
 ---
 
@@ -254,29 +283,20 @@ def _resolve_weights(sha256s: list[str], raw_weights: list[float]) -> list[float
     return [w / total for w in raw_weights]   # normalize so sum equals 1.0
 ```
 
-Normalized weights are converted to percentages and annotated explicitly in the context string.
-
-```python
-# runners.py:899-903
-for part_idx, (ctx, img_idx) in enumerate(zip(context_parts, loaded_indices)):
-    pct = round(weights[img_idx] * 100)
-    annotated_parts.append(f"[Image {part_idx + 1} — influence weight: {pct}%]\n{ctx}")
-context = "\n\n---\n\n".join(annotated_parts)
-```
+Normalized weights are converted to percentages and drive both the WD14 tag budget and the BM25 conflict resolution priority (see Step 2). The assembled context string is built by `_build_weighted_wd14_context()`.
 
 Example context received by the VLM:
 
 ```
-[Image 1 — influence weight: 60%]
-Prompt: 1girl, long hair, school uniform
-Must include these tags verbatim: 1girl, long hair, smile
-Reference tags: school uniform, outdoor, cherry blossoms
+Common style tags (all images): 1girl, long hair, smile, school uniform
 
 ---
 
-[Image 2 — influence weight: 40%]
-Must include these tags verbatim: sunset, warm lighting
-Reference tags: cloud, horizon, golden hour
+Style/aesthetic reference tags (influence 70%): purple_hair, hair_ribbon, ...
+
+---
+
+Style/aesthetic reference tags (influence 30%): outdoor, cherry_blossoms, ...
 ```
 
 ---
@@ -359,48 +379,44 @@ _TRANSLATE_PROMPT = (
 )
 ```
 
-After translation, `_extract_literal_directives()` uses a regular expression to extract **literal text directives** — instructions to render specific text within the image.
+After translation (or before the VLM call for any mode), `_extract_literal_texts()` uses a regular expression to extract **literal text strings** — quoted strings the user wants rendered in the image.
 
 ```python
-_LITERAL_TEXT_RE = re.compile(
-    r"""(?:add|insert|put|place|show|write|display|include|render)\s+
-        (?:the\s+)?(?:text|word|words|label|watermark|title|string|letters?|caption)\s+
-        ['"""「]
-        (?P<text>[^'""」]+)
-        ['"""」]
-        (?:[\s,]*(?:at|on|in|to)\s+
-           (?P<position>top|bottom|left|right|center|upper|lower|above|below)
-        )?""",
-    re.IGNORECASE | re.VERBOSE,
-)
+_LITERAL_TEXT_RE = re.compile(r"""
+    (?:add|insert|put|...)\s+(?:the\s+)?(?:text|...)\s+['\"「](?P<text>[^'\"」\n]+)['\"」]
+    |
+    ['\"「『](?P<text_ja>[^'\"」』\n]+)['\"」』]\s*(?:という|の)?
+    \s*(?:文字|テキスト|...)?\s*を?\s*(?:に|で)?\s*(?:入れ|描画|追加|表示|書い|記載)
+    |
+    (?:textboard|sign|...|テキスト)\s*(?:に|で|with|saying|reading)?\s*['\"「『](?P<text_ctx>[^'\"」』\n]+)['\"」』]
+""", re.IGNORECASE | re.VERBOSE)
 ```
 
-**Example — extraction and injection of literal text:**
+The extracted strings are stored; the instruction itself is passed to the VLM unchanged. After the VLM produces the positive prompt, `_append_literal_texts()` appends Anima-format tags at the end:
 
-```
-Input instruction (Japanese): 「RANBELL という文字を上部に追加して」
-     ↓ _translate_instruction()
-English: "Add the text 'RANBELL' at the top"
-     ↓ _extract_literal_directives()
-literals = [{"type": "literal_text", "text": "RANBELL", "position": "top"}]
-nl_instruction = ""  ← literal portion removed
-
-(injected in post-processing step)
-     ↓ _inject_literal_directives()
-final positive: 'text "RANBELL", top_text, text_on_image, 1girl, long_hair, ...'
+```python
+def _append_literal_texts(positive: str, texts: list[str]) -> str:
+    tags = [f'text "{t}"' for t in texts]
+    return positive.rstrip(", ") + ", " + ", ".join(tags)
 ```
 
-Position keyword mapping:
+**Example:**
 
-| Input keyword | Output tag |
-|---------------|------------|
-| top / upper / above | `top_text` |
-| bottom / lower / below | `bottom_text` |
-| left / right / center | `overlay_text` |
+```
+Instruction: 「テキストボードに"Good!"って手に持っている」
+     ↓ _extract_literal_texts()
+texts = ["Good!"]   ← instruction passed to VLM unchanged
 
-**Why bypass the VLM for this?**
+     ↓ VLM generates:
+positive = "1girl, holding_sign, ..."
 
-Asking a VLM to render a specific string precisely in an image is notoriously unreliable — the VLM may reinterpret or transform the text. By extracting the literal text before the VLM sees it and injecting it directly into the prompt afterward, the system guarantees string accuracy.
+     ↓ _append_literal_texts()
+final positive: '1girl, holding_sign, ..., text "Good!"'
+```
+
+**Why append at the end (not prepend)?**
+
+Anima and compatible models parse `text "X"` as a rendering directive and expect it near the end of the prompt, not mixed into character or composition tags. Appending after VLM generation also ensures the literal tag never interferes with VLM reasoning about the scene.
 
 #### enhanced mode — `_translate_and_classify()`
 
@@ -554,6 +570,69 @@ else:
     negative = ""
 ```
 
+#### WD14 post-processing pipeline (all styles)
+
+After the VLM produces its raw output and before forced-tag removal, a WD14-driven correction pass runs for **all three prompt styles**:
+
+**natural style — 2-pass flow:**
+
+```
+Pass 1 VLM output (tag line)
+  → _ensure_subject_anchor()          ensure 1girl/solo present
+  → _inject_wd14_must_tags()          inject missing WD14 unique tags (must+ref, budget-sorted)
+
+Pass 2 VLM output (prose + category tags)
+  → _build_all_must()                 weight-descending deduped list of all unique tags
+  → _correct_prose_wd14_conflicts()   replace (tag) groups in prose that conflict with all_must
+  → _enforce_wd14_on_cat_tags()       override per-category tag fields from VLM
+```
+
+**danbooru style:**
+
+```
+VLM output (flat tag line)
+  → _inject_wd14_must_tags()          inject missing WD14 unique tags
+  → _build_all_must()
+  → _enforce_wd14_on_cat_tags()
+```
+
+**detailed style:**
+
+```
+VLM output (8-section text + cat_tags JSON)
+  → _build_all_must()
+  → _correct_prose_wd14_conflicts()   fix inline (tag) groups in section text
+  → _enforce_wd14_on_cat_tags()
+```
+
+#### `_inject_wd14_must_tags()`
+
+Merges WD14 unique tags (both `must` and `ref` tiers) into the VLM-generated tag line. Images are processed in budget-descending order (highest weight first), ensuring that dominant images' tags are inserted before subordinate images' tags. Tags already present in the line are skipped.
+
+Insertion point: immediately after the last subject-anchor tag (`1girl`, `solo`, etc.).
+
+#### `_build_all_must()`
+
+Returns a deduplicated list of all unique tags across images, sorted by image weight descending:
+
+```python
+def _build_all_must(wd14_analysis: dict) -> list[str]:
+    # weight-descending iteration → higher-weight tags come first
+    # first occurrence wins on dedup → high-weight tags dominate replacement
+```
+
+This ordering guarantees that when `_apply_must_replacements()` searches for the first conflicting tag, it always finds the higher-weight image's version.
+
+#### `_correct_prose_wd14_conflicts()`
+
+Scans inline `(tag, tag, ...)` groups in the VLM prose and replaces any tag that conflicts (BM25 token overlap) with a tag from `all_must`. Because `all_must` is weight-sorted, the replacement is always the dominant image's attribute:
+
+```
+prose:    "...(golden_hair, long_hair)..."
+all_must: ["purple_hair", ...]          ← from 70% image
+result:   "...(purple_hair, long_hair)..."
+```
+
 #### Post-processing function overview
 
 | Function | Purpose | Example |
@@ -562,8 +641,12 @@ else:
 | `_parse_positive_negative()` | Split `POSITIVE:` / `NEGATIVE:` sections | Used when negative prompt is requested |
 | `_clean_markdown()` | Remove Markdown symbols and label lines | `**bold**` → `bold`, `## Header` → deleted |
 | `_strip_stray_negative()` | Remove unintended negative sections | Delete `NEGATIVE: blurry, ...` when generated spontaneously |
+| `_inject_wd14_must_tags()` | Inject WD14 unique tags into tag line | adds `purple_hair` after `1girl` |
+| `_build_all_must()` | Build weight-sorted all-unique-tag list | used by prose/cat-tag correction |
+| `_correct_prose_wd14_conflicts()` | Fix conflicting tags in prose `(groups)` | `(golden_hair)` → `(purple_hair)` |
+| `_enforce_wd14_on_cat_tags()` | Override VLM category tags with WD14 | `hair_color: ["blonde"]` → `["purple"]` |
 | `_remove_forced_tags()` | Remove admin-configured banned tags | `explicit, 1girl, ...` → `1girl, ...` |
-| `_inject_literal_directives()` | Prepend literal text tags | `text "RANBELL", top_text, text_on_image, 1girl, ...` |
+| `_append_literal_texts()` | Append `text "X"` tags at end | `..., text "Good!"` |
 | `_check_natural_prose()` | Verify prose block presence for natural style | Returns `prose_missing=true` if no prose found |
 
 #### Patterns processed by `_clean_markdown()`
@@ -1047,18 +1130,18 @@ class RefineRequest(BaseModel):
 
 - `prose_missing`: `true` when the natural style produced no prose block
 - `removed_tags`: list of tags removed by the `prompt_removal_tags` configuration
-- `injected_literals`: list of literal text items extracted and injected via `instruction_mode`
+- `injected_literals`: list of literal strings extracted from the instruction and appended as `text "X"` at the end of the positive prompt
 
 ### 10.3 Key Implementation Files
 
-| File | Approx. lines | Purpose |
-|------|---------------|---------|
-| `backend/app/api/ai.py` | ~754 | RefineRequest, style instruction strings, all helper functions, endpoints |
-| `backend/app/jobs/runners.py:781-1012` | 231 | `run_refine_prompt()` core processing |
-| `backend/app/ai/tile_image.py` | 42 | Tile image composition (Pillow) |
-| `backend/app/ai/wd14.py` | — | WD14 ONNX inference, tag + score output |
-| `frontend/src/App.vue:~239-, ~1685-, ~2761-` | — | Full alchemy UI (state management / SSE handling / layout) |
-| `backend/app/runtime_config.py` | — | Runtime settings: `prompt_removal_tags`, `vlm_model`, etc. |
+| File | Purpose |
+|------|---------|
+| `backend/app/api/ai.py` | RefineRequest, `_build_weighted_wd14_context()`, `_build_all_must()`, `_inject_wd14_must_tags()`, `_correct_prose_wd14_conflicts()`, `_enforce_wd14_on_cat_tags()`, `_extract_literal_texts()`, `_append_literal_texts()`, style instruction strings, endpoints |
+| `backend/app/jobs/runners.py` | `run_refine_prompt()` — orchestrates all steps including WD14 post-processing for all three prompt styles |
+| `backend/app/ai/tile_image.py` | Tile image composition (Pillow) |
+| `backend/app/ai/wd14.py` | WD14 ONNX inference, tag + score output |
+| `frontend/src/App.vue` | Full alchemy UI (state management / SSE handling / layout) |
+| `backend/app/runtime_config.py` | Runtime settings: `prompt_removal_tags`, `vlm_model`, etc. |
 
 ---
 

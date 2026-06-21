@@ -153,7 +153,7 @@ async def lifespan(app: FastAPI):
     await ollama.close()
 
 
-app = FastAPI(title="Ranbell Image", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="Ranbell Image", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

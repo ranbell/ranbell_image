@@ -6,6 +6,50 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [0.3.0] — 2026-06-21
+
+### Added
+
+- **Invoke / Pro Mode — major overhaul**
+  - Topic-driven flow: free-text topic is converted to topic_tags + slogan before axis decomposition
+  - Category section inputs: character / background / props / action / mood / camera
+  - Topic expand button (⚡) — uses reference images as visual context to auto-fill 4 sections
+  - WD14 tag autocomplete on all section inputs and character-tag field
+  - Visual Spec tag adoption — click hair / clothing / accessory / pose / expression tags to append to character tags; +all button for batch adoption
+
+- **Invoke / Light Mode**
+  - Section inputs and theme expansion applied to Light Mode
+  - BM25 tag normalization added
+
+- **Invoke / shared quality**
+  - VLM refinement pass added for axis_tag_hints before spirit composition
+  - Alignment score improved with BM25 token-match component
+  - Spirit card progress bar wired to real processing phases (composing / generating / tagging)
+  - Seasonal emoji category added
+  - ComfyUI prompt output standardized to English
+
+- **Refine**
+  - Visual Script + category tag card (WD14 hair / clothing / pose / expression tags) implemented
+  - Literal text rendering redesigned as Anima format, injected without VLM pass
+  - WD14 common/unique tag separation and contradiction post-processing
+
+- **Control Room**
+  - WAITED queue displayed in ISA-101 style (separate from active)
+  - Invoke thumbnail retry added
+
+### Fixed
+
+- **Invoke / Pro Mode** — all spirits converging to the same situation when a topic is given
+  - Per-spirit scene variant generation (`generate_scene_variants`) — each spirit receives a distinct scene description
+  - topic_tags distributed in tiers per spirit (core / interpretive / divergent)
+  - VLM filter prompt tightened to exclude generic scene-setting tags
+- **Inspire** — images from multiple sources bleeding into each other
+- **Inspire** — speed improvements, stronger progress bar feedback
+- **Refine** — character subject and action tags dropping from output
+- **Refine** — BM25 weight priority in tag injection and prose correction
+
+---
+
 ## [0.2.0] — 2026-06-14
 
 ### Added

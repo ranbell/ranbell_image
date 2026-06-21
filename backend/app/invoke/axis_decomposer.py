@@ -49,6 +49,8 @@ _EMOJI_MEANINGS = {
     "🗻": "Mount Fuji, Japanese icon, snow-capped peak",
     "🌌": "galaxy, nebula, deep space, star field",
     "🌠": "shooting star, fleeting light, night sky, brief wonder",
+    "☀️": "summer sun, midsummer heat, blazing sunshine, clear sky, high noon",
+    "🍂": "autumn leaves, fall foliage, harvest season, fading warmth, maple red",
 }
 
 # ── Slider descriptions (used for slogan generation only) ────────────────────
@@ -91,6 +93,12 @@ _EMOJI_AXIS_FILL: dict[str, dict[str, Any]] = {
     "🌈": {"lighting": "post-rain diffuse light",           "palette": "full spectrum color"},
     "🌠": {"lighting": "shooting star, brief flash",        "mood": "fleeting wonder"},
     "❄️": {"palette": "cold blues and white",              "mood": "winter stillness"},
+    "☀️": {"scene":    "midsummer, clear blue sky, open air",
+           "lighting": "bright midday sunlight, high sun angle",
+           "palette":  "vivid blue and white, summer brightness"},
+    "🍂": {"scene":    "autumn forest, carpet of fallen leaves",
+           "lighting": "warm amber light, low-angle afternoon sun, golden hour",
+           "palette":  "amber, deep red, and burnt orange"},
     "🌫️": {"lighting": "diffuse fog",                      "mood": "dreamlike ambiguity"},
     "🌺": {"palette": "vivid tropical colors"},
     "🪷": {"palette": "soft lavender and white",            "mood": "spiritual calm"},
@@ -260,6 +268,7 @@ def _build_completion_prompt(
     empty_axes: list[str],
     person_desc: str,
     character_hints: dict | None = None,
+    pro_sections: dict | None = None,
 ) -> str:
     person_present = bool(person_desc)
     character_hints = character_hints or {}
@@ -287,6 +296,24 @@ def _build_completion_prompt(
                 lines.append(f"  {k}: {v}")
         lines.append("")
 
+    _SECTION_TO_AXIS = {
+        "character":  "character_detail",
+        "background": "scene",
+        "props":      "accessories",
+        "action":     "action",
+    }
+    seed_hints = {axis: (pro_sections or {}).get(sect, "").strip()
+                  for sect, axis in _SECTION_TO_AXIS.items()}
+    seed_hints = {k: v for k, v in seed_hints.items() if v}
+    if seed_hints:
+        lines.append(
+            "USER SEED HINTS — starting points for specific axes. "
+            "Incorporate and enrich these where they fit the overall theme:"
+        )
+        for axis, val in seed_hints.items():
+            lines.append(f"  {axis} seed: {val}")
+        lines.append("")
+
     if empty_axes:
         fill_list = [a for a in empty_axes if a not in ("style", "character_detail", "accessories")]
         if "style" in empty_axes:
@@ -300,7 +327,10 @@ def _build_completion_prompt(
             "  " + ", ".join(fill_list),
             "",
             "Rules:",
-            "- action: the specific thing happening at this exact frozen instant (pose, gaze, gesture)",
+            "- action: explicit Danbooru action/pose tags for this frozen instant "
+            "(e.g. gripping, touching, kneeling, outstretched_arm, holding_hands, "
+            "hand_on_another's_cheek, running, sitting, looking_at_viewer). "
+            "NEVER use literary descriptions — use concrete Danbooru tags only.",
             "- Keep each text value concise (5-15 words), except character_detail (see below)",
             "- style: 1-3 Danbooru-compatible style tags as a list",
             "",
@@ -411,6 +441,7 @@ async def decompose_axes(
     camera_shot: str = "",
     camera_angle: str = "",
     character_hints: dict | None = None,
+    pro_sections: dict | None = None,
 ) -> dict:
     emoji_codes = emoji_codes or []
     mood_sliders = mood_sliders or {}
@@ -441,6 +472,7 @@ async def decompose_axes(
     prompt = _build_completion_prompt(
         effective_slogan, prefilled, empty_axes, person_desc,
         character_hints=character_hints,
+        pro_sections=pro_sections,
     )
 
     # Step 2c: Parse VLM output and apply prefilled values as overrides
@@ -449,3 +481,52 @@ async def decompose_axes(
 
     axes["_slogan"] = slogan
     return axes
+
+
+async def generate_scene_variants(
+    ollama,
+    axes: dict,
+    pro_topic: str,
+    n: int = 5,
+) -> list[str]:
+    """テーマと基本軸から N 種の異なるシーン記述を生成してスピリット別に割り当てる。
+
+    各バリアントは環境タイプ（屋内/屋外、都市/自然、幻想/現実）を変えることで
+    スピリット間のシチュエーション多様性を確保する。
+    失敗時は base_scene の繰り返しにフォールバック。
+    """
+    base_scene = axes.get("scene", "")
+    subject = axes.get("subject", "")
+    mood = axes.get("mood", "")
+
+    prompt_lines = [
+        f"Topic: {pro_topic}",
+        f"Base scene: {base_scene}",
+        f"Subject: {subject}",
+        f"Mood: {mood}",
+        "",
+        f"Generate {n} DISTINCT scene/setting descriptions for images on this topic.",
+        "Rules:",
+        "- Each must be a compact Danbooru-compatible scene description (5-15 words).",
+        "- Vary the environment TYPE dramatically across all variants:",
+        "  indoor / outdoor, urban / natural, realistic / fantastical, micro / grand scale, etc.",
+        "- Do NOT repeat the same environment type in any two variants.",
+        "- The first variant may be close to the base scene; others must diverge meaningfully.",
+        "- Every variant must still feel thematically coherent with the topic.",
+        f'Output ONLY a valid JSON array of exactly {n} strings, no markdown: ["scene1","scene2",...]',
+    ]
+
+    try:
+        raw = await ollama.generate_text("\n".join(prompt_lines), fmt="json")
+        raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+        raw = re.sub(r"\s*```$", "", raw.strip())
+        variants = json.loads(raw)
+        if isinstance(variants, list):
+            cleaned = [v.strip() for v in variants if isinstance(v, str) and v.strip()]
+            if len(cleaned) >= 2:
+                logger.debug("generate_scene_variants: %d variants", len(cleaned))
+                return cleaned[:n]
+    except Exception as e:
+        logger.warning("generate_scene_variants failed: %s", e)
+
+    return [base_scene] * n

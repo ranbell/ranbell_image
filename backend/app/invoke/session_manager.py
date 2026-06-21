@@ -32,8 +32,11 @@ class InvokeSession:
     enabled_spirits: list[str]
     prompt_mode: str = "danbooru+natural"  # 'danbooru+natural' | 'natural' | 'danbooru'
     locale: str = "en"                     # 'en' | 'ja' — controls monologue language
+    rebel_inversion: bool = True           # False = rebel expresses Counter perspective without axis inversion
     person_tags: str = ""                  # e.g. "1girl, solo" — prepended to every positive prompt
     pro_negative: str = ""                 # user-supplied negative from Pro mode
+    pro_topic: str = ""                    # Pro mode natural language topic (お題テキスト)
+    pro_sections: dict = field(default_factory=dict)  # character/background/props/action seed hints
     # Runtime resources (stored to avoid threading through callbacks)
     db: Any = None
     ollama: Any = None
@@ -86,6 +89,9 @@ class InvokeSessionManager:
         locale: str = "en",
         person_tags: str = "",
         pro_negative: str = "",
+        pro_topic: str = "",
+        pro_sections: dict | None = None,
+        rebel_inversion: bool = True,
         db=None,
         ollama=None,
         comfy=None,
@@ -103,6 +109,9 @@ class InvokeSessionManager:
             locale=locale,
             person_tags=person_tags,
             pro_negative=pro_negative,
+            pro_topic=pro_topic or "",
+            pro_sections=pro_sections or {},
+            rebel_inversion=rebel_inversion,
             db=db,
             ollama=ollama,
             comfy=comfy,
@@ -144,25 +153,61 @@ class InvokeSessionManager:
             elif isinstance(v, str) and v:
                 axis_tags.extend(v.replace(",", " ").split())
 
+        import asyncio
         from .vocab_bank import get_vocab_hints, get_axis_semantic_tags
-        try:
-            vocab_hints = await get_vocab_hints(session.db, session.ollama, axis_tags)
-        except Exception as e:
-            logger.warning("vocab_hints failed: %s", e)
+        _vh, _ah = await asyncio.gather(
+            get_vocab_hints(session.db, session.ollama, axis_tags),
+            get_axis_semantic_tags(session.db, session.ollama, axes),
+            return_exceptions=True,
+        )
+        if isinstance(_vh, Exception):
+            logger.warning("vocab_hints failed: %s", _vh)
             vocab_hints = {"stranger": [], "lunatic": []}
-
-        try:
-            axis_tag_hints = await get_axis_semantic_tags(session.db, session.ollama, axes)
-        except Exception as e:
-            logger.warning("axis_tag_hints failed: %s", e)
+        else:
+            vocab_hints = _vh
+        if isinstance(_ah, Exception):
+            logger.warning("axis_tag_hints failed: %s", _ah)
             axis_tag_hints = []
+        else:
+            axis_tag_hints = _ah
+
+        # topic_tags をスピリット別ティアに分割
+        # 上位タグ（コア）= テーマに直結、下位タグ = より発散的
+        topic_tags = axes.get('_topic_tags', [])
+        n_tags = len(topic_tags)
+        if n_tags > 0:
+            cut1 = max(1, n_tags // 3)
+            cut2 = max(cut1 + 1, n_tags * 2 // 3)
+            _topic_tier = {
+                "faithful": topic_tags[:cut2],           # コア〜中間
+                "rebel":    topic_tags[:cut2],           # 同上（rebelはシーン軸で逆転）
+                "stranger": topic_tags[cut1:],           # 中間〜発散
+                "lunatic":  topic_tags[cut2:] or topic_tags[cut1:],  # 最も発散的
+                "oracle":   topic_tags[::2],             # 間引きで全域カバー
+            }
+        else:
+            _topic_tier = {}
 
         from ..spooler.models import JobLane
         from ..jobs.runners import run_invoke_spirit_compose
 
-        for spirit_name in session.enabled_spirits:
+        scene_variants = axes.get('_scene_variants', [])
+        spirit_names = list(session.enabled_spirits)
+        axis_tag_hints_set = set(axis_tag_hints)
+
+        for i, spirit_name in enumerate(spirit_names):
             session.spirits[spirit_name].status = "composing"
             spirit_vocab = vocab_hints if spirit_name in ("stranger", "lunatic") else {"stranger": [], "lunatic": []}
+
+            # スピリット別 topic_tags をセマンティック候補の補足として末尾に追加
+            spirit_topic = _topic_tier.get(spirit_name, topic_tags)
+            spirit_hints = (axis_tag_hints + [t for t in spirit_topic if t not in axis_tag_hints_set])[:25]
+
+            # Pro mode: 各スピリットに異なるシーンバリアントを割り当て
+            if scene_variants and i < len(scene_variants):
+                spirit_axes = {**axes, 'scene': scene_variants[i]}
+            else:
+                spirit_axes = axes
 
             job_id = session.spooler.submit(
                 JobLane.PROMPT,
@@ -171,10 +216,11 @@ class InvokeSessionManager:
                 meta={"session_id": session_id, "spirit": spirit_name},
                 session_id=session_id,
                 spirit_name=spirit_name,
-                axes=axes,
+                axes=spirit_axes,
                 vocab_hints=spirit_vocab,
-                axis_tag_hints=axis_tag_hints,
+                axis_tag_hints=spirit_hints,
                 locale=session.locale,
+                rebel_inversion=session.rebel_inversion if spirit_name == "rebel" else True,
                 session_manager=self,
             )
             session.spirits[spirit_name].job_ids.append(job_id)
@@ -196,11 +242,19 @@ class InvokeSessionManager:
         spirit.status = "composed"
 
         # フロントへの通知は compose 完了ごとに逐次送信
+        _cat_fields = (
+            "hair_tags", "expression_tags", "clothing_tags", "accessory_tags",
+            "pose_tags", "background_tags", "object_tags", "lighting_tags",
+        )
         await self.emit(session, "spirit_composed", {
             "spirit": spirit_name,
             "monologue": prompt_result.get("internal_monologue", ""),
             "natural_language": prompt_result.get("natural_language", ""),
             "natural_language_ja": prompt_result.get("natural_language_ja", ""),
+            "danbooru_tags": prompt_result.get("danbooru_tags", ""),
+            "inverted_axis": prompt_result.get("inverted_axis"),
+            "wild_tags_used": prompt_result.get("wild_tags_used", []),
+            **{f: prompt_result.get(f, "") for f in _cat_fields},
         })
 
         # 全 spirit が compose を終えたら generation を一括 submit
@@ -223,6 +277,18 @@ class InvokeSessionManager:
                         session_manager=self,
                     )
                     s.job_ids.append(job_id)
+
+    async def on_spirit_progress(
+        self, session_id: str, spirit_name: str, step: int, total: int
+    ) -> None:
+        session = self.get_session(session_id)
+        if not session:
+            return
+        await self.emit(session, "spirit_progress", {
+            "spirit": spirit_name,
+            "step": step,
+            "total": total,
+        })
 
     async def on_image_done(
         self,

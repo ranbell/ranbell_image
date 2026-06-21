@@ -30,6 +30,7 @@ export const EMOJI_PALETTE = [
   '🌿','💧','🌺','🪷','🦋','🌅','🌇','🏔️','🎋','🍃',
   '❄️','💫','🌈','🎭','🔮','🪞','🗝️','🌑','🌾','🫧',
   '🕸️','🐚','🌫️','🎐','🪐','🌋','🗻','🌌','🌠',
+  '☀️','🍂',
 ]
 
 // ── Singleton state ────────────────────────────────────────────────────────────
@@ -65,14 +66,22 @@ const invokeProTopic       = ref('')   // natural language topic → AI converts
 const invokeProPersonTags  = ref('')   // free-form character tags (prepended to all spirits)
 const invokeProPrompt      = ref('')
 const invokeProNegative    = ref('')
+const invokeProSections    = ref({ character: '', background: '', props: '', action: '', mood: '', camera: '' })
 const invokeWorkflow    = ref('')
 const invokeSeeds       = ref({})
 
 // Spirit ON/OFF
 const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true })
+// Rebel inversion mode: true = invert one axis (may produce dramatic/broken images), false = Counter perspective without inversion
+const invokeRebelInversion = ref(true)
 
 // SSE
 let _eventSource = null
+
+const _SPIRIT_TAG_FIELDS = [
+  'hair_tags', 'expression_tags', 'clothing_tags', 'accessory_tags',
+  'pose_tags', 'background_tags', 'object_tags', 'lighting_tags',
+]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function _resetSpirits() {
@@ -80,6 +89,7 @@ function _resetSpirits() {
   for (const name of SPIRIT_NAMES) {
     s[name] = {
       status: 'waiting',
+      genProgress: 0,
       sha256: null,
       alignment_score: null,
       monologue: null,
@@ -88,6 +98,7 @@ function _resetSpirits() {
       danbooru_tags: null,
       wild_tags_used: [],
       inverted_axis: null,
+      ...Object.fromEntries(_SPIRIT_TAG_FIELDS.map(f => [f, []])),
     }
   }
   invokeSpirits.value = s
@@ -131,13 +142,25 @@ function _handleEvent(evt) {
       s.monologue = evt.monologue || null
       s.natural_language = evt.natural_language || null
       s.natural_language_ja = evt.natural_language_ja || null
+      s.danbooru_tags = evt.danbooru_tags || null
+      s.inverted_axis = evt.inverted_axis || null
+      s.wild_tags_used = evt.wild_tags_used || []
+      for (const f of _SPIRIT_TAG_FIELDS) {
+        const v = evt[f]
+        s[f] = v ? v.split(',').map(t => t.trim()).filter(Boolean) : []
+      }
     }
+  }
+  else if (type === 'spirit_progress') {
+    const s = invokeSpirits.value[evt.spirit]
+    if (s) s.genProgress = evt.total > 0 ? evt.step / evt.total : 0
   }
   else if (type === 'image_ready') {
     const s = invokeSpirits.value[evt.spirit]
     if (s) {
       s.status = 'tagging'
       s.sha256 = evt.sha256
+      s.genProgress = 1.0
     }
   }
   else if (type === 'spirit_done') {
@@ -192,12 +215,14 @@ async function summon(token, locale = 'en') {
 
   const body = {
     user_intent: invokeText.value,
+    pro_topic: invokeProTopic.value,
     emoji_codes: invokeEmojis.value,
     mood_sliders: invokeMoodSliders.value,
     color_hex: invokeColors.value,
     pro_prompt: invokeProPrompt.value,
     pro_negative: invokeProNegative.value,
     pro_person_tags: invokeProPersonTags.value,
+    pro_sections: { ...invokeProSections.value },
     seeds: invokeSeeds.value,
     workflow_name: invokeWorkflow.value,
     input_mode: invokeInputMode.value,
@@ -207,6 +232,7 @@ async function summon(token, locale = 'en') {
     prompt_mode: invokePromptMode.value,
     camera_shot: invokeCameraShot.value,
     camera_angle: invokeCameraAngle.value,
+    rebel_inversion: invokeRebelInversion.value,
     locale,
   }
 
@@ -330,8 +356,8 @@ export function useInvokeSession() {
     invokeEmojis, invokeText, invokeColors, invokeMoodSliders,
     invokePersonGender, invokePersonCount, invokePromptMode,
     invokeCameraShot, invokeCameraAngle,
-    invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeWorkflow, invokeSeeds,
-    invokeEnabledSpirits, enabledSpiritList,
+    invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
+    invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
     openInvoke, closeInvoke,
     summon, cancel, respin, adopt, sendToRefine,
     fetchDaily, fetchStats, enhancePrompt,

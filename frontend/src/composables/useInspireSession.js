@@ -9,6 +9,7 @@ const inspireResults          = ref([])
 const inspireMorphTimeline    = ref([])
 const inspireError            = ref('')
 const inspireSlots            = ref([])
+const inspireSlotsDirty       = ref(false)
 const arithmeticRoles         = ref({})
 const morphSlotA              = ref('')
 const morphSlotB              = ref('')
@@ -24,7 +25,7 @@ const inversionVolatileTags   = ref([])
 const inversionNewTags        = ref([])
 const inversionNeutralizerTags = ref([])
 const inversionAtmosphereTags = ref([])
-const inversionUserInjectPrompt = ref('')
+const inversionUserSections = ref({ character: '', background: '', props: '', action: '' })
 const inversionLang           = ref('en')
 const inversionStrength       = ref(1.0)
 const inspireInversionTagsNl  = ref('')
@@ -35,6 +36,14 @@ const inversionVolatileTagsGrouped = ref({})
 const inversionNewTagsGrouped      = ref({})
 const inversionLlmClassification   = ref({})
 const inversionStep2RawResult      = ref({})
+const inversionHairTags        = ref([])
+const inversionClothingTags    = ref([])
+const inversionAccessoryTags   = ref([])
+const inversionPoseTags        = ref([])
+const inversionExpressionTags  = ref([])
+const inversionBackgroundTags  = ref([])
+const inversionObjectTags      = ref([])
+const inversionLightingTags    = ref([])
 const brainstormLoading       = ref(false)
 const brainstormText          = ref('')
 const brainstormStreaming      = ref('')
@@ -88,6 +97,7 @@ function resetSession(initialSlots = []) {
   inspireMorphTimeline.value    = []
   inspireError.value            = ''
   inspireSlots.value            = shas
+  inspireSlotsDirty.value       = false
   inspireAnomalyTags.value      = []
   inspireInversionTags.value    = []
   inspireInversionNegativeTags.value = []
@@ -100,7 +110,7 @@ function resetSession(initialSlots = []) {
   inversionNewTags.value        = []
   inversionNeutralizerTags.value = []
   inversionAtmosphereTags.value = []
-  inversionUserInjectPrompt.value = ''
+  inversionUserSections.value = { character: '', background: '', props: '', action: '' }
   inversionLang.value           = 'en'
   inversionStrength.value       = 1.0
   inspireInversionTagsNl.value  = ''
@@ -111,6 +121,14 @@ function resetSession(initialSlots = []) {
   inversionNewTagsGrouped.value      = {}
   inversionLlmClassification.value   = {}
   inversionStep2RawResult.value      = {}
+  inversionHairTags.value        = []
+  inversionClothingTags.value    = []
+  inversionAccessoryTags.value   = []
+  inversionPoseTags.value        = []
+  inversionExpressionTags.value  = []
+  inversionBackgroundTags.value  = []
+  inversionObjectTags.value      = []
+  inversionLightingTags.value    = []
   inversionStoryStreaming.value  = ''
   brainstormLoading.value       = false
   brainstormText.value          = ''
@@ -142,6 +160,21 @@ function toggleInspireResultSelection(sha256) {
   inspireResultSelection.value = s
 }
 
+function addToInspireSlots(sha256) {
+  if (inspireSlots.value.includes(sha256)) return 'duplicate'
+  if (inspireSlots.value.length >= 6) return 'full'
+  inspireSlots.value = [...inspireSlots.value, sha256]
+  inspireSlotsDirty.value = true
+  return 'ok'
+}
+
+function removeFromInspireSlots(sha256) {
+  inspireSlots.value = inspireSlots.value.filter(s => s !== sha256)
+  inspireSlotsDirty.value = true
+  if (morphSlotA.value === sha256) morphSlotA.value = inspireSlots.value[0] || ''
+  if (morphSlotB.value === sha256) morphSlotB.value = inspireSlots.value.find(s => s !== morphSlotA.value) || ''
+}
+
 function setActiveReader(reader) {
   _activeReader = reader
 }
@@ -154,6 +187,7 @@ export function useInspireSession() {
     inspireMorphTimeline,
     inspireError,
     inspireSlots,
+    inspireSlotsDirty,
     arithmeticRoles,
     morphSlotA,
     morphSlotB,
@@ -169,7 +203,7 @@ export function useInspireSession() {
     inversionNewTags,
     inversionNeutralizerTags,
     inversionAtmosphereTags,
-    inversionUserInjectPrompt,
+    inversionUserSections,
     inversionLang,
     inversionStrength,
     inspireInversionTagsNl,
@@ -180,6 +214,14 @@ export function useInspireSession() {
     inversionNewTagsGrouped,
     inversionLlmClassification,
     inversionStep2RawResult,
+    inversionHairTags,
+    inversionClothingTags,
+    inversionAccessoryTags,
+    inversionPoseTags,
+    inversionExpressionTags,
+    inversionBackgroundTags,
+    inversionObjectTags,
+    inversionLightingTags,
     inversionJobId,
     brainstormJobId,
     brainstormLoading,
@@ -196,6 +238,8 @@ export function useInspireSession() {
     textSearchQuery,
     inspireResultSelection,
     toggleInspireResultSelection,
+    addToInspireSlots,
+    removeFromInspireSlots,
     isRunning,
     hasSession,
     resetSession,

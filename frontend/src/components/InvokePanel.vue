@@ -22,8 +22,8 @@ const {
   invokeEmojis, invokeText, invokeColors, invokeMoodSliders,
   invokePersonGender, invokePersonCount, invokePromptMode,
   invokeCameraShot, invokeCameraAngle,
-  invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeWorkflow, invokeSeeds,
-  invokeEnabledSpirits, enabledSpiritList,
+  invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
+  invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
   openInvoke, closeInvoke,
   summon, cancel, respin, adopt, sendToRefine,
   fetchDaily, fetchStats, enhancePrompt,
@@ -111,6 +111,26 @@ watch(isLoading, (loading) => {
   if (loading) selectedNarrativeSpirit.value = null
 })
 
+// ── Visual Script helpers ──────────────────────────────────────────────────────
+function styledVS(text) {
+  if (!text) return ''
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\(([^)]+)\)/g, '<span class="font-mono text-emerald-400/80 text-[10px] bg-emerald-950/50 px-0.5 rounded not-italic">($1)</span>')
+}
+
+const vsCopied = ref(false)
+async function copyVS(name) {
+  const s = invokeSpirits.value[name]
+  if (!s) return
+  const text = (locale.value === 'ja' && s.natural_language_ja) ? s.natural_language_ja : s.natural_language
+  try {
+    await navigator.clipboard.writeText(text || '')
+    vsCopied.value = true
+    setTimeout(() => { vsCopied.value = false }, 1500)
+  } catch {}
+}
+
 // ── Camera work options ───────────────────────────────────────────────────────
 const CAMERA_SHOTS = computed(() => [
   { val: 'wide_shot',        label: t('invoke.camera.wide') },
@@ -189,6 +209,12 @@ async function handleSendToRefine(spiritName) {
 
 // ── Emoji palette categories ──────────────────────────────────────────────────
 const _EMOJI_DATA = [
+  { catKey: 'seasons', emojis: [
+    { em: '🌸', mk: 'cherry' },
+    { em: '☀️', mk: 'sun' },
+    { em: '🍂', mk: 'autumnLeaves' },
+    { em: '❄️', mk: 'snowflake' },
+  ]},
   { catKey: 'lightFlame', emojis: [
     { em: '✨', mk: 'sparkles' },
     { em: '⚡', mk: 'lightning' },
@@ -200,7 +226,6 @@ const _EMOJI_DATA = [
     { em: '🌙', mk: 'moon' },
     { em: '🌑', mk: 'newMoon' },
     { em: '🌈', mk: 'rainbow' },
-    { em: '❄️', mk: 'snowflake' },
     { em: '🌫️', mk: 'fog' },
     { em: '🌌', mk: 'galaxy' },
   ]},
@@ -213,7 +238,6 @@ const _EMOJI_DATA = [
     { em: '🎋', mk: 'bamboo' },
   ]},
   { catKey: 'flowerCreatures', emojis: [
-    { em: '🌸', mk: 'cherry' },
     { em: '🌺', mk: 'hibiscus' },
     { em: '🪷', mk: 'lotus' },
     { em: '🦋', mk: 'butterfly' },
@@ -428,7 +452,113 @@ watch(invokeOracleNextRun, (val) => {
 onUnmounted(() => {
   SPIRIT_NAMES.forEach(n => _clearAnim(n))
   clearInterval(_countdownTimer)
+  Object.values(_iacTimers).forEach(clearTimeout)
 })
+
+// ── Pro mode: テーマ → セクション自動展開 ─────────────────────────────────────
+const _invokeSectionsLoading = ref(false)
+async function expandSections() {
+  if (!invokeProTopic.value.trim() || _invokeSectionsLoading.value) return
+  _invokeSectionsLoading.value = true
+  try {
+    const r = await fetch('/api/inspire/expand-theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Token': getToken() },
+      body: JSON.stringify({ theme: invokeProTopic.value, sha256s: [], lang: locale.value || 'ja' }),
+    })
+    if (r.ok) {
+      const data = await r.json()
+      invokeProSections.value = {
+        character:  data.character  || invokeProSections.value.character,
+        background: data.background || invokeProSections.value.background,
+        props:      data.props      || invokeProSections.value.props,
+        action:     data.action     || invokeProSections.value.action,
+      }
+    }
+  } catch {}
+  _invokeSectionsLoading.value = false
+}
+
+const INVOKE_SECTIONS = [
+  { key: 'character',  icon: '👤', labelKey: 'invoke.sectionCharacter',  phKey: 'invoke.sectionCharacterPh' },
+  { key: 'background', icon: '🌄', labelKey: 'invoke.sectionBackground', phKey: 'invoke.sectionBackgroundPh' },
+  { key: 'props',      icon: '🎒', labelKey: 'invoke.sectionProps',      phKey: 'invoke.sectionPropsPh' },
+  { key: 'action',     icon: '🏃', labelKey: 'invoke.sectionAction',     phKey: 'invoke.sectionActionPh' },
+  { key: 'mood',       icon: '🌀', labelKey: 'invoke.sectionMood',       phKey: 'invoke.sectionMoodPh' },
+  { key: 'camera',     icon: '📷', labelKey: 'invoke.sectionCamera',     phKey: 'invoke.sectionCameraPh' },
+]
+const _iacSuggestions  = ref({})
+const _iacShowDropdown = ref({})
+const _iacActiveIndex  = ref({})
+const _iacTimers       = {}
+
+function _iacLastToken(text) { return text.split(',').pop().trim() }
+
+async function iacFetch(key, text) {
+  const q = _iacLastToken(text).replace(/ /g, '_')
+  if (!q || q.length < 2) {
+    _iacSuggestions.value  = { ..._iacSuggestions.value,  [key]: [] }
+    _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: false }
+    return
+  }
+  clearTimeout(_iacTimers[key])
+  _iacTimers[key] = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/tags/suggest?q=${encodeURIComponent(q)}&limit=8`)
+      if (r.ok) {
+        const data = await r.json()
+        _iacSuggestions.value  = { ..._iacSuggestions.value,  [key]: data }
+        _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: data.length > 0 }
+        _iacActiveIndex.value  = { ..._iacActiveIndex.value,  [key]: -1 }
+      }
+    } catch {}
+  }, 150)
+}
+
+function iacSelect(key, tag) {
+  const cur = key === 'charTags' ? invokeProPersonTags.value : invokeProSections.value[key]
+  const ci  = cur.lastIndexOf(',')
+  const pre = ci >= 0 ? cur.slice(0, ci + 1) + ' ' : ''
+  const next = (pre + tag).trimStart()
+  if (key === 'charTags') {
+    invokeProPersonTags.value = next
+  } else {
+    invokeProSections.value = { ...invokeProSections.value, [key]: next }
+  }
+  _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: false }
+  _iacSuggestions.value  = { ..._iacSuggestions.value,  [key]: [] }
+}
+
+function iacKeydown(key, e) {
+  const sugs = _iacSuggestions.value[key] || []
+  if (!_iacShowDropdown.value[key] || !sugs.length) return
+  if (e.key === 'ArrowDown') { e.preventDefault(); _iacActiveIndex.value = { ..._iacActiveIndex.value, [key]: Math.min((_iacActiveIndex.value[key] ?? -1) + 1, sugs.length - 1) } }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _iacActiveIndex.value = { ..._iacActiveIndex.value, [key]: Math.max((_iacActiveIndex.value[key] ?? -1) - 1, -1) } }
+  else if (e.key === 'Enter' && (_iacActiveIndex.value[key] ?? -1) >= 0) { e.preventDefault(); iacSelect(key, sugs[_iacActiveIndex.value[key]].tag) }
+  else if (e.key === 'Escape') { _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: false } }
+}
+
+function iacHide(key) { setTimeout(() => { _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: false } }, 150) }
+
+// ── Visual Spec タグ採用 ───────────────────────────────────────────────────────
+const personTagSet = computed(() =>
+  new Set(invokeProPersonTags.value.split(',').map(t => t.trim()).filter(Boolean))
+)
+
+function appendToPersonTags(tag) {
+  if (invokeInputMode.value !== 'pro') return
+  if (personTagSet.value.has(tag)) return
+  const cur = invokeProPersonTags.value.trim()
+  invokeProPersonTags.value = cur ? cur + ', ' + tag : tag
+}
+
+function appendGroupToPersonTags(tags) {
+  const current = new Set(invokeProPersonTags.value.split(',').map(t => t.trim()).filter(Boolean))
+  const toAdd = tags.filter(t => !current.has(t))
+  if (!toAdd.length) return
+  const cur = invokeProPersonTags.value.trim()
+  invokeProPersonTags.value = cur ? cur + ', ' + toAdd.join(', ') : toAdd.join(', ')
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function spiritBorderClass(name) {
@@ -473,6 +603,15 @@ const summonBlockReason = computed(() => {
 
 function thumbnailUrl(sha256) {
   return `/api/thumbnails/${sha256}.webp`
+}
+
+function onThumbnailError(event) {
+  const img = event.target
+  const retries = parseInt(img.dataset.retries || '0')
+  if (retries >= 3) return
+  img.dataset.retries = retries + 1
+  const src = img.src
+  setTimeout(() => { img.src = ''; img.src = src }, 600 * (retries + 1))
 }
 </script>
 
@@ -677,22 +816,43 @@ function thumbnailUrl(sha256) {
               <template v-else>
 
                 <!-- キャラクタータグ -->
-                <div>
+                <div class="relative">
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ t('invoke.proCharTagsLabel') }} <span class="text-gray-700 normal-case font-normal">{{ t('invoke.proCharTagsOptional') }}</span></p>
                   <textarea v-model="invokeProPersonTags"
+                    @input="iacFetch('charTags', $event.target.value)"
+                    @keydown="e => iacKeydown('charTags', e)"
+                    @blur="iacHide('charTags')"
                     placeholder="1girl, red_hair, blue_eyes, sailor_uniform..."
                     rows="2"
                     class="w-full bg-gray-800/60 border border-gray-700/50 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-sky-500/60 focus:ring-1 focus:ring-sky-500/30 transition resize-none" />
+                  <div v-if="_iacShowDropdown['charTags'] && (_iacSuggestions['charTags'] || []).length"
+                    class="absolute top-full left-0 right-0 mt-0.5 bg-gray-800 border border-gray-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div v-for="(s, i) in _iacSuggestions['charTags']" :key="s.tag"
+                      @mousedown.prevent="iacSelect('charTags', s.tag)"
+                      class="flex items-center justify-between px-3 py-1.5 cursor-pointer text-xs transition-colors"
+                      :class="i === _iacActiveIndex['charTags'] ? 'bg-sky-700/60 text-white' : 'hover:bg-gray-700 text-gray-200'">
+                      <span class="font-mono">{{ s.tag }}</span>
+                      <span class="text-[10px] text-gray-500 ml-2">{{ s.count }}</span>
+                    </div>
+                  </div>
                   <p class="text-[9px] text-gray-700 mt-0.5">{{ t('invoke.proCharTagsHint') }}</p>
                 </div>
 
                 <!-- お題タグ変換 -->
                 <div>
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ t('invoke.proTopicLabel') }}</p>
-                  <textarea v-model="invokeProTopic"
-                    :placeholder="t('invoke.proTopicPlaceholder')"
-                    rows="3"
-                    class="w-full bg-gray-800/60 border border-gray-700/50 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30 transition resize-none" />
+                  <div class="flex gap-1.5 items-start">
+                    <textarea v-model="invokeProTopic"
+                      :placeholder="t('invoke.proTopicPlaceholder')"
+                      rows="3"
+                      class="flex-1 bg-gray-800/60 border border-gray-700/50 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30 transition resize-none" />
+                    <button @click="expandSections"
+                      :disabled="_invokeSectionsLoading || !invokeProTopic.trim()"
+                      :title="t('invoke.expandSections')"
+                      class="flex-shrink-0 px-2 py-1.5 rounded-lg text-sm bg-gray-700/60 border border-gray-600/50 text-amber-300 hover:bg-gray-600/60 hover:border-amber-500/40 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                      {{ _invokeSectionsLoading ? '…' : '⚡' }}
+                    </button>
+                  </div>
                   <button @click="handleEnhancePrompt"
                     :disabled="enhancing || !invokeProTopic.trim()"
                     class="mt-1.5 w-full py-2 rounded-xl text-xs font-medium transition-all
@@ -707,6 +867,32 @@ function thumbnailUrl(sha256) {
                   <p v-if="enhancedNL" class="mt-1.5 text-[9px] text-gray-500 italic leading-relaxed">
                     {{ enhancedNL }}
                   </p>
+                </div>
+
+                <!-- カテゴリ別セクションヒント -->
+                <div class="space-y-2">
+                  <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">{{ t('invoke.sectionHintsLabel') }}</p>
+                  <div v-for="sec in INVOKE_SECTIONS" :key="sec.key" class="relative">
+                    <label class="flex items-center gap-1 text-[10px] text-gray-500 mb-0.5">{{ t(sec.labelKey) }}</label>
+                    <textarea
+                      :value="invokeProSections[sec.key]"
+                      @input="e => { invokeProSections[sec.key] = e.target.value; iacFetch(sec.key, e.target.value) }"
+                      @keydown="e => iacKeydown(sec.key, e)"
+                      @blur="iacHide(sec.key)"
+                      rows="2"
+                      :placeholder="t(sec.phKey)"
+                      class="w-full bg-gray-800/60 border border-gray-700/50 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-sky-500/60 focus:ring-1 focus:ring-sky-500/30 transition resize-none" />
+                    <div v-if="_iacShowDropdown[sec.key] && (_iacSuggestions[sec.key] || []).length"
+                      class="absolute top-full left-0 right-0 mt-0.5 bg-gray-800 border border-gray-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                      <div v-for="(s, i) in _iacSuggestions[sec.key]" :key="s.tag"
+                        @mousedown.prevent="iacSelect(sec.key, s.tag)"
+                        class="flex items-center justify-between px-3 py-1.5 cursor-pointer text-xs transition-colors"
+                        :class="i === _iacActiveIndex[sec.key] ? 'bg-sky-700/60 text-white' : 'hover:bg-gray-700 text-gray-200'">
+                        <span class="font-mono">{{ s.tag }}</span>
+                        <span class="text-[10px] text-gray-500 ml-2">{{ s.count }}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Positive prompt -->
@@ -792,6 +978,17 @@ function thumbnailUrl(sha256) {
                   </button>
                 </div>
                 <p v-if="enabledSpiritList.length === 0" class="text-[10px] text-red-400 mt-1.5">{{ t('invoke.spiritSelectError') }}</p>
+                <!-- Rebel inversion toggle -->
+                <div v-if="invokeEnabledSpirits.rebel" class="mt-2 flex items-center gap-2">
+                  <span class="text-[9px] text-gray-500">{{ t('invoke.rebelModeLabel') }}</span>
+                  <button @click="invokeRebelInversion = !invokeRebelInversion"
+                    class="text-[9px] px-2 py-0.5 rounded border transition-colors"
+                    :class="invokeRebelInversion
+                      ? 'bg-rose-950/50 border-rose-700/50 text-rose-400 hover:bg-rose-900/50'
+                      : 'bg-gray-900/50 border-gray-700/50 text-gray-400 hover:bg-gray-800/50'">
+                    {{ invokeRebelInversion ? t('invoke.rebelModeShadow') : t('invoke.rebelModeHarmony') }}
+                  </button>
+                </div>
               </div>
 
               <!-- ── Summon / Cancel ── -->
@@ -848,7 +1045,8 @@ function thumbnailUrl(sha256) {
                     @click="emit('select-image', invokeDailyOracle.images[name].sha256)">
                     <div class="relative rounded-xl overflow-hidden border border-gray-700/40 aspect-square hover:border-gray-500 transition-colors">
                       <img :src="thumbnailUrl(invokeDailyOracle.images[name].sha256)"
-                        class="w-full h-full object-cover" loading="lazy" />
+                        class="w-full h-full object-cover" loading="lazy"
+                        @error="onThumbnailError($event)" />
                       <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-1">
                         <span :class="SPIRIT_META[name].color" class="text-xs font-bold">{{ locale === 'ja' ? SPIRIT_META[name].kanji : SPIRIT_META[name].en }}</span>
                       </div>
@@ -913,7 +1111,8 @@ function thumbnailUrl(sha256) {
                         <img v-if="invokeSpirits[name]?.sha256"
                           :src="thumbnailUrl(invokeSpirits[name].sha256)"
                           class="w-full h-full object-cover"
-                          loading="lazy" />
+                          loading="lazy"
+                          @error="onThumbnailError($event)" />
                         <!-- Loading skeleton -->
                         <div v-else-if="['composing','generating','tagging'].includes(invokeSpirits[name]?.status)"
                           v-pulse-sync
@@ -952,6 +1151,14 @@ function thumbnailUrl(sha256) {
                         </p>
                       </div>
 
+                      <!-- VS first-line snippet -->
+                      <div v-if="invokeSpirits[name]?.natural_language" @click.stop
+                        class="px-2.5 pb-1.5">
+                        <p class="text-[9px] text-gray-600 line-clamp-2 leading-tight">
+                          {{ invokeSpirits[name].natural_language.slice(0, 130) }}
+                        </p>
+                      </div>
+
                       <!-- Action buttons -->
                       <div v-if="invokeSpirits[name]?.status === 'done'" @click.stop class="flex gap-1 px-2.5 pb-2.5 mt-auto">
                         <button @click="handleRespin(name)"
@@ -971,9 +1178,20 @@ function thumbnailUrl(sha256) {
                       <!-- Progress bar while in-flight -->
                       <div v-else-if="['composing','generating','tagging'].includes(invokeSpirits[name]?.status)" class="px-2.5 pb-2.5 mt-auto">
                         <div class="h-1 w-full rounded-full bg-gray-800/80 overflow-hidden">
-                          <div :class="SPIRIT_META[name].border.replace('border-','bg-')"
-                            v-pulse-sync
-                            class="h-full rounded-full pulse-sync w-2/3"></div>
+                          <!-- Real progress: ComfyUI ステップ中のみ (generating && progress > 0) -->
+                          <div v-if="invokeSpirits[name]?.status === 'generating' && (invokeSpirits[name]?.genProgress ?? 0) > 0"
+                               :class="SPIRIT_META[name].border.replace('border-','bg-')"
+                               class="h-full rounded-full transition-[width] duration-300 ease-out"
+                               :style="{ width: (invokeSpirits[name].genProgress * 100) + '%' }"></div>
+                          <!-- Indeterminate: composing / queue待ち / tagging (画像後のAI処理) -->
+                          <!-- tagging 中は w-full + opacity-40 で「画像完了・後処理中」を表現 -->
+                          <div v-else
+                               :class="[
+                                 SPIRIT_META[name].border.replace('border-','bg-'),
+                                 invokeSpirits[name]?.status === 'tagging' ? 'w-full opacity-40' : 'w-2/3',
+                               ]"
+                               v-pulse-sync
+                               class="h-full rounded-full pulse-sync"></div>
                         </div>
                       </div>
                       <!-- Error -->
@@ -1026,17 +1244,24 @@ function thumbnailUrl(sha256) {
 
                   <!-- ③ Spirit narratives -->
                   <div v-if="selectedNarrativeSpirit">
-                    <p class="text-[9px] font-semibold text-gray-600 uppercase tracking-wider mb-2">{{ t('invoke.narrativeLabel') }}</p>
+                    <div class="flex items-center justify-between mb-2">
+                      <p class="text-[9px] font-semibold text-gray-600 uppercase tracking-wider">{{ t('invoke.narrativeLabelVS') }}</p>
+                      <button v-if="invokeSpirits[selectedNarrativeSpirit]?.natural_language"
+                        @click="copyVS(selectedNarrativeSpirit)"
+                        class="text-[9px] px-1.5 py-0.5 rounded border border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-500/50 transition-colors">
+                        {{ vsCopied ? '✓' : 'Copy' }}
+                      </button>
+                    </div>
                     <div class="bg-gray-800/30 border border-gray-700/30 rounded-xl px-3 py-3 min-h-[4rem]">
                       <p class="text-[9px] mb-1.5" :class="SPIRIT_META[selectedNarrativeSpirit].color">
                         {{ locale === 'ja' ? SPIRIT_META[selectedNarrativeSpirit].kanji + ' ' : '' }}{{ SPIRIT_META[selectedNarrativeSpirit].en }}
                       </p>
                       <template v-if="invokeSpirits[selectedNarrativeSpirit]?.natural_language">
-                        <p class="text-xs text-gray-300 leading-relaxed italic">
-                          {{ (locale === 'ja' && invokeSpirits[selectedNarrativeSpirit].natural_language_ja)
-                             ? invokeSpirits[selectedNarrativeSpirit].natural_language_ja
-                             : invokeSpirits[selectedNarrativeSpirit].natural_language }}
-                        </p>
+                        <p class="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap" v-html="styledVS(
+                          (locale === 'ja' && invokeSpirits[selectedNarrativeSpirit].natural_language_ja)
+                            ? invokeSpirits[selectedNarrativeSpirit].natural_language_ja
+                            : invokeSpirits[selectedNarrativeSpirit].natural_language
+                        )"></p>
                       </template>
                       <template v-else>
                         <p class="text-[10px] text-gray-600 italic">
@@ -1045,6 +1270,137 @@ function thumbnailUrl(sha256) {
                           <span v-else>—</span>
                         </p>
                       </template>
+                    </div>
+                  </div>
+
+                  <!-- ④ Visual Spec category tags card (emerald) — タグをクリックでキャラタグへ追記 -->
+                  <div v-if="selectedNarrativeSpirit && (
+                      invokeSpirits[selectedNarrativeSpirit]?.hair_tags?.length ||
+                      invokeSpirits[selectedNarrativeSpirit]?.clothing_tags?.length ||
+                      invokeSpirits[selectedNarrativeSpirit]?.pose_tags?.length ||
+                      invokeSpirits[selectedNarrativeSpirit]?.expression_tags?.length ||
+                      invokeSpirits[selectedNarrativeSpirit]?.background_tags?.length ||
+                      invokeSpirits[selectedNarrativeSpirit]?.object_tags?.length ||
+                      invokeSpirits[selectedNarrativeSpirit]?.lighting_tags?.length)"
+                    class="bg-emerald-950/30 border border-emerald-800/30 rounded-xl p-3 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <p class="text-[9px] font-semibold text-emerald-400 uppercase tracking-wide">{{ t('invoke.visualSpecTitle') }}</p>
+                      <p class="text-[8px] text-emerald-700">{{ invokeInputMode === 'pro' ? t('invoke.tagAdoptHint') : '' }}</p>
+                    </div>
+                    <!-- Row 1: Hair / Clothing / Accessories -->
+                    <div class="grid grid-cols-3 gap-1.5">
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].hair_tags?.length" class="space-y-0.5">
+                        <div class="flex items-center justify-between">
+                          <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupHair') }}</p>
+                          <button v-if="invokeInputMode === 'pro'" @click="appendGroupToPersonTags(invokeSpirits[selectedNarrativeSpirit].hair_tags)"
+                            class="text-[8px] text-emerald-700 hover:text-emerald-400 transition-colors leading-none">+all</button>
+                        </div>
+                        <div class="flex flex-wrap gap-0.5">
+                          <button v-for="tag in invokeSpirits[selectedNarrativeSpirit].hair_tags" :key="tag"
+                            @click="appendToPersonTags(tag)"
+                            :class="invokeInputMode === 'pro'
+                              ? personTagSet.has(tag)
+                                ? 'bg-emerald-700/50 border-emerald-500/60 text-emerald-200 opacity-60 cursor-default'
+                                : 'bg-emerald-900/40 border-emerald-700/30 text-emerald-300/90 hover:bg-emerald-700/50 hover:border-emerald-500/50 cursor-pointer'
+                              : 'bg-emerald-900/40 border-emerald-700/30 text-emerald-300/90 cursor-default'"
+                            class="px-1 py-0.5 border rounded-full text-[9px] font-mono transition-colors">{{ tag }}</button>
+                        </div>
+                      </div>
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].clothing_tags?.length" class="space-y-0.5">
+                        <div class="flex items-center justify-between">
+                          <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupClothing') }}</p>
+                          <button v-if="invokeInputMode === 'pro'" @click="appendGroupToPersonTags(invokeSpirits[selectedNarrativeSpirit].clothing_tags)"
+                            class="text-[8px] text-emerald-700 hover:text-emerald-400 transition-colors leading-none">+all</button>
+                        </div>
+                        <div class="flex flex-wrap gap-0.5">
+                          <button v-for="tag in invokeSpirits[selectedNarrativeSpirit].clothing_tags" :key="tag"
+                            @click="appendToPersonTags(tag)"
+                            :class="invokeInputMode === 'pro'
+                              ? personTagSet.has(tag)
+                                ? 'bg-emerald-700/50 border-emerald-500/60 text-emerald-200 opacity-60 cursor-default'
+                                : 'bg-emerald-900/40 border-emerald-700/30 text-emerald-300/90 hover:bg-emerald-700/50 hover:border-emerald-500/50 cursor-pointer'
+                              : 'bg-emerald-900/40 border-emerald-700/30 text-emerald-300/90 cursor-default'"
+                            class="px-1 py-0.5 border rounded-full text-[9px] font-mono transition-colors">{{ tag }}</button>
+                        </div>
+                      </div>
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].accessory_tags?.length" class="space-y-0.5">
+                        <div class="flex items-center justify-between">
+                          <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupAccessory') }}</p>
+                          <button v-if="invokeInputMode === 'pro'" @click="appendGroupToPersonTags(invokeSpirits[selectedNarrativeSpirit].accessory_tags)"
+                            class="text-[8px] text-emerald-700 hover:text-emerald-400 transition-colors leading-none">+all</button>
+                        </div>
+                        <div class="flex flex-wrap gap-0.5">
+                          <button v-for="tag in invokeSpirits[selectedNarrativeSpirit].accessory_tags" :key="tag"
+                            @click="appendToPersonTags(tag)"
+                            :class="invokeInputMode === 'pro'
+                              ? personTagSet.has(tag)
+                                ? 'bg-emerald-700/50 border-emerald-500/60 text-emerald-200 opacity-60 cursor-default'
+                                : 'bg-emerald-900/40 border-emerald-700/30 text-emerald-300/90 hover:bg-emerald-700/50 hover:border-emerald-500/50 cursor-pointer'
+                              : 'bg-emerald-900/40 border-emerald-700/30 text-emerald-300/90 cursor-default'"
+                            class="px-1 py-0.5 border rounded-full text-[9px] font-mono transition-colors">{{ tag }}</button>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Row 2: Pose / Expression -->
+                    <div class="grid grid-cols-2 gap-1.5">
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].pose_tags?.length" class="space-y-0.5">
+                        <div class="flex items-center justify-between">
+                          <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupPose') }}</p>
+                          <button v-if="invokeInputMode === 'pro'" @click="appendGroupToPersonTags(invokeSpirits[selectedNarrativeSpirit].pose_tags)"
+                            class="text-[8px] text-emerald-700 hover:text-emerald-400 transition-colors leading-none">+all</button>
+                        </div>
+                        <div class="flex flex-wrap gap-0.5">
+                          <button v-for="tag in invokeSpirits[selectedNarrativeSpirit].pose_tags" :key="tag"
+                            @click="appendToPersonTags(tag)"
+                            :class="invokeInputMode === 'pro'
+                              ? personTagSet.has(tag)
+                                ? 'bg-sky-700/50 border-sky-500/60 text-sky-200 opacity-60 cursor-default'
+                                : 'bg-sky-900/40 border-sky-700/30 text-sky-300/90 hover:bg-sky-700/50 hover:border-sky-500/50 cursor-pointer'
+                              : 'bg-sky-900/40 border-sky-700/30 text-sky-300/90 cursor-default'"
+                            class="px-1 py-0.5 border rounded-full text-[9px] font-mono transition-colors">{{ tag }}</button>
+                        </div>
+                      </div>
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].expression_tags?.length" class="space-y-0.5">
+                        <div class="flex items-center justify-between">
+                          <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupExpression') }}</p>
+                          <button v-if="invokeInputMode === 'pro'" @click="appendGroupToPersonTags(invokeSpirits[selectedNarrativeSpirit].expression_tags)"
+                            class="text-[8px] text-emerald-700 hover:text-emerald-400 transition-colors leading-none">+all</button>
+                        </div>
+                        <div class="flex flex-wrap gap-0.5">
+                          <button v-for="tag in invokeSpirits[selectedNarrativeSpirit].expression_tags" :key="tag"
+                            @click="appendToPersonTags(tag)"
+                            :class="invokeInputMode === 'pro'
+                              ? personTagSet.has(tag)
+                                ? 'bg-rose-700/50 border-rose-500/60 text-rose-200 opacity-60 cursor-default'
+                                : 'bg-rose-900/40 border-rose-700/30 text-rose-300/90 hover:bg-rose-700/50 hover:border-rose-500/50 cursor-pointer'
+                              : 'bg-rose-900/40 border-rose-700/30 text-rose-300/90 cursor-default'"
+                            class="px-1 py-0.5 border rounded-full text-[9px] font-mono transition-colors">{{ tag }}</button>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Row 3: Background / Objects / Lighting -->
+                    <div class="grid grid-cols-3 gap-1.5">
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].background_tags?.length" class="space-y-0.5">
+                        <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupBackground') }}</p>
+                        <div class="flex flex-wrap gap-0.5">
+                          <span v-for="tag in invokeSpirits[selectedNarrativeSpirit].background_tags" :key="tag"
+                            class="px-1 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[9px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].object_tags?.length" class="space-y-0.5">
+                        <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupObject') }}</p>
+                        <div class="flex flex-wrap gap-0.5">
+                          <span v-for="tag in invokeSpirits[selectedNarrativeSpirit].object_tags" :key="tag"
+                            class="px-1 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[9px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="invokeSpirits[selectedNarrativeSpirit].lighting_tags?.length" class="space-y-0.5">
+                        <p class="text-[9px] text-emerald-400/70 font-semibold">{{ t('invoke.tagGroupLighting') }}</p>
+                        <div class="flex flex-wrap gap-0.5">
+                          <span v-for="tag in invokeSpirits[selectedNarrativeSpirit].lighting_tags" :key="tag"
+                            class="px-1 py-0.5 bg-amber-900/40 border border-amber-700/30 text-amber-300/90 rounded-full text-[9px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 

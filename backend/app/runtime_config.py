@@ -47,6 +47,9 @@ _defaults = {
     "auto_pause_on_generation": True,
     "auto_pause_lanes":         ["embed", "eval"],
     "auto_alignment_evaluate":  False,
+    # WD14 tag weighting for refine (common/unique decomposition)
+    "wd14_common_ratio":         0.3,
+    "wd14_unique_count":         20,
     # Processing parallelism
     "alignment_concurrency":    1,
     "pipeline_auto_continue":   True,

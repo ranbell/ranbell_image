@@ -117,19 +117,29 @@ export function useControlRoom(jobsMap, resourcesRef) {
   const activeJobs = computed(() => {
     const jobs = Array.from(jobsMap.value.values())
     const active = jobs.filter(j =>
-      j.state === 'running' || j.state === 'paused' || j.state === 'queued' ||
+      j.state === 'running' || j.state === 'paused' ||
       j.state === 'cancelling' || j.state === 'failed'
     )
-    // held(pause gate) → running/paused → cancelling → queued(descending priority) → failed
-    const order = { running: 0, paused: 0, cancelling: 1, queued: 2, failed: 3 }
+    // held(pause gate) → running/paused → cancelling → failed
+    const order = { running: 0, paused: 0, cancelling: 1, failed: 2 }
     return active.sort((a, b) => {
       if (a.held && !b.held) return -1
       if (!a.held && b.held) return 1
       const so = (order[a.state] ?? 9) - (order[b.state] ?? 9)
       if (so !== 0) return so
-      if (a.state === 'queued') return (b.priority ?? 0) - (a.priority ?? 0)
       return a.created_at - b.created_at
     })
+  })
+
+  const waitedJobs = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs
+      .filter(j => j.state === 'queued')
+      .sort((a, b) => {
+        if (a.held && !b.held) return 1
+        if (!a.held && b.held) return -1
+        return (b.priority ?? 0) - (a.priority ?? 0) || a.created_at - b.created_at
+      })
   })
 
   // ── throughput (completions in last 1 minute) ────────────────────────────────
@@ -252,6 +262,7 @@ export function useControlRoom(jobsMap, resourcesRef) {
     systemStatus,
     masterStatus,
     activeJobs,
+    waitedJobs,
     eventLog,
     throughput,
     sparkline,

@@ -14,6 +14,86 @@ _tags_df = None
 
 
 _loaded_model_dir: str | None = None
+_token_index: dict[str, list[str]] | None = None
+_cand_token_lengths: dict[str, int] | None = None
+_tag_set_space: frozenset[str] | None = None
+
+
+def _build_token_index() -> None:
+    """Build inverted token index and tag vocab set for BM25 matching. Called once during model load."""
+    global _token_index, _cand_token_lengths, _tag_set_space
+    if _tags_df is None or _token_index is not None:
+        return
+    from ..alignment.bm25_matcher import tokenize
+    idx: dict[str, list[str]] = {}
+    lengths: dict[str, int] = {}
+    for name in _tags_df["name"]:
+        toks = tokenize(name)
+        lengths[name] = len(toks)
+        for tok in toks:
+            idx.setdefault(tok, []).append(name)
+    _token_index = idx
+    _cand_token_lengths = lengths
+    _tag_set_space = frozenset(name.replace("_", " ") for name in _tags_df["name"])
+    logger.info("WD14 BM25 token index built (%d tokens, %d tags)", len(idx), len(_tag_set_space))
+
+
+def bm25_find_tag(concept: str) -> str | None:
+    """Return best-matching Danbooru tag name (underscore format) for a free-form concept."""
+    from ..alignment.bm25_matcher import tokenize
+    if _token_index is None:
+        _build_token_index()
+    if not _token_index:
+        return None
+    tokens = tokenize(concept)
+    if not tokens:
+        return None
+    scores: dict[str, int] = {}
+    for tok in tokens:
+        for cand in _token_index.get(tok, []):
+            scores[cand] = scores.get(cand, 0) + 1
+    if not scores:
+        return None
+    n_tokens = len(tokens)
+    best, best_j = None, 0.0
+    for cand, overlap in scores.items():
+        cand_len = _cand_token_lengths[cand]
+        j = overlap / (n_tokens + cand_len - overlap)
+        if j > best_j:
+            best_j, best = j, cand
+    return best if best_j >= 0.35 else None
+
+
+def normalize_tag_string(text: str) -> str:
+    """Normalize a comma-separated Danbooru tag string using BM25 vocab matching.
+
+    Strips weight syntax like (tag:1.3), validates each token against selected_tags.csv,
+    and maps near-matches via BM25. Returns space-style comma-separated tags.
+    Unknown tokens with no BM25 match are dropped.
+    """
+    if not text or _tags_df is None:
+        return text
+    vocab = _tag_set_space or frozenset(name.replace("_", " ") for name in _tags_df["name"])
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in (t.strip() for t in text.split(",") if t.strip()):
+        # strip SDXL weight syntax: (tag:1.3) → tag, preserving ":" in tag names
+        stripped = raw.strip("() ")
+        left, sep, right = stripped.rpartition(":")
+        tag = left.strip() if sep and right.rstrip(")").replace(".", "").isdigit() else stripped
+        tag_space = tag.replace("_", " ").lower()
+        if tag_space in vocab:
+            if tag_space not in seen:
+                result.append(tag_space)
+                seen.add(tag_space)
+        else:
+            matched = bm25_find_tag(tag)
+            if matched:
+                key = matched.replace("_", " ")
+                if key not in seen:
+                    result.append(key)
+                    seen.add(key)
+    return ", ".join(result)
 
 
 def _load_model(model_dir: str) -> None:
@@ -38,6 +118,7 @@ def _load_model(model_dir: str) -> None:
     _tags_df = pd.read_csv(tags_path)
     _loaded_model_dir = model_dir
     logger.info("WD14 model loaded (%d tags)", len(_tags_df))
+    _build_token_index()
 
 
 def _predict_sync(image_path: Path, threshold: float, model_dir: str) -> list[str]:

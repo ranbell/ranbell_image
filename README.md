@@ -77,18 +77,19 @@ Every background operation in Ranbell Image — scanning, embedding generation, 
 
 ![Synthesis](docs/screenshots/05_synthesis.png)
 
-Select 1–6 reference images, write a short instruction, and let the VLM synthesize a new prompt that blends your references with your intent.
+Select 1–6 reference images, set influence weights, write a short instruction, and let the VLM synthesize a prompt that blends your references exactly as intended.
 
-**Example:** pin three images of a character and write *"add bunny ears and a summer dress"* — the studio extracts the visual vocabulary from your references via WD14, then uses Ollama to generate a precise, ready-to-use prompt.
+**Example:** pin two character images at 70% / 30% and write *"add bunny ears and a summer dress"* — WD14 extracts visual vocabulary from each image proportionally to its weight, resolves contradictions (e.g., hair color) in favor of the dominant image, and Ollama generates a precise, ready-to-use prompt.
 
 Choose your output style to match your model:
 
 | Style | Example output | Best for |
 |---|---|---|
-| **Danbooru** | `rabbit_ears, 1girl, summer_dress, outdoors, smile` | Tag-trained models (SD 1.5, SDXL, Pony) |
-| **Natural language** | `A girl with rabbit ears wearing a white summer dress, standing in a sunlit garden` | NL-first models (FLUX, Anima) |
-| **Hybrid** | `rabbit_ears, 1girl, summer_dress \| standing in a sunlit garden, warm afternoon light` | Both model families |
+| **natural** | Tags + prose paragraph | NL-first models (FLUX, Anima) |
+| **danbooru** | `rabbit_ears, 1girl, summer_dress, outdoors, smile` | Tag-trained models (SD 1.5, SDXL, Pony) |
+| **detailed** | 8-section structured description | Fine-grained control |
 
+- **Weight-aware WD14 injection** — per-image tag budget and conflict resolution respect influence weights across all prompt styles
 - **One-click ComfyUI submit** — the synthesized prompt is auto-injected into your workflow and queued for generation
 - **Streaming output** — watch the prompt form in real time, including the model's chain-of-thought
 - **Alignment scoring** — after generation, the VLM grades how well the produced image matches the prompt (0–100%)

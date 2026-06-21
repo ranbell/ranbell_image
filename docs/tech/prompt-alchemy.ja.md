@@ -209,32 +209,65 @@ for idx, sha256 in enumerate(body.sha256s[:6]):      # 最大6枚
 
 ---
 
-### ステップ 2: WD14 タグスコア分類
+### ステップ 2: WD14 重み付きコンテキスト構築
 
-WD14 タガーが付与した確信度スコアを使い、タグを 2 段階に分類します。
+`api/ai.py` の `_build_weighted_wd14_context()` が、各画像の WD14 タグスコアと影響度ウェイトを VLM 向けのコンテキスト文字列に変換します。
 
-| スコア範囲 | 扱い | VLM プロンプトへの記述 |
-|-----------|------|---------------------|
-| ≥ 0.70 | **必須タグ** (`must_tags`) | `Must include these tags verbatim: tag1, tag2, ...` |
-| < 0.70 | **参考タグ** (`reference_tags`) | `Reference tags: tag1, tag2, ...`（上位30件） |
+#### Pass 1 — 共通タグ / 固有タグ の分離
+
+**全アクティブ画像（weight > 0）に共通するタグ**が `common_set` として1回だけ記載されます。一部の画像にしかないタグは `unique` としてその画像に割り当てられます。
 
 ```python
-# runners.py:869-879 より（閾値定数 = 0.70）
-scored_pairs = list(zip(wd14, wd14_scores))
-must_tags = [t for t, s in scored_pairs if s >= _WD14_MUST_INCLUDE_THRESHOLD]
-if must_tags:
-    lines.append(f"Must include these tags verbatim: {', '.join(must_tags)}")
-remaining = [t for t, s in scored_pairs if s < _WD14_MUST_INCLUDE_THRESHOLD]
-if remaining:
-    lines.append(f"Reference tags: {', '.join(remaining[:30])}")
+active_sets = [score_map_by_idx[i].keys() for i in active_indices]
+common_set  = active_sets[0].intersection(*active_sets[1:])
 ```
 
-**なぜ 2 段階に分けるのでしょう？**
+#### 画像ごとのタグ予算
 
-高スコアタグは「この画像を構成する本質的な要素」なので、`verbatim`（そのまま含めよ）という強い指示を付けます。低スコアタグは「この画像の文脈・雰囲気」なので、VLM が柔軟に解釈して活用できる参考情報として渡します。この区別が、参照画像の「核」を守りながら「雰囲気」も活かすプロンプトを生み出す鍵です。
+各画像の固有タグ予算はウェイトに比例します：
+
+```
+budget = round(unique_count × weight × n_active)
+```
+
+70% 画像は 30% 画像の約 2.3 倍のタグ枠を得ます。予算内でタグを確信度順に並べ、上位を `must_final`（スコア ≥ 0.70）・残りを `ref_final` に分類します。
+
+#### Pass 2 — BM25 矛盾解決
+
+画像ペアを比較し、低ウェイト画像の固有タグが高ウェイト画像の固有タグと意味トークンを共有（BM25 方式、最短トークン長 3 文字）する場合、低ウェイト側のタグを除去します：
+
+```python
+# 低ウェイト画像の "purple_hair" が高ウェイト画像の "blonde_hair" と矛盾
+# → "purple_hair" を低ウェイト画像の除去セットに追加
+```
+
+これにより、支配的な画像の外見属性が従属画像によって汚染されません。
+
+#### コンテキスト形式
+
+```
+Common style tags (all images): 1girl, long hair, smile, school uniform
+
+---
+
+Style/aesthetic reference tags (influence 70%): purple_hair, hair_ribbon, ...
+
+---
+
+Style/aesthetic reference tags (influence 30%): outdoor, cherry_blossoms, ...
+```
+
+`unique_by_image` に格納される画像ごとの分析：
+
+| フィールド | 内容 |
+|---------|------|
+| `must` | 高確信固有タグ（スコア ≥ 0.70）、矛盾除去後 |
+| `ref` | 低確信固有タグ、矛盾除去後 |
+| `weight` | 正規化済みウェイト（0.0〜1.0） |
+| `budget` | 割り当てられた固有タグ枠 |
 
 > **WD14 タグの形式について**
-> WD14 モデルは Danbooru 風のタグ（`blue_hair`, `1girl` 等）を出力しますが、Ranbell Image のパイプライン（`wd14.py`）はアンダースコアをスペースに変換して格納します（`blue_hair` → `blue hair`）。そのため VLM に渡るタグはスペース区切りの自然語に近い形になっています。
+> WD14 はアンダースコア付きタグ（`blue_hair` 等）を出力しますが、`wd14.py` でスペースに変換して格納します。VLM にはスペース区切りの自然語として渡されます。
 
 ---
 
@@ -252,29 +285,20 @@ def _resolve_weights(sha256s: list[str], raw_weights: list[float]) -> list[float
     return [w / total for w in raw_weights]   # 合計が 1.0 になるよう正規化
 ```
 
-正規化されたウェイトはパーセンテージに変換されて、コンテキスト文字列に明示的に注記されます。
-
-```python
-# runners.py:899-903
-for part_idx, (ctx, img_idx) in enumerate(zip(context_parts, loaded_indices)):
-    pct = round(weights[img_idx] * 100)
-    annotated_parts.append(f"[Image {part_idx + 1} — influence weight: {pct}%]\n{ctx}")
-context = "\n\n---\n\n".join(annotated_parts)
-```
+正規化されたウェイトは WD14 タグ予算と BM25 矛盾解決の優先度の両方に使われます（ステップ 2 参照）。コンテキスト文字列は `_build_weighted_wd14_context()` が構築します。
 
 VLM が受け取るコンテキストの例：
 
 ```
-[Image 1 — influence weight: 60%]
-Prompt: 1girl, long hair, school uniform
-Must include these tags verbatim: 1girl, long hair, smile
-Reference tags: school uniform, outdoor, cherry blossoms
+Common style tags (all images): 1girl, long hair, smile, school uniform
 
 ---
 
-[Image 2 — influence weight: 40%]
-Must include these tags verbatim: sunset, warm lighting
-Reference tags: cloud, horizon, golden hour
+Style/aesthetic reference tags (influence 70%): purple_hair, hair_ribbon, ...
+
+---
+
+Style/aesthetic reference tags (influence 30%): outdoor, cherry_blossoms, ...
 ```
 
 ---
@@ -357,48 +381,44 @@ _TRANSLATE_PROMPT = (
 )
 ```
 
-翻訳後、`_extract_literal_directives()` で**リテラルテキスト指示**（画像内に文字を描き込む指示）を正規表現で抽出します。
+翻訳後（または any モードで VLM 呼び出し前）、`_extract_literal_texts()` が**引用符で囲まれた文字列**を正規表現で抽出します。英語・日本語・テキストボード/看板文脈の 3 パターンに対応しています。
 
 ```python
-_LITERAL_TEXT_RE = re.compile(
-    r"""(?:add|insert|put|place|show|write|display|include|render)\s+
-        (?:the\s+)?(?:text|word|words|label|watermark|title|string|letters?|caption)\s+
-        ['"""「]
-        (?P<text>[^'""」]+)
-        ['"""」]
-        (?:[\s,]*(?:at|on|in|to)\s+
-           (?P<position>top|bottom|left|right|center|upper|lower|above|below)
-        )?""",
-    re.IGNORECASE | re.VERBOSE,
-)
+_LITERAL_TEXT_RE = re.compile(r"""
+    (?:add|insert|put|...)\s+(?:the\s+)?(?:text|...)\s+['\"「](?P<text>[^'\"」\n]+)['\"」]
+    |
+    ['\"「『](?P<text_ja>[^'\"」』\n]+)['\"」』]\s*(?:という|の)?
+    \s*(?:文字|テキスト|...)?\s*を?\s*(?:に|で)?\s*(?:入れ|描画|追加|表示|書い|記載)
+    |
+    (?:textboard|sign|...|テキスト)\s*(?:に|で|with|saying|reading)?\s*['\"「『](?P<text_ctx>[^'\"」』\n]+)['\"」』]
+""", re.IGNORECASE | re.VERBOSE)
 ```
 
-**リテラルテキストの抽出と注入の例：**
+抽出した文字列はリストに保持し、指示文はそのまま VLM へ渡します。VLM がポジティブプロンプトを生成した後、`_append_literal_texts()` がプロンプト末尾に Anima 形式タグを追記します：
 
-```
-入力指示（日本語）: 「RANBELL という文字を上部に追加して」
-     ↓ _translate_instruction()
-英語訳: "Add the text 'RANBELL' at the top"
-     ↓ _extract_literal_directives()
-literals = [{"type": "literal_text", "text": "RANBELL", "position": "top"}]
-nl_instruction = ""  ← リテラル部分が除去された残り
-
-（後処理ステップで注入）
-     ↓ _inject_literal_directives()
-最終ポジティブ: 'text "RANBELL", top_text, text_on_image, 1girl, long_hair, ...'
+```python
+def _append_literal_texts(positive: str, texts: list[str]) -> str:
+    tags = [f'text "{t}"' for t in texts]
+    return positive.rstrip(", ") + ", " + ", ".join(tags)
 ```
 
-位置キーワードのマッピング：
+**例：**
 
-| 入力キーワード | 出力タグ |
-|-------------|--------|
-| top / upper / above | `top_text` |
-| bottom / lower / below | `bottom_text` |
-| left / right / center | `overlay_text` |
+```
+指示: 「テキストボードに"Good!"って手に持っている」
+     ↓ _extract_literal_texts()
+texts = ["Good!"]   ← 指示はそのまま VLM へ渡す
 
-**なぜ VLM を迂回するのでしょう？**
+     ↓ VLM が生成:
+positive = "1girl, holding_sign, ..."
 
-VLM に対して「画像内に文字を正確に描いてほしい」と伝えることは実は難しくて、VLM がそのテキストを別の意図で解釈したり変形したりするリスクがあります。リテラルテキストを先に抽出して VLM を完全にバイパスし、後から直接プロンプトに注入することで、文字列の正確性を確保しています。
+     ↓ _append_literal_texts()
+最終: '1girl, holding_sign, ..., text "Good!"'
+```
+
+**末尾に追記する理由**
+
+Anima および対応モデルは `text "X"` タグをレンダリング指示として解釈し、プロンプト末尾に置くことを期待しています。また VLM 生成後に追記することで、リテラルテキストが VLM のシーン推論に干渉しません。
 
 #### enhanced モード — `_translate_and_classify()`
 
@@ -527,29 +547,74 @@ async for event in ollama.generate_vlm_stream(
 
 VLM の生出力（`raw_text`）を、プロンプトスタイルに応じた後処理パイプラインで整形します。
 
-#### スタイル別の後処理分岐
+#### WD14 後処理パイプライン（全スタイル共通）
+
+スタイル別の整形後、WD14 分析結果が存在する場合は必ず WD14 補正パスが実行されます。
+
+**natural スタイル — 2パス:**
+
+```
+Pass 1 タグ行
+  → _ensure_subject_anchor()          1girl/solo の存在確認
+  → _inject_wd14_must_tags()          WD14 固有タグを予算順に注入（must+ref）
+
+Pass 2 散文 + カテゴリタグ
+  → _build_all_must()                 ウェイト降順の全固有タグリストを構築
+  → _correct_prose_wd14_conflicts()   散文中の (tag) グループを WD14 で修正
+  → _enforce_wd14_on_cat_tags()       カテゴリタグフィールドを WD14 で上書き
+```
+
+**danbooru スタイル:**
+
+```
+VLM 出力（フラットタグ行）
+  → _inject_wd14_must_tags()
+  → _build_all_must()
+  → _enforce_wd14_on_cat_tags()
+```
+
+**detailed スタイル:**
+
+```
+VLM 出力（8セクションテキスト + cat_tags JSON）
+  → _build_all_must()
+  → _correct_prose_wd14_conflicts()   セクションテキスト内の (tag) グループを修正
+  → _enforce_wd14_on_cat_tags()
+```
+
+#### `_inject_wd14_must_tags()`
+
+WD14 固有タグ（`must` + `ref` 両層）を VLM 生成タグ行に統合します。画像はウェイト降順で処理されるため、支配的な画像のタグが先に挿入されます。すでにタグ行に存在するタグはスキップされます。挿入位置はサブジェクトアンカータグ（`1girl`、`solo` 等）の直後です。
+
+#### `_build_all_must()`
+
+全画像の固有タグをウェイト降順で重複排除したリストを返します。このウェイト順が重要で、`_apply_must_replacements()` が最初に見つけた矛盾タグを採用するため、常に高ウェイト画像のバージョンが勝ちます：
 
 ```python
-# runners.py:952-984
-if body.prompt_style == "detailed":
-    if body.negative_prompt:
-        parsed = _parse_detailed_output(raw_text)
-        positive = _clean_markdown(parsed or _parse_positive_negative(raw_text)[0])
-        neg_m = re.search(r"NEGATIVE:\s*(.*?)$", raw_text, re.S | re.I)
-        negative = _clean_markdown(neg_m.group(1).strip()) if neg_m else ""
-    else:
-        raw_stripped = _strip_stray_negative(raw_text)
-        parsed = _parse_detailed_output(raw_stripped)
-        positive = _clean_markdown(parsed if parsed else raw_stripped)
-        negative = ""
+def _build_all_must(wd14_analysis: dict) -> list[str]:
+    # ウェイト降順 → 高ウェイト画像のタグが先頭に来る
+    # 先着優先で重複排除 → 高ウェイト側が矛盾で勝つ
+```
 
+#### `_correct_prose_wd14_conflicts()`
+
+VLM 散文内のインライン `(tag, tag, ...)` グループをスキャンし、`all_must` のタグと矛盾する（BM25 トークン重複）タグを置き換えます。`all_must` はウェイト順なので、置換は常に支配的な画像の属性が採用されます：
+
+```
+散文:    "...(golden_hair, long_hair)..."
+all_must: ["purple_hair", ...]          ← 70% 画像のタグ
+結果:    "...(purple_hair, long_hair)..."
+```
+
+#### スタイル別の VLM 出力整形分岐
+
+```python
+if body.prompt_style == "detailed":
+    positive = _clean_markdown(_parse_detailed_output(...))
 elif body.negative_prompt:
-    positive_raw, negative_raw = _parse_positive_negative(raw_text)
-    positive = _clean_markdown(positive_raw)
-    negative = _clean_markdown(negative_raw)
+    positive, negative = _parse_positive_negative(raw_text)
 else:
     positive = _clean_markdown(_strip_stray_negative(raw_text))
-    negative = ""
 ```
 
 #### 後処理関数の役割一覧
@@ -560,8 +625,12 @@ else:
 | `_parse_positive_negative()` | `POSITIVE:` / `NEGATIVE:` セクションを分離 | ネガティブプロンプト要求時に使用 |
 | `_clean_markdown()` | Markdown 記号・ラベル行を除去 | `**bold**` → `bold`、`## Header` → 削除 |
 | `_strip_stray_negative()` | 意図しないネガティブセクションを除去 | `NEGATIVE: blurry, ...` が勝手に生成された場合に削除 |
+| `_inject_wd14_must_tags()` | WD14 固有タグをタグ行に注入 | `purple_hair` を `1girl` 直後に追加 |
+| `_build_all_must()` | ウェイト順全固有タグリストを構築 | 散文・カテゴリタグ補正に使用 |
+| `_correct_prose_wd14_conflicts()` | 散文中の矛盾タグを修正 | `(golden_hair)` → `(purple_hair)` |
+| `_enforce_wd14_on_cat_tags()` | カテゴリタグを WD14 で上書き | `hair_color: ["blonde"]` → `["purple"]` |
 | `_remove_forced_tags()` | 管理設定の禁止タグを除去 | `explicit, 1girl, ...` → `1girl, ...` |
-| `_inject_literal_directives()` | リテラルテキストタグを先頭に注入 | `text "RANBELL", top_text, text_on_image, 1girl, ...` |
+| `_append_literal_texts()` | `text "X"` タグをプロンプト末尾に追記 | `..., text "Good!"` |
 | `_check_natural_prose()` | natural スタイルで散文ブロックの存在を検証 | 散文がない場合 `prose_missing=true` を返す |
 
 #### `_clean_markdown()` が処理するパターン
@@ -1049,14 +1118,14 @@ class RefineRequest(BaseModel):
 
 ### 10.3 主要実装ファイル
 
-| ファイル | 行数目安 | 役割 |
-|---------|---------|------|
-| `backend/app/api/ai.py` | 〜754行 | RefineRequest, スタイル指示文字列, 全ヘルパー関数, エンドポイント |
-| `backend/app/jobs/runners.py:781-1012` | 231行 | `run_refine_prompt()` 実処理 |
-| `backend/app/ai/tile_image.py` | 42行 | タイル画像合成（Pillow） |
-| `backend/app/ai/wd14.py` | — | WD14 ONNX 推論、タグ + スコア出力 |
-| `frontend/src/App.vue:〜239-, 〜1685-, 〜2761-` | — | 錬成 UI 全体（状態管理 / SSE 処理 / レイアウト） |
-| `backend/app/runtime_config.py` | — | `prompt_removal_tags`, `vlm_model` 等のランタイム設定 |
+| ファイル | 役割 |
+|---------|------|
+| `backend/app/api/ai.py` | RefineRequest、`_build_weighted_wd14_context()`、`_build_all_must()`、`_inject_wd14_must_tags()`、`_correct_prose_wd14_conflicts()`、`_enforce_wd14_on_cat_tags()`、`_extract_literal_texts()`、`_append_literal_texts()`、スタイル指示文字列、エンドポイント |
+| `backend/app/jobs/runners.py` | `run_refine_prompt()` — 全ステップのオーケストレーション（全スタイルの WD14 後処理を含む） |
+| `backend/app/ai/tile_image.py` | タイル画像合成（Pillow） |
+| `backend/app/ai/wd14.py` | WD14 ONNX 推論、タグ + スコア出力 |
+| `frontend/src/App.vue` | 錬成 UI 全体（状態管理 / SSE 処理 / レイアウト） |
+| `backend/app/runtime_config.py` | `prompt_removal_tags`, `vlm_model` 等のランタイム設定 |
 
 ---
 

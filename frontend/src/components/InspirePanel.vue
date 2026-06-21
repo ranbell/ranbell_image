@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInspireSession, INVERSION_AXIS_IDS } from '../composables/useInspireSession.js'
 
@@ -26,7 +26,7 @@ const {
   inversionVolatileTags,
   inversionNewTags,
   inversionAtmosphereTags,
-  inversionUserInjectPrompt,
+  inversionUserSections,
   inversionLang,
   inversionStrength,
   inspireInversionTagsNl,
@@ -37,6 +37,14 @@ const {
   inversionNewTagsGrouped,
   inversionLlmClassification,
   inversionStep2RawResult,
+  inversionHairTags,
+  inversionClothingTags,
+  inversionAccessoryTags,
+  inversionPoseTags,
+  inversionExpressionTags,
+  inversionBackgroundTags,
+  inversionObjectTags,
+  inversionLightingTags,
   inversionJobId,
   brainstormJobId,
   brainstormLoading,
@@ -53,6 +61,9 @@ const {
   textSearchQuery,
   inspireResultSelection,
   toggleInspireResultSelection,
+  inspireSlotsDirty,
+  addToInspireSlots,
+  removeFromInspireSlots,
   isRunning,
   hasSession,
   resetSession,
@@ -144,8 +155,9 @@ watch(() => props.show, (val) => {
   if (!val) return
   if (!hasSession.value) {
     resetSession(props.initialSlots || [])
-  } else {
-    // Keep session results intact; only sync slots to the latest selection
+  } else if (!inspireSlotsDirty.value) {
+    // Keep session results intact; only sync slots to the latest selection,
+    // unless the user has manually curated the bucket this session.
     inspireSlots.value = (props.initialSlots || []).slice(0, 6)
   }
 })
@@ -162,6 +174,13 @@ function toggleArithmeticRole(sha256) {
     ...arithmeticRoles.value,
     [sha256]: arithmeticRoles.value[sha256] === 'add' ? 'sub' : 'add',
   }
+}
+
+function handleAddToBucket(sha256) {
+  const status = addToInspireSlots(sha256)
+  if (status === 'full') emit('toast', { msg: t('inspire.bucketFull'), type: 'error' })
+  else if (status === 'duplicate') emit('toast', { msg: t('inspire.bucketDuplicate'), type: 'info' })
+  else emit('toast', { msg: t('inspire.bucketAdded'), type: 'success' })
 }
 
 async function runInspire() {
@@ -230,7 +249,8 @@ async function runInspire() {
           sha256s: inspireSlots.value,
           n_results: 12,
           change_targets: inversionChangeTargets.value,
-          user_inject_prompt: inversionUserInjectPrompt.value,
+          user_inject_sections: { ...inversionUserSections.value },
+          user_inject_prompt: Object.values(inversionUserSections.value).filter(Boolean).join(', '),
           custom_blacklist: [],
           lang: inversionLang.value,
           inversion_strength: inversionStrength.value,
@@ -288,6 +308,14 @@ async function runInspire() {
               inversionStep2RawResult.value = evt.step2_raw_by_axis || inversionStep2RawResult.value
             } else if (evt.type === 'step3_result') {
               inversionAtmosphereTags.value = evt.atmosphere_tags || []
+              inversionHairTags.value       = evt.hair_tags       || []
+              inversionClothingTags.value   = evt.clothing_tags   || []
+              inversionAccessoryTags.value  = evt.accessory_tags  || []
+              inversionPoseTags.value       = evt.pose_tags       || []
+              inversionExpressionTags.value = evt.expression_tags || []
+              inversionBackgroundTags.value = evt.background_tags || []
+              inversionObjectTags.value     = evt.object_tags     || []
+              inversionLightingTags.value   = evt.lighting_tags   || []
             } else if (evt.type === 'stage') {
               inversionStage.value = evt.stage
               inversionStageLabel.value = evt.label
@@ -308,6 +336,14 @@ async function runInspire() {
               inversionNewTagsGrouped.value = evt.new_tags_by_axis || inversionNewTagsGrouped.value
               inversionStep2RawResult.value = evt.step2_raw_by_axis || inversionStep2RawResult.value
               inversionAtmosphereTags.value = evt.atmosphere_tags || inversionAtmosphereTags.value
+              inversionHairTags.value       = evt.hair_tags       || inversionHairTags.value
+              inversionClothingTags.value   = evt.clothing_tags   || inversionClothingTags.value
+              inversionAccessoryTags.value  = evt.accessory_tags  || inversionAccessoryTags.value
+              inversionPoseTags.value       = evt.pose_tags       || inversionPoseTags.value
+              inversionExpressionTags.value = evt.expression_tags || inversionExpressionTags.value
+              inversionBackgroundTags.value = evt.background_tags || inversionBackgroundTags.value
+              inversionObjectTags.value     = evt.object_tags     || inversionObjectTags.value
+              inversionLightingTags.value   = evt.lighting_tags   || inversionLightingTags.value
               inversionRemovedTags.value = evt.removed_tags || []
               inversionStoryStreaming.value = ''
               inversionStage.value = 0
@@ -562,6 +598,106 @@ async function copyToClipboard(text) {
   }
 }
 
+// ── テーマ自動展開 ─────────────────────────────────────────────────────────────
+const inversionTheme        = ref('')
+const inversionThemeLoading = ref(false)
+
+async function expandTheme() {
+  if (!inversionTheme.value.trim() || inversionThemeLoading.value) return
+  inversionThemeLoading.value = true
+  try {
+    const r = await fetch('/api/inspire/expand-theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        theme: inversionTheme.value,
+        sha256s: inspireSlots.value,
+        lang: inversionLang.value,
+      }),
+    })
+    if (r.ok) {
+      const data = await r.json()
+      inversionUserSections.value = {
+        character:  data.character  || inversionUserSections.value.character,
+        background: data.background || inversionUserSections.value.background,
+        props:      data.props      || inversionUserSections.value.props,
+        action:     data.action     || inversionUserSections.value.action,
+      }
+    }
+  } catch {}
+  inversionThemeLoading.value = false
+}
+
+// ── 4セクション WD14 オートコンプリート ───────────────────────────────────────
+const INVERSION_SECTIONS = [
+  { key: 'character',  icon: '👤', labelKey: 'inspire.sectionCharacter',  phKey: 'inspire.sectionCharacterPh' },
+  { key: 'background', icon: '🌄', labelKey: 'inspire.sectionBackground', phKey: 'inspire.sectionBackgroundPh' },
+  { key: 'props',      icon: '🎒', labelKey: 'inspire.sectionProps',      phKey: 'inspire.sectionPropsPh' },
+  { key: 'action',     icon: '🏃', labelKey: 'inspire.sectionAction',     phKey: 'inspire.sectionActionPh' },
+]
+
+const acSuggestions  = ref({})
+const acShowDropdown = ref({})
+const acActiveIndex  = ref({})
+const acTimers       = {}
+
+function acGetLastToken(text) {
+  return text.split(',').pop().trim()
+}
+
+async function acFetch(key, text) {
+  const q = acGetLastToken(text)
+  if (!q || q.length < 2) {
+    acSuggestions.value  = { ...acSuggestions.value,  [key]: [] }
+    acShowDropdown.value = { ...acShowDropdown.value, [key]: false }
+    return
+  }
+  clearTimeout(acTimers[key])
+  acTimers[key] = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/tags/suggest?q=${encodeURIComponent(q)}&limit=8`)
+      if (r.ok) {
+        const data = await r.json()
+        acSuggestions.value  = { ...acSuggestions.value,  [key]: data }
+        acShowDropdown.value = { ...acShowDropdown.value, [key]: data.length > 0 }
+        acActiveIndex.value  = { ...acActiveIndex.value,  [key]: -1 }
+      }
+    } catch {}
+  }, 150)
+}
+
+function acSelect(key, tag) {
+  const cur = inversionUserSections.value[key]
+  const commaIdx = cur.lastIndexOf(',')
+  const prefix = commaIdx >= 0 ? cur.slice(0, commaIdx + 1) + ' ' : ''
+  inversionUserSections.value = { ...inversionUserSections.value, [key]: (prefix + tag).trimStart() }
+  acShowDropdown.value = { ...acShowDropdown.value, [key]: false }
+  acSuggestions.value  = { ...acSuggestions.value,  [key]: [] }
+}
+
+function acKeydown(key, e) {
+  const sugs = acSuggestions.value[key] || []
+  if (!acShowDropdown.value[key] || !sugs.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    acActiveIndex.value = { ...acActiveIndex.value, [key]: Math.min((acActiveIndex.value[key] ?? -1) + 1, sugs.length - 1) }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    acActiveIndex.value = { ...acActiveIndex.value, [key]: Math.max((acActiveIndex.value[key] ?? -1) - 1, -1) }
+  } else if (e.key === 'Enter' && (acActiveIndex.value[key] ?? -1) >= 0) {
+    e.preventDefault()
+    acSelect(key, sugs[acActiveIndex.value[key]].tag)
+  } else if (e.key === 'Escape') {
+    acShowDropdown.value = { ...acShowDropdown.value, [key]: false }
+  }
+}
+
+function acHide(key) {
+  setTimeout(() => { acShowDropdown.value = { ...acShowDropdown.value, [key]: false } }, 150)
+}
+
+onUnmounted(() => { Object.values(acTimers).forEach(clearTimeout) })
+
 function parseBrainstormSections(text) {
   if (!text) return []
   const sections = []
@@ -666,6 +802,15 @@ function simpleMarkdown(text) {
                           : inspireTab === 'blend'
                             ? ((blendWeights[sha] ?? 0.5) > 0.3 ? 'ring-emerald-500/70' : (blendWeights[sha] ?? 0.5) < -0.3 ? 'ring-red-500/70' : 'ring-gray-600/50')
                             : 'ring-indigo-500/60'" />
+                    <button
+                      @click="removeFromInspireSlots(sha)"
+                      :disabled="isRunning"
+                      class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-900 border-2 border-gray-700
+                             text-gray-400 hover:text-white hover:bg-red-600 hover:border-red-500
+                             flex items-center justify-center text-[10px] leading-none transition-all
+                             opacity-0 group-hover/slot:opacity-100 disabled:opacity-0 z-10">
+                      ✕
+                    </button>
                     <!-- Arithmetic toggle -->
                     <button v-if="inspireTab === 'arithmetic'"
                       @click="toggleArithmeticRole(sha)"
@@ -758,11 +903,62 @@ function simpleMarkdown(text) {
                 <p v-if="inversionChangeTargets.length === 0" class="text-[11px] text-amber-500/70 px-1">
                   ⚠ {{ $t('inspire.inversionSelectRequired') }}
                 </p>
-                <!-- User inject prompt -->
-                <input v-model="inversionUserInjectPrompt"
-                  type="text"
-                  :placeholder="t('inspire.placeholderExtra')"
-                  class="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-cyan-500/60 transition-colors" />
+                <!-- テーマ入力 + 自動展開 -->
+                <div class="space-y-1.5 pt-0.5">
+                  <p class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">
+                    {{ t('inspire.themeLabel') }}
+                  </p>
+                  <div class="flex gap-1.5">
+                    <input v-model="inversionTheme"
+                      type="text"
+                      :placeholder="t('inspire.themePlaceholder')"
+                      @keydown.enter="expandTheme"
+                      class="flex-1 bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-cyan-500/60 transition-colors min-w-0" />
+                    <button @click="expandTheme" :disabled="inversionThemeLoading"
+                      class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                      :class="inversionThemeLoading
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                        : 'bg-cyan-700/60 hover:bg-cyan-600/70 text-cyan-200'">
+                      {{ inversionThemeLoading ? '…' : t('inspire.themeExpand') }}
+                    </button>
+                  </div>
+                </div>
+                <!-- セクション別ヒント (WD14 AC付き) -->
+                <div class="space-y-1.5 pt-0.5">
+                  <p class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">
+                    {{ t('inspire.hintSectionsLabel') }}
+                  </p>
+                  <div v-for="sec in INVERSION_SECTIONS" :key="sec.key" class="relative">
+                    <label class="flex items-center gap-1 text-[10px] text-gray-500 mb-0.5">
+                      <span>{{ sec.icon }}</span>
+                      <span>{{ t(sec.labelKey) }}</span>
+                    </label>
+                    <textarea
+                      :value="inversionUserSections[sec.key]"
+                      @input="e => { inversionUserSections.value[sec.key] = e.target.value; acFetch(sec.key, e.target.value) }"
+                      @keydown="e => acKeydown(sec.key, e)"
+                      @blur="acHide(sec.key)"
+                      rows="2"
+                      :placeholder="t(sec.phKey)"
+                      class="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-cyan-500/60 transition-colors resize-none"
+                    />
+                    <div
+                      v-if="acShowDropdown[sec.key] && (acSuggestions[sec.key] || []).length"
+                      class="absolute top-full left-0 right-0 mt-0.5 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden"
+                    >
+                      <div
+                        v-for="(s, i) in acSuggestions[sec.key]"
+                        :key="s.tag"
+                        @mousedown.prevent="acSelect(sec.key, s.tag)"
+                        class="flex items-center justify-between px-3 py-1.5 cursor-pointer text-xs transition-colors"
+                        :class="i === acActiveIndex[sec.key] ? 'bg-cyan-700/60 text-white' : 'hover:bg-gray-700 text-gray-200'"
+                      >
+                        <span class="font-mono">{{ s.tag }}</span>
+                        <span class="text-[10px] text-gray-500 ml-2">{{ s.count }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <!-- Inversion strength slider -->
                 <div class="space-y-1 pt-1">
                   <div class="flex justify-between text-[10px] text-gray-500">
@@ -1037,6 +1233,77 @@ function simpleMarkdown(text) {
                     class="ml-1.5 text-violet-500 animate-pulse">{{ $t('inspire.storyGenerating') }}</span>
                 </p>
                 <p class="text-xs text-violet-200 leading-relaxed max-h-40 overflow-y-auto whitespace-pre-wrap">{{ inspireInversionStory || inversionStoryStreaming }}</p>
+              </div>
+
+              <!-- Step3: Visual Spec — structured category tags -->
+              <div v-if="inversionHairTags.length || inversionClothingTags.length || inversionPoseTags.length || inversionExpressionTags.length || inversionBackgroundTags.length"
+                class="bg-emerald-950/30 border border-emerald-800/30 rounded-xl p-3.5 space-y-2.5">
+                <p class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">{{ $t('inspire.visualSpecTitle') }}</p>
+                <!-- Row 1: Hair / Clothing / Accessories -->
+                <div class="grid grid-cols-3 gap-2">
+                  <div v-if="inversionHairTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupHair') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionHairTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="inversionClothingTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupClothing') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionClothingTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="inversionAccessoryTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupAccessory') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionAccessoryTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- Row 2: Pose / Expression -->
+                <div class="grid grid-cols-2 gap-2">
+                  <div v-if="inversionPoseTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupPose') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionPoseTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-sky-900/40 border border-sky-700/30 text-sky-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="inversionExpressionTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupExpression') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionExpressionTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-rose-900/40 border border-rose-700/30 text-rose-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- Row 3: Background / Objects / Lighting -->
+                <div class="grid grid-cols-3 gap-2">
+                  <div v-if="inversionBackgroundTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupBackground') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionBackgroundTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="inversionObjectTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupObject') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionObjectTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                  <div v-if="inversionLightingTags.length" class="space-y-1">
+                    <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupLighting') }}</p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in inversionLightingTags" :key="tag"
+                        class="px-1.5 py-0.5 bg-amber-900/40 border border-amber-700/30 text-amber-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <!-- Removed tags report (forbidden words) -->
@@ -1322,6 +1589,15 @@ function simpleMarkdown(text) {
                               <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                           </button>
+                          <button
+                            @click.stop="handleAddToBucket(img.sha256)"
+                            class="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center
+                                   transition-all duration-150 z-10 bg-black/50 border-2 border-gray-400/70
+                                   text-white opacity-0 group-hover:opacity-100 hover:bg-emerald-600 hover:border-emerald-400
+                                   cursor-pointer"
+                            :title="$t('inspire.addToBucket')">
+                            <span class="text-[11px] leading-none font-bold">+</span>
+                          </button>
                         </div>
                         <div class="px-1.5 py-1">
                           <p class="text-[10px] text-gray-500 truncate">{{ img.name }}</p>
@@ -1358,6 +1634,15 @@ function simpleMarkdown(text) {
                             <svg v-if="selectedSet.has(img.sha256)" class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
                               <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
+                          </button>
+                          <button
+                            @click.stop="handleAddToBucket(img.sha256)"
+                            class="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center
+                                   transition-all duration-150 z-10 bg-black/50 border-2 border-gray-400/70
+                                   text-white opacity-0 group-hover:opacity-100 hover:bg-emerald-600 hover:border-emerald-400
+                                   cursor-pointer"
+                            :title="$t('inspire.addToBucket')">
+                            <span class="text-[11px] leading-none font-bold">+</span>
                           </button>
                         </div>
                         <div class="px-1.5 py-1">
@@ -1422,6 +1707,15 @@ function simpleMarkdown(text) {
                           class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
                           <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
+                      </button>
+                      <button
+                        @click.stop="handleAddToBucket(img.sha256)"
+                        class="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center
+                               transition-all duration-150 z-10 bg-black/50 border-2 border-gray-400/70
+                               text-white opacity-0 group-hover:opacity-100 hover:bg-emerald-600 hover:border-emerald-400
+                               cursor-pointer"
+                        :title="$t('inspire.addToBucket')">
+                        <span class="text-[11px] leading-none font-bold">+</span>
                       </button>
                     </div>
                     <div class="px-2 py-1.5">

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -353,3 +355,200 @@ async def get_recent_adopted_tags(db, days: int = 7, limit: int = 200) -> dict[s
     except Exception as e:
         logger.warning("get_recent_adopted_tags failed: %s", e)
     return freq
+
+
+# ── Pro mode: お題ドリブン WD14 タグ取得 ────────────────────────────────────
+
+_PRO_SECTION_ORDER = ("character", "background", "props", "action", "mood", "camera")
+
+
+def _section_pairs(pro_sections: dict | None) -> list[tuple[str, str]]:
+    """pro_sections から (section_name, value) ペアを定義済み順で返す。空値はスキップ。"""
+    if not pro_sections:
+        return []
+    return [
+        (sect, v) for sect in _PRO_SECTION_ORDER
+        if (v := (pro_sections.get(sect) or "").strip())
+    ]
+
+
+async def get_topic_tags(
+    db,
+    ollama,
+    topic: str,
+    pro_sections: dict | None = None,
+    limit: int = 25,
+) -> list[str]:
+    """お題テキスト + sections から WD14 ベクトル検索し、VLM でお題に特徴的なタグを返す。
+
+    limit=25 で返すことでスピリット別にティア分配できる（上位がコア、下位が発散的）。
+    Falls back to raw candidates when VLM call fails.
+    Returns [] when WD14 vocab is not imported.
+    """
+    count = await _get_vocab_count(db)
+    if not topic or count == 0:
+        return []
+
+    pairs = _section_pairs(pro_sections)
+    query_parts = [topic] + [v for _, v in pairs]
+
+    try:
+        vec = await ollama.embed(" ".join(query_parts))
+    except Exception as e:
+        logger.warning("get_topic_tags embed failed: %s", e)
+        return []
+
+    try:
+        hits = await db.search_wd14_vocab(
+            vec, min_freq=0.01, max_freq=0.80, category=0, limit=limit * 2
+        )
+    except Exception as e:
+        logger.warning("get_topic_tags search failed: %s", e)
+        return []
+
+    candidates = [h["name"] for h in hits if not _is_species_tag(h["name"])]
+    if not candidates:
+        return []
+
+    sections_block = (
+        "\nSection hints:\n" + "\n".join(f"  {sect}: {v}" for sect, v in pairs)
+    ) if pairs else ""
+
+    prompt = (
+        f"Topic: {topic}{sections_block}\n"
+        f"Candidate Danbooru tags: [{', '.join(candidates)}]\n\n"
+        f"Select up to {limit} tags that are SPECIFICALLY CHARACTERISTIC of this topic. "
+        f"Exclude generic scene-setting tags that appear in almost any image of this type "
+        f"(e.g. indoors, outdoors, wooden_floor, stone_wall, grass, sky — unless they are "
+        f"a defining feature of this specific topic). "
+        f"Prefer tags that distinguish this topic from superficially similar ones.\n"
+        f'Output ONLY a JSON array: ["tag1", "tag2", ...]'
+    )
+
+    try:
+        raw = await ollama.generate_text(prompt, fmt="json")
+        raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+        raw = re.sub(r"\s*```$", "", raw.strip())
+        selected = json.loads(raw)
+        if isinstance(selected, list):
+            result = [t for t in selected if isinstance(t, str) and t.strip()]
+            if result:
+                logger.debug("get_topic_tags: %d → %d tags", len(candidates), len(result))
+                return result[:limit]
+    except Exception as e:
+        logger.warning("get_topic_tags VLM filter failed: %s", e)
+
+    return candidates[:limit]
+
+
+async def synthesize_slogan(
+    topic: str,
+    pro_sections: dict | None,
+    topic_tags: list[str],
+    ollama,
+) -> str:
+    """お題・sections・filtered WD14 tags から vivid なスローガンを 1-2 文で生成。
+
+    VLM 呼び出しが失敗した場合は topic をそのまま返す。
+    """
+    lines: list[str] = [
+        "You are a creative director for anime illustrations.",
+        "Based on the following inputs, write ONE vivid creative theme (1-2 sentences, Japanese or English).",
+        "The theme should capture the visual essence — be evocative and specific.",
+        "",
+        f"Topic: {topic}",
+    ]
+    for sect, v in _section_pairs(pro_sections):
+        lines.append(f"{sect}: {v}")
+    if topic_tags:
+        lines.append(f"Related visual elements: {', '.join(topic_tags)}")
+    lines += ["", "Output ONLY the theme sentence. No quotes, no explanation."]
+
+    try:
+        result = await ollama.generate_text("\n".join(lines))
+        slogan = result.strip()
+        if slogan:
+            logger.debug("synthesize_slogan: %r", slogan[:80])
+            return slogan
+    except Exception as e:
+        logger.warning("synthesize_slogan failed: %s", e)
+
+    return topic
+
+
+# ── Pro mode: axis_tag_hints の VLM 精査 (将来用) ────────────────────────────
+
+async def refine_axis_tag_hints(
+    raw_hints: list[str],
+    axes: dict,
+    pro_sections: dict | None,
+    ollama,
+    target: int = 12,
+) -> list[str]:
+    """VLM で候補タグを精査し、ユーザー意図と整合する上位タグだけ返す。
+
+    raw_hints が空か ollama が None の場合はそのまま返す。
+    VLM 呼び出しが失敗した場合も raw_hints をフォールバックとして返す。
+    """
+    if not raw_hints or not ollama:
+        return raw_hints
+
+    # 軸サマリー（プロンプトに収める）
+    axis_lines: list[str] = []
+    for k in ("subject", "character_detail", "action", "scene",
+              "mood", "lighting", "style", "accessories", "palette"):
+        v = axes.get(k, "")
+        if isinstance(v, list):
+            v = ", ".join(v)
+        if v:
+            axis_lines.append(f"  {k}: {v}")
+
+    # Pro セクション（空でない場合のみ）
+    section_lines: list[str] = []
+    if pro_sections:
+        for sect in ("character", "background", "props", "action"):
+            v = (pro_sections.get(sect) or "").strip()
+            if v:
+                section_lines.append(f"  {sect}: {v}")
+
+    lines: list[str] = [
+        "You are a Danbooru tag curator for an anime image prompt.",
+        "",
+        "Creative axes (these are ALREADY in the prompt — do NOT re-select them):",
+        *axis_lines,
+    ]
+    if section_lines:
+        lines += [
+            "",
+            "User's section requests (selected tags must be consistent with these):",
+            *section_lines,
+        ]
+    lines += [
+        "",
+        f"Candidate tags from semantic search ({len(raw_hints)} total):",
+        f"  [{', '.join(raw_hints)}]",
+        "",
+        f"Select up to {target} tags that:",
+        "1. Are NOT already expressed by the axes above",
+        "2. Are consistent with the user's section requests",
+        "3. Add specific visual detail the axes do not already cover",
+        "4. Exclude overly generic or irrelevant tags",
+        "",
+        'Output ONLY a JSON array of selected tag strings: ["tag1", "tag2", ...]',
+    ]
+    prompt = "\n".join(lines)
+
+    try:
+        raw = await ollama.generate_text(prompt, fmt="json")
+        raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+        raw = re.sub(r"\s*```$", "", raw.strip())
+        selected = json.loads(raw)
+        if isinstance(selected, list):
+            result = [t for t in selected if isinstance(t, str) and t.strip()]
+            if result:
+                logger.debug("refine_axis_tag_hints: %d → %d tags", len(raw_hints), len(result))
+                return result
+    except Exception as e:
+        logger.warning("refine_axis_tag_hints VLM failed: %s", e)
+
+    return raw_hints

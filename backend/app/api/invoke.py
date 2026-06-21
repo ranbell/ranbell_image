@@ -39,6 +39,10 @@ class SummonRequest(BaseModel):
     camera_angle: str = ""  # e.g. "from_above", "dutch_angle"
     # Locale
     locale: str = "en"      # 'en' | 'ja' — controls monologue language
+    pro_topic: str = ""              # Pro mode natural language topic (お題テキスト直送)
+    pro_sections: dict[str, str] = {}  # character / background / props / action seed hints
+    # Rebel spirit control
+    rebel_inversion: bool = True  # False = rebel aims for beautiful image without axis inversion
     # Common
     workflow_name: str = ""
     input_mode: str = "light"  # light | pro
@@ -143,16 +147,15 @@ async def summon(body: SummonRequest, request: Request):
     cfg = await get_runtime_config(db)
     workflow_name = body.workflow_name or cfg.get("invoke_daily_oracle_workflow", "")
 
-    # Merge pro prompt into user_intent if pro mode
     user_intent = body.user_intent
-    if body.input_mode == "pro" and body.pro_prompt:
-        user_intent = body.pro_prompt
+    _pro_topic = body.pro_topic if body.input_mode == "pro" else ""
 
     from ..invoke.axis_decomposer import _resolve_person
     person_tags_str, _ = _resolve_person(body.person_gender, body.person_count)
     if body.input_mode == "pro" and body.pro_person_tags.strip():
         person_tags_str = body.pro_person_tags.strip()
 
+    _pro_sections = body.pro_sections if body.input_mode == "pro" else {}
     session = mgr.create_session(
         user_intent=user_intent,
         input_mode=body.input_mode,
@@ -162,6 +165,9 @@ async def summon(body: SummonRequest, request: Request):
         locale=body.locale,
         person_tags=person_tags_str,
         pro_negative=body.pro_negative if body.input_mode == "pro" else "",
+        pro_topic=_pro_topic,
+        pro_sections=_pro_sections,
+        rebel_inversion=body.rebel_inversion,
         db=db,
         ollama=ollama,
         comfy=comfy,
@@ -188,6 +194,8 @@ async def summon(body: SummonRequest, request: Request):
         person_count=body.person_count,
         camera_shot=body.camera_shot,
         camera_angle=body.camera_angle,
+        pro_topic=_pro_topic,
+        pro_sections=_pro_sections,
         session_manager=mgr,
     )
 

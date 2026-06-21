@@ -1,7 +1,9 @@
 """Tests for the alchemy/refine prompt pipeline.
 
 Covers:
-  - _build_vlm_prompt(): style × instruction_framing combinations
+  - _build_vlm_prompt(): style × instruction_framing combinations (danbooru/detailed)
+  - _build_natural_tags_prompt() / _build_natural_prose_prompt(): natural style two-pass builders
+  - _check_natural_prose(): prose-vs-tag-list heuristic
   - _extract_literal_directives(): regex extraction
   - _inject_literal_directives(): prompt injection
   - _parse_detailed_output(): bold and plain-header fallback
@@ -21,7 +23,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.api.ai import (
     _STYLE_INSTRUCTIONS,
+    _build_natural_prose_prompt,
+    _build_natural_tags_prompt,
     _build_vlm_prompt,
+    _check_natural_prose,
     _extract_literal_directives,
     _inject_literal_directives,
     _parse_detailed_output,
@@ -31,22 +36,22 @@ from app.api.ai import (
 )
 
 
-# ── _build_vlm_prompt ─────────────────────────────────────────────────────────
+# ── _build_vlm_prompt (danbooru / detailed) ───────────────────────────────────
 
 class TestBuildVlmPrompt:
     CONTEXT = "[Image 1 — influence weight: 100%]\nPrompt: 1girl, blue hair"
 
-    def test_natural_no_framing_uses_raw_instruction(self):
+    def test_no_framing_uses_raw_instruction(self):
         prompt = _build_vlm_prompt(
-            self.CONTEXT, "make it foggy", "natural",
+            self.CONTEXT, "make it foggy", "danbooru",
             with_negative=False, instruction_framing=False,
         )
         assert "make it foggy" in prompt
         assert "PROMPT ENGINEERING DIRECTIVE" not in prompt
 
-    def test_natural_with_framing_wraps_instruction(self):
+    def test_with_framing_wraps_instruction(self):
         prompt = _build_vlm_prompt(
-            self.CONTEXT, "make it foggy", "natural",
+            self.CONTEXT, "make it foggy", "danbooru",
             with_negative=False, instruction_framing=True,
         )
         assert "PROMPT ENGINEERING DIRECTIVE" in prompt
@@ -55,7 +60,7 @@ class TestBuildVlmPrompt:
 
     def test_empty_instruction_uses_default(self):
         prompt = _build_vlm_prompt(
-            self.CONTEXT, "", "natural",
+            self.CONTEXT, "", "danbooru",
             with_negative=False, instruction_framing=False,
         )
         assert "Create a refined, high-quality image generation prompt" in prompt
@@ -84,7 +89,7 @@ class TestBuildVlmPrompt:
 
     def test_with_negative_adds_sections(self):
         prompt = _build_vlm_prompt(
-            self.CONTEXT, "", "natural",
+            self.CONTEXT, "", "danbooru",
             with_negative=True, instruction_framing=False,
         )
         assert "POSITIVE:" in prompt
@@ -92,17 +97,119 @@ class TestBuildVlmPrompt:
 
     def test_without_negative_no_negative_section(self):
         prompt = _build_vlm_prompt(
-            self.CONTEXT, "", "natural",
+            self.CONTEXT, "", "danbooru",
             with_negative=False, instruction_framing=False,
         )
         assert "NEGATIVE:" not in prompt
 
     def test_context_included(self):
         prompt = _build_vlm_prompt(
-            self.CONTEXT, "", "natural",
+            self.CONTEXT, "", "danbooru",
             with_negative=False, instruction_framing=False,
         )
         assert "1girl, blue hair" in prompt
+
+
+# ── _build_natural_tags_prompt / _build_natural_prose_prompt ─────────────────
+
+class TestBuildNaturalTagsPrompt:
+    CONTEXT = "[Image 1 — influence weight: 100%]\nPrompt: 1girl, blue hair"
+
+    def test_no_framing_uses_raw_instruction(self):
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "make it foggy", with_negative=False, instruction_framing=False,
+        )
+        assert "make it foggy" in prompt
+        assert "PROMPT ENGINEERING DIRECTIVE" not in prompt
+
+    def test_with_framing_wraps_instruction(self):
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "make it foggy", with_negative=False, instruction_framing=True,
+        )
+        assert "PROMPT ENGINEERING DIRECTIVE" in prompt
+        assert "make it foggy" in prompt
+
+    def test_empty_instruction_uses_default(self):
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "", with_negative=False, instruction_framing=False,
+        )
+        assert "Create a refined, high-quality image generation prompt" in prompt
+
+    def test_with_negative_adds_sections(self):
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "", with_negative=True, instruction_framing=False,
+        )
+        assert "POSITIVE:" in prompt
+        assert "NEGATIVE:" in prompt
+
+    def test_without_negative_no_negative_section(self):
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "", with_negative=False, instruction_framing=False,
+        )
+        assert "NEGATIVE:" not in prompt
+
+    def test_context_included(self):
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "", with_negative=False, instruction_framing=False,
+        )
+        assert "1girl, blue hair" in prompt
+
+    def test_no_prose_requested(self):
+        """The tags-only call must not ask for a prose paragraph."""
+        prompt = _build_natural_tags_prompt(
+            self.CONTEXT, "", with_negative=False, instruction_framing=False,
+        )
+        assert "150" not in prompt
+        assert "flowing prose" not in prompt
+
+
+class TestBuildNaturalProsePrompt:
+    CONTEXT = "[Image 1 — influence weight: 100%]\nPrompt: 1girl, blue hair"
+    TAGS = "1girl, blue_hair, blue_eyes, masterpiece"
+
+    def test_context_and_tags_included(self):
+        prompt = _build_natural_prose_prompt(self.CONTEXT, "", self.TAGS)
+        assert "1girl, blue hair" in prompt
+        assert self.TAGS in prompt
+
+    def test_requests_long_prose(self):
+        prompt = _build_natural_prose_prompt(self.CONTEXT, "", self.TAGS)
+        assert "150-250 words" in prompt
+        assert "Do NOT output a comma-separated tag list" in prompt
+
+    def test_instruction_framing(self):
+        prompt = _build_natural_prose_prompt(
+            self.CONTEXT, "make it foggy", self.TAGS, instruction_framing=True,
+        )
+        assert "PROMPT ENGINEERING DIRECTIVE" in prompt
+        assert "make it foggy" in prompt
+
+    def test_retry_adds_sharper_directive(self):
+        normal = _build_natural_prose_prompt(self.CONTEXT, "", self.TAGS, retry=False)
+        retry = _build_natural_prose_prompt(self.CONTEXT, "", self.TAGS, retry=True)
+        assert "Your previous attempt" not in normal
+        assert "Your previous attempt" in retry
+
+
+# ── _check_natural_prose ──────────────────────────────────────────────────────
+
+class TestCheckNaturalProse:
+    def test_long_prose_passes(self):
+        text = (
+            "She stands at the edge of a rain-slicked rooftop, her long silver hair "
+            "whipping sideways in the wind as cool blue neon spills across her damp "
+            "jacket, one hand braced on the railing while she looks back over her "
+            "shoulder with a wary half-smile, golden light catching the edge of her "
+            "collar as distant towers blur into the rainy haze behind her."
+        )
+        assert _check_natural_prose(text)
+
+    def test_tag_list_fails(self):
+        text = "1girl, blue_hair, blue_eyes, masterpiece, best_quality, looking_at_viewer"
+        assert not _check_natural_prose(text)
+
+    def test_short_text_fails(self):
+        assert not _check_natural_prose("A short foggy scene at dusk.")
 
 
 # ── _extract_literal_directives ───────────────────────────────────────────────
@@ -461,13 +568,15 @@ DUMMY_CONTEXT = "[Image 1 — influence weight: 100%]\nPrompt: 1girl, blue hair\
 class TestVlmPromptCombinations:
     """Verify the correct vlm_prompt is built for every mode × style combination.
     Tests _build_vlm_prompt() with the pre-processed instruction to simulate
-    what run_refine_prompt() does.
+    what run_refine_prompt() does. Covers danbooru/detailed (single VLM call styles);
+    natural style's two-pass builders are covered by TestBuildNaturalTagsPrompt /
+    TestBuildNaturalProsePrompt above.
     """
 
     INSTRUCTION_JP = "'Ranbell Image' というテキストを上部に表示して、油絵風にして"
     INSTRUCTION_EN_TRANSLATED = "add text 'Ranbell Image' at top, oil painting style"
 
-    @pytest.mark.parametrize("style", ["natural", "danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
     def test_none_mode_passes_raw_instruction(self, style):
         """mode=none: instruction sent to VLM unchanged, no framing."""
         prompt = _build_vlm_prompt(
@@ -477,7 +586,7 @@ class TestVlmPromptCombinations:
         assert self.INSTRUCTION_JP in prompt
         assert "PROMPT ENGINEERING DIRECTIVE" not in prompt
 
-    @pytest.mark.parametrize("style", ["natural", "danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
     def test_basic_mode_removes_literal_before_vlm(self, style):
         """mode=basic: literal text extracted BEFORE VLM call.
         VLM receives: cleaned NL instruction + framing, NOT the literal text part."""
@@ -494,7 +603,7 @@ class TestVlmPromptCombinations:
         # Framing must be applied
         assert "PROMPT ENGINEERING DIRECTIVE" in prompt
 
-    @pytest.mark.parametrize("style", ["natural", "danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
     def test_enhanced_mode_removes_literal_before_vlm(self, style):
         """mode=enhanced: simulate LLM classification output.
         VLM receives: nl_instruction only + framing."""
@@ -507,7 +616,7 @@ class TestVlmPromptCombinations:
         assert "oil painting" in prompt
         assert "PROMPT ENGINEERING DIRECTIVE" in prompt
 
-    @pytest.mark.parametrize("style", ["natural", "danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
     def test_style_instructions_present_in_prompt(self, style):
         """Style directive is always included in the VLM prompt."""
         prompt = _build_vlm_prompt(
@@ -516,7 +625,6 @@ class TestVlmPromptCombinations:
         )
         # Key phrase unique to each style
         style_marker = {
-            "natural": "BLOCK 1 (tags)",
             "danbooru": "80–120 comma-separated English tags",
             "detailed": "Core Subject",
         }[style]

@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from ..ai.ollama import OllamaClient
 from ..db.qdrant_client import QdrantDBClient
+from .bm25_matcher import compute_bm25_match, detect_prompt_style
 from .embedding import compute_alignment_score
 from .vlm_analyzer import analyze_with_llm
 from .schema import AlignmentRecord, AlignmentResult
@@ -55,13 +56,18 @@ class AlignmentEvaluator:
         tags: list[str] = doc.get("wd14_tags") or []
         tags_text = ", ".join(tags)
 
+        prompt_style = detect_prompt_style(positive_prompt)
+        bm25_rate, bm25_matched, bm25_unmatched = compute_bm25_match(positive_prompt, tags)
+
         try:
-            score = await compute_alignment_score(positive_prompt, tags_text, self._ollama)
+            embedding_score = await compute_alignment_score(positive_prompt, tags_text, self._ollama)
         except Exception as exc:
             logger.error("Embedding failure for %s: %s", sha256, exc)
             record = AlignmentRecord(
                 image_id=sha256,
                 score=None,
+                bm25_score=bm25_rate,
+                prompt_style=prompt_style,
                 status="error",
                 summary=f"Embedding error: {exc}",
                 **existing_i18n,
@@ -71,8 +77,21 @@ class AlignmentEvaluator:
                 sha256=sha256, status="error", evaluated_at=record.evaluated_at
             )
 
+        # Blend embedding (semantic) and BM25 (lexical) scores.
+        # danbooru-style prompts map 1:1 to tags → BM25 is more reliable there.
+        w_emb = 0.4 if prompt_style == "danbooru" else 0.7
+        score = round(w_emb * embedding_score + (1.0 - w_emb) * bm25_rate, 4)
+
         try:
-            analysis = await analyze_with_llm(positive_prompt, tags, score, self._ollama)
+            analysis = await analyze_with_llm(
+                positive_prompt,
+                tags,
+                score,
+                self._ollama,
+                bm25_matched=bm25_matched,
+                bm25_unmatched=bm25_unmatched,
+                prompt_style=prompt_style,
+            )
         except Exception as exc:
             logger.error("LLM analysis failure for %s: %s", sha256, exc)
             analysis = {
@@ -85,6 +104,8 @@ class AlignmentEvaluator:
         record = AlignmentRecord(
             image_id=sha256,
             score=score,
+            bm25_score=bm25_rate,
+            prompt_style=prompt_style,
             status="done",
             summary=analysis.get("summary", ""),
             matched_elements=analysis.get("matched_elements", []),
@@ -101,6 +122,8 @@ class AlignmentEvaluator:
             sha256=sha256,
             status="done",
             score=score,
+            bm25_score=bm25_rate,
+            prompt_style=prompt_style,
             summary=record.summary,
             matched_elements=record.matched_elements,
             unmatched_elements=record.unmatched_elements,

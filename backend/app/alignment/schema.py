@@ -13,7 +13,9 @@ class AlignmentRecord(BaseModel):
     )
     evaluator_version: str = "2.0"
     score: float | None = None
-    score_method: str = "embedding_similarity_v1"
+    bm25_score: float | None = None
+    prompt_style: str | None = None
+    score_method: str = "hybrid_v1"
     # Legacy single-language fields kept for backward compatibility (ja)
     summary: str = ""
     matched_elements: list[str] = []
@@ -34,6 +36,8 @@ class AlignmentResult(BaseModel):
     sha256: str
     status: Literal["done", "skipped", "error"]
     score: float | None = None
+    bm25_score: float | None = None
+    prompt_style: str | None = None
     summary: str = ""
     matched_elements: list[str] = []
     unmatched_elements: list[str] = []

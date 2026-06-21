@@ -350,6 +350,41 @@ const comfyGeneratedImages = ref([])   // sha256 list of saved generated images
 const refineErrorMsg = ref('')
 const proseMissing = ref(false)
 const removedTags = ref([])
+const refinePhaseCode = ref('')
+
+const refineTotalSteps = computed(() => {
+  let n = 2  // 画像ロード + 後処理
+  if (refineInstructionMode.value === 'enhanced') n++  // enhanced のみ LLM ステップあり
+  if (refineSuppressConflict.value) n++
+  n += refineStyle.value === 'natural' ? 2 : 1
+  return n
+})
+
+const refineCurrentStep = computed(() => {
+  const order = ['loadingImages']
+  if (refineInstructionMode.value === 'enhanced') order.push('translatingInstruction')
+  if (refineSuppressConflict.value) order.push('analyzingConflicts')
+  if (refineStyle.value === 'natural') {
+    order.push('writingTags', 'writingDescription')
+  } else {
+    order.push('generatingPrompt')
+  }
+  order.push('parsingOutput')
+  const idx = order.indexOf(refinePhaseCode.value)
+  return idx >= 0 ? idx + 1 : 0
+})
+
+const refineHairTags = ref([])
+const refineClothingTags = ref([])
+const refineAccessoryTags = ref([])
+const refinePoseTags = ref([])
+const refineExpressionTags = ref([])
+const refineBackgroundTags = ref([])
+const refineObjectTags = ref([])
+const refineLightingTags = ref([])
+const refineWd14Analysis = ref(null)   // { common_tags, common_total, common_selected, unique_by_image }
+const refineCommonRatio = ref(0.3)     // 0.0〜1.0
+const refineUniqueCount = ref(20)      // 固有タグ数/画像@100%重み
 const workflows = ref([])
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────
@@ -2078,6 +2113,16 @@ async function runRefine() {
   refineErrorMsg.value = ''
   proseMissing.value = false
   refinePromptJobId.value = null
+  refinePhaseCode.value = ''
+  refineHairTags.value = []
+  refineClothingTags.value = []
+  refineAccessoryTags.value = []
+  refinePoseTags.value = []
+  refineExpressionTags.value = []
+  refineBackgroundTags.value = []
+  refineObjectTags.value = []
+  refineLightingTags.value = []
+  refineWd14Analysis.value = null
 
   try {
     const orderedShas = [...selectedIds.value].slice(0, 6)
@@ -2091,6 +2136,8 @@ async function runRefine() {
       prompt_style: refineStyle.value,
       negative_prompt: refineNegative.value,
       suppress_conflict_tags: refineSuppressConflict.value,
+      wd14_common_ratio: refineCommonRatio.value,
+      wd14_unique_count: refineUniqueCount.value,
       auto_submit: refineAutoSubmit.value,
       batch_count: refineBatchCount.value,
       workflow_name: refineWorkflow.value,
@@ -2148,6 +2195,9 @@ async function runRefine() {
 
 function handleRefineEvent(evt) {
   switch (evt.type) {
+    case 'phase':
+      refinePhaseCode.value = evt.code || ''
+      break
     case 'think':
       _pendingThink += evt.text
       _scheduleFlush()
@@ -2162,6 +2212,15 @@ function handleRefineEvent(evt) {
       refinedPrompt.value = evt.positive || ''
       proseMissing.value = !!evt.prose_missing
       removedTags.value = evt.removed_tags || []
+      refineWd14Analysis.value = evt.wd14_analysis || null
+      refineHairTags.value = evt.hair_tags || []
+      refineClothingTags.value = evt.clothing_tags || []
+      refineAccessoryTags.value = evt.accessory_tags || []
+      refinePoseTags.value = evt.pose_tags || []
+      refineExpressionTags.value = evt.expression_tags || []
+      refineBackgroundTags.value = evt.background_tags || []
+      refineObjectTags.value = evt.object_tags || []
+      refineLightingTags.value = evt.lighting_tags || []
       refinePhase.value = evt.auto_submit ? 'comfy' : 'done'
       break
     case 'comfy_queued':
@@ -2221,6 +2280,7 @@ function openAnalyzer() { showAnalyzer.value = true }
 const showInspire = ref(false)
 const inspireRunning = ref(false)
 const showAbout = ref(false)
+const appVersion = __APP_VERSION__
 
 const inspireInitialSlots = computed(() => [...selectedIds.value].slice(0, 6))
 const inspireSelectedIds = computed(() => [...selectedIds.value])
@@ -3116,6 +3176,7 @@ onUnmounted(() => {
                       </svg>
                     </button>
                   </div>
+                  <p v-if="refineInstructionMode !== 'none'" class="mt-1.5 text-[10px] text-gray-600 whitespace-pre-line leading-relaxed">{{ $t('refine.instructionTextHint') }}</p>
                 </div>
 
                 <!-- Section 1: Ollama controls -->
@@ -3148,6 +3209,34 @@ onUnmounted(() => {
                         <option :value="16384">{{ $t('refine.numCtxRecommended') }}</option>
                         <option :value="32768">32,768</option>
                       </select>
+                    </div>
+                    <!-- WD14 tag decomposition settings -->
+                    <div class="border-t border-gray-700/50 pt-3 space-y-3">
+                      <p class="text-xs text-gray-500 font-semibold uppercase tracking-wide">{{ $t('refine.wd14Settings') }}</p>
+                      <div>
+                        <label class="text-xs text-gray-500 flex justify-between mb-1.5">
+                          <span>{{ $t('refine.wd14CommonRatio') }}</span>
+                          <span class="text-purple-400 font-mono">{{ Math.round(refineCommonRatio * 100) }}%</span>
+                        </label>
+                        <input v-model.number="refineCommonRatio" type="range" min="0" max="1" step="0.1"
+                          :disabled="refining || refineDirectPrompt !== null"
+                          class="w-full accent-purple-500 disabled:opacity-50" />
+                        <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+                          <span>{{ $t('refine.wd14CommonRatioLow') }}</span><span>{{ $t('refine.wd14CommonRatioHigh') }}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label class="text-xs text-gray-500 flex justify-between mb-1.5">
+                          <span>{{ $t('refine.wd14UniqueCount') }}</span>
+                          <span class="text-purple-400 font-mono">{{ refineUniqueCount }}</span>
+                        </label>
+                        <input v-model.number="refineUniqueCount" type="range" min="5" max="40" step="5"
+                          :disabled="refining || refineDirectPrompt !== null"
+                          class="w-full accent-purple-500 disabled:opacity-50" />
+                        <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+                          <span>5</span><span>40</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </details>
@@ -3480,6 +3569,19 @@ onUnmounted(() => {
 
                 <!-- Block 1: LLM streaming → final prompts (appears on start, stays) -->
                 <div v-if="refineStarted">
+                  <!-- LLM phase progress bar with step/ETA overlay -->
+                  <div v-if="refinePhase === 'llm'" class="mb-3">
+                    <ProgressBar
+                      :progress="refinePromptJob?.progress ?? 0"
+                      :indeterminate="!refinePromptJob || refinePromptJob.progress_indeterminate"
+                      :progressText="refinePhaseCode ? $t('refine.phase.' + refinePhaseCode) : $t('refine.ollamaGenerating')"
+                      :eta="refinePromptJob?.eta_seconds ?? null"
+                      :currentStep="refineCurrentStep"
+                      :totalSteps="refineTotalSteps"
+                      color="purple-gradient"
+                      size="md"
+                    />
+                  </div>
                   <!-- Waiting for first token (refinement circle animation) -->
                   <div v-if="refinePhase === 'llm' && !streamingText && !positivePrompt"
                     class="flex flex-col items-center justify-center py-12 select-none">
@@ -3494,7 +3596,7 @@ onUnmounted(() => {
                     <p class="text-sm text-purple-300 animate-pulse">
                       {{ refinePromptJob?.state === 'queued' ? $t('refine.queued') : $t('refine.generatingPrompt') }}
                     </p>
-                    <p class="text-xs text-gray-600 mt-1">{{ $t('refine.ollamaGenerating') }}</p>
+                    <p class="text-xs text-gray-600 mt-1">{{ refinePhaseCode ? $t('refine.phase.' + refinePhaseCode) : $t('refine.ollamaGenerating') }}</p>
                   </div>
                   <!-- Streaming text (while generating) -->
                   <div v-if="streamingText && !positivePrompt"
@@ -3502,9 +3604,120 @@ onUnmounted(() => {
                     <div class="absolute top-3 right-3 flex gap-1">
                       <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
                     </div>
-                    <p class="text-xs text-purple-400 font-semibold uppercase tracking-wide mb-2">{{ $t('refine.generating') }}</p>
+                    <p class="text-xs text-purple-400 font-semibold uppercase tracking-wide mb-2">
+                      {{ $t('refine.generating') }}<span v-if="refinePhaseCode" class="text-gray-500 font-normal normal-case"> — {{ $t('refine.phase.' + refinePhaseCode) }}</span>
+                    </p>
                     <p class="text-sm text-gray-200 whitespace-pre-wrap break-words leading-relaxed font-mono">{{ streamingText }}<span class="text-purple-400">▌</span></p>
                   </div>
+                  <!-- WD14 tag analysis card (collapsible) — shown after generation -->
+                  <details v-if="refineWd14Analysis" class="group bg-slate-950/50 border border-slate-700/40 rounded-xl overflow-hidden">
+                    <summary class="px-3.5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-slate-800/30 transition-colors">
+                      <span class="text-xs font-semibold text-slate-400 uppercase tracking-wide">{{ $t('refine.wd14AnalysisTitle') }}</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] text-slate-600 font-mono">
+                          {{ $t('refine.wd14CommonCount', { n: refineWd14Analysis.common_selected }) }}
+                        </span>
+                        <span class="text-slate-600 group-open:rotate-180 transition-transform text-xs">▼</span>
+                      </div>
+                    </summary>
+                    <div class="px-3.5 pb-3 space-y-2.5">
+                      <!-- Common tags -->
+                      <div v-if="refineWd14Analysis.common_tags?.length" class="space-y-1">
+                        <p class="text-[10px] text-slate-500 font-semibold">{{ $t('refine.wd14CommonLabel') }} ({{ refineWd14Analysis.common_selected }}/{{ refineWd14Analysis.common_total }})</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineWd14Analysis.common_tags" :key="tag"
+                            class="px-1.5 py-0.5 bg-slate-800/60 border border-slate-600/40 text-slate-300/80 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <!-- Per-image unique tags -->
+                      <div v-for="(imgInfo, imgIdx) in refineWd14Analysis.unique_by_image" :key="imgIdx" class="space-y-1">
+                        <p class="text-[10px] text-slate-500 font-semibold">{{ $t('refine.wd14UniqueLabel', { n: Number(imgIdx) + 1 }) }} ({{ imgInfo.selected_count }}/{{ imgInfo.budget }})</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in imgInfo.must" :key="'m'+tag"
+                            class="px-1.5 py-0.5 bg-purple-900/40 border border-purple-700/30 text-purple-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                          <span v-for="tag in imgInfo.ref" :key="'r'+tag"
+                            class="px-1.5 py-0.5 bg-gray-800/60 border border-gray-700/30 text-gray-400/80 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+
+                  <!-- Visual Spec category tags card (emerald) — collapsible, natural + detailed styles -->
+                  <details v-if="refineHairTags.length || refineClothingTags.length || refinePoseTags.length || refineExpressionTags.length || refineBackgroundTags.length || refineObjectTags.length || refineLightingTags.length"
+                    class="group bg-emerald-950/30 border border-emerald-800/30 rounded-xl overflow-hidden">
+                    <summary class="px-3.5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-emerald-900/20 transition-colors">
+                      <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">{{ $t('refine.visualSpecTitle') }}</span>
+                      <span class="text-emerald-700 group-open:rotate-180 transition-transform text-xs">▼</span>
+                    </summary>
+                    <div class="px-3.5 pb-3 space-y-2.5">
+                    <!-- Row 1: Hair / Clothing / Accessories -->
+                    <div class="grid grid-cols-3 gap-2">
+                      <div v-if="refineHairTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupHair') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineHairTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="refineClothingTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupClothing') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineClothingTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="refineAccessoryTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupAccessory') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineAccessoryTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Row 2: Pose / Expression -->
+                    <div class="grid grid-cols-2 gap-2">
+                      <div v-if="refinePoseTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupPose') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refinePoseTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-sky-900/40 border border-sky-700/30 text-sky-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="refineExpressionTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupExpression') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineExpressionTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-rose-900/40 border border-rose-700/30 text-rose-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Row 3: Background / Objects / Lighting -->
+                    <div class="grid grid-cols-3 gap-2">
+                      <div v-if="refineBackgroundTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupBackground') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineBackgroundTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="refineObjectTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupObject') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineObjectTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                      <div v-if="refineLightingTags.length" class="space-y-1">
+                        <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupLighting') }}</p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in refineLightingTags" :key="tag"
+                            class="px-1.5 py-0.5 bg-amber-900/40 border border-amber-700/30 text-amber-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    </div>
+                  </details>
+
                   <!-- Final prompts (permanent once generated) -->
                   <div v-if="positivePrompt" class="bg-gray-900 border border-purple-800/30 rounded-xl p-4 space-y-3">
                     <div class="flex items-center justify-between">
@@ -4435,7 +4648,7 @@ onUnmounted(() => {
 
           <div class="text-center">
             <h2 class="text-xl font-bold text-purple-300 tracking-tight">Ranbell Image</h2>
-            <p class="text-xs text-gray-500 mt-0.5">v0.1.0</p>
+            <p class="text-xs text-gray-500 mt-0.5">v{{ appVersion }}</p>
           </div>
 
           <p class="text-sm text-gray-400 text-center leading-relaxed whitespace-pre-line">{{ $t('about.tagline') }}</p>
