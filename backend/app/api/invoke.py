@@ -149,6 +149,7 @@ async def summon(body: SummonRequest, request: Request):
 
     user_intent = body.user_intent
     _pro_topic = body.pro_topic if body.input_mode == "pro" else ""
+    _pro_prompt = body.pro_prompt if body.input_mode == "pro" else ""
 
     from ..invoke.axis_decomposer import _resolve_person
     person_tags_str, _ = _resolve_person(body.person_gender, body.person_count)
@@ -196,6 +197,7 @@ async def summon(body: SummonRequest, request: Request):
         camera_angle=body.camera_angle,
         pro_topic=_pro_topic,
         pro_sections=_pro_sections,
+        pro_prompt=_pro_prompt,
         session_manager=mgr,
     )
 
@@ -230,40 +232,16 @@ async def respin(body: RespinRequest, request: Request):
     spirit.prompt_result = None
     spirit.alignment_score = None
 
-    from ..invoke.vocab_bank import get_vocab_hints, get_axis_semantic_tags
-    axis_tags = []
-    for v in (session.axes or {}).values():
-        if isinstance(v, list):
-            axis_tags.extend(v)
-        elif isinstance(v, str) and v:
-            axis_tags.extend(v.split())
-
-    try:
-        vocab_hints = await get_vocab_hints(session.db, session.ollama, axis_tags)
-    except Exception:
-        vocab_hints = {"stranger": [], "lunatic": []}
-
-    try:
-        axis_tag_hints = await get_axis_semantic_tags(session.db, session.ollama, session.axes or {})
-    except Exception:
-        axis_tag_hints = []
-
     from ..spooler.models import JobLane
-    from ..jobs.runners import run_invoke_spirit_compose
-
-    spirit_vocab = vocab_hints if body.spirit_name in ("stranger", "lunatic") else {"stranger": [], "lunatic": []}
+    from ..jobs.runners import run_invoke_respin
 
     job_id = session.spooler.submit(
         JobLane.PROMPT,
         f"invoke.respin/{body.spirit_name[:3]}",
-        run_invoke_spirit_compose,
+        run_invoke_respin,
         meta={"session_id": body.session_id, "spirit": body.spirit_name, "respin": True},
         session_id=body.session_id,
         spirit_name=body.spirit_name,
-        axes=session.axes or {},
-        vocab_hints=spirit_vocab,
-        axis_tag_hints=axis_tag_hints,
-        locale=session.locale,
         session_manager=mgr,
     )
     spirit.job_ids.append(job_id)
@@ -412,10 +390,10 @@ async def get_stats(request: Request):
 @router.post("/enhance-prompt")
 async def enhance_prompt(body: EnhancePromptRequest, request: Request):
     """Embed user text, find semantically related Danbooru tags, refine into prompt + natural language."""
-    from ..invoke.vocab_bank import _is_species_tag
+    import asyncio
 
-    db     = request.app.state.db
-    ollama = request.app.state.ollama
+    db      = request.app.state.db
+    spooler = request.app.state.spooler
 
     if not body.text.strip():
         raise HTTPException(422, "text must not be empty")
@@ -424,54 +402,25 @@ async def enhance_prompt(body: EnhancePromptRequest, request: Request):
     if count == 0:
         raise HTTPException(503, "WD14 vocab not imported — run POST /api/admin/invoke/import-wd14-vocab first")
 
-    try:
-        vec = await ollama.embed(body.text)
-    except Exception as e:
-        raise HTTPException(502, f"Embed failed: {e}")
+    from ..spooler.models import JobLane
+    from ..jobs.runners import run_invoke_enhance_prompt
 
-    hits = await db.search_wd14_vocab(vec, min_freq=0.005, max_freq=1.0, limit=body.tag_count * 2)
-    # Filter species/race tags from candidates before passing to LLM
-    candidate_names = [h["name"] for h in hits if not _is_species_tag(h["name"])]
-
-    system_prompt = (
-        "You are an expert Danbooru image-tag curator. "
-        "The user provides a scene description (possibly in Japanese). "
-        "You receive a candidate tag list sourced by semantic search. "
-        "Your job: select the most fitting tags, add obvious missing ones (e.g. 1girl), "
-        "and write a polished English visual description (1-2 sentences). "
-        "Output ONLY valid JSON, no markdown fences:\n"
-        '{"tags": "tag1, tag2, ...", "natural_language": "..."}'
+    job_id = spooler.submit(
+        JobLane.PROMPT,
+        "invoke.enhance_prompt",
+        run_invoke_enhance_prompt,
+        db=db,
+        ollama=request.app.state.ollama,
+        text=body.text,
+        tag_count=body.tag_count,
     )
-    user_msg = (
-        f"User description: {body.text}\n\n"
-        f"Candidate tags: {', '.join(candidate_names)}\n\n"
-        f"Select {body.tag_count} tags and write the natural_language description."
-    )
-    full_prompt = f"{system_prompt}\n\n{user_msg}"
 
     try:
-        raw = await ollama.generate_text(full_prompt, fmt="json")
-        import re as _re
-        raw = _re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=_re.MULTILINE)
-        raw = _re.sub(r"\s*```$", "", raw.strip(), flags=_re.MULTILINE)
-        import json as _json
-        result = _json.loads(raw)
-    except Exception as e:
-        logger.warning("enhance_prompt LLM parse failed: %s — returning raw hits", e)
-        result = {
-            "tags": ", ".join(candidate_names[:body.tag_count]),
-            "natural_language": body.text,
-        }
-
-    # Filter species tags from LLM output as a second line of defense
-    raw_tags = [t.strip() for t in result.get("tags", "").split(",")]
-    result["tags"] = ", ".join(t for t in raw_tags if t and not _is_species_tag(t))
-
-    return {
-        "tags":             result.get("tags", ""),
-        "natural_language": result.get("natural_language", ""),
-        "vocab_hits":       [h for h in hits[:body.tag_count] if not _is_species_tag(h["name"])],
-    }
+        return await asyncio.wait_for(spooler.wait(job_id), timeout=120.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Tag generation timed out")
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
 
 
 @router.get("/session/{session_id}")

@@ -271,8 +271,8 @@ def _classify_hint_tag(tag: str) -> str | None:
         return "pose"
     if tag in _ACCESSORY_EXACT:
         return "accessories"
-    if any(tag.endswith(s) or tag == s for s in _SCENE_SUFFIXES):
-        return "scene"
+    # scene カテゴリは character hints に含めない — slogan から axis decomposer が自由に生成すべきで
+    # ここで先入れすると特定キーワードが全スピリットに固着する
     return None
 
 
@@ -474,6 +474,89 @@ async def synthesize_slogan(
         logger.warning("synthesize_slogan failed: %s", e)
 
     return topic
+
+
+async def expand_pro_prompt(
+    prompt: str,
+    topic: str,
+    pro_sections: dict | None,
+    ollama,
+) -> dict:
+    """お題 × ユーザープロンプトからストーリー指令と追加タグを生成する。
+
+    ユーザーのタグはそのまま維持し、スピリットがそれを基にストーリーを
+    肉付けするための指針を作成する。
+
+    返り値:
+        slogan: 1-2 文: お題と pro_prompt が融合した視覚的テーマ
+        story_directive: 3-4 文: お題×pro_prompt が生み出すシーン・感情・ドラマ
+        supplement_tags: story を補完する追加 Danbooru タグのリスト (5-15 個)
+        scene_anchor: 50 words 以上・2-3 短文のシーン記述
+
+    LLM 失敗時は prompt をそのまま使うフォールバックを返す。
+    """
+    lines: list[str] = [
+        "You are a story director for AI anime image generation.",
+        "The user has already written their Danbooru tag list (the BASE TAGS).",
+        "Your task: given the BASE TAGS and a TOPIC, craft a narrative story directive",
+        "and suggest supplementary Danbooru tags that develop a story around the base.",
+        "",
+    ]
+
+    if topic:
+        lines += [
+            f"TOPIC (overarching theme — all output MUST be consistent with it): {topic}",
+            "",
+        ]
+
+    for sect, v in _section_pairs(pro_sections):
+        lines.append(f"{sect} hint: {v}")
+    if pro_sections:
+        lines.append("")
+
+    lines += [
+        f"BASE TAGS (user's Danbooru tag list — treat as given, do NOT alter): {prompt}",
+        "",
+        "RULES — violating any of these is an error:",
+        "1. TOPIC ANCHOR: All output must be consistent with the topic.",
+        "2. story_directive: Write 3-4 sentences of narrative context describing the scene,",
+        "   emotion, and dramatic moment that the BASE TAGS inhabit within the topic.",
+        "   This is prose for the spirit — NOT a tag list.",
+        "3. supplement_tags: 5-15 Danbooru tags that ADD to the story.",
+        "   Do NOT repeat tags already in BASE TAGS.",
+        "   Cover: scene/environment, atmosphere, lighting, mood effects, props from the story.",
+        "   NEVER use abstract adjectives — only concrete Danbooru tag names.",
+        "4. scene_anchor: at least 50 words, 2-3 concrete short sentences about the environment,",
+        "   lighting quality, and atmosphere of the story scene.",
+        "",
+        "Output ONLY valid JSON, no markdown fences:",
+        '{"slogan":"<1-2 sentence vivid thematic directive fusing topic and BASE TAGS>","story_directive":"<3-4 sentence narrative context for the spirit>","supplement_tags":["tag1","tag2",...],"scene_anchor":"<50+ words, 2-3 concrete short sentences>"}',
+    ]
+
+    _fallback = {
+        "slogan": topic or prompt,
+        "story_directive": "",
+        "supplement_tags": [],
+        "scene_anchor": "",
+    }
+
+    try:
+        raw = await ollama.generate_text("\n".join(lines), fmt="json")
+        raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+        raw = re.sub(r"\s*```$", "", raw.strip())
+        result = json.loads(raw)
+        if isinstance(result, dict) and result.get("slogan"):
+            logger.debug("expand_pro_prompt: slogan=%r", str(result["slogan"])[:80])
+            return {
+                "slogan":          str(result.get("slogan", topic or prompt)).strip() or (topic or prompt),
+                "story_directive": str(result.get("story_directive", "")).strip(),
+                "supplement_tags": [t for t in result.get("supplement_tags", []) if isinstance(t, str)],
+                "scene_anchor":    str(result.get("scene_anchor", "")).strip(),
+            }
+    except Exception as e:
+        logger.warning("expand_pro_prompt failed: %s", e)
+
+    return _fallback
 
 
 # ── Pro mode: axis_tag_hints の VLM 精査 (将来用) ────────────────────────────

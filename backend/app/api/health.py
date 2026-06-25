@@ -77,7 +77,7 @@ async def detailed_health(request: Request):
     )
 
     return {
-        "backend": {"ok": True, "version": "0.3.0"},
+        "backend": {"ok": True, "version": "0.3.1"},
         "qdrant": qdrant_res,
         "ollama": ollama_res,
         "comfyui": comfy_res,

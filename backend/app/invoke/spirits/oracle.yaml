@@ -42,12 +42,16 @@ system_prompt: |
   CORRECT: (hand_on_another's_cheek), (gripping), (breast_grab), (thigh_grab), (hair_grab),
   (wrist_grab), (lap_pillow), (nape), (collarbone), (outstretched_arm).
 
+  TAG COUNT REQUIREMENT: Your danbooru_tags MUST contain at least 50 comma-separated tags.
+  When BASE TAGS are provided, include them ALL verbatim first, then add your creative/
+  atmospheric/scene/lighting tags to reach 50+. Fewer than 50 tags is an error.
+
   Output ONLY valid JSON, no markdown fences, no explanation. Schema:
   {
     "spirit": "Vantage",
     "natural_language": "<3-5 sentence English Visual Script with inline danbooru tags in ASCII parentheses that would make the viewer stop. Open with the subject count and specific frozen moment or action. Press character details — hair, expression, clothing tags — into the viewer with full force. Let atmosphere and lighting tags carry your deepest reading of the slogan's truth. Example: 'A (1girl, solo) is (gripping, holding_sword) with both hands, knuckles white. Her (long_hair, brown_hair) falls over a (school_uniform) as she stands in (park, outdoor), bathed in (afternoon_sun, warm_light).' ALWAYS in English — goes directly to image generation.>",
     "natural_language_ja": "<同じシーンを日本語でビジュアルスクリプト形式で2〜4文。各視覚要素には danbooru タグを半角括弧でインライン埋め込みすること（例：「（wooden_bench）に座る（1girl）が（afternoon_sun）に照らされた（park, outdoor）を眺めている。」）。ユーザー表示専用であり、画像生成には使用されない。>",
-    "danbooru_tags": "<English-only comma-separated Danbooru tags>",
+    "danbooru_tags": "<English-only comma-separated Danbooru tags — minimum 50 tags: BASE TAGS verbatim + creative/scene/atmosphere additions>",
     "negative_supplement": "<English only — anything that would dilute the impact>",
     "internal_monologue": "<one short line in English, the spirit's inner voice>",
     "hair_tags": "<comma-separated hair-related tags extracted from danbooru_tags>",

@@ -269,6 +269,7 @@ def _build_completion_prompt(
     person_desc: str,
     character_hints: dict | None = None,
     pro_sections: dict | None = None,
+    pro_prompt_spec: dict | None = None,
 ) -> str:
     person_present = bool(person_desc)
     character_hints = character_hints or {}
@@ -295,6 +296,23 @@ def _build_completion_prompt(
             else:
                 lines.append(f"  {k}: {v}")
         lines.append("")
+
+    # Pro prompt spec: ユーザーが直接書いたプロンプトの展開仕様 — seed hints より高優先度
+    if pro_prompt_spec:
+        visual_spec = pro_prompt_spec.get("visual_spec", "")
+        action_tags = pro_prompt_spec.get("action_tags", [])
+        item_tags = pro_prompt_spec.get("item_tags", [])
+        if visual_spec:
+            lines.append(
+                "USER PROMPT REQUIREMENT — the user has specified these visual elements. "
+                "Reflect them in the axes. Do not omit, substitute, or abstract:"
+            )
+            lines.append(f"  {visual_spec}")
+            if action_tags:
+                lines.append(f"  Actions to reflect in the action axis: {', '.join(action_tags)}")
+            if item_tags:
+                lines.append(f"  Items/props to reflect in the accessories axis: {', '.join(item_tags)}")
+            lines.append("")
 
     _SECTION_TO_AXIS = {
         "character":  "character_detail",
@@ -352,11 +370,11 @@ def _build_completion_prompt(
             "",
         ]
         if character_hints:
-            lines.append("DANBOORU SUGGESTIONS — semantically relevant tags for this scene. Choose the most fitting:")
+            lines.append("DANBOORU VOCABULARY HINTS — loose suggestions for character attributes. Choose only those that naturally fit the creative directive:")
             for cat, tags in character_hints.items():
                 if tags:
                     lines.append(f"  {cat}: [{', '.join(tags)}]")
-            lines.append("Incorporate as many relevant suggestions as possible into character_detail, accessories, and danbooru_tags.")
+            lines.append("Use only hints that enhance the character naturally. Do NOT force-include hints that feel out of place.")
             lines.append("")
     else:
         # No person — enrich environment instead
@@ -371,11 +389,11 @@ def _build_completion_prompt(
             "",
         ]
         if character_hints:
-            lines.append("DANBOORU SCENE SUGGESTIONS — semantically relevant tags:")
+            lines.append("DANBOORU VOCABULARY HINTS — loose atmospheric suggestions:")
             for cat, tags in character_hints.items():
                 if tags:
                     lines.append(f"  {cat}: [{', '.join(tags)}]")
-            lines.append("Use these to enrich scene, mood, and style axes.")
+            lines.append("Use only those that serve the creative directive. Do NOT over-anchor the scene to specific keywords from these hints.")
             lines.append("")
 
     lines += [
@@ -442,6 +460,7 @@ async def decompose_axes(
     camera_angle: str = "",
     character_hints: dict | None = None,
     pro_sections: dict | None = None,
+    pro_prompt_spec: dict | None = None,
 ) -> dict:
     emoji_codes = emoji_codes or []
     mood_sliders = mood_sliders or {}
@@ -473,6 +492,7 @@ async def decompose_axes(
         effective_slogan, prefilled, empty_axes, person_desc,
         character_hints=character_hints,
         pro_sections=pro_sections,
+        pro_prompt_spec=pro_prompt_spec,
     )
 
     # Step 2c: Parse VLM output and apply prefilled values as overrides

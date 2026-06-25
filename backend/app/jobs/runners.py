@@ -1280,6 +1280,7 @@ async def run_invoke_axis_decompose(
     camera_angle: str = "",
     pro_topic: str = "",
     pro_sections: dict | None = None,
+    pro_prompt: str = "",
     session_manager,
 ) -> dict:
     """PROMPT lane. Decompose user intent into structured axes."""
@@ -1292,16 +1293,24 @@ async def run_invoke_axis_decompose(
     from ..invoke.axis_decomposer import _EMOJI_MEANINGS
 
     person_present = bool(person_gender or person_count)
+    pro_prompt_spec: dict | None = None
 
-    # Pro mode: お題テキストがあれば topic_tags + slogan を合成してから軸分解へ
-    if pro_topic:
+    if pro_prompt:
+        # pro_prompt 指定時: まずビジュアル仕様に展開し、そのスローガンを使用
+        from ..invoke.vocab_bank import expand_pro_prompt, get_topic_tags
+        pro_prompt_spec = await expand_pro_prompt(pro_prompt, pro_topic, pro_sections, ollama)
+        effective_slogan = pro_prompt_spec["slogan"]
+        # topic_tags は引き続き取得（テーマ整合の WD14 補完用）
+        anchor_text = pro_topic or pro_prompt
+        topic_tags = await get_topic_tags(db, ollama, anchor_text, pro_sections) if anchor_text else []
+    elif pro_topic:
+        # pro_topic のみ: 従来通り topic_tags + slogan を合成
         from ..invoke.vocab_bank import get_topic_tags, synthesize_slogan
         topic_tags = await get_topic_tags(db, ollama, pro_topic, pro_sections)
         effective_slogan = await synthesize_slogan(pro_topic, pro_sections, topic_tags, ollama)
     else:
         topic_tags = []
         effective_slogan = user_intent  # Light mode: determine_slogan が通常通り実行
-
 
     hint_query = effective_slogan or " ".join(
         _EMOJI_MEANINGS.get(e, e) for e in (emoji_codes or [])
@@ -1326,18 +1335,28 @@ async def run_invoke_axis_decompose(
         camera_angle=camera_angle,
         character_hints=character_hints,
         pro_sections=pro_sections or {},
+        pro_prompt_spec=pro_prompt_spec,
     )
     # スピリットが元の NL テキストを参照できるよう _user_intent を元お題に上書き
-    axes['_user_intent'] = pro_topic or user_intent
+    axes['_user_intent'] = pro_topic or pro_prompt or user_intent
     if topic_tags:
         axes['_topic_tags'] = topic_tags
+    if pro_prompt_spec:
+        axes['_story_directive']  = pro_prompt_spec.get("story_directive", "")
+        axes['_supplement_tags']  = pro_prompt_spec.get("supplement_tags", [])
+    if pro_prompt:
+        axes['_pro_prompt_raw'] = pro_prompt  # ベースタグを生値で保存（スピリットに verbatim 渡し）
 
     # Pro mode: スピリット別シーン多様性のため N バリアントを生成
-    if pro_topic:
+    if pro_topic or pro_prompt:
         from ..invoke.axis_decomposer import generate_scene_variants
         _session = session_manager.get_session(session_id)
         enabled_count = len(_session.enabled_spirits) if _session else 5
-        scene_variants = await generate_scene_variants(ollama, axes, pro_topic, n=enabled_count)
+        # scene_anchor があれば pro_topic に付加してより具体的なベースシーンを渡す
+        variant_topic = pro_topic or pro_prompt
+        if pro_prompt_spec and pro_prompt_spec.get("scene_anchor"):
+            variant_topic = f"{variant_topic}\n{pro_prompt_spec['scene_anchor']}"
+        scene_variants = await generate_scene_variants(ollama, axes, variant_topic, n=enabled_count)
         axes['_scene_variants'] = scene_variants
 
     reporter.update(1.0, "Axes ready")
@@ -1408,11 +1427,36 @@ async def run_invoke_spirit_compose(
     if axis_tag_hints:
         user_msg_parts.append(
             f"SUGGESTED DANBOORU TAGS (semantically close to the axes — "
-            f"incorporate as many as appropriate): [{', '.join(axis_tag_hints)}]"
+            f"use these as Danbooru vocabulary hints; include only those consistent with the scene axes, "
+            f"skip any that would over-anchor a specific location): [{', '.join(axis_tag_hints)}]"
+        )
+    # BASE TAGS: ユーザー指定の Danbooru タグ — verbatim で全て含める
+    if axes.get("_pro_prompt_raw"):
+        user_msg_parts.append(
+            "BASE TAGS (the user's own Danbooru tags — include ALL of these verbatim, unchanged, "
+            "as the foundation of your danbooru_tags output. Do NOT omit, rename, or substitute any): "
+            f"[{axes['_pro_prompt_raw']}]"
+        )
+    # STORY DIRECTIVE: お題 × pro_prompt から生成したナラティブ指令
+    if axes.get("_story_directive"):
+        user_msg_parts.append(
+            f"STORY DIRECTIVE (narrative context from topic × user prompt — add tags that develop "
+            f"this story ON TOP of the BASE TAGS): {axes['_story_directive']}"
+        )
+    # SUPPLEMENT TAGS: story 分析から提案された追加タグ
+    supplement = axes.get("_supplement_tags", [])
+    if supplement:
+        user_msg_parts.append(
+            f"SUGGESTED SUPPLEMENT TAGS (from story analysis — incorporate fitting ones): "
+            f"[{', '.join(supplement)}]"
         )
     user_msg_parts.append(
         "Your danbooru_tags MUST cover all axes: subject+action, scene+environment, "
         "mood+atmosphere, lighting, palette, and style."
+    )
+    user_msg_parts.append(
+        "MINIMUM TAG COUNT: danbooru_tags MUST contain at least 50 comma-separated tags "
+        "(BASE TAGS verbatim + story/atmosphere/action/scene additions)."
     )
     if locale == "ja":
         user_msg_parts.append(
@@ -1721,6 +1765,126 @@ async def run_invoke_alignment_score(
     reporter.update(1.0, f"score={score:.2f}" if score is not None else "scored")
     await session_manager.on_spirit_done(session_id, spirit_name, score)
     return {"score": score}
+
+
+async def run_invoke_respin(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    session_id: str,
+    spirit_name: str,
+    session_manager,
+) -> dict:
+    """PROMPT lane. Compute vocab/axis hints then compose a single spirit for respin."""
+    import asyncio as _asyncio
+    from ..invoke.vocab_bank import get_vocab_hints, get_axis_semantic_tags
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise ValueError(f"Session {session_id} not found or expired")
+
+    axis_tags: list[str] = []
+    for v in (session.axes or {}).values():
+        if isinstance(v, list):
+            axis_tags.extend(v)
+        elif isinstance(v, str) and v:
+            axis_tags.extend(v.replace(",", " ").split())
+
+    _vh, _ah = await _asyncio.gather(
+        get_vocab_hints(session.db, session.ollama, axis_tags),
+        get_axis_semantic_tags(session.db, session.ollama, session.axes or {}),
+        return_exceptions=True,
+    )
+    vocab_hints = _vh if not isinstance(_vh, Exception) else {"stranger": [], "lunatic": []}
+    axis_tag_hints = _ah if not isinstance(_ah, Exception) else []
+
+    spirit_vocab = vocab_hints if spirit_name in ("stranger", "lunatic") else {"stranger": [], "lunatic": []}
+
+    reporter.update(0.25, f"Hints ready — composing {spirit_name}")
+    cancel.raise_if_set()
+
+    return await run_invoke_spirit_compose(
+        reporter,
+        cancel,
+        session_id=session_id,
+        spirit_name=spirit_name,
+        axes=session.axes or {},
+        vocab_hints=spirit_vocab,
+        axis_tag_hints=axis_tag_hints,
+        locale=session.locale,
+        rebel_inversion=session.rebel_inversion if spirit_name == "rebel" else True,
+        session_manager=session_manager,
+    )
+
+
+async def run_invoke_enhance_prompt(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    text: str,
+    tag_count: int = 25,
+) -> dict:
+    """PROMPT lane. Embed text, find semantic WD14 tags, refine via LLM."""
+    import json as _json
+    import re as _re
+    from ..invoke.vocab_bank import _is_species_tag
+
+    reporter.update(0.1, "Embedding text...")
+    cancel.raise_if_set()
+
+    vec = await ollama.embed(text)
+
+    reporter.update(0.4, "Searching vocab...")
+    cancel.raise_if_set()
+
+    hits = await db.search_wd14_vocab(vec, min_freq=0.005, max_freq=1.0, limit=tag_count * 2)
+    candidate_names = [h["name"] for h in hits if not _is_species_tag(h["name"])]
+
+    reporter.update(0.6, "Refining tags...")
+    cancel.raise_if_set()
+
+    system_prompt = (
+        "You are an expert Danbooru image-tag curator. "
+        "The user provides a scene description (possibly in Japanese). "
+        "You receive a candidate tag list sourced by semantic search. "
+        "Your job: select the most fitting tags, add obvious missing ones (e.g. 1girl), "
+        "and write a polished English visual description (1-2 sentences). "
+        "Output ONLY valid JSON, no markdown fences:\n"
+        '{"tags": "tag1, tag2, ...", "natural_language": "..."}'
+    )
+    user_msg = (
+        f"User description: {text}\n\n"
+        f"Candidate tags: {', '.join(candidate_names)}\n\n"
+        f"Select {tag_count} tags and write the natural_language description."
+    )
+    full_prompt = f"{system_prompt}\n\n{user_msg}"
+
+    try:
+        raw = await ollama.generate_text(full_prompt, fmt="json")
+        raw = _re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=_re.MULTILINE)
+        raw = _re.sub(r"\s*```$", "", raw.strip(), flags=_re.MULTILINE)
+        result = _json.loads(raw)
+    except Exception as e:
+        logger.warning("enhance_prompt LLM parse failed: %s — returning raw hits", e)
+        result = {
+            "tags": ", ".join(candidate_names[:tag_count]),
+            "natural_language": text,
+        }
+
+    raw_tags = [t.strip() for t in result.get("tags", "").split(",")]
+    result["tags"] = ", ".join(t for t in raw_tags if t and not _is_species_tag(t))
+
+    reporter.update(1.0, "Done")
+    return {
+        "tags":             result.get("tags", ""),
+        "natural_language": result.get("natural_language", ""),
+        "vocab_hits":       [h for h in hits[:tag_count] if not _is_species_tag(h["name"])],
+    }
 
 
 async def run_invoke_daily_oracle(
