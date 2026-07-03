@@ -38,7 +38,7 @@
         </div>
       </div>
 
-      <!-- ── P&ID process flow diagram: Gen → Embed pipeline ── -->
+      <!-- ── P&ID process flow diagram: Gen → Embed → Eval pipeline ── -->
       <div class="cr-pid">
 
         <!-- JOBS IN source terminus -->
@@ -76,12 +76,31 @@
             <div class="cr-pid-reactor">
               <div class="cr-pid-reactor-track">
                 <div class="cr-pid-reactor-fill cr-pid-reactor-fill--gen"
-                  :style="{ transform: `scaleX(${genActiveJob ? (genActiveJob.progress ?? 0) / 100 : 0})` }" />
+                  :style="{ transform: `scaleX(${genActiveJob ? (genActiveJob.progress ?? 0) : 0})` }" />
               </div>
               <span class="cr-pid-reactor-label">
-                {{ genActiveJob ? `${genActiveJob.progress ?? 0}%` : '—' }}
+                {{ genActiveJob ? `${Math.round((genActiveJob.progress ?? 0) * 100)}%` : '—' }}
               </span>
             </div>
+          </div>
+          <div class="cr-pid-resbar">
+            <template v-if="genResource?.kind === 'local'">
+              <span class="cr-pid-resbar-name">{{ genResource.name }}</span>
+              <div class="cr-pid-resbar-gauge">
+                <div class="cr-pid-resbar-fill cr-pid-resbar-fill--gen"
+                  :style="{ width: `${Math.round(genResource.gpu_util_pct ?? 0)}%` }" />
+              </div>
+              <span class="cr-pid-resbar-val">GPU {{ Math.round(genResource.gpu_util_pct ?? 0) }}%</span>
+              <span class="cr-pid-resbar-vram" v-if="genResource.vram_total_gb">
+                {{ Math.round(genResource.vram_used_gb ?? 0) }}/{{ genResource.vram_total_gb }}G
+              </span>
+            </template>
+            <template v-else-if="genResource">
+              <span class="cr-lamp cr-lamp--xs" :class="genResource.reachable ? 'cr-lamp--nominal' : 'cr-lamp--fault'" />
+              <span class="cr-pid-resbar-name">{{ genResource.name }}</span>
+              <span class="cr-pid-resbar-latency" v-if="genResource.reachable && genResource.latency_ms != null">~{{ Math.round(genResource.latency_ms) }}ms</span>
+              <span class="cr-pid-resbar-fault" v-else-if="!genResource.reachable">UNREACHABLE</span>
+            </template>
           </div>
         </div>
 
@@ -114,19 +133,95 @@
             <div class="cr-pid-reactor">
               <div class="cr-pid-reactor-track">
                 <div class="cr-pid-reactor-fill cr-pid-reactor-fill--embed"
-                  :style="{ transform: `scaleX(${embedActiveJob ? (embedActiveJob.progress ?? 0) / 100 : 0})` }" />
+                  :style="{ transform: `scaleX(${embedActiveJob ? (embedActiveJob.progress ?? 0) : 0})` }" />
               </div>
               <span class="cr-pid-reactor-label">
-                {{ embedActiveJob ? `${embedActiveJob.progress ?? 0}%` : '—' }}
+                {{ embedActiveJob ? `${Math.round((embedActiveJob.progress ?? 0) * 100)}%` : '—' }}
               </span>
             </div>
           </div>
+          <div class="cr-pid-resbar">
+            <template v-if="embedResource?.kind === 'local'">
+              <span class="cr-pid-resbar-name">{{ embedResource.name }}</span>
+              <div class="cr-pid-resbar-gauge">
+                <div class="cr-pid-resbar-fill cr-pid-resbar-fill--embed"
+                  :style="{ width: `${Math.round(embedResource.gpu_util_pct ?? 0)}%` }" />
+              </div>
+              <span class="cr-pid-resbar-val">GPU {{ Math.round(embedResource.gpu_util_pct ?? 0) }}%</span>
+              <span class="cr-pid-resbar-vram" v-if="embedResource.vram_total_gb">
+                {{ Math.round(embedResource.vram_used_gb ?? 0) }}/{{ embedResource.vram_total_gb }}G
+              </span>
+            </template>
+            <template v-else-if="embedResource">
+              <span class="cr-lamp cr-lamp--xs" :class="embedResource.reachable ? 'cr-lamp--nominal' : 'cr-lamp--fault'" />
+              <span class="cr-pid-resbar-name">{{ embedResource.name }}</span>
+              <span class="cr-pid-resbar-latency" v-if="embedResource.reachable && embedResource.latency_ms != null">~{{ Math.round(embedResource.latency_ms) }}ms</span>
+              <span class="cr-pid-resbar-fault" v-else-if="!embedResource.reachable">UNREACHABLE</span>
+            </template>
+          </div>
         </div>
 
-        <!-- pipe: EMBED → VECTOR STORE -->
+        <!-- transfer pipe: EMBED → EVAL -->
+        <div class="cr-pid-pipe cr-pid-pipe--xfer">
+          <div class="cr-pid-pipe-line"
+            :class="(embedActiveJob || evalQueueDepth > 0) ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+          <span class="cr-pid-pipe-arrow">▶</span>
+        </div>
+
+        <!-- EVAL unit -->
+        <div class="cr-pid-unit cr-pid-unit--eval" :class="`cr-pid-state--${systemStatus.alignment || 'standby'}`">
+          <div class="cr-pid-unit-header">
+            <span class="cr-lamp" :class="`cr-lamp--${systemStatus.alignment || 'standby'}`" />
+            <span class="cr-pid-unit-name">ALIGNMENT</span>
+            <span class="cr-pid-unit-state">{{ (systemStatus.alignment || 'standby').toUpperCase() }}</span>
+            <button
+              class="cr-pid-valve-btn"
+              :class="{ 'is-paused': laneStates['eval']?.paused }"
+              @click="toggleLanePause('eval')"
+              :title="laneStates['eval']?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+            >{{ laneStates['eval']?.paused ? '▶' : '⏸' }}</button>
+          </div>
+          <div class="cr-pid-unit-body">
+            <div class="cr-pid-tank" :title="`${evalQueueDepth} queued`">
+              <div class="cr-pid-tank-fill cr-pid-tank-fill--eval"
+                :style="{ height: `${Math.min(100, evalQueueDepth * 20)}%` }" />
+              <span class="cr-pid-tank-label">{{ evalQueueDepth }}</span>
+            </div>
+            <div class="cr-pid-reactor">
+              <div class="cr-pid-reactor-track">
+                <div class="cr-pid-reactor-fill cr-pid-reactor-fill--eval"
+                  :style="{ transform: `scaleX(${evalActiveJob ? (evalActiveJob.progress ?? 0) : 0})` }" />
+              </div>
+              <span class="cr-pid-reactor-label">
+                {{ evalActiveJob ? `${Math.round((evalActiveJob.progress ?? 0) * 100)}%` : '—' }}
+              </span>
+            </div>
+          </div>
+          <div class="cr-pid-resbar">
+            <template v-if="evalResource?.kind === 'local'">
+              <span class="cr-pid-resbar-name">{{ evalResource.name }}</span>
+              <div class="cr-pid-resbar-gauge">
+                <div class="cr-pid-resbar-fill cr-pid-resbar-fill--eval"
+                  :style="{ width: `${Math.round(evalResource.cpu_pct ?? 0)}%` }" />
+              </div>
+              <span class="cr-pid-resbar-val">CPU {{ Math.round(evalResource.cpu_pct ?? 0) }}%</span>
+              <span class="cr-pid-resbar-vram" v-if="evalResource.ram_total_gb">
+                {{ Math.round(evalResource.ram_used_gb ?? 0) }}/{{ evalResource.ram_total_gb }}G
+              </span>
+            </template>
+            <template v-else-if="evalResource">
+              <span class="cr-lamp cr-lamp--xs" :class="evalResource.reachable ? 'cr-lamp--nominal' : 'cr-lamp--fault'" />
+              <span class="cr-pid-resbar-name">{{ evalResource.name }}</span>
+              <span class="cr-pid-resbar-latency" v-if="evalResource.reachable && evalResource.latency_ms != null">~{{ Math.round(evalResource.latency_ms) }}ms</span>
+              <span class="cr-pid-resbar-fault" v-else-if="!evalResource.reachable">UNREACHABLE</span>
+            </template>
+          </div>
+        </div>
+
+        <!-- pipe: EVAL → VECTOR STORE -->
         <div class="cr-pid-pipe">
           <div class="cr-pid-pipe-line"
-            :class="embedActiveJob ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+            :class="evalActiveJob ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
         </div>
 
         <!-- VECTOR STORE drain terminus -->
@@ -478,6 +573,11 @@ const {
   genQueueDepth,
   embedActiveJob,
   embedQueueDepth,
+  evalActiveJob,
+  evalQueueDepth,
+  genResource,
+  embedResource,
+  evalResource,
 } = props.controlRoom
 
 async function toggleLanePause(lane) {
@@ -1802,7 +1902,7 @@ function ratioClass(used, total, caution, fault) {
   display: flex;
   align-items: center;
   padding: 0 20px;
-  height: 92px;
+  height: 112px;
   background: #090910;
   border-bottom: 1px solid var(--cr-border);
   flex-shrink: 0;
@@ -1819,7 +1919,7 @@ function ratioClass(used, total, caution, fault) {
   justify-content: center;
   gap: 5px;
   width: 72px;
-  height: 64px;
+  height: 82px;
   border: 1px solid rgba(130, 80, 220, 0.22);
   border-radius: 2px;
   background: rgba(130, 80, 220, 0.05);
@@ -1850,7 +1950,7 @@ function ratioClass(used, total, caution, fault) {
 .cr-pid-pipe {
   flex: 1 0 16px;
   max-width: 56px;
-  height: 64px;
+  height: 82px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1892,7 +1992,7 @@ function ratioClass(used, total, caution, fault) {
   flex-direction: column;
   gap: 0;
   width: 178px;
-  height: 72px;
+  height: 90px;
   border: 1px solid rgba(130, 80, 220, 0.2);
   border-radius: 2px;
   background: #0c0c14;
@@ -2007,6 +2107,7 @@ function ratioClass(used, total, caution, fault) {
 
 .cr-pid-tank-fill--gen   { background: rgba(74, 124, 90, 0.65); }
 .cr-pid-tank-fill--embed { background: rgba(74, 110, 180, 0.65); }
+.cr-pid-tank-fill--eval  { background: rgba(160, 100, 200, 0.65); }
 
 .cr-pid-tank-label {
   font-size: 8px;
@@ -2048,6 +2149,7 @@ function ratioClass(used, total, caution, fault) {
 
 .cr-pid-reactor-fill--gen   { background: linear-gradient(90deg, var(--cr-nominal) 0%, #6aaa80 100%); }
 .cr-pid-reactor-fill--embed { background: linear-gradient(90deg, #3a5ea8 0%, #7090cc 100%); }
+.cr-pid-reactor-fill--eval  { background: linear-gradient(90deg, #7040a0 0%, #aa80cc 100%); }
 
 .cr-pid-reactor-label {
   font-size: 10px;
@@ -2056,4 +2158,92 @@ function ratioClass(used, total, caution, fault) {
   text-align: right;
   line-height: 1;
 }
+
+/* eval unit lane tint */
+.cr-pid-unit--eval  { border-color: rgba(160, 100, 200, 0.3); background: rgba(160, 100, 200, 0.05); }
+.cr-pid-unit--eval.cr-pid-state--active,
+.cr-pid-unit--eval.cr-pid-state--nominal { border-color: rgba(160, 100, 200, 0.55); background: rgba(160, 100, 200, 0.09); }
+.cr-pid-unit--eval.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--eval.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--eval.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+/* resource bar footer */
+.cr-pid-resbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px;
+  border-top: 1px solid rgba(130, 80, 220, 0.1);
+  background: rgba(0,0,0,0.18);
+  flex-shrink: 0;
+  min-height: 18px;
+  overflow: hidden;
+}
+
+.cr-pid-resbar-name {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  font-family: var(--cr-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70px;
+}
+
+.cr-pid-resbar-gauge {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 1px;
+  overflow: hidden;
+  min-width: 20px;
+}
+
+.cr-pid-resbar-fill {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.5s ease;
+}
+.cr-pid-resbar-fill--gen   { background: rgba(74, 124, 90, 0.75); }
+.cr-pid-resbar-fill--embed { background: rgba(74, 110, 180, 0.75); }
+.cr-pid-resbar-fill--eval  { background: rgba(160, 100, 200, 0.75); }
+
+.cr-pid-resbar-val {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  font-family: var(--cr-mono);
+  white-space: nowrap;
+}
+
+.cr-pid-resbar-vram {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  font-family: var(--cr-mono);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.cr-pid-resbar-latency {
+  font-size: 8px;
+  color: var(--cr-active);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-pid-resbar-fault {
+  font-size: 8px;
+  color: var(--cr-fault);
+  letter-spacing: 0.05em;
+  font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-lamp--xs { width: 6px !important; height: 6px !important; flex-shrink: 0; }
 </style>

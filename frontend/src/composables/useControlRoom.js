@@ -170,6 +170,38 @@ export function useControlRoom(jobsMap, resourcesRef) {
     return jobs.filter(j => j.id.startsWith('embed-') && j.state === 'queued').length
   })
 
+  const evalActiveJob = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.find(j =>
+      j.id.startsWith('eval-') &&
+      (j.state === 'running' || j.state === 'cancelling')
+    ) ?? null
+  })
+
+  const evalQueueDepth = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.filter(j => j.id.startsWith('eval-') && j.state === 'queued').length
+  })
+
+  // ── P&ID resource binding ─────────────────────────────────────────────────────
+  // GEN: prefers remote-comfyui (separate machine), falls back to local-gpu0
+  const genResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-comfyui') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
+  // EMBED: prefers remote-ollama, falls back to local-gpu0
+  const embedResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-ollama') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
+  // EVAL: same as embed (uses Ollama); local mode → show CPU stats
+  const evalResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-ollama') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
   // ── throughput (completions in last 1 minute) ────────────────────────────────
 
   const throughput = computed(() => {
@@ -303,5 +335,10 @@ export function useControlRoom(jobsMap, resourcesRef) {
     genQueueDepth,
     embedActiveJob,
     embedQueueDepth,
+    evalActiveJob,
+    evalQueueDepth,
+    genResource,
+    embedResource,
+    evalResource,
   }
 }
