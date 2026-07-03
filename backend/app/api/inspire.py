@@ -1625,45 +1625,57 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
 
 @router.post("/expand-theme")
 async def expand_theme(body: ExpandThemeRequest, request: Request):
-    """Use VLM to expand a free-form theme into 4-section structured Danbooru tags."""
+    """Submit a job to the PROMPT lane and return job_id. Stream via /expand-theme/{job_id}/stream."""
     if not body.theme.strip():
         raise HTTPException(422, "theme must not be empty")
-    ollama = request.app.state.ollama
-    db     = request.app.state.db
-    cfg    = await get_runtime_config(db)
+    from ..jobs.runners import run_expand_theme
+    spooler = request.app.state.spooler
+    db      = request.app.state.db
+    ollama  = request.app.state.ollama
 
-    # Load reference images for VLM context if provided
-    tile_bytes: bytes | None = None
-    image_bytes_list: list[bytes] = []
-    for sha256 in body.sha256s[:4]:
-        doc = await db.get(sha256)
-        if not doc:
-            continue
-        fp = Path(doc.get("path", ""))
-        if fp.exists():
-            image_bytes_list.append(fp.read_bytes())
-    if image_bytes_list:
-        tile_bytes = create_tile_image(image_bytes_list)
+    event_queue: asyncio.Queue = asyncio.Queue()
+    job_id = spooler.submit(
+        JobLane.PROMPT,
+        "expand_theme",
+        run_expand_theme,
+        meta={},
+        body_dict=body.model_dump(),
+        db=db,
+        ollama=ollama,
+        event_queue=event_queue,
+    )
+    request.app.state.inspire_event_queues[job_id] = event_queue
+    return {"job_id": job_id, "status": "queued"}
 
-    safe_theme = body.theme.replace("{", "{{").replace("}", "}}")
-    prompt = _EXPAND_THEME_PROMPT.format(theme=safe_theme)
 
-    try:
-        if tile_bytes:
-            raw = await ollama.generate_vlm(prompt, [tile_bytes], model=cfg["vlm_model"])
-        else:
-            raw = await ollama.generate_text(prompt, model=cfg["vlm_model"])
-        data = _parse_json_from_llm(raw) or {}
-    except Exception as exc:
-        logger.warning("expand_theme VLM failed: %s", exc)
-        raise HTTPException(502, "VLM call failed")
+@router.get("/expand-theme/{job_id}/stream")
+async def expand_theme_stream(job_id: str, request: Request):
+    q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
+    if q is None:
+        raise HTTPException(404, f"expand-theme job {job_id!r} not found")
 
-    return {
-        "character":  _normalize_section(data.get("character", "")),
-        "background": _normalize_section(data.get("background", "")),
-        "props":      _normalize_section(data.get("props", "")),
-        "action":     _normalize_section(data.get("action", "")),
-    }
+    async def generate():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    await request.app.state.spooler.cancel(job_id)
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
+                if item is None:
+                    break
+                yield item
+        finally:
+            request.app.state.inspire_event_queues.pop(job_id, None)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/inversion")

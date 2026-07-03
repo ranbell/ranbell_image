@@ -818,6 +818,60 @@ async def run_brainstorm(
         await event_queue.put(None)
 
 
+async def run_expand_theme(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    body_dict: dict,
+    db,
+    ollama,
+    event_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane runner — expands a theme into 4 section tags via VLM, puts done event on event_queue."""
+    from ..api.inspire import (
+        ExpandThemeRequest, _sse, _normalize_section,
+        _EXPAND_THEME_PROMPT, _parse_json_from_llm, create_tile_image,
+    )
+    from ..runtime_config import get_runtime_config
+
+    body = ExpandThemeRequest(**body_dict)
+    cfg = await get_runtime_config(db)
+    reporter.indeterminate()
+
+    image_bytes_list: list[bytes] = []
+    for sha256 in body.sha256s[:4]:
+        doc = await db.get(sha256)
+        if doc:
+            fp = Path(doc.get("path", ""))
+            if fp.exists():
+                image_bytes_list.append(fp.read_bytes())
+    tile_bytes = create_tile_image(image_bytes_list) if image_bytes_list else None
+
+    safe_theme = body.theme.replace("{", "{{").replace("}", "}}")
+    prompt = _EXPAND_THEME_PROMPT.format(theme=safe_theme)
+
+    try:
+        if tile_bytes:
+            raw = await ollama.generate_vlm(prompt, [tile_bytes], model=cfg["vlm_model"])
+        else:
+            raw = await ollama.generate_text(prompt, model=cfg["vlm_model"])
+        data = _parse_json_from_llm(raw) or {}
+    except Exception as exc:
+        await event_queue.put(_sse({"type": "error", "message": str(exc)}))
+        await event_queue.put(None)
+        raise
+
+    await event_queue.put(_sse({
+        "type": "done",
+        "character":  _normalize_section(data.get("character", "")),
+        "background": _normalize_section(data.get("background", "")),
+        "props":      _normalize_section(data.get("props", "")),
+        "action":     _normalize_section(data.get("action", "")),
+    }))
+    reporter.update(1.0, "Done")
+    await event_queue.put(None)
+
+
 async def _find_conflict_tags(
     instruction_en: str,
     source_tags: list[str],
@@ -1828,8 +1882,9 @@ async def run_invoke_enhance_prompt(
     ollama,
     text: str,
     tag_count: int = 25,
-) -> dict:
-    """PROMPT lane. Embed text, find semantic WD14 tags, refine via LLM."""
+    event_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane. Embed text, find semantic WD14 tags, refine via LLM. Puts done event on event_queue."""
     import json as _json
     import re as _re
     from ..invoke.vocab_bank import _is_species_tag
@@ -1879,12 +1934,15 @@ async def run_invoke_enhance_prompt(
     raw_tags = [t.strip() for t in result.get("tags", "").split(",")]
     result["tags"] = ", ".join(t for t in raw_tags if t and not _is_species_tag(t))
 
-    reporter.update(1.0, "Done")
-    return {
+    result_dict = {
+        "type":             "done",
         "tags":             result.get("tags", ""),
         "natural_language": result.get("natural_language", ""),
         "vocab_hits":       [h for h in hits[:tag_count] if not _is_species_tag(h["name"])],
     }
+    reporter.update(1.0, "Done")
+    await event_queue.put(f"data: {json.dumps(result_dict)}\n\n")
+    await event_queue.put(None)
 
 
 async def run_invoke_daily_oracle(

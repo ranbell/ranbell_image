@@ -4008,6 +4008,12 @@ onUnmounted(() => {
                   ✨ {{ $t('detail.refineFromThis') }}
                 </button>
                 <button
+                  v-if="selected.positive_prompt"
+                  @click="handleInvokeSendToRefine({ positive_prompt: selected.positive_prompt, negative_prompt: selected.negative_prompt || '', sha256: selected.sha256 })"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
+                  🎨 {{ $t('detail.generateFromPrompt') }}
+                </button>
+                <button
                   v-if="selected.embedding_status === 'done'"
                   @click="findSimilar(selected)"
                   :disabled="similarLoading || colorSimilarLoading"

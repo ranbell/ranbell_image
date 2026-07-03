@@ -328,9 +328,28 @@ async function enhancePrompt(token) {
     body: JSON.stringify({ text: invokeProTopic.value, tag_count: 25 }),
   })
   if (!r.ok) throw new Error(await r.text())
-  const data = await r.json()
-  if (data.tags) invokeProPrompt.value = data.tags
-  return data
+  const { job_id } = await r.json()
+  const streamR = await fetch(`/api/invoke/enhance-prompt/${job_id}/stream`)
+  const reader = streamR.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const parts = buf.split('\n\n')
+    buf = parts.pop()
+    for (const part of parts) {
+      const dataLine = part.split('\n').find(l => l.startsWith('data:'))
+      if (!dataLine) continue
+      const evt = JSON.parse(dataLine.slice(5))
+      if (evt.type === 'done') {
+        if (evt.tags) invokeProPrompt.value = evt.tags
+        return evt
+      }
+    }
+  }
+  return null
 }
 
 function toggleEmoji(emoji) {

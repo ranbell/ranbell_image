@@ -389,9 +389,7 @@ async def get_stats(request: Request):
 
 @router.post("/enhance-prompt")
 async def enhance_prompt(body: EnhancePromptRequest, request: Request):
-    """Embed user text, find semantically related Danbooru tags, refine into prompt + natural language."""
-    import asyncio
-
+    """Submit tag-generation job to PROMPT lane. Stream results via /enhance-prompt/{job_id}/stream."""
     db      = request.app.state.db
     spooler = request.app.state.spooler
 
@@ -405,6 +403,7 @@ async def enhance_prompt(body: EnhancePromptRequest, request: Request):
     from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_enhance_prompt
 
+    event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
         JobLane.PROMPT,
         "invoke.enhance_prompt",
@@ -413,14 +412,40 @@ async def enhance_prompt(body: EnhancePromptRequest, request: Request):
         ollama=request.app.state.ollama,
         text=body.text,
         tag_count=body.tag_count,
+        event_queue=event_queue,
     )
+    request.app.state.inspire_event_queues[job_id] = event_queue
+    return {"job_id": job_id, "status": "queued"}
 
-    try:
-        return await asyncio.wait_for(spooler.wait(job_id), timeout=120.0)
-    except asyncio.TimeoutError:
-        raise HTTPException(504, "Tag generation timed out")
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+
+@router.get("/enhance-prompt/{job_id}/stream")
+async def enhance_prompt_stream(job_id: str, request: Request):
+    q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
+    if q is None:
+        raise HTTPException(404, f"enhance-prompt job {job_id!r} not found")
+
+    async def generate():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    await request.app.state.spooler.cancel(job_id)
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
+                if item is None:
+                    break
+                yield item
+        finally:
+            request.app.state.inspire_event_queues.pop(job_id, None)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/session/{session_id}")

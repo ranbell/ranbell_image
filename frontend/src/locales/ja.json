@@ -337,6 +337,7 @@
     "rawMetaExpand": "▶ 展開する",
     "rawMetaJsonCopy": "JSON コピー",
     "refineFromThis": "この画像から錬成",
+    "generateFromPrompt": "同じプロンプトで生成",
     "download": "ダウンロード"
   },
   "refine": {

@@ -466,13 +466,30 @@ async function expandSections() {
       headers: { 'Content-Type': 'application/json', 'X-API-Token': getToken() },
       body: JSON.stringify({ theme: invokeProTopic.value, sha256s: [], lang: locale.value || 'ja' }),
     })
-    if (r.ok) {
-      const data = await r.json()
-      invokeProSections.value = {
-        character:  data.character  || invokeProSections.value.character,
-        background: data.background || invokeProSections.value.background,
-        props:      data.props      || invokeProSections.value.props,
-        action:     data.action     || invokeProSections.value.action,
+    if (!r.ok) throw new Error(await r.text())
+    const { job_id } = await r.json()
+    const streamR = await fetch(`/api/inspire/expand-theme/${job_id}/stream`)
+    const reader = streamR.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop()
+      for (const part of parts) {
+        const dataLine = part.split('\n').find(l => l.startsWith('data:'))
+        if (!dataLine) continue
+        const evt = JSON.parse(dataLine.slice(5))
+        if (evt.type === 'done') {
+          invokeProSections.value = {
+            character:  evt.character  || invokeProSections.value.character,
+            background: evt.background || invokeProSections.value.background,
+            props:      evt.props      || invokeProSections.value.props,
+            action:     evt.action     || invokeProSections.value.action,
+          }
+        }
       }
     }
   } catch {}

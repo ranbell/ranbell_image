@@ -337,6 +337,7 @@
     "rawMetaExpand": "▶ Expand",
     "rawMetaJsonCopy": "Copy JSON",
     "refineFromThis": "Refine from this image",
+    "generateFromPrompt": "Generate with same prompt",
     "download": "Download"
   },
   "refine": {
