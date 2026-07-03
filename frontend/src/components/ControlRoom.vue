@@ -38,6 +38,110 @@
         </div>
       </div>
 
+      <!-- ── P&ID process flow diagram: Gen → Embed pipeline ── -->
+      <div class="cr-pid">
+
+        <!-- JOBS IN source terminus -->
+        <div class="cr-pid-terminus">
+          <div class="cr-pid-terminus-label">JOBS IN</div>
+          <div class="cr-pid-terminus-count" :class="{ 'cr-pid-terminus-count--active': genQueueDepth > 0 }">
+            {{ genQueueDepth }}
+          </div>
+        </div>
+
+        <!-- pipe: IN → GEN -->
+        <div class="cr-pid-pipe">
+          <div class="cr-pid-pipe-line" :class="genQueueDepth > 0 ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+        </div>
+
+        <!-- GEN unit -->
+        <div class="cr-pid-unit cr-pid-unit--gen" :class="`cr-pid-state--${systemStatus.generation || 'standby'}`">
+          <div class="cr-pid-unit-header">
+            <span class="cr-lamp" :class="`cr-lamp--${systemStatus.generation || 'standby'}`" />
+            <span class="cr-pid-unit-name">GENERATION</span>
+            <span class="cr-pid-unit-state">{{ (systemStatus.generation || 'standby').toUpperCase() }}</span>
+            <button
+              class="cr-pid-valve-btn"
+              :class="{ 'is-paused': laneStates['gen']?.paused }"
+              @click="toggleLanePause('gen')"
+              :title="laneStates['gen']?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+            >{{ laneStates['gen']?.paused ? '▶' : '⏸' }}</button>
+          </div>
+          <div class="cr-pid-unit-body">
+            <div class="cr-pid-tank" :title="`${genQueueDepth} queued`">
+              <div class="cr-pid-tank-fill cr-pid-tank-fill--gen"
+                :style="{ height: `${Math.min(100, genQueueDepth * 20)}%` }" />
+              <span class="cr-pid-tank-label">{{ genQueueDepth }}</span>
+            </div>
+            <div class="cr-pid-reactor">
+              <div class="cr-pid-reactor-track">
+                <div class="cr-pid-reactor-fill cr-pid-reactor-fill--gen"
+                  :style="{ transform: `scaleX(${genActiveJob ? (genActiveJob.progress ?? 0) / 100 : 0})` }" />
+              </div>
+              <span class="cr-pid-reactor-label">
+                {{ genActiveJob ? `${genActiveJob.progress ?? 0}%` : '—' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- transfer pipe: GEN → EMBED -->
+        <div class="cr-pid-pipe cr-pid-pipe--xfer">
+          <div class="cr-pid-pipe-line"
+            :class="(genActiveJob || embedQueueDepth > 0) ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+          <span class="cr-pid-pipe-arrow">▶</span>
+        </div>
+
+        <!-- EMBED unit -->
+        <div class="cr-pid-unit cr-pid-unit--embed" :class="`cr-pid-state--${systemStatus.embedding || 'standby'}`">
+          <div class="cr-pid-unit-header">
+            <span class="cr-lamp" :class="`cr-lamp--${systemStatus.embedding || 'standby'}`" />
+            <span class="cr-pid-unit-name">EMBEDDING</span>
+            <span class="cr-pid-unit-state">{{ (systemStatus.embedding || 'standby').toUpperCase() }}</span>
+            <button
+              class="cr-pid-valve-btn"
+              :class="{ 'is-paused': laneStates['embed']?.paused }"
+              @click="toggleLanePause('embed')"
+              :title="laneStates['embed']?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+            >{{ laneStates['embed']?.paused ? '▶' : '⏸' }}</button>
+          </div>
+          <div class="cr-pid-unit-body">
+            <div class="cr-pid-tank" :title="`${embedQueueDepth} queued`">
+              <div class="cr-pid-tank-fill cr-pid-tank-fill--embed"
+                :style="{ height: `${Math.min(100, embedQueueDepth * 20)}%` }" />
+              <span class="cr-pid-tank-label">{{ embedQueueDepth }}</span>
+            </div>
+            <div class="cr-pid-reactor">
+              <div class="cr-pid-reactor-track">
+                <div class="cr-pid-reactor-fill cr-pid-reactor-fill--embed"
+                  :style="{ transform: `scaleX(${embedActiveJob ? (embedActiveJob.progress ?? 0) / 100 : 0})` }" />
+              </div>
+              <span class="cr-pid-reactor-label">
+                {{ embedActiveJob ? `${embedActiveJob.progress ?? 0}%` : '—' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- pipe: EMBED → VECTOR STORE -->
+        <div class="cr-pid-pipe">
+          <div class="cr-pid-pipe-line"
+            :class="embedActiveJob ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+        </div>
+
+        <!-- VECTOR STORE drain terminus -->
+        <div class="cr-pid-terminus">
+          <div class="cr-pid-terminus-label">VECTOR<br>STORE</div>
+          <span class="cr-lamp"
+            :class="systemStatus.vectorStore === 'fault'
+              ? 'cr-lamp--fault'
+              : systemStatus.vectorStore === 'nominal' || systemStatus.vectorStore === 'active'
+              ? 'cr-lamp--nominal'
+              : 'cr-lamp--standby'" />
+        </div>
+
+      </div>
+
       <div class="cr-body">
 
         <!-- ── left: resources ── -->
@@ -370,6 +474,10 @@ const {
   localResources,
   remoteResources,
   laneStates,
+  genActiveJob,
+  genQueueDepth,
+  embedActiveJob,
+  embedQueueDepth,
 } = props.controlRoom
 
 async function toggleLanePause(lane) {
@@ -1687,5 +1795,265 @@ function ratioClass(used, total, caution, fault) {
 .cr-resources-scroll::-webkit-scrollbar-thumb {
   background: var(--cr-border);
   border-radius: 2px;
+}
+
+/* ── P&ID process flow diagram ──────────────────────────────────────────────── */
+.cr-pid {
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  height: 92px;
+  background: #090910;
+  border-bottom: 1px solid var(--cr-border);
+  flex-shrink: 0;
+  overflow: hidden;
+  font-family: var(--cr-mono);
+  gap: 0;
+}
+
+/* terminus boxes (JOBS IN / VECTOR STORE) */
+.cr-pid-terminus {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 72px;
+  height: 64px;
+  border: 1px solid rgba(130, 80, 220, 0.22);
+  border-radius: 2px;
+  background: rgba(130, 80, 220, 0.05);
+  flex-shrink: 0;
+}
+
+.cr-pid-terminus-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--cr-text-label);
+  text-align: center;
+  line-height: 1.3;
+}
+
+.cr-pid-terminus-count {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 2ch;
+  text-align: center;
+  line-height: 1;
+}
+.cr-pid-terminus-count--active { color: var(--cr-active); }
+
+/* pipe segments */
+.cr-pid-pipe {
+  flex: 1 0 16px;
+  max-width: 56px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.cr-pid-pipe--xfer { max-width: 48px; }
+
+.cr-pid-pipe-line {
+  width: 100%;
+  height: 3px;
+  border-radius: 1px;
+  transition: background 0.5s ease, box-shadow 0.5s ease;
+}
+
+.cr-pid-pipe--flowing {
+  background: linear-gradient(90deg, var(--cr-nominal) 0%, #5ab070 100%);
+  box-shadow: 0 0 5px rgba(61, 107, 80, 0.5);
+}
+
+.cr-pid-pipe--idle { background: rgba(130, 80, 220, 0.12); }
+
+.cr-pid-pipe-arrow {
+  position: absolute;
+  font-size: 9px;
+  color: var(--cr-text-dim);
+  opacity: 0.55;
+  pointer-events: none;
+  line-height: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  margin-top: 1px;
+}
+
+/* processing unit boxes */
+.cr-pid-unit {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 178px;
+  height: 72px;
+  border: 1px solid rgba(130, 80, 220, 0.2);
+  border-radius: 2px;
+  background: #0c0c14;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: border-color 0.3s, background 0.3s;
+}
+
+/* lane base tints */
+.cr-pid-unit--gen   { border-color: rgba(74, 124, 90, 0.3); background: rgba(74, 124, 90, 0.05); }
+.cr-pid-unit--embed { border-color: rgba(74, 110, 180, 0.3); background: rgba(74, 110, 180, 0.05); }
+
+/* ISA-101 state intensity modifiers */
+.cr-pid-unit--gen.cr-pid-state--active,
+.cr-pid-unit--gen.cr-pid-state--nominal  { border-color: rgba(74, 124, 90, 0.55); background: rgba(74, 124, 90, 0.09); }
+.cr-pid-unit--gen.cr-pid-state--caution  { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--gen.cr-pid-state--fault    { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--gen.cr-pid-state--paused   { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+.cr-pid-unit--embed.cr-pid-state--active,
+.cr-pid-unit--embed.cr-pid-state--nominal { border-color: rgba(74, 110, 180, 0.55); background: rgba(74, 110, 180, 0.09); }
+.cr-pid-unit--embed.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--embed.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--embed.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+.cr-pid-unit-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px 4px;
+  background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid rgba(130, 80, 220, 0.1);
+  flex-shrink: 0;
+}
+
+.cr-pid-unit-header .cr-lamp { width: 8px; height: 8px; flex-shrink: 0; }
+
+.cr-pid-unit-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--cr-text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cr-pid-unit-state {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--cr-text-dim);
+  flex-shrink: 0;
+}
+
+.cr-pid-state--active  .cr-pid-unit-state { color: var(--cr-active); }
+.cr-pid-state--nominal .cr-pid-unit-state { color: #4a8060; }
+.cr-pid-state--caution .cr-pid-unit-state { color: var(--cr-caution); }
+.cr-pid-state--fault   .cr-pid-unit-state { color: var(--cr-fault); }
+.cr-pid-state--paused  .cr-pid-unit-state { color: #8877bb; }
+
+/* valve button */
+.cr-pid-valve-btn {
+  background: none;
+  border: 1px solid rgba(100, 100, 150, 0.3);
+  color: var(--cr-text-dim);
+  border-radius: 2px;
+  padding: 1px 5px;
+  font-size: 9px;
+  cursor: pointer;
+  line-height: 1.4;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cr-pid-valve-btn:hover { background: rgba(100, 100, 150, 0.15); color: var(--cr-text); }
+.cr-pid-valve-btn.is-paused { border-color: rgba(102, 85, 170, 0.55); color: #9988cc; }
+.cr-pid-valve-btn.is-paused:hover { background: rgba(102, 85, 170, 0.15); }
+
+/* unit body */
+.cr-pid-unit-body {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  padding: 6px 8px 5px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* vertical tank (queue depth level indicator) */
+.cr-pid-tank {
+  width: 14px;
+  flex-shrink: 0;
+  border: 1px solid rgba(130, 80, 220, 0.15);
+  border-radius: 1px;
+  background: rgba(0,0,0,0.35);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.cr-pid-tank-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  border-radius: 1px;
+  transition: height 0.5s ease;
+}
+
+.cr-pid-tank-fill--gen   { background: rgba(74, 124, 90, 0.65); }
+.cr-pid-tank-fill--embed { background: rgba(74, 110, 180, 0.65); }
+
+.cr-pid-tank-label {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+  padding-bottom: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* horizontal reactor bar (active job progress) */
+.cr-pid-reactor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cr-pid-reactor-track {
+  height: 9px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(130, 80, 220, 0.12);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.cr-pid-reactor-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 1px;
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
+  transition: transform 0.4s ease;
+}
+
+.cr-pid-reactor-fill--gen   { background: linear-gradient(90deg, var(--cr-nominal) 0%, #6aaa80 100%); }
+.cr-pid-reactor-fill--embed { background: linear-gradient(90deg, #3a5ea8 0%, #7090cc 100%); }
+
+.cr-pid-reactor-label {
+  font-size: 10px;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  line-height: 1;
 }
 </style>

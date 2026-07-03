@@ -142,6 +142,34 @@ export function useControlRoom(jobsMap, resourcesRef) {
       })
   })
 
+  // ── P&ID lane observables ─────────────────────────────────────────────────────
+
+  const genActiveJob = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.find(j =>
+      j.id.startsWith('gen-') &&
+      (j.state === 'running' || j.state === 'cancelling')
+    ) ?? null
+  })
+
+  const genQueueDepth = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.filter(j => j.id.startsWith('gen-') && j.state === 'queued').length
+  })
+
+  const embedActiveJob = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.find(j =>
+      j.id.startsWith('embed-') &&
+      (j.state === 'running' || j.state === 'cancelling')
+    ) ?? null
+  })
+
+  const embedQueueDepth = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.filter(j => j.id.startsWith('embed-') && j.state === 'queued').length
+  })
+
   // ── throughput (completions in last 1 minute) ────────────────────────────────
 
   const throughput = computed(() => {
@@ -271,5 +299,9 @@ export function useControlRoom(jobsMap, resourcesRef) {
     remoteResources,
     laneStates,
     ingestEvent,
+    genActiveJob,
+    genQueueDepth,
+    embedActiveJob,
+    embedQueueDepth,
   }
 }
