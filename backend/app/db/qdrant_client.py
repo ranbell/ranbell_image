@@ -632,7 +632,7 @@ class QdrantDBClient:
 
         return docs, next_cursor
 
-    async def scroll_all(
+    def _make_filter(
         self,
         *,
         tags_include: list[str] | None = None,
@@ -643,8 +643,8 @@ class QdrantDBClient:
         star_min: int | None = None,
         category: str | None = None,
         sha256_ids: set[str] | None = None,
-    ) -> list[dict]:
-        """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions."""
+    ) -> qm.Filter | None:
+        """Build a Qdrant Filter from common image query parameters."""
         must: list = []
         must_not: list = []
         if tags_include:
@@ -663,16 +663,30 @@ class QdrantDBClient:
             must.append(qm.FieldCondition(key="star_rating", range=qm.Range(gte=star_min)))
         if category in ("AI", "NR"):
             must.append(qm.FieldCondition(key="batch_category", match=qm.MatchValue(value=category)))
-
         if sha256_ids is not None:
-            ids_filter = qm.HasIdCondition(has_id=[sha256_to_point_id(s) for s in sha256_ids])
-            scroll_filter = qm.Filter(
-                must=must + [ids_filter],
-                must_not=must_not or None,
-            )
-        else:
-            scroll_filter = qm.Filter(must=must, must_not=must_not or None) if (must or must_not) else None
+            must.append(qm.HasIdCondition(has_id=[sha256_to_point_id(s) for s in sha256_ids]))
+        if not must and not must_not:
+            return None
+        return qm.Filter(must=must, must_not=must_not or None)
 
+    async def scroll_all(
+        self,
+        *,
+        tags_include: list[str] | None = None,
+        tags_exclude: list[str] | None = None,
+        tag_logic: str = "and",
+        keyword: str | None = None,
+        models: list[str] | None = None,
+        star_min: int | None = None,
+        category: str | None = None,
+        sha256_ids: set[str] | None = None,
+    ) -> list[dict]:
+        """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions."""
+        scroll_filter = self._make_filter(
+            tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
+            keyword=keyword, models=models, star_min=star_min,
+            category=category, sha256_ids=sha256_ids,
+        )
         all_docs: list[dict] = []
         offset = None
         while True:
@@ -689,6 +703,83 @@ class QdrantDBClient:
                 break
             offset = next_offset
         return all_docs
+
+    async def scroll_filtered_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        sort: str = "newest",
+        tags_include: list[str] | None = None,
+        tags_exclude: list[str] | None = None,
+        tag_logic: str = "and",
+        keyword: str | None = None,
+        models: list[str] | None = None,
+        star_min: int | None = None,
+        category: str | None = None,
+        sha256_ids: set[str] | None = None,
+    ) -> tuple[list[dict], str | None, int]:
+        """Fetch one page of filtered results using order_by cursor pagination.
+
+        Returns (docs, next_cursor, approximate_total).
+        Uses the same cursor format as scroll_images() for consistency.
+        align_desc is not supported here — caller must handle that case separately.
+        """
+        sort_def = _SORT_ORDER_BY.get(sort, _SORT_ORDER_BY["newest"])
+        scroll_filter = self._make_filter(
+            tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
+            keyword=keyword, models=models, star_min=star_min,
+            category=category, sha256_ids=sha256_ids,
+        )
+
+        # Approximate total (avoids full collection scan)
+        count_result = await self._qc.count(
+            collection_name=IMAGES_COLLECTION,
+            count_filter=scroll_filter,
+            exact=False,
+        )
+        total = count_result.count
+
+        # Decode cursor
+        cursor_start = None
+        last_id = None
+        if cursor:
+            try:
+                c = json.loads(base64.b64decode(cursor.encode()))
+                cursor_start = c.get("start")
+                last_id = c.get("last_id")
+            except Exception:
+                pass
+
+        order = qm.OrderBy(
+            key=sort_def.key,
+            direction=sort_def.direction,
+            start_from=cursor_start,
+        )
+        fetch_limit = limit + 2 if last_id else limit + 1
+        points, _ = await self._qc.scroll(
+            collection_name=IMAGES_COLLECTION,
+            scroll_filter=scroll_filter,
+            order_by=order,
+            limit=fetch_limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        docs = [p.payload for p in points]
+        if last_id:
+            docs = [d for d in docs if d.get("sha256") != last_id]
+        has_more = len(docs) >= limit
+        docs = docs[:limit]
+
+        next_cursor = None
+        if has_more and docs:
+            last = docs[-1]
+            next_cursor = base64.b64encode(json.dumps({
+                "start": last.get(sort_def.key),
+                "last_id": last.get("sha256"),
+            }).encode()).decode()
+
+        return docs, next_cursor, total
 
     async def scroll_model_facets(self) -> list[dict]:
         """Aggregate unique model names (from params.Model) with image counts."""
@@ -1039,6 +1130,16 @@ class QdrantDBClient:
                 qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="done"))
             ]),
             exact=True,
+        )
+        return result.count
+
+    async def count_pending(self) -> int:
+        result = await self._qc.count(
+            collection_name=IMAGES_COLLECTION,
+            count_filter=qm.Filter(must=[
+                qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="pending"))
+            ]),
+            exact=False,
         )
         return result.count
 

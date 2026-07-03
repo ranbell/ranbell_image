@@ -5,11 +5,21 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from ..db.qdrant_client import QdrantDBClient
+from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION as _IMAGES_COLLECTION
 from ..runtime_config import get_runtime_config
 from .ollama import OllamaClient
 from . import wd14 as wd14_mod
 from .color_extractor import extract_color_palette
+from qdrant_client import models as _qm
+
+_PENDING_FILTER = _qm.Filter(must=[
+    _qm.FieldCondition(key="embedding_status", match=_qm.MatchValue(value="pending"))
+])
+
+
+async def _run_with_sem(sem: asyncio.Semaphore, fn, *args) -> None:
+    async with sem:
+        await fn(*args)
 
 logger = logging.getLogger(__name__)
 
@@ -84,33 +94,69 @@ async def run_ai_pipeline(
         embed_model = cfg["embed_model"] or None
         concurrency = int(cfg.get("pipeline_concurrency", 4))
 
+        async def _process_one(doc: dict) -> None:
+            if pipeline_state.cancelled:
+                return
+            if pause_checkpoint:
+                await pause_checkpoint()
+            try:
+                await _process_doc(doc, db, ollama, threshold, embed_model, wd14_model_dir)
+                pipeline_state.processed += 1
+                pipeline_state.update_eta()
+            except Exception as e:
+                pipeline_state.errors += 1
+                pipeline_state.last_error = f"{type(e).__name__}: {e}"
+                logger.exception("Pipeline error for %s", doc.get("sha256"))
+
         if sha256s:
-            docs = [d for d in [await db.get(s) for s in sha256s] if d]
+            docs = await db.get_by_sha256s(sha256s)
+            pipeline_state.total = len(docs)
+            logger.info("AI pipeline [selected]: %d docs, concurrency=%d", len(docs), concurrency)
+            sem = asyncio.Semaphore(concurrency)
+            await asyncio.gather(*(
+                _run_with_sem(sem, _process_one, doc) for doc in docs
+            ))
         else:
-            docs = await _fetch_pending(db, cfg["pipeline_batch_size"])
+            # producer/consumer: stream pending docs through a bounded queue
+            # to avoid loading all pending docs into memory at once
+            pipeline_state.total = await db.count_pending()
+            logger.info(
+                "AI pipeline [all_pending]: ~%d docs, concurrency=%d",
+                pipeline_state.total, concurrency,
+            )
 
-        pipeline_state.total = len(docs)
-        logger.info("AI pipeline [%s]: %d docs, concurrency=%d", mode, len(docs), concurrency)
+            queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=concurrency * 4)
 
-        sem = asyncio.Semaphore(concurrency)
+            async def _producer() -> None:
+                offset = None
+                while True:
+                    points, next_offset = await db._qc.scroll(
+                        collection_name=_IMAGES_COLLECTION,
+                        scroll_filter=_PENDING_FILTER,
+                        limit=min(200, concurrency * 8),
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    for p in points:
+                        await queue.put(p.payload)
+                    if next_offset is None:
+                        break
+                    offset = next_offset
+                for _ in range(concurrency):
+                    await queue.put(None)
 
-        async def process_one(doc: dict) -> None:
-            async with sem:
-                if pipeline_state.cancelled:
-                    return
-                if pause_checkpoint:
-                    await pause_checkpoint()
-                try:
-                    await _process_doc(doc, db, ollama, threshold, embed_model, wd14_model_dir)
-                    pipeline_state.processed += 1
-                    pipeline_state.update_eta()
-                except Exception as e:
-                    err_msg = f"{type(e).__name__}: {e}"
-                    logger.exception("Pipeline error for %s", doc.get("sha256"))
-                    pipeline_state.errors += 1
-                    pipeline_state.last_error = err_msg
+            async def _worker() -> None:
+                while True:
+                    doc = await queue.get()
+                    if doc is None:
+                        break
+                    await _process_one(doc)
 
-        await asyncio.gather(*(process_one(doc) for doc in docs))
+            await asyncio.gather(
+                _producer(),
+                *[_worker() for _ in range(concurrency)],
+            )
 
     finally:
         pipeline_state.finish()
@@ -121,29 +167,6 @@ async def run_ai_pipeline(
             pipeline_state.cancelled,
         )
 
-
-async def _fetch_pending(db: QdrantDBClient, limit: int) -> list[dict]:
-    from ..db.qdrant_client import IMAGES_COLLECTION
-    from qdrant_client import models as qm
-
-    docs: list[dict] = []
-    offset = None
-    while len(docs) < limit:
-        points, next_offset = await db._qc.scroll(
-            collection_name=IMAGES_COLLECTION,
-            scroll_filter=qm.Filter(must=[
-                qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="pending"))
-            ]),
-            limit=min(1000, limit - len(docs)),
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
-        )
-        docs.extend(p.payload for p in points)
-        if next_offset is None:
-            break
-        offset = next_offset
-    return docs
 
 
 async def _process_doc(

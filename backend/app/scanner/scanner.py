@@ -202,7 +202,7 @@ async def run_heal(db: QdrantDBClient) -> None:
         )
 
 
-async def run_scan(db: QdrantDBClient) -> None:
+async def run_scan(db: QdrantDBClient, concurrency: int = 8) -> None:
     """Full scan: processes every file. Use for first-time setup or corruption recovery."""
     if scan_state.running:
         return
@@ -213,17 +213,21 @@ async def run_scan(db: QdrantDBClient) -> None:
         loop = asyncio.get_event_loop()
         files = await loop.run_in_executor(None, _collect_all_files)
         scan_state.total = len(files)
-        logger.info("Full scan: %d files", len(files))
+        logger.info("Full scan: %d files, concurrency=%d", len(files), concurrency)
 
-        for path in files:
-            scan_state.current_file = str(path)
-            try:
-                await _process_image(path, db)
-                scan_state.processed += 1
-                scan_state.added += 1
-            except Exception:
-                logger.exception("Failed to process %s", path)
-                scan_state.errors += 1
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _bounded(path: Path) -> None:
+            async with sem:
+                try:
+                    await _process_image(path, db)
+                    scan_state.processed += 1
+                    scan_state.added += 1
+                except Exception:
+                    logger.exception("Failed to process %s", path)
+                    scan_state.errors += 1
+
+        await asyncio.gather(*(_bounded(p) for p in files))
 
     finally:
         scan_state.finish()

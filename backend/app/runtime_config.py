@@ -53,6 +53,7 @@ _defaults = {
     # Processing parallelism
     "alignment_concurrency":    1,
     "pipeline_auto_continue":   True,
+    "scan_concurrency":         8,
 }
 
 _cache: RuntimeConfigCache | None = None

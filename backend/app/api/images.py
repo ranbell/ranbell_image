@@ -256,49 +256,6 @@ async def list_images(
                 "search_mode": False, "sort": sort}
 
     if is_filter:
-        available_tags: list[str] = []
-
-        if inc_list and model_list:
-            # 2-phase: parallel Qdrant calls to get model-only set (for tag universe) + full filtered set
-            model_only_task = db.scroll_all(
-                models=model_list, keyword=keyword, star_min=star_min,
-                category=category, sha256_ids=align_sha256s,
-            )
-            full_task = db.scroll_all(
-                tags_include=inc_list, tags_exclude=exc_list or None, tag_logic=tag_logic,
-                models=model_list, keyword=keyword, star_min=star_min,
-                category=category, sha256_ids=align_sha256s,
-            )
-            model_docs, docs = await asyncio.gather(model_only_task, full_task)
-            tag_universe: set[str] = set()
-            for d in model_docs:
-                tag_universe.update(d.get("wd14_tags") or [])
-            available_tags = sorted(tag_universe)
-        else:
-            docs = await db.scroll_all(
-                tags_include=inc_list or None,
-                tags_exclude=exc_list or None,
-                tag_logic=tag_logic,
-                models=model_list or None,
-                keyword=keyword,
-                star_min=star_min,
-                category=category,
-                sha256_ids=align_sha256s,
-            )
-
-        docs = sort_docs(docs, sort)
-
-        total = len(docs)
-        offset_idx = 0
-        if cursor:
-            try:
-                offset_idx = int(_b64.b64decode(cursor.encode()).decode())
-            except Exception:
-                offset_idx = 0
-        page = docs[offset_idx:offset_idx + limit]
-        has_more = offset_idx + limit < total
-        next_cur = _b64.b64encode(str(offset_idx + limit).encode()).decode() if has_more else None
-
         active_filters = {
             "tags_include": inc_list,
             "tags_exclude": exc_list,
@@ -307,6 +264,41 @@ async def list_images(
             "models": model_list,
             "sort": sort,
         }
+
+        # Use order_by cursor pagination (one page at a time, no full-load).
+        # align_desc is handled above before this block and always returns early.
+        filter_kwargs = dict(
+            tags_include=inc_list or None,
+            tags_exclude=exc_list or None,
+            tag_logic=tag_logic,
+            models=model_list or None,
+            keyword=keyword,
+            star_min=star_min,
+            category=category,
+            sha256_ids=align_sha256s,
+        )
+
+        available_tags: list[str] = []
+        if inc_list and model_list:
+            # Fetch tag universe for the model scope in parallel with the page fetch
+            model_scope_task = db.scroll_all(
+                models=model_list, keyword=keyword,
+                star_min=star_min, category=category, sha256_ids=align_sha256s,
+            )
+            page_task = db.scroll_filtered_page(
+                limit=limit, cursor=cursor or None, sort=sort, **filter_kwargs
+            )
+            model_docs, (page, next_cur, total) = await asyncio.gather(
+                model_scope_task, page_task
+            )
+            tag_universe: set[str] = set()
+            for d in model_docs:
+                tag_universe.update(d.get("wd14_tags") or [])
+            available_tags = sorted(tag_universe)
+        else:
+            page, next_cur, total = await db.scroll_filtered_page(
+                limit=limit, cursor=cursor or None, sort=sort, **filter_kwargs
+            )
 
         return {
             "total": total,

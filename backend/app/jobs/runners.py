@@ -117,8 +117,10 @@ async def run_scan_full(
     spooler=None,
 ) -> None:
     from ..scanner.scanner import run_scan, scan_state
+    from ..runtime_config import get_runtime_config
+    cfg = await get_runtime_config(db)
     reporter.indeterminate()
-    task = asyncio.create_task(run_scan(db))
+    task = asyncio.create_task(run_scan(db, concurrency=int(cfg.get("scan_concurrency", 8))))
     cancel.on_cancel(task.cancel)
 
     while not task.done():
@@ -420,23 +422,8 @@ async def run_pipeline(
             else:
                 logger.info("Auto-alignment skipped: EVALUATION lane is paused")
 
-    # auto-continue: if the batch was full, re-submit for the remaining items
-    if spooler is not None and not cancel._event.is_set():
-        from ..runtime_config import get_runtime_config
-        from ..spooler.models import JobLane
-        cfg2 = await get_runtime_config(db)
-        if cfg2.get("pipeline_auto_continue", True):
-            batch_size = int(cfg2.get("pipeline_batch_size", 5000))
-            if pipeline_state.total >= batch_size and spooler.is_lane_active(JobLane.EMBEDDING):
-                spooler.submit(
-                    JobLane.EMBEDDING,
-                    "ai_pipeline_continue",
-                    run_pipeline,
-                    db=db,
-                    ollama=ollama,
-                    spooler=spooler,
-                )
-                logger.info("Auto-continue pipeline submitted (batch_size=%d reached)", batch_size)
+    # auto-continue: pipeline now processes all pending items in one run via Queue,
+    # so re-submission is no longer needed.
 
     return result
 
