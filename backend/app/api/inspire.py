@@ -568,7 +568,7 @@ If criminal issues found, replace those tags with safe alternatives.
 _EXPAND_THEME_PROMPT = """\
 # ROLE
 You are a Danbooru tag expert. Given a theme/topic, generate specific danbooru-compatible tags
-for each of four categories. Think creatively and artistically — avoid obvious/generic tags.
+for each of six categories. Think creatively and artistically — avoid obvious/generic tags.
 Prefer visually striking, specific, non-obvious choices that create a vivid scene.
 
 # THEME
@@ -580,6 +580,8 @@ Prefer visually striking, specific, non-obvious choices that create a vivid scen
 - BACKGROUND: location, time of day, weather, architectural/natural elements (5-10 tags)
 - PROPS & ACCESSORIES: held objects, worn accessories, jewelry, nearby props (4-8 tags)
 - ACTION: pose, gesture, facial expression, body language (3-6 tags)
+- MOOD: lighting style, color palette, emotional atmosphere (e.g. soft_lighting, warm_color_palette, melancholic, dramatic_lighting) (3-6 tags)
+- CAMERA: shot framing and angle (e.g. close-up, wide_shot, from_above, dutch_angle, full_body) (2-4 tags)
 - Do NOT include quality meta-tags (masterpiece, best_quality, highres, etc.)
 - Do NOT repeat tags across sections
 
@@ -588,7 +590,9 @@ Prefer visually striking, specific, non-obvious choices that create a vivid scen
   "character": "tag1, tag2, ...",
   "background": "tag1, tag2, ...",
   "props": "tag1, tag2, ...",
-  "action": "tag1, tag2, ..."
+  "action": "tag1, tag2, ...",
+  "mood": "tag1, tag2, ...",
+  "camera": "tag1, tag2, ..."
 }}"""
 
 

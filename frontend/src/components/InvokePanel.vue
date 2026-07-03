@@ -499,6 +499,8 @@ async function expandSections() {
             background: evt.background || invokeProSections.value.background,
             props:      evt.props      || invokeProSections.value.props,
             action:     evt.action     || invokeProSections.value.action,
+            mood:       evt.mood       || invokeProSections.value.mood,
+            camera:     evt.camera     || invokeProSections.value.camera,
           }
         }
       }

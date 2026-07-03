@@ -75,7 +75,7 @@ const invokeWorkflow    = ref('')
 const invokeSeeds       = ref({})
 
 // Spirit ON/OFF
-const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true, sorrow: false })
+const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true, sorrow: true })
 // Rebel inversion mode: true = invert one axis (may produce dramatic/broken images), false = Counter perspective without inversion
 const invokeRebelInversion = ref(true)
 

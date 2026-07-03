@@ -867,6 +867,8 @@ async def run_expand_theme(
         "background": _normalize_section(data.get("background", "")),
         "props":      _normalize_section(data.get("props", "")),
         "action":     _normalize_section(data.get("action", "")),
+        "mood":       _normalize_section(data.get("mood", "")),
+        "camera":     _normalize_section(data.get("camera", "")),
     }))
     reporter.update(1.0, "Done")
     await event_queue.put(None)
