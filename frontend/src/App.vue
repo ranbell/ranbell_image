@@ -3134,12 +3134,23 @@ onUnmounted(() => {
                     class="bg-cyan-950/60 border border-cyan-600/50 rounded-xl p-3.5 space-y-2.5">
                     <div class="flex items-start justify-between gap-2">
                       <div class="flex items-center gap-2 min-w-0">
-                        <span class="text-base shrink-0">🪞</span>
+                        <span class="text-base shrink-0">{{
+                          refineDirectPromptSource.startsWith('inversion') ? '🪞'
+                          : refineDirectPromptSource === 'history' ? '📜'
+                          : refineDirectPromptSource === 'invoke'  ? '✨'
+                          : refineDirectPromptSource === 'detail'  ? '🎨'
+                          : '📥'
+                        }}</span>
                         <div class="min-w-0">
-                          <p class="text-xs font-semibold text-cyan-300">{{ $t('refine.directFromInversion') }}</p>
+                          <p class="text-xs font-semibold text-cyan-300">{{
+                            refineDirectPromptSource.startsWith('inversion') ? $t('refine.directFromInversion')
+                            : refineDirectPromptSource === 'history' ? $t('refine.directFromHistory')
+                            : refineDirectPromptSource === 'invoke'  ? $t('refine.directFromInvoke')
+                            : refineDirectPromptSource === 'detail'  ? $t('refine.directFromDetail')
+                            : $t('refine.directFromDirect')
+                          }}</p>
                           <p class="text-[10px] text-cyan-600 mt-0.5">
-                            {{ refineDirectPromptSource === 'inversion-tags' ? $t('refine.directFormatTags') : $t('refine.directFormatProse') }}
-                            {{ $t('refine.directBypassNote') }}
+                            <template v-if="refineDirectPromptSource.startsWith('inversion')">{{ refineDirectPromptSource === 'inversion-tags' ? $t('refine.directFormatTags') : $t('refine.directFormatProse') }} </template>{{ $t('refine.directBypassNote') }}
                           </p>
                         </div>
                       </div>
@@ -4009,7 +4020,7 @@ onUnmounted(() => {
                 </button>
                 <button
                   v-if="selected.positive_prompt"
-                  @click="handleInvokeSendToRefine({ positive_prompt: selected.positive_prompt, negative_prompt: selected.negative_prompt || '', sha256: selected.sha256 })"
+                  @click="handleSendToRefineDirect({ shas: [selected.sha256], directPrompt: selected.positive_prompt, directNegativePrompt: selected.negative_prompt || '', source: 'detail' })"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
                   🎨 {{ $t('detail.generateFromPrompt') }}
                 </button>
