@@ -1336,6 +1336,7 @@ async def run_invoke_axis_decompose(
     pro_sections: dict | None = None,
     pro_prompt: str = "",
     session_manager,
+    resonance_mode: bool = False,
 ) -> dict:
     """PROMPT lane. Decompose user intent into structured axes."""
     from ..invoke.axis_decomposer import decompose_axes
@@ -1376,6 +1377,20 @@ async def run_invoke_axis_decompose(
     except Exception as _e:
         logger.debug("[invoke] character_hints failed: %s", _e)
         character_hints = {}
+
+    # Echoes of Resonance: blend starred-image taste hints into character_hints
+    if resonance_mode:
+        from ..invoke.vocab_bank import compute_resonance_hints
+        try:
+            resonance = await compute_resonance_hints(db)
+            for cat, tags in resonance.items():
+                seen = set(character_hints.get(cat, []))
+                character_hints[cat] = character_hints.get(cat, []) + [
+                    t for t in tags if t not in seen
+                ]
+            logger.debug("[invoke] resonance hints merged: %s", {k: len(v) for k, v in resonance.items()})
+        except Exception as _re:
+            logger.warning("[invoke] resonance_hints failed: %s", _re)
 
     axes = await decompose_axes(
         ollama,
@@ -2092,3 +2107,99 @@ async def run_import_wd14_vocab(
     reporter.update(1.0, f"完了: {len(points)} タグを登録")
     logger.info("[import_wd14_vocab] done: %d tags", len(points))
     return {"imported": len(points)}
+
+
+async def run_emotion_tag(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    sha256s: list[str] | None = None,
+) -> dict:
+    """EMBEDDING lane. Assign 12 emotion dimension scores to images using Ollama LLM.
+
+    When sha256s is None, processes all images that lack emotion scores (no emotion_loneliness
+    payload field). Results are stored as flat keys: emotion_loneliness, emotion_nostalgia, ...
+    """
+    from ..ai.emotion_tagger import score_emotions, EMOTION_DIMENSIONS
+    from qdrant_client import models as qm
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    if sha256s:
+        docs = [doc async for doc in _iter_sha256_docs(db, sha256s)]
+    else:
+        docs = []
+        offset = None
+        while True:
+            cancel.raise_if_set()
+            pts, next_offset = await db._qc.scroll(
+                collection_name="images",
+                scroll_filter=qm.Filter(must=[
+                    qm.IsEmptyCondition(
+                        is_empty=qm.PayloadField(key="emotion_loneliness")
+                    ),
+                ]),
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(
+                    include=["sha256", "positive_prompt", "wd14_tags"]
+                ),
+                with_vectors=False,
+            )
+            docs.extend(p.payload for p in pts if p.payload)
+            if next_offset is None:
+                break
+            offset = next_offset
+
+    total = len(docs)
+    done = 0
+    errors = 0
+    reporter.indeterminate()
+
+    cfg = {}
+    try:
+        from ..runtime_config import get_runtime_config
+        cfg = await get_runtime_config(db)
+    except Exception:
+        pass
+    concurrency = int(cfg.get("pipeline_concurrency", 4))
+    vlm_model: str | None = cfg.get("vlm_model") or None
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def process_one(doc: dict) -> None:
+        nonlocal done, errors
+        sha256 = doc.get("sha256")
+        if not sha256:
+            return
+        async with sem:
+            cancel.raise_if_set()
+            scores = await score_emotions(
+                doc.get("positive_prompt") or "",
+                doc.get("wd14_tags") or [],
+                ollama,
+                model=vlm_model,
+            )
+            if scores:
+                payload = {f"emotion_{dim}": scores[dim] for dim in EMOTION_DIMENSIONS}
+                await db.set_payload(sha256, payload)
+                done += 1
+            else:
+                errors += 1
+            if total > 0:
+                reporter.update(done / total, f"感情タグ付け {done}/{total}")
+
+    await asyncio.gather(*(process_one(doc) for doc in docs), return_exceptions=True)
+    logger.info("[emotion_tag] done=%d errors=%d total=%d", done, errors, total)
+    return {"done": done, "errors": errors, "total": total}
+
+
+async def _iter_sha256_docs(db, sha256s: list[str]):
+    """Yield payload dicts for a list of sha256 hashes."""
+    for sha256 in sha256s:
+        doc = await db.get(sha256)
+        if doc:
+            yield doc

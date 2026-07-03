@@ -9,7 +9,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SPIRIT_ORDER = ["faithful", "rebel", "stranger", "lunatic", "oracle"]
+SPIRIT_ORDER = ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"]
 SESSION_TTL = 3600  # seconds
 
 

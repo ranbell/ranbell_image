@@ -43,6 +43,8 @@ class SummonRequest(BaseModel):
     pro_sections: dict[str, str] = {}  # character / background / props / action seed hints
     # Rebel spirit control
     rebel_inversion: bool = True  # False = rebel aims for beautiful image without axis inversion
+    # Resonance mode: drift all spirits toward the user's starred aesthetic
+    resonance_mode: bool = False
     # Common
     workflow_name: str = ""
     input_mode: str = "light"  # light | pro
@@ -199,6 +201,7 @@ async def summon(body: SummonRequest, request: Request):
         pro_sections=_pro_sections,
         pro_prompt=_pro_prompt,
         session_manager=mgr,
+        resonance_mode=body.resonance_mode,
     )
 
     request.app.state.invoke_event_queues[session.session_id] = session.event_queue
@@ -456,3 +459,58 @@ async def get_session(session_id: str, request: Request):
     if not session:
         raise HTTPException(404, "Session not found")
     return session.to_dict()
+
+
+@router.get("/resonance/preview")
+async def resonance_preview(request: Request, n: int = 20):
+    """Preview the taste centroid tags without triggering a summon.
+
+    Returns {tags: [{name, score}], star4_count, star5_count, total_contributing}.
+    Used by the frontend resonance toggle to show which aesthetic hints are active.
+    """
+    from qdrant_client import models as qm
+
+    db = request.app.state.db
+    # Count contributing images
+    star4_count = 0
+    star5_count = 0
+    offset = None
+    try:
+        while True:
+            pts, next_offset = await db._qc.scroll(
+                collection_name="images",
+                scroll_filter=qm.Filter(must=[
+                    qm.FieldCondition(key="star_rating", range=qm.Range(gte=4)),
+                    qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="done")),
+                ]),
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["star_rating"]),
+                with_vectors=False,
+            )
+            for p in pts:
+                r = (p.payload or {}).get("star_rating", 4)
+                if r >= 5:
+                    star5_count += 1
+                else:
+                    star4_count += 1
+            if next_offset is None or (star4_count + star5_count) >= 500:
+                break
+            offset = next_offset
+    except Exception as e:
+        logger.warning("resonance_preview count failed: %s", e)
+        return {"tags": [], "star4_count": 0, "star5_count": 0, "total_contributing": 0}
+
+    if star4_count + star5_count == 0:
+        return {"tags": [], "star4_count": 0, "star5_count": 0, "total_contributing": 0}
+
+    from ..invoke.vocab_bank import compute_resonance_hints
+    hints = await compute_resonance_hints(db, n_tags=n)
+    all_tags = hints.get("character", []) + hints.get("mood", []) + hints.get("scene", [])
+
+    return {
+        "tags": [{"name": t} for t in all_tags[:n]],
+        "star4_count": star4_count,
+        "star5_count": star5_count,
+        "total_contributing": star4_count + star5_count,
+    }

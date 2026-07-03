@@ -7,7 +7,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-SPIRIT_NAMES = ["faithful", "rebel", "stranger", "lunatic", "oracle"]
+SPIRIT_NAMES = ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"]
 _SPIRITS_DIR = Path(__file__).parent / "spirits"
 
 _cache: dict[str, dict] = {}

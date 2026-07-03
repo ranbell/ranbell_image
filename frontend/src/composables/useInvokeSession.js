@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 
-export const SPIRIT_NAMES = ['faithful', 'rebel', 'stranger', 'lunatic', 'oracle']
+export const SPIRIT_NAMES = ['faithful', 'rebel', 'stranger', 'lunatic', 'oracle', 'sorrow']
 
 export const SPIRIT_META = {
   faithful: { kanji: '映', en: 'Mirror',  color: 'text-sky-400',    border: 'border-sky-500',    bg: 'bg-sky-950' },
@@ -8,6 +8,7 @@ export const SPIRIT_META = {
   stranger: { kanji: '漂', en: 'Wander',  color: 'text-violet-400', border: 'border-violet-500', bg: 'bg-violet-950' },
   lunatic:  { kanji: '奔', en: 'Surge',   color: 'text-amber-400',  border: 'border-amber-500',  bg: 'bg-amber-950' },
   oracle:   { kanji: '瞰', en: 'Vantage', color: 'text-emerald-400', border: 'border-emerald-500', bg: 'bg-emerald-950' },
+  sorrow:   { kanji: '愁', en: 'Poet',    color: 'text-slate-400',  border: 'border-slate-500',  bg: 'bg-slate-950' },
 }
 
 // Spirit frame: faithful/stranger → gold on high alignment; rebel/lunatic → obsidian on LOW alignment
@@ -21,6 +22,9 @@ export function getSpiritFrame(spiritName, alignmentScore, threshold = 0.85) {
   }
   if (spiritName === 'rebel' || spiritName === 'lunatic') {
     return alignmentScore <= (1 - threshold) ? 'obsidian' : null
+  }
+  if (spiritName === 'sorrow') {
+    return alignmentScore >= threshold ? 'gold' : null
   }
   return null
 }
@@ -71,9 +75,14 @@ const invokeWorkflow    = ref('')
 const invokeSeeds       = ref({})
 
 // Spirit ON/OFF
-const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true })
+const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true, sorrow: false })
 // Rebel inversion mode: true = invert one axis (may produce dramatic/broken images), false = Counter perspective without inversion
 const invokeRebelInversion = ref(true)
+
+// Echoes of Resonance
+const invokeResonanceMode = ref(false)
+const invokeResonanceTags = ref([])   // [{name}] preview from /resonance/preview
+const invokeResonanceCount = ref(0)   // total contributing starred images
 
 // SSE
 let _eventSource = null
@@ -233,6 +242,7 @@ async function summon(token, locale = 'en') {
     camera_shot: invokeCameraShot.value,
     camera_angle: invokeCameraAngle.value,
     rebel_inversion: invokeRebelInversion.value,
+    resonance_mode: invokeResonanceMode.value,
     locale,
   }
 
@@ -250,6 +260,21 @@ async function summon(token, locale = 'en') {
     invokeLoading.value = false
     console.error('Invoke summon failed:', err)
     throw err
+  }
+}
+
+async function fetchResonancePreview(token) {
+  try {
+    const r = await fetch('/api/invoke/resonance/preview?n=20', {
+      headers: { 'X-API-Token': token },
+    })
+    if (!r.ok) return
+    const data = await r.json()
+    invokeResonanceTags.value = data.tags || []
+    invokeResonanceCount.value = data.total_contributing || 0
+  } catch {
+    invokeResonanceTags.value = []
+    invokeResonanceCount.value = 0
   }
 }
 
@@ -377,9 +402,10 @@ export function useInvokeSession() {
     invokeCameraShot, invokeCameraAngle,
     invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
     invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
+    invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
     openInvoke, closeInvoke,
     summon, cancel, respin, adopt, sendToRefine,
-    fetchDaily, fetchStats, enhancePrompt,
+    fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview,
     toggleEmoji, toggleSpirit,
     getSpiritFrame,
   }

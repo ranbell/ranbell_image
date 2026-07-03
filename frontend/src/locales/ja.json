@@ -118,7 +118,9 @@
       "outlier": "未踏探索",
       "outlierDesc": "意味的対極・低密度領域の発見",
       "textSearch": "テキスト検索",
-      "textSearchDesc": "自然言語でコレクションを意味検索"
+      "textSearchDesc": "自然言語でコレクションを意味検索",
+      "emotionSearch": "感情検索",
+      "emotionSearchDesc": "感情次元スコアで画像を探す"
     },
     "blendWeightsLabel": "重みスライダー",
     "outlierModeLabel": "探索モード",
@@ -126,6 +128,24 @@
     "emptyOutlier": "対極モード: 選択画像から最も遠い意味空間の画像を発見。孤島モード: UMAPマップで孤立した未踏領域の画像を発見",
     "textSearchLabel": "検索テキスト",
     "textSearchPlaceholder": "例: 夕暮れの海岸で一人たたずむ少女、青い空とひまわり畑...",
+    "emotionSearchLabel": "感情次元",
+    "emotionMinScore": "最小スコア",
+    "emotionSearchRun": "🌒 感情で探す",
+    "emotionSearchRunning": "検索中...",
+    "emotion": {
+      "loneliness":  "孤独",
+      "nostalgia":   "郷愁",
+      "ephemeral":   "儚さ",
+      "melancholy":  "憂鬱",
+      "serenity":    "静けさ",
+      "wonder":      "驚嘆",
+      "joy":         "喜び",
+      "tension":     "緊張",
+      "warmth":      "温もり",
+      "mystery":     "神秘",
+      "desolation":  "荒廃",
+      "vitality":    "生命力"
+    },
     "inversionSelectAll": "全選択",
     "inversionSelectRequired": "軸を1つ以上選択してください",
     "axes": {
@@ -1035,6 +1055,9 @@
     "rebelModeLabel": "逆 (Counter)",
     "rebelModeShadow": "逆転",
     "rebelModeHarmony": "調和",
+    "sorrowDesc": "シネマティックな哀愁 — フィルムグレイン・くすみカラー・郷愁の光",
+    "resonanceLabel": "記憶の共鳴",
+    "resonanceNoStars": "4★以上の評価をつけると有効になります",
     "adoptSuccess": "{kanji} 採用 ✓",
     "status": {
       "waiting":    "待機中",

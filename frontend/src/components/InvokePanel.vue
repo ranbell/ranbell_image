@@ -27,9 +27,10 @@ const {
   invokeCameraShot, invokeCameraAngle,
   invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
   invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
+  invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
   openInvoke, closeInvoke,
   summon, cancel, respin, adopt, sendToRefine,
-  fetchDaily, fetchStats, enhancePrompt,
+  fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview,
   toggleEmoji, toggleSpirit,
 } = useInvokeSession()
 
@@ -827,6 +828,27 @@ function onThumbnailError(event) {
                       class="px-2 py-1 rounded-lg border text-[9px] transition">
                       {{ opt.label }}
                     </button>
+                  </div>
+                </div>
+
+                <!-- Echoes of Resonance -->
+                <div class="pt-1">
+                  <div class="flex items-center gap-2">
+                    <button
+                      @click="invokeResonanceMode = !invokeResonanceMode; if (invokeResonanceMode) fetchResonancePreview(getToken())"
+                      :class="invokeResonanceMode
+                        ? 'bg-violet-700/50 border-violet-500/60 text-violet-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] transition">
+                      <span>🌟</span>
+                      <span>{{ t('invoke.resonanceLabel') }}</span>
+                    </button>
+                    <span v-if="invokeResonanceMode && invokeResonanceCount > 0" class="text-[9px] text-violet-400">
+                      {{ invokeResonanceTags.slice(0, 5).map(t => t.name).join(', ') }}<span v-if="invokeResonanceTags.length > 5">…</span>
+                    </span>
+                    <span v-else-if="invokeResonanceMode && invokeResonanceCount === 0" class="text-[9px] text-gray-600">
+                      {{ t('invoke.resonanceNoStars') }}
+                    </span>
                   </div>
                 </div>
 

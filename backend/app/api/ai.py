@@ -1333,6 +1333,73 @@ async def get_similarity_graph(
     return graph
 
 
+class EmotionTagRequest(BaseModel):
+    sha256s: list[str] = []  # empty = process all pending (no emotion_loneliness field)
+
+
+@router.post("/emotion-tag")
+async def trigger_emotion_tag(body: EmotionTagRequest, request: Request):
+    """Queue emotion scoring job for specified images or all untagged images."""
+    from ..jobs.runners import run_emotion_tag
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+    spooler = request.app.state.spooler
+    job_id = spooler.submit(
+        JobLane.EMBEDDING,
+        "emotion_tag",
+        run_emotion_tag,
+        db=db,
+        ollama=ollama,
+        sha256s=body.sha256s or None,
+    )
+    return {"status": "queued", "job_id": job_id}
+
+
+class EmotionSearchRequest(BaseModel):
+    emotion: str          # one of the 12 EMOTION_DIMENSIONS names
+    min_score: float = 0.5
+    limit: int = 50
+
+
+@router.post("/emotion-search")
+async def emotion_search(body: EmotionSearchRequest, request: Request):
+    """Return images scored at or above min_score on the given emotion dimension.
+
+    Results are ordered highest score first.
+    """
+    from ..ai.emotion_tagger import EMOTION_DIMENSIONS
+    from qdrant_client import models as qm
+    from ..db.qdrant_client import IMAGES_COLLECTION
+
+    if body.emotion not in EMOTION_DIMENSIONS:
+        raise HTTPException(400, f"Unknown emotion '{body.emotion}'. Valid: {EMOTION_DIMENSIONS}")
+
+    db = request.app.state.db
+    field_key = f"emotion_{body.emotion}"
+    limit = max(1, min(body.limit, 200))
+
+    try:
+        points, _ = await db._qc.scroll(
+            collection_name=IMAGES_COLLECTION,
+            scroll_filter=qm.Filter(must=[
+                qm.FieldCondition(
+                    key=field_key,
+                    range=qm.Range(gte=body.min_score),
+                ),
+            ]),
+            limit=limit,
+            order_by=qm.OrderBy(key=field_key, direction=qm.Direction.DESC),
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as e:
+        logger.warning("emotion_search failed: %s", e)
+        raise HTTPException(500, "Emotion search failed — indexes may not be built yet")
+
+    docs = [p.payload for p in points if p.payload]
+    return {"emotion": body.emotion, "min_score": body.min_score, "results": docs}
+
+
 @router.get("/status")
 async def ai_status(request: Request):
     db = request.app.state.db

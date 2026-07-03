@@ -94,7 +94,9 @@
       "outlier": "Undiscovered",
       "outlierDesc": "Find semantic antipodes and isolated regions",
       "textSearch": "Text Search",
-      "textSearchDesc": "Semantic search by natural language"
+      "textSearchDesc": "Semantic search by natural language",
+      "emotionSearch": "Emotion Search",
+      "emotionSearchDesc": "Find images by emotional dimension score"
     },
     "blendWeightsLabel": "Weight sliders",
     "outlierModeLabel": "Discovery mode",
@@ -102,6 +104,24 @@
     "emptyOutlier": "Antipode mode: finds images at the opposite end of the semantic space. Isolated mode: discovers low-density unexplored regions in the UMAP map",
     "textSearchLabel": "Search text",
     "textSearchPlaceholder": "e.g. a girl standing alone on a beach at sunset, blue sky and sunflower field...",
+    "emotionSearchLabel": "Emotion Dimension",
+    "emotionMinScore": "Min score",
+    "emotionSearchRun": "🌒 Search by Emotion",
+    "emotionSearchRunning": "Searching...",
+    "emotion": {
+      "loneliness":  "Loneliness",
+      "nostalgia":   "Nostalgia",
+      "ephemeral":   "Ephemeral",
+      "melancholy":  "Melancholy",
+      "serenity":    "Serenity",
+      "wonder":      "Wonder",
+      "joy":         "Joy",
+      "tension":     "Tension",
+      "warmth":      "Warmth",
+      "mystery":     "Mystery",
+      "desolation":  "Desolation",
+      "vitality":    "Vitality"
+    },
     "inversionSelectAll": "Select all",
     "inversionSelectRequired": "Select at least one axis",
     "axes": {
@@ -1034,6 +1054,9 @@
     "rebelModeLabel": "逆 (Counter)",
     "rebelModeShadow": "Inversion",
     "rebelModeHarmony": "Harmony",
+    "sorrowDesc": "Cinematic melancholy — film grain, muted palette, nostalgic light",
+    "resonanceLabel": "Echoes of Resonance",
+    "resonanceNoStars": "Rate 4★+ images to activate",
     "adoptSuccess": "{kanji} adopted ✓",
     "status": {
       "waiting":    "Waiting",

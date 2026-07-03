@@ -452,6 +452,18 @@ class QdrantDBClient:
             field_name="creation_record.method",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
+        # Emotion dimension indexes (12 flat float keys: emotion_loneliness, etc.)
+        _EMOTION_DIMS = (
+            "loneliness", "nostalgia", "ephemeral", "melancholy",
+            "serenity", "wonder", "joy", "tension",
+            "warmth", "mystery", "desolation", "vitality",
+        )
+        for _dim in _EMOTION_DIMS:
+            await self._qc.create_payload_index(
+                collection_name=IMAGES_COLLECTION,
+                field_name=f"emotion_{_dim}",
+                field_schema=qm.PayloadSchemaType.FLOAT,
+            )
 
     async def close(self) -> None:
         await self._qc.close()

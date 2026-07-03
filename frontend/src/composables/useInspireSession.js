@@ -57,6 +57,12 @@ const blendWeights            = ref({})
 const outlierMode             = ref('antipode')
 const textSearchQuery         = ref('')
 
+// Emotion search
+const emotionSearchDimension  = ref('melancholy')
+const emotionSearchMinScore   = ref(0.5)
+const emotionSearchResults    = ref([])
+const emotionSearchLoading    = ref(false)
+
 const inversionJobId = ref(null)
 const brainstormJobId = ref(null)
 const inspireResultSelection = ref(new Set())
@@ -140,6 +146,8 @@ function resetSession(initialSlots = []) {
   inspireGroupedResults.value   = []
   outlierMode.value             = 'antipode'
   textSearchQuery.value         = ''
+  emotionSearchResults.value    = []
+  emotionSearchLoading.value    = false
   inspireResultSelection.value  = new Set()
   const roles = {}
   const weights = {}
@@ -177,6 +185,29 @@ function removeFromInspireSlots(sha256) {
 
 function setActiveReader(reader) {
   _activeReader = reader
+}
+
+async function runEmotionSearch(token) {
+  emotionSearchLoading.value = true
+  emotionSearchResults.value = []
+  try {
+    const r = await fetch('/api/ai/emotion-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Token': token },
+      body: JSON.stringify({
+        emotion: emotionSearchDimension.value,
+        min_score: emotionSearchMinScore.value,
+        limit: 50,
+      }),
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json()
+    emotionSearchResults.value = data.results || []
+  } catch (e) {
+    console.error('Emotion search failed:', e)
+  } finally {
+    emotionSearchLoading.value = false
+  }
 }
 
 export function useInspireSession() {
@@ -236,6 +267,10 @@ export function useInspireSession() {
     blendWeights,
     outlierMode,
     textSearchQuery,
+    emotionSearchDimension,
+    emotionSearchMinScore,
+    emotionSearchResults,
+    emotionSearchLoading,
     inspireResultSelection,
     toggleInspireResultSelection,
     addToInspireSlots,
@@ -244,5 +279,6 @@ export function useInspireSession() {
     hasSession,
     resetSession,
     setActiveReader,
+    runEmotionSearch,
   }
 }

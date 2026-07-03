@@ -635,3 +635,132 @@ async def refine_axis_tag_hints(
         logger.warning("refine_axis_tag_hints VLM failed: %s", e)
 
     return raw_hints
+
+
+# ── Echoes of Resonance ────────────────────────────────────────────────────────
+
+_CHARACTER_KEYWORDS = frozenset({
+    "_hair", "_eyes", "dress", "uniform", "outfit", "shirt", "skirt", "school",
+    "jacket", "coat", "blouse", "sweater", "hoodie", "kimono", "yukata", "leotard",
+    "bikini", "swimsuit", "hat", "ribbon", "bow", "braid", "twintail", "ponytail",
+    "short_hair", "long_hair", "medium_hair",
+})
+_SCENE_KEYWORDS = frozenset({
+    "room", "street", "forest", "beach", "city", "garden", "sky", "water",
+    "building", "park", "school", "library", "cafe", "bar", "mountain", "ocean",
+    "river", "lake", "field", "house", "rooftop", "corridor", "hallway", "bridge",
+    "train", "station", "window", "door", "indoor", "outdoor",
+})
+
+
+def _classify_resonance_tag(tag: str) -> str:
+    """Classify a wd14 tag into character/scene/mood hint category."""
+    for kw in _CHARACTER_KEYWORDS:
+        if kw in tag:
+            return "character"
+    for kw in _SCENE_KEYWORDS:
+        if kw in tag:
+            return "scene"
+    return "mood"
+
+
+async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
+    """Compute aesthetic taste hints from high-rated (≥4★) images.
+
+    Fetches embeddings of star_rating≥4 images, computes a weighted centroid
+    (star4=1.0, star5=2.0), searches wd14_vocab for n_tags nearest tags, and
+    returns them classified as character_hints compatible with decompose_axes().
+    Returns {} when no starred images exist or wd14_vocab is empty.
+    """
+    import math
+    from qdrant_client import models as qm
+
+    vocab_count = await _get_vocab_count(db)
+    if vocab_count == 0:
+        return {}
+
+    # Scroll all images rated ≥4 and retrieve their full embeddings
+    points: list = []
+    offset = None
+    try:
+        while True:
+            pts, next_offset = await db._qc.scroll(
+                collection_name="images",
+                scroll_filter=qm.Filter(must=[
+                    qm.FieldCondition(
+                        key="star_rating",
+                        range=qm.Range(gte=4),
+                    ),
+                    qm.FieldCondition(
+                        key="embedding_status",
+                        match=qm.MatchValue(value="done"),
+                    ),
+                ]),
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["star_rating"]),
+                with_vectors=["embedding"],
+            )
+            points.extend(pts)
+            if next_offset is None or len(points) >= 500:
+                break
+            offset = next_offset
+    except Exception as e:
+        logger.warning("compute_resonance_hints scroll failed: %s", e)
+        return {}
+
+    if not points:
+        return {}
+
+    # Weighted centroid: star4 weight=1.0, star5 weight=2.0
+    dim: int | None = None
+    centroid: list[float] = []
+    total_weight = 0.0
+
+    for p in points:
+        vec = p.vector.get("embedding") if isinstance(p.vector, dict) else None
+        if not vec:
+            continue
+        rating = (p.payload or {}).get("star_rating", 4)
+        weight = 2.0 if rating >= 5 else 1.0
+        if dim is None:
+            dim = len(vec)
+            centroid = [0.0] * dim
+        if len(vec) != dim:
+            continue
+        for i, v in enumerate(vec):
+            centroid[i] += v * weight
+        total_weight += weight
+
+    if total_weight == 0.0 or dim is None:
+        return {}
+
+    # Normalize centroid
+    centroid = [v / total_weight for v in centroid]
+    norm = math.sqrt(sum(v * v for v in centroid))
+    if norm > 0.0:
+        centroid = [v / norm for v in centroid]
+
+    # Find nearest wd14 tags to the centroid
+    raw_tags = await db.search_wd14_vocab(
+        centroid,
+        min_freq=0.005,
+        max_freq=0.8,
+        category=0,
+        limit=n_tags,
+    )
+    if not raw_tags:
+        return {}
+
+    # Classify into hint categories
+    hints: dict[str, list[str]] = {"character": [], "scene": [], "mood": []}
+    for entry in raw_tags:
+        cat = _classify_resonance_tag(entry["name"])
+        hints[cat].append(entry["name"])
+
+    logger.debug(
+        "compute_resonance_hints: %d starred images → %d tags (c=%d s=%d m=%d)",
+        len(points), len(raw_tags),
+        len(hints["character"]), len(hints["scene"]), len(hints["mood"]),
+    )
+    return {k: v for k, v in hints.items() if v}
