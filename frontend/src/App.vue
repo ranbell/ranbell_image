@@ -79,6 +79,22 @@ const jobStreamConnected = ref(false)
 const cr = useControlRoom(jobsMap, resourcesRef)
 const { masterStatus, systemStatus, ingestEvent: crIngestEvent } = cr
 
+// ── Remote resource connection status ─────────────────────────────────────────
+function _resourceStatus(name) {
+  const res = resourcesRef.value.find(r => r.name === name)
+  if (!res) return 'unknown'   // SSE まだ未受信 → 警告を出さない
+  if (res.reachable) return 'ok'
+  return res.last_ok == null ? 'starting' : 'fault'
+}
+const comfyOffline = computed(() => {
+  const s = _resourceStatus('remote-comfyui')
+  return s === 'fault' || s === 'starting'
+})
+const ollamaOffline = computed(() => {
+  const s = _resourceStatus('remote-ollama')
+  return s === 'fault' || s === 'starting'
+})
+
 const hasAnyActiveJob = computed(() =>
   [...jobsMap.value.values()].some(j => j.state === 'running' || j.state === 'cancelling')
 )
@@ -3171,6 +3187,25 @@ onUnmounted(() => {
                   </div>
                 </Transition>
 
+                <!-- Ollama offline banner -->
+                <Transition
+                  enter-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 -translate-y-2"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-150"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-2">
+                  <div v-if="ollamaOffline && refineDirectPrompt === null"
+                    class="bg-amber-950/60 border border-amber-700/40 rounded-xl p-3.5 space-y-2">
+                    <div class="flex items-center gap-2">
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+                      <p class="text-xs font-semibold text-amber-300">{{ $t('refine.ollamaOfflineTitle') }}</p>
+                    </div>
+                    <p class="text-[10px] text-amber-500/80 leading-relaxed">{{ $t('refine.ollamaOfflineHint') }}</p>
+                    <p class="text-[10px] text-amber-600 italic">{{ $t('refine.ollamaOfflineDirectHint') }}</p>
+                  </div>
+                </Transition>
+
                 <!-- Instruction -->
                 <div>
                   <label class="text-xs text-gray-500 mb-1 block">{{ $t('refine.extraHint') }}</label>
@@ -3197,6 +3232,10 @@ onUnmounted(() => {
                     <span class="flex items-center gap-2">
                       {{ $t('refine.ollamaControl') }}
                       <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
+                      <span v-else-if="ollamaOffline" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
+                        <span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse inline-block"></span>
+                        {{ $t('refine.ollamaOfflineBadge') }}
+                      </span>
                     </span>
                     <span class="text-gray-600 group-open:rotate-180 transition-transform">▼</span>
                   </summary>
@@ -3485,7 +3524,22 @@ onUnmounted(() => {
               </div>
 
               <!-- Run / Cancel button (pinned bottom of left pane) -->
-              <div class="p-4 border-t border-gray-800 flex-shrink-0 flex gap-2">
+              <div class="p-4 border-t border-gray-800 flex-shrink-0 space-y-2">
+                <!-- ComfyUI offline warning -->
+                <Transition
+                  enter-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 -translate-y-1"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-150"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-1">
+                  <div v-if="comfyOffline && (refineAutoSubmit || refineDirectPrompt !== null)"
+                    class="bg-amber-950/60 border border-amber-700/40 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+                    <span>{{ $t('refine.comfyOfflineHint') }}</span>
+                  </div>
+                </Transition>
+                <div class="flex gap-2">
                 <button @click="runRefine" :disabled="refining || selectedCount === 0 || (refineAutoSubmit && !refineWorkflow)"
                   class="flex-1 py-3 rounded-xl text-sm font-semibold transition-all"
                   :class="refining
@@ -3513,6 +3567,7 @@ onUnmounted(() => {
                   class="px-4 py-3 rounded-xl text-sm font-semibold bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200 border border-red-800/60 transition-all">
                   {{ $t('admin.cancel') }}
                 </button>
+                </div>
               </div>
             </div>
 
@@ -4647,6 +4702,7 @@ onUnmounted(() => {
     <!-- ── Invoke Panel ── -->
     <InvokePanel
       :show="showInvoke"
+      :comfyOffline="comfyOffline"
       @update:show="showInvoke = $event"
       @send-to-refine="handleInvokeSendToRefine($event)"
       @toast="showToast($event.msg, $event.type)"

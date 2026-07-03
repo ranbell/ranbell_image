@@ -468,7 +468,12 @@
     "tagGroupExpression": "😊 表情",
     "tagGroupBackground": "🌿 背景",
     "tagGroupObject": "🪑 オブジェクト",
-    "tagGroupLighting": "☀️ ライティング"
+    "tagGroupLighting": "☀️ ライティング",
+    "ollamaOfflineBadge": "オフライン",
+    "ollamaOfflineTitle": "Ollama に接続できません",
+    "ollamaOfflineHint": "VLM によるプロンプト錬成が利用できません。Ollama が再接続されるまで AI 錬成は実行できません。",
+    "ollamaOfflineDirectHint": "ダイレクトプロンプトモードは引き続き使用できます — Invoke またはサムネイル詳細からプロンプトを送信してください。",
+    "comfyOfflineHint": "ComfyUI に接続できません — ジョブはスプーラーに蓄積され、再接続後に実行されます。"
   },
   "toast": {
     "pipelineStarted": "AI処理を開始しました。",
@@ -1128,6 +1133,7 @@
     "tagGroupExpression": "😊 表情",
     "tagGroupBackground": "🌿 背景",
     "tagGroupObject": "🪑 オブジェクト",
-    "tagGroupLighting": "☀️ ライティング"
+    "tagGroupLighting": "☀️ ライティング",
+    "comfyOfflineHint": "ComfyUI に接続できません — 画像は再接続後に生成されます。"
   }
 }

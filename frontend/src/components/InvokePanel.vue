@@ -10,7 +10,10 @@ import {
 } from '../composables/useInvokeSession.js'
 import { getToken } from '../apiToken.js'
 
-const props = defineProps({ show: Boolean })
+const props = defineProps({
+  show: Boolean,
+  comfyOffline: { type: Boolean, default: false },
+})
 const emit  = defineEmits(['update:show', 'send-to-refine', 'toast', 'select-image'])
 
 const { locale, t } = useI18n()
@@ -1034,6 +1037,19 @@ function onThumbnailError(event) {
                 <p v-if="summonBlockReason && !isLoading" class="text-[10px] text-amber-500 text-center">
                   {{ summonBlockReason }}
                 </p>
+                <Transition
+                  enter-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 -translate-y-1"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-150"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-1">
+                  <div v-if="props.comfyOffline"
+                    class="flex items-center gap-2 px-3 py-2 bg-amber-950/60 border border-amber-700/40 rounded-xl text-xs text-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+                    <span>{{ t('invoke.comfyOfflineHint') }}</span>
+                  </div>
+                </Transition>
               </div>
 
             </div>

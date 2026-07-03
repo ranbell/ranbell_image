@@ -468,7 +468,12 @@
     "tagGroupExpression": "😊 Expression",
     "tagGroupBackground": "🌿 Background",
     "tagGroupObject": "🪑 Objects",
-    "tagGroupLighting": "☀️ Lighting"
+    "tagGroupLighting": "☀️ Lighting",
+    "ollamaOfflineBadge": "offline",
+    "ollamaOfflineTitle": "Cannot connect to Ollama",
+    "ollamaOfflineHint": "VLM-based prompt generation is unavailable. AI Refine will not work until Ollama reconnects.",
+    "ollamaOfflineDirectHint": "Direct Prompt mode is still available — send a prompt from Invoke or the image detail panel to bypass the VLM.",
+    "comfyOfflineHint": "ComfyUI is unreachable — jobs will queue in the spooler and execute when it reconnects."
   },
   "toast": {
     "pipelineStarted": "AI processing started.",
@@ -1127,6 +1132,7 @@
     "tagGroupExpression": "😊 Expression",
     "tagGroupBackground": "🌿 Background",
     "tagGroupObject": "🪑 Objects",
-    "tagGroupLighting": "☀️ Lighting"
+    "tagGroupLighting": "☀️ Lighting",
+    "comfyOfflineHint": "ComfyUI is unreachable — images will queue and generate when it reconnects."
   }
 }
