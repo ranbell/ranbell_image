@@ -185,6 +185,27 @@ HSV / L\*a\*b\* 空間での 5 クラスター KMeans で抽出されます。
 | `creation_record` | — | 作成方法・元画像参照・インスパイアコンテキスト・生成パラメータを含む辞書 |
 | `creation_record.method` | KEYWORD | 作成方法識別子（フィルタリング用にインデックス済み） |
 
+#### 感情スコア（Subjective Emotion）
+
+Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元の主観的感情スコアです。`run_emotion_tag` ランナー（EMBEDDING レーン）が処理し、`POST /api/ai/emotion-tag` でトリガーできます。フィールド名はネスト構造ではなくフラットキー形式を採用しています（Qdrant 1.18 の `FieldCondition` との確実な互換性のため）。
+
+| フィールド | インデックス種別 | 感情次元 |
+|---|---|---|
+| `emotion_loneliness` | FLOAT | 孤独感 |
+| `emotion_nostalgia` | FLOAT | 郷愁・懐かしさ |
+| `emotion_ephemeral` | FLOAT | 儚さ・一瞬性 |
+| `emotion_melancholy` | FLOAT | メランコリー・哀愁 |
+| `emotion_serenity` | FLOAT | 静けさ・平穏 |
+| `emotion_wonder` | FLOAT | 驚嘆・畏敬 |
+| `emotion_joy` | FLOAT | 喜び・明るさ |
+| `emotion_tension` | FLOAT | 緊張感・不安 |
+| `emotion_warmth` | FLOAT | 温もり・親しみ |
+| `emotion_mystery` | FLOAT | 神秘・謎 |
+| `emotion_desolation` | FLOAT | 荒廃・虚無感 |
+| `emotion_vitality` | FLOAT | 生命力・躍動感 |
+
+すべて 0.0〜1.0 の範囲。フィールドが存在しない画像は未処理（`IsEmptyCondition` で検出可能）。感情タグが付与された画像は `POST /api/ai/emotion-search` で次元別スコア閾値検索が可能です。
+
 ### `alignment` コレクション
 
 評価済み画像 1 枚につき 1 ポイント。ポイント ID は `image_id` から決定論的に生成されます。

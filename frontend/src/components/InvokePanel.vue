@@ -391,6 +391,13 @@ function _animateMonologue(spiritName, text) {
       }
       i++
       _animTimers[spiritName] = setTimeout(nextChar, delay)
+
+    } else if (spiritName === 'sorrow') {
+      // Slow, contemplative — each word carries weight; rare long pauses
+      spiritDisplayText[spiritName].value += c
+      i++
+      const pause = (i % 6 === 0 && Math.random() < 0.35) ? 320 : 72
+      _animTimers[spiritName] = setTimeout(nextChar, pause)
     }
   }
 

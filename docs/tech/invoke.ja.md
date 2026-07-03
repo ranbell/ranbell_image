@@ -1,6 +1,6 @@
-# 技術リファレンス: Invoke — 5スピリット AI 画像生成システム
+# 技術リファレンス: Invoke — 6スピリット AI 画像生成システム
 
-このドキュメントでは、Ranbell Image の **Invoke（召喚）** 機能の実装全体を解説します。ユーザーが「召喚」を実行した瞬間から、5つのスピリットが並列に画像を生成し、アライメントスコアが表示されるまでのすべての処理を段階的に説明します。
+このドキュメントでは、Ranbell Image の **Invoke（召喚）** 機能の実装全体を解説します。ユーザーが「召喚」を実行した瞬間から、最大6つのスピリットが並列に画像を生成し、アライメントスコアが表示されるまでのすべての処理を段階的に説明します。
 
 設計の動機から始め、データモデル、軸分解アルゴリズム、スピリット定義、ジョブパイプライン、SSE ストリーム、デイリーオラクルと進みます。個々のモジュールを把握したい場合は、該当セクションから直接読み始めても構いません。
 
@@ -10,7 +10,7 @@
 
 一枚の画像を生成するとき、ユーザーの入力は常に「解釈の余地」を持ちます。同じ「夜の海辺、月明かり」という指示でも、忠実に再現する画像もあれば、月光の代わりに嵐を描くほうが詩的な場合もあります。
 
-Invoke はこの曖昧さを欠点として隠すのではなく、意図的に5つの異なる解釈として展開します:
+Invoke はこの曖昧さを欠点として隠すのではなく、意図的に最大6つの異なる解釈として展開します:
 
 | スピリット | 漢字 | 英名 | 解釈の方針 |
 |---|---|---|---|
@@ -19,8 +19,9 @@ Invoke はこの曖昧さを欠点として隠すのではなく、意図的に5
 | **stranger** | 漂 | Wander | 意味的に近い「招かれざる客」タグを自然に織り込む |
 | **lunatic** | 奔 | Surge | 意味的に遠い「野生タグ」を中心に据え、想定外を全力で追求する |
 | **oracle** | 瞰 | Vantage | 完全な創作自由。最も衝撃的な解釈を選ぶ |
+| **sorrow** | 愁 | Poet | シネマティック哀愁に全振り。film_grain・muted_colors・analog_film を常に注入（デフォルト OFF） |
 
-これら 5つは同じ「軸セット」（後述する10軸分解）を受け取り、それぞれ独自のシステムプロンプトに基づいてプロンプトを生成します。並列実行されるため、5枚のバリエーションが可能な限り短い時間で揃います。
+これら最大6つは同じ「軸セット」（後述する10軸分解）を受け取り、それぞれ独自のシステムプロンプトに基づいてプロンプトを生成します。並列実行されるため、有効なスピリット分のバリエーションが可能な限り短い時間で揃います。
 
 ```
 ユーザー入力 (テキスト / 絵文字 / スライダー / 色)
@@ -68,7 +69,7 @@ SSE ストリーム → フロントエンド
 
 | ファイル | 責務 |
 |---|---|
-| `backend/app/api/invoke.py` | REST API ルート (9エンドポイント)、SSE ジェネレーター |
+| `backend/app/api/invoke.py` | REST API ルート (11エンドポイント)、SSE ジェネレーター |
 | `backend/app/invoke/session_manager.py` | `InvokeSession`、`SpiritState`、`InvokeSessionManager` |
 | `backend/app/invoke/axis_decomposer.py` | ユーザー入力 → 10軸変換、絵文字マッピング、VLM 補完 |
 | `backend/app/invoke/spirit_loader.py` | YAML スピリット定義の読み込み・キャッシュ |
@@ -80,7 +81,9 @@ SSE ストリーム → フロントエンド
 | `backend/app/invoke/spirits/stranger.yaml` | Wander スピリット定義 |
 | `backend/app/invoke/spirits/lunatic.yaml` | Surge スピリット定義 |
 | `backend/app/invoke/spirits/oracle.yaml` | Vantage スピリット定義 |
-| `backend/app/jobs/runners.py` | 6つの invoke ランナー関数 (L1130–L1608) |
+| `backend/app/invoke/spirits/sorrow.yaml` | Poet スピリット定義（第6スピリット「愁」） |
+| `backend/app/ai/emotion_tagger.py` | 12次元感情スコアリング（Ollama 経由） |
+| `backend/app/jobs/runners.py` | invoke / emotion_tag ランナー関数 |
 | `backend/app/main.py` | 初期化: セッションマネージャー、スピリットプリロード、オラクルスケジューラー |
 | `backend/app/runtime_config.py` | invoke 設定キーのデフォルト値 (L34–L42) |
 | `backend/app/api/admin.py` | 管理エンドポイント: WD14 語彙、オラクル管理 (L393–L427) |
@@ -189,7 +192,7 @@ class InvokeSession:
     finalize_submitted: bool = False   # finalize ジョブ submit 済みフラグ（二重投入防止）
 ```
 
-**enabled_spirits の正規化**: `create_session()` は受け取ったスピリット名を `SPIRIT_ORDER = ["faithful", "rebel", "stranger", "lunatic", "oracle"]` の順序でフィルタします。順序が保証されることで、UI 表示順とジョブ送信順が一致します。
+**enabled_spirits の正規化**: `create_session()` は受け取ったスピリット名を `SPIRIT_ORDER = ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"]` の順序でフィルタします。順序が保証されることで、UI 表示順とジョブ送信順が一致します。
 
 **finalize_submitted フラグ**: `_maybe_submit_finalize()` が複数回呼ばれても finalize ジョブが 1 度しか投入されないことをこのフラグで保証します。スピリットが error になるパスと正常完了するパスの両方から `_maybe_submit_finalize()` が呼ばれるため、このガードが不可欠です。
 
@@ -223,6 +226,8 @@ class SummonRequest(BaseModel):
     workflow_name: str = ""
     input_mode: str = "light"
     enabled_spirits: list[str] = ["faithful", "rebel", "stranger", "lunatic", "oracle"]
+    # ↑ sorrow はデフォルト OFF。UI で明示的に有効化した場合のみリストに含まれる
+    resonance_mode: bool = False    # Echoes of Resonance（共鳴モード）
 ```
 
 その他のリクエストモデル:
@@ -238,7 +243,7 @@ class SummonRequest(BaseModel):
 
 ---
 
-## 5つのスピリット
+## 6つのスピリット
 
 ### スピリット定義ファイル
 
@@ -287,6 +292,10 @@ system_prompt: |
 **oracle（瞰 / Vantage）** — `needs_vocab_hint: false`
 
 完全な創作自由。ユーザー意図を深く読み取り、最も「視聴者を止める」画像になる解釈を独自に選びます。軸の追加・削除・無視・再構築がすべて許可されます。`character_detail` タグは「アンカー」として必ず含めますが、それ以外はすべて Vantage の判断に委ねられます。
+
+**sorrow（愁 / Poet）** — `needs_vocab_hint: false`
+
+シネマティック・ノスタルジック・フィルムグレインに全振りした第6スピリット。入力がどんなに明るく鮮やかでも、パレットを muted/desaturated、ムードを nostalgic/melancholic、ライティングを soft diffuse/overcast へ静かに変換します。`danbooru_tags` には常に `film_grain, depth_of_field, bokeh, muted_colors, analog_film, vintage_aesthetic, lomography` を含め、`negative_supplement` には `oversaturated, vivid_colors, neon, bright_background, flat_lighting, harsh_light, studio_lighting, high_contrast, glossy` を含めます。**デフォルト OFF（opt-in）**: `SummonRequest.enabled_spirits` の初期値には含まれません。spirit フィールドの出力値は `"Poet"` です。
 
 ### LLM 出力スキーマ（全スピリット共通）
 
@@ -447,6 +456,7 @@ DANBOORU SUGGESTIONS — semantically relevant tags for this scene. Choose the m
 | `get_axis_semantic_tags()` | 軸テキストに最も近い Danbooru タグ。全スピリットのプロンプト精度向上 | **非常に近い** | 全スピリット |
 | `get_vocab_hints()` | 逸脱・意外性タグ | 中〜遠い | stranger / lunatic のみ |
 | `get_character_danbooru_hints()` | 軸分解 VLM 補完用のキャラクター属性タグ | 近い（キャラ属性） | axis_decomposer のみ |
+| `compute_resonance_hints()` | star_rating≥4 画像の embedding 重心から「ユーザーの好み」タグを生成 | ユーザー好みに近い | 全スピリット（resonance_mode 時） |
 
 ### get_axis_semantic_tags()
 
@@ -551,6 +561,53 @@ async def get_vocab_hints(
 ### get_recent_adopted_tags()
 
 デイリーオラクルが「ユーザーの好みのカウンターポイント」を生成するために使用します。過去 N 日間に `adopted_at_genesis=True` でマークされた画像の `wd14_tags` 頻度を集計します。
+
+### compute_resonance_hints()
+
+**Echoes of Resonance（共鳴モード）** の中核処理です。`SummonRequest.resonance_mode == True` のとき `run_invoke_axis_decompose` から呼ばれ、返り値を `character_hints` にマージします。
+
+```python
+async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
+```
+
+**処理フロー:**
+
+```
+1. Qdrant images コレクションを scroll（最大 500件）
+   フィルター: star_rating >= 4 AND embedding_status == "done"
+   with_vectors=["embedding"]
+
+2. 重み付き重心を計算
+   star4 → weight=1.0
+   star5 → weight=2.0
+   centroid = weighted_sum(embedding_vectors) / total_weight
+   L2 正規化（cosine 距離の一貫性のため）
+
+3. db.search_wd14_vocab(centroid, min_freq=0.005, max_freq=0.8, limit=n_tags)
+   → ユーザーの美的感覚に意味的に近い Danbooru タグ上位20件
+
+4. タグをカテゴリ分類
+   "_hair" / "_eyes" / "dress" / "uniform" / "shirt" 等 → "character"
+   "room" / "street" / "forest" / "beach" / "city" 等 → "scene"
+   上記以外 → "mood"
+
+5. {"character": [...], "mood": [...], "scene": [...]} を返す
+   （貢献画像 0件の場合は {} を返してサイレントフォールバック）
+```
+
+`run_invoke_axis_decompose` 内での使用:
+
+```python
+if resonance_mode:
+    resonance = await compute_resonance_hints(db)
+    for cat, tags in resonance.items():
+        seen = set(character_hints.get(cat, []))
+        character_hints[cat] = character_hints.get(cat, []) + [
+            t for t in tags if t not in seen
+        ]
+```
+
+これにより全スピリットの `_build_completion_prompt()` の `DANBOORU VOCABULARY HINTS` セクションにユーザーの好みタグが反映されます。
 
 ---
 
@@ -966,6 +1023,7 @@ await session.event_queue.get()
 | `GET`  | `/api/invoke/stats` | 召喚統計情報取得 |
 | `POST` | `/api/invoke/enhance-prompt` | テキストを Danbooru タグ + 自然言語に変換 |
 | `GET`  | `/api/invoke/session/{session_id}` | セッション現在状態取得 |
+| `GET`  | `/api/invoke/resonance/preview` | 共鳴タグのプレビュー取得（star4/5 カウントと上位タグ） |
 
 ### POST /api/invoke/summon
 
@@ -1033,10 +1091,30 @@ await session.event_queue.get()
     "rebel": {画像ペイロード},
     ...
   },
-  "spirit_order": ["faithful", "rebel", "stranger", "lunatic", "oracle"],
+  "spirit_order": ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"],
   "next_run_at": "2026-06-17T00:00:00+09:00"
 }
 ```
+
+### GET /api/invoke/resonance/preview
+
+共鳴モード（Echoes of Resonance）のタグプレビュー。スプーラーを使わない軽量エンドポイントです。
+
+**レスポンス:**
+```json
+{
+  "star4_count": 12,
+  "star5_count": 4,
+  "tags": [
+    {"name": "muted_colors", "score": 0.91},
+    {"name": "film_grain", "score": 0.87},
+    ...
+  ]
+}
+```
+
+- `tags` は `compute_resonance_hints()` の結果をフラットなリストに展開したもの（最大 20件）
+- 対象画像が 0件の場合は `{"star4_count": 0, "star5_count": 0, "tags": []}` を返す
 
 ---
 
@@ -1049,14 +1127,15 @@ await session.event_queue.get()
 **エクスポートされる定数:**
 
 ```javascript
-SPIRIT_NAMES = ["faithful", "rebel", "stranger", "lunatic", "oracle"]
+SPIRIT_NAMES = ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"]
 
 SPIRIT_META = {
-  faithful: { kanji: "映", nameEn: "Mirror", color: "#...", border: "..." },
-  rebel:    { kanji: "逆", nameEn: "Counter", ... },
-  stranger: { kanji: "漂", nameEn: "Wander",  ... },
-  lunatic:  { kanji: "奔", nameEn: "Surge",   ... },
-  oracle:   { kanji: "瞰", nameEn: "Vantage", ... },
+  faithful: { kanji: "映", en: "Mirror",   color: "text-amber-400",  border: "border-amber-500",  bg: "bg-amber-950" },
+  rebel:    { kanji: "逆", en: "Counter",  color: "text-rose-400",   border: "border-rose-500",   bg: "bg-rose-950"  },
+  stranger: { kanji: "漂", en: "Wander",   color: "text-teal-400",   border: "border-teal-500",   bg: "bg-teal-950"  },
+  lunatic:  { kanji: "奔", en: "Surge",    color: "text-violet-400", border: "border-violet-500", bg: "bg-violet-950"},
+  oracle:   { kanji: "瞰", en: "Vantage",  color: "text-sky-400",    border: "border-sky-500",    bg: "bg-sky-950"   },
+  sorrow:   { kanji: "愁", en: "Poet",     color: "text-slate-400",  border: "border-slate-500",  bg: "bg-slate-950" },
 }
 
 EMOJI_PALETTE   // 39 絵文字の選択肢
@@ -1085,7 +1164,10 @@ invokePersonCount    // "1" | "2" | "3+" | ""
 invokePromptMode     // "danbooru+natural" | "natural" | "danbooru"
 invokeCameraShot     // カメラショット
 invokeCameraAngle    // カメラアングル
-invokeEnabledSpirits // 有効なスピリット名の Set
+invokeEnabledSpirits // 有効なスピリット名の Set（デフォルト: faithful/rebel/stranger/lunatic/oracle が true、sorrow が false）
+invokeResonanceMode  // Echoes of Resonance トグル
+invokeResonanceTags  // 共鳴タグプレビュー [{name, score}, ...]
+invokeResonanceCount // 対象 star4+5 画像の合計数
 
 // Pro モード専用
 invokeProTopic, invokeProNegative, invokeProPersonTags
@@ -1095,7 +1177,7 @@ invokeProWorkflow, invokeProSeeds
 **主要関数:**
 
 ```javascript
-summon(token, locale)          // POST /summon → SSE 接続
+summon(token, locale)          // POST /summon → SSE 接続（resonance_mode を body に含む）
 cancel(token)                  // POST /cancel
 respin(spiritName, token)      // POST /respin
 adopt(spiritName, token)       // POST /adopt
@@ -1106,11 +1188,17 @@ enhancePrompt(token)           // POST /enhance-prompt
 toggleEmoji(emoji)             // 絵文字の追加/除去（最大 6）
 toggleSpirit(name)             // スピリットの有効/無効切り替え
 getSpiritFrame(name, score, threshold)  // フレームレアリティを返す
+fetchResonancePreview(token)   // GET /resonance/preview → invokeResonanceTags / invokeResonanceCount を更新
 ```
 
 **`getSpiritFrame()` のフレームレアリティ:**
 
-alignment_score と `invoke_gold_frame_threshold` を比較してフレームスタイルを決定します。スコアがしきい値以上でゴールドフレーム、未満で通常フレームが返ります。
+alignment_score と `invoke_gold_frame_threshold` を比較してフレームスタイルを決定します。
+
+| スピリット | 高スコア | 低スコア |
+|---|---|---|
+| faithful / stranger / oracle / sorrow | `"gold"` | `null` |
+| rebel / lunatic | `null` | `"obsidian"` |
 
 ### InvokePanel.vue
 
@@ -1295,7 +1383,7 @@ app.include_router(invoke_router)
 
 | 定数 / デフォルト | 値 | 効果 |
 |---|---|---|
-| `SPIRIT_ORDER` | `["faithful","rebel","stranger","lunatic","oracle"]` | スピリット実行順、UI 表示順 |
+| `SPIRIT_ORDER` | `["faithful","rebel","stranger","lunatic","oracle","sorrow"]` | スピリット実行順、UI 表示順 |
 | `SESSION_TTL` | 3600 秒 | セッションの有効期間 |
 | `invoke_gold_frame_threshold` | 0.85 | ゴールドフレーム表示の alignment_score しきい値 |
 | stranger `min_freq` / `max_freq` | 0.04 / 0.40 | stranger タグの Danbooru 頻度範囲 |
@@ -1306,3 +1394,7 @@ app.include_router(invoke_router)
 | oracle_scheduler ポーリング間隔 | 30 秒 | 目標時刻を見逃さないための間隔 |
 | `invoke_daily_oracle_min_free_gb` | 5.0 GB | オラクル生成に必要な最低ディスク空き容量 |
 | `enhance_prompt` 語彙検索 | `min_freq=0.005, max_freq=1.0` | 希少タグも含む広範囲の候補取得 |
+| resonance `n_tags` | 20 | compute_resonance_hints が返す最大タグ数 |
+| resonance scroll 上限 | 500 件 | embedding 重心計算に使う star4+ 画像の最大数 |
+| resonance 重み | star4=1.0, star5=2.0 | star5 を star4 の 2倍に重み付け |
+| `EMOTION_DIMENSIONS` | 12 次元 | loneliness / nostalgia / ephemeral / melancholy / serenity / wonder / joy / tension / warmth / mystery / desolation / vitality |
