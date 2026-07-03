@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from ..api.images import invalidate_image_caches
 from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION as _IMAGES_COLLECTION
 from ..runtime_config import get_runtime_config
 from .ollama import OllamaClient
@@ -160,6 +161,7 @@ async def run_ai_pipeline(
 
     finally:
         pipeline_state.finish()
+        invalidate_image_caches()
         logger.info(
             "AI pipeline done: %d processed, %d errors, cancelled=%s",
             pipeline_state.processed,

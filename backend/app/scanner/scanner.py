@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from ..api.images import invalidate_image_caches
 from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
 from ..ingest import extract_from_image
@@ -195,6 +196,7 @@ async def run_heal(db: QdrantDBClient) -> None:
 
     finally:
         scan_state.finish()
+        invalidate_image_caches()
         logger.info(
             "Heal done: added=%d updated=%d skipped=%d deleted=%d errors=%d",
             scan_state.added, scan_state.updated,
@@ -231,6 +233,7 @@ async def run_scan(db: QdrantDBClient, concurrency: int = 8) -> None:
 
     finally:
         scan_state.finish()
+        invalidate_image_caches()
         logger.info(
             "Full scan done: %d processed, %d errors",
             scan_state.processed, scan_state.errors,
@@ -328,7 +331,10 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
             await ensure_thumbnail(path, sha256)
         return
 
-    result = await loop.run_in_executor(None, extract_from_image, path)
+    result, _ = await asyncio.gather(
+        loop.run_in_executor(None, extract_from_image, path),
+        ensure_thumbnail(path, sha256),
+    )
 
     payload: dict = {
         "sha256": sha256,
@@ -352,4 +358,3 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
     }
 
     await db.upsert_new(sha256, payload)
-    await ensure_thumbnail(path, sha256)

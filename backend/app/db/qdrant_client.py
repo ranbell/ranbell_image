@@ -1573,15 +1573,17 @@ class QdrantDBClient:
                 model = ((pl.get("params") or {}).get("Model") or "").strip()
                 to_update.append((p.id, model))
             if to_update:
-                import asyncio as _asyncio
-                await _asyncio.gather(*[
-                    self._qc.set_payload(
-                        collection_name=IMAGES_COLLECTION,
-                        payload={"model_name": model},
-                        points=qm.PointIdsList(points=[point_id]),
-                    )
-                    for point_id, model in to_update
-                ])
+                from collections import defaultdict
+                groups: defaultdict[str, list] = defaultdict(list)
+                for point_id, model in to_update:
+                    groups[model].append(point_id)
+                for model, ids in groups.items():
+                    for i in range(0, len(ids), 500):
+                        await self._qc.set_payload(
+                            collection_name=IMAGES_COLLECTION,
+                            payload={"model_name": model},
+                            points=qm.PointIdsList(points=ids[i:i + 500]),
+                        )
                 count += len(to_update)
                 logger.info("model_name backfill: %d docs updated so far", count)
             if next_offset is None:
@@ -1619,14 +1621,17 @@ class QdrantDBClient:
                 category = "AI" if fmt in ("a1111", "comfyui") else "NR"
                 to_update.append((sha256, category))
             if to_update:
-                await asyncio.gather(*[
-                    self._qc.set_payload(
-                        collection_name=IMAGES_COLLECTION,
-                        payload={"batch_category": cat},
-                        points=qm.PointIdsList(points=[sha256_to_point_id(sha256)]),
-                    )
-                    for sha256, cat in to_update
-                ])
+                from collections import defaultdict
+                groups: defaultdict[str, list] = defaultdict(list)
+                for sha256, cat in to_update:
+                    groups[cat].append(sha256_to_point_id(sha256))
+                for cat, ids in groups.items():
+                    for i in range(0, len(ids), 500):
+                        await self._qc.set_payload(
+                            collection_name=IMAGES_COLLECTION,
+                            payload={"batch_category": cat},
+                            points=qm.PointIdsList(points=ids[i:i + 500]),
+                        )
                 count += len(to_update)
                 logger.info("batch_category backfill: %d docs updated so far", count)
             if next_offset is None:
@@ -1661,14 +1666,20 @@ class QdrantDBClient:
                 path = pl.get("path", "")
                 to_update.append((sha256, path.startswith(source_prefix)))
             if to_update:
-                await asyncio.gather(*[
-                    self._qc.set_payload(
+                true_ids  = [sha256_to_point_id(s) for s, v in to_update if v]
+                false_ids = [sha256_to_point_id(s) for s, v in to_update if not v]
+                for i in range(0, len(true_ids), 500):
+                    await self._qc.set_payload(
                         collection_name=IMAGES_COLLECTION,
-                        payload={"is_reference": is_ref},
-                        points=qm.PointIdsList(points=[sha256_to_point_id(sha256)]),
+                        payload={"is_reference": True},
+                        points=qm.PointIdsList(points=true_ids[i:i + 500]),
                     )
-                    for sha256, is_ref in to_update
-                ])
+                for i in range(0, len(false_ids), 500):
+                    await self._qc.set_payload(
+                        collection_name=IMAGES_COLLECTION,
+                        payload={"is_reference": False},
+                        points=qm.PointIdsList(points=false_ids[i:i + 500]),
+                    )
                 count += len(to_update)
                 logger.info("is_reference backfill: %d docs updated so far", count)
             if next_offset is None:

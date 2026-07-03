@@ -51,7 +51,7 @@ _defaults = {
     "wd14_common_ratio":         0.3,
     "wd14_unique_count":         20,
     # Processing parallelism
-    "alignment_concurrency":    1,
+    "alignment_concurrency":    2,
     "pipeline_auto_continue":   True,
     "scan_concurrency":         8,
 }

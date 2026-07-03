@@ -4,8 +4,10 @@ import asyncio
 import logging
 from collections.abc import Callable
 
+from qdrant_client import models as qm
+
 from ..ai.ollama import OllamaClient
-from ..db.qdrant_client import QdrantDBClient
+from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION
 from .bm25_matcher import compute_bm25_match, detect_prompt_style
 from .embedding import compute_alignment_score
 from .vlm_analyzer import analyze_with_llm
@@ -146,14 +148,31 @@ class AlignmentEvaluator:
             targets = list(sha256s)
         else:
             already_scored = await self._db.scroll_alignment_sha256s()
-            all_docs = await self._db.scroll_all()
-            targets = [
-                d["sha256"]
-                for d in all_docs
-                if (d.get("positive_prompt") or "").strip()
-                and d.get("wd14_tags")
-                and d["sha256"] not in already_scored
-            ]
+            targets = []
+            offset = None
+            while True:
+                points, next_offset = await self._db._qc.scroll(
+                    collection_name=IMAGES_COLLECTION,
+                    limit=200,
+                    offset=offset,
+                    with_payload=qm.PayloadSelectorInclude(
+                        include=["sha256", "positive_prompt", "wd14_tags"]
+                    ),
+                    with_vectors=False,
+                )
+                for p in points:
+                    pl = p.payload or {}
+                    sha = pl.get("sha256", "")
+                    if (
+                        sha
+                        and sha not in already_scored
+                        and (pl.get("positive_prompt") or "").strip()
+                        and pl.get("wd14_tags")
+                    ):
+                        targets.append(sha)
+                if next_offset is None:
+                    break
+                offset = next_offset
 
         total = len(targets)
         sem = asyncio.Semaphore(concurrency)

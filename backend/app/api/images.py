@@ -45,6 +45,15 @@ _facets_cache: dict = {"data": None, "ts": 0.0}
 _FACETS_TTL = 120.0
 
 
+def invalidate_image_caches() -> None:
+    """Force-expire all in-memory caches. Call after scan or AI pipeline completes."""
+    _tags_cache.update({"data": None, "ts": 0.0})
+    _dirs_cache.update({"data": None, "ts": 0.0})
+    _name_cache.update({"name_asc": None, "name_desc": None, "ts": 0.0})
+    _align_sort_cache.update({"data": None, "ts": 0.0})
+    _facets_cache.update({"data": None, "ts": 0.0})
+
+
 async def _get_name_sorted(db, sort: str) -> list[str]:
     """Return sha256 list sorted by name (cached, built from minimal payload scroll)."""
     now = time.time()
