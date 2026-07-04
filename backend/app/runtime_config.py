@@ -39,6 +39,7 @@ _defaults = {
     "invoke_daily_oracle_time":          "00:00",
     "invoke_daily_oracle_timezone":      "UTC",
     "invoke_daily_oracle_topic":         "",
+    "invoke_daily_oracle_roulette":      False,
     "invoke_daily_oracle_min_free_gb":   5.0,
     # Disk gauge thresholds (used_pct %)
     "disk_caution_pct":                  75,

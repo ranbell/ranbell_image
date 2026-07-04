@@ -316,6 +316,33 @@ let refineAbortController = null
 const refineTemp = ref(0.7)
 const refineDivergence = ref(0)        // 0.0〜1.0: Transmute (mutate style away from references)
 const refineMutationTags = ref([])     // mutation tags sampled by the backend
+const refineVariationCount = ref(1)    // natural style: prose pass fan-out (1〜3)
+const refineVariants = ref([])         // [{positive, temperature}] extra fan-out variants
+const refineEmotionShift = ref('')     // target emotion dimension ('' = off)
+const imageRoles = ref(new Map())      // sha256 → 'both' | 'style' | 'content'
+
+const REFINE_EMOTIONS = [
+  'loneliness', 'nostalgia', 'ephemeral', 'melancholy', 'serenity', 'wonder',
+  'joy', 'tension', 'warmth', 'mystery', 'desolation', 'vitality',
+]
+
+const _ROLE_CYCLE = { both: 'style', style: 'content', content: 'both' }
+const _ROLE_ICONS = { both: '🖼️', style: '🎨', content: '🧍' }
+
+function cycleImageRole(sha) {
+  const next = new Map(imageRoles.value)
+  next.set(sha, _ROLE_CYCLE[next.get(sha) || 'both'])
+  imageRoles.value = next
+}
+
+function imageRoleIcon(sha) {
+  return _ROLE_ICONS[imageRoles.value.get(sha) || 'both']
+}
+
+function applyRefineVariant(variant) {
+  positivePrompt.value = variant.positive
+  refinedPrompt.value = variant.positive
+}
 const refineNumCtx = ref(16384)
 const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detailed'
 const refineInstructionMode = ref('basic')   // 'none' | 'basic' | 'enhanced'
@@ -2142,6 +2169,7 @@ async function runRefine() {
   refineLightingTags.value = []
   refineWd14Analysis.value = null
   refineMutationTags.value = []
+  refineVariants.value = []
 
   try {
     const orderedShas = [...selectedIds.value].slice(0, 6)
@@ -2158,6 +2186,9 @@ async function runRefine() {
       wd14_common_ratio: refineCommonRatio.value,
       wd14_unique_count: refineUniqueCount.value,
       divergence: refineDivergence.value,
+      variation_count: refineVariationCount.value,
+      roles: orderedShas.map(s => imageRoles.value.get(s) || 'both'),
+      emotion_shift: refineEmotionShift.value,
       auto_submit: refineAutoSubmit.value,
       batch_count: refineBatchCount.value,
       workflow_name: refineWorkflow.value,
@@ -2234,6 +2265,7 @@ function handleRefineEvent(evt) {
       removedTags.value = evt.removed_tags || []
       refineWd14Analysis.value = evt.wd14_analysis || null
       refineMutationTags.value = evt.mutation_tags || []
+      refineVariants.value = evt.variants || []
       refineHairTags.value = evt.hair_tags || []
       refineClothingTags.value = evt.clothing_tags || []
       refineAccessoryTags.value = evt.accessory_tags || []
@@ -3271,6 +3303,32 @@ onUnmounted(() => {
                       </p>
                     </div>
                     <div>
+                      <label class="text-xs text-gray-500 block mb-1" :title="$t('refine.emotionShiftTip')">
+                        🌒 {{ $t('refine.emotionShift') }}
+                      </label>
+                      <select v-model="refineEmotionShift" :disabled="refining || refineDirectPrompt !== null"
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50">
+                        <option value="">{{ $t('refine.emotionShiftOff') }}</option>
+                        <option v-for="em in REFINE_EMOTIONS" :key="em" :value="em">{{ $t(`inspire.emotion.${em}`) }}</option>
+                      </select>
+                    </div>
+                    <div v-if="refineStyle === 'natural'">
+                      <label class="text-xs text-gray-500 block mb-1" :title="$t('refine.variationTip')">
+                        🎲 {{ $t('refine.variationCount') }}
+                      </label>
+                      <div class="flex gap-1">
+                        <button v-for="n in [1, 2, 3]" :key="n"
+                          @click="refineVariationCount = n"
+                          :disabled="refining || refineDirectPrompt !== null"
+                          :class="refineVariationCount === n
+                            ? 'bg-purple-700/60 border-purple-500/60 text-purple-200'
+                            : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300'"
+                          class="flex-1 py-1.5 rounded-lg border text-xs transition disabled:opacity-50">
+                          {{ n }}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
                       <label class="text-xs text-gray-500 block mb-1">{{ $t('refine.numCtx') }}</label>
                       <select v-model.number="refineNumCtx" :disabled="refining || refineDirectPrompt !== null"
                         class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500 disabled:opacity-50">
@@ -3502,6 +3560,18 @@ onUnmounted(() => {
                   <div v-if="proseMissing" class="px-3 py-2 bg-yellow-900/40 border border-yellow-700/50 rounded-lg">
                     <p class="text-xs text-yellow-300">{{ $t('refine.proseMissing') }}</p>
                   </div>
+                  <!-- Fan-out variant switcher -->
+                  <div v-if="refineVariants.length" class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[10px] text-gray-600 uppercase tracking-wide">{{ $t('refine.variants') }}</span>
+                    <button v-for="(v, i) in refineVariants" :key="i"
+                      @click="applyRefineVariant(v)"
+                      :class="positivePrompt === v.positive
+                        ? 'bg-purple-700 text-white border-purple-500'
+                        : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'"
+                      class="px-2 py-0.5 rounded-md border text-[10px] font-mono transition">
+                      V{{ i + 2 }} · t{{ v.temperature }}
+                    </button>
+                  </div>
                   <!-- Tag format toggle -->
                   <div class="flex items-center gap-1.5">
                     <span class="text-[10px] text-gray-600 uppercase tracking-wide">{{ $t('refine.tagFormatLabel') }}</span>
@@ -3631,9 +3701,20 @@ onUnmounted(() => {
                         :value="imageWeights.get(sha256) ?? 50"
                         :disabled="refining"
                         @input="onWeightChange(sha256, Number($event.target.value))"
-                        class="w-full h-1 rounded appearance-none bg-gray-700 accent-purple-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        class="w-full h-1 rounded appearance-none bg-gray-700 accent-purple-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                         :title="$t('refine.weightTip')"
                       />
+                      <button @click="cycleImageRole(sha256)"
+                        :disabled="refining"
+                        :title="$t('refine.roleTip')"
+                        :class="(imageRoles.get(sha256) || 'both') === 'both'
+                          ? 'border-gray-700/60 text-gray-500'
+                          : (imageRoles.get(sha256) === 'style'
+                            ? 'border-teal-600/60 text-teal-300 bg-teal-950/40'
+                            : 'border-rose-600/60 text-rose-300 bg-rose-950/40')"
+                        class="mt-1 w-full py-0.5 rounded border text-[9px] transition disabled:opacity-40">
+                        {{ imageRoleIcon(sha256) }} {{ $t(`refine.role_${imageRoles.get(sha256) || 'both'}`) }}
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -91,6 +91,17 @@ const invokeFrontierTags = ref([])    // [{name}] preview from /frontier/preview
 // Heat: global LLM temperature multiplier over each spirit's native temperature
 const invokeHeat = ref(1.0)           // 0.6–1.3
 
+// Wildness (乱れ度): widens stranger/lunatic vocab pools (1–3)
+const invokeWildness = ref(1)
+
+// Emotion register: target emotion dimension ('' = off)
+const invokeEmotion = ref('')
+
+export const EMOTION_DIMENSIONS = [
+  'loneliness', 'nostalgia', 'ephemeral', 'melancholy', 'serenity', 'wonder',
+  'joy', 'tension', 'warmth', 'mystery', 'desolation', 'vitality',
+]
+
 // SSE
 let _eventSource = null
 
@@ -254,6 +265,8 @@ async function summon(token, locale = 'en') {
     resonance_mode: invokeResonanceMode.value,
     frontier_mode: invokeFrontierMode.value,
     heat: invokeHeat.value,
+    wildness: invokeWildness.value,
+    emotion: invokeEmotion.value,
     locale,
   }
 
@@ -287,6 +300,49 @@ async function fetchResonancePreview(token) {
     invokeResonanceTags.value = []
     invokeResonanceCount.value = 0
   }
+}
+
+async function _launchLineage(endpoint, payload, token, locale) {
+  if (invokeLoading.value) return
+  invokeLoading.value = true
+  invokeSessionId.value = null
+  invokeAxes.value = null
+  _resetSpirits()
+
+  const enabled = SPIRIT_NAMES.filter(n => invokeEnabledSpirits.value[n])
+  const body = {
+    ...payload,
+    workflow_name: invokeWorkflow.value,
+    enabled_spirits: enabled,
+    prompt_mode: invokePromptMode.value,
+    heat: invokeHeat.value,
+    wildness: invokeWildness.value,
+    locale,
+  }
+
+  try {
+    const r = await fetch(`/api/invoke/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Token': token },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json()
+    invokeSessionId.value = data.session_id
+    _connectEventSource(data.session_id, token)
+  } catch (err) {
+    invokeLoading.value = false
+    console.error(`Invoke ${endpoint} failed:`, err)
+    throw err
+  }
+}
+
+async function evolve(sha256, token, locale = 'en', mutation = 0.3) {
+  await _launchLineage('evolve', { sha256, mutation }, token, locale)
+}
+
+async function breed(sha256A, sha256B, token, locale = 'en') {
+  await _launchLineage('breed', { sha256_a: sha256A, sha256_b: sha256B }, token, locale)
 }
 
 async function fetchFrontierPreview(token) {
@@ -428,8 +484,9 @@ export function useInvokeSession() {
     invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
     invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
     invokeFrontierMode, invokeFrontierTags, invokeHeat,
+    invokeWildness, invokeEmotion,
     openInvoke, closeInvoke,
-    summon, cancel, respin, adopt, sendToRefine,
+    summon, cancel, respin, adopt, sendToRefine, evolve, breed,
     fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
     toggleEmoji, toggleSpirit,
     getSpiritFrame,

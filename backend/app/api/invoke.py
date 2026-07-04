@@ -49,6 +49,10 @@ class SummonRequest(BaseModel):
     frontier_mode: bool = False
     # Global LLM temperature multiplier applied on top of each spirit's native temperature
     heat: float = 1.0  # 0.6–1.3
+    # 乱れ度 1–3: widens stranger/lunatic vocab pools (2: wider band + 3 wild tags, 3: + rare tag)
+    wildness: int = 1
+    # Target emotion dimension ('' | loneliness | nostalgia | ... — see emotion_tagger.EMOTION_DIMENSIONS)
+    emotion: str = ""
     # Common
     workflow_name: str = ""
     input_mode: str = "light"  # light | pro
@@ -73,6 +77,28 @@ class SendToRefineRequest(BaseModel):
 
 class DailyOracleRequest(BaseModel):
     workflow_name: str = ""
+
+
+class EvolveRequest(BaseModel):
+    sha256: str
+    mutation: float = 0.3    # fraction of mutable axes to jitter (0–1)
+    workflow_name: str = ""
+    enabled_spirits: list[str] = []
+    prompt_mode: str = "danbooru+natural"
+    locale: str = "en"
+    heat: float = 1.0
+    wildness: int = 1
+
+
+class BreedRequest(BaseModel):
+    sha256_a: str
+    sha256_b: str
+    workflow_name: str = ""
+    enabled_spirits: list[str] = []
+    prompt_mode: str = "danbooru+natural"
+    locale: str = "en"
+    heat: float = 1.0
+    wildness: int = 1
 
 
 class CancelRequest(BaseModel):
@@ -176,6 +202,7 @@ async def summon(body: SummonRequest, request: Request):
         pro_sections=_pro_sections,
         rebel_inversion=body.rebel_inversion,
         heat=body.heat,
+        wildness=body.wildness,
         db=db,
         ollama=ollama,
         comfy=comfy,
@@ -208,6 +235,7 @@ async def summon(body: SummonRequest, request: Request):
         session_manager=mgr,
         resonance_mode=body.resonance_mode,
         frontier_mode=body.frontier_mode,
+        emotion=body.emotion,
     )
 
     request.app.state.invoke_event_queues[session.session_id] = session.event_queue
@@ -262,6 +290,125 @@ async def respin(body: RespinRequest, request: Request):
     )
     spirit.job_ids.append(job_id)
     return {"job_id": job_id}
+
+
+async def _load_genesis_axes(db, sha256: str) -> tuple[dict, dict]:
+    """Return (axes_snapshot, genesis) for an Invoke-born image, or raise HTTPException."""
+    doc = await db.get(sha256)
+    if not doc:
+        raise HTTPException(404, f"Image {sha256[:12]} not found")
+    genesis = doc.get("genesis") or {}
+    axes = genesis.get("axes_snapshot") or {}
+    if not axes:
+        raise HTTPException(400, f"Image {sha256[:12]} has no genesis axes (not Invoke-born)")
+    return axes, genesis
+
+
+async def _launch_lineage_session(
+    request: Request,
+    *,
+    mode: str,
+    parent_shas: list[str],
+    parent_axes: list[dict],
+    user_intent: str,
+    workflow_name: str,
+    enabled_spirits: list[str],
+    prompt_mode: str,
+    locale: str,
+    heat: float,
+    wildness: int,
+    mutation: float = 0.3,
+) -> dict:
+    mgr = _get_invoke_manager(request)
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+
+    from ..runtime_config import get_runtime_config
+    cfg = await get_runtime_config(db)
+    workflow_name = workflow_name or cfg.get("invoke_daily_oracle_workflow", "")
+    if not workflow_name:
+        raise HTTPException(422, "workflow_name required (no default workflow configured)")
+
+    session = mgr.create_session(
+        user_intent=user_intent,
+        input_mode=mode,
+        workflow_name=workflow_name,
+        enabled_spirits=enabled_spirits,
+        prompt_mode=prompt_mode,
+        locale=locale,
+        heat=heat,
+        wildness=wildness,
+        parent_sha256s=parent_shas,
+        db=db,
+        ollama=ollama,
+        comfy=request.app.state.comfy,
+        spooler=request.app.state.spooler,
+    )
+
+    from ..spooler.models import JobLane
+    from ..jobs.runners import run_invoke_lineage
+
+    job_id = request.app.state.spooler.submit(
+        JobLane.PROMPT,
+        f"invoke.{mode}",
+        run_invoke_lineage,
+        meta={"session_id": session.session_id, "mode": mode, "parents": parent_shas},
+        db=db,
+        ollama=ollama,
+        session_id=session.session_id,
+        parent_axes=parent_axes,
+        mode=mode,
+        mutation=mutation,
+        session_manager=mgr,
+    )
+
+    request.app.state.invoke_event_queues[session.session_id] = session.event_queue
+    return {"session_id": session.session_id, "job_id": job_id}
+
+
+@router.post("/evolve")
+async def evolve(body: EvolveRequest, request: Request):
+    """Re-summon from an Invoke-born image's axes snapshot with mutation."""
+    db = request.app.state.db
+    axes, genesis = await _load_genesis_axes(db, body.sha256)
+    return await _launch_lineage_session(
+        request,
+        mode="evolve",
+        parent_shas=[body.sha256],
+        parent_axes=[axes],
+        user_intent=genesis.get("original_intent") or "[evolve]",
+        workflow_name=body.workflow_name,
+        enabled_spirits=body.enabled_spirits,
+        prompt_mode=body.prompt_mode,
+        locale=body.locale,
+        heat=body.heat,
+        wildness=body.wildness,
+        mutation=body.mutation,
+    )
+
+
+@router.post("/breed")
+async def breed(body: BreedRequest, request: Request):
+    """Merge two Invoke-born images' axes snapshots into a child session."""
+    db = request.app.state.db
+    axes_a, genesis_a = await _load_genesis_axes(db, body.sha256_a)
+    axes_b, genesis_b = await _load_genesis_axes(db, body.sha256_b)
+    intent_a = genesis_a.get("original_intent") or ""
+    intent_b = genesis_b.get("original_intent") or ""
+    user_intent = " × ".join(filter(None, dict.fromkeys([intent_a, intent_b]))) or "[breed]"
+    return await _launch_lineage_session(
+        request,
+        mode="breed",
+        parent_shas=[body.sha256_a, body.sha256_b],
+        parent_axes=[axes_a, axes_b],
+        user_intent=user_intent,
+        workflow_name=body.workflow_name,
+        enabled_spirits=body.enabled_spirits,
+        prompt_mode=body.prompt_mode,
+        locale=body.locale,
+        heat=body.heat,
+        wildness=body.wildness,
+    )
 
 
 @router.post("/adopt")
@@ -391,6 +538,7 @@ async def trigger_daily_oracle(body: DailyOracleRequest, request: Request):
         daily_oracle_date=today,
         workflow_name=workflow_name,
         topic=topic,
+        roulette=bool(cfg.get("invoke_daily_oracle_roulette", False)),
     )
     return {"status": "queued", "job_id": job_id, "date": today}
 

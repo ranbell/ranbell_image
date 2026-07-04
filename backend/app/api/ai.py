@@ -50,6 +50,9 @@ class RefineRequest(BaseModel):
     wd14_common_ratio: float = 0.3
     wd14_unique_count: int = 20
     divergence: float = 0.0  # 0–1: mutate style/scene away from references (Transmute)
+    variation_count: int = 1  # natural style only: run the prose pass N times (1–3) at rising temperatures
+    roles: list[str] = []  # per-image role aligned with sha256s: 'both' | 'style' | 'content'
+    emotion_shift: str = ""  # target emotion dimension (e.g. 'nostalgia') to rewrite the register toward
 
 
 class SearchRequest(BaseModel):
@@ -855,6 +858,33 @@ def _tags_conflict(tag_a: str, tag_b: str) -> bool:
     return bool(toks_a & toks_b)
 
 
+def _filter_tags_for_role(scored: list[tuple[str, float]], role: str) -> list[tuple[str, float]]:
+    """Filter an image's scored WD14 tags according to its reference role.
+
+    'style'  — contribute only aesthetics: drop character-identity tags
+               (subject counts, hair/eyes/clothing/accessories).
+    'content' — contribute only the subject: drop scene/background tags.
+    Anything else ('both') passes through unchanged.
+    """
+    if role not in ("style", "content"):
+        return scored
+    from ..invoke.vocab_bank import _classify_resonance_tag
+
+    if role == "style":
+        return [
+            (t, s) for t, s in scored
+            if t.lower() not in _SUBJECT_ANCHOR_TAGS
+            and _classify_resonance_tag(t) != "character"
+        ]
+    return [(t, s) for t, s in scored if _classify_resonance_tag(t) != "scene"]
+
+
+_ROLE_CONTEXT_LABELS = {
+    "style": " — STYLE reference (aesthetics only: lighting / palette / background / art style)",
+    "content": " — CONTENT reference (subject only: character / pose)",
+}
+
+
 def _build_weighted_wd14_context(
     raw_docs: list[tuple[dict, int]],
     weights: list[float],
@@ -863,14 +893,22 @@ def _build_weighted_wd14_context(
     common_ratio: float = 0.3,
     unique_count: int = 20,
     must_threshold: float = _WD14_MUST_INCLUDE_THRESHOLD,
+    roles: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Build VLM context with common/unique tag decomposition.
+
+    roles: optional per-image role aligned by original index ('both'|'style'|'content').
 
     Returns (context_str, analysis_dict).
     analysis_dict: common_tags, unique_by_image.
     """
     if not raw_docs:
         return "", {}
+
+    def _role_of(img_idx: int) -> str:
+        if roles and img_idx < len(roles):
+            return roles[img_idx] or "both"
+        return "both"
 
     # Collect scored tags per image, using correct weight by original index
     image_scored: list[list[tuple[str, float]]] = []
@@ -889,6 +927,7 @@ def _build_weighted_wd14_context(
             )
         else:
             scored = [(t, 0.5) for t in wd14 if t not in conflict_tags]
+        scored = _filter_tags_for_role(scored, _role_of(img_idx))
         image_scored.append(scored)
         image_tag_sets.append({t for t, _ in scored})
         image_weights.append(w)
@@ -998,7 +1037,8 @@ def _build_weighted_wd14_context(
         all_unique = must_final + ref_final
         if all_unique:
             lines.append(f"Style/aesthetic reference tags (influence {pct}%): {', '.join(all_unique)}")
-        part = f"[Image {len(context_parts) + 1} — influence weight: {pct}% — distinctive elements]"
+        role_label = _ROLE_CONTEXT_LABELS.get(_role_of(img_idx), "")
+        part = f"[Image {len(context_parts) + 1} — influence weight: {pct}%{role_label} — distinctive elements]"
         if lines:
             part += "\n" + "\n".join(lines)
         context_parts.append(part)

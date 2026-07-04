@@ -6,6 +6,7 @@ import {
   SPIRIT_NAMES,
   SPIRIT_META,
   EMOJI_PALETTE,
+  EMOTION_DIMENSIONS,
   getSpiritFrame,
 } from '../composables/useInvokeSession.js'
 import { getToken } from '../apiToken.js'
@@ -29,11 +30,46 @@ const {
   invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
   invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
   invokeFrontierMode, invokeFrontierTags, invokeHeat,
+  invokeWildness, invokeEmotion,
   openInvoke, closeInvoke,
-  summon, cancel, respin, adopt, sendToRefine,
+  summon, cancel, respin, adopt, sendToRefine, evolve, breed,
   fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
   toggleEmoji, toggleSpirit,
 } = useInvokeSession()
+
+// ── Lineage (Evolve & Breed) ──────────────────────────────────────────────────
+const breedPicks = ref([])  // sha256 list, max 2
+
+function toggleBreedPick(sha256) {
+  const idx = breedPicks.value.indexOf(sha256)
+  if (idx !== -1) breedPicks.value.splice(idx, 1)
+  else {
+    if (breedPicks.value.length >= 2) breedPicks.value.shift()
+    breedPicks.value.push(sha256)
+  }
+}
+
+async function handleEvolve(spiritName) {
+  const sha256 = invokeSpirits.value[spiritName]?.sha256
+  if (!sha256) return
+  breedPicks.value = []
+  try {
+    await evolve(sha256, getToken(), locale.value)
+  } catch (err) {
+    emit('toast', { msg: t('invoke.errors.summon', { msg: err.message }), type: 'error' })
+  }
+}
+
+async function handleBreed() {
+  if (breedPicks.value.length !== 2) return
+  const [a, b] = breedPicks.value
+  breedPicks.value = []
+  try {
+    await breed(a, b, getToken(), locale.value)
+  } catch (err) {
+    emit('toast', { msg: t('invoke.errors.summon', { msg: err.message }), type: 'error' })
+  }
+}
 
 // Resonance / Frontier are mutually exclusive drift directions
 function toggleResonance() {
@@ -894,6 +930,22 @@ function onThumbnailError(event) {
                   </div>
                 </div>
 
+                <!-- Emotion register -->
+                <div>
+                  <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1"
+                    :title="t('invoke.emotionTitle')">🌒 {{ t('invoke.emotionLabel') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <button v-for="em in EMOTION_DIMENSIONS" :key="em"
+                      @click="invokeEmotion = invokeEmotion === em ? '' : em"
+                      :class="invokeEmotion === em
+                        ? 'bg-indigo-700/60 border-indigo-500/60 text-indigo-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="px-2 py-1 rounded-lg border text-[9px] transition">
+                      {{ t(`inspire.emotion.${em}`) }}
+                    </button>
+                  </div>
+                </div>
+
               </template>
 
               <!-- ── Pro mode inputs ── -->
@@ -1089,6 +1141,22 @@ function onThumbnailError(event) {
                 </div>
               </div>
 
+              <!-- ── Wildness (乱れ度) — stranger/lunatic vocab pools (common) ── -->
+              <div v-if="invokeEnabledSpirits.stranger || invokeEnabledSpirits.lunatic">
+                <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1"
+                  :title="t('invoke.wildnessTitle')">🌪️ {{ t('invoke.wildnessLabel') }}</p>
+                <div class="flex gap-1">
+                  <button v-for="lv in [1, 2, 3]" :key="lv"
+                    @click="invokeWildness = lv"
+                    :class="invokeWildness === lv
+                      ? 'bg-amber-700/60 border-amber-500/60 text-amber-200'
+                      : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300'"
+                    class="flex-1 py-1 rounded-lg border text-[10px] transition-all">
+                    {{ t(`invoke.wildness${lv}`) }}
+                  </button>
+                </div>
+              </div>
+
               <!-- ── Summon / Cancel ── -->
               <div class="space-y-1.5">
                 <button @click="handleSummon"
@@ -1179,8 +1247,20 @@ function onThumbnailError(event) {
                 </div>
               </div>
 
+              <!-- Breed action bar: appears when 2 spirits are picked -->
+              <div v-if="breedPicks.length > 0" class="mb-3 flex items-center gap-2 px-3 py-2 rounded-xl border border-pink-800/40 bg-pink-950/30">
+                <span class="text-[10px] text-pink-300">⚭ {{ t('invoke.breedPicked', { n: breedPicks.length }) }}</span>
+                <button @click="handleBreed"
+                  :disabled="breedPicks.length !== 2 || isLoading"
+                  class="px-3 py-1 rounded-lg border border-pink-500/60 bg-pink-800/50 hover:bg-pink-700/50 text-[10px] text-pink-100 disabled:opacity-40 transition">
+                  {{ t('invoke.btnBreed') }}
+                </button>
+                <button @click="breedPicks = []"
+                  class="px-2 py-1 rounded-lg text-[10px] text-gray-500 hover:text-gray-300 transition">✕</button>
+              </div>
+
               <!-- Bento spirit cards (horizontal, appears immediately on summon) -->
-              <div v-else class="pb-2">
+              <div v-if="hasAnyResult || isLoading" class="pb-2">
                 <div class="grid gap-3" :style="`grid-template-columns: repeat(${enabledSpiritList.length}, minmax(0, 1fr))`">
                   <template v-for="name in SPIRIT_NAMES" :key="name">
                     <div v-if="invokeEnabledSpirits[name]"
@@ -1282,20 +1362,39 @@ function onThumbnailError(event) {
                       </div>
 
                       <!-- Action buttons -->
-                      <div v-if="invokeSpirits[name]?.status === 'done'" @click.stop class="flex gap-1 px-2.5 pb-2.5 mt-auto">
-                        <button @click="handleRespin(name)"
-                          :disabled="isLoading"
-                          class="flex-1 py-1.5 rounded-lg border border-gray-700/50 bg-gray-800/60 hover:bg-gray-700/60 text-[9px] text-gray-400 hover:text-gray-200 disabled:opacity-40 transition">
-                          {{ t('invoke.btnRespin') }}
-                        </button>
-                        <button @click="handleAdopt(name)"
-                          class="flex-1 py-1.5 rounded-lg border border-yellow-600/40 bg-yellow-900/30 hover:bg-yellow-800/40 text-[9px] text-yellow-300 hover:text-yellow-200 transition">
-                          {{ t('invoke.btnAdopt') }}
-                        </button>
-                        <button @click="handleSendToRefine(name)"
-                          class="flex-1 py-1.5 rounded-lg border border-purple-700/40 bg-purple-900/30 hover:bg-purple-800/40 text-[9px] text-purple-300 hover:text-purple-200 transition">
-                          {{ t('invoke.btnRefine') }}
-                        </button>
+                      <div v-if="invokeSpirits[name]?.status === 'done'" @click.stop class="px-2.5 pb-2.5 mt-auto space-y-1">
+                        <div class="flex gap-1">
+                          <button @click="handleRespin(name)"
+                            :disabled="isLoading"
+                            class="flex-1 py-1.5 rounded-lg border border-gray-700/50 bg-gray-800/60 hover:bg-gray-700/60 text-[9px] text-gray-400 hover:text-gray-200 disabled:opacity-40 transition">
+                            {{ t('invoke.btnRespin') }}
+                          </button>
+                          <button @click="handleAdopt(name)"
+                            class="flex-1 py-1.5 rounded-lg border border-yellow-600/40 bg-yellow-900/30 hover:bg-yellow-800/40 text-[9px] text-yellow-300 hover:text-yellow-200 transition">
+                            {{ t('invoke.btnAdopt') }}
+                          </button>
+                          <button @click="handleSendToRefine(name)"
+                            class="flex-1 py-1.5 rounded-lg border border-purple-700/40 bg-purple-900/30 hover:bg-purple-800/40 text-[9px] text-purple-300 hover:text-purple-200 transition">
+                            {{ t('invoke.btnRefine') }}
+                          </button>
+                        </div>
+                        <div v-if="invokeSpirits[name]?.sha256" class="flex gap-1">
+                          <button @click="handleEvolve(name)"
+                            :disabled="isLoading"
+                            :title="t('invoke.evolveTitle')"
+                            class="flex-1 py-1.5 rounded-lg border border-emerald-700/40 bg-emerald-950/30 hover:bg-emerald-900/40 text-[9px] text-emerald-300 hover:text-emerald-200 disabled:opacity-40 transition">
+                            🧬 {{ t('invoke.btnEvolve') }}
+                          </button>
+                          <button @click="toggleBreedPick(invokeSpirits[name].sha256)"
+                            :disabled="isLoading"
+                            :title="t('invoke.breedPickTitle')"
+                            :class="breedPicks.includes(invokeSpirits[name].sha256)
+                              ? 'border-pink-500/60 bg-pink-900/50 text-pink-200'
+                              : 'border-pink-800/40 bg-pink-950/20 text-pink-400/70 hover:text-pink-300'"
+                            class="flex-1 py-1.5 rounded-lg border text-[9px] disabled:opacity-40 transition">
+                            ⚭ {{ t('invoke.btnBreedPick') }}
+                          </button>
+                        </div>
                       </div>
                       <!-- Progress bar while in-flight -->
                       <div v-else-if="['composing','generating','tagging'].includes(invokeSpirits[name]?.status)" class="px-2.5 pb-2.5 mt-auto">

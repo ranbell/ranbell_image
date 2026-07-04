@@ -155,12 +155,18 @@ async def get_vocab_hints(
     axis_tags: list[str],
     stranger_count: int = 1,
     lunatic_count: int = 2,
+    wildness: int = 1,
 ) -> dict[str, list[str]]:
     """Return {"stranger": [...], "lunatic": [...]} using Qdrant semantic search.
 
     Stranger: tags semantically related to the axis, medium Danbooru frequency.
     Lunatic: tags semantically distant from the axis, high Danbooru frequency,
              absent from the user's personal library.
+
+    wildness (乱れ度) widens the pools:
+      1 — default counts and frequency bands
+      2 — lunatic pool widens to min_freq 0.10 and gets 3 wild tags
+      3 — level 2 + one rare-band tag (freq 0.005–0.05) + 2 stranger guests
 
     Falls back to empty lists if vocab is not imported yet.
     """
@@ -171,6 +177,13 @@ async def get_vocab_hints(
             "to enable stranger/lunatic tag hints"
         )
         return {"stranger": [], "lunatic": []}
+
+    wildness = max(1, min(3, wildness))
+    lunatic_min_freq = 0.40 if wildness == 1 else 0.10
+    if wildness >= 2:
+        lunatic_count = max(lunatic_count, 3)
+    if wildness >= 3:
+        stranger_count = max(stranger_count, 2)
 
     axis_set = {t.lower().replace(" ", "_") for t in axis_tags}
     axis_text = " ".join(axis_tags) or "general anime artwork"
@@ -206,7 +219,7 @@ async def get_vocab_hints(
     # ── Lunatic: high Danbooru frequency, absent from user library, DISTANT from axis ──
     try:
         lunatic_hits = await db.search_wd14_vocab(
-            axis_vec, min_freq=0.40, max_freq=1.0, category=0, limit=200
+            axis_vec, min_freq=lunatic_min_freq, max_freq=1.0, category=0, limit=200
         )
         # Filter: axis exclusion + absent from user library
         lunatic_pool = [
@@ -221,6 +234,25 @@ async def get_vocab_hints(
     except Exception as e:
         logger.warning("lunatic hint failed: %s", e)
         lunatic = []
+
+    # ── Wildness 3: add one genuinely exotic rare-band tag ──
+    if wildness >= 3:
+        try:
+            rare_hits = await db.search_wd14_vocab(
+                axis_vec, min_freq=0.005, max_freq=0.05, category=0, limit=60
+            )
+            rare_pool = [
+                h for h in rare_hits
+                if h["name"] not in axis_set
+                and h["name"] not in lunatic
+                and lib_freq.get(h["name"], 0) <= 2
+                and not _is_species_tag(h["name"])
+            ]
+            rare_pool.sort(key=lambda h: h["score"])
+            if rare_pool:
+                lunatic.append(rare_pool[0]["name"])
+        except Exception as e:
+            logger.warning("rare hint failed: %s", e)
 
     return {"stranger": stranger, "lunatic": lunatic}
 
@@ -635,6 +667,46 @@ async def refine_axis_tag_hints(
         logger.warning("refine_axis_tag_hints VLM failed: %s", e)
 
     return raw_hints
+
+
+# ── Emotion register (12 dimensions shared with the emotion tagger) ──────────
+
+_EMOTION_QUERIES = {
+    "loneliness": "loneliness solitude isolated empty distant quiet alone",
+    "nostalgia":  "nostalgia bittersweet memory faded old times sepia longing",
+    "ephemeral":  "ephemeral fleeting transient fragile passing moment petals",
+    "melancholy": "melancholy sorrow wistful gloomy rain grey subdued",
+    "serenity":   "serenity calm peaceful still tranquil gentle quiet morning",
+    "wonder":     "wonder awe marvel vast breathtaking grand celestial",
+    "joy":        "joy happy cheerful bright playful laughter sunny",
+    "tension":    "tension suspense unease sharp dramatic edge storm",
+    "warmth":     "warmth cozy soft tender comfort golden hearth",
+    "mystery":    "mystery enigmatic hidden shadow secret fog veiled",
+    "desolation": "desolation ruin abandoned decay barren wasteland dust",
+    "vitality":   "vitality energy dynamic vivid alive motion bloom",
+}
+
+
+async def get_emotion_hints(db, ollama, emotion: str, n_tags: int = 6) -> list[str]:
+    """Return Danbooru mood/lighting tags semantically close to an emotion dimension.
+
+    Returns [] for unknown emotions, when the vocab bank is not imported, or on error.
+    """
+    query = _EMOTION_QUERIES.get(emotion)
+    if not query:
+        return []
+    count = await _get_vocab_count(db)
+    if count == 0:
+        return []
+
+    try:
+        vec = await ollama.embed(query)
+        hits = await db.search_wd14_vocab(vec, min_freq=0.01, max_freq=0.6, category=0, limit=n_tags * 4)
+    except Exception as e:
+        logger.warning("get_emotion_hints failed for %s: %s", emotion, e)
+        return []
+
+    return [h["name"] for h in hits if not _is_species_tag(h["name"])][:n_tags]
 
 
 # ── Echoes of Resonance ────────────────────────────────────────────────────────

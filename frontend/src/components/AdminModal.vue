@@ -1257,6 +1257,18 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500 resize-none" />
                 <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.topicHint') }}</p>
               </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled" class="flex items-center justify-between">
+                <div>
+                  <label class="text-xs text-gray-500 block">🎡 {{ $t('admin.dailyOracle.roulette') }}</label>
+                  <p class="text-[10px] text-gray-600">{{ $t('admin.dailyOracle.rouletteHint') }}</p>
+                </div>
+                <button @click="adminConfig.invoke_daily_oracle_roulette = !adminConfig.invoke_daily_oracle_roulette"
+                  :class="adminConfig.invoke_daily_oracle_roulette ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors flex-shrink-0">
+                  <span :class="adminConfig.invoke_daily_oracle_roulette ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="absolute top-0.5 left-0 w-4 h-4 bg-white rounded-full transition-transform"></span>
+                </button>
+              </div>
               <div v-if="adminConfig.invoke_daily_oracle_enabled">
                 <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.dailyOracle.executionTime') }}</label>
                 <input v-model="adminConfig.invoke_daily_oracle_time" type="time"

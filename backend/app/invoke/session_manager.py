@@ -36,6 +36,8 @@ class InvokeSession:
     locale: str = "en"                     # 'en' | 'ja' — controls monologue language
     rebel_inversion: bool = True           # False = rebel expresses Counter perspective without axis inversion
     heat: float = 1.0                      # global LLM temperature multiplier (0.6–1.3)
+    wildness: int = 1                      # 乱れ度 1–3: widens stranger/lunatic vocab pools
+    parent_sha256s: list[str] = field(default_factory=list)  # lineage: evolve (1 parent) / breed (2 parents)
     person_tags: str = ""                  # e.g. "1girl, solo" — prepended to every positive prompt
     pro_negative: str = ""                 # user-supplied negative from Pro mode
     pro_topic: str = ""                    # Pro mode natural language topic (お題テキスト)
@@ -97,6 +99,8 @@ class InvokeSessionManager:
         pro_sections: dict | None = None,
         rebel_inversion: bool = True,
         heat: float = 1.0,
+        wildness: int = 1,
+        parent_sha256s: list[str] | None = None,
         db=None,
         ollama=None,
         comfy=None,
@@ -118,6 +122,8 @@ class InvokeSessionManager:
             pro_sections=pro_sections or {},
             rebel_inversion=rebel_inversion,
             heat=max(0.6, min(1.3, heat)),
+            wildness=max(1, min(3, wildness)),
+            parent_sha256s=parent_sha256s or [],
             db=db,
             ollama=ollama,
             comfy=comfy,
@@ -162,7 +168,7 @@ class InvokeSessionManager:
         import asyncio
         from .vocab_bank import get_vocab_hints, get_axis_semantic_tags
         _vh, _ah = await asyncio.gather(
-            get_vocab_hints(session.db, session.ollama, axis_tags),
+            get_vocab_hints(session.db, session.ollama, axis_tags, wildness=session.wildness),
             get_axis_semantic_tags(session.db, session.ollama, axes),
             return_exceptions=True,
         )
@@ -481,6 +487,7 @@ def _build_genesis(
         "alignment_at_genesis": session.spirits[spirit_name].alignment_score,
         "novelty_at_genesis": session.spirits[spirit_name].novelty_score,
         "wild_tags": pr.get("wild_tags_used", []),
+        "parents": list(session.parent_sha256s),
         "respin_count": 0,
         "workflow_preset": session.workflow_name,
         "daily_oracle_date": daily_date,

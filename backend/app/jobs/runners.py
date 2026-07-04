@@ -1058,7 +1058,31 @@ async def run_refine_prompt(
         conflict_tags,
         common_ratio=effective_common_ratio,
         unique_count=body.wd14_unique_count,
+        roles=body.roles or None,
     )
+
+    # Emotional register shift: state the references' dominant emotion and the target
+    if body.emotion_shift:
+        from ..ai.emotion_tagger import EMOTION_DIMENSIONS
+        if body.emotion_shift in EMOTION_DIMENSIONS:
+            sums = {d: 0.0 for d in EMOTION_DIMENSIONS}
+            scored_docs = 0
+            for doc, _ in raw_docs:
+                if doc.get(f"emotion_{EMOTION_DIMENSIONS[0]}") is None:
+                    continue
+                scored_docs += 1
+                for d in EMOTION_DIMENSIONS:
+                    sums[d] += float(doc.get(f"emotion_{d}") or 0.0)
+            current_line = ""
+            if scored_docs:
+                dom = max(sums, key=sums.get)
+                current_line = f"Current dominant register: {dom} ({sums[dom] / scored_docs:.2f}).\n"
+            context += (
+                "\n\n---\n\n[EMOTIONAL REGISTER SHIFT]\n"
+                f"{current_line}"
+                f"Rewrite the mood, lighting, color, and atmosphere toward: {body.emotion_shift}. "
+                "Keep the subject, pose, and composition of the references intact."
+            )
 
     mutation_tags: list[str] = []
     if divergence > 0:
@@ -1105,11 +1129,12 @@ async def run_refine_prompt(
         phase_end: float = 1.0,
         expected_tokens: int = 200,
         phase_text: str = "",
+        options_override: dict | None = None,
     ) -> str:
         """Run a text-only LLM call (no images), forwarding tokens to token_queue."""
         tokens: list[str] = []
         async for event in ollama.generate_text_stream(
-            prompt, model=cfg["vlm_model"], options=options
+            prompt, model=cfg["vlm_model"], options=options_override or options
         ):
             if _abort.is_set():
                 raise JobCancelled()
@@ -1126,6 +1151,11 @@ async def run_refine_prompt(
     context_story = ""
     cat_tags: dict[str, list[str]] = {f: [] for f in _REFINE_CAT_FIELDS}
     _all_must = _build_all_must(wd14_analysis)
+
+    # Variation fan-out (natural style only): prose pass runs N times on a temperature ladder
+    _FANOUT_TEMPS = (0.5, 0.8, 1.1)
+    variation_count = max(1, min(3, body.variation_count)) if body.prompt_style == "natural" else 1
+    fanout_stories: list[tuple[str, float]] = []  # (story, temperature) for extra variants
 
     try:
         if body.prompt_style == "natural":
@@ -1155,7 +1185,14 @@ async def run_refine_prompt(
                 instruction_framing=instruction_framing,
             )
             _phase("writingDescription", 0.55, "Writing Visual Script...")
-            vs_raw = await _stream_text(vs_prompt, 0.55, 0.90, 500, "Writing Visual Script...")
+            _pass2_end = 0.90 if variation_count == 1 else 0.70
+            _main_options = (
+                {**options, "temperature": _FANOUT_TEMPS[0]} if variation_count > 1 else None
+            )
+            vs_raw = await _stream_text(
+                vs_prompt, 0.55, _pass2_end, 500, "Writing Visual Script...",
+                options_override=_main_options,
+            )
 
             # Parse visual script: split prose from labeled tag sections
             context_story, vs_cat_tags = _parse_visual_script_sections(vs_raw)
@@ -1171,6 +1208,22 @@ async def run_refine_prompt(
 
             prose_missing = len(context_story.split()) < 30
             positive = f"{tags_positive}\n\n{context_story}"
+
+            # Extra fan-out variants: same tags, hotter prose interpretations
+            for _vi, _vt in enumerate(_FANOUT_TEMPS[1:variation_count]):
+                _put({"type": "token", "text": "\n\n---\n\n"})
+                _v_start = 0.70 + 0.10 * _vi
+                _phase("writingDescription", _v_start, f"Variant prose (temp {_vt})...")
+                _v_raw = await _stream_text(
+                    vs_prompt, _v_start, _v_start + 0.10, 500,
+                    f"Variant prose (temp {_vt})...",
+                    options_override={**options, "temperature": _vt},
+                )
+                _v_story, _ = _parse_visual_script_sections(_v_raw)
+                _v_story = _strip_visual_script_markers(_v_story)
+                if _all_must:
+                    _v_story = _correct_prose_wd14_conflicts(_v_story, _all_must)
+                fanout_stories.append((f"{tags_positive}\n\n{_v_story}", _vt))
         else:
             vlm_prompt = _build_vlm_prompt(
                 context, nl_instruction, body.prompt_style, body.negative_prompt,
@@ -1247,6 +1300,14 @@ async def run_refine_prompt(
     if literal_texts:
         positive = _append_literal_texts(positive, literal_texts)
 
+    # 5c. process fan-out variants with the same post-processing as the main prompt
+    variants: list[dict] = []
+    for _v_pos, _vt in fanout_stories:
+        _v_pos, _ = _remove_forced_tags(_v_pos, removal_tags, all_lines=False)
+        if literal_texts:
+            _v_pos = _append_literal_texts(_v_pos, literal_texts)
+        variants.append({"positive": _v_pos, "temperature": _vt})
+
     _put({
         "type": "done",
         "positive": positive,
@@ -1259,15 +1320,18 @@ async def run_refine_prompt(
         "wd14_analysis": wd14_analysis,
         "divergence": divergence,
         "mutation_tags": mutation_tags,
+        "variants": variants,
         **cat_tags,
     })
 
-    # 6. auto_submit: queue a ComfyUI generation job
+    # 6. auto_submit: queue a ComfyUI generation job (one per fan-out variant)
     if body.auto_submit and body.workflow_name:
         try:
             _phase("queuingGeneration", 0.97, "Queuing generation job...")
             gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
+            for v in variants:
+                _submit_gen_direct(spooler, comfy, db, body, v["positive"], negative, seed=seed_for_gen)
         except Exception as exc:
             _put({"type": "error", "message": f"Generation job error: {exc}"})
 
@@ -1351,6 +1415,7 @@ async def run_invoke_axis_decompose(
     session_manager,
     resonance_mode: bool = False,
     frontier_mode: bool = False,
+    emotion: str = "",
 ) -> dict:
     """PROMPT lane. Decompose user intent into structured axes."""
     from ..invoke.axis_decomposer import decompose_axes
@@ -1419,12 +1484,31 @@ async def run_invoke_axis_decompose(
         except Exception as _fe:
             logger.warning("[invoke] frontier_hints failed: %s", _fe)
 
+    # Emotion register: bias the mood axis toward the chosen emotional dimension
+    emotion_hint: str | None = None
+    if emotion:
+        from ..invoke.vocab_bank import get_emotion_hints
+        try:
+            em_tags = await get_emotion_hints(db, ollama, emotion)
+            if em_tags:
+                seen = set(character_hints.get("mood", []))
+                character_hints["mood"] = character_hints.get("mood", []) + [
+                    t for t in em_tags if t not in seen
+                ]
+            emotion_hint = (
+                f"Target emotional register: {emotion}. "
+                "Infuse the mood and lighting axes with this feeling."
+            )
+        except Exception as _ee:
+            logger.warning("[invoke] emotion_hints failed: %s", _ee)
+
     axes = await decompose_axes(
         ollama,
         user_intent=effective_slogan,
         emoji_codes=emoji_codes,
         mood_sliders=mood_sliders,
         color_hex=color_hex,
+        context_hint=emotion_hint,
         person_gender=person_gender,
         person_count=person_count,
         camera_shot=camera_shot,
@@ -1934,7 +2018,7 @@ async def run_invoke_respin(
             axis_tags.extend(v.replace(",", " ").split())
 
     _vh, _ah = await _asyncio.gather(
-        get_vocab_hints(session.db, session.ollama, axis_tags),
+        get_vocab_hints(session.db, session.ollama, axis_tags, wildness=session.wildness),
         get_axis_semantic_tags(session.db, session.ollama, session.axes or {}),
         return_exceptions=True,
     )
@@ -2068,6 +2152,7 @@ async def run_invoke_daily_oracle(
     daily_oracle_date: str,
     workflow_name: str = "",
     topic: str = "",
+    roulette: bool = False,
 ) -> dict:
     """SYNC lane (low priority). Generate today's 5 oracle images."""
     from ..invoke.axis_decomposer import decompose_axes
@@ -2077,6 +2162,38 @@ async def run_invoke_daily_oracle(
 
     reporter.indeterminate()
     cancel.raise_if_set()
+
+    # Roulette: draw today's theme instead of repeating a static topic.
+    # Alternates "comfort day" (recent taste) and "frontier day" (unexplored vocabulary).
+    if not topic and roulette:
+        from datetime import date as _date
+        from ..invoke.vocab_bank import compute_frontier_hints, synthesize_slogan
+
+        try:
+            day = _date.fromisoformat(daily_oracle_date)
+        except ValueError:
+            day = _date.today()
+        season = ("winter", "winter", "spring", "spring", "spring", "summer",
+                  "summer", "summer", "autumn", "autumn", "autumn", "winter")[day.month - 1]
+
+        drawn_tags: list[str] = []
+        if day.timetuple().tm_yday % 2 == 0:
+            mode = "a comforting scene close to the user's recent taste"
+            try:
+                recent = await get_recent_adopted_tags(db, days=14)
+                drawn_tags = [t for t, _ in sorted(recent.items(), key=lambda x: -x[1])[:4]]
+            except Exception as e:
+                logger.warning("oracle roulette comfort tags failed: %s", e)
+        else:
+            mode = "an unexplored frontier scene unlike anything in the user's library"
+            try:
+                fh = await compute_frontier_hints(db, n_tags=8)
+                drawn_tags = (fh.get("mood", []) + fh.get("scene", []) + fh.get("character", []))[:3]
+            except Exception as e:
+                logger.warning("oracle roulette frontier tags failed: %s", e)
+
+        topic = await synthesize_slogan(f"A {season} day — {mode}", None, drawn_tags, ollama)
+        logger.info("[invoke] oracle roulette topic: %r (tags=%s)", topic[:80], drawn_tags)
 
     context_hint = None
     if not topic:
@@ -2122,6 +2239,108 @@ async def run_invoke_daily_oracle(
 
     reporter.update(1.0, "Daily oracle complete")
     return {"session_id": session.session_id, "axes": axes}
+
+
+_LINEAGE_MUTABLE_AXES = ("scene", "mood", "lighting", "palette", "composition", "accessories", "action")
+
+
+async def run_invoke_lineage(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    session_id: str,
+    parent_axes: list[dict],
+    mode: str,               # 'evolve' | 'breed'
+    mutation: float = 0.3,
+    session_manager,
+) -> dict:
+    """PROMPT lane. Synthesize axes from parent genesis snapshots, then launch spirits.
+
+    evolve — single parent: jitter a `mutation` fraction of the mutable axes by swapping in
+             semantic-neighbor tags from the wd14 vocab bank.
+    breed  — two parents: merge their axes via a small JSON-in/JSON-out VLM task
+             (random per-axis pick as fallback).
+    """
+    import json as _json
+    import random as _random
+    import re as _re
+
+    from ..invoke.vocab_bank import _is_species_tag
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise ValueError(f"Session {session_id} not found or expired")
+
+    axes: dict = dict(parent_axes[0])
+
+    if mode == "breed" and len(parent_axes) >= 2:
+        axes_a, axes_b = parent_axes[0], parent_axes[1]
+        keys = ("subject", "character_detail", "action", "scene", "mood",
+                "lighting", "composition", "style", "palette", "accessories")
+
+        def _axis_str(a: dict, k: str) -> str:
+            v = a.get(k, "")
+            return ", ".join(v) if isinstance(v, list) else str(v or "")
+
+        prompt = "\n".join([
+            "You are merging two image concepts into one child concept.",
+            "For each axis, choose the value from A, from B, or write a short fusion of both.",
+            "Keep every value concise and Danbooru-compatible. The child must be a coherent single scene.",
+            "",
+            "AXES A: " + _json.dumps({k: _axis_str(axes_a, k) for k in keys}, ensure_ascii=False),
+            "AXES B: " + _json.dumps({k: _axis_str(axes_b, k) for k in keys}, ensure_ascii=False),
+            "",
+            "Output ONLY valid JSON with exactly these keys, no markdown fences:",
+            _json.dumps({k: "<value>" for k in keys}),
+        ])
+        merged: dict = {}
+        try:
+            raw = await ollama.generate_text(prompt, fmt="json")
+            raw = _re.sub(r"^```(?:json)?\s*", "", raw.strip())
+            raw = _re.sub(r"\s*```$", "", raw.strip())
+            parsed = _json.loads(raw)
+            if isinstance(parsed, dict):
+                merged = {k: str(parsed.get(k, "")).strip() for k in keys}
+        except Exception as e:
+            logger.warning("[invoke] breed merge VLM failed, falling back to random pick: %s", e)
+        if not merged or not any(merged.values()):
+            merged = {k: _axis_str(_random.choice((axes_a, axes_b)), k) for k in keys}
+
+        axes = merged
+        # style axis is a list downstream
+        axes["style"] = [s.strip() for s in str(axes.get("style", "")).split(",") if s.strip()]
+
+    elif mode == "evolve":
+        cancel.raise_if_set()
+        n_mut = max(1, round(max(0.0, min(1.0, mutation)) * len(_LINEAGE_MUTABLE_AXES)))
+        chosen = _random.sample(_LINEAGE_MUTABLE_AXES, n_mut)
+        for axis in chosen:
+            val = axes.get(axis) or ""
+            text = ", ".join(val) if isinstance(val, list) else str(val)
+            if not text.strip():
+                continue
+            try:
+                vec = await ollama.embed(text)
+                hits = await db.search_wd14_vocab(vec, min_freq=0.01, max_freq=0.8, category=0, limit=30)
+                # Skip the nearest hits — they are near-synonyms that barely mutate anything
+                pool = [h["name"] for h in hits[10:] if not _is_species_tag(h["name"])]
+                if pool:
+                    axes[axis] = ", ".join(_random.sample(pool, min(2, len(pool))))
+            except Exception as e:
+                logger.warning("[invoke] evolve mutation failed for axis %s: %s", axis, e)
+        logger.debug("[invoke] evolve mutated axes: %s", chosen)
+
+    axes["_slogan"] = session.user_intent
+    axes["_user_intent"] = session.user_intent
+
+    reporter.update(1.0, f"{mode} axes ready")
+    await session_manager.on_axis_done(session_id, axes)
+    return {"axes": axes, "mode": mode}
 
 
 # ── SYNC lane: WD14 vocab import ───────────────────────────────────────────────
