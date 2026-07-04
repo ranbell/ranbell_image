@@ -4,7 +4,7 @@ import json
 import logging
 import random
 import uuid
-
+from collections import defaultdict
 
 from qdrant_client import AsyncQdrantClient, models as qm
 
@@ -28,6 +28,26 @@ _SORT_ORDER_BY = {
     "size_asc":    qm.OrderBy(key="size", direction=qm.Direction.ASC),
     "rating_desc": qm.OrderBy(key="star_rating", direction=qm.Direction.DESC),
 }
+
+PENDING_FILTER = qm.Filter(must=[
+    qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="pending"))
+])
+
+
+def _decode_scroll_cursor(cursor: str | None) -> tuple[object, str | None]:
+    """Decode a pagination cursor into (start_from, last_id)."""
+    if not cursor:
+        return None, None
+    try:
+        c = json.loads(base64.b64decode(cursor.encode()))
+        return c.get("start"), c.get("last_id")
+    except Exception:
+        return None, None
+
+
+def _encode_scroll_cursor(sort_key_value: object, sha256: str) -> str:
+    """Encode (sort_field_value, sha256) into a pagination cursor string."""
+    return base64.b64encode(json.dumps({"start": sort_key_value, "last_id": sha256}).encode()).decode()
 
 
 class QdrantDBClient:
@@ -583,15 +603,7 @@ class QdrantDBClient:
         sort_def = _SORT_ORDER_BY.get(sort, _SORT_ORDER_BY["newest"])
 
         # Decode cursor: {start: <sort_field_value>, last_id: <sha256>}
-        start_from = None
-        last_id = None
-        if cursor:
-            try:
-                c = json.loads(base64.b64decode(cursor.encode()))
-                start_from = c.get("start")
-                last_id = c.get("last_id")
-            except Exception:
-                pass
+        start_from, last_id = _decode_scroll_cursor(cursor)
 
         order = qm.OrderBy(
             key=sort_def.key,
@@ -623,10 +635,7 @@ class QdrantDBClient:
 
         if has_more and docs:
             last = docs[-1]
-            next_cursor = base64.b64encode(json.dumps({
-                "start": last.get(sort_def.key),
-                "last_id": last.get("sha256"),
-            }).encode()).decode()
+            next_cursor = _encode_scroll_cursor(last.get(sort_def.key), last.get("sha256"))
         else:
             next_cursor = None
 
@@ -741,15 +750,7 @@ class QdrantDBClient:
         total = count_result.count
 
         # Decode cursor
-        cursor_start = None
-        last_id = None
-        if cursor:
-            try:
-                c = json.loads(base64.b64decode(cursor.encode()))
-                cursor_start = c.get("start")
-                last_id = c.get("last_id")
-            except Exception:
-                pass
+        cursor_start, last_id = _decode_scroll_cursor(cursor)
 
         order = qm.OrderBy(
             key=sort_def.key,
@@ -774,10 +775,7 @@ class QdrantDBClient:
         next_cursor = None
         if has_more and docs:
             last = docs[-1]
-            next_cursor = base64.b64encode(json.dumps({
-                "start": last.get(sort_def.key),
-                "last_id": last.get("sha256"),
-            }).encode()).decode()
+            next_cursor = _encode_scroll_cursor(last.get(sort_def.key), last.get("sha256"))
 
         return docs, next_cursor, total
 
@@ -1080,7 +1078,6 @@ class QdrantDBClient:
 
     async def find_duplicate_path_sha256s(self) -> dict[str, list[str]]:
         """Return {path: [sha256, ...]} for paths with more than one Qdrant entry."""
-        from collections import defaultdict
         path_map: defaultdict[str, list[str]] = defaultdict(list)
         offset = None
         while True:
@@ -1136,9 +1133,7 @@ class QdrantDBClient:
     async def count_pending(self) -> int:
         result = await self._qc.count(
             collection_name=IMAGES_COLLECTION,
-            count_filter=qm.Filter(must=[
-                qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="pending"))
-            ]),
+            count_filter=PENDING_FILTER,
             exact=False,
         )
         return result.count
@@ -1573,7 +1568,6 @@ class QdrantDBClient:
                 model = ((pl.get("params") or {}).get("Model") or "").strip()
                 to_update.append((p.id, model))
             if to_update:
-                from collections import defaultdict
                 groups: defaultdict[str, list] = defaultdict(list)
                 for point_id, model in to_update:
                     groups[model].append(point_id)
@@ -1621,7 +1615,6 @@ class QdrantDBClient:
                 category = "AI" if fmt in ("a1111", "comfyui") else "NR"
                 to_update.append((sha256, category))
             if to_update:
-                from collections import defaultdict
                 groups: defaultdict[str, list] = defaultdict(list)
                 for sha256, cat in to_update:
                     groups[cat].append(sha256_to_point_id(sha256))
@@ -1666,20 +1659,16 @@ class QdrantDBClient:
                 path = pl.get("path", "")
                 to_update.append((sha256, path.startswith(source_prefix)))
             if to_update:
-                true_ids  = [sha256_to_point_id(s) for s, v in to_update if v]
-                false_ids = [sha256_to_point_id(s) for s, v in to_update if not v]
-                for i in range(0, len(true_ids), 500):
-                    await self._qc.set_payload(
-                        collection_name=IMAGES_COLLECTION,
-                        payload={"is_reference": True},
-                        points=qm.PointIdsList(points=true_ids[i:i + 500]),
-                    )
-                for i in range(0, len(false_ids), 500):
-                    await self._qc.set_payload(
-                        collection_name=IMAGES_COLLECTION,
-                        payload={"is_reference": False},
-                        points=qm.PointIdsList(points=false_ids[i:i + 500]),
-                    )
+                groups: dict[bool, list] = {True: [], False: []}
+                for sha256, is_ref in to_update:
+                    groups[is_ref].append(sha256_to_point_id(sha256))
+                for is_ref_val, ids in groups.items():
+                    for i in range(0, len(ids), 500):
+                        await self._qc.set_payload(
+                            collection_name=IMAGES_COLLECTION,
+                            payload={"is_reference": is_ref_val},
+                            points=qm.PointIdsList(points=ids[i:i + 500]),
+                        )
                 count += len(to_update)
                 logger.info("is_reference backfill: %d docs updated so far", count)
             if next_offset is None:

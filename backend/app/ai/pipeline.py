@@ -6,16 +6,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from ..api.images import invalidate_image_caches
-from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION as _IMAGES_COLLECTION
+from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION as _IMAGES_COLLECTION, PENDING_FILTER as _PENDING_FILTER
 from ..runtime_config import get_runtime_config
 from .ollama import OllamaClient
 from . import wd14 as wd14_mod
 from .color_extractor import extract_color_palette
-from qdrant_client import models as _qm
-
-_PENDING_FILTER = _qm.Filter(must=[
-    _qm.FieldCondition(key="embedding_status", match=_qm.MatchValue(value="pending"))
-])
 
 
 async def _run_with_sem(sem: asyncio.Semaphore, fn, *args) -> None:

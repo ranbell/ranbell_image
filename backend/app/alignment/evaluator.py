@@ -153,7 +153,7 @@ class AlignmentEvaluator:
             while True:
                 points, next_offset = await self._db._qc.scroll(
                     collection_name=IMAGES_COLLECTION,
-                    limit=200,
+                    limit=500,
                     offset=offset,
                     with_payload=qm.PayloadSelectorInclude(
                         include=["sha256", "positive_prompt", "wd14_tags"]
