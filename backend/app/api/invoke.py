@@ -45,6 +45,10 @@ class SummonRequest(BaseModel):
     rebel_inversion: bool = True  # False = rebel aims for beautiful image without axis inversion
     # Resonance mode: drift all spirits toward the user's starred aesthetic
     resonance_mode: bool = False
+    # Frontier mode: drift all spirits AWAY from the user's known territory (mutually exclusive with resonance)
+    frontier_mode: bool = False
+    # Global LLM temperature multiplier applied on top of each spirit's native temperature
+    heat: float = 1.0  # 0.6–1.3
     # Common
     workflow_name: str = ""
     input_mode: str = "light"  # light | pro
@@ -171,6 +175,7 @@ async def summon(body: SummonRequest, request: Request):
         pro_topic=_pro_topic,
         pro_sections=_pro_sections,
         rebel_inversion=body.rebel_inversion,
+        heat=body.heat,
         db=db,
         ollama=ollama,
         comfy=comfy,
@@ -202,6 +207,7 @@ async def summon(body: SummonRequest, request: Request):
         pro_prompt=_pro_prompt,
         session_manager=mgr,
         resonance_mode=body.resonance_mode,
+        frontier_mode=body.frontier_mode,
     )
 
     request.app.state.invoke_event_queues[session.session_id] = session.event_queue
@@ -230,10 +236,17 @@ async def respin(body: RespinRequest, request: Request):
         except Exception:
             pass
 
+    # Preserve the previous attempt so the respin can diverge from it
+    if spirit.prompt_result:
+        spirit.history.append(spirit.prompt_result)
+
     spirit.status = "composing"
     spirit.sha256 = None
     spirit.prompt_result = None
     spirit.alignment_score = None
+    spirit.novelty_score = None
+    # Allow the finalize job (pipeline → novelty → alignment) to run again for the respun image
+    session.finalize_submitted = False
 
     from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_respin
@@ -514,3 +527,19 @@ async def resonance_preview(request: Request, n: int = 20):
         "star5_count": star5_count,
         "total_contributing": star4_count + star5_count,
     }
+
+
+@router.get("/frontier/preview")
+async def frontier_preview(request: Request, n: int = 20):
+    """Preview the frontier tags (never-seen vocabulary far from the taste centroid).
+
+    Returns {tags: [{name}], total_contributing}. Empty tags when no starred images
+    exist (the frontier is computed relative to the taste centroid).
+    """
+    db = request.app.state.db
+
+    from ..invoke.vocab_bank import compute_frontier_hints
+    hints = await compute_frontier_hints(db, n_tags=n)
+    all_tags = hints.get("character", []) + hints.get("mood", []) + hints.get("scene", [])
+
+    return {"tags": [{"name": t} for t in all_tags[:n]]}

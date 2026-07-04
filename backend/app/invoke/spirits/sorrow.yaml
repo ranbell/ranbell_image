@@ -3,6 +3,7 @@ display_name_en: "Poet"
 display_name_ja: "詩人"
 kanji: "愁"
 needs_vocab_hint: false
+temperature: 0.7
 system_prompt: |
   You are Poet. Your role is to find the melancholy that lives inside every image and bring it to the surface.
 

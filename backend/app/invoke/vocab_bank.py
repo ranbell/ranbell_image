@@ -664,20 +664,13 @@ def _classify_resonance_tag(tag: str) -> str:
     return "mood"
 
 
-async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
-    """Compute aesthetic taste hints from high-rated (≥4★) images.
+async def _taste_centroid(db) -> list[float] | None:
+    """Weighted embedding centroid of high-rated (≥4★) images (star4=1.0, star5=2.0).
 
-    Fetches embeddings of star_rating≥4 images, computes a weighted centroid
-    (star4=1.0, star5=2.0), searches wd14_vocab for n_tags nearest tags, and
-    returns them classified as character_hints compatible with decompose_axes().
-    Returns {} when no starred images exist or wd14_vocab is empty.
+    Returns the normalized centroid vector, or None when no starred images exist.
     """
     import math
     from qdrant_client import models as qm
-
-    vocab_count = await _get_vocab_count(db)
-    if vocab_count == 0:
-        return {}
 
     # Scroll all images rated ≥4 and retrieve their full embeddings
     points: list = []
@@ -706,13 +699,12 @@ async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str
                 break
             offset = next_offset
     except Exception as e:
-        logger.warning("compute_resonance_hints scroll failed: %s", e)
-        return {}
+        logger.warning("_taste_centroid scroll failed: %s", e)
+        return None
 
     if not points:
-        return {}
+        return None
 
-    # Weighted centroid: star4 weight=1.0, star5 weight=2.0
     dim: int | None = None
     centroid: list[float] = []
     total_weight = 0.0
@@ -733,13 +725,29 @@ async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str
         total_weight += weight
 
     if total_weight == 0.0 or dim is None:
-        return {}
+        return None
 
-    # Normalize centroid
     centroid = [v / total_weight for v in centroid]
     norm = math.sqrt(sum(v * v for v in centroid))
     if norm > 0.0:
         centroid = [v / norm for v in centroid]
+    return centroid
+
+
+async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
+    """Compute aesthetic taste hints from high-rated (≥4★) images.
+
+    Searches wd14_vocab for the n_tags nearest tags to the taste centroid and
+    returns them classified as character_hints compatible with decompose_axes().
+    Returns {} when no starred images exist or wd14_vocab is empty.
+    """
+    vocab_count = await _get_vocab_count(db)
+    if vocab_count == 0:
+        return {}
+
+    centroid = await _taste_centroid(db)
+    if centroid is None:
+        return {}
 
     # Find nearest wd14 tags to the centroid
     raw_tags = await db.search_wd14_vocab(
@@ -759,8 +767,63 @@ async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str
         hints[cat].append(entry["name"])
 
     logger.debug(
-        "compute_resonance_hints: %d starred images → %d tags (c=%d s=%d m=%d)",
-        len(points), len(raw_tags),
+        "compute_resonance_hints: %d tags (c=%d s=%d m=%d)",
+        len(raw_tags),
+        len(hints["character"]), len(hints["scene"]), len(hints["mood"]),
+    )
+    return {k: v for k, v in hints.items() if v}
+
+
+async def compute_frontier_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
+    """Mirror of compute_resonance_hints: tags the user's library has never touched.
+
+    Searches wd14_vocab near the taste centroid with a wide net, keeps only tags
+    absent from the library, and sorts ASCENDING by score so the semantically
+    farthest tags from the user's taste come first (same trick as lunatic hints).
+    Returns {} when no starred images exist or wd14_vocab is empty.
+    """
+    vocab_count = await _get_vocab_count(db)
+    if vocab_count == 0:
+        return {}
+
+    centroid = await _taste_centroid(db)
+    if centroid is None:
+        return {}
+
+    try:
+        hits = await db.search_wd14_vocab(
+            centroid,
+            min_freq=0.02,
+            max_freq=0.6,
+            category=0,
+            limit=300,
+        )
+    except Exception as e:
+        logger.warning("compute_frontier_hints search failed: %s", e)
+        return {}
+    if not hits:
+        return {}
+
+    lib_freq = await _get_library_tag_freq(db)
+    pool = [
+        h for h in hits
+        if lib_freq.get(h["name"], 0) == 0 and not _is_species_tag(h["name"])
+    ]
+    # Low score = far from the taste centroid = most "frontier"
+    pool.sort(key=lambda h: h["score"])
+
+    hints: dict[str, list[str]] = {"character": [], "scene": [], "mood": []}
+    taken = 0
+    for entry in pool:
+        if taken >= n_tags:
+            break
+        cat = _classify_resonance_tag(entry["name"])
+        hints[cat].append(entry["name"])
+        taken += 1
+
+    logger.debug(
+        "compute_frontier_hints: %d candidates → %d tags (c=%d s=%d m=%d)",
+        len(pool), taken,
         len(hints["character"]), len(hints["scene"]), len(hints["mood"]),
     )
     return {k: v for k, v in hints.items() if v}

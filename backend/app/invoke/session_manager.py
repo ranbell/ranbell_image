@@ -20,7 +20,9 @@ class SpiritState:
     sha256: str | None = None
     prompt_result: dict | None = None
     alignment_score: float | None = None
+    novelty_score: float | None = None
     job_ids: list[str] = field(default_factory=list)
+    history: list[dict] = field(default_factory=list)  # prior prompt_results (respin memory)
 
 
 @dataclass
@@ -33,6 +35,7 @@ class InvokeSession:
     prompt_mode: str = "danbooru+natural"  # 'danbooru+natural' | 'natural' | 'danbooru'
     locale: str = "en"                     # 'en' | 'ja' — controls monologue language
     rebel_inversion: bool = True           # False = rebel expresses Counter perspective without axis inversion
+    heat: float = 1.0                      # global LLM temperature multiplier (0.6–1.3)
     person_tags: str = ""                  # e.g. "1girl, solo" — prepended to every positive prompt
     pro_negative: str = ""                 # user-supplied negative from Pro mode
     pro_topic: str = ""                    # Pro mode natural language topic (お題テキスト)
@@ -63,6 +66,7 @@ class InvokeSession:
                     "status": s.status,
                     "sha256": s.sha256,
                     "alignment_score": s.alignment_score,
+                    "novelty_score": s.novelty_score,
                     "monologue": (s.prompt_result or {}).get("internal_monologue"),
                     "natural_language": (s.prompt_result or {}).get("natural_language"),
                     "natural_language_ja": (s.prompt_result or {}).get("natural_language_ja"),
@@ -92,6 +96,7 @@ class InvokeSessionManager:
         pro_topic: str = "",
         pro_sections: dict | None = None,
         rebel_inversion: bool = True,
+        heat: float = 1.0,
         db=None,
         ollama=None,
         comfy=None,
@@ -112,6 +117,7 @@ class InvokeSessionManager:
             pro_topic=pro_topic or "",
             pro_sections=pro_sections or {},
             rebel_inversion=rebel_inversion,
+            heat=max(0.6, min(1.3, heat)),
             db=db,
             ollama=ollama,
             comfy=comfy,
@@ -340,6 +346,7 @@ class InvokeSessionManager:
             "spirit": spirit_name,
             "sha256": spirit.sha256,
             "alignment_score": alignment_score,
+            "novelty_score": spirit.novelty_score,
         })
 
         if all(session.spirits[n].status in ("done", "error") for n in session.enabled_spirits):
@@ -472,6 +479,7 @@ def _build_genesis(
         "siblings": siblings or [],
         "adopted_at_genesis": adopted,
         "alignment_at_genesis": session.spirits[spirit_name].alignment_score,
+        "novelty_at_genesis": session.spirits[spirit_name].novelty_score,
         "wild_tags": pr.get("wild_tags_used", []),
         "respin_count": 0,
         "workflow_preset": session.workflow_name,

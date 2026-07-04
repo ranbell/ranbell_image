@@ -84,6 +84,13 @@ const invokeResonanceMode = ref(false)
 const invokeResonanceTags = ref([])   // [{name}] preview from /resonance/preview
 const invokeResonanceCount = ref(0)   // total contributing starred images
 
+// Frontier (inverse resonance: never-seen vocabulary far from the taste centroid)
+const invokeFrontierMode = ref(false)
+const invokeFrontierTags = ref([])    // [{name}] preview from /frontier/preview
+
+// Heat: global LLM temperature multiplier over each spirit's native temperature
+const invokeHeat = ref(1.0)           // 0.6–1.3
+
 // SSE
 let _eventSource = null
 
@@ -101,6 +108,7 @@ function _resetSpirits() {
       genProgress: 0,
       sha256: null,
       alignment_score: null,
+      novelty_score: null,
       monologue: null,
       natural_language: null,
       natural_language_ja: null,
@@ -178,6 +186,7 @@ function _handleEvent(evt) {
       s.status = 'done'
       s.sha256 = evt.sha256 || s.sha256
       s.alignment_score = evt.alignment_score
+      s.novelty_score = evt.novelty_score ?? null
     }
   }
   else if (type === 'spirit_error') {
@@ -243,6 +252,8 @@ async function summon(token, locale = 'en') {
     camera_angle: invokeCameraAngle.value,
     rebel_inversion: invokeRebelInversion.value,
     resonance_mode: invokeResonanceMode.value,
+    frontier_mode: invokeFrontierMode.value,
+    heat: invokeHeat.value,
     locale,
   }
 
@@ -275,6 +286,19 @@ async function fetchResonancePreview(token) {
   } catch {
     invokeResonanceTags.value = []
     invokeResonanceCount.value = 0
+  }
+}
+
+async function fetchFrontierPreview(token) {
+  try {
+    const r = await fetch('/api/invoke/frontier/preview?n=20', {
+      headers: { 'X-API-Token': token },
+    })
+    if (!r.ok) return
+    const data = await r.json()
+    invokeFrontierTags.value = data.tags || []
+  } catch {
+    invokeFrontierTags.value = []
   }
 }
 
@@ -403,9 +427,10 @@ export function useInvokeSession() {
     invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
     invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
     invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
+    invokeFrontierMode, invokeFrontierTags, invokeHeat,
     openInvoke, closeInvoke,
     summon, cancel, respin, adopt, sendToRefine,
-    fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview,
+    fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
     toggleEmoji, toggleSpirit,
     getSpiritFrame,
   }

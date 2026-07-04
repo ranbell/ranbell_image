@@ -945,6 +945,7 @@ async def run_refine_prompt(
         _extract_literal_texts,
         _append_literal_texts,
         _parse_detailed_output,
+        _sample_mutation_tags,
         _REFINE_CAT_FIELDS,
     )
     from ..api.inspire import _parse_json_from_llm, _split_tags
@@ -1045,15 +1046,34 @@ async def run_refine_prompt(
                 nl_instruction, all_source_tags, db, ollama, cfg["vlm_model"]
             )
 
-    # 1b. build context with common/unique WD14 tag decomposition
+    # 1b. build context with common/unique WD14 tag decomposition.
+    # Transmute: divergence loosens the shared-trait lock and injects mutation tags.
+    divergence = max(0.0, min(1.0, body.divergence))
+    effective_common_ratio = body.wd14_common_ratio * (1.0 - divergence * 0.7)
+
     _phase("buildingPrompt", 0.10, "Building prompt context...")
     context, wd14_analysis = _build_weighted_wd14_context(
         raw_docs,
         weights,
         conflict_tags,
-        common_ratio=body.wd14_common_ratio,
+        common_ratio=effective_common_ratio,
         unique_count=body.wd14_unique_count,
     )
+
+    mutation_tags: list[str] = []
+    if divergence > 0:
+        _phase("mutatingTags", 0.14, "Sampling mutation tags...")
+        mutation_tags = await _sample_mutation_tags(db, ollama, wd14_analysis, divergence)
+        if mutation_tags:
+            pct = round(divergence * 100)
+            context += (
+                f"\n\n---\n\n[MUTATION TAGS — divergence {pct}%]\n"
+                f"{', '.join(mutation_tags)}\n"
+                f"Replace roughly {pct}% of the style / scene / lighting elements of the "
+                "references with these mutation tags. Keep the subject count, pose, and "
+                "character identity from the references intact."
+            )
+
     instruction_framing = body.instruction_mode != "none"
 
     async def _stream_vlm(
@@ -1123,8 +1143,10 @@ async def run_refine_prompt(
             tags_positive = _clean_markdown(tags_positive)
             negative = _clean_markdown(negative)
             tags_positive = _ensure_subject_anchor(tags_positive, raw_docs)
-            # Inject WD14 must_unique directly into tag line ("2回" reinforcement)
-            tags_positive = _inject_wd14_must_tags(tags_positive, wd14_analysis)
+            # Inject WD14 must_unique directly into tag line ("2回" reinforcement).
+            # Skipped at high divergence — re-anchoring all reference tags would undo the mutation.
+            if divergence <= 0.5:
+                tags_positive = _inject_wd14_must_tags(tags_positive, wd14_analysis)
 
             # Pass 2: Visual Script — prose with inline danbooru tags + per-category labeled sections.
             _put({"type": "token", "text": "\n\n"})
@@ -1196,7 +1218,7 @@ async def run_refine_prompt(
                 positive = _clean_markdown(_strip_stray_negative(raw_text))
                 negative = ""
             # WD14 post-processing for danbooru/detailed (mirrors natural branch)
-            if body.prompt_style == "danbooru":
+            if body.prompt_style == "danbooru" and divergence <= 0.5:
                 positive = _inject_wd14_must_tags(positive, wd14_analysis)
             if _all_must:
                 if body.prompt_style == "detailed":
@@ -1235,6 +1257,8 @@ async def run_refine_prompt(
         "injected_literals": [{"text": t} for t in literal_texts],
         "context_story": context_story,
         "wd14_analysis": wd14_analysis,
+        "divergence": divergence,
+        "mutation_tags": mutation_tags,
         **cat_tags,
     })
 
@@ -1326,6 +1350,7 @@ async def run_invoke_axis_decompose(
     pro_prompt: str = "",
     session_manager,
     resonance_mode: bool = False,
+    frontier_mode: bool = False,
 ) -> dict:
     """PROMPT lane. Decompose user intent into structured axes."""
     from ..invoke.axis_decomposer import decompose_axes
@@ -1380,6 +1405,19 @@ async def run_invoke_axis_decompose(
             logger.debug("[invoke] resonance hints merged: %s", {k: len(v) for k, v in resonance.items()})
         except Exception as _re:
             logger.warning("[invoke] resonance_hints failed: %s", _re)
+    # Frontier: blend never-seen vocabulary far from the taste centroid (exclusive with resonance)
+    elif frontier_mode:
+        from ..invoke.vocab_bank import compute_frontier_hints
+        try:
+            frontier = await compute_frontier_hints(db)
+            for cat, tags in frontier.items():
+                seen = set(character_hints.get(cat, []))
+                character_hints[cat] = character_hints.get(cat, []) + [
+                    t for t in tags if t not in seen
+                ]
+            logger.debug("[invoke] frontier hints merged: %s", {k: len(v) for k, v in frontier.items()})
+        except Exception as _fe:
+            logger.warning("[invoke] frontier_hints failed: %s", _fe)
 
     axes = await decompose_axes(
         ollama,
@@ -1405,13 +1443,14 @@ async def run_invoke_axis_decompose(
     if pro_prompt:
         axes['_pro_prompt_raw'] = pro_prompt  # ベースタグを生値で保存（スピリットに verbatim 渡し）
 
-    # Pro mode: スピリット別シーン多様性のため N バリアントを生成
-    if pro_topic or pro_prompt:
+    # スピリット別シーン多様性のため N バリアントを生成（Light モードは slogan をトピックとして使用。
+    # 先頭バリアントはベースシーンに近いため faithful は概ね元のシーンを保つ）
+    variant_topic = pro_topic or pro_prompt or axes.get('_slogan') or user_intent
+    if variant_topic:
         from ..invoke.axis_decomposer import generate_scene_variants
         _session = session_manager.get_session(session_id)
         enabled_count = len(_session.enabled_spirits) if _session else 5
         # scene_anchor があれば pro_topic に付加してより具体的なベースシーンを渡す
-        variant_topic = pro_topic or pro_prompt
         if pro_prompt_spec and pro_prompt_spec.get("scene_anchor"):
             variant_topic = f"{variant_topic}\n{pro_prompt_spec['scene_anchor']}"
         scene_variants = await generate_scene_variants(ollama, axes, variant_topic, n=enabled_count)
@@ -1433,6 +1472,8 @@ async def run_invoke_spirit_compose(
     axis_tag_hints: list | None = None,
     locale: str = "en",
     rebel_inversion: bool = True,
+    avoid_tags: list | None = None,
+    respin_boost: float = 0.0,
     session_manager,
 ) -> dict:
     """PROMPT lane. Generate prompt for one Spirit via Ollama."""
@@ -1528,6 +1569,13 @@ async def run_invoke_spirit_compose(
             "Set inverted_axis to null."
         )
 
+    if avoid_tags:
+        user_msg_parts.append(
+            f"PREVIOUS ATTEMPT (do NOT reproduce): [{', '.join(avoid_tags)}] — "
+            "the user asked for a DIFFERENT take. Choose a different scene interpretation, "
+            "lighting, and supporting cast of tags. Keep the character identity and axes intact."
+        )
+
     full_prompt = f"{sys_prompt}\n\n---\n\n" + "\n".join(user_msg_parts)
 
     session = session_manager.get_session(session_id)
@@ -1536,9 +1584,16 @@ async def run_invoke_spirit_compose(
         await session_manager.on_spirit_error(session_id, spirit_name, "Session expired")
         return {}
 
-    logger.debug("[invoke] spirit_compose start: %s", spirit_name)
+    # Spirit-native temperature × session heat (+ respin boost) drives sampling divergence
+    heat = getattr(session, "heat", 1.0) or 1.0
+    temperature = float(spirit.get("temperature", 0.8)) * heat + respin_boost
+    temperature = max(0.1, min(1.6, temperature))
+
+    logger.debug("[invoke] spirit_compose start: %s temp=%.2f", spirit_name, temperature)
     try:
-        raw = await ollama.generate_text(full_prompt, fmt="json")
+        raw = await ollama.generate_text(
+            full_prompt, fmt="json", options={"temperature": temperature}
+        )
     except Exception as e:
         logger.warning("[invoke] spirit_compose ollama failed (%s): %s", spirit_name, e)
         await session_manager.on_spirit_error(session_id, spirit_name, f"LLM error: {e}")
@@ -1767,10 +1822,37 @@ async def run_invoke_session_finalize(
     except Exception as exc:
         logger.warning("[invoke] session_finalize pipeline failed: %s", exc)
 
-    reporter.update(0.9, "pipeline done, submitting alignment")
+    reporter.update(0.85, "pipeline done, scoring novelty")
+
+    # Surprise スコア: 最近傍ライブラリ画像との埋め込み距離（セッション兄弟は除外）。
+    # VLM 不要の純ベクトル演算 — lunatic/stranger の逸脱を可視化する。
+    session = session_manager.get_session(session_id)
+    sibling_set = set(spirit_sha256s.values())
+    for spirit_name, sha256 in spirit_sha256s.items():
+        cancel.raise_if_set()
+        novelty: float | None = None
+        try:
+            similar = await db.search_similar(sha256, n_results=8)
+            top_sim = next(
+                (d["_score"] for d in similar if d.get("sha256") not in sibling_set),
+                None,
+            )
+            if top_sim is not None:
+                novelty = round(max(0.0, min(1.0, 1.0 - float(top_sim))) * 100, 1)
+        except Exception as exc:
+            logger.debug("[invoke] novelty score failed for %s: %s", sha256[:12], exc)
+        if novelty is None:
+            continue
+        if session and (spirit := session.spirits.get(spirit_name)):
+            spirit.novelty_score = novelty
+        try:
+            await db.set_payload(sha256, {"genesis.novelty_at_genesis": novelty})
+        except Exception as exc:
+            logger.debug("[invoke] novelty payload write failed for %s: %s", sha256[:12], exc)
+
+    reporter.update(0.9, "novelty done, submitting alignment")
 
     # Pipeline 完了後、各 spirit の alignment を EVALUATION ランに submit
-    session = session_manager.get_session(session_id)
     if session:
         for spirit_name, sha256 in spirit_sha256s.items():
             spirit = session.spirits.get(spirit_name)
@@ -1861,6 +1943,29 @@ async def run_invoke_respin(
 
     spirit_vocab = vocab_hints if spirit_name in ("stranger", "lunatic") else {"stranger": [], "lunatic": []}
 
+    # Respin memory: steer away from previous attempts instead of re-rolling the same dice
+    avoid_tags: list[str] = []
+    spirit_state = session.spirits.get(spirit_name)
+    history = spirit_state.history if spirit_state else []
+    if history:
+        prev_wild: set[str] = set()
+        seen: set[str] = set()
+        for prev in history:
+            prev_wild.update(prev.get("wild_tags_used") or [])
+            for f in ("background_tags", "object_tags", "lighting_tags", "pose_tags"):
+                for t in (prev.get(f) or "").split(","):
+                    t = t.strip()
+                    if t and t.lower() not in seen:
+                        avoid_tags.append(t)
+                        seen.add(t.lower())
+        avoid_tags = avoid_tags[-15:]  # most recent attempts matter most
+        # Draw fresh vocabulary: drop guest/wild tags already tried
+        if prev_wild:
+            spirit_vocab = {
+                k: [t for t in v if t not in prev_wild]
+                for k, v in spirit_vocab.items()
+            }
+
     reporter.update(0.25, f"Hints ready — composing {spirit_name}")
     cancel.raise_if_set()
 
@@ -1874,6 +1979,8 @@ async def run_invoke_respin(
         axis_tag_hints=axis_tag_hints,
         locale=session.locale,
         rebel_inversion=session.rebel_inversion if spirit_name == "rebel" else True,
+        avoid_tags=avoid_tags,
+        respin_boost=min(0.3, 0.1 * len(history)),
         session_manager=session_manager,
     )
 

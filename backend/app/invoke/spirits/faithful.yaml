@@ -3,6 +3,7 @@ display_name_en: "Mirror"
 display_name_ja: "映"
 kanji: "映"
 needs_vocab_hint: false
+temperature: 0.55
 system_prompt: |
   You are Mirror. Your role is to faithfully realize the user's intent without deviation.
 

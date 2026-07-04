@@ -314,6 +314,8 @@ let refineAbortController = null
 
 // ── Refine settings ────────────────────────────────────────────────────────────
 const refineTemp = ref(0.7)
+const refineDivergence = ref(0)        // 0.0〜1.0: Transmute (mutate style away from references)
+const refineMutationTags = ref([])     // mutation tags sampled by the backend
 const refineNumCtx = ref(16384)
 const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detailed'
 const refineInstructionMode = ref('basic')   // 'none' | 'basic' | 'enhanced'
@@ -2139,6 +2141,7 @@ async function runRefine() {
   refineObjectTags.value = []
   refineLightingTags.value = []
   refineWd14Analysis.value = null
+  refineMutationTags.value = []
 
   try {
     const orderedShas = [...selectedIds.value].slice(0, 6)
@@ -2154,6 +2157,7 @@ async function runRefine() {
       suppress_conflict_tags: refineSuppressConflict.value,
       wd14_common_ratio: refineCommonRatio.value,
       wd14_unique_count: refineUniqueCount.value,
+      divergence: refineDivergence.value,
       auto_submit: refineAutoSubmit.value,
       batch_count: refineBatchCount.value,
       workflow_name: refineWorkflow.value,
@@ -2229,6 +2233,7 @@ function handleRefineEvent(evt) {
       proseMissing.value = !!evt.prose_missing
       removedTags.value = evt.removed_tags || []
       refineWd14Analysis.value = evt.wd14_analysis || null
+      refineMutationTags.value = evt.mutation_tags || []
       refineHairTags.value = evt.hair_tags || []
       refineClothingTags.value = evt.clothing_tags || []
       refineAccessoryTags.value = evt.accessory_tags || []
@@ -3250,6 +3255,20 @@ onUnmounted(() => {
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.tempLow') }}</span><span>{{ $t('refine.tempHigh') }}</span>
                       </div>
+                    </div>
+                    <div>
+                      <label class="text-xs text-gray-500 flex justify-between mb-1.5">
+                        <span :title="$t('refine.divergenceTitle')">⚗️ {{ $t('refine.divergence') }}</span>
+                        <span class="text-teal-400 font-mono">{{ Math.round(refineDivergence * 100) }}%</span>
+                      </label>
+                      <input v-model.number="refineDivergence" type="range" min="0" max="1" step="0.05"
+                        :disabled="refining || refineDirectPrompt !== null" class="w-full accent-teal-500 disabled:opacity-50" />
+                      <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+                        <span>{{ $t('refine.divergenceLow') }}</span><span>{{ $t('refine.divergenceHigh') }}</span>
+                      </div>
+                      <p v-if="refineMutationTags.length" class="text-[10px] text-teal-500/80 mt-1 break-all">
+                        {{ $t('refine.mutationTags') }}: {{ refineMutationTags.join(', ') }}
+                      </p>
                     </div>
                     <div>
                       <label class="text-xs text-gray-500 block mb-1">{{ $t('refine.numCtx') }}</label>

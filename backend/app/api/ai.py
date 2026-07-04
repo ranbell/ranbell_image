@@ -49,6 +49,7 @@ class RefineRequest(BaseModel):
     suppress_conflict_tags: bool = False
     wd14_common_ratio: float = 0.3
     wd14_unique_count: int = 20
+    divergence: float = 0.0  # 0–1: mutate style/scene away from references (Transmute)
 
 
 class SearchRequest(BaseModel):
@@ -1085,6 +1086,49 @@ def _build_all_must(wd14_analysis: dict) -> list[str]:
                 result.append(t)
                 seen.add(t)
     return result
+
+
+async def _sample_mutation_tags(
+    db,
+    ollama,
+    wd14_analysis: dict,
+    divergence: float,
+    *,
+    max_tags: int = 12,
+) -> list[str]:
+    """Sample "related but absent" Danbooru tags for the Transmute divergence dial.
+
+    Embeds the reference tag set and searches the wd14_vocab bank, then takes the
+    mid-ranked band (close enough to stay coherent, far enough to mutate) excluding
+    tags already present in the references. Returns [] on any failure or when the
+    vocab bank is not imported.
+    """
+    import random
+
+    from ..invoke.vocab_bank import _is_species_tag
+
+    source_tags: set[str] = set(wd14_analysis.get("common_tags", []))
+    for info in wd14_analysis.get("unique_by_image", {}).values():
+        source_tags.update(info.get("must", []))
+        source_tags.update(info.get("ref", []))
+    if not source_tags:
+        return []
+
+    try:
+        vec = await ollama.embed(" ".join(sorted(source_tags)[:80]))
+        hits = await db.search_wd14_vocab(vec, min_freq=0.02, max_freq=0.6, limit=120)
+    except Exception as exc:
+        logger.debug("mutation tag sampling failed: %s", exc)
+        return []
+
+    pool = [
+        h["name"] for h in hits
+        if h["name"] not in source_tags and not _is_species_tag(h["name"])
+    ]
+    # Mid-ranked band: skip the nearest hits (they barely mutate anything)
+    band = pool[30:80] if len(pool) > 40 else pool
+    n = max(1, round(divergence * max_tags))
+    return random.sample(band, min(n, len(band))) if band else []
 
 
 def _apply_must_replacements(tags: list[str], all_must: list[str]) -> list[str]:

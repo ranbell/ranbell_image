@@ -3,6 +3,7 @@ display_name_en: "Vantage"
 display_name_ja: "瞰"
 kanji: "瞰"
 needs_vocab_hint: false
+temperature: 1.0
 system_prompt: |
   You are Vantage. You have full creative freedom.
 

@@ -28,11 +28,28 @@ const {
   invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
   invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
   invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
+  invokeFrontierMode, invokeFrontierTags, invokeHeat,
   openInvoke, closeInvoke,
   summon, cancel, respin, adopt, sendToRefine,
-  fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview,
+  fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
   toggleEmoji, toggleSpirit,
 } = useInvokeSession()
+
+// Resonance / Frontier are mutually exclusive drift directions
+function toggleResonance() {
+  invokeResonanceMode.value = !invokeResonanceMode.value
+  if (invokeResonanceMode.value) {
+    invokeFrontierMode.value = false
+    fetchResonancePreview(getToken())
+  }
+}
+function toggleFrontier() {
+  invokeFrontierMode.value = !invokeFrontierMode.value
+  if (invokeFrontierMode.value) {
+    invokeResonanceMode.value = false
+    fetchFrontierPreview(getToken())
+  }
+}
 
 // ── Workflows ─────────────────────────────────────────────────────────────────
 const workflows = ref([])
@@ -840,11 +857,11 @@ function onThumbnailError(event) {
                   </div>
                 </div>
 
-                <!-- Echoes of Resonance -->
+                <!-- Echoes of Resonance / Frontier -->
                 <div class="pt-1">
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 flex-wrap">
                     <button
-                      @click="invokeResonanceMode = !invokeResonanceMode; if (invokeResonanceMode) fetchResonancePreview(getToken())"
+                      @click="toggleResonance"
                       :class="invokeResonanceMode
                         ? 'bg-violet-700/50 border-violet-500/60 text-violet-200'
                         : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
@@ -852,11 +869,27 @@ function onThumbnailError(event) {
                       <span>🌟</span>
                       <span>{{ t('invoke.resonanceLabel') }}</span>
                     </button>
+                    <button
+                      @click="toggleFrontier"
+                      :title="t('invoke.frontierTitle')"
+                      :class="invokeFrontierMode
+                        ? 'bg-teal-700/50 border-teal-500/60 text-teal-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] transition">
+                      <span>🧭</span>
+                      <span>{{ t('invoke.frontierLabel') }}</span>
+                    </button>
                     <span v-if="invokeResonanceMode && invokeResonanceCount > 0" class="text-[9px] text-violet-400">
                       {{ invokeResonanceTags.slice(0, 5).map(t => t.name).join(', ') }}<span v-if="invokeResonanceTags.length > 5">…</span>
                     </span>
                     <span v-else-if="invokeResonanceMode && invokeResonanceCount === 0" class="text-[9px] text-gray-600">
                       {{ t('invoke.resonanceNoStars') }}
+                    </span>
+                    <span v-else-if="invokeFrontierMode && invokeFrontierTags.length > 0" class="text-[9px] text-teal-400">
+                      {{ invokeFrontierTags.slice(0, 5).map(t => t.name).join(', ') }}<span v-if="invokeFrontierTags.length > 5">…</span>
+                    </span>
+                    <span v-else-if="invokeFrontierMode" class="text-[9px] text-gray-600">
+                      {{ t('invoke.frontierNoStars') }}
                     </span>
                   </div>
                 </div>
@@ -1042,6 +1075,20 @@ function onThumbnailError(event) {
                 </div>
               </div>
 
+              <!-- ── Heat slider (common) ── -->
+              <div>
+                <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1 flex items-center justify-between">
+                  <span :title="t('invoke.heatTitle')">🔥 {{ t('invoke.heatLabel') }}</span>
+                  <span class="font-mono text-orange-400/80 normal-case">×{{ invokeHeat.toFixed(2) }}</span>
+                </p>
+                <input type="range" min="0.6" max="1.3" step="0.05" v-model.number="invokeHeat"
+                  class="w-full accent-orange-500" />
+                <div class="flex justify-between text-[9px] text-gray-700">
+                  <span>{{ t('invoke.heatCalm') }}</span>
+                  <span>{{ t('invoke.heatWild') }}</span>
+                </div>
+              </div>
+
               <!-- ── Summon / Cancel ── -->
               <div class="space-y-1.5">
                 <button @click="handleSummon"
@@ -1155,6 +1202,17 @@ function onThumbnailError(event) {
                           <p class="text-[9px] text-gray-600">
                             {{ spiritStatusLabel(invokeSpirits[name]?.status) }}
                           </p>
+                        </div>
+                        <!-- Surprise (novelty) badge -->
+                        <div v-if="invokeSpirits[name]?.novelty_score !== null && invokeSpirits[name]?.novelty_score !== undefined"
+                          :title="t('invoke.surpriseTitle')"
+                          :class="[
+                            invokeSpirits[name].novelty_score >= 40
+                              ? 'bg-teal-900/60 border-teal-500/60 text-teal-300'
+                              : 'bg-gray-800/60 border-gray-700/40 text-gray-500',
+                            'text-[9px] px-1.5 py-0.5 rounded-full border font-mono flex-shrink-0'
+                          ]">
+                          ✦{{ Math.round(invokeSpirits[name].novelty_score) }}
                         </div>
                         <!-- Alignment badge -->
                         <div v-if="invokeSpirits[name]?.alignment_score !== null && invokeSpirits[name]?.alignment_score !== undefined"
