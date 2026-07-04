@@ -893,6 +893,7 @@
     "tabHealth": "Dataset Health",
     "semanticCompute": "Compute UMAP",
     "semanticRecompute": "Recompute",
+    "semanticRecomputeConfirm": "Recompute UMAP?\nDepending on the number of images, this may take several minutes to tens of minutes.",
     "semanticStatus": "{covered} / {total} images mapped",
     "semanticPending": "UMAP not yet computed. Click Compute to start.",
     "semanticRunning": "Computing… {done} / {total}",
