@@ -81,6 +81,9 @@ class ImageDirectoryWatcher:
 
         pending_heal = False
         heal_deadline: float | None = None
+        pending_generated = False
+        generated_deadline: float | None = None
+        has_non_invoke = False
 
         while True:
             try:
@@ -88,20 +91,44 @@ class ImageDirectoryWatcher:
                     self._event_queue.get(), timeout=1.0
                 )
             except asyncio.TimeoutError:
-                if pending_heal and heal_deadline is not None:
-                    now = asyncio.get_event_loop().time()
-                    if now >= heal_deadline:
+                now = asyncio.get_event_loop().time()
+                if pending_heal and heal_deadline is not None and now >= heal_deadline:
+                    self._spooler.submit(
+                        JobLane.SYNC,
+                        "scan_heal",
+                        run_scan_heal,
+                        db=self._db,
+                        ollama=self._ollama,
+                        spooler=self._spooler,
+                    )
+                    logger.info("Auto-triggered SCAN_HEAL")
+                    pending_heal = False
+                    heal_deadline = None
+                if pending_generated and generated_deadline is not None and now >= generated_deadline:
+                    self._spooler.submit(
+                        JobLane.SYNC,
+                        "scan_heal",
+                        run_scan_heal,
+                        db=self._db,
+                        ollama=self._ollama,
+                        spooler=self._spooler,
+                    )
+                    if self._auto_ai_pipeline and has_non_invoke:
                         self._spooler.submit(
-                            JobLane.SYNC,
-                            "scan_heal",
-                            run_scan_heal,
+                            JobLane.EMBEDDING,
+                            "ai_pipeline_auto",
+                            run_pipeline,
                             db=self._db,
                             ollama=self._ollama,
                             spooler=self._spooler,
                         )
-                        logger.info("Auto-triggered SCAN_HEAL")
-                        pending_heal = False
-                        heal_deadline = None
+                    logger.info(
+                        "Auto-triggered SCAN_HEAL for generated_dir (non_invoke=%s)",
+                        has_non_invoke,
+                    )
+                    pending_generated = False
+                    generated_deadline = None
+                    has_non_invoke = False
                 continue
             except asyncio.CancelledError:
                 break
@@ -111,23 +138,12 @@ class ImageDirectoryWatcher:
                     if event_type == "created":
                         # Invoke-generated images are saved under generated_dir/invoke/
                         # and are managed by the invoke pipeline (wd14 + alignment jobs).
-                        # Skip ai_pipeline_auto for these to avoid redundant scans on the main screen.
+                        # Debounce all generated files; skip ai_pipeline_auto for invoke ones.
                         is_invoke = path.is_relative_to(self._generated_dir / "invoke")
-
-                        sha256 = await register_image(path, self._db)
-                        if not sha256:
-                            await wait_for_registration(path)
-                            logger.debug("waited for in-flight registration: %s", path.name)
-                        logger.info("Auto-registered%s: %s", " (invoke-skip-pipeline)" if is_invoke else "", path.name)
-                        if self._auto_ai_pipeline and not is_invoke:
-                            self._spooler.submit(
-                                JobLane.EMBEDDING,
-                                "ai_pipeline_auto",
-                                run_pipeline,
-                                db=self._db,
-                                ollama=self._ollama,
-                                spooler=self._spooler,
-                            )
+                        pending_generated = True
+                        generated_deadline = asyncio.get_event_loop().time() + 2.0
+                        if not is_invoke:
+                            has_non_invoke = True
                 else:
                     pending_heal = True
                     heal_deadline = asyncio.get_event_loop().time() + self._debounce

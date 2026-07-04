@@ -220,7 +220,7 @@ async def get_health(request: Request):
             count_filter=qm.Filter(must_not=[
                 qm.IsEmptyCondition(is_empty=qm.PayloadField(key="positive_prompt"))
             ]),
-            exact=True,
+            exact=False,
         ),
         db.scroll_model_facets(),
     )

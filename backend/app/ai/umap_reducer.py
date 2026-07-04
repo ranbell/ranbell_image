@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import pickle
+import random
 import threading
 import time
 from pathlib import Path
@@ -75,20 +76,23 @@ async def run_umap_analysis(db, cancel_fn: Callable[[], bool]) -> None:
     loop = asyncio.get_event_loop()
 
     try:
+        from ..runtime_config import get_runtime_config
+
         # Phase 1: Fetch embedding vectors
         pairs = await db.get_all_embeddings()
         if not pairs:
             analyzer_umap_state["error"] = "No embeddings found"
             return
 
+        cfg = await get_runtime_config(db)
+        max_pts = int(cfg.get("umap_max_points", 20_000))
+        if len(pairs) > max_pts:
+            pairs = random.sample(pairs, max_pts)
+
         sha256s = [p[0] for p in pairs]
         vectors = np.array([p[1] for p in pairs], dtype=np.float32)
         n = len(sha256s)
         analyzer_umap_state["total"] = n
-
-        if n > 10_000:
-            analyzer_umap_state["error"] = f"Datasets larger than 10,000 items are not yet supported. (current: {n:,} items)"
-            return
 
         if cancel_fn():
             return

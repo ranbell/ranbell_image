@@ -54,6 +54,7 @@ _defaults = {
     "alignment_concurrency":    2,
     "pipeline_auto_continue":   True,
     "scan_concurrency":         8,
+    "umap_max_points":          20_000,
 }
 
 _cache: RuntimeConfigCache | None = None
