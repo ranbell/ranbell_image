@@ -157,16 +157,18 @@ class GenerateImagesRequest(BaseModel):
     # Manual-mode edited prompts, keyed by axis. Omitted axes use stored prompts.
     axes: dict[str, dict] = {}
     seed: int | None = None
+    workflow_name: str = ""
 
 
-def _submit_axis_image_job(app, story: dict, axis: str, seed: int) -> str:
+def _submit_axis_image_job(app, story: dict, axis: str, seed: int,
+                            workflow_override: str = "") -> str:
     from ..jobs.runners import run_chronicle_image_generate
 
     axis_data = (story.get("axes") or {}).get(axis) or {}
     positive = axis_data.get("prompt_positive")
     if not positive:
         raise HTTPException(409, f"Axis {axis!r} has no stored prompt")
-    workflow_name = story.get("workflow_name")
+    workflow_name = workflow_override or story.get("workflow_name")
     if not workflow_name:
         raise HTTPException(409, "Story has no stored workflow_name")
 
@@ -216,6 +218,12 @@ async def generate_images(story_id: str, body: GenerateImagesRequest, request: R
     if body.axes:
         story = await story_db.get_story(db, story_id)
 
+    effective_workflow = body.workflow_name or story.get("workflow_name", "")
+    if not effective_workflow:
+        raise HTTPException(409, "workflow_name is required for image generation")
+    if body.workflow_name and not story.get("workflow_name"):
+        await story_db.update_story(db, story_id, {"workflow_name": body.workflow_name})
+
     seed = body.seed if body.seed is not None else random.randint(0, (1 << 64) - 1)
     jobs = []
     for axis in story_db.AXES:
@@ -223,7 +231,8 @@ async def generate_images(story_id: str, body: GenerateImagesRequest, request: R
             continue
         if not ((story.get("axes") or {}).get(axis) or {}).get("prompt_positive"):
             continue
-        job_id = _submit_axis_image_job(app, story, axis, seed)
+        job_id = _submit_axis_image_job(app, story, axis, seed,
+                                        workflow_override=effective_workflow)
         jobs.append({"axis": axis, "job_id": job_id})
     if not jobs:
         raise HTTPException(409, "No axes with stored prompts to generate")

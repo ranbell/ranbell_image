@@ -306,7 +306,7 @@ async function generateImages() {
     const r = await fetch(`/api/story/${storyId.value}/generate-images`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ axes, seed: seed.value }),
+      body: JSON.stringify({ axes, seed: seed.value, workflow_name: workflow.value }),
     })
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
     const data = await r.json()

@@ -147,6 +147,15 @@ async def update_story_axis(db, story_id: str, axis: str, updates: dict) -> None
     )
 
 
+async def update_story(db, story_id: str, updates: dict) -> None:
+    """Patch top-level story fields (e.g. workflow_name)."""
+    await db._qc.set_payload(
+        collection_name=STORIES_COLLECTION,
+        payload=updates,
+        points=qm.PointIdsList(points=[story_id]),
+    )
+
+
 async def delete_story(db, story_id: str) -> None:
     await db._qc.delete(
         collection_name=STORIES_COLLECTION,
