@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -14,6 +14,19 @@ const AXES = ['past', 'present', 'future']
 const stories = ref([])
 const loading = ref(false)
 const regenerating = ref(new Set())   // `${storyId}:${axis}`
+const lang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
+
+function storyTitle(story) {
+  return (lang.value === 'ja' && story.title_ja) ? story.title_ja : (story.title || '')
+}
+function storyOverall(story) {
+  return (lang.value === 'ja' && story.overall_story_ja)
+    ? story.overall_story_ja : (story.overall_story || '')
+}
+function axisStory(story, axis) {
+  const a = story.axes?.[axis] || {}
+  return (lang.value === 'ja' && a.story_ja) ? a.story_ja : (a.story || '')
+}
 
 watch(() => props.show, (val) => { if (val) fetchStories() })
 
@@ -69,6 +82,11 @@ function onThumbError(e, sha256) {
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-800">
           <h2 class="text-base font-bold text-amber-300">📖 {{ t('storybook.title') }}</h2>
           <div class="flex items-center gap-2">
+            <div class="flex rounded-lg overflow-hidden border border-gray-700 text-xs">
+              <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
+                :class="lang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
+                class="px-2.5 py-1.5 transition-colors uppercase">{{ l }}</button>
+            </div>
             <button @click="fetchStories"
               class="px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-300 transition-colors">
               ⟳ {{ t('storybook.refresh') }}
@@ -84,8 +102,17 @@ function onThumbError(e, sha256) {
 
           <div v-for="story in stories" :key="story.story_id"
             class="bg-gray-800/40 border border-gray-800 rounded-2xl p-4 flex flex-col gap-3">
+            <!-- title + overall story -->
+            <div v-if="storyTitle(story)" class="flex flex-col gap-1.5">
+              <h3 class="text-sm font-bold text-amber-200">{{ storyTitle(story) }}</h3>
+              <p v-if="storyOverall(story)"
+                class="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">
+                {{ storyOverall(story) }}
+              </p>
+            </div>
             <div class="flex items-center gap-3 text-[10px] text-gray-500">
               <span v-if="story.worldview" class="text-amber-400/80">🌍 {{ story.worldview }}</span>
+              <span v-if="story.time_scale" class="text-teal-400/70">⏳ ± {{ t('chronicle.timeScale.' + story.time_scale) }}</span>
               <span class="ml-auto font-mono">{{ new Date(story.created_at * 1000).toLocaleString() }}</span>
             </div>
 
@@ -123,7 +150,7 @@ function onThumbError(e, sha256) {
                 </div>
 
                 <p class="text-[11px] text-gray-400 leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">
-                  {{ story.axes?.[axis]?.story || '—' }}
+                  {{ axisStory(story, axis) || '—' }}
                 </p>
               </div>
             </div>

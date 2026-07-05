@@ -2,7 +2,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -12,6 +12,7 @@ const props = defineProps({
 const emit = defineEmits(['update:show', 'toast'])
 
 const AXES = ['past', 'present', 'future']
+const TIME_SCALES = ['minutes', 'hours', 'days', 'months', 'years', 'decades']
 
 // ── form state ────────────────────────────────────────────────────────────────
 const baseSha = ref('')
@@ -21,6 +22,7 @@ const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
 const workflow = ref('')
 const divergence = ref(0)
+const timeScaleIdx = ref(4)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
 const dragOver = ref(false)
@@ -45,8 +47,25 @@ const groupId = ref('')
 const seed = ref(null)
 const prompts = ref({})        // axis -> {positive, negative} (editable)
 const imageJobs = ref([])
-const doneManual = ref(false)  // manual mode: pipeline done, waiting for user
+const finished = ref(false)    // pipeline done (done event received)
 const errorMsg = ref('')
+const title = ref('')
+const titleJa = ref('')
+const overall = ref('')
+const overallJa = ref('')
+
+const displayTitle = computed(() =>
+  (locale.value?.startsWith('ja') && titleJa.value) ? titleJa.value : title.value
+)
+const displayOverall = computed(() =>
+  (locale.value?.startsWith('ja') && overallJa.value) ? overallJa.value : overall.value
+)
+
+// Pipeline done but no image jobs submitted (manual mode, or no workflow was
+// selected): prompts stay editable and images can still be generated from here.
+const canGenerate = computed(() =>
+  finished.value && !!storyId.value && !imageJobs.value.length
+)
 
 let _reader = null
 let _pendingTokens = ''
@@ -84,8 +103,12 @@ function resetRun() {
   seed.value = null
   prompts.value = {}
   imageJobs.value = []
-  doneManual.value = false
+  finished.value = false
   errorMsg.value = ''
+  title.value = ''
+  titleJa.value = ''
+  overall.value = ''
+  overallJa.value = ''
 }
 
 // ── external image drop ───────────────────────────────────────────────────────
@@ -126,6 +149,7 @@ async function start() {
         base_sha256: baseSha.value,
         base_time_axis: baseAxis.value,
         worldview: worldview.value,
+        time_scale: TIME_SCALES[timeScaleIdx.value],
         prompt_style: promptStyle.value,
         workflow_name: workflow.value,
         divergence: divergence.value,
@@ -182,8 +206,16 @@ function handleEvent(ev) {
     case 'axis_prompt':
       prompts.value = { ...prompts.value, [ev.axis]: { positive: ev.positive, negative: ev.negative } }
       break
+    case 'story':
+      title.value = ev.title || ''
+      overall.value = ev.overall || ''
+      break
     case 'story_saved':
       storyId.value = ev.story_id
+      break
+    case 'translation':
+      titleJa.value = ev.title_ja || ''
+      overallJa.value = ev.overall_ja || ''
       break
     case 'warning':
       emit('toast', { msg: ev.message, type: 'warning' })
@@ -193,7 +225,12 @@ function handleEvent(ev) {
       break
     case 'done':
       seed.value = ev.seed
-      if (ev.manual_mode) doneManual.value = true
+      finished.value = true
+      phase.value = 'done'
+      if (ev.title) title.value = ev.title
+      if (ev.title_ja) titleJa.value = ev.title_ja
+      if (ev.overall) overall.value = ev.overall
+      if (ev.overall_ja) overallJa.value = ev.overall_ja
       break
     case 'error':
       errorMsg.value = ev.message
@@ -225,7 +262,6 @@ async function generateImages() {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
     const data = await r.json()
     imageJobs.value = data.jobs
-    doneManual.value = false
     emit('toast', { msg: t('chronicle.imagesQueued'), type: 'success' })
   } catch (err) {
     emit('toast', { msg: String(err.message || err), type: 'error' })
@@ -294,6 +330,12 @@ async function generateImages() {
                   <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                 </select>
               </div>
+              <!-- time scale -->
+              <div class="flex items-center gap-2">
+                <span class="text-gray-500 w-24 flex-shrink-0" :title="t('chronicle.timeScaleTitle')">⏳ {{ t('chronicle.timeScaleLabel') }}</span>
+                <input v-model.number="timeScaleIdx" type="range" min="0" :max="TIME_SCALES.length - 1" step="1" class="flex-1 accent-teal-500" />
+                <span class="text-teal-400 w-16 text-right">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
+              </div>
               <!-- divergence -->
               <div class="flex items-center gap-2">
                 <span class="text-gray-500 w-24 flex-shrink-0" :title="t('chronicle.divergenceTitle')">⚗️ {{ t('chronicle.divergence') }}</span>
@@ -328,6 +370,15 @@ async function generateImages() {
             <span v-if="seed !== null" class="text-[10px] text-gray-600 font-mono ml-auto">seed: {{ seed }}</span>
           </div>
 
+          <!-- title + overall story -->
+          <div v-if="displayTitle" class="flex flex-col gap-1.5">
+            <h3 class="text-sm font-bold text-amber-200">📖 {{ displayTitle }}</h3>
+            <p v-if="displayOverall"
+              class="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">
+              {{ displayOverall }}
+            </p>
+          </div>
+
           <!-- stream output -->
           <div v-if="streamText || running"
             class="bg-gray-950/60 border border-gray-800 rounded-xl p-4 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></div>
@@ -340,15 +391,18 @@ async function generateImages() {
             <div v-for="(p, axis) in prompts" :key="axis"
               class="bg-gray-800/40 border border-gray-800 rounded-xl p-3 flex flex-col gap-2">
               <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
-              <textarea v-model="p.positive" rows="3" :readonly="!doneManual"
+              <textarea v-model="p.positive" rows="3" :readonly="!canGenerate"
                 class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 resize-y focus:border-teal-500 outline-none"></textarea>
-              <textarea v-model="p.negative" rows="1" :readonly="!doneManual" :placeholder="t('chronicle.negative')"
+              <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
                 class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 resize-y focus:border-teal-500 outline-none"></textarea>
             </div>
-            <button v-if="doneManual" @click="generateImages" :disabled="!workflow"
-              class="self-start px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-              🎨 {{ t('chronicle.generateImages') }}
-            </button>
+            <div v-if="canGenerate" class="flex items-center gap-3">
+              <button @click="generateImages" :disabled="!workflow"
+                class="px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+                🎨 {{ t('chronicle.generateImages') }}
+              </button>
+              <span v-if="!workflow" class="text-[10px] text-amber-400/80">{{ t('chronicle.noWorkflowHint') }}</span>
+            </div>
           </div>
 
           <!-- queued image jobs -->

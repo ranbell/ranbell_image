@@ -1219,6 +1219,16 @@
     "workflow": "Workflow",
     "workflowNone": "(none — prompts only)",
     "divergence": "Transmute",
+    "timeScaleLabel": "Time span",
+    "timeScaleTitle": "How far apart the three acts are in time",
+    "timeScale": {
+      "minutes": "minutes",
+      "hours": "hours",
+      "days": "days",
+      "months": "months",
+      "years": "years",
+      "decades": "decades"
+    },
     "divergenceTitle": "Inject unexpected elements into the past/future acts",
     "seedInherit": "Inherit base image seed",
     "manualMode": "Manual mode (review prompts before generating)",
@@ -1235,13 +1245,16 @@
     "negative": "negative prompt",
     "generateImages": "Generate images",
     "imagesQueued": "Image jobs queued",
+    "noWorkflowHint": "No workflow selected — choose one above, then generate",
     "phase": {
       "loadingImage": "Loading image",
       "extractingVision": "Reading the image",
       "mutatingTags": "Sampling mutations",
       "writingStory": "Writing the chronicle",
       "refiningPrompt": "Refining prompts",
-      "savingStory": "Saving story"
+      "savingStory": "Saving story",
+      "translating": "Translating to Japanese",
+      "done": "Done"
     }
   },
   "storybook": {

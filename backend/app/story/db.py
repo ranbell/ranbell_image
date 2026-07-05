@@ -7,8 +7,12 @@ Payload schema:
     base_image_id: sha256 of the base image
     base_time_axis: "past" | "present" | "future"
     worldview: str
+    time_scale: "minutes" | "hours" | "days" | "months" | "years" | "decades"
     workflow_name: str
-    axes: { past/present/future: { story, prompt_positive, prompt_negative, image_id } }
+    title / title_ja: str
+    overall_story / overall_story_ja: str
+    axes: { past/present/future: { story, story_ja, prompt_positive,
+                                   prompt_negative, image_id } }
     created_at: float (unix time)
     group_id: str
 """
@@ -33,15 +37,24 @@ def new_story_payload(
     worldview: str,
     workflow_name: str,
     group_id: str,
+    time_scale: str = "years",
+    title: str = "",
+    overall_story: str = "",
 ) -> dict:
     return {
         "base_image_id": base_image_id,
         "base_time_axis": base_time_axis,
         "worldview": worldview,
+        "time_scale": time_scale,
         "workflow_name": workflow_name,
+        "title": title,
+        "title_ja": "",
+        "overall_story": overall_story,
+        "overall_story_ja": "",
         "axes": {
             axis: {
                 "story": "",
+                "story_ja": "",
                 "prompt_positive": None,
                 "prompt_negative": None,
                 "image_id": base_image_id if axis == base_time_axis else None,
@@ -118,15 +131,20 @@ async def set_story_embedding(db, story_id: str, embedding: list[float]) -> None
 
 
 async def update_story_axis(db, story_id: str, axis: str, updates: dict) -> None:
-    """Merge updates into axes[axis] (read-modify-write on the axes object)."""
+    """Merge updates into axes[axis] via a nested-key write.
+
+    Uses Qdrant's payload `key` path so two axes updated concurrently (e.g.
+    the past and future image jobs finishing at the same time) cannot clobber
+    each other, which a read-modify-write of the whole axes object would.
+    """
     if axis not in AXES:
         raise ValueError(f"Unknown axis: {axis!r}")
-    story = await get_story(db, story_id)
-    if story is None:
-        raise KeyError(f"Story {story_id!r} not found")
-    axes = story.get("axes") or {a: {} for a in AXES}
-    axes[axis] = {**axes.get(axis, {}), **updates}
-    await set_story_payload(db, story_id, {"axes": axes})
+    await db._qc.set_payload(
+        collection_name=STORIES_COLLECTION,
+        payload=updates,
+        points=qm.PointIdsList(points=[story_id]),
+        key=f"axes.{axis}",
+    )
 
 
 async def delete_story(db, story_id: str) -> None:

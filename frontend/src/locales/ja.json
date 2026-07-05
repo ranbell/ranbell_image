@@ -1219,6 +1219,16 @@
     "workflow": "ワークフロー",
     "workflowNone": "(なし — プロンプトのみ)",
     "divergence": "Transmute",
+    "timeScaleLabel": "時間スケール",
+    "timeScaleTitle": "3幕がどれだけ時間的に離れているか",
+    "timeScale": {
+      "minutes": "数分",
+      "hours": "数時間",
+      "days": "数日",
+      "months": "数ヶ月",
+      "years": "数年",
+      "decades": "数十年"
+    },
     "divergenceTitle": "過去・未来の物語に予測不能な要素を混ぜ込む",
     "seedInherit": "元画像のSeedを引き継ぐ",
     "manualMode": "マニュアルモード(プロンプト確認後に画像生成)",
@@ -1235,13 +1245,16 @@
     "negative": "ネガティブプロンプト",
     "generateImages": "画像を生成",
     "imagesQueued": "画像生成ジョブを投入しました",
+    "noWorkflowHint": "ワークフロー未選択です — 上で選択してから生成してください",
     "phase": {
       "loadingImage": "画像を読み込み中",
       "extractingVision": "画像を読み解いています",
       "mutatingTags": "変異タグを抽出中",
       "writingStory": "物語を執筆中",
       "refiningPrompt": "プロンプトを錬成中",
-      "savingStory": "物語を保存中"
+      "savingStory": "物語を保存中",
+      "translating": "日本語に翻訳中",
+      "done": "完了"
     }
   },
   "storybook": {

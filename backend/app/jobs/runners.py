@@ -2686,7 +2686,16 @@ async def run_chronicle_story(
     Unless manual_mode, submits the per-axis GENERATION jobs itself, so a
     group cancel that stops this job also prevents the follow-on submissions.
     """
-    from ..api.ai import _sample_mutation_tags
+    from ..api.ai import (
+        _build_all_must,
+        _build_weighted_wd14_context,
+        _check_natural_prose,
+        _clean_markdown,
+        _correct_prose_wd14_conflicts,
+        _inject_wd14_must_tags,
+        _parse_positive_negative,
+        _sample_mutation_tags,
+    )
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
     from ..story import db as story_db
@@ -2695,10 +2704,11 @@ async def run_chronicle_story(
         AXES,
         build_axis_prompt,
         build_story_prompt,
+        build_translation_prompt,
         build_vision_prompt,
         character_tags_from_wd14,
-        parse_prompt_json,
         parse_story_sections,
+        parse_translation_json,
         remove_conflict_tags,
     )
 
@@ -2760,7 +2770,19 @@ async def run_chronicle_story(
             character_desc = visual_text
             scene_desc = visual_text
 
-        # ── Stage 2: three-act chronicle ──────────────────────────────────────
+        # Weighted WD14 analysis of the base image (Refine-grade tag context)
+        wd14_context = ""
+        wd14_analysis: dict = {}
+        if wd14_tags:
+            try:
+                wd14_context, wd14_analysis = _build_weighted_wd14_context(
+                    [(doc, 0)], [1.0], set()
+                )
+            except Exception as exc:
+                logger.warning("[chronicle] wd14 context build failed: %s", exc)
+        all_must = _build_all_must(wd14_analysis) if wd14_analysis else []
+
+        # ── Stage 2: title + overall + three acts ─────────────────────────────
         divergence = max(0.0, min(1.0, body.divergence))
         mutation_tags: list[str] = []
         if divergence > 0:
@@ -2778,6 +2800,7 @@ async def run_chronicle_story(
             scene_desc=scene_desc,
             base_axis=body.base_time_axis,
             worldview=body.worldview,
+            time_scale=body.time_scale,
             mutation_tags=mutation_tags,
         )
         story_tokens: list[str] = []
@@ -2794,33 +2817,73 @@ async def run_chronicle_story(
                         0.28 + 0.32 * min(len(story_tokens) / 600, 0.97),
                         "Writing chronicle...",
                     )
-        stories = parse_story_sections("".join(story_tokens))
+        sections = parse_story_sections("".join(story_tokens))
         cancel.raise_if_set()
-        if not all(stories.get(a) for a in AXES):
-            missing = [a for a in AXES if not stories.get(a)]
+        if not all(sections.get(a) for a in AXES):
+            missing = [a for a in AXES if not sections.get(a)]
             _put({"type": "error", "message": f"Story acts missing: {', '.join(missing)}"})
             return
-        _put({"type": "story", "axes": stories})
+        stories = {a: sections[a] for a in AXES}
+        title = sections["title"] or "Untitled Chronicle"
+        overall = sections["overall"]
+        _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
-        # ── Stage 3: per-axis prompt refinement ───────────────────────────────
+        # ── Stage 3: per-axis Visual Script prompt ────────────────────────────
         gen_axes = [a for a in AXES if a != body.base_time_axis]
         prompts: dict[str, dict] = {}
         for i, axis in enumerate(gen_axes):
-            _phase("refiningPrompt", 0.62 + 0.14 * i, f"Refining {axis} prompt...")
+            _phase("refiningPrompt", 0.55 + 0.12 * i, f"Refining {axis} prompt...")
+            _put({"type": "token", "text": f"\n\n— {axis} prompt —\n"})
             axis_prompt = build_axis_prompt(
                 story_text=stories[axis],
                 character_tags=character_tags,
                 character_desc=character_desc,
                 prompt_style=body.prompt_style,
+                wd14_context=wd14_context,
             )
-            raw = await ollama.generate_text(
-                axis_prompt, model=vlm_model, options=options, fmt="json"
-            )
+            axis_tokens: list[str] = []
+            async for event in ollama.generate_text_stream(
+                axis_prompt, model=vlm_model, options=options
+            ):
+                if _abort.is_set():
+                    raise JobCancelled()
+                _put(event)
+                if event["type"] == "token":
+                    axis_tokens.append(event["text"])
+                    if len(axis_tokens) % 8 == 0:
+                        reporter.update(
+                            0.55 + 0.12 * (i + min(len(axis_tokens) / 700, 0.97)),
+                            f"Refining {axis} prompt...",
+                        )
             cancel.raise_if_set()
-            positive, negative = parse_prompt_json(raw)
+            positive, negative = _parse_positive_negative("".join(axis_tokens))
+            positive = _clean_markdown(positive)
+            negative = _clean_markdown(negative)
             if not positive:
                 _put({"type": "error", "message": f"Prompt refinement failed for {axis}"})
                 return
+
+            # Split into tag line / prose per style, then apply Refine-grade fixes
+            if body.prompt_style == "danbooru":
+                tag_line, prose = positive, ""
+            elif body.prompt_style == "natural":
+                tag_line, prose = "", positive
+            else:  # danbooru+natural: first block = tags, rest = prose
+                head, _, tail = positive.partition("\n\n")
+                tag_line, prose = head.strip(), tail.strip()
+
+            if tag_line:
+                tag_line = _strip_quality_metatags(tag_line)
+                tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+                if wd14_analysis and divergence <= 0.5:
+                    tag_line = _inject_wd14_must_tags(tag_line, wd14_analysis)
+            if prose and all_must:
+                prose = _correct_prose_wd14_conflicts(prose, all_must)
+            if body.prompt_style != "danbooru" and not _check_natural_prose(prose):
+                _put({"type": "warning",
+                      "message": f"{axis}: prose paragraphs look thin — consider re-generating."})
+            positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)
+
             # Transmute cleanup: drop tags that contradict this act's story
             if mutation_tags:
                 tag_candidates = [
@@ -2838,13 +2901,16 @@ async def run_chronicle_story(
                   "positive": positive, "negative": negative})
 
         # ── Save story record ─────────────────────────────────────────────────
-        _phase("savingStory", 0.92, "Saving story...")
+        _phase("savingStory", 0.82, "Saving story...")
         payload = story_db.new_story_payload(
             base_image_id=body.base_sha256,
             base_time_axis=body.base_time_axis,
             worldview=body.worldview,
             workflow_name=body.workflow_name,
             group_id=body.group_id,
+            time_scale=body.time_scale,
+            title=title,
+            overall_story=overall,
         )
         for axis in AXES:
             payload["axes"][axis]["story"] = stories[axis]
@@ -2855,12 +2921,38 @@ async def run_chronicle_story(
         embedding = None
         try:
             embedding = await ollama.embed(
-                " ".join(stories[a] for a in AXES)[:4000]
+                " ".join([title, overall, *(stories[a] for a in AXES)])[:4000]
             )
         except Exception as exc:
             logger.warning("[chronicle] story embed failed: %s", exc)
         story_id = await story_db.create_story(db, payload, embedding)
         _put({"type": "story_saved", "story_id": story_id})
+
+        # ── Final stage: Japanese translation ─────────────────────────────────
+        # Runs before image-job submission so the axes write cannot clobber an
+        # image_id linked by a concurrently running GENERATION job.
+        translation: dict = {}
+        try:
+            _phase("translating", 0.90, "Translating to Japanese...")
+            raw_tr = await ollama.generate_text(
+                build_translation_prompt(title, overall, stories),
+                model=vlm_model, options=options, fmt="json",
+            )
+            translation = parse_translation_json(raw_tr)
+            if any(translation.values()):
+                for axis in AXES:
+                    payload["axes"][axis]["story_ja"] = translation.get(f"{axis}_ja", "")
+                await story_db.set_story_payload(db, story_id, {
+                    "title_ja": translation.get("title_ja", ""),
+                    "overall_story_ja": translation.get("overall_ja", ""),
+                    "axes": payload["axes"],
+                })
+                _put({"type": "translation", **translation})
+            else:
+                _put({"type": "warning", "message": "Japanese translation came back empty."})
+        except Exception as exc:
+            logger.warning("[chronicle] translation failed: %s", exc)
+            _put({"type": "warning", "message": f"Japanese translation failed: {exc}"})
 
         # ── Seed resolution ───────────────────────────────────────────────────
         import random as _random
@@ -2898,6 +2990,9 @@ async def run_chronicle_story(
                 )
                 image_jobs.append({"axis": axis, "job_id": gen_job_id})
             _put({"type": "image_jobs", "jobs": image_jobs})
+        elif not body.workflow_name:
+            _put({"type": "warning",
+                  "message": "No workflow selected — image generation skipped."})
 
         _put({
             "type": "done",
@@ -2905,6 +3000,10 @@ async def run_chronicle_story(
             "group_id": body.group_id,
             "seed": seed,
             "manual_mode": body.manual_mode,
+            "title": title,
+            "title_ja": translation.get("title_ja", ""),
+            "overall": overall,
+            "overall_ja": translation.get("overall_ja", ""),
             "axes": payload["axes"],
         })
     except JobCancelled:
