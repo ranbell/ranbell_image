@@ -957,7 +957,11 @@
     "resume": "再開",
     "cancel": "キャンセル",
     "pauseLane": "レーンを一時停止",
-    "resumeLane": "レーンを再開"
+    "resumeLane": "レーンを再開",
+    "gpuGuardTooltip": "Generation / Prompt Engine 稼働中のため GPU 保護で自動停止中。完了後に自動再開します",
+    "heldTooltip": "ポーズゲートで待機中 — レーン再開時に自動的に進みます",
+    "slotsTooltip": "最大同時リクエスト数（セマフォ容量）",
+    "cpuLaneTooltip": "CPU 専用レーン — GPU 保護中も動作し続けます"
   },
   "jobTitle": {
     "scan_heal":               "スキャン（修復）",

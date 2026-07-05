@@ -24,22 +24,29 @@
           :key="sys.key"
           class="cr-ann-tile"
           :class="`cr-ann--${systemStatus[sys.key] || 'standby'}`"
+          :title="systemStatus[sys.key] === 'guard' ? t('controlRoom.gpuGuardTooltip') : undefined"
         >
           <span class="cr-lamp" :class="`cr-lamp--${systemStatus[sys.key] || 'standby'}`" />
           <span class="cr-ann-name">{{ sys.label }}</span>
-          <span class="cr-ann-state">{{ (systemStatus[sys.key] || 'standby').toUpperCase() }}</span>
+          <span class="cr-ann-state">{{ systemStatus[sys.key] === 'guard' ? '⛨ GPU GUARD' : (systemStatus[sys.key] || 'standby').toUpperCase() }}</span>
           <button
             v-if="sys.lane"
             class="cr-ann-ctrl-btn"
-            :class="{ 'is-paused': laneStates[sys.lane]?.paused }"
+            :class="{ 'is-paused': laneStates[sys.lane]?.paused, 'is-guard': isGuardPaused(sys.lane) }"
+            :disabled="isGuardPaused(sys.lane)"
             @click.stop="toggleLanePause(sys.lane)"
-            :title="laneStates[sys.lane]?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
-          >{{ laneStates[sys.lane]?.paused ? '▶' : '⏸' }}</button>
+            :title="isGuardPaused(sys.lane) ? t('controlRoom.gpuGuardTooltip') : laneStates[sys.lane]?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+          >{{ isGuardPaused(sys.lane) ? '⛨' : laneStates[sys.lane]?.paused ? '▶' : '⏸' }}</button>
         </div>
       </div>
 
-      <!-- ── P&ID process flow diagram: Gen → Embed → Eval pipeline ── -->
+      <!-- ── P&ID process flow diagram: Gen → Tag → Embed → Eval pipeline ── -->
       <div class="cr-pid">
+
+        <!-- GPU interlock rail: shown while the spooler holds lanes to protect the GPU -->
+        <div v-if="guardActive" class="cr-pid-interlock-rail">
+          <span class="cr-pid-interlock-label">⛨ GPU INTERLOCK · {{ guardSourceLabel }}</span>
+        </div>
 
         <!-- JOBS IN source terminus -->
         <div class="cr-pid-terminus">
@@ -49,174 +56,81 @@
           </div>
         </div>
 
-        <!-- pipe: IN → GEN -->
-        <div class="cr-pid-pipe">
-          <div class="cr-pid-pipe-line" :class="genQueueDepth > 0 ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
-        </div>
+        <template v-for="(unit, i) in pidUnits" :key="unit.key">
+          <!-- pipe into this unit -->
+          <div class="cr-pid-pipe" :class="{ 'cr-pid-pipe--xfer': i > 0 }">
+            <div class="cr-pid-pipe-line" :class="pipeFlowing(i) ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+            <span v-if="i > 0" class="cr-pid-pipe-arrow">▶</span>
+          </div>
 
-        <!-- GEN unit -->
-        <div class="cr-pid-unit cr-pid-unit--gen" :class="`cr-pid-state--${systemStatus.generation || 'standby'}`">
-          <div class="cr-pid-unit-header">
-            <span class="cr-lamp" :class="`cr-lamp--${systemStatus.generation || 'standby'}`" />
-            <span class="cr-pid-unit-name">GENERATION</span>
-            <span class="cr-pid-unit-state">{{ (systemStatus.generation || 'standby').toUpperCase() }}</span>
-            <button
-              class="cr-pid-valve-btn"
-              :class="{ 'is-paused': laneStates['gen']?.paused }"
-              @click="toggleLanePause('gen')"
-              :title="laneStates['gen']?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
-            >{{ laneStates['gen']?.paused ? '▶' : '⏸' }}</button>
-          </div>
-          <div class="cr-pid-unit-body">
-            <div class="cr-pid-tank" :title="`${genQueueDepth} queued`">
-              <div class="cr-pid-tank-fill cr-pid-tank-fill--gen"
-                :style="{ height: `${Math.min(100, genQueueDepth * 20)}%` }" />
-              <span class="cr-pid-tank-label">{{ genQueueDepth }}</span>
-            </div>
-            <div class="cr-pid-reactor">
-              <div class="cr-pid-reactor-track">
-                <div class="cr-pid-reactor-fill cr-pid-reactor-fill--gen"
-                  :style="{ transform: `scaleX(${genActiveJob ? (genActiveJob.progress ?? 0) : 0})` }" />
-              </div>
-              <span class="cr-pid-reactor-label">
-                {{ genActiveJob ? `${Math.round((genActiveJob.progress ?? 0) * 100)}%` : '—' }}
-              </span>
-            </div>
-          </div>
-          <div class="cr-pid-resbar">
-            <template v-if="genResource?.kind === 'local'">
-              <span class="cr-pid-resbar-name">{{ genResource.name }}</span>
-              <div class="cr-pid-resbar-gauge">
-                <div class="cr-pid-resbar-fill cr-pid-resbar-fill--gen"
-                  :style="{ width: `${Math.round(genResource.gpu_util_pct ?? 0)}%` }" />
-              </div>
-              <span class="cr-pid-resbar-val">GPU {{ Math.round(genResource.gpu_util_pct ?? 0) }}%</span>
-              <span class="cr-pid-resbar-vram" v-if="genResource.vram_total_gb">
-                {{ Math.round(genResource.vram_used_gb ?? 0) }}/{{ genResource.vram_total_gb }}G
-              </span>
-            </template>
-            <template v-else-if="genResource">
-              <span class="cr-lamp cr-lamp--xs" :class="genResource.reachable ? 'cr-lamp--nominal' : 'cr-lamp--fault'" />
-              <span class="cr-pid-resbar-name">{{ genResource.name }}</span>
-              <span class="cr-pid-resbar-latency" v-if="genResource.reachable && genResource.latency_ms != null">~{{ Math.round(genResource.latency_ms) }}ms</span>
-              <span class="cr-pid-resbar-fault" v-else-if="!genResource.reachable">UNREACHABLE</span>
-            </template>
-          </div>
-        </div>
+          <div class="cr-pid-unit-wrap">
+            <!-- interlock taps: trigger source (●) on GEN, shield (⛨) on guarded lanes -->
+            <span v-if="guardActive && unit.key === 'gen'" class="cr-pid-tap cr-pid-tap--source">●</span>
+            <span v-else-if="unit.status === 'guard'" class="cr-pid-tap cr-pid-tap--shield">⛨</span>
 
-        <!-- transfer pipe: GEN → EMBED -->
-        <div class="cr-pid-pipe cr-pid-pipe--xfer">
-          <div class="cr-pid-pipe-line"
-            :class="(genActiveJob || embedQueueDepth > 0) ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
-          <span class="cr-pid-pipe-arrow">▶</span>
-        </div>
-
-        <!-- EMBED unit -->
-        <div class="cr-pid-unit cr-pid-unit--embed" :class="`cr-pid-state--${systemStatus.embedding || 'standby'}`">
-          <div class="cr-pid-unit-header">
-            <span class="cr-lamp" :class="`cr-lamp--${systemStatus.embedding || 'standby'}`" />
-            <span class="cr-pid-unit-name">EMBEDDING</span>
-            <span class="cr-pid-unit-state">{{ (systemStatus.embedding || 'standby').toUpperCase() }}</span>
-            <button
-              class="cr-pid-valve-btn"
-              :class="{ 'is-paused': laneStates['embed']?.paused }"
-              @click="toggleLanePause('embed')"
-              :title="laneStates['embed']?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
-            >{{ laneStates['embed']?.paused ? '▶' : '⏸' }}</button>
-          </div>
-          <div class="cr-pid-unit-body">
-            <div class="cr-pid-tank" :title="`${embedQueueDepth} queued`">
-              <div class="cr-pid-tank-fill cr-pid-tank-fill--embed"
-                :style="{ height: `${Math.min(100, embedQueueDepth * 20)}%` }" />
-              <span class="cr-pid-tank-label">{{ embedQueueDepth }}</span>
-            </div>
-            <div class="cr-pid-reactor">
-              <div class="cr-pid-reactor-track">
-                <div class="cr-pid-reactor-fill cr-pid-reactor-fill--embed"
-                  :style="{ transform: `scaleX(${embedActiveJob ? (embedActiveJob.progress ?? 0) : 0})` }" />
+            <div class="cr-pid-unit" :class="[`cr-pid-unit--${unit.key}`, `cr-pid-state--${unit.status || 'standby'}`]">
+              <div class="cr-pid-unit-header">
+                <span class="cr-lamp" :class="`cr-lamp--${unit.status || 'standby'}`" />
+                <span class="cr-pid-unit-name">{{ unit.name }}</span>
+                <span v-if="unit.cpuOnly" class="cr-pid-cpu-chip" :title="t('controlRoom.cpuLaneTooltip')">CPU</span>
+                <span class="cr-pid-unit-state">{{ unit.status === 'guard' ? '⛨ GUARD' : (unit.status || 'standby').toUpperCase() }}</span>
+                <button
+                  class="cr-pid-valve-btn"
+                  :class="{ 'is-paused': laneStates[unit.lane]?.paused, 'is-guard': isGuardPaused(unit.lane) }"
+                  :disabled="isGuardPaused(unit.lane)"
+                  @click="toggleLanePause(unit.lane)"
+                  :title="isGuardPaused(unit.lane) ? t('controlRoom.gpuGuardTooltip') : laneStates[unit.lane]?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+                >{{ isGuardPaused(unit.lane) ? '⛨' : laneStates[unit.lane]?.paused ? '▶' : '⏸' }}</button>
               </div>
-              <span class="cr-pid-reactor-label">
-                {{ embedActiveJob ? `${Math.round((embedActiveJob.progress ?? 0) * 100)}%` : '—' }}
-              </span>
-            </div>
-          </div>
-          <div class="cr-pid-resbar">
-            <template v-if="embedResource?.kind === 'local'">
-              <span class="cr-pid-resbar-name">{{ embedResource.name }}</span>
-              <div class="cr-pid-resbar-gauge">
-                <div class="cr-pid-resbar-fill cr-pid-resbar-fill--embed"
-                  :style="{ width: `${Math.round(embedResource.gpu_util_pct ?? 0)}%` }" />
+              <div class="cr-pid-unit-body">
+                <div class="cr-pid-tank" :title="`${unit.depth} queued`">
+                  <div class="cr-pid-tank-fill" :class="`cr-pid-tank-fill--${unit.key}`"
+                    :style="{ height: `${Math.min(100, unit.depth * 20)}%` }" />
+                  <span class="cr-pid-tank-label">{{ unit.depth }}</span>
+                </div>
+                <div class="cr-pid-reactor">
+                  <div class="cr-pid-reactor-track">
+                    <div class="cr-pid-reactor-fill" :class="`cr-pid-reactor-fill--${unit.key}`"
+                      :style="{ transform: `scaleX(${unit.job ? (unit.job.progress ?? 0) : 0})` }" />
+                  </div>
+                  <span class="cr-pid-reactor-label" :class="{ 'cr-pid-reactor-label--guard': !unit.job && unit.status === 'guard' }">
+                    {{ unit.job
+                      ? `${Math.round((unit.job.progress ?? 0) * 100)}%`
+                      : unit.status === 'guard' ? `HELD BY ${guardSourceLabel}` : '—' }}
+                  </span>
+                </div>
               </div>
-              <span class="cr-pid-resbar-val">GPU {{ Math.round(embedResource.gpu_util_pct ?? 0) }}%</span>
-              <span class="cr-pid-resbar-vram" v-if="embedResource.vram_total_gb">
-                {{ Math.round(embedResource.vram_used_gb ?? 0) }}/{{ embedResource.vram_total_gb }}G
-              </span>
-            </template>
-            <template v-else-if="embedResource">
-              <span class="cr-lamp cr-lamp--xs" :class="embedResource.reachable ? 'cr-lamp--nominal' : 'cr-lamp--fault'" />
-              <span class="cr-pid-resbar-name">{{ embedResource.name }}</span>
-              <span class="cr-pid-resbar-latency" v-if="embedResource.reachable && embedResource.latency_ms != null">~{{ Math.round(embedResource.latency_ms) }}ms</span>
-              <span class="cr-pid-resbar-fault" v-else-if="!embedResource.reachable">UNREACHABLE</span>
-            </template>
-          </div>
-        </div>
-
-        <!-- transfer pipe: EMBED → EVAL -->
-        <div class="cr-pid-pipe cr-pid-pipe--xfer">
-          <div class="cr-pid-pipe-line"
-            :class="(embedActiveJob || evalQueueDepth > 0) ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
-          <span class="cr-pid-pipe-arrow">▶</span>
-        </div>
-
-        <!-- EVAL unit -->
-        <div class="cr-pid-unit cr-pid-unit--eval" :class="`cr-pid-state--${systemStatus.alignment || 'standby'}`">
-          <div class="cr-pid-unit-header">
-            <span class="cr-lamp" :class="`cr-lamp--${systemStatus.alignment || 'standby'}`" />
-            <span class="cr-pid-unit-name">ALIGNMENT</span>
-            <span class="cr-pid-unit-state">{{ (systemStatus.alignment || 'standby').toUpperCase() }}</span>
-            <button
-              class="cr-pid-valve-btn"
-              :class="{ 'is-paused': laneStates['eval']?.paused }"
-              @click="toggleLanePause('eval')"
-              :title="laneStates['eval']?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
-            >{{ laneStates['eval']?.paused ? '▶' : '⏸' }}</button>
-          </div>
-          <div class="cr-pid-unit-body">
-            <div class="cr-pid-tank" :title="`${evalQueueDepth} queued`">
-              <div class="cr-pid-tank-fill cr-pid-tank-fill--eval"
-                :style="{ height: `${Math.min(100, evalQueueDepth * 20)}%` }" />
-              <span class="cr-pid-tank-label">{{ evalQueueDepth }}</span>
-            </div>
-            <div class="cr-pid-reactor">
-              <div class="cr-pid-reactor-track">
-                <div class="cr-pid-reactor-fill cr-pid-reactor-fill--eval"
-                  :style="{ transform: `scaleX(${evalActiveJob ? (evalActiveJob.progress ?? 0) : 0})` }" />
+              <div class="cr-pid-resbar">
+                <template v-if="unit.resource?.kind === 'local'">
+                  <span class="cr-pid-resbar-name">{{ unit.resource.name }}</span>
+                  <div class="cr-pid-resbar-gauge">
+                    <div class="cr-pid-resbar-fill" :class="`cr-pid-resbar-fill--${unit.key}`"
+                      :style="{ width: `${Math.round((unit.metric === 'gpu' ? unit.resource.gpu_util_pct : unit.resource.cpu_pct) ?? 0)}%` }" />
+                  </div>
+                  <span class="cr-pid-resbar-val">
+                    {{ unit.metric === 'gpu' ? 'GPU' : 'CPU' }}
+                    {{ Math.round((unit.metric === 'gpu' ? unit.resource.gpu_util_pct : unit.resource.cpu_pct) ?? 0) }}%
+                  </span>
+                  <span class="cr-pid-resbar-vram" v-if="unit.metric === 'gpu' && unit.resource.vram_total_gb">
+                    {{ Math.round(unit.resource.vram_used_gb ?? 0) }}/{{ unit.resource.vram_total_gb }}G
+                  </span>
+                  <span class="cr-pid-resbar-vram" v-else-if="unit.metric === 'cpu' && unit.resource.ram_total_gb">
+                    {{ Math.round(unit.resource.ram_used_gb ?? 0) }}/{{ unit.resource.ram_total_gb }}G
+                  </span>
+                </template>
+                <template v-else-if="unit.resource">
+                  <span class="cr-lamp cr-lamp--xs"
+                    :class="unit.resource.reachable ? 'cr-lamp--nominal' : (unit.resource.last_checked == null ? 'cr-lamp--starting' : 'cr-lamp--fault')" />
+                  <span class="cr-pid-resbar-name">{{ unit.resource.name }}</span>
+                  <span class="cr-pid-resbar-slots" v-if="unit.resource.concurrency" :title="t('controlRoom.slotsTooltip')">×{{ unit.resource.concurrency }}</span>
+                  <span class="cr-pid-resbar-latency" v-if="unit.resource.reachable && unit.resource.latency_ms != null">~{{ Math.round(unit.resource.latency_ms) }}ms</span>
+                  <span class="cr-pid-resbar-starting" v-else-if="!unit.resource.reachable && unit.resource.last_checked == null">STARTING</span>
+                  <span class="cr-pid-resbar-fault" v-else-if="!unit.resource.reachable">UNREACHABLE</span>
+                </template>
               </div>
-              <span class="cr-pid-reactor-label">
-                {{ evalActiveJob ? `${Math.round((evalActiveJob.progress ?? 0) * 100)}%` : '—' }}
-              </span>
             </div>
           </div>
-          <div class="cr-pid-resbar">
-            <template v-if="evalResource?.kind === 'local'">
-              <span class="cr-pid-resbar-name">{{ evalResource.name }}</span>
-              <div class="cr-pid-resbar-gauge">
-                <div class="cr-pid-resbar-fill cr-pid-resbar-fill--eval"
-                  :style="{ width: `${Math.round(evalResource.cpu_pct ?? 0)}%` }" />
-              </div>
-              <span class="cr-pid-resbar-val">CPU {{ Math.round(evalResource.cpu_pct ?? 0) }}%</span>
-              <span class="cr-pid-resbar-vram" v-if="evalResource.ram_total_gb">
-                {{ Math.round(evalResource.ram_used_gb ?? 0) }}/{{ evalResource.ram_total_gb }}G
-              </span>
-            </template>
-            <template v-else-if="evalResource">
-              <span class="cr-lamp cr-lamp--xs" :class="evalResource.reachable ? 'cr-lamp--nominal' : 'cr-lamp--fault'" />
-              <span class="cr-pid-resbar-name">{{ evalResource.name }}</span>
-              <span class="cr-pid-resbar-latency" v-if="evalResource.reachable && evalResource.latency_ms != null">~{{ Math.round(evalResource.latency_ms) }}ms</span>
-              <span class="cr-pid-resbar-fault" v-else-if="!evalResource.reachable">UNREACHABLE</span>
-            </template>
-          </div>
-        </div>
+        </template>
 
         <!-- pipe: EVAL → VECTOR STORE -->
         <div class="cr-pid-pipe">
@@ -297,6 +211,7 @@
               <div class="cr-resource-header">
                 <span class="cr-lamp" :class="res.reachable ? 'cr-lamp--nominal' : (res.last_checked == null ? 'cr-lamp--starting' : 'cr-lamp--fault')" />
                 <span class="cr-resource-name">{{ resourceLabel(res.name) }}</span>
+                <span class="cr-remote-slots" v-if="res.concurrency" :title="t('controlRoom.slotsTooltip')">×{{ res.concurrency }}</span>
                 <span class="cr-remote-version" v-if="res.version">v{{ res.version }}</span>
                 <span class="cr-remote-latency" v-if="res.reachable && res.latency_ms != null">
                   ~{{ Math.round(res.latency_ms) }}ms
@@ -398,7 +313,10 @@
                 <span class="cr-job-elapsed">{{ formatElapsed(job) }}</span>
               </div>
               <div class="cr-job-row2" v-else-if="job.state === 'paused'">
-                <span class="cr-job-badge cr-job-badge--paused">
+                <span v-if="isGuardPaused(job.lane)" class="cr-job-badge cr-job-badge--guard" :title="t('controlRoom.gpuGuardTooltip')">
+                  ⛨ GPU Guard
+                </span>
+                <span v-else class="cr-job-badge cr-job-badge--paused">
                   {{ laneStates[job.lane]?.paused ? '⏸ Lane Paused' : '⏸ Paused' }}
                 </span>
                 <span class="cr-job-elapsed">{{ formatElapsed(job) }}</span>
@@ -450,7 +368,7 @@
                 <span class="cr-waited-pos">{{ String(i + 1).padStart(2, ' ') }}</span>
                 <span class="cr-waited-lane" :data-lane="job.lane">{{ laneCode(job.lane) }}</span>
                 <span class="cr-waited-title" :title="job.title">{{ job.title }}</span>
-                <span v-if="job.held" class="cr-waited-tag cr-waited-tag--held">HELD</span>
+                <span v-if="job.held" class="cr-waited-tag cr-waited-tag--held" :title="t('controlRoom.heldTooltip')">HELD</span>
                 <span v-else-if="job.priority > 0" class="cr-waited-tag cr-waited-tag--pri">P{{ job.priority }}</span>
                 <div class="cr-waited-actions">
                   <template v-if="!job.held">
@@ -569,16 +487,26 @@ const {
   localResources,
   remoteResources,
   laneStates,
+  guardActive,
+  guardSourceLabel,
   genActiveJob,
   genQueueDepth,
+  tagActiveJob,
+  tagQueueDepth,
   embedActiveJob,
   embedQueueDepth,
   evalActiveJob,
   evalQueueDepth,
   genResource,
+  tagResource,
   embedResource,
   evalResource,
 } = props.controlRoom
+
+function isGuardPaused(lane) {
+  const ls = laneStates.value[lane]
+  return !!(ls?.paused && ls.pause_reason === 'auto')
+}
 
 async function toggleLanePause(lane) {
   const paused = laneStates.value[lane]?.paused
@@ -587,6 +515,21 @@ async function toggleLanePause(lane) {
   } catch (e) {
     console.error('Lane control error:', e)
   }
+}
+
+// ── P&ID unit descriptors (flow order: GEN → TAG → EMBED → EVAL) ────────────
+// metric picks which local gauge to show; cpuOnly marks GPU-independent lanes
+const pidUnits = computed(() => [
+  { key: 'gen',   name: 'GENERATION', lane: 'gen',     status: systemStatus.value.generation, job: genActiveJob.value,   depth: genQueueDepth.value,   resource: genResource.value,   metric: 'gpu' },
+  { key: 'tag',   name: 'TAGGING',    lane: 'tagging', status: systemStatus.value.tagging,    job: tagActiveJob.value,   depth: tagQueueDepth.value,   resource: tagResource.value,   metric: 'cpu', cpuOnly: true },
+  { key: 'embed', name: 'EMBEDDING',  lane: 'embed',   status: systemStatus.value.embedding,  job: embedActiveJob.value, depth: embedQueueDepth.value, resource: embedResource.value, metric: 'gpu' },
+  { key: 'eval',  name: 'ALIGNMENT',  lane: 'eval',    status: systemStatus.value.alignment,  job: evalActiveJob.value,  depth: evalQueueDepth.value,  resource: evalResource.value,  metric: 'cpu' },
+])
+
+function pipeFlowing(i) {
+  const units = pidUnits.value
+  if (i === 0) return units[0].depth > 0
+  return !!(units[i - 1].job || units[i].depth > 0)
 }
 
 // track jobs where pause was requested but state is still running (for blink control)
@@ -789,6 +732,8 @@ function ratioClass(used, total, caution, fault) {
   --cr-fault:         #cc3333;
   --cr-fault-glow:    rgba(204, 51, 51, 0.6);
   --cr-standby:       #2a2a3a;
+  --cr-guard:         #45c5e0;
+  --cr-guard-glow:    rgba(69, 197, 224, 0.5);
 
   /* centralized font sizes */
   --cr-font-body:  14px;
@@ -1065,6 +1010,14 @@ function ratioClass(used, total, caution, fault) {
 .cr-ann--paused .cr-ann-state {
   color: #9988cc;
 }
+.cr-lamp--guard {
+  background: var(--cr-guard);
+  box-shadow: 0 0 6px var(--cr-guard-glow);
+  animation: cr-pulse 2.6s ease-in-out infinite;
+  will-change: opacity;
+}
+.cr-ann--guard { background: rgba(69, 197, 224, 0.05); }
+.cr-ann--guard .cr-ann-state { color: var(--cr-guard); }
 
 /* ── annunciator: lane pause/resume buttons ──────────────────────────────── */
 .cr-ann-ctrl-btn {
@@ -1091,6 +1044,14 @@ function ratioClass(used, total, caution, fault) {
 }
 .cr-ann-ctrl-btn.is-paused:hover {
   background: rgba(102, 85, 170, 0.15);
+}
+/* guard = spooler-managed: not operable, shown as a shield */
+.cr-ann-ctrl-btn.is-guard,
+.cr-pid-valve-btn.is-guard {
+  border-color: rgba(69, 197, 224, 0.55);
+  color: var(--cr-guard);
+  cursor: default;
+  pointer-events: none;
 }
 
 /* ── resources ───────────────────────────────────────────────────────────────── */
@@ -1160,6 +1121,18 @@ function ratioClass(used, total, caution, fault) {
   font-size: var(--cr-font-small);
   font-family: var(--cr-mono);
   opacity: 0.6;
+}
+
+.cr-remote-slots {
+  color: var(--cr-text-dim);
+  font-size: 10px;
+  font-family: var(--cr-mono);
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(100, 100, 130, 0.35);
+  border-radius: 2px;
+  padding: 0 4px;
+  line-height: 1.5;
+  flex-shrink: 0;
 }
 
 .cr-remote-endpoint {
@@ -1538,6 +1511,11 @@ function ratioClass(used, total, caution, fault) {
   color: #e8a84a;
   border: 1px solid rgba(230, 140, 40, 0.5);
 }
+.cr-job-badge--guard {
+  background: rgba(69, 197, 224, 0.12);
+  color: var(--cr-guard);
+  border: 1px solid rgba(69, 197, 224, 0.45);
+}
 
 /* ── bulk action bar ─────────────────────────────────────────────────────────── */
 .cr-bulk-bar {
@@ -1641,7 +1619,8 @@ function ratioClass(used, total, caution, fault) {
   border: 1px solid rgba(100, 100, 130, 0.3);
 }
 /* per-lane color coding (ISA-101: use subdued tints, not saturated) */
-.cr-waited-lane[data-lane="gen"]    { background: rgba(74, 124, 90, 0.18);  color: #6aaa80; border-color: rgba(74, 124, 90, 0.35); }
+.cr-waited-lane[data-lane="gen"]     { background: rgba(74, 124, 90, 0.18);  color: #6aaa80; border-color: rgba(74, 124, 90, 0.35); }
+.cr-waited-lane[data-lane="tagging"] { background: rgba(170, 125, 65, 0.18); color: #c09a60; border-color: rgba(170, 125, 65, 0.35); }
 .cr-waited-lane[data-lane="embed"]  { background: rgba(74, 110, 180, 0.18); color: #7090cc; border-color: rgba(74, 110, 180, 0.35); }
 .cr-waited-lane[data-lane="eval"]   { background: rgba(160, 100, 200, 0.18); color: #aa80cc; border-color: rgba(160, 100, 200, 0.35); }
 .cr-waited-lane[data-lane="prompt"] { background: rgba(184, 134, 11, 0.15); color: #b89040; border-color: rgba(184, 134, 11, 0.3); }
@@ -1899,6 +1878,7 @@ function ratioClass(used, total, caution, fault) {
 
 /* ── P&ID process flow diagram ──────────────────────────────────────────────── */
 .cr-pid {
+  position: relative;
   display: flex;
   align-items: center;
   padding: 0 20px;
@@ -1910,6 +1890,53 @@ function ratioClass(used, total, caution, fault) {
   font-family: var(--cr-mono);
   gap: 0;
 }
+
+/* ── GPU interlock rail (dashed bus across the top while guard is active) ──── */
+.cr-pid-interlock-rail {
+  position: absolute;
+  top: 4px;
+  left: 20px;
+  right: 20px;
+  height: 0;
+  border-top: 1px dashed rgba(69, 197, 224, 0.55);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.cr-pid-interlock-label {
+  position: relative;
+  top: -7px;
+  background: #090910;
+  padding: 0 8px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--cr-guard);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* wrapper so interlock taps can sit above the unit (unit itself clips overflow) */
+.cr-pid-unit-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.cr-pid-tap {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  line-height: 1;
+  z-index: 2;
+  pointer-events: none;
+  color: var(--cr-guard);
+  text-shadow: 0 0 4px var(--cr-guard-glow);
+}
+.cr-pid-tap--shield { animation: cr-pulse 2.6s ease-in-out infinite; }
 
 /* terminus boxes (JOBS IN / VECTOR STORE) */
 .cr-pid-terminus {
@@ -1991,7 +2018,7 @@ function ratioClass(used, total, caution, fault) {
   display: flex;
   flex-direction: column;
   gap: 0;
-  width: 178px;
+  width: 164px;
   height: 90px;
   border: 1px solid rgba(130, 80, 220, 0.2);
   border-radius: 2px;
@@ -2004,6 +2031,19 @@ function ratioClass(used, total, caution, fault) {
 /* lane base tints */
 .cr-pid-unit--gen   { border-color: rgba(74, 124, 90, 0.3); background: rgba(74, 124, 90, 0.05); }
 .cr-pid-unit--embed { border-color: rgba(74, 110, 180, 0.3); background: rgba(74, 110, 180, 0.05); }
+.cr-pid-unit--tag   { border-color: rgba(170, 125, 65, 0.3); background: rgba(170, 125, 65, 0.05); }
+
+.cr-pid-unit--tag.cr-pid-state--active,
+.cr-pid-unit--tag.cr-pid-state--nominal { border-color: rgba(170, 125, 65, 0.55); background: rgba(170, 125, 65, 0.09); }
+.cr-pid-unit--tag.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--tag.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--tag.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+/* GPU guard state overrides the lane tint on any unit */
+.cr-pid-unit.cr-pid-state--guard {
+  border-color: rgba(69, 197, 224, 0.5);
+  background: rgba(69, 197, 224, 0.06);
+}
 
 /* ISA-101 state intensity modifiers */
 .cr-pid-unit--gen.cr-pid-state--active,
@@ -2053,6 +2093,20 @@ function ratioClass(used, total, caution, fault) {
 .cr-pid-state--caution .cr-pid-unit-state { color: var(--cr-caution); }
 .cr-pid-state--fault   .cr-pid-unit-state { color: var(--cr-fault); }
 .cr-pid-state--paused  .cr-pid-unit-state { color: #8877bb; }
+.cr-pid-state--guard   .cr-pid-unit-state { color: var(--cr-guard); font-weight: 700; }
+
+/* CPU-only lane chip (TAGGING keeps running during GPU guard) */
+.cr-pid-cpu-chip {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0 4px;
+  line-height: 1.5;
+  border: 1px solid rgba(170, 125, 65, 0.4);
+  border-radius: 1px;
+  color: #c09a60;
+  flex-shrink: 0;
+}
 
 /* valve button */
 .cr-pid-valve-btn {
@@ -2106,6 +2160,7 @@ function ratioClass(used, total, caution, fault) {
 }
 
 .cr-pid-tank-fill--gen   { background: rgba(74, 124, 90, 0.65); }
+.cr-pid-tank-fill--tag   { background: rgba(170, 125, 65, 0.65); }
 .cr-pid-tank-fill--embed { background: rgba(74, 110, 180, 0.65); }
 .cr-pid-tank-fill--eval  { background: rgba(160, 100, 200, 0.65); }
 
@@ -2148,6 +2203,7 @@ function ratioClass(used, total, caution, fault) {
 }
 
 .cr-pid-reactor-fill--gen   { background: linear-gradient(90deg, var(--cr-nominal) 0%, #6aaa80 100%); }
+.cr-pid-reactor-fill--tag   { background: linear-gradient(90deg, #8a6a30 0%, #c09a60 100%); }
 .cr-pid-reactor-fill--embed { background: linear-gradient(90deg, #3a5ea8 0%, #7090cc 100%); }
 .cr-pid-reactor-fill--eval  { background: linear-gradient(90deg, #7040a0 0%, #aa80cc 100%); }
 
@@ -2157,6 +2213,13 @@ function ratioClass(used, total, caution, fault) {
   font-variant-numeric: tabular-nums;
   text-align: right;
   line-height: 1;
+}
+
+.cr-pid-reactor-label--guard {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  color: var(--cr-guard);
+  white-space: nowrap;
 }
 
 /* eval unit lane tint */
@@ -2207,6 +2270,7 @@ function ratioClass(used, total, caution, fault) {
   transition: width 0.5s ease;
 }
 .cr-pid-resbar-fill--gen   { background: rgba(74, 124, 90, 0.75); }
+.cr-pid-resbar-fill--tag   { background: rgba(170, 125, 65, 0.75); }
 .cr-pid-resbar-fill--embed { background: rgba(74, 110, 180, 0.75); }
 .cr-pid-resbar-fill--eval  { background: rgba(160, 100, 200, 0.75); }
 
@@ -2242,6 +2306,25 @@ function ratioClass(used, total, caution, fault) {
   color: var(--cr-fault);
   letter-spacing: 0.05em;
   font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-pid-resbar-starting {
+  font-size: 8px;
+  color: #4aa8cc;
+  letter-spacing: 0.05em;
+  font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-pid-resbar-slots {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  border: 1px solid rgba(100, 100, 130, 0.35);
+  border-radius: 1px;
+  padding: 0 3px;
+  font-family: var(--cr-mono);
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
 
