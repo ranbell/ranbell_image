@@ -2746,6 +2746,14 @@ async def run_chronicle_story(
             return
         image_bytes = fp.read_bytes()
 
+        # Ollama VLMs may reject WebP — convert to JPEG for universal compatibility
+        if fp.suffix.lower() == ".webp":
+            import io
+            from PIL import Image as _PILImage
+            _buf = io.BytesIO()
+            _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(_buf, format="JPEG", quality=95)
+            image_bytes = _buf.getvalue()
+
         wd14_tags = doc.get("wd14_tags") or []
         character_tags = character_tags_from_wd14(wd14_tags)
 
