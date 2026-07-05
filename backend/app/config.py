@@ -52,9 +52,11 @@ class Settings(BaseSettings):
     # queues internally; this mainly provides fail-fast when it is unreachable)
     resource_remote_comfyui_concurrency: int = 1
     # 1-GPU setups: serialize PROMPT (Ollama LLM) jobs against GENERATION (ComfyUI)
-    # jobs via a shared local-gpu0 semaphore. Leave False when Ollama and ComfyUI
-    # run on different GPUs/servers.
-    prompt_gen_mutex: bool = False
+    # jobs via a shared local-gpu0 semaphore.
+    # None (default) = auto-detect: if both ollama_url and comfyui_url point to the
+    # local host (localhost / host.docker.internal / 127.0.0.1), they share the same
+    # GPU and are serialized automatically.  Set True/False to override.
+    prompt_gen_mutex: bool | None = None
     # Expert override: lane value → resource name (e.g. {"gen": "remote-comfyui"}).
     # Resource names managed at the client level (remote-ollama) are rejected here
     # to avoid double acquisition. Env var form: JSON string.

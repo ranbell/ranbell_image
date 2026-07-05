@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
     comfy = ComfyUIClient()
 
     from .config import settings as _settings
-    resources, lane_resource = build_resources(_settings)
+    resources, lane_resource, topology = build_resources(_settings)
     spooler = JobSpooler(resources=resources, lane_resource=lane_resource)
     # Throttle all Ollama traffic (every lane) at the client, per HTTP request
     ollama.set_resource(resources.get("remote-ollama"))
@@ -118,15 +118,24 @@ async def lifespan(app: FastAPI):
     # On startup: apply pause settings saved in the DB to the spooler
     from .runtime_config import _defaults as _rc_defaults
     _saved_cfg = await db.get_config()
+    # Topology-aware defaults — overridden by any value the user has saved in the DB.
+    _default_pause_lanes = list(_rc_defaults["auto_pause_lanes"])  # ["embed", "eval"]
+    if topology["tagging_local"] and (topology["ollama_local"] or topology["comfyui_local"]):
+        # WD14 CPU inference competes with local GPU workloads — pause during gen/prompt
+        if "tagging" not in _default_pause_lanes:
+            _default_pause_lanes.append("tagging")
+    # EVALUATION uses Ollama VLM; if Ollama is remote it doesn't contend with local GPU
+    _default_eval_pause = topology["ollama_local"]
+
     spooler.update_pause_settings(
         auto_pause_on_priority=_saved_cfg.get(
             "auto_pause_on_generation", _rc_defaults["auto_pause_on_generation"]
         ),
         auto_pause_target_lanes=_saved_cfg.get(
-            "auto_pause_lanes", _rc_defaults["auto_pause_lanes"]
+            "auto_pause_lanes", _default_pause_lanes
         ),
         eval_auto_pause=_saved_cfg.get(
-            "eval_auto_pause", _rc_defaults["eval_auto_pause"]
+            "eval_auto_pause", _default_eval_pause
         ),
     )
 

@@ -204,6 +204,13 @@ class Resource:
         return d
 
 
+def _is_local_url(url: str) -> bool:
+    """True if the URL points to the local host (same physical machine as the backend)."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1", "host.docker.internal")
+
+
 # Default configuration.
 # Ollama traffic is throttled INSIDE OllamaClient (per-request acquisition of
 # remote-ollama), so no lane holds the Ollama semaphore across a whole job —
@@ -224,7 +231,7 @@ DEFAULT_LANE_RESOURCE: dict[JobLane, str | None] = {
 _CLIENT_MANAGED_RESOURCES: frozenset[str] = frozenset({"remote-ollama"})
 
 
-def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | None]]:
+def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | None], dict]:
     """Build the Resource dict and lane→resource mapping from settings."""
     resources: dict[str, Resource] = {
         "local-gpu0": Resource(
@@ -279,10 +286,29 @@ def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | 
     if "remote-comfyui" in resources:
         lane_resource[JobLane.GENERATION] = "remote-comfyui"
 
-    # 1-GPU mutex: PROMPT (Ollama LLM) and GENERATION (ComfyUI) share local-gpu0.
-    # Both lanes are never pause targets, so holding the semaphore across the
-    # whole job cannot meet a checkpoint pause (no circular wait).
-    if getattr(settings, "prompt_gen_mutex", False):
+    # Topology detection: determine whether Ollama and ComfyUI are on the same
+    # physical host as the backend.  host.docker.internal / localhost / 127.0.0.1
+    # all indicate "local machine".
+    ollama_url_str = getattr(settings, "ollama_url", "") or ""
+    comfyui_url_str = comfyui_url or ""
+    ollama_local = _is_local_url(ollama_url_str)
+    comfyui_local = _is_local_url(comfyui_url_str)
+
+    # prompt_gen_mutex: None = auto (same-host → True), True/False = explicit override.
+    # Both lanes are never pause targets, so holding local-gpu0 across the whole job
+    # cannot meet a checkpoint pause (no circular wait / no deadlock).
+    raw_mutex = getattr(settings, "prompt_gen_mutex", None)
+    if raw_mutex is None:
+        effective_mutex = ollama_local and comfyui_local
+        logger.info(
+            "[topology] auto prompt_gen_mutex=%s  ollama=%s (local=%s)  comfyui=%s (local=%s)",
+            effective_mutex, ollama_url_str, ollama_local, comfyui_url_str, comfyui_local,
+        )
+    else:
+        effective_mutex = bool(raw_mutex)
+        logger.info("[topology] explicit prompt_gen_mutex=%s", effective_mutex)
+
+    if effective_mutex:
         lane_resource[JobLane.GENERATION] = "local-gpu0"
         lane_resource[JobLane.PROMPT] = "local-gpu0"
 
@@ -303,7 +329,13 @@ def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | 
             continue
         lane_resource[JobLane(lane_val)] = res_name or None
 
-    return resources, lane_resource
+    topology = {
+        "ollama_local": ollama_local,
+        "comfyui_local": comfyui_local,
+        "tagging_local": True,  # WD14 always runs on the backend CPU
+        "prompt_gen_mutex": effective_mutex,
+    }
+    return resources, lane_resource, topology
 
 
 def disk_snapshot(paths: dict[str, str]) -> list[dict]:
