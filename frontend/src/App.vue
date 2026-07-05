@@ -2385,7 +2385,6 @@ function openChronicleFromStorybook(sha256) {
 }
 
 function openImageFromStorybook(sha256) {
-  showStorybook.value = false
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
     selected.value = img
