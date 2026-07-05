@@ -48,12 +48,25 @@ def character_tags_from_wd14(wd14_tags: list[str], limit: int = 40) -> list[str]
 
 # ── Stage 1: visual vocabulary extraction ─────────────────────────────────────
 
+# Interpretive sections appended to both vision prompt variants. They feed the
+# story stage as inspiration; the literal sections above them stay the anchor
+# for the base act (split apart again by split_vision_sections).
+_VISION_NARRATIVE_SECTIONS = (
+    "STORY HOOKS: 2-3 speculative one-liners — what might have JUST happened "
+    "here, and what might be ABOUT to happen\n"
+    "OFF-FRAME: what the world just outside this frame plausibly contains\n"
+    "SYMBOLS: 1-3 objects or details in the image with narrative potential\n"
+    "ESSENCE: the abstract role of this place/moment, in one phrase "
+    '(e.g. "a threshold between two worlds")\n'
+)
+
+
 def build_vision_prompt(full_extraction: bool) -> str:
     """VLM prompt for the base image.
 
     full_extraction=True (external image without wd14_tags): describe everything.
     full_extraction=False: wd14_tags already cover appearance — only describe
-    what tags cannot express (environment, mood).
+    what tags cannot express (environment, mood, narrative reading).
     """
     if full_extraction:
         return (
@@ -63,19 +76,59 @@ def build_vision_prompt(full_extraction: bool) -> str:
             "OUTFIT: clothing and accessories\n"
             "SCENE: background, environment, time of day, weather\n"
             "MOOD: overall mood and emotional tone\n"
-            "Be concrete and visual. No speculation about names or backstory."
+            f"{_VISION_NARRATIVE_SECTIONS}"
+            "Keep CHARACTER/OUTFIT/SCENE/MOOD concrete and visual — no names, "
+            "no guesses there. Speculation belongs ONLY in the last four sections."
         )
     return (
         "Describe this image for an illustrator, in English.\n"
         "Cover, in short labeled sections:\n"
         "SCENE: background, environment, time of day, weather\n"
         "MOOD: overall mood, atmosphere and emotional tone\n"
+        f"{_VISION_NARRATIVE_SECTIONS}"
         "Do NOT describe the character's appearance or clothing. "
-        "Be concrete and visual."
+        "Keep SCENE/MOOD concrete and visual; speculation belongs ONLY in the "
+        "last four sections."
     )
 
 
+# Tolerant to markdown decoration: **STORY HOOKS:**, ## OFF-FRAME: , SYMBOLS —
+_VISION_NARRATIVE_RE = re.compile(
+    r"(?im)^[ \t>#*-]{0,4}\**\s*(?:STORY[ _]?HOOKS?|OFF[-_ ]?FRAME|SYMBOLS|ESSENCE)\s*\**\s*[:：]"
+)
+
+
+def split_vision_sections(text: str) -> tuple[str, str]:
+    """Split VLM output into (literal_desc, narrative_hooks).
+
+    Cuts at the first narrative label (STORY HOOKS/OFF-FRAME/SYMBOLS/ESSENCE).
+    No labels found → (text, "") so older-style output keeps working.
+    """
+    m = _VISION_NARRATIVE_RE.search(text)
+    if not m:
+        return text.strip(), ""
+    return text[: m.start()].strip(), text[m.start():].strip()
+
+
 # ── Stage 2: title + overall + three acts ─────────────────────────────────────
+
+def _boldness_line(divergence: float) -> str:
+    """Story-boldness rule scaled by the Transmute divergence slider."""
+    if divergence < 0.3:
+        return (
+            "- Surprise the reader quietly: prefer grounded, intimate turns "
+            "over spectacle."
+        )
+    if divergence <= 0.6:
+        return (
+            "- Prefer the unexpected-but-plausible development over the obvious "
+            "one; avoid clichés."
+        )
+    return (
+        "- Take the boldest interpretation that still makes narrative sense. "
+        "Avoid the first idea that comes to mind — subvert the obvious reading."
+    )
+
 
 def build_story_prompt(
     *,
@@ -85,6 +138,8 @@ def build_story_prompt(
     worldview: str,
     time_scale: str = "years",
     mutation_tags: list[str] | None = None,
+    story_hooks: str = "",
+    divergence: float = 0.0,
 ) -> str:
     """LLM prompt producing [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] sections."""
     world_line = (
@@ -110,6 +165,13 @@ def build_story_prompt(
             "\nUnexpected elements to weave into the PAST and FUTURE acts "
             f"(reinterpret them freely): {', '.join(mutation_tags)}\n"
         )
+    hooks_block = ""
+    if story_hooks.strip():
+        hooks_block = (
+            "\nNARRATIVE SEEDS — an interpretive reading of the base image "
+            "(inspiration only; you may extend or contradict it):\n"
+            f"{story_hooks.strip()}\n"
+        )
     return (
         "You are a storyteller. Write a three-act chronicle (past, present, future) "
         "of the single character below.\n\n"
@@ -119,6 +181,7 @@ def build_story_prompt(
         f"{character_desc}\n\n"
         f"THE {base_axis.upper()} looks exactly like this scene:\n{scene_desc}\n\n"
         f"{world_line}\n"
+        f"{hooks_block}"
         f"{mutation_block}\n"
         "Rules:\n"
         f"- The {base_axis} act must match the scene above faithfully.\n"
@@ -132,6 +195,17 @@ def build_story_prompt(
         "    FUTURE = departure / aftermath / new beginning.\n"
         "- Never write an act as 'standing in the same place with different lighting'.\n"
         "- The visual distance between acts must strictly follow the TIME SCALE above.\n"
+        "- The arc must contain ONE turning point or reversal: a belief, plan or "
+        "situation that flips.\n"
+        "- Pick ONE concrete motif (an object or detail from the scene) that "
+        "appears in all three acts and TRANSFORMS in meaning across them.\n"
+        "- Link the acts by cause and effect (because of PAST, PRESENT; because "
+        "of PRESENT, FUTURE) — never three disconnected vignettes.\n"
+        "- Give each act a different dominant emotion.\n"
+        "- Within the MAY-change list of the time constraint above, maximize "
+        "difference: anything ALLOWED to change between acts SHOULD visibly "
+        "change (location, outfit, weather — whichever the scale permits).\n"
+        f"{_boldness_line(divergence)}\n"
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
         "its own line, in this order:\n"
@@ -311,6 +385,155 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
 }
 
 
+# ── Identity tag scoping (chronicle-specific WD14 handling) ───────────────────
+#
+# Chronicle depicts a DIFFERENT moment in time, so unlike Refine we must never
+# force the base image's scene/pose/background/time-of-day tags into an axis
+# prompt. Only identity traits are anchored, and which categories count as
+# "identity" shrinks with the time scale (outfit is identity at minutes, not at
+# years). Whitelist polarity: an unrecognized tag is never injected.
+
+_COLOR_WORDS = (
+    "black|white|blonde?|brown|red|pink|purple|violet|blue|green|grey|gray|"
+    "silver|orange|aqua|amber|yellow|golden?|platinum|crimson|multicolored|"
+    "gradient|two-tone|streaked|dark|light"
+)
+_HAIR_COLOR_RE = re.compile(rf"^(?:\w+_)?(?:{_COLOR_WORDS})_hair$")
+_EYE_COLOR_RE = re.compile(rf"^(?:\w+_)?(?:{_COLOR_WORDS})_eyes$")
+
+_HAIR_STYLE_TAGS = frozenset({
+    "long_hair", "short_hair", "medium_hair", "very_long_hair",
+    "absurdly_long_hair", "wavy_hair", "curly_hair", "straight_hair",
+    "messy_hair", "spiked_hair", "hair_bun", "double_bun", "hair_intakes",
+    "hair_over_one_eye", "hair_between_eyes", "bob_cut", "hime_cut",
+    "pixie_cut", "drill_hair", "blunt_bangs", "swept_bangs",
+})
+_HAIR_STYLE_TOKENS = frozenset({
+    "braid", "braids", "twintails", "twintail", "ponytail", "bangs", "ahoge",
+    "sidelocks",
+})
+_FACE_BODY_TOKENS = frozenset({
+    "mole", "freckles", "fang", "fangs", "horn", "horns", "wing", "wings",
+    "tail", "ears", "skin", "scar", "tattoo", "halo", "heterochromia",
+    "elf", "tanned", "tanlines",
+})
+# Clothing/accessory half of vocab_bank._CHARACTER_KEYWORDS, token form
+_OUTFIT_TOKENS = frozenset({
+    "dress", "uniform", "outfit", "shirt", "skirt", "jacket", "coat",
+    "blouse", "sweater", "hoodie", "kimono", "yukata", "leotard", "bikini",
+    "swimsuit", "hat", "ribbon", "bow", "bowtie", "necktie", "glove",
+    "gloves", "thighhighs", "pantyhose", "boots", "shoes", "socks", "scarf",
+    "cape", "cloak", "armor", "necklace", "earring", "earrings", "glasses",
+    "choker", "apron", "vest", "pants", "shorts", "belt", "corset",
+})
+
+
+def classify_identity_tag(tag: str) -> str | None:
+    """'hair_color'|'hair_style'|'eyes'|'face'|'outfit'|None (= never inject)."""
+    t = tag.strip().lower().replace(" ", "_")
+    if _HAIR_COLOR_RE.match(t):
+        return "hair_color"
+    toks = set(t.split("_"))
+    if t in _HAIR_STYLE_TAGS or toks & _HAIR_STYLE_TOKENS:
+        return "hair_style"
+    if _EYE_COLOR_RE.match(t) or t == "heterochromia":
+        return "eyes"
+    if toks & _FACE_BODY_TOKENS:
+        return "face"
+    if toks & _OUTFIT_TOKENS:
+        return "outfit"
+    return None
+
+
+# Which identity categories are still anchored at each time scale
+# (derived from _SCALE_VISUAL_RULES must_keep lists above).
+_IDENTITY_CATEGORIES_BY_SCALE: dict[str, frozenset[str]] = {
+    "minutes": frozenset({"hair_color", "hair_style", "eyes", "face", "outfit"}),
+    "tens_of_minutes": frozenset({"hair_color", "hair_style", "eyes", "face", "outfit"}),
+    "hours": frozenset({"hair_color", "hair_style", "eyes", "face", "outfit"}),
+    "days": frozenset({"hair_color", "hair_style", "eyes", "face"}),
+    "months": frozenset({"hair_color", "hair_style", "eyes", "face"}),
+    "years": frozenset({"hair_color", "eyes", "face"}),
+    "decades": frozenset(),
+}
+
+
+def identity_tags_for_scale(
+    wd14_tags: list[str], time_scale: str, *, limit: int = 12
+) -> list[str]:
+    """Scale-gated identity subset of the base image's wd14 tags, order kept."""
+    allowed = _IDENTITY_CATEGORIES_BY_SCALE.get(
+        time_scale, _IDENTITY_CATEGORIES_BY_SCALE["years"]
+    )
+    if not allowed:
+        return []
+    result: list[str] = []
+    for tag in wd14_tags:
+        category = classify_identity_tag(tag)
+        if category in allowed:
+            result.append(tag)
+            if len(result) >= limit:
+                break
+    return result
+
+
+# Mirror of api.ai._SUBJECT_ANCHOR_TAGS (kept local so this module stays
+# import-free / unit-testable) — update both together.
+_SUBJECT_ANCHORS = frozenset({
+    "1girl", "1boy", "2girls", "2boys", "3girls", "4girls", "6+girls",
+    "solo", "couple", "multiple_girls", "multiple_boys", "multiple girls",
+})
+
+
+def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
+    """Insert identity tags after the last subject-anchor tag, dedup (ci)."""
+    parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+    existing = {p.lower() for p in parts}
+    new: list[str] = []
+    for tag in identity:
+        key = tag.lower()
+        if key not in existing:
+            new.append(tag)
+            existing.add(key)
+    if not new:
+        return tag_line
+    cut = max(
+        (i + 1 for i, p in enumerate(parts) if p.lower() in _SUBJECT_ANCHORS),
+        default=0,
+    ) or len(parts)
+    return ", ".join(parts[:cut] + new + parts[cut:])
+
+
+_INLINE_TAG_GROUP_RE = re.compile(r"\(([^)]+)\)")
+
+
+def collect_prompt_tags(positive: str) -> list[str]:
+    """Harvest tag candidates from a positive prompt, underscore form, deduped.
+
+    Comma-only lines contribute every segment (same heuristic as
+    remove_conflict_tags); prose lines contribute their inline (tag, tag)
+    groups, so natural-style prompts get conflict cleanup too.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+
+    def _add(raw: str) -> None:
+        tag = raw.strip().replace(" ", "_")
+        if tag and tag not in seen:
+            seen.add(tag)
+            result.append(tag)
+
+    for line in positive.split("\n"):
+        if "," in line and "." not in line:
+            for seg in line.split(","):
+                _add(seg)
+        else:
+            for m in _INLINE_TAG_GROUP_RE.finditer(line):
+                for seg in m.group(1).split(","):
+                    _add(seg)
+    return result
+
+
 def build_axis_prompt(
     *,
     story_text: str,
@@ -367,9 +590,26 @@ def build_axis_prompt(
             f"STRICTLY FORBIDDEN in this image prompt:\n"
             f"  {rules['forbidden']}\n\n"
             "Do NOT generate anything in the positive prompt that violates the FORBIDDEN list.\n"
+            "COMPOSITION: choose a camera setup clearly DIFFERENT from the base "
+            "image. Pick the shot that best dramatizes this act from: close-up, "
+            "upper_body, cowboy_shot, full_body, wide_shot, from_above, "
+            "from_below, from_behind, from_side, dutch_angle — and include it "
+            "as danbooru tags.\n"
         )
     else:
         temporal_block = ""
+
+    if not wd14_context:
+        wd14_block = ""
+    elif axis != base_axis:
+        wd14_block = (
+            f"\n[WD14 tags of the BASE image ({base_axis} act) — use ONLY for "
+            "character identity and art style continuity; do NOT copy its "
+            "scene, pose, background, or time-of-day tags into this act]\n"
+            f"{wd14_context}\n"
+        )
+    else:
+        wd14_block = f"\n[WD14 tag analysis of the base image]\n{wd14_context}\n"
 
     if prompt_style == "natural":
         format_rule = (
@@ -397,8 +637,8 @@ def build_axis_prompt(
         f"SCENE (this act of the story):\n{story_text}\n"
         f"{temporal_block}\n"
         f"{identity_src}\n"
-        + (f"\n[WD14 tag analysis of the base image]\n{wd14_context}\n" if wd14_context else "")
-        + "\n[Visual Script format]\n"
+        f"{wd14_block}"
+        "\n[Visual Script format]\n"
         f"{_VISUAL_SCRIPT_GUIDE}\n\n"
         "Rules:\n"
         "- Condense the character's PHYSICAL identity (hair, eyes, notable "
@@ -419,14 +659,24 @@ def build_axis_prompt(
     )
 
 
-def remove_conflict_tags(positive: str, conflicts: set[str]) -> str:
+def remove_conflict_tags(
+    positive: str, conflicts: set[str], *, include_prose_groups: bool = False
+) -> str:
     """Remove conflicting danbooru tags from the tag portion of a positive prompt.
 
-    Only comma-separated segments are filtered (prose sentences are left as-is,
-    matching how _find_conflict_tags reports plain tag names).
+    Comma-separated tag lines are always filtered (matching how
+    _find_conflict_tags reports plain tag names). With include_prose_groups,
+    inline (tag, tag) groups on prose lines are filtered too; a group whose
+    tags are all removed disappears entirely (never an empty "()").
     """
     if not conflicts:
         return positive
+
+    def _fix_group(m: re.Match) -> str:
+        tags = [t.strip() for t in m.group(1).split(",")]
+        kept = [t for t in tags if t and t.replace(" ", "_") not in conflicts]
+        return f"({', '.join(kept)})" if kept else ""
+
     lines = positive.split("\n")
     cleaned: list[str] = []
     for line in lines:
@@ -434,6 +684,9 @@ def remove_conflict_tags(positive: str, conflicts: set[str]) -> str:
             tags = [t.strip() for t in line.split(",")]
             kept = [t for t in tags if t and t.replace(" ", "_") not in conflicts]
             cleaned.append(", ".join(kept))
+        elif include_prose_groups:
+            fixed = _INLINE_TAG_GROUP_RE.sub(_fix_group, line)
+            cleaned.append(re.sub(r"  +", " ", fixed))
         else:
             cleaned.append(line)
     return "\n".join(cleaned)

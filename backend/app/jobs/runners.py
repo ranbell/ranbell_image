@@ -2688,12 +2688,10 @@ async def run_chronicle_story(
     """
     from ..api.ai import (
         _apply_must_replacements,
-        _build_all_must,
         _build_weighted_wd14_context,
         _check_natural_prose,
         _clean_markdown,
         _correct_prose_wd14_conflicts,
-        _inject_wd14_must_tags,
         _parse_positive_negative,
         _sample_mutation_tags,
     )
@@ -2711,10 +2709,14 @@ async def run_chronicle_story(
         build_translation_prompt,
         build_vision_prompt,
         character_tags_from_wd14,
+        collect_prompt_tags,
+        identity_tags_for_scale,
+        inject_identity_tags,
         parse_story_json,
         parse_story_sections,
         parse_translation_json,
         remove_conflict_tags,
+        split_vision_sections,
     )
 
     body = ChronicleRequest(**body_dict)
@@ -2776,12 +2778,14 @@ async def run_chronicle_story(
         visual_text = "".join(vis_tokens).strip()
         cancel.raise_if_set()
 
+        # Literal sections anchor the base act; narrative hooks feed Stage 2 only
+        literal_text, story_hooks = split_vision_sections(visual_text)
         if character_tags:
             character_desc = "[visual tags] " + ", ".join(character_tags)
-            scene_desc = visual_text
+            scene_desc = literal_text
         else:
-            character_desc = visual_text
-            scene_desc = visual_text
+            character_desc = literal_text
+            scene_desc = literal_text
 
         # Weighted WD14 analysis of the base image (Refine-grade tag context)
         wd14_context = ""
@@ -2793,7 +2797,9 @@ async def run_chronicle_story(
                 )
             except Exception as exc:
                 logger.warning("[chronicle] wd14 context build failed: %s", exc)
-        all_must = _build_all_must(wd14_analysis) if wd14_analysis else []
+        # Only identity traits are anchored across axes, and only as far as the
+        # time scale keeps them (outfit at minutes-hours, nothing at decades)
+        identity_tags = identity_tags_for_scale(character_tags, body.time_scale)
 
         # ── Stage 2: title + overall + three acts ─────────────────────────────
         divergence = max(0.0, min(1.0, body.divergence))
@@ -2815,6 +2821,8 @@ async def run_chronicle_story(
             worldview=body.worldview,
             time_scale=body.time_scale,
             mutation_tags=mutation_tags,
+            story_hooks=story_hooks,
+            divergence=divergence,
         )
         story_tokens: list[str] = []
         async for event in ollama.generate_text_stream(
@@ -2932,30 +2940,34 @@ async def run_chronicle_story(
             if tag_line:
                 tag_line = _strip_quality_metatags(tag_line)
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
-                if wd14_analysis and divergence <= 0.5:
-                    tag_line = _inject_wd14_must_tags(tag_line, wd14_analysis)
-                    if all_must:
-                        parts = [t.strip() for t in tag_line.split(",") if t.strip()]
-                        tag_line = ", ".join(_apply_must_replacements(parts, all_must))
-            if prose and all_must:
-                prose = _correct_prose_wd14_conflicts(prose, all_must)
+
+            # This act's story wins over the base image: one conflict pass per
+            # axis over the identity candidates + everything the LLM generated
+            candidates = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
+            sources = list(dict.fromkeys(identity_tags + candidates))[:80]
+            conflicts: set[str] = set()
+            if sources:
+                conflicts = await _find_conflict_tags(
+                    stories[axis][:400], sources, db, ollama, vlm_model
+                )
+                if conflicts:
+                    logger.info("[chronicle] %s: story-conflict tags: %s",
+                                axis, ", ".join(sorted(conflicts)))
+
+            # Scale-gated identity anchoring — scene/pose/background tags of
+            # the base image are never injected or forced back
+            inject = [t for t in identity_tags if t not in conflicts]
+            if tag_line and inject:
+                tag_line = inject_identity_tags(tag_line, inject)
+                parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                tag_line = ", ".join(_apply_must_replacements(parts, inject))
+            if prose and inject:
+                prose = _correct_prose_wd14_conflicts(prose, inject)
             if body.prompt_style != "danbooru" and not _check_natural_prose(prose):
                 _put({"type": "warning",
                       "message": f"{axis}: prose paragraphs look thin — consider re-generating."})
             positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)
-
-            # Transmute cleanup: drop tags that contradict this act's story
-            if mutation_tags:
-                tag_candidates = [
-                    t.strip().replace(" ", "_")
-                    for line in positive.split("\n") if "," in line
-                    for t in line.split(",") if t.strip()
-                ]
-                if tag_candidates:
-                    conflicts = await _find_conflict_tags(
-                        stories[axis][:400], tag_candidates, db, ollama, vlm_model
-                    )
-                    positive = remove_conflict_tags(positive, conflicts)
+            positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
             prompts[axis] = {"positive": positive, "negative": negative}
             _put({"type": "axis_prompt", "axis": axis,
                   "positive": positive, "negative": negative})

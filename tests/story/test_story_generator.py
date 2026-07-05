@@ -23,10 +23,15 @@ from app.story.generator import (
     build_translation_prompt,
     build_vision_prompt,
     character_tags_from_wd14,
+    classify_identity_tag,
+    collect_prompt_tags,
+    identity_tags_for_scale,
+    inject_identity_tags,
     parse_story_json,
     parse_story_sections,
     parse_translation_json,
     remove_conflict_tags,
+    split_vision_sections,
 )
 
 
@@ -225,8 +230,10 @@ def test_build_axis_prompt_visual_script_structure():
     # POSITIVE/NEGATIVE labeled output, not JSON
     assert "POSITIVE:" in prompt and "NEGATIVE:" in prompt
     assert '{"positive"' not in prompt
-    # wd14 context embedded
-    assert "[WD14 tag analysis of the base image]" in prompt
+    # wd14 context embedded — non-base axis gets the identity-only framing
+    assert "[common tags] 1girl, silver_hair" in prompt
+    assert "use ONLY for character identity and art style continuity" in prompt
+    assert "do NOT copy its scene, pose, background, or time-of-day tags" in prompt
 
 
 def test_build_axis_prompt_styles():
@@ -373,6 +380,10 @@ def test_build_vision_prompt_modes():
     partial = build_vision_prompt(full_extraction=False)
     assert "Do NOT describe the character's appearance" in partial
     assert "CHARACTER:" not in partial
+    # interpretive sections present in both modes
+    for section in ("STORY HOOKS:", "OFF-FRAME:", "SYMBOLS:", "ESSENCE:"):
+        assert section in full
+        assert section in partial
 
 
 # ── character_tags_from_wd14 ──────────────────────────────────────────────────
@@ -403,3 +414,207 @@ def test_remove_conflict_tags_tag_line():
 def test_remove_conflict_tags_noop():
     positive = "1girl, night"
     assert remove_conflict_tags(positive, set()) == positive
+
+
+def test_remove_conflict_tags_prose_groups():
+    positive = (
+        "1girl, silver_hair, night\n\n"
+        "She waits by a (window, indoors) as the (full_moon) rises. Calm."
+    )
+    default = remove_conflict_tags(positive, {"night", "indoors"})
+    # default: prose inline groups untouched
+    assert "(window, indoors)" in default
+    assert "night" not in default.split("\n")[0]
+    cleaned = remove_conflict_tags(
+        positive, {"night", "indoors", "full_moon"}, include_prose_groups=True
+    )
+    assert "(window)" in cleaned
+    assert "indoors" not in cleaned
+    # fully-conflicting group disappears without leaving "()"
+    assert "()" not in cleaned
+    assert "full_moon" not in cleaned
+
+
+# ── identity tag scoping ──────────────────────────────────────────────────────
+
+def test_classify_identity_tag():
+    assert classify_identity_tag("silver_hair") == "hair_color"
+    assert classify_identity_tag("dark_blue_hair") == "hair_color"
+    assert classify_identity_tag("long_hair") == "hair_style"
+    assert classify_identity_tag("twintails") == "hair_style"
+    assert classify_identity_tag("side_ponytail") == "hair_style"
+    assert classify_identity_tag("red_eyes") == "eyes"
+    assert classify_identity_tag("heterochromia") == "eyes"
+    assert classify_identity_tag("animal_ears") == "face"
+    assert classify_identity_tag("mole_under_eye") == "face"
+    assert classify_identity_tag("dark_skin") == "face"
+    assert classify_identity_tag("school_uniform") == "outfit"
+    assert classify_identity_tag("black_dress") == "outfit"
+    assert classify_identity_tag("hair_ribbon") == "outfit"
+    # scene / pose / composition / time-of-day tags are never identity
+    for tag in ("sitting", "indoors", "night", "window", "from_behind",
+                "standing", "outdoors", "sunset", "cityscape", "looking_at_viewer"):
+        assert classify_identity_tag(tag) is None, tag
+
+
+def test_identity_tags_for_scale():
+    tags = ["1girl", "silver_hair", "black_dress", "red_eyes", "ponytail",
+            "sitting", "indoors", "night"]
+    minutes = identity_tags_for_scale(tags, "minutes")
+    assert "black_dress" in minutes and "silver_hair" in minutes
+    assert "sitting" not in minutes and "indoors" not in minutes
+    days = identity_tags_for_scale(tags, "days")
+    assert "black_dress" not in days  # outfit may change
+    assert "silver_hair" in days and "ponytail" in days
+    years = identity_tags_for_scale(tags, "years")
+    assert "ponytail" not in years  # hair style may change
+    assert "silver_hair" in years and "red_eyes" in years
+    assert identity_tags_for_scale(tags, "decades") == []
+    # unknown scale falls back to years
+    assert identity_tags_for_scale(tags, "bogus") == years
+
+
+def test_identity_tags_for_scale_limit():
+    tags = [f"{c}_hair" for c in ("red", "blue", "green", "black", "white")]
+    assert len(identity_tags_for_scale(tags, "minutes", limit=3)) == 3
+
+
+def test_inject_identity_tags():
+    line = "1girl, solo, running, forest"
+    out = inject_identity_tags(line, ["silver_hair", "red_eyes"])
+    parts = [t.strip() for t in out.split(",")]
+    # inserted right after the last subject anchor (solo)
+    assert parts[:4] == ["1girl", "solo", "silver_hair", "red_eyes"]
+    assert parts[4:] == ["running", "forest"]
+    # case-insensitive dedup + noop on empty
+    assert inject_identity_tags(line, ["Solo", "RUNNING"]) == line
+    assert inject_identity_tags(line, []) == line
+
+
+def test_inject_identity_tags_no_anchor():
+    out = inject_identity_tags("running, forest", ["silver_hair"])
+    assert out == "running, forest, silver_hair"
+
+
+# ── collect_prompt_tags ───────────────────────────────────────────────────────
+
+def test_collect_prompt_tags_mixed():
+    positive = (
+        "1girl, solo, silver hair, night\n\n"
+        "She grips a (sword, holding_sword) on a (rooftop) under the moon. "
+        "The wind howls."
+    )
+    tags = collect_prompt_tags(positive)
+    assert "1girl" in tags and "night" in tags
+    assert "silver_hair" in tags  # space → underscore
+    assert "sword" in tags and "holding_sword" in tags and "rooftop" in tags
+    # prose words outside (...) groups are not harvested
+    assert "wind" not in tags and "moon" not in tags
+    # deduped
+    assert len(tags) == len(set(tags))
+
+
+def test_collect_prompt_tags_empty():
+    assert collect_prompt_tags("") == []
+    assert collect_prompt_tags("Just a plain sentence.") == []
+
+
+# ── split_vision_sections ─────────────────────────────────────────────────────
+
+def test_split_vision_sections():
+    text = (
+        "SCENE: an airship deck at dusk, rain incoming\n"
+        "MOOD: tense, expectant\n"
+        "STORY HOOKS: she just received a letter; the fleet is about to depart\n"
+        "OFF-FRAME: a burning harbor below\n"
+        "SYMBOLS: the letter, a cracked compass\n"
+        "ESSENCE: a point of no return"
+    )
+    literal, hooks = split_vision_sections(text)
+    assert "airship deck" in literal
+    assert "STORY HOOKS" not in literal
+    assert hooks.startswith("STORY HOOKS:")
+    assert "cracked compass" in hooks
+
+
+def test_split_vision_sections_markdown_labels():
+    text = "SCENE: a field\n**Story Hooks:** something happened\n## ESSENCE: dawn"
+    literal, hooks = split_vision_sections(text)
+    assert literal == "SCENE: a field"
+    assert "something happened" in hooks
+
+
+def test_split_vision_sections_fallback():
+    text = "SCENE: a field\nMOOD: calm"
+    literal, hooks = split_vision_sections(text)
+    assert literal == text
+    assert hooks == ""
+
+
+# ── narrative craft in build_story_prompt ─────────────────────────────────────
+
+def test_build_story_prompt_craft_rules():
+    prompt = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+    )
+    assert "turning point or reversal" in prompt
+    assert "TRANSFORMS in meaning" in prompt
+    assert "cause and effect" in prompt
+    assert "different dominant emotion" in prompt
+
+
+def test_build_story_prompt_story_hooks():
+    with_hooks = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+        story_hooks="STORY HOOKS: she just arrived",
+    )
+    assert "NARRATIVE SEEDS" in with_hooks
+    assert "she just arrived" in with_hooks
+    without = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+    )
+    assert "NARRATIVE SEEDS" not in without
+
+
+def test_build_story_prompt_boldness_scales_with_divergence():
+    low = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+        divergence=0.0,
+    )
+    mid = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+        divergence=0.5,
+    )
+    high = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+        divergence=0.9,
+    )
+    assert "quietly" in low
+    assert "unexpected-but-plausible" in mid
+    assert "boldest interpretation" in high
+    assert "boldest interpretation" not in low
+
+
+# ── composition variation in build_axis_prompt ────────────────────────────────
+
+def test_build_axis_prompt_composition_non_base_axis_only():
+    kwargs = dict(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+    )
+    non_base = build_axis_prompt(axis="past", base_axis="present", **kwargs)
+    assert "COMPOSITION:" in non_base
+    assert "dutch_angle" in non_base
+    base = build_axis_prompt(axis="present", base_axis="present", **kwargs)
+    assert "COMPOSITION:" not in base
+
+
+def test_build_axis_prompt_wd14_label_base_axis():
+    prompt = build_axis_prompt(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="present", base_axis="present",
+        wd14_context="[common tags] 1girl",
+    )
+    assert "[WD14 tag analysis of the base image]" in prompt
+    assert "do NOT copy its scene" not in prompt
