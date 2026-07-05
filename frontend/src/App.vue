@@ -2813,7 +2813,7 @@ onUnmounted(() => {
               :min="isoToMs(dateRangeMin)"
               :max="isoToMs(dateRangeMax)"
               :value="sliderTimestamp ?? isoToMs(dateRangeMax)"
-              :disabled="dateRangeLoading || searchMode === 'semantic'"
+              :disabled="dateRangeLoading"
               @input="onSliderInput"
               @change="onSliderChange"
               class="w-32 h-1.5 appearance-none rounded-full cursor-pointer bg-gray-700 accent-violet-500 disabled:opacity-40 disabled:cursor-not-allowed" />
