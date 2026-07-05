@@ -12,7 +12,7 @@ const props = defineProps({
 const emit = defineEmits(['update:show', 'toast'])
 
 const AXES = ['past', 'present', 'future']
-const TIME_SCALES = ['minutes', 'hours', 'days', 'months', 'years', 'decades']
+const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
 
 // ── form state ────────────────────────────────────────────────────────────────
 const baseSha = ref('')
@@ -22,7 +22,7 @@ const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
 const workflow = ref('')
 const divergence = ref(0)
-const timeScaleIdx = ref(4)   // index into TIME_SCALES, default "years"
+const timeScaleIdx = ref(5)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
 const dragOver = ref(false)

@@ -25,6 +25,7 @@ SECTIONS = ("title", "overall") + AXES
 # Temporal spacing between the three acts, selected by the UI slider
 TIME_SCALES = {
     "minutes": "a few minutes",
+    "tens_of_minutes": "tens of minutes",
     "hours": "a few hours",
     "days": "a few days",
     "months": "a few months",
@@ -258,6 +259,15 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "season, time of day"
         ),
         "may_differ": "micro-pose, finger/hand position, expression, a gust of wind",
+        "forbidden": "any outfit change, any location change, any passage of seasons, aging",
+    },
+    "tens_of_minutes": {
+        "must_keep": (
+            "outfit (IDENTICAL), hair color and style (IDENTICAL), "
+            "physical appearance (IDENTICAL), same room or immediate outdoor spot, "
+            "season, time of day"
+        ),
+        "may_differ": "pose, expression, minor object placement, slight lighting shift",
         "forbidden": "any outfit change, any location change, any passage of seasons, aging",
     },
     "hours": {

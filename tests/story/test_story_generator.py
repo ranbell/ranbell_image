@@ -168,6 +168,12 @@ def test_build_story_prompt_time_scale():
     assert "NON-NEGOTIABLE" in minutes
     assert "a few minutes" in minutes
     assert "FORBIDDEN" in minutes
+    tens = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present",
+        worldview="", time_scale="tens_of_minutes",
+    )
+    assert "tens of minutes" in tens
+    assert "FORBIDDEN" in tens
     hours = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="hours",

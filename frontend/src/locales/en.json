@@ -1223,6 +1223,7 @@
     "timeScaleTitle": "How far apart the three acts are in time",
     "timeScale": {
       "minutes": "minutes",
+      "tens_of_minutes": "tens of minutes",
       "hours": "hours",
       "days": "days",
       "months": "months",

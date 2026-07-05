@@ -1223,6 +1223,7 @@
     "timeScaleTitle": "3幕がどれだけ時間的に離れているか",
     "timeScale": {
       "minutes": "数分",
+      "tens_of_minutes": "数十分",
       "hours": "数時間",
       "days": "数日",
       "months": "数ヶ月",

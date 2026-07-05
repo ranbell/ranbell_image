@@ -81,6 +81,10 @@ function onThumbError(e, sha256) {
   e.target.src = `/api/originals/${sha256}`
 }
 
+function formatDate(ts) {
+  return new Date(ts * 1000).toLocaleString(lang.value === 'ja' ? 'ja-JP' : 'en-US')
+}
+
 // ── full-text detail view ─────────────────────────────────────────────────────
 const detailStory = ref(null)
 </script>
@@ -134,7 +138,7 @@ const detailStory = ref(null)
                 class="px-2 py-0.5 bg-red-900/30 hover:bg-red-800/60 border border-red-800/40 rounded-full text-red-400 transition-colors">
                 🗑 {{ t('storybook.delete') }}
               </button>
-              <span class="ml-auto font-mono">{{ new Date(story.created_at * 1000).toLocaleString() }}</span>
+              <span class="ml-auto font-mono">{{ formatDate(story.created_at) }}</span>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -193,7 +197,7 @@ const detailStory = ref(null)
                 <div class="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
                   <span v-if="detailStory.worldview">🌍 {{ detailStory.worldview }}</span>
                   <span v-if="detailStory.time_scale">⏳ {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
-                  <span class="font-mono">{{ new Date(detailStory.created_at * 1000).toLocaleString() }}</span>
+                  <span class="font-mono">{{ formatDate(detailStory.created_at) }}</span>
                 </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
