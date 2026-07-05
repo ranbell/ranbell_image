@@ -81,6 +81,17 @@ class OllamaClient:
             async with self._resource.acquire():
                 yield
 
+    def _raise_with_body(self, r) -> None:
+        """Like raise_for_status() but logs and re-raises with the Ollama error body."""
+        if r.is_error:
+            try:
+                body = r.json()
+                msg = body.get("error") or str(body)
+            except Exception:
+                msg = r.text[:500]
+            logger.error("[ollama] %s %s — %s", r.status_code, r.url, msg)
+            r.raise_for_status()
+
     async def embed(self, text: str, model: str | None = None) -> list[float]:
         async with self._acquire():
             r = await self._client.post(
@@ -119,7 +130,7 @@ class OllamaClient:
                     "options": options or {},
                 },
             )
-        r.raise_for_status()
+        self._raise_with_body(r)
         return r.json()["response"]
 
     async def generate_vlm_stream(
@@ -144,7 +155,14 @@ class OllamaClient:
             },
             timeout=settings.ollama_timeout_sec,
         ) as resp:
-            resp.raise_for_status()
+            if resp.is_error:
+                body = await resp.aread()
+                try:
+                    msg = json.loads(body).get("error") or body[:500].decode()
+                except Exception:
+                    msg = body[:500].decode()
+                logger.error("[ollama] %s %s — %s", resp.status_code, resp.url, msg)
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line:
                     continue
@@ -186,7 +204,7 @@ class OllamaClient:
             payload["format"] = fmt
         async with self._acquire():
             r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
-        r.raise_for_status()
+        self._raise_with_body(r)
         return r.json()["response"]
 
     async def generate_text_stream(
@@ -203,7 +221,14 @@ class OllamaClient:
             json={"model": model or settings.vlm_model, "prompt": prompt, "stream": True, "options": {"num_predict": -1, **(options or {})}},
             timeout=settings.ollama_timeout_sec,
         ) as resp:
-            resp.raise_for_status()
+            if resp.is_error:
+                body = await resp.aread()
+                try:
+                    msg = json.loads(body).get("error") or body[:500].decode()
+                except Exception:
+                    msg = body[:500].decode()
+                logger.error("[ollama] %s %s — %s", resp.status_code, resp.url, msg)
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line:
                     continue
