@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
     build_axis_prompt,
+    build_overall_prompt,
     build_story_prompt,
     build_story_repair_prompt,
     build_title_prompt,
@@ -130,6 +131,13 @@ def test_build_title_prompt():
     assert "NEVER generic" in prompt
 
 
+def test_build_overall_prompt():
+    prompt = build_overall_prompt("The Iron Garden", {"past": "p", "present": "n", "future": "f"})
+    assert "PAST: p" in prompt
+    assert "TITLE: The Iron Garden" in prompt
+    assert "2-4 sentence" in prompt
+
+
 # ── build_story_prompt ────────────────────────────────────────────────────────
 
 def test_build_story_prompt_base_axis_anchored():
@@ -157,14 +165,20 @@ def test_build_story_prompt_time_scale():
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="minutes",
     )
-    assert "TIME SCALE" in minutes
+    assert "NON-NEGOTIABLE" in minutes
     assert "a few minutes" in minutes
+    assert "FORBIDDEN" in minutes
+    hours = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present",
+        worldview="", time_scale="hours",
+    )
+    assert "outfit change" in hours  # hours forbidden list
     decades = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="decades",
     )
     assert "several decades" in decades
-    assert "transformed" in decades  # decade guide text
+    assert "everything" in decades  # decade may_differ
     # unknown scale falls back to years
     fallback = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present",
@@ -249,8 +263,10 @@ def test_build_axis_prompt_temporal_context_decades():
         prompt_style="danbooru", time_scale="decades",
         axis="past", base_axis="present",
     )
-    assert "TEMPORAL CONTEXT" in prompt
-    assert "decades" in prompt.lower() or "transformed" in prompt
+    assert "TEMPORAL CONSTRAINT" in prompt
+    assert "ABSOLUTE" in prompt
+    assert "FORBIDDEN" in prompt
+    assert "everything" in prompt  # decades may_differ = "everything"
 
 
 def test_build_axis_prompt_temporal_context_minutes():
@@ -260,8 +276,9 @@ def test_build_axis_prompt_temporal_context_minutes():
         prompt_style="danbooru", time_scale="minutes",
         axis="future", base_axis="present",
     )
-    assert "TEMPORAL CONTEXT" in prompt
-    assert "nearly identical" in prompt
+    assert "TEMPORAL CONSTRAINT" in prompt
+    assert "IDENTICAL" in prompt
+    assert "FORBIDDEN" in prompt
 
 
 def test_build_axis_prompt_base_axis_no_temporal_block():

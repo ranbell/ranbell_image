@@ -2703,6 +2703,7 @@ async def run_chronicle_story(
     from ..story.generator import (
         AXES,
         build_axis_prompt,
+        build_overall_prompt,
         build_story_prompt,
         build_story_repair_prompt,
         build_title_prompt,
@@ -2824,9 +2825,8 @@ async def run_chronicle_story(
         sections = parse_story_sections(raw_story)
         cancel.raise_if_set()
 
-        # Repair pass: when marker parsing fails, ask the LLM to restructure
-        # its own output as strict JSON (same pattern as Invoke's JSON parsing).
-        if not all(sections.get(a) for a in AXES):
+        # Repair pass: trigger when any axis act is missing OR [OVERALL] absent.
+        if not all(sections.get(a) for a in AXES) or not sections.get("overall"):
             _phase("repairingStory", 0.50, "Repairing story format...")
             try:
                 raw_fix = await ollama.generate_text(
@@ -2859,6 +2859,15 @@ async def run_chronicle_story(
                 logger.warning("[chronicle] title fallback failed: %s", exc)
         if not title:
             title = "Untitled Chronicle"
+        if not overall:
+            # Last resort: dedicated overall call so Storybook always has a summary
+            try:
+                raw_ov = await ollama.generate_text(
+                    build_overall_prompt(title, stories), model=vlm_model, options=options,
+                )
+                overall = raw_ov.strip()
+            except Exception as exc:
+                logger.warning("[chronicle] overall fallback failed: %s", exc)
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
         # ── Stage 3: per-axis Visual Script prompt ────────────────────────────

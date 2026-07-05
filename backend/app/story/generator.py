@@ -92,15 +92,14 @@ def build_story_prompt(
         else "No setting was specified — invent a fitting, evocative world yourself."
     )
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     time_block = (
-        f"TIME SCALE: {span} between acts\n\n"
-        "Visual change guide — the magnitude of change in EVERY act MUST match this scale:\n"
-        "- minutes:  same location, same outfit, same light — only micro-action / expression changes\n"
-        "- hours:    same day — light angle and fatigue shift; environment unchanged\n"
-        "- days:     same season — slight emotional wear; environment mostly the same\n"
-        "- months:   season may change — clothing may shift; visible growth/mood difference\n"
-        "- years:    different life chapter — outfit era, aging, environment evolved\n"
-        "- decades:  entirely different life chapter — age, fashion era, world around them transformed"
+        "⚠️ ABSOLUTE TIME CONSTRAINT — NON-NEGOTIABLE ⚠️\n"
+        f'TIME SCALE: {span} between acts (scale key: "{time_scale}").\n\n'
+        f"  MUST stay the same: {rules['must_keep']}\n"
+        f"  MAY change:         {rules['may_differ']}\n"
+        f"  STRICTLY FORBIDDEN: {rules['forbidden']}\n\n"
+        "Violating any FORBIDDEN item makes the story WRONG regardless of creativity."
     )
     mutation_block = ""
     if mutation_tags:
@@ -207,6 +206,20 @@ def build_title_prompt(stories: dict[str, str]) -> str:
     )
 
 
+def build_overall_prompt(title: str, stories: dict[str, str]) -> str:
+    """Last-resort overall-story generation when Stage 2 produced none."""
+    return (
+        "Write a 2-4 sentence overall arc summary connecting all three acts "
+        "of this chronicle into a single journey. Be concrete — use the "
+        "story's actual events, not abstract themes.\n\n"
+        f"TITLE: {title}\n\n"
+        f"PAST: {stories.get('past', '')}\n\n"
+        f"PRESENT: {stories.get('present', '')}\n\n"
+        f"FUTURE: {stories.get('future', '')}\n\n"
+        "Return ONLY the summary text — no headings, no quotes."
+    )
+
+
 # ── Stage 3: per-axis Visual Script prompt ────────────────────────────────────
 
 _VISUAL_SCRIPT_GUIDE = (
@@ -231,29 +244,46 @@ _VISUAL_SCRIPT_GUIDE = (
 )
 
 
-_SCALE_NOTES = {
-    "minutes": (
-        "The character's appearance (hair, outfit, face) must be nearly identical "
-        "to the base scene. Only pose, expression, and light conditions may differ."
-    ),
-    "hours": (
-        "The character's appearance (hair, outfit, face) must be nearly identical "
-        "to the base scene. Only pose, expression, and light conditions may differ."
-    ),
-    "days": (
-        "Core appearance remains recognizable; slight seasonal or emotional wear may show."
-    ),
-    "months": (
-        "Core appearance remains recognizable; seasonal or emotional wear may show."
-    ),
-    "years": (
-        "The character may look noticeably older or younger. Fashion and environment "
-        "should reflect a different life stage."
-    ),
-    "decades": (
-        "Age, fashion era, and environment should be visibly transformed — "
-        "a wholly different chapter of life."
-    ),
+# Per-scale visual invariants used in both story and image-prompt generation.
+# Keys: must_keep (IDENTICAL to base), may_differ (allowed changes), forbidden.
+_SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
+    "minutes": {
+        "must_keep": (
+            "outfit (IDENTICAL), hair color and style (IDENTICAL), "
+            "physical appearance (IDENTICAL), exact location (SAME room/spot), "
+            "season, time of day"
+        ),
+        "may_differ": "micro-pose, finger/hand position, expression, a gust of wind",
+        "forbidden": "any outfit change, any location change, any passage of seasons, aging",
+    },
+    "hours": {
+        "must_keep": (
+            "outfit (IDENTICAL), hair color and style (IDENTICAL), "
+            "physical appearance (IDENTICAL), same building or outdoor location, season"
+        ),
+        "may_differ": "light angle and shadow direction, expression, pose, slight fatigue",
+        "forbidden": "outfit change, location change, season change, aging",
+    },
+    "days": {
+        "must_keep": "hair color and style, core facial features, same general area",
+        "may_differ": "outfit (may have changed), time of day, emotional state, minor details",
+        "forbidden": "season change, significant aging, major location change",
+    },
+    "months": {
+        "must_keep": "hair color, core facial features, recognizable character identity",
+        "may_differ": "seasonal outfit, season, slight physical wear, environment",
+        "forbidden": "significant aging, era-level fashion shift",
+    },
+    "years": {
+        "must_keep": "recognizable as the same person",
+        "may_differ": "outfit style, slight aging, hair style, environment, life stage",
+        "forbidden": "complete transformation that makes the person unrecognizable",
+    },
+    "decades": {
+        "must_keep": "any recognizable trait if plausible",
+        "may_differ": "everything — age, fashion era, environment, world",
+        "forbidden": "nothing is forbidden — show dramatic transformation",
+    },
 }
 
 
@@ -280,16 +310,22 @@ def build_axis_prompt(
     else:
         identity_src = "Character description:\n" + character_desc
 
-    # Temporal context block for non-base axes
+    # Temporal context block for non-base axes — absolute constraint
     if axis != base_axis:
         span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
-        direction = "before" if axis == "past" else "after"
-        scale_note = _SCALE_NOTES.get(time_scale, _SCALE_NOTES["years"])
+        direction = "BEFORE" if axis == "past" else "AFTER"
+        rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
         temporal_block = (
-            f"\nTEMPORAL CONTEXT:\n"
-            f"This is the [{axis.upper()}] act — approximately {span} {direction} "
-            f"the base scene ({base_axis}).\n"
-            f"{scale_note}\n"
+            f"\n⚠️ TEMPORAL CONSTRAINT — ABSOLUTE ⚠️\n"
+            f"This [{axis.upper()}] scene is {span} {direction} the base scene ({base_axis}).\n"
+            f'TIME SCALE: "{time_scale}"\n\n'
+            f"Visual elements that MUST be IDENTICAL to the base image:\n"
+            f"  {rules['must_keep']}\n"
+            f"Visual elements that MAY differ:\n"
+            f"  {rules['may_differ']}\n"
+            f"STRICTLY FORBIDDEN in this image prompt:\n"
+            f"  {rules['forbidden']}\n\n"
+            "Do NOT generate anything in the positive prompt that violates the FORBIDDEN list.\n"
         )
     else:
         temporal_block = ""
