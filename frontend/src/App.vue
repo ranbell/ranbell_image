@@ -117,6 +117,7 @@ const selected = ref(null)
 const wd14Copied = ref(false)
 const showAiResetConfirm = ref(false)
 const sentinel = ref(null)
+const sentinelVisible = ref(false)
 const mainEl = ref(null)
 
 const showInfo = ref(false)
@@ -1363,7 +1364,10 @@ async function fetchImages(reset = false) {
   if (loading.value) return
   if (!reset && !hasMore.value) return
   loading.value = true
-  if (reset) { images.value = []; nextCursor.value = null; hasMore.value = true }
+  // On reset, keep the old list on screen until the new page arrives — clearing
+  // here would blank the gallery and clamp scrollTop to 0 for the whole fetch
+  // (up to 30s under Qdrant load). The list is replaced on arrival instead.
+  if (reset) { nextCursor.value = null; hasMore.value = true }
   try {
     if (searchMode.value === 'semantic' && searchQuery.value) {
       const res = await fetch('/api/ai/search', {
@@ -1376,6 +1380,7 @@ async function fetchImages(reset = false) {
       total.value = images.value.length
       hasMore.value = false
       fetchAlignmentsForImages(images.value)
+      if (reset) mainEl.value?.scrollTo({ top: 0 })
     } else {
       const params = new URLSearchParams({ limit: LIMIT, sort: sortOrder.value })
       if (nextCursor.value) params.set('cursor', nextCursor.value)
@@ -1398,7 +1403,12 @@ async function fetchImages(reset = false) {
       }
       const res = await fetch(`/api/images?${params}`)
       const data = await res.json()
-      images.value.push(...data.images)
+      if (reset) {
+        images.value = data.images
+        mainEl.value?.scrollTo({ top: 0 })
+      } else {
+        images.value.push(...data.images)
+      }
       total.value = data.total
       nextCursor.value = data.next_cursor
       hasMore.value = !!data.next_cursor
@@ -1411,7 +1421,14 @@ async function fetchImages(reset = false) {
     }
   } finally {
     loading.value = false
+    // Re-check the sentinel: IntersectionObserver only fires on state change,
+    // so a fetch skipped while loading would otherwise stall pagination.
+    nextTick(() => maybeFetchNext())
   }
+}
+
+function maybeFetchNext() {
+  if (sentinelVisible.value && !loading.value && hasMore.value) fetchImages()
 }
 
 function softRefreshGallery() {
@@ -2528,25 +2545,26 @@ function handleToggleImageSelection(img, sourceEl) {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
-  await waitForBackend()
-
-  startJobStream()
-  runStartupChecks()
-
-  // Set up observer immediately — before awaiting data fetches.
-  // fetchImages() can hang for up to 30s under Qdrant load, and the observer
-  // must be ready before that to fire when the user scrolls.
+  // Set up the observer before anything async — waitForBackend/fetchImages can
+  // hang for up to 30s and the observer must be live for scrolls during that time.
   observer = new IntersectionObserver(entries => {
-    const entry = entries[0]
-    if (entry.isIntersecting) {
-      if (!loading.value && hasMore.value) {
-        fetchImages()
-      }
-    }
+    sentinelVisible.value = entries[0].isIntersecting
+    maybeFetchNext()
   }, { root: mainEl.value, rootMargin: '200px' })
   if (sentinel.value) {
     observer.observe(sentinel.value)
   }
+  // The sentinel lives in the flat-view v-else branch, so it unmounts on view
+  // switches (and is absent when starting in folder view) — re-observe on remount.
+  watch(sentinel, (el, old) => {
+    if (old) { observer.unobserve(old); sentinelVisible.value = false }
+    if (el) observer.observe(el)
+  })
+
+  await waitForBackend()
+
+  startJobStream()
+  runStartupChecks()
 
   if (viewMode.value === 'folder') {
     await Promise.all([fetchDirs(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()])
