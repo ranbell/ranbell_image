@@ -87,7 +87,9 @@ def build_story_prompt(
 ) -> str:
     """LLM prompt producing [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] sections."""
     world_line = (
-        f'Setting requested by the user: "{worldview}"'
+        f'Setting atmosphere / inspiration: "{worldview}" — '
+        "use this as backdrop and visual flavour only; the specific scene "
+        "details in the base image above always take precedence."
         if worldview.strip()
         else "No setting was specified — invent a fitting, evocative world yourself."
     )
@@ -111,7 +113,9 @@ def build_story_prompt(
         "You are a storyteller. Write a three-act chronicle (past, present, future) "
         "of the single character below.\n\n"
         f"{time_block}\n\n"
-        f"CHARACTER:\n{character_desc}\n\n"
+        "CHARACTER (visual descriptor tags — interpret as appearance attributes, "
+        "NOT as character names or story text):\n"
+        f"{character_desc}\n\n"
         f"THE {base_axis.upper()} looks exactly like this scene:\n{scene_desc}\n\n"
         f"{world_line}\n"
         f"{mutation_block}\n"
@@ -297,16 +301,33 @@ def build_axis_prompt(
     time_scale: str = "years",
     axis: str = "present",
     base_axis: str = "present",
+    title: str = "",
+    overall: str = "",
+    all_stories: dict[str, str] | None = None,
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
     Character identity keywords are condensed and placed at the head of the
     positive prompt so the same character survives across all three images.
     """
-    if character_tags:
-        identity_src = (
-            "Character identity tags (danbooru): " + ", ".join(character_tags)
+    if all_stories:
+        chronicle_ctx = (
+            "FULL CHRONICLE CONTEXT:\n"
+            "This image prompt depicts ONE scene from a three-act chronicle.\n\n"
+            f"Title: {title}\n"
+            f"Overall arc: {overall}\n\n"
+            "The three acts (read these to understand the full journey):\n"
+            f"  [PAST]:    {all_stories.get('past', '')}\n"
+            f"  [PRESENT] ← base image: {all_stories.get('present', '')}\n"
+            f"  [FUTURE]:  {all_stories.get('future', '')}\n\n"
+            f"You are now generating the image prompt for: [{axis.upper()}]\n"
+            f"The base image captures the [{base_axis.upper()}] act.\n\n"
         )
+    else:
+        chronicle_ctx = ""
+
+    if character_tags:
+        identity_src = "[visual tags] " + ", ".join(character_tags)
     else:
         identity_src = "Character description:\n" + character_desc
 
@@ -352,6 +373,7 @@ def build_axis_prompt(
     return (
         "You are an expert image generation prompt engineer.\n"
         "Turn ONE act of a story into an image prompt.\n\n"
+        f"{chronicle_ctx}"
         f"SCENE (this act of the story):\n{story_text}\n"
         f"{temporal_block}\n"
         f"{identity_src}\n"

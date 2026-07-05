@@ -2768,7 +2768,7 @@ async def run_chronicle_story(
         cancel.raise_if_set()
 
         if character_tags:
-            character_desc = "danbooru tags: " + ", ".join(character_tags)
+            character_desc = "[visual tags] " + ", ".join(character_tags)
             scene_desc = visual_text
         else:
             character_desc = visual_text
@@ -2885,6 +2885,9 @@ async def run_chronicle_story(
                 time_scale=body.time_scale,
                 axis=axis,
                 base_axis=body.base_time_axis,
+                title=title,
+                overall=overall,
+                all_stories=stories,
             )
             axis_tokens: list[str] = []
             async for event in ollama.generate_text_stream(

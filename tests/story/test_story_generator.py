@@ -292,6 +292,40 @@ def test_build_axis_prompt_base_axis_no_temporal_block():
     assert "TEMPORAL CONTEXT" not in prompt
 
 
+def test_build_axis_prompt_chronicle_context():
+    stories = {
+        "past": "She was a child in the slums.",
+        "present": "She stands at the city gates.",
+        "future": "She leads the rebellion.",
+    }
+    prompt = build_axis_prompt(
+        story_text=stories["past"],
+        character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="past", base_axis="present",
+        title="The Iron Road",
+        overall="A girl rises from nothing to lead a revolution.",
+        all_stories=stories,
+    )
+    assert "FULL CHRONICLE CONTEXT" in prompt
+    assert "The Iron Road" in prompt
+    assert "A girl rises from nothing" in prompt
+    assert "She was a child in the slums." in prompt
+    assert "She leads the rebellion." in prompt
+    assert "[PAST]" in prompt
+    assert "generating the image prompt for: [PAST]" in prompt
+
+
+def test_build_axis_prompt_no_context_if_no_stories():
+    prompt = build_axis_prompt(
+        story_text="She stands alone.",
+        character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="past", base_axis="present",
+    )
+    assert "FULL CHRONICLE CONTEXT" not in prompt
+
+
 # ── translation stage ─────────────────────────────────────────────────────────
 
 def test_build_translation_prompt():
