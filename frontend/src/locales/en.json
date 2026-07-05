@@ -1254,6 +1254,7 @@
       "refiningPrompt": "Refining prompts",
       "savingStory": "Saving story",
       "translating": "Translating to Japanese",
+      "repairingStory": "Repairing story format",
       "done": "Done"
     }
   },
@@ -1267,6 +1268,10 @@
     "regenQueuedShort": "Queued",
     "regenQueued": "Image regeneration queued (new seed)",
     "regenTitle": "Regenerate this image only, with a new seed",
+    "details": "Details",
+    "overall": "Overall story",
+    "detailPositive": "Positive prompt",
+    "detailNegative": "Negative prompt",
     "weaveFrom": "Weave a new chronicle from this image",
     "weaveFromShort": "Weave"
   }

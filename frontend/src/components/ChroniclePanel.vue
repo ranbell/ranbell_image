@@ -54,11 +54,14 @@ const titleJa = ref('')
 const overall = ref('')
 const overallJa = ref('')
 
+// English is the canonical text; JA is a stored translation. The toggle
+// switches display only (default follows the UI locale).
+const panelLang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
 const displayTitle = computed(() =>
-  (locale.value?.startsWith('ja') && titleJa.value) ? titleJa.value : title.value
+  (panelLang.value === 'ja' && titleJa.value) ? titleJa.value : title.value
 )
 const displayOverall = computed(() =>
-  (locale.value?.startsWith('ja') && overallJa.value) ? overallJa.value : overall.value
+  (panelLang.value === 'ja' && overallJa.value) ? overallJa.value : overall.value
 )
 
 // Pipeline done but no image jobs submitted (manual mode, or no workflow was
@@ -372,7 +375,14 @@ async function generateImages() {
 
           <!-- title + overall story -->
           <div v-if="displayTitle" class="flex flex-col gap-1.5">
-            <h3 class="text-sm font-bold text-amber-200">📖 {{ displayTitle }}</h3>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-bold text-amber-200 flex-1">📖 {{ displayTitle }}</h3>
+              <div v-if="titleJa || overallJa" class="flex rounded-lg overflow-hidden border border-gray-700 text-[10px]">
+                <button v-for="l in ['ja', 'en']" :key="l" @click="panelLang = l"
+                  :class="panelLang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
+                  class="px-2 py-1 transition-colors uppercase">{{ l }}</button>
+              </div>
+            </div>
             <p v-if="displayOverall"
               class="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">
               {{ displayOverall }}

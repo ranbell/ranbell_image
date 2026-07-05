@@ -120,27 +120,86 @@ def build_story_prompt(
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
         "its own line, in this order:\n"
-        "[TITLE] — an evocative title for the whole chronicle (one line, no quotes)\n"
+        "[TITLE] — a specific, evocative title (3-8 words) drawn from the "
+        "story's concrete imagery (a place, object, or motif). NEVER generic "
+        "titles like 'Untitled', 'A Chronicle' or 'A Story'.\n"
         "[OVERALL] — a 2-4 sentence summary of the arc connecting all three acts\n"
         "[PAST] then [PRESENT] then [FUTURE] — the acts themselves.\n"
         "No other headings."
     )
 
 
+# Tolerant marker matching: [PAST], **[PAST]**, PAST:, **PAST:**, ## PAST: ...
+# Bare bracketed markers match anywhere; colon forms must start a line so that
+# prose words like "past" are never mistaken for markers.
+_SECTION_MARKER_RE = re.compile(
+    r"(?im)"
+    r"(?:\[\s*(TITLE|OVERALL|PAST|PRESENT|FUTURE)\s*\]"
+    r"|^[ \t>#]{0,4}\**(TITLE|OVERALL|PAST|PRESENT|FUTURE)\**[ \t]*:)"
+)
+
+
 def parse_story_sections(raw: str) -> dict[str, str]:
     """Split marker-delimited story output into {section: text}. Missing → ''."""
     result = {section: "" for section in SECTIONS}
-    pattern = re.compile(r"\[(TITLE|OVERALL|PAST|PRESENT|FUTURE)\]", re.IGNORECASE)
-    parts = pattern.split(raw)
-    # parts = [preamble, MARKER, text, MARKER, text, ...]
-    for i in range(1, len(parts) - 1, 2):
-        section = parts[i].lower()
-        if section in result:
-            result[section] = parts[i + 1].strip()
+    parts = _SECTION_MARKER_RE.split(raw)
+    # split with 2 groups → [preamble, g1, g2, text, g1, g2, text, ...]
+    for i in range(1, len(parts) - 2, 3):
+        section = (parts[i] or parts[i + 1] or "").lower()
+        text = (parts[i + 2] or "").strip().lstrip("*:] \t").strip()
+        if section in result and not result[section]:
+            result[section] = text
     # Title should be a single clean line
     if result["title"]:
-        result["title"] = result["title"].splitlines()[0].strip().strip('"「」')
+        result["title"] = result["title"].splitlines()[0].strip().strip('*"「」')
     return result
+
+
+def build_story_repair_prompt(raw_story: str) -> str:
+    """Fallback when marker parsing fails: restructure the raw output as JSON."""
+    return (
+        "The text below contains a chronicle with a title, an overall summary, "
+        "and three acts (past, present, future), but the formatting is broken.\n"
+        "Extract the five parts. Keep the wording — do not rewrite or shorten.\n"
+        "If the title or overall summary is genuinely absent, write a fitting "
+        "one from the acts.\n\n"
+        f"TEXT:\n{raw_story[:6000]}\n\n"
+        "Answer with JSON only, using exactly these keys:\n"
+        '{"title": "...", "overall": "...", "past": "...", '
+        '"present": "...", "future": "..."}'
+    )
+
+
+def parse_story_json(raw: str) -> dict[str, str]:
+    """Parse the repair-pass output. Missing/broken → empty strings per key."""
+    empty = {k: "" for k in SECTIONS}
+    text = raw.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return empty
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return empty
+    if not isinstance(data, dict):
+        return empty
+    return {k: str(data.get(k) or "").strip() for k in SECTIONS}
+
+
+def build_title_prompt(stories: dict[str, str]) -> str:
+    """Last-resort title generation when Stage 2 produced none."""
+    return (
+        "Give this three-act chronicle a short, specific, evocative title "
+        "(3-8 words). Draw on the story's concrete imagery — a place, an "
+        "object, a motif. NEVER generic ('Untitled', 'A Chronicle', 'A Story').\n\n"
+        f"PAST: {stories.get('past', '')}\n\n"
+        f"PRESENT: {stories.get('present', '')}\n\n"
+        f"FUTURE: {stories.get('future', '')}\n\n"
+        "Return ONLY the title text — no quotes, no explanation."
+    )
 
 
 # ── Stage 3: per-axis Visual Script prompt ────────────────────────────────────

@@ -1254,6 +1254,7 @@
       "refiningPrompt": "プロンプトを錬成中",
       "savingStory": "物語を保存中",
       "translating": "日本語に翻訳中",
+      "repairingStory": "物語の形式を修復中",
       "done": "完了"
     }
   },
@@ -1267,6 +1268,10 @@
     "regenQueuedShort": "投入済",
     "regenQueued": "画像の再生成を投入しました(新しいSeed)",
     "regenTitle": "この画像だけを新しいSeedで再生成",
+    "details": "詳細",
+    "overall": "全体ストーリー",
+    "detailPositive": "ポジティブプロンプト",
+    "detailNegative": "ネガティブプロンプト",
     "weaveFrom": "この画像から新たな物語を紡ぐ",
     "weaveFromShort": "紡ぐ"
   }

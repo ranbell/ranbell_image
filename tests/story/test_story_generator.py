@@ -17,9 +17,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.story.generator import (
     build_axis_prompt,
     build_story_prompt,
+    build_story_repair_prompt,
+    build_title_prompt,
     build_translation_prompt,
     build_vision_prompt,
     character_tags_from_wd14,
+    parse_story_json,
     parse_story_sections,
     parse_translation_json,
     remove_conflict_tags,
@@ -72,6 +75,59 @@ def test_parse_story_sections_title_single_line():
 def test_parse_story_sections_empty():
     result = parse_story_sections("no markers at all")
     assert all(v == "" for v in result.values())
+
+
+def test_parse_story_sections_markdown_variants():
+    # Bold bracket markers and colon-form headers (real-world LLM sloppiness)
+    raw = (
+        "**[TITLE]** The Iron Garden\n"
+        "**OVERALL:** An arc of rust and bloom.\n"
+        "## PAST:\nShe tended machines.\n"
+        "**Present:** She tends flowers.\n"
+        "FUTURE: The garden tends itself."
+    )
+    result = parse_story_sections(raw)
+    assert result["title"] == "The Iron Garden"
+    assert result["overall"] == "An arc of rust and bloom."
+    assert result["past"] == "She tended machines."
+    assert result["present"] == "She tends flowers."
+    assert result["future"] == "The garden tends itself."
+
+
+def test_parse_story_sections_prose_words_not_markers():
+    # "past"/"present" inside prose must not be mistaken for section markers
+    raw = (
+        "[PAST]\nIn the past she walked here, present in every memory.\n"
+        "[PRESENT]\nb\n[FUTURE]\nc"
+    )
+    result = parse_story_sections(raw)
+    assert "present in every memory" in result["past"]
+    assert result["present"] == "b"
+
+
+# ── repair pass ───────────────────────────────────────────────────────────────
+
+def test_build_story_repair_prompt():
+    prompt = build_story_repair_prompt("broken output text")
+    assert "broken output text" in prompt
+    assert '"title"' in prompt and '"future"' in prompt
+
+
+def test_parse_story_json():
+    raw = ('{"title": "T", "overall": "O", "past": "p", '
+           '"present": "n", "future": "f"}')
+    result = parse_story_json(raw)
+    assert result["title"] == "T" and result["future"] == "f"
+    wrapped = parse_story_json('```json\n{"past": "p"}\n```')
+    assert wrapped["past"] == "p" and wrapped["title"] == ""
+    broken = parse_story_json("nope")
+    assert all(v == "" for v in broken.values())
+
+
+def test_build_title_prompt():
+    prompt = build_title_prompt({"past": "p", "present": "n", "future": "f"})
+    assert "PAST: p" in prompt
+    assert "NEVER generic" in prompt
 
 
 # ── build_story_prompt ────────────────────────────────────────────────────────

@@ -70,13 +70,16 @@ function onThumbError(e, sha256) {
   e.target.dataset.fallback = '1'
   e.target.src = `/api/originals/${sha256}`
 }
+
+// ── full-text detail view ─────────────────────────────────────────────────────
+const detailStory = ref(null)
 </script>
 
 <template>
   <Teleport to="body">
     <div v-if="show" class="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4"
       @click.self="close" @keydown.esc="close">
-      <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
+      <div class="relative bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
 
         <!-- header -->
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-800">
@@ -113,6 +116,10 @@ function onThumbError(e, sha256) {
             <div class="flex items-center gap-3 text-[10px] text-gray-500">
               <span v-if="story.worldview" class="text-amber-400/80">🌍 {{ story.worldview }}</span>
               <span v-if="story.time_scale" class="text-teal-400/70">⏳ ± {{ t('chronicle.timeScale.' + story.time_scale) }}</span>
+              <button @click="detailStory = story"
+                class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full text-gray-300 transition-colors">
+                📄 {{ t('storybook.details') }}
+              </button>
               <span class="ml-auto font-mono">{{ new Date(story.created_at * 1000).toLocaleString() }}</span>
             </div>
 
@@ -152,6 +159,50 @@ function onThumbError(e, sha256) {
                 <p class="text-[11px] text-gray-400 leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">
                   {{ axisStory(story, axis) || '—' }}
                 </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── full-text detail overlay ── -->
+        <div v-if="detailStory" class="absolute inset-0 z-10 bg-black/70 flex items-center justify-center p-6 rounded-2xl"
+          @click.self="detailStory = null">
+          <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-full flex flex-col">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+              <h3 class="text-sm font-bold text-amber-200 truncate">📄 {{ storyTitle(detailStory) || t('storybook.details') }}</h3>
+              <div class="flex items-center gap-2">
+                <div class="flex rounded-lg overflow-hidden border border-gray-700 text-[10px]">
+                  <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
+                    :class="lang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
+                    class="px-2 py-1 transition-colors uppercase">{{ l }}</button>
+                </div>
+                <button @click="detailStory = null"
+                  class="text-gray-600 hover:text-gray-200 text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800 transition-colors">✕</button>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-4 text-xs">
+              <div class="flex items-center gap-3 text-[10px] text-gray-500">
+                <span v-if="detailStory.worldview" class="text-amber-400/80">🌍 {{ detailStory.worldview }}</span>
+                <span v-if="detailStory.time_scale" class="text-teal-400/70">⏳ ± {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
+                <span class="ml-auto font-mono">{{ new Date(detailStory.created_at * 1000).toLocaleString() }}</span>
+              </div>
+              <div v-if="storyOverall(detailStory)">
+                <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">{{ t('storybook.overall') }}</p>
+                <p class="text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">{{ storyOverall(detailStory) }}</p>
+              </div>
+              <div v-for="axis in AXES" :key="axis" class="bg-gray-800/40 border border-gray-800 rounded-xl p-3 flex flex-col gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-wide"
+                  :class="axis === detailStory.base_time_axis ? 'text-amber-400' : 'text-teal-400'">
+                  {{ t('chronicle.axis.' + axis) }}
+                  <span v-if="axis === detailStory.base_time_axis" class="text-gray-500 normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
+                </span>
+                <p class="text-gray-300 leading-relaxed whitespace-pre-wrap">{{ axisStory(detailStory, axis) || '—' }}</p>
+                <template v-if="detailStory.axes?.[axis]?.prompt_positive">
+                  <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mt-1">{{ t('storybook.detailPositive') }}</p>
+                  <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-gray-950/60 rounded-lg p-2">{{ detailStory.axes[axis].prompt_positive }}</pre>
+                  <p v-if="detailStory.axes[axis].prompt_negative" class="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{{ t('storybook.detailNegative') }}</p>
+                  <pre v-if="detailStory.axes[axis].prompt_negative" class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-gray-950/60 rounded-lg p-2">{{ detailStory.axes[axis].prompt_negative }}</pre>
+                </template>
               </div>
             </div>
           </div>

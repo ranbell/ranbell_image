@@ -2704,9 +2704,12 @@ async def run_chronicle_story(
         AXES,
         build_axis_prompt,
         build_story_prompt,
+        build_story_repair_prompt,
+        build_title_prompt,
         build_translation_prompt,
         build_vision_prompt,
         character_tags_from_wd14,
+        parse_story_json,
         parse_story_sections,
         parse_translation_json,
         remove_conflict_tags,
@@ -2817,15 +2820,45 @@ async def run_chronicle_story(
                         0.28 + 0.32 * min(len(story_tokens) / 600, 0.97),
                         "Writing chronicle...",
                     )
-        sections = parse_story_sections("".join(story_tokens))
+        raw_story = "".join(story_tokens)
+        sections = parse_story_sections(raw_story)
         cancel.raise_if_set()
+
+        # Repair pass: when marker parsing fails, ask the LLM to restructure
+        # its own output as strict JSON (same pattern as Invoke's JSON parsing).
+        if not all(sections.get(a) for a in AXES):
+            _phase("repairingStory", 0.50, "Repairing story format...")
+            try:
+                raw_fix = await ollama.generate_text(
+                    build_story_repair_prompt(raw_story),
+                    model=vlm_model, options=options, fmt="json",
+                )
+                fixed = parse_story_json(raw_fix)
+                for key, value in fixed.items():
+                    if value and not sections.get(key):
+                        sections[key] = value
+            except Exception as exc:
+                logger.warning("[chronicle] story repair pass failed: %s", exc)
+            cancel.raise_if_set()
         if not all(sections.get(a) for a in AXES):
             missing = [a for a in AXES if not sections.get(a)]
             _put({"type": "error", "message": f"Story acts missing: {', '.join(missing)}"})
             return
+
         stories = {a: sections[a] for a in AXES}
-        title = sections["title"] or "Untitled Chronicle"
+        title = sections["title"]
         overall = sections["overall"]
+        if not title:
+            # Last resort: dedicated title call so books never end up "Untitled"
+            try:
+                raw_title = await ollama.generate_text(
+                    build_title_prompt(stories), model=vlm_model, options=options,
+                )
+                title = raw_title.strip().splitlines()[0].strip().strip('*"「」') if raw_title.strip() else ""
+            except Exception as exc:
+                logger.warning("[chronicle] title fallback failed: %s", exc)
+        if not title:
+            title = "Untitled Chronicle"
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
         # ── Stage 3: per-axis Visual Script prompt ────────────────────────────
