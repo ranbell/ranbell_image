@@ -91,7 +91,7 @@ const detailStory = ref(null)
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4"
+    <div v-if="show" class="fixed inset-0 z-[65] bg-black/80 flex items-center justify-center p-4"
       @click.self="close" @keydown.esc="close">
       <div class="relative bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
 
