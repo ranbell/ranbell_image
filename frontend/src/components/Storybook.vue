@@ -179,45 +179,88 @@ const detailStory = ref(null)
         </div>
 
         <!-- ── full-text detail overlay ── -->
-        <div v-if="detailStory" class="absolute inset-0 z-10 bg-black/70 flex items-center justify-center p-6 rounded-2xl"
+        <div v-if="detailStory"
+          class="absolute inset-0 z-10 bg-black/80 flex items-center justify-center p-4 rounded-2xl"
           @click.self="detailStory = null">
-          <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-full flex flex-col">
-            <div class="flex items-center justify-between px-5 py-3 border-b border-gray-800">
-              <h3 class="text-sm font-bold text-amber-200 truncate">📄 {{ storyTitle(detailStory) || t('storybook.details') }}</h3>
-              <div class="flex items-center gap-2">
+          <div class="bg-gray-950 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-full flex flex-col">
+
+            <!-- ヘッダー -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-800 gap-4">
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-bold text-amber-200 leading-tight truncate">
+                  {{ storyTitle(detailStory) || t('storybook.details') }}
+                </h2>
+                <div class="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
+                  <span v-if="detailStory.worldview">🌍 {{ detailStory.worldview }}</span>
+                  <span v-if="detailStory.time_scale">⏳ {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
+                  <span class="font-mono">{{ new Date(detailStory.created_at * 1000).toLocaleString() }}</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
                 <div class="flex rounded-lg overflow-hidden border border-gray-700 text-[10px]">
                   <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
                     :class="lang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
-                    class="px-2 py-1 transition-colors uppercase">{{ l }}</button>
+                    class="px-2.5 py-1.5 transition-colors uppercase">{{ l }}</button>
                 </div>
                 <button @click="detailStory = null"
                   class="text-gray-600 hover:text-gray-200 text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800 transition-colors">✕</button>
               </div>
             </div>
-            <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-4 text-xs">
-              <div class="flex items-center gap-3 text-[10px] text-gray-500">
-                <span v-if="detailStory.worldview" class="text-amber-400/80">🌍 {{ detailStory.worldview }}</span>
-                <span v-if="detailStory.time_scale" class="text-teal-400/70">⏳ ± {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
-                <span class="ml-auto font-mono">{{ new Date(detailStory.created_at * 1000).toLocaleString() }}</span>
+
+            <div class="flex-1 overflow-y-auto divide-y divide-gray-800/50">
+
+              <!-- prologue: 全体ストーリー -->
+              <div v-if="storyOverall(detailStory)" class="px-8 py-5">
+                <p class="text-gray-300 leading-relaxed text-sm italic border-l-2 border-amber-700/50 pl-4">
+                  {{ storyOverall(detailStory) }}
+                </p>
               </div>
-              <div v-if="storyOverall(detailStory)">
-                <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">{{ t('storybook.overall') }}</p>
-                <p class="text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">{{ storyOverall(detailStory) }}</p>
+
+              <!-- 各幕: 交互レイアウト -->
+              <div v-for="(axis, idx) in AXES" :key="axis"
+                class="flex min-h-[220px]"
+                :class="idx % 2 === 0 ? 'flex-row' : 'flex-row-reverse'">
+
+                <!-- 画像パネル -->
+                <div class="w-2/5 shrink-0 bg-gray-900 cursor-pointer relative group overflow-hidden"
+                  @click="openImage(axisImage(detailStory, axis))">
+                  <img v-if="axisImage(detailStory, axis)"
+                    :src="`/api/thumbnails/${axisImage(detailStory, axis)}.webp`"
+                    @error="onThumbError($event, axisImage(detailStory, axis))"
+                    class="w-full h-full object-cover hover:opacity-90 transition-opacity" loading="lazy" />
+                  <span v-else class="absolute inset-0 flex items-center justify-center text-4xl text-gray-700">⏳</span>
+                  <button v-if="axisImage(detailStory, axis)"
+                    @click.stop="emit('weave-from', axisImage(detailStory, axis))"
+                    :title="t('storybook.weaveFrom')"
+                    class="absolute bottom-2 right-2 px-2 py-1 bg-teal-900/80 hover:bg-teal-700/90 border border-teal-600/50 rounded-lg text-[10px] text-teal-200 opacity-0 group-hover:opacity-100 transition-opacity">
+                    📜 {{ t('storybook.weaveFromShort') }}
+                  </button>
+                </div>
+
+                <!-- テキストパネル -->
+                <div class="flex-1 px-6 py-5 flex flex-col gap-3 justify-center">
+                  <span class="text-[10px] font-bold uppercase tracking-widest"
+                    :class="axis === detailStory.base_time_axis ? 'text-amber-400' : 'text-teal-400'">
+                    {{ t('chronicle.axis.' + axis) }}
+                    <span v-if="axis === detailStory.base_time_axis"
+                      class="text-gray-500 normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
+                  </span>
+                  <p class="text-gray-200 leading-relaxed text-sm whitespace-pre-wrap">
+                    {{ axisStory(detailStory, axis) || '—' }}
+                  </p>
+                  <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
+                    <summary class="cursor-pointer text-[10px] text-gray-500 hover:text-gray-300 select-none">
+                      {{ t('storybook.showPrompt') }}
+                    </summary>
+                    <div class="mt-2 flex flex-col gap-1">
+                      <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-gray-900/80 rounded-lg p-2">{{ detailStory.axes[axis].prompt_positive }}</pre>
+                      <pre v-if="detailStory.axes[axis].prompt_negative"
+                        class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-gray-900/80 rounded-lg p-2">{{ detailStory.axes[axis].prompt_negative }}</pre>
+                    </div>
+                  </details>
+                </div>
               </div>
-              <div v-for="axis in AXES" :key="axis" class="bg-gray-800/40 border border-gray-800 rounded-xl p-3 flex flex-col gap-2">
-                <span class="text-[10px] font-bold uppercase tracking-wide"
-                  :class="axis === detailStory.base_time_axis ? 'text-amber-400' : 'text-teal-400'">
-                  {{ t('chronicle.axis.' + axis) }}
-                  <span v-if="axis === detailStory.base_time_axis" class="text-gray-500 normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
-                </span>
-                <p class="text-gray-300 leading-relaxed whitespace-pre-wrap">{{ axisStory(detailStory, axis) || '—' }}</p>
-                <template v-if="detailStory.axes?.[axis]?.prompt_positive">
-                  <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mt-1">{{ t('storybook.detailPositive') }}</p>
-                  <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-gray-950/60 rounded-lg p-2">{{ detailStory.axes[axis].prompt_positive }}</pre>
-                  <p v-if="detailStory.axes[axis].prompt_negative" class="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{{ t('storybook.detailNegative') }}</p>
-                  <pre v-if="detailStory.axes[axis].prompt_negative" class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-gray-950/60 rounded-lg p-2">{{ detailStory.axes[axis].prompt_negative }}</pre>
-                </template>
-              </div>
+
             </div>
           </div>
         </div>

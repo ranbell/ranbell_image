@@ -1272,6 +1272,7 @@
     "overall": "全体ストーリー",
     "detailPositive": "ポジティブプロンプト",
     "detailNegative": "ネガティブプロンプト",
+    "showPrompt": "プロンプトを表示",
     "weaveFrom": "この画像から新たな物語を紡ぐ",
     "weaveFromShort": "紡ぐ",
     "delete": "削除",

@@ -1272,6 +1272,7 @@
     "overall": "Overall story",
     "detailPositive": "Positive prompt",
     "detailNegative": "Negative prompt",
+    "showPrompt": "Show prompt",
     "weaveFrom": "Weave a new chronicle from this image",
     "weaveFromShort": "Weave",
     "delete": "Delete",
