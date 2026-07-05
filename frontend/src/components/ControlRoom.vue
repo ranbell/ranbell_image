@@ -715,7 +715,7 @@ const failedCount = computed(() => activeJobs.value.filter(j => j.state === 'fai
 
 // ── utilities ────────────────────────────────────────────────────────────────
 
-const _LANE_CODE = { gen: 'GEN', embed: 'EMB', eval: 'ALN', prompt: 'PE', sync: 'SYN' }
+const _LANE_CODE = { gen: 'GEN', tagging: 'TAG', embed: 'EMB', eval: 'ALN', prompt: 'PE', sync: 'SYN' }
 function laneCode(lane) {
   return _LANE_CODE[lane] ?? (lane ?? '').slice(0, 3).toUpperCase()
 }

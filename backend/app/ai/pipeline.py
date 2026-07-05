@@ -69,6 +69,9 @@ class PipelineState(BaseModel):
 
 
 pipeline_state = PipelineState()
+# Separate state for the CPU-only tagging stage so it can run concurrently
+# with an embed-stage job (TAGGING lane vs EMBEDDING lane).
+tagging_state = PipelineState()
 
 
 async def run_ai_pipeline(
@@ -76,12 +79,22 @@ async def run_ai_pipeline(
     ollama: OllamaClient,
     sha256s: list[str] | None = None,
     pause_checkpoint=None,
+    stage: str = "full",
 ) -> None:
-    if pipeline_state.running:
+    """Process pending docs.
+
+    stage:
+      "full"    — WD14 + colors + embed + UMAP per doc (invoke finalize, legacy path)
+      "tagging" — CPU only: WD14 + colors; embedding_status stays pending
+      "embed"   — embed + UMAP, reusing tags written by the tagging stage
+                  (falls back to the full path per doc when tags are missing)
+    """
+    state = tagging_state if stage == "tagging" else pipeline_state
+    if state.running:
         return
 
-    mode = "selected" if sha256s else "all_pending"
-    pipeline_state.reset(mode)
+    mode = ("selected" if sha256s else "all_pending") if stage == "full" else f"{stage}:{'selected' if sha256s else 'all_pending'}"
+    state.reset(mode)
 
     try:
         cfg = await get_runtime_config(db)
@@ -91,23 +104,28 @@ async def run_ai_pipeline(
         concurrency = int(cfg.get("pipeline_concurrency", 4))
 
         async def _process_one(doc: dict) -> None:
-            if pipeline_state.cancelled:
+            if state.cancelled:
                 return
             if pause_checkpoint:
                 await pause_checkpoint()
             try:
-                await _process_doc(doc, db, ollama, threshold, embed_model, wd14_model_dir)
-                pipeline_state.processed += 1
-                pipeline_state.update_eta()
+                if stage == "tagging":
+                    await _tag_doc(doc, db, threshold, wd14_model_dir, state)
+                elif stage == "embed":
+                    await _embed_doc(doc, db, ollama, threshold, embed_model, wd14_model_dir, state)
+                else:
+                    await _process_doc(doc, db, ollama, threshold, embed_model, wd14_model_dir, state)
+                state.processed += 1
+                state.update_eta()
             except Exception as e:
-                pipeline_state.errors += 1
-                pipeline_state.last_error = f"{type(e).__name__}: {e}"
+                state.errors += 1
+                state.last_error = f"{type(e).__name__}: {e}"
                 logger.exception("Pipeline error for %s", doc.get("sha256"))
 
         if sha256s:
             docs = await db.get_by_sha256s(sha256s)
-            pipeline_state.total = len(docs)
-            logger.info("AI pipeline [selected]: %d docs, concurrency=%d", len(docs), concurrency)
+            state.total = len(docs)
+            logger.info("AI pipeline [%s]: %d docs, concurrency=%d", mode, len(docs), concurrency)
             sem = asyncio.Semaphore(concurrency)
             await asyncio.gather(*(
                 _run_with_sem(sem, _process_one, doc) for doc in docs
@@ -115,10 +133,10 @@ async def run_ai_pipeline(
         else:
             # producer/consumer: stream pending docs through a bounded queue
             # to avoid loading all pending docs into memory at once
-            pipeline_state.total = await db.count_pending()
+            state.total = await db.count_pending()
             logger.info(
-                "AI pipeline [all_pending]: ~%d docs, concurrency=%d",
-                pipeline_state.total, concurrency,
+                "AI pipeline [%s]: ~%d docs, concurrency=%d",
+                mode, state.total, concurrency,
             )
 
             queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=concurrency * 4)
@@ -155,40 +173,16 @@ async def run_ai_pipeline(
             )
 
     finally:
-        pipeline_state.finish()
+        state.finish()
         invalidate_image_caches()
         logger.info(
-            "AI pipeline done: %d processed, %d errors, cancelled=%s",
-            pipeline_state.processed,
-            pipeline_state.errors,
-            pipeline_state.cancelled,
+            "AI pipeline [%s] done: %d processed, %d errors, cancelled=%s",
+            mode, state.processed, state.errors, state.cancelled,
         )
 
 
 
-async def _process_doc(
-    doc: dict,
-    db: QdrantDBClient,
-    ollama: OllamaClient,
-    threshold: float,
-    embed_model: str | None = None,
-    wd14_model_dir: str | None = None,
-) -> None:
-    sha256 = doc.get("sha256")
-    if not sha256:
-        return
-    file_path = Path(doc.get("path", ""))
-    if not file_path.exists():
-        return
-
-    pipeline_state.active_wd14 += 1
-    try:
-        scored = await wd14_mod.predict_tags_scored(file_path, threshold, wd14_model_dir)
-    finally:
-        pipeline_state.active_wd14 -= 1
-    wd14_tags = [tag for tag, _ in scored]
-    wd14_tags_scores = [round(score, 4) for _, score in scored]
-
+def _build_embed_text(doc: dict, wd14_tags: list[str]) -> str:
     parts = []
     prompt = doc.get("positive_prompt", "")
     if prompt:
@@ -202,13 +196,132 @@ async def _process_doc(
         parts.append(", ".join(wd14_tags))
     if doc.get("name"):
         parts.append(str(doc["name"]))
-    embed_text = " ".join(parts)
+    return " ".join(parts)
 
-    pipeline_state.active_embed += 1
+
+async def _tag_doc(
+    doc: dict,
+    db: QdrantDBClient,
+    threshold: float,
+    wd14_model_dir: str | None = None,
+    state: PipelineState = tagging_state,
+) -> None:
+    """CPU stage: WD14 tags + color palette. Leaves embedding_status pending."""
+    sha256 = doc.get("sha256")
+    if not sha256:
+        return
+    if doc.get("wd14_tags"):
+        return  # already tagged (embed stage or a previous run got here first)
+    file_path = Path(doc.get("path", ""))
+    if not file_path.exists():
+        return
+
+    state.active_wd14 += 1
+    try:
+        scored = await wd14_mod.predict_tags_scored(file_path, threshold, wd14_model_dir)
+    finally:
+        state.active_wd14 -= 1
+
+    color_data = await asyncio.get_event_loop().run_in_executor(
+        None, extract_color_palette, file_path
+    )
+
+    state.active_save += 1
+    try:
+        payload: dict = {
+            "wd14_tags": [tag for tag, _ in scored],
+            "wd14_tags_scores": [round(score, 4) for _, score in scored],
+        }
+        color_lab: list[float] | None = None
+        if color_data:
+            payload.update(color_data)
+            color_lab = color_data.get("color_lab")
+        await db.set_payload(sha256, payload)
+        if color_lab and db.has_color_vector:
+            await db.set_color_vector(sha256, color_lab)
+    finally:
+        state.active_save -= 1
+
+
+async def _embed_doc(
+    doc: dict,
+    db: QdrantDBClient,
+    ollama: OllamaClient,
+    threshold: float,
+    embed_model: str | None = None,
+    wd14_model_dir: str | None = None,
+    state: PipelineState = pipeline_state,
+) -> None:
+    """GPU stage: embed + UMAP, reusing tags from the tagging stage.
+
+    Re-fetches the doc so tags written after our scroll snapshot are seen;
+    falls back to the full path when the doc was never tagged.
+    """
+    sha256 = doc.get("sha256")
+    if not sha256:
+        return
+
+    fresh = await db.get(sha256) or doc
+    wd14_tags = fresh.get("wd14_tags") or []
+    if not wd14_tags:
+        await _process_doc(fresh, db, ollama, threshold, embed_model, wd14_model_dir, state)
+        return
+
+    state.active_embed += 1
+    try:
+        embedding = await ollama.embed(_build_embed_text(fresh, wd14_tags), model=embed_model)
+    finally:
+        state.active_embed -= 1
+
+    from .umap_reducer import umap_has_model, umap_transform_one_sync
+    umap_xy: tuple[float, float] | None = None
+    if umap_has_model():
+        loop = asyncio.get_event_loop()
+        umap_xy = await loop.run_in_executor(None, umap_transform_one_sync, embedding)
+
+    state.active_save += 1
+    try:
+        await db.set_embedding(sha256, embedding)
+        payload: dict = {"embedding_status": "done"}
+        if umap_xy is not None:
+            payload["umap_x"] = umap_xy[0]
+            payload["umap_y"] = umap_xy[1]
+        await db.set_payload(sha256, payload)
+    finally:
+        state.active_save -= 1
+
+
+async def _process_doc(
+    doc: dict,
+    db: QdrantDBClient,
+    ollama: OllamaClient,
+    threshold: float,
+    embed_model: str | None = None,
+    wd14_model_dir: str | None = None,
+    state: PipelineState = pipeline_state,
+) -> None:
+    sha256 = doc.get("sha256")
+    if not sha256:
+        return
+    file_path = Path(doc.get("path", ""))
+    if not file_path.exists():
+        return
+
+    state.active_wd14 += 1
+    try:
+        scored = await wd14_mod.predict_tags_scored(file_path, threshold, wd14_model_dir)
+    finally:
+        state.active_wd14 -= 1
+    wd14_tags = [tag for tag, _ in scored]
+    wd14_tags_scores = [round(score, 4) for _, score in scored]
+
+    embed_text = _build_embed_text(doc, wd14_tags)
+
+    state.active_embed += 1
     try:
         embedding = await ollama.embed(embed_text, model=embed_model)
     finally:
-        pipeline_state.active_embed -= 1
+        state.active_embed -= 1
 
     color_data = await asyncio.get_event_loop().run_in_executor(
         None, extract_color_palette, file_path
@@ -221,7 +334,7 @@ async def _process_doc(
         loop = asyncio.get_event_loop()
         umap_xy = await loop.run_in_executor(None, umap_transform_one_sync, embedding)
 
-    pipeline_state.active_save += 1
+    state.active_save += 1
     try:
         await db.set_embedding(sha256, embedding)
         payload: dict = {
@@ -240,4 +353,4 @@ async def _process_doc(
         if color_lab and db.has_color_vector:
             await db.set_color_vector(sha256, color_lab)
     finally:
-        pipeline_state.active_save -= 1
+        state.active_save -= 1

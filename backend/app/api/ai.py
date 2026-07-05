@@ -1240,15 +1240,17 @@ async def trigger_pipeline(
     request: Request,
     body: PipelineRequest = PipelineRequest(),
 ):
-    from ..jobs.runners import run_pipeline
+    from ..jobs.runners import run_pipeline_tagging
     spooler = request.app.state.spooler
     db = request.app.state.db
     ollama = request.app.state.ollama
     sha256s = body.sha256s or None
+    # CPU tagging stage first (TAGGING lane, never auto-paused); it chains the
+    # embed stage onto the EMBEDDING lane when done.
     job_id = spooler.submit(
-        JobLane.EMBEDDING,
-        "ai_pipeline",
-        run_pipeline,
+        JobLane.TAGGING,
+        "ai_tagging",
+        run_pipeline_tagging,
         db=db,
         ollama=ollama,
         sha256s=sha256s,

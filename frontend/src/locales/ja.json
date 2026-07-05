@@ -802,6 +802,8 @@
       "autoPause": "生成/プロンプト時にバックグラウンド GPU 処理を自動ポーズ",
       "autoPauseDesc": "GENERATION・PROMPT レーンがアクティブな間、対象レーンはジョブを開始しません",
       "alwaysTrigger": "（gen・prompt は常にトリガー）",
+      "evalAutoPause": "評価レーンの自動ポーズ（tier2）",
+      "evalAutoPauseDesc": "gen・prompt・embed の稼働中は VLM 評価を停止します。Ollama と ComfyUI が別 GPU の場合のみ OFF にしてください",
       "autoAlignment": "AI パイプライン完了後に適合度評価を自動実行",
       "autoAlignmentDesc": "EVALUATION レーンがポーズ中の場合はスキップ",
       "parallelism": "処理並列度",

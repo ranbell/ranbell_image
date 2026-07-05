@@ -78,10 +78,11 @@ async def update_config(body: ConfigBody, request: Request):
     spooler = request.app.state.spooler
 
     # If pause settings changed, apply them immediately to the running spooler
-    if "auto_pause_on_generation" in updates or "auto_pause_lanes" in updates:
+    if "auto_pause_on_generation" in updates or "auto_pause_lanes" in updates or "eval_auto_pause" in updates:
         spooler.update_pause_settings(
             auto_pause_on_priority=existing.get("auto_pause_on_generation", True),
             auto_pause_target_lanes=existing.get("auto_pause_lanes", ["embed", "eval"]),
+            eval_auto_pause=existing.get("eval_auto_pause", True),
         )
 
     # If disk thresholds changed, push to spooler immediately

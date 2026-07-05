@@ -93,14 +93,15 @@ async def run_scan_heal(
     except asyncio.CancelledError:
         raise JobCancelled()
 
-    # auto-start AI pipeline if new files were registered
+    # auto-start AI pipeline if new files were registered (CPU tagging stage
+    # first; it chains the embed stage on the EMBEDDING lane)
     if spooler is not None and ollama is not None and scan_state.added > 0:
         from ..spooler.models import JobLane
-        if spooler.is_lane_active(JobLane.EMBEDDING):
+        if spooler.is_lane_active(JobLane.TAGGING):
             spooler.submit(
-                JobLane.EMBEDDING,
-                "ai_pipeline_post_scan",
-                run_pipeline,
+                JobLane.TAGGING,
+                "ai_tagging_post_scan",
+                run_pipeline_tagging,
                 db=db,
                 ollama=ollama,
                 spooler=spooler,
@@ -138,11 +139,11 @@ async def run_scan_full(
 
     if spooler is not None and ollama is not None and scan_state.added > 0:
         from ..spooler.models import JobLane
-        if spooler.is_lane_active(JobLane.EMBEDDING):
+        if spooler.is_lane_active(JobLane.TAGGING):
             spooler.submit(
-                JobLane.EMBEDDING,
-                "ai_pipeline_post_scan",
-                run_pipeline,
+                JobLane.TAGGING,
+                "ai_tagging_post_scan",
+                run_pipeline_tagging,
                 db=db,
                 ollama=ollama,
                 spooler=spooler,
@@ -352,6 +353,70 @@ async def run_analyze_umap(
 
 # ── EMBEDDING lane: AI pipeline · MRL backfill ────────────────────────────────
 
+async def run_pipeline_tagging(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama=None,
+    sha256s: list[str] | None = None,
+    spooler=None,
+) -> dict:
+    """TAGGING lane (CPU only, never auto-paused). WD14 + colors for pending docs,
+    then chains the embed stage on the EMBEDDING lane."""
+    from ..ai.pipeline import tagging_state, run_ai_pipeline
+    from ..spooler.models import JobLane
+
+    def _on_cancel() -> None:
+        tagging_state.cancelled = True
+
+    cancel.on_cancel(_on_cancel)
+    reporter.indeterminate()
+
+    task = asyncio.create_task(
+        run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint, stage="tagging")
+    )
+    cancel.on_cancel(task.cancel)
+
+    while not task.done():
+        total = tagging_state.total
+        processed = tagging_state.processed
+        if total > 0:
+            reporter.update(processed / total, f"{processed}/{total} tagged")
+        else:
+            reporter.indeterminate()
+        await asyncio.sleep(0.5)
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        raise JobCancelled()
+
+    if cancel._event.is_set():
+        raise JobCancelled()
+
+    # Chain the embed stage. Submit even while EMBEDDING is auto-paused — the job
+    # waits at the pause gate and runs when generation finishes (that overlap is
+    # the whole point of the tagging stage). Dedup against an existing queued job.
+    if spooler is not None and ollama is not None:
+        _already_queued = any(
+            j["lane"] == "embed" and j["state"] == "queued" and j["title"].startswith("ai_pipeline")
+            for j in spooler.snapshot()
+        )
+        if not _already_queued:
+            spooler.submit(
+                JobLane.EMBEDDING,
+                "ai_pipeline",
+                run_pipeline,
+                db=db,
+                ollama=ollama,
+                sha256s=sha256s,
+                spooler=spooler,
+            )
+
+    return {"processed": tagging_state.processed, "errors": tagging_state.errors}
+
+
 async def run_pipeline(
     reporter: ProgressReporter,
     cancel: CancelToken,
@@ -369,8 +434,11 @@ async def run_pipeline(
     cancel.on_cancel(_on_cancel)
     reporter.indeterminate()
 
+    # stage="embed" reuses tags written by the tagging stage and falls back to
+    # the full per-doc path when tags are missing — behaviorally equivalent to
+    # the old full pipeline for untagged docs.
     task = asyncio.create_task(
-        run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint)
+        run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint, stage="embed")
     )
     cancel.on_cancel(task.cancel)
 
@@ -2140,25 +2208,22 @@ async def run_invoke_enhance_prompt(
     await event_queue.put(None)
 
 
-async def run_invoke_daily_oracle(
+async def run_invoke_oracle_compose(
     reporter: ProgressReporter,
     cancel: CancelToken,
     *,
     db,
     ollama,
-    comfy,
-    spooler,
-    session_manager,
-    daily_oracle_date: str,
-    workflow_name: str = "",
     topic: str = "",
     roulette: bool = False,
+    daily_oracle_date: str = "",
 ) -> dict:
-    """SYNC lane (low priority). Generate today's 5 oracle images."""
+    """PROMPT lane. Draw the oracle's daily theme and decompose axes.
+
+    All Ollama (GPU) work of the daily oracle lives here so the SYNC lane
+    stays CPU/I-O only."""
     from ..invoke.axis_decomposer import decompose_axes
-    from ..invoke.session_manager import SPIRIT_ORDER
     from ..invoke.vocab_bank import get_recent_adopted_tags
-    from ..spooler.models import JobLane
 
     reporter.indeterminate()
     cancel.raise_if_set()
@@ -2210,15 +2275,61 @@ async def run_invoke_daily_oracle(
         except Exception as e:
             logger.warning("daily oracle context hint failed: %s", e)
 
+    cancel.raise_if_set()
     axes = await decompose_axes(ollama, user_intent=topic, context_hint=context_hint)
-    axes["_daily_oracle_date"] = daily_oracle_date
+    reporter.update(1.0, "Oracle axes ready")
+    return {"axes": axes, "topic": topic}
 
-    reporter.update(0.1, "Axes ready — launching oracle spirits")
+
+async def run_invoke_daily_oracle(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    comfy,
+    spooler,
+    session_manager,
+    daily_oracle_date: str,
+    workflow_name: str = "",
+    topic: str = "",
+    roulette: bool = False,
+) -> dict:
+    """SYNC lane (low priority). Generate today's 5 oracle images.
+
+    LLM work (theme + axis decomposition) is delegated to a PROMPT lane job so
+    this SYNC job stays CPU/I-O only; cross-lane waiting cannot deadlock (the
+    PROMPT worker is independent of SYNC)."""
+    from ..invoke.session_manager import SPIRIT_ORDER
+    from ..spooler.models import JobLane
+
+    reporter.indeterminate()
     cancel.raise_if_set()
 
     if not workflow_name:
         reporter.update(1.0, "Skipped: no oracle workflow configured")
         return {"skipped": True, "reason": "no workflow"}
+
+    compose_job_id = spooler.submit(
+        JobLane.PROMPT,
+        "invoke.oracle_compose",
+        run_invoke_oracle_compose,
+        meta={"daily_oracle_date": daily_oracle_date},
+        db=db,
+        ollama=ollama,
+        topic=topic,
+        roulette=roulette,
+        daily_oracle_date=daily_oracle_date,
+    )
+    cancel.on_cancel(lambda: asyncio.create_task(spooler.cancel(compose_job_id)))
+    reporter.update(0.05, "Composing oracle axes (PROMPT lane)...")
+    compose_result = await spooler.wait(compose_job_id)
+
+    axes = compose_result["axes"]
+    axes["_daily_oracle_date"] = daily_oracle_date
+
+    reporter.update(0.1, "Axes ready — launching oracle spirits")
+    cancel.raise_if_set()
 
     session = session_manager.create_session(
         user_intent="[daily oracle]",
@@ -2234,8 +2345,13 @@ async def run_invoke_daily_oracle(
     await session_manager.on_axis_done(session.session_id, axes)
     reporter.update(0.15, f"Oracle session {session.session_id} launched — awaiting spirits")
 
-    # Wait until all spirits finish (queue receives None on session_complete / all errors)
-    await session.event_queue.get()
+    # Wait until the session reaches a terminal state (complete / all-error / cancelled)
+    waiter = asyncio.create_task(session.completion.wait())
+    cancel.on_cancel(waiter.cancel)
+    try:
+        await waiter
+    except asyncio.CancelledError:
+        raise JobCancelled()
 
     reporter.update(1.0, "Daily oracle complete")
     return {"session_id": session.session_id, "axes": axes}

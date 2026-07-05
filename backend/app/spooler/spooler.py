@@ -73,6 +73,9 @@ class JobSpooler:
         # Auto-pause settings (can be overridden by update_pause_settings())
         self._auto_pause_on_priority: bool = True
         self._auto_pause_target_lanes: frozenset[JobLane] = _DEFAULT_AUTO_PAUSE_TARGETS
+        # tier2: pause EVALUATION while GEN/PROMPT/EMBED are active.
+        # Disable only when Ollama (eval VLM) runs on a different GPU than ComfyUI.
+        self._eval_auto_pause: bool = True
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -409,14 +412,17 @@ class JobSpooler:
         self,
         auto_pause_on_priority: bool,
         auto_pause_target_lanes: list[str],
+        eval_auto_pause: bool = True,
     ) -> None:
         self._auto_pause_on_priority = auto_pause_on_priority
         self._auto_pause_target_lanes = frozenset(
             JobLane(v) for v in auto_pause_target_lanes
             if v in JobLane._value2member_map_
         )
+        self._eval_auto_pause = eval_auto_pause
         if not auto_pause_on_priority:
             self.resume_lanes(list(JobLane), reason=LanePauseReason.AUTO)
+        self._check_eval_pause()
 
     def is_lane_active(self, lane: JobLane) -> bool:
         return self._lane_events[lane].is_set()
@@ -450,8 +456,12 @@ class JobSpooler:
         self._check_eval_pause()
 
     def _check_eval_pause(self) -> None:
-        """Recompute tier2 auto-pause for the EVALUATION lane (always applied, independent of settings).
-        Pauses EVALUATION if any of GENERATION / PROMPT / EMBEDDING is active."""
+        """Recompute tier2 auto-pause for the EVALUATION lane.
+        Pauses EVALUATION if any of GENERATION / PROMPT / EMBEDDING is active.
+        Can be disabled via eval_auto_pause (multi-GPU / separate-server setups)."""
+        if not self._eval_auto_pause:
+            self.resume_lanes([JobLane.EVALUATION], reason=LanePauseReason.AUTO)
+            return
         blocking = any(
             j.state in (JobState.QUEUED, JobState.RUNNING, JobState.CANCELLING)
             for j in self._registry.values()

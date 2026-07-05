@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -165,6 +166,18 @@ class Resource:
     def __post_init__(self) -> None:
         self._sem = asyncio.Semaphore(self.concurrency)
 
+    @asynccontextmanager
+    async def acquire(self):
+        """Acquire the resource semaphore for one request/section.
+
+        Fails fast with ResourceUnreachable for remote resources known to be down
+        (only after the first health probe has run — permissive during startup).
+        """
+        if self.kind == "remote" and self.last_checked is not None and not self.reachable:
+            raise ResourceUnreachable(f"Resource {self.name!r} is unreachable")
+        async with self._sem:
+            yield
+
     def to_dict(self) -> dict:
         d = {
             "name": self.name,
@@ -191,16 +204,24 @@ class Resource:
         return d
 
 
-# Default configuration: all GPU lanes are consolidated under local-gpu0 (concurrency=1)
-# EVALUATION is controlled via lane-level pause (tier2 rule) and does not use the resource semaphore.
-# Holding the remote-ollama semaphore while entering a checkpoint pause would deadlock other lanes.
+# Default configuration.
+# Ollama traffic is throttled INSIDE OllamaClient (per-request acquisition of
+# remote-ollama), so no lane holds the Ollama semaphore across a whole job —
+# this is what makes lane pause checkpoints deadlock-free.
+# GENERATION is the only whole-job resource: one generation = one ComfyUI run.
 DEFAULT_LANE_RESOURCE: dict[JobLane, str | None] = {
     JobLane.GENERATION: "local-gpu0",
-    JobLane.EMBEDDING:  "local-gpu0",
+    JobLane.EMBEDDING:  None,
     JobLane.EVALUATION: None,
     JobLane.SYNC:       None,
     JobLane.PROMPT:     None,
+    JobLane.TAGGING:    None,
 }
+
+# Resources whose semaphore is acquired inside a client (per HTTP request).
+# Mapping a LANE onto these would make a job acquire the same non-reentrant
+# semaphore twice (whole-job + per-request) and self-deadlock.
+_CLIENT_MANAGED_RESOURCES: frozenset[str] = frozenset({"remote-ollama"})
 
 
 def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | None]]:
@@ -240,13 +261,14 @@ def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | 
             reachable=False,
         )
 
-    # Register ComfyUI as a monitoring-only remote resource (not included in lane mapping)
+    # Register ComfyUI as a remote resource — GENERATION maps onto it so that
+    # generation jobs serialize per its concurrency and fail fast when it is down
     comfyui_url = getattr(settings, "comfyui_url", None)
     if comfyui_url:
         resources["remote-comfyui"] = Resource(
             name="remote-comfyui",
             kind="remote",
-            concurrency=99,  # Not used in lane mapping, so semaphore is effectively a no-op
+            concurrency=getattr(settings, "resource_remote_comfyui_concurrency", 1),
             endpoint=comfyui_url,
             health_path="/system_stats",
             reachable=False,
@@ -254,10 +276,32 @@ def build_resources(settings) -> tuple[dict[str, Resource], dict[JobLane, str | 
 
     lane_resource = dict(DEFAULT_LANE_RESOURCE)
 
-    # If remote-ollama exists, delegate EMBEDDING to it
-    # Do not delegate EVALUATION — it is controlled via lane pause (deadlock prevention)
-    if "remote-ollama" in resources:
-        lane_resource[JobLane.EMBEDDING] = "remote-ollama"
+    if "remote-comfyui" in resources:
+        lane_resource[JobLane.GENERATION] = "remote-comfyui"
+
+    # 1-GPU mutex: PROMPT (Ollama LLM) and GENERATION (ComfyUI) share local-gpu0.
+    # Both lanes are never pause targets, so holding the semaphore across the
+    # whole job cannot meet a checkpoint pause (no circular wait).
+    if getattr(settings, "prompt_gen_mutex", False):
+        lane_resource[JobLane.GENERATION] = "local-gpu0"
+        lane_resource[JobLane.PROMPT] = "local-gpu0"
+
+    # Expert override: {"gen": "remote-comfyui", "prompt": null, ...}
+    for lane_val, res_name in (getattr(settings, "resource_lane_map", None) or {}).items():
+        if lane_val not in JobLane._value2member_map_:
+            logger.warning("resource_lane_map: unknown lane %r ignored", lane_val)
+            continue
+        if res_name and res_name in _CLIENT_MANAGED_RESOURCES:
+            logger.warning(
+                "resource_lane_map: %r is client-managed (per-request acquisition) — "
+                "mapping lane %r onto it would self-deadlock; ignored",
+                res_name, lane_val,
+            )
+            continue
+        if res_name and res_name not in resources:
+            logger.warning("resource_lane_map: unknown resource %r for lane %r ignored", res_name, lane_val)
+            continue
+        lane_resource[JobLane(lane_val)] = res_name or None
 
     return resources, lane_resource
 
@@ -302,10 +346,7 @@ async def run_with_resource(
         logger.warning("Resource %r not found, running without semaphore", res_name)
         return await func(*args)
 
-    if res.kind == "remote" and not res.reachable:
-        raise ResourceUnreachable(f"Resource {res.name!r} is unreachable")
-
-    async with res._sem:
+    async with res.acquire():
         return await func(*args)
 
 

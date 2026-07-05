@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
     from .config import settings as _settings
     resources, lane_resource = build_resources(_settings)
     spooler = JobSpooler(resources=resources, lane_resource=lane_resource)
+    # Throttle all Ollama traffic (every lane) at the client, per HTTP request
+    ollama.set_resource(resources.get("remote-ollama"))
 
     app.state.db = db
     app.state.ollama = ollama
@@ -120,6 +122,9 @@ async def lifespan(app: FastAPI):
         ),
         auto_pause_target_lanes=_saved_cfg.get(
             "auto_pause_lanes", _rc_defaults["auto_pause_lanes"]
+        ),
+        eval_auto_pause=_saved_cfg.get(
+            "eval_auto_pause", _rc_defaults["eval_auto_pause"]
         ),
     )
 

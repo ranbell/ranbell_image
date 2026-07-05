@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     ollama_url: str = "http://host.docker.internal:11434"
     embed_model: str = "nomic-embed-text"
     vlm_model: str = "gemma4:e2b"
+    # HTTP timeout for all Ollama requests. A hung Ollama otherwise blocks the
+    # single-worker PROMPT lane for this long — lower it if that matters more
+    # than very long generations.
+    ollama_timeout_sec: float = 300.0
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"
@@ -39,9 +43,22 @@ class Settings(BaseSettings):
     resource_local_gpu0_concurrency: int = 1
     # Only set if offloading remote Ollama to a separate machine
     resource_remote_ollama_endpoint: str | None = None
+    # Max concurrent HTTP requests to the Ollama server (enforced inside OllamaClient,
+    # across ALL lanes — prompt / embed / eval / sync)
     resource_remote_ollama_concurrency: int = 1
     resource_remote_ollama_health_path: str = "/api/version"
     resource_remote_qdrant_health_path: str = "/healthz"
+    # Max concurrent GENERATION jobs against the ComfyUI server (ComfyUI also
+    # queues internally; this mainly provides fail-fast when it is unreachable)
+    resource_remote_comfyui_concurrency: int = 1
+    # 1-GPU setups: serialize PROMPT (Ollama LLM) jobs against GENERATION (ComfyUI)
+    # jobs via a shared local-gpu0 semaphore. Leave False when Ollama and ComfyUI
+    # run on different GPUs/servers.
+    prompt_gen_mutex: bool = False
+    # Expert override: lane value → resource name (e.g. {"gen": "remote-comfyui"}).
+    # Resource names managed at the client level (remote-ollama) are rejected here
+    # to avoid double acquisition. Env var form: JSON string.
+    resource_lane_map: dict[str, str | None] = {}
 
     model_config = {"env_file": ".env"}
 

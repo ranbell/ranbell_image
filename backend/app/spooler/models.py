@@ -24,6 +24,7 @@ class JobLane(str, Enum):
     EVALUATION = "eval"
     SYNC       = "sync"
     PROMPT     = "prompt"
+    TAGGING    = "tagging"   # CPU-only (WD14 / colors) — never auto-paused, keeps working during generation
 
 
 class LanePauseReason(str, Enum):

@@ -1114,3 +1114,56 @@ From button click to Control Room lamp change:
 | ETA sample window | 5 samples | `deque(maxlen=5)` on `Job._eta_samples` |
 | Frontend SSE batch window | 250 ms | `job_updated` events coalesced before Vue re-render |
 | Frontend reconnect delay | 3 s | Delay before re-opening `EventSource` on error |
+
+---
+
+## 2026-07 Update: TAGGING Lane, Client-Level Ollama Throttling, and Topology Settings
+
+This section supersedes the older descriptions of the lane list, the default
+lane → resource mapping, and the "hardcoded" tier2 rule above.
+
+### What changed
+
+- **New `TAGGING` lane** (`tagging`): CPU-only work (WD14 tagging + color
+  extraction). It is never an auto-pause target, so tagging keeps running while
+  images are being generated. The AI pipeline is now two-staged: a TAGGING-lane
+  job (WD14 + colors) chains an EMBEDDING-lane job (embed + UMAP) on completion.
+  The embed stage falls back to full per-doc processing when tags are missing,
+  so triggering it alone is always safe.
+- **Ollama traffic is throttled inside `OllamaClient`**: every HTTP request
+  (from ANY lane — prompt / embed / eval / sync) acquires the `remote-ollama`
+  semaphore for the duration of that request only. No job holds the semaphore
+  across a pause checkpoint, which removes the historical deadlock constraint
+  and caps total server concurrency via `RESOURCE_REMOTE_OLLAMA_CONCURRENCY`.
+  Because of this, lanes must NOT be mapped onto `remote-ollama` in
+  `RESOURCE_LANE_MAP` (double acquisition would self-deadlock; such entries are
+  rejected with a warning).
+- **`remote-comfyui` is a real resource**: GENERATION maps onto it by default,
+  giving per-`RESOURCE_REMOTE_COMFYUI_CONCURRENCY` serialization and fail-fast
+  (`ResourceUnreachable`) when ComfyUI is down (after the first health probe).
+- **tier2 is configurable**: `eval_auto_pause` (runtime config / Admin →
+  GPU priority) controls whether EVALUATION pauses while gen/prompt/embed are
+  active. Default `true` (1-GPU protection).
+- **`PROMPT_GEN_MUTEX`** (env setting, default `false`): serializes PROMPT
+  (Ollama LLM) jobs against GENERATION (ComfyUI) jobs via a shared `local-gpu0`
+  semaphore. Neither lane is ever a pause target, so the whole-job hold cannot
+  meet a checkpoint pause (no circular wait).
+- **`RESOURCE_LANE_MAP`** (env setting, JSON, e.g.
+  `{"gen": "remote-comfyui", "sync": null}`): expert override of the lane →
+  resource mapping. Unknown lanes/resources and client-managed resources are
+  ignored with a warning.
+- The daily oracle's LLM work (theme roulette + axis decomposition) runs as a
+  PROMPT-lane job; the SYNC-lane oracle job is now pure orchestration and waits
+  on the invoke session's `completion` event.
+
+### Recommended settings per topology
+
+| Topology | `auto_pause_on_generation` | `eval_auto_pause` | `PROMPT_GEN_MUTEX` |
+|---|---|---|---|
+| 1 GPU (Ollama + ComfyUI co-located) | `true` (default) | `true` (default) | **`true` recommended** |
+| 2 servers / 2 GPUs (Ollama separated) | **`false`** | **`false`** | `false` (default) |
+
+In the 1-GPU topology the pauses protect the GPU: generation gets priority and
+background lanes stop. In the 2-server topology those pauses only waste the
+second GPU — disable them and rely on `RESOURCE_REMOTE_OLLAMA_CONCURRENCY` /
+`RESOURCE_REMOTE_COMFYUI_CONCURRENCY` to protect each server individually.

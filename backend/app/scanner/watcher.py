@@ -75,7 +75,7 @@ class ImageDirectoryWatcher:
         logger.info("File watcher started")
 
     async def _dispatch_loop(self) -> None:
-        from ..jobs.runners import run_pipeline, run_scan_heal
+        from ..jobs.runners import run_pipeline_tagging, run_scan_heal
         from ..spooler.models import JobLane
         from .scanner import register_image, wait_for_registration
 
@@ -115,9 +115,9 @@ class ImageDirectoryWatcher:
                     )
                     if self._auto_ai_pipeline and has_non_invoke:
                         self._spooler.submit(
-                            JobLane.EMBEDDING,
-                            "ai_pipeline_auto",
-                            run_pipeline,
+                            JobLane.TAGGING,
+                            "ai_tagging_auto",
+                            run_pipeline_tagging,
                             db=self._db,
                             ollama=self._ollama,
                             spooler=self._spooler,

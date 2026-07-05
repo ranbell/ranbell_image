@@ -47,6 +47,9 @@ _defaults = {
     # GPU priority control
     "auto_pause_on_generation": True,
     "auto_pause_lanes":         ["embed", "eval"],
+    # tier2: pause EVALUATION while gen/prompt/embed are active.
+    # Set False only when Ollama runs on a different GPU than ComfyUI.
+    "eval_auto_pause":          True,
     "auto_alignment_evaluate":  False,
     # WD14 tag weighting for refine (common/unique decomposition)
     "wd14_common_ratio":         0.3,

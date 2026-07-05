@@ -50,7 +50,11 @@ class InvokeSession:
     spirits: dict[str, SpiritState] = field(default_factory=dict)
     axes: dict | None = None
     event_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    # Set when the session reaches a terminal state (complete / all-error / cancelled).
+    # Awaitable by workers (e.g. daily oracle) without consuming the SSE event queue.
+    completion: asyncio.Event = field(default_factory=asyncio.Event)
     created_at: float = field(default_factory=time.time)
+    last_activity: float = field(default_factory=time.time)
     completed: bool = False
     cancelled: bool = False
     finalize_submitted: bool = False
@@ -141,12 +145,15 @@ class InvokeSessionManager:
         self._sessions.pop(session_id, None)
 
     def _evict_expired(self) -> None:
+        # Activity-based TTL: sessions with in-flight jobs keep touching last_activity
+        # via emit(), so queue congestion no longer expires them mid-flight.
         cutoff = time.time() - SESSION_TTL
-        expired = [sid for sid, s in self._sessions.items() if s.created_at < cutoff]
+        expired = [sid for sid, s in self._sessions.items() if s.last_activity < cutoff]
         for sid in expired:
             self._sessions.pop(sid, None)
 
     async def emit(self, session: InvokeSession, event_type: str, data: dict) -> None:
+        session.last_activity = time.time()
         await session.event_queue.put({"type": event_type, **data})
 
     async def on_axis_done(self, session_id: str, axes: dict) -> None:
@@ -360,6 +367,7 @@ class InvokeSessionManager:
             await self.emit(session, "session_complete", {"session_id": session_id})
             await _update_summon_stats(session=session)
             await session.event_queue.put(None)
+            session.completion.set()
             # finalize（pipeline + alignment）は on_image_done / on_spirit_error から submit 済み
 
     async def on_spirit_error(self, session_id: str, spirit_name: str, error: str) -> None:
@@ -378,6 +386,7 @@ class InvokeSessionManager:
             session.completed = True
             await self.emit(session, "session_complete", {"session_id": session_id})
             await session.event_queue.put(None)
+            session.completion.set()
 
     async def cancel_session(self, session_id: str) -> bool:
         session = self.get_session(session_id)
@@ -396,6 +405,7 @@ class InvokeSessionManager:
         session.completed = True
         await self.emit(session, "session_cancelled", {"session_id": session_id})
         await session.event_queue.put(None)
+        session.completion.set()
         return True
 
     async def adopt_spirit(self, session_id: str, spirit_name: str) -> str | None:

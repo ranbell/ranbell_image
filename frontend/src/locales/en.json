@@ -802,6 +802,8 @@
       "autoPause": "Auto-pause background GPU processing during generation/prompt",
       "autoPauseDesc": "Target lanes won't start jobs while GENERATION/PROMPT lanes are active",
       "alwaysTrigger": "(gen/prompt always trigger)",
+      "evalAutoPause": "Auto-pause Evaluation (tier2)",
+      "evalAutoPauseDesc": "Pause VLM evaluation while gen/prompt/embed are active. Turn OFF only when Ollama runs on a different GPU than ComfyUI",
       "autoAlignment": "Auto-run alignment evaluation after AI pipeline completes",
       "autoAlignmentDesc": "Skipped if EVALUATION lane is paused",
       "parallelism": "Processing Parallelism",

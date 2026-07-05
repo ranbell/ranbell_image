@@ -14,6 +14,7 @@ export const LampState = Object.freeze({
 // activeLanes: lane prefixes whose job activity should be reflected in a resource-based system
 const SYSTEMS = [
   { key: 'generation',   label: 'Generation',   lane: 'gen'   },
+  { key: 'tagging',      label: 'Tagging',       lane: 'tagging' },
   { key: 'embedding',    label: 'Embedding',     lane: 'embed' },
   { key: 'vectorStore',  label: 'Vector Store',  resource: 'remote-qdrant' },
   { key: 'alignment',    label: 'Alignment',     lane: 'eval'  },

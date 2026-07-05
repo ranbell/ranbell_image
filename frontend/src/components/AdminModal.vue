@@ -1130,6 +1130,23 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                 <span class="text-[10px] text-gray-600 self-center">{{ $t('admin.gpuPriority.alwaysTrigger') }}</span>
               </div>
 
+              <!-- tier2: EVALUATION auto-pause (hard rule, now configurable) -->
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-xs text-gray-300">{{ $t('admin.gpuPriority.evalAutoPause') }}</p>
+                  <p class="text-[10px] text-gray-600 mt-0.5">{{ $t('admin.gpuPriority.evalAutoPauseDesc') }}</p>
+                </div>
+                <button
+                  @click="adminConfig.eval_auto_pause = !adminConfig.eval_auto_pause"
+                  :class="adminConfig.eval_auto_pause ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none">
+                  <span
+                    :class="adminConfig.eval_auto_pause ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="inline-block h-4 w-4 mt-0.5 transform rounded-full bg-white transition-transform duration-200">
+                  </span>
+                </button>
+              </div>
+
               <!-- Auto-run alignment evaluation -->
               <div class="border-t border-gray-700 pt-3 flex items-center justify-between gap-3">
                 <div>

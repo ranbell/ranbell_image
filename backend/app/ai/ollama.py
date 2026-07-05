@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import httpx
@@ -61,23 +62,41 @@ class StreamParser:
 
 
 class OllamaClient:
-    def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=300.0)
+    def __init__(self, resource=None) -> None:
+        """resource: optional spooler Resource (remote-ollama). When set, every
+        request acquires its semaphore for the duration of the HTTP call only —
+        no job ever holds it across a pause checkpoint, so lane pauses cannot
+        deadlock, and total server concurrency is capped across ALL lanes."""
+        self._client = httpx.AsyncClient(timeout=settings.ollama_timeout_sec)
+        self._resource = resource
+
+    def set_resource(self, resource) -> None:
+        self._resource = resource
+
+    @asynccontextmanager
+    async def _acquire(self):
+        if self._resource is None:
+            yield
+        else:
+            async with self._resource.acquire():
+                yield
 
     async def embed(self, text: str, model: str | None = None) -> list[float]:
-        r = await self._client.post(
-            f"{settings.ollama_url}/api/embed",
-            json={"model": model or settings.embed_model, "input": text},
-        )
+        async with self._acquire():
+            r = await self._client.post(
+                f"{settings.ollama_url}/api/embed",
+                json={"model": model or settings.embed_model, "input": text},
+            )
         r.raise_for_status()
         return r.json()["embeddings"][0]
 
     async def embed_batch(self, texts: list[str], model: str | None = None) -> list[list[float]]:
         """Embed multiple texts in a single Ollama API call."""
-        r = await self._client.post(
-            f"{settings.ollama_url}/api/embed",
-            json={"model": model or settings.embed_model, "input": texts},
-        )
+        async with self._acquire():
+            r = await self._client.post(
+                f"{settings.ollama_url}/api/embed",
+                json={"model": model or settings.embed_model, "input": texts},
+            )
         r.raise_for_status()
         return r.json()["embeddings"]
 
@@ -89,16 +108,17 @@ class OllamaClient:
         options: dict | None = None,
     ) -> str:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
-        r = await self._client.post(
-            f"{settings.ollama_url}/api/generate",
-            json={
-                "model": model or settings.vlm_model,
-                "prompt": prompt,
-                "images": images_b64,
-                "stream": False,
-                "options": options or {},
-            },
-        )
+        async with self._acquire():
+            r = await self._client.post(
+                f"{settings.ollama_url}/api/generate",
+                json={
+                    "model": model or settings.vlm_model,
+                    "prompt": prompt,
+                    "images": images_b64,
+                    "stream": False,
+                    "options": options or {},
+                },
+            )
         r.raise_for_status()
         return r.json()["response"]
 
@@ -112,7 +132,7 @@ class OllamaClient:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
         parser = StreamParser()
 
-        async with self._client.stream(
+        async with self._acquire(), self._client.stream(
             "POST",
             f"{settings.ollama_url}/api/generate",
             json={
@@ -122,7 +142,7 @@ class OllamaClient:
                 "stream": True,
                 "options": options or {},
             },
-            timeout=300.0,
+            timeout=settings.ollama_timeout_sec,
         ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
@@ -164,7 +184,8 @@ class OllamaClient:
         }
         if fmt:
             payload["format"] = fmt
-        r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
+        async with self._acquire():
+            r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()["response"]
 
@@ -176,11 +197,11 @@ class OllamaClient:
     ) -> AsyncGenerator[dict, None]:
         """Stream text generation without vision inputs."""
         parser = StreamParser()
-        async with self._client.stream(
+        async with self._acquire(), self._client.stream(
             "POST",
             f"{settings.ollama_url}/api/generate",
             json={"model": model or settings.vlm_model, "prompt": prompt, "stream": True, "options": {"num_predict": -1, **(options or {})}},
-            timeout=300.0,
+            timeout=settings.ollama_timeout_sec,
         ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
