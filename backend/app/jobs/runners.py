@@ -2634,3 +2634,399 @@ async def _iter_sha256_docs(db, sha256s: list[str]):
         doc = await db.get(sha256)
         if doc:
             yield doc
+
+
+# ── Chronicle (story) pipeline ────────────────────────────────────────────────
+
+async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: str, db) -> str | None:
+    """Save a chronicle-generated image to generated_images_dir/Chronicles/.
+
+    Unlike invoke/, this subfolder is NOT skipped by the watcher, so the auto
+    AI pipeline (wd14 tagging, embedding) picks these images up like any other
+    generated image.
+    """
+    import hashlib as _hl
+    from datetime import datetime as _dt
+
+    from ..config import settings as _settings
+    from ..scanner.scanner import register_image as _register_image
+
+    sha256 = _hl.sha256(img_bytes).hexdigest()
+    gen_dir = _settings.generated_images_dir / "Chronicles"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(original_name).suffix or ".png"
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    path = gen_dir / f"chronicle_{ts}_{sha256[:8]}{suffix}"
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, path.write_bytes, img_bytes)
+    try:
+        await _register_image(path, db)
+        return sha256
+    except Exception as exc:
+        logger.error("[chronicle] register_image failed: %s", exc)
+        return None
+
+
+async def run_chronicle_story(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    body_dict: dict,
+    db,
+    ollama,
+    spooler,
+    comfy,
+    token_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane runner — Chronicle stages 1-3, streaming events into token_queue.
+
+    Always puts a None sentinel at the end (done, cancelled, or errored).
+    Unless manual_mode, submits the per-axis GENERATION jobs itself, so a
+    group cancel that stops this job also prevents the follow-on submissions.
+    """
+    from ..api.ai import _find_conflict_tags, _sample_mutation_tags
+    from ..runtime_config import get_runtime_config
+    from ..spooler.models import JobLane
+    from ..story import db as story_db
+    from ..story.api import ChronicleRequest
+    from ..story.generator import (
+        AXES,
+        build_axis_prompt,
+        build_story_prompt,
+        build_vision_prompt,
+        character_tags_from_wd14,
+        parse_prompt_json,
+        parse_story_sections,
+        remove_conflict_tags,
+    )
+
+    body = ChronicleRequest(**body_dict)
+
+    def _put(event: dict | None) -> None:
+        token_queue.put_nowait(event)
+
+    def _phase(code: str, progress: float, text: str) -> None:
+        reporter.update(progress, text)
+        _put({"type": "phase", "code": code})
+
+    _abort = asyncio.Event()
+    cancel.on_cancel(_abort.set)
+
+    try:
+        cfg = await get_runtime_config(db)
+        vlm_model = body.vlm_model or cfg["vlm_model"]
+        options = {"temperature": body.temperature}
+
+        # ── Stage 1: visual vocabulary ────────────────────────────────────────
+        _phase("loadingImage", 0.02, "Loading base image...")
+        doc = await db.get(body.base_sha256)
+        if not doc:
+            _put({"type": "error", "message": "Base image not found"})
+            return
+        fp = Path(doc.get("path", ""))
+        if not fp.exists():
+            _put({"type": "error", "message": f"Base image file missing: {fp.name}"})
+            return
+        image_bytes = fp.read_bytes()
+
+        wd14_tags = doc.get("wd14_tags") or []
+        character_tags = character_tags_from_wd14(wd14_tags)
+
+        _phase("extractingVision", 0.05, "Extracting visual vocabulary...")
+        vision_prompt = build_vision_prompt(full_extraction=not character_tags)
+        vis_tokens: list[str] = []
+        async for event in ollama.generate_vlm_stream(
+            vision_prompt, [image_bytes], model=vlm_model, options=options
+        ):
+            if _abort.is_set():
+                raise JobCancelled()
+            _put(event)
+            if event["type"] == "token":
+                vis_tokens.append(event["text"])
+                if len(vis_tokens) % 8 == 0:
+                    reporter.update(
+                        0.05 + 0.20 * min(len(vis_tokens) / 250, 0.97),
+                        "Extracting visual vocabulary...",
+                    )
+        visual_text = "".join(vis_tokens).strip()
+        cancel.raise_if_set()
+
+        if character_tags:
+            character_desc = "danbooru tags: " + ", ".join(character_tags)
+            scene_desc = visual_text
+        else:
+            character_desc = visual_text
+            scene_desc = visual_text
+
+        # ── Stage 2: three-act chronicle ──────────────────────────────────────
+        divergence = max(0.0, min(1.0, body.divergence))
+        mutation_tags: list[str] = []
+        if divergence > 0:
+            _phase("mutatingTags", 0.26, "Sampling mutation tags...")
+            mutation_tags = await _sample_mutation_tags(
+                db, ollama, {"common_tags": character_tags or wd14_tags}, divergence
+            )
+            if mutation_tags:
+                _put({"type": "mutation_tags", "tags": mutation_tags})
+
+        _phase("writingStory", 0.28, "Writing chronicle...")
+        _put({"type": "token", "text": "\n\n"})
+        story_prompt = build_story_prompt(
+            character_desc=character_desc,
+            scene_desc=scene_desc,
+            base_axis=body.base_time_axis,
+            worldview=body.worldview,
+            mutation_tags=mutation_tags,
+        )
+        story_tokens: list[str] = []
+        async for event in ollama.generate_text_stream(
+            story_prompt, model=vlm_model, options=options
+        ):
+            if _abort.is_set():
+                raise JobCancelled()
+            _put(event)
+            if event["type"] == "token":
+                story_tokens.append(event["text"])
+                if len(story_tokens) % 8 == 0:
+                    reporter.update(
+                        0.28 + 0.32 * min(len(story_tokens) / 600, 0.97),
+                        "Writing chronicle...",
+                    )
+        stories = parse_story_sections("".join(story_tokens))
+        cancel.raise_if_set()
+        if not all(stories.get(a) for a in AXES):
+            missing = [a for a in AXES if not stories.get(a)]
+            _put({"type": "error", "message": f"Story acts missing: {', '.join(missing)}"})
+            return
+        _put({"type": "story", "axes": stories})
+
+        # ── Stage 3: per-axis prompt refinement ───────────────────────────────
+        gen_axes = [a for a in AXES if a != body.base_time_axis]
+        prompts: dict[str, dict] = {}
+        for i, axis in enumerate(gen_axes):
+            _phase("refiningPrompt", 0.62 + 0.14 * i, f"Refining {axis} prompt...")
+            axis_prompt = build_axis_prompt(
+                story_text=stories[axis],
+                character_tags=character_tags,
+                character_desc=character_desc,
+                prompt_style=body.prompt_style,
+            )
+            raw = await ollama.generate_text(
+                axis_prompt, model=vlm_model, options=options, fmt="json"
+            )
+            cancel.raise_if_set()
+            positive, negative = parse_prompt_json(raw)
+            if not positive:
+                _put({"type": "error", "message": f"Prompt refinement failed for {axis}"})
+                return
+            # Transmute cleanup: drop tags that contradict this act's story
+            if mutation_tags:
+                tag_candidates = [
+                    t.strip().replace(" ", "_")
+                    for line in positive.split("\n") if "," in line
+                    for t in line.split(",") if t.strip()
+                ]
+                if tag_candidates:
+                    conflicts = await _find_conflict_tags(
+                        stories[axis][:400], tag_candidates, db, ollama, vlm_model
+                    )
+                    positive = remove_conflict_tags(positive, conflicts)
+            prompts[axis] = {"positive": positive, "negative": negative}
+            _put({"type": "axis_prompt", "axis": axis,
+                  "positive": positive, "negative": negative})
+
+        # ── Save story record ─────────────────────────────────────────────────
+        _phase("savingStory", 0.92, "Saving story...")
+        payload = story_db.new_story_payload(
+            base_image_id=body.base_sha256,
+            base_time_axis=body.base_time_axis,
+            worldview=body.worldview,
+            workflow_name=body.workflow_name,
+            group_id=body.group_id,
+        )
+        for axis in AXES:
+            payload["axes"][axis]["story"] = stories[axis]
+        for axis in gen_axes:
+            payload["axes"][axis]["prompt_positive"] = prompts[axis]["positive"]
+            payload["axes"][axis]["prompt_negative"] = prompts[axis]["negative"]
+
+        embedding = None
+        try:
+            embedding = await ollama.embed(
+                " ".join(stories[a] for a in AXES)[:4000]
+            )
+        except Exception as exc:
+            logger.warning("[chronicle] story embed failed: %s", exc)
+        story_id = await story_db.create_story(db, payload, embedding)
+        _put({"type": "story_saved", "story_id": story_id})
+
+        # ── Seed resolution ───────────────────────────────────────────────────
+        import random as _random
+
+        seed: int | None = None
+        seed_warning = ""
+        if body.use_ref_seed:
+            seed = (doc.get("model_info") or {}).get("seed") \
+                or (doc.get("creation_record") or {}).get("seed")
+            if seed is None:
+                seed_warning = "Base image has no seed info — using a new random seed."
+        if seed is None:
+            seed = _random.randint(0, (1 << 64) - 1)
+        if seed_warning:
+            _put({"type": "warning", "message": seed_warning})
+
+        # ── Submit image jobs (auto mode) ─────────────────────────────────────
+        image_jobs: list[dict] = []
+        if not body.manual_mode and body.workflow_name:
+            for axis in gen_axes:
+                cancel.raise_if_set()
+                gen_job_id = spooler.submit(
+                    JobLane.GENERATION,
+                    "chronicle_image",
+                    run_chronicle_image_generate,
+                    meta={"group_id": body.group_id, "story_id": story_id, "axis": axis},
+                    db=db,
+                    comfy=comfy,
+                    story_id=story_id,
+                    axis=axis,
+                    workflow_name=body.workflow_name,
+                    positive=prompts[axis]["positive"],
+                    negative=prompts[axis]["negative"],
+                    seed=seed,
+                )
+                image_jobs.append({"axis": axis, "job_id": gen_job_id})
+            _put({"type": "image_jobs", "jobs": image_jobs})
+
+        _put({
+            "type": "done",
+            "story_id": story_id,
+            "group_id": body.group_id,
+            "seed": seed,
+            "manual_mode": body.manual_mode,
+            "axes": payload["axes"],
+        })
+    except JobCancelled:
+        raise
+    except Exception as exc:
+        logger.exception("[chronicle] story pipeline failed")
+        _put({"type": "error", "message": str(exc)})
+    finally:
+        _put(None)
+
+
+async def run_chronicle_image_generate(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    comfy,
+    story_id: str,
+    axis: str,
+    workflow_name: str,
+    positive: str,
+    negative: str,
+    seed: int | None,
+) -> dict:
+    """GEN lane. Generate one chronicle axis image, save to Chronicles/, link it."""
+    import random as _random
+
+    from ..creation.schema import CreationRecord
+    from ..story import db as story_db
+
+    reporter.indeterminate()
+
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    wf = comfy.load_workflow(workflow_name)
+    patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)
+    prompt_id = await comfy.queue_prompt(patched)
+    reporter.update(0.0, "Waiting in ComfyUI queue...")
+
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception as exc:
+                logger.warning("ComfyUI queue delete failed: %s", exc)
+        try:
+            await comfy.interrupt()
+        except Exception as exc:
+            logger.warning("ComfyUI interrupt failed: %s", exc)
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    async def _finalize(sha256: str) -> None:
+        try:
+            await story_db.update_story_axis(db, story_id, axis, {"image_id": sha256})
+        except Exception as exc:
+            logger.error("[chronicle] story link failed for %s/%s: %s", story_id, axis, exc)
+        record = CreationRecord(
+            method="chronicle",
+            prompt_style="",
+            workflow_name=workflow_name,
+            positive_prompt_generated=positive,
+            negative_prompt_generated=negative,
+            seed=seed,
+        )
+        await db.set_payload(sha256, {
+            "creation_record": record.model_dump(),
+            "chronicle_story_id": story_id,
+            "chronicle_axis": axis,
+        })
+
+    saved_sha256s: list[str] = []
+    saved_filenames: set[str] = set()
+
+    async for event in comfy.stream_progress(prompt_id):
+        cancel.raise_if_set()
+        queued = False
+        if event["type"] == "comfy_progress":
+            v = event.get("value", 0)
+            m = event.get("max", 1)
+            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+        elif event["type"] == "comfy_output":
+            for img_ref in event.get("images", []):
+                cancel.raise_if_set()
+                try:
+                    img_bytes = await comfy.fetch_image(
+                        img_ref["filename"],
+                        img_ref.get("subfolder", ""),
+                        img_ref.get("type", "output"),
+                    )
+                    sha256 = await _save_and_register_chronicle_image(
+                        img_bytes, img_ref["filename"], db
+                    )
+                    if sha256:
+                        saved_sha256s.append(sha256)
+                        saved_filenames.add(img_ref["filename"])
+                        await _finalize(sha256)
+                except Exception as exc:
+                    logger.error("[chronicle] image save error: %s", exc)
+
+    # fill in images missed by WebSocket from /history
+    history_images = await comfy.fetch_history(prompt_id)
+    for img_ref in history_images:
+        if img_ref.get("filename") in saved_filenames:
+            continue
+        try:
+            img_bytes = await comfy.fetch_image(
+                img_ref["filename"],
+                img_ref.get("subfolder", ""),
+                img_ref.get("type", "output"),
+            )
+            sha256 = await _save_and_register_chronicle_image(
+                img_bytes, img_ref["filename"], db
+            )
+            if sha256:
+                saved_sha256s.append(sha256)
+                await _finalize(sha256)
+        except Exception as exc:
+            logger.error("[chronicle] history image save error: %s", exc)
+
+    reporter.update(1.0, f"{len(saved_sha256s)} images generated")
+    return {"sha256s": saved_sha256s, "story_id": story_id, "axis": axis, "seed": seed}

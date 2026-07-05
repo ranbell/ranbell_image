@@ -516,6 +516,8 @@
   },
   "header": {
     "invoke": "召喚",
+    "chronicle": "Chronicle",
+    "storybook": "Storybook",
     "folderCount": "{n} フォルダ",
     "imageCount": "{n} 枚",
     "refining": "錬成実行中",
@@ -1202,5 +1204,52 @@
     "tagGroupObject": "🪑 オブジェクト",
     "tagGroupLighting": "☀️ ライティング",
     "comfyOfflineHint": "ComfyUI に接続できません — 画像は再接続後に生成されます。"
+  },
+  "chronicle": {
+    "title": "Chronicle — 物語生成",
+    "baseAxis": "基準の時間軸",
+    "axis": { "past": "過去", "present": "現在", "future": "未来" },
+    "worldview": "世界観",
+    "worldviewPh": "例: 黄昏のスチームパンク都市(空欄ならAIが決定)",
+    "promptStyle": "形式",
+    "style": { "danbooru_natural": "タグ+NL", "natural": "NLのみ", "danbooru": "タグのみ" },
+    "workflow": "ワークフロー",
+    "workflowNone": "(なし — プロンプトのみ)",
+    "divergence": "Transmute",
+    "divergenceTitle": "過去・未来の物語に予測不能な要素を混ぜ込む",
+    "seedInherit": "元画像のSeedを引き継ぐ",
+    "manualMode": "マニュアルモード(プロンプト確認後に画像生成)",
+    "start": "物語を紡ぐ",
+    "running": "紡いでいます...",
+    "cancel": "グループ中止",
+    "cancelled": "Chronicleを中止しました",
+    "dropHint": "外部画像をここにドロップ、またはギャラリーで選択してから開く",
+    "uploading": "アップロード中...",
+    "uploaded": "画像を登録しました",
+    "uploadFailed": "アップロード失敗",
+    "noBase": "ベース画像を選択またはドロップしてください",
+    "prompts": "生成されたプロンプト",
+    "negative": "ネガティブプロンプト",
+    "generateImages": "画像を生成",
+    "imagesQueued": "画像生成ジョブを投入しました",
+    "phase": {
+      "loadingImage": "画像を読み込み中",
+      "extractingVision": "画像を読み解いています",
+      "mutatingTags": "変異タグを抽出中",
+      "writingStory": "物語を執筆中",
+      "refiningPrompt": "プロンプトを錬成中",
+      "savingStory": "物語を保存中"
+    }
+  },
+  "storybook": {
+    "title": "Storybook",
+    "refresh": "更新",
+    "loading": "読み込み中...",
+    "empty": "まだ物語がありません — Chronicleで紡いでください",
+    "base": "基準",
+    "regen": "ガチャ",
+    "regenQueuedShort": "投入済",
+    "regenQueued": "画像の再生成を投入しました(新しいSeed)",
+    "regenTitle": "この画像だけを新しいSeedで再生成"
   }
 }

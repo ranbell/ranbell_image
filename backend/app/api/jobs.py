@@ -91,6 +91,22 @@ async def retry_job(job_id: str, request: Request):
     return {"status": "queued", "job_id": new_id, "retried_from": job_id}
 
 
+# ── Task groups ───────────────────────────────────────────────────────────────
+
+@router.post("/groups/{group_id}/cancel")
+async def cancel_group(group_id: str, request: Request):
+    """Cancel all active jobs whose meta.group_id matches."""
+    cancelled = await request.app.state.spooler.cancel_group(group_id)
+    return {"status": "cancel_requested", "group_id": group_id, "cancelled": cancelled}
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(group_id: str, request: Request):
+    """Cancel active group jobs and remove finished group records from history."""
+    result = await request.app.state.spooler.delete_group(group_id)
+    return {"status": "deleted", "group_id": group_id, **result}
+
+
 # ── Lane pause / resume ───────────────────────────────────────────────────────
 
 @router.get("/lanes")

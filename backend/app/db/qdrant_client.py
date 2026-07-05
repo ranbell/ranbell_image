@@ -18,6 +18,7 @@ CONFIG_COLLECTION = "app_config"
 CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
 WD14_VOCAB_COLLECTION = "wd14_vocab"
+STORIES_COLLECTION = "stories"
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -343,6 +344,30 @@ class QdrantDBClient:
         await self._create_alignment_indexes()
 
         await self._ensure_wd14_vocab_collection()
+
+        if not await self._qc.collection_exists(STORIES_COLLECTION):
+            await self._qc.create_collection(
+                collection_name=STORIES_COLLECTION,
+                vectors_config={
+                    "embedding": qm.VectorParams(
+                        size=settings.embed_dim,
+                        distance=qm.Distance.COSINE,
+                        on_disk=True,
+                    ),
+                },
+                on_disk_payload=True,
+            )
+            logger.info("Created collection: %s", STORIES_COLLECTION)
+        for field, schema in (
+            ("group_id", qm.PayloadSchemaType.KEYWORD),
+            ("base_image_id", qm.PayloadSchemaType.KEYWORD),
+            ("created_at", qm.PayloadSchemaType.FLOAT),
+        ):
+            await self._qc.create_payload_index(
+                collection_name=STORIES_COLLECTION,
+                field_name=field,
+                field_schema=schema,
+            )
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)

@@ -234,6 +234,34 @@ class JobSpooler:
 
         return False
 
+    # ── Task groups ────────────────────────────────────────────────────────────
+    # A group is any set of jobs sharing the same meta["group_id"].
+
+    async def cancel_group(self, group_id: str) -> int:
+        """Cancel all active (queued/held/running) jobs of the group."""
+        job_ids = [
+            jid for jid, job in list(self._registry.items())
+            if job.meta.get("group_id") == group_id
+        ]
+        cancelled = 0
+        for jid in job_ids:
+            if await self.cancel(jid):
+                cancelled += 1
+        return cancelled
+
+    async def delete_group(self, group_id: str) -> dict:
+        """Cancel active group jobs and drop finished group records from history.
+
+        Running jobs reach history asynchronously after their cancel completes;
+        those records expire naturally with the history deque.
+        """
+        cancelled = await self.cancel_group(group_id)
+        kept = [j for j in self._history if j.meta.get("group_id") != group_id]
+        removed = len(self._history) - len(kept)
+        if removed:
+            self._history = deque(kept, maxlen=_HISTORY_MAXLEN)
+        return {"cancelled": cancelled, "removed": removed}
+
     # ── Retry ──────────────────────────────────────────────────────────────────
 
     def retry(self, job_id: str) -> str:

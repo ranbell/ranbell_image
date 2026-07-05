@@ -516,6 +516,8 @@
   },
   "header": {
     "invoke": "Invoke",
+    "chronicle": "Chronicle",
+    "storybook": "Storybook",
     "folderCount": "{n} folders",
     "imageCount": "{n} images",
     "refining": "Generating",
@@ -1202,5 +1204,52 @@
     "tagGroupObject": "🪑 Objects",
     "tagGroupLighting": "☀️ Lighting",
     "comfyOfflineHint": "ComfyUI is unreachable — images will queue and generate when it reconnects."
+  },
+  "chronicle": {
+    "title": "Chronicle — Story Generation",
+    "baseAxis": "Base axis",
+    "axis": { "past": "Past", "present": "Present", "future": "Future" },
+    "worldview": "Worldview",
+    "worldviewPh": "e.g. steampunk city at dusk (empty = AI decides)",
+    "promptStyle": "Format",
+    "style": { "danbooru_natural": "Tags+NL", "natural": "NL only", "danbooru": "Tags only" },
+    "workflow": "Workflow",
+    "workflowNone": "(none — prompts only)",
+    "divergence": "Transmute",
+    "divergenceTitle": "Inject unexpected elements into the past/future acts",
+    "seedInherit": "Inherit base image seed",
+    "manualMode": "Manual mode (review prompts before generating)",
+    "start": "Weave Chronicle",
+    "running": "Weaving...",
+    "cancel": "Cancel group",
+    "cancelled": "Chronicle cancelled",
+    "dropHint": "Drop an external image here, or select one in the gallery before opening",
+    "uploading": "Uploading...",
+    "uploaded": "Image uploaded & registered",
+    "uploadFailed": "Upload failed",
+    "noBase": "Select or drop a base image first",
+    "prompts": "Generated prompts",
+    "negative": "negative prompt",
+    "generateImages": "Generate images",
+    "imagesQueued": "Image jobs queued",
+    "phase": {
+      "loadingImage": "Loading image",
+      "extractingVision": "Reading the image",
+      "mutatingTags": "Sampling mutations",
+      "writingStory": "Writing the chronicle",
+      "refiningPrompt": "Refining prompts",
+      "savingStory": "Saving story"
+    }
+  },
+  "storybook": {
+    "title": "Storybook",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "empty": "No stories yet — weave one in Chronicle",
+    "base": "base",
+    "regen": "Reroll",
+    "regenQueuedShort": "Queued",
+    "regenQueued": "Image regeneration queued (new seed)",
+    "regenTitle": "Regenerate this image only, with a new seed"
   }
 }

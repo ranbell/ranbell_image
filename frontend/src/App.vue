@@ -7,6 +7,8 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
+import ChroniclePanel from './components/ChroniclePanel.vue'
+import Storybook from './components/Storybook.vue'
 import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
@@ -2356,6 +2358,23 @@ function openInspire() { showInspire.value = true }
 // ── Invoke Panel ───────────────────────────────────────────────────────────────
 const showInvoke = ref(false)
 
+// ── Chronicle / Storybook ─────────────────────────────────────────────────────
+const showChronicle = ref(false)
+const showStorybook = ref(false)
+
+function openImageFromStorybook(sha256) {
+  showStorybook.value = false
+  const img = images.value.find(i => i.sha256 === sha256)
+  if (img) {
+    selected.value = img
+  } else {
+    fetch(`/api/images/${sha256}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(doc => { if (doc) selected.value = doc })
+      .catch(() => {})
+  }
+}
+
 function handleInvokeSendToRefine(data) {
   // data: { positive_prompt, negative_prompt, sha256, workflow_name }
   const shas = data.sha256 ? [data.sha256] : []
@@ -2631,6 +2650,14 @@ onUnmounted(() => {
           <button @click="showInvoke = true"
             class="px-3 py-1.5 bg-violet-900/70 hover:bg-violet-800/80 border border-violet-600/40 hover:border-violet-500/60 rounded-lg text-xs font-medium text-violet-200 transition-colors whitespace-nowrap">
             {{ $t('header.invoke') }}
+          </button>
+          <button @click="showChronicle = true"
+            class="px-3 py-1.5 bg-teal-900/70 hover:bg-teal-800/80 border border-teal-600/40 hover:border-teal-500/60 rounded-lg text-xs font-medium text-teal-200 transition-colors whitespace-nowrap">
+            {{ $t('header.chronicle') }}
+          </button>
+          <button @click="showStorybook = true"
+            class="px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 border border-amber-600/40 hover:border-amber-500/60 rounded-lg text-xs font-medium text-amber-200 transition-colors whitespace-nowrap">
+            {{ $t('header.storybook') }}
           </button>
           <button @click="triggerScan" :disabled="scanState?.state === 'running'"
             class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
@@ -4807,6 +4834,23 @@ onUnmounted(() => {
       @send-to-refine="handleInvokeSendToRefine($event)"
       @toast="showToast($event.msg, $event.type)"
       @select-image="openImageFromOracle($event)"
+    />
+
+    <!-- ── Chronicle Panel ── -->
+    <ChroniclePanel
+      :show="showChronicle"
+      :base-image="selected"
+      :comfyOffline="comfyOffline"
+      @update:show="showChronicle = $event"
+      @toast="showToast($event.msg, $event.type)"
+    />
+
+    <!-- ── Storybook ── -->
+    <Storybook
+      :show="showStorybook"
+      @update:show="showStorybook = $event"
+      @select-image="openImageFromStorybook($event)"
+      @toast="showToast($event.msg, $event.type)"
     />
 
         <!-- ── About modal ── -->

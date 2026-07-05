@@ -26,6 +26,7 @@ from .api.jobs import router as jobs_router
 from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
+from .story.api import router as story_router
 
 
 def _abort(msg: str) -> None:
@@ -103,6 +104,7 @@ async def lifespan(app: FastAPI):
     app.state.refine_token_queues: dict[str, asyncio.Queue] = {}
     app.state.inspire_event_queues: dict[str, asyncio.Queue] = {}
     app.state.invoke_event_queues: dict[str, asyncio.Queue] = {}
+    app.state.story_token_queues: dict[str, asyncio.Queue] = {}
 
     from .invoke.session_manager import InvokeSessionManager
     from .invoke.spirit_loader import preload_all as _preload_spirits
@@ -196,6 +198,7 @@ app.include_router(jobs_router)
 app.include_router(analyzer_router)
 app.include_router(alignment_router)
 app.include_router(invoke_router)
+app.include_router(story_router)
 
 
 @app.get("/api/token")
