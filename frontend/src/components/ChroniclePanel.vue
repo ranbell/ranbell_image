@@ -70,6 +70,20 @@ const canGenerate = computed(() =>
   finished.value && !!storyId.value && !imageJobs.value.length
 )
 
+// Extract title/overall from the streaming text in real time so they appear
+// progressively without waiting for the full story event.
+watch(streamText, (text) => {
+  if (title.value && overall.value) return
+  if (!title.value) {
+    const m = text.match(/\[TITLE\][^\[]*?\n(.*)/i)
+    if (m) title.value = m[1].trim().replace(/^["「]|["」]$/g, '')
+  }
+  if (!overall.value) {
+    const m = text.match(/\[OVERALL\][^\[]*?\n([\s\S]*?)(?=\[PAST\]|$)/i)
+    if (m) overall.value = m[1].trim()
+  }
+})
+
 let _reader = null
 let _pendingTokens = ''
 let _flushTimer = null

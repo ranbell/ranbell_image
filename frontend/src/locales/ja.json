@@ -1273,6 +1273,10 @@
     "detailPositive": "ポジティブプロンプト",
     "detailNegative": "ネガティブプロンプト",
     "weaveFrom": "この画像から新たな物語を紡ぐ",
-    "weaveFromShort": "紡ぐ"
+    "weaveFromShort": "紡ぐ",
+    "delete": "削除",
+    "deleteConfirm": "「{title}」を削除しますか？(生成画像は残ります)",
+    "deleted": "物語を削除しました",
+    "deleteFailed": "削除に失敗しました"
   }
 }

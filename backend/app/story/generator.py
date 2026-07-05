@@ -92,11 +92,15 @@ def build_story_prompt(
         else "No setting was specified — invent a fitting, evocative world yourself."
     )
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
-    span_line = (
-        f"The three acts are spaced about {span} apart. Match the magnitude of "
-        "change to that span: minutes means the same scene moments before and "
-        "after (same outfit, same place, small shifts in action and light); "
-        "decades means entirely different chapters of a life."
+    time_block = (
+        f"TIME SCALE: {span} between acts\n\n"
+        "Visual change guide — the magnitude of change in EVERY act MUST match this scale:\n"
+        "- minutes:  same location, same outfit, same light — only micro-action / expression changes\n"
+        "- hours:    same day — light angle and fatigue shift; environment unchanged\n"
+        "- days:     same season — slight emotional wear; environment mostly the same\n"
+        "- months:   season may change — clothing may shift; visible growth/mood difference\n"
+        "- years:    different life chapter — outfit era, aging, environment evolved\n"
+        "- decades:  entirely different life chapter — age, fashion era, world around them transformed"
     )
     mutation_block = ""
     if mutation_tags:
@@ -107,16 +111,17 @@ def build_story_prompt(
     return (
         "You are a storyteller. Write a three-act chronicle (past, present, future) "
         "of the single character below.\n\n"
+        f"{time_block}\n\n"
         f"CHARACTER:\n{character_desc}\n\n"
         f"THE {base_axis.upper()} looks exactly like this scene:\n{scene_desc}\n\n"
         f"{world_line}\n"
-        f"{span_line}\n"
         f"{mutation_block}\n"
         "Rules:\n"
         f"- The {base_axis} act must match the scene above faithfully.\n"
         "- The other two acts develop the character's journey emotionally and "
         "visually within the setting. Each act must describe a concrete, "
         "paintable scene (place, light, action, mood).\n"
+        "- The visual distance between acts must strictly follow the TIME SCALE above.\n"
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
         "its own line, in this order:\n"
@@ -226,6 +231,32 @@ _VISUAL_SCRIPT_GUIDE = (
 )
 
 
+_SCALE_NOTES = {
+    "minutes": (
+        "The character's appearance (hair, outfit, face) must be nearly identical "
+        "to the base scene. Only pose, expression, and light conditions may differ."
+    ),
+    "hours": (
+        "The character's appearance (hair, outfit, face) must be nearly identical "
+        "to the base scene. Only pose, expression, and light conditions may differ."
+    ),
+    "days": (
+        "Core appearance remains recognizable; slight seasonal or emotional wear may show."
+    ),
+    "months": (
+        "Core appearance remains recognizable; seasonal or emotional wear may show."
+    ),
+    "years": (
+        "The character may look noticeably older or younger. Fashion and environment "
+        "should reflect a different life stage."
+    ),
+    "decades": (
+        "Age, fashion era, and environment should be visibly transformed — "
+        "a wholly different chapter of life."
+    ),
+}
+
+
 def build_axis_prompt(
     *,
     story_text: str,
@@ -233,6 +264,9 @@ def build_axis_prompt(
     character_desc: str,
     prompt_style: str,
     wd14_context: str = "",
+    time_scale: str = "years",
+    axis: str = "present",
+    base_axis: str = "present",
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
@@ -245,6 +279,20 @@ def build_axis_prompt(
         )
     else:
         identity_src = "Character description:\n" + character_desc
+
+    # Temporal context block for non-base axes
+    if axis != base_axis:
+        span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+        direction = "before" if axis == "past" else "after"
+        scale_note = _SCALE_NOTES.get(time_scale, _SCALE_NOTES["years"])
+        temporal_block = (
+            f"\nTEMPORAL CONTEXT:\n"
+            f"This is the [{axis.upper()}] act — approximately {span} {direction} "
+            f"the base scene ({base_axis}).\n"
+            f"{scale_note}\n"
+        )
+    else:
+        temporal_block = ""
 
     if prompt_style == "natural":
         format_rule = (
@@ -268,7 +316,8 @@ def build_axis_prompt(
     return (
         "You are an expert image generation prompt engineer.\n"
         "Turn ONE act of a story into an image prompt.\n\n"
-        f"SCENE (this act of the story):\n{story_text}\n\n"
+        f"SCENE (this act of the story):\n{story_text}\n"
+        f"{temporal_block}\n"
         f"{identity_src}\n"
         + (f"\n[WD14 tag analysis of the base image]\n{wd14_context}\n" if wd14_context else "")
         + "\n[Visual Script format]\n"

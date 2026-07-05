@@ -1273,6 +1273,10 @@
     "detailPositive": "Positive prompt",
     "detailNegative": "Negative prompt",
     "weaveFrom": "Weave a new chronicle from this image",
-    "weaveFromShort": "Weave"
+    "weaveFromShort": "Weave",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{title}\"? (Generated images are kept.)",
+    "deleted": "Story deleted",
+    "deleteFailed": "Failed to delete story"
   }
 }

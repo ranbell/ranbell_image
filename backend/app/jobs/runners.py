@@ -2873,6 +2873,9 @@ async def run_chronicle_story(
                 character_desc=character_desc,
                 prompt_style=body.prompt_style,
                 wd14_context=wd14_context,
+                time_scale=body.time_scale,
+                axis=axis,
+                base_axis=body.base_time_axis,
             )
             axis_tokens: list[str] = []
             async for event in ollama.generate_text_stream(

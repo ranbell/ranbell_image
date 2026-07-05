@@ -157,18 +157,20 @@ def test_build_story_prompt_time_scale():
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="minutes",
     )
-    assert "about a few minutes apart" in minutes
+    assert "TIME SCALE" in minutes
+    assert "a few minutes" in minutes
     decades = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="decades",
     )
-    assert "about several decades apart" in decades
+    assert "several decades" in decades
+    assert "transformed" in decades  # decade guide text
     # unknown scale falls back to years
     fallback = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="bogus",
     )
-    assert "about a few years apart" in fallback
+    assert "a few years" in fallback
 
 
 def test_build_story_prompt_mutation_tags():
@@ -192,6 +194,9 @@ def test_build_axis_prompt_visual_script_structure():
         character_desc="",
         prompt_style="danbooru+natural",
         wd14_context="[common tags] 1girl, silver_hair",
+        time_scale="years",
+        axis="past",
+        base_axis="present",
     )
     # 5-paragraph internal guide
     for para in ("APPEARANCE", "ACTION", "ENVIRONMENT", "DETAIL", "MOOD"):
@@ -209,6 +214,9 @@ def test_build_axis_prompt_styles():
         story_text="She walks the ruins.",
         character_tags=["1girl", "silver_hair"],
         character_desc="",
+        time_scale="years",
+        axis="past",
+        base_axis="present",
     )
     tags_only = build_axis_prompt(prompt_style="danbooru", **kwargs)
     assert "comma-separated danbooru tag list (30-50 tags)" in tags_only
@@ -223,13 +231,48 @@ def test_build_axis_prompt_identity_source():
     with_tags = build_axis_prompt(
         story_text="s", character_tags=["1girl", "red_eyes"],
         character_desc="ignored", prompt_style="danbooru",
+        time_scale="years", axis="past", base_axis="present",
     )
     assert "1girl, red_eyes" in with_tags
     without_tags = build_axis_prompt(
         story_text="s", character_tags=[],
         character_desc="a girl with red eyes", prompt_style="danbooru",
+        time_scale="years", axis="past", base_axis="present",
     )
     assert "a girl with red eyes" in without_tags
+
+
+def test_build_axis_prompt_temporal_context_decades():
+    prompt = build_axis_prompt(
+        story_text="She stands in the ruins of her childhood home.",
+        character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="decades",
+        axis="past", base_axis="present",
+    )
+    assert "TEMPORAL CONTEXT" in prompt
+    assert "decades" in prompt.lower() or "transformed" in prompt
+
+
+def test_build_axis_prompt_temporal_context_minutes():
+    prompt = build_axis_prompt(
+        story_text="She reaches for the door handle.",
+        character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="minutes",
+        axis="future", base_axis="present",
+    )
+    assert "TEMPORAL CONTEXT" in prompt
+    assert "nearly identical" in prompt
+
+
+def test_build_axis_prompt_base_axis_no_temporal_block():
+    # When axis == base_axis, no TEMPORAL CONTEXT block should be inserted
+    prompt = build_axis_prompt(
+        story_text="She stands on the airship deck.",
+        character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="present", base_axis="present",
+    )
+    assert "TEMPORAL CONTEXT" not in prompt
 
 
 # ── translation stage ─────────────────────────────────────────────────────────

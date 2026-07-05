@@ -139,6 +139,12 @@ async def get_storybook(request: Request, limit: int = 50):
     return {"stories": stories}
 
 
+@router.delete("/{story_id}", status_code=204)
+async def delete_story_endpoint(story_id: str, request: Request):
+    """Delete a story record. Generated images are NOT deleted."""
+    await story_db.delete_story(request.app.state.db, story_id)
+
+
 @router.get("/{story_id}")
 async def get_story(story_id: str, request: Request):
     story = await story_db.get_story(request.app.state.db, story_id)

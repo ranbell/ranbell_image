@@ -64,6 +64,16 @@ function openImage(sha256) {
   if (sha256) emit('select-image', sha256)
 }
 
+async function deleteStory(story) {
+  const label = storyTitle(story) || story.story_id
+  if (!window.confirm(t('storybook.deleteConfirm', { title: label }))) return
+  const r = await fetch(`/api/story/${story.story_id}`, { method: 'DELETE' })
+  if (!r.ok) { emit('toast', { msg: t('storybook.deleteFailed'), type: 'error' }); return }
+  stories.value = stories.value.filter(s => s.story_id !== story.story_id)
+  if (detailStory.value?.story_id === story.story_id) detailStory.value = null
+  emit('toast', { msg: t('storybook.deleted'), type: 'success' })
+}
+
 function onThumbError(e, sha256) {
   // fall back to the original once (thumbnail may not be generated yet)
   if (e.target.dataset.fallback) return
@@ -119,6 +129,10 @@ const detailStory = ref(null)
               <button @click="detailStory = story"
                 class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full text-gray-300 transition-colors">
                 📄 {{ t('storybook.details') }}
+              </button>
+              <button @click="deleteStory(story)"
+                class="px-2 py-0.5 bg-red-900/30 hover:bg-red-800/60 border border-red-800/40 rounded-full text-red-400 transition-colors">
+                🗑 {{ t('storybook.delete') }}
               </button>
               <span class="ml-auto font-mono">{{ new Date(story.created_at * 1000).toLocaleString() }}</span>
             </div>
