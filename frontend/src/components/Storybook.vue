@@ -7,7 +7,7 @@ const { t } = useI18n()
 const props = defineProps({
   show: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:show', 'select-image', 'toast'])
+const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'toast'])
 
 const AXES = ['past', 'present', 'future']
 
@@ -101,11 +101,17 @@ function openImage(sha256) {
                   </button>
                 </div>
 
-                <div class="aspect-square bg-gray-950/60 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
+                <div class="relative group aspect-square bg-gray-950/60 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
                   @click="openImage(axisImage(story, axis))">
                   <img v-if="axisImage(story, axis)" :src="`/thumbnails/${axisImage(story, axis)}.webp`"
                     class="w-full h-full object-cover hover:opacity-90 transition-opacity" loading="lazy" />
                   <span v-else class="text-2xl text-gray-700">⏳</span>
+                  <button v-if="axisImage(story, axis)"
+                    @click.stop="emit('weave-from', axisImage(story, axis))"
+                    :title="t('storybook.weaveFrom')"
+                    class="absolute bottom-1.5 right-1.5 px-2 py-1 bg-teal-900/80 hover:bg-teal-700/90 border border-teal-600/50 rounded-lg text-[10px] text-teal-200 opacity-0 group-hover:opacity-100 transition-opacity">
+                    📜 {{ t('storybook.weaveFromShort') }}
+                  </button>
                 </div>
 
                 <p class="text-[11px] text-gray-400 leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">

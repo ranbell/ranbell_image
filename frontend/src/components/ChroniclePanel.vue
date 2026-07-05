@@ -51,7 +51,7 @@ function _flushTokens() {
 
 watch(() => props.show, async (val) => {
   if (!val) return
-  if (props.baseImage?.sha256 && !baseSha.value) baseSha.value = props.baseImage.sha256
+  if (props.baseImage?.sha256) baseSha.value = props.baseImage.sha256
   if (!workflows.value.length) {
     try {
       const r = await fetch('/api/comfy/workflows')

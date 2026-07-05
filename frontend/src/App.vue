@@ -2361,6 +2361,23 @@ const showInvoke = ref(false)
 // ── Chronicle / Storybook ─────────────────────────────────────────────────────
 const showChronicle = ref(false)
 const showStorybook = ref(false)
+const chronicleBase = ref(null)   // image doc (or {sha256}) prefilled as base
+
+function openChronicle(img = null) {
+  chronicleBase.value = img || selected.value || null
+  showChronicle.value = true
+}
+
+function openChronicleFromTray() {
+  const first = [...selectedIds.value][0]
+  if (!first) return
+  openChronicle(images.value.find(i => i.sha256 === first) || { sha256: first })
+}
+
+function openChronicleFromStorybook(sha256) {
+  showStorybook.value = false
+  openChronicle({ sha256 })
+}
 
 function openImageFromStorybook(sha256) {
   showStorybook.value = false
@@ -2651,7 +2668,7 @@ onUnmounted(() => {
             class="px-3 py-1.5 bg-violet-900/70 hover:bg-violet-800/80 border border-violet-600/40 hover:border-violet-500/60 rounded-lg text-xs font-medium text-violet-200 transition-colors whitespace-nowrap">
             {{ $t('header.invoke') }}
           </button>
-          <button @click="showChronicle = true"
+          <button @click="openChronicle()"
             class="px-3 py-1.5 bg-teal-900/70 hover:bg-teal-800/80 border border-teal-600/40 hover:border-teal-500/60 rounded-lg text-xs font-medium text-teal-200 transition-colors whitespace-nowrap">
             {{ $t('header.chronicle') }}
           </button>
@@ -4201,6 +4218,11 @@ onUnmounted(() => {
                   ✨ {{ $t('detail.refineFromThis') }}
                 </button>
                 <button
+                  @click="openChronicle(selected)"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-900/50 hover:bg-teal-800/70 border border-teal-700/50 text-teal-300 hover:text-teal-100 rounded-lg text-xs transition-colors">
+                  📜 {{ $t('detail.chronicleFromThis') }}
+                </button>
+                <button
                   v-if="selected.positive_prompt"
                   @click="handleSendToRefineDirect({ shas: [selected.sha256], directPrompt: selected.positive_prompt, directNegativePrompt: selected.negative_prompt || '', source: 'detail' })"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
@@ -4791,6 +4813,11 @@ onUnmounted(() => {
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-purple-800/60 hover:bg-purple-700/80 border border-purple-500/40 hover:border-purple-400/60 rounded-xl text-xs font-medium text-purple-200 transition-all duration-150">
                   {{ $t('tray.refine') }}
                 </button>
+                <button @click="openChronicleFromTray"
+                  :title="$t('tray.chronicleTitle')"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-900/60 hover:bg-teal-800/80 border border-teal-500/40 hover:border-teal-400/60 rounded-xl text-xs font-medium text-teal-200 transition-all duration-150">
+                  {{ $t('tray.chronicle') }}
+                </button>
                 <button @click="clearSelection"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/60 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-all duration-150">
                   {{ $t('tray.clear') }}
@@ -4839,7 +4866,7 @@ onUnmounted(() => {
     <!-- ── Chronicle Panel ── -->
     <ChroniclePanel
       :show="showChronicle"
-      :base-image="selected"
+      :base-image="chronicleBase"
       :comfyOffline="comfyOffline"
       @update:show="showChronicle = $event"
       @toast="showToast($event.msg, $event.type)"
@@ -4850,6 +4877,7 @@ onUnmounted(() => {
       :show="showStorybook"
       @update:show="showStorybook = $event"
       @select-image="openImageFromStorybook($event)"
+      @weave-from="openChronicleFromStorybook($event)"
       @toast="showToast($event.msg, $event.type)"
     />
 

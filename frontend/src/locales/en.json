@@ -7,7 +7,9 @@
     "inspire": "🔮 Inspire",
     "refine": "✨ Refine",
     "aiProcess": "AI Process",
-    "clear": "✕ Clear"
+    "clear": "✕ Clear",
+    "chronicle": "📜 Chronicle",
+    "chronicleTitle": "Weave a chronicle from the first selected image"
   },
   "inspire": {
     "copySuccess": "Copied",
@@ -357,6 +359,7 @@
     "rawMetaExpand": "▶ Expand",
     "rawMetaJsonCopy": "Copy JSON",
     "refineFromThis": "Refine from this image",
+    "chronicleFromThis": "Weave a chronicle",
     "generateFromPrompt": "Generate with same prompt",
     "download": "Download"
   },
@@ -1250,6 +1253,8 @@
     "regen": "Reroll",
     "regenQueuedShort": "Queued",
     "regenQueued": "Image regeneration queued (new seed)",
-    "regenTitle": "Regenerate this image only, with a new seed"
+    "regenTitle": "Regenerate this image only, with a new seed",
+    "weaveFrom": "Weave a new chronicle from this image",
+    "weaveFromShort": "Weave"
   }
 }

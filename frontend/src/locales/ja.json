@@ -7,7 +7,9 @@
     "inspire": "🔮 インスピレーション",
     "refine": "✨ 錬成",
     "aiProcess": "AI処理",
-    "clear": "✕ 解除"
+    "clear": "✕ 解除",
+    "chronicle": "📜 Chronicle",
+    "chronicleTitle": "選択中の先頭画像から物語を紡ぐ"
   },
   "inspire": {
     "copySuccess": "コピーしました",
@@ -357,6 +359,7 @@
     "rawMetaExpand": "▶ 展開する",
     "rawMetaJsonCopy": "JSON コピー",
     "refineFromThis": "この画像から錬成",
+    "chronicleFromThis": "この画像から物語を紡ぐ",
     "generateFromPrompt": "同じプロンプトで生成",
     "download": "ダウンロード"
   },
@@ -1250,6 +1253,8 @@
     "regen": "ガチャ",
     "regenQueuedShort": "投入済",
     "regenQueued": "画像の再生成を投入しました(新しいSeed)",
-    "regenTitle": "この画像だけを新しいSeedで再生成"
+    "regenTitle": "この画像だけを新しいSeedで再生成",
+    "weaveFrom": "この画像から新たな物語を紡ぐ",
+    "weaveFromShort": "紡ぐ"
   }
 }
