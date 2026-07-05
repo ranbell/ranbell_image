@@ -50,6 +50,13 @@ function axisImage(story, axis) {
 function openImage(sha256) {
   if (sha256) emit('select-image', sha256)
 }
+
+function onThumbError(e, sha256) {
+  // fall back to the original once (thumbnail may not be generated yet)
+  if (e.target.dataset.fallback) return
+  e.target.dataset.fallback = '1'
+  e.target.src = `/api/originals/${sha256}`
+}
 </script>
 
 <template>
@@ -103,7 +110,8 @@ function openImage(sha256) {
 
                 <div class="relative group aspect-square bg-gray-950/60 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
                   @click="openImage(axisImage(story, axis))">
-                  <img v-if="axisImage(story, axis)" :src="`/thumbnails/${axisImage(story, axis)}.webp`"
+                  <img v-if="axisImage(story, axis)" :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
+                    @error="onThumbError($event, axisImage(story, axis))"
                     class="w-full h-full object-cover hover:opacity-90 transition-opacity" loading="lazy" />
                   <span v-else class="text-2xl text-gray-700">⏳</span>
                   <button v-if="axisImage(story, axis)"

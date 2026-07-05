@@ -2364,7 +2364,12 @@ const showStorybook = ref(false)
 const chronicleBase = ref(null)   // image doc (or {sha256}) prefilled as base
 
 function openChronicle(img = null) {
-  chronicleBase.value = img || selected.value || null
+  let base = img || selected.value || null
+  if (!base && selectedIds.value.size) {
+    const first = [...selectedIds.value][0]
+    base = images.value.find(i => i.sha256 === first) || { sha256: first }
+  }
+  chronicleBase.value = base
   showChronicle.value = true
 }
 

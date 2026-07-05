@@ -2686,7 +2686,7 @@ async def run_chronicle_story(
     Unless manual_mode, submits the per-axis GENERATION jobs itself, so a
     group cancel that stops this job also prevents the follow-on submissions.
     """
-    from ..api.ai import _find_conflict_tags, _sample_mutation_tags
+    from ..api.ai import _sample_mutation_tags
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
     from ..story import db as story_db

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -25,6 +25,16 @@ const useRefSeed = ref(true)
 const manualMode = ref(false)
 const dragOver = ref(false)
 const uploading = ref(false)
+
+// Thumbnail with fallback to the original (freshly uploaded images may not
+// have a thumbnail yet)
+const thumbFailed = ref(false)
+watch(baseSha, () => { thumbFailed.value = false })
+const baseThumbSrc = computed(() =>
+  thumbFailed.value
+    ? `/api/originals/${baseSha.value}`
+    : `/api/thumbnails/${baseSha.value}.webp`
+)
 
 // ── run state ─────────────────────────────────────────────────────────────────
 const running = ref(false)
@@ -245,7 +255,7 @@ async function generateImages() {
               class="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 p-3 min-h-[180px] transition-colors"
               :class="dragOver ? 'border-teal-400 bg-teal-900/20' : 'border-gray-700 bg-gray-800/40'"
               @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
-              <img v-if="baseSha" :src="`/thumbnails/${baseSha}.webp`"
+              <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
                 class="max-h-36 rounded-lg object-contain" />
               <span v-else class="text-3xl">🖼️</span>
               <p class="text-[10px] text-gray-500 text-center leading-tight">
