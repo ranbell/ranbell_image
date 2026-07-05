@@ -301,7 +301,8 @@
     "folderEmpty": "No images in this folder.",
     "folderBack": "← Folder list",
     "rootFolder": "(root)",
-    "imageCount": "{n} images"
+    "imageCount": "{n} images",
+    "newImagesAvailable": "New images available — Refresh"
   },
   "detail": {
     "fullscreen": "Click to view fullscreen",

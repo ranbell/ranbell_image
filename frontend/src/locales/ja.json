@@ -301,7 +301,8 @@
     "folderEmpty": "このフォルダに画像はありません。",
     "folderBack": "← フォルダ一覧",
     "rootFolder": "(ルート直下)",
-    "imageCount": "{n} 枚"
+    "imageCount": "{n} 枚",
+    "newImagesAvailable": "新しい画像があります — 更新"
   },
   "detail": {
     "fullscreen": "クリックで全画面表示",

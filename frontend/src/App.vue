@@ -39,6 +39,7 @@ const nextCursor = ref(null)
 const LIMIT = 100
 const loading = ref(false)
 const hasMore = ref(true)
+const pendingGalleryRefresh = ref(false)
 
 // ── Backend readiness ─────────────────────────────────────────────────────────
 const backendStatus = ref('connecting') // 'connecting' | 'starting' | 'ready'
@@ -1413,6 +1414,14 @@ async function fetchImages(reset = false) {
   }
 }
 
+function softRefreshGallery() {
+  if ((mainEl.value?.scrollTop ?? 0) < 200) {
+    fetchImages(true)
+  } else {
+    pendingGalleryRefresh.value = true
+  }
+}
+
 async function fetchDirs() {
   dirsLoading.value = true
   try {
@@ -1578,7 +1587,7 @@ async function handleJobFinished(job) {
 
   // Scan complete → refresh gallery
   if (SCAN_TITLES.has(job.title)) {
-    await fetchImages(true)
+    softRefreshGallery()
     await fetchTags()
     fetchDateRange()
   }
@@ -1587,12 +1596,12 @@ async function handleJobFinished(job) {
   if (PIPELINE_TITLES.has(job.title)) {
     await fetchAiStatus()
     await fetchTags()
-    await fetchImages(true)
+    softRefreshGallery()
   }
 
   // GENERATION complete → refresh gallery + notify refine panel
   if (job.lane === 'gen') {
-    await fetchImages(true)
+    softRefreshGallery()
     if (refineGenJobId.value === job.id) {
       refineGenJobId.value = null
       refinePhase.value = 'done'
@@ -2366,7 +2375,7 @@ function handleRefineEvent(evt) {
       break
     case 'comfy_done':
       refinePhase.value = 'done'
-      fetchImages(true)
+      softRefreshGallery()
       break
     case 'cancelled':
       refinePhase.value = 'done'
@@ -3064,6 +3073,21 @@ onUnmounted(() => {
 
     <!-- ── Grid ── -->
     <main ref="mainEl" class="flex-1 min-h-0 p-2 overflow-y-auto">
+
+      <!-- ── New images banner ── -->
+      <Transition name="fade">
+        <div v-if="pendingGalleryRefresh"
+          class="sticky top-0 z-10 mb-2 flex items-center justify-center">
+          <button
+            @click="pendingGalleryRefresh = false; fetchImages(true); mainEl?.scrollTo({ top: 0, behavior: 'smooth' })"
+            class="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-full shadow-lg transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            {{ $t('gallery.newImagesAvailable') }}
+          </button>
+        </div>
+      </Transition>
 
       <!-- ── Folder list ── -->
       <template v-if="viewMode === 'folder' && activeDir === null">
@@ -5126,4 +5150,10 @@ onUnmounted(() => {
 .cr-slide-leave-active { transition: transform 150ms ease-in; }
 .cr-slide-enter-from,
 .cr-slide-leave-to { transform: translateY(-100%); }
+
+/* ── Fade Transition ─────────────────────────────────────────────────────── */
+.fade-enter-active { transition: opacity 200ms ease; }
+.fade-leave-active { transition: opacity 150ms ease; }
+.fade-enter-from,
+.fade-leave-to { opacity: 0; }
 </style>
