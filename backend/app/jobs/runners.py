@@ -2687,6 +2687,7 @@ async def run_chronicle_story(
     group cancel that stops this job also prevents the follow-on submissions.
     """
     from ..api.ai import (
+        _apply_must_replacements,
         _build_all_must,
         _build_weighted_wd14_context,
         _check_natural_prose,
@@ -2925,6 +2926,9 @@ async def run_chronicle_story(
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
                 if wd14_analysis and divergence <= 0.5:
                     tag_line = _inject_wd14_must_tags(tag_line, wd14_analysis)
+                    if all_must:
+                        parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                        tag_line = ", ".join(_apply_must_replacements(parts, all_must))
             if prose and all_must:
                 prose = _correct_prose_wd14_conflicts(prose, all_must)
             if body.prompt_style != "danbooru" and not _check_natural_prose(prose):
