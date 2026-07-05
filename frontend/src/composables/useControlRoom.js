@@ -12,14 +12,14 @@ export const LampState = Object.freeze({
 })
 
 // system definitions — lane-based and resource-based
-// activeLanes: lane prefixes whose job activity should be reflected in a resource-based system
+// lane + resource together: lane drives the status, resource unreachability forces FAULT
 const SYSTEMS = [
   { key: 'generation',   label: 'Generation',   lane: 'gen'   },
   { key: 'tagging',      label: 'Tagging',       lane: 'tagging' },
   { key: 'embedding',    label: 'Embedding',     lane: 'embed' },
   { key: 'vectorStore',  label: 'Vector Store',  resource: 'remote-qdrant' },
   { key: 'alignment',    label: 'Alignment',     lane: 'eval'  },
-  { key: 'promptEngine', label: 'Prompt Engine', resource: 'remote-ollama', activeLanes: ['prompt', 'embed', 'eval'] },
+  { key: 'promptEngine', label: 'Prompt Engine', lane: 'prompt', resource: 'remote-ollama' },
 ]
 
 const MAX_LOG_ENTRIES = 200
@@ -57,6 +57,11 @@ export function useControlRoom(jobsMap, resourcesRef) {
 
     return SYSTEMS.reduce((acc, sys) => {
       if (sys.lane) {
+        // backing resource down (e.g. Ollama unreachable) trumps lane activity
+        if (sys.resource) {
+          const res = resources.find(r => r.name === sys.resource)
+          if (res && !res.reachable) { acc[sys.key] = LampState.FAULT; return acc }
+        }
         const laneJobs = jobs.filter(j => j.id.startsWith(sys.lane + '-'))
         const running  = laneJobs.filter(j => j.state === 'running' || j.state === 'cancelling')
         const queued   = laneJobs.filter(j => j.state === 'queued')
@@ -78,17 +83,6 @@ export function useControlRoom(jobsMap, resourcesRef) {
         if (queued.length > 0)                        { acc[sys.key] = LampState.ACTIVE;  return acc }
         acc[sys.key] = LampState.NOMINAL
       } else if (sys.resource) {
-        // check job activity via activeLanes before resource reachability (takes priority over STANDBY)
-        if (sys.activeLanes) {
-          const laneJobs = jobs.filter(j => sys.activeLanes.some(l => j.id.startsWith(l + '-')))
-          const running  = laneJobs.filter(j => j.state === 'running' || j.state === 'cancelling')
-          const queued   = laneJobs.filter(j => j.state === 'queued')
-          const failed   = laneJobs.filter(j => j.state === 'failed')
-          if (failed.length > 0)                          { acc[sys.key] = LampState.FAULT;   return acc }
-          if (running.length > 0)                         { acc[sys.key] = LampState.ACTIVE;  return acc }
-          if (queued.length >= CAUTION_QUEUE_THRESHOLD)   { acc[sys.key] = LampState.CAUTION; return acc }
-          if (queued.length > 0)                          { acc[sys.key] = LampState.ACTIVE;  return acc }
-        }
         // check resource reachability
         const res = resources.find(r => r.name === sys.resource)
         if (!res) { acc[sys.key] = LampState.STANDBY; return acc }
@@ -161,6 +155,8 @@ export function useControlRoom(jobsMap, resourcesRef) {
     return jobs.filter(j => j.id.startsWith(prefix + '-') && j.state === 'queued').length
   })
 
+  const promptActiveJob  = laneActiveJob('prompt')
+  const promptQueueDepth = laneQueueDepth('prompt')
   const genActiveJob    = laneActiveJob('gen')
   const genQueueDepth   = laneQueueDepth('gen')
   const tagActiveJob    = laneActiveJob('tagging')
@@ -210,6 +206,12 @@ export function useControlRoom(jobsMap, resourcesRef) {
   const tagResource = computed(() =>
     resourcesRef.value.find(x => x.kind === 'local') ?? null
   )
+
+  // PROMPT: LLM via Ollama; local mode → show GPU stats
+  const promptResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-ollama') ?? r.find(x => x.kind === 'local') ?? null
+  })
 
   // ── throughput (completions in last 1 minute) ────────────────────────────────
 
@@ -349,6 +351,8 @@ export function useControlRoom(jobsMap, resourcesRef) {
     guardActive,
     guardSourceLabel,
     ingestEvent,
+    promptActiveJob,
+    promptQueueDepth,
     genActiveJob,
     genQueueDepth,
     tagActiveJob,
@@ -357,6 +361,7 @@ export function useControlRoom(jobsMap, resourcesRef) {
     embedQueueDepth,
     evalActiveJob,
     evalQueueDepth,
+    promptResource,
     genResource,
     tagResource,
     embedResource,

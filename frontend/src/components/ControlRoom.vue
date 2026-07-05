@@ -48,11 +48,11 @@
           <span class="cr-pid-interlock-label">⛨ GPU INTERLOCK · {{ guardSourceLabel }}</span>
         </div>
 
-        <!-- JOBS IN source terminus -->
+        <!-- JOBS IN source terminus (all queued jobs waiting to enter the pipeline) -->
         <div class="cr-pid-terminus">
           <div class="cr-pid-terminus-label">JOBS IN</div>
-          <div class="cr-pid-terminus-count" :class="{ 'cr-pid-terminus-count--active': genQueueDepth > 0 }">
-            {{ genQueueDepth }}
+          <div class="cr-pid-terminus-count" :class="{ 'cr-pid-terminus-count--active': waitedJobs.length > 0 }">
+            {{ waitedJobs.length }}
           </div>
         </div>
 
@@ -64,8 +64,8 @@
           </div>
 
           <div class="cr-pid-unit-wrap">
-            <!-- interlock taps: trigger source (●) on GEN, shield (⛨) on guarded lanes -->
-            <span v-if="guardActive && unit.key === 'gen'" class="cr-pid-tap cr-pid-tap--source">●</span>
+            <!-- interlock taps: ● on the active trigger lane, shield (⛨) on guarded lanes -->
+            <span v-if="guardActive && unit.trigger && unit.job" class="cr-pid-tap cr-pid-tap--source">●</span>
             <span v-else-if="unit.status === 'guard'" class="cr-pid-tap cr-pid-tap--shield">⛨</span>
 
             <div class="cr-pid-unit" :class="[`cr-pid-unit--${unit.key}`, `cr-pid-state--${unit.status || 'standby'}`]">
@@ -489,6 +489,8 @@ const {
   laneStates,
   guardActive,
   guardSourceLabel,
+  promptActiveJob,
+  promptQueueDepth,
   genActiveJob,
   genQueueDepth,
   tagActiveJob,
@@ -497,6 +499,7 @@ const {
   embedQueueDepth,
   evalActiveJob,
   evalQueueDepth,
+  promptResource,
   genResource,
   tagResource,
   embedResource,
@@ -517,10 +520,12 @@ async function toggleLanePause(lane) {
   }
 }
 
-// ── P&ID unit descriptors (flow order: GEN → TAG → EMBED → EVAL) ────────────
-// metric picks which local gauge to show; cpuOnly marks GPU-independent lanes
+// ── P&ID unit descriptors (flow order: PROMPT → GEN → TAG → EMBED → EVAL) ───
+// metric picks which local gauge to show; cpuOnly marks GPU-independent lanes;
+// trigger marks priority lanes that can hold the GPU interlock
 const pidUnits = computed(() => [
-  { key: 'gen',   name: 'GENERATION', lane: 'gen',     status: systemStatus.value.generation, job: genActiveJob.value,   depth: genQueueDepth.value,   resource: genResource.value,   metric: 'gpu' },
+  { key: 'prompt', name: 'PROMPT',    lane: 'prompt',  status: systemStatus.value.promptEngine, job: promptActiveJob.value, depth: promptQueueDepth.value, resource: promptResource.value, metric: 'gpu', trigger: true },
+  { key: 'gen',   name: 'GENERATION', lane: 'gen',     status: systemStatus.value.generation, job: genActiveJob.value,   depth: genQueueDepth.value,   resource: genResource.value,   metric: 'gpu', trigger: true },
   { key: 'tag',   name: 'TAGGING',    lane: 'tagging', status: systemStatus.value.tagging,    job: tagActiveJob.value,   depth: tagQueueDepth.value,   resource: tagResource.value,   metric: 'cpu', cpuOnly: true },
   { key: 'embed', name: 'EMBEDDING',  lane: 'embed',   status: systemStatus.value.embedding,  job: embedActiveJob.value, depth: embedQueueDepth.value, resource: embedResource.value, metric: 'gpu' },
   { key: 'eval',  name: 'ALIGNMENT',  lane: 'eval',    status: systemStatus.value.alignment,  job: evalActiveJob.value,  depth: evalQueueDepth.value,  resource: evalResource.value,  metric: 'cpu' },
@@ -2029,9 +2034,16 @@ function ratioClass(used, total, caution, fault) {
 }
 
 /* lane base tints */
-.cr-pid-unit--gen   { border-color: rgba(74, 124, 90, 0.3); background: rgba(74, 124, 90, 0.05); }
-.cr-pid-unit--embed { border-color: rgba(74, 110, 180, 0.3); background: rgba(74, 110, 180, 0.05); }
-.cr-pid-unit--tag   { border-color: rgba(170, 125, 65, 0.3); background: rgba(170, 125, 65, 0.05); }
+.cr-pid-unit--gen    { border-color: rgba(74, 124, 90, 0.3); background: rgba(74, 124, 90, 0.05); }
+.cr-pid-unit--embed  { border-color: rgba(74, 110, 180, 0.3); background: rgba(74, 110, 180, 0.05); }
+.cr-pid-unit--tag    { border-color: rgba(170, 125, 65, 0.3); background: rgba(170, 125, 65, 0.05); }
+.cr-pid-unit--prompt { border-color: rgba(80, 140, 160, 0.3); background: rgba(80, 140, 160, 0.05); }
+
+.cr-pid-unit--prompt.cr-pid-state--active,
+.cr-pid-unit--prompt.cr-pid-state--nominal { border-color: rgba(80, 140, 160, 0.55); background: rgba(80, 140, 160, 0.09); }
+.cr-pid-unit--prompt.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--prompt.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--prompt.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
 
 .cr-pid-unit--tag.cr-pid-state--active,
 .cr-pid-unit--tag.cr-pid-state--nominal { border-color: rgba(170, 125, 65, 0.55); background: rgba(170, 125, 65, 0.09); }
@@ -2159,6 +2171,7 @@ function ratioClass(used, total, caution, fault) {
   transition: height 0.5s ease;
 }
 
+.cr-pid-tank-fill--prompt { background: rgba(80, 140, 160, 0.65); }
 .cr-pid-tank-fill--gen   { background: rgba(74, 124, 90, 0.65); }
 .cr-pid-tank-fill--tag   { background: rgba(170, 125, 65, 0.65); }
 .cr-pid-tank-fill--embed { background: rgba(74, 110, 180, 0.65); }
@@ -2202,6 +2215,7 @@ function ratioClass(used, total, caution, fault) {
   transition: transform 0.4s ease;
 }
 
+.cr-pid-reactor-fill--prompt { background: linear-gradient(90deg, #3a7080 0%, #60aacc 100%); }
 .cr-pid-reactor-fill--gen   { background: linear-gradient(90deg, var(--cr-nominal) 0%, #6aaa80 100%); }
 .cr-pid-reactor-fill--tag   { background: linear-gradient(90deg, #8a6a30 0%, #c09a60 100%); }
 .cr-pid-reactor-fill--embed { background: linear-gradient(90deg, #3a5ea8 0%, #7090cc 100%); }
@@ -2269,6 +2283,7 @@ function ratioClass(used, total, caution, fault) {
   border-radius: 1px;
   transition: width 0.5s ease;
 }
+.cr-pid-resbar-fill--prompt { background: rgba(80, 140, 160, 0.75); }
 .cr-pid-resbar-fill--gen   { background: rgba(74, 124, 90, 0.75); }
 .cr-pid-resbar-fill--tag   { background: rgba(170, 125, 65, 0.75); }
 .cr-pid-resbar-fill--embed { background: rgba(74, 110, 180, 0.75); }
