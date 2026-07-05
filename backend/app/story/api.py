@@ -38,7 +38,7 @@ class ChronicleRequest(BaseModel):
     base_sha256: str
     base_time_axis: Literal["past", "present", "future"] = "present"
     worldview: str = ""
-    time_scale: Literal["minutes", "hours", "days", "months", "years", "decades"] = "years"
+    time_scale: Literal["minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"] = "years"
     prompt_style: str = "danbooru+natural"
     workflow_name: str = ""
     divergence: float = 0.0

@@ -197,7 +197,14 @@ async function start() {
         manual_mode: manualMode.value,
       }),
     })
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    if (!r.ok) {
+      const errBody = await r.json().catch(() => null)
+      const detail = errBody?.detail
+      const msg = typeof detail === 'string' ? detail
+        : Array.isArray(detail) ? detail.map(e => e.msg ?? JSON.stringify(e)).join('; ')
+        : r.statusText
+      throw new Error(msg)
+    }
     const { job_id, group_id } = await r.json()
     groupId.value = group_id
     await readStream(job_id)
