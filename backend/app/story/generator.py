@@ -122,9 +122,15 @@ def build_story_prompt(
         f"{mutation_block}\n"
         "Rules:\n"
         f"- The {base_axis} act must match the scene above faithfully.\n"
-        "- The other two acts develop the character's journey emotionally and "
-        "visually within the setting. Each act must describe a concrete, "
-        "paintable scene (place, light, action, mood).\n"
+        "- Each act must show the character in a DISTINCT MOMENT with a DIFFERENT ACTIVITY:\n"
+        "  • Never repeat the same pose or action across acts — each needs a specific\n"
+        "    physical action (writing, reaching, running, crouching, pressing, lifting…).\n"
+        "  • Vary the character's position in the environment: foreground vs background,\n"
+        "    different corner, different angle, different relationship to objects.\n"
+        "  • Think cinematically: PAST = approach / preparation / discovery;\n"
+        "    PRESENT = the peak moment (matches the base image);\n"
+        "    FUTURE = departure / aftermath / new beginning.\n"
+        "- Never write an act as 'standing in the same place with different lighting'.\n"
         "- The visual distance between acts must strictly follow the TIME SCALE above.\n"
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
@@ -235,8 +241,12 @@ _VISUAL_SCRIPT_GUIDE = (
     "paragraphs — this structure is an INTERNAL GUIDE ONLY:\n"
     "Paragraph 1 — APPEARANCE: subject count as very first tag (1girl/solo/...), "
     "then hair, eyes, face, expression, clothing, accessories.\n"
-    "Paragraph 2 — ACTION: pose, gesture, body language, physical interactions "
-    "from the scene.\n"
+    "Paragraph 2 — ACTION: INVENT a physically vivid, story-specific pose. "
+    "Never default to 'standing' or 'sitting facing forward'. Name a concrete "
+    "micro-action: hands pressing against cold glass, fingers tracing a map edge, "
+    "body half-turned mid-step, weight shifted onto one knee. "
+    "The pose must be emotionally legible at a glance and visually distinct "
+    "from a neutral upright stance.\n"
     "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day.\n"
     "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction "
     "and quality.\n"
@@ -258,7 +268,7 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "physical appearance (IDENTICAL), exact location (SAME room/spot), "
             "season, time of day"
         ),
-        "may_differ": "micro-pose, finger/hand position, expression, a gust of wind",
+        "may_differ": "micro-pose, finger/hand position, expression, a gust of wind, what the character is doing with hands/body (writing, reaching, pressing, picking up, etc.)",
         "forbidden": "any outfit change, any location change, any passage of seasons, aging",
     },
     "tens_of_minutes": {
@@ -267,7 +277,7 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "physical appearance (IDENTICAL), same room or immediate outdoor spot, "
             "season, time of day"
         ),
-        "may_differ": "pose, expression, minor object placement, slight lighting shift",
+        "may_differ": "pose, expression, minor object placement, slight lighting shift, character's activity and what they are doing, object being interacted with",
         "forbidden": "any outfit change, any location change, any passage of seasons, aging",
     },
     "hours": {
@@ -275,7 +285,7 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "outfit (IDENTICAL), hair color and style (IDENTICAL), "
             "physical appearance (IDENTICAL), same building or outdoor location, season"
         ),
-        "may_differ": "light angle and shadow direction, expression, pose, slight fatigue",
+        "may_differ": "light angle and shadow direction, expression, full pose and activity, props in hand, position within the location, slight fatigue",
         "forbidden": "outfit change, location change, season change, aging",
     },
     "days": {
@@ -396,8 +406,11 @@ def build_axis_prompt(
         "it at the very START of the positive prompt, so the same character is "
         "recognizable in every act.\n"
         f"- {format_rule}\n"
-        "- Depict THIS act's scene: place, action, lighting, mood — all "
-        "grounded in the story text.\n"
+        "- Depict THIS act's scene grounded in the story text: place, lighting, mood.\n"
+        "- For ACTION/POSE: the story names the dramatic moment; YOU invent the most\n"
+        "  visually striking physical instantiation. Choose the exact gesture, the\n"
+        "  weight distribution, the prop interaction — be specific, not generic.\n"
+        "  The pose must be emotionally distinct from the base image's pose.\n"
         "- NEGATIVE lists only things to avoid (artifacts, wrong elements for "
         "this scene). Short comma-separated tags.\n\n"
         "Output format (exactly these two labels, nothing else):\n"
