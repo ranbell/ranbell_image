@@ -1249,6 +1249,13 @@
     "negative": "ネガティブプロンプト",
     "generateImages": "画像を生成",
     "imagesQueued": "画像生成ジョブを投入しました",
+    "jobState": {
+      "queued":     "待機中",
+      "running":    "生成中",
+      "succeeded":  "完了",
+      "failed":     "失敗",
+      "cancelling": "中止中"
+    },
     "noWorkflowHint": "ワークフロー未選択です — 上で選択してから生成してください",
     "phase": {
       "loadingImage": "画像を読み込み中",

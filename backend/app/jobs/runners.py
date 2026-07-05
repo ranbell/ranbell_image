@@ -1028,7 +1028,7 @@ async def run_refine_prompt(
 
     def _phase(code: str, progress: float, text: str) -> None:
         reporter.update(progress, text)
-        _put({"type": "phase", "code": code})
+        _put({"type": "phase", "code": code, "progress": progress})
 
     # event for cancel signal (can be set synchronously from on_cancel handler)
     _abort = asyncio.Event()
@@ -2723,7 +2723,7 @@ async def run_chronicle_story(
 
     def _phase(code: str, progress: float, text: str) -> None:
         reporter.update(progress, text)
-        _put({"type": "phase", "code": code})
+        _put({"type": "phase", "code": code, "progress": progress})
 
     _abort = asyncio.Event()
     cancel.on_cancel(_abort.set)

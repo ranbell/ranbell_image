@@ -4970,6 +4970,7 @@ onUnmounted(() => {
       :show="showChronicle"
       :base-image="chronicleBase"
       :comfyOffline="comfyOffline"
+      :jobs-map="jobsMap"
       @update:show="showChronicle = $event"
       @toast="showToast($event.msg, $event.type)"
     />

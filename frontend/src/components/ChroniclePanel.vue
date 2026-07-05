@@ -8,6 +8,7 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   baseImage: { type: Object, default: null },   // gallery-selected image doc
   comfyOffline: { type: Boolean, default: false },
+  jobsMap: { type: Object, default: () => new Map() },  // App-level job state map
 })
 const emit = defineEmits(['update:show', 'toast'])
 
@@ -41,6 +42,7 @@ const baseThumbSrc = computed(() =>
 // ── run state ─────────────────────────────────────────────────────────────────
 const running = ref(false)
 const phase = ref('')
+const progress = ref(0)
 const streamText = ref('')
 const storyId = ref('')
 const groupId = ref('')
@@ -115,6 +117,7 @@ function close() { emit('update:show', false) }
 
 function resetRun() {
   phase.value = ''
+  progress.value = 0
   streamText.value = ''
   storyId.value = ''
   seed.value = null
@@ -126,6 +129,26 @@ function resetRun() {
   titleJa.value = ''
   overall.value = ''
   overallJa.value = ''
+}
+
+// ── image job status helpers ──────────────────────────────────────────────────
+function jobState(job_id) {
+  return props.jobsMap?.get(job_id)?.state ?? 'queued'
+}
+function jobStatusIcon(job_id) {
+  return { queued: '⏳', running: '⚙️', succeeded: '✓', failed: '✗', cancelling: '⏹' }[jobState(job_id)] ?? '⏳'
+}
+function jobStatusLabel(job_id) {
+  return t('chronicle.jobState.' + jobState(job_id), jobState(job_id))
+}
+function jobStatusClass(job_id) {
+  return {
+    queued:     'border-gray-700 bg-gray-900/50 text-gray-400',
+    running:    'border-teal-700/60 bg-teal-900/20 text-teal-300',
+    succeeded:  'border-green-700/60 bg-green-900/20 text-green-300',
+    failed:     'border-red-700/60 bg-red-900/20 text-red-400',
+    cancelling: 'border-gray-700 bg-gray-900/50 text-gray-500',
+  }[jobState(job_id)] ?? 'border-gray-700 bg-gray-900/50 text-gray-400'
 }
 
 // ── external image drop ───────────────────────────────────────────────────────
@@ -216,6 +239,7 @@ function handleEvent(ev) {
   switch (ev.type) {
     case 'phase':
       phase.value = ev.code
+      if (ev.progress !== undefined) progress.value = ev.progress
       break
     case 'token':
       _pendingTokens += ev.text
@@ -244,6 +268,7 @@ function handleEvent(ev) {
       seed.value = ev.seed
       finished.value = true
       phase.value = 'done'
+      progress.value = 1.0
       if (ev.title) title.value = ev.title
       if (ev.title_ja) titleJa.value = ev.title_ja
       if (ev.overall) overall.value = ev.overall
@@ -387,6 +412,13 @@ async function generateImages() {
             <span v-if="seed !== null" class="text-[10px] text-gray-600 font-mono ml-auto">seed: {{ seed }}</span>
           </div>
 
+          <!-- progress bar -->
+          <div v-if="running || (finished && progress > 0)"
+            class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+            <div class="h-full rounded-full bg-teal-500 transition-all duration-500"
+              :style="{ width: (progress * 100) + '%' }"></div>
+          </div>
+
           <!-- title + overall story -->
           <div v-if="displayTitle" class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2">
@@ -429,10 +461,15 @@ async function generateImages() {
             </div>
           </div>
 
-          <!-- queued image jobs -->
-          <div v-if="imageJobs.length" class="text-[10px] text-gray-500">
-            {{ t('chronicle.imagesQueued') }}:
-            <span v-for="j in imageJobs" :key="j.job_id" class="ml-2 font-mono text-gray-400">{{ t('chronicle.axis.' + j.axis) }} → {{ j.job_id }}</span>
+          <!-- image job status cards -->
+          <div v-if="imageJobs.length" class="flex flex-wrap gap-2">
+            <div v-for="j in imageJobs" :key="j.job_id"
+              class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
+              :class="jobStatusClass(j.job_id)">
+              <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
+              <span>{{ jobStatusIcon(j.job_id) }}</span>
+              <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
+            </div>
           </div>
         </div>
       </div>

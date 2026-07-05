@@ -1249,6 +1249,13 @@
     "negative": "negative prompt",
     "generateImages": "Generate images",
     "imagesQueued": "Image jobs queued",
+    "jobState": {
+      "queued":     "Queued",
+      "running":    "Generating",
+      "succeeded":  "Done",
+      "failed":     "Failed",
+      "cancelling": "Cancelling"
+    },
     "noWorkflowHint": "No workflow selected — choose one above, then generate",
     "phase": {
       "loadingImage": "Loading image",
