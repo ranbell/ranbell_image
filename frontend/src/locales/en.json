@@ -594,7 +594,10 @@
       "tagExclude": "Excluded (click to reset)",
       "tagClickToInclude": "Click to add as include filter",
       "tagClickToExclude": "Click to switch to exclude filter",
-      "tagClickToReset": "Click to remove filter"
+      "tagClickToReset": "Click to remove filter",
+      "dateSeek": "Timeline",
+      "dateSeekError": "Date range unavailable",
+      "dateSeekRetry": "Retry"
     },
     "similar": {
       "color": "🎨 Color similar:",

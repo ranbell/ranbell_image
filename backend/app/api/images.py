@@ -44,6 +44,9 @@ _ALIGN_SORT_TTL = 120.0  # 2 minutes
 _facets_cache: dict = {"data": None, "ts": 0.0}
 _FACETS_TTL = 120.0
 
+_date_range_cache: dict = {"data": None, "ts": 0.0}
+_DATE_RANGE_TTL = 300.0
+
 
 def invalidate_image_caches() -> None:
     """Force-expire all in-memory caches. Call after scan or AI pipeline completes."""
@@ -52,6 +55,7 @@ def invalidate_image_caches() -> None:
     _name_cache.update({"name_asc": None, "name_desc": None, "ts": 0.0})
     _align_sort_cache.update({"data": None, "ts": 0.0})
     _facets_cache.update({"data": None, "ts": 0.0})
+    _date_range_cache.update({"data": None, "ts": 0.0})
 
 
 async def _get_name_sorted(db, sort: str) -> list[str]:
@@ -136,6 +140,18 @@ async def get_image_facets(request: Request):
     return result
 
 
+@router.get("/images/date-range")
+async def get_date_range(request: Request):
+    """Return min and max mtime across all images for the timeline slider."""
+    now = time.monotonic()
+    if _date_range_cache["data"] is not None and now - _date_range_cache["ts"] < _DATE_RANGE_TTL:
+        return _date_range_cache["data"]
+    min_mtime, max_mtime = await _db(request).get_mtime_range()
+    result = {"min_mtime": min_mtime, "max_mtime": max_mtime}
+    _date_range_cache.update({"data": result, "ts": now})
+    return result
+
+
 @router.get("/images")
 async def list_images(
     request: Request,
@@ -151,6 +167,7 @@ async def list_images(
     star_min: int | None = None,   # minimum star rating filter (1-5)
     category: str | None = None,   # "AI" | "NR" — batch_category filter
     align_min: float | None = None, # 0.0-1.0 — minimum alignment score filter
+    date_seek: str = "",           # ISO datetime string — seek to date position (overrides cursor)
 ):
     import base64 as _b64
 
@@ -197,6 +214,12 @@ async def list_images(
 
     is_filter = bool(keyword or inc_list or exc_list or model_list or star_min is not None
                      or category is not None or align_min is not None)
+
+    # date_seek: convert ISO datetime string to synthetic cursor for mtime-based sorts
+    if date_seek and sort in ("newest", "oldest"):
+        if re.match(r'^\d{4}-\d{2}-\d{2}', date_seek):
+            import base64 as _b64s, json as _jsons
+            cursor = _b64s.b64encode(_jsons.dumps({"start": date_seek, "last_id": ""}).encode()).decode()
 
     # align_desc sort: pre-fetch alignment-ordered sha256 list, paginate with integer cursor
     if sort == "align_desc":

@@ -137,6 +137,14 @@ const categoryFilter = ref('all')   // 'all' | 'AI' | 'NR'
 const alignMinFilter = ref(null)    // null | 0.6 | 0.7 | 0.8
 const colorPickerVisible = ref(false)
 
+// ── Date timeline slider ──────────────────────────────────────────────────────
+const dateRangeMin = ref(null)      // ISO string — earliest image mtime
+const dateRangeMax = ref(null)      // ISO string — latest image mtime
+const dateRangeLoading = ref(false)
+const dateRangeError = ref(false)
+const sliderTimestamp = ref(null)   // number(ms) | null
+let _dateSeekTimer = null
+
 // ── Color Picker search ────────────────────────────────────────────────────────
 const colorPickHex = ref('#ff6b6b')         // selected hex color
 const colorPickDistance = ref(20)           // CIE76 ΔE distance threshold
@@ -166,6 +174,7 @@ const SORT_OPTIONS = computed(() => [
 function setSort(val) {
   sortOrder.value = val
   localStorage.setItem('sortOrder', val)
+  if (!['newest', 'oldest'].includes(val)) sliderTimestamp.value = null
   fetchImages(true)
 }
 
@@ -1383,6 +1392,9 @@ async function fetchImages(reset = false) {
       if (starFilter.value) params.set('star_min', starFilter.value)
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
       if (alignMinFilter.value !== null) params.set('align_min', alignMinFilter.value)
+      if (sliderTimestamp.value && ['newest', 'oldest'].includes(sortOrder.value)) {
+        params.set('date_seek', new Date(sliderTimestamp.value).toISOString())
+      }
       const res = await fetch(`/api/images?${params}`)
       const data = await res.json()
       images.value.push(...data.images)
@@ -1416,6 +1428,60 @@ async function fetchFacets() {
     const res = await fetch('/api/images/facets')
     if (res.ok) { const d = await res.json(); modelFacets.value = d.models || [] }
   } catch { }
+}
+
+async function fetchDateRange() {
+  dateRangeLoading.value = true
+  dateRangeError.value = false
+  try {
+    const res = await fetch('/api/images/date-range')
+    if (!res.ok) throw new Error()
+    const d = await res.json()
+    if (d.min_mtime && d.max_mtime) {
+      dateRangeMin.value = d.min_mtime
+      dateRangeMax.value = d.max_mtime
+    }
+  } catch { dateRangeError.value = true }
+  finally { dateRangeLoading.value = false }
+}
+
+function isoToMs(iso) { return iso ? new Date(iso).getTime() : 0 }
+
+const sliderDateLabel = computed(() => {
+  if (!sliderTimestamp.value) return ''
+  return new Date(sliderTimestamp.value).toLocaleDateString(
+    locale.value === 'ja' ? 'ja-JP' : 'en-US',
+    { year: 'numeric', month: 'short' }
+  )
+})
+
+const dateSeekActive = computed(() => sliderTimestamp.value !== null)
+
+function onSliderInput(e) {
+  sliderTimestamp.value = Number(e.target.value)
+  clearTimeout(_dateSeekTimer)
+  _dateSeekTimer = setTimeout(() => applyDateSeek(), 300)
+}
+
+function onSliderChange(e) {
+  sliderTimestamp.value = Number(e.target.value)
+  clearTimeout(_dateSeekTimer)
+  applyDateSeek()
+}
+
+function applyDateSeek() {
+  if (!sliderTimestamp.value) return
+  if (!['newest', 'oldest'].includes(sortOrder.value)) {
+    sortOrder.value = 'newest'
+    localStorage.setItem('sortOrder', 'newest')
+  }
+  fetchImages(true)
+}
+
+function clearDateSeek() {
+  sliderTimestamp.value = null
+  clearTimeout(_dateSeekTimer)
+  fetchImages(true)
 }
 
 function toggleModel(name) {
@@ -1514,6 +1580,7 @@ async function handleJobFinished(job) {
   if (SCAN_TITLES.has(job.title)) {
     await fetchImages(true)
     await fetchTags()
+    fetchDateRange()
   }
 
   // AI pipeline complete → refresh AI status + gallery
@@ -2473,9 +2540,9 @@ onMounted(async () => {
   }
 
   if (viewMode.value === 'folder') {
-    await Promise.all([fetchDirs(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus()])
+    await Promise.all([fetchDirs(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()])
   } else {
-    await Promise.all([fetchImages(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus()])
+    await Promise.all([fetchImages(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()])
   }
 })
 
@@ -2532,6 +2599,7 @@ onUnmounted(() => {
   observer?.disconnect()
   stopJobStream()
   clearTimeout(searchTimer)
+  clearTimeout(_dateSeekTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   document.removeEventListener('click', _onDocClick)
   document.removeEventListener('keydown', _onGlobalKey)
@@ -2729,6 +2797,36 @@ onUnmounted(() => {
             @click="alignMinFilter = alignMinFilter === pct/100 ? null : pct/100; fetchImages(true)"
             :class="alignMinFilter === pct/100 ? 'bg-orange-700 text-white border-orange-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
             class="px-2 py-0.5 rounded-full border transition-colors">≥{{ pct }}%</button>
+        </div>
+
+        <!-- Date timeline slider -->
+        <template v-if="dateRangeMin && dateRangeMax && isoToMs(dateRangeMax) > isoToMs(dateRangeMin)">
+          <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
+          <div class="flex items-center gap-2 flex-shrink-0 ml-auto">
+            <span class="text-gray-500">{{ $t('header.filter.dateSeek') }}</span>
+            <span v-if="dateSeekActive" class="flex items-center gap-1 text-violet-300">
+              <span class="w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0"></span>
+              {{ sliderDateLabel }}
+              <button @click="clearDateSeek" class="text-gray-500 hover:text-gray-300 ml-0.5 leading-none">✕</button>
+            </span>
+            <input type="range"
+              :min="isoToMs(dateRangeMin)"
+              :max="isoToMs(dateRangeMax)"
+              :value="sliderTimestamp ?? isoToMs(dateRangeMax)"
+              :disabled="dateRangeLoading || searchMode === 'semantic'"
+              @input="onSliderInput"
+              @change="onSliderChange"
+              class="w-32 h-1.5 appearance-none rounded-full cursor-pointer bg-gray-700 accent-violet-500 disabled:opacity-40 disabled:cursor-not-allowed" />
+            <span class="text-gray-600 text-[10px] whitespace-nowrap">
+              {{ new Date(dateRangeMin).getFullYear() }}–{{ new Date(dateRangeMax).getFullYear() }}
+            </span>
+          </div>
+        </template>
+        <div v-else-if="dateRangeError" class="flex items-center gap-1 ml-auto flex-shrink-0">
+          <span class="text-gray-600 text-[10px]">{{ $t('header.filter.dateSeekError') }}</span>
+          <button @click="fetchDateRange" class="text-gray-500 hover:text-gray-300 text-[10px] underline">
+            {{ $t('header.filter.dateSeekRetry') }}
+          </button>
         </div>
       </div>
       </template><!-- /flat-only quality bar -->

@@ -594,7 +594,10 @@
       "tagExclude": "除外（クリックで解除）",
       "tagClickToInclude": "クリックで「含む」フィルター追加",
       "tagClickToExclude": "クリックで「除外」フィルターに変更",
-      "tagClickToReset": "クリックでフィルター解除"
+      "tagClickToReset": "クリックでフィルター解除",
+      "dateSeek": "時系列",
+      "dateSeekError": "期間取得失敗",
+      "dateSeekRetry": "再試行"
     },
     "similar": {
       "color": "🎨 カラー類似:",

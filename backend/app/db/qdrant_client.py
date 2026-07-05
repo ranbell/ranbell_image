@@ -828,6 +828,22 @@ class QdrantDBClient:
             key=lambda x: -x["count"],
         )
 
+    async def get_mtime_range(self) -> tuple[str | None, str | None]:
+        """Return (min_mtime, max_mtime) ISO strings across all images."""
+        asc_order  = qm.OrderBy(key="mtime", direction=qm.Direction.ASC)
+        desc_order = qm.OrderBy(key="mtime", direction=qm.Direction.DESC)
+        asc_res, desc_res = await asyncio.gather(
+            self._qc.scroll(IMAGES_COLLECTION, order_by=asc_order,  limit=1,
+                            with_payload=qm.PayloadSelectorInclude(include=["mtime"]),
+                            with_vectors=False),
+            self._qc.scroll(IMAGES_COLLECTION, order_by=desc_order, limit=1,
+                            with_payload=qm.PayloadSelectorInclude(include=["mtime"]),
+                            with_vectors=False),
+        )
+        min_mtime = asc_res[0][0].payload.get("mtime")  if asc_res[0]  else None
+        max_mtime = desc_res[0][0].payload.get("mtime") if desc_res[0] else None
+        return min_mtime, max_mtime
+
     async def list_dirs(self, base_dirs: list[str]) -> list[dict]:
         """Scroll all docs and aggregate by parent directory.
 
