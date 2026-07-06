@@ -1,7 +1,9 @@
 """Chronicle / Storybook API.
 
-POST /api/story/chronicle              — start the story pipeline (PROMPT lane)
-GET  /api/story/chronicle/{id}/stream  — SSE token/event stream for that job
+POST /api/story/chronicle                    — Phase 1: pitch 3 candidates
+POST /api/story/chronicle/{story_id}/select  — Phase 2: expand chosen candidate
+POST /api/story/chronicle/{story_id}/respin  — regenerate (candidates | expand)
+GET  /api/story/chronicle/{job_id}/stream    — SSE token/event stream for a job
 POST /api/story/upload-base            — upload an external base image
 GET  /api/story/storybook              — list saved stories (newest first)
 GET  /api/story/{story_id}             — one story
@@ -38,6 +40,7 @@ class ChronicleRequest(BaseModel):
     base_sha256: str
     base_time_axis: Literal["past", "present", "future"] = "present"
     worldview: str = ""
+    user_topic: str = ""  # お題 — what the story is about (separate from worldview)
     time_scale: Literal["minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"] = "years"
     prompt_style: str = "danbooru+natural"
     workflow_name: str = ""
@@ -46,13 +49,37 @@ class ChronicleRequest(BaseModel):
     manual_mode: bool = False
     vlm_model: str = ""
     temperature: float = 0.8
+    locale: Literal["en", "ja"] = "en"  # language the story is written in
     group_id: str = ""  # issued server-side on submission
+
+
+class SelectCandidateRequest(BaseModel):
+    candidate_id: str
+    time_scale: str = ""  # empty → keep the scale chosen at Phase 1
+
+
+class RespinRequest(BaseModel):
+    stage: Literal["candidates", "expand"]
+    respin_count: int = 1
+
+
+# Temperature ladder for respin — each respin nudges creativity up (Refine's
+# _FANOUT_TEMPS idea, applied to whole-story regeneration).
+def _respin_temperature(base: float, respin_count: int) -> float:
+    return min(1.3, round(base + 0.2 * max(1, respin_count), 3))
+
+
+def _draft_base_temp(story: dict) -> float:
+    return float(((story.get("context") or {}).get("body") or {}).get("temperature", 0.8))
 
 
 @router.post("/chronicle")
 async def start_chronicle(body: ChronicleRequest, request: Request):
-    """Submit the story pipeline job and return its job_id + group_id."""
-    from ..jobs.runners import run_chronicle_story
+    """Phase 1: submit the candidate-generation job, return its job_id + group_id.
+
+    The draft story_id is delivered later via the SSE "candidates" event.
+    """
+    from ..jobs.runners import run_chronicle_candidates
 
     app = request.app
     body.group_id = f"chr-{uuid.uuid4().hex[:12]}"
@@ -60,8 +87,8 @@ async def start_chronicle(body: ChronicleRequest, request: Request):
     token_queue: asyncio.Queue = asyncio.Queue()
     job_id = app.state.spooler.submit(
         JobLane.PROMPT,
-        "chronicle_story",
-        run_chronicle_story,
+        "chronicle_candidates",
+        run_chronicle_candidates,
         meta={"group_id": body.group_id, "base_sha256": body.base_sha256},
         body_dict=body.model_dump(),
         db=app.state.db,
@@ -72,6 +99,94 @@ async def start_chronicle(body: ChronicleRequest, request: Request):
     )
     app.state.story_token_queues[job_id] = token_queue
     return {"job_id": job_id, "group_id": body.group_id, "status": "queued"}
+
+
+@router.post("/chronicle/{story_id}/select")
+async def select_candidate(story_id: str, body: SelectCandidateRequest, request: Request):
+    """Phase 2: expand the chosen candidate. Returns a new streaming job_id."""
+    from ..jobs.runners import run_chronicle_expand
+
+    app = request.app
+    story = await story_db.get_story(app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+
+    token_queue: asyncio.Queue = asyncio.Queue()
+    job_id = app.state.spooler.submit(
+        JobLane.PROMPT,
+        "chronicle_expand",
+        run_chronicle_expand,
+        meta={"group_id": story.get("group_id", ""), "story_id": story_id},
+        story_id=story_id,
+        candidate_id=body.candidate_id,
+        time_scale=body.time_scale or story.get("time_scale", "years"),
+        temperature=_draft_base_temp(story),
+        db=app.state.db,
+        ollama=app.state.ollama,
+        spooler=app.state.spooler,
+        comfy=app.state.comfy,
+        token_queue=token_queue,
+    )
+    app.state.story_token_queues[job_id] = token_queue
+    return {"job_id": job_id, "story_id": story_id, "status": "queued"}
+
+
+@router.post("/chronicle/{story_id}/respin")
+async def respin_chronicle(story_id: str, body: RespinRequest, request: Request):
+    """Regenerate candidates or the expanded story at a raised temperature.
+
+    stage="candidates": re-pitch the three candidates (reuses Phase 1 context).
+    stage="expand":     re-expand the already-selected candidate.
+    Returns a new streaming job_id.
+    """
+    from ..jobs.runners import run_chronicle_candidates, run_chronicle_expand
+
+    app = request.app
+    story = await story_db.get_story(app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+    temp = _respin_temperature(_draft_base_temp(story), body.respin_count)
+    token_queue: asyncio.Queue = asyncio.Queue()
+
+    if body.stage == "candidates":
+        body_dict = (story.get("context") or {}).get("body") or {}
+        if not body_dict:
+            raise HTTPException(409, "Draft has no stored context for respin")
+        job_id = app.state.spooler.submit(
+            JobLane.PROMPT,
+            "chronicle_candidates",
+            run_chronicle_candidates,
+            meta={"group_id": story.get("group_id", ""), "story_id": story_id},
+            body_dict=body_dict,
+            db=app.state.db,
+            ollama=app.state.ollama,
+            spooler=app.state.spooler,
+            comfy=app.state.comfy,
+            token_queue=token_queue,
+            story_id=story_id,
+            temperature=temp,
+        )
+    else:  # expand
+        candidate_id = story.get("selected_candidate")
+        if not candidate_id:
+            raise HTTPException(409, "No candidate has been selected yet")
+        job_id = app.state.spooler.submit(
+            JobLane.PROMPT,
+            "chronicle_expand",
+            run_chronicle_expand,
+            meta={"group_id": story.get("group_id", ""), "story_id": story_id},
+            story_id=story_id,
+            candidate_id=candidate_id,
+            time_scale=story.get("time_scale", "years"),
+            temperature=temp,
+            db=app.state.db,
+            ollama=app.state.ollama,
+            spooler=app.state.spooler,
+            comfy=app.state.comfy,
+            token_queue=token_queue,
+        )
+    app.state.story_token_queues[job_id] = token_queue
+    return {"job_id": job_id, "story_id": story_id, "status": "queued"}
 
 
 @router.get("/chronicle/{job_id}/stream")

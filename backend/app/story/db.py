@@ -7,12 +7,20 @@ Payload schema:
     base_image_id: sha256 of the base image
     base_time_axis: "past" | "present" | "future"
     worldview: str
+    user_topic: str                      # お題 — what the story is about
     time_scale: "minutes" | "hours" | "days" | "months" | "years" | "decades"
     workflow_name: str
+    locale: "en" | "ja"                  # language the story was generated in
+    status: "draft" | "final"            # draft = candidates picked, not expanded
     title / title_ja: str
     overall_story / overall_story_ja: str
     axes: { past/present/future: { story, story_ja, prompt_positive,
                                    prompt_negative, image_id } }
+    candidates: [ {id, title, summary, suggested_time_scale, key_motif} ]
+    selected_candidate: "A" | "B" | "C"
+    respin_history: [ {kind, temperature, candidates?/title/overall/axes?} ]
+    context: { character_desc, scene_desc, wd14_identity_tags, common_tags,
+               story_hooks }             # carried Phase 1 → Phase 2
     created_at: float (unix time)
     group_id: str
 """
@@ -40,13 +48,22 @@ def new_story_payload(
     time_scale: str = "years",
     title: str = "",
     overall_story: str = "",
+    user_topic: str = "",
+    locale: str = "en",
+    status: str = "final",
+    candidates: list | None = None,
+    selected_candidate: str = "",
+    context: dict | None = None,
 ) -> dict:
     return {
         "base_image_id": base_image_id,
         "base_time_axis": base_time_axis,
         "worldview": worldview,
+        "user_topic": user_topic,
         "time_scale": time_scale,
         "workflow_name": workflow_name,
+        "locale": locale,
+        "status": status,
         "title": title,
         "title_ja": "",
         "overall_story": overall_story,
@@ -61,6 +78,10 @@ def new_story_payload(
             }
             for axis in AXES
         },
+        "candidates": candidates or [],
+        "selected_candidate": selected_candidate,
+        "respin_history": [],
+        "context": context or {},
         "created_at": time.time(),
         "group_id": group_id,
     }

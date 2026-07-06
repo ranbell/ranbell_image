@@ -141,6 +141,25 @@ const detailStory = ref(null)
               <span class="ml-auto font-mono">{{ formatDate(story.created_at) }}</span>
             </div>
 
+            <!-- the other story candidates that were offered at generation time -->
+            <details v-if="story.candidates?.length" class="text-[11px]">
+              <summary class="cursor-pointer text-gray-500 hover:text-gray-300 select-none">
+                💭 {{ t('storybook.otherCandidates') }} ({{ story.candidates.length }})
+              </summary>
+              <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div v-for="c in story.candidates" :key="c.id"
+                  class="p-2 rounded-lg border"
+                  :class="c.id === story.selected_candidate ? 'border-amber-600/50 bg-amber-900/10' : 'border-gray-800 bg-gray-900/40'">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-gray-700 text-gray-200">{{ c.id }}</span>
+                    <span class="text-[11px] font-bold text-amber-100 leading-tight">{{ c.title }}</span>
+                    <span v-if="c.id === story.selected_candidate" class="text-[9px] text-amber-400 ml-auto">✓</span>
+                  </div>
+                  <p class="text-[10px] text-gray-400 mt-1 leading-snug">{{ c.summary }}</p>
+                </div>
+              </div>
+            </details>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div v-for="axis in AXES" :key="axis"
                 class="rounded-xl border p-3 flex flex-col gap-2"

@@ -15,9 +15,21 @@ const emit = defineEmits(['update:show', 'toast'])
 const AXES = ['past', 'present', 'future']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
 
+// Step indicator: vision → candidates → select → expand → prompt → generate
+const STEPS = ['vision', 'candidates', 'select', 'expand', 'prompt', 'generate']
+const PHASE_STEP = {
+  loadingImage: 0, extractingVision: 0,
+  candidates: 1,
+  selecting: 2,
+  expanding: 3, repairingStory: 3, translating: 3, commonTags: 3,
+  refiningPrompt: 4,
+  savingStory: 5, done: 5,
+}
+
 // ── form state ────────────────────────────────────────────────────────────────
 const baseSha = ref('')
 const baseAxis = ref('present')
+const userTopic = ref('')
 const worldview = ref('')
 const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
@@ -28,6 +40,8 @@ const useRefSeed = ref(true)
 const manualMode = ref(false)
 const dragOver = ref(false)
 const uploading = ref(false)
+
+const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
 // Thumbnail with fallback to the original (freshly uploaded images may not
 // have a thumbnail yet)
@@ -56,15 +70,29 @@ const titleJa = ref('')
 const overall = ref('')
 const overallJa = ref('')
 
+// ── candidate / selection state ─────────────────────────────────────────────
+const candidates = ref([])       // [{id,title,summary,suggested_time_scale,key_motif}]
+const selecting = ref(false)     // candidates shown, awaiting a pick
+const selectedCandidate = ref('')
+const respinCandCount = ref(0)
+const respinExpandCount = ref(0)
+
 // English is the canonical text; JA is a stored translation. The toggle
 // switches display only (default follows the UI locale).
-const panelLang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
+const panelLang = ref(uiLocale.value)
 const displayTitle = computed(() =>
   (panelLang.value === 'ja' && titleJa.value) ? titleJa.value : title.value
 )
 const displayOverall = computed(() =>
   (panelLang.value === 'ja' && overallJa.value) ? overallJa.value : overall.value
 )
+
+// Current step for the step indicator
+const currentStep = computed(() => {
+  if (finished.value) return 5
+  if (selecting.value) return 2
+  return PHASE_STEP[phase.value] ?? 0
+})
 
 // Pipeline done but no image jobs submitted (manual mode, or no workflow was
 // selected): prompts stay editable and images can still be generated from here.
@@ -100,6 +128,7 @@ function _flushTokens() {
 watch(() => props.show, async (val) => {
   if (!val) return
   if (props.baseImage?.sha256) baseSha.value = props.baseImage.sha256
+  panelLang.value = uiLocale.value
   if (!workflows.value.length) {
     try {
       const r = await fetch('/api/comfy/workflows')
@@ -115,20 +144,29 @@ onUnmounted(() => {
 
 function close() { emit('update:show', false) }
 
-function resetRun() {
-  phase.value = ''
-  progress.value = 0
+function resetStory() {
   streamText.value = ''
-  storyId.value = ''
-  seed.value = null
   prompts.value = {}
   imageJobs.value = []
   finished.value = false
-  errorMsg.value = ''
+  seed.value = null
   title.value = ''
   titleJa.value = ''
   overall.value = ''
   overallJa.value = ''
+}
+
+function resetRun() {
+  phase.value = ''
+  progress.value = 0
+  errorMsg.value = ''
+  storyId.value = ''
+  candidates.value = []
+  selecting.value = false
+  selectedCandidate.value = ''
+  respinCandCount.value = 0
+  respinExpandCount.value = 0
+  resetStory()
 }
 
 // ── image job status helpers ──────────────────────────────────────────────────
@@ -173,6 +211,25 @@ async function onDrop(e) {
 }
 
 // ── pipeline ──────────────────────────────────────────────────────────────────
+function _extractError(errBody, resp) {
+  const detail = errBody?.detail
+  return typeof detail === 'string' ? detail
+    : Array.isArray(detail) ? detail.map(e => e.msg ?? JSON.stringify(e)).join('; ')
+    : resp.statusText
+}
+
+// Run a streaming job to completion, managing the flush timer.
+async function _runStream(jobId) {
+  if (!_flushTimer) _flushTimer = setInterval(_flushTokens, 66)
+  try {
+    await readStream(jobId)
+  } finally {
+    if (_flushTimer) { clearInterval(_flushTimer); _flushTimer = null }
+    _flushTokens()
+  }
+}
+
+// Phase 1 — pitch three story candidates
 async function start() {
   if (!baseSha.value) {
     emit('toast', { msg: t('chronicle.noBase'), type: 'error' })
@@ -180,7 +237,6 @@ async function start() {
   }
   resetRun()
   running.value = true
-  _flushTimer = setInterval(_flushTokens, 66)
   try {
     const r = await fetch('/api/story/chronicle', {
       method: 'POST',
@@ -188,6 +244,7 @@ async function start() {
       body: JSON.stringify({
         base_sha256: baseSha.value,
         base_time_axis: baseAxis.value,
+        user_topic: userTopic.value,
         worldview: worldview.value,
         time_scale: TIME_SCALES[timeScaleIdx.value],
         prompt_style: promptStyle.value,
@@ -195,26 +252,68 @@ async function start() {
         divergence: divergence.value,
         use_ref_seed: useRefSeed.value,
         manual_mode: manualMode.value,
+        locale: uiLocale.value,
       }),
     })
-    if (!r.ok) {
-      const errBody = await r.json().catch(() => null)
-      const detail = errBody?.detail
-      const msg = typeof detail === 'string' ? detail
-        : Array.isArray(detail) ? detail.map(e => e.msg ?? JSON.stringify(e)).join('; ')
-        : r.statusText
-      throw new Error(msg)
-    }
+    if (!r.ok) throw new Error(_extractError(await r.json().catch(() => null), r))
     const { job_id, group_id } = await r.json()
     groupId.value = group_id
-    await readStream(job_id)
+    await _runStream(job_id)
   } catch (err) {
     errorMsg.value = String(err.message || err)
     emit('toast', { msg: errorMsg.value, type: 'error' })
   } finally {
     running.value = false
-    if (_flushTimer) { clearInterval(_flushTimer); _flushTimer = null }
-    _flushTokens()
+  }
+}
+
+// Phase 2 — expand the chosen candidate
+async function selectCandidate(cid) {
+  if (!storyId.value || running.value) return
+  selectedCandidate.value = cid
+  selecting.value = false
+  resetStory()
+  running.value = true
+  try {
+    const r = await fetch(`/api/story/chronicle/${storyId.value}/select`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] }),
+    })
+    if (!r.ok) throw new Error(_extractError(await r.json().catch(() => null), r))
+    const { job_id } = await r.json()
+    await _runStream(job_id)
+  } catch (err) {
+    errorMsg.value = String(err.message || err)
+    emit('toast', { msg: errorMsg.value, type: 'error' })
+  } finally {
+    running.value = false
+  }
+}
+
+// Respin — regenerate candidates or the expanded story at a higher temperature
+async function respin(stage) {
+  if (!storyId.value || running.value) return
+  const count = stage === 'candidates'
+    ? (respinCandCount.value += 1)
+    : (respinExpandCount.value += 1)
+  if (stage === 'candidates') { candidates.value = []; selecting.value = false }
+  resetStory()
+  running.value = true
+  try {
+    const r = await fetch(`/api/story/chronicle/${storyId.value}/respin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage, respin_count: count }),
+    })
+    if (!r.ok) throw new Error(_extractError(await r.json().catch(() => null), r))
+    const { job_id } = await r.json()
+    await _runStream(job_id)
+  } catch (err) {
+    errorMsg.value = String(err.message || err)
+    emit('toast', { msg: errorMsg.value, type: 'error' })
+  } finally {
+    running.value = false
   }
 }
 
@@ -250,6 +349,12 @@ function handleEvent(ev) {
       break
     case 'token':
       _pendingTokens += ev.text
+      break
+    case 'candidates':
+      storyId.value = ev.story_id
+      candidates.value = ev.candidates || []
+      selecting.value = true
+      phase.value = 'selecting'
       break
     case 'axis_prompt':
       prompts.value = { ...prompts.value, [ev.axis]: { positive: ev.positive, negative: ev.negative } }
@@ -322,160 +427,230 @@ async function generateImages() {
   <Teleport to="body">
     <div v-if="show" class="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4"
       @click.self="close" @keydown.esc="close">
-      <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col">
 
         <!-- header -->
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-800">
-          <h2 class="text-base font-bold text-teal-300">📜 {{ t('chronicle.title') }}</h2>
+          <h2 class="text-base font-bold text-teal-300 flex items-center gap-2">
+            <span class="chronicle-lamp inline-block w-2.5 h-2.5 rounded-full bg-teal-400"
+              :class="running ? 'is-running' : 'opacity-30'"></span>
+            📜 {{ t('chronicle.title') }}
+          </h2>
           <button @click="close"
             class="text-gray-600 hover:text-gray-200 text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800 transition-colors">✕</button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+        <!-- step indicator -->
+        <div class="flex items-center gap-1 px-5 py-2 border-b border-gray-800/70 text-[10px]">
+          <template v-for="(s, i) in STEPS" :key="s">
+            <div class="flex items-center gap-1.5"
+              :class="i === currentStep ? 'text-teal-300' : i < currentStep ? 'text-green-400/80' : 'text-gray-600'">
+              <span class="w-4 h-4 rounded-full flex items-center justify-center border text-[9px]"
+                :class="i === currentStep ? 'border-teal-500 bg-teal-900/40 chronicle-dot-active'
+                  : i < currentStep ? 'border-green-700/60 bg-green-900/30' : 'border-gray-700 bg-gray-800/40'">
+                <span v-if="i < currentStep">✓</span><span v-else>{{ i + 1 }}</span>
+              </span>
+              <span class="uppercase tracking-wide hidden sm:inline">{{ t('chronicle.steps.' + s) }}</span>
+            </div>
+            <span v-if="i < STEPS.length - 1" class="text-gray-700 mx-0.5">→</span>
+          </template>
+        </div>
 
-          <!-- base image + settings -->
-          <div class="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-4">
-            <!-- base image / drop zone -->
-            <div
-              class="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 p-3 min-h-[180px] transition-colors"
-              :class="dragOver ? 'border-teal-400 bg-teal-900/20' : 'border-gray-700 bg-gray-800/40'"
-              @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
-              <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
-                class="max-h-36 rounded-lg object-contain" />
-              <span v-else class="text-3xl">🖼️</span>
-              <p class="text-[10px] text-gray-500 text-center leading-tight">
-                {{ uploading ? t('chronicle.uploading') : t('chronicle.dropHint') }}
+        <div class="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+          <!-- ── LEFT: settings ───────────────────────────────────────────── -->
+          <div class="flex flex-col gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-4">
+              <!-- base image / drop zone -->
+              <div
+                class="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 p-3 min-h-[160px] transition-colors"
+                :class="dragOver ? 'border-teal-400 bg-teal-900/20' : 'border-gray-700 bg-gray-800/40'"
+                @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
+                <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
+                  class="max-h-32 rounded-lg object-contain" />
+                <span v-else class="text-3xl">🖼️</span>
+                <p class="text-[10px] text-gray-500 text-center leading-tight">
+                  {{ uploading ? t('chronicle.uploading') : t('chronicle.dropHint') }}
+                </p>
+              </div>
+
+              <!-- settings -->
+              <div class="flex flex-col gap-3 text-xs">
+                <!-- base time axis -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0">{{ t('chronicle.baseAxis') }}</span>
+                  <button v-for="a in AXES" :key="a" @click="baseAxis = a"
+                    :class="baseAxis === a ? 'bg-teal-700 text-white border-teal-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
+                    class="px-2.5 py-1 rounded-full border transition-colors">{{ t('chronicle.axis.' + a) }}</button>
+                </div>
+                <!-- user topic (お題) -->
+                <div class="flex items-start gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0 pt-1">💡 {{ t('chronicle.userTopic') }}</span>
+                  <textarea v-model="userTopic" rows="2" :placeholder="t('chronicle.userTopicPh')"
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-200 resize-none focus:border-teal-500 outline-none"></textarea>
+                </div>
+                <!-- worldview -->
+                <div class="flex items-start gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0 pt-1">{{ t('chronicle.worldview') }}</span>
+                  <textarea v-model="worldview" rows="2" :placeholder="t('chronicle.worldviewPh')"
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-200 resize-none focus:border-teal-500 outline-none"></textarea>
+                </div>
+                <!-- prompt style -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0">{{ t('chronicle.promptStyle') }}</span>
+                  <button v-for="m in ['danbooru+natural', 'natural', 'danbooru']" :key="m" @click="promptStyle = m"
+                    :class="promptStyle === m ? 'bg-teal-700 text-white border-teal-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
+                    class="px-2.5 py-1 rounded-full border transition-colors">{{ t('chronicle.style.' + m.replace('+', '_')) }}</button>
+                </div>
+                <!-- workflow -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0">{{ t('chronicle.workflow') }}</span>
+                  <select v-model="workflow"
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-gray-200 focus:border-teal-500 outline-none">
+                    <option value="">{{ t('chronicle.workflowNone') }}</option>
+                    <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
+                  </select>
+                </div>
+                <!-- time scale -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.timeScaleTitle')">⏳ {{ t('chronicle.timeScaleLabel') }}</span>
+                  <input v-model.number="timeScaleIdx" type="range" min="0" :max="TIME_SCALES.length - 1" step="1" class="flex-1 accent-teal-500" />
+                  <span class="text-teal-400 w-16 text-right">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
+                </div>
+                <!-- divergence -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.divergenceTitle')">⚗️ {{ t('chronicle.divergence') }}</span>
+                  <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
+                  <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
+                </div>
+                <!-- seed / manual -->
+                <div class="flex items-center gap-4">
+                  <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
+                    <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" />
+                    {{ t('chronicle.seedInherit') }}
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
+                    <input v-model="manualMode" type="checkbox" class="accent-teal-500" />
+                    {{ t('chronicle.manualMode') }}
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- actions -->
+            <div class="flex items-center gap-3">
+              <button @click="start" :disabled="running || !baseSha"
+                class="px-4 py-2 bg-teal-700 hover:bg-teal-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+                {{ running ? t('chronicle.running') : t('chronicle.start') }}
+              </button>
+              <button v-if="running && groupId" @click="cancelGroup"
+                class="px-3 py-2 bg-red-900/60 hover:bg-red-800/70 border border-red-700/50 rounded-lg text-xs text-red-200 transition-colors">
+                {{ t('chronicle.cancel') }}
+              </button>
+              <span v-if="phase" class="text-[10px] text-gray-500 uppercase tracking-wide">{{ t('chronicle.phase.' + phase, phase) }}</span>
+              <span v-if="seed !== null" class="text-[10px] text-gray-600 font-mono ml-auto">seed: {{ seed }}</span>
+            </div>
+
+            <!-- progress bar -->
+            <div v-if="running || (finished && progress > 0)"
+              class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+              <div class="chronicle-progress h-full rounded-full transition-all duration-500"
+                :style="{ width: (progress * 100) + '%' }"></div>
+            </div>
+
+            <p v-if="errorMsg" class="text-xs text-red-400">{{ errorMsg }}</p>
+          </div>
+
+          <!-- ── RIGHT: candidates / story / prompts ──────────────────────── -->
+          <div class="flex flex-col gap-4 min-w-0">
+
+            <!-- candidate cards -->
+            <div v-if="candidates.length" class="flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <h3 class="text-xs font-bold text-amber-200 uppercase tracking-wide">{{ t('chronicle.candidatesTitle') }}</h3>
+                <button @click="respin('candidates')" :disabled="running"
+                  class="text-[10px] px-2 py-1 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 disabled:opacity-40 transition-colors">
+                  ♻️ {{ t('chronicle.respinCandidates') }}
+                </button>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button v-for="c in candidates" :key="c.id" @click="selectCandidate(c.id)"
+                  :disabled="running"
+                  class="text-left flex flex-col gap-1.5 p-3 rounded-xl border transition-colors disabled:opacity-50"
+                  :class="selectedCandidate === c.id
+                    ? 'border-amber-500 bg-amber-900/20'
+                    : 'border-gray-700 bg-gray-800/40 hover:border-amber-600/60 hover:bg-gray-800'">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-gray-700 text-gray-200">{{ c.id }}</span>
+                    <span class="text-xs font-bold text-amber-100 leading-tight">{{ c.title }}</span>
+                  </div>
+                  <p class="text-[11px] text-gray-300 leading-snug">{{ c.summary }}</p>
+                  <div class="flex flex-wrap gap-1 mt-auto pt-1">
+                    <span v-if="c.suggested_time_scale" class="text-[9px] px-1.5 py-0.5 rounded bg-gray-900/70 text-teal-300">
+                      ⏳ {{ t('chronicle.timeScale.' + c.suggested_time_scale, c.suggested_time_scale) }}
+                    </span>
+                    <span v-if="c.key_motif" class="text-[9px] px-1.5 py-0.5 rounded bg-gray-900/70 text-purple-300">
+                      ✦ {{ c.key_motif }}
+                    </span>
+                  </div>
+                  <span class="text-[10px] text-amber-400/90 font-medium mt-1">{{ t('chronicle.candidateSelect') }} →</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- title + overall story -->
+            <div v-if="displayTitle" class="flex flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-amber-200 flex-1">📖 {{ displayTitle }}</h3>
+                <button v-if="finished" @click="respin('expand')" :disabled="running"
+                  class="text-[10px] px-2 py-1 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 disabled:opacity-40 transition-colors">
+                  ♻️ {{ t('chronicle.respinStory') }}
+                </button>
+                <div v-if="titleJa || overallJa" class="flex rounded-lg overflow-hidden border border-gray-700 text-[10px]">
+                  <button v-for="l in ['ja', 'en']" :key="l" @click="panelLang = l"
+                    :class="panelLang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
+                    class="px-2 py-1 transition-colors uppercase">{{ l }}</button>
+                </div>
+              </div>
+              <p v-if="displayOverall"
+                class="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">
+                {{ displayOverall }}
               </p>
             </div>
 
-            <!-- settings -->
-            <div class="flex flex-col gap-3 text-xs">
-              <!-- base time axis -->
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500 w-24 flex-shrink-0">{{ t('chronicle.baseAxis') }}</span>
-                <button v-for="a in AXES" :key="a" @click="baseAxis = a"
-                  :class="baseAxis === a ? 'bg-teal-700 text-white border-teal-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
-                  class="px-2.5 py-1 rounded-full border transition-colors">{{ t('chronicle.axis.' + a) }}</button>
+            <!-- stream output -->
+            <div v-if="streamText || (running && !selecting)"
+              class="bg-gray-950/60 border border-gray-800 rounded-xl p-4 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></div>
+
+            <!-- per-axis prompts (editable in manual mode) -->
+            <div v-if="Object.keys(prompts).length" class="flex flex-col gap-3">
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide">{{ t('chronicle.prompts') }}</h3>
+              <div v-for="(p, axis) in prompts" :key="axis"
+                class="bg-gray-800/40 border border-gray-800 rounded-xl p-3 flex flex-col gap-2">
+                <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
+                <textarea v-model="p.positive" rows="3" :readonly="!canGenerate"
+                  class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 resize-y focus:border-teal-500 outline-none"></textarea>
+                <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
+                  class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 resize-y focus:border-teal-500 outline-none"></textarea>
               </div>
-              <!-- worldview -->
-              <div class="flex items-start gap-2">
-                <span class="text-gray-500 w-24 flex-shrink-0 pt-1">{{ t('chronicle.worldview') }}</span>
-                <textarea v-model="worldview" rows="2" :placeholder="t('chronicle.worldviewPh')"
-                  class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-200 resize-none focus:border-teal-500 outline-none"></textarea>
-              </div>
-              <!-- prompt style -->
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500 w-24 flex-shrink-0">{{ t('chronicle.promptStyle') }}</span>
-                <button v-for="m in ['danbooru+natural', 'natural', 'danbooru']" :key="m" @click="promptStyle = m"
-                  :class="promptStyle === m ? 'bg-teal-700 text-white border-teal-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
-                  class="px-2.5 py-1 rounded-full border transition-colors">{{ t('chronicle.style.' + m.replace('+', '_')) }}</button>
-              </div>
-              <!-- workflow -->
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500 w-24 flex-shrink-0">{{ t('chronicle.workflow') }}</span>
-                <select v-model="workflow"
-                  class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-gray-200 focus:border-teal-500 outline-none">
-                  <option value="">{{ t('chronicle.workflowNone') }}</option>
-                  <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
-                </select>
-              </div>
-              <!-- time scale -->
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500 w-24 flex-shrink-0" :title="t('chronicle.timeScaleTitle')">⏳ {{ t('chronicle.timeScaleLabel') }}</span>
-                <input v-model.number="timeScaleIdx" type="range" min="0" :max="TIME_SCALES.length - 1" step="1" class="flex-1 accent-teal-500" />
-                <span class="text-teal-400 w-16 text-right">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
-              </div>
-              <!-- divergence -->
-              <div class="flex items-center gap-2">
-                <span class="text-gray-500 w-24 flex-shrink-0" :title="t('chronicle.divergenceTitle')">⚗️ {{ t('chronicle.divergence') }}</span>
-                <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
-                <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
-              </div>
-              <!-- seed / manual -->
-              <div class="flex items-center gap-4">
-                <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
-                  <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" />
-                  {{ t('chronicle.seedInherit') }}
-                </label>
-                <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
-                  <input v-model="manualMode" type="checkbox" class="accent-teal-500" />
-                  {{ t('chronicle.manualMode') }}
-                </label>
+              <div v-if="canGenerate" class="flex items-center gap-3">
+                <button @click="generateImages" :disabled="!workflow"
+                  class="px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+                  🎨 {{ t('chronicle.generateImages') }}
+                </button>
+                <span v-if="!workflow" class="text-[10px] text-amber-400/80">{{ t('chronicle.noWorkflowHint') }}</span>
               </div>
             </div>
-          </div>
 
-          <!-- actions -->
-          <div class="flex items-center gap-3">
-            <button @click="start" :disabled="running || !baseSha"
-              class="px-4 py-2 bg-teal-700 hover:bg-teal-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-              {{ running ? t('chronicle.running') : t('chronicle.start') }}
-            </button>
-            <button v-if="running && groupId" @click="cancelGroup"
-              class="px-3 py-2 bg-red-900/60 hover:bg-red-800/70 border border-red-700/50 rounded-lg text-xs text-red-200 transition-colors">
-              {{ t('chronicle.cancel') }}
-            </button>
-            <span v-if="phase" class="text-[10px] text-gray-500 uppercase tracking-wide">{{ t('chronicle.phase.' + phase, phase) }}</span>
-            <span v-if="seed !== null" class="text-[10px] text-gray-600 font-mono ml-auto">seed: {{ seed }}</span>
-          </div>
-
-          <!-- progress bar -->
-          <div v-if="running || (finished && progress > 0)"
-            class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
-            <div class="h-full rounded-full bg-teal-500 transition-all duration-500"
-              :style="{ width: (progress * 100) + '%' }"></div>
-          </div>
-
-          <!-- title + overall story -->
-          <div v-if="displayTitle" class="flex flex-col gap-1.5">
-            <div class="flex items-center gap-2">
-              <h3 class="text-sm font-bold text-amber-200 flex-1">📖 {{ displayTitle }}</h3>
-              <div v-if="titleJa || overallJa" class="flex rounded-lg overflow-hidden border border-gray-700 text-[10px]">
-                <button v-for="l in ['ja', 'en']" :key="l" @click="panelLang = l"
-                  :class="panelLang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
-                  class="px-2 py-1 transition-colors uppercase">{{ l }}</button>
+            <!-- image job status cards -->
+            <div v-if="imageJobs.length" class="flex flex-wrap gap-2">
+              <div v-for="j in imageJobs" :key="j.job_id"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
+                :class="jobStatusClass(j.job_id)">
+                <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
+                <span>{{ jobStatusIcon(j.job_id) }}</span>
+                <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
               </div>
-            </div>
-            <p v-if="displayOverall"
-              class="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">
-              {{ displayOverall }}
-            </p>
-          </div>
-
-          <!-- stream output -->
-          <div v-if="streamText || running"
-            class="bg-gray-950/60 border border-gray-800 rounded-xl p-4 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></div>
-
-          <p v-if="errorMsg" class="text-xs text-red-400">{{ errorMsg }}</p>
-
-          <!-- per-axis prompts (editable in manual mode) -->
-          <div v-if="Object.keys(prompts).length" class="flex flex-col gap-3">
-            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide">{{ t('chronicle.prompts') }}</h3>
-            <div v-for="(p, axis) in prompts" :key="axis"
-              class="bg-gray-800/40 border border-gray-800 rounded-xl p-3 flex flex-col gap-2">
-              <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
-              <textarea v-model="p.positive" rows="3" :readonly="!canGenerate"
-                class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 resize-y focus:border-teal-500 outline-none"></textarea>
-              <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
-                class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 resize-y focus:border-teal-500 outline-none"></textarea>
-            </div>
-            <div v-if="canGenerate" class="flex items-center gap-3">
-              <button @click="generateImages" :disabled="!workflow"
-                class="px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-                🎨 {{ t('chronicle.generateImages') }}
-              </button>
-              <span v-if="!workflow" class="text-[10px] text-amber-400/80">{{ t('chronicle.noWorkflowHint') }}</span>
-            </div>
-          </div>
-
-          <!-- image job status cards -->
-          <div v-if="imageJobs.length" class="flex flex-wrap gap-2">
-            <div v-for="j in imageJobs" :key="j.job_id"
-              class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
-              :class="jobStatusClass(j.job_id)">
-              <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
-              <span>{{ jobStatusIcon(j.job_id) }}</span>
-              <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
             </div>
           </div>
         </div>
@@ -483,3 +658,34 @@ async function generateImages() {
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+@keyframes lamp-pulse {
+  0%, 100% { opacity: 0.3; box-shadow: 0 0 4px currentColor; }
+  50%      { opacity: 1.0; box-shadow: 0 0 12px currentColor; }
+}
+.chronicle-lamp.is-running {
+  animation: lamp-pulse 2s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.4); }
+  50%      { box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.15); }
+}
+.chronicle-dot-active {
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes progress-shift {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 0; }
+}
+.chronicle-progress {
+  background-image: linear-gradient(
+    45deg,
+    rgba(20, 184, 166, 0.9) 25%, rgba(45, 212, 191, 0.7) 25%,
+    rgba(45, 212, 191, 0.7) 50%, rgba(20, 184, 166, 0.9) 50%,
+    rgba(20, 184, 166, 0.9) 75%, rgba(45, 212, 191, 0.7) 75%
+  );
+  background-size: 40px 40px;
+  animation: progress-shift 1s linear infinite;
+}
+</style>

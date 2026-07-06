@@ -2669,7 +2669,7 @@ async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: st
         return None
 
 
-async def run_chronicle_story(
+async def run_chronicle_candidates(
     reporter: ProgressReporter,
     cancel: CancelToken,
     *,
@@ -2679,47 +2679,35 @@ async def run_chronicle_story(
     spooler,
     comfy,
     token_queue: asyncio.Queue,
+    story_id: str | None = None,
+    temperature: float | None = None,
 ) -> None:
-    """PROMPT lane runner — Chronicle stages 1-3, streaming events into token_queue.
+    """PROMPT lane — Chronicle Phase 1: extract vision + pitch three candidates.
 
-    Always puts a None sentinel at the end (done, cancelled, or errored).
-    Unless manual_mode, submits the per-axis GENERATION jobs itself, so a
-    group cancel that stops this job also prevents the follow-on submissions.
+    Emits {"type": "candidates", story_id, candidates} then a None sentinel.
+    The three candidates diverge along the faithful/rebel/stranger axes and are
+    written in the user's locale. A draft story record persists the candidates
+    plus the extracted vision context so Phase 2 (expand) can pick up from it
+    without redoing Stage 1.
+
+    When story_id is given this is a RESPIN: the draft's stored context is
+    reused (Stage 1 skipped), candidates are regenerated at the raised
+    temperature, and the previous set is archived in respin_history.
     """
-    from ..api.ai import (
-        _apply_must_replacements,
-        _build_weighted_wd14_context,
-        _check_natural_prose,
-        _clean_markdown,
-        _correct_prose_wd14_conflicts,
-        _parse_positive_negative,
-        _sample_mutation_tags,
-    )
+    from ..api.ai import _build_weighted_wd14_context
     from ..runtime_config import get_runtime_config
-    from ..spooler.models import JobLane
     from ..story import db as story_db
     from ..story.api import ChronicleRequest
     from ..story.generator import (
-        AXES,
-        build_axis_prompt,
-        build_overall_prompt,
-        build_story_prompt,
-        build_story_repair_prompt,
-        build_title_prompt,
-        build_translation_prompt,
+        build_candidates_prompt,
         build_vision_prompt,
         character_tags_from_wd14,
-        collect_prompt_tags,
-        identity_tags_for_scale,
-        inject_identity_tags,
-        parse_story_json,
-        parse_story_sections,
-        parse_translation_json,
-        remove_conflict_tags,
+        parse_candidates_json,
         split_vision_sections,
     )
 
     body = ChronicleRequest(**body_dict)
+    temp = body.temperature if temperature is None else temperature
 
     def _put(event: dict | None) -> None:
         token_queue.put_nowait(event)
@@ -2734,99 +2722,275 @@ async def run_chronicle_story(
     try:
         cfg = await get_runtime_config(db)
         vlm_model = body.vlm_model or cfg["vlm_model"]
-        options = {"temperature": body.temperature}
+        options = {"temperature": temp}
 
-        # ── Stage 1: visual vocabulary ────────────────────────────────────────
-        _phase("loadingImage", 0.02, "Loading base image...")
+        draft = None
+        if story_id:
+            draft = await story_db.get_story(db, story_id)
+            if not draft:
+                _put({"type": "error", "message": "Draft story not found"})
+                return
+        ctx: dict = (draft or {}).get("context") or {}
+
+        if not ctx:
+            # ── Stage 1: visual vocabulary ────────────────────────────────────
+            _phase("loadingImage", 0.03, "Loading base image...")
+            doc = await db.get(body.base_sha256)
+            if not doc:
+                _put({"type": "error", "message": "Base image not found"})
+                return
+            fp = Path(doc.get("path", ""))
+            if not fp.exists():
+                _put({"type": "error", "message": f"Base image file missing: {fp.name}"})
+                return
+            image_bytes = fp.read_bytes()
+
+            # Ollama VLMs may reject WebP — convert to JPEG for compatibility
+            if fp.suffix.lower() == ".webp":
+                import io
+                from PIL import Image as _PILImage
+                _buf = io.BytesIO()
+                _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(_buf, format="JPEG", quality=95)
+                image_bytes = _buf.getvalue()
+
+            wd14_tags = doc.get("wd14_tags") or []
+            character_tags = character_tags_from_wd14(wd14_tags)
+
+            _phase("extractingVision", 0.08, "Reading the image...")
+            vision_prompt = build_vision_prompt(full_extraction=not character_tags)
+            vis_tokens: list[str] = []
+            async for event in ollama.generate_vlm_stream(
+                vision_prompt, [image_bytes], model=vlm_model, options=options
+            ):
+                if _abort.is_set():
+                    raise JobCancelled()
+                _put(event)
+                if event["type"] == "token":
+                    vis_tokens.append(event["text"])
+                    if len(vis_tokens) % 8 == 0:
+                        reporter.update(
+                            0.08 + 0.35 * min(len(vis_tokens) / 250, 0.97),
+                            "Reading the image...",
+                        )
+            visual_text = "".join(vis_tokens).strip()
+            cancel.raise_if_set()
+
+            literal_text, story_hooks = split_vision_sections(visual_text)
+            if character_tags:
+                character_desc = "[visual tags] " + ", ".join(character_tags)
+                scene_desc = literal_text
+            else:
+                character_desc = literal_text
+                scene_desc = literal_text
+
+            wd14_context = ""
+            if wd14_tags:
+                try:
+                    wd14_context, _ = _build_weighted_wd14_context([(doc, 0)], [1.0], set())
+                except Exception as exc:
+                    logger.warning("[chronicle] wd14 context build failed: %s", exc)
+
+            ctx = {
+                "character_desc": character_desc,
+                "scene_desc": scene_desc,
+                "character_tags": character_tags,
+                "wd14_tags": wd14_tags,
+                "wd14_context": wd14_context,
+                "story_hooks": story_hooks,
+                "body": body_dict,
+            }
+
+        # ── Stage 2a: three story candidates (single JSON call) ───────────────
+        _phase("candidates", 0.55, "Imagining story candidates...")
+        raw = await ollama.generate_text(
+            build_candidates_prompt(
+                character_desc=ctx.get("character_desc", ""),
+                scene_desc=ctx.get("scene_desc", ""),
+                user_topic=body.user_topic,
+                worldview=body.worldview,
+                time_scale=body.time_scale,
+                locale=body.locale,
+            ),
+            model=vlm_model, options=options, fmt="json",
+        )
+        cancel.raise_if_set()
+        candidates = parse_candidates_json(raw)
+        if not candidates:
+            _put({"type": "error", "message": "Failed to generate story candidates"})
+            return
+
+        if story_id:
+            hist = list(draft.get("respin_history") or [])
+            hist.append({
+                "kind": "candidates",
+                "temperature": temp,
+                "candidates": draft.get("candidates") or [],
+            })
+            await story_db.set_story_payload(db, story_id, {
+                "candidates": candidates,
+                "respin_history": hist,
+            })
+        else:
+            payload = story_db.new_story_payload(
+                base_image_id=body.base_sha256,
+                base_time_axis=body.base_time_axis,
+                worldview=body.worldview,
+                workflow_name=body.workflow_name,
+                group_id=body.group_id,
+                time_scale=body.time_scale,
+                user_topic=body.user_topic,
+                locale=body.locale,
+                status="draft",
+                candidates=candidates,
+                context=ctx,
+            )
+            story_id = await story_db.create_story(db, payload)
+
+        _phase("selecting", 0.98, "Choose a story...")
+        _put({"type": "candidates", "story_id": story_id, "candidates": candidates})
+    except JobCancelled:
+        raise
+    except Exception as exc:
+        logger.exception("[chronicle] candidates phase failed")
+        _put({"type": "error", "message": str(exc)})
+    finally:
+        _put(None)
+
+
+async def run_chronicle_expand(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    story_id: str,
+    candidate_id: str,
+    time_scale: str,
+    temperature: float,
+    db,
+    ollama,
+    spooler,
+    comfy,
+    token_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane — Chronicle Phase 2: expand a chosen candidate, then prompts.
+
+    Loads the draft, expands the selected candidate into the three acts in the
+    user's locale, extracts shared identity tags, translates to English when the
+    story is Japanese (image prompts are always English), refines per-axis image
+    prompts (dropping the base image's WD14 scene tags and running a per-axis
+    story-conflict pass), finalises the record, and submits image jobs.
+
+    Re-invoking this (respin) archives the previous final story in
+    respin_history before overwriting.
+    """
+    from ..api.ai import (
+        _apply_must_replacements,
+        _check_natural_prose,
+        _clean_markdown,
+        _correct_prose_wd14_conflicts,
+        _parse_positive_negative,
+    )
+    from ..runtime_config import get_runtime_config
+    from ..spooler.models import JobLane
+    from ..story import db as story_db
+    from ..story.api import ChronicleRequest
+    from ..story.generator import (
+        AXES,
+        build_axis_prompt,
+        build_common_tags_prompt,
+        build_expand_prompt,
+        build_overall_prompt,
+        build_story_repair_prompt,
+        build_title_prompt,
+        build_translation_to_english_prompt,
+        collect_prompt_tags,
+        identity_tags_for_scale,
+        inject_identity_tags,
+        is_multi_character,
+        parse_common_tags_json,
+        parse_english_translation_json,
+        parse_story_json,
+        parse_story_sections,
+    )
+
+    def _put(event: dict | None) -> None:
+        token_queue.put_nowait(event)
+
+    def _phase(code: str, progress: float, text: str) -> None:
+        reporter.update(progress, text)
+        _put({"type": "phase", "code": code, "progress": progress})
+
+    _abort = asyncio.Event()
+    cancel.on_cancel(_abort.set)
+
+    try:
+        draft = await story_db.get_story(db, story_id)
+        if not draft:
+            _put({"type": "error", "message": "Draft story not found"})
+            return
+        ctx: dict = draft.get("context") or {}
+        body = ChronicleRequest(**(ctx.get("body") or {}))
+        body.time_scale = time_scale or body.time_scale
+        body.temperature = temperature
+        locale = body.locale
+
+        selected = next(
+            (c for c in (draft.get("candidates") or []) if c.get("id") == candidate_id),
+            None,
+        )
+        if selected is None:
+            _put({"type": "error", "message": f"Candidate {candidate_id!r} not found"})
+            return
+
+        cfg = await get_runtime_config(db)
+        vlm_model = body.vlm_model or cfg["vlm_model"]
+        options = {"temperature": temperature}
+
         doc = await db.get(body.base_sha256)
         if not doc:
             _put({"type": "error", "message": "Base image not found"})
             return
-        fp = Path(doc.get("path", ""))
-        if not fp.exists():
-            _put({"type": "error", "message": f"Base image file missing: {fp.name}"})
-            return
-        image_bytes = fp.read_bytes()
 
-        # Ollama VLMs may reject WebP — convert to JPEG for universal compatibility
-        if fp.suffix.lower() == ".webp":
-            import io
-            from PIL import Image as _PILImage
-            _buf = io.BytesIO()
-            _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(_buf, format="JPEG", quality=95)
-            image_bytes = _buf.getvalue()
+        character_desc = ctx.get("character_desc", "")
+        scene_desc = ctx.get("scene_desc", "")
+        character_tags = ctx.get("character_tags") or []
+        wd14_tags = ctx.get("wd14_tags") or []
+        wd14_context = ctx.get("wd14_context", "")
+        story_hooks = ctx.get("story_hooks", "")
+        multi = is_multi_character(wd14_tags)
+        identity_tags = identity_tags_for_scale(
+            character_tags, body.time_scale, multi_character=multi
+        )
 
-        wd14_tags = doc.get("wd14_tags") or []
-        character_tags = character_tags_from_wd14(wd14_tags)
+        # Respin of an already-finalised story: archive the previous version
+        if draft.get("status") == "final":
+            hist = list(draft.get("respin_history") or [])
+            hist.append({
+                "kind": "expand",
+                "temperature": temperature,
+                "title": draft.get("title"),
+                "overall": draft.get("overall_story"),
+                "axes": draft.get("axes"),
+            })
+            await story_db.set_story_payload(db, story_id, {"respin_history": hist})
 
-        _phase("extractingVision", 0.05, "Extracting visual vocabulary...")
-        vision_prompt = build_vision_prompt(full_extraction=not character_tags)
-        vis_tokens: list[str] = []
-        async for event in ollama.generate_vlm_stream(
-            vision_prompt, [image_bytes], model=vlm_model, options=options
-        ):
-            if _abort.is_set():
-                raise JobCancelled()
-            _put(event)
-            if event["type"] == "token":
-                vis_tokens.append(event["text"])
-                if len(vis_tokens) % 8 == 0:
-                    reporter.update(
-                        0.05 + 0.20 * min(len(vis_tokens) / 250, 0.97),
-                        "Extracting visual vocabulary...",
-                    )
-        visual_text = "".join(vis_tokens).strip()
-        cancel.raise_if_set()
-
-        # Literal sections anchor the base act; narrative hooks feed Stage 2 only
-        literal_text, story_hooks = split_vision_sections(visual_text)
-        if character_tags:
-            character_desc = "[visual tags] " + ", ".join(character_tags)
-            scene_desc = literal_text
-        else:
-            character_desc = literal_text
-            scene_desc = literal_text
-
-        # Weighted WD14 analysis of the base image (Refine-grade tag context)
-        wd14_context = ""
-        wd14_analysis: dict = {}
-        if wd14_tags:
-            try:
-                wd14_context, wd14_analysis = _build_weighted_wd14_context(
-                    [(doc, 0)], [1.0], set()
-                )
-            except Exception as exc:
-                logger.warning("[chronicle] wd14 context build failed: %s", exc)
-        # Only identity traits are anchored across axes, and only as far as the
-        # time scale keeps them (outfit at minutes-hours, nothing at decades)
-        identity_tags = identity_tags_for_scale(character_tags, body.time_scale)
-
-        # ── Stage 2: title + overall + three acts ─────────────────────────────
+        # ── Stage 2b: expand the chosen candidate (user's locale) ─────────────
         divergence = max(0.0, min(1.0, body.divergence))
-        mutation_tags: list[str] = []
-        if divergence > 0:
-            _phase("mutatingTags", 0.26, "Sampling mutation tags...")
-            mutation_tags = await _sample_mutation_tags(
-                db, ollama, {"common_tags": character_tags or wd14_tags}, divergence
-            )
-            if mutation_tags:
-                _put({"type": "mutation_tags", "tags": mutation_tags})
-
-        _phase("writingStory", 0.28, "Writing chronicle...")
+        _phase("expanding", 0.10, "Expanding the story...")
         _put({"type": "token", "text": "\n\n"})
-        story_prompt = build_story_prompt(
+        expand_prompt = build_expand_prompt(
+            selected=selected,
             character_desc=character_desc,
             scene_desc=scene_desc,
             base_axis=body.base_time_axis,
             worldview=body.worldview,
             time_scale=body.time_scale,
-            mutation_tags=mutation_tags,
             story_hooks=story_hooks,
             divergence=divergence,
+            locale=locale,
         )
         story_tokens: list[str] = []
         async for event in ollama.generate_text_stream(
-            story_prompt, model=vlm_model, options=options
+            expand_prompt, model=vlm_model, options=options
         ):
             if _abort.is_set():
                 raise JobCancelled()
@@ -2835,16 +2999,15 @@ async def run_chronicle_story(
                 story_tokens.append(event["text"])
                 if len(story_tokens) % 8 == 0:
                     reporter.update(
-                        0.28 + 0.32 * min(len(story_tokens) / 600, 0.97),
-                        "Writing chronicle...",
+                        0.10 + 0.28 * min(len(story_tokens) / 600, 0.97),
+                        "Expanding the story...",
                     )
         raw_story = "".join(story_tokens)
         sections = parse_story_sections(raw_story)
         cancel.raise_if_set()
 
-        # Repair pass: trigger when any axis act is missing OR [OVERALL] absent.
         if not all(sections.get(a) for a in AXES) or not sections.get("overall"):
-            _phase("repairingStory", 0.50, "Repairing story format...")
+            _phase("repairingStory", 0.40, "Repairing story format...")
             try:
                 raw_fix = await ollama.generate_text(
                     build_story_repair_prompt(raw_story),
@@ -2866,7 +3029,6 @@ async def run_chronicle_story(
         title = sections["title"]
         overall = sections["overall"]
         if not title:
-            # Last resort: dedicated title call so books never end up "Untitled"
             try:
                 raw_title = await ollama.generate_text(
                     build_title_prompt(stories), model=vlm_model, options=options,
@@ -2875,9 +3037,8 @@ async def run_chronicle_story(
             except Exception as exc:
                 logger.warning("[chronicle] title fallback failed: %s", exc)
         if not title:
-            title = "Untitled Chronicle"
+            title = selected.get("title") or "Untitled Chronicle"
         if not overall:
-            # Last resort: dedicated overall call so Storybook always has a summary
             try:
                 raw_ov = await ollama.generate_text(
                     build_overall_prompt(title, stories), model=vlm_model, options=options,
@@ -2885,7 +3046,42 @@ async def run_chronicle_story(
                 overall = raw_ov.strip()
             except Exception as exc:
                 logger.warning("[chronicle] overall fallback failed: %s", exc)
+        # Emit the story in the display (user) language for streaming preview
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
+
+        # ── English text for Stage 3 (image prompts are always English) ───────
+        if locale == "ja":
+            title_ja, overall_ja = title, overall
+            stories_ja = dict(stories)
+            en_map: dict = {}
+            try:
+                _phase("translating", 0.42, "Translating to English...")
+                raw_tr = await ollama.generate_text(
+                    build_translation_to_english_prompt(title, overall, stories),
+                    model=vlm_model, options=options, fmt="json",
+                )
+                en_map = parse_english_translation_json(raw_tr)
+            except Exception as exc:
+                logger.warning("[chronicle] to-English translation failed: %s", exc)
+            en_title = en_map.get("title") or title
+            en_overall = en_map.get("overall") or overall
+            en_stories = {a: (en_map.get(a) or stories[a]) for a in AXES}
+        else:
+            title_ja, overall_ja = "", ""
+            stories_ja = {a: "" for a in AXES}
+            en_title, en_overall, en_stories = title, overall, stories
+
+        # ── Stage 2c: shared identity/motif tags (supplementary anchor) ───────
+        _phase("commonTags", 0.48, "Extracting shared tags...")
+        common_tags: list[str] = []
+        try:
+            raw_ct = await ollama.generate_text(
+                build_common_tags_prompt(en_stories),
+                model=vlm_model, options=options, fmt="json",
+            )
+            common_tags = parse_common_tags_json(raw_ct)
+        except Exception as exc:
+            logger.warning("[chronicle] common tags extraction failed: %s", exc)
 
         # ── Stage 3: per-axis Visual Script prompt ────────────────────────────
         gen_axes = [a for a in AXES if a != body.base_time_axis]
@@ -2894,7 +3090,7 @@ async def run_chronicle_story(
             _phase("refiningPrompt", 0.55 + 0.12 * i, f"Refining {axis} prompt...")
             _put({"type": "token", "text": f"\n\n— {axis} prompt —\n"})
             axis_prompt = build_axis_prompt(
-                story_text=stories[axis],
+                story_text=en_stories[axis],
                 character_tags=character_tags,
                 character_desc=character_desc,
                 prompt_style=body.prompt_style,
@@ -2902,9 +3098,10 @@ async def run_chronicle_story(
                 time_scale=body.time_scale,
                 axis=axis,
                 base_axis=body.base_time_axis,
-                title=title,
-                overall=overall,
-                all_stories=stories,
+                title=en_title,
+                overall=en_overall,
+                all_stories=en_stories,
+                common_tags=common_tags,
             )
             axis_tokens: list[str] = []
             async for event in ollama.generate_text_stream(
@@ -2928,7 +3125,6 @@ async def run_chronicle_story(
                 _put({"type": "error", "message": f"Prompt refinement failed for {axis}"})
                 return
 
-            # Split into tag line / prose per style, then apply Refine-grade fixes
             if body.prompt_style == "danbooru":
                 tag_line, prose = positive, ""
             elif body.prompt_style == "natural":
@@ -2942,20 +3138,19 @@ async def run_chronicle_story(
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
 
             # This act's story wins over the base image: one conflict pass per
-            # axis over the identity candidates + everything the LLM generated
-            candidates = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
-            sources = list(dict.fromkeys(identity_tags + candidates))[:80]
+            # axis over the identity candidates + everything the LLM generated.
+            # Higher stakes than Refine — every axis is a different time/scene.
+            cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
+            sources = list(dict.fromkeys(identity_tags + common_tags + cand_tags))[:80]
             conflicts: set[str] = set()
             if sources:
                 conflicts = await _find_conflict_tags(
-                    stories[axis][:400], sources, db, ollama, vlm_model
+                    en_stories[axis][:400], sources, db, ollama, vlm_model
                 )
                 if conflicts:
-                    logger.info("[chronicle] %s: story-conflict tags: %s",
-                                axis, ", ".join(sorted(conflicts)))
+                    logger.info("[chronicle] %s: removed %d story-conflict tags: %s",
+                                axis, len(conflicts), ", ".join(sorted(conflicts)))
 
-            # Scale-gated identity anchoring — scene/pose/background tags of
-            # the base image are never injected or forced back
             inject = [t for t in identity_tags if t not in conflicts]
             if tag_line and inject:
                 tag_line = inject_identity_tags(tag_line, inject)
@@ -2972,59 +3167,48 @@ async def run_chronicle_story(
             _put({"type": "axis_prompt", "axis": axis,
                   "positive": positive, "negative": negative})
 
-        # ── Save story record ─────────────────────────────────────────────────
+        # ── Finalise the record (patch draft → final) ─────────────────────────
         _phase("savingStory", 0.82, "Saving story...")
-        payload = story_db.new_story_payload(
-            base_image_id=body.base_sha256,
-            base_time_axis=body.base_time_axis,
-            worldview=body.worldview,
-            workflow_name=body.workflow_name,
-            group_id=body.group_id,
-            time_scale=body.time_scale,
-            title=title,
-            overall_story=overall,
-        )
+        prev_axes = draft.get("axes") or {}
+        axes_payload: dict = {}
         for axis in AXES:
-            payload["axes"][axis]["story"] = stories[axis]
-        for axis in gen_axes:
-            payload["axes"][axis]["prompt_positive"] = prompts[axis]["positive"]
-            payload["axes"][axis]["prompt_negative"] = prompts[axis]["negative"]
+            axes_payload[axis] = {
+                "story": en_stories[axis],
+                "story_ja": stories_ja[axis],
+                "prompt_positive": prompts.get(axis, {}).get("positive"),
+                "prompt_negative": prompts.get(axis, {}).get("negative"),
+                "image_id": body.base_sha256 if axis == body.base_time_axis
+                else (prev_axes.get(axis) or {}).get("image_id"),
+            }
 
         embedding = None
         try:
             embedding = await ollama.embed(
-                " ".join([title, overall, *(stories[a] for a in AXES)])[:4000]
+                " ".join([en_title, en_overall, *(en_stories[a] for a in AXES)])[:4000]
             )
         except Exception as exc:
             logger.warning("[chronicle] story embed failed: %s", exc)
-        story_id = await story_db.create_story(db, payload, embedding)
-        _put({"type": "story_saved", "story_id": story_id})
 
-        # ── Final stage: Japanese translation ─────────────────────────────────
-        # Runs before image-job submission so the axes write cannot clobber an
-        # image_id linked by a concurrently running GENERATION job.
-        translation: dict = {}
-        try:
-            _phase("translating", 0.90, "Translating to Japanese...")
-            raw_tr = await ollama.generate_text(
-                build_translation_prompt(title, overall, stories),
-                model=vlm_model, options=options, fmt="json",
-            )
-            translation = parse_translation_json(raw_tr)
-            if any(translation.values()):
-                for axis in AXES:
-                    payload["axes"][axis]["story_ja"] = translation.get(f"{axis}_ja", "")
-                await story_db.set_story_payload(db, story_id, {
-                    "title_ja": translation.get("title_ja", ""),
-                    "overall_story_ja": translation.get("overall_ja", ""),
-                    "axes": payload["axes"],
-                })
-                _put({"type": "translation", **translation})
-            else:
-                _put({"type": "warning", "message": "Japanese translation came back empty."})
-        except Exception as exc:
-            logger.warning("[chronicle] translation failed: %s", exc)
-            _put({"type": "warning", "message": f"Japanese translation failed: {exc}"})
+        await story_db.set_story_payload(db, story_id, {
+            "status": "final",
+            "selected_candidate": candidate_id,
+            "time_scale": body.time_scale,
+            "workflow_name": body.workflow_name,
+            "title": en_title,
+            "title_ja": title_ja,
+            "overall_story": en_overall,
+            "overall_story_ja": overall_ja,
+            "axes": axes_payload,
+        })
+        if embedding:
+            try:
+                await story_db.set_story_embedding(db, story_id, embedding)
+            except Exception as exc:
+                logger.warning("[chronicle] set embedding failed: %s", exc)
+        _put({"type": "story_saved", "story_id": story_id})
+        if locale == "ja":
+            _put({"type": "translation", "title_ja": title_ja, "overall_ja": overall_ja,
+                  **{f"{a}_ja": stories_ja[a] for a in AXES}})
 
         # ── Seed resolution ───────────────────────────────────────────────────
         import random as _random
@@ -3072,16 +3256,16 @@ async def run_chronicle_story(
             "group_id": body.group_id,
             "seed": seed,
             "manual_mode": body.manual_mode,
-            "title": title,
-            "title_ja": translation.get("title_ja", ""),
-            "overall": overall,
-            "overall_ja": translation.get("overall_ja", ""),
-            "axes": payload["axes"],
+            "title": en_title,
+            "title_ja": title_ja,
+            "overall": en_overall,
+            "overall_ja": overall_ja,
+            "axes": axes_payload,
         })
     except JobCancelled:
         raise
     except Exception as exc:
-        logger.exception("[chronicle] story pipeline failed")
+        logger.exception("[chronicle] expand pipeline failed")
         _put({"type": "error", "message": str(exc)})
     finally:
         _put(None)

@@ -16,17 +16,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
     build_axis_prompt,
+    build_candidates_prompt,
+    build_common_tags_prompt,
+    build_expand_prompt,
     build_overall_prompt,
     build_story_prompt,
     build_story_repair_prompt,
     build_title_prompt,
     build_translation_prompt,
+    build_translation_to_english_prompt,
     build_vision_prompt,
     character_tags_from_wd14,
     classify_identity_tag,
     collect_prompt_tags,
     identity_tags_for_scale,
     inject_identity_tags,
+    is_multi_character,
+    parse_candidates_json,
+    parse_common_tags_json,
+    parse_english_translation_json,
     parse_story_json,
     parse_story_sections,
     parse_translation_json,
@@ -183,7 +191,7 @@ def test_build_story_prompt_time_scale():
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="hours",
     )
-    assert "outfit change" in hours  # hours forbidden list
+    assert "outfit" in hours  # hours still constrains the outfit
     decades = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="decades",
@@ -230,10 +238,9 @@ def test_build_axis_prompt_visual_script_structure():
     # POSITIVE/NEGATIVE labeled output, not JSON
     assert "POSITIVE:" in prompt and "NEGATIVE:" in prompt
     assert '{"positive"' not in prompt
-    # wd14 context embedded — non-base axis gets the identity-only framing
-    assert "[common tags] 1girl, silver_hair" in prompt
-    assert "use ONLY for character identity and art style continuity" in prompt
-    assert "do NOT copy its scene, pose, background, or time-of-day tags" in prompt
+    # Non-base axis: the base image's WD14 tags are dropped entirely (they
+    # describe a different moment) — the story text is the primary source.
+    assert "[common tags] 1girl, silver_hair" not in prompt
 
 
 def test_build_axis_prompt_styles():
@@ -616,5 +623,149 @@ def test_build_axis_prompt_wd14_label_base_axis():
         axis="present", base_axis="present",
         wd14_context="[common tags] 1girl",
     )
-    assert "[WD14 tag analysis of the base image]" in prompt
-    assert "do NOT copy its scene" not in prompt
+    # Base axis keeps WD14, but framed as style-only with the story as PRIMARY
+    assert "[common tags] 1girl" in prompt
+    assert "PRIMARY source for content" in prompt
+
+
+# ── Stage 2a: story candidates ────────────────────────────────────────────────
+
+def test_build_candidates_prompt():
+    prompt = build_candidates_prompt(
+        character_desc="[visual tags] 1girl, long_hair",
+        scene_desc="a quiet classroom",
+        user_topic="放課後の冒険",
+        worldview="",
+        time_scale="minutes",
+        locale="ja",
+    )
+    # user topic and the three spirit flavours are reflected
+    assert "放課後の冒険" in prompt
+    for flavour in ("faithful", "rebel", "stranger"):
+        assert flavour in prompt
+    # locale drives output language instruction
+    assert "日本語" in prompt
+
+
+def test_candidates_prompt_time_scale_rules():
+    minutes = build_candidates_prompt(
+        character_desc="c", scene_desc="s", time_scale="minutes", locale="en"
+    )
+    decades = build_candidates_prompt(
+        character_desc="c", scene_desc="s", time_scale="decades", locale="en"
+    )
+    # each embeds that scale's own visual rules, so the prompts differ by scale
+    from app.story.generator import _SCALE_VISUAL_RULES
+    assert _SCALE_VISUAL_RULES["minutes"]["forbidden"] in minutes
+    assert _SCALE_VISUAL_RULES["decades"]["may_differ"] in decades
+    assert minutes != decades
+
+
+def test_parse_candidates_json_clean():
+    raw = (
+        '{"candidates": ['
+        '{"id":"A","title":"T1","summary":"S1","suggested_time_scale":"years","key_motif":"m1"},'
+        '{"id":"B","title":"T2","summary":"S2","suggested_time_scale":"days","key_motif":"m2"}'
+        ']}'
+    )
+    out = parse_candidates_json(raw)
+    assert len(out) == 2
+    assert out[0]["id"] == "A" and out[0]["title"] == "T1"
+    assert out[1]["suggested_time_scale"] == "days"
+
+
+def test_parse_candidates_json_wrapped_and_broken():
+    wrapped = 'noise before {"candidates":[{"id":"A","title":"T"}]} noise after'
+    out = parse_candidates_json(wrapped)
+    assert len(out) == 1 and out[0]["title"] == "T"
+    # missing id → auto-assigned; missing fields → empty strings
+    assert out[0]["summary"] == "" and out[0]["id"] == "A"
+    assert parse_candidates_json("total garbage") == []
+
+
+def test_build_expand_prompt():
+    prompt = build_expand_prompt(
+        selected={"title": "The Bell", "summary": "a bell tolls", "key_motif": "bronze bell"},
+        character_desc="[visual tags] 1girl",
+        scene_desc="a belfry",
+        base_axis="present",
+        worldview="",
+        time_scale="years",
+        locale="ja",
+    )
+    # the chosen candidate seeds the expansion, in Japanese, keeping the markers
+    assert "The Bell" in prompt and "bronze bell" in prompt
+    assert "日本語" in prompt
+    assert "[TITLE]" in prompt and "[PAST]" in prompt
+
+
+# ── multi-character identity scoping ──────────────────────────────────────────
+
+def test_is_multi_character():
+    assert is_multi_character(["1girl", "long_hair"]) is False
+    assert is_multi_character(["2girls", "blonde_hair"]) is True
+    assert is_multi_character(["multiple_girls"]) is True
+
+
+def test_identity_tags_multi_character():
+    tags = ["blonde_hair", "blue_eyes", "long_hair"]
+    solo = identity_tags_for_scale(tags, "minutes")
+    multi = identity_tags_for_scale(tags, "minutes", multi_character=True)
+    # solo anchors hair colour + eyes; multi drops those (ambiguous ownership)
+    assert "blonde_hair" in solo and "blue_eyes" in solo
+    assert "blonde_hair" not in multi and "blue_eyes" not in multi
+    # hair style still anchors even with multiple characters
+    assert "long_hair" in multi
+
+
+# ── WD14 dependency reduction in build_axis_prompt ────────────────────────────
+
+def test_axis_prompt_no_wd14_for_non_base():
+    prompt = build_axis_prompt(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="future", base_axis="present",
+        wd14_context="UNIQUE_WD14_BLOCK_XYZ",
+    )
+    assert "UNIQUE_WD14_BLOCK_XYZ" not in prompt
+
+
+def test_axis_prompt_common_tags_injected():
+    prompt = build_axis_prompt(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="future", base_axis="present",
+        common_tags=["silver_hair", "bronze_bell"],
+    )
+    assert "silver_hair, bronze_bell" in prompt
+
+
+def test_minutes_outfit_change_allowed():
+    from app.story.generator import _SCALE_VISUAL_RULES
+    rules = _SCALE_VISUAL_RULES["minutes"]
+    assert "outfit" in rules["may_differ"]
+    assert "outfit" not in rules["forbidden"]
+
+
+# ── Stage 2c common tags + to-English translation ─────────────────────────────
+
+def test_build_and_parse_common_tags():
+    prompt = build_common_tags_prompt(
+        {"past": "p", "present": "pr", "future": "f"}
+    )
+    assert "PAST" in prompt and "10-15" in prompt
+    out = parse_common_tags_json('{"tags": ["long hair", "long_hair", "bronze_bell"]}')
+    assert out == ["long_hair", "bronze_bell"]  # spaced→underscored, deduped
+    assert parse_common_tags_json("broken") == []
+
+
+def test_translation_to_english():
+    prompt = build_translation_to_english_prompt(
+        "題", "概要", {"past": "過去", "present": "現在", "future": "未来"}
+    )
+    assert "English" in prompt
+    out = parse_english_translation_json(
+        '{"title":"T","overall":"O","past":"p","present":"pr","future":"f"}'
+    )
+    assert out["title"] == "T" and out["future"] == "f"
+    assert parse_english_translation_json("broken")["title"] == ""

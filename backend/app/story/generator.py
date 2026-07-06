@@ -305,6 +305,221 @@ def build_overall_prompt(title: str, stories: dict[str, str]) -> str:
     )
 
 
+# ── Stage 2a: three story candidates ─────────────────────────────────────────
+
+# Persona flavours distilled from the Invoke spirits (faithful/rebel/stranger),
+# adapted from image-prompt generation to story ideation. Reused rather than
+# reinvented so the three candidates diverge along proven axes.
+_CANDIDATE_SPIRITS = (
+    ("A", "faithful", (
+        "Stay faithful to the image. Read the scene at face value and tell the "
+        "most honest, grounded story its details plainly imply. No twist for its "
+        "own sake — aim for clarity, intimacy and emotional truth."
+    )),
+    ("B", "rebel", (
+        "Find the shadow of the obvious reading. Invert ONE core assumption — the "
+        "mood, the relationship, who holds power, or what is really happening — so "
+        "the story becomes a natural counterpart to the first impression: "
+        "surprising yet coherent, never random."
+    )),
+    ("C", "stranger", (
+        "Let one unexpected guest into the scene — a hidden world, an unseen "
+        "visitor, a genre shift, a secret the image does not show — and weave it "
+        "in as if it always belonged, reframing the whole chronicle."
+    )),
+)
+
+
+def _locale_output_line(locale: str) -> str:
+    if locale == "ja":
+        return "出力の title / summary / key_motif はすべて自然で読みやすい日本語で書くこと。"
+    return "Write every title / summary / key_motif field in natural English."
+
+
+def build_candidates_prompt(
+    *,
+    character_desc: str,
+    scene_desc: str,
+    user_topic: str = "",
+    worldview: str = "",
+    time_scale: str = "years",
+    locale: str = "en",
+) -> str:
+    """LLM prompt producing THREE distinct story candidates as JSON (one call).
+
+    The three ideas diverge along the faithful/rebel/stranger axes. Output
+    language follows `locale` (ja/en). The chosen time scale is a first-class
+    factor: each candidate must describe how past→present→future changes across
+    that span.
+    """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
+    topic_line = (
+        f'User topic (お題) — the stories MUST be about this: "{user_topic.strip()}"'
+        if user_topic.strip()
+        else "No topic was given — invent three genuinely different premises yourself."
+    )
+    world_line = (
+        f'Setting atmosphere / worldview: "{worldview.strip()}" — backdrop and '
+        "flavour only; the scene details above take precedence."
+        if worldview.strip()
+        else "No worldview was specified — invent fitting ones."
+    )
+    spirits_block = "\n".join(
+        f"  Candidate {cid} ({flavour}): {desc}"
+        for cid, flavour, desc in _CANDIDATE_SPIRITS
+    )
+    return (
+        "You are a storyteller pitching THREE different chronicles for the same "
+        "character and scene. Each chronicle spans past, present and future.\n\n"
+        "CHARACTER (visual descriptor tags — appearance only, not names):\n"
+        f"{character_desc}\n\n"
+        f"THE SCENE (the base moment):\n{scene_desc}\n\n"
+        f"{topic_line}\n"
+        f"{world_line}\n\n"
+        "⚠️ TIME SCALE — a first-class factor for every candidate ⚠️\n"
+        f'The three acts are {span} apart (scale key: "{time_scale}").\n'
+        f"  MUST stay the same across acts: {rules['must_keep']}\n"
+        f"  MAY change: {rules['may_differ']}\n"
+        f"  FORBIDDEN: {rules['forbidden']}\n"
+        "Each candidate's summary and key_motif MUST reflect how the story "
+        "changes across THIS time span (a few minutes feels intimate and "
+        "moment-to-moment; several decades spans eras and transformation).\n\n"
+        "Make the three candidates genuinely distinct:\n"
+        f"{spirits_block}\n\n"
+        f"{_locale_output_line(locale)}\n\n"
+        "For EACH candidate provide:\n"
+        "  - title: a specific, evocative title (3-8 words), never generic\n"
+        "  - summary: 2-3 sentences describing the past→present→future arc\n"
+        "  - suggested_time_scale: the scale this premise fits best, one of "
+        f"{', '.join(TIME_SCALES)} (may equal or differ from \"{time_scale}\")\n"
+        "  - key_motif: one concrete object/detail that recurs and transforms "
+        "in meaning across the three acts\n\n"
+        "Answer with JSON only, no markdown fences:\n"
+        '{"candidates": [\n'
+        '  {"id": "A", "title": "...", "summary": "...", '
+        '"suggested_time_scale": "...", "key_motif": "..."},\n'
+        '  {"id": "B", ...},\n'
+        '  {"id": "C", ...}\n'
+        "]}"
+    )
+
+
+def parse_candidates_json(raw: str) -> list[dict]:
+    """Parse the candidates output into a list of dicts. Missing/broken → []."""
+    text = raw.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return []
+    items = data.get("candidates") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        return []
+    result: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("id") or "").strip() or chr(ord("A") + len(result))
+        result.append({
+            "id": cid,
+            "title": str(item.get("title") or "").strip(),
+            "summary": str(item.get("summary") or "").strip(),
+            "suggested_time_scale": str(item.get("suggested_time_scale") or "").strip(),
+            "key_motif": str(item.get("key_motif") or "").strip(),
+        })
+    return result
+
+
+def build_expand_prompt(
+    *,
+    selected: dict,
+    character_desc: str,
+    scene_desc: str,
+    base_axis: str,
+    worldview: str,
+    time_scale: str = "years",
+    story_hooks: str = "",
+    divergence: float = 0.0,
+    locale: str = "en",
+) -> str:
+    """LLM prompt expanding ONE chosen candidate into the full three acts.
+
+    Same markers/structure as build_story_prompt, but seeded by the selected
+    candidate (title/summary/key_motif) and written in the user's locale.
+    """
+    seed_block = (
+        "CHOSEN STORY DIRECTION — expand THIS premise faithfully into the three "
+        "acts (keep its title unless it genuinely no longer fits):\n"
+        f"  Title:   {selected.get('title', '')}\n"
+        f"  Summary: {selected.get('summary', '')}\n"
+        "  Key motif (must recur and transform across all three acts): "
+        f"{selected.get('key_motif', '')}\n\n"
+    )
+    lang_block = (
+        "\n言語ルール: [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] のマーカーは"
+        "英語のまま残し、各セクションの本文はすべて自然で読みやすい日本語で書くこと。\n"
+        if locale == "ja"
+        else "\nLanguage: write all section body text in natural English.\n"
+    )
+    base = build_story_prompt(
+        character_desc=character_desc,
+        scene_desc=scene_desc,
+        base_axis=base_axis,
+        worldview=worldview,
+        time_scale=time_scale,
+        story_hooks=story_hooks,
+        divergence=divergence,
+    )
+    return seed_block + base + lang_block
+
+
+def build_common_tags_prompt(stories: dict[str, str]) -> str:
+    """Ask for 10-15 danbooru tags common to all three acts (identity anchor)."""
+    return (
+        "Below are the three acts of one chronicle about a single character.\n"
+        "Extract 10-15 danbooru tags that plausibly appear in ALL THREE acts — "
+        "focus on the character's stable identity (hair, eyes, distinctive "
+        "features) and any recurring motif or object. Do NOT include tags for "
+        "scene, background, time of day, or pose (those change between acts).\n\n"
+        f"PAST: {stories.get('past', '')}\n\n"
+        f"PRESENT: {stories.get('present', '')}\n\n"
+        f"FUTURE: {stories.get('future', '')}\n\n"
+        'Answer with JSON only: {"tags": ["tag_1", "tag_2", ...]}'
+    )
+
+
+def parse_common_tags_json(raw: str) -> list[str]:
+    """Parse the common-tags output into underscored tags. Missing/broken → []."""
+    text = raw.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return []
+    tags = data.get("tags") if isinstance(data, dict) else data
+    if not isinstance(tags, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in tags:
+        tag = str(t).strip().replace(" ", "_")
+        if tag and tag.lower() not in seen:
+            seen.add(tag.lower())
+            out.append(tag)
+    return out[:15]
+
+
 # ── Stage 3: per-axis Visual Script prompt ────────────────────────────────────
 
 _VISUAL_SCRIPT_GUIDE = (
@@ -338,29 +553,29 @@ _VISUAL_SCRIPT_GUIDE = (
 _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
     "minutes": {
         "must_keep": (
-            "outfit (IDENTICAL), hair color and style (IDENTICAL), "
+            "hair color and style (IDENTICAL), "
             "physical appearance (IDENTICAL), exact location (SAME room/spot), "
             "season, time of day"
         ),
-        "may_differ": "micro-pose, finger/hand position, expression, a gust of wind, what the character is doing with hands/body (writing, reaching, pressing, picking up, etc.)",
-        "forbidden": "any outfit change, any location change, any passage of seasons, aging",
+        "may_differ": "outfit (keep it identical UNLESS the story explicitly justifies a change — changing clothes, removing a jacket, a costume switch), micro-pose, finger/hand position, expression, a gust of wind, what the character is doing with hands/body (writing, reaching, pressing, picking up, etc.)",
+        "forbidden": "any location change, any passage of seasons, aging",
     },
     "tens_of_minutes": {
         "must_keep": (
-            "outfit (IDENTICAL), hair color and style (IDENTICAL), "
+            "hair color and style (IDENTICAL), "
             "physical appearance (IDENTICAL), same room or immediate outdoor spot, "
             "season, time of day"
         ),
-        "may_differ": "pose, expression, minor object placement, slight lighting shift, character's activity and what they are doing, object being interacted with",
-        "forbidden": "any outfit change, any location change, any passage of seasons, aging",
+        "may_differ": "outfit (keep it identical UNLESS the story explicitly justifies a change — changing clothes, removing a jacket, a costume switch), pose, expression, minor object placement, slight lighting shift, character's activity and what they are doing, object being interacted with",
+        "forbidden": "any location change, any passage of seasons, aging",
     },
     "hours": {
         "must_keep": (
-            "outfit (IDENTICAL), hair color and style (IDENTICAL), "
+            "hair color and style (IDENTICAL), "
             "physical appearance (IDENTICAL), same building or outdoor location, season"
         ),
-        "may_differ": "light angle and shadow direction, expression, full pose and activity, props in hand, position within the location, slight fatigue",
-        "forbidden": "outfit change, location change, season change, aging",
+        "may_differ": "outfit (keep it identical UNLESS the story explicitly justifies a change — changing clothes, a costume switch), light angle and shadow direction, expression, full pose and activity, props in hand, position within the location, slight fatigue",
+        "forbidden": "location change, season change, aging",
     },
     "days": {
         "must_keep": "hair color and style, core facial features, same general area",
@@ -458,13 +673,37 @@ _IDENTITY_CATEGORIES_BY_SCALE: dict[str, frozenset[str]] = {
 }
 
 
+# Multi-subject wd14 tags — when present we cannot tell which character a
+# hair_color / eyes tag belongs to, so anchoring those would smear identities.
+_MULTI_SUBJECT_TAGS = frozenset({
+    "2girls", "3girls", "4girls", "5girls", "6+girls", "multiple_girls",
+    "2boys", "3boys", "4boys", "multiple_boys", "multiple_girls",
+})
+
+
+def is_multi_character(wd14_tags: list[str]) -> bool:
+    """True if the base image depicts more than one subject (ambiguous identity)."""
+    return any(t.strip().lower() in _MULTI_SUBJECT_TAGS for t in wd14_tags)
+
+
 def identity_tags_for_scale(
-    wd14_tags: list[str], time_scale: str, *, limit: int = 12
+    wd14_tags: list[str],
+    time_scale: str,
+    *,
+    limit: int = 12,
+    multi_character: bool = False,
 ) -> list[str]:
-    """Scale-gated identity subset of the base image's wd14 tags, order kept."""
+    """Scale-gated identity subset of the base image's wd14 tags, order kept.
+
+    With multi_character=True the hair_color / eyes categories are dropped: with
+    several subjects present those tags cannot be attributed to one character, so
+    forcing them would blend identities. Face/hair_style/outfit still anchor.
+    """
     allowed = _IDENTITY_CATEGORIES_BY_SCALE.get(
         time_scale, _IDENTITY_CATEGORIES_BY_SCALE["years"]
     )
+    if multi_character:
+        allowed = allowed - {"hair_color", "eyes"}
     if not allowed:
         return []
     result: list[str] = []
@@ -547,11 +786,17 @@ def build_axis_prompt(
     title: str = "",
     overall: str = "",
     all_stories: dict[str, str] | None = None,
+    common_tags: list[str] | None = None,
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
     Character identity keywords are condensed and placed at the head of the
     positive prompt so the same character survives across all three images.
+
+    WD14 dependency is deliberately reduced: for non-base axes the base image's
+    WD14 tags are omitted entirely (they describe a different moment), and the
+    story text becomes the primary content source. common_tags — shared motif
+    tags extracted from all three acts — anchor continuity instead.
     """
     if all_stories:
         chronicle_ctx = (
@@ -599,17 +844,30 @@ def build_axis_prompt(
     else:
         temporal_block = ""
 
-    if not wd14_context:
+    if axis != base_axis:
+        # Non-base axis: the base image's WD14 tags describe a DIFFERENT moment
+        # in time, so they are dropped entirely. The story text is the primary
+        # source; character identity is carried by the identity tags the runner
+        # injects, plus the shared common_tags below.
         wd14_block = ""
-    elif axis != base_axis:
+    elif wd14_context:
         wd14_block = (
-            f"\n[WD14 tags of the BASE image ({base_axis} act) — use ONLY for "
-            "character identity and art style continuity; do NOT copy its "
-            "scene, pose, background, or time-of-day tags into this act]\n"
+            "\n[WD14 tags of the base image — for art style / quality reference "
+            "ONLY. The story text above is the PRIMARY source for content; "
+            "prefer it wherever the two disagree]\n"
             f"{wd14_context}\n"
         )
     else:
-        wd14_block = f"\n[WD14 tag analysis of the base image]\n{wd14_context}\n"
+        wd14_block = ""
+
+    if common_tags:
+        common_block = (
+            "\n[Shared identity/motif tags common to all three acts — keep these "
+            "consistent across the chronicle for character continuity]\n"
+            f"{', '.join(common_tags)}\n"
+        )
+    else:
+        common_block = ""
 
     if prompt_style == "natural":
         format_rule = (
@@ -638,6 +896,7 @@ def build_axis_prompt(
         f"{temporal_block}\n"
         f"{identity_src}\n"
         f"{wd14_block}"
+        f"{common_block}"
         "\n[Visual Script format]\n"
         f"{_VISUAL_SCRIPT_GUIDE}\n\n"
         "Rules:\n"
@@ -708,6 +967,48 @@ def build_translation_prompt(title: str, overall: str, stories: dict[str, str]) 
         '{"title_ja": "...", "overall_ja": "...", "past_ja": "...", '
         '"present_ja": "...", "future_ja": "..."}'
     )
+
+
+def build_translation_to_english_prompt(
+    title: str, overall: str, stories: dict[str, str]
+) -> str:
+    """Translate a user-language chronicle into English (for Stage 3 prompting).
+
+    Used when the story was generated in Japanese: the image-prompt stage always
+    works in English, so the acts are translated before Stage 3. Skipped when
+    the locale is already English.
+    """
+    return (
+        "Translate this chronicle into natural, fluent English.\n"
+        "Keep the tone and imagery. Do not add or remove content.\n\n"
+        f"TITLE: {title}\n\n"
+        f"OVERALL: {overall}\n\n"
+        f"PAST: {stories.get('past', '')}\n\n"
+        f"PRESENT: {stories.get('present', '')}\n\n"
+        f"FUTURE: {stories.get('future', '')}\n\n"
+        "Answer with JSON only, using exactly these keys:\n"
+        '{"title": "...", "overall": "...", "past": "...", '
+        '"present": "...", "future": "..."}'
+    )
+
+
+def parse_english_translation_json(raw: str) -> dict[str, str]:
+    """Parse the to-English translation output. Missing/broken → '' per key."""
+    empty = {k: "" for k in SECTIONS}
+    text = raw.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return empty
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return empty
+    if not isinstance(data, dict):
+        return empty
+    return {k: str(data.get(k) or "").strip() for k in SECTIONS}
 
 
 _TRANSLATION_KEYS = ("title_ja", "overall_ja", "past_ja", "present_ja", "future_ja")
