@@ -17,11 +17,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.story.generator import (
     build_axis_prompt,
     build_candidates_prompt,
-    build_common_tags_prompt,
     build_expand_prompt,
     build_overall_prompt,
     build_story_prompt,
     build_story_repair_prompt,
+    build_story_tags_prompt,
     build_title_prompt,
     build_translation_prompt,
     build_translation_to_english_prompt,
@@ -33,10 +33,10 @@ from app.story.generator import (
     inject_identity_tags,
     is_multi_character,
     parse_candidates_json,
-    parse_common_tags_json,
     parse_english_translation_json,
     parse_story_json,
     parse_story_sections,
+    parse_tags_json,
     parse_translation_json,
     remove_conflict_tags,
     split_vision_sections,
@@ -652,6 +652,10 @@ def test_build_candidates_prompt():
     # per-axis output schema (beats), not a single summary
     assert '"past"' in prompt and '"present"' in prompt and '"future"' in prompt
     assert '"summary"' not in prompt
+    # grounding guardrail keeps surprise in the real-world register
+    assert "GROUNDING" in prompt and "supernatural" in prompt
+    # minutes scale = image+alpha continuation, no scene jump
+    assert "EXTENDED slightly" in prompt and "HOW MUCH CHANGES" in prompt
 
 
 def test_candidates_prompt_base_axis_directions():
@@ -758,12 +762,12 @@ def test_axis_prompt_no_wd14_for_non_base():
     assert "UNIQUE_WD14_BLOCK_XYZ" not in prompt
 
 
-def test_axis_prompt_common_tags_injected():
+def test_axis_prompt_axis_tags_injected():
     prompt = build_axis_prompt(
         story_text="s", character_tags=["1girl"], character_desc="",
         prompt_style="danbooru", time_scale="years",
         axis="future", base_axis="present",
-        common_tags=["silver_hair", "bronze_bell"],
+        axis_tags=["silver_hair", "bronze_bell"],
     )
     assert "silver_hair, bronze_bell" in prompt
 
@@ -775,16 +779,30 @@ def test_minutes_outfit_change_allowed():
     assert "outfit" not in rules["forbidden"]
 
 
-# ── Stage 2c common tags + to-English translation ─────────────────────────────
+def test_scale_delta_line():
+    from app.story.generator import _scale_delta_line
+    minutes = _scale_delta_line("minutes")
+    decades = _scale_delta_line("decades")
+    assert "EXTENDED" in minutes and "SAME scene" in minutes
+    assert "eras" in decades
+    assert minutes != decades
+    # unknown scale falls back to years
+    assert _scale_delta_line("bogus") == _scale_delta_line("years")
 
-def test_build_and_parse_common_tags():
-    prompt = build_common_tags_prompt(
-        {"past": "p", "present": "pr", "future": "f"}
-    )
-    assert "PAST" in prompt and "10-15" in prompt
-    out = parse_common_tags_json('{"tags": ["long hair", "long_hair", "bronze_bell"]}')
-    assert out == ["long_hair", "bronze_bell"]  # spaced→underscored, deduped
-    assert parse_common_tags_json("broken") == []
+
+# ── per-axis story tags + to-English translation ──────────────────────────────
+
+def test_build_story_tags_prompt():
+    prompt = build_story_tags_prompt("A girl grips a sword on a rooftop at night.")
+    assert "about 50 danbooru tags" in prompt
+    assert "A girl grips a sword" in prompt
+    # generic tag parser: spaced→underscored, deduped, keeps >15 (limit 60)
+    out = parse_tags_json('{"tags": ["long hair", "long_hair", "bronze_bell"]}')
+    assert out == ["long_hair", "bronze_bell"]
+    import json as _json
+    many = parse_tags_json(_json.dumps({"tags": [f"t{i}" for i in range(80)]}))
+    assert len(many) == 60  # capped at limit
+    assert parse_tags_json("broken") == []
 
 
 def test_translation_to_english():

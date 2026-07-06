@@ -151,9 +151,11 @@ def build_story_prompt(
     )
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
+    delta = _scale_delta_line(time_scale)
     time_block = (
         "⚠️ ABSOLUTE TIME CONSTRAINT — NON-NEGOTIABLE ⚠️\n"
         f'TIME SCALE: {span} between acts (scale key: "{time_scale}").\n\n'
+        f"  HOW MUCH CHANGES between acts: {delta}\n"
         f"  MUST stay the same: {rules['must_keep']}\n"
         f"  MAY change:         {rules['may_differ']}\n"
         f"  STRICTLY FORBIDDEN: {rules['forbidden']}\n\n"
@@ -185,16 +187,16 @@ def build_story_prompt(
         f"{mutation_block}\n"
         "Rules:\n"
         f"- The {base_axis} act must match the scene above faithfully.\n"
-        "- Each act must show the character in a DISTINCT MOMENT with a DIFFERENT ACTIVITY:\n"
-        "  • Never repeat the same pose or action across acts — each needs a specific\n"
-        "    physical action (writing, reaching, running, crouching, pressing, lifting…).\n"
-        "  • Vary the character's position in the environment: foreground vs background,\n"
-        "    different corner, different angle, different relationship to objects.\n"
-        "  • Think cinematically: PAST = approach / preparation / discovery;\n"
-        "    PRESENT = the peak moment (matches the base image);\n"
-        "    FUTURE = departure / aftermath / new beginning.\n"
-        "- Never write an act as 'standing in the same place with different lighting'.\n"
-        "- The visual distance between acts must strictly follow the TIME SCALE above.\n"
+        "- Each act is a DISTINCT MOMENT on the SAME thread, spaced by the time scale:\n"
+        "  • Give each act a specific physical action (writing, reaching, pressing,\n"
+        "    lifting…) — never the identical pose twice.\n"
+        "  • Vary pose, gaze and framing ONLY as far as the scale's delta allows —\n"
+        "    at short scales keep the SAME spot and change just pose/action/expression;\n"
+        "    only at longer scales may the location or setting itself change.\n"
+        "  • Cinematic roles within that limit: PAST = the lead-up / a beat earlier;\n"
+        "    PRESENT = the base-image moment; FUTURE = the beat just after / aftermath.\n"
+        "- The visual distance between acts must strictly follow the delta above —\n"
+        "  do NOT leap to an origin story or a far-off ending at a short scale.\n"
         "- The arc must contain ONE turning point or reversal: a belief, plan or "
         "situation that flips.\n"
         "- Pick ONE concrete motif (an object or detail from the scene) that "
@@ -202,9 +204,9 @@ def build_story_prompt(
         "- Link the acts by cause and effect (because of PAST, PRESENT; because "
         "of PRESENT, FUTURE) — never three disconnected vignettes.\n"
         "- Give each act a different dominant emotion.\n"
-        "- Within the MAY-change list of the time constraint above, maximize "
-        "difference: anything ALLOWED to change between acts SHOULD visibly "
-        "change (location, outfit, weather — whichever the scale permits).\n"
+        "- Within the MAY-change list ONLY, let what is allowed to change visibly "
+        "change (outfit, weather, location — whichever the scale permits); never "
+        "change more than the delta above allows.\n"
         f"{_boldness_line(divergence)}\n"
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
@@ -323,9 +325,12 @@ _CANDIDATE_SPIRITS = (
         "surprising yet coherent, never random."
     )),
     ("C", "stranger", (
-        "Let one unexpected guest into the scene — a hidden world, an unseen "
-        "visitor, a genre shift, a secret the image does not show — and weave it "
-        "in as if it always belonged, reframing the whole chronicle."
+        "Recontextualize the scene with ONE unexpected but grounded element — a "
+        "hidden motive, a person just outside the frame, an ironic coincidence, a "
+        "surprising backstory or profession, a secret the character carries, a "
+        "reversal of who they really are. Keep the same real-world register as the "
+        "image; the surprise is human and situational, NEVER a genre shift to "
+        "space, magic, or the supernatural."
     )),
 )
 
@@ -379,10 +384,18 @@ def build_candidates_prompt(
             continue
         direction = "BEFORE" if AXES.index(a) < AXES.index(base_axis) else "AFTER"
         axis_lines.append(
-            f"  • [{a.upper()}] = a DIFFERENT concrete moment {span} {direction} the "
-            "image — a distinct scene/activity/situation, NOT a re-description of it."
+            f"  • [{a.upper()}] = the moment {span} {direction} the image, "
+            "on the same story thread."
         )
     axis_block = "\n".join(axis_lines)
+    delta = _scale_delta_line(time_scale)
+    guardrail = (
+        "GROUNDING — keep all three candidates in the SAME real-world register as "
+        "the image. Unless the worldview above explicitly asks for it, do NOT add "
+        "space, aliens, magic, spirits, ghosts, or any supernatural / sci-fi "
+        "element. Find the surprise in human, emotional and situational twists — "
+        "a hidden motive, an unseen person, an ironic turn — NOT in a genre shift."
+    )
     return (
         "You are a storyteller pitching THREE different chronicles for the same "
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
@@ -396,13 +409,13 @@ def build_candidates_prompt(
         "⚠️ TIME AXIS — this is the STORY ENGINE, not decoration ⚠️\n"
         f'The three moments are {span} apart (scale key: "{time_scale}").\n'
         f"{axis_block}\n"
-        "Same characters and same world throughout — only the MOMENT moves. Each "
-        "act must be a specific event (an action, a place within the world, a "
-        "change of situation) causally linked to the base image.\n"
+        f"HOW MUCH CHANGES between the acts: {delta}\n"
+        "Same characters and same world throughout — only the MOMENT moves, and "
+        "each act stays causally tethered to the base image. Do NOT jump to an "
+        "origin story or a far-off ending when the scale is short.\n"
         f"Visual continuity for this scale — keep: {rules['must_keep']}; "
-        f"may change: {rules['may_differ']}.\n"
-        "Let the scale change the KIND of story: a few minutes = moment-to-moment "
-        "beats in the same spot; several decades = eras and transformation.\n\n"
+        f"may change: {rules['may_differ']}.\n\n"
+        f"{guardrail}\n\n"
         "Make the three candidates genuinely distinct:\n"
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
@@ -512,23 +525,26 @@ def build_expand_prompt(
     return seed_block + base + lang_block
 
 
-def build_common_tags_prompt(stories: dict[str, str]) -> str:
-    """Ask for 10-15 danbooru tags common to all three acts (identity anchor)."""
+def build_story_tags_prompt(story_text: str, *, count: int = 50) -> str:
+    """Ask for ~count danbooru tags describing ONE act's scene (WD14-style).
+
+    Called per axis on that act's story, so each moment gets its own rich tag
+    set (the past act's scene tags differ from the future act's).
+    """
     return (
-        "Below are the three acts of one chronicle about a single character.\n"
-        "Extract 10-15 danbooru tags that plausibly appear in ALL THREE acts — "
-        "focus on the character's stable identity (hair, eyes, distinctive "
-        "features) and any recurring motif or object. Do NOT include tags for "
-        "scene, background, time of day, or pose (those change between acts).\n\n"
-        f"PAST: {stories.get('past', '')}\n\n"
-        f"PRESENT: {stories.get('present', '')}\n\n"
-        f"FUTURE: {stories.get('future', '')}\n\n"
+        f"Below is ONE scene from a story. Infer about {count} danbooru tags that "
+        "describe THIS scene as fully as possible — the character's appearance "
+        "(hair, eyes, face, body), clothing and accessories, pose and action, "
+        "the location and background, time of day, props and objects, lighting, "
+        "colour palette, mood and art style. Be specific and comprehensive; use "
+        "real danbooru tag spellings with underscores.\n\n"
+        f"SCENE:\n{story_text}\n\n"
         'Answer with JSON only: {"tags": ["tag_1", "tag_2", ...]}'
     )
 
 
-def parse_common_tags_json(raw: str) -> list[str]:
-    """Parse the common-tags output into underscored tags. Missing/broken → []."""
+def parse_tags_json(raw: str, *, limit: int = 60) -> list[str]:
+    """Parse a {"tags": [...]} payload into underscored tags. Missing/broken → []."""
     text = raw.strip()
     try:
         data = json.loads(text)
@@ -550,7 +566,7 @@ def parse_common_tags_json(raw: str) -> list[str]:
         if tag and tag.lower() not in seen:
             seen.add(tag.lower())
             out.append(tag)
-    return out[:15]
+    return out[:limit]
 
 
 # ── Stage 3: per-axis Visual Script prompt ────────────────────────────────────
@@ -631,6 +647,49 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
         "forbidden": "nothing is forbidden — show dramatic transformation",
     },
 }
+
+
+# How MUCH the scene changes between acts, per scale. Short scales must stay an
+# extension of the base image (small delta), not a scene/time jump; long scales
+# open up. Keeps the three acts from lurching into unrelated scenes at "minutes".
+_SCALE_DELTA: dict[str, str] = {
+    "minutes": (
+        "almost the same instant — the other acts are the SAME scene a few beats "
+        "earlier / later (a micro-shift of pose, gaze, hand action or expression). "
+        "This is the base image EXTENDED slightly before/after (an image+alpha "
+        "continuation), NOT a new scene, NOT a distant memory or a far future."
+    ),
+    "tens_of_minutes": (
+        "the same spot a short while apart — a small progression of the SAME "
+        "activity (an object picked up or set down, a step taken, the mood easing). "
+        "Same scene, small delta — no location or time-of-day jump."
+    ),
+    "hours": (
+        "the same place/building on the SAME day — a different beat of the same "
+        "visit (arriving, mid-way, about to leave). The location does not change "
+        "and it is not an origin story or a far-off ending."
+    ),
+    "days": (
+        "the same person and area a few days apart — outfit or time of day may "
+        "differ, but it is clearly the same ongoing life, not a dramatic origin "
+        "or finale."
+    ),
+    "months": (
+        "a seasonal shift in the same locale — wardrobe and season change while "
+        "identity and place stay recognizable."
+    ),
+    "years": (
+        "a life-stage change — settings and scenes may genuinely differ while the "
+        "person stays recognizable."
+    ),
+    "decades": (
+        "eras and transformation — scenes, fashion and world may change completely."
+    ),
+}
+
+
+def _scale_delta_line(time_scale: str) -> str:
+    return _SCALE_DELTA.get(time_scale, _SCALE_DELTA["years"])
 
 
 # ── Identity tag scoping (chronicle-specific WD14 handling) ───────────────────
@@ -819,7 +878,7 @@ def build_axis_prompt(
     title: str = "",
     overall: str = "",
     all_stories: dict[str, str] | None = None,
-    common_tags: list[str] | None = None,
+    axis_tags: list[str] | None = None,
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
@@ -828,8 +887,8 @@ def build_axis_prompt(
 
     WD14 dependency is deliberately reduced: for non-base axes the base image's
     WD14 tags are omitted entirely (they describe a different moment), and the
-    story text becomes the primary content source. common_tags — shared motif
-    tags extracted from all three acts — anchor continuity instead.
+    story text becomes the primary content source. axis_tags — ~50 danbooru
+    tags inferred from THIS act's own story — enrich the positive prompt.
     """
     if all_stories:
         chronicle_ctx = (
@@ -881,7 +940,7 @@ def build_axis_prompt(
         # Non-base axis: the base image's WD14 tags describe a DIFFERENT moment
         # in time, so they are dropped entirely. The story text is the primary
         # source; character identity is carried by the identity tags the runner
-        # injects, plus the shared common_tags below.
+        # injects, plus this act's own axis_tags below.
         wd14_block = ""
     elif wd14_context:
         wd14_block = (
@@ -893,11 +952,11 @@ def build_axis_prompt(
     else:
         wd14_block = ""
 
-    if common_tags:
+    if axis_tags:
         common_block = (
-            "\n[Shared identity/motif tags common to all three acts — keep these "
-            "consistent across the chronicle for character continuity]\n"
-            f"{', '.join(common_tags)}\n"
+            "\n[Danbooru tags inferred from THIS act's story — weave these into the "
+            "positive prompt to describe this scene richly and specifically]\n"
+            f"{', '.join(axis_tags)}\n"
         )
     else:
         common_block = ""

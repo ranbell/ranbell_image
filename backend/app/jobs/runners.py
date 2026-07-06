@@ -2897,20 +2897,20 @@ async def run_chronicle_expand(
     from ..story.generator import (
         AXES,
         build_axis_prompt,
-        build_common_tags_prompt,
         build_expand_prompt,
         build_overall_prompt,
         build_story_repair_prompt,
+        build_story_tags_prompt,
         build_title_prompt,
         build_translation_to_english_prompt,
         collect_prompt_tags,
         identity_tags_for_scale,
         inject_identity_tags,
         is_multi_character,
-        parse_common_tags_json,
         parse_english_translation_json,
         parse_story_json,
         parse_story_sections,
+        parse_tags_json,
         remove_conflict_tags,
     )
 
@@ -3073,22 +3073,23 @@ async def run_chronicle_expand(
             stories_ja = {a: "" for a in AXES}
             en_title, en_overall, en_stories = title, overall, stories
 
-        # ── Stage 2c: shared identity/motif tags (supplementary anchor) ───────
-        _phase("commonTags", 0.48, "Extracting shared tags...")
-        common_tags: list[str] = []
-        try:
-            raw_ct = await ollama.generate_text(
-                build_common_tags_prompt(en_stories),
-                model=vlm_model, options=options, fmt="json",
-            )
-            common_tags = parse_common_tags_json(raw_ct)
-        except Exception as exc:
-            logger.warning("[chronicle] common tags extraction failed: %s", exc)
-
         # ── Stage 3: per-axis Visual Script prompt ────────────────────────────
         gen_axes = [a for a in AXES if a != body.base_time_axis]
         prompts: dict[str, dict] = {}
         for i, axis in enumerate(gen_axes):
+            # Per-axis WD14-style tags inferred from THIS act's own story, so the
+            # past and future scenes each get their own rich (~50) tag set.
+            _phase("taggingAxis", 0.52 + 0.12 * i, f"Tagging {axis} scene...")
+            axis_tags: list[str] = []
+            try:
+                raw_at = await ollama.generate_text(
+                    build_story_tags_prompt(en_stories[axis]),
+                    model=vlm_model, options=options, fmt="json",
+                )
+                axis_tags = parse_tags_json(raw_at)
+            except Exception as exc:
+                logger.warning("[chronicle] %s tag inference failed: %s", axis, exc)
+
             _phase("refiningPrompt", 0.55 + 0.12 * i, f"Refining {axis} prompt...")
             _put({"type": "token", "text": f"\n\n— {axis} prompt —\n"})
             axis_prompt = build_axis_prompt(
@@ -3103,7 +3104,7 @@ async def run_chronicle_expand(
                 title=en_title,
                 overall=en_overall,
                 all_stories=en_stories,
-                common_tags=common_tags,
+                axis_tags=axis_tags,
             )
             axis_tokens: list[str] = []
             async for event in ollama.generate_text_stream(
@@ -3143,7 +3144,7 @@ async def run_chronicle_expand(
             # axis over the identity candidates + everything the LLM generated.
             # Higher stakes than Refine — every axis is a different time/scene.
             cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
-            sources = list(dict.fromkeys(identity_tags + common_tags + cand_tags))[:80]
+            sources = list(dict.fromkeys(identity_tags + axis_tags + cand_tags))[:140]
             conflicts: set[str] = set()
             if sources:
                 conflicts = await _find_conflict_tags(

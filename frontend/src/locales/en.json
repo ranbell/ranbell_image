@@ -1272,6 +1272,7 @@
       "selecting": "Choose a story",
       "expanding": "Expanding the story",
       "commonTags": "Extracting shared tags",
+      "taggingAxis": "Tagging the scene",
       "writingStory": "Writing the chronicle",
       "refiningPrompt": "Refining prompts",
       "savingStory": "Saving story",

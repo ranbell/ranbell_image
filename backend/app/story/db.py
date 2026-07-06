@@ -19,8 +19,8 @@ Payload schema:
     candidates: [ {id, title, summary, suggested_time_scale, key_motif} ]
     selected_candidate: "A" | "B" | "C"
     respin_history: [ {kind, temperature, candidates?/title/overall/axes?} ]
-    context: { character_desc, scene_desc, wd14_identity_tags, common_tags,
-               story_hooks }             # carried Phase 1 → Phase 2
+    context: { character_desc, scene_desc, character_tags, wd14_tags,
+               wd14_context, story_hooks, body }   # carried Phase 1 → Phase 2
     created_at: float (unix time)
     group_id: str
 """
