@@ -2808,6 +2808,7 @@ async def run_chronicle_candidates(
                 scene_desc=ctx.get("scene_desc", ""),
                 user_topic=body.user_topic,
                 worldview=body.worldview,
+                base_axis=body.base_time_axis,
                 time_scale=body.time_scale,
                 locale=body.locale,
             ),

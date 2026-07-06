@@ -636,6 +636,7 @@ def test_build_candidates_prompt():
         scene_desc="a quiet classroom",
         user_topic="放課後の冒険",
         worldview="",
+        base_axis="present",
         time_scale="minutes",
         locale="ja",
     )
@@ -645,47 +646,73 @@ def test_build_candidates_prompt():
         assert flavour in prompt
     # locale drives output language instruction
     assert "日本語" in prompt
+    # base image is bound to the base axis; other acts are offset in time
+    assert "THE BASE IMAGE IS THE [PRESENT] MOMENT" in prompt
+    assert "BEFORE the image" in prompt and "AFTER the image" in prompt
+    # per-axis output schema (beats), not a single summary
+    assert '"past"' in prompt and '"present"' in prompt and '"future"' in prompt
+    assert '"summary"' not in prompt
 
 
-def test_candidates_prompt_time_scale_rules():
+def test_candidates_prompt_base_axis_directions():
+    # base=past → the other two acts are both AFTER the image
+    past_base = build_candidates_prompt(
+        character_desc="c", scene_desc="s", base_axis="past", time_scale="hours",
+    )
+    assert "THE BASE IMAGE IS THE [PAST] MOMENT" in past_base
+    assert past_base.count("AFTER the image") == 2
+    assert "BEFORE the image" not in past_base
+
+
+def test_candidates_prompt_time_scale_differs():
     minutes = build_candidates_prompt(
         character_desc="c", scene_desc="s", time_scale="minutes", locale="en"
     )
     decades = build_candidates_prompt(
         character_desc="c", scene_desc="s", time_scale="decades", locale="en"
     )
-    # each embeds that scale's own visual rules, so the prompts differ by scale
     from app.story.generator import _SCALE_VISUAL_RULES
-    assert _SCALE_VISUAL_RULES["minutes"]["forbidden"] in minutes
+    # each embeds its own scale's continuity note, so prompts differ by scale
+    assert _SCALE_VISUAL_RULES["minutes"]["must_keep"] in minutes
     assert _SCALE_VISUAL_RULES["decades"]["may_differ"] in decades
+    assert "a few minutes apart" in minutes and "several decades apart" in decades
     assert minutes != decades
 
 
 def test_parse_candidates_json_clean():
     raw = (
         '{"candidates": ['
-        '{"id":"A","title":"T1","summary":"S1","suggested_time_scale":"years","key_motif":"m1"},'
-        '{"id":"B","title":"T2","summary":"S2","suggested_time_scale":"days","key_motif":"m2"}'
+        '{"id":"A","title":"T1","past":"p1","present":"pr1","future":"f1","key_motif":"m1"},'
+        '{"id":"B","title":"T2","past":"p2","present":"pr2","future":"f2","key_motif":"m2"}'
         ']}'
     )
     out = parse_candidates_json(raw)
     assert len(out) == 2
     assert out[0]["id"] == "A" and out[0]["title"] == "T1"
-    assert out[1]["suggested_time_scale"] == "days"
+    assert out[0]["past"] == "p1" and out[0]["future"] == "f1"
+    # summary is derived from the present beat when not provided
+    assert out[0]["summary"] == "pr1"
+
+
+def test_parse_candidates_json_legacy_summary():
+    # older records carried a single summary → still parsed, beats empty
+    raw = '{"candidates":[{"id":"A","title":"T","summary":"S"}]}'
+    out = parse_candidates_json(raw)
+    assert out[0]["summary"] == "S" and out[0]["present"] == ""
 
 
 def test_parse_candidates_json_wrapped_and_broken():
-    wrapped = 'noise before {"candidates":[{"id":"A","title":"T"}]} noise after'
+    wrapped = 'noise before {"candidates":[{"id":"A","title":"T","present":"pr"}]} tail'
     out = parse_candidates_json(wrapped)
-    assert len(out) == 1 and out[0]["title"] == "T"
-    # missing id → auto-assigned; missing fields → empty strings
-    assert out[0]["summary"] == "" and out[0]["id"] == "A"
+    assert len(out) == 1 and out[0]["title"] == "T" and out[0]["id"] == "A"
     assert parse_candidates_json("total garbage") == []
 
 
 def test_build_expand_prompt():
     prompt = build_expand_prompt(
-        selected={"title": "The Bell", "summary": "a bell tolls", "key_motif": "bronze bell"},
+        selected={"title": "The Bell", "past": "a bell is cast",
+                  "present": "a bell tolls", "future": "a bell cracks",
+                  "key_motif": "bronze bell"},
         character_desc="[visual tags] 1girl",
         scene_desc="a belfry",
         base_axis="present",
@@ -693,8 +720,9 @@ def test_build_expand_prompt():
         time_scale="years",
         locale="ja",
     )
-    # the chosen candidate seeds the expansion, in Japanese, keeping the markers
+    # the chosen candidate's beats seed the expansion, in Japanese, keeping markers
     assert "The Bell" in prompt and "bronze bell" in prompt
+    assert "a bell is cast" in prompt and "a bell cracks" in prompt
     assert "日本語" in prompt
     assert "[TITLE]" in prompt and "[PAST]" in prompt
 

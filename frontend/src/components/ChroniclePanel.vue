@@ -584,12 +584,16 @@ async function generateImages() {
                     <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-gray-700 text-gray-200">{{ c.id }}</span>
                     <span class="text-xs font-bold text-amber-100 leading-tight">{{ c.title }}</span>
                   </div>
-                  <p class="text-[11px] text-gray-300 leading-snug">{{ c.summary }}</p>
-                  <div class="flex flex-wrap gap-1 mt-auto pt-1">
-                    <span v-if="c.suggested_time_scale" class="text-[9px] px-1.5 py-0.5 rounded bg-gray-900/70 text-teal-300">
-                      ⏳ {{ t('chronicle.timeScale.' + c.suggested_time_scale, c.suggested_time_scale) }}
-                    </span>
-                    <span v-if="c.key_motif" class="text-[9px] px-1.5 py-0.5 rounded bg-gray-900/70 text-purple-300">
+                  <!-- three time-axis beats: base axis highlighted -->
+                  <div class="flex flex-col gap-1 text-[10px] leading-snug">
+                    <div v-for="ax in AXES" :key="ax" v-show="c[ax] || c.summary">
+                      <span class="font-bold uppercase tracking-wide mr-1"
+                        :class="ax === baseAxis ? 'text-amber-400' : 'text-teal-400'">{{ t('chronicle.axis.' + ax) }}</span>
+                      <span class="text-gray-300">{{ c[ax] || (ax === 'present' ? c.summary : '') }}</span>
+                    </div>
+                  </div>
+                  <div v-if="c.key_motif" class="mt-auto pt-1">
+                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-gray-900/70 text-purple-300">
                       ✦ {{ c.key_motif }}
                     </span>
                   </div>

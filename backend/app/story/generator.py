@@ -332,8 +332,8 @@ _CANDIDATE_SPIRITS = (
 
 def _locale_output_line(locale: str) -> str:
     if locale == "ja":
-        return "出力の title / summary / key_motif はすべて自然で読みやすい日本語で書くこと。"
-    return "Write every title / summary / key_motif field in natural English."
+        return "出力の title / past / present / future / key_motif はすべて自然で読みやすい日本語で書くこと。"
+    return "Write every title / past / present / future / key_motif field in natural English."
 
 
 def build_candidates_prompt(
@@ -342,15 +342,17 @@ def build_candidates_prompt(
     scene_desc: str,
     user_topic: str = "",
     worldview: str = "",
+    base_axis: str = "present",
     time_scale: str = "years",
     locale: str = "en",
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
     The three ideas diverge along the faithful/rebel/stranger axes. Output
-    language follows `locale` (ja/en). The chosen time scale is a first-class
-    factor: each candidate must describe how past→present→future changes across
-    that span.
+    language follows `locale` (ja/en). The time axis is the STORY ENGINE: the
+    base image is the `base_axis` moment, and each candidate must give ONE
+    concrete beat per act, where the other two acts are separate moments the
+    chosen span before / after the image (not a re-description of it).
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
@@ -369,36 +371,50 @@ def build_candidates_prompt(
         f"  Candidate {cid} ({flavour}): {desc}"
         for cid, flavour, desc in _CANDIDATE_SPIRITS
     )
+    # Bind each act to the time axis: base_axis = the image; the others are a
+    # span before / after it.
+    axis_lines = [f"  • [{base_axis.upper()}] = the base image above (do NOT change it)."]
+    for a in AXES:
+        if a == base_axis:
+            continue
+        direction = "BEFORE" if AXES.index(a) < AXES.index(base_axis) else "AFTER"
+        axis_lines.append(
+            f"  • [{a.upper()}] = a DIFFERENT concrete moment {span} {direction} the "
+            "image — a distinct scene/activity/situation, NOT a re-description of it."
+        )
+    axis_block = "\n".join(axis_lines)
     return (
         "You are a storyteller pitching THREE different chronicles for the same "
-        "character and scene. Each chronicle spans past, present and future.\n\n"
+        "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
+        f"separated by {span} of elapsed time.\n\n"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
-        f"THE SCENE (the base moment):\n{scene_desc}\n\n"
+        f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT — it looks exactly "
+        f"like this:\n{scene_desc}\n\n"
         f"{topic_line}\n"
         f"{world_line}\n\n"
-        "⚠️ TIME SCALE — a first-class factor for every candidate ⚠️\n"
-        f'The three acts are {span} apart (scale key: "{time_scale}").\n'
-        f"  MUST stay the same across acts: {rules['must_keep']}\n"
-        f"  MAY change: {rules['may_differ']}\n"
-        f"  FORBIDDEN: {rules['forbidden']}\n"
-        "Each candidate's summary and key_motif MUST reflect how the story "
-        "changes across THIS time span (a few minutes feels intimate and "
-        "moment-to-moment; several decades spans eras and transformation).\n\n"
+        "⚠️ TIME AXIS — this is the STORY ENGINE, not decoration ⚠️\n"
+        f'The three moments are {span} apart (scale key: "{time_scale}").\n'
+        f"{axis_block}\n"
+        "Same characters and same world throughout — only the MOMENT moves. Each "
+        "act must be a specific event (an action, a place within the world, a "
+        "change of situation) causally linked to the base image.\n"
+        f"Visual continuity for this scale — keep: {rules['must_keep']}; "
+        f"may change: {rules['may_differ']}.\n"
+        "Let the scale change the KIND of story: a few minutes = moment-to-moment "
+        "beats in the same spot; several decades = eras and transformation.\n\n"
         "Make the three candidates genuinely distinct:\n"
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
-        "For EACH candidate provide:\n"
-        "  - title: a specific, evocative title (3-8 words), never generic\n"
-        "  - summary: 2-3 sentences describing the past→present→future arc\n"
-        "  - suggested_time_scale: the scale this premise fits best, one of "
-        f"{', '.join(TIME_SCALES)} (may equal or differ from \"{time_scale}\")\n"
-        "  - key_motif: one concrete object/detail that recurs and transforms "
-        "in meaning across the three acts\n\n"
+        "For EACH candidate write ONE concrete sentence per act — past, present, "
+        f"future — where the [{base_axis}] sentence matches the base image and the "
+        f"other two are the events {span} before / after it. Also give a title "
+        "(3-8 words, specific and evocative, never generic) and a key_motif (one "
+        "concrete object that recurs and changes meaning across the three moments).\n\n"
         "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
-        '  {"id": "A", "title": "...", "summary": "...", '
-        '"suggested_time_scale": "...", "key_motif": "..."},\n'
+        '  {"id": "A", "title": "...", "past": "...", "present": "...", '
+        '"future": "...", "key_motif": "..."},\n'
         '  {"id": "B", ...},\n'
         '  {"id": "C", ...}\n'
         "]}"
@@ -426,11 +442,22 @@ def parse_candidates_json(raw: str) -> list[dict]:
         if not isinstance(item, dict):
             continue
         cid = str(item.get("id") or "").strip() or chr(ord("A") + len(result))
+        past = str(item.get("past") or "").strip()
+        present = str(item.get("present") or "").strip()
+        future = str(item.get("future") or "").strip()
+        # Backward compat: older records carried a single `summary` instead of
+        # per-axis beats. Keep a derived summary so downstream (Storybook,
+        # expand seed) never sees an empty field.
+        summary = str(item.get("summary") or "").strip()
+        if not summary:
+            summary = present or " / ".join(b for b in (past, future) if b)
         result.append({
             "id": cid,
             "title": str(item.get("title") or "").strip(),
-            "summary": str(item.get("summary") or "").strip(),
-            "suggested_time_scale": str(item.get("suggested_time_scale") or "").strip(),
+            "past": past,
+            "present": present,
+            "future": future,
+            "summary": summary,
             "key_motif": str(item.get("key_motif") or "").strip(),
         })
     return result
@@ -451,13 +478,19 @@ def build_expand_prompt(
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
     Same markers/structure as build_story_prompt, but seeded by the selected
-    candidate (title/summary/key_motif) and written in the user's locale.
+    candidate's per-act beats (title/past/present/future/key_motif) and written
+    in the user's locale. Older candidates without beats fall back to summary.
     """
+    beats = "".join(
+        f"  [{a.upper()}] seed: {selected.get(a, '')}\n"
+        for a in AXES if selected.get(a)
+    ) or f"  Summary: {selected.get('summary', '')}\n"
     seed_block = (
-        "CHOSEN STORY DIRECTION — expand THIS premise faithfully into the three "
-        "acts (keep its title unless it genuinely no longer fits):\n"
-        f"  Title:   {selected.get('title', '')}\n"
-        f"  Summary: {selected.get('summary', '')}\n"
+        "CHOSEN STORY DIRECTION — expand THESE beats faithfully into the three "
+        "full acts, honouring the time axis between them (keep the title unless "
+        "it genuinely no longer fits):\n"
+        f"  Title: {selected.get('title', '')}\n"
+        f"{beats}"
         "  Key motif (must recur and transform across all three acts): "
         f"{selected.get('key_motif', '')}\n\n"
     )
