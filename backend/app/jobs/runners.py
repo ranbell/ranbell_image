@@ -2911,6 +2911,7 @@ async def run_chronicle_expand(
         parse_english_translation_json,
         parse_story_json,
         parse_story_sections,
+        remove_conflict_tags,
     )
 
     def _put(event: dict | None) -> None:
