@@ -551,6 +551,15 @@ async function generateImages() {
               <span v-if="seed !== null" class="text-[10px] text-gray-600 font-mono ml-auto">seed: {{ seed }}</span>
             </div>
 
+            <!-- generate images (manual mode / no-workflow continue) -->
+            <div v-if="canGenerate" class="flex items-center gap-3">
+              <button @click="generateImages" :disabled="!workflow"
+                class="px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
+                🎨 {{ t('chronicle.generateImages') }}
+              </button>
+              <span v-if="!workflow" class="text-[10px] text-amber-400/80">{{ t('chronicle.noWorkflowHint') }}</span>
+            </div>
+
             <!-- progress bar -->
             <div v-if="running || (finished && progress > 0)"
               class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
@@ -636,13 +645,6 @@ async function generateImages() {
                   class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 resize-y focus:border-teal-500 outline-none"></textarea>
                 <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
                   class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 resize-y focus:border-teal-500 outline-none"></textarea>
-              </div>
-              <div v-if="canGenerate" class="flex items-center gap-3">
-                <button @click="generateImages" :disabled="!workflow"
-                  class="px-4 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
-                  🎨 {{ t('chronicle.generateImages') }}
-                </button>
-                <span v-if="!workflow" class="text-[10px] text-amber-400/80">{{ t('chronicle.noWorkflowHint') }}</span>
               </div>
             </div>
 
