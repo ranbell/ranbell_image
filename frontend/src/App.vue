@@ -5015,6 +5015,7 @@ onUnmounted(() => {
       :jobs-map="jobsMap"
       @update:show="showChronicle = $event"
       @toast="showToast($event.msg, $event.type)"
+      @open-storybook="showChronicle = false; showStorybook = true"
     />
 
     <!-- ── Storybook ── -->

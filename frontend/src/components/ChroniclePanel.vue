@@ -10,7 +10,7 @@ const props = defineProps({
   comfyOffline: { type: Boolean, default: false },
   jobsMap: { type: Object, default: () => new Map() },  // App-level job state map
 })
-const emit = defineEmits(['update:show', 'toast'])
+const emit = defineEmits(['update:show', 'toast', 'open-storybook'])
 
 const AXES = ['past', 'present', 'future']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
@@ -567,6 +567,23 @@ async function generateImages() {
                 :style="{ width: (progress * 100) + '%' }"></div>
             </div>
 
+            <!-- image job status cards (generation progress) -->
+            <div v-if="imageJobs.length" class="flex flex-wrap gap-2">
+              <div v-for="j in imageJobs" :key="j.job_id"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
+                :class="jobStatusClass(j.job_id)">
+                <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
+                <span>{{ jobStatusIcon(j.job_id) }}</span>
+                <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
+              </div>
+            </div>
+
+            <!-- open the Storybook to view finished chronicles -->
+            <button @click="emit('open-storybook')"
+              class="self-start px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 border border-amber-600/40 hover:border-amber-500/60 rounded-lg text-xs font-medium text-amber-200 transition-colors">
+              📖 {{ t('header.storybook') }}
+            </button>
+
             <p v-if="errorMsg" class="text-xs text-red-400">{{ errorMsg }}</p>
           </div>
 
@@ -645,17 +662,6 @@ async function generateImages() {
                   class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-200 resize-y focus:border-teal-500 outline-none"></textarea>
                 <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
                   class="bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 resize-y focus:border-teal-500 outline-none"></textarea>
-              </div>
-            </div>
-
-            <!-- image job status cards -->
-            <div v-if="imageJobs.length" class="flex flex-wrap gap-2">
-              <div v-for="j in imageJobs" :key="j.job_id"
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
-                :class="jobStatusClass(j.job_id)">
-                <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
-                <span>{{ jobStatusIcon(j.job_id) }}</span>
-                <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
               </div>
             </div>
           </div>
