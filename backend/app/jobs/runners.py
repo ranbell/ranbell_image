@@ -1652,7 +1652,18 @@ async def run_invoke_spirit_compose(
 
     # Build user message
     style_str = ", ".join(axes.get("style", []))
-    user_msg_parts = [
+    user_msg_parts: list[str] = []
+    # Front-load the respin "don't repeat this" instruction so the LLM actually
+    # notices it — buried at the tail of a long prompt it barely lands.
+    if avoid_tags:
+        user_msg_parts.append(
+            "⚠️ RESPIN — DO NOT REPRODUCE THE PREVIOUS ATTEMPT ⚠️\n"
+            f"Previously used tags: [{', '.join(avoid_tags)}]\n"
+            "Pick a genuinely different scene interpretation, pose, lighting, "
+            "palette, and supporting tag set. Keep the character identity and "
+            "the locked axes intact."
+        )
+    user_msg_parts.extend([
         f"slogan: {axes.get('_slogan', '')}",
         f"user_intent: {axes.get('_user_intent', '')}",
         f"axes:",
@@ -1666,7 +1677,7 @@ async def run_invoke_spirit_compose(
         f"  style: [{style_str}]",
         f"  palette: {axes.get('palette', '')}",
         f"  accessories: {axes.get('accessories', '')}",
-    ]
+    ])
     if spirit.get("needs_vocab_hint"):
         stranger_tags = ", ".join(vocab_hints.get("stranger", []))
         lunatic_tags = ", ".join(vocab_hints.get("lunatic", []))
@@ -1721,13 +1732,6 @@ async def run_invoke_spirit_compose(
             "Set inverted_axis to null."
         )
 
-    if avoid_tags:
-        user_msg_parts.append(
-            f"PREVIOUS ATTEMPT (do NOT reproduce): [{', '.join(avoid_tags)}] — "
-            "the user asked for a DIFFERENT take. Choose a different scene interpretation, "
-            "lighting, and supporting cast of tags. Keep the character identity and axes intact."
-        )
-
     full_prompt = f"{sys_prompt}\n\n---\n\n" + "\n".join(user_msg_parts)
 
     session = session_manager.get_session(session_id)
@@ -1741,10 +1745,16 @@ async def run_invoke_spirit_compose(
     temperature = float(spirit.get("temperature", 0.8)) * heat + respin_boost
     temperature = max(0.1, min(1.6, temperature))
 
-    logger.debug("[invoke] spirit_compose start: %s temp=%.2f", spirit_name, temperature)
+    # Fresh Ollama seed every compose so identical prompt text still samples
+    # a different trajectory — critical for making respins visibly different.
+    import random as _random
+    seed = _random.randint(1, (1 << 31) - 1)
+
+    logger.debug("[invoke] spirit_compose start: %s temp=%.2f seed=%d", spirit_name, temperature, seed)
     try:
         raw = await ollama.generate_text(
-            full_prompt, fmt="json", options={"temperature": temperature}
+            full_prompt, fmt="json",
+            options={"temperature": temperature, "seed": seed},
         )
     except Exception as e:
         logger.warning("[invoke] spirit_compose ollama failed (%s): %s", spirit_name, e)
@@ -1757,16 +1767,14 @@ async def run_invoke_spirit_compose(
     try:
         result = _json.loads(raw)
     except Exception as e:
+        # Malformed JSON used to be papered over with a subject-only fallback,
+        # which produced a silently anemic prompt. Surface it instead so the
+        # user can respin (same UX path as a content_policy block).
         logger.warning("[invoke] spirit_compose JSON parse failed (%s): %s | raw=%r", spirit_name, e, raw[:200])
-        result = {
-            "spirit": spirit_name,
-            "natural_language": axes.get("subject", "a figure in a mysterious scene"),
-            "danbooru_tags": ", ".join(axes.get("style", ["anime"])),
-            "negative_supplement": "",
-            "internal_monologue": "…",
-            "inverted_axis": None,
-            "wild_tags_used": [],
-        }
+        await session_manager.on_spirit_error(
+            session_id, spirit_name, "LLM returned malformed JSON — please retry."
+        )
+        return {}
 
     # ── BM25 normalize Spirit danbooru_tags against Danbooru vocabulary ──────
     try:
@@ -1782,6 +1790,21 @@ async def run_invoke_spirit_compose(
     if await check_spirit_output(result, ollama):
         logger.warning("[invoke] content_guard blocked spirit output: %s", spirit_name)
         await session_manager.on_spirit_error(session_id, spirit_name, BLOCK_MESSAGE)
+        return {}
+
+    # ── Adequacy guard: catch severely short / empty prompts and surface them
+    # the same way content_policy does, so the user sees the Retry button
+    # instead of a silently-degraded rendered image.
+    nl_len = len((result.get("natural_language") or "").strip())
+    tag_count = sum(1 for t in (result.get("danbooru_tags") or "").split(",") if t.strip())
+    if nl_len < 30 and tag_count < 15:
+        logger.warning(
+            "[invoke] spirit produced degenerate prompt: %s (nl=%d, tags=%d)",
+            spirit_name, nl_len, tag_count,
+        )
+        await session_manager.on_spirit_error(
+            session_id, spirit_name, "Prompt generation failed — please retry."
+        )
         return {}
 
     logger.debug("[invoke] spirit_compose done: %s → nl=%r", spirit_name, str(result.get("natural_language", ""))[:60])
@@ -2121,6 +2144,19 @@ async def run_invoke_respin(
     reporter.update(0.25, f"Hints ready — composing {spirit_name}")
     cancel.raise_if_set()
 
+    # Stepped respin temperature ramp. The previous +0.1 * len(history) was
+    # too gentle to visibly reroll on the first respin — this jumps to +0.25
+    # immediately so the user sees a genuinely different sampling trajectory.
+    n = len(history)
+    if n == 0:
+        respin_boost = 0.0
+    elif n == 1:
+        respin_boost = 0.25
+    elif n == 2:
+        respin_boost = 0.40
+    else:
+        respin_boost = 0.55
+
     return await run_invoke_spirit_compose(
         reporter,
         cancel,
@@ -2132,7 +2168,7 @@ async def run_invoke_respin(
         locale=session.locale,
         rebel_inversion=session.rebel_inversion if spirit_name == "rebel" else True,
         avoid_tags=avoid_tags,
-        respin_boost=min(0.3, 0.1 * len(history)),
+        respin_boost=respin_boost,
         session_manager=session_manager,
     )
 
