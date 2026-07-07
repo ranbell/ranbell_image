@@ -4,7 +4,6 @@ POST /api/story/chronicle                    — Phase 1: pitch 3 candidates
 POST /api/story/chronicle/{story_id}/select  — Phase 2: expand chosen candidate
 POST /api/story/chronicle/{story_id}/respin  — regenerate (candidates | expand)
 GET  /api/story/chronicle/{job_id}/stream    — SSE token/event stream for a job
-POST /api/story/upload-base            — upload an external base image
 GET  /api/story/storybook              — list saved stories (newest first)
 GET  /api/story/{story_id}             — one story
 POST /api/story/{story_id}/generate-images   — manual-mode continue (writes
@@ -13,27 +12,21 @@ POST /api/story/{story_id}/regenerate/{axis} — image-only retry with a new see
 """
 
 import asyncio
-import hashlib
 import json
 import logging
 import random
 import uuid
-from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..config import settings
 from ..spooler.models import JobLane
 from . import db as story_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/story")
-
-_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 class ChronicleRequest(BaseModel):
@@ -200,34 +193,6 @@ async def chronicle_stream(job_id: str, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-@router.post("/upload-base")
-async def upload_base(file: UploadFile, request: Request):
-    """Save an externally dropped image to Chronicles/ and register it."""
-    from ..scanner.scanner import register_image
-
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in _UPLOAD_SUFFIXES:
-        raise HTTPException(400, f"Unsupported file type: {suffix or '(none)'}")
-    data = await file.read()
-    if not data:
-        raise HTTPException(400, "Empty file")
-
-    sha256 = hashlib.sha256(data).hexdigest()
-    gen_dir = settings.generated_images_dir / "Chronicles"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = gen_dir / f"upload_{ts}_{sha256[:8]}{suffix}"
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, path.write_bytes, data)
-    try:
-        await register_image(path, request.app.state.db)
-    except Exception as exc:
-        logger.error("upload-base register_image failed: %s", exc)
-        raise HTTPException(500, f"Image registration failed: {exc}")
-    return {"sha256": sha256, "path": str(path)}
 
 
 @router.get("/storybook")

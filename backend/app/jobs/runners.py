@@ -2891,6 +2891,7 @@ async def run_chronicle_expand(
         _clean_markdown,
         _correct_prose_wd14_conflicts,
         _parse_positive_negative,
+        _sample_mutation_tags,
     )
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
@@ -2979,8 +2980,23 @@ async def run_chronicle_expand(
             })
             await story_db.set_story_payload(db, story_id, {"respin_history": hist})
 
-        # ── Stage 2b: expand the chosen candidate (user's locale) ─────────────
+        # ── Divergence: sample "related but absent" mutation tags to weave into
+        # the past/future acts. Surfaced to the client so the user can see which
+        # tags the divergence dial injected into the story seed.
         divergence = max(0.0, min(1.0, body.divergence))
+        mutation_tags: list[str] = []
+        if divergence > 0 and wd14_tags:
+            _phase("mutatingTags", 0.08, "Sampling mutation tags...")
+            try:
+                mutation_tags = await _sample_mutation_tags(
+                    db, ollama, {"common_tags": list(wd14_tags)}, divergence
+                )
+            except Exception as exc:
+                logger.warning("[chronicle] mutation tag sampling failed: %s", exc)
+            if mutation_tags:
+                _put({"type": "mutation_tags", "tags": mutation_tags})
+
+        # ── Stage 2b: expand the chosen candidate (user's locale) ─────────────
         _phase("expanding", 0.10, "Expanding the story...")
         _put({"type": "token", "text": "\n\n"})
         expand_prompt = build_expand_prompt(
@@ -2994,6 +3010,7 @@ async def run_chronicle_expand(
             divergence=divergence,
             emotion=body.emotion,
             locale=locale,
+            mutation_tags=mutation_tags,
         )
         story_tokens: list[str] = []
         async for event in ollama.generate_text_stream(
@@ -3232,6 +3249,8 @@ async def run_chronicle_expand(
             "overall_story": en_overall,
             "overall_story_ja": overall_ja,
             "axes": axes_payload,
+            "divergence": divergence,
+            "mutation_tags": mutation_tags,
         })
         if embedding:
             try:

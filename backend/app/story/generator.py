@@ -500,6 +500,7 @@ def build_expand_prompt(
     divergence: float = 0.0,
     emotion: str = "",
     locale: str = "en",
+    mutation_tags: list[str] | None = None,
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
@@ -532,6 +533,7 @@ def build_expand_prompt(
         base_axis=base_axis,
         worldview=worldview,
         time_scale=time_scale,
+        mutation_tags=mutation_tags,
         story_hooks=story_hooks,
         divergence=divergence,
         emotion=emotion,

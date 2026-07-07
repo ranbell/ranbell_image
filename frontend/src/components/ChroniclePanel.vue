@@ -40,8 +40,7 @@ const emotion = ref('')       // target emotion register ('' = off)
 const timeScaleIdx = ref(5)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
-const dragOver = ref(false)
-const uploading = ref(false)
+const pickingRandom = ref(false)
 
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
@@ -71,6 +70,7 @@ const title = ref('')
 const titleJa = ref('')
 const overall = ref('')
 const overallJa = ref('')
+const mutationTags = ref([])   // tags injected by the divergence dial (visible)
 
 // ── candidate / selection state ─────────────────────────────────────────────
 const candidates = ref([])       // [{id,title,summary,suggested_time_scale,key_motif}]
@@ -156,6 +156,7 @@ function resetStory() {
   titleJa.value = ''
   overall.value = ''
   overallJa.value = ''
+  mutationTags.value = []
 }
 
 function resetRun() {
@@ -191,24 +192,21 @@ function jobStatusClass(job_id) {
   }[jobState(job_id)] ?? 'border-gray-700 bg-gray-900/50 text-gray-400'
 }
 
-// ── external image drop ───────────────────────────────────────────────────────
-async function onDrop(e) {
-  dragOver.value = false
-  const file = e.dataTransfer?.files?.[0]
-  if (!file) return
-  uploading.value = true
+// ── random base image from library ────────────────────────────────────────────
+async function pickRandomBase() {
+  pickingRandom.value = true
   try {
-    const fd = new FormData()
-    fd.append('file', file)
-    const r = await fetch('/api/story/upload-base', { method: 'POST', body: fd })
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    const exclude = baseSha.value ? `&exclude=${baseSha.value}` : ''
+    const r = await fetch(`/api/images/random?n=1${exclude}`)
+    if (!r.ok) throw new Error(r.statusText)
     const data = await r.json()
-    baseSha.value = data.sha256
-    emit('toast', { msg: t('chronicle.uploaded'), type: 'success' })
+    const doc = (data.images || [])[0]
+    if (!doc?.sha256) throw new Error(t('chronicle.randomEmpty'))
+    baseSha.value = doc.sha256
   } catch (err) {
-    emit('toast', { msg: t('chronicle.uploadFailed') + ': ' + err.message, type: 'error' })
+    emit('toast', { msg: t('chronicle.randomFailed') + ': ' + (err.message || err), type: 'error' })
   } finally {
-    uploading.value = false
+    pickingRandom.value = false
   }
 }
 
@@ -351,6 +349,9 @@ function handleEvent(ev) {
       titleJa.value = ev.title_ja || ''
       overallJa.value = ev.overall_ja || ''
       break
+    case 'mutation_tags':
+      mutationTags.value = ev.tags || []
+      break
     case 'warning':
       emit('toast', { msg: ev.message, type: 'warning' })
       break
@@ -442,16 +443,17 @@ async function generateImages() {
           <!-- ── LEFT: settings ───────────────────────────────────────────── -->
           <div class="flex flex-col gap-4">
             <div class="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-4">
-              <!-- base image / drop zone -->
-              <div
-                class="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 p-3 min-h-[160px] transition-colors"
-                :class="dragOver ? 'border-teal-400 bg-teal-900/20' : 'border-gray-700 bg-gray-800/40'"
-                @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
+              <!-- base image + random-from-library picker -->
+              <div class="rounded-xl border border-gray-700 bg-gray-800/40 flex flex-col items-center justify-center gap-2 p-3 min-h-[160px]">
                 <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
-                  class="max-h-32 rounded-lg object-contain" />
+                  class="max-h-28 rounded-lg object-contain" />
                 <span v-else class="text-3xl">🖼️</span>
+                <button @click="pickRandomBase" :disabled="pickingRandom"
+                  class="w-full px-2.5 py-1 rounded-lg border border-teal-700/60 bg-teal-900/30 hover:bg-teal-800/50 text-teal-200 text-[10px] font-medium disabled:opacity-40 transition-colors">
+                  🎲 {{ pickingRandom ? t('chronicle.randomPicking') : t('chronicle.randomFromLibrary') }}
+                </button>
                 <p class="text-[10px] text-gray-500 text-center leading-tight">
-                  {{ uploading ? t('chronicle.uploading') : t('chronicle.dropHint') }}
+                  {{ t('chronicle.baseHint') }}
                 </p>
               </div>
 
@@ -499,10 +501,16 @@ async function generateImages() {
                   <span class="text-teal-400 w-16 text-right">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
                 </div>
                 <!-- divergence -->
-                <div class="flex items-center gap-2">
-                  <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.divergenceTitle')">⚗️ {{ t('chronicle.divergence') }}</span>
-                  <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
-                  <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.divergenceTitle')">⚗️ {{ t('chronicle.divergence') }}</span>
+                    <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
+                    <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
+                  </div>
+                  <p v-if="mutationTags.length" class="text-[10px] text-teal-500/80 pl-[calc(5rem+0.5rem)] break-all">
+                    <span class="text-purple-300/80">✦ {{ t('chronicle.mutationTags') }}:</span>
+                    {{ mutationTags.join(', ') }}
+                  </p>
                 </div>
                 <!-- emotion register -->
                 <div class="flex items-start gap-2">
