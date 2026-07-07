@@ -1591,6 +1591,70 @@ async function fetchAiStatus() {
   } catch { }
 }
 
+// ── Backend readiness & coalesced refresh ─────────────────────────────────────
+// Background refetches (fetchTags, softRefreshGallery, etc.) fired by
+// job_finished are heavy — a single fetchTags scrolls the entire images
+// collection through Qdrant. Without coalescing, an AI pipeline that completes
+// small batches back-to-back triggers this scroll storm every few seconds.
+// We batch into a 1s window and drop calls while the backend is unavailable
+// (the ready-transition watch below runs a full resyncAll on recovery, which
+// re-reads all filter/sort refs and thus loses no user intent).
+const isBackendReady = computed(() => backendStatus.value === 'ready')
+
+let _resyncInFlight = false
+async function resyncAll() {
+  if (_resyncInFlight) return
+  _resyncInFlight = true
+  try {
+    // Auxiliary data first — these are cheap and don't touch the scroll position.
+    const aux = [fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()]
+    if (viewMode.value === 'folder') {
+      await Promise.all([fetchDirs(), ...aux])
+    } else {
+      // softRefreshGallery respects scroll position: at top it re-fetches, deep
+      // in the list it surfaces a manual "reload" button instead of yanking the
+      // user back. Fine for recovery paths; on initial mount scrollTop is 0 so
+      // the flat gallery refetches immediately.
+      softRefreshGallery()
+      await Promise.all(aux)
+    }
+  } finally {
+    _resyncInFlight = false
+  }
+}
+
+let _bgRefreshFlags = null
+let _bgRefreshTimer = null
+function scheduleBackgroundRefresh(flags) {
+  if (!isBackendReady.value) return
+  if (!_bgRefreshFlags) _bgRefreshFlags = { tags: false, gallery: false, dateRange: false, aiStatus: false }
+  for (const k in flags) if (flags[k]) _bgRefreshFlags[k] = true
+  if (_bgRefreshTimer) return
+  _bgRefreshTimer = setTimeout(async () => {
+    const f = _bgRefreshFlags
+    _bgRefreshFlags = null
+    _bgRefreshTimer = null
+    if (!isBackendReady.value) return
+    const tasks = []
+    if (f.aiStatus) tasks.push(fetchAiStatus())
+    if (f.tags) tasks.push(fetchTags())
+    if (f.dateRange) tasks.push(fetchDateRange())
+    await Promise.all(tasks)
+    if (f.gallery) softRefreshGallery()
+  }, 1000)
+}
+
+let _waitInFlight = false
+async function ensureBackendReadinessMonitor() {
+  if (_waitInFlight) return
+  _waitInFlight = true
+  try {
+    await waitForBackend()
+  } finally {
+    _waitInFlight = false
+  }
+}
+
 // ── Job stream ────────────────────────────────────────────────────────────────
 async function handleJobFinished(job) {
   // GENERATION failure: reset the refine panel before checking for success
@@ -1604,21 +1668,17 @@ async function handleJobFinished(job) {
 
   // Scan complete → refresh gallery
   if (SCAN_TITLES.has(job.title)) {
-    softRefreshGallery()
-    await fetchTags()
-    fetchDateRange()
+    scheduleBackgroundRefresh({ gallery: true, tags: true, dateRange: true })
   }
 
   // AI pipeline complete → refresh AI status + gallery
   if (PIPELINE_TITLES.has(job.title)) {
-    await fetchAiStatus()
-    await fetchTags()
-    softRefreshGallery()
+    scheduleBackgroundRefresh({ gallery: true, tags: true, aiStatus: true })
   }
 
   // GENERATION complete → refresh gallery + notify refine panel
   if (job.lane === 'gen') {
-    softRefreshGallery()
+    scheduleBackgroundRefresh({ gallery: true })
     if (refineGenJobId.value === job.id) {
       refineGenJobId.value = null
       refinePhase.value = 'done'
@@ -1747,6 +1807,12 @@ function startJobStream() {
     jobStreamConnected.value = false
     es.close()
     _jobEventSource = null
+    // Treat SSE drop as a backend-availability signal: mark not-ready so
+    // scheduleBackgroundRefresh drops incoming refresh requests, and resume
+    // /api/health polling so the ready-transition watch fires resyncAll on
+    // recovery.
+    if (backendStatus.value === 'ready') backendStatus.value = 'connecting'
+    ensureBackendReadinessMonitor()
     setTimeout(startJobStream, 3000)
   }
 }
@@ -2566,11 +2632,17 @@ onMounted(async () => {
   startJobStream()
   runStartupChecks()
 
-  if (viewMode.value === 'folder') {
-    await Promise.all([fetchDirs(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()])
-  } else {
-    await Promise.all([fetchImages(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()])
-  }
+  await resyncAll()
+
+  // Watch for backend ready-transitions AFTER the initial sync so the initial
+  // load isn't delayed by the 2s flap guard. Subsequent transitions (server
+  // restart recovery) go through this path and re-sync once things stabilize.
+  watch(backendStatus, async (s, prev) => {
+    if (prev === 'ready' || s !== 'ready') return
+    await new Promise(r => setTimeout(r, 2000))
+    if (backendStatus.value !== 'ready') return
+    await resyncAll()
+  })
 })
 
 function onVisibilityChange() {
