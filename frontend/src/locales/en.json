@@ -1280,6 +1280,8 @@
       "taggingAxis": "Tagging the scene",
       "writingStory": "Writing the chronicle",
       "refiningPrompt": "Refining prompts",
+      "refiningPromptTags": "Refining prompt tags",
+      "refiningPromptProse": "Refining prompt prose",
       "savingStory": "Saving story",
       "translating": "Translating",
       "repairingStory": "Repairing story format",

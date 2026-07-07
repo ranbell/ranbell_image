@@ -114,6 +114,98 @@ def split_vision_sections(text: str) -> tuple[str, str]:
 
 # ── Stage 2: title + overall + three acts ─────────────────────────────────────
 
+# Δ phrase per scale — one-step and two-step totals. The two-step form is used
+# for the far act when the base is at one end of the timeline (e.g. base=past
+# → future is two Δ away). Deliberately non-uniform (a Δ of "years" doubles
+# to "several years", not "eight years") so the model reads "each act is a
+# distinct volume opened later on the timeline", not a rigid arithmetic step.
+_ELAPSED_UNIT: dict[str, tuple[str, str]] = {
+    "minutes":         ("A FEW MINUTES",    "SEVERAL MINUTES"),
+    "tens_of_minutes": ("TENS OF MINUTES",  "ABOUT AN HOUR"),
+    "hours":           ("A FEW HOURS",      "MOST OF A DAY"),
+    "days":            ("A FEW DAYS",       "OVER A WEEK"),
+    "months":          ("A FEW MONTHS",     "NEARLY A YEAR"),
+    "years":           ("A FEW YEARS",      "SEVERAL YEARS"),
+    "decades":         ("SEVERAL DECADES",  "A LIFETIME"),
+}
+_ELAPSED_UNIT_JA: dict[str, tuple[str, str]] = {
+    "minutes":         ("数分",   "十数分"),
+    "tens_of_minutes": ("十数分", "約1時間"),
+    "hours":           ("数時間", "半日"),
+    "days":            ("数日",   "1週間以上"),
+    "months":          ("数ヶ月", "1年近く"),
+    "years":           ("数年",   "十数年"),
+    "decades":         ("数十年", "一生分"),
+}
+
+
+def _elapsed_time_header(
+    *, base_axis: str, time_scale: str, locale: str = "en"
+) -> str:
+    """Volume-ledger header shared by every Chronicle LLM prompt.
+
+    Frames the three acts as distinct volumes on a timeline, anchored on the
+    user-selected base_axis (t=0) and expressed as elapsed deltas — "N later"
+    or "N earlier" — instead of the older "BEFORE/AFTER the image" phrasing.
+    The intent is to make the "next-volume feel" of past/present/future
+    palpable at the front of the prompt so the LLM stops re-shooting the
+    same moment three times.
+    """
+    one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
+    one_ja, two_ja = _ELAPSED_UNIT_JA.get(time_scale, _ELAPSED_UNIT_JA["years"])
+    base = base_axis.lower() if base_axis else "present"
+    if base not in AXES:
+        base = "present"
+
+    # Map each non-base act to its Δ magnitude ("one" or "two" step)
+    # and its temporal direction relative to base.
+    idx_base = AXES.index(base)
+    labels_en: dict[str, str] = {}
+    labels_ja: dict[str, str] = {}
+    for axis in AXES:
+        if axis == base:
+            continue
+        i = AXES.index(axis)
+        steps = abs(i - idx_base)
+        forward = i > idx_base
+        phrase = one if steps == 1 else two
+        phrase_ja = one_ja if steps == 1 else two_ja
+        dir_word = "LATER" if forward else "EARLIER"
+        dir_ja = "後" if forward else "前"
+        labels_en[axis] = f"{phrase} {dir_word}"
+        labels_ja[axis] = f"{phrase_ja}{dir_ja}"
+
+    if locale == "ja":
+        lines = [
+            "⏳ 時間軸 — ベースからの経過 ⏳",
+            f"BASE = [{base.upper()}] (t = 0, これが基準画像そのもの)",
+        ]
+        for axis in AXES:
+            if axis == base:
+                continue
+            lines.append(f"[{axis.upper()}] = {labels_ja[axis]} 経過")
+        lines.append(
+            "3つの幕はタイムライン上に順に開かれる別々の「巻」として扱うこと。"
+            "同じ瞬間を3回撮り直すのではなく、読者がページをめくって次の巻を開く感覚で書く。"
+        )
+        return "\n".join(lines) + "\n"
+
+    lines = [
+        "⏳ TIME AXIS — ELAPSED FROM BASE ⏳",
+        f"BASE = [{base.upper()}] (t = 0, this IS the base image)",
+    ]
+    for axis in AXES:
+        if axis == base:
+            continue
+        lines.append(f"[{axis.upper()}] = {labels_en[axis]}")
+    lines.append(
+        "Treat each act as a distinct volume opened later on the timeline — "
+        "the reader is turning the page to the next volume, not re-shooting "
+        "the same moment three times."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _coherence_hierarchy_block(
     *, base_axis: str, user_topic: str, time_scale: str
 ) -> str:
@@ -203,6 +295,9 @@ def build_story_prompt(
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     delta = _scale_delta_line(time_scale)
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
     hierarchy_block = _coherence_hierarchy_block(
         base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
     )
@@ -239,6 +334,7 @@ def build_story_prompt(
     return (
         "You are a storyteller. Write a three-act chronicle (past, present, future) "
         "of the single character below.\n\n"
+        f"{elapsed_header}\n"
         f"{hierarchy_block}\n"
         f"{time_block}\n"
         f"{base_lock_block}"
@@ -264,8 +360,9 @@ def build_story_prompt(
         "  • Vary pose, gaze and framing ONLY as far as the scale's delta allows —\n"
         "    at short scales keep the SAME spot and change just pose/action/expression;\n"
         "    only at longer scales may the location or setting itself change.\n"
-        "  • Cinematic roles within that limit: PAST = the lead-up / a beat earlier;\n"
-        "    PRESENT = the base-image moment; FUTURE = the beat just after / aftermath.\n"
+        f"  • Cinematic roles within that limit: the [{base_axis.upper()}] act IS the "
+        "base image (t = 0); the other two acts are the elapsed volumes above — read "
+        "the timeline header for their direction and distance.\n"
         "- The visual distance between acts must strictly follow the delta above —\n"
         "  do NOT leap to an origin story or a far-off ending at a short scale.\n"
         "- The arc must contain ONE turning point or reversal: a belief, plan or "
@@ -461,18 +558,9 @@ def build_candidates_prompt(
         f"  Candidate {cid} ({flavour}): {desc}"
         for cid, flavour, desc in _CANDIDATE_SPIRITS
     )
-    # Bind each act to the time axis: base_axis = the image; the others are a
-    # span before / after it.
-    axis_lines = [f"  • [{base_axis.upper()}] = the base image above (do NOT change it)."]
-    for a in AXES:
-        if a == base_axis:
-            continue
-        direction = "BEFORE" if AXES.index(a) < AXES.index(base_axis) else "AFTER"
-        axis_lines.append(
-            f"  • [{a.upper()}] = the moment {span} {direction} the image, "
-            "on the same story thread."
-        )
-    axis_block = "\n".join(axis_lines)
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale=locale
+    )
     delta = _scale_delta_line(time_scale)
     guardrail = (
         "GROUNDING — keep all three candidates in the SAME real-world register as "
@@ -488,16 +576,17 @@ def build_candidates_prompt(
         "You are a storyteller pitching THREE different chronicles for the same "
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
         f"separated by {span} of elapsed time.\n\n"
+        f"{elapsed_header}\n"
         f"{hierarchy_block}\n"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
-        f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT — it looks exactly "
-        f"like this:\n{scene_desc}\n\n"
+        f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT (t = 0) — it looks "
+        f"exactly like this:\n{scene_desc}\n\n"
         f"{topic_line}\n"
         f"{world_line}\n\n"
         "⚠️ TIME AXIS — this is the STORY ENGINE, not decoration ⚠️\n"
-        f'The three moments are {span} apart (scale key: "{time_scale}").\n'
-        f"{axis_block}\n"
+        f"Use the elapsed-time header above as the axis map. Each act opens a new "
+        f"volume at the marked elapsed distance from base (scale key: \"{time_scale}\").\n"
         f"HOW MUCH CHANGES between the acts: {delta}\n"
         "Same characters and same world throughout — only the MOMENT moves, and "
         "each act stays causally tethered to the base image. Do NOT jump to an "
@@ -510,10 +599,11 @@ def build_candidates_prompt(
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
         "For EACH candidate write ONE concrete sentence per act — past, present, "
-        f"future — where the [{base_axis}] sentence matches the base image and the "
-        f"other two are the events {span} before / after it. Also give a title "
-        "(3-8 words, specific and evocative, never generic) and a motif (one "
-        "concrete object that recurs and changes meaning across the three moments).\n\n"
+        f"future — where the [{base_axis}] sentence matches the base image (t = 0) "
+        "and the other two acts open the elapsed volumes marked in the header "
+        "above. Also give a title (3-8 words, specific and evocative, never "
+        "generic) and a motif (one concrete object that recurs and changes "
+        "meaning across the three moments).\n\n"
         "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
         '  {"id": "A", "title": "...", "past": "...", "present": "...", '
@@ -579,14 +669,16 @@ def build_expand_prompt(
     candidate's per-act beats (title/past/present/future/motif) and written
     in the user's locale. Older candidates without beats fall back to summary.
     """
-    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     beats = "".join(
         f"  [{a.upper()}] seed: {selected.get(a, '')}\n"
         for a in AXES if selected.get(a)
     ) or f"  Summary: {selected.get('summary', '')}\n"
     motif = selected.get("motif") or selected.get("key_motif") or ""
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale=locale
+    )
     seed_block = (
-        f"BASE = [{base_axis.upper()}] moment (image above); acts are spaced by {span}.\n"
+        f"{elapsed_header}\n"
         "CHOSEN STORY DIRECTION — expand THESE beats to satisfy the base image "
         "and the user topic above; adjust the candidate wherever they conflict "
         "(keep the title unless it genuinely no longer fits):\n"
@@ -1090,11 +1182,22 @@ def build_visual_examination_prompt(
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale=locale
+    )
     if axis != base_axis:
-        direction = "BEFORE" if axis == "past" else "AFTER"
+        # Compute this axis's elapsed distance/direction from the base.
+        idx_b = AXES.index(base_axis) if base_axis in AXES else 1
+        idx_a = AXES.index(axis)
+        steps = abs(idx_a - idx_b)
+        forward = idx_a > idx_b
+        one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
+        phrase = one if steps == 1 else two
+        dir_word = "LATER" if forward else "EARLIER"
         constraint = (
-            f"This [{axis.upper()}] moment is {span} {direction} the base image "
-            f"({base_axis}). MUST keep: {rules['must_keep']}. MAY change: "
+            f"This [{axis.upper()}] moment is {phrase} {dir_word} than the base "
+            f"([{base_axis.upper()}], t = 0). Base span: {span}. "
+            f"MUST keep: {rules['must_keep']}. MAY change: "
             f"{rules['may_differ']}. FORBIDDEN: {rules['forbidden']}. Choose a "
             "camera/framing clearly DIFFERENT from a plain front view of the base.\n"
         )
@@ -1121,6 +1224,7 @@ def build_visual_examination_prompt(
         "Read the act below and DECIDE, from multiple angles, exactly how the "
         "character is posed and framed so the image expresses the story rather "
         "than showing someone standing still.\n\n"
+        f"{elapsed_header}\n"
         f"{char_line}"
         f"ACT ([{axis.upper()}]):\n{story_text}\n\n"
         f"{constraint}"
@@ -1193,33 +1297,28 @@ def _visual_plan_block(plan: dict | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_axis_prompt(
+def _axis_context_blocks(
     *,
     story_text: str,
     character_tags: list[str],
     character_desc: str,
-    prompt_style: str,
-    wd14_context: str = "",
-    time_scale: str = "years",
-    axis: str = "present",
-    base_axis: str = "present",
-    title: str = "",
-    overall: str = "",
-    all_stories: dict[str, str] | None = None,
-    axis_tags: list[str] | None = None,
-    visual_plan: dict | None = None,
-    emotion: str = "",
-    user_topic: str = "",
-) -> str:
-    """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
+    wd14_context: str,
+    time_scale: str,
+    axis: str,
+    base_axis: str,
+    title: str,
+    overall: str,
+    all_stories: dict[str, str] | None,
+    axis_tags: list[str] | None,
+    visual_plan: dict | None,
+    emotion: str,
+    user_topic: str,
+) -> dict[str, str]:
+    """Shared preamble blocks for the axis prompt builders (single-pass + 2-pass).
 
-    Character identity keywords are condensed and placed at the head of the
-    positive prompt so the same character survives across all three images.
-
-    WD14 dependency is deliberately reduced: for non-base axes the base image's
-    WD14 tags are omitted entirely (they describe a different moment), and the
-    story text becomes the primary content source. axis_tags — ~50 danbooru
-    tags inferred from THIS act's own story — enrich the positive prompt.
+    Split out so `build_axis_prompt`, `build_axis_tags_prompt` and
+    `build_axis_prose_prompt` all frame the story, chronicle, temporal
+    constraints and identity anchors identically.
     """
     if all_stories:
         chronicle_ctx = (
@@ -1250,14 +1349,20 @@ def build_axis_prompt(
     else:
         identity_src = "Character description:\n" + character_desc
 
-    # Temporal context block for non-base axes — absolute constraint
     if axis != base_axis:
         span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
-        direction = "BEFORE" if axis == "past" else "AFTER"
+        idx_b = AXES.index(base_axis) if base_axis in AXES else 1
+        idx_a = AXES.index(axis)
+        steps = abs(idx_a - idx_b)
+        forward = idx_a > idx_b
+        one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
+        phrase = one if steps == 1 else two
+        dir_word = "LATER" if forward else "EARLIER"
         rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
         temporal_block = (
             f"\n⚠️ TEMPORAL CONSTRAINT — ABSOLUTE ⚠️\n"
-            f"This [{axis.upper()}] scene is {span} {direction} the base scene ({base_axis}).\n"
+            f"This [{axis.upper()}] scene opens a new volume {phrase} {dir_word} "
+            f"than the base ([{base_axis.upper()}], t = 0). Base span: {span}.\n"
             f'TIME SCALE: "{time_scale}"\n\n'
             f"Visual elements that MUST be IDENTICAL to the base image:\n"
             f"  {rules['must_keep']}\n"
@@ -1276,15 +1381,8 @@ def build_axis_prompt(
         temporal_block = ""
 
     if axis != base_axis:
-        # Non-base axis: the base image's WD14 tags describe a DIFFERENT moment
-        # in time, so they are dropped entirely. The story text is the primary
-        # source; character identity is carried by the identity tags the runner
-        # injects, plus this act's own axis_tags below.
         wd14_block = ""
     elif wd14_context:
-        # Base axis: the image is ground truth. WD14 pose/scene/mood tags MUST
-        # be reflected in the positive prompt so the rendered base image lines
-        # up with the actual thumbnail the user picked.
         wd14_block = (
             "\n[WD14 tags of the base image — the base_axis image MUST match "
             "these tags (pose, scene, mood). Reproduce them faithfully in the "
@@ -1303,8 +1401,73 @@ def build_axis_prompt(
     else:
         common_block = ""
 
-    plan_block = _visual_plan_block(visual_plan)
-    emotion_block = _emotion_guidance_line(emotion)
+    return {
+        "chronicle_ctx": chronicle_ctx,
+        "intent_ctx": intent_ctx,
+        "identity_src": identity_src,
+        "temporal_block": temporal_block,
+        "wd14_block": wd14_block,
+        "common_block": common_block,
+        "plan_block": _visual_plan_block(visual_plan),
+        "emotion_block": _emotion_guidance_line(emotion),
+    }
+
+
+def build_axis_prompt(
+    *,
+    story_text: str,
+    character_tags: list[str],
+    character_desc: str,
+    prompt_style: str,
+    wd14_context: str = "",
+    time_scale: str = "years",
+    axis: str = "present",
+    base_axis: str = "present",
+    title: str = "",
+    overall: str = "",
+    all_stories: dict[str, str] | None = None,
+    axis_tags: list[str] | None = None,
+    visual_plan: dict | None = None,
+    emotion: str = "",
+    user_topic: str = "",
+) -> str:
+    """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
+
+    Character identity keywords are condensed and placed at the head of the
+    positive prompt so the same character survives across all three images.
+
+    WD14 dependency is deliberately reduced: for non-base axes the base image's
+    WD14 tags are omitted entirely (they describe a different moment), and the
+    story text becomes the primary content source. axis_tags — ~50 danbooru
+    tags inferred from THIS act's own story — enrich the positive prompt.
+
+    Kept as a single-pass fallback; the 2-pass pipeline (build_axis_tags_prompt
+    → build_axis_prose_prompt) is preferred for lightweight VLMs.
+    """
+    ctx = _axis_context_blocks(
+        story_text=story_text,
+        character_tags=character_tags,
+        character_desc=character_desc,
+        wd14_context=wd14_context,
+        time_scale=time_scale,
+        axis=axis,
+        base_axis=base_axis,
+        title=title,
+        overall=overall,
+        all_stories=all_stories,
+        axis_tags=axis_tags,
+        visual_plan=visual_plan,
+        emotion=emotion,
+        user_topic=user_topic,
+    )
+    chronicle_ctx = ctx["chronicle_ctx"]
+    intent_ctx = ctx["intent_ctx"]
+    identity_src = ctx["identity_src"]
+    temporal_block = ctx["temporal_block"]
+    wd14_block = ctx["wd14_block"]
+    common_block = ctx["common_block"]
+    plan_block = ctx["plan_block"]
+    emotion_block = ctx["emotion_block"]
 
     if prompt_style == "natural":
         format_rule = (
@@ -1325,9 +1488,15 @@ def build_axis_prompt(
             "(b) the 5-paragraph Visual Script prose described above."
         )
 
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
+
     return (
         "You are an expert image generation prompt engineer.\n"
         "Turn ONE act of a story into an image prompt.\n\n"
+        f"{elapsed_header}\n"
+        f"You are now generating the image prompt for: [{axis.upper()}]\n\n"
         f"{chronicle_ctx}"
         f"{intent_ctx}"
         f"SCENE (this act of the story):\n{story_text}\n"
@@ -1359,6 +1528,274 @@ def build_axis_prompt(
         "still, include static-pose tags here (standing, static_pose, "
         "expressionless, stiff, arms_at_sides) so the figure is not left just "
         "standing.\n\n"
+        "Output format (exactly these two labels, nothing else):\n"
+        "POSITIVE:\n<the positive prompt>\n\n"
+        "NEGATIVE:\n<the negative prompt>"
+    )
+
+
+# ── Stage 3b split: 2-pass axis prompt for lightweight VLMs ──────────────────
+#
+# Refine's natural style (backend/app/api/ai.py) splits tag generation from
+# prose so a small VLM only has to solve one problem at a time. Chronicle
+# mirrors that pattern: build_axis_tags_prompt asks for a JSON tag payload,
+# then build_axis_prose_prompt writes the 5-paragraph Visual Script on top
+# of that tag line. This produces denser prompts than one-shot output on the
+# same model at the same total token budget.
+
+
+def build_axis_tags_prompt(
+    *,
+    story_text: str,
+    character_tags: list[str],
+    character_desc: str,
+    wd14_context: str = "",
+    time_scale: str = "years",
+    axis: str = "present",
+    base_axis: str = "present",
+    title: str = "",
+    overall: str = "",
+    all_stories: dict[str, str] | None = None,
+    axis_tags: list[str] | None = None,
+    visual_plan: dict | None = None,
+    emotion: str = "",
+    user_topic: str = "",
+) -> str:
+    """Pass 1 of Stage 3b: JSON tag payload for ONE act.
+
+    Mirrors Invoke's spirit schema so the same downstream parsing / injection
+    helpers apply. The VLM only has to enumerate tags in this call — no prose,
+    no POSITIVE/NEGATIVE structure — so a small model has budget for density.
+    """
+    ctx = _axis_context_blocks(
+        story_text=story_text,
+        character_tags=character_tags,
+        character_desc=character_desc,
+        wd14_context=wd14_context,
+        time_scale=time_scale,
+        axis=axis,
+        base_axis=base_axis,
+        title=title,
+        overall=overall,
+        all_stories=all_stories,
+        axis_tags=axis_tags,
+        visual_plan=visual_plan,
+        emotion=emotion,
+        user_topic=user_topic,
+    )
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
+    return (
+        "You are a danbooru-tag expert building the tag payload for ONE act "
+        "of a three-act chronicle. Do NOT write prose. Enumerate tags only.\n\n"
+        f"{elapsed_header}\n"
+        f"Target act: [{axis.upper()}]\n\n"
+        f"{ctx['chronicle_ctx']}"
+        f"{ctx['intent_ctx']}"
+        f"SCENE (this act of the story):\n{story_text}\n"
+        f"{ctx['temporal_block']}\n"
+        f"{ctx['identity_src']}\n"
+        f"{ctx['wd14_block']}"
+        f"{ctx['common_block']}"
+        f"{ctx['plan_block']}"
+        f"{ctx['emotion_block']}"
+        "\n[MANDATORY RULES]\n"
+        "- SUBJECT-FIRST: `danbooru_tags` MUST open with the subject-count tag "
+        "(1girl / 1boy / solo / 2girls / …). No other tag before it.\n"
+        "- ACTION-ANCHOR: `pose_tags` MUST contain at least 3 concrete danbooru "
+        "action/pose tags translated from the story verbs — reaching, "
+        "outstretched_arm, leaning_forward, looking_back, kneeling, gripping, "
+        "clenched_hand, holding, covering_face, touching, fingertips, "
+        "dynamic_pose. NEVER just `standing` / `sitting` with nothing else.\n"
+        "- EXPLICIT TAG: every noun the scene needs (hair color, eye color, "
+        "notable feature, clothing, prop, background, light source) MUST appear "
+        "as a real danbooru tag — never a euphemism or paraphrase.\n"
+        "- MIN 50 TAGS on `danbooru_tags`. Under-count = failed prompt.\n"
+        "- NO quality meta-tags anywhere (masterpiece / best_quality / highres / "
+        "4k / 8k / worst_quality / low_quality etc.).\n"
+        "- Every tag echoed under `danbooru_tags` should also appear in ONE of "
+        "the category buckets below.\n\n"
+        "Output JSON ONLY. No markdown fences, no commentary. Schema:\n"
+        '{\n'
+        '  "danbooru_tags": "<subject-count tag first, then 50+ comma-separated tags>",\n'
+        '  "subject_tags": "<subject count, character count, viewer relation>",\n'
+        '  "hair_tags": "<hair color, length, style>",\n'
+        '  "expression_tags": "<face, mouth, gaze, mood tags>",\n'
+        '  "clothing_tags": "<outfit, garments, fabric>",\n'
+        '  "accessory_tags": "<jewelry, hats, glasses, small items>",\n'
+        '  "pose_tags": "<>= 3 concrete pose/action tags, no bare standing>",\n'
+        '  "background_tags": "<location, setting, weather, time of day>",\n'
+        '  "object_tags": "<props, held items, environment objects>",\n'
+        '  "lighting_tags": "<light direction, quality, palette>",\n'
+        '  "negative_supplement": "<comma-separated artifacts to avoid>"\n'
+        "}"
+    )
+
+
+def parse_axis_tags_json(raw: str) -> tuple[str, dict[str, list[str]], str]:
+    """Parse Pass 1 output → (tag_line, categories, negative_supplement).
+
+    Returns:
+        tag_line: the merged comma-separated danbooru tag string.
+        categories: {"subject_tags": [...], "hair_tags": [...], ...}
+        negative_supplement: comma-separated artifacts to avoid.
+
+    Missing / broken → ("", {}, ""). Tags are underscored + deduplicated
+    (case-insensitive), preserving first-seen order.
+    """
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return "", {}, ""
+
+    def _split(s: str) -> list[str]:
+        return [t.strip().replace(" ", "_") for t in str(s).split(",") if t.strip()]
+
+    # Merge danbooru_tags with each category bucket to salvage anything the
+    # model put in the buckets but forgot on the main line.
+    seen: set[str] = set()
+    merged: list[str] = []
+
+    def _add(tags: list[str]) -> None:
+        for tag in tags:
+            k = tag.lower()
+            if k and k not in seen:
+                seen.add(k)
+                merged.append(tag)
+
+    _add(_split(data.get("danbooru_tags") or ""))
+    categories: dict[str, list[str]] = {}
+    for key in (
+        "subject_tags", "hair_tags", "expression_tags", "clothing_tags",
+        "accessory_tags", "pose_tags", "background_tags", "object_tags",
+        "lighting_tags",
+    ):
+        cat_tags = _split(data.get(key) or "")
+        categories[key] = cat_tags
+        _add(cat_tags)
+
+    tag_line = ", ".join(merged)
+    negative_supplement = str(data.get("negative_supplement") or "").strip()
+    return tag_line, categories, negative_supplement
+
+
+_CHRONICLE_MIN_TAGS = 25
+
+
+def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
+    """Guard for Pass 1 output — same spirit as Invoke's runners.py:1798-1808.
+
+    A prompt is degenerate if it is too short OR has no subject anchor within
+    the first few tags. Callers retry once with a temperature boost before
+    surfacing the failure to the user.
+    """
+    parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+    if len(parts) < _CHRONICLE_MIN_TAGS:
+        return True, f"tag_count={len(parts)}"
+    head = {p.lower() for p in parts[:5]}
+    if not (head & _SUBJECT_ANCHORS):
+        return True, "no_subject_anchor"
+    return False, ""
+
+
+def build_axis_prose_prompt(
+    *,
+    story_text: str,
+    tag_line: str,
+    character_tags: list[str],
+    character_desc: str,
+    prompt_style: str,
+    wd14_context: str = "",
+    time_scale: str = "years",
+    axis: str = "present",
+    base_axis: str = "present",
+    title: str = "",
+    overall: str = "",
+    all_stories: dict[str, str] | None = None,
+    axis_tags: list[str] | None = None,
+    visual_plan: dict | None = None,
+    emotion: str = "",
+    user_topic: str = "",
+    negative_supplement: str = "",
+) -> str:
+    """Pass 2 of Stage 3b: 5-paragraph Visual Script over Pass 1's tag line.
+
+    prompt_style="natural"          → POSITIVE = prose only (no leading tag line)
+    prompt_style="danbooru+natural" → POSITIVE = tag_line, blank line, prose
+    prompt_style="danbooru"         → not intended — call Pass 1 only and skip Pass 2.
+    """
+    ctx = _axis_context_blocks(
+        story_text=story_text,
+        character_tags=character_tags,
+        character_desc=character_desc,
+        wd14_context=wd14_context,
+        time_scale=time_scale,
+        axis=axis,
+        base_axis=base_axis,
+        title=title,
+        overall=overall,
+        all_stories=all_stories,
+        axis_tags=axis_tags,
+        visual_plan=visual_plan,
+        emotion=emotion,
+        user_topic=user_topic,
+    )
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
+    tag_block = (
+        "\n[PASS 1 TAG LINE — this becomes the leading tag portion of POSITIVE; "
+        "the prose you write below must be faithful to and enrich it (never "
+        "contradict it). Reuse these tags inline in ASCII parentheses inside "
+        "the prose so the AI image model reads them from both places]\n"
+        f"{tag_line}\n"
+    )
+    if prompt_style == "natural":
+        format_rule = (
+            "POSITIVE is the 5-paragraph Visual Script prose described above "
+            "(no leading tag line — tags live inline in the prose)."
+        )
+    else:  # danbooru+natural (default)
+        format_rule = (
+            "POSITIVE is two parts separated by ONE blank line:\n"
+            "(a) the PASS 1 TAG LINE above verbatim (do not re-order, do not "
+            "drop tags);\n"
+            "(b) the 5-paragraph Visual Script prose described above."
+        )
+    neg_hint = (
+        f"\nSuggested negatives from Pass 1 (merge with your own): {negative_supplement}\n"
+        if negative_supplement.strip()
+        else ""
+    )
+    return (
+        "You are an expert image generation prompt engineer.\n"
+        "Turn ONE act of a story into the FINAL image prompt, building on the "
+        "tag payload you generated in Pass 1.\n\n"
+        f"{elapsed_header}\n"
+        f"You are now generating the image prompt for: [{axis.upper()}]\n\n"
+        f"{ctx['chronicle_ctx']}"
+        f"{ctx['intent_ctx']}"
+        f"SCENE (this act of the story):\n{story_text}\n"
+        f"{ctx['temporal_block']}\n"
+        f"{ctx['identity_src']}\n"
+        f"{ctx['wd14_block']}"
+        f"{ctx['common_block']}"
+        f"{ctx['plan_block']}"
+        f"{ctx['emotion_block']}"
+        f"{tag_block}"
+        "\n[Visual Script format]\n"
+        f"{_VISUAL_SCRIPT_GUIDE}\n\n"
+        "Rules:\n"
+        f"- {format_rule}\n"
+        "- Depict THIS act's scene grounded in the story text: place, lighting, mood.\n"
+        "- The action MUST appear as concrete danbooru action/pose tags near the "
+        "FRONT of the positive prompt; a bare 'standing'/'sitting' with no action "
+        "tag is forbidden unless the act is truly motionless.\n"
+        "- NEGATIVE lists only things to avoid (artifacts, wrong elements for "
+        "this scene). Short comma-separated tags. Unless this act is deliberately "
+        "still, include static-pose tags here (standing, static_pose, "
+        "expressionless, stiff, arms_at_sides) so the figure is not left just "
+        f"standing.{neg_hint}\n"
         "Output format (exactly these two labels, nothing else):\n"
         "POSITIVE:\n<the positive prompt>\n\n"
         "NEGATIVE:\n<the negative prompt>"

@@ -2935,8 +2935,10 @@ async def run_chronicle_expand(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         AXES,
+        _chronicle_tags_degenerate,
         base_pose_tags,
-        build_axis_prompt,
+        build_axis_prose_prompt,
+        build_axis_tags_prompt,
         build_expand_prompt,
         build_visual_examination_prompt,
         build_overall_prompt,
@@ -2948,6 +2950,7 @@ async def run_chronicle_expand(
         identity_tags_for_scale,
         inject_identity_tags,
         is_multi_character,
+        parse_axis_tags_json,
         parse_english_translation_json,
         parse_story_json,
         parse_story_sections,
@@ -3179,49 +3182,121 @@ async def run_chronicle_expand(
                 logger.warning("[chronicle] %s visual examination failed: %s", axis, exc)
             cancel.raise_if_set()
 
-            _phase("refiningPrompt", 0.55 + 0.12 * i, f"Refining {axis} prompt...")
-            _put({"type": "token", "text": f"\n\n— {axis} prompt —\n"})
-            axis_prompt = build_axis_prompt(
-                story_text=en_stories[axis],
-                character_tags=character_tags,
-                character_desc=character_desc,
-                prompt_style=body.prompt_style,
-                wd14_context=wd14_context,
-                time_scale=body.time_scale,
-                axis=axis,
-                base_axis=body.base_time_axis,
-                title=en_title,
-                overall=en_overall,
-                all_stories=en_stories,
-                axis_tags=axis_tags,
-                visual_plan=visual_plan,
-                emotion=body.emotion,
-                user_topic=body.user_topic,
-            )
-            axis_tokens: list[str] = []
-            async for event in ollama.generate_text_stream(
-                axis_prompt, model=vlm_model, options=options
-            ):
-                if _abort.is_set():
-                    raise JobCancelled()
-                _put(event)
-                if event["type"] == "token":
-                    axis_tokens.append(event["text"])
-                    if len(axis_tokens) % 8 == 0:
-                        reporter.update(
-                            0.55 + 0.12 * (i + min(len(axis_tokens) / 700, 0.97)),
-                            f"Refining {axis} prompt...",
-                        )
+            # Stage 3b Pass 1: enumerate danbooru tags as JSON. Splitting the
+            # image-prompt work in two lets a small VLM focus per call — one
+            # problem at a time gives denser output than a single one-shot.
+            _phase("refiningPromptTags", 0.55 + 0.12 * i,
+                   f"Refining {axis} tags...")
+            _put({"type": "token", "text": f"\n\n— {axis} tags —\n"})
+            tag_line = ""
+            neg_supplement = ""
+            tag_categories: dict[str, list[str]] = {}
+            for tag_attempt in range(2):
+                tag_options = dict(options)
+                if tag_attempt == 1:
+                    # Mirror Invoke's respin ramp — one bump, then surface.
+                    tag_options["temperature"] = min(
+                        1.3, float(options.get("temperature", 0.7)) + 0.25
+                    )
+                try:
+                    raw_tags = await ollama.generate_text(
+                        build_axis_tags_prompt(
+                            story_text=en_stories[axis],
+                            character_tags=character_tags,
+                            character_desc=character_desc,
+                            wd14_context=wd14_context,
+                            time_scale=body.time_scale,
+                            axis=axis,
+                            base_axis=body.base_time_axis,
+                            title=en_title,
+                            overall=en_overall,
+                            all_stories=en_stories,
+                            axis_tags=axis_tags,
+                            visual_plan=visual_plan,
+                            emotion=body.emotion,
+                            user_topic=body.user_topic,
+                        ),
+                        model=vlm_model, options=tag_options, fmt="json",
+                    )
+                except Exception as exc:
+                    logger.warning("[chronicle] %s tag pass failed: %s", axis, exc)
+                    raw_tags = ""
+                tag_line, tag_categories, neg_supplement = parse_axis_tags_json(raw_tags)
+                degenerate, reason = _chronicle_tags_degenerate(tag_line)
+                if not degenerate:
+                    break
+                if tag_attempt == 0:
+                    logger.info(
+                        "[chronicle] %s Pass 1 degenerate (%s); retrying with +0.25 temp",
+                        axis, reason,
+                    )
+                    _put({"type": "warning",
+                          "message": f"{axis}: retrying tags ({reason})"})
+                else:
+                    logger.warning(
+                        "[chronicle] %s Pass 1 still degenerate after retry (%s)",
+                        axis, reason,
+                    )
+                    _put({"type": "warning",
+                          "message": f"{axis}: tag pass thin ({reason}); proceeding"})
             cancel.raise_if_set()
-            positive, negative = _parse_positive_negative("".join(axis_tokens))
-            positive = _clean_markdown(positive)
-            negative = _clean_markdown(negative)
-            if not positive:
-                _put({"type": "error", "message": f"Prompt refinement failed for {axis}"})
-                return
+
+            # Stage 3b Pass 2: 5-paragraph Visual Script over the tag line.
+            # For pure-danbooru style, Pass 2 is skipped — tag_line becomes the
+            # final POSITIVE and NEGATIVE comes from neg_supplement.
+            if body.prompt_style == "danbooru":
+                positive = tag_line
+                negative = neg_supplement
+                prose = ""
+            else:
+                _phase("refiningPromptProse", 0.60 + 0.12 * i,
+                       f"Refining {axis} prose...")
+                _put({"type": "token", "text": f"\n\n— {axis} prose —\n"})
+                prose_prompt = build_axis_prose_prompt(
+                    story_text=en_stories[axis],
+                    tag_line=tag_line,
+                    character_tags=character_tags,
+                    character_desc=character_desc,
+                    prompt_style=body.prompt_style,
+                    wd14_context=wd14_context,
+                    time_scale=body.time_scale,
+                    axis=axis,
+                    base_axis=body.base_time_axis,
+                    title=en_title,
+                    overall=en_overall,
+                    all_stories=en_stories,
+                    axis_tags=axis_tags,
+                    visual_plan=visual_plan,
+                    emotion=body.emotion,
+                    user_topic=body.user_topic,
+                    negative_supplement=neg_supplement,
+                )
+                axis_tokens: list[str] = []
+                async for event in ollama.generate_text_stream(
+                    prose_prompt, model=vlm_model, options=options
+                ):
+                    if _abort.is_set():
+                        raise JobCancelled()
+                    _put(event)
+                    if event["type"] == "token":
+                        axis_tokens.append(event["text"])
+                        if len(axis_tokens) % 8 == 0:
+                            reporter.update(
+                                0.60 + 0.12 * (i + min(len(axis_tokens) / 700, 0.97)),
+                                f"Refining {axis} prose...",
+                            )
+                cancel.raise_if_set()
+                positive, negative = _parse_positive_negative("".join(axis_tokens))
+                positive = _clean_markdown(positive)
+                negative = _clean_markdown(negative)
+                if neg_supplement and neg_supplement.strip() not in (negative or ""):
+                    negative = f"{negative}, {neg_supplement}".strip(", ") if negative else neg_supplement
+                if not positive:
+                    _put({"type": "error", "message": f"Prompt refinement failed for {axis}"})
+                    return
 
             if body.prompt_style == "danbooru":
-                tag_line, prose = positive, ""
+                prose = ""
             elif body.prompt_style == "natural":
                 tag_line, prose = "", positive
             else:  # danbooru+natural: first block = tags, rest = prose

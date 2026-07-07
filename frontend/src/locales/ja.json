@@ -1280,6 +1280,8 @@
       "taggingAxis": "場面をタグ付け中",
       "writingStory": "物語を執筆中",
       "refiningPrompt": "プロンプトを錬成中",
+      "refiningPromptTags": "プロンプトのタグを錬成中",
+      "refiningPromptProse": "プロンプトの文章を錬成中",
       "savingStory": "物語を保存中",
       "translating": "翻訳中",
       "repairingStory": "物語の形式を修復中",

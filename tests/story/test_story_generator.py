@@ -15,8 +15,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
+    _chronicle_tags_degenerate,
+    _elapsed_time_header,
     base_pose_tags,
     build_axis_prompt,
+    build_axis_prose_prompt,
+    build_axis_tags_prompt,
     build_candidates_prompt,
     build_expand_prompt,
     build_overall_prompt,
@@ -33,6 +37,7 @@ from app.story.generator import (
     identity_tags_for_scale,
     inject_identity_tags,
     is_multi_character,
+    parse_axis_tags_json,
     parse_candidates_json,
     parse_english_translation_json,
     parse_story_json,
@@ -652,9 +657,12 @@ def test_build_candidates_prompt():
         assert flavour in prompt
     # locale drives output language instruction
     assert "日本語" in prompt
-    # base image is bound to the base axis; other acts are offset in time
+    # base image is bound to the base axis; other acts open elapsed volumes
     assert "THE BASE IMAGE IS THE [PRESENT] MOMENT" in prompt
-    assert "BEFORE the image" in prompt and "AFTER the image" in prompt
+    # Elapsed-time framing (JA locale wraps the header in Japanese, but the
+    # bracket labels stay in English so the parser can lock onto them).
+    assert "経過" in prompt
+    assert "[PAST]" in prompt and "[FUTURE]" in prompt
     # per-axis output schema (beats), not a single summary
     assert '"past"' in prompt and '"present"' in prompt and '"future"' in prompt
     assert '"summary"' not in prompt
@@ -665,13 +673,16 @@ def test_build_candidates_prompt():
 
 
 def test_candidates_prompt_base_axis_directions():
-    # base=past → the other two acts are both AFTER the image
+    # base=past → the other two acts are both LATER (elapsed forward from base)
     past_base = build_candidates_prompt(
         character_desc="c", scene_desc="s", base_axis="past", time_scale="hours",
     )
     assert "THE BASE IMAGE IS THE [PAST] MOMENT" in past_base
-    assert past_base.count("AFTER the image") == 2
-    assert "BEFORE the image" not in past_base
+    # Both non-base axes use LATER phrasing; no EARLIER when base = past.
+    assert past_base.count(" LATER") >= 2
+    assert " EARLIER" not in past_base
+    # Elapsed header explicitly names the far act's two-step distance.
+    assert "MOST OF A DAY LATER" in past_base
 
 
 def test_candidates_prompt_time_scale_differs():
@@ -685,7 +696,9 @@ def test_candidates_prompt_time_scale_differs():
     # each embeds its own scale's continuity note, so prompts differ by scale
     assert _SCALE_VISUAL_RULES["minutes"]["must_keep"] in minutes
     assert _SCALE_VISUAL_RULES["decades"]["may_differ"] in decades
-    assert "a few minutes apart" in minutes and "several decades apart" in decades
+    # Elapsed-time framing echoes the span per scale.
+    assert "A FEW MINUTES LATER" in minutes or "A FEW MINUTES EARLIER" in minutes
+    assert "SEVERAL DECADES LATER" in decades or "SEVERAL DECADES EARLIER" in decades
     assert minutes != decades
 
 
@@ -979,3 +992,300 @@ def test_emotion_register_off_by_default():
         base_axis="present", worldview="", emotion="not_a_real_emotion",
     )
     assert "EMOTIONAL REGISTER" not in prompt2
+
+
+# ── elapsed-time header (next-volume framing) ────────────────────────────────
+
+def test_elapsed_header_past_base_years_en():
+    header = _elapsed_time_header(base_axis="past", time_scale="years", locale="en")
+    assert "ELAPSED FROM BASE" in header
+    assert "BASE = [PAST]" in header
+    assert "t = 0" in header
+    assert "A FEW YEARS LATER" in header
+    assert "SEVERAL YEARS LATER" in header
+    # Never mixes EARLIER when base is past (no earlier moments to reach).
+    assert "EARLIER" not in header
+
+
+def test_elapsed_header_future_base_minutes_en():
+    header = _elapsed_time_header(
+        base_axis="future", time_scale="minutes", locale="en"
+    )
+    assert "BASE = [FUTURE]" in header
+    # From future looking back: PAST is two Δ, PRESENT is one Δ.
+    assert "SEVERAL MINUTES EARLIER" in header
+    assert "A FEW MINUTES EARLIER" in header
+    assert "LATER" not in header
+
+
+def test_elapsed_header_present_base_symmetric():
+    header = _elapsed_time_header(
+        base_axis="present", time_scale="hours", locale="en"
+    )
+    assert "BASE = [PRESENT]" in header
+    # From present: past is one Δ EARLIER, future is one Δ LATER.
+    assert "A FEW HOURS EARLIER" in header
+    assert "A FEW HOURS LATER" in header
+    # No two-step phrasing when base is in the middle.
+    assert "MOST OF A DAY" not in header
+
+
+def test_elapsed_header_locale_ja():
+    header = _elapsed_time_header(
+        base_axis="past", time_scale="years", locale="ja"
+    )
+    assert "経過" in header
+    assert "BASE = [PAST]" in header
+    assert "数年後 経過" in header
+    assert "十数年後 経過" in header
+
+
+def test_elapsed_header_all_scales_smoke():
+    for scale in (
+        "minutes", "tens_of_minutes", "hours", "days",
+        "months", "years", "decades",
+    ):
+        for base in ("past", "present", "future"):
+            h = _elapsed_time_header(base_axis=base, time_scale=scale, locale="en")
+            assert h, f"empty header for {base=} {scale=}"
+            assert f"BASE = [{base.upper()}]" in h
+            for axis in ("past", "present", "future"):
+                if axis == base:
+                    continue
+                assert f"[{axis.upper()}]" in h
+
+
+def test_elapsed_header_unknown_scale_defaults_to_years():
+    h = _elapsed_time_header(base_axis="present", time_scale="millennia", locale="en")
+    assert "A FEW YEARS EARLIER" in h
+    assert "A FEW YEARS LATER" in h
+
+
+# ── elapsed header is threaded into every stage prompt ────────────────────────
+
+def test_candidates_prompt_uses_elapsed_header_not_axis_lines():
+    prompt = build_candidates_prompt(
+        character_desc="1girl", scene_desc="a room",
+        base_axis="past", time_scale="years",
+    )
+    assert "ELAPSED FROM BASE" in prompt
+    assert "A FEW YEARS LATER" in prompt
+    assert "SEVERAL YEARS LATER" in prompt
+    # Old direction-based phrasing is gone.
+    assert "the moment a few years AFTER the image" not in prompt
+    assert "the moment a few years BEFORE the image" not in prompt
+
+
+def test_story_prompt_carries_elapsed_header():
+    prompt = build_story_prompt(
+        character_desc="1girl", scene_desc="a room",
+        base_axis="future", worldview="",
+        time_scale="hours",
+    )
+    assert "ELAPSED FROM BASE" in prompt
+    assert "A FEW HOURS EARLIER" in prompt
+    # base-lock language should reference elapsed volumes, not "PRESENT = base moment"
+    assert "PRESENT = the base-image moment" not in prompt
+
+
+def test_expand_prompt_carries_elapsed_header():
+    seed = {
+        "id": "A", "title": "Silent Garden",
+        "past": "seed p", "present": "seed pr", "future": "seed f",
+        "motif": "a key",
+    }
+    prompt = build_expand_prompt(
+        selected=seed,
+        character_desc="1girl", scene_desc="a room",
+        base_axis="present", worldview="",
+        time_scale="days",
+    )
+    assert "ELAPSED FROM BASE" in prompt
+    assert "A FEW DAYS EARLIER" in prompt
+    assert "A FEW DAYS LATER" in prompt
+
+
+def test_visual_examination_prompt_carries_elapsed_header():
+    prompt = build_visual_examination_prompt(
+        story_text="she reaches for the door",
+        axis="past", base_axis="present",
+        time_scale="months",
+    )
+    assert "ELAPSED FROM BASE" in prompt
+    # non-base act constraint should use elapsed phrasing.
+    assert "A FEW MONTHS EARLIER" in prompt
+
+
+def test_axis_prompt_carries_elapsed_header():
+    prompt = build_axis_prompt(
+        story_text="s",
+        character_tags=["1girl", "solo"],
+        character_desc="",
+        prompt_style="danbooru",
+        time_scale="years",
+        axis="future", base_axis="past",
+    )
+    assert "ELAPSED FROM BASE" in prompt
+    # future is two Δ later than past.
+    assert "SEVERAL YEARS LATER" in prompt
+
+
+# ── Stage 3b Pass 1 (build_axis_tags_prompt) ─────────────────────────────────
+
+def test_axis_tags_prompt_demands_json_and_rules():
+    prompt = build_axis_tags_prompt(
+        story_text="she reaches for the door",
+        character_tags=["1girl", "silver_hair", "blue_eyes"],
+        character_desc="",
+        axis="past", base_axis="present",
+        time_scale="years",
+    )
+    assert "JSON ONLY" in prompt
+    assert "SUBJECT-FIRST" in prompt
+    assert "ACTION-ANCHOR" in prompt
+    assert "MIN 50 TAGS" in prompt
+    # Structured schema keys the parser expects.
+    for key in (
+        "danbooru_tags", "subject_tags", "hair_tags", "expression_tags",
+        "clothing_tags", "pose_tags", "background_tags",
+        "object_tags", "lighting_tags",
+    ):
+        assert f'"{key}"' in prompt
+    # Elapsed header threaded through.
+    assert "ELAPSED FROM BASE" in prompt
+
+
+def test_parse_axis_tags_json_merges_categories_into_tag_line():
+    raw = (
+        '{"danbooru_tags": "1girl, silver_hair, blue_eyes, reaching",'
+        ' "subject_tags": "1girl, solo",'
+        ' "pose_tags": "reaching, outstretched_arm, leaning_forward",'
+        ' "background_tags": "dim_hallway, wooden_door",'
+        ' "negative_supplement": "text, watermark"}'
+    )
+    tag_line, categories, neg = parse_axis_tags_json(raw)
+    # danbooru_tags come first, unique tags from buckets are appended.
+    assert tag_line.startswith("1girl, silver_hair, blue_eyes, reaching")
+    assert "solo" in tag_line
+    assert "outstretched_arm" in tag_line
+    assert "leaning_forward" in tag_line
+    assert "dim_hallway" in tag_line
+    assert "wooden_door" in tag_line
+    assert categories["pose_tags"] == ["reaching", "outstretched_arm", "leaning_forward"]
+    assert neg == "text, watermark"
+
+
+def test_parse_axis_tags_json_broken_returns_empty():
+    assert parse_axis_tags_json("not json") == ("", {}, "")
+    assert parse_axis_tags_json("") == ("", {}, "")
+
+
+# ── Chronicle degenerate detector ─────────────────────────────────────────────
+
+def _make_tag_line(n: int, *, anchor: bool = True) -> str:
+    """Helper: build a tag line with n tags, optionally anchored."""
+    body = ", ".join(f"tag_{i}" for i in range(n))
+    return f"1girl, {body}" if anchor else body
+
+
+def test_chronicle_tags_degenerate_short_tag_line():
+    tag_line = _make_tag_line(10)
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert degenerate
+    assert "tag_count=" in reason
+
+
+def test_chronicle_tags_degenerate_missing_subject_anchor():
+    tag_line = ", ".join(f"tag_{i}" for i in range(40))
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert degenerate
+    assert reason == "no_subject_anchor"
+
+
+def test_chronicle_tags_degenerate_healthy_prompt():
+    tag_line = _make_tag_line(55)
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert not degenerate
+    assert reason == ""
+
+
+def test_chronicle_tags_degenerate_anchor_solo():
+    tag_line = "solo, " + ", ".join(f"tag_{i}" for i in range(40))
+    degenerate, _ = _chronicle_tags_degenerate(tag_line)
+    assert not degenerate
+
+
+# ── Stage 3b Pass 2 (build_axis_prose_prompt) ────────────────────────────────
+
+def test_axis_prose_prompt_embeds_pass1_tag_line():
+    tag_line = "1girl, solo, silver_hair, blue_eyes, reaching, outstretched_arm"
+    prompt = build_axis_prose_prompt(
+        story_text="she reaches for the door",
+        tag_line=tag_line,
+        character_tags=["1girl", "silver_hair"],
+        character_desc="",
+        prompt_style="danbooru+natural",
+        axis="past", base_axis="present",
+        time_scale="years",
+    )
+    assert tag_line in prompt
+    assert "PASS 1 TAG LINE" in prompt
+    assert "Visual Script" in prompt
+    assert "POSITIVE:" in prompt
+    assert "NEGATIVE:" in prompt
+    # danbooru+natural expects the tag line verbatim then prose.
+    assert "PASS 1 TAG LINE above verbatim" in prompt
+
+
+def test_axis_prose_prompt_natural_style_no_tag_line_output():
+    tag_line = "1girl, solo, reaching"
+    prompt = build_axis_prose_prompt(
+        story_text="scene",
+        tag_line=tag_line,
+        character_tags=["1girl"],
+        character_desc="",
+        prompt_style="natural",
+        axis="present", base_axis="present",
+    )
+    # natural mode: prose only in POSITIVE, tag line lives inline in prose.
+    assert "no leading tag line" in prompt
+    assert tag_line in prompt  # still passed as guidance
+
+
+def test_axis_prose_prompt_forwards_negative_supplement():
+    prompt = build_axis_prose_prompt(
+        story_text="scene",
+        tag_line="1girl, solo",
+        character_tags=["1girl"],
+        character_desc="",
+        prompt_style="danbooru+natural",
+        axis="present", base_axis="present",
+        negative_supplement="text, watermark, blurry",
+    )
+    assert "text, watermark, blurry" in prompt
+
+
+# ── Sanity: 2-pass output shape when combined ────────────────────────────────
+
+def test_pass1_and_pass2_share_context_shape():
+    """Both builders should reference the same story, chronicle, and identity."""
+    kw = dict(
+        story_text="she reaches for the door",
+        character_tags=["1girl", "silver_hair"],
+        character_desc="",
+        axis="past", base_axis="present", time_scale="years",
+        all_stories={
+            "past": "then", "present": "now (base)", "future": "later",
+        },
+        title="Silent Doors", overall="A chronicle.",
+    )
+    tags_prompt = build_axis_tags_prompt(**kw)
+    prose_prompt = build_axis_prose_prompt(
+        tag_line="1girl, solo, reaching",
+        prompt_style="danbooru+natural",
+        **kw,
+    )
+    for shared in ("she reaches for the door", "Silent Doors",
+                   "[PAST]", "[PRESENT]", "1girl"):
+        assert shared in tags_prompt, f"missing in tags_prompt: {shared!r}"
+        assert shared in prose_prompt, f"missing in prose_prompt: {shared!r}"

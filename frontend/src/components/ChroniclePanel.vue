@@ -24,6 +24,7 @@ const PHASE_STEP = {
   selecting: 2,
   expanding: 3, repairingStory: 3, translating: 3,
   taggingAxis: 4, examining: 4, refiningPrompt: 4,
+  refiningPromptTags: 4, refiningPromptProse: 4,
   savingStory: 5, done: 5,
 }
 
