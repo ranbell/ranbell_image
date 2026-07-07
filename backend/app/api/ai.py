@@ -57,7 +57,7 @@ class RefineRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    n_results: int = 20
+    n_results: int | None = None  # None → use the admin-configured semantic_search_limit
     tag: str = ""
     sort: str = "relevance"
 
@@ -1383,8 +1383,10 @@ async def semantic_search(body: SearchRequest, request: Request):
         }
 
     cfg = await get_runtime_config(db)
+    limit = max(1, min(int(cfg.get("semantic_search_limit", 100)), 500))
+    n_results = min(body.n_results, limit) if body.n_results else limit
     embedding = await ollama.embed(body.query, model=cfg["embed_model"])
-    docs = await db.search_vector(embedding, n_results=body.n_results, tag=body.tag or None)
+    docs = await db.search_vector(embedding, n_results=n_results, tag=body.tag or None)
 
     if body.sort != "relevance":
         docs = sort_docs(docs, body.sort)

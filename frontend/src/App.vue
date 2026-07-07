@@ -1373,7 +1373,7 @@ async function fetchImages(reset = false) {
       const res = await fetch('/api/ai/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery.value, n_results: 50, sort: sortOrder.value }),
+        body: JSON.stringify({ query: searchQuery.value, sort: sortOrder.value }),
       })
       const data = await res.json()
       images.value = data.results || []

@@ -47,6 +47,7 @@ class ConfigBody(BaseModel):
     invoke_daily_oracle_min_free_gb: float | None = None
     disk_caution_pct: Annotated[int, Field(ge=1, le=99)] | None = None
     disk_fault_pct: Annotated[int, Field(ge=1, le=99)] | None = None
+    semantic_search_limit: Annotated[int, Field(ge=1, le=500)] | None = None
 
 
 @router.get("/config")

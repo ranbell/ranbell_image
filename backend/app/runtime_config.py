@@ -59,6 +59,8 @@ _defaults = {
     "pipeline_auto_continue":   True,
     "scan_concurrency":         8,
     "umap_max_points":          20_000,
+    # Max results returned by natural-language semantic search
+    "semantic_search_limit":    100,
 }
 
 _cache: RuntimeConfigCache | None = None

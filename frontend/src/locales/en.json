@@ -714,6 +714,7 @@
       "pipelineBatch": "Max items / run",
       "pipelineConcurrency": "Concurrency",
       "tagsCacheTtl": "Tags cache TTL (sec)",
+      "semanticSearchLimit": "Semantic search max results",
       "uiSettings": "UI Settings",
       "language": "Language",
       "langEn": "English",

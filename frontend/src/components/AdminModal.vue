@@ -1090,6 +1090,11 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   <input v-model.number="adminConfig.tags_cache_ttl" type="number" min="0" max="3600"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.semanticSearchLimit') }}</label>
+                  <input v-model.number="adminConfig.semantic_search_limit" type="number" min="1" max="500" step="10"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
               </div>
             </div>
 

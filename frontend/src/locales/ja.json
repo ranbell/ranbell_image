@@ -714,6 +714,7 @@
       "pipelineBatch": "最大処理件数 / 実行",
       "pipelineConcurrency": "並行処理数",
       "tagsCacheTtl": "タグキャッシュ TTL (秒)",
+      "semanticSearchLimit": "セマンティック検索の最大件数",
       "uiSettings": "UI設定",
       "language": "言語",
       "langEn": "English",
