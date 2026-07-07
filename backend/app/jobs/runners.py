@@ -3144,7 +3144,8 @@ async def run_chronicle_expand(
             # axis over the identity candidates + everything the LLM generated.
             # Higher stakes than Refine — every axis is a different time/scene.
             cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
-            sources = list(dict.fromkeys(identity_tags + axis_tags + cand_tags))[:140]
+            # _find_conflict_tags only reads the first 80, so cap here to match.
+            sources = list(dict.fromkeys(identity_tags + axis_tags + cand_tags))[:80]
             conflicts: set[str] = set()
             if sources:
                 conflicts = await _find_conflict_tags(

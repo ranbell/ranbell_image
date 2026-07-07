@@ -10,7 +10,9 @@ Stage 2 (LLM)  — title + overall summary + three acts, streamed with
 Stage 3 (LLM)  — per-axis image prompt in Refine's Visual Script format
                  (danbooru tag line + 5 prose paragraphs with inline tags),
                  output as POSITIVE:/NEGATIVE: labeled sections
-Final  (LLM)   — Japanese translation of title/overall/acts (JSON)
+
+Stories are authored in the user's locale; when that is Japanese they are
+translated to English before Stage 3 (image prompts are always English).
 """
 
 import json
@@ -261,22 +263,26 @@ def build_story_repair_prompt(raw_story: str) -> str:
     )
 
 
-def parse_story_json(raw: str) -> dict[str, str]:
-    """Parse the repair-pass output. Missing/broken → empty strings per key."""
-    empty = {k: "" for k in SECTIONS}
+def _loads_lenient(raw: str):
+    """Parse JSON, tolerating prose around a single {...} object. → obj or None."""
     text = raw.strip()
     try:
-        data = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\{.*\}", text, re.DOTALL)
         if not m:
-            return empty
+            return None
         try:
-            data = json.loads(m.group(0))
+            return json.loads(m.group(0))
         except json.JSONDecodeError:
-            return empty
+            return None
+
+
+def parse_story_json(raw: str) -> dict[str, str]:
+    """Parse the repair-pass output. Missing/broken → empty strings per key."""
+    data = _loads_lenient(raw)
     if not isinstance(data, dict):
-        return empty
+        return {k: "" for k in SECTIONS}
     return {k: str(data.get(k) or "").strip() for k in SECTIONS}
 
 
@@ -436,17 +442,7 @@ def build_candidates_prompt(
 
 def parse_candidates_json(raw: str) -> list[dict]:
     """Parse the candidates output into a list of dicts. Missing/broken → []."""
-    text = raw.strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if not m:
-            return []
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return []
+    data = _loads_lenient(raw)
     items = data.get("candidates") if isinstance(data, dict) else data
     if not isinstance(items, list):
         return []
@@ -545,17 +541,7 @@ def build_story_tags_prompt(story_text: str, *, count: int = 50) -> str:
 
 def parse_tags_json(raw: str, *, limit: int = 60) -> list[str]:
     """Parse a {"tags": [...]} payload into underscored tags. Missing/broken → []."""
-    text = raw.strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if not m:
-            return []
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return []
+    data = _loads_lenient(raw)
     tags = data.get("tags") if isinstance(data, dict) else data
     if not isinstance(tags, list):
         return []
@@ -1043,23 +1029,8 @@ def remove_conflict_tags(
     return "\n".join(cleaned)
 
 
-# ── Final stage: Japanese translation ─────────────────────────────────────────
-
-def build_translation_prompt(title: str, overall: str, stories: dict[str, str]) -> str:
-    """LLM prompt translating the chronicle into natural literary Japanese."""
-    return (
-        "Translate this chronicle into natural, literary Japanese.\n"
-        "Keep the tone and imagery. Do not add or remove content.\n\n"
-        f"TITLE: {title}\n\n"
-        f"OVERALL: {overall}\n\n"
-        f"PAST: {stories.get('past', '')}\n\n"
-        f"PRESENT: {stories.get('present', '')}\n\n"
-        f"FUTURE: {stories.get('future', '')}\n\n"
-        "Answer with JSON only, using exactly these keys:\n"
-        '{"title_ja": "...", "overall_ja": "...", "past_ja": "...", '
-        '"present_ja": "...", "future_ja": "..."}'
-    )
-
+# ── Final stage: translate the user-language chronicle into English ──────────
+# (image prompts always work in English; skipped when the locale is already en)
 
 def build_translation_to_english_prompt(
     title: str, overall: str, stories: dict[str, str]
@@ -1086,40 +1057,7 @@ def build_translation_to_english_prompt(
 
 def parse_english_translation_json(raw: str) -> dict[str, str]:
     """Parse the to-English translation output. Missing/broken → '' per key."""
-    empty = {k: "" for k in SECTIONS}
-    text = raw.strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if not m:
-            return empty
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return empty
+    data = _loads_lenient(raw)
     if not isinstance(data, dict):
-        return empty
+        return {k: "" for k in SECTIONS}
     return {k: str(data.get(k) or "").strip() for k in SECTIONS}
-
-
-_TRANSLATION_KEYS = ("title_ja", "overall_ja", "past_ja", "present_ja", "future_ja")
-
-
-def parse_translation_json(raw: str) -> dict[str, str]:
-    """Parse the translation output. Missing/broken → empty strings per key."""
-    empty = {k: "" for k in _TRANSLATION_KEYS}
-    text = raw.strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if not m:
-            return empty
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return empty
-    if not isinstance(data, dict):
-        return empty
-    return {k: str(data.get(k) or "").strip() for k in _TRANSLATION_KEYS}

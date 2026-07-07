@@ -4,7 +4,7 @@ Covers:
   - parse_story_sections(): marker splitting incl. TITLE/OVERALL, missing acts
   - build_story_prompt(): base-axis anchoring, worldview, time scale, mutation tags
   - build_axis_prompt(): Visual Script guide, prompt_style variants, identity source
-  - build_translation_prompt() / parse_translation_json(): JA translation stage
+  - build_translation_to_english_prompt(): user-locale → English before Stage 3
   - build_vision_prompt(): full vs. tags-assisted extraction
   - character_tags_from_wd14(): meta-tag filtering
   - remove_conflict_tags(): tag-line filtering, prose preservation
@@ -23,7 +23,6 @@ from app.story.generator import (
     build_story_repair_prompt,
     build_story_tags_prompt,
     build_title_prompt,
-    build_translation_prompt,
     build_translation_to_english_prompt,
     build_vision_prompt,
     character_tags_from_wd14,
@@ -37,7 +36,6 @@ from app.story.generator import (
     parse_story_json,
     parse_story_sections,
     parse_tags_json,
-    parse_translation_json,
     remove_conflict_tags,
     split_vision_sections,
 )
@@ -346,37 +344,6 @@ def test_build_axis_prompt_no_context_if_no_stories():
     assert "FULL CHRONICLE CONTEXT" not in prompt
 
 
-# ── translation stage ─────────────────────────────────────────────────────────
-
-def test_build_translation_prompt():
-    prompt = build_translation_prompt(
-        "The Ascent", "An arc.", {"past": "p", "present": "n", "future": "f"},
-    )
-    assert "TITLE: The Ascent" in prompt
-    assert "PAST: p" in prompt
-    assert '"title_ja"' in prompt and '"future_ja"' in prompt
-
-
-def test_parse_translation_json_clean():
-    raw = ('{"title_ja": "昇天", "overall_ja": "全体", "past_ja": "過去", '
-           '"present_ja": "現在", "future_ja": "未来"}')
-    result = parse_translation_json(raw)
-    assert result["title_ja"] == "昇天"
-    assert result["future_ja"] == "未来"
-
-
-def test_parse_translation_json_wrapped_and_partial():
-    raw = 'Here:\n```json\n{"title_ja": "題", "past_ja": "過去"}\n```'
-    result = parse_translation_json(raw)
-    assert result["title_ja"] == "題"
-    assert result["past_ja"] == "過去"
-    assert result["overall_ja"] == ""
-
-
-def test_parse_translation_json_broken():
-    result = parse_translation_json("not json")
-    assert all(v == "" for v in result.values())
-    assert set(result) == {"title_ja", "overall_ja", "past_ja", "present_ja", "future_ja"}
 
 
 # ── build_vision_prompt ───────────────────────────────────────────────────────

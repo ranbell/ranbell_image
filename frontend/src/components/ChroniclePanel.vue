@@ -21,8 +21,8 @@ const PHASE_STEP = {
   loadingImage: 0, extractingVision: 0,
   candidates: 1,
   selecting: 2,
-  expanding: 3, repairingStory: 3, translating: 3, commonTags: 3,
-  refiningPrompt: 4,
+  expanding: 3, repairingStory: 3, translating: 3,
+  taggingAxis: 4, refiningPrompt: 4,
   savingStory: 5, done: 5,
 }
 
@@ -229,36 +229,20 @@ async function _runStream(jobId) {
   }
 }
 
-// Phase 1 — pitch three story candidates
-async function start() {
-  if (!baseSha.value) {
-    emit('toast', { msg: t('chronicle.noBase'), type: 'error' })
-    return
-  }
-  resetRun()
+// POST a request, then stream its job to completion, managing running/errors.
+// onJob(data) runs a caller-specific step (e.g. capture group_id) before streaming.
+async function _submitAndStream(url, payload, onJob) {
   running.value = true
   try {
-    const r = await fetch('/api/story/chronicle', {
+    const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        base_sha256: baseSha.value,
-        base_time_axis: baseAxis.value,
-        user_topic: userTopic.value,
-        worldview: worldview.value,
-        time_scale: TIME_SCALES[timeScaleIdx.value],
-        prompt_style: promptStyle.value,
-        workflow_name: workflow.value,
-        divergence: divergence.value,
-        use_ref_seed: useRefSeed.value,
-        manual_mode: manualMode.value,
-        locale: uiLocale.value,
-      }),
+      body: JSON.stringify(payload),
     })
     if (!r.ok) throw new Error(_extractError(await r.json().catch(() => null), r))
-    const { job_id, group_id } = await r.json()
-    groupId.value = group_id
-    await _runStream(job_id)
+    const data = await r.json()
+    onJob?.(data)
+    await _runStream(data.job_id)
   } catch (err) {
     errorMsg.value = String(err.message || err)
     emit('toast', { msg: errorMsg.value, type: 'error' })
@@ -267,28 +251,36 @@ async function start() {
   }
 }
 
+// Phase 1 — pitch three story candidates
+async function start() {
+  if (!baseSha.value) {
+    emit('toast', { msg: t('chronicle.noBase'), type: 'error' })
+    return
+  }
+  resetRun()
+  await _submitAndStream('/api/story/chronicle', {
+    base_sha256: baseSha.value,
+    base_time_axis: baseAxis.value,
+    user_topic: userTopic.value,
+    worldview: worldview.value,
+    time_scale: TIME_SCALES[timeScaleIdx.value],
+    prompt_style: promptStyle.value,
+    workflow_name: workflow.value,
+    divergence: divergence.value,
+    use_ref_seed: useRefSeed.value,
+    manual_mode: manualMode.value,
+    locale: uiLocale.value,
+  }, (d) => { groupId.value = d.group_id })
+}
+
 // Phase 2 — expand the chosen candidate
 async function selectCandidate(cid) {
   if (!storyId.value || running.value) return
   selectedCandidate.value = cid
   selecting.value = false
   resetStory()
-  running.value = true
-  try {
-    const r = await fetch(`/api/story/chronicle/${storyId.value}/select`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] }),
-    })
-    if (!r.ok) throw new Error(_extractError(await r.json().catch(() => null), r))
-    const { job_id } = await r.json()
-    await _runStream(job_id)
-  } catch (err) {
-    errorMsg.value = String(err.message || err)
-    emit('toast', { msg: errorMsg.value, type: 'error' })
-  } finally {
-    running.value = false
-  }
+  await _submitAndStream(`/api/story/chronicle/${storyId.value}/select`,
+    { candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] })
 }
 
 // Respin — regenerate candidates or the expanded story at a higher temperature
@@ -299,22 +291,8 @@ async function respin(stage) {
     : (respinExpandCount.value += 1)
   if (stage === 'candidates') { candidates.value = []; selecting.value = false }
   resetStory()
-  running.value = true
-  try {
-    const r = await fetch(`/api/story/chronicle/${storyId.value}/respin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage, respin_count: count }),
-    })
-    if (!r.ok) throw new Error(_extractError(await r.json().catch(() => null), r))
-    const { job_id } = await r.json()
-    await _runStream(job_id)
-  } catch (err) {
-    errorMsg.value = String(err.message || err)
-    emit('toast', { msg: errorMsg.value, type: 'error' })
-  } finally {
-    running.value = false
-  }
+  await _submitAndStream(`/api/story/chronicle/${storyId.value}/respin`,
+    { stage, respin_count: count })
 }
 
 async function readStream(jobId) {
