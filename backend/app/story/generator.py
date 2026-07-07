@@ -142,6 +142,7 @@ def build_story_prompt(
     mutation_tags: list[str] | None = None,
     story_hooks: str = "",
     divergence: float = 0.0,
+    emotion: str = "",
 ) -> str:
     """LLM prompt producing [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] sections."""
     world_line = (
@@ -190,8 +191,15 @@ def build_story_prompt(
         "Rules:\n"
         f"- The {base_axis} act must match the scene above faithfully.\n"
         "- Each act is a DISTINCT MOMENT on the SAME thread, spaced by the time scale:\n"
-        "  • Give each act a specific physical action (writing, reaching, pressing,\n"
-        "    lifting…) — never the identical pose twice.\n"
+        "  • Build every act around ONE concrete, stageable physical action the "
+        "character is caught mid-doing — reaching, turning to look back, kneeling, "
+        "leaning in, gripping, pushing, recoiling, covering the face. The body must "
+        "be DOING something an illustrator could draw at a glance.\n"
+        "  • NEVER let an act be the character merely standing, sitting upright, or "
+        "posing for the camera; a neutral upright stance is not an action. Convey "
+        "emotion THROUGH the action and expression, not through inner monologue.\n"
+        "  • Vary the action/pose across the three acts — never the identical pose "
+        "twice.\n"
         "  • Vary pose, gaze and framing ONLY as far as the scale's delta allows —\n"
         "    at short scales keep the SAME spot and change just pose/action/expression;\n"
         "    only at longer scales may the location or setting itself change.\n"
@@ -210,6 +218,7 @@ def build_story_prompt(
         "change (outfit, weather, location — whichever the scale permits); never "
         "change more than the delta above allows.\n"
         f"{_boldness_line(divergence)}\n"
+        f"{_emotion_guidance_line(emotion).rstrip()}\n"
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
         "its own line, in this order:\n"
@@ -355,6 +364,7 @@ def build_candidates_prompt(
     worldview: str = "",
     base_axis: str = "present",
     time_scale: str = "years",
+    emotion: str = "",
     locale: str = "en",
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
@@ -368,7 +378,12 @@ def build_candidates_prompt(
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     topic_line = (
-        f'User topic (お題) — the stories MUST be about this: "{user_topic.strip()}"'
+        f'User topic (お題) — the stories MUST be about this: "{user_topic.strip()}"\n'
+        "Honour the topic's tense and aspect literally. If it describes an action "
+        "IN PROGRESS (e.g. \"…している最中\", \"in the middle of doing X\"), then ALL "
+        "three acts stay INSIDE that ongoing action — the moments before/after are "
+        "still mid-action. Do NOT resolve, complete, finish, or walk away from the "
+        "action, and do NOT turn it into a before/after of a now-finished task."
         if user_topic.strip()
         else "No topic was given — invent three genuinely different premises yourself."
     )
@@ -421,7 +436,8 @@ def build_candidates_prompt(
         "origin story or a far-off ending when the scale is short.\n"
         f"Visual continuity for this scale — keep: {rules['must_keep']}; "
         f"may change: {rules['may_differ']}.\n\n"
-        f"{guardrail}\n\n"
+        f"{guardrail}\n"
+        f"{_emotion_guidance_line(emotion, locale)}\n"
         "Make the three candidates genuinely distinct:\n"
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
@@ -482,6 +498,7 @@ def build_expand_prompt(
     time_scale: str = "years",
     story_hooks: str = "",
     divergence: float = 0.0,
+    emotion: str = "",
     locale: str = "en",
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
@@ -517,6 +534,7 @@ def build_expand_prompt(
         time_scale=time_scale,
         story_hooks=story_hooks,
         divergence=divergence,
+        emotion=emotion,
     )
     return seed_block + base + lang_block
 
@@ -533,7 +551,13 @@ def build_story_tags_prompt(story_text: str, *, count: int = 50) -> str:
         "(hair, eyes, face, body), clothing and accessories, pose and action, "
         "the location and background, time of day, props and objects, lighting, "
         "colour palette, mood and art style. Be specific and comprehensive; use "
-        "real danbooru tag spellings with underscores.\n\n"
+        "real danbooru tag spellings with underscores.\n"
+        "PRIORITISE the character's PHYSICAL ACTION, POSE and CAMERA ANGLE: emit "
+        "concrete danbooru action/pose tags (e.g. reaching, outstretched_arm, "
+        "leaning_forward, looking_back, kneeling, gripping, holding, covering_face, "
+        "dynamic_pose) and a framing tag (from_side, from_above, cowboy_shot…). "
+        "Do NOT fall back to a static default of just 'standing'/'solo' — capture "
+        "what the body is actually doing in this scene.\n\n"
         f"SCENE:\n{story_text}\n\n"
         'Answer with JSON only: {"tags": ["tag_1", "tag_2", ...]}'
     )
@@ -578,6 +602,21 @@ _VISUAL_SCRIPT_GUIDE = (
     "Embed danbooru tags inline in ASCII parentheses right after each element, "
     'e.g. "A (1girl, solo) with (long_hair, silver_hair) grips a (sword, '
     'holding_sword) on a (rooftop) under (night_sky, full_moon)."\n'
+    "ACTION-ANCHOR — this is what makes the image express the story, so it is "
+    "MANDATORY: every physical action in the act MUST surface as danbooru action "
+    "tags in paragraph 2, placed right after the subject/appearance tags so the "
+    "pose reads strongly. Translate story verbs into real danbooru pose tags, e.g. "
+    "grip→(gripping, clenched_hand), touch→(touching, fingertips), reach→(reaching, "
+    "outstretched_arm), run→(running, dynamic_pose, leaning_forward), kneel→"
+    "(kneeling, one_knee), look back→(looking_back, turning_head), lean→(leaning_"
+    "forward), fall→(falling), hold hands→(holding_hands), cover face→(covering_"
+    "face, hand_over_own_mouth). Use the concrete tag, never a vague phrase like "
+    "'(tender_gesture)'. Add a camera/framing tag for the pose (from_side, "
+    "from_above, from_behind, dutch_angle, cowboy_shot, close-up…).\n"
+    "FORBIDDEN as the whole pose: a bare (standing) / (sitting) / (arms_at_sides) / "
+    "(expressionless) with no action tag — a motionless upright figure is exactly "
+    "the boring default this must avoid. Unless the story truly depicts stillness, "
+    "the character must be visibly mid-action.\n"
     "At least 2 danbooru tags per sentence. English only. No vague phrases. "
     "NEVER add quality meta-tags (masterpiece, best_quality, highres etc.)."
 )
@@ -643,12 +682,15 @@ _SCALE_DELTA: dict[str, str] = {
         "almost the same instant — the other acts are the SAME scene a few beats "
         "earlier / later (a micro-shift of pose, gaze, hand action or expression). "
         "This is the base image EXTENDED slightly before/after (an image+alpha "
-        "continuation), NOT a new scene, NOT a distant memory or a far future."
+        "continuation), NOT a new scene, NOT a distant memory or a far future. "
+        "If an activity is underway it is STILL underway in every act — a few beats "
+        "does not finish it; do not resolve, complete or exit the action."
     ),
     "tens_of_minutes": (
         "the same spot a short while apart — a small progression of the SAME "
         "activity (an object picked up or set down, a step taken, the mood easing). "
-        "Same scene, small delta — no location or time-of-day jump."
+        "Same scene, small delta — no location or time-of-day jump. An activity "
+        "underway stays underway; do not wrap it up or end the scene."
     ),
     "hours": (
         "the same place/building on the SAME day — a different beat of the same "
@@ -851,6 +893,155 @@ def collect_prompt_tags(positive: str) -> list[str]:
     return result
 
 
+# ── Emotion register (shared across story + image-prompt stages) ──────────────
+#
+# The 12 dimensions mirror ai.emotion_tagger.EMOTION_DIMENSIONS. Descriptions are
+# distilled from vocab_bank._EMOTION_QUERIES so the guidance stays in sync with
+# the tag semantics used elsewhere, but here it is a static instruction (no
+# embedding lookup needed at prompt-build time).
+_EMOTION_REGISTER = {
+    "loneliness": "loneliness, solitude, isolation, quiet emptiness",
+    "nostalgia":  "bittersweet nostalgia, faded memory, sepia longing",
+    "ephemeral":  "fleeting, fragile, transient, a passing moment",
+    "melancholy": "melancholy, wistful sorrow, subdued grey mood",
+    "serenity":   "serenity, calm, peaceful stillness, gentle light",
+    "wonder":     "wonder, awe, vast and breathtaking marvel",
+    "joy":        "joy, bright cheerful playfulness, sunlit warmth",
+    "tension":    "tension, suspense, unease, a sharp dramatic edge",
+    "warmth":     "warmth, cozy tenderness, soft golden comfort",
+    "mystery":    "mystery, enigmatic shadow, secrets half-veiled",
+    "desolation": "desolation, ruin, abandonment, barren decay",
+    "vitality":   "vitality, energy, vivid motion, life in bloom",
+}
+
+
+def _emotion_guidance_line(emotion: str, locale: str = "en") -> str:
+    """One-line register guidance for a chosen emotion. Empty/unknown → ''.
+
+    Biases the OVERALL mood/lighting/colour/atmosphere toward the emotion while
+    each act still keeps its own dominant emotion (an overarching tone, not a
+    per-act override).
+    """
+    desc = _EMOTION_REGISTER.get((emotion or "").strip().lower())
+    if not desc:
+        return ""
+    if locale == "ja":
+        return (
+            f"\n感情レジスタ: 全体のムード・照明・色・雰囲気を「{desc}」へ寄せること。"
+            "各幕固有の支配的感情は保ったまま、上位のトーンとして通底させる。\n"
+        )
+    return (
+        f"\nEMOTIONAL REGISTER: bias the overall mood, lighting, colour and "
+        f"atmosphere toward {desc}. Keep each act's own dominant emotion, but let "
+        "this register run through all of them as the overarching tone.\n"
+    )
+
+
+def build_visual_examination_prompt(
+    *,
+    story_text: str,
+    axis: str,
+    base_axis: str,
+    time_scale: str = "years",
+    character_desc: str = "",
+    emotion: str = "",
+    locale: str = "en",
+) -> str:
+    """Stage 3a: decide the shot BEFORE writing the Visual Script.
+
+    Forces a deliberate, multi-angle staging decision for one act and returns it
+    as JSON. The point is `focal_action_tags`: concrete danbooru pose/action tags
+    so the downstream image prompt (and the tag-driven image model) is never left
+    with a motionless upright figure. Non-base axes also inherit the scale's
+    must-keep/forbidden constraints and must pick a camera different from the base.
+    """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
+    if axis != base_axis:
+        direction = "BEFORE" if axis == "past" else "AFTER"
+        constraint = (
+            f"This [{axis.upper()}] moment is {span} {direction} the base image "
+            f"({base_axis}). MUST keep: {rules['must_keep']}. MAY change: "
+            f"{rules['may_differ']}. FORBIDDEN: {rules['forbidden']}. Choose a "
+            "camera/framing clearly DIFFERENT from a plain front view of the base.\n"
+        )
+    else:
+        constraint = ""
+    char_line = f"CHARACTER (appearance only):\n{character_desc}\n\n" if character_desc else ""
+    return (
+        "You are a storyboard director planning ONE shot before it is drawn.\n"
+        "Read the act below and DECIDE, from multiple angles, exactly how the "
+        "character is posed and framed so the image expresses the story rather "
+        "than showing someone standing still.\n\n"
+        f"{char_line}"
+        f"ACT ([{axis.upper()}]):\n{story_text}\n\n"
+        f"{constraint}"
+        "Decide the SINGLE most story-expressive physical action and stage it. "
+        "`focal_action_tags` MUST be concrete danbooru pose/action tags (e.g. "
+        "reaching, outstretched_arm, leaning_forward, looking_back, kneeling, "
+        "gripping, covering_face, holding, clenched_hand) — NEVER just 'standing' "
+        "or 'sitting' with nothing else. Pick a camera angle that dramatizes it.\n"
+        f"{_emotion_guidance_line(emotion, locale)}"
+        "Answer with JSON only, no markdown fences:\n"
+        '{"shot": "<close-up|upper_body|cowboy_shot|full_body|wide_shot>", '
+        '"camera_angle": "<from_side|from_above|from_below|from_behind|dutch_angle|straight-on>", '
+        '"focal_action_tags": ["tag_1", "tag_2", ...], '
+        '"gesture_prose": "<one vivid sentence naming the exact gesture and weight>", '
+        '"lighting": "<direction + quality>", "palette": "<colour palette>", '
+        '"key_props": ["prop_1", ...], "mood": "<one phrase>"}'
+    )
+
+
+def parse_visual_plan_json(raw: str) -> dict:
+    """Parse a Stage 3a visual plan. Missing/broken → {} (axis prompt still works)."""
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return {}
+    def _s(key: str) -> str:
+        return str(data.get(key) or "").strip()
+    def _l(key: str) -> list[str]:
+        v = data.get(key)
+        if not isinstance(v, list):
+            return []
+        return [str(t).strip().replace(" ", "_") for t in v if str(t).strip()]
+    plan = {
+        "shot": _s("shot"),
+        "camera_angle": _s("camera_angle"),
+        "focal_action_tags": _l("focal_action_tags"),
+        "gesture_prose": _s("gesture_prose"),
+        "lighting": _s("lighting"),
+        "palette": _s("palette"),
+        "key_props": _l("key_props"),
+        "mood": _s("mood"),
+    }
+    return plan if any(plan.values()) else {}
+
+
+def _visual_plan_block(plan: dict | None) -> str:
+    """Render a Stage 3a visual plan as a grounding block for build_axis_prompt."""
+    if not plan:
+        return ""
+    action = ", ".join(plan.get("focal_action_tags") or [])
+    props = ", ".join(plan.get("key_props") or [])
+    lines = ["\n[LOCKED SHOT PLAN — realise THIS exactly; put the pose tags near the FRONT of the positive prompt]"]
+    if action:
+        lines.append(f"Focal action (danbooru pose tags, MANDATORY): {action}")
+    if plan.get("gesture_prose"):
+        lines.append(f"Gesture: {plan['gesture_prose']}")
+    shot_bits = ", ".join(b for b in (plan.get("shot"), plan.get("camera_angle")) if b)
+    if shot_bits:
+        lines.append(f"Camera/framing (include as tags): {shot_bits}")
+    if plan.get("lighting"):
+        lines.append(f"Lighting: {plan['lighting']}")
+    if plan.get("palette"):
+        lines.append(f"Palette: {plan['palette']}")
+    if props:
+        lines.append(f"Key props: {props}")
+    if plan.get("mood"):
+        lines.append(f"Mood: {plan['mood']}")
+    return "\n".join(lines) + "\n"
+
+
 def build_axis_prompt(
     *,
     story_text: str,
@@ -865,6 +1056,8 @@ def build_axis_prompt(
     overall: str = "",
     all_stories: dict[str, str] | None = None,
     axis_tags: list[str] | None = None,
+    visual_plan: dict | None = None,
+    emotion: str = "",
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
@@ -947,6 +1140,9 @@ def build_axis_prompt(
     else:
         common_block = ""
 
+    plan_block = _visual_plan_block(visual_plan)
+    emotion_block = _emotion_guidance_line(emotion)
+
     if prompt_style == "natural":
         format_rule = (
             "POSITIVE is the 5-paragraph Visual Script prose described above. "
@@ -975,6 +1171,8 @@ def build_axis_prompt(
         f"{identity_src}\n"
         f"{wd14_block}"
         f"{common_block}"
+        f"{plan_block}"
+        f"{emotion_block}"
         "\n[Visual Script format]\n"
         f"{_VISUAL_SCRIPT_GUIDE}\n\n"
         "Rules:\n"
@@ -988,8 +1186,15 @@ def build_axis_prompt(
         "  visually striking physical instantiation. Choose the exact gesture, the\n"
         "  weight distribution, the prop interaction — be specific, not generic.\n"
         "  The pose must be emotionally distinct from the base image's pose.\n"
+        "- The action MUST appear as concrete danbooru action/pose tags near the\n"
+        "  FRONT of the positive prompt (right after the identity keywords), because\n"
+        "  the image model reads pose from tags. A bare 'standing'/'sitting' with no\n"
+        "  action tag is forbidden unless the act is truly motionless.\n"
         "- NEGATIVE lists only things to avoid (artifacts, wrong elements for "
-        "this scene). Short comma-separated tags.\n\n"
+        "this scene). Short comma-separated tags. Unless this act is deliberately "
+        "still, include static-pose tags here (standing, static_pose, "
+        "expressionless, stiff, arms_at_sides) so the figure is not left just "
+        "standing.\n\n"
         "Output format (exactly these two labels, nothing else):\n"
         "POSITIVE:\n<the positive prompt>\n\n"
         "NEGATIVE:\n<the negative prompt>"

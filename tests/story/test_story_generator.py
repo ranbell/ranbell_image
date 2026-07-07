@@ -25,6 +25,7 @@ from app.story.generator import (
     build_title_prompt,
     build_translation_to_english_prompt,
     build_vision_prompt,
+    build_visual_examination_prompt,
     character_tags_from_wd14,
     classify_identity_tag,
     collect_prompt_tags,
@@ -36,6 +37,7 @@ from app.story.generator import (
     parse_story_json,
     parse_story_sections,
     parse_tags_json,
+    parse_visual_plan_json,
     remove_conflict_tags,
     split_vision_sections,
 )
@@ -782,3 +784,143 @@ def test_translation_to_english():
     )
     assert out["title"] == "T" and out["future"] == "f"
     assert parse_english_translation_json("broken")["title"] == ""
+
+
+# ── pose expressiveness: story action + ACTION-ANCHOR + Stage 3a ──────────────
+
+def test_story_prompt_requires_physical_action():
+    prompt = build_story_prompt(
+        character_desc="1girl", scene_desc="a room",
+        base_axis="present", worldview="", time_scale="years",
+    )
+    assert "stageable physical action" in prompt
+    # boring default explicitly banned
+    assert "merely standing" in prompt
+
+
+def test_visual_script_guide_has_action_anchor():
+    prompt = build_axis_prompt(
+        story_text="She reaches for the letter.",
+        character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru+natural", time_scale="years",
+        axis="past", base_axis="present",
+    )
+    # verb→danbooru action tag map ported from Refine
+    assert "ACTION-ANCHOR" in prompt
+    assert "reaching" in prompt and "outstretched_arm" in prompt
+    # boring upright default forbidden as the whole pose
+    assert "FORBIDDEN as the whole pose" in prompt
+    # NEGATIVE guidance suggests static-pose tags
+    assert "static_pose" in prompt
+
+
+def test_build_visual_examination_prompt_demands_action_tags():
+    prompt = build_visual_examination_prompt(
+        story_text="She kneels to pick up the shard.",
+        axis="past", base_axis="present", time_scale="minutes",
+        character_desc="1girl",
+    )
+    assert "focal_action_tags" in prompt
+    assert "danbooru" in prompt
+    # non-base minutes axis carries the scale constraints
+    assert "MUST keep" in prompt and "FORBIDDEN" in prompt
+    # camera decision requested
+    assert "camera_angle" in prompt
+
+
+def test_parse_visual_plan_json():
+    plan = parse_visual_plan_json(
+        '{"shot":"cowboy_shot","camera_angle":"from_side",'
+        '"focal_action_tags":["reaching","outstretched arm"],'
+        '"gesture_prose":"she leans in","lighting":"warm side light",'
+        '"palette":"amber","key_props":["letter"],"mood":"tense"}'
+    )
+    assert plan["shot"] == "cowboy_shot"
+    # spaces normalised to underscores
+    assert plan["focal_action_tags"] == ["reaching", "outstretched_arm"]
+    assert plan["key_props"] == ["letter"]
+    # broken / empty → {}
+    assert parse_visual_plan_json("nonsense") == {}
+    assert parse_visual_plan_json('{"shot":"","focal_action_tags":[]}') == {}
+
+
+def test_axis_prompt_includes_visual_plan():
+    plan = {
+        "shot": "cowboy_shot", "camera_angle": "from_side",
+        "focal_action_tags": ["reaching", "outstretched_arm"],
+        "gesture_prose": "she leans across the desk",
+        "lighting": "warm", "palette": "amber", "key_props": ["letter"],
+        "mood": "tense",
+    }
+    prompt = build_axis_prompt(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru+natural", time_scale="years",
+        axis="past", base_axis="present", visual_plan=plan,
+    )
+    assert "LOCKED SHOT PLAN" in prompt
+    assert "reaching, outstretched_arm" in prompt
+    assert "she leans across the desk" in prompt
+    # no plan → no block
+    no_plan = build_axis_prompt(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="past", base_axis="present",
+    )
+    assert "LOCKED SHOT PLAN" not in no_plan
+
+
+def test_story_tags_prompt_prioritises_action():
+    prompt = build_story_tags_prompt("She runs across the bridge.")
+    assert "PHYSICAL ACTION" in prompt
+    assert "dynamic_pose" in prompt
+
+
+# ── ongoing-action topic intent (point 3) ─────────────────────────────────────
+
+def test_candidates_prompt_honours_ongoing_topic():
+    prompt = build_candidates_prompt(
+        character_desc="1girl", scene_desc="reading at a desk",
+        user_topic="本を読んでいる最中", time_scale="minutes",
+    )
+    assert "tense and aspect" in prompt
+    assert "IN PROGRESS" in prompt
+    assert "本を読んでいる最中" in prompt
+
+
+def test_scale_delta_minutes_keeps_action_ongoing():
+    prompt = build_story_prompt(
+        character_desc="1girl", scene_desc="reading",
+        base_axis="present", worldview="", time_scale="minutes",
+    )
+    assert "STILL underway" in prompt
+
+
+# ── emotion register option (point 4) ─────────────────────────────────────────
+
+def test_emotion_register_threads_into_prompts():
+    cand = build_candidates_prompt(
+        character_desc="1girl", scene_desc="a room", emotion="nostalgia",
+    )
+    assert "EMOTIONAL REGISTER" in cand and "nostalgia" in cand
+    story = build_story_prompt(
+        character_desc="1girl", scene_desc="a room",
+        base_axis="present", worldview="", emotion="melancholy",
+    )
+    assert "EMOTIONAL REGISTER" in story
+    axis = build_axis_prompt(
+        story_text="s", character_tags=["1girl"], character_desc="",
+        prompt_style="danbooru", time_scale="years",
+        axis="past", base_axis="present", emotion="serenity",
+    )
+    assert "EMOTIONAL REGISTER" in axis
+
+
+def test_emotion_register_off_by_default():
+    prompt = build_candidates_prompt(character_desc="1girl", scene_desc="a room")
+    assert "EMOTIONAL REGISTER" not in prompt
+    # unknown emotion is ignored (no crash, no block)
+    prompt2 = build_story_prompt(
+        character_desc="1girl", scene_desc="a room",
+        base_axis="present", worldview="", emotion="not_a_real_emotion",
+    )
+    assert "EMOTIONAL REGISTER" not in prompt2

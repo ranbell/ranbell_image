@@ -2810,6 +2810,7 @@ async def run_chronicle_candidates(
                 worldview=body.worldview,
                 base_axis=body.base_time_axis,
                 time_scale=body.time_scale,
+                emotion=body.emotion,
                 locale=body.locale,
             ),
             model=vlm_model, options=options, fmt="json",
@@ -2840,6 +2841,7 @@ async def run_chronicle_candidates(
                 group_id=body.group_id,
                 time_scale=body.time_scale,
                 user_topic=body.user_topic,
+                emotion=body.emotion,
                 locale=body.locale,
                 status="draft",
                 candidates=candidates,
@@ -2898,6 +2900,7 @@ async def run_chronicle_expand(
         AXES,
         build_axis_prompt,
         build_expand_prompt,
+        build_visual_examination_prompt,
         build_overall_prompt,
         build_story_repair_prompt,
         build_story_tags_prompt,
@@ -2911,6 +2914,7 @@ async def run_chronicle_expand(
         parse_story_json,
         parse_story_sections,
         parse_tags_json,
+        parse_visual_plan_json,
         remove_conflict_tags,
     )
 
@@ -2988,6 +2992,7 @@ async def run_chronicle_expand(
             time_scale=body.time_scale,
             story_hooks=story_hooks,
             divergence=divergence,
+            emotion=body.emotion,
             locale=locale,
         )
         story_tokens: list[str] = []
@@ -3090,6 +3095,28 @@ async def run_chronicle_expand(
             except Exception as exc:
                 logger.warning("[chronicle] %s tag inference failed: %s", axis, exc)
 
+            # Stage 3a: decide the shot (pose/camera) BEFORE writing the prompt,
+            # so the pose expresses the story instead of a default upright stance.
+            _phase("examining", 0.53 + 0.12 * i, f"Framing the {axis} shot...")
+            visual_plan: dict = {}
+            try:
+                raw_vp = await ollama.generate_text(
+                    build_visual_examination_prompt(
+                        story_text=en_stories[axis],
+                        axis=axis,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale,
+                        character_desc=character_desc,
+                        emotion=body.emotion,
+                        locale="en",
+                    ),
+                    model=vlm_model, options=options, fmt="json",
+                )
+                visual_plan = parse_visual_plan_json(raw_vp)
+            except Exception as exc:
+                logger.warning("[chronicle] %s visual examination failed: %s", axis, exc)
+            cancel.raise_if_set()
+
             _phase("refiningPrompt", 0.55 + 0.12 * i, f"Refining {axis} prompt...")
             _put({"type": "token", "text": f"\n\n— {axis} prompt —\n"})
             axis_prompt = build_axis_prompt(
@@ -3105,6 +3132,8 @@ async def run_chronicle_expand(
                 overall=en_overall,
                 all_stories=en_stories,
                 axis_tags=axis_tags,
+                visual_plan=visual_plan,
+                emotion=body.emotion,
             )
             axis_tokens: list[str] = []
             async for event in ollama.generate_text_stream(

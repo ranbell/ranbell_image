@@ -45,6 +45,7 @@ class ChronicleRequest(BaseModel):
     prompt_style: str = "danbooru+natural"
     workflow_name: str = ""
     divergence: float = 0.0
+    emotion: str = ""  # target emotion register ('' = off; see emotion_tagger.EMOTION_DIMENSIONS)
     use_ref_seed: bool = True
     manual_mode: bool = False
     vlm_model: str = ""

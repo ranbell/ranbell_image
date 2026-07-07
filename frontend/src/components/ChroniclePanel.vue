@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 
 const { t, locale } = useI18n()
 
@@ -22,7 +23,7 @@ const PHASE_STEP = {
   candidates: 1,
   selecting: 2,
   expanding: 3, repairingStory: 3, translating: 3,
-  taggingAxis: 4, refiningPrompt: 4,
+  taggingAxis: 4, examining: 4, refiningPrompt: 4,
   savingStory: 5, done: 5,
 }
 
@@ -35,6 +36,7 @@ const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
 const workflow = ref('')
 const divergence = ref(0)
+const emotion = ref('')       // target emotion register ('' = off)
 const timeScaleIdx = ref(5)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
@@ -267,6 +269,7 @@ async function start() {
     prompt_style: promptStyle.value,
     workflow_name: workflow.value,
     divergence: divergence.value,
+    emotion: emotion.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
     locale: uiLocale.value,
@@ -501,6 +504,20 @@ async function generateImages() {
                   <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
                   <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
                 </div>
+                <!-- emotion register -->
+                <div class="flex items-start gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0 pt-1" :title="t('chronicle.emotionTitle')">🌒 {{ t('chronicle.emotionLabel') }}</span>
+                  <div class="flex flex-wrap gap-1 flex-1">
+                    <button v-for="em in EMOTION_DIMENSIONS" :key="em"
+                      @click="emotion = emotion === em ? '' : em"
+                      :class="emotion === em
+                        ? 'bg-indigo-700/60 border-indigo-500/60 text-indigo-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="px-2 py-1 rounded-lg border text-[10px] transition">
+                      {{ t(`inspire.emotion.${em}`) }}
+                    </button>
+                  </div>
+                </div>
                 <!-- seed / manual -->
                 <div class="flex items-center gap-4">
                   <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
@@ -577,7 +594,7 @@ async function generateImages() {
                   ♻️ {{ t('chronicle.respinCandidates') }}
                 </button>
               </div>
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                 <button v-for="c in candidates" :key="c.id" @click="selectCandidate(c.id)"
                   :disabled="running"
                   class="text-left flex flex-col gap-1.5 p-3 rounded-xl border transition-colors disabled:opacity-50"
