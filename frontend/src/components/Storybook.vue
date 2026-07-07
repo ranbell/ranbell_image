@@ -19,7 +19,11 @@ const SORTS = ['newest', 'oldest', 'title', 'time_scale']
 const stories = ref([])
 const loading = ref(false)
 const regenerating = ref(new Set())
+// Content-language toggle (story title/body/date). Defaults to the global UI
+// locale and follows it when the app language is switched, but can be overridden
+// per view via the JA/EN buttons for bilingual browsing.
 const lang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
+watch(locale, (l) => { lang.value = l?.startsWith('ja') ? 'ja' : 'en' })
 
 // ── view / filter state (persisted to localStorage) ───────────────────────────
 const _saved = (() => { try { return JSON.parse(localStorage.getItem('storybook.ui') || '{}') } catch { return {} } })()

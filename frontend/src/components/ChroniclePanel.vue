@@ -81,8 +81,10 @@ const respinCandCount = ref(0)
 const respinExpandCount = ref(0)
 
 // English is the canonical text; JA is a stored translation. The toggle
-// switches display only (default follows the UI locale).
+// switches display only (default follows the UI locale, and keeps following it
+// when the app language is switched while the panel is open).
 const panelLang = ref(uiLocale.value)
+watch(uiLocale, (l) => { panelLang.value = l })
 const displayTitle = computed(() =>
   (panelLang.value === 'ja' && titleJa.value) ? titleJa.value : title.value
 )
