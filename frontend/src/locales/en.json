@@ -1315,6 +1315,38 @@
     "delete": "Delete",
     "deleteConfirm": "Delete \"{title}\"? (Generated images are kept.)",
     "deleted": "Story deleted",
-    "deleteFailed": "Failed to delete story"
+    "deleteFailed": "Failed to delete story",
+    "emptyFiltered": "No stories match the current filters",
+    "searchPh": "Search title, story, motif…",
+    "view": {
+      "gallery": "Gallery",
+      "detail": "Detail",
+      "timeline": "Timeline",
+      "focus": "Focus"
+    },
+    "sort": {
+      "newest": "Newest",
+      "oldest": "Oldest",
+      "title": "Title",
+      "time_scale": "Time scale"
+    },
+    "filter": {
+      "baseAxis": "Base axis",
+      "timeScale": "Scale",
+      "emotion": "Emotion",
+      "more": "More filters",
+      "clear": "Clear filters"
+    },
+    "bucket": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "Earlier this week",
+      "thisMonth": "Earlier this month"
+    },
+    "focus": {
+      "prev": "Previous (←)",
+      "next": "Next (→)",
+      "close": "Close (Esc)"
+    }
   }
 }

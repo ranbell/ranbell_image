@@ -1315,6 +1315,38 @@
     "delete": "削除",
     "deleteConfirm": "「{title}」を削除しますか？(生成画像は残ります)",
     "deleted": "物語を削除しました",
-    "deleteFailed": "削除に失敗しました"
+    "deleteFailed": "削除に失敗しました",
+    "emptyFiltered": "条件に一致する物語はありません",
+    "searchPh": "タイトル・物語・モチーフを検索…",
+    "view": {
+      "gallery": "ギャラリー",
+      "detail": "詳細",
+      "timeline": "タイムライン",
+      "focus": "フォーカス"
+    },
+    "sort": {
+      "newest": "新しい順",
+      "oldest": "古い順",
+      "title": "タイトル順",
+      "time_scale": "時間スケール順"
+    },
+    "filter": {
+      "baseAxis": "基準軸",
+      "timeScale": "スケール",
+      "emotion": "感情",
+      "more": "詳細フィルタ",
+      "clear": "フィルタ解除"
+    },
+    "bucket": {
+      "today": "今日",
+      "yesterday": "昨日",
+      "thisWeek": "今週の他の日",
+      "thisMonth": "今月の他の日"
+    },
+    "focus": {
+      "prev": "前へ (←)",
+      "next": "次へ (→)",
+      "close": "閉じる (Esc)"
+    }
   }
 }
