@@ -1246,6 +1246,7 @@
     "running": "Weaving...",
     "candidatesTitle": "Story candidates",
     "candidateSelect": "Choose this story",
+    "forkFromCandidate": "Fork with this candidate",
     "respinCandidates": "New candidates",
     "respinStory": "Rewrite story",
     "cancel": "Cancel group",

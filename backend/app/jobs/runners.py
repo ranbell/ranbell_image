@@ -2899,6 +2899,7 @@ async def run_chronicle_expand(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         AXES,
+        base_pose_tags,
         build_axis_prompt,
         build_expand_prompt,
         build_visual_examination_prompt,
@@ -3011,6 +3012,7 @@ async def run_chronicle_expand(
             emotion=body.emotion,
             locale=locale,
             mutation_tags=mutation_tags,
+            user_topic=body.user_topic,
         )
         story_tokens: list[str] = []
         async for event in ollama.generate_text_stream(
@@ -3114,8 +3116,13 @@ async def run_chronicle_expand(
 
             # Stage 3a: decide the shot (pose/camera) BEFORE writing the prompt,
             # so the pose expresses the story instead of a default upright stance.
+            # For the base_axis the pose is LOCKED to the base image's wd14 tags
+            # so the rendered base image matches the thumbnail the user picked.
             _phase("examining", 0.53 + 0.12 * i, f"Framing the {axis} shot...")
             visual_plan: dict = {}
+            axis_base_pose = (
+                base_pose_tags(wd14_tags) if axis == body.base_time_axis else []
+            )
             try:
                 raw_vp = await ollama.generate_text(
                     build_visual_examination_prompt(
@@ -3126,6 +3133,8 @@ async def run_chronicle_expand(
                         character_desc=character_desc,
                         emotion=body.emotion,
                         locale="en",
+                        base_pose_tags=axis_base_pose,
+                        user_topic=body.user_topic,
                     ),
                     model=vlm_model, options=options, fmt="json",
                 )
@@ -3151,6 +3160,7 @@ async def run_chronicle_expand(
                 axis_tags=axis_tags,
                 visual_plan=visual_plan,
                 emotion=body.emotion,
+                user_topic=body.user_topic,
             )
             axis_tokens: list[str] = []
             async for event in ollama.generate_text_stream(

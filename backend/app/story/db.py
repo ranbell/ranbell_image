@@ -16,7 +16,7 @@ Payload schema:
     overall_story / overall_story_ja: str
     axes: { past/present/future: { story, story_ja, prompt_positive,
                                    prompt_negative, image_id } }
-    candidates: [ {id, title, summary, suggested_time_scale, key_motif} ]
+    candidates: [ {id, title, past, present, future, summary, motif} ]
     selected_candidate: "A" | "B" | "C"
     respin_history: [ {kind, temperature, candidates?/title/overall/axes?} ]
     context: { character_desc, scene_desc, character_tags, wd14_tags,
@@ -98,6 +98,32 @@ async def create_story(db, payload: dict, embedding: list[float] | None = None) 
         points=[qm.PointStruct(id=story_id, vector=vector, payload=payload)],
     )
     return story_id
+
+
+async def fork_draft(db, story: dict) -> str:
+    """Clone a finalized story into a fresh draft point and return the new id.
+
+    Used when the user picks a different candidate on an already-finalized run:
+    instead of overwriting the previous Storybook entry, we spin off a new
+    draft that inherits the setup (base image, candidates, worldview, topic,
+    workflow, locale, etc.) but starts with an empty axes/respin_history so
+    Phase 2 writes into its own record.
+    """
+    payload = new_story_payload(
+        base_image_id=story.get("base_image_id", ""),
+        base_time_axis=story.get("base_time_axis", "present"),
+        worldview=story.get("worldview", ""),
+        workflow_name=story.get("workflow_name", ""),
+        group_id=story.get("group_id", ""),
+        time_scale=story.get("time_scale", "years"),
+        user_topic=story.get("user_topic", ""),
+        emotion=story.get("emotion", ""),
+        locale=story.get("locale", "en"),
+        status="draft",
+        candidates=story.get("candidates") or [],
+        context=story.get("context") or {},
+    )
+    return await create_story(db, payload)
 
 
 async def get_story(db, story_id: str) -> dict | None:

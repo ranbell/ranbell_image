@@ -108,13 +108,23 @@ async def start_chronicle(body: ChronicleRequest, request: Request):
 
 @router.post("/chronicle/{story_id}/select")
 async def select_candidate(story_id: str, body: SelectCandidateRequest, request: Request):
-    """Phase 2: expand the chosen candidate. Returns a new streaming job_id."""
+    """Phase 2: expand the chosen candidate. Returns a new streaming job_id.
+
+    If the target story is already finalized (the user picked another candidate
+    from a completed run), the draft is forked into a fresh story record so the
+    previous Storybook entry is not overwritten. Re-expanding on purpose stays
+    on the /respin endpoint.
+    """
     from ..jobs.runners import run_chronicle_expand
 
     app = request.app
     story = await story_db.get_story(app.state.db, story_id)
     if story is None:
         raise HTTPException(404, f"Story {story_id!r} not found")
+
+    if story.get("status") == "final":
+        story_id = await story_db.fork_draft(app.state.db, story)
+        story = await story_db.get_story(app.state.db, story_id)
 
     job_id = _submit_prompt_job(
         app, "chronicle_expand", run_chronicle_expand,

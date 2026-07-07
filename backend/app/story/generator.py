@@ -114,6 +114,53 @@ def split_vision_sections(text: str) -> tuple[str, str]:
 
 # ── Stage 2: title + overall + three acts ─────────────────────────────────────
 
+def _coherence_hierarchy_block(
+    *, base_axis: str, user_topic: str, time_scale: str
+) -> str:
+    """Precedence rule shared across every LLM stage.
+
+    The three anchors — base image, user topic, time axis — often pull the
+    story in different directions; this block tells the LLM which one wins
+    when they conflict so the pipeline stays coherent end to end.
+    """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    topic_line = (
+        f'2. USER TOPIC ("{user_topic.strip()}") — what the story is ABOUT. '
+        "Overrides the chosen candidate wherever they conflict. Never invert "
+        "or resolve it for the sake of surprise."
+        if user_topic.strip()
+        else "2. USER TOPIC — (none given; invent freely, but honour 1 and 3)."
+    )
+    return (
+        "⚠️ COHERENCE HIERARCHY — resolve conflicts in this order ⚠️\n"
+        f"1. BASE IMAGE — the [{base_axis.upper()}] act depicts this scene literally.\n"
+        f"{topic_line}\n"
+        f'3. TIME AXIS (scale "{time_scale}": {span} between acts) — how much may '
+        "change between acts. Non-negotiable.\n"
+        "4. CANDIDATE beats — scaffolding; adjust freely to satisfy 1-3.\n"
+        "5. Divergence / mutation tags / emotion — flavour; may be dropped to satisfy 1-3.\n"
+    )
+
+
+def _user_intent_block(user_topic: str) -> str:
+    """USER INTENT block for stages 2 (expand) and 3 (axis). Empty when no topic."""
+    topic = user_topic.strip()
+    if not topic:
+        return ""
+    return (
+        f'\nUSER TOPIC (highest constraint after the base image): "{topic}"\n'
+        '  - If it names an ENDING ("最後は…" / "ends with…" / "結末は…" / "…になる"),\n'
+        "    the FUTURE act's concrete action is that ending. Do not substitute.\n"
+        '  - If it names an ONGOING action ("…最中" / "…途中" / "in the middle of…"),\n'
+        "    ALL three acts stay INSIDE that action; do not resolve or exit it.\n"
+        '  - If it names a moment ("…するシーン" / "the moment X"), PRESENT realises\n'
+        "    that moment (and it must also match the base image).\n"
+        "  - The chosen candidate below is scaffolding; where it conflicts with the\n"
+        "    topic, follow the topic.\n"
+        "  - Honour the topic's temporal envelope regardless of the scale slider.\n"
+    )
+
+
 def _boldness_line(divergence: float) -> str:
     """Story-boldness rule scaled by the Transmute divergence slider."""
     if divergence < 0.3:
@@ -143,6 +190,7 @@ def build_story_prompt(
     story_hooks: str = "",
     divergence: float = 0.0,
     emotion: str = "",
+    user_topic: str = "",
 ) -> str:
     """LLM prompt producing [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] sections."""
     world_line = (
@@ -155,6 +203,17 @@ def build_story_prompt(
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     delta = _scale_delta_line(time_scale)
+    hierarchy_block = _coherence_hierarchy_block(
+        base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
+    )
+    intent_block = _user_intent_block(user_topic)
+    base_lock_block = (
+        f"\n🔒 BASE ACT ({base_axis.upper()}) = the image above. Reproduce it literally:\n"
+        "  - Same pose and expression as in the scene description.\n"
+        "  - Same setting, props, lighting, time of day.\n"
+        f"  - Do NOT invent new elements in the {base_axis} act.\n"
+        "  - Extension is only permitted in the OTHER two acts, within the delta.\n"
+    )
     time_block = (
         "⚠️ ABSOLUTE TIME CONSTRAINT — NON-NEGOTIABLE ⚠️\n"
         f'TIME SCALE: {span} between acts (scale key: "{time_scale}").\n\n'
@@ -180,7 +239,10 @@ def build_story_prompt(
     return (
         "You are a storyteller. Write a three-act chronicle (past, present, future) "
         "of the single character below.\n\n"
-        f"{time_block}\n\n"
+        f"{hierarchy_block}\n"
+        f"{time_block}\n"
+        f"{base_lock_block}"
+        f"{intent_block}\n"
         "CHARACTER (visual descriptor tags — interpret as appearance attributes, "
         "NOT as character names or story text):\n"
         f"{character_desc}\n\n"
@@ -189,7 +251,6 @@ def build_story_prompt(
         f"{hooks_block}"
         f"{mutation_block}\n"
         "Rules:\n"
-        f"- The {base_axis} act must match the scene above faithfully.\n"
         "- Each act is a DISTINCT MOMENT on the SAME thread, spaced by the time scale:\n"
         "  • Build every act around ONE concrete, stageable physical action the "
         "character is caught mid-doing — reaching, turning to look back, kneeling, "
@@ -345,15 +406,18 @@ _CANDIDATE_SPIRITS = (
         "surprising backstory or profession, a secret the character carries, a "
         "reversal of who they really are. Keep the same real-world register as the "
         "image; the surprise is human and situational, NEVER a genre shift to "
-        "space, magic, or the supernatural."
+        "space, magic, or the supernatural. If a USER TOPIC is given, the surprise "
+        "MUST remain compatible with it — never invert the topic itself (do not "
+        "turn 'ending is X' into 'never reaches X', do not turn 'mid-X' into "
+        "'X already finished')."
     )),
 )
 
 
 def _locale_output_line(locale: str) -> str:
     if locale == "ja":
-        return "出力の title / past / present / future / key_motif はすべて自然で読みやすい日本語で書くこと。"
-    return "Write every title / past / present / future / key_motif field in natural English."
+        return "出力の title / past / present / future / motif はすべて自然で読みやすい日本語で書くこと。"
+    return "Write every title / past / present / future / motif field in natural English."
 
 
 def build_candidates_prompt(
@@ -417,10 +481,14 @@ def build_candidates_prompt(
         "element. Find the surprise in human, emotional and situational twists — "
         "a hidden motive, an unseen person, an ironic turn — NOT in a genre shift."
     )
+    hierarchy_block = _coherence_hierarchy_block(
+        base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
+    )
     return (
         "You are a storyteller pitching THREE different chronicles for the same "
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
         f"separated by {span} of elapsed time.\n\n"
+        f"{hierarchy_block}\n"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
         f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT — it looks exactly "
@@ -444,12 +512,12 @@ def build_candidates_prompt(
         "For EACH candidate write ONE concrete sentence per act — past, present, "
         f"future — where the [{base_axis}] sentence matches the base image and the "
         f"other two are the events {span} before / after it. Also give a title "
-        "(3-8 words, specific and evocative, never generic) and a key_motif (one "
+        "(3-8 words, specific and evocative, never generic) and a motif (one "
         "concrete object that recurs and changes meaning across the three moments).\n\n"
         "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
         '  {"id": "A", "title": "...", "past": "...", "present": "...", '
-        '"future": "...", "key_motif": "..."},\n'
+        '"future": "...", "motif": "..."},\n'
         '  {"id": "B", ...},\n'
         '  {"id": "C", ...}\n'
         "]}"
@@ -476,6 +544,8 @@ def parse_candidates_json(raw: str) -> list[dict]:
         summary = str(item.get("summary") or "").strip()
         if not summary:
             summary = present or " / ".join(b for b in (past, future) if b)
+        # `motif` is the canonical name; older records used `key_motif`.
+        motif = str(item.get("motif") or item.get("key_motif") or "").strip()
         result.append({
             "id": cid,
             "title": str(item.get("title") or "").strip(),
@@ -483,7 +553,7 @@ def parse_candidates_json(raw: str) -> list[dict]:
             "present": present,
             "future": future,
             "summary": summary,
-            "key_motif": str(item.get("key_motif") or "").strip(),
+            "motif": motif,
         })
     return result
 
@@ -501,25 +571,29 @@ def build_expand_prompt(
     emotion: str = "",
     locale: str = "en",
     mutation_tags: list[str] | None = None,
+    user_topic: str = "",
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
     Same markers/structure as build_story_prompt, but seeded by the selected
-    candidate's per-act beats (title/past/present/future/key_motif) and written
+    candidate's per-act beats (title/past/present/future/motif) and written
     in the user's locale. Older candidates without beats fall back to summary.
     """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     beats = "".join(
         f"  [{a.upper()}] seed: {selected.get(a, '')}\n"
         for a in AXES if selected.get(a)
     ) or f"  Summary: {selected.get('summary', '')}\n"
+    motif = selected.get("motif") or selected.get("key_motif") or ""
     seed_block = (
-        "CHOSEN STORY DIRECTION — expand THESE beats faithfully into the three "
-        "full acts, honouring the time axis between them (keep the title unless "
-        "it genuinely no longer fits):\n"
+        f"BASE = [{base_axis.upper()}] moment (image above); acts are spaced by {span}.\n"
+        "CHOSEN STORY DIRECTION — expand THESE beats to satisfy the base image "
+        "and the user topic above; adjust the candidate wherever they conflict "
+        "(keep the title unless it genuinely no longer fits):\n"
         f"  Title: {selected.get('title', '')}\n"
         f"{beats}"
-        "  Key motif (must recur and transform across all three acts): "
-        f"{selected.get('key_motif', '')}\n\n"
+        "  Motif (must recur and transform across all three acts): "
+        f"{motif}\n\n"
     )
     lang_block = (
         "\n言語ルール: [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] のマーカーは"
@@ -537,6 +611,7 @@ def build_expand_prompt(
         story_hooks=story_hooks,
         divergence=divergence,
         emotion=emotion,
+        user_topic=user_topic,
     )
     return seed_block + base + lang_block
 
@@ -808,6 +883,57 @@ def is_multi_character(wd14_tags: list[str]) -> bool:
     return any(t.strip().lower() in _MULTI_SUBJECT_TAGS for t in wd14_tags)
 
 
+# Tokens that identify pose / action / framing tags among a wd14 tag list.
+# Deliberately loose — matches any tag containing one of these tokens so that
+# both bare ("standing") and compound ("outstretched_arm", "leaning_forward")
+# variants are picked up. Framing tags (from_side / cowboy_shot) are matched
+# by exact-tag membership below.
+_POSE_ACTION_TOKENS = frozenset({
+    "standing", "sitting", "kneeling", "lying", "crouching", "squatting",
+    "leaning", "reaching", "pointing", "walking", "running", "jumping",
+    "falling", "flying", "swimming", "holding", "gripping", "clenched",
+    "touching", "grabbing", "hugging", "kissing", "carrying", "lifting",
+    "pushing", "pulling", "clapping", "waving", "bowing", "turning",
+    "bending", "stretching", "spread", "outstretched", "raised", "crossed",
+    "folded", "closed", "open", "covering", "hiding", "looking",
+    "smiling", "laughing", "crying", "screaming", "shouting",
+    "sleeping", "eating", "drinking", "reading", "writing", "playing",
+    "dancing", "singing", "praying", "fighting",
+    "arm", "arms", "hand", "hands", "leg", "legs", "knee", "foot", "feet",
+    "head", "face", "mouth", "eye", "eyes",
+    "pose",
+})
+_FRAMING_TAGS = frozenset({
+    "from_side", "from_above", "from_below", "from_behind", "from_front",
+    "close-up", "close_up", "upper_body", "cowboy_shot", "full_body",
+    "wide_shot", "dutch_angle", "straight-on", "portrait", "looking_at_viewer",
+    "looking_away", "looking_back", "looking_down", "looking_up",
+    "profile", "three_quarter_view",
+})
+
+
+def base_pose_tags(wd14_tags: list[str], *, limit: int = 10) -> list[str]:
+    """Return the pose/action/framing subset of the base image's wd14 tags.
+
+    Used as a hard lock on the base_axis visual plan (see
+    build_visual_examination_prompt): whatever pose the actual base image
+    shows must be the pose the base_axis rendering reproduces.
+    """
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in wd14_tags:
+        t = raw.strip().lower().replace(" ", "_")
+        if not t or t in seen:
+            continue
+        toks = set(t.split("_"))
+        if t in _FRAMING_TAGS or toks & _POSE_ACTION_TOKENS:
+            result.append(t)
+            seen.add(t)
+            if len(result) >= limit:
+                break
+    return result
+
+
 def identity_tags_for_scale(
     wd14_tags: list[str],
     time_scale: str,
@@ -948,6 +1074,8 @@ def build_visual_examination_prompt(
     character_desc: str = "",
     emotion: str = "",
     locale: str = "en",
+    base_pose_tags: list[str] | None = None,
+    user_topic: str = "",
 ) -> str:
     """Stage 3a: decide the shot BEFORE writing the Visual Script.
 
@@ -956,6 +1084,9 @@ def build_visual_examination_prompt(
     so the downstream image prompt (and the tag-driven image model) is never left
     with a motionless upright figure. Non-base axes also inherit the scale's
     must-keep/forbidden constraints and must pick a camera different from the base.
+
+    For the base_axis the pose is LOCKED to the base image's WD14 pose tags so
+    the base rendering stays coherent with the actual thumbnail the user picked.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
@@ -968,7 +1099,22 @@ def build_visual_examination_prompt(
             "camera/framing clearly DIFFERENT from a plain front view of the base.\n"
         )
     else:
-        constraint = ""
+        pose_lock = ""
+        if base_pose_tags:
+            pose_lock = (
+                "🔒 BASE-AXIS POSE LOCK — this is the base image itself. Your "
+                "`focal_action_tags` MUST include the WD14 pose/action tags below "
+                "verbatim (add complementary tags if useful, but never contradict "
+                "them). The camera angle must match the base image's framing.\n"
+                f"Base pose/action tags: {', '.join(base_pose_tags)}\n"
+            )
+        constraint = pose_lock
+    intent_line = (
+        f'\nUSER INTENT: this chronicle fulfils "{user_topic.strip()}". Stage this '
+        "shot so the intent is legible in the frame (especially the FUTURE act).\n"
+        if user_topic.strip()
+        else ""
+    )
     char_line = f"CHARACTER (appearance only):\n{character_desc}\n\n" if character_desc else ""
     return (
         "You are a storyboard director planning ONE shot before it is drawn.\n"
@@ -978,6 +1124,7 @@ def build_visual_examination_prompt(
         f"{char_line}"
         f"ACT ([{axis.upper()}]):\n{story_text}\n\n"
         f"{constraint}"
+        f"{intent_line}"
         "Decide the SINGLE most story-expressive physical action and stage it. "
         "`focal_action_tags` MUST be concrete danbooru pose/action tags (e.g. "
         "reaching, outstretched_arm, leaning_forward, looking_back, kneeling, "
@@ -990,7 +1137,7 @@ def build_visual_examination_prompt(
         '"focal_action_tags": ["tag_1", "tag_2", ...], '
         '"gesture_prose": "<one vivid sentence naming the exact gesture and weight>", '
         '"lighting": "<direction + quality>", "palette": "<colour palette>", '
-        '"key_props": ["prop_1", ...], "mood": "<one phrase>"}'
+        '"props": ["prop_1", ...], "mood": "<one phrase>"}'
     )
 
 
@@ -1006,6 +1153,8 @@ def parse_visual_plan_json(raw: str) -> dict:
         if not isinstance(v, list):
             return []
         return [str(t).strip().replace(" ", "_") for t in v if str(t).strip()]
+    # `props` is the canonical field; older records used `key_props`.
+    props = _l("props") or _l("key_props")
     plan = {
         "shot": _s("shot"),
         "camera_angle": _s("camera_angle"),
@@ -1013,7 +1162,7 @@ def parse_visual_plan_json(raw: str) -> dict:
         "gesture_prose": _s("gesture_prose"),
         "lighting": _s("lighting"),
         "palette": _s("palette"),
-        "key_props": _l("key_props"),
+        "props": props,
         "mood": _s("mood"),
     }
     return plan if any(plan.values()) else {}
@@ -1024,7 +1173,7 @@ def _visual_plan_block(plan: dict | None) -> str:
     if not plan:
         return ""
     action = ", ".join(plan.get("focal_action_tags") or [])
-    props = ", ".join(plan.get("key_props") or [])
+    props = ", ".join(plan.get("props") or plan.get("key_props") or [])
     lines = ["\n[LOCKED SHOT PLAN — realise THIS exactly; put the pose tags near the FRONT of the positive prompt]"]
     if action:
         lines.append(f"Focal action (danbooru pose tags, MANDATORY): {action}")
@@ -1038,7 +1187,7 @@ def _visual_plan_block(plan: dict | None) -> str:
     if plan.get("palette"):
         lines.append(f"Palette: {plan['palette']}")
     if props:
-        lines.append(f"Key props: {props}")
+        lines.append(f"Props: {props}")
     if plan.get("mood"):
         lines.append(f"Mood: {plan['mood']}")
     return "\n".join(lines) + "\n"
@@ -1060,6 +1209,7 @@ def build_axis_prompt(
     axis_tags: list[str] | None = None,
     visual_plan: dict | None = None,
     emotion: str = "",
+    user_topic: str = "",
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
@@ -1086,6 +1236,14 @@ def build_axis_prompt(
         )
     else:
         chronicle_ctx = ""
+
+    intent_ctx = (
+        f'\nUSER INTENT: this chronicle was written to fulfil "{user_topic.strip()}". '
+        "Keep this shot faithful to that intent — especially in the FUTURE act "
+        "(if the topic names an ending, the FUTURE image must depict that ending).\n"
+        if user_topic.strip()
+        else ""
+    )
 
     if character_tags:
         identity_src = "[visual tags] " + ", ".join(character_tags)
@@ -1124,10 +1282,13 @@ def build_axis_prompt(
         # injects, plus this act's own axis_tags below.
         wd14_block = ""
     elif wd14_context:
+        # Base axis: the image is ground truth. WD14 pose/scene/mood tags MUST
+        # be reflected in the positive prompt so the rendered base image lines
+        # up with the actual thumbnail the user picked.
         wd14_block = (
-            "\n[WD14 tags of the base image — for art style / quality reference "
-            "ONLY. The story text above is the PRIMARY source for content; "
-            "prefer it wherever the two disagree]\n"
+            "\n[WD14 tags of the base image — the base_axis image MUST match "
+            "these tags (pose, scene, mood). Reproduce them faithfully in the "
+            "positive prompt; the story text is secondary for this axis]\n"
             f"{wd14_context}\n"
         )
     else:
@@ -1168,6 +1329,7 @@ def build_axis_prompt(
         "You are an expert image generation prompt engineer.\n"
         "Turn ONE act of a story into an image prompt.\n\n"
         f"{chronicle_ctx}"
+        f"{intent_ctx}"
         f"SCENE (this act of the story):\n{story_text}\n"
         f"{temporal_block}\n"
         f"{identity_src}\n"

@@ -73,7 +73,7 @@ const overallJa = ref('')
 const mutationTags = ref([])   // tags injected by the divergence dial (visible)
 
 // ── candidate / selection state ─────────────────────────────────────────────
-const candidates = ref([])       // [{id,title,summary,suggested_time_scale,key_motif}]
+const candidates = ref([])       // [{id,title,past,present,future,summary,motif}]
 const selecting = ref(false)     // candidates shown, awaiting a pick
 const selectedCandidate = ref('')
 const respinCandCount = ref(0)
@@ -621,12 +621,15 @@ async function generateImages() {
                       <span class="text-gray-300">{{ c[ax] || (ax === 'present' ? c.summary : '') }}</span>
                     </div>
                   </div>
-                  <div v-if="c.key_motif" class="mt-auto pt-1">
+                  <div v-if="c.motif || c.key_motif" class="mt-auto pt-1">
                     <span class="text-[9px] px-1.5 py-0.5 rounded bg-gray-900/70 text-purple-300">
-                      ✦ {{ c.key_motif }}
+                      ✦ {{ c.motif || c.key_motif }}
                     </span>
                   </div>
-                  <span class="text-[10px] text-amber-400/90 font-medium mt-1">{{ t('chronicle.candidateSelect') }} →</span>
+                  <span class="text-[10px] font-medium mt-1"
+                    :class="finished ? 'text-purple-300/90' : 'text-amber-400/90'">
+                    {{ finished ? t('chronicle.forkFromCandidate') : t('chronicle.candidateSelect') }} →
+                  </span>
                 </button>
               </div>
             </div>

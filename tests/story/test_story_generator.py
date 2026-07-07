@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
+    base_pose_tags,
     build_axis_prompt,
     build_candidates_prompt,
     build_expand_prompt,
@@ -216,6 +217,41 @@ def test_build_story_prompt_mutation_tags():
         character_desc="c", scene_desc="s", base_axis="present", worldview="",
     )
     assert "Unexpected elements" not in no_mutation
+
+
+def test_build_story_prompt_user_topic_hard_constraint():
+    prompt = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present",
+        worldview="", user_topic="最後は花畑にたどり着く",
+    )
+    # coherence hierarchy tells the LLM which anchor wins
+    assert "COHERENCE HIERARCHY" in prompt
+    # user topic block reaches the model verbatim
+    assert "最後は花畑にたどり着く" in prompt
+    assert "USER TOPIC" in prompt
+    # base act lock present regardless of topic
+    assert "BASE ACT" in prompt
+    # empty topic → intent block is skipped
+    no_topic = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+    )
+    assert "USER TOPIC" in no_topic  # hierarchy still names the slot
+    assert "highest constraint" not in no_topic  # but the details block is gone
+
+
+def test_base_pose_tags():
+    tags = [
+        "1girl", "long_hair", "blonde_hair", "sitting", "looking_at_viewer",
+        "hand_on_own_face", "smile", "indoors",
+    ]
+    result = base_pose_tags(tags)
+    # picks up pose + framing tags; drops appearance/scene ones
+    assert "sitting" in result
+    assert "looking_at_viewer" in result
+    assert "hand_on_own_face" in result
+    assert "long_hair" not in result and "indoors" not in result
+    # empty in → empty out
+    assert base_pose_tags([]) == []
 
 
 # ── build_axis_prompt ─────────────────────────────────────────────────────────
@@ -592,9 +628,10 @@ def test_build_axis_prompt_wd14_label_base_axis():
         axis="present", base_axis="present",
         wd14_context="[common tags] 1girl",
     )
-    # Base axis keeps WD14, but framed as style-only with the story as PRIMARY
+    # Base axis carries the wd14 tags and treats the base image as the anchor
+    # the rendered base_axis image must match.
     assert "[common tags] 1girl" in prompt
-    assert "PRIMARY source for content" in prompt
+    assert "base_axis image MUST match" in prompt
 
 
 # ── Stage 2a: story candidates ────────────────────────────────────────────────
@@ -655,16 +692,24 @@ def test_candidates_prompt_time_scale_differs():
 def test_parse_candidates_json_clean():
     raw = (
         '{"candidates": ['
-        '{"id":"A","title":"T1","past":"p1","present":"pr1","future":"f1","key_motif":"m1"},'
-        '{"id":"B","title":"T2","past":"p2","present":"pr2","future":"f2","key_motif":"m2"}'
+        '{"id":"A","title":"T1","past":"p1","present":"pr1","future":"f1","motif":"m1"},'
+        '{"id":"B","title":"T2","past":"p2","present":"pr2","future":"f2","motif":"m2"}'
         ']}'
     )
     out = parse_candidates_json(raw)
     assert len(out) == 2
     assert out[0]["id"] == "A" and out[0]["title"] == "T1"
     assert out[0]["past"] == "p1" and out[0]["future"] == "f1"
+    assert out[0]["motif"] == "m1"
     # summary is derived from the present beat when not provided
     assert out[0]["summary"] == "pr1"
+
+
+def test_parse_candidates_json_legacy_key_motif():
+    # older records used `key_motif`; parser reads either and emits `motif`
+    raw = '{"candidates":[{"id":"A","title":"T","present":"pr","key_motif":"legacy"}]}'
+    out = parse_candidates_json(raw)
+    assert out[0]["motif"] == "legacy"
 
 
 def test_parse_candidates_json_legacy_summary():
@@ -685,19 +730,24 @@ def test_build_expand_prompt():
     prompt = build_expand_prompt(
         selected={"title": "The Bell", "past": "a bell is cast",
                   "present": "a bell tolls", "future": "a bell cracks",
-                  "key_motif": "bronze bell"},
+                  "motif": "bronze bell"},
         character_desc="[visual tags] 1girl",
         scene_desc="a belfry",
         base_axis="present",
         worldview="",
         time_scale="years",
         locale="ja",
+        user_topic="最後は鐘が割れる瞬間",
     )
     # the chosen candidate's beats seed the expansion, in Japanese, keeping markers
     assert "The Bell" in prompt and "bronze bell" in prompt
     assert "a bell is cast" in prompt and "a bell cracks" in prompt
     assert "日本語" in prompt
     assert "[TITLE]" in prompt and "[PAST]" in prompt
+    # user topic must reach the LLM as a hard constraint
+    assert "最後は鐘が割れる瞬間" in prompt
+    assert "COHERENCE HIERARCHY" in prompt
+    assert "BASE ACT" in prompt
 
 
 # ── multi-character identity scoping ──────────────────────────────────────────
@@ -833,12 +883,17 @@ def test_parse_visual_plan_json():
         '{"shot":"cowboy_shot","camera_angle":"from_side",'
         '"focal_action_tags":["reaching","outstretched arm"],'
         '"gesture_prose":"she leans in","lighting":"warm side light",'
-        '"palette":"amber","key_props":["letter"],"mood":"tense"}'
+        '"palette":"amber","props":["letter"],"mood":"tense"}'
     )
     assert plan["shot"] == "cowboy_shot"
     # spaces normalised to underscores
     assert plan["focal_action_tags"] == ["reaching", "outstretched_arm"]
-    assert plan["key_props"] == ["letter"]
+    assert plan["props"] == ["letter"]
+    # legacy `key_props` key still parses so older records keep loading
+    legacy = parse_visual_plan_json(
+        '{"shot":"cowboy_shot","key_props":["letter"]}'
+    )
+    assert legacy["props"] == ["letter"]
     # broken / empty → {}
     assert parse_visual_plan_json("nonsense") == {}
     assert parse_visual_plan_json('{"shot":"","focal_action_tags":[]}') == {}
@@ -849,7 +904,7 @@ def test_axis_prompt_includes_visual_plan():
         "shot": "cowboy_shot", "camera_angle": "from_side",
         "focal_action_tags": ["reaching", "outstretched_arm"],
         "gesture_prose": "she leans across the desk",
-        "lighting": "warm", "palette": "amber", "key_props": ["letter"],
+        "lighting": "warm", "palette": "amber", "props": ["letter"],
         "mood": "tense",
     }
     prompt = build_axis_prompt(

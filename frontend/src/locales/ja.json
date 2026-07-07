@@ -1246,6 +1246,7 @@
     "running": "紡いでいます...",
     "candidatesTitle": "物語候補",
     "candidateSelect": "この物語を選ぶ",
+    "forkFromCandidate": "この候補で新しい物語を紡ぐ",
     "respinCandidates": "候補を再生成",
     "respinStory": "物語を作り直す",
     "cancel": "グループ中止",
