@@ -1334,19 +1334,33 @@ _FACE_BODY_TOKENS = frozenset({
     "tail", "ears", "skin", "scar", "tattoo", "halo", "heterochromia",
     "elf", "tanned", "tanlines",
 })
-# Clothing/accessory half of vocab_bank._CHARACTER_KEYWORDS, token form
-_OUTFIT_TOKENS = frozenset({
+# Clothing/accessory half of vocab_bank._CHARACTER_KEYWORDS, token form.
+# Split into ACCESSORIES (jewelry / eyewear / headwear / neckwear / hosiery —
+# small identity-defining adornments) and GARMENTS (core clothing). The new
+# WD14+Refine flow treats accessories as ALWAYS-KEEP identity (with hair colour
+# and eye colour), while garments are free to change across the timeline.
+_ACCESSORY_TOKENS = frozenset({
+    "hat", "ribbon", "bow", "bowtie", "necktie", "scarf", "glove", "gloves",
+    "necklace", "earring", "earrings", "glasses", "choker", "belt",
+    "thighhighs", "pantyhose", "boots", "shoes", "socks",
+})
+_GARMENT_TOKENS = frozenset({
     "dress", "uniform", "outfit", "shirt", "skirt", "jacket", "coat",
     "blouse", "sweater", "hoodie", "kimono", "yukata", "leotard", "bikini",
-    "swimsuit", "hat", "ribbon", "bow", "bowtie", "necktie", "glove",
-    "gloves", "thighhighs", "pantyhose", "boots", "shoes", "socks", "scarf",
-    "cape", "cloak", "armor", "necklace", "earring", "earrings", "glasses",
-    "choker", "apron", "vest", "pants", "shorts", "belt", "corset",
+    "swimsuit", "cape", "cloak", "armor", "apron", "vest", "pants",
+    "shorts", "corset",
 })
+# Backward-compatible union (any caller wanting "clothing or accessory").
+_OUTFIT_TOKENS = _ACCESSORY_TOKENS | _GARMENT_TOKENS
 
 
 def classify_identity_tag(tag: str) -> str | None:
-    """'hair_color'|'hair_style'|'eyes'|'face'|'outfit'|None (= never inject)."""
+    """'hair_color'|'hair_style'|'eyes'|'face'|'accessory'|'outfit'|None.
+
+    None = never inject. 'accessory' (jewelry, eyewear, ribbon, hat…) is split
+    out from 'outfit' (garments) so the WD14+Refine flow can lock accessories as
+    identity while letting garments change across the timeline.
+    """
     t = tag.strip().lower().replace(" ", "_")
     if _HAIR_COLOR_RE.match(t):
         return "hair_color"
@@ -1357,7 +1371,9 @@ def classify_identity_tag(tag: str) -> str | None:
         return "eyes"
     if toks & _FACE_BODY_TOKENS:
         return "face"
-    if toks & _OUTFIT_TOKENS:
+    if toks & _ACCESSORY_TOKENS:
+        return "accessory"
+    if toks & _GARMENT_TOKENS:
         return "outfit"
     return None
 
@@ -1463,6 +1479,38 @@ def identity_tags_for_scale(
     for tag in wd14_tags:
         category = classify_identity_tag(tag)
         if category in allowed:
+            result.append(tag)
+            if len(result) >= limit:
+                break
+    return result
+
+
+# The always-keep identity set for the WD14+Refine flow: hair colour, eye
+# colour, and accessories — held constant across ALL time scales (unlike the
+# scale-gated identity_tags_for_scale). Garments, hair style and pose are free
+# to change from act to act, driven by the WD14 vector search + base-image tags.
+_IDENTITY_LOCK_CATEGORIES = frozenset({"hair_color", "eyes", "accessory"})
+
+
+def identity_lock_tags(
+    wd14_tags: list[str],
+    *,
+    limit: int = 12,
+    multi_character: bool = False,
+) -> list[str]:
+    """Base image's hair-colour + eye-colour + accessory tags — ALWAYS kept.
+
+    Scale-independent (unlike identity_tags_for_scale): these are the traits the
+    user wants preserved across every act. multi_character drops hair_color/eyes
+    (ambiguous ownership with several subjects), same as identity_tags_for_scale;
+    accessories still lock.
+    """
+    allowed = _IDENTITY_LOCK_CATEGORIES
+    if multi_character:
+        allowed = allowed - {"hair_color", "eyes"}
+    result: list[str] = []
+    for tag in wd14_tags:
+        if classify_identity_tag(tag) in allowed:
             result.append(tag)
             if len(result) >= limit:
                 break

@@ -43,6 +43,7 @@ from app.story.generator import (
     character_tags_from_wd14,
     classify_identity_tag,
     collect_prompt_tags,
+    identity_lock_tags,
     identity_tags_for_scale,
     inject_identity_tags,
     is_multi_character,
@@ -474,13 +475,40 @@ def test_classify_identity_tag():
     assert classify_identity_tag("animal_ears") == "face"
     assert classify_identity_tag("mole_under_eye") == "face"
     assert classify_identity_tag("dark_skin") == "face"
+    # garments classify as outfit
     assert classify_identity_tag("school_uniform") == "outfit"
     assert classify_identity_tag("black_dress") == "outfit"
-    assert classify_identity_tag("hair_ribbon") == "outfit"
+    # accessories are their own category (split out of outfit)
+    assert classify_identity_tag("hair_ribbon") == "accessory"
+    assert classify_identity_tag("necklace") == "accessory"
+    assert classify_identity_tag("earrings") == "accessory"
+    assert classify_identity_tag("glasses") == "accessory"
+    assert classify_identity_tag("choker") == "accessory"
+    assert classify_identity_tag("hat") == "accessory"
     # scene / pose / composition / time-of-day tags are never identity
     for tag in ("sitting", "indoors", "night", "window", "from_behind",
                 "standing", "outdoors", "sunset", "cityscape", "looking_at_viewer"):
         assert classify_identity_tag(tag) is None, tag
+
+
+def test_identity_lock_tags():
+    tags = ["1girl", "silver_hair", "red_eyes", "black_dress", "necklace",
+            "choker", "ponytail", "sitting", "night"]
+    # always-keep = hair colour + eye colour + accessories, scale-independent
+    lock = identity_lock_tags(tags)
+    assert "silver_hair" in lock and "red_eyes" in lock
+    assert "necklace" in lock and "choker" in lock
+    # garments / hair style / pose are NOT locked (free to change)
+    assert "black_dress" not in lock and "ponytail" not in lock
+    assert "sitting" not in lock and "night" not in lock
+    # multi-character drops hair colour + eyes (ambiguous), keeps accessories
+    multi = identity_lock_tags(tags, multi_character=True)
+    assert "silver_hair" not in multi and "red_eyes" not in multi
+    assert "necklace" in multi and "choker" in multi
+    # limit is honoured
+    assert len(identity_lock_tags(
+        ["silver_hair", "red_eyes", "necklace", "choker", "earrings"], limit=2
+    )) == 2
 
 
 def test_identity_tags_for_scale():
