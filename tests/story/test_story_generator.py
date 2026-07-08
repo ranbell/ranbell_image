@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.story.generator import (
     _candidate_beats_degenerate,
     _chronicle_tags_degenerate,
+    _coherence_hierarchy_block,
     _dramatic_mode_line,
     _elapsed_time_header,
     _text_similarity,
@@ -24,6 +25,7 @@ from app.story.generator import (
     assign_dramatic_modes,
     base_pose_tags,
     build_differentiate_acts_prompt,
+    build_topic_directive_prompt,
     candidates_degenerate,
     build_axis_prompt,
     build_axis_prose_prompt,
@@ -1465,3 +1467,86 @@ def test_build_differentiate_acts_prompt():
         assert marker in prompt
     # base axis stays matched to the image
     assert "[PRESENT] act must still match the base image" in prompt
+
+
+# ── user topic concretization (お題 narrative directive) ──────────────────────
+
+def test_build_topic_directive_prompt():
+    en = build_topic_directive_prompt("exploring abandoned ruins", locale="en")
+    assert "exploring abandoned ruins" in en
+    assert "DIRECTIVE" in en
+    # narrative, not visual tags; broad/long spans not shackled
+    assert "NOT appearance or danbooru tags" in en
+    assert "THEME the three acts explore freely" in en
+    ja = build_topic_directive_prompt("廃墟を探索する", locale="ja", time_scale="decades")
+    assert "廃墟を探索する" in ja
+    assert "方針" in ja and "テーマ" in ja
+    # the elapsed span is threaded in per scale
+    assert "several decades" in ja
+    assert "a few years" in build_topic_directive_prompt("x", locale="en")
+
+
+def test_candidates_prompt_topic_hoisted_above_base_image():
+    prompt = build_candidates_prompt(
+        character_desc="1girl",
+        scene_desc="UNIQUE_SCENE_MARKER a sunlit classroom",
+        user_topic="廃墟を探索する冒険",
+        topic_directive="少女は忘れられた廃墟を探索し、隠された過去に触れていく。",
+        locale="ja",
+        time_scale="years",
+    )
+    # the topic block appears BEFORE the base-image description
+    assert prompt.index("★ USER TOPIC") < prompt.index("UNIQUE_SCENE_MARKER")
+    # raw topic + narrative directive both present
+    assert "廃墟を探索する冒険" in prompt
+    assert "隠された過去に触れていく" in prompt
+    # base image is explicitly scoped to LOOK-only
+    assert "fixes the base act's LOOK only" in prompt
+    # ongoing-action tense guidance preserved from the old topic_line
+    assert "tense and aspect" in prompt
+
+
+def test_candidates_prompt_topic_without_directive():
+    # directive omitted → still hoists the raw topic prominently
+    prompt = build_candidates_prompt(
+        character_desc="1girl", scene_desc="a room", user_topic="放課後の冒険",
+    )
+    assert "★ USER TOPIC" in prompt
+    assert "放課後の冒険" in prompt
+    # empty topic → no topic block, generic invent-your-own line
+    empty = build_candidates_prompt(character_desc="1girl", scene_desc="a room")
+    assert "★ USER TOPIC" not in empty
+    assert "No topic was given" in empty
+
+
+def test_coherence_hierarchy_scopes_image_vs_topic():
+    block = _coherence_hierarchy_block(
+        base_axis="present", user_topic="a secret journey", time_scale="years",
+    )
+    # base image scoped to LOOK; topic drives the subject
+    assert "fixes only how" in block and "LOOKS" in block
+    assert "what the STORY IS ABOUT" in block
+    assert "these two do not conflict" in block
+
+
+def test_story_and_expand_thread_topic_directive():
+    directive = "DIRECTIVE_MARKER_XYZ she hunts a truth across years"
+    story = build_story_prompt(
+        character_desc="1girl", scene_desc="s", base_axis="present", worldview="",
+        user_topic="真実を追う", topic_directive=directive,
+    )
+    assert directive in story
+    assert "what the STORY IS ABOUT across all three acts" in story
+    expand = build_expand_prompt(
+        selected={"id": "A", "title": "T", "past": "p", "present": "pr",
+                  "future": "f", "motif": "m"},
+        character_desc="1girl", scene_desc="s", base_axis="present", worldview="",
+        user_topic="真実を追う", topic_directive=directive,
+    )
+    assert directive in expand
+    # empty directive → no directive line, no crash
+    plain = build_story_prompt(
+        character_desc="1girl", scene_desc="s", base_axis="present", worldview="",
+        user_topic="真実を追う",
+    )
+    assert "Story direction distilled from the topic" not in plain

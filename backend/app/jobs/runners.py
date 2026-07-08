@@ -2737,6 +2737,7 @@ async def run_chronicle_candidates(
     from ..story.generator import (
         assign_dramatic_modes,
         build_candidates_prompt,
+        build_topic_directive_prompt,
         build_vision_prompt,
         candidates_degenerate,
         character_tags_from_wd14,
@@ -2828,6 +2829,25 @@ async def run_chronicle_candidates(
                 except Exception as exc:
                     logger.warning("[chronicle] wd14 context build failed: %s", exc)
 
+            # Distil an abstract user topic (お題) into a short NARRATIVE directive
+            # so the small model has a concrete subject to build on instead of
+            # re-telling the base image. Narrative (not visual tags) so broad
+            # topics / long spans are not shackled. Done once; reused on respin.
+            topic_directive = ""
+            if body.user_topic.strip():
+                reporter.update(0.50, "Distilling the topic...")
+                try:
+                    topic_directive = (await ollama.generate_text(
+                        build_topic_directive_prompt(
+                            body.user_topic,
+                            time_scale=body.time_scale,
+                            locale=body.locale,
+                        ),
+                        model=vlm_model, options=options,
+                    )).strip()
+                except Exception as exc:
+                    logger.warning("[chronicle] topic directive failed: %s", exc)
+
             ctx = {
                 "character_desc": character_desc,
                 "scene_desc": scene_desc,
@@ -2835,6 +2855,7 @@ async def run_chronicle_candidates(
                 "wd14_tags": wd14_tags,
                 "wd14_context": wd14_context,
                 "story_hooks": story_hooks,
+                "topic_directive": topic_directive,
                 "body": body_dict,
             }
 
@@ -2863,6 +2884,7 @@ async def run_chronicle_candidates(
                     time_scale=body.time_scale,
                     emotion=body.emotion,
                     locale=body.locale,
+                    topic_directive=ctx.get("topic_directive", ""),
                     candidate_modes=candidate_modes,
                 ),
                 model=vlm_model, options=cand_options, fmt="json",
@@ -3086,6 +3108,7 @@ async def run_chronicle_expand(
             locale=locale,
             mutation_tags=mutation_tags,
             user_topic=body.user_topic,
+            topic_directive=ctx.get("topic_directive", ""),
         )
         story_tokens: list[str] = []
         async for event in ollama.generate_text_stream(

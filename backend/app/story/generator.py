@@ -222,15 +222,16 @@ def _coherence_hierarchy_block(
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     topic_line = (
-        f'2. USER TOPIC ("{user_topic.strip()}") — what the story is ABOUT. '
-        "Overrides the chosen candidate wherever they conflict. Never invert "
-        "or resolve it for the sake of surprise."
+        f'2. USER TOPIC ("{user_topic.strip()}") — what the STORY IS ABOUT across '
+        "all three acts. Drives the subject; the base image never overrides it. "
+        "Overrides the chosen candidate. Never invert or resolve it for surprise."
         if user_topic.strip()
         else "2. USER TOPIC — (none given; invent freely, but honour 1 and 3)."
     )
     lines = [
         "COHERENCE HIERARCHY — resolve conflicts in this order:",
-        f"1. BASE IMAGE — the [{base_axis.upper()}] act depicts this scene literally.",
+        f"1. BASE IMAGE — fixes only how the [{base_axis.upper()}] act LOOKS (its "
+        "scene, pose, character identity). It does NOT decide what the story is about.",
         topic_line,
         f'3. TIME AXIS (scale "{time_scale}": {span} between acts) — how much may '
         "change between acts. Non-negotiable.",
@@ -254,22 +255,81 @@ def _coherence_hierarchy_block(
         lines.append(
             "5. Divergence / mutation tags / emotion — flavour; may be dropped to satisfy 1-3."
         )
+    lines.append(
+        "(Base image = how it LOOKS; user topic = what it is ABOUT — these two do "
+        "not conflict.)"
+    )
     return "\n".join(lines) + "\n"
 
 
-def _user_intent_block(user_topic: str) -> str:
+def build_topic_directive_prompt(
+    user_topic: str, *, time_scale: str = "years", locale: str = "en"
+) -> str:
+    """Expand an abstract user topic (お題) into a short NARRATIVE directive.
+
+    The candidate stage kept ignoring the topic because a small local model
+    cannot bridge an abstract theme to concrete scenes against a vivid literal
+    image description. This turns the topic into 2-3 sentences of story direction
+    — the subject, the conflict/journey it implies, and a few situational anchors
+    — deliberately NOT visual danbooru tags (those would shrink a broad theme
+    into a tag-salad and pin the visuals across a long timeline). It is framed as
+    a THEME the three acts explore freely, so it never over-constrains long spans
+    or broad topics.
+    """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    if locale == "ja":
+        return (
+            "あなたは物語のディレクターです。次の『お題』を、三幕構成の物語の"
+            "『方針』へ具体化してください。\n"
+            f"お題: {user_topic.strip()}\n"
+            f"三幕は約{span}の間隔で並びます。\n\n"
+            "出力する方針（2-3文、自然な日本語）に含めること:\n"
+            "- この物語が扱う主題（お題を噛み砕いた一文）\n"
+            "- そこに含意される葛藤・目的・旅路・転機\n"
+            "- 具体的な状況アンカーを2-3個（状況・関係・出来事など物語上の要素。"
+            "外見やdanbooruタグではない）\n\n"
+            "重要: これは固定シーンの指定ではなく、三幕が自由に展開してよい『テーマ』です。"
+            "時間軸が長くても各幕を1枚の絵に縛らないこと。\n"
+            "方針の本文だけを出力（見出し・引用符・説明は不要）。"
+        )
+    return (
+        "You are a story director. Turn the TOPIC below into a short narrative "
+        "DIRECTIVE for a three-act story.\n"
+        f"TOPIC: {user_topic.strip()}\n"
+        f"The three acts are spaced about {span} apart.\n\n"
+        "The directive (2-3 sentences, natural English) must convey:\n"
+        "- the subject this story is about (one plain sentence distilling the topic)\n"
+        "- the conflict, goal, journey or turn it implies\n"
+        "- 2-3 concrete situational anchors (situations, relationships, events — "
+        "story elements, NOT appearance or danbooru tags)\n\n"
+        "IMPORTANT: this is a THEME the three acts explore freely, NOT a fixed "
+        "scene. Even across a long time span, do not pin each act to one picture.\n"
+        "Output ONLY the directive prose — no headings, quotes or explanation."
+    )
+
+
+def _user_intent_block(user_topic: str, topic_directive: str = "") -> str:
     """USER INTENT block for stages 2 (expand) and 3 (axis). Empty when no topic."""
     topic = user_topic.strip()
     if not topic:
         return ""
+    directive_line = (
+        "  Story direction distilled from the topic (the SUBJECT all three acts "
+        f"explore — a theme, not a fixed scene):\n    {topic_directive.strip()}\n"
+        if topic_directive.strip()
+        else ""
+    )
     return (
-        f'\nUSER TOPIC (highest constraint after the base image): "{topic}"\n'
+        f'\nUSER TOPIC — what the STORY IS ABOUT across all three acts: "{topic}"\n'
+        f"{directive_line}"
         '  - If it names an ENDING ("最後は…" / "ends with…" / "結末は…" / "…になる"),\n'
         "    the FUTURE act's concrete action is that ending. Do not substitute.\n"
         '  - If it names an ONGOING action ("…最中" / "…途中" / "in the middle of…"),\n'
         "    ALL three acts stay INSIDE that action; do not resolve or exit it.\n"
         '  - If it names a moment ("…するシーン" / "the moment X"), PRESENT realises\n'
         "    that moment (and it must also match the base image).\n"
+        "  - The base image only fixes how the base act LOOKS; the topic decides\n"
+        "    what the story is ABOUT. Make every act embody the topic.\n"
         "  - The chosen candidate below is scaffolding; where it conflicts with the\n"
         "    topic, follow the topic.\n"
         "  - Honour the topic's temporal envelope regardless of the scale slider.\n"
@@ -353,6 +413,7 @@ def build_story_prompt(
     divergence: float = 0.0,
     emotion: str = "",
     user_topic: str = "",
+    topic_directive: str = "",
     dramatic_mode: str = "",
     turn: str = "",
 ) -> str:
@@ -372,7 +433,7 @@ def build_story_prompt(
         base_axis=base_axis, user_topic=user_topic, time_scale=time_scale,
         protect_twist=protect,
     )
-    intent_block = _user_intent_block(user_topic)
+    intent_block = _user_intent_block(user_topic, topic_directive)
     time_block = _time_contract_block(base_axis=base_axis, time_scale=time_scale)
 
     shape_line = _dramatic_mode_line(dramatic_mode)
@@ -707,6 +768,7 @@ def build_candidates_prompt(
     emotion: str = "",
     locale: str = "en",
     candidate_modes: dict[str, str] | None = None,
+    topic_directive: str = "",
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
@@ -715,19 +777,39 @@ def build_candidates_prompt(
     base image is the `base_axis` moment, and each candidate must give ONE
     concrete beat per act, where the other two acts are separate moments the
     chosen span before / after the image (not a re-description of it).
+
+    The user topic (お題) is hoisted into a prominent block ABOVE the base-image
+    description and expanded with `topic_directive` (a narrative directive from
+    build_topic_directive_prompt), because a small local model otherwise drowns
+    an abstract topic under the vivid literal image and re-tells the picture.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
-    topic_line = (
-        f'User topic (お題) — the stories MUST be about this: "{user_topic.strip()}"\n'
-        "Honour the topic's tense and aspect literally. If it describes an action "
-        "IN PROGRESS (e.g. \"…している最中\", \"in the middle of doing X\"), then ALL "
-        "three acts stay INSIDE that ongoing action — the moments before/after are "
-        "still mid-action. Do NOT resolve, complete, finish, or walk away from the "
-        "action, and do NOT turn it into a before/after of a now-finished task."
-        if user_topic.strip()
-        else "No topic was given — invent three genuinely different premises yourself."
-    )
+    # Hoisted, high-salience topic block (rendered before the base image below).
+    if user_topic.strip():
+        directive_part = (
+            "Story direction (the SUBJECT the three acts explore — a theme, not a "
+            f"fixed scene):\n{topic_directive.strip()}\n"
+            if topic_directive.strip()
+            else ""
+        )
+        topic_block = (
+            "★ USER TOPIC (お題) — THIS is what the story must be ABOUT ★\n"
+            f'Topic: "{user_topic.strip()}"\n'
+            f"{directive_part}"
+            "Every one of the three acts must embody this topic. The base image "
+            "below only fixes how the base act LOOKS; it does NOT decide the "
+            "subject — the topic does. Do not let the picture pull the story back "
+            "into a plain depiction of itself.\n"
+            "Honour the topic's tense and aspect literally: if it describes an "
+            "action IN PROGRESS (e.g. \"…している最中\", \"in the middle of doing X\"), "
+            "ALL three acts stay INSIDE that ongoing action — do NOT resolve, "
+            "complete or walk away from it.\n"
+        )
+    else:
+        topic_block = (
+            "No topic was given — invent three genuinely different premises yourself.\n"
+        )
     world_line = (
         f'Setting atmosphere / worldview: "{worldview.strip()}" — backdrop and '
         "flavour only; the scene details above take precedence."
@@ -765,12 +847,13 @@ def build_candidates_prompt(
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
         f"separated by {span} of elapsed time.\n\n"
         f"{elapsed_header}\n"
+        f"{topic_block}\n"
         f"{hierarchy_block}\n"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
         f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT (t = 0) — it looks "
-        f"exactly like this:\n{scene_desc}\n\n"
-        f"{topic_line}\n"
+        f"exactly like this (this fixes the base act's LOOK only, not the subject):"
+        f"\n{scene_desc}\n\n"
         f"{world_line}\n\n"
         "⚠️ TIME AXIS — this is the STORY ENGINE, not decoration ⚠️\n"
         f"Use the elapsed-time header above as the axis map. Each act opens a new "
@@ -977,6 +1060,7 @@ def build_expand_prompt(
     locale: str = "en",
     mutation_tags: list[str] | None = None,
     user_topic: str = "",
+    topic_directive: str = "",
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
@@ -1030,6 +1114,7 @@ def build_expand_prompt(
         divergence=divergence,
         emotion=emotion,
         user_topic=user_topic,
+        topic_directive=topic_directive,
         dramatic_mode=dramatic_mode,
         turn=turn,
     )
