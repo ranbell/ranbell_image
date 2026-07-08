@@ -38,6 +38,13 @@ const workflows = ref([])
 const workflow = ref('')
 const divergence = ref(0)
 const emotion = ref('')       // target emotion register ('' = off)
+// Story-shape dimension, mirrors backend generator._DRAMATIC_MODES. '' = auto
+// (the backend auto-varies a distinct mode per candidate).
+const DRAMATIC_MODES = [
+  'escalation', 'reversal', 'revelation', 'irony', 'approaching_threat',
+  'pursuit', 'parting', 'temptation', 'secret_surfacing', 'role_reversal',
+]
+const dramaticMode = ref('')  // preferred story shape ('' = auto/おまかせ)
 const timeScaleIdx = ref(5)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
@@ -271,6 +278,7 @@ async function start() {
     workflow_name: workflow.value,
     divergence: divergence.value,
     emotion: emotion.value,
+    dramatic_mode: dramaticMode.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
     locale: uiLocale.value,
@@ -526,6 +534,28 @@ async function generateImages() {
                         : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
                       class="px-2 py-1 rounded-lg border text-[10px] transition">
                       {{ t(`inspire.emotion.${em}`) }}
+                    </button>
+                  </div>
+                </div>
+                <!-- dramatic mode (story shape) -->
+                <div class="flex items-start gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0 pt-1" :title="t('chronicle.dramaticModeTitle')">🎭 {{ t('chronicle.dramaticModeLabel') }}</span>
+                  <div class="flex flex-wrap gap-1 flex-1">
+                    <button
+                      @click="dramaticMode = ''"
+                      :class="dramaticMode === ''
+                        ? 'bg-indigo-700/60 border-indigo-500/60 text-indigo-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="px-2 py-1 rounded-lg border text-[10px] transition">
+                      {{ t('chronicle.dramaticModeAuto') }}
+                    </button>
+                    <button v-for="dm in DRAMATIC_MODES" :key="dm"
+                      @click="dramaticMode = dramaticMode === dm ? '' : dm"
+                      :class="dramaticMode === dm
+                        ? 'bg-indigo-700/60 border-indigo-500/60 text-indigo-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="px-2 py-1 rounded-lg border text-[10px] transition">
+                      {{ t(`chronicle.dramaticMode.${dm}`) }}
                     </button>
                   </div>
                 </div>

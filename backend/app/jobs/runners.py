@@ -2735,8 +2735,10 @@ async def run_chronicle_candidates(
     from ..story import db as story_db
     from ..story.api import ChronicleRequest
     from ..story.generator import (
+        assign_dramatic_modes,
         build_candidates_prompt,
         build_vision_prompt,
+        candidates_degenerate,
         character_tags_from_wd14,
         parse_candidates_json,
         split_vision_sections,
@@ -2837,22 +2839,52 @@ async def run_chronicle_candidates(
             }
 
         # ── Stage 2a: three story candidates (single JSON call) ───────────────
+        # Assign a DISTINCT dramatic mode per candidate (A/B/C) so the three
+        # pitches diverge in plot shape, not just viewpoint. A user-chosen mode
+        # (body.dramatic_mode) is pinned; empty auto-varies.
+        candidate_modes = assign_dramatic_modes(preferred=body.dramatic_mode)
         _phase("candidates", 0.55, "Imagining story candidates...")
-        raw = await ollama.generate_text(
-            build_candidates_prompt(
-                character_desc=ctx.get("character_desc", ""),
-                scene_desc=ctx.get("scene_desc", ""),
-                user_topic=body.user_topic,
-                worldview=body.worldview,
-                base_axis=body.base_time_axis,
-                time_scale=body.time_scale,
-                emotion=body.emotion,
-                locale=body.locale,
-            ),
-            model=vlm_model, options=options, fmt="json",
-        )
-        cancel.raise_if_set()
-        candidates = parse_candidates_json(raw)
+        candidates: list[dict] = []
+        for cand_attempt in range(2):
+            cand_options = dict(options)
+            if cand_attempt == 1:
+                # Timeline collapsed on the first try — mirror the tag stage's
+                # degenerate-retry: bump temperature once, then use what we get.
+                cand_options["temperature"] = min(
+                    1.3, float(options.get("temperature", 0.8)) + 0.25
+                )
+            raw = await ollama.generate_text(
+                build_candidates_prompt(
+                    character_desc=ctx.get("character_desc", ""),
+                    scene_desc=ctx.get("scene_desc", ""),
+                    user_topic=body.user_topic,
+                    worldview=body.worldview,
+                    base_axis=body.base_time_axis,
+                    time_scale=body.time_scale,
+                    emotion=body.emotion,
+                    locale=body.locale,
+                    candidate_modes=candidate_modes,
+                ),
+                model=vlm_model, options=cand_options, fmt="json",
+            )
+            cancel.raise_if_set()
+            parsed = parse_candidates_json(raw)
+            if parsed:
+                # The mode we assigned is authoritative — backfill it so a
+                # candidate that forgot to echo `dramatic_mode` still carries it
+                # (and its protected `turn`) into the expand stage.
+                for c in parsed:
+                    if not c.get("dramatic_mode"):
+                        c["dramatic_mode"] = candidate_modes.get(c.get("id", ""), "")
+                candidates = parsed
+            if parsed and not candidates_degenerate(parsed):
+                break
+            if cand_attempt == 0:
+                logger.info("[chronicle] candidate beats degenerate; retrying with +temp")
+                _put({"type": "warning",
+                      "message": "candidates thin (timeline collapsed) — regenerating"})
+            else:
+                logger.warning("[chronicle] candidates still degenerate after retry")
         if not candidates:
             _put({"type": "error", "message": "Failed to generate story candidates"})
             return
@@ -2936,9 +2968,11 @@ async def run_chronicle_expand(
     from ..story.generator import (
         AXES,
         _chronicle_tags_degenerate,
+        acts_temporally_distinct,
         base_pose_tags,
         build_axis_prose_prompt,
         build_axis_tags_prompt,
+        build_differentiate_acts_prompt,
         build_expand_prompt,
         build_visual_examination_prompt,
         build_overall_prompt,
@@ -3111,6 +3145,39 @@ async def run_chronicle_expand(
                 overall = raw_ov.strip()
             except Exception as exc:
                 logger.warning("[chronicle] overall fallback failed: %s", exc)
+
+        # ── Timeline distinctness guard ───────────────────────────────────────
+        # If the three acts collapsed into one restated moment, fire ONE targeted
+        # rewrite that pushes them apart on the timeline (base act stays matched
+        # to the image). Mirrors the tag stage's degenerate retry.
+        if not acts_temporally_distinct(stories):
+            _phase("differentiating", 0.41, "Separating the three moments...")
+            try:
+                raw_diff = await ollama.generate_text(
+                    build_differentiate_acts_prompt(
+                        title=title, overall=overall, stories=stories,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale, locale=locale,
+                    ),
+                    model=vlm_model,
+                    options={**options, "temperature": min(1.3, temperature + 0.2)},
+                )
+                fixed = parse_story_sections(raw_diff)
+                if all(fixed.get(a) for a in AXES) and acts_temporally_distinct(
+                    {a: fixed[a] for a in AXES}
+                ):
+                    stories = {a: fixed[a] for a in AXES}
+                    if fixed.get("title"):
+                        title = fixed["title"]
+                    if fixed.get("overall"):
+                        overall = fixed["overall"]
+                    logger.info("[chronicle] acts differentiated on rewrite")
+                else:
+                    logger.info("[chronicle] differentiate rewrite did not improve; keeping original")
+            except Exception as exc:
+                logger.warning("[chronicle] differentiate pass failed: %s", exc)
+            cancel.raise_if_set()
+
         # Emit the story in the display (user) language for streaming preview
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 

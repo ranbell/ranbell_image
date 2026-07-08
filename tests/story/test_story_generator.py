@@ -15,9 +15,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
+    _candidate_beats_degenerate,
     _chronicle_tags_degenerate,
+    _dramatic_mode_line,
     _elapsed_time_header,
+    _text_similarity,
+    acts_temporally_distinct,
+    assign_dramatic_modes,
     base_pose_tags,
+    build_differentiate_acts_prompt,
+    candidates_degenerate,
     build_axis_prompt,
     build_axis_prose_prompt,
     build_axis_tags_prompt,
@@ -184,7 +191,7 @@ def test_build_story_prompt_time_scale():
         character_desc="c", scene_desc="s", base_axis="present",
         worldview="", time_scale="minutes",
     )
-    assert "NON-NEGOTIABLE" in minutes
+    assert "TIME CONTRACT" in minutes
     assert "a few minutes" in minutes
     assert "FORBIDDEN" in minutes
     tens = build_story_prompt(
@@ -234,8 +241,8 @@ def test_build_story_prompt_user_topic_hard_constraint():
     # user topic block reaches the model verbatim
     assert "最後は花畑にたどり着く" in prompt
     assert "USER TOPIC" in prompt
-    # base act lock present regardless of topic
-    assert "BASE ACT" in prompt
+    # base image lock present regardless of topic (time contract)
+    assert "IS the base image" in prompt
     # empty topic → intent block is skipped
     no_topic = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present", worldview="",
@@ -574,10 +581,45 @@ def test_build_story_prompt_craft_rules():
     prompt = build_story_prompt(
         character_desc="c", scene_desc="s", base_axis="present", worldview="",
     )
-    assert "turning point or reversal" in prompt
-    assert "TRANSFORMS in meaning" in prompt
+    # a clear dramatic shape drives the arc (no forced single turning point)
+    assert "dramatic shape" in prompt
+    # motif ESCALATES rather than merely repeating
+    assert "ESCALATE" in prompt
     assert "cause and effect" in prompt
-    assert "different dominant emotion" in prompt
+    assert "its own dominant emotion" in prompt
+
+
+def test_build_story_prompt_cliffhanger_ending():
+    prompt = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+    )
+    # the future act must NOT tie a bow — cliffhanger policy
+    assert "do NOT tie a bow" in prompt
+    assert "next volume" in prompt
+    # no user topic → no ending exception clause
+    assert "if the user topic explicitly names an ending" not in prompt
+    # with a topic, the explicit-ending exception is offered
+    with_topic = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+        user_topic="最後は花畑にたどり着く",
+    )
+    assert "if the user topic explicitly names an ending" in with_topic
+
+
+def test_build_story_prompt_dramatic_mode_and_turn():
+    # a given dramatic mode drives the arc and the turn is protected in hierarchy
+    prompt = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+        dramatic_mode="reversal", turn="she was the pursuer all along",
+    )
+    assert "REVERSAL" in prompt
+    assert "she was the pursuer all along" in prompt
+    assert "THE CHOSEN TURN" in prompt  # protected precedence level
+    # without a mode/turn the twist-protection level is absent
+    plain = build_story_prompt(
+        character_desc="c", scene_desc="s", base_axis="present", worldview="",
+    )
+    assert "THE CHOSEN TURN" not in plain
 
 
 def test_build_story_prompt_story_hooks():
@@ -760,7 +802,7 @@ def test_build_expand_prompt():
     # user topic must reach the LLM as a hard constraint
     assert "最後は鐘が割れる瞬間" in prompt
     assert "COHERENCE HIERARCHY" in prompt
-    assert "BASE ACT" in prompt
+    assert "IS the base image" in prompt
 
 
 # ── multi-character identity scoping ──────────────────────────────────────────
@@ -1289,3 +1331,137 @@ def test_pass1_and_pass2_share_context_shape():
                    "[PAST]", "[PRESENT]", "1girl"):
         assert shared in tags_prompt, f"missing in tags_prompt: {shared!r}"
         assert shared in prose_prompt, f"missing in prose_prompt: {shared!r}"
+
+
+# ── dramatic modes (story-shape dimension) ────────────────────────────────────
+
+def test_dramatic_mode_line():
+    assert "REVERSAL" in _dramatic_mode_line("reversal")
+    assert "反転" in _dramatic_mode_line("reversal", "ja")
+    # unknown / empty → ''
+    assert _dramatic_mode_line("") == ""
+    assert _dramatic_mode_line("not_a_mode") == ""
+
+
+def test_assign_dramatic_modes_distinct_and_preferred():
+    import random
+    modes = assign_dramatic_modes(rng=random.Random(0))
+    # three ids, three DISTINCT modes
+    assert set(modes) == {"A", "B", "C"}
+    assert len(set(modes.values())) == 3
+    # a preferred mode is pinned onto the first id
+    pinned = assign_dramatic_modes(preferred="irony", rng=random.Random(0))
+    assert pinned["A"] == "irony"
+    assert len(set(pinned.values())) == 3
+    # unknown preferred is ignored (still three distinct, no crash)
+    junk = assign_dramatic_modes(preferred="bogus", rng=random.Random(1))
+    assert len(set(junk.values())) == 3
+
+
+def test_candidates_prompt_includes_dramatic_modes():
+    prompt = build_candidates_prompt(
+        character_desc="1girl", scene_desc="a room", time_scale="hours",
+        candidate_modes={"A": "irony", "B": "parting", "C": "pursuit"},
+    )
+    assert "Dramatic shape for A" in prompt
+    assert "IRONY" in prompt and "PARTING" in prompt and "PURSUIT" in prompt
+    # new schema fields requested
+    assert '"dramatic_mode"' in prompt and '"turn"' in prompt
+    # cliffhanger bias reaches the candidate stage too
+    assert "LEAN INTO the turn" in prompt
+
+
+def test_parse_candidates_json_dramatic_mode_turn():
+    raw = (
+        '{"candidates":[{"id":"A","title":"T","dramatic_mode":"Revelation",'
+        '"past":"p","present":"pr","future":"f","motif":"m",'
+        '"turn":"the letter was never sent"}]}'
+    )
+    out = parse_candidates_json(raw)
+    assert out[0]["dramatic_mode"] == "revelation"  # lowercased
+    assert out[0]["turn"] == "the letter was never sent"
+    # legacy records without the fields → empty strings, no crash
+    legacy = parse_candidates_json('{"candidates":[{"id":"A","present":"pr"}]}')
+    assert legacy[0]["dramatic_mode"] == "" and legacy[0]["turn"] == ""
+
+
+def test_expand_prompt_protects_turn():
+    prompt = build_expand_prompt(
+        selected={"id": "A", "title": "T", "past": "p", "present": "pr",
+                  "future": "f", "motif": "m", "dramatic_mode": "revelation",
+                  "turn": "the letter was never sent"},
+        character_desc="1girl", scene_desc="a room",
+        base_axis="present", worldview="", time_scale="days",
+    )
+    assert "PROTECTED" in prompt
+    assert "the letter was never sent" in prompt
+    assert "REVELATION" in prompt
+    assert "THE CHOSEN TURN" in prompt  # hierarchy protects the twist
+
+
+# ── timeline distinctness helpers (code-side enforcement) ─────────────────────
+
+def test_text_similarity():
+    assert _text_similarity("she runs home", "she runs home") == 1.0
+    assert _text_similarity("morning bus stop", "sunset hilltop bow") < 0.3
+    # empty inputs → 0.0, no crash
+    assert _text_similarity("", "anything") == 0.0
+
+
+def test_candidate_beats_degenerate():
+    same = "She stands on the sunny hilltop holding a clear umbrella, smiling."
+    assert _candidate_beats_degenerate(
+        {"past": same, "present": same, "future": same}
+    )
+    varied = {
+        "past": "She waits nervously at the crowded morning bus stop, gripping her umbrella.",
+        "present": "She stands triumphant on the sunny hilltop, arms flung wide open.",
+        "future": "She trudges downhill at dusk, shoulders sagging with quiet fatigue.",
+    }
+    assert not _candidate_beats_degenerate(varied)
+    # a missing beat counts as degenerate
+    assert _candidate_beats_degenerate({"past": "a", "present": "", "future": "c"})
+
+
+def test_candidates_degenerate_set():
+    same = "She stands on the hilltop holding a clear umbrella, smiling brightly."
+    bad = [{"past": same, "present": same, "future": same} for _ in range(3)]
+    assert candidates_degenerate(bad)
+    varied = {
+        "past": "She waits nervously at the crowded morning bus stop with her umbrella.",
+        "present": "She stands triumphant on the sunny hilltop, arms flung wide open.",
+        "future": "She trudges downhill at dusk, shoulders sagging with quiet fatigue.",
+    }
+    assert not candidates_degenerate([dict(varied) for _ in range(3)])
+    # empty set is degenerate
+    assert candidates_degenerate([])
+
+
+def test_acts_temporally_distinct():
+    same = "She stands on the sunny hilltop holding a clear umbrella, smiling."
+    assert not acts_temporally_distinct(
+        {"past": same, "present": same, "future": same}
+    )
+    assert acts_temporally_distinct({
+        "past": "A small child hides beneath the stairwell in the crumbling orphanage.",
+        "present": "She stands at the tall iron city gates as the guards turn to stare.",
+        "future": "She lifts a torch above the roaring crowd in the burning plaza.",
+    })
+    # incomplete input is treated as distinct (handled by the missing-act path)
+    assert acts_temporally_distinct({"past": "a", "present": "", "future": "c"})
+
+
+def test_build_differentiate_acts_prompt():
+    prompt = build_differentiate_acts_prompt(
+        title="The Umbrella", overall="An arc across one afternoon.",
+        stories={"past": "same p", "present": "same n", "future": "same f"},
+        base_axis="present", time_scale="hours", locale="ja",
+    )
+    assert "collapsed" in prompt
+    assert "TIME CONTRACT" in prompt
+    assert "経過" in prompt  # ja elapsed header follows the story locale
+    # keeps the marker contract so parse_story_sections consumes it
+    for marker in ("[TITLE]", "[PAST]", "[PRESENT]", "[FUTURE]"):
+        assert marker in prompt
+    # base axis stays matched to the image
+    assert "[PRESENT] act must still match the base image" in prompt

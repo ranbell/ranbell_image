@@ -207,13 +207,18 @@ def _elapsed_time_header(
 
 
 def _coherence_hierarchy_block(
-    *, base_axis: str, user_topic: str, time_scale: str
+    *, base_axis: str, user_topic: str, time_scale: str, protect_twist: bool = False
 ) -> str:
     """Precedence rule shared across every LLM stage.
 
-    The three anchors — base image, user topic, time axis — often pull the
-    story in different directions; this block tells the LLM which one wins
-    when they conflict so the pipeline stays coherent end to end.
+    The anchors — base image, user topic, time axis — often pull the story in
+    different directions; this block tells the LLM which one wins when they
+    conflict so the pipeline stays coherent end to end.
+
+    protect_twist (expand/story stages, where ONE candidate has been chosen)
+    inserts the candidate's dramatic shape and central turn ABOVE its
+    freely-adjustable beats, so the surprise the pitch hinged on is not sanded
+    toward the obvious reading during expansion.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     topic_line = (
@@ -223,15 +228,33 @@ def _coherence_hierarchy_block(
         if user_topic.strip()
         else "2. USER TOPIC — (none given; invent freely, but honour 1 and 3)."
     )
-    return (
-        "⚠️ COHERENCE HIERARCHY — resolve conflicts in this order ⚠️\n"
-        f"1. BASE IMAGE — the [{base_axis.upper()}] act depicts this scene literally.\n"
-        f"{topic_line}\n"
+    lines = [
+        "COHERENCE HIERARCHY — resolve conflicts in this order:",
+        f"1. BASE IMAGE — the [{base_axis.upper()}] act depicts this scene literally.",
+        topic_line,
         f'3. TIME AXIS (scale "{time_scale}": {span} between acts) — how much may '
-        "change between acts. Non-negotiable.\n"
-        "4. CANDIDATE beats — scaffolding; adjust freely to satisfy 1-3.\n"
-        "5. Divergence / mutation tags / emotion — flavour; may be dropped to satisfy 1-3.\n"
-    )
+        "change between acts. Non-negotiable.",
+    ]
+    if protect_twist:
+        lines.append(
+            "4. THE CHOSEN TURN & DRAMATIC SHAPE — the single surprise this story "
+            "hinges on. PRESERVE it; keep it central. Do not soften it back toward "
+            "the obvious reading for the sake of fitting 1-3."
+        )
+        lines.append(
+            "5. CANDIDATE beats — scaffolding; reword freely to satisfy 1-4."
+        )
+        lines.append(
+            "6. Divergence / mutation tags / emotion — flavour; may be dropped to satisfy 1-4."
+        )
+    else:
+        lines.append(
+            "4. CANDIDATE beats — scaffolding; adjust freely to satisfy 1-3."
+        )
+        lines.append(
+            "5. Divergence / mutation tags / emotion — flavour; may be dropped to satisfy 1-3."
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _user_intent_block(user_topic: str) -> str:
@@ -253,6 +276,30 @@ def _user_intent_block(user_topic: str) -> str:
     )
 
 
+def _ending_policy_block(user_topic: str) -> str:
+    """Cliffhanger ending policy — the fix for the 'forced tidy resolution' problem.
+
+    The old design mandated 'FUTURE act = the ending', so every chronicle wound
+    down into a calm summary and read as bland. Instead the future act must LEAN
+    INTO the story's turn and leave the pull open — a hook into the next volume.
+    The single exception: if the user topic explicitly names an ending, that
+    ending wins (this block yields to the USER TOPIC intent rules).
+    """
+    exception = (
+        " Exception: if the user topic explicitly names an ending, honour that "
+        "ending as written instead."
+        if user_topic.strip()
+        else ""
+    )
+    return (
+        "- ENDING — do NOT tie a bow. The future act must NOT wind down into a "
+        "calm summary or a resolved conclusion (avoid \"in the end…\", \"and so she "
+        "realises…\", \"最終的に…\", \"こうして…を実感する\"). Leave the reader mid-motion — "
+        "on a reversal, a rising stake, an exposure, a parting on the brink, or a "
+        f"fresh question — a hook that pulls toward the next volume.{exception}\n"
+    )
+
+
 def _boldness_line(divergence: float) -> str:
     """Story-boldness rule scaled by the Transmute divergence slider."""
     if divergence < 0.3:
@@ -271,6 +318,29 @@ def _boldness_line(divergence: float) -> str:
     )
 
 
+def _time_contract_block(*, base_axis: str, time_scale: str) -> str:
+    """One consolidated time contract for Stage 2 (story) prompts.
+
+    Replaces the old trio of overlapping ⚠️ALL-CAPS blocks (ABSOLUTE TIME
+    CONSTRAINT + BASE ACT lock + delta restatement) with a single calm block.
+    The redundant shouting was the main reason the small local model drowned the
+    timeline among competing constraints; the substance (base lock, delta,
+    must/may/forbidden) is preserved here, once.
+    """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
+    delta = _scale_delta_line(time_scale)
+    return (
+        f'TIME CONTRACT (scale "{time_scale}": {span} between acts)\n'
+        f"- The [{base_axis.upper()}] act IS the base image: reproduce its scene, "
+        "pose, props, lighting and time of day; invent nothing new there.\n"
+        f"- Distance between acts — how much may change: {delta}\n"
+        f"- Keep IDENTICAL across acts: {rules['must_keep']}\n"
+        f"- MAY change: {rules['may_differ']}\n"
+        f"- FORBIDDEN to change: {rules['forbidden']}\n"
+    )
+
+
 def build_story_prompt(
     *,
     character_desc: str,
@@ -283,6 +353,8 @@ def build_story_prompt(
     divergence: float = 0.0,
     emotion: str = "",
     user_topic: str = "",
+    dramatic_mode: str = "",
+    turn: str = "",
 ) -> str:
     """LLM prompt producing [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] sections."""
     world_line = (
@@ -292,32 +364,32 @@ def build_story_prompt(
         if worldview.strip()
         else "No setting was specified — invent a fitting, evocative world yourself."
     )
-    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
-    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
-    delta = _scale_delta_line(time_scale)
     elapsed_header = _elapsed_time_header(
         base_axis=base_axis, time_scale=time_scale, locale="en"
     )
+    protect = bool(turn.strip() or _dramatic_mode_line(dramatic_mode))
     hierarchy_block = _coherence_hierarchy_block(
-        base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
+        base_axis=base_axis, user_topic=user_topic, time_scale=time_scale,
+        protect_twist=protect,
     )
     intent_block = _user_intent_block(user_topic)
-    base_lock_block = (
-        f"\n🔒 BASE ACT ({base_axis.upper()}) = the image above. Reproduce it literally:\n"
-        "  - Same pose and expression as in the scene description.\n"
-        "  - Same setting, props, lighting, time of day.\n"
-        f"  - Do NOT invent new elements in the {base_axis} act.\n"
-        "  - Extension is only permitted in the OTHER two acts, within the delta.\n"
+    time_block = _time_contract_block(base_axis=base_axis, time_scale=time_scale)
+
+    shape_line = _dramatic_mode_line(dramatic_mode)
+    shape_rule = (
+        f"- DRAMATIC SHAPE — drive the whole arc with this shape: {shape_line}\n"
+        if shape_line
+        else "- Give the arc a clear dramatic shape — a rising stake, a reversal, "
+        "an exposure, a threat drawing near — not a flat sequence of events.\n"
     )
-    time_block = (
-        "⚠️ ABSOLUTE TIME CONSTRAINT — NON-NEGOTIABLE ⚠️\n"
-        f'TIME SCALE: {span} between acts (scale key: "{time_scale}").\n\n'
-        f"  HOW MUCH CHANGES between acts: {delta}\n"
-        f"  MUST stay the same: {rules['must_keep']}\n"
-        f"  MAY change:         {rules['may_differ']}\n"
-        f"  STRICTLY FORBIDDEN: {rules['forbidden']}\n\n"
-        "Violating any FORBIDDEN item makes the story WRONG regardless of creativity."
+    turn_rule = (
+        f"- The story hinges on THIS turn — keep it central and let the future "
+        f"act lean INTO it, never away from it: {turn.strip()}\n"
+        if turn.strip()
+        else ""
     )
+    ending_block = _ending_policy_block(user_topic)
+
     mutation_block = ""
     if mutation_tags:
         mutation_block = (
@@ -336,8 +408,7 @@ def build_story_prompt(
         "of the single character below.\n\n"
         f"{elapsed_header}\n"
         f"{hierarchy_block}\n"
-        f"{time_block}\n"
-        f"{base_lock_block}"
+        f"{time_block}"
         f"{intent_block}\n"
         "CHARACTER (visual descriptor tags — interpret as appearance attributes, "
         "NOT as character names or story text):\n"
@@ -346,35 +417,24 @@ def build_story_prompt(
         f"{world_line}\n"
         f"{hooks_block}"
         f"{mutation_block}\n"
-        "Rules:\n"
-        "- Each act is a DISTINCT MOMENT on the SAME thread, spaced by the time scale:\n"
-        "  • Build every act around ONE concrete, stageable physical action the "
+        "Craft rules:\n"
+        "- Each act is a DISTINCT MOMENT on the same thread (obey the time "
+        "contract above) — never re-shoot the same instant three times.\n"
+        "- Build every act around ONE concrete, stageable physical action the "
         "character is caught mid-doing — reaching, turning to look back, kneeling, "
         "leaning in, gripping, pushing, recoiling, covering the face. The body must "
-        "be DOING something an illustrator could draw at a glance.\n"
-        "  • NEVER let an act be the character merely standing, sitting upright, or "
-        "posing for the camera; a neutral upright stance is not an action. Convey "
-        "emotion THROUGH the action and expression, not through inner monologue.\n"
-        "  • Vary the action/pose across the three acts — never the identical pose "
-        "twice.\n"
-        "  • Vary pose, gaze and framing ONLY as far as the scale's delta allows —\n"
-        "    at short scales keep the SAME spot and change just pose/action/expression;\n"
-        "    only at longer scales may the location or setting itself change.\n"
-        f"  • Cinematic roles within that limit: the [{base_axis.upper()}] act IS the "
-        "base image (t = 0); the other two acts are the elapsed volumes above — read "
-        "the timeline header for their direction and distance.\n"
-        "- The visual distance between acts must strictly follow the delta above —\n"
-        "  do NOT leap to an origin story or a far-off ending at a short scale.\n"
-        "- The arc must contain ONE turning point or reversal: a belief, plan or "
-        "situation that flips.\n"
-        "- Pick ONE concrete motif (an object or detail from the scene) that "
-        "appears in all three acts and TRANSFORMS in meaning across them.\n"
+        "be DOING something an illustrator could draw at a glance; a character "
+        "merely standing, sitting upright, or posing is NOT an action. Convey "
+        "emotion through the action and expression, not inner monologue. Vary the "
+        "action across the three acts — never the identical pose twice.\n"
+        f"{shape_rule}"
+        f"{turn_rule}"
+        "- Carry ONE concrete motif (an object or detail from the scene) through "
+        "all three acts, letting its meaning ESCALATE — not merely repeat.\n"
         "- Link the acts by cause and effect (because of PAST, PRESENT; because "
         "of PRESENT, FUTURE) — never three disconnected vignettes.\n"
-        "- Give each act a different dominant emotion.\n"
-        "- Within the MAY-change list ONLY, let what is allowed to change visibly "
-        "change (outfit, weather, location — whichever the scale permits); never "
-        "change more than the delta above allows.\n"
+        "- Give each act its own dominant emotion.\n"
+        f"{ending_block}"
         f"{_boldness_line(divergence)}\n"
         f"{_emotion_guidance_line(emotion).rstrip()}\n"
         "- 3-6 sentences per act, in English.\n"
@@ -511,10 +571,129 @@ _CANDIDATE_SPIRITS = (
 )
 
 
+# ── Dramatic modes (story-shape dimension, orthogonal to the spirits) ─────────
+#
+# Mirrors _EMOTION_REGISTER, but where emotion colours the MOOD a dramatic mode
+# drives the PLOT — what shape the arc makes and what kind of turn it takes.
+# One mode is assigned per candidate (distinct across A/B/C, see
+# assign_dramatic_modes) so the three pitches differ in shape, not just content,
+# which is what keeps the whole feature from producing the same slice-of-life
+# arc every time. Every mode stays inside the real-world register (no genre
+# shift); the surprise is always human and situational. Each mode is a
+# forward-leaning shape whose future act LEANS INTO the turn rather than tidying
+# it away — this is what makes the cliffhanger ending policy land.
+_DRAMATIC_MODES: dict[str, tuple[str, str]] = {
+    "escalation": (
+        "ESCALATION — each act raises the stakes above the last; a small pressure "
+        "in one act is urgent by the next. Never let it settle; the future act is "
+        "the pressure at its highest, not its release.",
+        "エスカレーション — 各幕で緊張が段階的に高まる。ある幕の小さな圧力が次の幕では切迫する。"
+        "決して落ち着かせない。未来幕は圧力が最高潮に達した瞬間で、解放された後ではない。",
+    ),
+    "reversal": (
+        "REVERSAL — what seemed true is flipped on its head; a belief, a "
+        "relationship, or who holds power inverts across the acts. The future act "
+        "is the moment the ground gives way, not the new equilibrium after it.",
+        "反転 — 真実と思えたものが覆る。信念・関係・力関係のいずれかが幕をまたいで逆転する。"
+        "未来幕は足元が崩れる瞬間で、逆転後に落ち着いた均衡ではない。",
+    ),
+    "revelation": (
+        "REVELATION — a hidden fact surfaces piece by piece; each act uncovers "
+        "more of a truth that recolours everything before it. The future act "
+        "exposes the truth, it does not resolve what the truth means.",
+        "発覚 — 隠れた事実が少しずつ表面化し、各幕がそれ以前をすべて塗り替える。"
+        "未来幕は真実を露わにする瞬間で、その意味を解決しはしない。",
+    ),
+    "irony": (
+        "IRONY — the character strives for one thing while the acts quietly "
+        "deliver its opposite; the widening gap between intent and outcome is the "
+        "point. The future act is that gap at its sharpest.",
+        "皮肉 — 望んだものとは逆の結果が静かに訪れる。意図と結末のズレそのものが主題で、"
+        "未来幕はそのズレが最も鋭くなった瞬間。",
+    ),
+    "approaching_threat": (
+        "APPROACHING THREAT — something is closing in across the acts (a deadline, "
+        "a pursuer, a consequence). The future act is the threat nearly upon them, "
+        "NOT averted or survived.",
+        "迫る脅威 — 幕を追うごとに何か（期限・追手・報い）が迫る。"
+        "未来幕は脅威が目前に迫った瞬間で、回避・生還した後ではない。",
+    ),
+    "pursuit": (
+        "PURSUIT / QUEST — the character is chasing or searching across the acts, "
+        "each act closer but not arrived. End mid-chase on the verge, not at the "
+        "prize.",
+        "追跡／探求 — 各幕で何かを追い、探し続ける。近づくが未到達。"
+        "獲得の後ではなく、あと一歩の追跡の途中で終える。",
+    ),
+    "parting": (
+        "PARTING — a bond is being pulled apart across the acts (a leaving, a "
+        "drift, a last time). The future act is the edge of separation, not the "
+        "life after it.",
+        "別れ — 幕をまたいで絆が引き裂かれていく（去る・すれ違う・最後の一度）。"
+        "未来幕は別離の瀬戸際で、その後の日々ではない。",
+    ),
+    "temptation": (
+        "TEMPTATION — a pull toward something risky grows across the acts. The "
+        "future act is the character on the verge of giving in, not the aftermath "
+        "of the choice.",
+        "誘惑 — 危ういものへの引力が幕ごとに強まる。"
+        "未来幕は誘惑に屈する寸前で、選んだ後の顛末ではない。",
+    ),
+    "secret_surfacing": (
+        "SECRET SURFACING — the character carries something they hide; across the "
+        "acts it presses closer to exposure. End at the brink of it coming out.",
+        "秘密の露見 — 隠し事を抱えており、それが幕ごとに露見へ近づく。"
+        "明るみに出る寸前で終える。",
+    ),
+    "role_reversal": (
+        "ROLE REVERSAL — who leads and who follows (or protector and protected) "
+        "trade places across the acts. The future act is mid-swap, the balance not "
+        "yet settled.",
+        "役割逆転 — 導く者と従う者（守る者と守られる者）が幕をまたいで入れ替わる。"
+        "未来幕は入れ替わりの最中で、力関係が確定する前。",
+    ),
+}
+_DRAMATIC_MODE_KEYS: tuple[str, ...] = tuple(_DRAMATIC_MODES)
+
+
+def _dramatic_mode_line(mode: str, locale: str = "en") -> str:
+    """One-line story-shape guidance for a dramatic mode. Empty/unknown → ''."""
+    pair = _DRAMATIC_MODES.get((mode or "").strip().lower())
+    if not pair:
+        return ""
+    return pair[1] if locale == "ja" else pair[0]
+
+
+def assign_dramatic_modes(
+    ids: tuple[str, ...] = ("A", "B", "C"),
+    *,
+    preferred: str = "",
+    rng=None,
+) -> dict[str, str]:
+    """Pick a DISTINCT dramatic mode for each candidate id.
+
+    preferred (a user-chosen mode, '' = auto) is pinned onto the first id so a
+    user selection is guaranteed present; the remaining ids get contrasting
+    modes sampled without replacement. rng defaults to the module `random`
+    (injectable for deterministic tests).
+    """
+    import random as _random
+    rng = rng or _random
+    pool = list(_DRAMATIC_MODE_KEYS)
+    chosen: list[str] = []
+    pref = (preferred or "").strip().lower()
+    if pref in _DRAMATIC_MODES:
+        chosen.append(pref)
+        pool.remove(pref)
+    rng.shuffle(pool)
+    chosen.extend(pool)
+    return {cid: chosen[i] for i, cid in enumerate(ids)}
+
+
 def _locale_output_line(locale: str) -> str:
     if locale == "ja":
-        return "出力の title / past / present / future / motif はすべて自然で読みやすい日本語で書くこと。"
-    return "Write every title / past / present / future / motif field in natural English."
+        return "出力の title / past / present / future / motif / turn はすべて自然で読みやすい日本語で書くこと。"
+    return "Write every title / past / present / future / motif / turn field in natural English."
 
 
 def build_candidates_prompt(
@@ -527,6 +706,7 @@ def build_candidates_prompt(
     time_scale: str = "years",
     emotion: str = "",
     locale: str = "en",
+    candidate_modes: dict[str, str] | None = None,
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
@@ -554,9 +734,17 @@ def build_candidates_prompt(
         if worldview.strip()
         else "No worldview was specified — invent fitting ones."
     )
+    modes = candidate_modes or {}
+
+    def _spirit_line(cid: str, flavour: str, desc: str) -> str:
+        line = f"  Candidate {cid} ({flavour}): {desc}"
+        mode_line = _dramatic_mode_line(modes.get(cid, ""), locale)
+        if mode_line:
+            line += f"\n    Dramatic shape for {cid} — {mode_line}"
+        return line
+
     spirits_block = "\n".join(
-        f"  Candidate {cid} ({flavour}): {desc}"
-        for cid, flavour, desc in _CANDIDATE_SPIRITS
+        _spirit_line(cid, flavour, desc) for cid, flavour, desc in _CANDIDATE_SPIRITS
     )
     elapsed_header = _elapsed_time_header(
         base_axis=base_axis, time_scale=time_scale, locale=locale
@@ -595,19 +783,27 @@ def build_candidates_prompt(
         f"may change: {rules['may_differ']}.\n\n"
         f"{guardrail}\n"
         f"{_emotion_guidance_line(emotion, locale)}\n"
-        "Make the three candidates genuinely distinct:\n"
+        "Make the three candidates genuinely distinct — each pairs a different "
+        "reading (below) with a different dramatic shape, so the three diverge in "
+        "BOTH viewpoint and plot:\n"
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
         "For EACH candidate write ONE concrete sentence per act — past, present, "
         f"future — where the [{base_axis}] sentence matches the base image (t = 0) "
         "and the other two acts open the elapsed volumes marked in the header "
-        "above. Also give a title (3-8 words, specific and evocative, never "
-        "generic) and a motif (one concrete object that recurs and changes "
-        "meaning across the three moments).\n\n"
+        "above, driven by that candidate's dramatic shape. Do NOT tidy the arc "
+        "into a neat resolution: the future beat should LEAN INTO the turn (a "
+        "rising stake, a reversal, an exposure, a threat nearly upon them) and "
+        "leave the reader wanting the next volume — unless the user topic names an "
+        "explicit ending. Also give: a title (3-8 words, specific and evocative, "
+        "never generic); a motif (one concrete object that recurs and escalates "
+        "in meaning across the three moments); a one-sentence `turn` naming the "
+        "single surprising pivot this candidate hinges on; and echo back the "
+        "assigned `dramatic_mode` key.\n\n"
         "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
-        '  {"id": "A", "title": "...", "past": "...", "present": "...", '
-        '"future": "...", "motif": "..."},\n'
+        '  {"id": "A", "title": "...", "dramatic_mode": "...", "past": "...", '
+        '"present": "...", "future": "...", "motif": "...", "turn": "..."},\n'
         '  {"id": "B", ...},\n'
         '  {"id": "C", ...}\n'
         "]}"
@@ -636,6 +832,9 @@ def parse_candidates_json(raw: str) -> list[dict]:
             summary = present or " / ".join(b for b in (past, future) if b)
         # `motif` is the canonical name; older records used `key_motif`.
         motif = str(item.get("motif") or item.get("key_motif") or "").strip()
+        # Dramatic-mode dimension (may be absent on legacy records → "").
+        dramatic_mode = str(item.get("dramatic_mode") or "").strip().lower()
+        turn = str(item.get("turn") or "").strip()
         result.append({
             "id": cid,
             "title": str(item.get("title") or "").strip(),
@@ -644,8 +843,124 @@ def parse_candidates_json(raw: str) -> list[dict]:
             "future": future,
             "summary": summary,
             "motif": motif,
+            "dramatic_mode": dramatic_mode,
+            "turn": turn,
         })
     return result
+
+
+# ── Timeline distinctness (code-side enforcement, not prose pleading) ─────────
+#
+# The pipeline layered a lot of prose telling the model NOT to re-shoot the same
+# moment three times, but nothing ever CHECKED. These helpers give the timeline
+# programmatic teeth, mirroring _chronicle_tags_degenerate: if the acts collapse
+# into one moment, the runner retries once at a higher temperature. Similarity
+# is measured with language-agnostic character bigrams so it works for both the
+# English and Japanese stories the pipeline produces.
+
+def _char_bigrams(s: str) -> set[str]:
+    t = re.sub(r"\s+", "", s.lower())
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """Character-bigram Jaccard similarity of two short texts (0..1)."""
+    ba, bb = _char_bigrams(a), _char_bigrams(b)
+    if not ba or not bb:
+        return 0.0
+    return len(ba & bb) / len(ba | bb)
+
+
+_BEAT_SIMILAR_THRESHOLD = 0.6
+
+
+def _mean_pairwise_similarity(beats: list[str]) -> float:
+    pairs = [(0, 1), (0, 2), (1, 2)]
+    sims = [_text_similarity(beats[i], beats[j]) for i, j in pairs]
+    return sum(sims) / len(sims)
+
+
+def _candidate_beats_degenerate(
+    candidate: dict, *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+) -> bool:
+    """True if a candidate's three act beats restate one moment (timeline collapsed).
+
+    A missing beat also counts as degenerate — there is nothing to distinguish.
+    """
+    beats = [str(candidate.get(a) or "").strip() for a in AXES]
+    if not all(beats):
+        return True
+    return _mean_pairwise_similarity(beats) >= threshold
+
+
+def candidates_degenerate(candidates: list[dict]) -> bool:
+    """True when the candidate SET is too weak — most candidates collapse the
+    timeline — so the runner should regenerate once at a higher temperature."""
+    if not candidates:
+        return True
+    n_bad = sum(1 for c in candidates if _candidate_beats_degenerate(c))
+    return n_bad >= max(2, (len(candidates) + 1) // 2)
+
+
+def acts_temporally_distinct(
+    stories: dict[str, str], *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+) -> bool:
+    """True if the three expanded acts are meaningfully different moments.
+
+    False → they collapsed into near-duplicates; the runner fires one targeted
+    'differentiate the acts' rewrite. Incomplete input returns True so the
+    missing-act error path (not this one) handles it.
+    """
+    beats = [str(stories.get(a) or "").strip() for a in AXES]
+    if not all(beats):
+        return True
+    return _mean_pairwise_similarity(beats) < threshold
+
+
+def build_differentiate_acts_prompt(
+    *,
+    title: str,
+    overall: str,
+    stories: dict[str, str],
+    base_axis: str,
+    time_scale: str = "years",
+    locale: str = "en",
+) -> str:
+    """Rewrite prompt fired when the three acts collapsed into one moment.
+
+    Pushes the acts apart along the timeline while keeping the base act matched
+    to the image. Emits the same [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE]
+    markers so parse_story_sections consumes it unchanged.
+    """
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale=locale
+    )
+    time_block = _time_contract_block(base_axis=base_axis, time_scale=time_scale)
+    lang = (
+        "各セクションの本文は自然で読みやすい日本語で書くこと。"
+        if locale == "ja"
+        else "Write all section body text in natural English."
+    )
+    return (
+        "These three acts of one chronicle read as the SAME moment restated three "
+        "times — the timeline has collapsed. Rewrite them so each act is a "
+        "clearly DIFFERENT moment at its marked elapsed distance, while keeping "
+        "the same characters, motif and overall arc.\n\n"
+        f"{elapsed_header}\n"
+        f"{time_block}\n"
+        f"The [{base_axis.upper()}] act must still match the base image; move the "
+        "OTHER two acts to their own moments (different action, beat and — where "
+        "the scale allows — setting), keeping cause and effect between them.\n\n"
+        f"TITLE: {title}\n"
+        f"OVERALL: {overall}\n"
+        f"CURRENT PAST: {stories.get('past', '')}\n"
+        f"CURRENT PRESENT: {stories.get('present', '')}\n"
+        f"CURRENT FUTURE: {stories.get('future', '')}\n\n"
+        f"{lang}\n"
+        "Output exactly these markers, each on its own line:\n"
+        "[TITLE] then [OVERALL] then [PAST] then [PRESENT] then [FUTURE].\n"
+        "No other headings."
+    )
 
 
 def build_expand_prompt(
@@ -666,25 +981,36 @@ def build_expand_prompt(
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
     Same markers/structure as build_story_prompt, but seeded by the selected
-    candidate's per-act beats (title/past/present/future/motif) and written
-    in the user's locale. Older candidates without beats fall back to summary.
+    candidate's per-act beats (title/past/present/future/motif) plus its
+    dramatic_mode + turn (carried through as PROTECTED so the surprise survives
+    expansion), and written in the user's locale. Older candidates without beats
+    fall back to summary.
     """
     beats = "".join(
         f"  [{a.upper()}] seed: {selected.get(a, '')}\n"
         for a in AXES if selected.get(a)
     ) or f"  Summary: {selected.get('summary', '')}\n"
     motif = selected.get("motif") or selected.get("key_motif") or ""
+    dramatic_mode = str(selected.get("dramatic_mode") or "").strip().lower()
+    turn = str(selected.get("turn") or "").strip()
     elapsed_header = _elapsed_time_header(
         base_axis=base_axis, time_scale=time_scale, locale=locale
+    )
+    turn_seed = (
+        f"  Central turn (PROTECTED — keep it, do not soften): {turn}\n"
+        if turn
+        else ""
     )
     seed_block = (
         f"{elapsed_header}\n"
         "CHOSEN STORY DIRECTION — expand THESE beats to satisfy the base image "
-        "and the user topic above; adjust the candidate wherever they conflict "
-        "(keep the title unless it genuinely no longer fits):\n"
+        "and the user topic above; reword the beats wherever they conflict, but "
+        "keep the central turn and dramatic shape intact (keep the title unless "
+        "it genuinely no longer fits):\n"
         f"  Title: {selected.get('title', '')}\n"
         f"{beats}"
-        "  Motif (must recur and transform across all three acts): "
+        f"{turn_seed}"
+        "  Motif (must recur and ESCALATE in meaning across all three acts): "
         f"{motif}\n\n"
     )
     lang_block = (
@@ -704,6 +1030,8 @@ def build_expand_prompt(
         divergence=divergence,
         emotion=emotion,
         user_topic=user_topic,
+        dramatic_mode=dramatic_mode,
+        turn=turn,
     )
     return seed_block + base + lang_block
 
