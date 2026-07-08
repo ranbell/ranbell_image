@@ -1139,6 +1139,10 @@ function onThumbnailError(event) {
                   <span>{{ t('invoke.heatCalm') }}</span>
                   <span>{{ t('invoke.heatWild') }}</span>
                 </div>
+                <p class="mt-1 text-[9px] text-gray-500 leading-relaxed flex gap-1">
+                  <span class="flex-shrink-0">💡</span>
+                  <span>{{ t('invoke.heatTip') }}</span>
+                </p>
               </div>
 
               <!-- ── Wildness (乱れ度) — stranger/lunatic vocab pools (common) ── -->
@@ -1155,6 +1159,10 @@ function onThumbnailError(event) {
                     {{ t(`invoke.wildness${lv}`) }}
                   </button>
                 </div>
+                <p class="mt-1 text-[9px] text-gray-500 leading-relaxed flex gap-1">
+                  <span class="flex-shrink-0">💡</span>
+                  <span>{{ t('invoke.wildnessTip') }}</span>
+                </p>
               </div>
 
               <!-- ── Summon / Cancel ── -->
