@@ -584,9 +584,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <h2 class="text-lg font-bold text-amber-200 leading-tight truncate">
                   {{ storyTitle(detailStory) || t('storybook.details') }}
                 </h2>
-                <div class="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
+                <div class="flex items-center flex-wrap gap-3 mt-1 text-[10px] text-gray-500">
                   <span v-if="detailStory.worldview">🌍 {{ detailStory.worldview }}</span>
                   <span v-if="detailStory.time_scale">⏳ {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
+                  <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-400/70">🧩 {{ detailStory.workflow_name }}</span>
                   <span class="font-mono">{{ formatDate(detailStory.created_at) }}</span>
                 </div>
               </div>
@@ -610,15 +611,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <div v-if="storyBio(detailStory)" class="px-8 py-5">
                 <div class="flex items-center justify-between mb-2">
                   <h4 class="text-xs font-semibold text-purple-300/80 tracking-wide">📖 {{ t('storybook.biography') }}</h4>
-                  <div class="flex gap-2">
+                  <div class="flex items-center gap-2">
+                    <span v-if="detailStory.workflow_name" class="text-[10px] text-gray-600 font-mono hidden sm:inline">🧩 {{ detailStory.workflow_name }}</span>
                     <button @click="addPinup(detailStory, 'add')"
                       :disabled="pinupBusy.has(detailStory.story_id)"
+                      :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
                       class="px-2 py-1 rounded-lg border border-gray-700/50 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition">
                       + {{ t('storybook.pinupAdd') }}
                     </button>
                     <button v-if="storyPinups(detailStory).length"
                       @click="addPinup(detailStory, 'replace')"
                       :disabled="pinupBusy.has(detailStory.story_id)"
+                      :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
                       class="px-2 py-1 rounded-lg border border-gray-700/50 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition">
                       ⟳ {{ t('storybook.pinupReplace') }}
                     </button>

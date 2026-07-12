@@ -3183,7 +3183,7 @@ async def run_chronicle_expand(
                 build_timetable_prompt(
                     biography=biography, scene_desc=scene_desc,
                     time_scale=body.time_scale, base_axis=body.base_time_axis,
-                    locale=locale,
+                    locale=locale, selected=selected, user_topic=body.user_topic,
                 ),
                 model=vlm_model, options=options, fmt="json",
             ))

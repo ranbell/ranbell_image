@@ -36,7 +36,7 @@ const worldview = ref('')
 const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
 const workflow = ref('')
-const divergence = ref(0)
+const divergence = ref(0.3)   // default ~30%: below this stories go abstract (no concrete actions/items)
 const emotion = ref('')       // target emotion register ('' = off)
 // Story-shape dimension, mirrors backend generator._DRAMATIC_MODES. '' = auto
 // (the backend auto-varies a distinct mode per candidate).

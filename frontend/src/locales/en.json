@@ -1344,6 +1344,8 @@
     "pinupAdd": "Add pose",
     "pinupReplace": "Reroll",
     "pinupQueued": "Pinup queued — it will appear here shortly",
+    "workflowTitle": "The ComfyUI workflow this chronicle's images were generated with",
+    "pinupWorkflowTitle": "Generated with the chronicle's workflow: {wf}",
     "bioOccupation": "occupation",
     "bio_hobbies": "hobbies",
     "bio_favourite_items": "favourite items",

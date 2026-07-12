@@ -1619,7 +1619,7 @@ def test_build_timetable_scale_adaptive():
     )
     assert "~2 hours AROUND this moment" in tens
     assert "20 minutes apart" in tens
-    assert "MIDDLE" in tens and "drawable actions" in tens
+    assert "MIDDLE" in tens and "drawable" in tens
     minutes = build_timetable_prompt(
         biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="minutes",
     )
@@ -1632,6 +1632,25 @@ def test_build_timetable_scale_adaptive():
     assert build_timetable_prompt(
         biography={}, scene_desc="x", time_scale="bogus",
     ) == build_timetable_prompt(biography={}, scene_desc="x", time_scale="years")
+
+
+def test_build_timetable_is_story_driven():
+    # the chosen story + scene drive the table, not generic hobbies
+    tt = build_timetable_prompt(
+        biography={"hobbies": ["knitting"]},
+        scene_desc="a sunlit classroom by the window",
+        time_scale="hours",
+        selected={"title": "Shadow and Bandana",
+                  "past": "she leaves her seat", "present": "she stands by the window",
+                  "future": "he never appears"},
+        user_topic="放課後",
+    )
+    assert "CHOSEN STORY" in tt
+    assert "Shadow and Bandana" in tt and "stands by the window" in tt
+    assert "放課後" in tt
+    # scene grounding + hobby guard
+    assert "sunlit classroom by the window" in tt
+    assert "do NOT invent hobbies" in tt
     slots = parse_timetable_json(
         '{"slots":[{"label":"morning","activity":"kneads dough","place":"kitchen",'
         '"feeling":"calm"},{"nope":1},{"label":"","activity":""}]}'

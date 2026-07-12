@@ -1344,6 +1344,8 @@
     "pinupAdd": "ポーズ追加",
     "pinupReplace": "引き直し",
     "pinupQueued": "ピンナップを生成中 — まもなくここに表示されます",
+    "workflowTitle": "このChronicleの画像生成に使われたComfyUIワークフロー",
+    "pinupWorkflowTitle": "このChronicleのワークフローで生成: {wf}",
     "bioOccupation": "職業",
     "bio_hobbies": "趣味",
     "bio_favourite_items": "好きなもの",

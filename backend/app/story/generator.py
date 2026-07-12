@@ -1076,36 +1076,53 @@ def build_timetable_prompt(
     time_scale: str = "years",
     base_axis: str = "present",
     locale: str = "en",
+    selected: dict | None = None,
+    user_topic: str = "",
 ) -> str:
-    """Map the character onto a timetable that COVERS the chosen time axis at good
-    granularity, centred on the base moment.
+    """Turn the CHOSEN STORY into a fine-grained timetable that COVERS the time
+    axis, centred on the base moment.
 
-    The window is sized a little wider than the axis delta and sliced finely (see
-    _TIMETABLE_WINDOW) so the moments just before/after "now" are concretely
-    grounded — e.g. a tens-of-minutes axis gets a ~2-hour table in ~20-min slots.
-    English output; translated separately for display.
+    Crucially this is the SELECTED story unfolding across time, grounded in the
+    base image's actual SETTING — NOT a generic hobby diary. The biography is
+    personality flavour only; it must not drop in activities (knitting,
+    journaling…) that don't belong to this scene or story. English output.
     """
     window, slots = _TIMETABLE_WINDOW.get(
         time_scale, _TIMETABLE_WINDOW["years"]
     )
+    story_block = ""
+    if selected:
+        beats = "; ".join(
+            f"{a}: {selected.get(a, '')}" for a in AXES if selected.get(a)
+        )
+        story_block = (
+            "CHOSEN STORY — the timetable is THIS story playing out over time, not "
+            "a generic day:\n"
+            f"  \"{selected.get('title', '')}\" — {beats}\n"
+        )
+    topic_line = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
     return (
-        "You are mapping a character's life onto a timetable so a story can pick "
-        "concrete moments from it. The timetable must COVER the story's time axis "
-        "at fine granularity, centred on the present moment.\n\n"
+        "Turn the CHOSEN STORY below into a fine-grained timetable so a picture "
+        "can be drawn for each moment. The timetable is THIS STORY unfolding "
+        "across time — never a generic hobby diary.\n\n"
         f"TABLE SPAN: {window}.\n"
-        f"SLICING: {slots}. Put the base moment in the MIDDLE (its label is "
-        '"now" / "today" / her current age) and detail the slots just before and '
-        "after it especially clearly.\n\n"
-        f"CHARACTER: {_biography_brief(biography)}\n"
-        f"HER WORLD RIGHT NOW (the base image): {scene_desc}\n\n"
-        "For EACH slot give what she is concretely DOING (a physical activity "
-        "using her hobbies / favourite items), WHERE she is, and how she FEELS. "
-        "Consecutive slots must flow into each other (what she does at one leads "
-        "into the next). Activities must be drawable actions — never 'relaxing', "
-        "'thinking' or 'spending time'.\n"
+        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / her "
+        "current age) IS the base image moment and must match it; detail the "
+        "slots just before and after it especially clearly.\n\n"
+        f"{story_block}"
+        f"{topic_line}"
+        f"THE SETTING — every slot happens in or around this place unless the "
+        f"story itself clearly moves her: {scene_desc}\n"
+        f"CHARACTER (personality flavour ONLY — do NOT invent hobbies or props "
+        f"that don't fit the scene/story): {_biography_brief(biography)}\n\n"
+        "For EACH slot give ONE concrete physical action that advances the story, "
+        "WHERE (consistent with the setting above), and how she FEELS. Consecutive "
+        "slots must flow into each other. Actions must be drawable — never "
+        "'relaxing', 'thinking' or 'spending time', and never an unrelated hobby "
+        "dropped into a scene where it makes no sense.\n"
         "Output English JSON only, no fences:\n"
         '{"slots": [{"label": "<relative time, e.g. -20min / now / +20min>", '
-        '"activity": "<concrete physical action + item>", '
+        '"activity": "<concrete physical action tied to the story>", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
 
@@ -1156,20 +1173,24 @@ def build_concrete_activities_prompt(
     topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
     return (
         "Pin down EXACTLY what the character is physically doing at each of the "
-        "three story moments, by cross-checking her biography, her timetable and "
-        "the chosen story draft. Every moment must be ONE concrete, drawable "
-        "physical action using a specific hobby / favourite item — NEVER standing, "
-        "sitting or lounging idle.\n\n"
+        "three story moments, by cross-checking the chosen story draft, the "
+        "timetable and her biography. Every moment must be ONE concrete, drawable "
+        "physical action — NEVER standing, sitting or lounging idle.\n\n"
         f"{elapsed}\n"
-        f"CHARACTER: {_biography_brief(biography)}\n"
-        f"TIMETABLE:\n{tt}\n\n"
-        f"BASE SCENE (the [{base_axis.upper()}] moment looks like this): {scene_desc}\n"
+        "PRIORITY: the CHOSEN STORY DRAFT drives what happens; the timetable and "
+        "biography only supply concrete detail (a prop, a gesture). Do NOT drop "
+        "in an unrelated hobby (knitting, journaling…) if it does not fit the "
+        "story or the base scene.\n"
+        f"BASE SCENE — all three moments stay in or around THIS setting unless the "
+        f"story clearly moves her: {scene_desc}\n"
+        "CHOSEN STORY DRAFT (the spine — refine each beat into a concrete action):\n"
+        f"{beats}"
         f"{topic}"
-        "CHOSEN STORY DRAFT (rough — refine into concrete action):\n"
-        f"{beats}\n"
-        "For each axis pick the timetable moment nearest that elapsed distance and "
-        "state the concrete action (verb + body + prop + place). The "
-        f"[{base_axis.upper()}] action must match the base scene.\n"
+        f"TIMETABLE (nearby moments for continuity):\n{tt}\n"
+        f"CHARACTER (flavour only): {_biography_brief(biography)}\n\n"
+        "For each axis state the concrete action (verb + body + prop + place) that "
+        f"realises that beat. The [{base_axis.upper()}] action must match the base "
+        "scene exactly.\n"
         "Output English JSON only, no fences:\n"
         '{"past": "<one concrete action sentence>", '
         '"present": "<...>", "future": "<...>"}'
