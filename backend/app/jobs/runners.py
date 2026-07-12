@@ -3537,6 +3537,7 @@ async def run_chronicle_expand(
             "biography_ja": biography_ja,
             "timetable": timetable,
             "timetable_ja": timetable_ja,
+            "pinups": _current_pinups(doc),
             "pinup_image_id": doc.get("pinup_image_id"),
         })
         if embedding:
@@ -3589,25 +3590,12 @@ async def run_chronicle_expand(
             _put({"type": "warning",
                   "message": "No workflow selected — image generation skipped."})
 
-        # ── Pinup (optional): a neutral full-body reference of this character,
-        # registered onto the base image doc + Biography. Built once per image.
-        if body.generate_pinup and body.workflow_name and not doc.get("pinup_image_id"):
+        # ── Pinup (optional): a neutral reference of this character, registered
+        # onto the base image doc + Biography. Built once per image (the runner
+        # builds its own prompt + picks a pose).
+        if body.generate_pinup and body.workflow_name and not doc.get("pinups") \
+                and not doc.get("pinup_image_id"):
             try:
-                fav = (biography.get("favourite_items") or [])[:2]
-                item_tags = await _wd14_search_tags(" ".join(fav), limit=8) if fav else []
-                pin_seen: set[str] = set()
-                pin_merged: list[str] = []
-                for t in [*lock_tags, *base_appearance, *item_tags, "solo",
-                          "cowboy_shot", "standing", "looking_at_viewer",
-                          "simple_background"]:
-                    tag = str(t).strip().replace(" ", "_")
-                    k = tag.lower()
-                    if tag and k not in pin_seen:
-                        pin_seen.add(k)
-                        pin_merged.append(tag)
-                pin_line = _strip_quality_metatags(
-                    _ensure_subject_anchor(", ".join(pin_merged), [(doc, 0)])
-                )
                 pinup_job_id = spooler.submit(
                     JobLane.GENERATION,
                     "pinup_image",
@@ -3615,13 +3603,14 @@ async def run_chronicle_expand(
                     meta={"group_id": body.group_id, "story_id": story_id,
                           "base_sha256": body.base_sha256},
                     db=db,
+                    ollama=ollama,
                     comfy=comfy,
                     base_sha256=body.base_sha256,
                     story_id=story_id,
                     workflow_name=body.workflow_name,
-                    positive=pin_line,
-                    negative="",
                     seed=None,
+                    mode="add",
+                    pose_index=0,
                 )
                 _put({"type": "pinup_job", "job_id": pinup_job_id})
             except Exception as exc:
@@ -3764,22 +3753,93 @@ async def run_chronicle_image_generate(
     return {"sha256s": saved_sha256s, "story_id": story_id, "axis": axis, "seed": seed}
 
 
+# Pose sets for pinups — each "add" cycles to a different pose so the corkboard
+# fills with varied shots rather than the same stance.
+_PINUP_POSES: list[list[str]] = [
+    ["standing", "looking_at_viewer", "cowboy_shot"],
+    ["sitting", "looking_at_viewer"],
+    ["waving", "smile", "looking_at_viewer", "cowboy_shot"],
+    ["hand_on_hip", "standing", "looking_at_viewer"],
+    ["arms_crossed", "standing", "looking_at_viewer"],
+    ["leaning_forward", "looking_at_viewer", "smile"],
+    ["hands_clasped", "own_hands_together", "standing", "looking_at_viewer"],
+    ["peace_sign", "v", "smile", "looking_at_viewer", "cowboy_shot"],
+    ["holding_own_arm", "standing", "looking_away"],
+    ["stretching", "arms_up", "smile"],
+]
+
+
+def _current_pinups(doc: dict) -> list[str]:
+    """The base image's pinup sha list, tolerant of the legacy single field."""
+    pins = doc.get("pinups")
+    if isinstance(pins, list) and pins:
+        return [p for p in pins if p]
+    pid = doc.get("pinup_image_id")
+    return [pid] if pid else []
+
+
+async def _pinup_item_tags(db, ollama, biography: dict, *, limit: int = 8) -> list[str]:
+    """WD14 tags for the character's favourite items (for the pinup to hold)."""
+    fav = [str(x).strip() for x in (biography.get("favourite_items") or [])[:2] if str(x).strip()]
+    if not fav:
+        return []
+    try:
+        vec = await ollama.embed(" ".join(fav))
+        hits = await db.search_wd14_vocab(
+            vec, min_freq=0.01, max_freq=0.80, category=0, limit=limit
+        )
+        return [str(h.get("name") or "").strip() for h in hits if h.get("name")]
+    except Exception as exc:
+        logger.warning("[pinup] item tag search failed: %s", exc)
+        return []
+
+
+def _build_pinup_positive(
+    doc: dict, biography: dict, pose_tags: list[str], item_tags: list[str]
+) -> str:
+    """Assemble a neutral-reference pinup positive: base appearance + favourite
+    items + a chosen pose, subject-anchored with the always-keep identity."""
+    from ..story.generator import (
+        character_tags_from_wd14,
+        classify_identity_tag,
+        identity_lock_tags,
+        inject_identity_tags,
+        is_multi_character,
+    )
+    wd14 = doc.get("wd14_tags") or []
+    ctags = character_tags_from_wd14(wd14)
+    lock = identity_lock_tags(ctags, multi_character=is_multi_character(wd14))
+    base_appearance = [t for t in ctags if classify_identity_tag(t) is not None]
+    merged: list[str] = []
+    seen: set[str] = set()
+    for t in [*base_appearance, *item_tags, "solo", *pose_tags, "simple_background"]:
+        tag = str(t).strip().replace(" ", "_")
+        k = tag.lower()
+        if tag and k not in seen:
+            seen.add(k)
+            merged.append(tag)
+    line = _ensure_subject_anchor(", ".join(merged), [(doc, 0)])
+    line = inject_identity_tags(line, lock)
+    return _strip_quality_metatags(line)
+
+
 async def run_pinup_image_generate(
     reporter: ProgressReporter,
     cancel: CancelToken,
     *,
     db,
+    ollama,
     comfy,
     base_sha256: str,
     story_id: str,
     workflow_name: str,
-    positive: str,
-    negative: str,
     seed: int | None,
+    mode: str = "add",
+    pose_index: int | None = None,
 ) -> dict:
-    """GEN lane. Generate ONE reference 'pinup' for a base image and register it
-    onto the image doc (pinup_image_id) + the story record. Mirrors
-    run_chronicle_image_generate but keyed to the base image, not a story axis."""
+    """GEN lane. Generate a reference 'pinup' for a base image and register it
+    onto the image doc (pinups[] + pinup_image_id) + the story record. mode
+    'add' appends (a fresh pose); 'replace' swaps the most recent one."""
     import random as _random
 
     from ..creation.schema import CreationRecord
@@ -3788,6 +3848,15 @@ async def run_pinup_image_generate(
     reporter.indeterminate()
     if seed is None:
         seed = _random.randint(0, (1 << 64) - 1)
+
+    doc = await db.get(base_sha256) or {}
+    biography = doc.get("biography") or {}
+    existing = _current_pinups(doc)
+    idx = pose_index if pose_index is not None else len(existing)
+    pose = _PINUP_POSES[idx % len(_PINUP_POSES)]
+    item_tags = await _pinup_item_tags(db, ollama, biography)
+    positive = _build_pinup_positive(doc, biography, pose, item_tags)
+    negative = ""
 
     wf = comfy.load_workflow(workflow_name)
     patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)
@@ -3810,12 +3879,20 @@ async def run_pinup_image_generate(
     cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
 
     async def _finalize(sha256: str) -> None:
+        cur = await db.get(base_sha256) or {}
+        pins = _current_pinups(cur)
+        if mode == "replace" and pins:
+            pins[-1] = sha256
+        else:
+            pins.append(sha256)
         try:
-            await db.set_payload(base_sha256, {"pinup_image_id": sha256})
+            await db.set_payload(base_sha256, {"pinups": pins, "pinup_image_id": sha256})
         except Exception as exc:
             logger.error("[pinup] doc link failed for %s: %s", base_sha256, exc)
         try:
-            await story_db.set_story_payload(db, story_id, {"pinup_image_id": sha256})
+            await story_db.set_story_payload(
+                db, story_id, {"pinups": pins, "pinup_image_id": sha256}
+            )
         except Exception as exc:
             logger.warning("[pinup] story link failed for %s: %s", story_id, exc)
         record = CreationRecord(

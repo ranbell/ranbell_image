@@ -60,6 +60,10 @@ class RespinRequest(BaseModel):
     respin_count: int = 1
 
 
+class PinupRequest(BaseModel):
+    mode: Literal["add", "replace"] = "add"
+
+
 # Temperature ladder for respin — each respin nudges creativity up (Refine's
 # _FANOUT_TEMPS idea, applied to whole-story regeneration).
 def _respin_temperature(base: float, respin_count: int) -> float:
@@ -328,3 +332,39 @@ async def regenerate_axis(story_id: str, axis: str, request: Request):
     seed = random.randint(0, (1 << 64) - 1)
     job_id = _submit_axis_image_job(request.app, story, axis, seed)
     return {"status": "queued", "job_id": job_id, "axis": axis, "seed": seed}
+
+
+@router.post("/{story_id}/pinup")
+async def generate_pinup(story_id: str, body: PinupRequest, request: Request):
+    """Add ('add', a fresh pose) or replace the latest reference pinup for the
+    story's base character. The pinup runner builds its own prompt from the
+    base image's biography + identity."""
+    from ..jobs.runners import run_pinup_image_generate
+
+    app = request.app
+    story = await story_db.get_story(app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+    base_sha = story.get("base_image_id")
+    if not base_sha:
+        raise HTTPException(409, "Story has no base image")
+    workflow_name = story.get("workflow_name")
+    if not workflow_name:
+        raise HTTPException(409, "Story has no stored workflow_name")
+
+    job_id = app.state.spooler.submit(
+        JobLane.GENERATION,
+        "pinup_image",
+        run_pinup_image_generate,
+        meta={"group_id": story.get("group_id", ""), "story_id": story_id,
+              "base_sha256": base_sha},
+        db=app.state.db,
+        ollama=app.state.ollama,
+        comfy=app.state.comfy,
+        base_sha256=base_sha,
+        story_id=story_id,
+        workflow_name=workflow_name,
+        seed=None,
+        mode=body.mode,
+    )
+    return {"status": "queued", "job_id": job_id, "mode": body.mode}

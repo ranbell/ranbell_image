@@ -165,6 +165,62 @@ function openImage(sha256) {
   if (sha256) emit('select-image', sha256)
 }
 
+// ── Pinups (polaroids on the corkboard) ──────────────────────────────────────
+const pinupView = ref(null)        // sha256 shown enlarged in the polaroid lightbox
+const pinupBusy = ref(new Set())   // story_ids with a pinup job in flight
+const PINUP_ROT = [-5, 4, -3, 6, -6, 3, -4, 5]
+function pinupRotation(i) { return PINUP_ROT[i % PINUP_ROT.length] }
+function storyPinups(story) {
+  if (Array.isArray(story.pinups) && story.pinups.length) return story.pinups.filter(Boolean)
+  return story.pinup_image_id ? [story.pinup_image_id] : []
+}
+function openPinup(sha) { if (sha) pinupView.value = sha }
+
+async function refetchStory(id) {
+  try {
+    const r = await fetch(`/api/story/${id}`)
+    if (!r.ok) return null
+    const s = await r.json()
+    stories.value = stories.value.map(x => (x.story_id === id ? s : x))
+    if (detailStory.value?.story_id === id) detailStory.value = s
+    return s
+  } catch { return null }
+}
+
+async function addPinup(story, mode) {
+  const id = story.story_id
+  const before = storyPinups(story)
+  const prevLen = before.length
+  const prevLast = before[before.length - 1] || ''
+  pinupBusy.value = new Set([...pinupBusy.value, id])
+  try {
+    const r = await fetch(`/api/story/${id}/pinup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    emit('toast', { msg: t('storybook.pinupQueued'), type: 'success' })
+    // Poll until the new (add) or swapped (replace) pinup lands.
+    for (let i = 0; i < 20; i++) {
+      await new Promise(res => setTimeout(res, 4000))
+      const s = await refetchStory(id)
+      if (!s) continue
+      const pins = storyPinups(s)
+      const changed = mode === 'add'
+        ? pins.length > prevLen
+        : (pins[pins.length - 1] || '') !== prevLast
+      if (changed) break
+    }
+  } catch (err) {
+    emit('toast', { msg: String(err.message || err), type: 'error' })
+  } finally {
+    const next = new Set(pinupBusy.value)
+    next.delete(id)
+    pinupBusy.value = next
+  }
+}
+
 async function deleteStory(story) {
   const label = storyTitle(story) || story.story_id
   if (!window.confirm(t('storybook.deleteConfirm', { title: label }))) return
@@ -545,12 +601,37 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </div>
               <!-- Biography -->
               <div v-if="storyBio(detailStory)" class="px-8 py-5">
-                <h4 class="text-xs font-semibold text-purple-300/80 mb-2 tracking-wide">📖 {{ t('storybook.biography') }}</h4>
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-xs font-semibold text-purple-300/80 tracking-wide">📖 {{ t('storybook.biography') }}</h4>
+                  <div class="flex gap-2">
+                    <button @click="addPinup(detailStory, 'add')"
+                      :disabled="pinupBusy.has(detailStory.story_id)"
+                      class="px-2 py-1 rounded-lg border border-gray-700/50 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition">
+                      + {{ t('storybook.pinupAdd') }}
+                    </button>
+                    <button v-if="storyPinups(detailStory).length"
+                      @click="addPinup(detailStory, 'replace')"
+                      :disabled="pinupBusy.has(detailStory.story_id)"
+                      class="px-2 py-1 rounded-lg border border-gray-700/50 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition">
+                      ⟳ {{ t('storybook.pinupReplace') }}
+                    </button>
+                  </div>
+                </div>
+                <!-- Corkboard of polaroids -->
+                <div v-if="storyPinups(detailStory).length || pinupBusy.has(detailStory.story_id)"
+                  class="pinboard mb-3">
+                  <div v-for="(sha, i) in storyPinups(detailStory)" :key="sha"
+                    class="pincard" :style="{ transform: `rotate(${pinupRotation(i)}deg)` }"
+                    @click="openPinup(sha)">
+                    <span class="pincard-pin"></span>
+                    <img :src="`/api/thumbnails/${sha}.webp`" @error="onThumbError($event, sha)" />
+                  </div>
+                  <div v-if="pinupBusy.has(detailStory.story_id)" class="pincard pincard--loading">
+                    <span class="pincard-pin"></span>
+                    <div class="pincard-spin">…</div>
+                  </div>
+                </div>
                 <div class="flex gap-4">
-                  <img v-if="detailStory.pinup_image_id"
-                    :src="`/api/thumbnails/${detailStory.pinup_image_id}.webp`"
-                    @error="onThumbError($event, detailStory.pinup_image_id)"
-                    class="w-24 h-32 object-cover rounded-lg shrink-0 bg-gray-900" />
                   <div class="text-sm text-gray-300 space-y-1.5 min-w-0">
                     <p v-if="storyBio(detailStory).personality">{{ storyBio(detailStory).personality }}</p>
                     <p v-if="storyBio(detailStory).occupation" class="text-gray-400">
@@ -701,6 +782,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         </div>
       </div>
     </div>
+
+    <!-- Pinup polaroid lightbox -->
+    <div v-if="pinupView"
+      class="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-8"
+      @click.self="pinupView = null">
+      <div class="pincard pincard--large" @click="pinupView = null">
+        <span class="pincard-pin"></span>
+        <img :src="`/api/originals/${pinupView}`" @error="onThumbError($event, pinupView)" />
+      </div>
+    </div>
   </Teleport>
 </template>
 
@@ -758,4 +849,69 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
 /* Compact Polaroid stack for the Timeline strip */
 .polaroid-stack-sm .polaroid { border-width: 3px; border-bottom-width: 14px; }
+
+/* ── Pinup corkboard (Biography reference photos) ─────────────────────────── */
+.pinboard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem 1.4rem;
+  padding: 1.2rem 1rem;
+  border-radius: 0.6rem;
+  background-color: #b98a58;
+  background-image:
+    radial-gradient(rgba(0, 0, 0, 0.14) 1px, transparent 1.4px),
+    radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1.4px);
+  background-size: 9px 9px, 9px 9px;
+  background-position: 0 0, 4.5px 4.5px;
+  box-shadow: inset 0 0 34px rgba(0, 0, 0, 0.32),
+              0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.pincard {
+  position: relative;
+  background: #fafafa;
+  padding: 0.4rem 0.4rem 1.4rem;
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.pincard:hover {
+  transform: rotate(0deg) scale(1.06) !important;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+  z-index: 2;
+}
+.pincard img {
+  display: block;
+  width: 6rem;
+  height: 8rem;
+  object-fit: cover;
+  background: #e5e5e5;
+}
+.pincard-pin {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff6b64, #d0362f);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.pincard--loading {
+  width: 6.8rem;
+  height: 9.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pincard-spin { color: #b0b0b0; font-size: 1.6rem; letter-spacing: 2px; }
+.pincard--large {
+  padding: 0.9rem 0.9rem 3rem;
+  cursor: zoom-out;
+}
+.pincard--large img {
+  width: min(70vw, 460px);
+  height: auto;
+  max-height: 72vh;
+}
 </style>

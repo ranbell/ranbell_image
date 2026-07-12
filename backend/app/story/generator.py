@@ -1027,6 +1027,47 @@ def build_json_translation_prompt(obj, *, target: str = "Japanese") -> str:
 
 _TIMETABLE_KEYS = ("label", "activity", "place", "feeling")
 
+# Per-scale timetable WINDOW: a span centred on the base moment ("now"), sized a
+# bit wider than the axis delta and sliced finely, so the acts just before/after
+# "now" are explicitly grounded. Keys: window (what the table spans), slots (how
+# finely to cut it, with example relative labels centred on "now").
+_TIMETABLE_WINDOW: dict[str, tuple[str, str]] = {
+    "minutes": (
+        "the ~30 minutes AROUND this moment",
+        "7 slots about 5 minutes apart, labelled relative to now "
+        "(-15min, -10min, -5min, now, +5min, +10min, +15min)",
+    ),
+    "tens_of_minutes": (
+        "the ~2 hours AROUND this moment (so the tens-of-minutes before and after "
+        "are fully covered)",
+        "7 slots about 20 minutes apart, labelled relative to now "
+        "(-1h, -40min, -20min, now, +20min, +40min, +1h)",
+    ),
+    "hours": (
+        "this whole DAY around the moment",
+        "about 7 slots a couple of hours apart, labelled by clock time "
+        "(early morning, mid-morning, noon, early afternoon, late afternoon, "
+        "evening, night)",
+    ),
+    "days": (
+        "about a WEEK around this day",
+        "7 slots about a day apart, labelled relative to today "
+        "(-3d, -2d, -1d, today, +1d, +2d, +3d)",
+    ),
+    "months": (
+        "about a YEAR around now",
+        "about 6-7 slots ~2 months / by season, labelled by month or season",
+    ),
+    "years": (
+        "several YEARS of her life around now",
+        "about 6-7 slots ~1-2 years apart, labelled by age or life stage",
+    ),
+    "decades": (
+        "her whole LIFE across eras",
+        "about 6-7 slots by decade / life stage (childhood … later years)",
+    ),
+}
+
 
 def build_timetable_prompt(
     *,
@@ -1036,35 +1077,35 @@ def build_timetable_prompt(
     base_axis: str = "present",
     locale: str = "en",
 ) -> str:
-    """Map the character onto a timetable so acts can pick concrete moments.
+    """Map the character onto a timetable that COVERS the chosen time axis at good
+    granularity, centred on the base moment.
 
-    Short scales → a one-day schedule; long scales → life stages. English.
+    The window is sized a little wider than the axis delta and sliced finely (see
+    _TIMETABLE_WINDOW) so the moments just before/after "now" are concretely
+    grounded — e.g. a tens-of-minutes axis gets a ~2-hour table in ~20-min slots.
+    English output; translated separately for display.
     """
-    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
-    short = time_scale in ("minutes", "tens_of_minutes", "hours", "days")
-    if short:
-        frame = (
-            "Build a ONE-DAY timetable of this character's typical day — about 6 "
-            "slots (early morning, morning, noon, afternoon, evening, night)."
-        )
-    else:
-        frame = (
-            "Build a LIFE timetable across her stages spanning about "
-            f"{span} — about 6 slots (childhood, adolescence, youth, adulthood, "
-            "middle age, later years); adapt to what fits her."
-        )
+    window, slots = _TIMETABLE_WINDOW.get(
+        time_scale, _TIMETABLE_WINDOW["years"]
+    )
     return (
         "You are mapping a character's life onto a timetable so a story can pick "
-        "concrete moments from it.\n"
-        f"{frame}\n\n"
+        "concrete moments from it. The timetable must COVER the story's time axis "
+        "at fine granularity, centred on the present moment.\n\n"
+        f"TABLE SPAN: {window}.\n"
+        f"SLICING: {slots}. Put the base moment in the MIDDLE (its label is "
+        '"now" / "today" / her current age) and detail the slots just before and '
+        "after it especially clearly.\n\n"
         f"CHARACTER: {_biography_brief(biography)}\n"
-        f"HER WORLD (from the base image): {scene_desc}\n\n"
+        f"HER WORLD RIGHT NOW (the base image): {scene_desc}\n\n"
         "For EACH slot give what she is concretely DOING (a physical activity "
         "using her hobbies / favourite items), WHERE she is, and how she FEELS. "
-        "Activities must be drawable actions — never 'relaxing', 'thinking' or "
-        "'spending time'.\n"
+        "Consecutive slots must flow into each other (what she does at one leads "
+        "into the next). Activities must be drawable actions — never 'relaxing', "
+        "'thinking' or 'spending time'.\n"
         "Output English JSON only, no fences:\n"
-        '{"slots": [{"label": "...", "activity": "<concrete physical action + item>", '
+        '{"slots": [{"label": "<relative time, e.g. -20min / now / +20min>", '
+        '"activity": "<concrete physical action + item>", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
 

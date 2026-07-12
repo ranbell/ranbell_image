@@ -1612,14 +1612,26 @@ def test_build_and_parse_biography():
 
 
 def test_build_timetable_scale_adaptive():
-    day = build_timetable_prompt(
-        biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="hours",
+    # window covers + slices the chosen axis, centred on "now"
+    tens = build_timetable_prompt(
+        biography={"hobbies": ["baking"]}, scene_desc="kitchen",
+        time_scale="tens_of_minutes",
     )
-    assert "ONE-DAY timetable" in day and "drawable actions" in day
+    assert "~2 hours AROUND this moment" in tens
+    assert "20 minutes apart" in tens
+    assert "MIDDLE" in tens and "drawable actions" in tens
+    minutes = build_timetable_prompt(
+        biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="minutes",
+    )
+    assert "~30 minutes AROUND this moment" in minutes
     life = build_timetable_prompt(
         biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="years",
     )
-    assert "LIFE timetable" in life
+    assert "several YEARS of her life" in life
+    # unknown scale falls back to years window
+    assert build_timetable_prompt(
+        biography={}, scene_desc="x", time_scale="bogus",
+    ) == build_timetable_prompt(biography={}, scene_desc="x", time_scale="years")
     slots = parse_timetable_json(
         '{"slots":[{"label":"morning","activity":"kneads dough","place":"kitchen",'
         '"feeling":"calm"},{"nope":1},{"label":"","activity":""}]}'
