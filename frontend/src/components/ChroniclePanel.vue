@@ -159,6 +159,7 @@ watch(() => props.show, async (val) => {
 
 onUnmounted(() => {
   if (_flushTimer) clearInterval(_flushTimer)
+  _stopImageGenMonitor()
   _reader?.cancel().catch(() => {})
 })
 
@@ -180,6 +181,8 @@ function resetStory() {
   concrete.value = null
   axisReasoning.value = {}
   pinupJobId.value = ''
+  _stopImageGenMonitor()
+  imageGen.value = { progress: 0, active: false, text: '', states: {} }
 }
 
 function resetRun() {
@@ -195,9 +198,9 @@ function resetRun() {
   resetStory()
 }
 
-// ── image job status helpers ──────────────────────────────────────────────────
+// ── image job status helpers (read the throttled snapshot, not jobsMap live) ──
 function jobState(job_id) {
-  return props.jobsMap?.get(job_id)?.state ?? 'queued'
+  return imageGen.value.states[job_id] ?? 'queued'
 }
 function jobStatusIcon(job_id) {
   return { queued: '⏳', running: '⚙️', succeeded: '✓', failed: '✗', cancelling: '⏹' }[jobState(job_id)] ?? '⏳'
@@ -215,32 +218,43 @@ function jobStatusClass(job_id) {
   }[jobState(job_id)] ?? 'border-gray-700 bg-gray-900/50 text-gray-400'
 }
 
-// ── image-generation progress (axis images + optional pinup) ──────────────────
-const imageJobIds = computed(() => {
+// ── image-generation progress ────────────────────────────────────────────────
+// Snapshot of the axis/pinup jobs, sampled on a slow timer (NOT a computed over
+// jobsMap) so the panel does not re-render on every 4 Hz job update — the timer
+// runs only while a job is active and stops itself when they finish.
+const imageGen = ref({ progress: 0, active: false, text: '', states: {} })
+let _imgTimer = null
+function _sampleImageGen() {
   const ids = imageJobs.value.map(j => j.job_id)
   if (pinupJobId.value) ids.push(pinupJobId.value)
-  return ids
-})
-const imageGenProgress = computed(() => {
-  const ids = imageJobIds.value
-  if (!ids.length) return 0
-  let sum = 0
+  if (!ids.length) {
+    imageGen.value = { progress: 0, active: false, text: '', states: {} }
+    return
+  }
+  let sum = 0, active = false, text = ''
+  const states = {}
   for (const id of ids) {
     const j = props.jobsMap?.get(id)
-    sum += j?.state === 'succeeded' ? 1 : (j?.progress || 0)
+    const st = j?.state ?? 'queued'
+    states[id] = st
+    sum += st === 'succeeded' ? 1 : (j?.progress || 0)
+    if (st === 'queued' || st === 'running') active = true
+    if (st === 'running' && j?.progress_text && !text) text = j.progress_text
   }
-  return sum / ids.length
-})
-const imageGenActive = computed(() =>
-  imageJobIds.value.some(id => ['queued', 'running'].includes(props.jobsMap?.get(id)?.state)),
-)
-const imageGenText = computed(() => {
-  for (const id of imageJobIds.value) {
-    const j = props.jobsMap?.get(id)
-    if (j?.state === 'running' && j.progress_text) return j.progress_text
-  }
-  return ''
-})
+  imageGen.value = { progress: sum / ids.length, active, text, states }
+}
+function _startImageGenMonitor() {
+  if (_imgTimer) return
+  _sampleImageGen()
+  if (!imageGen.value.active) return
+  _imgTimer = setInterval(() => {
+    _sampleImageGen()
+    if (!imageGen.value.active) { clearInterval(_imgTimer); _imgTimer = null }
+  }, 700)  // ~1.4 Hz — enough to feel live, cheap on CPU
+}
+function _stopImageGenMonitor() {
+  if (_imgTimer) { clearInterval(_imgTimer); _imgTimer = null }
+}
 
 // ── reasoning display (content-language aware, follows panelLang) ─────────────
 const REASON_AXES = ['past', 'present', 'future']
@@ -442,12 +456,14 @@ function handleEvent(ev) {
       break
     case 'pinup_job':
       pinupJobId.value = ev.job_id
+      _startImageGenMonitor()
       break
     case 'warning':
       emit('toast', { msg: ev.message, type: 'warning' })
       break
     case 'image_jobs':
       imageJobs.value = ev.jobs
+      _startImageGenMonitor()
       break
     case 'done':
       seed.value = ev.seed
@@ -702,17 +718,16 @@ async function generateImages() {
               </div>
             </div>
 
-            <!-- image-generation progress bar (drives from the ComfyUI jobs) -->
+            <!-- image-generation progress bar (throttled snapshot of the jobs) -->
             <div v-if="imageJobs.length" class="flex flex-col gap-1">
               <div class="flex items-center justify-between text-[10px]"
-                :class="imageGenActive ? 'text-teal-300/90' : 'text-gray-500'">
-                <span>🎨 {{ t('chronicle.imagesGenerating') }}<span v-if="imageGenText" class="text-gray-500"> · {{ imageGenText }}</span></span>
-                <span class="font-mono">{{ Math.round(imageGenProgress * 100) }}%</span>
+                :class="imageGen.active ? 'text-teal-300/90' : 'text-gray-500'">
+                <span>🎨 {{ t('chronicle.imagesGenerating') }}<span v-if="imageGen.text" class="text-gray-500"> · {{ imageGen.text }}</span></span>
+                <span class="font-mono">{{ Math.round(imageGen.progress * 100) }}%</span>
               </div>
               <div class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
-                <div class="chronicle-progress h-full rounded-full transition-all duration-300"
-                  :class="{ 'animate-pulse': imageGenActive && imageGenProgress < 0.02 }"
-                  :style="{ width: Math.max(imageGenProgress * 100, imageGenActive ? 4 : 0) + '%' }"></div>
+                <div class="chronicle-progress h-full rounded-full transition-[width] duration-500"
+                  :style="{ width: Math.max(imageGen.progress * 100, imageGen.active ? 4 : 0) + '%' }"></div>
               </div>
             </div>
 
