@@ -187,6 +187,13 @@ async function refetchStory(id) {
   } catch { return null }
 }
 
+// Open the detail overlay, then refetch so the newest images (axes + pinups)
+// show even if they finished generating after the gallery list was loaded.
+function openDetail(story) {
+  detailStory.value = story
+  refetchStory(story.story_id)
+}
+
 async function addPinup(story, mode) {
   const id = story.story_id
   const before = storyPinups(story)
@@ -426,7 +433,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 </div>
                 <!-- hover-visible action row -->
                 <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button @click.stop="detailStory = story"
+                  <button @click.stop="openDetail(story)"
                     :title="t('storybook.details')"
                     class="px-1.5 py-0.5 rounded bg-gray-900/70 hover:bg-gray-800 border border-gray-700 text-[9px] text-gray-300">
                     📄
@@ -492,7 +499,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <span v-if="story.worldview" class="text-amber-400/80">🌍 {{ story.worldview }}</span>
                 <span v-if="story.time_scale" class="text-teal-400/70">⏳ ± {{ t('chronicle.timeScale.' + story.time_scale) }}</span>
                 <span v-if="story.emotion" class="text-indigo-400/80">🌒 {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}</span>
-                <button @click="detailStory = story"
+                <button @click="openDetail(story)"
                   class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full text-gray-300 transition-colors">
                   📄 {{ t('storybook.details') }}
                 </button>
@@ -783,9 +790,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       </div>
     </div>
 
-    <!-- Pinup polaroid lightbox -->
+    <!-- Pinup polaroid lightbox (top-most: above the story detail + image viewer) -->
     <div v-if="pinupView"
-      class="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-8"
+      class="fixed inset-0 z-[210] bg-black/85 flex items-center justify-center p-8"
       @click.self="pinupView = null">
       <div class="pincard pincard--large" @click="pinupView = null">
         <span class="pincard-pin"></span>
