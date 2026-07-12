@@ -48,7 +48,12 @@ const dramaticMode = ref('')  // preferred story shape ('' = auto/おまかせ)
 const timeScaleIdx = ref(5)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
+const generatePinup = ref(false)        // generate + register a reference pinup
+const suppressConflictTags = ref(true)  // run per-axis story-conflict tag removal
 const pickingRandom = ref(false)
+// Character grounding surfaced during generation (from biography/timetable events)
+const biography = ref(null)
+const timetable = ref([])
 
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
@@ -279,6 +284,8 @@ async function start() {
     divergence: divergence.value,
     emotion: emotion.value,
     dramatic_mode: dramaticMode.value,
+    generate_pinup: generatePinup.value,
+    suppress_conflict_tags: suppressConflictTags.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
     locale: uiLocale.value,
@@ -362,6 +369,16 @@ function handleEvent(ev) {
       break
     case 'mutation_tags':
       mutationTags.value = ev.tags || []
+      break
+    case 'biography':
+      biography.value = ev.biography_ja && Object.keys(ev.biography_ja).length
+        ? ev.biography_ja : ev.biography
+      break
+    case 'timetable':
+      timetable.value = (ev.timetable_ja && ev.timetable_ja.length)
+        ? ev.timetable_ja : (ev.timetable || [])
+      break
+    case 'pinup_job':
       break
     case 'warning':
       emit('toast', { msg: ev.message, type: 'warning' })
@@ -559,8 +576,8 @@ async function generateImages() {
                     </button>
                   </div>
                 </div>
-                <!-- seed / manual -->
-                <div class="flex items-center gap-4">
+                <!-- seed / manual / pinup / conflict -->
+                <div class="flex items-center flex-wrap gap-4">
                   <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
                     <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" />
                     {{ t('chronicle.seedInherit') }}
@@ -568,6 +585,14 @@ async function generateImages() {
                   <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
                     <input v-model="manualMode" type="checkbox" class="accent-teal-500" />
                     {{ t('chronicle.manualMode') }}
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer text-gray-400" :title="t('chronicle.pinupTitle')">
+                    <input v-model="generatePinup" type="checkbox" class="accent-teal-500" />
+                    {{ t('chronicle.generatePinup') }}
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer text-gray-400" :title="t('chronicle.suppressConflictTitle')">
+                    <input v-model="suppressConflictTags" type="checkbox" class="accent-teal-500" />
+                    {{ t('chronicle.suppressConflict') }}
                   </label>
                 </div>
               </div>

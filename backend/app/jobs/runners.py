@@ -2736,11 +2736,14 @@ async def run_chronicle_candidates(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         assign_dramatic_modes,
+        build_biography_prompt,
         build_candidates_prompt,
+        build_json_translation_prompt,
         build_topic_directive_prompt,
         build_vision_prompt,
         candidates_degenerate,
         character_tags_from_wd14,
+        parse_biography_json,
         parse_candidates_json,
         split_vision_sections,
     )
@@ -2829,6 +2832,46 @@ async def run_chronicle_candidates(
                 except Exception as exc:
                     logger.warning("[chronicle] wd14 context build failed: %s", exc)
 
+            # ── Biography: who she is as a person (hobbies, favourite items,
+            # personality) — the persistent grounding that lets later stages
+            # depict concrete daily actions instead of a stiff idle pose. Built
+            # once per base image and cached on the image doc for reuse.
+            biography: dict = doc.get("biography") or {}
+            biography_ja: dict = doc.get("biography_ja") or {}
+            if not biography:
+                _phase("buildingBiography", 0.46, "Imagining who she is...")
+                try:
+                    biography = parse_biography_json(await ollama.generate_text(
+                        build_biography_prompt(
+                            character_desc=character_desc,
+                            scene_desc=scene_desc,
+                            wd14_tags=wd14_tags,
+                            worldview=body.worldview,
+                            locale=body.locale,
+                        ),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                except Exception as exc:
+                    logger.warning("[chronicle] biography build failed: %s", exc)
+                if biography and body.locale == "ja":
+                    try:
+                        biography_ja = parse_biography_json(await ollama.generate_text(
+                            build_json_translation_prompt(biography, target="Japanese"),
+                            model=vlm_model, options=options, fmt="json",
+                        ))
+                    except Exception as exc:
+                        logger.warning("[chronicle] biography translation failed: %s", exc)
+                if biography:
+                    try:
+                        await db.set_payload(body.base_sha256, {
+                            "biography": biography, "biography_ja": biography_ja,
+                        })
+                    except Exception as exc:
+                        logger.warning("[chronicle] biography persist failed: %s", exc)
+            if biography:
+                _put({"type": "biography",
+                      "biography": biography, "biography_ja": biography_ja})
+
             # Distil an abstract user topic (お題) into a short NARRATIVE directive
             # so the small model has a concrete subject to build on instead of
             # re-telling the base image. Narrative (not visual tags) so broad
@@ -2856,6 +2899,8 @@ async def run_chronicle_candidates(
                 "wd14_context": wd14_context,
                 "story_hooks": story_hooks,
                 "topic_directive": topic_directive,
+                "biography": biography,
+                "biography_ja": biography_ja,
                 "body": body_dict,
             }
 
@@ -2977,9 +3022,10 @@ async def run_chronicle_expand(
     """
     from ..api.ai import (
         _apply_must_replacements,
-        _check_natural_prose,
+        _build_weighted_wd14_context,
         _clean_markdown,
         _correct_prose_wd14_conflicts,
+        _inject_wd14_must_tags,
         _parse_positive_negative,
         _sample_mutation_tags,
     )
@@ -2990,7 +3036,10 @@ async def run_chronicle_expand(
     from ..story.generator import (
         AXES,
         build_axis_prose_prompt,
+        build_concrete_activities_prompt,
         build_expand_prompt,
+        build_json_translation_prompt,
+        build_timetable_prompt,
         build_visual_examination_prompt,
         build_overall_prompt,
         build_story_repair_prompt,
@@ -3001,10 +3050,12 @@ async def run_chronicle_expand(
         identity_lock_tags,
         inject_identity_tags,
         is_multi_character,
+        parse_concrete_activities_json,
         parse_english_translation_json,
         parse_story_json,
         parse_story_sections,
         parse_tags_json,
+        parse_timetable_json,
         parse_visual_plan_json,
         remove_conflict_tags,
     )
@@ -3062,6 +3113,12 @@ async def run_chronicle_expand(
         base_appearance = [
             t for t in character_tags if classify_identity_tag(t) is not None
         ]
+        # Base image's WD14 must/ref analysis (for Refine-style must reinforcement).
+        wd14_analysis: dict = {}
+        try:
+            _, wd14_analysis = _build_weighted_wd14_context([(doc, 0)], [1.0], set())
+        except Exception as exc:
+            logger.warning("[chronicle] wd14 analysis build failed: %s", exc)
 
         # Respin of an already-finalised story: archive the previous version
         if draft.get("status") == "final":
@@ -3098,8 +3155,39 @@ async def run_chronicle_expand(
         # abstract prose — which is what left the character standing stiffly.
         gen_axes = [a for a in AXES if a != body.base_time_axis]
 
-        # Situation seeds = the chosen candidate's per-axis beats, in English
-        # (WD14 search + image prompts always work in English).
+        # Biography (persistent character grounding) carried from Phase 1.
+        biography = ctx.get("biography") or {}
+        biography_ja = ctx.get("biography_ja") or {}
+
+        # ── Timetable: map her life onto concrete moments (scale-adaptive) so the
+        # acts depict specific daily activities from her life, not idle poses.
+        _phase("buildingTimetable", 0.10, "Charting her day...")
+        timetable: list[dict] = []
+        timetable_ja: list[dict] = []
+        try:
+            timetable = parse_timetable_json(await ollama.generate_text(
+                build_timetable_prompt(
+                    biography=biography, scene_desc=scene_desc,
+                    time_scale=body.time_scale, base_axis=body.base_time_axis,
+                    locale=locale,
+                ),
+                model=vlm_model, options=options, fmt="json",
+            ))
+        except Exception as exc:
+            logger.warning("[chronicle] timetable build failed: %s", exc)
+        if timetable and locale == "ja":
+            try:
+                timetable_ja = parse_timetable_json(await ollama.generate_text(
+                    build_json_translation_prompt(timetable, target="Japanese"),
+                    model=vlm_model, options=options, fmt="json",
+                ))
+            except Exception as exc:
+                logger.warning("[chronicle] timetable translation failed: %s", exc)
+        if timetable:
+            _put({"type": "timetable",
+                  "timetable": timetable, "timetable_ja": timetable_ja})
+
+        # English candidate beats (fallback + WD14 query base).
         beats = {a: str(selected.get(a) or "").strip() for a in AXES}
         if locale == "ja":
             _phase("translating", 0.12, "Translating the situation...")
@@ -3110,12 +3198,33 @@ async def run_chronicle_expand(
                     ),
                     model=vlm_model, options=options, fmt="json",
                 ))
-                situation_en = {a: (tr.get(a) or beats[a]) for a in AXES}
+                beats_en = {a: (tr.get(a) or beats[a]) for a in AXES}
             except Exception as exc:
                 logger.warning("[chronicle] situation translation failed: %s", exc)
-                situation_en = dict(beats)
+                beats_en = dict(beats)
         else:
-            situation_en = dict(beats)
+            beats_en = dict(beats)
+
+        # ── Re-examination: cross-check bio + timetable + draft → ONE concrete,
+        # drawable action per axis. THIS is what replaces the stiff idle pose:
+        # each situation now names a specific physical activity with her items.
+        _phase("concretizing", 0.14, "Pinning down the action...")
+        concrete: dict = {}
+        try:
+            concrete = parse_concrete_activities_json(await ollama.generate_text(
+                build_concrete_activities_prompt(
+                    biography=biography, timetable=timetable, selected=selected,
+                    scene_desc=scene_desc, base_axis=body.base_time_axis,
+                    time_scale=body.time_scale, user_topic=body.user_topic,
+                    locale=locale,
+                ),
+                model=vlm_model, options=options, fmt="json",
+            ))
+        except Exception as exc:
+            logger.warning("[chronicle] concrete activities failed: %s", exc)
+        # Prefer the concrete action; fall back to the English candidate beat.
+        situation_en = {a: (concrete.get(a) or beats_en[a]) for a in AXES}
+        cancel.raise_if_set()
 
         async def _wd14_search_tags(query: str, limit: int = 40) -> list[str]:
             """Concrete danbooru tags for a situation via WD14 vocab vector search.
@@ -3213,6 +3322,10 @@ async def run_chronicle_expand(
             parts = [t.strip() for t in tag_line.split(",") if t.strip()]
             tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
             tag_line = _strip_quality_metatags(tag_line)
+            # Refine-style reinforcement: re-inject the base image's must/ref WD14
+            # tags after the subject anchor, unless divergence deliberately mutates.
+            if divergence <= 0.5 and wd14_analysis:
+                tag_line = _inject_wd14_must_tags(tag_line, wd14_analysis)
 
             # (4) Refine pass-2 visual script over the tag line (action surfaces
             #     as danbooru pose tags — the anti-stiff-pose mandate).
@@ -3268,10 +3381,12 @@ async def run_chronicle_expand(
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
 
             # (5) Conflict cleanup vs the situation + re-lock identity (Refine).
+            # The story-conflict tag removal is gated by suppress_conflict_tags
+            # (Refine parity); identity re-lock always runs.
             cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
             sources = list(dict.fromkeys(lock_tags + axis_search_tags + cand_tags))[:80]
             conflicts: set[str] = set()
-            if sources:
+            if body.suppress_conflict_tags and sources:
                 try:
                     conflicts = await _find_conflict_tags(
                         sit[:400], sources, db, ollama, vlm_model
@@ -3321,6 +3436,8 @@ async def run_chronicle_expand(
                 mutation_tags=mutation_tags,
                 user_topic=body.user_topic,
                 topic_directive=ctx.get("topic_directive", ""),
+                biography=biography,
+                timetable=timetable,
             ),
             model=vlm_model, options=options,
         ):
@@ -3415,6 +3532,12 @@ async def run_chronicle_expand(
             "axes": axes_payload,
             "divergence": divergence,
             "mutation_tags": mutation_tags,
+            # Display snapshots (Storybook reads these directly).
+            "biography": biography,
+            "biography_ja": biography_ja,
+            "timetable": timetable,
+            "timetable_ja": timetable_ja,
+            "pinup_image_id": doc.get("pinup_image_id"),
         })
         if embedding:
             try:
@@ -3465,6 +3588,44 @@ async def run_chronicle_expand(
         elif not body.workflow_name:
             _put({"type": "warning",
                   "message": "No workflow selected — image generation skipped."})
+
+        # ── Pinup (optional): a neutral full-body reference of this character,
+        # registered onto the base image doc + Biography. Built once per image.
+        if body.generate_pinup and body.workflow_name and not doc.get("pinup_image_id"):
+            try:
+                fav = (biography.get("favourite_items") or [])[:2]
+                item_tags = await _wd14_search_tags(" ".join(fav), limit=8) if fav else []
+                pin_seen: set[str] = set()
+                pin_merged: list[str] = []
+                for t in [*lock_tags, *base_appearance, *item_tags, "solo",
+                          "cowboy_shot", "standing", "looking_at_viewer",
+                          "simple_background"]:
+                    tag = str(t).strip().replace(" ", "_")
+                    k = tag.lower()
+                    if tag and k not in pin_seen:
+                        pin_seen.add(k)
+                        pin_merged.append(tag)
+                pin_line = _strip_quality_metatags(
+                    _ensure_subject_anchor(", ".join(pin_merged), [(doc, 0)])
+                )
+                pinup_job_id = spooler.submit(
+                    JobLane.GENERATION,
+                    "pinup_image",
+                    run_pinup_image_generate,
+                    meta={"group_id": body.group_id, "story_id": story_id,
+                          "base_sha256": body.base_sha256},
+                    db=db,
+                    comfy=comfy,
+                    base_sha256=body.base_sha256,
+                    story_id=story_id,
+                    workflow_name=body.workflow_name,
+                    positive=pin_line,
+                    negative="",
+                    seed=None,
+                )
+                _put({"type": "pinup_job", "job_id": pinup_job_id})
+            except Exception as exc:
+                logger.warning("[chronicle] pinup submit failed: %s", exc)
 
         _put({
             "type": "done",
@@ -3601,3 +3762,116 @@ async def run_chronicle_image_generate(
 
     reporter.update(1.0, f"{len(saved_sha256s)} images generated")
     return {"sha256s": saved_sha256s, "story_id": story_id, "axis": axis, "seed": seed}
+
+
+async def run_pinup_image_generate(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    comfy,
+    base_sha256: str,
+    story_id: str,
+    workflow_name: str,
+    positive: str,
+    negative: str,
+    seed: int | None,
+) -> dict:
+    """GEN lane. Generate ONE reference 'pinup' for a base image and register it
+    onto the image doc (pinup_image_id) + the story record. Mirrors
+    run_chronicle_image_generate but keyed to the base image, not a story axis."""
+    import random as _random
+
+    from ..creation.schema import CreationRecord
+    from ..story import db as story_db
+
+    reporter.indeterminate()
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    wf = comfy.load_workflow(workflow_name)
+    patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)
+    prompt_id = await comfy.queue_prompt(patched)
+    reporter.update(0.0, "Waiting in ComfyUI queue...")
+
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception as exc:
+                logger.warning("ComfyUI queue delete failed: %s", exc)
+        try:
+            await comfy.interrupt()
+        except Exception as exc:
+            logger.warning("ComfyUI interrupt failed: %s", exc)
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    async def _finalize(sha256: str) -> None:
+        try:
+            await db.set_payload(base_sha256, {"pinup_image_id": sha256})
+        except Exception as exc:
+            logger.error("[pinup] doc link failed for %s: %s", base_sha256, exc)
+        try:
+            await story_db.set_story_payload(db, story_id, {"pinup_image_id": sha256})
+        except Exception as exc:
+            logger.warning("[pinup] story link failed for %s: %s", story_id, exc)
+        record = CreationRecord(
+            method="chronicle",
+            prompt_style="",
+            workflow_name=workflow_name,
+            positive_prompt_generated=positive,
+            negative_prompt_generated=negative,
+            seed=seed,
+        )
+        await db.set_payload(sha256, {
+            "creation_record": record.model_dump(),
+            "pinup_of_image_id": base_sha256,
+        })
+
+    saved: list[str] = []
+
+    async def _try_save(img_ref) -> None:
+        img_bytes = await comfy.fetch_image(
+            img_ref["filename"], img_ref.get("subfolder", ""),
+            img_ref.get("type", "output"),
+        )
+        sha256 = await _save_and_register_chronicle_image(
+            img_bytes, img_ref["filename"], db
+        )
+        if sha256:
+            saved.append(sha256)
+            await _finalize(sha256)
+
+    async for event in comfy.stream_progress(prompt_id):
+        cancel.raise_if_set()
+        queued = False
+        if event["type"] == "comfy_progress":
+            v = event.get("value", 0)
+            m = event.get("max", 1)
+            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+        elif event["type"] == "comfy_output":
+            for img_ref in event.get("images", []):
+                cancel.raise_if_set()
+                try:
+                    await _try_save(img_ref)
+                except Exception as exc:
+                    logger.error("[pinup] image save error: %s", exc)
+                if saved:
+                    break
+        if saved:
+            break
+
+    if not saved:
+        for img_ref in await comfy.fetch_history(prompt_id):
+            try:
+                await _try_save(img_ref)
+            except Exception as exc:
+                logger.error("[pinup] history image save error: %s", exc)
+            if saved:
+                break
+
+    reporter.update(1.0, "pinup generated" if saved else "no pinup image")
+    return {"sha256s": saved, "base_sha256": base_sha256, "story_id": story_id, "seed": seed}

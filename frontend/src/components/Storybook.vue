@@ -57,6 +57,17 @@ function axisStory(story, axis) {
   const a = story.axes?.[axis] || {}
   return (lang.value === 'ja' && a.story_ja) ? a.story_ja : (a.story || '')
 }
+function storyBio(story) {
+  const ja = story.biography_ja
+  const bio = (lang.value === 'ja' && ja && Object.keys(ja).length) ? ja : story.biography
+  return (bio && Object.keys(bio).length) ? bio : null
+}
+function storyTimetable(story) {
+  const ja = story.timetable_ja
+  const tt = (lang.value === 'ja' && ja && ja.length) ? ja : story.timetable
+  return Array.isArray(tt) ? tt : []
+}
+const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
 
 // ── filter / sort → visibleStories ────────────────────────────────────────────
 function matches(story, q) {
@@ -531,6 +542,44 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <p class="text-gray-300 leading-relaxed text-sm italic border-l-2 border-amber-700/50 pl-4">
                   {{ storyOverall(detailStory) }}
                 </p>
+              </div>
+              <!-- Biography -->
+              <div v-if="storyBio(detailStory)" class="px-8 py-5">
+                <h4 class="text-xs font-semibold text-purple-300/80 mb-2 tracking-wide">📖 {{ t('storybook.biography') }}</h4>
+                <div class="flex gap-4">
+                  <img v-if="detailStory.pinup_image_id"
+                    :src="`/api/thumbnails/${detailStory.pinup_image_id}.webp`"
+                    @error="onThumbError($event, detailStory.pinup_image_id)"
+                    class="w-24 h-32 object-cover rounded-lg shrink-0 bg-gray-900" />
+                  <div class="text-sm text-gray-300 space-y-1.5 min-w-0">
+                    <p v-if="storyBio(detailStory).personality">{{ storyBio(detailStory).personality }}</p>
+                    <p v-if="storyBio(detailStory).occupation" class="text-gray-400">
+                      <span class="text-gray-500">{{ t('storybook.bioOccupation') }}:</span> {{ storyBio(detailStory).occupation }}
+                    </p>
+                    <p v-for="f in BIO_LIST_FIELDS" :key="f"
+                      v-show="(storyBio(detailStory)[f] || []).length"
+                      class="text-gray-400 break-words">
+                      <span class="text-gray-500">{{ t('storybook.bio_' + f) }}:</span>
+                      {{ (storyBio(detailStory)[f] || []).join('、') }}
+                    </p>
+                    <p v-if="storyBio(detailStory).backstory" class="text-gray-400 italic pt-1">{{ storyBio(detailStory).backstory }}</p>
+                  </div>
+                </div>
+              </div>
+              <!-- Timetable -->
+              <div v-if="storyTimetable(detailStory).length" class="px-8 py-5">
+                <h4 class="text-xs font-semibold text-teal-300/80 mb-2 tracking-wide">🕒 {{ t('storybook.timetable') }}</h4>
+                <ul class="space-y-1.5">
+                  <li v-for="(slot, si) in storyTimetable(detailStory)" :key="si"
+                    class="text-sm text-gray-300 flex gap-2">
+                    <span class="text-teal-400/80 font-medium shrink-0 w-24">{{ slot.label }}</span>
+                    <span class="min-w-0">
+                      {{ slot.activity }}
+                      <span v-if="slot.place" class="text-gray-500">@ {{ slot.place }}</span>
+                      <span v-if="slot.feeling" class="text-gray-600 italic">（{{ slot.feeling }}）</span>
+                    </span>
+                  </li>
+                </ul>
               </div>
               <div v-for="(axis, idx) in AXES" :key="axis"
                 class="flex min-h-[220px]"

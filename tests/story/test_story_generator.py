@@ -40,11 +40,18 @@ from app.story.generator import (
     build_translation_to_english_prompt,
     build_vision_prompt,
     build_visual_examination_prompt,
+    build_biography_prompt,
+    build_concrete_activities_prompt,
+    build_json_translation_prompt,
+    build_timetable_prompt,
     character_tags_from_wd14,
     classify_identity_tag,
     collect_prompt_tags,
     identity_lock_tags,
     identity_tags_for_scale,
+    parse_biography_json,
+    parse_concrete_activities_json,
+    parse_timetable_json,
     inject_identity_tags,
     is_multi_character,
     parse_axis_tags_json,
@@ -1578,3 +1585,89 @@ def test_story_and_expand_thread_topic_directive():
         user_topic="真実を追う",
     )
     assert "Story direction distilled from the topic" not in plain
+
+
+# ── biography / timetable / concrete activities (life-grounding) ──────────────
+
+def test_build_and_parse_biography():
+    prompt = build_biography_prompt(
+        character_desc="[visual tags] 1girl, silver_hair",
+        scene_desc="a classroom", wd14_tags=["1girl", "book"], worldview="",
+        locale="ja",
+    )
+    assert "BIOGRAPHY" in prompt
+    assert "do NOT restate" in prompt  # appearance excluded
+    assert "favourite_items" in prompt and "hobbies" in prompt
+    bio = parse_biography_json(
+        '{"personality":"kind","occupation":"baker","hobbies":["baking",""],'
+        '"favourite_items":["rolling pin"],"likes":["bread"],"dislikes":[],'
+        '"quirks":["hums"],"backstory":"grew up in a bakery"}'
+    )
+    assert bio["personality"] == "kind" and bio["occupation"] == "baker"
+    assert bio["hobbies"] == ["baking"]  # blanks dropped
+    assert bio["favourite_items"] == ["rolling pin"]
+    # broken / empty → {}
+    assert parse_biography_json("junk") == {}
+    assert parse_biography_json('{"unrelated":1}') == {}
+
+
+def test_build_timetable_scale_adaptive():
+    day = build_timetable_prompt(
+        biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="hours",
+    )
+    assert "ONE-DAY timetable" in day and "drawable actions" in day
+    life = build_timetable_prompt(
+        biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="years",
+    )
+    assert "LIFE timetable" in life
+    slots = parse_timetable_json(
+        '{"slots":[{"label":"morning","activity":"kneads dough","place":"kitchen",'
+        '"feeling":"calm"},{"nope":1},{"label":"","activity":""}]}'
+    )
+    assert len(slots) == 1 and slots[0]["activity"] == "kneads dough"
+    assert parse_timetable_json("junk") == []
+
+
+def test_build_concrete_activities():
+    prompt = build_concrete_activities_prompt(
+        biography={"hobbies": ["baking"], "favourite_items": ["rolling pin"]},
+        timetable=[{"label": "morning", "activity": "kneads dough",
+                    "place": "kitchen", "feeling": "calm"}],
+        selected={"past": "p", "present": "pr", "future": "f"},
+        scene_desc="kitchen", base_axis="present", time_scale="hours",
+        user_topic="放課後",
+    )
+    assert "drawable" in prompt and "NEVER standing" in prompt
+    assert "kneads dough" in prompt and "放課後" in prompt
+    acts = parse_concrete_activities_json(
+        '{"past":"kneading dough","present":"pulling bread from the oven",'
+        '"future":"boxing loaves"}'
+    )
+    assert acts["past"] == "kneading dough" and acts["future"] == "boxing loaves"
+    assert parse_concrete_activities_json("junk") == {}
+
+
+def test_json_translation_prompt():
+    p = build_json_translation_prompt({"a": "hello"}, target="Japanese")
+    assert "Japanese" in p and "hello" in p and "KEYS" in p
+
+
+def test_expand_prompt_weaves_biography_timetable():
+    prompt = build_expand_prompt(
+        selected={"id": "A", "title": "T", "past": "p", "present": "pr",
+                  "future": "f", "motif": "m"},
+        character_desc="1girl", scene_desc="kitchen", base_axis="present",
+        worldview="",
+        biography={"favourite_items": ["rolling pin"], "hobbies": ["baking"]},
+        timetable=[{"label": "morning", "activity": "kneads dough"}],
+    )
+    assert "CHARACTER BIOGRAPHY" in prompt
+    assert "rolling pin" in prompt and "kneads dough" in prompt
+    # absent → no blocks
+    plain = build_expand_prompt(
+        selected={"id": "A", "title": "T", "past": "p", "present": "pr",
+                  "future": "f", "motif": "m"},
+        character_desc="1girl", scene_desc="kitchen", base_axis="present",
+        worldview="",
+    )
+    assert "CHARACTER BIOGRAPHY" not in plain

@@ -932,6 +932,217 @@ def parse_candidates_json(raw: str) -> list[dict]:
     return result
 
 
+# ── Biography / Timetable / Concrete activities ───────────────────────────────
+#
+# Persistent character grounding to defeat the "stiff/idle pose" problem: a
+# BIOGRAPHY (hobbies, favourite items, personality — never appearance, which
+# WD14 owns) gives the character things she physically DOES; a TIMETABLE maps
+# that onto concrete moments; and a re-examination step pins each act to ONE
+# drawable action using her hobbies/items. All English (grounds prompts + WD14
+# search); a display translation is produced separately for the ja UI.
+
+_BIO_STR_KEYS = ("personality", "occupation", "backstory")
+_BIO_LIST_KEYS = ("hobbies", "favourite_items", "likes", "dislikes", "quirks")
+
+
+def build_biography_prompt(
+    *,
+    character_desc: str,
+    scene_desc: str,
+    wd14_tags: list[str] | None = None,
+    worldview: str = "",
+    locale: str = "en",
+) -> str:
+    """VLM/LLM prompt inventing a character BIOGRAPHY from the base image.
+
+    Personality / hobbies / favourite items / backstory — NOT appearance. Output
+    is English (canonical, used to ground image prompts + WD14 vector search).
+    """
+    tags = ", ".join((wd14_tags or [])[:40])
+    world = f'Setting / worldview: "{worldview.strip()}"\n' if worldview.strip() else ""
+    return (
+        "From the image description below, invent a believable BIOGRAPHY for this "
+        "single character — who she is as a person, NOT how she looks (appearance "
+        "is already fixed). Ground it in the visible cues (setting, objects, mood) "
+        "but flesh out an inner life.\n\n"
+        f"CHARACTER (appearance tags — do NOT restate as biography): {character_desc}\n"
+        f"SCENE: {scene_desc}\n"
+        f"WD14 tags: {tags}\n"
+        f"{world}\n"
+        "Make hobbies, favourite items and quirks CONCRETE and PHYSICAL — things "
+        "she visibly DOES / HOLDS / USES so they can drive a picture (e.g. 'kneads "
+        "bread dough', 'tunes a violin', 'presses flowers between book pages'), "
+        "never vague traits like 'loves music'.\n"
+        "Output English JSON only, no markdown fences:\n"
+        '{"personality": "<2-3 sentences>", '
+        '"occupation": "<role / student life>", '
+        '"hobbies": ["<physical hobby>", "...3-5"], '
+        '"favourite_items": ["<concrete object she owns/carries>", "...3-5"], '
+        '"likes": ["...", "...2-4"], "dislikes": ["...", "...1-3"], '
+        '"quirks": ["<a habitual physical gesture>", "...1-3"], '
+        '"backstory": "<2-3 sentences of history>"}'
+    )
+
+
+def parse_biography_json(raw: str) -> dict:
+    """Parse a biography payload. Missing/broken → {} (feature degrades off)."""
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return {}
+    out: dict = {}
+    for k in _BIO_STR_KEYS:
+        out[k] = str(data.get(k) or "").strip()
+    for k in _BIO_LIST_KEYS:
+        v = data.get(k)
+        out[k] = [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+    return out if any(out.values()) else {}
+
+
+def _biography_brief(bio: dict | None) -> str:
+    """One-line biography summary for embedding into other prompts."""
+    if not bio:
+        return "(no biography)"
+    parts: list[str] = []
+    if bio.get("occupation"):
+        parts.append(str(bio["occupation"]))
+    if bio.get("personality"):
+        parts.append(str(bio["personality"]))
+    if bio.get("hobbies"):
+        parts.append("hobbies: " + ", ".join(bio["hobbies"]))
+    if bio.get("favourite_items"):
+        parts.append("favourite items: " + ", ".join(bio["favourite_items"]))
+    if bio.get("quirks"):
+        parts.append("quirks: " + ", ".join(bio["quirks"]))
+    return " | ".join(parts) or "(no biography)"
+
+
+def build_json_translation_prompt(obj, *, target: str = "Japanese") -> str:
+    """Translate every VALUE of a JSON object; keys/structure preserved."""
+    return (
+        f"Translate every VALUE in this JSON into natural {target}. Keep the KEYS "
+        "and the JSON structure identical. Answer with JSON only, no fences.\n\n"
+        f"{json.dumps(obj, ensure_ascii=False)}"
+    )
+
+
+_TIMETABLE_KEYS = ("label", "activity", "place", "feeling")
+
+
+def build_timetable_prompt(
+    *,
+    biography: dict | None,
+    scene_desc: str,
+    time_scale: str = "years",
+    base_axis: str = "present",
+    locale: str = "en",
+) -> str:
+    """Map the character onto a timetable so acts can pick concrete moments.
+
+    Short scales → a one-day schedule; long scales → life stages. English.
+    """
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    short = time_scale in ("minutes", "tens_of_minutes", "hours", "days")
+    if short:
+        frame = (
+            "Build a ONE-DAY timetable of this character's typical day — about 6 "
+            "slots (early morning, morning, noon, afternoon, evening, night)."
+        )
+    else:
+        frame = (
+            "Build a LIFE timetable across her stages spanning about "
+            f"{span} — about 6 slots (childhood, adolescence, youth, adulthood, "
+            "middle age, later years); adapt to what fits her."
+        )
+    return (
+        "You are mapping a character's life onto a timetable so a story can pick "
+        "concrete moments from it.\n"
+        f"{frame}\n\n"
+        f"CHARACTER: {_biography_brief(biography)}\n"
+        f"HER WORLD (from the base image): {scene_desc}\n\n"
+        "For EACH slot give what she is concretely DOING (a physical activity "
+        "using her hobbies / favourite items), WHERE she is, and how she FEELS. "
+        "Activities must be drawable actions — never 'relaxing', 'thinking' or "
+        "'spending time'.\n"
+        "Output English JSON only, no fences:\n"
+        '{"slots": [{"label": "...", "activity": "<concrete physical action + item>", '
+        '"place": "...", "feeling": "..."}, "..."]}'
+    )
+
+
+def parse_timetable_json(raw: str) -> list[dict]:
+    """Parse a timetable payload into a list of slot dicts. Broken → []."""
+    data = _loads_lenient(raw)
+    slots = data.get("slots") if isinstance(data, dict) else data
+    if not isinstance(slots, list):
+        return []
+    out: list[dict] = []
+    for s in slots:
+        if not isinstance(s, dict):
+            continue
+        item = {k: str(s.get(k) or "").strip() for k in _TIMETABLE_KEYS}
+        if item["activity"] or item["label"]:
+            out.append(item)
+    return out
+
+
+def build_concrete_activities_prompt(
+    *,
+    biography: dict | None,
+    timetable: list[dict] | None,
+    selected: dict,
+    scene_desc: str,
+    base_axis: str = "present",
+    time_scale: str = "years",
+    user_topic: str = "",
+    locale: str = "en",
+) -> str:
+    """Re-examine bio + timetable + chosen draft → ONE drawable action per axis.
+
+    This is the anti-stiff-pose core: it forces each act to be a concrete
+    physical action using a specific hobby/item, English, feeding situation_en.
+    """
+    elapsed = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
+    tt = "\n".join(
+        f"  - {s.get('label', '')}: {s.get('activity', '')} @ {s.get('place', '')} "
+        f"({s.get('feeling', '')})"
+        for s in (timetable or [])
+    ) or "  (no timetable)"
+    beats = "".join(
+        f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
+    ) or "  (no draft)\n"
+    topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
+    return (
+        "Pin down EXACTLY what the character is physically doing at each of the "
+        "three story moments, by cross-checking her biography, her timetable and "
+        "the chosen story draft. Every moment must be ONE concrete, drawable "
+        "physical action using a specific hobby / favourite item — NEVER standing, "
+        "sitting or lounging idle.\n\n"
+        f"{elapsed}\n"
+        f"CHARACTER: {_biography_brief(biography)}\n"
+        f"TIMETABLE:\n{tt}\n\n"
+        f"BASE SCENE (the [{base_axis.upper()}] moment looks like this): {scene_desc}\n"
+        f"{topic}"
+        "CHOSEN STORY DRAFT (rough — refine into concrete action):\n"
+        f"{beats}\n"
+        "For each axis pick the timetable moment nearest that elapsed distance and "
+        "state the concrete action (verb + body + prop + place). The "
+        f"[{base_axis.upper()}] action must match the base scene.\n"
+        "Output English JSON only, no fences:\n"
+        '{"past": "<one concrete action sentence>", '
+        '"present": "<...>", "future": "<...>"}'
+    )
+
+
+def parse_concrete_activities_json(raw: str) -> dict:
+    """Parse {past,present,future} concrete actions. Missing keys → '' per axis."""
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return {}
+    return {a: str(data.get(a) or "").strip() for a in AXES}
+
+
 # ── Timeline distinctness (code-side enforcement, not prose pleading) ─────────
 #
 # The pipeline layered a lot of prose telling the model NOT to re-shoot the same
@@ -1061,6 +1272,8 @@ def build_expand_prompt(
     mutation_tags: list[str] | None = None,
     user_topic: str = "",
     topic_directive: str = "",
+    biography: dict | None = None,
+    timetable: list[dict] | None = None,
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
@@ -1068,8 +1281,22 @@ def build_expand_prompt(
     candidate's per-act beats (title/past/present/future/motif) plus its
     dramatic_mode + turn (carried through as PROTECTED so the surprise survives
     expansion), and written in the user's locale. Older candidates without beats
-    fall back to summary.
+    fall back to summary. When a biography / timetable are supplied they are
+    woven in as grounding so the prose reads as this specific person's life.
     """
+    bio_block = ""
+    if biography:
+        bio_block = (
+            "\nCHARACTER BIOGRAPHY (ground the prose in this person — her hobbies, "
+            "favourite items and quirks should surface as concrete actions):\n"
+            f"  {_biography_brief(biography)}\n"
+        )
+    tt_block = ""
+    if timetable:
+        tt_lines = "; ".join(
+            f"{s.get('label', '')}: {s.get('activity', '')}" for s in timetable[:6]
+        )
+        tt_block = f"  Daily/life rhythm: {tt_lines}\n"
     beats = "".join(
         f"  [{a.upper()}] seed: {selected.get(a, '')}\n"
         for a in AXES if selected.get(a)
@@ -1095,7 +1322,8 @@ def build_expand_prompt(
         f"{beats}"
         f"{turn_seed}"
         "  Motif (must recur and ESCALATE in meaning across all three acts): "
-        f"{motif}\n\n"
+        f"{motif}\n"
+        f"{bio_block}{tt_block}\n"
     )
     lang_block = (
         "\n言語ルール: [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] のマーカーは"

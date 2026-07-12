@@ -40,6 +40,8 @@ class ChronicleRequest(BaseModel):
     divergence: float = 0.0
     emotion: str = ""  # target emotion register ('' = off; see emotion_tagger.EMOTION_DIMENSIONS)
     dramatic_mode: str = ""  # preferred story-shape ('' = auto-vary; see generator._DRAMATIC_MODES)
+    suppress_conflict_tags: bool = True  # run the per-axis story-conflict tag removal (Refine parity)
+    generate_pinup: bool = False  # generate + register a reference "pinup" for the base image
     use_ref_seed: bool = True
     manual_mode: bool = False
     vlm_model: str = ""
