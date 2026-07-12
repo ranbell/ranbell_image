@@ -336,15 +336,24 @@ def _user_intent_block(user_topic: str, topic_directive: str = "") -> str:
     )
 
 
-def _ending_policy_block(user_topic: str) -> str:
+_TONE_HOOKS = {
+    "bright": "a new opportunity opening, an exciting decision, a bond deepening, "
+              "a discovery within reach, or a bold leap about to be taken",
+    "neutral": "a turn, a rising stake, a decision, or a fresh question",
+    "dark": "a reversal, a rising stake, an exposure, a parting on the brink, or a "
+            "fresh question",
+}
+
+
+def _ending_policy_block(user_topic: str, tone: str = "bright") -> str:
     """Cliffhanger ending policy — the fix for the 'forced tidy resolution' problem.
 
-    The old design mandated 'FUTURE act = the ending', so every chronicle wound
-    down into a calm summary and read as bland. Instead the future act must LEAN
-    INTO the story's turn and leave the pull open — a hook into the next volume.
-    The single exception: if the user topic explicitly names an ending, that
-    ending wins (this block yields to the USER TOPIC intent rules).
+    The future act must LEAN INTO the story's turn and leave the pull open — a
+    hook into the next volume. The example hooks are tone-aware so a bright story
+    ends on a hopeful, forward-looking beat rather than a grim one. The single
+    exception: if the user topic explicitly names an ending, that ending wins.
     """
+    hooks = _TONE_HOOKS.get((tone or "bright").strip().lower(), _TONE_HOOKS["bright"])
     exception = (
         " Exception: if the user topic explicitly names an ending, honour that "
         "ending as written instead."
@@ -355,9 +364,28 @@ def _ending_policy_block(user_topic: str) -> str:
         "- ENDING — do NOT tie a bow. The future act must NOT wind down into a "
         "calm summary or a resolved conclusion (avoid \"in the end…\", \"and so she "
         "realises…\", \"最終的に…\", \"こうして…を実感する\"). Leave the reader mid-motion — "
-        "on a reversal, a rising stake, an exposure, a parting on the brink, or a "
-        f"fresh question — a hook that pulls toward the next volume.{exception}\n"
+        f"on {hooks} — a hook that pulls toward the next volume.{exception}\n"
     )
+
+
+def _tone_line(tone: str, locale: str = "en") -> str:
+    """Overall tonal bias for the story, threaded into candidates + story stages."""
+    t = (tone or "bright").strip().lower()
+    if locale == "ja":
+        return {
+            "bright": "\nトーン: 希望・温かさ・前進を基調に。彼女が成長し、つながり、発見する物語に。"
+                      "悲劇的・破滅的な結末は、お題が明示的に求めない限り避ける。\n",
+            "neutral": "\nトーン: バランス重視。無理な幸福も陰惨さも避け、自然な起伏で。\n",
+            "dark": "\nトーン: 緊張・ほろ苦さ・不穏さを許容してよい。\n",
+        }.get(t, "")
+    return {
+        "bright": "\nTONE: keep it hopeful, warm and forward-moving — she grows, "
+                  "connects or discovers. Avoid grim, tragic or catastrophic "
+                  "outcomes unless the user topic explicitly asks for darkness.\n",
+        "neutral": "\nTONE: balanced — neither forced-happy nor grim; natural ups "
+                   "and downs.\n",
+        "dark": "\nTONE: tension, bittersweetness or unease are welcome.\n",
+    }.get(t, "")
 
 
 def _boldness_line(divergence: float) -> str:
@@ -416,6 +444,7 @@ def build_story_prompt(
     topic_directive: str = "",
     dramatic_mode: str = "",
     turn: str = "",
+    tone: str = "bright",
 ) -> str:
     """LLM prompt producing [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] sections."""
     world_line = (
@@ -449,7 +478,7 @@ def build_story_prompt(
         if turn.strip()
         else ""
     )
-    ending_block = _ending_policy_block(user_topic)
+    ending_block = _ending_policy_block(user_topic, tone)
 
     mutation_block = ""
     if mutation_tags:
@@ -497,6 +526,7 @@ def build_story_prompt(
         "- Give each act its own dominant emotion.\n"
         f"{ending_block}"
         f"{_boldness_line(divergence)}\n"
+        f"{_tone_line(tone).rstrip()}\n"
         f"{_emotion_guidance_line(emotion).rstrip()}\n"
         "- 3-6 sentences per act, in English.\n"
         "- Output exactly these five sections, each starting with its marker on "
@@ -713,8 +743,61 @@ _DRAMATIC_MODES: dict[str, tuple[str, str]] = {
         "役割逆転 — 導く者と従う者（守る者と守られる者）が幕をまたいで入れ替わる。"
         "未来幕は入れ替わりの最中で、力関係が確定する前。",
     ),
+    # ── bright / forward-looking shapes ──────────────────────────────────────
+    "discovery": (
+        "DISCOVERY — she stumbles onto something wonderful and follows it; each "
+        "act uncovers more delight or possibility. The future act is the thrilling "
+        "brink of a marvellous find, not its loss.",
+        "発見 — 素晴らしい何かに出会い、追いかけていく。各幕でその歓びや可能性が広がる。"
+        "未来幕は驚きの発見を目前にした高揚の瞬間で、喪失ではない。",
+    ),
+    "reunion": (
+        "REUNION — a bond reforms or deepens across the acts; distance closes, a "
+        "connection warms. The future act is the joyful meeting about to happen.",
+        "再会 — 幕をまたいで絆が結び直され、深まる。距離が縮まり、つながりが温まる。"
+        "未来幕は喜ばしい再会が今まさに訪れる瞬間。",
+    ),
+    "breakthrough": (
+        "BREAKTHROUGH — patient effort starts to pay off; a skill, goal or dream "
+        "moves within reach. The future act is triumph on the verge, not defeat.",
+        "飛躍 — 積み重ねた努力が実を結び始める。技・目標・夢が手の届く所へ来る。"
+        "未来幕は勝利の一歩手前で、敗北ではない。",
+    ),
+    "adventure": (
+        "ADVENTURE — an exciting new undertaking begins and grows; curiosity pulls "
+        "her outward. The future act is her leaping into it, eyes alight.",
+        "冒険 — 心躍る新しい試みが始まり、広がっていく。好奇心が外へと駆り立てる。"
+        "未来幕は目を輝かせてそこへ飛び込む瞬間。",
+    ),
+    "kindness": (
+        "KINDNESS — a small act of warmth or connection ripples outward and "
+        "changes things for the better. The future act is the moment it lands.",
+        "やさしさ — 小さな温かい行い・つながりが波紋のように広がり、状況を良い方へ変える。"
+        "未来幕はその想いが届く瞬間。",
+    ),
+    "mischief": (
+        "MISCHIEF — playful, good-natured fun escalates gleefully across the acts. "
+        "The future act is the delighted peak of the prank or game.",
+        "いたずら — 悪意のない遊び心が幕ごとに楽しく高まる。"
+        "未来幕はいたずらや遊びが最高に盛り上がった瞬間。",
+    ),
+    "bloom": (
+        "BLOOM — she grows into her own; shyness turns to confidence, a talent "
+        "flowers. The future act is her coming into full bloom, not wilting.",
+        "開花 — 彼女が自分らしさへと成長する。臆病が自信へ、才能が花開く。"
+        "未来幕は満開へと咲きゆく瞬間で、萎れる姿ではない。",
+    ),
 }
 _DRAMATIC_MODE_KEYS: tuple[str, ...] = tuple(_DRAMATIC_MODES)
+# Split for tone-aware assignment: bright shapes lean hopeful/forward, dark ones
+# lean tense/ominous. "auto" (bright tone) prefers bright; dark tone includes dark.
+_BRIGHT_MODE_KEYS: tuple[str, ...] = (
+    "discovery", "reunion", "breakthrough", "adventure", "kindness", "mischief",
+    "bloom", "pursuit",
+)
+_DARK_MODE_KEYS: tuple[str, ...] = tuple(
+    k for k in _DRAMATIC_MODE_KEYS if k not in _BRIGHT_MODE_KEYS
+)
 
 
 def _dramatic_mode_line(mode: str, locale: str = "en") -> str:
@@ -729,26 +812,37 @@ def assign_dramatic_modes(
     ids: tuple[str, ...] = ("A", "B", "C"),
     *,
     preferred: str = "",
+    tone: str = "bright",
     rng=None,
 ) -> dict[str, str]:
-    """Pick a DISTINCT dramatic mode for each candidate id.
+    """Pick a DISTINCT dramatic mode for each candidate id, tone-aware.
 
     preferred (a user-chosen mode, '' = auto) is pinned onto the first id so a
-    user selection is guaranteed present; the remaining ids get contrasting
-    modes sampled without replacement. rng defaults to the module `random`
-    (injectable for deterministic tests).
+    user selection is guaranteed present. tone shapes the auto pool:
+    'bright' → bright shapes first (dark only if more ids than bright modes),
+    'dark' → dark shapes first, 'neutral' → the full pool shuffled. rng is
+    injectable for deterministic tests.
     """
     import random as _random
     rng = rng or _random
-    pool = list(_DRAMATIC_MODE_KEYS)
+    tone = (tone or "bright").strip().lower()
+    if tone == "dark":
+        primary, secondary = list(_DARK_MODE_KEYS), list(_BRIGHT_MODE_KEYS)
+    elif tone == "neutral":
+        primary, secondary = list(_DRAMATIC_MODE_KEYS), []
+    else:  # bright (default)
+        primary, secondary = list(_BRIGHT_MODE_KEYS), list(_DARK_MODE_KEYS)
+    rng.shuffle(primary)
+    rng.shuffle(secondary)
+    ordered = primary + secondary
+
     chosen: list[str] = []
     pref = (preferred or "").strip().lower()
     if pref in _DRAMATIC_MODES:
         chosen.append(pref)
-        pool.remove(pref)
-    rng.shuffle(pool)
-    chosen.extend(pool)
-    return {cid: chosen[i] for i, cid in enumerate(ids)}
+        ordered = [k for k in ordered if k != pref]
+    chosen.extend(ordered)
+    return {cid: chosen[i % len(chosen)] for i, cid in enumerate(ids)}
 
 
 def _locale_output_line(locale: str) -> str:
@@ -769,6 +863,7 @@ def build_candidates_prompt(
     locale: str = "en",
     candidate_modes: dict[str, str] | None = None,
     topic_directive: str = "",
+    tone: str = "bright",
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
@@ -865,10 +960,12 @@ def build_candidates_prompt(
         f"Visual continuity for this scale — keep: {rules['must_keep']}; "
         f"may change: {rules['may_differ']}.\n\n"
         f"{guardrail}\n"
+        f"{_tone_line(tone, locale)}"
         f"{_emotion_guidance_line(emotion, locale)}\n"
         "Make the three candidates genuinely distinct — each pairs a different "
         "reading (below) with a different dramatic shape, so the three diverge in "
-        "BOTH viewpoint and plot:\n"
+        "BOTH viewpoint and plot. A surprising turn can be delightful or hopeful "
+        "— surprise does NOT have to mean darkness:\n"
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
         "For EACH candidate write ONE concrete sentence per act — past, present, "
@@ -944,6 +1041,35 @@ def parse_candidates_json(raw: str) -> list[dict]:
 _BIO_STR_KEYS = ("personality", "occupation", "backstory")
 _BIO_LIST_KEYS = ("hobbies", "favourite_items", "likes", "dislikes", "quirks")
 
+# A wide pool of interest areas, sampled per generation and offered to the model
+# as (non-mandatory) inspiration so biographies stop collapsing onto the same
+# few defaults (baking / violin / flowers). Deliberately mixes athletic,
+# creative, intellectual, outdoorsy and quirky domains.
+_BIO_DOMAINS = (
+    "competitive swimming", "street photography", "amateur astronomy", "pottery",
+    "retro video games", "rock climbing", "jazz piano", "embroidery", "chess",
+    "birdwatching", "car & engine tinkering", "kyudo (archery)", "coding side-projects",
+    "ballet", "sea fishing", "urban gardening", "skateboarding", "calligraphy",
+    "marine biology", "distance running", "beekeeping", "watercolour painting",
+    "kendo", "tarot & fortune-telling", "figure skating", "herbalism & tea blends",
+    "vintage fashion hunting", "road cycling", "keeping tropical fish", "close-up magic",
+    "rock & mineral collecting", "graffiti / mural art", "amateur radio", "surfing",
+    "baking pastries", "knitting & crochet", "model kit building", "cosplay sewing",
+    "rhythm games at the arcade", "hiking & bouldering", "stargazing photography",
+    "playing the drums", "growing succulents", "collecting vinyl records",
+    "kickboxing", "origami", "volunteering at an animal shelter", "roller derby",
+    "bookbinding", "brewing coffee by hand",
+)
+
+
+def sample_bio_domains(n: int = 5, *, rng=None) -> list[str]:
+    """Pick n distinct interest domains as biography inspiration (rng injectable)."""
+    import random as _random
+    rng = rng or _random
+    pool = list(_BIO_DOMAINS)
+    rng.shuffle(pool)
+    return pool[:max(0, n)]
+
 
 def build_biography_prompt(
     *,
@@ -952,14 +1078,28 @@ def build_biography_prompt(
     wd14_tags: list[str] | None = None,
     worldview: str = "",
     locale: str = "en",
+    inspiration_domains: list[str] | None = None,
 ) -> str:
     """VLM/LLM prompt inventing a character BIOGRAPHY from the base image.
 
     Personality / hobbies / favourite items / backstory — NOT appearance. Output
     is English (canonical, used to ground image prompts + WD14 vector search).
+    `inspiration_domains` (a rotating random sample) steers variety so different
+    characters get genuinely different lives.
     """
     tags = ", ".join((wd14_tags or [])[:40])
     world = f'Setting / worldview: "{worldview.strip()}"\n' if worldview.strip() else ""
+    domains = ", ".join(inspiration_domains or [])
+    domain_block = (
+        "VARIETY — make her DISTINCT; do NOT fall back on the usual defaults "
+        "(baking, violin, reading, pressing flowers). Draw her hobbies and "
+        "favourite items from varied areas — for THIS character consider e.g.: "
+        f"{domains}; or anything else that genuinely fits her image. Pick what "
+        "suits the scene, not the same handful every time.\n"
+        if domains
+        else "VARIETY — make her DISTINCT; avoid the usual defaults (baking, "
+        "violin, reading). Choose hobbies/items that genuinely fit HER image.\n"
+    )
     return (
         "From the image description below, invent a believable BIOGRAPHY for this "
         "single character — who she is as a person, NOT how she looks (appearance "
@@ -969,10 +1109,10 @@ def build_biography_prompt(
         f"SCENE: {scene_desc}\n"
         f"WD14 tags: {tags}\n"
         f"{world}\n"
-        "Make hobbies, favourite items and quirks CONCRETE and PHYSICAL — things "
-        "she visibly DOES / HOLDS / USES so they can drive a picture (e.g. 'kneads "
-        "bread dough', 'tunes a violin', 'presses flowers between book pages'), "
-        "never vague traits like 'loves music'.\n"
+        f"{domain_block}"
+        "Keep hobbies, favourite items and quirks CONCRETE and PHYSICAL — things "
+        "she visibly DOES / HOLDS / USES so they can drive a picture — never vague "
+        "traits like 'loves music'.\n"
         "Output English JSON only, no markdown fences:\n"
         '{"personality": "<2-3 sentences>", '
         '"occupation": "<role / student life>", '
@@ -1336,6 +1476,7 @@ def build_expand_prompt(
     topic_directive: str = "",
     biography: dict | None = None,
     timetable: list[dict] | None = None,
+    tone: str = "bright",
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
@@ -1407,6 +1548,7 @@ def build_expand_prompt(
         topic_directive=topic_directive,
         dramatic_mode=dramatic_mode,
         turn=turn,
+        tone=tone,
     )
     return seed_block + base + lang_block
 

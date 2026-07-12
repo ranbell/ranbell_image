@@ -15,14 +15,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
+    _BRIGHT_MODE_KEYS,
+    _DARK_MODE_KEYS,
     _candidate_beats_degenerate,
     _chronicle_tags_degenerate,
     _coherence_hierarchy_block,
     _dramatic_mode_line,
     _elapsed_time_header,
+    _ending_policy_block,
     _text_similarity,
+    _tone_line,
     acts_temporally_distinct,
     assign_dramatic_modes,
+    sample_bio_domains,
     base_pose_tags,
     build_differentiate_acts_prompt,
     build_topic_directive_prompt,
@@ -1609,6 +1614,77 @@ def test_build_and_parse_biography():
     # broken / empty → {}
     assert parse_biography_json("junk") == {}
     assert parse_biography_json('{"unrelated":1}') == {}
+
+
+def test_sample_bio_domains():
+    import random
+    d = sample_bio_domains(5, rng=random.Random(0))
+    assert len(d) == 5 and len(set(d)) == 5
+    # deterministic with a fixed rng; different seeds differ
+    assert sample_bio_domains(5, rng=random.Random(0)) == d
+    assert sample_bio_domains(5, rng=random.Random(9)) != d
+    assert sample_bio_domains(0) == []
+
+
+def test_biography_prompt_diversity_no_fixed_examples():
+    p = build_biography_prompt(
+        character_desc="1girl", scene_desc="a rooftop", wd14_tags=["book"],
+        inspiration_domains=["rock climbing", "amateur astronomy"],
+    )
+    assert "VARIETY" in p
+    assert "rock climbing" in p and "amateur astronomy" in p
+    # the old fixed examples that anchored every bio are gone
+    assert "kneads bread dough" not in p
+    assert "tunes a violin" not in p
+    assert "presses flowers" not in p
+
+
+def test_assign_dramatic_modes_tone():
+    import random
+    bright = assign_dramatic_modes(tone="bright", rng=random.Random(3))
+    assert len(set(bright.values())) == 3
+    assert all(v in _BRIGHT_MODE_KEYS for v in bright.values())
+    dark = assign_dramatic_modes(tone="dark", rng=random.Random(3))
+    assert len(set(dark.values())) == 3
+    assert all(v in _DARK_MODE_KEYS for v in dark.values())
+    # preferred is still pinned regardless of tone
+    pinned = assign_dramatic_modes(preferred="parting", tone="bright", rng=random.Random(4))
+    assert pinned["A"] == "parting"
+    assert len(set(pinned.values())) == 3
+
+
+def test_bright_modes_exist():
+    for m in ("discovery", "reunion", "breakthrough", "adventure", "kindness",
+              "mischief", "bloom"):
+        assert m in _BRIGHT_MODE_KEYS
+        assert _dramatic_mode_line(m)  # has guidance text
+        assert _dramatic_mode_line(m, "ja")
+
+
+def test_tone_line_and_ending_hooks():
+    assert "hopeful" in _tone_line("bright") and "grim" in _tone_line("bright")
+    assert "希望" in _tone_line("bright", "ja")
+    assert _tone_line("neutral") and _tone_line("dark")
+    assert _tone_line("") == _tone_line("bright")  # default
+    # ending hooks are tone-aware
+    assert "new opportunity" in _ending_policy_block("", "bright")
+    assert "parting on the brink" in _ending_policy_block("", "dark")
+
+
+def test_tone_threaded_into_prompts():
+    c = build_candidates_prompt(character_desc="1girl", scene_desc="s", tone="bright")
+    assert "TONE:" in c
+    assert "surprise does NOT have to mean darkness" in c
+    s = build_story_prompt(
+        character_desc="1girl", scene_desc="s", base_axis="present",
+        worldview="", tone="bright",
+    )
+    assert "TONE:" in s and "new opportunity" in s
+    d = build_story_prompt(
+        character_desc="1girl", scene_desc="s", base_axis="present",
+        worldview="", tone="dark",
+    )
+    assert "parting on the brink" in d
 
 
 def test_build_timetable_scale_adaptive():

@@ -45,6 +45,8 @@ const DRAMATIC_MODES = [
   'pursuit', 'parting', 'temptation', 'secret_surfacing', 'role_reversal',
 ]
 const dramaticMode = ref('')  // preferred story shape ('' = auto/おまかせ)
+const TONES = ['bright', 'neutral', 'dark']
+const tone = ref('bright')    // overall story tone (default bright/前向き)
 const timeScaleIdx = ref(5)   // index into TIME_SCALES, default "years"
 const useRefSeed = ref(true)
 const manualMode = ref(false)
@@ -356,6 +358,7 @@ async function start() {
     divergence: divergence.value,
     emotion: emotion.value,
     dramatic_mode: dramaticMode.value,
+    tone: tone.value,
     generate_pinup: generatePinup.value,
     suppress_conflict_tags: suppressConflictTags.value,
     use_ref_seed: useRefSeed.value,
@@ -652,6 +655,20 @@ async function generateImages() {
                         : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
                       class="px-2 py-1 rounded-lg border text-[10px] transition">
                       {{ t(`chronicle.dramaticMode.${dm}`) }}
+                    </button>
+                  </div>
+                </div>
+                <!-- tone -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.toneTitle')">🌤 {{ t('chronicle.toneLabel') }}</span>
+                  <div class="flex flex-wrap gap-1 flex-1">
+                    <button v-for="tn in TONES" :key="tn"
+                      @click="tone = tn"
+                      :class="tone === tn
+                        ? 'bg-amber-700/60 border-amber-500/60 text-amber-100'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="px-2 py-1 rounded-lg border text-[10px] transition">
+                      {{ t(`chronicle.tone.${tn}`) }}
                     </button>
                   </div>
                 </div>

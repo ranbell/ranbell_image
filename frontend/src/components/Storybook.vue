@@ -587,6 +587,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <div class="flex items-center flex-wrap gap-3 mt-1 text-[10px] text-gray-500">
                   <span v-if="detailStory.worldview">🌍 {{ detailStory.worldview }}</span>
                   <span v-if="detailStory.time_scale">⏳ {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
+                  <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-400/70">🧠 {{ detailStory.base_model_name }}</span>
                   <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-400/70">🧩 {{ detailStory.workflow_name }}</span>
                   <span class="font-mono">{{ formatDate(detailStory.created_at) }}</span>
                 </div>

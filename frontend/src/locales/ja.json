@@ -1245,6 +1245,13 @@
       "secret_surfacing": "秘密の露見",
       "role_reversal": "役割逆転"
     },
+    "toneLabel": "トーン",
+    "toneTitle": "物語全体の基調。明るい=希望・前向き／暗い=緊張・ほろ苦い。",
+    "tone": {
+      "bright": "明るい",
+      "neutral": "中立",
+      "dark": "暗い"
+    },
     "timeScaleLabel": "時間スケール",
     "timeScaleTitle": "3幕がどれだけ時間的に離れているか",
     "timeScale": {
@@ -1345,6 +1352,7 @@
     "pinupReplace": "引き直し",
     "pinupQueued": "ピンナップを生成中 — まもなくここに表示されます",
     "workflowTitle": "このChronicleの画像生成に使われたComfyUIワークフロー",
+    "modelTitle": "このChronicleの元画像の画像モデル",
     "pinupWorkflowTitle": "このChronicleのワークフローで生成: {wf}",
     "bioOccupation": "職業",
     "bio_hobbies": "趣味",

@@ -2745,6 +2745,7 @@ async def run_chronicle_candidates(
         character_tags_from_wd14,
         parse_biography_json,
         parse_candidates_json,
+        sample_bio_domains,
         split_vision_sections,
     )
 
@@ -2851,6 +2852,11 @@ async def run_chronicle_candidates(
 
             if not biography:
                 _phase("buildingBiography", 0.46, "Imagining who she is...")
+                # Rotating inspiration domains + a hotter sample so biographies
+                # stop collapsing onto the same few defaults.
+                bio_options = {**options, "temperature": min(
+                    1.2, float(options.get("temperature", 0.8)) + 0.3
+                )}
                 try:
                     biography = parse_biography_json(await ollama.generate_text(
                         build_biography_prompt(
@@ -2859,8 +2865,9 @@ async def run_chronicle_candidates(
                             wd14_tags=wd14_tags,
                             worldview=body.worldview,
                             locale=body.locale,
+                            inspiration_domains=sample_bio_domains(5),
                         ),
-                        model=vlm_model, options=options, fmt="json",
+                        model=vlm_model, options=bio_options, fmt="json",
                     ))
                 except Exception as exc:
                     logger.warning("[chronicle] biography build failed: %s", exc)
@@ -2922,7 +2929,9 @@ async def run_chronicle_candidates(
         # Assign a DISTINCT dramatic mode per candidate (A/B/C) so the three
         # pitches diverge in plot shape, not just viewpoint. A user-chosen mode
         # (body.dramatic_mode) is pinned; empty auto-varies.
-        candidate_modes = assign_dramatic_modes(preferred=body.dramatic_mode)
+        candidate_modes = assign_dramatic_modes(
+            preferred=body.dramatic_mode, tone=body.tone
+        )
         _phase("candidates", 0.55, "Imagining story candidates...")
         candidates: list[dict] = []
         for cand_attempt in range(2):
@@ -2945,6 +2954,7 @@ async def run_chronicle_candidates(
                     locale=body.locale,
                     topic_directive=ctx.get("topic_directive", ""),
                     candidate_modes=candidate_modes,
+                    tone=body.tone,
                 ),
                 model=vlm_model, options=cand_options, fmt="json",
             )
@@ -2995,6 +3005,7 @@ async def run_chronicle_candidates(
                 status="draft",
                 candidates=candidates,
                 context=ctx,
+                base_model_name=doc.get("model_name") or "",
             )
             story_id = await story_db.create_story(db, payload)
 
@@ -3478,6 +3489,7 @@ async def run_chronicle_expand(
                 topic_directive=ctx.get("topic_directive", ""),
                 biography=biography,
                 timetable=timetable,
+                tone=body.tone,
             ),
             model=vlm_model, options=options,
         ):

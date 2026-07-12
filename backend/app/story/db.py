@@ -55,10 +55,12 @@ def new_story_payload(
     candidates: list | None = None,
     selected_candidate: str = "",
     context: dict | None = None,
+    base_model_name: str = "",
 ) -> dict:
     return {
         "base_image_id": base_image_id,
         "base_time_axis": base_time_axis,
+        "base_model_name": base_model_name,
         "worldview": worldview,
         "user_topic": user_topic,
         "emotion": emotion,

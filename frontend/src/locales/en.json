@@ -1245,6 +1245,13 @@
       "secret_surfacing": "Secret surfacing",
       "role_reversal": "Role reversal"
     },
+    "toneLabel": "Tone",
+    "toneTitle": "Overall mood of the story. Bright = hopeful/forward; Dark = tense/bittersweet.",
+    "tone": {
+      "bright": "Bright",
+      "neutral": "Neutral",
+      "dark": "Dark"
+    },
     "timeScaleLabel": "Time span",
     "timeScaleTitle": "How far apart the three acts are in time",
     "timeScale": {
@@ -1345,6 +1352,7 @@
     "pinupReplace": "Reroll",
     "pinupQueued": "Pinup queued — it will appear here shortly",
     "workflowTitle": "The ComfyUI workflow this chronicle's images were generated with",
+    "modelTitle": "The image model of the base image this chronicle was woven from",
     "pinupWorkflowTitle": "Generated with the chronicle's workflow: {wf}",
     "bioOccupation": "occupation",
     "bio_hobbies": "hobbies",
