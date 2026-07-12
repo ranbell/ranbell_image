@@ -1281,6 +1281,7 @@
     "cancel": "グループ中止",
     "cancelled": "Chronicleを中止しました",
     "baseHint": "ギャラリーで画像を選んでから開くか、下のボタンでランダムに選択",
+    "baseModelTitle": "元画像の画像モデル / checkpoint",
     "randomFromLibrary": "ランダム選択",
     "randomPicking": "選択中...",
     "randomFailed": "ランダム選択に失敗しました",

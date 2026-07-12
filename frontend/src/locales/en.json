@@ -1281,6 +1281,7 @@
     "cancel": "Cancel group",
     "cancelled": "Chronicle cancelled",
     "baseHint": "Pick an image in the gallery before opening, or use the button below",
+    "baseModelTitle": "The image model / checkpoint of the base image",
     "randomFromLibrary": "Random from library",
     "randomPicking": "Picking...",
     "randomFailed": "Random pick failed",

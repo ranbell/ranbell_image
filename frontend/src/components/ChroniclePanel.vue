@@ -30,7 +30,11 @@ const PHASE_STEP = {
 
 // ── form state ────────────────────────────────────────────────────────────────
 const baseSha = ref('')
+const baseModel = ref('')   // base image's checkpoint/model, follows the selection
 const baseAxis = ref('present')
+function _modelOf(doc) {
+  return doc?.model_name || doc?.model_info?.model_name || ''
+}
 const userTopic = ref('')
 const worldview = ref('')
 const promptStyle = ref('danbooru+natural')
@@ -65,7 +69,17 @@ const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 // Thumbnail with fallback to the original (freshly uploaded images may not
 // have a thumbnail yet)
 const thumbFailed = ref(false)
-watch(baseSha, () => { thumbFailed.value = false })
+watch(baseSha, async (sha) => {
+  thumbFailed.value = false
+  // Fallback: if the selecting doc didn't carry the model, fetch it by sha so
+  // the checkpoint display still follows (gallery/random both land here).
+  if (sha && !baseModel.value) {
+    try {
+      const r = await fetch(`/api/images/${sha}`)
+      if (r.ok) baseModel.value = _modelOf(await r.json())
+    } catch {}
+  }
+})
 const baseThumbSrc = computed(() =>
   thumbFailed.value
     ? `/api/originals/${baseSha.value}`
@@ -147,9 +161,20 @@ function _flushTokens() {
   }
 }
 
+// Keep the displayed model in sync with the gallery-selected base image.
+watch(() => props.baseImage, (doc) => {
+  if (doc?.sha256) {
+    baseSha.value = doc.sha256
+    baseModel.value = _modelOf(doc)
+  }
+}, { immediate: true })
+
 watch(() => props.show, async (val) => {
   if (!val) return
-  if (props.baseImage?.sha256) baseSha.value = props.baseImage.sha256
+  if (props.baseImage?.sha256) {
+    baseSha.value = props.baseImage.sha256
+    baseModel.value = _modelOf(props.baseImage)
+  }
   panelLang.value = uiLocale.value
   if (!workflows.value.length) {
     try {
@@ -292,6 +317,7 @@ async function pickRandomBase() {
     const doc = (data.images || [])[0]
     if (!doc?.sha256) throw new Error(t('chronicle.randomEmpty'))
     baseSha.value = doc.sha256
+    baseModel.value = _modelOf(doc)
   } catch (err) {
     emit('toast', { msg: t('chronicle.randomFailed') + ': ' + (err.message || err), type: 'error' })
   } finally {
@@ -558,6 +584,10 @@ async function generateImages() {
                 <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
                   class="max-h-28 rounded-lg object-contain" />
                 <span v-else class="text-3xl">🖼️</span>
+                <p v-if="baseSha && baseModel" :title="t('chronicle.baseModelTitle')"
+                  class="w-full text-[10px] text-purple-300/70 font-mono text-center leading-tight break-all">
+                  🧠 {{ baseModel }}
+                </p>
                 <button @click="pickRandomBase" :disabled="pickingRandom"
                   class="w-full px-2.5 py-1 rounded-lg border border-teal-700/60 bg-teal-900/30 hover:bg-teal-800/50 text-teal-200 text-[10px] font-medium disabled:opacity-40 transition-colors">
                   🎲 {{ pickingRandom ? t('chronicle.randomPicking') : t('chronicle.randomFromLibrary') }}
