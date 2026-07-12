@@ -51,9 +51,12 @@ const manualMode = ref(false)
 const generatePinup = ref(false)        // generate + register a reference pinup
 const suppressConflictTags = ref(true)  // run per-axis story-conflict tag removal
 const pickingRandom = ref(false)
-// Character grounding surfaced during generation (from biography/timetable events)
+// Character grounding + reasoning surfaced during generation (transparency)
 const biography = ref(null)
-const timetable = ref([])
+const timetable = ref(null)
+const concrete = ref(null)          // {past,current,future} activities (+ _ja)
+const axisReasoning = ref({})       // axis -> {action, focal, shot, camera, search_tags}
+const pinupJobId = ref('')          // background pinup image job (if any)
 
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
@@ -172,6 +175,11 @@ function resetStory() {
   overall.value = ''
   overallJa.value = ''
   mutationTags.value = []
+  biography.value = null
+  timetable.value = null
+  concrete.value = null
+  axisReasoning.value = {}
+  pinupJobId.value = ''
 }
 
 function resetRun() {
@@ -206,6 +214,56 @@ function jobStatusClass(job_id) {
     cancelling: 'border-gray-700 bg-gray-900/50 text-gray-500',
   }[jobState(job_id)] ?? 'border-gray-700 bg-gray-900/50 text-gray-400'
 }
+
+// ── image-generation progress (axis images + optional pinup) ──────────────────
+const imageJobIds = computed(() => {
+  const ids = imageJobs.value.map(j => j.job_id)
+  if (pinupJobId.value) ids.push(pinupJobId.value)
+  return ids
+})
+const imageGenProgress = computed(() => {
+  const ids = imageJobIds.value
+  if (!ids.length) return 0
+  let sum = 0
+  for (const id of ids) {
+    const j = props.jobsMap?.get(id)
+    sum += j?.state === 'succeeded' ? 1 : (j?.progress || 0)
+  }
+  return sum / ids.length
+})
+const imageGenActive = computed(() =>
+  imageJobIds.value.some(id => ['queued', 'running'].includes(props.jobsMap?.get(id)?.state)),
+)
+const imageGenText = computed(() => {
+  for (const id of imageJobIds.value) {
+    const j = props.jobsMap?.get(id)
+    if (j?.state === 'running' && j.progress_text) return j.progress_text
+  }
+  return ''
+})
+
+// ── reasoning display (content-language aware, follows panelLang) ─────────────
+const REASON_AXES = ['past', 'present', 'future']
+const bioView = computed(() => {
+  const b = biography.value
+  if (!b) return null
+  return (panelLang.value === 'ja' && b.ja && Object.keys(b.ja).length) ? b.ja : b.en
+})
+const timetableView = computed(() => {
+  const tt = timetable.value
+  if (!tt) return []
+  return (panelLang.value === 'ja' && tt.ja && tt.ja.length) ? tt.ja : (tt.en || [])
+})
+const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
+function activityFor(axis) {
+  const c = concrete.value
+  if (!c) return ''
+  return (panelLang.value === 'ja' && c.ja && c.ja[axis]) ? c.ja[axis] : (c.en?.[axis] || '')
+}
+const hasReasoning = computed(() =>
+  !!bioView.value || timetableView.value.length > 0 || !!concrete.value
+  || Object.keys(axisReasoning.value).length > 0,
+)
 
 // ── random base image from library ────────────────────────────────────────────
 async function pickRandomBase() {
@@ -371,14 +429,19 @@ function handleEvent(ev) {
       mutationTags.value = ev.tags || []
       break
     case 'biography':
-      biography.value = ev.biography_ja && Object.keys(ev.biography_ja).length
-        ? ev.biography_ja : ev.biography
+      biography.value = { en: ev.biography, ja: ev.biography_ja }
       break
     case 'timetable':
-      timetable.value = (ev.timetable_ja && ev.timetable_ja.length)
-        ? ev.timetable_ja : (ev.timetable || [])
+      timetable.value = { en: ev.timetable || [], ja: ev.timetable_ja || [] }
+      break
+    case 'concrete_activities':
+      concrete.value = { en: ev.activities || {}, ja: ev.activities_ja || {} }
+      break
+    case 'axis_reasoning':
+      axisReasoning.value = { ...axisReasoning.value, [ev.axis]: ev }
       break
     case 'pinup_job':
+      pinupJobId.value = ev.job_id
       break
     case 'warning':
       emit('toast', { msg: ev.message, type: 'warning' })
@@ -639,6 +702,20 @@ async function generateImages() {
               </div>
             </div>
 
+            <!-- image-generation progress bar (drives from the ComfyUI jobs) -->
+            <div v-if="imageJobs.length" class="flex flex-col gap-1">
+              <div class="flex items-center justify-between text-[10px]"
+                :class="imageGenActive ? 'text-teal-300/90' : 'text-gray-500'">
+                <span>🎨 {{ t('chronicle.imagesGenerating') }}<span v-if="imageGenText" class="text-gray-500"> · {{ imageGenText }}</span></span>
+                <span class="font-mono">{{ Math.round(imageGenProgress * 100) }}%</span>
+              </div>
+              <div class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+                <div class="chronicle-progress h-full rounded-full transition-all duration-300"
+                  :class="{ 'animate-pulse': imageGenActive && imageGenProgress < 0.02 }"
+                  :style="{ width: Math.max(imageGenProgress * 100, imageGenActive ? 4 : 0) + '%' }"></div>
+              </div>
+            </div>
+
             <!-- open the Storybook to view finished chronicles -->
             <button @click="emit('open-storybook')"
               class="self-start px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 border border-amber-600/40 hover:border-amber-500/60 rounded-lg text-xs font-medium text-amber-200 transition-colors">
@@ -715,6 +792,53 @@ async function generateImages() {
             <!-- stream output -->
             <div v-if="streamText || (running && !selecting)"
               class="bg-gray-950/60 border border-gray-800 rounded-xl p-4 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></div>
+
+            <!-- ── reasoning (transparency: what is happening & on what basis) ── -->
+            <div v-if="hasReasoning" class="flex flex-col gap-2">
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide">🧠 {{ t('chronicle.reasoning') }}</h3>
+
+              <!-- who she is -->
+              <div v-if="bioView" class="bg-gray-950/50 border border-gray-800 rounded-xl p-3 text-[11px] text-gray-300 space-y-1">
+                <div class="text-[10px] font-bold text-purple-300/80 uppercase tracking-wide">📖 {{ t('storybook.biography') }}</div>
+                <p v-if="bioView.personality">{{ bioView.personality }}</p>
+                <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
+                  <span class="text-gray-500">{{ t('storybook.bio_' + f) }}:</span> {{ (bioView[f] || []).join('、') }}
+                </p>
+              </div>
+
+              <!-- her day -->
+              <div v-if="timetableView.length" class="bg-gray-950/50 border border-gray-800 rounded-xl p-3 text-[11px]">
+                <div class="text-[10px] font-bold text-teal-300/80 uppercase tracking-wide mb-1">🕒 {{ t('storybook.timetable') }}</div>
+                <ul class="space-y-0.5">
+                  <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
+                    <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
+                    <span class="min-w-0">{{ s.activity }}<span v-if="s.place" class="text-gray-500"> @ {{ s.place }}</span></span>
+                  </li>
+                </ul>
+              </div>
+
+              <!-- per moment: the decided action + the evidence tags -->
+              <div v-for="axis in REASON_AXES" :key="axis"
+                v-show="activityFor(axis) || axisReasoning[axis]"
+                class="bg-gray-950/50 border border-gray-800 rounded-xl p-3 text-[11px]">
+                <div class="text-[10px] font-bold text-amber-300/80 uppercase tracking-wide mb-1">🎬 {{ t('chronicle.axis.' + axis) }}</div>
+                <p v-if="activityFor(axis)" class="text-gray-300 mb-1">{{ activityFor(axis) }}</p>
+                <div v-if="axisReasoning[axis]" class="text-[10px] text-gray-500 space-y-0.5">
+                  <p v-if="axisReasoning[axis].shot || axisReasoning[axis].camera">
+                    <span class="text-gray-600">{{ t('chronicle.reasonShot') }}:</span>
+                    {{ [axisReasoning[axis].shot, axisReasoning[axis].camera].filter(Boolean).join(' / ') }}
+                  </p>
+                  <p v-if="(axisReasoning[axis].focal || []).length">
+                    <span class="text-gray-600">{{ t('chronicle.reasonPose') }}:</span>
+                    {{ (axisReasoning[axis].focal || []).join(', ') }}
+                  </p>
+                  <p v-if="(axisReasoning[axis].search_tags || []).length" class="break-words">
+                    <span class="text-gray-600">{{ t('chronicle.reasonTags') }}:</span>
+                    {{ (axisReasoning[axis].search_tags || []).join(', ') }}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <!-- per-axis prompts (editable in manual mode) -->
             <div v-if="Object.keys(prompts).length" class="flex flex-col gap-3">

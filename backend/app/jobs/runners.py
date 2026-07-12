@@ -2838,6 +2838,17 @@ async def run_chronicle_candidates(
             # once per base image and cached on the image doc for reuse.
             biography: dict = doc.get("biography") or {}
             biography_ja: dict = doc.get("biography_ja") or {}
+
+            async def _translate_bio(bio: dict) -> dict:
+                try:
+                    return parse_biography_json(await ollama.generate_text(
+                        build_json_translation_prompt(bio, target="Japanese"),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                except Exception as exc:
+                    logger.warning("[chronicle] biography translation failed: %s", exc)
+                    return {}
+
             if not biography:
                 _phase("buildingBiography", 0.46, "Imagining who she is...")
                 try:
@@ -2853,21 +2864,24 @@ async def run_chronicle_candidates(
                     ))
                 except Exception as exc:
                     logger.warning("[chronicle] biography build failed: %s", exc)
-                if biography and body.locale == "ja":
-                    try:
-                        biography_ja = parse_biography_json(await ollama.generate_text(
-                            build_json_translation_prompt(biography, target="Japanese"),
-                            model=vlm_model, options=options, fmt="json",
-                        ))
-                    except Exception as exc:
-                        logger.warning("[chronicle] biography translation failed: %s", exc)
+                # Biography is authored in English; always keep a Japanese copy too
+                # so the Storybook JA/EN toggle works regardless of content locale.
                 if biography:
+                    biography_ja = await _translate_bio(biography)
                     try:
                         await db.set_payload(body.base_sha256, {
                             "biography": biography, "biography_ja": biography_ja,
                         })
                     except Exception as exc:
                         logger.warning("[chronicle] biography persist failed: %s", exc)
+            elif not biography_ja:
+                # Cached bio from before bilingual support — backfill the JA copy.
+                biography_ja = await _translate_bio(biography)
+                if biography_ja:
+                    try:
+                        await db.set_payload(body.base_sha256, {"biography_ja": biography_ja})
+                    except Exception as exc:
+                        logger.warning("[chronicle] biography_ja backfill failed: %s", exc)
             if biography:
                 _put({"type": "biography",
                       "biography": biography, "biography_ja": biography_ja})
@@ -3175,7 +3189,9 @@ async def run_chronicle_expand(
             ))
         except Exception as exc:
             logger.warning("[chronicle] timetable build failed: %s", exc)
-        if timetable and locale == "ja":
+        # Timetable is authored in English; always keep a Japanese copy so the
+        # Storybook JA/EN toggle works regardless of content locale.
+        if timetable:
             try:
                 timetable_ja = parse_timetable_json(await ollama.generate_text(
                     build_json_translation_prompt(timetable, target="Japanese"),
@@ -3183,7 +3199,6 @@ async def run_chronicle_expand(
                 ))
             except Exception as exc:
                 logger.warning("[chronicle] timetable translation failed: %s", exc)
-        if timetable:
             _put({"type": "timetable",
                   "timetable": timetable, "timetable_ja": timetable_ja})
 
@@ -3224,6 +3239,18 @@ async def run_chronicle_expand(
             logger.warning("[chronicle] concrete activities failed: %s", exc)
         # Prefer the concrete action; fall back to the English candidate beat.
         situation_en = {a: (concrete.get(a) or beats_en[a]) for a in AXES}
+        # Surface the reasoning: what she is doing at each moment (+ JA for clarity).
+        if concrete:
+            concrete_ja: dict = {}
+            try:
+                concrete_ja = parse_concrete_activities_json(await ollama.generate_text(
+                    build_json_translation_prompt(concrete, target="Japanese"),
+                    model=vlm_model, options=options, fmt="json",
+                ))
+            except Exception as exc:
+                logger.warning("[chronicle] concrete translation failed: %s", exc)
+            _put({"type": "concrete_activities",
+                  "activities": concrete, "activities_ja": concrete_ja})
         cancel.raise_if_set()
 
         async def _wd14_search_tags(query: str, limit: int = 40) -> list[str]:
@@ -3304,6 +3331,19 @@ async def run_chronicle_expand(
                 except Exception as exc:
                     logger.warning("[chronicle] %s tag fallback failed: %s", axis, exc)
             cancel.raise_if_set()
+
+            # Surface the reasoning for this axis: the concrete action, the chosen
+            # shot, and the WD14 tags that were retrieved as the visual evidence.
+            _put({
+                "type": "axis_reasoning",
+                "axis": axis,
+                "action": sit,
+                "focal": focal,
+                "shot": visual_plan.get("shot", ""),
+                "camera": visual_plan.get("camera_angle", ""),
+                "gesture": gesture,
+                "search_tags": axis_search_tags[:14],
+            })
 
             # (3) Assemble the tag line the Refine way: action first, then the
             #     searched scene tags + base-image appearance, subject-anchored,
