@@ -124,7 +124,13 @@ const timelineBuckets = computed(() => {
   return [...map.values()].sort((a, b) => a.order - b.order)
 })
 
-watch(() => props.show, (val) => { if (val) fetchStories() })
+watch(() => props.show, (val) => {
+  if (val) fetchStories()
+  else {
+    detailStory.value = null
+    pinupView.value = null
+  }
+})
 
 function close() { emit('update:show', false) }
 
@@ -563,192 +569,195 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </div>
         </div>
 
-        <!-- DETAIL OVERLAY -->
-        <Transition name="sb-overlay">
-          <div v-if="detailStory"
-            class="absolute inset-0 z-20 sb-overlay-bg flex items-center justify-center p-3 sm:p-4"
-            @click.self="closeDetail">
-            <div class="sb-detail-panel w-full max-w-4xl max-h-full flex flex-col overflow-hidden">
-              <div class="flex items-start justify-between px-5 sm:px-6 py-4 sb-hairline gap-3">
-                <div class="min-w-0 flex-1">
-                  <h2 class="sb-display text-xl text-[var(--sb-amber)] leading-snug">
-                    {{ storyTitle(detailStory) || t('storybook.details') }}
-                  </h2>
-                  <div class="flex items-center flex-wrap gap-2 mt-1.5 text-[10px] text-[var(--sb-muted)]">
-                    <span v-if="detailStory.worldview" class="text-[var(--sb-amber)]/75">{{ detailStory.worldview }}</span>
-                    <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
-                      <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
-                    </span>
-                    <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
-                    <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
-                    <span class="font-mono text-[9px]">{{ formatDate(detailStory.created_at) }}</span>
-                  </div>
-                </div>
-                <div class="flex items-center gap-1.5 shrink-0">
-                  <button @click="detailPrev" :disabled="detailIndex <= 0"
-                    class="sb-icon-btn disabled:opacity-30"
-                    :aria-label="t('storybook.aria.prev')"
-                    :title="t('storybook.detail.prev')">
-                    <SbIcon name="chevronLeft" class="w-4 h-4" />
+      </div>
+    </div>
+
+    <!-- Story detail: fixed above Storybook shell (z-65), below gallery detail (z-70) -->
+    <Transition name="sb-overlay">
+      <div v-if="show && detailStory"
+        class="fixed inset-0 z-[68] sb-overlay-bg flex items-center justify-center p-3 sm:p-6"
+        @click.self="closeDetail">
+        <div class="sb-detail-panel w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+          <div class="flex items-start justify-between px-5 sm:px-6 py-4 sb-hairline gap-3">
+            <div class="min-w-0 flex-1">
+              <h2 class="sb-display text-xl text-[var(--sb-amber)] leading-snug">
+                {{ storyTitle(detailStory) || t('storybook.details') }}
+              </h2>
+              <div class="flex items-center flex-wrap gap-2 mt-1.5 text-[10px] text-[var(--sb-muted)]">
+                <span v-if="detailStory.worldview" class="text-[var(--sb-amber)]/75">{{ detailStory.worldview }}</span>
+                <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
+                  <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
+                </span>
+                <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
+                <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
+                <span class="font-mono text-[9px]">{{ formatDate(detailStory.created_at) }}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button @click="detailPrev" :disabled="detailIndex <= 0"
+                class="sb-icon-btn disabled:opacity-30"
+                :aria-label="t('storybook.aria.prev')"
+                :title="t('storybook.detail.prev')">
+                <SbIcon name="chevronLeft" class="w-4 h-4" />
+              </button>
+              <span v-if="detailIndex >= 0" class="text-[10px] text-[var(--sb-muted)] font-mono min-w-[3.5rem] text-center">
+                {{ t('storybook.detail.position', { n: detailIndex + 1, total: visibleStories.length }) }}
+              </span>
+              <button @click="detailNext" :disabled="detailIndex < 0 || detailIndex >= visibleStories.length - 1"
+                class="sb-icon-btn disabled:opacity-30"
+                :aria-label="t('storybook.aria.next')"
+                :title="t('storybook.detail.next')">
+                <SbIcon name="chevronRight" class="w-4 h-4" />
+              </button>
+              <div class="sb-seg ml-1">
+                <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
+                  :class="lang === l ? 'is-on' : ''" class="sb-seg-btn uppercase">{{ l }}</button>
+              </div>
+              <button @click="closeDetail" class="sb-icon-btn"
+                :aria-label="t('storybook.aria.close')"
+                :title="t('storybook.detail.close')">
+                <SbIcon name="close" class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto min-h-0">
+            <div v-if="storyOverall(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
+              <p class="sb-prose italic border-l border-[var(--sb-rule)] pl-4">
+                {{ storyOverall(detailStory) }}
+              </p>
+            </div>
+
+            <div v-if="storyBio(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
+              <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <h4 class="sb-section-title">{{ t('storybook.biography') }}</h4>
+                <div class="flex items-center gap-2">
+                  <button @click="addPinup(detailStory, 'add')"
+                    :disabled="pinupBusy.has(detailStory.story_id)"
+                    :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
+                    class="sb-btn disabled:opacity-40">
+                    + {{ t('storybook.pinupAdd') }}
                   </button>
-                  <span v-if="detailIndex >= 0" class="text-[10px] text-[var(--sb-muted)] font-mono min-w-[3.5rem] text-center">
-                    {{ t('storybook.detail.position', { n: detailIndex + 1, total: visibleStories.length }) }}
-                  </span>
-                  <button @click="detailNext" :disabled="detailIndex < 0 || detailIndex >= visibleStories.length - 1"
-                    class="sb-icon-btn disabled:opacity-30"
-                    :aria-label="t('storybook.aria.next')"
-                    :title="t('storybook.detail.next')">
-                    <SbIcon name="chevronRight" class="w-4 h-4" />
-                  </button>
-                  <div class="sb-seg ml-1">
-                    <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
-                      :class="lang === l ? 'is-on' : ''" class="sb-seg-btn uppercase">{{ l }}</button>
-                  </div>
-                  <button @click="closeDetail" class="sb-icon-btn"
-                    :aria-label="t('storybook.aria.close')"
-                    :title="t('storybook.detail.close')">
-                    <SbIcon name="close" class="w-4 h-4" />
+                  <button v-if="storyPinups(detailStory).length"
+                    @click="addPinup(detailStory, 'replace')"
+                    :disabled="pinupBusy.has(detailStory.story_id)"
+                    :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
+                    class="sb-btn disabled:opacity-40">
+                    <SbIcon name="refresh" class="w-3 h-3" />
+                    {{ t('storybook.pinupReplace') }}
                   </button>
                 </div>
               </div>
-
-              <div class="flex-1 overflow-y-auto">
-                <div v-if="storyOverall(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
-                  <p class="sb-prose italic border-l border-[var(--sb-rule)] pl-4">
-                    {{ storyOverall(detailStory) }}
-                  </p>
+              <div v-if="storyPinups(detailStory).length || pinupBusy.has(detailStory.story_id)"
+                class="pinboard mb-4">
+                <div v-for="(sha, i) in storyPinups(detailStory)" :key="sha"
+                  class="pincard" :style="{ transform: `rotate(${pinupRotation(i)}deg)` }"
+                  @click="openPinup(sha)">
+                  <span class="pincard-pin"></span>
+                  <img :src="`/api/thumbnails/${sha}.webp`" @error="onThumbError($event, sha)" />
                 </div>
+                <div v-if="pinupBusy.has(detailStory.story_id)" class="pincard pincard--loading">
+                  <span class="pincard-pin"></span>
+                  <div class="pincard-spin">…</div>
+                </div>
+              </div>
+              <div class="text-sm text-gray-300 space-y-1.5 min-w-0 leading-relaxed">
+                <p v-if="storyBio(detailStory).personality">{{ storyBio(detailStory).personality }}</p>
+                <p v-if="storyBio(detailStory).occupation" class="text-gray-400">
+                  <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ storyBio(detailStory).occupation }}
+                </p>
+                <p v-for="f in BIO_LIST_FIELDS" :key="f"
+                  v-show="(storyBio(detailStory)[f] || []).length"
+                  class="text-gray-400 break-words">
+                  <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span>
+                  {{ joinList(storyBio(detailStory)[f]) }}
+                </p>
+                <p v-if="storyBio(detailStory).backstory" class="text-gray-400 italic pt-1">{{ storyBio(detailStory).backstory }}</p>
+              </div>
+            </div>
 
-                <div v-if="storyBio(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
-                  <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                    <h4 class="sb-section-title">{{ t('storybook.biography') }}</h4>
-                    <div class="flex items-center gap-2">
-                      <button @click="addPinup(detailStory, 'add')"
-                        :disabled="pinupBusy.has(detailStory.story_id)"
-                        :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
-                        class="sb-btn disabled:opacity-40">
-                        + {{ t('storybook.pinupAdd') }}
-                      </button>
-                      <button v-if="storyPinups(detailStory).length"
-                        @click="addPinup(detailStory, 'replace')"
-                        :disabled="pinupBusy.has(detailStory.story_id)"
-                        :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
-                        class="sb-btn disabled:opacity-40">
-                        <SbIcon name="refresh" class="w-3 h-3" />
-                        {{ t('storybook.pinupReplace') }}
-                      </button>
-                    </div>
-                  </div>
-                  <div v-if="storyPinups(detailStory).length || pinupBusy.has(detailStory.story_id)"
-                    class="pinboard mb-4">
-                    <div v-for="(sha, i) in storyPinups(detailStory)" :key="sha"
-                      class="pincard" :style="{ transform: `rotate(${pinupRotation(i)}deg)` }"
-                      @click="openPinup(sha)">
-                      <span class="pincard-pin"></span>
-                      <img :src="`/api/thumbnails/${sha}.webp`" @error="onThumbError($event, sha)" />
-                    </div>
-                    <div v-if="pinupBusy.has(detailStory.story_id)" class="pincard pincard--loading">
-                      <span class="pincard-pin"></span>
-                      <div class="pincard-spin">…</div>
-                    </div>
-                  </div>
-                  <div class="text-sm text-gray-300 space-y-1.5 min-w-0 leading-relaxed">
-                    <p v-if="storyBio(detailStory).personality">{{ storyBio(detailStory).personality }}</p>
-                    <p v-if="storyBio(detailStory).occupation" class="text-gray-400">
-                      <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ storyBio(detailStory).occupation }}
-                    </p>
-                    <p v-for="f in BIO_LIST_FIELDS" :key="f"
-                      v-show="(storyBio(detailStory)[f] || []).length"
-                      class="text-gray-400 break-words">
-                      <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span>
-                      {{ joinList(storyBio(detailStory)[f]) }}
-                    </p>
-                    <p v-if="storyBio(detailStory).backstory" class="text-gray-400 italic pt-1">{{ storyBio(detailStory).backstory }}</p>
+            <details v-if="storyTimetable(detailStory).length" class="px-6 sm:px-8 py-5 sb-section" open>
+              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3">
+                <SbIcon name="clock" class="w-3.5 h-3.5 opacity-70" />
+                {{ t('storybook.timetable') }}
+              </summary>
+              <ul class="space-y-2">
+                <li v-for="(slot, si) in storyTimetable(detailStory)" :key="si"
+                  class="text-sm text-gray-300 flex gap-3">
+                  <span class="text-teal-400/85 font-medium shrink-0 w-24 text-[13px]">{{ slot.label }}</span>
+                  <span class="min-w-0 leading-relaxed">
+                    {{ slot.activity }}
+                    <span v-if="slot.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: slot.place }) }}</span>
+                    <span v-if="slot.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: slot.feeling }) }}</span>
+                  </span>
+                </li>
+              </ul>
+            </details>
+
+            <div v-for="(axis, ai) in AXES" :key="axis"
+              class="px-6 sm:px-8 py-6 sb-section flex flex-col sm:flex-row gap-5"
+              :class="ai % 2 === 1 ? 'sm:flex-row-reverse' : ''">
+              <div class="sm:w-2/5 shrink-0">
+                <div class="relative aspect-square rounded-xl overflow-hidden bg-black/50 border border-white/5 group cursor-pointer"
+                  @click="axisImage(detailStory, axis) && openImage(axisImage(detailStory, axis))">
+                  <img v-if="axisImage(detailStory, axis)"
+                    :src="`/api/thumbnails/${axisImage(detailStory, axis)}.webp`"
+                    @error="onThumbError($event, axisImage(detailStory, axis))"
+                    class="w-full h-full object-cover" loading="lazy" />
+                  <span v-else class="absolute inset-0 flex items-center justify-center text-[var(--sb-faint)] text-sm cursor-default">{{ t('storybook.imagePending') }}</span>
+                  <div class="absolute inset-x-0 bottom-0 p-2 flex flex-wrap gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/80 to-transparent"
+                    @click.stop>
+                    <button v-if="axisImage(detailStory, axis)"
+                      @click="openImage(axisImage(detailStory, axis))"
+                      class="sb-btn bg-black/50"
+                      :aria-label="t('storybook.aria.openInGallery')">
+                      <SbIcon name="image" class="w-3 h-3" />
+                      {{ t('storybook.openInGallery') }}
+                    </button>
+                    <button v-if="axisImage(detailStory, axis)"
+                      @click="emit('weave-from', axisImage(detailStory, axis))"
+                      class="sb-btn bg-teal-950/70 border-teal-700/40 text-teal-100"
+                      :aria-label="t('storybook.aria.weave')">
+                      <SbIcon name="weave" class="w-3 h-3" />
+                      {{ t('storybook.weaveFromShort') }}
+                    </button>
+                    <button v-if="axis !== detailStory.base_time_axis && detailStory.axes?.[axis]?.prompt_positive"
+                      @click="regenerate(detailStory, axis)"
+                      :disabled="regenerating.has(`${detailStory.story_id}:${axis}`)"
+                      class="sb-btn-accent disabled:opacity-40 ml-auto"
+                      :aria-label="t('storybook.aria.regen')">
+                      <SbIcon name="dice" class="w-3 h-3" />
+                      {{ regenerating.has(`${detailStory.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                    </button>
                   </div>
                 </div>
-
-                <details v-if="storyTimetable(detailStory).length" class="px-6 sm:px-8 py-5 sb-section" open>
-                  <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3">
-                    <SbIcon name="clock" class="w-3.5 h-3.5 opacity-70" />
-                    {{ t('storybook.timetable') }}
+              </div>
+              <div class="sm:w-3/5 flex flex-col gap-2 min-w-0">
+                <span class="text-[11px] font-semibold uppercase tracking-widest"
+                  :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
+                  {{ t('chronicle.axis.' + axis) }}
+                  <span v-if="axis === detailStory.base_time_axis"
+                    class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
+                </span>
+                <p class="sb-prose">
+                  {{ axisStory(detailStory, axis) || '—' }}
+                </p>
+                <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
+                  <summary class="cursor-pointer text-[10px] text-[var(--sb-muted)] hover:text-gray-300 select-none">
+                    {{ t('storybook.showPrompt') }}
                   </summary>
-                  <ul class="space-y-2">
-                    <li v-for="(slot, si) in storyTimetable(detailStory)" :key="si"
-                      class="text-sm text-gray-300 flex gap-3">
-                      <span class="text-teal-400/85 font-medium shrink-0 w-24 text-[13px]">{{ slot.label }}</span>
-                      <span class="min-w-0 leading-relaxed">
-                        {{ slot.activity }}
-                        <span v-if="slot.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: slot.place }) }}</span>
-                        <span v-if="slot.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: slot.feeling }) }}</span>
-                      </span>
-                    </li>
-                  </ul>
+                  <div class="mt-2 flex flex-col gap-1">
+                    <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_positive }}</pre>
+                    <pre v-if="detailStory.axes[axis].prompt_negative"
+                      class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_negative }}</pre>
+                  </div>
                 </details>
-
-                <div v-for="(axis, ai) in AXES" :key="axis"
-                  class="px-6 sm:px-8 py-6 sb-section flex flex-col sm:flex-row gap-5"
-                  :class="ai % 2 === 1 ? 'sm:flex-row-reverse' : ''">
-                  <div class="sm:w-2/5 shrink-0">
-                    <div class="relative aspect-square rounded-xl overflow-hidden bg-black/50 border border-white/5 group">
-                      <img v-if="axisImage(detailStory, axis)"
-                        :src="`/api/thumbnails/${axisImage(detailStory, axis)}.webp`"
-                        @error="onThumbError($event, axisImage(detailStory, axis))"
-                        class="w-full h-full object-cover" loading="lazy" />
-                      <span v-else class="absolute inset-0 flex items-center justify-center text-[var(--sb-faint)] text-sm">{{ t('storybook.imagePending') }}</span>
-                      <div class="absolute inset-x-0 bottom-0 p-2 flex flex-wrap gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/80 to-transparent">
-                        <button v-if="axisImage(detailStory, axis)"
-                          @click="openImage(axisImage(detailStory, axis))"
-                          class="sb-btn bg-black/50"
-                          :aria-label="t('storybook.aria.openInGallery')">
-                          <SbIcon name="image" class="w-3 h-3" />
-                          {{ t('storybook.openInGallery') }}
-                        </button>
-                        <button v-if="axisImage(detailStory, axis)"
-                          @click="emit('weave-from', axisImage(detailStory, axis))"
-                          class="sb-btn bg-teal-950/70 border-teal-700/40 text-teal-100"
-                          :aria-label="t('storybook.aria.weave')">
-                          <SbIcon name="weave" class="w-3 h-3" />
-                          {{ t('storybook.weaveFromShort') }}
-                        </button>
-                        <button v-if="axis !== detailStory.base_time_axis && detailStory.axes?.[axis]?.prompt_positive"
-                          @click="regenerate(detailStory, axis)"
-                          :disabled="regenerating.has(`${detailStory.story_id}:${axis}`)"
-                          class="sb-btn-accent disabled:opacity-40 ml-auto"
-                          :aria-label="t('storybook.aria.regen')">
-                          <SbIcon name="dice" class="w-3 h-3" />
-                          {{ regenerating.has(`${detailStory.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="sm:w-3/5 flex flex-col gap-2 min-w-0">
-                    <span class="text-[11px] font-semibold uppercase tracking-widest"
-                      :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
-                      {{ t('chronicle.axis.' + axis) }}
-                      <span v-if="axis === detailStory.base_time_axis"
-                        class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
-                    </span>
-                    <p class="sb-prose">
-                      {{ axisStory(detailStory, axis) || '—' }}
-                    </p>
-                    <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
-                      <summary class="cursor-pointer text-[10px] text-[var(--sb-muted)] hover:text-gray-300 select-none">
-                        {{ t('storybook.showPrompt') }}
-                      </summary>
-                      <div class="mt-2 flex flex-col gap-1">
-                        <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_positive }}</pre>
-                        <pre v-if="detailStory.axes[axis].prompt_negative"
-                          class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_negative }}</pre>
-                      </div>
-                    </details>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
-        </Transition>
+        </div>
       </div>
-    </div>
+    </Transition>
 
     <!-- Pinup lightbox -->
     <div v-if="pinupView"
@@ -950,7 +959,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   background: radial-gradient(ellipse at 50% 30%, rgba(232, 196, 122, 0.08), transparent 55%),
               rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(2px);
-  border-radius: 1rem;
 }
 .sb-detail-panel {
   background:

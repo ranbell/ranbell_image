@@ -3096,20 +3096,18 @@ async def run_chronicle_expand(
     """PROMPT lane — Chronicle Phase 2: expand a chosen candidate, then prompts.
 
     Loads the draft, expands the selected candidate into the three acts in the
-    user's locale, extracts shared identity tags, translates to English when the
-    story is Japanese (image prompts are always English), refines per-axis image
-    prompts (dropping the base image's WD14 scene tags and running a per-axis
-    story-conflict pass), finalises the record, and submits image jobs.
+    user's locale, translates to English when needed, then per non-base axis
+    runs visual exam + WD14 search on the finished story text, assembles image
+    prompts with identity-lock tags only (hair/eyes/accessories — never the base
+    image's scene must-tags), finalises the record, and submits image jobs.
 
     Re-invoking this (respin) archives the previous final story in
     respin_history before overwriting.
     """
     from ..api.ai import (
         _apply_must_replacements,
-        _build_weighted_wd14_context,
         _clean_markdown,
         _correct_prose_wd14_conflicts,
-        _inject_wd14_must_tags,
         _parse_positive_negative,
         _remove_forced_tags,
         _sample_mutation_tags,
@@ -3134,11 +3132,11 @@ async def run_chronicle_expand(
         build_story_tags_prompt,
         build_translation_to_english_prompt,
         chunk_list,
-        classify_identity_tag,
         collect_prompt_tags,
         identity_lock_tags,
         inject_identity_tags,
         is_multi_character,
+        merge_chronicle_axis_tags,
         parse_concrete_activities_json,
         parse_english_translation_json,
         parse_story_json,
@@ -3196,20 +3194,9 @@ async def run_chronicle_expand(
         wd14_context = ctx.get("wd14_context", "")
         story_hooks = ctx.get("story_hooks", "")
         multi = is_multi_character(wd14_tags)
-        # Always-keep identity for the WD14+Refine flow: hair colour, eye colour,
-        # accessories — held constant across every act regardless of time scale.
+        # Always-keep identity: hair colour, eye colour, accessories only.
+        # Scene / outfit / pose from the base image must NOT propagate to other axes.
         lock_tags = identity_lock_tags(character_tags, multi_character=multi)
-        # Base-image appearance (hair/eyes/face/accessory/garment) minus pose &
-        # scene tags — a secondary tag source for each generated axis.
-        base_appearance = [
-            t for t in character_tags if classify_identity_tag(t) is not None
-        ]
-        # Base image's WD14 must/ref analysis (for Refine-style must reinforcement).
-        wd14_analysis: dict = {}
-        try:
-            _, wd14_analysis = _build_weighted_wd14_context([(doc, 0)], [1.0], set())
-        except Exception as exc:
-            logger.warning("[chronicle] wd14 analysis build failed: %s", exc)
 
         # Respin of an already-finalised story: archive the previous version
         if draft.get("status") == "final":
@@ -3240,11 +3227,9 @@ async def run_chronicle_expand(
             if mutation_tags:
                 _put({"type": "mutation_tags", "tags": mutation_tags})
 
-        # ═══ Inverted pipeline: build image prompts FIRST (grounded in WD14
-        # vector search + the Refine identity-lock method), THEN write the
-        # connective story last. Concrete actions come from real danbooru tags
-        # (WD14 search + a shot-plan) instead of a small VLM inventing poses from
-        # abstract prose — which is what left the character standing stiffly.
+        # ═══ Story-first pipeline: write past/present/future prose, then
+        # WD14-search tags from the finished acts and assemble prompts with
+        # identity-lock only (hair/eyes/accessories — never base scene must-tags).
         gen_axes = [a for a in AXES if a != body.base_time_axis]
 
         # Biography (persistent character grounding) carried from Phase 1.
@@ -3386,197 +3371,13 @@ async def run_chronicle_expand(
                     out.append(name)
             return filter_tag_list(out, removal)
 
-        # ── Per non-base axis: shot plan → WD14 search → Refine-method prompt ──
-        prompts: dict[str, dict] = {}
-        visual_plans: dict[str, dict] = {}
-        for i, axis in enumerate(gen_axes):
-            sit = situation_en[axis]
 
-            # (1) Concrete action decision (reused Stage 3a): focal action tags,
-            #     gesture and camera so the pose expresses the moment.
-            _phase("examining", 0.16 + 0.22 * i, f"Framing the {axis} shot...")
-            visual_plan: dict = {}
-            try:
-                raw_vp = await ollama.generate_text(
-                    build_visual_examination_prompt(
-                        story_text=sit,
-                        axis=axis,
-                        base_axis=body.base_time_axis,
-                        time_scale=body.time_scale,
-                        character_desc=character_desc,
-                        emotion=body.emotion,
-                        locale="en",
-                        base_pose_tags=[],
-                        user_topic=body.user_topic,
-                        axis_slot=axis_slots.get(axis),
-                    ),
-                    model=vlm_model, options=options, fmt="json", think=True,
-                )
-                visual_plan = parse_visual_plan_json(raw_vp)
-            except Exception as exc:
-                logger.warning("[chronicle] %s visual examination failed: %s", axis, exc)
-            visual_plans[axis] = visual_plan
-            focal = visual_plan.get("focal_action_tags") or []
-            gesture = visual_plan.get("gesture_prose") or ""
-            cancel.raise_if_set()
-
-            # (2) WD14 vector search on the situation (+ action + topic) → many
-            #     concrete scene/action/prop tags. Fallback: VLM tag inference.
-            _phase("taggingAxis", 0.20 + 0.22 * i, f"Searching {axis} tags...")
-            query = " ".join(
-                x for x in [sit, gesture, ", ".join(focal), body.user_topic] if x
-            )
-            axis_search_tags = await _wd14_search_tags(query)
-            if not axis_search_tags:
-                _put({"type": "warning",
-                      "message": f"{axis}: WD14 vocab empty — using VLM tag inference"})
-                try:
-                    axis_search_tags = parse_tags_json(await ollama.generate_text(
-                        build_story_tags_prompt(sit),
-                        model=vlm_model, options=options, fmt="json",
-                    ))
-                except Exception as exc:
-                    logger.warning("[chronicle] %s tag fallback failed: %s", axis, exc)
-            cancel.raise_if_set()
-
-            # Surface the reasoning for this axis: the concrete action, the chosen
-            # shot, and the WD14 tags that were retrieved as the visual evidence.
-            _put({
-                "type": "axis_reasoning",
-                "axis": axis,
-                "action": sit,
-                "focal": focal,
-                "shot": visual_plan.get("shot", ""),
-                "camera": visual_plan.get("camera_angle", ""),
-                "gesture": gesture,
-                "search_tags": axis_search_tags[:14],
-            })
-
-            # (3) Assemble the tag line the Refine way: action first, then the
-            #     searched scene tags + base-image appearance, subject-anchored,
-            #     with the always-keep identity (hair/eyes/accessories) enforced.
-            merged: list[str] = []
-            seen: set[str] = set()
-            for t in [*focal, *axis_search_tags, *base_appearance]:
-                tag = str(t).strip().replace(" ", "_")
-                k = tag.lower()
-                if tag and k not in seen:
-                    seen.add(k)
-                    merged.append(tag)
-            tag_line = ", ".join(merged)
-            tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
-            tag_line = inject_identity_tags(tag_line, lock_tags)
-            parts = [t.strip() for t in tag_line.split(",") if t.strip()]
-            tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
-            tag_line = _strip_quality_metatags(tag_line)
-            # Refine-style reinforcement: re-inject the base image's must/ref WD14
-            # tags after the subject anchor, unless divergence deliberately mutates.
-            if divergence <= 0.5 and wd14_analysis:
-                tag_line = _inject_wd14_must_tags(tag_line, wd14_analysis)
-
-            # (4) Refine pass-2 visual script over the tag line (action surfaces
-            #     as danbooru pose tags — the anti-stiff-pose mandate).
-            if body.prompt_style == "danbooru":
-                positive, negative = tag_line, ""
-            else:
-                _phase("refiningPromptProse", 0.28 + 0.22 * i, f"Writing {axis} prompt...")
-                _put({"type": "token", "text": f"\n\n— {axis} —\n"})
-                prose_prompt = build_axis_prose_prompt(
-                    story_text=sit,
-                    tag_line=tag_line,
-                    character_tags=character_tags,
-                    character_desc=character_desc,
-                    prompt_style=body.prompt_style,
-                    wd14_context=wd14_context,
-                    time_scale=body.time_scale,
-                    axis=axis,
-                    base_axis=body.base_time_axis,
-                    title=selected.get("title", ""),
-                    overall="",
-                    all_stories=situation_en,
-                    axis_tags=axis_search_tags,
-                    visual_plan=visual_plan,
-                    emotion=body.emotion,
-                    user_topic=body.user_topic,
-                )
-                axis_tokens: list[str] = []
-                async for event in ollama.generate_text_stream(
-                    prose_prompt, model=vlm_model, options=options
-                ):
-                    if _abort.is_set():
-                        raise JobCancelled()
-                    _put(event)
-                    if event["type"] == "token":
-                        axis_tokens.append(event["text"])
-                cancel.raise_if_set()
-                positive, negative = _parse_positive_negative("".join(axis_tokens))
-                positive = _clean_markdown(positive)
-                negative = _clean_markdown(negative)
-                if not positive:
-                    positive = tag_line  # prose failed → use the assembled tags
-
-            # Split tag line vs prose for identity enforcement on the prose half.
-            if body.prompt_style == "danbooru":
-                prose = ""
-            elif body.prompt_style == "natural":
-                tag_line, prose = "", positive
-            else:  # danbooru+natural
-                head, _, tail = positive.partition("\n\n")
-                tag_line, prose = head.strip(), tail.strip()
-            if tag_line:
-                tag_line = _strip_quality_metatags(tag_line)
-                tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
-
-            # (5) Conflict cleanup vs the situation + re-lock identity (Refine).
-            # The story-conflict tag removal is gated by suppress_conflict_tags
-            # (Refine parity); identity re-lock always runs.
-            cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
-            sources = list(dict.fromkeys(lock_tags + axis_search_tags + cand_tags))[:80]
-            conflicts: set[str] = set()
-            if body.suppress_conflict_tags and sources:
-                try:
-                    conflicts = await _find_conflict_tags(
-                        sit[:400], sources, db, ollama, vlm_model
-                    )
-                except Exception as exc:
-                    logger.warning("[chronicle] %s conflict pass failed: %s", axis, exc)
-            inject = [t for t in lock_tags if t not in conflicts]
-            if tag_line and inject:
-                tag_line = inject_identity_tags(tag_line, inject)
-                parts = [t.strip() for t in tag_line.split(",") if t.strip()]
-                tag_line = ", ".join(_apply_must_replacements(parts, inject))
-            if prose and inject:
-                prose = _correct_prose_wd14_conflicts(prose, inject)
-            positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)
-            positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
-            if not positive:
-                _put({"type": "error", "message": f"Prompt build failed for {axis}"})
-                return
-            positive, removed_tags = _remove_forced_tags(
-                positive,
-                removal,
-                all_lines=(body.prompt_style in ("detailed", "danbooru")),
-            )
-            prompts[axis] = {"positive": positive, "negative": negative}
-            axis_evt: dict = {
-                "type": "axis_prompt", "axis": axis,
-                "positive": positive, "negative": negative,
-            }
-            if removed_tags:
-                axis_evt["removed_tags"] = removed_tags
-            _put(axis_evt)
-
-        # ── Story LAST: connective past/current/future prose that ties the
-        # generated images together, then saved for Storybook display. Each
-        # chosen beat is enriched with its axis's concrete gesture so the prose
-        # matches what the images show.
-        _phase("expanding", 0.72, "Writing the chronicle...")
+        # ── Story FIRST: connective past/current/future prose (Storybook display
+        # + English WD14 search seed). Gesture enrichment is deferred — prompts
+        # are grounded in the finished acts rather than the other way around.
+        _phase("expanding", 0.16, "Writing the chronicle...")
         _put({"type": "token", "text": "\n\n"})
         connect_seed = dict(selected)
-        for a in gen_axes:
-            g = (visual_plans.get(a) or {}).get("gesture_prose") or ""
-            if g and connect_seed.get(a):
-                connect_seed[a] = f"{connect_seed[a]} ({g})"
         story_tokens: list[str] = []
         async for event in ollama.generate_text_stream(
             build_expand_prompt(
@@ -3623,8 +3424,6 @@ async def run_chronicle_expand(
                 logger.warning("[chronicle] story repair pass failed: %s", exc)
             cancel.raise_if_set()
 
-        # The story is connective glue now — fall back to the candidate beats for
-        # any act the model dropped rather than aborting the whole chronicle.
         stories = {a: (sections.get(a) or beats[a]) for a in AXES}
         title = sections.get("title") or selected.get("title") or "Untitled Chronicle"
         overall = sections.get("overall") or ""
@@ -3638,7 +3437,7 @@ async def run_chronicle_expand(
 
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
-        # English canonical copy for storage + embedding (prompts already built).
+        # English canonical copy — also the WD14 / visual-exam query source.
         if locale == "ja":
             title_ja, overall_ja = title, overall
             stories_ja = dict(stories)
@@ -3658,6 +3457,167 @@ async def run_chronicle_expand(
             stories_ja = {a: "" for a in AXES}
             en_title, en_overall, en_stories = title, overall, stories
 
+        # ── Per non-base axis: shot plan on finished story → WD14 search → prompt
+        prompts: dict[str, dict] = {}
+        visual_plans: dict[str, dict] = {}
+        for i, axis in enumerate(gen_axes):
+            story_en = en_stories.get(axis) or situation_en[axis]
+
+            # (1) Concrete action decision: focal action tags, gesture and camera
+            #     grounded in the finished axis story (not the short situation beat).
+            _phase("examining", 0.40 + 0.16 * i, f"Framing the {axis} shot...")
+            visual_plan: dict = {}
+            try:
+                raw_vp = await ollama.generate_text(
+                    build_visual_examination_prompt(
+                        story_text=story_en,
+                        axis=axis,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale,
+                        character_desc=character_desc,
+                        emotion=body.emotion,
+                        locale="en",
+                        base_pose_tags=[],
+                        user_topic=body.user_topic,
+                        axis_slot=axis_slots.get(axis),
+                    ),
+                    model=vlm_model, options=options, fmt="json", think=True,
+                )
+                visual_plan = parse_visual_plan_json(raw_vp)
+            except Exception as exc:
+                logger.warning("[chronicle] %s visual examination failed: %s", axis, exc)
+            visual_plans[axis] = visual_plan
+            focal = visual_plan.get("focal_action_tags") or []
+            gesture = visual_plan.get("gesture_prose") or ""
+            cancel.raise_if_set()
+
+            # (2) WD14 vector search on the finished story (+ gesture + topic).
+            _phase("taggingAxis", 0.44 + 0.16 * i, f"Searching {axis} tags...")
+            query = " ".join(
+                x for x in [story_en, gesture, ", ".join(focal), body.user_topic] if x
+            )
+            axis_search_tags = await _wd14_search_tags(query)
+            if not axis_search_tags:
+                _put({"type": "warning",
+                      "message": f"{axis}: WD14 vocab empty — using VLM tag inference"})
+                try:
+                    axis_search_tags = parse_tags_json(await ollama.generate_text(
+                        build_story_tags_prompt(story_en),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                except Exception as exc:
+                    logger.warning("[chronicle] %s tag fallback failed: %s", axis, exc)
+            cancel.raise_if_set()
+
+            _put({
+                "type": "axis_reasoning",
+                "axis": axis,
+                "action": story_en[:240],
+                "focal": focal,
+                "shot": visual_plan.get("shot", ""),
+                "camera": visual_plan.get("camera_angle", ""),
+                "gesture": gesture,
+                "search_tags": axis_search_tags[:14],
+            })
+
+            # (3) Assemble tags: focal + searched scene + identity lock only.
+            # Base-image must/ref WD14 (scene) are intentionally NOT re-injected.
+            tag_line = merge_chronicle_axis_tags(
+                focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+            )
+            tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+            tag_line = inject_identity_tags(tag_line, lock_tags)
+            parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+            tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
+            tag_line = _strip_quality_metatags(tag_line)
+
+            # (4) Refine pass-2 visual script over the tag line.
+            if body.prompt_style == "danbooru":
+                positive, negative = tag_line, ""
+            else:
+                _phase("refiningPromptProse", 0.50 + 0.16 * i, f"Writing {axis} prompt...")
+                _put({"type": "token", "text": f"\n\n— {axis} —\n"})
+                prose_prompt = build_axis_prose_prompt(
+                    story_text=story_en,
+                    tag_line=tag_line,
+                    character_tags=lock_tags,
+                    character_desc=character_desc,
+                    prompt_style=body.prompt_style,
+                    wd14_context=wd14_context,
+                    time_scale=body.time_scale,
+                    axis=axis,
+                    base_axis=body.base_time_axis,
+                    title=en_title,
+                    overall=en_overall,
+                    all_stories=en_stories,
+                    axis_tags=axis_search_tags,
+                    visual_plan=visual_plan,
+                    emotion=body.emotion,
+                    user_topic=body.user_topic,
+                )
+                axis_tokens: list[str] = []
+                async for event in ollama.generate_text_stream(
+                    prose_prompt, model=vlm_model, options=options
+                ):
+                    if _abort.is_set():
+                        raise JobCancelled()
+                    _put(event)
+                    if event["type"] == "token":
+                        axis_tokens.append(event["text"])
+                cancel.raise_if_set()
+                positive, negative = _parse_positive_negative("".join(axis_tokens))
+                positive = _clean_markdown(positive)
+                negative = _clean_markdown(negative)
+                if not positive:
+                    positive = tag_line
+
+            if body.prompt_style == "danbooru":
+                prose = ""
+            elif body.prompt_style == "natural":
+                tag_line, prose = "", positive
+            else:  # danbooru+natural
+                head, _, tail = positive.partition("\n\n")
+                tag_line, prose = head.strip(), tail.strip()
+            if tag_line:
+                tag_line = _strip_quality_metatags(tag_line)
+                tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+
+            # (5) Conflict cleanup vs the finished story + re-lock identity.
+            cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
+            sources = list(dict.fromkeys(lock_tags + axis_search_tags + cand_tags))[:80]
+            conflicts: set[str] = set()
+            if body.suppress_conflict_tags and sources:
+                try:
+                    conflicts = await _find_conflict_tags(
+                        story_en[:400], sources, db, ollama, vlm_model
+                    )
+                except Exception as exc:
+                    logger.warning("[chronicle] %s conflict pass failed: %s", axis, exc)
+            inject = [t for t in lock_tags if t not in conflicts]
+            if tag_line and inject:
+                tag_line = inject_identity_tags(tag_line, inject)
+                parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                tag_line = ", ".join(_apply_must_replacements(parts, inject))
+            if prose and inject:
+                prose = _correct_prose_wd14_conflicts(prose, inject)
+            positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)
+            positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
+            if not positive:
+                _put({"type": "error", "message": f"Prompt build failed for {axis}"})
+                return
+            positive, removed_tags = _remove_forced_tags(
+                positive,
+                removal,
+                all_lines=(body.prompt_style in ("detailed", "danbooru")),
+            )
+            prompts[axis] = {"positive": positive, "negative": negative}
+            axis_evt: dict = {
+                "type": "axis_prompt", "axis": axis,
+                "positive": positive, "negative": negative,
+            }
+            if removed_tags:
+                axis_evt["removed_tags"] = removed_tags
+            _put(axis_evt)
 
         # ── Finalise the record (patch draft → final) ─────────────────────────
         _phase("savingStory", 0.82, "Saving story...")

@@ -143,6 +143,14 @@ const showPipelineProgress = computed(() =>
   !showImageProgress.value && (running.value || (finished.value && progress.value > 0))
 )
 
+/** Keep the panel open during pipeline / image jobs — ignore Esc & backdrop. */
+const stayOpen = computed(() => {
+  if (running.value) return true
+  if (imageGen.value.active) return true
+  const states = imageGen.value.states || {}
+  return Object.values(states).some(s => s === 'queued' || s === 'running')
+})
+
 watch(streamText, (text) => {
   if (title.value && overall.value) return
   if (!title.value) {
@@ -158,6 +166,8 @@ watch(streamText, (text) => {
 let _reader = null
 let _pendingTokens = ''
 let _flushTimer = null
+let _backdropArmed = false
+let _ignoreDismissUntil = 0
 
 function _flushTokens() {
   if (_pendingTokens) {
@@ -180,7 +190,13 @@ watch(() => props.baseImage, (doc) => {
 }, { immediate: true })
 
 watch(() => props.show, async (val) => {
-  if (!val) return
+  if (!val) {
+    _backdropArmed = false
+    return
+  }
+  // Ignore backdrop/Esc dismiss for one tick after open (same click that opened
+  // the panel must not close it; also clears underlay races with gallery detail).
+  _ignoreDismissUntil = performance.now() + 400
   if (props.baseImage?.sha256) {
     baseSha.value = props.baseImage.sha256
     baseModel.value = _modelOf(props.baseImage)
@@ -194,13 +210,35 @@ watch(() => props.show, async (val) => {
   }
 })
 
+function _dismissBlocked() {
+  return stayOpen.value || performance.now() < _ignoreDismissUntil
+}
+
 function onKey(e) {
   if (!props.show) return
-  if (e.key === 'Escape') {
-    close()
+  if (e.key !== 'Escape') return
+  if (_dismissBlocked()) {
     e.preventDefault()
+    e.stopPropagation()
+    return
   }
+  close()
+  e.preventDefault()
 }
+
+function onBackdropDown(e) {
+  if (e.target === e.currentTarget) _backdropArmed = true
+  else _backdropArmed = false
+}
+
+function onBackdropUp(e) {
+  const armed = _backdropArmed
+  _backdropArmed = false
+  if (!armed || e.target !== e.currentTarget) return
+  if (_dismissBlocked()) return
+  close()
+}
+
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
@@ -569,9 +607,11 @@ async function generateImages() {
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="chronicle-root fixed inset-0 z-[70] flex items-center justify-center p-4"
-      @click.self="close">
-      <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
+    <div v-if="show" class="chronicle-root fixed inset-0 z-[85] flex items-center justify-center p-4"
+      @mousedown.self="onBackdropDown"
+      @mouseup.self="onBackdropUp">
+      <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden"
+        @mousedown.stop>
 
         <!-- header -->
         <div class="flex items-center justify-between px-5 py-3.5 sb-hairline">

@@ -528,6 +528,29 @@ def test_identity_lock_tags():
     )) == 2
 
 
+def test_merge_chronicle_axis_tags_identity_only():
+    """Non-base Chronicle prompts must not inherit base scene/outfit tags."""
+    from app.story.generator import merge_chronicle_axis_tags
+
+    lock = identity_lock_tags([
+        "1girl", "light_brown_hair", "brown_eyes", "necklace",
+        "train_interior", "window", "black_jacket", "standing",
+    ])
+    line = merge_chronicle_axis_tags(
+        focal=["holding_sketchbook", "looking_outside"],
+        search_tags=["apartment", "outdoors", "ponytail", "skirt"],
+        lock_tags=lock,
+    )
+    lower = line.lower()
+    assert "light_brown_hair" in lower and "brown_eyes" in lower
+    assert "necklace" in lower
+    assert "holding_sketchbook" in lower and "apartment" in lower
+    # base scene / outfit never forced in via lock merge
+    assert "train_interior" not in lower
+    assert "window" not in lower
+    assert "black_jacket" not in lower
+
+
 def test_identity_tags_for_scale():
     tags = ["1girl", "silver_hair", "black_dress", "red_eyes", "ponytail",
             "sitting", "indoors", "night"]

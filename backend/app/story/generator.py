@@ -2351,6 +2351,29 @@ def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
     return ", ".join(parts[:cut] + new + parts[cut:])
 
 
+def merge_chronicle_axis_tags(
+    *,
+    focal: list[str],
+    search_tags: list[str],
+    lock_tags: list[str],
+) -> str:
+    """Non-base Chronicle axis tag line: focal + WD14 search, then identity lock.
+
+    Deliberately omits the base image's full WD14 / must-scene tags so past and
+    present acts are not forced into the base setting (e.g. train interior).
+    Only hair colour, eye colour, and accessories from identity_lock_tags propagate.
+    """
+    merged: list[str] = []
+    seen: set[str] = set()
+    for t in [*focal, *search_tags]:
+        tag = str(t).strip().replace(" ", "_")
+        k = tag.lower()
+        if tag and k not in seen:
+            seen.add(k)
+            merged.append(tag)
+    return inject_identity_tags(", ".join(merged), lock_tags)
+
+
 _INLINE_TAG_GROUP_RE = re.compile(r"\(([^)]+)\)")
 
 

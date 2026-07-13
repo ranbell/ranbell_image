@@ -2530,6 +2530,8 @@ function openChronicle(img = null) {
     const first = [...selectedIds.value][0]
     base = images.value.find(i => i.sha256 === first) || { sha256: first }
   }
+  // Dismiss gallery detail so it cannot cover Chronicle (both were z-70).
+  selected.value = null
   chronicleBase.value = base
   showChronicle.value = true
 }
@@ -2549,12 +2551,12 @@ function openImageFromStorybook(sha256) {
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
     selected.value = img
-  } else {
-    fetch(`/api/images/${sha256}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(doc => { if (doc) selected.value = doc })
-      .catch(() => {})
+    return
   }
+  fetch(`/api/images/${sha256}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(doc => { if (doc) selected.value = doc })
+    .catch(() => {})
 }
 
 function handleInvokeSendToRefine(data) {
@@ -2667,8 +2669,23 @@ function _onGlobalKey(e) {
     controlRoomVisible.value = !controlRoomVisible.value
     return
   }
-  if (e.key === 'Escape' && controlRoomVisible.value) {
-    controlRoomVisible.value = false
+  if (e.key === 'Escape') {
+    // Gallery image detail sits above Storybook; close it before Storybook handles Esc.
+    if (showLightbox.value) {
+      closeLightbox()
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    if (selected.value) {
+      selected.value = null
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    if (controlRoomVisible.value) {
+      controlRoomVisible.value = false
+    }
   }
 }
 
@@ -4367,7 +4384,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="selected" class="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4"
+      <div v-if="selected" class="fixed inset-0 z-[72] bg-black/85 flex items-center justify-center p-4"
         @click.self="selected = null"
         @keydown.left.prevent="prevImage" @keydown.right.prevent="nextImage" @keydown.escape="selected = null"
         tabindex="-1">
