@@ -119,6 +119,39 @@ const displayOverall = computed(() =>
   (panelLang.value === 'ja' && overallJa.value) ? overallJa.value : overall.value
 )
 
+/** Past / present / future prose from expand (EN canonical + optional JA). */
+const axisStories = ref({ past: '', present: '', future: '' })
+const axisStoriesJa = ref({ past: '', present: '', future: '' })
+function displayAxisStory(axis) {
+  const en = axisStories.value[axis] || ''
+  const ja = axisStoriesJa.value[axis] || ''
+  if (panelLang.value === 'ja') return ja || en
+  return en || ja
+}
+const hasAxisStories = computed(() =>
+  AXES.some(a => !!(axisStories.value[a] || axisStoriesJa.value[a]))
+)
+/** Show the expand stream in the open pane until structured acts arrive. */
+const showLiveStream = computed(() =>
+  running.value && !!streamText.value && !hasAxisStories.value && currentStep.value === 3
+)
+function _axesFromMap(src) {
+  const out = {}
+  for (const a of AXES) {
+    const v = src?.[a]
+    if (typeof v === 'string' && v.trim()) out[a] = v.trim()
+  }
+  return out
+}
+function _mergeAxisStories(enPatch, jaPatch) {
+  if (enPatch && Object.keys(enPatch).length) {
+    axisStories.value = { ...axisStories.value, ...enPatch }
+  }
+  if (jaPatch && Object.keys(jaPatch).length) {
+    axisStoriesJa.value = { ...axisStoriesJa.value, ...jaPatch }
+  }
+}
+
 const currentStep = computed(() => {
   if (finished.value) return 5
   if (selecting.value) return 2
@@ -152,7 +185,6 @@ const stayOpen = computed(() => {
 })
 
 watch(streamText, (text) => {
-  if (title.value && overall.value) return
   if (!title.value) {
     const m = text.match(/\[TITLE\][^\[]*?\n(.*)/i)
     if (m) title.value = m[1].trim().replace(/^["「]|["」]$/g, '')
@@ -160,6 +192,23 @@ watch(streamText, (text) => {
   if (!overall.value) {
     const m = text.match(/\[OVERALL\][^\[]*?\n([\s\S]*?)(?=\[PAST\]|$)/i)
     if (m) overall.value = m[1].trim()
+  }
+  // Provisional axis prose from the live expand stream (request locale).
+  const patch = {}
+  for (const axis of AXES) {
+    const cur = uiLocale.value === 'ja' ? axisStoriesJa.value[axis] : axisStories.value[axis]
+    if (cur) continue
+    const tag = axis.toUpperCase()
+    const m = text.match(new RegExp(
+      `\\[${tag}\\][^\\[]*?\\n([\\s\\S]*?)(?=\\[(?:PAST|PRESENT|FUTURE|OVERALL|TITLE)\\]|$)`,
+      'i',
+    ))
+    const body = m?.[1]?.trim()
+    if (body) patch[axis] = body
+  }
+  if (Object.keys(patch).length) {
+    if (uiLocale.value === 'ja') _mergeAxisStories(null, patch)
+    else _mergeAxisStories(patch, null)
   }
 })
 
@@ -264,6 +313,8 @@ function resetStory() {
   titleJa.value = ''
   overall.value = ''
   overallJa.value = ''
+  axisStories.value = { past: '', present: '', future: '' }
+  axisStoriesJa.value = { past: '', present: '', future: '' }
   mutationTags.value = []
   storySeedTags.value = []
   storySeedMotif.value = ''
@@ -524,6 +575,12 @@ function handleEvent(ev) {
     case 'story':
       title.value = ev.title || ''
       overall.value = ev.overall || ''
+      if (ev.axes) {
+        const patch = _axesFromMap(ev.axes)
+        // Expand streams in the request locale; JA → Ja slot until done brings EN.
+        if (uiLocale.value === 'ja') _mergeAxisStories(null, patch)
+        else _mergeAxisStories(patch, null)
+      }
       break
     case 'story_saved':
       storyId.value = ev.story_id
@@ -531,6 +588,13 @@ function handleEvent(ev) {
     case 'translation':
       titleJa.value = ev.title_ja || ''
       overallJa.value = ev.overall_ja || ''
+      {
+        const jaPatch = {}
+        for (const a of AXES) {
+          if (ev[`${a}_ja`]) jaPatch[a] = ev[`${a}_ja`]
+        }
+        _mergeAxisStories(null, jaPatch)
+      }
       break
     case 'mutation_tags':
       mutationTags.value = ev.tags || []
@@ -571,6 +635,16 @@ function handleEvent(ev) {
       if (ev.title_ja) titleJa.value = ev.title_ja
       if (ev.overall) overall.value = ev.overall
       if (ev.overall_ja) overallJa.value = ev.overall_ja
+      if (ev.axes) {
+        const en = {}
+        const ja = {}
+        for (const a of AXES) {
+          const ax = ev.axes[a] || {}
+          if (ax.story) en[a] = ax.story
+          if (ax.story_ja) ja[a] = ax.story_ja
+        }
+        _mergeAxisStories(en, ja)
+      }
       break
     case 'error':
       errorMsg.value = ev.message
@@ -1002,7 +1076,7 @@ async function generateImages() {
                   <SbIcon name="refresh" class="w-3 h-3" />
                   {{ t('chronicle.respinStory') }}
                 </button>
-                <div v-if="titleJa || overallJa" class="sb-seg">
+                <div v-if="titleJa || overallJa || hasAxisStories" class="sb-seg">
                   <button v-for="l in ['ja', 'en']" :key="l" @click="panelLang = l"
                     :class="panelLang === l ? 'is-on-teal' : ''"
                     class="sb-seg-btn uppercase">{{ l }}</button>
@@ -1013,8 +1087,30 @@ async function generateImages() {
               </p>
             </div>
 
-            <!-- raw stream (closed) -->
-            <details v-if="streamText || (running && !selecting)"
+            <!-- structured past / present / future (always visible once known) -->
+            <div v-if="hasAxisStories" class="flex flex-col gap-3">
+              <div v-for="axis in AXES" :key="'story-' + axis"
+                v-show="displayAxisStory(axis)"
+                class="rounded-xl border border-white/5 bg-black/30 p-3 flex flex-col gap-1.5">
+                <span class="text-[10px] font-semibold uppercase tracking-widest"
+                  :class="axis === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
+                  {{ t('chronicle.axis.' + axis) }}
+                  <span v-if="axis === baseAxis" class="text-[var(--sb-muted)] normal-case font-normal ml-1">
+                    ({{ t('storybook.base') }})
+                  </span>
+                </span>
+                <p class="sb-prose text-sm">{{ displayAxisStory(axis) }}</p>
+              </div>
+            </div>
+
+            <!-- live expand stream (open) until structured acts arrive -->
+            <div v-if="showLiveStream"
+              class="rounded-xl border border-teal-800/40 bg-black/40 p-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto font-light">
+              {{ streamText }}<span class="animate-pulse text-teal-400">▍</span>
+            </div>
+
+            <!-- raw stream (closed) once acts are visible, or for non-expand phases -->
+            <details v-else-if="streamText || (running && !selecting)"
               class="rounded-xl border border-white/5 bg-black/30">
               <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
                 <span class="flex items-center gap-1.5">
