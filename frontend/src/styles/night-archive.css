@@ -1,0 +1,131 @@
+/* Night Archive — shared Storybook / Chronicle shell tokens & controls */
+
+.sb-theme,
+.storybook-root,
+.chronicle-root {
+  --sb-font-display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --sb-font-ui: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --sb-amber: #e8c47a;
+  --sb-teal: #2dd4bf;
+  --sb-ink: #0c0e12;
+  --sb-panel: #141820;
+  --sb-rule: rgba(232, 196, 122, 0.22);
+  --sb-muted: #8b929e;
+  --sb-faint: #5c6470;
+  font-family: var(--sb-font-ui);
+}
+
+.sb-display { font-family: var(--sb-font-display); font-weight: 600; }
+.sb-prose {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: #e5e7eb;
+  white-space: pre-wrap;
+}
+.sb-shell {
+  background:
+    linear-gradient(165deg, rgba(232, 196, 122, 0.06) 0%, transparent 42%),
+    var(--sb-panel);
+  border: 1px solid rgba(232, 196, 122, 0.18);
+  border-radius: 1rem;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.chronicle-root .sb-shell {
+  background:
+    linear-gradient(165deg, rgba(45, 212, 191, 0.07) 0%, transparent 42%),
+    var(--sb-panel);
+  border-color: rgba(45, 212, 191, 0.22);
+}
+.sb-hairline { border-bottom: 1px solid var(--sb-rule); }
+.chronicle-root .sb-hairline { border-bottom-color: rgba(45, 212, 191, 0.18); }
+
+.sb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  color: #d1d5db;
+  font-size: 0.7rem;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.sb-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(232, 196, 122, 0.25); }
+.sb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sb-icon-btn {
+  width: 2rem; height: 2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 0.5rem;
+  color: var(--sb-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.sb-icon-btn:hover { background: rgba(255, 255, 255, 0.06); color: #e5e7eb; }
+
+.sb-seg {
+  display: inline-flex;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sb-seg-btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.7rem;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--sb-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.sb-seg-btn:hover { background: rgba(255, 255, 255, 0.05); }
+.sb-seg-btn.is-on { background: rgba(146, 64, 14, 0.55); color: #fef3c7; }
+.sb-seg-btn.is-on-teal { background: rgba(19, 78, 74, 0.65); color: #ccfbf1; }
+
+.sb-chip {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--sb-muted);
+  font-size: 0.625rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sb-chip:hover { background: rgba(255, 255, 255, 0.05); }
+.sb-chip.is-chip-on { background: rgba(146, 64, 14, 0.5); color: #fef3c7; border-color: rgba(245, 158, 11, 0.35); }
+.sb-chip.is-chip-on-teal { background: rgba(19, 78, 74, 0.55); color: #ccfbf1; border-color: rgba(45, 212, 191, 0.3); }
+.sb-chip.is-chip-on-indigo { background: rgba(49, 46, 129, 0.55); color: #e0e7ff; border-color: rgba(129, 140, 248, 0.3); }
+
+.sb-label {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sb-muted);
+}
+.sb-icon { display: inline-block; flex-shrink: 0; width: 1em; height: 1em; vertical-align: -0.125em; }
+
+.sb-select, .sb-input, .sb-textarea {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  color: #e5e7eb;
+  outline: none;
+  width: 100%;
+}
+.sb-textarea { resize: vertical; min-height: 2.5rem; }
+.sb-select:focus, .sb-input:focus, .sb-textarea:focus {
+  border-color: rgba(45, 212, 191, 0.45);
+}
+
+.sb-progress {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.sb-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f766e, #2dd4bf);
+  transition: width 0.5s ease;
+}

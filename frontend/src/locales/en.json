@@ -8,7 +8,7 @@
     "refine": "✨ Refine",
     "aiProcess": "AI Process",
     "clear": "✕ Clear",
-    "chronicle": "📜 Chronicle",
+    "chronicle": "Chronicle",
     "chronicleTitle": "Weave a chronicle from the first selected image"
   },
   "inspire": {
@@ -1339,6 +1339,20 @@
       "expand": "Expand",
       "prompt": "Prompt",
       "generate": "Generate"
+    },
+    "idleHint": "Tune the settings, then press Weave",
+    "settingsSummary": "Settings summary",
+    "editSettings": "Show settings",
+    "directionGroup": "Story direction",
+    "outputGroup": "Output & generation",
+    "advancedGroup": "Advanced",
+    "rawStream": "Raw output",
+    "seedLabel": "seed",
+    "motifLabel": "motif",
+    "openStorybook": "Open Storybook",
+    "comfyOfflineHint": "ComfyUI is unreachable — images will queue and generate when it reconnects.",
+    "aria": {
+      "close": "Close"
     }
   },
   "storybook": {
@@ -1355,6 +1369,8 @@
     "overall": "Overall story",
     "biography": "Biography",
     "timetable": "Timetable",
+    "timetablePlace": "@ {place}",
+    "timetableFeeling": "({feeling})",
     "pinupAdd": "Add pose",
     "pinupReplace": "Reroll",
     "pinupQueued": "Pinup queued — it will appear here shortly",
@@ -1379,11 +1395,15 @@
     "deleteFailed": "Failed to delete story",
     "emptyFiltered": "No stories match the current filters",
     "searchPh": "Search title, story, motif…",
+    "readMore": "Read more",
+    "openInGallery": "Open in gallery",
+    "close": "Close",
+    "listSep": ", ",
+    "imagePending": "Pending",
     "view": {
       "gallery": "Gallery",
       "detail": "Detail",
-      "timeline": "Timeline",
-      "focus": "Focus"
+      "timeline": "Timeline"
     },
     "sort": {
       "newest": "Newest",
@@ -1396,7 +1416,8 @@
       "timeScale": "Scale",
       "emotion": "Emotion",
       "more": "More filters",
-      "clear": "Clear filters"
+      "clear": "Clear filters",
+      "all": "All"
     },
     "bucket": {
       "today": "Today",
@@ -1404,10 +1425,22 @@
       "thisWeek": "Earlier this week",
       "thisMonth": "Earlier this month"
     },
-    "focus": {
-      "prev": "Previous (←)",
-      "next": "Next (→)",
-      "close": "Close (Esc)"
+    "detail": {
+      "prev": "Previous",
+      "next": "Next",
+      "close": "Close",
+      "position": "{n} / {total}"
+    },
+    "aria": {
+      "details": "Open details",
+      "delete": "Delete story",
+      "weave": "Weave a new chronicle from this image",
+      "regen": "Regenerate this axis image",
+      "prev": "Previous story",
+      "next": "Next story",
+      "close": "Close",
+      "refresh": "Refresh list",
+      "openInGallery": "Open image in gallery"
     }
   }
 }

@@ -70,6 +70,8 @@ async function waitForBackend() {
 
 // ── Job stream ────────────────────────────────────────────────────────────────
 const jobsMap = ref(new Map())   // job.id -> job dict
+// Stable getter so ChroniclePanel can sample jobs without re-rendering on every map update.
+function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
 
 // ── Control Room ──────────────────────────────────────────────────────────────
@@ -5084,7 +5086,7 @@ onUnmounted(() => {
       :show="showChronicle"
       :base-image="chronicleBase"
       :comfyOffline="comfyOffline"
-      :jobs-map="jobsMap"
+      :get-jobs-map="getJobsMap"
       @update:show="showChronicle = $event"
       @toast="showToast($event.msg, $event.type)"
       @open-storybook="showChronicle = false; showStorybook = true"

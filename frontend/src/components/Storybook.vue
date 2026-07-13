@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
+import SbIcon from './SbIcon.vue'
 
 const { t, locale } = useI18n()
 
@@ -19,13 +20,9 @@ const SORTS = ['newest', 'oldest', 'title', 'time_scale']
 const stories = ref([])
 const loading = ref(false)
 const regenerating = ref(new Set())
-// Content-language toggle (story title/body/date). Defaults to the global UI
-// locale and follows it when the app language is switched, but can be overridden
-// per view via the JA/EN buttons for bilingual browsing.
 const lang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
 watch(locale, (l) => { lang.value = l?.startsWith('ja') ? 'ja' : 'en' })
 
-// ── view / filter state (persisted to localStorage) ───────────────────────────
 const _saved = (() => { try { return JSON.parse(localStorage.getItem('storybook.ui') || '{}') } catch { return {} } })()
 const viewMode = ref(VIEW_MODES.includes(_saved.viewMode) ? _saved.viewMode : 'gallery')
 const query = ref(_saved.query || '')
@@ -45,7 +42,6 @@ watch([viewMode, query, sort, filters], () => {
   } catch {}
 }, { deep: true })
 
-// ── i18n-aware getters (unchanged) ────────────────────────────────────────────
 function storyTitle(story) {
   return (lang.value === 'ja' && story.title_ja) ? story.title_ja : (story.title || '')
 }
@@ -67,9 +63,11 @@ function storyTimetable(story) {
   const tt = (lang.value === 'ja' && ja && ja.length) ? ja : story.timetable
   return Array.isArray(tt) ? tt : []
 }
+function joinList(arr) {
+  return (arr || []).join(t('storybook.listSep'))
+}
 const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
 
-// ── filter / sort → visibleStories ────────────────────────────────────────────
 function matches(story, q) {
   if (!q) return true
   const bag = [
@@ -101,7 +99,6 @@ const visibleStories = computed(() => {
   }
 })
 
-// ── timeline buckets ─────────────────────────────────────────────────────────
 function bucketFor(ts) {
   const now = new Date()
   const d = new Date((ts || 0) * 1000)
@@ -117,7 +114,6 @@ function bucketFor(ts) {
 }
 
 const timelineBuckets = computed(() => {
-  // Timeline is always chronological (newest first), independent of the sort dropdown
   const chrono = [...visibleStories.value].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
   const map = new Map()
   for (const s of chrono) {
@@ -128,7 +124,6 @@ const timelineBuckets = computed(() => {
   return [...map.values()].sort((a, b) => a.order - b.order)
 })
 
-// ── fetching / actions ────────────────────────────────────────────────────────
 watch(() => props.show, (val) => { if (val) fetchStories() })
 
 function close() { emit('update:show', false) }
@@ -165,9 +160,8 @@ function openImage(sha256) {
   if (sha256) emit('select-image', sha256)
 }
 
-// ── Pinups (polaroids on the corkboard) ──────────────────────────────────────
-const pinupView = ref(null)        // sha256 shown enlarged in the polaroid lightbox
-const pinupBusy = ref(new Set())   // story_ids with a pinup job in flight
+const pinupView = ref(null)
+const pinupBusy = ref(new Set())
 const PINUP_ROT = [-5, 4, -3, 6, -6, 3, -4, 5]
 function pinupRotation(i) { return PINUP_ROT[i % PINUP_ROT.length] }
 function storyPinups(story) {
@@ -187,11 +181,28 @@ async function refetchStory(id) {
   } catch { return null }
 }
 
-// Open the detail overlay, then refetch so the newest images (axes + pinups)
-// show even if they finished generating after the gallery list was loaded.
+const detailStory = ref(null)
+
+const detailIndex = computed(() => {
+  if (!detailStory.value) return -1
+  return visibleStories.value.findIndex(s => s.story_id === detailStory.value.story_id)
+})
+
 function openDetail(story) {
   detailStory.value = story
   refetchStory(story.story_id)
+}
+
+function closeDetail() { detailStory.value = null }
+
+function detailPrev() {
+  const i = detailIndex.value
+  if (i > 0) openDetail(visibleStories.value[i - 1])
+}
+
+function detailNext() {
+  const i = detailIndex.value
+  if (i >= 0 && i < visibleStories.value.length - 1) openDetail(visibleStories.value[i + 1])
 }
 
 async function addPinup(story, mode) {
@@ -208,7 +219,6 @@ async function addPinup(story, mode) {
     })
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
     emit('toast', { msg: t('storybook.pinupQueued'), type: 'success' })
-    // Poll until the new (add) or swapped (replace) pinup lands.
     for (let i = 0; i < 20; i++) {
       await new Promise(res => setTimeout(res, 4000))
       const s = await refetchStory(id)
@@ -235,7 +245,6 @@ async function deleteStory(story) {
   if (!r.ok) { emit('toast', { msg: t('storybook.deleteFailed'), type: 'error' }); return }
   stories.value = stories.value.filter(s => s.story_id !== story.story_id)
   if (detailStory.value?.story_id === story.story_id) detailStory.value = null
-  if (focusStoryId.value === story.story_id) focusStoryId.value = ''
   emit('toast', { msg: t('storybook.deleted'), type: 'success' })
 }
 
@@ -259,37 +268,16 @@ function clearFilters() {
   query.value = ''
 }
 
-// ── detail overlay (existing behaviour, stays as-is) ──────────────────────────
-const detailStory = ref(null)
-
-// ── focus mode ────────────────────────────────────────────────────────────────
-const focusStoryId = ref('')
-const focusStory = computed(() =>
-  focusStoryId.value ? visibleStories.value.find(s => s.story_id === focusStoryId.value) : null
-)
-const focusIndex = computed(() => {
-  if (!focusStoryId.value) return -1
-  return visibleStories.value.findIndex(s => s.story_id === focusStoryId.value)
-})
-function focusOpen(story) { focusStoryId.value = story.story_id }
-function focusClose() { focusStoryId.value = '' }
-function focusPrev() {
-  const i = focusIndex.value
-  if (i > 0) focusStoryId.value = visibleStories.value[i - 1].story_id
-}
-function focusNext() {
-  const i = focusIndex.value
-  if (i >= 0 && i < visibleStories.value.length - 1) focusStoryId.value = visibleStories.value[i + 1].story_id
-}
-
 function onKey(e) {
   if (!props.show) return
-  if (focusStoryId.value) {
-    if (e.key === 'ArrowLeft') { focusPrev(); e.preventDefault() }
-    else if (e.key === 'ArrowRight') { focusNext(); e.preventDefault() }
-    else if (e.key === 'Escape') { focusClose(); e.preventDefault() }
-  } else if (detailStory.value) {
-    if (e.key === 'Escape') { detailStory.value = null; e.preventDefault() }
+  if (pinupView.value) {
+    if (e.key === 'Escape') { pinupView.value = null; e.preventDefault() }
+    return
+  }
+  if (detailStory.value) {
+    if (e.key === 'ArrowLeft') { detailPrev(); e.preventDefault() }
+    else if (e.key === 'ArrowRight') { detailNext(); e.preventDefault() }
+    else if (e.key === 'Escape') { closeDetail(); e.preventDefault() }
   } else if (e.key === 'Escape') {
     close()
   }
@@ -300,81 +288,84 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-[65] bg-black/80 flex items-center justify-center p-4"
+    <div v-if="show" class="storybook-root fixed inset-0 z-[65] flex items-center justify-center p-4"
       @click.self="close">
-      <div class="relative bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col">
+      <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
 
-        <!-- ── header ────────────────────────────────────────────────────── -->
-        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-800">
-          <h2 class="text-base font-bold text-amber-300">📖 {{ t('storybook.title') }}</h2>
+        <!-- header -->
+        <div class="flex items-center justify-between px-5 py-3.5 sb-hairline">
+          <h2 class="sb-display text-lg text-[var(--sb-amber)] tracking-wide flex items-center gap-2.5">
+            <SbIcon name="book" class="w-5 h-5 opacity-80" />
+            {{ t('storybook.title') }}
+          </h2>
           <div class="flex items-center gap-2">
-            <div class="flex rounded-lg overflow-hidden border border-gray-700 text-xs">
+            <div class="sb-seg">
               <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
-                :class="lang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
-                class="px-2.5 py-1.5 transition-colors uppercase">{{ l }}</button>
+                :class="lang === l ? 'is-on' : ''" class="sb-seg-btn uppercase">{{ l }}</button>
             </div>
-            <button @click="fetchStories"
-              class="px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-300 transition-colors">
-              ⟳ {{ t('storybook.refresh') }}
+            <button @click="fetchStories" class="sb-btn" :aria-label="t('storybook.aria.refresh')">
+              <SbIcon name="refresh" class="w-3.5 h-3.5" />
+              {{ t('storybook.refresh') }}
             </button>
-            <button @click="close"
-              class="text-gray-600 hover:text-gray-200 text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800 transition-colors">✕</button>
+            <button @click="close" class="sb-icon-btn" :aria-label="t('storybook.aria.close')">
+              <SbIcon name="close" class="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        <!-- ── toolbar: view mode | search | sort | filter chips ─────────── -->
-        <div class="flex flex-wrap items-center gap-2 px-5 py-2.5 border-b border-gray-800 bg-gray-900/50">
-          <div class="flex rounded-lg overflow-hidden border border-gray-700 text-[11px]">
+        <!-- toolbar -->
+        <div class="flex flex-wrap items-center gap-2 px-5 py-2.5 sb-hairline bg-black/20">
+          <div class="sb-seg">
             <button v-for="m in VIEW_MODES" :key="m" @click="viewMode = m"
-              :class="viewMode === m ? 'bg-teal-800/70 text-teal-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
-              class="px-3 py-1.5 transition-colors">
+              :class="viewMode === m ? 'is-on-teal' : ''" class="sb-seg-btn">
               {{ t('storybook.view.' + m) }}
             </button>
           </div>
 
-          <label class="flex items-center gap-1.5 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1">
-            <span class="text-gray-500 text-xs">🔍</span>
-            <input v-model="query" type="search" :placeholder="t('storybook.searchPh')"
-              class="bg-transparent text-xs text-gray-200 outline-none w-48" />
+          <label class="sb-search">
+            <SbIcon name="search" class="w-3.5 h-3.5 text-[var(--sb-muted)]" />
+            <input v-model="query" type="search" :placeholder="t('storybook.searchPh')" />
           </label>
 
-          <select v-model="sort"
-            class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:border-teal-500 outline-none">
-            <option v-for="s in SORTS" :key="s" :value="s">
-              ⌛ {{ t('storybook.sort.' + s) }}
-            </option>
+          <select v-model="sort" class="sb-select">
+            <option v-for="s in SORTS" :key="s" :value="s">{{ t('storybook.sort.' + s) }}</option>
           </select>
 
           <div class="flex items-center gap-1 flex-wrap">
-            <span class="text-[10px] text-gray-500 uppercase tracking-wide">{{ t('storybook.filter.baseAxis') }}</span>
+            <span class="sb-label">{{ t('storybook.filter.baseAxis') }}</span>
+            <button
+              @click="filters.base_axis = ''"
+              :class="!filters.base_axis ? 'is-chip-on' : ''"
+              class="sb-chip">{{ t('storybook.filter.all') }}</button>
             <button v-for="a in AXES" :key="a"
               @click="filters.base_axis = filters.base_axis === a ? '' : a"
-              :class="filters.base_axis === a ? 'bg-amber-800/70 text-amber-100 border-amber-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'"
-              class="px-2 py-0.5 rounded-full border text-[10px] transition-colors">
+              :class="filters.base_axis === a ? 'is-chip-on' : ''"
+              class="sb-chip">
               {{ t('chronicle.axis.' + a) }}
             </button>
           </div>
 
-          <details class="text-[10px]">
-            <summary class="cursor-pointer text-gray-400 hover:text-gray-200 select-none px-2 py-1">
-              🏷 {{ t('storybook.filter.more') }}
+          <details class="relative text-[10px]">
+            <summary class="sb-btn cursor-pointer list-none flex items-center gap-1">
+              <SbIcon name="filter" class="w-3 h-3" />
+              {{ t('storybook.filter.more') }}
             </summary>
-            <div class="absolute z-30 mt-1 bg-gray-950 border border-gray-700 rounded-lg p-3 flex flex-col gap-2 shadow-xl">
+            <div class="absolute z-30 mt-1 right-0 sm:left-0 sm:right-auto bg-[var(--sb-panel)] border border-[var(--sb-rule)] rounded-xl p-3 flex flex-col gap-2 shadow-2xl min-w-[16rem]">
               <div class="flex items-center gap-1 flex-wrap max-w-md">
-                <span class="text-gray-500 uppercase tracking-wide w-20">{{ t('storybook.filter.timeScale') }}</span>
+                <span class="sb-label w-20">{{ t('storybook.filter.timeScale') }}</span>
                 <button v-for="ts in TIME_SCALES" :key="ts"
                   @click="filters.time_scale = filters.time_scale === ts ? '' : ts"
-                  :class="filters.time_scale === ts ? 'bg-teal-800/70 text-teal-100 border-teal-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'"
-                  class="px-2 py-0.5 rounded-full border transition-colors">
+                  :class="filters.time_scale === ts ? 'is-chip-on-teal' : ''"
+                  class="sb-chip">
                   {{ t('chronicle.timeScale.' + ts) }}
                 </button>
               </div>
               <div class="flex items-center gap-1 flex-wrap max-w-md">
-                <span class="text-gray-500 uppercase tracking-wide w-20">{{ t('storybook.filter.emotion') }}</span>
+                <span class="sb-label w-20">{{ t('storybook.filter.emotion') }}</span>
                 <button v-for="em in EMOTION_DIMENSIONS" :key="em"
                   @click="filters.emotion = filters.emotion === em ? '' : em"
-                  :class="filters.emotion === em ? 'bg-indigo-800/70 text-indigo-100 border-indigo-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'"
-                  class="px-2 py-0.5 rounded-full border transition-colors">
+                  :class="filters.emotion === em ? 'is-chip-on-indigo' : ''"
+                  class="sb-chip">
                   {{ t(`inspire.emotion.${em}`) }}
                 </button>
               </div>
@@ -382,150 +373,144 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </details>
 
           <button v-if="query || filters.base_axis || filters.time_scale || filters.emotion"
-            @click="clearFilters"
-            class="ml-auto px-2 py-1 rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-700 text-[10px] text-gray-300 transition-colors">
-            ✕ {{ t('storybook.filter.clear') }}
+            @click="clearFilters" class="ml-auto sb-btn">
+            <SbIcon name="close" class="w-3 h-3" />
+            {{ t('storybook.filter.clear') }}
           </button>
         </div>
 
-        <!-- ── body ──────────────────────────────────────────────────────── -->
-        <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
-          <p v-if="loading" class="text-xs text-gray-500">{{ t('storybook.loading') }}</p>
-          <p v-else-if="!stories.length" class="text-xs text-gray-500">{{ t('storybook.empty') }}</p>
-          <p v-else-if="!visibleStories.length" class="text-xs text-gray-500">{{ t('storybook.emptyFiltered') }}</p>
+        <!-- body -->
+        <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5 sb-body">
+          <p v-if="loading" class="text-xs text-[var(--sb-muted)]">{{ t('storybook.loading') }}</p>
+          <p v-else-if="!stories.length" class="text-xs text-[var(--sb-muted)]">{{ t('storybook.empty') }}</p>
+          <p v-else-if="!visibleStories.length" class="text-xs text-[var(--sb-muted)]">{{ t('storybook.emptyFiltered') }}</p>
 
-          <!-- ── GALLERY MODE — Polaroid stacks ─────────────────────────── -->
+          <!-- GALLERY -->
           <div v-if="viewMode === 'gallery' && visibleStories.length"
             class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
             <div v-for="story in visibleStories" :key="story.story_id"
-              class="storybook-card group bg-gray-800/40 border border-gray-800 rounded-2xl p-3 flex flex-col gap-2 cursor-pointer transition-all"
-              @click="focusOpen(story)">
-
+              class="storybook-card sb-card group cursor-pointer"
+              @click="openDetail(story)">
               <div class="polaroid-stack">
                 <div v-for="axis in AXES" :key="axis"
                   class="polaroid" :class="[axis, axis === story.base_time_axis ? 'base' : '']">
                   <img v-if="axisImage(story, axis)"
                     :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
                     @error="onThumbError($event, axisImage(story, axis))" loading="lazy" />
-                  <span v-else class="polaroid-empty">⏳</span>
+                  <span v-else class="polaroid-empty">{{ t('storybook.imagePending') }}</span>
                 </div>
               </div>
-
-              <!-- footer -->
-              <div class="flex flex-col gap-1">
-                <div class="flex items-center gap-1.5">
-                  <h3 class="text-xs font-bold text-amber-200 truncate flex-1">
-                    {{ storyTitle(story) || '—' }}
-                  </h3>
+              <div class="flex flex-col gap-1.5 mt-1">
+                <h3 class="sb-display text-sm text-[var(--sb-amber)] truncate">
+                  {{ storyTitle(story) || '—' }}
+                </h3>
+                <div class="flex items-center gap-1 flex-wrap text-[10px]">
+                  <span v-if="motifOf(story)" class="sb-meta-chip sb-meta-motif">
+                    <SbIcon name="spark" class="w-2.5 h-2.5" />{{ motifOf(story) }}
+                  </span>
+                  <span v-if="story.time_scale" class="sb-meta-chip sb-meta-scale">
+                    <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + story.time_scale) }}
+                  </span>
+                  <span v-if="story.emotion" class="sb-meta-chip sb-meta-emotion">
+                    {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}
+                  </span>
+                  <span class="ml-auto text-[var(--sb-faint)] font-mono text-[9px]">{{ formatDate(story.created_at).split(' ')[0] }}</span>
                 </div>
-                <div class="flex items-center gap-1 flex-wrap text-[9px]">
-                  <span v-if="motifOf(story)"
-                    class="px-1.5 py-0.5 rounded bg-gray-900/70 text-purple-300">
-                    ✦ {{ motifOf(story) }}
-                  </span>
-                  <span v-if="story.time_scale" class="px-1.5 py-0.5 rounded bg-gray-900/70 text-teal-300">
-                    ⏳ {{ t('chronicle.timeScale.' + story.time_scale) }}
-                  </span>
-                  <span v-if="story.emotion" class="px-1.5 py-0.5 rounded bg-gray-900/70 text-indigo-300">
-                    🌒 {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}
-                  </span>
-                  <span class="ml-auto text-gray-600 font-mono">{{ formatDate(story.created_at).split(' ')[0] }}</span>
-                </div>
-                <!-- hover-visible action row -->
-                <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button @click.stop="openDetail(story)"
-                    :title="t('storybook.details')"
-                    class="px-1.5 py-0.5 rounded bg-gray-900/70 hover:bg-gray-800 border border-gray-700 text-[9px] text-gray-300">
-                    📄
-                  </button>
-                  <button v-if="axisImage(story, story.base_time_axis)"
-                    @click.stop="emit('weave-from', axisImage(story, story.base_time_axis))"
+                <div class="flex items-center gap-1 pt-0.5">
+                  <button @click.stop="emit('weave-from', axisImage(story, story.base_time_axis))"
+                    v-if="axisImage(story, story.base_time_axis)"
+                    :aria-label="t('storybook.aria.weave')"
                     :title="t('storybook.weaveFrom')"
-                    class="px-1.5 py-0.5 rounded bg-teal-900/70 hover:bg-teal-800 border border-teal-700 text-[9px] text-teal-200">
-                    🧶
+                    class="sb-icon-btn-sm text-teal-300/80">
+                    <SbIcon name="weave" class="w-3.5 h-3.5" />
                   </button>
                   <button @click.stop="deleteStory(story)"
+                    :aria-label="t('storybook.aria.delete')"
                     :title="t('storybook.delete')"
-                    class="ml-auto px-1.5 py-0.5 rounded bg-red-900/40 hover:bg-red-800/70 border border-red-800/50 text-[9px] text-red-300">
-                    🗑
+                    class="ml-auto sb-icon-btn-sm text-red-300/70 hover:text-red-200">
+                    <SbIcon name="trash" class="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- ── TIMELINE MODE — buckets with horizontal strips ─────────── -->
+          <!-- TIMELINE -->
           <div v-if="viewMode === 'timeline' && visibleStories.length" class="flex flex-col gap-4">
             <div v-for="bucket in timelineBuckets" :key="bucket.key" class="flex flex-col gap-2">
-              <h3 class="sticky top-0 z-10 backdrop-blur bg-gray-900/80 py-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-300 border-b border-gray-800/70">
-                🕰 {{ bucket.label }} <span class="text-gray-500 font-normal normal-case">({{ bucket.stories.length }})</span>
+              <h3 class="sticky top-0 z-10 backdrop-blur-md bg-[var(--sb-ink)]/85 py-1.5 sb-display text-xs tracking-wider text-[var(--sb-amber)] border-b border-[var(--sb-rule)] flex items-center gap-2">
+                <SbIcon name="clock" class="w-3.5 h-3.5 opacity-70" />
+                {{ bucket.label }}
+                <span class="text-[var(--sb-muted)] font-normal" style="font-family: var(--sb-font-ui)">({{ bucket.stories.length }})</span>
               </h3>
               <div class="flex gap-3 overflow-x-auto pb-2 snap-x">
                 <div v-for="story in bucket.stories" :key="story.story_id"
-                  class="storybook-card group shrink-0 w-48 snap-start bg-gray-800/40 border border-gray-800 rounded-xl p-2.5 flex flex-col gap-1.5 cursor-pointer transition-all"
-                  @click="focusOpen(story)">
+                  class="storybook-card sb-card group shrink-0 w-48 snap-start cursor-pointer"
+                  @click="openDetail(story)">
                   <div class="polaroid-stack polaroid-stack-sm">
                     <div v-for="axis in AXES" :key="axis"
                       class="polaroid" :class="[axis, axis === story.base_time_axis ? 'base' : '']">
                       <img v-if="axisImage(story, axis)"
                         :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
                         @error="onThumbError($event, axisImage(story, axis))" loading="lazy" />
-                      <span v-else class="polaroid-empty">⏳</span>
+                      <span v-else class="polaroid-empty text-[10px]">{{ t('storybook.imagePending') }}</span>
                     </div>
                   </div>
-                  <h4 class="text-[11px] font-bold text-amber-200 truncate">{{ storyTitle(story) || '—' }}</h4>
-                  <div class="flex items-center gap-1 text-[9px]">
-                    <span v-if="motifOf(story)"
-                      class="px-1.5 py-0.5 rounded bg-gray-900/70 text-purple-300 truncate">✦ {{ motifOf(story) }}</span>
-                    <span class="ml-auto text-gray-600 font-mono">{{ new Date(story.created_at * 1000).toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' }) }}</span>
+                  <h4 class="sb-display text-[11px] text-[var(--sb-amber)] truncate mt-1">{{ storyTitle(story) || '—' }}</h4>
+                  <div class="flex items-center gap-1 text-[9px] mt-0.5">
+                    <span v-if="motifOf(story)" class="sb-meta-chip sb-meta-motif truncate">
+                      <SbIcon name="spark" class="w-2.5 h-2.5" />{{ motifOf(story) }}
+                    </span>
+                    <span class="ml-auto text-[var(--sb-faint)] font-mono">{{ new Date(story.created_at * 1000).toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-US', { hour: '2-digit', minute: '2-digit' }) }}</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- ── DETAIL MODE — the original long-form layout ────────────── -->
+          <!-- DETAIL LIST -->
           <div v-if="viewMode === 'detail' && visibleStories.length" class="flex flex-col gap-5">
-            <div v-for="story in visibleStories" :key="story.story_id"
-              class="bg-gray-800/40 border border-gray-800 rounded-2xl p-4 flex flex-col gap-3">
+            <div v-for="story in visibleStories" :key="story.story_id" class="sb-card p-4 flex flex-col gap-3">
               <div v-if="storyTitle(story)" class="flex flex-col gap-1.5">
-                <h3 class="text-sm font-bold text-amber-200">{{ storyTitle(story) }}</h3>
+                <h3 class="sb-display text-base text-[var(--sb-amber)]">{{ storyTitle(story) }}</h3>
                 <p v-if="storyOverall(story)"
-                  class="text-[11px] text-gray-300 leading-relaxed whitespace-pre-wrap border-l-2 border-amber-700/40 pl-3">
+                  class="text-[12px] text-gray-300/90 leading-relaxed whitespace-pre-wrap border-l border-[var(--sb-rule)] pl-3 line-clamp-3">
                   {{ storyOverall(story) }}
                 </p>
+                <button v-if="storyOverall(story)" @click="openDetail(story)" class="sb-link self-start">
+                  {{ t('storybook.readMore') }}
+                </button>
               </div>
-              <div class="flex items-center gap-3 text-[10px] text-gray-500 flex-wrap">
-                <span v-if="story.worldview" class="text-amber-400/80">🌍 {{ story.worldview }}</span>
-                <span v-if="story.time_scale" class="text-teal-400/70">⏳ ± {{ t('chronicle.timeScale.' + story.time_scale) }}</span>
-                <span v-if="story.emotion" class="text-indigo-400/80">🌒 {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}</span>
-                <button @click="openDetail(story)"
-                  class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full text-gray-300 transition-colors">
-                  📄 {{ t('storybook.details') }}
+              <div class="flex items-center gap-2 text-[10px] text-[var(--sb-muted)] flex-wrap">
+                <span v-if="story.worldview" class="text-[var(--sb-amber)]/80">{{ story.worldview }}</span>
+                <span v-if="story.time_scale" class="sb-meta-chip sb-meta-scale">
+                  <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + story.time_scale) }}
+                </span>
+                <span v-if="story.emotion" class="sb-meta-chip sb-meta-emotion">
+                  {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}
+                </span>
+                <button @click="openDetail(story)" class="sb-btn">
+                  <SbIcon name="doc" class="w-3 h-3" />
+                  {{ t('storybook.details') }}
                 </button>
-                <button @click="focusOpen(story)"
-                  class="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full text-gray-300 transition-colors">
-                  🎯 {{ t('storybook.view.focus') }}
+                <button @click="deleteStory(story)" class="sb-btn text-red-300/80">
+                  <SbIcon name="trash" class="w-3 h-3" />
+                  {{ t('storybook.delete') }}
                 </button>
-                <button @click="deleteStory(story)"
-                  class="px-2 py-0.5 bg-red-900/30 hover:bg-red-800/60 border border-red-800/40 rounded-full text-red-400 transition-colors">
-                  🗑 {{ t('storybook.delete') }}
-                </button>
-                <span class="ml-auto font-mono">{{ formatDate(story.created_at) }}</span>
+                <span class="ml-auto font-mono text-[9px]">{{ formatDate(story.created_at) }}</span>
               </div>
 
               <details v-if="story.candidates?.length" class="text-[11px]">
-                <summary class="cursor-pointer text-gray-500 hover:text-gray-300 select-none">
-                  💭 {{ t('storybook.otherCandidates') }} ({{ story.candidates.length }})
+                <summary class="cursor-pointer text-[var(--sb-muted)] hover:text-gray-300 select-none">
+                  {{ t('storybook.otherCandidates') }} ({{ story.candidates.length }})
                 </summary>
                 <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div v-for="c in story.candidates" :key="c.id"
                     class="p-2 rounded-lg border"
-                    :class="c.id === story.selected_candidate ? 'border-amber-600/50 bg-amber-900/10' : 'border-gray-800 bg-gray-900/40'">
+                    :class="c.id === story.selected_candidate ? 'border-[var(--sb-amber)]/40 bg-amber-900/10' : 'border-white/5 bg-black/20'">
                     <div class="flex items-center gap-1.5">
-                      <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-gray-700 text-gray-200">{{ c.id }}</span>
-                      <span class="text-[11px] font-bold text-amber-100 leading-tight">{{ c.title }}</span>
-                      <span v-if="c.id === story.selected_candidate" class="text-[9px] text-amber-400 ml-auto">✓</span>
+                      <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-white/10 text-gray-200">{{ c.id }}</span>
+                      <span class="text-[11px] font-semibold text-[var(--sb-amber)] leading-tight">{{ c.title }}</span>
                     </div>
                     <p class="text-[10px] text-gray-400 mt-1 leading-snug">{{ c.summary }}</p>
                   </div>
@@ -535,33 +520,37 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div v-for="axis in AXES" :key="axis"
                   class="rounded-xl border p-3 flex flex-col gap-2"
-                  :class="axis === story.base_time_axis ? 'border-amber-600/50 bg-amber-900/10' : 'border-gray-800 bg-gray-900/40'">
+                  :class="axis === story.base_time_axis ? 'border-[var(--sb-amber)]/35 bg-amber-900/10' : 'border-white/5 bg-black/25'">
                   <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-bold uppercase tracking-wide"
-                      :class="axis === story.base_time_axis ? 'text-amber-400' : 'text-teal-400'">
+                    <span class="text-[10px] font-semibold uppercase tracking-wide"
+                      :class="axis === story.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
                       {{ t('chronicle.axis.' + axis) }}
-                      <span v-if="axis === story.base_time_axis" class="text-gray-500 normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
+                      <span v-if="axis === story.base_time_axis" class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
                     </span>
                     <button v-if="axis !== story.base_time_axis && story.axes?.[axis]?.prompt_positive"
                       @click="regenerate(story, axis)"
                       :disabled="regenerating.has(`${story.story_id}:${axis}`)"
                       :title="t('storybook.regenTitle')"
-                      class="text-[10px] px-2 py-0.5 bg-purple-900/60 hover:bg-purple-800/70 disabled:opacity-40 border border-purple-700/50 rounded-full text-purple-200 transition-colors">
-                      🎲 {{ regenerating.has(`${story.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                      :aria-label="t('storybook.aria.regen')"
+                      class="sb-btn-accent disabled:opacity-40">
+                      <SbIcon name="dice" class="w-3 h-3" />
+                      {{ regenerating.has(`${story.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
                     </button>
                   </div>
 
-                  <div class="relative group aspect-square bg-gray-950/60 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
-                    @click="openImage(axisImage(story, axis))">
+                  <div class="relative group aspect-square bg-black/40 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer"
+                    @click="openDetail(story)">
                     <img v-if="axisImage(story, axis)" :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
                       @error="onThumbError($event, axisImage(story, axis))"
                       class="w-full h-full object-cover hover:opacity-90 transition-opacity" loading="lazy" />
-                    <span v-else class="text-2xl text-gray-700">⏳</span>
+                    <span v-else class="text-xs text-[var(--sb-faint)]">{{ t('storybook.imagePending') }}</span>
                     <button v-if="axisImage(story, axis)"
                       @click.stop="emit('weave-from', axisImage(story, axis))"
                       :title="t('storybook.weaveFrom')"
-                      class="absolute bottom-1.5 right-1.5 px-2 py-1 bg-teal-900/80 hover:bg-teal-700/90 border border-teal-600/50 rounded-lg text-[10px] text-teal-200 opacity-0 group-hover:opacity-100 transition-opacity">
-                      📜 {{ t('storybook.weaveFromShort') }}
+                      :aria-label="t('storybook.aria.weave')"
+                      class="absolute bottom-1.5 right-1.5 sb-btn opacity-0 group-hover:opacity-100 transition-opacity bg-teal-950/90 border-teal-700/40 text-teal-100">
+                      <SbIcon name="weave" class="w-3 h-3" />
+                      {{ t('storybook.weaveFromShort') }}
                     </button>
                   </div>
 
@@ -574,228 +563,194 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </div>
         </div>
 
-        <!-- ── detail overlay (kept from previous UI) ─────────────────────── -->
-        <div v-if="detailStory"
-          class="absolute inset-0 z-20 bg-black/80 flex items-center justify-center p-4 rounded-2xl"
-          @click.self="detailStory = null">
-          <div class="bg-gray-950 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-4xl max-h-full flex flex-col">
-            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-800 gap-4">
-              <div class="min-w-0 flex-1">
-                <h2 class="text-lg font-bold text-amber-200 leading-tight truncate">
-                  {{ storyTitle(detailStory) || t('storybook.details') }}
-                </h2>
-                <div class="flex items-center flex-wrap gap-3 mt-1 text-[10px] text-gray-500">
-                  <span v-if="detailStory.worldview">🌍 {{ detailStory.worldview }}</span>
-                  <span v-if="detailStory.time_scale">⏳ {{ t('chronicle.timeScale.' + detailStory.time_scale) }}</span>
-                  <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-400/70">🧠 {{ detailStory.base_model_name }}</span>
-                  <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-400/70">🧩 {{ detailStory.workflow_name }}</span>
-                  <span class="font-mono">{{ formatDate(detailStory.created_at) }}</span>
-                </div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <div class="flex rounded-lg overflow-hidden border border-gray-700 text-[10px]">
-                  <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
-                    :class="lang === l ? 'bg-amber-800/70 text-amber-100' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'"
-                    class="px-2.5 py-1.5 transition-colors uppercase">{{ l }}</button>
-                </div>
-                <button @click="detailStory = null"
-                  class="text-gray-600 hover:text-gray-200 text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800 transition-colors">✕</button>
-              </div>
-            </div>
-            <div class="flex-1 overflow-y-auto divide-y divide-gray-800/50">
-              <div v-if="storyOverall(detailStory)" class="px-8 py-5">
-                <p class="text-gray-300 leading-relaxed text-sm italic border-l-2 border-amber-700/50 pl-4">
-                  {{ storyOverall(detailStory) }}
-                </p>
-              </div>
-              <!-- Biography -->
-              <div v-if="storyBio(detailStory)" class="px-8 py-5">
-                <div class="flex items-center justify-between mb-2">
-                  <h4 class="text-xs font-semibold text-purple-300/80 tracking-wide">📖 {{ t('storybook.biography') }}</h4>
-                  <div class="flex items-center gap-2">
-                    <span v-if="detailStory.workflow_name" class="text-[10px] text-gray-600 font-mono hidden sm:inline">🧩 {{ detailStory.workflow_name }}</span>
-                    <button @click="addPinup(detailStory, 'add')"
-                      :disabled="pinupBusy.has(detailStory.story_id)"
-                      :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
-                      class="px-2 py-1 rounded-lg border border-gray-700/50 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition">
-                      + {{ t('storybook.pinupAdd') }}
-                    </button>
-                    <button v-if="storyPinups(detailStory).length"
-                      @click="addPinup(detailStory, 'replace')"
-                      :disabled="pinupBusy.has(detailStory.story_id)"
-                      :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
-                      class="px-2 py-1 rounded-lg border border-gray-700/50 text-[10px] text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition">
-                      ⟳ {{ t('storybook.pinupReplace') }}
-                    </button>
+        <!-- DETAIL OVERLAY -->
+        <Transition name="sb-overlay">
+          <div v-if="detailStory"
+            class="absolute inset-0 z-20 sb-overlay-bg flex items-center justify-center p-3 sm:p-4"
+            @click.self="closeDetail">
+            <div class="sb-detail-panel w-full max-w-4xl max-h-full flex flex-col overflow-hidden">
+              <div class="flex items-start justify-between px-5 sm:px-6 py-4 sb-hairline gap-3">
+                <div class="min-w-0 flex-1">
+                  <h2 class="sb-display text-xl text-[var(--sb-amber)] leading-snug">
+                    {{ storyTitle(detailStory) || t('storybook.details') }}
+                  </h2>
+                  <div class="flex items-center flex-wrap gap-2 mt-1.5 text-[10px] text-[var(--sb-muted)]">
+                    <span v-if="detailStory.worldview" class="text-[var(--sb-amber)]/75">{{ detailStory.worldview }}</span>
+                    <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
+                      <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
+                    </span>
+                    <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
+                    <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
+                    <span class="font-mono text-[9px]">{{ formatDate(detailStory.created_at) }}</span>
                   </div>
                 </div>
-                <!-- Corkboard of polaroids -->
-                <div v-if="storyPinups(detailStory).length || pinupBusy.has(detailStory.story_id)"
-                  class="pinboard mb-3">
-                  <div v-for="(sha, i) in storyPinups(detailStory)" :key="sha"
-                    class="pincard" :style="{ transform: `rotate(${pinupRotation(i)}deg)` }"
-                    @click="openPinup(sha)">
-                    <span class="pincard-pin"></span>
-                    <img :src="`/api/thumbnails/${sha}.webp`" @error="onThumbError($event, sha)" />
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button @click="detailPrev" :disabled="detailIndex <= 0"
+                    class="sb-icon-btn disabled:opacity-30"
+                    :aria-label="t('storybook.aria.prev')"
+                    :title="t('storybook.detail.prev')">
+                    <SbIcon name="chevronLeft" class="w-4 h-4" />
+                  </button>
+                  <span v-if="detailIndex >= 0" class="text-[10px] text-[var(--sb-muted)] font-mono min-w-[3.5rem] text-center">
+                    {{ t('storybook.detail.position', { n: detailIndex + 1, total: visibleStories.length }) }}
+                  </span>
+                  <button @click="detailNext" :disabled="detailIndex < 0 || detailIndex >= visibleStories.length - 1"
+                    class="sb-icon-btn disabled:opacity-30"
+                    :aria-label="t('storybook.aria.next')"
+                    :title="t('storybook.detail.next')">
+                    <SbIcon name="chevronRight" class="w-4 h-4" />
+                  </button>
+                  <div class="sb-seg ml-1">
+                    <button v-for="l in ['ja', 'en']" :key="l" @click="lang = l"
+                      :class="lang === l ? 'is-on' : ''" class="sb-seg-btn uppercase">{{ l }}</button>
                   </div>
-                  <div v-if="pinupBusy.has(detailStory.story_id)" class="pincard pincard--loading">
-                    <span class="pincard-pin"></span>
-                    <div class="pincard-spin">…</div>
-                  </div>
+                  <button @click="closeDetail" class="sb-icon-btn"
+                    :aria-label="t('storybook.aria.close')"
+                    :title="t('storybook.detail.close')">
+                    <SbIcon name="close" class="w-4 h-4" />
+                  </button>
                 </div>
-                <div class="flex gap-4">
-                  <div class="text-sm text-gray-300 space-y-1.5 min-w-0">
+              </div>
+
+              <div class="flex-1 overflow-y-auto">
+                <div v-if="storyOverall(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
+                  <p class="sb-prose italic border-l border-[var(--sb-rule)] pl-4">
+                    {{ storyOverall(detailStory) }}
+                  </p>
+                </div>
+
+                <div v-if="storyBio(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
+                  <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                    <h4 class="sb-section-title">{{ t('storybook.biography') }}</h4>
+                    <div class="flex items-center gap-2">
+                      <button @click="addPinup(detailStory, 'add')"
+                        :disabled="pinupBusy.has(detailStory.story_id)"
+                        :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
+                        class="sb-btn disabled:opacity-40">
+                        + {{ t('storybook.pinupAdd') }}
+                      </button>
+                      <button v-if="storyPinups(detailStory).length"
+                        @click="addPinup(detailStory, 'replace')"
+                        :disabled="pinupBusy.has(detailStory.story_id)"
+                        :title="t('storybook.pinupWorkflowTitle', { wf: detailStory.workflow_name || '—' })"
+                        class="sb-btn disabled:opacity-40">
+                        <SbIcon name="refresh" class="w-3 h-3" />
+                        {{ t('storybook.pinupReplace') }}
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="storyPinups(detailStory).length || pinupBusy.has(detailStory.story_id)"
+                    class="pinboard mb-4">
+                    <div v-for="(sha, i) in storyPinups(detailStory)" :key="sha"
+                      class="pincard" :style="{ transform: `rotate(${pinupRotation(i)}deg)` }"
+                      @click="openPinup(sha)">
+                      <span class="pincard-pin"></span>
+                      <img :src="`/api/thumbnails/${sha}.webp`" @error="onThumbError($event, sha)" />
+                    </div>
+                    <div v-if="pinupBusy.has(detailStory.story_id)" class="pincard pincard--loading">
+                      <span class="pincard-pin"></span>
+                      <div class="pincard-spin">…</div>
+                    </div>
+                  </div>
+                  <div class="text-sm text-gray-300 space-y-1.5 min-w-0 leading-relaxed">
                     <p v-if="storyBio(detailStory).personality">{{ storyBio(detailStory).personality }}</p>
                     <p v-if="storyBio(detailStory).occupation" class="text-gray-400">
-                      <span class="text-gray-500">{{ t('storybook.bioOccupation') }}:</span> {{ storyBio(detailStory).occupation }}
+                      <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ storyBio(detailStory).occupation }}
                     </p>
                     <p v-for="f in BIO_LIST_FIELDS" :key="f"
                       v-show="(storyBio(detailStory)[f] || []).length"
                       class="text-gray-400 break-words">
-                      <span class="text-gray-500">{{ t('storybook.bio_' + f) }}:</span>
-                      {{ (storyBio(detailStory)[f] || []).join('、') }}
+                      <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span>
+                      {{ joinList(storyBio(detailStory)[f]) }}
                     </p>
                     <p v-if="storyBio(detailStory).backstory" class="text-gray-400 italic pt-1">{{ storyBio(detailStory).backstory }}</p>
                   </div>
                 </div>
-              </div>
-              <!-- Timetable -->
-              <div v-if="storyTimetable(detailStory).length" class="px-8 py-5">
-                <h4 class="text-xs font-semibold text-teal-300/80 mb-2 tracking-wide">🕒 {{ t('storybook.timetable') }}</h4>
-                <ul class="space-y-1.5">
-                  <li v-for="(slot, si) in storyTimetable(detailStory)" :key="si"
-                    class="text-sm text-gray-300 flex gap-2">
-                    <span class="text-teal-400/80 font-medium shrink-0 w-24">{{ slot.label }}</span>
-                    <span class="min-w-0">
-                      {{ slot.activity }}
-                      <span v-if="slot.place" class="text-gray-500">@ {{ slot.place }}</span>
-                      <span v-if="slot.feeling" class="text-gray-600 italic">（{{ slot.feeling }}）</span>
-                    </span>
-                  </li>
-                </ul>
-              </div>
-              <div v-for="(axis, idx) in AXES" :key="axis"
-                class="flex min-h-[220px]"
-                :class="idx % 2 === 0 ? 'flex-row' : 'flex-row-reverse'">
-                <div class="w-2/5 shrink-0 bg-gray-900 cursor-pointer relative group overflow-hidden"
-                  @click="openImage(axisImage(detailStory, axis))">
-                  <img v-if="axisImage(detailStory, axis)"
-                    :src="`/api/thumbnails/${axisImage(detailStory, axis)}.webp`"
-                    @error="onThumbError($event, axisImage(detailStory, axis))"
-                    class="w-full h-full object-cover hover:opacity-90 transition-opacity" loading="lazy" />
-                  <span v-else class="absolute inset-0 flex items-center justify-center text-4xl text-gray-700">⏳</span>
-                  <button v-if="axisImage(detailStory, axis)"
-                    @click.stop="emit('weave-from', axisImage(detailStory, axis))"
-                    :title="t('storybook.weaveFrom')"
-                    class="absolute bottom-2 right-2 px-2 py-1 bg-teal-900/80 hover:bg-teal-700/90 border border-teal-600/50 rounded-lg text-[10px] text-teal-200 opacity-0 group-hover:opacity-100 transition-opacity">
-                    📜 {{ t('storybook.weaveFromShort') }}
-                  </button>
-                </div>
-                <div class="flex-1 px-6 py-5 flex flex-col gap-3 justify-center">
-                  <span class="text-[10px] font-bold uppercase tracking-widest"
-                    :class="axis === detailStory.base_time_axis ? 'text-amber-400' : 'text-teal-400'">
-                    {{ t('chronicle.axis.' + axis) }}
-                    <span v-if="axis === detailStory.base_time_axis"
-                      class="text-gray-500 normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
-                  </span>
-                  <p class="text-gray-200 leading-relaxed text-sm whitespace-pre-wrap">
-                    {{ axisStory(detailStory, axis) || '—' }}
-                  </p>
-                  <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
-                    <summary class="cursor-pointer text-[10px] text-gray-500 hover:text-gray-300 select-none">
-                      {{ t('storybook.showPrompt') }}
-                    </summary>
-                    <div class="mt-2 flex flex-col gap-1">
-                      <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-gray-900/80 rounded-lg p-2">{{ detailStory.axes[axis].prompt_positive }}</pre>
-                      <pre v-if="detailStory.axes[axis].prompt_negative"
-                        class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-gray-900/80 rounded-lg p-2">{{ detailStory.axes[axis].prompt_negative }}</pre>
+
+                <details v-if="storyTimetable(detailStory).length" class="px-6 sm:px-8 py-5 sb-section" open>
+                  <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3">
+                    <SbIcon name="clock" class="w-3.5 h-3.5 opacity-70" />
+                    {{ t('storybook.timetable') }}
+                  </summary>
+                  <ul class="space-y-2">
+                    <li v-for="(slot, si) in storyTimetable(detailStory)" :key="si"
+                      class="text-sm text-gray-300 flex gap-3">
+                      <span class="text-teal-400/85 font-medium shrink-0 w-24 text-[13px]">{{ slot.label }}</span>
+                      <span class="min-w-0 leading-relaxed">
+                        {{ slot.activity }}
+                        <span v-if="slot.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: slot.place }) }}</span>
+                        <span v-if="slot.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: slot.feeling }) }}</span>
+                      </span>
+                    </li>
+                  </ul>
+                </details>
+
+                <div v-for="(axis, ai) in AXES" :key="axis"
+                  class="px-6 sm:px-8 py-6 sb-section flex flex-col sm:flex-row gap-5"
+                  :class="ai % 2 === 1 ? 'sm:flex-row-reverse' : ''">
+                  <div class="sm:w-2/5 shrink-0">
+                    <div class="relative aspect-square rounded-xl overflow-hidden bg-black/50 border border-white/5 group">
+                      <img v-if="axisImage(detailStory, axis)"
+                        :src="`/api/thumbnails/${axisImage(detailStory, axis)}.webp`"
+                        @error="onThumbError($event, axisImage(detailStory, axis))"
+                        class="w-full h-full object-cover" loading="lazy" />
+                      <span v-else class="absolute inset-0 flex items-center justify-center text-[var(--sb-faint)] text-sm">{{ t('storybook.imagePending') }}</span>
+                      <div class="absolute inset-x-0 bottom-0 p-2 flex flex-wrap gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity bg-gradient-to-t from-black/80 to-transparent">
+                        <button v-if="axisImage(detailStory, axis)"
+                          @click="openImage(axisImage(detailStory, axis))"
+                          class="sb-btn bg-black/50"
+                          :aria-label="t('storybook.aria.openInGallery')">
+                          <SbIcon name="image" class="w-3 h-3" />
+                          {{ t('storybook.openInGallery') }}
+                        </button>
+                        <button v-if="axisImage(detailStory, axis)"
+                          @click="emit('weave-from', axisImage(detailStory, axis))"
+                          class="sb-btn bg-teal-950/70 border-teal-700/40 text-teal-100"
+                          :aria-label="t('storybook.aria.weave')">
+                          <SbIcon name="weave" class="w-3 h-3" />
+                          {{ t('storybook.weaveFromShort') }}
+                        </button>
+                        <button v-if="axis !== detailStory.base_time_axis && detailStory.axes?.[axis]?.prompt_positive"
+                          @click="regenerate(detailStory, axis)"
+                          :disabled="regenerating.has(`${detailStory.story_id}:${axis}`)"
+                          class="sb-btn-accent disabled:opacity-40 ml-auto"
+                          :aria-label="t('storybook.aria.regen')">
+                          <SbIcon name="dice" class="w-3 h-3" />
+                          {{ regenerating.has(`${detailStory.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                        </button>
+                      </div>
                     </div>
-                  </details>
+                  </div>
+                  <div class="sm:w-3/5 flex flex-col gap-2 min-w-0">
+                    <span class="text-[11px] font-semibold uppercase tracking-widest"
+                      :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
+                      {{ t('chronicle.axis.' + axis) }}
+                      <span v-if="axis === detailStory.base_time_axis"
+                        class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
+                    </span>
+                    <p class="sb-prose">
+                      {{ axisStory(detailStory, axis) || '—' }}
+                    </p>
+                    <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
+                      <summary class="cursor-pointer text-[10px] text-[var(--sb-muted)] hover:text-gray-300 select-none">
+                        {{ t('storybook.showPrompt') }}
+                      </summary>
+                      <div class="mt-2 flex flex-col gap-1">
+                        <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_positive }}</pre>
+                        <pre v-if="detailStory.axes[axis].prompt_negative"
+                          class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_negative }}</pre>
+                      </div>
+                    </details>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </Transition>
       </div>
     </div>
 
-    <!-- ── FOCUS MODE — full-screen single-story view ─────────────────────── -->
-    <div v-if="show && focusStory" class="fixed inset-0 z-[75] bg-black/95 flex flex-col p-6"
-      @click.self="focusClose">
-      <div class="flex items-center justify-between mb-4">
-        <div class="min-w-0 flex-1">
-          <h2 class="text-lg font-bold text-amber-200 truncate">{{ storyTitle(focusStory) || '—' }}</h2>
-          <div class="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">
-            <span v-if="focusStory.worldview">🌍 {{ focusStory.worldview }}</span>
-            <span v-if="focusStory.time_scale">⏳ {{ t('chronicle.timeScale.' + focusStory.time_scale) }}</span>
-            <span v-if="focusStory.emotion" class="text-indigo-400/80">🌒 {{ t(`inspire.emotion.${focusStory.emotion}`, focusStory.emotion) }}</span>
-            <span class="font-mono">{{ formatDate(focusStory.created_at) }}</span>
-            <span class="ml-2 text-gray-600">{{ focusIndex + 1 }} / {{ visibleStories.length }}</span>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 shrink-0">
-          <button @click="focusPrev" :disabled="focusIndex <= 0"
-            :title="t('storybook.focus.prev')"
-            class="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-30 border border-gray-700 rounded-lg text-gray-300">← </button>
-          <button @click="focusNext" :disabled="focusIndex >= visibleStories.length - 1"
-            :title="t('storybook.focus.next')"
-            class="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-30 border border-gray-700 rounded-lg text-gray-300"> →</button>
-          <button @click="focusClose"
-            :title="t('storybook.focus.close')"
-            class="ml-2 text-gray-500 hover:text-gray-200 text-2xl w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-800">✕</button>
-        </div>
-      </div>
-
-      <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-5 overflow-hidden">
-        <!-- big base image -->
-        <div class="flex flex-col gap-3 min-h-0">
-          <div class="flex-1 min-h-0 bg-gray-950 border border-gray-800 rounded-2xl overflow-hidden flex items-center justify-center">
-            <img v-if="axisImage(focusStory, focusStory.base_time_axis)"
-              :src="`/api/thumbnails/${axisImage(focusStory, focusStory.base_time_axis)}.webp`"
-              @error="onThumbError($event, axisImage(focusStory, focusStory.base_time_axis))"
-              class="max-w-full max-h-full object-contain" />
-            <span v-else class="text-4xl text-gray-700">⏳</span>
-          </div>
-          <div class="grid grid-cols-3 gap-2">
-            <div v-for="axis in AXES" :key="axis"
-              class="relative aspect-square bg-gray-950 rounded-lg overflow-hidden border cursor-pointer"
-              :class="axis === focusStory.base_time_axis ? 'border-amber-600/60' : 'border-gray-800'"
-              @click="openImage(axisImage(focusStory, axis))">
-              <img v-if="axisImage(focusStory, axis)"
-                :src="`/api/thumbnails/${axisImage(focusStory, axis)}.webp`"
-                @error="onThumbError($event, axisImage(focusStory, axis))"
-                class="w-full h-full object-cover" loading="lazy" />
-              <span v-else class="absolute inset-0 flex items-center justify-center text-gray-700">⏳</span>
-              <span class="absolute bottom-0.5 left-1 text-[9px] font-bold uppercase tracking-wide"
-                :class="axis === focusStory.base_time_axis ? 'text-amber-300' : 'text-teal-300'">
-                {{ t('chronicle.axis.' + axis) }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- story text -->
-        <div class="flex flex-col gap-3 overflow-y-auto pr-1">
-          <p v-if="storyOverall(focusStory)"
-            class="text-sm text-gray-300 italic leading-relaxed border-l-2 border-amber-700/50 pl-3">
-            {{ storyOverall(focusStory) }}
-          </p>
-          <div v-for="axis in AXES" :key="axis" class="flex flex-col gap-1.5">
-            <span class="text-[10px] font-bold uppercase tracking-widest"
-              :class="axis === focusStory.base_time_axis ? 'text-amber-400' : 'text-teal-400'">
-              {{ t('chronicle.axis.' + axis) }}
-              <span v-if="axis === focusStory.base_time_axis"
-                class="text-gray-500 normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
-            </span>
-            <p class="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
-              {{ axisStory(focusStory, axis) || '—' }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Pinup polaroid lightbox (top-most: above the story detail + image viewer) -->
+    <!-- Pinup lightbox -->
     <div v-if="pinupView"
       class="fixed inset-0 z-[210] bg-black/85 flex items-center justify-center p-8"
       @click.self="pinupView = null">
@@ -808,7 +763,221 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
-/* ── Polaroid stack ───────────────────────────────────────────────────────── */
+.storybook-root {
+  --sb-font-display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --sb-font-ui: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --sb-amber: #e8c47a;
+  --sb-ink: #0c0e12;
+  --sb-panel: #141820;
+  --sb-rule: rgba(232, 196, 122, 0.22);
+  --sb-muted: #8b929e;
+  --sb-faint: #5c6470;
+  font-family: var(--sb-font-ui);
+  background: radial-gradient(ellipse at 30% 20%, rgba(232, 196, 122, 0.07), transparent 50%),
+              rgba(0, 0, 0, 0.82);
+}
+
+.sb-display { font-family: var(--sb-font-display); font-weight: 600; }
+.sb-prose {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: #e5e7eb;
+  white-space: pre-wrap;
+}
+.sb-shell {
+  background:
+    linear-gradient(165deg, rgba(232, 196, 122, 0.06) 0%, transparent 42%),
+    var(--sb-panel);
+  border: 1px solid rgba(232, 196, 122, 0.18);
+  border-radius: 1rem;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.sb-hairline { border-bottom: 1px solid var(--sb-rule); }
+.sb-section { border-bottom: 1px solid rgba(232, 196, 122, 0.1); }
+.sb-section-title {
+  font-family: var(--sb-font-display);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  color: rgba(232, 196, 122, 0.85);
+  font-weight: 600;
+}
+.sb-body { color: #d1d5db; }
+
+.sb-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  padding: 0.75rem;
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 0.35s, box-shadow 0.35s;
+}
+.storybook-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(232, 196, 122, 0.28);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.sb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  color: #d1d5db;
+  font-size: 0.7rem;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.sb-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(232, 196, 122, 0.25); }
+.sb-btn-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  background: rgba(88, 28, 135, 0.45);
+  color: #e9d5ff;
+  font-size: 0.65rem;
+  transition: background 0.15s;
+}
+.sb-btn-accent:hover { background: rgba(107, 33, 168, 0.55); }
+.sb-icon-btn {
+  width: 2rem; height: 2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 0.5rem;
+  color: var(--sb-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.sb-icon-btn:hover { background: rgba(255, 255, 255, 0.06); color: #e5e7eb; }
+.sb-icon-btn-sm {
+  width: 1.6rem; height: 1.6rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.25);
+  transition: background 0.15s, color 0.15s;
+}
+.sb-icon-btn-sm:hover { background: rgba(255, 255, 255, 0.08); }
+.sb-link {
+  font-size: 0.7rem;
+  color: var(--sb-amber);
+  opacity: 0.85;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sb-link:hover { opacity: 1; }
+
+.sb-seg {
+  display: inline-flex;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sb-seg-btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.7rem;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--sb-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.sb-seg-btn:hover { background: rgba(255, 255, 255, 0.05); }
+.sb-seg-btn.is-on { background: rgba(146, 64, 14, 0.55); color: #fef3c7; }
+.sb-seg-btn.is-on-teal { background: rgba(19, 78, 74, 0.65); color: #ccfbf1; }
+
+.sb-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+}
+.sb-search input {
+  background: transparent;
+  outline: none;
+  font-size: 0.75rem;
+  color: #e5e7eb;
+  width: 12rem;
+}
+.sb-select {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.75rem;
+  color: #e5e7eb;
+  outline: none;
+}
+.sb-label {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sb-muted);
+}
+.sb-chip {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--sb-muted);
+  font-size: 0.625rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sb-chip:hover { background: rgba(255, 255, 255, 0.05); }
+.sb-chip.is-chip-on { background: rgba(146, 64, 14, 0.5); color: #fef3c7; border-color: rgba(245, 158, 11, 0.35); }
+.sb-chip.is-chip-on-teal { background: rgba(19, 78, 74, 0.55); color: #ccfbf1; border-color: rgba(45, 212, 191, 0.3); }
+.sb-chip.is-chip-on-indigo { background: rgba(49, 46, 129, 0.55); color: #e0e7ff; border-color: rgba(129, 140, 248, 0.3); }
+
+.sb-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.35rem;
+  background: rgba(0, 0, 0, 0.35);
+  max-width: 100%;
+}
+.sb-meta-motif { color: #d8b4fe; }
+.sb-meta-scale { color: #5eead4; }
+.sb-meta-emotion { color: #a5b4fc; }
+
+.sb-icon { display: inline-block; flex-shrink: 0; }
+
+.sb-overlay-bg {
+  background: radial-gradient(ellipse at 50% 30%, rgba(232, 196, 122, 0.08), transparent 55%),
+              rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(2px);
+  border-radius: 1rem;
+}
+.sb-detail-panel {
+  background:
+    linear-gradient(180deg, rgba(232, 196, 122, 0.07) 0%, transparent 28%),
+    #0f1218;
+  border: 1px solid rgba(232, 196, 122, 0.2);
+  border-radius: 0.9rem;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6);
+}
+
+.sb-overlay-enter-active,
+.sb-overlay-leave-active {
+  transition: opacity 0.22s ease;
+}
+.sb-overlay-enter-active .sb-detail-panel,
+.sb-overlay-leave-active .sb-detail-panel {
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.22s ease;
+}
+.sb-overlay-enter-from,
+.sb-overlay-leave-to { opacity: 0; }
+.sb-overlay-enter-from .sb-detail-panel,
+.sb-overlay-leave-to .sb-detail-panel {
+  transform: translateY(10px) scale(0.985);
+  opacity: 0;
+}
+
+/* Polaroid stack */
 .polaroid-stack {
   position: relative;
   aspect-ratio: 1 / 1;
@@ -821,12 +990,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   left: 16%;
   width: 68%;
   height: 68%;
-  background: #f5f4eb;
-  border: 4px solid #f5f4eb;
-  border-bottom-width: 22px;    /* Polaroid signature bottom margin */
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
-  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1),
-              box-shadow 0.4s;
+  background: #f3efe4;
+  border: 4px solid #f3efe4;
+  border-bottom-width: 22px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 0.45s;
   overflow: hidden;
 }
 .polaroid img {
@@ -841,54 +1010,56 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   justify-content: center;
   height: 100%;
   color: #94a3b8;
-  font-size: 1.5rem;
+  font-size: 0.7rem;
+  font-family: var(--sb-font-ui);
+  padding: 0.5rem;
+  text-align: center;
 }
 .polaroid.past    { transform: translate(-16%, -6%) rotate(-6deg); z-index: 1; }
 .polaroid.present { transform: translate(0, 0)       rotate(2deg);  z-index: 2; }
 .polaroid.future  { transform: translate(16%, 6%)    rotate(8deg);  z-index: 3; }
 .polaroid.base {
-  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.6),
-              0 6px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 2px rgba(232, 196, 122, 0.65),
+              0 8px 18px rgba(0, 0, 0, 0.5);
 }
-
-/* Hover: fan the three photos out horizontally */
 .storybook-card:hover .polaroid-stack .polaroid.past    { transform: translate(-42%, -2%) rotate(-4deg); }
 .storybook-card:hover .polaroid-stack .polaroid.present { transform: translate(0, -2%)     rotate(0deg);  }
 .storybook-card:hover .polaroid-stack .polaroid.future  { transform: translate(42%, -2%)  rotate(4deg);  }
-.storybook-card:hover {
-  transform: translateY(-2px);
-}
-
-/* Compact Polaroid stack for the Timeline strip */
 .polaroid-stack-sm .polaroid { border-width: 3px; border-bottom-width: 14px; }
 
-/* ── Pinup corkboard (Biography reference photos) ─────────────────────────── */
+/* Pinboard */
 .pinboard {
   display: flex;
   flex-wrap: wrap;
   gap: 1.1rem 1.4rem;
-  padding: 1.2rem 1rem;
-  border-radius: 0.6rem;
-  background-color: #b98a58;
+  padding: 1.25rem 1.1rem;
+  border-radius: 0.65rem;
+  background-color: #a87b4d;
   background-image:
-    radial-gradient(rgba(0, 0, 0, 0.14) 1px, transparent 1.4px),
-    radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1.4px);
-  background-size: 9px 9px, 9px 9px;
-  background-position: 0 0, 4.5px 4.5px;
-  box-shadow: inset 0 0 34px rgba(0, 0, 0, 0.32),
-              0 2px 6px rgba(0, 0, 0, 0.3);
+    radial-gradient(rgba(0, 0, 0, 0.16) 1px, transparent 1.4px),
+    radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.4px),
+    linear-gradient(135deg, rgba(255, 220, 170, 0.12), transparent 50%);
+  background-size: 9px 9px, 9px 9px, auto;
+  background-position: 0 0, 4.5px 4.5px, 0 0;
+  box-shadow: inset 0 0 36px rgba(0, 0, 0, 0.35),
+              0 2px 8px rgba(0, 0, 0, 0.35);
 }
 .pincard {
   position: relative;
-  background: #fafafa;
+  background: #faf8f3;
   padding: 0.4rem 0.4rem 1.4rem;
-  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+  animation: sb-pin-settle 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes sb-pin-settle {
+  from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+  to { opacity: 1; }
 }
 .pincard:hover {
   transform: rotate(0deg) scale(1.06) !important;
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.55);
   z-index: 2;
 }
 .pincard img {
@@ -906,8 +1077,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ff6b64, #d0362f);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  background: radial-gradient(circle at 35% 30%, #ff7a72, #c42e28);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 .pincard--loading {
   width: 6.8rem;
@@ -925,5 +1096,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   width: min(70vw, 460px);
   height: auto;
   max-height: 72vh;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>

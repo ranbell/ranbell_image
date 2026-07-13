@@ -8,7 +8,7 @@
     "refine": "✨ 錬成",
     "aiProcess": "AI処理",
     "clear": "✕ 解除",
-    "chronicle": "📜 Chronicle",
+    "chronicle": "Chronicle",
     "chronicleTitle": "選択中の先頭画像から物語を紡ぐ"
   },
   "inspire": {
@@ -1339,6 +1339,20 @@
       "expand": "展開",
       "prompt": "プロンプト",
       "generate": "生成"
+    },
+    "idleHint": "設定を整えて「物語を紡ぐ」を押してください",
+    "settingsSummary": "設定サマリ",
+    "editSettings": "設定を表示",
+    "directionGroup": "物語の方向",
+    "outputGroup": "出力・生成",
+    "advancedGroup": "詳細設定",
+    "rawStream": "生出力",
+    "seedLabel": "seed",
+    "motifLabel": "モチーフ",
+    "openStorybook": "Storybook を開く",
+    "comfyOfflineHint": "ComfyUI に接続できません — 画像は再接続後に生成されます。",
+    "aria": {
+      "close": "閉じる"
     }
   },
   "storybook": {
@@ -1355,6 +1369,8 @@
     "overall": "全体ストーリー",
     "biography": "バイオグラフィ",
     "timetable": "タイムテーブル",
+    "timetablePlace": "@ {place}",
+    "timetableFeeling": "（{feeling}）",
     "pinupAdd": "ポーズ追加",
     "pinupReplace": "引き直し",
     "pinupQueued": "ピンナップを生成中 — まもなくここに表示されます",
@@ -1379,11 +1395,15 @@
     "deleteFailed": "削除に失敗しました",
     "emptyFiltered": "条件に一致する物語はありません",
     "searchPh": "タイトル・物語・モチーフを検索…",
+    "readMore": "続きを読む",
+    "openInGallery": "ギャラリーで開く",
+    "close": "閉じる",
+    "listSep": "、",
+    "imagePending": "生成中",
     "view": {
       "gallery": "ギャラリー",
       "detail": "詳細",
-      "timeline": "タイムライン",
-      "focus": "フォーカス"
+      "timeline": "タイムライン"
     },
     "sort": {
       "newest": "新しい順",
@@ -1396,7 +1416,8 @@
       "timeScale": "スケール",
       "emotion": "感情",
       "more": "詳細フィルタ",
-      "clear": "フィルタ解除"
+      "clear": "フィルタ解除",
+      "all": "すべて"
     },
     "bucket": {
       "today": "今日",
@@ -1404,10 +1425,22 @@
       "thisWeek": "今週の他の日",
       "thisMonth": "今月の他の日"
     },
-    "focus": {
-      "prev": "前へ (←)",
-      "next": "次へ (→)",
-      "close": "閉じる (Esc)"
+    "detail": {
+      "prev": "前へ",
+      "next": "次へ",
+      "close": "閉じる",
+      "position": "{n} / {total}"
+    },
+    "aria": {
+      "details": "詳細を開く",
+      "delete": "物語を削除",
+      "weave": "この画像から物語を紡ぐ",
+      "regen": "この軸の画像を再生成",
+      "prev": "前の物語",
+      "next": "次の物語",
+      "close": "閉じる",
+      "refresh": "一覧を更新",
+      "openInGallery": "ギャラリーで画像を開く"
     }
   }
 }
