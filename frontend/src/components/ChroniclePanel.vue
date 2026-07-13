@@ -41,6 +41,8 @@ const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
 const workflow = ref('')
 const divergence = ref(0.3)   // default ~30%: below this stories go abstract (no concrete actions/items)
+const temperature = ref(1.0)  // Gemma 4 recommended default
+const numCtx = ref(16384)
 const emotion = ref('')       // target emotion register ('' = off)
 // Story-shape dimension, mirrors backend generator._DRAMATIC_MODES. '' = auto
 // (the backend auto-varies a distinct mode per candidate).
@@ -103,6 +105,8 @@ const titleJa = ref('')
 const overall = ref('')
 const overallJa = ref('')
 const mutationTags = ref([])   // tags injected by the divergence dial (visible)
+const storySeedTags = ref([])  // WD14 seed tags forcing concrete events
+const storySeedMotif = ref('')
 
 // ── candidate / selection state ─────────────────────────────────────────────
 const candidates = ref([])       // [{id,title,past,present,future,summary,motif}]
@@ -203,6 +207,8 @@ function resetStory() {
   overall.value = ''
   overallJa.value = ''
   mutationTags.value = []
+  storySeedTags.value = []
+  storySeedMotif.value = ''
   biography.value = null
   timetable.value = null
   concrete.value = null
@@ -389,6 +395,8 @@ async function start() {
     suppress_conflict_tags: suppressConflictTags.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
+    temperature: temperature.value,
+    num_ctx: numCtx.value,
     locale: uiLocale.value,
   }, (d) => { groupId.value = d.group_id })
 }
@@ -470,6 +478,10 @@ function handleEvent(ev) {
       break
     case 'mutation_tags':
       mutationTags.value = ev.tags || []
+      break
+    case 'story_seed_tags':
+      storySeedTags.value = ev.tags || []
+      storySeedMotif.value = ev.motif || ''
       break
     case 'biography':
       biography.value = { en: ev.biography, ja: ev.biography_ja }
@@ -652,6 +664,28 @@ async function generateImages() {
                     {{ mutationTags.join(', ') }}
                   </p>
                 </div>
+                <!-- temperature (Gemma 4 default 1.0) -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.temperatureTitle')">{{ t('chronicle.temperature') }}</span>
+                  <input v-model.number="temperature" type="range" min="0" max="1.5" step="0.1" class="flex-1 accent-teal-500" />
+                  <span class="text-teal-400 font-mono w-10 text-right">{{ temperature.toFixed(1) }}</span>
+                </div>
+                <!-- num_ctx -->
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-500 w-20 flex-shrink-0" :title="t('chronicle.numCtxTitle')">{{ t('chronicle.numCtx') }}</span>
+                  <select v-model.number="numCtx"
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-gray-200 focus:border-teal-500 outline-none">
+                    <option :value="4096">4096</option>
+                    <option :value="8192">8192</option>
+                    <option :value="16384">{{ t('chronicle.numCtxRecommended') }}</option>
+                    <option :value="32768">32768</option>
+                  </select>
+                </div>
+                <p v-if="storySeedTags.length" class="text-[10px] text-amber-500/80 break-all">
+                  <span class="text-amber-300/80">✦ {{ t('chronicle.seedTags') }}:</span>
+                  {{ storySeedTags.join(', ') }}
+                  <span v-if="storySeedMotif"> · motif: {{ storySeedMotif }}</span>
+                </p>
                 <!-- emotion register -->
                 <div class="flex items-start gap-2">
                   <span class="text-gray-500 w-20 flex-shrink-0 pt-1" :title="t('chronicle.emotionTitle')">🌒 {{ t('chronicle.emotionLabel') }}</span>

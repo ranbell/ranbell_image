@@ -27,7 +27,13 @@ from app.story.generator import (
     _tone_line,
     acts_temporally_distinct,
     assign_dramatic_modes,
+    bind_timetable_axis_slots,
+    candidates_ungrounded,
+    chunk_list,
+    filter_story_seed_pool,
+    parse_candidates_json,
     sample_bio_domains,
+    translation_values_complete,
     base_pose_tags,
     build_differentiate_acts_prompt,
     build_topic_directive_prompt,
@@ -40,6 +46,7 @@ from app.story.generator import (
     build_overall_prompt,
     build_story_prompt,
     build_story_repair_prompt,
+    build_timetable_prompt,
     build_story_tags_prompt,
     build_title_prompt,
     build_translation_to_english_prompt,
@@ -48,7 +55,6 @@ from app.story.generator import (
     build_biography_prompt,
     build_concrete_activities_prompt,
     build_json_translation_prompt,
-    build_timetable_prompt,
     character_tags_from_wd14,
     classify_identity_tag,
     collect_prompt_tags,
@@ -60,7 +66,6 @@ from app.story.generator import (
     inject_identity_tags,
     is_multi_character,
     parse_axis_tags_json,
-    parse_candidates_json,
     parse_english_translation_json,
     parse_story_json,
     parse_story_sections,
@@ -1770,6 +1775,8 @@ def test_expand_prompt_weaves_biography_timetable():
     )
     assert "CHARACTER BIOGRAPHY" in prompt
     assert "rolling pin" in prompt and "kneads dough" in prompt
+    assert "HARD RULES" in prompt
+    assert "Daily/life rhythm" not in prompt
     # absent → no blocks
     plain = build_expand_prompt(
         selected={"id": "A", "title": "T", "past": "p", "present": "pr",
@@ -1778,3 +1785,78 @@ def test_expand_prompt_weaves_biography_timetable():
         worldview="",
     )
     assert "CHARACTER BIOGRAPHY" not in plain
+
+
+def test_candidates_prompt_leads_with_hard_rules_and_seed_tags():
+    p = build_candidates_prompt(
+        character_desc="1girl",
+        scene_desc="a cafe counter",
+        seed_tags=["coffee_cup", "apron", "paper"],
+        forced_motif="paper",
+        biography={"hobbies": ["latte art"]},
+    )
+    assert p.lstrip().startswith("HARD RULES")
+    assert "SEED TAGS" in p and "coffee_cup" in p and "paper" in p
+    assert "latte art" in p
+    assert "grounded_tags" in p
+
+
+def test_parse_candidates_grounded_tags():
+    raw = (
+        '{"candidates":[{"id":"A","title":"T","past":"p","present":"pr",'
+        '"future":"f","motif":"m","turn":"t","grounded_tags":["coffee_cup","apron"]}]}'
+    )
+    c = parse_candidates_json(raw)[0]
+    assert c["grounded_tags"] == ["coffee_cup", "apron"]
+
+
+def test_candidates_ungrounded_gate():
+    seed = ["a", "b", "c", "d"]
+    assert candidates_ungrounded(
+        [{"grounded_tags": ["a"]}, {"grounded_tags": []}, {"grounded_tags": []}],
+        seed,
+    )
+    assert not candidates_ungrounded(
+        [
+            {"grounded_tags": ["a", "b"]},
+            {"grounded_tags": ["b", "c"]},
+            {"grounded_tags": ["a", "c"]},
+        ],
+        seed,
+    )
+    assert not candidates_ungrounded([], ["a"])  # seed too small → skip gate
+
+
+def test_bind_timetable_axis_slots_prefers_axis_field():
+    slots = bind_timetable_axis_slots([
+        {"axis": "past", "label": "-1h", "activity": "tamp", "place": "bar", "feeling": "x"},
+        {"axis": "present", "label": "now", "activity": "serve", "place": "c", "feeling": "y"},
+        {"axis": "future", "label": "+1h", "activity": "fold", "place": "t", "feeling": "z"},
+        {"axis": "bridge", "label": "+30m", "activity": "wipe", "place": "c", "feeling": "q"},
+    ])
+    assert set(slots) == {"past", "present", "future"}
+    assert slots["past"]["activity"] == "tamp"
+
+
+def test_filter_story_seed_pool_drops_generic():
+    pool = filter_story_seed_pool(
+        ["1girl", "coffee_cup", "solo", "espresso_machine", "looking_at_viewer"],
+        removal={"bad_tag"},
+    )
+    low = {t.lower() for t in pool}
+    assert "coffee_cup" in low and "espresso_machine" in low
+    assert "1girl" not in low and "solo" not in low
+
+
+def test_translation_values_complete_and_chunk_list():
+    assert translation_values_complete({"a": "hello world"}, {"a": "こんにちは世界"})
+    assert not translation_values_complete({"a": "hello world"}, {"a": ""})
+    assert chunk_list([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+
+
+def test_timetable_prompt_requests_axis_field():
+    tt = build_timetable_prompt(
+        biography={}, scene_desc="cafe", time_scale="hours",
+        selected={"title": "T", "past": "p", "present": "pr", "future": "f"},
+    )
+    assert '"axis"' in tt or "axis" in tt

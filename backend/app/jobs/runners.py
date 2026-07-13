@@ -2674,6 +2674,15 @@ async def _iter_sha256_docs(db, sha256s: list[str]):
 
 # ── Chronicle (story) pipeline ────────────────────────────────────────────────
 
+def _chronicle_llm_options(body, temp: float, cfg: dict) -> dict:
+    return {
+        "temperature": temp,
+        "num_ctx": int(getattr(body, "num_ctx", None) or cfg.get("ollama_num_ctx", 16384)),
+        "top_k": 64,
+        "top_p": 0.95,
+    }
+
+
 async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: str, db) -> str | None:
     """Save a chronicle-generated image to generated_images_dir/Chronicles/.
 
@@ -2730,11 +2739,12 @@ async def run_chronicle_candidates(
     reused (Stage 1 skipped), candidates are regenerated at the raised
     temperature, and the previous set is archived in respin_history.
     """
-    from ..api.ai import _build_weighted_wd14_context
+    from ..api.ai import _build_weighted_wd14_context, filter_tag_list, removal_tag_set
     from ..runtime_config import get_runtime_config
     from ..story import db as story_db
     from ..story.api import ChronicleRequest
     from ..story.generator import (
+        _biography_brief,
         assign_dramatic_modes,
         build_biography_prompt,
         build_candidates_prompt,
@@ -2742,10 +2752,14 @@ async def run_chronicle_candidates(
         build_topic_directive_prompt,
         build_vision_prompt,
         candidates_degenerate,
+        candidates_ungrounded,
         character_tags_from_wd14,
+        filter_story_seed_pool,
         parse_biography_json,
         parse_candidates_json,
+        pick_forced_motif,
         sample_bio_domains,
+        sample_story_seed_tags,
         split_vision_sections,
     )
 
@@ -2765,7 +2779,7 @@ async def run_chronicle_candidates(
     try:
         cfg = await get_runtime_config(db)
         vlm_model = body.vlm_model or cfg["vlm_model"]
-        options = {"temperature": temp}
+        options = _chronicle_llm_options(body, temp, cfg)
 
         draft = None
         if story_id:
@@ -2925,6 +2939,43 @@ async def run_chronicle_candidates(
                 "body": body_dict,
             }
 
+        # ── Story seed tags (always resample, including on respin) ─────────────
+        story_seed_tags: list[str] = []
+        forced_motif = ""
+        try:
+            seed_query = " ".join(
+                x for x in [
+                    body.user_topic,
+                    ctx.get("scene_desc", ""),
+                    ctx.get("story_hooks", ""),
+                    _biography_brief(ctx.get("biography")),
+                ] if x
+            ).strip()
+            if seed_query:
+                vec = await ollama.embed(seed_query)
+                hits = await db.search_wd14_vocab(
+                    vec, limit=60, min_freq=0.01, max_freq=0.80, category=0,
+                )
+                hit_names = [
+                    str(h.get("name") or "").strip().replace(" ", "_")
+                    for h in hits if h.get("name")
+                ]
+                removal = removal_tag_set(cfg)
+                pool = filter_story_seed_pool(
+                    filter_tag_list(hit_names, removal), removal=removal,
+                )
+                story_seed_tags = sample_story_seed_tags(pool)
+                forced_motif = pick_forced_motif(story_seed_tags)
+        except Exception as exc:
+            logger.warning("[chronicle] story seed sampling failed: %s", exc)
+            story_seed_tags = []
+            forced_motif = ""
+            _put({"type": "warning",
+                  "message": "story seed tags unavailable — continuing without"})
+        ctx["story_seed_tags"] = story_seed_tags
+        ctx["forced_motif"] = forced_motif
+        _put({"type": "story_seed_tags", "tags": story_seed_tags, "motif": forced_motif})
+
         # ── Stage 2a: three story candidates (single JSON call) ───────────────
         # Assign a DISTINCT dramatic mode per candidate (A/B/C) so the three
         # pitches diverge in plot shape, not just viewpoint. A user-chosen mode
@@ -2955,8 +3006,11 @@ async def run_chronicle_candidates(
                     topic_directive=ctx.get("topic_directive", ""),
                     candidate_modes=candidate_modes,
                     tone=body.tone,
+                    biography=ctx.get("biography"),
+                    seed_tags=story_seed_tags,
+                    forced_motif=forced_motif,
                 ),
-                model=vlm_model, options=cand_options, fmt="json",
+                model=vlm_model, options=cand_options, fmt="json", think=True,
             )
             cancel.raise_if_set()
             parsed = parse_candidates_json(raw)
@@ -2968,14 +3022,18 @@ async def run_chronicle_candidates(
                     if not c.get("dramatic_mode"):
                         c["dramatic_mode"] = candidate_modes.get(c.get("id", ""), "")
                 candidates = parsed
-            if parsed and not candidates_degenerate(parsed):
+            if (
+                parsed
+                and not candidates_degenerate(parsed)
+                and not candidates_ungrounded(parsed, story_seed_tags)
+            ):
                 break
             if cand_attempt == 0:
-                logger.info("[chronicle] candidate beats degenerate; retrying with +temp")
+                logger.info("[chronicle] candidates thin/ungrounded; retrying with +temp")
                 _put({"type": "warning",
-                      "message": "candidates thin (timeline collapsed) — regenerating"})
+                      "message": "candidates thin or ungrounded — regenerating"})
             else:
-                logger.warning("[chronicle] candidates still degenerate after retry")
+                logger.warning("[chronicle] candidates still thin/ungrounded after retry")
         if not candidates:
             _put({"type": "error", "message": "Failed to generate story candidates"})
             return
@@ -2990,6 +3048,7 @@ async def run_chronicle_candidates(
             await story_db.set_story_payload(db, story_id, {
                 "candidates": candidates,
                 "respin_history": hist,
+                "context": ctx,
             })
         else:
             payload = story_db.new_story_payload(
@@ -3052,7 +3111,10 @@ async def run_chronicle_expand(
         _correct_prose_wd14_conflicts,
         _inject_wd14_must_tags,
         _parse_positive_negative,
+        _remove_forced_tags,
         _sample_mutation_tags,
+        filter_tag_list,
+        removal_tag_set,
     )
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
@@ -3060,6 +3122,7 @@ async def run_chronicle_expand(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         AXES,
+        bind_timetable_axis_slots,
         build_axis_prose_prompt,
         build_concrete_activities_prompt,
         build_expand_prompt,
@@ -3070,6 +3133,7 @@ async def run_chronicle_expand(
         build_story_repair_prompt,
         build_story_tags_prompt,
         build_translation_to_english_prompt,
+        chunk_list,
         classify_identity_tag,
         collect_prompt_tags,
         identity_lock_tags,
@@ -3083,6 +3147,7 @@ async def run_chronicle_expand(
         parse_timetable_json,
         parse_visual_plan_json,
         remove_conflict_tags,
+        translation_values_complete,
     )
 
     def _put(event: dict | None) -> None:
@@ -3116,7 +3181,8 @@ async def run_chronicle_expand(
 
         cfg = await get_runtime_config(db)
         vlm_model = body.vlm_model or cfg["vlm_model"]
-        options = {"temperature": temperature}
+        options = _chronicle_llm_options(body, temperature, cfg)
+        removal = removal_tag_set(cfg)
 
         doc = await db.get(body.base_sha256)
         if not doc:
@@ -3168,6 +3234,7 @@ async def run_chronicle_expand(
                 mutation_tags = await _sample_mutation_tags(
                     db, ollama, {"common_tags": list(wd14_tags)}, divergence
                 )
+                mutation_tags = filter_tag_list(mutation_tags, removal)
             except Exception as exc:
                 logger.warning("[chronicle] mutation tag sampling failed: %s", exc)
             if mutation_tags:
@@ -3183,35 +3250,60 @@ async def run_chronicle_expand(
         # Biography (persistent character grounding) carried from Phase 1.
         biography = ctx.get("biography") or {}
         biography_ja = ctx.get("biography_ja") or {}
+        seed_tags = list(ctx.get("story_seed_tags") or [])
+        forced_motif = str(ctx.get("forced_motif") or "")
 
         # ── Timetable: map her life onto concrete moments (scale-adaptive) so the
         # acts depict specific daily activities from her life, not idle poses.
-        _phase("buildingTimetable", 0.10, "Charting her day...")
+        # Short scales skip the full-day table — the span is too brief to chart.
         timetable: list[dict] = []
         timetable_ja: list[dict] = []
-        try:
-            timetable = parse_timetable_json(await ollama.generate_text(
-                build_timetable_prompt(
-                    biography=biography, scene_desc=scene_desc,
-                    time_scale=body.time_scale, base_axis=body.base_time_axis,
-                    locale=locale, selected=selected, user_topic=body.user_topic,
-                ),
-                model=vlm_model, options=options, fmt="json",
-            ))
-        except Exception as exc:
-            logger.warning("[chronicle] timetable build failed: %s", exc)
-        # Timetable is authored in English; always keep a Japanese copy so the
-        # Storybook JA/EN toggle works regardless of content locale.
-        if timetable:
+        axis_slots: dict[str, dict] = {}
+        if body.time_scale in ("minutes", "tens_of_minutes"):
+            axis_slots = {}
+        else:
+            _phase("buildingTimetable", 0.10, "Charting her day...")
             try:
-                timetable_ja = parse_timetable_json(await ollama.generate_text(
-                    build_json_translation_prompt(timetable, target="Japanese"),
-                    model=vlm_model, options=options, fmt="json",
+                timetable = parse_timetable_json(await ollama.generate_text(
+                    build_timetable_prompt(
+                        biography=biography, scene_desc=scene_desc,
+                        time_scale=body.time_scale, base_axis=body.base_time_axis,
+                        locale=locale, selected=selected, user_topic=body.user_topic,
+                    ),
+                    model=vlm_model, options=options, fmt="json", think=True,
                 ))
             except Exception as exc:
-                logger.warning("[chronicle] timetable translation failed: %s", exc)
-            _put({"type": "timetable",
-                  "timetable": timetable, "timetable_ja": timetable_ja})
+                logger.warning("[chronicle] timetable build failed: %s", exc)
+            if timetable:
+                axis_slots = bind_timetable_axis_slots(
+                    timetable, base_axis=body.base_time_axis,
+                )
+            # Timetable is authored in English; always keep a Japanese copy so the
+            # Storybook JA/EN toggle works regardless of content locale.
+            if timetable:
+                try:
+                    merged_ja: list = []
+                    for chunk in chunk_list(timetable, 4):
+                        part = parse_timetable_json(await ollama.generate_text(
+                            build_json_translation_prompt(chunk, target="Japanese"),
+                            model=vlm_model, options=options, fmt="json",
+                        ))
+                        if isinstance(part, list):
+                            merged_ja.extend(part)
+                    timetable_ja = merged_ja
+                    if not translation_values_complete(timetable, timetable_ja):
+                        timetable_ja = parse_timetable_json(await ollama.generate_text(
+                            build_json_translation_prompt(timetable, target="Japanese"),
+                            model=vlm_model, options=options, fmt="json",
+                        ))
+                        if not translation_values_complete(timetable, timetable_ja):
+                            logger.warning(
+                                "[chronicle] timetable JA translation still incomplete"
+                            )
+                except Exception as exc:
+                    logger.warning("[chronicle] timetable translation failed: %s", exc)
+                _put({"type": "timetable",
+                      "timetable": timetable, "timetable_ja": timetable_ja})
 
         # English candidate beats (fallback + WD14 query base).
         beats = {a: str(selected.get(a) or "").strip() for a in AXES}
@@ -3243,8 +3335,11 @@ async def run_chronicle_expand(
                     scene_desc=scene_desc, base_axis=body.base_time_axis,
                     time_scale=body.time_scale, user_topic=body.user_topic,
                     locale=locale,
+                    axis_slots=axis_slots,
+                    seed_tags=seed_tags,
+                    forced_motif=forced_motif,
                 ),
-                model=vlm_model, options=options, fmt="json",
+                model=vlm_model, options=options, fmt="json", think=True,
             ))
         except Exception as exc:
             logger.warning("[chronicle] concrete activities failed: %s", exc)
@@ -3289,7 +3384,7 @@ async def run_chronicle_expand(
                 if name and k not in seen:
                     seen.add(k)
                     out.append(name)
-            return out
+            return filter_tag_list(out, removal)
 
         # ── Per non-base axis: shot plan → WD14 search → Refine-method prompt ──
         prompts: dict[str, dict] = {}
@@ -3313,8 +3408,9 @@ async def run_chronicle_expand(
                         locale="en",
                         base_pose_tags=[],
                         user_topic=body.user_topic,
+                        axis_slot=axis_slots.get(axis),
                     ),
-                    model=vlm_model, options=options, fmt="json",
+                    model=vlm_model, options=options, fmt="json", think=True,
                 )
                 visual_plan = parse_visual_plan_json(raw_vp)
             except Exception as exc:
@@ -3456,9 +3552,19 @@ async def run_chronicle_expand(
             if not positive:
                 _put({"type": "error", "message": f"Prompt build failed for {axis}"})
                 return
+            positive, removed_tags = _remove_forced_tags(
+                positive,
+                removal,
+                all_lines=(body.prompt_style in ("detailed", "danbooru")),
+            )
             prompts[axis] = {"positive": positive, "negative": negative}
-            _put({"type": "axis_prompt", "axis": axis,
-                  "positive": positive, "negative": negative})
+            axis_evt: dict = {
+                "type": "axis_prompt", "axis": axis,
+                "positive": positive, "negative": negative,
+            }
+            if removed_tags:
+                axis_evt["removed_tags"] = removed_tags
+            _put(axis_evt)
 
         # ── Story LAST: connective past/current/future prose that ties the
         # generated images together, then saved for Storybook display. Each
@@ -3490,8 +3596,11 @@ async def run_chronicle_expand(
                 biography=biography,
                 timetable=timetable,
                 tone=body.tone,
+                seed_tags=seed_tags,
+                forced_motif=forced_motif,
+                axis_slots=axis_slots,
             ),
-            model=vlm_model, options=options,
+            model=vlm_model, options=options, think=True,
         ):
             if _abort.is_set():
                 raise JobCancelled()
@@ -3591,6 +3700,7 @@ async def run_chronicle_expand(
             "timetable_ja": timetable_ja,
             "pinups": _current_pinups(doc),
             "pinup_image_id": doc.get("pinup_image_id"),
+            "context": {**ctx, "axis_slots": axis_slots},
         })
         if embedding:
             try:

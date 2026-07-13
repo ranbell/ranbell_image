@@ -111,24 +111,48 @@ class OllamaClient:
         r.raise_for_status()
         return r.json()["embeddings"]
 
+    @staticmethod
+    def _with_think(payload: dict, think: bool | str | None) -> dict:
+        """Attach Ollama native `think` when requested (Gemma 4 / reasoning models)."""
+        if think is not None:
+            payload["think"] = think
+        return payload
+
+    @staticmethod
+    def _stream_chunk_events(parser: StreamParser, data: dict) -> list[dict]:
+        """Yield think/token events from one Ollama stream JSON object."""
+        events: list[dict] = []
+        thinking = data.get("thinking") or ""
+        if thinking:
+            events.append({"type": "think", "text": thinking})
+        chunk = data.get("response", "")
+        if chunk:
+            events.extend(parser.feed(chunk))
+        return events
+
     async def generate_vlm(
         self,
         prompt: str,
         image_bytes_list: list[bytes],
         model: str | None = None,
         options: dict | None = None,
+        think: bool | str | None = None,
     ) -> str:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
+        payload = self._with_think(
+            {
+                "model": model or settings.vlm_model,
+                "prompt": prompt,
+                "images": images_b64,
+                "stream": False,
+                "options": options or {},
+            },
+            think,
+        )
         async with self._acquire():
             r = await self._client.post(
                 f"{settings.ollama_url}/api/generate",
-                json={
-                    "model": model or settings.vlm_model,
-                    "prompt": prompt,
-                    "images": images_b64,
-                    "stream": False,
-                    "options": options or {},
-                },
+                json=payload,
             )
         self._raise_with_body(r)
         return r.json()["response"]
@@ -139,20 +163,25 @@ class OllamaClient:
         image_bytes_list: list[bytes],
         model: str | None = None,
         options: dict | None = None,
+        think: bool | str | None = None,
     ) -> AsyncGenerator[dict, None]:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
         parser = StreamParser()
-
-        async with self._acquire(), self._client.stream(
-            "POST",
-            f"{settings.ollama_url}/api/generate",
-            json={
+        payload = self._with_think(
+            {
                 "model": model or settings.vlm_model,
                 "prompt": prompt,
                 "images": images_b64,
                 "stream": True,
                 "options": options or {},
             },
+            think,
+        )
+
+        async with self._acquire(), self._client.stream(
+            "POST",
+            f"{settings.ollama_url}/api/generate",
+            json=payload,
             timeout=settings.ollama_timeout_sec,
         ) as resp:
             if resp.is_error:
@@ -170,10 +199,8 @@ class OllamaClient:
                     data = json.loads(line)
                 except Exception:
                     continue
-                chunk = data.get("response", "")
-                if chunk:
-                    for event in parser.feed(chunk):
-                        yield event
+                for event in self._stream_chunk_events(parser, data):
+                    yield event
                 if data.get("done"):
                     for event in parser.flush():
                         yield event
@@ -188,18 +215,22 @@ class OllamaClient:
         model: str | None = None,
         options: dict | None = None,
         fmt: str | None = None,
+        think: bool | str | None = None,
     ) -> str:
         """Generate text without vision inputs (text-only LLM call)."""
         # num_predict=-1 means unlimited; callers can override via options.
         # Without this, Ollama uses the model Modelfile default (often 128–512
         # tokens) and will silently truncate structured JSON responses.
         merged_options = {"num_predict": -1, **(options or {})}
-        payload: dict = {
-            "model": model or settings.vlm_model,
-            "prompt": prompt,
-            "stream": False,
-            "options": merged_options,
-        }
+        payload: dict = self._with_think(
+            {
+                "model": model or settings.vlm_model,
+                "prompt": prompt,
+                "stream": False,
+                "options": merged_options,
+            },
+            think,
+        )
         if fmt:
             payload["format"] = fmt
         async with self._acquire():
@@ -212,13 +243,23 @@ class OllamaClient:
         prompt: str,
         model: str | None = None,
         options: dict | None = None,
+        think: bool | str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Stream text generation without vision inputs."""
         parser = StreamParser()
+        payload = self._with_think(
+            {
+                "model": model or settings.vlm_model,
+                "prompt": prompt,
+                "stream": True,
+                "options": {"num_predict": -1, **(options or {})},
+            },
+            think,
+        )
         async with self._acquire(), self._client.stream(
             "POST",
             f"{settings.ollama_url}/api/generate",
-            json={"model": model or settings.vlm_model, "prompt": prompt, "stream": True, "options": {"num_predict": -1, **(options or {})}},
+            json=payload,
             timeout=settings.ollama_timeout_sec,
         ) as resp:
             if resp.is_error:
@@ -236,10 +277,8 @@ class OllamaClient:
                     data = json.loads(line)
                 except Exception:
                     continue
-                chunk = data.get("response", "")
-                if chunk:
-                    for event in parser.feed(chunk):
-                        yield event
+                for event in self._stream_chunk_events(parser, data):
+                    yield event
                 if data.get("done"):
                     for event in parser.flush():
                         yield event

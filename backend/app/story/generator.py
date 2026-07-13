@@ -48,6 +48,314 @@ def character_tags_from_wd14(wd14_tags: list[str], limit: int = 40) -> list[str]
     return [t for t in wd14_tags if not _META_TAG_RE.match(t)][:limit]
 
 
+# ── Chronicle concreteness: HARD RULES + WD14 seed tags ───────────────────────
+#
+# Small VLMs drift into abstract "fate / loneliness" essays. The fix is twofold:
+# (1) put a short HARD RULES block at the very top of story prompts, and
+# (2) force a sampled WD14 seed-tag set into drawable events (not tag lists).
+
+_GENERIC_SEED_SKIP = frozenset({
+    "1girl", "2girls", "3girls", "multiple_girls", "solo", "solo_focus",
+    "looking_at_viewer", "simple_background", "white_background",
+    "absurdres", "highres", "masterpiece", "best_quality", "official_art",
+    "portrait", "upper_body", "cowboy_shot", "full_body", "close-up",
+})
+
+# Heuristic: tags that look like physical props / tools for forced_motif.
+_MOTIF_OBJECT_HINTS = (
+    "cup", "mug", "glass", "book", "letter", "paper", "memo", "note", "envelope",
+    "bag", "phone", "umbrella", "flower", "key", "ring", "box", "bottle",
+    "camera", "pen", "pencil", "sword", "knife", "plate", "bowl", "tray",
+    "machine", "lamp", "candle", "ticket", "card", "scarf", "hat", "glove",
+)
+
+_CHRONICLE_FEWSHOT_CANDIDATES = (
+    "Example of GOOD concrete output (structure only — invent your own story):\n"
+    '{"candidates":[{"id":"A","title":"Steam on the Portafilter",'
+    '"dramatic_mode":"escalation",'
+    '"past":"She tamps coffee into the portafilter with both palms before open.",'
+    '"present":"She slides a ceramic cup across the wooden counter to a regular.",'
+    '"future":"At close she folds the order memo and tucks it into her apron pocket.",'
+    '"motif":"order memo","turn":"The memo name belongs to someone she thought had left town.",'
+    '"grounded_tags":["coffee_cup","apron","paper"]}]}'
+)
+
+
+def chronicle_hard_rules_preamble(*, locale: str = "en") -> str:
+    """Short HARD RULES block — must be the first lines of story prompts."""
+    if locale == "ja":
+        return (
+            "【最優先ルール — 必ず守ること】\n"
+            "1. 書くのは写真に撮れる具体的な出来事だけ（誰が・何を持って／何をして・どこで）。\n"
+            "2. 禁止: 運命、想いだけ、抽象テーマのみ、視線を遠くにやるだけ、気分だけの幕、比喩だけの転換。\n"
+            "3. 撮れないなら書き直せ。emotion/tone は動作の色付けのみ。気分で動作を置き換えるな。\n"
+        )
+    return (
+        "HARD RULES (read first — violate none):\n"
+        "1. Write ONLY concrete, drawable events: who does what with which object, where.\n"
+        "2. FORBIDDEN: fate, destiny, vague longing, abstract themes without action, "
+        "mood-only beats, metaphorical-only turns, \"gazed into the distance\".\n"
+        "3. Every act must be a scene you could photograph. If it cannot be drawn, rewrite it.\n"
+        "4. emotion/tone only COLOR the action — never replace the action with mood alone.\n"
+    )
+
+
+def chronicle_seed_tags_block(
+    seed_tags: list[str] | None,
+    *,
+    forced_motif: str = "",
+    must_k: int = 3,
+    locale: str = "en",
+) -> str:
+    """Mandatory WD14 seed-tag injection block (events, not tag lists)."""
+    tags = [t for t in (seed_tags or []) if t]
+    if not tags and not forced_motif:
+        return ""
+    tag_line = ", ".join(tags) if tags else "(none)"
+    k = min(must_k, len(tags)) if tags else 0
+    if locale == "ja":
+        motif_line = (
+            f"モチーフ物体（固定）: {forced_motif} — 三幕で意味が変容する同一の物として使え。\n"
+            if forced_motif else ""
+        )
+        must_line = (
+            f"SEED TAGS のうち少なくとも {k} 個を、誰が何を持って／何をして／どこにいるかとして"
+            "三幕に分散して織り込め。タグ名を並べるな。出来事に翻訳せよ。"
+            "1幕に全タグを詰め込むな。\n"
+            if k else ""
+        )
+        return (
+            f"★ SEED TAGS（描ける事実の語彙 — 必須）★\n{tag_line}\n"
+            f"{motif_line}{must_line}"
+        )
+    motif_line = (
+        f"FIXED MOTIF OBJECT: {forced_motif} — reuse it across acts with shifting meaning.\n"
+        if forced_motif else ""
+    )
+    must_line = (
+        f"Weave at least {k} of the SEED TAGS into the three acts as who/what/where "
+        "physical facts. Translate tags into events — do NOT list tag names. "
+        "Spread them across acts; do not dump every tag into one act.\n"
+        if k else ""
+    )
+    return (
+        f"★ SEED TAGS (drawable vocabulary — MANDATORY) ★\n{tag_line}\n"
+        f"{motif_line}{must_line}"
+    )
+
+
+def pick_forced_motif(seed_tags: list[str], *, rng=None) -> str:
+    """Pick one physical-object-like tag as motif; empty if none suitable."""
+    import random as _random
+    r = rng or _random
+    objects: list[str] = []
+    for t in seed_tags:
+        low = t.lower().replace(" ", "_")
+        if low in _GENERIC_SEED_SKIP or _META_TAG_RE.match(low):
+            continue
+        if any(h in low for h in _MOTIF_OBJECT_HINTS):
+            objects.append(t)
+    if not objects:
+        return ""
+    return r.choice(objects)
+
+
+def filter_story_seed_pool(
+    names: list[str],
+    *,
+    removal: set[str] | None = None,
+    exclude: set[str] | None = None,
+) -> list[str]:
+    """Filter WD14 hit names into a story-seed pool (drawable, non-generic)."""
+    from ..invoke.vocab_bank import _is_species_tag
+
+    rem = removal or set()
+    ex = {x.lower().replace(" ", "_") for x in (exclude or set())}
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in names:
+        name = str(raw or "").strip().replace(" ", "_")
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen or key in rem or key in ex:
+            continue
+        if key in _GENERIC_SEED_SKIP or _META_TAG_RE.match(key):
+            continue
+        if _is_species_tag(key):
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def sample_story_seed_tags(
+    pool: list[str],
+    *,
+    n_min: int = 6,
+    n_max: int = 12,
+    rng=None,
+) -> list[str]:
+    """Random sample 6–12 tags from a filtered pool (or all if smaller)."""
+    import random as _random
+    r = rng or _random
+    if not pool:
+        return []
+    n = min(len(pool), r.randint(n_min, n_max) if len(pool) >= n_min else len(pool))
+    if n >= len(pool):
+        return list(pool)
+    return r.sample(pool, n)
+
+
+def candidates_ungrounded(
+    candidates: list[dict],
+    seed_tags: list[str],
+    *,
+    min_hits: int = 2,
+) -> bool:
+    """True when most candidates fail to report enough grounded_tags ∩ seed."""
+    seed = {t.lower().replace(" ", "_") for t in seed_tags if t}
+    if len(seed) < 3:
+        return False
+    if not candidates:
+        return True
+    bad = 0
+    for c in candidates:
+        used = {
+            str(t).lower().replace(" ", "_")
+            for t in (c.get("grounded_tags") or [])
+            if t
+        }
+        if len(used & seed) < min_hits:
+            bad += 1
+    return bad >= max(2, (len(candidates) + 1) // 2)
+
+
+def bind_timetable_axis_slots(
+    slots: list[dict],
+    *,
+    base_axis: str = "present",
+) -> dict[str, dict]:
+    """Pick one slot per past/present/future from a timetable list."""
+    axis_slots: dict[str, dict] = {}
+    # Prefer explicit axis field from the model.
+    for s in slots:
+        ax = str(s.get("axis") or "").strip().lower()
+        if ax in AXES and ax not in axis_slots:
+            axis_slots[ax] = {
+                "label": str(s.get("label") or "").strip(),
+                "activity": str(s.get("activity") or "").strip(),
+                "place": str(s.get("place") or "").strip(),
+                "feeling": str(s.get("feeling") or "").strip(),
+            }
+    if len(axis_slots) == 3:
+        return axis_slots
+
+    # Heuristic: map by label keywords, else by position.
+    def _guess(slot: dict) -> str | None:
+        lab = str(slot.get("label") or "").lower()
+        if any(k in lab for k in ("now", "today", "present", "現在", "今")):
+            return "present"
+        if any(k in lab for k in ("past", "earlier", "-", "前", "昨日")):
+            return "past"
+        if any(k in lab for k in ("future", "later", "+", "後", "明日")):
+            return "future"
+        return None
+
+    for s in slots:
+        ax = _guess(s)
+        if ax and ax not in axis_slots:
+            axis_slots[ax] = {
+                "label": str(s.get("label") or "").strip(),
+                "activity": str(s.get("activity") or "").strip(),
+                "place": str(s.get("place") or "").strip(),
+                "feeling": str(s.get("feeling") or "").strip(),
+            }
+    if base_axis in AXES and base_axis not in axis_slots and slots:
+        mid = slots[len(slots) // 2]
+        axis_slots[base_axis] = {
+            "label": str(mid.get("label") or "now").strip(),
+            "activity": str(mid.get("activity") or "").strip(),
+            "place": str(mid.get("place") or "").strip(),
+            "feeling": str(mid.get("feeling") or "").strip(),
+        }
+    # Fill remaining axes from chronological thirds.
+    if len(slots) >= 3:
+        picks = {"past": slots[0], "present": slots[len(slots) // 2], "future": slots[-1]}
+        for ax, s in picks.items():
+            if ax not in axis_slots:
+                axis_slots[ax] = {
+                    "label": str(s.get("label") or "").strip(),
+                    "activity": str(s.get("activity") or "").strip(),
+                    "place": str(s.get("place") or "").strip(),
+                    "feeling": str(s.get("feeling") or "").strip(),
+                }
+    return {a: axis_slots[a] for a in AXES if a in axis_slots}
+
+
+def format_axis_slots_block(axis_slots: dict[str, dict] | None, *, locale: str = "en") -> str:
+    """Format the three bound timetable slots for expand/concrete prompts."""
+    if not axis_slots:
+        return ""
+    lines = []
+    for a in AXES:
+        s = axis_slots.get(a) or {}
+        if not s:
+            continue
+        lines.append(
+            f"  [{a.upper()}] {s.get('label', '')}: {s.get('activity', '')} "
+            f"@ {s.get('place', '')} ({s.get('feeling', '')})"
+        )
+    if not lines:
+        return ""
+    if locale == "ja":
+        return "各幕の時間アンカー（画面の事実）:\n" + "\n".join(lines) + "\n"
+    return "TIME ANCHORS per act (on-screen facts):\n" + "\n".join(lines) + "\n"
+
+
+def translation_values_complete(source, translated, *, min_ratio: float = 0.35) -> bool:
+    """True if translated structure covers source keys with non-trivial values."""
+    if isinstance(source, dict) and isinstance(translated, dict):
+        if not source:
+            return True
+        ok = 0
+        need = 0
+        for k, v in source.items():
+            if isinstance(v, (dict, list)):
+                if not translation_values_complete(v, translated.get(k), min_ratio=min_ratio):
+                    return False
+                continue
+            src = str(v or "").strip()
+            if not src:
+                continue
+            need += 1
+            dst = str((translated or {}).get(k) or "").strip()
+            if dst and len(dst) >= max(1, int(len(src) * min_ratio)):
+                ok += 1
+        return need == 0 or ok >= max(1, need - 1) if need > 2 else ok == need
+    if isinstance(source, list) and isinstance(translated, list):
+        if len(translated) < max(1, len(source) - 1) and len(source) > 1:
+            return False
+        for s, t in zip(source, translated):
+            if not translation_values_complete(s, t, min_ratio=min_ratio):
+                return False
+        return True
+    if isinstance(source, str):
+        src = source.strip()
+        dst = str(translated or "").strip()
+        if not src:
+            return True
+        return bool(dst) and len(dst) >= max(1, int(len(src) * min_ratio))
+    return translated is not None
+
+
+def chunk_list(items: list, size: int) -> list[list]:
+    """Split a list into chunks of `size` (last chunk may be shorter)."""
+    if size <= 0:
+        return [items]
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
 # ── Stage 1: visual vocabulary extraction ─────────────────────────────────────
 
 # Interpretive sections appended to both vision prompt variants. They feed the
@@ -864,6 +1172,9 @@ def build_candidates_prompt(
     candidate_modes: dict[str, str] | None = None,
     topic_directive: str = "",
     tone: str = "bright",
+    biography: dict | None = None,
+    seed_tags: list[str] | None = None,
+    forced_motif: str = "",
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
@@ -877,6 +1188,8 @@ def build_candidates_prompt(
     description and expanded with `topic_directive` (a narrative directive from
     build_topic_directive_prompt), because a small local model otherwise drowns
     an abstract topic under the vivid literal image and re-tells the picture.
+
+    HARD RULES + WD14 seed tags lead the prompt so small models stay concrete.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
@@ -937,13 +1250,27 @@ def build_candidates_prompt(
     hierarchy_block = _coherence_hierarchy_block(
         base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
     )
+    head = chronicle_hard_rules_preamble(locale=locale)
+    seed_block = chronicle_seed_tags_block(
+        seed_tags, forced_motif=forced_motif, locale=locale
+    )
+    bio_block = ""
+    if biography:
+        bio_block = (
+            "CHARACTER BIOGRAPHY (hobbies/items as physical actions only):\n"
+            f"  {_biography_brief(biography)}\n\n"
+        )
+    motif_json_hint = forced_motif or "one concrete recurring object"
     return (
+        f"{head}\n"
+        f"{seed_block}\n"
         "You are a storyteller pitching THREE different chronicles for the same "
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
         f"separated by {span} of elapsed time.\n\n"
         f"{elapsed_header}\n"
         f"{topic_block}\n"
         f"{hierarchy_block}\n"
+        f"{bio_block}"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
         f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT (t = 0) — it looks "
@@ -976,14 +1303,17 @@ def build_candidates_prompt(
         "rising stake, a reversal, an exposure, a threat nearly upon them) and "
         "leave the reader wanting the next volume — unless the user topic names an "
         "explicit ending. Also give: a title (3-8 words, specific and evocative, "
-        "never generic); a motif (one concrete object that recurs and escalates "
-        "in meaning across the three moments); a one-sentence `turn` naming the "
-        "single surprising pivot this candidate hinges on; and echo back the "
-        "assigned `dramatic_mode` key.\n\n"
+        "never generic); a motif "
+        f"(use '{motif_json_hint}' when a fixed motif was given); a one-sentence "
+        "`turn` naming the single surprising pivot; echo `dramatic_mode`; and "
+        "`grounded_tags` — an array of the SEED TAG names you actually turned into "
+        "events (English danbooru spelling).\n\n"
+        f"{_CHRONICLE_FEWSHOT_CANDIDATES}\n\n"
         "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
         '  {"id": "A", "title": "...", "dramatic_mode": "...", "past": "...", '
-        '"present": "...", "future": "...", "motif": "...", "turn": "..."},\n'
+        '"present": "...", "future": "...", "motif": "...", "turn": "...", '
+        '"grounded_tags": ["tag_a", "tag_b"]},\n'
         '  {"id": "B", ...},\n'
         '  {"id": "C", ...}\n'
         "]}"
@@ -1015,6 +1345,13 @@ def parse_candidates_json(raw: str) -> list[dict]:
         # Dramatic-mode dimension (may be absent on legacy records → "").
         dramatic_mode = str(item.get("dramatic_mode") or "").strip().lower()
         turn = str(item.get("turn") or "").strip()
+        grounded_raw = item.get("grounded_tags") or item.get("used_tags") or []
+        grounded_tags: list[str] = []
+        if isinstance(grounded_raw, list):
+            for t in grounded_raw:
+                name = str(t or "").strip().replace(" ", "_")
+                if name:
+                    grounded_tags.append(name)
         result.append({
             "id": cid,
             "title": str(item.get("title") or "").strip(),
@@ -1025,9 +1362,9 @@ def parse_candidates_json(raw: str) -> list[dict]:
             "motif": motif,
             "dramatic_mode": dramatic_mode,
             "turn": turn,
+            "grounded_tags": grounded_tags,
         })
     return result
-
 
 # ── Biography / Timetable / Concrete activities ───────────────────────────────
 #
@@ -1260,8 +1597,12 @@ def build_timetable_prompt(
         "slots must flow into each other. Actions must be drawable — never "
         "'relaxing', 'thinking' or 'spending time', and never an unrelated hobby "
         "dropped into a scene where it makes no sense.\n"
+        "Mark each slot with an `axis` field: exactly one slot each for "
+        '"past", "present", and "future" (matching the story beats); other slots '
+        'may use "bridge".\n'
         "Output English JSON only, no fences:\n"
-        '{"slots": [{"label": "<relative time, e.g. -20min / now / +20min>", '
+        '{"slots": [{"axis": "past|present|future|bridge", '
+        '"label": "<relative time, e.g. -20min / now / +20min>", '
         '"activity": "<concrete physical action tied to the story>", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
@@ -1274,10 +1615,11 @@ def parse_timetable_json(raw: str) -> list[dict]:
     if not isinstance(slots, list):
         return []
     out: list[dict] = []
+    keys = _TIMETABLE_KEYS + ("axis",)
     for s in slots:
         if not isinstance(s, dict):
             continue
-        item = {k: str(s.get(k) or "").strip() for k in _TIMETABLE_KEYS}
+        item = {k: str(s.get(k) or "").strip() for k in keys}
         if item["activity"] or item["label"]:
             out.append(item)
     return out
@@ -1293,6 +1635,9 @@ def build_concrete_activities_prompt(
     time_scale: str = "years",
     user_topic: str = "",
     locale: str = "en",
+    axis_slots: dict[str, dict] | None = None,
+    seed_tags: list[str] | None = None,
+    forced_motif: str = "",
 ) -> str:
     """Re-examine bio + timetable + chosen draft → ONE drawable action per axis.
 
@@ -1311,21 +1656,37 @@ def build_concrete_activities_prompt(
         f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
     ) or "  (no draft)\n"
     topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
+    head = chronicle_hard_rules_preamble(locale="en")
+    seed_block = chronicle_seed_tags_block(
+        seed_tags, forced_motif=forced_motif, locale="en"
+    )
+    anchors = format_axis_slots_block(axis_slots, locale="en")
+    priority = (
+        "PRIORITY: TIME ANCHORS (when present) define the on-screen physical fact "
+        "for each act; the CHOSEN STORY DRAFT supplies motive and dramatic turn; "
+        "the timetable/biography only supply props or gestures. Do NOT drop in an "
+        "unrelated hobby if it does not fit the story or the base scene.\n"
+        if axis_slots else
+        "PRIORITY: the CHOSEN STORY DRAFT drives what happens; the timetable and "
+        "biography only supply concrete detail (a prop, a gesture). Do NOT drop "
+        "in an unrelated hobby (knitting, journaling…) if it does not fit the "
+        "story or the base scene.\n"
+    )
     return (
+        f"{head}\n"
+        f"{seed_block}\n"
         "Pin down EXACTLY what the character is physically doing at each of the "
         "three story moments, by cross-checking the chosen story draft, the "
         "timetable and her biography. Every moment must be ONE concrete, drawable "
         "physical action — NEVER standing, sitting or lounging idle.\n\n"
         f"{elapsed}\n"
-        "PRIORITY: the CHOSEN STORY DRAFT drives what happens; the timetable and "
-        "biography only supply concrete detail (a prop, a gesture). Do NOT drop "
-        "in an unrelated hobby (knitting, journaling…) if it does not fit the "
-        "story or the base scene.\n"
+        f"{priority}"
         f"BASE SCENE — all three moments stay in or around THIS setting unless the "
         f"story clearly moves her: {scene_desc}\n"
         "CHOSEN STORY DRAFT (the spine — refine each beat into a concrete action):\n"
         f"{beats}"
         f"{topic}"
+        f"{anchors}"
         f"TIMETABLE (nearby moments for continuity):\n{tt}\n"
         f"CHARACTER (flavour only): {_biography_brief(biography)}\n\n"
         "For each axis state the concrete action (verb + body + prop + place) that "
@@ -1477,6 +1838,9 @@ def build_expand_prompt(
     biography: dict | None = None,
     timetable: list[dict] | None = None,
     tone: str = "bright",
+    seed_tags: list[str] | None = None,
+    forced_motif: str = "",
+    axis_slots: dict[str, dict] | None = None,
 ) -> str:
     """LLM prompt expanding ONE chosen candidate into the full three acts.
 
@@ -1494,17 +1858,24 @@ def build_expand_prompt(
             "favourite items and quirks should surface as concrete actions):\n"
             f"  {_biography_brief(biography)}\n"
         )
-    tt_block = ""
-    if timetable:
+    tt_block = format_axis_slots_block(axis_slots, locale=locale)
+    if not tt_block and timetable:
         tt_lines = "; ".join(
             f"{s.get('label', '')}: {s.get('activity', '')}" for s in timetable[:6]
         )
-        tt_block = f"  Daily/life rhythm: {tt_lines}\n"
+        tt_block = (
+            f"  Time anchors (not a diary): {tt_lines}\n"
+        )
     beats = "".join(
         f"  [{a.upper()}] seed: {selected.get(a, '')}\n"
         for a in AXES if selected.get(a)
     ) or f"  Summary: {selected.get('summary', '')}\n"
-    motif = selected.get("motif") or selected.get("key_motif") or ""
+    motif = (
+        forced_motif
+        or selected.get("motif")
+        or selected.get("key_motif")
+        or ""
+    )
     dramatic_mode = str(selected.get("dramatic_mode") or "").strip().lower()
     turn = str(selected.get("turn") or "").strip()
     elapsed_header = _elapsed_time_header(
@@ -1515,7 +1886,11 @@ def build_expand_prompt(
         if turn
         else ""
     )
-    seed_block = (
+    head = chronicle_hard_rules_preamble(locale=locale)
+    seed_block = chronicle_seed_tags_block(
+        seed_tags, forced_motif=forced_motif or motif, locale=locale
+    )
+    seed_block_story = (
         f"{elapsed_header}\n"
         "CHOSEN STORY DIRECTION — expand THESE beats to satisfy the base image "
         "and the user topic above; reword the beats wherever they conflict, but "
@@ -1550,7 +1925,7 @@ def build_expand_prompt(
         turn=turn,
         tone=tone,
     )
-    return seed_block + base + lang_block
+    return f"{head}\n{seed_block}\n{seed_block_story}" + base + lang_block
 
 
 def build_story_tags_prompt(story_text: str, *, count: int = 50) -> str:
@@ -2061,6 +2436,7 @@ def build_visual_examination_prompt(
     locale: str = "en",
     base_pose_tags: list[str] | None = None,
     user_topic: str = "",
+    axis_slot: dict | None = None,
 ) -> str:
     """Stage 3a: decide the shot BEFORE writing the Visual Script.
 
@@ -2112,6 +2488,13 @@ def build_visual_examination_prompt(
         else ""
     )
     char_line = f"CHARACTER (appearance only):\n{character_desc}\n\n" if character_desc else ""
+    slot_line = ""
+    if axis_slot:
+        slot_line = (
+            f"TIME ANCHOR for this act (on-screen fact — stage THIS):\n"
+            f"  {axis_slot.get('label', '')}: {axis_slot.get('activity', '')} "
+            f"@ {axis_slot.get('place', '')} ({axis_slot.get('feeling', '')})\n\n"
+        )
     return (
         "You are a storyboard director planning ONE shot before it is drawn.\n"
         "Read the act below and DECIDE, from multiple angles, exactly how the "
@@ -2119,6 +2502,7 @@ def build_visual_examination_prompt(
         "than showing someone standing still.\n\n"
         f"{elapsed_header}\n"
         f"{char_line}"
+        f"{slot_line}"
         f"ACT ([{axis.upper()}]):\n{story_text}\n\n"
         f"{constraint}"
         f"{intent_line}"

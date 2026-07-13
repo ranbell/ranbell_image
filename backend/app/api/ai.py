@@ -775,6 +775,32 @@ def _check_natural_prose(text: str) -> bool:
     return comma_density < 0.25 and avg_word_len > 4.0
 
 
+def removal_tag_set(cfg: dict | None) -> set[str]:
+    """Normalize Admin `prompt_removal_tags` to a lowercase underscore set."""
+    if not cfg:
+        return set()
+    return {
+        t.lower().replace(" ", "_")
+        for t in (cfg.get("prompt_removal_tags") or [])
+        if str(t).strip()
+    }
+
+
+def filter_tag_list(tags: list[str], removal: set[str]) -> list[str]:
+    """Drop tags present in the removal set (space/underscore equivalent)."""
+    if not removal:
+        return list(tags)
+    out: list[str] = []
+    for t in tags:
+        name = str(t or "").strip()
+        if not name:
+            continue
+        if name.lower().replace(" ", "_") in removal:
+            continue
+        out.append(name)
+    return out
+
+
 def _remove_forced_tags(
     positive: str,
     removal_tags: set[str],

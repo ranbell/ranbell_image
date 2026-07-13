@@ -46,7 +46,8 @@ class ChronicleRequest(BaseModel):
     use_ref_seed: bool = True
     manual_mode: bool = False
     vlm_model: str = ""
-    temperature: float = 0.8
+    temperature: float = 1.0  # Gemma 4 recommended default
+    num_ctx: int = 16384
     locale: Literal["en", "ja"] = "en"  # language the story is written in
     group_id: str = ""  # issued server-side on submission
 
@@ -66,13 +67,14 @@ class PinupRequest(BaseModel):
 
 
 # Temperature ladder for respin — each respin nudges creativity up (Refine's
-# _FANOUT_TEMPS idea, applied to whole-story regeneration).
+# _FANOUT_TEMPS idea, applied to whole-story regeneration). Base default is
+# Gemma 4's 1.0, so the step is +0.1 to avoid slamming into the 1.3 cap.
 def _respin_temperature(base: float, respin_count: int) -> float:
-    return min(1.3, round(base + 0.2 * max(1, respin_count), 3))
+    return min(1.3, round(base + 0.1 * max(1, respin_count), 3))
 
 
 def _draft_base_temp(story: dict) -> float:
-    return float(((story.get("context") or {}).get("body") or {}).get("temperature", 0.8))
+    return float(((story.get("context") or {}).get("body") or {}).get("temperature", 1.0))
 
 
 def _submit_prompt_job(app, name: str, runner, *, meta: dict, **kwargs) -> str:
