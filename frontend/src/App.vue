@@ -2737,7 +2737,7 @@ onUnmounted(() => {
     />
 
     <!-- ── Header ── -->
-    <header class="sticky top-0 z-20 bg-gray-900 border-b border-gray-800">
+    <header class="sticky top-0 z-[var(--z-header)] bg-gray-900 border-b border-gray-800">
       <div class="flex items-center gap-2 px-4 py-2.5 flex-wrap">
         <button @click="goHome" class="flex items-center gap-2 cursor-pointer focus:outline-none">
           <img src="/logo.png" alt="Ranbell Image" class="h-7 w-7 rounded-md flex-shrink-0" />
@@ -2775,7 +2775,7 @@ onUnmounted(() => {
 
           <!-- Tag autocomplete dropdown -->
           <div v-if="showSuggestions && tagSuggestions.length"
-            class="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+            class="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-[var(--z-popover)] overflow-hidden">
             <div v-for="(s, i) in tagSuggestions" :key="s.tag"
               @mousedown.prevent="selectSuggestion(s.tag)"
               :class="i === suggestionIndex ? 'bg-purple-700/60 text-white' : 'hover:bg-gray-700 text-gray-200'"
@@ -2965,7 +2965,7 @@ onUnmounted(() => {
             :class="similarSource._colorMode ? 'border border-pink-700/50' : 'border border-indigo-700/50'" />
           <Teleport to="body">
             <div v-if="similarThumbHover"
-              class="fixed top-16 left-4 z-[9999] pointer-events-none">
+              class="fixed top-16 left-4 z-[var(--z-dragghost)] pointer-events-none">
               <img :src="`/api/thumbnails/${similarSource.sha256}.webp`"
                 class="w-48 h-auto max-h-72 rounded-xl object-contain bg-gray-900 shadow-2xl ring-1"
                 :class="similarSource._colorMode ? 'ring-pink-600/50' : 'ring-indigo-600/50'" />
@@ -3403,7 +3403,7 @@ onUnmounted(() => {
 
     <!-- ── Prompt Refine Panel (2-pane) ── -->
     <Teleport to="body">
-      <div v-if="showRefine" class="fixed inset-0 z-[75] bg-black/90 flex items-center justify-center p-3"
+      <div v-if="showRefine" class="fixed inset-0 z-[var(--z-panel)] bg-black/90 flex items-center justify-center p-3"
         @mousedown.self="refineOverlayMousedownOnBg = true"
         @mouseup.self="if (refineOverlayMousedownOnBg) showRefine = false; refineOverlayMousedownOnBg = false"
         @mouseleave="refineOverlayMousedownOnBg = false">
@@ -4269,7 +4269,7 @@ onUnmounted(() => {
 
     <!-- ── Instruction Modal ── -->
     <Teleport to="body">
-      <div v-if="showInstructionModal" class="fixed inset-0 z-[90] bg-black/80 flex items-center justify-center p-4"
+      <div v-if="showInstructionModal" class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4"
         @mousedown.self="showInstructionModal = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col gap-3 p-5">
           <div class="flex items-center justify-between">
@@ -4313,7 +4313,7 @@ onUnmounted(() => {
       <Teleport to="body">
         <div v-if="showLightbox && selected"
           ref="lbContainerRef"
-          class="fixed inset-0 z-[70] bg-black flex items-center justify-center overflow-hidden select-none"
+          class="fixed inset-0 z-[var(--z-gallery-zoom)] bg-black flex items-center justify-center overflow-hidden select-none"
           :style="{ cursor: lbDragging ? 'grabbing' : 'grab' }"
           @wheel.prevent="lbOnWheel"
           @mousedown="lbOnMousedown"
@@ -4372,7 +4372,7 @@ onUnmounted(() => {
       </Teleport>
 
       <!-- AI Reset confirmation dialog -->
-      <div v-if="showAiResetConfirm" class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4" @click.self="showAiResetConfirm = false">
+      <div v-if="showAiResetConfirm" class="fixed inset-0 z-[var(--z-modal)] bg-black/70 flex items-center justify-center p-4" @click.self="showAiResetConfirm = false">
         <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full shadow-2xl">
           <p class="text-sm text-gray-200 mb-5">{{ $t('detail.aiResetConfirmMsg') }}</p>
           <div class="flex gap-3 justify-end">
@@ -4384,7 +4384,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="selected" class="fixed inset-0 z-[72] bg-black/85 flex items-center justify-center p-4"
+      <div v-if="selected" class="fixed inset-0 z-[var(--z-gallery)] bg-black/85 flex items-center justify-center p-4"
         @click.self="selected = null"
         @keydown.left.prevent="prevImage" @keydown.right.prevent="nextImage" @keydown.escape="selected = null"
         tabindex="-1">
@@ -4697,7 +4697,7 @@ onUnmounted(() => {
     <!-- ── Raw Metadata Modal ── -->
     <Teleport to="body">
       <div v-if="rawMetadataModal.open"
-        class="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4"
+        class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4"
         @click.self="rawMetadataModal.open = false">
         <div class="bg-gray-900 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl border border-gray-700">
           <!-- header -->
@@ -4761,7 +4761,7 @@ onUnmounted(() => {
     <!-- ── Similarity Graph Overlay ── -->
     <Teleport to="body">
       <div v-if="showSimilarityGraph"
-        class="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center"
+        class="fixed inset-0 z-[var(--z-fullscreen-view)] bg-black/90 flex items-center justify-center"
         @click.self="closeSimilarityGraph">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col"
           style="width: 92vw; height: 92vh;">
@@ -4864,7 +4864,7 @@ onUnmounted(() => {
                 leave-from-class="opacity-100 scale-100"
                 leave-to-class="opacity-0 scale-95">
                 <div v-if="graphContextMenu"
-                  class="fixed z-[200] py-1 rounded-xl shadow-2xl
+                  class="fixed z-[var(--z-toast)] py-1 rounded-xl shadow-2xl
                          bg-gray-900/95 backdrop-blur-md border border-gray-700/80"
                   :style="{
                     left: graphContextMenu.screenX + 'px',
@@ -4915,7 +4915,7 @@ onUnmounted(() => {
         leave-from-class="opacity-100 scale-100 translate-y-0"
         leave-to-class="opacity-0 scale-95 translate-y-1">
         <div v-if="bucketHovered && selectedCount > 0"
-          class="fixed z-[50] bg-slate-900/95 backdrop-blur-md border border-purple-500/30 rounded-xl shadow-2xl p-2"
+          class="fixed z-[var(--z-popover)] bg-slate-900/95 backdrop-blur-md border border-purple-500/30 rounded-xl shadow-2xl p-2"
           :style="bucketPopupStyle"
           @mouseenter="bucketHovered = true"
           @mouseleave="bucketHovered = false">
@@ -4938,7 +4938,7 @@ onUnmounted(() => {
         leave-from-class="opacity-100 scale-100"
         leave-to-class="opacity-0 scale-90">
         <div v-if="hoveredThumbnailSha"
-          class="fixed z-[60] pointer-events-none rounded-xl overflow-hidden ring-2 ring-purple-400/70 shadow-2xl"
+          class="fixed z-[var(--z-popover)] pointer-events-none rounded-xl overflow-hidden ring-2 ring-purple-400/70 shadow-2xl"
           :style="hoveredThumbnailStyle">
           <img :src="`/api/thumbnails/${hoveredThumbnailSha}.webp`"
             class="w-28 h-28 object-cover block" />
@@ -4950,7 +4950,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="inspireHasSession || refineHasSession"
-        class="fixed bottom-0 left-4 z-[46] pb-20 flex flex-col items-start gap-2 pointer-events-none">
+        class="fixed bottom-0 left-4 z-[var(--z-chrome)] pb-20 flex flex-col items-start gap-2 pointer-events-none">
         <!-- Inspiration session chip -->
         <div v-if="inspireHasSession"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl shadow-xl backdrop-blur-sm
@@ -4994,7 +4994,7 @@ onUnmounted(() => {
 
     <!-- ── Bottom Selection Tray ── -->
     <Teleport to="body">
-      <div class="fixed bottom-0 left-0 right-0 z-[45] transition-transform duration-500 pointer-events-none"
+      <div class="fixed bottom-0 left-0 right-0 z-[var(--z-chrome)] transition-transform duration-500 pointer-events-none"
         :style="`transform: translateY(${selectedCount > 0 ? '0' : '100%'}); transition-timing-function: cubic-bezier(0.4,0,0.2,1);`">
         <div class="mx-3 mb-3 pointer-events-auto">
           <div class="bg-slate-950/90 backdrop-blur-md border border-purple-500/25 rounded-2xl shadow-2xl shadow-black/60"
@@ -5120,7 +5120,7 @@ onUnmounted(() => {
 
         <!-- ── About modal ── -->
     <Teleport to="body">
-      <div v-if="showAbout" class="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4"
+      <div v-if="showAbout" class="fixed inset-0 z-[var(--z-panel)] bg-black/80 flex items-center justify-center p-4"
         @click.self="showAbout = false" @keydown.esc="showAbout = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center gap-5 p-8 relative">
           <button @click="showAbout = false"
@@ -5188,7 +5188,7 @@ onUnmounted(() => {
 
     <Teleport to="body">
       <Transition enter-from-class="opacity-0 translate-y-2" leave-to-class="opacity-0 translate-y-2">
-        <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] pointer-events-none">
+        <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[var(--z-toast)] pointer-events-none">
           <div class="flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl text-sm font-medium transition-all duration-300"
             :class="{
               'bg-gray-800 border border-gray-700 text-gray-200': toast.type === 'info',
@@ -5208,7 +5208,7 @@ onUnmounted(() => {
   <!-- ── API Token Prompt ── -->
   <Teleport to="body">
     <div v-if="showTokenPrompt"
-      class="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4">
+      class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4">
       <div class="bg-gray-900 rounded-xl w-full max-w-sm shadow-2xl border border-gray-700 p-6 space-y-4">
         <h2 class="text-base font-semibold text-gray-100">API トークンの入力</h2>
         <p class="text-xs text-gray-400">

@@ -750,7 +750,7 @@ function ratioClass(used, total, caution, fault) {
 .cr-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9000;
+  z-index: var(--z-system);
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;

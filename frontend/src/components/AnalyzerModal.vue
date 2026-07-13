@@ -1173,7 +1173,7 @@ async function fetchAnalyzerHealth() {
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-[58] bg-black/92 flex items-center justify-center p-3">
+    <div v-if="show" class="fixed inset-0 z-[var(--z-panel)] bg-black/92 flex items-center justify-center p-3">
       <div class="bg-gray-900 rounded-2xl w-full max-w-7xl shadow-2xl border border-gray-800 flex flex-col" style="height: 94vh">
         <!-- Header -->
         <div class="flex items-center gap-4 px-5 py-3 border-b border-gray-800 flex-shrink-0">
@@ -1705,7 +1705,7 @@ async function fetchAnalyzerHealth() {
   <!-- UMAP hover thumbnail tooltip -->
   <Teleport to="body">
     <div v-if="umapTooltip.visible"
-      class="fixed z-[70] pointer-events-none"
+      class="fixed z-[var(--z-panel-child)] pointer-events-none"
       :style="`left:${umapTooltip.x}px;top:${umapTooltip.y}px`">
       <div class="bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-1.5 flex flex-col items-center gap-1">
         <img :src="`/api/thumbnails/${umapTooltip.sha256}.webp`"
@@ -1718,7 +1718,7 @@ async function fetchAnalyzerHealth() {
   <!-- Tag network hover tooltip -->
   <Teleport to="body">
     <div v-if="tagNetTooltip.visible"
-      class="fixed z-[70] pointer-events-none"
+      class="fixed z-[var(--z-panel-child)] pointer-events-none"
       :style="`left:${tagNetTooltip.x}px;top:${tagNetTooltip.y}px`">
       <div class="bg-gray-900 border border-gray-700/80 rounded-xl shadow-2xl px-3 py-2.5 min-w-[120px]">
         <div class="text-xs font-semibold text-gray-100 mb-0.5">{{ tagNetTooltip.node?.label }}</div>

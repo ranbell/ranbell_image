@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── z-index layering scale ──────────────────────────────────────────────────
+   Single source of truth for every full-screen overlay. All overlays (both
+   `Teleport to body` panels and inline App overlays) compete in the root
+   stacking context, so use these named tiers instead of ad-hoc numbers.
+   Reference via Tailwind arbitrary values, e.g. `z-[var(--z-panel-chronicle)]`. */
+:root {
+  --z-header:          100;  /* sticky top header */
+  --z-chrome:          200;  /* selection tray, bottom bar */
+  --z-popover:         300;  /* dropdowns, hover previews, quick panels */
+  --z-fullscreen-view: 400;  /* similarity graph & other content-level fullscreen views */
+  --z-gallery:         500;  /* gallery image detail (selected) */
+  --z-gallery-zoom:    550;  /* focus/lightbox zoom (above the detail it launched from) */
+  --z-panel:           600;  /* major panels: Invoke / Refine / Analyzer / Inspire / About */
+  --z-panel-child:     610;  /* panel-owned sub-detail (Analyzer detail, etc.) */
+  --z-panel-story:     620;  /* Storybook shell */
+  --z-panel-story-top: 630;  /* Storybook story detail */
+  --z-panel-chronicle: 640;  /* Chronicle shell (top-most panel) */
+  --z-panel-media:     700;  /* Storybook pinup lightbox / panel-owned media zoom */
+  --z-modal:           800;  /* blocking confirms: instruction / AI reset / raw metadata / token prompt */
+  --z-toast:           900;  /* toasts & context menus — always above content */
+  --z-system:         1000;  /* Control Room */
+  --z-dragghost:      9999;  /* drag ghost */
+}
+
 /* ── Low-Power / GPU-Saving Animations Override ── */
 /* Loop opacity in 2 steps over 3 seconds to avoid continuous 60 FPS painting */
 .animate-pulse {

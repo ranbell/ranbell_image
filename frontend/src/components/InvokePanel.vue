@@ -701,7 +701,7 @@ function onThumbnailError(event) {
 <template>
   <Teleport to="body">
     <div v-if="show"
-      class="fixed inset-0 z-[56] bg-black/92 flex items-center justify-center p-3"
+      class="fixed inset-0 z-[var(--z-panel)] bg-black/92 flex items-center justify-center p-3"
       @mousedown.self="overlayMousedownOnBg = true"
       @mouseup.self="if (overlayMousedownOnBg) emit('update:show', false); overlayMousedownOnBg = false"
       @mouseleave="overlayMousedownOnBg = false">

@@ -757,7 +757,7 @@ function simpleMarkdown(text) {
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-[55] bg-black/92 flex items-center justify-center p-3"
+    <div v-if="show" class="fixed inset-0 z-[var(--z-panel)] bg-black/92 flex items-center justify-center p-3"
       @click.self="emit('update:show', false)">
       <div class="bg-gray-900 rounded-2xl w-full max-w-7xl shadow-2xl border border-gray-800/80 max-h-[95vh] flex flex-col"
         style="box-shadow: 0 0 60px rgba(99,102,241,0.15), 0 25px 60px rgba(0,0,0,0.7);">

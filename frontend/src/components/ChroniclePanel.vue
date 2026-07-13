@@ -211,6 +211,11 @@ watch(() => props.show, async (val) => {
 })
 
 function _dismissBlocked() {
+  // Re-sample live job state before deciding: `stayOpen` otherwise reads the 2s
+  // poll snapshot, which can lag behind image jobs that started right after the
+  // pipeline finished (running→false) — leaving a window where a stray Esc /
+  // backdrop click closes the panel mid image-generation.
+  _sampleImageGen()
   return stayOpen.value || performance.now() < _ignoreDismissUntil
 }
 
@@ -607,7 +612,7 @@ async function generateImages() {
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="chronicle-root fixed inset-0 z-[85] flex items-center justify-center p-4"
+    <div v-if="show" class="chronicle-root fixed inset-0 z-[var(--z-panel-chronicle)] flex items-center justify-center p-4"
       @mousedown.self="onBackdropDown"
       @mouseup.self="onBackdropUp">
       <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden"

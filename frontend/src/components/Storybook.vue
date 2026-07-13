@@ -124,15 +124,33 @@ const timelineBuckets = computed(() => {
   return [...map.values()].sort((a, b) => a.order - b.order)
 })
 
+// Dismiss guard (mirrors ChroniclePanel): swallow the click/Esc that opened the
+// panel and any underlay race from an overlay beneath it for one tick.
+let _backdropArmed = false
+let _ignoreDismissUntil = 0
+
 watch(() => props.show, (val) => {
-  if (val) fetchStories()
-  else {
+  if (val) {
+    _ignoreDismissUntil = performance.now() + 400
+    fetchStories()
+  } else {
+    _backdropArmed = false
     detailStory.value = null
     pinupView.value = null
   }
 })
 
 function close() { emit('update:show', false) }
+function _dismissBlocked() { return performance.now() < _ignoreDismissUntil }
+
+function onBackdropDown(e) { _backdropArmed = e.target === e.currentTarget }
+function onBackdropUp(e) {
+  const armed = _backdropArmed
+  _backdropArmed = false
+  if (!armed || e.target !== e.currentTarget) return
+  if (_dismissBlocked()) return
+  close()
+}
 
 async function fetchStories() {
   loading.value = true
@@ -285,6 +303,7 @@ function onKey(e) {
     else if (e.key === 'ArrowRight') { detailNext(); e.preventDefault() }
     else if (e.key === 'Escape') { closeDetail(); e.preventDefault() }
   } else if (e.key === 'Escape') {
+    if (_dismissBlocked()) { e.preventDefault(); return }
     close()
   }
 }
@@ -294,8 +313,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="storybook-root fixed inset-0 z-[65] flex items-center justify-center p-4"
-      @click.self="close">
+    <div v-if="show" class="storybook-root fixed inset-0 z-[var(--z-panel-story)] flex items-center justify-center p-4"
+      @mousedown="onBackdropDown" @mouseup="onBackdropUp">
       <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
 
         <!-- header -->
@@ -575,7 +594,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     <!-- Story detail: fixed above Storybook shell (z-65), below gallery detail (z-70) -->
     <Transition name="sb-overlay">
       <div v-if="show && detailStory"
-        class="fixed inset-0 z-[68] sb-overlay-bg flex items-center justify-center p-3 sm:p-6"
+        class="fixed inset-0 z-[var(--z-panel-story-top)] sb-overlay-bg flex items-center justify-center p-3 sm:p-6"
         @click.self="closeDetail">
         <div class="sb-detail-panel w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
           <div class="flex items-start justify-between px-5 sm:px-6 py-4 sb-hairline gap-3">
@@ -761,7 +780,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
     <!-- Pinup lightbox -->
     <div v-if="pinupView"
-      class="fixed inset-0 z-[210] bg-black/85 flex items-center justify-center p-8"
+      class="fixed inset-0 z-[var(--z-panel-media)] bg-black/85 flex items-center justify-center p-8"
       @click.self="pinupView = null">
       <div class="pincard pincard--large" @click="pinupView = null">
         <span class="pincard-pin"></span>
