@@ -1443,6 +1443,15 @@
       }
     },
     "otherCandidates": "Other candidates",
+    "topicOnlyBadge": "Topic only",
+    "weaveSettings": "Weave settings",
+    "axisSlot": "Time anchor",
+    "draftDelta": "Draft Δ",
+    "qualityScore": "Quality",
+    "refineAxis": "Reweave in Refine",
+    "refineAxisTitle": "Send this axis prompt to Refine to regenerate as many times as you want",
+    "refineNeedPrompt": "No prompt on this axis",
+    "filterQuality": "Quality",
     "weaveFrom": "Weave a new chronicle from this image",
     "weaveFromShort": "Weave",
     "delete": "Delete",
@@ -1465,7 +1474,8 @@
       "newest": "Newest",
       "oldest": "Oldest",
       "title": "Title",
-      "time_scale": "Time scale"
+      "time_scale": "Time scale",
+      "quality": "By quality"
     },
     "filter": {
       "baseAxis": "Base axis",

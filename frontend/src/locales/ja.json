@@ -1443,6 +1443,15 @@
       }
     },
     "otherCandidates": "他の候補",
+    "topicOnlyBadge": "お題のみ",
+    "weaveSettings": "紡ぎ設定",
+    "axisSlot": "時間アンカー",
+    "draftDelta": "下書きΔ",
+    "qualityScore": "品質",
+    "refineAxis": "Refineで再紡ぎ",
+    "refineAxisTitle": "この軸のプロンプトをRefineに渡し、何度でも生成できます",
+    "refineNeedPrompt": "この軸にプロンプトがありません",
+    "filterQuality": "品質",
     "weaveFrom": "この画像から新たな物語を紡ぐ",
     "weaveFromShort": "紡ぐ",
     "delete": "削除",
@@ -1465,7 +1474,8 @@
       "newest": "新しい順",
       "oldest": "古い順",
       "title": "タイトル順",
-      "time_scale": "時間スケール順"
+      "time_scale": "時間スケール順",
+      "quality": "品質順"
     },
     "filter": {
       "baseAxis": "基準軸",
