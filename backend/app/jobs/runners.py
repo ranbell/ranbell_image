@@ -998,6 +998,7 @@ async def run_refine_prompt(
     )
     from ..api.inspire import _parse_json_from_llm, _split_tags
     from ..ai.tile_image import create_tile_image
+    from ..prompt.visual_spec import clamp_prose_paragraphs
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
 
@@ -1254,17 +1255,20 @@ async def run_refine_prompt(
 
             # Pass 2: Visual Script — prose with inline danbooru tags + per-category labeled sections.
             _put({"type": "token", "text": "\n\n"})
+            _prose_n = clamp_prose_paragraphs(getattr(body, "prose_paragraphs", 5))
             vs_prompt = _build_natural_visual_script_prompt(
                 context, nl_instruction, tags_positive,
                 instruction_framing=instruction_framing,
+                prose_paragraphs=_prose_n,
             )
             _phase("writingDescription", 0.55, "Writing Visual Script...")
             _pass2_end = 0.90 if variation_count == 1 else 0.70
             _main_options = (
                 {**options, "temperature": _FANOUT_TEMPS[0]} if variation_count > 1 else None
             )
+            _vs_tokens = 350 + _prose_n * 80
             vs_raw = await _stream_text(
-                vs_prompt, 0.55, _pass2_end, 500, "Writing Visual Script...",
+                vs_prompt, 0.55, _pass2_end, _vs_tokens, "Writing Visual Script...",
                 options_override=_main_options,
             )
 
@@ -1280,7 +1284,9 @@ async def run_refine_prompt(
             if _all_must:
                 cat_tags = _enforce_wd14_on_cat_tags(cat_tags, _all_must)
 
-            prose_missing = len(context_story.split()) < 30
+            # Shorter Visual Scripts still need real prose, not a stub.
+            _min_words = max(18, 6 * _prose_n)
+            prose_missing = len(context_story.split()) < _min_words
             positive = f"{tags_positive}\n\n{context_story}"
 
             # Extra fan-out variants: same tags, hotter prose interpretations
@@ -1289,7 +1295,7 @@ async def run_refine_prompt(
                 _v_start = 0.70 + 0.10 * _vi
                 _phase("writingDescription", _v_start, f"Variant prose (temp {_vt})...")
                 _v_raw = await _stream_text(
-                    vs_prompt, _v_start, _v_start + 0.10, 500,
+                    vs_prompt, _v_start, _v_start + 0.10, _vs_tokens,
                     f"Variant prose (temp {_vt})...",
                     options_override={**options, "temperature": _vt},
                 )
@@ -3953,6 +3959,7 @@ async def run_chronicle_expand(
                     emotion=body.emotion,
                     user_topic=body.user_topic,
                     negative_supplement=neg_supplement,
+                    prose_paragraphs=getattr(body, "prose_paragraphs", 5),
                 )
                 axis_tokens: list[str] = []
                 async for event in ollama.generate_text_stream(
@@ -4182,6 +4189,7 @@ async def run_chronicle_expand(
                                     emotion=body.emotion,
                                     user_topic=body.user_topic,
                                     draft_grounding=grounding,
+                                    prose_paragraphs=getattr(body, "prose_paragraphs", 5),
                                 )
                                 axis_tokens2: list[str] = []
                                 async for event in ollama.generate_text_stream(

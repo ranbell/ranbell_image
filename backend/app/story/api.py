@@ -56,6 +56,9 @@ class ChronicleRequest(BaseModel):
     vlm_model: str = ""
     temperature: float = 1.0  # Gemma 4 recommended default
     num_ctx: int = 16384
+    # Visual Script prose length (paragraphs 3–7). Models differ in which
+    # length they handle cleanly — UI exposes this as a slider.
+    prose_paragraphs: int = 5
     locale: Literal["en", "ja"] = "en"  # language the story is written in
     group_id: str = ""  # issued server-side on submission
 
@@ -86,6 +89,7 @@ class RespinRequest(BaseModel):
     manual_mode: bool | None = None
     temperature: float | None = None
     num_ctx: int | None = None
+    prose_paragraphs: int | None = None
     worldview: str | None = None
     user_topic: str | None = None
 
@@ -98,7 +102,7 @@ _RESPIN_OVERRIDE_FIELDS = (
     "time_scale", "divergence", "emotion", "dramatic_mode", "tone",
     "prompt_style", "workflow_name", "use_draft_refine", "draft_width",
     "draft_height", "draft_steps", "suppress_conflict_tags", "manual_mode",
-    "temperature", "num_ctx", "worldview", "user_topic",
+    "temperature", "num_ctx", "prose_paragraphs", "worldview", "user_topic",
 )
 
 

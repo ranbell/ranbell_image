@@ -19,6 +19,49 @@ VISUAL_SPEC_CAT_FIELDS: tuple[str, ...] = (
 CHRONICLE_CAT_FIELDS = VISUAL_SPEC_CAT_FIELDS
 REFINE_CAT_FIELDS = VISUAL_SPEC_CAT_FIELDS
 
+# Visual Script prose length (paragraph count). Models differ in what length
+# they handle well — expose as a UI slider (default keeps historical behavior).
+DEFAULT_PROSE_PARAGRAPHS = 5
+MIN_PROSE_PARAGRAPHS = 3
+MAX_PROSE_PARAGRAPHS = 7
+
+
+def clamp_prose_paragraphs(n: int | None) -> int:
+    try:
+        v = int(n) if n is not None else DEFAULT_PROSE_PARAGRAPHS
+    except (TypeError, ValueError):
+        v = DEFAULT_PROSE_PARAGRAPHS
+    return max(MIN_PROSE_PARAGRAPHS, min(MAX_PROSE_PARAGRAPHS, v))
+
+
+def prose_sentence_range(paragraphs: int) -> str:
+    """Sentences-per-paragraph hint scaled with total length."""
+    n = clamp_prose_paragraphs(paragraphs)
+    if n <= 3:
+        return "2-3"
+    if n >= 7:
+        return "2-5"
+    return "2-4"
+
+
+def visual_script_length_line(paragraphs: int = DEFAULT_PROSE_PARAGRAPHS) -> str:
+    """Hard length directive for Visual Script prompts."""
+    n = clamp_prose_paragraphs(paragraphs)
+    sent = prose_sentence_range(n)
+    if n == DEFAULT_PROSE_PARAGRAPHS:
+        return (
+            f"Write exactly {n} flowing paragraphs ({sent} sentences each). "
+            "Do NOT label the paragraphs — the five focuses below map 1:1 "
+            "to paragraphs 1–5."
+        )
+    return (
+        f"Write exactly {n} flowing paragraphs ({sent} sentences each). "
+        "Do NOT label the paragraphs. Distribute the five focuses below "
+        f"across those {n} paragraphs "
+        f"({'compress related focuses into fewer paragraphs' if n < DEFAULT_PROSE_PARAGRAPHS else 'split focuses across more paragraphs when needed'})."
+    )
+
+
 LABELED_TAG_FOOTER = (
     "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
     "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
@@ -31,14 +74,22 @@ LABELED_TAG_FOOTER = (
     "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
 )
 
+
+def chronicle_labeled_tag_footer(
+    paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
+) -> str:
+    n = clamp_prose_paragraphs(paragraphs)
+    return (
+        f"After the {n}-paragraph prose (still inside POSITIVE, after the prose), "
+        "output ONLY these labeled category lines. Prefer tags already present in "
+        "the PASS 1 TAG LINE — do not invent a parallel taxonomy. Leave a bucket "
+        "empty if nothing fits:\n\n"
+        f"{LABELED_TAG_FOOTER}"
+    )
+
+
 # Chronicle prose prompt wraps the footer with Pass-1 instructions.
-CHRONICLE_LABELED_TAG_FOOTER = (
-    "After the 5-paragraph prose (still inside POSITIVE, after the prose), "
-    "output ONLY these labeled category lines. Prefer tags already present in "
-    "the PASS 1 TAG LINE — do not invent a parallel taxonomy. Leave a bucket "
-    "empty if nothing fits:\n\n"
-    f"{LABELED_TAG_FOOTER}"
-)
+CHRONICLE_LABELED_TAG_FOOTER = chronicle_labeled_tag_footer(DEFAULT_PROSE_PARAGRAPHS)
 
 VS_LABEL_RE = re.compile(
     r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",

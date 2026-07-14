@@ -64,6 +64,7 @@ const useDraftRefine = ref('auto') // auto | on | off
 const draftWidth = ref(512)
 const draftHeight = ref(512)
 const draftSteps = ref(12)
+const proseParagraphs = ref(5)
 const pickingRandom = ref(false)
 const biography = ref(null)
 const timetable = ref(null)
@@ -595,6 +596,7 @@ function currentSettingsPayload() {
     manual_mode: manualMode.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
+    prose_paragraphs: proseParagraphs.value,
     locale: uiLocale.value,
   }
 }
@@ -640,6 +642,7 @@ async function respin(stage) {
     manual_mode: settings.manual_mode,
     temperature: settings.temperature,
     num_ctx: settings.num_ctx,
+    prose_paragraphs: settings.prose_paragraphs,
     worldview: settings.worldview,
     user_topic: settings.user_topic,
   })
@@ -1011,6 +1014,21 @@ async function generateImages() {
                       class="sb-chip" :class="promptStyle === m ? 'is-chip-on-teal' : ''">
                       {{ t('chronicle.style.' + m.replace('+', '_')) }}
                     </button>
+                  </div>
+                  <div v-if="promptStyle !== 'danbooru'" class="flex items-center gap-2">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.proseLengthTitle')">
+                      {{ t('chronicle.proseLengthLabel') }}
+                    </span>
+                    <input v-model.number="proseParagraphs" type="range" min="3" max="7" step="1"
+                      class="flex-1 accent-teal-500" />
+                    <span class="text-teal-400 w-16 text-right text-[11px] font-mono">
+                      {{ proseParagraphs }}{{ t('chronicle.proseLengthUnit') }}
+                    </span>
+                  </div>
+                  <div v-if="promptStyle !== 'danbooru'"
+                    class="flex justify-between text-[10px] text-[var(--sb-faint)] pl-[calc(5rem+0.5rem)] -mt-1">
+                    <span>{{ t('chronicle.proseLengthShort') }}</span>
+                    <span>{{ t('chronicle.proseLengthLong') }}</span>
                   </div>
                   <div class="flex items-center flex-wrap gap-4">
                     <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]">

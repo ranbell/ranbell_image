@@ -119,6 +119,7 @@ function hasWeaveSettings(story) {
     body.dramatic_mode ||
     body.use_draft_refine ||
     body.prompt_style ||
+    body.prose_paragraphs ||
     story.time_scale ||
     story.emotion ||
     story.base_model_name ||
@@ -756,6 +757,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   </span>
                   <span v-if="storyBody(detailStory).prompt_style" class="sb-meta-chip font-mono text-[var(--sb-muted)]">
                     {{ promptStyleLabel(storyBody(detailStory).prompt_style) }}
+                  </span>
+                  <span v-if="storyBody(detailStory).prose_paragraphs && storyBody(detailStory).prompt_style !== 'danbooru'"
+                    class="sb-meta-chip text-[var(--sb-muted)]">
+                    {{ t('chronicle.proseLengthLabel') }} {{ storyBody(detailStory).prose_paragraphs }}{{ t('chronicle.proseLengthUnit') }}
                   </span>
                   <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
                     <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}

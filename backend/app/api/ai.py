@@ -15,10 +15,13 @@ from ..config import settings
 from ..ai.tile_image import create_tile_image
 from ..jobs.sse_stream import queue_sse_response
 from ..prompt.visual_spec import (
+    DEFAULT_PROSE_PARAGRAPHS,
     LABELED_TAG_FOOTER,
     REFINE_CAT_FIELDS as _REFINE_CAT_FIELDS,
+    clamp_prose_paragraphs,
     parse_visual_script as _parse_visual_script_sections,
     strip_section_markers as _strip_visual_script_markers,
+    visual_script_length_line,
 )
 from ..runtime_config import get_runtime_config
 from ..scanner.scanner import register_image
@@ -62,6 +65,9 @@ class RefineRequest(BaseModel):
     wd14_unique_count: int = 20
     divergence: float = 0.0  # 0–1: mutate style/scene away from references (Transmute)
     variation_count: int = 1  # natural style only: run the prose pass N times (1–3) at rising temperatures
+    # natural style Visual Script length (paragraphs 3–7). Models differ in
+    # which length they handle cleanly — UI exposes this as a slider.
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS
     roles: list[str] = []  # per-image role aligned with sha256s: 'both' | 'style' | 'content'
     emotion_shift: str = ""  # target emotion dimension (e.g. 'nostalgia') to rewrite the register toward
 
@@ -337,43 +343,54 @@ _NATURAL_PROSE_RETRY_PREFIX = (
     "list.\n\n"
 )
 
-_NATURAL_VISUAL_SCRIPT_INSTRUCTION = (
-    "Write a VISUAL SCRIPT for an AI image generator: flowing English prose where every concrete\n"
-    "visual element is simultaneously named in danbooru vocabulary within ASCII parentheses.\n"
-    "This text goes directly into an AI image generator — clarity and natural English are critical.\n\n"
-    "# OUTPUT FORMAT\n"
-    "Write exactly 5 flowing paragraphs (2-4 sentences each). "
-    "Do NOT label paragraphs. Do NOT write [CHARACTER], [ACTION], [SCENE], [DETAIL], [MOOD] "
-    "or any bracket markers in the output — those are INTERNAL STRUCTURAL GUIDES ONLY.\n"
-    "Embed danbooru tags inline in ASCII parentheses immediately after each element:\n"
-    "Example: \"A (1girl, solo) with (long_hair, brown_hair) grips a (sword, holding_sword) "
-    "with both hands, knuckles white. Her (school_uniform) shifts as she stands in a (park, outdoor), "
-    "bathed in (afternoon_sun, warm_light). The (green_trees, sky) frame her determined expression.\"\n\n"
-    "# INTERNAL PARAGRAPH GUIDE (do NOT echo these labels in output)\n"
-    "Paragraph 1 — APPEARANCE: subject count as very first tag (1girl/solo/2girls/1boy…), "
-    "then hair, eyes, face, expression, clothing, accessories.\n"
-    "Paragraph 2 — ACTION: pose, gesture, body language, physical interactions from the story.\n"
-    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day.\n"
-    "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction and quality.\n"
-    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression.\n\n"
-    "# RULES\n"
-    "0. SUBJECT-FIRST: The VERY FIRST parenthetical MUST be the subject count: "
-    "(1girl, solo) or (2girls) or (1boy), etc. Never start with a scene element.\n"
-    "1. ACTION-ANCHOR: All concrete physical actions from [User instruction] MUST appear as "
-    "danbooru action tags in paragraph 2. "
-    "Translate story verbs: 握る→(gripping,clenched_hand), 触れる→(touching,fingertips), "
-    "抱きしめる→(hug,arms_around_another's_neck), 手を繋ぐ→(holding_hands), "
-    "走る→(running,dynamic_pose), 跪く→(kneeling,one_knee), 手を伸ばす→(reaching,outstretched_arm).\n"
-    "2. EXPLICIT TAG RULE: NEVER use euphemistic language for actions or body parts. "
-    "WRONG: '(tender_touch)', '(intimate_gesture)', '(closeness)'. "
-    "CORRECT: '(hand_on_another's_cheek)', '(breast_grab)', '(gripping)', '(lap_pillow)', "
-    "'(hair_grab)', '(wrist_grab)', '(nape)', '(collarbone)', '(thigh_grab)'.\n"
-    "3. English only — at least 2 danbooru tags per sentence.\n"
-    "4. No vague phrases: no 'somehow', 'a sense of', 'filled with emotion'.\n"
-    "5. NEVER add quality meta-tags (masterpiece, best_quality, highres etc.).\n\n"
-    "Write the 5-paragraph prose now. Then, on a new line after the prose, output ONLY these "
-    "labeled tag lines (no JSON, no code block, no extra text):\n\n"
-    f"{LABELED_TAG_FOOTER}"
+def _natural_visual_script_instruction(
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
+) -> str:
+    n = clamp_prose_paragraphs(prose_paragraphs)
+    length_line = visual_script_length_line(n)
+    return (
+        "Write a VISUAL SCRIPT for an AI image generator: flowing English prose where every concrete\n"
+        "visual element is simultaneously named in danbooru vocabulary within ASCII parentheses.\n"
+        "This text goes directly into an AI image generator — clarity and natural English are critical.\n\n"
+        "# OUTPUT FORMAT\n"
+        f"{length_line} "
+        "Do NOT write [CHARACTER], [ACTION], [SCENE], [DETAIL], [MOOD] "
+        "or any bracket markers in the output — those are INTERNAL STRUCTURAL GUIDES ONLY.\n"
+        "Embed danbooru tags inline in ASCII parentheses immediately after each element:\n"
+        "Example: \"A (1girl, solo) with (long_hair, brown_hair) grips a (sword, holding_sword) "
+        "with both hands, knuckles white. Her (school_uniform) shifts as she stands in a (park, outdoor), "
+        "bathed in (afternoon_sun, warm_light). The (green_trees, sky) frame her determined expression.\"\n\n"
+        "# INTERNAL FOCUS GUIDE (do NOT echo these labels in output)\n"
+        "Focus APPEARANCE: subject count as very first tag (1girl/solo/2girls/1boy…), "
+        "then hair, eyes, face, expression, clothing, accessories.\n"
+        "Focus ACTION: pose, gesture, body language, physical interactions from the story.\n"
+        "Focus ENVIRONMENT: location, background, setting, time of day.\n"
+        "Focus DETAIL: textures, props, fine details, lighting direction and quality.\n"
+        "Focus MOOD: color temperature, atmosphere, overall impression.\n\n"
+        "# RULES\n"
+        "0. SUBJECT-FIRST: The VERY FIRST parenthetical MUST be the subject count: "
+        "(1girl, solo) or (2girls) or (1boy), etc. Never start with a scene element.\n"
+        "1. ACTION-ANCHOR: All concrete physical actions from [User instruction] MUST appear as "
+        "danbooru action tags in the ACTION focus. "
+        "Translate story verbs: 握る→(gripping,clenched_hand), 触れる→(touching,fingertips), "
+        "抱きしめる→(hug,arms_around_another's_neck), 手を繋ぐ→(holding_hands), "
+        "走る→(running,dynamic_pose), 跪く→(kneeling,one_knee), 手を伸ばす→(reaching,outstretched_arm).\n"
+        "2. EXPLICIT TAG RULE: NEVER use euphemistic language for actions or body parts. "
+        "WRONG: '(tender_touch)', '(intimate_gesture)', '(closeness)'. "
+        "CORRECT: '(hand_on_another's_cheek)', '(breast_grab)', '(gripping)', '(lap_pillow)', "
+        "'(hair_grab)', '(wrist_grab)', '(nape)', '(collarbone)', '(thigh_grab)'.\n"
+        "3. English only — at least 2 danbooru tags per sentence.\n"
+        "4. No vague phrases: no 'somehow', 'a sense of', 'filled with emotion'.\n"
+        "5. NEVER add quality meta-tags (masterpiece, best_quality, highres etc.).\n\n"
+        f"Write the {n}-paragraph prose now. Then, on a new line after the prose, output ONLY these "
+        "labeled tag lines (no JSON, no code block, no extra text):\n\n"
+        f"{LABELED_TAG_FOOTER}"
+    )
+
+
+# Default (5-paragraph) instruction kept for import/test back-compat.
+_NATURAL_VISUAL_SCRIPT_INSTRUCTION = _natural_visual_script_instruction(
+    DEFAULT_PROSE_PARAGRAPHS
 )
 
 
@@ -463,15 +480,17 @@ def _build_natural_visual_script_prompt(
     instruction: str,
     tags_text: str,
     instruction_framing: bool = False,
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
 ) -> str:
     instr_block = _format_instruction_block(instruction, instruction_framing)
+    style_instr = _natural_visual_script_instruction(prose_paragraphs)
 
     story_mandate = (
         "[Story → Image Mandate]\n"
         "The [User instruction] describes a story. "
         "The characters in that story are the PRIMARY SUBJECTS of this image. "
         "Translate their concrete physical actions (gripping, touching, running, kneeling, etc.) "
-        "directly into embedded danbooru action tags in the [ACTION] section. "
+        "directly into embedded danbooru action tags in the ACTION focus. "
         "Do NOT lose or generalize the story's specific physical interactions."
     )
 
@@ -481,7 +500,7 @@ def _build_natural_visual_script_prompt(
         "UNIFIED COMPOSITION MANDATE: Describe ONE SINGLE IMAGE. Regardless of how many "
         "reference images are provided, synthesize them into a single coherent scene — "
         "not a collage, not a diptych, not a reference sheet.\n\n"
-        f"[Style directive]\n{_NATURAL_VISUAL_SCRIPT_INSTRUCTION}\n\n"
+        f"[Style directive]\n{style_instr}\n\n"
         f"[Reference metadata]\n{context}\n\n"
         f"[Tags already extracted for this scene — use as danbooru vocabulary anchor]\n{tags_text}\n\n"
         f"{story_mandate}\n\n"

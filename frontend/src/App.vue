@@ -332,6 +332,7 @@ const refineTemp = ref(0.7)
 const refineDivergence = ref(0)        // 0.0〜1.0: Transmute (mutate style away from references)
 const refineMutationTags = ref([])     // mutation tags sampled by the backend
 const refineVariationCount = ref(1)    // natural style: prose pass fan-out (1〜3)
+const refineProseParagraphs = ref(5)   // natural style: Visual Script length (3〜7)
 const refineVariants = ref([])         // [{positive, temperature}] extra fan-out variants
 const refineEmotionShift = ref('')     // target emotion dimension ('' = off)
 const imageRoles = ref(new Map())      // sha256 → 'both' | 'style' | 'content'
@@ -2354,6 +2355,7 @@ async function runRefine() {
       wd14_unique_count: refineUniqueCount.value,
       divergence: refineDivergence.value,
       variation_count: refineVariationCount.value,
+      prose_paragraphs: refineProseParagraphs.value,
       roles: orderedShas.map(s => imageRoles.value.get(s) || 'both'),
       emotion_shift: refineEmotionShift.value,
       auto_submit: refineAutoSubmit.value,
@@ -3621,6 +3623,19 @@ onUnmounted(() => {
                           class="flex-1 py-1.5 rounded-lg border text-xs transition disabled:opacity-50">
                           {{ n }}
                         </button>
+                      </div>
+                    </div>
+                    <div v-if="refineStyle === 'natural'">
+                      <label class="text-xs text-gray-500 flex justify-between mb-1.5" :title="$t('refine.proseLengthTip')">
+                        <span>{{ $t('refine.proseLength') }}</span>
+                        <span class="text-purple-400 font-mono">{{ refineProseParagraphs }}{{ $t('refine.proseLengthUnit') }}</span>
+                      </label>
+                      <input v-model.number="refineProseParagraphs" type="range" min="3" max="7" step="1"
+                        :disabled="refining || refineDirectPrompt !== null"
+                        class="w-full accent-purple-500 disabled:opacity-50" />
+                      <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+                        <span>{{ $t('refine.proseLengthShort') }}</span>
+                        <span>{{ $t('refine.proseLengthLong') }}</span>
                       </div>
                     </div>
                     <div>

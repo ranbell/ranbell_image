@@ -72,3 +72,37 @@ def test_build_axis_prose_prompt_asks_for_labeled_categories():
     assert "LIGHTING_TAGS:" in prompt
     assert "Work in DANBOORU TAGS first" in prompt
     assert "THREE parts" in prompt
+    assert "exactly 5 flowing paragraphs" in prompt
+
+
+def test_build_axis_prose_prompt_respects_prose_paragraphs():
+    short = build_axis_prose_prompt(
+        story_text="She runs on the beach.",
+        tag_line="1girl, running, beach",
+        character_tags=["brown_hair"],
+        character_desc="girl",
+        prompt_style="natural",
+        prose_paragraphs=3,
+    )
+    long = build_axis_prose_prompt(
+        story_text="She runs on the beach.",
+        tag_line="1girl, running, beach",
+        character_tags=["brown_hair"],
+        character_desc="girl",
+        prompt_style="natural",
+        prose_paragraphs=7,
+    )
+    assert "exactly 3 flowing paragraphs" in short
+    assert "3-paragraph Visual Script" in short
+    assert "After the 3-paragraph prose" in short
+    assert "exactly 7 flowing paragraphs" in long
+    assert "7-paragraph Visual Script" in long
+
+
+def test_clamp_prose_paragraphs():
+    from app.prompt.visual_spec import clamp_prose_paragraphs
+    assert clamp_prose_paragraphs(1) == 3
+    assert clamp_prose_paragraphs(5) == 5
+    assert clamp_prose_paragraphs(99) == 7
+    assert clamp_prose_paragraphs(None) == 5
+    assert clamp_prose_paragraphs("nope") == 5

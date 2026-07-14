@@ -21,9 +21,12 @@ import re
 
 from ..prompt.visual_spec import (
     CHRONICLE_CAT_FIELDS,
-    CHRONICLE_LABELED_TAG_FOOTER as _VS_LABELED_TAG_FOOTER,
+    DEFAULT_PROSE_PARAGRAPHS,
+    chronicle_labeled_tag_footer,
+    clamp_prose_paragraphs,
     merge_category_tags,
     parse_visual_script as parse_visual_script_category_tags,
+    visual_script_length_line,
 )
 from ..tags.catalog import (
     ACCESSORIES as _ACCESSORIES,
@@ -2231,50 +2234,57 @@ def parse_tags_json(raw: str, *, limit: int = 60) -> list[str]:
 
 # ── Stage 3: per-axis Visual Script prompt ────────────────────────────────────
 
-_VISUAL_SCRIPT_GUIDE = (
-    "Write a VISUAL SCRIPT: flowing English prose where every concrete visual "
-    "element is simultaneously named in danbooru vocabulary within ASCII "
-    "parentheses. This text goes directly into an AI image generator.\n"
-    "Write exactly 5 flowing paragraphs (2-4 sentences each). Do NOT label the "
-    "paragraphs — this structure is an INTERNAL GUIDE ONLY:\n"
-    "Paragraph 1 — APPEARANCE: subject count as very first tag (1girl/solo/...), "
-    "then hair, eyes, face, expression, clothing, accessories.\n"
-    "Paragraph 2 — ACTION: INVENT a physically vivid, story-specific pose. "
-    "Never default to 'standing' or 'sitting facing forward'. Name a concrete "
-    "micro-action: hands pressing against cold glass, fingers tracing a map edge, "
-    "body half-turned mid-step, weight shifted onto one knee. "
-    "The pose must be emotionally legible at a glance and visually distinct "
-    "from a neutral upright stance.\n"
-    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day. "
-    "Fill the frame with *specific* place cues (a lit cafe storefront with "
-    "bottles in the window, a streetlamp, distant mountains, stadium bleachers "
-    "and crowd) — never a vague empty backdrop.\n"
-    "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction "
-    "and quality. Name the light (rim light / backlight / golden hour / long "
-    "shadows / warm interior glow) and at least two props the eye can rest on.\n"
-    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression. "
-    "Add weather/particles when fitting (wind in hair/scarf, confetti, haze).\n"
-    "Embed danbooru tags inline in ASCII parentheses right after each element, "
-    'e.g. "A (1girl, solo) with (long_hair, silver_hair) grips a (sword, '
-    'holding_sword) on a (rooftop) under (night_sky, full_moon)."\n'
-    "ACTION-ANCHOR — this is what makes the image express the story, so it is "
-    "MANDATORY: every physical action in the act MUST surface as danbooru action "
-    "tags in paragraph 2, placed right after the subject/appearance tags so the "
-    "pose reads strongly. Translate story verbs into real danbooru pose tags, e.g. "
-    "grip→(gripping, clenched_hand), touch→(touching, fingertips), reach→(reaching, "
-    "outstretched_arm), run→(running, dynamic_pose, leaning_forward), kneel→"
-    "(kneeling, one_knee), look back→(looking_back, turning_head), lean→(leaning_"
-    "forward), fall→(falling), hold hands→(holding_hands), cover face→(covering_"
-    "face, hand_over_own_mouth). Use the concrete tag, never a vague phrase like "
-    "'(tender_gesture)'. Add a camera/framing tag for the pose (from_side, "
-    "from_above, from_behind, dutch_angle, cowboy_shot, close-up…).\n"
-    "FORBIDDEN as the whole pose: a bare (standing) / (sitting) / (arms_at_sides) / "
-    "(expressionless) with no action tag — a motionless upright figure is exactly "
-    "the boring default this must avoid. Unless the story truly depicts stillness, "
-    "the character must be visibly mid-action.\n"
-    "At least 2 danbooru tags per sentence. English only. No vague phrases. "
-    "NEVER add quality meta-tags (masterpiece, best_quality, highres etc.)."
-)
+def _visual_script_guide(paragraphs: int = DEFAULT_PROSE_PARAGRAPHS) -> str:
+    """Chronicle Visual Script format guide with adjustable prose length."""
+    n = clamp_prose_paragraphs(paragraphs)
+    length_line = visual_script_length_line(n)
+    return (
+        "Write a VISUAL SCRIPT: flowing English prose where every concrete visual "
+        "element is simultaneously named in danbooru vocabulary within ASCII "
+        "parentheses. This text goes directly into an AI image generator.\n"
+        f"{length_line}\n"
+        "Focus APPEARANCE: subject count as very first tag (1girl/solo/...), "
+        "then hair, eyes, face, expression, clothing, accessories.\n"
+        "Focus ACTION: INVENT a physically vivid, story-specific pose. "
+        "Never default to 'standing' or 'sitting facing forward'. Name a concrete "
+        "micro-action: hands pressing against cold glass, fingers tracing a map edge, "
+        "body half-turned mid-step, weight shifted onto one knee. "
+        "The pose must be emotionally legible at a glance and visually distinct "
+        "from a neutral upright stance.\n"
+        "Focus ENVIRONMENT: location, background, setting, time of day. "
+        "Fill the frame with *specific* place cues (a lit cafe storefront with "
+        "bottles in the window, a streetlamp, distant mountains, stadium bleachers "
+        "and crowd) — never a vague empty backdrop.\n"
+        "Focus DETAIL: textures, props, fine details, lighting direction "
+        "and quality. Name the light (rim light / backlight / golden hour / long "
+        "shadows / warm interior glow) and at least two props the eye can rest on.\n"
+        "Focus MOOD: color temperature, atmosphere, overall impression. "
+        "Add weather/particles when fitting (wind in hair/scarf, confetti, haze).\n"
+        "Embed danbooru tags inline in ASCII parentheses right after each element, "
+        'e.g. "A (1girl, solo) with (long_hair, silver_hair) grips a (sword, '
+        'holding_sword) on a (rooftop) under (night_sky, full_moon)."\n'
+        "ACTION-ANCHOR — this is what makes the image express the story, so it is "
+        "MANDATORY: every physical action in the act MUST surface as danbooru action "
+        "tags in the ACTION focus, placed right after the subject/appearance tags so the "
+        "pose reads strongly. Translate story verbs into real danbooru pose tags, e.g. "
+        "grip→(gripping, clenched_hand), touch→(touching, fingertips), reach→(reaching, "
+        "outstretched_arm), run→(running, dynamic_pose, leaning_forward), kneel→"
+        "(kneeling, one_knee), look back→(looking_back, turning_head), lean→(leaning_"
+        "forward), fall→(falling), hold hands→(holding_hands), cover face→(covering_"
+        "face, hand_over_own_mouth). Use the concrete tag, never a vague phrase like "
+        "'(tender_gesture)'. Add a camera/framing tag for the pose (from_side, "
+        "from_above, from_behind, dutch_angle, cowboy_shot, close-up…).\n"
+        "FORBIDDEN as the whole pose: a bare (standing) / (sitting) / (arms_at_sides) / "
+        "(expressionless) with no action tag — a motionless upright figure is exactly "
+        "the boring default this must avoid. Unless the story truly depicts stillness, "
+        "the character must be visibly mid-action.\n"
+        "At least 2 danbooru tags per sentence. English only. No vague phrases. "
+        "NEVER add quality meta-tags (masterpiece, best_quality, highres etc.)."
+    )
+
+
+# Default guide kept for imports / tests that expect a module-level constant.
+_VISUAL_SCRIPT_GUIDE = _visual_script_guide(DEFAULT_PROSE_PARAGRAPHS)
 
 
 # Refine-parity category buckets (UI + structured view for image models).
@@ -3174,6 +3184,7 @@ def build_axis_prompt(
     visual_plan: dict | None = None,
     emotion: str = "",
     user_topic: str = "",
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
 ) -> str:
     """LLM prompt producing POSITIVE:/NEGATIVE: sections for one axis.
 
@@ -3188,6 +3199,7 @@ def build_axis_prompt(
     Kept as a single-pass fallback; the 2-pass pipeline (build_axis_tags_prompt
     → build_axis_prose_prompt) is preferred for lightweight VLMs.
     """
+    _prose_n = clamp_prose_paragraphs(prose_paragraphs)
     ctx = _axis_context_blocks(
         story_text=story_text,
         character_tags=character_tags,
@@ -3215,7 +3227,7 @@ def build_axis_prompt(
 
     if prompt_style == "natural":
         format_rule = (
-            "POSITIVE is the 5-paragraph Visual Script prose described above. "
+            f"POSITIVE is the {_prose_n}-paragraph Visual Script prose described above. "
             "Open paragraph 1 with the condensed identity keywords as inline tags."
         )
     elif prompt_style == "danbooru":
@@ -3229,7 +3241,7 @@ def build_axis_prompt(
             "POSITIVE is two parts separated by a blank line:\n"
             "(a) a comma-separated danbooru tag line (30-50 tags) — condensed "
             "identity keywords FIRST, then action/environment/detail/mood tags;\n"
-            "(b) the 5-paragraph Visual Script prose described above."
+            f"(b) the {_prose_n}-paragraph Visual Script prose described above."
         )
 
     elapsed_header = _elapsed_time_header(
@@ -3251,7 +3263,7 @@ def build_axis_prompt(
         f"{plan_block}"
         f"{emotion_block}"
         "\n[Visual Script format]\n"
-        f"{_VISUAL_SCRIPT_GUIDE}\n\n"
+        f"{_visual_script_guide(_prose_n)}\n\n"
         "Rules:\n"
         "- Condense the character's PHYSICAL identity (hair, eyes, notable "
         "features, signature outfit elements) into a SHORT keyword list and put "
@@ -3622,8 +3634,9 @@ def build_axis_prose_prompt(
     user_topic: str = "",
     negative_supplement: str = "",
     draft_grounding: str = "",
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
 ) -> str:
-    """Pass 2 of Stage 3b: 5-paragraph Visual Script over Pass 1's tag line.
+    """Pass 2 of Stage 3b: Visual Script over Pass 1's tag line.
 
     prompt_style="natural"          → POSITIVE = prose only (no leading tag line)
     prompt_style="danbooru+natural" → POSITIVE = tag_line, blank line, prose
@@ -3632,6 +3645,7 @@ def build_axis_prose_prompt(
     When ``draft_grounding`` is set (Phase B), the image model's draft WD14 is
     treated as visual fact — lighting/atmosphere/props must match it.
     """
+    _prose_n = clamp_prose_paragraphs(prose_paragraphs)
     ctx = _axis_context_blocks(
         story_text=story_text,
         character_tags=character_tags,
@@ -3670,7 +3684,7 @@ def build_axis_prose_prompt(
         )
     if prompt_style == "natural":
         format_rule = (
-            "POSITIVE is: (1) the 5-paragraph Visual Script prose, then "
+            f"POSITIVE is: (1) the {_prose_n}-paragraph Visual Script prose, then "
             "(2) the labeled *_TAGS category lines. No leading flat tag line "
             "— tags live inline in the prose and in the category footer."
         )
@@ -3679,7 +3693,7 @@ def build_axis_prose_prompt(
             "POSITIVE has THREE parts separated by blank lines:\n"
             "(a) the PASS 1 DANBOORU TAG LINE above verbatim (do not re-order, "
             "do not drop tags);\n"
-            "(b) the 5-paragraph Visual Script prose;\n"
+            f"(b) the {_prose_n}-paragraph Visual Script prose;\n"
             "(c) the labeled *_TAGS category lines (Refine Visual Spec)."
         )
     neg_hint = (
@@ -3710,8 +3724,8 @@ def build_axis_prose_prompt(
         f"{tag_block}"
         f"{grounding_block}"
         "\n[Visual Script format]\n"
-        f"{_VISUAL_SCRIPT_GUIDE}\n\n"
-        f"{_VS_LABELED_TAG_FOOTER}\n\n"
+        f"{_visual_script_guide(_prose_n)}\n\n"
+        f"{chronicle_labeled_tag_footer(_prose_n)}\n\n"
         "Rules:\n"
         f"- {format_rule}\n"
         f"{draft_rule}"
