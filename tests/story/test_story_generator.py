@@ -1949,6 +1949,42 @@ def test_topic_anchor_tokens_festival_multi():
     assert not candidates_off_topic(en, "夏祭りで遊ぶ三人の少女")
 
 
+def test_topic_anchor_tokens_single_kanji_rain_and_rooftop():
+    """1-kanji cues (雨/駅/星) and 屋上 must expand to EN for off-topic gating."""
+    rain = topic_anchor_tokens("雨の駅で待ち合わせ")
+    assert "rain" in rain and "station" in rain
+    assert any(t in rain for t in ("wait", "waiting", "meet", "meeting"))
+    rain_en = [{
+        "id": "A",
+        "past": "She waits on the rainy station platform",
+        "present": "She waves under an umbrella at the station",
+        "future": "They leave the station steps in the rain",
+        "title": "Platform",
+    }] * 3
+    assert not candidates_off_topic(rain_en, "雨の駅で待ち合わせ")
+
+    roof = topic_anchor_tokens("屋上で星を見る")
+    assert "rooftop" in roof and "star" in roof
+    roof_en = [{
+        "id": "A",
+        "past": "She opens the school rooftop door at night",
+        "present": "She points at a bright star on the rooftop",
+        "future": "She counts constellations on the rooftop",
+        "title": "Stars",
+    }] * 3
+    assert not candidates_off_topic(roof_en, "屋上で星を見る")
+    assert candidates_off_topic(
+        [{
+            "id": "A",
+            "past": "She kneads dough in a quiet kitchen",
+            "present": "She folds pastry on the counter",
+            "future": "She bakes bread at dawn",
+            "title": "Kitchen",
+        }] * 3,
+        "屋上で星を見る",
+    )
+
+
 def test_multi_character_drops_hair_eye_locks():
     wd14 = [
         "3girls", "multiple_girls", "blonde_hair", "black_hair",

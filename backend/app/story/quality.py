@@ -19,7 +19,8 @@ from .generator import (
     acts_temporally_distinct,
     activities_temporally_distinct,
     axis_tag_lines_collapsed,
-    topic_anchor_tokens,
+    _is_ja_script_token,
+    topic_anchor_groups,
     _chronicle_tags_degenerate,
 )
 
@@ -189,8 +190,8 @@ def _score_topic_fit(
     topic = (user_topic or "").strip()
     if not topic:
         return 0.7, "no_topic"  # neutral — free improvisation is allowed
-    tokens = topic_anchor_tokens(topic)
-    if not tokens:
+    groups = topic_anchor_groups(topic)
+    if not groups:
         return 0.7, "no_tokens"
     blob = " ".join(
         [
@@ -200,21 +201,21 @@ def _score_topic_fit(
             *(activities.get(a) or "" for a in AXES),
         ]
     ).lower()
-    # When the story blob is English-only, ignore pure-CJK anchors so JA お題
-    # aliases (festival←夏祭) are not diluted by tokens that can never hit.
-    blob_has_cjk = any("\u3400" <= c <= "\u9fff" for c in blob)
-    if not blob_has_cjk:
-        matchable = [
-            t for t in tokens
-            if not any("\u3400" <= c <= "\u9fff" for c in t)
-        ] or tokens
-    else:
-        matchable = tokens
-    hits = sum(1 for tok in matchable if tok in blob)
-    ratio = hits / max(1, len(matchable))
-    # Soft curve: 1 token hit → ~0.45, half → ~0.7, all → 1.0
+    # English-only blobs: ignore JA-script members so aliases are not diluted
+    # (カフェ never appears in EN prose; cafe/coffee/barista do).
+    blob_has_ja = any(_is_ja_script_token(c) for c in blob)
+    hits = 0
+    for group in groups:
+        if not blob_has_ja:
+            members = [t for t in group if not _is_ja_script_token(t)] or group
+        else:
+            members = group
+        if any(tok in blob for tok in members):
+            hits += 1
+    ratio = hits / max(1, len(groups))
+    # Soft curve: 1 group hit → ~0.45+, half → ~0.7, all → 1.0
     score = _clamp01(0.25 + 0.75 * ratio)
-    return score, f"hits={hits}/{len(matchable)}"
+    return score, f"hits={hits}/{len(groups)}"
 
 
 def _score_diversity(
