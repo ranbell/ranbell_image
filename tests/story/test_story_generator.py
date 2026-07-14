@@ -564,6 +564,32 @@ def test_merge_chronicle_axis_tags_identity_only():
     assert len([t for t in line.split(",") if t.strip()]) <= 20
 
 
+def test_theme_must_tags_bunny_girl():
+    from app.story.generator import (
+        build_fast_candidate,
+        ensure_theme_must_tags,
+        parse_fast_prompts_json,
+        theme_must_tags,
+    )
+
+    must = theme_must_tags("バニーガール")
+    assert "bunny_girl" in must and "rabbit_ears" in must and "leotard" in must
+    assert "bunny_girl" in theme_must_tags("night bunny girl")
+    # Survives 20-tag cap even when the line is flooded.
+    flooded = "1girl, " + ", ".join(f"pad_{i}" for i in range(40))
+    kept = ensure_theme_must_tags(flooded, must)
+    parts = [t.strip() for t in kept.split(",") if t.strip()]
+    assert len(parts) <= 20
+    assert "bunny_girl" in parts and "rabbit_ears" in parts
+    cand = build_fast_candidate("バニーガール", locale="ja")
+    assert cand["id"] == "A" and "バニー" in cand["present"]
+    lines, neg = parse_fast_prompts_json(
+        '{"past":"1girl, bunny_girl","present":"1girl, bunny_girl, smile",'
+        '"future":"1girl, bunny_girl, walking","negative":"blurry"}'
+    )
+    assert "bunny_girl" in lines["present"] and neg == "blurry"
+
+
 def test_cap_danbooru_tag_line_keeps_identity_and_focal():
     from app.story.generator import (
         IMAGE_PROMPT_MAX_TAGS,

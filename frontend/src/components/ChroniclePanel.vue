@@ -58,6 +58,8 @@ const tone = ref('bright')
 const timeScaleIdx = ref(5)
 const useRefSeed = ref(true)
 const manualMode = ref(false)
+const fastMode = ref(false)
+const pendingAutoSelect = ref('')
 const generatePinup = ref(false)
 const suppressConflictTags = ref(true)
 const useDraftRefine = ref('auto') // auto | on | off
@@ -559,6 +561,7 @@ function resetRun() {
   candidates.value = []
   selecting.value = false
   selectedCandidate.value = ''
+  pendingAutoSelect.value = ''
   respinCandCount.value = 0
   respinExpandCount.value = 0
   resetStory()
@@ -782,6 +785,11 @@ async function _submitAndStream(url, payload, onJob, { expand = false } = {}) {
     // Grace window so Esc/backdrop can't win the race between stream end and
     // image_jobs / first job-poll sample (same class of bug as mid-expand dismiss).
     _ignoreDismissUntil = performance.now() + 5000
+    const autoCid = pendingAutoSelect.value
+    if (autoCid && storyId.value && !errorMsg.value) {
+      pendingAutoSelect.value = ''
+      queueMicrotask(() => selectCandidate(autoCid))
+    }
   }
 }
 
@@ -817,12 +825,13 @@ function currentSettingsPayload() {
     tone: tone.value,
     generate_pinup: baseSha.value ? generatePinup.value : false,
     suppress_conflict_tags: suppressConflictTags.value,
-    use_draft_refine: useDraftRefine.value,
+    use_draft_refine: fastMode.value ? 'off' : useDraftRefine.value,
     draft_width: draftWidth.value,
     draft_height: draftHeight.value,
     draft_steps: draftSteps.value,
     use_ref_seed: baseSha.value ? useRefSeed.value : false,
     manual_mode: manualMode.value,
+    fast_mode: fastMode.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
     prose_paragraphs: proseParagraphs.value,
@@ -877,6 +886,7 @@ async function respin(stage) {
     draft_steps: settings.draft_steps,
     suppress_conflict_tags: settings.suppress_conflict_tags,
     manual_mode: settings.manual_mode,
+    fast_mode: settings.fast_mode,
     temperature: settings.temperature,
     num_ctx: settings.num_ctx,
     prose_paragraphs: settings.prose_paragraphs,
@@ -924,6 +934,11 @@ function handleEvent(ev) {
       candidates.value = ev.candidates || []
       selecting.value = true
       phase.value = 'selecting'
+      if (ev.auto_select) {
+        // Fast mode: expand after this stream ends (running blocks mid-stream).
+        selecting.value = false
+        pendingAutoSelect.value = ev.auto_select
+      }
       break
     case 'axis_prompt':
       prompts.value = {
@@ -1305,8 +1320,18 @@ async function generateImages() {
                       <input v-model="manualMode" type="checkbox" class="accent-teal-500" />
                       {{ t('chronicle.manualMode') }}
                     </label>
+                    <label
+                      class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]"
+                      :title="t('chronicle.fastModeTitle')"
+                    >
+                      <input v-model="fastMode" type="checkbox" class="accent-amber-500" />
+                      {{ t('chronicle.fastMode') }}
+                    </label>
                   </div>
-                  <div class="flex items-center gap-2 flex-wrap">
+                  <p v-if="fastMode" class="text-[10px] text-amber-500/80 pl-1">
+                    {{ t('chronicle.fastModeHint') }}
+                  </p>
+                  <div v-if="!fastMode" class="flex items-center gap-2 flex-wrap">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftRefineTitle')">{{ t('chronicle.draftRefine') }}</span>
                     <button v-for="m in ['auto', 'on', 'off']" :key="m" type="button"
                       @click="useDraftRefine = m"
@@ -1314,11 +1339,11 @@ async function generateImages() {
                       {{ t('chronicle.draftRefineMode.' + m) }}
                     </button>
                   </div>
-                  <p v-if="draftRefineDisabledHint && useDraftRefine !== 'off'"
+                  <p v-if="!fastMode && draftRefineDisabledHint && useDraftRefine !== 'off'"
                     class="text-[10px] text-amber-500/70 pl-[5.5rem]">
                     {{ draftRefineDisabledHint }}
                   </p>
-                  <div v-if="useDraftRefine !== 'off'" class="flex items-center gap-2 flex-wrap text-[10px] text-[var(--sb-muted)]">
+                  <div v-if="!fastMode && useDraftRefine !== 'off'" class="flex items-center gap-2 flex-wrap text-[10px] text-[var(--sb-muted)]">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftSizeTitle')">{{ t('chronicle.draftSize') }}</span>
                     <label class="flex items-center gap-1">
                       <span class="text-[var(--sb-faint)]">W</span>
@@ -1383,6 +1408,14 @@ async function generateImages() {
                   <SbIcon v-else name="weave" class="w-4 h-4" />
                   {{ running ? t('chronicle.running') : t('chronicle.start') }}
                 </button>
+                <label
+                  class="flex items-center gap-1.5 cursor-pointer text-xs"
+                  :class="fastMode ? 'text-amber-300' : 'text-[var(--sb-muted)]'"
+                  :title="t('chronicle.fastModeTitle')"
+                >
+                  <input v-model="fastMode" type="checkbox" class="accent-amber-500" />
+                  {{ t('chronicle.fastMode') }}
+                </label>
                 <button v-if="running && groupId" type="button" @click="cancelGroup"
                   class="sb-btn text-red-300 border-red-800/40">
                   {{ t('chronicle.cancel') }}

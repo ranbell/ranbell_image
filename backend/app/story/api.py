@@ -47,6 +47,9 @@ class ChronicleRequest(BaseModel):
     generate_pinup: bool = False  # generate + register a reference "pinup" for the base image
     use_ref_seed: bool = True
     manual_mode: bool = False
+    # Skip timetable / long prose / densify / draft-refine: お題 → one-shot
+    # lean tag prompts → Comfy. Theme costume tags are hard-kept.
+    fast_mode: bool = False
     # Phase B: cheap draft → WD14 → rebuild (borrow image-model expression).
     # auto = on for any non-micro scale, or divergence ≥ 0.25; on/off force.
     use_draft_refine: Literal["auto", "on", "off"] = "auto"
@@ -87,6 +90,7 @@ class RespinRequest(BaseModel):
     draft_steps: int | None = None
     suppress_conflict_tags: bool | None = None
     manual_mode: bool | None = None
+    fast_mode: bool | None = None
     temperature: float | None = None
     num_ctx: int | None = None
     prose_paragraphs: int | None = None
@@ -102,6 +106,7 @@ _RESPIN_OVERRIDE_FIELDS = (
     "time_scale", "divergence", "emotion", "dramatic_mode", "tone",
     "prompt_style", "workflow_name", "use_draft_refine", "draft_width",
     "draft_height", "draft_steps", "suppress_conflict_tags", "manual_mode",
+    "fast_mode",
     "temperature", "num_ctx", "prose_paragraphs", "worldview", "user_topic",
 )
 

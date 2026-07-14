@@ -2851,9 +2851,118 @@ def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
 
 
 # Anime diffusion models lose coherence past ~20 tags. Draft and final share
-# this ceiling; keep identity + focal first when truncating.
+# this ceiling; keep identity + theme must-tags first when truncating.
 IMAGE_PROMPT_MAX_TAGS = 20
 IMAGE_PROMPT_MAX_PROSE_WORDS = 60
+
+
+# Deterministic costume/motif packs from お題. These MUST survive tag capping —
+# the long Chronicle pipeline otherwise drops "bunny girl" as non-identity.
+_THEME_MUST_RULES: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
+    (
+        (
+            "バニーガール", "バニー ガール", "bunny girl", "bunnygirl",
+            "bunny_girl", "playboy bunny", "playboy_bunny", "bunny costume",
+        ),
+        (
+            "bunny_girl", "rabbit_ears", "leotard", "pantyhose",
+            "detached_collar", "wrist_cuffs",
+        ),
+    ),
+    (
+        ("メイド服", "メイド", "maid outfit", "maid dress", "maid"),
+        ("maid", "maid_headdress", "apron"),
+    ),
+    (
+        ("巫女", "miko", "shrine maiden", "shrine_maiden"),
+        ("miko", "hakama"),
+    ),
+    (
+        ("セーラー服", "sailor uniform", "sailor_uniform", "serafuku"),
+        ("serafuku", "sailor_collar"),
+    ),
+    (
+        ("制服", "school uniform", "school_uniform"),
+        ("school_uniform",),
+    ),
+    (
+        ("着物", "浴衣", "kimono", "yukata"),
+        ("kimono",),
+    ),
+]
+# If WD14 / character tags already carry these, promote the matching pack.
+_THEME_TAG_HINTS: dict[str, tuple[str, ...]] = {
+    "bunny_girl": _THEME_MUST_RULES[0][1],
+    "rabbit_ears": _THEME_MUST_RULES[0][1],
+    "bunny_ears": _THEME_MUST_RULES[0][1],
+    "playboy_bunny": _THEME_MUST_RULES[0][1],
+    "maid": _THEME_MUST_RULES[1][1],
+    "maid_headdress": _THEME_MUST_RULES[1][1],
+    "miko": _THEME_MUST_RULES[2][1],
+    "serafuku": _THEME_MUST_RULES[3][1],
+    "sailor_collar": _THEME_MUST_RULES[3][1],
+}
+
+
+def theme_must_tags(
+    user_topic: str,
+    *,
+    extra_tags: list[str] | None = None,
+) -> list[str]:
+    """Danbooru tags that every axis prompt must keep for the given お題.
+
+    Costume themes (bunny girl, maid, …) are not identity-locked by hair/eyes,
+    so without this hard must-list they vanish across densify / draft / cap.
+    """
+    text = (user_topic or "").strip().lower().replace("＿", "_")
+    text_compact = re.sub(r"[\s_]+", "", text)
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(seq: tuple[str, ...] | list[str]) -> None:
+        for raw in seq:
+            tag = str(raw).strip().replace(" ", "_")
+            key = tag.lower()
+            if tag and key not in seen:
+                seen.add(key)
+                out.append(tag)
+
+    for needles, tags in _THEME_MUST_RULES:
+        for needle in needles:
+            n = needle.lower().replace(" ", "")
+            n_spaced = needle.lower()
+            if (
+                n in text_compact
+                or n_spaced in text
+                or needle in (user_topic or "")
+            ):
+                _add(tags)
+                break
+
+    for raw in extra_tags or []:
+        key = str(raw).strip().replace(" ", "_").lower()
+        pack = _THEME_TAG_HINTS.get(key)
+        if pack:
+            _add(pack)
+
+    return out
+
+
+def ensure_theme_must_tags(
+    tag_line: str,
+    must_tags: list[str],
+    *,
+    max_tags: int = IMAGE_PROMPT_MAX_TAGS,
+    priority_tags: list[str] | None = None,
+) -> str:
+    """Guarantee ``must_tags`` appear, then hard-cap (must tags win priority)."""
+    if not must_tags:
+        return cap_danbooru_tag_line(
+            tag_line, max_tags=max_tags, priority_tags=priority_tags
+        )
+    injected = inject_identity_tags(tag_line or "", must_tags)
+    prio = list(dict.fromkeys([*(must_tags or []), *(priority_tags or [])]))
+    return cap_danbooru_tag_line(injected, max_tags=max_tags, priority_tags=prio)
 
 
 def cap_danbooru_tag_line(
@@ -3610,6 +3719,122 @@ def parse_axis_tags_json(raw: str) -> tuple[str, dict[str, list[str]], str]:
     tag_line = ", ".join(merged)
     negative_supplement = str(data.get("negative_supplement") or "").strip()
     return tag_line, categories, negative_supplement
+
+
+def build_fast_prompts_prompt(
+    *,
+    user_topic: str,
+    theme_must: list[str],
+    character_tags: list[str],
+    character_desc: str = "",
+    beats: dict[str, str] | None = None,
+    gen_axes: list[str] | None = None,
+    time_scale: str = "years",
+    worldview: str = "",
+    emotion: str = "",
+) -> str:
+    """One-shot JSON: lean danbooru tag lines for each axis (fast mode).
+
+    Skips timetable / Visual Script / densify. Theme must-tags are mandatory
+    on every axis so costume お題 (bunny girl, …) cannot evaporate.
+    """
+    axes = [a for a in (gen_axes or list(AXES)) if a in AXES] or list(AXES)
+    beats = beats or {}
+    must = ", ".join(
+        str(t).strip().replace(" ", "_") for t in (theme_must or []) if str(t).strip()
+    ) or "(none — invent a concrete costume from the topic)"
+    identity = ", ".join(
+        str(t).strip().replace(" ", "_") for t in (character_tags or [])[:12]
+        if str(t).strip()
+    ) or "(infer from topic)"
+    beat_lines = "\n".join(
+        f"- {a.upper()}: {beats.get(a) or user_topic}" for a in axes
+    )
+    axis_keys = ", ".join(f'"{a}"' for a in axes)
+    return (
+        "You are a danbooru-tag expert. FAST MODE: emit ONE lean image-prompt "
+        "tag line per act. No prose. No stories.\n\n"
+        f"お題 / TOPIC (authoritative costume & subject): {user_topic}\n"
+        f"Worldview (optional mood only): {worldview or '(none)'}\n"
+        f"Emotion register: {emotion or '(free)'}\n"
+        f"Time scale between acts: {time_scale}\n"
+        f"Character identity tags (keep hair/eyes if present): {identity}\n"
+        f"Character note: {character_desc or '(none)'}\n"
+        f"Act beats (vary pose/place/action ONLY — costume stays):\n{beat_lines}\n\n"
+        f"THEME MUST-TAGS — copy VERBATIM into EVERY axis tag line:\n{must}\n\n"
+        "[RULES]\n"
+        f"- Each axis: 12–{IMAGE_PROMPT_MAX_TAGS} comma-separated danbooru tags, "
+        f"HARD MAX {IMAGE_PROMPT_MAX_TAGS}.\n"
+        "- Open with subject-count (1girl / 1boy / solo / …).\n"
+        "- THEME MUST-TAGS appear on every axis — never drop or paraphrase them.\n"
+        "- Vary only: pose/action, place, expression, one light cue.\n"
+        "- No quality meta-tags (masterpiece, best_quality, highres, …).\n"
+        "- English danbooru snake_case only.\n\n"
+        "Output JSON ONLY:\n"
+        "{\n"
+        f'  // keys: {axis_keys}\n'
+        '  "past": "1girl, …",\n'
+        '  "present": "1girl, …",\n'
+        '  "future": "1girl, …",\n'
+        '  "negative": "optional short comma-separated negatives"\n'
+        "}"
+    )
+
+
+def parse_fast_prompts_json(raw: str) -> tuple[dict[str, str], str]:
+    """Parse fast-mode JSON → ({axis: tag_line}, negative)."""
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return {}, ""
+    out: dict[str, str] = {}
+    for axis in AXES:
+        val = data.get(axis) or data.get(axis.upper()) or ""
+        if isinstance(val, list):
+            parts = [
+                str(t).strip().replace(" ", "_") for t in val if str(t).strip()
+            ]
+            line = ", ".join(parts)
+        else:
+            parts = [
+                t.strip().replace(" ", "_")
+                for t in str(val).split(",") if t.strip()
+            ]
+            line = ", ".join(parts)
+        if line:
+            out[axis] = line
+    neg = str(data.get("negative") or data.get("negative_supplement") or "").strip()
+    return out, neg
+
+
+def build_fast_candidate(
+    user_topic: str,
+    *,
+    time_scale: str = "years",
+    locale: str = "en",
+) -> dict:
+    """Synthetic single candidate for fast mode (no LLM pitch round)."""
+    topic = (user_topic or "").strip() or "untitled"
+    if locale == "ja":
+        return {
+            "id": "A",
+            "title": topic[:80],
+            "overall": f"「{topic}」を軸にした三つの瞬間。",
+            "past": f"少し前 — {topic}",
+            "present": f"いま — {topic}",
+            "future": f"このあと — {topic}",
+            "dramatic_mode": "escalation",
+            "time_scale": time_scale,
+        }
+    return {
+        "id": "A",
+        "title": topic[:80],
+        "overall": f"Three moments around: {topic}",
+        "past": f"Earlier — {topic}",
+        "present": f"Now — {topic}",
+        "future": f"Later — {topic}",
+        "dramatic_mode": "escalation",
+        "time_scale": time_scale,
+    }
 
 
 _CHRONICLE_MIN_TAGS = 25

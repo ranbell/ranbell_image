@@ -2881,6 +2881,7 @@ async def run_chronicle_candidates(
         assign_dramatic_modes,
         build_biography_prompt,
         build_candidates_prompt,
+        build_fast_candidate,
         build_json_translation_prompt,
         build_topic_directive_prompt,
         build_topic_only_grounding_prompt,
@@ -2918,6 +2919,7 @@ async def run_chronicle_candidates(
         options = _chronicle_llm_options(body, temp, cfg)
 
         draft = None
+        doc: dict = {}
         if story_id:
             draft = await story_db.get_story(db, story_id)
             if not draft:
@@ -3166,6 +3168,56 @@ async def run_chronicle_candidates(
         ctx["forced_motif"] = forced_motif
         _put({"type": "story_seed_tags", "tags": story_seed_tags, "motif": forced_motif})
 
+        # ── Fast mode: skip pitch LLM — one synthetic candidate, auto-expand ─
+        if getattr(body, "fast_mode", False):
+            _phase("candidates", 0.70, "Fast mode — skipping story pitches...")
+            candidates = [
+                build_fast_candidate(
+                    body.user_topic,
+                    time_scale=body.time_scale,
+                    locale=body.locale,
+                )
+            ]
+            if story_id:
+                hist = list((draft or {}).get("respin_history") or [])
+                hist.append({
+                    "kind": "candidates",
+                    "temperature": temp,
+                    "candidates": (draft or {}).get("candidates") or [],
+                    "fast_mode": True,
+                })
+                await story_db.set_story_payload(db, story_id, {
+                    "candidates": candidates,
+                    "respin_history": hist,
+                    "context": ctx,
+                })
+            else:
+                payload = story_db.new_story_payload(
+                    base_image_id=body.base_sha256,
+                    base_time_axis=body.base_time_axis,
+                    worldview=body.worldview,
+                    workflow_name=body.workflow_name,
+                    group_id=body.group_id,
+                    time_scale=body.time_scale,
+                    user_topic=body.user_topic,
+                    emotion=body.emotion,
+                    locale=body.locale,
+                    status="draft",
+                    candidates=candidates,
+                    context=ctx,
+                    base_model_name=doc.get("model_name") or "",
+                )
+                story_id = await story_db.create_story(db, payload)
+            _phase("selecting", 0.98, "Fast mode — auto-selecting...")
+            _put({
+                "type": "candidates",
+                "story_id": story_id,
+                "candidates": candidates,
+                "auto_select": candidates[0]["id"],
+                "fast_mode": True,
+            })
+            return
+
         # ── Stage 2a: three story candidates (single JSON call) ───────────────
         # Assign a DISTINCT dramatic mode per candidate (A/B/C) so the three
         # pitches diverge in plot shape, not just viewpoint. A user-chosen mode
@@ -3353,16 +3405,20 @@ async def run_chronicle_expand(
         is_multi_character,
         assemble_capped_positive,
         build_draft_grounding_block,
+        build_fast_prompts_prompt,
+        bucket_danbooru_tags,
         cap_danbooru_tag_line,
         draft_positive_for_comfy,
         draft_richness_delta,
+        ensure_theme_must_tags,
         merge_chronicle_axis_tags,
         merge_category_tags,
         merge_draft_wd14_tags,
+        parse_fast_prompts_json,
+        theme_must_tags,
         merge_story_sections,
         parse_axis_tags_json,
         parse_visual_script_category_tags,
-        bucket_danbooru_tags,
         CHRONICLE_CAT_FIELDS,
         parse_biography_json,
         parse_concrete_activities_json,
@@ -3500,6 +3556,259 @@ async def run_chronicle_expand(
         biography_ja = ctx.get("biography_ja") or {}
         seed_tags = list(ctx.get("story_seed_tags") or [])
         forced_motif = str(ctx.get("forced_motif") or "")
+        theme_must = theme_must_tags(
+            body.user_topic,
+            extra_tags=list(character_tags) + list(wd14_tags),
+        )
+        if theme_must:
+            _put({"type": "theme_must_tags", "tags": theme_must})
+
+        # ── Fast mode: お題 → one-shot lean tags → save → Comfy ───────────────
+        if getattr(body, "fast_mode", False):
+            import random as _random
+
+            _phase("fastPrompting", 0.25, "Fast mode: theme → prompts...")
+            if biography:
+                _put({
+                    "type": "biography",
+                    "biography": parse_biography_json(biography) or biography,
+                    "biography_ja": parse_biography_json(biography_ja) or biography_ja,
+                })
+            beats = {a: str(selected.get(a) or "").strip() for a in AXES}
+            title = str(selected.get("title") or body.user_topic or "Chronicle").strip()
+            overall = str(
+                selected.get("overall") or body.user_topic or title
+            ).strip()
+            stories = {a: (beats[a] or body.user_topic or title) for a in AXES}
+            _put({"type": "story", "title": title, "overall": overall, "axes": stories})
+            if locale == "ja":
+                title_ja, overall_ja = title, overall
+                stories_ja = dict(stories)
+                en_title, en_overall = title, overall
+                en_stories = dict(stories)
+            else:
+                title_ja, overall_ja = "", ""
+                stories_ja = {a: "" for a in AXES}
+                en_title, en_overall, en_stories = title, overall, stories
+
+            seed: int | None = None
+            if body.use_ref_seed and has_base:
+                seed = (doc.get("model_info") or {}).get("seed") \
+                    or (doc.get("creation_record") or {}).get("seed")
+            if seed is None:
+                seed = _random.randint(0, (1 << 64) - 1)
+
+            fast_axes = list(gen_axes) or list(AXES)
+            raw_fast = ""
+            try:
+                async with _heartbeat("fastPrompting", 0.30):
+                    raw_fast = await ollama.generate_text(
+                        build_fast_prompts_prompt(
+                            user_topic=body.user_topic,
+                            theme_must=theme_must,
+                            character_tags=lock_tags or character_tags,
+                            character_desc=character_desc,
+                            beats=en_stories,
+                            gen_axes=fast_axes,
+                            time_scale=body.time_scale,
+                            worldview=body.worldview,
+                            emotion=body.emotion,
+                        ),
+                        model=vlm_model, options=options, fmt="json", think=False,
+                    )
+            except Exception as exc:
+                logger.warning("[chronicle] fast prompts LLM failed: %s", exc)
+            axis_lines, fast_neg = parse_fast_prompts_json(raw_fast)
+            prompts: dict = {}
+            for axis in AXES:
+                if has_base and axis == body.base_time_axis:
+                    continue
+                if axis not in fast_axes:
+                    continue
+                base_line = axis_lines.get(axis) or ""
+                if not base_line:
+                    # Deterministic fallback — theme must + identity + beat cue.
+                    base_line = merge_chronicle_axis_tags(
+                        focal=[t for t in (theme_must or [])[:2]],
+                        search_tags=list(theme_must),
+                        lock_tags=lock_tags,
+                    )
+                tag_line = _strip_quality_metatags(base_line)
+                tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)] if doc else [])
+                tag_line = inject_identity_tags(tag_line, lock_tags)
+                tag_line = ensure_theme_must_tags(
+                    tag_line,
+                    theme_must,
+                    priority_tags=list(dict.fromkeys([*theme_must, *lock_tags])),
+                )
+                negative = fast_neg or ""
+                axis_cats = bucket_danbooru_tags(tag_line)
+                positive = tag_line
+                prompts[axis] = {
+                    "positive": positive,
+                    "negative": negative,
+                    "visual_script": "",
+                    **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
+                }
+                evt = {
+                    "type": "axis_prompt",
+                    "axis": axis,
+                    "positive": positive,
+                    "negative": negative,
+                    "visual_script": "",
+                    "fast_mode": True,
+                }
+                for k in CHRONICLE_CAT_FIELDS:
+                    if axis_cats.get(k):
+                        evt[k] = axis_cats[k]
+                _put(evt)
+
+            if not prompts:
+                _put({"type": "error", "message": "Fast mode produced no axis prompts"})
+                return
+
+            concrete: dict = {}
+            timetable: list = []
+            timetable_ja: list = []
+            axis_slots: dict = {}
+            situation_en = en_stories
+
+            quality_eval: dict = {}
+            try:
+                from ..story.quality import evaluate_chronicle_quality
+                quality_eval = evaluate_chronicle_quality(
+                    user_topic=body.user_topic,
+                    title=en_title,
+                    overall=en_overall,
+                    stories=en_stories,
+                    activities=situation_en,
+                    prompts=prompts,
+                    time_scale=body.time_scale,
+                    lock_tags=lock_tags,
+                    draft_deltas=None,
+                    scored_axes=list(prompts.keys()),
+                    topic_directive=body.worldview or "",
+                )
+                _put({"type": "quality_eval", **quality_eval})
+            except Exception as exc:
+                logger.warning("[chronicle] fast quality_eval failed: %s", exc)
+
+            _phase("savingStory", 0.82, "Saving story...")
+            prev_axes = draft.get("axes") or {}
+            axes_payload: dict = {}
+            for axis in AXES:
+                p = prompts.get(axis) or {}
+                axes_payload[axis] = {
+                    "story": en_stories[axis],
+                    "story_ja": stories_ja[axis],
+                    "prompt_positive": p.get("positive"),
+                    "prompt_negative": p.get("negative"),
+                    "image_id": (
+                        body.base_sha256
+                        if has_base and axis == body.base_time_axis
+                        else (prev_axes.get(axis) or {}).get("image_id")
+                    ),
+                }
+                for k in CHRONICLE_CAT_FIELDS:
+                    if p.get(k):
+                        axes_payload[axis][k] = p[k]
+
+            embedding = None
+            try:
+                embedding = await ollama.embed(
+                    " ".join(
+                        [en_title, en_overall, *(en_stories[a] for a in AXES)]
+                    )[:4000]
+                )
+            except Exception as exc:
+                logger.warning("[chronicle] fast story embed failed: %s", exc)
+
+            save_payload = {
+                "status": "final",
+                "selected_candidate": candidate_id,
+                "time_scale": body.time_scale,
+                "workflow_name": body.workflow_name,
+                "title": en_title,
+                "title_ja": title_ja,
+                "overall_story": en_overall,
+                "overall_story_ja": overall_ja,
+                "axes": axes_payload,
+                "divergence": divergence,
+                "mutation_tags": mutation_tags,
+                "biography": biography,
+                "biography_ja": biography_ja,
+                "timetable": timetable,
+                "timetable_ja": timetable_ja,
+                "pinups": _current_pinups(doc) if doc else [],
+                "pinup_image_id": (doc or {}).get("pinup_image_id"),
+                "context": {
+                    **ctx,
+                    "axis_slots": axis_slots,
+                    "fast_mode": True,
+                    "theme_must_tags": theme_must,
+                },
+            }
+            if quality_eval:
+                save_payload["quality_eval"] = quality_eval
+            await story_db.set_story_payload(db, story_id, save_payload)
+            if embedding:
+                try:
+                    await story_db.set_story_embedding(db, story_id, embedding)
+                except Exception as exc:
+                    logger.warning("[chronicle] fast set embedding failed: %s", exc)
+            _put({"type": "story_saved", "story_id": story_id})
+            if locale == "ja":
+                _put({
+                    "type": "translation",
+                    "title_ja": title_ja,
+                    "overall_ja": overall_ja,
+                    **{f"{a}_ja": stories_ja[a] for a in AXES},
+                })
+
+            image_jobs: list[dict] = []
+            if not body.manual_mode and body.workflow_name:
+                for axis in prompts:
+                    cancel.raise_if_set()
+                    gen_job_id = spooler.submit(
+                        JobLane.GENERATION,
+                        "chronicle_image",
+                        run_chronicle_image_generate,
+                        meta={
+                            "group_id": body.group_id,
+                            "story_id": story_id,
+                            "axis": axis,
+                        },
+                        db=db,
+                        comfy=comfy,
+                        story_id=story_id,
+                        axis=axis,
+                        workflow_name=body.workflow_name,
+                        positive=prompts[axis]["positive"],
+                        negative=prompts[axis]["negative"],
+                        seed=seed,
+                    )
+                    image_jobs.append({"axis": axis, "job_id": gen_job_id})
+                _put({"type": "image_jobs", "jobs": image_jobs})
+            elif not body.workflow_name:
+                _put({
+                    "type": "warning",
+                    "message": "No workflow selected — image generation skipped.",
+                })
+
+            _put({
+                "type": "done",
+                "story_id": story_id,
+                "group_id": body.group_id,
+                "seed": seed,
+                "manual_mode": body.manual_mode,
+                "fast_mode": True,
+                "title": en_title,
+                "title_ja": title_ja,
+                "overall": en_overall,
+                "overall_ja": overall_ja,
+                "axes": axes_payload,
+            })
+            return
 
         # ── Timetable: map her life onto concrete moments (scale-adaptive) so the
         # acts depict specific daily activities from her life, not idle poses.
@@ -4173,10 +4482,11 @@ async def run_chronicle_expand(
                 prose = _correct_prose_wd14_conflicts(prose, inject)
             # Comfy payload: lean danbooru tag line (≤20) + trimmed prose.
             # Tag floods make anime models ignore the prompt entirely.
-            prio_tags = list(dict.fromkeys([*lock_tags, *focal]))
+            # Theme costume must-tags (bunny_girl, …) win over padding.
+            prio_tags = list(dict.fromkeys([*theme_must, *lock_tags, *focal]))
             if tag_line:
-                tag_line = cap_danbooru_tag_line(
-                    tag_line, priority_tags=prio_tags,
+                tag_line = ensure_theme_must_tags(
+                    tag_line, theme_must, priority_tags=prio_tags,
                 )
             positive = assemble_capped_positive(
                 tag_line, prose, priority_tags=prio_tags,
@@ -4186,7 +4496,9 @@ async def run_chronicle_expand(
                 # Re-cap after conflict strip in case identity was reordered.
                 head, _, tail = positive.partition("\n\n")
                 if "," in head and "." not in head:
-                    tag_line = cap_danbooru_tag_line(head, priority_tags=prio_tags)
+                    tag_line = ensure_theme_must_tags(
+                        head, theme_must, priority_tags=prio_tags,
+                    )
                     positive = assemble_capped_positive(
                         tag_line, tail if prose else "", priority_tags=prio_tags,
                     )
@@ -4449,10 +4761,12 @@ async def run_chronicle_expand(
                             }))
                         if prose and inject:
                             prose = _correct_prose_wd14_conflicts(prose, inject)
-                        prio_tags = list(dict.fromkeys([*lock_tags, *focal]))
+                        prio_tags = list(dict.fromkeys(
+                            [*theme_must, *lock_tags, *focal]
+                        ))
                         if tag_line:
-                            tag_line = cap_danbooru_tag_line(
-                                tag_line, priority_tags=prio_tags,
+                            tag_line = ensure_theme_must_tags(
+                                tag_line, theme_must, priority_tags=prio_tags,
                             )
                         positive = assemble_capped_positive(
                             tag_line, prose, priority_tags=prio_tags,
@@ -4463,8 +4777,8 @@ async def run_chronicle_expand(
                         if tag_line and positive:
                             head, _, tail = positive.partition("\n\n")
                             if "," in head and "." not in head:
-                                tag_line = cap_danbooru_tag_line(
-                                    head, priority_tags=prio_tags,
+                                tag_line = ensure_theme_must_tags(
+                                    head, theme_must, priority_tags=prio_tags,
                                 )
                                 positive = assemble_capped_positive(
                                     tag_line,

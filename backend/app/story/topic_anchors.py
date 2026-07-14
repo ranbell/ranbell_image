@@ -47,6 +47,8 @@ _TOPIC_JA_EN_ALIASES: dict[str, tuple[str, ...]] = {
     "試合": ("match", "game", "stadium", "competition"),
     "祝い": ("celebration", "toast", "party"),
     "放課後": ("after school", "afterschool"),
+    "バニーガール": ("bunny girl", "bunny_girl", "playboy bunny", "bunny"),
+    "バニー": ("bunny", "bunny girl", "bunny_girl"),
 }
 _TOPIC_EN_JA_ALIASES: dict[str, tuple[str, ...]] = {
     "cafe": ("カフェ",),
@@ -64,6 +66,9 @@ _TOPIC_EN_JA_ALIASES: dict[str, tuple[str, ...]] = {
     "rooftop": ("屋上",),
     "star": ("星",),
     "library": ("図書館",),
+    "bunny": ("バニー", "バニーガール"),
+    "bunny girl": ("バニーガール",),
+    "bunny_girl": ("バニーガール",),
 }
 
 
