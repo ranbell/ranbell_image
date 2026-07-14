@@ -1786,6 +1786,80 @@ def should_differentiate_acts(time_scale: str) -> bool:
     return (time_scale or "").strip().lower() not in _SKIP_DIFFERENTIATE_SCALES
 
 
+def activities_temporally_distinct(
+    activities: dict[str, str], *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+) -> bool:
+    """True if the three concrete actions are meaningfully different moments.
+
+    Same bigram measure as ``acts_temporally_distinct``. Incomplete input
+    returns True so the missing-act path (not this one) handles it.
+    """
+    beats = [str(activities.get(a) or "").strip() for a in AXES]
+    if not all(beats):
+        return True
+    return _mean_pairwise_similarity(beats) < threshold
+
+
+def axis_slots_collapsed(
+    axis_slots: dict[str, dict] | None, *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+) -> bool:
+    """True when bound timetable place+activity strings collapse across acts."""
+    if not axis_slots:
+        return False
+    beats = []
+    for a in AXES:
+        s = axis_slots.get(a) or {}
+        text = f"{s.get('place', '')} {s.get('activity', '')}".strip()
+        beats.append(text)
+    if not all(beats):
+        return False
+    return _mean_pairwise_similarity(beats) >= threshold
+
+
+def build_differentiate_activities_prompt(
+    *,
+    activities: dict[str, str],
+    selected: dict,
+    base_axis: str,
+    time_scale: str = "years",
+    scene_desc: str = "",
+    axis_slots: dict[str, dict] | None = None,
+    user_topic: str = "",
+) -> str:
+    """Rewrite collapsed concrete actions into three distinct drawable moments."""
+    elapsed = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
+    anchors = format_axis_slots_block(axis_slots, locale="en")
+    topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
+    beats = "".join(
+        f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
+    )
+    return (
+        f"{chronicle_hard_rules_preamble(locale='en')}\n"
+        "These three concrete actions read as the SAME physical moment restated "
+        "three times. Rewrite them so each axis is a CLEARLY DIFFERENT drawable "
+        "action at its marked elapsed distance — different verb, prop, and "
+        "(where the scale allows) place — while keeping the same character and "
+        "story spine.\n\n"
+        f"{elapsed}\n"
+        f"BASE SCENE ([{base_axis.upper()}] must still match): {scene_desc}\n"
+        f"{topic}"
+        f"{anchors}"
+        "STORY DRAFT spine:\n"
+        f"{beats}"
+        "CURRENT ACTIONS (too alike — push them apart):\n"
+        f"  PAST: {activities.get('past', '')}\n"
+        f"  PRESENT: {activities.get('present', '')}\n"
+        f"  FUTURE: {activities.get('future', '')}\n\n"
+        f"The [{base_axis.upper()}] action must still match the base scene. "
+        "Move the OTHER two to their own moments.\n"
+        "Output English JSON only, no fences:\n"
+        '{"past": "<one concrete action sentence>", '
+        '"present": "<...>", "future": "<...>"}'
+    )
+
+
 def build_differentiate_acts_prompt(
     *,
     title: str,

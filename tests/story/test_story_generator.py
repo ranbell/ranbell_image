@@ -36,6 +36,9 @@ from app.story.generator import (
     find_mutex_conflict_tags,
     infer_axis_scene_constraints,
     merge_draft_wd14_tags,
+    activities_temporally_distinct,
+    axis_slots_collapsed,
+    build_differentiate_activities_prompt,
     parse_candidates_json,
     sample_bio_domains,
     should_differentiate_acts,
@@ -1550,6 +1553,52 @@ def test_should_differentiate_acts_skips_micro_scales():
     assert should_differentiate_acts("hours")
     assert should_differentiate_acts("years")
     assert should_differentiate_acts("decades")
+
+
+def test_activities_temporally_distinct():
+    same = "She stands by the window holding a teacup, gazing outside quietly."
+    assert not activities_temporally_distinct(
+        {"past": same, "present": same, "future": same}
+    )
+    assert activities_temporally_distinct({
+        "past": "She ties her laces at the muddy trailhead before dawn.",
+        "present": "She climbs the ridge with both hands on the rope.",
+        "future": "She plants a marker flag on the windy summit rock.",
+    })
+    assert activities_temporally_distinct({"past": "a", "present": "", "future": "c"})
+
+
+def test_axis_slots_collapsed():
+    assert axis_slots_collapsed({
+        "past": {"place": "park bench", "activity": "reading"},
+        "present": {"place": "park bench", "activity": "reading"},
+        "future": {"place": "park bench", "activity": "reading"},
+    })
+    assert not axis_slots_collapsed({
+        "past": {"place": "kitchen", "activity": "kneading dough"},
+        "present": {"place": "rooftop", "activity": "hanging laundry"},
+        "future": {"place": "station", "activity": "catching the last train"},
+    })
+    assert not axis_slots_collapsed({})
+    assert not axis_slots_collapsed(None)
+
+
+def test_build_differentiate_activities_prompt():
+    prompt = build_differentiate_activities_prompt(
+        activities={
+            "past": "same action", "present": "same action", "future": "same action",
+        },
+        selected={"past": "beat p", "present": "beat n", "future": "beat f"},
+        base_axis="present",
+        time_scale="years",
+        scene_desc="a sunlit classroom",
+        user_topic="卒業",
+    )
+    assert "CLEARLY DIFFERENT" in prompt
+    assert "CURRENT ACTIONS" in prompt
+    assert "[PRESENT] action must still match the base scene" in prompt
+    assert "卒業" in prompt
+    assert '"past"' in prompt and '"future"' in prompt
 
 
 # ── Scene constraints + mechanical mutex conflicts ────────────────────────────

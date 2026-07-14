@@ -3217,13 +3217,13 @@ async def run_chronicle_expand(
     """PROMPT lane — Chronicle Phase 2: expand a chosen candidate, then prompts.
 
     Loads the draft, expands the selected candidate into the three acts in the
-    user's locale, rewrites collapsed timelines once when needed, translates to
-    English when needed, then per non-base axis runs visual exam + WD14 search
-    on the finished story text with scene must/forbid constraints, optionally
-    generates a cheap draft image and rebuilds the prompt from its WD14 tags
-    (Phase B), assembles image prompts with identity-lock tags only
-    (hair/eyes/accessories — never the base image's scene must-tags), finalises
-    the record, and submits image jobs.
+    user's locale, rewrites collapsed timelines/actions once when needed,
+    translates to English when needed, then per non-base axis runs visual exam
+    + WD14 search with scene must/forbid constraints, densifies thin tag lines
+    via Pass-1 JSON tags, optionally generates a cheap draft image and rebuilds
+    the prompt from its WD14 tags (Phase B), assembles image prompts with
+    identity-lock tags only (hair/eyes/accessories — never the base image's
+    scene must-tags), finalises the record, and submits image jobs.
 
     Re-invoking this (respin) archives the previous final story in
     respin_history before overwriting.
@@ -3244,12 +3244,17 @@ async def run_chronicle_expand(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         AXES,
+        _chronicle_tags_degenerate,
         acts_temporally_distinct,
+        activities_temporally_distinct,
         apply_scene_constraints,
+        axis_slots_collapsed,
         bind_timetable_axis_slots,
         build_axis_prose_prompt,
+        build_axis_tags_prompt,
         build_concrete_activities_prompt,
         build_differentiate_acts_prompt,
+        build_differentiate_activities_prompt,
         build_expand_prompt,
         build_json_translation_prompt,
         build_timetable_prompt,
@@ -3268,6 +3273,7 @@ async def run_chronicle_expand(
         is_multi_character,
         merge_chronicle_axis_tags,
         merge_draft_wd14_tags,
+        parse_axis_tags_json,
         parse_concrete_activities_json,
         parse_english_translation_json,
         parse_story_json,
@@ -3461,6 +3467,35 @@ async def run_chronicle_expand(
             ))
         except Exception as exc:
             logger.warning("[chronicle] concrete activities failed: %s", exc)
+
+        # Push collapsed actions apart (and when timetable slots themselves collapsed).
+        if (
+            concrete
+            and should_differentiate_acts(body.time_scale)
+            and (
+                not activities_temporally_distinct(concrete)
+                or axis_slots_collapsed(axis_slots)
+            )
+        ):
+            _phase("differentiating", 0.15, "Separating the three actions...")
+            try:
+                rewritten = parse_concrete_activities_json(await ollama.generate_text(
+                    build_differentiate_activities_prompt(
+                        activities=concrete,
+                        selected=selected,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale,
+                        scene_desc=scene_desc,
+                        axis_slots=axis_slots,
+                        user_topic=body.user_topic,
+                    ),
+                    model=vlm_model, options=options, fmt="json", think=True,
+                ))
+                if all(rewritten.get(a) for a in AXES):
+                    concrete = rewritten
+            except Exception as exc:
+                logger.warning("[chronicle] differentiate activities failed: %s", exc)
+
         # Prefer the concrete action; fall back to the English candidate beat.
         situation_en = {a: (concrete.get(a) or beats_en[a]) for a in AXES}
         # Surface the reasoning: what she is doing at each moment (+ JA for clarity).
@@ -3746,6 +3781,68 @@ async def run_chronicle_expand(
             tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
             tag_line = _strip_quality_metatags(tag_line)
 
+            # (3b) Densify thin tag lines via Pass-1 JSON tags (previously unwired).
+            neg_supplement = ""
+            degenerate, deg_reason = _chronicle_tags_degenerate(tag_line)
+            if degenerate:
+                _phase("refiningPromptTags", 0.48 + 0.16 * i,
+                       f"Densifying {axis} tags ({deg_reason})...")
+                try:
+                    denser_opts = dict(options)
+                    denser_opts["temperature"] = min(
+                        1.3, float(denser_opts.get("temperature", 1.0)) + 0.15
+                    )
+                    raw_tags = await ollama.generate_text(
+                        build_axis_tags_prompt(
+                            story_text=story_en,
+                            character_tags=lock_tags,
+                            character_desc=character_desc,
+                            wd14_context=wd14_context,
+                            time_scale=body.time_scale,
+                            axis=axis,
+                            base_axis=body.base_time_axis,
+                            title=en_title,
+                            overall=en_overall,
+                            all_stories=en_stories,
+                            axis_tags=axis_search_tags,
+                            visual_plan=visual_plan,
+                            emotion=body.emotion,
+                            user_topic=body.user_topic,
+                        ),
+                        model=vlm_model, options=denser_opts, fmt="json", think=True,
+                    )
+                    pass1_line, _cats, neg_supplement = parse_axis_tags_json(raw_tags)
+                    if pass1_line:
+                        # Prefer denser Pass-1 while keeping search/focal/lock grounding.
+                        blended_search = list(dict.fromkeys(
+                            [t.strip() for t in pass1_line.split(",") if t.strip()]
+                            + list(axis_search_tags)
+                            + list(focal)
+                        ))
+                        blended_search = apply_scene_constraints(
+                            blended_search, scene_constraints
+                        )
+                        axis_search_tags = blended_search
+                        tag_line = merge_chronicle_axis_tags(
+                            focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+                        )
+                        tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+                        tag_line = inject_identity_tags(tag_line, lock_tags)
+                        parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                        tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
+                        tag_line = _strip_quality_metatags(tag_line)
+                        still_bad, still_reason = _chronicle_tags_degenerate(tag_line)
+                        if still_bad:
+                            _put({
+                                "type": "warning",
+                                "message": (
+                                    f"{axis}: tags still thin after densify "
+                                    f"({still_reason})"
+                                ),
+                            })
+                except Exception as exc:
+                    logger.warning("[chronicle] %s tag densify failed: %s", axis, exc)
+
             # (4) Refine pass-2 visual script over the tag line.
             if body.prompt_style == "danbooru":
                 positive, negative = tag_line, ""
@@ -3769,6 +3866,7 @@ async def run_chronicle_expand(
                     visual_plan=visual_plan,
                     emotion=body.emotion,
                     user_topic=body.user_topic,
+                    negative_supplement=neg_supplement,
                 )
                 axis_tokens: list[str] = []
                 async for event in ollama.generate_text_stream(
