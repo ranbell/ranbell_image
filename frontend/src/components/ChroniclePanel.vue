@@ -68,7 +68,6 @@ const axisReasoning = ref({})
 const axisDrafts = ref({})
 const pinupJobId = ref('')
 
-const forceSettings = ref(false)
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
 const thumbFailed = ref(false)
@@ -161,7 +160,8 @@ const currentStep = computed(() => {
   return PHASE_STEP[phase.value] ?? 0
 })
 
-const showSettings = computed(() => currentStep.value === 0 || forceSettings.value)
+// Keep the full left-hand settings (workflow, topic, dials) visible at every
+// pipeline step — do not collapse them into a summary after Weave starts.
 const settingsLocked = computed(() => running.value)
 
 const canGenerate = computed(() =>
@@ -341,7 +341,6 @@ function resetRun() {
   selectedCandidate.value = ''
   respinCandCount.value = 0
   respinExpandCount.value = 0
-  forceSettings.value = false
   resetStory()
 }
 
@@ -738,40 +737,11 @@ async function generateImages() {
 
         <div class="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-          <!-- ── LEFT: settings / summary ─────────────────────────────────── -->
+          <!-- ── LEFT: settings (always visible) ───────────────────────────── -->
           <div class="flex flex-col gap-4 min-w-0">
 
-            <!-- settings summary (collapsed while pipeline is past vision) -->
-            <div v-if="!showSettings" class="flex flex-col gap-3">
-              <div class="flex items-center gap-3 p-3 rounded-xl border border-teal-800/30 bg-black/25">
-                <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
-                  class="w-14 h-14 rounded-lg object-cover shrink-0 border border-white/10" />
-                <div class="min-w-0 flex-1 text-[11px] space-y-1">
-                  <div class="sb-label">{{ t('chronicle.settingsSummary') }}</div>
-                  <div class="flex flex-wrap gap-1.5 text-gray-300">
-                    <span class="sb-chip is-chip-on-teal">{{ t('chronicle.axis.' + baseAxis) }}</span>
-                    <span class="sb-chip">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
-                    <span class="sb-chip">{{ t('chronicle.tone.' + tone) }}</span>
-                  </div>
-                  <p v-if="phase" class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wide">
-                    {{ t('chronicle.phase.' + phase, phase) }}
-                  </p>
-                </div>
-                <div class="flex flex-col gap-1.5 shrink-0">
-                  <button v-if="running && groupId" @click="cancelGroup" class="sb-btn text-red-300 border-red-800/40">
-                    {{ t('chronicle.cancel') }}
-                  </button>
-                  <button @click="forceSettings = true" :disabled="running"
-                    class="sb-btn" :class="running ? '' : 'border-teal-700/40 text-teal-200'">
-                    <SbIcon name="settings" class="w-3 h-3" />
-                    {{ t('chronicle.editSettings') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- full settings (progressive disclosure) -->
-            <fieldset v-else :disabled="settingsLocked" class="flex flex-col gap-4 min-w-0 disabled:opacity-60">
+            <!-- full settings; locked while the pipeline runs -->
+            <fieldset :disabled="settingsLocked" class="flex flex-col gap-4 min-w-0 disabled:opacity-60">
               <div class="grid grid-cols-1 sm:grid-cols-[148px_1fr] gap-4">
                 <div class="rounded-xl border border-teal-800/25 bg-black/25 flex flex-col items-center justify-center gap-2 p-3 min-h-[160px]">
                   <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
@@ -969,10 +939,6 @@ async function generateImages() {
                 <button v-if="running && groupId" type="button" @click="cancelGroup"
                   class="sb-btn text-red-300 border-red-800/40">
                   {{ t('chronicle.cancel') }}
-                </button>
-                <button v-if="currentStep >= 1" type="button" @click="forceSettings = false"
-                  class="sb-btn text-[var(--sb-muted)]">
-                  {{ t('chronicle.settingsSummary') }}
                 </button>
                 <span v-if="phase" class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wide">
                   {{ t('chronicle.phase.' + phase, phase) }}
