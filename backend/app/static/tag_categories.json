@@ -70,11 +70,12 @@
       "sword", "katana", "spear", "axe", "arrow",
       "gun", "pistol", "rifle", "shield", "dagger",
       "cup", "teacup", "coffee_cup", "mug", "bottle", "can", "glass",
-      "umbrella", "parasol", "fan", "lantern", "candle", "torch",
+      "pitcher", "latte_art", "espresso_machine", "milk", "foam", "steam",
+      "umbrella", "parasol", "fan", "lantern", "paper_lantern", "candle", "torch",
       "phone", "cellphone", "camera", "mirror",
       "bag", "backpack", "briefcase", "suitcase", "purse",
       "flower", "rose", "bouquet", "leaf", "branch",
-      "food", "cake", "candy", "cookie", "fruit", "apple",
+      "food", "cake", "candy", "candy_apple", "cookie", "fruit", "apple",
       "key", "coin", "gem", "jewel", "orb", "crystal",
       "wand", "staff", "rod", "broom",
       "chopsticks", "fork", "knife", "lunch_box", "tray",
@@ -82,7 +83,9 @@
       "sword_sheath", "shopping_bag",
       "gaming_controller", "binoculars", "compass", "map",
       "musical_instrument", "guitar", "violin", "flute",
-      "paintbrush", "magnifying_glass", "hourglass"
+      "paintbrush", "magnifying_glass", "hourglass",
+      "clock", "ticket", "towel", "shell", "telescope", "railing",
+      "sparkler", "goldfish", "sign", "chalkboard_menu", "counter"
     ]
   },
 
@@ -118,24 +121,26 @@
     "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
     "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
     "ecstatic", "horrified", "panicked", "relieved", "focused",
-    "looking_at_viewer", "looking_away", "looking_back"
+    "wonder", "concentrating", "determined", "awe", "soft_smile",
+    "looking_at_viewer", "looking_away", "looking_back", "looking_at_another",
+    "looking_ahead", "looking_to_the_side"
   ],
 
   "axis_action": [
-    "standing", "slouching", "leaning_forward", "leaning_back",
+    "standing", "slouching", "leaning", "leaning_forward", "leaning_back",
     "leaning_on_object", "sitting_on_floor",
     "sitting", "kneeling", "lying_down", "crouching", "squatting",
     "lying_on_back", "lying_on_side", "lying_on_stomach",
     "v_arms", "crossed_arms", "arm_stretch",
     "looking_down", "looking_up", "bowing", "curtsy",
-    "jumping_up", "spinning", "stretching",
+    "jumping_up", "spinning", "stretching", "turning", "fluttering",
     "arms_behind_back", "arms_up",
     "arms_at_sides", "arms_behind_head", "arm_up",
     "hand_on_hip", "hands_on_hips",
     "hand_on_own_chin", "hand_on_own_cheek", "hand_on_own_face",
     "hand_to_mouth", "finger_to_mouth", "finger_to_lips",
-    "hands_clasped", "hands_together", "interlocked_fingers",
-    "reaching_out", "outstretched_arm", "outstretched_hand",
+    "hands_clasped", "hands_together", "interlocked_fingers", "holding_hands",
+    "reaching", "reaching_out", "outstretched_arm", "outstretched_hand",
     "spread_arms", "arm_behind_head",
     "v", "peace_sign", "ok_sign", "thumbs_up", "thumbs_down",
     "pointing", "pointing_at_viewer", "pointing_at_self",
@@ -145,7 +150,9 @@
     "seiza", "wariza", "prayer", "praying",
     "hugging_own_legs", "knees_up", "knees_to_chest",
     "crossed_legs", "leg_up", "legs_apart", "contrapposto",
-    "all_fours", "on_back", "on_stomach", "curled_up"
+    "all_fours", "on_back", "on_stomach", "curled_up",
+    "pouring", "spilling", "wiping", "guiding", "teaching", "sharing",
+    "scooping", "opening", "closing", "carrying", "dynamic_pose"
   ],
 
   "axis_clothing_explicit": [
@@ -159,12 +166,12 @@
     "hairpin", "hairclip",
     "shoes", "boots", "heels", "sandals", "sneakers",
     "maid", "sailor", "apron", "cape", "cloak", "mantle", "veil",
-    "obi", "hakama", "haori", "cheongsam",
+    "obi", "hakama", "haori", "cheongsam", "yukata", "kimono",
     "tracksuit", "jersey", "leotard", "tutu",
     "fingerless_gloves", "elbow_gloves",
     "overall", "beret", "hood",
     "school_uniform", "military_uniform",
-    "dress"
+    "dress", "swimsuit", "bikini", "one-piece_swimsuit", "school_swimsuit"
   ],
 
   "axis_accessories": [
@@ -209,7 +216,11 @@
     "visual_lighting": [
       "shadow", "darkness", "bright", "dim", "gloomy",
       "backlight", "rim_light", "lens_flare",
-      "bokeh", "haze_effect", "volumetric_light",
+      "bokeh", "haze_effect", "volumetric_light", "volumetric_lighting",
+      "cinematic_lighting", "warm_light", "cool_light", "daylight",
+      "starlight", "neon", "neon_lights", "streetlamp", "city_lights",
+      "sparkle", "glow", "dramatic_shadow",
+      "detailed_background", "depth_of_field", "motion_blur", "speed_lines",
       "warm_colors", "cool_colors", "vibrant_color", "pastel_colors",
       "monochrome", "warm_tone", "cold_tone", "color_palette",
       "dramatic_sky", "particle_effects"
@@ -222,10 +233,12 @@
       "clear_sky", "overcast",
       "sun", "sunlight", "sunbeam", "ray_of_light", "god_rays", "light_rays",
       "moon", "full_moon", "crescent_moon", "half_moon", "moonlight",
-      "stars", "star", "shooting_star",
+      "stars", "star", "shooting_star", "constellation",
       "clouds", "cloud",
       "fog", "mist", "haze", "rain", "drizzle", "snow", "snowfall",
-      "sunny", "windy", "storm", "lightning", "thunder", "rainbow",
+      "sunny", "windy", "wind", "storm", "lightning", "thunder", "rainbow",
+      "smoke", "splash", "wave", "waves", "puddle",
+      "fireworks", "confetti", "streamer", "petals", "leaves", "dust",
       "spring", "summer", "autumn", "fall", "winter",
       "cherry_blossoms", "sakura", "autumn_leaves", "fallen_leaves",
       "aurora", "northern_lights", "eclipse", "thunderstorm",
@@ -246,18 +259,22 @@
       "classroom", "library", "office", "bedroom", "living_room", "bathroom",
       "kitchen", "dining_room", "hallway", "corridor",
       "chalkboard", "blackboard", "whiteboard", "bulletin_board",
-      "park", "garden", "street", "road", "plaza", "rooftop", "balcony",
-      "beach", "forest", "mountain", "meadow", "field", "riverside",
+      "park", "garden", "street", "road", "plaza", "rooftop", "school_rooftop",
+      "balcony",
+      "beach", "seaside", "ocean", "sea", "sand", "shore",
+      "forest", "mountain", "meadow", "field", "riverside",
       "castle", "ruins", "temple", "shrine", "cafe", "restaurant",
+      "festival", "food_stall", "stall", "market",
       "alley", "bridge", "dock", "harbor",
       "indoors", "outdoors", "inside", "outside", "urban", "rural",
       "scenery", "cityscape", "landscape",
       "school_hallway", "gymnasium", "music_room", "science_lab",
       "amusement_park", "shopping_mall", "station_platform", "train_interior",
+      "train_station", "platform", "train", "gate",
       "hospital_room", "church", "cathedral", "palace", "dungeon",
       "cave", "void", "underwater", "outer_space",
       "nature", "lake", "river", "waterfall", "cliff",
-      "tree", "grass", "bush", "lawn", "hedge",
+      "tree", "grass", "bush", "lawn", "hedge", "palm_tree",
       "flower_field", "flower_garden",
       "pink_flower", "white_flower", "yellow_flower"
     ]
@@ -299,7 +316,9 @@
       "drinking", "eating", "holding_", "holding", "running", "sleeping",
       "reading", "dancing", "fighting", "walking",
       "jumping", "kneeling", "lying", "crawling",
-      "looking_back", "looking_away", "riding", "riding_"
+      "looking_back", "looking_away", "riding", "riding_",
+      "pouring", "spilling", "wiping", "reaching", "sharing",
+      "teaching", "guiding", "scooping", "waving", "pointing"
     ]
   }
 }

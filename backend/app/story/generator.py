@@ -3529,6 +3529,9 @@ _EXPRESSION_TAGS = frozenset({
     "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
     "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
     "ecstatic", "horrified", "panicked", "relieved", "focused",
+    "wonder", "concentrating", "determined", "awe", "soft_smile",
+    "looking_at_viewer", "looking_away", "looking_back", "looking_at_another",
+    "looking_ahead", "looking_to_the_side",
 })
 _EXPRESSION_TOKENS = frozenset({
     "smile", "smiling", "grin", "laugh", "tear", "tears", "teary", "sob",
@@ -3536,7 +3539,8 @@ _EXPRESSION_TOKENS = frozenset({
     "nervous", "worried", "expressionless", "serious", "stoic", "gasp",
     "smug", "melancholy", "nostalgic", "pensive", "flustered", "embarrassed",
     "scared", "terrified", "panicked", "relieved", "focused", "cheerful",
-    "joyful", "lonely", "annoyed", "glaring",
+    "joyful", "lonely", "annoyed", "glaring", "wonder", "concentrating",
+    "determined", "awe",
 })
 
 # Shared identity / quality noise stripped before cross-axis tag comparison.
