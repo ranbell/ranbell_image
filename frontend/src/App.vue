@@ -2546,7 +2546,14 @@ function openChronicle(img = null) {
   selected.value = null
   // Force a new object so ChroniclePanel watch fires even for the same sha.
   chronicleBase.value = base?.sha256 ? { ...base, sha256: base.sha256 } : base
-  showChronicle.value = true
+  // If already "open" but the Teleport blanked (e.g. i18n render throw), a plain
+  // true assignment is a no-op — bounce false→true so the shell remounts.
+  if (showChronicle.value) {
+    showChronicle.value = false
+    nextTick(() => { showChronicle.value = true })
+  } else {
+    showChronicle.value = true
+  }
 }
 
 function openStorybook() {

@@ -1443,7 +1443,7 @@
     "overall": "全体ストーリー",
     "biography": "バイオグラフィ",
     "timetable": "タイムテーブル",
-    "timetablePlace": "@ {place}",
+    "timetablePlace": "{'@'} {place}",
     "timetableFeeling": "（{feeling}）",
     "pinupAdd": "ポーズ追加",
     "pinupReplace": "引き直し",

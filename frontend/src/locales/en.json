@@ -1443,7 +1443,7 @@
     "overall": "Overall story",
     "biography": "Biography",
     "timetable": "Timetable",
-    "timetablePlace": "@ {place}",
+    "timetablePlace": "{'@'} {place}",
     "timetableFeeling": "({feeling})",
     "pinupAdd": "Add pose",
     "pinupReplace": "Reroll",
