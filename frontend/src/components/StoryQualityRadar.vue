@@ -15,6 +15,7 @@ const DIM_ORDER = [
   'action',
   'drawability',
   'identity',
+  'richness',
 ]
 
 const SIZE = 220

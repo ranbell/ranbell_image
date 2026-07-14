@@ -315,6 +315,10 @@ _TOPIC_JA_EN_ALIASES: dict[str, tuple[str, ...]] = {
     "廃墟": ("ruin", "ruins", "abandoned"),
     "探索": ("explore", "exploring", "search"),
     "働く": ("work", "working", "job"),
+    "自転車": ("bicycle", "bike", "cycling"),
+    "試合": ("match", "game", "stadium", "competition"),
+    "祝い": ("celebration", "toast", "party"),
+    "放課後": ("after school", "afterschool"),
 }
 _TOPIC_EN_JA_ALIASES: dict[str, tuple[str, ...]] = {
     "cafe": ("カフェ",),
@@ -2208,10 +2212,15 @@ _VISUAL_SCRIPT_GUIDE = (
     "body half-turned mid-step, weight shifted onto one knee. "
     "The pose must be emotionally legible at a glance and visually distinct "
     "from a neutral upright stance.\n"
-    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day.\n"
+    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day. "
+    "Fill the frame with *specific* place cues (a lit cafe storefront with "
+    "bottles in the window, a streetlamp, distant mountains, stadium bleachers "
+    "and crowd) — never a vague empty backdrop.\n"
     "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction "
-    "and quality.\n"
-    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression.\n"
+    "and quality. Name the light (rim light / backlight / golden hour / long "
+    "shadows / warm interior glow) and at least two props the eye can rest on.\n"
+    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression. "
+    "Add weather/particles when fitting (wind in hair/scarf, confetti, haze).\n"
     "Embed danbooru tags inline in ASCII parentheses right after each element, "
     'e.g. "A (1girl, solo) with (long_hair, silver_hair) grips a (sword, '
     'holding_sword) on a (rooftop) under (night_sky, full_moon)."\n'
@@ -3142,6 +3151,13 @@ def build_axis_tags_prompt(
         "the act's emotion (smile, blush, tears, pout, serious, nervous, "
         "expressionless, open_mouth, …). A person with no expression tag fails "
         "— mood cannot read from pose alone.\n"
+        "- SCENE RICHNESS: the image must feel *lived-in*, not a blank backdrop. "
+        "`lighting_tags` ≥2 (e.g. sunset, rim_light, backlight, lens_flare, "
+        "warm_light, long_shadow). `background_tags` ≥3 specific place cues "
+        "(street, shop, storefront, stadium, crowd, streetlamp, mountain…). "
+        "`object_tags` ≥2 tangible props (bicycle, scarf, mug, medal, confetti…). "
+        "Prefer wind/motion/atmosphere when the story supports it "
+        "(fluttering_scarf, confetti, streamers, dust).\n"
         "- EXPLICIT TAG: every noun the scene needs (hair color, eye color, "
         "notable feature, clothing, prop, background, light source) MUST appear "
         "as a real danbooru tag — never a euphemism or paraphrase.\n"
@@ -3234,6 +3250,8 @@ _DYNAMIC_ACTION_TOKENS = frozenset({
     "opening", "closing", "tying", "stirring", "spilling", "teaching",
     "sliding", "unlocking", "locking", "tamping", "steaming", "shaping",
     "both_hands", "surprised", "concentrating",
+    "riding", "pedaling", "fluttering", "cheering", "clinking", "toasting",
+    "laughing", "winking",
 })
 
 # Face / mood tags required whenever a person is on-screen (emotion must read).

@@ -30,19 +30,141 @@ QUALITY_DIMS = (
     "action",
     "drawability",
     "identity",
+    "richness",
 )
 
 # Place / prop cues for "drawable" scoring (EN + common JA).
 _PLACE_RE_HINTS = (
     "cafe", "kitchen", "station", "park", "street", "room", "classroom",
     "counter", "window", "door", "rooftop", "bridge", "library", "shop",
-    "カフェ", "キッチン", "駅", "公園", "街", "教室", "部屋", "店",
+    "stadium", "arena", "bicycle", "bike",
+    "カフェ", "キッチン", "駅", "公園", "街", "教室", "部屋", "店", "自転車",
 )
 _ACTION_VERB_HINTS = (
     "pour", "hold", "reach", "wipe", "run", "write", "open", "grab",
     "lift", "push", "pull", "knead", "fold", "slide", "teach", "point",
-    "注", "持", "掴", "走", "書", "開", "押", "拭",
+    "pedal", "ride", "toast", "cheer", "clink", "flutter", "lean",
+    "注", "持", "掴", "走", "書", "開", "押", "拭", "走", "乾杯",
 )
+
+# ── Scene richness (reference: dense golden-hour / celebration shots) ─────────
+_LIGHTING_TOKENS = frozenset({
+    "sunset", "sunrise", "golden_hour", "dusk", "dawn", "rim_light", "backlight",
+    "backlighting", "lens_flare", "volumetric_lighting", "god_rays", "sunbeam",
+    "dramatic_shadow", "long_shadow", "warm_light", "cool_light", "neon",
+    "cinematic_lighting", "sidelight", "contre-jour", "glow", "sparkle",
+    "afternoon", "evening", "night", "morning", "blue_hour", "daylight", "bright",
+})
+_ENV_TOKENS = frozenset({
+    "street", "road", "alley", "cityscape", "town", "shop", "storefront", "cafe",
+    "bar", "window", "building", "facade", "streetlamp", "lamppost", "sign",
+    "banner", "mountain", "sky", "cloud", "stadium", "arena", "crowd", "audience",
+    "bleachers", "plant", "flower", "pot", "fence", "sidewalk", "pavement",
+    "outdoors", "indoors", "scenery", "city", "urban",
+})
+_PROP_TOKENS = frozenset({
+    "bicycle", "bike", "scarf", "necktie", "ribbon", "bag", "medal", "trophy",
+    "mug", "beer", "glass", "bottle", "confetti", "streamer", "flag", "ball",
+    "umbrella", "phone", "book", "cup", "pitcher", "apron", "helmet",
+})
+_MOTION_TOKENS = frozenset({
+    "riding", "pedaling", "running", "jumping", "fluttering", "waving",
+    "leaning", "turning", "looking_back", "cheering", "toast", "clinking",
+    "holding", "reaching", "dynamic_pose", "wind", "motion_blur", "speed_lines",
+    "pouring", "spilling", "dancing", "hugging",
+})
+_ATMOS_TOKENS = frozenset({
+    "confetti", "streamer", "wind", "dust", "particle", "sparkle", "bokeh",
+    "haze", "fog", "smoke", "petals", "leaves", "rain", "snow",
+})
+
+
+def _token_hits(parts: list[str], vocab: frozenset[str]) -> list[str]:
+    hits: list[str] = []
+    seen: set[str] = set()
+    for raw in parts:
+        t = raw.strip().lower().replace(" ", "_").replace("-", "_")
+        toks = set(t.split("_"))
+        matched = None
+        if t in vocab:
+            matched = t
+        else:
+            for v in vocab:
+                if v in toks or v in t:
+                    matched = v
+                    break
+        if matched and matched not in seen:
+            seen.add(matched)
+            hits.append(matched)
+    return hits
+
+
+def score_prompt_richness(tag_line: str) -> dict[str, Any]:
+    """Score one prompt for reference-grade visual richness (0..1 + breakdown).
+
+    Tuned against dense scenes: golden-hour bicycle street, stadium celebration
+    with confetti — lighting, expression, motion, environment density, props.
+    """
+    parts = _parts(tag_line)
+    if not parts:
+        return {
+            "score": 0.0,
+            "lighting": 0, "environment": 0, "props": 0,
+            "motion": 0, "atmosphere": 0, "expression": False,
+            "tag_count": 0,
+        }
+    lighting = _token_hits(parts, _LIGHTING_TOKENS)
+    environment = _token_hits(parts, _ENV_TOKENS)
+    props = _token_hits(parts, _PROP_TOKENS)
+    motion = _token_hits(parts, _MOTION_TOKENS)
+    atmosphere = _token_hits(parts, _ATMOS_TOKENS)
+    has_expr = _tag_has_expression(parts)
+
+    # Soft caps — reference images typically clear these floors.
+    light_s = _clamp01(len(lighting) / 3.0)
+    env_s = _clamp01(len(environment) / 4.0)
+    prop_s = _clamp01(len(props) / 3.0)
+    motion_s = _clamp01(len(motion) / 3.0)
+    atmos_s = _clamp01(len(atmosphere) / 2.0)
+    expr_s = 1.0 if has_expr else 0.0
+    density_s = _clamp01((len(parts) - 25) / 35.0)  # 25→0, 60→1
+
+    score = _clamp01(
+        0.18 * light_s
+        + 0.18 * env_s
+        + 0.14 * prop_s
+        + 0.16 * motion_s
+        + 0.10 * atmos_s
+        + 0.14 * expr_s
+        + 0.10 * density_s
+    )
+    return {
+        "score": round(score, 3),
+        "lighting": len(lighting),
+        "environment": len(environment),
+        "props": len(props),
+        "motion": len(motion),
+        "atmosphere": len(atmosphere),
+        "expression": has_expr,
+        "tag_count": len(parts),
+        "hits": {
+            "lighting": lighting,
+            "environment": environment,
+            "props": props,
+            "motion": motion,
+            "atmosphere": atmosphere,
+        },
+    }
+
+
+def _score_richness(prompts: dict[str, str]) -> tuple[float, dict[str, Any]]:
+    per: dict[str, Any] = {}
+    scores: list[float] = []
+    for a in AXES:
+        detail = score_prompt_richness(prompts.get(a) or "")
+        per[a] = detail
+        scores.append(float(detail["score"]))
+    return _clamp01(sum(scores) / max(1, len(scores))), per
 
 
 def _clamp01(x: float) -> float:
@@ -265,6 +387,7 @@ def evaluate_chronicle_quality(
     action, action_per = _score_action(norm_prompts, activities)
     drawability, draw_note = _score_drawability(activities, stories)
     identity, id_note = _score_identity(norm_prompts, lock_tags)
+    richness, rich_per = _score_richness(norm_prompts)
 
     dimensions = {
         "topic_fit": round(topic_fit, 3),
@@ -273,6 +396,7 @@ def evaluate_chronicle_quality(
         "action": round(action, 3),
         "drawability": round(drawability, 3),
         "identity": round(identity, 3),
+        "richness": round(richness, 3),
     }
     overall_score = round(
         sum(dimensions[d] for d in QUALITY_DIMS) / len(QUALITY_DIMS), 3
@@ -287,11 +411,13 @@ def evaluate_chronicle_quality(
         "per_axis": {
             "expression": expr_per,
             "action": action_per,
+            "richness": rich_per,
         },
         "notes": {
             "topic_fit": topic_note,
             "diversity": div_note,
             "drawability": draw_note,
             "identity": id_note,
+            "richness": f"mean={richness:.2f}",
         },
     }
