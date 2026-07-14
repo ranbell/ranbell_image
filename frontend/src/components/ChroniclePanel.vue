@@ -261,10 +261,14 @@ function _scheduleFlush() {
 }
 
 watch(() => props.baseImage, (doc) => {
-  if (doc?.sha256) {
-    baseSha.value = doc.sha256
-    baseModel.value = _modelOf(doc)
+  if (!doc?.sha256) return
+  // New weave request (Storybook「紡ぐ」含む): clear prior finished/partial run
+  // so the panel can start again instead of staying locked on the last result.
+  if (finished.value || storyId.value || (baseSha.value && baseSha.value !== doc.sha256)) {
+    resetRun()
   }
+  baseSha.value = doc.sha256
+  baseModel.value = _modelOf(doc)
 }, { immediate: true })
 
 watch(() => props.show, async (val) => {
@@ -278,6 +282,9 @@ watch(() => props.show, async (val) => {
   if (props.baseImage?.sha256) {
     baseSha.value = props.baseImage.sha256
     baseModel.value = _modelOf(props.baseImage)
+  } else if (finished.value) {
+    // Topic-only / no-base reopen after a finished run → fresh start.
+    resetRun()
   }
   panelLang.value = uiLocale.value
   if (!workflows.value.length) {

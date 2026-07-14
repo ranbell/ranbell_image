@@ -10,7 +10,7 @@ const { t, locale } = useI18n()
 const props = defineProps({
   show: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'toast'])
+const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'send-to-refine-direct', 'toast'])
 
 const AXES = ['past', 'present', 'future']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
@@ -38,7 +38,6 @@ function axisHasVisualSpec(axisData) {
 // ── data ──────────────────────────────────────────────────────────────────────
 const stories = ref([])
 const loading = ref(false)
-const regenerating = ref(new Set())
 const lang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
 watch(locale, (l) => { lang.value = l?.startsWith('ja') ? 'ja' : 'en' })
 
@@ -246,19 +245,20 @@ async function fetchStories() {
   loading.value = false
 }
 
-async function regenerate(story, axis) {
-  const key = `${story.story_id}:${axis}`
-  regenerating.value = new Set([...regenerating.value, key])
-  try {
-    const r = await fetch(`/api/story/${story.story_id}/regenerate/${axis}`, { method: 'POST' })
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
-    emit('toast', { msg: t('storybook.regenQueued'), type: 'success' })
-  } catch (err) {
-    emit('toast', { msg: String(err.message || err), type: 'error' })
-    const next = new Set(regenerating.value)
-    next.delete(key)
-    regenerating.value = next
+function sendAxisToRefine(story, axis) {
+  const ax = story?.axes?.[axis]
+  if (!ax?.prompt_positive) {
+    emit('toast', { msg: t('storybook.refineNeedPrompt'), type: 'error' })
+    return
   }
+  const sha = ax.image_id || story.base_image_id || ''
+  emit('send-to-refine-direct', {
+    shas: sha ? [sha] : [],
+    directPrompt: ax.prompt_positive,
+    directNegativePrompt: ax.prompt_negative || '',
+    source: 'storybook',
+    workflow_name: story.workflow_name || '',
+  })
 }
 
 function axisImage(story, axis) {
@@ -654,14 +654,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                       {{ t('chronicle.axis.' + axis) }}
                       <span v-if="axis === story.base_time_axis" class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
                     </span>
-                    <button v-if="axis !== story.base_time_axis && story.axes?.[axis]?.prompt_positive"
-                      @click="regenerate(story, axis)"
-                      :disabled="regenerating.has(`${story.story_id}:${axis}`)"
-                      :title="t('storybook.regenTitle')"
-                      :aria-label="t('storybook.aria.regen')"
-                      class="sb-btn-accent disabled:opacity-40">
-                      <SbIcon name="dice" class="w-3 h-3" />
-                      {{ regenerating.has(`${story.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                    <button v-if="story.axes?.[axis]?.prompt_positive"
+                      @click="sendAxisToRefine(story, axis)"
+                      :title="t('storybook.refineAxisTitle')"
+                      :aria-label="t('storybook.refineAxis')"
+                      class="sb-btn-accent">
+                      <SbIcon name="spark" class="w-3 h-3" />
+                      {{ t('storybook.refineAxis') }}
                     </button>
                   </div>
 
@@ -935,13 +934,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                       <SbIcon name="weave" class="w-3 h-3" />
                       {{ t('storybook.weaveFromShort') }}
                     </button>
-                    <button v-if="axis !== detailStory.base_time_axis && detailStory.axes?.[axis]?.prompt_positive"
-                      @click="regenerate(detailStory, axis)"
-                      :disabled="regenerating.has(`${detailStory.story_id}:${axis}`)"
-                      class="sb-btn-accent disabled:opacity-40 ml-auto"
-                      :aria-label="t('storybook.aria.regen')">
-                      <SbIcon name="dice" class="w-3 h-3" />
-                      {{ regenerating.has(`${detailStory.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                    <button v-if="detailStory.axes?.[axis]?.prompt_positive"
+                      @click="sendAxisToRefine(detailStory, axis)"
+                      :title="t('storybook.refineAxisTitle')"
+                      class="sb-btn-accent ml-auto"
+                      :aria-label="t('storybook.refineAxis')">
+                      <SbIcon name="spark" class="w-3 h-3" />
+                      {{ t('storybook.refineAxis') }}
                     </button>
                   </div>
                 </div>

@@ -449,6 +449,7 @@
     "directFromHistory":   "Prompt received from generation history",
     "directFromInvoke":    "Prompt received from Invoke spirit",
     "directFromDetail":    "Generating directly from this image's prompt",
+    "directFromStorybook": "Reweaving from a Storybook axis prompt",
     "directFromDirect":    "Direct prompt received",
     "directFormatTags": "WD14 tag format",
     "directFormatProse": "Natural language",
