@@ -17,10 +17,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
     AXES,
+    CHRONICLE_CAT_FIELDS,
     acts_temporally_distinct,
     activities_temporally_distinct,
+    apply_scene_constraints,
     axis_slots_collapsed,
     axis_tag_lines_collapsed,
+    bucket_danbooru_tags,
     build_draft_grounding_block,
     candidates_degenerate,
     candidates_off_topic,
@@ -28,8 +31,10 @@ from app.story.generator import (
     draft_richness_delta,
     identity_lock_tags,
     infer_axis_scene_constraints,
+    merge_category_tags,
     merge_chronicle_axis_tags,
     merge_draft_wd14_tags,
+    parse_visual_script_category_tags,
     should_differentiate_acts,
     should_use_draft_refine,
     topic_anchor_tokens,
@@ -190,6 +195,44 @@ PROSE = {
 }
 
 
+# Refine-style labeled category footers (what Pass-2 would append)
+CAT_FOOTER = {
+    "past": (
+        "SUBJECT_TAGS: 1girl, solo, brown_eyes\n"
+        "HAIR_TAGS: brown_hair, long_hair, hair_ribbon\n"
+        "EXPRESSION_TAGS: open_mouth, laughing, looking_ahead\n"
+        "CLOTHING_TAGS: white_dress\n"
+        "ACCESSORY_TAGS: hair_ribbon\n"
+        "POSE_TAGS: running, chasing, dynamic_pose, from_side, cowboy_shot\n"
+        "BACKGROUND_TAGS: ocean, beach, wet_sand, foam, wave, outdoors, horizon\n"
+        "OBJECT_TAGS: foam\n"
+        "LIGHTING_TAGS: daylight, midday, sparkle, cinematic_lighting"
+    ),
+    "present": (
+        "SUBJECT_TAGS: 1girl, solo, brown_eyes\n"
+        "HAIR_TAGS: brown_hair, hair_ribbon\n"
+        "EXPRESSION_TAGS: smile, looking_at_viewer\n"
+        "CLOTHING_TAGS: white_dress, wet_clothes\n"
+        "ACCESSORY_TAGS: hair_ribbon\n"
+        "POSE_TAGS: kicking, leaning_forward, splash, cowboy_shot, from_side\n"
+        "BACKGROUND_TAGS: ocean, beach, wave, outdoors, horizon, summer\n"
+        "OBJECT_TAGS: seawater, splash\n"
+        "LIGHTING_TAGS: sunlight, lens_flare, sparkle, bright, cinematic_lighting"
+    ),
+    "future": (
+        "SUBJECT_TAGS: 1girl, solo, brown_eyes\n"
+        "HAIR_TAGS: brown_hair, hair_ribbon\n"
+        "EXPRESSION_TAGS: looking_down, curious, blush\n"
+        "CLOTHING_TAGS: white_dress\n"
+        "ACCESSORY_TAGS: hair_ribbon\n"
+        "POSE_TAGS: crouching, holding, both_hands, close-up\n"
+        "BACKGROUND_TAGS: ocean, beach, sand, waterline, wet_sand, wave, outdoors\n"
+        "OBJECT_TAGS: shell\n"
+        "LIGHTING_TAGS: soft_light, day, cinematic_lighting"
+    ),
+}
+
+
 def _assemble(axis: str, *, use_draft: bool) -> tuple[str, str, dict]:
     build = AXIS_BUILD[axis]
     constraints = infer_axis_scene_constraints(STORIES[axis])
@@ -201,39 +244,64 @@ def _assemble(axis: str, *, use_draft: bool) -> tuple[str, str, dict]:
             lock_tags=LOCK,
             focal=build["focal"],
         )
-    # scene constraints may forbid mismatches
-    from app.story.generator import apply_scene_constraints
     search = apply_scene_constraints(search, constraints)
     tag_line = merge_chronicle_axis_tags(
         focal=build["focal"], search_tags=search, lock_tags=LOCK,
     )
-    # densify-ish pad to ~32 content tags
     parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+    # Ensure subject anchors + identity lock visible on the tag line
+    for anchor in ("1girl", "solo"):
+        if anchor not in {p.lower() for p in parts}:
+            parts.insert(0, anchor)
+    for lock in LOCK:
+        if lock.lower() not in {p.lower() for p in parts}:
+            parts.append(lock)
     pad = [
         "detailed_background", "depth_of_field", "cinematic_lighting",
-        "highres", "summer", "from_side", "cowboy_shot",
+        "summer", "from_side", "cowboy_shot",
     ]
     seen = {p.lower() for p in parts}
     for p in pad:
-        if p.lower() not in seen and len(parts) < 34:
+        if p.lower() not in seen and len(parts) < 36:
             parts.append(p)
             seen.add(p.lower())
     tag_line = ", ".join(parts)
-    positive = f"{tag_line}\n\n{PROSE[axis]}"
+
+    # Pass-2 body: prose + labeled category footer (then strip for Comfy positive)
+    vs_raw = f"{PROSE[axis]}\n\n{CAT_FOOTER[axis]}"
+    prose, vs_cats = parse_visual_script_category_tags(vs_raw)
+    cats = merge_category_tags(
+        vs_cats,
+        bucket_danbooru_tags(tag_line),
+    )
+    # Comfy payload = tag_line + prose only (categories are metadata)
+    positive = f"{tag_line}\n\n{prose}".strip()
     grounding = build_draft_grounding_block(DRAFT_WD14[axis]) if use_draft else ""
     meta = {
         "tag_line": tag_line,
-        "grounding_preview": grounding[:160] + ("…" if grounding else ""),
+        "visual_script": prose,
+        "categories": cats,
+        "grounding_preview": (grounding[:160] + "…") if grounding else "",
         "richness": score_prompt_richness(positive),
     }
     return positive, "blurry, lowres, bad anatomy, static_pose, expressionless", meta
 
 
+def _print_cats(cats: dict) -> None:
+    print("  Visual Spec (分類タグ):")
+    for key in CHRONICLE_CAT_FIELDS:
+        tags = cats.get(key) or []
+        if tags:
+            print(f"    {key:18} {', '.join(tags)}")
+
+
 def _print_full(title: str, prompts: dict[str, dict], q: dict, gates: dict) -> None:
     print("\n" + "═" * 72)
-    print(f"  SIM: {title}")
+    print(f"  FULL SIM: {title}")
     print(f"  お題: {TOPIC}")
     print(f"  時間尺度: {TIME_SCALE}（前後数十分）  divergence={DIVERGENCE}")
+    print(f"  形式: danbooru+natural（内部=Danbooru正本 / 出力=分類Visual Spec）")
+    print(f"  lock_tags: {LOCK}")
     print("═" * 72)
     print("\n── Gates ──")
     for k, v in gates.items():
@@ -252,31 +320,39 @@ def _print_full(title: str, prompts: dict[str, dict], q: dict, gates: dict) -> N
     if q.get("draft_grounding"):
         print(f"  draft_grounding: {q['draft_grounding']}")
 
-    print("\n── Final prompts (POSITIVE) ──")
+    print("\n── Stories (EN) ──")
     for axis in AXES:
-        p = prompts[axis]["positive"]
-        n = prompts[axis]["negative"]
-        r = score_prompt_richness(p)
-        print(f"\n[{axis.upper()}]  richness={r['score']:.2f}  "
+        print(f"  [{axis}] {STORIES[axis]}")
+    print("\n── Activities ──")
+    for axis in AXES:
+        print(f"  [{axis}] {ACTIVITIES[axis]}")
+
+    print("\n── Final axis payloads ──")
+    for axis in AXES:
+        p = prompts[axis]
+        pos = p["positive"]
+        r = score_prompt_richness(pos)
+        print(f"\n{'─' * 72}")
+        print(f"[{axis.upper()}]  richness={r['score']:.2f}  "
               f"light={r['lighting']} env={r['environment']} props={r['props']} "
               f"motion={r['motion']} expr={r['expression']}")
-        print("POSITIVE:")
-        print(p)
-        print("NEGATIVE:")
-        print(n)
+        print("\nPOSITIVE (→ ComfyUI = tag_line + Visual Script prose):")
+        print(pos)
+        print("\nNEGATIVE:")
+        print(p["negative"])
+        if p.get("visual_script"):
+            print("\nVisual Script prose only:")
+            print(p["visual_script"])
+        _print_cats(p.get("categories") or {})
 
 
 def test_sim_beach_girl_tens_of_minutes(capsys):
-    # ── candidate / gate layer ──
     draft_auto = should_use_draft_refine(
         mode="auto",
         time_scale=TIME_SCALE,
         divergence=DIVERGENCE,
         workflow_name=WORKFLOW,
     )
-    # tens_of_minutes is micro → auto draft OFF even at 0.35 (< needs 0.25? wait 0.35 >= 0.25)
-    # Actually divergence 0.35 >= 0.25 → draft SHOULD be True with new logic!
-    # Check: if div >= 0.25 return True even for skip scales.
     draft_auto_low_div = should_use_draft_refine(
         mode="auto",
         time_scale=TIME_SCALE,
@@ -300,7 +376,6 @@ def test_sim_beach_girl_tens_of_minutes(capsys):
         "draft_refine_auto_div0.15": draft_auto_low_div,
     }
 
-    # Path A: realistic auto (this divergence 0.35 → draft ON despite micro scale)
     prompts_a: dict[str, dict] = {}
     deltas_a: dict[str, dict] = {}
     for axis in AXES:
@@ -310,7 +385,13 @@ def test_sim_beach_girl_tens_of_minutes(capsys):
             lock_tags=LOCK,
         )
         pos, neg, meta = _assemble(axis, use_draft=draft_auto)
-        prompts_a[axis] = {"positive": pos, "negative": neg}
+        prompts_a[axis] = {
+            "positive": pos,
+            "negative": neg,
+            "visual_script": meta["visual_script"],
+            "categories": meta["categories"],
+            **{k: meta["categories"].get(k, []) for k in CHRONICLE_CAT_FIELDS},
+        }
         if draft_auto:
             deltas_a[axis] = draft_richness_delta(
                 before_tag_line=before_tags,
@@ -337,36 +418,10 @@ def test_sim_beach_girl_tens_of_minutes(capsys):
         draft_deltas=deltas_a or None,
     )
     _print_full(
-        "Path A — Auto draft (divergence=0.35)",
+        "海辺で遊ぶ少女 — Auto draft (divergence=0.35)",
         prompts_a, q_a, gates,
     )
 
-    # Path B: forced Off (micro session without draft) for comparison
-    prompts_b: dict[str, dict] = {}
-    for axis in AXES:
-        pos, neg, _ = _assemble(axis, use_draft=False)
-        prompts_b[axis] = {"positive": pos, "negative": neg}
-    q_b = evaluate_chronicle_quality(
-        user_topic=TOPIC,
-        title="Tide Chase",
-        overall=q_a.get("notes", {}).get("topic_fit", "") and (
-            "Across a few dozen minutes on the same shore, a barefoot girl "
-            "moves from chasing foam to kicking spray to collecting a shell."
-        ) or (
-            "Across a few dozen minutes on the same shore, a barefoot girl "
-            "moves from chasing foam to kicking spray to collecting a shell."
-        ),
-        stories=STORIES,
-        activities=ACTIVITIES,
-        prompts=prompts_b,
-        time_scale=TIME_SCALE,
-        lock_tags=LOCK,
-    )
-    print("\n── Comparison: draft Off vs Auto ──")
-    print(f"  {'dim':12} {'auto':>6} {'off':>6}")
-    for d in q_a["dimensions"]:
-        print(f"  {d:12} {q_a['dimensions'][d]:6.2f} {q_b['dimensions'][d]:6.2f}")
-    print(f"  {'OVERALL':12} {q_a['overall']:6.2f} {q_b['overall']:6.2f}")
     if deltas_a:
         print("\n── Draft richness Δ (per axis) ──")
         for axis, d in deltas_a.items():
@@ -375,12 +430,12 @@ def test_sim_beach_girl_tens_of_minutes(capsys):
                 f"(Δ={d['delta']:+.2f})"
             )
 
-    # Soft asserts — this is a sim report, but keep floors honest
+    # Soft asserts
     assert not gates["candidates_degenerate"]
     assert not gates["candidates_off_topic"]
-    assert gates["should_differentiate_acts"] is False  # micro scale
+    assert gates["should_differentiate_acts"] is False
     assert gates["draft_refine_auto_div0.15"] is False
-    assert gates["draft_refine_auto_div0.35"] is True  # div≥0.25 lifts micro
+    assert gates["draft_refine_auto_div0.35"] is True
     assert q_a["dimensions"]["topic_fit"] >= 0.55
     assert q_a["dimensions"]["expression"] >= 0.5
     assert q_a["dimensions"]["richness"] >= 0.45
@@ -389,3 +444,6 @@ def test_sim_beach_girl_tens_of_minutes(capsys):
         blob = prompts_a[axis]["positive"].lower()
         assert "ocean" in blob or "beach" in blob
         assert any(x in blob for x in ("smile", "laughing", "open_mouth", "blush"))
+        cats = prompts_a[axis]["categories"]
+        assert cats.get("pose_tags") or cats.get("expression_tags")
+        assert "SUBJECT_TAGS" not in prompts_a[axis]["positive"]  # stripped from Comfy
