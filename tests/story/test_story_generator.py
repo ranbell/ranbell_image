@@ -333,7 +333,7 @@ def test_build_axis_prompt_styles():
         base_axis="present",
     )
     tags_only = build_axis_prompt(prompt_style="danbooru", **kwargs)
-    assert "comma-separated danbooru tag list (30-50 tags)" in tags_only
+    assert "comma-separated danbooru tag list (12-20 tags" in tags_only
     assert "No prose" in tags_only
     natural = build_axis_prompt(prompt_style="natural", **kwargs)
     assert "5-paragraph Visual Script prose" in natural
@@ -561,6 +561,47 @@ def test_merge_chronicle_axis_tags_identity_only():
     assert "train_interior" not in lower
     assert "window" not in lower
     assert "black_jacket" not in lower
+    assert len([t for t in line.split(",") if t.strip()]) <= 20
+
+
+def test_cap_danbooru_tag_line_keeps_identity_and_focal():
+    from app.story.generator import (
+        IMAGE_PROMPT_MAX_TAGS,
+        assemble_capped_positive,
+        cap_danbooru_tag_line,
+        draft_positive_for_comfy,
+    )
+
+    many = ", ".join([
+        "1girl", "solo", "blonde_hair", "blue_eyes", "reaching",
+        *[f"pad_tag_{i}" for i in range(40)],
+        "sunset",
+    ])
+    capped = cap_danbooru_tag_line(
+        many,
+        priority_tags=["blonde_hair", "blue_eyes", "reaching"],
+    )
+    parts = [t.strip() for t in capped.split(",") if t.strip()]
+    assert len(parts) == IMAGE_PROMPT_MAX_TAGS
+    assert "1girl" in parts and "blonde_hair" in parts and "reaching" in parts
+    assert "pad_tag_30" not in parts
+
+    draft = draft_positive_for_comfy(
+        tag_line=many,
+        positive=f"{many}\n\nA very long prose paragraph " * 20,
+        priority_tags=["blonde_hair", "reaching"],
+    )
+    assert "\n\n" not in draft
+    assert len([t for t in draft.split(",") if t.strip()]) <= IMAGE_PROMPT_MAX_TAGS
+
+    final = assemble_capped_positive(
+        many,
+        "word " * 200,
+        priority_tags=["blonde_hair"],
+    )
+    head, _, prose = final.partition("\n\n")
+    assert len([t for t in head.split(",") if t.strip()]) <= IMAGE_PROMPT_MAX_TAGS
+    assert len(prose.split()) <= 60
 
 
 def test_identity_tags_for_scale():
@@ -1267,7 +1308,7 @@ def test_axis_tags_prompt_demands_json_and_rules():
     assert "JSON ONLY" in prompt
     assert "SUBJECT-FIRST" in prompt
     assert "ACTION-ANCHOR" in prompt
-    assert "MIN 50 TAGS" in prompt
+    assert "HARD MAX 20 TAGS" in prompt
     # Structured schema keys the parser expects.
     for key in (
         "danbooru_tags", "subject_tags", "hair_tags", "expression_tags",

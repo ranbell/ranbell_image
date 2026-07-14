@@ -2523,6 +2523,10 @@ def repair_collapsed_axis_tags(
         if not candidates:
             continue
         new_pos = _inject_tags_into_positive(positive, candidates)
+        head, _, tail = new_pos.partition("\n\n")
+        if "," in head and "\n" not in head and "." not in head:
+            head = cap_danbooru_tag_line(head, priority_tags=candidates)
+            new_pos = f"{head}\n\n{tail}".strip() if tail.strip() else head
         if new_pos != positive:
             out[a] = {**entry, "positive": new_pos}
     return out
@@ -2846,17 +2850,82 @@ def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
     return insert_after_anchors(tag_line, list(identity))
 
 
+# Anime diffusion models lose coherence past ~20 tags. Draft and final share
+# this ceiling; keep identity + focal first when truncating.
+IMAGE_PROMPT_MAX_TAGS = 20
+IMAGE_PROMPT_MAX_PROSE_WORDS = 60
+
+
+def cap_danbooru_tag_line(
+    tag_line: str | list[str],
+    *,
+    max_tags: int = IMAGE_PROMPT_MAX_TAGS,
+    priority_tags: list[str] | None = None,
+) -> str:
+    """Hard-cap a comma-separated Danbooru tag line for image models.
+
+    Keeps subject-count anchors and ``priority_tags`` (identity / focal) first,
+    then fills from the original order until ``max_tags``.
+    """
+    if isinstance(tag_line, (list, tuple)):
+        parts = [
+            str(t).strip().replace(" ", "_") for t in tag_line if str(t).strip()
+        ]
+    else:
+        parts = [
+            t.strip().replace(" ", "_")
+            for t in str(tag_line or "").split(",")
+            if t.strip()
+        ]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for tag in parts:
+        key = tag.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(tag)
+    if max_tags < 1 or len(deduped) <= max_tags:
+        return ", ".join(deduped)
+
+    by_key = {t.lower(): t for t in deduped}
+    chosen: list[str] = []
+    chosen_keys: set[str] = set()
+
+    def _take(key: str) -> None:
+        if key in chosen_keys or key not in by_key or len(chosen) >= max_tags:
+            return
+        chosen.append(by_key[key])
+        chosen_keys.add(key)
+
+    for tag in deduped:
+        if tag.lower() in _SUBJECT_ANCHORS:
+            _take(tag.lower())
+    for raw in priority_tags or []:
+        tag = str(raw).strip().replace(" ", "_")
+        if tag:
+            _take(tag.lower())
+    for tag in deduped:
+        _take(tag.lower())
+        if len(chosen) >= max_tags:
+            break
+    return ", ".join(chosen)
+
+
 def merge_chronicle_axis_tags(
     *,
     focal: list[str],
     search_tags: list[str],
     lock_tags: list[str],
+    max_tags: int = IMAGE_PROMPT_MAX_TAGS,
 ) -> str:
     """Non-base Chronicle axis tag line: focal + WD14 search, then identity lock.
 
     Deliberately omits the base image's full WD14 / must-scene tags so past and
     present acts are not forced into the base setting (e.g. train interior).
     Only hair colour, eye colour, and accessories from identity_lock_tags propagate.
+
+    Hard-capped to ``max_tags`` (default 20): anime image models degrade when
+    the positive is flooded with tags.
     """
     merged: list[str] = []
     seen: set[str] = set()
@@ -2866,7 +2935,12 @@ def merge_chronicle_axis_tags(
         if tag and k not in seen:
             seen.add(k)
             merged.append(tag)
-    return inject_identity_tags(", ".join(merged), lock_tags)
+    line = inject_identity_tags(", ".join(merged), lock_tags)
+    return cap_danbooru_tag_line(
+        line,
+        max_tags=max_tags,
+        priority_tags=[*lock_tags, *focal],
+    )
 
 
 _INLINE_TAG_GROUP_RE = re.compile(r"\(([^)]+)\)")
@@ -2897,6 +2971,53 @@ def collect_prompt_tags(positive: str) -> list[str]:
                 for seg in m.group(1).split(","):
                     _add(seg)
     return result
+
+
+def assemble_capped_positive(
+    tag_line: str,
+    prose: str = "",
+    *,
+    priority_tags: list[str] | None = None,
+    max_tags: int = IMAGE_PROMPT_MAX_TAGS,
+    max_prose_words: int = IMAGE_PROMPT_MAX_PROSE_WORDS,
+) -> str:
+    """Build Comfy-ready positive: capped tag head + optional trimmed prose."""
+    capped_tags = (
+        cap_danbooru_tag_line(
+            tag_line, max_tags=max_tags, priority_tags=priority_tags
+        )
+        if (tag_line or "").strip()
+        else ""
+    )
+    capped_prose = (prose or "").strip()
+    if capped_prose and max_prose_words > 0:
+        words = capped_prose.split()
+        if len(words) > max_prose_words:
+            capped_prose = " ".join(words[:max_prose_words])
+    if capped_tags and capped_prose:
+        return f"{capped_tags}\n\n{capped_prose}"
+    return capped_tags or capped_prose
+
+
+def draft_positive_for_comfy(
+    *,
+    tag_line: str,
+    positive: str,
+    priority_tags: list[str] | None = None,
+    max_tags: int = IMAGE_PROMPT_MAX_TAGS,
+) -> str:
+    """Short tags-only positive for low-res draft generation (≤ max_tags)."""
+    if (tag_line or "").strip():
+        return cap_danbooru_tag_line(
+            tag_line, max_tags=max_tags, priority_tags=priority_tags
+        )
+    harvested = collect_prompt_tags(positive or "")
+    if harvested:
+        return cap_danbooru_tag_line(
+            harvested, max_tags=max_tags, priority_tags=priority_tags
+        )
+    words = (positive or "").split()
+    return " ".join(words[:max_tags])
 
 
 # ── Emotion register (shared across story + image-prompt stages) ──────────────
@@ -3278,15 +3399,18 @@ def build_axis_prompt(
         )
     elif prompt_style == "danbooru":
         format_rule = (
-            "POSITIVE is a single comma-separated danbooru tag list (30-50 tags): "
+            "POSITIVE is a single comma-separated danbooru tag list "
+            f"(12-{IMAGE_PROMPT_MAX_TAGS} tags, hard max {IMAGE_PROMPT_MAX_TAGS}): "
             "the condensed identity keywords FIRST, then action, environment, "
-            "detail and mood tags for this scene. No prose."
+            "and one mood/light cue for this scene. No prose. Never exceed "
+            f"{IMAGE_PROMPT_MAX_TAGS} tags — more tags confuse the image model."
         )
     else:  # danbooru+natural
         format_rule = (
             "POSITIVE is two parts separated by a blank line:\n"
-            "(a) a comma-separated danbooru tag line (30-50 tags) — condensed "
-            "identity keywords FIRST, then action/environment/detail/mood tags;\n"
+            f"(a) a comma-separated danbooru tag line (12-{IMAGE_PROMPT_MAX_TAGS} "
+            f"tags, hard max {IMAGE_PROMPT_MAX_TAGS}) — condensed identity "
+            "keywords FIRST, then action/environment/mood; never pad;\n"
             f"(b) the {_prose_n}-paragraph Visual Script prose described above."
         )
 
@@ -3405,43 +3529,38 @@ def build_axis_tags_prompt(
         "\n[MANDATORY RULES]\n"
         "- SUBJECT-FIRST: `danbooru_tags` MUST open with the subject-count tag "
         "(1girl / 1boy / solo / 2girls / …). No other tag before it.\n"
-        "- ACTION-ANCHOR: `pose_tags` MUST contain at least 3 concrete danbooru "
-        "action/pose tags translated from the story verbs — reaching, "
-        "outstretched_arm, leaning_forward, looking_back, kneeling, gripping, "
-        "clenched_hand, holding, covering_face, touching, fingertips, "
-        "dynamic_pose. NEVER just `standing` / `sitting` with nothing else.\n"
+        "- ACTION-ANCHOR: `pose_tags` MUST contain 1–2 concrete danbooru "
+        "action/pose tags from the story verbs — reaching, outstretched_arm, "
+        "leaning_forward, looking_back, kneeling, gripping, holding, "
+        "covering_face, touching. NEVER just `standing` / `sitting` alone.\n"
         "- EXPRESSION: when the subject is a person (1girl / 1boy / solo / …), "
-        "`expression_tags` MUST contain ≥1 concrete face/mood tag drawn from "
-        "the act's emotion (smile, blush, tears, pout, serious, nervous, "
-        "expressionless, open_mouth, …). A person with no expression tag fails "
-        "— mood cannot read from pose alone.\n"
-        "- SCENE RICHNESS: the image must feel *lived-in*, not a blank backdrop. "
-        "`lighting_tags` ≥2 (e.g. sunset, rim_light, backlight, lens_flare, "
-        "warm_light, long_shadow). `background_tags` ≥3 specific place cues "
-        "(street, shop, storefront, stadium, crowd, streetlamp, mountain…). "
-        "`object_tags` ≥2 tangible props (bicycle, scarf, mug, medal, confetti…). "
-        "Prefer wind/motion/atmosphere when the story supports it "
-        "(fluttering_scarf, confetti, streamers, dust).\n"
-        "- EXPLICIT TAG: every noun the scene needs (hair color, eye color, "
-        "notable feature, clothing, prop, background, light source) MUST appear "
-        "as a real danbooru tag — never a euphemism or paraphrase.\n"
-        "- MIN 50 TAGS on `danbooru_tags`. Under-count = failed prompt.\n"
+        "`expression_tags` MUST contain ≥1 concrete face/mood tag "
+        "(smile, blush, tears, pout, serious, nervous, open_mouth, …).\n"
+        "- SCENE CUES (lean): pick the strongest cues only — "
+        "`lighting_tags` 1, `background_tags` 1–2, `object_tags` 0–1. "
+        "Do not pad with near-synonyms.\n"
+        "- EXPLICIT TAG: hair color, eye color, key clothing, and the main "
+        "action/place MUST be real danbooru tags — never euphemisms.\n"
+        f"- HARD MAX {IMAGE_PROMPT_MAX_TAGS} TAGS on `danbooru_tags` "
+        f"(target 12–18). Over {IMAGE_PROMPT_MAX_TAGS} = failed prompt — "
+        "anime image models cannot parse tag floods.\n"
         "- NO quality meta-tags anywhere (masterpiece / best_quality / highres / "
         "4k / 8k / worst_quality / low_quality etc.).\n"
-        "- Every tag echoed under `danbooru_tags` should also appear in ONE of "
-        "the category buckets below.\n\n"
+        "- Category buckets list the SAME short tag set (split by role); "
+        "do not invent extra tags just to fill buckets.\n\n"
         "Output JSON ONLY. No markdown fences, no commentary. Schema:\n"
         '{\n'
-        '  "danbooru_tags": "<subject-count tag first, then 50+ comma-separated tags>",\n'
-        '  "subject_tags": "<subject count, character count, viewer relation>",\n'
-        '  "hair_tags": "<hair color, length, style>",\n'
-        '  "expression_tags": "<REQUIRED if person: ≥1 face/mood tag — smile, blush, tears, serious…>",\n'
-        '  "clothing_tags": "<outfit, garments, fabric>",\n'
-        '  "accessory_tags": "<jewelry, hats, glasses, small items>",\n'
-        '  "pose_tags": "<>= 3 concrete pose/action tags, no bare standing>",\n'
-        '  "background_tags": "<location, setting, weather, time of day>",\n'
-        '  "object_tags": "<props, held items, environment objects>",\n'
-        '  "lighting_tags": "<light direction, quality, palette>",\n'
+        f'  "danbooru_tags": "<subject-count first, then ≤{IMAGE_PROMPT_MAX_TAGS} '
+        'comma-separated tags — lean, no padding>",\n'
+        '  "subject_tags": "<subject count, character count>",\n'
+        '  "hair_tags": "<hair color, length or style — only if needed>",\n'
+        '  "expression_tags": "<REQUIRED if person: 1 face/mood tag>",\n'
+        '  "clothing_tags": "<key outfit only>",\n'
+        '  "accessory_tags": "<only if distinctive>",\n'
+        '  "pose_tags": "<1–2 concrete pose/action tags>",\n'
+        '  "background_tags": "<1–2 place/setting cues>",\n'
+        '  "object_tags": "<0–1 prop if essential>",\n'
+        '  "lighting_tags": "<1 light/mood cue>",\n'
         '  "negative_supplement": "<comma-separated artifacts to avoid>"\n'
         "}"
     )
@@ -3737,8 +3856,8 @@ def build_axis_prose_prompt(
     else:  # danbooru+natural (default)
         format_rule = (
             "POSITIVE has THREE parts separated by blank lines:\n"
-            "(a) the PASS 1 DANBOORU TAG LINE above verbatim (do not re-order, "
-            "do not drop tags);\n"
+            f"(a) the PASS 1 DANBOORU TAG LINE above verbatim (≤{IMAGE_PROMPT_MAX_TAGS} "
+            "tags — do not expand or pad it);\n"
             f"(b) the {_prose_n}-paragraph Visual Script prose;\n"
             "(c) the labeled *_TAGS category lines (Refine Visual Spec)."
         )
@@ -4293,7 +4412,12 @@ def merge_draft_wd14_tags(
     _add(draft_rest)
     _add(vocab_kept)
     _add(locks)
-    return out
+    capped = cap_danbooru_tag_line(
+        out,
+        max_tags=IMAGE_PROMPT_MAX_TAGS,
+        priority_tags=[*focal_norm, *locks],
+    )
+    return [t.strip() for t in capped.split(",") if t.strip()]
 
 
 def build_draft_grounding_block(draft_tags: list[str], *, locale: str = "en") -> str:
@@ -4302,7 +4426,7 @@ def build_draft_grounding_block(draft_tags: list[str], *, locale: str = "en") ->
         str(t).strip().replace(" ", "_")
         for t in (draft_tags or [])
         if str(t).strip()
-    ][:40]
+    ][:IMAGE_PROMPT_MAX_TAGS]
     if not tags:
         return ""
     joined = ", ".join(tags)

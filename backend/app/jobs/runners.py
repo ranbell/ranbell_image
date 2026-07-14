@@ -3351,7 +3351,10 @@ async def run_chronicle_expand(
         infer_axis_scene_constraints,
         inject_identity_tags,
         is_multi_character,
+        assemble_capped_positive,
         build_draft_grounding_block,
+        cap_danbooru_tag_line,
+        draft_positive_for_comfy,
         draft_richness_delta,
         merge_chronicle_axis_tags,
         merge_category_tags,
@@ -4168,13 +4171,25 @@ async def run_chronicle_expand(
                 }))
             if prose and inject:
                 prose = _correct_prose_wd14_conflicts(prose, inject)
-            # Comfy payload: danbooru tag line + Visual Script prose only
-            # (category lines are metadata — Refine parity).
-            positive = (
-                f"{tag_line}\n\n{prose}".strip()
-                if tag_line and prose else (tag_line or prose)
+            # Comfy payload: lean danbooru tag line (≤20) + trimmed prose.
+            # Tag floods make anime models ignore the prompt entirely.
+            prio_tags = list(dict.fromkeys([*lock_tags, *focal]))
+            if tag_line:
+                tag_line = cap_danbooru_tag_line(
+                    tag_line, priority_tags=prio_tags,
+                )
+            positive = assemble_capped_positive(
+                tag_line, prose, priority_tags=prio_tags,
             )
             positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
+            if tag_line:
+                # Re-cap after conflict strip in case identity was reordered.
+                head, _, tail = positive.partition("\n\n")
+                if "," in head and "." not in head:
+                    tag_line = cap_danbooru_tag_line(head, priority_tags=prio_tags)
+                    positive = assemble_capped_positive(
+                        tag_line, tail if prose else "", priority_tags=prio_tags,
+                    )
             if not positive:
                 _put({"type": "error", "message": f"Prompt build failed for {axis}"})
                 return
@@ -4209,10 +4224,15 @@ async def run_chronicle_expand(
             if draft_refine:
                 _phase("draftingAxis", 0.58 + 0.08 * i, f"Drafting {axis} scene...")
                 try:
+                    draft_pos = draft_positive_for_comfy(
+                        tag_line=tag_line,
+                        positive=positive,
+                        priority_tags=prio_tags,
+                    )
                     draft_bytes = await _comfy_generate_bytes(
                         comfy, cancel,
                         workflow_name=body.workflow_name,
-                        positive=positive,
+                        positive=draft_pos,
                         negative=negative,
                         seed=seed,
                         width=int(getattr(body, "draft_width", 512) or 512),
@@ -4429,13 +4449,28 @@ async def run_chronicle_expand(
                             }))
                         if prose and inject:
                             prose = _correct_prose_wd14_conflicts(prose, inject)
-                        positive = (
-                            f"{tag_line}\n\n{prose}".strip()
-                            if tag_line and prose else (tag_line or prose)
+                        prio_tags = list(dict.fromkeys([*lock_tags, *focal]))
+                        if tag_line:
+                            tag_line = cap_danbooru_tag_line(
+                                tag_line, priority_tags=prio_tags,
+                            )
+                        positive = assemble_capped_positive(
+                            tag_line, prose, priority_tags=prio_tags,
                         )
                         positive = remove_conflict_tags(
                             positive, conflicts, include_prose_groups=True
                         )
+                        if tag_line and positive:
+                            head, _, tail = positive.partition("\n\n")
+                            if "," in head and "." not in head:
+                                tag_line = cap_danbooru_tag_line(
+                                    head, priority_tags=prio_tags,
+                                )
+                                positive = assemble_capped_positive(
+                                    tag_line,
+                                    tail if prose else "",
+                                    priority_tags=prio_tags,
+                                )
                         if positive:
                             positive, removed_tags = _remove_forced_tags(
                                 positive,
