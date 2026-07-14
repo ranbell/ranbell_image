@@ -2,7 +2,9 @@
 
 .sb-theme,
 .storybook-root,
-.chronicle-root {
+.chronicle-root,
+.sb-overlay-bg,
+.sb-detail-panel {
   --sb-font-display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
   --sb-font-ui: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", sans-serif;
   --sb-amber: #e8c47a;
@@ -13,6 +15,11 @@
   --sb-muted: #8b929e;
   --sb-faint: #5c6470;
   font-family: var(--sb-font-ui);
+  /* Detail overlay is a Teleport sibling of .storybook-root — without these
+     tokens, Tailwind `text-[var(--sb-*)]` becomes invalid and falls back to
+     near-black ink on the dark panel (unreadable in dark UI). */
+  color: #e5e7eb;
+  color-scheme: dark;
 }
 
 /* Hard z-index so Tailwind arbitrary `z-[var(--z-*)]` never leaves these

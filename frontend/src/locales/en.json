@@ -1345,6 +1345,8 @@
     "noBase": "Choose a base image first",
     "reasoning": "Reasoning",
     "draftMaterials": "Draft notes",
+    "draftImages": "Draft images",
+    "draftImageAlt": "{axis} draft image",
     "draftInProgress": "in progress",
     "reasonShot": "shot",
     "reasonPose": "pose",

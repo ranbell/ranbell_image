@@ -665,10 +665,14 @@ function activityFor(axis) {
   const v = (panelLang.value === 'ja' && c.ja && c.ja[axis]) ? c.ja[axis] : (c.en?.[axis] || '')
   return typeof v === 'string' ? v : (v == null ? '' : String(v))
 }
-/** Bio / timetable / concrete drafted during expand — keep visible while creating. */
+const draftImageAxes = computed(() =>
+  REASON_AXES.filter(a => !!(axisDrafts.value[a]?.draft_image_id))
+)
+/** Bio / timetable / concrete / draft thumbs — keep visible while creating. */
 const hasDraftMaterials = computed(() =>
   !!bioView.value || timetableView.value.length > 0
-  || REASON_AXES.some(a => !!activityFor(a)),
+  || REASON_AXES.some(a => !!activityFor(a))
+  || draftImageAxes.value.length > 0,
 )
 const hasShotReasoning = computed(() =>
   Object.keys(axisReasoning.value).length > 0
@@ -1659,6 +1663,35 @@ async function generateImages() {
               </div>
             </div>
 
+            <!-- Quality radar: surface near the story (not buried under reasoning) -->
+            <div v-if="qualityEval?.dimensions"
+              class="rounded-xl border border-teal-800/30 bg-black/30 p-3 flex flex-col gap-3">
+              <div class="flex items-center gap-2">
+                <SbIcon name="spark" class="w-3.5 h-3.5 text-teal-400/80" />
+                <h3 class="sb-label text-teal-300/90 mb-0">{{ t('storybook.quality.title') }}</h3>
+                <span class="ml-auto text-sm font-mono text-teal-300/90">
+                  {{ Math.round((qualityEval.overall || 0) * 100) }}
+                </span>
+              </div>
+              <StoryQualityRadar :eval="qualityEval" />
+              <div v-if="chronicleQualityActions().length" class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="act in chronicleQualityActions()"
+                  :key="act.id"
+                  type="button"
+                  class="sb-btn border-teal-700/40 text-teal-100"
+                  :disabled="running"
+                  @click="act.run()"
+                >{{ act.label }}</button>
+              </div>
+              <p v-if="qualityDraftNote" class="text-[10px] font-mono text-teal-300/70">
+                {{ qualityDraftNote }}
+              </p>
+              <p class="text-[10px] text-[var(--sb-muted)] leading-relaxed">
+                {{ t('storybook.quality.hint') }}
+              </p>
+            </div>
+
             <!-- Draft materials: always open while creating (not buried in <details>) -->
             <div v-if="hasDraftMaterials" class="flex flex-col gap-2">
               <h3 class="sb-label text-teal-300/90 flex items-center gap-1.5">
@@ -1704,6 +1737,29 @@ async function generateImages() {
                 class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px]">
                 <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
                 <p class="text-gray-300">{{ activityFor(axis) }}</p>
+              </div>
+
+              <!-- Phase-B draft images (live preview only; not kept on finished story) -->
+              <div v-if="draftImageAxes.length"
+                class="rounded-xl border border-teal-800/30 bg-black/30 p-3">
+                <div class="sb-label text-teal-300/80 mb-2 flex items-center gap-1">
+                  <SbIcon name="image" class="w-3 h-3" />{{ t('chronicle.draftImages') }}
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                  <div v-for="axis in draftImageAxes" :key="'draft-img-' + axis"
+                    class="flex flex-col gap-1 min-w-0">
+                    <span class="text-[9px] uppercase tracking-wider text-[var(--sb-amber)]">
+                      {{ t('chronicle.axis.' + axis) }}
+                    </span>
+                    <a :href="`/api/originals/${axisDrafts[axis].draft_image_id}`"
+                      target="_blank" rel="noopener"
+                      class="block aspect-square rounded-lg overflow-hidden border border-white/10 bg-black/40">
+                      <img :src="`/api/thumbnails/${axisDrafts[axis].draft_image_id}.webp`"
+                        :alt="t('chronicle.draftImageAlt', { axis: t('chronicle.axis.' + axis) })"
+                        class="w-full h-full object-cover" loading="lazy" />
+                    </a>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1753,6 +1809,13 @@ async function generateImages() {
                     </p>
                   </div>
                   <div v-if="axisDrafts[axis]" class="mt-2 text-[10px] text-[var(--sb-muted)]">
+                    <a v-if="axisDrafts[axis].draft_image_id"
+                      :href="`/api/originals/${axisDrafts[axis].draft_image_id}`"
+                      target="_blank" rel="noopener"
+                      class="block w-28 aspect-square mb-1.5 rounded-lg overflow-hidden border border-white/10 bg-black/40">
+                      <img :src="`/api/thumbnails/${axisDrafts[axis].draft_image_id}.webp`"
+                        class="w-full h-full object-cover" loading="lazy" />
+                    </a>
                     <p v-if="asStringList(axisDrafts[axis].draft_tags).length" class="break-words">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftTags') }}:</span>
                       {{ joinList(axisDrafts[axis].draft_tags) }}
@@ -1767,40 +1830,6 @@ async function generateImages() {
                     </p>
                   </div>
                 </div>
-              </div>
-            </details>
-
-            <!-- quality radar (from SSE quality_eval) -->
-            <details v-if="qualityEval?.dimensions"
-              class="rounded-xl border border-white/5 bg-black/25" open>
-              <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
-                <span class="flex items-center gap-1.5">
-                  <SbIcon name="spark" class="w-3.5 h-3.5 text-teal-400/80" />
-                  {{ t('storybook.quality.title') }}
-                </span>
-                <span class="text-[11px] font-mono text-teal-300/80">
-                  {{ Math.round((qualityEval.overall || 0) * 100) }}
-                </span>
-              </summary>
-              <div class="px-3 pb-3">
-                <StoryQualityRadar :eval="qualityEval" />
-                <div v-if="chronicleQualityActions().length" class="mt-3 flex flex-wrap gap-1.5">
-                  <button
-                    v-for="act in chronicleQualityActions()"
-                    :key="act.id"
-                    type="button"
-                    class="sb-btn border-teal-700/40 text-teal-100"
-                    :disabled="running"
-                    @click="act.run()"
-                  >{{ act.label }}</button>
-                </div>
-                <p v-if="qualityDraftNote"
-                  class="mt-2 text-[10px] font-mono text-teal-300/70">
-                  {{ qualityDraftNote }}
-                </p>
-                <p class="mt-2 text-[10px] text-[var(--sb-muted)] leading-relaxed">
-                  {{ t('storybook.quality.hint') }}
-                </p>
               </div>
             </details>
 

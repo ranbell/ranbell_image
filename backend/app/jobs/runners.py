@@ -2730,6 +2730,39 @@ async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: st
         return None
 
 
+async def _save_chronicle_draft_image(
+    img_bytes: bytes, original_name: str, db,
+) -> tuple[str | None, Path | None]:
+    """Save a Phase-B draft under Chronicles/drafts/ for live preview in Chronicle.
+
+    Marked ``chronicle_draft`` so it is not treated as a final axis image.
+    Not linked onto the finished story payload (preview-during-weave only).
+    """
+    import hashlib as _hl
+    from datetime import datetime as _dt
+
+    from ..config import settings as _settings
+    from ..scanner.scanner import register_image as _register_image
+
+    sha256 = _hl.sha256(img_bytes).hexdigest()
+    gen_dir = _settings.generated_images_dir / "Chronicles" / "drafts"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(original_name).suffix or ".png"
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    path = gen_dir / f"draft_{ts}_{sha256[:8]}{suffix}"
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, path.write_bytes, img_bytes)
+    try:
+        await _register_image(path, db)
+        await db.set_payload(sha256, {"chronicle_draft": True})
+        return sha256, path
+    except Exception as exc:
+        logger.error("[chronicle] draft register_image failed: %s", exc)
+        return None, path if path.exists() else None
+
+
 async def _comfy_generate_bytes(
     comfy,
     cancel: CancelToken,
@@ -4193,22 +4226,30 @@ async def run_chronicle_expand(
                     _put({"type": "warning",
                           "message": f"{axis}: draft refine skipped (no draft image)"})
                 else:
+                    draft_sha, draft_path = await _save_chronicle_draft_image(
+                        draft_bytes, f"{axis}_draft.png", db,
+                    )
                     draft_tags: list[str] = []
                     _phase("scanningDraft", 0.60 + 0.08 * i,
                            f"Scanning {axis} draft tags...")
                     try:
-                        draft_tags = await _wd14_tags_from_bytes(draft_bytes, db)
+                        if draft_path and draft_path.exists():
+                            draft_tags = await _wd14_tags_from_path(draft_path, db)
+                        else:
+                            draft_tags = await _wd14_tags_from_bytes(draft_bytes, db)
                         draft_tags = filter_tag_list(draft_tags, removal)
                     except Exception as exc:
                         logger.warning(
                             "[chronicle] %s draft WD14 failed: %s", axis, exc
                         )
-                    # Draft bytes are discarded after the scan — never registered.
+                    # Always surface the draft thumb in the live Chronicle pane
+                    # (not persisted on the finished story record).
                     if not draft_tags:
                         _put({
                             "type": "axis_draft",
                             "axis": axis,
                             "draft_tags": [],
+                            "draft_image_id": draft_sha or "",
                         })
                     if draft_tags:
                         _phase("refiningPromptProse", 0.62 + 0.08 * i,
@@ -4245,6 +4286,7 @@ async def run_chronicle_expand(
                             "type": "axis_draft",
                             "axis": axis,
                             "draft_tags": draft_tags[:24],
+                            "draft_image_id": draft_sha or "",
                         }
                         if richness_delta:
                             draft_evt["draft_richness_delta"] = richness_delta

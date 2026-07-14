@@ -122,7 +122,7 @@ const labels = computed(() => {
         :x="lab.x" :y="lab.y"
         text-anchor="middle"
         dominant-baseline="middle"
-        fill="rgba(139,146,158,0.95)"
+        fill="var(--sb-muted, #c4c9d2)"
         font-size="9"
       >{{ lab.label }}</text>
     </svg>

@@ -914,9 +914,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     <!-- Story detail: fixed above Storybook shell (z-65), below gallery detail (z-70) -->
     <Transition name="sb-overlay">
       <div v-if="show && detailStory"
-        class="fixed inset-0 z-[var(--z-panel-story-top)] sb-overlay-bg flex items-center justify-center p-3 sm:p-6"
+        class="sb-theme fixed inset-0 z-[var(--z-panel-story-top)] sb-overlay-bg flex items-center justify-center p-3 sm:p-6"
         @click.self="closeDetail">
-        <div class="sb-detail-panel w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+        <div class="sb-detail-panel w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden text-gray-200">
           <div class="flex items-start justify-between px-5 sm:px-6 py-4 sb-hairline gap-3">
             <div class="min-w-0 flex-1">
               <h2 class="sb-display text-xl text-[var(--sb-amber)] leading-snug">
@@ -1053,6 +1053,48 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </p>
             </div>
 
+            <!-- Quality radar: keep near the top so it isn't buried under bio/timetable -->
+            <div v-if="detailStory.quality_eval?.dimensions"
+              class="px-6 sm:px-8 py-5 sb-section">
+              <h4 class="sb-section-title flex items-center gap-2 mb-4">
+                <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
+                {{ t('storybook.quality.title') }}
+                <span class="ml-auto font-mono text-sm text-[var(--sb-amber)] normal-case tracking-normal">
+                  {{ Math.round((detailStory.quality_eval.overall || 0) * 100) }}
+                </span>
+              </h4>
+              <StoryQualityRadar :eval="detailStory.quality_eval" />
+              <div v-if="qualityActions(detailStory).length" class="mt-3 flex flex-wrap gap-1.5">
+                <button
+                  v-for="act in qualityActions(detailStory)"
+                  :key="act.id"
+                  type="button"
+                  class="sb-btn-accent"
+                  :title="act.tip"
+                  @click="act.run()"
+                >
+                  <SbIcon name="spark" class="w-3 h-3" />
+                  {{ act.label }}
+                </button>
+              </div>
+              <div v-if="AXES.some(a => draftRichnessFor(detailStory, a))"
+                class="mt-2 space-y-0.5">
+                <p v-for="ax in AXES" :key="'dr-' + ax"
+                  v-show="draftRichnessFor(detailStory, ax)"
+                  class="text-[10px] font-mono text-[var(--sb-faint)]">
+                  <span>{{ t('chronicle.axis.' + ax) }}:</span>
+                  {{ formatDraftDelta(draftRichnessFor(detailStory, ax)) }}
+                </p>
+              </div>
+              <p v-if="qualityDraftNote(detailStory)"
+                class="mt-2 text-[10px] font-mono text-[var(--sb-faint)]">
+                {{ qualityDraftNote(detailStory) }}
+              </p>
+              <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
+                {{ t('storybook.quality.hint') }}
+              </p>
+            </div>
+
             <div v-if="storyBio(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
               <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
                 <h4 class="sb-section-title">{{ t('storybook.biography') }}</h4>
@@ -1151,46 +1193,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   </span>
                 </li>
               </ul>
-            </details>
-
-            <details v-if="detailStory.quality_eval?.dimensions"
-              class="px-6 sm:px-8 py-5 sb-section" open>
-              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-0">
-                <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
-                {{ t('storybook.quality.title') }}
-              </summary>
-              <div class="mt-4">
-                <StoryQualityRadar :eval="detailStory.quality_eval" />
-                <div v-if="qualityActions(detailStory).length" class="mt-3 flex flex-wrap gap-1.5">
-                  <button
-                    v-for="act in qualityActions(detailStory)"
-                    :key="act.id"
-                    type="button"
-                    class="sb-btn-accent"
-                    :title="act.tip"
-                    @click="act.run()"
-                  >
-                    <SbIcon name="spark" class="w-3 h-3" />
-                    {{ act.label }}
-                  </button>
-                </div>
-                <div v-if="AXES.some(a => draftRichnessFor(detailStory, a))"
-                  class="mt-2 space-y-0.5">
-                  <p v-for="ax in AXES" :key="'dr-' + ax"
-                    v-show="draftRichnessFor(detailStory, ax)"
-                    class="text-[10px] font-mono text-[var(--sb-faint)]">
-                    <span class="text-[var(--sb-faint)]">{{ t('chronicle.axis.' + ax) }}:</span>
-                    {{ formatDraftDelta(draftRichnessFor(detailStory, ax)) }}
-                  </p>
-                </div>
-                <p v-if="qualityDraftNote(detailStory)"
-                  class="mt-2 text-[10px] font-mono text-[var(--sb-faint)]">
-                  {{ qualityDraftNote(detailStory) }}
-                </p>
-                <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
-                  {{ t('storybook.quality.hint') }}
-                </p>
-              </div>
             </details>
 
             <div v-for="(axis, ai) in AXES" :key="axis"
@@ -1318,6 +1320,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   --sb-muted: #8b929e;
   --sb-faint: #5c6470;
   font-family: var(--sb-font-ui);
+  color: #e5e7eb;
+  color-scheme: dark;
   background: radial-gradient(ellipse at 30% 20%, rgba(232, 196, 122, 0.07), transparent 50%),
               rgba(0, 0, 0, 0.82);
 }
@@ -1503,6 +1507,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   backdrop-filter: blur(2px);
 }
 .sb-detail-panel {
+  /* Local tokens too — detail is outside .storybook-root in the Teleport tree. */
+  --sb-amber: #e8c47a;
+  --sb-muted: #8b929e;
+  --sb-faint: #5c6470;
+  --sb-rule: rgba(232, 196, 122, 0.22);
+  color: #e5e7eb;
   background:
     linear-gradient(180deg, rgba(232, 196, 122, 0.07) 0%, transparent 28%),
     #0f1218;
