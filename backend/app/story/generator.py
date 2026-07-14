@@ -81,20 +81,33 @@ _CHRONICLE_FEWSHOT_CANDIDATES = (
 )
 
 
-def chronicle_hard_rules_preamble(*, locale: str = "en") -> str:
+def chronicle_hard_rules_preamble(*, locale: str = "en", has_user_topic: bool = False) -> str:
     """Short HARD RULES block — must be the first lines of story prompts."""
     if locale == "ja":
+        topic_rule = (
+            "2. お題がある場合: 抽象テーマでもよいが、各幕はそれを具体的な動作に翻訳すること。"
+            "お題を捨てて画像の見たまま再描写するな。\n"
+            if has_user_topic else
+            "2. 禁止: 運命、想いだけ、抽象テーマのみ、視線を遠くにやるだけ、気分だけの幕、比喩だけの転換。\n"
+        )
         return (
             "【最優先ルール — 必ず守ること】\n"
             "1. 書くのは写真に撮れる具体的な出来事だけ（誰が・何を持って／何をして・どこで）。\n"
-            "2. 禁止: 運命、想いだけ、抽象テーマのみ、視線を遠くにやるだけ、気分だけの幕、比喩だけの転換。\n"
+            f"{topic_rule}"
             "3. 撮れないなら書き直せ。emotion/tone は動作の色付けのみ。気分で動作を置き換えるな。\n"
         )
+    topic_rule = (
+        "2. When a USER TOPIC is given: abstract themes are allowed ONLY as that topic — "
+        "translate it into concrete drawable actions in every act. NEVER abandon the "
+        "topic to re-describe the base image at face value.\n"
+        if has_user_topic else
+        "2. FORBIDDEN: fate, destiny, vague longing, abstract themes without action, "
+        "mood-only beats, metaphorical-only turns, \"gazed into the distance\".\n"
+    )
     return (
         "HARD RULES (read first — violate none):\n"
         "1. Write ONLY concrete, drawable events: who does what with which object, where.\n"
-        "2. FORBIDDEN: fate, destiny, vague longing, abstract themes without action, "
-        "mood-only beats, metaphorical-only turns, \"gazed into the distance\".\n"
+        f"{topic_rule}"
         "3. Every act must be a scene you could photograph. If it cannot be drawn, rewrite it.\n"
         "4. emotion/tone only COLOR the action — never replace the action with mood alone.\n"
     )
@@ -227,6 +240,66 @@ def candidates_ungrounded(
             if t
         }
         if len(used & seed) < min_hits:
+            bad += 1
+    return bad >= max(2, (len(candidates) + 1) // 2)
+
+
+_TOPIC_EN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
+_TOPIC_KANJI_RE = re.compile(r"[\u3400-\u9fff]{2,}")
+_TOPIC_KATA_RE = re.compile(r"[\u30a0-\u30ff]{2,}")
+
+
+def topic_anchor_tokens(user_topic: str, topic_directive: str = "") -> list[str]:
+    """Salient tokens from お題 (+ directive) for off-topic detection.
+
+    Japanese uses kanji/katakana chunks (not whole phrases glued by hiragana)
+    so a topic like 「廃墟を探索する冒険」 yields 「廃墟」「探索」「冒険」.
+    """
+    text = f"{user_topic or ''} {topic_directive or ''}".strip()
+    if not text:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def _add(tok: str) -> None:
+        t = tok.lower().replace("_", " ").strip()
+        if not t or len(t) < 2 or t in seen:
+            return
+        if t in {
+            "the", "and", "for", "with", "from", "that", "this", "her", "his",
+            "she", "girl", "story", "about", "into", "over", "under",
+        }:
+            return
+        seen.add(t)
+        out.append(t)
+
+    for m in _TOPIC_EN_RE.finditer(text):
+        _add(m.group(0))
+    for m in _TOPIC_KANJI_RE.finditer(text):
+        _add(m.group(0))
+    for m in _TOPIC_KATA_RE.finditer(text):
+        _add(m.group(0))
+    return out[:12]
+
+
+def candidates_off_topic(
+    candidates: list[dict],
+    user_topic: str,
+    topic_directive: str = "",
+) -> bool:
+    """True when most candidates' beats ignore the user topic tokens.
+
+    Cheap substring check (works for JA and EN). Empty topic → False (no gate).
+    """
+    tokens = topic_anchor_tokens(user_topic, topic_directive)
+    if len(tokens) < 1 or not candidates:
+        return False
+    bad = 0
+    for c in candidates:
+        blob = " ".join(
+            str(c.get(a) or "") for a in (*AXES, "title", "turn", "motif")
+        ).lower()
+        if not any(tok in blob for tok in tokens):
             bad += 1
     return bad >= max(2, (len(candidates) + 1) // 2)
 
@@ -946,15 +1019,18 @@ def build_overall_prompt(title: str, stories: dict[str, str]) -> str:
 # reinvented so the three candidates diverge along proven axes.
 _CANDIDATE_SPIRITS = (
     ("A", "faithful", (
-        "Stay faithful to the image. Read the scene at face value and tell the "
-        "most honest, grounded story its details plainly imply. No twist for its "
-        "own sake — aim for clarity, intimacy and emotional truth."
+        "Stay faithful to the image's LOOK. Read the visual details honestly, but "
+        "if a USER TOPIC is given the story SUBJECT must still be that topic — "
+        "grounded in the image's appearance, never abandoning the topic for a plain "
+        "re-description of the picture. No twist for its own sake — aim for clarity, "
+        "intimacy and emotional truth."
     )),
     ("B", "rebel", (
         "Find the shadow of the obvious reading. Invert ONE core assumption — the "
         "mood, the relationship, who holds power, or what is really happening — so "
         "the story becomes a natural counterpart to the first impression: "
-        "surprising yet coherent, never random."
+        "surprising yet coherent, never random. If a USER TOPIC is given, invert "
+        "AROUND the topic — never invert or abandon the topic itself."
     )),
     ("C", "stranger", (
         "Recontextualize the scene with ONE unexpected but grounded element — a "
@@ -1184,17 +1260,16 @@ def build_candidates_prompt(
     concrete beat per act, where the other two acts are separate moments the
     chosen span before / after the image (not a re-description of it).
 
-    The user topic (お題) is hoisted into a prominent block ABOVE the base-image
-    description and expanded with `topic_directive` (a narrative directive from
-    build_topic_directive_prompt), because a small local model otherwise drowns
-    an abstract topic under the vivid literal image and re-tells the picture.
-
-    HARD RULES + WD14 seed tags lead the prompt so small models stay concrete.
+    The user topic (お題) is hoisted to the VERY TOP of the prompt (above HARD
+    RULES and seed tags) and expanded with `topic_directive`, because a small
+    local model otherwise drowns an abstract topic under competing constraints
+    and re-tells the picture.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
-    # Hoisted, high-salience topic block (rendered before the base image below).
-    if user_topic.strip():
+    has_topic = bool(user_topic.strip())
+    # Hoisted, high-salience topic block (rendered FIRST when present).
+    if has_topic:
         directive_part = (
             "Story direction (the SUBJECT the three acts explore — a theme, not a "
             f"fixed scene):\n{topic_directive.strip()}\n"
@@ -1205,10 +1280,11 @@ def build_candidates_prompt(
             "★ USER TOPIC (お題) — THIS is what the story must be ABOUT ★\n"
             f'Topic: "{user_topic.strip()}"\n'
             f"{directive_part}"
-            "Every one of the three acts must embody this topic. The base image "
-            "below only fixes how the base act LOOKS; it does NOT decide the "
-            "subject — the topic does. Do not let the picture pull the story back "
-            "into a plain depiction of itself.\n"
+            "PRIORITY: the topic decides the SUBJECT of all three candidates. "
+            "Every act of A, B and C must embody this topic as a concrete drawable "
+            "event. The base image below only fixes how the base act LOOKS; it does "
+            "NOT decide the subject — the topic does. Do not let the picture pull "
+            "the story back into a plain depiction of itself.\n"
             "Honour the topic's tense and aspect literally: if it describes an "
             "action IN PROGRESS (e.g. \"…している最中\", \"in the middle of doing X\"), "
             "ALL three acts stay INSIDE that ongoing action — do NOT resolve, "
@@ -1250,26 +1326,30 @@ def build_candidates_prompt(
     hierarchy_block = _coherence_hierarchy_block(
         base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
     )
-    head = chronicle_hard_rules_preamble(locale=locale)
+    head = chronicle_hard_rules_preamble(locale=locale, has_user_topic=has_topic)
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif, locale=locale
     )
     bio_block = ""
     if biography:
         bio_block = (
-            "CHARACTER BIOGRAPHY (hobbies/items as physical actions only):\n"
+            "CHARACTER BIOGRAPHY (hobbies/items as physical actions only — never "
+            "override the USER TOPIC subject):\n"
             f"  {_biography_brief(biography)}\n\n"
         )
     motif_json_hint = forced_motif or "one concrete recurring object"
+    # Topic-first when present: small models overweight the opening tokens.
+    lead = (
+        f"{topic_block}\n{hierarchy_block}\n{head}\n{seed_block}\n"
+        if has_topic else
+        f"{head}\n{seed_block}\n{topic_block}\n{hierarchy_block}\n"
+    )
     return (
-        f"{head}\n"
-        f"{seed_block}\n"
+        f"{lead}"
         "You are a storyteller pitching THREE different chronicles for the same "
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
         f"separated by {span} of elapsed time.\n\n"
         f"{elapsed_header}\n"
-        f"{topic_block}\n"
-        f"{hierarchy_block}\n"
         f"{bio_block}"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
@@ -1611,7 +1691,13 @@ def build_timetable_prompt(
 def parse_timetable_json(raw: str) -> list[dict]:
     """Parse a timetable payload into a list of slot dicts. Broken → []."""
     data = _loads_lenient(raw)
-    slots = data.get("slots") if isinstance(data, dict) else data
+    slots = None
+    if isinstance(data, dict):
+        slots = data.get("slots")
+        if slots is None:
+            slots = data.get("timetable") or data.get("schedule")
+    elif isinstance(data, list):
+        slots = data
     if not isinstance(slots, list):
         return []
     out: list[dict] = []
@@ -1656,7 +1742,9 @@ def build_concrete_activities_prompt(
         f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
     ) or "  (no draft)\n"
     topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
-    head = chronicle_hard_rules_preamble(locale="en")
+    head = chronicle_hard_rules_preamble(
+        locale="en", has_user_topic=bool(user_topic.strip())
+    )
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif, locale="en"
     )
@@ -1836,7 +1924,7 @@ def build_differentiate_activities_prompt(
         f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
     )
     return (
-        f"{chronicle_hard_rules_preamble(locale='en')}\n"
+        f"{chronicle_hard_rules_preamble(locale='en', has_user_topic=bool(user_topic.strip()))}\n"
         "These three concrete actions read as the SAME physical moment restated "
         "three times. Rewrite them so each axis is a CLEARLY DIFFERENT drawable "
         "action at its marked elapsed distance — different verb, prop, and "
@@ -1972,7 +2060,9 @@ def build_expand_prompt(
         if turn
         else ""
     )
-    head = chronicle_hard_rules_preamble(locale=locale)
+    head = chronicle_hard_rules_preamble(
+        locale=locale, has_user_topic=bool(user_topic.strip())
+    )
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif or motif, locale=locale
     )

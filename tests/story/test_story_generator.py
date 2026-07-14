@@ -30,6 +30,8 @@ from app.story.generator import (
     assign_dramatic_modes,
     bind_timetable_axis_slots,
     candidates_ungrounded,
+    candidates_off_topic,
+    topic_anchor_tokens,
     chunk_list,
     filter_story_seed_pool,
     find_identity_mutex_conflicts,
@@ -1788,8 +1790,11 @@ def test_candidates_prompt_topic_hoisted_above_base_image():
         locale="ja",
         time_scale="years",
     )
-    # the topic block appears BEFORE the base-image description
-    assert prompt.index("★ USER TOPIC") < prompt.index("UNIQUE_SCENE_MARKER")
+    # Topic leads the prompt (above HARD RULES / seeds / base image).
+    topic_at = prompt.index("★ USER TOPIC")
+    rules_marker = "【最優先ルール" if "【最優先ルール" in prompt else "HARD RULES"
+    assert topic_at < prompt.index(rules_marker)
+    assert topic_at < prompt.index("UNIQUE_SCENE_MARKER")
     # raw topic + narrative directive both present
     assert "廃墟を探索する冒険" in prompt
     assert "隠された過去に触れていく" in prompt
@@ -1797,6 +1802,10 @@ def test_candidates_prompt_topic_hoisted_above_base_image():
     assert "fixes the base act's LOOK only" in prompt
     # ongoing-action tense guidance preserved from the old topic_line
     assert "tense and aspect" in prompt
+    # HARD RULES carve-out for topics
+    assert "お題がある場合" in prompt or "USER TOPIC is given" in prompt
+    # All three spirits mention topic compatibility
+    assert prompt.count("USER TOPIC") >= 3
 
 
 def test_candidates_prompt_topic_without_directive():
@@ -1810,6 +1819,26 @@ def test_candidates_prompt_topic_without_directive():
     empty = build_candidates_prompt(character_desc="1girl", scene_desc="a room")
     assert "★ USER TOPIC" not in empty
     assert "No topic was given" in empty
+
+
+def test_candidates_off_topic_gate():
+    tokens = topic_anchor_tokens("廃墟を探索する冒険", "少女は廃墟を歩く")
+    assert any("廃墟" in t for t in tokens)
+    on_topic = [{
+        "id": "A",
+        "past": "廃墟の入口で懐中電灯を確かめる",
+        "present": "崩れた廊下を探索する",
+        "future": "地下で古い地図を見つける",
+    }] * 3
+    assert not candidates_off_topic(on_topic, "廃墟を探索する冒険")
+    off = [{
+        "id": "A",
+        "past": "教室でノートを開く",
+        "present": "窓辺で空を眺める",
+        "future": "放課後に友人と帰る",
+    }] * 3
+    assert candidates_off_topic(off, "廃墟を探索する冒険")
+    assert not candidates_off_topic(off, "")
 
 
 def test_coherence_hierarchy_scopes_image_vs_topic():

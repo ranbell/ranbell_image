@@ -2864,6 +2864,7 @@ async def run_chronicle_candidates(
         build_topic_directive_prompt,
         build_vision_prompt,
         candidates_degenerate,
+        candidates_off_topic,
         candidates_ungrounded,
         character_tags_from_wd14,
         filter_story_seed_pool,
@@ -3138,14 +3139,23 @@ async def run_chronicle_candidates(
                 parsed
                 and not candidates_degenerate(parsed)
                 and not candidates_ungrounded(parsed, story_seed_tags)
+                and not candidates_off_topic(
+                    parsed,
+                    body.user_topic,
+                    ctx.get("topic_directive", ""),
+                )
             ):
                 break
             if cand_attempt == 0:
-                logger.info("[chronicle] candidates thin/ungrounded; retrying with +temp")
+                logger.info(
+                    "[chronicle] candidates thin/ungrounded/off-topic; retrying with +temp"
+                )
                 _put({"type": "warning",
-                      "message": "candidates thin or ungrounded — regenerating"})
+                      "message": "candidates thin, ungrounded, or off-topic — regenerating"})
             else:
-                logger.warning("[chronicle] candidates still thin/ungrounded after retry")
+                logger.warning(
+                    "[chronicle] candidates still thin/ungrounded/off-topic after retry"
+                )
         if not candidates:
             _put({"type": "error", "message": "Failed to generate story candidates"})
             return
@@ -3370,55 +3380,72 @@ async def run_chronicle_expand(
 
         # ── Timetable: map her life onto concrete moments (scale-adaptive) so the
         # acts depict specific daily activities from her life, not idle poses.
-        # Short scales skip the full-day table — the span is too brief to chart.
+        # Prompt builder is scale-adaptive (including minutes); always attempt it.
         timetable: list[dict] = []
         timetable_ja: list[dict] = []
         axis_slots: dict[str, dict] = {}
-        if body.time_scale in ("minutes", "tens_of_minutes"):
-            axis_slots = {}
-        else:
-            _phase("buildingTimetable", 0.10, "Charting her day...")
+        _phase("buildingTimetable", 0.10, "Charting her day...")
+        # Re-surface biography so the Reasoning panel is not empty after resetStory().
+        if biography:
+            _put({
+                "type": "biography",
+                "biography": biography,
+                "biography_ja": biography_ja,
+            })
+        for tt_attempt in range(2):
             try:
+                tt_options = dict(options)
+                if tt_attempt == 1:
+                    tt_options["temperature"] = min(
+                        1.3, float(options.get("temperature", 0.8)) + 0.2
+                    )
                 timetable = parse_timetable_json(await ollama.generate_text(
                     build_timetable_prompt(
                         biography=biography, scene_desc=scene_desc,
                         time_scale=body.time_scale, base_axis=body.base_time_axis,
                         locale=locale, selected=selected, user_topic=body.user_topic,
                     ),
-                    model=vlm_model, options=options, fmt="json", think=True,
+                    model=vlm_model, options=tt_options, fmt="json", think=True,
                 ))
             except Exception as exc:
                 logger.warning("[chronicle] timetable build failed: %s", exc)
+                timetable = []
             if timetable:
-                axis_slots = bind_timetable_axis_slots(
-                    timetable, base_axis=body.base_time_axis,
-                )
-            # Timetable is authored in English; always keep a Japanese copy so the
-            # Storybook JA/EN toggle works regardless of content locale.
-            if timetable:
-                try:
-                    merged_ja: list = []
-                    for chunk in chunk_list(timetable, 4):
-                        part = parse_timetable_json(await ollama.generate_text(
-                            build_json_translation_prompt(chunk, target="Japanese"),
-                            model=vlm_model, options=options, fmt="json",
-                        ))
-                        if isinstance(part, list):
-                            merged_ja.extend(part)
-                    timetable_ja = merged_ja
+                break
+            if tt_attempt == 0:
+                logger.info("[chronicle] timetable empty; retrying once")
+        if timetable:
+            axis_slots = bind_timetable_axis_slots(
+                timetable, base_axis=body.base_time_axis,
+            )
+        else:
+            _put({"type": "warning",
+                  "message": "Timetable could not be built — continuing without it."})
+        # Always emit so the UI can show or clear the section (never silent).
+        if timetable:
+            try:
+                merged_ja: list = []
+                for chunk in chunk_list(timetable, 4):
+                    part = parse_timetable_json(await ollama.generate_text(
+                        build_json_translation_prompt(chunk, target="Japanese"),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                    if isinstance(part, list):
+                        merged_ja.extend(part)
+                timetable_ja = merged_ja
+                if not translation_values_complete(timetable, timetable_ja):
+                    timetable_ja = parse_timetable_json(await ollama.generate_text(
+                        build_json_translation_prompt(timetable, target="Japanese"),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
                     if not translation_values_complete(timetable, timetable_ja):
-                        timetable_ja = parse_timetable_json(await ollama.generate_text(
-                            build_json_translation_prompt(timetable, target="Japanese"),
-                            model=vlm_model, options=options, fmt="json",
-                        ))
-                        if not translation_values_complete(timetable, timetable_ja):
-                            logger.warning(
-                                "[chronicle] timetable JA translation still incomplete"
-                            )
-                except Exception as exc:
-                    logger.warning("[chronicle] timetable translation failed: %s", exc)
-                _put({"type": "timetable",
-                      "timetable": timetable, "timetable_ja": timetable_ja})
+                        logger.warning(
+                            "[chronicle] timetable JA translation still incomplete"
+                        )
+            except Exception as exc:
+                logger.warning("[chronicle] timetable translation failed: %s", exc)
+        _put({"type": "timetable",
+              "timetable": timetable, "timetable_ja": timetable_ja})
 
         # English candidate beats (fallback + WD14 query base).
         beats = {a: str(selected.get(a) or "").strip() for a in AXES}

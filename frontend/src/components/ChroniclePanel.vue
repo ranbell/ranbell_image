@@ -1138,6 +1138,28 @@ async function generateImages() {
               <pre class="px-3 pb-3 text-xs text-gray-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></pre>
             </details>
 
+            <!-- timetable: always open when present (was hidden inside collapsed Reasoning) -->
+            <details v-if="timetableView.length" class="rounded-xl border border-white/5 bg-black/25" open>
+              <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
+                <span class="flex items-center gap-1.5">
+                  <SbIcon name="clock" class="w-3.5 h-3.5 text-teal-400/80" />
+                  {{ t('storybook.timetable') }}
+                </span>
+              </summary>
+              <div class="px-3 pb-3">
+                <ul class="space-y-0.5 text-[11px]">
+                  <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
+                    <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
+                    <span class="min-w-0">
+                      {{ s.activity }}
+                      <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
+                      <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </details>
+
             <!-- reasoning (closed) -->
             <details v-if="hasReasoning" class="rounded-xl border border-white/5 bg-black/25">
               <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
@@ -1155,22 +1177,6 @@ async function generateImages() {
                   <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
                     <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
                   </p>
-                </div>
-
-                <div v-if="timetableView.length" class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px]">
-                  <div class="sb-label text-teal-300/80 mb-1 flex items-center gap-1">
-                    <SbIcon name="clock" class="w-3 h-3" />{{ t('storybook.timetable') }}
-                  </div>
-                  <ul class="space-y-0.5">
-                    <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
-                      <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
-                      <span class="min-w-0">
-                        {{ s.activity }}
-                        <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
-                        <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
-                      </span>
-                    </li>
-                  </ul>
                 </div>
 
                 <div v-for="axis in REASON_AXES" :key="axis"
