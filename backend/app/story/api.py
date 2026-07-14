@@ -30,7 +30,8 @@ router = APIRouter(prefix="/api/story")
 
 
 class ChronicleRequest(BaseModel):
-    base_sha256: str
+    # Empty → topic-only mode (no source image); then user_topic is required.
+    base_sha256: str = ""
     base_time_axis: Literal["past", "present", "future"] = "present"
     worldview: str = ""
     user_topic: str = ""  # お題 — what the story is about (separate from worldview)
@@ -111,12 +112,21 @@ async def start_chronicle(body: ChronicleRequest, request: Request):
     """
     from ..jobs.runners import run_chronicle_candidates
 
+    if not (body.base_sha256 or "").strip() and not (body.user_topic or "").strip():
+        raise HTTPException(
+            400,
+            "user_topic is required when no base image is provided",
+        )
+
     app = request.app
     body.group_id = f"chr-{uuid.uuid4().hex[:12]}"
 
     job_id = _submit_prompt_job(
         app, "chronicle_candidates", run_chronicle_candidates,
-        meta={"group_id": body.group_id, "base_sha256": body.base_sha256},
+        meta={
+            "group_id": body.group_id,
+            "base_sha256": body.base_sha256 or "topic-only",
+        },
         body_dict=body.model_dump(),
     )
     return {"job_id": job_id, "group_id": body.group_id, "status": "queued"}
@@ -293,8 +303,11 @@ async def generate_images(story_id: str, body: GenerateImagesRequest, request: R
         raise HTTPException(404, f"Story {story_id!r} not found")
 
     base_axis = story.get("base_time_axis")
+    has_base_image = bool(story.get("base_image_id"))
     for axis, updates in body.axes.items():
-        if axis == base_axis or axis not in story_db.AXES:
+        # With a source image, the base axis is the 元絵 — don't overwrite its prompts.
+        # Topic-only stories generate all three axes, so edits are allowed.
+        if (has_base_image and axis == base_axis) or axis not in story_db.AXES:
             continue
         allowed = {
             k: updates[k]
@@ -315,7 +328,7 @@ async def generate_images(story_id: str, body: GenerateImagesRequest, request: R
     seed = body.seed if body.seed is not None else random.randint(0, (1 << 64) - 1)
     jobs = []
     for axis in story_db.AXES:
-        if axis == base_axis:
+        if has_base_image and axis == base_axis:
             continue
         if not ((story.get("axes") or {}).get(axis) or {}).get("prompt_positive"):
             continue
@@ -335,7 +348,7 @@ async def regenerate_axis(story_id: str, axis: str, request: Request):
     story = await story_db.get_story(request.app.state.db, story_id)
     if story is None:
         raise HTTPException(404, f"Story {story_id!r} not found")
-    if axis == story.get("base_time_axis"):
+    if axis == story.get("base_time_axis") and story.get("base_image_id"):
         raise HTTPException(409, "The base axis image cannot be regenerated")
 
     seed = random.randint(0, (1 << 64) - 1)

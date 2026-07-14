@@ -2862,6 +2862,7 @@ async def run_chronicle_candidates(
         build_candidates_prompt,
         build_json_translation_prompt,
         build_topic_directive_prompt,
+        build_topic_only_grounding_prompt,
         build_vision_prompt,
         candidates_degenerate,
         candidates_off_topic,
@@ -2870,6 +2871,7 @@ async def run_chronicle_candidates(
         filter_story_seed_pool,
         parse_biography_json,
         parse_candidates_json,
+        parse_topic_only_grounding_json,
         pick_forced_motif,
         sample_bio_domains,
         sample_story_seed_tags,
@@ -2903,69 +2905,121 @@ async def run_chronicle_candidates(
         ctx: dict = (draft or {}).get("context") or {}
 
         if not ctx:
-            # ── Stage 1: visual vocabulary ────────────────────────────────────
-            _phase("loadingImage", 0.03, "Loading base image...")
-            doc = await db.get(body.base_sha256)
-            if not doc:
-                _put({"type": "error", "message": "Base image not found"})
-                return
-            fp = Path(doc.get("path", ""))
-            if not fp.exists():
-                _put({"type": "error", "message": f"Base image file missing: {fp.name}"})
-                return
-            image_bytes = fp.read_bytes()
-
-            # Ollama VLMs may reject WebP — convert to JPEG for compatibility
-            if fp.suffix.lower() == ".webp":
-                import io
-                from PIL import Image as _PILImage
-                _buf = io.BytesIO()
-                _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(_buf, format="JPEG", quality=95)
-                image_bytes = _buf.getvalue()
-
-            wd14_tags = doc.get("wd14_tags") or []
-            character_tags = character_tags_from_wd14(wd14_tags)
-
-            _phase("extractingVision", 0.08, "Reading the image...")
-            vision_prompt = build_vision_prompt(full_extraction=not character_tags)
-            vis_tokens: list[str] = []
-            async for event in ollama.generate_vlm_stream(
-                vision_prompt, [image_bytes], model=vlm_model, options=options
-            ):
-                if _abort.is_set():
-                    raise JobCancelled()
-                _put(event)
-                if event["type"] == "token":
-                    vis_tokens.append(event["text"])
-                    if len(vis_tokens) % 8 == 0:
-                        reporter.update(
-                            0.08 + 0.35 * min(len(vis_tokens) / 250, 0.97),
-                            "Reading the image...",
-                        )
-            visual_text = "".join(vis_tokens).strip()
-            cancel.raise_if_set()
-
-            literal_text, story_hooks = split_vision_sections(visual_text)
-            if character_tags:
-                character_desc = "[visual tags] " + ", ".join(character_tags)
-                scene_desc = literal_text
-            else:
-                character_desc = literal_text
-                scene_desc = literal_text
-
+            # ── Stage 1: visual vocabulary (image) or topic-only invent ───────
+            has_base = bool((body.base_sha256 or "").strip())
+            doc: dict = {}
+            wd14_tags: list[str] = []
+            character_tags: list[str] = []
+            character_desc = ""
+            scene_desc = ""
             wd14_context = ""
-            if wd14_tags:
-                try:
-                    wd14_context, _ = _build_weighted_wd14_context([(doc, 0)], [1.0], set())
-                except Exception as exc:
-                    logger.warning("[chronicle] wd14 context build failed: %s", exc)
+            story_hooks = ""
+            biography: dict = {}
+            biography_ja: dict = {}
 
-            # ── Biography: who she is as a person (hobbies, favourite items,
-            # personality) — the persistent grounding that lets later stages
-            # depict concrete daily actions instead of a stiff idle pose. Built
-            # once per base image and cached on the image doc for reuse.
-            biography: dict = doc.get("biography") or {}
-            biography_ja: dict = doc.get("biography_ja") or {}
+            if has_base:
+                _phase("loadingImage", 0.03, "Loading base image...")
+                doc = await db.get(body.base_sha256) or {}
+                if not doc:
+                    _put({"type": "error", "message": "Base image not found"})
+                    return
+                fp = Path(doc.get("path", ""))
+                if not fp.exists():
+                    _put({"type": "error", "message": f"Base image file missing: {fp.name}"})
+                    return
+                image_bytes = fp.read_bytes()
+
+                # Ollama VLMs may reject WebP — convert to JPEG for compatibility
+                if fp.suffix.lower() == ".webp":
+                    import io
+                    from PIL import Image as _PILImage
+                    _buf = io.BytesIO()
+                    _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(
+                        _buf, format="JPEG", quality=95,
+                    )
+                    image_bytes = _buf.getvalue()
+
+                wd14_tags = doc.get("wd14_tags") or []
+                character_tags = character_tags_from_wd14(wd14_tags)
+
+                _phase("extractingVision", 0.08, "Reading the image...")
+                vision_prompt = build_vision_prompt(full_extraction=not character_tags)
+                vis_tokens: list[str] = []
+                async for event in ollama.generate_vlm_stream(
+                    vision_prompt, [image_bytes], model=vlm_model, options=options
+                ):
+                    if _abort.is_set():
+                        raise JobCancelled()
+                    _put(event)
+                    if event["type"] == "token":
+                        vis_tokens.append(event["text"])
+                        if len(vis_tokens) % 8 == 0:
+                            reporter.update(
+                                0.08 + 0.35 * min(len(vis_tokens) / 250, 0.97),
+                                "Reading the image...",
+                            )
+                visual_text = "".join(vis_tokens).strip()
+                cancel.raise_if_set()
+
+                literal_text, story_hooks = split_vision_sections(visual_text)
+                if character_tags:
+                    character_desc = "[visual tags] " + ", ".join(character_tags)
+                    scene_desc = literal_text
+                else:
+                    character_desc = literal_text
+                    scene_desc = literal_text
+
+                if wd14_tags:
+                    try:
+                        wd14_context, _ = _build_weighted_wd14_context(
+                            [(doc, 0)], [1.0], set(),
+                        )
+                    except Exception as exc:
+                        logger.warning("[chronicle] wd14 context build failed: %s", exc)
+
+                biography = doc.get("biography") or {}
+                biography_ja = doc.get("biography_ja") or {}
+            else:
+                # Topic-only: invent character + scene from お題 (no 元絵).
+                if not body.user_topic.strip():
+                    _put({
+                        "type": "error",
+                        "message": "user_topic is required when no base image is provided",
+                    })
+                    return
+                _phase("extractingVision", 0.08, "Inventing character from topic...")
+                try:
+                    grounding = parse_topic_only_grounding_json(
+                        await ollama.generate_text(
+                            build_topic_only_grounding_prompt(
+                                user_topic=body.user_topic,
+                                worldview=body.worldview,
+                                locale=body.locale,
+                            ),
+                            model=vlm_model, options=options, fmt="json",
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning("[chronicle] topic-only grounding failed: %s", exc)
+                    grounding = {}
+                if not grounding:
+                    _put({
+                        "type": "error",
+                        "message": "Failed to invent character from topic",
+                    })
+                    return
+                character_desc = grounding.get("character_desc") or body.user_topic
+                scene_desc = grounding.get("scene_desc") or body.user_topic
+                wd14_tags = list(grounding.get("wd14_tags") or [])
+                character_tags = character_tags_from_wd14(wd14_tags)
+                story_hooks = ""
+                _put({
+                    "type": "warning",
+                    "message": (
+                        "Topic-only mode — no source image; inventing character "
+                        "and generating all three axis images."
+                    ),
+                })
 
             async def _translate_bio(bio: dict) -> dict:
                 try:
@@ -3002,16 +3056,17 @@ async def run_chronicle_candidates(
                 # so the Storybook JA/EN toggle works regardless of content locale.
                 if biography:
                     biography_ja = await _translate_bio(biography)
-                    try:
-                        await db.set_payload(body.base_sha256, {
-                            "biography": biography, "biography_ja": biography_ja,
-                        })
-                    except Exception as exc:
-                        logger.warning("[chronicle] biography persist failed: %s", exc)
+                    if has_base:
+                        try:
+                            await db.set_payload(body.base_sha256, {
+                                "biography": biography, "biography_ja": biography_ja,
+                            })
+                        except Exception as exc:
+                            logger.warning("[chronicle] biography persist failed: %s", exc)
             elif not biography_ja:
                 # Cached bio from before bilingual support — backfill the JA copy.
                 biography_ja = await _translate_bio(biography)
-                if biography_ja:
+                if biography_ja and has_base:
                     try:
                         await db.set_payload(body.base_sha256, {"biography_ja": biography_ja})
                     except Exception as exc:
@@ -3049,6 +3104,7 @@ async def run_chronicle_candidates(
                 "topic_directive": topic_directive,
                 "biography": biography,
                 "biography_ja": biography_ja,
+                "topic_only": not has_base,
                 "body": body_dict,
             }
 
@@ -3329,10 +3385,13 @@ async def run_chronicle_expand(
         options = _chronicle_llm_options(body, temperature, cfg)
         removal = removal_tag_set(cfg)
 
-        doc = await db.get(body.base_sha256)
-        if not doc:
-            _put({"type": "error", "message": "Base image not found"})
-            return
+        doc = {}
+        has_base = bool((body.base_sha256 or "").strip())
+        if has_base:
+            doc = await db.get(body.base_sha256) or {}
+            if not doc:
+                _put({"type": "error", "message": "Base image not found"})
+                return
 
         character_desc = ctx.get("character_desc", "")
         scene_desc = ctx.get("scene_desc", "")
@@ -3377,7 +3436,12 @@ async def run_chronicle_expand(
         # ═══ Story-first pipeline: write past/present/future prose, then
         # WD14-search tags from the finished acts and assemble prompts with
         # identity-lock only (hair/eyes/accessories — never base scene must-tags).
-        gen_axes = [a for a in AXES if a != body.base_time_axis]
+        # With a source image, the base_time_axis reuses 元絵 (skip prompt/image).
+        # Topic-only: generate prompts + images for ALL three axes.
+        gen_axes = (
+            list(AXES) if not has_base
+            else [a for a in AXES if a != body.base_time_axis]
+        )
 
         # Biography (persistent character grounding) carried from Phase 1.
         biography = ctx.get("biography") or {}
@@ -3695,7 +3759,7 @@ async def run_chronicle_expand(
 
         seed: int | None = None
         seed_warning = ""
-        if body.use_ref_seed:
+        if body.use_ref_seed and has_base:
             seed = (doc.get("model_info") or {}).get("seed") \
                 or (doc.get("creation_record") or {}).get("seed")
             if seed is None:
@@ -4325,8 +4389,11 @@ async def run_chronicle_expand(
                 "story_ja": stories_ja[axis],
                 "prompt_positive": prompts.get(axis, {}).get("positive"),
                 "prompt_negative": prompts.get(axis, {}).get("negative"),
-                "image_id": body.base_sha256 if axis == body.base_time_axis
-                else (prev_axes.get(axis) or {}).get("image_id"),
+                "image_id": (
+                    body.base_sha256
+                    if has_base and axis == body.base_time_axis
+                    else (prev_axes.get(axis) or {}).get("image_id")
+                ),
             }
 
         embedding = None
@@ -4354,8 +4421,8 @@ async def run_chronicle_expand(
             "biography_ja": biography_ja,
             "timetable": timetable,
             "timetable_ja": timetable_ja,
-            "pinups": _current_pinups(doc),
-            "pinup_image_id": doc.get("pinup_image_id"),
+            "pinups": _current_pinups(doc) if doc else [],
+            "pinup_image_id": (doc or {}).get("pinup_image_id"),
             "context": {**ctx, "axis_slots": axis_slots},
         }
         if quality_eval:
@@ -4399,8 +4466,13 @@ async def run_chronicle_expand(
         # ── Pinup (optional): a neutral reference of this character, registered
         # onto the base image doc + Biography. Built once per image (the runner
         # builds its own prompt + picks a pose).
-        if body.generate_pinup and body.workflow_name and not doc.get("pinups") \
-                and not doc.get("pinup_image_id"):
+        if (
+            has_base
+            and body.generate_pinup
+            and body.workflow_name
+            and not doc.get("pinups")
+            and not doc.get("pinup_image_id")
+        ):
             try:
                 pinup_job_id = spooler.submit(
                     JobLane.GENERATION,

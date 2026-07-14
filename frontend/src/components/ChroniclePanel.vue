@@ -546,14 +546,20 @@ async function _submitAndStream(url, payload, onJob) {
   }
 }
 
+function clearBase() {
+  baseSha.value = ''
+  baseModel.value = ''
+  thumbFailed.value = false
+}
+
 async function start() {
-  if (!baseSha.value) {
-    emit('toast', { msg: t('chronicle.noBase'), type: 'error' })
+  if (!baseSha.value && !userTopic.value.trim()) {
+    emit('toast', { msg: t('chronicle.needTopicOrBase'), type: 'error' })
     return
   }
   resetRun()
   await _submitAndStream('/api/story/chronicle', {
-    base_sha256: baseSha.value,
+    base_sha256: baseSha.value || '',
     base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
     worldview: worldview.value,
@@ -564,13 +570,13 @@ async function start() {
     emotion: emotion.value,
     dramatic_mode: dramaticMode.value,
     tone: tone.value,
-    generate_pinup: generatePinup.value,
+    generate_pinup: baseSha.value ? generatePinup.value : false,
     suppress_conflict_tags: suppressConflictTags.value,
     use_draft_refine: useDraftRefine.value,
     draft_width: draftWidth.value,
     draft_height: draftHeight.value,
     draft_steps: draftSteps.value,
-    use_ref_seed: useRefSeed.value,
+    use_ref_seed: baseSha.value ? useRefSeed.value : false,
     manual_mode: manualMode.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
@@ -834,6 +840,9 @@ async function generateImages() {
                   <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
                     class="max-h-28 rounded-lg object-contain" />
                   <SbIcon v-else name="image" class="w-8 h-8 text-[var(--sb-faint)]" />
+                  <p v-if="!baseSha" class="text-[10px] text-teal-300/80 text-center leading-tight px-1">
+                    {{ t('chronicle.topicOnlyHint') }}
+                  </p>
                   <p v-if="baseSha && baseModel" :title="t('chronicle.baseModelTitle')"
                     class="w-full text-[10px] text-teal-300/70 font-mono text-center leading-tight break-all">
                     {{ baseModel }}
@@ -843,6 +852,10 @@ async function generateImages() {
                     <SbIcon name="dice" class="w-3 h-3" />
                     {{ pickingRandom ? t('chronicle.randomPicking') : t('chronicle.randomFromLibrary') }}
                   </button>
+                  <button v-if="baseSha" type="button" @click="clearBase" :disabled="settingsLocked"
+                    class="sb-btn w-full justify-center border-white/10 text-[var(--sb-muted)] text-[10px]">
+                    {{ t('chronicle.clearBase') }}
+                  </button>
                   <p class="text-[10px] text-[var(--sb-muted)] text-center leading-tight">
                     {{ t('chronicle.baseHint') }}
                   </p>
@@ -850,12 +863,15 @@ async function generateImages() {
 
                 <div class="flex flex-col gap-3 text-xs min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
-                    <span class="sb-label w-20 shrink-0">{{ t('chronicle.baseAxis') }}</span>
+                    <span class="sb-label w-20 shrink-0" :title="baseSha ? t('chronicle.baseAxisHintImage') : t('chronicle.baseAxisHintTopic')">{{ t('chronicle.baseAxis') }}</span>
                     <button v-for="a in AXES" :key="a" type="button" @click="baseAxis = a"
                       class="sb-chip" :class="baseAxis === a ? 'is-chip-on-teal' : ''">
                       {{ t('chronicle.axis.' + a) }}
                     </button>
                   </div>
+                  <p class="text-[10px] text-[var(--sb-muted)] -mt-1 ml-20 leading-tight">
+                    {{ baseSha ? t('chronicle.baseAxisHintImage') : t('chronicle.baseAxisHintTopic') }}
+                  </p>
                   <div class="flex items-start gap-2">
                     <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.userTopic') }}</span>
                     <textarea v-model="userTopic" rows="2" :placeholder="t('chronicle.userTopicPh')"
@@ -1036,7 +1052,7 @@ async function generateImages() {
             </fieldset>
 
               <div class="flex items-center gap-3 flex-wrap">
-                <button type="button" @click="start" :disabled="running || !baseSha"
+                <button type="button" @click="start" :disabled="running || (!baseSha && !userTopic.trim())"
                   class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium
                     bg-teal-800 hover:bg-teal-700 disabled:opacity-40 text-teal-50 transition-colors">
                   <span v-if="running" class="chronicle-shuttle-mini" aria-hidden="true">
