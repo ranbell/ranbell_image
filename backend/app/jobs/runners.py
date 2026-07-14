@@ -2714,33 +2714,6 @@ async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: st
         return None
 
 
-async def _save_chronicle_draft_image(img_bytes: bytes, original_name: str, db) -> tuple[str | None, Path | None]:
-    """Save a Phase-B draft under Chronicles/drafts/ (not linked as axis image)."""
-    import hashlib as _hl
-    from datetime import datetime as _dt
-
-    from ..config import settings as _settings
-    from ..scanner.scanner import register_image as _register_image
-
-    sha256 = _hl.sha256(img_bytes).hexdigest()
-    gen_dir = _settings.generated_images_dir / "Chronicles" / "drafts"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-
-    suffix = Path(original_name).suffix or ".png"
-    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-    path = gen_dir / f"draft_{ts}_{sha256[:8]}{suffix}"
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, path.write_bytes, img_bytes)
-    try:
-        await _register_image(path, db)
-        await db.set_payload(sha256, {"chronicle_draft": True})
-        return sha256, path
-    except Exception as exc:
-        logger.error("[chronicle] draft register_image failed: %s", exc)
-        return None, path if path.exists() else None
-
-
 async def _comfy_generate_bytes(
     comfy,
     cancel: CancelToken,
@@ -2814,7 +2787,7 @@ async def _comfy_generate_bytes(
 
 
 async def _wd14_tags_from_path(path: Path, db) -> list[str]:
-    """Synchronous WD14 scan of a draft image path (do not wait on the watcher)."""
+    """Synchronous WD14 scan of an image path (do not wait on the watcher)."""
     from ..ai import wd14 as wd14_mod
     from ..runtime_config import get_runtime_config
 
@@ -2833,6 +2806,24 @@ async def _wd14_tags_from_path(path: Path, db) -> list[str]:
             seen.add(key)
             out.append(name)
     return out
+
+
+async def _wd14_tags_from_bytes(img_bytes: bytes, db) -> list[str]:
+    """WD14-scan image bytes via a throwaway tempfile (never registered/persisted)."""
+    import tempfile
+
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(img_bytes)
+            path = Path(tmp.name)
+        return await _wd14_tags_from_path(path, db)
+    finally:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning("[chronicle] draft tempfile cleanup failed: %s", exc)
 
 
 async def run_chronicle_candidates(
@@ -3687,7 +3678,6 @@ async def run_chronicle_expand(
             workflow_name=body.workflow_name,
             manual_mode=body.manual_mode,
         )
-        draft_ids: dict[str, str] = {}
         if draft_refine:
             _put({
                 "type": "warning",
@@ -3983,26 +3973,20 @@ async def run_chronicle_expand(
                     _put({"type": "warning",
                           "message": f"{axis}: draft refine skipped (no draft image)"})
                 else:
-                    draft_sha, draft_path = await _save_chronicle_draft_image(
-                        draft_bytes, f"{axis}_draft.png", db,
-                    )
                     draft_tags: list[str] = []
-                    if draft_path and draft_path.exists():
-                        _phase("scanningDraft", 0.60 + 0.08 * i,
-                               f"Scanning {axis} draft tags...")
-                        try:
-                            draft_tags = await _wd14_tags_from_path(draft_path, db)
-                            draft_tags = filter_tag_list(draft_tags, removal)
-                        except Exception as exc:
-                            logger.warning(
-                                "[chronicle] %s draft WD14 failed: %s", axis, exc
-                            )
-                    if draft_sha:
-                        draft_ids[axis] = draft_sha
+                    _phase("scanningDraft", 0.60 + 0.08 * i,
+                           f"Scanning {axis} draft tags...")
+                    try:
+                        draft_tags = await _wd14_tags_from_bytes(draft_bytes, db)
+                        draft_tags = filter_tag_list(draft_tags, removal)
+                    except Exception as exc:
+                        logger.warning(
+                            "[chronicle] %s draft WD14 failed: %s", axis, exc
+                        )
+                    # Draft bytes are discarded after the scan — never registered.
                     _put({
                         "type": "axis_draft",
                         "axis": axis,
-                        "draft_sha256": draft_sha or "",
                         "draft_tags": draft_tags[:24],
                     })
                     if draft_tags:
@@ -4188,9 +4172,6 @@ async def run_chronicle_expand(
                 "prompt_negative": prompts.get(axis, {}).get("negative"),
                 "image_id": body.base_sha256 if axis == body.base_time_axis
                 else (prev_axes.get(axis) or {}).get("image_id"),
-                "draft_image_id": draft_ids.get(axis) or (
-                    (prev_axes.get(axis) or {}).get("draft_image_id")
-                ),
             }
 
         embedding = None

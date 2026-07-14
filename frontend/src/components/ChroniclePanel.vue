@@ -1192,11 +1192,7 @@ async function generateImages() {
                       {{ (axisReasoning[axis].search_tags || []).join(', ') }}
                     </p>
                   </div>
-                  <div v-if="axisDrafts[axis]" class="mt-2 flex items-start gap-2 text-[10px] text-[var(--sb-muted)]">
-                    <img v-if="axisDrafts[axis].draft_sha256"
-                      :src="`/api/thumbnails/${axisDrafts[axis].draft_sha256}.webp`"
-                      class="w-14 h-14 object-cover rounded border border-white/10 shrink-0"
-                      alt="" />
+                  <div v-if="axisDrafts[axis]" class="mt-2 text-[10px] text-[var(--sb-muted)]">
                     <p v-if="(axisDrafts[axis].draft_tags || []).length" class="break-words">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftTags') }}:</span>
                       {{ (axisDrafts[axis].draft_tags || []).join(', ') }}
