@@ -2855,6 +2855,10 @@ def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
 IMAGE_PROMPT_MAX_TAGS = 20
 IMAGE_PROMPT_MAX_PROSE_WORDS = 60
 
+# Fast mode: VLM aims for ≥30 tags, then +5 mid-rank WD14 injects (cap 45).
+FAST_PROMPT_MIN_TAGS = 30
+FAST_PROMPT_MAX_TAGS = 45
+
 
 # Deterministic costume/motif packs from お題. These MUST survive tag capping —
 # the long Chronicle pipeline otherwise drops "bunny girl" as non-identity.
@@ -3721,6 +3725,49 @@ def parse_axis_tags_json(raw: str) -> tuple[str, dict[str, list[str]], str]:
     return tag_line, categories, negative_supplement
 
 
+def sample_midrank_wd14_tags(
+    ranked: list[str],
+    *,
+    lo: int = 20,
+    hi: int = 50,
+    k: int = 5,
+    exclude: list[str] | None = None,
+    rng=None,
+) -> list[str]:
+    """Randomly sample up to ``k`` tags from 1-based ranks ``lo``..``hi``.
+
+    ``ranked`` is similarity order (best first). Ranks outside the list or
+    already in ``exclude`` are skipped. Short pools return fewer than ``k``.
+    """
+    import random as _random
+
+    if lo < 1 or hi < lo or k < 1:
+        return []
+    pool = [
+        str(t).strip().replace(" ", "_")
+        for t in ranked[lo - 1 : hi]
+        if str(t).strip()
+    ]
+    ban = {
+        str(t).strip().replace(" ", "_").lower()
+        for t in (exclude or [])
+        if str(t).strip()
+    }
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for tag in pool:
+        key = tag.lower()
+        if key in ban or key in seen:
+            continue
+        seen.add(key)
+        candidates.append(tag)
+    if not candidates:
+        return []
+    pick = min(k, len(candidates))
+    r = rng if rng is not None else _random
+    return list(r.sample(candidates, pick))
+
+
 def build_fast_prompts_prompt(
     *,
     user_topic: str,
@@ -3732,14 +3779,21 @@ def build_fast_prompts_prompt(
     time_scale: str = "years",
     worldview: str = "",
     emotion: str = "",
+    biography: dict | None = None,
+    tone: str = "",
+    dramatic_mode: str = "",
+    base_axis: str = "present",
 ) -> str:
-    """One-shot JSON: lean danbooru tag lines for each axis (fast mode).
+    """One-shot JSON: danbooru tag lines for each axis (fast mode).
 
-    Skips timetable / Visual Script / densify. Theme must-tags are mandatory
-    on every axis so costume お題 (bunny girl, …) cannot evaporate.
+    Carries biography / elapsed timeline / tone so acts stay consistent.
+    Theme must-tags are mandatory on every axis. Target ≥30 tags per axis.
     """
     axes = [a for a in (gen_axes or list(AXES)) if a in AXES] or list(AXES)
     beats = beats or {}
+    base = (base_axis or "present").lower()
+    if base not in AXES:
+        base = "present"
     must = ", ".join(
         str(t).strip().replace(" ", "_") for t in (theme_must or []) if str(t).strip()
     ) or "(none — invent a concrete costume from the topic)"
@@ -3751,31 +3805,52 @@ def build_fast_prompts_prompt(
         f"- {a.upper()}: {beats.get(a) or user_topic}" for a in axes
     )
     axis_keys = ", ".join(f'"{a}"' for a in axes)
+    elapsed = _elapsed_time_header(
+        base_axis=base, time_scale=time_scale, locale="en"
+    )
+    bio_line = _biography_brief(biography)
+    base_note = (
+        f"BASE axis = [{base.upper()}] (t = 0). If a source image is used, that "
+        "axis reuses the source and is NOT regenerated; other axes must read as "
+        f"distinct moments on the {time_scale} scale."
+    )
     return (
-        "You are a danbooru-tag expert. FAST MODE: emit ONE lean image-prompt "
-        "tag line per act. No prose. No stories.\n\n"
+        "You are a danbooru-tag expert. FAST MODE: emit ONE image-prompt "
+        "tag line per act. No prose stories — tags only.\n\n"
+        f"{elapsed}\n"
+        f"{base_note}\n\n"
         f"お題 / TOPIC (authoritative costume & subject): {user_topic}\n"
-        f"Worldview (optional mood only): {worldview or '(none)'}\n"
+        f"Worldview (mood / setting bias): {worldview or '(none)'}\n"
         f"Emotion register: {emotion or '(free)'}\n"
+        f"Tone: {tone or 'neutral'}\n"
+        f"Dramatic mode: {dramatic_mode or 'escalation'}\n"
         f"Time scale between acts: {time_scale}\n"
+        f"PERSONALITY / biography (let mannerisms colour pose & expression):\n"
+        f"  {bio_line}\n"
         f"Character identity tags (keep hair/eyes if present): {identity}\n"
-        f"Character note: {character_desc or '(none)'}\n"
-        f"Act beats (vary pose/place/action ONLY — costume stays):\n{beat_lines}\n\n"
+        f"Character appearance note: {character_desc or '(none)'}\n"
+        f"Act beats (vary pose/place/action; costume + identity stay):\n"
+        f"{beat_lines}\n\n"
         f"THEME MUST-TAGS — copy VERBATIM into EVERY axis tag line:\n{must}\n\n"
         "[RULES]\n"
-        f"- Each axis: 12–{IMAGE_PROMPT_MAX_TAGS} comma-separated danbooru tags, "
-        f"HARD MAX {IMAGE_PROMPT_MAX_TAGS}.\n"
+        f"- Each axis: AT LEAST {FAST_PROMPT_MIN_TAGS} comma-separated danbooru "
+        f"tags (target {FAST_PROMPT_MIN_TAGS}–{FAST_PROMPT_MAX_TAGS}). "
+        f"Under {FAST_PROMPT_MIN_TAGS} = failed prompt.\n"
+        f"- Soft ceiling {FAST_PROMPT_MAX_TAGS}; do not pad with synonyms.\n"
         "- Open with subject-count (1girl / 1boy / solo / …).\n"
         "- THEME MUST-TAGS appear on every axis — never drop or paraphrase them.\n"
-        "- Vary only: pose/action, place, expression, one light cue.\n"
+        "- Reflect biography personality in expression/pose tags when possible.\n"
+        "- Honour the elapsed-time header: past/present/future must feel like "
+        "different volumes (age/wear/setting shifts matching the time scale).\n"
+        "- Include concrete pose/action, place, lighting, and a few props.\n"
         "- No quality meta-tags (masterpiece, best_quality, highres, …).\n"
         "- English danbooru snake_case only.\n\n"
         "Output JSON ONLY:\n"
         "{\n"
         f'  // keys: {axis_keys}\n'
-        '  "past": "1girl, …",\n'
-        '  "present": "1girl, …",\n'
-        '  "future": "1girl, …",\n'
+        '  "past": "1girl, … (≥30 tags)",\n'
+        '  "present": "1girl, … (≥30 tags)",\n'
+        '  "future": "1girl, … (≥30 tags)",\n'
         '  "negative": "optional short comma-separated negatives"\n'
         "}"
     )
@@ -3811,27 +3886,51 @@ def build_fast_candidate(
     *,
     time_scale: str = "years",
     locale: str = "en",
+    base_axis: str = "present",
 ) -> dict:
     """Synthetic single candidate for fast mode (no LLM pitch round)."""
     topic = (user_topic or "").strip() or "untitled"
+    one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
+    one_ja, two_ja = _ELAPSED_UNIT_JA.get(time_scale, _ELAPSED_UNIT_JA["years"])
+    base = (base_axis or "present").lower()
+    if base not in AXES:
+        base = "present"
+    idx_base = AXES.index(base)
+
+    def _beat_en(axis: str) -> str:
+        if axis == base:
+            return f"Now (base, t=0) — {topic}"
+        steps = abs(AXES.index(axis) - idx_base)
+        phrase = one if steps == 1 else two
+        direction = "later" if AXES.index(axis) > idx_base else "earlier"
+        return f"{phrase.title()} {direction} — {topic}"
+
+    def _beat_ja(axis: str) -> str:
+        if axis == base:
+            return f"いま（基準 t=0）— {topic}"
+        steps = abs(AXES.index(axis) - idx_base)
+        phrase = one_ja if steps == 1 else two_ja
+        direction = "後" if AXES.index(axis) > idx_base else "前"
+        return f"{phrase}{direction} — {topic}"
+
     if locale == "ja":
         return {
             "id": "A",
             "title": topic[:80],
-            "overall": f"「{topic}」を軸にした三つの瞬間。",
-            "past": f"少し前 — {topic}",
-            "present": f"いま — {topic}",
-            "future": f"このあと — {topic}",
+            "overall": f"「{topic}」を軸に、{time_scale} スケールで隔たった三つの瞬間。",
+            "past": _beat_ja("past"),
+            "present": _beat_ja("present"),
+            "future": _beat_ja("future"),
             "dramatic_mode": "escalation",
             "time_scale": time_scale,
         }
     return {
         "id": "A",
         "title": topic[:80],
-        "overall": f"Three moments around: {topic}",
-        "past": f"Earlier — {topic}",
-        "present": f"Now — {topic}",
-        "future": f"Later — {topic}",
+        "overall": f"Three moments around “{topic}” on a {time_scale} scale.",
+        "past": _beat_en("past"),
+        "present": _beat_en("present"),
+        "future": _beat_en("future"),
         "dramatic_mode": "escalation",
         "time_scale": time_scale,
     }

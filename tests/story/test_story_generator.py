@@ -581,13 +581,74 @@ def test_theme_must_tags_bunny_girl():
     parts = [t.strip() for t in kept.split(",") if t.strip()]
     assert len(parts) <= 20
     assert "bunny_girl" in parts and "rabbit_ears" in parts
-    cand = build_fast_candidate("バニーガール", locale="ja")
+    cand = build_fast_candidate("バニーガール", locale="ja", time_scale="years")
     assert cand["id"] == "A" and "バニー" in cand["present"]
+    assert "years" in cand["overall"] or "スケール" in cand["overall"]
     lines, neg = parse_fast_prompts_json(
         '{"past":"1girl, bunny_girl","present":"1girl, bunny_girl, smile",'
         '"future":"1girl, bunny_girl, walking","negative":"blurry"}'
     )
     assert "bunny_girl" in lines["present"] and neg == "blurry"
+
+
+def test_build_fast_prompts_prompt_carries_personality_and_min_30():
+    from app.story.generator import (
+        FAST_PROMPT_MIN_TAGS,
+        build_fast_prompts_prompt,
+    )
+
+    prompt = build_fast_prompts_prompt(
+        user_topic="バニーガール",
+        theme_must=["bunny_girl", "rabbit_ears"],
+        character_tags=["1girl", "blonde_hair", "blue_eyes"],
+        character_desc="tall bunny bartender",
+        beats={
+            "past": "years earlier — cafe",
+            "present": "now — bar",
+            "future": "years later — rooftop",
+        },
+        time_scale="years",
+        worldview="neon night city",
+        emotion="warmth",
+        biography={
+            "occupation": "bartender",
+            "personality": "quietly playful",
+            "hobbies": ["sketching"],
+            "quirks": ["hums while pouring"],
+        },
+        tone="bright",
+        dramatic_mode="escalation",
+        base_axis="present",
+    )
+    assert "ELAPSED FROM BASE" in prompt or "BASE =" in prompt or "t = 0" in prompt
+    assert "quietly playful" in prompt
+    assert "bartender" in prompt
+    assert "bright" in prompt
+    assert "escalation" in prompt
+    assert f"AT LEAST {FAST_PROMPT_MIN_TAGS}" in prompt
+    assert "bunny_girl" in prompt
+    assert "HARD MAX 20" not in prompt
+
+
+def test_sample_midrank_wd14_tags_from_ranks_20_to_50():
+    from app.story.generator import sample_midrank_wd14_tags
+    import random
+
+    ranked = [f"tag_{i}" for i in range(1, 61)]  # tag_1 .. tag_60
+    rng = random.Random(0)
+    picked = sample_midrank_wd14_tags(
+        ranked, lo=20, hi=50, k=5, exclude=["tag_25"], rng=rng,
+    )
+    assert len(picked) == 5
+    allowed = {f"tag_{i}" for i in range(20, 51)} - {"tag_25"}
+    assert set(picked) <= allowed
+    assert "tag_25" not in picked
+    assert "tag_1" not in picked and "tag_19" not in picked
+    # Short list: fewer than k
+    short = sample_midrank_wd14_tags(
+        [f"t{i}" for i in range(25)], lo=20, hi=50, k=5, rng=random.Random(1),
+    )
+    assert 0 < len(short) <= 5
 
 
 def test_cap_danbooru_tag_line_keeps_identity_and_focal():

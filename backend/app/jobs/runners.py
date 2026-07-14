@@ -3176,6 +3176,7 @@ async def run_chronicle_candidates(
                     body.user_topic,
                     time_scale=body.time_scale,
                     locale=body.locale,
+                    base_axis=body.base_time_axis,
                 )
             ]
             if story_id:
@@ -3411,10 +3412,12 @@ async def run_chronicle_expand(
         draft_positive_for_comfy,
         draft_richness_delta,
         ensure_theme_must_tags,
+        FAST_PROMPT_MAX_TAGS,
         merge_chronicle_axis_tags,
         merge_category_tags,
         merge_draft_wd14_tags,
         parse_fast_prompts_json,
+        sample_midrank_wd14_tags,
         theme_must_tags,
         merge_story_sections,
         parse_axis_tags_json,
@@ -3613,12 +3616,43 @@ async def run_chronicle_expand(
                             time_scale=body.time_scale,
                             worldview=body.worldview,
                             emotion=body.emotion,
+                            biography=biography,
+                            tone=body.tone,
+                            dramatic_mode=str(
+                                selected.get("dramatic_mode")
+                                or body.dramatic_mode
+                                or "escalation"
+                            ),
+                            base_axis=body.base_time_axis,
                         ),
                         model=vlm_model, options=options, fmt="json", think=False,
                     )
             except Exception as exc:
                 logger.warning("[chronicle] fast prompts LLM failed: %s", exc)
             axis_lines, fast_neg = parse_fast_prompts_json(raw_fast)
+
+            async def _fast_wd14_rank(query: str, limit: int = 50) -> list[str]:
+                q = query.strip()
+                if not q:
+                    return []
+                try:
+                    vec = await ollama.embed(q)
+                    hits = await db.search_wd14_vocab(
+                        vec, min_freq=0.01, max_freq=0.80, category=0, limit=limit,
+                    )
+                except Exception as exc:
+                    logger.warning("[chronicle] fast wd14 search failed: %s", exc)
+                    return []
+                out: list[str] = []
+                seen: set[str] = set()
+                for h in hits:
+                    name = str(h.get("name") or "").strip().replace(" ", "_")
+                    key = name.lower()
+                    if name and key not in seen:
+                        seen.add(key)
+                        out.append(name)
+                return filter_tag_list(out, removal)
+
             prompts: dict = {}
             for axis in AXES:
                 if has_base and axis == body.base_time_axis:
@@ -3632,15 +3666,55 @@ async def run_chronicle_expand(
                         focal=[t for t in (theme_must or [])[:2]],
                         search_tags=list(theme_must),
                         lock_tags=lock_tags,
+                        max_tags=FAST_PROMPT_MAX_TAGS,
                     )
                 tag_line = _strip_quality_metatags(base_line)
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)] if doc else [])
                 tag_line = inject_identity_tags(tag_line, lock_tags)
+                prio = list(dict.fromkeys([*theme_must, *lock_tags]))
                 tag_line = ensure_theme_must_tags(
                     tag_line,
                     theme_must,
-                    priority_tags=list(dict.fromkeys([*theme_must, *lock_tags])),
+                    max_tags=FAST_PROMPT_MAX_TAGS,
+                    priority_tags=prio,
                 )
+                # Mid-rank WD14 spice: top-50 search → ranks 20–50 → random 5.
+                inject_tags: list[str] = []
+                try:
+                    query = f"{body.user_topic}. {tag_line}".strip(". ")
+                    ranked = await _fast_wd14_rank(query, limit=50)
+                    existing = [
+                        t.strip() for t in tag_line.split(",") if t.strip()
+                    ]
+                    inject_tags = sample_midrank_wd14_tags(
+                        ranked,
+                        lo=20,
+                        hi=50,
+                        k=5,
+                        exclude=existing + list(theme_must) + list(lock_tags),
+                        rng=_random,
+                    )
+                    if inject_tags:
+                        tag_line = inject_identity_tags(tag_line, inject_tags)
+                        tag_line = ensure_theme_must_tags(
+                            tag_line,
+                            theme_must,
+                            max_tags=FAST_PROMPT_MAX_TAGS,
+                            priority_tags=prio + inject_tags,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[chronicle] %s fast mid-rank inject failed: %s", axis, exc
+                    )
+                    inject_tags = []
+                if not inject_tags:
+                    _put({
+                        "type": "warning",
+                        "message": (
+                            f"{axis}: WD14 mid-rank inject skipped "
+                            "(empty pool or search failed)"
+                        ),
+                    })
                 negative = fast_neg or ""
                 axis_cats = bucket_danbooru_tags(tag_line)
                 positive = tag_line
@@ -3658,6 +3732,8 @@ async def run_chronicle_expand(
                     "visual_script": "",
                     "fast_mode": True,
                 }
+                if inject_tags:
+                    evt["wd14_midrank_inject"] = inject_tags
                 for k in CHRONICLE_CAT_FIELDS:
                     if axis_cats.get(k):
                         evt[k] = axis_cats[k]
