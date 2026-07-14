@@ -17,11 +17,11 @@
     ],
     "eye_shapes": [
       "tareme", "tsurime", "heterochromia", "sanpaku", "slit_pupils",
-      "glowing_eyes", "half-closed_eyes",
+      "glowing_eyes",
       "ringed_eyes", "spiral_eyes", "heart-shaped_pupils",
       "star-shaped_pupils", "x_eyes", "round_eyes", "sharp_eyes",
-      "heavy_eyelids", "wide_eyes", "asymmetrical_eyes", "empty_eyes",
-      "tired_eyes", "sparkling_eyes"
+      "heavy_eyelids", "wide_eyes", "asymmetrical_eyes",
+      "sparkling_eyes"
     ],
     "body": [
       "large_breasts", "huge_breasts", "medium_breasts", "small_breasts",
@@ -59,8 +59,7 @@
     "composition": [
       "cowboy_shot", "close_up", "portrait", "bust", "upper_body", "lower_body",
       "full_body", "head_only", "from_above", "from_below", "from_side",
-      "from_behind", "dutch_angle", "looking_at_viewer", "looking_away",
-      "looking_back", "face_only", "profile",
+      "from_behind", "dutch_angle", "face_only", "profile",
       "three-quarter_view", "two-shot", "wide_shot", "extreme_close_up",
       "aerial_view", "worm_eye_view", "symmetrical", "over_the_shoulder",
       "pov", "selfie", "multiple_views", "character_sheet"
@@ -112,12 +111,14 @@
     "surprised", "shocked", "open_mouth", "gasp",
     "closed_mouth", "half_open_mouth",
     "closed_eyes", "half-closed_eyes", "winking", "one_eye_closed",
+    "empty_eyes", "tired_eyes",
     "pout", "pouting", "smirk", "wink", "worried", "embarrassed", "shy",
     "nervous", "confused", "flustered", "sleepy", "dazed",
     "excited", "cheerful", "content", "satisfied", "reluctant",
     "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
     "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
-    "ecstatic", "horrified", "panicked", "relieved", "focused"
+    "ecstatic", "horrified", "panicked", "relieved", "focused",
+    "looking_at_viewer", "looking_away", "looking_back"
   ],
 
   "axis_action": [

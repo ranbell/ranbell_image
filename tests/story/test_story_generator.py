@@ -26,13 +26,25 @@ from app.story.generator import (
     _text_similarity,
     _tone_line,
     acts_temporally_distinct,
+    apply_scene_constraints,
     assign_dramatic_modes,
     bind_timetable_axis_slots,
     candidates_ungrounded,
+    candidates_off_topic,
+    topic_anchor_tokens,
     chunk_list,
     filter_story_seed_pool,
+    find_identity_mutex_conflicts,
+    find_mutex_conflict_tags,
+    infer_axis_scene_constraints,
+    merge_draft_wd14_tags,
+    activities_temporally_distinct,
+    axis_slots_collapsed,
+    build_differentiate_activities_prompt,
     parse_candidates_json,
     sample_bio_domains,
+    should_differentiate_acts,
+    should_use_draft_refine,
     translation_values_complete,
     base_pose_tags,
     build_differentiate_acts_prompt,
@@ -1295,8 +1307,10 @@ def test_parse_axis_tags_json_broken_returns_empty():
 # ── Chronicle degenerate detector ─────────────────────────────────────────────
 
 def _make_tag_line(n: int, *, anchor: bool = True) -> str:
-    """Helper: build a tag line with n tags, optionally anchored."""
-    body = ", ".join(f"tag_{i}" for i in range(n))
+    """Helper: build a tag line with n tags, optionally anchored + action + expression."""
+    # Always include a dynamic action + expression so idle/expression guards do not trip.
+    extras = max(0, n - 3)
+    body = ", ".join(["holding", "smile", * (f"tag_{i}" for i in range(extras))])
     return f"1girl, {body}" if anchor else body
 
 
@@ -1308,7 +1322,7 @@ def test_chronicle_tags_degenerate_short_tag_line():
 
 
 def test_chronicle_tags_degenerate_missing_subject_anchor():
-    tag_line = ", ".join(f"tag_{i}" for i in range(40))
+    tag_line = "holding, smile, " + ", ".join(f"tag_{i}" for i in range(40))
     degenerate, reason = _chronicle_tags_degenerate(tag_line)
     assert degenerate
     assert reason == "no_subject_anchor"
@@ -1322,9 +1336,30 @@ def test_chronicle_tags_degenerate_healthy_prompt():
 
 
 def test_chronicle_tags_degenerate_anchor_solo():
-    tag_line = "solo, " + ", ".join(f"tag_{i}" for i in range(40))
+    tag_line = "solo, holding, smile, " + ", ".join(f"tag_{i}" for i in range(40))
     degenerate, _ = _chronicle_tags_degenerate(tag_line)
     assert not degenerate
+
+
+def test_chronicle_tags_degenerate_idle_pose_only():
+    """standing/smile with no dynamic action must densify — simulation finding."""
+    pad = ", ".join(f"bg_{i}" for i in range(30))
+    tag_line = f"1girl, standing, smile, looking_at_viewer, cafe, counter, {pad}"
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert degenerate
+    assert reason == "no_dynamic_action"
+
+
+def test_chronicle_tags_degenerate_person_needs_expression():
+    """Person on-screen without any face/mood tag must densify."""
+    pad = ", ".join(f"bg_{i}" for i in range(30))
+    tag_line = f"1girl, holding, reaching, cafe, counter, apron, {pad}"
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert degenerate
+    assert reason == "no_expression"
+    # expressionless still counts — a chosen blank face is fine
+    ok = f"1girl, holding, reaching, expressionless, cafe, {pad}"
+    assert not _chronicle_tags_degenerate(ok)[0]
 
 
 # ── Stage 3b Pass 2 (build_axis_prose_prompt) ────────────────────────────────
@@ -1341,12 +1376,14 @@ def test_axis_prose_prompt_embeds_pass1_tag_line():
         time_scale="years",
     )
     assert tag_line in prompt
-    assert "PASS 1 TAG LINE" in prompt
+    assert "PASS 1 DANBOORU TAG LINE" in prompt
     assert "Visual Script" in prompt
     assert "POSITIVE:" in prompt
     assert "NEGATIVE:" in prompt
-    # danbooru+natural expects the tag line verbatim then prose.
-    assert "PASS 1 TAG LINE above verbatim" in prompt
+    assert "SUBJECT_TAGS:" in prompt
+    # danbooru+natural: tag line + prose + category footer
+    assert "THREE parts" in prompt
+    assert "verbatim" in prompt
 
 
 def test_axis_prose_prompt_natural_style_no_tag_line_output():
@@ -1359,10 +1396,10 @@ def test_axis_prose_prompt_natural_style_no_tag_line_output():
         prompt_style="natural",
         axis="present", base_axis="present",
     )
-    # natural mode: prose only in POSITIVE, tag line lives inline in prose.
-    assert "no leading tag line" in prompt
+    # natural mode: prose + category footer; no leading flat tag line in POSITIVE
+    assert "No leading flat tag line" in prompt or "no leading flat tag line" in prompt
     assert tag_line in prompt  # still passed as guidance
-
+    assert "SUBJECT_TAGS:" in prompt
 
 def test_axis_prose_prompt_forwards_negative_supplement():
     prompt = build_axis_prose_prompt(
@@ -1537,6 +1574,274 @@ def test_build_differentiate_acts_prompt():
     assert "[PRESENT] act must still match the base image" in prompt
 
 
+def test_should_differentiate_acts_skips_micro_scales():
+    assert not should_differentiate_acts("minutes")
+    assert not should_differentiate_acts("tens_of_minutes")
+    assert should_differentiate_acts("hours")
+    assert should_differentiate_acts("years")
+    assert should_differentiate_acts("decades")
+
+
+def test_activities_temporally_distinct():
+    same = "She stands by the window holding a teacup, gazing outside quietly."
+    assert not activities_temporally_distinct(
+        {"past": same, "present": same, "future": same}
+    )
+    assert activities_temporally_distinct({
+        "past": "She ties her laces at the muddy trailhead before dawn.",
+        "present": "She climbs the ridge with both hands on the rope.",
+        "future": "She plants a marker flag on the windy summit rock.",
+    })
+    assert activities_temporally_distinct({"past": "a", "present": "", "future": "c"})
+
+
+def test_axis_slots_collapsed():
+    assert axis_slots_collapsed({
+        "past": {"place": "park bench", "activity": "reading"},
+        "present": {"place": "park bench", "activity": "reading"},
+        "future": {"place": "park bench", "activity": "reading"},
+    })
+    assert not axis_slots_collapsed({
+        "past": {"place": "kitchen", "activity": "kneading dough"},
+        "present": {"place": "rooftop", "activity": "hanging laundry"},
+        "future": {"place": "station", "activity": "catching the last train"},
+    })
+    assert not axis_slots_collapsed({})
+    assert not axis_slots_collapsed(None)
+
+
+def test_build_differentiate_activities_prompt():
+    prompt = build_differentiate_activities_prompt(
+        activities={
+            "past": "same action", "present": "same action", "future": "same action",
+        },
+        selected={"past": "beat p", "present": "beat n", "future": "beat f"},
+        base_axis="present",
+        time_scale="years",
+        scene_desc="a sunlit classroom",
+        user_topic="卒業",
+    )
+    assert "CLEARLY DIFFERENT" in prompt
+    assert "CURRENT ACTIONS" in prompt
+    assert "[PRESENT] action must still match the base scene" in prompt
+    assert "卒業" in prompt
+    assert '"past"' in prompt and '"future"' in prompt
+
+
+# ── Scene constraints + mechanical mutex conflicts ────────────────────────────
+
+def test_infer_axis_scene_constraints_night_indoor():
+    story = (
+        "At midnight she sits alone in her bedroom, lit only by moonlight "
+        "through the window, turning the pages of a worn notebook."
+    )
+    c = infer_axis_scene_constraints(story)
+    assert c["time_of_day"] == "night"
+    assert c["indoor_outdoor"] == "indoor"
+    assert "night" in c["must_tags"]
+    assert "indoors" in c["must_tags"]
+    assert "day" in c["forbid_tags"]
+    assert "outdoors" in c["forbid_tags"]
+    assert "blue_sky" in c["forbid_tags"]
+
+
+def test_infer_axis_scene_constraints_day_outdoor():
+    story = (
+        "On a sunny afternoon she walks through the park, sunlit grass "
+        "under her shoes, waving at friends across the street."
+    )
+    c = infer_axis_scene_constraints(story)
+    assert c["time_of_day"] == "day"
+    assert c["indoor_outdoor"] == "outdoor"
+    assert "day" in c["must_tags"] or "daylight" in c["must_tags"]
+    assert "outdoors" in c["must_tags"]
+    assert "night" in c["forbid_tags"]
+    assert "indoors" in c["forbid_tags"]
+
+
+def test_infer_axis_scene_constraints_empty_when_ambiguous():
+    c = infer_axis_scene_constraints("She holds a letter and waits.")
+    assert c["time_of_day"] == ""
+    assert c["indoor_outdoor"] == ""
+    assert c["must_tags"] == []
+    assert c["forbid_tags"] == []
+
+
+def test_apply_scene_constraints_filters_and_injects():
+    constraints = infer_axis_scene_constraints(
+        "At night she stands outdoors under the moonlit sky."
+    )
+    tags = ["1girl", "day", "blue_sky", "outdoors", "smile", "park"]
+    out = apply_scene_constraints(tags, constraints)
+    assert "day" not in [t.lower() for t in out]
+    assert "blue_sky" not in [t.lower() for t in out]
+    assert "night" in out
+    assert "1girl" in out
+    assert "outdoors" in out
+
+
+def test_find_mutex_conflict_tags_day_vs_night():
+    tags = ["1girl", "night", "day", "blue_sky", "moonlight", "smile"]
+    conflicts = find_mutex_conflict_tags(tags, preferred=["night"])
+    assert "day" in conflicts
+    assert "blue_sky" in conflicts
+    assert "night" not in conflicts
+    assert "moonlight" not in conflicts
+
+
+def test_find_mutex_conflict_tags_indoor_vs_outdoor():
+    tags = ["indoors", "outdoors", "bedroom", "park"]
+    conflicts = find_mutex_conflict_tags(tags, preferred=["indoors"])
+    assert "outdoors" in conflicts
+    assert "park" in conflicts
+    assert "indoors" not in conflicts
+    assert "bedroom" not in conflicts
+
+
+def test_find_mutex_conflict_tags_first_seen_when_no_preferred():
+    tags = ["day", "night", "sunny"]
+    conflicts = find_mutex_conflict_tags(tags, preferred=None)
+    # day appears first → night loses
+    assert "night" in conflicts
+    assert "day" not in conflicts
+
+
+def test_find_identity_mutex_conflicts_hair_and_eyes():
+    locks = ["blonde_hair", "blue_eyes", "hair_ribbon"]
+    tags = ["blonde_hair", "brown_hair", "blue_eyes", "green_eyes", "long_hair"]
+    conflicts = find_identity_mutex_conflicts(tags, locks)
+    assert "brown_hair" in conflicts
+    assert "green_eyes" in conflicts
+    assert "blonde_hair" not in conflicts
+    assert "blue_eyes" not in conflicts
+    assert "long_hair" not in conflicts  # style, not color
+
+
+def test_remove_conflict_tags_with_mutex_set():
+    positive = "1girl, night, day, blue_sky, indoors, outdoors, smile"
+    conflicts = find_mutex_conflict_tags(
+        [t.strip() for t in positive.split(",")],
+        preferred=["night", "indoors"],
+    )
+    cleaned = remove_conflict_tags(positive, conflicts)
+    assert "night" in cleaned
+    assert "indoors" in cleaned
+    assert "day" not in cleaned.split(", ")
+    assert "outdoors" not in cleaned.split(", ")
+
+
+# ── Phase B: draft refine helpers ─────────────────────────────────────────────
+
+def test_should_use_draft_refine_modes():
+    assert not should_use_draft_refine(
+        mode="on", time_scale="years", divergence=0.8, workflow_name="",
+    )
+    assert not should_use_draft_refine(
+        mode="on", time_scale="years", divergence=0.8,
+        workflow_name="x.json", manual_mode=True,
+    )
+    assert should_use_draft_refine(
+        mode="on", time_scale="minutes", divergence=0.0, workflow_name="x.json",
+    )
+    assert not should_use_draft_refine(
+        mode="off", time_scale="years", divergence=1.0, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="years", divergence=0.0, workflow_name="x.json",
+    )
+    # auto: hours is no longer skipped (only minutes / tens_of_minutes)
+    assert should_use_draft_refine(
+        mode="auto", time_scale="hours", divergence=0.2, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="days", divergence=0.0, workflow_name="x.json",
+    )
+    # micro scales skip unless divergence ≥ 0.25
+    assert not should_use_draft_refine(
+        mode="auto", time_scale="minutes", divergence=0.2, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="minutes", divergence=0.25, workflow_name="x.json",
+    )
+
+
+def test_merge_draft_wd14_tags_prefers_draft_scene():
+    merged = merge_draft_wd14_tags(
+        vocab_tags=["day", "blue_sky", "park", "smile"],
+        draft_tags=["night", "moonlight", "rooftop", "brown_hair"],
+        lock_tags=["blonde_hair", "blue_eyes"],
+        focal=["looking_up"],
+    )
+    assert merged[0] == "looking_up"
+    assert "night" in merged
+    assert "moonlight" in merged
+    assert "rooftop" in merged
+    # wrong hair from draft dropped; lock kept
+    assert "brown_hair" not in merged
+    assert "blonde_hair" in merged
+    # day/blue_sky conflict with night draft → dropped
+    assert "day" not in merged
+    assert "blue_sky" not in merged
+    assert "smile" in merged
+    # richness tags (moonlight/night/rooftop) promoted ahead of leftover vocab
+    rich_idx = min(merged.index(t) for t in ("night", "moonlight", "rooftop"))
+    assert rich_idx < merged.index("smile")
+
+
+def test_merge_draft_wd14_tags_empty_draft_keeps_vocab():
+    merged = merge_draft_wd14_tags(
+        vocab_tags=["park", "smile"],
+        draft_tags=[],
+        lock_tags=["blonde_hair"],
+        focal=["waving"],
+    )
+    assert "waving" in merged
+    assert "park" in merged
+    assert "blonde_hair" in merged
+
+
+def test_build_draft_grounding_block_and_delta():
+    from app.story.generator import (
+        build_draft_grounding_block,
+        draft_richness_delta,
+    )
+    block = build_draft_grounding_block(
+        ["golden_hour", "rim_light", "bicycle", "storefront"],
+        locale="en",
+    )
+    assert "DRAFT GROUNDING" in block
+    assert "golden_hour" in block
+    assert "image model's own expression" in block
+    ja = build_draft_grounding_block(["neon", "cafe"], locale="ja")
+    assert "下書き接地" in ja
+    thin = "1girl, solo, smile, outdoors, day, standing"
+    rich = (
+        "1girl, solo, smile, outdoors, street, storefront, cafe, "
+        "bicycle, riding, sunset, golden_hour, rim_light, scarf"
+    )
+    delta = draft_richness_delta(before_tag_line=thin, after_tag_line=rich)
+    assert delta["after"] > delta["before"]
+    assert delta["delta"] > 0.1
+    assert delta["draft_lighting"] >= 1
+    assert delta["draft_environment"] >= 1
+
+
+def test_build_axis_prose_prompt_includes_draft_grounding():
+    from app.story.generator import build_draft_grounding_block
+    g = build_draft_grounding_block(["sunset", "bicycle", "rim_light"])
+    prompt = build_axis_prose_prompt(
+        story_text="She rides home at dusk.",
+        tag_line="1girl, riding_bicycle, sunset",
+        character_tags=["blonde_hair"],
+        character_desc="blonde girl",
+        prompt_style="danbooru+natural",
+        draft_grounding=g,
+    )
+    assert "DRAFT GROUNDING" in prompt
+    assert "Prefer DRAFT GROUNDING" in prompt
+    assert "rim_light" in prompt
+
+
 # ── user topic concretization (お題 narrative directive) ──────────────────────
 
 def test_build_topic_directive_prompt():
@@ -1563,8 +1868,11 @@ def test_candidates_prompt_topic_hoisted_above_base_image():
         locale="ja",
         time_scale="years",
     )
-    # the topic block appears BEFORE the base-image description
-    assert prompt.index("★ USER TOPIC") < prompt.index("UNIQUE_SCENE_MARKER")
+    # Topic leads the prompt (above HARD RULES / seeds / base image).
+    topic_at = prompt.index("★ USER TOPIC")
+    rules_marker = "【最優先ルール" if "【最優先ルール" in prompt else "HARD RULES"
+    assert topic_at < prompt.index(rules_marker)
+    assert topic_at < prompt.index("UNIQUE_SCENE_MARKER")
     # raw topic + narrative directive both present
     assert "廃墟を探索する冒険" in prompt
     assert "隠された過去に触れていく" in prompt
@@ -1572,6 +1880,10 @@ def test_candidates_prompt_topic_hoisted_above_base_image():
     assert "fixes the base act's LOOK only" in prompt
     # ongoing-action tense guidance preserved from the old topic_line
     assert "tense and aspect" in prompt
+    # HARD RULES carve-out for topics
+    assert "お題がある場合" in prompt or "USER TOPIC is given" in prompt
+    # All three spirits mention topic compatibility
+    assert prompt.count("USER TOPIC") >= 3
 
 
 def test_candidates_prompt_topic_without_directive():
@@ -1585,6 +1897,133 @@ def test_candidates_prompt_topic_without_directive():
     empty = build_candidates_prompt(character_desc="1girl", scene_desc="a room")
     assert "★ USER TOPIC" not in empty
     assert "No topic was given" in empty
+
+
+def test_candidates_off_topic_gate():
+    tokens = topic_anchor_tokens("廃墟を探索する冒険", "少女は廃墟を歩く")
+    assert any("廃墟" in t for t in tokens)
+    on_topic = [{
+        "id": "A",
+        "past": "廃墟の入口で懐中電灯を確かめる",
+        "present": "崩れた廊下を探索する",
+        "future": "地下で古い地図を見つける",
+    }] * 3
+    assert not candidates_off_topic(on_topic, "廃墟を探索する冒険")
+    off = [{
+        "id": "A",
+        "past": "教室でノートを開く",
+        "present": "窓辺で空を眺める",
+        "future": "放課後に友人と帰る",
+    }] * 3
+    assert candidates_off_topic(off, "廃墟を探索する冒険")
+    assert not candidates_off_topic(off, "")
+
+
+def test_topic_anchor_tokens_bilingual_cafe():
+    tokens = topic_anchor_tokens("この子がカフェで働く話")
+    assert "カフェ" in tokens
+    assert "cafe" in tokens
+    # English beats with cafe should pass a Japanese お題
+    en_cafe = [{
+        "id": "A",
+        "past": "She spills milk at the cafe counter",
+        "present": "She pours latte art at the cafe",
+        "future": "She trains a junior barista",
+        "title": "Cafe years",
+    }] * 3
+    assert not candidates_off_topic(en_cafe, "この子がカフェで働く話")
+
+
+def test_topic_anchor_tokens_festival_multi():
+    tokens = topic_anchor_tokens("夏祭りで遊ぶ三人の少女")
+    assert "夏祭" in tokens or "祭り" in tokens
+    assert "festival" in tokens
+    assert "3girls" in tokens or "trio" in tokens
+    en = [{
+        "id": "A",
+        "past": "Three girls buy squid at the summer festival",
+        "present": "The trio races under paper lanterns",
+        "future": "They share candy under fireworks at the festival",
+        "title": "Matsuri",
+    }] * 3
+    assert not candidates_off_topic(en, "夏祭りで遊ぶ三人の少女")
+
+
+def test_topic_anchor_tokens_single_kanji_rain_and_rooftop():
+    """1-kanji cues (雨/駅/星) and 屋上 must expand to EN for off-topic gating."""
+    rain = topic_anchor_tokens("雨の駅で待ち合わせ")
+    assert "rain" in rain and "station" in rain
+    assert any(t in rain for t in ("wait", "waiting", "meet", "meeting"))
+    rain_en = [{
+        "id": "A",
+        "past": "She waits on the rainy station platform",
+        "present": "She waves under an umbrella at the station",
+        "future": "They leave the station steps in the rain",
+        "title": "Platform",
+    }] * 3
+    assert not candidates_off_topic(rain_en, "雨の駅で待ち合わせ")
+
+    roof = topic_anchor_tokens("屋上で星を見る")
+    assert "rooftop" in roof and "star" in roof
+    roof_en = [{
+        "id": "A",
+        "past": "She opens the school rooftop door at night",
+        "present": "She points at a bright star on the rooftop",
+        "future": "She counts constellations on the rooftop",
+        "title": "Stars",
+    }] * 3
+    assert not candidates_off_topic(roof_en, "屋上で星を見る")
+    assert candidates_off_topic(
+        [{
+            "id": "A",
+            "past": "She kneads dough in a quiet kitchen",
+            "present": "She folds pastry on the counter",
+            "future": "She bakes bread at dawn",
+            "title": "Kitchen",
+        }] * 3,
+        "屋上で星を見る",
+    )
+
+
+def test_multi_character_drops_hair_eye_locks():
+    wd14 = [
+        "3girls", "multiple_girls", "blonde_hair", "black_hair",
+        "blue_eyes", "brown_eyes", "yukata", "hair_ornament",
+    ]
+    assert is_multi_character(wd14)
+    lock = identity_lock_tags(wd14, multi_character=True)
+    assert "blonde_hair" not in lock and "blue_eyes" not in lock
+    solo_lock = identity_lock_tags(
+        ["1girl", "solo", "blonde_hair", "blue_eyes", "hair_ornament"],
+        multi_character=False,
+    )
+    assert "blonde_hair" in solo_lock and "blue_eyes" in solo_lock
+
+
+def test_axis_tag_lines_collapsed_detects_paraphrase_overlap():
+    from app.story.generator import axis_tag_lines_collapsed
+    same = (
+        "1girl, holding, kitchen, dough, flour, wooden_board, indoors, "
+        "silver_hair, blue_eyes, solo, looking_at_viewer, detailed_background"
+    )
+    assert axis_tag_lines_collapsed(
+        {"past": same, "present": same, "future": same}
+    )
+    diverse = {
+        "past": (
+            "1girl, spilling, milk, pitcher, apron, cafe, morning, towel, "
+            "counter, reaching, silver_hair"
+        ),
+        "present": (
+            "1girl, pouring, latte_art, coffee_cup, cafe, window, steam, "
+            "ceramic, holding, silver_hair"
+        ),
+        "future": (
+            "1girl, wiping, pointing, teaching, espresso_machine, evening, "
+            "cloth, back_bar, silver_hair"
+        ),
+    }
+    assert not axis_tag_lines_collapsed(diverse)
 
 
 def test_coherence_hierarchy_scopes_image_vs_topic():

@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
+import StoryQualityRadar from './StoryQualityRadar.vue'
 
 const { t, locale } = useI18n()
 
@@ -67,6 +68,21 @@ function joinList(arr) {
   return (arr || []).join(t('storybook.listSep'))
 }
 const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
+
+function qualityDraftNote(story) {
+  const q = story?.quality_eval
+  if (!q) return ''
+  const dg = q.draft_grounding
+  if (dg && typeof dg === 'object') {
+    const n = (dg.axes || []).length
+    const d = Number(dg.mean_delta ?? 0)
+    return t('storybook.quality.draftGrounding', {
+      axes: n,
+      delta: (d >= 0 ? '+' : '') + d.toFixed(2),
+    })
+  }
+  return q.notes?.draft_grounding ? String(q.notes.draft_grounding) : ''
+}
 
 function matches(story, q) {
   if (!q) return true
@@ -603,9 +619,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 {{ storyTitle(detailStory) || t('storybook.details') }}
               </h2>
               <div class="flex items-center flex-wrap gap-2 mt-1.5 text-[10px] text-[var(--sb-muted)]">
+                <span v-if="detailStory.user_topic" class="text-teal-300/80">
+                  {{ t('chronicle.userTopic') }}: {{ detailStory.user_topic }}
+                </span>
                 <span v-if="detailStory.worldview" class="text-[var(--sb-amber)]/75">{{ detailStory.worldview }}</span>
                 <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
                   <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
+                </span>
+                <span v-if="detailStory.emotion" class="sb-meta-chip">
+                  {{ t('inspire.emotion.' + detailStory.emotion) }}
                 </span>
                 <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
                 <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
@@ -711,6 +733,27 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   </span>
                 </li>
               </ul>
+            </details>
+
+            <details v-if="detailStory.quality_eval?.dimensions"
+              class="px-6 sm:px-8 py-5 sb-section">
+              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-0">
+                <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
+                {{ t('storybook.quality.title') }}
+                <span class="ml-auto text-[11px] font-mono text-teal-300/80 normal-case tracking-normal font-normal">
+                  {{ Math.round((detailStory.quality_eval.overall || 0) * 100) }}
+                </span>
+              </summary>
+              <div class="mt-4">
+                <StoryQualityRadar :eval="detailStory.quality_eval" />
+                <p v-if="qualityDraftNote(detailStory)"
+                  class="mt-2 text-[10px] font-mono text-teal-300/70">
+                  {{ qualityDraftNote(detailStory) }}
+                </p>
+                <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
+                  {{ t('storybook.quality.hint') }}
+                </p>
+              </div>
             </details>
 
             <div v-for="(axis, ai) in AXES" :key="axis"

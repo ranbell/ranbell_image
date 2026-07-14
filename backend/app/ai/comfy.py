@@ -94,6 +94,91 @@ class ComfyUIClient:
                 return pos_id, neg_id
         return None, None
 
+    @classmethod
+    def _resolve_latent_node(cls, wf: dict, start_id: str) -> str | None:
+        """BFS from start_id through wire connections to find an EmptyLatent* node.
+
+        Mirrors ``_resolve_clip_node``: follow upstream links from a KSampler's
+        ``latent_image`` input until a known latent creator is found.
+        """
+        visited: set[str] = set()
+        queue = [start_id]
+        while queue:
+            nid = queue.pop(0)
+            if nid in visited:
+                continue
+            visited.add(nid)
+            node = wf.get(nid, {})
+            if node.get("class_type") in cls._LATENT_NODE_TYPES:
+                return nid
+            for v in node.get("inputs", {}).values():
+                if isinstance(v, list) and len(v) >= 1:
+                    queue.append(str(v[0]))
+        return None
+
+    @classmethod
+    def _find_latent_nodes_via_ksampler(cls, wf: dict) -> list[str]:
+        """Latent node ids reached from each KSampler's ``latent_image`` input."""
+        found: list[str] = []
+        seen: set[str] = set()
+        for node in wf.values():
+            if node.get("class_type") not in cls._KSAMPLER_TYPES:
+                continue
+            ref = (node.get("inputs") or {}).get("latent_image")
+            if not isinstance(ref, list) or not ref:
+                continue
+            lid = cls._resolve_latent_node(wf, str(ref[0]))
+            if lid and lid not in seen:
+                seen.add(lid)
+                found.append(lid)
+        return found
+
+    @classmethod
+    def _patch_node_int_field(
+        cls, wf: dict, node_id: str, key: str, value: int
+    ) -> bool:
+        """Set an int field on a node, or follow a wire to a Primitive and set it.
+
+        Replacing a wire ``[upstream, idx]`` with a bare int is also valid in
+        ComfyAPI graphs; we prefer patching the upstream Primitive when present
+        so other consumers of that Primitive stay consistent.
+        """
+        node = wf.get(node_id)
+        if not node:
+            return False
+        inputs = node.setdefault("inputs", {})
+        cur = inputs.get(key)
+        if isinstance(cur, bool):
+            return False
+        if isinstance(cur, (int, float)):
+            inputs[key] = int(value)
+            return True
+        if isinstance(cur, list) and len(cur) >= 1:
+            up_id = str(cur[0])
+            up = wf.get(up_id)
+            if not up:
+                # Dangling wire — replace with scalar so the graph still runs.
+                inputs[key] = int(value)
+                return True
+            up_inputs = up.setdefault("inputs", {})
+            up_type = up.get("class_type") or ""
+            if "value" in up_inputs and isinstance(up_inputs["value"], (int, float)):
+                up_inputs["value"] = int(value)
+                return True
+            if up_type in (
+                "PrimitiveNode", "PrimitiveInt", "PrimitiveFloat", "INT", "Float",
+            ):
+                up_inputs["value"] = int(value)
+                return True
+            # Unknown upstream — break the wire and set a scalar on the latent.
+            inputs[key] = int(value)
+            return True
+        # Field missing (unusual for EmptyLatent) — set it.
+        if key in ("width", "height", "batch_size"):
+            inputs[key] = int(value)
+            return True
+        return False
+
     def patch_workflow(
         self,
         workflow: dict,
@@ -103,6 +188,10 @@ class ComfyUIClient:
         neg_node_id: str = "",
         batch_count: int = 1,
         seed: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        steps: int | None = None,
+        cfg: float | None = None,
     ) -> dict:
         wf = copy.deepcopy(workflow)
 
@@ -127,10 +216,46 @@ class ComfyUIClient:
             elif len(fallback_clips) >= 2:
                 wf[fallback_clips[1]]["inputs"]["text"] = negative
 
-        if batch_count > 1:
-            for node in wf.values():
-                if node.get("class_type") in self._LATENT_NODE_TYPES:
-                    node["inputs"]["batch_size"] = batch_count
+        # Size / batch: only touch EmptyLatent* nodes that are actually wired
+        # into a KSampler.latent_image (same connection-tracing pattern as CLIP).
+        # Fall back to every EmptyLatent* only when no connected latent is found.
+        if batch_count > 1 or width is not None or height is not None:
+            latent_ids = self._find_latent_nodes_via_ksampler(wf)
+            if not latent_ids:
+                latent_ids = [
+                    k for k, v in wf.items()
+                    if v.get("class_type") in self._LATENT_NODE_TYPES
+                ]
+            for lid in latent_ids:
+                if batch_count > 1:
+                    self._patch_node_int_field(wf, lid, "batch_size", batch_count)
+                if width is not None:
+                    self._patch_node_int_field(wf, lid, "width", int(width))
+                if height is not None:
+                    self._patch_node_int_field(wf, lid, "height", int(height))
+
+        if steps is not None or cfg is not None:
+            for node_id, node in wf.items():
+                if node.get("class_type") not in self._KSAMPLER_TYPES:
+                    continue
+                inputs = node.setdefault("inputs", {})
+                if steps is not None and "steps" in inputs:
+                    cur = inputs["steps"]
+                    if isinstance(cur, list) and len(cur) >= 1:
+                        # Follow Primitive wire when present; else replace link.
+                        self._patch_node_int_field(wf, node_id, "steps", int(steps))
+                    elif isinstance(cur, (int, float)):
+                        inputs["steps"] = int(steps)
+                if cfg is not None and "cfg" in inputs:
+                    cur = inputs["cfg"]
+                    if isinstance(cur, list) and len(cur) >= 1:
+                        up = wf.get(str(cur[0]))
+                        if up and "value" in up.get("inputs", {}):
+                            up["inputs"]["value"] = float(cfg)
+                        else:
+                            inputs["cfg"] = float(cfg)
+                    elif isinstance(cur, (int, float)):
+                        inputs["cfg"] = float(cfg)
 
         if seed is not None:
             patched: set[str] = set()

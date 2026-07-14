@@ -2714,6 +2714,118 @@ async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: st
         return None
 
 
+async def _comfy_generate_bytes(
+    comfy,
+    cancel: CancelToken,
+    *,
+    workflow_name: str,
+    positive: str,
+    negative: str,
+    seed: int | None,
+    width: int | None = None,
+    height: int | None = None,
+    steps: int | None = None,
+) -> bytes | None:
+    """Queue one Comfy render and return the first output image bytes."""
+    import random as _random
+
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    wf = comfy.load_workflow(workflow_name)
+    patched = comfy.patch_workflow(
+        wf, positive, negative, "", "", 1,
+        seed=seed, width=width, height=height, steps=steps,
+    )
+    prompt_id = await comfy.queue_prompt(patched)
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception as exc:
+                logger.warning("ComfyUI queue delete failed: %s", exc)
+        try:
+            await comfy.interrupt()
+        except Exception as exc:
+            logger.warning("ComfyUI interrupt failed: %s", exc)
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    img_bytes: bytes | None = None
+    async for event in comfy.stream_progress(prompt_id):
+        cancel.raise_if_set()
+        queued = False
+        if event["type"] == "comfy_output":
+            for img_ref in event.get("images", []):
+                cancel.raise_if_set()
+                try:
+                    img_bytes = await comfy.fetch_image(
+                        img_ref["filename"],
+                        img_ref.get("subfolder", ""),
+                        img_ref.get("type", "output"),
+                    )
+                    if img_bytes:
+                        return img_bytes
+                except Exception as exc:
+                    logger.error("[chronicle] draft fetch error: %s", exc)
+
+    if img_bytes is None:
+        for img_ref in await comfy.fetch_history(prompt_id):
+            try:
+                img_bytes = await comfy.fetch_image(
+                    img_ref["filename"],
+                    img_ref.get("subfolder", ""),
+                    img_ref.get("type", "output"),
+                )
+                if img_bytes:
+                    return img_bytes
+            except Exception as exc:
+                logger.error("[chronicle] draft history fetch error: %s", exc)
+    return img_bytes
+
+
+async def _wd14_tags_from_path(path: Path, db) -> list[str]:
+    """Synchronous WD14 scan of an image path (do not wait on the watcher)."""
+    from ..ai import wd14 as wd14_mod
+    from ..runtime_config import get_runtime_config
+
+    cfg = await get_runtime_config(db)
+    threshold = float(cfg.get("wd14_threshold", 0.35))
+    model_dir = cfg.get("wd14_model_dir")
+    scored = await wd14_mod.predict_tags_scored(
+        path, threshold=threshold, model_dir=model_dir,
+    )
+    out: list[str] = []
+    seen: set[str] = set()
+    for tag, _score in scored:
+        name = str(tag).strip().replace(" ", "_")
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+async def _wd14_tags_from_bytes(img_bytes: bytes, db) -> list[str]:
+    """WD14-scan image bytes via a throwaway tempfile (never registered/persisted)."""
+    import tempfile
+
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(img_bytes)
+            path = Path(tmp.name)
+        return await _wd14_tags_from_path(path, db)
+    finally:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning("[chronicle] draft tempfile cleanup failed: %s", exc)
+
+
 async def run_chronicle_candidates(
     reporter: ProgressReporter,
     cancel: CancelToken,
@@ -2752,6 +2864,7 @@ async def run_chronicle_candidates(
         build_topic_directive_prompt,
         build_vision_prompt,
         candidates_degenerate,
+        candidates_off_topic,
         candidates_ungrounded,
         character_tags_from_wd14,
         filter_story_seed_pool,
@@ -3026,14 +3139,23 @@ async def run_chronicle_candidates(
                 parsed
                 and not candidates_degenerate(parsed)
                 and not candidates_ungrounded(parsed, story_seed_tags)
+                and not candidates_off_topic(
+                    parsed,
+                    body.user_topic,
+                    ctx.get("topic_directive", ""),
+                )
             ):
                 break
             if cand_attempt == 0:
-                logger.info("[chronicle] candidates thin/ungrounded; retrying with +temp")
+                logger.info(
+                    "[chronicle] candidates thin/ungrounded/off-topic; retrying with +temp"
+                )
                 _put({"type": "warning",
-                      "message": "candidates thin or ungrounded — regenerating"})
+                      "message": "candidates thin, ungrounded, or off-topic — regenerating"})
             else:
-                logger.warning("[chronicle] candidates still thin/ungrounded after retry")
+                logger.warning(
+                    "[chronicle] candidates still thin/ungrounded/off-topic after retry"
+                )
         if not candidates:
             _put({"type": "error", "message": "Failed to generate story candidates"})
             return
@@ -3096,10 +3218,13 @@ async def run_chronicle_expand(
     """PROMPT lane — Chronicle Phase 2: expand a chosen candidate, then prompts.
 
     Loads the draft, expands the selected candidate into the three acts in the
-    user's locale, translates to English when needed, then per non-base axis
-    runs visual exam + WD14 search on the finished story text, assembles image
-    prompts with identity-lock tags only (hair/eyes/accessories — never the base
-    image's scene must-tags), finalises the record, and submits image jobs.
+    user's locale, rewrites collapsed timelines/actions once when needed,
+    translates to English when needed, then per non-base axis runs visual exam
+    + WD14 search with scene must/forbid constraints, densifies thin tag lines
+    via Pass-1 JSON tags, optionally generates a cheap draft image and rebuilds
+    the prompt from its WD14 tags (Phase B), assembles image prompts with
+    identity-lock tags only (hair/eyes/accessories — never the base image's
+    scene must-tags), finalises the record, and submits image jobs.
 
     Re-invoking this (respin) archives the previous final story in
     respin_history before overwriting.
@@ -3120,9 +3245,18 @@ async def run_chronicle_expand(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         AXES,
+        _chronicle_tags_degenerate,
+        acts_temporally_distinct,
+        activities_temporally_distinct,
+        apply_scene_constraints,
+        axis_slots_collapsed,
+        axis_tag_lines_collapsed,
         bind_timetable_axis_slots,
         build_axis_prose_prompt,
+        build_axis_tags_prompt,
         build_concrete_activities_prompt,
+        build_differentiate_acts_prompt,
+        build_differentiate_activities_prompt,
         build_expand_prompt,
         build_json_translation_prompt,
         build_timetable_prompt,
@@ -3133,10 +3267,21 @@ async def run_chronicle_expand(
         build_translation_to_english_prompt,
         chunk_list,
         collect_prompt_tags,
+        find_identity_mutex_conflicts,
+        find_mutex_conflict_tags,
         identity_lock_tags,
+        infer_axis_scene_constraints,
         inject_identity_tags,
         is_multi_character,
+        build_draft_grounding_block,
+        draft_richness_delta,
         merge_chronicle_axis_tags,
+        merge_category_tags,
+        merge_draft_wd14_tags,
+        parse_axis_tags_json,
+        parse_visual_script_category_tags,
+        bucket_danbooru_tags,
+        CHRONICLE_CAT_FIELDS,
         parse_concrete_activities_json,
         parse_english_translation_json,
         parse_story_json,
@@ -3145,6 +3290,8 @@ async def run_chronicle_expand(
         parse_timetable_json,
         parse_visual_plan_json,
         remove_conflict_tags,
+        should_differentiate_acts,
+        should_use_draft_refine,
         translation_values_complete,
     )
 
@@ -3240,55 +3387,72 @@ async def run_chronicle_expand(
 
         # ── Timetable: map her life onto concrete moments (scale-adaptive) so the
         # acts depict specific daily activities from her life, not idle poses.
-        # Short scales skip the full-day table — the span is too brief to chart.
+        # Prompt builder is scale-adaptive (including minutes); always attempt it.
         timetable: list[dict] = []
         timetable_ja: list[dict] = []
         axis_slots: dict[str, dict] = {}
-        if body.time_scale in ("minutes", "tens_of_minutes"):
-            axis_slots = {}
-        else:
-            _phase("buildingTimetable", 0.10, "Charting her day...")
+        _phase("buildingTimetable", 0.10, "Charting her day...")
+        # Re-surface biography so the Reasoning panel is not empty after resetStory().
+        if biography:
+            _put({
+                "type": "biography",
+                "biography": biography,
+                "biography_ja": biography_ja,
+            })
+        for tt_attempt in range(2):
             try:
+                tt_options = dict(options)
+                if tt_attempt == 1:
+                    tt_options["temperature"] = min(
+                        1.3, float(options.get("temperature", 0.8)) + 0.2
+                    )
                 timetable = parse_timetable_json(await ollama.generate_text(
                     build_timetable_prompt(
                         biography=biography, scene_desc=scene_desc,
                         time_scale=body.time_scale, base_axis=body.base_time_axis,
                         locale=locale, selected=selected, user_topic=body.user_topic,
                     ),
-                    model=vlm_model, options=options, fmt="json", think=True,
+                    model=vlm_model, options=tt_options, fmt="json", think=True,
                 ))
             except Exception as exc:
                 logger.warning("[chronicle] timetable build failed: %s", exc)
+                timetable = []
             if timetable:
-                axis_slots = bind_timetable_axis_slots(
-                    timetable, base_axis=body.base_time_axis,
-                )
-            # Timetable is authored in English; always keep a Japanese copy so the
-            # Storybook JA/EN toggle works regardless of content locale.
-            if timetable:
-                try:
-                    merged_ja: list = []
-                    for chunk in chunk_list(timetable, 4):
-                        part = parse_timetable_json(await ollama.generate_text(
-                            build_json_translation_prompt(chunk, target="Japanese"),
-                            model=vlm_model, options=options, fmt="json",
-                        ))
-                        if isinstance(part, list):
-                            merged_ja.extend(part)
-                    timetable_ja = merged_ja
+                break
+            if tt_attempt == 0:
+                logger.info("[chronicle] timetable empty; retrying once")
+        if timetable:
+            axis_slots = bind_timetable_axis_slots(
+                timetable, base_axis=body.base_time_axis,
+            )
+        else:
+            _put({"type": "warning",
+                  "message": "Timetable could not be built — continuing without it."})
+        # Always emit so the UI can show or clear the section (never silent).
+        if timetable:
+            try:
+                merged_ja: list = []
+                for chunk in chunk_list(timetable, 4):
+                    part = parse_timetable_json(await ollama.generate_text(
+                        build_json_translation_prompt(chunk, target="Japanese"),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                    if isinstance(part, list):
+                        merged_ja.extend(part)
+                timetable_ja = merged_ja
+                if not translation_values_complete(timetable, timetable_ja):
+                    timetable_ja = parse_timetable_json(await ollama.generate_text(
+                        build_json_translation_prompt(timetable, target="Japanese"),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
                     if not translation_values_complete(timetable, timetable_ja):
-                        timetable_ja = parse_timetable_json(await ollama.generate_text(
-                            build_json_translation_prompt(timetable, target="Japanese"),
-                            model=vlm_model, options=options, fmt="json",
-                        ))
-                        if not translation_values_complete(timetable, timetable_ja):
-                            logger.warning(
-                                "[chronicle] timetable JA translation still incomplete"
-                            )
-                except Exception as exc:
-                    logger.warning("[chronicle] timetable translation failed: %s", exc)
-                _put({"type": "timetable",
-                      "timetable": timetable, "timetable_ja": timetable_ja})
+                        logger.warning(
+                            "[chronicle] timetable JA translation still incomplete"
+                        )
+            except Exception as exc:
+                logger.warning("[chronicle] timetable translation failed: %s", exc)
+        _put({"type": "timetable",
+              "timetable": timetable, "timetable_ja": timetable_ja})
 
         # English candidate beats (fallback + WD14 query base).
         beats = {a: str(selected.get(a) or "").strip() for a in AXES}
@@ -3328,6 +3492,35 @@ async def run_chronicle_expand(
             ))
         except Exception as exc:
             logger.warning("[chronicle] concrete activities failed: %s", exc)
+
+        # Push collapsed actions apart (and when timetable slots themselves collapsed).
+        if (
+            concrete
+            and should_differentiate_acts(body.time_scale)
+            and (
+                not activities_temporally_distinct(concrete)
+                or axis_slots_collapsed(axis_slots)
+            )
+        ):
+            _phase("differentiating", 0.15, "Separating the three actions...")
+            try:
+                rewritten = parse_concrete_activities_json(await ollama.generate_text(
+                    build_differentiate_activities_prompt(
+                        activities=concrete,
+                        selected=selected,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale,
+                        scene_desc=scene_desc,
+                        axis_slots=axis_slots,
+                        user_topic=body.user_topic,
+                    ),
+                    model=vlm_model, options=options, fmt="json", think=True,
+                ))
+                if all(rewritten.get(a) for a in AXES):
+                    concrete = rewritten
+            except Exception as exc:
+                logger.warning("[chronicle] differentiate activities failed: %s", exc)
+
         # Prefer the concrete action; fall back to the English candidate beat.
         situation_en = {a: (concrete.get(a) or beats_en[a]) for a in AXES}
         # Surface the reasoning: what she is doing at each moment (+ JA for clarity).
@@ -3435,6 +3628,46 @@ async def run_chronicle_expand(
             except Exception as exc:
                 logger.warning("[chronicle] overall fallback failed: %s", exc)
 
+        # ── Timeline teeth: if the three acts collapsed into one moment, rewrite
+        # once. Skipped for micro scales where near-duplicate beats are correct.
+        if (
+            should_differentiate_acts(body.time_scale)
+            and not acts_temporally_distinct(stories)
+        ):
+            _phase("differentiating", 0.22, "Separating the three moments...")
+            try:
+                diff_tokens: list[str] = []
+                async for event in ollama.generate_text_stream(
+                    build_differentiate_acts_prompt(
+                        title=title,
+                        overall=overall,
+                        stories=stories,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale,
+                        locale=locale,
+                    ),
+                    model=vlm_model, options=options, think=True,
+                ):
+                    if _abort.is_set():
+                        raise JobCancelled()
+                    _put(event)
+                    if event["type"] == "token":
+                        diff_tokens.append(event["text"])
+                diff_sections = parse_story_sections("".join(diff_tokens))
+                if all(diff_sections.get(a) for a in AXES):
+                    stories = {a: diff_sections[a] for a in AXES}
+                    title = diff_sections.get("title") or title
+                    overall = diff_sections.get("overall") or overall
+                else:
+                    logger.warning(
+                        "[chronicle] differentiate rewrite incomplete — keeping original acts"
+                    )
+            except JobCancelled:
+                raise
+            except Exception as exc:
+                logger.warning("[chronicle] differentiate rewrite failed: %s", exc)
+            cancel.raise_if_set()
+
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
         # English canonical copy — also the WD14 / visual-exam query source.
@@ -3457,9 +3690,42 @@ async def run_chronicle_expand(
             stories_ja = {a: "" for a in AXES}
             en_title, en_overall, en_stories = title, overall, stories
 
+        # ── Seed + Phase B draft-refine gate (needed before axis prompt loop) ─
+        import random as _random
+
+        seed: int | None = None
+        seed_warning = ""
+        if body.use_ref_seed:
+            seed = (doc.get("model_info") or {}).get("seed") \
+                or (doc.get("creation_record") or {}).get("seed")
+            if seed is None:
+                seed_warning = "Base image has no seed info — using a new random seed."
+        if seed is None:
+            seed = _random.randint(0, (1 << 64) - 1)
+        if seed_warning:
+            _put({"type": "warning", "message": seed_warning})
+
+        draft_refine = should_use_draft_refine(
+            mode=getattr(body, "use_draft_refine", "auto"),
+            time_scale=body.time_scale,
+            divergence=divergence,
+            workflow_name=body.workflow_name,
+            manual_mode=body.manual_mode,
+        )
+        if draft_refine:
+            _put({
+                "type": "warning",
+                "message": (
+                    "Draft grounding on — borrow the image model's expression: "
+                    "low-res draft → WD14 → rebuild lighting/atmosphere/props "
+                    "before final generation (main quality lever)."
+                ),
+            })
+
         # ── Per non-base axis: shot plan on finished story → WD14 search → prompt
         prompts: dict[str, dict] = {}
         visual_plans: dict[str, dict] = {}
+        draft_deltas: dict[str, dict] = {}
         for i, axis in enumerate(gen_axes):
             story_en = en_stories.get(axis) or situation_en[axis]
 
@@ -3489,10 +3755,15 @@ async def run_chronicle_expand(
             visual_plans[axis] = visual_plan
             focal = visual_plan.get("focal_action_tags") or []
             gesture = visual_plan.get("gesture_prose") or ""
+            expr = (visual_plan.get("expression_tag") or "").strip().replace(" ", "_")
+            if expr and expr not in focal:
+                focal = [*focal, expr]
             cancel.raise_if_set()
 
-            # (2) WD14 vector search on the finished story (+ gesture + topic).
+            # (2) WD14 vector search on the finished story (+ gesture + topic),
+            #     then apply story-derived must/forbid (day↔night, indoor↔outdoor).
             _phase("taggingAxis", 0.44 + 0.16 * i, f"Searching {axis} tags...")
+            scene_constraints = infer_axis_scene_constraints(story_en)
             query = " ".join(
                 x for x in [story_en, gesture, ", ".join(focal), body.user_topic] if x
             )
@@ -3507,6 +3778,8 @@ async def run_chronicle_expand(
                     ))
                 except Exception as exc:
                     logger.warning("[chronicle] %s tag fallback failed: %s", axis, exc)
+            axis_search_tags = apply_scene_constraints(axis_search_tags, scene_constraints)
+            focal = apply_scene_constraints(focal, scene_constraints)
             cancel.raise_if_set()
 
             _put({
@@ -3518,6 +3791,12 @@ async def run_chronicle_expand(
                 "camera": visual_plan.get("camera_angle", ""),
                 "gesture": gesture,
                 "search_tags": axis_search_tags[:14],
+                "scene_constraints": {
+                    "time_of_day": scene_constraints.get("time_of_day", ""),
+                    "indoor_outdoor": scene_constraints.get("indoor_outdoor", ""),
+                    "must_tags": scene_constraints.get("must_tags", [])[:8],
+                    "forbid_tags": scene_constraints.get("forbid_tags", [])[:12],
+                },
             })
 
             # (3) Assemble tags: focal + searched scene + identity lock only.
@@ -3531,9 +3810,78 @@ async def run_chronicle_expand(
             tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
             tag_line = _strip_quality_metatags(tag_line)
 
+            # (3b) Densify thin tag lines via Pass-1 JSON tags (previously unwired).
+            # Pass-1 stays danbooru-tag-centric so the VLM does not freestyle prose.
+            neg_supplement = ""
+            pass1_cats: dict = {}
+            degenerate, deg_reason = _chronicle_tags_degenerate(tag_line)
+            if degenerate:
+                _phase("refiningPromptTags", 0.48 + 0.16 * i,
+                       f"Densifying {axis} tags ({deg_reason})...")
+                try:
+                    denser_opts = dict(options)
+                    denser_opts["temperature"] = min(
+                        1.3, float(denser_opts.get("temperature", 1.0)) + 0.15
+                    )
+                    raw_tags = await ollama.generate_text(
+                        build_axis_tags_prompt(
+                            story_text=story_en,
+                            character_tags=lock_tags,
+                            character_desc=character_desc,
+                            wd14_context=wd14_context,
+                            time_scale=body.time_scale,
+                            axis=axis,
+                            base_axis=body.base_time_axis,
+                            title=en_title,
+                            overall=en_overall,
+                            all_stories=en_stories,
+                            axis_tags=axis_search_tags,
+                            visual_plan=visual_plan,
+                            emotion=body.emotion,
+                            user_topic=body.user_topic,
+                        ),
+                        model=vlm_model, options=denser_opts, fmt="json", think=True,
+                    )
+                    pass1_line, pass1_cats, neg_supplement = parse_axis_tags_json(raw_tags)
+                    if pass1_line:
+                        # Prefer denser Pass-1 while keeping search/focal/lock grounding.
+                        blended_search = list(dict.fromkeys(
+                            [t.strip() for t in pass1_line.split(",") if t.strip()]
+                            + list(axis_search_tags)
+                            + list(focal)
+                        ))
+                        blended_search = apply_scene_constraints(
+                            blended_search, scene_constraints
+                        )
+                        axis_search_tags = blended_search
+                        tag_line = merge_chronicle_axis_tags(
+                            focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+                        )
+                        tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+                        tag_line = inject_identity_tags(tag_line, lock_tags)
+                        parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                        tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
+                        tag_line = _strip_quality_metatags(tag_line)
+                        still_bad, still_reason = _chronicle_tags_degenerate(tag_line)
+                        if still_bad:
+                            _put({
+                                "type": "warning",
+                                "message": (
+                                    f"{axis}: tags still thin after densify "
+                                    f"({still_reason})"
+                                ),
+                            })
+                except Exception as exc:
+                    logger.warning("[chronicle] %s tag densify failed: %s", axis, exc)
+
             # (4) Refine pass-2 visual script over the tag line.
+            axis_cats: dict = {}
             if body.prompt_style == "danbooru":
                 positive, negative = tag_line, ""
+                prose = ""
+                axis_cats = merge_category_tags(
+                    pass1_cats, bucket_danbooru_tags(tag_line),
+                )
             else:
                 _phase("refiningPromptProse", 0.50 + 0.16 * i, f"Writing {axis} prompt...")
                 _put({"type": "token", "text": f"\n\n— {axis} —\n"})
@@ -3554,6 +3902,7 @@ async def run_chronicle_expand(
                     visual_plan=visual_plan,
                     emotion=body.emotion,
                     user_topic=body.user_topic,
+                    negative_supplement=neg_supplement,
                 )
                 axis_tokens: list[str] = []
                 async for event in ollama.generate_text_stream(
@@ -3571,36 +3920,82 @@ async def run_chronicle_expand(
                 if not positive:
                     positive = tag_line
 
-            if body.prompt_style == "danbooru":
-                prose = ""
-            elif body.prompt_style == "natural":
-                tag_line, prose = "", positive
-            else:  # danbooru+natural
-                head, _, tail = positive.partition("\n\n")
-                tag_line, prose = head.strip(), tail.strip()
-            if tag_line:
-                tag_line = _strip_quality_metatags(tag_line)
-                tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+                if body.prompt_style == "natural":
+                    # Prose + optional category footer; no leading tag line.
+                    prose, vs_cats = parse_visual_script_category_tags(positive)
+                    tag_line = ""
+                    axis_cats = merge_category_tags(
+                        pass1_cats, vs_cats, bucket_danbooru_tags(
+                            ", ".join(
+                                t for ts in (pass1_cats or {}).values() for t in ts
+                            )
+                        ),
+                    )
+                else:  # danbooru+natural
+                    head, _, tail = positive.partition("\n\n")
+                    tag_line, rest = head.strip(), tail.strip()
+                    prose, vs_cats = parse_visual_script_category_tags(rest)
+                    axis_cats = merge_category_tags(
+                        pass1_cats, vs_cats, bucket_danbooru_tags(tag_line),
+                    )
+                if tag_line:
+                    tag_line = _strip_quality_metatags(tag_line)
+                    tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
 
             # (5) Conflict cleanup vs the finished story + re-lock identity.
+            # Mechanical mutex (day↔night / indoor↔outdoor / hair·eye lock) runs
+            # first; the LLM conflict pass is additive on top when enabled.
             cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
             sources = list(dict.fromkeys(lock_tags + axis_search_tags + cand_tags))[:80]
+            preferred = list(dict.fromkeys(
+                list(scene_constraints.get("must_tags") or []) + list(lock_tags)
+            ))
             conflicts: set[str] = set()
+            conflicts |= find_mutex_conflict_tags(sources, preferred=preferred)
+            conflicts |= find_identity_mutex_conflicts(sources, lock_tags)
+            # Story forbid list is authoritative even when tags slipped past apply.
+            conflicts |= {
+                str(t).strip().replace(" ", "_")
+                for t in (scene_constraints.get("forbid_tags") or [])
+                if t
+            }
             if body.suppress_conflict_tags and sources:
                 try:
-                    conflicts = await _find_conflict_tags(
+                    conflicts |= await _find_conflict_tags(
                         story_en[:400], sources, db, ollama, vlm_model
                     )
                 except Exception as exc:
                     logger.warning("[chronicle] %s conflict pass failed: %s", axis, exc)
+            # Never strip identity lock via conflict cleanup.
+            lock_keys = {t.lower().replace(" ", "_") for t in lock_tags}
+            conflicts = {
+                c for c in conflicts
+                if c.lower().replace(" ", "_") not in lock_keys
+            }
             inject = [t for t in lock_tags if t not in conflicts]
+            must_keep = [
+                t for t in (scene_constraints.get("must_tags") or [])
+                if t.lower().replace(" ", "_") not in {
+                    c.lower().replace(" ", "_") for c in conflicts
+                }
+            ]
             if tag_line and inject:
                 tag_line = inject_identity_tags(tag_line, inject)
                 parts = [t.strip() for t in tag_line.split(",") if t.strip()]
                 tag_line = ", ".join(_apply_must_replacements(parts, inject))
+            if tag_line and must_keep:
+                parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                tag_line = ", ".join(apply_scene_constraints(parts, {
+                    "must_tags": must_keep, "forbid_tags": [],
+                }))
             if prose and inject:
                 prose = _correct_prose_wd14_conflicts(prose, inject)
-            positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)
+            # Comfy payload: danbooru tag line + Visual Script prose only
+            # (category lines are metadata — Refine parity).
+            positive = (
+                f"{tag_line}\n\n{prose}".strip()
+                if tag_line and prose else (tag_line or prose)
+            )
             positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
             if not positive:
                 _put({"type": "error", "message": f"Prompt build failed for {axis}"})
@@ -3610,14 +4005,315 @@ async def run_chronicle_expand(
                 removal,
                 all_lines=(body.prompt_style in ("detailed", "danbooru")),
             )
-            prompts[axis] = {"positive": positive, "negative": negative}
+            if not axis_cats:
+                axis_cats = bucket_danbooru_tags(
+                    tag_line or positive.split("\n\n")[0]
+                )
+            prompts[axis] = {
+                "positive": positive,
+                "negative": negative,
+                "visual_script": prose or "",
+                **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
+            }
             axis_evt: dict = {
                 "type": "axis_prompt", "axis": axis,
                 "positive": positive, "negative": negative,
+                "visual_script": prose or "",
             }
+            for k in CHRONICLE_CAT_FIELDS:
+                if axis_cats.get(k):
+                    axis_evt[k] = axis_cats[k]
             if removed_tags:
                 axis_evt["removed_tags"] = removed_tags
             _put(axis_evt)
+
+            # ── Phase B: cheap draft → sync WD14 → rebuild prompt ─────────────
+            if draft_refine:
+                _phase("draftingAxis", 0.58 + 0.08 * i, f"Drafting {axis} scene...")
+                try:
+                    draft_bytes = await _comfy_generate_bytes(
+                        comfy, cancel,
+                        workflow_name=body.workflow_name,
+                        positive=positive,
+                        negative=negative,
+                        seed=seed,
+                        width=int(getattr(body, "draft_width", 512) or 512),
+                        height=int(getattr(body, "draft_height", 512) or 512),
+                        steps=int(getattr(body, "draft_steps", 12) or 12),
+                    )
+                except Exception as exc:
+                    logger.warning("[chronicle] %s draft generate failed: %s", axis, exc)
+                    draft_bytes = None
+                if not draft_bytes:
+                    _put({"type": "warning",
+                          "message": f"{axis}: draft refine skipped (no draft image)"})
+                else:
+                    draft_tags: list[str] = []
+                    _phase("scanningDraft", 0.60 + 0.08 * i,
+                           f"Scanning {axis} draft tags...")
+                    try:
+                        draft_tags = await _wd14_tags_from_bytes(draft_bytes, db)
+                        draft_tags = filter_tag_list(draft_tags, removal)
+                    except Exception as exc:
+                        logger.warning(
+                            "[chronicle] %s draft WD14 failed: %s", axis, exc
+                        )
+                    # Draft bytes are discarded after the scan — never registered.
+                    if not draft_tags:
+                        _put({
+                            "type": "axis_draft",
+                            "axis": axis,
+                            "draft_tags": [],
+                        })
+                    if draft_tags:
+                        _phase("refiningPromptProse", 0.62 + 0.08 * i,
+                               f"Rebuilding {axis} prompt from draft...")
+                        # Snapshot pre-draft richness so we can measure the lift.
+                        before_tag_line = merge_chronicle_axis_tags(
+                            focal=focal,
+                            search_tags=list(axis_search_tags),
+                            lock_tags=lock_tags,
+                        )
+                        blended = merge_draft_wd14_tags(
+                            vocab_tags=axis_search_tags,
+                            draft_tags=draft_tags,
+                            lock_tags=lock_tags,
+                            focal=focal,
+                        )
+                        blended = apply_scene_constraints(blended, scene_constraints)
+                        axis_search_tags = blended
+                        tag_line = merge_chronicle_axis_tags(
+                            focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+                        )
+                        tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+                        tag_line = inject_identity_tags(tag_line, lock_tags)
+                        parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                        tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
+                        tag_line = _strip_quality_metatags(tag_line)
+                        richness_delta = draft_richness_delta(
+                            before_tag_line=before_tag_line,
+                            after_tag_line=tag_line,
+                        )
+                        if richness_delta:
+                            draft_deltas[axis] = richness_delta
+                        draft_evt: dict = {
+                            "type": "axis_draft",
+                            "axis": axis,
+                            "draft_tags": draft_tags[:24],
+                        }
+                        if richness_delta:
+                            draft_evt["draft_richness_delta"] = richness_delta
+                        _put(draft_evt)
+                        grounding = build_draft_grounding_block(draft_tags)
+
+                        if body.prompt_style == "danbooru":
+                            positive, negative = tag_line, negative or ""
+                            prose = ""
+                            axis_cats = merge_category_tags(
+                                bucket_danbooru_tags(tag_line),
+                            )
+                        else:
+                            try:
+                                prose_prompt = build_axis_prose_prompt(
+                                    story_text=story_en,
+                                    tag_line=tag_line,
+                                    character_tags=lock_tags,
+                                    character_desc=character_desc,
+                                    prompt_style=body.prompt_style,
+                                    wd14_context=wd14_context,
+                                    time_scale=body.time_scale,
+                                    axis=axis,
+                                    base_axis=body.base_time_axis,
+                                    title=en_title,
+                                    overall=en_overall,
+                                    all_stories=en_stories,
+                                    axis_tags=axis_search_tags,
+                                    visual_plan=visual_plan,
+                                    emotion=body.emotion,
+                                    user_topic=body.user_topic,
+                                    draft_grounding=grounding,
+                                )
+                                axis_tokens2: list[str] = []
+                                async for event in ollama.generate_text_stream(
+                                    prose_prompt, model=vlm_model, options=options
+                                ):
+                                    if _abort.is_set():
+                                        raise JobCancelled()
+                                    _put(event)
+                                    if event["type"] == "token":
+                                        axis_tokens2.append(event["text"])
+                                positive, neg2 = _parse_positive_negative(
+                                    "".join(axis_tokens2)
+                                )
+                                positive = _clean_markdown(positive)
+                                neg2 = _clean_markdown(neg2)
+                                if neg2:
+                                    negative = neg2
+                                if not positive:
+                                    positive = tag_line
+                            except Exception as exc:
+                                logger.warning(
+                                    "[chronicle] %s draft prose rebuild failed: %s",
+                                    axis, exc,
+                                )
+                                positive = tag_line
+
+                            if body.prompt_style == "natural":
+                                prose, vs_cats = parse_visual_script_category_tags(
+                                    positive
+                                )
+                                tag_line = ""
+                            else:
+                                head, _, tail = positive.partition("\n\n")
+                                tag_line, rest = head.strip(), tail.strip()
+                                prose, vs_cats = parse_visual_script_category_tags(
+                                    rest
+                                )
+                            axis_cats = merge_category_tags(
+                                vs_cats, bucket_danbooru_tags(tag_line),
+                            )
+                            if tag_line:
+                                tag_line = _strip_quality_metatags(tag_line)
+                                tag_line = _ensure_subject_anchor(
+                                    tag_line, [(doc, 0)]
+                                )
+
+                        cand_tags = collect_prompt_tags(
+                            f"{tag_line}\n\n{prose}".strip()
+                        )
+                        sources = list(dict.fromkeys(
+                            lock_tags + axis_search_tags + cand_tags
+                        ))[:80]
+                        preferred = list(dict.fromkeys(
+                            list(scene_constraints.get("must_tags") or [])
+                            + list(lock_tags)
+                        ))
+                        conflicts = set()
+                        conflicts |= find_mutex_conflict_tags(
+                            sources, preferred=preferred
+                        )
+                        conflicts |= find_identity_mutex_conflicts(
+                            sources, lock_tags
+                        )
+                        conflicts |= {
+                            str(t).strip().replace(" ", "_")
+                            for t in (scene_constraints.get("forbid_tags") or [])
+                            if t
+                        }
+                        if body.suppress_conflict_tags and sources:
+                            try:
+                                conflicts |= await _find_conflict_tags(
+                                    story_en[:400], sources, db, ollama, vlm_model
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "[chronicle] %s draft conflict pass failed: %s",
+                                    axis, exc,
+                                )
+                        lock_keys = {
+                            t.lower().replace(" ", "_") for t in lock_tags
+                        }
+                        conflicts = {
+                            c for c in conflicts
+                            if c.lower().replace(" ", "_") not in lock_keys
+                        }
+                        inject = [t for t in lock_tags if t not in conflicts]
+                        must_keep = [
+                            t for t in (scene_constraints.get("must_tags") or [])
+                            if t.lower().replace(" ", "_") not in {
+                                c.lower().replace(" ", "_") for c in conflicts
+                            }
+                        ]
+                        if tag_line and inject:
+                            tag_line = inject_identity_tags(tag_line, inject)
+                            parts = [
+                                t.strip() for t in tag_line.split(",") if t.strip()
+                            ]
+                            tag_line = ", ".join(
+                                _apply_must_replacements(parts, inject)
+                            )
+                        if tag_line and must_keep:
+                            parts = [
+                                t.strip() for t in tag_line.split(",") if t.strip()
+                            ]
+                            tag_line = ", ".join(apply_scene_constraints(parts, {
+                                "must_tags": must_keep, "forbid_tags": [],
+                            }))
+                        if prose and inject:
+                            prose = _correct_prose_wd14_conflicts(prose, inject)
+                        positive = (
+                            f"{tag_line}\n\n{prose}".strip()
+                            if tag_line and prose else (tag_line or prose)
+                        )
+                        positive = remove_conflict_tags(
+                            positive, conflicts, include_prose_groups=True
+                        )
+                        if positive:
+                            positive, removed_tags = _remove_forced_tags(
+                                positive,
+                                removal,
+                                all_lines=(body.prompt_style in (
+                                    "detailed", "danbooru"
+                                )),
+                            )
+                            prompts[axis] = {
+                                "positive": positive,
+                                "negative": negative,
+                                "visual_script": prose or "",
+                                "refined_from_draft": True,
+                                **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
+                            }
+                            refined_evt: dict = {
+                                "type": "axis_prompt",
+                                "axis": axis,
+                                "positive": positive,
+                                "negative": negative,
+                                "visual_script": prose or "",
+                                "refined_from_draft": True,
+                            }
+                            for k in CHRONICLE_CAT_FIELDS:
+                                if axis_cats.get(k):
+                                    refined_evt[k] = axis_cats[k]
+                            if removed_tags:
+                                refined_evt["removed_tags"] = removed_tags
+                            if axis in draft_deltas:
+                                refined_evt["draft_richness_delta"] = draft_deltas[axis]
+                            _put(refined_evt)
+
+        # Cross-axis tag diversity: catch paraphrase collapses prose gates missed.
+        if should_differentiate_acts(body.time_scale):
+            tag_snapshot = {
+                a: (prompts.get(a) or {}).get("positive") or "" for a in AXES
+            }
+            if axis_tag_lines_collapsed(tag_snapshot):
+                _put({
+                    "type": "warning",
+                    "message": (
+                        "Axis prompts look visually similar — "
+                        "past/present/future may read as the same shot. "
+                        "Try a higher divergence or Respin story."
+                    ),
+                })
+
+        # Multi-axis quality radar (topic fit, diversity, expression, …).
+        quality_eval: dict = {}
+        try:
+            from ..story.quality import evaluate_chronicle_quality
+            quality_eval = evaluate_chronicle_quality(
+                user_topic=body.user_topic,
+                title=en_title,
+                overall=en_overall,
+                stories=en_stories,
+                activities=concrete or situation_en,
+                prompts=prompts,
+                time_scale=body.time_scale,
+                lock_tags=lock_tags,
+                draft_deltas=draft_deltas or None,
+            )
+            _put({"type": "quality_eval", **quality_eval})
+        except Exception as exc:
+            logger.warning("[chronicle] quality_eval failed: %s", exc)
+            quality_eval = {}
 
         # ── Finalise the record (patch draft → final) ─────────────────────────
         _phase("savingStory", 0.82, "Saving story...")
@@ -3641,7 +4337,7 @@ async def run_chronicle_expand(
         except Exception as exc:
             logger.warning("[chronicle] story embed failed: %s", exc)
 
-        await story_db.set_story_payload(db, story_id, {
+        save_payload = {
             "status": "final",
             "selected_candidate": candidate_id,
             "time_scale": body.time_scale,
@@ -3661,7 +4357,10 @@ async def run_chronicle_expand(
             "pinups": _current_pinups(doc),
             "pinup_image_id": doc.get("pinup_image_id"),
             "context": {**ctx, "axis_slots": axis_slots},
-        })
+        }
+        if quality_eval:
+            save_payload["quality_eval"] = quality_eval
+        await story_db.set_story_payload(db, story_id, save_payload)
         if embedding:
             try:
                 await story_db.set_story_embedding(db, story_id, embedding)
@@ -3671,21 +4370,6 @@ async def run_chronicle_expand(
         if locale == "ja":
             _put({"type": "translation", "title_ja": title_ja, "overall_ja": overall_ja,
                   **{f"{a}_ja": stories_ja[a] for a in AXES}})
-
-        # ── Seed resolution ───────────────────────────────────────────────────
-        import random as _random
-
-        seed: int | None = None
-        seed_warning = ""
-        if body.use_ref_seed:
-            seed = (doc.get("model_info") or {}).get("seed") \
-                or (doc.get("creation_record") or {}).get("seed")
-            if seed is None:
-                seed_warning = "Base image has no seed info — using a new random seed."
-        if seed is None:
-            seed = _random.randint(0, (1 << 64) - 1)
-        if seed_warning:
-            _put({"type": "warning", "message": seed_warning})
 
         # ── Submit image jobs (auto mode) ─────────────────────────────────────
         image_jobs: list[dict] = []

@@ -794,16 +794,26 @@ _TAG_TO_AXIS: dict[str, str] = _build_tag_to_axis()
 
 
 def _get_tag_axis(tag: str) -> str | None:
-    """Return the axis for a tag; None if not in any frozenset. Suffix patterns take precedence."""
+    """Return the axis for a tag; None if not in any frozenset. Suffix patterns take precedence.
+
+    Expression / gaze tags that end in ``_eyes`` (closed_eyes, teary_eyes…) must
+    NOT be forced into always_fixed — that path was freezing emotion and killing
+    facial diversity. Known frozenset/LLM map entries win first.
+    """
+    mapped = _TAG_TO_AXIS.get(tag)
+    if mapped is not None:
+        return mapped
     if tag.endswith('_hair'):
         return 'hair'
     if tag.endswith('_eyes'):
+        # Eye COLOUR (blue_eyes) stays identity-fixed; expressive eye states are
+        # already in _TAG_TO_AXIS as emotion when listed under axis_emotion.
         return 'always_fixed'
     if any(tag.endswith(s) for s in _FTC_CLOTHING_SUFFIXES):
         return 'clothing'
     if any(kw in tag for kw in _FTC_ACTION_KEYWORDS):
         return 'action'
-    return _TAG_TO_AXIS.get(tag)
+    return None
 
 
 def _group_volatile_by_axis(

@@ -7,9 +7,9 @@ jobs/runners.py.
 Stage 1 (VLM)  — visual vocabulary extraction (wd14_tags reused when available)
 Stage 2 (LLM)  — title + overall summary + three acts, streamed with
                  [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] markers
-Stage 3 (LLM)  — per-axis image prompt in Refine's Visual Script format
-                 (danbooru tag line + 5 prose paragraphs with inline tags),
-                 output as POSITIVE:/NEGATIVE: labeled sections
+Stage 3 (LLM)  — per-axis image prompt: danbooru tag line (Pass 1 ground truth)
+                 + Refine Visual Script prose + categorized *_TAGS footer;
+                 ComfyUI gets tag_line + prose; categories emit on axis_prompt SSE
 
 Stories are authored in the user's locale; when that is Japanese they are
 translated to English before Stage 3 (image prompts are always English).
@@ -81,20 +81,33 @@ _CHRONICLE_FEWSHOT_CANDIDATES = (
 )
 
 
-def chronicle_hard_rules_preamble(*, locale: str = "en") -> str:
+def chronicle_hard_rules_preamble(*, locale: str = "en", has_user_topic: bool = False) -> str:
     """Short HARD RULES block — must be the first lines of story prompts."""
     if locale == "ja":
+        topic_rule = (
+            "2. お題がある場合: 抽象テーマでもよいが、各幕はそれを具体的な動作に翻訳すること。"
+            "お題を捨てて画像の見たまま再描写するな。\n"
+            if has_user_topic else
+            "2. 禁止: 運命、想いだけ、抽象テーマのみ、視線を遠くにやるだけ、気分だけの幕、比喩だけの転換。\n"
+        )
         return (
             "【最優先ルール — 必ず守ること】\n"
             "1. 書くのは写真に撮れる具体的な出来事だけ（誰が・何を持って／何をして・どこで）。\n"
-            "2. 禁止: 運命、想いだけ、抽象テーマのみ、視線を遠くにやるだけ、気分だけの幕、比喩だけの転換。\n"
+            f"{topic_rule}"
             "3. 撮れないなら書き直せ。emotion/tone は動作の色付けのみ。気分で動作を置き換えるな。\n"
         )
+    topic_rule = (
+        "2. When a USER TOPIC is given: abstract themes are allowed ONLY as that topic — "
+        "translate it into concrete drawable actions in every act. NEVER abandon the "
+        "topic to re-describe the base image at face value.\n"
+        if has_user_topic else
+        "2. FORBIDDEN: fate, destiny, vague longing, abstract themes without action, "
+        "mood-only beats, metaphorical-only turns, \"gazed into the distance\".\n"
+    )
     return (
         "HARD RULES (read first — violate none):\n"
         "1. Write ONLY concrete, drawable events: who does what with which object, where.\n"
-        "2. FORBIDDEN: fate, destiny, vague longing, abstract themes without action, "
-        "mood-only beats, metaphorical-only turns, \"gazed into the distance\".\n"
+        f"{topic_rule}"
         "3. Every act must be a scene you could photograph. If it cannot be drawn, rewrite it.\n"
         "4. emotion/tone only COLOR the action — never replace the action with mood alone.\n"
     )
@@ -227,6 +240,203 @@ def candidates_ungrounded(
             if t
         }
         if len(used & seed) < min_hits:
+            bad += 1
+    return bad >= max(2, (len(candidates) + 1) // 2)
+
+
+_TOPIC_EN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
+_TOPIC_KANJI_RE = re.compile(r"[\u3400-\u9fff]{2,}")
+_TOPIC_KATA_RE = re.compile(r"[\u30a0-\u30ff]{2,}")
+_TOPIC_STOP = frozenset({
+    "the", "and", "for", "with", "from", "that", "this", "her", "his",
+    "she", "girl", "story", "about", "into", "over", "under",
+})
+
+
+# Compact bilingual bridges for お題 gating (substring match is otherwise JA≠EN).
+# Single-kanji keys (雨/駅/星/海/夜/朝) are included — regex chunks are 2+ only,
+# so topic_anchor_groups also substring-scans these keys in the raw お題.
+_TOPIC_JA_EN_ALIASES: dict[str, tuple[str, ...]] = {
+    "カフェ": ("cafe", "coffee", "barista"),
+    "珈琲": ("coffee", "cafe"),
+    "キッチン": ("kitchen",),
+    "台所": ("kitchen",),
+    "駅": ("station", "platform", "train"),
+    "学校": ("school", "classroom"),
+    "教室": ("classroom", "school"),
+    "公園": ("park",),
+    "海": ("sea", "ocean", "beach"),
+    "海辺": ("beach", "seaside"),
+    "祭り": ("festival", "matsuri"),
+    "夏祭": ("festival", "matsuri", "summer festival"),
+    "花火": ("fireworks",),
+    "三人": ("3girls", "three girls", "trio"),
+    "二人": ("2girls", "2boys", "couple"),
+    "雨": ("rain", "rainy"),
+    "夜": ("night", "midnight"),
+    "朝": ("morning", "dawn"),
+    "屋上": ("rooftop", "roof"),
+    "星": ("star", "stars", "constellation", "starry sky"),
+    "待ち合わせ": ("meeting", "waiting", "wait", "meet", "rendezvous"),
+    "図書館": ("library",),
+    "料理": ("cooking", "kitchen", "recipe"),
+    "冒険": ("adventure", "quest"),
+    "廃墟": ("ruin", "ruins", "abandoned"),
+    "探索": ("explore", "exploring", "search"),
+    "働く": ("work", "working", "job", "barista", "trainee", "mentor"),
+    "自転車": ("bicycle", "bike", "cycling"),
+    "試合": ("match", "game", "stadium", "competition"),
+    "祝い": ("celebration", "toast", "party"),
+    "放課後": ("after school", "afterschool"),
+}
+_TOPIC_EN_JA_ALIASES: dict[str, tuple[str, ...]] = {
+    "cafe": ("カフェ",),
+    "coffee": ("カフェ", "珈琲"),
+    "kitchen": ("キッチン", "台所"),
+    "station": ("駅",),
+    "school": ("学校",),
+    "park": ("公園",),
+    "beach": ("海辺", "海"),
+    "festival": ("祭り", "夏祭"),
+    "matsuri": ("祭り",),
+    "fireworks": ("花火",),
+    "rain": ("雨",),
+    "night": ("夜",),
+    "rooftop": ("屋上",),
+    "star": ("星",),
+    "library": ("図書館",),
+}
+
+
+def _normalize_topic_token(tok: str) -> str:
+    return (tok or "").lower().replace("_", " ").strip()
+
+
+def _is_ja_script_token(tok: str) -> bool:
+    """True when token is mostly CJK / kana (cannot hit an English-only blob)."""
+    if not tok:
+        return False
+    return any(
+        "\u3400" <= c <= "\u9fff" or "\u3040" <= c <= "\u30ff"
+        for c in tok
+    )
+
+
+def topic_anchor_groups(
+    user_topic: str, topic_directive: str = "",
+) -> list[list[str]]:
+    """Seed groups from お題: each ``[seed, *aliases]`` for topic-fit scoring.
+
+    A group counts as a hit when *any* member appears in the story blob.
+    Flat ``topic_anchor_tokens`` is the deduped union of all groups.
+    """
+    text = f"{user_topic or ''} {topic_directive or ''}".strip()
+    if not text:
+        return []
+    text_l = text.lower()
+    seeds: list[str] = []
+    seen_seeds: set[str] = set()
+
+    def _add_seed(tok: str) -> None:
+        t = _normalize_topic_token(tok)
+        if not t or t in seen_seeds or t in _TOPIC_STOP:
+            return
+        # Allow 1-char seeds only when they are known alias keys (雨/駅/星…).
+        if len(t) < 2 and t not in _TOPIC_JA_EN_ALIASES:
+            return
+        seen_seeds.add(t)
+        seeds.append(t)
+
+    for m in _TOPIC_EN_RE.finditer(text):
+        _add_seed(m.group(0))
+    for m in _TOPIC_KANJI_RE.finditer(text):
+        _add_seed(m.group(0))
+    for m in _TOPIC_KATA_RE.finditer(text):
+        _add_seed(m.group(0))
+
+    # Substring scan for alias keys (covers 1-kanji and mixed verbs like 働く).
+    for key in sorted(_TOPIC_JA_EN_ALIASES.keys(), key=len, reverse=True):
+        if key in text or key.lower() in text_l:
+            _add_seed(key)
+
+    groups: list[list[str]] = []
+    for seed in seeds:
+        group: list[str] = []
+        gseen: set[str] = set()
+
+        def _add_g(tok: str) -> None:
+            t = _normalize_topic_token(tok)
+            if not t or t in gseen or t in _TOPIC_STOP:
+                return
+            if len(t) < 2 and t not in _TOPIC_JA_EN_ALIASES:
+                return
+            gseen.add(t)
+            group.append(t)
+
+        _add_g(seed)
+        for alias in _TOPIC_JA_EN_ALIASES.get(seed, ()):
+            _add_g(alias)
+        for en, ja_aliases in _TOPIC_EN_JA_ALIASES.items():
+            if seed == en or seed in {_normalize_topic_token(a) for a in ja_aliases}:
+                _add_g(en)
+                for a in ja_aliases:
+                    _add_g(a)
+        # EN seed → JA aliases (and JA→EN already covered above).
+        if seed in _TOPIC_EN_JA_ALIASES:
+            for a in _TOPIC_EN_JA_ALIASES[seed]:
+                _add_g(a)
+                for en_alias in _TOPIC_JA_EN_ALIASES.get(
+                    _normalize_topic_token(a), (),
+                ):
+                    _add_g(en_alias)
+        if group:
+            groups.append(group)
+    return groups[:16]
+
+
+def topic_anchor_tokens(user_topic: str, topic_directive: str = "") -> list[str]:
+    """Salient tokens from お題 (+ directive) for off-topic detection.
+
+    Japanese uses kanji/katakana chunks (not whole phrases glued by hiragana)
+    so a topic like 「廃墟を探索する冒険」 yields 「廃墟」「探索」「冒険」.
+    Each JA token is also expanded with common EN aliases so English candidate
+    beats still match a Japanese お題 (カフェ↔cafe). Single-kanji cues like
+    雨/駅/星 are recovered via the alias-key substring scan.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for group in topic_anchor_groups(user_topic, topic_directive):
+        for tok in group:
+            if tok not in seen:
+                seen.add(tok)
+                out.append(tok)
+    return out[:24]
+
+
+def candidates_off_topic(
+    candidates: list[dict],
+    user_topic: str,
+    topic_directive: str = "",
+) -> bool:
+    """True when most candidates' beats ignore the user topic tokens.
+
+    Cheap substring check (works for JA and EN). Empty topic → False (no gate).
+    A candidate is on-topic when any seed *group* has a member hit (so JA お題
+    with only EN beats still passes via aliases).
+    """
+    groups = topic_anchor_groups(user_topic, topic_directive)
+    if len(groups) < 1 or not candidates:
+        return False
+    bad = 0
+    for c in candidates:
+        blob = " ".join(
+            str(c.get(a) or "") for a in (*AXES, "title", "turn", "motif")
+        ).lower()
+        hit = any(
+            any(tok in blob for tok in group)
+            for group in groups
+        )
+        if not hit:
             bad += 1
     return bad >= max(2, (len(candidates) + 1) // 2)
 
@@ -946,15 +1156,18 @@ def build_overall_prompt(title: str, stories: dict[str, str]) -> str:
 # reinvented so the three candidates diverge along proven axes.
 _CANDIDATE_SPIRITS = (
     ("A", "faithful", (
-        "Stay faithful to the image. Read the scene at face value and tell the "
-        "most honest, grounded story its details plainly imply. No twist for its "
-        "own sake — aim for clarity, intimacy and emotional truth."
+        "Stay faithful to the image's LOOK. Read the visual details honestly, but "
+        "if a USER TOPIC is given the story SUBJECT must still be that topic — "
+        "grounded in the image's appearance, never abandoning the topic for a plain "
+        "re-description of the picture. No twist for its own sake — aim for clarity, "
+        "intimacy and emotional truth."
     )),
     ("B", "rebel", (
         "Find the shadow of the obvious reading. Invert ONE core assumption — the "
         "mood, the relationship, who holds power, or what is really happening — so "
         "the story becomes a natural counterpart to the first impression: "
-        "surprising yet coherent, never random."
+        "surprising yet coherent, never random. If a USER TOPIC is given, invert "
+        "AROUND the topic — never invert or abandon the topic itself."
     )),
     ("C", "stranger", (
         "Recontextualize the scene with ONE unexpected but grounded element — a "
@@ -1184,17 +1397,16 @@ def build_candidates_prompt(
     concrete beat per act, where the other two acts are separate moments the
     chosen span before / after the image (not a re-description of it).
 
-    The user topic (お題) is hoisted into a prominent block ABOVE the base-image
-    description and expanded with `topic_directive` (a narrative directive from
-    build_topic_directive_prompt), because a small local model otherwise drowns
-    an abstract topic under the vivid literal image and re-tells the picture.
-
-    HARD RULES + WD14 seed tags lead the prompt so small models stay concrete.
+    The user topic (お題) is hoisted to the VERY TOP of the prompt (above HARD
+    RULES and seed tags) and expanded with `topic_directive`, because a small
+    local model otherwise drowns an abstract topic under competing constraints
+    and re-tells the picture.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
-    # Hoisted, high-salience topic block (rendered before the base image below).
-    if user_topic.strip():
+    has_topic = bool(user_topic.strip())
+    # Hoisted, high-salience topic block (rendered FIRST when present).
+    if has_topic:
         directive_part = (
             "Story direction (the SUBJECT the three acts explore — a theme, not a "
             f"fixed scene):\n{topic_directive.strip()}\n"
@@ -1205,10 +1417,11 @@ def build_candidates_prompt(
             "★ USER TOPIC (お題) — THIS is what the story must be ABOUT ★\n"
             f'Topic: "{user_topic.strip()}"\n'
             f"{directive_part}"
-            "Every one of the three acts must embody this topic. The base image "
-            "below only fixes how the base act LOOKS; it does NOT decide the "
-            "subject — the topic does. Do not let the picture pull the story back "
-            "into a plain depiction of itself.\n"
+            "PRIORITY: the topic decides the SUBJECT of all three candidates. "
+            "Every act of A, B and C must embody this topic as a concrete drawable "
+            "event. The base image below only fixes how the base act LOOKS; it does "
+            "NOT decide the subject — the topic does. Do not let the picture pull "
+            "the story back into a plain depiction of itself.\n"
             "Honour the topic's tense and aspect literally: if it describes an "
             "action IN PROGRESS (e.g. \"…している最中\", \"in the middle of doing X\"), "
             "ALL three acts stay INSIDE that ongoing action — do NOT resolve, "
@@ -1250,26 +1463,30 @@ def build_candidates_prompt(
     hierarchy_block = _coherence_hierarchy_block(
         base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
     )
-    head = chronicle_hard_rules_preamble(locale=locale)
+    head = chronicle_hard_rules_preamble(locale=locale, has_user_topic=has_topic)
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif, locale=locale
     )
     bio_block = ""
     if biography:
         bio_block = (
-            "CHARACTER BIOGRAPHY (hobbies/items as physical actions only):\n"
+            "CHARACTER BIOGRAPHY (hobbies/items as physical actions only — never "
+            "override the USER TOPIC subject):\n"
             f"  {_biography_brief(biography)}\n\n"
         )
     motif_json_hint = forced_motif or "one concrete recurring object"
+    # Topic-first when present: small models overweight the opening tokens.
+    lead = (
+        f"{topic_block}\n{hierarchy_block}\n{head}\n{seed_block}\n"
+        if has_topic else
+        f"{head}\n{seed_block}\n{topic_block}\n{hierarchy_block}\n"
+    )
     return (
-        f"{head}\n"
-        f"{seed_block}\n"
+        f"{lead}"
         "You are a storyteller pitching THREE different chronicles for the same "
         "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
         f"separated by {span} of elapsed time.\n\n"
         f"{elapsed_header}\n"
-        f"{topic_block}\n"
-        f"{hierarchy_block}\n"
         f"{bio_block}"
         "CHARACTER (visual descriptor tags — appearance only, not names):\n"
         f"{character_desc}\n\n"
@@ -1611,7 +1828,13 @@ def build_timetable_prompt(
 def parse_timetable_json(raw: str) -> list[dict]:
     """Parse a timetable payload into a list of slot dicts. Broken → []."""
     data = _loads_lenient(raw)
-    slots = data.get("slots") if isinstance(data, dict) else data
+    slots = None
+    if isinstance(data, dict):
+        slots = data.get("slots")
+        if slots is None:
+            slots = data.get("timetable") or data.get("schedule")
+    elif isinstance(data, list):
+        slots = data
     if not isinstance(slots, list):
         return []
     out: list[dict] = []
@@ -1656,7 +1879,9 @@ def build_concrete_activities_prompt(
         f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
     ) or "  (no draft)\n"
     topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
-    head = chronicle_hard_rules_preamble(locale="en")
+    head = chronicle_hard_rules_preamble(
+        locale="en", has_user_topic=bool(user_topic.strip())
+    )
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif, locale="en"
     )
@@ -1711,9 +1936,12 @@ def parse_concrete_activities_json(raw: str) -> dict:
 # The pipeline layered a lot of prose telling the model NOT to re-shoot the same
 # moment three times, but nothing ever CHECKED. These helpers give the timeline
 # programmatic teeth, mirroring _chronicle_tags_degenerate: if the acts collapse
-# into one moment, the runner retries once at a higher temperature. Similarity
-# is measured with language-agnostic character bigrams so it works for both the
-# English and Japanese stories the pipeline produces.
+# into one moment, the expand runner fires one targeted differentiate rewrite.
+# Similarity is measured with language-agnostic character bigrams so it works
+# for both the English and Japanese stories the pipeline produces.
+#
+# Short scales (minutes / tens_of_minutes) intentionally keep near-duplicate
+# beats — those acts are micro-shifts of one scene — so differentiate is skipped.
 
 def _char_bigrams(s: str) -> set[str]:
     t = re.sub(r"\s+", "", s.lower())
@@ -1772,6 +2000,89 @@ def acts_temporally_distinct(
     if not all(beats):
         return True
     return _mean_pairwise_similarity(beats) < threshold
+
+
+# Scales where near-duplicate acts are expected (same scene, micro-shift).
+_SKIP_DIFFERENTIATE_SCALES = frozenset({"minutes", "tens_of_minutes"})
+
+
+def should_differentiate_acts(time_scale: str) -> bool:
+    """False for micro time scales where three near-identical beats are correct."""
+    return (time_scale or "").strip().lower() not in _SKIP_DIFFERENTIATE_SCALES
+
+
+def activities_temporally_distinct(
+    activities: dict[str, str], *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+) -> bool:
+    """True if the three concrete actions are meaningfully different moments.
+
+    Same bigram measure as ``acts_temporally_distinct``. Incomplete input
+    returns True so the missing-act path (not this one) handles it.
+    """
+    beats = [str(activities.get(a) or "").strip() for a in AXES]
+    if not all(beats):
+        return True
+    return _mean_pairwise_similarity(beats) < threshold
+
+
+def axis_slots_collapsed(
+    axis_slots: dict[str, dict] | None, *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+) -> bool:
+    """True when bound timetable place+activity strings collapse across acts."""
+    if not axis_slots:
+        return False
+    beats = []
+    for a in AXES:
+        s = axis_slots.get(a) or {}
+        text = f"{s.get('place', '')} {s.get('activity', '')}".strip()
+        beats.append(text)
+    if not all(beats):
+        return False
+    return _mean_pairwise_similarity(beats) >= threshold
+
+
+def build_differentiate_activities_prompt(
+    *,
+    activities: dict[str, str],
+    selected: dict,
+    base_axis: str,
+    time_scale: str = "years",
+    scene_desc: str = "",
+    axis_slots: dict[str, dict] | None = None,
+    user_topic: str = "",
+) -> str:
+    """Rewrite collapsed concrete actions into three distinct drawable moments."""
+    elapsed = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale="en"
+    )
+    anchors = format_axis_slots_block(axis_slots, locale="en")
+    topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
+    beats = "".join(
+        f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
+    )
+    return (
+        f"{chronicle_hard_rules_preamble(locale='en', has_user_topic=bool(user_topic.strip()))}\n"
+        "These three concrete actions read as the SAME physical moment restated "
+        "three times. Rewrite them so each axis is a CLEARLY DIFFERENT drawable "
+        "action at its marked elapsed distance — different verb, prop, and "
+        "(where the scale allows) place — while keeping the same character and "
+        "story spine.\n\n"
+        f"{elapsed}\n"
+        f"BASE SCENE ([{base_axis.upper()}] must still match): {scene_desc}\n"
+        f"{topic}"
+        f"{anchors}"
+        "STORY DRAFT spine:\n"
+        f"{beats}"
+        "CURRENT ACTIONS (too alike — push them apart):\n"
+        f"  PAST: {activities.get('past', '')}\n"
+        f"  PRESENT: {activities.get('present', '')}\n"
+        f"  FUTURE: {activities.get('future', '')}\n\n"
+        f"The [{base_axis.upper()}] action must still match the base scene. "
+        "Move the OTHER two to their own moments.\n"
+        "Output English JSON only, no fences:\n"
+        '{"past": "<one concrete action sentence>", '
+        '"present": "<...>", "future": "<...>"}'
+    )
 
 
 def build_differentiate_acts_prompt(
@@ -1886,7 +2197,9 @@ def build_expand_prompt(
         if turn
         else ""
     )
-    head = chronicle_hard_rules_preamble(locale=locale)
+    head = chronicle_hard_rules_preamble(
+        locale=locale, has_user_topic=bool(user_topic.strip())
+    )
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif or motif, locale=locale
     )
@@ -1984,10 +2297,15 @@ _VISUAL_SCRIPT_GUIDE = (
     "body half-turned mid-step, weight shifted onto one knee. "
     "The pose must be emotionally legible at a glance and visually distinct "
     "from a neutral upright stance.\n"
-    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day.\n"
+    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day. "
+    "Fill the frame with *specific* place cues (a lit cafe storefront with "
+    "bottles in the window, a streetlamp, distant mountains, stadium bleachers "
+    "and crowd) — never a vague empty backdrop.\n"
     "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction "
-    "and quality.\n"
-    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression.\n"
+    "and quality. Name the light (rim light / backlight / golden hour / long "
+    "shadows / warm interior glow) and at least two props the eye can rest on.\n"
+    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression. "
+    "Add weather/particles when fitting (wind in hair/scarf, confetti, haze).\n"
     "Embed danbooru tags inline in ASCII parentheses right after each element, "
     'e.g. "A (1girl, solo) with (long_hair, silver_hair) grips a (sword, '
     'holding_sword) on a (rooftop) under (night_sky, full_moon)."\n'
@@ -2009,6 +2327,177 @@ _VISUAL_SCRIPT_GUIDE = (
     "At least 2 danbooru tags per sentence. English only. No vague phrases. "
     "NEVER add quality meta-tags (masterpiece, best_quality, highres etc.)."
 )
+
+
+# Refine-parity category buckets (UI + structured view for image models).
+CHRONICLE_CAT_FIELDS = (
+    "subject_tags",
+    "hair_tags",
+    "expression_tags",
+    "clothing_tags",
+    "accessory_tags",
+    "pose_tags",
+    "background_tags",
+    "object_tags",
+    "lighting_tags",
+)
+
+_VS_LABELED_TAG_FOOTER = (
+    "After the 5-paragraph prose (still inside POSITIVE, after the prose), "
+    "output ONLY these labeled category lines. Prefer tags already present in "
+    "the PASS 1 TAG LINE — do not invent a parallel taxonomy. Leave a bucket "
+    "empty if nothing fits:\n\n"
+    "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
+    "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
+    "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
+    "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
+    "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
+    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
+    "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
+    "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
+    "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
+)
+
+_VS_LABEL_RE = re.compile(
+    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_VS_SECTION_MARKER_RE = re.compile(
+    r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I
+)
+
+_BUCKET_SUBJECT = frozenset({
+    "1girl", "1boy", "2girls", "2boys", "3girls", "3boys", "4girls", "6+girls",
+    "solo", "solo_focus", "multiple_girls", "multiple_boys", "couple",
+})
+_BUCKET_EXPR = frozenset({
+    "smile", "smiling", "laughing", "blush", "tears", "crying", "open_mouth",
+    "closed_mouth", "serious", "angry", "sad", "happy", "nervous", "shy",
+    "expressionless", "grin", "frown", "pout", "wink", "surprised", "scared",
+    "looking_at_viewer", "looking_away", "looking_back", "looking_down",
+    "looking_up", "closed_eyes", "teary_eyes", "half-closed_eyes", "watery_eyes",
+})
+_BUCKET_LIGHT = frozenset({
+    "sunset", "sunrise", "golden_hour", "rim_light", "backlight", "lens_flare",
+    "cinematic_lighting", "volumetric", "god_rays", "warm_light", "cool_light",
+    "neon", "moonlight", "daylight", "soft_light", "sparkle", "glow",
+    "afternoon", "evening", "morning", "night", "dusk", "dawn",
+})
+_BUCKET_POSE = frozenset({
+    "standing", "sitting", "kneeling", "crouching", "lying", "running",
+    "walking", "jumping", "reaching", "holding", "pointing", "waving",
+    "leaning", "dynamic_pose", "from_side", "from_above", "from_below",
+    "cowboy_shot", "upper_body", "full_body", "close-up", "profile",
+    "outstretched_arm", "arms_up", "hands_on_hips", "crossed_arms",
+})
+_BUCKET_BG = frozenset({
+    "outdoors", "indoors", "beach", "ocean", "street", "cityscape", "park",
+    "forest", "sky", "cloud", "room", "classroom", "cafe", "shop", "storefront",
+    "stadium", "festival", "rooftop", "bridge", "mountain", "scenery",
+    "simple_background", "white_background", "blurry_background",
+})
+_BUCKET_OBJ = frozenset({
+    "bicycle", "bike", "scarf", "umbrella", "bag", "book", "cup", "mug",
+    "sword", "phone", "flower", "shell", "lantern", "confetti", "medal",
+})
+_EXPR_EYE_PREFIXES = ("teary", "closed", "empty", "half", "watery", "tired")
+
+
+def parse_visual_script_category_tags(text: str) -> tuple[str, dict[str, list[str]]]:
+    """Split Visual Script body into prose + Refine-style category dict."""
+    src = text or ""
+    first_m = _VS_LABEL_RE.search(src)
+    if first_m:
+        prose = src[: first_m.start()].strip()
+        tags_block = src[first_m.start():]
+    else:
+        prose = src.strip()
+        tags_block = ""
+    prose = _VS_SECTION_MARKER_RE.sub("", prose).strip()
+    cats: dict[str, list[str]] = {}
+    for m in _VS_LABEL_RE.finditer(tags_block):
+        field = m.group(1).lower() + "_tags"
+        raw = (m.group(2) or "").strip().strip("[]")
+        tags = [
+            t.strip().replace(" ", "_")
+            for t in raw.split(",")
+            if t.strip() and t.strip() not in ("[", "]")
+        ]
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in tags:
+            k = t.lower()
+            if k not in seen:
+                seen.add(k)
+                out.append(t)
+        cats[field] = out
+    return prose, cats
+
+
+def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
+    """Heuristic category buckets from a flat danbooru tag line (no LLM)."""
+    parts = [
+        t.strip().replace(" ", "_")
+        for t in (tag_line or "").split(",")
+        if t.strip()
+    ]
+    cats: dict[str, list[str]] = {k: [] for k in CHRONICLE_CAT_FIELDS}
+    for tag in parts:
+        low = tag.lower()
+        toks = set(low.split("_"))
+        if low in _BUCKET_SUBJECT or low.startswith(("1girl", "1boy", "2girl", "3girl")):
+            cats["subject_tags"].append(tag)
+        elif low.endswith("_hair") or ("hair" in toks and "eyes" not in toks):
+            cats["hair_tags"].append(tag)
+        elif low.endswith("_eyes"):
+            if any(low.startswith(p) or p in toks for p in _EXPR_EYE_PREFIXES):
+                cats["expression_tags"].append(tag)
+            else:
+                cats["subject_tags"].append(tag)
+        elif low in _BUCKET_EXPR or bool(toks & _BUCKET_EXPR):
+            cats["expression_tags"].append(tag)
+        elif low in _BUCKET_LIGHT or bool(toks & _BUCKET_LIGHT):
+            cats["lighting_tags"].append(tag)
+        elif low in _BUCKET_POSE or bool(toks & _BUCKET_POSE):
+            cats["pose_tags"].append(tag)
+        elif low in _BUCKET_BG or bool(toks & _BUCKET_BG):
+            cats["background_tags"].append(tag)
+        elif low in _BUCKET_OBJ or bool(toks & _BUCKET_OBJ):
+            cats["object_tags"].append(tag)
+        elif any(s in low for s in (
+            "dress", "shirt", "skirt", "uniform", "kimono", "yukata",
+            "jacket", "coat", "pants", "socks", "shoes", "boots",
+        )):
+            cats["clothing_tags"].append(tag)
+        elif any(s in low for s in (
+            "hat", "glasses", "earring", "necklace", "choker", "bag",
+            "hair_ornament", "hair_ribbon", "ribbon",
+        )):
+            cats["accessory_tags"].append(tag)
+        else:
+            cats["object_tags"].append(tag)
+    return {k: v for k, v in cats.items() if v}
+
+
+def merge_category_tags(
+    *sources: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    """Merge category dicts; first occurrence of each tag wins globally."""
+    out: dict[str, list[str]] = {k: [] for k in CHRONICLE_CAT_FIELDS}
+    seen_global: set[str] = set()
+    for src in sources:
+        if not src:
+            continue
+        for key in CHRONICLE_CAT_FIELDS:
+            for tag in src.get(key) or []:
+                t = str(tag).strip().replace(" ", "_")
+                k = t.lower()
+                if not t or k in seen_global:
+                    continue
+                seen_global.add(k)
+                out[key].append(t)
+    return {k: v for k, v in out.items() if v}
+
 
 
 # Per-scale visual invariants used in both story and image-prompt generation.
@@ -2523,6 +3012,9 @@ def build_visual_examination_prompt(
         "Read the act below and DECIDE, from multiple angles, exactly how the "
         "character is posed and framed so the image expresses the story rather "
         "than showing someone standing still.\n\n"
+        "EXPRESSION: name the face/mood that matches this act (one concrete "
+        "danbooru expression — smile, blush, tears, serious, pout, nervous…). "
+        "A person without a readable expression fails this stage.\n\n"
         f"{elapsed_header}\n"
         f"{char_line}"
         f"{slot_line}"
@@ -2539,6 +3031,7 @@ def build_visual_examination_prompt(
         '{"shot": "<close-up|upper_body|cowboy_shot|full_body|wide_shot>", '
         '"camera_angle": "<from_side|from_above|from_below|from_behind|dutch_angle|straight-on>", '
         '"focal_action_tags": ["tag_1", "tag_2", ...], '
+        '"expression_tag": "<one danbooru face/mood tag — smile, blush, tears, serious…>", '
         '"gesture_prose": "<one vivid sentence naming the exact gesture and weight>", '
         '"lighting": "<direction + quality>", "palette": "<colour palette>", '
         '"props": ["prop_1", ...], "mood": "<one phrase>"}'
@@ -2563,6 +3056,7 @@ def parse_visual_plan_json(raw: str) -> dict:
         "shot": _s("shot"),
         "camera_angle": _s("camera_angle"),
         "focal_action_tags": _l("focal_action_tags"),
+        "expression_tag": _s("expression_tag"),
         "gesture_prose": _s("gesture_prose"),
         "lighting": _s("lighting"),
         "palette": _s("palette"),
@@ -2908,6 +3402,18 @@ def build_axis_tags_prompt(
         "outstretched_arm, leaning_forward, looking_back, kneeling, gripping, "
         "clenched_hand, holding, covering_face, touching, fingertips, "
         "dynamic_pose. NEVER just `standing` / `sitting` with nothing else.\n"
+        "- EXPRESSION: when the subject is a person (1girl / 1boy / solo / …), "
+        "`expression_tags` MUST contain ≥1 concrete face/mood tag drawn from "
+        "the act's emotion (smile, blush, tears, pout, serious, nervous, "
+        "expressionless, open_mouth, …). A person with no expression tag fails "
+        "— mood cannot read from pose alone.\n"
+        "- SCENE RICHNESS: the image must feel *lived-in*, not a blank backdrop. "
+        "`lighting_tags` ≥2 (e.g. sunset, rim_light, backlight, lens_flare, "
+        "warm_light, long_shadow). `background_tags` ≥3 specific place cues "
+        "(street, shop, storefront, stadium, crowd, streetlamp, mountain…). "
+        "`object_tags` ≥2 tangible props (bicycle, scarf, mug, medal, confetti…). "
+        "Prefer wind/motion/atmosphere when the story supports it "
+        "(fluttering_scarf, confetti, streamers, dust).\n"
         "- EXPLICIT TAG: every noun the scene needs (hair color, eye color, "
         "notable feature, clothing, prop, background, light source) MUST appear "
         "as a real danbooru tag — never a euphemism or paraphrase.\n"
@@ -2921,7 +3427,7 @@ def build_axis_tags_prompt(
         '  "danbooru_tags": "<subject-count tag first, then 50+ comma-separated tags>",\n'
         '  "subject_tags": "<subject count, character count, viewer relation>",\n'
         '  "hair_tags": "<hair color, length, style>",\n'
-        '  "expression_tags": "<face, mouth, gaze, mood tags>",\n'
+        '  "expression_tags": "<REQUIRED if person: ≥1 face/mood tag — smile, blush, tears, serious…>",\n'
         '  "clothing_tags": "<outfit, garments, fabric>",\n'
         '  "accessory_tags": "<jewelry, hats, glasses, small items>",\n'
         '  "pose_tags": "<>= 3 concrete pose/action tags, no bare standing>",\n'
@@ -2981,13 +3487,110 @@ def parse_axis_tags_json(raw: str) -> tuple[str, dict[str, list[str]], str]:
 
 _CHRONICLE_MIN_TAGS = 25
 
+# Pose tags that alone do NOT count as a drawable action (idle / portrait defaults).
+_IDLE_POSE_TAGS = frozenset({
+    "standing", "sitting", "kneeling", "lying", "crouching",
+    "smile", "smiling", "blush", "closed_mouth", "open_mouth",
+    "looking_at_viewer", "looking_away", "arms_at_sides", "static_pose",
+    "cowboy_shot", "upper_body", "full_body", "portrait", "solo",
+})
+# Tokens that mark a real physical action in a danbooru tag.
+_DYNAMIC_ACTION_TOKENS = frozenset({
+    "reaching", "pointing", "walking", "running", "jumping", "falling",
+    "holding", "gripping", "clenched", "touching", "grabbing", "hugging",
+    "carrying", "lifting", "pushing", "pulling", "waving", "bowing",
+    "bending", "stretching", "outstretched", "raised", "covering",
+    "hiding", "pouring", "wiping", "writing", "reading", "eating",
+    "drinking", "cooking", "kneading", "folding", "cutting", "painting",
+    "typing", "dancing", "singing", "fighting", "throwing", "catching",
+    "opening", "closing", "tying", "stirring", "spilling", "teaching",
+    "sliding", "unlocking", "locking", "tamping", "steaming", "shaping",
+    "both_hands", "surprised", "concentrating",
+    "riding", "pedaling", "fluttering", "cheering", "clinking", "toasting",
+    "laughing", "winking",
+})
+
+# Face / mood tags required whenever a person is on-screen (emotion must read).
+# Mirrors tag_categories.json axis_emotion — kept local so generator stays
+# import-free. Expressionless/neutral/serious count: a blank face is still a
+# chosen expression; a *missing* expression is the failure mode.
+_EXPRESSION_TAGS = frozenset({
+    "smile", "smiling", "grin", "laugh", "laughing", "happy", "joyful",
+    "sad", "crying", "tears", "teary_eyes", "teary-eyed", "watery_eyes", "sobbing",
+    "expressionless", "neutral", "calm", "serious", "stoic",
+    "angry", "annoyed", "frustrated", "glaring", "frowning", "frown",
+    "blush", "blushing", "red_cheeks",
+    "surprised", "shocked", "open_mouth", "gasp",
+    "closed_mouth", "half_open_mouth",
+    "closed_eyes", "half-closed_eyes", "winking", "one_eye_closed",
+    "pout", "pouting", "smirk", "wink", "worried", "embarrassed", "shy",
+    "nervous", "confused", "flustered", "sleepy", "dazed",
+    "excited", "cheerful", "content", "satisfied", "reluctant",
+    "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
+    "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
+    "ecstatic", "horrified", "panicked", "relieved", "focused",
+})
+_EXPRESSION_TOKENS = frozenset({
+    "smile", "smiling", "grin", "laugh", "tear", "tears", "teary", "sob",
+    "blush", "frown", "pout", "smirk", "wink", "angry", "sad", "shy",
+    "nervous", "worried", "expressionless", "serious", "stoic", "gasp",
+    "smug", "melancholy", "nostalgic", "pensive", "flustered", "embarrassed",
+    "scared", "terrified", "panicked", "relieved", "focused", "cheerful",
+    "joyful", "lonely", "annoyed", "glaring",
+})
+
+# Shared identity / quality noise stripped before cross-axis tag comparison.
+_TAG_COMPARE_IGNORE = _SUBJECT_ANCHORS | _IDLE_POSE_TAGS | frozenset({
+    "highres", "absurdres", "masterpiece", "best_quality", "detailed_background",
+    "depth_of_field", "cinematic_lighting", "sharp_focus", "dynamic_angle",
+    "looking_at_viewer", "detailed",
+})
+
+
+def _tag_has_dynamic_action(parts: list[str]) -> bool:
+    for raw in parts:
+        toks = set(raw.lower().replace("-", "_").split("_"))
+        if toks & _DYNAMIC_ACTION_TOKENS:
+            return True
+        # Compound tags like "holding_cup" / "spilling_milk"
+        if any(tok in raw.lower() for tok in _DYNAMIC_ACTION_TOKENS):
+            return True
+    return False
+
+
+def _tag_has_expression(parts: list[str]) -> bool:
+    """True if the tag line contains at least one face/mood expression tag."""
+    for raw in parts:
+        t = raw.strip().lower().replace(" ", "_")
+        if not t:
+            continue
+        if t in _EXPRESSION_TAGS:
+            return True
+        toks = set(t.replace("-", "_").split("_"))
+        if toks & _EXPRESSION_TOKENS:
+            return True
+    return False
+
+
+def _tag_has_person_subject(parts: list[str]) -> bool:
+    """True when the prompt depicts a person (expression then becomes mandatory)."""
+    head = {p.strip().lower().replace(" ", "_") for p in parts if p.strip()}
+    if head & _SUBJECT_ANCHORS:
+        return True
+    return any(
+        "girl" in p or "boy" in p or "woman" in p or "man" in p or "person" in p
+        for p in head
+    )
+
 
 def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
     """Guard for Pass 1 output — same spirit as Invoke's runners.py:1798-1808.
 
-    A prompt is degenerate if it is too short OR has no subject anchor within
-    the first few tags. Callers retry once with a temperature boost before
-    surfacing the failure to the user.
+    A prompt is degenerate if it is too short, has no subject anchor within
+    the first few tags, has no dynamic action (idle standing/smile only),
+    OR (when a person is on-screen) has no facial expression tag — emotion
+    cannot read without one.
+    Callers retry once with a temperature boost before surfacing the failure.
     """
     parts = [t.strip() for t in tag_line.split(",") if t.strip()]
     if len(parts) < _CHRONICLE_MIN_TAGS:
@@ -2995,7 +3598,85 @@ def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
     head = {p.lower() for p in parts[:5]}
     if not (head & _SUBJECT_ANCHORS):
         return True, "no_subject_anchor"
+    if not _tag_has_dynamic_action(parts):
+        return True, "no_dynamic_action"
+    if _tag_has_person_subject(parts) and not _tag_has_expression(parts):
+        return True, "no_expression"
     return False, ""
+
+
+def _content_tag_set(tag_line: str) -> set[str]:
+    """Tag set used for cross-axis diversity — drops identity/idle/quality noise."""
+    out: set[str] = set()
+    for raw in tag_line.split(","):
+        t = raw.strip().lower().replace(" ", "_")
+        if not t or t in _TAG_COMPARE_IGNORE:
+            continue
+        # Densify / sim padding (detail_8 …) is not scene content.
+        if t.startswith("detail_"):
+            continue
+        # Drop pure hair/eye colour locks from comparison (identity, not scene).
+        toks = set(t.split("_"))
+        if toks & {"hair", "eyes", "eyecolor"} and "ornament" not in toks:
+            if any(c in t for c in (
+                "blonde", "silver", "blue", "red", "green", "brown", "black",
+                "white", "pink", "purple", "orange", "grey", "gray",
+            )):
+                continue
+        out.add(t)
+    return out
+
+
+_AXIS_TAG_SIMILAR_THRESHOLD = 0.75
+
+
+def axis_tag_lines_collapsed(
+    tag_lines: dict[str, str],
+    *,
+    threshold: float = _AXIS_TAG_SIMILAR_THRESHOLD,
+) -> bool:
+    """True when past/present/future content tags collapse into one scene.
+
+    Compares content tags (scene/action/props) after stripping identity locks
+    and idle portrait defaults. Axes with empty / too-thin tag lines are
+    skipped so incomplete builds do not false-positive.
+
+    Also collapses when *scene/prop* tags alone (verbs stripped) stay nearly
+    identical — catches knead/fold/shape paraphrases of the same kitchen beat.
+    """
+    sets = []
+    scene_sets = []
+    for a in AXES:
+        s = _content_tag_set(tag_lines.get(a, ""))
+        if len(s) >= 3:
+            sets.append(s)
+            scene_sets.append({
+                t for t in s
+                if t not in _DYNAMIC_ACTION_TOKENS
+                and t not in _EXPRESSION_TAGS
+                and not (set(t.split("_")) & _DYNAMIC_ACTION_TOKENS)
+                and not (set(t.split("_")) & _EXPRESSION_TOKENS)
+            })
+    if len(sets) < 2:
+        return False
+
+    def _mean_jaccard(group: list[set[str]]) -> float:
+        sims = []
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                a, b = group[i], group[j]
+                if not a or not b:
+                    continue
+                sims.append(len(a & b) / len(a | b))
+        return (sum(sims) / len(sims)) if sims else 0.0
+
+    if _mean_jaccard(sets) >= threshold:
+        return True
+    # Scene/prop-only: require a bit more overlap (same place + props).
+    scene_sets = [s for s in scene_sets if len(s) >= 2]
+    if len(scene_sets) >= 2 and _mean_jaccard(scene_sets) >= max(threshold, 0.75):
+        return True
+    return False
 
 
 def build_axis_prose_prompt(
@@ -3017,12 +3698,16 @@ def build_axis_prose_prompt(
     emotion: str = "",
     user_topic: str = "",
     negative_supplement: str = "",
+    draft_grounding: str = "",
 ) -> str:
     """Pass 2 of Stage 3b: 5-paragraph Visual Script over Pass 1's tag line.
 
     prompt_style="natural"          → POSITIVE = prose only (no leading tag line)
     prompt_style="danbooru+natural" → POSITIVE = tag_line, blank line, prose
     prompt_style="danbooru"         → not intended — call Pass 1 only and skip Pass 2.
+
+    When ``draft_grounding`` is set (Phase B), the image model's draft WD14 is
+    treated as visual fact — lighting/atmosphere/props must match it.
     """
     ctx = _axis_context_blocks(
         story_text=story_text,
@@ -3044,33 +3729,50 @@ def build_axis_prose_prompt(
         base_axis=base_axis, time_scale=time_scale, locale="en"
     )
     tag_block = (
-        "\n[PASS 1 TAG LINE — this becomes the leading tag portion of POSITIVE; "
-        "the prose you write below must be faithful to and enrich it (never "
-        "contradict it). Reuse these tags inline in ASCII parentheses inside "
-        "the prose so the AI image model reads them from both places]\n"
+        "\n[PASS 1 DANBOORU TAG LINE — authoritative visual vocabulary]\n"
+        "Keep ALL internal reasoning in danbooru tags. Do not replace this line "
+        "with free prose invents. The prose below must REUSE these tags inline "
+        "in ASCII parentheses and must never contradict them.\n"
         f"{tag_line}\n"
     )
+    grounding_block = ""
+    if (draft_grounding or "").strip():
+        grounding_block = (
+            f"\n{draft_grounding.strip()}\n"
+            "CRITICAL: The draft grounding above is stronger than story-text "
+            "guesses for lighting, atmosphere, background, props and pose. "
+            "Write the Visual Script so those draft facts are VISIBLE in the "
+            "final image. Do not invent conflicting weather, time-of-day, or "
+            "setting. Identity locks (hair/eye colour) still win over draft.\n"
+        )
     if prompt_style == "natural":
         format_rule = (
-            "POSITIVE is the 5-paragraph Visual Script prose described above "
-            "(no leading tag line — tags live inline in the prose)."
+            "POSITIVE is: (1) the 5-paragraph Visual Script prose, then "
+            "(2) the labeled *_TAGS category lines. No leading flat tag line "
+            "— tags live inline in the prose and in the category footer."
         )
     else:  # danbooru+natural (default)
         format_rule = (
-            "POSITIVE is two parts separated by ONE blank line:\n"
-            "(a) the PASS 1 TAG LINE above verbatim (do not re-order, do not "
-            "drop tags);\n"
-            "(b) the 5-paragraph Visual Script prose described above."
+            "POSITIVE has THREE parts separated by blank lines:\n"
+            "(a) the PASS 1 DANBOORU TAG LINE above verbatim (do not re-order, "
+            "do not drop tags);\n"
+            "(b) the 5-paragraph Visual Script prose;\n"
+            "(c) the labeled *_TAGS category lines (Refine Visual Spec)."
         )
     neg_hint = (
         f"\nSuggested negatives from Pass 1 (merge with your own): {negative_supplement}\n"
         if negative_supplement.strip()
         else ""
     )
+    draft_rule = (
+        "- Prefer DRAFT GROUNDING (image-model facts) over thin text guesses "
+        "for light, place, props and motion when present.\n"
+        if grounding_block else ""
+    )
     return (
         "You are an expert image generation prompt engineer.\n"
-        "Turn ONE act of a story into the FINAL image prompt, building on the "
-        "tag payload you generated in Pass 1.\n\n"
+        "Work in DANBOORU TAGS first (Pass 1 tag line is ground truth), then "
+        "render a Visual Script the image model can read easily.\n\n"
         f"{elapsed_header}\n"
         f"You are now generating the image prompt for: [{axis.upper()}]\n\n"
         f"{ctx['chronicle_ctx']}"
@@ -3083,21 +3785,26 @@ def build_axis_prose_prompt(
         f"{ctx['plan_block']}"
         f"{ctx['emotion_block']}"
         f"{tag_block}"
+        f"{grounding_block}"
         "\n[Visual Script format]\n"
         f"{_VISUAL_SCRIPT_GUIDE}\n\n"
+        f"{_VS_LABELED_TAG_FOOTER}\n\n"
         "Rules:\n"
         f"- {format_rule}\n"
+        f"{draft_rule}"
         "- Depict THIS act's scene grounded in the story text: place, lighting, mood.\n"
         "- The action MUST appear as concrete danbooru action/pose tags near the "
         "FRONT of the positive prompt; a bare 'standing'/'sitting' with no action "
         "tag is forbidden unless the act is truly motionless.\n"
+        "- Category lines must mostly subset the PASS 1 tag line "
+        "(plus a few inline enrichments already used in the prose).\n"
         "- NEGATIVE lists only things to avoid (artifacts, wrong elements for "
         "this scene). Short comma-separated tags. Unless this act is deliberately "
         "still, include static-pose tags here (standing, static_pose, "
         "expressionless, stiff, arms_at_sides) so the figure is not left just "
         f"standing.{neg_hint}\n"
         "Output format (exactly these two labels, nothing else):\n"
-        "POSITIVE:\n<the positive prompt>\n\n"
+        "POSITIVE:\n<the positive prompt with tag line / prose / category lines>\n\n"
         "NEGATIVE:\n<the negative prompt>"
     )
 
@@ -3133,6 +3840,528 @@ def remove_conflict_tags(
         else:
             cleaned.append(line)
     return "\n".join(cleaned)
+
+
+# ── Scene constraints + mechanical mutex conflicts ────────────────────────────
+#
+# WD14 vector search returns semantic neighbours, not logically consistent tags
+# (a night story can still pull day / blue_sky). These helpers extract cheap
+# structured constraints from finished act prose and strip exclusive opposites
+# before the LLM conflict pass — prevention beats post-hoc cleanup.
+
+_TIME_OF_DAY_FAMILIES: dict[str, frozenset[str]] = {
+    "day": frozenset({
+        "day", "daylight", "daytime", "morning", "afternoon", "noon",
+        "sunrise", "sunny", "blue_sky", "bright_sky", "sunlight",
+        "morning_sun", "afternoon_sun", "sunbeam", "sunbeams", "broad_daylight",
+    }),
+    "night": frozenset({
+        "night", "nighttime", "night_sky", "midnight", "moon", "moonlight",
+        "full_moon", "crescent_moon", "starry_sky", "stars", "star_(sky)",
+        "dark", "darkness", "lamp", "streetlamp", "neon_lights", "night_lights",
+    }),
+    "dusk": frozenset({
+        "dusk", "sunset", "evening", "twilight", "golden_hour", "orange_sky",
+        "afterglow", "evening_sky",
+    }),
+    "dawn": frozenset({
+        "dawn", "daybreak", "early_morning", "sunrise",
+    }),
+}
+
+_INDOOR_OUTDOOR_FAMILIES: dict[str, frozenset[str]] = {
+    "indoor": frozenset({
+        "indoors", "indoor", "inside", "bedroom", "classroom", "kitchen",
+        "bathroom", "living_room", "library", "cafe", "shop_interior",
+        "train_interior", "office", "hospital", "corridor", "hallway",
+        "restaurant", "bar_(place)",
+    }),
+    "outdoor": frozenset({
+        "outdoors", "outdoor", "outside", "park", "street", "cityscape",
+        "road", "field", "forest", "beach", "rooftop", "sky", "clouds",
+        "garden", "bridge", "alley", "mountain", "shore", "plaza",
+    }),
+}
+
+# Canonical must-tag for each family (injected when the story implies that side).
+_FAMILY_MUST_TAGS: dict[str, tuple[str, ...]] = {
+    "day": ("day", "daylight"),
+    "night": ("night",),
+    "dusk": ("dusk", "sunset"),
+    "dawn": ("dawn",),
+    "indoor": ("indoors",),
+    "outdoor": ("outdoors",),
+}
+
+# Story-prose keyword → family (scored by substring hits; English acts only —
+# axis tagging always runs on the English canonical copy).
+_TIME_STORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "night": (
+        "night", "midnight", "moonlight", "moonlit", "starry", "nocturnal",
+        "lamp-lit", "lamplit", "by moonlight", "under the moon", "after dark",
+        "in the dark", "nighttime", "night time",
+    ),
+    "day": (
+        "morning", "afternoon", "noon", "midday", "daylight", "daytime",
+        "sunny", "sunlit", "sunshine", "broad daylight", "in the sun",
+    ),
+    "dusk": (
+        "dusk", "sunset", "evening", "twilight", "golden hour", "at dusk",
+        "as the sun set", "as the sun sets",
+    ),
+    "dawn": (
+        "dawn", "daybreak", "at sunrise", "first light", "early morning",
+    ),
+}
+
+_PLACE_STORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "indoor": (
+        "indoors", "indoor", "inside", "bedroom", "classroom", "kitchen",
+        "bathroom", "living room", "library", "cafe", "café", "corridor",
+        "hallway", "office", "hospital", "train car", "train carriage",
+        "shop interior", "in her room", "in the room", "at the desk",
+    ),
+    "outdoor": (
+        "outdoors", "outdoor", "outside", "park", "street", "rooftop",
+        "beach", "forest", "garden", "bridge", "plaza", "alley",
+        "under the open sky", "on the hill", "in the field",
+    ),
+}
+
+
+def _score_family_keywords(text: str, families: dict[str, tuple[str, ...]]) -> str:
+    """Return the winning family key, or '' on tie / no hits."""
+    scores = {
+        key: sum(1 for kw in kws if kw in text)
+        for key, kws in families.items()
+    }
+    best = max(scores.values()) if scores else 0
+    if best <= 0:
+        return ""
+    winners = [k for k, v in scores.items() if v == best]
+    return winners[0] if len(winners) == 1 else ""
+
+
+def _forbid_for_family(
+    chosen: str, families: dict[str, frozenset[str]]
+) -> list[str]:
+    if not chosen or chosen not in families:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for key, tags in families.items():
+        if key == chosen:
+            continue
+        for t in tags:
+            if t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out
+
+
+def infer_axis_scene_constraints(story_text: str) -> dict:
+    """Extract must/forbid scene tags from finished act prose (no LLM).
+
+    Returns:
+        {
+          "time_of_day": "night"|"day"|"dusk"|"dawn"|"",
+          "indoor_outdoor": "indoor"|"outdoor"|"",
+          "must_tags": [...],
+          "forbid_tags": [...],
+        }
+    """
+    text = re.sub(r"\s+", " ", (story_text or "").lower())
+    time_key = _score_family_keywords(text, _TIME_STORY_KEYWORDS)
+    place_key = _score_family_keywords(text, _PLACE_STORY_KEYWORDS)
+
+    must: list[str] = []
+    forbid: list[str] = []
+    seen_must: set[str] = set()
+    seen_forbid: set[str] = set()
+
+    def _add_must(family: str) -> None:
+        for t in _FAMILY_MUST_TAGS.get(family, ()):
+            if t not in seen_must:
+                seen_must.add(t)
+                must.append(t)
+
+    def _add_forbid(tags: list[str]) -> None:
+        for t in tags:
+            if t not in seen_forbid and t not in seen_must:
+                seen_forbid.add(t)
+                forbid.append(t)
+
+    if time_key:
+        _add_must(time_key)
+        _add_forbid(_forbid_for_family(time_key, _TIME_OF_DAY_FAMILIES))
+    if place_key:
+        _add_must(place_key)
+        _add_forbid(_forbid_for_family(place_key, _INDOOR_OUTDOOR_FAMILIES))
+
+    return {
+        "time_of_day": time_key,
+        "indoor_outdoor": place_key,
+        "must_tags": must,
+        "forbid_tags": forbid,
+    }
+
+
+def apply_scene_constraints(
+    tags: list[str],
+    constraints: dict | None,
+) -> list[str]:
+    """Drop forbid tags and ensure must tags are present (order-preserving)."""
+    if not constraints:
+        return [str(t).strip().replace(" ", "_") for t in tags if str(t).strip()]
+
+    forbid = {
+        str(t).strip().lower().replace(" ", "_")
+        for t in (constraints.get("forbid_tags") or [])
+        if t
+    }
+    must = [
+        str(t).strip().replace(" ", "_")
+        for t in (constraints.get("must_tags") or [])
+        if str(t).strip()
+    ]
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in tags:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if not tag or key in forbid or key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+
+    # Prepend must tags that survived forbid (identity/subject stay caller-side).
+    inject: list[str] = []
+    for tag in must:
+        key = tag.lower()
+        if key in forbid or key in seen:
+            continue
+        seen.add(key)
+        inject.append(tag)
+    return inject + out
+
+
+def find_mutex_conflict_tags(
+    tags: list[str],
+    *,
+    preferred: list[str] | None = None,
+) -> set[str]:
+    """Return tags that lose an exclusive-family fight (day↔night, indoor↔outdoor).
+
+    Within each mutex group, at most one family may survive. Preference order:
+    1. family overlapping ``preferred`` (story must-tags / identity lock)
+    2. otherwise the first family encountered in ``tags`` order
+    Losing families' tags are reported as conflicts for remove_conflict_tags.
+    """
+    norm = [str(t).strip().replace(" ", "_") for t in tags if str(t).strip()]
+    pref = {
+        str(t).strip().lower().replace(" ", "_")
+        for t in (preferred or [])
+        if t
+    }
+    conflicts: set[str] = set()
+
+    for families in (_TIME_OF_DAY_FAMILIES, _INDOOR_OUTDOOR_FAMILIES):
+        present: dict[str, list[str]] = {}
+        for tag in norm:
+            key = tag.lower()
+            for fam, members in families.items():
+                if key in members:
+                    present.setdefault(fam, []).append(tag)
+                    break
+        if len(present) < 2:
+            continue
+
+        winner = ""
+        for fam, members in present.items():
+            if any(t.lower() in pref for t in members) or (fam in pref):
+                winner = fam
+                break
+        if not winner:
+            # First tag in input order decides the surviving family.
+            for tag in norm:
+                key = tag.lower()
+                for fam, members in families.items():
+                    if key in members:
+                        winner = fam
+                        break
+                if winner:
+                    break
+
+        for fam, members in present.items():
+            if fam == winner:
+                continue
+            for t in members:
+                conflicts.add(t.replace(" ", "_"))
+
+    return conflicts
+
+
+def find_identity_mutex_conflicts(
+    tags: list[str],
+    lock_tags: list[str],
+) -> set[str]:
+    """Hair-color / eye-color tags that contradict the identity lock.
+
+    If the lock pins ``blonde_hair``, any other ``*_hair`` color in ``tags`` is
+    a conflict. Same for eyes. Non-color identity tags are left alone.
+    """
+    locks = [str(t).strip().replace(" ", "_") for t in lock_tags if t]
+    lock_hair = {t.lower() for t in locks if classify_identity_tag(t) == "hair_color"}
+    lock_eyes = {t.lower() for t in locks if classify_identity_tag(t) == "eyes"}
+    if not lock_hair and not lock_eyes:
+        return set()
+
+    conflicts: set[str] = set()
+    for raw in tags:
+        tag = str(raw).strip().replace(" ", "_")
+        if not tag:
+            continue
+        key = tag.lower()
+        cat = classify_identity_tag(tag)
+        if cat == "hair_color" and lock_hair and key not in lock_hair:
+            conflicts.add(tag)
+        elif cat == "eyes" and lock_eyes and key not in lock_eyes:
+            conflicts.add(tag)
+    return conflicts
+
+
+# ── Phase B: draft-image grounding ────────────────────────────────────────────
+#
+# Non-base axes have no real image yet, so WD14 vocab search is text-only and
+# drifts. Generate a cheap low-res draft, scan it with WD14, and rebuild the
+# axis prompt from those image-grounded tags before the final gen.
+#
+# This is the main quality lever: the image model already "knows" lighting,
+# atmosphere, props and pose that small VLMs invent poorly — we borrow that
+# expression by reading the draft back through WD14.
+
+# Auto: skip only micro scales (same-scene micro-shifts); everything else drafts.
+_DRAFT_SKIP_SCALES = frozenset({"minutes", "tens_of_minutes"})
+_DRAFT_AUTO_DIVERGENCE = 0.25
+# Backward-compat alias used by older tests / callers.
+_DRAFT_AUTO_SCALES = frozenset({"hours", "days", "months", "years", "decades"})
+
+# Tags that are identity / count anchors — never replaced by draft WD14 alone.
+_DRAFT_KEEP_CATEGORIES = frozenset({
+    "hair_color", "hair_style", "eyes", "face", "accessory",
+})
+
+# Draft WD14 tags in these families are the image model's expressive gift —
+# promote them ahead of text-search vocab so the rebuild keeps that richness.
+_DRAFT_RICHNESS_TOKENS = frozenset({
+    # lighting
+    "sunset", "sunrise", "golden_hour", "dusk", "dawn", "rim_light", "backlight",
+    "lens_flare", "volumetric", "god_rays", "sunbeam", "shadow", "warm_light",
+    "cool_light", "neon", "cinematic_lighting", "glow", "sparkle", "moonlight",
+    "daylight", "afternoon", "evening", "morning", "night",
+    # environment
+    "street", "road", "alley", "cityscape", "shop", "storefront", "cafe", "bar",
+    "window", "building", "streetlamp", "banner", "mountain", "sky", "cloud",
+    "stadium", "crowd", "audience", "bleachers", "plant", "flower", "outdoors",
+    "indoors", "scenery", "rooftop", "park", "bridge",
+    # props / atmosphere / motion the model invented
+    "bicycle", "bike", "scarf", "medal", "trophy", "mug", "beer", "confetti",
+    "streamer", "umbrella", "wind", "dust", "particle", "bokeh", "haze",
+    "riding", "pedaling", "fluttering", "cheering", "dynamic_pose", "motion_blur",
+})
+
+
+def _is_draft_richness_tag(tag: str) -> bool:
+    t = tag.strip().lower().replace(" ", "_").replace("-", "_")
+    if not t:
+        return False
+    if t in _DRAFT_RICHNESS_TOKENS:
+        return True
+    toks = set(t.split("_"))
+    return bool(toks & _DRAFT_RICHNESS_TOKENS)
+
+
+def should_use_draft_refine(
+    *,
+    mode: str | bool | None,
+    time_scale: str,
+    divergence: float,
+    workflow_name: str = "",
+    manual_mode: bool = False,
+) -> bool:
+    """Whether Phase B draft→WD14→rebuild should run for this expand.
+
+    ``mode``:
+      - True / \"on\"  → always (when a workflow is set and not manual)
+      - False / \"off\" → never
+      - None / \"auto\" → any non-micro time scale, or divergence ≥ 0.25
+    """
+    if manual_mode or not (workflow_name or "").strip():
+        return False
+    if isinstance(mode, bool):
+        return mode
+    key = str(mode or "auto").strip().lower()
+    if key in ("off", "false", "0", "no"):
+        return False
+    if key in ("on", "true", "1", "yes"):
+        return True
+    # auto — prefer drafting; only skip micro scales unless divergence is high
+    scale = (time_scale or "").strip().lower()
+    try:
+        div = float(divergence)
+    except (TypeError, ValueError):
+        div = 0.0
+    if div >= _DRAFT_AUTO_DIVERGENCE:
+        return True
+    return scale not in _DRAFT_SKIP_SCALES
+
+
+def merge_draft_wd14_tags(
+    *,
+    vocab_tags: list[str],
+    draft_tags: list[str],
+    lock_tags: list[str] | None = None,
+    focal: list[str] | None = None,
+) -> list[str]:
+    """Blend text-search tags with image-grounded draft WD14 tags.
+
+    Draft scene/pose/lighting tags are promoted ahead of vocab near-misses so
+    the image model's expression (rim light, storefront, confetti…) survives
+    into the final prompt. Identity lock and subject anchors always win.
+    Focal action tags stay near the front.
+    """
+    locks = [str(t).strip().replace(" ", "_") for t in (lock_tags or []) if t]
+    lock_keys = {t.lower() for t in locks}
+    focal_norm = [str(t).strip().replace(" ", "_") for t in (focal or []) if t]
+
+    def _overlap_conflict(a: str, b: str) -> bool:
+        if a == b:
+            return False
+        ta = {t for t in a.lower().split("_") if len(t) >= 3}
+        tb = {t for t in b.lower().split("_") if len(t) >= 3}
+        return bool(ta & tb)
+
+    # Drop draft tags that fight identity lock (wrong hair/eye color etc.).
+    draft_clean: list[str] = []
+    seen_draft: set[str] = set()
+    for raw in draft_tags:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if not tag or key in seen_draft:
+            continue
+        cat = classify_identity_tag(tag)
+        if cat in ("hair_color", "eyes") and lock_keys:
+            if key not in lock_keys:
+                continue
+        if cat in _DRAFT_KEEP_CATEGORIES and lock_keys and key not in lock_keys:
+            if any(classify_identity_tag(l) == cat for l in locks):
+                continue
+        seen_draft.add(key)
+        draft_clean.append(tag)
+
+    draft_keys = {t.lower() for t in draft_clean}
+
+    # Prefer draft side of exclusive scene families (day↔night, indoor↔outdoor).
+    mutex_drop = {
+        t.lower()
+        for t in find_mutex_conflict_tags(
+            draft_clean + [
+                str(t).strip().replace(" ", "_") for t in vocab_tags if t
+            ],
+            preferred=draft_clean,
+        )
+    }
+
+    vocab_kept: list[str] = []
+    seen_vocab: set[str] = set()
+    for raw in vocab_tags:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if (
+            not tag
+            or key in seen_vocab
+            or key in draft_keys
+            or key in lock_keys
+            or key in mutex_drop
+        ):
+            continue
+        if any(_overlap_conflict(tag, d) for d in draft_clean):
+            continue
+        seen_vocab.add(key)
+        vocab_kept.append(tag)
+
+    # Split draft into richness-first vs remainder so lighting/env/props win.
+    draft_rich = [t for t in draft_clean if _is_draft_richness_tag(t)]
+    draft_rest = [t for t in draft_clean if not _is_draft_richness_tag(t)]
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(seq: list[str]) -> None:
+        for tag in seq:
+            key = tag.lower()
+            if key not in seen:
+                seen.add(key)
+                out.append(tag)
+
+    _add(focal_norm)
+    _add(draft_rich)   # image-model expression first
+    _add(draft_rest)
+    _add(vocab_kept)
+    _add(locks)
+    return out
+
+
+def build_draft_grounding_block(draft_tags: list[str], *, locale: str = "en") -> str:
+    """Instruction block for Pass-2 rebuild: treat draft WD14 as visual fact."""
+    tags = [
+        str(t).strip().replace(" ", "_")
+        for t in (draft_tags or [])
+        if str(t).strip()
+    ][:40]
+    if not tags:
+        return ""
+    joined = ", ".join(tags)
+    if locale == "ja":
+        return (
+            "\n[下書き接地 — 画像モデルが既に描いた事実]\n"
+            f"低解像度下書きの WD14: {joined}\n"
+            "これらはテキスト推測ではなく、画像モデルの表現そのもの。"
+            "照明・雰囲気・背景・小道具・ポーズはこれに合わせて書き直し、"
+            "矛盾するタグは捨てること。同一性（髪色・瞳色）だけは保持。\n"
+        )
+    return (
+        "\n[DRAFT GROUNDING — facts the IMAGE MODEL already painted]\n"
+        f"Low-res draft WD14: {joined}\n"
+        "These are not text guesses — they are the image model's own expression. "
+        "Rewrite lighting, atmosphere, background, props and pose to MATCH them; "
+        "drop contradicting invented tags. Keep identity (hair/eye colour) only.\n"
+    )
+
+
+def draft_richness_delta(
+    *,
+    before_tag_line: str,
+    after_tag_line: str,
+) -> dict:
+    """Compare richness before/after draft merge (lazy import to avoid cycles)."""
+    try:
+        from .quality import score_prompt_richness
+    except Exception:
+        return {}
+    before = score_prompt_richness(before_tag_line)
+    after = score_prompt_richness(after_tag_line)
+    return {
+        "before": before.get("score", 0.0),
+        "after": after.get("score", 0.0),
+        "delta": round(
+            float(after.get("score", 0.0)) - float(before.get("score", 0.0)), 3
+        ),
+        "draft_lighting": after.get("lighting", 0),
+        "draft_environment": after.get("environment", 0),
+        "draft_props": after.get("props", 0),
+    }
 
 
 # ── Final stage: translate the user-language chronicle into English ──────────

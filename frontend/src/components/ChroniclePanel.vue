@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
+import StoryQualityRadar from './StoryQualityRadar.vue'
 
 const { t, locale } = useI18n()
 
@@ -27,6 +28,7 @@ const PHASE_STEP = {
   concretizing: 3, differentiating: 3, writingStory: 3,
   taggingAxis: 4, examining: 4, refiningPrompt: 4,
   refiningPromptTags: 4, refiningPromptProse: 4,
+  draftingAxis: 4, scanningDraft: 4,
   savingStory: 5, done: 5,
 }
 
@@ -58,14 +60,19 @@ const useRefSeed = ref(true)
 const manualMode = ref(false)
 const generatePinup = ref(false)
 const suppressConflictTags = ref(true)
+const useDraftRefine = ref('auto') // auto | on | off
+const draftWidth = ref(512)
+const draftHeight = ref(512)
+const draftSteps = ref(12)
 const pickingRandom = ref(false)
 const biography = ref(null)
 const timetable = ref(null)
 const concrete = ref(null)
 const axisReasoning = ref({})
+const axisDrafts = ref({})
+const qualityEval = ref(null)
 const pinupJobId = ref('')
 
-const forceSettings = ref(false)
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
 const thumbFailed = ref(false)
@@ -158,7 +165,8 @@ const currentStep = computed(() => {
   return PHASE_STEP[phase.value] ?? 0
 })
 
-const showSettings = computed(() => currentStep.value === 0 || forceSettings.value)
+// Keep the full left-hand settings (workflow, topic, dials) visible at every
+// pipeline step — do not collapse them into a summary after Weave starts.
 const settingsLocked = computed(() => running.value)
 
 const canGenerate = computed(() =>
@@ -175,6 +183,27 @@ const showImageProgress = computed(() => imageJobs.value.length > 0)
 const showPipelineProgress = computed(() =>
   !showImageProgress.value && (running.value || (finished.value && progress.value > 0))
 )
+
+/** Cute loom animation while the long pipeline (or image jobs) are busy. */
+const isBusyWeaving = computed(() =>
+  running.value || !!imageGen.value.active
+)
+const showWeaverStage = computed(() => {
+  if (!isBusyWeaving.value) return false
+  // Full-stage weaver when the right pane is still mostly empty.
+  if (visibleCandidates.value.length) return false
+  if (displayTitle.value) return false
+  if (Object.keys(prompts.value).length) return false
+  return true
+})
+const weaverCaption = computed(() => {
+  if (imageGen.value.active) return t('chronicle.weaverImages')
+  if (phase.value) {
+    const label = t('chronicle.phase.' + phase.value, phase.value)
+    return t('chronicle.weaverPhase', { phase: label })
+  }
+  return t('chronicle.weaverBusy')
+})
 
 /** Keep the panel open during pipeline / image jobs — ignore Esc & backdrop. */
 const stayOpen = computed(() => {
@@ -322,6 +351,8 @@ function resetStory() {
   timetable.value = null
   concrete.value = null
   axisReasoning.value = {}
+  axisDrafts.value = {}
+  qualityEval.value = null
   pinupJobId.value = ''
   _stopImageGenMonitor()
   imageGen.value = { progress: 0, active: false, text: '', states: {} }
@@ -337,7 +368,6 @@ function resetRun() {
   selectedCandidate.value = ''
   respinCandCount.value = 0
   respinExpandCount.value = 0
-  forceSettings.value = false
   resetStory()
 }
 
@@ -424,8 +454,43 @@ function activityFor(axis) {
 }
 const hasReasoning = computed(() =>
   !!bioView.value || timetableView.value.length > 0 || !!concrete.value
-  || Object.keys(axisReasoning.value).length > 0,
+  || Object.keys(axisReasoning.value).length > 0
+  || Object.keys(axisDrafts.value).length > 0,
 )
+
+const CAT_TAG_GROUPS = [
+  { key: 'subject_tags', label: 'tagGroupSubject' },
+  { key: 'hair_tags', label: 'tagGroupHair' },
+  { key: 'expression_tags', label: 'tagGroupExpression' },
+  { key: 'clothing_tags', label: 'tagGroupClothing' },
+  { key: 'accessory_tags', label: 'tagGroupAccessory' },
+  { key: 'pose_tags', label: 'tagGroupPose' },
+  { key: 'background_tags', label: 'tagGroupBackground' },
+  { key: 'object_tags', label: 'tagGroupObject' },
+  { key: 'lighting_tags', label: 'tagGroupLighting' },
+]
+
+function axisHasCatTags(p) {
+  return CAT_TAG_GROUPS.some(g => (p?.[g.key] || []).length > 0)
+}
+
+const qualityDraftNote = computed(() => {
+  const q = qualityEval.value
+  if (!q) return ''
+  const dg = q.draft_grounding
+  if (dg && typeof dg === 'object') {
+    const n = (dg.axes || []).length
+    const d = Number(dg.mean_delta ?? 0)
+    return t('storybook.quality.draftGrounding', {
+      axes: n,
+      delta: (d >= 0 ? '+' : '') + d.toFixed(2),
+    })
+  }
+  if (q.notes?.draft_grounding) {
+    return String(q.notes.draft_grounding)
+  }
+  return ''
+})
 
 async function pickRandomBase() {
   pickingRandom.value = true
@@ -501,6 +566,10 @@ async function start() {
     tone: tone.value,
     generate_pinup: generatePinup.value,
     suppress_conflict_tags: suppressConflictTags.value,
+    use_draft_refine: useDraftRefine.value,
+    draft_width: draftWidth.value,
+    draft_height: draftHeight.value,
+    draft_steps: draftSteps.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
     temperature: temperature.value,
@@ -570,8 +639,31 @@ function handleEvent(ev) {
       phase.value = 'selecting'
       break
     case 'axis_prompt':
-      prompts.value = { ...prompts.value, [ev.axis]: { positive: ev.positive, negative: ev.negative } }
+      prompts.value = {
+        ...prompts.value,
+        [ev.axis]: {
+          positive: ev.positive,
+          negative: ev.negative,
+          refined_from_draft: !!ev.refined_from_draft,
+          draft_richness_delta: ev.draft_richness_delta || null,
+          visual_script: ev.visual_script || '',
+          subject_tags: ev.subject_tags || [],
+          hair_tags: ev.hair_tags || [],
+          expression_tags: ev.expression_tags || [],
+          clothing_tags: ev.clothing_tags || [],
+          accessory_tags: ev.accessory_tags || [],
+          pose_tags: ev.pose_tags || [],
+          background_tags: ev.background_tags || [],
+          object_tags: ev.object_tags || [],
+          lighting_tags: ev.lighting_tags || [],
+        },
+      }
       break
+    case 'quality_eval': {
+      const { type: _t, ...rest } = ev
+      qualityEval.value = rest
+      break
+    }
     case 'story':
       title.value = ev.title || ''
       overall.value = ev.overall || ''
@@ -614,6 +706,9 @@ function handleEvent(ev) {
       break
     case 'axis_reasoning':
       axisReasoning.value = { ...axisReasoning.value, [ev.axis]: ev }
+      break
+    case 'axis_draft':
+      axisDrafts.value = { ...axisDrafts.value, [ev.axis]: ev }
       break
     case 'pinup_job':
       pinupJobId.value = ev.job_id
@@ -729,40 +824,11 @@ async function generateImages() {
 
         <div class="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-          <!-- ── LEFT: settings / summary ─────────────────────────────────── -->
+          <!-- ── LEFT: settings (always visible) ───────────────────────────── -->
           <div class="flex flex-col gap-4 min-w-0">
 
-            <!-- settings summary (collapsed while pipeline is past vision) -->
-            <div v-if="!showSettings" class="flex flex-col gap-3">
-              <div class="flex items-center gap-3 p-3 rounded-xl border border-teal-800/30 bg-black/25">
-                <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
-                  class="w-14 h-14 rounded-lg object-cover shrink-0 border border-white/10" />
-                <div class="min-w-0 flex-1 text-[11px] space-y-1">
-                  <div class="sb-label">{{ t('chronicle.settingsSummary') }}</div>
-                  <div class="flex flex-wrap gap-1.5 text-gray-300">
-                    <span class="sb-chip is-chip-on-teal">{{ t('chronicle.axis.' + baseAxis) }}</span>
-                    <span class="sb-chip">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
-                    <span class="sb-chip">{{ t('chronicle.tone.' + tone) }}</span>
-                  </div>
-                  <p v-if="phase" class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wide">
-                    {{ t('chronicle.phase.' + phase, phase) }}
-                  </p>
-                </div>
-                <div class="flex flex-col gap-1.5 shrink-0">
-                  <button v-if="running && groupId" @click="cancelGroup" class="sb-btn text-red-300 border-red-800/40">
-                    {{ t('chronicle.cancel') }}
-                  </button>
-                  <button @click="forceSettings = true" :disabled="running"
-                    class="sb-btn" :class="running ? '' : 'border-teal-700/40 text-teal-200'">
-                    <SbIcon name="settings" class="w-3 h-3" />
-                    {{ t('chronicle.editSettings') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- full settings (progressive disclosure) -->
-            <fieldset v-else :disabled="settingsLocked" class="flex flex-col gap-4 min-w-0 disabled:opacity-60">
+            <!-- full settings; locked while the pipeline runs -->
+            <fieldset :disabled="settingsLocked" class="flex flex-col gap-4 min-w-0 disabled:opacity-60">
               <div class="grid grid-cols-1 sm:grid-cols-[148px_1fr] gap-4">
                 <div class="rounded-xl border border-teal-800/25 bg-black/25 flex flex-col items-center justify-center gap-2 p-3 min-h-[160px]">
                   <img v-if="baseSha" :src="baseThumbSrc" @error="thumbFailed = true"
@@ -907,6 +973,32 @@ async function generateImages() {
                       {{ t('chronicle.manualMode') }}
                     </label>
                   </div>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftRefineTitle')">{{ t('chronicle.draftRefine') }}</span>
+                    <button v-for="m in ['auto', 'on', 'off']" :key="m" type="button"
+                      @click="useDraftRefine = m"
+                      class="sb-chip" :class="useDraftRefine === m ? 'is-chip-on-teal' : ''">
+                      {{ t('chronicle.draftRefineMode.' + m) }}
+                    </button>
+                  </div>
+                  <div v-if="useDraftRefine !== 'off'" class="flex items-center gap-2 flex-wrap text-[10px] text-[var(--sb-muted)]">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftSizeTitle')">{{ t('chronicle.draftSize') }}</span>
+                    <label class="flex items-center gap-1">
+                      <span class="text-[var(--sb-faint)]">W</span>
+                      <input v-model.number="draftWidth" type="number" min="256" max="1024" step="64"
+                        class="sb-input w-16 py-0.5 text-[11px] font-mono" />
+                    </label>
+                    <label class="flex items-center gap-1">
+                      <span class="text-[var(--sb-faint)]">H</span>
+                      <input v-model.number="draftHeight" type="number" min="256" max="1024" step="64"
+                        class="sb-input w-16 py-0.5 text-[11px] font-mono" />
+                    </label>
+                    <label class="flex items-center gap-1" :title="t('chronicle.draftStepsTitle')">
+                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.draftSteps') }}</span>
+                      <input v-model.number="draftSteps" type="number" min="4" max="28" step="1"
+                        class="sb-input w-14 py-0.5 text-[11px] font-mono" />
+                    </label>
+                  </div>
                 </div>
               </details>
 
@@ -941,21 +1033,22 @@ async function generateImages() {
                 {{ storySeedTags.join(', ') }}
                 <span v-if="storySeedMotif"> · {{ t('chronicle.motifLabel') }}: {{ storySeedMotif }}</span>
               </p>
+            </fieldset>
 
               <div class="flex items-center gap-3 flex-wrap">
                 <button type="button" @click="start" :disabled="running || !baseSha"
                   class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium
                     bg-teal-800 hover:bg-teal-700 disabled:opacity-40 text-teal-50 transition-colors">
-                  <SbIcon name="weave" class="w-4 h-4" />
+                  <span v-if="running" class="chronicle-shuttle-mini" aria-hidden="true">
+                    <span class="chronicle-shuttle-mini__yarn"></span>
+                    <span class="chronicle-shuttle-mini__body"></span>
+                  </span>
+                  <SbIcon v-else name="weave" class="w-4 h-4" />
                   {{ running ? t('chronicle.running') : t('chronicle.start') }}
                 </button>
                 <button v-if="running && groupId" type="button" @click="cancelGroup"
                   class="sb-btn text-red-300 border-red-800/40">
                   {{ t('chronicle.cancel') }}
-                </button>
-                <button v-if="currentStep >= 1" type="button" @click="forceSettings = false"
-                  class="sb-btn text-[var(--sb-muted)]">
-                  {{ t('chronicle.settingsSummary') }}
                 </button>
                 <span v-if="phase" class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wide">
                   {{ t('chronicle.phase.' + phase, phase) }}
@@ -964,7 +1057,6 @@ async function generateImages() {
                   {{ t('chronicle.seedLabel') }}: {{ seed }}
                 </span>
               </div>
-            </fieldset>
 
             <!-- generate images (manual / no-workflow continue) -->
             <div v-if="canGenerate" class="flex items-center gap-3 flex-wrap">
@@ -978,13 +1070,22 @@ async function generateImages() {
             </div>
 
             <!-- ONE progress system: pipeline XOR imageGen -->
-            <div v-if="showPipelineProgress" class="flex flex-col gap-1">
-              <div class="flex items-center justify-between text-[10px] text-teal-300/90">
-                <span>{{ phase ? t('chronicle.phase.' + phase, phase) : t('chronicle.running') }}</span>
-                <span class="font-mono">{{ Math.round(progress * 100) }}%</span>
-              </div>
-              <div class="sb-progress">
-                <div class="sb-progress-bar" :style="{ width: (progress * 100) + '%' }"></div>
+            <div v-if="showPipelineProgress" class="flex flex-col gap-2">
+              <div class="flex items-center gap-2.5">
+                <div class="chronicle-shuttle-mini" aria-hidden="true">
+                  <span class="chronicle-shuttle-mini__yarn"></span>
+                  <span class="chronicle-shuttle-mini__body"></span>
+                </div>
+                <div class="flex-1 flex flex-col gap-1 min-w-0">
+                  <div class="flex items-center justify-between text-[10px] text-teal-300/90">
+                    <span class="truncate">{{ phase ? t('chronicle.phase.' + phase, phase) : t('chronicle.running') }}</span>
+                    <span class="font-mono shrink-0 ml-2">{{ Math.round(progress * 100) }}%</span>
+                  </div>
+                  <div class="sb-progress chronicle-progress-alive">
+                    <div class="sb-progress-bar chronicle-progress-bar-alive"
+                      :style="{ width: (progress * 100) + '%' }"></div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -998,14 +1099,24 @@ async function generateImages() {
                   <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
                 </div>
               </div>
-              <div class="flex items-center justify-between text-[10px]"
-                :class="imageGen.active ? 'text-teal-300/90' : 'text-[var(--sb-muted)]'">
-                <span>{{ t('chronicle.imagesGenerating') }}<span v-if="imageGen.text" class="text-[var(--sb-faint)]"> · {{ imageGen.text }}</span></span>
-                <span class="font-mono">{{ Math.round(imageGen.progress * 100) }}%</span>
-              </div>
-              <div class="sb-progress">
-                <div class="sb-progress-bar"
-                  :style="{ width: Math.max(imageGen.progress * 100, imageGen.active ? 4 : 0) + '%' }"></div>
+              <div class="flex items-center gap-2.5">
+                <div class="chronicle-shuttle-mini" aria-hidden="true"
+                  :class="imageGen.active ? '' : 'is-idle'">
+                  <span class="chronicle-shuttle-mini__yarn"></span>
+                  <span class="chronicle-shuttle-mini__body"></span>
+                </div>
+                <div class="flex-1 flex flex-col gap-1 min-w-0">
+                  <div class="flex items-center justify-between text-[10px]"
+                    :class="imageGen.active ? 'text-teal-300/90' : 'text-[var(--sb-muted)]'">
+                    <span class="truncate">{{ t('chronicle.imagesGenerating') }}<span v-if="imageGen.text" class="text-[var(--sb-faint)]"> · {{ imageGen.text }}</span></span>
+                    <span class="font-mono shrink-0 ml-2">{{ Math.round(imageGen.progress * 100) }}%</span>
+                  </div>
+                  <div class="sb-progress" :class="imageGen.active ? 'chronicle-progress-alive' : ''">
+                    <div class="sb-progress-bar"
+                      :class="imageGen.active ? 'chronicle-progress-bar-alive' : ''"
+                      :style="{ width: Math.max(imageGen.progress * 100, imageGen.active ? 4 : 0) + '%' }"></div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1026,6 +1137,63 @@ async function generateImages() {
               <p class="sb-display text-base text-[var(--sb-muted)] leading-relaxed whitespace-pre-line">
                 {{ t('chronicle.idleHint') }}
               </p>
+            </div>
+
+            <!-- Full-stage loom while waiting for the first real content -->
+            <div v-if="showWeaverStage"
+              class="chronicle-weaver flex flex-col items-center justify-center gap-4 min-h-[220px] px-4 py-6 rounded-2xl border border-teal-800/30 bg-gradient-to-b from-teal-950/40 via-black/20 to-transparent"
+              role="status" :aria-label="weaverCaption">
+              <div class="chronicle-loom" aria-hidden="true">
+                <div class="chronicle-loom__frame">
+                  <span class="chronicle-loom__peg chronicle-loom__peg--l"></span>
+                  <span class="chronicle-loom__peg chronicle-loom__peg--r"></span>
+                  <span class="chronicle-loom__warp chronicle-loom__warp--1"></span>
+                  <span class="chronicle-loom__warp chronicle-loom__warp--2"></span>
+                  <span class="chronicle-loom__warp chronicle-loom__warp--3"></span>
+                  <span class="chronicle-loom__weft"></span>
+                  <span class="chronicle-loom__shuttle">
+                    <span class="chronicle-loom__shuttle-eye"></span>
+                  </span>
+                  <span class="chronicle-loom__stitch chronicle-loom__stitch--1"></span>
+                  <span class="chronicle-loom__stitch chronicle-loom__stitch--2"></span>
+                  <span class="chronicle-loom__stitch chronicle-loom__stitch--3"></span>
+                </div>
+                <div class="chronicle-loom__bobbin">
+                  <span class="chronicle-loom__bobbin-core"></span>
+                  <span class="chronicle-loom__bobbin-thread"></span>
+                </div>
+                <span class="chronicle-loom__spark chronicle-loom__spark--1"></span>
+                <span class="chronicle-loom__spark chronicle-loom__spark--2"></span>
+                <span class="chronicle-loom__spark chronicle-loom__spark--3"></span>
+              </div>
+              <div class="text-center space-y-1.5 max-w-xs">
+                <p class="sb-display text-sm text-teal-200/95 tracking-wide">{{ weaverCaption }}</p>
+                <p class="text-[11px] text-[var(--sb-muted)] leading-relaxed">{{ t('chronicle.weaverPatience') }}</p>
+              </div>
+            </div>
+
+            <!-- Compact ribbon when content already fills the pane -->
+            <div v-else-if="isBusyWeaving"
+              class="chronicle-weaver-ribbon flex items-center gap-3 px-3 py-2.5 rounded-xl border border-teal-800/30 bg-teal-950/25"
+              role="status" :aria-label="weaverCaption">
+              <div class="chronicle-loom chronicle-loom--sm" aria-hidden="true">
+                <div class="chronicle-loom__frame">
+                  <span class="chronicle-loom__warp chronicle-loom__warp--1"></span>
+                  <span class="chronicle-loom__warp chronicle-loom__warp--2"></span>
+                  <span class="chronicle-loom__warp chronicle-loom__warp--3"></span>
+                  <span class="chronicle-loom__weft"></span>
+                  <span class="chronicle-loom__shuttle">
+                    <span class="chronicle-loom__shuttle-eye"></span>
+                  </span>
+                </div>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-[11px] text-teal-200/95 truncate">{{ weaverCaption }}</p>
+                <p class="text-[10px] text-[var(--sb-muted)] truncate">{{ t('chronicle.weaverPatience') }}</p>
+              </div>
+              <span class="chronicle-weaver-dots text-teal-400/80 font-mono text-xs shrink-0" aria-hidden="true">
+                <span>.</span><span>.</span><span>.</span>
+              </span>
             </div>
 
             <!-- candidates -->
@@ -1121,6 +1289,28 @@ async function generateImages() {
               <pre class="px-3 pb-3 text-xs text-gray-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></pre>
             </details>
 
+            <!-- timetable: always open when present (was hidden inside collapsed Reasoning) -->
+            <details v-if="timetableView.length" class="rounded-xl border border-white/5 bg-black/25" open>
+              <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
+                <span class="flex items-center gap-1.5">
+                  <SbIcon name="clock" class="w-3.5 h-3.5 text-teal-400/80" />
+                  {{ t('storybook.timetable') }}
+                </span>
+              </summary>
+              <div class="px-3 pb-3">
+                <ul class="space-y-0.5 text-[11px]">
+                  <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
+                    <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
+                    <span class="min-w-0">
+                      {{ s.activity }}
+                      <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
+                      <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </details>
+
             <!-- reasoning (closed) -->
             <details v-if="hasReasoning" class="rounded-xl border border-white/5 bg-black/25">
               <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
@@ -1135,29 +1325,17 @@ async function generateImages() {
                     <SbIcon name="book" class="w-3 h-3" />{{ t('storybook.biography') }}
                   </div>
                   <p v-if="bioView.personality">{{ bioView.personality }}</p>
+                  <p v-if="bioView.occupation" class="text-gray-400 break-words">
+                    <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ bioView.occupation }}
+                  </p>
                   <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
                     <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
                   </p>
-                </div>
-
-                <div v-if="timetableView.length" class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px]">
-                  <div class="sb-label text-teal-300/80 mb-1 flex items-center gap-1">
-                    <SbIcon name="clock" class="w-3 h-3" />{{ t('storybook.timetable') }}
-                  </div>
-                  <ul class="space-y-0.5">
-                    <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
-                      <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
-                      <span class="min-w-0">
-                        {{ s.activity }}
-                        <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
-                        <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
-                      </span>
-                    </li>
-                  </ul>
+                  <p v-if="bioView.backstory" class="text-gray-400 italic pt-1">{{ bioView.backstory }}</p>
                 </div>
 
                 <div v-for="axis in REASON_AXES" :key="axis"
-                  v-show="activityFor(axis) || axisReasoning[axis]"
+                  v-show="activityFor(axis) || axisReasoning[axis] || axisDrafts[axis]"
                   class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px]">
                   <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
                   <p v-if="activityFor(axis)" class="text-gray-300 mb-1">{{ activityFor(axis) }}</p>
@@ -1175,7 +1353,45 @@ async function generateImages() {
                       {{ (axisReasoning[axis].search_tags || []).join(', ') }}
                     </p>
                   </div>
+                  <div v-if="axisDrafts[axis]" class="mt-2 text-[10px] text-[var(--sb-muted)]">
+                    <p v-if="(axisDrafts[axis].draft_tags || []).length" class="break-words">
+                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftTags') }}:</span>
+                      {{ (axisDrafts[axis].draft_tags || []).join(', ') }}
+                    </p>
+                    <p v-if="axisDrafts[axis].draft_richness_delta"
+                      class="mt-0.5 font-mono text-teal-300/70">
+                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftDelta') }}:</span>
+                      {{ Number(axisDrafts[axis].draft_richness_delta.before || 0).toFixed(2) }}
+                      → {{ Number(axisDrafts[axis].draft_richness_delta.after || 0).toFixed(2) }}
+                      ({{ (Number(axisDrafts[axis].draft_richness_delta.delta || 0) >= 0 ? '+' : '')
+                        + Number(axisDrafts[axis].draft_richness_delta.delta || 0).toFixed(2) }})
+                    </p>
+                  </div>
                 </div>
+              </div>
+            </details>
+
+            <!-- quality radar (from SSE quality_eval) -->
+            <details v-if="qualityEval?.dimensions"
+              class="rounded-xl border border-white/5 bg-black/25" open>
+              <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
+                <span class="flex items-center gap-1.5">
+                  <SbIcon name="spark" class="w-3.5 h-3.5 text-teal-400/80" />
+                  {{ t('storybook.quality.title') }}
+                </span>
+                <span class="text-[11px] font-mono text-teal-300/80">
+                  {{ Math.round((qualityEval.overall || 0) * 100) }}
+                </span>
+              </summary>
+              <div class="px-3 pb-3">
+                <StoryQualityRadar :eval="qualityEval" />
+                <p v-if="qualityDraftNote"
+                  class="mt-2 text-[10px] font-mono text-teal-300/70">
+                  {{ qualityDraftNote }}
+                </p>
+                <p class="mt-2 text-[10px] text-[var(--sb-muted)] leading-relaxed">
+                  {{ t('storybook.quality.hint') }}
+                </p>
               </div>
             </details>
 
@@ -1184,11 +1400,45 @@ async function generateImages() {
               <h3 class="sb-label">{{ t('chronicle.prompts') }}</h3>
               <div v-for="(p, axis) in prompts" :key="axis"
                 class="bg-black/30 border border-white/5 rounded-xl p-3 flex flex-col gap-2">
-                <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
+                  <span v-if="p.refined_from_draft"
+                    class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/50 text-teal-300/90 border border-teal-700/40">
+                    {{ t('chronicle.refinedFromDraft') }}
+                  </span>
+                  <span v-if="p.draft_richness_delta"
+                    class="text-[9px] font-mono text-teal-300/70 ml-auto">
+                    {{ t('chronicle.reasonDraftDelta') }}
+                    {{ Number(p.draft_richness_delta.before || 0).toFixed(2) }}
+                    → {{ Number(p.draft_richness_delta.after || 0).toFixed(2) }}
+                    ({{ (Number(p.draft_richness_delta.delta || 0) >= 0 ? '+' : '')
+                      + Number(p.draft_richness_delta.delta || 0).toFixed(2) }})
+                  </span>
+                </div>
                 <textarea v-model="p.positive" rows="3" :readonly="!canGenerate"
                   class="sb-textarea text-xs"></textarea>
                 <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
                   class="sb-textarea text-xs text-[var(--sb-muted)]"></textarea>
+                <div v-if="axisHasCatTags(p)"
+                  class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
+                  <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
+                    {{ t('chronicle.visualSpecTitle') }}
+                  </p>
+                  <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
+                    v-show="(p[g.key] || []).length"
+                    class="space-y-0.5">
+                    <p class="text-[9px] text-emerald-400/70 font-semibold">
+                      {{ t('chronicle.' + g.label) }}
+                    </p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in p[g.key]" :key="tag"
+                        class="text-[10px] font-mono px-1.5 py-0.5 rounded
+                          bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
+                        {{ tag }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1218,6 +1468,273 @@ async function generateImages() {
 }
 .chronicle-dot-active {
   animation: dot-pulse 3s steps(2, start) infinite;
+}
+
+/* ── Cute loom / shuttle while Chronicle is busy ─────────────────────────── */
+@keyframes chronicle-shuttle-weave {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(118px); }
+}
+@keyframes chronicle-weft-grow {
+  0%, 100% { width: 12%; opacity: 0.55; }
+  50%      { width: 88%; opacity: 0.95; }
+}
+@keyframes chronicle-bobbin-bob {
+  0%, 100% { transform: translateY(0) rotate(-8deg); }
+  50%      { transform: translateY(5px) rotate(8deg); }
+}
+@keyframes chronicle-spark {
+  0%, 100% { opacity: 0; transform: scale(0.4); }
+  40%      { opacity: 0.9; transform: scale(1); }
+  70%      { opacity: 0; transform: scale(0.6); }
+}
+@keyframes chronicle-stitch-pop {
+  0%, 100% { opacity: 0.15; transform: scaleY(0.4); }
+  50%      { opacity: 0.95; transform: scaleY(1); }
+}
+@keyframes chronicle-mini-hop {
+  0%, 100% { transform: translateY(0) rotate(-12deg); }
+  50%      { transform: translateY(-3px) rotate(12deg); }
+}
+@keyframes chronicle-yarn-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes chronicle-progress-shimmer {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes chronicle-dot-wave {
+  0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
+  40%           { opacity: 1; transform: translateY(-2px); }
+}
+
+.chronicle-loom {
+  position: relative;
+  width: 168px;
+  height: 88px;
+}
+.chronicle-loom--sm {
+  width: 72px;
+  height: 36px;
+  flex-shrink: 0;
+}
+.chronicle-loom__frame {
+  position: absolute;
+  inset: 18% 4% 28% 4%;
+  border: 1.5px solid rgba(45, 212, 191, 0.35);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(13, 148, 136, 0.12), transparent 55%),
+    rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.chronicle-loom--sm .chronicle-loom__frame {
+  inset: 10% 2% 18% 2%;
+  border-radius: 4px;
+}
+.chronicle-loom__peg {
+  position: absolute;
+  top: -5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5eead4;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.35);
+}
+.chronicle-loom__peg--l { left: 10%; }
+.chronicle-loom__peg--r { right: 10%; }
+
+.chronicle-loom__warp {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(94, 234, 212, 0.35);
+}
+.chronicle-loom__warp--1 { top: 28%; }
+.chronicle-loom__warp--2 { top: 50%; background: rgba(251, 191, 36, 0.4); }
+.chronicle-loom__warp--3 { top: 72%; background: rgba(125, 211, 252, 0.4); }
+
+.chronicle-loom__weft {
+  position: absolute;
+  left: 8%;
+  top: 48%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #2dd4bf, #fbbf24, #7dd3fc);
+  animation: chronicle-weft-grow 2.4s ease-in-out infinite;
+  transform-origin: left center;
+}
+.chronicle-loom--sm .chronicle-loom__weft {
+  height: 1.5px;
+  animation-duration: 1.8s;
+}
+
+.chronicle-loom__shuttle {
+  position: absolute;
+  top: 38%;
+  left: 6%;
+  width: 22px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #99f6e4, #0f766e);
+  border: 1px solid rgba(204, 251, 241, 0.5);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  animation: chronicle-shuttle-weave 2.4s ease-in-out infinite;
+  z-index: 2;
+}
+.chronicle-loom--sm .chronicle-loom__shuttle {
+  width: 12px;
+  height: 6px;
+  top: 36%;
+  animation-duration: 1.8s;
+  animation-name: chronicle-shuttle-weave-sm;
+}
+@keyframes chronicle-shuttle-weave-sm {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(46px); }
+}
+.chronicle-loom__shuttle-eye {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.55);
+}
+.chronicle-loom--sm .chronicle-loom__shuttle-eye {
+  width: 2px;
+  height: 2px;
+  margin: -1px 0 0 -1px;
+}
+
+.chronicle-loom__stitch {
+  position: absolute;
+  bottom: 10%;
+  width: 3px;
+  height: 10px;
+  border-radius: 1px;
+  background: #5eead4;
+  animation: chronicle-stitch-pop 2.4s ease-in-out infinite;
+}
+.chronicle-loom__stitch--1 { left: 22%; animation-delay: 0s; background: #5eead4; }
+.chronicle-loom__stitch--2 { left: 48%; animation-delay: 0.4s; background: #fbbf24; }
+.chronicle-loom__stitch--3 { left: 74%; animation-delay: 0.8s; background: #7dd3fc; }
+
+.chronicle-loom__bobbin {
+  position: absolute;
+  right: -2px;
+  bottom: 0;
+  width: 28px;
+  height: 28px;
+  animation: chronicle-bobbin-bob 2.4s ease-in-out infinite;
+}
+.chronicle-loom__bobbin-core {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, #ccfbf1 0%, #14b8a6 45%, #0f766e 100%);
+  border: 1.5px solid rgba(204, 251, 241, 0.45);
+}
+.chronicle-loom__bobbin-thread {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed rgba(94, 234, 212, 0.55);
+  border-top-color: transparent;
+  animation: chronicle-yarn-spin 3.2s linear infinite;
+}
+
+.chronicle-loom__spark {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fde68a;
+  animation: chronicle-spark 2.4s ease-in-out infinite;
+}
+.chronicle-loom__spark--1 { top: 6%; left: 18%; animation-delay: 0.2s; }
+.chronicle-loom__spark--2 { top: 0; right: 28%; animation-delay: 0.9s; background: #99f6e4; }
+.chronicle-loom__spark--3 { bottom: 8%; left: 42%; animation-delay: 1.5s; background: #bae6fd; }
+
+.chronicle-shuttle-mini {
+  position: relative;
+  width: 22px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.chronicle-shuttle-mini__body {
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 16px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #99f6e4, #0f766e);
+  border: 1px solid rgba(204, 251, 241, 0.45);
+  animation: chronicle-mini-hop 1.4s ease-in-out infinite;
+}
+.chronicle-shuttle-mini__yarn {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ccfbf1, #0d9488);
+  border: 1px solid rgba(204, 251, 241, 0.4);
+  animation: chronicle-yarn-spin 2.8s linear infinite;
+}
+.chronicle-shuttle-mini.is-idle .chronicle-shuttle-mini__body,
+.chronicle-shuttle-mini.is-idle .chronicle-shuttle-mini__yarn {
+  animation: none;
+  opacity: 0.45;
+}
+
+.chronicle-progress-alive {
+  position: relative;
+  overflow: hidden;
+}
+.chronicle-progress-bar-alive {
+  background: linear-gradient(
+    90deg,
+    #0f766e 0%,
+    #2dd4bf 35%,
+    #fbbf24 50%,
+    #2dd4bf 65%,
+    #0f766e 100%
+  );
+  background-size: 200% 100%;
+  animation: chronicle-progress-shimmer 2.2s linear infinite;
+}
+
+.chronicle-weaver-dots span {
+  display: inline-block;
+  animation: chronicle-dot-wave 1.2s ease-in-out infinite;
+}
+.chronicle-weaver-dots span:nth-child(2) { animation-delay: 0.15s; }
+.chronicle-weaver-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chronicle-loom__weft,
+  .chronicle-loom__shuttle,
+  .chronicle-loom__bobbin,
+  .chronicle-loom__bobbin-thread,
+  .chronicle-loom__spark,
+  .chronicle-loom__stitch,
+  .chronicle-shuttle-mini__body,
+  .chronicle-shuttle-mini__yarn,
+  .chronicle-progress-bar-alive,
+  .chronicle-weaver-dots span {
+    animation: none !important;
+  }
+  .chronicle-loom__weft { width: 70%; opacity: 0.85; }
+  .chronicle-loom__shuttle { left: 42%; }
 }
 
 details > summary::-webkit-details-marker { display: none; }
