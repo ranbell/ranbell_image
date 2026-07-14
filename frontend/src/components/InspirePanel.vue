@@ -38,6 +38,7 @@ const {
   inversionNewTagsGrouped,
   inversionLlmClassification,
   inversionStep2RawResult,
+  inversionSubjectTags,
   inversionHairTags,
   inversionClothingTags,
   inversionAccessoryTags,
@@ -315,6 +316,7 @@ async function runInspire() {
               inversionStep2RawResult.value = evt.step2_raw_by_axis || inversionStep2RawResult.value
             } else if (evt.type === 'step3_result') {
               inversionAtmosphereTags.value = evt.atmosphere_tags || []
+              inversionSubjectTags.value    = evt.subject_tags    || []
               inversionHairTags.value       = evt.hair_tags       || []
               inversionClothingTags.value   = evt.clothing_tags   || []
               inversionAccessoryTags.value  = evt.accessory_tags  || []
@@ -343,6 +345,7 @@ async function runInspire() {
               inversionNewTagsGrouped.value = evt.new_tags_by_axis || inversionNewTagsGrouped.value
               inversionStep2RawResult.value = evt.step2_raw_by_axis || inversionStep2RawResult.value
               inversionAtmosphereTags.value = evt.atmosphere_tags || inversionAtmosphereTags.value
+              inversionSubjectTags.value    = evt.subject_tags    || inversionSubjectTags.value
               inversionHairTags.value       = evt.hair_tags       || inversionHairTags.value
               inversionClothingTags.value   = evt.clothing_tags   || inversionClothingTags.value
               inversionAccessoryTags.value  = evt.accessory_tags  || inversionAccessoryTags.value
@@ -1272,9 +1275,16 @@ function simpleMarkdown(text) {
               </div>
 
               <!-- Step3: Visual Spec — structured category tags -->
-              <div v-if="inversionHairTags.length || inversionClothingTags.length || inversionPoseTags.length || inversionExpressionTags.length || inversionBackgroundTags.length"
+              <div v-if="inversionSubjectTags.length || inversionHairTags.length || inversionClothingTags.length || inversionPoseTags.length || inversionExpressionTags.length || inversionBackgroundTags.length"
                 class="bg-emerald-950/30 border border-emerald-800/30 rounded-xl p-3.5 space-y-2.5">
                 <p class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">{{ $t('inspire.visualSpecTitle') }}</p>
+                <div v-if="inversionSubjectTags.length" class="space-y-1">
+                  <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupSubject') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="tag in inversionSubjectTags" :key="tag"
+                      class="px-1.5 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                  </div>
+                </div>
                 <!-- Row 1: Hair / Clothing / Accessories -->
                 <div class="grid grid-cols-3 gap-2">
                   <div v-if="inversionHairTags.length" class="space-y-1">
