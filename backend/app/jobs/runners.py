@@ -2767,43 +2767,15 @@ async def _comfy_generate_bytes(
 
 
 async def _wd14_tags_from_path(path: Path, db) -> list[str]:
-    """Synchronous WD14 scan of an image path (do not wait on the watcher)."""
+    """WD14-scan an image path (do not wait on the watcher)."""
     from ..ai import wd14 as wd14_mod
-    from ..runtime_config import get_runtime_config
-
-    cfg = await get_runtime_config(db)
-    threshold = float(cfg.get("wd14_threshold", 0.35))
-    model_dir = cfg.get("wd14_model_dir")
-    scored = await wd14_mod.predict_tags_scored(
-        path, threshold=threshold, model_dir=model_dir,
-    )
-    out: list[str] = []
-    seen: set[str] = set()
-    for tag, _score in scored:
-        name = str(tag).strip().replace(" ", "_")
-        key = name.lower()
-        if name and key not in seen:
-            seen.add(key)
-            out.append(name)
-    return out
+    return await wd14_mod.tags_from_path(path, db=db)
 
 
 async def _wd14_tags_from_bytes(img_bytes: bytes, db) -> list[str]:
-    """WD14-scan image bytes via a throwaway tempfile (never registered/persisted)."""
-    import tempfile
-
-    path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp.write(img_bytes)
-            path = Path(tmp.name)
-        return await _wd14_tags_from_path(path, db)
-    finally:
-        if path is not None:
-            try:
-                path.unlink(missing_ok=True)
-            except Exception as exc:
-                logger.warning("[chronicle] draft tempfile cleanup failed: %s", exc)
+    """WD14-scan image bytes via a throwaway tempfile (never registered)."""
+    from ..ai import wd14 as wd14_mod
+    return await wd14_mod.tags_from_bytes(img_bytes, db=db)
 
 
 async def run_chronicle_candidates(

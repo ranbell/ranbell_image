@@ -11,6 +11,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..jobs.sse_stream import queue_sse_response
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/invoke", tags=["invoke"])
@@ -587,28 +589,9 @@ async def enhance_prompt_stream(job_id: str, request: Request):
     q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
     if q is None:
         raise HTTPException(404, f"enhance-prompt job {job_id!r} not found")
-
-    async def generate():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    await request.app.state.spooler.cancel(job_id)
-                    break
-                try:
-                    item = await asyncio.wait_for(q.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield "event: ping\ndata: {}\n\n"
-                    continue
-                if item is None:
-                    break
-                yield item
-        finally:
-            request.app.state.inspire_event_queues.pop(job_id, None)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return queue_sse_response(
+        request, q, job_id=job_id,
+        registry=request.app.state.inspire_event_queues, encode="raw",
     )
 
 

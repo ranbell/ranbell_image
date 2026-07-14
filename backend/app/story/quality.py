@@ -19,10 +19,9 @@ from .generator import (
     acts_temporally_distinct,
     activities_temporally_distinct,
     axis_tag_lines_collapsed,
-    _is_ja_script_token,
-    topic_anchor_groups,
     _chronicle_tags_degenerate,
 )
+from .topic_anchors import _is_ja_script_token, topic_anchor_groups
 
 QUALITY_DIMS = (
     "topic_fit",

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..ai.tile_image import create_tile_image
+from ..jobs.sse_stream import queue_sse_response
 from ..prompt.visual_spec import (
     LABELED_TAG_FOOTER,
     REFINE_CAT_FIELDS as _REFINE_CAT_FIELDS,
@@ -1312,28 +1313,12 @@ async def refine_stream(job_id: str, request: Request):
     token_queue: asyncio.Queue | None = request.app.state.refine_token_queues.get(job_id)
     if token_queue is None:
         raise HTTPException(404, f"Refine job {job_id!r} not found")
-
-    async def generate():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    await request.app.state.spooler.cancel(job_id)
-                    break
-                try:
-                    item = await asyncio.wait_for(token_queue.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield "event: ping\ndata: {}\n\n"
-                    continue
-                if item is None:
-                    break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-        finally:
-            request.app.state.refine_token_queues.pop(job_id, None)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return queue_sse_response(
+        request,
+        token_queue,
+        job_id=job_id,
+        registry=request.app.state.refine_token_queues,
+        encode="json",
     )
 
 
