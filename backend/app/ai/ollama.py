@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -9,6 +10,8 @@ import httpx
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+_THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 
 
 class StreamParser:
@@ -236,7 +239,22 @@ class OllamaClient:
         async with self._acquire():
             r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
         self._raise_with_body(r)
-        return r.json()["response"]
+        data = r.json()
+        text = str(data.get("response") or "")
+        if "<think>" in text.lower():
+            text = _THINK_BLOCK_RE.sub("", text)
+        text = text.strip()
+        if not text:
+            # Qwen3.5 / reasoning models sometimes leave response empty while
+            # still emitting usable JSON in the thinking channel.
+            thinking = str(data.get("thinking") or "").strip()
+            if thinking and "{" in thinking:
+                logger.warning(
+                    "[ollama] empty response from %s; recovering JSON from thinking",
+                    payload.get("model"),
+                )
+                text = thinking
+        return text
 
     async def generate_text_stream(
         self,

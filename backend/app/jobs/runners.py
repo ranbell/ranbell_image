@@ -3013,20 +3013,52 @@ async def run_chronicle_candidates(
                     })
                     return
                 _phase("extractingVision", 0.08, "Inventing character from topic...")
-                try:
-                    grounding = parse_topic_only_grounding_json(
-                        await ollama.generate_text(
-                            build_topic_only_grounding_prompt(
-                                user_topic=body.user_topic,
-                                worldview=body.worldview,
-                                locale=body.locale,
-                            ),
-                            model=vlm_model, options=options, fmt="json",
+                # Qwen3.5+ needs explicit think=True (matches other Chronicle JSON
+                # stages). Retry once on empty/unparseable response.
+                grounding_prompt = build_topic_only_grounding_prompt(
+                    user_topic=body.user_topic,
+                    worldview=body.worldview,
+                    locale=body.locale,
+                )
+                grounding: dict = {}
+                for attempt in range(2):
+                    try:
+                        g_opts = dict(options)
+                        if attempt == 1:
+                            g_opts["temperature"] = min(
+                                1.3, float(g_opts.get("temperature", 1.0)) + 0.15
+                            )
+                        raw_ground = await ollama.generate_text(
+                            grounding_prompt,
+                            model=vlm_model,
+                            options=g_opts,
+                            fmt="json",
+                            think=True,
                         )
-                    )
-                except Exception as exc:
-                    logger.warning("[chronicle] topic-only grounding failed: %s", exc)
-                    grounding = {}
+                        if not (raw_ground or "").strip():
+                            logger.warning(
+                                "[chronicle] topic-only grounding empty "
+                                "response (attempt %d)",
+                                attempt + 1,
+                            )
+                            continue
+                        grounding = parse_topic_only_grounding_json(raw_ground)
+                        if grounding:
+                            break
+                        logger.warning(
+                            "[chronicle] topic-only grounding parse empty "
+                            "(attempt %d): %s",
+                            attempt + 1,
+                            (raw_ground or "")[:240],
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[chronicle] topic-only grounding failed "
+                            "(attempt %d): %s",
+                            attempt + 1,
+                            exc,
+                        )
+                        grounding = {}
                 if not grounding:
                     _put({
                         "type": "error",

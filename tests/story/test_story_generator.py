@@ -2485,6 +2485,14 @@ def test_topic_only_grounding_prompt_and_parse():
     assert parsed["scene_desc"] == "wet platform"
     assert "umbrella" in parsed["wd14_tags"]
     assert parse_topic_only_grounding_json("not json") == {}
+    # Reasoning models may wrap JSON in <think>…</think>.
+    wrapped = parse_topic_only_grounding_json(
+        '<think>planning…</think>\n'
+        '{"character_desc": "red eyes", "scene_desc": "rooftop", '
+        '"wd14_tags": ["1girl", "night"]}'
+    )
+    assert wrapped["scene_desc"] == "rooftop"
+    assert "night" in wrapped["wd14_tags"]
 
 
 def test_topic_only_axis_image_id_rule():

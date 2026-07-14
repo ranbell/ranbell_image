@@ -1038,6 +1038,9 @@ def build_story_repair_prompt(raw_story: str) -> str:
 def _loads_lenient(raw: str):
     """Parse JSON, tolerating prose around a single {...} object. → obj or None."""
     text = raw.strip()
+    # Reasoning models may leave <think>...</think> around / before the JSON.
+    if "<think>" in text.lower():
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.I).strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
