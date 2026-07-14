@@ -35,9 +35,11 @@ from app.story.generator import (
     find_identity_mutex_conflicts,
     find_mutex_conflict_tags,
     infer_axis_scene_constraints,
+    merge_draft_wd14_tags,
     parse_candidates_json,
     sample_bio_domains,
     should_differentiate_acts,
+    should_use_draft_refine,
     translation_values_complete,
     base_pose_tags,
     build_differentiate_acts_prompt,
@@ -1650,6 +1652,65 @@ def test_remove_conflict_tags_with_mutex_set():
     assert "indoors" in cleaned
     assert "day" not in cleaned.split(", ")
     assert "outdoors" not in cleaned.split(", ")
+
+
+# ── Phase B: draft refine helpers ─────────────────────────────────────────────
+
+def test_should_use_draft_refine_modes():
+    assert not should_use_draft_refine(
+        mode="on", time_scale="years", divergence=0.8, workflow_name="",
+    )
+    assert not should_use_draft_refine(
+        mode="on", time_scale="years", divergence=0.8,
+        workflow_name="x.json", manual_mode=True,
+    )
+    assert should_use_draft_refine(
+        mode="on", time_scale="minutes", divergence=0.0, workflow_name="x.json",
+    )
+    assert not should_use_draft_refine(
+        mode="off", time_scale="years", divergence=1.0, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="years", divergence=0.0, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="hours", divergence=0.5, workflow_name="x.json",
+    )
+    assert not should_use_draft_refine(
+        mode="auto", time_scale="hours", divergence=0.2, workflow_name="x.json",
+    )
+
+
+def test_merge_draft_wd14_tags_prefers_draft_scene():
+    merged = merge_draft_wd14_tags(
+        vocab_tags=["day", "blue_sky", "park", "smile"],
+        draft_tags=["night", "moonlight", "rooftop", "brown_hair"],
+        lock_tags=["blonde_hair", "blue_eyes"],
+        focal=["looking_up"],
+    )
+    assert merged[0] == "looking_up"
+    assert "night" in merged
+    assert "moonlight" in merged
+    assert "rooftop" in merged
+    # wrong hair from draft dropped; lock kept
+    assert "brown_hair" not in merged
+    assert "blonde_hair" in merged
+    # day/blue_sky conflict with night draft → dropped
+    assert "day" not in merged
+    assert "blue_sky" not in merged
+    assert "smile" in merged
+
+
+def test_merge_draft_wd14_tags_empty_draft_keeps_vocab():
+    merged = merge_draft_wd14_tags(
+        vocab_tags=["park", "smile"],
+        draft_tags=[],
+        lock_tags=["blonde_hair"],
+        focal=["waving"],
+    )
+    assert "waving" in merged
+    assert "park" in merged
+    assert "blonde_hair" in merged
 
 
 # ── user topic concretization (お題 narrative directive) ──────────────────────

@@ -1277,6 +1277,14 @@
     "pinupTitle": "このキャラの基準ピンナップを生成し Biography に登録します（画像ジョブ1枚分の追加）",
     "suppressConflict": "矛盾タグ除去",
     "suppressConflictTitle": "場面と矛盾する生成タグを除去します（Refine準拠）。OFFで全タグを保持。",
+    "draftRefine": "下書き接地",
+    "draftRefineTitle": "低解像度の下書きを生成し、WD14でスキャンして軸プロンプトを再構成してから本番生成します。Autoは長い時間尺度または高いdivergenceで有効。",
+    "draftRefineMode": {
+      "auto": "Auto",
+      "on": "On",
+      "off": "Off"
+    },
+    "reasonDraftTags": "下書きWD14",
     "start": "物語を紡ぐ",
     "running": "紡いでいます...",
     "candidatesTitle": "物語候補",
@@ -1323,6 +1331,8 @@
       "differentiating": "3つの瞬間を分離中",
       "examining": "構図を検討中",
       "taggingAxis": "場面をタグ付け中",
+      "draftingAxis": "低解像度下書きを生成中",
+      "scanningDraft": "下書きをスキャン中",
       "writingStory": "物語を執筆中",
       "refiningPrompt": "プロンプトを錬成中",
       "refiningPromptTags": "プロンプトのタグを錬成中",

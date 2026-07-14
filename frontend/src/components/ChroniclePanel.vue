@@ -27,6 +27,7 @@ const PHASE_STEP = {
   concretizing: 3, differentiating: 3, writingStory: 3,
   taggingAxis: 4, examining: 4, refiningPrompt: 4,
   refiningPromptTags: 4, refiningPromptProse: 4,
+  draftingAxis: 4, scanningDraft: 4,
   savingStory: 5, done: 5,
 }
 
@@ -58,11 +59,13 @@ const useRefSeed = ref(true)
 const manualMode = ref(false)
 const generatePinup = ref(false)
 const suppressConflictTags = ref(true)
+const useDraftRefine = ref('auto') // auto | on | off
 const pickingRandom = ref(false)
 const biography = ref(null)
 const timetable = ref(null)
 const concrete = ref(null)
 const axisReasoning = ref({})
+const axisDrafts = ref({})
 const pinupJobId = ref('')
 
 const forceSettings = ref(false)
@@ -322,6 +325,7 @@ function resetStory() {
   timetable.value = null
   concrete.value = null
   axisReasoning.value = {}
+  axisDrafts.value = {}
   pinupJobId.value = ''
   _stopImageGenMonitor()
   imageGen.value = { progress: 0, active: false, text: '', states: {} }
@@ -424,7 +428,8 @@ function activityFor(axis) {
 }
 const hasReasoning = computed(() =>
   !!bioView.value || timetableView.value.length > 0 || !!concrete.value
-  || Object.keys(axisReasoning.value).length > 0,
+  || Object.keys(axisReasoning.value).length > 0
+  || Object.keys(axisDrafts.value).length > 0,
 )
 
 async function pickRandomBase() {
@@ -501,6 +506,7 @@ async function start() {
     tone: tone.value,
     generate_pinup: generatePinup.value,
     suppress_conflict_tags: suppressConflictTags.value,
+    use_draft_refine: useDraftRefine.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
     temperature: temperature.value,
@@ -614,6 +620,9 @@ function handleEvent(ev) {
       break
     case 'axis_reasoning':
       axisReasoning.value = { ...axisReasoning.value, [ev.axis]: ev }
+      break
+    case 'axis_draft':
+      axisDrafts.value = { ...axisDrafts.value, [ev.axis]: ev }
       break
     case 'pinup_job':
       pinupJobId.value = ev.job_id
@@ -907,6 +916,14 @@ async function generateImages() {
                       {{ t('chronicle.manualMode') }}
                     </label>
                   </div>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftRefineTitle')">{{ t('chronicle.draftRefine') }}</span>
+                    <button v-for="m in ['auto', 'on', 'off']" :key="m" type="button"
+                      @click="useDraftRefine = m"
+                      class="sb-chip" :class="useDraftRefine === m ? 'is-chip-on-teal' : ''">
+                      {{ t('chronicle.draftRefineMode.' + m) }}
+                    </button>
+                  </div>
                 </div>
               </details>
 
@@ -1157,7 +1174,7 @@ async function generateImages() {
                 </div>
 
                 <div v-for="axis in REASON_AXES" :key="axis"
-                  v-show="activityFor(axis) || axisReasoning[axis]"
+                  v-show="activityFor(axis) || axisReasoning[axis] || axisDrafts[axis]"
                   class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px]">
                   <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
                   <p v-if="activityFor(axis)" class="text-gray-300 mb-1">{{ activityFor(axis) }}</p>
@@ -1173,6 +1190,16 @@ async function generateImages() {
                     <p v-if="(axisReasoning[axis].search_tags || []).length" class="break-words">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonTags') }}:</span>
                       {{ (axisReasoning[axis].search_tags || []).join(', ') }}
+                    </p>
+                  </div>
+                  <div v-if="axisDrafts[axis]" class="mt-2 flex items-start gap-2 text-[10px] text-[var(--sb-muted)]">
+                    <img v-if="axisDrafts[axis].draft_sha256"
+                      :src="`/api/thumbnails/${axisDrafts[axis].draft_sha256}.webp`"
+                      class="w-14 h-14 object-cover rounded border border-white/10 shrink-0"
+                      alt="" />
+                    <p v-if="(axisDrafts[axis].draft_tags || []).length" class="break-words">
+                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftTags') }}:</span>
+                      {{ (axisDrafts[axis].draft_tags || []).join(', ') }}
                     </p>
                   </div>
                 </div>

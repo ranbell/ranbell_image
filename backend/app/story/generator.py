@@ -3436,6 +3436,143 @@ def find_identity_mutex_conflicts(
     return conflicts
 
 
+# ── Phase B: draft-image grounding ────────────────────────────────────────────
+#
+# Non-base axes have no real image yet, so WD14 vocab search is text-only and
+# drifts. Optionally generate a cheap low-res draft, scan it with WD14, and
+# rebuild the axis tag line from those image-grounded tags before the final gen.
+
+_DRAFT_AUTO_SCALES = frozenset({"months", "years", "decades"})
+_DRAFT_AUTO_DIVERGENCE = 0.45
+
+# Tags that are identity / count anchors — never replaced by draft WD14 alone.
+_DRAFT_KEEP_CATEGORIES = frozenset({
+    "hair_color", "hair_style", "eyes", "face", "accessory",
+})
+
+
+def should_use_draft_refine(
+    *,
+    mode: str | bool | None,
+    time_scale: str,
+    divergence: float,
+    workflow_name: str = "",
+    manual_mode: bool = False,
+) -> bool:
+    """Whether Phase B draft→WD14→rebuild should run for this expand.
+
+    ``mode``:
+      - True / \"on\"  → always (when a workflow is set and not manual)
+      - False / \"off\" → never
+      - None / \"auto\" → long time scales or high divergence
+    """
+    if manual_mode or not (workflow_name or "").strip():
+        return False
+    if isinstance(mode, bool):
+        return mode
+    key = str(mode or "auto").strip().lower()
+    if key in ("off", "false", "0", "no"):
+        return False
+    if key in ("on", "true", "1", "yes"):
+        return True
+    # auto
+    scale = (time_scale or "").strip().lower()
+    try:
+        div = float(divergence)
+    except (TypeError, ValueError):
+        div = 0.0
+    return scale in _DRAFT_AUTO_SCALES or div >= _DRAFT_AUTO_DIVERGENCE
+
+
+def merge_draft_wd14_tags(
+    *,
+    vocab_tags: list[str],
+    draft_tags: list[str],
+    lock_tags: list[str] | None = None,
+    focal: list[str] | None = None,
+) -> list[str]:
+    """Blend text-search tags with image-grounded draft WD14 tags.
+
+    Draft scene/pose tags replace overlapping vocab near-misses; identity lock
+    and subject anchors always win. Focal action tags stay near the front.
+    """
+    locks = [str(t).strip().replace(" ", "_") for t in (lock_tags or []) if t]
+    lock_keys = {t.lower() for t in locks}
+    focal_norm = [str(t).strip().replace(" ", "_") for t in (focal or []) if t]
+
+    def _overlap_conflict(a: str, b: str) -> bool:
+        if a == b:
+            return False
+        ta = {t for t in a.lower().split("_") if len(t) >= 3}
+        tb = {t for t in b.lower().split("_") if len(t) >= 3}
+        return bool(ta & tb)
+
+    # Drop draft tags that fight identity lock (wrong hair/eye color etc.).
+    draft_clean: list[str] = []
+    seen_draft: set[str] = set()
+    for raw in draft_tags:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if not tag or key in seen_draft:
+            continue
+        cat = classify_identity_tag(tag)
+        if cat in ("hair_color", "eyes") and lock_keys:
+            if key not in lock_keys:
+                continue
+        if cat in _DRAFT_KEEP_CATEGORIES and lock_keys and key not in lock_keys:
+            if any(classify_identity_tag(l) == cat for l in locks):
+                continue
+        seen_draft.add(key)
+        draft_clean.append(tag)
+
+    draft_keys = {t.lower() for t in draft_clean}
+
+    # Prefer draft side of exclusive scene families (day↔night, indoor↔outdoor).
+    mutex_drop = {
+        t.lower()
+        for t in find_mutex_conflict_tags(
+            draft_clean + [
+                str(t).strip().replace(" ", "_") for t in vocab_tags if t
+            ],
+            preferred=draft_clean,
+        )
+    }
+
+    vocab_kept: list[str] = []
+    seen_vocab: set[str] = set()
+    for raw in vocab_tags:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if (
+            not tag
+            or key in seen_vocab
+            or key in draft_keys
+            or key in lock_keys
+            or key in mutex_drop
+        ):
+            continue
+        if any(_overlap_conflict(tag, d) for d in draft_clean):
+            continue
+        seen_vocab.add(key)
+        vocab_kept.append(tag)
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(seq: list[str]) -> None:
+        for tag in seq:
+            key = tag.lower()
+            if key not in seen:
+                seen.add(key)
+                out.append(tag)
+
+    _add(focal_norm)
+    _add(draft_clean)
+    _add(vocab_kept)
+    _add(locks)
+    return out
+
+
 # ── Final stage: translate the user-language chronicle into English ──────────
 # (image prompts always work in English; skipped when the locale is already en)
 

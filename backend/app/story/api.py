@@ -45,6 +45,12 @@ class ChronicleRequest(BaseModel):
     generate_pinup: bool = False  # generate + register a reference "pinup" for the base image
     use_ref_seed: bool = True
     manual_mode: bool = False
+    # Phase B: cheap draft → WD14 → rebuild axis prompt before final gen.
+    # auto = on for long time scales / high divergence; on/off force the choice.
+    use_draft_refine: Literal["auto", "on", "off"] = "auto"
+    draft_width: int = 512
+    draft_height: int = 512
+    draft_steps: int = 12
     vlm_model: str = ""
     temperature: float = 1.0  # Gemma 4 recommended default
     num_ctx: int = 16384

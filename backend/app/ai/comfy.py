@@ -103,6 +103,10 @@ class ComfyUIClient:
         neg_node_id: str = "",
         batch_count: int = 1,
         seed: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        steps: int | None = None,
+        cfg: float | None = None,
     ) -> dict:
         wf = copy.deepcopy(workflow)
 
@@ -127,10 +131,27 @@ class ComfyUIClient:
             elif len(fallback_clips) >= 2:
                 wf[fallback_clips[1]]["inputs"]["text"] = negative
 
-        if batch_count > 1:
+        if batch_count > 1 or width is not None or height is not None:
             for node in wf.values():
-                if node.get("class_type") in self._LATENT_NODE_TYPES:
-                    node["inputs"]["batch_size"] = batch_count
+                if node.get("class_type") not in self._LATENT_NODE_TYPES:
+                    continue
+                inputs = node.setdefault("inputs", {})
+                if batch_count > 1:
+                    inputs["batch_size"] = batch_count
+                if width is not None and "width" in inputs:
+                    inputs["width"] = int(width)
+                if height is not None and "height" in inputs:
+                    inputs["height"] = int(height)
+
+        if steps is not None or cfg is not None:
+            for node in wf.values():
+                if node.get("class_type") not in self._KSAMPLER_TYPES:
+                    continue
+                inputs = node.setdefault("inputs", {})
+                if steps is not None and "steps" in inputs:
+                    inputs["steps"] = int(steps)
+                if cfg is not None and "cfg" in inputs:
+                    inputs["cfg"] = float(cfg)
 
         if seed is not None:
             patched: set[str] = set()

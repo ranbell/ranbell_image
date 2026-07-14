@@ -1277,6 +1277,14 @@
     "pinupTitle": "Generate a reference 'pinup' of this character and register it to her Biography (one extra image job)",
     "suppressConflict": "Conflict-tag removal",
     "suppressConflictTitle": "Remove generated tags that contradict the scene (Refine parity). Turn off to keep every tag.",
+    "draftRefine": "Draft refine",
+    "draftRefineTitle": "Generate a low-res draft, scan WD14 tags from it, and rebuild the axis prompt before the final image. Auto enables for long time scales or high divergence.",
+    "draftRefineMode": {
+      "auto": "Auto",
+      "on": "On",
+      "off": "Off"
+    },
+    "reasonDraftTags": "Draft WD14",
     "start": "Weave Chronicle",
     "running": "Weaving...",
     "candidatesTitle": "Story candidates",
@@ -1323,6 +1331,8 @@
       "differentiating": "Separating the three moments",
       "examining": "Framing the shot",
       "taggingAxis": "Tagging the scene",
+      "draftingAxis": "Drafting a low-res scene",
+      "scanningDraft": "Scanning draft tags",
       "writingStory": "Writing the chronicle",
       "refiningPrompt": "Refining prompts",
       "refiningPromptTags": "Refining prompt tags",
