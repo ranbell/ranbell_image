@@ -1747,11 +1747,19 @@ def test_should_use_draft_refine_modes():
     assert should_use_draft_refine(
         mode="auto", time_scale="years", divergence=0.0, workflow_name="x.json",
     )
+    # auto: hours is no longer skipped (only minutes / tens_of_minutes)
     assert should_use_draft_refine(
-        mode="auto", time_scale="hours", divergence=0.5, workflow_name="x.json",
-    )
-    assert not should_use_draft_refine(
         mode="auto", time_scale="hours", divergence=0.2, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="days", divergence=0.0, workflow_name="x.json",
+    )
+    # micro scales skip unless divergence ≥ 0.25
+    assert not should_use_draft_refine(
+        mode="auto", time_scale="minutes", divergence=0.2, workflow_name="x.json",
+    )
+    assert should_use_draft_refine(
+        mode="auto", time_scale="minutes", divergence=0.25, workflow_name="x.json",
     )
 
 
@@ -1773,6 +1781,9 @@ def test_merge_draft_wd14_tags_prefers_draft_scene():
     assert "day" not in merged
     assert "blue_sky" not in merged
     assert "smile" in merged
+    # richness tags (moonlight/night/rooftop) promoted ahead of leftover vocab
+    rich_idx = min(merged.index(t) for t in ("night", "moonlight", "rooftop"))
+    assert rich_idx < merged.index("smile")
 
 
 def test_merge_draft_wd14_tags_empty_draft_keeps_vocab():
@@ -1785,6 +1796,48 @@ def test_merge_draft_wd14_tags_empty_draft_keeps_vocab():
     assert "waving" in merged
     assert "park" in merged
     assert "blonde_hair" in merged
+
+
+def test_build_draft_grounding_block_and_delta():
+    from app.story.generator import (
+        build_draft_grounding_block,
+        draft_richness_delta,
+    )
+    block = build_draft_grounding_block(
+        ["golden_hour", "rim_light", "bicycle", "storefront"],
+        locale="en",
+    )
+    assert "DRAFT GROUNDING" in block
+    assert "golden_hour" in block
+    assert "image model's own expression" in block
+    ja = build_draft_grounding_block(["neon", "cafe"], locale="ja")
+    assert "下書き接地" in ja
+    thin = "1girl, solo, smile, outdoors, day, standing"
+    rich = (
+        "1girl, solo, smile, outdoors, street, storefront, cafe, "
+        "bicycle, riding, sunset, golden_hour, rim_light, scarf"
+    )
+    delta = draft_richness_delta(before_tag_line=thin, after_tag_line=rich)
+    assert delta["after"] > delta["before"]
+    assert delta["delta"] > 0.1
+    assert delta["draft_lighting"] >= 1
+    assert delta["draft_environment"] >= 1
+
+
+def test_build_axis_prose_prompt_includes_draft_grounding():
+    from app.story.generator import build_draft_grounding_block
+    g = build_draft_grounding_block(["sunset", "bicycle", "rim_light"])
+    prompt = build_axis_prose_prompt(
+        story_text="She rides home at dusk.",
+        tag_line="1girl, riding_bicycle, sunset",
+        character_tags=["blonde_hair"],
+        character_desc="blonde girl",
+        prompt_style="danbooru+natural",
+        draft_grounding=g,
+    )
+    assert "DRAFT GROUNDING" in prompt
+    assert "Prefer DRAFT GROUNDING" in prompt
+    assert "rim_light" in prompt
 
 
 # ── user topic concretization (お題 narrative directive) ──────────────────────

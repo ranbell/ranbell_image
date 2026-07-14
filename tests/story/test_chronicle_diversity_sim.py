@@ -423,7 +423,7 @@ SCENARIOS = {
             "tag_lines_collapsed": True,  # content-tag gate after pad strip
             "max_tag_jaccard_lt": 1.01,
             "all_have_action": True,
-            "draft_refine_auto": False,
+            "draft_refine_auto": True,  # days scale → auto draft (non-micro)
             "probe_paraphrase_gap": True,
         },
     },

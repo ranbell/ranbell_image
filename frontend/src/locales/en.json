@@ -1277,14 +1277,15 @@
     "pinupTitle": "Generate a reference 'pinup' of this character and register it to her Biography (one extra image job)",
     "suppressConflict": "Conflict-tag removal",
     "suppressConflictTitle": "Remove generated tags that contradict the scene (Refine parity). Turn off to keep every tag.",
-    "draftRefine": "Draft refine",
-    "draftRefineTitle": "Generate a low-res draft, scan WD14 tags from it, and rebuild the axis prompt before the final image. Auto enables for long time scales or high divergence.",
+    "draftRefine": "Draft grounding",
+    "draftRefineTitle": "Paint a tiny draft, read it with WD14, and ground the final prompt in the image model's own lighting, atmosphere and props (main quality lever). Auto: any non-minute scale, or divergence ≥ 0.25.",
     "draftRefineMode": {
       "auto": "Auto",
       "on": "On",
       "off": "Off"
     },
     "reasonDraftTags": "Draft WD14",
+    "reasonDraftDelta": "Richness Δ",
     "start": "Weave Chronicle",
     "running": "Weaving...",
     "weaverBusy": "Spinning the yarn…",
@@ -1403,7 +1404,7 @@
     "quality": {
       "title": "Quality radar",
       "overall": "Overall",
-      "hint": "Rule-based scores (0–100) for topic fit, diversity, expression, action, drawability, identity, and richness (lighting / dense background / props). Collapsed by default.",
+      "hint": "Rule-based scores (0–100) for topic fit, diversity, expression, action, drawability, identity, and richness. When draft grounding ran, the image-model richness lift (delta) is recorded too.",
       "chartAria": "Quality radar chart, overall {pct}",
       "dim": {
         "topic_fit": "Topic",

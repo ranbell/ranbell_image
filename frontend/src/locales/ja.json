@@ -1278,13 +1278,14 @@
     "suppressConflict": "矛盾タグ除去",
     "suppressConflictTitle": "場面と矛盾する生成タグを除去します（Refine準拠）。OFFで全タグを保持。",
     "draftRefine": "下書き接地",
-    "draftRefineTitle": "低解像度の下書きを生成し、WD14でスキャンして軸プロンプトを再構成してから本番生成します。Autoは長い時間尺度または高いdivergenceで有効。",
+    "draftRefineTitle": "小さな下書きを描かせ、WD14で読み取り、画像モデル自身の照明・雰囲気・小道具表現を本番プロンプトに接地します（最大の品質レバー）。Autoは分単位以外、またはdivergence≥0.25で有効。",
     "draftRefineMode": {
       "auto": "Auto",
       "on": "On",
       "off": "Off"
     },
     "reasonDraftTags": "下書きWD14",
+    "reasonDraftDelta": "豊かさΔ",
     "start": "物語を紡ぐ",
     "running": "紡いでいます...",
     "weaverBusy": "糸車をまわしています…",
@@ -1403,7 +1404,7 @@
     "quality": {
       "title": "品質レーダー",
       "overall": "総合",
-      "hint": "お題適合・多様性・表情・動作・描画しやすさ・同一性・豊かさ（照明・背景密度・小道具）をルールで採点（0–100）。普段は畳んでおけます。",
+      "hint": "お題適合・多様性・表情・動作・描画しやすさ・同一性・豊かさをルール採点（0–100）。下書き接地がある場合は、画像モデル表現の寄与（richness delta）も記録されます。",
       "chartAria": "品質レーダーチャート、総合 {pct}",
       "dim": {
         "topic_fit": "お題適合",

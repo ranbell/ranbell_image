@@ -357,8 +357,13 @@ def evaluate_chronicle_quality(
     time_scale: str = "years",
     lock_tags: list[str] | None = None,
     method: str = "rules",
+    draft_deltas: dict[str, dict] | None = None,
 ) -> dict[str, Any]:
-    """Return a ``quality_eval`` dict ready to persist on the story payload."""
+    """Return a ``quality_eval`` dict ready to persist on the story payload.
+
+    ``draft_deltas`` (optional): per-axis richness before/after Phase B draft
+    refine — records how much expression was borrowed from the image model.
+    """
     stories = stories or {}
     activities = activities or {}
     # Normalise prompts: accept either raw strings or {positive, negative} dicts.
@@ -402,7 +407,35 @@ def evaluate_chronicle_quality(
         sum(dimensions[d] for d in QUALITY_DIMS) / len(QUALITY_DIMS), 3
     )
 
-    return {
+    draft_note = ""
+    draft_per: dict[str, Any] = {}
+    if draft_deltas:
+        deltas: list[float] = []
+        for axis, d in draft_deltas.items():
+            if not isinstance(d, dict):
+                continue
+            draft_per[axis] = d
+            try:
+                deltas.append(float(d.get("delta", 0.0)))
+            except (TypeError, ValueError):
+                pass
+        if deltas:
+            mean_d = sum(deltas) / len(deltas)
+            draft_note = (
+                f"draft_refine axes={len(deltas)} mean_delta={mean_d:+.2f}"
+            )
+
+    notes = {
+        "topic_fit": topic_note,
+        "diversity": div_note,
+        "drawability": draw_note,
+        "identity": id_note,
+        "richness": f"mean={richness:.2f}",
+    }
+    if draft_note:
+        notes["draft_grounding"] = draft_note
+
+    out: dict[str, Any] = {
         "version": 1,
         "evaluated_at": time.time(),
         "method": method,
@@ -413,11 +446,16 @@ def evaluate_chronicle_quality(
             "action": action_per,
             "richness": rich_per,
         },
-        "notes": {
-            "topic_fit": topic_note,
-            "diversity": div_note,
-            "drawability": draw_note,
-            "identity": id_note,
-            "richness": f"mean={richness:.2f}",
-        },
+        "notes": notes,
     }
+    if draft_per:
+        out["per_axis"]["draft_richness"] = draft_per
+        out["draft_grounding"] = {
+            "axes": list(draft_per.keys()),
+            "mean_delta": round(
+                sum(float(d.get("delta", 0.0)) for d in draft_per.values())
+                / max(1, len(draft_per)),
+                3,
+            ),
+        }
+    return out

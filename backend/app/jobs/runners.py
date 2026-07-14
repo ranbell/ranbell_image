@@ -3273,6 +3273,8 @@ async def run_chronicle_expand(
         infer_axis_scene_constraints,
         inject_identity_tags,
         is_multi_character,
+        build_draft_grounding_block,
+        draft_richness_delta,
         merge_chronicle_axis_tags,
         merge_draft_wd14_tags,
         parse_axis_tags_json,
@@ -3710,14 +3712,16 @@ async def run_chronicle_expand(
             _put({
                 "type": "warning",
                 "message": (
-                    "Draft refine on — each non-base axis gets a low-res draft, "
-                    "WD14 scan, and prompt rebuild before final generation."
+                    "Draft grounding on — borrow the image model's expression: "
+                    "low-res draft → WD14 → rebuild lighting/atmosphere/props "
+                    "before final generation (main quality lever)."
                 ),
             })
 
         # ── Per non-base axis: shot plan on finished story → WD14 search → prompt
         prompts: dict[str, dict] = {}
         visual_plans: dict[str, dict] = {}
+        draft_deltas: dict[str, dict] = {}
         for i, axis in enumerate(gen_axes):
             story_en = en_stories.get(axis) or situation_en[axis]
 
@@ -4015,14 +4019,21 @@ async def run_chronicle_expand(
                             "[chronicle] %s draft WD14 failed: %s", axis, exc
                         )
                     # Draft bytes are discarded after the scan — never registered.
-                    _put({
-                        "type": "axis_draft",
-                        "axis": axis,
-                        "draft_tags": draft_tags[:24],
-                    })
+                    if not draft_tags:
+                        _put({
+                            "type": "axis_draft",
+                            "axis": axis,
+                            "draft_tags": [],
+                        })
                     if draft_tags:
                         _phase("refiningPromptProse", 0.62 + 0.08 * i,
                                f"Rebuilding {axis} prompt from draft...")
+                        # Snapshot pre-draft richness so we can measure the lift.
+                        before_tag_line = merge_chronicle_axis_tags(
+                            focal=focal,
+                            search_tags=list(axis_search_tags),
+                            lock_tags=lock_tags,
+                        )
                         blended = merge_draft_wd14_tags(
                             vocab_tags=axis_search_tags,
                             draft_tags=draft_tags,
@@ -4039,6 +4050,21 @@ async def run_chronicle_expand(
                         parts = [t.strip() for t in tag_line.split(",") if t.strip()]
                         tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
                         tag_line = _strip_quality_metatags(tag_line)
+                        richness_delta = draft_richness_delta(
+                            before_tag_line=before_tag_line,
+                            after_tag_line=tag_line,
+                        )
+                        if richness_delta:
+                            draft_deltas[axis] = richness_delta
+                        draft_evt: dict = {
+                            "type": "axis_draft",
+                            "axis": axis,
+                            "draft_tags": draft_tags[:24],
+                        }
+                        if richness_delta:
+                            draft_evt["draft_richness_delta"] = richness_delta
+                        _put(draft_evt)
+                        grounding = build_draft_grounding_block(draft_tags)
 
                         if body.prompt_style == "danbooru":
                             positive, negative = tag_line, negative or ""
@@ -4062,6 +4088,7 @@ async def run_chronicle_expand(
                                     visual_plan=visual_plan,
                                     emotion=body.emotion,
                                     user_topic=body.user_topic,
+                                    draft_grounding=grounding,
                                 )
                                 axis_tokens2: list[str] = []
                                 async for event in ollama.generate_text_stream(
@@ -4189,6 +4216,8 @@ async def run_chronicle_expand(
                             }
                             if removed_tags:
                                 refined_evt["removed_tags"] = removed_tags
+                            if axis in draft_deltas:
+                                refined_evt["draft_richness_delta"] = draft_deltas[axis]
                             _put(refined_evt)
 
         # Cross-axis tag diversity: catch paraphrase collapses prose gates missed.
@@ -4219,6 +4248,7 @@ async def run_chronicle_expand(
                 prompts=prompts,
                 time_scale=body.time_scale,
                 lock_tags=lock_tags,
+                draft_deltas=draft_deltas or None,
             )
             _put({"type": "quality_eval", **quality_eval})
         except Exception as exc:

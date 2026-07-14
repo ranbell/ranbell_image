@@ -725,6 +725,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </summary>
               <div class="mt-4">
                 <StoryQualityRadar :eval="detailStory.quality_eval" />
+                <p v-if="detailStory.quality_eval?.notes?.draft_grounding"
+                  class="mt-2 text-[10px] font-mono text-teal-300/70">
+                  {{ detailStory.quality_eval.notes.draft_grounding }}
+                </p>
                 <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
                   {{ t('storybook.quality.hint') }}
                 </p>

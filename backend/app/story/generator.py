@@ -3442,12 +3442,16 @@ def build_axis_prose_prompt(
     emotion: str = "",
     user_topic: str = "",
     negative_supplement: str = "",
+    draft_grounding: str = "",
 ) -> str:
     """Pass 2 of Stage 3b: 5-paragraph Visual Script over Pass 1's tag line.
 
     prompt_style="natural"          → POSITIVE = prose only (no leading tag line)
     prompt_style="danbooru+natural" → POSITIVE = tag_line, blank line, prose
     prompt_style="danbooru"         → not intended — call Pass 1 only and skip Pass 2.
+
+    When ``draft_grounding`` is set (Phase B), the image model's draft WD14 is
+    treated as visual fact — lighting/atmosphere/props must match it.
     """
     ctx = _axis_context_blocks(
         story_text=story_text,
@@ -3475,6 +3479,16 @@ def build_axis_prose_prompt(
         "the prose so the AI image model reads them from both places]\n"
         f"{tag_line}\n"
     )
+    grounding_block = ""
+    if (draft_grounding or "").strip():
+        grounding_block = (
+            f"\n{draft_grounding.strip()}\n"
+            "CRITICAL: The draft grounding above is stronger than story-text "
+            "guesses for lighting, atmosphere, background, props and pose. "
+            "Write the Visual Script so those draft facts are VISIBLE in the "
+            "final image. Do not invent conflicting weather, time-of-day, or "
+            "setting. Identity locks (hair/eye colour) still win over draft.\n"
+        )
     if prompt_style == "natural":
         format_rule = (
             "POSITIVE is the 5-paragraph Visual Script prose described above "
@@ -3492,6 +3506,11 @@ def build_axis_prose_prompt(
         if negative_supplement.strip()
         else ""
     )
+    draft_rule = (
+        "- Prefer DRAFT GROUNDING (image-model facts) over thin text guesses "
+        "for light, place, props and motion when present.\n"
+        if grounding_block else ""
+    )
     return (
         "You are an expert image generation prompt engineer.\n"
         "Turn ONE act of a story into the FINAL image prompt, building on the "
@@ -3508,10 +3527,12 @@ def build_axis_prose_prompt(
         f"{ctx['plan_block']}"
         f"{ctx['emotion_block']}"
         f"{tag_block}"
+        f"{grounding_block}"
         "\n[Visual Script format]\n"
         f"{_VISUAL_SCRIPT_GUIDE}\n\n"
         "Rules:\n"
         f"- {format_rule}\n"
+        f"{draft_rule}"
         "- Depict THIS act's scene grounded in the story text: place, lighting, mood.\n"
         "- The action MUST appear as concrete danbooru action/pose tags near the "
         "FRONT of the positive prompt; a bare 'standing'/'sitting' with no action "
@@ -3852,16 +3873,52 @@ def find_identity_mutex_conflicts(
 # ── Phase B: draft-image grounding ────────────────────────────────────────────
 #
 # Non-base axes have no real image yet, so WD14 vocab search is text-only and
-# drifts. Optionally generate a cheap low-res draft, scan it with WD14, and
-# rebuild the axis tag line from those image-grounded tags before the final gen.
+# drifts. Generate a cheap low-res draft, scan it with WD14, and rebuild the
+# axis prompt from those image-grounded tags before the final gen.
+#
+# This is the main quality lever: the image model already "knows" lighting,
+# atmosphere, props and pose that small VLMs invent poorly — we borrow that
+# expression by reading the draft back through WD14.
 
-_DRAFT_AUTO_SCALES = frozenset({"months", "years", "decades"})
-_DRAFT_AUTO_DIVERGENCE = 0.45
+# Auto: skip only micro scales (same-scene micro-shifts); everything else drafts.
+_DRAFT_SKIP_SCALES = frozenset({"minutes", "tens_of_minutes"})
+_DRAFT_AUTO_DIVERGENCE = 0.25
+# Backward-compat alias used by older tests / callers.
+_DRAFT_AUTO_SCALES = frozenset({"hours", "days", "months", "years", "decades"})
 
 # Tags that are identity / count anchors — never replaced by draft WD14 alone.
 _DRAFT_KEEP_CATEGORIES = frozenset({
     "hair_color", "hair_style", "eyes", "face", "accessory",
 })
+
+# Draft WD14 tags in these families are the image model's expressive gift —
+# promote them ahead of text-search vocab so the rebuild keeps that richness.
+_DRAFT_RICHNESS_TOKENS = frozenset({
+    # lighting
+    "sunset", "sunrise", "golden_hour", "dusk", "dawn", "rim_light", "backlight",
+    "lens_flare", "volumetric", "god_rays", "sunbeam", "shadow", "warm_light",
+    "cool_light", "neon", "cinematic_lighting", "glow", "sparkle", "moonlight",
+    "daylight", "afternoon", "evening", "morning", "night",
+    # environment
+    "street", "road", "alley", "cityscape", "shop", "storefront", "cafe", "bar",
+    "window", "building", "streetlamp", "banner", "mountain", "sky", "cloud",
+    "stadium", "crowd", "audience", "bleachers", "plant", "flower", "outdoors",
+    "indoors", "scenery", "rooftop", "park", "bridge",
+    # props / atmosphere / motion the model invented
+    "bicycle", "bike", "scarf", "medal", "trophy", "mug", "beer", "confetti",
+    "streamer", "umbrella", "wind", "dust", "particle", "bokeh", "haze",
+    "riding", "pedaling", "fluttering", "cheering", "dynamic_pose", "motion_blur",
+})
+
+
+def _is_draft_richness_tag(tag: str) -> bool:
+    t = tag.strip().lower().replace(" ", "_").replace("-", "_")
+    if not t:
+        return False
+    if t in _DRAFT_RICHNESS_TOKENS:
+        return True
+    toks = set(t.split("_"))
+    return bool(toks & _DRAFT_RICHNESS_TOKENS)
 
 
 def should_use_draft_refine(
@@ -3877,7 +3934,7 @@ def should_use_draft_refine(
     ``mode``:
       - True / \"on\"  → always (when a workflow is set and not manual)
       - False / \"off\" → never
-      - None / \"auto\" → long time scales or high divergence
+      - None / \"auto\" → any non-micro time scale, or divergence ≥ 0.25
     """
     if manual_mode or not (workflow_name or "").strip():
         return False
@@ -3888,13 +3945,15 @@ def should_use_draft_refine(
         return False
     if key in ("on", "true", "1", "yes"):
         return True
-    # auto
+    # auto — prefer drafting; only skip micro scales unless divergence is high
     scale = (time_scale or "").strip().lower()
     try:
         div = float(divergence)
     except (TypeError, ValueError):
         div = 0.0
-    return scale in _DRAFT_AUTO_SCALES or div >= _DRAFT_AUTO_DIVERGENCE
+    if div >= _DRAFT_AUTO_DIVERGENCE:
+        return True
+    return scale not in _DRAFT_SKIP_SCALES
 
 
 def merge_draft_wd14_tags(
@@ -3906,8 +3965,10 @@ def merge_draft_wd14_tags(
 ) -> list[str]:
     """Blend text-search tags with image-grounded draft WD14 tags.
 
-    Draft scene/pose tags replace overlapping vocab near-misses; identity lock
-    and subject anchors always win. Focal action tags stay near the front.
+    Draft scene/pose/lighting tags are promoted ahead of vocab near-misses so
+    the image model's expression (rim light, storefront, confetti…) survives
+    into the final prompt. Identity lock and subject anchors always win.
+    Focal action tags stay near the front.
     """
     locks = [str(t).strip().replace(" ", "_") for t in (lock_tags or []) if t]
     lock_keys = {t.lower() for t in locks}
@@ -3969,6 +4030,10 @@ def merge_draft_wd14_tags(
         seen_vocab.add(key)
         vocab_kept.append(tag)
 
+    # Split draft into richness-first vs remainder so lighting/env/props win.
+    draft_rich = [t for t in draft_clean if _is_draft_richness_tag(t)]
+    draft_rest = [t for t in draft_clean if not _is_draft_richness_tag(t)]
+
     out: list[str] = []
     seen: set[str] = set()
 
@@ -3980,10 +4045,62 @@ def merge_draft_wd14_tags(
                 out.append(tag)
 
     _add(focal_norm)
-    _add(draft_clean)
+    _add(draft_rich)   # image-model expression first
+    _add(draft_rest)
     _add(vocab_kept)
     _add(locks)
     return out
+
+
+def build_draft_grounding_block(draft_tags: list[str], *, locale: str = "en") -> str:
+    """Instruction block for Pass-2 rebuild: treat draft WD14 as visual fact."""
+    tags = [
+        str(t).strip().replace(" ", "_")
+        for t in (draft_tags or [])
+        if str(t).strip()
+    ][:40]
+    if not tags:
+        return ""
+    joined = ", ".join(tags)
+    if locale == "ja":
+        return (
+            "\n[下書き接地 — 画像モデルが既に描いた事実]\n"
+            f"低解像度下書きの WD14: {joined}\n"
+            "これらはテキスト推測ではなく、画像モデルの表現そのもの。"
+            "照明・雰囲気・背景・小道具・ポーズはこれに合わせて書き直し、"
+            "矛盾するタグは捨てること。同一性（髪色・瞳色）だけは保持。\n"
+        )
+    return (
+        "\n[DRAFT GROUNDING — facts the IMAGE MODEL already painted]\n"
+        f"Low-res draft WD14: {joined}\n"
+        "These are not text guesses — they are the image model's own expression. "
+        "Rewrite lighting, atmosphere, background, props and pose to MATCH them; "
+        "drop contradicting invented tags. Keep identity (hair/eye colour) only.\n"
+    )
+
+
+def draft_richness_delta(
+    *,
+    before_tag_line: str,
+    after_tag_line: str,
+) -> dict:
+    """Compare richness before/after draft merge (lazy import to avoid cycles)."""
+    try:
+        from .quality import score_prompt_richness
+    except Exception:
+        return {}
+    before = score_prompt_richness(before_tag_line)
+    after = score_prompt_richness(after_tag_line)
+    return {
+        "before": before.get("score", 0.0),
+        "after": after.get("score", 0.0),
+        "delta": round(
+            float(after.get("score", 0.0)) - float(before.get("score", 0.0)), 3
+        ),
+        "draft_lighting": after.get("lighting", 0),
+        "draft_environment": after.get("environment", 0),
+        "draft_props": after.get("props", 0),
+    }
 
 
 # ── Final stage: translate the user-language chronicle into English ──────────

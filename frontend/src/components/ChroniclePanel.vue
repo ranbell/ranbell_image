@@ -1270,6 +1270,14 @@ async function generateImages() {
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftTags') }}:</span>
                       {{ (axisDrafts[axis].draft_tags || []).join(', ') }}
                     </p>
+                    <p v-if="axisDrafts[axis].draft_richness_delta"
+                      class="mt-0.5 font-mono text-teal-300/70">
+                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftDelta') }}:</span>
+                      {{ Number(axisDrafts[axis].draft_richness_delta.before || 0).toFixed(2) }}
+                      → {{ Number(axisDrafts[axis].draft_richness_delta.after || 0).toFixed(2) }}
+                      ({{ (Number(axisDrafts[axis].draft_richness_delta.delta || 0) >= 0 ? '+' : '')
+                        + Number(axisDrafts[axis].draft_richness_delta.delta || 0).toFixed(2) }})
+                    </p>
                   </div>
                 </div>
               </div>
