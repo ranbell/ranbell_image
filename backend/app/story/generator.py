@@ -254,6 +254,8 @@ def topic_anchor_tokens(user_topic: str, topic_directive: str = "") -> list[str]
 
     Japanese uses kanji/katakana chunks (not whole phrases glued by hiragana)
     so a topic like 「廃墟を探索する冒険」 yields 「廃墟」「探索」「冒険」.
+    Each JA token is also expanded with common EN aliases so English candidate
+    beats still match a Japanese お題 (カフェ↔cafe).
     """
     text = f"{user_topic or ''} {topic_directive or ''}".strip()
     if not text:
@@ -279,7 +281,53 @@ def topic_anchor_tokens(user_topic: str, topic_directive: str = "") -> list[str]
         _add(m.group(0))
     for m in _TOPIC_KATA_RE.finditer(text):
         _add(m.group(0))
-    return out[:12]
+
+    # Expand JA anchors with EN aliases (and vice-versa when EN topic given).
+    for tok in list(out):
+        for alias in _TOPIC_JA_EN_ALIASES.get(tok, ()):
+            _add(alias)
+    for en, aliases in _TOPIC_EN_JA_ALIASES.items():
+        if en in seen:
+            for alias in aliases:
+                _add(alias)
+
+    return out[:24]
+
+
+# Compact bilingual bridges for お題 gating (substring match is otherwise JA≠EN).
+_TOPIC_JA_EN_ALIASES: dict[str, tuple[str, ...]] = {
+    "カフェ": ("cafe", "coffee", "barista"),
+    "珈琲": ("coffee", "cafe"),
+    "キッチン": ("kitchen",),
+    "台所": ("kitchen",),
+    "駅": ("station", "platform", "train"),
+    "学校": ("school", "classroom"),
+    "教室": ("classroom", "school"),
+    "公園": ("park",),
+    "海": ("sea", "ocean", "beach"),
+    "海辺": ("beach", "seaside"),
+    "雨": ("rain", "rainy"),
+    "夜": ("night", "midnight"),
+    "朝": ("morning", "dawn"),
+    "図書館": ("library",),
+    "料理": ("cooking", "kitchen", "recipe"),
+    "冒険": ("adventure", "quest"),
+    "廃墟": ("ruin", "ruins", "abandoned"),
+    "探索": ("explore", "exploring", "search"),
+    "働く": ("work", "working", "job"),
+}
+_TOPIC_EN_JA_ALIASES: dict[str, tuple[str, ...]] = {
+    "cafe": ("カフェ",),
+    "coffee": ("カフェ", "珈琲"),
+    "kitchen": ("キッチン", "台所"),
+    "station": ("駅",),
+    "school": ("学校",),
+    "park": ("公園",),
+    "beach": ("海辺", "海"),
+    "rain": ("雨",),
+    "night": ("夜",),
+    "library": ("図書館",),
+}
 
 
 def candidates_off_topic(
@@ -3157,13 +3205,52 @@ def parse_axis_tags_json(raw: str) -> tuple[str, dict[str, list[str]], str]:
 
 _CHRONICLE_MIN_TAGS = 25
 
+# Pose tags that alone do NOT count as a drawable action (idle / portrait defaults).
+_IDLE_POSE_TAGS = frozenset({
+    "standing", "sitting", "kneeling", "lying", "crouching",
+    "smile", "smiling", "blush", "closed_mouth", "open_mouth",
+    "looking_at_viewer", "looking_away", "arms_at_sides", "static_pose",
+    "cowboy_shot", "upper_body", "full_body", "portrait", "solo",
+})
+# Tokens that mark a real physical action in a danbooru tag.
+_DYNAMIC_ACTION_TOKENS = frozenset({
+    "reaching", "pointing", "walking", "running", "jumping", "falling",
+    "holding", "gripping", "clenched", "touching", "grabbing", "hugging",
+    "carrying", "lifting", "pushing", "pulling", "waving", "bowing",
+    "bending", "stretching", "outstretched", "raised", "covering",
+    "hiding", "pouring", "wiping", "writing", "reading", "eating",
+    "drinking", "cooking", "kneading", "folding", "cutting", "painting",
+    "typing", "dancing", "singing", "fighting", "throwing", "catching",
+    "opening", "closing", "tying", "stirring", "spilling", "teaching",
+    "sliding", "unlocking", "locking", "tamping", "steaming", "shaping",
+    "both_hands", "surprised", "concentrating",
+})
+
+# Shared identity / quality noise stripped before cross-axis tag comparison.
+_TAG_COMPARE_IGNORE = _SUBJECT_ANCHORS | _IDLE_POSE_TAGS | frozenset({
+    "highres", "absurdres", "masterpiece", "best_quality", "detailed_background",
+    "depth_of_field", "cinematic_lighting", "sharp_focus", "dynamic_angle",
+    "looking_at_viewer", "detailed",
+})
+
+
+def _tag_has_dynamic_action(parts: list[str]) -> bool:
+    for raw in parts:
+        toks = set(raw.lower().replace("-", "_").split("_"))
+        if toks & _DYNAMIC_ACTION_TOKENS:
+            return True
+        # Compound tags like "holding_cup" / "spilling_milk"
+        if any(tok in raw.lower() for tok in _DYNAMIC_ACTION_TOKENS):
+            return True
+    return False
+
 
 def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
     """Guard for Pass 1 output — same spirit as Invoke's runners.py:1798-1808.
 
-    A prompt is degenerate if it is too short OR has no subject anchor within
-    the first few tags. Callers retry once with a temperature boost before
-    surfacing the failure to the user.
+    A prompt is degenerate if it is too short, has no subject anchor within
+    the first few tags, OR has no dynamic action (idle standing/smile only).
+    Callers retry once with a temperature boost before surfacing the failure.
     """
     parts = [t.strip() for t in tag_line.split(",") if t.strip()]
     if len(parts) < _CHRONICLE_MIN_TAGS:
@@ -3171,7 +3258,81 @@ def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
     head = {p.lower() for p in parts[:5]}
     if not (head & _SUBJECT_ANCHORS):
         return True, "no_subject_anchor"
+    if not _tag_has_dynamic_action(parts):
+        return True, "no_dynamic_action"
     return False, ""
+
+
+def _content_tag_set(tag_line: str) -> set[str]:
+    """Tag set used for cross-axis diversity — drops identity/idle/quality noise."""
+    out: set[str] = set()
+    for raw in tag_line.split(","):
+        t = raw.strip().lower().replace(" ", "_")
+        if not t or t in _TAG_COMPARE_IGNORE:
+            continue
+        # Densify / sim padding (detail_8 …) is not scene content.
+        if t.startswith("detail_"):
+            continue
+        # Drop pure hair/eye colour locks from comparison (identity, not scene).
+        toks = set(t.split("_"))
+        if toks & {"hair", "eyes", "eyecolor"} and "ornament" not in toks:
+            if any(c in t for c in (
+                "blonde", "silver", "blue", "red", "green", "brown", "black",
+                "white", "pink", "purple", "orange", "grey", "gray",
+            )):
+                continue
+        out.add(t)
+    return out
+
+
+_AXIS_TAG_SIMILAR_THRESHOLD = 0.75
+
+
+def axis_tag_lines_collapsed(
+    tag_lines: dict[str, str],
+    *,
+    threshold: float = _AXIS_TAG_SIMILAR_THRESHOLD,
+) -> bool:
+    """True when past/present/future content tags collapse into one scene.
+
+    Compares content tags (scene/action/props) after stripping identity locks
+    and idle portrait defaults. Axes with empty / too-thin tag lines are
+    skipped so incomplete builds do not false-positive.
+
+    Also collapses when *scene/prop* tags alone (verbs stripped) stay nearly
+    identical — catches knead/fold/shape paraphrases of the same kitchen beat.
+    """
+    sets = []
+    scene_sets = []
+    for a in AXES:
+        s = _content_tag_set(tag_lines.get(a, ""))
+        if len(s) >= 3:
+            sets.append(s)
+            scene_sets.append({
+                t for t in s
+                if t not in _DYNAMIC_ACTION_TOKENS
+                and not (set(t.split("_")) & _DYNAMIC_ACTION_TOKENS)
+            })
+    if len(sets) < 2:
+        return False
+
+    def _mean_jaccard(group: list[set[str]]) -> float:
+        sims = []
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                a, b = group[i], group[j]
+                if not a or not b:
+                    continue
+                sims.append(len(a & b) / len(a | b))
+        return (sum(sims) / len(sims)) if sims else 0.0
+
+    if _mean_jaccard(sets) >= threshold:
+        return True
+    # Scene/prop-only: require a bit more overlap (same place + props).
+    scene_sets = [s for s in scene_sets if len(s) >= 2]
+    if len(scene_sets) >= 2 and _mean_jaccard(scene_sets) >= max(threshold, 0.75):
+        return True
+    return False
 
 
 def build_axis_prose_prompt(

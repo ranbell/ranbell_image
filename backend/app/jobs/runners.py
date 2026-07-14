@@ -3250,6 +3250,7 @@ async def run_chronicle_expand(
         activities_temporally_distinct,
         apply_scene_constraints,
         axis_slots_collapsed,
+        axis_tag_lines_collapsed,
         bind_timetable_axis_slots,
         build_axis_prose_prompt,
         build_axis_tags_prompt,
@@ -4186,6 +4187,21 @@ async def run_chronicle_expand(
                             if removed_tags:
                                 refined_evt["removed_tags"] = removed_tags
                             _put(refined_evt)
+
+        # Cross-axis tag diversity: catch paraphrase collapses prose gates missed.
+        if should_differentiate_acts(body.time_scale):
+            tag_snapshot = {
+                a: (prompts.get(a) or {}).get("positive") or "" for a in AXES
+            }
+            if axis_tag_lines_collapsed(tag_snapshot):
+                _put({
+                    "type": "warning",
+                    "message": (
+                        "Axis prompts look visually similar — "
+                        "past/present/future may read as the same shot. "
+                        "Try a higher divergence or Respin story."
+                    ),
+                })
 
         # ── Finalise the record (patch draft → final) ─────────────────────────
         _phase("savingStory", 0.82, "Saving story...")

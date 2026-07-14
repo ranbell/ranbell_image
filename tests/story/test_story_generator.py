@@ -1307,8 +1307,10 @@ def test_parse_axis_tags_json_broken_returns_empty():
 # ── Chronicle degenerate detector ─────────────────────────────────────────────
 
 def _make_tag_line(n: int, *, anchor: bool = True) -> str:
-    """Helper: build a tag line with n tags, optionally anchored."""
-    body = ", ".join(f"tag_{i}" for i in range(n))
+    """Helper: build a tag line with n tags, optionally anchored + action."""
+    # Always include a dynamic action so the idle-pose guard does not trip.
+    extras = max(0, n - 2)
+    body = ", ".join(["holding", * (f"tag_{i}" for i in range(extras))])
     return f"1girl, {body}" if anchor else body
 
 
@@ -1320,7 +1322,7 @@ def test_chronicle_tags_degenerate_short_tag_line():
 
 
 def test_chronicle_tags_degenerate_missing_subject_anchor():
-    tag_line = ", ".join(f"tag_{i}" for i in range(40))
+    tag_line = "holding, " + ", ".join(f"tag_{i}" for i in range(40))
     degenerate, reason = _chronicle_tags_degenerate(tag_line)
     assert degenerate
     assert reason == "no_subject_anchor"
@@ -1334,9 +1336,18 @@ def test_chronicle_tags_degenerate_healthy_prompt():
 
 
 def test_chronicle_tags_degenerate_anchor_solo():
-    tag_line = "solo, " + ", ".join(f"tag_{i}" for i in range(40))
+    tag_line = "solo, holding, " + ", ".join(f"tag_{i}" for i in range(40))
     degenerate, _ = _chronicle_tags_degenerate(tag_line)
     assert not degenerate
+
+
+def test_chronicle_tags_degenerate_idle_pose_only():
+    """standing/smile with no dynamic action must densify — simulation finding."""
+    pad = ", ".join(f"bg_{i}" for i in range(30))
+    tag_line = f"1girl, standing, smile, looking_at_viewer, cafe, counter, {pad}"
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert degenerate
+    assert reason == "no_dynamic_action"
 
 
 # ── Stage 3b Pass 2 (build_axis_prose_prompt) ────────────────────────────────
@@ -1839,6 +1850,47 @@ def test_candidates_off_topic_gate():
     }] * 3
     assert candidates_off_topic(off, "廃墟を探索する冒険")
     assert not candidates_off_topic(off, "")
+
+
+def test_topic_anchor_tokens_bilingual_cafe():
+    tokens = topic_anchor_tokens("この子がカフェで働く話")
+    assert "カフェ" in tokens
+    assert "cafe" in tokens
+    # English beats with cafe should pass a Japanese お題
+    en_cafe = [{
+        "id": "A",
+        "past": "She spills milk at the cafe counter",
+        "present": "She pours latte art at the cafe",
+        "future": "She trains a junior barista",
+        "title": "Cafe years",
+    }] * 3
+    assert not candidates_off_topic(en_cafe, "この子がカフェで働く話")
+
+
+def test_axis_tag_lines_collapsed_detects_paraphrase_overlap():
+    from app.story.generator import axis_tag_lines_collapsed
+    same = (
+        "1girl, holding, kitchen, dough, flour, wooden_board, indoors, "
+        "silver_hair, blue_eyes, solo, looking_at_viewer, detailed_background"
+    )
+    assert axis_tag_lines_collapsed(
+        {"past": same, "present": same, "future": same}
+    )
+    diverse = {
+        "past": (
+            "1girl, spilling, milk, pitcher, apron, cafe, morning, towel, "
+            "counter, reaching, silver_hair"
+        ),
+        "present": (
+            "1girl, pouring, latte_art, coffee_cup, cafe, window, steam, "
+            "ceramic, holding, silver_hair"
+        ),
+        "future": (
+            "1girl, wiping, pointing, teaching, espresso_machine, evening, "
+            "cloth, back_bar, silver_hair"
+        ),
+    }
+    assert not axis_tag_lines_collapsed(diverse)
 
 
 def test_coherence_hierarchy_scopes_image_vs_topic():
