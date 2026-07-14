@@ -478,7 +478,9 @@ const CAT_TAG_GROUPS = [
 ]
 
 function axisHasCatTags(p) {
-  return CAT_TAG_GROUPS.some(g => (p?.[g.key] || []).length > 0)
+  if (!p) return false
+  if (p.visual_script) return true
+  return CAT_TAG_GROUPS.some(g => (p[g.key] || []).length > 0)
 }
 
 const qualityDraftNote = computed(() => {
@@ -1479,24 +1481,18 @@ async function generateImages() {
                 <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
                   class="sb-textarea text-xs text-[var(--sb-muted)]"></textarea>
                 <div v-if="axisHasCatTags(p)"
-                  class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
-                  <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
-                    {{ t('chronicle.visualSpecTitle') }}
+                  class="mt-2 border-l-2 border-[var(--sb-rule)] pl-3 space-y-1.5">
+                  <p class="sb-label">{{ t('chronicle.visualSpecTitle') }}</p>
+                  <p v-if="p.visual_script"
+                    class="text-[11px] text-[var(--sb-muted)] whitespace-pre-wrap leading-relaxed">
+                    {{ p.visual_script }}
                   </p>
-                  <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
+                  <p v-for="g in CAT_TAG_GROUPS" :key="g.key"
                     v-show="(p[g.key] || []).length"
-                    class="space-y-0.5">
-                    <p class="text-[9px] text-emerald-400/70 font-semibold">
-                      {{ t('chronicle.' + g.label) }}
-                    </p>
-                    <div class="flex flex-wrap gap-1">
-                      <span v-for="tag in p[g.key]" :key="tag"
-                        class="text-[10px] font-mono px-1.5 py-0.5 rounded
-                          bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
-                        {{ tag }}
-                      </span>
-                    </div>
-                  </div>
+                    class="text-[10px]">
+                    <span class="text-[var(--sb-faint)]">{{ t('chronicle.' + g.label) }}:</span>
+                    <span class="font-mono text-gray-400">{{ (p[g.key] || []).join(', ') }}</span>
+                  </p>
                 </div>
               </div>
             </div>

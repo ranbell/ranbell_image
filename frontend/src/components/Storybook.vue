@@ -108,6 +108,23 @@ function storyBody(story) {
 function isTopicOnly(story) {
   return !!(story?.context?.topic_only) || !story?.base_image_id
 }
+function hasWeaveSettings(story) {
+  if (!story) return false
+  const body = storyBody(story)
+  return !!(
+    isTopicOnly(story) ||
+    typeof story.divergence === 'number' ||
+    (story.mutation_tags || []).length ||
+    body.tone ||
+    body.dramatic_mode ||
+    body.use_draft_refine ||
+    body.prompt_style ||
+    story.time_scale ||
+    story.emotion ||
+    story.base_model_name ||
+    story.workflow_name
+  )
+}
 function qualityPct(story) {
   const o = story?.quality_eval?.overall
   if (o == null || Number.isNaN(Number(o))) return null
@@ -525,23 +542,28 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   <span v-if="motifOf(story)" class="sb-meta-chip sb-meta-motif">
                     <SbIcon name="spark" class="w-2.5 h-2.5" />{{ motifOf(story) }}
                   </span>
-                  <span v-if="story.time_scale" class="sb-meta-chip sb-meta-scale">
+                  <span v-else-if="story.time_scale" class="sb-meta-chip sb-meta-scale">
                     <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + story.time_scale) }}
                   </span>
+                  <span v-if="isTopicOnly(story)" class="sb-meta-chip sb-meta-topic">
+                    {{ t('storybook.topicOnlyBadge') }}
+                  </span>
+                  <span class="ml-auto text-[var(--sb-faint)] font-mono text-[9px]">{{ formatDate(story.created_at).split(' ')[0] }}</span>
+                </div>
+                <div class="sb-card-meta-more flex items-center gap-1 flex-wrap text-[10px] opacity-0 group-hover:opacity-100 transition-opacity">
                   <span v-if="story.emotion" class="sb-meta-chip sb-meta-emotion">
                     {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}
                   </span>
-                  <span v-if="qualityPct(story) != null" class="sb-meta-chip font-mono text-teal-300/80"
+                  <span v-if="qualityPct(story) != null" class="sb-meta-chip font-mono text-[var(--sb-muted)]"
                     :title="t('storybook.qualityScore')">
                     {{ qualityPct(story) }}
+                  </span>
+                  <span v-if="motifOf(story) && story.time_scale" class="sb-meta-chip sb-meta-scale">
+                    <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + story.time_scale) }}
                   </span>
                   <span v-if="story.base_time_axis" class="sb-meta-chip text-[9px] text-[var(--sb-muted)]">
                     {{ t('chronicle.axis.' + story.base_time_axis) }}
                   </span>
-                  <span v-if="isTopicOnly(story)" class="sb-meta-chip text-amber-300/80">
-                    {{ t('storybook.topicOnlyBadge') }}
-                  </span>
-                  <span class="ml-auto text-[var(--sb-faint)] font-mono text-[9px]">{{ formatDate(story.created_at).split(' ')[0] }}</span>
                 </div>
                 <div class="flex items-center gap-1 pt-0.5">
                   <button @click.stop="emit('weave-from', axisImage(story, story.base_time_axis))"
@@ -703,45 +725,48 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <h2 class="sb-display text-xl text-[var(--sb-amber)] leading-snug">
                 {{ storyTitle(detailStory) || t('storybook.details') }}
               </h2>
-              <div class="flex items-center flex-wrap gap-2 mt-1.5 text-[10px] text-[var(--sb-muted)]">
-                <span v-if="detailStory.user_topic" class="text-teal-300/80">
-                  {{ t('chronicle.userTopic') }}: {{ detailStory.user_topic }}
-                </span>
-                <span v-if="detailStory.worldview" class="text-[var(--sb-amber)]/75">{{ detailStory.worldview }}</span>
-                <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
-                  <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
-                </span>
-                <span v-if="detailStory.emotion" class="sb-meta-chip">
-                  {{ t('inspire.emotion.' + detailStory.emotion) }}
-                </span>
-                <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
-                <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
-                <span class="font-mono text-[9px]">{{ formatDate(detailStory.created_at) }}</span>
+              <div class="mt-1.5 text-[11px] text-[var(--sb-muted)] leading-relaxed">
+                <span v-if="detailStory.user_topic" class="text-[var(--sb-amber)]/90">{{ detailStory.user_topic }}</span>
+                <span v-if="detailStory.user_topic && detailStory.worldview"> · </span>
+                <span v-if="detailStory.worldview">{{ detailStory.worldview }}</span>
+                <span v-if="detailStory.created_at" class="font-mono text-[9px] text-[var(--sb-faint)] ml-2">{{ formatDate(detailStory.created_at) }}</span>
               </div>
-              <div class="flex items-center flex-wrap gap-1.5 mt-2 text-[10px]"
-                :title="t('storybook.weaveSettings')">
-                <span v-if="isTopicOnly(detailStory)" class="sb-meta-chip text-amber-300/80">
-                  {{ t('storybook.topicOnlyBadge') }}
-                </span>
-                <span v-if="typeof detailStory.divergence === 'number'" class="sb-meta-chip font-mono text-teal-300/80">
-                  {{ t('chronicle.divergence') }} {{ Math.round(detailStory.divergence * 100) }}%
-                </span>
-                <span v-if="(detailStory.mutation_tags || []).length" class="sb-meta-chip text-purple-300/80">
-                  {{ t('chronicle.mutationTags') }}: {{ (detailStory.mutation_tags || []).join(', ') }}
-                </span>
-                <span v-if="storyBody(detailStory).tone" class="sb-meta-chip">
-                  {{ t('chronicle.tone.' + storyBody(detailStory).tone, storyBody(detailStory).tone) }}
-                </span>
-                <span v-if="storyBody(detailStory).dramatic_mode" class="sb-meta-chip">
-                  {{ dramaticModeLabel(storyBody(detailStory).dramatic_mode) }}
-                </span>
-                <span v-if="storyBody(detailStory).use_draft_refine" class="sb-meta-chip text-teal-300/75">
-                  {{ t('chronicle.draftRefineMode.' + storyBody(detailStory).use_draft_refine, storyBody(detailStory).use_draft_refine) }}
-                </span>
-                <span v-if="storyBody(detailStory).prompt_style" class="sb-meta-chip font-mono">
-                  {{ promptStyleLabel(storyBody(detailStory).prompt_style) }}
-                </span>
-              </div>
+              <details v-if="hasWeaveSettings(detailStory)" class="mt-2 text-[10px]">
+                <summary class="cursor-pointer text-[var(--sb-faint)] hover:text-[var(--sb-muted)] select-none">
+                  {{ t('storybook.weaveSettings') }}
+                </summary>
+                <div class="mt-1.5 flex flex-wrap gap-1.5">
+                  <span v-if="isTopicOnly(detailStory)" class="sb-meta-chip sb-meta-topic">
+                    {{ t('storybook.topicOnlyBadge') }}
+                  </span>
+                  <span v-if="typeof detailStory.divergence === 'number'" class="sb-meta-chip font-mono text-[var(--sb-muted)]">
+                    {{ t('chronicle.divergence') }} {{ Math.round(detailStory.divergence * 100) }}%
+                  </span>
+                  <span v-if="(detailStory.mutation_tags || []).length" class="sb-meta-chip text-[var(--sb-muted)]">
+                    {{ t('chronicle.mutationTags') }}: {{ (detailStory.mutation_tags || []).join(', ') }}
+                  </span>
+                  <span v-if="storyBody(detailStory).tone" class="sb-meta-chip text-[var(--sb-muted)]">
+                    {{ t('chronicle.tone.' + storyBody(detailStory).tone, storyBody(detailStory).tone) }}
+                  </span>
+                  <span v-if="storyBody(detailStory).dramatic_mode" class="sb-meta-chip text-[var(--sb-muted)]">
+                    {{ dramaticModeLabel(storyBody(detailStory).dramatic_mode) }}
+                  </span>
+                  <span v-if="storyBody(detailStory).use_draft_refine" class="sb-meta-chip text-[var(--sb-muted)]">
+                    {{ t('chronicle.draftRefineMode.' + storyBody(detailStory).use_draft_refine, storyBody(detailStory).use_draft_refine) }}
+                  </span>
+                  <span v-if="storyBody(detailStory).prompt_style" class="sb-meta-chip font-mono text-[var(--sb-muted)]">
+                    {{ promptStyleLabel(storyBody(detailStory).prompt_style) }}
+                  </span>
+                  <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
+                    <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
+                  </span>
+                  <span v-if="detailStory.emotion" class="sb-meta-chip sb-meta-emotion">
+                    {{ t('inspire.emotion.' + detailStory.emotion) }}
+                  </span>
+                  <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="sb-meta-chip font-mono text-[var(--sb-faint)] truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
+                  <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="sb-meta-chip font-mono text-[var(--sb-faint)] truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
+                </div>
+              </details>
             </div>
             <div class="flex items-center gap-1.5 shrink-0">
               <button @click="detailPrev" :disabled="detailIndex <= 0"
@@ -882,9 +907,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-0">
                 <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
                 {{ t('storybook.quality.title') }}
-                <span class="ml-auto text-[11px] font-mono text-teal-300/80 normal-case tracking-normal font-normal">
-                  {{ Math.round((detailStory.quality_eval.overall || 0) * 100) }}
-                </span>
               </summary>
               <div class="mt-4">
                 <StoryQualityRadar :eval="detailStory.quality_eval" />
@@ -892,13 +914,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   class="mt-2 space-y-0.5">
                   <p v-for="ax in AXES" :key="'dr-' + ax"
                     v-show="draftRichnessFor(detailStory, ax)"
-                    class="text-[10px] font-mono text-teal-300/70">
+                    class="text-[10px] font-mono text-[var(--sb-faint)]">
                     <span class="text-[var(--sb-faint)]">{{ t('chronicle.axis.' + ax) }}:</span>
                     {{ formatDraftDelta(draftRichnessFor(detailStory, ax)) }}
                   </p>
                 </div>
                 <p v-if="qualityDraftNote(detailStory)"
-                  class="mt-2 text-[10px] font-mono text-teal-300/70">
+                  class="mt-2 text-[10px] font-mono text-[var(--sb-faint)]">
                   {{ qualityDraftNote(detailStory) }}
                 </p>
                 <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
@@ -948,13 +970,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <div class="sm:w-3/5 flex flex-col gap-2 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-[11px] font-semibold uppercase tracking-widest"
-                    :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
+                    :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-[var(--sb-muted)]'">
                     {{ t('chronicle.axis.' + axis) }}
                     <span v-if="axis === detailStory.base_time_axis"
                       class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
                   </span>
                   <span v-if="draftRichnessFor(detailStory, axis)"
-                    class="sb-meta-chip font-mono text-[9px] text-teal-300/80"
+                    class="text-[9px] font-mono text-[var(--sb-faint)]"
                     :title="t('storybook.draftDelta')">
                     {{ t('storybook.draftDelta') }} {{ formatDraftDelta(draftRichnessFor(detailStory, axis)) }}
                   </span>
@@ -968,28 +990,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   {{ axisStory(detailStory, axis) || '—' }}
                 </p>
                 <div v-if="axisHasVisualSpec(detailStory.axes?.[axis])"
-                  class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
-                  <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
-                    {{ t('chronicle.visualSpecTitle') }}
-                  </p>
+                  class="mt-2 border-l-2 border-[var(--sb-rule)] pl-3 space-y-1.5">
+                  <p class="sb-label">{{ t('chronicle.visualSpecTitle') }}</p>
                   <p v-if="detailStory.axes[axis].visual_script"
-                    class="text-[10px] text-emerald-200/70 whitespace-pre-wrap leading-relaxed">
+                    class="text-[11px] text-[var(--sb-muted)] whitespace-pre-wrap leading-relaxed">
                     {{ detailStory.axes[axis].visual_script }}
                   </p>
-                  <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
+                  <p v-for="g in CAT_TAG_GROUPS" :key="g.key"
                     v-show="(detailStory.axes[axis][g.key] || []).length"
-                    class="space-y-0.5">
-                    <p class="text-[9px] text-emerald-400/70 font-semibold">
-                      {{ t('chronicle.' + g.label) }}
-                    </p>
-                    <div class="flex flex-wrap gap-1">
-                      <span v-for="tag in detailStory.axes[axis][g.key]" :key="tag"
-                        class="text-[10px] font-mono px-1.5 py-0.5 rounded
-                          bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
-                        {{ tag }}
-                      </span>
-                    </div>
-                  </div>
+                    class="text-[10px]">
+                    <span class="text-[var(--sb-faint)]">{{ t('chronicle.' + g.label) }}:</span>
+                    <span class="font-mono text-gray-400">{{ (detailStory.axes[axis][g.key] || []).join(', ') }}</span>
+                  </p>
                 </div>
                 <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
                   <summary class="cursor-pointer text-[10px] text-[var(--sb-muted)] hover:text-gray-300 select-none">
@@ -1048,7 +1060,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     var(--sb-panel);
   border: 1px solid rgba(232, 196, 122, 0.18);
   border-radius: 1rem;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.48);
 }
 .sb-hairline { border-bottom: 1px solid var(--sb-rule); }
 .sb-section { border-bottom: 1px solid rgba(232, 196, 122, 0.1); }
@@ -1072,7 +1084,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .storybook-card:hover {
   transform: translateY(-3px);
   border-color: rgba(232, 196, 122, 0.28);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
 .sb-btn {
@@ -1093,14 +1105,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   align-items: center;
   gap: 0.3rem;
   padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-  border: 1px solid rgba(168, 85, 247, 0.35);
-  background: rgba(88, 28, 135, 0.45);
-  color: #e9d5ff;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(232, 196, 122, 0.35);
+  background: rgba(146, 64, 14, 0.28);
+  color: #fef3c7;
   font-size: 0.65rem;
   transition: background 0.15s;
 }
-.sb-btn-accent:hover { background: rgba(107, 33, 168, 0.55); }
+.sb-btn-accent:hover { background: rgba(146, 64, 14, 0.42); }
 .sb-icon-btn {
   width: 2rem; height: 2rem;
   display: inline-flex; align-items: center; justify-content: center;
@@ -1177,7 +1189,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 }
 .sb-chip {
   padding: 0.2rem 0.55rem;
-  border-radius: 999px;
+  border-radius: 0.35rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.25);
   color: var(--sb-muted);
@@ -1187,7 +1199,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .sb-chip:hover { background: rgba(255, 255, 255, 0.05); }
 .sb-chip.is-chip-on { background: rgba(146, 64, 14, 0.5); color: #fef3c7; border-color: rgba(245, 158, 11, 0.35); }
 .sb-chip.is-chip-on-teal { background: rgba(19, 78, 74, 0.55); color: #ccfbf1; border-color: rgba(45, 212, 191, 0.3); }
-.sb-chip.is-chip-on-indigo { background: rgba(49, 46, 129, 0.55); color: #e0e7ff; border-color: rgba(129, 140, 248, 0.3); }
+.sb-chip.is-chip-on-indigo {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+  border-color: rgba(232, 196, 122, 0.25);
+}
 
 .sb-meta-chip {
   display: inline-flex;
@@ -1198,9 +1214,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   background: rgba(0, 0, 0, 0.35);
   max-width: 100%;
 }
-.sb-meta-motif { color: #d8b4fe; }
-.sb-meta-scale { color: #5eead4; }
-.sb-meta-emotion { color: #a5b4fc; }
+.sb-meta-motif { color: var(--sb-amber); opacity: 0.9; }
+.sb-meta-scale { color: #7dd3c7; }
+.sb-meta-emotion { color: var(--sb-muted); }
+.sb-meta-topic { color: rgba(232, 196, 122, 0.85); }
+.sb-card-meta-more { min-height: 1.1rem; }
 
 .sb-icon { display: inline-block; flex-shrink: 0; }
 
@@ -1215,7 +1233,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     #0f1218;
   border: 1px solid rgba(232, 196, 122, 0.2);
   border-radius: 0.9rem;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
 }
 
 .sb-overlay-enter-active,
@@ -1247,10 +1265,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   left: 16%;
   width: 68%;
   height: 68%;
-  background: #f3efe4;
-  border: 4px solid #f3efe4;
+  background: #e4e0d6;
+  border: 4px solid #e4e0d6;
   border-bottom-width: 22px;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
   transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1),
               box-shadow 0.45s;
   overflow: hidden;
@@ -1277,7 +1295,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .polaroid.future  { transform: translate(16%, 6%)    rotate(8deg);  z-index: 3; }
 .polaroid.base {
   box-shadow: 0 0 0 2px rgba(232, 196, 122, 0.65),
-              0 8px 18px rgba(0, 0, 0, 0.5);
+              0 8px 20px rgba(0, 0, 0, 0.45);
 }
 .storybook-card:hover .polaroid-stack .polaroid.past    { transform: translate(-42%, -2%) rotate(-4deg); }
 .storybook-card:hover .polaroid-stack .polaroid.present { transform: translate(0, -2%)     rotate(0deg);  }
@@ -1291,11 +1309,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   gap: 1.1rem 1.4rem;
   padding: 1.25rem 1.1rem;
   border-radius: 0.65rem;
-  background-color: #a87b4d;
+  background-color: #8a7358;
   background-image:
     radial-gradient(rgba(0, 0, 0, 0.16) 1px, transparent 1.4px),
     radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.4px),
-    linear-gradient(135deg, rgba(255, 220, 170, 0.12), transparent 50%);
+    linear-gradient(135deg, rgba(255, 220, 170, 0.08), transparent 50%);
   background-size: 9px 9px, 9px 9px, auto;
   background-position: 0 0, 4.5px 4.5px, 0 0;
   box-shadow: inset 0 0 36px rgba(0, 0, 0, 0.35),

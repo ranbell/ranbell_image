@@ -102,34 +102,34 @@ const labels = computed(() => {
       <line
         v-for="(ln, li) in axisLines" :key="'a' + li"
         :x1="CX" :y1="CY" :x2="ln.x2" :y2="ln.y2"
-        stroke="rgba(45,212,191,0.18)"
+        stroke="rgba(232,196,122,0.18)"
         stroke-width="1"
       />
       <polygon
         :points="valuePolygon"
-        fill="rgba(45,212,191,0.22)"
-        stroke="rgba(94,234,212,0.85)"
+        fill="rgba(232,196,122,0.22)"
+        stroke="#e8c47a"
         stroke-width="1.5"
       />
       <circle
         v-for="(pt, i) in valuePoints" :key="'d' + i"
         :cx="pt.x" :cy="pt.y"
         r="3"
-        fill="#5eead4"
+        fill="#e8c47a"
       />
       <text
         v-for="lab in labels" :key="lab.key"
         :x="lab.x" :y="lab.y"
         text-anchor="middle"
         dominant-baseline="middle"
-        fill="rgba(204,251,241,0.9)"
+        fill="rgba(139,146,158,0.95)"
         font-size="9"
       >{{ lab.label }}</text>
     </svg>
 
     <div class="flex-1 min-w-0 w-full max-w-xs flex flex-col gap-2">
       <div class="flex items-baseline gap-2">
-        <span class="text-2xl font-semibold text-teal-200 tabular-nums leading-none">{{ overallPct }}</span>
+        <span class="text-2xl font-semibold text-[var(--sb-amber)] tabular-nums leading-none">{{ overallPct }}</span>
         <span class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wider">
           {{ t('storybook.quality.overall') }}
         </span>
@@ -140,9 +140,9 @@ const labels = computed(() => {
       <ul class="grid grid-cols-1 gap-1.5 text-[11px]">
         <li v-for="d in dims" :key="d.key"
           class="flex items-center gap-2 text-gray-300">
-          <span class="text-teal-300/90 w-20 shrink-0">{{ d.label }}</span>
-          <div class="flex-1 h-1.5 rounded-full bg-black/40 overflow-hidden">
-            <div class="h-full rounded-full bg-teal-500/80"
+          <span class="text-[var(--sb-muted)] w-20 shrink-0">{{ d.label }}</span>
+          <div class="flex-1 h-1.5 rounded-sm bg-black/40 overflow-hidden">
+            <div class="h-full rounded-sm bg-[rgba(232,196,122,0.7)]"
               :style="{ width: Math.round(d.value * 100) + '%' }"></div>
           </div>
           <span class="font-mono text-[10px] text-[var(--sb-muted)] w-8 text-right tabular-nums">
