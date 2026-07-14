@@ -1284,6 +1284,11 @@
       "on": "On",
       "off": "Off"
     },
+    "draftSize": "下書きサイズ",
+    "draftSizeTitle": "低解像度下書きの幅×高さ（ピクセル）。小さいほど速いが、WD14の読み取りが粗くなります",
+    "draftSteps": "steps",
+    "draftStepsTitle": "下書き生成のステップ数（少ないほど速い）",
+    "refinedFromDraft": "下書き接地済",
     "reasonDraftTags": "下書きWD14",
     "reasonDraftDelta": "豊かさΔ",
     "start": "物語を紡ぐ",
@@ -1405,6 +1410,7 @@
       "title": "品質レーダー",
       "overall": "総合",
       "hint": "お題適合・多様性・表情・動作・描画しやすさ・同一性・豊かさをルール採点（0–100）。下書き接地がある場合は、画像モデル表現の寄与（richness delta）も記録されます。",
+      "draftGrounding": "下書き接地: {axes}軸 · 豊かさΔ平均 {delta}",
       "chartAria": "品質レーダーチャート、総合 {pct}",
       "dim": {
         "topic_fit": "お題適合",

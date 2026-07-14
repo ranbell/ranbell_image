@@ -69,6 +69,21 @@ function joinList(arr) {
 }
 const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
 
+function qualityDraftNote(story) {
+  const q = story?.quality_eval
+  if (!q) return ''
+  const dg = q.draft_grounding
+  if (dg && typeof dg === 'object') {
+    const n = (dg.axes || []).length
+    const d = Number(dg.mean_delta ?? 0)
+    return t('storybook.quality.draftGrounding', {
+      axes: n,
+      delta: (d >= 0 ? '+' : '') + d.toFixed(2),
+    })
+  }
+  return q.notes?.draft_grounding ? String(q.notes.draft_grounding) : ''
+}
+
 function matches(story, q) {
   if (!q) return true
   const bag = [
@@ -604,9 +619,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 {{ storyTitle(detailStory) || t('storybook.details') }}
               </h2>
               <div class="flex items-center flex-wrap gap-2 mt-1.5 text-[10px] text-[var(--sb-muted)]">
+                <span v-if="detailStory.user_topic" class="text-teal-300/80">
+                  {{ t('chronicle.userTopic') }}: {{ detailStory.user_topic }}
+                </span>
                 <span v-if="detailStory.worldview" class="text-[var(--sb-amber)]/75">{{ detailStory.worldview }}</span>
                 <span v-if="detailStory.time_scale" class="sb-meta-chip sb-meta-scale">
                   <SbIcon name="clock" class="w-2.5 h-2.5" />{{ t('chronicle.timeScale.' + detailStory.time_scale) }}
+                </span>
+                <span v-if="detailStory.emotion" class="sb-meta-chip">
+                  {{ t('inspire.emotion.' + detailStory.emotion) }}
                 </span>
                 <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
                 <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
@@ -725,9 +746,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </summary>
               <div class="mt-4">
                 <StoryQualityRadar :eval="detailStory.quality_eval" />
-                <p v-if="detailStory.quality_eval?.notes?.draft_grounding"
+                <p v-if="qualityDraftNote(detailStory)"
                   class="mt-2 text-[10px] font-mono text-teal-300/70">
-                  {{ detailStory.quality_eval.notes.draft_grounding }}
+                  {{ qualityDraftNote(detailStory) }}
                 </p>
                 <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
                   {{ t('storybook.quality.hint') }}

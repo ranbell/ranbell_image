@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
+import StoryQualityRadar from './StoryQualityRadar.vue'
 
 const { t, locale } = useI18n()
 
@@ -60,12 +61,16 @@ const manualMode = ref(false)
 const generatePinup = ref(false)
 const suppressConflictTags = ref(true)
 const useDraftRefine = ref('auto') // auto | on | off
+const draftWidth = ref(512)
+const draftHeight = ref(512)
+const draftSteps = ref(12)
 const pickingRandom = ref(false)
 const biography = ref(null)
 const timetable = ref(null)
 const concrete = ref(null)
 const axisReasoning = ref({})
 const axisDrafts = ref({})
+const qualityEval = ref(null)
 const pinupJobId = ref('')
 
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
@@ -347,6 +352,7 @@ function resetStory() {
   concrete.value = null
   axisReasoning.value = {}
   axisDrafts.value = {}
+  qualityEval.value = null
   pinupJobId.value = ''
   _stopImageGenMonitor()
   imageGen.value = { progress: 0, active: false, text: '', states: {} }
@@ -452,6 +458,24 @@ const hasReasoning = computed(() =>
   || Object.keys(axisDrafts.value).length > 0,
 )
 
+const qualityDraftNote = computed(() => {
+  const q = qualityEval.value
+  if (!q) return ''
+  const dg = q.draft_grounding
+  if (dg && typeof dg === 'object') {
+    const n = (dg.axes || []).length
+    const d = Number(dg.mean_delta ?? 0)
+    return t('storybook.quality.draftGrounding', {
+      axes: n,
+      delta: (d >= 0 ? '+' : '') + d.toFixed(2),
+    })
+  }
+  if (q.notes?.draft_grounding) {
+    return String(q.notes.draft_grounding)
+  }
+  return ''
+})
+
 async function pickRandomBase() {
   pickingRandom.value = true
   try {
@@ -527,6 +551,9 @@ async function start() {
     generate_pinup: generatePinup.value,
     suppress_conflict_tags: suppressConflictTags.value,
     use_draft_refine: useDraftRefine.value,
+    draft_width: draftWidth.value,
+    draft_height: draftHeight.value,
+    draft_steps: draftSteps.value,
     use_ref_seed: useRefSeed.value,
     manual_mode: manualMode.value,
     temperature: temperature.value,
@@ -596,8 +623,21 @@ function handleEvent(ev) {
       phase.value = 'selecting'
       break
     case 'axis_prompt':
-      prompts.value = { ...prompts.value, [ev.axis]: { positive: ev.positive, negative: ev.negative } }
+      prompts.value = {
+        ...prompts.value,
+        [ev.axis]: {
+          positive: ev.positive,
+          negative: ev.negative,
+          refined_from_draft: !!ev.refined_from_draft,
+          draft_richness_delta: ev.draft_richness_delta || null,
+        },
+      }
       break
+    case 'quality_eval': {
+      const { type: _t, ...rest } = ev
+      qualityEval.value = rest
+      break
+    }
     case 'story':
       title.value = ev.title || ''
       overall.value = ev.overall || ''
@@ -914,6 +954,24 @@ async function generateImages() {
                       class="sb-chip" :class="useDraftRefine === m ? 'is-chip-on-teal' : ''">
                       {{ t('chronicle.draftRefineMode.' + m) }}
                     </button>
+                  </div>
+                  <div v-if="useDraftRefine !== 'off'" class="flex items-center gap-2 flex-wrap text-[10px] text-[var(--sb-muted)]">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftSizeTitle')">{{ t('chronicle.draftSize') }}</span>
+                    <label class="flex items-center gap-1">
+                      <span class="text-[var(--sb-faint)]">W</span>
+                      <input v-model.number="draftWidth" type="number" min="256" max="1024" step="64"
+                        class="sb-input w-16 py-0.5 text-[11px] font-mono" />
+                    </label>
+                    <label class="flex items-center gap-1">
+                      <span class="text-[var(--sb-faint)]">H</span>
+                      <input v-model.number="draftHeight" type="number" min="256" max="1024" step="64"
+                        class="sb-input w-16 py-0.5 text-[11px] font-mono" />
+                    </label>
+                    <label class="flex items-center gap-1" :title="t('chronicle.draftStepsTitle')">
+                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.draftSteps') }}</span>
+                      <input v-model.number="draftSteps" type="number" min="4" max="28" step="1"
+                        class="sb-input w-14 py-0.5 text-[11px] font-mono" />
+                    </label>
                   </div>
                 </div>
               </details>
@@ -1241,9 +1299,13 @@ async function generateImages() {
                     <SbIcon name="book" class="w-3 h-3" />{{ t('storybook.biography') }}
                   </div>
                   <p v-if="bioView.personality">{{ bioView.personality }}</p>
+                  <p v-if="bioView.occupation" class="text-gray-400 break-words">
+                    <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ bioView.occupation }}
+                  </p>
                   <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
                     <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
                   </p>
+                  <p v-if="bioView.backstory" class="text-gray-400 italic pt-1">{{ bioView.backstory }}</p>
                 </div>
 
                 <div v-for="axis in REASON_AXES" :key="axis"
@@ -1283,12 +1345,50 @@ async function generateImages() {
               </div>
             </details>
 
+            <!-- quality radar (from SSE quality_eval) -->
+            <details v-if="qualityEval?.dimensions"
+              class="rounded-xl border border-white/5 bg-black/25" open>
+              <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
+                <span class="flex items-center gap-1.5">
+                  <SbIcon name="spark" class="w-3.5 h-3.5 text-teal-400/80" />
+                  {{ t('storybook.quality.title') }}
+                </span>
+                <span class="text-[11px] font-mono text-teal-300/80">
+                  {{ Math.round((qualityEval.overall || 0) * 100) }}
+                </span>
+              </summary>
+              <div class="px-3 pb-3">
+                <StoryQualityRadar :eval="qualityEval" />
+                <p v-if="qualityDraftNote"
+                  class="mt-2 text-[10px] font-mono text-teal-300/70">
+                  {{ qualityDraftNote }}
+                </p>
+                <p class="mt-2 text-[10px] text-[var(--sb-muted)] leading-relaxed">
+                  {{ t('storybook.quality.hint') }}
+                </p>
+              </div>
+            </details>
+
             <!-- prompts -->
             <div v-if="Object.keys(prompts).length" class="flex flex-col gap-3">
               <h3 class="sb-label">{{ t('chronicle.prompts') }}</h3>
               <div v-for="(p, axis) in prompts" :key="axis"
                 class="bg-black/30 border border-white/5 rounded-xl p-3 flex flex-col gap-2">
-                <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
+                  <span v-if="p.refined_from_draft"
+                    class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/50 text-teal-300/90 border border-teal-700/40">
+                    {{ t('chronicle.refinedFromDraft') }}
+                  </span>
+                  <span v-if="p.draft_richness_delta"
+                    class="text-[9px] font-mono text-teal-300/70 ml-auto">
+                    {{ t('chronicle.reasonDraftDelta') }}
+                    {{ Number(p.draft_richness_delta.before || 0).toFixed(2) }}
+                    → {{ Number(p.draft_richness_delta.after || 0).toFixed(2) }}
+                    ({{ (Number(p.draft_richness_delta.delta || 0) >= 0 ? '+' : '')
+                      + Number(p.draft_richness_delta.delta || 0).toFixed(2) }})
+                  </span>
+                </div>
                 <textarea v-model="p.positive" rows="3" :readonly="!canGenerate"
                   class="sb-textarea text-xs"></textarea>
                 <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
