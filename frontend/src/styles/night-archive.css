@@ -15,6 +15,15 @@
   font-family: var(--sb-font-ui);
 }
 
+/* Hard z-index so Tailwind arbitrary `z-[var(--z-*)]` never leaves these
+   overlays at auto (gallery/job re-renders would paint over them mid-expand). */
+.storybook-root {
+  z-index: var(--z-panel-story, 620) !important;
+}
+.chronicle-root {
+  z-index: var(--z-panel-chronicle, 640) !important;
+}
+
 .sb-display { font-family: var(--sb-font-display); font-weight: 600; }
 .sb-prose {
   font-size: 0.9375rem;

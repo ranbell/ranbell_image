@@ -28,22 +28,37 @@ async def iter_queue_sse(
     registry_key: str | None = None,
     ping_seconds: float = 15.0,
     encode: Literal["json", "raw"] = "json",
+    cancel_on_disconnect: bool = True,
+    disconnect_grace_seconds: float = 45.0,
 ) -> AsyncIterator[str]:
     """Yield SSE frames until the queue sends ``None``.
 
-    On client disconnect, cancels ``job_id`` via the app spooler (if set).
+    Client disconnect handling:
+    - Proxies / browsers often flap ``is_disconnected()`` during long silent
+      LLM stretches (Chronicle "Pinning down the action", etc.).
+    - Require the client to stay disconnected for ``disconnect_grace_seconds``
+      before ending the stream.
+    - When ``cancel_on_disconnect`` is False (Chronicle), never cancel the job
+      from the stream — only the explicit Cancel button should abort work.
     Always pops ``registry_key`` from ``registry`` in ``finally``.
     """
     key = registry_key if registry_key is not None else job_id
+    disconnect_since: float | None = None
     try:
         while True:
             if await request.is_disconnected():
-                if job_id:
-                    try:
-                        await request.app.state.spooler.cancel(job_id)
-                    except Exception:
-                        pass
-                break
+                now = asyncio.get_running_loop().time()
+                if disconnect_since is None:
+                    disconnect_since = now
+                elif (now - disconnect_since) >= disconnect_grace_seconds:
+                    if cancel_on_disconnect and job_id:
+                        try:
+                            await request.app.state.spooler.cancel(job_id)
+                        except Exception:
+                            pass
+                    break
+            else:
+                disconnect_since = None
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=ping_seconds)
             except asyncio.TimeoutError:
@@ -77,6 +92,8 @@ def queue_sse_response(
     registry_key: str | None = None,
     ping_seconds: float = 15.0,
     encode: Literal["json", "raw"] = "json",
+    cancel_on_disconnect: bool = True,
+    disconnect_grace_seconds: float = 45.0,
 ) -> StreamingResponse:
     """Convenience: ``iter_queue_sse`` wrapped in ``StreamingResponse``."""
     return sse_response(
@@ -88,5 +105,7 @@ def queue_sse_response(
             registry_key=registry_key,
             ping_seconds=ping_seconds,
             encode=encode,
+            cancel_on_disconnect=cancel_on_disconnect,
+            disconnect_grace_seconds=disconnect_grace_seconds,
         )
     )

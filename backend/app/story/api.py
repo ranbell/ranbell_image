@@ -271,12 +271,17 @@ async def chronicle_stream(job_id: str, request: Request):
     token_queue: asyncio.Queue | None = request.app.state.story_token_queues.get(job_id)
     if token_queue is None:
         raise HTTPException(404, f"Chronicle job {job_id!r} not found")
+    # Never cancel Chronicle jobs on flaky SSE disconnects during long silent
+    # LLM phases (concretizing / think=True). Explicit Cancel still works.
     return queue_sse_response(
         request,
         token_queue,
         job_id=job_id,
         registry=request.app.state.story_token_queues,
         encode="json",
+        cancel_on_disconnect=False,
+        disconnect_grace_seconds=90.0,
+        ping_seconds=10.0,
     )
 
 

@@ -1,11 +1,11 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onErrorCaptured } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
 import StoryQualityRadar from './StoryQualityRadar.vue'
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -233,6 +233,10 @@ const baseThumbSrc = computed(() =>
 
 // ── run state ─────────────────────────────────────────────────────────────────
 const running = ref(false)
+/** True from select/respin-expand until done/error — keeps panel open even if
+ *  the SSE stream flaps during long silent LLM phases (concretizing). */
+const expandSessionActive = ref(false)
+const streamTerminal = ref(false)
 const phase = ref('')
 const progress = ref(0)
 const streamText = ref('')
@@ -243,6 +247,14 @@ const prompts = ref({})
 const imageJobs = ref([])
 const finished = ref(false)
 const errorMsg = ref('')
+const renderError = ref('')
+
+onErrorCaptured((err) => {
+  // Keep the shell mounted; a child render throw used to blank the Teleport.
+  renderError.value = String(err?.message || err)
+  console.error('[ChroniclePanel] render error:', err)
+  return false
+})
 const title = ref('')
 const titleJa = ref('')
 const overall = ref('')
@@ -330,7 +342,7 @@ const showPipelineProgress = computed(() =>
 
 /** Cute loom animation while the long pipeline (or image jobs) are busy. */
 const isBusyWeaving = computed(() =>
-  running.value || !!imageGen.value.active
+  running.value || expandSessionActive.value || !!imageGen.value.active
 )
 const showWeaverStage = computed(() => {
   if (!isBusyWeaving.value) return false
@@ -345,20 +357,24 @@ const showWeaverStage = computed(() => {
   if (Object.keys(prompts.value).length) return false
   return true
 })
+const phaseLabel = computed(() => {
+  if (!phase.value) return t('chronicle.running')
+  const key = 'chronicle.phase.' + phase.value
+  return te(key) ? t(key) : phase.value
+})
 const weaverCaption = computed(() => {
   if (imageGen.value.active) return t('chronicle.weaverImages')
-  if (phase.value) {
-    const label = t('chronicle.phase.' + phase.value, phase.value)
-    return t('chronicle.weaverPhase', { phase: label })
-  }
+  if (phase.value) return t('chronicle.weaverPhase', { phase: phaseLabel.value })
   return t('chronicle.weaverBusy')
 })
 
 /** Keep the panel open during pipeline / image jobs — ignore Esc & backdrop. */
 const stayOpen = computed(() => {
   if (running.value) return true
-  // Truncation / pipeline errors must leave the panel readable for retry.
-  if (errorMsg.value) return true
+  // Mid-expand (incl. silent "Pinning down the action") — never auto-dismiss.
+  if (expandSessionActive.value) return true
+  // Truncation / pipeline / render errors must leave the panel readable.
+  if (errorMsg.value || renderError.value) return true
   // image_jobs may arrive a tick before the 2s poll fills imageGen.states.
   if (imageJobs.value.length) {
     if (imageGen.value.active) return true
@@ -495,7 +511,10 @@ onUnmounted(() => {
   _reader?.cancel().catch(() => {})
 })
 
-function close() { emit('update:show', false) }
+function close() {
+  expandSessionActive.value = false
+  emit('update:show', false)
+}
 
 function resetStory({ keepDraftNotes = false } = {}) {
   streamText.value = ''
@@ -531,6 +550,9 @@ function resetRun() {
   phase.value = ''
   progress.value = 0
   errorMsg.value = ''
+  renderError.value = ''
+  expandSessionActive.value = false
+  streamTerminal.value = false
   storyId.value = ''
   candidates.value = []
   selecting.value = false
@@ -721,9 +743,12 @@ async function _runStream(jobId) {
   }
 }
 
-async function _submitAndStream(url, payload, onJob) {
+async function _submitAndStream(url, payload, onJob, { expand = false } = {}) {
   running.value = true
   errorMsg.value = ''
+  renderError.value = ''
+  streamTerminal.value = false
+  if (expand) expandSessionActive.value = true
   try {
     const r = await fetch(url, {
       method: 'POST',
@@ -734,14 +759,23 @@ async function _submitAndStream(url, payload, onJob) {
     const data = await r.json()
     onJob?.(data)
     await _runStream(data.job_id)
+    if (expand && expandSessionActive.value && !streamTerminal.value && !errorMsg.value) {
+      // Stream died mid-expand (proxy flap / cancel) without done/error.
+      errorMsg.value = t('chronicle.streamDropped')
+      emit('toast', { msg: errorMsg.value, type: 'warning' })
+    }
   } catch (err) {
     errorMsg.value = String(err.message || err)
     emit('toast', { msg: errorMsg.value, type: 'error' })
   } finally {
     running.value = false
+    if (streamTerminal.value || errorMsg.value) {
+      // Keep expandSessionActive until the user starts a new run / closes, so a
+      // dropped stream cannot instantly unlock Esc/backdrop dismiss.
+    }
     // Grace window so Esc/backdrop can't win the race between stream end and
     // image_jobs / first job-poll sample (same class of bug as mid-expand dismiss).
-    _ignoreDismissUntil = performance.now() + 2000
+    _ignoreDismissUntil = performance.now() + 5000
   }
 }
 
@@ -804,8 +838,12 @@ async function selectCandidate(cid) {
   // before the first SSE phase event arrives.
   phase.value = 'expanding'
   resetStory({ keepDraftNotes: true })
-  await _submitAndStream(`/api/story/chronicle/${storyId.value}/select`,
-    { candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] })
+  await _submitAndStream(
+    `/api/story/chronicle/${storyId.value}/select`,
+    { candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] },
+    null,
+    { expand: true },
+  )
 }
 
 async function respin(stage) {
@@ -838,7 +876,7 @@ async function respin(stage) {
     prose_paragraphs: settings.prose_paragraphs,
     worldview: settings.worldview,
     user_topic: settings.user_topic,
-  })
+  }, null, { expand: stage === 'expand' })
 }
 
 async function readStream(jobId) {
@@ -932,10 +970,10 @@ function handleEvent(ev) {
       }
       break
     case 'mutation_tags':
-      mutationTags.value = ev.tags || []
+      mutationTags.value = asStringList(ev.tags)
       break
     case 'story_seed_tags':
-      storySeedTags.value = ev.tags || []
+      storySeedTags.value = asStringList(ev.tags)
       storySeedMotif.value = ev.motif || ''
       break
     case 'biography':
@@ -974,6 +1012,8 @@ function handleEvent(ev) {
       _startImageGenMonitor()
       break
     case 'done':
+      streamTerminal.value = true
+      expandSessionActive.value = false
       seed.value = ev.seed
       finished.value = true
       phase.value = 'done'
@@ -994,6 +1034,7 @@ function handleEvent(ev) {
       }
       break
     case 'error':
+      streamTerminal.value = true
       errorMsg.value = ev.message
       emit('toast', { msg: ev.message, type: 'error' })
       break
@@ -1168,9 +1209,9 @@ async function generateImages() {
                       <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
                       <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
                     </div>
-                    <p v-if="mutationTags.length" class="text-[10px] text-teal-500/80 pl-[calc(5rem+0.5rem)] break-all">
+                    <p v-if="asStringList(mutationTags).length" class="text-[10px] text-teal-500/80 pl-[calc(5rem+0.5rem)] break-all">
                       <span class="text-teal-300/80">{{ t('chronicle.mutationTags') }}:</span>
-                      {{ mutationTags.join(', ') }}
+                      {{ joinList(mutationTags) }}
                     </p>
                   </div>
                   <div class="flex items-start gap-2">
@@ -1318,9 +1359,9 @@ async function generateImages() {
                 </div>
               </details>
 
-              <p v-if="storySeedTags.length" class="text-[10px] text-amber-500/80 break-all">
+              <p v-if="asStringList(storySeedTags).length" class="text-[10px] text-amber-500/80 break-all">
                 <span class="text-amber-300/80">{{ t('chronicle.seedTags') }}:</span>
-                {{ storySeedTags.join(', ') }}
+                {{ joinList(storySeedTags) }}
                 <span v-if="storySeedMotif"> · {{ t('chronicle.motifLabel') }}: {{ storySeedMotif }}</span>
               </p>
             </fieldset>
@@ -1368,7 +1409,7 @@ async function generateImages() {
                 </div>
                 <div class="flex-1 flex flex-col gap-1 min-w-0">
                   <div class="flex items-center justify-between text-[10px] text-teal-300/90">
-                    <span class="truncate">{{ phase ? t('chronicle.phase.' + phase, phase) : t('chronicle.running') }}</span>
+                    <span class="truncate">{{ phaseLabel }}</span>
                     <span class="font-mono shrink-0 ml-2">{{ Math.round(progress * 100) }}%</span>
                   </div>
                   <div class="sb-progress chronicle-progress-alive">
@@ -1417,6 +1458,7 @@ async function generateImages() {
             </button>
 
             <p v-if="errorMsg" class="text-xs text-red-400">{{ errorMsg }}</p>
+            <p v-if="renderError" class="text-xs text-amber-400">{{ renderError }}</p>
           </div>
 
           <!-- ── RIGHT: candidates / story / prompts ──────────────────────── -->
@@ -1699,19 +1741,19 @@ async function generateImages() {
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonShot') }}:</span>
                       {{ [axisReasoning[axis].shot, axisReasoning[axis].camera].filter(Boolean).join(' / ') }}
                     </p>
-                    <p v-if="(axisReasoning[axis].focal || []).length">
+                    <p v-if="asStringList(axisReasoning[axis].focal).length">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonPose') }}:</span>
-                      {{ (axisReasoning[axis].focal || []).join(', ') }}
+                      {{ joinList(axisReasoning[axis].focal) }}
                     </p>
-                    <p v-if="(axisReasoning[axis].search_tags || []).length" class="break-words">
+                    <p v-if="asStringList(axisReasoning[axis].search_tags).length" class="break-words">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonTags') }}:</span>
-                      {{ (axisReasoning[axis].search_tags || []).join(', ') }}
+                      {{ joinList(axisReasoning[axis].search_tags) }}
                     </p>
                   </div>
                   <div v-if="axisDrafts[axis]" class="mt-2 text-[10px] text-[var(--sb-muted)]">
-                    <p v-if="(axisDrafts[axis].draft_tags || []).length" class="break-words">
+                    <p v-if="asStringList(axisDrafts[axis].draft_tags).length" class="break-words">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonDraftTags') }}:</span>
-                      {{ (axisDrafts[axis].draft_tags || []).join(', ') }}
+                      {{ joinList(axisDrafts[axis].draft_tags) }}
                     </p>
                     <p v-if="axisDrafts[axis].draft_richness_delta"
                       class="mt-0.5 font-mono text-teal-300/70">
@@ -1792,10 +1834,10 @@ async function generateImages() {
                     {{ p.visual_script }}
                   </p>
                   <p v-for="g in CAT_TAG_GROUPS" :key="g.key"
-                    v-show="(p[g.key] || []).length"
+                    v-show="asStringList(p[g.key]).length"
                     class="text-[10px]">
                     <span class="text-[var(--sb-faint)]">{{ t('chronicle.' + g.label) }}:</span>
-                    <span class="font-mono text-gray-400">{{ (p[g.key] || []).join(', ') }}</span>
+                    <span class="font-mono text-gray-400">{{ joinList(p[g.key]) }}</span>
                   </p>
                 </div>
               </div>

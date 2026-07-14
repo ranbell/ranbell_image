@@ -13,10 +13,12 @@ Runner signature:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
@@ -3349,6 +3351,29 @@ async def run_chronicle_expand(
         reporter.update(progress, text)
         _put({"type": "phase", "code": code, "progress": progress})
 
+    @asynccontextmanager
+    async def _heartbeat(code: str, progress: float, *, interval: float = 8.0):
+        """Keep SSE/proxies alive during long non-streaming LLM calls (think=True)."""
+        async def _beat() -> None:
+            n = 0
+            while True:
+                await asyncio.sleep(interval)
+                n += 1
+                # Re-emit phase so the UI stays on this step and the wire isn't idle.
+                _put({
+                    "type": "phase",
+                    "code": code,
+                    "progress": progress,
+                    "heartbeat": n,
+                })
+        task = asyncio.create_task(_beat())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
     _abort = asyncio.Event()
     cancel.on_cancel(_abort.set)
 
@@ -3535,18 +3560,19 @@ async def run_chronicle_expand(
         _phase("concretizing", 0.14, "Pinning down the action...")
         concrete: dict = {}
         try:
-            concrete = parse_concrete_activities_json(await ollama.generate_text(
-                build_concrete_activities_prompt(
-                    biography=biography, timetable=timetable, selected=selected,
-                    scene_desc=scene_desc, base_axis=body.base_time_axis,
-                    time_scale=body.time_scale, user_topic=body.user_topic,
-                    locale=locale,
-                    axis_slots=axis_slots,
-                    seed_tags=seed_tags,
-                    forced_motif=forced_motif,
-                ),
-                model=vlm_model, options=options, fmt="json", think=True,
-            ))
+            async with _heartbeat("concretizing", 0.14):
+                concrete = parse_concrete_activities_json(await ollama.generate_text(
+                    build_concrete_activities_prompt(
+                        biography=biography, timetable=timetable, selected=selected,
+                        scene_desc=scene_desc, base_axis=body.base_time_axis,
+                        time_scale=body.time_scale, user_topic=body.user_topic,
+                        locale=locale,
+                        axis_slots=axis_slots,
+                        seed_tags=seed_tags,
+                        forced_motif=forced_motif,
+                    ),
+                    model=vlm_model, options=options, fmt="json", think=True,
+                ))
         except Exception as exc:
             logger.warning("[chronicle] concrete activities failed: %s", exc)
 
@@ -3561,19 +3587,20 @@ async def run_chronicle_expand(
         ):
             _phase("differentiating", 0.15, "Separating the three actions...")
             try:
-                rewritten = parse_concrete_activities_json(await ollama.generate_text(
-                    build_differentiate_activities_prompt(
-                        activities=concrete,
-                        selected=selected,
-                        base_axis=body.base_time_axis,
-                        time_scale=body.time_scale,
-                        scene_desc=scene_desc,
-                        axis_slots=axis_slots,
-                        user_topic=body.user_topic,
-                        locale=locale,
-                    ),
-                    model=vlm_model, options=options, fmt="json", think=True,
-                ))
+                async with _heartbeat("differentiating", 0.15):
+                    rewritten = parse_concrete_activities_json(await ollama.generate_text(
+                        build_differentiate_activities_prompt(
+                            activities=concrete,
+                            selected=selected,
+                            base_axis=body.base_time_axis,
+                            time_scale=body.time_scale,
+                            scene_desc=scene_desc,
+                            axis_slots=axis_slots,
+                            user_topic=body.user_topic,
+                            locale=locale,
+                        ),
+                        model=vlm_model, options=options, fmt="json", think=True,
+                    ))
                 if all(rewritten.get(a) for a in AXES):
                     concrete = rewritten
             except Exception as exc:
@@ -4616,6 +4643,7 @@ async def run_chronicle_expand(
             "axes": axes_payload,
         })
     except JobCancelled:
+        _put({"type": "error", "message": "Chronicle expand was cancelled"})
         raise
     except Exception as exc:
         logger.exception("[chronicle] expand pipeline failed")

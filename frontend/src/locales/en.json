@@ -1330,6 +1330,7 @@
     "respinStory": "Rewrite story",
     "cancel": "Cancel group",
     "cancelled": "Chronicle cancelled",
+    "streamDropped": "Connection to the weave stream dropped — the panel stayed open. Retry expand if progress stopped.",
     "baseHint": "Topic alone works without an image — or pick from the gallery / random",
     "topicOnlyHint": "Topic-only — invent the character and generate all three axis images",
     "clearBase": "Clear image (topic only)",
