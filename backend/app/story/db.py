@@ -21,6 +21,8 @@ Payload schema:
     respin_history: [ {kind, temperature, candidates?/title/overall/axes?} ]
     context: { character_desc, scene_desc, character_tags, wd14_tags,
                wd14_context, story_hooks, body }   # carried Phase 1 → Phase 2
+    quality_eval: optional { version, overall, dimensions{topic_fit,…},
+                             method, notes, per_axis }  # Storybook radar
     created_at: float (unix time)
     group_id: str
 """

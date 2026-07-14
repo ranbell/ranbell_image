@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
+import StoryQualityRadar from './StoryQualityRadar.vue'
 
 const { t, locale } = useI18n()
 
@@ -711,6 +712,23 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   </span>
                 </li>
               </ul>
+            </details>
+
+            <details v-if="detailStory.quality_eval?.dimensions"
+              class="px-6 sm:px-8 py-5 sb-section">
+              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-0">
+                <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
+                {{ t('storybook.quality.title') }}
+                <span class="ml-auto text-[11px] font-mono text-teal-300/80 normal-case tracking-normal font-normal">
+                  {{ Math.round((detailStory.quality_eval.overall || 0) * 100) }}
+                </span>
+              </summary>
+              <div class="mt-4">
+                <StoryQualityRadar :eval="detailStory.quality_eval" />
+                <p class="mt-3 text-[10px] text-[var(--sb-muted)] leading-relaxed">
+                  {{ t('storybook.quality.hint') }}
+                </p>
+              </div>
             </details>
 
             <div v-for="(axis, ai) in AXES" :key="axis"

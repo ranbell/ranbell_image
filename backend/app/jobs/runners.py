@@ -4206,6 +4206,25 @@ async def run_chronicle_expand(
                     ),
                 })
 
+        # Multi-axis quality radar (topic fit, diversity, expression, …).
+        quality_eval: dict = {}
+        try:
+            from ..story.quality import evaluate_chronicle_quality
+            quality_eval = evaluate_chronicle_quality(
+                user_topic=body.user_topic,
+                title=en_title,
+                overall=en_overall,
+                stories=en_stories,
+                activities=concrete or situation_en,
+                prompts=prompts,
+                time_scale=body.time_scale,
+                lock_tags=lock_tags,
+            )
+            _put({"type": "quality_eval", **quality_eval})
+        except Exception as exc:
+            logger.warning("[chronicle] quality_eval failed: %s", exc)
+            quality_eval = {}
+
         # ── Finalise the record (patch draft → final) ─────────────────────────
         _phase("savingStory", 0.82, "Saving story...")
         prev_axes = draft.get("axes") or {}
@@ -4228,7 +4247,7 @@ async def run_chronicle_expand(
         except Exception as exc:
             logger.warning("[chronicle] story embed failed: %s", exc)
 
-        await story_db.set_story_payload(db, story_id, {
+        save_payload = {
             "status": "final",
             "selected_candidate": candidate_id,
             "time_scale": body.time_scale,
@@ -4248,7 +4267,10 @@ async def run_chronicle_expand(
             "pinups": _current_pinups(doc),
             "pinup_image_id": doc.get("pinup_image_id"),
             "context": {**ctx, "axis_slots": axis_slots},
-        })
+        }
+        if quality_eval:
+            save_payload["quality_eval"] = quality_eval
+        await story_db.set_story_payload(db, story_id, save_payload)
         if embedding:
             try:
                 await story_db.set_story_embedding(db, story_id, embedding)

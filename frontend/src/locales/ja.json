@@ -1400,6 +1400,20 @@
     "detailPositive": "ポジティブプロンプト",
     "detailNegative": "ネガティブプロンプト",
     "showPrompt": "プロンプトを表示",
+    "quality": {
+      "title": "品質レーダー",
+      "overall": "総合",
+      "hint": "お題適合・多様性・表情・動作・描画しやすさ・同一性をルールで採点（0–100）。普段は畳んでおけます。",
+      "chartAria": "品質レーダーチャート、総合 {pct}",
+      "dim": {
+        "topic_fit": "お題適合",
+        "diversity": "多様性",
+        "expression": "表情",
+        "action": "動作",
+        "drawability": "描画性",
+        "identity": "同一性"
+      }
+    },
     "otherCandidates": "他の候補",
     "weaveFrom": "この画像から新たな物語を紡ぐ",
     "weaveFromShort": "紡ぐ",
