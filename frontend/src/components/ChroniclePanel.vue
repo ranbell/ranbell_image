@@ -73,6 +73,145 @@ const axisReasoning = ref({})
 const axisDrafts = ref({})
 const qualityEval = ref(null)
 const pinupJobId = ref('')
+const compareSnapshot = ref(null) // { label, prose, divergence } before applying a knob preset
+
+const WHAT_IF = [
+  {
+    id: 'rain_night',
+    topicJa: '雨の夜、傘を忘れたちょっとの寄り道',
+    topicEn: 'A rainy night detour after forgetting an umbrella',
+    worldviewJa: '濡れたネオンと静かな路地',
+    worldviewEn: 'Wet neon and quiet alleys',
+    tone: 'dark',
+    emotion: 'melancholy',
+    dramatic: 'revelation',
+    scale: 'hours',
+    prose: 4,
+    divergence: 0.35,
+  },
+  {
+    id: 'ten_years',
+    topicJa: '十年後、同じ場所で再開する',
+    topicEn: 'Reunion at the same place ten years later',
+    worldviewJa: '季節の変わった馴染みの街',
+    worldviewEn: 'A familiar town after many seasons',
+    tone: 'neutral',
+    emotion: 'nostalgia',
+    dramatic: 'reversal',
+    scale: 'decades',
+    prose: 6,
+    divergence: 0.45,
+  },
+  {
+    id: 'duo',
+    topicJa: '二人で逃げる、短い午後',
+    topicEn: 'A short afternoon on the run together',
+    worldviewJa: '風の強い海岸線',
+    worldviewEn: 'A windy coastline',
+    tone: 'bright',
+    emotion: 'joy',
+    dramatic: 'pursuit',
+    scale: 'tens_of_minutes',
+    prose: 5,
+    divergence: 0.4,
+  },
+  {
+    id: 'festival',
+    topicJa: '祭りのあと、提灯が消えていく',
+    topicEn: 'After the festival, lanterns going dark',
+    worldviewJa: '夏の縁日と残響',
+    worldviewEn: 'Summer fairground afterglow',
+    tone: 'bright',
+    emotion: 'ephemeral',
+    dramatic: 'parting',
+    scale: 'hours',
+    prose: 5,
+    divergence: 0.3,
+  },
+]
+
+const KNOB_PRESETS = [
+  { id: 'prose_short', labelKey: 'chronicle.knobProseShort', prose: 3, divergence: null },
+  { id: 'prose_long', labelKey: 'chronicle.knobProseLong', prose: 7, divergence: null },
+  { id: 'diverge_low', labelKey: 'chronicle.knobDivergeLow', prose: null, divergence: 0.1 },
+  { id: 'diverge_high', labelKey: 'chronicle.knobDivergeHigh', prose: null, divergence: 0.75 },
+]
+
+function applyWhatIf(preset, { startNow = true } = {}) {
+  const ja = uiLocale.value === 'ja'
+  userTopic.value = ja ? preset.topicJa : preset.topicEn
+  worldview.value = ja ? preset.worldviewJa : preset.worldviewEn
+  tone.value = preset.tone
+  emotion.value = EMOTION_DIMENSIONS.includes(preset.emotion) ? preset.emotion : ''
+  dramaticMode.value = DRAMATIC_MODES.includes(preset.dramatic) ? preset.dramatic : ''
+  const si = TIME_SCALES.indexOf(preset.scale)
+  if (si >= 0) timeScaleIdx.value = si
+  if (preset.prose) proseParagraphs.value = preset.prose
+  if (typeof preset.divergence === 'number') divergence.value = preset.divergence
+  if (startNow && !running.value) start()
+}
+
+function applyKnobPreset(preset) {
+  compareSnapshot.value = {
+    label: t(preset.labelKey),
+    prose: proseParagraphs.value,
+    divergence: divergence.value,
+  }
+  if (preset.prose != null) proseParagraphs.value = preset.prose
+  if (preset.divergence != null) divergence.value = preset.divergence
+}
+
+function restoreKnobSnapshot() {
+  if (!compareSnapshot.value) return
+  proseParagraphs.value = compareSnapshot.value.prose
+  divergence.value = compareSnapshot.value.divergence
+  compareSnapshot.value = null
+}
+
+const weaverTeasers = computed(() =>
+  AXES.map((axis) => {
+    const text = displayAxisStory(axis) || ''
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 72)
+    return { axis, snippet, ready: !!snippet }
+  }).filter((x) => x.ready)
+)
+
+function chronicleQualityActions() {
+  const dims = qualityEval.value?.dimensions || {}
+  const weak = Object.entries(dims)
+    .map(([k, v]) => ({ k, v: Number(v) }))
+    .filter((d) => d.v < 0.55)
+    .sort((a, b) => a.v - b.v)
+  const actions = []
+  if (weak.some((d) => d.k === 'topic_fit' || d.k === 'diversity')) {
+    actions.push({
+      id: 'respin-expand',
+      label: t('chronicle.qualityAction.respin'),
+      run: () => respin('expand'),
+    })
+  }
+  if (weak.some((d) => d.k === 'richness' || d.k === 'drawability')) {
+    actions.push({
+      id: 'prose-up',
+      label: t('chronicle.qualityAction.proseLonger'),
+      run: () => {
+        proseParagraphs.value = Math.min(7, (proseParagraphs.value || 5) + 2)
+        respin('expand')
+      },
+    })
+  }
+  if (weak.some((d) => d.k === 'diversity')) {
+    actions.push({
+      id: 'diverge-up',
+      label: t('chronicle.qualityAction.moreDiverge'),
+      run: () => {
+        divergence.value = Math.min(1, divergence.value + 0.25)
+        respin('candidates')
+      },
+    })
+  }
+  return actions.slice(0, 3)
+}
 
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
@@ -1030,6 +1169,15 @@ async function generateImages() {
                     <span>{{ t('chronicle.proseLengthShort') }}</span>
                     <span>{{ t('chronicle.proseLengthLong') }}</span>
                   </div>
+                  <div v-if="promptStyle !== 'danbooru'" class="flex flex-wrap gap-1 pl-[calc(5rem+0.5rem)]">
+                    <button
+                      v-for="k in KNOB_PRESETS.filter(p => p.prose != null)"
+                      :key="k.id"
+                      type="button"
+                      class="sb-chip"
+                      @click="applyKnobPreset(k)"
+                    >{{ t(k.labelKey) }}</button>
+                  </div>
                   <div class="flex items-center flex-wrap gap-4">
                     <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]">
                       <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" />
@@ -1212,10 +1360,51 @@ async function generateImages() {
           <div class="flex flex-col gap-4 min-w-0">
 
             <div v-if="currentStep === 0 && !running && !streamText"
-              class="flex-1 flex items-center justify-center min-h-[200px] text-center px-6">
+              class="flex-1 flex flex-col items-center justify-center min-h-[220px] text-center px-4 py-6 gap-4">
               <p class="sb-display text-base text-[var(--sb-muted)] leading-relaxed whitespace-pre-line">
                 {{ t('chronicle.idleHint') }}
               </p>
+              <div class="what-if-grid w-full max-w-lg">
+                <p class="text-[10px] uppercase tracking-wider text-teal-400/70 mb-2">{{ t('chronicle.whatIfTitle') }}</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    v-for="w in WHAT_IF"
+                    :key="w.id"
+                    type="button"
+                    class="what-if-chip text-left"
+                    :disabled="settingsLocked"
+                    @click="applyWhatIf(w)"
+                  >
+                    <span class="what-if-chip__title">{{ t('chronicle.whatIf.' + w.id) }}</span>
+                    <span class="what-if-chip__desc">{{ uiLocale === 'ja' ? w.topicJa : w.topicEn }}</span>
+                  </button>
+                </div>
+                <p class="text-[10px] text-[var(--sb-faint)] mt-2">{{ t('chronicle.whatIfHint') }}</p>
+              </div>
+              <div class="w-full max-w-lg border-t border-white/5 pt-3">
+                <p class="text-[10px] uppercase tracking-wider text-[var(--sb-muted)] mb-2">{{ t('chronicle.knobCompareTitle') }}</p>
+                <div class="flex flex-wrap gap-1.5 justify-center">
+                  <button
+                    v-for="k in KNOB_PRESETS"
+                    :key="k.id"
+                    type="button"
+                    class="sb-chip"
+                    :disabled="settingsLocked"
+                    @click="applyKnobPreset(k)"
+                  >{{ t(k.labelKey) }}</button>
+                  <button
+                    v-if="compareSnapshot"
+                    type="button"
+                    class="sb-chip is-chip-on"
+                    @click="restoreKnobSnapshot"
+                  >{{ t('chronicle.knobRestore') }}</button>
+                </div>
+                <p v-if="compareSnapshot" class="text-[10px] text-teal-300/80 mt-1.5 font-mono">
+                  {{ compareSnapshot.label }}
+                  · {{ t('chronicle.proseLengthLabel') }} {{ proseParagraphs }}
+                  · {{ t('chronicle.divergence') }} {{ Math.round(divergence * 100) }}%
+                </p>
+              </div>
             </div>
 
             <!-- Full-stage loom while waiting for the first real content -->
@@ -1248,6 +1437,19 @@ async function generateImages() {
               <div class="text-center space-y-1.5 max-w-xs">
                 <p class="sb-display text-sm text-teal-200/95 tracking-wide">{{ weaverCaption }}</p>
                 <p class="text-[11px] text-[var(--sb-muted)] leading-relaxed">{{ t('chronicle.weaverPatience') }}</p>
+              </div>
+              <div v-if="weaverTeasers.length" class="weaver-teaser-row w-full max-w-md">
+                <p class="text-[9px] uppercase tracking-wider text-teal-500/70 mb-1.5 text-center">{{ t('chronicle.weaverTeaser') }}</p>
+                <div class="flex flex-col gap-1.5">
+                  <div
+                    v-for="te in weaverTeasers"
+                    :key="te.axis"
+                    class="weaver-teaser-card"
+                  >
+                    <span class="weaver-teaser-card__axis">{{ t('chronicle.axis.' + te.axis) }}</span>
+                    <span class="weaver-teaser-card__text">{{ te.snippet }}…</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1464,6 +1666,16 @@ async function generateImages() {
               </summary>
               <div class="px-3 pb-3">
                 <StoryQualityRadar :eval="qualityEval" />
+                <div v-if="chronicleQualityActions().length" class="mt-3 flex flex-wrap gap-1.5">
+                  <button
+                    v-for="act in chronicleQualityActions()"
+                    :key="act.id"
+                    type="button"
+                    class="sb-btn border-teal-700/40 text-teal-100"
+                    :disabled="running"
+                    @click="act.run()"
+                  >{{ act.label }}</button>
+                </div>
                 <p v-if="qualityDraftNote"
                   class="mt-2 text-[10px] font-mono text-teal-300/70">
                   {{ qualityDraftNote }}
@@ -1812,4 +2024,58 @@ async function generateImages() {
 
 details > summary::-webkit-details-marker { display: none; }
 fieldset:disabled { pointer-events: none; }
+
+.what-if-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(45, 212, 191, 0.2);
+  background: linear-gradient(145deg, rgba(15, 118, 110, 0.25), rgba(0, 0, 0, 0.35));
+  transition: transform 0.2s ease, border-color 0.2s, box-shadow 0.2s;
+}
+.what-if-chip:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: rgba(45, 212, 191, 0.45);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.what-if-chip__title {
+  font-family: var(--sb-font-display);
+  font-size: 0.8rem;
+  color: #99f6e4;
+}
+.what-if-chip__desc {
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: #8b929e;
+}
+
+.weaver-teaser-card {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(45, 212, 191, 0.15);
+  background: rgba(0, 0, 0, 0.35);
+  animation: weaver-teaser-in 0.45s ease both;
+}
+.weaver-teaser-card__axis {
+  flex-shrink: 0;
+  font-size: 0.55rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5eead4;
+}
+.weaver-teaser-card__text {
+  font-size: 0.7rem;
+  color: #cbd5e1;
+  text-align: left;
+  line-height: 1.35;
+}
+@keyframes weaver-teaser-in {
+  from { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
 </style>

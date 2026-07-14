@@ -1392,6 +1392,26 @@
       "generate": "Generate"
     },
     "idleHint": "Tune the settings, then press Weave",
+    "whatIfTitle": "What if — weave now",
+    "whatIfHint": "A chip fills topic & worldview, then starts weaving",
+    "whatIf": {
+      "rain_night": "Rainy night",
+      "ten_years": "Ten years later",
+      "duo": "On the run together",
+      "festival": "After the festival"
+    },
+    "knobCompareTitle": "Knob compare (tweak settings first)",
+    "knobProseShort": "Prose · short",
+    "knobProseLong": "Prose · long",
+    "knobDivergeLow": "Diverge · low",
+    "knobDivergeHigh": "Diverge · high",
+    "knobRestore": "Restore previous",
+    "weaverTeaser": "Fragments emerging from the mist",
+    "qualityAction": {
+      "respin": "Reweave the tale",
+      "proseLonger": "Longer prose & reweave",
+      "moreDiverge": "More diverge · new candidates"
+    },
     "settingsSummary": "Settings summary",
     "editSettings": "Show settings",
     "directionGroup": "Story direction",
@@ -1479,7 +1499,29 @@
     "view": {
       "gallery": "Gallery",
       "detail": "Detail",
-      "timeline": "Timeline"
+      "timeline": "Timeline",
+      "moodboard": "Moodboard"
+    },
+    "moodboardHint": "Pin every axis and pinup on a wall — browse the world as a board",
+    "moodboardEmpty": "Nothing to pin yet",
+    "timeScrubTitle": "Scrub through time",
+    "timeScrubHint": "Slider or keys 1 / 2 / 3 for past ↔ present ↔ future",
+    "timeScrubAria": "Select time axis",
+    "variantShelf": "What-if shelf",
+    "variantShelfHint": "Unpicked candidates stay as other lives of the same character",
+    "variantPicked": "Chosen",
+    "regenQueued": "Queued a regen for this axis",
+    "regenDone": "A new moment arrived",
+    "regenBaseBlocked": "Can't regen the base-axis source image — try another axis",
+    "qualityAction": {
+      "reweave": "Weave again",
+      "reweaveTip": "{dim} is weak — reshuffle the world with the same subject",
+      "refine": "Refine {axis}",
+      "refineTip": "Push {dim} via Refine",
+      "refineIdentity": "Lock identity in Refine",
+      "refineIdentityTip": "Rebuild look consistency in Refine",
+      "anotherMoment": "Another moment in Refine",
+      "anotherMomentTip": "Replay the prompt at another temperature"
     },
     "sort": {
       "newest": "Newest",

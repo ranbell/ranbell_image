@@ -1392,6 +1392,26 @@
       "generate": "生成"
     },
     "idleHint": "設定を整えて「物語を紡ぐ」を押してください",
+    "whatIfTitle": "もしも — いま紡ぐ",
+    "whatIfHint": "チップを押すとお題と世界観が入って、そのまま紡ぎはじめます",
+    "whatIf": {
+      "rain_night": "雨の夜",
+      "ten_years": "十年後",
+      "duo": "二人で逃げる",
+      "festival": "祭りのあと"
+    },
+    "knobCompareTitle": "ノブ比較（設定だけ先に振る）",
+    "knobProseShort": "自然文・短",
+    "knobProseLong": "自然文・長",
+    "knobDivergeLow": "飛躍・低",
+    "knobDivergeHigh": "飛躍・高",
+    "knobRestore": "直前の設定に戻す",
+    "weaverTeaser": "霧から見えはじめた断片",
+    "qualityAction": {
+      "respin": "語りを再紡ぎ",
+      "proseLonger": "自然文を長くして再紡ぎ",
+      "moreDiverge": "飛躍を上げて候補から"
+    },
     "settingsSummary": "設定サマリ",
     "editSettings": "設定を表示",
     "directionGroup": "物語の方向",
@@ -1479,7 +1499,29 @@
     "view": {
       "gallery": "ギャラリー",
       "detail": "詳細",
-      "timeline": "タイムライン"
+      "timeline": "タイムライン",
+      "moodboard": "ムードボード"
+    },
+    "moodboardHint": "三軸とピンナップを壁に並べて、世界観を眺めるモードです",
+    "moodboardEmpty": "まだ壁に貼れる画像がありません",
+    "timeScrubTitle": "時間をめくる",
+    "timeScrubHint": "スライダーか 1 / 2 / 3 キーで過去↔現在↔未来",
+    "timeScrubAria": "時間軸を選択",
+    "variantShelf": "もしも棚",
+    "variantShelfHint": "選ばれなかった候補も、同じ子の別の人生として残せます",
+    "variantPicked": "採用",
+    "regenQueued": "この軸の再生成をキューしました",
+    "regenDone": "新しい瞬間が届きました",
+    "regenBaseBlocked": "基準軸の元絵はガチャできません（別の軸を試して）",
+    "qualityAction": {
+      "reweave": "もう一度紡ぐ",
+      "reweaveTip": "{dim} が弱いので、同じ子で世界を振り直します",
+      "refine": "{axis} を錬成へ",
+      "refineTip": "{dim} を錬成で押し上げる",
+      "refineIdentity": "基準軸を錬成で固定",
+      "refineIdentityTip": "見た目の一貫性を錬成で立て直す",
+      "anotherMoment": "別の瞬間を錬成",
+      "anotherMomentTip": "同じプロンプトを別温度で遊ぶ"
     },
     "sort": {
       "newest": "新しい順",

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
 import StoryQualityRadar from './StoryQualityRadar.vue'
+import TimeScrubPolaroids from './TimeScrubPolaroids.vue'
 
 const { t, locale } = useI18n()
 
@@ -14,8 +15,12 @@ const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'send-to-
 
 const AXES = ['past', 'present', 'future']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
-const VIEW_MODES = ['gallery', 'detail', 'timeline']
+const VIEW_MODES = ['gallery', 'detail', 'timeline', 'moodboard']
 const SORTS = ['newest', 'oldest', 'title', 'time_scale', 'quality']
+const QUALITY_WEAK = 0.55
+const QUALITY_ACTION_DIMS = [
+  'topic_fit', 'diversity', 'expression', 'action', 'drawability', 'identity', 'richness',
+]
 
 const CAT_TAG_GROUPS = [
   { key: 'subject_tags', label: 'tagGroupSubject' },
@@ -287,6 +292,122 @@ function openImage(sha256) {
   if (sha256) emit('select-image', sha256)
 }
 
+// ── Time scrub (past ↔ present ↔ future) ────────────────────────────────────
+const detailScrubIdx = ref(1)
+const cardScrub = ref({}) // story_id → 0|1|2
+const variantShelfOpen = ref(true)
+const regenBusy = ref(new Set())
+
+function defaultScrubFor(story) {
+  const i = AXES.indexOf(story?.base_time_axis)
+  return i >= 0 ? i : 1
+}
+function cardScrubIdx(story) {
+  const v = cardScrub.value[story.story_id]
+  return v == null ? defaultScrubFor(story) : v
+}
+function setCardScrub(storyId, idx) {
+  cardScrub.value = { ...cardScrub.value, [storyId]: idx }
+}
+
+function weakestAxis(story) {
+  // Prefer non-base axes with images/prompts for "another moment" play
+  const ordered = [...AXES].sort((a, b) => {
+    if (a === story.base_time_axis) return 1
+    if (b === story.base_time_axis) return -1
+    return 0
+  })
+  return ordered.find(a => story.axes?.[a]?.prompt_positive) || story.base_time_axis || 'present'
+}
+
+function qualityActions(story) {
+  const dims = story?.quality_eval?.dimensions || {}
+  const ranked = QUALITY_ACTION_DIMS
+    .map((key) => ({ key, value: Number(dims[key] ?? 1) }))
+    .filter((d) => d.value < QUALITY_WEAK)
+    .sort((a, b) => a.value - b.value)
+    .slice(0, 3)
+  const actions = []
+  for (const d of ranked) {
+    if (d.key === 'topic_fit' || d.key === 'diversity') {
+      const sha = axisImage(story, story.base_time_axis) || story.base_image_id
+      if (sha) {
+        actions.push({
+          id: 'reweave-' + d.key,
+          label: t('storybook.qualityAction.reweave'),
+          tip: t('storybook.qualityAction.reweaveTip', { dim: t('storybook.quality.dim.' + d.key) }),
+          run: () => emit('weave-from', sha),
+        })
+      }
+    } else if (d.key === 'richness' || d.key === 'drawability' || d.key === 'expression' || d.key === 'action') {
+      const axis = weakestAxis(story)
+      if (story.axes?.[axis]?.prompt_positive) {
+        actions.push({
+          id: 'refine-' + d.key,
+          label: t('storybook.qualityAction.refine', { axis: t('chronicle.axis.' + axis) }),
+          tip: t('storybook.qualityAction.refineTip', { dim: t('storybook.quality.dim.' + d.key) }),
+          run: () => sendAxisToRefine(story, axis),
+        })
+      }
+    } else if (d.key === 'identity') {
+      const axis = story.base_time_axis || 'present'
+      if (story.axes?.[axis]?.prompt_positive) {
+        actions.push({
+          id: 'refine-identity',
+          label: t('storybook.qualityAction.refineIdentity'),
+          tip: t('storybook.qualityAction.refineIdentityTip'),
+          run: () => sendAxisToRefine(story, axis),
+        })
+      }
+    }
+  }
+  // Always offer a playful "another moment" if we have a prompt
+  const playAxis = weakestAxis(story)
+  if (story.axes?.[playAxis]?.prompt_positive && !actions.some(a => a.id.startsWith('refine-'))) {
+    actions.push({
+      id: 'play-refine',
+      label: t('storybook.qualityAction.anotherMoment'),
+      tip: t('storybook.qualityAction.anotherMomentTip'),
+      run: () => sendAxisToRefine(story, playAxis),
+    })
+  }
+  // Dedupe by id
+  const seen = new Set()
+  return actions.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true))).slice(0, 3)
+}
+
+async function regenerateAxis(story, axis) {
+  if (axis === story.base_time_axis && story.base_image_id) {
+    emit('toast', { msg: t('storybook.regenBaseBlocked'), type: 'error' })
+    return
+  }
+  const id = story.story_id
+  const key = `${id}:${axis}`
+  if (regenBusy.value.has(key)) return
+  const before = axisImage(story, axis) || ''
+  regenBusy.value = new Set([...regenBusy.value, key])
+  try {
+    const r = await fetch(`/api/story/${id}/regenerate/${axis}`, { method: 'POST' })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    emit('toast', { msg: t('storybook.regenQueued'), type: 'success' })
+    for (let i = 0; i < 30; i++) {
+      await new Promise((res) => setTimeout(res, 2000))
+      const s = await refetchStory(id)
+      const now = axisImage(s || story, axis) || ''
+      if (now && now !== before) {
+        emit('toast', { msg: t('storybook.regenDone'), type: 'success' })
+        break
+      }
+    }
+  } catch (err) {
+    emit('toast', { msg: String(err.message || err), type: 'error' })
+  } finally {
+    const next = new Set(regenBusy.value)
+    next.delete(key)
+    regenBusy.value = next
+  }
+}
+
 const pinupView = ref(null)
 const pinupBusy = ref(new Set())
 const PINUP_ROT = [-5, 4, -3, 6, -6, 3, -4, 5]
@@ -296,6 +417,35 @@ function storyPinups(story) {
   return story.pinup_image_id ? [story.pinup_image_id] : []
 }
 function openPinup(sha) { if (sha) pinupView.value = sha }
+
+const moodboardPins = computed(() => {
+  const pins = []
+  for (const story of visibleStories.value) {
+    for (const axis of AXES) {
+      const sha = axisImage(story, axis)
+      if (!sha) continue
+      pins.push({
+        key: `${story.story_id}-${axis}`,
+        sha,
+        story,
+        axis,
+        title: storyTitle(story),
+        kind: 'axis',
+      })
+    }
+    storyPinups(story).forEach((sha, i) => {
+      pins.push({
+        key: `${story.story_id}-pin-${i}`,
+        sha,
+        story,
+        axis: 'pinup',
+        title: storyTitle(story),
+        kind: 'pinup',
+      })
+    })
+  }
+  return pins
+})
 
 async function refetchStory(id) {
   try {
@@ -309,6 +459,9 @@ async function refetchStory(id) {
 }
 
 const detailStory = ref(null)
+watch(detailStory, (s) => {
+  if (s) detailScrubIdx.value = defaultScrubFor(s)
+})
 
 const detailIndex = computed(() => {
   if (!detailStory.value) return -1
@@ -405,6 +558,9 @@ function onKey(e) {
     if (e.key === 'ArrowLeft') { detailPrev(); e.preventDefault() }
     else if (e.key === 'ArrowRight') { detailNext(); e.preventDefault() }
     else if (e.key === 'Escape') { closeDetail(); e.preventDefault() }
+    else if (e.key === '1') { detailScrubIdx.value = 0; e.preventDefault() }
+    else if (e.key === '2') { detailScrubIdx.value = 1; e.preventDefault() }
+    else if (e.key === '3') { detailScrubIdx.value = 2; e.preventDefault() }
   } else if (e.key === 'Escape') {
     if (_dismissBlocked()) { e.preventDefault(); return }
     close()
@@ -526,15 +682,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <div v-for="story in visibleStories" :key="story.story_id"
               class="storybook-card sb-card group cursor-pointer"
               @click="openDetail(story)">
-              <div class="polaroid-stack">
-                <div v-for="axis in AXES" :key="axis"
-                  class="polaroid" :class="[axis, axis === story.base_time_axis ? 'base' : '']">
-                  <img v-if="axisImage(story, axis)"
-                    :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
-                    @error="onThumbError($event, axisImage(story, axis))" loading="lazy" />
-                  <span v-else class="polaroid-empty">{{ t('storybook.imagePending') }}</span>
-                </div>
-              </div>
+              <TimeScrubPolaroids
+                :front-index="cardScrubIdx(story)"
+                :base-axis="story.base_time_axis || 'present'"
+                :image-for="(ax) => axisImage(story, ax)"
+                :pending-label="t('storybook.imagePending')"
+                size="md"
+                @update:front-index="setCardScrub(story.story_id, $event)"
+                @open-image="openImage"
+                @thumb-error="(e, sha) => onThumbError(e, sha)"
+              />
               <div class="flex flex-col gap-1.5 mt-1">
                 <h3 class="sb-display text-sm text-[var(--sb-amber)] truncate">
                   {{ storyTitle(story) || '—' }}
@@ -585,6 +742,29 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             </div>
           </div>
 
+          <!-- MOODBOARD -->
+          <div v-if="viewMode === 'moodboard' && moodboardPins.length" class="mood-wall">
+            <p class="text-[11px] text-[var(--sb-muted)] mb-3 leading-relaxed">{{ t('storybook.moodboardHint') }}</p>
+            <div class="pinboard mood-wall-board">
+              <div
+                v-for="(pin, i) in moodboardPins"
+                :key="pin.key"
+                class="pincard mood-pin"
+                :style="{ transform: `rotate(${pinupRotation(i)}deg)` }"
+                @click="openDetail(pin.story)"
+              >
+                <span class="pincard-pin"></span>
+                <img :src="`/api/thumbnails/${pin.sha}.webp`" @error="onThumbError($event, pin.sha)" loading="lazy" />
+                <div class="mood-pin-caption">
+                  <span class="truncate">{{ pin.title || '—' }}</span>
+                  <span class="opacity-70">{{ pin.kind === 'pinup' ? 'pin' : t('chronicle.axis.' + pin.axis) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else-if="viewMode === 'moodboard' && visibleStories.length && !moodboardPins.length"
+            class="text-xs text-[var(--sb-muted)]">{{ t('storybook.moodboardEmpty') }}</p>
+
           <!-- TIMELINE -->
           <div v-if="viewMode === 'timeline' && visibleStories.length" class="flex flex-col gap-4">
             <div v-for="bucket in timelineBuckets" :key="bucket.key" class="flex flex-col gap-2">
@@ -597,15 +777,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <div v-for="story in bucket.stories" :key="story.story_id"
                   class="storybook-card sb-card group shrink-0 w-48 snap-start cursor-pointer"
                   @click="openDetail(story)">
-                  <div class="polaroid-stack polaroid-stack-sm">
-                    <div v-for="axis in AXES" :key="axis"
-                      class="polaroid" :class="[axis, axis === story.base_time_axis ? 'base' : '']">
-                      <img v-if="axisImage(story, axis)"
-                        :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
-                        @error="onThumbError($event, axisImage(story, axis))" loading="lazy" />
-                      <span v-else class="polaroid-empty text-[10px]">{{ t('storybook.imagePending') }}</span>
-                    </div>
-                  </div>
+                  <TimeScrubPolaroids
+                    :front-index="cardScrubIdx(story)"
+                    :base-axis="story.base_time_axis || 'present'"
+                    :image-for="(ax) => axisImage(story, ax)"
+                    :pending-label="t('storybook.imagePending')"
+                    size="sm"
+                    @update:front-index="setCardScrub(story.story_id, $event)"
+                    @open-image="openImage"
+                    @thumb-error="(e, sha) => onThumbError(e, sha)"
+                  />
                   <h4 class="sb-display text-[11px] text-[var(--sb-amber)] truncate mt-1">{{ storyTitle(story) || '—' }}</h4>
                   <div class="flex items-center gap-1 text-[9px] mt-0.5">
                     <span v-if="motifOf(story)" class="sb-meta-chip sb-meta-motif truncate">
@@ -802,6 +983,55 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </div>
 
           <div class="flex-1 overflow-y-auto min-h-0">
+            <!-- Time scrub hero -->
+            <div class="px-6 sm:px-8 pt-5 pb-2 sb-section">
+              <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                <h4 class="sb-section-title mb-0">{{ t('storybook.timeScrubTitle') }}</h4>
+                <p class="text-[10px] text-[var(--sb-faint)]">{{ t('storybook.timeScrubHint') }}</p>
+              </div>
+              <TimeScrubPolaroids
+                v-model:front-index="detailScrubIdx"
+                :base-axis="detailStory.base_time_axis || 'present'"
+                :image-for="(ax) => axisImage(detailStory, ax)"
+                :pending-label="t('storybook.imagePending')"
+                size="lg"
+                @open-image="openImage"
+                @thumb-error="(e, sha) => onThumbError(e, sha)"
+              />
+              <p class="mt-3 sb-prose text-sm max-h-28 overflow-y-auto border-l border-[var(--sb-rule)] pl-3">
+                {{ axisStory(detailStory, AXES[detailScrubIdx]) || '—' }}
+              </p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <button
+                  v-if="detailStory.axes?.[AXES[detailScrubIdx]]?.prompt_positive"
+                  @click="sendAxisToRefine(detailStory, AXES[detailScrubIdx])"
+                  class="sb-btn-accent"
+                >
+                  <SbIcon name="spark" class="w-3 h-3" />
+                  {{ t('storybook.refineAxis') }}
+                </button>
+                <button
+                  v-if="axisImage(detailStory, AXES[detailScrubIdx])
+                    && !(AXES[detailScrubIdx] === detailStory.base_time_axis && detailStory.base_image_id)"
+                  @click="regenerateAxis(detailStory, AXES[detailScrubIdx])"
+                  :disabled="regenBusy.has(detailStory.story_id + ':' + AXES[detailScrubIdx])"
+                  class="sb-btn disabled:opacity-40"
+                  :title="t('storybook.regen')"
+                >
+                  <SbIcon name="refresh" class="w-3 h-3" />
+                  {{ t('storybook.regen') }}
+                </button>
+                <button
+                  v-if="axisImage(detailStory, AXES[detailScrubIdx])"
+                  @click="emit('weave-from', axisImage(detailStory, AXES[detailScrubIdx]))"
+                  class="sb-btn border-teal-700/40 text-teal-100"
+                >
+                  <SbIcon name="weave" class="w-3 h-3" />
+                  {{ t('storybook.weaveFromShort') }}
+                </button>
+              </div>
+            </div>
+
             <div v-if="storyOverall(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
               <p class="sb-prose italic border-l border-[var(--sb-rule)] pl-4">
                 {{ storyOverall(detailStory) }}
@@ -856,28 +1086,29 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </div>
             </div>
 
-            <details v-if="detailStory.candidates?.length" class="px-6 sm:px-8 py-5 sb-section" open>
-              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3">
+            <details v-if="detailStory.candidates?.length" class="px-6 sm:px-8 py-5 sb-section" :open="variantShelfOpen">
+              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3"
+                @click.prevent="variantShelfOpen = !variantShelfOpen">
                 <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
-                {{ t('storybook.otherCandidates') }} ({{ detailStory.candidates.length }})
+                {{ t('storybook.variantShelf') }} ({{ detailStory.candidates.length }})
               </summary>
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <p class="text-[10px] text-[var(--sb-muted)] mb-2">{{ t('storybook.variantShelfHint') }}</p>
+              <div class="flex gap-3 overflow-x-auto pb-2 snap-x">
                 <div v-for="c in detailStory.candidates" :key="c.id"
-                  class="p-2.5 rounded-lg border"
+                  class="variant-card snap-start shrink-0 w-56 p-3 rounded-xl border"
                   :class="c.id === detailStory.selected_candidate
-                    ? 'border-[var(--sb-amber)]/40 bg-amber-900/10'
-                    : 'border-white/5 bg-black/20'">
+                    ? 'border-[var(--sb-amber)]/50 bg-amber-900/15 variant-card--picked'
+                    : 'border-white/5 bg-black/25'">
                   <div class="flex items-center gap-1.5 flex-wrap">
                     <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-white/10 text-gray-200">{{ c.id }}</span>
                     <span class="text-[11px] font-semibold text-[var(--sb-amber)] leading-tight">{{ c.title }}</span>
-                    <span v-if="c.dramatic_mode" class="sb-meta-chip text-[9px]">
-                      {{ dramaticModeLabel(c.dramatic_mode) }}
+                    <span v-if="c.id === detailStory.selected_candidate" class="sb-meta-chip text-[9px] text-[var(--sb-amber)]">
+                      {{ t('storybook.variantPicked') }}
                     </span>
-                    <span v-if="c.turn" class="text-[9px] text-[var(--sb-muted)] italic">{{ c.turn }}</span>
                   </div>
-                  <p v-if="c.summary" class="text-[10px] text-gray-400 mt-1 leading-snug">{{ c.summary }}</p>
-                  <div class="mt-1.5 flex flex-col gap-0.5 text-[10px] leading-snug">
-                    <p v-for="ax in AXES" :key="ax" v-show="c[ax]">
+                  <p v-if="c.summary" class="text-[10px] text-gray-400 mt-1.5 leading-snug line-clamp-4">{{ c.summary }}</p>
+                  <div class="mt-2 flex flex-col gap-0.5 text-[10px] leading-snug">
+                    <p v-for="ax in AXES" :key="ax" v-show="c[ax]" class="line-clamp-2">
                       <span class="font-semibold uppercase tracking-wide mr-1 text-[9px]"
                         :class="ax === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/80'">
                         {{ t('chronicle.axis.' + ax) }}
@@ -915,6 +1146,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </summary>
               <div class="mt-4">
                 <StoryQualityRadar :eval="detailStory.quality_eval" />
+                <div v-if="qualityActions(detailStory).length" class="mt-3 flex flex-wrap gap-1.5">
+                  <button
+                    v-for="act in qualityActions(detailStory)"
+                    :key="act.id"
+                    type="button"
+                    class="sb-btn-accent"
+                    :title="act.tip"
+                    @click="act.run()"
+                  >
+                    <SbIcon name="spark" class="w-3 h-3" />
+                    {{ act.label }}
+                  </button>
+                </div>
                 <div v-if="AXES.some(a => draftRichnessFor(detailStory, a))"
                   class="mt-2 space-y-0.5">
                   <p v-for="ax in AXES" :key="'dr-' + ax"
@@ -968,6 +1212,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                       :aria-label="t('storybook.refineAxis')">
                       <SbIcon name="spark" class="w-3 h-3" />
                       {{ t('storybook.refineAxis') }}
+                    </button>
+                    <button
+                      v-if="!(axis === detailStory.base_time_axis && detailStory.base_image_id)"
+                      @click="regenerateAxis(detailStory, axis)"
+                      :disabled="regenBusy.has(detailStory.story_id + ':' + axis)"
+                      class="sb-btn bg-black/50 disabled:opacity-40"
+                      :aria-label="t('storybook.aria.regen')"
+                      :title="t('storybook.regen')"
+                    >
+                      <SbIcon name="refresh" class="w-3 h-3" />
+                      {{ t('storybook.regen') }}
                     </button>
                   </div>
                 </div>
@@ -1306,6 +1561,41 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .storybook-card:hover .polaroid-stack .polaroid.present { transform: translate(0, -2%)     rotate(0deg);  }
 .storybook-card:hover .polaroid-stack .polaroid.future  { transform: translate(42%, -2%)  rotate(4deg);  }
 .polaroid-stack-sm .polaroid { border-width: 3px; border-bottom-width: 14px; }
+
+.variant-card {
+  transition: transform 0.25s ease, border-color 0.25s, box-shadow 0.25s;
+}
+.variant-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(232, 196, 122, 0.35);
+}
+.variant-card--picked {
+  box-shadow: 0 0 0 1px rgba(232, 196, 122, 0.25);
+}
+
+.mood-wall-board {
+  min-height: 14rem;
+}
+.mood-pin {
+  width: auto;
+}
+.mood-pin img {
+  width: 7rem;
+  height: 9rem;
+}
+.mood-pin-caption {
+  position: absolute;
+  left: 0.4rem;
+  right: 0.4rem;
+  bottom: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  font-size: 0.55rem;
+  line-height: 1.2;
+  color: #444;
+  font-family: var(--sb-font-ui);
+}
 
 /* Pinboard */
 .pinboard {
