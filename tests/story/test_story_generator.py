@@ -591,6 +591,26 @@ def test_theme_must_tags_bunny_girl():
     assert "bunny_girl" in lines["present"] and neg == "blurry"
 
 
+def test_normalize_time_scale_and_hours_beats():
+    from app.story.generator import (
+        build_fast_candidate,
+        normalize_time_scale,
+    )
+
+    assert normalize_time_scale("hours") == "hours"
+    assert normalize_time_scale("") == "years"
+    assert normalize_time_scale("hour") == "years"  # typo → safe default
+    cand = build_fast_candidate(
+        "バニーガール", time_scale="hours", locale="ja", base_axis="present",
+    )
+    assert "数時間" in cand["past"] and "数年" not in cand["past"]
+    assert "hours" in cand["overall"]
+    en = build_fast_candidate(
+        "bunny", time_scale="hours", locale="en", base_axis="present",
+    )
+    assert "HOURS" in en["past"] and "YEARS" not in en["past"]
+
+
 def test_build_fast_prompts_prompt_carries_personality_and_min_30():
     from app.story.generator import (
         FAST_PROMPT_MIN_TAGS,

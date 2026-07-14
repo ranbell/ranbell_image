@@ -64,6 +64,18 @@ TIME_SCALES = {
     "decades": "several decades",
 }
 
+
+def normalize_time_scale(scale: str | None, default: str = "years") -> str:
+    """Return a known Chronicle time_scale key, else ``default``.
+
+    Unknown / empty values used to silently fall through to the years branch
+    of ``_ELAPSED_UNIT.get(..., years)``, which made 'hours' look like '数年'.
+    """
+    s = str(scale or "").strip()
+    if s in TIME_SCALES:
+        return s
+    return default if default in TIME_SCALES else "years"
+
 # Tags that describe rating/quality metadata rather than appearance
 _META_TAG_RE = re.compile(
     r"^(masterpiece|best_quality|high_quality|low_quality|worst_quality|"
@@ -3805,6 +3817,7 @@ def build_fast_prompts_prompt(
         f"- {a.upper()}: {beats.get(a) or user_topic}" for a in axes
     )
     axis_keys = ", ".join(f'"{a}"' for a in axes)
+    time_scale = normalize_time_scale(time_scale)
     elapsed = _elapsed_time_header(
         base_axis=base, time_scale=time_scale, locale="en"
     )
@@ -3890,6 +3903,7 @@ def build_fast_candidate(
 ) -> dict:
     """Synthetic single candidate for fast mode (no LLM pitch round)."""
     topic = (user_topic or "").strip() or "untitled"
+    time_scale = normalize_time_scale(time_scale)
     one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
     one_ja, two_ja = _ELAPSED_UNIT_JA.get(time_scale, _ELAPSED_UNIT_JA["years"])
     base = (base_axis or "present").lower()
@@ -3903,7 +3917,8 @@ def build_fast_candidate(
         steps = abs(AXES.index(axis) - idx_base)
         phrase = one if steps == 1 else two
         direction = "later" if AXES.index(axis) > idx_base else "earlier"
-        return f"{phrase.title()} {direction} — {topic}"
+        # Keep canonical casing from _ELAPSED_UNIT (do not .title()).
+        return f"{phrase} {direction} — {topic}"
 
     def _beat_ja(axis: str) -> str:
         if axis == base:

@@ -60,7 +60,13 @@ const useRefSeed = ref(true)
 const manualMode = ref(false)
 const fastMode = ref(false)
 const pendingAutoSelect = ref('')
+/** time_scale captured at Weave start — used for fast auto-select expand */
+const pendingExpandTimeScale = ref('')
 const generatePinup = ref(false)
+
+function currentTimeScale() {
+  return TIME_SCALES[timeScaleIdx.value] || 'years'
+}
 const suppressConflictTags = ref(true)
 const useDraftRefine = ref('auto') // auto | on | off
 const draftWidth = ref(512)
@@ -562,6 +568,7 @@ function resetRun() {
   selecting.value = false
   selectedCandidate.value = ''
   pendingAutoSelect.value = ''
+  pendingExpandTimeScale.value = ''
   respinCandCount.value = 0
   respinExpandCount.value = 0
   resetStory()
@@ -788,7 +795,8 @@ async function _submitAndStream(url, payload, onJob, { expand = false } = {}) {
     const autoCid = pendingAutoSelect.value
     if (autoCid && storyId.value && !errorMsg.value) {
       pendingAutoSelect.value = ''
-      queueMicrotask(() => selectCandidate(autoCid))
+      const scale = pendingExpandTimeScale.value || currentTimeScale()
+      queueMicrotask(() => selectCandidate(autoCid, scale))
     }
   }
 }
@@ -805,6 +813,7 @@ async function start() {
     return
   }
   resetRun()
+  pendingExpandTimeScale.value = currentTimeScale()
   await _submitAndStream('/api/story/chronicle', currentSettingsPayload(), (d) => {
     groupId.value = d.group_id
   })
@@ -816,7 +825,7 @@ function currentSettingsPayload() {
     base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
     worldview: worldview.value,
-    time_scale: TIME_SCALES[timeScaleIdx.value],
+    time_scale: currentTimeScale(),
     prompt_style: promptStyle.value,
     workflow_name: workflow.value,
     divergence: divergence.value,
@@ -845,7 +854,7 @@ const draftRefineDisabledHint = computed(() => {
   return ''
 })
 
-async function selectCandidate(cid) {
+async function selectCandidate(cid, timeScaleOverride = '') {
   if (!storyId.value || running.value) return
   selectedCandidate.value = cid
   selecting.value = false
@@ -853,9 +862,10 @@ async function selectCandidate(cid) {
   // before the first SSE phase event arrives.
   phase.value = 'expanding'
   resetStory({ keepDraftNotes: true })
+  const scale = timeScaleOverride || pendingExpandTimeScale.value || currentTimeScale()
   await _submitAndStream(
     `/api/story/chronicle/${storyId.value}/select`,
-    { candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] },
+    { candidate_id: cid, time_scale: scale },
     null,
     { expand: true },
   )

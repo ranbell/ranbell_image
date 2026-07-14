@@ -200,12 +200,28 @@ async def select_candidate(story_id: str, body: SelectCandidateRequest, request:
         story_id = await story_db.fork_draft(app.state.db, story)
         story = await story_db.get_story(app.state.db, story_id)
 
+    from ..story.generator import TIME_SCALES, normalize_time_scale
+
+    # Prefer a *valid* client scale; else Phase-1 story / context.body.
+    # Invalid/empty client must not wipe a correct Phase-1 "hours" into years.
+    ctx_body = ((story.get("context") or {}).get("body") or {})
+    client = str(body.time_scale or "").strip()
+    if client in TIME_SCALES:
+        raw_scale = client
+    else:
+        raw_scale = (
+            ctx_body.get("time_scale")
+            or story.get("time_scale")
+            or "years"
+        )
+    scale = normalize_time_scale(raw_scale)
+
     job_id = _submit_prompt_job(
         app, "chronicle_expand", run_chronicle_expand,
         meta={"group_id": story.get("group_id", ""), "story_id": story_id},
         story_id=story_id,
         candidate_id=body.candidate_id,
-        time_scale=body.time_scale or story.get("time_scale", "years"),
+        time_scale=scale,
         temperature=_draft_base_temp(story),
     )
     return {"job_id": job_id, "story_id": story_id, "status": "queued"}

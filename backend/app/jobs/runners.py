@@ -2894,6 +2894,7 @@ async def run_chronicle_candidates(
         parse_biography_json,
         parse_candidates_json,
         parse_topic_only_grounding_json,
+        normalize_time_scale,
         pick_forced_motif,
         sample_bio_domains,
         sample_story_seed_tags,
@@ -2901,6 +2902,7 @@ async def run_chronicle_candidates(
     )
 
     body = ChronicleRequest(**body_dict)
+    body.time_scale = normalize_time_scale(body.time_scale)
     temp = body.temperature if temperature is None else temperature
 
     def _put(event: dict | None) -> None:
@@ -3128,7 +3130,9 @@ async def run_chronicle_candidates(
                 "biography": biography,
                 "biography_ja": biography_ja,
                 "topic_only": not has_base,
-                "body": body_dict,
+                # Persist validated request (not the raw dict) so time_scale etc.
+                # cannot drift from ChronicleRequest defaults / coercion.
+                "body": body.model_dump(),
             }
 
         # ── Story seed tags (always resample, including on respin) ─────────────
@@ -3171,6 +3175,7 @@ async def run_chronicle_candidates(
         # ── Fast mode: skip pitch LLM — one synthetic candidate, auto-expand ─
         if getattr(body, "fast_mode", False):
             _phase("candidates", 0.70, "Fast mode — skipping story pitches...")
+            body.time_scale = normalize_time_scale(body.time_scale)
             candidates = [
                 build_fast_candidate(
                     body.user_topic,
@@ -3406,6 +3411,7 @@ async def run_chronicle_expand(
         is_multi_character,
         assemble_capped_positive,
         build_draft_grounding_block,
+        build_fast_candidate,
         build_fast_prompts_prompt,
         bucket_danbooru_tags,
         cap_danbooru_tag_line,
@@ -3416,6 +3422,7 @@ async def run_chronicle_expand(
         merge_chronicle_axis_tags,
         merge_category_tags,
         merge_draft_wd14_tags,
+        normalize_time_scale,
         parse_fast_prompts_json,
         sample_midrank_wd14_tags,
         theme_must_tags,
@@ -3479,9 +3486,22 @@ async def run_chronicle_expand(
             return
         ctx: dict = draft.get("context") or {}
         body = ChronicleRequest(**(ctx.get("body") or {}))
-        body.time_scale = time_scale or body.time_scale
+        # Job arg (from /select) wins, then stored Phase-1 body, then story row.
+        body.time_scale = normalize_time_scale(
+            time_scale
+            or body.time_scale
+            or draft.get("time_scale")
+            or "years"
+        )
         body.temperature = temperature
         locale = body.locale
+        # Keep context.body in sync so respins / Storybook see the resolved scale.
+        try:
+            synced = dict(ctx.get("body") or {})
+            synced["time_scale"] = body.time_scale
+            ctx = {**ctx, "body": synced}
+        except Exception:
+            pass
 
         selected = next(
             (c for c in (draft.get("candidates") or []) if c.get("id") == candidate_id),
@@ -3570,20 +3590,50 @@ async def run_chronicle_expand(
         if getattr(body, "fast_mode", False):
             import random as _random
 
-            _phase("fastPrompting", 0.25, "Fast mode: theme → prompts...")
+            _phase(
+                "fastPrompting",
+                0.25,
+                f"Fast mode: theme → prompts ({body.time_scale})...",
+            )
+            _put({"type": "info", "message": f"time_scale={body.time_scale}"})
             if biography:
                 _put({
                     "type": "biography",
                     "biography": parse_biography_json(biography) or biography,
                     "biography_ja": parse_biography_json(biography_ja) or biography_ja,
                 })
-            beats = {a: str(selected.get(a) or "").strip() for a in AXES}
-            title = str(selected.get("title") or body.user_topic or "Chronicle").strip()
+            # Rebuild temporal beats from the resolved scale so a stale Phase-1
+            # candidate (e.g. years baked while UI shows hours) cannot stick.
+            refreshed = build_fast_candidate(
+                body.user_topic,
+                time_scale=body.time_scale,
+                locale=locale,
+                base_axis=body.base_time_axis,
+            )
+            beats = {
+                a: str(refreshed.get(a) or selected.get(a) or "").strip()
+                for a in AXES
+            }
+            title = str(
+                refreshed.get("title")
+                or selected.get("title")
+                or body.user_topic
+                or "Chronicle"
+            ).strip()
             overall = str(
-                selected.get("overall") or body.user_topic or title
+                refreshed.get("overall")
+                or selected.get("overall")
+                or body.user_topic
+                or title
             ).strip()
             stories = {a: (beats[a] or body.user_topic or title) for a in AXES}
-            _put({"type": "story", "title": title, "overall": overall, "axes": stories})
+            _put({
+                "type": "story",
+                "title": title,
+                "overall": overall,
+                "axes": stories,
+                "time_scale": body.time_scale,
+            })
             if locale == "ja":
                 title_ja, overall_ja = title, overall
                 stories_ja = dict(stories)
