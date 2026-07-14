@@ -7,9 +7,9 @@ jobs/runners.py.
 Stage 1 (VLM)  — visual vocabulary extraction (wd14_tags reused when available)
 Stage 2 (LLM)  — title + overall summary + three acts, streamed with
                  [TITLE]/[OVERALL]/[PAST]/[PRESENT]/[FUTURE] markers
-Stage 3 (LLM)  — per-axis image prompt in Refine's Visual Script format
-                 (danbooru tag line + 5 prose paragraphs with inline tags),
-                 output as POSITIVE:/NEGATIVE: labeled sections
+Stage 3 (LLM)  — per-axis image prompt: danbooru tag line (Pass 1 ground truth)
+                 + Refine Visual Script prose + categorized *_TAGS footer;
+                 ComfyUI gets tag_line + prose; categories emit on axis_prompt SSE
 
 Stories are authored in the user's locale; when that is Japanese they are
 translated to English before Stage 3 (image prompts are always English).
@@ -2252,6 +2252,177 @@ _VISUAL_SCRIPT_GUIDE = (
 )
 
 
+# Refine-parity category buckets (UI + structured view for image models).
+CHRONICLE_CAT_FIELDS = (
+    "subject_tags",
+    "hair_tags",
+    "expression_tags",
+    "clothing_tags",
+    "accessory_tags",
+    "pose_tags",
+    "background_tags",
+    "object_tags",
+    "lighting_tags",
+)
+
+_VS_LABELED_TAG_FOOTER = (
+    "After the 5-paragraph prose (still inside POSITIVE, after the prose), "
+    "output ONLY these labeled category lines. Prefer tags already present in "
+    "the PASS 1 TAG LINE — do not invent a parallel taxonomy. Leave a bucket "
+    "empty if nothing fits:\n\n"
+    "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
+    "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
+    "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
+    "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
+    "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
+    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
+    "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
+    "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
+    "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
+)
+
+_VS_LABEL_RE = re.compile(
+    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_VS_SECTION_MARKER_RE = re.compile(
+    r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I
+)
+
+_BUCKET_SUBJECT = frozenset({
+    "1girl", "1boy", "2girls", "2boys", "3girls", "3boys", "4girls", "6+girls",
+    "solo", "solo_focus", "multiple_girls", "multiple_boys", "couple",
+})
+_BUCKET_EXPR = frozenset({
+    "smile", "smiling", "laughing", "blush", "tears", "crying", "open_mouth",
+    "closed_mouth", "serious", "angry", "sad", "happy", "nervous", "shy",
+    "expressionless", "grin", "frown", "pout", "wink", "surprised", "scared",
+    "looking_at_viewer", "looking_away", "looking_back", "looking_down",
+    "looking_up", "closed_eyes", "teary_eyes", "half-closed_eyes", "watery_eyes",
+})
+_BUCKET_LIGHT = frozenset({
+    "sunset", "sunrise", "golden_hour", "rim_light", "backlight", "lens_flare",
+    "cinematic_lighting", "volumetric", "god_rays", "warm_light", "cool_light",
+    "neon", "moonlight", "daylight", "soft_light", "sparkle", "glow",
+    "afternoon", "evening", "morning", "night", "dusk", "dawn",
+})
+_BUCKET_POSE = frozenset({
+    "standing", "sitting", "kneeling", "crouching", "lying", "running",
+    "walking", "jumping", "reaching", "holding", "pointing", "waving",
+    "leaning", "dynamic_pose", "from_side", "from_above", "from_below",
+    "cowboy_shot", "upper_body", "full_body", "close-up", "profile",
+    "outstretched_arm", "arms_up", "hands_on_hips", "crossed_arms",
+})
+_BUCKET_BG = frozenset({
+    "outdoors", "indoors", "beach", "ocean", "street", "cityscape", "park",
+    "forest", "sky", "cloud", "room", "classroom", "cafe", "shop", "storefront",
+    "stadium", "festival", "rooftop", "bridge", "mountain", "scenery",
+    "simple_background", "white_background", "blurry_background",
+})
+_BUCKET_OBJ = frozenset({
+    "bicycle", "bike", "scarf", "umbrella", "bag", "book", "cup", "mug",
+    "sword", "phone", "flower", "shell", "lantern", "confetti", "medal",
+})
+_EXPR_EYE_PREFIXES = ("teary", "closed", "empty", "half", "watery", "tired")
+
+
+def parse_visual_script_category_tags(text: str) -> tuple[str, dict[str, list[str]]]:
+    """Split Visual Script body into prose + Refine-style category dict."""
+    src = text or ""
+    first_m = _VS_LABEL_RE.search(src)
+    if first_m:
+        prose = src[: first_m.start()].strip()
+        tags_block = src[first_m.start():]
+    else:
+        prose = src.strip()
+        tags_block = ""
+    prose = _VS_SECTION_MARKER_RE.sub("", prose).strip()
+    cats: dict[str, list[str]] = {}
+    for m in _VS_LABEL_RE.finditer(tags_block):
+        field = m.group(1).lower() + "_tags"
+        raw = (m.group(2) or "").strip().strip("[]")
+        tags = [
+            t.strip().replace(" ", "_")
+            for t in raw.split(",")
+            if t.strip() and t.strip() not in ("[", "]")
+        ]
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in tags:
+            k = t.lower()
+            if k not in seen:
+                seen.add(k)
+                out.append(t)
+        cats[field] = out
+    return prose, cats
+
+
+def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
+    """Heuristic category buckets from a flat danbooru tag line (no LLM)."""
+    parts = [
+        t.strip().replace(" ", "_")
+        for t in (tag_line or "").split(",")
+        if t.strip()
+    ]
+    cats: dict[str, list[str]] = {k: [] for k in CHRONICLE_CAT_FIELDS}
+    for tag in parts:
+        low = tag.lower()
+        toks = set(low.split("_"))
+        if low in _BUCKET_SUBJECT or low.startswith(("1girl", "1boy", "2girl", "3girl")):
+            cats["subject_tags"].append(tag)
+        elif low.endswith("_hair") or ("hair" in toks and "eyes" not in toks):
+            cats["hair_tags"].append(tag)
+        elif low.endswith("_eyes"):
+            if any(low.startswith(p) or p in toks for p in _EXPR_EYE_PREFIXES):
+                cats["expression_tags"].append(tag)
+            else:
+                cats["subject_tags"].append(tag)
+        elif low in _BUCKET_EXPR or bool(toks & _BUCKET_EXPR):
+            cats["expression_tags"].append(tag)
+        elif low in _BUCKET_LIGHT or bool(toks & _BUCKET_LIGHT):
+            cats["lighting_tags"].append(tag)
+        elif low in _BUCKET_POSE or bool(toks & _BUCKET_POSE):
+            cats["pose_tags"].append(tag)
+        elif low in _BUCKET_BG or bool(toks & _BUCKET_BG):
+            cats["background_tags"].append(tag)
+        elif low in _BUCKET_OBJ or bool(toks & _BUCKET_OBJ):
+            cats["object_tags"].append(tag)
+        elif any(s in low for s in (
+            "dress", "shirt", "skirt", "uniform", "kimono", "yukata",
+            "jacket", "coat", "pants", "socks", "shoes", "boots",
+        )):
+            cats["clothing_tags"].append(tag)
+        elif any(s in low for s in (
+            "hat", "glasses", "earring", "necklace", "choker", "bag",
+            "hair_ornament", "hair_ribbon", "ribbon",
+        )):
+            cats["accessory_tags"].append(tag)
+        else:
+            cats["object_tags"].append(tag)
+    return {k: v for k, v in cats.items() if v}
+
+
+def merge_category_tags(
+    *sources: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    """Merge category dicts; first occurrence of each tag wins globally."""
+    out: dict[str, list[str]] = {k: [] for k in CHRONICLE_CAT_FIELDS}
+    seen_global: set[str] = set()
+    for src in sources:
+        if not src:
+            continue
+        for key in CHRONICLE_CAT_FIELDS:
+            for tag in src.get(key) or []:
+                t = str(tag).strip().replace(" ", "_")
+                k = t.lower()
+                if not t or k in seen_global:
+                    continue
+                seen_global.add(k)
+                out[key].append(t)
+    return {k: v for k, v in out.items() if v}
+
+
+
 # Per-scale visual invariants used in both story and image-prompt generation.
 # Keys: must_keep (IDENTICAL to base), may_differ (allowed changes), forbidden.
 _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
@@ -3481,10 +3652,10 @@ def build_axis_prose_prompt(
         base_axis=base_axis, time_scale=time_scale, locale="en"
     )
     tag_block = (
-        "\n[PASS 1 TAG LINE — this becomes the leading tag portion of POSITIVE; "
-        "the prose you write below must be faithful to and enrich it (never "
-        "contradict it). Reuse these tags inline in ASCII parentheses inside "
-        "the prose so the AI image model reads them from both places]\n"
+        "\n[PASS 1 DANBOORU TAG LINE — authoritative visual vocabulary]\n"
+        "Keep ALL internal reasoning in danbooru tags. Do not replace this line "
+        "with free prose invents. The prose below must REUSE these tags inline "
+        "in ASCII parentheses and must never contradict them.\n"
         f"{tag_line}\n"
     )
     grounding_block = ""
@@ -3499,15 +3670,17 @@ def build_axis_prose_prompt(
         )
     if prompt_style == "natural":
         format_rule = (
-            "POSITIVE is the 5-paragraph Visual Script prose described above "
-            "(no leading tag line — tags live inline in the prose)."
+            "POSITIVE is: (1) the 5-paragraph Visual Script prose, then "
+            "(2) the labeled *_TAGS category lines. No leading flat tag line "
+            "— tags live inline in the prose and in the category footer."
         )
     else:  # danbooru+natural (default)
         format_rule = (
-            "POSITIVE is two parts separated by ONE blank line:\n"
-            "(a) the PASS 1 TAG LINE above verbatim (do not re-order, do not "
-            "drop tags);\n"
-            "(b) the 5-paragraph Visual Script prose described above."
+            "POSITIVE has THREE parts separated by blank lines:\n"
+            "(a) the PASS 1 DANBOORU TAG LINE above verbatim (do not re-order, "
+            "do not drop tags);\n"
+            "(b) the 5-paragraph Visual Script prose;\n"
+            "(c) the labeled *_TAGS category lines (Refine Visual Spec)."
         )
     neg_hint = (
         f"\nSuggested negatives from Pass 1 (merge with your own): {negative_supplement}\n"
@@ -3521,8 +3694,8 @@ def build_axis_prose_prompt(
     )
     return (
         "You are an expert image generation prompt engineer.\n"
-        "Turn ONE act of a story into the FINAL image prompt, building on the "
-        "tag payload you generated in Pass 1.\n\n"
+        "Work in DANBOORU TAGS first (Pass 1 tag line is ground truth), then "
+        "render a Visual Script the image model can read easily.\n\n"
         f"{elapsed_header}\n"
         f"You are now generating the image prompt for: [{axis.upper()}]\n\n"
         f"{ctx['chronicle_ctx']}"
@@ -3538,6 +3711,7 @@ def build_axis_prose_prompt(
         f"{grounding_block}"
         "\n[Visual Script format]\n"
         f"{_VISUAL_SCRIPT_GUIDE}\n\n"
+        f"{_VS_LABELED_TAG_FOOTER}\n\n"
         "Rules:\n"
         f"- {format_rule}\n"
         f"{draft_rule}"
@@ -3545,13 +3719,15 @@ def build_axis_prose_prompt(
         "- The action MUST appear as concrete danbooru action/pose tags near the "
         "FRONT of the positive prompt; a bare 'standing'/'sitting' with no action "
         "tag is forbidden unless the act is truly motionless.\n"
+        "- Category lines must mostly subset the PASS 1 tag line "
+        "(plus a few inline enrichments already used in the prose).\n"
         "- NEGATIVE lists only things to avoid (artifacts, wrong elements for "
         "this scene). Short comma-separated tags. Unless this act is deliberately "
         "still, include static-pose tags here (standing, static_pose, "
         "expressionless, stiff, arms_at_sides) so the figure is not left just "
         f"standing.{neg_hint}\n"
         "Output format (exactly these two labels, nothing else):\n"
-        "POSITIVE:\n<the positive prompt>\n\n"
+        "POSITIVE:\n<the positive prompt with tag line / prose / category lines>\n\n"
         "NEGATIVE:\n<the negative prompt>"
     )
 

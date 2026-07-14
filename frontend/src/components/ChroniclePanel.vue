@@ -458,6 +458,22 @@ const hasReasoning = computed(() =>
   || Object.keys(axisDrafts.value).length > 0,
 )
 
+const CAT_TAG_GROUPS = [
+  { key: 'subject_tags', label: 'tagGroupSubject' },
+  { key: 'hair_tags', label: 'tagGroupHair' },
+  { key: 'expression_tags', label: 'tagGroupExpression' },
+  { key: 'clothing_tags', label: 'tagGroupClothing' },
+  { key: 'accessory_tags', label: 'tagGroupAccessory' },
+  { key: 'pose_tags', label: 'tagGroupPose' },
+  { key: 'background_tags', label: 'tagGroupBackground' },
+  { key: 'object_tags', label: 'tagGroupObject' },
+  { key: 'lighting_tags', label: 'tagGroupLighting' },
+]
+
+function axisHasCatTags(p) {
+  return CAT_TAG_GROUPS.some(g => (p?.[g.key] || []).length > 0)
+}
+
 const qualityDraftNote = computed(() => {
   const q = qualityEval.value
   if (!q) return ''
@@ -630,6 +646,16 @@ function handleEvent(ev) {
           negative: ev.negative,
           refined_from_draft: !!ev.refined_from_draft,
           draft_richness_delta: ev.draft_richness_delta || null,
+          visual_script: ev.visual_script || '',
+          subject_tags: ev.subject_tags || [],
+          hair_tags: ev.hair_tags || [],
+          expression_tags: ev.expression_tags || [],
+          clothing_tags: ev.clothing_tags || [],
+          accessory_tags: ev.accessory_tags || [],
+          pose_tags: ev.pose_tags || [],
+          background_tags: ev.background_tags || [],
+          object_tags: ev.object_tags || [],
+          lighting_tags: ev.lighting_tags || [],
         },
       }
       break
@@ -1393,6 +1419,26 @@ async function generateImages() {
                   class="sb-textarea text-xs"></textarea>
                 <textarea v-model="p.negative" rows="1" :readonly="!canGenerate" :placeholder="t('chronicle.negative')"
                   class="sb-textarea text-xs text-[var(--sb-muted)]"></textarea>
+                <div v-if="axisHasCatTags(p)"
+                  class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
+                  <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
+                    {{ t('chronicle.visualSpecTitle') }}
+                  </p>
+                  <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
+                    v-show="(p[g.key] || []).length"
+                    class="space-y-0.5">
+                    <p class="text-[9px] text-emerald-400/70 font-semibold">
+                      {{ t('chronicle.' + g.label) }}
+                    </p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in p[g.key]" :key="tag"
+                        class="text-[10px] font-mono px-1.5 py-0.5 rounded
+                          bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
+                        {{ tag }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

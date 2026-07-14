@@ -3276,8 +3276,12 @@ async def run_chronicle_expand(
         build_draft_grounding_block,
         draft_richness_delta,
         merge_chronicle_axis_tags,
+        merge_category_tags,
         merge_draft_wd14_tags,
         parse_axis_tags_json,
+        parse_visual_script_category_tags,
+        bucket_danbooru_tags,
+        CHRONICLE_CAT_FIELDS,
         parse_concrete_activities_json,
         parse_english_translation_json,
         parse_story_json,
@@ -3807,7 +3811,9 @@ async def run_chronicle_expand(
             tag_line = _strip_quality_metatags(tag_line)
 
             # (3b) Densify thin tag lines via Pass-1 JSON tags (previously unwired).
+            # Pass-1 stays danbooru-tag-centric so the VLM does not freestyle prose.
             neg_supplement = ""
+            pass1_cats: dict = {}
             degenerate, deg_reason = _chronicle_tags_degenerate(tag_line)
             if degenerate:
                 _phase("refiningPromptTags", 0.48 + 0.16 * i,
@@ -3836,7 +3842,7 @@ async def run_chronicle_expand(
                         ),
                         model=vlm_model, options=denser_opts, fmt="json", think=True,
                     )
-                    pass1_line, _cats, neg_supplement = parse_axis_tags_json(raw_tags)
+                    pass1_line, pass1_cats, neg_supplement = parse_axis_tags_json(raw_tags)
                     if pass1_line:
                         # Prefer denser Pass-1 while keeping search/focal/lock grounding.
                         blended_search = list(dict.fromkeys(
@@ -3869,8 +3875,13 @@ async def run_chronicle_expand(
                     logger.warning("[chronicle] %s tag densify failed: %s", axis, exc)
 
             # (4) Refine pass-2 visual script over the tag line.
+            axis_cats: dict = {}
             if body.prompt_style == "danbooru":
                 positive, negative = tag_line, ""
+                prose = ""
+                axis_cats = merge_category_tags(
+                    pass1_cats, bucket_danbooru_tags(tag_line),
+                )
             else:
                 _phase("refiningPromptProse", 0.50 + 0.16 * i, f"Writing {axis} prompt...")
                 _put({"type": "token", "text": f"\n\n— {axis} —\n"})
@@ -3909,16 +3920,27 @@ async def run_chronicle_expand(
                 if not positive:
                     positive = tag_line
 
-            if body.prompt_style == "danbooru":
-                prose = ""
-            elif body.prompt_style == "natural":
-                tag_line, prose = "", positive
-            else:  # danbooru+natural
-                head, _, tail = positive.partition("\n\n")
-                tag_line, prose = head.strip(), tail.strip()
-            if tag_line:
-                tag_line = _strip_quality_metatags(tag_line)
-                tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
+                if body.prompt_style == "natural":
+                    # Prose + optional category footer; no leading tag line.
+                    prose, vs_cats = parse_visual_script_category_tags(positive)
+                    tag_line = ""
+                    axis_cats = merge_category_tags(
+                        pass1_cats, vs_cats, bucket_danbooru_tags(
+                            ", ".join(
+                                t for ts in (pass1_cats or {}).values() for t in ts
+                            )
+                        ),
+                    )
+                else:  # danbooru+natural
+                    head, _, tail = positive.partition("\n\n")
+                    tag_line, rest = head.strip(), tail.strip()
+                    prose, vs_cats = parse_visual_script_category_tags(rest)
+                    axis_cats = merge_category_tags(
+                        pass1_cats, vs_cats, bucket_danbooru_tags(tag_line),
+                    )
+                if tag_line:
+                    tag_line = _strip_quality_metatags(tag_line)
+                    tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
 
             # (5) Conflict cleanup vs the finished story + re-lock identity.
             # Mechanical mutex (day↔night / indoor↔outdoor / hair·eye lock) runs
@@ -3968,7 +3990,12 @@ async def run_chronicle_expand(
                 }))
             if prose and inject:
                 prose = _correct_prose_wd14_conflicts(prose, inject)
-            positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)
+            # Comfy payload: danbooru tag line + Visual Script prose only
+            # (category lines are metadata — Refine parity).
+            positive = (
+                f"{tag_line}\n\n{prose}".strip()
+                if tag_line and prose else (tag_line or prose)
+            )
             positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
             if not positive:
                 _put({"type": "error", "message": f"Prompt build failed for {axis}"})
@@ -3978,11 +4005,24 @@ async def run_chronicle_expand(
                 removal,
                 all_lines=(body.prompt_style in ("detailed", "danbooru")),
             )
-            prompts[axis] = {"positive": positive, "negative": negative}
+            if not axis_cats:
+                axis_cats = bucket_danbooru_tags(
+                    tag_line or positive.split("\n\n")[0]
+                )
+            prompts[axis] = {
+                "positive": positive,
+                "negative": negative,
+                "visual_script": prose or "",
+                **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
+            }
             axis_evt: dict = {
                 "type": "axis_prompt", "axis": axis,
                 "positive": positive, "negative": negative,
+                "visual_script": prose or "",
             }
+            for k in CHRONICLE_CAT_FIELDS:
+                if axis_cats.get(k):
+                    axis_evt[k] = axis_cats[k]
             if removed_tags:
                 axis_evt["removed_tags"] = removed_tags
             _put(axis_evt)
@@ -4069,6 +4109,9 @@ async def run_chronicle_expand(
                         if body.prompt_style == "danbooru":
                             positive, negative = tag_line, negative or ""
                             prose = ""
+                            axis_cats = merge_category_tags(
+                                bucket_danbooru_tags(tag_line),
+                            )
                         else:
                             try:
                                 prose_prompt = build_axis_prose_prompt(
@@ -4116,10 +4159,19 @@ async def run_chronicle_expand(
                                 positive = tag_line
 
                             if body.prompt_style == "natural":
-                                tag_line, prose = "", positive
+                                prose, vs_cats = parse_visual_script_category_tags(
+                                    positive
+                                )
+                                tag_line = ""
                             else:
                                 head, _, tail = positive.partition("\n\n")
-                                tag_line, prose = head.strip(), tail.strip()
+                                tag_line, rest = head.strip(), tail.strip()
+                                prose, vs_cats = parse_visual_script_category_tags(
+                                    rest
+                                )
+                            axis_cats = merge_category_tags(
+                                vs_cats, bucket_danbooru_tags(tag_line),
+                            )
                             if tag_line:
                                 tag_line = _strip_quality_metatags(tag_line)
                                 tag_line = _ensure_subject_anchor(
@@ -4205,15 +4257,23 @@ async def run_chronicle_expand(
                                 )),
                             )
                             prompts[axis] = {
-                                "positive": positive, "negative": negative,
+                                "positive": positive,
+                                "negative": negative,
+                                "visual_script": prose or "",
+                                "refined_from_draft": True,
+                                **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
                             }
                             refined_evt: dict = {
                                 "type": "axis_prompt",
                                 "axis": axis,
                                 "positive": positive,
                                 "negative": negative,
+                                "visual_script": prose or "",
                                 "refined_from_draft": True,
                             }
+                            for k in CHRONICLE_CAT_FIELDS:
+                                if axis_cats.get(k):
+                                    refined_evt[k] = axis_cats[k]
                             if removed_tags:
                                 refined_evt["removed_tags"] = removed_tags
                             if axis in draft_deltas:

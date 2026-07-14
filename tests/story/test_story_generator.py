@@ -1376,12 +1376,14 @@ def test_axis_prose_prompt_embeds_pass1_tag_line():
         time_scale="years",
     )
     assert tag_line in prompt
-    assert "PASS 1 TAG LINE" in prompt
+    assert "PASS 1 DANBOORU TAG LINE" in prompt
     assert "Visual Script" in prompt
     assert "POSITIVE:" in prompt
     assert "NEGATIVE:" in prompt
-    # danbooru+natural expects the tag line verbatim then prose.
-    assert "PASS 1 TAG LINE above verbatim" in prompt
+    assert "SUBJECT_TAGS:" in prompt
+    # danbooru+natural: tag line + prose + category footer
+    assert "THREE parts" in prompt
+    assert "verbatim" in prompt
 
 
 def test_axis_prose_prompt_natural_style_no_tag_line_output():
@@ -1394,10 +1396,10 @@ def test_axis_prose_prompt_natural_style_no_tag_line_output():
         prompt_style="natural",
         axis="present", base_axis="present",
     )
-    # natural mode: prose only in POSITIVE, tag line lives inline in prose.
-    assert "no leading tag line" in prompt
+    # natural mode: prose + category footer; no leading flat tag line in POSITIVE
+    assert "No leading flat tag line" in prompt or "no leading flat tag line" in prompt
     assert tag_line in prompt  # still passed as guidance
-
+    assert "SUBJECT_TAGS:" in prompt
 
 def test_axis_prose_prompt_forwards_negative_supplement():
     prompt = build_axis_prose_prompt(
