@@ -558,7 +558,13 @@ async function start() {
     return
   }
   resetRun()
-  await _submitAndStream('/api/story/chronicle', {
+  await _submitAndStream('/api/story/chronicle', currentSettingsPayload(), (d) => {
+    groupId.value = d.group_id
+  })
+}
+
+function currentSettingsPayload() {
+  return {
     base_sha256: baseSha.value || '',
     base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
@@ -581,8 +587,14 @@ async function start() {
     temperature: temperature.value,
     num_ctx: numCtx.value,
     locale: uiLocale.value,
-  }, (d) => { groupId.value = d.group_id })
+  }
 }
+
+const draftRefineDisabledHint = computed(() => {
+  if (manualMode.value) return t('chronicle.draftRefineDisabledManual')
+  if (!workflow.value) return t('chronicle.draftRefineDisabledWorkflow')
+  return ''
+})
 
 async function selectCandidate(cid) {
   if (!storyId.value || running.value) return
@@ -600,8 +612,28 @@ async function respin(stage) {
     : (respinExpandCount.value += 1)
   if (stage === 'candidates') { candidates.value = []; selecting.value = false }
   resetStory()
-  await _submitAndStream(`/api/story/chronicle/${storyId.value}/respin`,
-    { stage, respin_count: count })
+  const settings = currentSettingsPayload()
+  await _submitAndStream(`/api/story/chronicle/${storyId.value}/respin`, {
+    stage,
+    respin_count: count,
+    time_scale: settings.time_scale,
+    divergence: settings.divergence,
+    emotion: settings.emotion,
+    dramatic_mode: settings.dramatic_mode,
+    tone: settings.tone,
+    prompt_style: settings.prompt_style,
+    workflow_name: settings.workflow_name,
+    use_draft_refine: settings.use_draft_refine,
+    draft_width: settings.draft_width,
+    draft_height: settings.draft_height,
+    draft_steps: settings.draft_steps,
+    suppress_conflict_tags: settings.suppress_conflict_tags,
+    manual_mode: settings.manual_mode,
+    temperature: settings.temperature,
+    num_ctx: settings.num_ctx,
+    worldview: settings.worldview,
+    user_topic: settings.user_topic,
+  })
 }
 
 async function readStream(jobId) {
@@ -997,6 +1029,10 @@ async function generateImages() {
                       {{ t('chronicle.draftRefineMode.' + m) }}
                     </button>
                   </div>
+                  <p v-if="draftRefineDisabledHint && useDraftRefine !== 'off'"
+                    class="text-[10px] text-amber-500/70 pl-[5.5rem]">
+                    {{ draftRefineDisabledHint }}
+                  </p>
                   <div v-if="useDraftRefine !== 'off'" class="flex items-center gap-2 flex-wrap text-[10px] text-[var(--sb-muted)]">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftSizeTitle')">{{ t('chronicle.draftSize') }}</span>
                     <label class="flex items-center gap-1">

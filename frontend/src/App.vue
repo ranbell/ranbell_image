@@ -435,6 +435,7 @@ const refineCurrentStep = computed(() => {
 })
 
 const refineHairTags = ref([])
+const refineSubjectTags = ref([])
 const refineClothingTags = ref([])
 const refineAccessoryTags = ref([])
 const refinePoseTags = ref([])
@@ -442,6 +443,7 @@ const refineExpressionTags = ref([])
 const refineBackgroundTags = ref([])
 const refineObjectTags = ref([])
 const refineLightingTags = ref([])
+const refineInjectedLiterals = ref([])
 const refineWd14Analysis = ref(null)   // { common_tags, common_total, common_selected, unique_by_image }
 const refineCommonRatio = ref(0.3)     // 0.0〜1.0
 const refineUniqueCount = ref(20)      // 固有タグ数/画像@100%重み
@@ -2323,6 +2325,7 @@ async function runRefine() {
   refinePromptJobId.value = null
   refinePhaseCode.value = ''
   refineHairTags.value = []
+  refineSubjectTags.value = []
   refineClothingTags.value = []
   refineAccessoryTags.value = []
   refinePoseTags.value = []
@@ -2330,6 +2333,7 @@ async function runRefine() {
   refineBackgroundTags.value = []
   refineObjectTags.value = []
   refineLightingTags.value = []
+  refineInjectedLiterals.value = []
   refineWd14Analysis.value = null
   refineMutationTags.value = []
   refineVariants.value = []
@@ -2430,6 +2434,7 @@ function handleRefineEvent(evt) {
       refineMutationTags.value = evt.mutation_tags || []
       refineVariants.value = evt.variants || []
       refineHairTags.value = evt.hair_tags || []
+      refineSubjectTags.value = evt.subject_tags || []
       refineClothingTags.value = evt.clothing_tags || []
       refineAccessoryTags.value = evt.accessory_tags || []
       refinePoseTags.value = evt.pose_tags || []
@@ -2437,6 +2442,9 @@ function handleRefineEvent(evt) {
       refineBackgroundTags.value = evt.background_tags || []
       refineObjectTags.value = evt.object_tags || []
       refineLightingTags.value = evt.lighting_tags || []
+      refineInjectedLiterals.value = (evt.injected_literals || []).map(
+        (x) => (typeof x === 'string' ? x : (x?.text || ''))
+      ).filter(Boolean)
       refinePhase.value = evt.auto_submit ? 'comfy' : 'done'
       break
     case 'comfy_queued':
@@ -3871,6 +3879,13 @@ onUnmounted(() => {
                     </div>
                     <p class="text-xs text-gray-200 bg-gray-800/80 rounded-lg p-3 whitespace-pre-wrap break-words leading-relaxed max-h-36 overflow-y-auto">{{ fmtPrompt(positivePrompt) }}</p>
                   </div>
+                  <div v-if="refineInjectedLiterals.length" class="flex flex-wrap items-center gap-1.5">
+                    <span class="text-[10px] text-purple-400/80 font-semibold uppercase tracking-wide">{{ $t('refine.injectedLiterals') }}</span>
+                    <span v-for="(lit, i) in refineInjectedLiterals" :key="i"
+                      class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-900/40 border border-purple-700/40 text-purple-200/90">
+                      text "{{ lit }}"
+                    </span>
+                  </div>
                   <div v-if="negativePromptText">
                     <div class="flex items-center justify-between mb-1.5">
                       <p class="text-xs font-semibold text-red-400 uppercase tracking-wide">{{ $t('refine.negativePromptLabel') }}</p>
@@ -4088,13 +4103,21 @@ onUnmounted(() => {
                   </details>
 
                   <!-- Visual Spec category tags card (emerald) — collapsible, natural + detailed styles -->
-                  <details v-if="refineHairTags.length || refineClothingTags.length || refinePoseTags.length || refineExpressionTags.length || refineBackgroundTags.length || refineObjectTags.length || refineLightingTags.length"
+                  <details v-if="refineSubjectTags.length || refineHairTags.length || refineClothingTags.length || refinePoseTags.length || refineExpressionTags.length || refineBackgroundTags.length || refineObjectTags.length || refineLightingTags.length || refineAccessoryTags.length"
                     class="group bg-emerald-950/30 border border-emerald-800/30 rounded-xl overflow-hidden">
                     <summary class="px-3.5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-emerald-900/20 transition-colors">
                       <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">{{ $t('refine.visualSpecTitle') }}</span>
                       <span class="text-emerald-700 group-open:rotate-180 transition-transform text-xs">▼</span>
                     </summary>
                     <div class="px-3.5 pb-3 space-y-2.5">
+                    <!-- Row 0: Subject -->
+                    <div v-if="refineSubjectTags.length" class="space-y-1">
+                      <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupSubject') }}</p>
+                      <div class="flex flex-wrap gap-1">
+                        <span v-for="tag in refineSubjectTags" :key="tag"
+                          class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                      </div>
+                    </div>
                     <!-- Row 1: Hair / Clothing / Accessories -->
                     <div class="grid grid-cols-3 gap-2">
                       <div v-if="refineHairTags.length" class="space-y-1">

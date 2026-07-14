@@ -17,6 +17,24 @@ const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'y
 const VIEW_MODES = ['gallery', 'detail', 'timeline']
 const SORTS = ['newest', 'oldest', 'title', 'time_scale']
 
+const CAT_TAG_GROUPS = [
+  { key: 'subject_tags', label: 'tagGroupSubject' },
+  { key: 'hair_tags', label: 'tagGroupHair' },
+  { key: 'expression_tags', label: 'tagGroupExpression' },
+  { key: 'clothing_tags', label: 'tagGroupClothing' },
+  { key: 'accessory_tags', label: 'tagGroupAccessory' },
+  { key: 'pose_tags', label: 'tagGroupPose' },
+  { key: 'background_tags', label: 'tagGroupBackground' },
+  { key: 'object_tags', label: 'tagGroupObject' },
+  { key: 'lighting_tags', label: 'tagGroupLighting' },
+]
+
+function axisHasVisualSpec(axisData) {
+  if (!axisData) return false
+  if (axisData.visual_script) return true
+  return CAT_TAG_GROUPS.some(g => (axisData[g.key] || []).length > 0)
+}
+
 // ── data ──────────────────────────────────────────────────────────────────────
 const stories = ref([])
 const loading = ref(false)
@@ -812,6 +830,30 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                     <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_positive }}</pre>
                     <pre v-if="detailStory.axes[axis].prompt_negative"
                       class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_negative }}</pre>
+                    <div v-if="axisHasVisualSpec(detailStory.axes[axis])"
+                      class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
+                      <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
+                        {{ t('chronicle.visualSpecTitle') }}
+                      </p>
+                      <p v-if="detailStory.axes[axis].visual_script"
+                        class="text-[10px] text-emerald-200/70 whitespace-pre-wrap leading-relaxed">
+                        {{ detailStory.axes[axis].visual_script }}
+                      </p>
+                      <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
+                        v-show="(detailStory.axes[axis][g.key] || []).length"
+                        class="space-y-0.5">
+                        <p class="text-[9px] text-emerald-400/70 font-semibold">
+                          {{ t('chronicle.' + g.label) }}
+                        </p>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="tag in detailStory.axes[axis][g.key]" :key="tag"
+                            class="text-[10px] font-mono px-1.5 py-0.5 rounded
+                              bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
+                            {{ tag }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </details>
               </div>

@@ -682,7 +682,11 @@ def _extract_spec_category_tags(world_spec: dict) -> dict[str, list[str]]:
         "object_tags":     "object_desc",
         "lighting_tags":   "lighting_desc",
     }
-    return {cat: _extract_embedded_tags(world_spec.get(src, "")) for cat, src in cat_map.items()}
+    out = {cat: _extract_embedded_tags(world_spec.get(src, "")) for cat, src in cat_map.items()}
+    # subject_tags: Chronicle/Refine Visual Spec parity (9 categories)
+    subject = _extract_embedded_tags(world_spec.get("character_desc", ""))
+    out["subject_tags"] = subject
+    return out
 
 
 def _parse_json_from_llm(raw: str) -> dict:
@@ -1361,6 +1365,12 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     volatile_tags = [t for ax, tags in all_axis_grouped.items() if ax in change_set for t in tags]
     non_target_tags = [t for ax, tags in all_axis_grouped.items() if ax not in change_set for t in tags]
     fixed_tags = always_fixed + non_target_tags
+    # Safety net: re-assert frozenset + WD14 rules over LLM / split mistakes
+    # (e.g. smile left in fixed while emotion is a change target).
+    if frozenset_enabled:
+        fixed_tags, volatile_tags = _apply_frozenset_corrections(
+            fixed_tags, volatile_tags, change_set,
+        )
     fixed_tags_grouped = _categorize_fixed_tags(fixed_tags, base_tags, volatile_tags)
     # Reconstruct complete fixed_tags from grouped and pass to all subsequent steps
     fixed_tags = [tag for tags in fixed_tags_grouped.values() for tag in tags]
@@ -1368,7 +1378,13 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     if body.user_inject_sections:
         fixed_tags = _apply_section_overrides(fixed_tags, body.user_inject_sections)
     # Only expose groups for selected axes as volatile_tags_grouped
-    volatile_tags_grouped = {ax: tags for ax, tags in all_axis_grouped.items() if ax in change_set and tags}
+    volatile_tags_grouped = _group_volatile_by_axis(
+        volatile_tags, selected_targets, axis_override=llm_classification or None,
+    )
+    volatile_tags_grouped = {
+        ax: tags for ax, tags in volatile_tags_grouped.items()
+        if ax in change_set and tags
+    }
     yield _sse({"type": "step1_result", "fixed_tags": fixed_tags, "volatile_tags": volatile_tags,
                 "fixed_tags_grouped": fixed_tags_grouped, "volatile_tags_grouped": volatile_tags_grouped,
                 "llm_classification": llm_classification})
@@ -1425,6 +1441,20 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     )
     # Extract per-category tags from STEP3 danbooru-embedded *_desc fields
     ws_cat_tags = _extract_spec_category_tags(world_spec)
+    # Subject anchors from fixed character tags (Refine/Chronicle parity)
+    from ..tags.subject_anchors import SUBJECT_ANCHOR_TAGS
+    _subj = [
+        t for t in fixed_tags
+        if t.lower().replace(" ", "_") in SUBJECT_ANCHOR_TAGS
+    ]
+    if _subj:
+        seen_s = {x.lower() for x in ws_cat_tags.get("subject_tags", [])}
+        merged_s = list(ws_cat_tags.get("subject_tags") or [])
+        for t in _subj:
+            if t.lower() not in seen_s:
+                merged_s.append(t)
+                seen_s.add(t.lower())
+        ws_cat_tags["subject_tags"] = merged_s
     # BM25 normalize: validate/replace non-standard tags against Danbooru vocabulary
     ws_cat_tags = {k: _bm25_normalize_tags(v) for k, v in ws_cat_tags.items()}
     yield _sse({"type": "step3_result", **ws_cat_tags})
@@ -1516,7 +1546,9 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     if removal_set:
         kept: list[str] = []
         for t in final_positive:
-            if t in removal_set:
+            # BM25 may yield space-form tags; match underscore-normalized removal set
+            norm = str(t).lower().replace(" ", "_")
+            if norm in removal_set or t in removal_set:
                 removed_tags.append(t)
             else:
                 kept.append(t)

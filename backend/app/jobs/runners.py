@@ -1132,6 +1132,32 @@ async def run_refine_prompt(
                 "Keep the subject, pose, and composition of the references intact."
             )
 
+    if body.inspire_context:
+        ic = body.inspire_context if isinstance(body.inspire_context, dict) else {}
+        lines = ["\n\n---\n\n[INSPIRE CONTEXT]"]
+        mode = ic.get("mode") or ""
+        if mode:
+            lines.append(f"mode: {mode}")
+        targets = ic.get("change_targets") or ic.get("axes") or []
+        if targets:
+            lines.append(f"change_targets: {', '.join(str(t) for t in targets)}")
+        injected = ic.get("injected_tags") or []
+        if injected:
+            lines.append(f"injected_tags: {', '.join(str(t) for t in injected)}")
+        add_shas = ic.get("add_sha256s") or []
+        sub_shas = ic.get("sub_sha256s") or []
+        if add_shas:
+            lines.append(f"add_sha256s: {', '.join(str(s) for s in add_shas)}")
+        if sub_shas:
+            lines.append(f"sub_sha256s: {', '.join(str(s) for s in sub_shas)}")
+        sha_a = ic.get("sha256_a") or ""
+        sha_b = ic.get("sha256_b") or ""
+        if sha_a or sha_b:
+            lines.append(f"sha256_a: {sha_a}")
+            lines.append(f"sha256_b: {sha_b}")
+        if len(lines) > 1:
+            context += "\n".join(lines)
+
     mutation_tags: list[str] = []
     if divergence > 0:
         _phase("mutatingTags", 0.14, "Sampling mutation tags...")
@@ -1318,6 +1344,8 @@ async def run_refine_prompt(
             else:
                 positive = _clean_markdown(_strip_stray_negative(raw_text))
                 negative = ""
+            # Subject-count safety net for danbooru/detailed (natural already does this).
+            positive = _ensure_subject_anchor(positive, raw_docs)
             # WD14 post-processing for danbooru/detailed (mirrors natural branch)
             if body.prompt_style == "danbooru" and divergence <= 0.5:
                 positive = _inject_wd14_must_tags(positive, wd14_analysis)
@@ -3259,6 +3287,7 @@ async def run_chronicle_expand(
         apply_scene_constraints,
         axis_slots_collapsed,
         axis_tag_lines_collapsed,
+        base_pose_tags,
         bind_timetable_axis_slots,
         build_axis_prose_prompt,
         build_axis_tags_prompt,
@@ -3298,6 +3327,7 @@ async def run_chronicle_expand(
         parse_timetable_json,
         parse_visual_plan_json,
         remove_conflict_tags,
+        repair_collapsed_axis_tags,
         should_differentiate_acts,
         should_use_draft_refine,
         translation_values_complete,
@@ -3529,6 +3559,7 @@ async def run_chronicle_expand(
                         scene_desc=scene_desc,
                         axis_slots=axis_slots,
                         user_topic=body.user_topic,
+                        locale=locale,
                     ),
                     model=vlm_model, options=options, fmt="json", think=True,
                 ))
@@ -3759,7 +3790,10 @@ async def run_chronicle_expand(
                         character_desc=character_desc,
                         emotion=body.emotion,
                         locale="en",
-                        base_pose_tags=[],
+                        base_pose_tags=(
+                            base_pose_tags(wd14_tags)
+                            if axis == body.base_time_axis else []
+                        ),
                         user_topic=body.user_topic,
                         axis_slot=axis_slots.get(axis),
                     ),
@@ -4302,14 +4336,57 @@ async def run_chronicle_expand(
                 a: (prompts.get(a) or {}).get("positive") or "" for a in AXES
             }
             if axis_tag_lines_collapsed(tag_snapshot):
-                _put({
-                    "type": "warning",
-                    "message": (
-                        "Axis prompts look visually similar — "
-                        "past/present/future may read as the same shot. "
-                        "Try a higher divergence or Respin story."
-                    ),
+                repaired = repair_collapsed_axis_tags(
+                    prompts,
+                    visual_plans=visual_plans,
+                    activities=concrete or situation_en,
+                    gen_axes=gen_axes,
+                )
+                changed = [
+                    a for a in gen_axes
+                    if (repaired.get(a) or {}).get("positive")
+                    != (prompts.get(a) or {}).get("positive")
+                ]
+                if changed:
+                    prompts = repaired
+                    for axis in changed:
+                        p = prompts.get(axis) or {}
+                        evt: dict = {
+                            "type": "axis_prompt",
+                            "axis": axis,
+                            "positive": p.get("positive") or "",
+                            "negative": p.get("negative") or "",
+                            "visual_script": p.get("visual_script") or "",
+                            "repaired_collapsed": True,
+                        }
+                        if p.get("refined_from_draft"):
+                            evt["refined_from_draft"] = True
+                        for k in CHRONICLE_CAT_FIELDS:
+                            if p.get(k):
+                                evt[k] = p[k]
+                        if axis in draft_deltas:
+                            evt["draft_richness_delta"] = draft_deltas[axis]
+                        _put(evt)
+                still = axis_tag_lines_collapsed({
+                    a: (prompts.get(a) or {}).get("positive") or "" for a in AXES
                 })
+                if still:
+                    _put({
+                        "type": "warning",
+                        "message": (
+                            "Axis prompts look visually similar — "
+                            "past/present/future may read as the same shot. "
+                            "Try a higher divergence or Respin story."
+                        ),
+                    })
+                else:
+                    _put({
+                        "type": "info",
+                        "message": (
+                            "Collapsed axis tags repaired with distinct "
+                            "action/expression anchors from the visual plans."
+                        ),
+                    })
 
         # Multi-axis quality radar (topic fit, diversity, expression, …).
         quality_eval: dict = {}
@@ -4325,6 +4402,12 @@ async def run_chronicle_expand(
                 time_scale=body.time_scale,
                 lock_tags=lock_tags,
                 draft_deltas=draft_deltas or None,
+                scored_axes=gen_axes,
+                topic_directive=(
+                    getattr(body, "topic_directive", None)
+                    or body.worldview
+                    or ""
+                ),
             )
             _put({"type": "quality_eval", **quality_eval})
         except Exception as exc:
@@ -4336,17 +4419,23 @@ async def run_chronicle_expand(
         prev_axes = draft.get("axes") or {}
         axes_payload: dict = {}
         for axis in AXES:
+            p = prompts.get(axis) or {}
             axes_payload[axis] = {
                 "story": en_stories[axis],
                 "story_ja": stories_ja[axis],
-                "prompt_positive": prompts.get(axis, {}).get("positive"),
-                "prompt_negative": prompts.get(axis, {}).get("negative"),
+                "prompt_positive": p.get("positive"),
+                "prompt_negative": p.get("negative"),
                 "image_id": (
                     body.base_sha256
                     if has_base and axis == body.base_time_axis
                     else (prev_axes.get(axis) or {}).get("image_id")
                 ),
             }
+            if p.get("visual_script"):
+                axes_payload[axis]["visual_script"] = p["visual_script"]
+            for k in CHRONICLE_CAT_FIELDS:
+                if p.get(k):
+                    axes_payload[axis][k] = p[k]
 
         embedding = None
         try:
