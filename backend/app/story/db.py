@@ -80,7 +80,12 @@ def new_story_payload(
                 "story_ja": "",
                 "prompt_positive": None,
                 "prompt_negative": None,
-                "image_id": base_image_id if axis == base_time_axis else None,
+                # Topic-only (empty base_image_id): no axis reuses a source SHA.
+                "image_id": (
+                    base_image_id
+                    if base_image_id and axis == base_time_axis
+                    else None
+                ),
             }
             for axis in AXES
         },

@@ -2300,6 +2300,61 @@ def test_bind_timetable_axis_slots_prefers_axis_field():
     assert slots["past"]["activity"] == "tamp"
 
 
+def test_bind_timetable_axis_slots_distinct_when_base_is_future():
+    """Regression: base_axis=future must not reuse the mid slot for present."""
+    # No axis fields / no past|present|future label cues → chronological thirds.
+    raw = [
+        {"label": "slot0", "activity": "open", "place": "door", "feeling": "a"},
+        {"label": "slot1", "activity": "wait", "place": "hall", "feeling": "b"},
+        {"label": "slot2", "activity": "meet", "place": "roof", "feeling": "c"},
+        {"label": "slot3", "activity": "leave", "place": "stair", "feeling": "d"},
+        {"label": "slot4", "activity": "home", "place": "room", "feeling": "e"},
+    ]
+    for base in ("past", "present", "future"):
+        slots = bind_timetable_axis_slots(raw, base_axis=base)
+        assert set(slots) == {"past", "present", "future"}
+        acts = {slots[a]["activity"] for a in ("past", "present", "future")}
+        assert len(acts) == 3, f"base={base} collided: {slots}"
+        assert slots["past"]["activity"] == "open"
+        assert slots["present"]["activity"] == "meet"
+        assert slots["future"]["activity"] == "home"
+
+
+def test_topic_only_grounding_prompt_and_parse():
+    from app.story.generator import (
+        build_topic_only_grounding_prompt,
+        parse_topic_only_grounding_json,
+    )
+    p = build_topic_only_grounding_prompt(user_topic="雨の駅で待ち合わせ")
+    assert "NO reference image" in p
+    assert "雨の駅" in p
+    parsed = parse_topic_only_grounding_json(
+        '{"character_desc": "silver hair", "scene_desc": "wet platform", '
+        '"wd14_tags": ["1girl", "solo", "umbrella", "rain"]}'
+    )
+    assert parsed["scene_desc"] == "wet platform"
+    assert "umbrella" in parsed["wd14_tags"]
+    assert parse_topic_only_grounding_json("not json") == {}
+
+
+def test_topic_only_axis_image_id_rule():
+    """Empty base_image_id → no axis reuses a source SHA (mirrors db.new_story_payload)."""
+    base_image_id = ""
+    base_time_axis = "present"
+    for axis in ("past", "present", "future"):
+        image_id = (
+            base_image_id if base_image_id and axis == base_time_axis else None
+        )
+        assert image_id is None
+    # With a real base image, only the chosen axis keeps the SHA.
+    base_image_id = "abc123"
+    mapped = {
+        a: (base_image_id if base_image_id and a == base_time_axis else None)
+        for a in ("past", "present", "future")
+    }
+    assert mapped == {"past": None, "present": "abc123", "future": None}
+
+
 def test_filter_story_seed_pool_drops_generic():
     pool = filter_story_seed_pool(
         ["1girl", "coffee_cup", "solo", "espresso_machine", "looking_at_viewer"],

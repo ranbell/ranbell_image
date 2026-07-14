@@ -446,18 +446,26 @@ def bind_timetable_axis_slots(
     *,
     base_axis: str = "present",
 ) -> dict[str, dict]:
-    """Pick one slot per past/present/future from a timetable list."""
+    """Pick one slot per past/present/future from a timetable list.
+
+    ``base_axis`` is kept for API compatibility / callers; chronological
+    thirds always use distinct early/mid/late picks so past≠present≠future
+    even when the base image is the past or future act.
+    """
+    def _view(s: dict) -> dict:
+        return {
+            "label": str(s.get("label") or "").strip(),
+            "activity": str(s.get("activity") or "").strip(),
+            "place": str(s.get("place") or "").strip(),
+            "feeling": str(s.get("feeling") or "").strip(),
+        }
+
     axis_slots: dict[str, dict] = {}
     # Prefer explicit axis field from the model.
     for s in slots:
         ax = str(s.get("axis") or "").strip().lower()
         if ax in AXES and ax not in axis_slots:
-            axis_slots[ax] = {
-                "label": str(s.get("label") or "").strip(),
-                "activity": str(s.get("activity") or "").strip(),
-                "place": str(s.get("place") or "").strip(),
-                "feeling": str(s.get("feeling") or "").strip(),
-            }
+            axis_slots[ax] = _view(s)
     if len(axis_slots) == 3:
         return axis_slots
 
@@ -475,32 +483,52 @@ def bind_timetable_axis_slots(
     for s in slots:
         ax = _guess(s)
         if ax and ax not in axis_slots:
-            axis_slots[ax] = {
-                "label": str(s.get("label") or "").strip(),
-                "activity": str(s.get("activity") or "").strip(),
-                "place": str(s.get("place") or "").strip(),
-                "feeling": str(s.get("feeling") or "").strip(),
-            }
-    if base_axis in AXES and base_axis not in axis_slots and slots:
-        mid = slots[len(slots) // 2]
-        axis_slots[base_axis] = {
-            "label": str(mid.get("label") or "now").strip(),
-            "activity": str(mid.get("activity") or "").strip(),
-            "place": str(mid.get("place") or "").strip(),
-            "feeling": str(mid.get("feeling") or "").strip(),
-        }
-    # Fill remaining axes from chronological thirds.
-    if len(slots) >= 3:
-        picks = {"past": slots[0], "present": slots[len(slots) // 2], "future": slots[-1]}
-        for ax, s in picks.items():
-            if ax not in axis_slots:
-                axis_slots[ax] = {
-                    "label": str(s.get("label") or "").strip(),
-                    "activity": str(s.get("activity") or "").strip(),
-                    "place": str(s.get("place") or "").strip(),
-                    "feeling": str(s.get("feeling") or "").strip(),
-                }
+            axis_slots[ax] = _view(s)
+    if len(axis_slots) == 3:
+        return axis_slots
+
+    # Chronological thirds with DISTINCT indices (fixes base_axis≠present
+    # collisions where mid was assigned twice).
+    if slots:
+        chron = _chronological_axis_picks(slots)
+        for ax in AXES:
+            if ax not in axis_slots and ax in chron:
+                axis_slots[ax] = chron[ax]
     return {a: axis_slots[a] for a in AXES if a in axis_slots}
+
+
+def _chronological_axis_picks(slots: list[dict]) -> dict[str, dict]:
+    """Map ordered timetable rows → past/present/future with distinct slots."""
+    def _view(s: dict) -> dict:
+        return {
+            "label": str(s.get("label") or "").strip(),
+            "activity": str(s.get("activity") or "").strip(),
+            "place": str(s.get("place") or "").strip(),
+            "feeling": str(s.get("feeling") or "").strip(),
+        }
+
+    n = len(slots)
+    if n == 0:
+        return {}
+    if n == 1:
+        v = _view(slots[0])
+        return {"past": dict(v), "present": dict(v), "future": dict(v)}
+    if n == 2:
+        return {
+            "past": _view(slots[0]),
+            "present": _view(slots[0]),
+            "future": _view(slots[1]),
+        }
+    i_past, i_pres, i_fut = 0, n // 2, n - 1
+    if i_pres == i_past:
+        i_pres = 1
+    if i_pres == i_fut:
+        i_pres = n - 2
+    return {
+        "past": _view(slots[i_past]),
+        "present": _view(slots[i_pres]),
+        "future": _view(slots[i_fut]),
+    }
 
 
 def format_axis_slots_block(axis_slots: dict[str, dict] | None, *, locale: str = "en") -> str:
@@ -1623,6 +1651,58 @@ def sample_bio_domains(n: int = 5, *, rng=None) -> list[str]:
     pool = list(_BIO_DOMAINS)
     rng.shuffle(pool)
     return pool[:max(0, n)]
+
+
+def build_topic_only_grounding_prompt(
+    *,
+    user_topic: str,
+    worldview: str = "",
+    locale: str = "en",
+) -> str:
+    """Invent character + scene + Danbooru tags when there is no source image.
+
+    Output is English JSON so biography / expand / WD14 search can reuse it
+    the same way as a VLM vision pass over a base image.
+    """
+    world = f'Worldview / setting: "{worldview.strip()}"\n' if worldview.strip() else ""
+    return (
+        "There is NO reference image. Invent ONE anime-style character and a "
+        "concrete starting SCENE that fits the topic below. Appearance must be "
+        "specific enough to lock identity across past/present/future (hair "
+        "colour, eye colour, signature accessory).\n\n"
+        f'TOPIC (お題): "{user_topic.strip()}"\n'
+        f"{world}\n"
+        "Rules:\n"
+        "- Solo character unless the topic clearly requires multiple people.\n"
+        "- Scene is a real place with props (not abstract void).\n"
+        "- wd14_tags: 12–24 common Danbooru tags (underscore form), including "
+        "1girl/1boy or 2girls/3girls as appropriate, hair, eyes, outfit, place.\n"
+        "- Do NOT invent famous copyrighted characters.\n\n"
+        "Output English JSON only, no markdown fences:\n"
+        '{"character_desc": "<1-2 sentences of appearance>", '
+        '"scene_desc": "<1-2 sentences of place + action right now>", '
+        '"wd14_tags": ["1girl", "solo", "blonde_hair", "blue_eyes", "..."]}'
+    )
+
+
+def parse_topic_only_grounding_json(raw: str) -> dict:
+    """Parse topic-only grounding. Missing/broken → {}."""
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return {}
+    tags_raw = data.get("wd14_tags")
+    tags: list[str] = []
+    if isinstance(tags_raw, list):
+        for t in tags_raw:
+            s = str(t or "").strip().replace(" ", "_")
+            if s:
+                tags.append(s)
+    out = {
+        "character_desc": str(data.get("character_desc") or "").strip(),
+        "scene_desc": str(data.get("scene_desc") or "").strip(),
+        "wd14_tags": tags[:40],
+    }
+    return out if out["character_desc"] or out["scene_desc"] or out["wd14_tags"] else {}
 
 
 def build_biography_prompt(
