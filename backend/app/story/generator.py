@@ -1711,9 +1711,12 @@ def parse_concrete_activities_json(raw: str) -> dict:
 # The pipeline layered a lot of prose telling the model NOT to re-shoot the same
 # moment three times, but nothing ever CHECKED. These helpers give the timeline
 # programmatic teeth, mirroring _chronicle_tags_degenerate: if the acts collapse
-# into one moment, the runner retries once at a higher temperature. Similarity
-# is measured with language-agnostic character bigrams so it works for both the
-# English and Japanese stories the pipeline produces.
+# into one moment, the expand runner fires one targeted differentiate rewrite.
+# Similarity is measured with language-agnostic character bigrams so it works
+# for both the English and Japanese stories the pipeline produces.
+#
+# Short scales (minutes / tens_of_minutes) intentionally keep near-duplicate
+# beats — those acts are micro-shifts of one scene — so differentiate is skipped.
 
 def _char_bigrams(s: str) -> set[str]:
     t = re.sub(r"\s+", "", s.lower())
@@ -1772,6 +1775,15 @@ def acts_temporally_distinct(
     if not all(beats):
         return True
     return _mean_pairwise_similarity(beats) < threshold
+
+
+# Scales where near-duplicate acts are expected (same scene, micro-shift).
+_SKIP_DIFFERENTIATE_SCALES = frozenset({"minutes", "tens_of_minutes"})
+
+
+def should_differentiate_acts(time_scale: str) -> bool:
+    """False for micro time scales where three near-identical beats are correct."""
+    return (time_scale or "").strip().lower() not in _SKIP_DIFFERENTIATE_SCALES
 
 
 def build_differentiate_acts_prompt(
@@ -3133,6 +3145,295 @@ def remove_conflict_tags(
         else:
             cleaned.append(line)
     return "\n".join(cleaned)
+
+
+# ── Scene constraints + mechanical mutex conflicts ────────────────────────────
+#
+# WD14 vector search returns semantic neighbours, not logically consistent tags
+# (a night story can still pull day / blue_sky). These helpers extract cheap
+# structured constraints from finished act prose and strip exclusive opposites
+# before the LLM conflict pass — prevention beats post-hoc cleanup.
+
+_TIME_OF_DAY_FAMILIES: dict[str, frozenset[str]] = {
+    "day": frozenset({
+        "day", "daylight", "daytime", "morning", "afternoon", "noon",
+        "sunrise", "sunny", "blue_sky", "bright_sky", "sunlight",
+        "morning_sun", "afternoon_sun", "sunbeam", "sunbeams", "broad_daylight",
+    }),
+    "night": frozenset({
+        "night", "nighttime", "night_sky", "midnight", "moon", "moonlight",
+        "full_moon", "crescent_moon", "starry_sky", "stars", "star_(sky)",
+        "dark", "darkness", "lamp", "streetlamp", "neon_lights", "night_lights",
+    }),
+    "dusk": frozenset({
+        "dusk", "sunset", "evening", "twilight", "golden_hour", "orange_sky",
+        "afterglow", "evening_sky",
+    }),
+    "dawn": frozenset({
+        "dawn", "daybreak", "early_morning", "sunrise",
+    }),
+}
+
+_INDOOR_OUTDOOR_FAMILIES: dict[str, frozenset[str]] = {
+    "indoor": frozenset({
+        "indoors", "indoor", "inside", "bedroom", "classroom", "kitchen",
+        "bathroom", "living_room", "library", "cafe", "shop_interior",
+        "train_interior", "office", "hospital", "corridor", "hallway",
+        "restaurant", "bar_(place)",
+    }),
+    "outdoor": frozenset({
+        "outdoors", "outdoor", "outside", "park", "street", "cityscape",
+        "road", "field", "forest", "beach", "rooftop", "sky", "clouds",
+        "garden", "bridge", "alley", "mountain", "shore", "plaza",
+    }),
+}
+
+# Canonical must-tag for each family (injected when the story implies that side).
+_FAMILY_MUST_TAGS: dict[str, tuple[str, ...]] = {
+    "day": ("day", "daylight"),
+    "night": ("night",),
+    "dusk": ("dusk", "sunset"),
+    "dawn": ("dawn",),
+    "indoor": ("indoors",),
+    "outdoor": ("outdoors",),
+}
+
+# Story-prose keyword → family (scored by substring hits; English acts only —
+# axis tagging always runs on the English canonical copy).
+_TIME_STORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "night": (
+        "night", "midnight", "moonlight", "moonlit", "starry", "nocturnal",
+        "lamp-lit", "lamplit", "by moonlight", "under the moon", "after dark",
+        "in the dark", "nighttime", "night time",
+    ),
+    "day": (
+        "morning", "afternoon", "noon", "midday", "daylight", "daytime",
+        "sunny", "sunlit", "sunshine", "broad daylight", "in the sun",
+    ),
+    "dusk": (
+        "dusk", "sunset", "evening", "twilight", "golden hour", "at dusk",
+        "as the sun set", "as the sun sets",
+    ),
+    "dawn": (
+        "dawn", "daybreak", "at sunrise", "first light", "early morning",
+    ),
+}
+
+_PLACE_STORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "indoor": (
+        "indoors", "indoor", "inside", "bedroom", "classroom", "kitchen",
+        "bathroom", "living room", "library", "cafe", "café", "corridor",
+        "hallway", "office", "hospital", "train car", "train carriage",
+        "shop interior", "in her room", "in the room", "at the desk",
+    ),
+    "outdoor": (
+        "outdoors", "outdoor", "outside", "park", "street", "rooftop",
+        "beach", "forest", "garden", "bridge", "plaza", "alley",
+        "under the open sky", "on the hill", "in the field",
+    ),
+}
+
+
+def _score_family_keywords(text: str, families: dict[str, tuple[str, ...]]) -> str:
+    """Return the winning family key, or '' on tie / no hits."""
+    scores = {
+        key: sum(1 for kw in kws if kw in text)
+        for key, kws in families.items()
+    }
+    best = max(scores.values()) if scores else 0
+    if best <= 0:
+        return ""
+    winners = [k for k, v in scores.items() if v == best]
+    return winners[0] if len(winners) == 1 else ""
+
+
+def _forbid_for_family(
+    chosen: str, families: dict[str, frozenset[str]]
+) -> list[str]:
+    if not chosen or chosen not in families:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for key, tags in families.items():
+        if key == chosen:
+            continue
+        for t in tags:
+            if t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out
+
+
+def infer_axis_scene_constraints(story_text: str) -> dict:
+    """Extract must/forbid scene tags from finished act prose (no LLM).
+
+    Returns:
+        {
+          "time_of_day": "night"|"day"|"dusk"|"dawn"|"",
+          "indoor_outdoor": "indoor"|"outdoor"|"",
+          "must_tags": [...],
+          "forbid_tags": [...],
+        }
+    """
+    text = re.sub(r"\s+", " ", (story_text or "").lower())
+    time_key = _score_family_keywords(text, _TIME_STORY_KEYWORDS)
+    place_key = _score_family_keywords(text, _PLACE_STORY_KEYWORDS)
+
+    must: list[str] = []
+    forbid: list[str] = []
+    seen_must: set[str] = set()
+    seen_forbid: set[str] = set()
+
+    def _add_must(family: str) -> None:
+        for t in _FAMILY_MUST_TAGS.get(family, ()):
+            if t not in seen_must:
+                seen_must.add(t)
+                must.append(t)
+
+    def _add_forbid(tags: list[str]) -> None:
+        for t in tags:
+            if t not in seen_forbid and t not in seen_must:
+                seen_forbid.add(t)
+                forbid.append(t)
+
+    if time_key:
+        _add_must(time_key)
+        _add_forbid(_forbid_for_family(time_key, _TIME_OF_DAY_FAMILIES))
+    if place_key:
+        _add_must(place_key)
+        _add_forbid(_forbid_for_family(place_key, _INDOOR_OUTDOOR_FAMILIES))
+
+    return {
+        "time_of_day": time_key,
+        "indoor_outdoor": place_key,
+        "must_tags": must,
+        "forbid_tags": forbid,
+    }
+
+
+def apply_scene_constraints(
+    tags: list[str],
+    constraints: dict | None,
+) -> list[str]:
+    """Drop forbid tags and ensure must tags are present (order-preserving)."""
+    if not constraints:
+        return [str(t).strip().replace(" ", "_") for t in tags if str(t).strip()]
+
+    forbid = {
+        str(t).strip().lower().replace(" ", "_")
+        for t in (constraints.get("forbid_tags") or [])
+        if t
+    }
+    must = [
+        str(t).strip().replace(" ", "_")
+        for t in (constraints.get("must_tags") or [])
+        if str(t).strip()
+    ]
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in tags:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if not tag or key in forbid or key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+
+    # Prepend must tags that survived forbid (identity/subject stay caller-side).
+    inject: list[str] = []
+    for tag in must:
+        key = tag.lower()
+        if key in forbid or key in seen:
+            continue
+        seen.add(key)
+        inject.append(tag)
+    return inject + out
+
+
+def find_mutex_conflict_tags(
+    tags: list[str],
+    *,
+    preferred: list[str] | None = None,
+) -> set[str]:
+    """Return tags that lose an exclusive-family fight (day↔night, indoor↔outdoor).
+
+    Within each mutex group, at most one family may survive. Preference order:
+    1. family overlapping ``preferred`` (story must-tags / identity lock)
+    2. otherwise the first family encountered in ``tags`` order
+    Losing families' tags are reported as conflicts for remove_conflict_tags.
+    """
+    norm = [str(t).strip().replace(" ", "_") for t in tags if str(t).strip()]
+    pref = {
+        str(t).strip().lower().replace(" ", "_")
+        for t in (preferred or [])
+        if t
+    }
+    conflicts: set[str] = set()
+
+    for families in (_TIME_OF_DAY_FAMILIES, _INDOOR_OUTDOOR_FAMILIES):
+        present: dict[str, list[str]] = {}
+        for tag in norm:
+            key = tag.lower()
+            for fam, members in families.items():
+                if key in members:
+                    present.setdefault(fam, []).append(tag)
+                    break
+        if len(present) < 2:
+            continue
+
+        winner = ""
+        for fam, members in present.items():
+            if any(t.lower() in pref for t in members) or (fam in pref):
+                winner = fam
+                break
+        if not winner:
+            # First tag in input order decides the surviving family.
+            for tag in norm:
+                key = tag.lower()
+                for fam, members in families.items():
+                    if key in members:
+                        winner = fam
+                        break
+                if winner:
+                    break
+
+        for fam, members in present.items():
+            if fam == winner:
+                continue
+            for t in members:
+                conflicts.add(t.replace(" ", "_"))
+
+    return conflicts
+
+
+def find_identity_mutex_conflicts(
+    tags: list[str],
+    lock_tags: list[str],
+) -> set[str]:
+    """Hair-color / eye-color tags that contradict the identity lock.
+
+    If the lock pins ``blonde_hair``, any other ``*_hair`` color in ``tags`` is
+    a conflict. Same for eyes. Non-color identity tags are left alone.
+    """
+    locks = [str(t).strip().replace(" ", "_") for t in lock_tags if t]
+    lock_hair = {t.lower() for t in locks if classify_identity_tag(t) == "hair_color"}
+    lock_eyes = {t.lower() for t in locks if classify_identity_tag(t) == "eyes"}
+    if not lock_hair and not lock_eyes:
+        return set()
+
+    conflicts: set[str] = set()
+    for raw in tags:
+        tag = str(raw).strip().replace(" ", "_")
+        if not tag:
+            continue
+        key = tag.lower()
+        cat = classify_identity_tag(tag)
+        if cat == "hair_color" and lock_hair and key not in lock_hair:
+            conflicts.add(tag)
+        elif cat == "eyes" and lock_eyes and key not in lock_eyes:
+            conflicts.add(tag)
+    return conflicts
 
 
 # ── Final stage: translate the user-language chronicle into English ──────────

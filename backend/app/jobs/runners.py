@@ -3096,10 +3096,12 @@ async def run_chronicle_expand(
     """PROMPT lane — Chronicle Phase 2: expand a chosen candidate, then prompts.
 
     Loads the draft, expands the selected candidate into the three acts in the
-    user's locale, translates to English when needed, then per non-base axis
-    runs visual exam + WD14 search on the finished story text, assembles image
-    prompts with identity-lock tags only (hair/eyes/accessories — never the base
-    image's scene must-tags), finalises the record, and submits image jobs.
+    user's locale, rewrites collapsed timelines once when needed, translates to
+    English when needed, then per non-base axis runs visual exam + WD14 search
+    on the finished story text with scene must/forbid constraints, assembles
+    image prompts with identity-lock tags only (hair/eyes/accessories — never
+    the base image's scene must-tags), finalises the record, and submits image
+    jobs.
 
     Re-invoking this (respin) archives the previous final story in
     respin_history before overwriting.
@@ -3120,9 +3122,12 @@ async def run_chronicle_expand(
     from ..story.api import ChronicleRequest
     from ..story.generator import (
         AXES,
+        acts_temporally_distinct,
+        apply_scene_constraints,
         bind_timetable_axis_slots,
         build_axis_prose_prompt,
         build_concrete_activities_prompt,
+        build_differentiate_acts_prompt,
         build_expand_prompt,
         build_json_translation_prompt,
         build_timetable_prompt,
@@ -3133,7 +3138,10 @@ async def run_chronicle_expand(
         build_translation_to_english_prompt,
         chunk_list,
         collect_prompt_tags,
+        find_identity_mutex_conflicts,
+        find_mutex_conflict_tags,
         identity_lock_tags,
+        infer_axis_scene_constraints,
         inject_identity_tags,
         is_multi_character,
         merge_chronicle_axis_tags,
@@ -3145,6 +3153,7 @@ async def run_chronicle_expand(
         parse_timetable_json,
         parse_visual_plan_json,
         remove_conflict_tags,
+        should_differentiate_acts,
         translation_values_complete,
     )
 
@@ -3435,6 +3444,46 @@ async def run_chronicle_expand(
             except Exception as exc:
                 logger.warning("[chronicle] overall fallback failed: %s", exc)
 
+        # ── Timeline teeth: if the three acts collapsed into one moment, rewrite
+        # once. Skipped for micro scales where near-duplicate beats are correct.
+        if (
+            should_differentiate_acts(body.time_scale)
+            and not acts_temporally_distinct(stories)
+        ):
+            _phase("differentiating", 0.22, "Separating the three moments...")
+            try:
+                diff_tokens: list[str] = []
+                async for event in ollama.generate_text_stream(
+                    build_differentiate_acts_prompt(
+                        title=title,
+                        overall=overall,
+                        stories=stories,
+                        base_axis=body.base_time_axis,
+                        time_scale=body.time_scale,
+                        locale=locale,
+                    ),
+                    model=vlm_model, options=options, think=True,
+                ):
+                    if _abort.is_set():
+                        raise JobCancelled()
+                    _put(event)
+                    if event["type"] == "token":
+                        diff_tokens.append(event["text"])
+                diff_sections = parse_story_sections("".join(diff_tokens))
+                if all(diff_sections.get(a) for a in AXES):
+                    stories = {a: diff_sections[a] for a in AXES}
+                    title = diff_sections.get("title") or title
+                    overall = diff_sections.get("overall") or overall
+                else:
+                    logger.warning(
+                        "[chronicle] differentiate rewrite incomplete — keeping original acts"
+                    )
+            except JobCancelled:
+                raise
+            except Exception as exc:
+                logger.warning("[chronicle] differentiate rewrite failed: %s", exc)
+            cancel.raise_if_set()
+
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
         # English canonical copy — also the WD14 / visual-exam query source.
@@ -3491,8 +3540,10 @@ async def run_chronicle_expand(
             gesture = visual_plan.get("gesture_prose") or ""
             cancel.raise_if_set()
 
-            # (2) WD14 vector search on the finished story (+ gesture + topic).
+            # (2) WD14 vector search on the finished story (+ gesture + topic),
+            #     then apply story-derived must/forbid (day↔night, indoor↔outdoor).
             _phase("taggingAxis", 0.44 + 0.16 * i, f"Searching {axis} tags...")
+            scene_constraints = infer_axis_scene_constraints(story_en)
             query = " ".join(
                 x for x in [story_en, gesture, ", ".join(focal), body.user_topic] if x
             )
@@ -3507,6 +3558,8 @@ async def run_chronicle_expand(
                     ))
                 except Exception as exc:
                     logger.warning("[chronicle] %s tag fallback failed: %s", axis, exc)
+            axis_search_tags = apply_scene_constraints(axis_search_tags, scene_constraints)
+            focal = apply_scene_constraints(focal, scene_constraints)
             cancel.raise_if_set()
 
             _put({
@@ -3518,6 +3571,12 @@ async def run_chronicle_expand(
                 "camera": visual_plan.get("camera_angle", ""),
                 "gesture": gesture,
                 "search_tags": axis_search_tags[:14],
+                "scene_constraints": {
+                    "time_of_day": scene_constraints.get("time_of_day", ""),
+                    "indoor_outdoor": scene_constraints.get("indoor_outdoor", ""),
+                    "must_tags": scene_constraints.get("must_tags", [])[:8],
+                    "forbid_tags": scene_constraints.get("forbid_tags", [])[:12],
+                },
             })
 
             # (3) Assemble tags: focal + searched scene + identity lock only.
@@ -3583,21 +3642,51 @@ async def run_chronicle_expand(
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
 
             # (5) Conflict cleanup vs the finished story + re-lock identity.
+            # Mechanical mutex (day↔night / indoor↔outdoor / hair·eye lock) runs
+            # first; the LLM conflict pass is additive on top when enabled.
             cand_tags = collect_prompt_tags(f"{tag_line}\n\n{prose}".strip())
             sources = list(dict.fromkeys(lock_tags + axis_search_tags + cand_tags))[:80]
+            preferred = list(dict.fromkeys(
+                list(scene_constraints.get("must_tags") or []) + list(lock_tags)
+            ))
             conflicts: set[str] = set()
+            conflicts |= find_mutex_conflict_tags(sources, preferred=preferred)
+            conflicts |= find_identity_mutex_conflicts(sources, lock_tags)
+            # Story forbid list is authoritative even when tags slipped past apply.
+            conflicts |= {
+                str(t).strip().replace(" ", "_")
+                for t in (scene_constraints.get("forbid_tags") or [])
+                if t
+            }
             if body.suppress_conflict_tags and sources:
                 try:
-                    conflicts = await _find_conflict_tags(
+                    conflicts |= await _find_conflict_tags(
                         story_en[:400], sources, db, ollama, vlm_model
                     )
                 except Exception as exc:
                     logger.warning("[chronicle] %s conflict pass failed: %s", axis, exc)
+            # Never strip identity lock via conflict cleanup.
+            lock_keys = {t.lower().replace(" ", "_") for t in lock_tags}
+            conflicts = {
+                c for c in conflicts
+                if c.lower().replace(" ", "_") not in lock_keys
+            }
             inject = [t for t in lock_tags if t not in conflicts]
+            must_keep = [
+                t for t in (scene_constraints.get("must_tags") or [])
+                if t.lower().replace(" ", "_") not in {
+                    c.lower().replace(" ", "_") for c in conflicts
+                }
+            ]
             if tag_line and inject:
                 tag_line = inject_identity_tags(tag_line, inject)
                 parts = [t.strip() for t in tag_line.split(",") if t.strip()]
                 tag_line = ", ".join(_apply_must_replacements(parts, inject))
+            if tag_line and must_keep:
+                parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+                tag_line = ", ".join(apply_scene_constraints(parts, {
+                    "must_tags": must_keep, "forbid_tags": [],
+                }))
             if prose and inject:
                 prose = _correct_prose_wd14_conflicts(prose, inject)
             positive = f"{tag_line}\n\n{prose}".strip() if tag_line and prose else (tag_line or prose)

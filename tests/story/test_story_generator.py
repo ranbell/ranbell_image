@@ -26,13 +26,18 @@ from app.story.generator import (
     _text_similarity,
     _tone_line,
     acts_temporally_distinct,
+    apply_scene_constraints,
     assign_dramatic_modes,
     bind_timetable_axis_slots,
     candidates_ungrounded,
     chunk_list,
     filter_story_seed_pool,
+    find_identity_mutex_conflicts,
+    find_mutex_conflict_tags,
+    infer_axis_scene_constraints,
     parse_candidates_json,
     sample_bio_domains,
+    should_differentiate_acts,
     translation_values_complete,
     base_pose_tags,
     build_differentiate_acts_prompt,
@@ -1535,6 +1540,116 @@ def test_build_differentiate_acts_prompt():
         assert marker in prompt
     # base axis stays matched to the image
     assert "[PRESENT] act must still match the base image" in prompt
+
+
+def test_should_differentiate_acts_skips_micro_scales():
+    assert not should_differentiate_acts("minutes")
+    assert not should_differentiate_acts("tens_of_minutes")
+    assert should_differentiate_acts("hours")
+    assert should_differentiate_acts("years")
+    assert should_differentiate_acts("decades")
+
+
+# ── Scene constraints + mechanical mutex conflicts ────────────────────────────
+
+def test_infer_axis_scene_constraints_night_indoor():
+    story = (
+        "At midnight she sits alone in her bedroom, lit only by moonlight "
+        "through the window, turning the pages of a worn notebook."
+    )
+    c = infer_axis_scene_constraints(story)
+    assert c["time_of_day"] == "night"
+    assert c["indoor_outdoor"] == "indoor"
+    assert "night" in c["must_tags"]
+    assert "indoors" in c["must_tags"]
+    assert "day" in c["forbid_tags"]
+    assert "outdoors" in c["forbid_tags"]
+    assert "blue_sky" in c["forbid_tags"]
+
+
+def test_infer_axis_scene_constraints_day_outdoor():
+    story = (
+        "On a sunny afternoon she walks through the park, sunlit grass "
+        "under her shoes, waving at friends across the street."
+    )
+    c = infer_axis_scene_constraints(story)
+    assert c["time_of_day"] == "day"
+    assert c["indoor_outdoor"] == "outdoor"
+    assert "day" in c["must_tags"] or "daylight" in c["must_tags"]
+    assert "outdoors" in c["must_tags"]
+    assert "night" in c["forbid_tags"]
+    assert "indoors" in c["forbid_tags"]
+
+
+def test_infer_axis_scene_constraints_empty_when_ambiguous():
+    c = infer_axis_scene_constraints("She holds a letter and waits.")
+    assert c["time_of_day"] == ""
+    assert c["indoor_outdoor"] == ""
+    assert c["must_tags"] == []
+    assert c["forbid_tags"] == []
+
+
+def test_apply_scene_constraints_filters_and_injects():
+    constraints = infer_axis_scene_constraints(
+        "At night she stands outdoors under the moonlit sky."
+    )
+    tags = ["1girl", "day", "blue_sky", "outdoors", "smile", "park"]
+    out = apply_scene_constraints(tags, constraints)
+    assert "day" not in [t.lower() for t in out]
+    assert "blue_sky" not in [t.lower() for t in out]
+    assert "night" in out
+    assert "1girl" in out
+    assert "outdoors" in out
+
+
+def test_find_mutex_conflict_tags_day_vs_night():
+    tags = ["1girl", "night", "day", "blue_sky", "moonlight", "smile"]
+    conflicts = find_mutex_conflict_tags(tags, preferred=["night"])
+    assert "day" in conflicts
+    assert "blue_sky" in conflicts
+    assert "night" not in conflicts
+    assert "moonlight" not in conflicts
+
+
+def test_find_mutex_conflict_tags_indoor_vs_outdoor():
+    tags = ["indoors", "outdoors", "bedroom", "park"]
+    conflicts = find_mutex_conflict_tags(tags, preferred=["indoors"])
+    assert "outdoors" in conflicts
+    assert "park" in conflicts
+    assert "indoors" not in conflicts
+    assert "bedroom" not in conflicts
+
+
+def test_find_mutex_conflict_tags_first_seen_when_no_preferred():
+    tags = ["day", "night", "sunny"]
+    conflicts = find_mutex_conflict_tags(tags, preferred=None)
+    # day appears first → night loses
+    assert "night" in conflicts
+    assert "day" not in conflicts
+
+
+def test_find_identity_mutex_conflicts_hair_and_eyes():
+    locks = ["blonde_hair", "blue_eyes", "hair_ribbon"]
+    tags = ["blonde_hair", "brown_hair", "blue_eyes", "green_eyes", "long_hair"]
+    conflicts = find_identity_mutex_conflicts(tags, locks)
+    assert "brown_hair" in conflicts
+    assert "green_eyes" in conflicts
+    assert "blonde_hair" not in conflicts
+    assert "blue_eyes" not in conflicts
+    assert "long_hair" not in conflicts  # style, not color
+
+
+def test_remove_conflict_tags_with_mutex_set():
+    positive = "1girl, night, day, blue_sky, indoors, outdoors, smile"
+    conflicts = find_mutex_conflict_tags(
+        [t.strip() for t in positive.split(",")],
+        preferred=["night", "indoors"],
+    )
+    cleaned = remove_conflict_tags(positive, conflicts)
+    assert "night" in cleaned
+    assert "indoors" in cleaned
+    assert "day" not in cleaned.split(", ")
+    assert "outdoors" not in cleaned.split(", ")
 
 
 # ── user topic concretization (お題 narrative directive) ──────────────────────
