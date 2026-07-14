@@ -1932,6 +1932,36 @@ def test_topic_anchor_tokens_bilingual_cafe():
     assert not candidates_off_topic(en_cafe, "この子がカフェで働く話")
 
 
+def test_topic_anchor_tokens_festival_multi():
+    tokens = topic_anchor_tokens("夏祭りで遊ぶ三人の少女")
+    assert "夏祭" in tokens or "祭り" in tokens
+    assert "festival" in tokens
+    assert "3girls" in tokens or "trio" in tokens
+    en = [{
+        "id": "A",
+        "past": "Three girls buy squid at the summer festival",
+        "present": "The trio races under paper lanterns",
+        "future": "They share candy under fireworks at the festival",
+        "title": "Matsuri",
+    }] * 3
+    assert not candidates_off_topic(en, "夏祭りで遊ぶ三人の少女")
+
+
+def test_multi_character_drops_hair_eye_locks():
+    wd14 = [
+        "3girls", "multiple_girls", "blonde_hair", "black_hair",
+        "blue_eyes", "brown_eyes", "yukata", "hair_ornament",
+    ]
+    assert is_multi_character(wd14)
+    lock = identity_lock_tags(wd14, multi_character=True)
+    assert "blonde_hair" not in lock and "blue_eyes" not in lock
+    solo_lock = identity_lock_tags(
+        ["1girl", "solo", "blonde_hair", "blue_eyes", "hair_ornament"],
+        multi_character=False,
+    )
+    assert "blonde_hair" in solo_lock and "blue_eyes" in solo_lock
+
+
 def test_axis_tag_lines_collapsed_detects_paraphrase_overlap():
     from app.story.generator import axis_tag_lines_collapsed
     same = (

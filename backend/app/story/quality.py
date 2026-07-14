@@ -37,13 +37,16 @@ QUALITY_DIMS = (
 _PLACE_RE_HINTS = (
     "cafe", "kitchen", "station", "park", "street", "room", "classroom",
     "counter", "window", "door", "rooftop", "bridge", "library", "shop",
-    "stadium", "arena", "bicycle", "bike",
+    "stadium", "arena", "bicycle", "bike", "festival", "stall", "lantern",
+    "beach", "ocean", "seaside",
     "カフェ", "キッチン", "駅", "公園", "街", "教室", "部屋", "店", "自転車",
+    "祭り", "屋台", "海辺",
 )
 _ACTION_VERB_HINTS = (
     "pour", "hold", "reach", "wipe", "run", "write", "open", "grab",
     "lift", "push", "pull", "knead", "fold", "slide", "teach", "point",
     "pedal", "ride", "toast", "cheer", "clink", "flutter", "lean",
+    "race", "share", "buy", "scoop", "kick", "chase", "crouch",
     "注", "持", "掴", "走", "書", "開", "押", "拭", "走", "乾杯",
 )
 
@@ -324,13 +327,22 @@ def _score_identity(
         if t
     ]
     if not locks:
-        # No lock available — score presence of any hair/eye colour cue.
-        hits = 0
+        # No lock — common for multi-character bases (hair/eyes dropped).
+        # Prefer multi-subject anchors; else fall back to any hair/eye cue.
+        multi_hits = 0
+        hair_eye_hits = 0
         for a in AXES:
             low = (prompts.get(a) or "").lower()
+            if any(
+                m in low
+                for m in ("3girls", "2girls", "multiple_girls", "multiple_boys", "2boys")
+            ):
+                multi_hits += 1
             if "_hair" in low or "_eyes" in low:
-                hits += 1
-        return _clamp01(hits / 3.0), "heuristic_hair_eyes"
+                hair_eye_hits += 1
+        if multi_hits:
+            return _clamp01(multi_hits / 3.0), "multi_subject_anchor"
+        return _clamp01(hair_eye_hits / 3.0), "heuristic_hair_eyes"
     scores: list[float] = []
     for a in AXES:
         low = {
