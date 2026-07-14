@@ -36,6 +36,7 @@ const inversionVolatileTagsGrouped = ref({})
 const inversionNewTagsGrouped      = ref({})
 const inversionLlmClassification   = ref({})
 const inversionStep2RawResult      = ref({})
+const inversionSubjectTags     = ref([])
 const inversionHairTags        = ref([])
 const inversionClothingTags    = ref([])
 const inversionAccessoryTags   = ref([])
@@ -127,6 +128,7 @@ function resetSession(initialSlots = []) {
   inversionNewTagsGrouped.value      = {}
   inversionLlmClassification.value   = {}
   inversionStep2RawResult.value      = {}
+  inversionSubjectTags.value     = []
   inversionHairTags.value        = []
   inversionClothingTags.value    = []
   inversionAccessoryTags.value   = []
@@ -245,6 +247,7 @@ export function useInspireSession() {
     inversionNewTagsGrouped,
     inversionLlmClassification,
     inversionStep2RawResult,
+    inversionSubjectTags,
     inversionHairTags,
     inversionClothingTags,
     inversionAccessoryTags,

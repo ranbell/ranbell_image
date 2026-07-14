@@ -26,8 +26,14 @@ from ..prompt.visual_spec import (
     parse_visual_script as parse_visual_script_category_tags,
 )
 from ..tags.catalog import (
+    ACCESSORIES as _ACCESSORIES,
+    ABSTRACT_BG as _ABSTRACT_BG,
+    COUNT as _COUNT,
     EXPRESSION_TAGS as _EXPRESSION_TAGS,
     EXPRESSION_TOKENS as _EXPRESSION_TOKENS,
+    PROPS as _PROPS,
+    VISUAL_LIGHTING as _VISUAL_LIGHTING,
+    get_tag_axis,
 )
 from ..tags.subject_anchors import (
     SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHORS,
@@ -1799,7 +1805,7 @@ def build_concrete_activities_prompt(
     physical action using a specific hobby/item, English, feeding situation_en.
     """
     elapsed = _elapsed_time_header(
-        base_axis=base_axis, time_scale=time_scale, locale="en"
+        base_axis=base_axis, time_scale=time_scale, locale=locale
     )
     tt = "\n".join(
         f"  - {s.get('label', '')}: {s.get('activity', '')} @ {s.get('place', '')} "
@@ -1811,12 +1817,12 @@ def build_concrete_activities_prompt(
     ) or "  (no draft)\n"
     topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
     head = chronicle_hard_rules_preamble(
-        locale="en", has_user_topic=bool(user_topic.strip())
+        locale=locale, has_user_topic=bool(user_topic.strip())
     )
     seed_block = chronicle_seed_tags_block(
-        seed_tags, forced_motif=forced_motif, locale="en"
+        seed_tags, forced_motif=forced_motif, locale=locale
     )
-    anchors = format_axis_slots_block(axis_slots, locale="en")
+    anchors = format_axis_slots_block(axis_slots, locale=locale)
     priority = (
         "PRIORITY: TIME ANCHORS (when present) define the on-screen physical fact "
         "for each act; the CHOSEN STORY DRAFT supplies motive and dramatic turn; "
@@ -1827,6 +1833,11 @@ def build_concrete_activities_prompt(
         "biography only supply concrete detail (a prop, a gesture). Do NOT drop "
         "in an unrelated hobby (knitting, journaling…) if it does not fit the "
         "story or the base scene.\n"
+    )
+    json_lang = (
+        "Output Japanese JSON values only, no fences:\n"
+        if locale == "ja"
+        else "Output English JSON only, no fences:\n"
     )
     return (
         f"{head}\n"
@@ -1848,7 +1859,7 @@ def build_concrete_activities_prompt(
         "For each axis state the concrete action (verb + body + prop + place) that "
         f"realises that beat. The [{base_axis.upper()}] action must match the base "
         "scene exactly.\n"
-        "Output English JSON only, no fences:\n"
+        f"{json_lang}"
         '{"past": "<one concrete action sentence>", '
         '"present": "<...>", "future": "<...>"}'
     )
@@ -1981,18 +1992,24 @@ def build_differentiate_activities_prompt(
     scene_desc: str = "",
     axis_slots: dict[str, dict] | None = None,
     user_topic: str = "",
+    locale: str = "en",
 ) -> str:
     """Rewrite collapsed concrete actions into three distinct drawable moments."""
     elapsed = _elapsed_time_header(
-        base_axis=base_axis, time_scale=time_scale, locale="en"
+        base_axis=base_axis, time_scale=time_scale, locale=locale
     )
-    anchors = format_axis_slots_block(axis_slots, locale="en")
+    anchors = format_axis_slots_block(axis_slots, locale=locale)
     topic = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
     beats = "".join(
         f"  [{a.upper()}] draft: {selected.get(a, '')}\n" for a in AXES if selected.get(a)
     )
+    json_lang = (
+        "Output Japanese JSON values only, no fences:\n"
+        if locale == "ja"
+        else "Output English JSON only, no fences:\n"
+    )
     return (
-        f"{chronicle_hard_rules_preamble(locale='en', has_user_topic=bool(user_topic.strip()))}\n"
+        f"{chronicle_hard_rules_preamble(locale=locale, has_user_topic=bool(user_topic.strip()))}\n"
         "These three concrete actions read as the SAME physical moment restated "
         "three times. Rewrite them so each axis is a CLEARLY DIFFERENT drawable "
         "action at its marked elapsed distance — different verb, prop, and "
@@ -2010,7 +2027,7 @@ def build_differentiate_activities_prompt(
         f"  FUTURE: {activities.get('future', '')}\n\n"
         f"The [{base_axis.upper()}] action must still match the base scene. "
         "Move the OTHER two to their own moments.\n"
-        "Output English JSON only, no fences:\n"
+        f"{json_lang}"
         '{"past": "<one concrete action sentence>", '
         '"present": "<...>", "future": "<...>"}'
     )
@@ -2262,46 +2279,21 @@ _VISUAL_SCRIPT_GUIDE = (
 
 # Refine-parity category buckets (UI + structured view for image models).
 # CHRONICLE_CAT_FIELDS / parse / merge / footer: see prompt.visual_spec
+# Primary classification: tags.catalog.get_tag_axis (+ ACCESSORIES / lighting sets).
 
-_BUCKET_SUBJECT = frozenset({
-    "1girl", "1boy", "2girls", "2boys", "3girls", "3boys", "4girls", "6+girls",
-    "solo", "solo_focus", "multiple_girls", "multiple_boys", "couple",
-})
-_BUCKET_EXPR = frozenset({
-    "smile", "smiling", "laughing", "blush", "tears", "crying", "open_mouth",
-    "closed_mouth", "serious", "angry", "sad", "happy", "nervous", "shy",
-    "expressionless", "grin", "frown", "pout", "wink", "surprised", "scared",
-    "looking_at_viewer", "looking_away", "looking_back", "looking_down",
-    "looking_up", "closed_eyes", "teary_eyes", "half-closed_eyes", "watery_eyes",
-})
-_BUCKET_LIGHT = frozenset({
-    "sunset", "sunrise", "golden_hour", "rim_light", "backlight", "lens_flare",
-    "cinematic_lighting", "volumetric", "god_rays", "warm_light", "cool_light",
-    "neon", "moonlight", "daylight", "soft_light", "sparkle", "glow",
-    "afternoon", "evening", "morning", "night", "dusk", "dawn",
-})
-_BUCKET_POSE = frozenset({
-    "standing", "sitting", "kneeling", "crouching", "lying", "running",
-    "walking", "jumping", "reaching", "holding", "pointing", "waving",
-    "leaning", "dynamic_pose", "from_side", "from_above", "from_below",
-    "cowboy_shot", "upper_body", "full_body", "close-up", "profile",
-    "outstretched_arm", "arms_up", "hands_on_hips", "crossed_arms",
-})
-_BUCKET_BG = frozenset({
-    "outdoors", "indoors", "beach", "ocean", "street", "cityscape", "park",
-    "forest", "sky", "cloud", "room", "classroom", "cafe", "shop", "storefront",
-    "stadium", "festival", "rooftop", "bridge", "mountain", "scenery",
-    "simple_background", "white_background", "blurry_background",
-})
-_BUCKET_OBJ = frozenset({
-    "bicycle", "bike", "scarf", "umbrella", "bag", "book", "cup", "mug",
-    "sword", "phone", "flower", "shell", "lantern", "confetti", "medal",
-})
 _EXPR_EYE_PREFIXES = ("teary", "closed", "empty", "half", "watery", "tired")
+_CLOTHING_HINTS = (
+    "dress", "shirt", "skirt", "uniform", "kimono", "yukata",
+    "jacket", "coat", "pants", "socks", "shoes", "boots",
+)
+_ACCESSORY_HINTS = (
+    "hat", "cap", "glasses", "earring", "necklace", "choker", "bag",
+    "hair_ornament", "hair_ribbon", "ribbon", "gloves", "scarf",
+)
 
 
 def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
-    """Heuristic category buckets from a flat danbooru tag line (no LLM)."""
+    """Category buckets from a flat danbooru tag line via tags.catalog axes."""
     parts = [
         t.strip().replace(" ", "_")
         for t in (tag_line or "").split(",")
@@ -2311,38 +2303,173 @@ def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
     for tag in parts:
         low = tag.lower()
         toks = set(low.split("_"))
-        if low in _BUCKET_SUBJECT or low.startswith(("1girl", "1boy", "2girl", "3girl")):
-            cats["subject_tags"].append(tag)
-        elif low.endswith("_hair") or ("hair" in toks and "eyes" not in toks):
-            cats["hair_tags"].append(tag)
-        elif low.endswith("_eyes"):
+
+        # ACCESSORIES win even though TAG_TO_AXIS maps them to clothing.
+        if low in _ACCESSORIES:
+            cats["accessory_tags"].append(tag)
+            continue
+
+        # Expressive *_eyes before always_fixed / emotion axis defaults.
+        if low.endswith("_eyes"):
             if any(low.startswith(p) or p in toks for p in _EXPR_EYE_PREFIXES):
                 cats["expression_tags"].append(tag)
             else:
                 cats["subject_tags"].append(tag)
-        elif low in _BUCKET_EXPR or bool(toks & _BUCKET_EXPR):
+            continue
+
+        axis = get_tag_axis(low)
+        if axis == "always_fixed" or low in _COUNT:
+            if low in _PROPS:
+                cats["object_tags"].append(tag)
+            else:
+                cats["subject_tags"].append(tag)
+            continue
+
+        if axis == "hair":
+            cats["hair_tags"].append(tag)
+        elif axis == "emotion":
             cats["expression_tags"].append(tag)
-        elif low in _BUCKET_LIGHT or bool(toks & _BUCKET_LIGHT):
-            cats["lighting_tags"].append(tag)
-        elif low in _BUCKET_POSE or bool(toks & _BUCKET_POSE):
+        elif axis == "action":
             cats["pose_tags"].append(tag)
-        elif low in _BUCKET_BG or bool(toks & _BUCKET_BG):
+        elif axis == "clothing":
+            if any(s in low for s in _ACCESSORY_HINTS):
+                cats["accessory_tags"].append(tag)
+            else:
+                cats["clothing_tags"].append(tag)
+        elif (
+            axis == "time_weather"
+            or low in _VISUAL_LIGHTING
+            or (axis == "visual" and low in _VISUAL_LIGHTING)
+        ):
+            cats["lighting_tags"].append(tag)
+        elif (
+            axis == "location"
+            or low in _ABSTRACT_BG
+            or (axis == "visual" and low in _ABSTRACT_BG)
+        ):
             cats["background_tags"].append(tag)
-        elif low in _BUCKET_OBJ or bool(toks & _BUCKET_OBJ):
-            cats["object_tags"].append(tag)
-        elif any(s in low for s in (
-            "dress", "shirt", "skirt", "uniform", "kimono", "yukata",
-            "jacket", "coat", "pants", "socks", "shoes", "boots",
-        )):
+        elif axis == "visual":
+            cats["lighting_tags"].append(tag)
+        elif any(s in low for s in _CLOTHING_HINTS):
             cats["clothing_tags"].append(tag)
-        elif any(s in low for s in (
-            "hat", "glasses", "earring", "necklace", "choker", "bag",
-            "hair_ornament", "hair_ribbon", "ribbon",
-        )):
+        elif any(s in low for s in _ACCESSORY_HINTS):
             cats["accessory_tags"].append(tag)
         else:
             cats["object_tags"].append(tag)
     return {k: v for k, v in cats.items() if v}
+
+
+_ACTIVITY_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "to", "of", "in", "on", "at", "for", "with",
+    "her", "his", "she", "he", "they", "their", "from", "into", "over", "under",
+    "as", "by", "is", "are", "was", "were", "be", "been", "being", "this", "that",
+    "while", "then", "than", "very", "just", "only", "into", "onto", "across",
+})
+
+
+def _activity_keyword_tokens(text: str, *, limit: int = 6) -> list[str]:
+    """Danbooru-ish keyword tokens from an activity sentence (unique, ordered)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in re.findall(r"[A-Za-z][A-Za-z0-9']+", text or ""):
+        tok = raw.lower().replace("'", "")
+        if len(tok) < 3 or tok in _ACTIVITY_STOPWORDS:
+            continue
+        if tok in seen:
+            continue
+        seen.add(tok)
+        out.append(tok)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _inject_tags_into_positive(positive: str, new_tags: list[str]) -> str:
+    """Insert tags after subject anchors when possible; else after first tag."""
+    cleaned = [t.strip().replace(" ", "_") for t in new_tags if t and str(t).strip()]
+    if not cleaned:
+        return positive
+    try:
+        return insert_after_anchors(positive, cleaned)
+    except Exception:
+        pass
+    parts = [t.strip() for t in (positive or "").split(",") if t.strip()]
+    existing = {p.lower() for p in parts}
+    add = [t for t in cleaned if t.lower() not in existing]
+    if not add:
+        return positive
+    if not parts:
+        return ", ".join(add)
+    # Prepend after the first tag (keep leading subject/count if present).
+    return ", ".join(parts[:1] + add + parts[1:])
+
+
+def repair_collapsed_axis_tags(
+    prompts: dict,
+    *,
+    visual_plans: dict,
+    activities: dict,
+    gen_axes: list[str],
+) -> dict:
+    """Inject per-axis unique action/expression/activity tokens into collapsed prompts.
+
+    Idempotent-ish: skips tags already present in that axis positive. Mutates a
+    shallow copy of ``prompts`` and returns it.
+    """
+    axes = [a for a in gen_axes if a in AXES] or list(AXES)
+    # Collect per-axis candidate tags from visual plans + activities.
+    per_axis: dict[str, list[str]] = {}
+    for a in axes:
+        plan = visual_plans.get(a) or {}
+        tags: list[str] = []
+        for t in plan.get("focal_action_tags") or []:
+            s = str(t).strip().replace(" ", "_")
+            if s:
+                tags.append(s)
+        expr = str(plan.get("expression_tag") or "").strip().replace(" ", "_")
+        if expr:
+            tags.append(expr)
+        tags.extend(_activity_keyword_tokens(str(activities.get(a) or "")))
+        # Dedupe within axis (preserve order).
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for t in tags:
+            k = t.lower()
+            if k not in seen:
+                seen.add(k)
+                uniq.append(t)
+        per_axis[a] = uniq
+
+    # Prefer tags unique to this axis among gen_axes (shared tags are weaker).
+    shared: set[str] = set()
+    if len(axes) >= 2:
+        counts: dict[str, int] = {}
+        for a in axes:
+            for t in {x.lower() for x in per_axis.get(a, [])}:
+                counts[t] = counts.get(t, 0) + 1
+        shared = {t for t, n in counts.items() if n >= 2}
+
+    out = dict(prompts)
+    for a in axes:
+        entry = out.get(a)
+        if not isinstance(entry, dict):
+            continue
+        positive = str(entry.get("positive") or "")
+        if not positive.strip():
+            continue
+        candidates = [
+            t for t in per_axis.get(a, [])
+            if t.lower() not in shared or len(per_axis.get(a, [])) <= 2
+        ]
+        # Fall back to all candidates if uniqueness filtered everything.
+        if not candidates:
+            candidates = list(per_axis.get(a, []))
+        if not candidates:
+            continue
+        new_pos = _inject_tags_into_positive(positive, candidates)
+        if new_pos != positive:
+            out[a] = {**entry, "positive": new_pos}
+    return out
 
 
 # Per-scale visual invariants used in both story and image-prompt generation.

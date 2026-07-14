@@ -68,10 +68,48 @@ class SelectCandidateRequest(BaseModel):
 class RespinRequest(BaseModel):
     stage: Literal["candidates", "expand"]
     respin_count: int = 1
+    # Optional overrides — same knobs as ChronicleRequest; None = keep stored.
+    time_scale: Literal[
+        "minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"
+    ] | None = None
+    divergence: float | None = None
+    emotion: str | None = None
+    dramatic_mode: str | None = None
+    tone: Literal["bright", "neutral", "dark"] | None = None
+    prompt_style: str | None = None
+    workflow_name: str | None = None
+    use_draft_refine: Literal["auto", "on", "off"] | None = None
+    draft_width: int | None = None
+    draft_height: int | None = None
+    draft_steps: int | None = None
+    suppress_conflict_tags: bool | None = None
+    manual_mode: bool | None = None
+    temperature: float | None = None
+    num_ctx: int | None = None
+    worldview: str | None = None
+    user_topic: str | None = None
 
 
 class PinupRequest(BaseModel):
     mode: Literal["add", "replace"] = "add"
+
+
+_RESPIN_OVERRIDE_FIELDS = (
+    "time_scale", "divergence", "emotion", "dramatic_mode", "tone",
+    "prompt_style", "workflow_name", "use_draft_refine", "draft_width",
+    "draft_height", "draft_steps", "suppress_conflict_tags", "manual_mode",
+    "temperature", "num_ctx", "worldview", "user_topic",
+)
+
+
+def _merge_respin_overrides(body_dict: dict, body: RespinRequest) -> dict:
+    """Merge non-None RespinRequest override fields into a stored context body."""
+    out = dict(body_dict or {})
+    for key in _RESPIN_OVERRIDE_FIELDS:
+        val = getattr(body, key, None)
+        if val is not None:
+            out[key] = val
+    return out
 
 
 # Temperature ladder for respin — each respin nudges creativity up (Refine's
@@ -178,13 +216,22 @@ async def respin_chronicle(story_id: str, body: RespinRequest, request: Request)
     story = await story_db.get_story(app.state.db, story_id)
     if story is None:
         raise HTTPException(404, f"Story {story_id!r} not found")
-    temp = _respin_temperature(_draft_base_temp(story), body.respin_count)
+    ladder_temp = _respin_temperature(_draft_base_temp(story), body.respin_count)
+    temp = body.temperature if body.temperature is not None else ladder_temp
     meta = {"group_id": story.get("group_id", ""), "story_id": story_id}
 
     if body.stage == "candidates":
         body_dict = (story.get("context") or {}).get("body") or {}
         if not body_dict:
             raise HTTPException(409, "Draft has no stored context for respin")
+        body_dict = _merge_respin_overrides(body_dict, body)
+        # Persist updated knobs so subsequent respins / expand see them.
+        try:
+            ctx = dict(story.get("context") or {})
+            ctx["body"] = body_dict
+            await story_db.set_story_payload(app.state.db, story_id, {"context": ctx})
+        except Exception as exc:
+            logger.warning("[chronicle] respin context persist failed: %s", exc)
         job_id = _submit_prompt_job(
             app, "chronicle_candidates", run_chronicle_candidates, meta=meta,
             body_dict=body_dict, story_id=story_id, temperature=temp,
@@ -193,10 +240,23 @@ async def respin_chronicle(story_id: str, body: RespinRequest, request: Request)
         candidate_id = story.get("selected_candidate")
         if not candidate_id:
             raise HTTPException(409, "No candidate has been selected yet")
+        ctx = dict(story.get("context") or {})
+        body_dict = _merge_respin_overrides(ctx.get("body") or {}, body)
+        ctx["body"] = body_dict
+        try:
+            await story_db.set_story_payload(app.state.db, story_id, {"context": ctx})
+        except Exception as exc:
+            logger.warning("[chronicle] respin expand context persist failed: %s", exc)
+        scale = (
+            body.time_scale
+            or body_dict.get("time_scale")
+            or story.get("time_scale")
+            or "years"
+        )
         job_id = _submit_prompt_job(
             app, "chronicle_expand", run_chronicle_expand, meta=meta,
             story_id=story_id, candidate_id=candidate_id,
-            time_scale=story.get("time_scale", "years"), temperature=temp,
+            time_scale=scale, temperature=temp,
         )
     return {"job_id": job_id, "story_id": story_id, "status": "queued"}
 

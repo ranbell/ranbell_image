@@ -160,14 +160,24 @@ def score_prompt_richness(tag_line: str) -> dict[str, Any]:
     }
 
 
-def _score_richness(prompts: dict[str, str]) -> tuple[float, dict[str, Any]]:
+def _score_richness(
+    prompts: dict[str, str],
+    scored_axes: list[str] | None = None,
+) -> tuple[float, dict[str, Any]]:
     per: dict[str, Any] = {}
     scores: list[float] = []
-    for a in AXES:
-        detail = score_prompt_richness(prompts.get(a) or "")
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
+    for a in axes:
+        line = prompts.get(a) or ""
+        if not line.strip():
+            per[a] = {"score": None, "skipped": True}
+            continue
+        detail = score_prompt_richness(line)
         per[a] = detail
         scores.append(float(detail["score"]))
-    return _clamp01(sum(scores) / max(1, len(scores))), per
+    if not scores:
+        return 0.5, per
+    return _clamp01(sum(scores) / len(scores)), per
 
 
 def _clamp01(x: float) -> float:
@@ -185,21 +195,24 @@ def _score_topic_fit(
     overall: str,
     stories: dict[str, str],
     activities: dict[str, str],
+    prompts: dict[str, str] | None = None,
+    topic_directive: str = "",
 ) -> tuple[float, str]:
     topic = (user_topic or "").strip()
     if not topic:
-        return 0.7, "no_topic"  # neutral — free improvisation is allowed
-    groups = topic_anchor_groups(topic)
+        return 0.55, "no_topic"  # mild penalty — free improvisation allowed
+    groups = topic_anchor_groups(topic, topic_directive)
     if not groups:
-        return 0.7, "no_tokens"
+        return 0.55, "no_tokens"
     blob = " ".join(
         [
             title or "",
             overall or "",
             *(stories.get(a) or "" for a in AXES),
             *(activities.get(a) or "" for a in AXES),
+            *((prompts or {}).get(a) or "" for a in AXES),
         ]
-    ).lower()
+    ).lower().replace("_", " ")
     # English-only blobs: ignore JA-script members so aliases are not diluted
     # (カフェ never appears in EN prose; cafe/coffee/barista do).
     blob_has_ja = any(_is_ja_script_token(c) for c in blob)
@@ -209,7 +222,10 @@ def _score_topic_fit(
             members = [t for t in group if not _is_ja_script_token(t)] or group
         else:
             members = group
-        if any(tok in blob for tok in members):
+        if any(
+            tok.replace("_", " ") in blob or tok in blob
+            for tok in members
+        ):
             hits += 1
     ratio = hits / max(1, len(groups))
     # Soft curve: 1 group hit → ~0.45+, half → ~0.7, all → 1.0
@@ -223,10 +239,12 @@ def _score_diversity(
     activities: dict[str, str],
     prompts: dict[str, str],
     time_scale: str,
+    scored_axes: list[str] | None = None,
 ) -> tuple[float, str]:
-    story_sim = _mean_pairwise_similarity([stories.get(a) or "" for a in AXES])
-    act_sim = _mean_pairwise_similarity([activities.get(a) or "" for a in AXES])
-    tag_collapse = axis_tag_lines_collapsed(prompts)
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
+    story_sim = _mean_pairwise_similarity([stories.get(a) or "" for a in axes])
+    act_sim = _mean_pairwise_similarity([activities.get(a) or "" for a in axes])
+    tag_collapse = axis_tag_lines_collapsed({a: prompts.get(a) or "" for a in axes})
     # Invert similarity → diversity. Micro scales expect higher similarity.
     micro = (time_scale or "").strip().lower() in {"minutes", "tens_of_minutes"}
     story_div = 1.0 - story_sim
@@ -240,20 +258,24 @@ def _score_diversity(
         f"tag_collapse={tag_collapse}"
     )
     # Soft floor when acts_temporally_distinct fails on long scales.
-    if not micro and not acts_temporally_distinct(stories):
+    if not micro and not acts_temporally_distinct({a: stories.get(a) or "" for a in axes}):
         raw = min(raw, 0.35)
         note += " acts_collapsed"
     return _clamp01(raw), note
 
 
-def _score_expression(prompts: dict[str, str]) -> tuple[float, dict[str, Any]]:
+def _score_expression(
+    prompts: dict[str, str],
+    scored_axes: list[str] | None = None,
+) -> tuple[float, dict[str, Any]]:
     per: dict[str, Any] = {}
     scores: list[float] = []
-    for a in AXES:
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
+    for a in axes:
         parts = _parts(prompts.get(a) or "")
         if not parts:
-            per[a] = {"person": False, "ok": True, "score": 1.0}
-            scores.append(1.0)
+            # Base-image axes with no generated prompt — skip (do not award 1.0).
+            per[a] = {"person": False, "ok": False, "score": None, "skipped": True}
             continue
         person = _tag_has_person_subject(parts)
         ok = (not person) or _tag_has_expression(parts)
@@ -270,15 +292,25 @@ def _score_expression(prompts: dict[str, str]) -> tuple[float, dict[str, Any]]:
             s = 0.85
         per[a] = {"person": person, "ok": ok, "expr_count": expr_n, "score": s}
         scores.append(s)
-    return _clamp01(sum(scores) / max(1, len(scores))), per
+    if not scores:
+        return 0.5, per
+    return _clamp01(sum(scores) / len(scores)), per
 
 
-def _score_action(prompts: dict[str, str], activities: dict[str, str]) -> tuple[float, dict]:
+def _score_action(
+    prompts: dict[str, str],
+    activities: dict[str, str],
+    scored_axes: list[str] | None = None,
+) -> tuple[float, dict]:
     per: dict[str, Any] = {}
     scores: list[float] = []
-    for a in AXES:
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
+    for a in axes:
         parts = _parts(prompts.get(a) or "")
         act_text = (activities.get(a) or "").lower()
+        if not parts and not act_text.strip():
+            per[a] = {"score": None, "skipped": True}
+            continue
         has_tag_action = _tag_has_dynamic_action(parts) if parts else False
         has_text_action = any(v in act_text for v in _ACTION_VERB_HINTS)
         deg, reason = _chronicle_tags_degenerate(prompts.get(a) or "") if parts else (True, "empty")
@@ -296,15 +328,19 @@ def _score_action(prompts: dict[str, str], activities: dict[str, str]) -> tuple[
             "score": s,
         }
         scores.append(s)
-    return _clamp01(sum(scores) / max(1, len(scores))), per
+    if not scores:
+        return 0.5, per
+    return _clamp01(sum(scores) / len(scores)), per
 
 
 def _score_drawability(
     activities: dict[str, str],
     stories: dict[str, str],
+    scored_axes: list[str] | None = None,
 ) -> tuple[float, str]:
     scores: list[float] = []
-    for a in AXES:
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
+    for a in axes:
         text = f"{activities.get(a) or ''} {stories.get(a) or ''}".lower()
         if not text.strip():
             scores.append(0.2)
@@ -320,7 +356,8 @@ def _score_drawability(
         if length_ok:
             s += 0.15
         scores.append(_clamp01(s))
-    distinct = activities_temporally_distinct(activities) if any(activities.values()) else True
+    act_slice = {a: activities.get(a) or "" for a in axes}
+    distinct = activities_temporally_distinct(act_slice) if any(act_slice.values()) else True
     mean = sum(scores) / max(1, len(scores))
     if not distinct:
         mean = min(mean, 0.45)
@@ -330,6 +367,7 @@ def _score_drawability(
 def _score_identity(
     prompts: dict[str, str],
     lock_tags: list[str] | None,
+    scored_axes: list[str] | None = None,
 ) -> tuple[float, str]:
     locks = [
         str(t).strip().lower().replace(" ", "_")
@@ -339,9 +377,10 @@ def _score_identity(
     if not locks:
         # No lock — common for multi-character bases (hair/eyes dropped).
         # Prefer multi-subject anchors; else fall back to any hair/eye cue.
+        axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
         multi_hits = 0
         hair_eye_hits = 0
-        for a in AXES:
+        for a in axes:
             low = (prompts.get(a) or "").lower()
             if any(
                 m in low
@@ -350,22 +389,25 @@ def _score_identity(
                 multi_hits += 1
             if "_hair" in low or "_eyes" in low:
                 hair_eye_hits += 1
+        n = max(1, len(axes))
         if multi_hits:
-            return _clamp01(multi_hits / 3.0), "multi_subject_anchor"
-        return _clamp01(hair_eye_hits / 3.0), "heuristic_hair_eyes"
+            return _clamp01(multi_hits / n), "multi_subject_anchor"
+        return _clamp01(hair_eye_hits / n), "heuristic_hair_eyes"
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
     scores: list[float] = []
-    for a in AXES:
+    for a in axes:
         low = {
             t.strip().lower().replace(" ", "_")
             for t in (prompts.get(a) or "").split(",")
             if t.strip()
         }
         if not low:
-            scores.append(0.0)
-            continue
+            continue  # skip empty base-axis prompts
         present = sum(1 for t in locks if t in low)
         scores.append(present / max(1, len(locks)))
-    return _clamp01(sum(scores) / max(1, len(scores))), f"locks={len(locks)}"
+    if not scores:
+        return 0.5, f"locks={len(locks)}"
+    return _clamp01(sum(scores) / len(scores)), f"locks={len(locks)}"
 
 
 def evaluate_chronicle_quality(
@@ -380,11 +422,16 @@ def evaluate_chronicle_quality(
     lock_tags: list[str] | None = None,
     method: str = "rules",
     draft_deltas: dict[str, dict] | None = None,
+    scored_axes: list[str] | None = None,
+    topic_directive: str = "",
 ) -> dict[str, Any]:
     """Return a ``quality_eval`` dict ready to persist on the story payload.
 
-    ``draft_deltas`` (optional): per-axis richness before/after Phase B draft
-    refine — records how much expression was borrowed from the image model.
+    ``scored_axes``: axes that received prompt generation (excludes base-image
+    reuse). Empty-prompt axes are skipped rather than scored as perfect.
+
+    ``draft_deltas``: per-axis richness before/after Phase B — also boosts the
+    richness dimension when the image model contributed expression.
     """
     stories = stories or {}
     activities = activities or {}
@@ -397,38 +444,31 @@ def evaluate_chronicle_quality(
         else:
             norm_prompts[a] = str(raw or "")
 
+    axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
+
     topic_fit, topic_note = _score_topic_fit(
         user_topic=user_topic,
         title=title,
         overall=overall,
         stories=stories,
         activities=activities,
+        prompts=norm_prompts,
+        topic_directive=topic_directive,
     )
     diversity, div_note = _score_diversity(
         stories=stories,
         activities=activities,
         prompts=norm_prompts,
         time_scale=time_scale,
+        scored_axes=axes,
     )
-    expression, expr_per = _score_expression(norm_prompts)
-    action, action_per = _score_action(norm_prompts, activities)
-    drawability, draw_note = _score_drawability(activities, stories)
-    identity, id_note = _score_identity(norm_prompts, lock_tags)
-    richness, rich_per = _score_richness(norm_prompts)
+    expression, expr_per = _score_expression(norm_prompts, scored_axes=axes)
+    action, action_per = _score_action(norm_prompts, activities, scored_axes=axes)
+    drawability, draw_note = _score_drawability(activities, stories, scored_axes=axes)
+    identity, id_note = _score_identity(norm_prompts, lock_tags, scored_axes=axes)
+    richness, rich_per = _score_richness(norm_prompts, scored_axes=axes)
 
-    dimensions = {
-        "topic_fit": round(topic_fit, 3),
-        "diversity": round(diversity, 3),
-        "expression": round(expression, 3),
-        "action": round(action, 3),
-        "drawability": round(drawability, 3),
-        "identity": round(identity, 3),
-        "richness": round(richness, 3),
-    }
-    overall_score = round(
-        sum(dimensions[d] for d in QUALITY_DIMS) / len(QUALITY_DIMS), 3
-    )
-
+    draft_boost = 0.0
     draft_note = ""
     draft_per: dict[str, Any] = {}
     if draft_deltas:
@@ -443,9 +483,25 @@ def evaluate_chronicle_quality(
                 pass
         if deltas:
             mean_d = sum(deltas) / len(deltas)
+            draft_boost = _clamp01(mean_d / 12.0) * 0.25
+            richness = _clamp01(richness + draft_boost)
             draft_note = (
-                f"draft_refine axes={len(deltas)} mean_delta={mean_d:+.2f}"
+                f"draft_refine axes={len(deltas)} mean_delta={mean_d:+.2f} "
+                f"boost={draft_boost:+.2f}"
             )
+
+    dimensions = {
+        "topic_fit": round(topic_fit, 3),
+        "diversity": round(diversity, 3),
+        "expression": round(expression, 3),
+        "action": round(action, 3),
+        "drawability": round(drawability, 3),
+        "identity": round(identity, 3),
+        "richness": round(richness, 3),
+    }
+    overall_score = round(
+        sum(dimensions[d] for d in QUALITY_DIMS) / len(QUALITY_DIMS), 3
+    )
 
     notes = {
         "topic_fit": topic_note,
@@ -453,6 +509,7 @@ def evaluate_chronicle_quality(
         "drawability": draw_note,
         "identity": id_note,
         "richness": f"mean={richness:.2f}",
+        "scored_axes": ",".join(axes),
     }
     if draft_note:
         notes["draft_grounding"] = draft_note
@@ -469,6 +526,7 @@ def evaluate_chronicle_quality(
             "richness": rich_per,
         },
         "notes": notes,
+        "scored_axes": axes,
     }
     if draft_per:
         out["per_axis"]["draft_richness"] = draft_per
@@ -479,5 +537,6 @@ def evaluate_chronicle_quality(
                 / max(1, len(draft_per)),
                 3,
             ),
+            "richness_boost": round(draft_boost, 3),
         }
     return out

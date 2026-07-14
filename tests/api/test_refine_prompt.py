@@ -4,8 +4,8 @@ Covers:
   - _build_vlm_prompt(): style × instruction_framing combinations (danbooru/detailed)
   - _build_natural_tags_prompt() / _build_natural_prose_prompt(): natural style two-pass builders
   - _check_natural_prose(): prose-vs-tag-list heuristic
-  - _extract_literal_directives(): regex extraction
-  - _inject_literal_directives(): prompt injection
+  - _extract_literal_texts(): regex extraction
+  - _append_literal_texts(): prompt append
   - _parse_detailed_output(): bold and plain-header fallback
   - _translate_instruction(): mock Ollama
   - _translate_and_classify(): mock Ollama + JSON parsing
@@ -27,8 +27,8 @@ from app.api.ai import (
     _build_natural_tags_prompt,
     _build_vlm_prompt,
     _check_natural_prose,
-    _extract_literal_directives,
-    _inject_literal_directives,
+    _extract_literal_texts,
+    _append_literal_texts,
     _parse_detailed_output,
     _remove_forced_tags,
     _translate_and_classify,
@@ -212,87 +212,67 @@ class TestCheckNaturalProse:
         assert not _check_natural_prose("A short foggy scene at dusk.")
 
 
-# ── _extract_literal_directives ───────────────────────────────────────────────
+# ── _extract_literal_texts ────────────────────────────────────────────────────
 
-class TestExtractLiteralDirectives:
+class TestExtractLiteralTexts:
     def test_basic_text_at_top(self):
-        cleaned, lits = _extract_literal_directives("add text 'Ranbell Image' at top")
-        assert len(lits) == 1
-        assert lits[0]["text"] == "Ranbell Image"
-        assert lits[0]["position"] == "top"
+        texts, cleaned = _extract_literal_texts("add text 'Ranbell Image' at top")
+        assert texts == ["Ranbell Image"]
         assert "Ranbell Image" not in cleaned
 
     def test_basic_text_at_bottom(self):
-        _, lits = _extract_literal_directives('display text "Hello" at bottom')
-        assert lits[0]["position"] == "bottom"
+        texts, _ = _extract_literal_texts('display text "Hello" at bottom')
+        assert texts == ["Hello"]
 
-    def test_text_without_position_defaults_top(self):
-        _, lits = _extract_literal_directives("add watermark 'Copyright 2025'")
-        assert lits[0]["position"] == "top"
+    def test_text_without_position(self):
+        texts, _ = _extract_literal_texts("add watermark 'Copyright 2025'")
+        assert texts == ["Copyright 2025"]
 
     def test_no_directive_returns_unchanged(self):
-        cleaned, lits = _extract_literal_directives("make it foggy and dramatic")
-        assert lits == []
+        texts, cleaned = _extract_literal_texts("make it foggy and dramatic")
+        assert texts == []
         assert cleaned == "make it foggy and dramatic"
 
     def test_mixed_instruction_extracts_only_literal(self):
-        cleaned, lits = _extract_literal_directives(
+        texts, cleaned = _extract_literal_texts(
             "oil painting style, add text 'Ranbell Image' at top"
         )
-        assert len(lits) == 1
-        assert lits[0]["text"] == "Ranbell Image"
+        assert texts == ["Ranbell Image"]
         assert "oil painting" in cleaned
         assert "Ranbell Image" not in cleaned
 
     def test_multiple_text_directives(self):
-        _, lits = _extract_literal_directives(
+        texts, _ = _extract_literal_texts(
             "insert label 'Top Label' at top, add caption 'Bottom Label' at bottom"
         )
-        assert len(lits) == 2
-        texts = {d["text"] for d in lits}
-        assert "Top Label" in texts
-        assert "Bottom Label" in texts
+        assert texts == ["Top Label", "Bottom Label"]
 
     def test_case_insensitive(self):
-        _, lits = _extract_literal_directives("ADD TEXT 'HELLO' AT TOP")
-        assert len(lits) == 1
+        texts, _ = _extract_literal_texts("ADD TEXT 'HELLO' AT TOP")
+        assert texts == ["HELLO"]
 
     def test_unicode_text_content(self):
-        _, lits = _extract_literal_directives("add text 'Ranbell画像' at top")
-        assert lits[0]["text"] == "Ranbell画像"
+        texts, _ = _extract_literal_texts("add text 'Ranbell画像' at top")
+        assert texts == ["Ranbell画像"]
 
 
-# ── _inject_literal_directives ────────────────────────────────────────────────
+# ── _append_literal_texts ─────────────────────────────────────────────────────
 
-class TestInjectLiteralDirectives:
-    def test_top_text_prepended(self):
-        lits = [{"text": "Ranbell Image", "position": "top"}]
-        result = _inject_literal_directives("1girl, blue hair", lits)
-        assert result.startswith('text "Ranbell Image", top_text, text_on_image,')
-        assert "1girl" in result
+class TestAppendLiteralTexts:
+    def test_appends_text_tags(self):
+        result = _append_literal_texts("1girl, blue hair", ["Ranbell Image"])
+        assert result.endswith('text "Ranbell Image", text_on_image')
+        assert result.startswith("1girl")
 
-    def test_bottom_text_uses_bottom_tag(self):
-        lits = [{"text": "Footer", "position": "bottom"}]
-        result = _inject_literal_directives("1girl", lits)
-        assert "bottom_text" in result
-
-    def test_unknown_position_uses_overlay(self):
-        lits = [{"text": "X", "position": "center"}]
-        result = _inject_literal_directives("1girl", lits)
-        assert "overlay_text" in result
-
-    def test_empty_literals_unchanged(self):
-        result = _inject_literal_directives("1girl, blue hair", [])
-        assert result == "1girl, blue hair"
-
-    def test_multiple_literals_all_prepended(self):
-        lits = [
-            {"text": "Title", "position": "top"},
-            {"text": "Footer", "position": "bottom"},
-        ]
-        result = _inject_literal_directives("1girl", lits)
+    def test_multiple_texts(self):
+        result = _append_literal_texts("1girl", ["Title", "Footer"])
         assert 'text "Title"' in result
         assert 'text "Footer"' in result
+        assert result.endswith("text_on_image")
+
+    def test_empty_texts_unchanged(self):
+        result = _append_literal_texts("1girl, blue hair", [])
+        assert result == "1girl, blue hair"
 
 
 # ── _parse_detailed_output ────────────────────────────────────────────────────
@@ -590,7 +570,7 @@ class TestVlmPromptCombinations:
     def test_basic_mode_removes_literal_before_vlm(self, style):
         """mode=basic: literal text extracted BEFORE VLM call.
         VLM receives: cleaned NL instruction + framing, NOT the literal text part."""
-        cleaned, lits = _extract_literal_directives(self.INSTRUCTION_EN_TRANSLATED)
+        lits, cleaned = _extract_literal_texts(self.INSTRUCTION_EN_TRANSLATED)
         assert len(lits) == 1, "literal should be extracted"
         prompt = _build_vlm_prompt(
             DUMMY_CONTEXT, cleaned, style,
@@ -643,21 +623,21 @@ class TestVlmPromptCombinations:
             assert header in prompt, f"Missing section header: {header}"
 
     def test_basic_mode_literal_injected_into_positive(self):
-        """End-to-end: literal extracted → not in VLM prompt → injected into positive."""
-        cleaned, lits = _extract_literal_directives(
+        """End-to-end: literal extracted → not in VLM prompt → appended to positive."""
+        lits, cleaned = _extract_literal_texts(
             "add text 'Ranbell Image' at top, oil painting style"
         )
+        assert "Ranbell Image" not in cleaned
         # Simulate VLM output (no literal in it)
         fake_vlm_output = "oil_painting, masterpiece, 1girl, blue_hair"
-        positive = _inject_literal_directives(fake_vlm_output, lits)
-        assert positive.startswith('text "Ranbell Image"')
-        assert "top_text" in positive
-        assert "text_on_image" in positive
+        positive = _append_literal_texts(fake_vlm_output, lits)
+        assert 'text "Ranbell Image"' in positive
+        assert positive.endswith("text_on_image")
         assert "oil_painting" in positive
 
     def test_none_mode_empty_literals_no_injection(self):
         """mode=none: no extraction, no injection."""
         lits: list = []
         fake_vlm_output = "1girl, blue_hair, masterpiece"
-        result = _inject_literal_directives(fake_vlm_output, lits)
+        result = _append_literal_texts(fake_vlm_output, lits)
         assert result == fake_vlm_output

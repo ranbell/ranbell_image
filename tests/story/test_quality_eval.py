@@ -105,3 +105,76 @@ def test_evaluate_accepts_prompt_dicts():
         time_scale="years",
     )
     assert "expression" in q["dimensions"]
+
+
+def test_empty_prompt_axes_are_skipped_not_perfect():
+    """Empty positives among scored axes must not score as perfect expression."""
+    q = evaluate_chronicle_quality(
+        prompts={
+            "past": "",
+            "present": _good_prompts()["present"],
+            "future": _good_prompts()["future"],
+        },
+        stories={
+            "past": "She spills milk.",
+            "present": "She pours latte art.",
+            "future": "She teaches a junior.",
+        },
+        activities={
+            "past": "spilling milk",
+            "present": "pouring latte",
+            "future": "teaching junior",
+        },
+        time_scale="years",
+        scored_axes=["past", "present", "future"],
+    )
+    assert q["per_axis"]["expression"]["past"].get("skipped") is True
+    assert q["per_axis"]["expression"]["past"].get("score") is None
+    # Non-empty axes still contribute; overall expression stays healthy.
+    assert q["dimensions"]["expression"] >= 0.5
+    assert q["scored_axes"] == ["past", "present", "future"]
+
+
+def test_topic_fit_includes_prompts_and_directive():
+    """topic_fit should consider prompt tag text and topic_directive aliases."""
+    weak = evaluate_chronicle_quality(
+        user_topic="カフェで働く",
+        title="Walk",
+        overall="A stroll.",
+        stories={
+            "past": "She walks outside.",
+            "present": "She walks outside.",
+            "future": "She walks outside.",
+        },
+        activities={
+            "past": "walking",
+            "present": "walking",
+            "future": "walking",
+        },
+        prompts={
+            "past": "1girl, walking, outdoors",
+            "present": "1girl, walking, outdoors",
+            "future": "1girl, walking, outdoors",
+        },
+        time_scale="years",
+    )
+    strong = evaluate_chronicle_quality(
+        user_topic="カフェで働く",
+        title="First Pour",
+        overall="Barista at the cafe.",
+        stories={
+            "past": "She spills milk at the cafe.",
+            "present": "She pours latte art.",
+            "future": "She teaches espresso.",
+        },
+        activities={
+            "past": "spilling milk pitcher",
+            "present": "pouring latte",
+            "future": "teaching junior barista",
+        },
+        prompts=_good_prompts(),
+        time_scale="years",
+        topic_directive="cafe barista coffee latte",
+    )
+    assert strong["dimensions"]["topic_fit"] >= weak["dimensions"]["topic_fit"]
+    assert strong["dimensions"]["topic_fit"] >= 0.5

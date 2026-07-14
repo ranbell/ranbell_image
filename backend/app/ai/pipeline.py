@@ -229,7 +229,9 @@ async def _tag_doc(
     state.active_save += 1
     try:
         payload: dict = {
-            "wd14_tags": [tag for tag, _ in scored],
+            "wd14_tags": [
+                str(tag).strip().replace(" ", "_") for tag, _ in scored
+            ],
             "wd14_tags_scores": [round(score, 4) for _, score in scored],
         }
         color_lab: list[float] | None = None
@@ -312,7 +314,7 @@ async def _process_doc(
         scored = await wd14_mod.predict_tags_scored(file_path, threshold, wd14_model_dir)
     finally:
         state.active_wd14 -= 1
-    wd14_tags = [tag for tag, _ in scored]
+    wd14_tags = [str(tag).strip().replace(" ", "_") for tag, _ in scored]
     wd14_tags_scores = [round(score, 4) for _, score in scored]
 
     embed_text = _build_embed_text(doc, wd14_tags)
