@@ -1,7 +1,6 @@
-"""Chronicle / scene tags should resolve via frozenset, not only Phase B LLM."""
+"""Chronicle / scene tags should resolve via frozenset (shared tags.catalog)."""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -9,66 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-_JSON = Path(__file__).resolve().parents[2] / "backend" / "app" / "static" / "tag_categories.json"
-
-
-def _build_axis_map() -> dict[str, str]:
-    data = json.loads(_JSON.read_text(encoding="utf-8"))
-    m: dict[str, str] = {}
-    fixed = data["always_fixed"]
-    for key in ("count", "eye_shapes", "body", "skin_face", "race", "composition", "props"):
-        for tag in fixed[key]:
-            m[tag] = "always_fixed"
-    for tag in data["axis_hair"]:
-        m[tag] = "hair"
-    for tag in data["axis_emotion"]:
-        m[tag] = "emotion"
-    for tag in data["axis_action"]:
-        m[tag] = "action"
-    for tag in data["axis_clothing_explicit"]:
-        m[tag] = "clothing"
-    for tag in data["axis_accessories"]:
-        m[tag] = "clothing"
-    for tag in data["axis_parts"]:
-        m[tag] = "parts"
-    for tag in data["axis_art_style"]["always_fixed"]:
-        m[tag] = "always_fixed"
-    for tag in data["axis_art_style"]["volatile"]:
-        m[tag] = "style"
-    for tag in data["axis_environment"]["visual_lighting"]:
-        m[tag] = "visual"
-    for tag in data["axis_environment"]["time_weather"]:
-        m[tag] = "time_weather"
-    for tag in data["axis_background"]["abstract"]:
-        m[tag] = "visual"
-    for tag in data["axis_background"]["location"]:
-        m[tag] = "location"
-    return m
-
-
-_AXIS = _build_axis_map()
-_CLOTHING_SUFFIXES = tuple(
-    json.loads(_JSON.read_text(encoding="utf-8"))["patterns"]["clothing_suffixes"]
-)
-_ACTION_KEYWORDS = tuple(
-    json.loads(_JSON.read_text(encoding="utf-8"))["patterns"]["action_keywords"]
-)
-
-
-def _get_tag_axis(tag: str) -> str | None:
-    """Mirror inspire._get_tag_axis without importing FastAPI-bound module."""
-    mapped = _AXIS.get(tag)
-    if mapped is not None:
-        return mapped
-    if tag.endswith("_hair"):
-        return "hair"
-    if tag.endswith("_eyes"):
-        return "always_fixed"
-    if any(tag.endswith(s) for s in _CLOTHING_SUFFIXES):
-        return "clothing"
-    if any(kw in tag for kw in _ACTION_KEYWORDS):
-        return "action"
-    return None
+from app.tags.catalog import TAG_TO_AXIS, get_tag_axis
 
 
 # Tags from cafe / rain-station / rooftop / festival / beach Chronicle sims.
@@ -141,13 +81,26 @@ _CHRONICLE_SCENE_TAGS = {
 
 @pytest.mark.parametrize("tag,expected", sorted(_CHRONICLE_SCENE_TAGS.items()))
 def test_chronicle_scene_tags_are_frozenset_classified(tag, expected):
-    assert _get_tag_axis(tag) == expected, f"{tag} → {_get_tag_axis(tag)}"
+    assert get_tag_axis(tag) == expected, f"{tag} → {get_tag_axis(tag)}"
 
 
-def test_tag_categories_json_is_valid_and_grew():
-    data = json.loads(_JSON.read_text(encoding="utf-8"))
-    assert len(_AXIS) >= 900
-    assert "festival" in data["axis_background"]["location"]
-    assert "pouring" in data["axis_action"]
-    assert "cinematic_lighting" in data["axis_environment"]["visual_lighting"]
-    assert "yukata" in data["axis_clothing_explicit"]
+def test_tag_catalog_grew_and_loads_json():
+    assert len(TAG_TO_AXIS) >= 900
+    assert get_tag_axis("festival") == "location"
+    assert get_tag_axis("pouring") == "action"
+    assert get_tag_axis("cinematic_lighting") == "visual"
+    assert get_tag_axis("yukata") == "clothing"
+    assert get_tag_axis("smile") == "emotion"
+    assert get_tag_axis("chartreuse_eyes") == "always_fixed"  # unknown colour
+    assert get_tag_axis("teary_eyes") == "emotion"  # listed expression
+
+
+def test_subject_anchors_insert_and_ensure():
+    from app.tags.subject_anchors import ensure_subject_anchor, insert_after_anchors
+
+    line = insert_after_anchors("1girl, solo, cafe", ["silver_hair", "1girl"])
+    assert line.startswith("1girl, solo, silver_hair")
+    assert line.count("1girl") == 1
+
+    docs = [({"wd14_tags": ["1girl", "cafe"], "wd14_tags_scores": [0.9, 0.5]}, 0)]
+    assert ensure_subject_anchor("cafe, smile", docs).startswith("1girl,")

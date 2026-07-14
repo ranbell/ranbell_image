@@ -19,6 +19,21 @@ import json
 import logging
 import re
 
+from ..prompt.visual_spec import (
+    CHRONICLE_CAT_FIELDS,
+    CHRONICLE_LABELED_TAG_FOOTER as _VS_LABELED_TAG_FOOTER,
+    merge_category_tags,
+    parse_visual_script as parse_visual_script_category_tags,
+)
+from ..tags.catalog import (
+    EXPRESSION_TAGS as _EXPRESSION_TAGS,
+    EXPRESSION_TOKENS as _EXPRESSION_TOKENS,
+)
+from ..tags.subject_anchors import (
+    SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHORS,
+    insert_after_anchors,
+)
+
 logger = logging.getLogger(__name__)
 
 AXES = ("past", "present", "future")
@@ -2410,41 +2425,7 @@ _VISUAL_SCRIPT_GUIDE = (
 
 
 # Refine-parity category buckets (UI + structured view for image models).
-CHRONICLE_CAT_FIELDS = (
-    "subject_tags",
-    "hair_tags",
-    "expression_tags",
-    "clothing_tags",
-    "accessory_tags",
-    "pose_tags",
-    "background_tags",
-    "object_tags",
-    "lighting_tags",
-)
-
-_VS_LABELED_TAG_FOOTER = (
-    "After the 5-paragraph prose (still inside POSITIVE, after the prose), "
-    "output ONLY these labeled category lines. Prefer tags already present in "
-    "the PASS 1 TAG LINE — do not invent a parallel taxonomy. Leave a bucket "
-    "empty if nothing fits:\n\n"
-    "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
-    "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
-    "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
-    "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
-    "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
-    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
-    "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
-    "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
-    "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
-)
-
-_VS_LABEL_RE = re.compile(
-    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
-    re.MULTILINE | re.IGNORECASE,
-)
-_VS_SECTION_MARKER_RE = re.compile(
-    r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I
-)
+# CHRONICLE_CAT_FIELDS / parse / merge / footer: see prompt.visual_spec
 
 _BUCKET_SUBJECT = frozenset({
     "1girl", "1boy", "2girls", "2boys", "3girls", "3boys", "4girls", "6+girls",
@@ -2481,37 +2462,6 @@ _BUCKET_OBJ = frozenset({
     "sword", "phone", "flower", "shell", "lantern", "confetti", "medal",
 })
 _EXPR_EYE_PREFIXES = ("teary", "closed", "empty", "half", "watery", "tired")
-
-
-def parse_visual_script_category_tags(text: str) -> tuple[str, dict[str, list[str]]]:
-    """Split Visual Script body into prose + Refine-style category dict."""
-    src = text or ""
-    first_m = _VS_LABEL_RE.search(src)
-    if first_m:
-        prose = src[: first_m.start()].strip()
-        tags_block = src[first_m.start():]
-    else:
-        prose = src.strip()
-        tags_block = ""
-    prose = _VS_SECTION_MARKER_RE.sub("", prose).strip()
-    cats: dict[str, list[str]] = {}
-    for m in _VS_LABEL_RE.finditer(tags_block):
-        field = m.group(1).lower() + "_tags"
-        raw = (m.group(2) or "").strip().strip("[]")
-        tags = [
-            t.strip().replace(" ", "_")
-            for t in raw.split(",")
-            if t.strip() and t.strip() not in ("[", "]")
-        ]
-        seen: set[str] = set()
-        out: list[str] = []
-        for t in tags:
-            k = t.lower()
-            if k not in seen:
-                seen.add(k)
-                out.append(t)
-        cats[field] = out
-    return prose, cats
 
 
 def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
@@ -2557,27 +2507,6 @@ def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
         else:
             cats["object_tags"].append(tag)
     return {k: v for k, v in cats.items() if v}
-
-
-def merge_category_tags(
-    *sources: dict[str, list[str]] | None,
-) -> dict[str, list[str]]:
-    """Merge category dicts; first occurrence of each tag wins globally."""
-    out: dict[str, list[str]] = {k: [] for k in CHRONICLE_CAT_FIELDS}
-    seen_global: set[str] = set()
-    for src in sources:
-        if not src:
-            continue
-        for key in CHRONICLE_CAT_FIELDS:
-            for tag in src.get(key) or []:
-                t = str(tag).strip().replace(" ", "_")
-                k = t.lower()
-                if not t or k in seen_global:
-                    continue
-                seen_global.add(k)
-                out[key].append(t)
-    return {k: v for k, v in out.items() if v}
-
 
 
 # Per-scale visual invariants used in both story and image-prompt generation.
@@ -2893,31 +2822,9 @@ def identity_lock_tags(
     return result
 
 
-# Mirror of api.ai._SUBJECT_ANCHOR_TAGS (kept local so this module stays
-# import-free / unit-testable) — update both together.
-_SUBJECT_ANCHORS = frozenset({
-    "1girl", "1boy", "2girls", "2boys", "3girls", "4girls", "6+girls",
-    "solo", "couple", "multiple_girls", "multiple_boys", "multiple girls",
-})
-
-
 def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
     """Insert identity tags after the last subject-anchor tag, dedup (ci)."""
-    parts = [t.strip() for t in tag_line.split(",") if t.strip()]
-    existing = {p.lower() for p in parts}
-    new: list[str] = []
-    for tag in identity:
-        key = tag.lower()
-        if key not in existing:
-            new.append(tag)
-            existing.add(key)
-    if not new:
-        return tag_line
-    cut = max(
-        (i + 1 for i, p in enumerate(parts) if p.lower() in _SUBJECT_ANCHORS),
-        default=0,
-    ) or len(parts)
-    return ", ".join(parts[:cut] + new + parts[cut:])
+    return insert_after_anchors(tag_line, list(identity))
 
 
 def merge_chronicle_axis_tags(
@@ -3590,38 +3497,7 @@ _DYNAMIC_ACTION_TOKENS = frozenset({
     "laughing", "winking",
 })
 
-# Face / mood tags required whenever a person is on-screen (emotion must read).
-# Mirrors tag_categories.json axis_emotion — kept local so generator stays
-# import-free. Expressionless/neutral/serious count: a blank face is still a
-# chosen expression; a *missing* expression is the failure mode.
-_EXPRESSION_TAGS = frozenset({
-    "smile", "smiling", "grin", "laugh", "laughing", "happy", "joyful",
-    "sad", "crying", "tears", "teary_eyes", "teary-eyed", "watery_eyes", "sobbing",
-    "expressionless", "neutral", "calm", "serious", "stoic",
-    "angry", "annoyed", "frustrated", "glaring", "frowning", "frown",
-    "blush", "blushing", "red_cheeks",
-    "surprised", "shocked", "open_mouth", "gasp",
-    "closed_mouth", "half_open_mouth",
-    "closed_eyes", "half-closed_eyes", "winking", "one_eye_closed",
-    "pout", "pouting", "smirk", "wink", "worried", "embarrassed", "shy",
-    "nervous", "confused", "flustered", "sleepy", "dazed",
-    "excited", "cheerful", "content", "satisfied", "reluctant",
-    "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
-    "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
-    "ecstatic", "horrified", "panicked", "relieved", "focused",
-    "wonder", "concentrating", "determined", "awe", "soft_smile",
-    "looking_at_viewer", "looking_away", "looking_back", "looking_at_another",
-    "looking_ahead", "looking_to_the_side",
-})
-_EXPRESSION_TOKENS = frozenset({
-    "smile", "smiling", "grin", "laugh", "tear", "tears", "teary", "sob",
-    "blush", "frown", "pout", "smirk", "wink", "angry", "sad", "shy",
-    "nervous", "worried", "expressionless", "serious", "stoic", "gasp",
-    "smug", "melancholy", "nostalgic", "pensive", "flustered", "embarrassed",
-    "scared", "terrified", "panicked", "relieved", "focused", "cheerful",
-    "joyful", "lonely", "annoyed", "glaring", "wonder", "concentrating",
-    "determined", "awe",
-})
+# Face / mood tags: _EXPRESSION_TAGS / _EXPRESSION_TOKENS from tags.catalog (top).
 
 # Shared identity / quality noise stripped before cross-axis tag comparison.
 _TAG_COMPARE_IGNORE = _SUBJECT_ANCHORS | _IDLE_POSE_TAGS | frozenset({

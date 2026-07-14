@@ -20,34 +20,14 @@ import re
 from pathlib import Path
 
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
+from ..tags.subject_anchors import (
+    PERSON_COUNT_TAGS as _PERSON_COUNT_TAGS,
+    ensure_subject_anchor as _ensure_subject_anchor,
+)
 
 _PRIORITY_ALIGNMENT = -10
 
 logger = logging.getLogger(__name__)
-
-# Person/subject count tags used as safety-net anchors in refine output.
-_PERSON_COUNT_TAGS = frozenset({
-    "1girl", "1boy", "solo", "2girls", "2boys", "3girls", "3boys",
-    "multiple_girls", "multiple_boys", "6+girls", "6+boys",
-    "1other", "2others", "multiple_others",
-})
-
-
-def _ensure_subject_anchor(tags_positive: str, raw_docs: list, wd14_scores_key: str = "wd14_tags_scores") -> str:
-    """If Pass 1 output lacks a subject count tag, prepend the highest-confidence one from WD14."""
-    tag_set = {t.strip().lower() for t in tags_positive.split(",") if t.strip()}
-    if tag_set & _PERSON_COUNT_TAGS:
-        return tags_positive
-    best_tag, best_score = "", 0.0
-    for doc, _idx in raw_docs:
-        wd14 = doc.get("wd14_tags", [])
-        scores = doc.get(wd14_scores_key) or []
-        for tag, score in zip(wd14, scores):
-            if tag in _PERSON_COUNT_TAGS and score > best_score:
-                best_tag, best_score = tag, score
-    if best_tag and best_score >= 0.40:
-        return f"{best_tag}, {tags_positive}"
-    return tags_positive
 
 
 # Quality meta-tags that must never appear in invoke positive/negative prompts.

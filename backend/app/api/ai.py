@@ -13,9 +13,19 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..ai.tile_image import create_tile_image
+from ..prompt.visual_spec import (
+    LABELED_TAG_FOOTER,
+    REFINE_CAT_FIELDS as _REFINE_CAT_FIELDS,
+    parse_visual_script as _parse_visual_script_sections,
+    strip_section_markers as _strip_visual_script_markers,
+)
 from ..runtime_config import get_runtime_config
 from ..scanner.scanner import register_image
 from ..spooler.models import JobLane
+from ..tags.subject_anchors import (
+    SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHOR_TAGS,
+    insert_after_anchors,
+)
 from .sort_utils import sort_docs
 
 logger = logging.getLogger(__name__)
@@ -362,21 +372,7 @@ _NATURAL_VISUAL_SCRIPT_INSTRUCTION = (
     "5. NEVER add quality meta-tags (masterpiece, best_quality, highres etc.).\n\n"
     "Write the 5-paragraph prose now. Then, on a new line after the prose, output ONLY these "
     "labeled tag lines (no JSON, no code block, no extra text):\n\n"
-    "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
-    "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
-    "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
-    "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
-    "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
-    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
-    "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
-    "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
-    "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
-)
-
-_REFINE_CAT_FIELDS = (
-    "subject_tags",
-    "hair_tags", "expression_tags", "clothing_tags", "accessory_tags",
-    "pose_tags", "background_tags", "object_tags", "lighting_tags",
+    f"{LABELED_TAG_FOOTER}"
 )
 
 
@@ -1089,19 +1085,7 @@ def _build_weighted_wd14_context(
     return context, analysis
 
 
-# ── Visual Script parser (labeled-section format, replaces fragile JSON parse) ──
-
-_VS_LABEL_RE = re.compile(
-    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
-    re.MULTILINE | re.IGNORECASE,
-)
-
-_SECTION_MARKER_RE = re.compile(r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I)
-
-_SUBJECT_ANCHOR_TAGS = frozenset({
-    "1girl", "1boy", "2girls", "2boys", "3girls", "4girls", "6+girls",
-    "solo", "couple", "multiple_girls", "multiple_boys", "multiple girls",
-})
+# ── Visual Spec / subject anchors: see prompt.visual_spec + tags.subject_anchors ──
 
 
 def _inject_wd14_must_tags(tags_text: str, wd14_analysis: dict) -> str:
@@ -1110,15 +1094,13 @@ def _inject_wd14_must_tags(tags_text: str, wd14_analysis: dict) -> str:
     High-budget (high-weight) images' tags are inserted first.
     Tags already present (case-insensitive) are skipped.
     """
-    parts = [t.strip() for t in tags_text.split(",") if t.strip()]
-    existing = {p.lower() for p in parts}
-
     sorted_images = sorted(
         wd14_analysis.get("unique_by_image", {}).items(),
         key=lambda x: x[1].get("budget", 0),
         reverse=True,
     )
     new_must: list[str] = []
+    existing = {t.strip().lower() for t in tags_text.split(",") if t.strip()}
     for _, info in sorted_images:
         for tag in info.get("must", []) + info.get("ref", []):
             key = tag.lower()
@@ -1128,14 +1110,7 @@ def _inject_wd14_must_tags(tags_text: str, wd14_analysis: dict) -> str:
 
     if not new_must:
         return tags_text
-
-    # Insert after every subject-anchor tag (1girl, solo, etc.), wherever they appear
-    cut = max(
-        (i + 1 for i, p in enumerate(parts) if p.lower() in _SUBJECT_ANCHOR_TAGS),
-        default=0,
-    ) or len(parts)
-
-    return ", ".join(parts[:cut] + new_must + parts[cut:])
+    return insert_after_anchors(tags_text, new_must)
 
 
 def _build_all_must(wd14_analysis: dict) -> list[str]:
@@ -1224,39 +1199,6 @@ def _correct_prose_wd14_conflicts(prose: str, all_must: list[str]) -> str:
 def _enforce_wd14_on_cat_tags(cat_tags: dict[str, list[str]], all_must: list[str]) -> dict[str, list[str]]:
     """Override VLM-generated category tags with WD14 must_unique where they conflict."""
     return {field: _apply_must_replacements(tags, all_must) for field, tags in cat_tags.items()}
-
-
-def _parse_visual_script_sections(text: str) -> tuple[str, dict[str, list[str]]]:
-    """Split visual script into prose + per-category tag dict.
-
-    Handles the labeled section format:
-        [prose...]
-        HAIR_TAGS: purple_hair, long_hair
-        POSE_TAGS: standing, arms_at_sides
-        ...
-    Falls back gracefully when labels are absent (returns full text as prose).
-    """
-    from .inspire import _split_tags  # local import to avoid circular dep
-
-    first_m = _VS_LABEL_RE.search(text)
-    if first_m:
-        prose = text[: first_m.start()].strip()
-        tags_block = text[first_m.start():]
-    else:
-        prose = text.strip()
-        tags_block = ""
-
-    cat_tags: dict[str, list[str]] = {}
-    for m in _VS_LABEL_RE.finditer(tags_block):
-        field = m.group(1).lower() + "_tags"
-        cat_tags[field] = _split_tags(m.group(2))
-
-    return prose, cat_tags
-
-
-def _strip_visual_script_markers(text: str) -> str:
-    """Remove [CHARACTER]/[ACTION]/[SCENE]/[DETAIL]/[MOOD] section markers from prose."""
-    return _SECTION_MARKER_RE.sub("", text).strip()
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────

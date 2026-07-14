@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from ..ai.tile_image import create_tile_image
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
+from ..tags import catalog as tag_catalog
 from .inspire_axes import (
     AXIS_DEFINITIONS, ALL_AXES, AXIS_ALIAS_MAP,
     STEP1_AXIS_TABLE, STEP2_INVERSION_HINTS,
@@ -38,67 +39,31 @@ def _load_wd14_character_tags() -> frozenset[str]:
 
 _WD14_CHAR_TAGS: frozenset[str] = _load_wd14_character_tags()
 
-# ── Tag category data from JSON ────────────────────────────────────────────────
-_TAG_DATA: dict = json.loads(
-    (Path(__file__).parent.parent / "static" / "tag_categories.json").read_text(encoding="utf-8")
-)
+# ── Tag category data (shared catalog — tag_categories.json) ───────────────────
+_TAG_DATA: dict = tag_catalog.TAG_DATA
+_FTC_COUNT = tag_catalog.COUNT
+_FTC_EYE_SHAPES = tag_catalog.EYE_SHAPES
+_FTC_BODY = tag_catalog.BODY
+_FTC_SKIN_FACE = tag_catalog.SKIN_FACE
+_FTC_RACE = tag_catalog.RACE
+_FTC_COMPOSITION = tag_catalog.COMPOSITION
+_FTC_PROPS = tag_catalog.PROPS
+_FTC_HAIR_STYLES = tag_catalog.HAIR_STYLES
+_FTC_EXPRESSION = tag_catalog.EXPRESSION
+_FTC_POSE = tag_catalog.POSE
+_FTC_CLOTHING_EXPLICIT = tag_catalog.CLOTHING_EXPLICIT
+_FTC_ACCESSORIES = tag_catalog.ACCESSORIES
+_FTC_BODY_PARTS = tag_catalog.BODY_PARTS
+_FTC_ART_STYLE = tag_catalog.ART_STYLE
+_FTC_ENVIRONMENT = tag_catalog.ENVIRONMENT
+_FTC_BACKGROUND = tag_catalog.BACKGROUND
+_FTC_CLOTHING_SUFFIXES = tag_catalog.CLOTHING_SUFFIXES
+_FTC_ACTION_KEYWORDS = tag_catalog.ACTION_KEYWORDS
+_STYLE_ALWAYS_FIXED = tag_catalog.STYLE_ALWAYS_FIXED
+_VISUAL_LIGHTING = tag_catalog.VISUAL_LIGHTING
+_ABSTRACT_BG = tag_catalog.ABSTRACT_BG
 
-def _fs(*keys: str) -> frozenset[str]:
-    """Retrieve tags at the given JSON key path and return as a frozenset."""
-    d: dict | list = _TAG_DATA
-    for k in keys:
-        d = d[k]  # type: ignore
-    return frozenset(d)  # type: ignore
-
-_FTC_COUNT:             frozenset[str] = _fs("always_fixed", "count")
-_FTC_EYE_SHAPES:        frozenset[str] = _fs("always_fixed", "eye_shapes")
-_FTC_BODY:              frozenset[str] = _fs("always_fixed", "body")
-_FTC_SKIN_FACE:         frozenset[str] = _fs("always_fixed", "skin_face")
-_FTC_RACE:              frozenset[str] = _fs("always_fixed", "race")
-_FTC_COMPOSITION:       frozenset[str] = _fs("always_fixed", "composition")
-_FTC_PROPS:             frozenset[str] = _fs("always_fixed", "props")
-_FTC_HAIR_STYLES:       frozenset[str] = _fs("axis_hair")
-_FTC_EXPRESSION:        frozenset[str] = _fs("axis_emotion")
-_FTC_POSE:              frozenset[str] = _fs("axis_action")
-_FTC_CLOTHING_EXPLICIT: frozenset[str] = _fs("axis_clothing_explicit")
-_FTC_ACCESSORIES:       frozenset[str] = _fs("axis_accessories")
-_FTC_BODY_PARTS:        frozenset[str] = _fs("axis_parts")
-_FTC_ART_STYLE:         frozenset[str] = (
-    _fs("axis_art_style", "volatile") | _fs("axis_art_style", "always_fixed")
-)
-_FTC_ENVIRONMENT:       frozenset[str] = (
-    _fs("axis_environment", "visual_lighting") | _fs("axis_environment", "time_weather")
-)
-_FTC_BACKGROUND:        frozenset[str] = (
-    _fs("axis_background", "abstract") | _fs("axis_background", "location")
-)
-_FTC_CLOTHING_SUFFIXES: tuple[str, ...] = tuple(_TAG_DATA["patterns"]["clothing_suffixes"])
-_FTC_ACTION_KEYWORDS:   tuple[str, ...] = tuple(_TAG_DATA["patterns"]["action_keywords"])
-
-_STYLE_ALWAYS_FIXED: frozenset[str] = _fs("axis_art_style", "always_fixed")
-_VISUAL_LIGHTING:    frozenset[str] = _fs("axis_environment", "visual_lighting")
-_ABSTRACT_BG:        frozenset[str] = _fs("axis_background", "abstract")
-
-# ── Display group lookup: tag → display group name (JSON driven) ──────────────
-def _build_display_group_map() -> dict[str, str]:
-    """Build a tag→group-name dict from tag_categories.json display_category_map."""
-    result: dict[str, str] = {}
-    for entry in _TAG_DATA.get("display_category_map", []):
-        label = entry["label"]
-        path = entry["source"].split(".")
-        node: dict | list = _TAG_DATA
-        for key in path:
-            if isinstance(node, dict):
-                node = node.get(key, [])
-            else:
-                node = []
-        if isinstance(node, list):
-            for tag in node:
-                if tag not in result:          # First-win (first definition takes priority)
-                    result[tag] = label
-    return result
-
-_TAG_DISPLAY_GROUP: dict[str, str] = _build_display_group_map()
+_TAG_DISPLAY_GROUP: dict[str, str] = tag_catalog.build_display_group_map()
 
 router = APIRouter(prefix="/api/inspire")
 
@@ -751,69 +716,16 @@ def _split_tags(tag_str: str) -> list[str]:
 
 
 def _build_tag_to_axis() -> dict[str, str]:
-    """Build tag→axis mapping from frozensets + WD14 CSV. 'always_fixed' means fixed with no axis."""
-    m: dict[str, str] = {}
-
-    # WD14 category=4 character name tags → always FIXED
-    for tag in _WD14_CHAR_TAGS:
-        m[tag] = 'always_fixed'
-
-    # Content rating tags → always FIXED (VLM judgment is ambiguous for these)
-    for tag in ("general", "sensitive", "explicit", "safe", "nsfw",
-                "questionable", "rating_safe", "rating_explicit", "rating_general"):
-        m[tag] = 'always_fixed'
-
-    # Always FIXED (never becomes volatile regardless of which axis is selected)
-    for tag in (*_FTC_COUNT, *_FTC_EYE_SHAPES, *_FTC_BODY,
-                *_FTC_SKIN_FACE, *_FTC_RACE, *_FTC_COMPOSITION, *_FTC_PROPS):
-        m[tag] = 'always_fixed'
-
-    # style axis — some are always FIXED (uses top-level constant _STYLE_ALWAYS_FIXED)
-    for tag in _FTC_ART_STYLE:
-        m[tag] = 'always_fixed' if tag in _STYLE_ALWAYS_FIXED else 'style'
-
-    for tag in _FTC_HAIR_STYLES:        m[tag] = 'hair'
-    for tag in _FTC_EXPRESSION:         m[tag] = 'emotion'
-    for tag in _FTC_POSE:               m[tag] = 'action'
-    for tag in _FTC_ACCESSORIES:        m[tag] = 'clothing'
-    for tag in _FTC_CLOTHING_EXPLICIT:  m[tag] = 'clothing'
-    for tag in _FTC_BODY_PARTS:         m[tag] = 'parts'
-
-    # _FTC_ENVIRONMENT: visual lighting vs time/weather (uses top-level constant _VISUAL_LIGHTING)
-    for tag in _FTC_ENVIRONMENT:
-        m[tag] = 'visual' if tag in _VISUAL_LIGHTING else 'time_weather'
-
-    # _FTC_BACKGROUND: abstract background vs location (uses top-level constant _ABSTRACT_BG)
-    for tag in _FTC_BACKGROUND:
-        m[tag] = 'visual' if tag in _ABSTRACT_BG else 'location'
-
-    return m
+    """Build tag→axis mapping from shared catalog + WD14 character names."""
+    return tag_catalog.build_tag_to_axis(extra_always_fixed=_WD14_CHAR_TAGS)
 
 
 _TAG_TO_AXIS: dict[str, str] = _build_tag_to_axis()
 
 
 def _get_tag_axis(tag: str) -> str | None:
-    """Return the axis for a tag; None if not in any frozenset. Suffix patterns take precedence.
-
-    Expression / gaze tags that end in ``_eyes`` (closed_eyes, teary_eyes…) must
-    NOT be forced into always_fixed — that path was freezing emotion and killing
-    facial diversity. Known frozenset/LLM map entries win first.
-    """
-    mapped = _TAG_TO_AXIS.get(tag)
-    if mapped is not None:
-        return mapped
-    if tag.endswith('_hair'):
-        return 'hair'
-    if tag.endswith('_eyes'):
-        # Eye COLOUR (blue_eyes) stays identity-fixed; expressive eye states are
-        # already in _TAG_TO_AXIS as emotion when listed under axis_emotion.
-        return 'always_fixed'
-    if any(tag.endswith(s) for s in _FTC_CLOTHING_SUFFIXES):
-        return 'clothing'
-    if any(kw in tag for kw in _FTC_ACTION_KEYWORDS):
-        return 'action'
-    return None
+    """Return the axis for a tag; None if not in any frozenset."""
+    return tag_catalog.get_tag_axis(tag, mapping=_TAG_TO_AXIS)
 
 
 def _group_volatile_by_axis(
