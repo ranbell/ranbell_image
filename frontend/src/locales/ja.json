@@ -1343,6 +1343,8 @@
     "randomEmpty": "ライブラリに画像がありません",
     "noBase": "ベース画像を選択してください",
     "reasoning": "推論の内訳",
+    "draftMaterials": "下書きメモ",
+    "draftInProgress": "作成中",
     "reasonShot": "構図",
     "reasonPose": "ポーズ",
     "reasonTags": "根拠タグ",

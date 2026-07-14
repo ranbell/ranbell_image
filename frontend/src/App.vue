@@ -2540,11 +2540,21 @@ function openChronicle(img = null) {
     const first = [...selectedIds.value][0]
     base = images.value.find(i => i.sha256 === first) || { sha256: first }
   }
-  // Dismiss gallery detail so it cannot cover Chronicle (both were z-70).
+  // Storybook sits under Chronicle on the z-scale — close it so Chronicle is visible.
+  showStorybook.value = false
+  // Dismiss gallery detail so it cannot cover Chronicle.
   selected.value = null
   // Force a new object so ChroniclePanel watch fires even for the same sha.
   chronicleBase.value = base?.sha256 ? { ...base, sha256: base.sha256 } : base
   showChronicle.value = true
+}
+
+function openStorybook() {
+  // Chronicle is above Storybook (--z-panel-chronicle > --z-panel-story).
+  // Leaving it open makes Storybook look like it "won't open".
+  showChronicle.value = false
+  selected.value = null
+  showStorybook.value = true
 }
 
 function openChronicleFromTray() {
@@ -2878,7 +2888,7 @@ onUnmounted(() => {
             class="px-3 py-1.5 bg-teal-900/70 hover:bg-teal-800/80 border border-teal-600/40 hover:border-teal-500/60 rounded-lg text-xs font-medium text-teal-200 transition-colors whitespace-nowrap">
             {{ $t('header.chronicle') }}
           </button>
-          <button @click="showStorybook = true"
+          <button @click="openStorybook()"
             class="px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 border border-amber-600/40 hover:border-amber-500/60 rounded-lg text-xs font-medium text-amber-200 transition-colors whitespace-nowrap">
             {{ $t('header.storybook') }}
           </button>
@@ -5152,7 +5162,7 @@ onUnmounted(() => {
       :get-jobs-map="getJobsMap"
       @update:show="showChronicle = $event"
       @toast="showToast($event.msg, $event.type)"
-      @open-storybook="showChronicle = false; showStorybook = true"
+      @open-storybook="openStorybook()"
     />
 
     <!-- ── Storybook ── -->

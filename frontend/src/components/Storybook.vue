@@ -250,7 +250,10 @@ watch(() => props.show, (val) => {
 function close() { emit('update:show', false) }
 function _dismissBlocked() { return performance.now() < _ignoreDismissUntil }
 
-function onBackdropDown(e) { _backdropArmed = e.target === e.currentTarget }
+function onBackdropDown(e) {
+  if (e.target === e.currentTarget) _backdropArmed = true
+  else _backdropArmed = false
+}
 function onBackdropUp(e) {
   const armed = _backdropArmed
   _backdropArmed = false
@@ -562,8 +565,13 @@ function onKey(e) {
     else if (e.key === '2') { detailScrubIdx.value = 1; e.preventDefault() }
     else if (e.key === '3') { detailScrubIdx.value = 2; e.preventDefault() }
   } else if (e.key === 'Escape') {
-    if (_dismissBlocked()) { e.preventDefault(); return }
+    if (_dismissBlocked()) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     close()
+    e.preventDefault()
   }
 }
 onMounted(() => window.addEventListener('keydown', onKey))
@@ -573,8 +581,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 <template>
   <Teleport to="body">
     <div v-if="show" class="storybook-root fixed inset-0 z-[var(--z-panel-story)] flex items-center justify-center p-4"
-      @mousedown="onBackdropDown" @mouseup="onBackdropUp">
-      <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
+      @mousedown.self="onBackdropDown"
+      @mouseup.self="onBackdropUp">
+      <div class="sb-shell relative w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden"
+        @mousedown.stop>
 
         <!-- header -->
         <div class="flex items-center justify-between px-5 py-3.5 sb-hairline">

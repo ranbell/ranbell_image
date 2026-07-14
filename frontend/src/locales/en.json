@@ -1343,6 +1343,8 @@
     "randomEmpty": "No images in library",
     "noBase": "Choose a base image first",
     "reasoning": "Reasoning",
+    "draftMaterials": "Draft notes",
+    "draftInProgress": "in progress",
     "reasonShot": "shot",
     "reasonPose": "pose",
     "reasonTags": "evidence tags",

@@ -972,6 +972,42 @@ def parse_story_sections(raw: str) -> dict[str, str]:
     return result
 
 
+def story_sections_complete(
+    sections: dict[str, str] | None,
+    *,
+    min_axis_chars: int = 12,
+) -> bool:
+    """True when all three acts look present and not mid-truncation.
+
+    Used after expand / repair to decide whether to retry. TITLE/OVERALL may be
+    filled later by dedicated fallbacks; PAST/PRESENT/FUTURE must stand alone.
+    min_axis_chars is kept low so dense JA prose still passes.
+    """
+    if not isinstance(sections, dict):
+        return False
+    for axis in AXES:
+        text = str(sections.get(axis) or "").strip()
+        if len(text) < min_axis_chars:
+            return False
+        # Cut off mid-stream: hanging open quote / bracket.
+        if text[-1] in "「『（([{\"'":
+            return False
+    return True
+
+
+def merge_story_sections(
+    primary: dict[str, str],
+    secondary: dict[str, str],
+) -> dict[str, str]:
+    """Prefer non-empty primary fields; fill gaps from secondary."""
+    out = {k: "" for k in SECTIONS}
+    for k in SECTIONS:
+        a = str((primary or {}).get(k) or "").strip()
+        b = str((secondary or {}).get(k) or "").strip()
+        out[k] = a or b
+    return out
+
+
 def build_story_repair_prompt(raw_story: str) -> str:
     """Fallback when marker parsing fails: restructure the raw output as JSON."""
     return (

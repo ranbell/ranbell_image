@@ -2371,6 +2371,34 @@ def test_translation_values_complete_and_chunk_list():
     assert chunk_list([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
 
 
+def test_story_sections_complete_and_merge():
+    from app.story.generator import merge_story_sections, story_sections_complete
+
+    complete = {
+        "title": "Rain Letter",
+        "overall": "A letter changes everything.",
+        "past": "彼女は雨の駅で手紙を握りしめていた。",
+        "present": "今、その封を開ける指が少し震えている。",
+        "future": "数年後、同じ駅で彼女は返事を書く。",
+    }
+    assert story_sections_complete(complete)
+
+    truncated = {**complete, "future": "数年後、同じ駅で彼女は「"}
+    assert not story_sections_complete(truncated)
+
+    missing = {**complete, "past": "短い"}
+    assert not story_sections_complete(missing)
+    assert not story_sections_complete({**complete, "future": ""})
+
+    merged = merge_story_sections(
+        {"title": "", "overall": "", "past": "A" * 30, "present": "", "future": ""},
+        {"title": "T", "overall": "O", "past": "old", "present": "B" * 30, "future": "C" * 30},
+    )
+    assert merged["title"] == "T"
+    assert merged["past"].startswith("A")
+    assert merged["present"].startswith("B")
+
+
 def test_timetable_prompt_requests_axis_field():
     tt = build_timetable_prompt(
         biography={}, scene_desc="cafe", time_scale="hours",

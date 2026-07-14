@@ -278,9 +278,13 @@ function displayAxisStory(axis) {
 const hasAxisStories = computed(() =>
   AXES.some(a => !!(axisStories.value[a] || axisStoriesJa.value[a]))
 )
-/** Show the expand stream in the open pane until structured acts arrive. */
+/** Show expand stream openly until structured acts arrive (any post-select step).
+ *  Do NOT gate on currentStep===3: once examining/prompt phases start, step becomes
+ *  4 and a truncated expand (no [PAST]/… markers) would otherwise collapse into a
+ *  closed <details> — looking like the expand window vanished. */
 const showLiveStream = computed(() =>
-  running.value && !!streamText.value && !hasAxisStories.value && currentStep.value === 3
+  !!streamText.value && !hasAxisStories.value && !selecting.value
+  && (running.value || (!finished.value && currentStep.value >= 3))
 )
 function _axesFromMap(src) {
   const out = {}
@@ -348,6 +352,15 @@ const weaverCaption = computed(() => {
 /** Keep the panel open during pipeline / image jobs — ignore Esc & backdrop. */
 const stayOpen = computed(() => {
   if (running.value) return true
+  // Truncation / pipeline errors must leave the panel readable for retry.
+  if (errorMsg.value) return true
+  // image_jobs may arrive a tick before the 2s poll fills imageGen.states.
+  if (imageJobs.value.length) {
+    if (imageGen.value.active) return true
+    const states = imageGen.value.states || {}
+    if (!Object.keys(states).length) return true
+    return Object.values(states).some(s => s === 'queued' || s === 'running')
+  }
   if (imageGen.value.active) return true
   const states = imageGen.value.states || {}
   return Object.values(states).some(s => s === 'queued' || s === 'running')
@@ -599,9 +612,13 @@ function activityFor(axis) {
   if (!c) return ''
   return (panelLang.value === 'ja' && c.ja && c.ja[axis]) ? c.ja[axis] : (c.en?.[axis] || '')
 }
-const hasReasoning = computed(() =>
-  !!bioView.value || timetableView.value.length > 0 || !!concrete.value
-  || Object.keys(axisReasoning.value).length > 0
+/** Bio / timetable / concrete drafted during expand — keep visible while creating. */
+const hasDraftMaterials = computed(() =>
+  !!bioView.value || timetableView.value.length > 0
+  || REASON_AXES.some(a => !!activityFor(a)),
+)
+const hasShotReasoning = computed(() =>
+  Object.keys(axisReasoning.value).length > 0
   || Object.keys(axisDrafts.value).length > 0,
 )
 
@@ -677,6 +694,7 @@ async function _runStream(jobId) {
 
 async function _submitAndStream(url, payload, onJob) {
   running.value = true
+  errorMsg.value = ''
   try {
     const r = await fetch(url, {
       method: 'POST',
@@ -692,6 +710,9 @@ async function _submitAndStream(url, payload, onJob) {
     emit('toast', { msg: errorMsg.value, type: 'error' })
   } finally {
     running.value = false
+    // Grace window so Esc/backdrop can't win the race between stream end and
+    // image_jobs / first job-poll sample (same class of bug as mid-expand dismiss).
+    _ignoreDismissUntil = performance.now() + 2000
   }
 }
 
@@ -750,6 +771,9 @@ async function selectCandidate(cid) {
   if (!storyId.value || running.value) return
   selectedCandidate.value = cid
   selecting.value = false
+  // Leave 'selecting' phase immediately so the live expand pane (step≥3) can show
+  // before the first SSE phase event arrives.
+  phase.value = 'expanding'
   resetStory()
   await _submitAndStream(`/api/story/chronicle/${storyId.value}/select`,
     { candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] })
@@ -1552,6 +1576,54 @@ async function generateImages() {
               </div>
             </div>
 
+            <!-- Draft materials: always open while creating (not buried in <details>) -->
+            <div v-if="hasDraftMaterials" class="flex flex-col gap-2">
+              <h3 class="sb-label text-teal-300/90 flex items-center gap-1.5">
+                <SbIcon name="spark" class="w-3.5 h-3.5" />
+                {{ t('chronicle.draftMaterials') }}
+                <span v-if="running" class="normal-case font-normal text-[var(--sb-muted)]">
+                  · {{ t('chronicle.draftInProgress') }}
+                </span>
+              </h3>
+
+              <div v-if="bioView" class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px] text-gray-300 space-y-1">
+                <div class="sb-label text-teal-300/80 flex items-center gap-1">
+                  <SbIcon name="book" class="w-3 h-3" />{{ t('storybook.biography') }}
+                </div>
+                <p v-if="bioView.personality">{{ bioView.personality }}</p>
+                <p v-if="bioView.occupation" class="text-gray-400 break-words">
+                  <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ bioView.occupation }}
+                </p>
+                <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
+                  <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
+                </p>
+                <p v-if="bioView.backstory" class="text-gray-400 italic pt-1">{{ bioView.backstory }}</p>
+              </div>
+
+              <div v-if="timetableView.length" class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px]">
+                <div class="sb-label text-teal-300/80 mb-1 flex items-center gap-1">
+                  <SbIcon name="clock" class="w-3 h-3" />{{ t('storybook.timetable') }}
+                </div>
+                <ul class="space-y-0.5">
+                  <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
+                    <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
+                    <span class="min-w-0">
+                      {{ s.activity }}
+                      <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
+                      <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              <div v-for="axis in REASON_AXES" :key="'act-' + axis"
+                v-show="activityFor(axis)"
+                class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px]">
+                <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
+                <p class="text-gray-300">{{ activityFor(axis) }}</p>
+              </div>
+            </div>
+
             <!-- live expand stream (open) until structured acts arrive -->
             <div v-if="showLiveStream"
               class="rounded-xl border border-teal-800/40 bg-black/40 p-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto font-light">
@@ -1570,30 +1642,8 @@ async function generateImages() {
               <pre class="px-3 pb-3 text-xs text-gray-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto font-light">{{ streamText }}<span v-if="running" class="animate-pulse text-teal-400">▍</span></pre>
             </details>
 
-            <!-- timetable: always open when present (was hidden inside collapsed Reasoning) -->
-            <details v-if="timetableView.length" class="rounded-xl border border-white/5 bg-black/25" open>
-              <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
-                <span class="flex items-center gap-1.5">
-                  <SbIcon name="clock" class="w-3.5 h-3.5 text-teal-400/80" />
-                  {{ t('storybook.timetable') }}
-                </span>
-              </summary>
-              <div class="px-3 pb-3">
-                <ul class="space-y-0.5 text-[11px]">
-                  <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
-                    <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
-                    <span class="min-w-0">
-                      {{ s.activity }}
-                      <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
-                      <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </details>
-
-            <!-- reasoning (closed) -->
-            <details v-if="hasReasoning" class="rounded-xl border border-white/5 bg-black/25">
+            <!-- shot / tag / draft-tag reasoning (secondary — may stay folded) -->
+            <details v-if="hasShotReasoning" class="rounded-xl border border-white/5 bg-black/25">
               <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
                 <span class="flex items-center gap-1.5">
                   <SbIcon name="spark" class="w-3.5 h-3.5" />
@@ -1601,25 +1651,10 @@ async function generateImages() {
                 </span>
               </summary>
               <div class="px-3 pb-3 flex flex-col gap-2">
-                <div v-if="bioView" class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px] text-gray-300 space-y-1">
-                  <div class="sb-label text-teal-300/80 flex items-center gap-1">
-                    <SbIcon name="book" class="w-3 h-3" />{{ t('storybook.biography') }}
-                  </div>
-                  <p v-if="bioView.personality">{{ bioView.personality }}</p>
-                  <p v-if="bioView.occupation" class="text-gray-400 break-words">
-                    <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ bioView.occupation }}
-                  </p>
-                  <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
-                    <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
-                  </p>
-                  <p v-if="bioView.backstory" class="text-gray-400 italic pt-1">{{ bioView.backstory }}</p>
-                </div>
-
-                <div v-for="axis in REASON_AXES" :key="axis"
-                  v-show="activityFor(axis) || axisReasoning[axis] || axisDrafts[axis]"
+                <div v-for="axis in REASON_AXES" :key="'shot-' + axis"
+                  v-show="axisReasoning[axis] || axisDrafts[axis]"
                   class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px]">
                   <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
-                  <p v-if="activityFor(axis)" class="text-gray-300 mb-1">{{ activityFor(axis) }}</p>
                   <div v-if="axisReasoning[axis]" class="text-[10px] text-[var(--sb-muted)] space-y-0.5">
                     <p v-if="axisReasoning[axis].shot || axisReasoning[axis].camera">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonShot') }}:</span>

@@ -3321,6 +3321,7 @@ async def run_chronicle_expand(
         merge_chronicle_axis_tags,
         merge_category_tags,
         merge_draft_wd14_tags,
+        merge_story_sections,
         parse_axis_tags_json,
         parse_visual_script_category_tags,
         bucket_danbooru_tags,
@@ -3336,6 +3337,7 @@ async def run_chronicle_expand(
         repair_collapsed_axis_tags,
         should_differentiate_acts,
         should_use_draft_refine,
+        story_sections_complete,
         translation_values_complete,
     )
 
@@ -3621,54 +3623,70 @@ async def run_chronicle_expand(
         # ── Story FIRST: connective past/current/future prose (Storybook display
         # + English WD14 search seed). Gesture enrichment is deferred — prompts
         # are grounded in the finished acts rather than the other way around.
+        #
+        # Truncation (num_ctx + think) previously left marker-less / half-cut acts:
+        # repair once, then retry the whole expand without think if still incomplete.
         _phase("expanding", 0.16, "Writing the chronicle...")
         _put({"type": "token", "text": "\n\n"})
         connect_seed = dict(selected)
-        story_tokens: list[str] = []
-        async for event in ollama.generate_text_stream(
-            build_expand_prompt(
-                selected=connect_seed,
-                character_desc=character_desc,
-                scene_desc=scene_desc,
-                base_axis=body.base_time_axis,
-                worldview=body.worldview,
-                time_scale=body.time_scale,
-                story_hooks=story_hooks,
-                divergence=divergence,
-                emotion=body.emotion,
-                locale=locale,
-                mutation_tags=mutation_tags,
-                user_topic=body.user_topic,
-                topic_directive=ctx.get("topic_directive", ""),
-                biography=biography,
-                timetable=timetable,
-                tone=body.tone,
-                seed_tags=seed_tags,
-                forced_motif=forced_motif,
-                axis_slots=axis_slots,
-            ),
-            model=vlm_model, options=options, think=True,
-        ):
-            if _abort.is_set():
-                raise JobCancelled()
-            _put(event)
-            if event["type"] == "token":
-                story_tokens.append(event["text"])
-        sections = parse_story_sections("".join(story_tokens))
-        cancel.raise_if_set()
+        expand_prompt = build_expand_prompt(
+            selected=connect_seed,
+            character_desc=character_desc,
+            scene_desc=scene_desc,
+            base_axis=body.base_time_axis,
+            worldview=body.worldview,
+            time_scale=body.time_scale,
+            story_hooks=story_hooks,
+            divergence=divergence,
+            emotion=body.emotion,
+            locale=locale,
+            mutation_tags=mutation_tags,
+            user_topic=body.user_topic,
+            topic_directive=ctx.get("topic_directive", ""),
+            biography=biography,
+            timetable=timetable,
+            tone=body.tone,
+            seed_tags=seed_tags,
+            forced_motif=forced_motif,
+            axis_slots=axis_slots,
+        )
 
-        if not all(sections.get(a) for a in AXES) or not sections.get("overall"):
-            try:
-                fixed = parse_story_json(await ollama.generate_text(
-                    build_story_repair_prompt("".join(story_tokens)),
-                    model=vlm_model, options=options, fmt="json",
-                ))
-                for key, value in fixed.items():
-                    if value and not sections.get(key):
-                        sections[key] = value
-            except Exception as exc:
-                logger.warning("[chronicle] story repair pass failed: %s", exc)
+        async def _stream_expand(*, think: bool) -> tuple[dict[str, str], str]:
+            tokens: list[str] = []
+            async for event in ollama.generate_text_stream(
+                expand_prompt, model=vlm_model, options=options, think=think,
+            ):
+                if _abort.is_set():
+                    raise JobCancelled()
+                _put(event)
+                if event["type"] == "token":
+                    tokens.append(event["text"])
+            raw = "".join(tokens)
+            parsed = parse_story_sections(raw)
             cancel.raise_if_set()
+            if not story_sections_complete(parsed) or not parsed.get("overall"):
+                try:
+                    fixed = parse_story_json(await ollama.generate_text(
+                        build_story_repair_prompt(raw),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                    parsed = merge_story_sections(parsed, fixed)
+                except Exception as exc:
+                    logger.warning("[chronicle] story repair pass failed: %s", exc)
+                cancel.raise_if_set()
+            return parsed, raw
+
+        sections, _story_raw = await _stream_expand(think=True)
+        if not story_sections_complete(sections):
+            logger.warning(
+                "[chronicle] expand truncated after think+repair; retrying without think"
+            )
+            _put({"type": "warning",
+                  "message": "Story looked truncated — rewriting without thinking..."})
+            _phase("expanding", 0.20, "Rewriting the chronicle...")
+            _put({"type": "token", "text": "\n\n— retry —\n"})
+            retry_sections, _ = await _stream_expand(think=False)
+            sections = merge_story_sections(retry_sections, sections)
 
         stories = {a: (sections.get(a) or beats[a]) for a in AXES}
         title = sections.get("title") or selected.get("title") or "Untitled Chronicle"
@@ -3721,17 +3739,56 @@ async def run_chronicle_expand(
                 logger.warning("[chronicle] differentiate rewrite failed: %s", exc)
             cancel.raise_if_set()
 
+        if not story_sections_complete(stories):
+            _put({"type": "warning",
+                  "message": "Expanded story may be incomplete — check Past/Present/Future."})
+
         _put({"type": "story", "title": title, "overall": overall, "axes": stories})
 
         # English canonical copy — also the WD14 / visual-exam query source.
         if locale == "ja":
             title_ja, overall_ja = title, overall
             stories_ja = dict(stories)
+            src_for_en = {"title": title, "overall": overall, **stories}
+            en_map: dict[str, str] = {}
             try:
                 en_map = parse_english_translation_json(await ollama.generate_text(
                     build_translation_to_english_prompt(title, overall, stories),
                     model=vlm_model, options=options, fmt="json",
                 ))
+                if not translation_values_complete(src_for_en, en_map):
+                    logger.warning(
+                        "[chronicle] to-English translation incomplete; retrying once"
+                    )
+                    en_map = parse_english_translation_json(await ollama.generate_text(
+                        build_translation_to_english_prompt(title, overall, stories),
+                        model=vlm_model, options=options, fmt="json",
+                    ))
+                if not translation_values_complete(src_for_en, en_map):
+                    # Per-axis fallback — smaller JSON, less likely to truncate.
+                    logger.warning(
+                        "[chronicle] to-English still incomplete; translating per axis"
+                    )
+                    for axis in AXES:
+                        if en_map.get(axis) and translation_values_complete(
+                            stories[axis], en_map.get(axis)
+                        ):
+                            continue
+                        try:
+                            part = parse_english_translation_json(
+                                await ollama.generate_text(
+                                    build_translation_to_english_prompt(
+                                        "", "", {axis: stories[axis]}
+                                    ),
+                                    model=vlm_model, options=options, fmt="json",
+                                )
+                            )
+                            if part.get(axis):
+                                en_map[axis] = part[axis]
+                        except Exception as exc:
+                            logger.warning(
+                                "[chronicle] %s to-English fallback failed: %s", axis, exc
+                            )
             except Exception as exc:
                 logger.warning("[chronicle] to-English translation failed: %s", exc)
                 en_map = {}
