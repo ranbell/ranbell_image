@@ -200,11 +200,21 @@ def _score_topic_fit(
             *(activities.get(a) or "" for a in AXES),
         ]
     ).lower()
-    hits = sum(1 for tok in tokens if tok in blob)
-    ratio = hits / max(1, len(tokens))
+    # When the story blob is English-only, ignore pure-CJK anchors so JA お題
+    # aliases (festival←夏祭) are not diluted by tokens that can never hit.
+    blob_has_cjk = any("\u3400" <= c <= "\u9fff" for c in blob)
+    if not blob_has_cjk:
+        matchable = [
+            t for t in tokens
+            if not any("\u3400" <= c <= "\u9fff" for c in t)
+        ] or tokens
+    else:
+        matchable = tokens
+    hits = sum(1 for tok in matchable if tok in blob)
+    ratio = hits / max(1, len(matchable))
     # Soft curve: 1 token hit → ~0.45, half → ~0.7, all → 1.0
     score = _clamp01(0.25 + 0.75 * ratio)
-    return score, f"hits={hits}/{len(tokens)}"
+    return score, f"hits={hits}/{len(matchable)}"
 
 
 def _score_diversity(
