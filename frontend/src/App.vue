@@ -2305,7 +2305,7 @@ function cancelRefine() {
 }
 
 async function runRefine() {
-  if (selectedCount.value === 0) return
+  if (selectedCount.value === 0 && refineDirectPrompt.value === null) return
   refining.value = true
   refineStarted.value = true
   refinePhase.value = 'llm'
@@ -2540,7 +2540,8 @@ function openChronicle(img = null) {
   }
   // Dismiss gallery detail so it cannot cover Chronicle (both were z-70).
   selected.value = null
-  chronicleBase.value = base
+  // Force a new object so ChroniclePanel watch fires even for the same sha.
+  chronicleBase.value = base?.sha256 ? { ...base, sha256: base.sha256 } : base
   showChronicle.value = true
 }
 
@@ -2551,8 +2552,9 @@ function openChronicleFromTray() {
 }
 
 function openChronicleFromStorybook(sha256) {
-  showStorybook.value = false
-  openChronicle({ sha256 })
+  // Keep Storybook mounted underneath; open a fresh Chronicle weave session.
+  chronicleBase.value = { sha256 }
+  showChronicle.value = true
 }
 
 function openImageFromStorybook(sha256) {
@@ -2596,16 +2598,20 @@ function handleSendToRefine({ shas, text, inspireContext = null }) {
   openRefine()
 }
 
-function handleSendToRefineDirect({ shas, directPrompt, directNegativePrompt = '', source = '', inspireContext = null }) {
+function handleSendToRefineDirect({ shas, directPrompt, directNegativePrompt = '', source = '', inspireContext = null, workflow_name = '' }) {
   selectedIds.value = new Set(shas)
   pinnedShas.value = new Set(shas)
-  randomCount.value = Math.min(6, Math.max(shas.length, 1))
+  randomCount.value = Math.min(6, Math.max(shas.length || 1, 1))
   refineInstruction.value = ''
   refineDirectPrompt.value = directPrompt
   refineDirectNegativePrompt.value = directNegativePrompt
   refineDirectPromptSource.value = source
   refineInspireContext.value = inspireContext
   refineStyle.value = 'natural'
+  if (workflow_name) refineWorkflow.value = workflow_name
+  // Storybook sits above Refine in z-order — dismiss it so Refine is usable.
+  // User can reopen Storybook anytime; prompts remain in Refine for repeated runs.
+  if (source === 'storybook') showStorybook.value = false
   openRefine()
 }
 
@@ -3479,6 +3485,7 @@ onUnmounted(() => {
                           : refineDirectPromptSource === 'history' ? '📜'
                           : refineDirectPromptSource === 'invoke'  ? '✨'
                           : refineDirectPromptSource === 'detail'  ? '🎨'
+                          : refineDirectPromptSource === 'storybook' ? '📖'
                           : '📥'
                         }}</span>
                         <div class="min-w-0">
@@ -3487,6 +3494,7 @@ onUnmounted(() => {
                             : refineDirectPromptSource === 'history' ? $t('refine.directFromHistory')
                             : refineDirectPromptSource === 'invoke'  ? $t('refine.directFromInvoke')
                             : refineDirectPromptSource === 'detail'  ? $t('refine.directFromDetail')
+                            : refineDirectPromptSource === 'storybook' ? $t('refine.directFromStorybook')
                             : $t('refine.directFromDirect')
                           }}</p>
                           <p class="text-[10px] text-cyan-600 mt-0.5">
@@ -3923,7 +3931,7 @@ onUnmounted(() => {
                   </div>
                 </Transition>
                 <div class="flex gap-2">
-                <button @click="runRefine" :disabled="refining || selectedCount === 0 || (refineAutoSubmit && !refineWorkflow)"
+                <button @click="runRefine" :disabled="refining || (selectedCount === 0 && refineDirectPrompt === null) || (refineAutoSubmit && !refineWorkflow)"
                   class="flex-1 py-3 rounded-xl text-sm font-semibold transition-all"
                   :class="refining
                     ? 'bg-gray-800 text-gray-400 cursor-not-allowed'
@@ -5138,6 +5146,7 @@ onUnmounted(() => {
       @update:show="showStorybook = $event"
       @select-image="openImageFromStorybook($event)"
       @weave-from="openChronicleFromStorybook($event)"
+      @send-to-refine-direct="handleSendToRefineDirect($event)"
       @toast="showToast($event.msg, $event.type)"
     />
 

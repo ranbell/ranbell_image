@@ -10,12 +10,12 @@ const { t, locale } = useI18n()
 const props = defineProps({
   show: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'toast'])
+const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'send-to-refine-direct', 'toast'])
 
 const AXES = ['past', 'present', 'future']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
 const VIEW_MODES = ['gallery', 'detail', 'timeline']
-const SORTS = ['newest', 'oldest', 'title', 'time_scale']
+const SORTS = ['newest', 'oldest', 'title', 'time_scale', 'quality']
 
 const CAT_TAG_GROUPS = [
   { key: 'subject_tags', label: 'tagGroupSubject' },
@@ -38,7 +38,6 @@ function axisHasVisualSpec(axisData) {
 // ── data ──────────────────────────────────────────────────────────────────────
 const stories = ref([])
 const loading = ref(false)
-const regenerating = ref(new Set())
 const lang = ref(locale.value?.startsWith('ja') ? 'ja' : 'en')
 watch(locale, (l) => { lang.value = l?.startsWith('ja') ? 'ja' : 'en' })
 
@@ -50,6 +49,7 @@ const filters = ref({
   base_axis: _saved.filters?.base_axis || '',
   time_scale: _saved.filters?.time_scale || '',
   emotion: _saved.filters?.emotion || '',
+  qualityMin: _saved.filters?.qualityMin ?? '',
 })
 
 watch([viewMode, query, sort, filters], () => {
@@ -102,6 +102,42 @@ function qualityDraftNote(story) {
   return q.notes?.draft_grounding ? String(q.notes.draft_grounding) : ''
 }
 
+function storyBody(story) {
+  return story?.context?.body || {}
+}
+function isTopicOnly(story) {
+  return !!(story?.context?.topic_only) || !story?.base_image_id
+}
+function qualityPct(story) {
+  const o = story?.quality_eval?.overall
+  if (o == null || Number.isNaN(Number(o))) return null
+  return Math.round(Math.max(0, Math.min(1, Number(o))) * 100)
+}
+function draftRichnessFor(story, axis) {
+  return story?.quality_eval?.per_axis?.draft_richness?.[axis] || null
+}
+function axisSlotLabel(story, axis) {
+  const slot = story?.context?.axis_slots?.[axis]
+  if (!slot || typeof slot !== 'object') return ''
+  const bits = [slot.label, slot.activity, slot.place].filter(Boolean)
+  return bits.join(' · ')
+}
+function dramaticModeLabel(mode) {
+  if (!mode) return ''
+  return t('chronicle.dramaticMode.' + mode, mode)
+}
+function formatDraftDelta(d) {
+  if (!d || typeof d !== 'object') return ''
+  const before = Number(d.before || 0).toFixed(2)
+  const after = Number(d.after || 0).toFixed(2)
+  const delta = Number(d.delta || 0)
+  return `${before} → ${after} (${delta >= 0 ? '+' : ''}${delta.toFixed(2)})`
+}
+function promptStyleLabel(style) {
+  if (!style) return ''
+  return t('chronicle.style.' + String(style).replace('+', '_'), style)
+}
+
 function matches(story, q) {
   if (!q) return true
   const bag = [
@@ -116,19 +152,33 @@ function matches(story, q) {
 const visibleStories = computed(() => {
   const q = query.value.trim()
   const f = filters.value
+  const qMin = f.qualityMin === '' || f.qualityMin == null ? null : Number(f.qualityMin)
   const list = stories.value.filter(s => {
     if (f.base_axis && s.base_time_axis !== f.base_axis) return false
     if (f.time_scale && s.time_scale !== f.time_scale) return false
     if (f.emotion && s.emotion !== f.emotion) return false
+    if (qMin != null && !Number.isNaN(qMin)) {
+      const pct = qualityPct(s)
+      if (pct == null || pct < qMin) return false
+    }
     if (!matches(s, q)) return false
     return true
   })
   const cmpTitle = (a, b) => (storyTitle(a) || '').localeCompare(storyTitle(b) || '', lang.value)
   const cmpScale = (a, b) => TIME_SCALES.indexOf(a.time_scale) - TIME_SCALES.indexOf(b.time_scale)
+  const cmpQuality = (a, b) => {
+    const qa = qualityPct(a)
+    const qb = qualityPct(b)
+    if (qa == null && qb == null) return 0
+    if (qa == null) return 1
+    if (qb == null) return -1
+    return qb - qa
+  }
   switch (sort.value) {
     case 'oldest':     return [...list].sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
     case 'title':      return [...list].sort(cmpTitle)
     case 'time_scale': return [...list].sort(cmpScale)
+    case 'quality':    return [...list].sort(cmpQuality)
     default:           return [...list].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
   }
 })
@@ -195,19 +245,20 @@ async function fetchStories() {
   loading.value = false
 }
 
-async function regenerate(story, axis) {
-  const key = `${story.story_id}:${axis}`
-  regenerating.value = new Set([...regenerating.value, key])
-  try {
-    const r = await fetch(`/api/story/${story.story_id}/regenerate/${axis}`, { method: 'POST' })
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
-    emit('toast', { msg: t('storybook.regenQueued'), type: 'success' })
-  } catch (err) {
-    emit('toast', { msg: String(err.message || err), type: 'error' })
-    const next = new Set(regenerating.value)
-    next.delete(key)
-    regenerating.value = next
+function sendAxisToRefine(story, axis) {
+  const ax = story?.axes?.[axis]
+  if (!ax?.prompt_positive) {
+    emit('toast', { msg: t('storybook.refineNeedPrompt'), type: 'error' })
+    return
   }
+  const sha = ax.image_id || story.base_image_id || ''
+  emit('send-to-refine-direct', {
+    shas: sha ? [sha] : [],
+    directPrompt: ax.prompt_positive,
+    directNegativePrompt: ax.prompt_negative || '',
+    source: 'storybook',
+    workflow_name: story.workflow_name || '',
+  })
 }
 
 function axisImage(story, axis) {
@@ -322,7 +373,7 @@ function motifOf(story) {
 }
 
 function clearFilters() {
-  filters.value = { base_axis: '', time_scale: '', emotion: '' }
+  filters.value = { base_axis: '', time_scale: '', emotion: '', qualityMin: '' }
   query.value = ''
 }
 
@@ -428,10 +479,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   {{ t(`inspire.emotion.${em}`) }}
                 </button>
               </div>
+              <div class="flex items-center gap-2 flex-wrap max-w-md">
+                <span class="sb-label w-20">{{ t('storybook.filterQuality') }}</span>
+                <input v-model="filters.qualityMin" type="number" min="0" max="100" step="5"
+                  placeholder="—"
+                  class="sb-select w-16 font-mono text-[10px]" />
+                <span class="text-[var(--sb-faint)] font-mono">+</span>
+              </div>
             </div>
           </details>
 
-          <button v-if="query || filters.base_axis || filters.time_scale || filters.emotion"
+          <button v-if="query || filters.base_axis || filters.time_scale || filters.emotion || filters.qualityMin !== ''"
             @click="clearFilters" class="ml-auto sb-btn">
             <SbIcon name="close" class="w-3 h-3" />
             {{ t('storybook.filter.clear') }}
@@ -472,6 +530,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   </span>
                   <span v-if="story.emotion" class="sb-meta-chip sb-meta-emotion">
                     {{ t(`inspire.emotion.${story.emotion}`, story.emotion) }}
+                  </span>
+                  <span v-if="qualityPct(story) != null" class="sb-meta-chip font-mono text-teal-300/80"
+                    :title="t('storybook.qualityScore')">
+                    {{ qualityPct(story) }}
+                  </span>
+                  <span v-if="story.base_time_axis" class="sb-meta-chip text-[9px] text-[var(--sb-muted)]">
+                    {{ t('chronicle.axis.' + story.base_time_axis) }}
+                  </span>
+                  <span v-if="isTopicOnly(story)" class="sb-meta-chip text-amber-300/80">
+                    {{ t('storybook.topicOnlyBadge') }}
                   </span>
                   <span class="ml-auto text-[var(--sb-faint)] font-mono text-[9px]">{{ formatDate(story.created_at).split(' ')[0] }}</span>
                 </div>
@@ -586,14 +654,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                       {{ t('chronicle.axis.' + axis) }}
                       <span v-if="axis === story.base_time_axis" class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
                     </span>
-                    <button v-if="axis !== story.base_time_axis && story.axes?.[axis]?.prompt_positive"
-                      @click="regenerate(story, axis)"
-                      :disabled="regenerating.has(`${story.story_id}:${axis}`)"
-                      :title="t('storybook.regenTitle')"
-                      :aria-label="t('storybook.aria.regen')"
-                      class="sb-btn-accent disabled:opacity-40">
-                      <SbIcon name="dice" class="w-3 h-3" />
-                      {{ regenerating.has(`${story.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                    <button v-if="story.axes?.[axis]?.prompt_positive"
+                      @click="sendAxisToRefine(story, axis)"
+                      :title="t('storybook.refineAxisTitle')"
+                      :aria-label="t('storybook.refineAxis')"
+                      class="sb-btn-accent">
+                      <SbIcon name="spark" class="w-3 h-3" />
+                      {{ t('storybook.refineAxis') }}
                     </button>
                   </div>
 
@@ -650,6 +717,30 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <span v-if="detailStory.base_model_name" :title="t('storybook.modelTitle')" class="font-mono text-purple-300/60 truncate max-w-[10rem]">{{ detailStory.base_model_name }}</span>
                 <span v-if="detailStory.workflow_name" :title="t('storybook.workflowTitle')" class="font-mono text-teal-300/60 truncate max-w-[10rem]">{{ detailStory.workflow_name }}</span>
                 <span class="font-mono text-[9px]">{{ formatDate(detailStory.created_at) }}</span>
+              </div>
+              <div class="flex items-center flex-wrap gap-1.5 mt-2 text-[10px]"
+                :title="t('storybook.weaveSettings')">
+                <span v-if="isTopicOnly(detailStory)" class="sb-meta-chip text-amber-300/80">
+                  {{ t('storybook.topicOnlyBadge') }}
+                </span>
+                <span v-if="typeof detailStory.divergence === 'number'" class="sb-meta-chip font-mono text-teal-300/80">
+                  {{ t('chronicle.divergence') }} {{ Math.round(detailStory.divergence * 100) }}%
+                </span>
+                <span v-if="(detailStory.mutation_tags || []).length" class="sb-meta-chip text-purple-300/80">
+                  {{ t('chronicle.mutationTags') }}: {{ (detailStory.mutation_tags || []).join(', ') }}
+                </span>
+                <span v-if="storyBody(detailStory).tone" class="sb-meta-chip">
+                  {{ t('chronicle.tone.' + storyBody(detailStory).tone, storyBody(detailStory).tone) }}
+                </span>
+                <span v-if="storyBody(detailStory).dramatic_mode" class="sb-meta-chip">
+                  {{ dramaticModeLabel(storyBody(detailStory).dramatic_mode) }}
+                </span>
+                <span v-if="storyBody(detailStory).use_draft_refine" class="sb-meta-chip text-teal-300/75">
+                  {{ t('chronicle.draftRefineMode.' + storyBody(detailStory).use_draft_refine, storyBody(detailStory).use_draft_refine) }}
+                </span>
+                <span v-if="storyBody(detailStory).prompt_style" class="sb-meta-chip font-mono">
+                  {{ promptStyleLabel(storyBody(detailStory).prompt_style) }}
+                </span>
               </div>
             </div>
             <div class="flex items-center gap-1.5 shrink-0">
@@ -735,6 +826,39 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </div>
             </div>
 
+            <details v-if="detailStory.candidates?.length" class="px-6 sm:px-8 py-5 sb-section" open>
+              <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3">
+                <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
+                {{ t('storybook.otherCandidates') }} ({{ detailStory.candidates.length }})
+              </summary>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div v-for="c in detailStory.candidates" :key="c.id"
+                  class="p-2.5 rounded-lg border"
+                  :class="c.id === detailStory.selected_candidate
+                    ? 'border-[var(--sb-amber)]/40 bg-amber-900/10'
+                    : 'border-white/5 bg-black/20'">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-white/10 text-gray-200">{{ c.id }}</span>
+                    <span class="text-[11px] font-semibold text-[var(--sb-amber)] leading-tight">{{ c.title }}</span>
+                    <span v-if="c.dramatic_mode" class="sb-meta-chip text-[9px]">
+                      {{ dramaticModeLabel(c.dramatic_mode) }}
+                    </span>
+                    <span v-if="c.turn" class="text-[9px] text-[var(--sb-muted)] italic">{{ c.turn }}</span>
+                  </div>
+                  <p v-if="c.summary" class="text-[10px] text-gray-400 mt-1 leading-snug">{{ c.summary }}</p>
+                  <div class="mt-1.5 flex flex-col gap-0.5 text-[10px] leading-snug">
+                    <p v-for="ax in AXES" :key="ax" v-show="c[ax]">
+                      <span class="font-semibold uppercase tracking-wide mr-1 text-[9px]"
+                        :class="ax === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/80'">
+                        {{ t('chronicle.axis.' + ax) }}
+                      </span>
+                      <span class="text-gray-300">{{ c[ax] }}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </details>
+
             <details v-if="storyTimetable(detailStory).length" class="px-6 sm:px-8 py-5 sb-section" open>
               <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-3">
                 <SbIcon name="clock" class="w-3.5 h-3.5 opacity-70" />
@@ -754,7 +878,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             </details>
 
             <details v-if="detailStory.quality_eval?.dimensions"
-              class="px-6 sm:px-8 py-5 sb-section">
+              class="px-6 sm:px-8 py-5 sb-section" open>
               <summary class="sb-section-title cursor-pointer select-none list-none flex items-center gap-2 mb-0">
                 <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
                 {{ t('storybook.quality.title') }}
@@ -764,6 +888,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </summary>
               <div class="mt-4">
                 <StoryQualityRadar :eval="detailStory.quality_eval" />
+                <div v-if="AXES.some(a => draftRichnessFor(detailStory, a))"
+                  class="mt-2 space-y-0.5">
+                  <p v-for="ax in AXES" :key="'dr-' + ax"
+                    v-show="draftRichnessFor(detailStory, ax)"
+                    class="text-[10px] font-mono text-teal-300/70">
+                    <span class="text-[var(--sb-faint)]">{{ t('chronicle.axis.' + ax) }}:</span>
+                    {{ formatDraftDelta(draftRichnessFor(detailStory, ax)) }}
+                  </p>
+                </div>
                 <p v-if="qualityDraftNote(detailStory)"
                   class="mt-2 text-[10px] font-mono text-teal-300/70">
                   {{ qualityDraftNote(detailStory) }}
@@ -801,27 +934,63 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                       <SbIcon name="weave" class="w-3 h-3" />
                       {{ t('storybook.weaveFromShort') }}
                     </button>
-                    <button v-if="axis !== detailStory.base_time_axis && detailStory.axes?.[axis]?.prompt_positive"
-                      @click="regenerate(detailStory, axis)"
-                      :disabled="regenerating.has(`${detailStory.story_id}:${axis}`)"
-                      class="sb-btn-accent disabled:opacity-40 ml-auto"
-                      :aria-label="t('storybook.aria.regen')">
-                      <SbIcon name="dice" class="w-3 h-3" />
-                      {{ regenerating.has(`${detailStory.story_id}:${axis}`) ? t('storybook.regenQueuedShort') : t('storybook.regen') }}
+                    <button v-if="detailStory.axes?.[axis]?.prompt_positive"
+                      @click="sendAxisToRefine(detailStory, axis)"
+                      :title="t('storybook.refineAxisTitle')"
+                      class="sb-btn-accent ml-auto"
+                      :aria-label="t('storybook.refineAxis')">
+                      <SbIcon name="spark" class="w-3 h-3" />
+                      {{ t('storybook.refineAxis') }}
                     </button>
                   </div>
                 </div>
               </div>
               <div class="sm:w-3/5 flex flex-col gap-2 min-w-0">
-                <span class="text-[11px] font-semibold uppercase tracking-widest"
-                  :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
-                  {{ t('chronicle.axis.' + axis) }}
-                  <span v-if="axis === detailStory.base_time_axis"
-                    class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
-                </span>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-[11px] font-semibold uppercase tracking-widest"
+                    :class="axis === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
+                    {{ t('chronicle.axis.' + axis) }}
+                    <span v-if="axis === detailStory.base_time_axis"
+                      class="text-[var(--sb-muted)] normal-case font-normal ml-1">({{ t('storybook.base') }})</span>
+                  </span>
+                  <span v-if="draftRichnessFor(detailStory, axis)"
+                    class="sb-meta-chip font-mono text-[9px] text-teal-300/80"
+                    :title="t('storybook.draftDelta')">
+                    {{ t('storybook.draftDelta') }} {{ formatDraftDelta(draftRichnessFor(detailStory, axis)) }}
+                  </span>
+                </div>
+                <p v-if="axisSlotLabel(detailStory, axis)"
+                  class="text-[10px] text-[var(--sb-muted)] leading-snug"
+                  :title="t('storybook.axisSlot')">
+                  {{ axisSlotLabel(detailStory, axis) }}
+                </p>
                 <p class="sb-prose">
                   {{ axisStory(detailStory, axis) || '—' }}
                 </p>
+                <div v-if="axisHasVisualSpec(detailStory.axes?.[axis])"
+                  class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
+                  <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
+                    {{ t('chronicle.visualSpecTitle') }}
+                  </p>
+                  <p v-if="detailStory.axes[axis].visual_script"
+                    class="text-[10px] text-emerald-200/70 whitespace-pre-wrap leading-relaxed">
+                    {{ detailStory.axes[axis].visual_script }}
+                  </p>
+                  <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
+                    v-show="(detailStory.axes[axis][g.key] || []).length"
+                    class="space-y-0.5">
+                    <p class="text-[9px] text-emerald-400/70 font-semibold">
+                      {{ t('chronicle.' + g.label) }}
+                    </p>
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="tag in detailStory.axes[axis][g.key]" :key="tag"
+                        class="text-[10px] font-mono px-1.5 py-0.5 rounded
+                          bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
+                        {{ tag }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
                 <details v-if="detailStory.axes?.[axis]?.prompt_positive" class="mt-1">
                   <summary class="cursor-pointer text-[10px] text-[var(--sb-muted)] hover:text-gray-300 select-none">
                     {{ t('storybook.showPrompt') }}
@@ -830,30 +999,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                     <pre class="text-[10px] text-gray-400 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_positive }}</pre>
                     <pre v-if="detailStory.axes[axis].prompt_negative"
                       class="text-[10px] text-gray-500 whitespace-pre-wrap font-mono bg-black/40 rounded-lg p-2.5">{{ detailStory.axes[axis].prompt_negative }}</pre>
-                    <div v-if="axisHasVisualSpec(detailStory.axes[axis])"
-                      class="mt-1 rounded-lg border border-emerald-800/30 bg-emerald-950/25 p-2 space-y-1.5">
-                      <p class="text-[9px] font-semibold text-emerald-400/90 uppercase tracking-wide">
-                        {{ t('chronicle.visualSpecTitle') }}
-                      </p>
-                      <p v-if="detailStory.axes[axis].visual_script"
-                        class="text-[10px] text-emerald-200/70 whitespace-pre-wrap leading-relaxed">
-                        {{ detailStory.axes[axis].visual_script }}
-                      </p>
-                      <div v-for="g in CAT_TAG_GROUPS" :key="g.key"
-                        v-show="(detailStory.axes[axis][g.key] || []).length"
-                        class="space-y-0.5">
-                        <p class="text-[9px] text-emerald-400/70 font-semibold">
-                          {{ t('chronicle.' + g.label) }}
-                        </p>
-                        <div class="flex flex-wrap gap-1">
-                          <span v-for="tag in detailStory.axes[axis][g.key]" :key="tag"
-                            class="text-[10px] font-mono px-1.5 py-0.5 rounded
-                              bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90">
-                            {{ tag }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </details>
               </div>
