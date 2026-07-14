@@ -436,11 +436,13 @@ function _scheduleFlush() {
 
 watch(() => props.baseImage, (doc) => {
   if (!doc?.sha256) return
-  // New weave request (Storybook「紡ぐ」含む): clear prior finished/partial run
-  // so the panel can start again instead of staying locked on the last result.
-  if (finished.value || storyId.value || (baseSha.value && baseSha.value !== doc.sha256)) {
-    resetRun()
-  }
+  // Only reset on a real base change, or a fresh weave after a finished run.
+  // Never reset merely because storyId is set — openChronicle() always emits a
+  // new object ref for the same sha, and that used to wipe the expand pane
+  // mid-pipeline (around "Pinning down the action").
+  const shaChanged = !!(baseSha.value && baseSha.value !== doc.sha256)
+  const reweaveSame = finished.value && !running.value && !expandSessionActive.value
+  if (shaChanged || reweaveSame) resetRun()
   baseSha.value = doc.sha256
   baseModel.value = _modelOf(doc)
 }, { immediate: true })
@@ -688,7 +690,7 @@ const CAT_TAG_GROUPS = [
 function axisHasCatTags(p) {
   if (!p) return false
   if (p.visual_script) return true
-  return CAT_TAG_GROUPS.some(g => (p[g.key] || []).length > 0)
+  return CAT_TAG_GROUPS.some(g => asStringList(p[g.key]).length > 0)
 }
 
 const qualityDraftNote = computed(() => {
