@@ -3326,6 +3326,7 @@ async def run_chronicle_expand(
         parse_visual_script_category_tags,
         bucket_danbooru_tags,
         CHRONICLE_CAT_FIELDS,
+        parse_biography_json,
         parse_concrete_activities_json,
         parse_english_translation_json,
         parse_story_json,
@@ -3446,12 +3447,14 @@ async def run_chronicle_expand(
         timetable_ja: list[dict] = []
         axis_slots: dict[str, dict] = {}
         _phase("buildingTimetable", 0.10, "Charting her day...")
-        # Re-surface biography so the Reasoning panel is not empty after resetStory().
+        # Re-surface biography so draft notes stay visible after select→expand.
+        # Re-parse list fields: stored JA translations sometimes collapse arrays
+        # into strings, which used to crash the Chronicle Vue panel mid-expand.
         if biography:
             _put({
                 "type": "biography",
-                "biography": biography,
-                "biography_ja": biography_ja,
+                "biography": parse_biography_json(biography) or biography,
+                "biography_ja": parse_biography_json(biography_ja) or biography_ja,
             })
         for tt_attempt in range(2):
             try:

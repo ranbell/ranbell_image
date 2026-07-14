@@ -2078,6 +2078,8 @@ def test_build_and_parse_biography():
     assert bio["personality"] == "kind" and bio["occupation"] == "baker"
     assert bio["hobbies"] == ["baking"]  # blanks dropped
     assert bio["favourite_items"] == ["rolling pin"]
+    # Truncated JA translations may collapse a list into a bare string.
+    assert parse_biography_json({"hobbies": "読書", "personality": "温和"})["hobbies"] == ["読書"]
     # broken / empty → {}
     assert parse_biography_json("junk") == {}
     assert parse_biography_json('{"unrelated":1}') == {}

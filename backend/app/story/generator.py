@@ -1655,8 +1655,13 @@ def build_biography_prompt(
 
 
 def parse_biography_json(raw: str) -> dict:
-    """Parse a biography payload. Missing/broken → {} (feature degrades off)."""
-    data = _loads_lenient(raw)
+    """Parse a biography payload. Missing/broken → {} (feature degrades off).
+
+    Truncated JA translations sometimes collapse list fields into a bare string;
+    coerce those to a one-element list so callers (and the Vue panel) never see
+    a non-list hobbies/items value.
+    """
+    data = _loads_lenient(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else None)
     if not isinstance(data, dict):
         return {}
     out: dict = {}
@@ -1664,7 +1669,12 @@ def parse_biography_json(raw: str) -> dict:
         out[k] = str(data.get(k) or "").strip()
     for k in _BIO_LIST_KEYS:
         v = data.get(k)
-        out[k] = [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+        if isinstance(v, list):
+            out[k] = [str(x).strip() for x in v if str(x).strip()]
+        elif isinstance(v, str) and v.strip():
+            out[k] = [v.strip()]
+        else:
+            out[k] = []
     return out if any(out.values()) else {}
 
 

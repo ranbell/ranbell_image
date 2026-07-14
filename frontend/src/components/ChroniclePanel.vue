@@ -334,9 +334,14 @@ const isBusyWeaving = computed(() =>
 )
 const showWeaverStage = computed(() => {
   if (!isBusyWeaving.value) return false
-  // Full-stage weaver when the right pane is still mostly empty.
+  // Full-stage weaver only when the right pane is still mostly empty.
+  // Draft notes / live stream / candidates must stay visible during expand
+  // (especially around "Pinning down the action").
   if (visibleCandidates.value.length) return false
   if (displayTitle.value) return false
+  if (hasDraftMaterials.value) return false
+  if (hasAxisStories.value) return false
+  if (streamText.value) return false
   if (Object.keys(prompts.value).length) return false
   return true
 })
@@ -492,7 +497,7 @@ onUnmounted(() => {
 
 function close() { emit('update:show', false) }
 
-function resetStory() {
+function resetStory({ keepDraftNotes = false } = {}) {
   streamText.value = ''
   prompts.value = {}
   imageJobs.value = []
@@ -507,8 +512,12 @@ function resetStory() {
   mutationTags.value = []
   storySeedTags.value = []
   storySeedMotif.value = ''
-  biography.value = null
-  timetable.value = null
+  // Keep bio/timetable across select→expand so the pane stays populated while
+  // "Pinning down the action" / timetable rebuild runs (SSE overwrites later).
+  if (!keepDraftNotes) {
+    biography.value = null
+    timetable.value = null
+  }
   concrete.value = null
   axisReasoning.value = {}
   axisDrafts.value = {}
@@ -593,24 +602,44 @@ function _stopImageGenMonitor() {
 }
 
 const REASON_AXES = ['past', 'present', 'future']
+const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
+/** Coerce bio list fields — truncated JA translations often return a string, and
+ *  calling Array.join on a string throws and blanks the whole Chronicle panel. */
+function asStringList(v) {
+  if (Array.isArray(v)) return v.map(x => String(x ?? '').trim()).filter(Boolean)
+  if (typeof v === 'string' && v.trim()) return [v.trim()]
+  return []
+}
+function joinList(v) {
+  return asStringList(v).join(t('storybook.listSep'))
+}
+function normalizeBio(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const out = { ...raw }
+  for (const f of BIO_LIST_FIELDS) out[f] = asStringList(raw[f])
+  return out
+}
 const bioView = computed(() => {
   const b = biography.value
   if (!b) return null
-  return (panelLang.value === 'ja' && b.ja && Object.keys(b.ja).length) ? b.ja : b.en
+  const raw = (panelLang.value === 'ja' && b.ja && Object.keys(b.ja).length) ? b.ja : b.en
+  return normalizeBio(raw)
 })
 const timetableView = computed(() => {
   const tt = timetable.value
   if (!tt) return []
-  return (panelLang.value === 'ja' && tt.ja && tt.ja.length) ? tt.ja : (tt.en || [])
+  const rows = (panelLang.value === 'ja' && Array.isArray(tt.ja) && tt.ja.length)
+    ? tt.ja
+    : (Array.isArray(tt.en) ? tt.en : [])
+  return rows
+    .map((s) => (s && typeof s === 'object' ? s : { label: '', activity: String(s || ''), place: '', feeling: '' }))
+    .filter((s) => s.label || s.activity)
 })
-const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
-function joinList(arr) {
-  return (arr || []).join(t('storybook.listSep'))
-}
 function activityFor(axis) {
   const c = concrete.value
   if (!c) return ''
-  return (panelLang.value === 'ja' && c.ja && c.ja[axis]) ? c.ja[axis] : (c.en?.[axis] || '')
+  const v = (panelLang.value === 'ja' && c.ja && c.ja[axis]) ? c.ja[axis] : (c.en?.[axis] || '')
+  return typeof v === 'string' ? v : (v == null ? '' : String(v))
 }
 /** Bio / timetable / concrete drafted during expand — keep visible while creating. */
 const hasDraftMaterials = computed(() =>
@@ -774,7 +803,7 @@ async function selectCandidate(cid) {
   // Leave 'selecting' phase immediately so the live expand pane (step≥3) can show
   // before the first SSE phase event arrives.
   phase.value = 'expanding'
-  resetStory()
+  resetStory({ keepDraftNotes: true })
   await _submitAndStream(`/api/story/chronicle/${storyId.value}/select`,
     { candidate_id: cid, time_scale: TIME_SCALES[timeScaleIdx.value] })
 }
@@ -785,7 +814,8 @@ async function respin(stage) {
     ? (respinCandCount.value += 1)
     : (respinExpandCount.value += 1)
   if (stage === 'candidates') { candidates.value = []; selecting.value = false }
-  resetStory()
+  resetStory({ keepDraftNotes: stage === 'expand' })
+  if (stage === 'expand') phase.value = 'expanding'
   const settings = currentSettingsPayload()
   await _submitAndStream(`/api/story/chronicle/${storyId.value}/respin`, {
     stage,
@@ -909,13 +939,22 @@ function handleEvent(ev) {
       storySeedMotif.value = ev.motif || ''
       break
     case 'biography':
-      biography.value = { en: ev.biography, ja: ev.biography_ja }
+      biography.value = {
+        en: normalizeBio(ev.biography) || {},
+        ja: normalizeBio(ev.biography_ja) || {},
+      }
       break
     case 'timetable':
-      timetable.value = { en: ev.timetable || [], ja: ev.timetable_ja || [] }
+      timetable.value = {
+        en: Array.isArray(ev.timetable) ? ev.timetable : [],
+        ja: Array.isArray(ev.timetable_ja) ? ev.timetable_ja : [],
+      }
       break
     case 'concrete_activities':
-      concrete.value = { en: ev.activities || {}, ja: ev.activities_ja || {} }
+      concrete.value = {
+        en: (ev.activities && typeof ev.activities === 'object') ? ev.activities : {},
+        ja: (ev.activities_ja && typeof ev.activities_ja === 'object') ? ev.activities_ja : {},
+      }
       break
     case 'axis_reasoning':
       axisReasoning.value = { ...axisReasoning.value, [ev.axis]: ev }
@@ -1594,7 +1633,7 @@ async function generateImages() {
                 <p v-if="bioView.occupation" class="text-gray-400 break-words">
                   <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ bioView.occupation }}
                 </p>
-                <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="(bioView[f] || []).length" class="text-gray-400 break-words">
+                <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="asStringList(bioView[f]).length" class="text-gray-400 break-words">
                   <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
                 </p>
                 <p v-if="bioView.backstory" class="text-gray-400 italic pt-1">{{ bioView.backstory }}</p>

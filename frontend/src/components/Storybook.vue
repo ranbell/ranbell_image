@@ -87,10 +87,15 @@ function storyTimetable(story) {
   const tt = (lang.value === 'ja' && ja && ja.length) ? ja : story.timetable
   return Array.isArray(tt) ? tt : []
 }
-function joinList(arr) {
-  return (arr || []).join(t('storybook.listSep'))
-}
 const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
+function asStringList(v) {
+  if (Array.isArray(v)) return v.map(x => String(x ?? '').trim()).filter(Boolean)
+  if (typeof v === 'string' && v.trim()) return [v.trim()]
+  return []
+}
+function joinList(v) {
+  return asStringList(v).join(t('storybook.listSep'))
+}
 
 function qualityDraftNote(story) {
   const q = story?.quality_eval
@@ -1087,7 +1092,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ storyBio(detailStory).occupation }}
                 </p>
                 <p v-for="f in BIO_LIST_FIELDS" :key="f"
-                  v-show="(storyBio(detailStory)[f] || []).length"
+                  v-show="asStringList(storyBio(detailStory)[f]).length"
                   class="text-gray-400 break-words">
                   <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span>
                   {{ joinList(storyBio(detailStory)[f]) }}
