@@ -237,14 +237,14 @@ SCENARIOS = {
                 ],
             },
             "present": {
-                "focal": ["pouring", "holding", "concentrating"],
+                "focal": ["pouring", "holding", "concentrating", "smile"],
                 "search": [
                     "latte_art", "coffee_cup", "cafe", "day", "window",
                     "indoors", "counter", "steam", "ceramic",
                 ],
             },
             "future": {
-                "focal": ["wiping", "pointing", "teaching"],
+                "focal": ["wiping", "pointing", "teaching", "serious"],
                 "search": [
                     "espresso_machine", "cafe", "indoors", "evening",
                     "cloth", "steam", "back_bar", "warm_light",
@@ -400,15 +400,15 @@ SCENARIOS = {
         },
         "axis_build": {
             "past": {
-                "focal": ["kneading", "both_hands"],
+                "focal": ["kneading", "both_hands", "focused"],
                 "search": ["kitchen", "dough", "flour", "wooden_board", "indoors"],
             },
             "present": {
-                "focal": ["folding", "both_hands"],
+                "focal": ["folding", "both_hands", "serious"],
                 "search": ["kitchen", "dough", "flour", "wooden_board", "indoors"],
             },
             "future": {
-                "focal": ["shaping", "holding"],
+                "focal": ["shaping", "holding", "smile"],
                 "search": [
                     "kitchen", "dough", "flour", "wooden_board", "indoors", "loaf",
                 ],
@@ -482,15 +482,15 @@ SCENARIOS = {
         },
         "axis_build": {
             "past": {
-                "focal": ["lifting", "holding"],
+                "focal": ["lifting", "holding", "concentrating"],
                 "search": ["pitcher", "steam", "cafe", "cup"],
             },
             "present": {
-                "focal": ["pouring"],
+                "focal": ["pouring", "focused"],
                 "search": ["milk", "espresso", "cafe", "stream"],
             },
             "future": {
-                "focal": ["sliding", "holding"],
+                "focal": ["sliding", "holding", "smile"],
                 "search": ["coffee_cup", "counter", "latte_art"],
             },
         },

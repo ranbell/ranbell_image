@@ -3747,6 +3747,9 @@ async def run_chronicle_expand(
             visual_plans[axis] = visual_plan
             focal = visual_plan.get("focal_action_tags") or []
             gesture = visual_plan.get("gesture_prose") or ""
+            expr = (visual_plan.get("expression_tag") or "").strip().replace(" ", "_")
+            if expr and expr not in focal:
+                focal = [*focal, expr]
             cancel.raise_if_set()
 
             # (2) WD14 vector search on the finished story (+ gesture + topic),

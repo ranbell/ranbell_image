@@ -1307,10 +1307,10 @@ def test_parse_axis_tags_json_broken_returns_empty():
 # ── Chronicle degenerate detector ─────────────────────────────────────────────
 
 def _make_tag_line(n: int, *, anchor: bool = True) -> str:
-    """Helper: build a tag line with n tags, optionally anchored + action."""
-    # Always include a dynamic action so the idle-pose guard does not trip.
-    extras = max(0, n - 2)
-    body = ", ".join(["holding", * (f"tag_{i}" for i in range(extras))])
+    """Helper: build a tag line with n tags, optionally anchored + action + expression."""
+    # Always include a dynamic action + expression so idle/expression guards do not trip.
+    extras = max(0, n - 3)
+    body = ", ".join(["holding", "smile", * (f"tag_{i}" for i in range(extras))])
     return f"1girl, {body}" if anchor else body
 
 
@@ -1322,7 +1322,7 @@ def test_chronicle_tags_degenerate_short_tag_line():
 
 
 def test_chronicle_tags_degenerate_missing_subject_anchor():
-    tag_line = "holding, " + ", ".join(f"tag_{i}" for i in range(40))
+    tag_line = "holding, smile, " + ", ".join(f"tag_{i}" for i in range(40))
     degenerate, reason = _chronicle_tags_degenerate(tag_line)
     assert degenerate
     assert reason == "no_subject_anchor"
@@ -1336,7 +1336,7 @@ def test_chronicle_tags_degenerate_healthy_prompt():
 
 
 def test_chronicle_tags_degenerate_anchor_solo():
-    tag_line = "solo, holding, " + ", ".join(f"tag_{i}" for i in range(40))
+    tag_line = "solo, holding, smile, " + ", ".join(f"tag_{i}" for i in range(40))
     degenerate, _ = _chronicle_tags_degenerate(tag_line)
     assert not degenerate
 
@@ -1348,6 +1348,18 @@ def test_chronicle_tags_degenerate_idle_pose_only():
     degenerate, reason = _chronicle_tags_degenerate(tag_line)
     assert degenerate
     assert reason == "no_dynamic_action"
+
+
+def test_chronicle_tags_degenerate_person_needs_expression():
+    """Person on-screen without any face/mood tag must densify."""
+    pad = ", ".join(f"bg_{i}" for i in range(30))
+    tag_line = f"1girl, holding, reaching, cafe, counter, apron, {pad}"
+    degenerate, reason = _chronicle_tags_degenerate(tag_line)
+    assert degenerate
+    assert reason == "no_expression"
+    # expressionless still counts — a chosen blank face is fine
+    ok = f"1girl, holding, reaching, expressionless, cafe, {pad}"
+    assert not _chronicle_tags_degenerate(ok)[0]
 
 
 # ── Stage 3b Pass 2 (build_axis_prose_prompt) ────────────────────────────────

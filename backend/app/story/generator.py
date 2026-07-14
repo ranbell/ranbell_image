@@ -2747,6 +2747,9 @@ def build_visual_examination_prompt(
         "Read the act below and DECIDE, from multiple angles, exactly how the "
         "character is posed and framed so the image expresses the story rather "
         "than showing someone standing still.\n\n"
+        "EXPRESSION: name the face/mood that matches this act (one concrete "
+        "danbooru expression — smile, blush, tears, serious, pout, nervous…). "
+        "A person without a readable expression fails this stage.\n\n"
         f"{elapsed_header}\n"
         f"{char_line}"
         f"{slot_line}"
@@ -2763,6 +2766,7 @@ def build_visual_examination_prompt(
         '{"shot": "<close-up|upper_body|cowboy_shot|full_body|wide_shot>", '
         '"camera_angle": "<from_side|from_above|from_below|from_behind|dutch_angle|straight-on>", '
         '"focal_action_tags": ["tag_1", "tag_2", ...], '
+        '"expression_tag": "<one danbooru face/mood tag — smile, blush, tears, serious…>", '
         '"gesture_prose": "<one vivid sentence naming the exact gesture and weight>", '
         '"lighting": "<direction + quality>", "palette": "<colour palette>", '
         '"props": ["prop_1", ...], "mood": "<one phrase>"}'
@@ -2787,6 +2791,7 @@ def parse_visual_plan_json(raw: str) -> dict:
         "shot": _s("shot"),
         "camera_angle": _s("camera_angle"),
         "focal_action_tags": _l("focal_action_tags"),
+        "expression_tag": _s("expression_tag"),
         "gesture_prose": _s("gesture_prose"),
         "lighting": _s("lighting"),
         "palette": _s("palette"),
@@ -3132,6 +3137,11 @@ def build_axis_tags_prompt(
         "outstretched_arm, leaning_forward, looking_back, kneeling, gripping, "
         "clenched_hand, holding, covering_face, touching, fingertips, "
         "dynamic_pose. NEVER just `standing` / `sitting` with nothing else.\n"
+        "- EXPRESSION: when the subject is a person (1girl / 1boy / solo / …), "
+        "`expression_tags` MUST contain ≥1 concrete face/mood tag drawn from "
+        "the act's emotion (smile, blush, tears, pout, serious, nervous, "
+        "expressionless, open_mouth, …). A person with no expression tag fails "
+        "— mood cannot read from pose alone.\n"
         "- EXPLICIT TAG: every noun the scene needs (hair color, eye color, "
         "notable feature, clothing, prop, background, light source) MUST appear "
         "as a real danbooru tag — never a euphemism or paraphrase.\n"
@@ -3145,7 +3155,7 @@ def build_axis_tags_prompt(
         '  "danbooru_tags": "<subject-count tag first, then 50+ comma-separated tags>",\n'
         '  "subject_tags": "<subject count, character count, viewer relation>",\n'
         '  "hair_tags": "<hair color, length, style>",\n'
-        '  "expression_tags": "<face, mouth, gaze, mood tags>",\n'
+        '  "expression_tags": "<REQUIRED if person: ≥1 face/mood tag — smile, blush, tears, serious…>",\n'
         '  "clothing_tags": "<outfit, garments, fabric>",\n'
         '  "accessory_tags": "<jewelry, hats, glasses, small items>",\n'
         '  "pose_tags": "<>= 3 concrete pose/action tags, no bare standing>",\n'
@@ -3226,6 +3236,35 @@ _DYNAMIC_ACTION_TOKENS = frozenset({
     "both_hands", "surprised", "concentrating",
 })
 
+# Face / mood tags required whenever a person is on-screen (emotion must read).
+# Mirrors tag_categories.json axis_emotion — kept local so generator stays
+# import-free. Expressionless/neutral/serious count: a blank face is still a
+# chosen expression; a *missing* expression is the failure mode.
+_EXPRESSION_TAGS = frozenset({
+    "smile", "smiling", "grin", "laugh", "laughing", "happy", "joyful",
+    "sad", "crying", "tears", "teary_eyes", "teary-eyed", "watery_eyes", "sobbing",
+    "expressionless", "neutral", "calm", "serious", "stoic",
+    "angry", "annoyed", "frustrated", "glaring", "frowning", "frown",
+    "blush", "blushing", "red_cheeks",
+    "surprised", "shocked", "open_mouth", "gasp",
+    "closed_mouth", "half_open_mouth",
+    "closed_eyes", "half-closed_eyes", "winking", "one_eye_closed",
+    "pout", "pouting", "smirk", "wink", "worried", "embarrassed", "shy",
+    "nervous", "confused", "flustered", "sleepy", "dazed",
+    "excited", "cheerful", "content", "satisfied", "reluctant",
+    "defeated", "hopeless", "terrified", "disgusted", "contemptuous",
+    "smug", "lonely", "melancholy", "nostalgic", "pensive", "thoughtful",
+    "ecstatic", "horrified", "panicked", "relieved", "focused",
+})
+_EXPRESSION_TOKENS = frozenset({
+    "smile", "smiling", "grin", "laugh", "tear", "tears", "teary", "sob",
+    "blush", "frown", "pout", "smirk", "wink", "angry", "sad", "shy",
+    "nervous", "worried", "expressionless", "serious", "stoic", "gasp",
+    "smug", "melancholy", "nostalgic", "pensive", "flustered", "embarrassed",
+    "scared", "terrified", "panicked", "relieved", "focused", "cheerful",
+    "joyful", "lonely", "annoyed", "glaring",
+})
+
 # Shared identity / quality noise stripped before cross-axis tag comparison.
 _TAG_COMPARE_IGNORE = _SUBJECT_ANCHORS | _IDLE_POSE_TAGS | frozenset({
     "highres", "absurdres", "masterpiece", "best_quality", "detailed_background",
@@ -3245,11 +3284,38 @@ def _tag_has_dynamic_action(parts: list[str]) -> bool:
     return False
 
 
+def _tag_has_expression(parts: list[str]) -> bool:
+    """True if the tag line contains at least one face/mood expression tag."""
+    for raw in parts:
+        t = raw.strip().lower().replace(" ", "_")
+        if not t:
+            continue
+        if t in _EXPRESSION_TAGS:
+            return True
+        toks = set(t.replace("-", "_").split("_"))
+        if toks & _EXPRESSION_TOKENS:
+            return True
+    return False
+
+
+def _tag_has_person_subject(parts: list[str]) -> bool:
+    """True when the prompt depicts a person (expression then becomes mandatory)."""
+    head = {p.strip().lower().replace(" ", "_") for p in parts if p.strip()}
+    if head & _SUBJECT_ANCHORS:
+        return True
+    return any(
+        "girl" in p or "boy" in p or "woman" in p or "man" in p or "person" in p
+        for p in head
+    )
+
+
 def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
     """Guard for Pass 1 output — same spirit as Invoke's runners.py:1798-1808.
 
     A prompt is degenerate if it is too short, has no subject anchor within
-    the first few tags, OR has no dynamic action (idle standing/smile only).
+    the first few tags, has no dynamic action (idle standing/smile only),
+    OR (when a person is on-screen) has no facial expression tag — emotion
+    cannot read without one.
     Callers retry once with a temperature boost before surfacing the failure.
     """
     parts = [t.strip() for t in tag_line.split(",") if t.strip()]
@@ -3260,6 +3326,8 @@ def _chronicle_tags_degenerate(tag_line: str) -> tuple[bool, str]:
         return True, "no_subject_anchor"
     if not _tag_has_dynamic_action(parts):
         return True, "no_dynamic_action"
+    if _tag_has_person_subject(parts) and not _tag_has_expression(parts):
+        return True, "no_expression"
     return False, ""
 
 
@@ -3311,7 +3379,9 @@ def axis_tag_lines_collapsed(
             scene_sets.append({
                 t for t in s
                 if t not in _DYNAMIC_ACTION_TOKENS
+                and t not in _EXPRESSION_TAGS
                 and not (set(t.split("_")) & _DYNAMIC_ACTION_TOKENS)
+                and not (set(t.split("_")) & _EXPRESSION_TOKENS)
             })
     if len(sets) < 2:
         return False
