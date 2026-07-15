@@ -369,9 +369,8 @@ def test_build_axis_prompt_temporal_context_decades():
         prompt_style="danbooru", time_scale="decades",
         axis="past", base_axis="present",
     )
-    assert "TEMPORAL CONSTRAINT" in prompt
-    assert "ABSOLUTE" in prompt
-    assert "FORBIDDEN" in prompt
+    assert "must_keep:" in prompt
+    assert "forbid:" in prompt
     assert "everything" in prompt  # decades may_differ = "everything"
 
 
@@ -382,9 +381,9 @@ def test_build_axis_prompt_temporal_context_minutes():
         prompt_style="danbooru", time_scale="minutes",
         axis="future", base_axis="present",
     )
-    assert "TEMPORAL CONSTRAINT" in prompt
+    assert "must_keep:" in prompt
     assert "IDENTICAL" in prompt
-    assert "FORBIDDEN" in prompt
+    assert "forbid:" in prompt
 
 
 def test_build_axis_prompt_base_axis_no_temporal_block():
@@ -413,13 +412,10 @@ def test_build_axis_prompt_chronicle_context():
         overall="A girl rises from nothing to lead a revolution.",
         all_stories=stories,
     )
-    assert "FULL CHRONICLE CONTEXT" in prompt
-    assert "The Iron Road" in prompt
-    assert "A girl rises from nothing" in prompt
+    assert "FULL CHRONICLE CONTEXT" not in prompt
+    assert "INPUT axis=past" in prompt
     assert "She was a child in the slums." in prompt
-    assert "She leads the rebellion." in prompt
-    assert "[PAST]" in prompt
-    assert "generating the image prompt for: [PAST]" in prompt
+    assert "must_keep:" in prompt
 
 
 def test_build_axis_prompt_no_context_if_no_stories():
@@ -898,10 +894,10 @@ def test_build_axis_prompt_composition_non_base_axis_only():
         prompt_style="danbooru", time_scale="years",
     )
     non_base = build_axis_prompt(axis="past", base_axis="present", **kwargs)
-    assert "COMPOSITION:" in non_base
+    assert "camera:" in non_base
     assert "dutch_angle" in non_base
     base = build_axis_prompt(axis="present", base_axis="present", **kwargs)
-    assert "COMPOSITION:" not in base
+    assert "camera:" not in base
 
 
 def test_build_axis_prompt_wd14_label_base_axis():
@@ -911,10 +907,8 @@ def test_build_axis_prompt_wd14_label_base_axis():
         axis="present", base_axis="present",
         wd14_context="[common tags] 1girl",
     )
-    # Base axis carries the wd14 tags and treats the base image as the anchor
-    # the rendered base_axis image must match.
     assert "[common tags] 1girl" in prompt
-    assert "base_axis image MUST match" in prompt
+    assert "base WD14 tags" in prompt
 
 
 # ── Stage 2a: story candidates ────────────────────────────────────────────────
@@ -936,7 +930,7 @@ def test_build_candidates_prompt():
     # locale drives output language instruction
     assert "日本語" in prompt
     # base image is bound to the base axis; other acts open elapsed volumes
-    assert "THE BASE IMAGE IS THE [PRESENT] MOMENT" in prompt
+    assert "BASE IMAGE = [PRESENT]" in prompt
     # Elapsed-time framing (JA locale wraps the header in Japanese, but the
     # bracket labels stay in English so the parser can lock onto them).
     assert "経過" in prompt
@@ -945,9 +939,9 @@ def test_build_candidates_prompt():
     assert '"past"' in prompt and '"present"' in prompt and '"future"' in prompt
     assert '"summary"' not in prompt
     # grounding guardrail keeps surprise in the real-world register
-    assert "GROUNDING" in prompt and "supernatural" in prompt
+    assert "GROUNDING" in prompt and "magic/aliens" in prompt
     # minutes scale = image+alpha continuation, no scene jump
-    assert "EXTENDED slightly" in prompt and "HOW MUCH CHANGES" in prompt
+    assert "EXTENDED slightly" in prompt and "time_delta:" in prompt
 
 
 def test_candidates_prompt_base_axis_directions():
@@ -955,7 +949,7 @@ def test_candidates_prompt_base_axis_directions():
     past_base = build_candidates_prompt(
         character_desc="c", scene_desc="s", base_axis="past", time_scale="hours",
     )
-    assert "THE BASE IMAGE IS THE [PAST] MOMENT" in past_base
+    assert "BASE IMAGE = [PAST]" in past_base
     # Both non-base axes use LATER phrasing; no EARLIER when base = past.
     assert past_base.count(" LATER") >= 2
     assert " EARLIER" not in past_base
@@ -1164,7 +1158,7 @@ def test_build_visual_examination_prompt_demands_action_tags():
     assert "focal_action_tags" in prompt
     assert "danbooru" in prompt
     # non-base minutes axis carries the scale constraints
-    assert "MUST keep" in prompt and "FORBIDDEN" in prompt
+    assert "must_keep:" in prompt and "forbid:" in prompt
     # camera decision requested
     assert "camera_angle" in prompt
 
@@ -1228,7 +1222,6 @@ def test_candidates_prompt_honours_ongoing_topic():
         character_desc="1girl", scene_desc="reading at a desk",
         user_topic="本を読んでいる最中", time_scale="minutes",
     )
-    assert "tense and aspect" in prompt
     assert "IN PROGRESS" in prompt
     assert "本を読んでいる最中" in prompt
 
@@ -1247,29 +1240,29 @@ def test_emotion_register_threads_into_prompts():
     cand = build_candidates_prompt(
         character_desc="1girl", scene_desc="a room", emotion="nostalgia",
     )
-    assert "EMOTIONAL REGISTER" in cand and "nostalgia" in cand
+    assert "mood=nostalgia" in cand
     story = build_story_prompt(
         character_desc="1girl", scene_desc="a room",
         base_axis="present", worldview="", emotion="melancholy",
     )
-    assert "EMOTIONAL REGISTER" in story
+    assert "mood=melancholy" in story
     axis = build_axis_prompt(
         story_text="s", character_tags=["1girl"], character_desc="",
         prompt_style="danbooru", time_scale="years",
         axis="past", base_axis="present", emotion="serenity",
     )
-    assert "EMOTIONAL REGISTER" in axis
+    assert "mood=serenity" in axis
 
 
 def test_emotion_register_off_by_default():
     prompt = build_candidates_prompt(character_desc="1girl", scene_desc="a room")
-    assert "EMOTIONAL REGISTER" not in prompt
+    assert "FIELDS: mood=" not in prompt
     # unknown emotion is ignored (no crash, no block)
     prompt2 = build_story_prompt(
         character_desc="1girl", scene_desc="a room",
         base_axis="present", worldview="", emotion="not_a_real_emotion",
     )
-    assert "EMOTIONAL REGISTER" not in prompt2
+    assert "FIELDS: mood=" not in prompt2
 
 
 # ── elapsed-time header (next-volume framing) ────────────────────────────────
@@ -1418,10 +1411,10 @@ def test_axis_tags_prompt_demands_json_and_rules():
         axis="past", base_axis="present",
         time_scale="years",
     )
-    assert "JSON ONLY" in prompt
+    assert "json only" in prompt.lower()
     assert "SUBJECT-FIRST" in prompt
-    assert "ACTION-ANCHOR" in prompt
-    assert "HARD MAX 20 TAGS" in prompt
+    assert "pose_tags" in prompt
+    assert "HARD MAX" in prompt and "20" in prompt
     # Structured schema keys the parser expects.
     for key in (
         "danbooru_tags", "subject_tags", "hair_tags", "expression_tags",
@@ -1624,12 +1617,10 @@ def test_candidates_prompt_includes_dramatic_modes():
         character_desc="1girl", scene_desc="a room", time_scale="hours",
         candidate_modes={"A": "irony", "B": "parting", "C": "pursuit"},
     )
-    assert "Dramatic shape for A" in prompt
-    assert "IRONY" in prompt and "PARTING" in prompt and "PURSUIT" in prompt
-    # new schema fields requested
+    assert "A(faithful)=mode:irony" in prompt
+    assert "B(rebel)=mode:parting" in prompt
+    assert "C(stranger)=mode:pursuit" in prompt
     assert '"dramatic_mode"' in prompt and '"turn"' in prompt
-    # cliffhanger bias reaches the candidate stage too
-    assert "LEAN INTO the turn" in prompt
 
 
 def test_parse_candidates_json_dramatic_mode_turn():
@@ -2022,35 +2013,24 @@ def test_candidates_prompt_topic_hoisted_above_base_image():
         locale="ja",
         time_scale="years",
     )
-    # Topic leads the prompt (above HARD RULES / seeds / base image).
-    topic_at = prompt.index("★ USER TOPIC")
-    rules_marker = "【最優先ルール" if "【最優先ルール" in prompt else "HARD RULES"
-    assert topic_at < prompt.index(rules_marker)
+    # Checklist leads; topic appears before the scene marker.
+    topic_at = prompt.index('topic="廃墟を探索する冒険"')
     assert topic_at < prompt.index("UNIQUE_SCENE_MARKER")
-    # raw topic + narrative directive both present
-    assert "廃墟を探索する冒険" in prompt
     assert "隠された過去に触れていく" in prompt
-    # base image is explicitly scoped to LOOK-only
-    assert "fixes the base act's LOOK only" in prompt
-    # ongoing-action tense guidance preserved from the old topic_line
-    assert "tense and aspect" in prompt
-    # HARD RULES carve-out for topics
+    assert "BASE IMAGE = [PRESENT]" in prompt
+    assert "IN PROGRESS" in prompt
     assert "お題がある場合" in prompt or "USER TOPIC is given" in prompt
-    # All three spirits mention topic compatibility
-    assert prompt.count("USER TOPIC") >= 3
+    assert "COHERENCE HIERARCHY" not in prompt
 
 
 def test_candidates_prompt_topic_without_directive():
-    # directive omitted → still hoists the raw topic prominently
     prompt = build_candidates_prompt(
         character_desc="1girl", scene_desc="a room", user_topic="放課後の冒険",
     )
-    assert "★ USER TOPIC" in prompt
+    assert 'topic="放課後の冒険"' in prompt
     assert "放課後の冒険" in prompt
-    # empty topic → no topic block, generic invent-your-own line
     empty = build_candidates_prompt(character_desc="1girl", scene_desc="a room")
-    assert "★ USER TOPIC" not in empty
-    assert "No topic was given" in empty
+    assert "topic=(none" in empty
 
 
 def test_candidates_off_topic_gate():
@@ -2297,7 +2277,7 @@ def test_tone_line_and_ending_hooks():
 def test_tone_threaded_into_prompts():
     c = build_candidates_prompt(character_desc="1girl", scene_desc="s", tone="bright")
     assert "TONE:" in c
-    assert "surprise does NOT have to mean darkness" in c
+    assert "COHERENCE HIERARCHY" not in c
     s = build_story_prompt(
         character_desc="1girl", scene_desc="s", base_axis="present",
         worldview="", tone="bright",
@@ -2319,18 +2299,18 @@ def test_build_timetable_scale_adaptive():
     assert "~2 hours AROUND this moment" in tens
     assert "20 minutes apart" in tens
     assert "BASE_TIME_AXIS=present" in tens and "drawable" in tens
-    assert "MIDDLE" in tens
+    assert "Middle slot" in tens
     past_tt = build_timetable_prompt(
         biography={}, scene_desc="kitchen window", time_scale="hours", base_axis="past",
     )
     assert "BASE_TIME_AXIS=past" in past_tt
-    assert "EARLY" in past_tt
+    assert "Opening slot" in past_tt
     assert "MIDDLE slot" not in past_tt
     fut_tt = build_timetable_prompt(
         biography={}, scene_desc="kitchen window", time_scale="hours", base_axis="future",
     )
     assert "BASE_TIME_AXIS=future" in fut_tt
-    assert "LATE" in fut_tt
+    assert "Closing slot" in fut_tt
     minutes = build_timetable_prompt(
         biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="minutes",
     )
@@ -2356,12 +2336,11 @@ def test_build_timetable_is_story_driven():
                   "future": "he never appears"},
         user_topic="放課後",
     )
-    assert "CHOSEN STORY" in tt
+    assert "STORY:" in tt
     assert "Shadow and Bandana" in tt and "stands by the window" in tt
     assert "放課後" in tt
-    # scene grounding + hobby guard
     assert "sunlit classroom by the window" in tt
-    assert "do NOT invent hobbies" in tt
+    assert "forbid_idle" in tt
     slots = parse_timetable_json(
         '{"slots":[{"label":"morning","activity":"kneads dough","place":"kitchen",'
         '"feeling":"calm"},{"nope":1},{"label":"","activity":""}]}'
@@ -2425,7 +2404,8 @@ def test_candidates_prompt_leads_with_hard_rules_and_seed_tags():
         forced_motif="paper",
         biography={"hobbies": ["latte art"]},
     )
-    assert p.lstrip().startswith("HARD RULES")
+    assert p.lstrip().startswith("PRIORITY")
+    assert "HARD RULES" in p
     assert "SEED TAGS" in p and "coffee_cup" in p and "paper" in p
     assert "latte art" in p
     assert "grounded_tags" in p
@@ -2544,8 +2524,8 @@ def test_axis_context_base_marker_follows_base_axis():
         },
         prompt_style="danbooru",
     )
-    assert "[FUTURE] ← base image" in prompt
-    assert "[PRESENT] ← base image" not in prompt
+    assert "INPUT axis=past" in prompt
+    assert "BASE = [FUTURE]" in prompt
 
 
 def test_topic_only_grounding_prompt_and_parse():
@@ -2679,10 +2659,9 @@ def test_visual_examination_slot_is_primary():
         axis_slot=slot,
         neighbors=[{"label": "-20m", "activity": "opens fridge", "place": "kitchen"}],
     )
-    assert "ON-SCREEN FACT" in prompt
+    assert "ANCHOR" in prompt
     assert "pours milk" in prompt
     assert "opens fridge" in prompt
-    # Mood text is secondary
     assert "quiet morning" in prompt
 
 
@@ -2702,10 +2681,10 @@ def test_timetable_prompt_prefers_topic_motif_turn():
         user_topic="放課後の呼び止め",
         topic_directive="Catch him at the gate before the last bell.",
     )
-    assert "SOURCE OF TRUTH" in tt
+    assert "forbid_idle" in tt
     assert "Shadow Bandana" in tt and "bandana" in tt
     assert "the name on the slip is wrong" in tt
-    assert "HINT beats" in tt
+    assert "hints=" in tt
     assert "放課後の呼び止め" in tt
     assert "Catch him at the gate" in tt
 
@@ -2760,3 +2739,58 @@ def test_merge_without_search_keeps_plan_and_lock():
     assert "reaching" in line
     assert "black_hair" in line
     assert "upper_body" in line
+
+
+# ── compact prompt contracts (small-LLM slim prompts) ─────────────────────────
+
+def test_compact_candidates_prompt_contract():
+    prompt = build_candidates_prompt(
+        character_desc="1girl", scene_desc="cafe",
+        user_topic="rainy morning", emotion="nostalgia",
+        candidate_modes={"A": "irony", "B": "pursuit", "C": "revelation"},
+    )
+    assert "PRIORITY (do in order" in prompt
+    assert "mood=nostalgia" in prompt
+    assert "COHERENCE HIERARCHY" not in prompt
+    assert "Dramatic shape for" not in prompt
+    assert len(prompt.split()) < 900
+
+
+def test_compact_densify_no_full_chronicle():
+    prompt = build_axis_tags_prompt(
+        story_text="She reaches for the umbrella.",
+        character_tags=["1girl"], character_desc="",
+        axis="future", base_axis="present", time_scale="hours",
+        title="Rain Gate", overall="arc",
+        all_stories={"past": "p", "present": "pr", "future": "f"},
+        visual_plan={"focal_action_tags": ["reaching", "outstretched_arm"]},
+    )
+    assert "FULL CHRONICLE CONTEXT" not in prompt
+    assert "INPUT axis=future" in prompt
+    assert "focal=[reaching, outstretched_arm]" in prompt
+    assert "must_keep:" in prompt
+
+
+def test_compact_visual_exam_contract():
+    prompt = build_visual_examination_prompt(
+        story_text="She grips the letter.",
+        axis="past", base_axis="present", time_scale="years",
+        emotion="melancholy",
+    )
+    assert "PRIORITY (do in order" in prompt
+    assert "mood=melancholy" in prompt
+    assert "must_keep:" in prompt
+    assert "ON-SCREEN FACT" not in prompt
+    assert len(prompt.split()) < 450
+
+
+def test_compact_timetable_contract():
+    prompt = build_timetable_prompt(
+        biography={}, scene_desc="classroom", time_scale="hours",
+        selected={"title": "T", "turn": "pivot", "dramatic_mode": "irony", "mood": "warmth"},
+        user_topic="after school",
+    )
+    assert "PRIORITY (do in order" in prompt
+    assert "mode=irony" in prompt
+    assert "CHOSEN STORY" not in prompt
+    assert "forbid_idle" in prompt

@@ -807,6 +807,7 @@ const CAT_TAG_GROUPS = [
 function axisHasCatTags(p) {
   if (!p) return false
   if (p.visual_script) return true
+  if (asStringList(p.similar_mix_tags).length) return true
   return CAT_TAG_GROUPS.some(g => asStringList(p[g.key]).length > 0)
 }
 
@@ -1098,6 +1099,8 @@ function handleEvent(ev) {
           background_tags: ev.background_tags || [],
           object_tags: ev.object_tags || [],
           lighting_tags: ev.lighting_tags || [],
+          similar_mix_tags: ev.similar_mix_tags || [],
+          similar_mix_sources: ev.similar_mix_sources || [],
         },
       }
       break
@@ -2065,10 +2068,36 @@ async function generateImages() {
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonPose') }}:</span>
                       {{ joinList(axisReasoning[axis].focal) }}
                     </p>
-                    <p v-if="asStringList(axisReasoning[axis].search_tags).length" class="break-words">
+                    <p v-if="asStringList(axisReasoning[axis].search_tags).length
+                      && !asStringList(axisReasoning[axis].similar_mix_tags).length" class="break-words">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonTags') }}:</span>
                       {{ joinList(axisReasoning[axis].search_tags) }}
                     </p>
+                    <details
+                      v-if="asStringList(axisReasoning[axis].similar_mix_tags).length
+                        || asStringList(axisReasoning[axis].similar_mix_sources).length"
+                      class="mt-1 rounded-lg border border-teal-800/40 bg-teal-950/20"
+                    >
+                      <summary class="cursor-pointer px-2 py-1 text-[10px] text-teal-300/90 list-none">
+                        {{ t('chronicle.similarMixTagsCount', {
+                          n: asStringList(axisReasoning[axis].similar_mix_tags).length,
+                          m: asStringList(axisReasoning[axis].similar_mix_sources).length,
+                        }) }}
+                      </summary>
+                      <div class="px-2 pb-2 space-y-1.5">
+                        <div v-if="asStringList(axisReasoning[axis].similar_mix_sources).length"
+                          class="flex flex-wrap gap-1">
+                          <a v-for="sha in asStringList(axisReasoning[axis].similar_mix_sources)" :key="sha"
+                            :href="`/api/originals/${sha}`" target="_blank" rel="noopener"
+                            class="w-10 h-10 rounded overflow-hidden border border-teal-700/40 bg-black/40">
+                            <img :src="`/api/thumbnails/${sha}.webp`" class="w-full h-full object-cover" loading="lazy" />
+                          </a>
+                        </div>
+                        <p class="break-words text-teal-200/80">
+                          {{ joinList(axisReasoning[axis].similar_mix_tags) }}
+                        </p>
+                      </div>
+                    </details>
                   </div>
                   <div v-if="axisDrafts[axis]" class="mt-2 text-[10px] text-[var(--sb-muted)]">
                     <a v-if="axisDrafts[axis].draft_image_id"
@@ -2132,6 +2161,29 @@ async function generateImages() {
                     <span class="text-[var(--sb-faint)]">{{ t('chronicle.' + g.label) }}:</span>
                     <span class="font-mono text-gray-400">{{ joinList(p[g.key]) }}</span>
                   </p>
+                  <details
+                    v-if="asStringList(p.similar_mix_tags).length || asStringList(p.similar_mix_sources).length"
+                    class="rounded-lg border border-teal-800/40 bg-teal-950/20"
+                  >
+                    <summary class="cursor-pointer px-2 py-1 text-[10px] text-teal-300/90 list-none">
+                      {{ t('chronicle.similarMixTagsCount', {
+                        n: asStringList(p.similar_mix_tags).length,
+                        m: asStringList(p.similar_mix_sources).length,
+                      }) }}
+                    </summary>
+                    <div class="px-2 pb-2 space-y-1.5">
+                      <div v-if="asStringList(p.similar_mix_sources).length" class="flex flex-wrap gap-1">
+                        <a v-for="sha in asStringList(p.similar_mix_sources)" :key="'mix-' + sha"
+                          :href="`/api/originals/${sha}`" target="_blank" rel="noopener"
+                          class="w-10 h-10 rounded overflow-hidden border border-teal-700/40 bg-black/40">
+                          <img :src="`/api/thumbnails/${sha}.webp`" class="w-full h-full object-cover" loading="lazy" />
+                        </a>
+                      </div>
+                      <p class="text-[10px] font-mono text-teal-200/80 break-words">
+                        {{ joinList(p.similar_mix_tags) }}
+                      </p>
+                    </div>
+                  </details>
                 </div>
               </div>
             </div>

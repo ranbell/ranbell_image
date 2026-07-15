@@ -1312,6 +1312,8 @@
     "similarTagMixHint": "Embeds the situation, finds near images, and blends their tags into each axis.",
     "similarTagMixRatio": "Mix ratio",
     "similarTagMixRatioTitle": "Fraction of the tag budget drawn from similar images",
+    "similarMixTags": "Similar mix tags",
+    "similarMixTagsCount": "Similar mix ({n}) · {m} neighbors",
     "generatePinup": "Pinup",
     "pinupTitle": "Generate a reference 'pinup' of this character and register it to her Biography (one extra image job)",
     "suppressConflict": "Conflict-tag removal",

@@ -1581,146 +1581,74 @@ def build_candidates_prompt(
 ) -> str:
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
-    The three ideas diverge along the faithful/rebel/stranger axes. Output
-    language follows `locale` (ja/en). The real pitch is title / motif / turn /
-    dramatic_mode; past/present/future are optional short hint beats only — the
-    timetable later supplies drawable on-screen actions. The base image is still
-    the `base_axis` look (t = 0).
-
-    The user topic (お題) is hoisted to the VERY TOP of the prompt (above HARD
-    RULES and seed tags) and expanded with `topic_directive`, because a small
-    local model otherwise drowns an abstract topic under competing constraints
-    and re-tells the picture.
+    Compact checklist contract for small local models. The real pitch is
+    title / motif / turn / dramatic_mode; past/present/future are optional hints.
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     has_topic = bool(user_topic.strip())
-    # Hoisted, high-salience topic block (rendered FIRST when present).
-    if has_topic:
-        directive_part = (
-            "Story direction (the SUBJECT the three acts explore — a theme, not a "
-            f"fixed scene):\n{topic_directive.strip()}\n"
-            if topic_directive.strip()
-            else ""
-        )
-        topic_block = (
-            "★ USER TOPIC (お題) — THIS is what the story must be ABOUT ★\n"
-            f'Topic: "{user_topic.strip()}"\n'
-            f"{directive_part}"
-            "PRIORITY: the topic decides the SUBJECT of all three candidates. "
-            "Every act of A, B and C must embody this topic as a concrete drawable "
-            "event. The base image below only fixes how the base act LOOKS; it does "
-            "NOT decide the subject — the topic does. Do not let the picture pull "
-            "the story back into a plain depiction of itself.\n"
-            "Honour the topic's tense and aspect literally: if it describes an "
-            "action IN PROGRESS (e.g. \"…している最中\", \"in the middle of doing X\"), "
-            "ALL three acts stay INSIDE that ongoing action — do NOT resolve, "
-            "complete or walk away from it.\n"
-        )
-    else:
-        topic_block = (
-            "No topic was given — invent three genuinely different premises yourself.\n"
-        )
-    world_line = (
-        f'Setting atmosphere / worldview: "{worldview.strip()}" — backdrop and '
-        "flavour only; the scene details above take precedence."
-        if worldview.strip()
-        else "No worldview was specified — invent fitting ones."
-    )
     modes = candidate_modes or {}
-
-    def _spirit_line(cid: str, flavour: str, desc: str) -> str:
-        line = f"  Candidate {cid} ({flavour}): {desc}"
-        mode_line = _dramatic_mode_line(modes.get(cid, ""), locale)
-        if mode_line:
-            line += f"\n    Dramatic shape for {cid} — {mode_line}"
-        return line
-
-    spirits_block = "\n".join(
-        _spirit_line(cid, flavour, desc) for cid, flavour, desc in _CANDIDATE_SPIRITS
-    )
-    elapsed_header = _elapsed_time_header(
-        base_axis=base_axis, time_scale=time_scale, locale=locale
-    )
-    delta = _scale_delta_line(time_scale)
-    guardrail = (
-        "GROUNDING — keep all three candidates in the SAME real-world register as "
-        "the image. Unless the worldview above explicitly asks for it, do NOT add "
-        "space, aliens, magic, spirits, ghosts, or any supernatural / sci-fi "
-        "element. Find the surprise in human, emotional and situational twists — "
-        "a hidden motive, an unseen person, an ironic turn — NOT in a genre shift."
-    )
-    hierarchy_block = _coherence_hierarchy_block(
-        base_axis=base_axis, user_topic=user_topic, time_scale=time_scale
+    mood_key = (emotion or "").strip().lower()
+    checklist = _compact_priority_checklist(
+        topic=user_topic,
+        base_axis=base_axis,
+        time_scale=time_scale,
+        mood=mood_key,
     )
     head = chronicle_hard_rules_preamble(locale=locale, has_user_topic=has_topic)
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif, locale=locale
     )
-    bio_block = ""
+    bio_line = ""
     if biography:
-        bio_block = (
-            "CHARACTER BIOGRAPHY (hobbies/items as physical actions only — never "
-            "override the USER TOPIC subject):\n"
-            f"  {_biography_brief(biography)}\n\n"
-        )
-    motif_json_hint = forced_motif or "one concrete recurring object"
-    # Topic-first when present: small models overweight the opening tokens.
-    lead = (
-        f"{topic_block}\n{hierarchy_block}\n{head}\n{seed_block}\n"
-        if has_topic else
-        f"{head}\n{seed_block}\n{topic_block}\n{hierarchy_block}\n"
+        bio_line = f"bio: {_biography_brief(biography)}\n"
+    world_line = (
+        f'worldview="{worldview.strip()[:120]}"'
+        if worldview.strip()
+        else "worldview=(none)"
     )
+    topic_note = ""
+    if has_topic:
+        directive = topic_directive.strip()
+        topic_note = (
+            f'topic="{user_topic.strip()}"'
+            + (f'\ndirection="{directive[:300]}"' if directive else "")
+            + "\nIf the topic describes an action IN PROGRESS, every act stays "
+            "inside that ongoing action — do not resolve or exit it.\n"
+        )
+    else:
+        topic_note = "topic=(none — invent three distinct premises)\n"
+    elapsed_header = _elapsed_time_header(
+        base_axis=base_axis, time_scale=time_scale, locale=locale
+    )
+    delta = _scale_delta_line(time_scale)
+    motif_json_hint = forced_motif or "one concrete recurring object"
     return (
-        f"{lead}"
-        "You are a storyteller pitching THREE different chronicles for the same "
-        "character. Each chronicle is THREE MOMENTS of ONE ongoing story, "
-        f"separated by {span} of elapsed time.\n\n"
-        f"{elapsed_header}\n"
-        f"{bio_block}"
-        "CHARACTER (visual descriptor tags — appearance only, not names):\n"
-        f"{character_desc}\n\n"
-        f"THE BASE IMAGE IS THE [{base_axis.upper()}] MOMENT (t = 0) — it looks "
-        f"exactly like this (this fixes the base act's LOOK only, not the subject):"
-        f"\n{scene_desc}\n\n"
-        f"{world_line}\n\n"
-        "⚠️ TIME AXIS — this is the STORY ENGINE, not decoration ⚠️\n"
-        f"Use the elapsed-time header above as the axis map. Each act opens a new "
-        f"volume at the marked elapsed distance from base (scale key: \"{time_scale}\").\n"
-        f"HOW MUCH CHANGES between the acts: {delta}\n"
-        "Same characters and same world throughout — only the MOMENT moves, and "
-        "each act stays causally tethered to the base image. Do NOT jump to an "
-        "origin story or a far-off ending when the scale is short.\n"
-        f"Visual continuity for this scale — keep: {rules['must_keep']}; "
-        f"may change: {rules['may_differ']}.\n\n"
-        f"{guardrail}\n"
+        f"{checklist}"
+        f"{head}"
+        f"{seed_block}"
+        f"{topic_note}"
+        f"{bio_line}"
+        f"{world_line}\n"
+        f"{_candidate_modes_block(modes)}"
         f"{_tone_line(tone, locale)}"
-        f"{_emotion_guidance_line(emotion, locale)}\n"
-        "Make the three candidates genuinely distinct — each pairs a different "
-        "reading (below) with a different dramatic shape, so the three diverge in "
-        "BOTH viewpoint and plot. A surprising turn can be delightful or hopeful "
-        "— surprise does NOT have to mean darkness:\n"
-        f"{spirits_block}\n\n"
+        f"{_emotion_guidance_line(emotion, locale)}"
+        "Pitch THREE chronicles (A/B/C) for ONE character. Each is three moments "
+        f"of ONE story, ~{span} apart.\n\n"
+        f"{elapsed_header}\n"
+        f"BASE IMAGE = [{base_axis.upper()}] (t=0). Scene:\n{scene_desc}\n\n"
+        f"CHARACTER (appearance tags only):\n{character_desc}\n\n"
+        f"time_delta: {delta}\n"
+        f"must_keep: {rules['must_keep']}\n"
+        f"may_differ: {rules['may_differ']}\n"
+        "GROUNDING: same real-world register — no magic/aliens unless worldview "
+        "explicitly asks. Surprise = human/situational, not genre shift.\n\n"
         f"{_locale_output_line(locale)}\n\n"
-        "THE REAL PITCH for each candidate is: title + motif + turn + dramatic_mode. "
-        "Those four decide the story spine the timetable will later detail into "
-        "drawable shots. past / present / future are SHORT OPTIONAL HINT beats "
-        "only — one suggestive sentence each is fine — and are NOT the source of "
-        "truth for final images (the timetable will pin concrete actions).\n"
-        f"If you include act hints, the [{base_axis}] hint should match the base "
-        "image (t = 0) and the others may open the elapsed volumes in the header. "
-        "Do NOT tidy the arc into a neat resolution: the future hint should "
-        "LEAN INTO the turn (a rising stake, a reversal, an exposure, a threat "
-        "nearly upon them) and leave the reader wanting the next volume — unless "
-        "the user "
-        "topic names an explicit ending. Give: a title (3-8 words, specific and "
-        "evocative, never generic); a motif "
-        f"(use '{motif_json_hint}' when a fixed motif was given); a one-sentence "
-        "`turn` naming the single surprising pivot; echo `dramatic_mode`; optional "
-        "short past/present/future hints; and `grounded_tags` — SEED TAG names you "
-        "actually turned into events (English danbooru spelling).\n\n"
+        "OUTPUT JSON only (no fences). Each candidate needs: title, motif, turn, "
+        "dramatic_mode (echo assigned mode), optional short past/present/future "
+        f"hints, grounded_tags (seed tags turned into events).\n"
+        f"motif hint: {motif_json_hint}\n\n"
         f"{_CHRONICLE_FEWSHOT_CANDIDATES}\n\n"
-        "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
         '  {"id": "A", "title": "...", "dramatic_mode": "...", "past": "...", '
         '"present": "...", "future": "...", "motif": "...", "turn": "...", '
@@ -2030,110 +1958,88 @@ def build_timetable_prompt(
     user_topic: str = "",
     topic_directive: str = "",
 ) -> str:
-    """Turn the CHOSEN STORY into a fine-grained timetable that COVERS the time
-    axis, centred on the base moment.
-
-    Primary drivers: user topic, selected title/motif/turn/dramatic_mode, the
-    base scene, and biography as personality flavour. Candidate past/present/
-    future beats are HINTS only — if they conflict with topic or turn, prefer
-    topic/turn. English output.
-    """
+    """Turn the CHOSEN STORY into a fine-grained timetable centred on the base moment."""
     window, slots = _TIMETABLE_WINDOW.get(
         time_scale, _TIMETABLE_WINDOW["years"]
+    )
+    effective_scale = (
+        time_scale if time_scale in _TIMETABLE_WINDOW else "years"
     )
     sel = selected or {}
     title = str(sel.get("title") or "").strip()
     motif = str(sel.get("motif") or sel.get("key_motif") or "").strip()
     turn = str(sel.get("turn") or "").strip()
     dramatic_mode = str(sel.get("dramatic_mode") or "").strip()
+    mood_val = str(sel.get("mood") or "").strip().lower()
     hint_beats = "; ".join(
         f"{a}: {sel.get(a, '')}" for a in AXES if sel.get(a)
     )
-    story_lines: list[str] = []
+    story_fields: list[str] = []
     if title:
-        story_lines.append(f'  Title: "{title}"')
+        story_fields.append(f'title="{title}"')
     if motif:
-        story_lines.append(f"  Motif: {motif}")
+        story_fields.append(f"motif={motif}")
     if turn:
-        story_lines.append(f"  Turn (the pivot): {turn}")
+        story_fields.append(f"turn={turn}")
     if dramatic_mode:
-        story_lines.append(f"  Dramatic mode: {dramatic_mode}")
+        story_fields.append(f"mode={dramatic_mode}")
     if hint_beats:
-        story_lines.append(
-            f"  HINT beats (suggestive only — discard if they fight the topic "
-            f"or turn): {hint_beats}"
-        )
+        story_fields.append(f"hints={hint_beats}")
     story_block = ""
-    if story_lines:
-        story_block = (
-            "CHOSEN STORY — the timetable is THIS story playing out over time, "
-            "not a generic day:\n"
-            + "\n".join(story_lines)
-            + "\n"
-        )
+    if story_fields:
+        story_block = "STORY: " + " ".join(story_fields) + "\n"
     topic_line = ""
     if user_topic.strip():
-        directive_part = (
-            f"Direction: {topic_directive.strip()}\n"
-            if topic_directive.strip()
-            else ""
-        )
+        directive = topic_directive.strip()
         topic_line = (
-            f'Topic (お題) — SUBJECT of every slot: "{user_topic.strip()}"\n'
-            f"{directive_part}"
-            "If a candidate beat conflicts with the topic or turn, follow "
-            "topic/turn and invent drawable actions that serve them.\n"
+            f'topic="{user_topic.strip()}"'
+            + (f' direction="{directive[:200]}"' if directive else "")
+            + "\n"
         )
     base = (base_axis or "present").lower()
     if base not in AXES:
         base = "present"
     if base == "present":
         base_slice = (
-            f'BASE_TIME_AXIS={base}. The MIDDLE slot MUST use axis "present" '
-            '(label like "now" / "today") and IS the base image moment (t = 0) — '
-            "its activity and place MUST match THE SETTING below. Detail the "
-            "slots just before and after it especially clearly."
+            f"BASE_TIME_AXIS={base}. Middle slot axis=present (t=0) = base image."
         )
     elif base == "past":
         base_slice = (
-            f'BASE_TIME_AXIS={base}. The EARLY / opening slot MUST use axis "past" '
-            "and IS the base image moment (t = 0) — its activity and place MUST "
-            "match THE SETTING below. Later slots move forward toward present, "
-            "then future. Do NOT put the base-image action in the middle row."
+            f"BASE_TIME_AXIS={base}. Opening slot axis=past (t=0) = base image."
         )
     else:
         base_slice = (
-            f'BASE_TIME_AXIS={base}. The LATE / closing slot MUST use axis "future" '
-            "and IS the base image moment (t = 0) — its activity and place MUST "
-            "match THE SETTING below. Earlier slots move backward toward present, "
-            "then past. Do NOT put the base-image action in the middle row."
+            f"BASE_TIME_AXIS={base}. Closing slot axis=future (t=0) = base image."
         )
+    checklist = _compact_priority_checklist(
+        topic=user_topic,
+        base_axis=base,
+        time_scale=effective_scale,
+        turn=turn,
+        mode=dramatic_mode,
+        mood=mood_val,
+    )
+    mood_line = (
+        f"Echo mood={mood_val} in spine-slot `feeling` fields.\n"
+        if mood_val and mood_val in _EMOTION_REGISTER
+        else ""
+    )
     return (
-        "Turn the CHOSEN STORY below into a fine-grained timetable so a picture "
-        "can be drawn for each moment. The timetable is THIS STORY unfolding "
-        "across time — never a generic hobby diary. Slot activities are the "
-        "SOURCE OF TRUTH for what each shot will show.\n\n"
-        f"TABLE SPAN: {window}.\n"
-        f"SLICING: {slots}. {base_slice}\n\n"
+        f"{checklist}"
+        "Build a drawable timetable for the chosen story — not a hobby diary.\n"
+        f"TABLE span={window}; slices={slots}. {base_slice}\n"
         f"{topic_line}"
         f"{story_block}"
-        f"THE SETTING — every slot happens in or around this place unless the "
-        f"story itself clearly moves her: {scene_desc}\n"
-        f"CHARACTER (personality flavour ONLY — do NOT invent hobbies or props "
-        f"that don't fit the scene/story): {_biography_brief(biography)}\n\n"
-        "For EACH slot give ONE concrete physical action that advances the story, "
-        "WHERE (consistent with the setting above), and how she FEELS. Consecutive "
-        "slots must flow into each other. Actions must be drawable — never "
-        "'relaxing', 'thinking' or 'spending time', and never an unrelated hobby "
-        "dropped into a scene where it makes no sense.\n"
-        "Mark each slot with an `axis` field: exactly one slot each for "
-        '"past", "present", and "future" (matching the story spine); other slots '
-        'may use "bridge". The slot whose axis equals BASE_TIME_AXIS must depict '
-        "the base image.\n"
-        "Output English JSON only, no fences:\n"
+        f"setting={scene_desc}\n"
+        f"bio={_biography_brief(biography)}\n"
+        f"{mood_line}"
+        "Each slot: axis (past|present|future|bridge), label, activity (physical "
+        "action), place, feeling. Base-axis slot must match the setting.\n"
+        "forbid_idle: [relaxing, thinking, spending time, mood-only beats]\n"
+        "OUTPUT JSON only:\n"
         '{"slots": [{"axis": "past|present|future|bridge", '
-        '"label": "<relative time, e.g. -20min / now / +20min>", '
-        '"activity": "<concrete physical action tied to the story>", '
+        '"label": "<relative time>", '
+        '"activity": "<concrete action>", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
 
@@ -3494,25 +3400,91 @@ _EMOTION_REGISTER = {
 
 
 def _emotion_guidance_line(emotion: str, locale: str = "en") -> str:
-    """One-line register guidance for a chosen emotion. Empty/unknown → ''.
-
-    Biases the OVERALL mood/lighting/colour/atmosphere toward the emotion while
-    each act still keeps its own dominant emotion (an overarching tone, not a
-    per-act override).
-    """
-    desc = _EMOTION_REGISTER.get((emotion or "").strip().lower())
-    if not desc:
+    """Short mood field for prompts. Empty/unknown → ''."""
+    key = (emotion or "").strip().lower()
+    if key not in _EMOTION_REGISTER:
         return ""
     if locale == "ja":
-        return (
-            f"\n感情レジスタ: 全体のムード・照明・色・雰囲気を「{desc}」へ寄せること。"
-            "各幕固有の支配的感情は保ったまま、上位のトーンとして通底させる。\n"
-        )
+        return f"\nFIELDS: mood={key}\n"
+    return f"\nFIELDS: mood={key}\n"
+
+
+def _compact_priority_checklist(
+    *,
+    topic: str = "",
+    base_axis: str = "present",
+    time_scale: str = "years",
+    turn: str = "",
+    mode: str = "",
+    mood: str = "",
+) -> str:
+    """Short explicit contract for small LLMs (replaces long hierarchy essays)."""
+    lines = [
+        "PRIORITY (do in order; later may drop):",
+        "1. topic" + (f'="{topic.strip()[:80]}"' if topic.strip() else ""),
+        f"2. base_look / base_axis={base_axis}",
+        f"3. time_scale={time_scale}",
+    ]
+    if turn.strip():
+        lines.append(f"4. turn={turn.strip()[:100]}")
+    fields = []
+    if mode.strip():
+        fields.append(f"mode={mode.strip()}")
+    if mood.strip() and mood.strip().lower() in _EMOTION_REGISTER:
+        fields.append(f"mood={mood.strip().lower()}")
+    if fields:
+        lines.append("FIELDS: " + " ".join(fields))
+    return "\n".join(lines) + "\n"
+
+
+def _scale_constraint_fields(
+    time_scale: str, *, axis: str, base_axis: str
+) -> str:
+    """Compact must/may/forbid lines for non-base axes."""
+    if axis == base_axis:
+        return ""
+    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     return (
-        f"\nEMOTIONAL REGISTER: bias the overall mood, lighting, colour and "
-        f"atmosphere toward {desc}. Keep each act's own dominant emotion, but let "
-        "this register run through all of them as the overarching tone.\n"
+        f"must_keep: {rules['must_keep']}\n"
+        f"may_differ: {rules['may_differ']}\n"
+        f"forbid: {rules['forbidden']}\n"
+        "camera: pick a framing different from the base "
+        "(close-up, upper_body, dutch_angle, from_side, …)\n"
     )
+
+
+def _minimal_densify_input_block(
+    *,
+    story_text: str,
+    axis: str,
+    title: str = "",
+    visual_plan: dict | None = None,
+) -> str:
+    """Minimal tag-stage input (replaces FULL CHRONICLE essays)."""
+    focal = [
+        str(t).strip().replace(" ", "_")
+        for t in (visual_plan or {}).get("focal_action_tags") or []
+        if str(t).strip()
+    ]
+    situation = (story_text or "").strip()
+    lines = [f"INPUT axis={axis}"]
+    if title.strip():
+        lines.append(f"title={title.strip()[:80]}")
+    if situation:
+        lines.append(f"situation={situation[:400]}")
+    if focal:
+        lines.append(f"focal=[{', '.join(focal)}]")
+    return "\n".join(lines) + "\n"
+
+
+def _candidate_modes_block(modes: dict[str, str]) -> str:
+    """Enum-only dramatic modes per candidate (no prose descriptions)."""
+    parts: list[str] = []
+    for cid, flavour, _ in _CANDIDATE_SPIRITS:
+        m = (modes.get(cid) or "").strip().lower()
+        token = m if m in _DRAMATIC_MODES else "escalation"
+        parts.append(f"{cid}({flavour})=mode:{token}")
+    return "CANDIDATES: " + " ".join(parts) + "\n"
 
 
 def build_visual_examination_prompt(
@@ -3549,49 +3521,37 @@ def build_visual_examination_prompt(
     elapsed_header = _elapsed_time_header(
         base_axis=base_axis, time_scale=time_scale, locale=locale
     )
+    mood_key = (emotion or "").strip().lower()
+    checklist = _compact_priority_checklist(
+        topic=user_topic,
+        base_axis=base_axis,
+        time_scale=time_scale,
+        mood=mood_key,
+    )
     if axis != base_axis:
-        # Compute this axis's elapsed distance/direction from the base.
-        idx_b = AXES.index(base_axis) if base_axis in AXES else 1
-        idx_a = AXES.index(axis)
-        steps = abs(idx_a - idx_b)
-        forward = idx_a > idx_b
-        one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
-        phrase = one if steps == 1 else two
-        dir_word = "LATER" if forward else "EARLIER"
-        constraint = (
-            f"This [{axis.upper()}] moment is {phrase} {dir_word} than the base "
-            f"([{base_axis.upper()}], t = 0). Base span: {span}. "
-            f"MUST keep: {rules['must_keep']}. MAY change: "
-            f"{rules['may_differ']}. FORBIDDEN: {rules['forbidden']}. Choose a "
-            "camera/framing clearly DIFFERENT from a plain front view of the base.\n"
+        constraint = _scale_constraint_fields(
+            time_scale, axis=axis, base_axis=base_axis
         )
+        constraint += "camera: pick a framing clearly different from the base.\n"
     else:
-        pose_lock = ""
+        constraint = ""
         if base_pose_tags:
-            pose_lock = (
-                "🔒 BASE-AXIS POSE LOCK — this is the base image itself. Your "
-                "`focal_action_tags` MUST include the WD14 pose/action tags below "
-                "verbatim (add complementary tags if useful, but never contradict "
-                "them). The camera angle must match the base image's framing.\n"
-                f"Base pose/action tags: {', '.join(base_pose_tags)}\n"
+            constraint = (
+                "BASE POSE LOCK — include these focal_action_tags verbatim:\n"
+                f"{', '.join(base_pose_tags)}\n"
             )
-        constraint = pose_lock
     intent_line = (
-        f'\nUSER INTENT: this chronicle fulfils "{user_topic.strip()}". Stage this '
-        "shot so the intent is legible in the frame (especially the FUTURE act).\n"
+        f'intent="{user_topic.strip()[:120]}"\n'
         if user_topic.strip()
         else ""
     )
-    char_line = f"CHARACTER (appearance only):\n{character_desc}\n\n" if character_desc else ""
+    char_line = f"character={character_desc}\n" if character_desc else ""
     slot_block = ""
     if axis_slot:
         slot_block = (
-            "★ ON-SCREEN FACT (PRIMARY — stage THIS activity/place exactly) ★\n"
-            f"  TIME ANCHOR [{axis.upper()}]: {axis_slot.get('label', '')}: "
-            f"{axis_slot.get('activity', '')} @ {axis_slot.get('place', '')} "
-            f"({axis_slot.get('feeling', '')})\n"
-            "Draw the action and place above. Do not substitute a different moment "
-            "from the story prose.\n\n"
+            "ANCHOR (draw this):\n"
+            f"  {axis_slot.get('label', '')}: {axis_slot.get('activity', '')} "
+            f"@ {axis_slot.get('place', '')} ({axis_slot.get('feeling', '')})\n"
         )
     neighbor_block = ""
     if neighbors:
@@ -3603,63 +3563,40 @@ def build_visual_examination_prompt(
             if not act:
                 continue
             nbr_lines.append(
-                f"  - {n.get('label', '')}: {act} @ {n.get('place', '')} "
-                f"({n.get('feeling', '')})"
+                f"  - {n.get('label', '')}: {act} @ {n.get('place', '')}"
             )
         if nbr_lines:
-            neighbor_block = (
-                "NEIGHBORING SLOTS (context only — continuity of the day; "
-                "do NOT draw these):\n"
-                + "\n".join(nbr_lines)
-                + "\n\n"
-            )
+            neighbor_block = "neighbors (context only):\n" + "\n".join(nbr_lines) + "\n"
     story_block = ""
     st = (story_text or "").strip()
     if st:
-        story_block = (
-            f"STORY COLOUR (optional mood/theme for [{axis.upper()}] — secondary; "
-            "do NOT override the on-screen fact above):\n"
-            f"{st}\n\n"
-        )
-    lead = (
-        "You are a storyboard director planning ONE shot before it is drawn.\n"
+        story_block = f"situation={st[:400]}\n"
+    mood_seed = (
+        f"Seed output mood from: {mood_key}\n"
+        if mood_key in _EMOTION_REGISTER
+        else ""
     )
-    if axis_slot:
-        lead += (
-            "The TIME ANCHOR below is the mandatory physical fact of the frame. "
-            "Neighboring slots and story prose are context only.\n\n"
-        )
-    else:
-        lead += (
-            "Read the act below and DECIDE, from multiple angles, exactly how the "
-            "character is posed and framed so the image expresses the story rather "
-            "than showing someone standing still.\n\n"
-        )
     return (
-        f"{lead}"
-        "EXPRESSION: name the face/mood that matches this act (one concrete "
-        "danbooru expression — smile, blush, tears, serious, pout, nervous…). "
-        "A person without a readable expression fails this stage.\n\n"
-        f"{elapsed_header}\n"
+        f"{checklist}"
+        "Plan ONE drawable shot (JSON only).\n"
+        f"axis={axis} base_axis={base_axis} span={span}\n"
+        f"{elapsed_header}"
         f"{char_line}"
         f"{slot_block}"
         f"{neighbor_block}"
         f"{story_block}"
-        f"{constraint}"
         f"{intent_line}"
-        "Decide the SINGLE most story-expressive physical action and stage it. "
-        "`focal_action_tags` MUST be concrete danbooru pose/action tags (e.g. "
-        "reaching, outstretched_arm, leaning_forward, looking_back, kneeling, "
-        "gripping, covering_face, holding, clenched_hand) — NEVER just 'standing' "
-        "or 'sitting' with nothing else. Pick a camera angle that dramatizes it.\n"
-        f"{_emotion_guidance_line(emotion, locale)}"
-        "Answer with JSON only, no markdown fences:\n"
+        f"{constraint}"
+        f"{mood_seed}"
+        "Rules: focal_action_tags = concrete danbooru pose/action (≥1). "
+        "Never standing/sitting alone. expression_tag required for people.\n"
+        "OUTPUT JSON:\n"
         '{"shot": "<close-up|upper_body|cowboy_shot|full_body|wide_shot>", '
         '"camera_angle": "<from_side|from_above|from_below|from_behind|dutch_angle|straight-on>", '
         '"focal_action_tags": ["tag_1", "tag_2", ...], '
-        '"expression_tag": "<one danbooru face/mood tag — smile, blush, tears, serious…>", '
-        '"gesture_prose": "<one vivid sentence naming the exact gesture and weight>", '
-        '"lighting": "<direction + quality>", "palette": "<colour palette>", '
+        '"expression_tag": "<smile|blush|tears|serious|...>", '
+        '"gesture_prose": "<one sentence>", '
+        '"lighting": "<direction + quality>", "palette": "<colours>", '
         '"props": ["prop_1", ...], "mood": "<one phrase>"}'
     )
 
@@ -3860,35 +3797,20 @@ def _axis_context_blocks(
 ) -> dict[str, str]:
     """Shared preamble blocks for the axis prompt builders (single-pass + 2-pass).
 
-    Split out so `build_axis_prompt`, `build_axis_tags_prompt` and
-    `build_axis_prose_prompt` all frame the story, chronicle, temporal
-    constraints and identity anchors identically.
+    Minimal situation + focal + scale constraints (no FULL CHRONICLE essays).
     """
-    if all_stories:
-        act_lines = []
-        for ax in AXES:
-            mark = " ← base image" if ax == base_axis else ""
-            act_lines.append(
-                f"  [{ax.upper()}]{mark}: {all_stories.get(ax, '')}"
-            )
-        chronicle_ctx = (
-            "FULL CHRONICLE CONTEXT:\n"
-            "This image prompt depicts ONE scene from a three-act chronicle.\n\n"
-            f"Title: {title}\n"
-            f"Overall arc: {overall}\n\n"
-            "The three acts (read these to understand the full journey):\n"
-            + "\n".join(act_lines)
-            + "\n\n"
-            f"You are now generating the image prompt for: [{axis.upper()}]\n"
-            f"The base image captures the [{base_axis.upper()}] act.\n\n"
-        )
-    else:
-        chronicle_ctx = ""
+    minimal_input = _minimal_densify_input_block(
+        story_text=story_text,
+        axis=axis,
+        title=title,
+        visual_plan=visual_plan,
+    )
+    scale_block = _scale_constraint_fields(
+        time_scale, axis=axis, base_axis=base_axis
+    )
 
     intent_ctx = (
-        f'\nUSER INTENT: this chronicle was written to fulfil "{user_topic.strip()}". '
-        "Keep this shot faithful to that intent — especially in the FUTURE act "
-        "(if the topic names an ending, the FUTURE image must depict that ending).\n"
+        f'intent="{user_topic.strip()[:120]}"\n'
         if user_topic.strip()
         else ""
     )
@@ -3898,44 +3820,13 @@ def _axis_context_blocks(
     else:
         identity_src = "Character description:\n" + character_desc
 
-    if axis != base_axis:
-        span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
-        idx_b = AXES.index(base_axis) if base_axis in AXES else 1
-        idx_a = AXES.index(axis)
-        steps = abs(idx_a - idx_b)
-        forward = idx_a > idx_b
-        one, two = _ELAPSED_UNIT.get(time_scale, _ELAPSED_UNIT["years"])
-        phrase = one if steps == 1 else two
-        dir_word = "LATER" if forward else "EARLIER"
-        rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
-        temporal_block = (
-            f"\n⚠️ TEMPORAL CONSTRAINT — ABSOLUTE ⚠️\n"
-            f"This [{axis.upper()}] scene opens a new volume {phrase} {dir_word} "
-            f"than the base ([{base_axis.upper()}], t = 0). Base span: {span}.\n"
-            f'TIME SCALE: "{time_scale}"\n\n'
-            f"Visual elements that MUST be IDENTICAL to the base image:\n"
-            f"  {rules['must_keep']}\n"
-            f"Visual elements that MAY differ:\n"
-            f"  {rules['may_differ']}\n"
-            f"STRICTLY FORBIDDEN in this image prompt:\n"
-            f"  {rules['forbidden']}\n\n"
-            "Do NOT generate anything in the positive prompt that violates the FORBIDDEN list.\n"
-            "COMPOSITION: choose a camera setup clearly DIFFERENT from the base "
-            "image. Pick the shot that best dramatizes this act from: close-up, "
-            "upper_body, cowboy_shot, full_body, wide_shot, from_above, "
-            "from_below, from_behind, from_side, dutch_angle — and include it "
-            "as danbooru tags.\n"
-        )
-    else:
-        temporal_block = ""
+    temporal_block = scale_block
 
     if axis != base_axis:
         wd14_block = ""
     elif wd14_context:
         wd14_block = (
-            "\n[WD14 tags of the base image — the base_axis image MUST match "
-            "these tags (pose, scene, mood). Reproduce them faithfully in the "
-            "positive prompt; the story text is secondary for this axis]\n"
+            "\n[base WD14 tags — reproduce faithfully on base axis]\n"
             f"{wd14_context}\n"
         )
     else:
@@ -3943,15 +3834,14 @@ def _axis_context_blocks(
 
     if axis_tags:
         common_block = (
-            "\n[Danbooru tags inferred from THIS act's story — weave these into the "
-            "positive prompt to describe this scene richly and specifically]\n"
+            "\n[inferred tags for this act]\n"
             f"{', '.join(axis_tags)}\n"
         )
     else:
         common_block = ""
 
     return {
-        "chronicle_ctx": chronicle_ctx,
+        "chronicle_ctx": minimal_input,
         "intent_ctx": intent_ctx,
         "identity_src": identity_src,
         "temporal_block": temporal_block,
@@ -4141,55 +4031,29 @@ def build_axis_tags_prompt(
         base_axis=base_axis, time_scale=time_scale, locale="en"
     )
     return (
-        "You are a danbooru-tag expert building the tag payload for ONE act "
-        "of a three-act chronicle. Do NOT write prose. Enumerate tags only.\n\n"
+        "Enumerate danbooru tags for ONE act. JSON only — no prose.\n\n"
         f"{elapsed_header}\n"
-        f"Target act: [{axis.upper()}]\n\n"
         f"{ctx['chronicle_ctx']}"
         f"{ctx['intent_ctx']}"
-        f"SCENE (this act of the story):\n{story_text}\n"
-        f"{ctx['temporal_block']}\n"
+        f"{ctx['temporal_block']}"
         f"{ctx['identity_src']}\n"
         f"{ctx['wd14_block']}"
         f"{ctx['common_block']}"
         f"{ctx['plan_block']}"
         f"{ctx['emotion_block']}"
-        "\n[MANDATORY RULES]\n"
-        "- SUBJECT-FIRST: `danbooru_tags` MUST open with the subject-count tag "
-        "(1girl / 1boy / solo / 2girls / …). No other tag before it.\n"
-        "- ACTION-ANCHOR: `pose_tags` MUST contain 1–2 concrete danbooru "
-        "action/pose tags from the story verbs — reaching, outstretched_arm, "
-        "leaning_forward, looking_back, kneeling, gripping, holding, "
-        "covering_face, touching. NEVER just `standing` / `sitting` alone.\n"
-        "- EXPRESSION: when the subject is a person (1girl / 1boy / solo / …), "
-        "`expression_tags` MUST contain ≥1 concrete face/mood tag "
-        "(smile, blush, tears, pout, serious, nervous, open_mouth, …).\n"
-        "- SCENE CUES (lean): pick the strongest cues only — "
-        "`lighting_tags` 1, `background_tags` 1–2, `object_tags` 0–1. "
-        "Do not pad with near-synonyms.\n"
-        "- EXPLICIT TAG: hair color, eye color, key clothing, and the main "
-        "action/place MUST be real danbooru tags — never euphemisms.\n"
-        f"- HARD MAX {IMAGE_PROMPT_MAX_TAGS} TAGS on `danbooru_tags` "
-        f"(target 12–18). Over {IMAGE_PROMPT_MAX_TAGS} = failed prompt — "
-        "anime image models cannot parse tag floods.\n"
-        "- NO quality meta-tags anywhere (masterpiece / best_quality / highres / "
-        "4k / 8k / worst_quality / low_quality etc.).\n"
-        "- Category buckets list the SAME short tag set (split by role); "
-        "do not invent extra tags just to fill buckets.\n\n"
-        "Output JSON ONLY. No markdown fences, no commentary. Schema:\n"
+        "\nRULES:\n"
+        "- SUBJECT-FIRST: danbooru_tags opens with 1girl/1boy/solo/…\n"
+        "- pose_tags: 1–2 concrete action tags (reaching, gripping, …)\n"
+        "- expression_tags: ≥1 face tag when a person is present\n"
+        f"- HARD MAX {IMAGE_PROMPT_MAX_TAGS} tags on danbooru_tags (target 12–18)\n"
+        "- No quality meta-tags (masterpiece, best_quality, …)\n\n"
+        "OUTPUT JSON:\n"
         '{\n'
-        f'  "danbooru_tags": "<subject-count first, then ≤{IMAGE_PROMPT_MAX_TAGS} '
-        'comma-separated tags — lean, no padding>",\n'
-        '  "subject_tags": "<subject count, character count>",\n'
-        '  "hair_tags": "<hair color, length or style — only if needed>",\n'
-        '  "expression_tags": "<REQUIRED if person: 1 face/mood tag>",\n'
-        '  "clothing_tags": "<key outfit only>",\n'
-        '  "accessory_tags": "<only if distinctive>",\n'
-        '  "pose_tags": "<1–2 concrete pose/action tags>",\n'
-        '  "background_tags": "<1–2 place/setting cues>",\n'
-        '  "object_tags": "<0–1 prop if essential>",\n'
-        '  "lighting_tags": "<1 light/mood cue>",\n'
-        '  "negative_supplement": "<comma-separated artifacts to avoid>"\n'
+        f'  "danbooru_tags": "<subject first, ≤{IMAGE_PROMPT_MAX_TAGS} tags>",\n'
+        '  "subject_tags": "...", "hair_tags": "...", "expression_tags": "...",\n'
+        '  "clothing_tags": "...", "accessory_tags": "...", "pose_tags": "...",\n'
+        '  "background_tags": "...", "object_tags": "...", "lighting_tags": "...",\n'
+        '  "negative_supplement": "..."\n'
         "}"
     )
 
@@ -4403,6 +4267,8 @@ def build_fast_candidate(
     time_scale: str = "years",
     locale: str = "en",
     base_axis: str = "present",
+    dramatic_mode: str = "",
+    emotion: str = "",
 ) -> dict:
     """Synthetic single candidate for fast mode (no LLM pitch round)."""
     topic = (user_topic or "").strip() or "untitled"
@@ -4413,6 +4279,9 @@ def build_fast_candidate(
     if base not in AXES:
         base = "present"
     idx_base = AXES.index(base)
+    mode = (dramatic_mode or "").strip()
+    if mode not in _DRAMATIC_MODES:
+        mode = "escalation"
 
     def _beat_en(axis: str) -> str:
         if axis == base:
@@ -4439,7 +4308,7 @@ def build_fast_candidate(
             "past": _beat_ja("past"),
             "present": _beat_ja("present"),
             "future": _beat_ja("future"),
-            "dramatic_mode": "escalation",
+            "dramatic_mode": mode,
             "time_scale": time_scale,
         }
     return {
@@ -4449,7 +4318,7 @@ def build_fast_candidate(
         "past": _beat_en("past"),
         "present": _beat_en("present"),
         "future": _beat_en("future"),
-        "dramatic_mode": "escalation",
+        "dramatic_mode": mode,
         "time_scale": time_scale,
     }
 

@@ -1312,6 +1312,8 @@
     "similarTagMixHint": "ギャラリー類似検索の語彙を各軸プロンプトに混ぜます。",
     "similarTagMixRatio": "混入率",
     "similarTagMixRatioTitle": "タグ予算のうち類似画像由来に使う割合",
+    "similarMixTags": "類似混入タグ",
+    "similarMixTagsCount": "類似混入タグ ({n}) · 近傍{m}枚",
     "generatePinup": "ピンナップ",
     "pinupTitle": "このキャラの基準ピンナップを生成し Biography に登録します（画像ジョブ1枚分の追加）",
     "suppressConflict": "矛盾タグ除去",

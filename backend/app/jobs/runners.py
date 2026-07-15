@@ -3218,6 +3218,8 @@ async def run_chronicle_candidates(
                     time_scale=body.time_scale,
                     locale=body.locale,
                     base_axis=body.base_time_axis,
+                    dramatic_mode=getattr(body, "dramatic_mode", "") or "",
+                    emotion=getattr(body, "emotion", "") or "",
                 )
             ]
             if story_id:
@@ -3677,6 +3679,8 @@ async def run_chronicle_expand(
                 time_scale=body.time_scale,
                 locale=locale,
                 base_axis=body.base_time_axis,
+                dramatic_mode=getattr(body, "dramatic_mode", "") or "",
+                emotion=getattr(body, "emotion", "") or "",
             )
             beats = {
                 a: str(refreshed.get(a) or selected.get(a) or "").strip()
@@ -4042,7 +4046,12 @@ async def run_chronicle_expand(
                         build_timetable_prompt(
                             biography=biography, scene_desc=scene_desc,
                             time_scale=body.time_scale, base_axis=body.base_time_axis,
-                            locale=locale, selected=selected, user_topic=body.user_topic,
+                            locale=locale,
+                            selected={
+                                **(selected or {}),
+                                "mood": (body.emotion or ""),
+                            },
+                            user_topic=body.user_topic,
                             topic_directive=ctx.get("topic_directive", ""),
                         ),
                         model=vlm_model, options=tt_options, fmt="json", think=True,
@@ -4064,6 +4073,15 @@ async def run_chronicle_expand(
                 scene_desc=scene_desc,
                 base_axis=body.base_time_axis,
             )
+            # Code-side mood: fill empty feeling from UI emotion register.
+            mood = str(getattr(body, "emotion", "") or "").strip().lower()
+            if mood:
+                for s in timetable:
+                    if isinstance(s, dict) and not str(s.get("feeling") or "").strip():
+                        s["feeling"] = mood
+                for ax, slot in (axis_slots or {}).items():
+                    if isinstance(slot, dict) and not str(slot.get("feeling") or "").strip():
+                        slot["feeling"] = mood
             timetable = apply_timetable_slot_marks(timetable, axis_slots)
             slot_neighbors = timetable_neighbors(timetable, axis_slots, radius=1)
             # Emit EN timetable WITH marks immediately (do not wait for JA).
@@ -4294,6 +4312,11 @@ async def run_chronicle_expand(
         if seed_warning:
             _put({"type": "warning", "message": seed_warning})
 
+        use_similar_mix_global = bool(getattr(body, "similar_tag_mix", True))
+        try:
+            mix_ratio_global = float(getattr(body, "similar_tag_mix_ratio", 0.3) or 0.3)
+        except (TypeError, ValueError):
+            mix_ratio_global = 0.3
         draft_refine = should_use_draft_refine(
             mode=getattr(body, "use_draft_refine", "auto"),
             time_scale=body.time_scale,
@@ -4301,6 +4324,13 @@ async def run_chronicle_expand(
             workflow_name=body.workflow_name,
             manual_mode=body.manual_mode,
         )
+        # Similar-tag mix needs draft grounding when Comfy is available.
+        if (
+            use_similar_mix_global
+            and not body.manual_mode
+            and (body.workflow_name or "").strip()
+        ):
+            draft_refine = True
         if draft_refine:
             _put({
                 "type": "warning",
@@ -4345,6 +4375,9 @@ async def run_chronicle_expand(
                 visual_plan = parse_visual_plan_json(raw_vp)
             except Exception as exc:
                 logger.warning("[chronicle] %s visual examination failed: %s", axis, exc)
+            # Code-side mood seed from UI emotion register (do not rely on LLM echo).
+            if (body.emotion or "").strip() and not str(visual_plan.get("mood") or "").strip():
+                visual_plan["mood"] = str(body.emotion).strip().lower()
             visual_plans[axis] = visual_plan
             focal = visual_plan_to_tags(visual_plan)
             gesture = visual_plan.get("gesture_prose") or ""
@@ -4354,10 +4387,16 @@ async def run_chronicle_expand(
             _phase("taggingAxis", 0.44 + 0.16 * i, f"Framing {axis} tags...")
             scene_constraints = infer_axis_scene_constraints(story_en)
             use_wd14_spice = bool(getattr(body, "wd14_prompt_spice", False))
-            use_similar_mix = bool(getattr(body, "similar_tag_mix", True))
+            use_similar_mix = use_similar_mix_global
+            mix_ratio = mix_ratio_global
             axis_search_tags: list[str] = []
+            similar_pinned: list[str] = []
+            similar_sources: list[str] = []
+            similar_kept: list[str] = []
             if use_similar_mix:
                 from ..story.similar_tags import (
+                    assemble_with_similar_budget,
+                    exclude_near_fixed_tags,
                     harvest_similar_situation_tags,
                     situation_embed_query,
                 )
@@ -4368,17 +4407,15 @@ async def run_chronicle_expand(
                     focal=focal,
                     user_topic=body.user_topic,
                     shot=str(visual_plan.get("shot") or ""),
+                    mood=str(visual_plan.get("mood") or body.emotion or ""),
                 )
                 try:
-                    mix_ratio = float(getattr(body, "similar_tag_mix_ratio", 0.3) or 0.3)
+                    mix_n = int(getattr(body, "similar_tag_mix_n", 4) or 4)
                 except (TypeError, ValueError):
-                    mix_ratio = 0.3
-                try:
-                    mix_n = int(getattr(body, "similar_tag_mix_n", 5) or 5)
-                except (TypeError, ValueError):
-                    mix_n = 5
+                    mix_n = 4
+                mix_n = max(3, min(6, mix_n))
                 excl = [body.base_sha256] if (has_base and body.base_sha256) else []
-                axis_search_tags = await harvest_similar_situation_tags(
+                axis_search_tags, similar_sources = await harvest_similar_situation_tags(
                     ollama=ollama,
                     db=db,
                     query=q,
@@ -4386,12 +4423,13 @@ async def run_chronicle_expand(
                     mix_ratio=mix_ratio,
                     budget=IMAGE_PROMPT_MAX_TAGS,
                     exclude_sha256s=excl,
-                    lock_exclude=lock_tags,
+                    lock_exclude=list(lock_tags) + list(theme_must or []),
                     filter_fn=lambda tags: filter_tag_list(tags, removal),
                 )
                 axis_search_tags = apply_scene_constraints(
                     axis_search_tags, scene_constraints
                 )
+                similar_pinned = list(axis_search_tags)
             elif use_wd14_spice:
                 query = " ".join(
                     x for x in [
@@ -4425,6 +4463,8 @@ async def run_chronicle_expand(
                 "camera": visual_plan.get("camera_angle", ""),
                 "gesture": gesture,
                 "search_tags": axis_search_tags[:14],
+                "similar_mix_tags": similar_pinned[:24],
+                "similar_mix_sources": similar_sources[:6],
                 "scene_constraints": {
                     "time_of_day": scene_constraints.get("time_of_day", ""),
                     "indoor_outdoor": scene_constraints.get("indoor_outdoor", ""),
@@ -4433,10 +4473,22 @@ async def run_chronicle_expand(
                 },
             })
 
-            # (3) Assemble tags: visual_plan (+ optional spice search) + identity lock.
-            tag_line = merge_chronicle_axis_tags(
-                focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
-            )
+            # (3) Assemble tags with reserved similar budget (pinned list).
+            from ..story.generator import IMAGE_PROMPT_MAX_TAGS as _MAX_TAGS
+            if use_similar_mix and similar_pinned:
+                from ..story.similar_tags import assemble_with_similar_budget
+                tag_line, similar_kept = assemble_with_similar_budget(
+                    lock_tags=list(theme_must or []) + list(lock_tags),
+                    focal=focal,
+                    similar_tags=similar_pinned,
+                    other_tags=axis_search_tags,
+                    mix_ratio=mix_ratio,
+                    budget=_MAX_TAGS,
+                )
+            else:
+                tag_line = merge_chronicle_axis_tags(
+                    focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+                )
             tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
             tag_line = inject_identity_tags(tag_line, lock_tags)
             parts = [t.strip() for t in tag_line.split(",") if t.strip()]
@@ -4487,9 +4539,20 @@ async def run_chronicle_expand(
                             blended_search, scene_constraints
                         )
                         axis_search_tags = blended_search
-                        tag_line = merge_chronicle_axis_tags(
-                            focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
-                        )
+                        if use_similar_mix and similar_pinned:
+                            from ..story.similar_tags import assemble_with_similar_budget
+                            tag_line, similar_kept = assemble_with_similar_budget(
+                                lock_tags=list(theme_must or []) + list(lock_tags),
+                                focal=focal,
+                                similar_tags=similar_pinned,
+                                other_tags=axis_search_tags,
+                                mix_ratio=mix_ratio,
+                                budget=_MAX_TAGS,
+                            )
+                        else:
+                            tag_line = merge_chronicle_axis_tags(
+                                focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+                            )
                         tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
                         tag_line = inject_identity_tags(tag_line, lock_tags)
                         parts = [t.strip() for t in tag_line.split(",") if t.strip()]
@@ -4667,12 +4730,16 @@ async def run_chronicle_expand(
                 "positive": positive,
                 "negative": negative,
                 "visual_script": prose or "",
+                "similar_mix_tags": list(similar_kept or similar_pinned or []),
+                "similar_mix_sources": list(similar_sources or []),
                 **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
             }
             axis_evt: dict = {
                 "type": "axis_prompt", "axis": axis,
                 "positive": positive, "negative": negative,
                 "visual_script": prose or "",
+                "similar_mix_tags": list(similar_kept or similar_pinned or []),
+                "similar_mix_sources": list(similar_sources or []),
             }
             for k in CHRONICLE_CAT_FIELDS:
                 if axis_cats.get(k):
@@ -4685,10 +4752,13 @@ async def run_chronicle_expand(
             if draft_refine:
                 _phase("draftingAxis", 0.58 + 0.08 * i, f"Drafting {axis} scene...")
                 try:
+                    # Prefer tag_line that already reserved similar mix slots.
                     draft_pos = draft_positive_for_comfy(
                         tag_line=tag_line,
                         positive=positive,
-                        priority_tags=prio_tags,
+                        priority_tags=list(dict.fromkeys(
+                            [*theme_must, *lock_tags, *focal, *similar_pinned]
+                        )),
                     )
                     draft_bytes = await _comfy_generate_bytes(
                         comfy, cancel,
@@ -4736,11 +4806,7 @@ async def run_chronicle_expand(
                         _phase("refiningPromptProse", 0.62 + 0.08 * i,
                                f"Rebuilding {axis} prompt from draft...")
                         # Snapshot pre-draft richness so we can measure the lift.
-                        before_tag_line = merge_chronicle_axis_tags(
-                            focal=focal,
-                            search_tags=list(axis_search_tags),
-                            lock_tags=lock_tags,
-                        )
+                        before_tag_line = tag_line
                         blended = merge_draft_wd14_tags(
                             vocab_tags=axis_search_tags,
                             draft_tags=draft_tags,
@@ -4748,17 +4814,39 @@ async def run_chronicle_expand(
                             focal=focal,
                         )
                         blended = apply_scene_constraints(blended, scene_constraints)
-                        axis_search_tags = blended
-                        tag_line = merge_chronicle_axis_tags(
-                            focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
-                        )
+                        if use_similar_mix and similar_pinned:
+                            from ..story.similar_tags import (
+                                assemble_with_similar_budget,
+                                exclude_near_fixed_tags,
+                            )
+                            blended = exclude_near_fixed_tags(
+                                blended, list(lock_tags) + list(theme_must or []),
+                            )
+                            tag_line, similar_kept = assemble_with_similar_budget(
+                                lock_tags=list(theme_must or []) + list(lock_tags),
+                                focal=focal,
+                                similar_tags=similar_pinned,
+                                other_tags=blended,
+                                mix_ratio=mix_ratio,
+                                budget=_MAX_TAGS,
+                            )
+                            axis_search_tags = list(dict.fromkeys(
+                                list(similar_pinned) + list(blended)
+                            ))
+                        else:
+                            axis_search_tags = blended
+                            tag_line = merge_chronicle_axis_tags(
+                                focal=focal, search_tags=axis_search_tags, lock_tags=lock_tags,
+                            )
                         tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
                         tag_line = inject_identity_tags(tag_line, lock_tags)
                         parts = [t.strip() for t in tag_line.split(",") if t.strip()]
                         tag_line = ", ".join(_apply_must_replacements(parts, lock_tags))
                         tag_line = _strip_quality_metatags(tag_line)
                         # Keep visual_plan tags ahead of draft WD14 padding.
-                        _prio = list(dict.fromkeys([*theme_must, *lock_tags, *focal]))
+                        _prio = list(dict.fromkeys(
+                            [*theme_must, *lock_tags, *focal, *similar_pinned]
+                        ))
                         tag_line = ensure_theme_must_tags(
                             tag_line, theme_must, priority_tags=_prio,
                         )
@@ -4921,7 +5009,7 @@ async def run_chronicle_expand(
                         if prose and inject:
                             prose = _correct_prose_wd14_conflicts(prose, inject)
                         prio_tags = list(dict.fromkeys(
-                            [*theme_must, *lock_tags, *focal]
+                            [*theme_must, *lock_tags, *focal, *similar_pinned]
                         ))
                         if tag_line:
                             tag_line = ensure_theme_must_tags(
@@ -4952,11 +5040,14 @@ async def run_chronicle_expand(
                                     "detailed", "danbooru"
                                 )),
                             )
+                            mix_tags = list(similar_kept or similar_pinned or [])
                             prompts[axis] = {
                                 "positive": positive,
                                 "negative": negative,
                                 "visual_script": prose or "",
                                 "refined_from_draft": True,
+                                "similar_mix_tags": mix_tags,
+                                "similar_mix_sources": list(similar_sources or []),
                                 **{k: axis_cats.get(k, []) for k in CHRONICLE_CAT_FIELDS},
                             }
                             refined_evt: dict = {
@@ -4966,6 +5057,8 @@ async def run_chronicle_expand(
                                 "negative": negative,
                                 "visual_script": prose or "",
                                 "refined_from_draft": True,
+                                "similar_mix_tags": mix_tags,
+                                "similar_mix_sources": list(similar_sources or []),
                             }
                             for k in CHRONICLE_CAT_FIELDS:
                                 if axis_cats.get(k):
@@ -5125,6 +5218,10 @@ async def run_chronicle_expand(
             }
             if p.get("visual_script"):
                 axes_payload[axis]["visual_script"] = p["visual_script"]
+            if p.get("similar_mix_tags"):
+                axes_payload[axis]["similar_mix_tags"] = p["similar_mix_tags"]
+            if p.get("similar_mix_sources"):
+                axes_payload[axis]["similar_mix_sources"] = p["similar_mix_sources"]
             for k in CHRONICLE_CAT_FIELDS:
                 if p.get(k):
                     axes_payload[axis][k] = p[k]
