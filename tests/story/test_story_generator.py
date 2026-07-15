@@ -2563,3 +2563,17 @@ def test_timetable_prompt_requests_axis_field():
         selected={"title": "T", "past": "p", "present": "pr", "future": "f"},
     )
     assert '"axis"' in tt or "axis" in tt
+
+
+def test_timetable_prompt_follows_locale_language():
+    en = build_timetable_prompt(
+        biography={}, scene_desc="cafe", time_scale="hours", locale="en",
+    )
+    ja = build_timetable_prompt(
+        biography={}, scene_desc="cafe", time_scale="hours", locale="ja",
+    )
+    assert "Output English JSON only" in en
+    assert "Output Japanese JSON values only" in ja
+    assert "相対時刻" in ja
+    assert "相対時刻" not in en
+    assert "concrete physical action tied to the story" in en

@@ -1780,7 +1780,10 @@ def build_timetable_prompt(
     Crucially this is the SELECTED story unfolding across time, grounded in the
     base image's actual SETTING — NOT a generic hobby diary. The biography is
     personality flavour only; it must not drop in activities (knitting,
-    journaling…) that don't belong to this scene or story. English output.
+    journaling…) that don't belong to this scene or story.
+
+    Output language follows ``locale`` (``ja`` → Japanese values, else English).
+    The missing language is filled later by translation in the expand runner.
     """
     window, slots = _TIMETABLE_WINDOW.get(
         time_scale, _TIMETABLE_WINDOW["years"]
@@ -1796,14 +1799,30 @@ def build_timetable_prompt(
             f"  \"{selected.get('title', '')}\" — {beats}\n"
         )
     topic_line = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
+    json_lang = (
+        "Output Japanese JSON values only, no fences "
+        "(keep axis keys in English: past/present/future/bridge):\n"
+        if locale == "ja"
+        else "Output English JSON only, no fences:\n"
+    )
+    label_hint = (
+        "<相対時刻。例: -20分 / いま / +20分>"
+        if locale == "ja"
+        else "<relative time, e.g. -20min / now / +20min>"
+    )
+    activity_hint = (
+        "<物語に紐づく具体的な身体動作>"
+        if locale == "ja"
+        else "<concrete physical action tied to the story>"
+    )
     return (
         "Turn the CHOSEN STORY below into a fine-grained timetable so a picture "
         "can be drawn for each moment. The timetable is THIS STORY unfolding "
         "across time — never a generic hobby diary.\n\n"
         f"TABLE SPAN: {window}.\n"
-        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / her "
-        "current age) IS the base image moment and must match it; detail the "
-        "slots just before and after it especially clearly.\n\n"
+        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / "
+        "「いま」 / 「今日」 / her current age) IS the base image moment and must "
+        "match it; detail the slots just before and after it especially clearly.\n\n"
         f"{story_block}"
         f"{topic_line}"
         f"THE SETTING — every slot happens in or around this place unless the "
@@ -1818,10 +1837,10 @@ def build_timetable_prompt(
         "Mark each slot with an `axis` field: exactly one slot each for "
         '"past", "present", and "future" (matching the story beats); other slots '
         'may use "bridge".\n'
-        "Output English JSON only, no fences:\n"
+        f"{json_lang}"
         '{"slots": [{"axis": "past|present|future|bridge", '
-        '"label": "<relative time, e.g. -20min / now / +20min>", '
-        '"activity": "<concrete physical action tied to the story>", '
+        f'"label": "{label_hint}", '
+        f'"activity": "{activity_hint}", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
 
