@@ -423,6 +423,35 @@ def format_axis_slots_block(axis_slots: dict[str, dict] | None, *, locale: str =
     return "TIME ANCHORS per act (on-screen facts):\n" + "\n".join(lines) + "\n"
 
 
+def timetable_slot_search_text(axis_slot: dict | None) -> str:
+    """Compact text from a bound timetable slot for WD14 search / draft lead."""
+    if not axis_slot:
+        return ""
+    parts = [
+        str(axis_slot.get(k) or "").strip()
+        for k in _TIMETABLE_KEYS
+        if str(axis_slot.get(k) or "").strip()
+    ]
+    return " ".join(parts)
+
+
+def timetable_draft_priority_tags(
+    axis_slot: dict | None,
+    *,
+    wd14_lead: list[str] | None = None,
+) -> list[str]:
+    """High-priority tags that must lead the low-res draft Comfy prompt."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in wd14_lead or []:
+        tag = str(raw).strip().replace(" ", "_")
+        key = tag.lower()
+        if tag and key not in seen:
+            seen.add(key)
+            out.append(tag)
+    return out
+
+
 def translation_values_complete(source, translated, *, min_ratio: float = 0.35) -> bool:
     """True if translated structure covers source keys with non-trivial values."""
     if isinstance(source, dict) and isinstance(translated, dict):
@@ -1780,7 +1809,10 @@ def build_timetable_prompt(
     Crucially this is the SELECTED story unfolding across time, grounded in the
     base image's actual SETTING — NOT a generic hobby diary. The biography is
     personality flavour only; it must not drop in activities (knitting,
-    journaling…) that don't belong to this scene or story. English output.
+    journaling…) that don't belong to this scene or story.
+
+    Output language follows ``locale`` (``ja`` → Japanese values, else English).
+    The missing language is filled later by translation in the expand runner.
     """
     window, slots = _TIMETABLE_WINDOW.get(
         time_scale, _TIMETABLE_WINDOW["years"]
@@ -1796,14 +1828,30 @@ def build_timetable_prompt(
             f"  \"{selected.get('title', '')}\" — {beats}\n"
         )
     topic_line = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
+    json_lang = (
+        "Output Japanese JSON values only, no fences "
+        "(keep axis keys in English: past/present/future/bridge):\n"
+        if locale == "ja"
+        else "Output English JSON only, no fences:\n"
+    )
+    label_hint = (
+        "<相対時刻。例: -20分 / いま / +20分>"
+        if locale == "ja"
+        else "<relative time, e.g. -20min / now / +20min>"
+    )
+    activity_hint = (
+        "<物語に紐づく具体的な身体動作>"
+        if locale == "ja"
+        else "<concrete physical action tied to the story>"
+    )
     return (
         "Turn the CHOSEN STORY below into a fine-grained timetable so a picture "
         "can be drawn for each moment. The timetable is THIS STORY unfolding "
         "across time — never a generic hobby diary.\n\n"
         f"TABLE SPAN: {window}.\n"
-        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / her "
-        "current age) IS the base image moment and must match it; detail the "
-        "slots just before and after it especially clearly.\n\n"
+        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / "
+        "「いま」 / 「今日」 / her current age) IS the base image moment and must "
+        "match it; detail the slots just before and after it especially clearly.\n\n"
         f"{story_block}"
         f"{topic_line}"
         f"THE SETTING — every slot happens in or around this place unless the "
@@ -1818,10 +1866,10 @@ def build_timetable_prompt(
         "Mark each slot with an `axis` field: exactly one slot each for "
         '"past", "present", and "future" (matching the story beats); other slots '
         'may use "bridge".\n'
-        "Output English JSON only, no fences:\n"
+        f"{json_lang}"
         '{"slots": [{"axis": "past|present|future|bridge", '
-        '"label": "<relative time, e.g. -20min / now / +20min>", '
-        '"activity": "<concrete physical action tied to the story>", '
+        f'"label": "{label_hint}", '
+        f'"activity": "{activity_hint}", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
 
@@ -3132,20 +3180,49 @@ def draft_positive_for_comfy(
     tag_line: str,
     positive: str,
     priority_tags: list[str] | None = None,
+    timetable_tags: list[str] | None = None,
     max_tags: int = IMAGE_PROMPT_MAX_TAGS,
 ) -> str:
-    """Short tags-only positive for low-res draft generation (≤ max_tags)."""
+    """Short tags-only positive for low-res draft generation (≤ max_tags).
+
+    When ``timetable_tags`` is set, those tags are forced to the FRONT so the
+    draft image model paints the timed story moment before generic scene tags.
+    """
+    lead = [
+        str(t).strip().replace(" ", "_")
+        for t in (timetable_tags or [])
+        if str(t).strip()
+    ]
+    lead_keys = {t.lower() for t in lead}
+    prio = list(dict.fromkeys([*lead, *(priority_tags or [])]))
+
     if (tag_line or "").strip():
+        base = tag_line.strip()
+    elif positive:
+        harvested = collect_prompt_tags(positive or "")
+        base = harvested if harvested else " ".join((positive or "").split()[:max_tags])
+    else:
+        base = ""
+
+    if lead and base:
+        rest = [
+            t.strip()
+            for t in base.split(",")
+            if t.strip() and t.strip().lower() not in lead_keys
+        ]
+        combined = ", ".join([*lead, *rest])
         return cap_danbooru_tag_line(
-            tag_line, max_tags=max_tags, priority_tags=priority_tags
+            combined, max_tags=max_tags, priority_tags=prio
         )
-    harvested = collect_prompt_tags(positive or "")
-    if harvested:
+    if base:
         return cap_danbooru_tag_line(
-            harvested, max_tags=max_tags, priority_tags=priority_tags
+            base, max_tags=max_tags, priority_tags=prio
         )
-    words = (positive or "").split()
-    return " ".join(words[:max_tags])
+    if lead:
+        return cap_danbooru_tag_line(
+            ", ".join(lead), max_tags=max_tags, priority_tags=prio
+        )
+    return ""
 
 
 # ── Emotion register (shared across story + image-prompt stages) ──────────────
@@ -4762,30 +4839,58 @@ def merge_draft_wd14_tags(
     return [t.strip() for t in capped.split(",") if t.strip()]
 
 
-def build_draft_grounding_block(draft_tags: list[str], *, locale: str = "en") -> str:
-    """Instruction block for Pass-2 rebuild: treat draft WD14 as visual fact."""
+def build_draft_grounding_block(
+    draft_tags: list[str],
+    *,
+    locale: str = "en",
+    axis_slot: dict | None = None,
+) -> str:
+    """Instruction block for Pass-2 rebuild: timetable anchor + draft WD14 facts."""
     tags = [
         str(t).strip().replace(" ", "_")
         for t in (draft_tags or [])
         if str(t).strip()
     ][:IMAGE_PROMPT_MAX_TAGS]
-    if not tags:
+    slot_text = timetable_slot_search_text(axis_slot)
+    if not tags and not slot_text:
         return ""
     joined = ", ".join(tags)
     if locale == "ja":
+        slot_block = ""
+        if slot_text:
+            slot_block = (
+                f"\n[時間割アンカー — この軸の瞬間]\n{slot_text}\n"
+                "下書きと最終文はこの時間軸の出来事・場所・感情を描くこと。\n"
+            )
+        tag_block = ""
+        if joined:
+            tag_block = (
+                f"低解像度下書きの WD14: {joined}\n"
+                "これらはテキスト推測ではなく、画像モデルの表現そのもの。"
+                "照明・雰囲気・背景・小道具・ポーズはこれに合わせて書き直し、"
+                "矛盾するタグは捨てること。同一性（髪色・瞳色）だけは保持。\n"
+            )
         return (
             "\n[下書き接地 — 画像モデルが既に描いた事実]\n"
-            f"低解像度下書きの WD14: {joined}\n"
-            "これらはテキスト推測ではなく、画像モデルの表現そのもの。"
-            "照明・雰囲気・背景・小道具・ポーズはこれに合わせて書き直し、"
-            "矛盾するタグは捨てること。同一性（髪色・瞳色）だけは保持。\n"
+            f"{slot_block}{tag_block}"
+        )
+    slot_block = ""
+    if slot_text:
+        slot_block = (
+            f"\n[TIMETABLE ANCHOR — this axis moment]\n{slot_text}\n"
+            "Draft and final text must depict THIS timed beat, place, and feeling.\n"
+        )
+    tag_block = ""
+    if joined:
+        tag_block = (
+            f"Low-res draft WD14: {joined}\n"
+            "These are not text guesses — they are the image model's own expression. "
+            "Rewrite lighting, atmosphere, background, props and pose to MATCH them; "
+            "drop contradicting invented tags. Keep identity (hair/eye colour) only.\n"
         )
     return (
         "\n[DRAFT GROUNDING — facts the IMAGE MODEL already painted]\n"
-        f"Low-res draft WD14: {joined}\n"
-        "These are not text guesses — they are the image model's own expression. "
-        "Rewrite lighting, atmosphere, background, props and pose to MATCH them; "
-        "drop contradicting invented tags. Keep identity (hair/eye colour) only.\n"
+        f"{slot_block}{tag_block}"
     )
 
 

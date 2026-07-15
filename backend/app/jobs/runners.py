@@ -3461,6 +3461,8 @@ async def run_chronicle_expand(
         merge_story_sections,
         parse_axis_tags_json,
         parse_visual_script_category_tags,
+        timetable_draft_priority_tags,
+        timetable_slot_search_text,
         CHRONICLE_CAT_FIELDS,
         parse_biography_json,
         parse_concrete_activities_json,
@@ -3970,7 +3972,7 @@ async def run_chronicle_expand(
 
         # ── Timetable: map her life onto concrete moments (scale-adaptive) so the
         # acts depict specific daily activities from her life, not idle poses.
-        # Prompt builder is scale-adaptive (including minutes); always attempt it.
+        # Generate in the UI locale first, then translate the missing language.
         timetable: list[dict] = []
         timetable_ja: list[dict] = []
         axis_slots: dict[str, dict] = {}
@@ -3984,6 +3986,32 @@ async def run_chronicle_expand(
                 "biography": parse_biography_json(biography) or biography,
                 "biography_ja": parse_biography_json(biography_ja) or biography_ja,
             })
+
+        async def _translate_timetable(
+            source: list[dict], *, target: str
+        ) -> list[dict]:
+            """Chunked JSON value translation for timetable slots."""
+            merged: list[dict] = []
+            for chunk in chunk_list(source, 4):
+                part = parse_timetable_json(await ollama.generate_text(
+                    build_json_translation_prompt(chunk, target=target),
+                    model=vlm_model, options=options, fmt="json",
+                ))
+                if isinstance(part, list):
+                    merged.extend(part)
+            if not translation_values_complete(source, merged):
+                merged = parse_timetable_json(await ollama.generate_text(
+                    build_json_translation_prompt(source, target=target),
+                    model=vlm_model, options=options, fmt="json",
+                ))
+                if not translation_values_complete(source, merged):
+                    logger.warning(
+                        "[chronicle] timetable %s translation still incomplete",
+                        target,
+                    )
+            return merged if isinstance(merged, list) else []
+
+        timetable_native: list[dict] = []
         for tt_attempt in range(2):
             try:
                 tt_options = dict(options)
@@ -3992,7 +4020,7 @@ async def run_chronicle_expand(
                         1.3, float(options.get("temperature", 0.8)) + 0.2
                     )
                 async with _heartbeat("buildingTimetable", 0.10):
-                    timetable = parse_timetable_json(await ollama.generate_text(
+                    timetable_native = parse_timetable_json(await ollama.generate_text(
                         build_timetable_prompt(
                             biography=biography, scene_desc=scene_desc,
                             time_scale=body.time_scale, base_axis=body.base_time_axis,
@@ -4002,41 +4030,46 @@ async def run_chronicle_expand(
                     ))
             except Exception as exc:
                 logger.warning("[chronicle] timetable build failed: %s", exc)
-                timetable = []
-            if timetable:
+                timetable_native = []
+            if timetable_native:
                 break
             if tt_attempt == 0:
                 logger.info("[chronicle] timetable empty; retrying once")
-        if timetable:
+
+        if timetable_native:
+            if locale == "ja":
+                timetable_ja = timetable_native
+                try:
+                    async with _heartbeat("buildingTimetable", 0.11):
+                        timetable = await _translate_timetable(
+                            timetable_ja, target="English",
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[chronicle] timetable EN translation failed: %s", exc
+                    )
+                    timetable = []
+            else:
+                timetable = timetable_native
+                try:
+                    async with _heartbeat("buildingTimetable", 0.11):
+                        timetable_ja = await _translate_timetable(
+                            timetable, target="Japanese",
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[chronicle] timetable JA translation failed: %s", exc
+                    )
+                    timetable_ja = []
+            # Prefer English for downstream prompts; fall back to native if EN
+            # translation failed (JA heuristics still work in bind_*).
             axis_slots = bind_timetable_axis_slots(
-                timetable, base_axis=body.base_time_axis,
+                timetable or timetable_ja, base_axis=body.base_time_axis,
             )
         else:
             _put({"type": "warning",
                   "message": "Timetable could not be built — continuing without it."})
         # Always emit so the UI can show or clear the section (never silent).
-        if timetable:
-            try:
-                merged_ja: list = []
-                for chunk in chunk_list(timetable, 4):
-                    part = parse_timetable_json(await ollama.generate_text(
-                        build_json_translation_prompt(chunk, target="Japanese"),
-                        model=vlm_model, options=options, fmt="json",
-                    ))
-                    if isinstance(part, list):
-                        merged_ja.extend(part)
-                timetable_ja = merged_ja
-                if not translation_values_complete(timetable, timetable_ja):
-                    timetable_ja = parse_timetable_json(await ollama.generate_text(
-                        build_json_translation_prompt(timetable, target="Japanese"),
-                        model=vlm_model, options=options, fmt="json",
-                    ))
-                    if not translation_values_complete(timetable, timetable_ja):
-                        logger.warning(
-                            "[chronicle] timetable JA translation still incomplete"
-                        )
-            except Exception as exc:
-                logger.warning("[chronicle] timetable translation failed: %s", exc)
         _put({"type": "timetable",
               "timetable": timetable, "timetable_ja": timetable_ja})
 
@@ -4067,7 +4100,9 @@ async def run_chronicle_expand(
             async with _heartbeat("concretizing", 0.14):
                 concrete = parse_concrete_activities_json(await ollama.generate_text(
                     build_concrete_activities_prompt(
-                        biography=biography, timetable=timetable, selected=selected,
+                        biography=biography,
+                        timetable=timetable or timetable_ja,
+                        selected=selected,
                         scene_desc=scene_desc, base_axis=body.base_time_axis,
                         time_scale=body.time_scale, user_topic=body.user_topic,
                         locale=locale,
@@ -4178,7 +4213,7 @@ async def run_chronicle_expand(
             user_topic=body.user_topic,
             topic_directive=ctx.get("topic_directive", ""),
             biography=biography,
-            timetable=timetable,
+            timetable=timetable or timetable_ja,
             tone=body.tone,
             seed_tags=seed_tags,
             forced_motif=forced_motif,
@@ -4372,6 +4407,18 @@ async def run_chronicle_expand(
         draft_deltas: dict[str, dict] = {}
         for i, axis in enumerate(gen_axes):
             story_en = en_stories.get(axis) or situation_en[axis]
+            axis_slot = axis_slots.get(axis) or {}
+            slot_text = timetable_slot_search_text(axis_slot)
+            timetable_wd14: list[str] = []
+            if slot_text.strip():
+                timetable_wd14 = await _wd14_search_tags(slot_text, limit=16)
+                if timetable_wd14:
+                    _put({
+                        "type": "timetable_axis_tags",
+                        "axis": axis,
+                        "slot_text": slot_text[:240],
+                        "tags": timetable_wd14[:14],
+                    })
 
             # (1) Concrete action decision: focal action tags, gesture and camera
             #     grounded in the finished axis story (not the short situation beat).
@@ -4412,9 +4459,19 @@ async def run_chronicle_expand(
             _phase("taggingAxis", 0.44 + 0.16 * i, f"Searching {axis} tags...")
             scene_constraints = infer_axis_scene_constraints(story_en)
             query = " ".join(
-                x for x in [story_en, gesture, ", ".join(focal), body.user_topic] if x
+                x for x in [
+                    slot_text,
+                    story_en,
+                    gesture,
+                    ", ".join(focal),
+                    body.user_topic,
+                ] if x
             )
             axis_search_tags = await _wd14_search_tags(query)
+            if timetable_wd14:
+                axis_search_tags = list(dict.fromkeys(
+                    [*timetable_wd14, *axis_search_tags]
+                ))
             if not axis_search_tags:
                 _put({"type": "warning",
                       "message": f"{axis}: WD14 vocab empty — using VLM tag inference"})
@@ -4693,11 +4750,15 @@ async def run_chronicle_expand(
             # ── Phase B: cheap draft → sync WD14 → rebuild prompt ─────────────
             if draft_refine:
                 _phase("draftingAxis", 0.58 + 0.08 * i, f"Drafting {axis} scene...")
+                timetable_lead = timetable_draft_priority_tags(
+                    axis_slot, wd14_lead=timetable_wd14,
+                )
                 try:
                     draft_pos = draft_positive_for_comfy(
                         tag_line=tag_line,
                         positive=positive,
                         priority_tags=prio_tags,
+                        timetable_tags=timetable_lead,
                     )
                     draft_bytes = await _comfy_generate_bytes(
                         comfy, cancel,
@@ -4754,7 +4815,7 @@ async def run_chronicle_expand(
                             vocab_tags=axis_search_tags,
                             draft_tags=draft_tags,
                             lock_tags=lock_tags,
-                            focal=focal,
+                            focal=[*timetable_lead, *focal],
                         )
                         blended = apply_scene_constraints(blended, scene_constraints)
                         axis_search_tags = blended
@@ -4781,7 +4842,11 @@ async def run_chronicle_expand(
                         if richness_delta:
                             draft_evt["draft_richness_delta"] = richness_delta
                         _put(draft_evt)
-                        grounding = build_draft_grounding_block(draft_tags)
+                        grounding = build_draft_grounding_block(
+                            draft_tags,
+                            locale=locale,
+                            axis_slot=axis_slot or None,
+                        )
 
                         if body.prompt_style == "danbooru":
                             positive, negative = tag_line, negative or ""
