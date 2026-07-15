@@ -24,8 +24,10 @@ from ..prompt.visual_spec import (
     DEFAULT_PROSE_PARAGRAPHS,
     chronicle_labeled_tag_footer,
     clamp_prose_paragraphs,
+    ensure_pose_tags_min_words,
     merge_category_tags,
     parse_visual_script as parse_visual_script_category_tags,
+    pose_word_count,
     visual_script_length_line,
 )
 from ..tags.catalog import (
@@ -332,14 +334,16 @@ def bind_timetable_axis_slots(
     """Pick one slot per past/present/future from a timetable list.
 
     Each returned slot includes ``index`` (0-based into ``slots``) plus
-    label/activity/place/feeling. ``base_axis`` is kept for API compatibility;
-    chronological thirds always use distinct early/mid/late picks so
-    past≠present≠future even when the base image is the past or future act.
+    label/activity/place/feeling. Chronological thirds always map
+    early/mid/late → past/present/future (story spine order). ``base_axis``
+    marks which spine act is t=0 for the base image; use
+    ``realign_base_slot_to_scene`` when content drifted from the base scene.
     Preference order: explicit ``axis`` field → label guess → chronological
     thirds.
     """
     axis_slots: dict[str, dict] = {}
     used_indices: set[int] = set()
+    _ = base_axis  # spine order is chronological; base used by realign / prompts
 
     # Prefer explicit axis field from the model.
     for i, s in enumerate(slots):
@@ -350,14 +354,20 @@ def bind_timetable_axis_slots(
     if len(axis_slots) == 3:
         return axis_slots
 
-    # Heuristic: map by label keywords, else by position.
+    # Heuristic: map by label keywords (avoid bare "-" / "+" matching mid-*).
     def _guess(slot: dict) -> str | None:
-        lab = str(slot.get("label") or "").lower()
+        lab = str(slot.get("label") or "").lower().strip()
         if any(k in lab for k in ("now", "today", "present", "現在", "今")):
             return "present"
-        if any(k in lab for k in ("past", "earlier", "-", "前", "昨日")):
+        if any(
+            k in lab
+            for k in ("past", "earlier", "yesterday", "前", "昨日", "以前")
+        ) or lab.startswith("-") or lab.startswith("−"):
             return "past"
-        if any(k in lab for k in ("future", "later", "+", "後", "明日")):
+        if any(
+            k in lab
+            for k in ("future", "later", "tomorrow", "後", "明日", "以降")
+        ) or lab.startswith("+"):
             return "future"
         return None
 
@@ -371,9 +381,7 @@ def bind_timetable_axis_slots(
     if len(axis_slots) == 3:
         return axis_slots
 
-    # Chronological thirds with DISTINCT indices (fixes base_axis≠present
-    # collisions where mid was assigned twice). Prefer unused rows when some
-    # axes were already bound via axis/label.
+    # Chronological thirds with DISTINCT indices.
     if slots:
         chron = _chronological_axis_picks(slots)
         for ax in AXES:
@@ -387,7 +395,6 @@ def bind_timetable_axis_slots(
             except (TypeError, ValueError):
                 pi = -1
             if pi in used_indices:
-                # Find nearest unused alternative along the same third.
                 alt = None
                 for j, s in enumerate(slots):
                     if j not in used_indices:
@@ -400,6 +407,123 @@ def bind_timetable_axis_slots(
             axis_slots[ax] = pick
             used_indices.add(pi)
     return {a: axis_slots[a] for a in AXES if a in axis_slots}
+
+
+def _slot_scene_score(slot: dict, scene_tokens: set[str]) -> float:
+    if not scene_tokens:
+        return 0.0
+    blob = " ".join(
+        str(slot.get(k) or "") for k in ("activity", "place", "label", "feeling")
+    ).lower()
+    toks = {
+        t.strip(".,!?;:\"'()[]{}").lower()
+        for t in blob.replace("_", " ").split()
+        if len(t.strip(".,!?;:\"'()[]{}")) > 2
+    }
+    if not toks:
+        return 0.0
+    return len(toks & scene_tokens) / max(1, len(scene_tokens))
+
+
+def realign_base_slot_to_scene(
+    slots: list[dict],
+    axis_slots: dict[str, dict] | None,
+    *,
+    scene_desc: str,
+    base_axis: str = "present",
+    min_margin: float = 0.08,
+) -> dict[str, dict]:
+    """If another row matches the base scene better, reassign ``base_axis``.
+
+    Only fires when the best-scoring unused/alternate row beats the current
+    base pick by ``min_margin``. Other axes keep their picks when possible.
+    """
+    if not slots or not axis_slots:
+        return dict(axis_slots or {})
+    base = (base_axis or "present").lower()
+    if base not in AXES:
+        base = "present"
+    scene_tokens = {
+        t.strip(".,!?;:\"'()[]{}").lower()
+        for t in (scene_desc or "").lower().replace("_", " ").split()
+        if len(t.strip(".,!?;:\"'()[]{}")) > 2
+    }
+    if len(scene_tokens) < 2:
+        return dict(axis_slots)
+
+    current = axis_slots.get(base)
+    cur_score = _slot_scene_score(current or {}, scene_tokens) if current else -1.0
+    best_i, best_score = -1, cur_score
+    for i, s in enumerate(slots):
+        if not isinstance(s, dict):
+            continue
+        sc = _slot_scene_score(s, scene_tokens)
+        if sc > best_score + 1e-9:
+            best_score, best_i = sc, i
+    if best_i < 0 or best_score < cur_score + min_margin:
+        return dict(axis_slots)
+
+    out = dict(axis_slots)
+    new_base = _slot_view(slots[best_i], best_i)
+    # Free whoever owned this index.
+    for ax, slot in list(out.items()):
+        try:
+            if int(slot.get("index")) == best_i:
+                del out[ax]
+        except (TypeError, ValueError, AttributeError):
+            continue
+    displaced = out.get(base)
+    out[base] = new_base
+    if displaced is not None:
+        try:
+            di = int(displaced.get("index"))
+        except (TypeError, ValueError):
+            di = -1
+        if di != best_i:
+            # Park displaced on a free axis if needed.
+            taken = set()
+            for slot in out.values():
+                try:
+                    taken.add(int(slot.get("index")))
+                except (TypeError, ValueError):
+                    pass
+            for ax in AXES:
+                if ax == base or ax in out:
+                    continue
+                out[ax] = displaced
+                break
+            else:
+                # All axes filled; try to place on missing chron pick.
+                pass
+    # Fill any missing axes from chronological unused rows.
+    used = set()
+    for slot in out.values():
+        try:
+            used.add(int(slot.get("index")))
+        except (TypeError, ValueError):
+            pass
+    chron = _chronological_axis_picks(slots)
+    for ax in AXES:
+        if ax in out:
+            continue
+        pick = chron.get(ax)
+        if not pick:
+            continue
+        try:
+            pi = int(pick.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if pi in used:
+            for j, s in enumerate(slots):
+                if j not in used and isinstance(s, dict):
+                    pick = _slot_view(s, j)
+                    pi = j
+                    break
+            else:
+                continue
+        out[ax] = pick
+        used.add(pi)
+    return {a: out[a] for a in AXES if a in out}
 
 
 def _chronological_axis_picks(slots: list[dict]) -> dict[str, dict]:
@@ -1960,15 +2084,37 @@ def build_timetable_prompt(
             "If a candidate beat conflicts with the topic or turn, follow "
             "topic/turn and invent drawable actions that serve them.\n"
         )
+    base = (base_axis or "present").lower()
+    if base not in AXES:
+        base = "present"
+    if base == "present":
+        base_slice = (
+            f'BASE_TIME_AXIS={base}. The MIDDLE slot MUST use axis "present" '
+            '(label like "now" / "today") and IS the base image moment (t = 0) — '
+            "its activity and place MUST match THE SETTING below. Detail the "
+            "slots just before and after it especially clearly."
+        )
+    elif base == "past":
+        base_slice = (
+            f'BASE_TIME_AXIS={base}. The EARLY / opening slot MUST use axis "past" '
+            "and IS the base image moment (t = 0) — its activity and place MUST "
+            "match THE SETTING below. Later slots move forward toward present, "
+            "then future. Do NOT put the base-image action in the middle row."
+        )
+    else:
+        base_slice = (
+            f'BASE_TIME_AXIS={base}. The LATE / closing slot MUST use axis "future" '
+            "and IS the base image moment (t = 0) — its activity and place MUST "
+            "match THE SETTING below. Earlier slots move backward toward present, "
+            "then past. Do NOT put the base-image action in the middle row."
+        )
     return (
         "Turn the CHOSEN STORY below into a fine-grained timetable so a picture "
         "can be drawn for each moment. The timetable is THIS STORY unfolding "
         "across time — never a generic hobby diary. Slot activities are the "
         "SOURCE OF TRUTH for what each shot will show.\n\n"
         f"TABLE SPAN: {window}.\n"
-        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / her "
-        "current age) IS the base image moment and must match it; detail the "
-        "slots just before and after it especially clearly.\n\n"
+        f"SLICING: {slots}. {base_slice}\n\n"
         f"{topic_line}"
         f"{story_block}"
         f"THE SETTING — every slot happens in or around this place unless the "
@@ -1982,7 +2128,8 @@ def build_timetable_prompt(
         "dropped into a scene where it makes no sense.\n"
         "Mark each slot with an `axis` field: exactly one slot each for "
         '"past", "present", and "future" (matching the story spine); other slots '
-        'may use "bridge".\n'
+        'may use "bridge". The slot whose axis equals BASE_TIME_AXIS must depict '
+        "the base image.\n"
         "Output English JSON only, no fences:\n"
         '{"slots": [{"axis": "past|present|future|bridge", '
         '"label": "<relative time, e.g. -20min / now / +20min>", '
@@ -2526,6 +2673,12 @@ _ACCESSORY_HINTS = (
     "hat", "cap", "glasses", "earring", "necklace", "choker", "bag",
     "hair_ornament", "hair_ribbon", "ribbon", "gloves", "scarf",
 )
+_BODY_PART_TOKENS = frozenset({
+    "arm", "arms", "hand", "hands", "leg", "legs", "finger", "fingers",
+    "foot", "feet", "knee", "knees", "shoulder", "shoulders", "elbow",
+    "elbows", "palm", "fist", "wrist", "ankle", "thigh", "hip", "hips",
+    "neck", "toe", "toes",
+})
 
 
 def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
@@ -2551,6 +2704,11 @@ def bucket_danbooru_tags(tag_line: str) -> dict[str, list[str]]:
                 cats["expression_tags"].append(tag)
             else:
                 cats["subject_tags"].append(tag)
+            continue
+
+        # Body parts before action, so outstretched_arm etc. land here.
+        if low == "bare_shoulders" or (toks & _BODY_PART_TOKENS):
+            cats["body_parts_tags"].append(tag)
             continue
 
         axis = get_tag_axis(low)
@@ -3707,15 +3865,20 @@ def _axis_context_blocks(
     constraints and identity anchors identically.
     """
     if all_stories:
+        act_lines = []
+        for ax in AXES:
+            mark = " ← base image" if ax == base_axis else ""
+            act_lines.append(
+                f"  [{ax.upper()}]{mark}: {all_stories.get(ax, '')}"
+            )
         chronicle_ctx = (
             "FULL CHRONICLE CONTEXT:\n"
             "This image prompt depicts ONE scene from a three-act chronicle.\n\n"
             f"Title: {title}\n"
             f"Overall arc: {overall}\n\n"
             "The three acts (read these to understand the full journey):\n"
-            f"  [PAST]:    {all_stories.get('past', '')}\n"
-            f"  [PRESENT] ← base image: {all_stories.get('present', '')}\n"
-            f"  [FUTURE]:  {all_stories.get('future', '')}\n\n"
+            + "\n".join(act_lines)
+            + "\n\n"
             f"You are now generating the image prompt for: [{axis.upper()}]\n"
             f"The base image captures the [{base_axis.upper()}] act.\n\n"
         )

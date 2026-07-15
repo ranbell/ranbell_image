@@ -74,6 +74,8 @@ const draftSteps = ref(12)
 const proseParagraphs = ref(3)
 const pickingRandom = ref(false)
 const wd14PromptSpice = ref(false)
+const similarTagMix = ref(true)
+const similarTagMixRatio = ref(0.3)
 const biography = ref(null)
 const timetable = ref(null)
 const concrete = ref(null)
@@ -795,6 +797,7 @@ const CAT_TAG_GROUPS = [
   { key: 'expression_tags', label: 'tagGroupExpression' },
   { key: 'clothing_tags', label: 'tagGroupClothing' },
   { key: 'accessory_tags', label: 'tagGroupAccessory' },
+  { key: 'body_parts_tags', label: 'tagGroupBodyParts' },
   { key: 'pose_tags', label: 'tagGroupPose' },
   { key: 'background_tags', label: 'tagGroupBackground' },
   { key: 'object_tags', label: 'tagGroupObject' },
@@ -943,6 +946,8 @@ function currentSettingsPayload() {
     manual_mode: manualMode.value,
     fast_mode: fastMode.value,
     wd14_prompt_spice: wd14PromptSpice.value,
+    similar_tag_mix: similarTagMix.value,
+    similar_tag_mix_ratio: similarTagMixRatio.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
     prose_paragraphs: proseParagraphs.value,
@@ -1000,6 +1005,8 @@ async function respin(stage) {
     manual_mode: settings.manual_mode,
     fast_mode: settings.fast_mode,
     wd14_prompt_spice: settings.wd14_prompt_spice,
+    similar_tag_mix: settings.similar_tag_mix,
+    similar_tag_mix_ratio: settings.similar_tag_mix_ratio,
     temperature: settings.temperature,
     num_ctx: settings.num_ctx,
     prose_paragraphs: settings.prose_paragraphs,
@@ -1086,6 +1093,7 @@ function handleEvent(ev) {
           expression_tags: ev.expression_tags || [],
           clothing_tags: ev.clothing_tags || [],
           accessory_tags: ev.accessory_tags || [],
+          body_parts_tags: ev.body_parts_tags || [],
           pose_tags: ev.pose_tags || [],
           background_tags: ev.background_tags || [],
           object_tags: ev.object_tags || [],
@@ -1451,6 +1459,25 @@ async function generateImages() {
                   <p v-if="fastMode" class="text-[10px] text-amber-500/80 pl-1">
                     {{ t('chronicle.fastModeHint') }}
                   </p>
+                  <label
+                    class="flex items-start gap-2 cursor-pointer text-xs"
+                    :class="similarTagMix ? 'text-teal-300' : 'text-[var(--sb-muted)]'"
+                    :title="t('chronicle.similarTagMixTitle')"
+                  >
+                    <input v-model="similarTagMix" type="checkbox" class="accent-teal-500 mt-0.5" />
+                    <span>
+                      <span class="font-medium">{{ t('chronicle.similarTagMix') }}</span>
+                      <span class="block text-[10px] text-teal-500/80 mt-0.5">{{ t('chronicle.similarTagMixHint') }}</span>
+                    </span>
+                  </label>
+                  <div v-if="similarTagMix" class="flex items-center gap-2 flex-wrap pl-6">
+                    <span class="sb-label shrink-0" :title="t('chronicle.similarTagMixRatioTitle')">{{ t('chronicle.similarTagMixRatio') }}</span>
+                    <input v-model.number="similarTagMixRatio" type="range" min="0.1" max="0.7" step="0.05"
+                      class="flex-1 accent-teal-500" />
+                    <span class="text-[11px] font-mono text-teal-300 w-10 text-right">
+                      {{ Math.round(similarTagMixRatio * 100) }}%
+                    </span>
+                  </div>
                   <label
                     class="flex items-start gap-2 cursor-pointer text-xs"
                     :class="wd14PromptSpice ? 'text-amber-300' : 'text-[var(--sb-muted)]'"

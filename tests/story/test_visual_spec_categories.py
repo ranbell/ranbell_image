@@ -12,6 +12,11 @@ from app.story.generator import (
     merge_category_tags,
     parse_visual_script_category_tags,
 )
+from app.prompt.visual_spec import (
+    ensure_pose_tags_min_words,
+    pose_tags_are_thin,
+    pose_word_count,
+)
 
 
 def test_parse_visual_script_category_tags_splits_prose():
@@ -106,3 +111,40 @@ def test_clamp_prose_paragraphs():
     assert clamp_prose_paragraphs(99) == 7
     assert clamp_prose_paragraphs(None) == 5
     assert clamp_prose_paragraphs("nope") == 5
+
+
+def test_parse_body_parts_and_pose_footer():
+    raw = (
+        "She reaches.\n\n"
+        "BODY_PARTS_TAGS: outstretched_arm, clenched_hand\n"
+        "POSE_TAGS: reaching, leaning_forward, dynamic_pose\n"
+    )
+    prose, cats = parse_visual_script_category_tags(raw)
+    assert "She reaches" in prose
+    assert cats["body_parts_tags"] == ["outstretched_arm", "clenched_hand"]
+    assert "reaching" in cats["pose_tags"]
+
+
+def test_bucket_puts_body_parts_separate_from_pose():
+    cats = bucket_danbooru_tags(
+        "1girl, reaching, outstretched_arm, running, bare_shoulders"
+    )
+    assert "outstretched_arm" in cats.get("body_parts_tags", [])
+    assert "bare_shoulders" in cats.get("body_parts_tags", [])
+    assert "reaching" in cats.get("pose_tags", [])
+    assert "running" in cats.get("pose_tags", [])
+
+
+def test_ensure_pose_tags_min_words_expands_idle():
+    thin = {"pose_tags": ["standing", "sitting"]}
+    assert pose_tags_are_thin(thin["pose_tags"])
+    filled = ensure_pose_tags_min_words(
+        thin,
+        min_words=5,
+        fillers=["reaching", "outstretched", "leaning_forward", "holding_cup"],
+    )
+    assert pose_word_count(filled["pose_tags"]) >= 5
+    assert not pose_tags_are_thin(filled["pose_tags"])
+    assert "standing" not in {t.lower() for t in filled["pose_tags"]} or "reaching" in {
+        t.lower() for t in filled["pose_tags"]
+    }

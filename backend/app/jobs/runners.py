@@ -3442,6 +3442,7 @@ async def run_chronicle_expand(
         build_translation_to_english_prompt,
         chunk_list,
         collect_prompt_tags,
+        ensure_pose_tags_min_words,
         find_identity_mutex_conflicts,
         find_mutex_conflict_tags,
         identity_lock_tags,
@@ -3452,6 +3453,7 @@ async def run_chronicle_expand(
         build_draft_grounding_block,
         build_fast_candidate,
         build_fast_prompts_prompt,
+        realign_base_slot_to_scene,
         bucket_danbooru_tags,
         cap_danbooru_tag_line,
         draft_positive_for_comfy,
@@ -4056,6 +4058,12 @@ async def run_chronicle_expand(
             axis_slots = bind_timetable_axis_slots(
                 timetable, base_axis=body.base_time_axis,
             )
+            axis_slots = realign_base_slot_to_scene(
+                timetable,
+                axis_slots,
+                scene_desc=scene_desc,
+                base_axis=body.base_time_axis,
+            )
             timetable = apply_timetable_slot_marks(timetable, axis_slots)
             slot_neighbors = timetable_neighbors(timetable, axis_slots, radius=1)
             # Emit EN timetable WITH marks immediately (do not wait for JA).
@@ -4342,12 +4350,49 @@ async def run_chronicle_expand(
             gesture = visual_plan.get("gesture_prose") or ""
             cancel.raise_if_set()
 
-            # (2) Optional WD14 vocab search (deprecated spice — off by default).
+            # (2) Similar-image WD14 mix (default ON) and/or deprecated vocab spice.
             _phase("taggingAxis", 0.44 + 0.16 * i, f"Framing {axis} tags...")
             scene_constraints = infer_axis_scene_constraints(story_en)
             use_wd14_spice = bool(getattr(body, "wd14_prompt_spice", False))
+            use_similar_mix = bool(getattr(body, "similar_tag_mix", True))
             axis_search_tags: list[str] = []
-            if use_wd14_spice:
+            if use_similar_mix:
+                from ..story.similar_tags import (
+                    harvest_similar_situation_tags,
+                    situation_embed_query,
+                )
+                from ..story.generator import IMAGE_PROMPT_MAX_TAGS
+                q = situation_embed_query(
+                    situation=situation_en.get(axis) or story_en,
+                    gesture=gesture,
+                    focal=focal,
+                    user_topic=body.user_topic,
+                    shot=str(visual_plan.get("shot") or ""),
+                )
+                try:
+                    mix_ratio = float(getattr(body, "similar_tag_mix_ratio", 0.3) or 0.3)
+                except (TypeError, ValueError):
+                    mix_ratio = 0.3
+                try:
+                    mix_n = int(getattr(body, "similar_tag_mix_n", 5) or 5)
+                except (TypeError, ValueError):
+                    mix_n = 5
+                excl = [body.base_sha256] if (has_base and body.base_sha256) else []
+                axis_search_tags = await harvest_similar_situation_tags(
+                    ollama=ollama,
+                    db=db,
+                    query=q,
+                    n_results=mix_n,
+                    mix_ratio=mix_ratio,
+                    budget=IMAGE_PROMPT_MAX_TAGS,
+                    exclude_sha256s=excl,
+                    lock_exclude=lock_tags,
+                    filter_fn=lambda tags: filter_tag_list(tags, removal),
+                )
+                axis_search_tags = apply_scene_constraints(
+                    axis_search_tags, scene_constraints
+                )
+            elif use_wd14_spice:
                 query = " ".join(
                     x for x in [
                         situation_en.get(axis) or story_en,
@@ -4471,6 +4516,20 @@ async def run_chronicle_expand(
                 axis_cats = merge_category_tags(
                     pass1_cats, bucket_danbooru_tags(tag_line),
                 )
+                _pose_fill = list(dict.fromkeys(
+                    list(visual_plan.get("focal_action_tags") or [])
+                    + list(focal)
+                    + [
+                        w.replace(" ", "_")
+                        for w in str(
+                            (axis_slots.get(axis) or {}).get("activity") or ""
+                        ).split()
+                        if len(w) > 2
+                    ]
+                ))
+                axis_cats = ensure_pose_tags_min_words(
+                    axis_cats, min_words=5, fillers=_pose_fill,
+                )
             else:
                 _phase("refiningPromptProse", 0.50 + 0.16 * i, f"Writing {axis} prompt...")
                 _put({"type": "token", "text": f"\n\n— {axis} —\n"})
@@ -4500,6 +4559,20 @@ async def run_chronicle_expand(
                     prose = (positive or "").strip()
                 axis_cats = merge_category_tags(
                     pass1_cats, vs_cats, bucket_danbooru_tags(tag_line),
+                )
+                _pose_fill = list(dict.fromkeys(
+                    list(visual_plan.get("focal_action_tags") or [])
+                    + list(focal)
+                    + [
+                        w.replace(" ", "_")
+                        for w in str(
+                            (axis_slots.get(axis) or {}).get("activity") or ""
+                        ).split()
+                        if len(w) > 2
+                    ]
+                ))
+                axis_cats = ensure_pose_tags_min_words(
+                    axis_cats, min_words=5, fillers=_pose_fill,
                 )
                 tag_line = _strip_quality_metatags(tag_line)
                 tag_line = _ensure_subject_anchor(tag_line, [(doc, 0)])
@@ -4716,6 +4789,9 @@ async def run_chronicle_expand(
                             axis_cats = merge_category_tags(
                                 bucket_danbooru_tags(tag_line),
                             )
+                            axis_cats = ensure_pose_tags_min_words(
+                                axis_cats, min_words=5, fillers=list(focal),
+                            )
                         else:
                             vs_cats: dict = {}
                             try:
@@ -4771,6 +4847,9 @@ async def run_chronicle_expand(
 
                             axis_cats = merge_category_tags(
                                 vs_cats, bucket_danbooru_tags(tag_line),
+                            )
+                            axis_cats = ensure_pose_tags_min_words(
+                                axis_cats, min_words=5, fillers=list(focal),
                             )
                             if tag_line:
                                 tag_line = _strip_quality_metatags(tag_line)

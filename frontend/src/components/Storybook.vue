@@ -28,6 +28,7 @@ const CAT_TAG_GROUPS = [
   { key: 'expression_tags', label: 'tagGroupExpression' },
   { key: 'clothing_tags', label: 'tagGroupClothing' },
   { key: 'accessory_tags', label: 'tagGroupAccessory' },
+  { key: 'body_parts_tags', label: 'tagGroupBodyParts' },
   { key: 'pose_tags', label: 'tagGroupPose' },
   { key: 'background_tags', label: 'tagGroupBackground' },
   { key: 'object_tags', label: 'tagGroupObject' },

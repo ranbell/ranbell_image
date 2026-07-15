@@ -9,6 +9,7 @@ VISUAL_SPEC_CAT_FIELDS: tuple[str, ...] = (
     "expression_tags",
     "clothing_tags",
     "accessory_tags",
+    "body_parts_tags",
     "pose_tags",
     "background_tags",
     "object_tags",
@@ -68,7 +69,9 @@ LABELED_TAG_FOOTER = (
     "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
     "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
     "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
-    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
+    "BODY_PARTS_TAGS: [comma,separated,danbooru,tags]\n"
+    "POSE_TAGS: [comma,separated,danbooru,tags]  "
+    "(≥5 words of concrete action — NEVER standing/sitting alone)\n"
     "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
     "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
     "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
@@ -92,9 +95,105 @@ def chronicle_labeled_tag_footer(
 CHRONICLE_LABELED_TAG_FOOTER = chronicle_labeled_tag_footer(DEFAULT_PROSE_PARAGRAPHS)
 
 VS_LABEL_RE = re.compile(
-    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
+    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|BODY_PARTS|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
     re.MULTILINE | re.IGNORECASE,
 )
+
+
+def pose_word_count(tags: list[str] | None) -> int:
+    """Count underscore/space-split word tokens across pose tags."""
+    n = 0
+    for raw in tags or []:
+        t = str(raw).strip().replace(" ", "_").replace("-", "_")
+        if not t:
+            continue
+        n += sum(1 for p in t.split("_") if p)
+    return n
+
+
+_POSE_IDLE_ONLY = frozenset({
+    "standing", "sitting", "arms_at_sides", "static_pose",
+    "kneeling", "lying", "crouching", "squatting",
+})
+
+
+def pose_tags_are_thin(tags: list[str] | None, *, min_words: int = 5) -> bool:
+    """True when pose bucket is idle-only or under ``min_words`` tokens."""
+    parts = [
+        str(t).strip().replace(" ", "_").lower()
+        for t in (tags or [])
+        if str(t).strip()
+    ]
+    if not parts:
+        return True
+    if pose_word_count(parts) < min_words:
+        return True
+    if all(p in _POSE_IDLE_ONLY for p in parts):
+        return True
+    return False
+
+
+def ensure_pose_tags_min_words(
+    cats: dict[str, list[str]] | None,
+    *,
+    min_words: int = 5,
+    fillers: list[str] | None = None,
+) -> dict[str, list[str]]:
+    """Guarantee pose_tags has ≥ ``min_words`` concrete action words.
+
+    Mutates and returns ``cats`` (empty dict if None). Idle-only buckets are
+    expanded from ``fillers`` (focal / activity tokens) first.
+    """
+    out: dict[str, list[str]] = dict(cats or {})
+    pose = list(out.get("pose_tags") or [])
+    seen = {t.lower() for t in pose}
+
+    def _add(tag: str) -> None:
+        t = str(tag).strip().replace(" ", "_")
+        k = t.lower()
+        if not t or k in seen:
+            return
+        # Prefer non-idle fillers when reseeding an idle-only bucket.
+        pose.append(t)
+        seen.add(k)
+
+    if pose_tags_are_thin(pose, min_words=min_words):
+        # Drop pure idle if we have fillers to rebuild from.
+        non_idle_fillers = [
+            str(t).strip().replace(" ", "_")
+            for t in (fillers or [])
+            if str(t).strip()
+            and str(t).strip().replace(" ", "_").lower() not in _POSE_IDLE_ONLY
+        ]
+        if non_idle_fillers and (
+            not pose or all(p.lower() in _POSE_IDLE_ONLY for p in pose)
+        ):
+            pose = []
+            seen = set()
+        for t in non_idle_fillers:
+            _add(t)
+            if pose_word_count(pose) >= min_words and not pose_tags_are_thin(
+                pose, min_words=min_words
+            ):
+                break
+        # Keep any prior non-idle tags.
+        for t in list(out.get("pose_tags") or []):
+            if t.lower() not in _POSE_IDLE_ONLY:
+                _add(t)
+
+    # Pad with remaining fillers until word budget met.
+    for t in fillers or []:
+        if pose_word_count(pose) >= min_words and not all(
+            p.lower() in _POSE_IDLE_ONLY for p in pose
+        ):
+            break
+        _add(str(t))
+
+    if pose:
+        out["pose_tags"] = pose
+    elif "pose_tags" in out:
+        del out["pose_tags"]
+    return out
 
 SECTION_MARKER_RE = re.compile(
     r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I

@@ -53,6 +53,11 @@ class ChronicleRequest(BaseModel):
     # Deprecated spice: story-seed WD14 + axis vocab search + fast mid-rank.
     # Default OFF — usually adds unrelated tags. Draft-image WD14 is separate.
     wd14_prompt_spice: bool = False
+    # Mix WD14 tags from images similar to the axis situation (embed → search).
+    # Raises visual resolution with grounded vocabulary. Default ON.
+    similar_tag_mix: bool = True
+    similar_tag_mix_ratio: float = 0.3  # fraction of tag budget from similar images
+    similar_tag_mix_n: int = 5  # near-neighbor image count
     # Phase B: cheap draft → WD14 → rebuild (borrow image-model expression).
     # auto = on for any non-micro scale, or divergence ≥ 0.25; on/off force.
     use_draft_refine: Literal["auto", "on", "off"] = "auto"
@@ -95,6 +100,9 @@ class RespinRequest(BaseModel):
     manual_mode: bool | None = None
     fast_mode: bool | None = None
     wd14_prompt_spice: bool | None = None
+    similar_tag_mix: bool | None = None
+    similar_tag_mix_ratio: float | None = None
+    similar_tag_mix_n: int | None = None
     temperature: float | None = None
     num_ctx: int | None = None
     prose_paragraphs: int | None = None
@@ -111,6 +119,7 @@ _RESPIN_OVERRIDE_FIELDS = (
     "prompt_style", "workflow_name", "use_draft_refine", "draft_width",
     "draft_height", "draft_steps", "suppress_conflict_tags", "manual_mode",
     "fast_mode", "wd14_prompt_spice",
+    "similar_tag_mix", "similar_tag_mix_ratio", "similar_tag_mix_n",
     "temperature", "num_ctx", "prose_paragraphs", "worldview", "user_topic",
 )
 

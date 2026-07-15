@@ -2318,7 +2318,19 @@ def test_build_timetable_scale_adaptive():
     )
     assert "~2 hours AROUND this moment" in tens
     assert "20 minutes apart" in tens
-    assert "MIDDLE" in tens and "drawable" in tens
+    assert "BASE_TIME_AXIS=present" in tens and "drawable" in tens
+    assert "MIDDLE" in tens
+    past_tt = build_timetable_prompt(
+        biography={}, scene_desc="kitchen window", time_scale="hours", base_axis="past",
+    )
+    assert "BASE_TIME_AXIS=past" in past_tt
+    assert "EARLY" in past_tt
+    assert "MIDDLE slot" not in past_tt
+    fut_tt = build_timetable_prompt(
+        biography={}, scene_desc="kitchen window", time_scale="hours", base_axis="future",
+    )
+    assert "BASE_TIME_AXIS=future" in fut_tt
+    assert "LATE" in fut_tt
     minutes = build_timetable_prompt(
         biography={"hobbies": ["baking"]}, scene_desc="kitchen", time_scale="minutes",
     )
@@ -2457,7 +2469,7 @@ def test_bind_timetable_axis_slots_prefers_axis_field():
 
 
 def test_bind_timetable_axis_slots_distinct_when_base_is_future():
-    """Regression: base_axis=future must not reuse the mid slot for present."""
+    """Regression: chronological thirds stay distinct for every base_axis."""
     # No axis fields / no past|present|future label cues → chronological thirds.
     raw = [
         {"label": "slot0", "activity": "open", "place": "door", "feeling": "a"},
@@ -2474,6 +2486,66 @@ def test_bind_timetable_axis_slots_distinct_when_base_is_future():
         assert slots["past"]["activity"] == "open"
         assert slots["present"]["activity"] == "meet"
         assert slots["future"]["activity"] == "home"
+
+
+def test_bind_timetable_label_mid_afternoon_not_past():
+    """Bare '-' must not match 'mid-afternoon' as a past cue."""
+    slots = bind_timetable_axis_slots([
+        {"label": "morning", "activity": "brew", "place": "cafe", "feeling": "calm"},
+        {"label": "mid-afternoon", "activity": "serve latte", "place": "counter", "feeling": "busy"},
+        {"label": "evening", "activity": "close", "place": "door", "feeling": "tired"},
+    ])
+    # Without explicit axis, chronological thirds win if label guess is incomplete.
+    assert slots["present"]["activity"] == "serve latte"
+    assert slots["past"]["activity"] == "brew"
+
+
+def test_realign_base_slot_to_scene_prefers_matching_row():
+    from app.story.generator import realign_base_slot_to_scene
+    raw = [
+        {"label": "-1h", "activity": "walk hallway", "place": "school", "feeling": "a"},
+        {"label": "now", "activity": "knit by window", "place": "sunlit classroom", "feeling": "b"},
+        {"label": "+1h", "activity": "leave building", "place": "gate", "feeling": "c"},
+    ]
+    bound = bind_timetable_axis_slots(raw)  # mid → present
+    # Pretend LLM put base action on past by explicit axes.
+    swapped = {
+        "past": {"index": 1, "label": "now", "activity": "knit by window",
+                 "place": "sunlit classroom", "feeling": "b"},
+        "present": {"index": 0, "label": "-1h", "activity": "walk hallway",
+                    "place": "school", "feeling": "a"},
+        "future": {"index": 2, "label": "+1h", "activity": "leave building",
+                   "place": "gate", "feeling": "c"},
+    }
+    fixed = realign_base_slot_to_scene(
+        raw, swapped,
+        scene_desc="sunlit classroom by the window knitting",
+        base_axis="present",
+        min_margin=0.05,
+    )
+    assert fixed["present"]["activity"] == "knit by window"
+
+
+def test_axis_context_base_marker_follows_base_axis():
+    prompt = build_axis_prompt(
+        story_text="future moment",
+        character_tags=["1girl"],
+        character_desc="c",
+        wd14_context="",
+        time_scale="years",
+        axis="past",
+        base_axis="future",
+        title="T",
+        overall="arc",
+        all_stories={
+            "past": "yesterday stroll",
+            "present": "today cafe",
+            "future": "tomorrow rooftop",
+        },
+        prompt_style="danbooru",
+    )
+    assert "[FUTURE] ← base image" in prompt
+    assert "[PRESENT] ← base image" not in prompt
 
 
 def test_topic_only_grounding_prompt_and_parse():
