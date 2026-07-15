@@ -1300,6 +1300,9 @@
     "fastMode": "高速モード",
     "fastModeTitle": "お題から一発でタグプロンプトを作り、時間割・長文・下書き接地をスキップして画像生成へ流します。衣装テーマ（バニーガール等）は必須タグとして全軸に保持します。",
     "fastModeHint": "高速モード: 候補選び・時間割・下書き接地を省略し、お題→短いタグ→生成のみ。",
+    "wd14Spice": "WD14 spice（非推奨）",
+    "wd14SpiceTitle": "物語シード・軸タグ検索・高速モードの mid-rank 注入を有効にします。無関係なタグが混ざりやすいので通常はオフ。下書き接地の WD14 は別設定です。",
+    "wd14SpiceHint": "通常はオフ。On は非推奨です。",
     "generatePinup": "ピンナップ",
     "pinupTitle": "このキャラの基準ピンナップを生成し Biography に登録します（画像ジョブ1枚分の追加）",
     "suppressConflict": "矛盾タグ除去",
@@ -1416,6 +1419,10 @@
     "knobDivergeHigh": "飛躍・高",
     "knobRestore": "直前の設定に戻す",
     "weaverTeaser": "霧から見えはじめた断片",
+    "statusHud": {
+      "title": "ステータス",
+      "timings": "ステップ所要時間"
+    },
     "qualityAction": {
       "respin": "語りを再紡ぎ",
       "proseLonger": "自然文を長くして再紡ぎ",
@@ -1451,6 +1458,7 @@
     "timetable": "タイムテーブル",
     "timetablePlace": "{'@'} {place}",
     "timetableFeeling": "（{feeling}）",
+    "timetableUsed": "{axis} として使用",
     "pinupAdd": "ポーズ追加",
     "pinupReplace": "引き直し",
     "pinupQueued": "ピンナップを生成中 — まもなくここに表示されます",
@@ -1472,6 +1480,8 @@
       "hint": "お題適合・多様性・表情・動作・描画しやすさ・同一性・豊かさをルール採点（0–100）。下書き接地がある場合は、画像モデル表現の寄与（richness delta）も記録されます。",
       "draftGrounding": "下書き接地: {axes}軸 · 豊かさΔ平均 {delta}",
       "chartAria": "品質レーダーチャート、総合 {pct}",
+      "failed": "採点に失敗しました",
+      "scoringFailed": "品質採点に失敗しました: {reason}",
       "dim": {
         "topic_fit": "お題適合",
         "diversity": "多様性",
@@ -1482,6 +1492,7 @@
         "richness": "豊かさ"
       }
     },
+    "timetableNeighbor": "{axis} 近傍",
     "otherCandidates": "他の候補",
     "topicOnlyBadge": "お題のみ",
     "weaveSettings": "紡ぎ設定",

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
-  eval: { type: Object, required: true },
+  eval: { type: Object, default: null },
 })
 
 const { t } = useI18n()
@@ -23,18 +23,30 @@ const CX = SIZE / 2
 const CY = SIZE / 2
 const R = 78
 
-const dims = computed(() => {
-  const d = props.eval?.dimensions || {}
-  return DIM_ORDER.map((key) => ({
-    key,
-    label: t('storybook.quality.dim.' + key),
-    value: Math.max(0, Math.min(1, Number(d[key] ?? 0))),
-  }))
+const hasDimensions = computed(() => {
+  const d = props.eval?.dimensions
+  return !!(d && typeof d === 'object' && !Array.isArray(d))
 })
 
-const overallPct = computed(() =>
-  Math.round(Math.max(0, Math.min(1, Number(props.eval?.overall ?? 0))) * 100)
-)
+const dims = computed(() => {
+  if (!hasDimensions.value) return []
+  const d = props.eval.dimensions
+  return DIM_ORDER.map((key) => {
+    const raw = Number(d[key])
+    const value = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0
+    return {
+      key,
+      label: t('storybook.quality.dim.' + key),
+      value,
+    }
+  })
+})
+
+const overallPct = computed(() => {
+  const o = Number(props.eval?.overall)
+  if (!Number.isFinite(o)) return null
+  return Math.round(Math.max(0, Math.min(1, o)) * 100)
+})
 
 function polar(i, n, radius) {
   const angle = -Math.PI / 2 + (i * 2 * Math.PI) / n
@@ -45,7 +57,8 @@ function polar(i, n, radius) {
 }
 
 const gridPolygons = computed(() => {
-  const n = dims.value.length || 1
+  const n = dims.value.length
+  if (!n) return []
   return [0.25, 0.5, 0.75, 1].map((frac) => {
     const pts = Array.from({ length: n }, (_, i) => {
       const p = polar(i, n, R * frac)
@@ -56,7 +69,8 @@ const gridPolygons = computed(() => {
 })
 
 const axisLines = computed(() => {
-  const n = dims.value.length || 1
+  const n = dims.value.length
+  if (!n) return []
   return Array.from({ length: n }, (_, i) => {
     const p = polar(i, n, R)
     return { x2: p.x, y2: p.y }
@@ -64,7 +78,8 @@ const axisLines = computed(() => {
 })
 
 const valuePolygon = computed(() => {
-  const n = dims.value.length || 1
+  const n = dims.value.length
+  if (!n) return ''
   return dims.value
     .map((d, i) => {
       const p = polar(i, n, R * d.value)
@@ -74,12 +89,14 @@ const valuePolygon = computed(() => {
 })
 
 const valuePoints = computed(() => {
-  const n = dims.value.length || 1
+  const n = dims.value.length
+  if (!n) return []
   return dims.value.map((d, i) => polar(i, n, R * d.value))
 })
 
 const labels = computed(() => {
-  const n = dims.value.length || 1
+  const n = dims.value.length
+  if (!n) return []
   return dims.value.map((d, i) => {
     const p = polar(i, n, R + 22)
     return { ...d, x: p.x, y: p.y, pct: Math.round(d.value * 100) }
@@ -88,10 +105,10 @@ const labels = computed(() => {
 </script>
 
 <template>
-  <div class="sb-quality-radar flex flex-col sm:flex-row items-center gap-5">
+  <div v-if="hasDimensions && dims.length" class="sb-quality-radar flex flex-col sm:flex-row items-center gap-5">
     <svg :width="SIZE" :height="SIZE" :viewBox="`0 0 ${SIZE} ${SIZE}`"
       class="block shrink-0" role="img"
-      :aria-label="t('storybook.quality.chartAria', { pct: overallPct })">
+      :aria-label="t('storybook.quality.chartAria', { pct: overallPct ?? '—' })">
       <polygon
         v-for="(g, gi) in gridPolygons" :key="'g' + gi"
         :points="g"
@@ -129,11 +146,13 @@ const labels = computed(() => {
 
     <div class="flex-1 min-w-0 w-full max-w-xs flex flex-col gap-2">
       <div class="flex items-baseline gap-2">
-        <span class="text-2xl font-semibold text-[var(--sb-amber)] tabular-nums leading-none">{{ overallPct }}</span>
+        <span class="text-2xl font-semibold text-[var(--sb-amber)] tabular-nums leading-none">
+          {{ overallPct != null ? overallPct : '—' }}
+        </span>
         <span class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wider">
           {{ t('storybook.quality.overall') }}
         </span>
-        <span v-if="eval.method" class="ml-auto text-[9px] text-[var(--sb-faint)] font-mono">
+        <span v-if="eval?.method" class="ml-auto text-[9px] text-[var(--sb-faint)] font-mono">
           {{ eval.method }}
         </span>
       </div>

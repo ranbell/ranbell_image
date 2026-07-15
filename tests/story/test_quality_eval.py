@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.story.quality import QUALITY_DIMS, evaluate_chronicle_quality
+from app.story.quality import (
+    QUALITY_DIMS,
+    evaluate_chronicle_quality,
+    quality_eval_failure,
+)
 
 
 def _good_prompts():
@@ -178,3 +182,44 @@ def test_topic_fit_includes_prompts_and_directive():
     )
     assert strong["dimensions"]["topic_fit"] >= weak["dimensions"]["topic_fit"]
     assert strong["dimensions"]["topic_fit"] >= 0.5
+
+
+def test_evaluate_handles_list_valued_stories():
+    """List-valued story axes must coerce to strings without throwing."""
+    q = evaluate_chronicle_quality(
+        user_topic="cafe",
+        title="First Pour",
+        overall="A barista grows at the cafe.",
+        stories={
+            "past": ["She spills", "milk at the cafe counter"],
+            "present": ["She pours latte art"],
+            "future": ["She teaches", "a junior barista"],
+        },
+        activities={
+            "past": ["tipping pitcher", "over counter"],
+            "present": "pouring latte",
+            "future": {"positive": "wiping espresso machine"},
+        },
+        prompts=_good_prompts(),
+        time_scale="years",
+    )
+    assert q["ok"] is True
+    assert q["overall"] is not None
+    assert set(q["dimensions"]) == set(QUALITY_DIMS)
+
+
+def test_quality_eval_failure_shape():
+    stub = quality_eval_failure(ValueError("bad axis text"))
+    assert stub["ok"] is False
+    assert stub["version"] == 1
+    assert stub["method"] == "rules"
+    assert stub["error"] == "bad axis text"
+    assert stub["overall"] is None
+    assert stub["dimensions"] is None
+    assert stub["per_axis"] == {}
+    assert stub["notes"] == {"error": "bad axis text"}
+    assert stub["scored_axes"] == []
+    assert "evaluated_at" in stub
+
+    stub_str = quality_eval_failure("plain message")
+    assert stub_str["error"] == "plain message"

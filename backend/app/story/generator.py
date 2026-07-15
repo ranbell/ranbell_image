@@ -313,6 +313,17 @@ def candidates_off_topic(
     return bad >= max(2, (len(candidates) + 1) // 2)
 
 
+def _slot_view(s: dict, index: int) -> dict:
+    """Normalise one timetable row into a bound axis slot (with source index)."""
+    return {
+        "index": int(index),
+        "label": str(s.get("label") or "").strip(),
+        "activity": str(s.get("activity") or "").strip(),
+        "place": str(s.get("place") or "").strip(),
+        "feeling": str(s.get("feeling") or "").strip(),
+    }
+
+
 def bind_timetable_axis_slots(
     slots: list[dict],
     *,
@@ -320,24 +331,22 @@ def bind_timetable_axis_slots(
 ) -> dict[str, dict]:
     """Pick one slot per past/present/future from a timetable list.
 
-    ``base_axis`` is kept for API compatibility / callers; chronological
-    thirds always use distinct early/mid/late picks so past≠present≠future
-    even when the base image is the past or future act.
+    Each returned slot includes ``index`` (0-based into ``slots``) plus
+    label/activity/place/feeling. ``base_axis`` is kept for API compatibility;
+    chronological thirds always use distinct early/mid/late picks so
+    past≠present≠future even when the base image is the past or future act.
+    Preference order: explicit ``axis`` field → label guess → chronological
+    thirds.
     """
-    def _view(s: dict) -> dict:
-        return {
-            "label": str(s.get("label") or "").strip(),
-            "activity": str(s.get("activity") or "").strip(),
-            "place": str(s.get("place") or "").strip(),
-            "feeling": str(s.get("feeling") or "").strip(),
-        }
-
     axis_slots: dict[str, dict] = {}
+    used_indices: set[int] = set()
+
     # Prefer explicit axis field from the model.
-    for s in slots:
+    for i, s in enumerate(slots):
         ax = str(s.get("axis") or "").strip().lower()
         if ax in AXES and ax not in axis_slots:
-            axis_slots[ax] = _view(s)
+            axis_slots[ax] = _slot_view(s, i)
+            used_indices.add(i)
     if len(axis_slots) == 3:
         return axis_slots
 
@@ -352,44 +361,60 @@ def bind_timetable_axis_slots(
             return "future"
         return None
 
-    for s in slots:
+    for i, s in enumerate(slots):
+        if i in used_indices:
+            continue
         ax = _guess(s)
         if ax and ax not in axis_slots:
-            axis_slots[ax] = _view(s)
+            axis_slots[ax] = _slot_view(s, i)
+            used_indices.add(i)
     if len(axis_slots) == 3:
         return axis_slots
 
     # Chronological thirds with DISTINCT indices (fixes base_axis≠present
-    # collisions where mid was assigned twice).
+    # collisions where mid was assigned twice). Prefer unused rows when some
+    # axes were already bound via axis/label.
     if slots:
         chron = _chronological_axis_picks(slots)
         for ax in AXES:
-            if ax not in axis_slots and ax in chron:
-                axis_slots[ax] = chron[ax]
+            if ax in axis_slots:
+                continue
+            pick = chron.get(ax)
+            if not pick:
+                continue
+            try:
+                pi = int(pick.get("index"))
+            except (TypeError, ValueError):
+                pi = -1
+            if pi in used_indices:
+                # Find nearest unused alternative along the same third.
+                alt = None
+                for j, s in enumerate(slots):
+                    if j not in used_indices:
+                        alt = _slot_view(s, j)
+                        break
+                if alt is None:
+                    continue
+                pick = alt
+                pi = int(pick["index"])
+            axis_slots[ax] = pick
+            used_indices.add(pi)
     return {a: axis_slots[a] for a in AXES if a in axis_slots}
 
 
 def _chronological_axis_picks(slots: list[dict]) -> dict[str, dict]:
     """Map ordered timetable rows → past/present/future with distinct slots."""
-    def _view(s: dict) -> dict:
-        return {
-            "label": str(s.get("label") or "").strip(),
-            "activity": str(s.get("activity") or "").strip(),
-            "place": str(s.get("place") or "").strip(),
-            "feeling": str(s.get("feeling") or "").strip(),
-        }
-
     n = len(slots)
     if n == 0:
         return {}
     if n == 1:
-        v = _view(slots[0])
+        v = _slot_view(slots[0], 0)
         return {"past": dict(v), "present": dict(v), "future": dict(v)}
     if n == 2:
         return {
-            "past": _view(slots[0]),
-            "present": _view(slots[0]),
-            "future": _view(slots[1]),
+            "past": _slot_view(slots[0], 0),
+            "present": _slot_view(slots[0], 0),
+            "future": _slot_view(slots[1], 1),
         }
     i_past, i_pres, i_fut = 0, n // 2, n - 1
     if i_pres == i_past:
@@ -397,10 +422,85 @@ def _chronological_axis_picks(slots: list[dict]) -> dict[str, dict]:
     if i_pres == i_fut:
         i_pres = n - 2
     return {
-        "past": _view(slots[i_past]),
-        "present": _view(slots[i_pres]),
-        "future": _view(slots[i_fut]),
+        "past": _slot_view(slots[i_past], i_past),
+        "present": _slot_view(slots[i_pres], i_pres),
+        "future": _slot_view(slots[i_fut], i_fut),
     }
+
+
+def apply_timetable_slot_marks(
+    timetable: list[dict],
+    axis_slots: dict[str, dict] | None,
+) -> list:
+    """Write ``used_as`` / ``used_as_neighbor`` marks onto each timetable slot.
+
+    Primary axis picks get ``used_as`` = past|present|future; neighbors leave
+    ``used_as`` null and accumulate axes in ``used_as_neighbor``. Mutates and
+    returns ``timetable`` for chaining.
+    """
+    if not timetable:
+        return timetable
+    primary_by_index: dict[int, str] = {}
+    for ax, slot in (axis_slots or {}).items():
+        if not isinstance(slot, dict):
+            continue
+        try:
+            idx = int(slot.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(timetable) and ax in AXES:
+            primary_by_index[idx] = ax
+
+    neighbor_by_index: dict[int, list[str]] = {}
+    if axis_slots:
+        for ax, nbrs in timetable_neighbors(timetable, axis_slots, radius=1).items():
+            for n in nbrs:
+                try:
+                    ni = int(n.get("index"))
+                except (TypeError, ValueError):
+                    continue
+                if ni in primary_by_index:
+                    continue
+                neighbor_by_index.setdefault(ni, [])
+                if ax not in neighbor_by_index[ni]:
+                    neighbor_by_index[ni].append(ax)
+
+    for i, s in enumerate(timetable):
+        if not isinstance(s, dict):
+            continue
+        s["used_as"] = primary_by_index.get(i)
+        s["used_as_neighbor"] = list(neighbor_by_index.get(i) or [])
+    return timetable
+
+
+def timetable_neighbors(
+    slots: list[dict],
+    axis_slots: dict[str, dict] | None,
+    *,
+    radius: int = 1,
+) -> dict[str, list[dict]]:
+    """Adjacent bridge rows per axis (excluding the primary slot itself)."""
+    out: dict[str, list[dict]] = {a: [] for a in AXES}
+    if not slots or not axis_slots or radius < 1:
+        return {a: out[a] for a in AXES if a in (axis_slots or {})}
+    n = len(slots)
+    for ax in AXES:
+        primary = axis_slots.get(ax)
+        if not isinstance(primary, dict):
+            continue
+        try:
+            idx = int(primary.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= idx < n):
+            continue
+        neighbors: list[dict] = []
+        for j in range(max(0, idx - radius), min(n, idx + radius + 1)):
+            if j == idx:
+                continue
+            neighbors.append(_slot_view(slots[j], j))
+        out[ax] = neighbors
+    return {a: out[a] for a in AXES if a in axis_slots}
 
 
 def format_axis_slots_block(axis_slots: dict[str, dict] | None, *, locale: str = "en") -> str:
@@ -423,33 +523,31 @@ def format_axis_slots_block(axis_slots: dict[str, dict] | None, *, locale: str =
     return "TIME ANCHORS per act (on-screen facts):\n" + "\n".join(lines) + "\n"
 
 
-def timetable_slot_search_text(axis_slot: dict | None) -> str:
-    """Compact text from a bound timetable slot for WD14 search / draft lead."""
-    if not axis_slot:
-        return ""
-    parts = [
-        str(axis_slot.get(k) or "").strip()
-        for k in _TIMETABLE_KEYS
-        if str(axis_slot.get(k) or "").strip()
-    ]
-    return " ".join(parts)
-
-
-def timetable_draft_priority_tags(
-    axis_slot: dict | None,
-    *,
-    wd14_lead: list[str] | None = None,
-) -> list[str]:
-    """High-priority tags that must lead the low-res draft Comfy prompt."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in wd14_lead or []:
-        tag = str(raw).strip().replace(" ", "_")
-        key = tag.lower()
-        if tag and key not in seen:
-            seen.add(key)
-            out.append(tag)
+def situation_from_axis_slots(axis_slots: dict[str, dict] | None) -> dict[str, str]:
+    """Build situation_en from slot activity (+ place)."""
+    out: dict[str, str] = {}
+    for a in AXES:
+        s = (axis_slots or {}).get(a) or {}
+        act = str(s.get("activity") or "").strip()
+        place = str(s.get("place") or "").strip()
+        if act and place:
+            out[a] = f"{act} @ {place}"
+        elif act:
+            out[a] = act
+        else:
+            out[a] = ""
     return out
+
+
+def axis_slots_ready(axis_slots: dict[str, dict] | None) -> bool:
+    """True if all three axes have non-empty activity."""
+    if not axis_slots:
+        return False
+    for a in AXES:
+        s = axis_slots.get(a) or {}
+        if not str(s.get("activity") or "").strip():
+            return False
+    return True
 
 
 def translation_values_complete(source, translated, *, min_ratio: float = 0.35) -> bool:
@@ -1360,10 +1458,10 @@ def build_candidates_prompt(
     """LLM prompt producing THREE distinct story candidates as JSON (one call).
 
     The three ideas diverge along the faithful/rebel/stranger axes. Output
-    language follows `locale` (ja/en). The time axis is the STORY ENGINE: the
-    base image is the `base_axis` moment, and each candidate must give ONE
-    concrete beat per act, where the other two acts are separate moments the
-    chosen span before / after the image (not a re-description of it).
+    language follows `locale` (ja/en). The real pitch is title / motif / turn /
+    dramatic_mode; past/present/future are optional short hint beats only — the
+    timetable later supplies drawable on-screen actions. The base image is still
+    the `base_axis` look (t = 0).
 
     The user topic (お題) is hoisted to the VERY TOP of the prompt (above HARD
     RULES and seed tags) and expanded with `topic_directive`, because a small
@@ -1480,19 +1578,23 @@ def build_candidates_prompt(
         "— surprise does NOT have to mean darkness:\n"
         f"{spirits_block}\n\n"
         f"{_locale_output_line(locale)}\n\n"
-        "For EACH candidate write ONE concrete sentence per act — past, present, "
-        f"future — where the [{base_axis}] sentence matches the base image (t = 0) "
-        "and the other two acts open the elapsed volumes marked in the header "
-        "above, driven by that candidate's dramatic shape. Do NOT tidy the arc "
-        "into a neat resolution: the future beat should LEAN INTO the turn (a "
-        "rising stake, a reversal, an exposure, a threat nearly upon them) and "
-        "leave the reader wanting the next volume — unless the user topic names an "
-        "explicit ending. Also give: a title (3-8 words, specific and evocative, "
-        "never generic); a motif "
+        "THE REAL PITCH for each candidate is: title + motif + turn + dramatic_mode. "
+        "Those four decide the story spine the timetable will later detail into "
+        "drawable shots. past / present / future are SHORT OPTIONAL HINT beats "
+        "only — one suggestive sentence each is fine — and are NOT the source of "
+        "truth for final images (the timetable will pin concrete actions).\n"
+        f"If you include act hints, the [{base_axis}] hint should match the base "
+        "image (t = 0) and the others may open the elapsed volumes in the header. "
+        "Do NOT tidy the arc into a neat resolution: the future hint should "
+        "LEAN INTO the turn (a rising stake, a reversal, an exposure, a threat "
+        "nearly upon them) and leave the reader wanting the next volume — unless "
+        "the user "
+        "topic names an explicit ending. Give: a title (3-8 words, specific and "
+        "evocative, never generic); a motif "
         f"(use '{motif_json_hint}' when a fixed motif was given); a one-sentence "
-        "`turn` naming the single surprising pivot; echo `dramatic_mode`; and "
-        "`grounded_tags` — an array of the SEED TAG names you actually turned into "
-        "events (English danbooru spelling).\n\n"
+        "`turn` naming the single surprising pivot; echo `dramatic_mode`; optional "
+        "short past/present/future hints; and `grounded_tags` — SEED TAG names you "
+        "actually turned into events (English danbooru spelling).\n\n"
         f"{_CHRONICLE_FEWSHOT_CANDIDATES}\n\n"
         "Answer with JSON only, no markdown fences:\n"
         '{"candidates": [\n'
@@ -1802,58 +1904,73 @@ def build_timetable_prompt(
     locale: str = "en",
     selected: dict | None = None,
     user_topic: str = "",
+    topic_directive: str = "",
 ) -> str:
     """Turn the CHOSEN STORY into a fine-grained timetable that COVERS the time
     axis, centred on the base moment.
 
-    Crucially this is the SELECTED story unfolding across time, grounded in the
-    base image's actual SETTING — NOT a generic hobby diary. The biography is
-    personality flavour only; it must not drop in activities (knitting,
-    journaling…) that don't belong to this scene or story.
-
-    Output language follows ``locale`` (``ja`` → Japanese values, else English).
-    The missing language is filled later by translation in the expand runner.
+    Primary drivers: user topic, selected title/motif/turn/dramatic_mode, the
+    base scene, and biography as personality flavour. Candidate past/present/
+    future beats are HINTS only — if they conflict with topic or turn, prefer
+    topic/turn. English output.
     """
     window, slots = _TIMETABLE_WINDOW.get(
         time_scale, _TIMETABLE_WINDOW["years"]
     )
+    sel = selected or {}
+    title = str(sel.get("title") or "").strip()
+    motif = str(sel.get("motif") or sel.get("key_motif") or "").strip()
+    turn = str(sel.get("turn") or "").strip()
+    dramatic_mode = str(sel.get("dramatic_mode") or "").strip()
+    hint_beats = "; ".join(
+        f"{a}: {sel.get(a, '')}" for a in AXES if sel.get(a)
+    )
+    story_lines: list[str] = []
+    if title:
+        story_lines.append(f'  Title: "{title}"')
+    if motif:
+        story_lines.append(f"  Motif: {motif}")
+    if turn:
+        story_lines.append(f"  Turn (the pivot): {turn}")
+    if dramatic_mode:
+        story_lines.append(f"  Dramatic mode: {dramatic_mode}")
+    if hint_beats:
+        story_lines.append(
+            f"  HINT beats (suggestive only — discard if they fight the topic "
+            f"or turn): {hint_beats}"
+        )
     story_block = ""
-    if selected:
-        beats = "; ".join(
-            f"{a}: {selected.get(a, '')}" for a in AXES if selected.get(a)
-        )
+    if story_lines:
         story_block = (
-            "CHOSEN STORY — the timetable is THIS story playing out over time, not "
-            "a generic day:\n"
-            f"  \"{selected.get('title', '')}\" — {beats}\n"
+            "CHOSEN STORY — the timetable is THIS story playing out over time, "
+            "not a generic day:\n"
+            + "\n".join(story_lines)
+            + "\n"
         )
-    topic_line = f'Topic (お題): "{user_topic.strip()}"\n' if user_topic.strip() else ""
-    json_lang = (
-        "Output Japanese JSON values only, no fences "
-        "(keep axis keys in English: past/present/future/bridge):\n"
-        if locale == "ja"
-        else "Output English JSON only, no fences:\n"
-    )
-    label_hint = (
-        "<相対時刻。例: -20分 / いま / +20分>"
-        if locale == "ja"
-        else "<relative time, e.g. -20min / now / +20min>"
-    )
-    activity_hint = (
-        "<物語に紐づく具体的な身体動作>"
-        if locale == "ja"
-        else "<concrete physical action tied to the story>"
-    )
+    topic_line = ""
+    if user_topic.strip():
+        directive_part = (
+            f"Direction: {topic_directive.strip()}\n"
+            if topic_directive.strip()
+            else ""
+        )
+        topic_line = (
+            f'Topic (お題) — SUBJECT of every slot: "{user_topic.strip()}"\n'
+            f"{directive_part}"
+            "If a candidate beat conflicts with the topic or turn, follow "
+            "topic/turn and invent drawable actions that serve them.\n"
+        )
     return (
         "Turn the CHOSEN STORY below into a fine-grained timetable so a picture "
         "can be drawn for each moment. The timetable is THIS STORY unfolding "
-        "across time — never a generic hobby diary.\n\n"
+        "across time — never a generic hobby diary. Slot activities are the "
+        "SOURCE OF TRUTH for what each shot will show.\n\n"
         f"TABLE SPAN: {window}.\n"
-        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / "
-        "「いま」 / 「今日」 / her current age) IS the base image moment and must "
-        "match it; detail the slots just before and after it especially clearly.\n\n"
-        f"{story_block}"
+        f"SLICING: {slots}. The MIDDLE slot (labelled \"now\" / \"today\" / her "
+        "current age) IS the base image moment and must match it; detail the "
+        "slots just before and after it especially clearly.\n\n"
         f"{topic_line}"
+        f"{story_block}"
         f"THE SETTING — every slot happens in or around this place unless the "
         f"story itself clearly moves her: {scene_desc}\n"
         f"CHARACTER (personality flavour ONLY — do NOT invent hobbies or props "
@@ -1864,12 +1981,12 @@ def build_timetable_prompt(
         "'relaxing', 'thinking' or 'spending time', and never an unrelated hobby "
         "dropped into a scene where it makes no sense.\n"
         "Mark each slot with an `axis` field: exactly one slot each for "
-        '"past", "present", and "future" (matching the story beats); other slots '
+        '"past", "present", and "future" (matching the story spine); other slots '
         'may use "bridge".\n'
-        f"{json_lang}"
+        "Output English JSON only, no fences:\n"
         '{"slots": [{"axis": "past|present|future|bridge", '
-        f'"label": "{label_hint}", '
-        f'"activity": "{activity_hint}", '
+        '"label": "<relative time, e.g. -20min / now / +20min>", '
+        '"activity": "<concrete physical action tied to the story>", '
         '"place": "...", "feeling": "..."}, "..."]}'
     )
 
@@ -3180,49 +3297,20 @@ def draft_positive_for_comfy(
     tag_line: str,
     positive: str,
     priority_tags: list[str] | None = None,
-    timetable_tags: list[str] | None = None,
     max_tags: int = IMAGE_PROMPT_MAX_TAGS,
 ) -> str:
-    """Short tags-only positive for low-res draft generation (≤ max_tags).
-
-    When ``timetable_tags`` is set, those tags are forced to the FRONT so the
-    draft image model paints the timed story moment before generic scene tags.
-    """
-    lead = [
-        str(t).strip().replace(" ", "_")
-        for t in (timetable_tags or [])
-        if str(t).strip()
-    ]
-    lead_keys = {t.lower() for t in lead}
-    prio = list(dict.fromkeys([*lead, *(priority_tags or [])]))
-
+    """Short tags-only positive for low-res draft generation (≤ max_tags)."""
     if (tag_line or "").strip():
-        base = tag_line.strip()
-    elif positive:
-        harvested = collect_prompt_tags(positive or "")
-        base = harvested if harvested else " ".join((positive or "").split()[:max_tags])
-    else:
-        base = ""
-
-    if lead and base:
-        rest = [
-            t.strip()
-            for t in base.split(",")
-            if t.strip() and t.strip().lower() not in lead_keys
-        ]
-        combined = ", ".join([*lead, *rest])
         return cap_danbooru_tag_line(
-            combined, max_tags=max_tags, priority_tags=prio
+            tag_line, max_tags=max_tags, priority_tags=priority_tags
         )
-    if base:
+    harvested = collect_prompt_tags(positive or "")
+    if harvested:
         return cap_danbooru_tag_line(
-            base, max_tags=max_tags, priority_tags=prio
+            harvested, max_tags=max_tags, priority_tags=priority_tags
         )
-    if lead:
-        return cap_danbooru_tag_line(
-            ", ".join(lead), max_tags=max_tags, priority_tags=prio
-        )
-    return ""
+    words = (positive or "").split()
+    return " ".join(words[:max_tags])
 
 
 # ── Emotion register (shared across story + image-prompt stages) ──────────────
@@ -3281,8 +3369,13 @@ def build_visual_examination_prompt(
     base_pose_tags: list[str] | None = None,
     user_topic: str = "",
     axis_slot: dict | None = None,
+    neighbors: list[dict] | None = None,
 ) -> str:
     """Stage 3a: decide the shot BEFORE writing the Visual Script.
+
+    When ``axis_slot`` is present it is the PRIMARY on-screen fact (required).
+    ``neighbors`` are optional surrounding timetable context only — not what to
+    draw. ``story_text`` is secondary mood/theme colour, demoted below the slot.
 
     Forces a deliberate, multi-angle staging decision for one act and returns it
     as JSON. The point is `focal_action_tags`: concrete danbooru pose/action tags
@@ -3332,25 +3425,68 @@ def build_visual_examination_prompt(
         else ""
     )
     char_line = f"CHARACTER (appearance only):\n{character_desc}\n\n" if character_desc else ""
-    slot_line = ""
+    slot_block = ""
     if axis_slot:
-        slot_line = (
-            f"TIME ANCHOR for this act (on-screen fact — stage THIS):\n"
-            f"  {axis_slot.get('label', '')}: {axis_slot.get('activity', '')} "
-            f"@ {axis_slot.get('place', '')} ({axis_slot.get('feeling', '')})\n\n"
+        slot_block = (
+            "★ ON-SCREEN FACT (PRIMARY — stage THIS activity/place exactly) ★\n"
+            f"  TIME ANCHOR [{axis.upper()}]: {axis_slot.get('label', '')}: "
+            f"{axis_slot.get('activity', '')} @ {axis_slot.get('place', '')} "
+            f"({axis_slot.get('feeling', '')})\n"
+            "Draw the action and place above. Do not substitute a different moment "
+            "from the story prose.\n\n"
+        )
+    neighbor_block = ""
+    if neighbors:
+        nbr_lines = []
+        for n in neighbors:
+            if not isinstance(n, dict):
+                continue
+            act = str(n.get("activity") or "").strip()
+            if not act:
+                continue
+            nbr_lines.append(
+                f"  - {n.get('label', '')}: {act} @ {n.get('place', '')} "
+                f"({n.get('feeling', '')})"
+            )
+        if nbr_lines:
+            neighbor_block = (
+                "NEIGHBORING SLOTS (context only — continuity of the day; "
+                "do NOT draw these):\n"
+                + "\n".join(nbr_lines)
+                + "\n\n"
+            )
+    story_block = ""
+    st = (story_text or "").strip()
+    if st:
+        story_block = (
+            f"STORY COLOUR (optional mood/theme for [{axis.upper()}] — secondary; "
+            "do NOT override the on-screen fact above):\n"
+            f"{st}\n\n"
+        )
+    lead = (
+        "You are a storyboard director planning ONE shot before it is drawn.\n"
+    )
+    if axis_slot:
+        lead += (
+            "The TIME ANCHOR below is the mandatory physical fact of the frame. "
+            "Neighboring slots and story prose are context only.\n\n"
+        )
+    else:
+        lead += (
+            "Read the act below and DECIDE, from multiple angles, exactly how the "
+            "character is posed and framed so the image expresses the story rather "
+            "than showing someone standing still.\n\n"
         )
     return (
-        "You are a storyboard director planning ONE shot before it is drawn.\n"
-        "Read the act below and DECIDE, from multiple angles, exactly how the "
-        "character is posed and framed so the image expresses the story rather "
-        "than showing someone standing still.\n\n"
+        f"{lead}"
         "EXPRESSION: name the face/mood that matches this act (one concrete "
         "danbooru expression — smile, blush, tears, serious, pout, nervous…). "
         "A person without a readable expression fails this stage.\n\n"
         f"{elapsed_header}\n"
         f"{char_line}"
-        f"{slot_line}"
-        f"ACT ([{axis.upper()}]):\n{story_text}\n\n"
+        f"{slot_block}"
+        f"{neighbor_block}"
+        f"{story_block}"
         f"{constraint}"
         f"{intent_line}"
         "Decide the SINGLE most story-expressive physical action and stage it. "
@@ -3399,7 +3535,12 @@ def parse_visual_plan_json(raw: str) -> dict:
 
 
 def _visual_plan_block(plan: dict | None) -> str:
-    """Render a Stage 3a visual plan as a grounding block for build_axis_prompt."""
+    """Render a Stage 3a visual plan as a grounding block for build_axis_prompt.
+
+    Tag lines should use ``visual_plan_to_tags`` — this block is for prose LLM
+    guidance only; shot/lighting/props are not guaranteed in the positive tags
+    unless plan_to_tags merged them.
+    """
     if not plan:
         return ""
     action = ", ".join(plan.get("focal_action_tags") or [])
@@ -3421,6 +3562,125 @@ def _visual_plan_block(plan: dict | None) -> str:
     if plan.get("mood"):
         lines.append(f"Mood: {plan['mood']}")
     return "\n".join(lines) + "\n"
+
+
+_SHOT_TAG_ALIASES = {
+    "close-up": "close-up",
+    "close_up": "close-up",
+    "closeup": "close-up",
+    "upper_body": "upper_body",
+    "upper-body": "upper_body",
+    "cowboy_shot": "cowboy_shot",
+    "cowboy-shot": "cowboy_shot",
+    "full_body": "full_body",
+    "full-body": "full_body",
+    "wide_shot": "wide_shot",
+    "wide-shot": "wide_shot",
+}
+_CAMERA_TAG_ALIASES = {
+    "from_side": "from_side",
+    "from_above": "from_above",
+    "from_below": "from_below",
+    "from_behind": "from_behind",
+    "dutch_angle": "dutch_angle",
+    "straight-on": "looking_at_viewer",
+    "straight_on": "looking_at_viewer",
+}
+_PLAN_LIGHTING_TOKENS = (
+    "sunset", "sunrise", "golden_hour", "dusk", "dawn", "rim_light", "backlight",
+    "backlighting", "lens_flare", "volumetric_lighting", "god_rays", "sunbeam",
+    "warm_light", "cool_light", "neon", "cinematic_lighting", "sidelight",
+    "night", "evening", "morning", "daylight", "candlelight", "spotlight",
+)
+
+
+def visual_plan_to_tags(plan: dict | None) -> list[str]:
+    """Materialise a Stage 3a visual plan into priority danbooru-style tags.
+
+    These are the mechanical source of truth for the tag line when WD14 spice is
+    off. Ambiguous free-text lighting that matches no known token is skipped.
+    """
+    if not plan or not isinstance(plan, dict):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        tag = str(raw or "").strip().replace(" ", "_")
+        if not tag:
+            return
+        k = tag.lower()
+        if k in seen:
+            return
+        seen.add(k)
+        out.append(tag)
+
+    for t in plan.get("focal_action_tags") or []:
+        _add(t)
+    expr = str(plan.get("expression_tag") or "").strip()
+    if expr:
+        _add(expr)
+    shot = str(plan.get("shot") or "").strip().lower().replace(" ", "_")
+    if shot:
+        _add(_SHOT_TAG_ALIASES.get(shot, shot))
+    cam = str(plan.get("camera_angle") or "").strip().lower().replace(" ", "_")
+    if cam:
+        _add(_CAMERA_TAG_ALIASES.get(cam, cam))
+    for p in plan.get("props") or plan.get("key_props") or []:
+        _add(p)
+    lighting = str(plan.get("lighting") or "").lower().replace("-", "_")
+    if lighting:
+        for tok in _PLAN_LIGHTING_TOKENS:
+            if tok in lighting or tok.replace("_", " ") in lighting:
+                _add(tok)
+    return out
+
+
+def build_axis_prose_prompt_lean(
+    *,
+    story_text: str,
+    tag_line: str,
+    axis: str = "present",
+    visual_plan: dict | None = None,
+    user_topic: str = "",
+    draft_grounding: str = "",
+) -> str:
+    """Short Visual Script only — runner prepends ``tag_line``. No category footer.
+
+    Speeds up Pass 2: model writes ≤60 words of prose; does not re-emit the
+    danbooru tag line or labeled *_TAGS blocks. Does not force think=False
+    (Qwen may need think=True at the call site).
+    """
+    intent = (
+        f'User intent: "{user_topic.strip()}".\n'
+        if user_topic.strip() else ""
+    )
+    grounding = ""
+    if (draft_grounding or "").strip():
+        grounding = (
+            f"\n{draft_grounding.strip()}\n"
+            "Prefer draft grounding for light/place/props when present; "
+            "do not contradict identity locks in the tag line.\n"
+        )
+    return (
+        "Write a SHORT Visual Script for ONE anime image prompt (English).\n"
+        "Hard limit: at most 60 words total, 1–2 short sentences.\n"
+        "Do NOT output a leading danbooru tag line.\n"
+        "Do NOT output labeled *_TAGS category footers.\n"
+        "Embed a few key tags from the AUTHORITATIVE list in ASCII parentheses "
+        "next to the matching detail. Do not invent conflicting tags.\n\n"
+        f"{intent}"
+        f"ACT [{axis.upper()}]:\n{story_text}\n"
+        f"{_visual_plan_block(visual_plan)}"
+        "AUTHORITATIVE TAGS (already fixed — reuse inline, never contradict):\n"
+        f"{tag_line}\n"
+        f"{grounding}"
+        "\nOutput format (exactly these two labels):\n"
+        "POSITIVE:\n"
+        "<1–2 short sentences, ≤60 words>\n\n"
+        "NEGATIVE:\n"
+        "<short comma-separated avoid tags, or leave blank>"
+    )
 
 
 def _axis_context_blocks(
@@ -4839,58 +5099,30 @@ def merge_draft_wd14_tags(
     return [t.strip() for t in capped.split(",") if t.strip()]
 
 
-def build_draft_grounding_block(
-    draft_tags: list[str],
-    *,
-    locale: str = "en",
-    axis_slot: dict | None = None,
-) -> str:
-    """Instruction block for Pass-2 rebuild: timetable anchor + draft WD14 facts."""
+def build_draft_grounding_block(draft_tags: list[str], *, locale: str = "en") -> str:
+    """Instruction block for Pass-2 rebuild: treat draft WD14 as visual fact."""
     tags = [
         str(t).strip().replace(" ", "_")
         for t in (draft_tags or [])
         if str(t).strip()
     ][:IMAGE_PROMPT_MAX_TAGS]
-    slot_text = timetable_slot_search_text(axis_slot)
-    if not tags and not slot_text:
+    if not tags:
         return ""
     joined = ", ".join(tags)
     if locale == "ja":
-        slot_block = ""
-        if slot_text:
-            slot_block = (
-                f"\n[時間割アンカー — この軸の瞬間]\n{slot_text}\n"
-                "下書きと最終文はこの時間軸の出来事・場所・感情を描くこと。\n"
-            )
-        tag_block = ""
-        if joined:
-            tag_block = (
-                f"低解像度下書きの WD14: {joined}\n"
-                "これらはテキスト推測ではなく、画像モデルの表現そのもの。"
-                "照明・雰囲気・背景・小道具・ポーズはこれに合わせて書き直し、"
-                "矛盾するタグは捨てること。同一性（髪色・瞳色）だけは保持。\n"
-            )
         return (
             "\n[下書き接地 — 画像モデルが既に描いた事実]\n"
-            f"{slot_block}{tag_block}"
-        )
-    slot_block = ""
-    if slot_text:
-        slot_block = (
-            f"\n[TIMETABLE ANCHOR — this axis moment]\n{slot_text}\n"
-            "Draft and final text must depict THIS timed beat, place, and feeling.\n"
-        )
-    tag_block = ""
-    if joined:
-        tag_block = (
-            f"Low-res draft WD14: {joined}\n"
-            "These are not text guesses — they are the image model's own expression. "
-            "Rewrite lighting, atmosphere, background, props and pose to MATCH them; "
-            "drop contradicting invented tags. Keep identity (hair/eye colour) only.\n"
+            f"低解像度下書きの WD14: {joined}\n"
+            "これらはテキスト推測ではなく、画像モデルの表現そのもの。"
+            "照明・雰囲気・背景・小道具・ポーズはこれに合わせて書き直し、"
+            "矛盾するタグは捨てること。同一性（髪色・瞳色）だけは保持。\n"
         )
     return (
         "\n[DRAFT GROUNDING — facts the IMAGE MODEL already painted]\n"
-        f"{slot_block}{tag_block}"
+        f"Low-res draft WD14: {joined}\n"
+        "These are not text guesses — they are the image model's own expression. "
+        "Rewrite lighting, atmosphere, background, props and pose to MATCH them; "
+        "drop contradicting invented tags. Keep identity (hair/eye colour) only.\n"
     )
 
 

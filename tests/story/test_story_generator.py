@@ -28,7 +28,13 @@ from app.story.generator import (
     acts_temporally_distinct,
     apply_scene_constraints,
     assign_dramatic_modes,
+    apply_timetable_slot_marks,
+    axis_slots_ready,
     bind_timetable_axis_slots,
+    build_axis_prose_prompt_lean,
+    situation_from_axis_slots,
+    timetable_neighbors,
+    visual_plan_to_tags,
     candidates_ungrounded,
     candidates_off_topic,
     topic_anchor_tokens,
@@ -1948,46 +1954,6 @@ def test_merge_draft_wd14_tags_empty_draft_keeps_vocab():
     assert "blonde_hair" in merged
 
 
-def test_draft_positive_for_comfy_timetable_leads():
-    from app.story.generator import draft_positive_for_comfy
-
-    many = ", ".join([
-        "1girl", "solo", "blonde_hair", "standing", "classroom",
-        *[f"pad_{i}" for i in range(30)],
-    ])
-    lead = ["running", "school_gate", "sunset"]
-    draft = draft_positive_for_comfy(
-        tag_line=many,
-        positive="",
-        priority_tags=["blonde_hair"],
-        timetable_tags=lead,
-    )
-    parts = [t.strip() for t in draft.split(",") if t.strip()]
-    assert parts[0] == "1girl"
-    assert parts[2:5] == lead
-    assert "blonde_hair" in parts
-
-
-def test_timetable_slot_search_and_draft_priority():
-    from app.story.generator import (
-        timetable_draft_priority_tags,
-        timetable_slot_search_text,
-    )
-
-    slot = {
-        "label": "午後",
-        "activity": "校門を走る",
-        "place": "学校",
-        "feeling": "切ない",
-    }
-    text = timetable_slot_search_text(slot)
-    assert "校門を走る" in text and "学校" in text
-    prio = timetable_draft_priority_tags(
-        slot, wd14_lead=["running", "school", "school_gate"],
-    )
-    assert prio == ["running", "school", "school_gate"]
-
-
 def test_build_draft_grounding_block_and_delta():
     from app.story.generator import (
         build_draft_grounding_block,
@@ -2002,19 +1968,6 @@ def test_build_draft_grounding_block_and_delta():
     assert "image model's own expression" in block
     ja = build_draft_grounding_block(["neon", "cafe"], locale="ja")
     assert "下書き接地" in ja
-    slot_block = build_draft_grounding_block(
-        ["sunset"],
-        locale="en",
-        axis_slot={
-            "label": "now",
-            "activity": "waves goodbye",
-            "place": "station",
-            "feeling": "wistful",
-        },
-    )
-    assert "TIMETABLE ANCHOR" in slot_block
-    assert "waves goodbye" in slot_block
-    assert "sunset" in slot_block
     thin = "1girl, solo, smile, outdoors, day, standing"
     rich = (
         "1girl, solo, smile, outdoors, street, storefront, cafe, "
@@ -2618,15 +2571,120 @@ def test_timetable_prompt_requests_axis_field():
     assert '"axis"' in tt or "axis" in tt
 
 
-def test_timetable_prompt_follows_locale_language():
-    en = build_timetable_prompt(
-        biography={}, scene_desc="cafe", time_scale="hours", locale="en",
+def test_bind_timetable_slots_include_index_and_marks():
+    raw = [
+        {"axis": "past", "label": "-1h", "activity": "tamp", "place": "bar", "feeling": "x"},
+        {"axis": "bridge", "label": "-30m", "activity": "wipe", "place": "c", "feeling": "q"},
+        {"axis": "present", "label": "now", "activity": "serve", "place": "c", "feeling": "y"},
+        {"axis": "bridge", "label": "+30m", "activity": "count", "place": "c", "feeling": "m"},
+        {"axis": "future", "label": "+1h", "activity": "fold", "place": "t", "feeling": "z"},
+    ]
+    bound = bind_timetable_axis_slots(raw)
+    assert bound["past"]["index"] == 0
+    assert bound["present"]["index"] == 2
+    assert bound["future"]["index"] == 4
+    assert axis_slots_ready(bound)
+    sit = situation_from_axis_slots(bound)
+    assert "tamp" in sit["past"] and "serve" in sit["present"]
+    marked = apply_timetable_slot_marks([dict(s) for s in raw], bound)
+    assert marked[0]["used_as"] == "past"
+    assert marked[2]["used_as"] == "present"
+    assert marked[4]["used_as"] == "future"
+    nbrs = timetable_neighbors(marked, bound, radius=1)
+    assert any(n.get("activity") == "wipe" for n in nbrs["present"])
+    assert any(n.get("activity") == "count" for n in nbrs["present"])
+    assert marked[1].get("used_as_neighbor")  # wipe used as neighbor of present
+
+
+def test_visual_examination_slot_is_primary():
+    slot = {
+        "index": 1, "label": "now", "activity": "pours milk",
+        "place": "counter", "feeling": "calm",
+    }
+    prompt = build_visual_examination_prompt(
+        story_text="A quiet morning mood.",
+        axis="present", base_axis="present", time_scale="hours",
+        axis_slot=slot,
+        neighbors=[{"label": "-20m", "activity": "opens fridge", "place": "kitchen"}],
     )
-    ja = build_timetable_prompt(
-        biography={}, scene_desc="cafe", time_scale="hours", locale="ja",
+    assert "ON-SCREEN FACT" in prompt
+    assert "pours milk" in prompt
+    assert "opens fridge" in prompt
+    # Mood text is secondary
+    assert "quiet morning" in prompt
+
+
+def test_timetable_prompt_prefers_topic_motif_turn():
+    tt = build_timetable_prompt(
+        biography={"hobbies": ["knitting"]},
+        scene_desc="classroom",
+        time_scale="hours",
+        selected={
+            "title": "Shadow Bandana",
+            "motif": "bandana",
+            "turn": "the name on the slip is wrong",
+            "past": "vague hint past",
+            "present": "vague hint now",
+            "future": "vague hint later",
+        },
+        user_topic="放課後の呼び止め",
+        topic_directive="Catch him at the gate before the last bell.",
     )
-    assert "Output English JSON only" in en
-    assert "Output Japanese JSON values only" in ja
-    assert "相対時刻" in ja
-    assert "相対時刻" not in en
-    assert "concrete physical action tied to the story" in en
+    assert "SOURCE OF TRUTH" in tt
+    assert "Shadow Bandana" in tt and "bandana" in tt
+    assert "the name on the slip is wrong" in tt
+    assert "HINT beats" in tt
+    assert "放課後の呼び止め" in tt
+    assert "Catch him at the gate" in tt
+
+
+def test_visual_plan_to_tags_materialises_shot_and_lighting():
+    tags = visual_plan_to_tags({
+        "focal_action_tags": ["reaching", "holding_cup"],
+        "expression_tag": "smile",
+        "shot": "cowboy_shot",
+        "camera_angle": "from_side",
+        "props": ["coffee_cup"],
+        "lighting": "warm golden hour rim light",
+    })
+    assert "reaching" in tags
+    assert "cowboy_shot" in tags
+    assert "from_side" in tags
+    assert "coffee_cup" in tags
+    assert "golden_hour" in tags
+    assert visual_plan_to_tags(None) == []
+    assert visual_plan_to_tags({}) == []
+
+
+def test_build_axis_prose_prompt_lean_is_short():
+    lean = build_axis_prose_prompt_lean(
+        story_text="She pours milk at the counter.",
+        tag_line="1girl, pouring, milk, smile",
+        axis="present",
+        visual_plan={
+            "focal_action_tags": ["pouring"],
+            "gesture_prose": "tilts the pitcher",
+        },
+        user_topic="cafe morning",
+    )
+    assert "60 words" in lean
+    assert "Do NOT output a leading danbooru tag line" in lean
+    assert "Do NOT output labeled *_TAGS" in lean
+    assert "FULL CHRONICLE CONTEXT" not in lean
+    assert "AUTHORITATIVE TAGS" in lean
+    assert "pours milk" in lean
+
+
+def test_merge_without_search_keeps_plan_and_lock():
+    from app.story.generator import merge_chronicle_axis_tags
+    plan = visual_plan_to_tags({
+        "focal_action_tags": ["reaching"],
+        "expression_tag": "serious",
+        "shot": "upper_body",
+    })
+    line = merge_chronicle_axis_tags(
+        focal=plan, search_tags=[], lock_tags=["black_hair", "green_eyes"],
+    )
+    assert "reaching" in line
+    assert "black_hair" in line
+    assert "upper_body" in line

@@ -18,7 +18,6 @@ const emit = defineEmits(['update:show', 'toast', 'open-storybook'])
 const AXES = ['past', 'present', 'future']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
 
-const STEPS = ['vision', 'candidates', 'select', 'expand', 'prompt', 'generate']
 const PHASE_STEP = {
   loadingImage: 0, extractingVision: 0,
   candidates: 1,
@@ -72,14 +71,19 @@ const useDraftRefine = ref('auto') // auto | on | off
 const draftWidth = ref(512)
 const draftHeight = ref(512)
 const draftSteps = ref(12)
-const proseParagraphs = ref(5)
+const proseParagraphs = ref(3)
 const pickingRandom = ref(false)
+const wd14PromptSpice = ref(false)
 const biography = ref(null)
 const timetable = ref(null)
 const concrete = ref(null)
 const axisReasoning = ref({})
 const axisDrafts = ref({})
 const qualityEval = ref(null)
+const phaseTimings = ref([]) // [{ code, duration_ms }]
+const phaseStartedAt = ref(null)
+const nowTick = ref(Date.now())
+let _phaseTickTimer = null
 const pinupJobId = ref('')
 const compareSnapshot = ref(null) // { label, prose, divergence } before applying a knob preset
 
@@ -185,10 +189,11 @@ const weaverTeasers = computed(() =>
 )
 
 function chronicleQualityActions() {
+  if (!qualityEvalHasRadar.value) return []
   const dims = qualityEval.value?.dimensions || {}
   const weak = Object.entries(dims)
     .map(([k, v]) => ({ k, v: Number(v) }))
-    .filter((d) => d.v < 0.55)
+    .filter((d) => Number.isFinite(d.v) && d.v < 0.55)
     .sort((a, b) => a.v - b.v)
   const actions = []
   if (weak.some((d) => d.k === 'topic_fit' || d.k === 'diversity')) {
@@ -352,6 +357,12 @@ const showPipelineProgress = computed(() =>
 const isBusyWeaving = computed(() =>
   running.value || expandSessionActive.value || !!imageGen.value.active
 )
+const showStatusHud = computed(() =>
+  running.value
+  || showPipelineProgress.value
+  || showImageProgress.value
+  || phaseTimings.value.length > 0
+)
 const showWeaverStage = computed(() => {
   if (!isBusyWeaving.value) return false
   // Full-stage weaver only when the right pane is still mostly empty.
@@ -375,6 +386,91 @@ const weaverCaption = computed(() => {
   if (phase.value) return t('chronicle.weaverPhase', { phase: phaseLabel.value })
   return t('chronicle.weaverBusy')
 })
+
+function formatDurationMs(ms) {
+  const n = Number(ms)
+  if (!Number.isFinite(n) || n < 0) return '—'
+  return `${(n / 1000).toFixed(1)}s`
+}
+
+function phaseCodeLabel(code) {
+  if (!code) return ''
+  const key = 'chronicle.phase.' + code
+  return te(key) ? t(key) : code
+}
+
+function recordPhaseTiming(code, duration_ms) {
+  if (!code || duration_ms == null) return
+  const ms = Number(duration_ms)
+  if (!Number.isFinite(ms)) return
+  const list = [...phaseTimings.value]
+  const last = list[list.length - 1]
+  // Heartbeats of the same code: update in place, don't double-count.
+  if (last && last.code === code) {
+    list[list.length - 1] = { code, duration_ms: ms }
+  } else {
+    list.push({ code, duration_ms: ms })
+  }
+  phaseTimings.value = list
+}
+
+function startPhaseTick() {
+  if (_phaseTickTimer) return
+  nowTick.value = Date.now()
+  _phaseTickTimer = setInterval(() => { nowTick.value = Date.now() }, 250)
+}
+
+function stopPhaseTick() {
+  if (_phaseTickTimer) {
+    clearInterval(_phaseTickTimer)
+    _phaseTickTimer = null
+  }
+}
+
+/** Timing rows for Status HUD — completed phases + live active phase. */
+const statusHudRows = computed(() => {
+  void nowTick.value
+  const rows = phaseTimings.value.map((r) => ({
+    code: r.code,
+    duration_ms: r.duration_ms,
+    active: false,
+    label: phaseCodeLabel(r.code),
+  }))
+  if (phase.value && phaseStartedAt.value && (running.value || expandSessionActive.value)) {
+    rows.push({
+      code: phase.value,
+      duration_ms: Math.max(0, nowTick.value - phaseStartedAt.value),
+      active: true,
+      label: phaseLabel.value,
+    })
+  }
+  return rows
+})
+
+const qualityEvalHasRadar = computed(() => {
+  const q = qualityEval.value
+  if (!q || q.ok === false) return false
+  return !!(q.dimensions && typeof q.dimensions === 'object')
+})
+const qualityEvalFailed = computed(() => {
+  const q = qualityEval.value
+  return !!(q && (q.ok === false || q.error))
+})
+const qualityOverallPct = computed(() => {
+  const o = qualityEval.value?.overall
+  if (o == null || Number.isNaN(Number(o))) return null
+  return Math.round(Math.max(0, Math.min(1, Number(o))) * 100)
+})
+
+function slotUsedAs(s) {
+  const u = s?.used_as
+  return AXES.includes(u) ? u : ''
+}
+function slotNeighbors(s) {
+  const n = s?.used_as_neighbor
+  if (!Array.isArray(n)) return []
+  return n.filter((a) => AXES.includes(a))
+}
 
 /** Keep the panel open during pipeline / image jobs — ignore Esc & backdrop. */
 const stayOpen = computed(() => {
@@ -518,6 +614,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null }
   _stopImageGenMonitor()
+  stopPhaseTick()
   _reader?.cancel().catch(() => {})
 })
 
@@ -571,6 +668,9 @@ function resetRun() {
   pendingExpandTimeScale.value = ''
   respinCandCount.value = 0
   respinExpandCount.value = 0
+  phaseTimings.value = []
+  phaseStartedAt.value = null
+  stopPhaseTick()
   resetStory()
 }
 
@@ -709,14 +809,15 @@ function axisHasCatTags(p) {
 
 const qualityDraftNote = computed(() => {
   const q = qualityEval.value
-  if (!q) return ''
+  if (!q || q.ok === false) return ''
   const dg = q.draft_grounding
   if (dg && typeof dg === 'object') {
     const n = (dg.axes || []).length
     const d = Number(dg.mean_delta ?? 0)
+    const deltaStr = Number.isFinite(d) ? ((d >= 0 ? '+' : '') + d.toFixed(2)) : '—'
     return t('storybook.quality.draftGrounding', {
       axes: n,
-      delta: (d >= 0 ? '+' : '') + d.toFixed(2),
+      delta: deltaStr,
     })
   }
   if (q.notes?.draft_grounding) {
@@ -841,6 +942,7 @@ function currentSettingsPayload() {
     use_ref_seed: baseSha.value ? useRefSeed.value : false,
     manual_mode: manualMode.value,
     fast_mode: fastMode.value,
+    wd14_prompt_spice: wd14PromptSpice.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
     prose_paragraphs: proseParagraphs.value,
@@ -897,6 +999,7 @@ async function respin(stage) {
     suppress_conflict_tags: settings.suppress_conflict_tags,
     manual_mode: settings.manual_mode,
     fast_mode: settings.fast_mode,
+    wd14_prompt_spice: settings.wd14_prompt_spice,
     temperature: settings.temperature,
     num_ctx: settings.num_ctx,
     prose_paragraphs: settings.prose_paragraphs,
@@ -932,9 +1035,28 @@ async function readStream(jobId) {
 function handleEvent(ev) {
   switch (ev.type) {
     case 'phase':
-      phase.value = ev.code
+      if (ev.prev_code && ev.duration_ms != null) {
+        recordPhaseTiming(ev.prev_code, ev.duration_ms)
+      }
+      if (ev.code && ev.code !== phase.value) {
+        phaseStartedAt.value = Date.now()
+        startPhaseTick()
+      } else if (ev.code && !phaseStartedAt.value) {
+        phaseStartedAt.value = Date.now()
+        startPhaseTick()
+      }
+      phase.value = ev.code || phase.value
       if (ev.progress !== undefined) progress.value = ev.progress
       break
+    case 'phase_timings': {
+      const incoming = Array.isArray(ev.timings) ? ev.timings : []
+      if (incoming.length) {
+        phaseTimings.value = incoming
+          .filter((r) => r?.code && r.duration_ms != null && Number.isFinite(Number(r.duration_ms)))
+          .map((r) => ({ code: r.code, duration_ms: Number(r.duration_ms) }))
+      }
+      break
+    }
     case 'token':
       _pendingTokens += ev.text
       _scheduleFlush()
@@ -1049,6 +1171,8 @@ function handleEvent(ev) {
       finished.value = true
       phase.value = 'done'
       progress.value = 1.0
+      phaseStartedAt.value = null
+      stopPhaseTick()
       if (ev.title) title.value = ev.title
       if (ev.title_ja) titleJa.value = ev.title_ja
       if (ev.overall) overall.value = ev.overall
@@ -1066,6 +1190,9 @@ function handleEvent(ev) {
       break
     case 'error':
       streamTerminal.value = true
+      expandSessionActive.value = false
+      phaseStartedAt.value = null
+      stopPhaseTick()
       errorMsg.value = ev.message
       emit('toast', { msg: ev.message, type: 'error' })
       break
@@ -1127,23 +1254,6 @@ async function generateImages() {
         <div v-if="comfyOffline"
           class="px-5 py-2 text-[11px] text-amber-200/90 bg-amber-950/40 border-b border-amber-800/30">
           {{ t('chronicle.comfyOfflineHint') }}
-        </div>
-
-        <!-- step indicator -->
-        <div class="flex items-center gap-1 px-5 py-2 sb-hairline text-[10px] bg-black/15">
-          <template v-for="(s, i) in STEPS" :key="s">
-            <div class="flex items-center gap-1.5"
-              :class="i === currentStep ? 'text-teal-300' : i < currentStep ? 'text-emerald-400/80' : 'text-[var(--sb-faint)]'">
-              <span class="w-4 h-4 rounded-full flex items-center justify-center border text-[9px]"
-                :class="i === currentStep ? 'border-teal-500 bg-teal-950/50 chronicle-dot-active'
-                  : i < currentStep ? 'border-emerald-700/60 bg-emerald-950/40' : 'border-white/10 bg-black/30'">
-                <SbIcon v-if="i < currentStep" name="check" class="w-2.5 h-2.5" />
-                <span v-else>{{ i + 1 }}</span>
-              </span>
-              <span class="uppercase tracking-wide hidden sm:inline">{{ t('chronicle.steps.' + s) }}</span>
-            </div>
-            <span v-if="i < STEPS.length - 1" class="text-[var(--sb-faint)] mx-0.5">→</span>
-          </template>
         </div>
 
         <div class="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -1341,6 +1451,17 @@ async function generateImages() {
                   <p v-if="fastMode" class="text-[10px] text-amber-500/80 pl-1">
                     {{ t('chronicle.fastModeHint') }}
                   </p>
+                  <label
+                    class="flex items-start gap-2 cursor-pointer text-xs"
+                    :class="wd14PromptSpice ? 'text-amber-300' : 'text-[var(--sb-muted)]'"
+                    :title="t('chronicle.wd14SpiceTitle')"
+                  >
+                    <input v-model="wd14PromptSpice" type="checkbox" class="accent-amber-500 mt-0.5" />
+                    <span>
+                      <span class="font-medium">{{ t('chronicle.wd14Spice') }}</span>
+                      <span class="block text-[10px] text-amber-500/80 mt-0.5">{{ t('chronicle.wd14SpiceHint') }}</span>
+                    </span>
+                  </label>
                   <div v-if="!fastMode" class="flex items-center gap-2 flex-wrap">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftRefineTitle')">{{ t('chronicle.draftRefine') }}</span>
                     <button v-for="m in ['auto', 'on', 'off']" :key="m" type="button"
@@ -1430,9 +1551,6 @@ async function generateImages() {
                   class="sb-btn text-red-300 border-red-800/40">
                   {{ t('chronicle.cancel') }}
                 </button>
-                <span v-if="phase" class="text-[10px] text-[var(--sb-muted)] uppercase tracking-wide">
-                  {{ t('chronicle.phase.' + phase, phase) }}
-                </span>
                 <span v-if="seed !== null" class="text-[10px] text-[var(--sb-faint)] font-mono ml-auto">
                   {{ t('chronicle.seedLabel') }}: {{ seed }}
                 </span>
@@ -1447,57 +1565,6 @@ async function generateImages() {
                 {{ t('chronicle.generateImages') }}
               </button>
               <span v-if="!workflow" class="text-[10px] text-amber-400/80">{{ t('chronicle.noWorkflowHint') }}</span>
-            </div>
-
-            <!-- ONE progress system: pipeline XOR imageGen -->
-            <div v-if="showPipelineProgress" class="flex flex-col gap-2">
-              <div class="flex items-center gap-2.5">
-                <div class="chronicle-shuttle-mini" aria-hidden="true">
-                  <span class="chronicle-shuttle-mini__yarn"></span>
-                  <span class="chronicle-shuttle-mini__body"></span>
-                </div>
-                <div class="flex-1 flex flex-col gap-1 min-w-0">
-                  <div class="flex items-center justify-between text-[10px] text-teal-300/90">
-                    <span class="truncate">{{ phaseLabel }}</span>
-                    <span class="font-mono shrink-0 ml-2">{{ Math.round(progress * 100) }}%</span>
-                  </div>
-                  <div class="sb-progress chronicle-progress-alive">
-                    <div class="sb-progress-bar chronicle-progress-bar-alive"
-                      :style="{ width: (progress * 100) + '%' }"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div v-else-if="showImageProgress" class="flex flex-col gap-2">
-              <div class="flex flex-wrap gap-2">
-                <div v-for="j in imageJobs" :key="j.job_id"
-                  class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
-                  :class="jobStatusClass(j.job_id)">
-                  <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
-                  <SbIcon :name="jobStatusIcon(j.job_id)" class="w-3 h-3" />
-                  <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
-                </div>
-              </div>
-              <div class="flex items-center gap-2.5">
-                <div class="chronicle-shuttle-mini" aria-hidden="true"
-                  :class="imageGen.active ? '' : 'is-idle'">
-                  <span class="chronicle-shuttle-mini__yarn"></span>
-                  <span class="chronicle-shuttle-mini__body"></span>
-                </div>
-                <div class="flex-1 flex flex-col gap-1 min-w-0">
-                  <div class="flex items-center justify-between text-[10px]"
-                    :class="imageGen.active ? 'text-teal-300/90' : 'text-[var(--sb-muted)]'">
-                    <span class="truncate">{{ t('chronicle.imagesGenerating') }}<span v-if="imageGen.text" class="text-[var(--sb-faint)]"> · {{ imageGen.text }}</span></span>
-                    <span class="font-mono shrink-0 ml-2">{{ Math.round(imageGen.progress * 100) }}%</span>
-                  </div>
-                  <div class="sb-progress" :class="imageGen.active ? 'chronicle-progress-alive' : ''">
-                    <div class="sb-progress-bar"
-                      :class="imageGen.active ? 'chronicle-progress-bar-alive' : ''"
-                      :style="{ width: Math.max(imageGen.progress * 100, imageGen.active ? 4 : 0) + '%' }"></div>
-                  </div>
-                </div>
-              </div>
             </div>
 
             <button v-if="finished" @click="emit('open-storybook')"
@@ -1561,7 +1628,7 @@ async function generateImages() {
               </div>
             </div>
 
-            <!-- Full-stage loom while waiting for the first real content -->
+            <!-- Status HUD: full-stage loom while waiting for first content -->
             <div v-if="showWeaverStage"
               class="chronicle-weaver flex flex-col items-center justify-center gap-4 min-h-[220px] px-4 py-6 rounded-2xl border border-teal-800/30 bg-gradient-to-b from-teal-950/40 via-black/20 to-transparent"
               role="status" :aria-label="weaverCaption">
@@ -1592,6 +1659,59 @@ async function generateImages() {
                 <p class="sb-display text-sm text-teal-200/95 tracking-wide">{{ weaverCaption }}</p>
                 <p class="text-[11px] text-[var(--sb-muted)] leading-relaxed">{{ t('chronicle.weaverPatience') }}</p>
               </div>
+
+              <!-- Progress: pipeline XOR imageGen -->
+              <div v-if="showPipelineProgress" class="w-full max-w-sm flex flex-col gap-1.5">
+                <div class="flex items-center justify-between text-[10px] text-teal-300/90">
+                  <span class="truncate">{{ phaseLabel }}</span>
+                  <span class="font-mono shrink-0 ml-2">{{ Math.round(progress * 100) }}%</span>
+                </div>
+                <div class="sb-progress chronicle-progress-alive">
+                  <div class="sb-progress-bar chronicle-progress-bar-alive"
+                    :style="{ width: (progress * 100) + '%' }"></div>
+                </div>
+              </div>
+              <div v-else-if="showImageProgress" class="w-full max-w-sm flex flex-col gap-2">
+                <div class="flex flex-wrap gap-2 justify-center">
+                  <div v-for="j in imageJobs" :key="j.job_id"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
+                    :class="jobStatusClass(j.job_id)">
+                    <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
+                    <SbIcon :name="jobStatusIcon(j.job_id)" class="w-3 h-3" />
+                    <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
+                  </div>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center justify-between text-[10px]"
+                    :class="imageGen.active ? 'text-teal-300/90' : 'text-[var(--sb-muted)]'">
+                    <span class="truncate">{{ t('chronicle.imagesGenerating') }}<span v-if="imageGen.text" class="text-[var(--sb-faint)]"> · {{ imageGen.text }}</span></span>
+                    <span class="font-mono shrink-0 ml-2">{{ Math.round(imageGen.progress * 100) }}%</span>
+                  </div>
+                  <div class="sb-progress" :class="imageGen.active ? 'chronicle-progress-alive' : ''">
+                    <div class="sb-progress-bar"
+                      :class="imageGen.active ? 'chronicle-progress-bar-alive' : ''"
+                      :style="{ width: Math.max(imageGen.progress * 100, imageGen.active ? 4 : 0) + '%' }"></div>
+                  </div>
+                </div>
+              </div>
+              <p v-else-if="phase" class="text-[11px] text-teal-300/90 uppercase tracking-wide">
+                {{ phaseLabel }}
+              </p>
+
+              <div v-if="statusHudRows.length" class="w-full max-w-sm">
+                <p class="text-[9px] uppercase tracking-wider text-teal-500/70 mb-1.5 text-center">
+                  {{ t('chronicle.statusHud.timings') }}
+                </p>
+                <ul class="space-y-0.5 max-h-28 overflow-y-auto text-[10px] font-mono">
+                  <li v-for="(row, ri) in statusHudRows" :key="row.code + '-' + ri"
+                    class="flex items-center justify-between gap-2 px-1"
+                    :class="row.active ? 'text-teal-200' : 'text-[var(--sb-muted)]'">
+                    <span class="truncate">{{ row.label }}</span>
+                    <span class="shrink-0 tabular-nums">{{ formatDurationMs(row.duration_ms) }}</span>
+                  </li>
+                </ul>
+              </div>
+
               <div v-if="weaverTeasers.length" class="weaver-teaser-row w-full max-w-md">
                 <p class="text-[9px] uppercase tracking-wider text-teal-500/70 mb-1.5 text-center">{{ t('chronicle.weaverTeaser') }}</p>
                 <div class="flex flex-col gap-1.5">
@@ -1607,28 +1727,73 @@ async function generateImages() {
               </div>
             </div>
 
-            <!-- Compact ribbon when content already fills the pane -->
-            <div v-else-if="isBusyWeaving"
-              class="chronicle-weaver-ribbon flex items-center gap-3 px-3 py-2.5 rounded-xl border border-teal-800/30 bg-teal-950/25"
+            <!-- Compact Status HUD ribbon when content already fills the pane -->
+            <div v-else-if="isBusyWeaving || showStatusHud"
+              class="chronicle-weaver-ribbon flex flex-col gap-2 px-3 py-2.5 rounded-xl border border-teal-800/30 bg-teal-950/25"
               role="status" :aria-label="weaverCaption">
-              <div class="chronicle-loom chronicle-loom--sm" aria-hidden="true">
-                <div class="chronicle-loom__frame">
-                  <span class="chronicle-loom__warp chronicle-loom__warp--1"></span>
-                  <span class="chronicle-loom__warp chronicle-loom__warp--2"></span>
-                  <span class="chronicle-loom__warp chronicle-loom__warp--3"></span>
-                  <span class="chronicle-loom__weft"></span>
-                  <span class="chronicle-loom__shuttle">
-                    <span class="chronicle-loom__shuttle-eye"></span>
-                  </span>
+              <div class="flex items-center gap-3">
+                <div v-if="isBusyWeaving" class="chronicle-loom chronicle-loom--sm" aria-hidden="true">
+                  <div class="chronicle-loom__frame">
+                    <span class="chronicle-loom__warp chronicle-loom__warp--1"></span>
+                    <span class="chronicle-loom__warp chronicle-loom__warp--2"></span>
+                    <span class="chronicle-loom__warp chronicle-loom__warp--3"></span>
+                    <span class="chronicle-loom__weft"></span>
+                    <span class="chronicle-loom__shuttle">
+                      <span class="chronicle-loom__shuttle-eye"></span>
+                    </span>
+                  </div>
                 </div>
+                <div class="min-w-0 flex-1 flex flex-col gap-1">
+                  <p class="text-[11px] text-teal-200/95 truncate">
+                    {{ isBusyWeaving ? weaverCaption : t('chronicle.statusHud.title') }}
+                  </p>
+                  <div v-if="showPipelineProgress" class="flex flex-col gap-0.5">
+                    <div class="flex items-center justify-between text-[10px] text-teal-300/90">
+                      <span class="truncate">{{ phaseLabel }}</span>
+                      <span class="font-mono shrink-0 ml-2">{{ Math.round(progress * 100) }}%</span>
+                    </div>
+                    <div class="sb-progress chronicle-progress-alive h-1">
+                      <div class="sb-progress-bar chronicle-progress-bar-alive"
+                        :style="{ width: (progress * 100) + '%' }"></div>
+                    </div>
+                  </div>
+                  <div v-else-if="showImageProgress" class="flex flex-col gap-1">
+                    <div class="flex flex-wrap gap-1">
+                      <div v-for="j in imageJobs" :key="j.job_id"
+                        class="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px]"
+                        :class="jobStatusClass(j.job_id)">
+                        <span class="font-bold uppercase">{{ t('chronicle.axis.' + j.axis) }}</span>
+                        <SbIcon :name="jobStatusIcon(j.job_id)" class="w-2.5 h-2.5" />
+                      </div>
+                    </div>
+                    <div class="sb-progress" :class="imageGen.active ? 'chronicle-progress-alive' : ''">
+                      <div class="sb-progress-bar"
+                        :class="imageGen.active ? 'chronicle-progress-bar-alive' : ''"
+                        :style="{ width: Math.max(imageGen.progress * 100, imageGen.active ? 4 : 0) + '%' }"></div>
+                    </div>
+                  </div>
+                  <p v-else-if="phase && isBusyWeaving" class="text-[10px] text-[var(--sb-muted)] truncate">
+                    {{ phaseLabel }}
+                  </p>
+                </div>
+                <span v-if="isBusyWeaving" class="chronicle-weaver-dots text-teal-400/80 font-mono text-xs shrink-0" aria-hidden="true">
+                  <span>.</span><span>.</span><span>.</span>
+                </span>
               </div>
-              <div class="min-w-0 flex-1">
-                <p class="text-[11px] text-teal-200/95 truncate">{{ weaverCaption }}</p>
-                <p class="text-[10px] text-[var(--sb-muted)] truncate">{{ t('chronicle.weaverPatience') }}</p>
-              </div>
-              <span class="chronicle-weaver-dots text-teal-400/80 font-mono text-xs shrink-0" aria-hidden="true">
-                <span>.</span><span>.</span><span>.</span>
-              </span>
+              <details v-if="statusHudRows.length" class="text-[10px]">
+                <summary class="cursor-pointer text-teal-400/80 select-none">
+                  {{ t('chronicle.statusHud.timings') }}
+                  <span class="text-[var(--sb-faint)] font-mono">({{ statusHudRows.length }})</span>
+                </summary>
+                <ul class="mt-1.5 space-y-0.5 max-h-24 overflow-y-auto font-mono">
+                  <li v-for="(row, ri) in statusHudRows" :key="'r-' + row.code + '-' + ri"
+                    class="flex items-center justify-between gap-2"
+                    :class="row.active ? 'text-teal-200' : 'text-[var(--sb-muted)]'">
+                    <span class="truncate">{{ row.label }}</span>
+                    <span class="shrink-0 tabular-nums">{{ formatDurationMs(row.duration_ms) }}</span>
+                  </li>
+                </ul>
+              </details>
             </div>
 
             <!-- candidates -->
@@ -1650,19 +1815,20 @@ async function generateImages() {
                     : 'border-white/8 bg-black/25 hover:border-teal-600/40 hover:bg-black/35'">
                   <div class="flex items-center gap-1.5">
                     <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-black/40 text-gray-200">{{ c.id }}</span>
-                    <span class="text-xs font-bold text-teal-100 leading-tight">{{ c.title }}</span>
+                    <span class="text-sm font-bold text-teal-100 leading-tight">{{ c.title }}</span>
                   </div>
-                  <div class="flex flex-col gap-1 text-[10px] leading-snug">
-                    <div v-for="ax in AXES" :key="ax" v-show="c[ax] || c.summary">
-                      <span class="font-bold uppercase tracking-wide mr-1"
-                        :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400'">{{ t('chronicle.axis.' + ax) }}</span>
-                      <span class="text-gray-300">{{ c[ax] || (ax === 'present' ? c.summary : '') }}</span>
-                    </div>
-                  </div>
-                  <div v-if="c.motif || c.key_motif" class="mt-auto pt-1">
-                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-black/50 text-teal-300/90">
+                  <p v-if="c.turn" class="text-[11px] text-gray-200 leading-snug">{{ c.turn }}</p>
+                  <div v-if="c.motif || c.key_motif" class="pt-0.5">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-950/50 text-teal-200/95 border border-teal-800/30">
                       {{ t('chronicle.motifLabel') }}: {{ c.motif || c.key_motif }}
                     </span>
+                  </div>
+                  <div class="flex flex-col gap-0.5 text-[9px] leading-snug opacity-45 mt-0.5">
+                    <div v-for="ax in AXES" :key="ax" v-show="c[ax] || c.summary">
+                      <span class="font-bold uppercase tracking-wide mr-1"
+                        :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">{{ t('chronicle.axis.' + ax) }}</span>
+                      <span class="text-gray-400">{{ c[ax] || (ax === 'present' ? c.summary : '') }}</span>
+                    </div>
                   </div>
                   <span v-if="selecting || finished" class="text-[10px] font-medium mt-1 text-teal-400/90">
                     {{ finished ? t('chronicle.forkFromCandidate') : t('chronicle.candidateSelect') }} →
@@ -1706,14 +1872,26 @@ async function generateImages() {
               </div>
             </div>
 
-            <!-- Quality radar: surface near the story (not buried under reasoning) -->
-            <div v-if="qualityEval?.dimensions"
+            <!-- Quality radar / scoring error -->
+            <div v-if="qualityEvalFailed"
+              class="rounded-xl border border-amber-800/40 bg-amber-950/25 p-3 flex flex-col gap-2">
+              <div class="flex items-center gap-2">
+                <SbIcon name="close" class="w-3.5 h-3.5 text-amber-400/80" />
+                <h3 class="sb-label text-amber-200/90 mb-0">{{ t('storybook.quality.title') }}</h3>
+              </div>
+              <p class="text-[11px] text-amber-100/85 leading-relaxed">
+                {{ t('storybook.quality.scoringFailed', {
+                  reason: qualityEval.error || t('storybook.quality.failed'),
+                }) }}
+              </p>
+            </div>
+            <div v-else-if="qualityEvalHasRadar"
               class="rounded-xl border border-teal-800/30 bg-black/30 p-3 flex flex-col gap-3">
               <div class="flex items-center gap-2">
                 <SbIcon name="spark" class="w-3.5 h-3.5 text-teal-400/80" />
                 <h3 class="sb-label text-teal-300/90 mb-0">{{ t('storybook.quality.title') }}</h3>
-                <span class="ml-auto text-sm font-mono text-teal-300/90">
-                  {{ Math.round((qualityEval.overall || 0) * 100) }}
+                <span v-if="qualityOverallPct != null" class="ml-auto text-sm font-mono text-teal-300/90">
+                  {{ qualityOverallPct }}
                 </span>
               </div>
               <StoryQualityRadar :eval="qualityEval" />
@@ -1764,12 +1942,26 @@ async function generateImages() {
                   <SbIcon name="clock" class="w-3 h-3" />{{ t('storybook.timetable') }}
                 </div>
                 <ul class="space-y-0.5">
-                  <li v-for="(s, si) in timetableView" :key="si" class="text-gray-300 flex gap-2">
-                    <span class="text-teal-400/80 shrink-0 w-20">{{ s.label }}</span>
-                    <span class="min-w-0">
-                      {{ s.activity }}
-                      <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
-                      <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
+                  <li v-for="(s, si) in timetableView" :key="si"
+                    class="text-gray-300 flex gap-2 items-start rounded-md px-1 -mx-1 py-0.5"
+                    :class="slotUsedAs(s) ? 'bg-teal-950/40 ring-1 ring-teal-800/35' : ''">
+                    <span class="text-teal-400/80 shrink-0 w-20 pt-0.5">{{ s.label }}</span>
+                    <span class="min-w-0 flex-1">
+                      <span class="inline-flex flex-wrap items-center gap-1 mb-0.5" v-if="slotUsedAs(s) || slotNeighbors(s).length">
+                        <span v-if="slotUsedAs(s)"
+                          class="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-teal-900/60 text-teal-200 border border-teal-700/40">
+                          {{ t('chronicle.axis.' + slotUsedAs(s)) }}
+                        </span>
+                        <span v-for="nb in slotNeighbors(s)" :key="nb"
+                          class="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded text-teal-500/55 border border-teal-900/40">
+                          {{ t('storybook.timetableNeighbor', { axis: t('chronicle.axis.' + nb) }) }}
+                        </span>
+                      </span>
+                      <span class="block">
+                        {{ s.activity }}
+                        <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
+                        <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
+                      </span>
                     </span>
                   </li>
                 </ul>

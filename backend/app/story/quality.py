@@ -184,6 +184,34 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
 
 
+def _coerce_text(v: Any) -> str:
+    """Normalise list / dict / scalar story fields to a plain string."""
+    if isinstance(v, list):
+        return " ".join(_coerce_text(x) for x in v)
+    if isinstance(v, dict):
+        return str(v.get("positive") or "")
+    if v is None:
+        return ""
+    return str(v)
+
+
+def quality_eval_failure(exc: BaseException | str, *, method: str = "rules") -> dict:
+    """Stub persisted when scoring fails — Storybook must not crash."""
+    msg = str(exc).strip() or type(exc).__name__ if not isinstance(exc, str) else exc
+    return {
+        "version": 1,
+        "evaluated_at": time.time(),
+        "method": method,
+        "ok": False,
+        "error": msg[:500],
+        "overall": None,
+        "dimensions": None,
+        "per_axis": {},
+        "notes": {"error": msg[:500]},
+        "scored_axes": [],
+    }
+
+
 def _parts(tag_line: str) -> list[str]:
     return [t.strip() for t in (tag_line or "").split(",") if t.strip()]
 
@@ -433,8 +461,12 @@ def evaluate_chronicle_quality(
     ``draft_deltas``: per-axis richness before/after Phase B — also boosts the
     richness dimension when the image model contributed expression.
     """
-    stories = stories or {}
-    activities = activities or {}
+    user_topic = _coerce_text(user_topic)
+    title = _coerce_text(title)
+    overall = _coerce_text(overall)
+    topic_directive = _coerce_text(topic_directive)
+    stories = {k: _coerce_text(v) for k, v in (stories or {}).items()}
+    activities = {k: _coerce_text(v) for k, v in (activities or {}).items()}
     # Normalise prompts: accept either raw strings or {positive, negative} dicts.
     norm_prompts: dict[str, str] = {}
     for a in AXES:
@@ -442,7 +474,7 @@ def evaluate_chronicle_quality(
         if isinstance(raw, dict):
             norm_prompts[a] = str(raw.get("positive") or "")
         else:
-            norm_prompts[a] = str(raw or "")
+            norm_prompts[a] = _coerce_text(raw)
 
     axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
 
@@ -518,6 +550,7 @@ def evaluate_chronicle_quality(
         "version": 1,
         "evaluated_at": time.time(),
         "method": method,
+        "ok": True,
         "overall": overall_score,
         "dimensions": dimensions,
         "per_axis": {

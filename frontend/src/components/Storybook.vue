@@ -99,17 +99,40 @@ function joinList(v) {
 
 function qualityDraftNote(story) {
   const q = story?.quality_eval
-  if (!q) return ''
+  if (!q || q.ok === false) return ''
   const dg = q.draft_grounding
   if (dg && typeof dg === 'object') {
     const n = (dg.axes || []).length
     const d = Number(dg.mean_delta ?? 0)
+    const deltaStr = Number.isFinite(d) ? ((d >= 0 ? '+' : '') + d.toFixed(2)) : '—'
     return t('storybook.quality.draftGrounding', {
       axes: n,
-      delta: (d >= 0 ? '+' : '') + d.toFixed(2),
+      delta: deltaStr,
     })
   }
   return q.notes?.draft_grounding ? String(q.notes.draft_grounding) : ''
+}
+
+function qualityEvalHasRadar(story) {
+  const q = story?.quality_eval
+  if (!q || q.ok === false) return false
+  return !!(q.dimensions && typeof q.dimensions === 'object')
+}
+
+function qualityEvalFailed(story) {
+  const q = story?.quality_eval
+  return !!(q && (q.ok === false || q.error))
+}
+
+function slotUsedAs(s) {
+  const u = s?.used_as
+  return AXES.includes(u) ? u : ''
+}
+
+function slotNeighbors(s) {
+  const n = s?.used_as_neighbor
+  if (!Array.isArray(n)) return []
+  return n.filter((a) => AXES.includes(a))
 }
 
 function storyBody(story) {
@@ -329,10 +352,11 @@ function weakestAxis(story) {
 }
 
 function qualityActions(story) {
+  if (!qualityEvalHasRadar(story)) return []
   const dims = story?.quality_eval?.dimensions || {}
   const ranked = QUALITY_ACTION_DIMS
     .map((key) => ({ key, value: Number(dims[key] ?? 1) }))
-    .filter((d) => d.value < QUALITY_WEAK)
+    .filter((d) => Number.isFinite(d.value) && d.value < QUALITY_WEAK)
     .sort((a, b) => a.value - b.value)
     .slice(0, 3)
   const actions = []
@@ -1053,14 +1077,27 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </p>
             </div>
 
-            <!-- Quality radar: keep near the top so it isn't buried under bio/timetable -->
-            <div v-if="detailStory.quality_eval?.dimensions"
+            <!-- Quality radar / scoring error -->
+            <div v-if="qualityEvalFailed(detailStory)"
+              class="px-6 sm:px-8 py-5 sb-section">
+              <h4 class="sb-section-title flex items-center gap-2 mb-3 text-amber-200/90">
+                <SbIcon name="close" class="w-3.5 h-3.5 opacity-70" />
+                {{ t('storybook.quality.title') }}
+              </h4>
+              <p class="text-[12px] text-amber-100/85 leading-relaxed">
+                {{ t('storybook.quality.scoringFailed', {
+                  reason: detailStory.quality_eval?.error || t('storybook.quality.failed'),
+                }) }}
+              </p>
+            </div>
+            <div v-else-if="qualityEvalHasRadar(detailStory)"
               class="px-6 sm:px-8 py-5 sb-section">
               <h4 class="sb-section-title flex items-center gap-2 mb-4">
                 <SbIcon name="spark" class="w-3.5 h-3.5 opacity-70" />
                 {{ t('storybook.quality.title') }}
-                <span class="ml-auto font-mono text-sm text-[var(--sb-amber)] normal-case tracking-normal">
-                  {{ Math.round((detailStory.quality_eval.overall || 0) * 100) }}
+                <span v-if="qualityPct(detailStory) != null"
+                  class="ml-auto font-mono text-sm text-[var(--sb-amber)] normal-case tracking-normal">
+                  {{ qualityPct(detailStory) }}
                 </span>
               </h4>
               <StoryQualityRadar :eval="detailStory.quality_eval" />
@@ -1158,19 +1195,23 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                     : 'border-white/5 bg-black/25'">
                   <div class="flex items-center gap-1.5 flex-wrap">
                     <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-white/10 text-gray-200">{{ c.id }}</span>
-                    <span class="text-[11px] font-semibold text-[var(--sb-amber)] leading-tight">{{ c.title }}</span>
+                    <span class="text-[12px] font-semibold text-[var(--sb-amber)] leading-tight">{{ c.title }}</span>
                     <span v-if="c.id === detailStory.selected_candidate" class="sb-meta-chip text-[9px] text-[var(--sb-amber)]">
                       {{ t('storybook.variantPicked') }}
                     </span>
                   </div>
-                  <p v-if="c.summary" class="text-[10px] text-gray-400 mt-1.5 leading-snug line-clamp-4">{{ c.summary }}</p>
-                  <div class="mt-2 flex flex-col gap-0.5 text-[10px] leading-snug">
-                    <p v-for="ax in AXES" :key="ax" v-show="c[ax]" class="line-clamp-2">
-                      <span class="font-semibold uppercase tracking-wide mr-1 text-[9px]"
-                        :class="ax === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/80'">
+                  <p v-if="c.turn" class="text-[10px] text-gray-200 mt-1.5 leading-snug line-clamp-3">{{ c.turn }}</p>
+                  <p v-else-if="c.summary" class="text-[10px] text-gray-400 mt-1.5 leading-snug line-clamp-3">{{ c.summary }}</p>
+                  <p v-if="c.motif || c.key_motif" class="mt-1.5 text-[9px] text-teal-300/90">
+                    {{ t('chronicle.motifLabel') }}: {{ c.motif || c.key_motif }}
+                  </p>
+                  <div class="mt-1.5 flex flex-col gap-0.5 text-[9px] leading-snug opacity-45">
+                    <p v-for="ax in AXES" :key="ax" v-show="c[ax]" class="line-clamp-1">
+                      <span class="font-semibold uppercase tracking-wide mr-1"
+                        :class="ax === detailStory.base_time_axis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">
                         {{ t('chronicle.axis.' + ax) }}
                       </span>
-                      <span class="text-gray-300">{{ c[ax] }}</span>
+                      <span class="text-gray-400">{{ c[ax] }}</span>
                     </p>
                   </div>
                 </div>
@@ -1184,12 +1225,26 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </summary>
               <ul class="space-y-2">
                 <li v-for="(slot, si) in storyTimetable(detailStory)" :key="si"
-                  class="text-sm text-gray-300 flex gap-3">
-                  <span class="text-teal-400/85 font-medium shrink-0 w-24 text-[13px]">{{ slot.label }}</span>
-                  <span class="min-w-0 leading-relaxed">
-                    {{ slot.activity }}
-                    <span v-if="slot.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: slot.place }) }}</span>
-                    <span v-if="slot.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: slot.feeling }) }}</span>
+                  class="text-sm text-gray-300 flex gap-3 items-start rounded-md px-1 -mx-1 py-1"
+                  :class="slotUsedAs(slot) ? 'bg-teal-950/30 ring-1 ring-teal-800/30' : ''">
+                  <span class="text-teal-400/85 font-medium shrink-0 w-24 text-[13px] pt-0.5">{{ slot.label }}</span>
+                  <span class="min-w-0 leading-relaxed flex-1">
+                    <span v-if="slotUsedAs(slot) || slotNeighbors(slot).length"
+                      class="inline-flex flex-wrap items-center gap-1 mb-1">
+                      <span v-if="slotUsedAs(slot)"
+                        class="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-teal-900/50 text-teal-200 border border-teal-700/35">
+                        {{ t('chronicle.axis.' + slotUsedAs(slot)) }}
+                      </span>
+                      <span v-for="nb in slotNeighbors(slot)" :key="nb"
+                        class="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded text-teal-500/50 border border-teal-900/35">
+                        {{ t('storybook.timetableNeighbor', { axis: t('chronicle.axis.' + nb) }) }}
+                      </span>
+                    </span>
+                    <span class="block">
+                      {{ slot.activity }}
+                      <span v-if="slot.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: slot.place }) }}</span>
+                      <span v-if="slot.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: slot.feeling }) }}</span>
+                    </span>
                   </span>
                 </li>
               </ul>

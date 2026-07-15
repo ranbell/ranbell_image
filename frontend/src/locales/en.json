@@ -1300,6 +1300,9 @@
     "fastMode": "Fast mode",
     "fastModeTitle": "Build lean tag prompts straight from the topic and skip timetable, long prose, and draft grounding. Costume themes (bunny girl, etc.) are hard-kept on every axis.",
     "fastModeHint": "Fast mode: skip pitches, timetable, and draft grounding — topic → short tags → generate.",
+    "wd14Spice": "WD14 spice (discouraged)",
+    "wd14SpiceTitle": "Enables story-seed WD14, per-axis vocab search, and fast mid-rank inject. Often adds unrelated tags — leave off. Draft-refine WD14 is a separate control.",
+    "wd14SpiceHint": "Off by default. Turning On is discouraged.",
     "generatePinup": "Pinup",
     "pinupTitle": "Generate a reference 'pinup' of this character and register it to her Biography (one extra image job)",
     "suppressConflict": "Conflict-tag removal",
@@ -1416,6 +1419,10 @@
     "knobDivergeHigh": "Diverge · high",
     "knobRestore": "Restore previous",
     "weaverTeaser": "Fragments emerging from the mist",
+    "statusHud": {
+      "title": "Status",
+      "timings": "Step timings"
+    },
     "qualityAction": {
       "respin": "Reweave the tale",
       "proseLonger": "Longer prose & reweave",
@@ -1451,6 +1458,7 @@
     "timetable": "Timetable",
     "timetablePlace": "{'@'} {place}",
     "timetableFeeling": "({feeling})",
+    "timetableUsed": "Used as {axis}",
     "pinupAdd": "Add pose",
     "pinupReplace": "Reroll",
     "pinupQueued": "Pinup queued — it will appear here shortly",
@@ -1472,6 +1480,8 @@
       "hint": "Rule-based scores (0–100) for topic fit, diversity, expression, action, drawability, identity, and richness. When draft grounding ran, the image-model richness lift (delta) is recorded too.",
       "draftGrounding": "Draft grounding: {axes} axes · mean richness Δ {delta}",
       "chartAria": "Quality radar chart, overall {pct}",
+      "failed": "Scoring failed",
+      "scoringFailed": "Quality scoring failed: {reason}",
       "dim": {
         "topic_fit": "Topic",
         "diversity": "Diversity",
@@ -1482,6 +1492,7 @@
         "richness": "Richness"
       }
     },
+    "timetableNeighbor": "near {axis}",
     "otherCandidates": "Other candidates",
     "topicOnlyBadge": "Topic only",
     "weaveSettings": "Weave settings",
