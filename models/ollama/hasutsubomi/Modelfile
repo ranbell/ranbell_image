@@ -1,0 +1,49 @@
+# Qwen3.5-Hasutsubomi-9B — Ollama Modelfile (text-only, non-thinking)
+#
+# 蓮蕾 (Hasutsubomi): Japanese creative writing / anime·LN / sub-culture.
+# Source: Local-Novel-LLM-project/Qwen3.5-Hasutsubomi-9B (Pre-Alpha)
+# GGUF:  mradermacher/Qwen3.5-Hasutsubomi-9B-GGUF
+#
+# Create (Hugging Face から直接 — Ollama 0.6+ 想定):
+#   ollama create hasutsubomi:9b -f models/ollama/hasutsubomi/Modelfile
+#
+# ローカル GGUF を使う場合は下の FROM を差し替え:
+#   FROM ./Qwen3.5-Hasutsubomi-9B.Q4_K_M.gguf
+#
+# Chronicles など API 経由では念のため think=false も渡すこと
+# （generate だと options 内ではなくトップレベル）。
+
+FROM hf.co/mradermacher/Qwen3.5-Hasutsubomi-9B-GGUF:Q4_K_M
+
+TEMPLATE """{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}<|im_end|>
+{{ end }}{{- end }}{{- if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+<think>
+
+</think>
+
+"""
+
+SYSTEM """あなたは日本語のライトノベル・アニメ調創作が得意な作家です。キャラの口調と個性を保ち、場面・動作・感情を具体的に描いてください。必要なら英語の danbooru タグや短いシーン beat にも対応します。説明口調やメタ発言は避け、出力は依頼どおりに簡潔かつ没入的に。"""
+
+PARAMETER temperature 0.8
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER presence_penalty 1.5
+PARAMETER repeat_penalty 1.05
+PARAMETER num_ctx 32768
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"
+
+LICENSE """
+Qwen is licensed under the Qwen LICENSE AGREEMENT.
+This fine-tune (Hasutsubomi) is provided by Local-Novel-LLM-project.
+See: https://huggingface.co/Local-Novel-LLM-project/Qwen3.5-Hasutsubomi-9B
+"""

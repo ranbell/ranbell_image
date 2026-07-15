@@ -1,0 +1,31 @@
+# Qwen3.5-Hasutsubomi-9B — thinking 版（プロット立案を先に書かせる）
+#
+#   ollama create hasutsubomi:9b-think -f models/ollama/hasutsubomi/Modelfile.think
+#
+# Chronicles の高速パス（短いタグ JSON）には不向き。長文 beat / 通常散文向け。
+
+FROM hf.co/mradermacher/Qwen3.5-Hasutsubomi-9B-GGUF:Q4_K_M
+
+TEMPLATE """{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{- range .Messages }}{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}<|im_end|>
+{{ end }}{{- end }}{{- if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+<think>
+"""
+
+SYSTEM """あなたは日本語のライトノベル・アニメ調創作が得意な作家です。必要なときだけ短い思考で構成を整えたあと、完成文だけを出力してください。キャラの口調と個性を保ち、場面・動作・感情を具体的に。"""
+
+PARAMETER temperature 0.85
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER presence_penalty 1.5
+PARAMETER repeat_penalty 1.05
+PARAMETER num_ctx 32768
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"
