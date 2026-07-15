@@ -3461,6 +3461,8 @@ async def run_chronicle_expand(
         merge_story_sections,
         parse_axis_tags_json,
         parse_visual_script_category_tags,
+        timetable_draft_priority_tags,
+        timetable_slot_search_text,
         CHRONICLE_CAT_FIELDS,
         parse_biography_json,
         parse_concrete_activities_json,
@@ -4405,6 +4407,18 @@ async def run_chronicle_expand(
         draft_deltas: dict[str, dict] = {}
         for i, axis in enumerate(gen_axes):
             story_en = en_stories.get(axis) or situation_en[axis]
+            axis_slot = axis_slots.get(axis) or {}
+            slot_text = timetable_slot_search_text(axis_slot)
+            timetable_wd14: list[str] = []
+            if slot_text.strip():
+                timetable_wd14 = await _wd14_search_tags(slot_text, limit=16)
+                if timetable_wd14:
+                    _put({
+                        "type": "timetable_axis_tags",
+                        "axis": axis,
+                        "slot_text": slot_text[:240],
+                        "tags": timetable_wd14[:14],
+                    })
 
             # (1) Concrete action decision: focal action tags, gesture and camera
             #     grounded in the finished axis story (not the short situation beat).
@@ -4445,9 +4459,19 @@ async def run_chronicle_expand(
             _phase("taggingAxis", 0.44 + 0.16 * i, f"Searching {axis} tags...")
             scene_constraints = infer_axis_scene_constraints(story_en)
             query = " ".join(
-                x for x in [story_en, gesture, ", ".join(focal), body.user_topic] if x
+                x for x in [
+                    slot_text,
+                    story_en,
+                    gesture,
+                    ", ".join(focal),
+                    body.user_topic,
+                ] if x
             )
             axis_search_tags = await _wd14_search_tags(query)
+            if timetable_wd14:
+                axis_search_tags = list(dict.fromkeys(
+                    [*timetable_wd14, *axis_search_tags]
+                ))
             if not axis_search_tags:
                 _put({"type": "warning",
                       "message": f"{axis}: WD14 vocab empty — using VLM tag inference"})
@@ -4726,11 +4750,15 @@ async def run_chronicle_expand(
             # ── Phase B: cheap draft → sync WD14 → rebuild prompt ─────────────
             if draft_refine:
                 _phase("draftingAxis", 0.58 + 0.08 * i, f"Drafting {axis} scene...")
+                timetable_lead = timetable_draft_priority_tags(
+                    axis_slot, wd14_lead=timetable_wd14,
+                )
                 try:
                     draft_pos = draft_positive_for_comfy(
                         tag_line=tag_line,
                         positive=positive,
                         priority_tags=prio_tags,
+                        timetable_tags=timetable_lead,
                     )
                     draft_bytes = await _comfy_generate_bytes(
                         comfy, cancel,
@@ -4787,7 +4815,7 @@ async def run_chronicle_expand(
                             vocab_tags=axis_search_tags,
                             draft_tags=draft_tags,
                             lock_tags=lock_tags,
-                            focal=focal,
+                            focal=[*timetable_lead, *focal],
                         )
                         blended = apply_scene_constraints(blended, scene_constraints)
                         axis_search_tags = blended
@@ -4814,7 +4842,11 @@ async def run_chronicle_expand(
                         if richness_delta:
                             draft_evt["draft_richness_delta"] = richness_delta
                         _put(draft_evt)
-                        grounding = build_draft_grounding_block(draft_tags)
+                        grounding = build_draft_grounding_block(
+                            draft_tags,
+                            locale=locale,
+                            axis_slot=axis_slot or None,
+                        )
 
                         if body.prompt_style == "danbooru":
                             positive, negative = tag_line, negative or ""

@@ -1948,6 +1948,46 @@ def test_merge_draft_wd14_tags_empty_draft_keeps_vocab():
     assert "blonde_hair" in merged
 
 
+def test_draft_positive_for_comfy_timetable_leads():
+    from app.story.generator import draft_positive_for_comfy
+
+    many = ", ".join([
+        "1girl", "solo", "blonde_hair", "standing", "classroom",
+        *[f"pad_{i}" for i in range(30)],
+    ])
+    lead = ["running", "school_gate", "sunset"]
+    draft = draft_positive_for_comfy(
+        tag_line=many,
+        positive="",
+        priority_tags=["blonde_hair"],
+        timetable_tags=lead,
+    )
+    parts = [t.strip() for t in draft.split(",") if t.strip()]
+    assert parts[0] == "1girl"
+    assert parts[2:5] == lead
+    assert "blonde_hair" in parts
+
+
+def test_timetable_slot_search_and_draft_priority():
+    from app.story.generator import (
+        timetable_draft_priority_tags,
+        timetable_slot_search_text,
+    )
+
+    slot = {
+        "label": "午後",
+        "activity": "校門を走る",
+        "place": "学校",
+        "feeling": "切ない",
+    }
+    text = timetable_slot_search_text(slot)
+    assert "校門を走る" in text and "学校" in text
+    prio = timetable_draft_priority_tags(
+        slot, wd14_lead=["running", "school", "school_gate"],
+    )
+    assert prio == ["running", "school", "school_gate"]
+
+
 def test_build_draft_grounding_block_and_delta():
     from app.story.generator import (
         build_draft_grounding_block,
@@ -1962,6 +2002,19 @@ def test_build_draft_grounding_block_and_delta():
     assert "image model's own expression" in block
     ja = build_draft_grounding_block(["neon", "cafe"], locale="ja")
     assert "下書き接地" in ja
+    slot_block = build_draft_grounding_block(
+        ["sunset"],
+        locale="en",
+        axis_slot={
+            "label": "now",
+            "activity": "waves goodbye",
+            "place": "station",
+            "feeling": "wistful",
+        },
+    )
+    assert "TIMETABLE ANCHOR" in slot_block
+    assert "waves goodbye" in slot_block
+    assert "sunset" in slot_block
     thin = "1girl, solo, smile, outdoors, day, standing"
     rich = (
         "1girl, solo, smile, outdoors, street, storefront, cafe, "
