@@ -65,13 +65,17 @@ class StreamParser:
 
 
 class OllamaClient:
-    def __init__(self, resource=None) -> None:
+    def __init__(self, resource=None, base_url: str | None = None) -> None:
         """resource: optional spooler Resource (remote-ollama). When set, every
         request acquires its semaphore for the duration of the HTTP call only —
         no job ever holds it across a pause checkpoint, so lane pauses cannot
         deadlock, and total server concurrency is capped across ALL lanes."""
         self._client = httpx.AsyncClient(timeout=settings.ollama_timeout_sec)
         self._resource = resource
+        self.base_url = (base_url or settings.ollama_url).rstrip("/")
+
+    def set_base_url(self, url: str) -> None:
+        self.base_url = (url or settings.ollama_url).rstrip("/")
 
     def set_resource(self, resource) -> None:
         self._resource = resource
@@ -98,7 +102,7 @@ class OllamaClient:
     async def embed(self, text: str, model: str | None = None) -> list[float]:
         async with self._acquire():
             r = await self._client.post(
-                f"{settings.ollama_url}/api/embed",
+                f"{self.base_url}/api/embed",
                 json={"model": model or settings.embed_model, "input": text},
             )
         r.raise_for_status()
@@ -108,7 +112,7 @@ class OllamaClient:
         """Embed multiple texts in a single Ollama API call."""
         async with self._acquire():
             r = await self._client.post(
-                f"{settings.ollama_url}/api/embed",
+                f"{self.base_url}/api/embed",
                 json={"model": model or settings.embed_model, "input": texts},
             )
         r.raise_for_status()
@@ -154,7 +158,7 @@ class OllamaClient:
         )
         async with self._acquire():
             r = await self._client.post(
-                f"{settings.ollama_url}/api/generate",
+                f"{self.base_url}/api/generate",
                 json=payload,
             )
         self._raise_with_body(r)
@@ -183,7 +187,7 @@ class OllamaClient:
 
         async with self._acquire(), self._client.stream(
             "POST",
-            f"{settings.ollama_url}/api/generate",
+            f"{self.base_url}/api/generate",
             json=payload,
             timeout=settings.ollama_timeout_sec,
         ) as resp:
@@ -237,7 +241,7 @@ class OllamaClient:
         if fmt:
             payload["format"] = fmt
         async with self._acquire():
-            r = await self._client.post(f"{settings.ollama_url}/api/generate", json=payload)
+            r = await self._client.post(f"{self.base_url}/api/generate", json=payload)
         self._raise_with_body(r)
         data = r.json()
         text = str(data.get("response") or "")
@@ -276,7 +280,7 @@ class OllamaClient:
         )
         async with self._acquire(), self._client.stream(
             "POST",
-            f"{settings.ollama_url}/api/generate",
+            f"{self.base_url}/api/generate",
             json=payload,
             timeout=settings.ollama_timeout_sec,
         ) as resp:
@@ -305,7 +309,7 @@ class OllamaClient:
             yield event
 
     async def health(self, url: str | None = None) -> bool:
-        base = url or settings.ollama_url
+        base = (url or self.base_url).rstrip("/")
         try:
             r = await self._client.get(f"{base}/api/tags", timeout=5.0)
             if r.status_code != 200:
@@ -315,7 +319,7 @@ class OllamaClient:
             return False
 
     async def list_models(self, url: str | None = None) -> list[str]:
-        base = url or settings.ollama_url
+        base = (url or self.base_url).rstrip("/")
         try:
             r = await self._client.get(f"{base}/api/tags", timeout=5.0)
             r.raise_for_status()

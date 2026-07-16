@@ -149,9 +149,12 @@ Open `docker-compose.override.yml` in a text editor and configure it:
 | Variable | Description |
 |---|---|
 | `API_TOKEN` | Authentication token. The browser fetches this automatically on first load — no manual setup required. Default: `RANBELL_IMAGE_API_TOKEN` |
-| `OLLAMA_URL` | URL of your Ollama instance. Default: `http://host.docker.internal:11434` |
+| `OLLAMA_URL` | URL of your Ollama instance (always used for embeddings). Default: `http://host.docker.internal:11434` |
 | `EMBED_MODEL` | Embedding model name. Default: `embeddinggemma:300m` |
-| `VLM_MODEL` | Vision-language model name. Default: `gemma4:e2b` |
+| `VLM_MODEL` | Text / VLM model name. Use e.g. `gemma4:e2b` with Ollama, or `bonsai` with Bonsai llama-server |
+| `LLM_PROVIDER` | `ollama` (default) or `openai` (OpenAI-compatible: Bonsai / llama.cpp / …) |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL. Default: `http://host.docker.internal:8080/v1` |
+| `OPENAI_API_KEY` | API key (any non-empty string if the server does not check). Default: `not-needed` |
 | `EMBED_DIM` | Output dimension of the embedding model. Must match your model exactly. Default: `768` |
 | `EMBED_DIM_SMALL` | Truncated dimension for fast prefetch search. Default: `256` |
 | `COMFYUI_URL` | URL of your ComfyUI instance. Default: `http://host.docker.internal:8188` |

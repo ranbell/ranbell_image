@@ -18,10 +18,17 @@ class Settings(BaseSettings):
     ollama_url: str = "http://host.docker.internal:11434"
     embed_model: str = "nomic-embed-text"
     vlm_model: str = "gemma4:e2b"
-    # HTTP timeout for all Ollama requests. A hung Ollama otherwise blocks the
-    # single-worker PROMPT lane for this long — lower it if that matters more
-    # than very long generations.
+    # HTTP timeout for all Ollama / OpenAI-compat requests. A hung backend
+    # otherwise blocks the single-worker PROMPT lane for this long — lower it
+    # if that matters more than very long generations.
     ollama_timeout_sec: float = 300.0
+
+    # Text / VLM provider: "ollama" | "openai" (OpenAI-compatible: Bonsai, llama.cpp, …)
+    # Embeddings always use Ollama regardless of this setting.
+    llm_provider: str = "ollama"
+    # Base URL may be with or without /v1 (normalized to …/v1).
+    openai_base_url: str = "http://host.docker.internal:8080/v1"
+    openai_api_key: str = "not-needed"
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"
