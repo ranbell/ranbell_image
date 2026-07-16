@@ -2700,6 +2700,24 @@ def _chronicle_llm_options(body, temp: float, cfg: dict) -> dict:
     }
 
 
+def _chronicle_bind_llm(ollama, body):
+    """Route Chronicle text/VLM to the per-run provider; embed stays Ollama."""
+    provider = getattr(body, "llm_provider", None) or "ollama"
+    bind = getattr(ollama, "bind", None)
+    if callable(bind):
+        return bind(provider)
+    return ollama
+
+
+def _chronicle_text_model(body, cfg: dict) -> str:
+    if getattr(body, "vlm_model", None):
+        return body.vlm_model
+    provider = getattr(body, "llm_provider", None) or "ollama"
+    if provider == "openai":
+        return cfg.get("openai_model") or "bonsai"
+    return cfg.get("vlm_model") or "gemma4:e2b"
+
+
 async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: str, db) -> str | None:
     """Save a chronicle-generated image to generated_images_dir/Chronicles/.
 
@@ -2918,7 +2936,8 @@ async def run_chronicle_candidates(
 
     try:
         cfg = await get_runtime_config(db)
-        vlm_model = body.vlm_model or cfg["vlm_model"]
+        ollama = _chronicle_bind_llm(ollama, body)
+        vlm_model = _chronicle_text_model(body, cfg)
         options = _chronicle_llm_options(body, temp, cfg)
 
         draft = None
@@ -3582,7 +3601,8 @@ async def run_chronicle_expand(
             return
 
         cfg = await get_runtime_config(db)
-        vlm_model = body.vlm_model or cfg["vlm_model"]
+        ollama = _chronicle_bind_llm(ollama, body)
+        vlm_model = _chronicle_text_model(body, cfg)
         options = _chronicle_llm_options(body, temperature, cfg)
         removal = removal_tag_set(cfg)
 

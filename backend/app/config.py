@@ -18,10 +18,18 @@ class Settings(BaseSettings):
     ollama_url: str = "http://host.docker.internal:11434"
     embed_model: str = "nomic-embed-text"
     vlm_model: str = "gemma4:e2b"
-    # HTTP timeout for all Ollama requests. A hung Ollama otherwise blocks the
-    # single-worker PROMPT lane for this long — lower it if that matters more
-    # than very long generations.
+    # HTTP timeout for all Ollama / OpenAI-compat requests. A hung backend
+    # otherwise blocks the single-worker PROMPT lane for this long — lower it
+    # if that matters more than very long generations.
     ollama_timeout_sec: float = 300.0
+
+    # Text / VLM provider selection is per-feature (Chronicles UI). The shared
+    # gateway always defaults to Ollama. These settings only configure the
+    # OpenAI-compatible endpoint used when Chronicles chooses it.
+    llm_provider: str = "ollama"  # default for Chronicles UI only
+    openai_base_url: str = "http://host.docker.internal:8080/v1"
+    openai_api_key: str = "not-needed"
+    openai_model: str = "bonsai"
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"

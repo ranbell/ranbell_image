@@ -33,6 +33,7 @@ const emit = defineEmits([
 // ── Admin internal state ──────────────────────────────────────────────────────
 const adminTab = ref('diag')
 const ollamaModels = ref([])
+const llmModels = ref([])
 const showAdvanced = ref(false)
 const adminStats = ref(null)
 const adminConfig = ref(null)
@@ -299,6 +300,13 @@ async function fetchOllamaModels() {
   } catch {}
 }
 
+async function fetchLlmModels() {
+  try {
+    const r = await fetch('/api/llm/models')
+    if (r.ok) llmModels.value = (await r.json()).models ?? []
+  } catch {}
+}
+
 async function reloadWorkflows() {
   try {
     const r = await fetch('/api/comfy/workflows')
@@ -338,6 +346,7 @@ function switchAdminTab(id) {
   if (id === 'diag')       fetchDiagData()
   if (id === 'connection') fetchHealth()
   if (id === 'config' && !ollamaModels.value.length) fetchOllamaModels()
+  if (id === 'config') fetchLlmModels()
   if (id === 'config' && !configWorkflows.value.length) {
     fetch('/api/comfy/workflows').then(r => r.ok && r.json()).then(list => { if (list) configWorkflows.value = list }).catch(() => {})
   }
@@ -371,7 +380,7 @@ watch(() => props.show, async (val) => {
     backendOffline.value = false
     adminStats.value = null
     adminConfig.value = null
-    await Promise.all([fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus()])
+    await Promise.all([fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchLlmModels(), fetchVocabStatus()])
   }
 })
 
@@ -989,7 +998,40 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             </div>
 
             <div class="bg-gray-800 rounded-xl p-4 space-y-4">
-              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Ollama</p>
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.config.llmProvider') }}</p>
+              <p class="text-[10px] text-gray-600">{{ $t('admin.config.llmProviderHint') }}</p>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.openaiBaseUrl') }}</label>
+                <input v-model="adminConfig.openai_base_url" type="text"
+                  placeholder="http://host.docker.internal:8080/v1"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.openaiApiKey') }}</label>
+                <input v-model="adminConfig.openai_api_key" type="text"
+                  placeholder="not-needed"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                  {{ $t('admin.config.openaiModel') }}
+                  <button @click="fetchLlmModels" class="text-gray-600 hover:text-gray-400" :title="$t('admin.config.refreshModels')">↺</button>
+                </label>
+                <select v-if="llmModels.length" v-model="adminConfig.openai_model"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                  <option v-for="m in llmModels" :key="m" :value="m">{{ m }}</option>
+                  <option v-if="adminConfig.openai_model && !llmModels.includes(adminConfig.openai_model)"
+                    :value="adminConfig.openai_model">{{ adminConfig.openai_model }}</option>
+                </select>
+                <input v-else v-model="adminConfig.openai_model" type="text"
+                  placeholder="bonsai"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.bonsaiHint') }}</p>
+              </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-4 space-y-4">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Ollama <span class="normal-case font-normal text-gray-600">({{ $t('admin.config.embedOnly') }})</span></p>
               <div>
                 <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.ollamaUrl') }}</label>
                 <input v-model="adminConfig.ollama_url" type="text"
@@ -999,7 +1041,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                 <div>
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
                     {{ $t('admin.config.embedModel') }}
-                    <button @click="fetchOllamaModels" class="text-gray-600 hover:text-gray-400" title="モデル一覧を再取得">↺</button>
+                    <button @click="fetchOllamaModels" class="text-gray-600 hover:text-gray-400" :title="$t('admin.config.refreshModels')">↺</button>
                   </label>
                   <select v-if="ollamaModels.length" v-model="adminConfig.embed_model"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
@@ -1021,6 +1063,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                       :value="adminConfig.vlm_model">{{ adminConfig.vlm_model }}</option>
                   </select>
                   <input v-else v-model="adminConfig.vlm_model" type="text"
+                    placeholder="gemma4:e2b"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 </div>
               </div>
@@ -1544,36 +1587,48 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                 </div>
               </div>
               <div class="bg-gray-800 rounded-xl p-4 space-y-1">
-                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Ollama</p>
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  LLM
+                  <span class="normal-case font-normal text-gray-600 ml-1">
+                    ({{ healthData.ollama.provider || healthData.llm?.provider || 'ollama' }})
+                  </span>
+                </p>
                 <div class="flex justify-between">
                   <span class="text-gray-400">{{ $t('admin.connection.statusLabel') }}</span>
-                  <span :class="healthData.ollama.ok ? 'text-green-400' : 'text-red-400'">{{ healthData.ollama.ok ? $t('admin.connection.ok') : $t('admin.connection.error') }}</span>
+                  <span :class="(healthData.llm?.ok ?? healthData.ollama.ok) ? 'text-green-400' : 'text-red-400'">
+                    {{ (healthData.llm?.ok ?? healthData.ollama.ok) ? $t('admin.connection.ok') : $t('admin.connection.error') }}
+                  </span>
                 </div>
-                <template v-if="healthData.ollama.ok">
-                  <div class="flex justify-between">
-                    <span class="text-gray-400">{{ $t('admin.connection.embedModel') }}</span>
-                    <span :class="healthData.ollama.embed_model_available ? 'text-green-400' : 'text-yellow-400'">
-                      {{ healthData.ollama.embed_model }} {{ healthData.ollama.embed_model_available ? '✓' : $t('admin.connection.notInstalled') }}
-                    </span>
+                <div class="flex justify-between">
+                  <span class="text-gray-400">{{ $t('admin.connection.embedModel') }}</span>
+                  <span :class="healthData.ollama.embed_model_available ? 'text-green-400' : 'text-yellow-400'">
+                    {{ healthData.ollama.embed_model }} {{ healthData.ollama.embed_model_available ? '✓' : $t('admin.connection.notInstalled') }}
+                    <span class="text-gray-600 text-[10px] ml-1">via Ollama</span>
+                  </span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400">{{ $t('admin.connection.vlmModel') }}</span>
+                  <span :class="healthData.ollama.vlm_model_available ? 'text-green-400' : 'text-yellow-400'">
+                    {{ healthData.ollama.vlm_model }} {{ healthData.ollama.vlm_model_available ? '✓' : $t('admin.connection.notInstalled') }}
+                  </span>
+                </div>
+                <div v-if="(healthData.llm?.models || healthData.ollama.llm_models || healthData.ollama.models)?.length" class="mt-2">
+                  <p class="text-xs text-gray-500 mb-1">{{ $t('admin.connection.installedModels') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="m in (healthData.llm?.models || healthData.ollama.llm_models || healthData.ollama.models)" :key="m"
+                      class="px-1.5 py-0.5 bg-gray-700 rounded text-xs text-gray-300 font-mono">{{ m }}</span>
                   </div>
-                  <div class="flex justify-between">
-                    <span class="text-gray-400">{{ $t('admin.connection.vlmModel') }}</span>
-                    <span :class="healthData.ollama.vlm_model_available ? 'text-green-400' : 'text-yellow-400'">
-                      {{ healthData.ollama.vlm_model }} {{ healthData.ollama.vlm_model_available ? '✓' : $t('admin.connection.notInstalled') }}
-                    </span>
-                  </div>
-                  <div v-if="healthData.ollama.models?.length" class="mt-2">
-                    <p class="text-xs text-gray-500 mb-1">{{ $t('admin.connection.installedModels') }}</p>
-                    <div class="flex flex-wrap gap-1">
-                      <span v-for="m in healthData.ollama.models" :key="m"
-                        class="px-1.5 py-0.5 bg-gray-700 rounded text-xs text-gray-300 font-mono">{{ m }}</span>
-                    </div>
-                  </div>
-                </template>
-                <div v-if="!healthData.ollama.ok" class="text-red-400 text-xs mt-1 font-mono break-all">{{ healthData.ollama.error }}</div>
+                </div>
+                <div v-if="!(healthData.llm?.ok ?? healthData.ollama.ok)" class="text-red-400 text-xs mt-1 font-mono break-all">
+                  {{ healthData.llm?.error || healthData.ollama.error }}
+                </div>
                 <div class="flex justify-between text-xs">
                   <span class="text-gray-500">{{ $t('admin.connection.url') }}</span>
-                  <span class="text-gray-500 font-mono">{{ healthData.ollama.url }}</span>
+                  <span class="text-gray-500 font-mono break-all text-right">{{ healthData.ollama.llm_url || healthData.llm?.url || healthData.ollama.url }}</span>
+                </div>
+                <div v-if="healthData.ollama.url && healthData.ollama.llm_url && healthData.ollama.url !== healthData.ollama.llm_url" class="flex justify-between text-xs">
+                  <span class="text-gray-500">Ollama (embed)</span>
+                  <span class="text-gray-500 font-mono break-all text-right">{{ healthData.ollama.url }}</span>
                 </div>
               </div>
               <div class="bg-gray-800 rounded-xl p-4 space-y-2">

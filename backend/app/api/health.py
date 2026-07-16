@@ -8,16 +8,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 
+def _model_available(model: str, models: list[str]) -> bool:
+    if not model:
+        return False
+    prefix = model.split(":")[0]
+    return any(m == model or m.startswith(prefix) for m in models)
+
+
 @router.get("/health/detail")
 async def detailed_health(request: Request):
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    llm = request.app.state.ollama
 
     async def check_qdrant():
         try:
             count = await db.total_count()
             vector_count = await db.count_with_embedding()
             info = await db._qc.get_collection(collection_name="images")
+            _ = info
             return {
                 "ok": True,
                 "doc_count": count,
@@ -29,11 +37,18 @@ async def detailed_health(request: Request):
             return {"ok": False, "error": "接続エラー", "url": settings.qdrant_url}
 
     async def check_ollama():
+        """Ollama is always required for embeddings."""
         try:
             cfg = await get_runtime_config(db)
             runtime_url = cfg["ollama_url"]
-            ok = await ollama.health(runtime_url)
-            models = await ollama.list_models(runtime_url) if ok else []
+            health_fn = getattr(llm, "health_ollama", None)
+            list_fn = getattr(llm, "list_ollama_models", None)
+            if health_fn:
+                ok = await health_fn(runtime_url)
+                models = await list_fn(runtime_url) if ok and list_fn else []
+            else:
+                ok = await llm.health(runtime_url)
+                models = await llm.list_models(runtime_url) if ok else []
             embed_model = cfg["embed_model"]
             vlm_model = cfg["vlm_model"]
             return {
@@ -41,19 +56,43 @@ async def detailed_health(request: Request):
                 "url": runtime_url,
                 "models": models,
                 "embed_model": embed_model,
-                "embed_model_available": any(
-                    m == embed_model or m.startswith(embed_model.split(":")[0])
-                    for m in models
-                ),
+                "embed_model_available": _model_available(embed_model, models),
                 "vlm_model": vlm_model,
-                "vlm_model_available": any(
-                    m == vlm_model or m.startswith(vlm_model.split(":")[0])
-                    for m in models
-                ),
+                "vlm_model_available": _model_available(vlm_model, models),
             }
         except Exception as e:
             logger.error("Ollama health check failed: %s", e)
             return {"ok": False, "error": "接続エラー", "url": settings.ollama_url, "models": []}
+
+    async def check_llm():
+        """OpenAI-compatible endpoint health (used by Chronicles when selected)."""
+        try:
+            cfg = await get_runtime_config(db)
+            url = cfg.get("openai_base_url") or settings.openai_base_url
+            health_fn = getattr(llm, "health_openai", None)
+            list_fn = getattr(llm, "list_openai_models", None)
+            ok = await health_fn(url) if health_fn else False
+            models = await list_fn(url) if ok and list_fn else []
+            openai_model = cfg.get("openai_model") or "bonsai"
+            return {
+                "ok": ok,
+                "provider": "openai",
+                "url": url,
+                "models": models,
+                "vlm_model": openai_model,
+                "vlm_model_available": bool(
+                    ok and (not models or _model_available(openai_model, models) or openai_model)
+                ),
+            }
+        except Exception as e:
+            logger.error("OpenAI-compat health check failed: %s", e)
+            return {
+                "ok": False,
+                "error": "接続エラー",
+                "provider": "openai",
+                "url": settings.openai_base_url,
+                "models": [],
+            }
 
     async def check_comfy():
         try:
@@ -72,23 +111,53 @@ async def detailed_health(request: Request):
             workflows = c.list_workflows() if c else []
             return {"ok": False, "error": "接続エラー", "url": settings.comfyui_url, "workflows": workflows}
 
-    qdrant_res, ollama_res, comfy_res = await asyncio.gather(
-        check_qdrant(), check_ollama(), check_comfy()
+    qdrant_res, ollama_res, llm_res, comfy_res = await asyncio.gather(
+        check_qdrant(), check_ollama(), check_llm(), check_comfy()
     )
+
+    # Backward-compatible ollama block + optional OpenAI-compat endpoint info
+    ollama_merged = {
+        **ollama_res,
+        "provider": "ollama",
+        "llm_url": llm_res.get("url"),
+        "llm_ok": llm_res.get("ok"),
+        "llm_models": llm_res.get("models", []),
+        "openai_model": llm_res.get("vlm_model"),
+    }
 
     return {
         "backend": {"ok": True, "version": "0.3.1"},
         "qdrant": qdrant_res,
-        "ollama": ollama_res,
+        "ollama": ollama_merged,
+        "llm": llm_res,
         "comfyui": comfy_res,
     }
 
 
 @router.get("/ollama/models")
 async def ollama_models(request: Request):
-    ollama = request.app.state.ollama
+    """Embedding-model list from Ollama (always)."""
+    llm = request.app.state.ollama
     try:
-        models = await ollama.list_models()
+        list_fn = getattr(llm, "list_ollama_models", llm.list_models)
+        models = await list_fn()
         return {"models": models}
     except Exception:
         return {"models": []}
+
+
+@router.get("/llm/models")
+async def llm_models(request: Request):
+    """OpenAI-compatible model list (for Chronicles endpoint config)."""
+    llm = request.app.state.ollama
+    db = request.app.state.db
+    try:
+        cfg = await get_runtime_config(db)
+        list_fn = getattr(llm, "list_openai_models", None)
+        if list_fn:
+            models = await list_fn(cfg.get("openai_base_url"))
+        else:
+            models = []
+        return {"provider": "openai", "models": models}
+    except Exception:
+        return {"provider": "openai", "models": []}

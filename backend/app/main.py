@@ -8,6 +8,8 @@ from .config import settings
 
 from .db.qdrant_client import QdrantDBClient
 from .ai.ollama import OllamaClient
+from .ai.openai_compat import OpenAICompatClient
+from .ai.llm import LlmGateway, apply_llm_runtime_config
 from .ai.comfy import ComfyUIClient
 from .core.runtime_cache import RuntimeConfigCache
 from . import runtime_config as _runtime_config
@@ -83,13 +85,19 @@ async def lifespan(app: FastAPI):
     db = QdrantDBClient()
     await db.start()
 
-    ollama = OllamaClient()
+    ollama_backend = OllamaClient()
+    openai_backend = OpenAICompatClient()
+    ollama = LlmGateway(
+        ollama_backend,
+        openai_backend,
+        provider=settings.llm_provider if settings.llm_provider in ("ollama", "openai") else "ollama",
+    )
     comfy = ComfyUIClient()
 
     from .config import settings as _settings
     resources, lane_resource, topology = build_resources(_settings)
     spooler = JobSpooler(resources=resources, lane_resource=lane_resource)
-    # Throttle all Ollama traffic (every lane) at the client, per HTTP request
+    # Throttle all LLM traffic (every lane) at the client, per HTTP request
     ollama.set_resource(resources.get("remote-ollama"))
 
     app.state.db = db
@@ -118,6 +126,7 @@ async def lifespan(app: FastAPI):
     # On startup: apply pause settings saved in the DB to the spooler
     from .runtime_config import _defaults as _rc_defaults
     _saved_cfg = await db.get_config()
+    apply_llm_runtime_config(ollama, {**_rc_defaults, **_saved_cfg})
     # Topology-aware defaults — overridden by any value the user has saved in the DB.
     _default_pause_lanes = list(_rc_defaults["auto_pause_lanes"])  # ["embed", "eval"]
     if topology["tagging_local"] and (topology["ollama_local"] or topology["comfyui_local"]):

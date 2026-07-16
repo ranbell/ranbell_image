@@ -147,9 +147,12 @@ cp docker-compose.override.yml.example docker-compose.override.yml
 | 変数名 | 説明 |
 |---|---|
 | `API_TOKEN` | 認証トークン。ブラウザが初回ロード時に自動取得するため手動設定不要。デフォルト: `RANBELL_IMAGE_API_TOKEN` |
-| `OLLAMA_URL` | Ollama のURL。デフォルト: `http://host.docker.internal:11434` |
+| `OLLAMA_URL` | Ollama のURL（埋め込みは常にこちら）。デフォルト: `http://host.docker.internal:11434` |
 | `EMBED_MODEL` | 埋め込みモデル名。デフォルト: `embeddinggemma:300m` |
-| `VLM_MODEL` | 視覚言語モデル名。デフォルト: `gemma4:e2b` |
+| `VLM_MODEL` | テキスト / VLM モデル名（Ollama・他機能用）。デフォルト: `gemma4:e2b` |
+| `OPENAI_BASE_URL` | Chronicles 用 OpenAI 互換サーバの URL。デフォルト: `http://host.docker.internal:8080/v1` |
+| `OPENAI_API_KEY` | Bearer token（未検証サーバは任意文字列で可）。デフォルト: `not-needed` |
+| `OPENAI_MODEL` | Chronicles が OpenAI 互換を選んだときのモデル ID。デフォルト: `bonsai` |
 | `EMBED_DIM` | 埋め込みモデルの出力次元数。モデルと**必ず一致させること**。デフォルト: `768` |
 | `EMBED_DIM_SMALL` | 高速プリフェッチ用の縮小次元数。デフォルト: `256` |
 | `COMFYUI_URL` | ComfyUI のURL。デフォルト: `http://host.docker.internal:8188` |

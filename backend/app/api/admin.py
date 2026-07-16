@@ -21,6 +21,10 @@ class ConfigBody(BaseModel):
     wd14_threshold: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     wd14_model_dir: str | None = None
     ollama_url: str | None = None
+    llm_provider: Literal["ollama", "openai"] | None = None
+    openai_base_url: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str | None = None
     scan_extensions: list[str] | None = None
     pipeline_batch_size: Annotated[int, Field(ge=1)] | None = None
     pipeline_concurrency: Annotated[int, Field(ge=1)] | None = None
@@ -75,6 +79,16 @@ async def update_config(body: ConfigBody, request: Request):
     existing["_updated_at"] = time.time()
     await db.put_config(existing)
     invalidate_cache()
+
+    # Hot-apply LLM provider / URLs without restart
+    llm_keys = {
+        "llm_provider", "ollama_url", "openai_base_url", "openai_api_key",
+        "openai_model", "vlm_model",
+    }
+    if llm_keys & updates.keys():
+        from ..ai.llm import apply_llm_runtime_config
+        from ..runtime_config import get_runtime_config as _grc
+        apply_llm_runtime_config(request.app.state.ollama, await _grc(db))
 
     spooler = request.app.state.spooler
 
