@@ -11,6 +11,8 @@ CONFIG_ID = "app_config"
 _defaults = {
     "embed_model":          settings.embed_model,
     "vlm_model":            settings.vlm_model,
+    "story_model":          settings.story_model,
+    "utility_model":        settings.utility_model,
     "wd14_threshold":       settings.wd14_threshold,
     "wd14_model_dir":       settings.wd14_model_dir,
     "ollama_url":           settings.ollama_url,

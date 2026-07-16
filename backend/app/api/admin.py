@@ -441,3 +441,30 @@ async def invoke_import_wd14_vocab(request: Request):
         ollama=ollama,
     )
     return {"status": "queued", "job_id": job_id}
+
+
+# ── Chronicle Pose Vocab (WD14 pose/action subset → Qdrant) ──────────────────
+
+@router.get("/chronicle/pose-vocab-status")
+async def chronicle_pose_vocab_status(request: Request):
+    db = request.app.state.db
+    count = await db.count_pose_vocab()
+    return {"imported": count > 0, "tag_count": count}
+
+
+@router.post("/chronicle/import-pose-vocab")
+async def chronicle_import_pose_vocab(request: Request):
+    """Embed the pose/action subset of selected_tags.csv into wd14_pose_vocab."""
+    from ..jobs.runners import run_import_pose_vocab
+    from ..spooler.models import JobLane
+    spooler = request.app.state.spooler
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+    job_id = spooler.submit(
+        JobLane.SYNC,
+        "import_pose_vocab",
+        run_import_pose_vocab,
+        db=db,
+        ollama=ollama,
+    )
+    return {"status": "queued", "job_id": job_id}

@@ -43,7 +43,9 @@ class ChronicleRequest(BaseModel):
     emotion: str = ""  # target emotion register ('' = off; see emotion_tagger.EMOTION_DIMENSIONS)
     dramatic_mode: str = ""  # preferred story-shape ('' = auto-vary; see generator._DRAMATIC_MODES)
     tone: Literal["bright", "neutral", "dark"] = "bright"  # overall story tone bias
-    suppress_conflict_tags: bool = True  # run the per-axis story-conflict tag removal (Refine parity)
+    # Deprecated (accepted, ignored): the LLM conflict pass was replaced by
+    # mechanical mutex rules only.
+    suppress_conflict_tags: bool = True
     generate_pinup: bool = False  # generate + register a reference "pinup" for the base image
     use_ref_seed: bool = True
     manual_mode: bool = False
@@ -59,15 +61,21 @@ class ChronicleRequest(BaseModel):
     similar_tag_mix_ratio: float = 0.3  # fraction of tag budget from similar images
     similar_tag_mix_n: int = 4  # near-but-different neighbor count (3–6)
     # Phase B: cheap draft → WD14 → rebuild (borrow image-model expression).
-    # auto = on for any non-micro scale, or divergence ≥ 0.25; on/off force.
-    use_draft_refine: Literal["auto", "on", "off"] = "auto"
+    # Opt-in only: "on" enables it; "auto" is treated as OFF (it added a full
+    # ComfyUI render + WD14 scan per axis for marginal gain).
+    use_draft_refine: Literal["auto", "on", "off"] = "off"
     draft_width: int = 512
     draft_height: int = 512
     draft_steps: int = 12
     # Per-run LLM backend. Default ollama — OpenAI-compat only when chosen here.
     # Other app features ignore this and always use Ollama via the shared gateway.
     llm_provider: Literal["ollama", "openai"] = "ollama"
-    vlm_model: str = ""
+    vlm_model: str = ""  # all-tier override (kept for backward compatibility)
+    # Stage-tiered overrides (Ollama provider only): story = creative arc/polish,
+    # utility = translations. Empty → runtime config tier → vlm_model. Vision
+    # always uses vlm_model; llm_provider="openai" collapses all tiers.
+    story_model: str = ""
+    utility_model: str = ""
     temperature: float = 1.0  # Gemma 4 recommended default
     num_ctx: int = 16384
     # Visual Script prose length (paragraphs 3–7). Chronicle lean path

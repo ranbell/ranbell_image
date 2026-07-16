@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     ollama_url: str = "http://host.docker.internal:11434"
     embed_model: str = "nomic-embed-text"
     vlm_model: str = "gemma4:e2b"
+    # Stage-tiered Chronicle models (Ollama provider only). Empty → fall back
+    # to vlm_model (no model swap on single-GPU Ollama). story = creative
+    # story-arc / polish calls (e.g. "hasutsubomi:9b"); utility = translations.
+    story_model: str = ""
+    utility_model: str = ""
     # HTTP timeout for all Ollama / OpenAI-compat requests. A hung backend
     # otherwise blocks the single-worker PROMPT lane for this long — lower it
     # if that matters more than very long generations.

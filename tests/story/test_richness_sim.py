@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
     _chronicle_tags_degenerate,
-    build_axis_tags_prompt,
 )
 from app.story.quality import (
     evaluate_chronicle_quality,
@@ -118,25 +117,6 @@ def test_thin_prompts_fail_richness_floor():
     assert bike["motion"] <= 1 or _chronicle_tags_degenerate(THIN_BIKE)[0]
 
 
-def test_pass1_prompt_demands_scene_richness():
-    prompt = build_axis_tags_prompt(
-        story_text=(
-            "She pedals through the sunset street, scarf fluttering, looking back "
-            "with a bright smile past the cafe windows."
-        ),
-        character_tags=["1girl", "black_hair", "brown_eyes"],
-        character_desc="schoolgirl",
-        axis="present",
-        base_axis="present",
-        time_scale="hours",
-    )
-    assert "SCENE RICHNESS" in prompt
-    assert "lighting_tags" in prompt
-    assert "rim_light" in prompt or "golden" in prompt.lower()
-    assert "background_tags" in prompt
-    assert "object_tags" in prompt
-
-
 def test_full_quality_eval_rich_vs_thin_matrix(capsys):
     rich_stories = {
         "past": "She unlocks her bicycle by the cafe as the sun dips low.",
@@ -216,88 +196,3 @@ def test_full_quality_eval_rich_vs_thin_matrix(capsys):
     assert rich_q["dimensions"]["action"] >= 0.6
 
 
-def test_draft_refine_lifts_thin_vocab_to_reference_richness(capsys):
-    """Phase B: thin text-search + rich draft WD14 → image-model expression wins."""
-    from app.story.generator import (
-        draft_richness_delta,
-        merge_draft_wd14_tags,
-        should_use_draft_refine,
-    )
-
-    # Auto now drafts hours/days — only minutes skip.
-    assert should_use_draft_refine(
-        mode="auto", time_scale="hours", divergence=0.1, workflow_name="w.json",
-    )
-    assert not should_use_draft_refine(
-        mode="auto", time_scale="minutes", divergence=0.1, workflow_name="w.json",
-    )
-
-    thin_vocab = [
-        "outdoors", "day", "street", "standing", "smile", "looking_at_viewer",
-        "simple_background", "school_uniform",
-    ]
-    # What a strong image model paints into a low-res draft (WD14 read-back).
-    draft_wd14 = [
-        "riding_bicycle", "bicycle", "pedaling", "leaning_forward",
-        "red_scarf", "fluttering_scarf", "wind",
-        "storefront", "cafe", "window", "streetlamp", "potted_plant",
-        "sunset", "golden_hour", "rim_light", "backlight", "lens_flare",
-        "looking_back", "open_mouth", "blush",
-    ]
-    lock = ["black_hair", "brown_eyes", "1girl"]
-    focal = ["riding_bicycle", "looking_back"]
-
-    before = ", ".join(focal + thin_vocab + lock)
-    merged = merge_draft_wd14_tags(
-        vocab_tags=thin_vocab,
-        draft_tags=draft_wd14,
-        lock_tags=lock,
-        focal=focal,
-    )
-    after = ", ".join(merged)
-    delta = draft_richness_delta(before_tag_line=before, after_tag_line=after)
-
-    print("\n═══ DRAFT GROUNDING LIFT (thin vocab → rich draft WD14) ═══")
-    print(f"  before richness={delta['before']:.2f}")
-    print(f"  after  richness={delta['after']:.2f}  Δ={delta['delta']:+.2f}")
-    print(f"  lighting={delta['draft_lighting']} env={delta['draft_environment']} "
-          f"props={delta['draft_props']}")
-    print(f"  merged head: {', '.join(merged[:14])}…")
-
-    assert "golden_hour" in merged
-    assert "rim_light" in merged
-    assert "storefront" in merged or "cafe" in merged
-    assert "bicycle" in merged or "riding_bicycle" in merged
-    # Richness tags sit ahead of leftover thin vocab (e.g. simple_background).
-    assert merged.index("golden_hour") < merged.index("simple_background")
-    assert delta["delta"] >= 0.25
-    assert delta["after"] >= 0.55
-
-    q = evaluate_chronicle_quality(
-        user_topic="放課後の自転車",
-        title="Draft Lift",
-        overall="A thin guess becomes a painted street.",
-        stories={
-            "past": "She unlocks the bike by the cafe.",
-            "present": "She pedals into the sunset looking back.",
-            "future": "She arrives home as streetlamps flicker on.",
-        },
-        activities={
-            "past": "Unlocking a bicycle beside a cafe.",
-            "present": "Riding a bicycle on the street at sunset.",
-            "future": "Parking the bicycle under a streetlamp.",
-        },
-        prompts={
-            "past": after,
-            "present": after,
-            "future": after,
-        },
-        time_scale="hours",
-        lock_tags=lock,
-        draft_deltas={"present": delta},
-    )
-    assert q["notes"].get("draft_grounding")
-    assert q["draft_grounding"]["mean_delta"] == delta["delta"]
-    assert q["dimensions"]["richness"] >= 0.50
-    print(f"  quality richness={q['dimensions']['richness']:.2f} "
-          f"note={q['notes']['draft_grounding']}")

@@ -131,6 +131,48 @@ def build_tag_to_axis(
 TAG_TO_AXIS: dict[str, str] = build_tag_to_axis()
 
 
+# ── Chronicle pose vocab subset ───────────────────────────────────────────────
+# Parts that end like verbs but are nouns/visuals — never pose/action tags.
+_POSE_DENY_SUFFIXES: tuple[str, ...] = (
+    "ring", "lighting", "censoring", "piercing", "clothing", "building",
+    "ceiling", "string", "wedding", "morning", "evening", "padding", "legwear",
+)
+_POSE_DENY_EXACT: frozenset[str] = frozenset({
+    "glowing", "glowing_eye", "glowing_eyes", "foreshortening", "snowing",
+    "raining", "steaming_body", "falling_petals", "falling_leaves",
+    "falling_snow", "folding_fan", "center_opening", "bodystocking", "rigging",
+    "clothes_writing", "revealing_clothes", "landing", "loading_screen",
+    "viewing", "sleeping_bag",
+})
+
+
+def pose_action_subset(names: Iterable[str]) -> list[str]:
+    """Filter WD14 general-tag names down to drawable pose/action tags.
+
+    Membership: axis_action tags + action-keyword hits (via get_tag_axis) +
+    a '-ing' verb-form heuristic on unclaimed tags, minus tags claimed by
+    other axes and a noun/'-ing' denylist. Yields ~650 tags from
+    selected_tags.csv (measured).
+    """
+    out: list[str] = []
+    for name in names:
+        t = str(name).lower().strip()
+        if not t or t in _POSE_DENY_EXACT:
+            continue
+        axis = get_tag_axis(t)
+        if axis == "action":
+            out.append(t)
+            continue
+        if axis is not None:
+            continue
+        parts = t.replace("-", "_").split("_")
+        if any(p.endswith(_POSE_DENY_SUFFIXES) for p in parts):
+            continue
+        if any(len(p) >= 5 and p.endswith("ing") for p in parts):
+            out.append(t)
+    return out
+
+
 def get_tag_axis(
     tag: str,
     *,

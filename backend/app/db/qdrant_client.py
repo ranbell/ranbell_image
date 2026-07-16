@@ -18,6 +18,7 @@ CONFIG_COLLECTION = "app_config"
 CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
 WD14_VOCAB_COLLECTION = "wd14_vocab"
+POSE_VOCAB_COLLECTION = "wd14_pose_vocab"
 STORIES_COLLECTION = "stories"
 
 _SORT_ORDER_BY = {
@@ -344,6 +345,7 @@ class QdrantDBClient:
         await self._create_alignment_indexes()
 
         await self._ensure_wd14_vocab_collection()
+        await self._ensure_pose_vocab_collection()
 
         if not await self._qc.collection_exists(STORIES_COLLECTION):
             await self._qc.create_collection(
@@ -2362,6 +2364,85 @@ class QdrantDBClient:
         except Exception as e:
             logger.warning("search_wd14_vocab failed: %s", e)
             return []
+
+    # ── Pose Vocab (wd14_pose_vocab collection) ───────────────────────────────────
+
+    async def _ensure_pose_vocab_collection(self) -> None:
+        if await self._qc.collection_exists(POSE_VOCAB_COLLECTION):
+            logger.info("Collection exists: %s", POSE_VOCAB_COLLECTION)
+            return
+        await self._qc.create_collection(
+            collection_name=POSE_VOCAB_COLLECTION,
+            vectors_config=qm.VectorParams(
+                size=settings.embed_dim,
+                distance=qm.Distance.COSINE,
+                quantization_config=qm.ScalarQuantization(
+                    scalar=qm.ScalarQuantizationConfig(
+                        type=qm.ScalarType.INT8,
+                        quantile=0.99,
+                        always_ram=True,
+                    )
+                ),
+            ),
+            on_disk_payload=True,
+        )
+        await self._qc.create_payload_index(
+            collection_name=POSE_VOCAB_COLLECTION,
+            field_name="name",
+            field_schema=qm.PayloadSchemaType.KEYWORD,
+        )
+        logger.info("Created collection: %s (embed_dim=%d)", POSE_VOCAB_COLLECTION, settings.embed_dim)
+
+    async def count_pose_vocab(self) -> int:
+        try:
+            result = await self._qc.count(POSE_VOCAB_COLLECTION)
+            return result.count
+        except Exception:
+            return 0
+
+    async def upsert_pose_vocab(self, points: list[dict]) -> None:
+        """Batch upsert pose vocab points. Each dict: {id, vector, name, frequency, count}."""
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i + batch_size]
+            qdrant_points = [
+                qm.PointStruct(
+                    id=p["id"],
+                    vector=p["vector"],
+                    payload={
+                        "name":      p["name"],
+                        "frequency": p["frequency"],
+                        "count":     p["count"],
+                    },
+                )
+                for p in batch
+            ]
+            await self._qc.upsert(collection_name=POSE_VOCAB_COLLECTION, points=qdrant_points)
+
+    async def scroll_pose_vocab_all(self) -> list[tuple[str, list[float]]]:
+        """Load the whole pose vocabulary (name, vector) — ~650 tags, kept
+        in process memory by pose_retrieval for hybrid ranking."""
+        out: list[tuple[str, list[float]]] = []
+        offset = None
+        try:
+            while True:
+                pts, next_offset = await self._qc.scroll(
+                    collection_name=POSE_VOCAB_COLLECTION,
+                    limit=500,
+                    offset=offset,
+                    with_payload=["name"],
+                    with_vectors=True,
+                )
+                for p in pts:
+                    if p.payload and p.payload.get("name") and p.vector is not None:
+                        out.append((p.payload["name"], p.vector))
+                if next_offset is None:
+                    break
+                offset = next_offset
+        except Exception as e:
+            logger.warning("scroll_pose_vocab_all failed: %s", e)
+            return []
+        return out
 
     async def get_aligned_sha256s(self, min_score: float) -> set[str]:
         """Return image_ids whose alignment score >= min_score."""

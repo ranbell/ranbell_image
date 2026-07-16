@@ -20,13 +20,15 @@ const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'y
 
 const PHASE_STEP = {
   loadingImage: 0, extractingVision: 0,
-  candidates: 1,
+  candidates: 1, storyArc: 1,
   selecting: 2,
   expanding: 3, repairingStory: 3, translating: 3,
   mutatingTags: 3, buildingBiography: 3, buildingTimetable: 3,
   concretizing: 3, differentiating: 3, writingStory: 3,
+  preparingActs: 3,
   taggingAxis: 4, examining: 4, refiningPrompt: 4,
   refiningPromptTags: 4, refiningPromptProse: 4,
+  retrievingPose: 4, polishingScript: 4, assemblingPrompt: 4,
   draftingAxis: 4, scanningDraft: 4,
   savingStory: 5, done: 5,
 }
@@ -1883,10 +1885,13 @@ async function generateImages() {
                     </span>
                   </div>
                   <div class="flex flex-col gap-0.5 text-[9px] leading-snug opacity-45 mt-0.5">
-                    <div v-for="ax in AXES" :key="ax" v-show="c[ax] || c.summary">
+                    <div v-for="ax in AXES" :key="ax" v-show="c.acts?.[ax]?.activity || c[ax] || c.summary">
                       <span class="font-bold uppercase tracking-wide mr-1"
                         :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">{{ t('chronicle.axis.' + ax) }}</span>
-                      <span class="text-gray-400">{{ c[ax] || (ax === 'present' ? c.summary : '') }}</span>
+                      <span v-if="c.acts?.[ax]?.label" class="text-teal-300/60 mr-1">[{{ c.acts[ax].label }}]</span>
+                      <span class="text-gray-400">{{ c.acts?.[ax]?.activity || c[ax] || (ax === 'present' ? c.summary : '') }}</span>
+                      <span v-if="c.acts?.[ax]?.place" class="ml-1 px-1 rounded bg-black/40 text-gray-500">📍{{ c.acts[ax].place }}</span>
+                      <span v-if="c.acts?.[ax]?.feeling" class="ml-1 px-1 rounded bg-black/40 text-gray-500">{{ c.acts[ax].feeling }}</span>
                     </div>
                   </div>
                   <span v-if="selecting || finished" class="text-[10px] font-medium mt-1 text-teal-400/90">

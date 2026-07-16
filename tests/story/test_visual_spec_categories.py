@@ -8,7 +8,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.story.generator import (
     bucket_danbooru_tags,
-    build_axis_prose_prompt,
     merge_category_tags,
     parse_visual_script_category_tags,
 )
@@ -62,46 +61,6 @@ def test_merge_category_tags_first_wins():
     assert "long_hair" in m["hair_tags"]
     assert m["pose_tags"] == ["running"]
     assert m["lighting_tags"] == ["sunset"]
-
-
-def test_build_axis_prose_prompt_asks_for_labeled_categories():
-    prompt = build_axis_prose_prompt(
-        story_text="She runs on the beach.",
-        tag_line="1girl, running, beach, smile",
-        character_tags=["brown_hair"],
-        character_desc="girl",
-        prompt_style="danbooru+natural",
-    )
-    assert "PASS 1 DANBOORU TAG LINE" in prompt
-    assert "SUBJECT_TAGS:" in prompt
-    assert "LIGHTING_TAGS:" in prompt
-    assert "Work in DANBOORU TAGS first" in prompt
-    assert "THREE parts" in prompt
-    assert "exactly 5 flowing paragraphs" in prompt
-
-
-def test_build_axis_prose_prompt_respects_prose_paragraphs():
-    short = build_axis_prose_prompt(
-        story_text="She runs on the beach.",
-        tag_line="1girl, running, beach",
-        character_tags=["brown_hair"],
-        character_desc="girl",
-        prompt_style="natural",
-        prose_paragraphs=3,
-    )
-    long = build_axis_prose_prompt(
-        story_text="She runs on the beach.",
-        tag_line="1girl, running, beach",
-        character_tags=["brown_hair"],
-        character_desc="girl",
-        prompt_style="natural",
-        prose_paragraphs=7,
-    )
-    assert "exactly 3 flowing paragraphs" in short
-    assert "3-paragraph Visual Script" in short
-    assert "After the 3-paragraph prose" in short
-    assert "exactly 7 flowing paragraphs" in long
-    assert "7-paragraph Visual Script" in long
 
 
 def test_clamp_prose_paragraphs():
