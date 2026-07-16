@@ -207,7 +207,7 @@ class _FakeSettings:
 
 
 def test_build_resources_defaults():
-    resources, lane_map = build_resources(_FakeSettings())
+    resources, lane_map, _ = build_resources(_FakeSettings())
     assert "remote-ollama" in resources and "remote-comfyui" in resources
     assert lane_map[JobLane.GENERATION] == "remote-comfyui"
     # Ollama is client-managed: no lane holds its semaphore across a whole job
@@ -219,7 +219,7 @@ def test_build_resources_defaults():
 def test_build_resources_prompt_gen_mutex():
     class S(_FakeSettings):
         prompt_gen_mutex = True
-    _, lane_map = build_resources(S())
+    _, lane_map, _ = build_resources(S())
     assert lane_map[JobLane.GENERATION] == "local-gpu0"
     assert lane_map[JobLane.PROMPT] == "local-gpu0"
 
@@ -232,7 +232,7 @@ def test_build_resources_lane_map_overrides():
             "gen": None,                  # explicit unmap
             "bogus": "local-gpu0",        # unknown lane → ignored
         }
-    _, lane_map = build_resources(S())
+    _, lane_map, _ = build_resources(S())
     assert lane_map[JobLane.SYNC] == "remote-comfyui"
     assert lane_map[JobLane.EVALUATION] is None
     assert lane_map[JobLane.GENERATION] is None

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.ai.openai_compat import (
     build_user_message,
@@ -11,7 +16,10 @@ from app.ai.openai_compat import (
     stream_delta_events,
     _normalize_base_url,
 )
-from app.ai.llm import LlmGateway
+# Import at module load: tests/api/conftest.py stubs pydantic/app.* process-wide
+# and tests/spooler purges app.* from sys.modules — a lazy import inside a test
+# would re-import app.config against the stubbed pydantic and crash.
+from app.ai.llm import LlmGateway, apply_llm_runtime_config
 
 
 def test_normalize_base_url_adds_v1():
@@ -127,7 +135,6 @@ async def test_gateway_defaults_to_ollama_bind_switches():
     assert await gw.embed("x") == [0.1, 0.2]
 
     # Global configure must not flip the default route away from Ollama.
-    from app.ai.llm import apply_llm_runtime_config
     apply_llm_runtime_config(gw, {
         "llm_provider": "openai",
         "openai_base_url": "http://x:8080",

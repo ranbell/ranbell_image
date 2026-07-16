@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import AsyncGenerator, Literal
 
+from ..config import settings
 from .ollama import OllamaClient
 from .openai_compat import OpenAICompatClient
 
@@ -27,8 +28,6 @@ def apply_llm_runtime_config(llm: "LlmGateway", cfg: dict) -> None:
     Does **not** change the default text/VLM route — that stays Ollama unless a
     caller explicitly binds/overrides (Chronicles).
     """
-    from ..config import settings
-
     llm.configure(
         # Keep the shared gateway on Ollama; feature-level bind() chooses OpenAI.
         provider="ollama",
