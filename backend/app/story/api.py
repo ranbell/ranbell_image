@@ -64,6 +64,9 @@ class ChronicleRequest(BaseModel):
     draft_width: int = 512
     draft_height: int = 512
     draft_steps: int = 12
+    # Per-run LLM backend. Default ollama — OpenAI-compat only when chosen here.
+    # Other app features ignore this and always use Ollama via the shared gateway.
+    llm_provider: Literal["ollama", "openai"] = "ollama"
     vlm_model: str = ""
     temperature: float = 1.0  # Gemma 4 recommended default
     num_ctx: int = 16384
@@ -103,6 +106,7 @@ class RespinRequest(BaseModel):
     similar_tag_mix: bool | None = None
     similar_tag_mix_ratio: float | None = None
     similar_tag_mix_n: int | None = None
+    llm_provider: Literal["ollama", "openai"] | None = None
     temperature: float | None = None
     num_ctx: int | None = None
     prose_paragraphs: int | None = None
@@ -120,7 +124,8 @@ _RESPIN_OVERRIDE_FIELDS = (
     "draft_height", "draft_steps", "suppress_conflict_tags", "manual_mode",
     "fast_mode", "wd14_prompt_spice",
     "similar_tag_mix", "similar_tag_mix_ratio", "similar_tag_mix_n",
-    "temperature", "num_ctx", "prose_paragraphs", "worldview", "user_topic",
+    "llm_provider", "temperature", "num_ctx", "prose_paragraphs",
+    "worldview", "user_topic",
 )
 
 

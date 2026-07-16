@@ -24,6 +24,7 @@ class ConfigBody(BaseModel):
     llm_provider: Literal["ollama", "openai"] | None = None
     openai_base_url: str | None = None
     openai_api_key: str | None = None
+    openai_model: str | None = None
     scan_extensions: list[str] | None = None
     pipeline_batch_size: Annotated[int, Field(ge=1)] | None = None
     pipeline_concurrency: Annotated[int, Field(ge=1)] | None = None
@@ -81,7 +82,8 @@ async def update_config(body: ConfigBody, request: Request):
 
     # Hot-apply LLM provider / URLs without restart
     llm_keys = {
-        "llm_provider", "ollama_url", "openai_base_url", "openai_api_key", "vlm_model",
+        "llm_provider", "ollama_url", "openai_base_url", "openai_api_key",
+        "openai_model", "vlm_model",
     }
     if llm_keys & updates.keys():
         from ..ai.llm import apply_llm_runtime_config

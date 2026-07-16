@@ -15,16 +15,16 @@ services:
       # API authentication token — must match the token stored in the frontend localStorage
       API_TOKEN: RANBELL_IMAGE_API_TOKEN
 
-      # Ollama (embeddings always; text/VLM when LLM_PROVIDER=ollama)
+      # Ollama (embeddings + default text/VLM for all features except Chronicles override)
       OLLAMA_URL: http://host.docker.internal:11434
       EMBED_MODEL: embeddinggemma:300m
       VLM_MODEL: gemma4:e2b
 
-      # Text/VLM provider: ollama | openai (OpenAI-compatible: Bonsai llama-server, etc.)
-      # LLM_PROVIDER: openai
+      # OpenAI-compatible endpoint for Chronicles (optional). Select it in
+      # Chronicles → Advanced; other features stay on Ollama.
       # OPENAI_BASE_URL: http://host.docker.internal:8080/v1
       # OPENAI_API_KEY: not-needed
-      # VLM_MODEL: bonsai
+      # OPENAI_MODEL: bonsai
 
       # The measured output dimension of embeddinggemma:300m is 768.
       # EMBED_DIM must always match the actual output dimension of your embed model.

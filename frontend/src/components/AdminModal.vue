@@ -999,50 +999,34 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
 
             <div class="bg-gray-800 rounded-xl p-4 space-y-4">
               <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.config.llmProvider') }}</p>
-              <div class="flex gap-2">
-                <button @click="adminConfig.llm_provider = 'ollama'; fetchLlmModels()"
-                  :class="(adminConfig.llm_provider || 'ollama') === 'ollama' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-gray-200'"
-                  class="px-4 py-1.5 rounded-lg border text-xs font-medium transition-colors">
-                  Ollama
-                </button>
-                <button @click="adminConfig.llm_provider = 'openai'; fetchLlmModels()"
-                  :class="adminConfig.llm_provider === 'openai' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-gray-200'"
-                  class="px-4 py-1.5 rounded-lg border text-xs font-medium transition-colors">
-                  {{ $t('admin.config.openaiCompat') }}
-                </button>
-              </div>
               <p class="text-[10px] text-gray-600">{{ $t('admin.config.llmProviderHint') }}</p>
-
-              <template v-if="adminConfig.llm_provider === 'openai'">
-                <div>
-                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.openaiBaseUrl') }}</label>
-                  <input v-model="adminConfig.openai_base_url" type="text"
-                    placeholder="http://host.docker.internal:8080/v1"
-                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
-                </div>
-                <div>
-                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.openaiApiKey') }}</label>
-                  <input v-model="adminConfig.openai_api_key" type="text"
-                    placeholder="not-needed"
-                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
-                </div>
-              </template>
-
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.openaiBaseUrl') }}</label>
+                <input v-model="adminConfig.openai_base_url" type="text"
+                  placeholder="http://host.docker.internal:8080/v1"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.openaiApiKey') }}</label>
+                <input v-model="adminConfig.openai_api_key" type="text"
+                  placeholder="not-needed"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              </div>
               <div>
                 <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
-                  {{ $t('admin.config.vlmModel') }}
+                  {{ $t('admin.config.openaiModel') }}
                   <button @click="fetchLlmModels" class="text-gray-600 hover:text-gray-400" :title="$t('admin.config.refreshModels')">↺</button>
                 </label>
-                <select v-if="llmModels.length" v-model="adminConfig.vlm_model"
+                <select v-if="llmModels.length" v-model="adminConfig.openai_model"
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
                   <option v-for="m in llmModels" :key="m" :value="m">{{ m }}</option>
-                  <option v-if="adminConfig.vlm_model && !llmModels.includes(adminConfig.vlm_model)"
-                    :value="adminConfig.vlm_model">{{ adminConfig.vlm_model }}</option>
+                  <option v-if="adminConfig.openai_model && !llmModels.includes(adminConfig.openai_model)"
+                    :value="adminConfig.openai_model">{{ adminConfig.openai_model }}</option>
                 </select>
-                <input v-else v-model="adminConfig.vlm_model" type="text"
-                  :placeholder="adminConfig.llm_provider === 'openai' ? 'bonsai' : 'gemma4:e2b'"
+                <input v-else v-model="adminConfig.openai_model" type="text"
+                  placeholder="bonsai"
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
-                <p v-if="adminConfig.llm_provider === 'openai'" class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.bonsaiHint') }}</p>
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.bonsaiHint') }}</p>
               </div>
             </div>
 
@@ -1053,19 +1037,35 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                 <input v-model="adminConfig.ollama_url" type="text"
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
               </div>
-              <div>
-                <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
-                  {{ $t('admin.config.embedModel') }}
-                  <button @click="fetchOllamaModels" class="text-gray-600 hover:text-gray-400" :title="$t('admin.config.refreshModels')">↺</button>
-                </label>
-                <select v-if="ollamaModels.length" v-model="adminConfig.embed_model"
-                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
-                  <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
-                  <option v-if="adminConfig.embed_model && !ollamaModels.includes(adminConfig.embed_model)"
-                    :value="adminConfig.embed_model">{{ adminConfig.embed_model }}</option>
-                </select>
-                <input v-else v-model="adminConfig.embed_model" type="text"
-                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.embedModel') }}
+                    <button @click="fetchOllamaModels" class="text-gray-600 hover:text-gray-400" :title="$t('admin.config.refreshModels')">↺</button>
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.embed_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.embed_model && !ollamaModels.includes(adminConfig.embed_model)"
+                      :value="adminConfig.embed_model">{{ adminConfig.embed_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.embed_model" type="text"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.vlmModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.vlm_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.vlm_model && !ollamaModels.includes(adminConfig.vlm_model)"
+                      :value="adminConfig.vlm_model">{{ adminConfig.vlm_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.vlm_model" type="text"
+                    placeholder="gemma4:e2b"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
               </div>
               <div>
                 <label class="text-xs text-gray-500 flex justify-between mb-1">

@@ -23,12 +23,13 @@ class Settings(BaseSettings):
     # if that matters more than very long generations.
     ollama_timeout_sec: float = 300.0
 
-    # Text / VLM provider: "ollama" | "openai" (OpenAI-compatible: Bonsai, llama.cpp, …)
-    # Embeddings always use Ollama regardless of this setting.
-    llm_provider: str = "ollama"
-    # Base URL may be with or without /v1 (normalized to …/v1).
+    # Text / VLM provider selection is per-feature (Chronicles UI). The shared
+    # gateway always defaults to Ollama. These settings only configure the
+    # OpenAI-compatible endpoint used when Chronicles chooses it.
+    llm_provider: str = "ollama"  # default for Chronicles UI only
     openai_base_url: str = "http://host.docker.internal:8080/v1"
     openai_api_key: str = "not-needed"
+    openai_model: str = "bonsai"
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"

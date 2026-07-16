@@ -46,6 +46,8 @@ const workflow = ref('')
 const divergence = ref(0.3)
 const temperature = ref(1.0)
 const numCtx = ref(16384)
+const llmProvider = ref('ollama') // 'ollama' | 'openai' — Chronicles only
+const openaiModel = ref('') // empty → server default (openai_model / bonsai)
 const emotion = ref('')
 const DRAMATIC_MODES = [
   'escalation', 'reversal', 'revelation', 'irony', 'approaching_threat',
@@ -925,7 +927,7 @@ async function start() {
 }
 
 function currentSettingsPayload() {
-  return {
+  const payload = {
     base_sha256: baseSha.value || '',
     base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
@@ -949,11 +951,16 @@ function currentSettingsPayload() {
     wd14_prompt_spice: wd14PromptSpice.value,
     similar_tag_mix: similarTagMix.value,
     similar_tag_mix_ratio: similarTagMixRatio.value,
+    llm_provider: llmProvider.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
     prose_paragraphs: proseParagraphs.value,
     locale: uiLocale.value,
   }
+  if (llmProvider.value === 'openai' && openaiModel.value.trim()) {
+    payload.vlm_model = openaiModel.value.trim()
+  }
+  return payload
 }
 
 const draftRefineDisabledHint = computed(() => {
@@ -1008,6 +1015,7 @@ async function respin(stage) {
     wd14_prompt_spice: settings.wd14_prompt_spice,
     similar_tag_mix: settings.similar_tag_mix,
     similar_tag_mix_ratio: settings.similar_tag_mix_ratio,
+    llm_provider: settings.llm_provider,
     temperature: settings.temperature,
     num_ctx: settings.num_ctx,
     prose_paragraphs: settings.prose_paragraphs,
@@ -1534,6 +1542,27 @@ async function generateImages() {
                   </span>
                 </summary>
                 <div class="px-3 pb-3 pt-1 flex flex-col gap-3 text-xs">
+                  <div class="flex items-center gap-2">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.llmProviderTitle')">{{ t('chronicle.llmProvider') }}</span>
+                    <div class="flex gap-1.5 flex-1">
+                      <button type="button" @click="llmProvider = 'ollama'"
+                        :class="llmProvider === 'ollama' ? 'bg-teal-700 border-teal-500 text-teal-50' : 'bg-black/30 border-white/10 text-[var(--sb-muted)]'"
+                        class="px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors">
+                        Ollama
+                      </button>
+                      <button type="button" @click="llmProvider = 'openai'"
+                        :class="llmProvider === 'openai' ? 'bg-teal-700 border-teal-500 text-teal-50' : 'bg-black/30 border-white/10 text-[var(--sb-muted)]'"
+                        class="px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors">
+                        {{ t('chronicle.openaiCompat') }}
+                      </button>
+                    </div>
+                  </div>
+                  <p class="text-[10px] text-[var(--sb-faint)] -mt-1">{{ t('chronicle.llmProviderHint') }}</p>
+                  <div v-if="llmProvider === 'openai'" class="flex items-center gap-2">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.openaiModelTitle')">{{ t('chronicle.openaiModel') }}</span>
+                    <input v-model="openaiModel" type="text" :placeholder="t('chronicle.openaiModelPh')"
+                      class="sb-input flex-1 font-mono text-[11px]" />
+                  </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.temperatureTitle')">{{ t('chronicle.temperature') }}</span>
                     <input v-model.number="temperature" type="range" min="0" max="1.5" step="0.1" class="flex-1 accent-teal-500" />

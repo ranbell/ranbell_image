@@ -118,20 +118,30 @@ class _FakeBackend:
 
 
 @pytest.mark.asyncio
-async def test_gateway_routes_text_but_keeps_embed_on_ollama():
+async def test_gateway_defaults_to_ollama_bind_switches():
     ollama = _FakeBackend("ollama")
     openai = _FakeBackend("openai")
-    # OpenAICompatClient.configure / OllamaClient.set_base_url are called by configure()
     gw = LlmGateway(ollama, openai, provider="ollama")
 
     assert await gw.generate_text("p") == "from-ollama"
     assert await gw.embed("x") == [0.1, 0.2]
 
-    gw.configure(provider="openai", openai_base_url="http://x:8080", vlm_model="bonsai")
-    assert gw.provider == "openai"
-    assert await gw.generate_text("p", fmt="json", think=True) == "from-openai"
-    # Embeddings must still hit Ollama even when text provider is OpenAI.
-    assert await gw.embed("y") == [0.1, 0.2]
+    # Global configure must not flip the default route away from Ollama.
+    from app.ai.llm import apply_llm_runtime_config
+    apply_llm_runtime_config(gw, {
+        "llm_provider": "openai",
+        "openai_base_url": "http://x:8080",
+        "openai_model": "bonsai",
+        "vlm_model": "gemma4:e2b",
+    })
+    assert gw.provider == "ollama"
+    assert await gw.generate_text("p") == "from-ollama"
+
+    bound = gw.bind("openai")
+    assert bound is not gw
+    assert await bound.generate_text("p", fmt="json", think=True) == "from-openai"
+    # Embeddings must still hit Ollama even on a bound openai view.
+    assert await bound.embed("y") == [0.1, 0.2]
     assert any(c.startswith("embed:ollama") for c in ollama.calls)
     assert not any(c.startswith("embed:") for c in openai.calls)
     assert any(c.startswith("gen:openai") for c in openai.calls)

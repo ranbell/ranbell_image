@@ -50,58 +50,46 @@ async def detailed_health(request: Request):
                 ok = await llm.health(runtime_url)
                 models = await llm.list_models(runtime_url) if ok else []
             embed_model = cfg["embed_model"]
+            vlm_model = cfg["vlm_model"]
             return {
                 "ok": ok,
                 "url": runtime_url,
                 "models": models,
                 "embed_model": embed_model,
                 "embed_model_available": _model_available(embed_model, models),
+                "vlm_model": vlm_model,
+                "vlm_model_available": _model_available(vlm_model, models),
             }
         except Exception as e:
             logger.error("Ollama health check failed: %s", e)
             return {"ok": False, "error": "接続エラー", "url": settings.ollama_url, "models": []}
 
     async def check_llm():
-        """Active text/VLM provider (Ollama or OpenAI-compatible)."""
+        """OpenAI-compatible endpoint health (used by Chronicles when selected)."""
         try:
             cfg = await get_runtime_config(db)
-            provider = cfg.get("llm_provider") or "ollama"
-            vlm_model = cfg["vlm_model"]
-            if provider == "openai":
-                url = cfg.get("openai_base_url") or settings.openai_base_url
-                health_fn = getattr(llm, "health_openai", llm.health)
-                list_fn = getattr(llm, "list_openai_models", llm.list_models)
-                ok = await health_fn(url)
-                models = await list_fn(url) if ok else []
-            else:
-                url = cfg["ollama_url"]
-                health_fn = getattr(llm, "health_ollama", llm.health)
-                list_fn = getattr(llm, "list_ollama_models", llm.list_models)
-                ok = await health_fn(url)
-                models = await list_fn(url) if ok else []
-            # llama-server (Bonsai) often accepts any model id for the one loaded GGUF.
-            if provider == "openai":
-                vlm_ok = ok and (
-                    not models
-                    or _model_available(vlm_model, models)
-                    or bool(vlm_model)
-                )
-            else:
-                vlm_ok = _model_available(vlm_model, models)
+            url = cfg.get("openai_base_url") or settings.openai_base_url
+            health_fn = getattr(llm, "health_openai", None)
+            list_fn = getattr(llm, "list_openai_models", None)
+            ok = await health_fn(url) if health_fn else False
+            models = await list_fn(url) if ok and list_fn else []
+            openai_model = cfg.get("openai_model") or "bonsai"
             return {
                 "ok": ok,
-                "provider": provider,
+                "provider": "openai",
                 "url": url,
                 "models": models,
-                "vlm_model": vlm_model,
-                "vlm_model_available": bool(vlm_ok),
+                "vlm_model": openai_model,
+                "vlm_model_available": bool(
+                    ok and (not models or _model_available(openai_model, models) or openai_model)
+                ),
             }
         except Exception as e:
-            logger.error("LLM health check failed: %s", e)
+            logger.error("OpenAI-compat health check failed: %s", e)
             return {
                 "ok": False,
                 "error": "接続エラー",
-                "provider": settings.llm_provider,
+                "provider": "openai",
                 "url": settings.openai_base_url,
                 "models": [],
             }
@@ -127,15 +115,14 @@ async def detailed_health(request: Request):
         check_qdrant(), check_ollama(), check_llm(), check_comfy()
     )
 
-    # Backward-compatible ollama block: merge embed + active VLM status
+    # Backward-compatible ollama block + optional OpenAI-compat endpoint info
     ollama_merged = {
         **ollama_res,
-        "provider": llm_res.get("provider", "ollama"),
-        "vlm_model": llm_res.get("vlm_model"),
-        "vlm_model_available": llm_res.get("vlm_model_available"),
+        "provider": "ollama",
         "llm_url": llm_res.get("url"),
         "llm_ok": llm_res.get("ok"),
         "llm_models": llm_res.get("models", []),
+        "openai_model": llm_res.get("vlm_model"),
     }
 
     return {
@@ -161,18 +148,16 @@ async def ollama_models(request: Request):
 
 @router.get("/llm/models")
 async def llm_models(request: Request):
-    """Text/VLM models for the active provider (Ollama or OpenAI-compat)."""
+    """OpenAI-compatible model list (for Chronicles endpoint config)."""
     llm = request.app.state.ollama
     db = request.app.state.db
     try:
         cfg = await get_runtime_config(db)
-        provider = cfg.get("llm_provider") or "ollama"
-        if provider == "openai":
-            list_fn = getattr(llm, "list_openai_models", llm.list_models)
+        list_fn = getattr(llm, "list_openai_models", None)
+        if list_fn:
             models = await list_fn(cfg.get("openai_base_url"))
         else:
-            list_fn = getattr(llm, "list_ollama_models", llm.list_models)
-            models = await list_fn(cfg.get("ollama_url"))
-        return {"provider": provider, "models": models}
+            models = []
+        return {"provider": "openai", "models": models}
     except Exception:
-        return {"provider": "ollama", "models": []}
+        return {"provider": "openai", "models": []}
