@@ -158,6 +158,42 @@ async def lifespan(app: FastAPI):
         _saved_cfg.get("disk_fault_pct", 90),
     )
 
+    # Chronicle pose vocab: bootstrap on fresh installs. The collection is
+    # created empty by db.start(); without points pose retrieval silently
+    # degrades to catalog matching, so auto-submit the import job once the
+    # WD14 label CSV is present (idempotent upsert — safe if raced).
+    async def _bootstrap_pose_vocab() -> None:
+        from pathlib import Path as _Path
+
+        from .jobs.runners import run_import_pose_vocab
+        from .spooler.models import JobLane
+        try:
+            if await db.count_pose_vocab() > 0:
+                return
+            csv_path = _Path(settings.wd14_model_dir) / "selected_tags.csv"
+            if not csv_path.exists():
+                startup_warnings.append(
+                    "Chronicle pose vocab is empty and selected_tags.csv is "
+                    f"missing at {csv_path} — pose-tag retrieval will use the "
+                    "coarse catalog fallback until the WD14 model dir is "
+                    "mounted and /api/admin/chronicle/import-pose-vocab is run."
+                )
+                return
+            spooler.submit(
+                JobLane.SYNC,
+                "import_pose_vocab",
+                run_import_pose_vocab,
+                db=db,
+                ollama=ollama,
+            )
+        except Exception as exc:  # never block startup on bootstrap
+            import logging
+            logging.getLogger("uvicorn").warning(
+                "pose vocab bootstrap failed: %s", exc
+            )
+
+    asyncio.ensure_future(_bootstrap_pose_vocab())
+
     from .invoke.oracle_scheduler import run_oracle_scheduler
     app.state.oracle_scheduler_task = asyncio.create_task(run_oracle_scheduler(app))
 
