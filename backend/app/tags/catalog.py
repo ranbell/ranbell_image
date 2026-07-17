@@ -173,6 +173,21 @@ def pose_action_subset(names: Iterable[str]) -> list[str]:
     return out
 
 
+def scene_vocab_subset(names: Iterable[str]) -> list[str]:
+    """Filter WD14 general-tag names to scene vocabulary: locations,
+    time/weather and visual-lighting tags (~140 tags from selected_tags.csv).
+
+    Used by Chronicle to ground an act's structured `place` string into real
+    danbooru tags — a small clean subset, unlike the full 8k-general vocab
+    whose raw cosine neighbours are junk (measured)."""
+    out: list[str] = []
+    for name in names:
+        t = str(name).lower().strip()
+        if t and get_tag_axis(t) in ("location", "time_weather", "visual"):
+            out.append(t)
+    return out
+
+
 def get_tag_axis(
     tag: str,
     *,

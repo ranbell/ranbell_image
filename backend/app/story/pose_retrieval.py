@@ -255,21 +255,26 @@ def fallback_pose_tags(sentence: str, *, k: int = 6) -> list[str]:
     return out
 
 
-# ── vocab cache (module-level; ~650 x 768 float32 ≈ 2 MB) ────────────────────
-_vocab_cache: tuple[list[str], np.ndarray] | None = None
+# Query/tag framing prefix for the scene vocabulary (see EMBED_PREFIX).
+SCENE_EMBED_PREFIX = "scene location: "
+
+# ── vocab caches (module-level; ≤800 x 768 float32 ≈ 2 MB each) ──────────────
+_vocab_cache: dict[str, tuple[list[str], np.ndarray]] = {}
 
 
 def invalidate_pose_vocab_cache() -> None:
-    global _vocab_cache
-    _vocab_cache = None
+    _vocab_cache.clear()
 
 
-async def load_pose_vocab(db) -> tuple[list[str], np.ndarray]:
-    """Scroll the wd14_pose_vocab collection once and cache unit vectors."""
-    global _vocab_cache
-    if _vocab_cache is not None:
-        return _vocab_cache
-    rows = await db.scroll_pose_vocab_all()
+async def _load_vocab(db, kind: str) -> tuple[list[str], np.ndarray]:
+    """Scroll a vocab collection once and cache unit vectors per kind."""
+    cached = _vocab_cache.get(kind)
+    if cached is not None:
+        return cached
+    scroll = (
+        db.scroll_scene_vocab_all if kind == "scene" else db.scroll_pose_vocab_all
+    )
+    rows = await scroll()
     if not rows:
         return [], np.zeros((0, 1), dtype=np.float32)
     tags = [name for name, _ in rows]
@@ -277,8 +282,12 @@ async def load_pose_vocab(db) -> tuple[list[str], np.ndarray]:
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     vecs = vecs / norms
-    _vocab_cache = (tags, vecs)
-    return _vocab_cache
+    _vocab_cache[kind] = (tags, vecs)
+    return _vocab_cache[kind]
+
+
+async def load_pose_vocab(db) -> tuple[list[str], np.ndarray]:
+    return await _load_vocab(db, "pose")
 
 
 async def retrieve_pose_tags(
@@ -315,3 +324,56 @@ async def retrieve_pose_tags(
     except Exception as e:
         logger.warning("[pose_retrieval] retrieval failed (%s), using fallback", e)
         return fallback_pose_tags(sentence, k=k)
+
+
+def fallback_scene_tags(place_text: str, *, k: int = 5) -> list[str]:
+    """No-vocab fallback: stem-match the place words against the catalog
+    scene axes (location / time_weather / visual)."""
+    stems = sentence_stems(place_text)
+    out: list[str] = []
+    pool = sorted(catalog.BACKGROUND | catalog.ENVIRONMENT)
+    for tag in pool:
+        parts = [p for p in tag.replace("-", "_").split("_") if p]
+        if any(_stem(p) in stems for p in parts):
+            out.append(tag)
+            if len(out) >= k:
+                break
+    return out
+
+
+async def retrieve_scene_tags(
+    ollama,
+    db,
+    place_text: str,
+    *,
+    k: int = 5,
+) -> list[str]:
+    """Ground an act's structured `place` string into real scene tags
+    (location / time-of-day / weather) via the same hybrid ranker.
+
+    Measured: "classroom, afternoon light"→classroom, "street near the park,
+    dusk"→park/dusk/street, "train station platform in the rain"→rain/
+    train_station/train — the tiny curated subset removes the junk the full
+    wd14_vocab cosine search produced (witch_hat/maid for a classroom)."""
+    text = (place_text or "").strip()
+    if not text:
+        return []
+    if not _is_mostly_ascii(text):
+        return fallback_scene_tags(text, k=k)
+    try:
+        tags, vecs = await _load_vocab(db, "scene")
+        if not tags:
+            logger.warning("[pose_retrieval] scene vocab empty — run import-pose-vocab")
+            return fallback_scene_tags(text, k=k)
+        qvec = np.array(
+            await ollama.embed(SCENE_EMBED_PREFIX + text), dtype=np.float32
+        )
+        n = float(np.linalg.norm(qvec))
+        if n == 0:
+            return fallback_scene_tags(text, k=k)
+        qvec /= n
+        result = rank_pose_tags(tags, vecs, qvec, text, k=k)
+        return result or fallback_scene_tags(text, k=k)
+    except Exception as e:
+        logger.warning("[pose_retrieval] scene retrieval failed (%s), using fallback", e)
+        return fallback_scene_tags(text, k=k)

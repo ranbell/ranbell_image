@@ -2600,15 +2600,20 @@ async def run_import_pose_vocab(
     db,
     ollama,
 ) -> dict:
-    """Embed the pose/action subset of selected_tags.csv into wd14_pose_vocab.
+    """Embed the pose/action AND scene subsets of selected_tags.csv into
+    wd14_pose_vocab / wd14_scene_vocab.
 
     Idempotent (point id = tag_id, pure upsert). Used by Chronicle expand for
-    hybrid pose-tag retrieval (story/pose_retrieval.py).
+    hybrid pose- and scene-tag retrieval (story/pose_retrieval.py).
     """
     import csv
     from ..config import settings
-    from ..story.pose_retrieval import EMBED_PREFIX, invalidate_pose_vocab_cache
-    from ..tags.catalog import pose_action_subset
+    from ..story.pose_retrieval import (
+        EMBED_PREFIX,
+        SCENE_EMBED_PREFIX,
+        invalidate_pose_vocab_cache,
+    )
+    from ..tags.catalog import pose_action_subset, scene_vocab_subset
 
     csv_path = Path(settings.wd14_model_dir) / "selected_tags.csv"
     if not csv_path.exists():
@@ -2627,47 +2632,60 @@ async def run_import_pose_vocab(
             if count > max_count:
                 max_count = count
 
-    subset = set(pose_action_subset(r["name"] for r in rows))
-    rows = [r for r in rows if r["name"].lower() in subset]
-    total = len(rows)
-    logger.info("[import_pose_vocab] %d pose/action tags to embed", total)
+    async def _embed_subset(subset: set[str], prefix: str, label: str) -> list[dict]:
+        picked = [r for r in rows if r["name"].lower() in subset]
+        total = len(picked)
+        logger.info("[import_pose_vocab] %d %s tags to embed", total, label)
+        BATCH = 256
+        done = 0
+        points: list[dict] = []
+        for i in range(0, total, BATCH):
+            cancel.raise_if_set()
+            batch = picked[i:i + BATCH]
+            texts = [prefix + r["name"].replace("_", " ") for r in batch]
+            try:
+                vectors = await ollama.embed_batch(texts)
+            except Exception as e:
+                logger.warning(
+                    "[import_pose_vocab] embed_batch failed at offset %d: %s", i, e
+                )
+                vectors = []
+                for text in texts:
+                    try:
+                        vectors.append(await ollama.embed(text))
+                    except Exception:
+                        vectors.append([0.0] * len(vectors[0]) if vectors else [0.0])
+            for row, vec in zip(batch, vectors):
+                points.append({
+                    "id":        row["id"],
+                    "vector":    vec,
+                    "name":      row["name"].lower(),
+                    "frequency": round(row["count"] / max_count, 6),
+                    "count":     row["count"],
+                })
+            done += len(batch)
+            reporter.update(done / max(total, 1), f"{label} 埋め込み中 {done}/{total}")
+        return points
 
-    BATCH = 256
-    done = 0
-    points: list[dict] = []
-    for i in range(0, total, BATCH):
-        cancel.raise_if_set()
-        batch = rows[i:i + BATCH]
-        texts = [EMBED_PREFIX + r["name"].replace("_", " ") for r in batch]
-        try:
-            vectors = await ollama.embed_batch(texts)
-        except Exception as e:
-            logger.warning("[import_pose_vocab] embed_batch failed at offset %d: %s", i, e)
-            vectors = []
-            for text in texts:
-                try:
-                    vectors.append(await ollama.embed(text))
-                except Exception:
-                    vectors.append([0.0] * len(vectors[0]) if vectors else [0.0])
-
-        for row, vec in zip(batch, vectors):
-            points.append({
-                "id":        row["id"],
-                "vector":    vec,
-                "name":      row["name"].lower(),
-                "frequency": round(row["count"] / max_count, 6),
-                "count":     row["count"],
-            })
-        done += len(batch)
-        reporter.update(done / total, f"埋め込み中 {done}/{total}")
+    names = [r["name"] for r in rows]
+    pose_points = await _embed_subset(
+        set(pose_action_subset(names)), EMBED_PREFIX, "pose",
+    )
+    scene_points = await _embed_subset(
+        set(scene_vocab_subset(names)), SCENE_EMBED_PREFIX, "scene",
+    )
 
     reporter.update(0.95, "Qdrantに登録中...")
-    await db.upsert_pose_vocab(points)
+    await db.upsert_pose_vocab(pose_points)
+    await db.upsert_scene_vocab(scene_points)
     invalidate_pose_vocab_cache()
 
-    reporter.update(1.0, f"完了: {len(points)} タグを登録")
-    logger.info("[import_pose_vocab] done: %d tags", len(points))
-    return {"imported": len(points)}
+    reporter.update(1.0, f"完了: pose {len(pose_points)} / scene {len(scene_points)} タグ")
+    logger.info(
+        "[import_pose_vocab] done: %d pose + %d scene tags",
+        len(pose_points), len(scene_points),
+    )
+    return {"imported": len(pose_points), "scene_imported": len(scene_points)}
 
 
 async def run_emotion_tag(
@@ -2994,16 +3012,22 @@ async def run_chronicle_candidates(
     from ..story import db as story_db
     from ..story.api import ChronicleRequest
     from ..story.generator import (
+        AXES,
         _biography_brief,
         arc_feedback_block,
         arc_needs_retry,
+        arc_problem_score,
         assign_dramatic_modes,
+        base_act_from_image,
         build_fast_candidate,
+        build_json_translation_prompt,
         build_story_arc_prompt,
         build_topic_only_grounding_prompt,
         build_vision_prompt,
         character_tags_from_wd14,
+        enforce_base_act,
         filter_story_seed_pool,
+        parse_flat_json_translation,
         parse_story_arc_json,
         parse_topic_only_grounding_json,
         normalize_time_scale,
@@ -3035,6 +3059,13 @@ async def run_chronicle_candidates(
         models = _chronicle_models(body, cfg)
         vlm_model = models["vision"]
         options = _chronicle_llm_options(body, temp, cfg)
+        # think for the creative arc call: bonsai-class models break with
+        # think=True (measured); qwen-class needs it. Config default False,
+        # per-request override wins.
+        story_think = (
+            body.story_think if getattr(body, "story_think", None) is not None
+            else bool(cfg.get("story_think", False))
+        )
 
         draft = None
         doc: dict = {}
@@ -3258,6 +3289,22 @@ async def run_chronicle_candidates(
         ctx["wd14_prompt_spice"] = use_wd14_spice
         _put({"type": "story_seed_tags", "tags": story_seed_tags, "motif": forced_motif})
 
+        # ── Base act = the image itself (deterministic script FIXED line) ────
+        # Lazy recompute: respins reuse a stored ctx and skip Stage 1, and old
+        # drafts predate this field. Pure function of wd14/scene, so always
+        # consistent.
+        has_base_ctx = bool((body.base_sha256 or "").strip()) and not ctx.get("topic_only")
+        base_act_fixed = dict(ctx.get("base_act_fixed") or {})
+        if has_base_ctx and not base_act_fixed:
+            base_act_fixed = base_act_from_image(
+                ctx.get("wd14_tags") or [],
+                ctx.get("scene_desc", ""),
+                emotion=body.emotion,
+            )
+            ctx["base_act_fixed"] = base_act_fixed
+        if base_act_fixed:
+            _put({"type": "base_act_fixed", "act": base_act_fixed})
+
         # ── Fast mode: skip pitch LLM — one synthetic candidate, auto-expand ─
         if getattr(body, "fast_mode", False):
             _phase("candidates", 0.70, "Fast mode — skipping story pitches...")
@@ -3322,6 +3369,7 @@ async def run_chronicle_candidates(
         _phase("storyArc", 0.55, "Writing the story arcs...")
         candidates: list[dict] = []
         problems: list[dict] = []
+        best_score: int | None = None
         feedback = ""
         for arc_attempt in range(2):
             arc_options = dict(options)
@@ -3344,8 +3392,10 @@ async def run_chronicle_candidates(
                     seed_tags=story_seed_tags,
                     forced_motif=forced_motif,
                     feedback=feedback,
+                    base_act_fixed=base_act_fixed or None,
                 ),
-                model=models["story"], options=arc_options, fmt="json", think=True,
+                model=models["story"], options=arc_options, fmt="json",
+                think=story_think,
             )
             cancel.raise_if_set()
             parsed = parse_story_arc_json(raw)
@@ -3356,19 +3406,23 @@ async def run_chronicle_candidates(
                 for c in parsed:
                     if not c.get("dramatic_mode"):
                         c["dramatic_mode"] = candidate_modes.get(c.get("id", ""), "")
-                candidates = parsed
-            problems = validate_story_arc(
+            attempt_problems = validate_story_arc(
                 parsed,
                 user_topic=body.user_topic,
                 time_scale=body.time_scale,
                 base_axis=body.base_time_axis,
             )
-            if parsed and not arc_needs_retry(problems):
+            # Keep the BEST attempt — a feedback retry can come back worse
+            # (measured: few-shot regurgitation at raised temperature).
+            score = arc_problem_score(attempt_problems)
+            if parsed and (best_score is None or score < best_score):
+                candidates, problems, best_score = parsed, attempt_problems, score
+            if parsed and not arc_needs_retry(attempt_problems):
                 break
             if arc_attempt == 0:
-                feedback = arc_feedback_block(problems, locale=body.locale)
+                feedback = arc_feedback_block(attempt_problems, locale=body.locale)
                 logger.info("[chronicle] arc validation failed; retrying with feedback: %s",
-                            [f"{p['candidate_id']}:{p['code']}" for p in problems])
+                            [f"{p['candidate_id']}:{p['code']}" for p in attempt_problems])
                 _put({"type": "warning",
                       "message": "story arcs failed validation — regenerating with feedback"})
             else:
@@ -3381,10 +3435,62 @@ async def run_chronicle_candidates(
             _put({"type": "warning",
                   "message": "some story arcs kept despite validation warnings"})
         for c in candidates:
+            # Labels/acts are authored in EN (see _ARC_OUTPUT_LINE); the ja UI
+            # gets the batched display translation below.
             repair_act_labels(
                 c, base_axis=body.base_time_axis,
-                time_scale=body.time_scale, locale=body.locale,
+                time_scale=body.time_scale, locale="en",
             )
+            enforce_base_act(
+                c, base_axis=body.base_time_axis, base_act_fixed=base_act_fixed,
+            )
+
+        # ── ja display translation: ONE batched call for all candidates ──────
+        if body.locale == "ja":
+            _phase("translating", 0.90, "Translating candidates...")
+            flat_keys: list[str] = []
+            src_flat: dict[str, str] = {}
+            for c in candidates:
+                cid = c.get("id") or "?"
+                for field in ("title", "turn", "motif", "personality_hint"):
+                    key = f"{cid}_{field}"
+                    flat_keys.append(key)
+                    src_flat[key] = str(c.get(field) or "")
+                acts = c.get("acts") or {}
+                for ax in AXES:
+                    a = acts.get(ax) or {}
+                    for field in ("label", "activity", "place", "feeling"):
+                        key = f"{cid}_{ax}_{field}"
+                        flat_keys.append(key)
+                        src_flat[key] = str(a.get(field) or "")
+            try:
+                tr = parse_flat_json_translation(
+                    await ollama.generate_text(
+                        build_json_translation_prompt(src_flat, target="Japanese"),
+                        model=models["utility"], options=options, fmt="json",
+                    ),
+                    flat_keys,
+                )
+            except Exception as exc:
+                logger.warning("[chronicle] candidate ja translation failed: %s", exc)
+                tr = {}
+            if tr:
+                for c in candidates:
+                    cid = c.get("id") or "?"
+                    for field in ("title", "turn", "motif", "personality_hint"):
+                        val = tr.get(f"{cid}_{field}")
+                        if val:
+                            c[f"{field}_ja"] = val
+                    acts_ja: dict[str, dict] = {}
+                    for ax in AXES:
+                        entry = {
+                            field: tr.get(f"{cid}_{ax}_{field}") or ""
+                            for field in ("label", "activity", "place", "feeling")
+                        }
+                        if any(entry.values()):
+                            acts_ja[ax] = entry
+                    if acts_ja:
+                        c["acts_ja"] = acts_ja
 
         if story_id:
             hist = list(draft.get("respin_history") or [])
@@ -3462,7 +3568,7 @@ async def run_chronicle_expand(
     from ..spooler.models import JobLane
     from ..story import db as story_db
     from ..story.api import ChronicleRequest
-    from ..story.pose_retrieval import retrieve_pose_tags
+    from ..story.pose_retrieval import retrieve_pose_tags, retrieve_scene_tags
     from ..story.generator import (
         AXES,
         CHRONICLE_CAT_FIELDS,
@@ -3470,16 +3576,18 @@ async def run_chronicle_expand(
         apply_scene_constraints,
         assemble_capped_positive,
         axis_tag_lines_collapsed,
+        base_act_from_image,
         bucket_danbooru_tags,
         build_acts_polish_prompt,
         build_fast_candidate,
         build_fast_prompts_prompt,
-        build_json_translation_prompt,
         candidate_acts,
         collect_prompt_tags,
         deterministic_shot_plan,
+        ensure_face_tags,
         ensure_pose_tags_min_words,
         ensure_theme_must_tags,
+        expression_tag_for_feeling,
         FAST_PROMPT_MAX_TAGS,
         find_identity_mutex_conflicts,
         find_mutex_conflict_tags,
@@ -3494,14 +3602,12 @@ async def run_chronicle_expand(
         parse_acts_polish_json,
         parse_biography_json,
         parse_fast_prompts_json,
-        parse_flat_json_translation,
         remove_conflict_tags,
         repair_act_labels,
         repair_collapsed_axis_tags,
         sample_midrank_wd14_tags,
         should_differentiate_acts,
         theme_must_tags,
-        translation_values_complete,
     )
 
     def _put(event: dict | None) -> None:
@@ -3599,6 +3705,10 @@ async def run_chronicle_expand(
         vlm_model = models["vision"]
         options = _chronicle_llm_options(body, temperature, cfg)
         removal = removal_tag_set(cfg)
+        story_think = (
+            body.story_think if getattr(body, "story_think", None) is not None
+            else bool(cfg.get("story_think", False))
+        )
 
         doc = {}
         has_base = bool((body.base_sha256 or "").strip())
@@ -4020,14 +4130,24 @@ async def run_chronicle_expand(
             return
 
         # ═══ Deterministic expansion: the chosen candidate's acts ARE the story.
-        # No timetable / concrete / differentiate / visual-exam / densify /
-        # prose-stream / conflict-LLM stages — the arc from Phase 1 flows into
-        # the image prompts verbatim (modulo one EN translation for ja).
+        # Acts are authored in EN (Phase 1, _ARC_OUTPUT_LINE) so there is no
+        # ja→EN translation step; the ja display copy was attached to the
+        # candidate in Phase 1 (title_ja / acts_ja). The base act is overwritten
+        # with the image-derived canon regardless of what the LLM wrote.
         acts = candidate_acts(selected)
         repair_act_labels(
             {"acts": acts}, base_axis=body.base_time_axis,
-            time_scale=body.time_scale, locale=locale,
+            time_scale=body.time_scale, locale="en",
         )
+        base_act_fixed = dict(ctx.get("base_act_fixed") or {})
+        if has_base and not base_act_fixed:
+            base_act_fixed = base_act_from_image(
+                wd14_tags, scene_desc, emotion=body.emotion,
+            )
+        if has_base and base_act_fixed:
+            for f in ("activity", "place", "feeling"):
+                if base_act_fixed.get(f):
+                    acts[body.base_time_axis][f] = base_act_fixed[f]
         timetable: list = []
         timetable_ja: list = []
         axis_slots: dict = {}
@@ -4039,9 +4159,6 @@ async def run_chronicle_expand(
                 "biography": parse_biography_json(biography) or biography,
                 "biography_ja": parse_biography_json(biography_ja) or biography_ja,
             })
-
-        title_loc = str(selected.get("title") or "Untitled Chronicle").strip()
-        turn_loc = str(selected.get("turn") or selected.get("motif") or "").strip()
 
         def _act_brief(act: dict) -> str:
             parts = []
@@ -4055,46 +4172,24 @@ async def run_chronicle_expand(
                 parts.append(f"({act['feeling']})")
             return " ".join(parts)
 
-        # EN working copy — pose retrieval / WD14 / image prompts are English.
         acts_en: dict[str, dict] = {a: dict(acts[a]) for a in AXES}
-        en_title, en_overall = title_loc, turn_loc
-        if locale == "ja":
-            _phase("translating", 0.12, "Translating the acts...")
-            flat_keys: list[str] = ["title", "turn"]
-            src_flat: dict[str, str] = {"title": title_loc, "turn": turn_loc}
-            for a in AXES:
-                for f in ("activity", "place", "feeling"):
-                    key = f"{a}_{f}"
-                    flat_keys.append(key)
-                    src_flat[key] = acts[a].get(f) or ""
-            tr: dict[str, str] = {}
-            for tr_attempt in range(2):
-                try:
-                    async with _heartbeat("translating", 0.12):
-                        tr = parse_flat_json_translation(
-                            await ollama.generate_text(
-                                build_json_translation_prompt(src_flat, target="English"),
-                                model=models["utility"], options=options, fmt="json",
-                            ),
-                            flat_keys,
-                        )
-                except Exception as exc:
-                    logger.warning("[chronicle] acts EN translation failed: %s", exc)
-                    tr = {}
-                if translation_values_complete(src_flat, tr):
-                    break
-            en_title = tr.get("title") or title_loc
-            en_overall = tr.get("turn") or turn_loc
-            for a in AXES:
-                for f in ("activity", "place", "feeling"):
-                    acts_en[a][f] = tr.get(f"{a}_{f}") or acts[a].get(f) or ""
+        en_title = str(selected.get("title") or "Untitled Chronicle").strip()
+        en_overall = str(selected.get("turn") or selected.get("motif") or "").strip()
 
         situation_en = {a: (acts_en[a].get("activity") or "").strip() for a in AXES}
         en_stories = {a: _act_brief(acts_en[a]) for a in AXES}
         if locale == "ja":
-            title_ja, overall_ja = title_loc, turn_loc
-            stories_ja = {a: _act_brief(acts[a]) for a in AXES}
-            title, overall, stories = title_ja, overall_ja, stories_ja
+            acts_ja = selected.get("acts_ja") or {}
+            title_ja = str(selected.get("title_ja") or "").strip()
+            overall_ja = str(
+                selected.get("turn_ja") or selected.get("motif_ja") or ""
+            ).strip()
+            stories_ja = {
+                a: (_act_brief(acts_ja.get(a) or {}) or en_stories[a]) for a in AXES
+            }
+            title = title_ja or en_title
+            overall = overall_ja or en_overall
+            stories = stories_ja
         else:
             title_ja, overall_ja = "", ""
             stories_ja = {a: "" for a in AXES}
@@ -4105,7 +4200,10 @@ async def run_chronicle_expand(
             "type": "concrete_activities",
             "activities": {a: situation_en[a] for a in AXES},
             "activities_ja": (
-                {a: (acts[a].get("activity") or "") for a in AXES}
+                {
+                    a: ((selected.get("acts_ja") or {}).get(a) or {}).get("activity", "")
+                    for a in AXES
+                }
                 if locale == "ja" else {}
             ),
         })
@@ -4138,29 +4236,6 @@ async def run_chronicle_expand(
             and bool((body.workflow_name or "").strip())
         )
 
-        async def _scene_search_tags(query: str, limit: int = 40) -> list[str]:
-            """Scene/place danbooru tags via wd14_vocab vector search."""
-            q = query.strip()
-            if not q:
-                return []
-            try:
-                vec = await ollama.embed(q)
-                hits = await db.search_wd14_vocab(
-                    vec, min_freq=0.01, max_freq=0.80, category=0, limit=limit
-                )
-            except Exception as exc:
-                logger.warning("[chronicle] wd14 vocab search failed: %s", exc)
-                return []
-            out: list[str] = []
-            seen: set[str] = set()
-            for h in hits:
-                name = str(h.get("name") or "").strip().replace(" ", "_")
-                k = name.lower()
-                if name and k not in seen:
-                    seen.add(k)
-                    out.append(name)
-            return filter_tag_list(out, removal)
-
         def _finish_tag_line(line: str) -> str:
             line = _ensure_subject_anchor(line, [(doc, 0)] if doc else [])
             line = inject_identity_tags(line, lock_tags)
@@ -4185,15 +4260,21 @@ async def run_chronicle_expand(
                 ollama, db, activity, k=6, used_tags=used_pose_tags,
             )
             used_pose_tags.update(pose_tags[:3])
+            # Face guarantee: a valid expression tag rides in `focal` so it
+            # enters prio_tags and survives the ≤20 cap.
+            expr_tag = expression_tag_for_feeling(feeling, emotion=body.emotion)
             focal = list(dict.fromkeys(
-                pose_tags + [t for t in shot_plan.values() if t]
+                pose_tags + [t for t in shot_plan.values() if t] + [expr_tag]
             ))
 
             scene_constraints = infer_axis_scene_constraints(story_en)
-            scene_query = " ".join(x for x in (
-                activity, act.get("place") or "", feeling,
+            # Ground the act's structured `place` via the curated scene vocab —
+            # the full-vocab cosine search returned junk (measured).
+            place_query = ", ".join(x for x in (
+                act.get("place") or "", feeling,
             ) if x)
-            axis_search_tags = await _scene_search_tags(scene_query)
+            axis_search_tags = await retrieve_scene_tags(ollama, db, place_query, k=5)
+            axis_search_tags = filter_tag_list(axis_search_tags, removal)
             axis_search_tags = apply_scene_constraints(axis_search_tags, scene_constraints)
 
             similar_pinned: list[str] = []
@@ -4272,6 +4353,7 @@ async def run_chronicle_expand(
                 "tag_line": tag_line,
                 "focal": focal,
                 "pose_tags": pose_tags,
+                "expr_tag": expr_tag,
                 "scene_constraints": scene_constraints,
                 "similar_pinned": similar_pinned,
                 "similar_sources": similar_sources,
@@ -4296,7 +4378,8 @@ async def run_chronicle_expand(
                             },
                             identity_tags=lock_tags,
                         ),
-                        model=models["story"], options=options, fmt="json", think=True,
+                        model=models["story"], options=options, fmt="json",
+                        think=story_think,
                     ))
             except Exception as exc:
                 logger.warning("[chronicle] acts polish failed: %s", exc)
@@ -4368,6 +4451,14 @@ async def run_chronicle_expand(
                     positive = assemble_capped_positive(
                         head, tail if prose else "", priority_tags=prio_tags,
                     )
+            # Face guarantee: eye colour + expression must survive every cap
+            # and conflict pass (anime models omit the face without them).
+            positive = ensure_face_tags(
+                positive,
+                expression_tag=st.get("expr_tag") or "",
+                lock_tags=lock_tags,
+                priority_tags=prio_tags,
+            )
             positive, removed_tags = _remove_forced_tags(
                 positive, removal,
                 all_lines=(body.prompt_style in ("detailed", "danbooru")),
@@ -4383,6 +4474,8 @@ async def run_chronicle_expand(
             axis_cats = ensure_pose_tags_min_words(
                 axis_cats, min_words=5, fillers=pose_fill,
             )
+            if st.get("expr_tag") and not axis_cats.get("expression_tags"):
+                axis_cats["expression_tags"] = [st["expr_tag"]]
             st["tag_line"] = tag_line
             return {
                 "positive": positive,

@@ -19,6 +19,7 @@ CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
 WD14_VOCAB_COLLECTION = "wd14_vocab"
 POSE_VOCAB_COLLECTION = "wd14_pose_vocab"
+SCENE_VOCAB_COLLECTION = "wd14_scene_vocab"
 STORIES_COLLECTION = "stories"
 
 _SORT_ORDER_BY = {
@@ -2365,14 +2366,14 @@ class QdrantDBClient:
             logger.warning("search_wd14_vocab failed: %s", e)
             return []
 
-    # ── Pose Vocab (wd14_pose_vocab collection) ───────────────────────────────────
+    # ── Pose / Scene Vocab (wd14_pose_vocab / wd14_scene_vocab) ────────────────────
 
-    async def _ensure_pose_vocab_collection(self) -> None:
-        if await self._qc.collection_exists(POSE_VOCAB_COLLECTION):
-            logger.info("Collection exists: %s", POSE_VOCAB_COLLECTION)
+    async def _ensure_tag_vocab_collection(self, collection: str) -> None:
+        if await self._qc.collection_exists(collection):
+            logger.info("Collection exists: %s", collection)
             return
         await self._qc.create_collection(
-            collection_name=POSE_VOCAB_COLLECTION,
+            collection_name=collection,
             vectors_config=qm.VectorParams(
                 size=settings.embed_dim,
                 distance=qm.Distance.COSINE,
@@ -2387,21 +2388,33 @@ class QdrantDBClient:
             on_disk_payload=True,
         )
         await self._qc.create_payload_index(
-            collection_name=POSE_VOCAB_COLLECTION,
+            collection_name=collection,
             field_name="name",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
-        logger.info("Created collection: %s (embed_dim=%d)", POSE_VOCAB_COLLECTION, settings.embed_dim)
+        logger.info("Created collection: %s (embed_dim=%d)", collection, settings.embed_dim)
 
-    async def count_pose_vocab(self) -> int:
+    async def _ensure_pose_vocab_collection(self) -> None:
+        await self._ensure_tag_vocab_collection(POSE_VOCAB_COLLECTION)
+
+    async def _ensure_scene_vocab_collection(self) -> None:
+        await self._ensure_tag_vocab_collection(SCENE_VOCAB_COLLECTION)
+
+    async def _count_tag_vocab(self, collection: str) -> int:
         try:
-            result = await self._qc.count(POSE_VOCAB_COLLECTION)
+            result = await self._qc.count(collection)
             return result.count
         except Exception:
             return 0
 
-    async def upsert_pose_vocab(self, points: list[dict]) -> None:
-        """Batch upsert pose vocab points. Each dict: {id, vector, name, frequency, count}."""
+    async def count_pose_vocab(self) -> int:
+        return await self._count_tag_vocab(POSE_VOCAB_COLLECTION)
+
+    async def count_scene_vocab(self) -> int:
+        return await self._count_tag_vocab(SCENE_VOCAB_COLLECTION)
+
+    async def _upsert_tag_vocab(self, collection: str, points: list[dict]) -> None:
+        """Batch upsert vocab points. Each dict: {id, vector, name, frequency, count}."""
         batch_size = 100
         for i in range(0, len(points), batch_size):
             batch = points[i:i + batch_size]
@@ -2417,17 +2430,23 @@ class QdrantDBClient:
                 )
                 for p in batch
             ]
-            await self._qc.upsert(collection_name=POSE_VOCAB_COLLECTION, points=qdrant_points)
+            await self._qc.upsert(collection_name=collection, points=qdrant_points)
 
-    async def scroll_pose_vocab_all(self) -> list[tuple[str, list[float]]]:
-        """Load the whole pose vocabulary (name, vector) — ~650 tags, kept
-        in process memory by pose_retrieval for hybrid ranking."""
+    async def upsert_pose_vocab(self, points: list[dict]) -> None:
+        await self._upsert_tag_vocab(POSE_VOCAB_COLLECTION, points)
+
+    async def upsert_scene_vocab(self, points: list[dict]) -> None:
+        await self._upsert_tag_vocab(SCENE_VOCAB_COLLECTION, points)
+
+    async def _scroll_tag_vocab_all(self, collection: str) -> list[tuple[str, list[float]]]:
+        """Load a whole tag vocabulary (name, vector) — ≤800 tags, kept in
+        process memory by pose_retrieval for hybrid ranking."""
         out: list[tuple[str, list[float]]] = []
         offset = None
         try:
             while True:
                 pts, next_offset = await self._qc.scroll(
-                    collection_name=POSE_VOCAB_COLLECTION,
+                    collection_name=collection,
                     limit=500,
                     offset=offset,
                     with_payload=["name"],
@@ -2440,9 +2459,15 @@ class QdrantDBClient:
                     break
                 offset = next_offset
         except Exception as e:
-            logger.warning("scroll_pose_vocab_all failed: %s", e)
+            logger.warning("scroll %s failed: %s", collection, e)
             return []
         return out
+
+    async def scroll_pose_vocab_all(self) -> list[tuple[str, list[float]]]:
+        return await self._scroll_tag_vocab_all(POSE_VOCAB_COLLECTION)
+
+    async def scroll_scene_vocab_all(self) -> list[tuple[str, list[float]]]:
+        return await self._scroll_tag_vocab_all(SCENE_VOCAB_COLLECTION)
 
     async def get_aligned_sha256s(self, min_score: float) -> set[str]:
         """Return image_ids whose alignment score >= min_score."""

@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI):
         from .jobs.runners import run_import_pose_vocab
         from .spooler.models import JobLane
         try:
-            if await db.count_pose_vocab() > 0:
+            if await db.count_pose_vocab() > 0 and await db.count_scene_vocab() > 0:
                 return
             csv_path = _Path(settings.wd14_model_dir) / "selected_tags.csv"
             if not csv_path.exists():

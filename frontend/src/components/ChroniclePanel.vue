@@ -348,6 +348,24 @@ const canGenerate = computed(() =>
   finished.value && !!storyId.value && !imageJobs.value.length
 )
 
+/** Candidates are authored in EN; a batched ja translation rides on the
+ *  candidate as `*_ja` / `acts_ja`. Prefer it when the UI is Japanese. */
+function candDisplay(c, field) {
+  if (uiLocale.value === 'ja' && c?.[`${field}_ja`]) return c[`${field}_ja`]
+  return c?.[field] || ''
+}
+function candAct(c, ax) {
+  const en = c?.acts?.[ax] || {}
+  if (uiLocale.value !== 'ja') return en
+  const ja = c?.acts_ja?.[ax] || {}
+  return {
+    label: ja.label || en.label || '',
+    activity: ja.activity || en.activity || '',
+    place: ja.place || en.place || '',
+    feeling: ja.feeling || en.feeling || '',
+  }
+}
+
 const visibleCandidates = computed(() => {
   if (!candidates.value.length) return []
   if (selecting.value || !selectedCandidate.value) return candidates.value
@@ -1876,22 +1894,22 @@ async function generateImages() {
                     : 'border-white/8 bg-black/25 hover:border-teal-600/40 hover:bg-black/35'">
                   <div class="flex items-center gap-1.5">
                     <span class="text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full bg-black/40 text-gray-200">{{ c.id }}</span>
-                    <span class="text-sm font-bold text-teal-100 leading-tight">{{ c.title }}</span>
+                    <span class="text-sm font-bold text-teal-100 leading-tight">{{ candDisplay(c, 'title') }}</span>
                   </div>
-                  <p v-if="c.turn" class="text-[11px] text-gray-200 leading-snug">{{ c.turn }}</p>
+                  <p v-if="c.turn" class="text-[11px] text-gray-200 leading-snug">{{ candDisplay(c, 'turn') }}</p>
                   <div v-if="c.motif || c.key_motif" class="pt-0.5">
                     <span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-950/50 text-teal-200/95 border border-teal-800/30">
-                      {{ t('chronicle.motifLabel') }}: {{ c.motif || c.key_motif }}
+                      {{ t('chronicle.motifLabel') }}: {{ candDisplay(c, 'motif') || c.key_motif }}
                     </span>
                   </div>
                   <div class="flex flex-col gap-0.5 text-[9px] leading-snug opacity-45 mt-0.5">
-                    <div v-for="ax in AXES" :key="ax" v-show="c.acts?.[ax]?.activity || c[ax] || c.summary">
+                    <div v-for="ax in AXES" :key="ax" v-show="candAct(c, ax).activity || c[ax] || c.summary">
                       <span class="font-bold uppercase tracking-wide mr-1"
                         :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">{{ t('chronicle.axis.' + ax) }}</span>
-                      <span v-if="c.acts?.[ax]?.label" class="text-teal-300/60 mr-1">[{{ c.acts[ax].label }}]</span>
-                      <span class="text-gray-400">{{ c.acts?.[ax]?.activity || c[ax] || (ax === 'present' ? c.summary : '') }}</span>
-                      <span v-if="c.acts?.[ax]?.place" class="ml-1 px-1 rounded bg-black/40 text-gray-500">📍{{ c.acts[ax].place }}</span>
-                      <span v-if="c.acts?.[ax]?.feeling" class="ml-1 px-1 rounded bg-black/40 text-gray-500">{{ c.acts[ax].feeling }}</span>
+                      <span v-if="candAct(c, ax).label" class="text-teal-300/60 mr-1">[{{ candAct(c, ax).label }}]</span>
+                      <span class="text-gray-400">{{ candAct(c, ax).activity || c[ax] || (ax === 'present' ? c.summary : '') }}</span>
+                      <span v-if="candAct(c, ax).place" class="ml-1 px-1 rounded bg-black/40 text-gray-500">📍{{ candAct(c, ax).place }}</span>
+                      <span v-if="candAct(c, ax).feeling" class="ml-1 px-1 rounded bg-black/40 text-gray-500">{{ candAct(c, ax).feeling }}</span>
                     </div>
                   </div>
                   <span v-if="selecting || finished" class="text-[10px] font-medium mt-1 text-teal-400/90">

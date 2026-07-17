@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # story-arc / polish calls (e.g. "hasutsubomi:9b"); utility = translations.
     story_model: str = ""
     utility_model: str = ""
+    # Native `think` for the creative story calls. bonsai-class models break
+    # with think=True (measured); qwen-class reasoning models need it.
+    story_think: bool = False
     # HTTP timeout for all Ollama / OpenAI-compat requests. A hung backend
     # otherwise blocks the single-worker PROMPT lane for this long — lower it
     # if that matters more than very long generations.

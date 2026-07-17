@@ -2128,6 +2128,117 @@ def _tag_has_expression(parts: list[str]) -> bool:
     return False
 
 
+# feeling word → danbooru expression tag. Values MUST be members of
+# _EXPRESSION_TAGS (guarded by tests) — anime models omit the face entirely
+# when the prompt carries no expression tag, so every axis prompt gets one.
+_FEELING_EXPRESSION_MAP: dict[str, str] = {
+    "joy": "smile", "joyful": "smile", "happy": "smile", "warm": "smile",
+    "hopeful": "smile", "glad": "smile", "cheerful": "smile", "calm": "smile",
+    "serene": "smile", "peaceful": "smile", "relieved": "smile",
+    "content": "smile", "inspired": "smile", "confident": "smug",
+    "excited": "excited", "thrilled": "excited",
+    "sad": "sad", "sorrowful": "sad", "melancholy": "sad", "wistful": "sad",
+    "gloomy": "sad", "lonely": "lonely",
+    "tearful": "crying", "weeping": "crying", "drowsy": "sleepy",
+    "surprised": "surprised", "startled": "surprised", "shocked": "surprised",
+    "amazed": "surprised",
+    "determined": "determined", "resolute": "determined",
+    "focused": "serious", "intent": "serious", "stern": "serious",
+    "nervous": "nervous", "anxious": "nervous", "worried": "nervous",
+    "uneasy": "nervous", "tense": "nervous",
+    "angry": "angry", "furious": "angry", "annoyed": "annoyed",
+    "embarrassed": "embarrassed", "shy": "embarrassed", "flustered": "embarrassed",
+    "curious": "awe", "intrigued": "awe",
+}
+_FEELING_EXPRESSION_JA: tuple[tuple[str, str], ...] = (
+    ("嬉", "smile"), ("楽", "smile"), ("温", "smile"), ("穏", "smile"),
+    ("悲", "sad"), ("寂", "lonely"), ("涙", "crying"), ("泣", "crying"),
+    ("驚", "surprised"), ("怒", "angry"), ("決意", "determined"),
+    ("緊張", "nervous"), ("不安", "nervous"), ("照", "embarrassed"),
+)
+_EMOTION_EXPRESSION_MAP: dict[str, str] = {
+    "loneliness": "lonely", "nostalgia": "sad", "ephemeral": "sad",
+    "melancholy": "sad", "serenity": "smile", "wonder": "surprised",
+    "joy": "smile", "tension": "nervous", "warmth": "smile",
+    "mystery": "serious", "desolation": "sad", "vitality": "excited",
+}
+
+
+def expression_tag_for_feeling(feeling: str, *, emotion: str = "") -> str:
+    """Map an act's feeling word to a valid danbooru expression tag.
+
+    Every branch returns a member of _EXPRESSION_TAGS; final fallback is
+    "smile" so a face is ALWAYS requested.
+    """
+    def _resolve(word: str) -> str:
+        w = (word or "").strip().lower().replace(" ", "_")
+        if not w:
+            return ""
+        if w in _EXPRESSION_TAGS:
+            return w
+        mapped = _FEELING_EXPRESSION_MAP.get(w)
+        if mapped and mapped in _EXPRESSION_TAGS:
+            return mapped
+        for key, tag in _FEELING_EXPRESSION_JA:
+            if key in word and tag in _EXPRESSION_TAGS:
+                return tag
+        toks = set(w.replace("-", "_").split("_"))
+        if toks & _EXPRESSION_TOKENS:
+            for cand in sorted(_EXPRESSION_TAGS):
+                if set(cand.replace("-", "_").split("_")) & toks:
+                    return cand
+        return ""
+
+    got = _resolve(feeling)
+    if got:
+        return got
+    e = (emotion or "").strip().lower()
+    mapped = _EMOTION_EXPRESSION_MAP.get(e)
+    if mapped and mapped in _EXPRESSION_TAGS:
+        return mapped
+    got = _resolve(e)
+    return got or "smile"
+
+
+def ensure_face_tags(
+    positive: str,
+    *,
+    expression_tag: str,
+    lock_tags: list[str],
+    priority_tags: list[str] | None = None,
+    max_tags: int | None = None,
+) -> str:
+    """Guarantee eye colour + one expression tag in the final tag line.
+
+    Anime models drop the character's face when neither survives the ≤20 cap
+    (measured by the user) — this is the last-line guard after all assembly
+    and conflict passes. Only acts on a comma tag-line head; prose-only
+    positives pass through unchanged.
+    """
+    head, sep, tail = positive.partition("\n\n")
+    if "," not in head or "." in head:
+        return positive
+    parts = [t.strip() for t in head.split(",") if t.strip()]
+    keys = {t.lower().replace(" ", "_") for t in parts}
+
+    face_musts: list[str] = []
+    for t in lock_tags:
+        if classify_identity_tag(t) == "eyes" and t.lower().replace(" ", "_") not in keys:
+            face_musts.append(t)
+    if expression_tag and not _tag_has_expression(parts):
+        face_musts.append(expression_tag)
+    if not face_musts:
+        return positive
+
+    limit = max_tags if max_tags is not None else IMAGE_PROMPT_MAX_TAGS
+    new_head = insert_after_anchors(head, face_musts)
+    new_head = cap_danbooru_tag_line(
+        new_head, max_tags=limit,
+        priority_tags=list(dict.fromkeys([*face_musts, *(priority_tags or [])])),
+    )
+    return f"{new_head}{sep}{tail}" if sep else new_head
+
+
 def _tag_has_person_subject(parts: list[str]) -> bool:
     """True when the prompt depicts a person (expression then becomes mandatory)."""
     head = {p.strip().lower().replace(" ", "_") for p in parts if p.strip()}
@@ -2753,6 +2864,8 @@ def parse_flat_json_translation(raw: str, keys: tuple[str, ...] | list[str]) -> 
 
 _ACT_KEYS = ("label", "activity", "place", "feeling", "motif_use")
 
+# Concrete example values only — bonsai-27b copies placeholder text verbatim
+# (measured), so the few-shot must never contain meta descriptions.
 _ARC_FEWSHOT = (
     "Example of GOOD concrete output (structure only — invent your own story):\n"
     '{"candidates":[{"id":"A","title":"Steam on the Portafilter",'
@@ -2760,26 +2873,132 @@ _ARC_FEWSHOT = (
     '"turn":"The memo name belongs to someone she thought had left town.",'
     '"personality_hint":"Methodical and warm; always double-folds paper slips.",'
     '"acts":{'
-    '"past":{"label":"2 hours earlier","activity":"She tamps coffee into the portafilter with both palms","place":"behind the cafe counter","feeling":"focused","motif_use":"the memo pad waits blank beside the grinder"},'
-    '"present":{"label":"now","activity":"She slides a ceramic cup across the wooden counter to a regular","place":"cafe counter, morning light","feeling":"warm","motif_use":"the order memo lies pinned under the saucer"},'
-    '"future":{"label":"3 hours later","activity":"She unfolds the crumpled order memo under the till lamp at close","place":"empty cafe at dusk","feeling":"startled","motif_use":"the memo shows a name she knows"}'
+    '"past":{"label":"2 hours earlier","activity":"She tamps coffee into the portafilter with both palms","place":"behind the cafe counter","feeling":"focused"},'
+    '"present":{"label":"now","activity":"She slides a ceramic cup across the wooden counter to a regular","place":"cafe counter, morning light","feeling":"warm"},'
+    '"future":{"label":"3 hours later","activity":"She unfolds the crumpled order memo under the till lamp at close","place":"empty cafe at dusk","feeling":"startled"}'
     '}}]}'
 )
 
+# Arc output is ALWAYS English: bonsai-class local models author far better EN
+# than ja (measured — ja output came back Chinese-contaminated and off-topic),
+# and the whole downstream pipeline (pose/scene retrieval, WD14, image prompts)
+# is English-only anyway. The ja UI gets a batched display translation instead.
+_ARC_OUTPUT_LINE = (
+    "Write every title / activity / place / feeling / motif / turn / "
+    "personality_hint field in natural ENGLISH (even when the topic is "
+    "Japanese — do not translate the topic, follow it)."
+)
 
-def _arc_locale_line(locale: str) -> str:
-    if locale == "ja":
-        return (
-            "title / activity / place / feeling / motif / turn / personality_hint は"
-            "すべて自然で読みやすい日本語で書くこと。label は「数時間後」「3年前」のように"
-            "数値+単位+後/前 の形式で書く（基準幕は「いま」）。"
-        )
-    return (
-        "Write every title / activity / place / feeling / motif / turn / "
-        "personality_hint field in natural English. Write each label as "
-        '"<number> <unit> later/earlier" using the time-scale unit '
-        '("now" for the base act).'
+# Feeling-word hints used when composing the base act from an image.
+_EXPRESSION_TO_FEELING: dict[str, str] = {
+    "smile": "warm", "smiling": "warm", "grin": "cheerful", "laughing": "joyful",
+    "happy": "joyful", "sad": "sad", "crying": "tearful", "tears": "tearful",
+    "serious": "focused", "expressionless": "calm", "angry": "angry",
+    "surprised": "surprised", "nervous": "nervous", "embarrassed": "embarrassed",
+    "closed_eyes": "serene", "sleepy": "drowsy", "smug": "confident",
+}
+
+
+def base_act_from_image(
+    wd14_tags: list[str], scene_desc: str, *, emotion: str = ""
+) -> dict:
+    """{activity, place, feeling} in EN, deterministically from the base image.
+
+    This is the FIXED line of the script scaffold: when the user hands us an
+    image, the base act IS that image — never something the story LLM invents.
+    """
+    from ..tags.catalog import pose_action_subset
+
+    tags = [str(t or "").strip().lower().replace(" ", "_") for t in (wd14_tags or [])]
+    tags = [t for t in tags if t]
+
+    def _first_sentence(text: str, max_words: int) -> str:
+        s = (text or "").strip().split(".")[0].strip()
+        return " ".join(s.split()[:max_words])
+
+    pose = pose_action_subset(tags)[:3]
+    activity = ", ".join(t.replace("_", " ") for t in pose) or _first_sentence(
+        scene_desc, 15
     )
+
+    places = [t for t in tags if get_tag_axis(t) == "location"][:3]
+    weather = [t for t in tags if get_tag_axis(t) == "time_weather"][:1]
+    place = ", ".join(
+        t.replace("_", " ") for t in (*places, *weather)
+    ) or _first_sentence(scene_desc, 10)
+
+    feeling = ""
+    for t in tags:
+        if t in _EXPRESSION_TAGS:
+            feeling = _EXPRESSION_TO_FEELING.get(t, t.replace("_", " "))
+            break
+    if not feeling:
+        e = (emotion or "").strip().lower()
+        feeling = e if e in _EMOTION_REGISTER else "calm"
+
+    return {"activity": activity, "place": place, "feeling": feeling}
+
+
+def build_script_scaffold(
+    *,
+    base_axis: str,
+    time_scale: str,
+    base_act_fixed: dict | None = None,
+) -> str:
+    """The 台本: a deterministic fill-in-the-blanks script.
+
+    Composed entirely from the existing (base_axis × time_scale) tables —
+    labels from ``default_act_labels`` and the scene delta from
+    ``_scale_delta_line`` — so the LLM never has to reason about the timeline.
+    With ``base_act_fixed`` the base act is written in as decided fact
+    (measured: bonsai copies FIXED lines verbatim into its JSON).
+    """
+    labels = default_act_labels(base_axis, time_scale, "en")
+    lines = [
+        "SCRIPT — TIME AXIS (fill ONLY the ____ slots; FIXED lines are decided "
+        "facts, copy them into your JSON exactly. Use the label values as written):",
+        f"scene_delta: {_scale_delta_line(time_scale)}",
+    ]
+    for ax in AXES:
+        if ax == base_axis and base_act_fixed:
+            lines.append(
+                f'[{ax.upper()} | label="{labels[ax]}" | t=0 — THIS IS THE BASE '
+                "IMAGE. FIXED]"
+            )
+            for key in ("activity", "place", "feeling"):
+                lines.append(f'  {key} = "{base_act_fixed.get(key, "")}"')
+        else:
+            mark = " | t=0 base act" if ax == base_axis else ""
+            lines.append(f'[{ax.upper()} | label="{labels[ax]}"{mark}]')
+            lines.append("  activity = ____   place = ____   feeling = ____")
+    return "\n".join(lines) + "\n"
+
+
+def enforce_base_act(
+    candidate: dict, *, base_axis: str, base_act_fixed: dict | None
+) -> None:
+    """Overwrite the base act with the image-derived facts (in place).
+
+    The scaffold asks the LLM to copy FIXED values, and measured behaviour says
+    it does — but this makes drift structurally impossible regardless.
+    """
+    if not base_act_fixed:
+        return
+    acts = candidate.get("acts")
+    if not isinstance(acts, dict):
+        return
+    act = acts.get(base_axis)
+    if not isinstance(act, dict):
+        act = {k: "" for k in _ACT_KEYS}
+        acts[base_axis] = act
+    for key in ("activity", "place", "feeling"):
+        if base_act_fixed.get(key):
+            act[key] = base_act_fixed[key]
+    # Rebuild the flat legacy beat in the parse_story_arc_json format.
+    beat = act.get("activity") or ""
+    if act.get("place"):
+        beat = f"{beat} ({act['place']})" if beat else act["place"]
+    candidate[base_axis] = beat
 
 
 def build_story_arc_prompt(
@@ -2797,25 +3016,20 @@ def build_story_arc_prompt(
     seed_tags: list[str] | None = None,
     forced_motif: str = "",
     feedback: str = "",
+    base_act_fixed: dict | None = None,
 ) -> str:
     """ONE LLM call → three candidates × full three-act arcs (JSON).
 
-    Replaces the old biography → topic-directive → candidates → timetable →
-    concrete-activities chain: the timetable contract, topic rules and the few
-    personality hints those stages produced are folded into this single prompt,
-    so a small local model makes ONE coherent creative decision instead of five
-    drifting ones.
+    Format tuned against bonsai-27b (measured): no key=value checklist at the
+    top (the model form-fills it), the deterministic script scaffold replaces
+    the prose timeline constraints, FIXED base-act lines are copied verbatim,
+    concrete-value few-shot only, output ALWAYS English (ja display is a
+    separate batched translation).
     """
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
     rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
     has_topic = bool(user_topic.strip())
     modes = candidate_modes or {}
-    checklist = _compact_priority_checklist(
-        topic=user_topic,
-        base_axis=base_axis,
-        time_scale=time_scale,
-        mood=(emotion or "").strip().lower(),
-    )
     head = chronicle_hard_rules_preamble(locale=locale, has_user_topic=has_topic)
     seed_block = chronicle_seed_tags_block(
         seed_tags, forced_motif=forced_motif, locale=locale
@@ -2834,43 +3048,50 @@ def build_story_arc_prompt(
         if worldview.strip()
         else "worldview=(none)"
     )
-    elapsed_header = _elapsed_time_header(
-        base_axis=base_axis, time_scale=time_scale, locale=locale
+    scaffold = build_script_scaffold(
+        base_axis=base_axis, time_scale=time_scale, base_act_fixed=base_act_fixed,
     )
-    delta = _scale_delta_line(time_scale)
-    motif_json_hint = forced_motif or "one concrete recurring object"
+    mood_line = ""
+    mood = (emotion or "").strip().lower()
+    if mood in _EMOTION_REGISTER:
+        mood_line = f"Overall mood: {mood}.\n"
+    motif_json_hint = forced_motif or ""
+    motif_line = f"motif hint: {motif_json_hint}\n" if motif_json_hint else ""
     feedback_block = f"\n{feedback.strip()}\n" if feedback.strip() else ""
+    scene_block = (
+        f"BASE IMAGE scene (context):\n{scene_desc.strip()[:400]}\n\n"
+        if scene_desc.strip()
+        else ""
+    )
     return (
-        f"{checklist}"
         f"{head}"
         f"{seed_block}"
         f"{topic_note}"
         f"{world_line}\n"
         f"{_candidate_modes_block(modes)}"
         f"{_tone_line(tone, locale)}"
-        f"{_emotion_guidance_line(emotion, locale)}"
-        "Pitch THREE chronicles (A/B/C) for ONE character. Each is ONE story "
-        f"told as three acts ~{span} apart, and each act is ONE drawable moment: "
-        "a physical activity (verb + object, ≤15 words), a concrete place, one "
-        "feeling word, and how the motif appears.\n\n"
-        f"{elapsed_header}\n"
-        f"BASE IMAGE = [{base_axis.upper()}] (t=0). Scene:\n{scene_desc}\n\n"
+        f"{mood_line}"
+        "TASK: Pitch THREE chronicles (A/B/C) for ONE character. Each is ONE "
+        f"story told as three acts ~{span} apart following the SCRIPT below. "
+        "Each act is ONE drawable moment: a physical activity (verb + object, "
+        "≤15 words), a concrete place, one feeling word.\n\n"
+        f"{scaffold}\n"
+        f"{scene_block}"
         f"CHARACTER (appearance tags only):\n{character_desc}\n\n"
-        f"time_delta: {delta}\n"
         f"must_keep: {rules['must_keep']}\n"
         f"may_differ: {rules['may_differ']}\n"
-        f"- The [{base_axis.upper()}] act must match the base image's scene.\n"
-        "- The three acts must be one connected thread (same motif, same turn "
-        "building), never three unrelated snapshots.\n"
+        "- The three acts must be one connected thread: one motif object recurs "
+        "and one turn builds — never three unrelated snapshots.\n"
         "GROUNDING: same real-world register — no magic/aliens unless worldview "
         "explicitly asks. Surprise = human/situational, not genre shift.\n"
-        f"personality_hint: 1 sentence — temperament + one habit or item she uses.\n"
+        "personality_hint: 1 sentence — temperament + one habit or item she uses.\n"
         f"{feedback_block}\n"
-        f"{_arc_locale_line(locale)}\n\n"
-        "OUTPUT JSON only (no fences), exactly this shape:\n"
-        f"{_ARC_FEWSHOT}\n\n"
-        f"motif hint: {motif_json_hint}\n"
-        '{"candidates": [ {"id": "A", ...}, {"id": "B", ...}, {"id": "C", ...} ]}'
+        f"{_ARC_OUTPUT_LINE}\n\n"
+        'OUTPUT: return ONLY a JSON object with a top-level "candidates" array '
+        "of EXACTLY 3 items (id A, B, C). Every candidate's acts must follow "
+        "the SCRIPT: copy FIXED values, fill the ____ slots.\n"
+        f"{motif_line}"
+        f"{_ARC_FEWSHOT}"
     )
 
 
@@ -2999,7 +3220,8 @@ def default_act_labels(
             labels[axis] = f"{phrase}{'後' if forward else '前'}"
         else:
             phrase = one if steps == 1 else two
-            labels[axis] = f"{phrase} {'later' if forward else 'earlier'}"
+            # The elapsed-unit table shouts (A FEW HOURS) — labels shouldn't.
+            labels[axis] = f"{phrase.lower()} {'later' if forward else 'earlier'}"
     return labels
 
 
@@ -3039,17 +3261,37 @@ def validate_story_arc(
     retried alone).
     """
     problems: list[dict] = []
-    groups = topic_anchor_groups(user_topic, topic_directive)
+    # Arc output is always English (see _ARC_OUTPUT_LINE): anchor groups whose
+    # every member is CJK can never hit an EN blob — drop them from the gate
+    # instead of failing every candidate on a ja お題 without EN aliases.
+    groups = [
+        g for g in topic_anchor_groups(user_topic, topic_directive)
+        if any(not _is_ja_script_token(tok) for tok in g)
+    ]
     need_hits = min(2, len(groups)) if groups else 0
     lo, hi = _SCALE_ALLOWED_MAGNITUDES.get(time_scale, (3.0, 4.0))
 
     if not candidates:
         return [{"candidate_id": "*", "code": "structure",
                  "detail": "no candidates parsed"}]
+    if len(candidates) < 3:
+        problems.append({
+            "candidate_id": "*", "code": "structure",
+            "detail": f"expected 3 candidates, got {len(candidates)}",
+        })
 
     for cand in candidates:
         cid = cand.get("id") or "?"
         acts = candidate_acts(cand)
+
+        # Few-shot regurgitation (measured on bonsai retries): the example
+        # story copied wholesale must never survive as a candidate.
+        blob_fewshot = f"{cand.get('title', '')} {cand.get('motif', '')}".lower()
+        if "portafilter" in blob_fewshot or "order memo" in blob_fewshot:
+            problems.append({
+                "candidate_id": cid, "code": "structure",
+                "detail": "copied the example story — invent your own",
+            })
 
         missing = [a for a in AXES if not acts[a]["activity"]]
         if missing:
@@ -3077,14 +3319,20 @@ def validate_story_arc(
                 1 for group in groups if any(tok in blob for tok in group)
             )
             if hits < need_hits:
-                missing_groups = [
-                    group[0] for group in groups
-                    if not any(tok in blob for tok in group)
-                ]
+                # Name the ENGLISH aliases — the model writes EN acts, so
+                # ja seeds alone give it nothing actionable (measured: the
+                # retry ignored ja anchor names).
+                missing_groups = []
+                for group in groups:
+                    if any(tok in blob for tok in group):
+                        continue
+                    en = [t for t in group if not _is_ja_script_token(t)][:3]
+                    missing_groups.append("/".join(en) if en else group[0])
                 problems.append({
                     "candidate_id": cid, "code": "off_topic",
                     "detail": (
-                        f"topic anchors missing: {', '.join(missing_groups[:4])}"
+                        "these topic elements appear in NO act — put them in "
+                        f"physically: {', '.join(missing_groups[:4])}"
                     ),
                 })
 
@@ -3135,6 +3383,17 @@ def arc_feedback_block(problems: list[dict], *, locale: str = "en") -> str:
     return "\n".join(lines) + "\n"
 
 
+_PROBLEM_WEIGHTS = {
+    "structure": 10, "off_topic": 4, "time_collapse": 4, "bad_scale_labels": 1,
+}
+
+
+def arc_problem_score(problems: list[dict]) -> int:
+    """Total badness of a validation result — used to keep the BEST attempt
+    (measured: a feedback retry can come back WORSE than the first try)."""
+    return sum(_PROBLEM_WEIGHTS.get(p.get("code"), 2) for p in problems)
+
+
 def select_best_candidates(
     candidates: list[dict],
     problems: list[dict],
@@ -3143,12 +3402,10 @@ def select_best_candidates(
 ) -> list[dict]:
     """Salvage pass after the retry: prefer clean candidates, rank the rest by
     problem count (labels weigh least — they are repairable)."""
-    weight = {"structure": 10, "off_topic": 4, "time_collapse": 4,
-              "bad_scale_labels": 1}
     score: dict[str, int] = {}
     for p in problems:
         cid = p.get("candidate_id") or "?"
-        score[cid] = score.get(cid, 0) + weight.get(p.get("code"), 2)
+        score[cid] = score.get(cid, 0) + _PROBLEM_WEIGHTS.get(p.get("code"), 2)
     ranked = sorted(
         candidates,
         key=lambda c: (score.get(c.get("id") or "?", 0),

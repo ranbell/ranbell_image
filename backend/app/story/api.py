@@ -76,6 +76,8 @@ class ChronicleRequest(BaseModel):
     # always uses vlm_model; llm_provider="openai" collapses all tiers.
     story_model: str = ""
     utility_model: str = ""
+    # Native `think` for creative story calls (None → runtime config default).
+    story_think: bool | None = None
     temperature: float = 1.0  # Gemma 4 recommended default
     num_ctx: int = 16384
     # Visual Script prose length (paragraphs 3–7). Chronicle lean path

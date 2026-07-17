@@ -449,7 +449,12 @@ async def invoke_import_wd14_vocab(request: Request):
 async def chronicle_pose_vocab_status(request: Request):
     db = request.app.state.db
     count = await db.count_pose_vocab()
-    return {"imported": count > 0, "tag_count": count}
+    scene_count = await db.count_scene_vocab()
+    return {
+        "imported": count > 0 and scene_count > 0,
+        "tag_count": count,
+        "scene_tag_count": scene_count,
+    }
 
 
 @router.post("/chronicle/import-pose-vocab")
