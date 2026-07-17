@@ -2786,6 +2786,24 @@ async def _iter_sha256_docs(db, sha256s: list[str]):
 
 # ── Chronicle (story) pipeline ────────────────────────────────────────────────
 
+def _vlm_image_bytes(doc: dict) -> bytes:
+    """Base-image bytes ready for a VLM. Raises FileNotFoundError when the
+    file is gone. Ollama VLMs may reject WebP, so transcode it to JPEG."""
+    fp = Path(doc.get("path", ""))
+    if not fp.exists():
+        raise FileNotFoundError(fp.name or "(no path)")
+    image_bytes = fp.read_bytes()
+    if fp.suffix.lower() == ".webp":
+        import io
+        from PIL import Image as _PILImage
+        _buf = io.BytesIO()
+        _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(
+            _buf, format="JPEG", quality=95,
+        )
+        image_bytes = _buf.getvalue()
+    return image_bytes
+
+
 def _chronicle_llm_options(body, temp: float, cfg: dict) -> dict:
     return {
         "temperature": temp,
@@ -3095,21 +3113,11 @@ async def run_chronicle_candidates(
                 if not doc:
                     _put({"type": "error", "message": "Base image not found"})
                     return
-                fp = Path(doc.get("path", ""))
-                if not fp.exists():
-                    _put({"type": "error", "message": f"Base image file missing: {fp.name}"})
+                try:
+                    image_bytes = _vlm_image_bytes(doc)
+                except FileNotFoundError as exc:
+                    _put({"type": "error", "message": f"Base image file missing: {exc}"})
                     return
-                image_bytes = fp.read_bytes()
-
-                # Ollama VLMs may reject WebP — convert to JPEG for compatibility
-                if fp.suffix.lower() == ".webp":
-                    import io
-                    from PIL import Image as _PILImage
-                    _buf = io.BytesIO()
-                    _PILImage.open(io.BytesIO(image_bytes)).convert("RGB").save(
-                        _buf, format="JPEG", quality=95,
-                    )
-                    image_bytes = _buf.getvalue()
 
                 wd14_tags = doc.get("wd14_tags") or []
                 character_tags = character_tags_from_wd14(wd14_tags)
@@ -3295,7 +3303,10 @@ async def run_chronicle_candidates(
         # consistent.
         has_base_ctx = bool((body.base_sha256 or "").strip()) and not ctx.get("topic_only")
         base_act_fixed = dict(ctx.get("base_act_fixed") or {})
-        if has_base_ctx and not base_act_fixed:
+        # `"outfit" not in` (not `.get`): a ctx cached before outfit existed
+        # must be recomputed, but an image with genuinely zero garment tags
+        # stores outfit="" and must NOT re-run on every respin.
+        if has_base_ctx and "outfit" not in base_act_fixed:
             base_act_fixed = base_act_from_image(
                 ctx.get("wd14_tags") or [],
                 ctx.get("scene_desc", ""),
@@ -3389,6 +3400,7 @@ async def run_chronicle_candidates(
                     locale=body.locale,
                     candidate_modes=candidate_modes,
                     tone=body.tone,
+                    divergence=body.divergence,
                     seed_tags=story_seed_tags,
                     forced_motif=forced_motif,
                     feedback=feedback,
@@ -3459,7 +3471,7 @@ async def run_chronicle_candidates(
                 acts = c.get("acts") or {}
                 for ax in AXES:
                     a = acts.get(ax) or {}
-                    for field in ("label", "activity", "place", "feeling"):
+                    for field in ("label", "activity", "place", "feeling", "outfit"):
                         key = f"{cid}_{ax}_{field}"
                         flat_keys.append(key)
                         src_flat[key] = str(a.get(field) or "")
@@ -3485,7 +3497,9 @@ async def run_chronicle_candidates(
                     for ax in AXES:
                         entry = {
                             field: tr.get(f"{cid}_{ax}_{field}") or ""
-                            for field in ("label", "activity", "place", "feeling")
+                            for field in (
+                                "label", "activity", "place", "feeling", "outfit",
+                            )
                         }
                         if any(entry.values()):
                             acts_ja[ax] = entry
@@ -3564,11 +3578,19 @@ async def run_chronicle_expand(
         filter_tag_list,
         removal_tag_set,
     )
+    from ..prompt.visual_spec import (
+        DEFAULT_PROSE_PARAGRAPHS,
+        clamp_prose_paragraphs,
+    )
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
     from ..story import db as story_db
     from ..story.api import ChronicleRequest
-    from ..story.pose_retrieval import retrieve_pose_tags, retrieve_scene_tags
+    from ..story.pose_retrieval import (
+        outfit_tags_from_words,
+        retrieve_pose_tags,
+        retrieve_scene_tags,
+    )
     from ..story.generator import (
         AXES,
         CHRONICLE_CAT_FIELDS,
@@ -3582,6 +3604,7 @@ async def run_chronicle_expand(
         build_fast_candidate,
         build_fast_prompts_prompt,
         candidate_acts,
+        chronicle_prose_budget,
         collect_prompt_tags,
         deterministic_shot_plan,
         ensure_face_tags,
@@ -3599,6 +3622,7 @@ async def run_chronicle_expand(
         merge_chronicle_axis_tags,
         merge_draft_wd14_tags,
         normalize_time_scale,
+        outfit_tags_from_wd14,
         parse_acts_polish_json,
         parse_biography_json,
         parse_fast_prompts_json,
@@ -3606,6 +3630,7 @@ async def run_chronicle_expand(
         repair_act_labels,
         repair_collapsed_axis_tags,
         sample_midrank_wd14_tags,
+        scale_outfit_rule,
         should_differentiate_acts,
         theme_must_tags,
     )
@@ -3728,6 +3753,10 @@ async def run_chronicle_expand(
         # Always-keep identity: hair colour, eye colour, accessories only.
         # Scene / outfit / pose from the base image must NOT propagate to other axes.
         lock_tags = identity_lock_tags(character_tags, multi_character=multi)
+        # The base image's garments — NOT locked (the outfit may legitimately
+        # change with the time scale), but fast mode needs them as a reference
+        # and short scales force them back on.
+        base_outfit_tags = outfit_tags_from_wd14(character_tags)
 
         # Respin of an already-finalised story: archive the previous version
         if draft.get("status") == "final":
@@ -3741,8 +3770,9 @@ async def run_chronicle_expand(
             })
             await story_db.set_story_payload(db, story_id, {"respin_history": hist})
 
-        # Divergence shaped the story back in Phase 1; expansion is faithful by
-        # design, so the old mutation-tag sampling stage is gone.
+        # Divergence shapes the premise in Phase 1 (build_story_arc_prompt's
+        # LEAP line); expansion is faithful by design, so the old mutation-tag
+        # sampling stage is gone. Kept here only to persist on the story doc.
         divergence = max(0.0, min(1.0, body.divergence))
         mutation_tags: list[str] = []
 
@@ -3755,6 +3785,43 @@ async def run_chronicle_expand(
             list(AXES) if not has_base
             else [a for a in AXES if a != body.base_time_axis]
         )
+
+        def _maybe_submit_pinup(story_id: str) -> None:
+            """Pinup (optional): a neutral reference of this character,
+            registered onto the base image doc + Biography. Built once per
+            image (the runner builds its own prompt + picks a pose).
+
+            Shared by BOTH the fast and slow paths — this used to live only in
+            the slow path, so fast mode silently never produced a portrait.
+            """
+            if not (
+                has_base
+                and body.generate_pinup
+                and body.workflow_name
+                and not doc.get("pinups")
+                and not doc.get("pinup_image_id")
+            ):
+                return
+            try:
+                pinup_job_id = spooler.submit(
+                    JobLane.GENERATION,
+                    "pinup_image",
+                    run_pinup_image_generate,
+                    meta={"group_id": body.group_id, "story_id": story_id,
+                          "base_sha256": body.base_sha256},
+                    db=db,
+                    ollama=ollama,
+                    comfy=comfy,
+                    base_sha256=body.base_sha256,
+                    story_id=story_id,
+                    workflow_name=body.workflow_name,
+                    seed=None,
+                    mode="add",
+                    pose_index=0,
+                )
+                _put({"type": "pinup_job", "job_id": pinup_job_id})
+            except Exception as exc:
+                logger.warning("[chronicle] pinup submit failed: %s", exc)
 
         # Biography (persistent character grounding) carried from Phase 1.
         biography = ctx.get("biography") or {}
@@ -3858,6 +3925,8 @@ async def run_chronicle_expand(
                                 or "escalation"
                             ),
                             base_axis=body.base_time_axis,
+                            base_outfit=base_outfit_tags,
+                            outfit_rule=scale_outfit_rule(body.time_scale),
                         ),
                         model=vlm_model, options=options, fmt="json", think=False,
                     )
@@ -3895,10 +3964,13 @@ async def run_chronicle_expand(
                     continue
                 base_line = axis_lines.get(axis) or ""
                 if not base_line:
-                    # Deterministic fallback — theme must + identity + beat cue.
+                    # Deterministic fallback — theme must + identity + outfit.
                     base_line = merge_chronicle_axis_tags(
-                        focal=[t for t in (theme_must or [])[:2]],
-                        search_tags=list(theme_must),
+                        focal=(
+                            [t for t in (theme_must or [])[:2]]
+                            or base_outfit_tags[:2]
+                        ),
+                        search_tags=list(theme_must) + list(base_outfit_tags),
                         lock_tags=lock_tags,
                         max_tags=FAST_PROMPT_MAX_TAGS,
                     )
@@ -3912,6 +3984,20 @@ async def run_chronicle_expand(
                     max_tags=FAST_PROMPT_MAX_TAGS,
                     priority_tags=prio,
                 )
+                # Short scales say the outfit is IDENTICAL, so force the base
+                # garments back deterministically rather than trusting the LLM.
+                # Longer scales legitimately allow a change — trust the line.
+                if (
+                    not theme_must
+                    and base_outfit_tags
+                    and body.time_scale in ("minutes", "tens_of_minutes", "hours")
+                ):
+                    tag_line = ensure_theme_must_tags(
+                        tag_line,
+                        base_outfit_tags,
+                        max_tags=FAST_PROMPT_MAX_TAGS,
+                        priority_tags=prio + base_outfit_tags,
+                    )
                 # Mid-rank WD14 spice (deprecated — only when wd14_prompt_spice).
                 inject_tags: list[str] = []
                 if bool(getattr(body, "wd14_prompt_spice", False)):
@@ -3951,6 +4037,20 @@ async def run_chronicle_expand(
                             ),
                         })
                 negative = fast_neg or ""
+                # Face guarantee: fast mode never ran this, so eye colour and
+                # expression could be missing or buried and the model would
+                # drop the face. Fast mode has no per-act feeling, so the
+                # expression comes from the run's emotion register (which falls
+                # back to "smile" — always a valid _EXPRESSION_TAGS member).
+                tag_line = ensure_face_tags(
+                    tag_line,
+                    expression_tag=expression_tag_for_feeling(
+                        "", emotion=body.emotion,
+                    ),
+                    lock_tags=lock_tags,
+                    priority_tags=prio,
+                    max_tags=FAST_PROMPT_MAX_TAGS,
+                )
                 axis_cats = bucket_danbooru_tags(tag_line)
                 positive = tag_line
                 prompts[axis] = {
@@ -4113,6 +4213,8 @@ async def run_chronicle_expand(
                     "message": "No workflow selected — image generation skipped.",
                 })
 
+            _maybe_submit_pinup(story_id)
+
             _emit_phase_timings()
             _put({
                 "type": "done",
@@ -4140,12 +4242,14 @@ async def run_chronicle_expand(
             time_scale=body.time_scale, locale="en",
         )
         base_act_fixed = dict(ctx.get("base_act_fixed") or {})
-        if has_base and not base_act_fixed:
+        # See the candidates runner: `"outfit" not in` refreshes a pre-outfit
+        # ctx without re-running for genuinely garment-less images.
+        if has_base and "outfit" not in base_act_fixed:
             base_act_fixed = base_act_from_image(
                 wd14_tags, scene_desc, emotion=body.emotion,
             )
         if has_base and base_act_fixed:
-            for f in ("activity", "place", "feeling"):
+            for f in ("activity", "place", "feeling", "outfit"):
                 if base_act_fixed.get(f):
                     acts[body.base_time_axis][f] = base_act_fixed[f]
         timetable: list = []
@@ -4263,8 +4367,23 @@ async def run_chronicle_expand(
             # Face guarantee: a valid expression tag rides in `focal` so it
             # enters prio_tags and survives the ≤20 cap.
             expr_tag = expression_tag_for_feeling(feeling, emotion=body.emotion)
+            # 服装: the act now says what she wears, so the image model no
+            # longer has to guess. A お題 costume pack (theme_must) is
+            # authoritative and suppresses the LLM's outfit entirely — merging
+            # the two lets find_mutex_conflict_tags prefer the focal garment and
+            # strip the pack (theme_must is not in `preferred` below).
+            outfit_tags: list[str] = []
+            if not theme_must:
+                outfit_tags = outfit_tags_from_words(act.get("outfit") or "", k=4)
+                # The model drops the field on some axes (measured). An
+                # unspecified outfit is the bug we are fixing, so fall back to
+                # the source image's garments — grounded and consistent beats
+                # letting the image model re-roll the clothes per axis.
+                if not outfit_tags:
+                    outfit_tags = base_outfit_tags[:2]
             focal = list(dict.fromkeys(
-                pose_tags + [t for t in shot_plan.values() if t] + [expr_tag]
+                pose_tags + [t for t in shot_plan.values() if t]
+                + outfit_tags + [expr_tag]
             ))
 
             scene_constraints = infer_axis_scene_constraints(story_en)
@@ -4363,6 +4482,12 @@ async def run_chronicle_expand(
             }
 
         # ── ONE polish call: Visual Script prose for all acts ─────────────────
+        # The 自然文 knob sizes the prose here AND raises the assembly cap below
+        # (assemble_capped_positive would otherwise truncate the long end to 60).
+        _prose_n = clamp_prose_paragraphs(
+            getattr(body, "prose_paragraphs", DEFAULT_PROSE_PARAGRAPHS)
+        )
+        _prose_max_words = chronicle_prose_budget(_prose_n)[1]
         prose_map: dict[str, str] = {a: "" for a in AXES}
         if body.prompt_style != "danbooru":
             _phase("polishingScript", 0.55, "Writing the Visual Scripts...")
@@ -4377,6 +4502,7 @@ async def run_chronicle_expand(
                                 for a in AXES
                             },
                             identity_tags=lock_tags,
+                            prose_paragraphs=_prose_n,
                         ),
                         model=models["story"], options=options, fmt="json",
                         think=story_think,
@@ -4396,8 +4522,12 @@ async def run_chronicle_expand(
             sources = list(dict.fromkeys(
                 lock_tags + st["axis_search_tags"] + focal + cand_tags
             ))[:80]
+            # theme_must leads: the お題 costume pack must win every mutex
+            # contest, otherwise a conflicting garment elsewhere in `sources`
+            # can strip the very tags theme_must_tags exists to guarantee.
             preferred = list(dict.fromkeys(
-                list(scene_constraints.get("must_tags") or [])
+                list(theme_must or [])
+                + list(scene_constraints.get("must_tags") or [])
                 + list(lock_tags) + list(focal)
             ))
             conflicts: set[str] = set()
@@ -4439,6 +4569,7 @@ async def run_chronicle_expand(
             tag_for_positive = "" if body.prompt_style == "natural" else tag_line
             positive = assemble_capped_positive(
                 tag_for_positive, prose, priority_tags=prio_tags,
+                max_prose_words=_prose_max_words,
             )
             positive = remove_conflict_tags(positive, conflicts, include_prose_groups=True)
             if tag_for_positive:
@@ -4450,6 +4581,7 @@ async def run_chronicle_expand(
                     )
                     positive = assemble_capped_positive(
                         head, tail if prose else "", priority_tags=prio_tags,
+                        max_prose_words=_prose_max_words,
                     )
             # Face guarantee: eye colour + expression must survive every cap
             # and conflict pass (anime models omit the face without them).
@@ -4649,7 +4781,9 @@ async def run_chronicle_expand(
                         "message": (
                             "Axis prompts look visually similar — "
                             "past/present/future may read as the same shot. "
-                            "Try a higher divergence or Respin story."
+                            "Respin the story, or raise divergence and respin "
+                            "the candidates (divergence shapes the premise, so "
+                            "it only takes effect on a new candidates pass)."
                         ),
                     })
                 else:
@@ -4787,36 +4921,7 @@ async def run_chronicle_expand(
             _put({"type": "warning",
                   "message": "No workflow selected — image generation skipped."})
 
-        # ── Pinup (optional): a neutral reference of this character, registered
-        # onto the base image doc + Biography. Built once per image (the runner
-        # builds its own prompt + picks a pose).
-        if (
-            has_base
-            and body.generate_pinup
-            and body.workflow_name
-            and not doc.get("pinups")
-            and not doc.get("pinup_image_id")
-        ):
-            try:
-                pinup_job_id = spooler.submit(
-                    JobLane.GENERATION,
-                    "pinup_image",
-                    run_pinup_image_generate,
-                    meta={"group_id": body.group_id, "story_id": story_id,
-                          "base_sha256": body.base_sha256},
-                    db=db,
-                    ollama=ollama,
-                    comfy=comfy,
-                    base_sha256=body.base_sha256,
-                    story_id=story_id,
-                    workflow_name=body.workflow_name,
-                    seed=None,
-                    mode="add",
-                    pose_index=0,
-                )
-                _put({"type": "pinup_job", "job_id": pinup_job_id})
-            except Exception as exc:
-                logger.warning("[chronicle] pinup submit failed: %s", exc)
+        _maybe_submit_pinup(story_id)
 
         _emit_phase_timings()
         _put({
@@ -5008,6 +5113,8 @@ def _build_pinup_positive(
     from ..story.generator import (
         character_tags_from_wd14,
         classify_identity_tag,
+        ensure_face_tags,
+        expression_tag_for_feeling,
         identity_lock_tags,
         inject_identity_tags,
         is_multi_character,
@@ -5026,7 +5133,14 @@ def _build_pinup_positive(
             merged.append(tag)
     line = _ensure_subject_anchor(", ".join(merged), [(doc, 0)])
     line = inject_identity_tags(line, lock)
-    return _strip_quality_metatags(line)
+    line = _strip_quality_metatags(line)
+    # A pinup is a character reference — the face is the whole point.
+    return ensure_face_tags(
+        line,
+        expression_tag=expression_tag_for_feeling(""),
+        lock_tags=lock,
+        priority_tags=lock,
+    )
 
 
 async def run_pinup_image_generate(

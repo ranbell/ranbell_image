@@ -58,7 +58,7 @@ const DRAMATIC_MODES = [
 const dramaticMode = ref('')
 const TONES = ['bright', 'neutral', 'dark']
 const tone = ref('bright')
-const timeScaleIdx = ref(5)
+const timeScaleIdx = ref(TIME_SCALES.indexOf('hours'))
 const useRefSeed = ref(true)
 const manualMode = ref(false)
 const fastMode = ref(false)
@@ -70,6 +70,8 @@ const generatePinup = ref(false)
 function currentTimeScale() {
   return TIME_SCALES[timeScaleIdx.value] || 'years'
 }
+// Deprecated server-side (mechanical mutex rules replaced the LLM conflict
+// pass), so there is no UI for it — still sent so the request shape is stable.
 const suppressConflictTags = ref(true)
 const useDraftRefine = ref('auto') // auto | on | off
 const draftWidth = ref(512)
@@ -91,99 +93,15 @@ const phaseStartedAt = ref(null)
 const nowTick = ref(Date.now())
 let _phaseTickTimer = null
 const pinupJobId = ref('')
-const compareSnapshot = ref(null) // { label, prose, divergence } before applying a knob preset
 
-const WHAT_IF = [
-  {
-    id: 'rain_night',
-    topicJa: '雨の夜、傘を忘れたちょっとの寄り道',
-    topicEn: 'A rainy night detour after forgetting an umbrella',
-    worldviewJa: '濡れたネオンと静かな路地',
-    worldviewEn: 'Wet neon and quiet alleys',
-    tone: 'dark',
-    emotion: 'melancholy',
-    dramatic: 'revelation',
-    scale: 'hours',
-    prose: 4,
-    divergence: 0.35,
-  },
-  {
-    id: 'ten_years',
-    topicJa: '十年後、同じ場所で再開する',
-    topicEn: 'Reunion at the same place ten years later',
-    worldviewJa: '季節の変わった馴染みの街',
-    worldviewEn: 'A familiar town after many seasons',
-    tone: 'neutral',
-    emotion: 'nostalgia',
-    dramatic: 'reversal',
-    scale: 'decades',
-    prose: 6,
-    divergence: 0.45,
-  },
-  {
-    id: 'duo',
-    topicJa: '二人で逃げる、短い午後',
-    topicEn: 'A short afternoon on the run together',
-    worldviewJa: '風の強い海岸線',
-    worldviewEn: 'A windy coastline',
-    tone: 'bright',
-    emotion: 'joy',
-    dramatic: 'pursuit',
-    scale: 'tens_of_minutes',
-    prose: 5,
-    divergence: 0.4,
-  },
-  {
-    id: 'festival',
-    topicJa: '祭りのあと、提灯が消えていく',
-    topicEn: 'After the festival, lanterns going dark',
-    worldviewJa: '夏の縁日と残響',
-    worldviewEn: 'Summer fairground afterglow',
-    tone: 'bright',
-    emotion: 'ephemeral',
-    dramatic: 'parting',
-    scale: 'hours',
-    prose: 5,
-    divergence: 0.3,
-  },
+// Shortcuts for the 自然文 slider, shown next to it in 出力・生成.
+const PROSE_PRESETS = [
+  { id: 'prose_short', labelKey: 'chronicle.knobProseShort', prose: 3 },
+  { id: 'prose_long', labelKey: 'chronicle.knobProseLong', prose: 7 },
 ]
 
-const KNOB_PRESETS = [
-  { id: 'prose_short', labelKey: 'chronicle.knobProseShort', prose: 3, divergence: null },
-  { id: 'prose_long', labelKey: 'chronicle.knobProseLong', prose: 7, divergence: null },
-  { id: 'diverge_low', labelKey: 'chronicle.knobDivergeLow', prose: null, divergence: 0.1 },
-  { id: 'diverge_high', labelKey: 'chronicle.knobDivergeHigh', prose: null, divergence: 0.75 },
-]
-
-function applyWhatIf(preset, { startNow = true } = {}) {
-  const ja = uiLocale.value === 'ja'
-  userTopic.value = ja ? preset.topicJa : preset.topicEn
-  worldview.value = ja ? preset.worldviewJa : preset.worldviewEn
-  tone.value = preset.tone
-  emotion.value = EMOTION_DIMENSIONS.includes(preset.emotion) ? preset.emotion : ''
-  dramaticMode.value = DRAMATIC_MODES.includes(preset.dramatic) ? preset.dramatic : ''
-  const si = TIME_SCALES.indexOf(preset.scale)
-  if (si >= 0) timeScaleIdx.value = si
-  if (preset.prose) proseParagraphs.value = preset.prose
-  if (typeof preset.divergence === 'number') divergence.value = preset.divergence
-  if (startNow && !running.value) start()
-}
-
-function applyKnobPreset(preset) {
-  compareSnapshot.value = {
-    label: t(preset.labelKey),
-    prose: proseParagraphs.value,
-    divergence: divergence.value,
-  }
-  if (preset.prose != null) proseParagraphs.value = preset.prose
-  if (preset.divergence != null) divergence.value = preset.divergence
-}
-
-function restoreKnobSnapshot() {
-  if (!compareSnapshot.value) return
-  proseParagraphs.value = compareSnapshot.value.prose
-  divergence.value = compareSnapshot.value.divergence
-  compareSnapshot.value = null
+function applyProsePreset(preset) {
+  proseParagraphs.value = preset.prose
 }
 
 const weaverTeasers = computed(() =>
@@ -934,6 +852,46 @@ function clearBase() {
   thumbFailed.value = false
 }
 
+const topicSuggesting = ref(false)
+
+/** Fill お題 with a short 起承転結 premise read off the base image.
+ *  Only prefills the field — the user reviews/edits and starts the run. */
+async function suggestTopicFromImage() {
+  if (!baseSha.value || topicSuggesting.value) return
+  topicSuggesting.value = true
+  try {
+    const r = await fetch('/api/story/topic-suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base_sha256: baseSha.value,
+        locale: uiLocale.value,
+        worldview: worldview.value,
+        llm_provider: llmProvider.value,
+        ...(llmProvider.value === 'openai' && openaiModel.value.trim()
+          ? { vlm_model: openaiModel.value.trim() }
+          : {}),
+      }),
+    })
+    if (!r.ok) {
+      let detail = r.statusText
+      try { detail = (await r.json()).detail || detail } catch { /* non-JSON error body */ }
+      throw new Error(detail)
+    }
+    const data = await r.json()
+    if (!data.topic) throw new Error(t('chronicle.topicFromImageEmpty'))
+    userTopic.value = data.topic
+    emit('toast', { msg: t('chronicle.topicFromImageDone'), type: 'success' })
+  } catch (err) {
+    emit('toast', {
+      msg: t('chronicle.topicFromImageFailed', { reason: String(err.message || err) }),
+      type: 'error',
+    })
+  } finally {
+    topicSuggesting.value = false
+  }
+}
+
 async function start() {
   if (!baseSha.value && !userTopic.value.trim()) {
     emit('toast', { msg: t('chronicle.needTopicOrBase'), type: 'error' })
@@ -1341,8 +1299,20 @@ async function generateImages() {
                   </p>
                   <div class="flex items-start gap-2">
                     <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.userTopic') }}</span>
-                    <textarea v-model="userTopic" rows="2" :placeholder="t('chronicle.userTopicPh')"
-                      class="sb-textarea flex-1"></textarea>
+                    <div class="flex-1 flex flex-col gap-1 min-w-0">
+                      <textarea v-model="userTopic" rows="2" :placeholder="t('chronicle.userTopicPh')"
+                        class="sb-textarea w-full"></textarea>
+                      <button v-if="baseSha" type="button"
+                        class="sb-chip self-start"
+                        :class="topicSuggesting ? 'is-chip-on-teal' : ''"
+                        :disabled="topicSuggesting || settingsLocked"
+                        :title="t('chronicle.topicFromImageTitle')"
+                        @click="suggestTopicFromImage">
+                        <SbIcon :name="topicSuggesting ? 'refresh' : 'spark'"
+                          class="w-3 h-3 inline mr-1" :class="topicSuggesting ? 'animate-spin' : ''" />
+                        {{ topicSuggesting ? t('chronicle.topicFromImageBusy') : t('chronicle.topicFromImage') }}
+                      </button>
+                    </div>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.timeScaleTitle')">
@@ -1421,8 +1391,8 @@ async function generateImages() {
                 </div>
               </details>
 
-              <!-- output (closed) -->
-              <details class="rounded-xl border border-white/5 bg-black/20">
+              <!-- output (open) -->
+              <details open class="rounded-xl border border-white/5 bg-black/20">
                 <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
                   <span class="flex items-center gap-1.5">
                     <SbIcon name="image" class="w-3.5 h-3.5 text-teal-400/80" />
@@ -1430,19 +1400,27 @@ async function generateImages() {
                   </span>
                 </summary>
                 <div class="px-3 pb-3 pt-1 flex flex-col gap-3 text-xs">
-                  <div class="flex items-center gap-2 flex-wrap">
+                  <p v-if="fastMode" class="text-[10px] text-amber-300/80 leading-snug">
+                    {{ t('chronicle.fastModeIgnores') }}
+                  </p>
+                  <div class="flex items-center gap-2 flex-wrap" :class="fastMode ? 'opacity-40' : ''">
                     <span class="sb-label w-20 shrink-0">{{ t('chronicle.promptStyle') }}</span>
                     <button v-for="m in ['danbooru+natural', 'natural', 'danbooru']" :key="m" type="button"
+                      :disabled="fastMode"
+                      :title="fastMode ? t('chronicle.fastModeIgnores') : ''"
                       @click="promptStyle = m"
                       class="sb-chip" :class="promptStyle === m ? 'is-chip-on-teal' : ''">
                       {{ t('chronicle.style.' + m.replace('+', '_')) }}
                     </button>
                   </div>
-                  <div v-if="promptStyle !== 'danbooru'" class="flex items-center gap-2">
-                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.proseLengthTitle')">
+                  <div v-if="promptStyle !== 'danbooru'" class="flex items-center gap-2"
+                    :class="fastMode ? 'opacity-40' : ''">
+                    <span class="sb-label w-20 shrink-0"
+                      :title="fastMode ? t('chronicle.fastModeIgnores') : t('chronicle.proseLengthTitle')">
                       {{ t('chronicle.proseLengthLabel') }}
                     </span>
                     <input v-model.number="proseParagraphs" type="range" min="3" max="7" step="1"
+                      :disabled="fastMode"
                       class="flex-1 accent-teal-500" />
                     <span class="text-teal-400 w-16 text-right text-[11px] font-mono">
                       {{ proseParagraphs }}{{ t('chronicle.proseLengthUnit') }}
@@ -1455,21 +1433,18 @@ async function generateImages() {
                   </div>
                   <div v-if="promptStyle !== 'danbooru'" class="flex flex-wrap gap-1 pl-[calc(5rem+0.5rem)]">
                     <button
-                      v-for="k in KNOB_PRESETS.filter(p => p.prose != null)"
+                      v-for="k in PROSE_PRESETS"
                       :key="k.id"
                       type="button"
                       class="sb-chip"
-                      @click="applyKnobPreset(k)"
+                      :disabled="fastMode"
+                      @click="applyProsePreset(k)"
                     >{{ t(k.labelKey) }}</button>
                   </div>
                   <div class="flex items-center flex-wrap gap-4">
                     <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]">
                       <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" />
                       {{ t('chronicle.seedInherit') }}
-                    </label>
-                    <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]" :title="t('chronicle.suppressConflictTitle')">
-                      <input v-model="suppressConflictTags" type="checkbox" class="accent-teal-500" />
-                      {{ t('chronicle.suppressConflict') }}
                     </label>
                     <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]" :title="t('chronicle.pinupTitle')">
                       <input v-model="generatePinup" type="checkbox" class="accent-teal-500" />
@@ -1492,18 +1467,22 @@ async function generateImages() {
                   </p>
                   <label
                     class="flex items-start gap-2 cursor-pointer text-xs"
-                    :class="similarTagMix ? 'text-teal-300' : 'text-[var(--sb-muted)]'"
-                    :title="t('chronicle.similarTagMixTitle')"
+                    :class="fastMode ? 'opacity-40 text-[var(--sb-muted)]'
+                      : (similarTagMix ? 'text-teal-300' : 'text-[var(--sb-muted)]')"
+                    :title="fastMode ? t('chronicle.fastModeIgnores') : t('chronicle.similarTagMixTitle')"
                   >
-                    <input v-model="similarTagMix" type="checkbox" class="accent-teal-500 mt-0.5" />
+                    <input v-model="similarTagMix" type="checkbox" :disabled="fastMode"
+                      class="accent-teal-500 mt-0.5" />
                     <span>
                       <span class="font-medium">{{ t('chronicle.similarTagMix') }}</span>
                       <span class="block text-[10px] text-teal-500/80 mt-0.5">{{ t('chronicle.similarTagMixHint') }}</span>
                     </span>
                   </label>
-                  <div v-if="similarTagMix" class="flex items-center gap-2 flex-wrap pl-6">
+                  <div v-if="similarTagMix" class="flex items-center gap-2 flex-wrap pl-6"
+                    :class="fastMode ? 'opacity-40' : ''">
                     <span class="sb-label shrink-0" :title="t('chronicle.similarTagMixRatioTitle')">{{ t('chronicle.similarTagMixRatio') }}</span>
                     <input v-model.number="similarTagMixRatio" type="range" min="0.1" max="0.7" step="0.05"
+                      :disabled="fastMode"
                       class="flex-1 accent-teal-500" />
                     <span class="text-[11px] font-mono text-teal-300 w-10 text-right">
                       {{ Math.round(similarTagMixRatio * 100) }}%
@@ -1664,47 +1643,6 @@ async function generateImages() {
               <p class="sb-display text-base text-[var(--sb-muted)] leading-relaxed whitespace-pre-line">
                 {{ t('chronicle.idleHint') }}
               </p>
-              <div class="what-if-grid w-full max-w-lg">
-                <p class="text-[10px] uppercase tracking-wider text-teal-400/70 mb-2">{{ t('chronicle.whatIfTitle') }}</p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    v-for="w in WHAT_IF"
-                    :key="w.id"
-                    type="button"
-                    class="what-if-chip text-left"
-                    :disabled="settingsLocked"
-                    @click="applyWhatIf(w)"
-                  >
-                    <span class="what-if-chip__title">{{ t('chronicle.whatIf.' + w.id) }}</span>
-                    <span class="what-if-chip__desc">{{ uiLocale === 'ja' ? w.topicJa : w.topicEn }}</span>
-                  </button>
-                </div>
-                <p class="text-[10px] text-[var(--sb-faint)] mt-2">{{ t('chronicle.whatIfHint') }}</p>
-              </div>
-              <div class="w-full max-w-lg border-t border-white/5 pt-3">
-                <p class="text-[10px] uppercase tracking-wider text-[var(--sb-muted)] mb-2">{{ t('chronicle.knobCompareTitle') }}</p>
-                <div class="flex flex-wrap gap-1.5 justify-center">
-                  <button
-                    v-for="k in KNOB_PRESETS"
-                    :key="k.id"
-                    type="button"
-                    class="sb-chip"
-                    :disabled="settingsLocked"
-                    @click="applyKnobPreset(k)"
-                  >{{ t(k.labelKey) }}</button>
-                  <button
-                    v-if="compareSnapshot"
-                    type="button"
-                    class="sb-chip is-chip-on"
-                    @click="restoreKnobSnapshot"
-                  >{{ t('chronicle.knobRestore') }}</button>
-                </div>
-                <p v-if="compareSnapshot" class="text-[10px] text-teal-300/80 mt-1.5 font-mono">
-                  {{ compareSnapshot.label }}
-                  · {{ t('chronicle.proseLengthLabel') }} {{ proseParagraphs }}
-                  · {{ t('chronicle.divergence') }} {{ Math.round(divergence * 100) }}%
-                </p>
-              </div>
             </div>
 
             <!-- Status HUD: full-stage loom while waiting for first content -->
@@ -2537,32 +2475,6 @@ async function generateImages() {
 
 details > summary::-webkit-details-marker { display: none; }
 fieldset:disabled { pointer-events: none; }
-
-.what-if-chip {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.7rem 0.8rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(45, 212, 191, 0.2);
-  background: linear-gradient(145deg, rgba(15, 118, 110, 0.25), rgba(0, 0, 0, 0.35));
-  transition: transform 0.2s ease, border-color 0.2s, box-shadow 0.2s;
-}
-.what-if-chip:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: rgba(45, 212, 191, 0.45);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
-}
-.what-if-chip__title {
-  font-family: var(--sb-font-display);
-  font-size: 0.8rem;
-  color: #99f6e4;
-}
-.what-if-chip__desc {
-  font-size: 0.65rem;
-  line-height: 1.35;
-  color: #8b929e;
-}
 
 .weaver-teaser-card {
   display: flex;

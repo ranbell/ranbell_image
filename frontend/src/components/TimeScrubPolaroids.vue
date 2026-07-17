@@ -1,33 +1,24 @@
 <script setup>
-import { computed } from 'vue'
+/**
+ * Past / present / future as a row of polaroids — all three visible at once.
+ *
+ * This used to stack them and dim everything except one "front" card, so
+ * reading the whole timeline meant scrubbing back and forth. The cards now sit
+ * side by side, equally lit, each captioned in the polaroid's own bottom strip.
+ */
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps({
+defineProps({
   axes: { type: Array, default: () => ['past', 'present', 'future'] },
-  frontIndex: { type: Number, default: 1 },
   baseAxis: { type: String, default: 'present' },
   imageFor: { type: Function, required: true },
   size: { type: String, default: 'md' }, // sm | md | lg
-  showScrub: { type: Boolean, default: true },
   pendingLabel: { type: String, default: '…' },
 })
 
-const emit = defineEmits(['update:frontIndex', 'open-image', 'thumb-error'])
+const emit = defineEmits(['open-image', 'thumb-error'])
 
 const { t } = useI18n()
-
-const front = computed(() =>
-  props.axes[Math.max(0, Math.min(props.axes.length - 1, props.frontIndex))] || props.axes[1]
-)
-
-function setFront(i, e) {
-  e?.stopPropagation?.()
-  emit('update:frontIndex', i)
-}
-
-function onScrub(e) {
-  emit('update:frontIndex', Number(e.target.value))
-}
 
 function onImgError(e, sha) {
   emit('thumb-error', e, sha)
@@ -35,99 +26,79 @@ function onImgError(e, sha) {
 </script>
 
 <template>
-  <div class="ts-polaroid-wrap" :class="'ts-size-' + size" @click.stop>
-    <div
-      class="polaroid-stack is-scrubbing"
-      :class="{ 'polaroid-stack-sm': size === 'sm', 'polaroid-stack-lg': size === 'lg' }"
-      @pointerdown.stop
+  <div class="ts-row" :class="'ts-size-' + size" @click.stop @pointerdown.stop>
+    <figure
+      v-for="axis in axes"
+      :key="axis"
+      class="polaroid"
+      :class="[axis, axis === baseAxis ? 'base' : '']"
+      :title="t('chronicle.axis.' + axis)"
     >
-      <div
-        v-for="(axis, i) in axes"
-        :key="axis"
-        class="polaroid"
-        :class="[
-          axis,
-          axis === baseAxis ? 'base' : '',
-          axis === front ? 'is-front' : '',
-        ]"
-        @click.stop="setFront(i)"
-      >
+      <div class="polaroid-window">
         <img
           v-if="imageFor(axis)"
           :src="`/api/thumbnails/${imageFor(axis)}.webp`"
           loading="lazy"
+          :alt="t('chronicle.axis.' + axis)"
           @error="onImgError($event, imageFor(axis))"
-          @dblclick.stop="imageFor(axis) && emit('open-image', imageFor(axis))"
+          @click.stop="emit('open-image', imageFor(axis))"
+          @dblclick.stop="emit('open-image', imageFor(axis))"
         />
         <span v-else class="polaroid-empty">{{ pendingLabel }}</span>
       </div>
-    </div>
-
-    <div v-if="showScrub" class="ts-scrub" @click.stop @pointerdown.stop>
-      <button
-        v-for="(axis, i) in axes"
-        :key="'t-' + axis"
-        type="button"
-        class="ts-scrub-tick"
-        :class="{ 'is-on': i === frontIndex, 'is-base': axis === baseAxis }"
-        :title="t('chronicle.axis.' + axis)"
-        @click="setFront(i)"
-      >
+      <figcaption class="polaroid-caption">
         {{ t('chronicle.axis.' + axis) }}
-      </button>
-      <input
-        class="ts-scrub-range"
-        type="range"
-        min="0"
-        :max="axes.length - 1"
-        step="1"
-        :value="frontIndex"
-        :aria-label="t('storybook.timeScrubAria')"
-        @input="onScrub"
-      />
-    </div>
+      </figcaption>
+    </figure>
   </div>
 </template>
 
 <style scoped>
-.ts-polaroid-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
+.ts-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
   width: 100%;
+  align-items: start;
 }
-
-.polaroid-stack {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  width: 100%;
-  perspective: 900px;
-}
-.polaroid-stack-lg {
-  max-width: 22rem;
+.ts-size-lg {
+  gap: 0.9rem;
+  max-width: 34rem;
   margin: 0 auto;
 }
+.ts-size-sm { gap: 0.3rem; }
 
 .polaroid {
-  position: absolute;
-  top: 12%;
-  left: 16%;
-  width: 68%;
-  height: 68%;
-  background: #d8dce4;
-  border: 4px solid #d8dce4;
-  border-bottom-width: 22px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
-  transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1),
-    box-shadow 0.5s, opacity 0.35s, filter 0.35s;
-  overflow: hidden;
-  cursor: pointer;
+  margin: 0;
+  background: linear-gradient(170deg, #eef1f6 0%, #d8dce4 100%);
+  padding: 4px 4px 0;
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s;
+  /* A hand-pinned tilt, alternating so the row reads as three separate prints
+     rather than a grid. Kept small so nothing overlaps its neighbour. */
+  transform: rotate(-1.6deg);
 }
-.polaroid img {
+.polaroid.present { transform: rotate(1.2deg); }
+.polaroid.future { transform: rotate(-0.6deg); }
+.polaroid:hover {
+  transform: rotate(0deg) translateY(-3px) scale(1.03);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+
+.polaroid-window {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: #11151c;
+}
+.polaroid-window img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  cursor: zoom-in;
 }
 .polaroid-empty {
   display: flex;
@@ -136,63 +107,41 @@ function onImgError(e, sha) {
   height: 100%;
   color: #64748b;
   font-size: 0.7rem;
-  padding: 0.5rem;
+  padding: 0.4rem;
   text-align: center;
 }
-.polaroid.past { transform: translate(-16%, -6%) rotate(-6deg); z-index: 1; }
-.polaroid.present { transform: translate(0, 0) rotate(2deg); z-index: 2; }
-.polaroid.future { transform: translate(16%, 6%) rotate(8deg); z-index: 3; }
-.polaroid.base {
-  box-shadow: 0 0 0 2px rgba(232, 196, 122, 0.55), 0 6px 16px rgba(0, 0, 0, 0.4);
-}
 
-.polaroid-stack.is-scrubbing .polaroid {
-  opacity: 0.42;
-  filter: brightness(0.78) saturate(0.85);
-}
-.polaroid-stack.is-scrubbing .polaroid.is-front {
-  z-index: 12 !important;
-  opacity: 1;
-  filter: none;
-  transform: translate(0, -6%) rotate(0deg) scale(1.12) !important;
-  box-shadow:
-    0 0 0 2px rgba(232, 196, 122, 0.45),
-    0 16px 36px rgba(0, 0, 0, 0.55);
-}
-
-.polaroid-stack-sm .polaroid {
-  border-width: 3px;
-  border-bottom-width: 14px;
-}
-
-.ts-scrub {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 0.25rem 0.35rem;
-  align-items: center;
-}
-.ts-scrub-tick {
-  font-size: 0.55rem;
-  letter-spacing: 0.04em;
+/* The classic polaroid chin, now carrying the axis label. */
+.polaroid-caption {
+  font-family: var(--sb-font-display, inherit);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #5c6470;
-  padding: 0.15rem 0.2rem;
-  border-radius: 0.3rem;
-  border: 1px solid transparent;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  text-align: center;
+  color: #4b5563;
+  padding: 0.3rem 0.15rem 0.4rem;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.ts-scrub-tick.is-on {
-  color: #fef3c7;
-  background: rgba(146, 64, 14, 0.4);
-  border-color: rgba(232, 196, 122, 0.3);
+.ts-size-lg .polaroid-caption {
+  font-size: 0.72rem;
+  padding: 0.45rem 0.2rem 0.6rem;
 }
-.ts-scrub-tick.is-base:not(.is-on) {
-  color: #7dd3c7;
+.ts-size-sm .polaroid { padding: 3px 3px 0; }
+.ts-size-sm .polaroid-caption {
+  font-size: 0.5rem;
+  padding: 0.2rem 0.1rem 0.28rem;
 }
-.ts-scrub-range {
-  grid-column: 1 / -1;
-  width: 100%;
-  accent-color: #e8c47a;
-  height: 0.9rem;
+
+/* The 元絵 keeps its amber pin. */
+.polaroid.base {
+  box-shadow: 0 0 0 2px rgba(232, 196, 122, 0.55), 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.polaroid.base .polaroid-caption { color: #92400e; font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  .polaroid, .polaroid:hover { transition: none; transform: none; }
 }
 </style>

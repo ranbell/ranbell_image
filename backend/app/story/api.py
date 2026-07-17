@@ -4,6 +4,7 @@ POST /api/story/chronicle                    — Phase 1: pitch 3 candidates
 POST /api/story/chronicle/{story_id}/select  — Phase 2: expand chosen candidate
 POST /api/story/chronicle/{story_id}/respin  — regenerate (candidates | expand)
 GET  /api/story/chronicle/{job_id}/stream    — SSE token/event stream for a job
+POST /api/story/topic-suggest          — 起承転結 お題 from a base image (no job)
 GET  /api/story/storybook              — list saved stories (newest first)
 GET  /api/story/{story_id}             — one story
 POST /api/story/{story_id}/generate-images   — manual-mode continue (writes
@@ -80,8 +81,9 @@ class ChronicleRequest(BaseModel):
     story_think: bool | None = None
     temperature: float = 1.0  # Gemma 4 recommended default
     num_ctx: int = 16384
-    # Visual Script prose length (paragraphs 3–7). Chronicle lean path
-    # truncates to ≤60 words regardless — keep the default short.
+    # Visual Script prose length (3–7) → per-act word budget via
+    # generator.chronicle_prose_budget. Ignored in fast_mode (tags only, no
+    # prose stage).
     prose_paragraphs: int = 3
     locale: Literal["en", "ja"] = "en"  # language the story is written in
     group_id: str = ""  # issued server-side on submission
@@ -126,6 +128,24 @@ class RespinRequest(BaseModel):
 
 class PinupRequest(BaseModel):
     mode: Literal["add", "replace"] = "add"
+
+
+class TopicSuggestRequest(BaseModel):
+    base_sha256: str
+    locale: Literal["en", "ja"] = "ja"
+    worldview: str = ""
+    llm_provider: Literal["ollama", "openai"] = "ollama"
+    vlm_model: str = ""
+    utility_model: str = ""
+    temperature: float = 1.0
+    num_ctx: int = 8192
+
+
+class TopicSuggestResponse(BaseModel):
+    topic: str  # 1–2 sentences, prefills the お題 field
+    beats: dict[str, str]  # {"ki","shou","ten","ketsu"} — for display
+    locale: str
+    base_sha256: str
 
 
 _RESPIN_OVERRIDE_FIELDS = (
@@ -206,6 +226,125 @@ async def start_chronicle(body: ChronicleRequest, request: Request):
         body_dict=body.model_dump(),
     )
     return {"job_id": job_id, "group_id": body.group_id, "status": "queued"}
+
+
+@router.post("/topic-suggest", response_model=TopicSuggestResponse)
+async def suggest_topic(body: TopicSuggestRequest, request: Request):
+    """Suggest a SHORT 起承転結 お題 from the base image (prefills the topic
+    field). Does NOT start a story run.
+
+    A plain awaited call, not a spooler job + SSE: the output is 1–2 sentences
+    with nothing to stream, and the PROMPT lane would queue this behind a
+    running chronicle, leaving the button dead for minutes. GPU concurrency is
+    guarded by LlmGateway.set_resource, which applies to a direct call too.
+    """
+    from ..jobs.runners import (
+        _chronicle_bind_llm,
+        _chronicle_llm_options,
+        _chronicle_models,
+        _vlm_image_bytes,
+    )
+    from ..runtime_config import get_runtime_config
+    from .generator import (
+        base_act_from_image,
+        build_json_translation_prompt,
+        build_topic_suggest_prompt,
+        build_vision_prompt,
+        character_tags_from_wd14,
+        parse_flat_json_translation,
+        parse_topic_suggest_json,
+        split_vision_sections,
+    )
+
+    db = request.app.state.db
+    doc = await db.get(body.base_sha256)
+    if not doc:
+        raise HTTPException(404, "Base image not found")
+
+    cfg = await get_runtime_config(db)
+    llm = _chronicle_bind_llm(request.app.state.ollama, body)
+    models = _chronicle_models(body, cfg)
+    options = _chronicle_llm_options(body, body.temperature, cfg)
+
+    wd14 = doc.get("wd14_tags") or []
+    character_tags = character_tags_from_wd14(wd14)
+
+    try:
+        async with asyncio.timeout(90):
+            if character_tags:
+                # WD14 already covers appearance / pose / place, so skip the
+                # VLM read entirely (~1–3s instead of ~30s). Mirrors the
+                # expand runner's build_vision_prompt(full_extraction=not
+                # character_tags) decision.
+                desc = "[visual tags] " + ", ".join(character_tags)
+                scene = ""
+                base_act = base_act_from_image(wd14, "")
+            else:
+                image_bytes = _vlm_image_bytes(doc)
+                vis = await llm.generate_vlm(
+                    build_vision_prompt(full_extraction=True), [image_bytes],
+                    model=models["vision"], options=options,
+                )
+                desc, _hooks = split_vision_sections(vis)
+                scene = desc
+                base_act = {}
+
+            prompt = build_topic_suggest_prompt(
+                character_desc=desc,
+                scene_desc=scene,
+                base_act=base_act,
+                worldview=body.worldview,
+            )
+            out = {"topic": "", "beats": {}}
+            for attempt in range(2):  # one retry, like the arc stage
+                raw = await llm.generate_text(
+                    prompt, model=models["utility"], options=options,
+                    fmt="json", think=False,
+                )
+                out = parse_topic_suggest_json(raw)
+                if out.get("topic"):
+                    break
+                logger.info("[story] topic-suggest attempt %d unparseable", attempt + 1)
+            if not out.get("topic"):
+                raise HTTPException(502, "Topic suggestion produced no text")
+
+            # Authored in English on purpose (see build_topic_suggest_prompt);
+            # the ja UI gets a batched display translation, like the arc stage.
+            if body.locale == "ja":
+                src = {"topic": out["topic"], **out["beats"]}
+                try:
+                    tr = parse_flat_json_translation(
+                        await llm.generate_text(
+                            build_json_translation_prompt(src, target="Japanese"),
+                            model=models["utility"], options=options, fmt="json",
+                        ),
+                        list(src),
+                    )
+                    if tr.get("topic"):
+                        out["topic"] = tr["topic"]
+                        out["beats"] = {
+                            k: tr.get(k) or v for k, v in out["beats"].items()
+                        }
+                except Exception as exc:
+                    # The English topic is still usable — the arc prompt says
+                    # "follow the topic, do not translate it".
+                    logger.warning("[story] topic-suggest ja translation failed: %s", exc)
+    except HTTPException:
+        raise
+    except FileNotFoundError:
+        raise HTTPException(404, "Base image file missing")
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(504, "Topic suggestion timed out")
+    except Exception as exc:
+        logger.warning("[story] topic-suggest failed: %s", exc)
+        raise HTTPException(502, "Topic suggestion failed")
+
+    return TopicSuggestResponse(
+        topic=out["topic"],
+        beats=out.get("beats") or {},
+        locale=body.locale,
+        base_sha256=body.base_sha256,
+    )
 
 
 @router.post("/chronicle/{story_id}/select")

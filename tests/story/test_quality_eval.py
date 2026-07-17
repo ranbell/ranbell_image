@@ -139,6 +139,45 @@ def test_empty_prompt_axes_are_skipped_not_perfect():
     assert q["scored_axes"] == ["past", "present", "future"]
 
 
+def test_scores_two_axes_when_base_image_supplies_one():
+    """Regression: every image-seeded chronicle failed scoring.
+
+    With a base image the runner regenerates only the OTHER two axes and passes
+    scored_axes=[2 axes], but _mean_pairwise_similarity hardcoded the pairs
+    (0,1)/(0,2)/(1,2) — beats[2] raised IndexError, surfacing in the UI as
+    "品質採点に失敗しました: list index out of range".
+    """
+    for axes in (["past", "future"], ["present", "future"], ["past", "present"]):
+        q = evaluate_chronicle_quality(
+            prompts=_good_prompts(),
+            stories={
+                "past": "She spills milk.",
+                "present": "She pours latte art.",
+                "future": "She teaches a junior.",
+            },
+            activities={
+                "past": "spilling milk",
+                "present": "pouring latte",
+                "future": "teaching junior",
+            },
+            time_scale="years",
+            scored_axes=axes,
+        )
+        assert q.get("ok") is not False, q.get("error")
+        assert q["scored_axes"] == axes
+        assert 0.0 <= q["dimensions"]["diversity"] <= 1.0
+
+
+def test_mean_pairwise_similarity_any_arity():
+    from app.story.generator import _mean_pairwise_similarity as mps
+
+    assert mps([]) == 0.0
+    assert mps(["only one"]) == 0.0          # no pairs → no similarity
+    assert mps(["same", "same"]) == 1.0
+    assert mps(["same", "same", "same"]) == 1.0  # 3-beat behaviour preserved
+    assert mps(["a totally different beat", "unrelated words here"]) < 1.0
+
+
 def test_topic_fit_includes_prompts_and_directive():
     """topic_fit should consider prompt tag text and topic_directive aliases."""
     weak = evaluate_chronicle_quality(

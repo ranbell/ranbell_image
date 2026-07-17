@@ -22,6 +22,7 @@ ja acts first). CJK input returns [] so callers fall back to catalog matching.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Iterable
 
 import numpy as np
@@ -339,6 +340,65 @@ def fallback_scene_tags(place_text: str, *, k: int = 5) -> list[str]:
             if len(out) >= k:
                 break
     return out
+
+
+def outfit_tags_from_words(outfit_text: str, *, k: int = 4) -> list[str]:
+    """Ground an act's free-text `outfit` phrase into danbooru clothing tags.
+
+    Pure and deterministic — unlike retrieve_pose_tags/retrieve_scene_tags this
+    needs no vocab collection and no embed call, because CLOTHING_EXPLICIT is a
+    small closed set (~76 entries) that exact matching covers well.
+
+    Matching is deliberately STRICT, because a loose match here is worse than
+    no match: two contradictory garments in one prompt (school_uniform +
+    military_uniform) fight each other and get mutex-stripped downstream.
+      * whole-token hits only — "tie" must not match "un(tie)d";
+      * longest tag first, and never a tag contained in one already taken
+        ("swimsuit" is dropped when "school_swimsuit" matched);
+      * the stem pass requires EVERY part of a multi-word tag to appear, so
+        "school uniform" cannot pull in military_uniform via the shared word.
+    """
+    text = (outfit_text or "").strip().lower()
+    if not text:
+        return []
+    # Match on a normalized key but always EMIT the canonical danbooru tag
+    # ("one-piece_swimsuit" keeps its hyphen — the emitted string is a real tag).
+    pool: list[tuple[str, str]] = sorted(
+        (
+            (re.sub(r"[^a-z0-9]+", "_", t).strip("_"), t)
+            for t in catalog.CLOTHING_EXPLICIT
+        ),
+        key=lambda kv: (-len(kv[0]), kv[0]),
+    )
+    normalized = "_" + re.sub(r"[^a-z0-9]+", "_", text).strip("_") + "_"
+    out: list[str] = []
+    keys: list[str] = []
+
+    def _take(key: str, tag: str) -> None:
+        if any(key in k2 or k2 in key for k2 in keys):
+            return  # overlapping/undercut duplicate of a stronger hit
+        keys.append(key)
+        out.append(tag)
+
+    for key, tag in pool:
+        if f"_{key}_" in normalized:
+            _take(key, tag)
+            if len(out) >= k:
+                return out
+
+    if out:
+        return out[:k]
+
+    # Nothing matched literally — fall back to stems, but only for tags whose
+    # every word is present ("a pleated skirt" → skirt, not military_uniform).
+    stems = sentence_stems(text)
+    for key, tag in pool:
+        parts = [p for p in key.split("_") if p]
+        if parts and all(_stem(p) in stems for p in parts):
+            _take(key, tag)
+            if len(out) >= k:
+                break
+    return out[:k]
 
 
 async def retrieve_scene_tags(

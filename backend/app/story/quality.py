@@ -197,7 +197,10 @@ def _coerce_text(v: Any) -> str:
 
 def quality_eval_failure(exc: BaseException | str, *, method: str = "rules") -> dict:
     """Stub persisted when scoring fails — Storybook must not crash."""
-    msg = str(exc).strip() or type(exc).__name__ if not isinstance(exc, str) else exc
+    # Never surface an empty reason: the UI renders it as
+    # "品質採点に失敗しました: {reason}".
+    msg = exc if isinstance(exc, str) else str(exc)
+    msg = msg.strip() or type(exc).__name__
     return {
         "version": 1,
         "evaluated_at": time.time(),

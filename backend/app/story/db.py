@@ -132,6 +132,13 @@ async def fork_draft(db, story: dict) -> str:
         candidates=story.get("candidates") or [],
         context=story.get("context") or {},
     )
+    # The pinup belongs to the base IMAGE, not to this telling of the story, so
+    # a fork inherits it — otherwise the portrait vanishes from the Storybook on
+    # every respin and the expand runner will not rebuild it (it skips when the
+    # image doc already has one).
+    if story.get("pinups") or story.get("pinup_image_id"):
+        payload["pinups"] = list(story.get("pinups") or [])
+        payload["pinup_image_id"] = story.get("pinup_image_id")
     return await create_story(db, payload)
 
 

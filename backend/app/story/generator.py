@@ -15,6 +15,7 @@ Stories are authored in the user's locale; when that is Japanese they are
 translated to English before Stage 3 (image prompts are always English).
 """
 
+import itertools
 import json
 import logging
 import re
@@ -463,6 +464,39 @@ def _tone_line(tone: str, locale: str = "en") -> str:
                    "and downs.\n",
         "dark": "\nTONE: tension, bittersweetness or unease are welcome.\n",
     }.get(t, "")
+
+
+def _divergence_line(divergence: float, locale: str = "en") -> str:
+    """飛躍度 — how far the premise may leap from the base image / topic.
+
+    Threaded into the candidates stage (the only stage that invents premises);
+    expansion is faithful by design and does not re-read it.
+    """
+    d = max(0.0, min(1.0, float(divergence or 0.0)))
+    if d < 0.25:
+        band = ("low", "\nLEAP: stay close to home — the obvious, grounded "
+                       "reading of the base image and topic. The turn is a small "
+                       "everyday shift, not a surprise.\n",
+                "\n飛躍度: 低。元絵とお題の素直な読みに留める。転は日常の小さな変化に。\n")
+    elif d < 0.55:
+        band = ("medium", "\nLEAP: one unexpected but plausible development — a "
+                          "reading a thoughtful reader would not guess first, yet "
+                          "accepts immediately.\n",
+                "\n飛躍度: 中。予想外だが腑に落ちる展開を一つ入れる。\n")
+    elif d < 0.8:
+        band = ("high", "\nLEAP: be bold — an unobvious premise and a real "
+                        "reversal. Recontextualise the base image rather than "
+                        "illustrate it. Stay in the same real-world register.\n",
+                "\n飛躍度: 高。意外な前提と本物の反転を。元絵を説明せず捉え直す。"
+                "現実の枠は保つ。\n")
+    else:
+        band = ("max", "\nLEAP: maximum — the premise should surprise even the "
+                       "person who chose the image, and each act should land "
+                       "somewhere the previous act did not imply. Still no magic "
+                       "or genre shift unless the worldview asks.\n",
+                "\n飛躍度: 最大。画像を選んだ本人が驚く前提に。各幕は前の幕から"
+                "予測できない場所へ。魔法・ジャンル転換は不可。\n")
+    return band[2] if locale == "ja" else band[1]
 
 
 # Tolerant marker matching: [PAST], **[PAST]**, PAST:, **PAST:**, ## PAST: ...
@@ -935,8 +969,14 @@ _BEAT_SIMILAR_THRESHOLD = 0.6
 
 
 def _mean_pairwise_similarity(beats: list[str]) -> float:
-    pairs = [(0, 1), (0, 2), (1, 2)]
-    sims = [_text_similarity(beats[i], beats[j]) for i, j in pairs]
+    """Mean similarity over every beat pair. Any length — quality.py scores
+    only the generated axes, which is 2 whenever a base image supplies one.
+    """
+    sims = [
+        _text_similarity(a, b) for a, b in itertools.combinations(beats, 2)
+    ]
+    if not sims:
+        return 0.0
     return sum(sims) / len(sims)
 
 
@@ -1204,6 +1244,9 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "season, time of day"
         ),
         "may_differ": "outfit (keep it identical UNLESS the story explicitly justifies a change — changing clothes, removing a jacket, a costume switch), micro-pose, finger/hand position, expression, a gust of wind, what the character is doing with hands/body (writing, reaching, pressing, picking up, etc.)",
+        "outfit_rule": (
+            "IDENTICAL in every act — copy the base outfit string verbatim. Only a change the story explicitly shows (removing a jacket, untying an apron) may alter it."
+        ),
         "forbidden": "any location change, any passage of seasons, aging",
     },
     "tens_of_minutes": {
@@ -1213,6 +1256,9 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "season, time of day"
         ),
         "may_differ": "outfit (keep it identical UNLESS the story explicitly justifies a change — changing clothes, removing a jacket, a costume switch), pose, expression, minor object placement, slight lighting shift, character's activity and what they are doing, object being interacted with",
+        "outfit_rule": (
+            "IDENTICAL in every act — copy the base outfit string verbatim. Only a change the story explicitly shows (removing a jacket, untying an apron) may alter it."
+        ),
         "forbidden": "any location change, any passage of seasons, aging",
     },
     "hours": {
@@ -1221,26 +1267,41 @@ _SCALE_VISUAL_RULES: dict[str, dict[str, str]] = {
             "physical appearance (IDENTICAL), same building or outdoor location, season"
         ),
         "may_differ": "outfit (keep it identical UNLESS the story explicitly justifies a change — changing clothes, a costume switch), light angle and shadow direction, expression, full pose and activity, props in hand, position within the location, slight fatigue",
+        "outfit_rule": (
+            "IDENTICAL in every act — copy the base outfit string verbatim unless the story explicitly shows a change (a costume switch, shedding a coat indoors)."
+        ),
         "forbidden": "location change, season change, aging",
     },
     "days": {
         "must_keep": "hair color and style, core facial features, same general area",
         "may_differ": "outfit (may have changed), time of day, emotional state, minor details",
+        "outfit_rule": (
+            "may be a different everyday set from the same wardrobe and season; never a different style of person."
+        ),
         "forbidden": "season change, significant aging, major location change",
     },
     "months": {
         "must_keep": "hair color, core facial features, recognizable character identity",
         "may_differ": "seasonal outfit, season, slight physical wear, environment",
+        "outfit_rule": (
+            "a SEASONAL variant — the same person's wardrobe shifted for the new season (coat vs shirt); same taste."
+        ),
         "forbidden": "significant aging, era-level fashion shift",
     },
     "years": {
         "must_keep": "recognizable as the same person",
         "may_differ": "outfit style, slight aging, hair style, environment, life stage",
+        "outfit_rule": (
+            "may change with her life stage (student uniform to work clothes); still recognisably her taste."
+        ),
         "forbidden": "complete transformation that makes the person unrecognizable",
     },
     "decades": {
         "must_keep": "any recognizable trait if plausible",
         "may_differ": "everything — age, fashion era, environment, world",
+        "outfit_rule": (
+            "may belong to a different fashion era entirely."
+        ),
         "forbidden": "nothing is forbidden — show dramatic transformation",
     },
 }
@@ -1292,6 +1353,13 @@ def _scale_delta_line(time_scale: str) -> str:
     return _SCALE_DELTA.get(time_scale, _SCALE_DELTA["years"])
 
 
+def scale_outfit_rule(time_scale: str) -> str:
+    """How much the outfit may change across acts at this scale (public
+    accessor — fast mode needs it without importing the private table)."""
+    rules = _SCALE_VISUAL_RULES.get(time_scale) or _SCALE_VISUAL_RULES["years"]
+    return rules["outfit_rule"]
+
+
 # ── Identity tag scoping (chronicle-specific WD14 handling) ───────────────────
 #
 # Chronicle depicts a DIFFERENT moment in time, so unlike Refine we must never
@@ -1339,6 +1407,11 @@ _GARMENT_TOKENS = frozenset({
     "blouse", "sweater", "hoodie", "kimono", "yukata", "leotard", "bikini",
     "swimsuit", "cape", "cloak", "armor", "apron", "vest", "pants",
     "shorts", "corset",
+    # Single-word garments with no compound structure to key off — without
+    # these, classify_identity_tag misses them entirely and a serafuku base
+    # image reports no outfit at all.
+    "serafuku", "cardigan", "hakama", "haori", "cheongsam", "overalls",
+    "jeans", "trousers", "tracksuit", "turtleneck", "blazer", "pullover",
 })
 # Backward-compatible union (any caller wanting "clothing or accessory").
 
@@ -1471,6 +1544,29 @@ def inject_identity_tags(tag_line: str, identity: list[str]) -> str:
 # this ceiling; keep identity + theme must-tags first when truncating.
 IMAGE_PROMPT_MAX_TAGS = 20
 IMAGE_PROMPT_MAX_PROSE_WORDS = 60
+
+
+# The 自然文 knob (3–7) → per-act prose size for build_acts_polish_prompt.
+#
+# A ceiling alone does NOT move the model: measured against gemma-4-12b, "at
+# most 120 words" still produced ~32 words, because the polish prompt's other
+# rules ("Rephrase, never invent") starve it of content — the ceiling is never
+# the target. Only a floor makes the knob track (measured: 3→~38w, 5→~55w,
+# 7→~85w). Callers MUST also pass `hi` to assemble_capped_positive as
+# max_prose_words, or IMAGE_PROMPT_MAX_PROSE_WORDS truncates the long end back
+# to 60 and the top of the range collapses.
+_PROSE_BUDGETS: dict[int, tuple[int, int, str]] = {
+    3: (25, 40, "1-2"),
+    4: (40, 60, "2-3"),
+    5: (60, 80, "3-4"),
+    6: (80, 100, "4-5"),
+    7: (100, 130, "5-6"),
+}
+
+
+def chronicle_prose_budget(paragraphs: int | None) -> tuple[int, int, str]:
+    """(min_words, max_words, sentence_range) for one act. Monotonic in n."""
+    return _PROSE_BUDGETS[clamp_prose_paragraphs(paragraphs)]
 
 # Fast mode: VLM aims for ≥30 tags, then +5 mid-rank WD14 injects (cap 45).
 FAST_PROMPT_MIN_TAGS = 30
@@ -1907,11 +2003,17 @@ def build_fast_prompts_prompt(
     tone: str = "",
     dramatic_mode: str = "",
     base_axis: str = "present",
+    base_outfit: list[str] | None = None,
+    outfit_rule: str = "",
 ) -> str:
     """One-shot JSON: danbooru tag lines for each axis (fast mode).
 
     Carries biography / elapsed timeline / tone so acts stay consistent.
     Theme must-tags are mandatory on every axis. Target ≥30 tags per axis.
+
+    Fast mode has no acts, so there is no per-slice `outfit` field to thread:
+    ``base_outfit`` (the source image's garment tags) + ``outfit_rule`` (the
+    scale's clothing directive) give the model the same information directly.
     """
     axes = [a for a in (gen_axes or list(AXES)) if a in AXES] or list(AXES)
     beats = beats or {}
@@ -1939,6 +2041,14 @@ def build_fast_prompts_prompt(
         "axis reuses the source and is NOT regenerated; other axes must read as "
         f"distinct moments on the {time_scale} scale."
     )
+    outfit_tags = ", ".join(
+        str(t).strip().replace(" ", "_") for t in (base_outfit or []) if str(t).strip()
+    )
+    outfit_line = (
+        f"Base outfit tags (from the source image): {outfit_tags}\n"
+        if outfit_tags else ""
+    )
+    outfit_directive = outfit_rule or scale_outfit_rule(time_scale)
     return (
         "You are a danbooru-tag expert. FAST MODE: emit ONE image-prompt "
         "tag line per act. No prose stories — tags only.\n\n"
@@ -1954,6 +2064,7 @@ def build_fast_prompts_prompt(
         f"  {bio_line}\n"
         f"Character identity tags (keep hair/eyes if present): {identity}\n"
         f"Character appearance note: {character_desc or '(none)'}\n"
+        f"{outfit_line}"
         f"Act beats (vary pose/place/action; costume + identity stay):\n"
         f"{beat_lines}\n\n"
         f"THEME MUST-TAGS — copy VERBATIM into EVERY axis tag line:\n{must}\n\n"
@@ -1964,6 +2075,8 @@ def build_fast_prompts_prompt(
         f"- Soft ceiling {FAST_PROMPT_MAX_TAGS}; do not pad with synonyms.\n"
         "- Open with subject-count (1girl / 1boy / solo / …).\n"
         "- THEME MUST-TAGS appear on every axis — never drop or paraphrase them.\n"
+        "- OUTFIT: every axis tag line MUST state the clothing explicitly with "
+        f"garment tags — never leave it implied. {outfit_directive}\n"
         "- Reflect biography personality in expression/pose tags when possible.\n"
         "- Honour the elapsed-time header: past/present/future must feel like "
         "different volumes (age/wear/setting shifts matching the time scale).\n"
@@ -2114,18 +2227,28 @@ def _tag_has_dynamic_action(parts: list[str]) -> bool:
     return False
 
 
-def _tag_has_expression(parts: list[str]) -> bool:
-    """True if the tag line contains at least one face/mood expression tag."""
+def _first_expression_tag(parts: list[str]) -> str:
+    """The first face/mood expression tag in a tag line, '' if none.
+
+    Single source of truth for "what counts as an expression" — _tag_has_
+    expression and lead_with_face_tags both derive from it, so the guarantee
+    and the ordering can never disagree about the same tag line.
+    """
     for raw in parts:
         t = raw.strip().lower().replace(" ", "_")
         if not t:
             continue
         if t in _EXPRESSION_TAGS:
-            return True
+            return raw.strip()
         toks = set(t.replace("-", "_").split("_"))
         if toks & _EXPRESSION_TOKENS:
-            return True
-    return False
+            return raw.strip()
+    return ""
+
+
+def _tag_has_expression(parts: list[str]) -> bool:
+    """True if the tag line contains at least one face/mood expression tag."""
+    return bool(_first_expression_tag(parts))
 
 
 # feeling word → danbooru expression tag. Values MUST be members of
@@ -2208,12 +2331,17 @@ def ensure_face_tags(
     priority_tags: list[str] | None = None,
     max_tags: int | None = None,
 ) -> str:
-    """Guarantee eye colour + one expression tag in the final tag line.
+    """Guarantee eye colour + one expression tag, and make them LEAD.
 
     Anime models drop the character's face when neither survives the ≤20 cap
-    (measured by the user) — this is the last-line guard after all assembly
-    and conflict passes. Only acts on a comma tag-line head; prose-only
-    positives pass through unchanged.
+    (measured by the user), and weight them weakly when they trail the line —
+    so the face tags must be both present AND at the front. This is the
+    last-line guard after all assembly and conflict passes. Only acts on a
+    comma tag-line head; prose-only positives pass through unchanged.
+
+    Order: guarantee → cap → lead. Leading must come LAST because
+    cap_danbooru_tag_line reorders to anchors → priority_tags → rest whenever
+    it trims, which would scatter the face tags back down the line.
     """
     head, sep, tail = positive.partition("\n\n")
     if "," not in head or "." in head:
@@ -2227,16 +2355,78 @@ def ensure_face_tags(
             face_musts.append(t)
     if expression_tag and not _tag_has_expression(parts):
         face_musts.append(expression_tag)
-    if not face_musts:
-        return positive
 
-    limit = max_tags if max_tags is not None else IMAGE_PROMPT_MAX_TAGS
-    new_head = insert_after_anchors(head, face_musts)
-    new_head = cap_danbooru_tag_line(
-        new_head, max_tags=limit,
-        priority_tags=list(dict.fromkeys([*face_musts, *(priority_tags or [])])),
+    new_head = head
+    if face_musts:
+        limit = max_tags if max_tags is not None else IMAGE_PROMPT_MAX_TAGS
+        new_head = insert_after_anchors(new_head, face_musts)
+        new_head = cap_danbooru_tag_line(
+            new_head, max_tags=limit,
+            priority_tags=list(dict.fromkeys([*face_musts, *(priority_tags or [])])),
+        )
+    # Runs even when nothing was missing: the tags are often already present
+    # but buried mid-line, and cap_danbooru_tag_line leaves a short line in its
+    # original order, so this is the only pass that fixes that case.
+    new_head = lead_with_face_tags(
+        new_head, expression_tag=expression_tag, lock_tags=lock_tags,
     )
+    if new_head == head:
+        return positive
     return f"{new_head}{sep}{tail}" if sep else new_head
+
+
+def lead_with_face_tags(
+    tag_line: str,
+    *,
+    expression_tag: str = "",
+    lock_tags: list[str] | None = None,
+) -> str:
+    """Reorder a tag line to: subject anchors, eye colour, expression, rest.
+
+    Pure reorder + case-insensitive dedup — never drops a tag, never caps,
+    idempotent.
+
+    The subject anchors keep the front: they are the subject-count contract of
+    the whole tag layer (ensure_subject_anchor *prepends* a recovered anchor,
+    so putting eyes at absolute index 0 would just fight it). They cost two
+    tokens and carry no colour or affect information, so they cannot dilute the
+    face conditioning that follows them.
+
+    When the base image has no eye-colour tag (or identity_lock_tags dropped it
+    for a multi-character base), no eye colour can be invented — the expression
+    then leads alone.
+    """
+    parts = [t.strip() for t in tag_line.split(",") if t.strip()]
+    if not parts:
+        return tag_line
+
+    def key(t: str) -> str:
+        return t.lower().replace(" ", "_")
+
+    anchors = [p for p in parts if key(p) in _SUBJECT_ANCHORS]
+    eyes = [p for p in parts if classify_identity_tag(p) == "eyes"]
+    if not eyes:
+        for t in lock_tags or []:
+            if classify_identity_tag(t) == "eyes":
+                eyes = [t]
+                break
+    expr = _first_expression_tag(parts)
+    if not expr and expression_tag:
+        expr = expression_tag
+
+    lead: list[str] = []
+    seen: set[str] = set()
+    for t in [*anchors, *eyes, *([expr] if expr else [])]:
+        if t and key(t) not in seen:
+            seen.add(key(t))
+            lead.append(t)
+    rest: list[str] = []
+    for p in parts:
+        if key(p) in seen:
+            continue
+        seen.add(key(p))
+        rest.append(p)
+    return ", ".join([*lead, *rest])
 
 
 def _tag_has_person_subject(parts: list[str]) -> bool:
@@ -2862,10 +3052,16 @@ def parse_flat_json_translation(raw: str, keys: tuple[str, ...] | list[str]) -> 
 # candidate can no longer drift. Validation is code-side (topic anchors,
 # temporal distinctness, act labels) with EXACTLY ONE feedback retry.
 
-_ACT_KEYS = ("label", "activity", "place", "feeling", "motif_use")
+# `outfit` exists because the image model cannot infer clothing: the scale
+# rules told the LLM to keep the outfit consistent, but there was no field to
+# write it into, so it never reached a prompt and every axis re-rolled the
+# clothes.
+_ACT_KEYS = ("label", "activity", "place", "feeling", "outfit", "motif_use")
 
 # Concrete example values only — bonsai-27b copies placeholder text verbatim
-# (measured), so the few-shot must never contain meta descriptions.
+# (measured), so the few-shot must never contain meta descriptions. The outfit
+# is deliberately IDENTICAL across this short-delta example: copying that is
+# the behaviour we want at minutes/hours scale.
 _ARC_FEWSHOT = (
     "Example of GOOD concrete output (structure only — invent your own story):\n"
     '{"candidates":[{"id":"A","title":"Steam on the Portafilter",'
@@ -2873,9 +3069,9 @@ _ARC_FEWSHOT = (
     '"turn":"The memo name belongs to someone she thought had left town.",'
     '"personality_hint":"Methodical and warm; always double-folds paper slips.",'
     '"acts":{'
-    '"past":{"label":"2 hours earlier","activity":"She tamps coffee into the portafilter with both palms","place":"behind the cafe counter","feeling":"focused"},'
-    '"present":{"label":"now","activity":"She slides a ceramic cup across the wooden counter to a regular","place":"cafe counter, morning light","feeling":"warm"},'
-    '"future":{"label":"3 hours later","activity":"She unfolds the crumpled order memo under the till lamp at close","place":"empty cafe at dusk","feeling":"startled"}'
+    '"past":{"label":"2 hours earlier","activity":"She tamps coffee into the portafilter with both palms","place":"behind the cafe counter","feeling":"focused","outfit":"black apron over a white shirt"},'
+    '"present":{"label":"now","activity":"She slides a ceramic cup across the wooden counter to a regular","place":"cafe counter, morning light","feeling":"warm","outfit":"black apron over a white shirt"},'
+    '"future":{"label":"3 hours later","activity":"She unfolds the crumpled order memo under the till lamp at close","place":"empty cafe at dusk","feeling":"startled","outfit":"white shirt, apron untied and hanging"}'
     '}}]}'
 )
 
@@ -2884,7 +3080,7 @@ _ARC_FEWSHOT = (
 # and the whole downstream pipeline (pose/scene retrieval, WD14, image prompts)
 # is English-only anyway. The ja UI gets a batched display translation instead.
 _ARC_OUTPUT_LINE = (
-    "Write every title / activity / place / feeling / motif / turn / "
+    "Write every title / activity / place / feeling / outfit / motif / turn / "
     "personality_hint field in natural ENGLISH (even when the topic is "
     "Japanese — do not translate the topic, follow it)."
 )
@@ -2899,13 +3095,42 @@ _EXPRESSION_TO_FEELING: dict[str, str] = {
 }
 
 
+def outfit_tags_from_wd14(wd14_tags: list[str], *, limit: int = 6) -> list[str]:
+    """Garment tags of the base image, WD14 order kept.
+
+    Union of the garment-token classifier and the catalog clothing axis, so
+    both `school_uniform` (token hit) and `serafuku` (catalog hit) are caught.
+    Accessories are excluded — identity_lock_tags already carries those, and
+    double-listing them would burn the ≤20 tag budget twice.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in wd14_tags or []:
+        t = str(raw or "").strip().lower().replace(" ", "_")
+        if not t or t in seen:
+            continue
+        cat = classify_identity_tag(t)
+        if cat == "accessory":
+            continue
+        if cat == "outfit" or get_tag_axis(t) == "clothing":
+            seen.add(t)
+            out.append(t)
+            if len(out) >= limit:
+                break
+    return out
+
+
 def base_act_from_image(
     wd14_tags: list[str], scene_desc: str, *, emotion: str = ""
 ) -> dict:
-    """{activity, place, feeling} in EN, deterministically from the base image.
+    """{activity, place, feeling, outfit} in EN, from the base image.
 
     This is the FIXED line of the script scaffold: when the user hands us an
     image, the base act IS that image — never something the story LLM invents.
+
+    `outfit` has no scene_desc fallback: build_vision_prompt(full_extraction=
+    False) explicitly tells the VLM not to describe clothing, so scene_desc has
+    no outfit content to mine. Empty string degrades to the old behaviour.
     """
     from ..tags.catalog import pose_action_subset
 
@@ -2936,7 +3161,138 @@ def base_act_from_image(
         e = (emotion or "").strip().lower()
         feeling = e if e in _EMOTION_REGISTER else "calm"
 
-    return {"activity": activity, "place": place, "feeling": feeling}
+    outfit = ", ".join(
+        t.replace("_", " ") for t in outfit_tags_from_wd14(tags, limit=4)
+    )
+
+    return {
+        "activity": activity, "place": place, "feeling": feeling,
+        "outfit": outfit,
+    }
+
+
+def build_topic_suggest_prompt(
+    *,
+    character_desc: str,
+    scene_desc: str = "",
+    base_act: dict | None = None,
+    worldview: str = "",
+) -> str:
+    """ONE call → a SHORT 起承転結 (4-beat) お題 blurb for the topic field.
+
+    Output is ALWAYS English, for the same measured reason as _ARC_OUTPUT_LINE:
+    bonsai-class local models author far better EN than ja. Asking for ja
+    directly came back with misspelled JSON keys and half-English sentences
+    (measured on gemma-4-12b). The ja UI gets a batched display translation
+    instead — build_json_translation_prompt, exactly like the arc stage.
+    """
+    act = base_act or {}
+    moment = ""
+    if act.get("activity"):
+        moment = (
+            f"  moment: {act.get('activity', '')}"
+            f" @ {act.get('place', '')} ({act.get('feeling', '')})"
+        )
+        if act.get("outfit"):
+            moment += f", wearing {act['outfit']}"
+        moment += "\n"
+    scene_line = f"  scene: {scene_desc.strip()[:300]}\n" if scene_desc.strip() else ""
+    world_line = (
+        f"worldview: {worldview.strip()[:120]}\n" if worldview.strip() else ""
+    )
+    return (
+        "You are pitching a premise for ONE illustration series.\n\n"
+        "BASE IMAGE — the story STARTS here; never contradict it:\n"
+        f"  character: {character_desc.strip()[:400]}\n"
+        f"{scene_line}{moment}{world_line}\n"
+        "TASK: write ONE premise with a 起承転結 shape — setup (what the image "
+        "already shows), development, a twist, a resolution.\n"
+        "RULES:\n"
+        "- 1-2 natural English sentences, 20-40 words TOTAL.\n"
+        "- The setup IS the base image above.\n"
+        "- The twist is a human or situational surprise — no magic, no genre "
+        "shift.\n"
+        "- Physical and drawable throughout: things a picture can show.\n"
+        "- Plain prose for a single text field: no headings, no bullets, no "
+        "quotes, no markdown, no beat labels, no romaji labels.\n"
+        'OUTPUT: ONLY this JSON object, in English: {"topic": "…"}\n'
+        "Nothing else — no code fences, no extra keys."
+    )
+
+
+_TOPIC_BEATS = ("ki", "shou", "ten", "ketsu")
+
+# Beat keys, for the older/looser shapes the model still sometimes emits (it
+# misspells the romaji — measured: "kecu" for "ketsu").
+_TOPIC_BEAT_ALIASES: dict[str, str] = {
+    "ki": "ki", "qi": "ki", "setup": "ki",
+    "shou": "shou", "sho": "shou", "show": "shou", "development": "shou",
+    "ten": "ten", "tenn": "ten", "twist": "ten",
+    "ketsu": "ketsu", "kecu": "ketsu", "ketu": "ketsu", "ketsuron": "ketsu",
+    "resolution": "ketsu", "conclusion": "ketsu",
+}
+_TOPIC_LABEL_RE = re.compile(
+    r"^\s*(?:起|承|転|結|ki|shou|sho|ten|ketsu|kecu)\s*[:：.)-]\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_topic_text(text: str) -> str:
+    """Strip the wrappers the model adds around a plain-prose field."""
+    t = str(text or "").strip()
+    t = re.sub(r"^```(?:json)?|```$", "", t).strip()
+    t = t.strip("\"'` \n\t")
+    t = _TOPIC_LABEL_RE.sub("", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def parse_topic_suggest_json(raw: str) -> dict:
+    """Parse the topic suggestion → {"topic": str, "beats": {...}}.
+
+    Lenient like every other parser here: junk → empty topic, and the caller
+    retries once before a 502 rather than prefilling the field with garbage.
+
+    The shapes below are all MEASURED failures of gemma-4-12b on this call, not
+    hypotheticals: a flat [k, v, k, v] array under a "```json,{" key, beat keys
+    instead of "topic", and code-fenced values.
+    """
+    data = _loads_lenient(raw)
+    if not isinstance(data, dict):
+        return {"topic": "", "beats": {}}
+
+    beats: dict[str, str] = {}
+    topic = ""
+
+    def _absorb(key, value) -> None:
+        nonlocal topic
+        k = str(key).strip().lower().strip("\"'` ")
+        if k == "topic" and not topic:
+            topic = _clean_topic_text(value)
+            return
+        canon = _TOPIC_BEAT_ALIASES.get(k)
+        if canon and canon not in beats:
+            text = _clean_topic_text(value)
+            if text:
+                beats[canon] = text
+
+    for raw_key, value in data.items():
+        if isinstance(value, list):
+            # Flat [key, value, key, value, …] emitted under a junk key.
+            flat = [str(x) for x in value]
+            for i in range(0, len(flat) - 1, 2):
+                _absorb(flat[i], flat[i + 1])
+            continue
+        if isinstance(value, (str, int, float)):
+            _absorb(raw_key, value)
+
+    if not topic and beats:
+        # Beats but no woven sentence — stitch them, stripping trailing
+        # punctuation so the join cannot produce "a.. b".
+        parts = [beats[k].rstrip(" .。、,") for k in _TOPIC_BEATS if beats.get(k)]
+        topic = ". ".join(p for p in parts if p)
+        if topic:
+            topic += "."
+    return {"topic": topic, "beats": beats}
 
 
 def build_script_scaffold(
@@ -2965,12 +3321,15 @@ def build_script_scaffold(
                 f'[{ax.upper()} | label="{labels[ax]}" | t=0 — THIS IS THE BASE '
                 "IMAGE. FIXED]"
             )
-            for key in ("activity", "place", "feeling"):
+            for key in ("activity", "place", "feeling", "outfit"):
                 lines.append(f'  {key} = "{base_act_fixed.get(key, "")}"')
         else:
             mark = " | t=0 base act" if ax == base_axis else ""
             lines.append(f'[{ax.upper()} | label="{labels[ax]}"{mark}]')
-            lines.append("  activity = ____   place = ____   feeling = ____")
+            lines.append(
+                "  activity = ____   place = ____   feeling = ____   "
+                "outfit = ____"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -2991,10 +3350,13 @@ def enforce_base_act(
     if not isinstance(act, dict):
         act = {k: "" for k in _ACT_KEYS}
         acts[base_axis] = act
-    for key in ("activity", "place", "feeling"):
+    for key in ("activity", "place", "feeling", "outfit"):
         if base_act_fixed.get(key):
             act[key] = base_act_fixed[key]
-    # Rebuild the flat legacy beat in the parse_story_arc_json format.
+    # Rebuild the flat legacy beat in the parse_story_arc_json format. The
+    # outfit stays OUT of it on purpose: infer_axis_scene_constraints and the
+    # topic-anchor gate read this string, and garment words there would
+    # register as false scene constraints.
     beat = act.get("activity") or ""
     if act.get("place"):
         beat = f"{beat} ({act['place']})" if beat else act["place"]
@@ -3013,6 +3375,7 @@ def build_story_arc_prompt(
     locale: str = "en",
     candidate_modes: dict[str, str] | None = None,
     tone: str = "bright",
+    divergence: float = 0.0,
     seed_tags: list[str] | None = None,
     forced_motif: str = "",
     feedback: str = "",
@@ -3070,16 +3433,19 @@ def build_story_arc_prompt(
         f"{world_line}\n"
         f"{_candidate_modes_block(modes)}"
         f"{_tone_line(tone, locale)}"
+        f"{_divergence_line(divergence, locale)}"
         f"{mood_line}"
         "TASK: Pitch THREE chronicles (A/B/C) for ONE character. Each is ONE "
         f"story told as three acts ~{span} apart following the SCRIPT below. "
         "Each act is ONE drawable moment: a physical activity (verb + object, "
-        "≤15 words), a concrete place, one feeling word.\n\n"
+        "≤15 words), a concrete place, one feeling word, and what she is "
+        "WEARING (outfit — a short garment phrase, ≤8 words).\n\n"
         f"{scaffold}\n"
         f"{scene_block}"
         f"CHARACTER (appearance tags only):\n{character_desc}\n\n"
         f"must_keep: {rules['must_keep']}\n"
         f"may_differ: {rules['may_differ']}\n"
+        f"outfit: {rules['outfit_rule']}\n"
         "- The three acts must be one connected thread: one motif object recurs "
         "and one turn builds — never three unrelated snapshots.\n"
         "GROUNDING: same real-world register — no magic/aliens unless worldview "
@@ -3096,11 +3462,15 @@ def build_story_arc_prompt(
 
 
 def _normalize_act(raw, *, fallback_label: str = "") -> dict:
-    """Coerce one act into {label, activity, place, feeling, motif_use} strings."""
+    """Coerce one act into _ACT_KEYS strings.
+
+    Stories saved before `outfit` existed simply get outfit="" here, which
+    degrades to the pre-outfit prompts — no migration needed.
+    """
     if isinstance(raw, str):
         return {
             "label": fallback_label, "activity": raw.strip(),
-            "place": "", "feeling": "", "motif_use": "",
+            "place": "", "feeling": "", "outfit": "", "motif_use": "",
         }
     if not isinstance(raw, dict):
         return {k: "" for k in _ACT_KEYS}
@@ -3422,14 +3792,19 @@ def build_acts_polish_prompt(
     acts: dict[str, dict],
     tag_lines: dict[str, str],
     identity_tags: list[str] | None = None,
+    prose_paragraphs: int | None = None,
 ) -> str:
-    """One call → short English Visual Script prose for ALL acts (JSON).
+    """One call → English Visual Script prose for ALL acts (JSON).
 
     The acts and tag lines are AUTHORITATIVE: the model may only rephrase the
-    given activity/place/feeling into ≤60 words of drawable prose per act and
-    weave in a few of that act's tags in ASCII parentheses. It must not invent
-    new events — this is what keeps expansion faithful to the chosen story.
+    given activity/place/feeling into drawable prose per act and weave in a few
+    of that act's tags in ASCII parentheses. It must not invent new events —
+    this is what keeps expansion faithful to the chosen story.
+
+    ``prose_paragraphs`` (the 自然文 knob, 3–7) sizes each act via
+    chronicle_prose_budget. None → DEFAULT_PROSE_PARAGRAPHS.
     """
+    lo, hi, sents = chronicle_prose_budget(prose_paragraphs)
     ident = ", ".join(identity_tags or [])
     act_blocks = []
     for axis in AXES:
@@ -3439,14 +3814,18 @@ def build_acts_polish_prompt(
             f"  activity: {a.get('activity', '')}\n"
             f"  place: {a.get('place', '')}\n"
             f"  feeling: {a.get('feeling', '')}\n"
+            f"  outfit: {a.get('outfit', '')}\n"
             f"  tags: {tag_lines.get(axis, '')}"
         )
     ident_line = f"Character identity tags (do not contradict): {ident}\n" if ident else ""
     return (
-        "Write a SHORT Visual Script for THREE anime image prompts (English).\n"
+        "Write a Visual Script for THREE anime image prompts (English).\n"
         "HARD RULES:\n"
-        "- For each act: at most 60 words, 1-2 short sentences, present tense.\n"
-        "- Describe ONLY the given activity / place / feeling. Do NOT add new "
+        f"- For each act: write {lo}-{hi} words ({sents} sentences), present "
+        f"tense. Aim for {lo} words MINIMUM — elaborate the given detail with "
+        "visible, drawable specifics (light, texture, posture, what the "
+        "clothing does).\n"
+        "- Describe ONLY the given activity / place / feeling / outfit. Do NOT add new "
         "events, characters, objects or camera directions. Rephrase, never invent.\n"
         "- Embed a few key tags from that act's tag list in ASCII parentheses "
         "next to the matching detail, e.g. 'she pours tea (pouring) at the "

@@ -10,13 +10,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.story.generator import (  # noqa: E402
     arc_feedback_block,
     arc_needs_retry,
+    assemble_capped_positive,
     build_acts_polish_prompt,
     build_story_arc_prompt,
+    build_topic_suggest_prompt,
     candidate_acts,
+    chronicle_prose_budget,
     default_act_labels,
     deterministic_shot_plan,
     parse_acts_polish_json,
     parse_story_arc_json,
+    parse_topic_suggest_json,
     repair_act_labels,
     select_best_candidates,
     synthesize_acts_from_flat,
@@ -71,6 +75,50 @@ def test_arc_prompt_contains_contract_topic_modes():
     assert "PRIORITY (do in order" not in p
     assert "must match the base image's scene" not in p
     assert "time_delta:" not in p
+
+
+def test_arc_prompt_carries_scale_outfit_rule():
+    """The scale rules told the LLM to keep the outfit consistent, but there
+    was no field to write it into — so the directive must now name `outfit`."""
+    def rule_line(scale):
+        p = build_story_arc_prompt(
+            character_desc="1girl", scene_desc="x", time_scale=scale,
+        )
+        return next(ln for ln in p.splitlines() if ln.startswith("outfit:"))
+
+    assert "IDENTICAL" in rule_line("minutes")
+    assert "IDENTICAL" in rule_line("hours")
+    assert "SEASONAL" in rule_line("months")
+    assert rule_line("years") != rule_line("months")
+    assert "WEARING" in build_story_arc_prompt(character_desc="1girl", scene_desc="x")
+    # Unknown scale falls back rather than raising.
+    assert scale_outfit_rule("nonsense") == scale_outfit_rule("years")
+
+
+def test_arc_prompt_divergence_reaches_prompt():
+    """飛躍度 was accepted, clamped and persisted but never reached any prompt —
+    the slider did nothing. Candidates is the only stage that invents a premise,
+    so the LEAP directive must land here and must differ across bands."""
+    def build(d, locale="en"):
+        return build_story_arc_prompt(
+            character_desc="1girl, brown_hair",
+            scene_desc="a rainy station square",
+            divergence=d,
+            locale=locale,
+        )
+    bands = [build(d) for d in (0.0, 0.3, 0.6, 0.95)]
+    leaps = [
+        next(ln for ln in p.splitlines() if ln.startswith("LEAP")) for p in bands
+    ]
+    assert len(set(leaps)) == 4, "each divergence band needs a distinct directive"
+    assert "stay close" in leaps[0]
+    assert "maximum" in leaps[3]
+    # Out-of-range input clamps rather than raising.
+    assert build(-5.0) == build(0.0)
+    assert build(99.0) == build(1.0)
+    assert build(None) == build(0.0)
+    # Localised, like _tone_line.
+    assert "飛躍度" in build(0.9, locale="ja")
 
 
 def test_arc_prompt_feedback_block_included_on_retry():
@@ -222,13 +270,111 @@ def test_polish_prompt_authoritative_and_parser():
                    "present": "waving", "future": "running"},
         identity_tags=["brown_hair", "blue_eyes"],
     )
-    assert "at most 60 words" in p
     assert "Rephrase, never invent" in p
     assert "holding_umbrella" in p and "brown_hair" in p
     out = parse_acts_polish_json(
         '{"past": "p", "present": "n", "future": "f"}'
     )
     assert out == {"past": "p", "present": "n", "future": "f"}
+
+
+def test_polish_prompt_prose_length_knob():
+    """The 自然文 knob must reach the prompt — it silently did not, so the
+    slider was inert and every story came out short."""
+    acts = candidate_acts(
+        parse_story_arc_json(json.dumps({"candidates": [_arc_json()]}))[0]
+    )
+    def build(n):
+        return build_acts_polish_prompt(
+            title="Rain Check", acts=acts,
+            tag_lines={"past": "standing", "present": "waving", "future": "running"},
+            prose_paragraphs=n,
+        )
+    short, long = build(3), build(7)
+    assert short != long
+    lo_s, hi_s, _ = chronicle_prose_budget(3)
+    lo_l, hi_l, _ = chronicle_prose_budget(7)
+    assert f"{lo_s}-{hi_s} words" in short
+    assert f"{lo_l}-{hi_l} words" in long
+    # A ceiling alone does not move the model; the floor is what makes it track.
+    assert f"Aim for {lo_l} words MINIMUM" in long
+    # The old hardcoded ceiling must not survive at any setting.
+    assert "at most 60 words" not in short and "at most 60 words" not in long
+
+
+def test_chronicle_prose_budget_monotonic_and_clamped():
+    budgets = [chronicle_prose_budget(n) for n in (3, 4, 5, 6, 7)]
+    los = [b[0] for b in budgets]
+    his = [b[1] for b in budgets]
+    assert los == sorted(los) and len(set(los)) == len(los)
+    assert his == sorted(his) and len(set(his)) == len(his)
+    assert all(lo < hi for lo, hi, _ in budgets)
+    # Out-of-range / junk clamps rather than raising (the dict lookup is total).
+    assert chronicle_prose_budget(0) == chronicle_prose_budget(3)
+    assert chronicle_prose_budget(99) == chronicle_prose_budget(7)
+    assert chronicle_prose_budget(None) == chronicle_prose_budget(5)
+    assert chronicle_prose_budget("junk") == chronicle_prose_budget(5)
+
+
+def test_assemble_capped_positive_honours_prose_budget():
+    """The second cut: even a long polish output was truncated back to 60."""
+    prose = " ".join(f"w{i}" for i in range(85))
+    default = assemble_capped_positive("1girl, solo", prose)
+    assert len(default.split("\n\n")[1].split()) == 60
+    hi = chronicle_prose_budget(7)[1]
+    widened = assemble_capped_positive("1girl, solo", prose, max_prose_words=hi)
+    assert len(widened.split("\n\n")[1].split()) == 85
+
+
+def test_topic_suggest_prompt_is_english_and_grounded():
+    p = build_topic_suggest_prompt(
+        character_desc="1girl, blue_eyes, school_uniform",
+        base_act={"activity": "sitting", "place": "classroom",
+                  "feeling": "warm", "outfit": "school uniform"},
+        worldview="a quiet town",
+    )
+    assert "起承転結" in p
+    # Authored in English on purpose: asking this model for ja directly came
+    # back with misspelled JSON keys and half-English sentences (measured).
+    assert "in English" in p
+    assert '{"topic"' in p
+    # The base image is the setup and must reach the prompt.
+    assert "sitting" in p and "classroom" in p and "school uniform" in p
+    assert "a quiet town" in p
+
+
+def test_parse_topic_suggest_json_survives_measured_llm_junk():
+    """Every shape here is a MEASURED gemma-4-12b failure, not a hypothetical."""
+    assert parse_topic_suggest_json(
+        '{"topic": "A girl waits by the window."}'
+    )["topic"] == "A girl waits by the window."
+
+    # A flat [k, v, k, v] array under a "```json,{" key.
+    flat = parse_topic_suggest_json(
+        '{"```json,{":["ki","a girl smiles","shou","she leans in",'
+        '"ten","she looks away","ketsu","a quiet moment",'
+        '"topic","A shared glance."]}'
+    )
+    assert flat["topic"] == "A shared glance."
+
+    # Beats only, with the model's romaji typo — stitched, and never "a.. b".
+    stitched = parse_topic_suggest_json('{"ki":"a","shou":"b","ten":"c","kecu":"d"}')
+    assert stitched["topic"] == "a. b. c. d."
+    assert ".." not in stitched["topic"]
+    assert stitched["beats"]["ketsu"] == "d"
+
+    # Wrappers the model adds around a plain-prose field.
+    assert parse_topic_suggest_json(
+        '{"topic": "```json A girl waits.```"}'
+    )["topic"] == "A girl waits."
+    assert parse_topic_suggest_json(
+        '{"topic": "Ki: A girl waits."}'
+    )["topic"] == "A girl waits."
+
+    # Unrecoverable → empty, so the endpoint 502s instead of prefilling junk.
+    for junk in ("not json", "{}", '{"topic": ""}', '{"topic": {"a": 1}}',
+                 '{"ki":"truncated", "'):
+        assert parse_topic_suggest_json(junk)["topic"] == ""
 
 
 def test_deterministic_shot_plan_rotates_and_reacts_to_feeling():
@@ -247,6 +393,9 @@ from app.story.generator import (  # noqa: E402
     enforce_base_act,
     ensure_face_tags,
     expression_tag_for_feeling,
+    lead_with_face_tags,
+    outfit_tags_from_wd14,
+    scale_outfit_rule,
 )
 from app.tags.catalog import EXPRESSION_TAGS, scene_vocab_subset  # noqa: E402
 
@@ -273,15 +422,63 @@ def test_base_act_from_image_scene_fallback():
     assert empty["feeling"] == "calm"
 
 
+def test_base_act_outfit_comes_from_the_image():
+    """服装: the image model cannot infer clothing, so the base axis outfit is
+    read off WD14 — never invented by the story LLM."""
+    assert base_act_from_image(_WD14, _SCENE)["outfit"] == "school uniform"
+    # No garment tags → empty, NOT a scene_desc guess: build_vision_prompt
+    # explicitly forbids the VLM from describing clothing, so scene_desc has
+    # nothing to mine and a guess would contradict the image.
+    assert base_act_from_image(["1girl", "blue_eyes"], _SCENE)["outfit"] == ""
+
+
+def test_outfit_tags_from_wd14_excludes_accessories():
+    tags = outfit_tags_from_wd14(_WD14)
+    assert "school_uniform" in tags
+    # identity_lock_tags already carries accessories; double-listing them would
+    # burn the ≤20 tag budget twice.
+    assert not {"thighhighs", "ribbon", "blue_eyes"} & set(tags)
+    # Single-word garments with no compound structure must still classify.
+    assert outfit_tags_from_wd14(["1girl", "serafuku"]) == ["serafuku"]
+    assert outfit_tags_from_wd14([]) == []
+
+
+def test_normalize_act_backfills_outfit_for_legacy_records():
+    """Stories saved before `outfit` existed must degrade, not crash."""
+    legacy = parse_story_arc_json(json.dumps({"candidates": [{
+        "id": "A", "title": "T",
+        "past": "a", "present": "b", "future": "c",
+    }]}))
+    for act in candidate_acts(legacy[0]).values():
+        assert act["outfit"] == ""
+
+
+def test_enforce_base_act_overwrites_outfit_but_not_the_flat_beat():
+    cand = {
+        "id": "A",
+        "acts": {"present": {"label": "now", "activity": "x", "place": "y",
+                             "feeling": "z", "outfit": "a red dress"}},
+    }
+    enforce_base_act(cand, base_axis="present",
+                     base_act_fixed={"activity": "sitting", "place": "park",
+                                     "feeling": "warm", "outfit": "school uniform"})
+    assert cand["acts"]["present"]["outfit"] == "school uniform"
+    # The flat beat feeds infer_axis_scene_constraints and the topic-anchor
+    # gate — garment words there would register as false scene constraints.
+    assert "uniform" not in cand["present"]
+
+
 def test_build_script_scaffold_fixed_and_blanks():
     fixed = {"activity": "sitting, holding book", "place": "park, day",
-             "feeling": "warm"}
+             "feeling": "warm", "outfit": "school uniform"}
     s = build_script_scaffold(base_axis="present", time_scale="hours",
                               base_act_fixed=fixed)
     assert "SCRIPT — TIME AXIS" in s
     assert "THIS IS THE BASE IMAGE. FIXED" in s
     assert 'activity = "sitting, holding book"' in s
-    assert s.count("= ____") == 6  # 2 blank acts × 3 slots
+    # The base outfit is a decided fact from the image, not the LLM's to invent.
+    assert 'outfit = "school uniform"' in s
+    assert s.count("= ____") == 8  # 2 blank acts × 4 slots
     assert 'label="a few hours earlier"' in s
     assert 'label="now"' in s
     # scene delta from the existing table
@@ -293,7 +490,8 @@ def test_build_script_scaffold_topic_only_all_blanks():
     s = build_script_scaffold(base_axis="present", time_scale="years",
                               base_act_fixed=None)
     assert "FIXED]" not in s
-    assert s.count("= ____") == 9
+    assert s.count("= ____") == 12  # 3 blank acts × 4 slots
+    assert "outfit = ____" in s
     assert "t=0 base act" in s
 
 
@@ -404,6 +602,8 @@ def test_ensure_face_tags_reinjects_after_cap():
     assert "blue_eyes" in parts and "smile" in parts
     assert len(parts) <= 20
     assert out.endswith("She reads quietly.")
+    # Injected face tags must also LEAD, not merely survive.
+    assert parts[:3] == ["1girl", "blue_eyes", "smile"]
 
 
 def test_ensure_face_tags_prose_only_passthrough():
@@ -413,11 +613,44 @@ def test_ensure_face_tags_prose_only_passthrough():
     ) == prose
 
 
-def test_ensure_face_tags_noop_when_present():
+def test_ensure_face_tags_already_leading_is_fixed_point():
     positive = "1girl, blue_eyes, smile, reading"
     assert ensure_face_tags(
         positive, expression_tag="smile", lock_tags=["blue_eyes"],
     ) == positive
+
+
+def test_ensure_face_tags_reorders_buried_tags_under_the_cap():
+    """The tags were present but buried, and cap_danbooru_tag_line returns a
+    short line in its ORIGINAL order — so nothing ever moved them forward."""
+    line = "1girl, solo, reading, tree, blue_eyes, outdoors, smile, skirt"
+    out = ensure_face_tags(
+        line, expression_tag="smile", lock_tags=["blue_eyes"],
+        priority_tags=["blue_eyes", "smile"],
+    )
+    assert out.split(", ")[:4] == ["1girl", "solo", "blue_eyes", "smile"]
+    # A pure reorder: no tag invented, none dropped.
+    assert {t.strip() for t in line.split(",")} == {t.strip() for t in out.split(",")}
+
+
+def test_lead_with_face_tags_idempotent_and_lossless():
+    line = "1girl, solo, reading, blue_eyes, tree, smile"
+    once = lead_with_face_tags(line, expression_tag="smile", lock_tags=["blue_eyes"])
+    twice = lead_with_face_tags(once, expression_tag="smile", lock_tags=["blue_eyes"])
+    assert once == twice
+    assert {t.strip() for t in line.split(",")} == {t.strip() for t in once.split(",")}
+
+
+def test_lead_with_face_tags_without_eye_colour():
+    """No eye tag on the base image (or multi-character → lock drops it): the
+    expression leads alone and no eye colour is invented."""
+    out = lead_with_face_tags(
+        "1girl, solo, reading, smile, tree", expression_tag="smile", lock_tags=[],
+    )
+    assert out.split(", ")[:3] == ["1girl", "solo", "smile"]
+    assert "eyes" not in out
+    # Empty input must not raise.
+    assert lead_with_face_tags("", expression_tag="smile", lock_tags=[]) == ""
 
 
 # ── scene vocab subset ────────────────────────────────────────────────────────

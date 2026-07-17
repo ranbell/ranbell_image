@@ -325,23 +325,8 @@ function openImage(sha256) {
   if (sha256) emit('select-image', sha256)
 }
 
-// ── Time scrub (past ↔ present ↔ future) ────────────────────────────────────
-const detailScrubIdx = ref(1)
-const cardScrub = ref({}) // story_id → 0|1|2
 const variantShelfOpen = ref(true)
 const regenBusy = ref(new Set())
-
-function defaultScrubFor(story) {
-  const i = AXES.indexOf(story?.base_time_axis)
-  return i >= 0 ? i : 1
-}
-function cardScrubIdx(story) {
-  const v = cardScrub.value[story.story_id]
-  return v == null ? defaultScrubFor(story) : v
-}
-function setCardScrub(storyId, idx) {
-  cardScrub.value = { ...cardScrub.value, [storyId]: idx }
-}
 
 function weakestAxis(story) {
   // Prefer non-base axes with images/prompts for "another moment" play
@@ -493,9 +478,6 @@ async function refetchStory(id) {
 }
 
 const detailStory = ref(null)
-watch(detailStory, (s) => {
-  if (s) detailScrubIdx.value = defaultScrubFor(s)
-})
 
 const detailIndex = computed(() => {
   if (!detailStory.value) return -1
@@ -592,9 +574,6 @@ function onKey(e) {
     if (e.key === 'ArrowLeft') { detailPrev(); e.preventDefault() }
     else if (e.key === 'ArrowRight') { detailNext(); e.preventDefault() }
     else if (e.key === 'Escape') { closeDetail(); e.preventDefault() }
-    else if (e.key === '1') { detailScrubIdx.value = 0; e.preventDefault() }
-    else if (e.key === '2') { detailScrubIdx.value = 1; e.preventDefault() }
-    else if (e.key === '3') { detailScrubIdx.value = 2; e.preventDefault() }
   } else if (e.key === 'Escape') {
     if (_dismissBlocked()) {
       e.preventDefault()
@@ -724,12 +703,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               class="storybook-card sb-card group cursor-pointer"
               @click="openDetail(story)">
               <TimeScrubPolaroids
-                :front-index="cardScrubIdx(story)"
                 :base-axis="story.base_time_axis || 'present'"
                 :image-for="(ax) => axisImage(story, ax)"
                 :pending-label="t('storybook.imagePending')"
                 size="md"
-                @update:front-index="setCardScrub(story.story_id, $event)"
                 @open-image="openImage"
                 @thumb-error="(e, sha) => onThumbError(e, sha)"
               />
@@ -819,12 +796,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   class="storybook-card sb-card group shrink-0 w-48 snap-start cursor-pointer"
                   @click="openDetail(story)">
                   <TimeScrubPolaroids
-                    :front-index="cardScrubIdx(story)"
                     :base-axis="story.base_time_axis || 'present'"
                     :image-for="(ax) => axisImage(story, ax)"
                     :pending-label="t('storybook.imagePending')"
                     size="sm"
-                    @update:front-index="setCardScrub(story.story_id, $event)"
                     @open-image="openImage"
                     @thumb-error="(e, sha) => onThumbError(e, sha)"
                   />
@@ -1031,7 +1006,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <p class="text-[10px] text-[var(--sb-faint)]">{{ t('storybook.timeScrubHint') }}</p>
               </div>
               <TimeScrubPolaroids
-                v-model:front-index="detailScrubIdx"
                 :base-axis="detailStory.base_time_axis || 'present'"
                 :image-for="(ax) => axisImage(detailStory, ax)"
                 :pending-label="t('storybook.imagePending')"
@@ -1039,38 +1013,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 @open-image="openImage"
                 @thumb-error="(e, sha) => onThumbError(e, sha)"
               />
-              <p class="mt-3 sb-prose text-sm max-h-28 overflow-y-auto border-l border-[var(--sb-rule)] pl-3">
-                {{ axisStory(detailStory, AXES[detailScrubIdx]) || '—' }}
-              </p>
-              <div class="mt-2 flex flex-wrap gap-1.5">
-                <button
-                  v-if="detailStory.axes?.[AXES[detailScrubIdx]]?.prompt_positive"
-                  @click="sendAxisToRefine(detailStory, AXES[detailScrubIdx])"
-                  class="sb-btn-accent"
-                >
-                  <SbIcon name="spark" class="w-3 h-3" />
-                  {{ t('storybook.refineAxis') }}
-                </button>
-                <button
-                  v-if="axisImage(detailStory, AXES[detailScrubIdx])
-                    && !(AXES[detailScrubIdx] === detailStory.base_time_axis && detailStory.base_image_id)"
-                  @click="regenerateAxis(detailStory, AXES[detailScrubIdx])"
-                  :disabled="regenBusy.has(detailStory.story_id + ':' + AXES[detailScrubIdx])"
-                  class="sb-btn disabled:opacity-40"
-                  :title="t('storybook.regen')"
-                >
-                  <SbIcon name="refresh" class="w-3 h-3" />
-                  {{ t('storybook.regen') }}
-                </button>
-                <button
-                  v-if="axisImage(detailStory, AXES[detailScrubIdx])"
-                  @click="emit('weave-from', axisImage(detailStory, AXES[detailScrubIdx]))"
-                  class="sb-btn border-teal-700/40 text-teal-100"
-                >
-                  <SbIcon name="weave" class="w-3 h-3" />
-                  {{ t('storybook.weaveFromShort') }}
-                </button>
-              </div>
             </div>
 
             <div v-if="storyOverall(detailStory)" class="px-6 sm:px-8 py-6 sb-section">
@@ -1618,56 +1560,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   transform: translateY(10px) scale(0.985);
   opacity: 0;
 }
-
-/* Polaroid stack */
-.polaroid-stack {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  width: 100%;
-  perspective: 900px;
-}
-.polaroid {
-  position: absolute;
-  top: 12%;
-  left: 16%;
-  width: 68%;
-  height: 68%;
-  background: #e4e0d6;
-  border: 4px solid #e4e0d6;
-  border-bottom-width: 22px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
-  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1),
-              box-shadow 0.45s;
-  overflow: hidden;
-}
-.polaroid img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.polaroid-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #94a3b8;
-  font-size: 0.7rem;
-  font-family: var(--sb-font-ui);
-  padding: 0.5rem;
-  text-align: center;
-}
-.polaroid.past    { transform: translate(-16%, -6%) rotate(-6deg); z-index: 1; }
-.polaroid.present { transform: translate(0, 0)       rotate(2deg);  z-index: 2; }
-.polaroid.future  { transform: translate(16%, 6%)    rotate(8deg);  z-index: 3; }
-.polaroid.base {
-  box-shadow: 0 0 0 2px rgba(232, 196, 122, 0.65),
-              0 8px 20px rgba(0, 0, 0, 0.45);
-}
-.storybook-card:hover .polaroid-stack .polaroid.past    { transform: translate(-42%, -2%) rotate(-4deg); }
-.storybook-card:hover .polaroid-stack .polaroid.present { transform: translate(0, -2%)     rotate(0deg);  }
-.storybook-card:hover .polaroid-stack .polaroid.future  { transform: translate(42%, -2%)  rotate(4deg);  }
-.polaroid-stack-sm .polaroid { border-width: 3px; border-bottom-width: 14px; }
 
 .variant-card {
   transition: transform 0.25s ease, border-color 0.25s, box-shadow 0.25s;
