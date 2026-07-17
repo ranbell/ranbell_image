@@ -148,7 +148,7 @@ function _connectEventSource(sessionId, token) {
     try {
       const evt = JSON.parse(e.data)
       _handleEvent(evt)
-    } catch {}
+    } catch (err) { console.debug('[invoke] stream event failed', err) }
   }
 
   _eventSource.onerror = () => {
@@ -414,7 +414,7 @@ async function fetchDaily() {
       invokeDailyOracle.value = data
       invokeOracleNextRun.value = data.next_run_at ?? null
     }
-  } catch {}
+  } catch (err) { console.debug('[invoke] fetchDaily failed', err) }
 }
 
 
@@ -422,7 +422,7 @@ async function fetchStats() {
   try {
     const r = await fetch('/api/invoke/stats')
     if (r.ok) invokeStats.value = await r.json()
-  } catch {}
+  } catch (err) { console.debug('[invoke] fetchStats failed', err) }
 }
 
 async function enhancePrompt(token) {
@@ -438,21 +438,27 @@ async function enhancePrompt(token) {
   const reader = streamR.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const parts = buf.split('\n\n')
-    buf = parts.pop()
-    for (const part of parts) {
-      const dataLine = part.split('\n').find(l => l.startsWith('data:'))
-      if (!dataLine) continue
-      const evt = JSON.parse(dataLine.slice(5))
-      if (evt.type === 'done') {
-        if (evt.tags) invokeProPrompt.value = evt.tags
-        return evt
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop()
+      for (const part of parts) {
+        const dataLine = part.split('\n').find(l => l.startsWith('data:'))
+        if (!dataLine) continue
+        const evt = JSON.parse(dataLine.slice(5))
+        if (evt.type === 'done') {
+          if (evt.tags) invokeProPrompt.value = evt.tags
+          return evt
+        }
       }
     }
+  } finally {
+    // Release the stream on early return or parse error, or the connection
+    // stays locked open.
+    reader.cancel().catch(() => {})
   }
   return null
 }

@@ -304,7 +304,8 @@
     "folderBack": "← Folder list",
     "rootFolder": "(root)",
     "imageCount": "{n} images",
-    "newImagesAvailable": "New images available — Refresh"
+    "newImagesAvailable": "New images available — Refresh",
+    "loadCap": "Reached the display cap of {n} images. Narrow down with search or filters."
   },
   "detail": {
     "fullscreen": "Click to view fullscreen",

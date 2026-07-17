@@ -37,6 +37,10 @@ const images = ref([])
 const total = ref(0)
 const nextCursor = ref(null)
 const LIMIT = 100
+// Infinite scroll has no virtualization: every loaded card stays in the array
+// and the DOM. Cap the session's loaded window so a marathon scroll can't grow
+// memory without bound; the user narrows via search/filters past this point.
+const MAX_GALLERY_IMAGES = 2000
 const loading = ref(false)
 const hasMore = ref(true)
 const pendingGalleryRefresh = ref(false)
@@ -73,6 +77,24 @@ const jobsMap = ref(new Map())   // job.id -> job dict
 // Stable getter so ChroniclePanel can sample jobs without re-rendering on every map update.
 function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
+
+// Terminal jobs accumulate for the whole session via SSE upserts, while the
+// backend keeps only 100 finished jobs (spooler _HISTORY_MAXLEN) — so anything
+// beyond this cap could never survive a reload anyway. Active jobs are never
+// pruned. Keeps the ~19 computeds that scan the whole map O(bounded).
+const TERMINAL_JOB_STATES = new Set(['succeeded', 'failed', 'cancelled'])
+const MAX_TERMINAL_JOBS = 200
+function pruneJobsMap(map) {
+  let terminal = 0
+  for (const j of map.values()) if (TERMINAL_JOB_STATES.has(j.state)) terminal++
+  if (terminal <= MAX_TERMINAL_JOBS) return map
+  const doomed = [...map.values()]
+    .filter(j => TERMINAL_JOB_STATES.has(j.state))
+    .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+    .slice(MAX_TERMINAL_JOBS)
+  for (const j of doomed) map.delete(j.id)
+  return map
+}
 
 // ── Control Room ──────────────────────────────────────────────────────────────
 const controlRoomVisible = ref(false)
@@ -872,7 +894,15 @@ function _scheduleFlush() {
 // ── Graph Canvas Rendering ─────────────────────────────────────────────────────
 const NODE_RADIUS = 40
 const ROOT_RADIUS = 64
-const _imgCache = {}
+// Decoded node thumbnails. App.vue never unmounts, so without a cap every
+// graph ever opened keeps its bitmaps alive for the whole session.
+const IMG_CACHE_MAX = 300
+const _imgCache = new Map()
+function _imgCachePut(sha, img) {
+  if (_imgCache.has(sha)) _imgCache.delete(sha)
+  _imgCache.set(sha, img)
+  while (_imgCache.size > IMG_CACHE_MAX) _imgCache.delete(_imgCache.keys().next().value)
+}
 let _graphSim = null
 let _graphNodes = []
 let _graphLinks = []
@@ -1011,10 +1041,10 @@ function _startSim(canvas, data) {
   }
 
   Promise.all(_graphNodes.map(n => {
-    if (_imgCache[n.sha256]?.complete) return Promise.resolve()
+    if (_imgCache.get(n.sha256)?.complete) return Promise.resolve()
     return new Promise(resolve => {
       const img = new Image()
-      img.onload = img.onerror = () => { _imgCache[n.sha256] = img; resolve() }
+      img.onload = img.onerror = () => { _imgCachePut(n.sha256, img); resolve() }
       img.src = `/api/thumbnails/${n.sha256}.webp`
     })
   })).then(() => { if (_graphSim) _graphSim.alpha(0.1).restart() })
@@ -1071,7 +1101,7 @@ function _startSim(canvas, data) {
       ctx.beginPath()
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
       ctx.clip()
-      const img = _imgCache[node.sha256]
+      const img = _imgCache.get(node.sha256)
       if (img?.complete && img.naturalWidth) {
         const iw = img.naturalWidth, ih = img.naturalHeight
         const scale = Math.max(r * 2 / iw, r * 2 / ih)
@@ -1135,7 +1165,7 @@ function _startSim(canvas, data) {
 
     // Hover preview popup (drawn last, on top of everything)
     if (_hoverPreviewNode) {
-      const pimg = _imgCache[_hoverPreviewNode.sha256]
+      const pimg = _imgCache.get(_hoverPreviewNode.sha256)
       if (pimg?.complete && pimg.naturalWidth) {
         const PREV_MAX = 260
         const iw = pimg.naturalWidth, ih = pimg.naturalHeight
@@ -1417,6 +1447,10 @@ async function fetchImages(reset = false) {
       total.value = data.total
       nextCursor.value = data.next_cursor
       hasMore.value = !!data.next_cursor
+      if (hasMore.value && images.value.length >= MAX_GALLERY_IMAGES) {
+        hasMore.value = false
+        showToast(t('gallery.loadCap', { n: images.value.length }), 'info', 6000)
+      }
       fetchAlignmentsForImages(data.images || [])
       if (data.available_tags?.length) {
         modelFilteredTagSet.value = new Set(data.available_tags)
@@ -1752,19 +1786,19 @@ function startJobStream() {
         }
       }
       if (evalMap.size > 0) alignmentEvaluating.value = evalMap
-    } catch {}
+    } catch (err) { console.debug('[sse] snapshot handler failed', err) }
   })
 
   const upsert = (e) => {
     try {
       const job = JSON.parse(e.data)
-      jobsMap.value = new Map(jobsMap.value).set(job.id, job)
+      jobsMap.value = pruneJobsMap(new Map(jobsMap.value).set(job.id, job))
       crIngestEvent(e.type, job)
       if (e.type === 'job_finished') {
         _pendingJobUpdates?.delete(job.id)
         handleJobFinished(job)
       }
-    } catch {}
+    } catch (err) { console.debug(`[sse] ${e.type} handler failed`, err) }
   }
   es.addEventListener('job_created', upsert)
   es.addEventListener('job_finished', upsert)
@@ -1783,12 +1817,12 @@ function startJobStream() {
         _pendingJobUpdatesTimer = setTimeout(() => {
           const newMap = new Map(jobsMap.value)
           for (const [id, j] of _pendingJobUpdates) newMap.set(id, j)
-          jobsMap.value = newMap
+          jobsMap.value = pruneJobsMap(newMap)
           _pendingJobUpdates = null
           _pendingJobUpdatesTimer = null
         }, 250)
       }
-    } catch {}
+    } catch (err) { console.debug('[sse] job_updated handler failed', err) }
   })
 
   es.addEventListener('resource_stats', (e) => {
@@ -1799,19 +1833,24 @@ function startJobStream() {
       if (data.disk_caution_pct != null) diskCautionPct.value = data.disk_caution_pct
       if (data.disk_fault_pct   != null) diskFaultPct.value   = data.disk_fault_pct
       crIngestEvent('resource_stats', data)
-    } catch {}
+    } catch (err) { console.debug('[sse] resource_stats handler failed', err) }
   })
 
   es.addEventListener('lane_state', (e) => {
     try {
       crIngestEvent('lane_state', JSON.parse(e.data))
-    } catch {}
+    } catch (err) { console.debug('[sse] lane_state handler failed', err) }
   })
 
   es.onerror = () => {
     jobStreamConnected.value = false
     es.close()
     _jobEventSource = null
+    // Drop this connection's pending update batch — the reconnect snapshot
+    // supersedes it, and the stale timer would otherwise fire into the new map.
+    clearTimeout(_pendingJobUpdatesTimer)
+    _pendingJobUpdatesTimer = null
+    _pendingJobUpdates = null
     // Treat SSE drop as a backend-availability signal: mark not-ready so
     // scheduleBackgroundRefresh drops incoming refresh requests, and resume
     // /api/health polling so the ready-transition watch fires resyncAll on
@@ -2399,7 +2438,7 @@ async function runRefine() {
       buffer = lines.pop() ?? ''
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
-        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch {}
+        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch (err) { console.debug('[refine] stream event failed', err) }
       }
     }
   } catch (e) {
@@ -3279,7 +3318,7 @@ onUnmounted(() => {
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2 items-start">
           <div v-for="img in images" :key="img.sha256"
-            class="cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
+            class="gallery-card cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
             :class="[
               selectedIds.has(img.sha256)
                 ? 'ring-2 ring-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.45)]'
@@ -3347,7 +3386,7 @@ onUnmounted(() => {
       <template v-else>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2 items-start">
           <div v-for="img in images" :key="img.sha256"
-            class="cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
+            class="gallery-card cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
             :class="[
               selectedIds.has(img.sha256)
                 ? 'ring-2 ring-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.45)]'
@@ -5304,6 +5343,15 @@ onUnmounted(() => {
 <style>
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Gallery cards ───────────────────────────────────────────────────────── */
+/* Off-screen cards skip rendering and let the browser drop their decoded
+   thumbnail bitmaps; the intrinsic size matches the h-48 thumb + caption so
+   the scrollbar stays stable. */
+.gallery-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 254px;
+}
 
 /* ── Control Room Status Bar ─────────────────────────────────────────────── */
 .cr-statusline {

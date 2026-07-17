@@ -86,15 +86,17 @@ const hasSession = computed(() =>
 // ── Actions ────────────────────────────────────────────────────────────────
 function resetSession(initialSlots = []) {
   if (_activeReader) {
-    _activeReader.cancel().catch(() => {})
+    _activeReader.cancel().catch(err => console.debug('[inspire] reader cancel failed', err))
     _activeReader = null
   }
   if (inversionJobId.value) {
-    fetch(`/api/jobs/${inversionJobId.value}/cancel`, { method: 'POST' }).catch(() => {})
+    fetch(`/api/jobs/${inversionJobId.value}/cancel`, { method: 'POST' })
+      .catch(err => console.debug('[inspire] inversion job cancel failed', err))
     inversionJobId.value = null
   }
   if (brainstormJobId.value) {
-    fetch(`/api/jobs/${brainstormJobId.value}/cancel`, { method: 'POST' }).catch(() => {})
+    fetch(`/api/jobs/${brainstormJobId.value}/cancel`, { method: 'POST' })
+      .catch(err => console.debug('[inspire] brainstorm job cancel failed', err))
     brainstormJobId.value = null
   }
   const shas = initialSlots.slice(0, 6)

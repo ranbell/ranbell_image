@@ -591,17 +591,23 @@ async function fetchColor3D() {
   }
 }
 
+let _backfillPolling = false
 async function triggerColorBackfill() {
   try {
     const res = await fetch('/api/admin/colors/backfill', { method: 'POST' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     // SSE watcher fires fetchColor3D on job completion, but if SSE misses the event,
-    // fall back to polling until the pending count clears (max 60 s).
+    // fall back to polling until the pending count clears (max 60 s). One chain
+    // at a time — each poll rebuilds the Plotly scene.
+    if (_backfillPolling) return
+    _backfillPolling = true
     const deadline = Date.now() + 60_000
     const poll = async () => {
       await fetchColor3D()
       if (color3dPendingCount.value > 0 && Date.now() < deadline)
         setTimeout(poll, 4000)
+      else
+        _backfillPolling = false
     }
     setTimeout(poll, 3000)
   } catch (e) {

@@ -433,26 +433,55 @@ const stayOpen = computed(() => {
   return Object.values(states).some(s => s === 'queued' || s === 'running')
 })
 
+// Incremental tag index over the append-only stream. Re-running full-text
+// regexes on every 64ms flush is O(n²) in stream length and can stall the tab
+// on long weaves, so only the newly appended chunk is scanned for tag markers.
+const _STREAM_TAGS = ['TITLE', 'OVERALL', 'PAST', 'PRESENT', 'FUTURE']
+let _tagScanPos = 0
+let _tagPos = {}
+
+function _resetStreamTagIndex() { _tagScanPos = 0; _tagPos = {} }
+
+// Body of a tagged section: text after the tag's line, up to the next tag.
+function _streamBody(text, tag) {
+  const start = _tagPos[tag]
+  if (start == null) return null
+  const nl = text.indexOf('\n', start)
+  if (nl < 0) return null
+  let end = text.length
+  for (const t of _STREAM_TAGS) {
+    const p = _tagPos[t]
+    if (p != null && p > start && p < end) end = p
+  }
+  return text.slice(nl + 1, end).trim()
+}
+
 watch(streamText, (text) => {
+  if (text.length < _tagScanPos) _resetStreamTagIndex()
+  const re = /\[(TITLE|OVERALL|PAST|PRESENT|FUTURE)\]/gi
+  // Back up past the longest marker in case one straddles a flush boundary.
+  re.lastIndex = Math.max(0, _tagScanPos - 12)
+  let m
+  while ((m = re.exec(text))) {
+    const k = m[1].toUpperCase()
+    if (_tagPos[k] == null) _tagPos[k] = m.index
+  }
+  _tagScanPos = text.length
   if (!title.value) {
-    const m = text.match(/\[TITLE\][^\[]*?\n(.*)/i)
-    if (m) title.value = m[1].trim().replace(/^["「]|["」]$/g, '')
+    const body = _streamBody(text, 'TITLE')
+    const line = body?.split('\n', 1)[0].trim()
+    if (line) title.value = line.replace(/^["「]|["」]$/g, '')
   }
   if (!overall.value) {
-    const m = text.match(/\[OVERALL\][^\[]*?\n([\s\S]*?)(?=\[PAST\]|$)/i)
-    if (m) overall.value = m[1].trim()
+    const body = _streamBody(text, 'OVERALL')
+    if (body) overall.value = body
   }
   // Provisional axis prose from the live expand stream (request locale).
   const patch = {}
   for (const axis of AXES) {
     const cur = uiLocale.value === 'ja' ? axisStoriesJa.value[axis] : axisStories.value[axis]
     if (cur) continue
-    const tag = axis.toUpperCase()
-    const m = text.match(new RegExp(
-      `\\[${tag}\\][^\\[]*?\\n([\\s\\S]*?)(?=\\[(?:PAST|PRESENT|FUTURE|OVERALL|TITLE)\\]|$)`,
-      'i',
-    ))
-    const body = m?.[1]?.trim()
+    const body = _streamBody(text, axis.toUpperCase())
     if (body) patch[axis] = body
   }
   if (Object.keys(patch).length) {
@@ -567,6 +596,7 @@ function close() {
 
 function resetStory({ keepDraftNotes = false } = {}) {
   streamText.value = ''
+  _resetStreamTagIndex()
   prompts.value = {}
   imageJobs.value = []
   finished.value = false

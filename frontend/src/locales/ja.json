@@ -304,7 +304,8 @@
     "folderBack": "← フォルダ一覧",
     "rootFolder": "(ルート直下)",
     "imageCount": "{n} 枚",
-    "newImagesAvailable": "新しい画像があります — 更新"
+    "newImagesAvailable": "新しい画像があります — 更新",
+    "loadCap": "表示上限 {n} 枚に達しました。検索やフィルタで絞り込んでください。"
   },
   "detail": {
     "fullscreen": "クリックで全画面表示",
