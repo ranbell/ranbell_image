@@ -5,7 +5,10 @@ from app.story.compose import (
     filter_compose_result,
     format_labeled_positive,
     format_summary,
+    map_expression,
+    resolve_chronicle_identity,
     soft_normalize_tag,
+    strip_expression_tags,
 )
 from app.story.generator import default_act_labels, repair_act_labels
 
@@ -38,8 +41,8 @@ def test_repair_act_labels_always_canonical():
     assert cand["acts"]["present"]["label"] == defaults["present"]
 
 
-def test_filter_compose_present_exclusive_and_shots():
-    acts = {
+def _sample_acts():
+    return {
         "past": {
             "label": "a few days earlier",
             "activity": "sketching",
@@ -62,6 +65,10 @@ def test_filter_compose_present_exclusive_and_shots():
             "outfit": "cardigan, skirt",
         },
     }
+
+
+def test_filter_compose_present_exclusive_and_shots():
+    acts = _sample_acts()
     composed = {
         "past": {
             "pose": ["sitting"],
@@ -78,7 +85,7 @@ def test_filter_compose_present_exclusive_and_shots():
         "future": {
             "pose": ["standing"],
             "outfit": ["cardigan", "skirt"],
-            "shot": ["upper_body"],  # duplicate → forced unique
+            "shot": ["upper_body"],
             "effect": ["indoors", "light_rays"],
         },
     }
@@ -94,10 +101,79 @@ def test_filter_compose_present_exclusive_and_shots():
     assert "apron" in out["present"]["outfit"]
     shots = {out[a]["shot"][0] for a in ("past", "present", "future")}
     assert len(shots) == 3
-    pos = out["present"]["positive"]
-    assert pos.startswith("Summary:")
-    assert "Character:" in pos
-    assert "Pose: pouring" in pos
+    assert "worried" in out["past"]["character"]
+    assert "serious" in out["present"]["character"]
+    assert "smile" not in out["present"]["character"]
+
+
+def test_forced_keywords_survive_allowlist():
+    acts = _sample_acts()
+    composed = {
+        "past": {"pose": ["sitting"], "outfit": ["blazer"], "shot": ["upper_body"], "effect": ["desk"]},
+        "present": {"pose": ["pouring"], "outfit": ["apron"], "shot": ["close-up"], "effect": ["cafe"]},
+        "future": {"pose": ["standing"], "outfit": ["skirt"], "shot": ["cowboy_shot"], "effect": ["indoors"]},
+    }
+    out = filter_compose_result(
+        composed,
+        acts,
+        identity=["1girl", "solo"],
+        forced_keywords={
+            "past": ["library", "letter"],
+            "present": [],
+            "future": ["confetti"],
+        },
+        use_allowlist=True,
+    )
+    assert "library" in out["past"]["effect"] or "library" in out["past"]["positive"]
+    assert "letter" in out["past"]["positive"]
+    assert "confetti" in out["future"]["positive"]
+
+
+def test_allowlist_off_keeps_unknown_tags():
+    acts = _sample_acts()
+    composed = {
+        "past": {
+            "pose": ["sitting"],
+            "outfit": ["mystery_cloak"],
+            "shot": ["upper_body"],
+            "effect": ["secret_archive"],
+        },
+        "present": {"pose": ["pouring"], "outfit": ["apron"], "shot": ["close-up"], "effect": ["cafe"]},
+        "future": {"pose": ["standing"], "outfit": ["skirt"], "shot": ["cowboy_shot"], "effect": ["indoors"]},
+    }
+    out = filter_compose_result(
+        composed,
+        acts,
+        identity=["1girl", "solo"],
+        use_allowlist=False,
+    )
+    assert "mystery_cloak" in out["past"]["outfit"]
+    assert "secret_archive" in out["past"]["effect"]
+
+
+def test_character_user_overrides_wd14_random():
+    ident = resolve_chronicle_identity(
+        "blue_hair, green_eyes, smile",
+        ["grey_hair", "red_eyes", "glasses"],
+        rng=__import__("random").Random(0),
+    )
+    assert "blue_hair" in ident
+    assert "green_eyes" in ident
+    assert "smile" not in ident  # expression stripped from appearance
+    assert "1girl" in ident
+
+
+def test_map_expression_varies_with_feeling():
+    emo = {"serious", "worried", "smile", "sad", "nervous", "expressionless"}
+    assert map_expression("focused", emo_allow=emo) == "serious"
+    assert map_expression("worried", emo_allow=emo) == "worried"
+    assert map_expression("overwhelmed", emo_allow=emo) == "worried"
+
+
+def test_strip_expression_tags():
+    assert strip_expression_tags(["1girl", "grey_hair", "smile", "red_eyes"]) == [
+        "1girl", "grey_hair", "red_eyes",
+    ]
 
 
 def test_format_labeled_positive_shape():

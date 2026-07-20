@@ -56,11 +56,108 @@ _FEELING_ALIASES = {
     "uncertain": "nervous",
     "careful": "serious",
     "serenity": "closed_eyes",
+    "calmly_focused": "serious",
+    "proud/calmly focused": "serious",
+    "stressed/chaotic": "worried",
 }
 
 
 def _hyph(s: str) -> str:
     return s.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def parse_csv_tags(text: str, *, strip_colors: bool = True) -> list[str]:
+    """Parse comma-separated user tags (keep order, dedupe)."""
+    if text is None:
+        return []
+    parts = re.split(r"[,，、]", str(text))
+    out: list[str] = []
+    for p in parts:
+        if not str(p).strip():
+            continue
+        tag = soft_normalize_tag(p) if strip_colors else _hyph(p)
+        if tag:
+            out.append(tag)
+    return list(dict.fromkeys(out))
+
+
+def parse_identity_tags(text: str) -> list[str]:
+    """Appearance tags: keep color prefixes (blue_hair, red_eyes)."""
+    return parse_csv_tags(text, strip_colors=False)
+
+
+def axis_keywords_from_body(body) -> dict[str, list[str]]:
+    """Read per-axis forced keywords from a ChronicleRequest-like object."""
+    return {
+        "past": parse_csv_tags(getattr(body, "keywords_past", "") or ""),
+        "present": parse_csv_tags(getattr(body, "keywords_present", "") or ""),
+        "future": parse_csv_tags(getattr(body, "keywords_future", "") or ""),
+    }
+
+
+def strip_expression_tags(tags: list[str], *, emo: set[str] | frozenset[str] | None = None) -> list[str]:
+    """Remove expression/emotion tags from an appearance list."""
+    emo_set = set(emo) if emo is not None else set(chronicle_allowlists().get("emo", []))
+    # Always strip common face expressions even if allowlist empty
+    emo_set |= {
+        "smile", "smirk", "grin", "laughing", "sad", "angry", "worried", "nervous",
+        "serious", "expressionless", "blush", "closed_eyes", "open_mouth", "frown",
+        "looking_at_viewer", "looking_away",
+    }
+    out: list[str] = []
+    for t in tags:
+        key = soft_normalize_tag(t)
+        if key in emo_set or key.replace("-", "_") in emo_set:
+            continue
+        out.append(t if t else key)
+    return out
+
+
+def ensure_subject_anchors(tags: list[str]) -> list[str]:
+    out = list(tags)
+    lower = {t.lower().replace(" ", "_") for t in out}
+    for anchor in ("1girl", "solo"):
+        if anchor not in lower:
+            out.insert(0, anchor)
+            lower.add(anchor)
+    return out
+
+
+def identity_candidates_from_wd14(wd14_tags: list[str], *, multi_character: bool = False) -> list[str]:
+    """Hair/eyes/accessory pool for random identity (no expressions)."""
+    from .generator import classify_identity_tag
+
+    allowed = {"hair_color", "eyes", "accessory"}
+    if multi_character:
+        allowed -= {"hair_color", "eyes"}
+    out: list[str] = []
+    for tag in wd14_tags or []:
+        if classify_identity_tag(tag) in allowed:
+            out.append(tag)
+    return list(dict.fromkeys(out))
+
+
+def resolve_chronicle_identity(
+    character_tags_user: str,
+    wd14_tags: list[str],
+    *,
+    rng=None,
+    multi_character: bool = False,
+    limit: int = 6,
+) -> list[str]:
+    """User appearance tags win; else random sample from WD14 identity pool."""
+    import random as _random
+
+    rng = rng or _random
+    user = strip_expression_tags(parse_identity_tags(character_tags_user or ""))
+    if user:
+        return ensure_subject_anchors(user)
+    pool = identity_candidates_from_wd14(wd14_tags, multi_character=multi_character)
+    if not pool:
+        return ensure_subject_anchors([])
+    k = min(len(pool), max(2, min(limit, len(pool))))
+    picked = rng.sample(pool, k=k) if len(pool) >= k else list(pool)
+    return ensure_subject_anchors(picked)
 
 
 def _vocab_path() -> Path:
@@ -183,24 +280,39 @@ def filter_to_allowlist(
 
 
 def map_expression(feeling: str, *, emo_allow: set[str] | list[str]) -> str:
+    """Map act feeling → expression. Prefer story fit; smile is last resort."""
     emo = set(emo_allow)
-    raw = expression_tag_for_feeling(feeling or "")
-    f = (feeling or "").lower()
-    t = _FEELING_ALIASES.get(raw, _FEELING_ALIASES.get(f, raw))
+    f = (feeling or "").lower().replace(" ", "_")
+    # Alias table first (story feelings often aren't danbooru tags)
+    t = ""
     for k, v in _FEELING_ALIASES.items():
-        if k in f:
+        if k.replace(" ", "_") in f or k in (feeling or "").lower():
             t = v
             break
-    t = soft_normalize_tag(t)
+    if not t:
+        raw = expression_tag_for_feeling(feeling or "", emotion="")
+        # Ignore smile fallback from generator until we try better options
+        t = "" if raw == "smile" and f and "smil" not in f and "proud" not in f and "happy" not in f and "joy" not in f else raw
+        if not t:
+            t = _FEELING_ALIASES.get(f, "")
+    t = soft_normalize_tag(t) if t else ""
     if t in emo and t != "looking_at_viewer":
         return t
-    if "worried" in emo and any(x in f for x in ("stress", "overwhelm", "anxious")):
+    if any(x in f for x in ("stress", "overwhelm", "anxious", "worry", "fear")) and "worried" in emo:
         return "worried"
+    if any(x in f for x in ("focus", "serious", "determin", "calm", "concentrat")) and "serious" in emo:
+        return "serious"
+    if any(x in f for x in ("sad", "lonely", "melanchol")) and "sad" in emo:
+        return "sad"
+    if any(x in f for x in ("nervous", "uncertain", "shy")) and "nervous" in emo:
+        return "nervous"
     if "serious" in emo:
         return "serious"
+    if "expressionless" in emo:
+        return "expressionless"
     if "smile" in emo:
         return "smile"
-    return next(iter(sorted(emo)), "smile")
+    return next(iter(sorted(emo)), "serious")
 
 
 def format_summary(label: str, activity: str, place: str) -> str:
@@ -241,30 +353,46 @@ def build_compose_prompt(
     throughline: str,
     acts: dict[str, dict],
     time_scale: str,
-    identity_hint: str = "grey_hair, red_eyes",
+    identity_hint: str = "",
     present_exclusive: frozenset[str] | None = None,
+    forced_keywords: dict[str, list[str]] | None = None,
+    use_allowlist: bool = True,
 ) -> str:
     allow = chronicle_allowlists()
     excl = ", ".join(sorted(present_exclusive or PRESENT_EXCLUSIVE_DEFAULT))
+    kw = forced_keywords or {}
+    kw_block = "\n".join(
+        f"  {ax}: {', '.join(kw.get(ax) or []) or '(none)'}" for ax in AXES
+    )
 
     def _fmt(name: str, items: list[str], n: int = 90) -> str:
         body = ", ".join(items[:n])
         return f"{name} ({len(items)}): {body}" + (" ..." if len(items) > n else "")
 
     acts_json = json.dumps(acts, ensure_ascii=False, indent=2)
-    return (
-        "Compose Danbooru tags for a 3-panel anime chronicle. "
-        "Use ONLY tags from the allowlists. Return JSON.\n\n"
-        f"IDENTITY (do NOT invent hair/eye colors; injected later): {identity_hint}\n"
-        f"TIME SCALE: {time_scale}\n"
-        f"TITLE: {title}\n"
-        f"THROUGHLINE: {throughline}\n\n"
-        f"ACTS:\n{acts_json}\n\n"
+    allow_rules = (
+        "Use ONLY tags from the allowlists below.\n\n"
         "ALLOWLISTS:\n"
         f"{_fmt('POSE', allow['pose'])}\n"
         f"{_fmt('OUTFIT', allow['outfit'], 110)}\n"
         f"{_fmt('SHOT', allow['shot'], 30)}\n"
         f"{_fmt('EFFECT', allow['effect'], 130)}\n\n"
+        if use_allowlist
+        else (
+            "Allowlist is OFF — prefer real Danbooru tags but you may use "
+            "specific props/places needed by the keywords.\n\n"
+        )
+    )
+    return (
+        "Compose Danbooru tags for a 3-panel anime chronicle. Return JSON.\n\n"
+        f"{allow_rules}"
+        f"IDENTITY (appearance only; expression comes from feeling later): "
+        f"{identity_hint or '(injected later)'}\n"
+        f"TIME SCALE: {time_scale}\n"
+        f"TITLE: {title}\n"
+        f"THROUGHLINE: {throughline}\n\n"
+        f"FORCED KEYWORDS (MUST appear in that axis Effect/Outfit/Pose):\n{kw_block}\n\n"
+        f"ACTS:\n{acts_json}\n\n"
         "FEW-SHOT (style only — do not copy):\n"
         'present: Pose=["pouring"] Outfit=["apron","blouse"] Shot=["close-up"] '
         'Effect=["cafe","counter","coffee_cup","steam"]\n'
@@ -275,10 +403,11 @@ def build_compose_prompt(
         "HARD RULES:\n"
         "- Keys: past, present, future. Each: pose(1-2), outfit(2-4), shot(1), effect(3-6).\n"
         "- Arrays of strings only. No color prefixes (blouse not white_blouse).\n"
-        "- present must match FIXED act; include pouring/cafe/counter when present is cafe pour.\n"
+        "- present must match FIXED act when FIXED is a cafe pour.\n"
         f"- past/future MUST NOT use: {excl}\n"
         "- Three DIFFERENT shot values. Outfits differ across acts when scale≥days.\n"
-        "- Exhibition/presentation poses: prefer standing (not spread_arms/hands_up).\n\n"
+        "- Include every forced keyword for that axis in effect (or outfit/pose if garment/action).\n"
+        "- Do NOT put expression tags in pose/outfit/effect; feeling drives expression later.\n\n"
         'Return ONLY JSON: {"past":{"pose":[],"outfit":[],"shot":[],"effect":[]},'
         '"present":{...},"future":{...}}\n'
     )
@@ -308,6 +437,38 @@ def parse_compose_json(raw: str) -> dict[str, dict]:
     return out
 
 
+def _pass_tags(
+    tags: list[str],
+    allowed: set[str],
+    *,
+    ban: set[str],
+    limit: int,
+    use_allowlist: bool,
+) -> list[str]:
+    if use_allowlist:
+        return filter_to_allowlist(tags, allowed, ban=ban, limit=limit)
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in tags:
+        key = soft_normalize_tag(t)
+        if not key or key in ban or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _inject_forced(tags: list[str], forced: list[str], *, limit: int = 12) -> list[str]:
+    out = list(tags)
+    for t in forced:
+        key = soft_normalize_tag(t)
+        if key and key not in {soft_normalize_tag(x) for x in out}:
+            out.append(key)
+    return out[:limit]
+
+
 def filter_compose_result(
     composed: dict[str, dict],
     acts: dict[str, dict],
@@ -315,73 +476,88 @@ def filter_compose_result(
     identity: list[str],
     base_axis: str = "present",
     present_exclusive: frozenset[str] | None = None,
+    use_allowlist: bool = True,
+    forced_keywords: dict[str, list[str]] | None = None,
 ) -> dict[str, dict]:
-    """Soft-filter compose JSON → per-axis labeled fields + positive string."""
+    """Filter compose JSON → labeled positives; forced keywords always kept."""
     allow = chronicle_allowlists()
     pose_a, emo_a, shot_a = set(allow["pose"]), set(allow["emo"]), set(allow["shot"])
     outfit_a, effect_a = set(allow["outfit"]), set(allow["effect"])
     excl = set(present_exclusive or PRESENT_EXCLUSIVE_DEFAULT)
     used_shots: set[str] = set()
     result: dict[str, dict] = {}
+    ident = strip_expression_tags(list(identity), emo=emo_a)
+    ident = ensure_subject_anchors(ident)
+    forced_keywords = forced_keywords or {}
 
     for ax in AXES:
         block = composed.get(ax) or {}
         act = acts.get(ax) or {}
         ban = set() if ax == base_axis else excl
+        forced = [soft_normalize_tag(t) for t in (forced_keywords.get(ax) or []) if t]
 
-        pose = filter_to_allowlist(parse_tag_field(block.get("pose")), pose_a, ban=ban, limit=2)
+        pose = _pass_tags(
+            parse_tag_field(block.get("pose")), pose_a, ban=ban, limit=2,
+            use_allowlist=use_allowlist,
+        )
         if not pose:
-            pose = ["standing"] if "standing" in pose_a else []
-        if ax == base_axis and "pouring" in pose_a and "pouring" in (
+            pose = ["standing"]
+        if ax == base_axis and "pouring" in (
             (act.get("activity") or "") + " " + " ".join(parse_tag_field(block.get("pose")))
         ).lower():
-            pose = ["pouring"] + [p for p in pose if p != "pouring"]
-            pose = pose[:2]
+            if not use_allowlist or "pouring" in pose_a:
+                pose = ["pouring"] + [p for p in pose if p != "pouring"]
+                pose = pose[:2]
 
-        outfit = filter_to_allowlist(parse_tag_field(block.get("outfit")), outfit_a, ban=ban, limit=4)
-        for t in filter_to_allowlist(parse_tag_field(act.get("outfit")), outfit_a, ban=ban, limit=4):
-            if t not in outfit:
-                outfit.append(t)
-        outfit = outfit[:4]
+        outfit = _pass_tags(
+            parse_tag_field(block.get("outfit")) + parse_tag_field(act.get("outfit")),
+            outfit_a, ban=ban, limit=4, use_allowlist=use_allowlist,
+        )
         if ax == base_axis:
             for req in parse_tag_field(act.get("outfit")):
                 r = soft_normalize_tag(req)
-                if r in outfit_a and r not in outfit:
+                if r and r not in outfit and (not use_allowlist or r in outfit_a):
                     outfit.insert(0, r)
             outfit = outfit[:4]
         if not outfit:
-            outfit = ["shirt"] if "shirt" in outfit_a else []
+            outfit = ["shirt"]
 
         shot_raw = block.get("shot")
         if isinstance(shot_raw, str):
             shot_raw = [shot_raw]
-        shot = filter_to_allowlist(parse_tag_field(shot_raw), shot_a, limit=1)
+        shot = _pass_tags(
+            parse_tag_field(shot_raw), shot_a, ban=set(), limit=1,
+            use_allowlist=use_allowlist,
+        )
         if not shot or shot[0] in used_shots:
             for s in ("close-up", "upper_body", "cowboy_shot", "from_side", "full_body", "wide_shot"):
-                if s in shot_a and s not in used_shots:
+                if s not in used_shots and (not use_allowlist or s in shot_a):
                     shot = [s]
                     break
         if shot:
             used_shots.add(shot[0])
 
-        effect = filter_to_allowlist(parse_tag_field(block.get("effect")), effect_a, ban=ban, limit=6)
-        for t in filter_to_allowlist(parse_tag_field(act.get("place")), effect_a, ban=ban, limit=2):
-            if t not in effect:
-                effect.append(t)
+        effect = _pass_tags(
+            parse_tag_field(block.get("effect")) + parse_tag_field(act.get("place")),
+            effect_a, ban=ban, limit=6, use_allowlist=use_allowlist,
+        )
         if ax == base_axis:
             act_blob = f"{act.get('activity', '')} {act.get('place', '')}".lower()
             force_cafe = "cafe" in act_blob or "pour" in act_blob
             for req in ("cafe", "counter", "coffee_cup", "steam"):
-                if req not in effect_a or req in effect:
+                if req in effect:
                     continue
                 if req in ("coffee_cup", "steam") and "pour" not in act_blob:
                     continue
-                if force_cafe or req in act_blob.replace(" ", "_"):
+                if force_cafe and (not use_allowlist or req in effect_a):
                     effect.append(req)
             effect = effect[:6]
 
+        # Forced keywords always land (prefer Effect; bypass allowlist)
+        effect = _inject_forced(effect, forced, limit=10)
+
         expr = map_expression(str(act.get("feeling") or ""), emo_allow=emo_a)
-        char = list(dict.fromkeys([*identity, expr]))
+        char = list(dict.fromkeys([*ident, expr]))
         summary = format_summary(
             str(act.get("label") or ax),
             str(act.get("activity") or ""),
@@ -395,6 +571,18 @@ def filter_compose_result(
             shot=shot,
             effect=effect,
         )
+        # Guarantee keywords appear in the positive text
+        missing = [t for t in forced if t and t not in positive.replace("-", "_") and t not in positive]
+        if missing:
+            effect = _inject_forced(effect, missing, limit=12)
+            positive = format_labeled_positive(
+                summary=summary,
+                character=char,
+                outfit=outfit,
+                pose=pose,
+                shot=shot,
+                effect=effect,
+            )
         result[ax] = {
             "summary": summary,
             "character": char,

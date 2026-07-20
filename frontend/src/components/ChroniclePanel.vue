@@ -43,6 +43,11 @@ function _modelOf(doc) {
 const userTopic = ref('')
 const lifeRole = ref('student_cafe_job')
 const LIFE_ROLES = ['student_cafe_job', 'freeter_multi_job', 'career_barista', 'custom']
+const characterTags = ref('')
+const keywordsPast = ref('')
+const keywordsPresent = ref('')
+const keywordsFuture = ref('')
+const composeAllowlist = ref(true)
 const worldview = ref('')
 const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
@@ -942,6 +947,11 @@ function currentSettingsPayload() {
     base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
     life_role: lifeRole.value,
+    character_tags: characterTags.value,
+    keywords_past: keywordsPast.value,
+    keywords_present: keywordsPresent.value,
+    keywords_future: keywordsFuture.value,
+    compose_allowlist: composeAllowlist.value,
     worldview: worldview.value,
     time_scale: currentTimeScale(),
     prompt_style: promptStyle.value,
@@ -1347,6 +1357,35 @@ async function generateImages() {
                       </button>
                     </div>
                   </div>
+                  <div class="flex items-start gap-2">
+                    <span class="sb-label w-20 shrink-0 pt-1.5" :title="t('chronicle.characterTagsTitle')">{{ t('chronicle.characterTags') }}</span>
+                    <textarea v-model="characterTags" rows="2"
+                      :placeholder="t('chronicle.characterTagsPh')"
+                      class="sb-textarea flex-1 w-full"></textarea>
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <div class="flex items-center gap-2">
+                      <span class="sb-label w-20 shrink-0" :title="t('chronicle.axisKeywordsTitle')">{{ t('chronicle.axisKeywords') }}</span>
+                      <span class="text-[10px] text-[var(--sb-muted)]">{{ t('chronicle.axisKeywordsHint') }}</span>
+                    </div>
+                    <div class="grid grid-cols-1 gap-1 pl-0 sm:pl-20">
+                      <div class="flex items-center gap-2">
+                        <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.past') }}</span>
+                        <input v-model="keywordsPast" type="text" class="sb-input flex-1"
+                          :placeholder="t('chronicle.keywordsPh')" />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.present') }}</span>
+                        <input v-model="keywordsPresent" type="text" class="sb-input flex-1"
+                          :placeholder="t('chronicle.keywordsPh')" />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.future') }}</span>
+                        <input v-model="keywordsFuture" type="text" class="sb-input flex-1"
+                          :placeholder="t('chronicle.keywordsPh')" />
+                      </div>
+                    </div>
+                  </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.lifeRoleTitle')">{{ t('chronicle.lifeRole') }}</span>
                     <select v-model="lifeRole" class="sb-select flex-1" :disabled="settingsLocked">
@@ -1509,6 +1548,17 @@ async function generateImages() {
                   <p v-if="fastMode" class="text-[10px] text-amber-500/80 pl-1">
                     {{ t('chronicle.fastModeHint') }}
                   </p>
+                  <label
+                    class="flex items-start gap-2 cursor-pointer text-xs"
+                    :class="composeAllowlist ? 'text-teal-300' : 'text-[var(--sb-muted)]'"
+                    :title="t('chronicle.composeAllowlistTitle')"
+                  >
+                    <input v-model="composeAllowlist" type="checkbox" class="accent-teal-500 mt-0.5" />
+                    <span>
+                      <span class="font-medium">{{ t('chronicle.composeAllowlist') }}</span>
+                      <span class="block text-[10px] text-teal-500/80 mt-0.5">{{ t('chronicle.composeAllowlistHint') }}</span>
+                    </span>
+                  </label>
                   <label
                     class="flex items-start gap-2 cursor-pointer text-xs"
                     :class="fastMode ? 'opacity-40 text-[var(--sb-muted)]'

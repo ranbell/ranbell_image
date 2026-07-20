@@ -588,7 +588,7 @@ def test_expression_tag_for_feeling_always_valid():
     assert expression_tag_for_feeling("hopeful") == "smile"  # mapped
     assert expression_tag_for_feeling("lonely") == "lonely"
     assert expression_tag_for_feeling("悲しい") == "sad"
-    assert expression_tag_for_feeling("completely-unknown-word") == "smile"
+    assert expression_tag_for_feeling("completely-unknown-word") == "serious"
     assert expression_tag_for_feeling("crying") == "crying"  # already valid
 
 

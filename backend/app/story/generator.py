@@ -2320,7 +2320,14 @@ def expression_tag_for_feeling(feeling: str, *, emotion: str = "") -> str:
     if mapped and mapped in _EXPRESSION_TAGS:
         return mapped
     got = _resolve(e)
-    return got or "smile"
+    # Prefer serious/expressionless over smile so chronicles do not all grin.
+    if got:
+        return got
+    if "serious" in _EXPRESSION_TAGS:
+        return "serious"
+    if "expressionless" in _EXPRESSION_TAGS:
+        return "expressionless"
+    return "smile"
 
 
 def ensure_face_tags(
@@ -3513,6 +3520,7 @@ def build_story_first_prompt(
     divergence: float = 0.0,
     feedback: str = "",
     base_act_fixed: dict | None = None,
+    axis_keywords: dict[str, list[str]] | None = None,
 ) -> str:
     """Story-first: write novels first, then extract drawable acts (JSON)."""
     span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
@@ -3529,6 +3537,17 @@ def build_story_first_prompt(
         "the topic (place/object/action), not as distant backstory.\n"
         if has_topic
         else "topic=(none — invent coherent premises per candidate)\n"
+    )
+    kw = axis_keywords or {}
+    kw_lines = []
+    for ax in AXES:
+        items = kw.get(ax) or []
+        if items:
+            kw_lines.append(f"  {ax}: MUST physically include {', '.join(items)}")
+    kw_note = (
+        "AXIS KEYWORDS (forced; separate from topic):\n" + "\n".join(kw_lines) + "\n"
+        if kw_lines
+        else ""
     )
     world_line = (
         f'worldview="{worldview.strip()[:120]}"'
@@ -3553,6 +3572,7 @@ def build_story_first_prompt(
         f"life_role: {role}\n  ({role_hint})\n"
         f"time_scale: {time_scale} (~{span} between acts)\n"
         f"{topic_note}"
+        f"{kw_note}"
         f"{world_line}\n"
         f"{_candidate_modes_block(modes)}"
         f"{_tone_line(tone, locale)}"

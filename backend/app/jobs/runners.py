@@ -3329,9 +3329,24 @@ async def run_chronicle_candidates(
                 getattr(body, "life_role", "") or "",
                 user_topic=body.user_topic,
             )
+            from ..story.compose import axis_keywords_from_body, resolve_chronicle_identity
+            import random as _rnd_sf
+            axis_kw = axis_keywords_from_body(body)
+            # Prefer user character_tags for Phase1 appearance desc when set.
+            _wd14 = list(ctx.get("character_tags") or []) + list(ctx.get("wd14_tags") or [])
+            _ident = resolve_chronicle_identity(
+                getattr(body, "character_tags", "") or "",
+                _wd14,
+                rng=_rnd_sf.Random((body.base_sha256 or story_id or "c")[:32]),
+            )
+            _char_desc = (
+                ", ".join(_ident)
+                if (getattr(body, "character_tags", "") or "").strip()
+                else (ctx.get("character_desc", "") or ", ".join(_ident))
+            )
             raw = await ollama.chat_text(
                 build_story_first_prompt(
-                    character_desc=ctx.get("character_desc", ""),
+                    character_desc=_char_desc,
                     scene_desc=ctx.get("scene_desc", ""),
                     user_topic=body.user_topic,
                     worldview=body.worldview,
@@ -3345,6 +3360,7 @@ async def run_chronicle_candidates(
                     divergence=body.divergence,
                     feedback=feedback,
                     base_act_fixed=base_act_fixed or None,
+                    axis_keywords=axis_kw,
                 ),
                 model=models["story"], options=arc_options,
                 # format=json + think often empties content on reasoning models.
@@ -3686,7 +3702,19 @@ async def run_chronicle_expand(
         multi = is_multi_character(wd14_tags)
         # Always-keep identity: hair colour, eye colour, accessories only.
         # Scene / outfit / pose from the base image must NOT propagate to other axes.
-        lock_tags = identity_lock_tags(character_tags, multi_character=multi)
+        from ..story.compose import (
+            axis_keywords_from_body,
+            resolve_chronicle_identity,
+        )
+        import random as _rnd_ident
+        lock_tags = resolve_chronicle_identity(
+            getattr(body, "character_tags", "") or "",
+            list(character_tags) + list(wd14_tags),
+            rng=_rnd_ident.Random(
+                (body.base_sha256 or story_id or "chronicle")[:32]
+            ),
+            multi_character=multi,
+        )
         # The base image's garments — NOT locked (the outfit may legitimately
         # change with the time scale), but fast mode needs them as a reference
         # and short scales force them back on.
@@ -4264,6 +4292,7 @@ async def run_chronicle_expand(
 
         # ── Allowlist compose (replaces retrieval / similar-mix / polish) ─────
         from ..story.compose import (
+            axis_keywords_from_body,
             build_compose_prompt,
             filter_compose_result,
             parse_compose_json,
@@ -4289,13 +4318,12 @@ async def run_chronicle_expand(
             or ""
         ).strip()
         identity = list(lock_tags)
-        for anchor in ("1girl", "solo"):
-            if anchor not in {t.lower() for t in identity}:
-                identity.insert(0, anchor)
+        forced_kw = axis_keywords_from_body(body)
+        use_allowlist = bool(getattr(body, "compose_allowlist", True))
         identity_hint = ", ".join(
             t for t in identity
             if t.lower() not in {"1girl", "solo"}
-        ) or "grey_hair, red_eyes"
+        )
 
         compose_options = dict(options)
         compose_options["num_ctx"] = max(
@@ -4312,6 +4340,8 @@ async def run_chronicle_expand(
                 acts=acts_en,
                 time_scale=body.time_scale,
                 identity_hint=identity_hint,
+                forced_keywords=forced_kw,
+                use_allowlist=use_allowlist,
             ),
             model=models["story"],
             options=compose_options,
@@ -4325,6 +4355,8 @@ async def run_chronicle_expand(
             acts_en,
             identity=identity,
             base_axis=body.base_time_axis,
+            use_allowlist=use_allowlist,
+            forced_keywords=forced_kw,
         )
 
         prompts: dict[str, dict] = {}

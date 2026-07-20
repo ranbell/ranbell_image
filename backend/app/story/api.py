@@ -38,6 +38,14 @@ class ChronicleRequest(BaseModel):
     life_role: str = ""  # student_cafe_job | freeter_multi_job | career_barista | custom | random
     worldview: str = ""
     user_topic: str = ""  # お題 — what the story is about (separate from worldview)
+    # Per-axis forced keywords (comma-separated). Independent of user_topic.
+    keywords_past: str = ""
+    keywords_present: str = ""
+    keywords_future: str = ""
+    # Appearance tags only (comma-separated). Empty → random from WD14 identity.
+    character_tags: str = ""
+    # When True, compose filters through catalog∩vocab allowlists.
+    compose_allowlist: bool = True
     time_scale: Literal["minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"] = "years"
     prompt_style: str = "danbooru+natural"
     workflow_name: str = ""
@@ -126,6 +134,11 @@ class RespinRequest(BaseModel):
     worldview: str | None = None
     user_topic: str | None = None
     life_role: str | None = None
+    keywords_past: str | None = None
+    keywords_present: str | None = None
+    keywords_future: str | None = None
+    character_tags: str | None = None
+    compose_allowlist: bool | None = None
 
 
 class PinupRequest(BaseModel):
@@ -158,6 +171,8 @@ _RESPIN_OVERRIDE_FIELDS = (
     "similar_tag_mix", "similar_tag_mix_ratio", "similar_tag_mix_n",
     "llm_provider", "temperature", "num_ctx", "prose_paragraphs",
     "worldview", "user_topic", "life_role",
+    "keywords_past", "keywords_present", "keywords_future",
+    "character_tags", "compose_allowlist",
 )
 
 
