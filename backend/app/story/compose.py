@@ -124,10 +124,10 @@ def ensure_subject_anchors(tags: list[str]) -> list[str]:
 
 
 def identity_candidates_from_wd14(wd14_tags: list[str], *, multi_character: bool = False) -> list[str]:
-    """Hair/eyes/accessory pool for random identity (no expressions)."""
+    """Hair color/style, eyes, accessory pool for identity (no expressions)."""
     from .generator import classify_identity_tag
 
-    allowed = {"hair_color", "eyes", "accessory"}
+    allowed = {"hair_color", "hair_style", "eyes", "accessory"}
     if multi_character:
         allowed -= {"hair_color", "eyes"}
     out: list[str] = []
@@ -137,26 +137,89 @@ def identity_candidates_from_wd14(wd14_tags: list[str], *, multi_character: bool
     return list(dict.fromkeys(out))
 
 
+def _bucket_identity(tags: list[str]) -> dict[str, list[str]]:
+    from .generator import classify_identity_tag
+
+    buckets: dict[str, list[str]] = {
+        "hair_color": [],
+        "hair_style": [],
+        "eyes": [],
+        "accessory": [],
+        "face": [],
+        "other": [],
+    }
+    for tag in tags or []:
+        cat = classify_identity_tag(tag) or "other"
+        buckets.setdefault(cat, []).append(tag)
+    return buckets
+
+
 def resolve_chronicle_identity(
     character_tags_user: str,
     wd14_tags: list[str],
     *,
     rng=None,
     multi_character: bool = False,
-    limit: int = 6,
+    limit: int = 8,
 ) -> list[str]:
-    """User appearance tags win; else random sample from WD14 identity pool."""
+    """User appearance tags win; else WD14 identity with hair/eyes/style kept.
+
+    Random sampling must NOT drop hair_color / eyes / hair_style when present
+    in the WD14 pool — those are the traits users notice vanishing.
+    """
     import random as _random
 
     rng = rng or _random
     user = strip_expression_tags(parse_identity_tags(character_tags_user or ""))
-    if user:
-        return ensure_subject_anchors(user)
     pool = identity_candidates_from_wd14(wd14_tags, multi_character=multi_character)
+    pb = _bucket_identity(pool)
+
+    def _pick_required(from_buckets: dict[str, list[str]], existing: list[str]) -> list[str]:
+        """Ensure hair_color, eyes, hair_style are present when available."""
+        have = _bucket_identity(existing)
+        out = list(existing)
+        for cat in ("hair_color", "eyes", "hair_style"):
+            if have.get(cat):
+                continue
+            cands = from_buckets.get(cat) or []
+            if not cands:
+                continue
+            # Prefer first WD14 hit (usually highest confidence order); slight
+            # randomness only when several options exist.
+            chosen = cands[0] if len(cands) == 1 else rng.choice(cands)
+            if chosen not in out:
+                out.append(chosen)
+        return out
+
+    if user:
+        # Keep every user tag; backfill missing hair/eyes/style from WD14.
+        filled = _pick_required(pb, user)
+        return ensure_subject_anchors(filled[: max(limit + 2, len(filled))])
+
     if not pool:
         return ensure_subject_anchors([])
-    k = min(len(pool), max(2, min(limit, len(pool))))
-    picked = rng.sample(pool, k=k) if len(pool) >= k else list(pool)
+
+    # Always take all hair_color + eyes from pool (usually 1 each), plus one
+    # hair_style, then fill with accessories / extra styles up to limit.
+    picked: list[str] = []
+    for cat in ("hair_color", "eyes"):
+        for t in pb.get(cat) or []:
+            if t not in picked:
+                picked.append(t)
+    styles = list(pb.get("hair_style") or [])
+    if styles:
+        picked.append(styles[0] if len(styles) == 1 else rng.choice(styles))
+    rest = [
+        t for t in pool
+        if t not in picked
+    ]
+    rng.shuffle(rest)
+    for t in rest:
+        if len(picked) >= limit:
+            break
+        picked.append(t)
+    # Final safety: if shuffle somehow skipped required cats, re-add.
+    picked = _pick_required(pb, picked)
     return ensure_subject_anchors(picked)
 
 

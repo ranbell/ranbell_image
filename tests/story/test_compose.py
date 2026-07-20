@@ -163,6 +163,36 @@ def test_character_user_overrides_wd14_random():
     assert "1girl" in ident
 
 
+def test_identity_keeps_hair_eyes_style_when_random():
+    """Random WD14 path must not drop eye color / hair / style via sample()."""
+    wd14 = [
+        "grey_hair", "red_eyes", "long_hair", "glasses", "hair_ribbon",
+        "earrings", "choker",
+    ]
+    for seed in range(20):
+        ident = resolve_chronicle_identity(
+            "",
+            wd14,
+            rng=__import__("random").Random(seed),
+        )
+        assert "grey_hair" in ident, seed
+        assert "red_eyes" in ident, seed
+        assert "long_hair" in ident, seed
+
+
+def test_identity_user_partial_backfills_from_wd14():
+    """User-specified eyes kept; missing hair filled from WD14."""
+    ident = resolve_chronicle_identity(
+        "red_eyes, long_hair",
+        ["grey_hair", "blue_eyes", "short_hair"],
+        rng=__import__("random").Random(1),
+    )
+    assert "red_eyes" in ident
+    assert "long_hair" in ident
+    assert "grey_hair" in ident  # backfilled hair_color
+    assert "blue_eyes" not in ident  # user eyes win; do not add second eye color
+
+
 def test_map_expression_varies_with_feeling():
     emo = {"serious", "worried", "smile", "sad", "nervous", "expressionless"}
     assert map_expression("focused", emo_allow=emo) == "serious"
