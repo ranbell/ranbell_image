@@ -67,7 +67,7 @@ def _sample_acts():
     }
 
 
-def test_filter_compose_present_exclusive_and_shots():
+def test_filter_compose_present_exclusive_keeps_llm_shots():
     acts = _sample_acts()
     composed = {
         "past": {
@@ -83,9 +83,9 @@ def test_filter_compose_present_exclusive_and_shots():
             "effect": ["cafe", "counter"],
         },
         "future": {
-            "pose": ["standing"],
+            "pose": ["holding"],
             "outfit": ["cardigan", "skirt"],
-            "shot": ["upper_body"],
+            "shot": ["upper_body"],  # duplicate OK — no forced shot rotation
             "effect": ["indoors", "light_rays"],
         },
     }
@@ -99,11 +99,40 @@ def test_filter_compose_present_exclusive_and_shots():
     assert "steam" not in out["past"]["effect"]
     assert out["present"]["pose"][0] == "pouring"
     assert "apron" in out["present"]["outfit"]
-    shots = {out[a]["shot"][0] for a in ("past", "present", "future")}
-    assert len(shots) == 3
+    assert out["future"]["shot"] == ["upper_body"]  # LLM value preserved
     assert "worried" in out["past"]["character"]
     assert "serious" in out["present"]["character"]
     assert "smile" not in out["present"]["character"]
+
+
+def test_filter_does_not_force_standing_or_cafe():
+    acts = {
+        "past": {
+            "label": "earlier", "activity": "reading", "place": "library",
+            "feeling": "calm", "outfit": "cardigan",
+        },
+        "present": {
+            "label": "now", "activity": "writing a letter", "place": "desk",
+            "feeling": "focused", "outfit": "blouse",
+        },
+        "future": {
+            "label": "later", "activity": "mailing the letter", "place": "street",
+            "feeling": "relieved", "outfit": "coat",
+        },
+    }
+    composed = {
+        "past": {"pose": ["reading"], "outfit": ["cardigan"], "shot": ["from_side"], "effect": ["library"]},
+        "present": {"pose": [], "outfit": ["blouse"], "shot": ["close-up"], "effect": ["desk", "letter"]},
+        "future": {"pose": ["walking"], "outfit": ["coat"], "shot": ["full_body"], "effect": ["street"]},
+    }
+    out = filter_compose_result(
+        composed, acts, identity=["1girl", "solo"], use_allowlist=False,
+    )
+    assert out["present"]["pose"] == []  # empty stays empty (no standing)
+    assert "cafe" not in out["present"]["effect"]
+    assert "steam" not in out["present"]["effect"]
+    assert "coffee_cup" not in out["present"]["effect"]
+    assert "shirt" not in out["present"]["outfit"]  # no shirt fallback when LLM gave blouse
 
 
 def test_forced_keywords_survive_allowlist():
@@ -204,6 +233,19 @@ def test_strip_expression_tags():
     assert strip_expression_tags(["1girl", "grey_hair", "smile", "red_eyes"]) == [
         "1girl", "grey_hair", "red_eyes",
     ]
+
+
+def test_compose_prompt_has_no_cafe_fewshot():
+    from app.story.compose import build_compose_prompt
+    p = build_compose_prompt(
+        title="t", throughline="x", acts=_sample_acts(), time_scale="days",
+        use_allowlist=False,
+    )
+    assert "FEW-SHOT" not in p
+    assert 'Pose=["pouring"]' not in p
+    assert 'Pose=["sitting"' not in p
+    assert "do NOT copy these tag values" in p
+    assert "Do NOT default every axis to sitting" in p
 
 
 def test_format_labeled_positive_shape():

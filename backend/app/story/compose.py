@@ -1,7 +1,8 @@
-"""Allowlist compose + labeled positive formatting for Chronicle Phase 2.
+"""Chronicle Phase 2: LLM compose → light filter → labeled positives.
 
-Permission lists are catalog ∩ selected_tags (hyphen/underscore normalized).
-Soft-normalization strips color / school_ / student_ prefixes before filter.
+Optional allowlist (catalog ∩ selected_tags). Soft-normalization strips color /
+school_ / student_ prefixes. Code injects identity, feeling→expression, and
+user forced keywords — not cafe/pose hardcodes.
 """
 from __future__ import annotations
 
@@ -419,10 +420,9 @@ def build_compose_prompt(
     identity_hint: str = "",
     present_exclusive: frozenset[str] | None = None,
     forced_keywords: dict[str, list[str]] | None = None,
-    use_allowlist: bool = True,
+    use_allowlist: bool = False,
 ) -> str:
     allow = chronicle_allowlists()
-    excl = ", ".join(sorted(present_exclusive or PRESENT_EXCLUSIVE_DEFAULT))
     kw = forced_keywords or {}
     kw_block = "\n".join(
         f"  {ax}: {', '.join(kw.get(ax) or []) or '(none)'}" for ax in AXES
@@ -434,18 +434,24 @@ def build_compose_prompt(
 
     acts_json = json.dumps(acts, ensure_ascii=False, indent=2)
     allow_rules = (
-        "Use ONLY tags from the allowlists below.\n\n"
-        "ALLOWLISTS:\n"
+        "Prefer tags from these allowlists when possible (not mandatory copies):\n"
         f"{_fmt('POSE', allow['pose'])}\n"
         f"{_fmt('OUTFIT', allow['outfit'], 110)}\n"
         f"{_fmt('SHOT', allow['shot'], 30)}\n"
         f"{_fmt('EFFECT', allow['effect'], 130)}\n\n"
         if use_allowlist
         else (
-            "Allowlist is OFF — prefer real Danbooru tags but you may use "
-            "specific props/places needed by the keywords.\n\n"
+            "No allowlist — invent fitting Danbooru-style tags from the acts. "
+            "Vary pose/shot/effect across the three axes; do not reuse one stock pose.\n\n"
         )
     )
+    excl = present_exclusive or PRESENT_EXCLUSIVE_DEFAULT
+    excl_hint = ""
+    if excl:
+        excl_hint = (
+            f"- Avoid leaking base-only props into other axes when irrelevant: "
+            f"{', '.join(sorted(excl))}.\n"
+        )
     return (
         "Compose Danbooru tags for a 3-panel anime chronicle. Return JSON.\n\n"
         f"{allow_rules}"
@@ -454,25 +460,27 @@ def build_compose_prompt(
         f"TIME SCALE: {time_scale}\n"
         f"TITLE: {title}\n"
         f"THROUGHLINE: {throughline}\n\n"
-        f"FORCED KEYWORDS (MUST appear in that axis Effect/Outfit/Pose):\n{kw_block}\n\n"
-        f"ACTS:\n{acts_json}\n\n"
-        "FEW-SHOT (style only — do not copy):\n"
-        'present: Pose=["pouring"] Outfit=["apron","blouse"] Shot=["close-up"] '
-        'Effect=["cafe","counter","coffee_cup","steam"]\n'
-        'past: Pose=["sitting","hand_on_own_chin"] Outfit=["school_uniform"] '
-        'Shot=["upper_body"] Effect=["classroom","desk","notebook"]\n'
-        'future: Pose=["standing"] Outfit=["cardigan","skirt"] Shot=["cowboy_shot"] '
-        'Effect=["indoors","light_rays"]\n\n'
+        f"FORCED KEYWORDS (must appear somewhere in that axis — prefer Effect):\n"
+        f"{kw_block}\n\n"
+        f"ACTS (derive pose/outfit/shot/effect from these; do not ignore them):\n"
+        f"{acts_json}\n\n"
+        "OUTPUT SHAPE (example keys only — do NOT copy these tag values):\n"
+        '{"past":{"pose":["..."],"outfit":["..."],"shot":["..."],"effect":["..."]},'
+        '"present":{"pose":["..."],"outfit":["..."],"shot":["..."],"effect":["..."]},'
+        '"future":{"pose":["..."],"outfit":["..."],"shot":["..."],"effect":["..."]}}\n\n'
         "HARD RULES:\n"
-        "- Keys: past, present, future. Each: pose(1-2), outfit(2-4), shot(1), effect(3-6).\n"
-        "- Arrays of strings only. No color prefixes (blouse not white_blouse).\n"
-        "- present must match FIXED act when FIXED is a cafe pour.\n"
-        f"- past/future MUST NOT use: {excl}\n"
-        "- Three DIFFERENT shot values. Outfits differ across acts when scale≥days.\n"
-        "- Include every forced keyword for that axis in effect (or outfit/pose if garment/action).\n"
-        "- Do NOT put expression tags in pose/outfit/effect; feeling drives expression later.\n\n"
-        'Return ONLY JSON: {"past":{"pose":[],"outfit":[],"shot":[],"effect":[]},'
-        '"present":{...},"future":{...}}\n'
+        "- Keys: past, present, future.\n"
+        "- pose: 1–3 tags matching that act's activity (diverse across axes).\n"
+        "- outfit: 2–5 garment tags matching that act's outfit field.\n"
+        "- shot: exactly 1 composition tag; prefer different shots per axis.\n"
+        "- effect: 3–8 place/prop/lighting tags matching place + keywords.\n"
+        "- Arrays of strings only. No color prefixes on clothes (blouse not white_blouse).\n"
+        "- present should reflect the FIXED present act when one is given.\n"
+        f"{excl_hint}"
+        "- Include every forced keyword for that axis (usually in effect).\n"
+        "- Do NOT put expression tags in pose/outfit/effect; feeling drives expression later.\n"
+        "- Do NOT default every axis to sitting / standing / hand_on_own_chin — "
+        "pick poses from the activity text.\n"
     )
 
 
@@ -539,15 +547,23 @@ def filter_compose_result(
     identity: list[str],
     base_axis: str = "present",
     present_exclusive: frozenset[str] | None = None,
-    use_allowlist: bool = True,
+    use_allowlist: bool = False,
     forced_keywords: dict[str, list[str]] | None = None,
 ) -> dict[str, dict]:
-    """Filter compose JSON → labeled positives; forced keywords always kept."""
+    """Light post-process of LLM compose; prefer model tags over hardcodes.
+
+    Code still: identity + feeling→expression, user forced keywords, optional
+    allowlist. No pouring/cafe/standing/shot-list overrides.
+    """
     allow = chronicle_allowlists()
     pose_a, emo_a, shot_a = set(allow["pose"]), set(allow["emo"]), set(allow["shot"])
     outfit_a, effect_a = set(allow["outfit"]), set(allow["effect"])
-    excl = set(present_exclusive or PRESENT_EXCLUSIVE_DEFAULT)
-    used_shots: set[str] = set()
+    # Soft exclusive: only strip if present act actually uses those props
+    base_act = acts.get(base_axis) or {}
+    base_blob = f"{base_act.get('activity', '')} {base_act.get('place', '')}".lower()
+    excl_src = present_exclusive if present_exclusive is not None else PRESENT_EXCLUSIVE_DEFAULT
+    use_excl = any(x in base_blob for x in ("pour", "coffee", "cafe", "steam"))
+    excl = set(excl_src) if use_excl else set()
     result: dict[str, dict] = {}
     ident = strip_expression_tags(list(identity), emo=emo_a)
     ident = ensure_subject_anchors(ident)
@@ -560,30 +576,21 @@ def filter_compose_result(
         forced = [soft_normalize_tag(t) for t in (forced_keywords.get(ax) or []) if t]
 
         pose = _pass_tags(
-            parse_tag_field(block.get("pose")), pose_a, ban=ban, limit=2,
+            parse_tag_field(block.get("pose")), pose_a, ban=ban, limit=3,
             use_allowlist=use_allowlist,
         )
-        if not pose:
-            pose = ["standing"]
-        if ax == base_axis and "pouring" in (
-            (act.get("activity") or "") + " " + " ".join(parse_tag_field(block.get("pose")))
-        ).lower():
-            if not use_allowlist or "pouring" in pose_a:
-                pose = ["pouring"] + [p for p in pose if p != "pouring"]
-                pose = pose[:2]
+        # Trust LLM; empty pose stays empty (no standing default)
 
         outfit = _pass_tags(
-            parse_tag_field(block.get("outfit")) + parse_tag_field(act.get("outfit")),
-            outfit_a, ban=ban, limit=4, use_allowlist=use_allowlist,
+            parse_tag_field(block.get("outfit")),
+            outfit_a, ban=ban, limit=5, use_allowlist=use_allowlist,
         )
-        if ax == base_axis:
-            for req in parse_tag_field(act.get("outfit")):
-                r = soft_normalize_tag(req)
-                if r and r not in outfit and (not use_allowlist or r in outfit_a):
-                    outfit.insert(0, r)
-            outfit = outfit[:4]
+        # Prefer LLM outfit; only if empty, fall back to act outfit text
         if not outfit:
-            outfit = ["shirt"]
+            outfit = _pass_tags(
+                parse_tag_field(act.get("outfit")),
+                outfit_a, ban=ban, limit=5, use_allowlist=use_allowlist,
+            )
 
         shot_raw = block.get("shot")
         if isinstance(shot_raw, str):
@@ -592,32 +599,20 @@ def filter_compose_result(
             parse_tag_field(shot_raw), shot_a, ban=set(), limit=1,
             use_allowlist=use_allowlist,
         )
-        if not shot or shot[0] in used_shots:
-            for s in ("close-up", "upper_body", "cowboy_shot", "from_side", "full_body", "wide_shot"):
-                if s not in used_shots and (not use_allowlist or s in shot_a):
-                    shot = [s]
-                    break
-        if shot:
-            used_shots.add(shot[0])
+        # Do not rewrite duplicate shots to a fixed rotation list
 
         effect = _pass_tags(
-            parse_tag_field(block.get("effect")) + parse_tag_field(act.get("place")),
-            effect_a, ban=ban, limit=6, use_allowlist=use_allowlist,
+            parse_tag_field(block.get("effect")),
+            effect_a, ban=ban, limit=8, use_allowlist=use_allowlist,
         )
-        if ax == base_axis:
-            act_blob = f"{act.get('activity', '')} {act.get('place', '')}".lower()
-            force_cafe = "cafe" in act_blob or "pour" in act_blob
-            for req in ("cafe", "counter", "coffee_cup", "steam"):
-                if req in effect:
-                    continue
-                if req in ("coffee_cup", "steam") and "pour" not in act_blob:
-                    continue
-                if force_cafe and (not use_allowlist or req in effect_a):
-                    effect.append(req)
-            effect = effect[:6]
+        if not effect:
+            effect = _pass_tags(
+                parse_tag_field(act.get("place")),
+                effect_a, ban=ban, limit=4, use_allowlist=use_allowlist,
+            )
 
-        # Forced keywords always land (prefer Effect; bypass allowlist)
-        effect = _inject_forced(effect, forced, limit=10)
+        # User forced keywords only (not cafe/pouring machinery)
+        effect = _inject_forced(effect, forced, limit=12)
 
         expr = map_expression(str(act.get("feeling") or ""), emo_allow=emo_a)
         char = list(dict.fromkeys([*ident, expr]))
@@ -634,10 +629,12 @@ def filter_compose_result(
             shot=shot,
             effect=effect,
         )
-        # Guarantee keywords appear in the positive text
-        missing = [t for t in forced if t and t not in positive.replace("-", "_") and t not in positive]
+        missing = [
+            t for t in forced
+            if t and t not in positive.replace("-", "_") and t not in positive
+        ]
         if missing:
-            effect = _inject_forced(effect, missing, limit=12)
+            effect = _inject_forced(effect, missing, limit=14)
             positive = format_labeled_positive(
                 summary=summary,
                 character=char,

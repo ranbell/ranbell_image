@@ -45,7 +45,7 @@ class ChronicleRequest(BaseModel):
     # Appearance tags only (comma-separated). Empty → random from WD14 identity.
     character_tags: str = ""
     # When True, compose filters through catalog∩vocab allowlists.
-    compose_allowlist: bool = True
+    compose_allowlist: bool = False
     time_scale: Literal["minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"] = "years"
     prompt_style: str = "danbooru+natural"
     workflow_name: str = ""

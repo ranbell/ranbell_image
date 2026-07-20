@@ -4319,7 +4319,7 @@ async def run_chronicle_expand(
         ).strip()
         identity = list(lock_tags)
         forced_kw = axis_keywords_from_body(body)
-        use_allowlist = bool(getattr(body, "compose_allowlist", True))
+        use_allowlist = bool(getattr(body, "compose_allowlist", False))
         identity_hint = ", ".join(
             t for t in identity
             if t.lower() not in {"1girl", "solo"}
