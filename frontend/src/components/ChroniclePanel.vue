@@ -41,13 +41,15 @@ function _modelOf(doc) {
   return doc?.model_name || doc?.model_info?.model_name || ''
 }
 const userTopic = ref('')
+const lifeRole = ref('student_cafe_job')
+const LIFE_ROLES = ['student_cafe_job', 'freeter_multi_job', 'career_barista', 'custom']
 const worldview = ref('')
 const promptStyle = ref('danbooru+natural')
 const workflows = ref([])
 const workflow = ref('')
 const divergence = ref(0.3)
 const temperature = ref(1.0)
-const numCtx = ref(16384)
+const numCtx = ref(32768)
 const llmProvider = ref('ollama') // 'ollama' | 'openai' — Chronicles only
 const openaiModel = ref('') // empty → server default (openai_model / bonsai)
 const emotion = ref('')
@@ -939,6 +941,7 @@ function currentSettingsPayload() {
     base_sha256: baseSha.value || '',
     base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
+    life_role: lifeRole.value,
     worldview: worldview.value,
     time_scale: currentTimeScale(),
     prompt_style: promptStyle.value,
@@ -1345,6 +1348,17 @@ async function generateImages() {
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.lifeRoleTitle')">{{ t('chronicle.lifeRole') }}</span>
+                    <select v-model="lifeRole" class="sb-select flex-1" :disabled="settingsLocked">
+                      <option v-for="r in LIFE_ROLES" :key="r" :value="r">{{ t('chronicle.lifeRoleOpt.' + r) }}</option>
+                    </select>
+                    <button type="button" class="sb-chip shrink-0" :disabled="settingsLocked"
+                      :title="t('chronicle.lifeRoleRandomTitle')"
+                      @click="lifeRole = LIFE_ROLES[Math.floor(Math.random() * (LIFE_ROLES.length - 1))]">
+                      {{ t('chronicle.lifeRoleRandom') }}
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.timeScaleTitle')">
                       <SbIcon name="clock" class="w-3 h-3 inline mr-0.5" />{{ t('chronicle.timeScaleLabel') }}
                     </span>
@@ -1600,10 +1614,9 @@ async function generateImages() {
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.numCtxTitle')">{{ t('chronicle.numCtx') }}</span>
                     <select v-model.number="numCtx" class="sb-select flex-1">
-                      <option :value="4096">4096</option>
                       <option :value="8192">8192</option>
-                      <option :value="16384">{{ t('chronicle.numCtxRecommended') }}</option>
-                      <option :value="32768">32768</option>
+                      <option :value="16384">16384</option>
+                      <option :value="32768">{{ t('chronicle.numCtxRecommended') }}</option>
                     </select>
                   </div>
                 </div>

@@ -243,6 +243,39 @@ class OpenAICompatClient:
             )
         return text
 
+    async def chat_text(
+        self,
+        prompt: str,
+        model: str | None = None,
+        options: dict | None = None,
+        fmt: str | None = None,
+        think: bool | str | None = None,
+        *,
+        messages: list[dict] | None = None,
+    ) -> str:
+        """OpenAI path is already chat; ``messages`` overrides the single-user prompt."""
+        if messages:
+            merged = {"num_predict": -1, **(options or {})}
+            async with self._acquire():
+                r = await self._client.post(
+                    self._chat_url(),
+                    headers=self._headers(),
+                    json={
+                        "model": model or self.default_model or settings.vlm_model,
+                        "messages": messages,
+                        "stream": False,
+                        **map_openai_options(merged, fmt=fmt, think=think),
+                    },
+                    timeout=settings.ollama_timeout_sec,
+                )
+            self._raise_with_body(r)
+            data = r.json()
+            choice = (data.get("choices") or [{}])[0]
+            return extract_message_text(choice.get("message") or {})
+        return await self.generate_text(
+            prompt, model=model, options=options, fmt=fmt, think=think
+        )
+
     async def generate_text_stream(
         self,
         prompt: str,

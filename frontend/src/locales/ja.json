@@ -1243,6 +1243,16 @@
     "axis": { "past": "過去", "present": "現在", "future": "未来" },
     "userTopic": "お題",
     "userTopicPh": "例: この子が学校に遅刻する話(空欄ならAIが自由に発想)",
+    "lifeRole": "身分",
+    "lifeRoleTitle": "物語上の身分・生活の軸。お題がある場合はお題が優先",
+    "lifeRoleRandom": "Random",
+    "lifeRoleRandomTitle": "閉集合からランダムに選ぶ",
+    "lifeRoleOpt": {
+      "student_cafe_job": "学生＋カフェバイト",
+      "freeter_multi_job": "フリーター（掛け持ち）",
+      "career_barista": "バリスタ志望",
+      "custom": "カスタム（お題から推定）"
+    },
     "worldview": "世界観",
     "worldviewPh": "例: 黄昏のスチームパンク都市(空欄ならAIが決定)",
     "promptStyle": "形式",

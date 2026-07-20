@@ -131,6 +131,29 @@ class LlmGateway:
             prompt, model=model, options=options, fmt=fmt, think=think
         )
 
+    async def chat_text(
+        self,
+        prompt: str,
+        model: str | None = None,
+        options: dict | None = None,
+        fmt: str | None = None,
+        think: bool | str | None = None,
+        provider: str | None = None,
+        *,
+        messages: list[dict] | None = None,
+    ) -> str:
+        """Prefer ``/api/chat`` on Ollama; OpenAI backend already uses chat."""
+        backend = self._gen(provider)
+        chat = getattr(backend, "chat_text", None)
+        if callable(chat):
+            return await chat(
+                prompt, model=model, options=options, fmt=fmt, think=think,
+                messages=messages,
+            )
+        return await backend.generate_text(
+            prompt, model=model, options=options, fmt=fmt, think=think
+        )
+
     async def generate_text_stream(
         self,
         prompt: str,

@@ -234,13 +234,15 @@ def test_validate_structure_missing_act():
     assert arc_needs_retry(problems)
 
 
-def test_repair_act_labels_overwrites_only_bad():
-    bad = _arc_json(label_past="3 years earlier")
+def test_repair_act_labels_always_canonical():
+    bad = _arc_json(label_past="3 years earlier", label_future="1 hour later")
     cands = parse_story_arc_json(json.dumps({"candidates": [bad]}))
     repair_act_labels(cands[0], base_axis="present", time_scale="hours")
     acts = cands[0]["acts"]
-    assert "year" not in acts["past"]["label"]
-    assert acts["future"]["label"] == "1 hour later"  # good label kept
+    defaults = default_act_labels("present", "hours")
+    assert acts["past"]["label"] == defaults["past"]
+    assert acts["future"]["label"] == defaults["future"]
+    assert acts["present"]["label"] == defaults["present"]
 
 
 def test_default_act_labels_ja():

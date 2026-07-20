@@ -1243,6 +1243,16 @@
     "axis": { "past": "Past", "present": "Present", "future": "Future" },
     "userTopic": "Topic",
     "userTopicPh": "e.g. a story about being late for school (empty = AI decides freely)",
+    "lifeRole": "Life role",
+    "lifeRoleTitle": "Life role for the story. User topic takes priority when set.",
+    "lifeRoleRandom": "Random",
+    "lifeRoleRandomTitle": "Pick a closed-set role at random",
+    "lifeRoleOpt": {
+      "student_cafe_job": "Student + cafe job",
+      "freeter_multi_job": "Freeter (multi job)",
+      "career_barista": "Career barista",
+      "custom": "Custom (infer from topic)"
+    },
     "worldview": "Worldview",
     "worldviewPh": "e.g. steampunk city at dusk (empty = AI decides)",
     "promptStyle": "Format",

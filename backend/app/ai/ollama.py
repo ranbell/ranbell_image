@@ -216,6 +216,41 @@ class OllamaClient:
         for event in parser.flush():
             yield event
 
+    @staticmethod
+    def _extract_generate_text(data: dict, *, model: str | None) -> str:
+        text = str(data.get("response") or "")
+        if "<think>" in text.lower():
+            text = _THINK_BLOCK_RE.sub("", text)
+        text = text.strip()
+        if not text:
+            # Qwen3.5 / reasoning models sometimes leave response empty while
+            # still emitting usable JSON in the thinking channel.
+            thinking = str(data.get("thinking") or "").strip()
+            if thinking and "{" in thinking:
+                logger.warning(
+                    "[ollama] empty response from %s; recovering JSON from thinking",
+                    model,
+                )
+                text = thinking
+        return text
+
+    @staticmethod
+    def _extract_chat_text(data: dict, *, model: str | None) -> str:
+        message = data.get("message") or {}
+        text = str(message.get("content") or "")
+        if "<think>" in text.lower():
+            text = _THINK_BLOCK_RE.sub("", text)
+        text = text.strip()
+        if not text:
+            thinking = str(message.get("thinking") or data.get("thinking") or "").strip()
+            if thinking and "{" in thinking:
+                logger.warning(
+                    "[ollama] empty chat content from %s; recovering JSON from thinking",
+                    model,
+                )
+                text = thinking
+        return text
+
     async def generate_text(
         self,
         prompt: str,
@@ -229,9 +264,10 @@ class OllamaClient:
         # Without this, Ollama uses the model Modelfile default (often 128–512
         # tokens) and will silently truncate structured JSON responses.
         merged_options = {"num_predict": -1, **(options or {})}
+        model_name = model or settings.vlm_model
         payload: dict = self._with_think(
             {
-                "model": model or settings.vlm_model,
+                "model": model_name,
                 "prompt": prompt,
                 "stream": False,
                 "options": merged_options,
@@ -243,22 +279,41 @@ class OllamaClient:
         async with self._acquire():
             r = await self._client.post(f"{self.base_url}/api/generate", json=payload)
         self._raise_with_body(r)
-        data = r.json()
-        text = str(data.get("response") or "")
-        if "<think>" in text.lower():
-            text = _THINK_BLOCK_RE.sub("", text)
-        text = text.strip()
-        if not text:
-            # Qwen3.5 / reasoning models sometimes leave response empty while
-            # still emitting usable JSON in the thinking channel.
-            thinking = str(data.get("thinking") or "").strip()
-            if thinking and "{" in thinking:
-                logger.warning(
-                    "[ollama] empty response from %s; recovering JSON from thinking",
-                    payload.get("model"),
-                )
-                text = thinking
-        return text
+        return self._extract_generate_text(r.json(), model=model_name)
+
+    async def chat_text(
+        self,
+        prompt: str,
+        model: str | None = None,
+        options: dict | None = None,
+        fmt: str | None = None,
+        think: bool | str | None = None,
+        *,
+        messages: list[dict] | None = None,
+    ) -> str:
+        """Chat completion via ``/api/chat`` (required for native think on bonsai/gemma).
+
+        Prefer this for Chronicle story-first creative calls with ``num_ctx`` ≥ 16384.
+        ``prompt`` alone becomes a single user message; pass ``messages`` to override.
+        """
+        merged_options = {"num_predict": -1, **(options or {})}
+        model_name = model or settings.vlm_model
+        msgs = messages or [{"role": "user", "content": prompt}]
+        payload: dict = self._with_think(
+            {
+                "model": model_name,
+                "messages": msgs,
+                "stream": False,
+                "options": merged_options,
+            },
+            think,
+        )
+        if fmt:
+            payload["format"] = fmt
+        async with self._acquire():
+            r = await self._client.post(f"{self.base_url}/api/chat", json=payload)
+        self._raise_with_body(r)
+        return self._extract_chat_text(r.json(), model=model_name)
 
     async def generate_text_stream(
         self,

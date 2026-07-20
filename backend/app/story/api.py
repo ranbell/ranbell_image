@@ -35,6 +35,7 @@ class ChronicleRequest(BaseModel):
     # Empty → topic-only mode (no source image); then user_topic is required.
     base_sha256: str = ""
     base_time_axis: Literal["past", "present", "future"] = "present"
+    life_role: str = ""  # student_cafe_job | freeter_multi_job | career_barista | custom | random
     worldview: str = ""
     user_topic: str = ""  # お題 — what the story is about (separate from worldview)
     time_scale: Literal["minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"] = "years"
@@ -80,7 +81,7 @@ class ChronicleRequest(BaseModel):
     # Native `think` for creative story calls (None → runtime config default).
     story_think: bool | None = None
     temperature: float = 1.0  # Gemma 4 recommended default
-    num_ctx: int = 16384
+    num_ctx: int = 32768
     # Visual Script prose length (3–7) → per-act word budget via
     # generator.chronicle_prose_budget. Ignored in fast_mode (tags only, no
     # prose stage).
@@ -124,6 +125,7 @@ class RespinRequest(BaseModel):
     prose_paragraphs: int | None = None
     worldview: str | None = None
     user_topic: str | None = None
+    life_role: str | None = None
 
 
 class PinupRequest(BaseModel):
@@ -155,7 +157,7 @@ _RESPIN_OVERRIDE_FIELDS = (
     "fast_mode", "wd14_prompt_spice",
     "similar_tag_mix", "similar_tag_mix_ratio", "similar_tag_mix_n",
     "llm_provider", "temperature", "num_ctx", "prose_paragraphs",
-    "worldview", "user_topic",
+    "worldview", "user_topic", "life_role",
 )
 
 

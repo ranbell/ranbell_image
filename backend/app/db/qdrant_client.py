@@ -2440,7 +2440,7 @@ class QdrantDBClient:
 
     async def _scroll_tag_vocab_all(self, collection: str) -> list[tuple[str, list[float]]]:
         """Load a whole tag vocabulary (name, vector) — ≤800 tags, kept in
-        process memory by pose_retrieval for hybrid ranking."""
+        process memory for hybrid ranking (legacy; Chronicle no longer uses pose vocab)."""
         out: list[tuple[str, list[float]]] = []
         offset = None
         try:

@@ -3461,6 +3461,153 @@ def build_story_arc_prompt(
     )
 
 
+# ── Story-first Phase 1 (novel → extract acts) ────────────────────────────────
+
+LIFE_ROLES: tuple[str, ...] = (
+    "student_cafe_job",
+    "freeter_multi_job",
+    "career_barista",
+    "custom",
+)
+
+LIFE_ROLE_HINTS: dict[str, str] = {
+    "student_cafe_job": (
+        "She is a student with a cafe part-time job NOW. Her whole life is NOT "
+        "only 'cafe worker'. Non-base acts should show student/portfolio life."
+    ),
+    "freeter_multi_job": (
+        "She juggles multiple part-time jobs; the cafe shift is only one slice of life."
+    ),
+    "career_barista": (
+        "Cafe work is her chosen craft, but stories still need off-counter beats "
+        "when the time scale is days or longer."
+    ),
+    "custom": "Infer a coherent life role from the topic and FIXED present.",
+}
+
+
+def resolve_life_role(life_role: str, *, user_topic: str = "") -> str:
+    role = (life_role or "").strip() or "custom"
+    if role == "random" or role not in LIFE_ROLES:
+        # Deterministic-ish pick from closed set excluding custom when no topic.
+        import hashlib
+        seed = f"{role}|{user_topic}".encode()
+        idx = int(hashlib.md5(seed).hexdigest(), 16) % (len(LIFE_ROLES) - 1)
+        role = LIFE_ROLES[idx]
+    return role
+
+
+def build_story_first_prompt(
+    *,
+    character_desc: str,
+    scene_desc: str,
+    user_topic: str = "",
+    worldview: str = "",
+    base_axis: str = "present",
+    time_scale: str = "days",
+    life_role: str = "student_cafe_job",
+    emotion: str = "",
+    locale: str = "en",
+    candidate_modes: dict[str, str] | None = None,
+    tone: str = "bright",
+    divergence: float = 0.0,
+    feedback: str = "",
+    base_act_fixed: dict | None = None,
+) -> str:
+    """Story-first: write novels first, then extract drawable acts (JSON)."""
+    span = TIME_SCALES.get(time_scale, TIME_SCALES["years"])
+    rules = _SCALE_VISUAL_RULES.get(time_scale, _SCALE_VISUAL_RULES["years"])
+    role = resolve_life_role(life_role, user_topic=user_topic)
+    role_hint = LIFE_ROLE_HINTS.get(role, LIFE_ROLE_HINTS["custom"])
+    modes = candidate_modes or {}
+    labels = default_act_labels(base_axis, time_scale, "en")
+    fixed = base_act_fixed or {}
+    has_topic = bool(user_topic.strip())
+    topic_note = (
+        f'topic="{user_topic.strip()}"\n'
+        "TOPIC RULE: the novel and every non-base act must physically contain "
+        "the topic (place/object/action), not as distant backstory.\n"
+        if has_topic
+        else "topic=(none — invent coherent premises per candidate)\n"
+    )
+    world_line = (
+        f'worldview="{worldview.strip()[:120]}"'
+        if worldview.strip()
+        else "worldview=(none)"
+    )
+    fixed_block = ""
+    if fixed:
+        fixed_block = (
+            f"FIXED {base_axis.upper()} (copy exactly into acts.{base_axis}):\n"
+            + "\n".join(f'  {k} = "{fixed.get(k, "")}"' for k in ("activity", "place", "feeling", "outfit"))
+            + "\n"
+        )
+    feedback_block = f"\n{feedback.strip()}\n" if feedback.strip() else ""
+    mood_line = ""
+    mood = (emotion or "").strip().lower()
+    if mood in _EMOTION_REGISTER:
+        mood_line = f"Overall mood: {mood}.\n"
+    return (
+        "You write SHORT coherent stories for an anime illustration trilogy, "
+        "THEN extract three drawable camera beats.\n\n"
+        f"life_role: {role}\n  ({role_hint})\n"
+        f"time_scale: {time_scale} (~{span} between acts)\n"
+        f"{topic_note}"
+        f"{world_line}\n"
+        f"{_candidate_modes_block(modes)}"
+        f"{_tone_line(tone, locale)}"
+        f"{_divergence_line(divergence, locale)}"
+        f"{mood_line}"
+        f"{fixed_block}"
+        f"BASE IMAGE scene:\n{(scene_desc or '')[:400]}\n\n"
+        f"CHARACTER (appearance only):\n{character_desc}\n\n"
+        f"must_keep: {rules['must_keep']}\n"
+        f"may_differ: {rules['may_differ']}\n"
+        f"outfit: {rules['outfit_rule']}\n"
+        "HARD RULES:\n"
+        f"- Write ONE short English novel (3–5 paragraphs) per candidate A/B/C first.\n"
+        "- Then extract acts that are VISUAL frames from that novel.\n"
+        f"- acts.{base_axis} must match FIXED exactly when FIXED is given.\n"
+        "- Non-base acts: off the FIXED counter/place when scale≥days; different outfits.\n"
+        "- No age jump / graduation timeskip unless scale is years or decades.\n"
+        f"- Use these labels exactly: past=\"{labels['past']}\", "
+        f"present=\"{labels['present']}\", future=\"{labels['future']}\".\n"
+        "- Keep story prose on the same time_scale (no 'weeks later' when scale is days).\n"
+        f"{feedback_block}\n"
+        "OUTPUT: return ONLY JSON:\n"
+        '{"candidates":[{"id":"A","title":"...","dramatic_mode":"...",'
+        '"throughline":"one sentence","story_en":"full short story paragraphs",'
+        '"personality_hint":"...",'
+        '"acts":{"past":{"label":"...","activity":"...","place":"...","feeling":"...","outfit":"..."},'
+        '"present":{...},"future":{...}}},'
+        '{"id":"B",...},{"id":"C",...}]}\n'
+    )
+
+
+def parse_story_first_json(raw: str) -> list[dict]:
+    """Parse story-first JSON; reuse arc normalizer for acts + flat fields."""
+    # Prefer standard arc parser; also lift story_en / throughline.
+    candidates = parse_story_arc_json(raw)
+    data = _loads_lenient(raw)
+    items = data.get("candidates") if isinstance(data, dict) else data
+    raw_by_id: dict[str, dict] = {}
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("id"):
+                raw_by_id[str(item["id"]).strip()] = item
+    for cand in candidates:
+        item = raw_by_id.get(cand["id"], {})
+        story = str(item.get("story_en") or item.get("story") or "").strip()
+        if story:
+            cand["story_en"] = story
+        throughline = str(item.get("throughline") or "").strip()
+        if throughline:
+            cand["throughline"] = throughline
+        if not cand.get("summary") and throughline:
+            cand["summary"] = throughline
+    return candidates
+
+
 def _normalize_act(raw, *, fallback_label: str = "") -> dict:
     """Coerce one act into _ACT_KEYS strings.
 
@@ -3598,8 +3745,7 @@ def default_act_labels(
 def repair_act_labels(
     candidate: dict, *, base_axis: str, time_scale: str, locale: str = "en"
 ) -> None:
-    """Overwrite out-of-scale act labels with canonical defaults (in place)."""
-    lo, hi = _SCALE_ALLOWED_MAGNITUDES.get(time_scale, (3.0, 4.0))
+    """Always overwrite act labels with canonical defaults for the time scale."""
     defaults = default_act_labels(base_axis, time_scale, locale)
     acts = candidate.get("acts")
     if not isinstance(acts, dict):
@@ -3608,11 +3754,7 @@ def repair_act_labels(
         act = acts.get(axis)
         if not isinstance(act, dict):
             continue
-        if axis == base_axis:
-            continue
-        mags = _label_magnitudes(act.get("label") or "")
-        if not act.get("label") or any(m < lo or m > hi for m in mags):
-            act["label"] = defaults[axis]
+        act["label"] = defaults[axis]
 
 
 def validate_story_arc(
