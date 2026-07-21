@@ -26,15 +26,39 @@ HAPPENING_CATEGORIES = (
     "環境変化系",
     "該当なし",
 )
+# smile / grin are intentionally NOT banned: a happy beat needs a real smile.
+# Only viewer/camera-facing gaze is suppressed (keeps her absorbed in her own world).
 BANNED_TAG_FRAGMENTS = (
     "looking_at_viewer",
     "looking at viewer",
     "looking_at_camera",
     "looking at camera",
-    "smile",
-    "smiling",
-    "grin",
 )
+
+# Face/expression danbooru tags. A person panel must carry at least one so the
+# character never renders blank-faced. Used for detection + backfill.
+EXPRESSION_TAGS = frozenset({
+    "smile", "grin", "open_mouth", "closed_mouth", "parted_lips", "blush",
+    "frown", "teary_eyes", "crying", "wide-eyed", "wide_eyed", "half-closed_eyes",
+    "half_closed_eyes", "closed_eyes", "furrowed_brow", "biting_lip",
+    "raised_eyebrows", "pout", "gritted_teeth", "surprised", "embarrassed",
+    "serious", "scowl", "sweatdrop", "nervous", "determined",
+})
+# Neutral-safe defaults injected when a panel lacks any expression tag (varied
+# per panel so three panels don't collapse to the same face).
+_DEFAULT_EXPRESSIONS = ("parted_lips", "half-closed_eyes", "closed_mouth")
+
+
+def has_expression_tag(tags) -> bool:
+    for t in tags or []:
+        k = (str(t) or "").strip().lower().replace(" ", "_").replace("-", "_")
+        if k in {e.replace("-", "_") for e in EXPRESSION_TAGS}:
+            return True
+    return False
+
+
+def default_expression(index: int) -> str:
+    return _DEFAULT_EXPRESSIONS[index % len(_DEFAULT_EXPRESSIONS)]
 
 _HAIR_COLOR_RE = re.compile(
     r"^(black|white|grey|gray|silver|blonde|blond|brown|auburn|red|pink|blue|"
@@ -158,6 +182,7 @@ def build_stage1_user_input(
     style_hint: str = "",
     time_scale: str = "days",
     locale: str = "ja",
+    profile_locked: bool = True,
 ) -> dict[str, Any]:
     from .generator import normalize_time_scale
 
@@ -181,6 +206,7 @@ def build_stage1_user_input(
             "eye_color": character_profile.get("eye_color") or "",
             "base_outfit": character_profile.get("base_outfit") or "",
         },
+        "character_profile_locked": bool(profile_locked),
         "include_happening": bool(include_happening),
         "author_style": (author_style or "").strip(),
         "custom_tags": {
@@ -267,17 +293,41 @@ def _strip_hair_eye_from_danbooru(tags: list[str], consistency: list[str]) -> li
     return out
 
 
+def _sanitize_identity_tags(raw) -> list[str]:
+    """Normalize model-authored consistency tags; drop banned/expression tokens."""
+    out: list[str] = []
+    for t in raw or []:
+        k = (str(t) or "").strip().lower().replace(" ", "_").replace("-", "_")
+        if not k or _is_banned_tag(k) or k in {e.replace("-", "_") for e in EXPRESSION_TAGS}:
+            continue
+        if k not in out:
+            out.append(k)
+    return out
+
+
 def apply_stage1_failure_handling(
     data: dict[str, Any],
     *,
     character_profile: dict[str, str],
     custom_tags: dict[str, list[str]] | None = None,
     include_happening: bool = False,
+    profile_locked: bool = True,
 ) -> dict[str, Any]:
-    """Post-process Stage1 JSON per FAILURE HANDLING (no re-LLM)."""
+    """Post-process Stage1 JSON per FAILURE HANDLING (no re-LLM).
+
+    ``profile_locked`` True (base image / user tags): consistency_tags are forced
+    to the fixed ``character_profile``. False (topic-only): the model is allowed to
+    design the protagonist appearance (gender / hair / concrete outfit) from the
+    theme+author, so its own consistency_tags are kept (sanitized), falling back to
+    the profile only when the model produced nothing usable.
+    """
     out = dict(data)
     expected = consistency_tags_from_profile(character_profile)
-    out["consistency_tags"] = expected
+    if profile_locked:
+        out["consistency_tags"] = expected
+    else:
+        model_tags = _sanitize_identity_tags(out.get("consistency_tags"))
+        out["consistency_tags"] = model_tags or expected
     out["include_happening"] = bool(include_happening)
     if not include_happening:
         out["happening_summary"] = ""
@@ -307,7 +357,7 @@ def apply_stage1_failure_handling(
         if isinstance(tags, str):
             tags = parse_csv_tags(tags, strip_colors=False)
         tags = [t for t in tags if t and not _is_banned_tag(t)]
-        tags = _strip_hair_eye_from_danbooru(tags, expected)
+        tags = _strip_hair_eye_from_danbooru(tags, out["consistency_tags"])
 
         # Merge custom_tags
         ct = (custom_tags or {}).get(PANELS[i]) or []
@@ -316,6 +366,10 @@ def apply_stage1_failure_handling(
                 continue
             if t not in tags:
                 tags.append(t)
+        # Expression is mandatory per panel but the model drops it ~7/9 of the
+        # time; guarantee at least one face tag so the character is never blank.
+        if not has_expression_tag(tags):
+            tags.append(default_expression(i))
         panel["danbooru_tags"] = tags
         if "character_state_diff" not in panel:
             panel["character_state_diff"] = ""

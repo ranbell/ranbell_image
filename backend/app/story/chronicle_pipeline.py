@@ -127,8 +127,15 @@ async def run_chronicle_candidates_v2(
                 author_id=getattr(body, "author_id", "") or "",
                 author_style=getattr(body, "author_style", "") or "",
             )
+            # Locked when identity comes from a base image or explicit user tags.
+            # Topic-only runs are UNLOCKED: Stage1 designs the protagonist's
+            # gender / hair / concrete outfit from the theme + author.
+            profile_locked = bool(has_base) or bool(
+                (getattr(body, "character_tags", "") or "").strip()
+            )
             ctx = {
                 "character_profile": profile,
+                "character_profile_locked": profile_locked,
                 "wd14_tags": wd14_tags,
                 "style_hint": style_hint,
                 "author_style": author_style,
@@ -153,6 +160,7 @@ async def run_chronicle_candidates_v2(
             ctx["time_scale"] = time_scale
 
         profile = ctx["character_profile"]
+        profile_locked = bool(ctx.get("character_profile_locked", True))
         author_style = ctx.get("author_style") or ""
         custom_tags = ctx.get("custom_tags") or custom_tags_from_body(body)
         include_happening = bool(ctx.get("include_happening"))
@@ -186,6 +194,7 @@ async def run_chronicle_candidates_v2(
                 style_hint=style_hint,
                 time_scale=time_scale,
                 locale=locale,
+                profile_locked=profile_locked,
             )
             messages = build_stage1_messages(user_input)
             data = None
@@ -212,6 +221,7 @@ async def run_chronicle_candidates_v2(
                         character_profile=profile,
                         custom_tags=custom_tags,
                         include_happening=include_happening,
+                        profile_locked=profile_locked,
                     )
                 reason = stage1_needs_retry(
                     data,
@@ -399,6 +409,7 @@ async def run_chronicle_expand_v2(
                 stage1.get("include_happening")
                 or ctx.get("include_happening")
             ),
+            profile_locked=bool(ctx.get("character_profile_locked", True)),
         )
 
         cfg = await get_runtime_config(db)

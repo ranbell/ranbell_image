@@ -7,7 +7,11 @@ from typing import Any
 
 from . import prompt_assets
 from .compose import soft_normalize_tag
-from .stage1_storyboard import PANELS
+from .stage1_storyboard import (
+    EXPRESSION_TAGS,
+    PANELS,
+    default_expression,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,27 @@ def _norm(s: str) -> str:
 
 def _has_non_ascii(s: str) -> bool:
     return any(ord(c) > 127 for c in (s or ""))
+
+
+_EXPR_NEEDLES = tuple(sorted(
+    {e.replace("-", " ") for e in EXPRESSION_TAGS}
+    | {e.replace("-", "_") for e in EXPRESSION_TAGS},
+    key=len, reverse=True,
+))
+
+
+def ensure_expression(positive: str, *, panel_index: int) -> str:
+    """Guarantee the final prompt carries at least one face/expression cue.
+
+    Stage1 backfills expression into danbooru_tags, but Stage2's rewrite can drop
+    it; this is the last line of defence so a person never renders blank-faced.
+    """
+    text = (positive or "").strip()
+    low = text.lower()
+    if any(n in low for n in _EXPR_NEEDLES):
+        return text
+    expr = default_expression(panel_index)
+    return f"{text}, {expr}" if text else expr
 
 
 def enforce_r0_locks(
@@ -174,6 +199,7 @@ async def enhance_all_panels(
             character_state_diff=str(panel.get("character_state_diff") or ""),
             gesture=str(panel.get("gesture") or ""),
         )
+        positive = ensure_expression(positive, panel_index=i)
         wall = time.perf_counter() - t0
         if log:
             log(

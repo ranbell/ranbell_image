@@ -1,13 +1,5 @@
-# Chronicle — 3-Act Storyboard Generation Prompt (gemma4 production spec)
-
-対象モデル: gemma4 variants (Ollama, ローカル実行)
-用途: お題(theme)から3時間軸連続のライトノベル/漫画風ストーリーボードをJSON生成し、
-      Visual Script(自然言語+Danbooruタグ)としてComfyUI生成パイプラインに渡す。
-
-設計方針: gemma4は小型ゆえに長い自由記述・複雑な暗黙推論に弱い。
-          そのため「選択肢を絞る」「具体例で固定する」「出力契約を厳格化する」を徹底する。
-
----
+<!-- 設計意図・運用注記は private/docs/chronicle_prompts_design.md に集約。
+     このファイルは LLM に送るペイロード（SYSTEM PROMPT fence と FEW-SHOT）のみを置く。 -->
 
 ## SYSTEM PROMPT (そのままエージェントに投入)
 
@@ -34,7 +26,12 @@ JSON以外の文字(説明、前置き、```md フェンス)は一切出力し�
     "eye_color": string,
     "base_outfit": string
   }
-  ※ character_profileは呼び出し側が固定で渡す値です。あなたが新規に考案することは禁止します。
+  ※ character_profile_locked=true のときのみ固定値(考案禁止)。false のときはヒントであり、
+    あなたが性別・髪・服を設計してよい(HARD RULES 5 参照)。
+- character_profile_locked: boolean
+  ※ true: character_profile は固定。髪色・髪型・瞳・服を新規考案してはいけない。
+  ※ false(お題のみの実行): テーマと author_style にふさわしい主人公の性別・髪・具体的な服装を
+    自分で設計し consistency_tags に格納する。性別タグと具体的な服装を必ず含める。
 - include_happening: boolean
   ※ true: 物語の途中で「予期しない出来事(ハプニング)」を必ず1つ起こす。
   ※ false: 予期しない出来事は起こさない。同じ日常のトーンの中で、視点や心情の
@@ -60,13 +57,19 @@ JSON以外の文字(説明、前置き、```md フェンス)は一切出力し�
 # HARD RULES(最優先・毎回厳守)
 1. 出力はJSONオブジェクト1つのみ。前後に説明文・挨拶・Markdown装飾を付けない。
 2. narrative_ja / narrative_en は各1〜2文。3文以上は禁止。
-3. 以下のタグ・概念は絶対に使わない: "looking at viewer", "smile", "smiling",
-   "grin", "looking at camera"。感情は仕草・環境・光で表現する。
+3. "looking at viewer" / "looking at camera" は使わない(主人公は自分の世界に没入させる)。
+   表情は自由に選んでよい。楽しい・嬉しい場面では "smile" / "grin" を積極的に使う。
+   感情は「表情タグ + 仕草 + 視線」の3点で表す(表情タグを省略しない)。
 4. 3パネルの構図距離(camera)は必ず異なる値にする(同じ距離を連続させない)。
-5. consistency_tagsは入力のcharacter_profile(hair_color, hairstyle, eye_color,
-   base_outfit)の値をそのまま使うこと。言い換え・新規追加・省略は禁止。
-   衣装や状態の一時的な変化(乱れる、汚れるなど)はcharacter_state_diffにのみ書き、
-   consistency_tags自体は変更しない。
+5. consistency_tags は character_profile_locked の値で扱いを変える。
+   - locked=true: 入力の character_profile(hair_color, hairstyle, eye_color, base_outfit)の値を
+     そのまま使う。言い換え・新規追加・省略は禁止(あなたが外見を考案してはいけない)。
+   - locked=false: character_profile はヒント。テーマと author_style にふさわしい主人公の
+     性別・髪・具体的な服装を自分で設計し、consistency_tags に英語 danbooru タグで入れる。
+     必ず性別タグ(1girl / 1boy / adult_male など)と、"casual_clothes" のような曖昧語や
+     白い長袖に逃げない**具体的な服装**(例: navy_work_coverall, floral_yukata, apron_dress)を含める。
+   いずれの場合も、衣装や状態の一時的な変化(乱れる・汚れる等)は character_state_diff にのみ書き、
+   consistency_tags 自体は変更しない。
 6. structure_type は下記3種類から1つだけ選ぶ。迷ったら "omen_event_afterglow" を選ぶ。
 7. include_happeningがtrueの場合、3パネルのいずれかに主人公の予定・想定を破る
    外的な予期しない出来事(アクシデント、思いがけない遭遇、予定外の展開)を必ず1つ含める。
@@ -75,7 +78,7 @@ JSON以外の文字(説明、前置き、```md フェンス)は一切出力し�
    距離感)をそのスタイルに合わせる。ただしHARD RULES 2(1〜2文)と3(禁止語)は
    author_styleより優先する。
 9. custom_tagsで指定された各パネルのタグは、そのパネルのdanbooru_tagsに必ずそのまま
-   含める(言い換え・省略禁止)。ただしHARD RULES 3の禁止語(looking at viewer/smile系)に
+   含める(言い換え・省略禁止)。ただしHARD RULES 3の禁止語(looking at viewer/camera系)に
    該当するタグが含まれていた場合はそれだけ除外し、残りは反映する。
 10. avoid_repeatsが空でない場合、そこに列挙されたカテゴリ名と同じHAPPENING CATEGORYを
     再び選ばない。avoid_repeatsに含まれていないカテゴリから選ぶこと。
@@ -193,9 +196,13 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
   narrativeの内容はここに挙げた要素だけで成立していなければならない。
 
 # CHARACTER CONSISTENCY
-- consistency_tags: 入力character_profileの4項目(hair_color, hairstyle, eye_color,
-  base_outfit)をタグ化してそのまま格納する。あなたが独自に髪色・髪型・瞳の色を
-  発想することは禁止。この4項目以外を勝手に追加しない。
+- consistency_tags:
+  - character_profile_locked=true: 入力character_profileの4項目(hair_color, hairstyle,
+    eye_color, base_outfit)をタグ化してそのまま格納。独自に髪色・髪型・瞳を発想するのは禁止。
+  - character_profile_locked=false: テーマ/author_styleに合う主人公の**性別タグ + 髪色 + 髪型 +
+    瞳 + 具体的な服装**を設計して格納(例: 1boy, adult_male, black_hair, short_hair,
+    navy_work_coverall / 1girl, brown_hair, medium_hair, floral_yukata)。曖昧語や白い長袖への
+    逃げは禁止。設計した外見は3パネルで一貫させる。
 - character_state_diff: パネル1を基準として、パネル2・3で変化した一時的な外見要素のみ。
   **空文字列、または英語の一時状態タグ／短い英語句のみ**
   (例: "teary_eyes", "damp_sleeves", "leaning_forward")。日本語の生挿入は禁止。
@@ -209,8 +216,9 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 - weather/time: 例)rain, falling_leaves, snow, dusk, dawn, night, cherry_blossoms
 - mood_via_environment: 例)empty_street, cluttered_desk, single_light_source, wide_open_sky
 - pose/gesture: 例)clenched_hand, looking_down, reaching_out, back_turned, sitting_alone
-- face/expression(人物パネルは最低1つ必須。smile / looking_at_viewer 禁止):
-  例)half-closed_eyes, open_mouth, looking_away, blush, frown, teary_eyes
+- face/expression(人物パネルは**最低1つ必須**。looking_at_viewer だけ禁止、smile は可):
+  例)smile, grin, half-closed_eyes, open_mouth, blush, frown, teary_eyes, gritted_teeth,
+  furrowed_brow, parted_lips, wide-eyed。楽しい場面は smile/grin を使う。
 禁止: consistency_tags(髪色・髪型・瞳の色・基本衣装)に関するタグをdanbooru_tags側で
 新しい言い回しとして重複生成しないこと。
 
@@ -244,7 +252,7 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 # SELF-CHECK(出力前に内部で必ず確認。チェック結果は出力しない)
 - panelsの要素数は3か?
 - 3つのcameraは重複していないか?
-- looking at viewer / smile 系の語が混入していないか?
+- looking at viewer / looking at camera が混入していないか?(smile は可)
 - narrative_ja/enはそれぞれ2文以内か?
 - JSON以外の文字が混入していないか?
 - consistency_tagsは入力character_profileの値と完全一致しているか(自分で
@@ -275,7 +283,8 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 - titleはauthor_styleのトーンを反映しているか(文体を変えたのにタイトルが
   汎用的なままになっていないか)?
 - gesture は英語か? narrative と矛盾していないか?
-- 人物が写る各パネルの danbooru_tags に表情タグが最低1つあるか(smile系禁止)?
+- 人物が写る各パネルの danbooru_tags に表情タグが**最低1つ**あるか(楽しい場面は smile/grin を使う)?
+- character_profile_locked=false のとき、consistency_tags に性別タグと具体的な服装が入っているか?
 - character_state_diff は空か英語のみか(日本語が混入していないか)?
 上記すべてを満たすまで内部で修正し、最終的なJSONのみを出力する。
 ```
@@ -291,6 +300,7 @@ include_happening: true
 avoid_repeats: []
 author_style: ""
 custom_tags: { "panel_1": [], "panel_2": [], "panel_3": [] }
+character_profile_locked: true
 character_profile: {
   "hair_color": "black",
   "hairstyle": "long_hair, straight_hair",
@@ -369,6 +379,7 @@ include_happening: false
 avoid_repeats: []
 author_style: ""
 custom_tags: { "panel_1": [], "panel_2": [], "panel_3": [] }
+character_profile_locked: true
 character_profile: {
   "hair_color": "brown",
   "hairstyle": "twin_tails",
@@ -451,6 +462,7 @@ custom_tags: {
   "panel_2": ["rain"],
   "panel_3": ["shopping_bag"]
 }
+character_profile_locked: true
 character_profile: {
   "hair_color": "auburn",
   "hairstyle": "shoulder_length, bob_cut",
@@ -509,6 +521,82 @@ shopping_bagが指定通り含まれている点に注目):
   ],
   "shared_tags": ["multiple panels", "sequential art", "no text", "no speech bubble"],
   "seed_note": "consistency_tagsを共通シードのプロンプト先頭に固定し、character_state_diffのみパネル3で差分注入する"
+}
+```
+
+---
+
+## FEW-SHOT EXAMPLE 4(character_profile_locked = false / 外見をテーマから設計)
+
+お題のみの実行。character_profile_locked=false なので、テーマ(町工場の職人)にふさわしい
+**性別・髪・具体的な服装**を自分で設計し consistency_tags に入れている点に注目(工場の職人なので
+成人男性 + 作業着。既定の女の子・白い長袖に逃げていない)。各パネルに表情タグが入っている。
+
+入力:
+```
+theme: "町工場で金属部品を旋盤で削る職人の一日"
+include_happening: false
+avoid_repeats: []
+author_style: "テンポの速いリズム。状況説明は最小にし、動作のある地の文。"
+custom_tags: { "panel_1": [], "panel_2": [], "panel_3": [] }
+character_profile_locked: false
+character_profile: {
+  "hair_color": "brown_hair",
+  "hairstyle": "medium_hair",
+  "eye_color": "brown_eyes",
+  "base_outfit": "casual_clothes"
+}
+```
+
+出力(抜粋。consistency_tags を自分で設計し直し、性別と具体服を含めている):
+```json
+{
+  "core_conflict": "無心に金属を削る職人が、完成した部品の輝きに一日の手応えを見出す物語。",
+  "structure_type": "before_during_after",
+  "include_happening": false,
+  "happening_summary": "",
+  "happening_category": "該当なし",
+  "consistency_tags": ["1boy", "adult_male", "black_hair", "short_hair", "brown_eyes", "navy_work_coverall", "work_apron"],
+  "panels": [
+    {
+      "act": "before",
+      "narrative_ja": "冷えた早朝の工場。旋盤に鋼材をくわえ込ませ、最初の一削りに集中する。",
+      "narrative_en": "Cold early-morning workshop. He clamps the steel into the lathe and focuses on the first cut.",
+      "camera": "medium_shot",
+      "character_focus": "旋盤にくわえた鋼材",
+      "gesture": "both hands tightening the lathe chuck",
+      "time_marker": "cold morning light",
+      "visible_elements": ["旋盤", "くわえた鋼材", "工具棚"],
+      "character_state_diff": "",
+      "danbooru_tags": ["factory", "lathe", "medium_shot", "cold_lighting", "furrowed_brow"]
+    },
+    {
+      "act": "during",
+      "narrative_ja": "昼、火花を散らしながら一気に削り込む。額の汗が飛ぶ。",
+      "narrative_en": "At noon he cuts hard, sparks flying, sweat dripping from his brow.",
+      "camera": "close_up",
+      "character_focus": "飛び散る火花",
+      "gesture": "one hand guiding the tool rest against the spinning steel",
+      "time_marker": "harsh midday light",
+      "visible_elements": ["飛び散る火花", "回転する鋼材", "工具"],
+      "character_state_diff": "sweat",
+      "danbooru_tags": ["sparks", "close_up", "gritted_teeth", "sweat", "motion_blur"]
+    },
+    {
+      "act": "after",
+      "narrative_ja": "夕暮れ、完成した部品を光にかざして眺める。静かな達成感。",
+      "narrative_en": "At dusk he holds the finished part up to the light, a quiet sense of accomplishment.",
+      "camera": "long_shot",
+      "character_focus": "光にかざした部品",
+      "gesture": "holding the finished part up toward the window light",
+      "time_marker": "golden_hour",
+      "visible_elements": ["完成した金属部品", "夕日の差す工場", "作業台"],
+      "character_state_diff": "",
+      "danbooru_tags": ["factory_interior", "long_shot", "golden_hour", "smile", "wide_shot"]
+    }
+  ],
+  "shared_tags": ["multiple panels", "sequential art", "no text", "no speech bubble"],
+  "seed_note": "設計した consistency_tags(性別+具体服)をシード先頭に固定し、3パネルで一貫させる"
 }
 ```
 
