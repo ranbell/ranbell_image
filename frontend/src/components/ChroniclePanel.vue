@@ -82,10 +82,6 @@ const baseAxis = ref('panel_2')
 function currentTimeScale() {
   return TIME_SCALES[timeScaleIdx.value] || 'days'
 }
-
-function currentTimeScale() {
-  return TIME_SCALES[timeScaleIdx.value] || 'years'
-}
 // Deprecated server-side (mechanical mutex rules replaced the LLM conflict
 // pass), so there is no UI for it — still sent so the request shape is stable.
 const suppressConflictTags = ref(true)
@@ -1505,6 +1501,7 @@ async function generateImages() {
                       <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                     </select>
                   </div>
+                  </details>
                 </div>
               </div>
 
