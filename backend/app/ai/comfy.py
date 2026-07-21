@@ -293,7 +293,15 @@ class ComfyUIClient:
 
         return wf
 
-    _LOAD_IMAGE_TYPES = frozenset({"LoadImage", "LoadImageMask", "LoadImageOutput"})
+    _LOAD_IMAGE_TYPES = frozenset({
+        "LoadImage",
+        "LoadImageMask",
+        "LoadImageOutput",
+        "LoadImageFromUrl",
+        "VHS_LoadImagePath",
+        "Image Load",
+        "LoadImageBatch",
+    })
 
     def patch_load_image_nodes(self, workflow: dict, image_name: str) -> tuple[dict, int]:
         """Set ``inputs.image`` on every LoadImage-like node. Returns (wf, count)."""
@@ -313,7 +321,11 @@ class ComfyUIClient:
         overwrite: bool = True,
         image_type: str = "input",
     ) -> str:
-        """Upload bytes to Comfy ``/upload/image``. Returns the stored filename."""
+        """Upload bytes to Comfy ``/upload/image``.
+
+        Returns the filename string suitable for ``LoadImage.inputs.image``
+        (``subfolder/name`` when Comfy stores under a subfolder).
+        """
         files = {"image": (filename, data, "application/octet-stream")}
         form = {
             "overwrite": "true" if overwrite else "false",
@@ -327,8 +339,13 @@ class ComfyUIClient:
         )
         r.raise_for_status()
         body = r.json() if r.content else {}
-        name = (body.get("name") if isinstance(body, dict) else None) or filename
-        return str(name)
+        if not isinstance(body, dict):
+            return filename
+        name = str(body.get("name") or filename)
+        sub = str(body.get("subfolder") or "").strip().strip("/")
+        if sub:
+            return f"{sub}/{name}"
+        return name
 
     async def fetch_image(self, filename: str, subfolder: str = "", type_: str = "output") -> bytes:
         r = await self._http.get(

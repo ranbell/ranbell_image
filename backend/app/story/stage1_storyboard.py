@@ -127,6 +127,26 @@ def consistency_tags_from_profile(profile: dict[str, str]) -> list[str]:
     return tags
 
 
+def panel_time_labels(time_scale: str, *, locale: str = "ja") -> dict[str, str]:
+    """Labels for the three Chronicle panels as Start / later / further later."""
+    from .generator import normalize_time_scale, _ELAPSED_UNIT, _ELAPSED_UNIT_JA
+
+    scale = normalize_time_scale(time_scale, "days")
+    if locale == "ja":
+        one, two = _ELAPSED_UNIT_JA.get(scale, _ELAPSED_UNIT_JA["days"])
+        return {
+            "panel_1": "スタート",
+            "panel_2": f"{one}後",
+            "panel_3": f"さらに{two}後",
+        }
+    one, two = _ELAPSED_UNIT.get(scale, _ELAPSED_UNIT["days"])
+    return {
+        "panel_1": "Start",
+        "panel_2": f"{one.title()} later".replace("A Few", "A few"),
+        "panel_3": f"Further {two.lower()} later",
+    }
+
+
 def build_stage1_user_input(
     *,
     theme: str,
@@ -136,7 +156,11 @@ def build_stage1_user_input(
     custom_tags: dict[str, list[str]] | None = None,
     avoid_repeats: list[str] | None = None,
     style_hint: str = "",
+    time_scale: str = "days",
+    locale: str = "ja",
 ) -> dict[str, Any]:
+    from .generator import normalize_time_scale
+
     ct = custom_tags or {}
     theme_text = (theme or "").strip()
     if style_hint.strip():
@@ -145,8 +169,12 @@ def build_stage1_user_input(
             if theme_text
             else f"[art_style_hint: {style_hint.strip()}]"
         )
+    scale = normalize_time_scale(time_scale, "days")
+    labels = panel_time_labels(scale, locale=locale)
     return {
         "theme": theme_text,
+        "time_scale": scale,
+        "panel_time_labels": labels,
         "character_profile": {
             "hair_color": character_profile.get("hair_color") or "",
             "hairstyle": character_profile.get("hairstyle") or "",

@@ -2765,33 +2765,20 @@ def _chronicle_bind_llm(ollama, body):
 
 
 def _chronicle_models(body, cfg: dict) -> dict[str, str]:
-    """Resolve stage-tiered Chronicle models: {"vision", "story", "utility"}.
+    """Resolve Chronicle models from the panel request only (no Admin fallback).
 
-    Ollama provider: per-request tier field > body.vlm_model (all-tier
-    override) > runtime cfg tier > cfg["vlm_model"]. Vision always resolves
-    from vlm_model (the story model may be text-only). Empty tiers fall back
-    to the vision model so a single-GPU Ollama never swaps models unless the
-    user opted in.
-
-    OpenAI-compat provider: story_model/utility_model are Ollama tier names,
-    so every tier collapses to body.vlm_model > cfg["openai_model"] (same
-    resolution the provider PR used).
+    Story/vision/utility all use ``body.vlm_model`` or ``body.story_model``.
+    Empty → empty strings; callers must reject before calling Ollama.
     """
     provider = getattr(body, "llm_provider", None) or "ollama"
+    panel = (
+        getattr(body, "story_model", "") or getattr(body, "vlm_model", "") or ""
+    ).strip()
     if provider == "openai":
-        m = getattr(body, "vlm_model", "") or cfg.get("openai_model") or "bonsai"
+        # Still prefer the panel field; do not invent Admin defaults for Chronicle.
+        m = panel
         return {"vision": m, "story": m, "utility": m}
-    vision = getattr(body, "vlm_model", "") or cfg.get("vlm_model") or ""
-    all_override = getattr(body, "vlm_model", "") or ""
-    story = (
-        getattr(body, "story_model", "") or all_override
-        or cfg.get("story_model") or vision
-    )
-    utility = (
-        getattr(body, "utility_model", "") or all_override
-        or cfg.get("utility_model") or vision
-    )
-    return {"vision": vision, "story": story, "utility": utility}
+    return {"vision": panel, "story": panel, "utility": panel}
 
 
 async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: str, db) -> str | None:
@@ -3054,23 +3041,38 @@ async def run_chronicle_image_generate(
                 wf, n_load = comfy.patch_load_image_nodes(wf, stored)
                 if n_load:
                     logger.info(
-                        "[chronicle] Comfy upload base=%s → %s patched LoadImage×%d axis=%s",
-                        base_sha[:12], stored, n_load, axis,
+                        "[chronicle] Comfy upload base=%s → uploaded=%s "
+                        "patched_nodes=%d workflow=%s axis=%s",
+                        base_sha[:12], stored, n_load, workflow_name, axis,
+                    )
+                    reporter.update(
+                        0.0,
+                        f"Comfy ref uploaded={stored} patched_nodes={n_load} "
+                        f"workflow={workflow_name}",
                     )
                 else:
-                    logger.warning(
-                        "[chronicle] Comfy upload base=%s → %s but no LoadImage in %s "
-                        "(text2img only) axis=%s",
-                        base_sha[:12], stored, workflow_name, axis,
+                    msg = (
+                        f"Comfy uploaded={stored} but no LoadImage-like nodes "
+                        f"in workflow={workflow_name} (text2img)"
                     )
+                    logger.warning(
+                        "[chronicle] %s axis=%s base=%s",
+                        msg, axis, base_sha[:12],
+                    )
+                    reporter.update(0.0, f"WARNING: {msg}")
             except Exception as exc:
                 logger.error(
                     "[chronicle] Comfy base image inject failed axis=%s: %s", axis, exc,
                 )
+                reporter.update(0.0, f"WARNING: Comfy base inject failed: {exc}")
         else:
             logger.warning(
                 "[chronicle] base image missing on disk sha=%s path=%s axis=%s",
                 base_sha[:12], fp, axis,
+            )
+            reporter.update(
+                0.0,
+                f"WARNING: base image missing on disk path={fp}",
             )
 
     patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)

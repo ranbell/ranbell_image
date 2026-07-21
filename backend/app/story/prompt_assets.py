@@ -27,13 +27,21 @@ def stage1_system_prompt() -> str:
 
 
 def stage1_fewshots_block() -> str:
-    """Everything from the first FEW-SHOT section through FAILURE HANDLING (exclusive)."""
+    """FEW-SHOT sections only (LLM-facing examples; no agent/integration notes)."""
     text = _read("stage1_storyboard.md")
-    m = re.search(
-        r"(## FEW-SHOT EXAMPLE[\s\S]*?)(?=\n## FAILURE HANDLING)",
-        text,
-    )
-    return (m.group(1).strip() if m else "")
+    m = re.search(r"(## FEW-SHOT EXAMPLE[\s\S]*)\Z", text)
+    block = m.group(1).strip() if m else ""
+    # Safety: never include agent-side implementation sections if present.
+    for stop in (
+        "\n## FAILURE HANDLING",
+        "\n## GENERATION PARAMETERS",
+        "\n## STAGE 2",
+        "\n## INTEGRATION NOTES",
+    ):
+        i = block.find(stop)
+        if i >= 0:
+            block = block[:i].rstrip()
+    return block
 
 
 def stage2_template() -> str:
@@ -45,3 +53,7 @@ def fill_stage2(input_text: str) -> str:
     if "<<INPUT>>" not in tpl:
         return tpl.rstrip() + "\n\n## Input\n\n```\n" + input_text + "\n```\n"
     return tpl.replace("<<INPUT>>", input_text)
+
+
+def clear_prompt_cache() -> None:
+    _read.cache_clear()

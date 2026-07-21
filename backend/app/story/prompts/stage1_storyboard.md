@@ -20,6 +20,14 @@ JSON以外の文字(説明、前置き、```md フェンス)は一切出力し�
 
 # INPUT
 - theme: string(お題)
+- time_scale: string(panels間の時間幅。minutes|tens_of_minutes|hours|days|months|years|decades)
+- panel_time_labels: {
+    "panel_1": string,  // スタート
+    "panel_2": string,  // 例: 数時間後
+    "panel_3": string   // 例: さらに半日後
+  }
+  ※ narrativeのtime_markerおよび3パネルの時間の進み方はこれらのラベルに従うこと。
+    「過去・現在・未来」という用語は使わない。
 - character_profile: {
     "hair_color": string,
     "hairstyle": string,
@@ -80,6 +88,8 @@ JSON以外の文字(説明、前置き、```md フェンス)は一切出力し�
     - 心理・記憶・回想など、外形に現れない内面の説明
     絵に描けない要素で物語を成立させてはならない。物語の情報はすべて
     「その場に見えている状態・物・姿勢」に変換して表現すること。
+12. パネルの時間関係は panel_time_labels に従う(スタート → 経過 → さらに経過)。
+    過去・現在・未来という用語は使わない。
 
 # STRUCTURE TYPES(選択肢はこの3つのみ)
 - "kishoutenketsu": 起(導入)→承(展開)→結(帰結)。日常からの小さな変化を描く時に選ぶ。
@@ -249,6 +259,7 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
   (「最初と違う」)が含まれていないか?
 - narrativeの内容は、そのパネルのvisible_elementsだけで成立しているか?
 - 3パネルすべてが暗い、または中央だけが極端に暗い構成になっていないか?
+- time_marker / 時間の進み方は panel_time_labels に沿っているか?
 - titleはauthor_styleのトーンを反映しているか(文体を変えたのにタイトルが
   汎用的なままになっていないか)?
 上記すべてを満たすまで内部で修正し、最終的なJSONのみを出力する。
@@ -488,116 +499,3 @@ shopping_bagが指定通り含まれている点に注目):
 
 ---
 
-## FAILURE HANDLING(エージェント側の実装ロジック)
-
-gemma4は指示逸脱・JSON崩れが起きやすいため、エージェント側で以下を実装することを推奨:
-
-1. **JSON parse失敗時**: レスポンスから最初の `{` 〜最後の `}` を正規表現で抽出して再パース
-2. **panels数 ≠ 3**: 同一promptで温度を下げて(temperature -0.2)1回だけ再試行
-3. **禁止語混入チェック**: "looking at viewer" "smile" "grin" を出力後に文字列検索し、
-   混入していればdanbooru_tagsから該当語のみ機械的に除去(全体再生成はしない)
-4. **camera重複**: 3パネルのcameraが重複していれば、long→medium→close_upに強制上書き
-5. **consistency_tags不一致**: モデル出力のconsistency_tagsが入力character_profileと
-   一致しない場合(独自の髪色・髪型・瞳の色を発想している場合)、モデル出力を破棄し、
-   入力character_profileの値でconsistency_tagsを強制的に上書きする(再生成不要、
-   単純置換で対応可能)
-6. **danbooru_tagsへの髪色/瞳色の重複混入**: 各パネルのdanbooru_tagsに
-   hair/eyeに関する語(色・型を問わず)が含まれていれば機械的に除去し、
-   consistency_tags側に一元化する
-7. **include_happening不一致**: true指定なのにhappening_summaryが空、またはpanelsに
-   外的な出来事が読み取れない場合は、同一promptで1回だけ再試行する(温度は変えない)。
-   false指定なのに外的な事件が含まれている場合も同様に1回再試行する。
-8. **custom_tags欠落**: gemma4はタグの取りこぼしが起きやすいため、再試行に頼らず
-   エージェント側の後処理として、該当パネルのdanbooru_tagsに含まれていない
-   custom_tagsを機械的に追記する(HARD RULES 3の禁止語チェックを通した上で)。
-   これを標準の実装方針として推奨する。
-9. **avoid_repeats違反**: happening_categoryがavoid_repeatsに含まれるカテゴリ名と
-   一致する場合、temperatureを+0.1して1回だけ再試行する
-   (多様性を出すため、他の失敗パターンと異なり温度を上げる)。それでも同じ
-   カテゴリになる場合はエージェント側でHAPPENING CATEGORIESから未使用の
-   カテゴリ名をプロンプトに明示的に追記して再試行する。
-
-## GENERATION PARAMETERS(推奨)
-
-- temperature: 0.6〜0.7(創造性と指示追従のバランス。0.8以上は禁止語混入率が上がる)
-- top_p: 0.9
-- max_tokens: 16000(余裕を持たせる。ただし長さに任せてnarrativeが冗長化しないよう、
-  HARD RULES 2の「1〜2文」制限をプロンプト側で担保すること)
-- 出力の最初のトークンとして `{` を強制できるなら(grammar/JSON mode対応時)有効化推奨
-
-## STAGE 2 連携時の注意点(詳細プロンプト生成段)
-
-本プロンプト(stage1)の出力JSONを受けて、さらに詳細な画像生成プロンプトを
-組み立てる2段目(stage2)を挟む構成を想定した場合の設計指針。
-
-### 役割分担の原則
-stage1の出力は「stage2への契約」である。stage2が契約を書き換えると、
-stage1で作り込んだ一貫性制御がすべて無効化される。
-
-**stage2が拡張してよいもの:**
-- danbooru_tagsの拡充(背景の細部、小物、質感などの追加)
-- 画風・画質系タグ(masterpiece, best_quality等の品質タグ)
-- 構図の細部指定(被写体の配置、余白の取り方など)
-- ネガティブプロンプトの生成
-
-**stage2が絶対に変更してはいけないもの(逐語コピー必須):**
-- `consistency_tags` — 髪色・髪型・瞳の色・基本衣装。言い換え厳禁
-  (例: `brown_hair` → `chestnut hair` のような書き換えは同一性を破壊する)
-- `custom_tags`由来のタグ — ユーザーが明示指定した以上、勝手な最適化は禁止
-- `camera` — 3パネルの距離バランスはstage1の設計意図
-- `happening_category` — 履歴管理用メタデータ。生成の都合で変わってはいけない
-- `character_state_diff` — パネル間の差分制御の要
-
-### stage2プロンプトに明記すべき指示
-```
-以下のフィールドは入力JSONから逐語的にコピーし、言い換え・要約・最適化を
-一切行わないこと: consistency_tags, custom_tags由来のタグ, camera,
-happening_category, character_state_diff。
-これらは上流で確定した制御値であり、あなたの裁量の対象外である。
-```
-
-### 切り分けのメリット
-出力に問題があった場合、
-- 物語構造・因果・意外性がおかしい → stage1の問題
-- 画としての破綻・キャラの同一性喪失 → stage2の問題
-と原因を切り分けやすくなる。stage2に契約遵守を徹底させておくことで、
-「stage1は正しかったのにstage2で崩れた」というデバッグ困難な状況を防げる。
-
-### バリデーション
-FAILURE HANDLINGの各種後処理(consistency_tags強制上書き、custom_tagsマージ等)は
-stage2の出力に対しても再度適用するのが安全。stage1直後とstage2直後の2箇所で
-検証を回すことで、どちらの段で崩れたかも自動的に判別できる。
-
----
-
-## INTEGRATION NOTES
-
-- `seed_note` はChronicleのSeed control機構にそのままマッピングし、
-  consistency_tagsを全パネル共通の固定プロンプト部として扱う
-- 出力JSONはStorybookのギャラリーメタデータ形式に直接投入可能な構造にしてある
-- character_profileはキャラクター登録データ(既存キャラDBやユーザー設定)から
-  エージェント側で毎回注入する想定。モデルに考案させない設計にしたことで、
-  同一キャラを使った複数話生成でも外見が崩壊しない
-- Danbooru tag vocabularyはオープン語彙として扱う設計にしたため、WD14タグ辞書との
-  突き合わせバリデーションは「存在しないタグを弾く」用途ではなく、
-  「hair/eye系タグの誤混入を検出する」用途で使うのが実用的
-- include_happeningはUI側でトグルスイッチとして露出させ、テーマ入力欄と並べて
-  渡す想定。falseをデフォルトにすると穏やかな日常回、trueをデフォルトにすると
-  展開のある回になるので、Storybookのギャラリー分類にも
-  ("happening" / "quiet" のようなラベルとして)流用できる
-- author_styleは自由記述欄として露出し、空欄可にしておくとエージェント側の
-  デフォルト文体(標準トーン)にフォールバックできる。プリセット(「淡々」「感傷的」
-  「テンポ良く」など)をボタンで用意し、選択時にこのフィールドへ定型文を差し込む
-  UIにすると入力の揺れが減る
-- 作家プリセットは管理画面でCRUD可能なレジストリとして持つ(name +
-  style_description)。保存先はQdrant上の小さな"authors"コレクション
-  (ダミーベクトル+payload)にし、既存のCouchDB統合方針と一貫させる。
-  生成リクエストはauthor_idで渡し、エージェント側でstyle_descriptionを
-  引いてauthor_styleフィールドに代入する
-- custom_tagsはパネル単位のタグ入力欄として露出。モデル出力への反映は
-  FAILURE HANDLING 8のエージェント側マージ処理を必須実装にすることで、
-  gemma4の取りこぼしに依存しない安定した注入が可能になる
-- avoid_repeatsはキャラクター/テーマ系列ごとに直近5件のhappening_categoryだけを
-  保持するローリングリストとして実装する(古いものはFIFOで破棄)。出力の
-  happening_categoryフィールドをそのままリストにpushすればよく、summary全文の
-  保存やパース処理は不要。ストレージ肥大化を避けつつ多様性を保てる

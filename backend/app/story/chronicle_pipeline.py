@@ -75,6 +75,17 @@ async def run_chronicle_candidates_v2(
         # Fixed for the whole Phase1 job — never mutate per candidate/attempt
         # (Ollama reloads the model when options differ even slightly).
         options = dict(llm_options_fn(body, temp, cfg, story=True))
+        story_model = (models.get("story") or "").strip()
+        if not story_model:
+            _put({
+                "type": "error",
+                "message": (
+                    "No model selected in Chronicle details. "
+                    "Set the model field (do not rely on Admin system defaults)."
+                ),
+            })
+            return
+        time_scale = getattr(body, "time_scale", None) or "days"
 
         draft = None
         doc: dict = {}
@@ -125,14 +136,21 @@ async def run_chronicle_candidates_v2(
                 "custom_tags": custom_tags_from_body(body),
                 "body": body.model_dump() if hasattr(body, "model_dump") else dict(body),
                 "llm_options": dict(options),
-                "story_model": models.get("story") or "",
+                "story_model": story_model,
+                "time_scale": time_scale,
             }
         else:
             # Keep options identical across respin of candidates when possible
             if ctx.get("llm_options"):
                 options = dict(ctx["llm_options"])
             ctx["llm_options"] = dict(options)
-            ctx["story_model"] = models.get("story") or ctx.get("story_model") or ""
+            ctx["story_model"] = story_model or ctx.get("story_model") or ""
+            time_scale = (
+                getattr(body, "time_scale", None)
+                or ctx.get("time_scale")
+                or "days"
+            )
+            ctx["time_scale"] = time_scale
 
         profile = ctx["character_profile"]
         author_style = ctx.get("author_style") or ""
@@ -140,11 +158,13 @@ async def run_chronicle_candidates_v2(
         include_happening = bool(ctx.get("include_happening"))
         style_hint = ctx.get("style_hint") or ""
         avoid: list[str] = []
-        story_model = models.get("story") or ""
+        locale = getattr(body, "locale", None) or "ja"
+        time_scale = ctx.get("time_scale") or time_scale or "days"
 
         _phase("storyboarding", 0.25, "Writing storyboards...")
         _log(f"[chronicle] model={story_model}")
         _log(f"[chronicle] options={_opts_snapshot(options, think=True)}")
+        _log(f"[chronicle] time_scale={time_scale}")
         _log(
             f"[chronicle] Phase1 START candidates={len(CANDIDATE_IDS)} "
             f"serial=true include_happening={include_happening}"
@@ -164,6 +184,8 @@ async def run_chronicle_candidates_v2(
                 custom_tags=custom_tags,
                 avoid_repeats=avoid,
                 style_hint=style_hint,
+                time_scale=time_scale,
+                locale=locale,
             )
             messages = build_stage1_messages(user_input)
             data = None
@@ -266,6 +288,7 @@ async def run_chronicle_candidates_v2(
                 base_model_name=(doc or {}).get("model_name") or "",
                 include_happening=include_happening,
                 author_style=author_style,
+                time_scale=time_scale,
             )
             story_id = await story_db.create_story(db, payload)
 
@@ -389,10 +412,17 @@ async def run_chronicle_expand_v2(
             options = dict(llm_options_fn(body, temperature, cfg, story=True))
             ctx["llm_options"] = dict(options)
         story_model = (
-            ctx.get("story_model")
-            or models.get("story")
-            or ""
-        )
+            (ctx.get("story_model") or models.get("story") or "")
+        ).strip()
+        if not story_model:
+            _put({
+                "type": "error",
+                "message": (
+                    "No model selected in Chronicle details. "
+                    "Set the model field (do not rely on Admin system defaults)."
+                ),
+            })
+            return
 
         if draft.get("status") == "final":
             hist = list(draft.get("respin_history") or [])

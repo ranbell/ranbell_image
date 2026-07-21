@@ -53,11 +53,12 @@ class ChronicleRequest(BaseModel):
     num_ctx: int = 32768
     locale: Literal["en", "ja"] = "ja"
     group_id: str = ""
+    time_scale: str = "days"  # minutes|tens_of_minutes|hours|days|months|years|decades
 
 
 class SelectCandidateRequest(BaseModel):
     candidate_id: str
-    time_scale: str = ""  # ignored (kept for client compat)
+    time_scale: str = ""  # optional override; draft context wins when empty
 
 
 class RespinRequest(BaseModel):
@@ -101,6 +102,7 @@ class TopicSuggestResponse(BaseModel):
 
 _RESPIN_OVERRIDE_FIELDS = (
     "workflow_name", "manual_mode", "llm_provider", "temperature", "num_ctx",
+    "vlm_model", "story_model", "time_scale",
     "user_topic", "character_tags", "include_happening", "author_style", "author_id",
     "custom_tags_panel_1", "custom_tags_panel_2", "custom_tags_panel_3",
 )
@@ -211,6 +213,11 @@ async def suggest_topic(body: TopicSuggestRequest, request: Request):
     cfg = await get_runtime_config(db)
     llm = _chronicle_bind_llm(request.app.state.ollama, body)
     models = _chronicle_models(body, cfg)
+    if not (models.get("utility") or models.get("vision") or "").strip():
+        raise HTTPException(
+            400,
+            "No model selected in Chronicle details. Set the story model field.",
+        )
     options = _chronicle_llm_options(body, body.temperature, cfg)
 
     wd14 = doc.get("wd14_tags") or []
@@ -240,7 +247,7 @@ async def suggest_topic(body: TopicSuggestRequest, request: Request):
                 character_desc=desc,
                 scene_desc=scene,
                 base_act=base_act,
-                worldview=body.worldview,
+                worldview="",
             )
             out = {"topic": "", "beats": {}}
             for attempt in range(2):  # one retry, like the arc stage

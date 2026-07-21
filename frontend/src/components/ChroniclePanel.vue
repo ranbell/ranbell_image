@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, onErrorCaptured } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { EMOTION_DIMENSIONS } from '../composables/useInvokeSession.js'
 import SbIcon from './SbIcon.vue'
 import StoryQualityRadar from './StoryQualityRadar.vue'
 
@@ -54,46 +53,49 @@ const workflow = ref('')
 const temperature = ref(0.7)
 const numCtx = ref(32768)
 const llmProvider = ref('ollama')
-const openaiModel = ref('')
+const storyModel = ref('')
+const ollamaModels = ref([])
 const useRefSeed = ref(true)
 const manualMode = ref(false)
 const pendingAutoSelect = ref('')
 const pendingExpandTimeScale = ref('')
-
-// Stubs for legacy template sections still present (hidden / unused in payload)
-const lifeRole = ref('custom')
-const LIFE_ROLES = ['custom']
-const keywordsPast = ref('')
-const keywordsPresent = ref('')
-const keywordsFuture = ref('')
-const composeAllowlist = ref(false)
-const worldview = ref('')
-const promptStyle = ref('danbooru+natural')
-const divergence = ref(0)
-const emotion = ref('')
-const DRAMATIC_MODES = []
-const dramaticMode = ref('')
-const TONES = ['bright', 'neutral', 'dark']
-const tone = ref('neutral')
 const timeScaleIdx = ref(3)
-const fastMode = ref(false)
-const generatePinup = ref(false)
-const baseAxis = ref('panel_2')
+/** Start panel is t=0 for Stage1+2 (panel_1 / スタート). */
+const baseAxis = 'panel_1'
+const ELAPSED_UNIT = {
+  minutes: ['A few minutes', 'several minutes'],
+  tens_of_minutes: ['Tens of minutes', 'about an hour'],
+  hours: ['A few hours', 'most of a day'],
+  days: ['A few days', 'over a week'],
+  months: ['A few months', 'nearly a year'],
+  years: ['A few years', 'several years'],
+  decades: ['Several decades', 'a lifetime'],
+}
+const ELAPSED_UNIT_JA = {
+  minutes: ['数分', '十数分'],
+  tens_of_minutes: ['十数分', '約1時間'],
+  hours: ['数時間', '半日'],
+  days: ['数日', '1週間以上'],
+  months: ['数ヶ月', '1年近く'],
+  years: ['数年', '十数年'],
+  decades: ['数十年', '一生分'],
+}
 function currentTimeScale() {
   return TIME_SCALES[timeScaleIdx.value] || 'days'
 }
-// Deprecated server-side (mechanical mutex rules replaced the LLM conflict
-// pass), so there is no UI for it — still sent so the request shape is stable.
-const suppressConflictTags = ref(true)
-const useDraftRefine = ref('auto') // auto | on | off
-const draftWidth = ref(512)
-const draftHeight = ref(512)
-const draftSteps = ref(12)
-const proseParagraphs = ref(3)
+/** Dynamic Start / {one} later / further {two} later from time_scale. */
+function panelAxisLabel(axis) {
+  const scale = currentTimeScale()
+  const ja = String(locale.value || '').startsWith('ja')
+  if (axis === 'panel_1') return ja ? 'スタート' : 'Start'
+  const pair = (ja ? ELAPSED_UNIT_JA : ELAPSED_UNIT)[scale]
+    || (ja ? ELAPSED_UNIT_JA.days : ELAPSED_UNIT.days)
+  if (axis === 'panel_2') return ja ? `${pair[0]}後` : `${pair[0]} later`
+  if (axis === 'panel_3') return ja ? `さらに${pair[1]}後` : `Further ${pair[1]} later`
+  return String(axis || '')
+}
 const pickingRandom = ref(false)
-const wd14PromptSpice = ref(false)
-const similarTagMix = ref(true)
-const similarTagMixRatio = ref(0.3)
+// SSE may still emit these; keep handlers, hide unused UI.
 const biography = ref(null)
 const timetable = ref(null)
 const concrete = ref(null)
@@ -105,16 +107,6 @@ const phaseStartedAt = ref(null)
 const nowTick = ref(Date.now())
 let _phaseTickTimer = null
 const pinupJobId = ref('')
-
-// Shortcuts for the 自然文 slider, shown next to it in 出力・生成.
-const PROSE_PRESETS = [
-  { id: 'prose_short', labelKey: 'chronicle.knobProseShort', prose: 3 },
-  { id: 'prose_long', labelKey: 'chronicle.knobProseLong', prose: 7 },
-]
-
-function applyProsePreset(preset) {
-  proseParagraphs.value = preset.prose
-}
 
 const weaverTeasers = computed(() =>
   AXES.map((axis) => {
@@ -132,34 +124,28 @@ function chronicleQualityActions() {
     .filter((d) => Number.isFinite(d.v) && d.v < 0.55)
     .sort((a, b) => a.v - b.v)
   const actions = []
-  if (weak.some((d) => d.k === 'topic_fit' || d.k === 'diversity')) {
+  if (weak.some((d) => d.k === 'topic_fit' || d.k === 'diversity' || d.k === 'richness' || d.k === 'drawability')) {
     actions.push({
       id: 'respin-expand',
       label: t('chronicle.qualityAction.respin'),
       run: () => respin('expand'),
     })
   }
-  if (weak.some((d) => d.k === 'richness' || d.k === 'drawability')) {
+  if (weak.some((d) => d.k === 'diversity') && actions.length < 2) {
     actions.push({
-      id: 'prose-up',
-      label: t('chronicle.qualityAction.proseLonger'),
-      run: () => {
-        proseParagraphs.value = Math.min(7, (proseParagraphs.value || 5) + 2)
-        respin('expand')
-      },
-    })
-  }
-  if (weak.some((d) => d.k === 'diversity')) {
-    actions.push({
-      id: 'diverge-up',
-      label: t('chronicle.qualityAction.moreDiverge'),
-      run: () => {
-        divergence.value = Math.min(1, divergence.value + 0.25)
-        respin('candidates')
-      },
+      id: 'respin-candidates',
+      label: t('chronicle.respinCandidates'),
+      run: () => respin('candidates'),
     })
   }
   return actions.slice(0, 3)
+}
+
+async function fetchOllamaModels() {
+  try {
+    const r = await fetch('/api/ollama/models')
+    if (r.ok) ollamaModels.value = (await r.json()).models ?? []
+  } catch {}
 }
 
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
@@ -580,6 +566,11 @@ watch(() => props.show, async (val) => {
       }
     } catch {}
   }
+  if (llmProvider.value === 'ollama') fetchOllamaModels()
+})
+
+watch(llmProvider, (p) => {
+  if (p === 'ollama') fetchOllamaModels()
 })
 
 function onAuthorPresetChange() {
@@ -791,10 +782,9 @@ function activityFor(axis) {
 const draftImageAxes = computed(() =>
   REASON_AXES.filter(a => !!(axisDrafts.value[a]?.draft_image_id))
 )
-/** Bio / timetable / concrete / draft thumbs — keep visible while creating. */
+/** Concrete activities / draft thumbs — bio & timetable UI hidden for Stage1+2. */
 const hasDraftMaterials = computed(() =>
-  !!bioView.value || timetableView.value.length > 0
-  || REASON_AXES.some(a => !!activityFor(a))
+  REASON_AXES.some(a => !!activityFor(a))
   || draftImageAxes.value.length > 0,
 )
 const hasShotReasoning = computed(() =>
@@ -929,6 +919,10 @@ const topicSuggesting = ref(false)
  *  Only prefills the field — the user reviews/edits and starts the run. */
 async function suggestTopicFromImage() {
   if (!baseSha.value || topicSuggesting.value) return
+  if (!storyModel.value.trim()) {
+    emit('toast', { msg: t('chronicle.needModel'), type: 'error' })
+    return
+  }
   topicSuggesting.value = true
   try {
     const r = await fetch('/api/story/topic-suggest', {
@@ -937,11 +931,9 @@ async function suggestTopicFromImage() {
       body: JSON.stringify({
         base_sha256: baseSha.value,
         locale: uiLocale.value,
-        worldview: '',
         llm_provider: llmProvider.value,
-        ...(llmProvider.value === 'openai' && openaiModel.value.trim()
-          ? { vlm_model: openaiModel.value.trim() }
-          : {}),
+        vlm_model: storyModel.value.trim(),
+        num_ctx: numCtx.value,
       }),
     })
     if (!r.ok) {
@@ -968,6 +960,10 @@ async function start() {
     emit('toast', { msg: t('chronicle.needTopicOrBase'), type: 'error' })
     return
   }
+  if (!storyModel.value.trim()) {
+    emit('toast', { msg: t('chronicle.needModel'), type: 'error' })
+    return
+  }
   resetRun()
   pendingExpandTimeScale.value = currentTimeScale()
   await _submitAndStream('/api/story/chronicle', currentSettingsPayload(), (d) => {
@@ -976,7 +972,7 @@ async function start() {
 }
 
 function currentSettingsPayload() {
-  const payload = {
+  return {
     base_sha256: baseSha.value || '',
     user_topic: userTopic.value,
     character_tags: characterTags.value,
@@ -993,18 +989,10 @@ function currentSettingsPayload() {
     temperature: temperature.value,
     num_ctx: numCtx.value,
     locale: uiLocale.value,
+    vlm_model: storyModel.value.trim(),
+    time_scale: currentTimeScale(),
   }
-  if (llmProvider.value === 'openai' && openaiModel.value.trim()) {
-    payload.vlm_model = openaiModel.value.trim()
-  }
-  return payload
 }
-
-const draftRefineDisabledHint = computed(() => {
-  if (manualMode.value) return t('chronicle.draftRefineDisabledManual')
-  if (!workflow.value) return t('chronicle.draftRefineDisabledWorkflow')
-  return ''
-})
 
 async function selectCandidate(cid, timeScaleOverride = '') {
   if (!storyId.value || running.value) return
@@ -1035,29 +1023,19 @@ async function respin(stage) {
   await _submitAndStream(`/api/story/chronicle/${storyId.value}/respin`, {
     stage,
     respin_count: count,
-    time_scale: settings.time_scale,
-    divergence: settings.divergence,
-    emotion: settings.emotion,
-    dramatic_mode: settings.dramatic_mode,
-    tone: settings.tone,
-    prompt_style: settings.prompt_style,
     workflow_name: settings.workflow_name,
-    use_draft_refine: settings.use_draft_refine,
-    draft_width: settings.draft_width,
-    draft_height: settings.draft_height,
-    draft_steps: settings.draft_steps,
-    suppress_conflict_tags: settings.suppress_conflict_tags,
     manual_mode: settings.manual_mode,
-    fast_mode: settings.fast_mode,
-    wd14_prompt_spice: settings.wd14_prompt_spice,
-    similar_tag_mix: settings.similar_tag_mix,
-    similar_tag_mix_ratio: settings.similar_tag_mix_ratio,
     llm_provider: settings.llm_provider,
     temperature: settings.temperature,
     num_ctx: settings.num_ctx,
-    prose_paragraphs: settings.prose_paragraphs,
-    worldview: settings.worldview,
     user_topic: settings.user_topic,
+    character_tags: settings.character_tags,
+    include_happening: settings.include_happening,
+    author_style: settings.author_style,
+    author_id: settings.author_id,
+    custom_tags_panel_1: settings.custom_tags_panel_1,
+    custom_tags_panel_2: settings.custom_tags_panel_2,
+    custom_tags_panel_3: settings.custom_tags_panel_3,
   }, null, { expand: stage === 'expand' })
 }
 
@@ -1395,320 +1373,48 @@ async function generateImages() {
                   <div class="flex flex-col gap-1.5">
                     <span class="sb-label">{{ t('chronicle.customTagsPanel') }}</span>
                     <div class="flex items-center gap-2">
-                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.panel_1') }}</span>
+                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ panelAxisLabel('panel_1') }}</span>
                       <input v-model="customTagsPanel1" type="text" class="sb-input flex-1"
                         :placeholder="t('chronicle.customTagsPh')" :disabled="settingsLocked" />
                     </div>
                     <div class="flex items-center gap-2">
-                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.panel_2') }}</span>
+                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ panelAxisLabel('panel_2') }}</span>
                       <input v-model="customTagsPanel2" type="text" class="sb-input flex-1"
                         :placeholder="t('chronicle.customTagsPh')" :disabled="settingsLocked" />
                     </div>
                     <div class="flex items-center gap-2">
-                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.panel_3') }}</span>
+                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ panelAxisLabel('panel_3') }}</span>
                       <input v-model="customTagsPanel3" type="text" class="sb-input flex-1"
                         :placeholder="t('chronicle.customTagsPh')" :disabled="settingsLocked" />
                     </div>
-                  </div>
-                  <!-- legacy settings kept below but collapsed -->
-                  <details class="opacity-50">
-                    <summary class="text-[10px] text-[var(--sb-muted)] cursor-pointer">legacy</summary>
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="sb-label w-20 shrink-0" :title="baseSha ? t('chronicle.baseAxisHintImage') : t('chronicle.baseAxisHintTopic')">{{ t('chronicle.baseAxis') }}</span>
-                    <button v-for="a in AXES" :key="a" type="button" @click="baseAxis = a"
-                      class="sb-chip" :class="baseAxis === a ? 'is-chip-on-teal' : ''">
-                      {{ t('chronicle.axis.' + a) }}
-                    </button>
-                  </div>
-                  <p class="text-[10px] text-[var(--sb-muted)] -mt-1 ml-20 leading-tight">
-                    {{ baseSha ? t('chronicle.baseAxisHintImage') : t('chronicle.baseAxisHintTopic') }}
-                  </p>
-                  <div class="flex items-start gap-2">
-                    <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.userTopic') }}</span>
-                    <div class="flex-1 flex flex-col gap-1 min-w-0">
-                      <textarea v-model="userTopic" rows="2" :placeholder="t('chronicle.userTopicPh')"
-                        class="sb-textarea w-full"></textarea>
-                      <button v-if="baseSha" type="button"
-                        class="sb-chip self-start"
-                        :class="topicSuggesting ? 'is-chip-on-teal' : ''"
-                        :disabled="topicSuggesting || settingsLocked"
-                        :title="t('chronicle.topicFromImageTitle')"
-                        @click="suggestTopicFromImage">
-                        <SbIcon :name="topicSuggesting ? 'refresh' : 'spark'"
-                          class="w-3 h-3 inline mr-1" :class="topicSuggesting ? 'animate-spin' : ''" />
-                        {{ topicSuggesting ? t('chronicle.topicFromImageBusy') : t('chronicle.topicFromImage') }}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="flex items-start gap-2">
-                    <span class="sb-label w-20 shrink-0 pt-1.5" :title="t('chronicle.characterTagsTitle')">{{ t('chronicle.characterTags') }}</span>
-                    <textarea v-model="characterTags" rows="2"
-                      :placeholder="t('chronicle.characterTagsPh')"
-                      class="sb-textarea flex-1 w-full"></textarea>
-                  </div>
-                  <div class="flex flex-col gap-1.5">
-                    <div class="flex items-center gap-2">
-                      <span class="sb-label w-20 shrink-0" :title="t('chronicle.axisKeywordsTitle')">{{ t('chronicle.axisKeywords') }}</span>
-                      <span class="text-[10px] text-[var(--sb-muted)]">{{ t('chronicle.axisKeywordsHint') }}</span>
-                    </div>
-                    <div class="grid grid-cols-1 gap-1 pl-0 sm:pl-20">
-                      <div class="flex items-center gap-2">
-                        <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.past') }}</span>
-                        <input v-model="keywordsPast" type="text" class="sb-input flex-1"
-                          :placeholder="t('chronicle.keywordsPh')" />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.present') }}</span>
-                        <input v-model="keywordsPresent" type="text" class="sb-input flex-1"
-                          :placeholder="t('chronicle.keywordsPh')" />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.future') }}</span>
-                        <input v-model="keywordsFuture" type="text" class="sb-input flex-1"
-                          :placeholder="t('chronicle.keywordsPh')" />
-                      </div>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.lifeRoleTitle')">{{ t('chronicle.lifeRole') }}</span>
-                    <select v-model="lifeRole" class="sb-select flex-1" :disabled="settingsLocked">
-                      <option v-for="r in LIFE_ROLES" :key="r" :value="r">{{ t('chronicle.lifeRoleOpt.' + r) }}</option>
-                    </select>
-                    <button type="button" class="sb-chip shrink-0" :disabled="settingsLocked"
-                      :title="t('chronicle.lifeRoleRandomTitle')"
-                      @click="lifeRole = LIFE_ROLES[Math.floor(Math.random() * (LIFE_ROLES.length - 1))]">
-                      {{ t('chronicle.lifeRoleRandom') }}
-                    </button>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.timeScaleTitle')">
                       <SbIcon name="clock" class="w-3 h-3 inline mr-0.5" />{{ t('chronicle.timeScaleLabel') }}
                     </span>
                     <input v-model.number="timeScaleIdx" type="range" min="0" :max="TIME_SCALES.length - 1" step="1"
-                      class="flex-1 accent-teal-500" />
+                      class="flex-1 accent-teal-500" :disabled="settingsLocked" />
                     <span class="text-teal-400 w-16 text-right text-[11px]">± {{ t('chronicle.timeScale.' + TIME_SCALES[timeScaleIdx]) }}</span>
-                  </div>
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.toneTitle')">{{ t('chronicle.toneLabel') }}</span>
-                    <button v-for="tn in TONES" :key="tn" type="button" @click="tone = tn"
-                      class="sb-chip" :class="tone === tn ? 'is-chip-on' : ''">
-                      {{ t('chronicle.tone.' + tn) }}
-                    </button>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0">{{ t('chronicle.workflow') }}</span>
-                    <select v-model="workflow" class="sb-select flex-1">
+                    <select v-model="workflow" class="sb-select flex-1" :disabled="settingsLocked">
                       <option value="">{{ t('chronicle.workflowNone') }}</option>
                       <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                     </select>
                   </div>
-                  </details>
-                </div>
-              </div>
-
-              <!-- direction (open) -->
-              <details open class="rounded-xl border border-white/5 bg-black/20">
-                <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
-                  <span class="flex items-center gap-1.5">
-                    <SbIcon name="spark" class="w-3.5 h-3.5 text-teal-400/80" />
-                    {{ t('chronicle.directionGroup') }}
-                  </span>
-                </summary>
-                <div class="px-3 pb-3 pt-1 flex flex-col gap-3 text-xs">
-                  <div class="flex items-start gap-2">
-                    <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.worldview') }}</span>
-                    <textarea v-model="worldview" rows="2" :placeholder="t('chronicle.worldviewPh')"
-                      class="sb-textarea flex-1"></textarea>
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <div class="flex items-center gap-2">
-                      <span class="sb-label w-20 shrink-0" :title="t('chronicle.divergenceTitle')">{{ t('chronicle.divergence') }}</span>
-                      <input v-model.number="divergence" type="range" min="0" max="1" step="0.05" class="flex-1 accent-teal-500" />
-                      <span class="text-teal-400 font-mono w-10 text-right">{{ Math.round(divergence * 100) }}%</span>
-                    </div>
-                    <p v-if="asStringList(mutationTags).length" class="text-[10px] text-teal-500/80 pl-[calc(5rem+0.5rem)] break-all">
-                      <span class="text-teal-300/80">{{ t('chronicle.mutationTags') }}:</span>
-                      {{ joinList(mutationTags) }}
-                    </p>
-                  </div>
-                  <div class="flex items-start gap-2">
-                    <span class="sb-label w-20 shrink-0 pt-1" :title="t('chronicle.emotionTitle')">{{ t('chronicle.emotionLabel') }}</span>
-                    <div class="flex flex-wrap gap-1 flex-1">
-                      <button v-for="em in EMOTION_DIMENSIONS" :key="em" type="button"
-                        @click="emotion = emotion === em ? '' : em"
-                        class="sb-chip" :class="emotion === em ? 'is-chip-on-indigo' : ''">
-                        {{ t(`inspire.emotion.${em}`) }}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="flex items-start gap-2">
-                    <span class="sb-label w-20 shrink-0 pt-1" :title="t('chronicle.dramaticModeTitle')">{{ t('chronicle.dramaticModeLabel') }}</span>
-                    <div class="flex flex-wrap gap-1 flex-1">
-                      <button type="button" @click="dramaticMode = ''"
-                        class="sb-chip" :class="dramaticMode === '' ? 'is-chip-on-indigo' : ''">
-                        {{ t('chronicle.dramaticModeAuto') }}
-                      </button>
-                      <button v-for="dm in DRAMATIC_MODES" :key="dm" type="button"
-                        @click="dramaticMode = dramaticMode === dm ? '' : dm"
-                        class="sb-chip" :class="dramaticMode === dm ? 'is-chip-on-indigo' : ''">
-                        {{ t(`chronicle.dramaticMode.${dm}`) }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </details>
-
-              <!-- output (open) -->
-              <details open class="rounded-xl border border-white/5 bg-black/20">
-                <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
-                  <span class="flex items-center gap-1.5">
-                    <SbIcon name="image" class="w-3.5 h-3.5 text-teal-400/80" />
-                    {{ t('chronicle.outputGroup') }}
-                  </span>
-                </summary>
-                <div class="px-3 pb-3 pt-1 flex flex-col gap-3 text-xs">
-                  <p v-if="fastMode" class="text-[10px] text-amber-300/80 leading-snug">
-                    {{ t('chronicle.fastModeIgnores') }}
-                  </p>
-                  <div class="flex items-center gap-2 flex-wrap" :class="fastMode ? 'opacity-40' : ''">
-                    <span class="sb-label w-20 shrink-0">{{ t('chronicle.promptStyle') }}</span>
-                    <button v-for="m in ['danbooru+natural', 'natural', 'danbooru']" :key="m" type="button"
-                      :disabled="fastMode"
-                      :title="fastMode ? t('chronicle.fastModeIgnores') : ''"
-                      @click="promptStyle = m"
-                      class="sb-chip" :class="promptStyle === m ? 'is-chip-on-teal' : ''">
-                      {{ t('chronicle.style.' + m.replace('+', '_')) }}
-                    </button>
-                  </div>
-                  <div v-if="promptStyle !== 'danbooru'" class="flex items-center gap-2"
-                    :class="fastMode ? 'opacity-40' : ''">
-                    <span class="sb-label w-20 shrink-0"
-                      :title="fastMode ? t('chronicle.fastModeIgnores') : t('chronicle.proseLengthTitle')">
-                      {{ t('chronicle.proseLengthLabel') }}
-                    </span>
-                    <input v-model.number="proseParagraphs" type="range" min="3" max="7" step="1"
-                      :disabled="fastMode"
-                      class="flex-1 accent-teal-500" />
-                    <span class="text-teal-400 w-16 text-right text-[11px] font-mono">
-                      {{ proseParagraphs }}{{ t('chronicle.proseLengthUnit') }}
-                    </span>
-                  </div>
-                  <div v-if="promptStyle !== 'danbooru'"
-                    class="flex justify-between text-[10px] text-[var(--sb-faint)] pl-[calc(5rem+0.5rem)] -mt-1">
-                    <span>{{ t('chronicle.proseLengthShort') }}</span>
-                    <span>{{ t('chronicle.proseLengthLong') }}</span>
-                  </div>
-                  <div v-if="promptStyle !== 'danbooru'" class="flex flex-wrap gap-1 pl-[calc(5rem+0.5rem)]">
-                    <button
-                      v-for="k in PROSE_PRESETS"
-                      :key="k.id"
-                      type="button"
-                      class="sb-chip"
-                      :disabled="fastMode"
-                      @click="applyProsePreset(k)"
-                    >{{ t(k.labelKey) }}</button>
-                  </div>
                   <div class="flex items-center flex-wrap gap-4">
                     <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]">
-                      <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" />
+                      <input v-model="useRefSeed" type="checkbox" class="accent-teal-500" :disabled="settingsLocked" />
                       {{ t('chronicle.seedInherit') }}
                     </label>
-                    <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]" :title="t('chronicle.pinupTitle')">
-                      <input v-model="generatePinup" type="checkbox" class="accent-teal-500" />
-                      {{ t('chronicle.generatePinup') }}
-                    </label>
                     <label class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]">
-                      <input v-model="manualMode" type="checkbox" class="accent-teal-500" />
+                      <input v-model="manualMode" type="checkbox" class="accent-teal-500" :disabled="settingsLocked" />
                       {{ t('chronicle.manualMode') }}
-                    </label>
-                    <label
-                      class="flex items-center gap-1.5 cursor-pointer text-[var(--sb-muted)]"
-                      :title="t('chronicle.fastModeTitle')"
-                    >
-                      <input v-model="fastMode" type="checkbox" class="accent-amber-500" />
-                      {{ t('chronicle.fastMode') }}
-                    </label>
-                  </div>
-                  <p v-if="fastMode" class="text-[10px] text-amber-500/80 pl-1">
-                    {{ t('chronicle.fastModeHint') }}
-                  </p>
-                  <label
-                    class="flex items-start gap-2 cursor-pointer text-xs"
-                    :class="composeAllowlist ? 'text-teal-300' : 'text-[var(--sb-muted)]'"
-                    :title="t('chronicle.composeAllowlistTitle')"
-                  >
-                    <input v-model="composeAllowlist" type="checkbox" class="accent-teal-500 mt-0.5" />
-                    <span>
-                      <span class="font-medium">{{ t('chronicle.composeAllowlist') }}</span>
-                      <span class="block text-[10px] text-teal-500/80 mt-0.5">{{ t('chronicle.composeAllowlistHint') }}</span>
-                    </span>
-                  </label>
-                  <label
-                    class="flex items-start gap-2 cursor-pointer text-xs"
-                    :class="fastMode ? 'opacity-40 text-[var(--sb-muted)]'
-                      : (similarTagMix ? 'text-teal-300' : 'text-[var(--sb-muted)]')"
-                    :title="fastMode ? t('chronicle.fastModeIgnores') : t('chronicle.similarTagMixTitle')"
-                  >
-                    <input v-model="similarTagMix" type="checkbox" :disabled="fastMode"
-                      class="accent-teal-500 mt-0.5" />
-                    <span>
-                      <span class="font-medium">{{ t('chronicle.similarTagMix') }}</span>
-                      <span class="block text-[10px] text-teal-500/80 mt-0.5">{{ t('chronicle.similarTagMixHint') }}</span>
-                    </span>
-                  </label>
-                  <div v-if="similarTagMix" class="flex items-center gap-2 flex-wrap pl-6"
-                    :class="fastMode ? 'opacity-40' : ''">
-                    <span class="sb-label shrink-0" :title="t('chronicle.similarTagMixRatioTitle')">{{ t('chronicle.similarTagMixRatio') }}</span>
-                    <input v-model.number="similarTagMixRatio" type="range" min="0.1" max="0.7" step="0.05"
-                      :disabled="fastMode"
-                      class="flex-1 accent-teal-500" />
-                    <span class="text-[11px] font-mono text-teal-300 w-10 text-right">
-                      {{ Math.round(similarTagMixRatio * 100) }}%
-                    </span>
-                  </div>
-                  <label
-                    class="flex items-start gap-2 cursor-pointer text-xs"
-                    :class="wd14PromptSpice ? 'text-amber-300' : 'text-[var(--sb-muted)]'"
-                    :title="t('chronicle.wd14SpiceTitle')"
-                  >
-                    <input v-model="wd14PromptSpice" type="checkbox" class="accent-amber-500 mt-0.5" />
-                    <span>
-                      <span class="font-medium">{{ t('chronicle.wd14Spice') }}</span>
-                      <span class="block text-[10px] text-amber-500/80 mt-0.5">{{ t('chronicle.wd14SpiceHint') }}</span>
-                    </span>
-                  </label>
-                  <div v-if="!fastMode" class="flex items-center gap-2 flex-wrap">
-                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftRefineTitle')">{{ t('chronicle.draftRefine') }}</span>
-                    <button v-for="m in ['auto', 'on', 'off']" :key="m" type="button"
-                      @click="useDraftRefine = m"
-                      class="sb-chip" :class="useDraftRefine === m ? 'is-chip-on-teal' : ''">
-                      {{ t('chronicle.draftRefineMode.' + m) }}
-                    </button>
-                  </div>
-                  <p v-if="!fastMode && draftRefineDisabledHint && useDraftRefine !== 'off'"
-                    class="text-[10px] text-amber-500/70 pl-[5.5rem]">
-                    {{ draftRefineDisabledHint }}
-                  </p>
-                  <div v-if="!fastMode && useDraftRefine !== 'off'" class="flex items-center gap-2 flex-wrap text-[10px] text-[var(--sb-muted)]">
-                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.draftSizeTitle')">{{ t('chronicle.draftSize') }}</span>
-                    <label class="flex items-center gap-1">
-                      <span class="text-[var(--sb-faint)]">W</span>
-                      <input v-model.number="draftWidth" type="number" min="256" max="1024" step="64"
-                        class="sb-input w-16 py-0.5 text-[11px] font-mono" />
-                    </label>
-                    <label class="flex items-center gap-1">
-                      <span class="text-[var(--sb-faint)]">H</span>
-                      <input v-model.number="draftHeight" type="number" min="256" max="1024" step="64"
-                        class="sb-input w-16 py-0.5 text-[11px] font-mono" />
-                    </label>
-                    <label class="flex items-center gap-1" :title="t('chronicle.draftStepsTitle')">
-                      <span class="text-[var(--sb-faint)]">{{ t('chronicle.draftSteps') }}</span>
-                      <input v-model.number="draftSteps" type="number" min="4" max="28" step="1"
-                        class="sb-input w-14 py-0.5 text-[11px] font-mono" />
                     </label>
                   </div>
                 </div>
-              </details>
+              </div>
 
               <!-- advanced (closed) -->
               <details class="rounded-xl border border-white/5 bg-black/20">
@@ -1735,10 +1441,14 @@ async function generateImages() {
                     </div>
                   </div>
                   <p class="text-[10px] text-[var(--sb-faint)] -mt-1">{{ t('chronicle.llmProviderHint') }}</p>
-                  <div v-if="llmProvider === 'openai'" class="flex items-center gap-2">
-                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.openaiModelTitle')">{{ t('chronicle.openaiModel') }}</span>
-                    <input v-model="openaiModel" type="text" :placeholder="t('chronicle.openaiModelPh')"
+                  <div class="flex items-center gap-2">
+                    <span class="sb-label w-20 shrink-0" :title="t('chronicle.storyModelTitle')">{{ t('chronicle.storyModel') }}</span>
+                    <input v-model="storyModel" type="text" list="chronicle-story-models"
+                      :placeholder="t('chronicle.storyModelPh')"
                       class="sb-input flex-1 font-mono text-[11px]" />
+                    <datalist v-if="llmProvider === 'ollama'" id="chronicle-story-models">
+                      <option v-for="m in ollamaModels" :key="m" :value="m" />
+                    </datalist>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.temperatureTitle')">{{ t('chronicle.temperature') }}</span>
@@ -1764,7 +1474,7 @@ async function generateImages() {
             </fieldset>
 
               <div class="flex items-center gap-3 flex-wrap">
-                <button type="button" @click="start" :disabled="running || (!baseSha && !userTopic.trim())"
+                <button type="button" @click="start" :disabled="running || (!baseSha && !userTopic.trim()) || !storyModel.trim()"
                   class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium
                     bg-teal-800 hover:bg-teal-700 disabled:opacity-40 text-teal-50 transition-colors">
                   <span v-if="running" class="chronicle-shuttle-mini" aria-hidden="true">
@@ -1774,14 +1484,6 @@ async function generateImages() {
                   <SbIcon v-else name="weave" class="w-4 h-4" />
                   {{ running ? t('chronicle.running') : t('chronicle.start') }}
                 </button>
-                <label
-                  class="flex items-center gap-1.5 cursor-pointer text-xs"
-                  :class="fastMode ? 'text-amber-300' : 'text-[var(--sb-muted)]'"
-                  :title="t('chronicle.fastModeTitle')"
-                >
-                  <input v-model="fastMode" type="checkbox" class="accent-amber-500" />
-                  {{ t('chronicle.fastMode') }}
-                </label>
                 <button v-if="running && groupId" type="button" @click="cancelGroup"
                   class="sb-btn text-red-300 border-red-800/40">
                   {{ t('chronicle.cancel') }}
@@ -1870,7 +1572,7 @@ async function generateImages() {
                   <div v-for="j in imageJobs" :key="j.job_id"
                     class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px]"
                     :class="jobStatusClass(j.job_id)">
-                    <span class="font-bold uppercase tracking-wide">{{ t('chronicle.axis.' + j.axis) }}</span>
+                    <span class="font-bold uppercase tracking-wide">{{ panelAxisLabel(j.axis) }}</span>
                     <SbIcon :name="jobStatusIcon(j.job_id)" class="w-3 h-3" />
                     <span class="opacity-70">{{ jobStatusLabel(j.job_id) }}</span>
                   </div>
@@ -1914,7 +1616,7 @@ async function generateImages() {
                     :key="te.axis"
                     class="weaver-teaser-card"
                   >
-                    <span class="weaver-teaser-card__axis">{{ t('chronicle.axis.' + te.axis) }}</span>
+                    <span class="weaver-teaser-card__axis">{{ panelAxisLabel(te.axis) }}</span>
                     <span class="weaver-teaser-card__text">{{ te.snippet }}…</span>
                   </div>
                 </div>
@@ -1956,7 +1658,7 @@ async function generateImages() {
                       <div v-for="j in imageJobs" :key="j.job_id"
                         class="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px]"
                         :class="jobStatusClass(j.job_id)">
-                        <span class="font-bold uppercase">{{ t('chronicle.axis.' + j.axis) }}</span>
+                        <span class="font-bold uppercase">{{ panelAxisLabel(j.axis) }}</span>
                         <SbIcon :name="jobStatusIcon(j.job_id)" class="w-2.5 h-2.5" />
                       </div>
                     </div>
@@ -2020,7 +1722,7 @@ async function generateImages() {
                   <div class="flex flex-col gap-0.5 text-[9px] leading-snug opacity-45 mt-0.5">
                     <div v-for="ax in AXES" :key="ax" v-show="candAct(c, ax).activity || c[ax] || c.summary">
                       <span class="font-bold uppercase tracking-wide mr-1"
-                        :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">{{ t('chronicle.axis.' + ax) }}</span>
+                        :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">{{ panelAxisLabel(ax) }}</span>
                       <span v-if="candAct(c, ax).label" class="text-teal-300/60 mr-1">[{{ candAct(c, ax).label }}]</span>
                       <span class="text-gray-400">{{ candAct(c, ax).activity || c[ax] || c.summary || '' }}</span>
                       <span v-if="candAct(c, ax).place" class="ml-1 px-1 rounded bg-black/40 text-gray-500">📍{{ candAct(c, ax).place }}</span>
@@ -2060,7 +1762,7 @@ async function generateImages() {
                 class="rounded-xl border border-white/5 bg-black/30 p-3 flex flex-col gap-1.5">
                 <span class="text-[10px] font-semibold uppercase tracking-widest"
                   :class="axis === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/90'">
-                  {{ t('chronicle.axis.' + axis) }}
+                  {{ panelAxisLabel(axis) }}
                   <span v-if="axis === baseAxis" class="text-[var(--sb-muted)] normal-case font-normal ml-1">
                     ({{ t('storybook.base') }})
                   </span>
@@ -2120,54 +1822,10 @@ async function generateImages() {
                 </span>
               </h3>
 
-              <div v-if="bioView" class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px] text-gray-300 space-y-1">
-                <div class="sb-label text-teal-300/80 flex items-center gap-1">
-                  <SbIcon name="book" class="w-3 h-3" />{{ t('storybook.biography') }}
-                </div>
-                <p v-if="bioView.personality">{{ bioView.personality }}</p>
-                <p v-if="bioView.occupation" class="text-gray-400 break-words">
-                  <span class="text-[var(--sb-muted)]">{{ t('storybook.bioOccupation') }}:</span> {{ bioView.occupation }}
-                </p>
-                <p v-for="f in BIO_LIST_FIELDS" :key="f" v-show="asStringList(bioView[f]).length" class="text-gray-400 break-words">
-                  <span class="text-[var(--sb-muted)]">{{ t('storybook.bio_' + f) }}:</span> {{ joinList(bioView[f]) }}
-                </p>
-                <p v-if="bioView.backstory" class="text-gray-400 italic pt-1">{{ bioView.backstory }}</p>
-              </div>
-
-              <div v-if="timetableView.length" class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px]">
-                <div class="sb-label text-teal-300/80 mb-1 flex items-center gap-1">
-                  <SbIcon name="clock" class="w-3 h-3" />{{ t('storybook.timetable') }}
-                </div>
-                <ul class="space-y-0.5">
-                  <li v-for="(s, si) in timetableView" :key="si"
-                    class="text-gray-300 flex gap-2 items-start rounded-md px-1 -mx-1 py-0.5"
-                    :class="slotUsedAs(s) ? 'bg-teal-950/40 ring-1 ring-teal-800/35' : ''">
-                    <span class="text-teal-400/80 shrink-0 w-20 pt-0.5">{{ s.label }}</span>
-                    <span class="min-w-0 flex-1">
-                      <span class="inline-flex flex-wrap items-center gap-1 mb-0.5" v-if="slotUsedAs(s) || slotNeighbors(s).length">
-                        <span v-if="slotUsedAs(s)"
-                          class="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-teal-900/60 text-teal-200 border border-teal-700/40">
-                          {{ t('chronicle.axis.' + slotUsedAs(s)) }}
-                        </span>
-                        <span v-for="nb in slotNeighbors(s)" :key="nb"
-                          class="text-[9px] uppercase tracking-wide px-1 py-0.5 rounded text-teal-500/55 border border-teal-900/40">
-                          {{ t('storybook.timetableNeighbor', { axis: t('chronicle.axis.' + nb) }) }}
-                        </span>
-                      </span>
-                      <span class="block">
-                        {{ s.activity }}
-                        <span v-if="s.place" class="text-[var(--sb-muted)]"> {{ t('storybook.timetablePlace', { place: s.place }) }}</span>
-                        <span v-if="s.feeling" class="text-gray-500 italic"> {{ t('storybook.timetableFeeling', { feeling: s.feeling }) }}</span>
-                      </span>
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
               <div v-for="axis in REASON_AXES" :key="'act-' + axis"
                 v-show="activityFor(axis)"
                 class="rounded-xl border border-white/5 bg-black/30 p-3 text-[11px]">
-                <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
+                <div class="sb-label text-[var(--sb-amber)] mb-1">{{ panelAxisLabel(axis) }}</div>
                 <p class="text-gray-300">{{ activityFor(axis) }}</p>
               </div>
 
@@ -2181,13 +1839,13 @@ async function generateImages() {
                   <div v-for="axis in draftImageAxes" :key="'draft-img-' + axis"
                     class="flex flex-col gap-1 min-w-0">
                     <span class="text-[9px] uppercase tracking-wider text-[var(--sb-amber)]">
-                      {{ t('chronicle.axis.' + axis) }}
+                      {{ panelAxisLabel(axis) }}
                     </span>
                     <a :href="`/api/originals/${axisDrafts[axis].draft_image_id}`"
                       target="_blank" rel="noopener"
                       class="block aspect-square rounded-lg overflow-hidden border border-white/10 bg-black/40">
                       <img :src="`/api/thumbnails/${axisDrafts[axis].draft_image_id}.webp`"
-                        :alt="t('chronicle.draftImageAlt', { axis: t('chronicle.axis.' + axis) })"
+                        :alt="t('chronicle.draftImageAlt', { axis: panelAxisLabel(axis) })"
                         class="w-full h-full object-cover" loading="lazy" />
                     </a>
                   </div>
@@ -2226,7 +1884,7 @@ async function generateImages() {
                 <div v-for="axis in REASON_AXES" :key="'shot-' + axis"
                   v-show="axisReasoning[axis] || axisDrafts[axis]"
                   class="bg-black/40 border border-white/5 rounded-xl p-3 text-[11px]">
-                  <div class="sb-label text-[var(--sb-amber)] mb-1">{{ t('chronicle.axis.' + axis) }}</div>
+                  <div class="sb-label text-[var(--sb-amber)] mb-1">{{ panelAxisLabel(axis) }}</div>
                   <div v-if="axisReasoning[axis]" class="text-[10px] text-[var(--sb-muted)] space-y-0.5">
                     <p v-if="axisReasoning[axis].shot || axisReasoning[axis].camera">
                       <span class="text-[var(--sb-faint)]">{{ t('chronicle.reasonShot') }}:</span>
@@ -2298,7 +1956,7 @@ async function generateImages() {
               <div v-for="(p, axis) in prompts" :key="axis"
                 class="bg-black/30 border border-white/5 rounded-xl p-3 flex flex-col gap-2">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-[10px] font-bold text-teal-400 uppercase">{{ t('chronicle.axis.' + axis) }}</span>
+                  <span class="text-[10px] font-bold text-teal-400 uppercase">{{ panelAxisLabel(axis) }}</span>
                   <span v-if="p.refined_from_draft"
                     class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/50 text-teal-300/90 border border-teal-700/40">
                     {{ t('chronicle.refinedFromDraft') }}

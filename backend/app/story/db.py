@@ -67,6 +67,7 @@ def new_story_payload(
         "context": context or {},
         "created_at": time.time(),
         "group_id": group_id,
+        "time_scale": time_scale,
     }
 
 
