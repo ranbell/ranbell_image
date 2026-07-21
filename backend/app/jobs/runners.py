@@ -3075,7 +3075,9 @@ async def run_chronicle_image_generate(
                 f"WARNING: base image missing on disk path={fp}",
             )
 
-    patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)
+    patched = comfy.patch_workflow(
+        wf, positive, negative, "", "", 1, seed=seed, append_negative=True,
+    )
     prompt_id = await comfy.queue_prompt(patched)
     reporter.update(0.0, "Waiting in ComfyUI queue...")
 

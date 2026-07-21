@@ -59,6 +59,16 @@ def _has_non_ascii(s: str) -> bool:
     return any(ord(c) > 127 for c in (s or ""))
 
 
+# Appended (not replacing) to the workflow's baked negative. Targets the two
+# render failures seen on studying/desk beats: the character collapsing into a
+# face-down/hidden-face slump, and cinematic black bars on wide shots.
+CHRONICLE_NEGATIVE = (
+    "head down on desk, face down on arms, lying on desk, sleeping on desk, "
+    "face hidden, hair covering face, hunched over hiding face, "
+    "letterboxed, black bars, border frame, extremely dark, underexposed"
+)
+
+
 _EXPR_NEEDLES = tuple(sorted(
     {e.replace("-", " ") for e in EXPRESSION_TAGS}
     | {e.replace("-", "_") for e in EXPRESSION_TAGS},
@@ -208,7 +218,7 @@ async def enhance_all_panels(
             )
         out[key] = {
             "positive": positive,
-            "negative": "",
+            "negative": CHRONICLE_NEGATIVE,
             "visual_script": visual_script_from_panel(panel, locale=locale),
             "camera": panel.get("camera") or "",
             "danbooru_tags": list(panel.get("danbooru_tags") or []),

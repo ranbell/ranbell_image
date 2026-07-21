@@ -192,6 +192,7 @@ class ComfyUIClient:
         height: int | None = None,
         steps: int | None = None,
         cfg: float | None = None,
+        append_negative: bool = False,
     ) -> dict:
         wf = copy.deepcopy(workflow)
 
@@ -209,12 +210,25 @@ class ComfyUIClient:
             wf[fallback_clips[0]]["inputs"]["text"] = positive
 
         if negative:
+            neg_target = None
             if neg_node_id and neg_node_id in wf:
-                wf[neg_node_id]["inputs"]["text"] = negative
+                neg_target = neg_node_id
             elif auto_neg:
-                wf[auto_neg]["inputs"]["text"] = negative
+                neg_target = auto_neg
             elif len(fallback_clips) >= 2:
-                wf[fallback_clips[1]]["inputs"]["text"] = negative
+                neg_target = fallback_clips[1]
+            if neg_target:
+                # append_negative extends the workflow's baked negative instead of
+                # replacing it, so caller-supplied tags add to (not wipe) the default.
+                if append_negative:
+                    existing = str(
+                        wf[neg_target]["inputs"].get("text") or ""
+                    ).strip()
+                    wf[neg_target]["inputs"]["text"] = (
+                        f"{existing}, {negative}" if existing else negative
+                    )
+                else:
+                    wf[neg_target]["inputs"]["text"] = negative
 
         # Size / batch: only touch EmptyLatent* nodes that are actually wired
         # into a KSampler.latent_image (same connection-tracing pattern as CLIP).
