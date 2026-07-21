@@ -253,7 +253,7 @@ async def run_chronicle_candidates_v2(
             cand = candidate_from_stage1(data, candidate_id=cid)
             candidates.append(cand)
             cat = str(data.get("happening_category") or "").strip()
-            if cat and cat != "該当なし" and cat not in avoid:
+            if cat and cat != "none" and cat not in avoid:
                 avoid.append(cat)
             _phase(
                 "storyboarding",

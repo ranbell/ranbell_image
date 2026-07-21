@@ -18,13 +18,15 @@ logger = logging.getLogger(__name__)
 
 PANELS = ("panel_1", "panel_2", "panel_3")
 CAMERAS = ("long_shot", "medium_shot", "close_up")
+# English happening categories (contract shared with stage1_storyboard.md).
+HAPPENING_NONE = "none"
 HAPPENING_CATEGORIES = (
-    "物理的アクシデント",
-    "人間関係アクシデント",
-    "発見系",
-    "予定変更系",
-    "環境変化系",
-    "該当なし",
+    "physical_accident",
+    "social_accident",
+    "discovery",
+    "schedule_change",
+    "environmental_change",
+    HAPPENING_NONE,
 )
 # smile / grin are intentionally NOT banned: a happy beat needs a real smile.
 # Only viewer/camera-facing gaze is suppressed (keeps her absorbed in her own world).
@@ -331,7 +333,7 @@ def apply_stage1_failure_handling(
     out["include_happening"] = bool(include_happening)
     if not include_happening:
         out["happening_summary"] = ""
-        out["happening_category"] = "該当なし"
+        out["happening_category"] = HAPPENING_NONE
 
     panels = list(out.get("panels") or [])
     while len(panels) < 3:
@@ -405,12 +407,12 @@ def stage1_needs_retry(
     if include_happening:
         summary = str(data.get("happening_summary") or "").strip()
         cat = str(data.get("happening_category") or "").strip()
-        if not summary or cat in ("", "該当なし"):
+        if not summary or cat in ("", HAPPENING_NONE):
             return "happening_missing"
     else:
         # Soft: if category is a real accident type, retry
         cat = str(data.get("happening_category") or "").strip()
-        if cat in HAPPENING_CATEGORIES and cat != "該当なし":
+        if cat in HAPPENING_CATEGORIES and cat != HAPPENING_NONE:
             if str(data.get("happening_summary") or "").strip():
                 return "happening_unexpected"
     avoid = set(avoid_repeats or [])
