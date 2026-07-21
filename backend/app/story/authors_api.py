@@ -28,6 +28,16 @@ async def list_authors(request: Request):
     return {"authors": rows}
 
 
+@router.post("/reset-defaults")
+async def reset_authors_to_defaults(request: Request):
+    """Replace all author presets with the built-in default seed set."""
+    result = await authors_db.reset_authors_to_defaults(
+        request.app.state.db,
+        vector_dim=settings.embed_dim,
+    )
+    return {"ok": True, **result}
+
+
 @router.post("")
 async def create_author(body: AuthorCreate, request: Request):
     try:

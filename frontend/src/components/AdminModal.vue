@@ -49,6 +49,12 @@ const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
 
+// Author presets (Chronicle)
+const authorsList = ref([])
+const authorsLoading = ref(false)
+const authorForm = ref({ id: '', name: '', genre_tag: '', style_description: '' })
+const authorEditing = ref(false)
+
 const configWorkflows = ref([])
 
 // Connection tab
@@ -352,6 +358,132 @@ function switchAdminTab(id) {
   }
   if (id === 'info') { fetchInfo(); fetchAiStatus() }
   if (id === 'system') fetchInfo()
+  if (id === 'authors') fetchAuthors()
+}
+
+async function fetchAuthors() {
+  authorsLoading.value = true
+  try {
+    const r = await fetch('/api/authors')
+    if (!r.ok) throw new Error(r.statusText)
+    const data = await r.json()
+    authorsList.value = data.authors || []
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    authorsLoading.value = false
+  }
+}
+
+function resetAuthorForm() {
+  authorForm.value = { id: '', name: '', genre_tag: '', style_description: '' }
+  authorEditing.value = false
+}
+
+function editAuthor(row) {
+  authorForm.value = {
+    id: row.id,
+    name: row.name || '',
+    genre_tag: row.genre_tag || '',
+    style_description: row.style_description || '',
+  }
+  authorEditing.value = true
+}
+
+async function saveAuthor() {
+  const f = authorForm.value
+  if (!f.name.trim() || !f.style_description.trim()) {
+    adminError.value = t('admin.authors.needFields')
+    return
+  }
+  adminLoading.value = 'authorSave'
+  adminError.value = ''
+  try {
+    const payload = {
+      name: f.name.trim(),
+      style_description: f.style_description.trim(),
+      genre_tag: f.genre_tag.trim(),
+    }
+    const r = await fetch(
+      authorEditing.value ? `/api/authors/${encodeURIComponent(f.id)}` : '/api/authors',
+      {
+        method: authorEditing.value ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    )
+    if (!r.ok) {
+      let detail = r.statusText
+      try { detail = (await r.json()).detail || detail } catch { /* */ }
+      throw new Error(detail)
+    }
+    adminSuccess.value = authorEditing.value
+      ? t('admin.authors.updated')
+      : t('admin.authors.created')
+    setTimeout(() => { adminSuccess.value = '' }, 3000)
+    resetAuthorForm()
+    await fetchAuthors()
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    adminLoading.value = ''
+  }
+}
+
+async function deleteAuthor(row) {
+  confirmThen(
+    t('admin.authors.deleteConfirm', { name: row.name }),
+    t('admin.authors.deleteConfirmDesc'),
+    async () => {
+      adminLoading.value = 'authorDelete'
+      adminError.value = ''
+      try {
+        const r = await fetch(`/api/authors/${encodeURIComponent(row.id)}`, { method: 'DELETE' })
+        if (!r.ok) throw new Error(r.statusText)
+        adminSuccess.value = t('admin.authors.deleted')
+        setTimeout(() => { adminSuccess.value = '' }, 3000)
+        if (authorForm.value.id === row.id) resetAuthorForm()
+        await fetchAuthors()
+      } catch (e) {
+        adminError.value = e.message || String(e)
+      } finally {
+        adminLoading.value = ''
+        adminConfirm.value = null
+      }
+    },
+  )
+}
+
+function resetAuthorsToDefaults() {
+  confirmThen(
+    t('admin.authors.resetConfirm'),
+    t('admin.authors.resetConfirmDesc'),
+    async () => {
+      adminLoading.value = 'authorReset'
+      adminError.value = ''
+      try {
+        const r = await fetch('/api/authors/reset-defaults', { method: 'POST' })
+        if (!r.ok) {
+          let detail = r.statusText
+          try { detail = (await r.json()).detail || detail } catch { /* */ }
+          throw new Error(detail)
+        }
+        const data = await r.json()
+        adminSuccess.value = t('admin.authors.resetDone', {
+          deleted: data.deleted ?? 0,
+          inserted: data.inserted ?? 0,
+        })
+        setTimeout(() => { adminSuccess.value = '' }, 4000)
+        resetAuthorForm()
+        await fetchAuthors()
+      } catch (e) {
+        adminError.value = e.message || String(e)
+      } finally {
+        adminLoading.value = ''
+        adminConfirm.value = null
+      }
+    },
+  )
 }
 
 // Proxy functions that emit to App.vue
@@ -410,6 +542,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             { id: 'overview',    label: $t('admin.overview.title') },
             { id: 'ai',          label: $t('admin.ai.title') },
             { id: 'config',      label: $t('admin.config.title') },
+            { id: 'authors',     label: $t('admin.authors.title') },
             { id: 'system',      label: $t('admin.system.title') },
             { id: 'jobs',        label: 'Jobs' },
             { id: 'connection',  label: $t('admin.connection.title') },
@@ -1386,6 +1519,92 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
               class="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
               {{ adminLoading === 'config' ? $t('admin.config.saving') : $t('admin.config.save') }}
             </button>
+          </div>
+
+          <!-- ── Author presets (Chronicle) ── -->
+          <div v-if="adminTab === 'authors'" class="space-y-4">
+            <div class="bg-gray-800 rounded-xl p-4 space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    {{ $t('admin.authors.title') }}
+                  </p>
+                  <p class="text-[11px] text-gray-500 mt-1">{{ $t('admin.authors.desc') }}</p>
+                </div>
+                <button type="button" @click="fetchAuthors" :disabled="authorsLoading"
+                  class="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40 shrink-0">
+                  {{ $t('admin.authors.refresh') }}
+                </button>
+              </div>
+
+              <div class="grid grid-cols-1 gap-2">
+                <input v-model="authorForm.name" type="text"
+                  :placeholder="$t('admin.authors.namePh')"
+                  class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" />
+                <input v-model="authorForm.genre_tag" type="text"
+                  :placeholder="$t('admin.authors.genrePh')"
+                  class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" />
+                <textarea v-model="authorForm.style_description" rows="3"
+                  :placeholder="$t('admin.authors.stylePh')"
+                  class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" />
+                <div class="flex gap-2">
+                  <button type="button" @click="saveAuthor"
+                    :disabled="!!adminLoading"
+                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs text-white font-medium">
+                    {{ authorEditing ? $t('admin.authors.saveEdit') : $t('admin.authors.add') }}
+                  </button>
+                  <button v-if="authorEditing" type="button" @click="resetAuthorForm"
+                    class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs text-gray-300">
+                    {{ $t('admin.authors.cancelEdit') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                {{ $t('admin.authors.listTitle', { n: authorsList.length }) }}
+              </p>
+              <div v-if="authorsLoading" class="text-xs text-gray-500 py-4 text-center">
+                {{ $t('admin.loading') }}
+              </div>
+              <div v-else-if="!authorsList.length" class="text-xs text-gray-500 py-4 text-center">
+                {{ $t('admin.authors.empty') }}
+              </div>
+              <div v-else class="space-y-2 max-h-[40vh] overflow-y-auto">
+                <div v-for="row in authorsList" :key="row.id"
+                  class="rounded-lg border border-gray-700/80 bg-gray-900/50 px-3 py-2 space-y-1">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <p class="text-sm text-gray-200 font-medium truncate">
+                        <span v-if="row.genre_tag" class="text-purple-300/80 text-[11px] mr-1">[{{ row.genre_tag }}]</span>
+                        {{ row.name }}
+                      </p>
+                      <p class="text-[11px] text-gray-500 line-clamp-2 mt-0.5">{{ row.style_description }}</p>
+                    </div>
+                    <div class="flex gap-1 shrink-0">
+                      <button type="button" @click="editAuthor(row)"
+                        class="px-2 py-1 text-[11px] rounded bg-gray-700 hover:bg-gray-600 text-gray-200">
+                        {{ $t('admin.authors.edit') }}
+                      </button>
+                      <button type="button" @click="deleteAuthor(row)" :disabled="!!adminLoading"
+                        class="px-2 py-1 text-[11px] rounded bg-red-950/60 hover:bg-red-900/70 text-red-300 disabled:opacity-40">
+                        {{ $t('admin.authors.delete') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-amber-300/90">{{ $t('admin.authors.resetTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.authors.resetDesc') }}</p>
+              <button type="button" @click="resetAuthorsToDefaults" :disabled="!!adminLoading"
+                class="px-3 py-1.5 bg-amber-800/70 hover:bg-amber-700 disabled:opacity-40 rounded-lg text-xs text-amber-50 font-medium">
+                {{ $t('admin.authors.resetBtn') }}
+              </button>
+            </div>
           </div>
 
           <!-- ── System tab ── -->

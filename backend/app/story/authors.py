@@ -137,8 +137,36 @@ async def delete_author(db, author_id: str) -> None:
     )
 
 
+async def delete_all_authors(db) -> int:
+    """Delete every author point. Returns deleted count."""
+    deleted = 0
+    offset = None
+    while True:
+        points, next_offset = await db._qc.scroll(
+            collection_name=AUTHORS_COLLECTION,
+            limit=128,
+            offset=offset,
+            with_payload=False,
+        )
+        if not points:
+            break
+        ids = [str(p.id) for p in points]
+        await db._qc.delete(
+            collection_name=AUTHORS_COLLECTION,
+            points_selector=qm.PointIdsList(points=ids),
+        )
+        deleted += len(ids)
+        if next_offset is None:
+            break
+        offset = next_offset
+    return deleted
+
+
 async def seed_authors_if_empty(db, *, vector_dim: int) -> int:
-    """Insert archetype seeds when collection has no points. Returns inserted count."""
+    """Insert archetype seeds when collection has no points. Returns inserted count.
+
+    Startup path: if any author already exists, do nothing.
+    """
     existing, _ = await db._qc.scroll(
         collection_name=AUTHORS_COLLECTION,
         limit=1,
@@ -146,6 +174,20 @@ async def seed_authors_if_empty(db, *, vector_dim: int) -> int:
     )
     if existing:
         return 0
+    return await _insert_seed_authors(db, vector_dim=vector_dim)
+
+
+async def reset_authors_to_defaults(db, *, vector_dim: int) -> dict[str, int]:
+    """Wipe all authors and re-insert AUTHOR_SEEDS (explicit reload of defaults)."""
+    deleted = await delete_all_authors(db)
+    inserted = await _insert_seed_authors(db, vector_dim=vector_dim)
+    logger.info(
+        "[authors] reset to defaults deleted=%d inserted=%d", deleted, inserted,
+    )
+    return {"deleted": deleted, "inserted": inserted}
+
+
+async def _insert_seed_authors(db, *, vector_dim: int) -> int:
     n = 0
     for seed in AUTHOR_SEEDS:
         try:

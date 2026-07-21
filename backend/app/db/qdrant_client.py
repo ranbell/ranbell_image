@@ -396,6 +396,7 @@ class QdrantDBClient:
         except Exception:
             pass
         try:
+            # Empty collection → insert defaults. Non-empty → leave untouched.
             from ..story.authors import seed_authors_if_empty
             await seed_authors_if_empty(self, vector_dim=settings.embed_dim)
         except Exception as exc:
