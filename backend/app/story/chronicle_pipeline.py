@@ -540,6 +540,70 @@ async def run_chronicle_expand_v2(
             except Exception as exc:
                 logger.warning("[chronicle] set embedding failed: %s", exc)
 
+        # Rule-based quality radar (panel_1/2/3); UI + agent eval consume this.
+        quality_eval: dict = {}
+        try:
+            from .quality import evaluate_chronicle_quality, quality_eval_failure
+
+            stories_q = {
+                k: (axes_payload[k].get("story") or axes_payload[k].get("story_ja") or "")
+                for k in PANELS
+            }
+            activities_q = {}
+            for i, key in enumerate(PANELS):
+                p = panels[i] if i < len(panels) else {}
+                activities_q[key] = " ".join(
+                    str(x) for x in (
+                        (p or {}).get("act"),
+                        (p or {}).get("gesture"),
+                        (p or {}).get("character_state_diff"),
+                    )
+                    if x
+                )
+            lock_tags = list(stage1.get("consistency_tags") or [])
+            if not lock_tags:
+                profile = ctx.get("character_profile") or {}
+                lock_tags = [
+                    t for t in (
+                        profile.get("hair_color"),
+                        profile.get("hairstyle"),
+                        profile.get("eye_color"),
+                        profile.get("base_outfit"),
+                    )
+                    if t
+                ]
+            quality_eval = evaluate_chronicle_quality(
+                user_topic=getattr(body, "user_topic", None) or draft.get("user_topic") or "",
+                title=title,
+                overall=overall,
+                stories=stories_q,
+                activities=activities_q,
+                prompts=prompts,
+                time_scale=(
+                    getattr(body, "time_scale", None)
+                    or draft.get("time_scale")
+                    or "days"
+                ),
+                lock_tags=lock_tags,
+                scored_axes=list(PANELS),
+            )
+            _put({"type": "quality_eval", **quality_eval})
+            await story_db.set_story_payload(db, story_id, {"quality_eval": quality_eval})
+        except Exception as exc:
+            logger.warning("[chronicle] quality_eval failed: %s", exc)
+            from .quality import quality_eval_failure
+
+            quality_eval = quality_eval_failure(exc)
+            _put({"type": "quality_eval", **quality_eval})
+            try:
+                await story_db.set_story_payload(db, story_id, {"quality_eval": quality_eval})
+            except Exception as persist_exc:
+                logger.warning("[chronicle] quality_eval persist failed: %s", persist_exc)
+            _put({
+                "type": "warning",
+                "message": f"Quality scoring failed: {quality_eval.get('error')}",
+            })
+
         _put({"type": "story_saved", "story_id": story_id})
 
         image_jobs: list[dict] = []

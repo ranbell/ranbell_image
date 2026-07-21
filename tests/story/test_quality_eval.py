@@ -13,21 +13,21 @@ from app.story.quality import (
 
 def _good_prompts():
     return {
-        "past": (
+        "panel_1": (
             "1girl, spilling, holding, surprised, milk, pitcher, apron, cafe, "
             "morning, towel, indoors, counter, silver_hair, blue_eyes, solo, "
             "reaching, wet, day, daylight, detailed_background, depth_of_field, "
             "cinematic_lighting, highres, sharp_focus, dynamic_angle, steam, "
             "white_shirt, open_mouth, foam, metal_pitcher"
         ),
-        "present": (
+        "panel_2": (
             "1girl, pouring, holding, smile, latte_art, coffee_cup, cafe, day, "
             "window, indoors, counter, steam, ceramic, silver_hair, blue_eyes, "
             "solo, concentrating, daylight, detailed_background, depth_of_field, "
             "cinematic_lighting, highres, sharp_focus, dynamic_angle, apron, "
             "heart, warm_light"
         ),
-        "future": (
+        "panel_3": (
             "1girl, wiping, pointing, teaching, serious, espresso_machine, cafe, "
             "indoors, evening, cloth, steam, back_bar, warm_light, silver_hair, "
             "blue_eyes, solo, detailed_background, depth_of_field, "
@@ -43,14 +43,14 @@ def test_evaluate_good_cafe_story_scores_high():
         title="First Pour",
         overall="A barista grows from spilled milk to mentoring juniors at the cafe.",
         stories={
-            "past": "She spills the milk pitcher at the cafe counter in the morning.",
-            "present": "She pours latte art for a regular at the sunlit cafe.",
-            "future": "Years later she wipes the espresso machine and teaches a junior.",
+            "panel_1": "She spills the milk pitcher at the cafe counter in the morning.",
+            "panel_2": "She pours latte art for a regular at the sunlit cafe.",
+            "panel_3": "Years later she wipes the espresso machine and teaches a junior.",
         },
         activities={
-            "past": "Tipping a milk pitcher over the cafe counter, soaking her apron.",
-            "present": "Pouring a heart latte into a cup at the cafe counter.",
-            "future": "Wiping the espresso machine at the cafe while pointing to the steamer.",
+            "panel_1": "Tipping a milk pitcher over the cafe counter, soaking her apron.",
+            "panel_2": "Pouring a heart latte into a cup at the cafe counter.",
+            "panel_3": "Wiping the espresso machine at the cafe while pointing to the steamer.",
         },
         prompts=_good_prompts(),
         time_scale="years",
@@ -79,16 +79,16 @@ def test_evaluate_collapsed_idle_scores_low_diversity_and_expression_or_action()
         title="Smile",
         overall="She stands and smiles.",
         stories={
-            "past": "She stands at the cafe counter smiling at the camera.",
-            "present": "She stands at the cafe counter smiling at the camera.",
-            "future": "She stands at the cafe counter smiling at the camera.",
+            "panel_1": "She stands at the cafe counter smiling at the camera.",
+            "panel_2": "She stands at the cafe counter smiling at the camera.",
+            "panel_3": "She stands at the cafe counter smiling at the camera.",
         },
         activities={
-            "past": "Standing at the cafe counter smiling.",
-            "present": "Standing at the cafe counter smiling.",
-            "future": "Standing at the cafe counter smiling.",
+            "panel_1": "Standing at the cafe counter smiling.",
+            "panel_2": "Standing at the cafe counter smiling.",
+            "panel_3": "Standing at the cafe counter smiling.",
         },
-        prompts={"past": same, "present": same, "future": same},
+        prompts={"panel_1": same, "panel_2": same, "panel_3": same},
         time_scale="years",
         lock_tags=["silver_hair", "blue_eyes"],
     )
@@ -100,12 +100,12 @@ def test_evaluate_collapsed_idle_scores_low_diversity_and_expression_or_action()
 def test_evaluate_accepts_prompt_dicts():
     q = evaluate_chronicle_quality(
         prompts={
-            "past": {"positive": _good_prompts()["past"], "negative": "blurry"},
-            "present": {"positive": _good_prompts()["present"]},
-            "future": {"positive": _good_prompts()["future"]},
+            "panel_1": {"positive": _good_prompts()["panel_1"], "negative": "blurry"},
+            "panel_2": {"positive": _good_prompts()["panel_2"]},
+            "panel_3": {"positive": _good_prompts()["panel_3"]},
         },
-        stories={"past": "a", "present": "b", "future": "c"},
-        activities={"past": "pour milk", "present": "wipe counter", "future": "teach junior"},
+        stories={"panel_1": "a", "panel_2": "b", "panel_3": "c"},
+        activities={"panel_1": "pour milk", "panel_2": "wipe counter", "panel_3": "teach junior"},
         time_scale="years",
     )
     assert "expression" in q["dimensions"]
@@ -115,28 +115,28 @@ def test_empty_prompt_axes_are_skipped_not_perfect():
     """Empty positives among scored axes must not score as perfect expression."""
     q = evaluate_chronicle_quality(
         prompts={
-            "past": "",
-            "present": _good_prompts()["present"],
-            "future": _good_prompts()["future"],
+            "panel_1": "",
+            "panel_2": _good_prompts()["panel_2"],
+            "panel_3": _good_prompts()["panel_3"],
         },
         stories={
-            "past": "She spills milk.",
-            "present": "She pours latte art.",
-            "future": "She teaches a junior.",
+            "panel_1": "She spills milk.",
+            "panel_2": "She pours latte art.",
+            "panel_3": "She teaches a junior.",
         },
         activities={
-            "past": "spilling milk",
-            "present": "pouring latte",
-            "future": "teaching junior",
+            "panel_1": "spilling milk",
+            "panel_2": "pouring latte",
+            "panel_3": "teaching junior",
         },
         time_scale="years",
-        scored_axes=["past", "present", "future"],
+        scored_axes=["panel_1", "panel_2", "panel_3"],
     )
-    assert q["per_axis"]["expression"]["past"].get("skipped") is True
-    assert q["per_axis"]["expression"]["past"].get("score") is None
+    assert q["per_axis"]["expression"]["panel_1"].get("skipped") is True
+    assert q["per_axis"]["expression"]["panel_1"].get("score") is None
     # Non-empty axes still contribute; overall expression stays healthy.
     assert q["dimensions"]["expression"] >= 0.5
-    assert q["scored_axes"] == ["past", "present", "future"]
+    assert q["scored_axes"] == ["panel_1", "panel_2", "panel_3"]
 
 
 def test_scores_two_axes_when_base_image_supplies_one():
@@ -147,18 +147,18 @@ def test_scores_two_axes_when_base_image_supplies_one():
     (0,1)/(0,2)/(1,2) — beats[2] raised IndexError, surfacing in the UI as
     "品質採点に失敗しました: list index out of range".
     """
-    for axes in (["past", "future"], ["present", "future"], ["past", "present"]):
+    for axes in (["panel_1", "panel_3"], ["panel_2", "panel_3"], ["panel_1", "panel_2"]):
         q = evaluate_chronicle_quality(
             prompts=_good_prompts(),
             stories={
-                "past": "She spills milk.",
-                "present": "She pours latte art.",
-                "future": "She teaches a junior.",
+                "panel_1": "She spills milk.",
+                "panel_2": "She pours latte art.",
+                "panel_3": "She teaches a junior.",
             },
             activities={
-                "past": "spilling milk",
-                "present": "pouring latte",
-                "future": "teaching junior",
+                "panel_1": "spilling milk",
+                "panel_2": "pouring latte",
+                "panel_3": "teaching junior",
             },
             time_scale="years",
             scored_axes=axes,
@@ -185,19 +185,19 @@ def test_topic_fit_includes_prompts_and_directive():
         title="Walk",
         overall="A stroll.",
         stories={
-            "past": "She walks outside.",
-            "present": "She walks outside.",
-            "future": "She walks outside.",
+            "panel_1": "She walks outside.",
+            "panel_2": "She walks outside.",
+            "panel_3": "She walks outside.",
         },
         activities={
-            "past": "walking",
-            "present": "walking",
-            "future": "walking",
+            "panel_1": "walking",
+            "panel_2": "walking",
+            "panel_3": "walking",
         },
         prompts={
-            "past": "1girl, walking, outdoors",
-            "present": "1girl, walking, outdoors",
-            "future": "1girl, walking, outdoors",
+            "panel_1": "1girl, walking, outdoors",
+            "panel_2": "1girl, walking, outdoors",
+            "panel_3": "1girl, walking, outdoors",
         },
         time_scale="years",
     )
@@ -206,14 +206,14 @@ def test_topic_fit_includes_prompts_and_directive():
         title="First Pour",
         overall="Barista at the cafe.",
         stories={
-            "past": "She spills milk at the cafe.",
-            "present": "She pours latte art.",
-            "future": "She teaches espresso.",
+            "panel_1": "She spills milk at the cafe.",
+            "panel_2": "She pours latte art.",
+            "panel_3": "She teaches espresso.",
         },
         activities={
-            "past": "spilling milk pitcher",
-            "present": "pouring latte",
-            "future": "teaching junior barista",
+            "panel_1": "spilling milk pitcher",
+            "panel_2": "pouring latte",
+            "panel_3": "teaching junior barista",
         },
         prompts=_good_prompts(),
         time_scale="years",
@@ -230,14 +230,14 @@ def test_evaluate_handles_list_valued_stories():
         title="First Pour",
         overall="A barista grows at the cafe.",
         stories={
-            "past": ["She spills", "milk at the cafe counter"],
-            "present": ["She pours latte art"],
-            "future": ["She teaches", "a junior barista"],
+            "panel_1": ["She spills", "milk at the cafe counter"],
+            "panel_2": ["She pours latte art"],
+            "panel_3": ["She teaches", "a junior barista"],
         },
         activities={
-            "past": ["tipping pitcher", "over counter"],
-            "present": "pouring latte",
-            "future": {"positive": "wiping espresso machine"},
+            "panel_1": ["tipping pitcher", "over counter"],
+            "panel_2": "pouring latte",
+            "panel_3": {"positive": "wiping espresso machine"},
         },
         prompts=_good_prompts(),
         time_scale="years",

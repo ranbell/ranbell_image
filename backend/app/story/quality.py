@@ -9,7 +9,6 @@ import time
 from typing import Any
 
 from .generator import (
-    AXES,
     _EXPRESSION_TAGS,
     _EXPRESSION_TOKENS,
     _mean_pairwise_similarity,
@@ -22,6 +21,9 @@ from .generator import (
     _chronicle_tags_degenerate,
 )
 from .topic_anchors import _is_ja_script_token, topic_anchor_groups
+
+# Keep in sync with story.db.AXES (panel contract; avoid importing db → qdrant).
+AXES = ("panel_1", "panel_2", "panel_3")
 
 QUALITY_DIMS = (
     "topic_fit",
@@ -275,7 +277,11 @@ def _score_diversity(
     axes = [a for a in (scored_axes or list(AXES)) if a in AXES] or list(AXES)
     story_sim = _mean_pairwise_similarity([stories.get(a) or "" for a in axes])
     act_sim = _mean_pairwise_similarity([activities.get(a) or "" for a in axes])
-    tag_collapse = axis_tag_lines_collapsed({a: prompts.get(a) or "" for a in axes})
+    axis_tuple = tuple(axes)
+    tag_collapse = axis_tag_lines_collapsed(
+        {a: prompts.get(a) or "" for a in axes},
+        axes=axis_tuple,
+    )
     # Invert similarity → diversity. Micro scales expect higher similarity.
     micro = (time_scale or "").strip().lower() in {"minutes", "tens_of_minutes"}
     story_div = 1.0 - story_sim
@@ -289,7 +295,10 @@ def _score_diversity(
         f"tag_collapse={tag_collapse}"
     )
     # Soft floor when acts_temporally_distinct fails on long scales.
-    if not micro and not acts_temporally_distinct({a: stories.get(a) or "" for a in axes}):
+    if not micro and not acts_temporally_distinct(
+        {a: stories.get(a) or "" for a in axes},
+        axes=axis_tuple,
+    ):
         raw = min(raw, 0.35)
         note += " acts_collapsed"
     return _clamp01(raw), note
@@ -388,7 +397,11 @@ def _score_drawability(
             s += 0.15
         scores.append(_clamp01(s))
     act_slice = {a: activities.get(a) or "" for a in axes}
-    distinct = activities_temporally_distinct(act_slice) if any(act_slice.values()) else True
+    distinct = (
+        activities_temporally_distinct(act_slice, axes=tuple(axes))
+        if any(act_slice.values())
+        else True
+    )
     mean = sum(scores) / max(1, len(scores))
     if not distinct:
         mean = min(mean, 0.45)

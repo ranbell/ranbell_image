@@ -981,7 +981,10 @@ def _mean_pairwise_similarity(beats: list[str]) -> float:
 
 
 def acts_temporally_distinct(
-    stories: dict[str, str], *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+    stories: dict[str, str],
+    *,
+    threshold: float = _BEAT_SIMILAR_THRESHOLD,
+    axes: tuple[str, ...] | None = None,
 ) -> bool:
     """True if the three expanded acts are meaningfully different moments.
 
@@ -989,7 +992,8 @@ def acts_temporally_distinct(
     'differentiate the acts' rewrite. Incomplete input returns True so the
     missing-act error path (not this one) handles it.
     """
-    beats = [str(stories.get(a) or "").strip() for a in AXES]
+    axis_list = axes or AXES
+    beats = [str(stories.get(a) or "").strip() for a in axis_list]
     if not all(beats):
         return True
     return _mean_pairwise_similarity(beats) < threshold
@@ -1005,14 +1009,18 @@ def should_differentiate_acts(time_scale: str) -> bool:
 
 
 def activities_temporally_distinct(
-    activities: dict[str, str], *, threshold: float = _BEAT_SIMILAR_THRESHOLD
+    activities: dict[str, str],
+    *,
+    threshold: float = _BEAT_SIMILAR_THRESHOLD,
+    axes: tuple[str, ...] | None = None,
 ) -> bool:
     """True if the three concrete actions are meaningfully different moments.
 
     Same bigram measure as ``acts_temporally_distinct``. Incomplete input
     returns True so the missing-act path (not this one) handles it.
     """
-    beats = [str(activities.get(a) or "").strip() for a in AXES]
+    axis_list = axes or AXES
+    beats = [str(activities.get(a) or "").strip() for a in axis_list]
     if not all(beats):
         return True
     return _mean_pairwise_similarity(beats) < threshold
@@ -2498,8 +2506,9 @@ def axis_tag_lines_collapsed(
     tag_lines: dict[str, str],
     *,
     threshold: float = _AXIS_TAG_SIMILAR_THRESHOLD,
+    axes: tuple[str, ...] | None = None,
 ) -> bool:
-    """True when past/present/future content tags collapse into one scene.
+    """True when panel content tags collapse into one scene.
 
     Compares content tags (scene/action/props) after stripping identity locks
     and idle portrait defaults. Axes with empty / too-thin tag lines are
@@ -2510,7 +2519,7 @@ def axis_tag_lines_collapsed(
     """
     sets = []
     scene_sets = []
-    for a in AXES:
+    for a in (axes or AXES):
         s = _content_tag_set(tag_lines.get(a, ""))
         if len(s) >= 3:
             sets.append(s)

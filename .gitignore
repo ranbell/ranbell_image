@@ -4,6 +4,7 @@ docker-compose.override.yml
 docker-data/
 data/
 qdrant_data/
+chronicle_evals/
 frontend/node_modules/
 frontend/dist/
 __pycache__/

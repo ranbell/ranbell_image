@@ -1,31 +1,38 @@
 """Chronicle / Storybook API.
 
 POST /api/story/chronicle                    — Phase 1: pitch 3 candidates
+POST /api/story/chronicle/run                — agent one-shot (Phase1→select→images)
+GET  /api/story/chronicle/run/{run_id}       — poll agent run status
+GET  /api/story/chronicle/catalog            — workflows, LLMs, authors, suggested defaults
 POST /api/story/chronicle/{story_id}/select  — Phase 2: expand chosen candidate
 POST /api/story/chronicle/{story_id}/respin  — regenerate (candidates | expand)
 GET  /api/story/chronicle/{job_id}/stream    — SSE token/event stream for a job
 POST /api/story/topic-suggest          — 起承転結 お題 from a base image (no job)
 GET  /api/story/storybook              — list saved stories (newest first)
 GET  /api/story/{story_id}             — one story
+GET  /api/story/{story_id}/eval-bundle — agent eval JSON (prompts + image URLs)
+POST /api/story/{story_id}/export-eval — write report + panel PNGs to disk
 POST /api/story/{story_id}/generate-images   — manual-mode continue (writes
                                                edited prompts back, submits jobs)
 POST /api/story/{story_id}/regenerate/{axis} — image-only retry with a new seed
 """
 
 import asyncio
-import json
 import logging
 import random
 import uuid
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..jobs.sse_stream import queue_sse_response
 from ..spooler.models import JobLane
 from . import db as story_db
+from .agent_run import get_runs, start_agent_run
+from .catalog import build_chronicle_catalog
+from .eval_export import build_eval_bundle, default_eval_root, export_eval_bundle
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/story")
@@ -54,6 +61,20 @@ class ChronicleRequest(BaseModel):
     locale: Literal["en", "ja"] = "ja"
     group_id: str = ""
     time_scale: str = "days"  # minutes|tens_of_minutes|hours|days|months|years|decades
+
+
+class ChronicleAgentRunRequest(ChronicleRequest):
+    """ChronicleRequest plus agent-orchestration knobs."""
+    candidate_id: str = "A"
+    timeout_sec: float = Field(default=1800.0, ge=60.0, le=7200.0)
+    wait_images: bool = True
+    export: bool = True
+    # Absolute or repo-relative path; empty → chronicle_evals/{story_id}/
+    export_dir: str = ""
+
+
+class ExportEvalRequest(BaseModel):
+    export_dir: str = ""
 
 
 class SelectCandidateRequest(BaseModel):
@@ -149,6 +170,18 @@ def _submit_prompt_job(app, name: str, runner, *, meta: dict, **kwargs) -> str:
     return job_id
 
 
+async def _image_docs_for_story(db, story: dict) -> dict[str, dict]:
+    docs: dict[str, dict] = {}
+    for axis in story_db.AXES:
+        sha = ((story.get("axes") or {}).get(axis) or {}).get("image_id") or ""
+        if not sha or sha in docs:
+            continue
+        doc = await db.get(sha)
+        if doc:
+            docs[sha] = doc
+    return docs
+
+
 @router.post("/chronicle")
 async def start_chronicle(body: ChronicleRequest, request: Request):
     """Phase 1: submit the candidate-generation job, return its job_id + group_id.
@@ -175,6 +208,51 @@ async def start_chronicle(body: ChronicleRequest, request: Request):
         body_dict=body.model_dump(),
     )
     return {"job_id": job_id, "group_id": body.group_id, "status": "queued"}
+
+
+@router.post("/chronicle/run")
+async def start_chronicle_agent_run(body: ChronicleAgentRunRequest, request: Request):
+    """Agent one-shot: Phase1 → select candidate → expand → wait images → export.
+
+    Returns immediately with ``run_id``; poll ``GET /chronicle/run/{run_id}``.
+    """
+    if not (body.base_sha256 or "").strip() and not (body.user_topic or "").strip():
+        raise HTTPException(
+            400,
+            "user_topic is required when no base image is provided",
+        )
+    app = request.app
+    body_dict = body.model_dump()
+    # Strip orchestration-only fields before storing on the draft context.
+    for key in ("candidate_id", "timeout_sec", "wait_images", "export", "export_dir"):
+        body_dict.pop(key, None)
+    body_dict["group_id"] = body_dict.get("group_id") or f"chr-{uuid.uuid4().hex[:12]}"
+    export_dir = (body.export_dir or "").strip() or None
+    run = start_agent_run(
+        app,
+        body_dict=body_dict,
+        candidate_id=(body.candidate_id or "A").strip() or "A",
+        timeout_sec=float(body.timeout_sec),
+        wait_images=bool(body.wait_images),
+        do_export=bool(body.export),
+        export_dir=export_dir,
+        submit_prompt_job=_submit_prompt_job,
+    )
+    return run.to_dict()
+
+
+@router.get("/chronicle/run/{run_id}")
+async def get_chronicle_agent_run(run_id: str, request: Request):
+    run = get_runs(request.app).get(run_id)
+    if run is None:
+        raise HTTPException(404, f"Agent run {run_id!r} not found")
+    return run.to_dict()
+
+
+@router.get("/chronicle/catalog")
+async def chronicle_catalog(request: Request):
+    """Workflows, LLM model lists, authors, and suggested run defaults for agents."""
+    return await build_chronicle_catalog(request.app)
 
 
 @router.post("/topic-suggest", response_model=TopicSuggestResponse)
@@ -437,6 +515,38 @@ async def get_storybook(request: Request, limit: int = 50):
 async def delete_story_endpoint(story_id: str, request: Request):
     """Delete a story record. Generated images are NOT deleted."""
     await story_db.delete_story(request.app.state.db, story_id)
+
+
+@router.get("/{story_id}/eval-bundle")
+async def get_eval_bundle(story_id: str, request: Request):
+    """Agent-facing JSON: prompts, narratives, image URLs, quality_eval."""
+    story = await story_db.get_story(request.app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+    docs = await _image_docs_for_story(request.app.state.db, story)
+    return build_eval_bundle(story, db_docs=docs)
+
+
+@router.post("/{story_id}/export-eval")
+async def export_eval(story_id: str, body: ExportEvalRequest, request: Request):
+    """Write report.json + panel PNGs under chronicle_evals/ (or export_dir)."""
+    story = await story_db.get_story(request.app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+    docs = await _image_docs_for_story(request.app.state.db, story)
+    out = Path(body.export_dir) if (body.export_dir or "").strip() else None
+    try:
+        meta = export_eval_bundle(story, db_docs=docs, out_dir=out)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "story_id": meta["story_id"],
+        "export_dir": meta["export_dir"],
+        "report_path": meta["report_path"],
+        "copied_panels": meta["copied_panels"],
+        "missing_panels": meta["missing_panels"],
+        "default_root": str(default_eval_root()),
+    }
 
 
 @router.get("/{story_id}")
