@@ -534,6 +534,65 @@ async function addPinup(story, mode) {
   }
 }
 
+// ── Scene novel (one paragraph per panel, in the author's voice) ──────────────
+const novelBusy = ref(new Set())
+function storyProse(story) {
+  return Array.isArray(story?.prose_scenes) ? story.prose_scenes : []
+}
+async function generateNovel(story) {
+  const id = story.story_id
+  novelBusy.value = new Set([...novelBusy.value, id])
+  try {
+    const r = await fetch(`/api/story/${id}/novel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    const data = await r.json()
+    // Patch prose in place so the reading board updates immediately.
+    stories.value = stories.value.map(x =>
+      x.story_id === id ? { ...x, prose_scenes: data.prose_scenes } : x)
+    if (detailStory.value?.story_id === id)
+      detailStory.value = { ...detailStory.value, prose_scenes: data.prose_scenes }
+  } catch (err) {
+    emit('toast', { msg: String(err.message || err), type: 'error' })
+  } finally {
+    const next = new Set(novelBusy.value)
+    next.delete(id)
+    novelBusy.value = next
+  }
+}
+
+// ── Snap: register a character reference from a generated panel ───────────────
+const snapBusy = ref(new Set())
+async function registerSnap(story, axis) {
+  const id = story.story_id
+  const key = `${id}:${axis}`
+  const prevLen = storyPinups(story).length
+  snapBusy.value = new Set([...snapBusy.value, key])
+  try {
+    const r = await fetch(`/api/story/${id}/snap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ axis }),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText)
+    emit('toast', { msg: t('storybook.snapQueued'), type: 'success' })
+    for (let i = 0; i < 30; i++) {
+      await new Promise(res => setTimeout(res, 4000))
+      const s = await refetchStory(id)
+      if (s && storyPinups(s).length > prevLen) break
+    }
+  } catch (err) {
+    emit('toast', { msg: String(err.message || err), type: 'error' })
+  } finally {
+    const next = new Set(snapBusy.value)
+    next.delete(key)
+    snapBusy.value = next
+  }
+}
+
 async function deleteStory(story) {
   const label = storyTitle(story) || story.story_id
   if (!window.confirm(t('storybook.deleteConfirm', { title: label }))) return
@@ -761,6 +820,43 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </div>
 
           <!-- MOODBOARD -->
+          <!-- MOODBOARD: per-story reading boards (3 panels + scene novel) -->
+          <div v-if="viewMode === 'moodboard' && visibleStories.length" class="flex flex-col gap-7 mb-8">
+            <div v-for="story in visibleStories" :key="`read-${story.story_id}`" class="sb-read-board">
+              <div class="flex items-baseline gap-3 mb-2">
+                <h3 class="sb-display text-sm text-[var(--sb-amber)] truncate">{{ storyTitle(story) || '—' }}</h3>
+                <button @click="generateNovel(story)" :disabled="novelBusy.has(story.story_id)"
+                  class="sb-seg-btn ml-auto text-[11px] whitespace-nowrap">
+                  {{ novelBusy.has(story.story_id) ? t('storybook.novelBusy')
+                     : (storyProse(story).length ? t('storybook.novelRegen') : t('storybook.novelGen')) }}
+                </button>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div v-for="(axis, ai) in AXES" :key="axis" class="flex flex-col gap-1.5">
+                  <div class="relative">
+                    <img v-if="axisImage(story, axis)" :src="`/api/thumbnails/${axisImage(story, axis)}.webp`"
+                      @error="onThumbError($event, axisImage(story, axis))" @click="openImage(axisImage(story, axis))"
+                      loading="lazy" class="w-full rounded cursor-pointer" />
+                    <div v-else class="w-full aspect-[3/4] rounded bg-[var(--sb-rule)]/30 flex items-center justify-center text-[10px] text-[var(--sb-muted)]">
+                      {{ t('storybook.imagePending') }}</div>
+                    <button v-if="axisImage(story, axis)" @click.stop="registerSnap(story, axis)"
+                      :disabled="snapBusy.has(`${story.story_id}:${axis}`)"
+                      class="sb-snap-btn" :title="t('storybook.snapTitle')">
+                      {{ snapBusy.has(`${story.story_id}:${axis}`) ? '…' : t('storybook.snapBtn') }}
+                    </button>
+                  </div>
+                  <p v-if="storyProse(story)[ai]" class="sb-prose text-[12px] leading-relaxed">{{ storyProse(story)[ai] }}</p>
+                </div>
+              </div>
+              <div v-if="storyPinups(story).length" class="flex gap-2 mt-2 flex-wrap items-center">
+                <span class="text-[10px] text-[var(--sb-muted)]">{{ t('storybook.snapRegistered') }}</span>
+                <img v-for="sha in storyPinups(story)" :key="sha" :src="`/api/thumbnails/${sha}.webp`"
+                  @error="onThumbError($event, sha)" @click="openPinup(sha)" loading="lazy"
+                  class="w-14 h-14 object-cover rounded cursor-pointer border border-[var(--sb-rule)]" />
+              </div>
+            </div>
+          </div>
+
           <div v-if="viewMode === 'moodboard' && moodboardPins.length" class="mood-wall">
             <p class="text-[11px] text-[var(--sb-muted)] mb-3 leading-relaxed">{{ t('storybook.moodboardHint') }}</p>
             <div class="pinboard mood-wall-board">
@@ -1357,6 +1453,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   color: #e5e7eb;
   white-space: pre-wrap;
 }
+.sb-read-board {
+  border: 1px solid var(--sb-rule);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+.sb-snap-btn {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 10px;
+  border-radius: 0.3rem;
+  background: rgba(19, 78, 74, 0.8);
+  color: #ccfbf1;
+  border: 1px solid rgba(20, 184, 166, 0.5);
+}
+.sb-snap-btn:hover { background: rgba(13, 148, 136, 0.95); }
+.sb-snap-btn:disabled { opacity: 0.5; }
 .sb-shell {
   background:
     linear-gradient(165deg, rgba(232, 196, 122, 0.06) 0%, transparent 42%),

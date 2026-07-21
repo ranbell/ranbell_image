@@ -104,6 +104,14 @@ class PinupRequest(BaseModel):
     mode: Literal["add", "replace"] = "add"
 
 
+class SnapRequest(BaseModel):
+    axis: str  # panel_1 | panel_2 | panel_3 — the generated panel to snap
+
+
+class NovelRequest(BaseModel):
+    pass
+
+
 class TopicSuggestRequest(BaseModel):
     base_sha256: str
     locale: Literal["en", "ja"] = "ja"
@@ -689,3 +697,93 @@ async def generate_pinup(story_id: str, body: PinupRequest, request: Request):
         mode=body.mode,
     )
     return {"status": "queued", "job_id": job_id, "mode": body.mode}
+
+
+@router.post("/{story_id}/snap")
+async def register_snap(story_id: str, body: SnapRequest, request: Request):
+    """Register a 'snap' character reference from a generated panel (no base image).
+
+    Extracts the panel's WD14 features, infers a biography, and renders a
+    neutral-pose reference linked onto the story's pinups[]."""
+    from ..jobs.runners import run_snap_image_generate
+
+    app = request.app
+    axis = (body.axis or "").strip()
+    if axis not in story_db.AXES:
+        raise HTTPException(400, f"Unknown panel: {axis!r}")
+    story = await story_db.get_story(app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+    panel_sha = ((story.get("axes") or {}).get(axis) or {}).get("image_id") or ""
+    if not panel_sha:
+        raise HTTPException(409, f"Panel {axis!r} has no generated image yet")
+    workflow_name = story.get("workflow_name")
+    if not workflow_name:
+        raise HTTPException(409, "Story has no stored workflow_name")
+
+    body_ctx = (story.get("context") or {}).get("body") or {}
+    author_style = story.get("author_style") or body_ctx.get("author_style") or ""
+    model = body_ctx.get("story_model") or body_ctx.get("vlm_model") or None
+
+    job_id = app.state.spooler.submit(
+        JobLane.GENERATION,
+        "snap_image",
+        run_snap_image_generate,
+        meta={"group_id": story.get("group_id", ""), "story_id": story_id, "axis": axis},
+        db=app.state.db,
+        ollama=app.state.ollama,
+        comfy=app.state.comfy,
+        story_id=story_id,
+        axis=axis,
+        panel_sha256=panel_sha,
+        workflow_name=workflow_name,
+        author_style=author_style,
+        model=model,
+        seed=None,
+    )
+    return {"status": "queued", "job_id": job_id, "axis": axis}
+
+
+@router.post("/{story_id}/novel")
+async def generate_novel(story_id: str, body: NovelRequest, request: Request):
+    """Write a short scene-by-scene novel (one paragraph per panel) in the
+    chronicle's author voice, and store it on the story as ``prose_scenes``."""
+    from ..story.generator import build_novel_prompt, parse_novel_json
+
+    app = request.app
+    story = await story_db.get_story(app.state.db, story_id)
+    if story is None:
+        raise HTTPException(404, f"Story {story_id!r} not found")
+
+    axes = story.get("axes") or {}
+    scenes_in: list[dict] = []
+    for axis in story_db.AXES:
+        a = axes.get(axis) or {}
+        tags = [t.strip() for t in str(a.get("prompt_positive") or "").split(",") if t.strip()]
+        scenes_in.append({
+            "narrative": a.get("story_ja") or a.get("story") or "",
+            "tags": tags,
+        })
+    if not any(s["narrative"] for s in scenes_in):
+        raise HTTPException(409, "Story has no panel narratives to write from")
+
+    body_ctx = (story.get("context") or {}).get("body") or {}
+    author_style = story.get("author_style") or body_ctx.get("author_style") or ""
+    model = body_ctx.get("story_model") or body_ctx.get("vlm_model") or None
+    prompt = build_novel_prompt(
+        author_style=author_style,
+        title=story.get("title") or "",
+        overall=story.get("overall_story") or "",
+        scenes=scenes_in,
+        locale="ja",
+    )
+    try:
+        raw = await app.state.ollama.chat_text(
+            prompt, model=model,
+            options={"num_ctx": 16384, "temperature": 0.8}, fmt=None,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Novel generation failed: {exc}")
+    prose = parse_novel_json(raw)
+    await story_db.set_story_payload(app.state.db, story_id, {"prose_scenes": prose})
+    return {"status": "ok", "prose_scenes": prose}

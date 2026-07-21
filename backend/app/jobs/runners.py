@@ -3193,6 +3193,11 @@ def _current_pinups(doc: dict) -> list[str]:
     return [pid] if pid else []
 
 
+# Bag-family tags get pulled in by generic favourite-item search and make every
+# reference hold a bag; drop them so items only appear when truly characteristic.
+_BAG_TAG_HINTS = ("bag", "backpack", "handbag", "satchel", "briefcase", "purse", "rucksack")
+
+
 async def _pinup_item_tags(db, ollama, biography: dict, *, limit: int = 8) -> list[str]:
     """WD14 tags for the character's favourite items (for the pinup to hold)."""
     fav = [str(x).strip() for x in (biography.get("favourite_items") or [])[:2] if str(x).strip()]
@@ -3203,7 +3208,12 @@ async def _pinup_item_tags(db, ollama, biography: dict, *, limit: int = 8) -> li
         hits = await db.search_wd14_vocab(
             vec, min_freq=0.01, max_freq=0.80, category=0, limit=limit
         )
-        return [str(h.get("name") or "").strip() for h in hits if h.get("name")]
+        out: list[str] = []
+        for h in hits:
+            name = str(h.get("name") or "").strip()
+            if name and not any(b in name.lower() for b in _BAG_TAG_HINTS):
+                out.append(name)
+        return out
     except Exception as exc:
         logger.warning("[pinup] item tag search failed: %s", exc)
         return []
@@ -3376,3 +3386,166 @@ async def run_pinup_image_generate(
 
     reporter.update(1.0, "pinup generated" if saved else "no pinup image")
     return {"sha256s": saved, "base_sha256": base_sha256, "story_id": story_id, "seed": seed}
+
+
+async def run_snap_image_generate(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    comfy,
+    story_id: str,
+    axis: str,
+    panel_sha256: str,
+    workflow_name: str,
+    author_style: str = "",
+    model: str | None = None,
+    seed: int | None = None,
+) -> dict:
+    """GEN lane. Register a 'snap' character reference from a generated chronicle
+    panel — no base image required. WD14-tag the panel, infer a biography from
+    those tags (grounded, so no phantom bag), render a neutral-pose reference,
+    and link it onto the story's pinups[]. Outfit comes from the panel's own
+    tags, not a generic favourite-items pool.
+    """
+    import random as _random
+
+    from ..config import settings as _settings
+    from ..creation.schema import CreationRecord
+    from ..story import db as story_db
+    from ..story.generator import build_snap_biography_prompt, parse_snap_biography
+
+    reporter.indeterminate()
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    doc = await db.get(panel_sha256) or {}
+    # The auto pipeline tags Chronicles/ images, but a just-generated panel may
+    # not be tagged yet — do it synchronously so identity/outfit are available.
+    if not doc.get("wd14_tags"):
+        try:
+            from ..ai.pipeline import _tag_doc
+            await _tag_doc(
+                doc, db, float(_settings.wd14_threshold),
+                _settings.wd14_model_dir or None,
+            )
+            doc = await db.get(panel_sha256) or doc
+        except Exception as exc:
+            logger.warning("[snap] wd14 tagging failed for %s: %s", panel_sha256[:12], exc)
+    wd14 = doc.get("wd14_tags") or []
+
+    # Infer + persist a biography grounded strictly in the panel's tags.
+    biography: dict = {}
+    try:
+        raw = await ollama.chat_text(
+            build_snap_biography_prompt(wd14, author_style),
+            model=model,
+            options={"num_ctx": 8192, "temperature": 0.6},
+            fmt=None,
+        )
+        biography = parse_snap_biography(raw)
+    except Exception as exc:
+        logger.warning("[snap] biography generation failed: %s", exc)
+    if biography:
+        try:
+            await db.set_payload(panel_sha256, {"biography": biography})
+        except Exception as exc:
+            logger.warning("[snap] biography persist failed: %s", exc)
+
+    # Outfit/appearance come from the panel's real tags (via _build_pinup_positive
+    # base_appearance); item_tags stays EMPTY so no generic bag is injected.
+    story = await story_db.get_story(db, story_id) or {}
+    existing = list(story.get("pinups") or [])
+    pose = _PINUP_POSES[len(existing) % len(_PINUP_POSES)]
+    positive = _build_pinup_positive(doc, biography, pose, [])
+    negative = ""
+
+    wf = comfy.load_workflow(workflow_name)
+    patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)
+    prompt_id = await comfy.queue_prompt(patched)
+    reporter.update(0.0, "Waiting in ComfyUI queue...")
+
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception as exc:
+                logger.warning("ComfyUI queue delete failed: %s", exc)
+        try:
+            await comfy.interrupt()
+        except Exception as exc:
+            logger.warning("ComfyUI interrupt failed: %s", exc)
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    saved: list[str] = []
+
+    async def _finalize(sha256: str) -> None:
+        cur = await story_db.get_story(db, story_id) or {}
+        pins = list(cur.get("pinups") or [])
+        pins.append(sha256)
+        try:
+            await story_db.set_story_payload(
+                db, story_id, {"pinups": pins, "pinup_image_id": sha256}
+            )
+        except Exception as exc:
+            logger.warning("[snap] story link failed for %s: %s", story_id, exc)
+        record = CreationRecord(
+            method="chronicle",
+            prompt_style="",
+            workflow_name=workflow_name,
+            positive_prompt_generated=positive,
+            negative_prompt_generated=negative,
+            seed=seed,
+        )
+        await db.set_payload(sha256, {
+            "creation_record": record.model_dump(),
+            "snap_of_image_id": panel_sha256,
+            "snap_story_id": story_id,
+        })
+
+    async def _try_save(img_ref) -> None:
+        img_bytes = await comfy.fetch_image(
+            img_ref["filename"], img_ref.get("subfolder", ""),
+            img_ref.get("type", "output"),
+        )
+        sha256 = await _save_and_register_chronicle_image(
+            img_bytes, img_ref["filename"], db
+        )
+        if sha256:
+            saved.append(sha256)
+            await _finalize(sha256)
+
+    async for event in comfy.stream_progress(prompt_id):
+        cancel.raise_if_set()
+        queued = False
+        if event["type"] == "comfy_progress":
+            v = event.get("value", 0)
+            m = event.get("max", 1)
+            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+        elif event["type"] == "comfy_output":
+            for img_ref in event.get("images", []):
+                cancel.raise_if_set()
+                try:
+                    await _try_save(img_ref)
+                except Exception as exc:
+                    logger.error("[snap] image save error: %s", exc)
+                if saved:
+                    break
+        if saved:
+            break
+
+    if not saved:
+        for img_ref in await comfy.fetch_history(prompt_id):
+            try:
+                await _try_save(img_ref)
+            except Exception as exc:
+                logger.error("[snap] history image save error: %s", exc)
+            if saved:
+                break
+
+    reporter.update(1.0, "snap registered" if saved else "no snap image")
+    return {"sha256s": saved, "panel_sha256": panel_sha256, "story_id": story_id, "seed": seed}

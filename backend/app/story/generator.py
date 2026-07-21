@@ -871,6 +871,95 @@ def parse_biography_json(raw: str) -> dict:
     return out if any(out.values()) else {}
 
 
+def build_snap_biography_prompt(wd14_tags: list[str], author_style: str = "") -> str:
+    """Prompt to infer a snap character's biography from an image's WD14 tags.
+
+    Grounded strictly in the tags so the reference never sprouts props the image
+    never had — notably NO bag unless a bag tag is actually present.
+    """
+    tags = ", ".join(str(t).strip() for t in (wd14_tags or [])[:40] if str(t).strip())
+    style = (
+        f'\nAuthor voice (personality flavour only): "{author_style.strip()}"'
+        if author_style.strip() else ""
+    )
+    return (
+        "From the danbooru tags of ONE anime character image, infer a short "
+        "character biography. Use ONLY what the tags support. Do NOT invent items "
+        "or accessories absent from the tags — in particular, never add a bag / "
+        "handbag / backpack unless such a tag is actually present.\n"
+        f"Tags: {tags}{style}\n\n"
+        "Output English JSON only, no markdown fences:\n"
+        '{"occupation":"<short or empty>","personality":"<1 sentence>",'
+        '"hobbies":["..."],"favourite_items":["..."],"quirks":["..."],'
+        '"outfit":["<danbooru clothing tags actually implied by the image>"]}'
+    )
+
+
+def build_novel_prompt(
+    *,
+    author_style: str,
+    title: str,
+    overall: str,
+    scenes: list[dict],
+    locale: str = "ja",
+) -> str:
+    """Prompt for a short scene-by-scene novel of a 3-panel story.
+
+    One paragraph per panel, written in the chronicle's author voice. Grounded in
+    each panel's narrative so the prose matches the images shown on the moodboard.
+    """
+    lang = "日本語" if locale == "ja" else "English"
+    voice = author_style.strip() or ("標準的で読みやすい文体" if locale == "ja" else "a clear, readable voice")
+    lines: list[str] = []
+    for i, s in enumerate(scenes, 1):
+        narr = str(s.get("narrative") or "").strip()
+        tags = ", ".join(str(t) for t in (s.get("tags") or [])[:12])
+        tm = str(s.get("time_marker") or "").strip()
+        lines.append(f"panel_{i}: {narr}" + (f" [time: {tm}]" if tm else "") + (f" [tags: {tags}]" if tags else ""))
+    scene_block = "\n".join(lines)
+    head = f'作品タイトル: 「{title}」\n物語の芯: {overall}\n' if locale == "ja" else f'Title: "{title}"\nCore: {overall}\n'
+    return (
+        f"あなたは小説家です。3枚の連続する挿絵に添える短い読み物を、{lang}で書きます。\n"
+        f"文体（作者プロフィール）: {voice}\n"
+        f"{head}\n"
+        "各 panel に対応する段落を1つずつ、合計3段落書いてください。各段落はその挿絵の場面だけを描写し、\n"
+        "見えているもの・仕草・空気感を、上の文体で情感豊かに綴ります(各段落 2〜4文)。挿絵に無い展開は足さない。\n\n"
+        f"{scene_block}\n\n"
+        'JSON のみを出力(前後に説明やコードフェンスを付けない):\n'
+        '{"scenes": ["panel_1の段落", "panel_2の段落", "panel_3の段落"]}'
+    )
+
+
+def parse_novel_json(raw: str) -> list[str]:
+    """Parse the novel JSON into exactly three paragraph strings (best-effort)."""
+    data = _loads_lenient(raw) if isinstance(raw, str) else raw
+    scenes: list[str] = []
+    if isinstance(data, dict):
+        v = data.get("scenes")
+        if isinstance(v, list):
+            scenes = [str(x).strip() for x in v if str(x).strip()]
+    if len(scenes) < 3:
+        scenes = (scenes + ["", "", ""])[:3]
+    return scenes[:3]
+
+
+def parse_snap_biography(raw: str) -> dict:
+    """Parse snap biography: standard bio keys plus an ``outfit`` tag list."""
+    bio = parse_biography_json(raw)
+    data = _loads_lenient(raw) if isinstance(raw, str) else (raw or {})
+    outfit: list[str] = []
+    if isinstance(data, dict):
+        v = data.get("outfit")
+        if isinstance(v, list):
+            outfit = [str(x).strip().replace(" ", "_") for x in v if str(x).strip()]
+        elif isinstance(v, str) and v.strip():
+            outfit = [v.strip().replace(" ", "_")]
+    if outfit or bio:
+        bio = dict(bio)
+        bio["outfit"] = outfit
+    return bio
+
+
 def _biography_brief(bio: dict | None) -> str:
     """One-line biography summary for embedding into other prompts."""
     if not bio:
