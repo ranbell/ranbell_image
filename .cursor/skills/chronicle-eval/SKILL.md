@@ -10,7 +10,8 @@ description: >-
 # Chronicle agent eval loop
 
 Full manual (Claude Code / agents): **[docs/guide/chronicle-agent.ja.md](../../../docs/guide/chronicle-agent.ja.md)**  
-Repo entry for Claude Code: **[CLAUDE.md](../../../CLAUDE.md)**
+Private ops / retest: **[private/CLAUDE.md](../../../private/CLAUDE.md)** (gitignored)  
+Root pointer: **[CLAUDE.md](../../../CLAUDE.md)**
 
 Human-driven improve loop: **discover → generate images → inspect → propose prompt edits → user approves → re-run**. Do **not** auto-patch prompts or auto-respin.
 

@@ -35,7 +35,15 @@ They are not subject to refinement, rewording, summarizing, merging, or optimiza
 - `consistency_tags` — hair color / hairstyle / eye color / base outfit
 - tags originating from `custom_tags` — explicitly specified by the user
 - `camera` — shot distance
-- `character_state_diff` — inter-panel state control
+- `character_state_diff` — inter-panel state (**English only**). If the input is
+  Japanese or mixed script, **translate** to equivalent English danbooru tags /
+  short English phrases, then lock those. Never paste Japanese into the output.
+- `gesture` — body action (**locked meaning**). If English, keep the same action.
+  If Japanese, **translate** to an English action phrase or danbooru pose tags that
+  preserve the same motion (do not invent a different pose). Never paste Japanese.
+
+**Place identity locks first.** Copy every `consistency_tags` entry **verbatim at the start**
+of the prompt. Do **not** restate hair, eyes, or base outfit in prose elsewhere.
 
 **Forbidden rewrites:**
 
@@ -45,10 +53,17 @@ They are not subject to refinement, rewording, summarizing, merging, or optimiza
 | `low_ponytail` | `hair tied back loosely` | `low_ponytail` |
 | `grey_eyes` | `silver-grey irises` | `grey_eyes` |
 | `medium_hair` | (merged into another length tag) | `medium_hair` |
+| `casual_clothes` | `loose beige cardigan over a dark skirt` (as identity) | `casual_clothes` only for identity; cloth *motion/weather state* may add temporary detail without inventing a new outfit |
+| gesture `arms stretched overhead` | fist pump / victory pose / guts pose | keep stretch / overhead arms |
 
-Rewriting these makes the three panels depict **different people**.
+Rewriting identity tags makes the three panels depict **different people**.
+Changing `gesture` into a different action (stretch → fist pump) breaks the storyboard.
 If any other rule conflicts with R0, **R0 always wins**.
-Never add new descriptive wording about hair, eyes, or base outfit.
+Never add new descriptive wording that **replaces** hair, eyes, or base outfit tags.
+The rewritten prompt itself must be **English only** (danbooru tags + English prose).
+Never emit Japanese, Chinese, or other non-Latin script in the output prompt.
+If `character_state_diff` / `gesture` arrive in Japanese, translate first (same meaning),
+then include the English form — do not drop the lock silently and do not paste the original.
 
 ---
 
@@ -125,18 +140,20 @@ Verify the generated prompt is genuinely specific. Add concrete detail where it 
 
 ---
 
-## Emotion — REQUIRED
+## Emotion — HARD RULE (REQUIRED)
 
 Without an explicit emotional state, every character comes out blank-faced and every
-pose comes out generic. Each prompt must carry one, expressed **without `smile` and
-without `looking at viewer`** — those break her immersion in her own world.
+pose comes out generic. Each prompt with a visible person **must** include **at least one
+danbooru Face/expression tag** from the Face column below (or an equivalent Face tag),
+expressed **without `smile` and without `looking at viewer` / `looking_at_viewer`** —
+those break her immersion in her own world.
 
 ### Emotion must appear in three channels at once
 
 One channel alone does not read. Use all three.
 
-1. **Face** — eyes, brows, mouth
-2. **Body language** — where the tension sits
+1. **Face** — eyes, brows, mouth (**≥1 danbooru expression tag is mandatory**)
+2. **Body language** — where the tension sits (aligned with locked `gesture`)
 3. **Gaze** — what she cannot look away from, or will not look at
 
 ### Vocabulary
@@ -177,13 +194,16 @@ Main subject: 1girl, foreground center, sharply rendered with highest detail.
 ```
 
 ### 2. Give the subject physical detail
-`1girl` alone does not distinguish her from the crowd. For the main subject only, describe:
+`1girl` alone does not distinguish her from the crowd. For the main subject only:
 
-- **Hair** — length, direction of flow, disturbance from wind or motion, how it catches light
-- **Clothing** — material texture, how folds gather, state of cuffs and hem, sway
-- **Posture and action** — hand position, finger placement, chin angle, where the gaze falls
+- **Hair / eyes / base outfit** — use **`consistency_tags` verbatim at the prompt head only**.
+  Do **not** paraphrase identity (no “chestnut hair”, no invented cardigan/skirt as a new outfit).
+  You may add **temporary** motion or weather state on hair/cloth (damp ends, sleeve pushed up)
+  without replacing the locked identity tags.
+- **Posture and action** — must realize the locked `gesture` (same action; do not substitute).
+  Hand position, finger placement, chin angle, where the gaze falls.
 
-Do not write these for background figures. **The difference in detail IS the hierarchy.**
+Do not write identity rewrites for background figures. **The difference in detail IS the hierarchy.**
 
 ### 3. Explicitly lower background priority
 Specify not only what to draw, but **how not to draw it**.
@@ -473,7 +493,8 @@ clear separation of the two hair colors, soft anime shading.
 
 ## Output
 
-Output only the rewritten prompt. No preamble, no explanation, no code fences.
+Output only the rewritten prompt in **English**. No preamble, no explanation, no code
+fences, no Japanese or other non-Latin script.
 
 ---
 

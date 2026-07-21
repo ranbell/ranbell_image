@@ -12,11 +12,13 @@ Ranbell Image の Chronicle（3パネル物語画像）を、**SSE なしの API
 - ComfyUI に workflow があり、画像生成可能なこと
 - Ollama（または OpenAI 互換）に Chronicle 用 LLM があること
 - 作業ディレクトリはリポジトリルート `ranbell_image/`
+- API は `X-API-Token` 必須（CLI: `--api-token` または環境変数 `RANBELL_API_TOKEN`）
 
 環境変数の代わりに CLI の `--base-url` を使う。
 
 ```text
 BASE=http://127.0.0.1:8000   # 実際のホストに合わせて変更
+RANBELL_API_TOKEN=...        # 環境のトークン
 ```
 
 ---
@@ -43,8 +45,9 @@ BASE=http://127.0.0.1:8000   # 実際のホストに合わせて変更
 ### CLI（推奨）
 
 ```bash
-python scripts/chronicle_agent_run.py --base-url "$BASE" --catalog
-python scripts/chronicle_agent_run.py --base-url "$BASE" --catalog --catalog-json
+export RANBELL_API_TOKEN=...   # or pass --api-token
+python scripts/chronicle_agent_run.py --base-url "$BASE" --api-token "$RANBELL_API_TOKEN" --catalog
+python scripts/chronicle_agent_run.py --base-url "$BASE" --api-token "$RANBELL_API_TOKEN" --catalog --catalog-json
 ```
 
 ### HTTP
@@ -82,6 +85,7 @@ catalog の推奨値で埋める:
 ```bash
 python scripts/chronicle_agent_run.py \
   --base-url "$BASE" \
+  --api-token "$RANBELL_API_TOKEN" \
   --topic "雨の日の図書室で課題を進める一日" \
   --use-catalog-defaults \
   --candidate A
@@ -92,6 +96,7 @@ python scripts/chronicle_agent_run.py \
 ```bash
 python scripts/chronicle_agent_run.py \
   --base-url "$BASE" \
+  --api-token "$RANBELL_API_TOKEN" \
   --topic "カフェで働く話" \
   --workflow "YOUR_WORKFLOW.json" \
   --story-model "YOUR_MODEL" \
@@ -252,7 +257,7 @@ curl -sS -X POST "$BASE/api/story/$STORY_ID/export-eval" \
 ユーザーが「Chronicle を回して画質を見て」と言ったら:
 
 ```text
-1. python scripts/chronicle_agent_run.py --base-url <BASE> --catalog を実行
+1. python scripts/chronicle_agent_run.py --base-url <BASE> --api-token "$RANBELL_API_TOKEN" --catalog を実行
 2. suggested_run または明示指定で --use-catalog-defaults 付き run
 3. done まで待ち、export_dir の panel_*.png を読む
 4. 改善案だけ提示し、プロンプト編集は承認後

@@ -2,26 +2,17 @@
 """Run Chronicle end-to-end via the agent orchestration API (no SSE).
 
 Examples:
-  # Discover workflows / LLMs / authors / suggested defaults
-  python scripts/chronicle_agent_run.py --base-url http://127.0.0.1:8000 --catalog
+  python scripts/chronicle_agent_run.py --base-url http://192.168.53.10:3100 \\
+    --api-token "$RANBELL_API_TOKEN" --catalog
 
-  # Run using catalog defaults for missing workflow/model
-  python scripts/chronicle_agent_run.py \\
-    --base-url http://127.0.0.1:8000 \\
-    --topic "雨の日の図書室" \\
-    --use-catalog-defaults
-
-  python scripts/chronicle_agent_run.py \\
-    --base-url http://127.0.0.1:8000 \\
-    --topic "カフェで働く" \\
-    --workflow "x.json" \\
-    --story-model "gemma3:12b" \\
-    --candidate B
+  python scripts/chronicle_agent_run.py --base-url http://192.168.53.10:3100 \\
+    --api-token "$RANBELL_API_TOKEN" --topic "雨の日の図書室" --use-catalog-defaults
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -35,9 +26,13 @@ def _req(
     body: dict | None = None,
     *,
     timeout: float = 60.0,
+    api_token: str = "",
 ) -> Any:
     data = None
     headers = {"Accept": "application/json"}
+    token = (api_token or "").strip()
+    if token:
+        headers["X-API-Token"] = token
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -83,21 +78,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Chronicle agent run (poll until done)")
     ap.add_argument("--base-url", default="http://127.0.0.1:8000")
     ap.add_argument(
-        "--catalog",
-        action="store_true",
-        help="Fetch GET /api/story/chronicle/catalog and exit",
+        "--api-token",
+        default=os.environ.get("RANBELL_API_TOKEN", ""),
+        help="X-API-Token (or env RANBELL_API_TOKEN)",
     )
-    ap.add_argument(
-        "--catalog-json",
-        action="store_true",
-        help="With --catalog, print full JSON instead of a summary",
-    )
-    ap.add_argument(
-        "--use-catalog-defaults",
-        action="store_true",
-        help="Fill empty workflow/story_model/llm_provider from catalog",
-    )
-    ap.add_argument("--topic", default="", help="user_topic (required without --base-sha)")
+    ap.add_argument("--catalog", action="store_true")
+    ap.add_argument("--catalog-json", action="store_true")
+    ap.add_argument("--use-catalog-defaults", action="store_true")
+    ap.add_argument("--topic", default="")
     ap.add_argument("--base-sha", default="", dest="base_sha256")
     ap.add_argument("--workflow", default="", dest="workflow_name")
     ap.add_argument("--candidate", default="A", dest="candidate_id")
@@ -110,7 +98,7 @@ def main() -> int:
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--num-ctx", type=int, default=32768)
     ap.add_argument("--timeout-sec", type=float, default=1800.0)
-    ap.add_argument("--poll", type=float, default=5.0, help="poll interval seconds")
+    ap.add_argument("--poll", type=float, default=5.0)
     ap.add_argument("--no-wait-images", action="store_true")
     ap.add_argument("--no-export", action="store_true")
     ap.add_argument("--export-dir", default="")
@@ -118,9 +106,13 @@ def main() -> int:
     args = ap.parse_args()
 
     base = args.base_url.rstrip("/")
+    token = (args.api_token or "").strip()
+
+    def req(method: str, url: str, body: dict | None = None, **kw: Any) -> Any:
+        return _req(method, url, body, api_token=token, **kw)
 
     if args.catalog:
-        cat = _req("GET", f"{base}/api/story/chronicle/catalog", timeout=120.0)
+        cat = req("GET", f"{base}/api/story/chronicle/catalog", timeout=120.0)
         if args.catalog_json:
             print(json.dumps(cat, ensure_ascii=False, indent=2))
         else:
@@ -139,7 +131,7 @@ def main() -> int:
     locale = args.locale
 
     if args.use_catalog_defaults:
-        cat = _req("GET", f"{base}/api/story/chronicle/catalog", timeout=120.0)
+        cat = req("GET", f"{base}/api/story/chronicle/catalog", timeout=120.0)
         sug = (cat or {}).get("suggested_run") or {}
         if not workflow:
             workflow = sug.get("workflow_name") or ""
@@ -193,7 +185,7 @@ def main() -> int:
         "manual_mode": args.manual_mode,
     }
     print(f"[chronicle_agent_run] POST {base}/api/story/chronicle/run", flush=True)
-    started = _req("POST", f"{base}/api/story/chronicle/run", payload)
+    started = req("POST", f"{base}/api/story/chronicle/run", payload)
     if not isinstance(started, dict):
         print(started)
         return 1
@@ -206,7 +198,7 @@ def main() -> int:
     deadline = time.time() + float(args.timeout_sec) + 60.0
     last_status = None
     while time.time() < deadline:
-        state = _req("GET", f"{base}/api/story/chronicle/run/{run_id}", timeout=30.0)
+        state = req("GET", f"{base}/api/story/chronicle/run/{run_id}", timeout=30.0)
         if not isinstance(state, dict):
             time.sleep(max(0.5, float(args.poll)))
             continue

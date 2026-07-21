@@ -72,10 +72,57 @@ def test_r0_enforces_missing_consistency():
         camera="close_up",
         character_state_diff="",
     )
-    assert "brown_hair" in text
-    assert "green_eyes" in text
-    assert "rain" in text
-    assert "close_up" in text or "close-up" in text
+    assert text.startswith("brown_hair, green_eyes, rain, close_up")
+    assert "anime illustration" in text
+
+
+def test_r0_always_prepends_even_when_present():
+    text = enforce_r0_locks(
+        "brown_hair, green_eyes, close_up, anime girl at a desk",
+        consistency_tags=["brown_hair", "green_eyes"],
+        custom_tags=[],
+        camera="close_up",
+        character_state_diff="",
+    )
+    # Lock line is always normalized to the front (duplicates allowed).
+    assert text.startswith("brown_hair, green_eyes, close_up,")
+
+
+def test_r0_skips_non_ascii_state_diff():
+    text = enforce_r0_locks(
+        "anime illustration",
+        consistency_tags=["brown_hair"],
+        custom_tags=[],
+        camera="medium_shot",
+        character_state_diff="目が潤んでいる",
+    )
+    assert "目が潤んでいる" not in text
+    assert text.startswith("brown_hair, medium_shot")
+
+
+def test_r0_english_state_diff_and_gesture():
+    text = enforce_r0_locks(
+        "anime illustration of a girl",
+        consistency_tags=["brown_hair"],
+        custom_tags=[],
+        camera="long_shot",
+        character_state_diff="teary_eyes",
+        gesture="arms stretched overhead",
+    )
+    assert text.startswith("brown_hair, long_shot, teary_eyes")
+    assert "arms stretched overhead" in text
+
+
+def test_r0_skips_japanese_gesture():
+    text = enforce_r0_locks(
+        "anime illustration",
+        consistency_tags=["brown_hair"],
+        custom_tags=[],
+        camera="close_up",
+        character_state_diff="",
+        gesture="背伸び",
+    )
+    assert "背伸び" not in text
 
 
 def test_character_profile_from_user_tags():

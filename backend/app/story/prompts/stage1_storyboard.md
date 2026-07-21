@@ -90,6 +90,12 @@ JSON以外の文字(説明、前置き、```md フェンス)は一切出力し�
     「その場に見えている状態・物・姿勢」に変換して表現すること。
 12. パネルの時間関係は panel_time_labels に従う(スタート → 経過 → さらに経過)。
     過去・現在・未来という用語は使わない。
+13. 【画像プロンプト汚染防止】次のフィールドは ASCII 英語のみ(日本語・その他非ラテン文字禁止)。
+    - gesture: 英語の具体動作フレーズまたは danbooru タグ
+    - character_state_diff: 空、または英語の一時状態タグ／短い英語句
+    - danbooru_tags / consistency_tags / shared_tags / camera / time_marker:
+      英語タグのみ
+    narrative_ja のみ日本語可。image 生成へ渡るタグ類に日本語を書いてはならない。
 
 # STRUCTURE TYPES(選択肢はこの3つのみ)
 - "kishoutenketsu": 起(導入)→承(展開)→結(帰結)。日常からの小さな変化を描く時に選ぶ。
@@ -178,7 +184,10 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 各パネルで以下を必ず決定する:
 - camera: "long_shot" | "medium_shot" | "close_up" のいずれか(3パネルで重複禁止)
 - character_focus: 視線の先(人物・物・空間のいずれか。カメラ方向は禁止)
-- gesture: 感情を語る身体動作・手の動き(表情タグに頼らない)
+- gesture: 身体動作・手の動きを **英語の具体フレーズまたは danbooru タグ** で書く
+  (例: "fingertips tracing the desk edge", "arms_stretched_overhead")。
+  身体動作は gesture に、**表情は danbooru_tags に別途必須**(表情タグだけで gesture を代用しない)。
+  narrative_ja/en と矛盾する gesture は禁止(伸びなのにガッツポーズ等)。
 - time_marker: 光の角度/天候/色温度のいずれかで時間経過を示す要素
 - visible_elements: そのパネルで画面内に実際に見えている主要な物・状況を列挙する。
   narrativeの内容はここに挙げた要素だけで成立していなければならない。
@@ -187,9 +196,10 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 - consistency_tags: 入力character_profileの4項目(hair_color, hairstyle, eye_color,
   base_outfit)をタグ化してそのまま格納する。あなたが独自に髪色・髪型・瞳の色を
   発想することは禁止。この4項目以外を勝手に追加しない。
-- character_state_diff: パネル1を基準として、パネル2・3で変化した一時的な外見要素のみ記述
-  (例: "髪が乱れる", "上着を脱ぐ", "頬に涙の跡")。consistency_tags自体は書き換えない。
-  変化がなければ空文字列。
+- character_state_diff: パネル1を基準として、パネル2・3で変化した一時的な外見要素のみ。
+  **空文字列、または英語の一時状態タグ／短い英語句のみ**
+  (例: "teary_eyes", "damp_sleeves", "leaning_forward")。日本語の生挿入は禁止。
+  consistency_tags自体は書き換えない。変化がなければ空文字列。
 
 # DANBOORU TAG VOCABULARY(方向性の例示。この語彙に限定しない)
 以下はカテゴリごとの例であり、閉じたリストではありません。物語の状況に応じて
@@ -199,6 +209,8 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 - weather/time: 例)rain, falling_leaves, snow, dusk, dawn, night, cherry_blossoms
 - mood_via_environment: 例)empty_street, cluttered_desk, single_light_source, wide_open_sky
 - pose/gesture: 例)clenched_hand, looking_down, reaching_out, back_turned, sitting_alone
+- face/expression(人物パネルは最低1つ必須。smile / looking_at_viewer 禁止):
+  例)half-closed_eyes, open_mouth, looking_away, blush, frown, teary_eyes
 禁止: consistency_tags(髪色・髪型・瞳の色・基本衣装)に関するタグをdanbooru_tags側で
 新しい言い回しとして重複生成しないこと。
 
@@ -218,11 +230,11 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
       "narrative_en": "string, 1-2 sentences",
       "camera": "long_shot | medium_shot | close_up",
       "character_focus": "string",
-      "gesture": "string",
-      "time_marker": "string",
+      "gesture": "string(English action phrase or danbooru tag only)",
+      "time_marker": "string(English)",
       "visible_elements": ["string(画面内に見えている物・状況)", "..."],
-      "character_state_diff": "string(空文字列可)",
-      "danbooru_tags": ["string", "..."]
+      "character_state_diff": "string(empty or English state tag/phrase only)",
+      "danbooru_tags": ["string(English danbooru tags)", "..."]
     }
   ],
   "shared_tags": ["multiple panels", "sequential art", "no text", "no speech bubble"],
@@ -262,6 +274,9 @@ AI画像生成では暗所の細部が潰れやすく、3枚並べた際の視�
 - time_marker / 時間の進み方は panel_time_labels に沿っているか?
 - titleはauthor_styleのトーンを反映しているか(文体を変えたのにタイトルが
   汎用的なままになっていないか)?
+- gesture は英語か? narrative と矛盾していないか?
+- 人物が写る各パネルの danbooru_tags に表情タグが最低1つあるか(smile系禁止)?
+- character_state_diff は空か英語のみか(日本語が混入していないか)?
 上記すべてを満たすまで内部で修正し、最終的なJSONのみを出力する。
 ```
 
@@ -302,11 +317,11 @@ character_profile: {
       "narrative_en": "In the empty classroom at dusk, she stares quietly at the vacant seat beside her.",
       "camera": "long_shot",
       "character_focus": "空席",
-      "gesture": "机の縁を指先でなぞる",
+      "gesture": "fingertips tracing the desk edge",
       "time_marker": "golden_hour",
       "visible_elements": ["空の教室", "隣の空席", "夕日の差す窓"],
       "character_state_diff": "",
-      "danbooru_tags": ["empty_classroom", "golden_hour", "long_shot", "sitting_alone"]
+      "danbooru_tags": ["empty_classroom", "golden_hour", "long_shot", "sitting_alone", "looking_away"]
     },
     {
       "act": "出来事",
@@ -314,11 +329,11 @@ character_profile: {
       "narrative_en": "On the station platform, she stands facing her childhood friend who is holding luggage, both lit by the departure lights.",
       "camera": "medium_shot",
       "character_focus": "幼馴染の顔",
-      "gesture": "制服の裾を強く握る",
+      "gesture": "clenching the hem of her uniform skirt",
       "time_marker": "overcast",
       "visible_elements": ["駅のホーム", "荷物を抱えた幼馴染", "停車中の電車"],
-      "character_state_diff": "目が潤んでいる",
-      "danbooru_tags": ["train_station", "overcast", "medium_shot", "clenched_hand"]
+      "character_state_diff": "teary_eyes",
+      "danbooru_tags": ["train_station", "overcast", "medium_shot", "clenched_hand", "open_mouth"]
     },
     {
       "act": "余韻",
@@ -326,11 +341,11 @@ character_profile: {
       "narrative_en": "Standing alone on the deserted platform, she wipes her eyes with her sleeve. Nothing remains down the tracks.",
       "camera": "close_up",
       "character_focus": "遠くの線路",
-      "gesture": "制服の袖で目元を拭う",
+      "gesture": "wiping her eyes with her uniform sleeve",
       "time_marker": "dusk",
       "visible_elements": ["無人のホーム", "空の線路", "夕闇"],
-      "character_state_diff": "涙の跡",
-      "danbooru_tags": ["dusk", "close_up", "back_turned", "empty_street"]
+      "character_state_diff": "tear_stains",
+      "danbooru_tags": ["dusk", "close_up", "back_turned", "empty_street", "teary_eyes"]
     }
   ],
   "shared_tags": ["multiple panels", "sequential art", "no text", "no speech bubble"],
@@ -378,11 +393,11 @@ character_profile: {
       "narrative_en": "Resting her chin on her hand by the register, she gazes idly at the shelves of an old candy shop.",
       "camera": "medium_shot",
       "character_focus": "埃をかぶった棚の奥",
-      "gesture": "頬杖をつく",
+      "gesture": "resting chin on hand",
       "time_marker": "dust particles in sunbeam",
       "visible_elements": ["駄菓子屋のレジ台", "古びた商品棚", "光の中の埃"],
       "character_state_diff": "",
-      "danbooru_tags": ["old_shop_interior", "dust_motes", "medium_shot", "sitting_alone"]
+      "danbooru_tags": ["old_shop_interior", "dust_motes", "medium_shot", "sitting_alone", "half-closed_eyes"]
     },
     {
       "act": "during",
@@ -390,11 +405,11 @@ character_profile: {
       "narrative_en": "She holds a bundle of old letters pulled from the back of the shelf, its string coming loose in her hands.",
       "camera": "close_up",
       "character_focus": "手にした手紙の束",
-      "gesture": "手紙を両手でそっと持つ",
+      "gesture": "holding the letter bundle with both hands",
       "time_marker": "shaft of afternoon light",
       "visible_elements": ["古い手紙の束", "解けかけた紐", "開いた棚"],
-      "character_state_diff": "前のめりになっている",
-      "danbooru_tags": ["old_letters", "close_up", "single_light_source", "reaching_out"]
+      "character_state_diff": "leaning_forward",
+      "danbooru_tags": ["old_letters", "close_up", "single_light_source", "reaching_out", "open_mouth"]
     },
     {
       "act": "after",
@@ -402,11 +417,11 @@ character_profile: {
       "narrative_en": "In the evening shop, she stands with her hand resting on the closed shelf, looking up at the shelving that reaches the ceiling.",
       "camera": "long_shot",
       "character_focus": "天井まで続く棚",
-      "gesture": "棚に手を添えて立つ",
+      "gesture": "standing with a hand on the closed shelf",
       "time_marker": "evening amber light",
       "visible_elements": ["閉じた棚", "天井まで並ぶ商品棚", "夕方の琥珀色の光"],
       "character_state_diff": "",
-      "danbooru_tags": ["old_shop_interior", "evening_light", "long_shot", "looking_down"]
+      "danbooru_tags": ["old_shop_interior", "evening_light", "long_shot", "looking_away", "closed_mouth"]
     }
   ],
   "shared_tags": ["multiple panels", "sequential art", "no text", "no speech bubble"],
@@ -461,11 +476,11 @@ shopping_bagが指定通り含まれている点に注目):
       "narrative_en": "The dress she's been eyeing sits behind the glass. She checks her wallet. Nothing more.",
       "camera": "long_shot",
       "character_focus": "ショーウィンドウのワンピース",
-      "gesture": "財布を軽く握りしめる",
+      "gesture": "lightly gripping her wallet",
       "visible_elements": ["ショーウィンドウ", "飾られたワンピース", "手にした財布"],
       "time_marker": "昼下がりの柔らかい日差し",
       "character_state_diff": "",
-      "danbooru_tags": ["shopping_street", "shop_window", "long_shot", "soft_lighting"]
+      "danbooru_tags": ["shopping_street", "shop_window", "long_shot", "soft_lighting", "looking_away"]
     },
     {
       "act": "出来事",
@@ -473,11 +488,11 @@ shopping_bagが指定通り含まれている点に注目):
       "narrative_en": "Her hand stops midair before the emptied rack. The dress hangs over the arm of the customer beside her. Rain streaks the window.",
       "camera": "medium_shot",
       "character_focus": "隣の客の腕にあるワンピース",
-      "gesture": "伸ばしかけた手を宙で止める",
+      "gesture": "hand frozen mid-reach toward the empty rack",
       "time_marker": "窓を伝う雨",
       "visible_elements": ["空のラック", "隣の客の腕に掛かったワンピース", "雨に濡れた窓"],
       "character_state_diff": "",
-      "danbooru_tags": ["clothing_store", "rain", "medium_shot", "reaching_out"]
+      "danbooru_tags": ["clothing_store", "rain", "medium_shot", "reaching_out", "surprised"]
     },
     {
       "act": "余韻",
@@ -485,11 +500,11 @@ shopping_bagが指定通り含まれている点に注目):
       "narrative_en": "At the shop's exit she adjusts her grip on the paper bag. Pale fabric peeks from its opening.",
       "camera": "close_up",
       "character_focus": "手元の紙袋",
-      "gesture": "紙袋の持ち手を握り直す",
+      "gesture": "adjusting her grip on the paper bag handles",
       "time_marker": "夕方の柔らかい光",
       "visible_elements": ["紙袋", "袋から覗く白い布地", "店の出口"],
-      "character_state_diff": "紙袋を提げている",
-      "danbooru_tags": ["shopping_bag", "golden_hour", "close_up", "looking_down"]
+      "character_state_diff": "carrying_shopping_bag",
+      "danbooru_tags": ["shopping_bag", "golden_hour", "close_up", "looking_away", "closed_mouth"]
     }
   ],
   "shared_tags": ["multiple panels", "sequential art", "no text", "no speech bubble"],

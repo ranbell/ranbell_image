@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from . import prompt_assets
@@ -11,12 +10,6 @@ from .compose import soft_normalize_tag
 from .stage1_storyboard import PANELS
 
 logger = logging.getLogger(__name__)
-
-_CAMERA_WORDS = {
-    "long_shot": ("long shot", "long_shot", "full body", "wide shot"),
-    "medium_shot": ("medium shot", "medium_shot", "waist up", "cowboy"),
-    "close_up": ("close-up", "close_up", "closeup", "close up"),
-}
 
 
 def build_stage2_input(
@@ -58,6 +51,10 @@ def _norm(s: str) -> str:
     return soft_normalize_tag(s) or (s or "").strip().lower().replace(" ", "_")
 
 
+def _has_non_ascii(s: str) -> bool:
+    return any(ord(c) > 127 for c in (s or ""))
+
+
 def enforce_r0_locks(
     prompt_text: str,
     *,
@@ -65,35 +62,56 @@ def enforce_r0_locks(
     custom_tags: list[str],
     camera: str,
     character_state_diff: str,
+    gesture: str = "",
 ) -> str:
-    """Append any missing locked tags/phrases verbatim at the front."""
+    """Always prepend consistency + custom + camera (fixed order).
+
+    English ``character_state_diff`` / ``gesture`` are locked when present.
+    Non-ASCII values are skipped (Stage1/2 prompts own English; this is a safety net).
+    """
     text = (prompt_text or "").strip()
-    missing: list[str] = []
-    blob = text.lower().replace("-", "_")
+    lock: list[str] = []
 
     for t in consistency_tags:
-        key = _norm(t)
-        if key and key not in blob and t.lower() not in text.lower():
-            missing.append(t)
-
+        s = str(t or "").strip()
+        if s:
+            lock.append(s)
     for t in custom_tags:
-        key = _norm(t)
-        if key and key not in blob and t.lower() not in text.lower():
-            missing.append(t)
+        s = str(t or "").strip()
+        if s:
+            lock.append(s)
 
     cam = (camera or "").strip()
     if cam:
-        alts = _CAMERA_WORDS.get(cam, (cam,))
-        if not any(a.replace(" ", "_") in blob or a in text.lower() for a in alts):
-            missing.append(cam)
+        lock.append(cam)
 
     diff = (character_state_diff or "").strip()
-    if diff and diff.lower() not in text.lower():
-        missing.append(diff)
+    if diff:
+        if _has_non_ascii(diff):
+            logger.warning(
+                "Skipping non-ASCII character_state_diff for R0 prepend: %r",
+                diff[:120],
+            )
+        else:
+            lock.append(diff)
 
-    if not missing:
+    gest = (gesture or "").strip()
+    if gest:
+        if _has_non_ascii(gest):
+            logger.warning(
+                "Skipping non-ASCII gesture for R0 prepend: %r",
+                gest[:120],
+            )
+        else:
+            blob = (text + " " + ", ".join(lock)).lower().replace("-", "_")
+            gkey = _norm(gest)
+            combined = (text + " " + ", ".join(lock)).lower()
+            if gkey and gkey not in blob and gest.lower() not in combined:
+                lock.append(gest)
+
+    lock_line = ", ".join(dict.fromkeys(lock))
+    if not lock_line:
         return text
-    lock_line = ", ".join(dict.fromkeys(missing))
     return f"{lock_line}, {text}" if text else lock_line
 
 
@@ -154,6 +172,7 @@ async def enhance_all_panels(
             custom_tags=list(ct.get(key) or []),
             camera=str(panel.get("camera") or ""),
             character_state_diff=str(panel.get("character_state_diff") or ""),
+            gesture=str(panel.get("gesture") or ""),
         )
         wall = time.perf_counter() - t0
         if log:
