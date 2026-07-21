@@ -59,13 +59,15 @@ def _has_non_ascii(s: str) -> bool:
     return any(ord(c) > 127 for c in (s or ""))
 
 
-# Appended (not replacing) to the workflow's baked negative. Targets the two
-# render failures seen on studying/desk beats: the character collapsing into a
-# face-down/hidden-face slump, and cinematic black bars on wide shots.
+# Appended (not replacing) to the workflow's baked negative. Kept deliberately
+# generic — the face-down slump / black-bar / over-dark failures were specific to
+# the Hakushi checkpoint, so they are addressed by choosing a better checkpoint,
+# not by a blanket scene-negative here. Only standard quality/anatomy tags remain.
 CHRONICLE_NEGATIVE = (
-    "head down on desk, face down on arms, lying on desk, sleeping on desk, "
-    "face hidden, hair covering face, hunched over hiding face, "
-    "letterboxed, black bars, border frame, extremely dark, underexposed"
+    "lowres, worst quality, low quality, bad anatomy, bad hands, "
+    "missing fingers, extra digits, fewer digits, malformed limbs, "
+    "extra limbs, deformed, mutated, disfigured, bad proportions, "
+    "jpeg artifacts, signature, watermark, text"
 )
 
 
