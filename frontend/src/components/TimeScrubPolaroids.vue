@@ -9,7 +9,7 @@
 import { useI18n } from 'vue-i18n'
 
 defineProps({
-  axes: { type: Array, default: () => ['past', 'present', 'future'] },
+  axes: { type: Array, default: () => ['panel_1', 'panel_2', 'panel_3'] },
   baseAxis: { type: String, default: 'present' },
   imageFor: { type: Function, required: true },
   size: { type: String, default: 'md' }, // sm | md | lg

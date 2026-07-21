@@ -13,7 +13,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:show', 'select-image', 'weave-from', 'send-to-refine-direct', 'toast'])
 
-const AXES = ['past', 'present', 'future']
+const AXES = ['panel_1', 'panel_2', 'panel_3']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
 const VIEW_MODES = ['gallery', 'detail', 'timeline', 'moodboard']
 const SORTS = ['newest', 'oldest', 'title', 'time_scale', 'quality']
@@ -335,7 +335,7 @@ function weakestAxis(story) {
     if (b === story.base_time_axis) return -1
     return 0
   })
-  return ordered.find(a => story.axes?.[a]?.prompt_positive) || story.base_time_axis || 'present'
+  return ordered.find(a => story.axes?.[a]?.prompt_positive) || story.base_time_axis || 'panel_1'
 }
 
 function qualityActions(story) {
@@ -369,7 +369,7 @@ function qualityActions(story) {
         })
       }
     } else if (d.key === 'identity') {
-      const axis = story.base_time_axis || 'present'
+      const axis = story.base_time_axis || 'panel_1'
       if (story.axes?.[axis]?.prompt_positive) {
         actions.push({
           id: 'refine-identity',
@@ -703,7 +703,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               class="storybook-card sb-card group cursor-pointer"
               @click="openDetail(story)">
               <TimeScrubPolaroids
-                :base-axis="story.base_time_axis || 'present'"
+                :base-axis="story.base_time_axis || 'panel_1'"
                 :image-for="(ax) => axisImage(story, ax)"
                 :pending-label="t('storybook.imagePending')"
                 size="md"
@@ -796,7 +796,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                   class="storybook-card sb-card group shrink-0 w-48 snap-start cursor-pointer"
                   @click="openDetail(story)">
                   <TimeScrubPolaroids
-                    :base-axis="story.base_time_axis || 'present'"
+                    :base-axis="story.base_time_axis || 'panel_1'"
                     :image-for="(ax) => axisImage(story, ax)"
                     :pending-label="t('storybook.imagePending')"
                     size="sm"
@@ -1006,7 +1006,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 <p class="text-[10px] text-[var(--sb-faint)]">{{ t('storybook.timeScrubHint') }}</p>
               </div>
               <TimeScrubPolaroids
-                :base-axis="detailStory.base_time_axis || 'present'"
+                :base-axis="detailStory.base_time_axis || 'panel_1'"
                 :image-for="(ax) => axisImage(detailStory, ax)"
                 :pending-label="t('storybook.imagePending')"
                 size="lg"

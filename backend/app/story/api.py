@@ -33,112 +33,49 @@ router = APIRouter(prefix="/api/story")
 
 class ChronicleRequest(BaseModel):
     # Empty → topic-only mode (no source image); then user_topic is required.
-    base_sha256: str = ""
-    base_time_axis: Literal["past", "present", "future"] = "present"
-    life_role: str = ""  # student_cafe_job | freeter_multi_job | career_barista | custom | random
-    worldview: str = ""
-    user_topic: str = ""  # お題 — what the story is about (separate from worldview)
-    # Per-axis forced keywords (comma-separated). Independent of user_topic.
-    keywords_past: str = ""
-    keywords_present: str = ""
-    keywords_future: str = ""
-    # Appearance tags only (comma-separated). Empty → random from WD14 identity.
-    character_tags: str = ""
-    # When True, compose filters through catalog∩vocab allowlists.
-    compose_allowlist: bool = False
-    time_scale: Literal["minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"] = "years"
-    prompt_style: str = "danbooru+natural"
+    base_sha256: str = ""  # optional reference for character + art style only
+    user_topic: str = ""  # theme
+    character_tags: str = ""  # appearance; empty → WD14 from base image when present
+    include_happening: bool = False
+    author_style: str = ""
+    author_id: str = ""
+    custom_tags_panel_1: str = ""
+    custom_tags_panel_2: str = ""
+    custom_tags_panel_3: str = ""
     workflow_name: str = ""
-    divergence: float = 0.0
-    emotion: str = ""  # target emotion register ('' = off; see emotion_tagger.EMOTION_DIMENSIONS)
-    dramatic_mode: str = ""  # preferred story-shape ('' = auto-vary; see generator._DRAMATIC_MODES)
-    tone: Literal["bright", "neutral", "dark"] = "bright"  # overall story tone bias
-    # Deprecated (accepted, ignored): the LLM conflict pass was replaced by
-    # mechanical mutex rules only.
-    suppress_conflict_tags: bool = True
-    generate_pinup: bool = False  # generate + register a reference "pinup" for the base image
-    use_ref_seed: bool = True
     manual_mode: bool = False
-    # Skip timetable / long prose / densify / draft-refine: お題 → one-shot
-    # lean tag prompts → Comfy. Theme costume tags are hard-kept.
-    fast_mode: bool = False
-    # Deprecated spice: story-seed WD14 + axis vocab search + fast mid-rank.
-    # Default OFF — usually adds unrelated tags. Draft-image WD14 is separate.
-    wd14_prompt_spice: bool = False
-    # Mix WD14 tags from images similar to the axis situation (embed → search).
-    # Raises visual resolution with grounded vocabulary. Default ON.
-    similar_tag_mix: bool = True
-    similar_tag_mix_ratio: float = 0.3  # fraction of tag budget from similar images
-    similar_tag_mix_n: int = 4  # near-but-different neighbor count (3–6)
-    # Phase B: cheap draft → WD14 → rebuild (borrow image-model expression).
-    # Opt-in only: "on" enables it; "auto" is treated as OFF (it added a full
-    # ComfyUI render + WD14 scan per axis for marginal gain).
-    use_draft_refine: Literal["auto", "on", "off"] = "off"
-    draft_width: int = 512
-    draft_height: int = 512
-    draft_steps: int = 12
-    # Per-run LLM backend. Default ollama — OpenAI-compat only when chosen here.
-    # Other app features ignore this and always use Ollama via the shared gateway.
+    use_ref_seed: bool = True
     llm_provider: Literal["ollama", "openai"] = "ollama"
-    vlm_model: str = ""  # all-tier override (kept for backward compatibility)
-    # Stage-tiered overrides (Ollama provider only): story = creative arc/polish,
-    # utility = translations. Empty → runtime config tier → vlm_model. Vision
-    # always uses vlm_model; llm_provider="openai" collapses all tiers.
+    vlm_model: str = ""
     story_model: str = ""
     utility_model: str = ""
-    # Native `think` for creative story calls (None → runtime config default).
-    story_think: bool | None = None
-    temperature: float = 1.0  # Gemma 4 recommended default
+    temperature: float = 0.7
     num_ctx: int = 32768
-    # Visual Script prose length (3–7) → per-act word budget via
-    # generator.chronicle_prose_budget. Ignored in fast_mode (tags only, no
-    # prose stage).
-    prose_paragraphs: int = 3
-    locale: Literal["en", "ja"] = "en"  # language the story is written in
-    group_id: str = ""  # issued server-side on submission
+    locale: Literal["en", "ja"] = "ja"
+    group_id: str = ""
 
 
 class SelectCandidateRequest(BaseModel):
     candidate_id: str
-    time_scale: str = ""  # empty → keep the scale chosen at Phase 1
+    time_scale: str = ""  # ignored (kept for client compat)
 
 
 class RespinRequest(BaseModel):
     stage: Literal["candidates", "expand"]
     respin_count: int = 1
-    # Optional overrides — same knobs as ChronicleRequest; None = keep stored.
-    time_scale: Literal[
-        "minutes", "tens_of_minutes", "hours", "days", "months", "years", "decades"
-    ] | None = None
-    divergence: float | None = None
-    emotion: str | None = None
-    dramatic_mode: str | None = None
-    tone: Literal["bright", "neutral", "dark"] | None = None
-    prompt_style: str | None = None
     workflow_name: str | None = None
-    use_draft_refine: Literal["auto", "on", "off"] | None = None
-    draft_width: int | None = None
-    draft_height: int | None = None
-    draft_steps: int | None = None
-    suppress_conflict_tags: bool | None = None
     manual_mode: bool | None = None
-    fast_mode: bool | None = None
-    wd14_prompt_spice: bool | None = None
-    similar_tag_mix: bool | None = None
-    similar_tag_mix_ratio: float | None = None
-    similar_tag_mix_n: int | None = None
     llm_provider: Literal["ollama", "openai"] | None = None
     temperature: float | None = None
     num_ctx: int | None = None
-    prose_paragraphs: int | None = None
-    worldview: str | None = None
     user_topic: str | None = None
-    life_role: str | None = None
-    keywords_past: str | None = None
-    keywords_present: str | None = None
-    keywords_future: str | None = None
     character_tags: str | None = None
-    compose_allowlist: bool | None = None
+    include_happening: bool | None = None
+    author_style: str | None = None
+    author_id: str | None = None
+    custom_tags_panel_1: str | None = None
+    custom_tags_panel_2: str | None = None
+    custom_tags_panel_3: str | None = None
 
 
 class PinupRequest(BaseModel):
@@ -148,7 +85,6 @@ class PinupRequest(BaseModel):
 class TopicSuggestRequest(BaseModel):
     base_sha256: str
     locale: Literal["en", "ja"] = "ja"
-    worldview: str = ""
     llm_provider: Literal["ollama", "openai"] = "ollama"
     vlm_model: str = ""
     utility_model: str = ""
@@ -157,22 +93,16 @@ class TopicSuggestRequest(BaseModel):
 
 
 class TopicSuggestResponse(BaseModel):
-    topic: str  # 1–2 sentences, prefills the お題 field
-    beats: dict[str, str]  # {"ki","shou","ten","ketsu"} — for display
+    topic: str
+    beats: dict[str, str]
     locale: str
     base_sha256: str
 
 
 _RESPIN_OVERRIDE_FIELDS = (
-    "time_scale", "divergence", "emotion", "dramatic_mode", "tone",
-    "prompt_style", "workflow_name", "use_draft_refine", "draft_width",
-    "draft_height", "draft_steps", "suppress_conflict_tags", "manual_mode",
-    "fast_mode", "wd14_prompt_spice",
-    "similar_tag_mix", "similar_tag_mix_ratio", "similar_tag_mix_n",
-    "llm_provider", "temperature", "num_ctx", "prose_paragraphs",
-    "worldview", "user_topic", "life_role",
-    "keywords_past", "keywords_present", "keywords_future",
-    "character_tags", "compose_allowlist",
+    "workflow_name", "manual_mode", "llm_provider", "temperature", "num_ctx",
+    "user_topic", "character_tags", "include_happening", "author_style", "author_id",
+    "custom_tags_panel_1", "custom_tags_panel_2", "custom_tags_panel_3",
 )
 
 
@@ -561,12 +491,8 @@ async def generate_images(story_id: str, body: GenerateImagesRequest, request: R
     if story is None:
         raise HTTPException(404, f"Story {story_id!r} not found")
 
-    base_axis = story.get("base_time_axis")
-    has_base_image = bool(story.get("base_image_id"))
     for axis, updates in body.axes.items():
-        # With a source image, the base axis is the 元絵 — don't overwrite its prompts.
-        # Topic-only stories generate all three axes, so edits are allowed.
-        if (has_base_image and axis == base_axis) or axis not in story_db.AXES:
+        if axis not in story_db.AXES:
             continue
         allowed = {
             k: updates[k]
@@ -587,28 +513,24 @@ async def generate_images(story_id: str, body: GenerateImagesRequest, request: R
     seed = body.seed if body.seed is not None else random.randint(0, (1 << 64) - 1)
     jobs = []
     for axis in story_db.AXES:
-        if has_base_image and axis == base_axis:
-            continue
         if not ((story.get("axes") or {}).get(axis) or {}).get("prompt_positive"):
             continue
         job_id = _submit_axis_image_job(app, story, axis, seed,
                                         workflow_override=effective_workflow)
         jobs.append({"axis": axis, "job_id": job_id})
     if not jobs:
-        raise HTTPException(409, "No axes with stored prompts to generate")
+        raise HTTPException(409, "No panels with stored prompts to generate")
     return {"status": "queued", "jobs": jobs, "seed": seed}
 
 
 @router.post("/{story_id}/regenerate/{axis}")
 async def regenerate_axis(story_id: str, axis: str, request: Request):
-    """Image-only retry for one axis with a fresh seed (story text unchanged)."""
+    """Image-only retry for one panel with a fresh seed (story text unchanged)."""
     if axis not in story_db.AXES:
-        raise HTTPException(400, f"Unknown axis: {axis!r}")
+        raise HTTPException(400, f"Unknown panel: {axis!r}")
     story = await story_db.get_story(request.app.state.db, story_id)
     if story is None:
         raise HTTPException(404, f"Story {story_id!r} not found")
-    if axis == story.get("base_time_axis") and story.get("base_image_id"):
-        raise HTTPException(409, "The base axis image cannot be regenerated")
 
     seed = random.randint(0, (1 << 64) - 1)
     job_id = _submit_axis_image_job(request.app, story, axis, seed)

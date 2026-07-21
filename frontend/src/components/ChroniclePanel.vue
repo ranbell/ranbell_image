@@ -15,12 +15,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:show', 'toast', 'open-storybook'])
 
-const AXES = ['past', 'present', 'future']
+const AXES = ['panel_1', 'panel_2', 'panel_3']
 const TIME_SCALES = ['minutes', 'tens_of_minutes', 'hours', 'days', 'months', 'years', 'decades']
 
 const PHASE_STEP = {
   loadingImage: 0, extractingVision: 0,
-  candidates: 1, storyArc: 1,
+  candidates: 1, storyArc: 1, storyboarding: 1, buildingProfile: 1,
+  enhancingPrompts: 4,
   selecting: 2,
   expanding: 3, repairingStory: 3, translating: 3,
   mutatingTags: 3, buildingBiography: 3, buildingTimetable: 3,
@@ -36,43 +37,51 @@ const PHASE_STEP = {
 // ── form state ────────────────────────────────────────────────────────────────
 const baseSha = ref('')
 const baseModel = ref('')
-const baseAxis = ref('present')
 function _modelOf(doc) {
   return doc?.model_name || doc?.model_info?.model_name || ''
 }
 const userTopic = ref('')
-const lifeRole = ref('student_cafe_job')
-const LIFE_ROLES = ['student_cafe_job', 'freeter_multi_job', 'career_barista', 'custom']
 const characterTags = ref('')
+const includeHappening = ref(false)
+const authorStyle = ref('')
+const authorId = ref('')
+const authorsList = ref([])
+const customTagsPanel1 = ref('')
+const customTagsPanel2 = ref('')
+const customTagsPanel3 = ref('')
+const workflows = ref([])
+const workflow = ref('')
+const temperature = ref(0.7)
+const numCtx = ref(32768)
+const llmProvider = ref('ollama')
+const openaiModel = ref('')
+const useRefSeed = ref(true)
+const manualMode = ref(false)
+const pendingAutoSelect = ref('')
+const pendingExpandTimeScale = ref('')
+
+// Stubs for legacy template sections still present (hidden / unused in payload)
+const lifeRole = ref('custom')
+const LIFE_ROLES = ['custom']
 const keywordsPast = ref('')
 const keywordsPresent = ref('')
 const keywordsFuture = ref('')
 const composeAllowlist = ref(false)
 const worldview = ref('')
 const promptStyle = ref('danbooru+natural')
-const workflows = ref([])
-const workflow = ref('')
-const divergence = ref(0.3)
-const temperature = ref(1.0)
-const numCtx = ref(32768)
-const llmProvider = ref('ollama') // 'ollama' | 'openai' — Chronicles only
-const openaiModel = ref('') // empty → server default (openai_model / bonsai)
+const divergence = ref(0)
 const emotion = ref('')
-const DRAMATIC_MODES = [
-  'escalation', 'reversal', 'revelation', 'irony', 'approaching_threat',
-  'pursuit', 'parting', 'temptation', 'secret_surfacing', 'role_reversal',
-]
+const DRAMATIC_MODES = []
 const dramaticMode = ref('')
 const TONES = ['bright', 'neutral', 'dark']
-const tone = ref('bright')
-const timeScaleIdx = ref(TIME_SCALES.indexOf('hours'))
-const useRefSeed = ref(true)
-const manualMode = ref(false)
+const tone = ref('neutral')
+const timeScaleIdx = ref(3)
 const fastMode = ref(false)
-const pendingAutoSelect = ref('')
-/** time_scale captured at Weave start — used for fast auto-select expand */
-const pendingExpandTimeScale = ref('')
 const generatePinup = ref(false)
+const baseAxis = ref('panel_2')
+function currentTimeScale() {
+  return TIME_SCALES[timeScaleIdx.value] || 'days'
+}
 
 function currentTimeScale() {
   return TIME_SCALES[timeScaleIdx.value] || 'years'
@@ -223,8 +232,8 @@ const displayOverall = computed(() =>
 )
 
 /** Past / present / future prose from expand (EN canonical + optional JA). */
-const axisStories = ref({ past: '', present: '', future: '' })
-const axisStoriesJa = ref({ past: '', present: '', future: '' })
+const axisStories = ref({ panel_1: '', panel_2: '', panel_3: '' })
+const axisStoriesJa = ref({ panel_1: '', panel_2: '', panel_3: '' })
 function displayAxisStory(axis) {
   const en = axisStories.value[axis] || ''
   const ja = axisStoriesJa.value[axis] || ''
@@ -280,14 +289,28 @@ function candDisplay(c, field) {
   return c?.[field] || ''
 }
 function candAct(c, ax) {
-  const en = c?.acts?.[ax] || {}
-  if (uiLocale.value !== 'ja') return en
-  const ja = c?.acts_ja?.[ax] || {}
+  const panels = c?.panels || {}
+  const p = panels[ax] || {}
+  if (p.narrative_ja || p.narrative_en || p.act) {
+    return {
+      label: p.act || ax,
+      activity: p.narrative_ja || p.narrative_en || '',
+      place: '',
+      feeling: '',
+      outfit: '',
+      camera: p.camera || '',
+      gesture: p.gesture || '',
+    }
+  }
+  // Legacy fallback
+  const acts = (panelLang.value === 'ja' && c?.acts_ja) ? c.acts_ja : (c?.acts || {})
+  const a = acts[ax] || {}
   return {
-    label: ja.label || en.label || '',
-    activity: ja.activity || en.activity || '',
-    place: ja.place || en.place || '',
-    feeling: ja.feeling || en.feeling || '',
+    label: a.label || '',
+    activity: a.activity || '',
+    place: a.place || '',
+    feeling: a.feeling || '',
+    outfit: a.outfit || '',
   }
 }
 
@@ -551,7 +574,21 @@ watch(() => props.show, async (val) => {
       if (r.ok) workflows.value = await r.json()
     } catch {}
   }
+  if (!authorsList.value.length) {
+    try {
+      const r = await fetch('/api/authors')
+      if (r.ok) {
+        const data = await r.json()
+        authorsList.value = data.authors || []
+      }
+    } catch {}
+  }
 })
+
+function onAuthorPresetChange() {
+  const row = authorsList.value.find((a) => a.id === authorId.value)
+  if (row?.style_description) authorStyle.value = row.style_description
+}
 
 function _dismissBlocked() {
   // Re-sample live job state before deciding: `stayOpen` otherwise reads the 2s
@@ -612,8 +649,8 @@ function resetStory({ keepDraftNotes = false } = {}) {
   titleJa.value = ''
   overall.value = ''
   overallJa.value = ''
-  axisStories.value = { past: '', present: '', future: '' }
-  axisStoriesJa.value = { past: '', present: '', future: '' }
+  axisStories.value = { panel_1: '', panel_2: '', panel_3: '' }
+  axisStoriesJa.value = { panel_1: '', panel_2: '', panel_3: '' }
   mutationTags.value = []
   storySeedTags.value = []
   storySeedMotif.value = ''
@@ -714,7 +751,7 @@ function _stopImageGenMonitor() {
   if (_imgTimer) { clearInterval(_imgTimer); _imgTimer = null }
 }
 
-const REASON_AXES = ['past', 'present', 'future']
+const REASON_AXES = ['panel_1', 'panel_2', 'panel_3']
 const BIO_LIST_FIELDS = ['hobbies', 'favourite_items', 'likes', 'dislikes', 'quirks']
 /** Coerce bio list fields — truncated JA translations often return a string, and
  *  calling Array.join on a string throws and blanks the whole Chronicle panel. */
@@ -903,7 +940,7 @@ async function suggestTopicFromImage() {
       body: JSON.stringify({
         base_sha256: baseSha.value,
         locale: uiLocale.value,
-        worldview: worldview.value,
+        worldview: '',
         llm_provider: llmProvider.value,
         ...(llmProvider.value === 'openai' && openaiModel.value.trim()
           ? { vlm_model: openaiModel.value.trim() }
@@ -944,38 +981,20 @@ async function start() {
 function currentSettingsPayload() {
   const payload = {
     base_sha256: baseSha.value || '',
-    base_time_axis: baseAxis.value,
     user_topic: userTopic.value,
-    life_role: lifeRole.value,
     character_tags: characterTags.value,
-    keywords_past: keywordsPast.value,
-    keywords_present: keywordsPresent.value,
-    keywords_future: keywordsFuture.value,
-    compose_allowlist: composeAllowlist.value,
-    worldview: worldview.value,
-    time_scale: currentTimeScale(),
-    prompt_style: promptStyle.value,
+    include_happening: includeHappening.value,
+    author_style: authorStyle.value,
+    author_id: authorId.value,
+    custom_tags_panel_1: customTagsPanel1.value,
+    custom_tags_panel_2: customTagsPanel2.value,
+    custom_tags_panel_3: customTagsPanel3.value,
     workflow_name: workflow.value,
-    divergence: divergence.value,
-    emotion: emotion.value,
-    dramatic_mode: dramaticMode.value,
-    tone: tone.value,
-    generate_pinup: baseSha.value ? generatePinup.value : false,
-    suppress_conflict_tags: suppressConflictTags.value,
-    use_draft_refine: fastMode.value ? 'off' : useDraftRefine.value,
-    draft_width: draftWidth.value,
-    draft_height: draftHeight.value,
-    draft_steps: draftSteps.value,
     use_ref_seed: baseSha.value ? useRefSeed.value : false,
     manual_mode: manualMode.value,
-    fast_mode: fastMode.value,
-    wd14_prompt_spice: wd14PromptSpice.value,
-    similar_tag_mix: similarTagMix.value,
-    similar_tag_mix_ratio: similarTagMixRatio.value,
     llm_provider: llmProvider.value,
     temperature: temperature.value,
     num_ctx: numCtx.value,
-    prose_paragraphs: proseParagraphs.value,
     locale: uiLocale.value,
   }
   if (llmProvider.value === 'openai' && openaiModel.value.trim()) {
@@ -1330,6 +1349,73 @@ async function generateImages() {
                 </div>
 
                 <div class="flex flex-col gap-3 text-xs min-w-0">
+                  <div class="flex items-start gap-2">
+                    <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.userTopic') }}</span>
+                    <div class="flex-1 flex flex-col gap-1 min-w-0">
+                      <textarea v-model="userTopic" rows="3" :placeholder="t('chronicle.userTopicPh')"
+                        class="sb-input flex-1 min-h-[4.5rem]" :disabled="settingsLocked" />
+                      <button v-if="baseSha" type="button"
+                        class="sb-chip self-start"
+                        :class="topicSuggesting ? 'is-chip-on-teal' : ''"
+                        :disabled="topicSuggesting || settingsLocked"
+                        :title="t('chronicle.topicFromImageTitle')"
+                        @click="suggestTopicFromImage">
+                        <SbIcon :name="topicSuggesting ? 'refresh' : 'spark'"
+                          class="w-3 h-3 inline mr-1" :class="topicSuggesting ? 'animate-spin' : ''" />
+                        {{ topicSuggesting ? t('chronicle.topicFromImageBusy') : t('chronicle.topicFromImage') }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="flex items-start gap-2">
+                    <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.characterTags') }}</span>
+                    <textarea v-model="characterTags" rows="2"
+                      :placeholder="t('chronicle.characterTagsPh')"
+                      class="sb-input flex-1" :disabled="settingsLocked" />
+                  </div>
+                  <label class="flex items-start gap-2 cursor-pointer text-[var(--sb-muted)]"
+                    :title="t('chronicle.includeHappeningHint')">
+                    <input v-model="includeHappening" type="checkbox" class="accent-teal-500 mt-0.5" :disabled="settingsLocked" />
+                    <span>
+                      <span class="font-medium text-teal-200">{{ t('chronicle.includeHappening') }}</span>
+                      <span class="block text-[10px] mt-0.5">{{ t('chronicle.includeHappeningHint') }}</span>
+                    </span>
+                  </label>
+                  <div class="flex items-center gap-2">
+                    <span class="sb-label w-20 shrink-0">{{ t('chronicle.authorPreset') }}</span>
+                    <select v-model="authorId" class="sb-select flex-1" :disabled="settingsLocked"
+                      @change="onAuthorPresetChange">
+                      <option value="">{{ t('chronicle.authorPresetNone') }}</option>
+                      <option v-for="a in authorsList" :key="a.id" :value="a.id">
+                        {{ a.genre_tag ? `[${a.genre_tag}] ` : '' }}{{ a.name }}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="flex items-start gap-2">
+                    <span class="sb-label w-20 shrink-0 pt-1.5">{{ t('chronicle.authorStyle') }}</span>
+                    <textarea v-model="authorStyle" rows="2" :placeholder="t('chronicle.authorStylePh')"
+                      class="sb-input flex-1" :disabled="settingsLocked" />
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <span class="sb-label">{{ t('chronicle.customTagsPanel') }}</span>
+                    <div class="flex items-center gap-2">
+                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.panel_1') }}</span>
+                      <input v-model="customTagsPanel1" type="text" class="sb-input flex-1"
+                        :placeholder="t('chronicle.customTagsPh')" :disabled="settingsLocked" />
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.panel_2') }}</span>
+                      <input v-model="customTagsPanel2" type="text" class="sb-input flex-1"
+                        :placeholder="t('chronicle.customTagsPh')" :disabled="settingsLocked" />
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="sb-label w-14 shrink-0 text-[10px]">{{ t('chronicle.axis.panel_3') }}</span>
+                      <input v-model="customTagsPanel3" type="text" class="sb-input flex-1"
+                        :placeholder="t('chronicle.customTagsPh')" :disabled="settingsLocked" />
+                    </div>
+                  </div>
+                  <!-- legacy settings kept below but collapsed -->
+                  <details class="opacity-50">
+                    <summary class="text-[10px] text-[var(--sb-muted)] cursor-pointer">legacy</summary>
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="sb-label w-20 shrink-0" :title="baseSha ? t('chronicle.baseAxisHintImage') : t('chronicle.baseAxisHintTopic')">{{ t('chronicle.baseAxis') }}</span>
                     <button v-for="a in AXES" :key="a" type="button" @click="baseAxis = a"
@@ -1938,7 +2024,7 @@ async function generateImages() {
                       <span class="font-bold uppercase tracking-wide mr-1"
                         :class="ax === baseAxis ? 'text-[var(--sb-amber)]' : 'text-teal-400/70'">{{ t('chronicle.axis.' + ax) }}</span>
                       <span v-if="candAct(c, ax).label" class="text-teal-300/60 mr-1">[{{ candAct(c, ax).label }}]</span>
-                      <span class="text-gray-400">{{ candAct(c, ax).activity || c[ax] || (ax === 'present' ? c.summary : '') }}</span>
+                      <span class="text-gray-400">{{ candAct(c, ax).activity || c[ax] || c.summary || '' }}</span>
                       <span v-if="candAct(c, ax).place" class="ml-1 px-1 rounded bg-black/40 text-gray-500">📍{{ candAct(c, ax).place }}</span>
                       <span v-if="candAct(c, ax).feeling" class="ml-1 px-1 rounded bg-black/40 text-gray-500">{{ candAct(c, ax).feeling }}</span>
                     </div>
