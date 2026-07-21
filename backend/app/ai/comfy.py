@@ -293,6 +293,43 @@ class ComfyUIClient:
 
         return wf
 
+    _LOAD_IMAGE_TYPES = frozenset({"LoadImage", "LoadImageMask", "LoadImageOutput"})
+
+    def patch_load_image_nodes(self, workflow: dict, image_name: str) -> tuple[dict, int]:
+        """Set ``inputs.image`` on every LoadImage-like node. Returns (wf, count)."""
+        wf = copy.deepcopy(workflow)
+        n = 0
+        for node in wf.values():
+            if node.get("class_type") in self._LOAD_IMAGE_TYPES:
+                node.setdefault("inputs", {})["image"] = image_name
+                n += 1
+        return wf, n
+
+    async def upload_image(
+        self,
+        data: bytes,
+        filename: str,
+        *,
+        overwrite: bool = True,
+        image_type: str = "input",
+    ) -> str:
+        """Upload bytes to Comfy ``/upload/image``. Returns the stored filename."""
+        files = {"image": (filename, data, "application/octet-stream")}
+        form = {
+            "overwrite": "true" if overwrite else "false",
+            "type": image_type,
+        }
+        r = await self._http.post(
+            f"{settings.comfyui_url}/upload/image",
+            files=files,
+            data=form,
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        body = r.json() if r.content else {}
+        name = (body.get("name") if isinstance(body, dict) else None) or filename
+        return str(name)
+
     async def fetch_image(self, filename: str, subfolder: str = "", type_: str = "output") -> bytes:
         r = await self._http.get(
             f"{settings.comfyui_url}/view",

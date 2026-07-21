@@ -476,6 +476,7 @@ def _submit_axis_image_job(app, story: dict, axis: str, seed: int,
         positive=positive,
         negative=axis_data.get("prompt_negative") or "",
         seed=seed,
+        base_sha256=story.get("base_image_id") or "",
     )
 
 

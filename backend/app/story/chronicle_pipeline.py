@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random as _random
+import time
 from typing import Any
 
 from ..spooler.models import CancelToken, JobCancelled, JobLane, ProgressReporter
@@ -27,6 +29,11 @@ logger = logging.getLogger(__name__)
 CANDIDATE_IDS = ("A", "B", "C")
 
 
+def _opts_snapshot(options: dict, *, think: bool = True) -> str:
+    payload = {**dict(options or {}), "think": think, "num_predict": -1}
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
 async def run_chronicle_candidates_v2(
     reporter: ProgressReporter,
     cancel: CancelToken,
@@ -42,11 +49,15 @@ async def run_chronicle_candidates_v2(
     llm_options_fn,
     vlm_image_bytes_fn,
 ) -> None:
-    """Phase 1: Stage1 storyboard × up to 3 candidates."""
+    """Phase 1: Stage1 storyboard × up to 3 candidates (serial, fixed options)."""
     temp = body.temperature if temperature is None else temperature
 
     def _put(event: dict | None) -> None:
         token_queue.put_nowait(event)
+
+    def _log(msg: str) -> None:
+        logger.info("%s", msg)
+        _put({"type": "token", "text": msg.rstrip() + "\n"})
 
     def _phase(code: str, progress: float, text: str) -> None:
         reporter.update(progress, text)
@@ -61,7 +72,9 @@ async def run_chronicle_candidates_v2(
         cfg = await get_runtime_config(db)
         ollama = bind_llm(ollama, body)
         models = models_fn(body, cfg)
-        options = llm_options_fn(body, temp, cfg, story=True)
+        # Fixed for the whole Phase1 job — never mutate per candidate/attempt
+        # (Ollama reloads the model when options differ even slightly).
+        options = dict(llm_options_fn(body, temp, cfg, story=True))
 
         draft = None
         doc: dict = {}
@@ -78,13 +91,13 @@ async def run_chronicle_candidates_v2(
             style_hint = ""
             if has_base:
                 _phase("loadingImage", 0.05, "Loading reference image...")
+                _log(f"[chronicle] loading base image sha={body.base_sha256[:12]}...")
                 doc = await db.get(body.base_sha256) or {}
                 if not doc:
                     _put({"type": "error", "message": "Base image not found"})
                     return
                 wd14_tags = list(doc.get("wd14_tags") or [])
                 style_hint = str(doc.get("model_name") or "").strip()
-                # Optional: keep raw tags for profile; no FIXED scene act
             elif not (body.user_topic or "").strip():
                 _put({
                     "type": "error",
@@ -111,7 +124,15 @@ async def run_chronicle_candidates_v2(
                 "include_happening": bool(getattr(body, "include_happening", False)),
                 "custom_tags": custom_tags_from_body(body),
                 "body": body.model_dump() if hasattr(body, "model_dump") else dict(body),
+                "llm_options": dict(options),
+                "story_model": models.get("story") or "",
             }
+        else:
+            # Keep options identical across respin of candidates when possible
+            if ctx.get("llm_options"):
+                options = dict(ctx["llm_options"])
+            ctx["llm_options"] = dict(options)
+            ctx["story_model"] = models.get("story") or ctx.get("story_model") or ""
 
         profile = ctx["character_profile"]
         author_style = ctx.get("author_style") or ""
@@ -119,17 +140,22 @@ async def run_chronicle_candidates_v2(
         include_happening = bool(ctx.get("include_happening"))
         style_hint = ctx.get("style_hint") or ""
         avoid: list[str] = []
+        story_model = models.get("story") or ""
 
         _phase("storyboarding", 0.25, "Writing storyboards...")
+        _log(f"[chronicle] model={story_model}")
+        _log(f"[chronicle] options={_opts_snapshot(options, think=True)}")
+        _log(
+            f"[chronicle] Phase1 START candidates={len(CANDIDATE_IDS)} "
+            f"serial=true include_happening={include_happening}"
+        )
+
         candidates: list[dict] = []
+        phase1_t0 = time.perf_counter()
         for i, cid in enumerate(CANDIDATE_IDS):
             cancel.raise_if_set()
             if _abort.is_set():
                 raise JobCancelled()
-            opts = dict(options)
-            opts["temperature"] = min(
-                1.2, float(opts.get("temperature") or temp) + 0.08 * i
-            )
             user_input = build_stage1_user_input(
                 theme=body.user_topic or "",
                 character_profile=profile,
@@ -142,27 +168,22 @@ async def run_chronicle_candidates_v2(
             messages = build_stage1_messages(user_input)
             data = None
             for attempt in range(2):
-                try_opts = dict(opts)
-                if attempt == 1:
-                    reason = stage1_needs_retry(
-                        data,
-                        include_happening=include_happening,
-                        avoid_repeats=avoid,
-                    )
-                    if reason == "avoid_repeats":
-                        try_opts["temperature"] = min(
-                            1.3, float(try_opts.get("temperature") or 0.7) + 0.1
-                        )
+                _log(
+                    f"[chronicle] Stage1 candidate={cid} attempt={attempt + 1}/2 START"
+                )
+                t0 = time.perf_counter()
                 raw = await ollama.chat_text(
                     "",
-                    model=models["story"],
-                    options=try_opts,
+                    model=story_model,
+                    options=options,
                     fmt=None,
                     think=True,
                     messages=messages,
                 )
                 cancel.raise_if_set()
+                wall = time.perf_counter() - t0
                 data = parse_stage1_json(raw)
+                parsed_ok = data is not None
                 if data:
                     data = apply_stage1_failure_handling(
                         data,
@@ -175,8 +196,18 @@ async def run_chronicle_candidates_v2(
                     include_happening=include_happening,
                     avoid_repeats=avoid,
                 )
+                _log(
+                    f"[chronicle] Stage1 candidate={cid} attempt={attempt + 1}/2 END "
+                    f"wall={wall:.3f}s parsed={'ok' if parsed_ok else 'FAIL'} "
+                    f"out_chars={len(raw or '')}"
+                    + (f" retry_reason={reason}" if reason else "")
+                )
                 if not reason:
                     break
+                _log(
+                    f"[chronicle] Stage1 candidate={cid} RETRY reason={reason} "
+                    f"(options unchanged)"
+                )
                 logger.info(
                     "[chronicle] stage1 retry candidate=%s reason=%s", cid, reason
                 )
@@ -185,6 +216,7 @@ async def run_chronicle_candidates_v2(
                     "type": "warning",
                     "message": f"Stage1 failed for candidate {cid}",
                 })
+                _log(f"[chronicle] Stage1 candidate={cid} FAILED — skipped")
                 continue
             cand = candidate_from_stage1(data, candidate_id=cid)
             candidates.append(cand)
@@ -196,6 +228,14 @@ async def run_chronicle_candidates_v2(
                 0.25 + 0.2 * (i + 1) / 3,
                 f"Storyboard {cid} ready...",
             )
+            _log(
+                f"[chronicle] Stage1 candidate={cid} OK title={cand.get('title')!r}"
+            )
+
+        _log(
+            f"[chronicle] Phase1 DONE candidates={len(candidates)} "
+            f"total_wall={time.perf_counter() - phase1_t0:.3f}s"
+        )
 
         if not candidates:
             _put({"type": "error", "message": "Failed to generate storyboard candidates"})
@@ -240,6 +280,24 @@ async def run_chronicle_candidates_v2(
         _put(None)
 
 
+def _seed_from_base_doc(doc: dict | None) -> int | None:
+    if not doc:
+        return None
+    cr = doc.get("creation_record") or {}
+    if isinstance(cr, dict) and cr.get("seed") is not None:
+        try:
+            return int(cr["seed"])
+        except (TypeError, ValueError):
+            pass
+    mi = doc.get("model_info") or {}
+    if isinstance(mi, dict) and mi.get("seed") is not None:
+        try:
+            return int(mi["seed"])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 async def run_chronicle_expand_v2(
     reporter: ProgressReporter,
     cancel: CancelToken,
@@ -257,12 +315,16 @@ async def run_chronicle_expand_v2(
     llm_options_fn,
     image_generate_fn,
 ) -> None:
-    """Phase 2: Stage2 enhance × 3 panels, then generate all three images."""
+    """Phase 2: Stage2 enhance × 3 panels (serial), then generate all three images."""
     from ..runtime_config import get_runtime_config
     from ..story.api import ChronicleRequest
 
     def _put(event: dict | None) -> None:
         token_queue.put_nowait(event)
+
+    def _log(msg: str) -> None:
+        logger.info("%s", msg)
+        _put({"type": "token", "text": msg.rstrip() + "\n"})
 
     def _phase(code: str, progress: float, text: str) -> None:
         reporter.update(progress, text)
@@ -274,7 +336,7 @@ async def run_chronicle_expand_v2(
             _put({"type": "error", "message": "Draft story not found"})
             return
 
-        ctx = draft.get("context") or {}
+        ctx = dict(draft.get("context") or {})
         body_dict = ctx.get("body") or {}
         try:
             body = ChronicleRequest(**{
@@ -319,11 +381,18 @@ async def run_chronicle_expand_v2(
         cfg = await get_runtime_config(db)
         ollama = bind_llm(ollama, body)
         models = models_fn(body, cfg)
-        options = llm_options_fn(body, temperature, cfg, story=True)
-        # Stage2: slightly cooler but still creative
-        options = dict(options)
-        options["temperature"] = min(float(options.get("temperature") or 0.7), 0.85)
-        options["num_ctx"] = max(16384, int(options.get("num_ctx") or 32768))
+        # Prefer Phase1-stored options so Ollama does not reload between phases.
+        if isinstance(ctx.get("llm_options"), dict) and ctx["llm_options"]:
+            options = dict(ctx["llm_options"])
+            _log("[chronicle] Stage2 using Phase1-stored llm_options (no mutation)")
+        else:
+            options = dict(llm_options_fn(body, temperature, cfg, story=True))
+            ctx["llm_options"] = dict(options)
+        story_model = (
+            ctx.get("story_model")
+            or models.get("story")
+            or ""
+        )
 
         if draft.get("status") == "final":
             hist = list(draft.get("respin_history") or [])
@@ -336,15 +405,20 @@ async def run_chronicle_expand_v2(
             await story_db.set_story_payload(db, story_id, {"respin_history": hist})
 
         _phase("enhancingPrompts", 0.3, "Enhancing panel prompts...")
+        _log(f"[chronicle] model={story_model}")
+        _log(f"[chronicle] options={_opts_snapshot(options, think=True)}")
+        _log("[chronicle] Stage2 START panels=3 serial=true")
         enhanced = await enhance_all_panels(
             ollama,
             stage1=stage1,
             custom_tags=custom_tags,
-            model=models["story"],
+            model=story_model,
             options=options,
             locale=body.locale or "ja",
+            log=_log,
         )
         cancel.raise_if_set()
+        _log("[chronicle] Stage2 DONE")
 
         prompts: dict[str, dict] = {}
         for key in PANELS:
@@ -369,7 +443,23 @@ async def run_chronicle_expand_v2(
         overall = str(stage1.get("core_conflict") or selected.get("summary") or "")
         panels = stage1.get("panels") or []
 
+        base_sha = (body.base_sha256 or draft.get("base_image_id") or "").strip()
+        use_ref_seed = bool(getattr(body, "use_ref_seed", False)) and bool(base_sha)
         seed = _random.randint(0, (1 << 64) - 1)
+        if use_ref_seed and base_sha:
+            base_doc = await db.get(base_sha) or {}
+            ref = _seed_from_base_doc(base_doc)
+            if ref is not None:
+                seed = ref
+                _log(f"[chronicle] use_ref_seed=ON seed={seed} from base={base_sha[:12]}")
+            else:
+                _log(
+                    f"[chronicle] use_ref_seed=ON but no seed on base={base_sha[:12]} "
+                    f"— using random seed={seed}"
+                )
+        else:
+            _log(f"[chronicle] image seed={seed} (random)")
+
         axes_payload: dict[str, Any] = {}
         for i, key in enumerate(PANELS):
             p = panels[i] if i < len(panels) else {}
@@ -424,6 +514,10 @@ async def run_chronicle_expand_v2(
 
         image_jobs: list[dict] = []
         if not body.manual_mode and body.workflow_name:
+            _log(
+                f"[chronicle] queue image jobs workflow={body.workflow_name} "
+                f"base_sha={base_sha[:12] if base_sha else '(none)'}"
+            )
             for key in PANELS:
                 cancel.raise_if_set()
                 gen_job_id = spooler.submit(
@@ -439,14 +533,17 @@ async def run_chronicle_expand_v2(
                     positive=prompts[key]["positive"],
                     negative=prompts[key]["negative"],
                     seed=seed,
+                    base_sha256=base_sha,
                 )
                 image_jobs.append({"axis": key, "job_id": gen_job_id})
+                _log(f"[chronicle] queued {key} job_id={gen_job_id}")
             _put({"type": "image_jobs", "jobs": image_jobs})
         elif not body.workflow_name:
             _put({
                 "type": "warning",
                 "message": "No workflow selected — image generation skipped.",
             })
+            _log("[chronicle] image generation skipped (no workflow)")
 
         _put({
             "type": "done",

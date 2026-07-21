@@ -3023,9 +3023,15 @@ async def run_chronicle_image_generate(
     positive: str,
     negative: str,
     seed: int | None,
+    base_sha256: str = "",
 ) -> dict:
-    """GEN lane. Generate one chronicle axis image, save to Chronicles/, link it."""
+    """GEN lane. Generate one chronicle axis image, save to Chronicles/, link it.
+
+    When ``base_sha256`` is set and the workflow has LoadImage nodes, the base
+    image is uploaded to Comfy and wired in (character / style reference).
+    """
     import random as _random
+    from pathlib import Path
 
     from ..creation.schema import CreationRecord
     from ..story import db as story_db
@@ -3036,6 +3042,37 @@ async def run_chronicle_image_generate(
         seed = _random.randint(0, (1 << 64) - 1)
 
     wf = comfy.load_workflow(workflow_name)
+    base_sha = (base_sha256 or "").strip()
+    if base_sha:
+        doc = await db.get(base_sha) or {}
+        fp = Path(doc.get("path", ""))
+        if fp.exists():
+            try:
+                data = fp.read_bytes()
+                upload_name = f"chronicle_ref_{base_sha[:16]}{fp.suffix or '.png'}"
+                stored = await comfy.upload_image(data, upload_name)
+                wf, n_load = comfy.patch_load_image_nodes(wf, stored)
+                if n_load:
+                    logger.info(
+                        "[chronicle] Comfy upload base=%s → %s patched LoadImage×%d axis=%s",
+                        base_sha[:12], stored, n_load, axis,
+                    )
+                else:
+                    logger.warning(
+                        "[chronicle] Comfy upload base=%s → %s but no LoadImage in %s "
+                        "(text2img only) axis=%s",
+                        base_sha[:12], stored, workflow_name, axis,
+                    )
+            except Exception as exc:
+                logger.error(
+                    "[chronicle] Comfy base image inject failed axis=%s: %s", axis, exc,
+                )
+        else:
+            logger.warning(
+                "[chronicle] base image missing on disk sha=%s path=%s axis=%s",
+                base_sha[:12], fp, axis,
+            )
+
     patched = comfy.patch_workflow(wf, positive, negative, "", "", 1, seed=seed)
     prompt_id = await comfy.queue_prompt(patched)
     reporter.update(0.0, "Waiting in ComfyUI queue...")

@@ -155,3 +155,17 @@ def test_patch_workflow_primitive_wired_width_height():
     # EmptyLatent still points at those primitives
     assert patched["1"]["inputs"]["width"] == ["10", 0]
     assert patched["1"]["inputs"]["height"] == ["11", 0]
+
+
+def test_patch_load_image_nodes():
+    client = ComfyUIClient()
+    wf = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": "old.png"}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "x"}},
+        "3": {"class_type": "LoadImageMask", "inputs": {"image": "mask.png"}},
+    }
+    patched, n = client.patch_load_image_nodes(wf, "chronicle_ref.png")
+    assert n == 2
+    assert patched["1"]["inputs"]["image"] == "chronicle_ref.png"
+    assert patched["3"]["inputs"]["image"] == "chronicle_ref.png"
+    assert wf["1"]["inputs"]["image"] == "old.png"  # original untouched

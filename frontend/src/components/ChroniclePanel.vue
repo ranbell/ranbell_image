@@ -239,10 +239,11 @@ function displayAxisStory(axis) {
 const hasAxisStories = computed(() =>
   AXES.some(a => !!(axisStories.value[a] || axisStoriesJa.value[a]))
 )
-/** Show expand stream openly until structured acts arrive (any post-select step).
+/** Show expand/exec stream openly until structured acts arrive (any post-select step).
  *  Do NOT gate on currentStep===3: once examining/prompt phases start, step becomes
  *  4 and a truncated expand (no [PAST]/… markers) would otherwise collapse into a
- *  closed <details> — looking like the expand window vanished. */
+ *  closed <details> — looking like the expand window vanished.
+ *  Also open during Phase1 storyboarding so Stage1 attempt/retry logs are visible. */
 const showLiveStream = computed(() =>
   !!streamText.value && !hasAxisStories.value && !selecting.value
   && (running.value || (!finished.value && currentStep.value >= 3))
@@ -2200,9 +2201,10 @@ async function generateImages() {
               {{ streamText }}<span class="animate-pulse text-teal-400">▍</span>
             </div>
 
-            <!-- raw stream (closed) once acts are visible, or for non-expand phases -->
+            <!-- raw stream (open while running so Stage1/2 exec logs stay visible) -->
             <details v-else-if="streamText || (running && !selecting)"
-              class="rounded-xl border border-white/5 bg-black/30">
+              class="rounded-xl border border-white/5 bg-black/30"
+              :open="running || !!streamText">
               <summary class="sb-btn cursor-pointer list-none w-full justify-between px-3 py-2 rounded-xl border-0">
                 <span class="flex items-center gap-1.5">
                   <SbIcon name="doc" class="w-3.5 h-3.5" />

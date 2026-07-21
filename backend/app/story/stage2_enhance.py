@@ -111,9 +111,10 @@ async def enhance_all_panels(
     model: str,
     options: dict,
     locale: str = "ja",
+    log=None,
 ) -> dict[str, dict]:
-    """Run Stage2 for panel_1/2/3 (sequential). Always think=True."""
-    import asyncio
+    """Run Stage2 for panel_1/2/3 strictly sequential. Always think=True."""
+    import time
 
     consistency = list(stage1.get("consistency_tags") or [])
     shared = list(stage1.get("shared_tags") or [])
@@ -121,12 +122,16 @@ async def enhance_all_panels(
     conflict = str(stage1.get("core_conflict") or "")
     panels = list(stage1.get("panels") or [])
     ct = custom_tags or {}
+    out: dict[str, dict] = {}
 
-    async def _one(i: int) -> tuple[str, dict]:
+    for i in range(3):
         key = PANELS[i]
         panel = panels[i] if i < len(panels) else {}
         if not isinstance(panel, dict):
             panel = {}
+        if log:
+            log(f"[chronicle] Stage2 {key} START (serial {i + 1}/3)")
+        t0 = time.perf_counter()
         prompt = build_stage2_prompt(
             panel=panel,
             panel_key=key,
@@ -150,7 +155,13 @@ async def enhance_all_panels(
             camera=str(panel.get("camera") or ""),
             character_state_diff=str(panel.get("character_state_diff") or ""),
         )
-        return key, {
+        wall = time.perf_counter() - t0
+        if log:
+            log(
+                f"[chronicle] Stage2 {key} END wall={wall:.3f}s "
+                f"out_chars={len(positive or '')}"
+            )
+        out[key] = {
             "positive": positive,
             "negative": "",
             "visual_script": visual_script_from_panel(panel, locale=locale),
@@ -158,6 +169,4 @@ async def enhance_all_panels(
             "danbooru_tags": list(panel.get("danbooru_tags") or []),
             "character_state_diff": panel.get("character_state_diff") or "",
         }
-
-    results = await asyncio.gather(*(_one(i) for i in range(3)))
-    return {k: v for k, v in results}
+    return out
