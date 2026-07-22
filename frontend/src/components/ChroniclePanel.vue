@@ -148,6 +148,35 @@ async function fetchOllamaModels() {
   } catch {}
 }
 
+// Story-model choices for the select: enumerated Ollama models plus the current
+// value (so a prefilled admin default that isn't in the list still shows).
+const storyModelOptions = computed(() => {
+  const list = [...ollamaModels.value]
+  const cur = (storyModel.value || '').trim()
+  if (cur && !list.includes(cur)) list.unshift(cur)
+  return list
+})
+
+// Default the LLM (provider / model / num_ctx) to what's configured in Admin.
+const defaultsLoaded = ref(false)
+async function loadChronicleDefaults() {
+  if (defaultsLoaded.value) return
+  defaultsLoaded.value = true
+  try {
+    const r = await fetch('/api/story/chronicle/catalog')
+    if (!r.ok) return
+    const cat = await r.json()
+    const ad = cat.admin_defaults || {}
+    const sug = cat.suggested_run || {}
+    if (!storyModel.value.trim()) {
+      if (ad.llm_provider === 'ollama' || ad.llm_provider === 'openai') llmProvider.value = ad.llm_provider
+      storyModel.value = (ad.story_model || ad.vlm_model || sug.story_model || '').trim()
+      const nc = Number(ad.ollama_num_ctx)
+      if (nc && [8192, 16384, 32768].includes(nc)) numCtx.value = nc
+    }
+  } catch {}
+}
+
 const uiLocale = computed(() => (locale.value?.startsWith('ja') ? 'ja' : 'en'))
 
 const thumbFailed = ref(false)
@@ -566,7 +595,8 @@ watch(() => props.show, async (val) => {
       }
     } catch {}
   }
-  if (llmProvider.value === 'ollama') fetchOllamaModels()
+  if (llmProvider.value === 'ollama') await fetchOllamaModels()
+  await loadChronicleDefaults()
 })
 
 watch(llmProvider, (p) => {
@@ -1443,12 +1473,14 @@ async function generateImages() {
                   <p class="text-[10px] text-[var(--sb-faint)] -mt-1">{{ t('chronicle.llmProviderHint') }}</p>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.storyModelTitle')">{{ t('chronicle.storyModel') }}</span>
-                    <input v-model="storyModel" type="text" list="chronicle-story-models"
-                      :placeholder="t('chronicle.storyModelPh')"
+                    <select v-if="llmProvider === 'ollama'" v-model="storyModel"
+                      :disabled="settingsLocked" class="sb-select flex-1 font-mono text-[11px]">
+                      <option value="">{{ t('chronicle.storyModelPh') }}</option>
+                      <option v-for="m in storyModelOptions" :key="m" :value="m">{{ m }}</option>
+                    </select>
+                    <input v-else v-model="storyModel" type="text"
+                      :placeholder="t('chronicle.storyModelPh')" :disabled="settingsLocked"
                       class="sb-input flex-1 font-mono text-[11px]" />
-                    <datalist v-if="llmProvider === 'ollama'" id="chronicle-story-models">
-                      <option v-for="m in ollamaModels" :key="m" :value="m" />
-                    </datalist>
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="sb-label w-20 shrink-0" :title="t('chronicle.temperatureTitle')">{{ t('chronicle.temperature') }}</span>
