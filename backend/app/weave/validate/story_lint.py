@@ -25,14 +25,14 @@ def lint_story_bundle(
             defects.append({
                 "code": "WORLD_MISSING",
                 "panel": "",
-                "fix": f"world.{field} is empty",
+                "problem": f"world.{field} is empty",
                 "fix": f"Fill world.{field}",
             })
     for u in unresolved:
         defects.append({
             "code": "MUST_SHOW_UNRESOLVED",
             "panel": "",
-            "fix": f"cannot resolve must_show key: {u}",
+            "problem": f"cannot resolve must_show key: {u}",
             "fix": "Set throughline_prop/place or signature_prop",
         })
 
@@ -74,7 +74,7 @@ def lint_story_bundle(
         defects.append({
             "code": "THROUGHLINE_GAP",
             "panel": "",
-            "fix": f"throughline resolved on {coverage}/{len(panels)} panels",
+            "problem": f"throughline resolved on {coverage}/{len(panels)} panels",
             "fix": "Ensure must_show resolves on every panel",
         })
 

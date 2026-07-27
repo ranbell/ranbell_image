@@ -19,7 +19,7 @@ def lint_cameras(panels: list[dict[str, Any]] | None) -> list[dict[str, str]]:
             defects.append({
                 "code": "BAD_CAMERA",
                 "panel": key,
-                "fix": f"invalid camera: {cam!r}",
+                "problem": f"invalid camera: {cam!r}",
                 "fix": f"Use one of {', '.join(CAMERAS)}",
             })
             continue
@@ -27,7 +27,7 @@ def lint_cameras(panels: list[dict[str, Any]] | None) -> list[dict[str, str]]:
             defects.append({
                 "code": "CAMERA_DUP",
                 "panel": key,
-                "fix": f"duplicate camera: {cam}",
+                "problem": f"duplicate camera: {cam}",
                 "fix": "Use three distinct cameras",
             })
         cams.append(cam)

@@ -843,6 +843,7 @@ onUnmounted(() => {
             <ul class="space-y-1 max-h-40 overflow-y-auto">
               <li v-for="(d, i) in (criticReport?.priority_defects || lintDefects)" :key="i" class="text-[11px] text-amber-100/90">
                 <span class="text-amber-500/80 font-mono">{{ d.code }}</span>
+                <span v-if="d.panel" class="text-[9px] text-gray-500"> {{ d.panel }}</span>
                 <span v-if="d.severity" class="text-[9px] text-gray-500"> {{ d.severity }}</span>
                 {{ d.problem }}
                 <span v-if="d.fix" class="block text-gray-400">→ {{ d.fix }}</span>
