@@ -23,6 +23,7 @@ const workflow = ref('')
 const workflows = ref([])
 const ollamaModels = ref([])
 const recreateChips = ref([])
+const useGalleryNn = ref(false)
 const pollTimer = ref(null)
 const trackedJobs = ref([]) // {job_id, kind, slot?, panel_key?}
 
@@ -50,6 +51,8 @@ const RATE_OPTIONS = [
 const cta = computed(() => session.value?.next_cta || { code: 'infer_character', label: '', enabled: false })
 const character = computed(() => session.value?.character || {})
 const boardImages = computed(() => character.value?.board?.images || [])
+const galleryRefs = computed(() => character.value?.gallery_refs || [])
+const gallerySpice = computed(() => character.value?.gallery_spice || [])
 const storyWorld = computed(() => session.value?.story_bundle?.world || {})
 const panels = computed(() => session.value?.panels || [])
 const gates = computed(() => session.value?.gates || {})
@@ -101,6 +104,7 @@ async function ensureSession() {
     workflow_sample: workflow.value,
     reference_image_id: props.baseImage?.sha256 || '',
     locale: 'ja',
+    use_gallery_nn: useGalleryNn.value,
   }
   session.value = await api('/api/weave/sessions', { method: 'POST', body: JSON.stringify(body) })
   return session.value
@@ -160,6 +164,7 @@ async function runAction(code) {
         topic: topic.value,
         author_style: authorStyle.value,
         story_model: storyModel.value,
+        use_gallery_nn: useGalleryNn.value,
       }),
     })
 
@@ -169,6 +174,7 @@ async function runAction(code) {
         body: JSON.stringify({
           personality_text: personalityText.value,
           story_model: storyModel.value,
+          use_gallery_nn: useGalleryNn.value,
         }),
       })
     } else if (code === 'lock_identity') {
@@ -297,7 +303,14 @@ function resetLocal() {
   errorMsg.value = ''
   trackedJobs.value = []
   recreateChips.value = []
+  // useGalleryNn preference is kept across reset
 }
+
+watch(session, (s) => {
+  if (!s) return
+  const flag = s?.quality_policy?.gallery_nn ?? s?.inputs?.use_gallery_nn
+  if (typeof flag === 'boolean') useGalleryNn.value = flag
+})
 
 watch(() => props.show, async (v) => {
   if (v) {
@@ -340,6 +353,14 @@ onUnmounted(() => {
             class="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
             :placeholder="t('weave.personalityPh')" />
 
+          <label class="flex items-start gap-2 rounded border border-gray-800 bg-gray-900/60 px-2 py-1.5 cursor-pointer">
+            <input v-model="useGalleryNn" type="checkbox" class="mt-0.5 accent-teal-500" />
+            <span>
+              <span class="block text-[11px] text-teal-100">{{ t('weave.galleryNn') }}</span>
+              <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.galleryNnHint') }}</span>
+            </span>
+          </label>
+
           <div class="space-y-1">
             <div class="text-[10px] text-gray-500">identity</div>
             <div class="flex flex-wrap gap-1">
@@ -350,6 +371,25 @@ onUnmounted(() => {
             <div class="flex flex-wrap gap-1">
               <span v-for="tag in (character.prop_tags || [])" :key="'p'+tag"
                 class="rounded bg-amber-950/80 px-1.5 py-0.5 text-[10px] text-amber-200">{{ tag }}</span>
+            </div>
+            <template v-if="gallerySpice.length">
+              <div class="text-[10px] text-gray-500 mt-2">{{ t('weave.gallerySpice') }}</div>
+              <div class="flex flex-wrap gap-1">
+                <span v-for="tag in gallerySpice" :key="'s'+tag"
+                  class="rounded bg-cyan-950/80 px-1.5 py-0.5 text-[10px] text-cyan-200">{{ tag }}</span>
+              </div>
+            </template>
+          </div>
+
+          <div v-if="galleryRefs.length" class="space-y-1">
+            <div class="text-[10px] uppercase tracking-wider text-cyan-500/80">{{ t('weave.galleryRefs') }}</div>
+            <div class="grid grid-cols-3 gap-1">
+              <a v-for="ref in galleryRefs" :key="ref.sha256"
+                :href="`/api/images/${ref.sha256}`" target="_blank" rel="noopener"
+                class="rounded border border-gray-800 overflow-hidden bg-gray-900"
+                :title="ref.name || ref.sha256">
+                <img v-if="thumb(ref.sha256)" :src="thumb(ref.sha256)" class="w-full aspect-square object-cover" />
+              </a>
             </div>
           </div>
 

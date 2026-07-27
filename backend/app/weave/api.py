@@ -26,18 +26,21 @@ class CreateSessionRequest(BaseModel):
     workflow_final: str = ""
     workflow_sample: str = ""
     locale: Literal["en", "ja"] = "ja"
+    use_gallery_nn: bool = False
 
 
 class InferRequest(BaseModel):
     personality_text: str = ""
     story_model: str = ""
     temperature: float = 0.7
+    use_gallery_nn: bool | None = None
 
 
 class TopicPatch(BaseModel):
     topic: str = ""
     author_style: str = ""
     story_model: str = ""
+    use_gallery_nn: bool | None = None
 
 
 class StoryGenerateRequest(BaseModel):
@@ -113,6 +116,7 @@ async def create_session(body: CreateSessionRequest, request: Request):
         workflow_final=body.workflow_final,
         workflow_sample=body.workflow_sample,
         locale=body.locale,
+        use_gallery_nn=body.use_gallery_nn,
     )
     session_id = await session_db.create_session(request.app.state.db, payload)
     session = await session_db.get_session(request.app.state.db, session_id)
@@ -135,6 +139,8 @@ async def get_session(session_id: str, request: Request):
 
 @router.patch("/sessions/{session_id}/inputs")
 async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
+    from .character.gallery_nn import set_gallery_nn_enabled
+
     session = await _load(request, session_id)
     inputs = session.setdefault("inputs", {})
     if body.topic:
@@ -143,13 +149,21 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         inputs["author_style"] = body.author_style
     if body.story_model:
         inputs["story_model"] = body.story_model
+    if body.use_gallery_nn is not None:
+        set_gallery_nn_enabled(session, body.use_gallery_nn)
     return await _save(request, session_id, session)
 
 
 @router.post("/sessions/{session_id}/character/infer")
 async def character_infer(session_id: str, body: InferRequest, request: Request):
+    from .character.gallery_nn import set_gallery_nn_enabled
+    from ..runtime_config import get_runtime_config
+
     session = await _load(request, session_id)
+    if body.use_gallery_nn is not None:
+        set_gallery_nn_enabled(session, body.use_gallery_nn)
     model = _model_from(session, body.story_model)
+    cfg = await get_runtime_config(request.app.state.db)
     try:
         await service.infer_character(
             session,
@@ -157,6 +171,8 @@ async def character_infer(session_id: str, body: InferRequest, request: Request)
             model=model,
             options={"temperature": body.temperature},
             personality_text=body.personality_text or None,
+            db=request.app.state.db,
+            embed_model=str(cfg.get("embed_model") or "nomic-embed-text"),
         )
     except service.WeaveError as e:
         raise HTTPException(e.status_code, e.message) from e

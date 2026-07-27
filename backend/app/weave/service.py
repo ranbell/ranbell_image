@@ -99,7 +99,11 @@ async def infer_character(
     model: str,
     options: dict | None = None,
     personality_text: str | None = None,
+    db=None,
+    embed_model: str = "",
 ) -> dict[str, Any]:
+    from .character.gallery_nn import enrich_character_from_gallery, is_gallery_nn_enabled
+
     inputs = session.setdefault("inputs", {})
     text = (personality_text or inputs.get("personality_text") or "").strip()
     if not text:
@@ -118,6 +122,9 @@ async def infer_character(
     apply_inference_to_character(session.setdefault("character", {}), data)
     session["character"]["identity_locked"] = False
     session["character"]["board"] = {"images": [], "accepted": False}
+    session["character"]["gallery_refs"] = []
+    session["character"]["gallery_spice"] = []
+    session["character"]["gallery_nn"] = None
     # Invalidate story if re-infer
     if int(session.get("story_version") or 0) > 0:
         session["story_bundle"] = {}
@@ -127,6 +134,21 @@ async def infer_character(
         session, actor="llm.personalitywright", type_="proposal",
         text=session["character"].get("reasoning_ja") or "character inferred",
     )
+    if is_gallery_nn_enabled(session) and db is not None:
+        summary = await enrich_character_from_gallery(
+            session,
+            db=db,
+            ollama=ollama,
+            embed_model=embed_model or "nomic-embed-text",
+        )
+        if summary.get("applied"):
+            n = summary.get("neighbor_count") or 0
+            added = len(summary.get("added_identity") or [])
+            append_timeline(
+                session, actor="system.gallery_nn", type_="enrich",
+                text=f"gallery NN: {n} neighbors, +{added} identity tags",
+                ref={"gallery_nn": summary},
+            )
     return session
 
 

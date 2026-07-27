@@ -215,6 +215,10 @@ async def build_chronicle_catalog(
                 "Old /api/story/chronicle* Stage1/Stage2 agent run was removed. "
                 "Use Weave session APIs below."
             ),
+            "gallery_nn": (
+                "Optional: pass use_gallery_nn=true on session create / infer to "
+                "enrich identity/spice from Qdrant nearest neighbors (default off)."
+            ),
         },
         "endpoints": {
             "catalog": "GET /api/weave/catalog",

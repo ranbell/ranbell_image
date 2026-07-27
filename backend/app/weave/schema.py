@@ -94,6 +94,7 @@ def new_session_payload(
     workflow_final: str = "",
     workflow_sample: str = "",
     locale: str = "ja",
+    use_gallery_nn: bool = False,
 ) -> dict[str, Any]:
     now = time.time()
     panels = [
@@ -101,6 +102,7 @@ def new_session_payload(
         _empty_panel("panel_2", "turn", "medium_shot"),
         _empty_panel("panel_3", "settle", "close_up"),
     ]
+    gallery_nn = bool(use_gallery_nn)
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "character",
@@ -114,6 +116,8 @@ def new_session_payload(
             "framing_fail_limit": 2,
             "strict_seal": False,
             "allow_story_before_board": True,
+            # Opt-in: Qdrant NN → identity/spice enrichment after infer.
+            "gallery_nn": gallery_nn,
         },
         "inputs": {
             "topic": topic or "",
@@ -127,6 +131,7 @@ def new_session_payload(
             "llm_provider": llm_provider or "ollama",
             "workflow_final": workflow_final or "",
             "workflow_sample": workflow_sample or "",
+            "use_gallery_nn": gallery_nn,
         },
         "character": {
             "personality": {},
@@ -139,6 +144,9 @@ def new_session_payload(
             "board": {"images": [], "accepted": False},
             "identity_locked": False,
             "source": "personality",
+            "gallery_refs": [],
+            "gallery_spice": [],
+            "gallery_nn": None,
         },
         "story_bundle": {},
         "story_version": 0,

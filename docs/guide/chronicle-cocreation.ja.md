@@ -212,6 +212,24 @@ topic が後から入る場合は Story 生成時に衣装↔場所の衝突を 
 
 参照画像ミックス既定: **髪・目=参照、小物・雰囲気=類推**。採用前にタグ差分プレビューを出す。
 
+### 4.5 ギャラリー近傍（オプション）
+
+`quality_policy.gallery_nn` / `inputs.use_gallery_nn`（**既定オフ**）が有効なとき、Personalitywright 直後に Qdrant 近傍検索でギャラリー画像を取り、WD14 を合流する。
+
+| 取得経路 | 用途 |
+|----------|------|
+| `reference_image_id` あり → `search_similar` | 参照画像のセマンティック近傍 |
+| identity/prop タグ → embed → `search_by_vector` | 類推タグからの近傍（Inspire Pre-Search と同系統） |
+
+合流ルール:
+
+- **identity**: 票数≥2 の髪/目/衣装。髪・目が空なら1票でも穴埋め可
+- **prop**: 既存 `signature_prop` / prop があるときだけ厚くする（新規小物の勝手な発明はしない）
+- **spice**: 非 identity / 非 prop の雰囲気タグ → パネル compile の `layers.spice` にのみ入れる（ボード identity 層には混ぜない）
+- 近傍サムネは `character.gallery_refs` に保持（人が見る補助。ボード画像自体は生成スロット）
+
+失敗時は no-op（Story 先行をブロックしない）。埋め込み空間はパイプラインと同じテキスト埋め込み（nomic）であり、画素 CLIP ではない。
+
 ---
 
 ## 5. ストーリー：1本＋再作成

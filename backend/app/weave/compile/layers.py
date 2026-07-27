@@ -100,6 +100,8 @@ def compile_panel(
     emotion = _dedupe([str(intent.get("emotion") or "")])
     time_marker = _dedupe([str(intent.get("time_marker") or "")])
     environment = _env_from_setting(str(world.get("setting") or ""), boost=env_boost)
+    # Optional gallery-NN atmosphere / style tags (never mixed into identity).
+    spice = _dedupe([str(t) for t in (character.get("gallery_spice") or [])])
 
     # Merge then strip framing conflicts (never drop identity/throughline cores)
     body = strip_framing_conflicts(
@@ -113,9 +115,9 @@ def compile_panel(
         "action": action,
         "emotion": emotion,
         "environment": environment,
-        "spice": [],
+        "spice": spice,
     }
-    positive_tags = _dedupe(identity + throughline + body)
+    positive_tags = _dedupe(identity + throughline + body + spice)
     prose_bits = [
         str(intent.get("narrative_en") or "").strip(),
         str(world.get("setting") or "").strip(),
