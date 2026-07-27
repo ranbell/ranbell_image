@@ -2738,23 +2738,6 @@ def _chronicle_llm_options(body, temp: float, cfg: dict, *, story: bool = False)
     }
 
 
-def _chronicle_story_think(body, cfg: dict, model: str) -> bool | str | None:
-    """Native think for creative story calls. False disables; else model-specific.
-
-    bonsai/qwen: think=\"high\" (chat). gemma4: think=True.
-    """
-    explicit = getattr(body, "story_think", None)
-    if explicit is False:
-        return False
-    enabled = True if explicit is True else bool(cfg.get("story_think", True))
-    if not enabled:
-        return False
-    m = (model or "").lower()
-    if "gemma" in m:
-        return True
-    return "high"
-
-
 def _chronicle_bind_llm(ollama, body):
     """Route Chronicle text/VLM to the per-run provider; embed stays Ollama."""
     provider = getattr(body, "llm_provider", None) or "ollama"
@@ -2810,192 +2793,6 @@ async def _save_and_register_chronicle_image(img_bytes: bytes, original_name: st
     except Exception as exc:
         logger.error("[chronicle] register_image failed: %s", exc)
         return None
-
-
-async def _save_chronicle_draft_image(
-    img_bytes: bytes, original_name: str, db,
-) -> tuple[str | None, Path | None]:
-    """Save a Phase-B draft under Chronicles/drafts/ for live preview in Chronicle.
-
-    Marked ``chronicle_draft`` so it is not treated as a final axis image.
-    Not linked onto the finished story payload (preview-during-weave only).
-    """
-    import hashlib as _hl
-    from datetime import datetime as _dt
-
-    from ..config import settings as _settings
-    from ..scanner.scanner import register_image as _register_image
-
-    sha256 = _hl.sha256(img_bytes).hexdigest()
-    gen_dir = _settings.generated_images_dir / "Chronicles" / "drafts"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-
-    suffix = Path(original_name).suffix or ".png"
-    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-    path = gen_dir / f"draft_{ts}_{sha256[:8]}{suffix}"
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, path.write_bytes, img_bytes)
-    try:
-        await _register_image(path, db)
-        await db.set_payload(sha256, {"chronicle_draft": True})
-        return sha256, path
-    except Exception as exc:
-        logger.error("[chronicle] draft register_image failed: %s", exc)
-        return None, path if path.exists() else None
-
-
-async def _comfy_generate_bytes(
-    comfy,
-    cancel: CancelToken,
-    *,
-    workflow_name: str,
-    positive: str,
-    negative: str,
-    seed: int | None,
-    width: int | None = None,
-    height: int | None = None,
-    steps: int | None = None,
-) -> bytes | None:
-    """Queue one Comfy render and return the first output image bytes."""
-    import random as _random
-
-    if seed is None:
-        seed = _random.randint(0, (1 << 64) - 1)
-
-    wf = comfy.load_workflow(workflow_name)
-    patched = comfy.patch_workflow(
-        wf, positive, negative, "", "", 1,
-        seed=seed, width=width, height=height, steps=steps,
-    )
-    prompt_id = await comfy.queue_prompt(patched)
-    queued = True
-
-    async def _cancel_comfy() -> None:
-        if queued:
-            try:
-                await comfy.delete_from_queue(prompt_id)
-            except Exception as exc:
-                logger.warning("ComfyUI queue delete failed: %s", exc)
-        try:
-            await comfy.interrupt()
-        except Exception as exc:
-            logger.warning("ComfyUI interrupt failed: %s", exc)
-
-    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
-
-    img_bytes: bytes | None = None
-    async for event in comfy.stream_progress(prompt_id):
-        cancel.raise_if_set()
-        queued = False
-        if event["type"] == "comfy_output":
-            for img_ref in event.get("images", []):
-                cancel.raise_if_set()
-                try:
-                    img_bytes = await comfy.fetch_image(
-                        img_ref["filename"],
-                        img_ref.get("subfolder", ""),
-                        img_ref.get("type", "output"),
-                    )
-                    if img_bytes:
-                        return img_bytes
-                except Exception as exc:
-                    logger.error("[chronicle] draft fetch error: %s", exc)
-
-    if img_bytes is None:
-        for img_ref in await comfy.fetch_history(prompt_id):
-            try:
-                img_bytes = await comfy.fetch_image(
-                    img_ref["filename"],
-                    img_ref.get("subfolder", ""),
-                    img_ref.get("type", "output"),
-                )
-                if img_bytes:
-                    return img_bytes
-            except Exception as exc:
-                logger.error("[chronicle] draft history fetch error: %s", exc)
-    return img_bytes
-
-
-async def _wd14_tags_from_path(path: Path, db) -> list[str]:
-    """WD14-scan an image path (do not wait on the watcher)."""
-    from ..ai import wd14 as wd14_mod
-    return await wd14_mod.tags_from_path(path, db=db)
-
-
-async def _wd14_tags_from_bytes(img_bytes: bytes, db) -> list[str]:
-    """WD14-scan image bytes via a throwaway tempfile (never registered)."""
-    from ..ai import wd14 as wd14_mod
-    return await wd14_mod.tags_from_bytes(img_bytes, db=db)
-
-
-async def run_chronicle_candidates(
-    reporter: ProgressReporter,
-    cancel: CancelToken,
-    *,
-    body_dict: dict,
-    db,
-    ollama,
-    spooler,
-    comfy,
-    token_queue: asyncio.Queue,
-    story_id: str | None = None,
-    temperature: float | None = None,
-) -> None:
-    """PROMPT lane — Chronicle Phase 1: Stage1 storyboard × up to 3 candidates."""
-    from ..story.api import ChronicleRequest
-    from ..story.chronicle_pipeline import run_chronicle_candidates_v2
-
-    body = ChronicleRequest(**body_dict)
-    await run_chronicle_candidates_v2(
-        reporter,
-        cancel,
-        body=body,
-        db=db,
-        ollama=ollama,
-        token_queue=token_queue,
-        story_id=story_id,
-        temperature=temperature,
-        bind_llm=_chronicle_bind_llm,
-        models_fn=_chronicle_models,
-        llm_options_fn=_chronicle_llm_options,
-        vlm_image_bytes_fn=_vlm_image_bytes,
-    )
-
-
-async def run_chronicle_expand(
-    reporter: ProgressReporter,
-    cancel: CancelToken,
-    *,
-    story_id: str,
-    candidate_id: str,
-    time_scale: str,
-    temperature: float,
-    db,
-    ollama,
-    spooler,
-    comfy,
-    token_queue: asyncio.Queue,
-) -> None:
-    """PROMPT lane — Chronicle Phase 2: Stage2 enhance × 3, generate all panels."""
-    from ..story.chronicle_pipeline import run_chronicle_expand_v2
-
-    await run_chronicle_expand_v2(
-        reporter,
-        cancel,
-        story_id=story_id,
-        candidate_id=candidate_id,
-        temperature=temperature,
-        db=db,
-        ollama=ollama,
-        spooler=spooler,
-        comfy=comfy,
-        token_queue=token_queue,
-        bind_llm=_chronicle_bind_llm,
-        models_fn=_chronicle_models,
-        llm_options_fn=_chronicle_llm_options,
-        image_generate_fn=run_chronicle_image_generate,
-    )
 
 
 async def run_chronicle_image_generate(
@@ -3166,6 +2963,173 @@ async def run_chronicle_image_generate(
 
     reporter.update(1.0, f"{len(saved_sha256s)} images generated")
     return {"sha256s": saved_sha256s, "story_id": story_id, "axis": axis, "seed": seed}
+
+
+async def run_weave_image_generate(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    comfy,
+    session_id: str,
+    kind: str,
+    target: str,
+    workflow_name: str,
+    positive: str,
+    negative: str,
+    seed: int | None,
+    steps: int | None = None,
+    base_sha256: str = "",
+    ollama=None,
+) -> dict:
+    """GEN lane for Weave board / sample / final images.
+
+    ``kind`` is board|sample|final; ``target`` is board slot or panel_key.
+    """
+    import random as _random
+    from pathlib import Path
+
+    from ..creation.schema import CreationRecord
+    from ..weave import session_db as weave_db
+
+    reporter.indeterminate()
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    wf = comfy.load_workflow(workflow_name)
+    base_sha = (base_sha256 or "").strip()
+    if base_sha:
+        doc = await db.get(base_sha) or {}
+        fp = Path(doc.get("path", ""))
+        if fp.exists():
+            try:
+                data = fp.read_bytes()
+                upload_name = f"weave_ref_{base_sha[:16]}{fp.suffix or '.png'}"
+                stored = await comfy.upload_image(data, upload_name)
+                wf, n_load = comfy.patch_load_image_nodes(wf, stored)
+                if n_load:
+                    reporter.update(
+                        0.0,
+                        f"Comfy ref uploaded={stored} patched_nodes={n_load}",
+                    )
+            except Exception as exc:
+                logger.warning("[weave] base inject failed: %s", exc)
+                reporter.update(0.0, f"WARNING: Comfy base inject failed: {exc}")
+
+    patched = comfy.patch_workflow(
+        wf, positive, negative, "", "", 1,
+        seed=seed, steps=steps, append_negative=True,
+    )
+    prompt_id = await comfy.queue_prompt(patched)
+    reporter.update(0.0, f"Weave {kind}/{target} queued in ComfyUI...")
+
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception as exc:
+                logger.warning("ComfyUI queue delete failed: %s", exc)
+        try:
+            await comfy.interrupt()
+        except Exception as exc:
+            logger.warning("ComfyUI interrupt failed: %s", exc)
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    async def _finalize(sha256: str) -> None:
+        try:
+            job = getattr(reporter, "_job", None)
+            jid = str(getattr(job, "id", "") or "")
+            meta = dict(getattr(job, "meta", None) or {})
+            si = meta.get("seed_index")
+            try:
+                si_int = int(si) if si is not None else None
+            except (TypeError, ValueError):
+                si_int = None
+            await weave_db.attach_render_result(
+                db, session_id, kind=kind, target=target, image_id=sha256,
+                ollama=ollama,
+                job_id=jid,
+                seed_index=si_int,
+            )
+        except Exception as exc:
+            logger.error(
+                "[weave] attach failed session=%s %s/%s: %s",
+                session_id, kind, target, exc,
+            )
+        record = CreationRecord(
+            method="weave",
+            prompt_style="",
+            workflow_name=workflow_name,
+            positive_prompt_generated=positive,
+            negative_prompt_generated=negative,
+            seed=seed,
+        )
+        await db.set_payload(sha256, {
+            "creation_record": record.model_dump(),
+            "weave_session_id": session_id,
+            "weave_kind": kind,
+            "weave_target": target,
+        })
+
+    saved_sha256s: list[str] = []
+    saved_filenames: set[str] = set()
+
+    async for event in comfy.stream_progress(prompt_id):
+        cancel.raise_if_set()
+        queued = False
+        if event["type"] == "comfy_progress":
+            v = event.get("value", 0)
+            m = event.get("max", 1)
+            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+        elif event["type"] == "comfy_output":
+            for img_ref in event.get("images", []):
+                cancel.raise_if_set()
+                try:
+                    img_bytes = await comfy.fetch_image(
+                        img_ref["filename"],
+                        img_ref.get("subfolder", ""),
+                        img_ref.get("type", "output"),
+                    )
+                    sha256 = await _save_and_register_chronicle_image(
+                        img_bytes, img_ref["filename"], db,
+                    )
+                    if sha256:
+                        saved_sha256s.append(sha256)
+                        saved_filenames.add(img_ref["filename"])
+                        await _finalize(sha256)
+                except Exception as exc:
+                    logger.error("[weave] image save error: %s", exc)
+
+    history_images = await comfy.fetch_history(prompt_id)
+    for img_ref in history_images:
+        if img_ref.get("filename") in saved_filenames:
+            continue
+        try:
+            img_bytes = await comfy.fetch_image(
+                img_ref["filename"],
+                img_ref.get("subfolder", ""),
+                img_ref.get("type", "output"),
+            )
+            sha256 = await _save_and_register_chronicle_image(
+                img_bytes, img_ref["filename"], db,
+            )
+            if sha256:
+                saved_sha256s.append(sha256)
+                await _finalize(sha256)
+        except Exception as exc:
+            logger.error("[weave] history image save error: %s", exc)
+
+    reporter.update(1.0, f"weave {kind}/{target}: {len(saved_sha256s)} image(s)")
+    return {
+        "sha256s": saved_sha256s,
+        "session_id": session_id,
+        "kind": kind,
+        "target": target,
+        "seed": seed,
+    }
 
 
 # Pose sets for pinups — each "add" cycles to a different pose so the corkboard

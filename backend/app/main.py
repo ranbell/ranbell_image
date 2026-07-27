@@ -30,6 +30,7 @@ from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
 from .story.api import router as story_router
 from .story.authors_api import router as authors_router
+from .weave.api import router as weave_router
 
 
 def _abort(msg: str) -> None:
@@ -114,7 +115,6 @@ async def lifespan(app: FastAPI):
     app.state.inspire_event_queues: dict[str, asyncio.Queue] = {}
     app.state.invoke_event_queues: dict[str, asyncio.Queue] = {}
     app.state.story_token_queues: dict[str, asyncio.Queue] = {}
-    app.state.chronicle_agent_runs: dict = {}
 
     from .invoke.session_manager import InvokeSessionManager
     from .invoke.spirit_loader import preload_all as _preload_spirits
@@ -256,6 +256,7 @@ app.include_router(alignment_router)
 app.include_router(invoke_router)
 app.include_router(story_router)
 app.include_router(authors_router)
+app.include_router(weave_router)
 
 
 @app.get("/api/token")

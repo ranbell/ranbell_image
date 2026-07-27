@@ -261,7 +261,7 @@ const timelineBuckets = computed(() => {
   return [...map.values()].sort((a, b) => a.order - b.order)
 })
 
-// Dismiss guard (mirrors ChroniclePanel): swallow the click/Esc that opened the
+// Dismiss guard (mirrors WeavePanel): swallow the click/Esc that opened the
 // panel and any underlay race from an overlay beneath it for one tick.
 let _backdropArmed = false
 let _ignoreDismissUntil = 0

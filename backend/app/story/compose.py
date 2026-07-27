@@ -88,7 +88,7 @@ def parse_identity_tags(text: str) -> list[str]:
 
 
 def axis_keywords_from_body(body) -> dict[str, list[str]]:
-    """Read per-axis forced keywords from a ChronicleRequest-like object."""
+    """Read per-axis forced keywords from a request-like object."""
     return {
         "past": parse_csv_tags(getattr(body, "keywords_past", "") or ""),
         "present": parse_csv_tags(getattr(body, "keywords_present", "") or ""),
