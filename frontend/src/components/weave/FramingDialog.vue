@@ -57,7 +57,7 @@ function submit() {
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+  <div v-if="show" class="fixed inset-0 z-[var(--z-panel-weave-child)] flex items-center justify-center bg-black/60 p-4"
     @mousedown.self="emit('close')">
     <div class="w-full max-w-md rounded-xl border border-teal-800/50 bg-gray-950 p-4 shadow-2xl space-y-3">
       <div class="flex items-start justify-between gap-2">

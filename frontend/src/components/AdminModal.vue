@@ -527,7 +527,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+    <div v-if="show" class="fixed inset-0 z-[var(--z-modal)] bg-black/90 flex items-center justify-center p-4"
       @click.self="emit('update:show', false)">
       <div class="bg-gray-900 rounded-xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl border border-gray-800">
 

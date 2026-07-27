@@ -693,7 +693,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 z-[80] flex items-stretch justify-center bg-black/70 backdrop-blur-sm"
+  <div v-if="show" class="weave-root fixed inset-0 z-[var(--z-panel-weave)] flex items-stretch justify-center bg-black/70 backdrop-blur-sm"
     @mousedown.self="close">
     <FramingDialog
       :show="framingDialog.show"

@@ -2,7 +2,7 @@
 
 .sb-theme,
 .storybook-root,
-.chronicle-root,
+.weave-root,
 .sb-overlay-bg,
 .sb-detail-panel {
   --sb-font-display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
@@ -27,8 +27,8 @@
 .storybook-root {
   z-index: var(--z-panel-story, 620) !important;
 }
-.chronicle-root {
-  z-index: var(--z-panel-chronicle, 640) !important;
+.weave-root {
+  z-index: var(--z-panel-weave, 640) !important;
 }
 
 .sb-display { font-family: var(--sb-font-display); font-weight: 600; }
@@ -46,14 +46,14 @@
   border-radius: 1rem;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
 }
-.chronicle-root .sb-shell {
+.weave-root .sb-shell {
   background:
     linear-gradient(165deg, rgba(45, 212, 191, 0.07) 0%, transparent 42%),
     var(--sb-panel);
   border-color: rgba(45, 212, 191, 0.22);
 }
 .sb-hairline { border-bottom: 1px solid var(--sb-rule); }
-.chronicle-root .sb-hairline { border-bottom-color: rgba(45, 212, 191, 0.18); }
+.weave-root .sb-hairline { border-bottom-color: rgba(45, 212, 191, 0.18); }
 
 .sb-btn {
   display: inline-flex;
