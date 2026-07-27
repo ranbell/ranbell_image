@@ -1783,6 +1783,7 @@
     "workflow": "Workflow",
     "authorStyle": "Voice",
     "next": "Next",
+    "ctaInferCharacter": "Infer the character from personality",
     "working": "Working…",
     "causality": "Causality",
     "recreate": "Recreate story",

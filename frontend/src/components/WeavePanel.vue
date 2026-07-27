@@ -75,7 +75,21 @@ const RATE_OPTIONS = [
   { id: 'unclear_story', labelKey: 'weave.rate.unclearStory' },
 ]
 
-const cta = computed(() => session.value?.next_cta || { code: 'infer_character', label: '', enabled: false })
+// Before the first call there is no server CTA, and this button is the only
+// way in — runAction() creates the session itself. Mirror what
+// POST …/character/infer requires instead of leaving the entry point dead.
+const cta = computed(() => {
+  if (session.value?.next_cta) return session.value.next_cta
+  const needs = []
+  if (!personalityText.value?.trim()) needs.push('personality_text')
+  if (!storyModel.value) needs.push('story_model')
+  return {
+    code: 'infer_character',
+    label: t('weave.ctaInferCharacter'),
+    enabled: needs.length === 0,
+    needs,
+  }
+})
 const character = computed(() => session.value?.character || {})
 const boardImages = computed(() => character.value?.board?.images || [])
 const galleryRefs = computed(() => character.value?.gallery_refs || [])

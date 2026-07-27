@@ -1783,6 +1783,7 @@
     "workflow": "ワークフロー",
     "authorStyle": "文体",
     "next": "次へ",
+    "ctaInferCharacter": "パーソナリティからキャラを類推",
     "working": "処理中…",
     "causality": "因果",
     "recreate": "ストーリー再作成",
