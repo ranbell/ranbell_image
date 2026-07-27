@@ -102,6 +102,11 @@ def compile_panel(
     environment = _env_from_setting(str(world.get("setting") or ""), boost=env_boost)
     # Optional gallery-NN atmosphere / style tags (never mixed into identity).
     spice = _dedupe([str(t) for t in (character.get("gallery_spice") or [])])
+    # Lab Spicer tags (quality_policy.spicer) — also spice layer only.
+    from ..character.spicer import is_spicer_enabled
+
+    if is_spicer_enabled(session):
+        spice = _dedupe(spice + [str(t) for t in (character.get("lab_spice") or [])])
     # face-visible emotion boost for dead_expression chip
     for c in session.get("constraints") or []:
         if (

@@ -97,6 +97,18 @@ async def attach_render_result(
             prev["pending"] = False
             panel[bucket] = prev
             if kind == "sample":
+                # Record into sample_history (multi-seed)
+                hist = list(panel.get("sample_history") or [])
+                matched = False
+                for h in hist:
+                    if h.get("pending") and not h.get("image_id"):
+                        h["image_id"] = image_id
+                        h["pending"] = False
+                        matched = True
+                        break
+                if not matched:
+                    hist.append({"image_id": image_id, "pending": False})
+                panel["sample_history"] = hist[-9:]
                 from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
                 from .verify.score import apply_weave_scores
                 from .verify.vlm_assist import apply_heuristic_vlm, apply_vlm_assist_to_panel

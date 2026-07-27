@@ -35,6 +35,9 @@ const recreateChips = ref([])
 const useGalleryNn = ref(false)
 const useVlmAssist = ref(true)
 const useStrictSeal = ref(false)
+const useSpicer = ref(false)
+const useMoodSlot = ref(false)
+const multiSeed = ref(1)
 const selectedPanelKey = ref('panel_1')
 const editingNarrative = ref('')
 const pollTimer = ref(null)
@@ -250,6 +253,9 @@ async function runAction(code) {
         use_gallery_nn: useGalleryNn.value,
         vlm_assist: useVlmAssist.value,
         strict_seal: useStrictSeal.value,
+        spicer: useSpicer.value,
+        mood_slot: useMoodSlot.value,
+        multi_seed: multiSeed.value,
       }),
     })
 
@@ -315,7 +321,7 @@ async function runAction(code) {
         }),
       })
       session.value = res
-      trackJobs(res.job)
+      trackJobs(res.jobs || res.job?.jobs || res.job)
     } else if (code === 'accept_board') {
       session.value = await api(`/api/weave/sessions/${id}/character/accept-board`, {
         method: 'POST',
@@ -626,6 +632,11 @@ watch(session, (s) => {
   if (typeof flag === 'boolean') useGalleryNn.value = flag
   if (typeof s?.quality_policy?.vlm_assist === 'boolean') useVlmAssist.value = s.quality_policy.vlm_assist
   if (typeof s?.quality_policy?.strict_seal === 'boolean') useStrictSeal.value = s.quality_policy.strict_seal
+  if (typeof s?.quality_policy?.spicer === 'boolean') useSpicer.value = s.quality_policy.spicer
+  const slots = s?.quality_policy?.board_slots
+  if (Array.isArray(slots)) useMoodSlot.value = slots.includes('mood')
+  const ms = Number(s?.quality_policy?.multi_seed)
+  if (ms >= 1 && ms <= 3) multiSeed.value = ms
   if (s?.inputs?.vlm_model) vlmModel.value = s.inputs.vlm_model
   if (s?.inputs?.llm_provider) llmProvider.value = s.inputs.llm_provider
   if (s.session_id) connectStream(s.session_id)
@@ -669,6 +680,9 @@ onUnmounted(() => {
           v-model:personality-text="personalityText"
           v-model:use-gallery-nn="useGalleryNn"
           v-model:use-vlm-assist="useVlmAssist"
+          v-model:use-spicer="useSpicer"
+          v-model:use-mood-slot="useMoodSlot"
+          v-model:multi-seed="multiSeed"
           :character="character"
           :board-images="boardImages"
           :gallery-refs="galleryRefs"
@@ -734,10 +748,20 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <label class="flex items-center gap-2 text-[11px] text-gray-400">
-            <input v-model="useStrictSeal" type="checkbox" class="accent-teal-500" />
-            {{ t('weave.strictSeal') }}
-          </label>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="flex items-center gap-2 text-[11px] text-gray-400">
+              <input v-model="useStrictSeal" type="checkbox" class="accent-teal-500" />
+              {{ t('weave.strictSeal') }}
+            </label>
+            <label class="flex items-center gap-1.5 text-[11px] text-gray-400">
+              <span>{{ t('weave.multiSeed') }}</span>
+              <select v-model.number="multiSeed" class="rounded border border-gray-800 bg-gray-900 px-1.5 py-0.5 text-[11px]">
+                <option :value="1">1</option>
+                <option :value="2">2</option>
+                <option :value="3">3</option>
+              </select>
+            </label>
+          </div>
 
           <!-- CTA -->
           <button

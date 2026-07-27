@@ -33,6 +33,15 @@ def compile_board_slot(session: dict[str, Any], slot: str) -> dict[str, str]:
     if slot == "prop":
         tags.extend(props)
         tags.append("holding")
+    if slot == "mood":
+        # Atmosphere-first; avoid prop clutter, lean on spice/palette cues
+        tags.extend(purpose)
+        for t in (character.get("gallery_spice") or [])[:4]:
+            tags.append(str(t))
+        for t in (character.get("lab_spice") or [])[:4]:
+            tags.append(str(t))
+        for t in (character.get("palette") or [])[:3]:
+            tags.append(str(t))
     # Strip framing conflicts for the intended camera
     tags = strip_framing_conflicts(tags, camera if camera != "close_up" else "close_up")
     # Dedup

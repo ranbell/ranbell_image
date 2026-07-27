@@ -118,6 +118,9 @@ def new_session_payload(
             "allow_story_before_board": True,
             # Opt-in: Qdrant NN → identity/spice enrichment after infer.
             "gallery_nn": gallery_nn,
+            # Lab extras (default off)
+            "spicer": False,
+            "multi_seed": 1,
         },
         "inputs": {
             "topic": topic or "",
@@ -146,6 +149,7 @@ def new_session_payload(
             "source": "personality",
             "gallery_refs": [],
             "gallery_spice": [],
+            "lab_spice": [],
             "gallery_nn": None,
         },
         "story_bundle": {},

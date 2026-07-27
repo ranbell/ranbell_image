@@ -83,6 +83,8 @@ def unlock_identity(session: dict[str, Any], *, confirm: bool = False) -> dict[s
 
 
 def accept_board(session: dict[str, Any], *, allow_pending: bool = False) -> dict[str, Any]:
+    from .character.board_slots import sync_board_briefs
+
     board = session.setdefault("character", {}).setdefault("board", {})
     images = board.get("images") or []
 
@@ -97,6 +99,7 @@ def accept_board(session: dict[str, Any], *, allow_pending: bool = False) -> dic
     slots = {img.get("slot") for img in images if _usable(img)}
     if "portrait" not in slots or "full" not in slots:
         # Test / dry path: synthesize placeholders only when explicitly allowed
+        sync_board_briefs(session)
         briefs = (session.get("character") or {}).get("board_briefs") or []
         if allow_pending and briefs and not any(_usable(i) for i in images):
             board["images"] = [
@@ -107,7 +110,7 @@ def accept_board(session: dict[str, Any], *, allow_pending: bool = False) -> dic
                     "pending": False,
                 }
                 for b in briefs
-                if b.get("slot") in ("portrait", "full", "prop")
+                if b.get("slot") in ("portrait", "full", "prop", "mood")
             ]
             slots = {img.get("slot") for img in board["images"] if _usable(img)}
         if "portrait" not in slots or "full" not in slots:
@@ -465,6 +468,9 @@ def enter_lookdev(session: dict[str, Any]) -> dict[str, Any]:
         src = by_key.get(panel.get("key"))
         if src and panel.get("intent"):
             panel["intent"]["must_show_resolved"] = src.get("must_show_resolved") or []
+    from .character.spicer import run_spicer
+
+    run_spicer(session)
     compile_all_panels(session)
     session["status"] = "lookdev"
     append_timeline(session, actor="user", type_="message", text="entered lookdev")
@@ -472,6 +478,9 @@ def enter_lookdev(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def compile_session(session: dict[str, Any], *, sparse_panels: list[str] | None = None) -> dict[str, Any]:
+    from .character.spicer import run_spicer
+
+    run_spicer(session)
     boost = set(sparse_panels or [])
     # Also boost panels that have sparse constraint
     for c in session.get("constraints") or []:

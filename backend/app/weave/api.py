@@ -48,6 +48,10 @@ class TopicPatch(BaseModel):
     vlm_assist: bool | None = None
     strict_seal: bool | None = None
     sample_steps: int | None = None
+    spicer: bool | None = None
+    mood_slot: bool | None = None
+    multi_seed: int | None = None
+    mode: Literal["standard", "lab"] | None = None
 
 
 class StoryGenerateRequest(BaseModel):
@@ -223,6 +227,23 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         session.setdefault("quality_policy", {})["strict_seal"] = bool(body.strict_seal)
     if body.sample_steps is not None:
         session.setdefault("inputs", {})["sample_steps"] = int(body.sample_steps)
+    if body.spicer is not None:
+        from .character.spicer import set_spicer_enabled
+
+        set_spicer_enabled(session, bool(body.spicer))
+    if body.mood_slot is not None:
+        from .character.board_slots import set_mood_slot
+
+        set_mood_slot(session, bool(body.mood_slot))
+    if body.multi_seed is not None:
+        session.setdefault("quality_policy", {})["multi_seed"] = max(
+            1, min(3, int(body.multi_seed)),
+        )
+    if body.mode is not None:
+        session.setdefault("quality_policy", {})["mode"] = body.mode
+        if body.mode == "lab" and body.spicer is None:
+            # Entering lab does not force spicer on; leaving clears nothing.
+            pass
     await resolve_author_style(session, request.app.state.db)
     apply_topic_warnings(session)
     return await _save(request, session_id, session)
@@ -325,6 +346,9 @@ async def character_board(
     if body.dry_pending or not (
         inputs.get("workflow_final") or inputs.get("workflow_sample")
     ):
+        from .character.board_slots import sync_board_briefs
+
+        sync_board_briefs(session)
         briefs = (session.get("character") or {}).get("board_briefs") or [
             {"slot": "portrait"}, {"slot": "full"}, {"slot": "prop"},
         ]
@@ -482,12 +506,14 @@ async def sample_panel(session_id: str, body: SampleRequest, request: Request):
         job = submit_sample_job(request.app, session_id, session, body.panel_key)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    jobs = job.get("jobs") or [job]
     append_timeline(
         session, actor="system", type_="sample",
-        text=f"sample queued {body.panel_key} job={job['job_id']}",
+        text=f"sample queued {body.panel_key} x{len(jobs)} job={job['job_id']}",
     )
     view = await _save(request, session_id, session)
     view["job"] = job
+    view["jobs"] = jobs
     return view
 
 

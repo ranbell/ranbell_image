@@ -5,6 +5,9 @@ defineProps({
   personalityText: String,
   useGalleryNn: Boolean,
   useVlmAssist: Boolean,
+  useSpicer: Boolean,
+  useMoodSlot: Boolean,
+  multiSeed: { type: Number, default: 1 },
   character: { type: Object, default: () => ({}) },
   boardImages: { type: Array, default: () => [] },
   galleryRefs: { type: Array, default: () => [] },
@@ -20,6 +23,9 @@ const emit = defineEmits([
   'update:personalityText',
   'update:useGalleryNn',
   'update:useVlmAssist',
+  'update:useSpicer',
+  'update:useMoodSlot',
+  'update:multiSeed',
   'reinfer',
 ])
 const { t } = useI18n()
@@ -62,6 +68,47 @@ const { t } = useI18n()
       </span>
     </label>
 
+    <div class="rounded border border-violet-900/40 bg-violet-950/20 p-2 space-y-2">
+      <div class="text-[10px] uppercase tracking-wider text-violet-400/90">{{ t('weave.lab') }}</div>
+      <label class="flex items-start gap-2 cursor-pointer">
+        <input
+          :checked="useSpicer"
+          type="checkbox"
+          class="mt-0.5 accent-violet-500"
+          @change="emit('update:useSpicer', $event.target.checked)"
+        />
+        <span>
+          <span class="block text-[11px] text-violet-100">{{ t('weave.spicer') }}</span>
+          <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.spicerHint') }}</span>
+        </span>
+      </label>
+      <label class="flex items-start gap-2 cursor-pointer">
+        <input
+          :checked="useMoodSlot"
+          type="checkbox"
+          class="mt-0.5 accent-violet-500"
+          @change="emit('update:useMoodSlot', $event.target.checked)"
+        />
+        <span>
+          <span class="block text-[11px] text-violet-100">{{ t('weave.moodSlot') }}</span>
+          <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.moodSlotHint') }}</span>
+        </span>
+      </label>
+      <label class="flex items-center gap-2 text-[11px] text-violet-100">
+        <span class="shrink-0">{{ t('weave.multiSeed') }}</span>
+        <select
+          :value="multiSeed"
+          class="rounded border border-gray-800 bg-gray-900 px-1.5 py-0.5 text-[11px]"
+          @change="emit('update:multiSeed', Number($event.target.value))"
+        >
+          <option :value="1">1</option>
+          <option :value="2">2</option>
+          <option :value="3">3</option>
+        </select>
+        <span class="text-[10px] text-gray-500">{{ t('weave.multiSeedHint') }}</span>
+      </label>
+    </div>
+
     <div class="space-y-1">
       <div class="text-[10px] text-gray-500">identity</div>
       <div class="flex flex-wrap gap-1">
@@ -78,6 +125,13 @@ const { t } = useI18n()
         <div class="flex flex-wrap gap-1">
           <span v-for="tag in gallerySpice" :key="'s'+tag"
             class="rounded bg-cyan-950/80 px-1.5 py-0.5 text-[10px] text-cyan-200">{{ tag }}</span>
+        </div>
+      </template>
+      <template v-if="(character.lab_spice || []).length">
+        <div class="text-[10px] text-gray-500 mt-2">{{ t('weave.labSpice') }}</div>
+        <div class="flex flex-wrap gap-1">
+          <span v-for="tag in character.lab_spice" :key="'ls'+tag"
+            class="rounded bg-violet-950/80 px-1.5 py-0.5 text-[10px] text-violet-200">{{ tag }}</span>
         </div>
       </template>
     </div>
