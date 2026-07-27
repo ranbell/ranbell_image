@@ -96,22 +96,23 @@ async def attach_render_result(
             prev["pending"] = False
             panel[bucket] = prev
             if kind == "sample":
-                from .verify.heuristics import apply_framing_to_panel
+                from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
 
-                wd14: list[str] = []
-                try:
-                    doc = await db.get(image_id) or {}
-                    wd14 = list(doc.get("wd14_tags") or [])
-                except Exception:
-                    wd14 = []
+                wd14 = await resolve_wd14_for_image(db, image_id)
                 apply_framing_to_panel(panel, wd14)
             break
         if kind == "final":
             finals = [
-                (p.get("final") or {}).get("image_id")
+                str((p.get("final") or {}).get("image_id") or "")
                 for p in (session.get("panels") or [])
             ]
-            if all(finals) and len(finals) >= 3:
-                session["status"] = "lookdev"  # ready to seal; not sealed yet
+            ready = (
+                len(finals) >= 3
+                and all(f and not f.startswith(("pending:", "placeholder:")) for f in finals)
+            )
+            if ready:
+                # Finals done → back to lookdev so CTA can offer Seal.
+                session["status"] = "lookdev"
                 session.setdefault("cross_panel_qa", {})["ready_for_final"] = True
+                session.setdefault("cross_panel_qa", {})["finals_ready"] = True
     await save_session(db, session_id, session)

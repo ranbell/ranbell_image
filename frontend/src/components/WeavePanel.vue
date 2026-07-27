@@ -246,12 +246,45 @@ async function runAction(code) {
       })
       session.value = res
       trackJobs(res.jobs)
+    } else if (code === 'seal') {
+      session.value = await api(`/api/weave/sessions/${id}/seal`, { method: 'POST' })
+      emit('toast', { msg: t('weave.sealed'), type: 'ok' })
+      if (session.value?.storybook_story_id) {
+        emit('open-storybook')
+      }
+    } else if (code === 'reeval_framing') {
+      session.value = await api(`/api/weave/sessions/${id}/sample/reeval-framing`, {
+        method: 'POST',
+      })
     } else if (code === 'fix_framing_or_override') {
-      const p = panels.value.find(p => p.qa?.framing === 'fail')
-      if (p) {
+      const p = panels.value.find(p => p.qa?.framing === 'fail' || p.qa?.framing === 'unknown')
+      if (!p) {
+        await refreshSession()
+        return
+      }
+      const fails = p.framing_fail_count || 0
+      const limit = session.value?.quality_policy?.framing_fail_limit || 2
+      if (fails < limit || p.qa?.framing === 'unknown') {
+        if (!window.confirm(t('weave.resampleConfirm'))) return
+        const res = await api(`/api/weave/sessions/${id}/sample`, {
+          method: 'POST',
+          body: JSON.stringify({
+            panel_key: p.key,
+            placeholder: false,
+            workflow_sample: workflow.value,
+          }),
+        })
+        session.value = res
+        trackJobs(res.job)
+      } else {
+        const reason = window.prompt(t('weave.overrideReasonPh'), '')
+        if (!reason || !String(reason).trim()) {
+          emit('toast', { msg: t('weave.overrideNeedReason'), type: 'warn' })
+          return
+        }
         session.value = await api(`/api/weave/sessions/${id}/sample/override-framing`, {
           method: 'POST',
-          body: JSON.stringify({ panel_key: p.key, reason: 'user override from UI' }),
+          body: JSON.stringify({ panel_key: p.key, reason: String(reason).trim() }),
         })
       }
     } else {
@@ -310,12 +343,34 @@ async function seal() {
   try {
     session.value = await api(`/api/weave/sessions/${sessionId.value}/seal`, { method: 'POST' })
     emit('toast', { msg: t('weave.sealed'), type: 'ok' })
+    if (session.value?.storybook_story_id) emit('open-storybook')
   } catch (e) {
     emit('toast', { msg: String(e.message || e), type: 'error' })
   } finally {
     busy.value = false
   }
 }
+
+async function rollbackTo(version) {
+  if (!sessionId.value) return
+  if (!window.confirm(t('weave.rollbackConfirm', { v: version }))) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/weave/sessions/${sessionId.value}/story/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ to_version: version }),
+    })
+  } catch (e) {
+    emit('toast', { msg: String(e.message || e), type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
+watch(() => session.value?.suggest_recreate, (v) => {
+  if (!v) return
+  emit('toast', { msg: t('weave.suggestRecreate'), type: 'warn' })
+})
 
 function close() {
   emit('update:show', false)
@@ -535,8 +590,10 @@ onUnmounted(() => {
           </div>
 
           <!-- recreate -->
-          <div class="rounded border border-gray-800 p-3 space-y-2">
+          <div class="rounded border border-gray-800 p-3 space-y-2"
+            :class="session?.suggest_recreate ? 'border-amber-600/60' : ''">
             <div class="text-[10px] uppercase text-gray-500">{{ t('weave.recreate') }}</div>
+            <p v-if="session?.suggest_recreate" class="text-[10px] text-amber-300">{{ t('weave.suggestRecreate') }}</p>
             <div class="flex flex-wrap gap-1">
               <button v-for="c in RECREATE_OPTIONS" :key="c.id"
                 class="rounded px-2 py-1 text-[10px] border"
@@ -553,6 +610,21 @@ onUnmounted(() => {
               :disabled="busy || !sessionId" @click="recreate">
               {{ t('weave.recreateGo') }}
             </button>
+          </div>
+
+          <!-- rollback -->
+          <div v-if="(session?.story_history || []).length" class="rounded border border-gray-800 p-3 space-y-2">
+            <div class="text-[10px] uppercase text-gray-500">{{ t('weave.rollback') }}</div>
+            <div class="space-y-1 max-h-32 overflow-y-auto">
+              <button v-for="h in (session.story_history || []).slice().reverse()" :key="h.version"
+                class="flex w-full items-start justify-between gap-2 rounded bg-gray-900/80 px-2 py-1.5 text-left hover:bg-gray-800"
+                :disabled="busy" @click="rollbackTo(h.version)">
+                <span class="text-[10px] text-teal-300">v{{ h.version }}</span>
+                <span class="flex-1 text-[10px] text-gray-400 line-clamp-2">
+                  {{ h.bundle?.world?.causality_one_liner || (h.reasons || []).join(', ') || '—' }}
+                </span>
+              </button>
+            </div>
           </div>
         </main>
 

@@ -107,8 +107,9 @@ def apply_story_to_session(session: dict[str, Any], bundle: dict[str, Any]) -> N
             "must_not": [],
             "locked": False,
         }
-        # Clear stale samples on new story
+        # Clear stale look-dev / final state on new story
         panel["sample"] = {"image_id": None, "job_id": None, "scorecard": None}
+        panel["final"] = {"image_id": None, "job_id": None, "scorecard": None}
         panel["compile"] = {
             "positive": "",
             "negative": "",
@@ -120,6 +121,17 @@ def apply_story_to_session(session: dict[str, Any], bundle: dict[str, Any]) -> N
             "updated_at": 0,
         }
         panel["framing_fail_count"] = 0
+        panel["qa"] = {
+            "drawability": None,
+            "critic": None,
+            "weave_score": None,
+            "framing": None,
+            "vlm": None,
+        }
+    session["framing_overrides"] = []
+    session["constraints"] = []
+    session.setdefault("cross_panel_qa", {})["ready_for_final"] = False
+    session.setdefault("cross_panel_qa", {})["finals_ready"] = False
     session["updated_at"] = time.time()
 
 

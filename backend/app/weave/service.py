@@ -361,9 +361,14 @@ def rollback_story(session: dict[str, Any], to_version: int) -> dict[str, Any]:
     # Keep current in history before restore
     _push_history(session, reasons=["rollback"], constraints=[])
     bundle = normalize_story_bundle(copy.deepcopy(match["bundle"]))
-    lint_story_bundle(bundle, session.get("character") or {})
+    lint = lint_story_bundle(bundle, session.get("character") or {})
     apply_story_to_session(session, bundle)
+    session["last_lint"] = lint
+    session.setdefault("cross_panel_qa", {})["throughline_coverage"] = lint.get(
+        "throughline_coverage"
+    )
     session["status"] = "story"
+    session["suggest_recreate"] = False
     append_timeline(
         session, actor="user", type_="decide",
         text=f"rolled back to version {to_version}",
@@ -424,9 +429,10 @@ def rate_sample(
         if chip == "good":
             continue
         if chip == "unclear_story" or chip == "話がわからない":
+            session["suggest_recreate"] = True
             append_timeline(
                 session, actor="system", type_="message",
-                text="story unclear — use recreate (look-dev samples will be discarded)",
+                text="story unclear — recreate required (look-dev samples will be discarded)",
             )
             continue
         if chip in ("sparse", "寂しい"):
@@ -541,3 +547,126 @@ def mark_sample_placeholder(session: dict[str, Any], panel_key: str) -> dict[str
         text=f"placeholder sample {panel_key}",
     )
     return session
+
+
+async def reeval_framing(session: dict[str, Any], db) -> dict[str, Any]:
+    """Re-read WD14 for long_shot samples whose framing is unknown/pending."""
+    from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
+
+    updated = 0
+    for panel in session.get("panels") or []:
+        cam = ((panel.get("intent") or {}).get("camera") or "")
+        if cam != "long_shot":
+            continue
+        fr = (panel.get("qa") or {}).get("framing")
+        if fr == "pass":
+            continue
+        iid = str((panel.get("sample") or {}).get("image_id") or "")
+        if not iid:
+            continue
+        wd14 = await resolve_wd14_for_image(db, iid)
+        apply_framing_to_panel(panel, wd14)
+        updated += 1
+    append_timeline(
+        session, actor="system", type_="message",
+        text=f"framing re-evaluated on {updated} panel(s)",
+    )
+    return session
+
+
+async def project_to_storybook(session: dict[str, Any], db) -> str:
+    """Write a sealed Weave session into the Storybook stories collection."""
+    from ..story import db as story_db
+
+    inputs = session.get("inputs") or {}
+    bundle = session.get("story_bundle") or {}
+    world = bundle.get("world") or {}
+    sid = str(session.get("session_id") or "")
+    payload = story_db.new_story_payload(
+        base_image_id=str(inputs.get("reference_image_id") or ""),
+        workflow_name=str(inputs.get("workflow_final") or inputs.get("workflow_sample") or ""),
+        group_id=sid or "weave",
+        title=str(bundle.get("title") or ""),
+        overall_story=str(world.get("causality_one_liner") or ""),
+        user_topic=str(inputs.get("topic") or ""),
+        locale=str(session.get("locale") or "ja"),
+        status="final",
+        author_style=str(inputs.get("author_style") or ""),
+        time_scale=str(world.get("time_scale") or ""),
+    )
+    payload["overall_story_ja"] = str(world.get("causality_one_liner") or "")
+    payload["title_ja"] = str(bundle.get("title") or "")
+    for panel in session.get("panels") or []:
+        key = str(panel.get("key") or "")
+        if key not in story_db.AXES:
+            continue
+        intent = panel.get("intent") or {}
+        compiled = panel.get("compile") or {}
+        final = panel.get("final") or {}
+        payload["axes"][key] = {
+            "story": str(intent.get("narrative_en") or intent.get("visible_change") or ""),
+            "story_ja": str(intent.get("narrative_ja") or ""),
+            "prompt_positive": compiled.get("positive"),
+            "prompt_negative": compiled.get("negative"),
+            "image_id": final.get("image_id"),
+        }
+    payload["context"] = {
+        "weave_session_id": sid,
+        "source": "weave",
+        "identity_tags": list((session.get("character") or {}).get("identity_tags") or []),
+        "prop_tags": list((session.get("character") or {}).get("prop_tags") or []),
+        "signature_prop": (session.get("character") or {}).get("signature_prop") or "",
+        "setting": world.get("setting") or "",
+        "throughline_prop": world.get("throughline_prop") or "",
+    }
+    story_id = await story_db.create_story(db, payload)
+    session["storybook_story_id"] = story_id
+    return story_id
+
+
+def export_bundle(session: dict[str, Any]) -> dict[str, Any]:
+    """Agent-facing export snapshot (no disk write)."""
+    from .verify.seal import evaluate_seal_rubric
+
+    panels_out = []
+    for p in session.get("panels") or []:
+        sample = p.get("sample") or {}
+        final = p.get("final") or {}
+        sid = sample.get("image_id")
+        fid = final.get("image_id")
+        panels_out.append({
+            "key": p.get("key"),
+            "intent": p.get("intent"),
+            "compile": p.get("compile"),
+            "qa": p.get("qa"),
+            "sample_image_id": sid,
+            "final_image_id": fid,
+            "sample_url": f"/api/images/{sid}" if sid and not str(sid).startswith("pending") else None,
+            "final_url": f"/api/images/{fid}" if fid and not str(fid).startswith("pending") else None,
+            "thumb_url": (
+                f"/api/thumbnails/{fid or sid}.webp"
+                if (fid or sid) and not str(fid or sid).startswith(("pending", "placeholder"))
+                else None
+            ),
+        })
+    return {
+        "session_id": session.get("session_id"),
+        "status": session.get("status"),
+        "inputs": session.get("inputs"),
+        "character": {
+            "identity_tags": (session.get("character") or {}).get("identity_tags"),
+            "prop_tags": (session.get("character") or {}).get("prop_tags"),
+            "signature_prop": (session.get("character") or {}).get("signature_prop"),
+            "gallery_spice": (session.get("character") or {}).get("gallery_spice"),
+            "tag_diff": (session.get("character") or {}).get("tag_diff"),
+            "board": (session.get("character") or {}).get("board"),
+        },
+        "story_bundle": session.get("story_bundle"),
+        "story_version": session.get("story_version"),
+        "last_lint": session.get("last_lint"),
+        "panels": panels_out,
+        "gates": gates(session),
+        "seal_rubric": evaluate_seal_rubric(session),
+        "storybook_story_id": session.get("storybook_story_id"),
+        "timeline": session.get("timeline") or [],
+    }

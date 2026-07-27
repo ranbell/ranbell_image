@@ -4,8 +4,18 @@ from __future__ import annotations
 from typing import Any
 
 
+def _finals_ready(panels: list[dict[str, Any]]) -> bool:
+    ids = []
+    for p in panels:
+        iid = str((p.get("final") or {}).get("image_id") or "")
+        if not iid or iid.startswith(("pending:", "placeholder:")):
+            return False
+        ids.append(iid)
+    return len(ids) >= 3
+
+
 def evaluate_seal_rubric(session: dict[str, Any]) -> dict[str, Any]:
-    """Lightweight rubric: same person / same story / framing / causality."""
+    """Rubric: same person / same story / framing / causality / finals×3."""
     character = session.get("character") or {}
     board = character.get("board") or {}
     images = board.get("images") or []
@@ -23,18 +33,17 @@ def evaluate_seal_rubric(session: dict[str, Any]) -> dict[str, Any]:
         if cam != "long_shot":
             continue
         fr = (p.get("qa") or {}).get("framing")
-        if fr == "fail" and p.get("key") not in overrides:
+        if p.get("key") in overrides:
+            continue
+        # Only explicit pass counts — unknown/None/fail block seal framing.
+        if fr != "pass":
             framing_ok = False
 
-    finals = [
-        bool((p.get("final") or {}).get("image_id"))
-        and not str((p.get("final") or {}).get("image_id") or "").startswith("pending")
-        for p in panels
-    ]
     samples = [bool((p.get("sample") or {}).get("image_id")) for p in panels]
     cams = [str((p.get("intent") or {}).get("camera") or "") for p in panels]
     filled = [c for c in cams if c]
     unique_cams = len(filled) >= 3 and len(set(filled)) == len(filled)
+    has_finals = _finals_ready(panels)
 
     checks = {
         "identity_locked": bool(character.get("identity_locked")),
@@ -45,19 +54,19 @@ def evaluate_seal_rubric(session: dict[str, Any]) -> dict[str, Any]:
         "framing_ok": framing_ok,
         "causality": bool(str(world.get("causality_one_liner") or "").strip()),
         "camera_unique": unique_cams,
-        "has_finals": all(finals) and len(finals) >= 3,
+        "has_finals": has_finals,
         "has_samples": sum(1 for s in samples if s) >= 1,
     }
+    # Finals are always required to seal (product exit).
     core_ok = all([
         checks["identity_locked"],
         checks["board_accepted"],
         checks["story_lint"],
         checks["framing_ok"],
         checks["causality"],
+        checks["has_finals"],
     ])
-    full_ok = core_ok and checks["camera_unique"] and (
-        checks["has_finals"] or checks["has_samples"]
-    )
+    full_ok = core_ok and checks["camera_unique"] and checks["has_samples"]
     policy = session.get("quality_policy") or {}
     strict = bool(policy.get("strict_seal"))
     return {

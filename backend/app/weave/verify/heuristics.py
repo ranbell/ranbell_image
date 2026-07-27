@@ -2,9 +2,11 @@
 
 Uses WD14 tags on the generated sample — no heavy face detector.
 long_shot that looks like a close portrait → framing=fail.
+Missing tags → framing=unknown (must NOT count as G4 pass).
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..character.split_tags import soft_normalize_tag
@@ -16,7 +18,7 @@ _CLOSE = frozenset({
 _WIDE = frozenset({
     "full_body", "wide_shot", "long_shot", "scenery", "outdoors",
     "landscape", "from_distance", "cowboy_shot", "full_shot",
-    "far_away", "huge_filesize",  # not wide but harmless
+    "far_away",
 })
 
 
@@ -27,7 +29,6 @@ def evaluate_long_shot_framing(wd14_tags: list[str] | None) -> str:
         return "unknown"
     close_hits = tags & _CLOSE
     wide_hits = tags & _WIDE
-    # Explicit close markers without wide context → fail
     if ("close-up" in tags or "close_up" in tags or "portrait" in tags) and not wide_hits:
         return "fail"
     if close_hits and not wide_hits and "full_body" not in tags:
@@ -53,3 +54,31 @@ def apply_framing_to_panel(panel: dict[str, Any], wd14_tags: list[str] | None) -
     if result == "fail":
         panel["framing_fail_count"] = int(panel.get("framing_fail_count") or 0) + 1
     return result
+
+
+async def resolve_wd14_for_image(db, image_id: str) -> list[str]:
+    """Prefer stored WD14; if empty, sync-tag from disk (soft-fail → [])."""
+    if not image_id or str(image_id).startswith(("pending:", "placeholder:")):
+        return []
+    try:
+        doc = await db.get(image_id) or {}
+    except Exception:
+        return []
+    existing = list(doc.get("wd14_tags") or [])
+    if existing:
+        return existing
+    path = Path(str(doc.get("path") or ""))
+    if not path.exists():
+        return []
+    try:
+        from ...ai import wd14 as wd14_mod
+
+        tags = await wd14_mod.tags_from_path(path, db=db)
+        if tags:
+            try:
+                await db.set_payload(image_id, {"wd14_tags": tags})
+            except Exception:
+                pass
+        return list(tags or [])
+    except Exception:
+        return []

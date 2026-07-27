@@ -45,9 +45,14 @@ def compile_board_slot(session: dict[str, Any], slot: str) -> dict[str, str]:
         seen.add(k)
         out.append(k)
     positive = ", ".join(out)
+    neg_bits = [WEAVE_NEGATIVE]
+    for raw in character.get("do_not") or []:
+        t = soft_normalize_tag(str(raw)) if str(raw).isascii() else str(raw).strip()
+        if t:
+            neg_bits.append(t)
     return {
         "positive": positive,
-        "negative": WEAVE_NEGATIVE,
+        "negative": ", ".join(neg_bits),
         "camera": camera,
         "slot": slot,
     }

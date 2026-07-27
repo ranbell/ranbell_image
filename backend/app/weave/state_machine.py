@@ -4,6 +4,17 @@ from __future__ import annotations
 from typing import Any
 
 
+def _has_finals(session: dict[str, Any]) -> bool:
+    panels = session.get("panels") or []
+    ids = []
+    for p in panels:
+        iid = str((p.get("final") or {}).get("image_id") or "")
+        if not iid or iid.startswith(("pending:", "placeholder:")):
+            return False
+        ids.append(iid)
+    return len(ids) >= 3
+
+
 def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     character = session.get("character") or {}
     board = character.get("board") or {}
@@ -21,6 +32,7 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
     samples_viewed = 0
     framing_ok = True
+    framing_pending = False
     for p in session.get("panels") or []:
         if (p.get("sample") or {}).get("image_id"):
             samples_viewed += 1
@@ -31,13 +43,17 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 o.get("panel_key") == p.get("key")
                 for o in (session.get("framing_overrides") or [])
             )
-            if fr == "fail" and not overridden:
+            if overridden:
+                continue
+            # Explicit pass only — unknown/None/fail block G4 (no pretend-pass).
+            if fr != "pass":
                 framing_ok = False
+                if fr in (None, "unknown"):
+                    framing_pending = True
 
     policy = session.get("quality_policy") or {}
     min_samples = int(policy.get("min_sample_panels") or 1)
 
-    # G2 warn: unique cameras + throughline coverage
     cams = [
         str((p.get("intent") or {}).get("camera") or "")
         for p in (session.get("panels") or [])
@@ -49,7 +65,8 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     coverage = (lint or {}).get("throughline_coverage")
     if coverage is None:
         coverage = (session.get("cross_panel_qa") or {}).get("throughline_coverage")
-    through_ok = coverage is None or int(coverage or 0) >= 3
+    # lint stores ratio 0..1 (panels_with_resolved / 3)
+    through_ok = coverage is None or float(coverage or 0) >= 0.999
 
     cross = session.get("cross_panel_qa") or {}
     from .verify.seal import evaluate_seal_rubric
@@ -57,6 +74,7 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     seal = evaluate_seal_rubric(session) if has_story else {
         "pass": False, "full_pass": False, "strict": bool(policy.get("strict_seal")),
     }
+    finals_ready = _has_finals(session)
 
     return {
         "G0_soft": {
@@ -77,7 +95,7 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
         "G2": {
             "pass": (not has_story) or (cam_ok and through_ok),
             "detail": f"cameras_unique={cam_ok} throughline={through_ok}",
-            "severity": True,
+            "warning": True,
         },
         "G3": {
             "pass": samples_viewed >= min_samples,
@@ -85,12 +103,18 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
         },
         "G4": {
             "pass": framing_ok,
-            "detail": "long_shot framing ok or overridden",
+            "detail": (
+                "long_shot framing pending tags"
+                if framing_pending else
+                "long_shot framing ok or overridden"
+            ),
+            "pending": framing_pending,
         },
         "G5": {
-            "pass": bool(cross.get("ready_for_final")),
-            "detail": "cross_panel ready_for_final",
-            "severity": True,
+            # Warn: finals ready for seal (not "ready to start final").
+            "pass": finals_ready or bool(cross.get("finals_ready")),
+            "detail": "finals×3 ready for seal",
+            "warning": True,
         },
         "G6": {
             "pass": bool(seal.get("full_pass")),
@@ -115,6 +139,13 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
         return {"code": "done", "label": "セッション完了", "enabled": False}
 
     if status == "rendering":
+        if _has_finals(session):
+            # Race: attach finished before status flip
+            return {
+                "code": "seal",
+                "label": "Seal（確定）して Storybook へ",
+                "enabled": True,
+            }
         return {"code": "wait_render", "label": "本番レンダー中", "enabled": False}
 
     if not character.get("identity_tags") and not character.get("identity_locked"):
@@ -136,7 +167,6 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
             "tag_diff": diff,
         }
 
-    # Story present but lint failed → Recreate is the only exit
     story_version = int(session.get("story_version") or 0)
     if story_version > 0 and not g["G1"]["pass"]:
         return {
@@ -170,9 +200,15 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
                 "enabled": True,
             }
         if not g["G4"]["pass"]:
+            if g["G4"].get("pending"):
+                return {
+                    "code": "reeval_framing",
+                    "label": "構図タグを再評価する",
+                    "enabled": True,
+                }
             return {
                 "code": "fix_framing_or_override",
-                "label": "構図を直す / 理由付きでオーバーライド",
+                "label": "構図を直す（再生成）/ 理由付きオーバーライド",
                 "enabled": True,
             }
         if not g["G0_hard"]["pass"]:
@@ -181,6 +217,12 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
                 "code": "accept_board",
                 "label": "イメージボードを採用（本番前に必須）",
                 "enabled": allow,
+            }
+        if _has_finals(session):
+            return {
+                "code": "seal",
+                "label": "Seal（確定）して Storybook へ",
+                "enabled": True,
             }
         return {
             "code": "render_final",

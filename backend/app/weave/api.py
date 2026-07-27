@@ -394,6 +394,20 @@ async def sample_override(session_id: str, body: OverrideFramingRequest, request
     return await _save(request, session_id, session)
 
 
+@router.post("/sessions/{session_id}/sample/reeval-framing")
+async def sample_reeval_framing(session_id: str, request: Request):
+    """Re-run WD14-based framing on long_shot samples (unknown → pass/fail)."""
+    session = await _load(request, session_id)
+    await service.reeval_framing(session, request.app.state.db)
+    return await _save(request, session_id, session)
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_session(session_id: str, request: Request):
+    session = await _load(request, session_id)
+    return service.export_bundle(session)
+
+
 @router.get("/sessions/{session_id}/cta")
 async def get_cta(session_id: str, request: Request):
     session = await _load(request, session_id)
@@ -420,7 +434,9 @@ async def render_final(
     if not g["G0_soft"]["pass"]:
         raise HTTPException(400, "identity must be locked")
     if not g["G1"]["pass"]:
-        raise HTTPException(400, "story required")
+        raise HTTPException(400, "story lint must pass before final render")
+    if not g["G4"]["pass"]:
+        raise HTTPException(400, "framing must pass or be overridden before final render")
     if not g["G0_hard"]["pass"]:
         raise HTTPException(400, "board must be accepted before final render")
     try:
@@ -443,6 +459,7 @@ async def seal(session_id: str, request: Request):
     from .verify.seal import evaluate_seal_rubric
 
     session = await _load(request, session_id)
+    session["session_id"] = session_id
     gate_map = gates(session)
     if not gate_map["G0_hard"]["pass"]:
         raise HTTPException(400, "board must be accepted before seal")
@@ -457,7 +474,16 @@ async def seal(session_id: str, request: Request):
             400,
             f"seal rubric failed: {', '.join(failed) or 'unknown'}",
         )
+    try:
+        story_id = await service.project_to_storybook(session, request.app.state.db)
+    except Exception as e:
+        logger.exception("storybook projection failed")
+        raise HTTPException(502, f"storybook projection failed: {e}") from e
     session["status"] = "sealed"
     session["seal_rubric"] = rubric
-    append_timeline(session, actor="user", type_="seal", text="sealed")
+    append_timeline(
+        session, actor="user", type_="seal",
+        text=f"sealed → storybook {story_id}",
+        ref={"storybook_story_id": story_id},
+    )
     return await _save(request, session_id, session)
