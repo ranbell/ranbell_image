@@ -39,6 +39,7 @@ class InferRequest(BaseModel):
 class TopicPatch(BaseModel):
     topic: str = ""
     author_style: str = ""
+    author_id: str | None = None
     story_model: str = ""
     use_gallery_nn: bool | None = None
 
@@ -47,6 +48,16 @@ class StoryGenerateRequest(BaseModel):
     topic: str = ""
     story_model: str = ""
     temperature: float = 0.7
+
+
+class UnlockIdentityRequest(BaseModel):
+    confirm: bool = False
+
+
+class NarrativePatchRequest(BaseModel):
+    panel_key: str
+    narrative_ja: str | None = None
+    narrative_en: str | None = None
 
 
 class RecreateRequest(BaseModel):
@@ -105,6 +116,8 @@ async def weave_catalog(request: Request):
 
 @router.post("/sessions")
 async def create_session(body: CreateSessionRequest, request: Request):
+    from .character.authors import resolve_author_style
+
     payload = await service.create_session_payload(
         topic=body.topic,
         personality_text=body.personality_text,
@@ -118,6 +131,7 @@ async def create_session(body: CreateSessionRequest, request: Request):
         locale=body.locale,
         use_gallery_nn=body.use_gallery_nn,
     )
+    await resolve_author_style(payload, request.app.state.db)
     session_id = await session_db.create_session(request.app.state.db, payload)
     session = await session_db.get_session(request.app.state.db, session_id)
     return service.public_view(session or {"session_id": session_id, **payload})
@@ -139,7 +153,9 @@ async def get_session(session_id: str, request: Request):
 
 @router.patch("/sessions/{session_id}/inputs")
 async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
+    from .character.authors import resolve_author_style
     from .character.gallery_nn import set_gallery_nn_enabled
+    from .character.topic_fit import apply_topic_warnings
 
     session = await _load(request, session_id)
     inputs = session.setdefault("inputs", {})
@@ -147,10 +163,18 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         inputs["topic"] = body.topic
     if body.author_style:
         inputs["author_style"] = body.author_style
+    if body.author_id is not None:
+        inputs["author_id"] = body.author_id
+        if body.author_id and not body.author_style:
+            # Clear stale freeform so preset can fill
+            if inputs.get("author_name") and inputs.get("author_style") == inputs.get("author_name"):
+                inputs["author_style"] = ""
     if body.story_model:
         inputs["story_model"] = body.story_model
     if body.use_gallery_nn is not None:
         set_gallery_nn_enabled(session, body.use_gallery_nn)
+    await resolve_author_style(session, request.app.state.db)
+    apply_topic_warnings(session)
     return await _save(request, session_id, session)
 
 
@@ -189,6 +213,19 @@ async def character_lock(session_id: str, request: Request):
     session = await _load(request, session_id)
     try:
         service.lock_identity(session)
+    except service.WeaveError as e:
+        raise HTTPException(e.status_code, e.message) from e
+    return await _save(request, session_id, session)
+
+
+@router.post("/sessions/{session_id}/character/unlock")
+async def character_unlock(
+    session_id: str, request: Request, body: UnlockIdentityRequest | None = None,
+):
+    session = await _load(request, session_id)
+    body = body or UnlockIdentityRequest()
+    try:
+        service.unlock_identity(session, confirm=bool(body.confirm))
     except service.WeaveError as e:
         raise HTTPException(e.status_code, e.message) from e
     return await _save(request, session_id, session)
@@ -284,12 +321,37 @@ async def story_generate(session_id: str, body: StoryGenerateRequest, request: R
             model=model,
             options={"temperature": body.temperature},
             topic=body.topic or None,
+            db=request.app.state.db,
         )
     except service.WeaveError as e:
         raise HTTPException(e.status_code, e.message) from e
     except Exception as e:
         logger.exception("storywright failed")
         raise HTTPException(502, f"storywright failed: {e}") from e
+    return await _save(request, session_id, session)
+
+
+@router.patch("/sessions/{session_id}/story/narrative")
+async def patch_narrative(session_id: str, body: NarrativePatchRequest, request: Request):
+    """Typo-only narrative patch. Large rewrites are rejected → use Recreate."""
+    from .schema import append_timeline
+    from .story.narrative_patch import NarrativePatchError, apply_narrative_typo_patch
+
+    session = await _load(request, session_id)
+    try:
+        result = apply_narrative_typo_patch(
+            session,
+            panel_key=body.panel_key,
+            narrative_ja=body.narrative_ja,
+            narrative_en=body.narrative_en,
+        )
+    except NarrativePatchError as e:
+        raise HTTPException(400, str(e)) from e
+    append_timeline(
+        session, actor="user", type_="edit",
+        text=f"narrative typo patch {body.panel_key}",
+        ref=result,
+    )
     return await _save(request, session_id, session)
 
 
@@ -304,6 +366,7 @@ async def story_recreate(session_id: str, body: RecreateRequest, request: Reques
             model=model,
             chips=body.chips,
             options={"temperature": body.temperature},
+            db=request.app.state.db,
         )
     except service.WeaveError as e:
         raise HTTPException(e.status_code, e.message) from e

@@ -18,12 +18,16 @@ const errorMsg = ref('')
 const personalityText = ref('')
 const topic = ref('')
 const authorStyle = ref('')
+const authorId = ref('')
+const authors = ref([])
 const storyModel = ref('')
 const workflow = ref('')
 const workflows = ref([])
 const ollamaModels = ref([])
 const recreateChips = ref([])
 const useGalleryNn = ref(false)
+const selectedPanelKey = ref('panel_1')
+const editingNarrative = ref('')
 const pollTimer = ref(null)
 const trackedJobs = ref([]) // {job_id, kind, slot?, panel_key?}
 
@@ -64,6 +68,12 @@ const lintDefects = computed(() => (
   || session.value?.last_lint?.defects
   || []
 ))
+const criticReport = computed(() => session.value?.critic_report || null)
+const characterWarnings = computed(() => character.value?.warnings || [])
+const selectedPanel = computed(() =>
+  panels.value.find(p => p.key === selectedPanelKey.value) || panels.value[0] || null
+)
+const compileLayers = computed(() => selectedPanel.value?.compile?.layers || null)
 const sessionId = computed(() => session.value?.session_id || '')
 
 function thumb(sha) {
@@ -93,6 +103,7 @@ async function loadCatalog() {
     const cat = await api('/api/weave/catalog')
     workflows.value = cat?.comfyui?.workflows || []
     ollamaModels.value = cat?.llm?.ollama?.models || []
+    authors.value = cat?.authors || []
     const suggested = cat?.suggested_run || {}
     if (!storyModel.value && suggested.story_model) storyModel.value = suggested.story_model
     if (!workflow.value && suggested.workflow_name) workflow.value = suggested.workflow_name
@@ -101,12 +112,19 @@ async function loadCatalog() {
   }
 }
 
+function onAuthorPick() {
+  const a = authors.value.find(x => x.id === authorId.value)
+  if (a?.style_description) authorStyle.value = a.style_description
+  else if (!authorId.value) { /* keep freeform */ }
+}
+
 async function ensureSession() {
   if (session.value?.session_id) return session.value
   const body = {
     topic: topic.value,
     personality_text: personalityText.value,
     author_style: authorStyle.value,
+    author_id: authorId.value,
     story_model: storyModel.value,
     workflow_final: workflow.value,
     workflow_sample: workflow.value,
@@ -115,6 +133,7 @@ async function ensureSession() {
     use_gallery_nn: useGalleryNn.value,
   }
   session.value = await api('/api/weave/sessions', { method: 'POST', body: JSON.stringify(body) })
+  if (session.value?.inputs?.author_style) authorStyle.value = session.value.inputs.author_style
   return session.value
 }
 
@@ -171,12 +190,18 @@ async function runAction(code) {
       body: JSON.stringify({
         topic: topic.value,
         author_style: authorStyle.value,
+        author_id: authorId.value,
         story_model: storyModel.value,
         use_gallery_nn: useGalleryNn.value,
       }),
     })
 
     if (code === 'infer_character') {
+      // Locked re-infer must go through confirmReinfer() (story wipe).
+      if (character.value?.identity_locked) {
+        emit('toast', { msg: t('weave.suggestReinfer'), type: 'warn' })
+        return
+      }
       session.value = await api(`/api/weave/sessions/${id}/character/infer`, {
         method: 'POST',
         body: JSON.stringify({
@@ -367,10 +392,67 @@ async function rollbackTo(version) {
   }
 }
 
+async function confirmReinfer() {
+  if (!window.confirm(t('weave.reinferConfirm'))) return
+  errorMsg.value = ''
+  busy.value = true
+  try {
+    await ensureSession()
+    const id = sessionId.value
+    if (character.value?.identity_locked) {
+      await api(`/api/weave/sessions/${id}/character/unlock`, {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true }),
+      })
+    }
+    session.value = await api(`/api/weave/sessions/${id}/character/infer`, {
+      method: 'POST',
+      body: JSON.stringify({
+        personality_text: personalityText.value,
+        story_model: storyModel.value,
+        use_gallery_nn: useGalleryNn.value,
+      }),
+    })
+  } catch (e) {
+    errorMsg.value = String(e.message || e)
+    emit('toast', { msg: errorMsg.value, type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
+async function saveNarrativePatch() {
+  if (!sessionId.value || !selectedPanel.value) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/weave/sessions/${sessionId.value}/story/narrative`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        panel_key: selectedPanel.value.key,
+        narrative_ja: editingNarrative.value,
+      }),
+    })
+    emit('toast', { msg: t('weave.narrativeSaved'), type: 'ok' })
+  } catch (e) {
+    emit('toast', { msg: String(e.message || e), type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
 watch(() => session.value?.suggest_recreate, (v) => {
   if (!v) return
   emit('toast', { msg: t('weave.suggestRecreate'), type: 'warn' })
 })
+
+watch(() => session.value?.suggest_reinfer, (v) => {
+  if (!v) return
+  emit('toast', { msg: t('weave.suggestReinfer'), type: 'warn' })
+})
+
+watch(selectedPanel, (p) => {
+  editingNarrative.value = p?.intent?.narrative_ja || ''
+}, { immediate: true })
 
 function close() {
   emit('update:show', false)
@@ -506,6 +588,17 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="text-[10px] text-gray-500" v-if="character.reasoning_ja">{{ character.reasoning_ja }}</div>
+
+          <div v-if="characterWarnings.length" class="rounded border border-amber-800/50 bg-amber-950/20 p-2 space-y-1">
+            <div class="text-[10px] text-amber-400">{{ t('weave.warnings') }}</div>
+            <p v-for="(w, i) in characterWarnings" :key="i" class="text-[10px] text-amber-100/90">{{ w.problem }}</p>
+          </div>
+
+          <button v-if="character.identity_locked || session?.suggest_reinfer"
+            class="w-full rounded border border-amber-700/40 bg-amber-950/40 px-2 py-1.5 text-[11px] text-amber-100 disabled:opacity-40"
+            :disabled="busy" @click="confirmReinfer">
+            {{ t('weave.reinfer') }}
+          </button>
         </aside>
 
         <!-- CENTER -->
@@ -531,6 +624,16 @@ onUnmounted(() => {
               </select>
             </div>
             <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.authorPreset') }}</label>
+              <select v-model="authorId" @change="onAuthorPick"
+                class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs">
+                <option value="">—</option>
+                <option v-for="a in authors" :key="a.id" :value="a.id">
+                  {{ a.name }}{{ a.genre_tag ? ` · ${a.genre_tag}` : '' }}
+                </option>
+              </select>
+            </div>
+            <div class="col-span-2">
               <label class="text-[10px] text-gray-500">{{ t('weave.authorStyle') }}</label>
               <input v-model="authorStyle" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs" />
             </div>
@@ -547,11 +650,16 @@ onUnmounted(() => {
           <p v-if="errorMsg" class="text-xs text-red-400 whitespace-pre-wrap">{{ errorMsg }}</p>
 
           <!-- lint defects → recreate only -->
-          <div v-if="lintDefects.length" class="rounded border border-amber-800/60 bg-amber-950/30 p-3 space-y-2">
+          <div v-if="lintDefects.length || criticReport" class="rounded border border-amber-800/60 bg-amber-950/30 p-3 space-y-2">
             <div class="text-[10px] uppercase text-amber-400/90">{{ t('weave.lintDefects') }}</div>
+            <p v-if="criticReport?.summary_ja" class="text-[11px] text-amber-50">{{ criticReport.summary_ja }}</p>
+            <p v-if="criticReport?.recreate_hint" class="text-[10px] text-amber-300/80">
+              tip: {{ criticReport.recreate_hint }}
+            </p>
             <ul class="space-y-1 max-h-40 overflow-y-auto">
-              <li v-for="(d, i) in lintDefects" :key="i" class="text-[11px] text-amber-100/90">
+              <li v-for="(d, i) in (criticReport?.priority_defects || lintDefects)" :key="i" class="text-[11px] text-amber-100/90">
                 <span class="text-amber-500/80 font-mono">{{ d.code }}</span>
+                <span v-if="d.severity" class="text-[9px] text-gray-500"> {{ d.severity }}</span>
                 {{ d.problem }}
                 <span v-if="d.fix" class="block text-gray-400">→ {{ d.fix }}</span>
               </li>
@@ -569,7 +677,9 @@ onUnmounted(() => {
           <!-- panels -->
           <div class="grid grid-cols-3 gap-2">
             <div v-for="p in panels" :key="p.key"
-              class="rounded border border-gray-800 bg-gray-900/50 overflow-hidden">
+              class="rounded border bg-gray-900/50 overflow-hidden cursor-pointer"
+              :class="selectedPanelKey === p.key ? 'border-teal-600/60' : 'border-gray-800'"
+              @click="selectedPanelKey = p.key">
               <div class="px-2 py-1 text-[10px] text-gray-400 flex justify-between">
                 <span>{{ p.key }}</span>
                 <span>{{ p.intent?.camera }}</span>
@@ -585,6 +695,28 @@ onUnmounted(() => {
                 <button v-for="r in RATE_OPTIONS" :key="r.id"
                   class="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-300 hover:bg-gray-700"
                   @click="ratePanel(p.key, r.id)">{{ t(r.labelKey) }}</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- narrative typo + layers -->
+          <div v-if="selectedPanel" class="rounded border border-gray-800 p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="text-[10px] uppercase text-gray-500">{{ t('weave.narrativeEdit') }} · {{ selectedPanel.key }}</div>
+              <button class="text-[10px] text-teal-300 disabled:opacity-40" :disabled="busy" @click="saveNarrativePatch">
+                {{ t('weave.narrativeSave') }}
+              </button>
+            </div>
+            <textarea v-model="editingNarrative" rows="2"
+              class="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
+              :placeholder="t('weave.narrativePh')" />
+            <div v-if="compileLayers" class="space-y-1">
+              <div class="text-[10px] uppercase text-teal-500/80">{{ t('weave.layers') }}</div>
+              <div v-for="(tags, layer) in compileLayers" :key="layer" class="flex flex-wrap gap-1 items-start">
+                <span class="text-[9px] text-gray-500 w-16 shrink-0">{{ layer }}</span>
+                <span v-for="tag in (tags || [])" :key="layer+tag"
+                  class="rounded bg-gray-800 px-1 py-0.5 text-[9px] text-gray-300">{{ tag }}</span>
+                <span v-if="!(tags || []).length" class="text-[9px] text-gray-600">—</span>
               </div>
             </div>
           </div>

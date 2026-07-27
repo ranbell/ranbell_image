@@ -718,9 +718,9 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 |----------------|------|
 | M0 セッション / CTA / G0-soft·hard | **済** |
 | M1 類推 + Story 先行 + board キュー | **済**（Comfy `run_weave_image_generate`） |
-| M2 must_show / Repairer×1 / Recreate / rollback / G1=lint | **済**（rollback UI・typo PATCH は薄い） |
-| M3 sample + framing heuristics + rate/override | **済**（VLM/WeaveScore は未） |
-| M4 render_final + Seal rubric (G6) | **済**（Storybook 投影・export/stream は未） |
+| M2 must_show / Repairer×1 / Critic / Recreate / rollback / typo PATCH | **済** |
+| M3 sample + framing heuristics + rate/override | **済**（WD14 同期評価・unknown≠pass。VLM/WeaveScore は未） |
+| M4 render_final + Seal rubric (G6) | **済**（finals×3 必須・Storybook 投影・`GET …/export`。SSE は未） |
 | M5 旧 Chronicle 撤去 | **済** |
 | ギャラリー近傍 `gallery_nn`（opt-in） | **済**（既定オフ） |
 | 参照髪・目ミックス + lock 前タグ差分 | **済** |

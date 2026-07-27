@@ -53,9 +53,31 @@ def lock_identity(session: dict[str, Any]) -> dict[str, Any]:
     character["prop_tags"] = props
     character["signature_prop"] = sig
     character["identity_locked"] = True
+    session["suggest_reinfer"] = False
     append_timeline(
         session, actor="user", type_="lock",
         text="identity locked",
+    )
+    return session
+
+
+def unlock_identity(session: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
+    """Unlock identity for re-infer. Wipes story when confirm=True."""
+    if not confirm:
+        raise WeaveError("confirm=true required — re-infer invalidates the story")
+    character = session.setdefault("character", {})
+    character["identity_locked"] = False
+    character["board"] = {"images": [], "accepted": False}
+    session["story_bundle"] = {}
+    session["story_version"] = 0
+    session["last_lint"] = None
+    session["critic_report"] = None
+    session["status"] = "character"
+    session["suggest_reinfer"] = False
+    session["suggest_recreate"] = False
+    append_timeline(
+        session, actor="user", type_="unlock",
+        text="identity unlocked — story invalidated; re-infer required",
     )
     return session
 
@@ -187,6 +209,14 @@ async def infer_character(
         "gallery_nn_reason": gallery_summary.get("reason"),
         "reference_reason": ref_summary.get("reason"),
     }
+    from .character.topic_fit import apply_topic_warnings
+
+    warns = apply_topic_warnings(session)
+    if warns:
+        append_timeline(
+            session, actor="system", type_="message",
+            text="topic/outfit warnings: " + "; ".join(w["problem"] for w in warns),
+        )
     return session
 
 
@@ -247,6 +277,7 @@ async def _lint_repair_apply(
     session.setdefault("cross_panel_qa", {})["throughline_coverage"] = lint.get(
         "throughline_coverage"
     )
+    session["critic_report"] = None
     if lint["pass"]:
         append_timeline(
             session, actor="llm.storywright", type_="message",
@@ -254,6 +285,29 @@ async def _lint_repair_apply(
         )
     else:
         defects = lint.get("defects") or []
+        policy = session.get("quality_policy") or {}
+        critic_mode = str(policy.get("critic") or "on_lint_fail")
+        if critic_mode in ("on_lint_fail", "strict", "always"):
+            from .story.critic import code_critic_fallback, run_critic
+
+            try:
+                report = await run_critic(
+                    ollama,
+                    model=model,
+                    options={**options, "temperature": 0.2},
+                    story_bundle=bundle,
+                    defects=defects,
+                    topic=topic,
+                )
+            except Exception as exc:
+                logger.warning("[weave] critic failed: %s", exc)
+                report = code_critic_fallback(defects)
+            session["critic_report"] = report
+            append_timeline(
+                session, actor="llm.critic", type_="message",
+                text=report.get("summary_ja") or "critic report",
+                ref={"critic_report": report},
+            )
         append_timeline(
             session, actor="system", type_="message",
             text=(
@@ -272,6 +326,7 @@ async def generate_story(
     model: str,
     options: dict | None = None,
     topic: str | None = None,
+    db=None,
 ) -> dict[str, Any]:
     if not (session.get("character") or {}).get("identity_locked"):
         raise WeaveError("identity must be locked (G0-soft) before story")
@@ -283,6 +338,11 @@ async def generate_story(
         raise WeaveError("topic is required")
     if not model:
         raise WeaveError("story_model is required")
+    from .character.authors import resolve_author_style
+    from .character.topic_fit import apply_topic_warnings
+
+    await resolve_author_style(session, db)
+    apply_topic_warnings(session)
     opts = options or {"temperature": 0.7}
     author_style = str(inputs.get("author_style") or "")
     bundle = await run_storywright(
@@ -308,11 +368,15 @@ async def recreate_story(
     model: str,
     chips: list[str],
     options: dict | None = None,
+    db=None,
 ) -> dict[str, Any]:
     if not chips:
         raise WeaveError("recreate requires reason chips")
     if session.get("status") in ("rendering", "sealed"):
         raise WeaveError("cannot recreate while rendering/sealed", status_code=409)
+    from .character.authors import resolve_author_style
+
+    await resolve_author_style(session, db)
     constraints = chips_to_constraints(
         chips,
         current_motifs=list(session.get("avoid_motifs") or []),
@@ -486,9 +550,10 @@ def rate_sample(
             compile_all_panels(session)
             continue
         if chip in ("wrong_person", "別人"):
+            session["suggest_reinfer"] = True
             append_timeline(
                 session, actor="system", type_="message",
-                text="wrong person — re-check identity (re-infer confirms story wipe)",
+                text="wrong person — confirm re-infer (story will be wiped)",
             )
             continue
     append_timeline(
