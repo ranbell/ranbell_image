@@ -1,4 +1,4 @@
-"""Agent-facing Chronicle capability catalog (workflows, LLMs, defaults)."""
+"""Agent-facing Weave/Storybook capability catalog (workflows, LLMs, defaults)."""
 from __future__ import annotations
 
 import logging
@@ -203,20 +203,33 @@ async def build_chronicle_catalog(
         },
         "notes": {
             "story_model_required": (
-                "Chronicle does not fall back to Admin models. "
-                "Pass story_model (or vlm_model) explicitly on every run."
+                "Weave does not fall back to Admin models. "
+                "Pass story_model (or vlm_model) explicitly on every session."
             ),
             "workflow_required_for_images": (
-                "workflow_name is required unless manual_mode=true "
-                "(then call generate-images later)."
+                "workflow_name is required for board / sample / final image jobs."
             ),
-            "topic_or_base": "Provide user_topic and/or base_sha256.",
+            "topic_or_base": "Provide topic and/or base_sha256 when creating a Weave session.",
             "model_pool_for_provider": model_pool,
+            "legacy_chronicle_removed": (
+                "Old /api/story/chronicle* Stage1/Stage2 agent run was removed. "
+                "Use Weave session APIs below."
+            ),
         },
         "endpoints": {
-            "catalog": "GET /api/story/chronicle/catalog",
-            "run": "POST /api/story/chronicle/run",
-            "run_status": "GET /api/story/chronicle/run/{run_id}",
+            "catalog": "GET /api/weave/catalog",
+            "sessions": "POST /api/weave/sessions",
+            "session": "GET /api/weave/sessions/{session_id}",
+            "infer_character": "POST /api/weave/sessions/{session_id}/character/infer",
+            "lock_character": "POST /api/weave/sessions/{session_id}/character/lock",
+            "story_generate": "POST /api/weave/sessions/{session_id}/story/generate",
+            "story_recreate": "POST /api/weave/sessions/{session_id}/story/recreate",
+            "lookdev": "POST /api/weave/sessions/{session_id}/lookdev",
+            "compile": "POST /api/weave/sessions/{session_id}/compile",
+            "sample": "POST /api/weave/sessions/{session_id}/sample",
+            "render_final": "POST /api/weave/sessions/{session_id}/render_final",
+            "seal": "POST /api/weave/sessions/{session_id}/seal",
+            "storybook": "GET /api/story/storybook",
             "eval_bundle": "GET /api/story/{story_id}/eval-bundle",
             "export_eval": "POST /api/story/{story_id}/export-eval",
             "workflows_only": "GET /api/comfy/workflows",

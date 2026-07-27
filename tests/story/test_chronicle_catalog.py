@@ -77,8 +77,8 @@ def test_build_chronicle_catalog_suggested_run():
     assert sug["workflow_name"] == "a.json"
     assert sug["story_model"] == "gemma3:12b"
     assert sug["story_model_available"] is True
-    assert "run" in cat["endpoints"]
-    assert "catalog" in cat["endpoints"]
+    assert cat["endpoints"]["catalog"] == "GET /api/weave/catalog"
+    assert "sessions" in cat["endpoints"]
     assert "days" in cat["time_scales"]
 
 

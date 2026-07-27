@@ -49,7 +49,7 @@ const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
 
-// Author presets (Chronicle)
+// Author presets (Weave / Storybook)
 const authorsList = ref([])
 const authorsLoading = ref(false)
 const authorForm = ref({ id: '', name: '', genre_tag: '', style_description: '' })
@@ -1521,7 +1521,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             </button>
           </div>
 
-          <!-- ── Author presets (Chronicle) ── -->
+          <!-- ── Author presets (Weave / Storybook) ── -->
           <div v-if="adminTab === 'authors'" class="space-y-4">
             <div class="bg-gray-800 rounded-xl p-4 space-y-3">
               <div class="flex items-start justify-between gap-3">

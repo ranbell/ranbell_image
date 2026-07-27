@@ -115,7 +115,6 @@ async def lifespan(app: FastAPI):
     app.state.inspire_event_queues: dict[str, asyncio.Queue] = {}
     app.state.invoke_event_queues: dict[str, asyncio.Queue] = {}
     app.state.story_token_queues: dict[str, asyncio.Queue] = {}
-    app.state.chronicle_agent_runs: dict = {}
 
     from .invoke.session_manager import InvokeSessionManager
     from .invoke.spirit_loader import preload_all as _preload_spirits

@@ -7,7 +7,6 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
-import ChroniclePanel from './components/ChroniclePanel.vue'
 import WeavePanel from './components/WeavePanel.vue'
 import Storybook from './components/Storybook.vue'
 import ControlRoom from './components/ControlRoom.vue'
@@ -75,7 +74,7 @@ async function waitForBackend() {
 
 // ── Job stream ────────────────────────────────────────────────────────────────
 const jobsMap = ref(new Map())   // job.id -> job dict
-// Stable getter so ChroniclePanel can sample jobs without re-rendering on every map update.
+// Stable getter so WeavePanel can sample jobs without re-rendering on every map update.
 function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
 
@@ -2569,17 +2568,24 @@ function openInspire() { showInspire.value = true }
 // ── Invoke Panel ───────────────────────────────────────────────────────────────
 const showInvoke = ref(false)
 
-// ── Chronicle / Storybook / Weave ─────────────────────────────────────────────
-const showChronicle = ref(false)
+// ── Weave / Storybook ─────────────────────────────────────────────────────────
 const showWeave = ref(false)
 const showStorybook = ref(false)
-const chronicleBase = ref(null)   // image doc (or {sha256}) prefilled as base
 const weaveBase = ref(null)
 
 function openWeave(img = null) {
+  let base = img || selected.value || null
+  if (!base && selectedIds.value.size) {
+    const first = [...selectedIds.value][0]
+    base = images.value.find(i => i.sha256 === first) || { sha256: first }
+  }
+  // Storybook sits under Weave on the z-scale — close it so Weave is visible.
   showStorybook.value = false
-  showChronicle.value = false
-  weaveBase.value = img?.sha256 ? { ...img, sha256: img.sha256 } : img
+  // Dismiss gallery detail so it cannot cover Weave.
+  selected.value = null
+  // Force a new object so WeavePanel watch fires even for the same sha.
+  weaveBase.value = base?.sha256 ? { ...base, sha256: base.sha256 } : base
+  // If already "open" but the Teleport blanked, bounce false→true to remount.
   if (showWeave.value) {
     showWeave.value = false
     nextTick(() => { showWeave.value = true })
@@ -2588,40 +2594,11 @@ function openWeave(img = null) {
   }
 }
 
-function openChronicle(img = null) {
-  let base = img || selected.value || null
-  if (!base && selectedIds.value.size) {
-    const first = [...selectedIds.value][0]
-    base = images.value.find(i => i.sha256 === first) || { sha256: first }
-  }
-  // Storybook sits under Chronicle on the z-scale — close it so Chronicle is visible.
-  showStorybook.value = false
-  // Dismiss gallery detail so it cannot cover Chronicle.
-  selected.value = null
-  // Force a new object so ChroniclePanel watch fires even for the same sha.
-  chronicleBase.value = base?.sha256 ? { ...base, sha256: base.sha256 } : base
-  // If already "open" but the Teleport blanked (e.g. i18n render throw), a plain
-  // true assignment is a no-op — bounce false→true so the shell remounts.
-  if (showChronicle.value) {
-    showChronicle.value = false
-    nextTick(() => { showChronicle.value = true })
-  } else {
-    showChronicle.value = true
-  }
-}
-
 function openStorybook() {
-  // Chronicle/Weave sit above Storybook — close them so Storybook is visible.
-  showChronicle.value = false
+  // Weave sits above Storybook — close it so Storybook is visible.
   showWeave.value = false
   selected.value = null
   showStorybook.value = true
-}
-
-function openChronicleFromTray() {
-  const first = [...selectedIds.value][0]
-  if (!first) return
-  openChronicle(images.value.find(i => i.sha256 === first) || { sha256: first })
 }
 
 function openWeaveFromTray() {
@@ -2630,10 +2607,10 @@ function openWeaveFromTray() {
   openWeave(images.value.find(i => i.sha256 === first) || { sha256: first })
 }
 
-function openChronicleFromStorybook(sha256) {
-  // Keep Storybook mounted underneath; open a fresh Chronicle weave session.
-  chronicleBase.value = { sha256 }
-  showChronicle.value = true
+function openWeaveFromStorybook(sha256) {
+  // Keep Storybook mounted underneath; open a fresh Weave session.
+  weaveBase.value = { sha256 }
+  showWeave.value = true
 }
 
 function openImageFromStorybook(sha256) {
@@ -2952,12 +2929,9 @@ onUnmounted(() => {
             {{ $t('header.invoke') }}
           </button>
           <button @click="openWeave()"
+            :title="$t('header.weaveTitle')"
             class="px-3 py-1.5 bg-cyan-900/70 hover:bg-cyan-800/80 border border-cyan-600/40 hover:border-cyan-500/60 rounded-lg text-xs font-medium text-cyan-200 transition-colors whitespace-nowrap">
             {{ $t('header.weave') }}
-          </button>
-          <button @click="openChronicle()"
-            class="px-3 py-1.5 bg-teal-900/70 hover:bg-teal-800/80 border border-teal-600/40 hover:border-teal-500/60 rounded-lg text-xs font-medium text-teal-200 transition-colors whitespace-nowrap">
-            {{ $t('header.chronicle') }}
           </button>
           <button @click="openStorybook()"
             class="px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 border border-amber-600/40 hover:border-amber-500/60 rounded-lg text-xs font-medium text-amber-200 transition-colors whitespace-nowrap">
@@ -4580,9 +4554,9 @@ onUnmounted(() => {
                   ✨ {{ $t('detail.refineFromThis') }}
                 </button>
                 <button
-                  @click="openChronicle(selected)"
-                  class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-900/50 hover:bg-teal-800/70 border border-teal-700/50 text-teal-300 hover:text-teal-100 rounded-lg text-xs transition-colors">
-                  📜 {{ $t('detail.chronicleFromThis') }}
+                  @click="openWeave(selected)"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
+                  {{ $t('detail.weaveFromThis') }}
                 </button>
                 <button
                   v-if="selected.positive_prompt"
@@ -5180,11 +5154,6 @@ onUnmounted(() => {
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/60 hover:bg-cyan-800/80 border border-cyan-500/40 hover:border-cyan-400/60 rounded-xl text-xs font-medium text-cyan-200 transition-all duration-150">
                   {{ $t('tray.weave') }}
                 </button>
-                <button @click="openChronicleFromTray"
-                  :title="$t('tray.chronicleTitle')"
-                  class="flex items-center gap-1.5 px-3 py-1.5 bg-teal-900/60 hover:bg-teal-800/80 border border-teal-500/40 hover:border-teal-400/60 rounded-xl text-xs font-medium text-teal-200 transition-all duration-150">
-                  {{ $t('tray.chronicle') }}
-                </button>
                 <button @click="clearSelection"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/60 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-all duration-150">
                   {{ $t('tray.clear') }}
@@ -5230,17 +5199,6 @@ onUnmounted(() => {
       @select-image="openImageFromOracle($event)"
     />
 
-    <!-- ── Chronicle Panel ── -->
-    <ChroniclePanel
-      :show="showChronicle"
-      :base-image="chronicleBase"
-      :comfyOffline="comfyOffline"
-      :get-jobs-map="getJobsMap"
-      @update:show="showChronicle = $event"
-      @toast="showToast($event.msg, $event.type)"
-      @open-storybook="openStorybook()"
-    />
-
     <WeavePanel
       :show="showWeave"
       :base-image="weaveBase"
@@ -5256,7 +5214,7 @@ onUnmounted(() => {
       :show="showStorybook"
       @update:show="showStorybook = $event"
       @select-image="openImageFromStorybook($event)"
-      @weave-from="openChronicleFromStorybook($event)"
+      @weave-from="openWeaveFromStorybook($event)"
       @send-to-refine-direct="handleSendToRefineDirect($event)"
       @toast="showToast($event.msg, $event.type)"
     />

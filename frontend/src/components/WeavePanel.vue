@@ -79,7 +79,7 @@ async function api(path, opts = {}) {
 
 async function loadCatalog() {
   try {
-    const cat = await api('/api/story/chronicle/catalog')
+    const cat = await api('/api/weave/catalog')
     workflows.value = cat?.comfyui?.workflows || []
     ollamaModels.value = cat?.llm?.ollama?.models || []
     const suggested = cat?.suggested_run || {}

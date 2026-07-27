@@ -93,6 +93,13 @@ async def _save(request: Request, session_id: str, session: dict) -> dict:
     return service.public_view(session)
 
 
+@router.get("/catalog")
+async def weave_catalog(request: Request):
+    """Workflows, LLM models, authors — shared capability catalog for Weave UI."""
+    from ..story.catalog import build_chronicle_catalog
+    return await build_chronicle_catalog(request.app)
+
+
 @router.post("/sessions")
 async def create_session(body: CreateSessionRequest, request: Request):
     payload = await service.create_session_payload(

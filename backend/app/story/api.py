@@ -1,104 +1,35 @@
-"""Chronicle / Storybook API.
+"""Storybook / story record API (Weave is the creation UI).
 
-POST /api/story/chronicle                    — Phase 1: pitch 3 candidates
-POST /api/story/chronicle/run                — agent one-shot (Phase1→select→images)
-GET  /api/story/chronicle/run/{run_id}       — poll agent run status
-GET  /api/story/chronicle/catalog            — workflows, LLMs, authors, suggested defaults
-POST /api/story/chronicle/{story_id}/select  — Phase 2: expand chosen candidate
-POST /api/story/chronicle/{story_id}/respin  — regenerate (candidates | expand)
-GET  /api/story/chronicle/{job_id}/stream    — SSE token/event stream for a job
-POST /api/story/topic-suggest          — 起承転結 お題 from a base image (no job)
+POST /api/story/topic-suggest          — short topic from a base image
 GET  /api/story/storybook              — list saved stories (newest first)
 GET  /api/story/{story_id}             — one story
-GET  /api/story/{story_id}/eval-bundle — agent eval JSON (prompts + image URLs)
+GET  /api/story/{story_id}/eval-bundle — eval JSON (prompts + image URLs)
 POST /api/story/{story_id}/export-eval — write report + panel PNGs to disk
-POST /api/story/{story_id}/generate-images   — manual-mode continue (writes
-                                               edited prompts back, submits jobs)
+POST /api/story/{story_id}/generate-images   — manual-mode continue
 POST /api/story/{story_id}/regenerate/{axis} — image-only retry with a new seed
+POST /api/story/{story_id}/pinup|snap|novel
+DELETE /api/story/{story_id}
 """
 
 import asyncio
 import logging
 import random
-import uuid
 from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from ..jobs.sse_stream import queue_sse_response
 from ..spooler.models import JobLane
 from . import db as story_db
-from .agent_run import get_runs, start_agent_run
-from .catalog import build_chronicle_catalog
 from .eval_export import build_eval_bundle, default_eval_root, export_eval_bundle
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/story")
 
 
-class ChronicleRequest(BaseModel):
-    # Empty → topic-only mode (no source image); then user_topic is required.
-    base_sha256: str = ""  # optional reference for character + art style only
-    user_topic: str = ""  # theme
-    character_tags: str = ""  # appearance; empty → WD14 from base image when present
-    include_happening: bool = False
-    author_style: str = ""
-    author_id: str = ""
-    custom_tags_panel_1: str = ""
-    custom_tags_panel_2: str = ""
-    custom_tags_panel_3: str = ""
-    workflow_name: str = ""
-    manual_mode: bool = False
-    use_ref_seed: bool = True
-    llm_provider: Literal["ollama", "openai"] = "ollama"
-    vlm_model: str = ""
-    story_model: str = ""
-    utility_model: str = ""
-    temperature: float = 0.7
-    num_ctx: int = 32768
-    locale: Literal["en", "ja"] = "ja"
-    group_id: str = ""
-    time_scale: str = "days"  # minutes|tens_of_minutes|hours|days|months|years|decades
-
-
-class ChronicleAgentRunRequest(ChronicleRequest):
-    """ChronicleRequest plus agent-orchestration knobs."""
-    candidate_id: str = "A"
-    timeout_sec: float = Field(default=1800.0, ge=60.0, le=7200.0)
-    wait_images: bool = True
-    export: bool = True
-    # Absolute or repo-relative path; empty → chronicle_evals/{story_id}/
-    export_dir: str = ""
-
-
 class ExportEvalRequest(BaseModel):
     export_dir: str = ""
-
-
-class SelectCandidateRequest(BaseModel):
-    candidate_id: str
-    time_scale: str = ""  # optional override; draft context wins when empty
-
-
-class RespinRequest(BaseModel):
-    stage: Literal["candidates", "expand"]
-    respin_count: int = 1
-    workflow_name: str | None = None
-    manual_mode: bool | None = None
-    llm_provider: Literal["ollama", "openai"] | None = None
-    temperature: float | None = None
-    num_ctx: int | None = None
-    user_topic: str | None = None
-    character_tags: str | None = None
-    include_happening: bool | None = None
-    author_style: str | None = None
-    author_id: str | None = None
-    custom_tags_panel_1: str | None = None
-    custom_tags_panel_2: str | None = None
-    custom_tags_panel_3: str | None = None
-
 
 class PinupRequest(BaseModel):
     mode: Literal["add", "replace"] = "add"
@@ -128,56 +59,6 @@ class TopicSuggestResponse(BaseModel):
     locale: str
     base_sha256: str
 
-
-_RESPIN_OVERRIDE_FIELDS = (
-    "workflow_name", "manual_mode", "llm_provider", "temperature", "num_ctx",
-    "vlm_model", "story_model", "time_scale",
-    "user_topic", "character_tags", "include_happening", "author_style", "author_id",
-    "custom_tags_panel_1", "custom_tags_panel_2", "custom_tags_panel_3",
-)
-
-
-def _merge_respin_overrides(body_dict: dict, body: RespinRequest) -> dict:
-    """Merge non-None RespinRequest override fields into a stored context body."""
-    out = dict(body_dict or {})
-    for key in _RESPIN_OVERRIDE_FIELDS:
-        val = getattr(body, key, None)
-        if val is not None:
-            out[key] = val
-    return out
-
-
-# Temperature ladder for respin — each respin nudges creativity up (Refine's
-# _FANOUT_TEMPS idea, applied to whole-story regeneration). Base default is
-# Gemma 4's 1.0, so the step is +0.1 to avoid slamming into the 1.3 cap.
-def _respin_temperature(base: float, respin_count: int) -> float:
-    return min(1.3, round(base + 0.1 * max(1, respin_count), 3))
-
-
-def _draft_base_temp(story: dict) -> float:
-    return float(((story.get("context") or {}).get("body") or {}).get("temperature", 1.0))
-
-
-def _submit_prompt_job(app, name: str, runner, *, meta: dict, **kwargs) -> str:
-    """Submit a PROMPT-lane chronicle job with the shared deps + SSE token queue.
-
-    Registers the queue under its job_id (for /stream) and returns the job_id.
-    """
-    token_queue: asyncio.Queue = asyncio.Queue()
-    job_id = app.state.spooler.submit(
-        JobLane.PROMPT, name, runner,
-        meta=meta,
-        db=app.state.db,
-        ollama=app.state.ollama,
-        spooler=app.state.spooler,
-        comfy=app.state.comfy,
-        token_queue=token_queue,
-        **kwargs,
-    )
-    app.state.story_token_queues[job_id] = token_queue
-    return job_id
-
-
 async def _image_docs_for_story(db, story: dict) -> dict[str, dict]:
     docs: dict[str, dict] = {}
     for axis in story_db.AXES:
@@ -190,79 +71,6 @@ async def _image_docs_for_story(db, story: dict) -> dict[str, dict]:
     return docs
 
 
-@router.post("/chronicle")
-async def start_chronicle(body: ChronicleRequest, request: Request):
-    """Phase 1: submit the candidate-generation job, return its job_id + group_id.
-
-    The draft story_id is delivered later via the SSE "candidates" event.
-    """
-    from ..jobs.runners import run_chronicle_candidates
-
-    if not (body.base_sha256 or "").strip() and not (body.user_topic or "").strip():
-        raise HTTPException(
-            400,
-            "user_topic is required when no base image is provided",
-        )
-
-    app = request.app
-    body.group_id = f"chr-{uuid.uuid4().hex[:12]}"
-
-    job_id = _submit_prompt_job(
-        app, "chronicle_candidates", run_chronicle_candidates,
-        meta={
-            "group_id": body.group_id,
-            "base_sha256": body.base_sha256 or "topic-only",
-        },
-        body_dict=body.model_dump(),
-    )
-    return {"job_id": job_id, "group_id": body.group_id, "status": "queued"}
-
-
-@router.post("/chronicle/run")
-async def start_chronicle_agent_run(body: ChronicleAgentRunRequest, request: Request):
-    """Agent one-shot: Phase1 → select candidate → expand → wait images → export.
-
-    Returns immediately with ``run_id``; poll ``GET /chronicle/run/{run_id}``.
-    """
-    if not (body.base_sha256 or "").strip() and not (body.user_topic or "").strip():
-        raise HTTPException(
-            400,
-            "user_topic is required when no base image is provided",
-        )
-    app = request.app
-    body_dict = body.model_dump()
-    # Strip orchestration-only fields before storing on the draft context.
-    for key in ("candidate_id", "timeout_sec", "wait_images", "export", "export_dir"):
-        body_dict.pop(key, None)
-    body_dict["group_id"] = body_dict.get("group_id") or f"chr-{uuid.uuid4().hex[:12]}"
-    export_dir = (body.export_dir or "").strip() or None
-    run = start_agent_run(
-        app,
-        body_dict=body_dict,
-        candidate_id=(body.candidate_id or "A").strip() or "A",
-        timeout_sec=float(body.timeout_sec),
-        wait_images=bool(body.wait_images),
-        do_export=bool(body.export),
-        export_dir=export_dir,
-        submit_prompt_job=_submit_prompt_job,
-    )
-    return run.to_dict()
-
-
-@router.get("/chronicle/run/{run_id}")
-async def get_chronicle_agent_run(run_id: str, request: Request):
-    run = get_runs(request.app).get(run_id)
-    if run is None:
-        raise HTTPException(404, f"Agent run {run_id!r} not found")
-    return run.to_dict()
-
-
-@router.get("/chronicle/catalog")
-async def chronicle_catalog(request: Request):
-    """Workflows, LLM model lists, authors, and suggested run defaults for agents."""
-    return await build_chronicle_catalog(request.app)
-
-
 @router.post("/topic-suggest", response_model=TopicSuggestResponse)
 async def suggest_topic(body: TopicSuggestRequest, request: Request):
     """Suggest a SHORT 起承転結 お題 from the base image (prefills the topic
@@ -270,7 +78,7 @@ async def suggest_topic(body: TopicSuggestRequest, request: Request):
 
     A plain awaited call, not a spooler job + SSE: the output is 1–2 sentences
     with nothing to stream, and the PROMPT lane would queue this behind a
-    running chronicle, leaving the button dead for minutes. GPU concurrency is
+    long LLM job, leaving the button dead for minutes. GPU concurrency is
     guarded by LlmGateway.set_resource, which applies to a direct call too.
     """
     from ..jobs.runners import (
@@ -302,7 +110,7 @@ async def suggest_topic(body: TopicSuggestRequest, request: Request):
     if not (models.get("utility") or models.get("vision") or "").strip():
         raise HTTPException(
             400,
-            "No model selected in Chronicle details. Set the story model field.",
+            "No model selected. Set story_model / vlm_model.",
         )
     options = _chronicle_llm_options(body, body.temperature, cfg)
 
@@ -385,133 +193,6 @@ async def suggest_topic(body: TopicSuggestRequest, request: Request):
         locale=body.locale,
         base_sha256=body.base_sha256,
     )
-
-
-@router.post("/chronicle/{story_id}/select")
-async def select_candidate(story_id: str, body: SelectCandidateRequest, request: Request):
-    """Phase 2: expand the chosen candidate. Returns a new streaming job_id.
-
-    If the target story is already finalized (the user picked another candidate
-    from a completed run), the draft is forked into a fresh story record so the
-    previous Storybook entry is not overwritten. Re-expanding on purpose stays
-    on the /respin endpoint.
-    """
-    from ..jobs.runners import run_chronicle_expand
-
-    app = request.app
-    story = await story_db.get_story(app.state.db, story_id)
-    if story is None:
-        raise HTTPException(404, f"Story {story_id!r} not found")
-
-    if story.get("status") == "final":
-        story_id = await story_db.fork_draft(app.state.db, story)
-        story = await story_db.get_story(app.state.db, story_id)
-
-    from ..story.generator import TIME_SCALES, normalize_time_scale
-
-    # Prefer a *valid* client scale; else Phase-1 story / context.body.
-    # Invalid/empty client must not wipe a correct Phase-1 "hours" into years.
-    ctx_body = ((story.get("context") or {}).get("body") or {})
-    client = str(body.time_scale or "").strip()
-    if client in TIME_SCALES:
-        raw_scale = client
-    else:
-        raw_scale = (
-            ctx_body.get("time_scale")
-            or story.get("time_scale")
-            or "years"
-        )
-    scale = normalize_time_scale(raw_scale)
-
-    job_id = _submit_prompt_job(
-        app, "chronicle_expand", run_chronicle_expand,
-        meta={"group_id": story.get("group_id", ""), "story_id": story_id},
-        story_id=story_id,
-        candidate_id=body.candidate_id,
-        time_scale=scale,
-        temperature=_draft_base_temp(story),
-    )
-    return {"job_id": job_id, "story_id": story_id, "status": "queued"}
-
-
-@router.post("/chronicle/{story_id}/respin")
-async def respin_chronicle(story_id: str, body: RespinRequest, request: Request):
-    """Regenerate candidates or the expanded story at a raised temperature.
-
-    stage="candidates": re-pitch the three candidates (reuses Phase 1 context).
-    stage="expand":     re-expand the already-selected candidate.
-    Returns a new streaming job_id.
-    """
-    from ..jobs.runners import run_chronicle_candidates, run_chronicle_expand
-
-    app = request.app
-    story = await story_db.get_story(app.state.db, story_id)
-    if story is None:
-        raise HTTPException(404, f"Story {story_id!r} not found")
-    ladder_temp = _respin_temperature(_draft_base_temp(story), body.respin_count)
-    temp = body.temperature if body.temperature is not None else ladder_temp
-    meta = {"group_id": story.get("group_id", ""), "story_id": story_id}
-
-    if body.stage == "candidates":
-        body_dict = (story.get("context") or {}).get("body") or {}
-        if not body_dict:
-            raise HTTPException(409, "Draft has no stored context for respin")
-        body_dict = _merge_respin_overrides(body_dict, body)
-        # Persist updated knobs so subsequent respins / expand see them.
-        try:
-            ctx = dict(story.get("context") or {})
-            ctx["body"] = body_dict
-            await story_db.set_story_payload(app.state.db, story_id, {"context": ctx})
-        except Exception as exc:
-            logger.warning("[chronicle] respin context persist failed: %s", exc)
-        job_id = _submit_prompt_job(
-            app, "chronicle_candidates", run_chronicle_candidates, meta=meta,
-            body_dict=body_dict, story_id=story_id, temperature=temp,
-        )
-    else:  # expand
-        candidate_id = story.get("selected_candidate")
-        if not candidate_id:
-            raise HTTPException(409, "No candidate has been selected yet")
-        ctx = dict(story.get("context") or {})
-        body_dict = _merge_respin_overrides(ctx.get("body") or {}, body)
-        ctx["body"] = body_dict
-        try:
-            await story_db.set_story_payload(app.state.db, story_id, {"context": ctx})
-        except Exception as exc:
-            logger.warning("[chronicle] respin expand context persist failed: %s", exc)
-        scale = (
-            body.time_scale
-            or body_dict.get("time_scale")
-            or story.get("time_scale")
-            or "years"
-        )
-        job_id = _submit_prompt_job(
-            app, "chronicle_expand", run_chronicle_expand, meta=meta,
-            story_id=story_id, candidate_id=candidate_id,
-            time_scale=scale, temperature=temp,
-        )
-    return {"job_id": job_id, "story_id": story_id, "status": "queued"}
-
-
-@router.get("/chronicle/{job_id}/stream")
-async def chronicle_stream(job_id: str, request: Request):
-    """Stream pipeline events (tokens, phases, prompts, done) via SSE."""
-    token_queue: asyncio.Queue | None = request.app.state.story_token_queues.get(job_id)
-    if token_queue is None:
-        raise HTTPException(404, f"Chronicle job {job_id!r} not found")
-    # Never cancel Chronicle jobs on flaky SSE disconnects during long silent
-    # LLM phases (concretizing / think=True). Explicit Cancel still works.
-    return queue_sse_response(
-        request,
-        token_queue,
-        job_id=job_id,
-        registry=request.app.state.story_token_queues,
-        encode="json",
-        cancel_on_disconnect=False,
-        disconnect_grace_seconds=90.0,
-        ping_seconds=10.0,
-    )
-
 
 @router.get("/storybook")
 async def get_storybook(request: Request, limit: int = 50):
