@@ -68,5 +68,5 @@ def test_lock_enter_lookdev_sample_rate_override():
     session["character"]["board_briefs"] = [
         {"slot": "portrait"}, {"slot": "full"}, {"slot": "prop"},
     ]
-    service.accept_board(session)
+    service.accept_board(session, allow_pending=True)
     assert session["character"]["board"]["accepted"]

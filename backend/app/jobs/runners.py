@@ -3168,6 +3168,161 @@ async def run_chronicle_image_generate(
     return {"sha256s": saved_sha256s, "story_id": story_id, "axis": axis, "seed": seed}
 
 
+async def run_weave_image_generate(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    comfy,
+    session_id: str,
+    kind: str,
+    target: str,
+    workflow_name: str,
+    positive: str,
+    negative: str,
+    seed: int | None,
+    steps: int | None = None,
+    base_sha256: str = "",
+) -> dict:
+    """GEN lane for Weave board / sample / final images.
+
+    ``kind`` is board|sample|final; ``target`` is board slot or panel_key.
+    """
+    import random as _random
+    from pathlib import Path
+
+    from ..creation.schema import CreationRecord
+    from ..weave import session_db as weave_db
+
+    reporter.indeterminate()
+    if seed is None:
+        seed = _random.randint(0, (1 << 64) - 1)
+
+    wf = comfy.load_workflow(workflow_name)
+    base_sha = (base_sha256 or "").strip()
+    if base_sha:
+        doc = await db.get(base_sha) or {}
+        fp = Path(doc.get("path", ""))
+        if fp.exists():
+            try:
+                data = fp.read_bytes()
+                upload_name = f"weave_ref_{base_sha[:16]}{fp.suffix or '.png'}"
+                stored = await comfy.upload_image(data, upload_name)
+                wf, n_load = comfy.patch_load_image_nodes(wf, stored)
+                if n_load:
+                    reporter.update(
+                        0.0,
+                        f"Comfy ref uploaded={stored} patched_nodes={n_load}",
+                    )
+            except Exception as exc:
+                logger.warning("[weave] base inject failed: %s", exc)
+                reporter.update(0.0, f"WARNING: Comfy base inject failed: {exc}")
+
+    patched = comfy.patch_workflow(
+        wf, positive, negative, "", "", 1,
+        seed=seed, steps=steps, append_negative=True,
+    )
+    prompt_id = await comfy.queue_prompt(patched)
+    reporter.update(0.0, f"Weave {kind}/{target} queued in ComfyUI...")
+
+    queued = True
+
+    async def _cancel_comfy() -> None:
+        if queued:
+            try:
+                await comfy.delete_from_queue(prompt_id)
+            except Exception as exc:
+                logger.warning("ComfyUI queue delete failed: %s", exc)
+        try:
+            await comfy.interrupt()
+        except Exception as exc:
+            logger.warning("ComfyUI interrupt failed: %s", exc)
+
+    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
+
+    async def _finalize(sha256: str) -> None:
+        try:
+            await weave_db.attach_render_result(
+                db, session_id, kind=kind, target=target, image_id=sha256,
+            )
+        except Exception as exc:
+            logger.error(
+                "[weave] attach failed session=%s %s/%s: %s",
+                session_id, kind, target, exc,
+            )
+        record = CreationRecord(
+            method="weave",
+            prompt_style="",
+            workflow_name=workflow_name,
+            positive_prompt_generated=positive,
+            negative_prompt_generated=negative,
+            seed=seed,
+        )
+        await db.set_payload(sha256, {
+            "creation_record": record.model_dump(),
+            "weave_session_id": session_id,
+            "weave_kind": kind,
+            "weave_target": target,
+        })
+
+    saved_sha256s: list[str] = []
+    saved_filenames: set[str] = set()
+
+    async for event in comfy.stream_progress(prompt_id):
+        cancel.raise_if_set()
+        queued = False
+        if event["type"] == "comfy_progress":
+            v = event.get("value", 0)
+            m = event.get("max", 1)
+            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+        elif event["type"] == "comfy_output":
+            for img_ref in event.get("images", []):
+                cancel.raise_if_set()
+                try:
+                    img_bytes = await comfy.fetch_image(
+                        img_ref["filename"],
+                        img_ref.get("subfolder", ""),
+                        img_ref.get("type", "output"),
+                    )
+                    sha256 = await _save_and_register_chronicle_image(
+                        img_bytes, img_ref["filename"], db,
+                    )
+                    if sha256:
+                        saved_sha256s.append(sha256)
+                        saved_filenames.add(img_ref["filename"])
+                        await _finalize(sha256)
+                except Exception as exc:
+                    logger.error("[weave] image save error: %s", exc)
+
+    history_images = await comfy.fetch_history(prompt_id)
+    for img_ref in history_images:
+        if img_ref.get("filename") in saved_filenames:
+            continue
+        try:
+            img_bytes = await comfy.fetch_image(
+                img_ref["filename"],
+                img_ref.get("subfolder", ""),
+                img_ref.get("type", "output"),
+            )
+            sha256 = await _save_and_register_chronicle_image(
+                img_bytes, img_ref["filename"], db,
+            )
+            if sha256:
+                saved_sha256s.append(sha256)
+                await _finalize(sha256)
+        except Exception as exc:
+            logger.error("[weave] history image save error: %s", exc)
+
+    reporter.update(1.0, f"weave {kind}/{target}: {len(saved_sha256s)} image(s)")
+    return {
+        "sha256s": saved_sha256s,
+        "session_id": session_id,
+        "kind": kind,
+        "target": target,
+        "seed": seed,
+    }
+
+
 # Pose sets for pinups — each "add" cycles to a different pose so the corkboard
 # fills with varied shots rather than the same stance.
 _PINUP_POSES: list[list[str]] = [

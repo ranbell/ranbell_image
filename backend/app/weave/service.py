@@ -57,30 +57,36 @@ def lock_identity(session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
-def accept_board(session: dict[str, Any]) -> dict[str, Any]:
+def accept_board(session: dict[str, Any], *, allow_pending: bool = False) -> dict[str, Any]:
     board = session.setdefault("character", {}).setdefault("board", {})
     images = board.get("images") or []
-    slots = {img.get("slot") for img in images if img.get("image_id")}
-    # Allow accept when briefs exist even if images pending? Design says portrait+full required.
-    # For M1 without Comfy, accept board briefs as placeholder acceptance only if images present
-    # OR if quality_policy allows dry accept when no renderer — use images OR board_briefs dry flag.
+
+    def _usable(img: dict) -> bool:
+        iid = str(img.get("image_id") or "")
+        if not iid:
+            return False
+        if iid.startswith("pending:") or iid.startswith("placeholder:"):
+            return allow_pending
+        return True
+
+    slots = {img.get("slot") for img in images if _usable(img)}
     if "portrait" not in slots or "full" not in slots:
-        # Dry-run path: synthesize placeholder image ids from briefs so G0-hard can be tested
+        # Test / dry path: synthesize placeholders only when explicitly allowed
         briefs = (session.get("character") or {}).get("board_briefs") or []
-        if briefs and not images:
+        if allow_pending and briefs and not any(_usable(i) for i in images):
             board["images"] = [
                 {
                     "slot": b.get("slot"),
-                    "image_id": f"pending:{b.get('slot')}",
+                    "image_id": f"placeholder:{b.get('slot')}",
                     "positive": "",
-                    "pending": True,
+                    "pending": False,
                 }
                 for b in briefs
                 if b.get("slot") in ("portrait", "full", "prop")
             ]
-            slots = {img.get("slot") for img in board["images"]}
+            slots = {img.get("slot") for img in board["images"] if _usable(img)}
         if "portrait" not in slots or "full" not in slots:
-            raise WeaveError("board needs portrait and full images before accept")
+            raise WeaveError("board needs rendered portrait and full images before accept")
     board["accepted"] = True
     append_timeline(session, actor="user", type_="lock", text="board accepted")
     return session

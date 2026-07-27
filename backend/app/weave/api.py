@@ -68,7 +68,8 @@ class OverrideFramingRequest(BaseModel):
 
 class SampleRequest(BaseModel):
     panel_key: str = "panel_1"
-    placeholder: bool = True  # M3: real Comfy wiring comes later
+    placeholder: bool = False
+    workflow_sample: str = ""
 
 
 def _model_from(session: dict, body_model: str = "") -> str:
@@ -170,41 +171,83 @@ async def character_lock(session_id: str, request: Request):
     return await _save(request, session_id, session)
 
 
+class AcceptBoardRequest(BaseModel):
+    allow_pending: bool = False  # tests / dry-run only
+
+
 @router.post("/sessions/{session_id}/character/accept-board")
-async def character_accept_board(session_id: str, request: Request):
+async def character_accept_board(
+    session_id: str, request: Request, body: AcceptBoardRequest | None = None,
+):
     session = await _load(request, session_id)
     try:
-        service.accept_board(session)
+        service.accept_board(
+            session,
+            allow_pending=bool(body and body.allow_pending),
+        )
     except service.WeaveError as e:
         raise HTTPException(e.status_code, e.message) from e
     return await _save(request, session_id, session)
 
 
+class BoardRenderRequest(BaseModel):
+    workflow_sample: str = ""
+    workflow_final: str = ""
+    dry_pending: bool = False  # skip Comfy; create pending slots only
+
+
 @router.post("/sessions/{session_id}/character/board")
-async def character_board(session_id: str, request: Request):
-    """Queue board renders — Comfy wiring in M3; for now create pending slots."""
-    session = await _load(request, session_id)
-    briefs = (session.get("character") or {}).get("board_briefs") or [
-        {"slot": "portrait", "camera": "close_up"},
-        {"slot": "full", "camera": "long_shot"},
-        {"slot": "prop", "camera": "medium_shot"},
-    ]
-    board = session.setdefault("character", {}).setdefault("board", {})
-    board["images"] = [
-        {
-            "slot": b.get("slot"),
-            "camera": b.get("camera"),
-            "image_id": f"pending:{b.get('slot')}",
-            "positive": "",
-            "pending": True,
-        }
-        for b in briefs
-        if b.get("slot")
-    ]
-    board["accepted"] = False
+async def character_board(
+    session_id: str, request: Request, body: BoardRenderRequest | None = None,
+):
+    """Queue Comfy board renders (portrait/full/prop)."""
     from .schema import append_timeline
-    append_timeline(session, actor="system", type_="message", text="board slots prepared (render pending)")
-    return await _save(request, session_id, session)
+    from .render.submit import submit_board_jobs
+
+    session = await _load(request, session_id)
+    body = body or BoardRenderRequest()
+    inputs = session.setdefault("inputs", {})
+    if body.workflow_sample:
+        inputs["workflow_sample"] = body.workflow_sample
+    if body.workflow_final:
+        inputs["workflow_final"] = body.workflow_final
+
+    if body.dry_pending or not (
+        inputs.get("workflow_final") or inputs.get("workflow_sample")
+    ):
+        briefs = (session.get("character") or {}).get("board_briefs") or [
+            {"slot": "portrait"}, {"slot": "full"}, {"slot": "prop"},
+        ]
+        board = session.setdefault("character", {}).setdefault("board", {})
+        board["images"] = [
+            {
+                "slot": b.get("slot"),
+                "image_id": None,
+                "job_id": None,
+                "pending": True,
+            }
+            for b in briefs if b.get("slot")
+        ]
+        board["accepted"] = False
+        append_timeline(
+            session, actor="system", type_="message",
+            text="board slots prepared without workflow (dry)",
+        )
+        view = await _save(request, session_id, session)
+        view["jobs"] = []
+        return view
+
+    try:
+        jobs = submit_board_jobs(request.app, session_id, session)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    append_timeline(
+        session, actor="system", type_="message",
+        text=f"board render queued: {len(jobs)} job(s)",
+    )
+    view = await _save(request, session_id, session)
+    view["jobs"] = jobs
+    return view
 
 
 @router.post("/sessions/{session_id}/story/generate")
@@ -278,19 +321,34 @@ async def compile_session(session_id: str, request: Request):
 
 @router.post("/sessions/{session_id}/sample")
 async def sample_panel(session_id: str, body: SampleRequest, request: Request):
+    from .render.submit import submit_sample_job
+    from .schema import append_timeline
+
     session = await _load(request, session_id)
     if session.get("status") != "lookdev":
         try:
             service.enter_lookdev(session)
         except service.WeaveError as e:
             raise HTTPException(e.status_code, e.message) from e
-    if not body.placeholder:
-        raise HTTPException(501, "Comfy sample render not wired yet — use placeholder=true")
+    if body.workflow_sample:
+        session.setdefault("inputs", {})["workflow_sample"] = body.workflow_sample
+    if body.placeholder:
+        try:
+            service.mark_sample_placeholder(session, body.panel_key)
+        except service.WeaveError as e:
+            raise HTTPException(e.status_code, e.message) from e
+        return await _save(request, session_id, session)
     try:
-        service.mark_sample_placeholder(session, body.panel_key)
-    except service.WeaveError as e:
-        raise HTTPException(e.status_code, e.message) from e
-    return await _save(request, session_id, session)
+        job = submit_sample_job(request.app, session_id, session, body.panel_key)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    append_timeline(
+        session, actor="system", type_="sample",
+        text=f"sample queued {body.panel_key} job={job['job_id']}",
+    )
+    view = await _save(request, session_id, session)
+    view["job"] = job
+    return view
 
 
 @router.post("/sessions/{session_id}/sample/rate")
@@ -319,9 +377,40 @@ async def get_cta(session_id: str, request: Request):
     return next_cta(session)
 
 
+class RenderFinalRequest(BaseModel):
+    workflow_final: str = ""
+
+
 @router.post("/sessions/{session_id}/render_final")
-async def render_final(session_id: str, request: Request):
-    raise HTTPException(501, "Final Comfy render not wired yet (M4)")
+async def render_final(
+    session_id: str, request: Request, body: RenderFinalRequest | None = None,
+):
+    from .render.submit import submit_final_jobs
+    from .schema import append_timeline
+    from .state_machine import gates
+
+    session = await _load(request, session_id)
+    body = body or RenderFinalRequest()
+    if body.workflow_final:
+        session.setdefault("inputs", {})["workflow_final"] = body.workflow_final
+    g = gates(session)
+    if not g["G0_soft"]["pass"]:
+        raise HTTPException(400, "identity must be locked")
+    if not g["G1"]["pass"]:
+        raise HTTPException(400, "story required")
+    if not g["G0_hard"]["pass"]:
+        raise HTTPException(400, "board must be accepted before final render")
+    try:
+        jobs = submit_final_jobs(request.app, session_id, session)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    append_timeline(
+        session, actor="system", type_="message",
+        text=f"final render queued: {len(jobs)} job(s)",
+    )
+    view = await _save(request, session_id, session)
+    view["jobs"] = jobs
+    return view
 
 
 @router.post("/sessions/{session_id}/seal")

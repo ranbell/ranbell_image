@@ -691,3 +691,21 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 | 次のアクション | M0 実装に入れる |
 
 **結論: 設計は実装可能な状態。次は M0 からコードに起こす。**
+
+---
+
+## 21. 実装状況（コード）
+
+| マイルストーン | 状態 |
+|----------------|------|
+| M0 セッション / CTA / G0-soft·hard | **済** `backend/app/weave/` |
+| M1 類推 + Story 先行 + board キュー | **済**（Comfy `run_weave_image_generate`） |
+| M2 must_show / Recreate / rollback / compile | **済** |
+| M3 sample Comfy + rate/override | **済** |
+| M4 render_final Comfy + Seal | **済**（Storybook 投影は未） |
+| UI WeavePanel | **済**（Chronicle 併存） |
+| 旧 Chronicle 撤去 | 未 |
+
+API: `/api/weave/sessions...`  
+UI: ヘッダー「Weave」→ `WeavePanel.vue`  
+テスト: `tests/weave/`（11+）
