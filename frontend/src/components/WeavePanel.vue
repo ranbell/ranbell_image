@@ -53,9 +53,17 @@ const character = computed(() => session.value?.character || {})
 const boardImages = computed(() => character.value?.board?.images || [])
 const galleryRefs = computed(() => character.value?.gallery_refs || [])
 const gallerySpice = computed(() => character.value?.gallery_spice || [])
+const tagDiff = computed(() => character.value?.tag_diff || null)
+const galleryNnStatus = computed(() => character.value?.gallery_nn || null)
 const storyWorld = computed(() => session.value?.story_bundle?.world || {})
 const panels = computed(() => session.value?.panels || [])
 const gates = computed(() => session.value?.gates || {})
+const lintDefects = computed(() => (
+  cta.value?.defects
+  || session.value?.gates?.G1?.defects
+  || session.value?.last_lint?.defects
+  || []
+))
 const sessionId = computed(() => session.value?.session_id || '')
 
 function thumb(sha) {
@@ -198,6 +206,20 @@ async function runAction(code) {
         method: 'POST',
         body: JSON.stringify({ topic: topic.value, story_model: storyModel.value }),
       })
+    } else if (code === 'recreate_story') {
+      if (!recreateChips.value.length) {
+        emit('toast', { msg: t('weave.needRecreateChip'), type: 'warn' })
+        return
+      }
+      if (!window.confirm(t('weave.recreateConfirm'))) return
+      session.value = await api(`/api/weave/sessions/${id}/story/recreate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          chips: recreateChips.value,
+          story_model: storyModel.value,
+        }),
+      })
+      recreateChips.value = []
     } else if (code === 'enter_lookdev') {
       session.value = await api(`/api/weave/sessions/${id}/lookdev`, { method: 'POST' })
     } else if (code === 'sample_panel') {
@@ -248,6 +270,7 @@ async function recreate() {
     emit('toast', { msg: t('weave.needRecreateChip'), type: 'warn' })
     return
   }
+  if (!window.confirm(t('weave.recreateConfirm'))) return
   busy.value = true
   errorMsg.value = ''
   try {
@@ -381,6 +404,26 @@ onUnmounted(() => {
             </template>
           </div>
 
+          <div v-if="tagDiff && (tagDiff.added?.length || tagDiff.removed?.length || tagDiff.spice?.length)"
+            class="rounded border border-cyan-900/50 bg-cyan-950/20 p-2 space-y-1">
+            <div class="text-[10px] uppercase tracking-wider text-cyan-400/90">{{ t('weave.tagDiff') }}</div>
+            <div v-if="tagDiff.added_from_reference?.length" class="text-[10px] text-teal-200">
+              ref: +{{ tagDiff.added_from_reference.join(', ') }}
+            </div>
+            <div v-if="tagDiff.added_from_gallery?.length" class="text-[10px] text-cyan-200">
+              gallery: +{{ tagDiff.added_from_gallery.join(', ') }}
+            </div>
+            <div v-if="tagDiff.removed?.length" class="text-[10px] text-amber-300">
+              −{{ tagDiff.removed.join(', ') }}
+            </div>
+            <div class="text-[10px] text-gray-500">{{ t('weave.tagDiffHint') }}</div>
+          </div>
+
+          <p v-if="useGalleryNn && galleryNnStatus && !galleryNnStatus.applied && galleryNnStatus.reason && galleryNnStatus.reason !== 'skipped'"
+            class="text-[10px] text-amber-400/90">
+            {{ t('weave.galleryNnSkip', { reason: galleryNnStatus.reason }) }}
+          </p>
+
           <div v-if="galleryRefs.length" class="space-y-1">
             <div class="text-[10px] uppercase tracking-wider text-cyan-500/80">{{ t('weave.galleryRefs') }}</div>
             <div class="grid grid-cols-3 gap-1">
@@ -392,6 +435,8 @@ onUnmounted(() => {
               </a>
             </div>
           </div>
+          <p v-else-if="useGalleryNn && character.identity_tags?.length && galleryNnStatus?.applied === false"
+            class="text-[10px] text-gray-500">{{ t('weave.galleryEmpty') }}</p>
 
           <div class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.board') }}</div>
           <div class="grid grid-cols-1 gap-2">
@@ -445,6 +490,19 @@ onUnmounted(() => {
           </button>
 
           <p v-if="errorMsg" class="text-xs text-red-400 whitespace-pre-wrap">{{ errorMsg }}</p>
+
+          <!-- lint defects → recreate only -->
+          <div v-if="lintDefects.length" class="rounded border border-amber-800/60 bg-amber-950/30 p-3 space-y-2">
+            <div class="text-[10px] uppercase text-amber-400/90">{{ t('weave.lintDefects') }}</div>
+            <ul class="space-y-1 max-h-40 overflow-y-auto">
+              <li v-for="(d, i) in lintDefects" :key="i" class="text-[11px] text-amber-100/90">
+                <span class="text-amber-500/80 font-mono">{{ d.code }}</span>
+                {{ d.problem }}
+                <span v-if="d.fix" class="block text-gray-400">→ {{ d.fix }}</span>
+              </li>
+            </ul>
+            <p class="text-[10px] text-amber-200/70">{{ t('weave.lintDefectsHint') }}</p>
+          </div>
 
           <!-- causality -->
           <div v-if="storyWorld.causality_one_liner" class="rounded border border-teal-900/40 bg-teal-950/30 p-3">

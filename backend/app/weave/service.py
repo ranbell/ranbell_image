@@ -26,10 +26,13 @@ class WeaveError(Exception):
 
 
 def public_view(session: dict[str, Any]) -> dict[str, Any]:
+    from .verify.seal import evaluate_seal_rubric
+
     return {
         **session,
         "gates": gates(session),
         "next_cta": next_cta(session),
+        "seal_rubric": evaluate_seal_rubric(session),
     }
 
 
@@ -120,35 +123,70 @@ async def infer_character(
         author_style=str(inputs.get("author_style") or ""),
     )
     apply_inference_to_character(session.setdefault("character", {}), data)
-    session["character"]["identity_locked"] = False
-    session["character"]["board"] = {"images": [], "accepted": False}
-    session["character"]["gallery_refs"] = []
-    session["character"]["gallery_spice"] = []
-    session["character"]["gallery_nn"] = None
+    character = session["character"]
+    character["identity_locked"] = False
+    character["board"] = {"images": [], "accepted": False}
+    character["gallery_refs"] = []
+    character["gallery_spice"] = []
+    character["gallery_nn"] = None
+    character["reference_mix"] = None
+    base_identity = list(character.get("identity_tags") or [])
     # Invalidate story if re-infer
     if int(session.get("story_version") or 0) > 0:
         session["story_bundle"] = {}
         session["story_version"] = 0
+        session["last_lint"] = None
         session["status"] = "character"
     append_timeline(
         session, actor="llm.personalitywright", type_="proposal",
-        text=session["character"].get("reasoning_ja") or "character inferred",
+        text=character.get("reasoning_ja") or "character inferred",
     )
+    gallery_summary: dict[str, Any] = {"applied": False, "added_identity": []}
     if is_gallery_nn_enabled(session) and db is not None:
-        summary = await enrich_character_from_gallery(
+        gallery_summary = await enrich_character_from_gallery(
             session,
             db=db,
             ollama=ollama,
             embed_model=embed_model or "nomic-embed-text",
         )
-        if summary.get("applied"):
-            n = summary.get("neighbor_count") or 0
-            added = len(summary.get("added_identity") or [])
+        if gallery_summary.get("applied"):
+            n = gallery_summary.get("neighbor_count") or 0
+            added = len(gallery_summary.get("added_identity") or [])
             append_timeline(
                 session, actor="system.gallery_nn", type_="enrich",
                 text=f"gallery NN: {n} neighbors, +{added} identity tags",
-                ref={"gallery_nn": summary},
+                ref={"gallery_nn": gallery_summary},
             )
+        elif gallery_summary.get("reason") not in (None, "skipped"):
+            append_timeline(
+                session, actor="system.gallery_nn", type_="message",
+                text=f"gallery NN skipped: {gallery_summary.get('reason')}",
+            )
+
+    from .character.reference_mix import apply_reference_mix
+
+    ref_summary = await apply_reference_mix(session, db)
+    character["reference_mix"] = ref_summary
+    if ref_summary.get("applied"):
+        append_timeline(
+            session, actor="system.reference_mix", type_="enrich",
+            text="reference hair/eyes applied: "
+            + ", ".join(ref_summary.get("added_from_reference") or []),
+        )
+
+    after = list(character.get("identity_tags") or [])
+    base_set = set(base_identity)
+    character["tag_diff"] = {
+        "base_identity": base_identity,
+        "after_enrichment": after,
+        "added_from_gallery": list(gallery_summary.get("added_identity") or []),
+        "added_from_reference": list(ref_summary.get("added_from_reference") or []),
+        "added": [t for t in after if t not in base_set],
+        "removed": [t for t in base_identity if t not in set(after)],
+        "spice": list(character.get("gallery_spice") or []),
+        "gallery_nn_reason": gallery_summary.get("reason"),
+        "reference_reason": ref_summary.get("reason"),
+    }
     return session
 
 
@@ -162,6 +200,69 @@ def _push_history(session: dict[str, Any], *, reasons: list[str], constraints: l
         "constraints": constraints,
         "at": time.time(),
     })
+
+
+async def _lint_repair_apply(
+    session: dict[str, Any],
+    bundle: dict[str, Any],
+    ollama,
+    *,
+    model: str,
+    options: dict,
+    topic: str,
+    actor_note: str,
+) -> dict[str, Any]:
+    """Lint → Repairer×1 → apply. Sets last_lint; G1 only passes when lint ok."""
+    from .story.repairer import run_repairer
+
+    character = session.get("character") or {}
+    lint = lint_story_bundle(bundle, character)
+    repaired = False
+    if not lint["pass"]:
+        try:
+            bundle = await run_repairer(
+                ollama,
+                model=model,
+                options=options,
+                story_bundle=bundle,
+                defects=list(lint.get("defects") or []),
+                character=character,
+                topic=topic,
+            )
+            lint = lint_story_bundle(bundle, character)
+            repaired = True
+            append_timeline(
+                session, actor="llm.repairer", type_="message",
+                text="repairer×1 attempted",
+            )
+        except Exception as exc:
+            logger.warning("[weave] repairer failed: %s", exc)
+            append_timeline(
+                session, actor="system", type_="message",
+                text=f"repairer failed: {exc}",
+            )
+
+    apply_story_to_session(session, bundle)
+    session["last_lint"] = lint
+    session.setdefault("cross_panel_qa", {})["throughline_coverage"] = lint.get(
+        "throughline_coverage"
+    )
+    if lint["pass"]:
+        append_timeline(
+            session, actor="llm.storywright", type_="message",
+            text=(bundle.get("world") or {}).get("causality_one_liner") or actor_note,
+        )
+    else:
+        defects = lint.get("defects") or []
+        append_timeline(
+            session, actor="system", type_="message",
+            text=(
+                f"story lint failed after"
+                f"{' repair' if repaired else ''}: {len(defects)} defects — recreate only"
+            ),
+            ref={"defects": defects},
+        )
+    return session
 
 
 async def generate_story(
@@ -182,34 +283,22 @@ async def generate_story(
         raise WeaveError("topic is required")
     if not model:
         raise WeaveError("story_model is required")
+    opts = options or {"temperature": 0.7}
     author_style = str(inputs.get("author_style") or "")
     bundle = await run_storywright(
         ollama,
         model=model,
-        options=options or {"temperature": 0.7},
+        options=opts,
         topic=topic_s,
         character=session.get("character") or {},
         author_style=author_style,
         avoid_motifs=list(session.get("avoid_motifs") or []),
     )
-    lint = lint_story_bundle(bundle, session.get("character") or {})
-    if not lint["pass"]:
-        # One repair attempt is deferred to a dedicated endpoint; surface defects.
-        apply_story_to_session(session, bundle)
-        session["last_lint"] = lint
-        append_timeline(
-            session, actor="system", type_="message",
-            text=f"story lint failed: {len(lint['defects'])} defects — recreate recommended",
-        )
-        return session
-    apply_story_to_session(session, bundle)
-    session["last_lint"] = lint
-    session["cross_panel_qa"]["throughline_coverage"] = lint.get("throughline_coverage")
-    append_timeline(
-        session, actor="llm.storywright", type_="message",
-        text=(bundle.get("world") or {}).get("causality_one_liner") or "story generated",
+    return await _lint_repair_apply(
+        session, bundle, ollama,
+        model=model, options=opts, topic=topic_s,
+        actor_note="story generated",
     )
-    return session
 
 
 async def recreate_story(
@@ -243,10 +332,11 @@ async def recreate_story(
     topic_s = str(inputs.get("topic") or "").strip()
     if not topic_s:
         raise WeaveError("topic is required")
+    opts = options or {"temperature": 0.8}
     bundle = await run_storywright(
         ollama,
         model=model,
-        options=options or {"temperature": 0.8},
+        options=opts,
         topic=topic_s,
         character=session.get("character") or {},
         author_style=str(inputs.get("author_style") or ""),
@@ -254,14 +344,12 @@ async def recreate_story(
         avoid_motifs=list(session.get("avoid_motifs") or []),
         previous_causality=str(prev_causal),
     )
-    lint = lint_story_bundle(bundle, session.get("character") or {})
-    apply_story_to_session(session, bundle)
-    session["last_lint"] = lint
-    session["status"] = "story"
-    append_timeline(
-        session, actor="llm.storywright", type_="message",
-        text=f"recreated with chips={chips}",
+    await _lint_repair_apply(
+        session, bundle, ollama,
+        model=model, options=opts, topic=topic_s,
+        actor_note=f"recreated with chips={chips}",
     )
+    session["status"] = "story"
     return session
 
 
@@ -371,7 +459,31 @@ def rate_sample(
                 "text": "emphasize signature_prop",
                 "active": True,
             })
+            if panel.get("intent") is not None:
+                panel["intent"]["focus"] = str(
+                    (session.get("character") or {}).get("signature_prop") or "prop"
+                )
             compile_all_panels(session)
+            continue
+        if chip in ("dead_expression", "表情死"):
+            session.setdefault("constraints", []).append({
+                "id": f"c-emo-{panel_key}",
+                "source": "user_comment",
+                "scope": panel_key,
+                "text": "face_visible_emotion",
+                "active": True,
+            })
+            if panel.get("intent") is not None:
+                emo = str(panel["intent"].get("emotion") or "").strip()
+                if not emo or emo in ("serious", "expressionless", "blank"):
+                    panel["intent"]["emotion"] = "soft smile"
+            compile_all_panels(session)
+            continue
+        if chip in ("wrong_person", "別人"):
+            append_timeline(
+                session, actor="system", type_="message",
+                text="wrong person — re-check identity (re-infer confirms story wipe)",
+            )
             continue
     append_timeline(
         session, actor="user", type_="message",

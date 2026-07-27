@@ -96,9 +96,15 @@ async def attach_render_result(
             prev["pending"] = False
             panel[bucket] = prev
             if kind == "sample":
-                cam = ((panel.get("intent") or {}).get("camera") or "")
-                if cam == "long_shot" and (panel.get("qa") or {}).get("framing") is None:
-                    panel.setdefault("qa", {})["framing"] = "pass"
+                from .verify.heuristics import apply_framing_to_panel
+
+                wd14: list[str] = []
+                try:
+                    doc = await db.get(image_id) or {}
+                    wd14 = list(doc.get("wd14_tags") or [])
+                except Exception:
+                    wd14 = []
+                apply_framing_to_panel(panel, wd14)
             break
         if kind == "final":
             finals = [

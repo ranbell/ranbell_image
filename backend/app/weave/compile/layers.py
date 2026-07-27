@@ -102,6 +102,16 @@ def compile_panel(
     environment = _env_from_setting(str(world.get("setting") or ""), boost=env_boost)
     # Optional gallery-NN atmosphere / style tags (never mixed into identity).
     spice = _dedupe([str(t) for t in (character.get("gallery_spice") or [])])
+    # face-visible emotion boost for dead_expression chip
+    for c in session.get("constraints") or []:
+        if (
+            c.get("active")
+            and c.get("text") == "face_visible_emotion"
+            and c.get("scope") in (panel_key, "session")
+        ):
+            if camera in ("medium_shot", "close_up"):
+                emotion = _dedupe(emotion + ["looking_at_viewer", "detailed_face"])
+            break
 
     # Merge then strip framing conflicts (never drop identity/throughline cores)
     body = strip_framing_conflicts(
@@ -135,9 +145,14 @@ def compile_panel(
             txt = str(c.get("text") or "")
             if txt.lower().startswith("negative:"):
                 neg_extra.append(txt.split(":", 1)[1].strip())
+    # character.do_not → negatives
+    for raw in character.get("do_not") or []:
+        t = soft_normalize_tag(str(raw)) if str(raw).isascii() else str(raw).strip()
+        if t:
+            neg_extra.append(t)
     negative = WEAVE_NEGATIVE
     if neg_extra:
-        negative = negative + ", " + ", ".join(neg_extra)
+        negative = negative + ", " + ", ".join(_dedupe(neg_extra))
 
     checksum = hashlib.sha256(positive.encode("utf-8")).hexdigest()[:16]
     result = {

@@ -440,11 +440,24 @@ async def render_final(
 async def seal(session_id: str, request: Request):
     from .schema import append_timeline
     from .state_machine import gates
+    from .verify.seal import evaluate_seal_rubric
 
     session = await _load(request, session_id)
     gate_map = gates(session)
     if not gate_map["G0_hard"]["pass"]:
         raise HTTPException(400, "board must be accepted before seal")
+    if not gate_map["G1"]["pass"]:
+        raise HTTPException(400, "story lint must pass before seal")
+    if not gate_map["G4"]["pass"]:
+        raise HTTPException(400, "framing must pass or be overridden before seal")
+    rubric = evaluate_seal_rubric(session)
+    if not rubric["pass"]:
+        failed = [k for k, v in (rubric.get("checks") or {}).items() if not v]
+        raise HTTPException(
+            400,
+            f"seal rubric failed: {', '.join(failed) or 'unknown'}",
+        )
     session["status"] = "sealed"
+    session["seal_rubric"] = rubric
     append_timeline(session, actor="user", type_="seal", text="sealed")
     return await _save(request, session_id, session)
