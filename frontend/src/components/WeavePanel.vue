@@ -5,6 +5,7 @@ import { getToken } from '../apiToken.js'
 import BoardColumn from './weave/BoardColumn.vue'
 import ScoreVlmBlock from './weave/ScoreVlmBlock.vue'
 import GatesColumn from './weave/GatesColumn.vue'
+import RollbackCompare from './weave/RollbackCompare.vue'
 
 const props = defineProps({
   show: Boolean,
@@ -33,6 +34,7 @@ const ollamaModels = ref([])
 const recreateChips = ref([])
 const useGalleryNn = ref(false)
 const useVlmAssist = ref(true)
+const useStrictSeal = ref(false)
 const selectedPanelKey = ref('panel_1')
 const editingNarrative = ref('')
 const pollTimer = ref(null)
@@ -247,6 +249,7 @@ async function runAction(code) {
         llm_provider: llmProvider.value,
         use_gallery_nn: useGalleryNn.value,
         vlm_assist: useVlmAssist.value,
+        strict_seal: useStrictSeal.value,
       }),
     })
 
@@ -343,7 +346,60 @@ async function runAction(code) {
       }
       const fails = p.framing_fail_count || 0
       const limit = session.value?.quality_policy?.framing_fail_limit || 2
-      if (fails < limit || p.qa?.framing === 'unknown') {
+      const choice = window.prompt(
+        t('weave.framingFixChoices', { fails, limit }),
+        '1',
+      )
+      if (choice === null) return
+      const c = String(choice).trim()
+      if (c === '2') {
+        // lighter sample steps
+        const res = await api(`/api/weave/sessions/${id}/sample`, {
+          method: 'POST',
+          body: JSON.stringify({
+            panel_key: p.key,
+            placeholder: false,
+            workflow_sample: workflow.value,
+            sample_steps: 12,
+          }),
+        })
+        session.value = res
+        trackJobs(res.job)
+        emit('toast', { msg: t('weave.framingLightSteps'), type: 'ok' })
+      } else if (c === '3') {
+        const alt = window.prompt(t('weave.framingPickWorkflow'), workflow.value || '')
+        if (!alt || !String(alt).trim()) {
+          emit('toast', { msg: t('weave.framingNeedWorkflow'), type: 'warn' })
+          return
+        }
+        workflow.value = String(alt).trim()
+        const res = await api(`/api/weave/sessions/${id}/sample`, {
+          method: 'POST',
+          body: JSON.stringify({
+            panel_key: p.key,
+            placeholder: false,
+            workflow_sample: workflow.value,
+            sample_steps: 16,
+          }),
+        })
+        session.value = res
+        trackJobs(res.job)
+      } else if (c === '4' || (fails >= limit && c !== '1')) {
+        if (fails < limit && c === '4') {
+          emit('toast', { msg: t('weave.overrideNeedFails', { limit }), type: 'warn' })
+          return
+        }
+        const reason = window.prompt(t('weave.overrideReasonPh'), '')
+        if (!reason || !String(reason).trim()) {
+          emit('toast', { msg: t('weave.overrideNeedReason'), type: 'warn' })
+          return
+        }
+        session.value = await api(`/api/weave/sessions/${id}/sample/override-framing`, {
+          method: 'POST',
+          body: JSON.stringify({ panel_key: p.key, reason: String(reason).trim() }),
+        })
+      } else {
+        // 1 = resample same workflow
         if (!window.confirm(t('weave.resampleConfirm'))) return
         const res = await api(`/api/weave/sessions/${id}/sample`, {
           method: 'POST',
@@ -355,16 +411,6 @@ async function runAction(code) {
         })
         session.value = res
         trackJobs(res.job)
-      } else {
-        const reason = window.prompt(t('weave.overrideReasonPh'), '')
-        if (!reason || !String(reason).trim()) {
-          emit('toast', { msg: t('weave.overrideNeedReason'), type: 'warn' })
-          return
-        }
-        session.value = await api(`/api/weave/sessions/${id}/sample/override-framing`, {
-          method: 'POST',
-          body: JSON.stringify({ panel_key: p.key, reason: String(reason).trim() }),
-        })
       }
     } else {
       await refreshSession()
@@ -579,6 +625,7 @@ watch(session, (s) => {
   const flag = s?.quality_policy?.gallery_nn ?? s?.inputs?.use_gallery_nn
   if (typeof flag === 'boolean') useGalleryNn.value = flag
   if (typeof s?.quality_policy?.vlm_assist === 'boolean') useVlmAssist.value = s.quality_policy.vlm_assist
+  if (typeof s?.quality_policy?.strict_seal === 'boolean') useStrictSeal.value = s.quality_policy.strict_seal
   if (s?.inputs?.vlm_model) vlmModel.value = s.inputs.vlm_model
   if (s?.inputs?.llm_provider) llmProvider.value = s.inputs.llm_provider
   if (s.session_id) connectStream(s.session_id)
@@ -687,6 +734,11 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <label class="flex items-center gap-2 text-[11px] text-gray-400">
+            <input v-model="useStrictSeal" type="checkbox" class="accent-teal-500" />
+            {{ t('weave.strictSeal') }}
+          </label>
+
           <!-- CTA -->
           <button
             class="w-full rounded-lg border border-teal-600/50 bg-teal-900/60 px-4 py-3 text-sm font-medium text-teal-100 hover:bg-teal-800/70 disabled:opacity-40"
@@ -694,6 +746,9 @@ onUnmounted(() => {
             @click="runAction(cta.code)">
             {{ busy ? t('weave.working') : (cta.label || t('weave.next')) }}
           </button>
+          <p v-if="cta.needs?.length" class="text-[10px] text-amber-300">
+            {{ t('weave.ctaNeeds', { needs: cta.needs.join(', ') }) }}
+          </p>
 
           <p v-if="errorMsg" class="text-xs text-red-400 whitespace-pre-wrap">{{ errorMsg }}</p>
 
@@ -803,20 +858,13 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <!-- rollback -->
-          <div v-if="(session?.story_history || []).length" class="rounded border border-gray-800 p-3 space-y-2">
-            <div class="text-[10px] uppercase text-gray-500">{{ t('weave.rollback') }}</div>
-            <div class="space-y-1 max-h-32 overflow-y-auto">
-              <button v-for="h in (session.story_history || []).slice().reverse()" :key="h.version"
-                class="flex w-full items-start justify-between gap-2 rounded bg-gray-900/80 px-2 py-1.5 text-left hover:bg-gray-800"
-                :disabled="busy" @click="rollbackTo(h.version)">
-                <span class="text-[10px] text-teal-300">v{{ h.version }}</span>
-                <span class="flex-1 text-[10px] text-gray-400 line-clamp-2">
-                  {{ h.bundle?.world?.causality_one_liner || (h.reasons || []).join(', ') || '—' }}
-                </span>
-              </button>
-            </div>
-          </div>
+          <RollbackCompare
+            :history="session?.story_history || []"
+            :current-causality="storyWorld.causality_one_liner || ''"
+            :current-version="session?.story_version || 0"
+            :busy="busy"
+            @rollback="rollbackTo"
+          />
         </main>
 
         <GatesColumn

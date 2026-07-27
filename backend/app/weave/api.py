@@ -46,12 +46,15 @@ class TopicPatch(BaseModel):
     llm_provider: Literal["ollama", "openai"] | None = None
     use_gallery_nn: bool | None = None
     vlm_assist: bool | None = None
+    strict_seal: bool | None = None
+    sample_steps: int | None = None
 
 
 class StoryGenerateRequest(BaseModel):
     topic: str = ""
     story_model: str = ""
     temperature: float = 0.7
+    author_style: str = ""
 
 
 class UnlockIdentityRequest(BaseModel):
@@ -88,6 +91,7 @@ class SampleRequest(BaseModel):
     panel_key: str = "panel_1"
     placeholder: bool = False
     workflow_sample: str = ""
+    sample_steps: int | None = None
 
 
 def _model_from(session: dict, body_model: str = "") -> str:
@@ -215,6 +219,10 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         set_gallery_nn_enabled(session, body.use_gallery_nn)
     if body.vlm_assist is not None:
         session.setdefault("quality_policy", {})["vlm_assist"] = bool(body.vlm_assist)
+    if body.strict_seal is not None:
+        session.setdefault("quality_policy", {})["strict_seal"] = bool(body.strict_seal)
+    if body.sample_steps is not None:
+        session.setdefault("inputs", {})["sample_steps"] = int(body.sample_steps)
     await resolve_author_style(session, request.app.state.db)
     apply_topic_warnings(session)
     return await _save(request, session_id, session)
@@ -355,6 +363,8 @@ async def character_board(
 @router.post("/sessions/{session_id}/story/generate")
 async def story_generate(session_id: str, body: StoryGenerateRequest, request: Request):
     session = await _load(request, session_id)
+    if body.author_style:
+        session.setdefault("inputs", {})["author_style"] = body.author_style
     model = _model_from(session, body.story_model)
     try:
         await service.generate_story(
@@ -460,6 +470,8 @@ async def sample_panel(session_id: str, body: SampleRequest, request: Request):
             raise HTTPException(e.status_code, e.message) from e
     if body.workflow_sample:
         session.setdefault("inputs", {})["workflow_sample"] = body.workflow_sample
+    if body.sample_steps is not None:
+        session.setdefault("inputs", {})["sample_steps"] = int(body.sample_steps)
     if body.placeholder:
         try:
             service.mark_sample_placeholder(session, body.panel_key)

@@ -628,8 +628,7 @@
       "errors": "{n} errors",
       "cancel": "Cancel",
       "lastError": "Last error:"
-    },
-    "weave": "Weave"
+    }
   },
   "about": {
     "tagline": "Local AI-powered image management and generation.\nSemantic search, similarity search, and prompt refinement pipeline.",
@@ -1735,6 +1734,16 @@
     "export": "Export",
     "exported": "Session exported",
     "crossQa": "cross-panel",
+    "strictSeal": "Strict seal (G5/G6)",
+    "ctaNeeds": "Missing: {needs}",
+    "framingFixChoices": "Fix framing (fails {fails}/{limit})\n1=resample same workflow\n2=lighter steps (12)\n3=other workflow\n4=override with reason\nNumber:",
+    "framingLightSteps": "Queued sample with lighter steps",
+    "framingPickWorkflow": "Sample workflow name",
+    "framingNeedWorkflow": "Enter a workflow name",
+    "overrideNeedFails": "Override needs {limit}+ framing fails",
+    "rollbackCurrent": "Current",
+    "rollbackSelected": "Selected",
+    "rollbackGo": "Roll back to v{v}",
     "topic": "Topic",
     "topicPh": "e.g. A rainy day in a small bookstore",
     "storyModel": "Story model",

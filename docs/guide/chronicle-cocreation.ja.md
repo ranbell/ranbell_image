@@ -724,8 +724,9 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 | M5 旧 Chronicle 撤去 | **済** |
 | ギャラリー近傍 `gallery_nn`（opt-in） | **済**（既定オフ） |
 | 参照髪・目ミックス + lock 前タグ差分 | **済** |
-| UI WeavePanel | **済**（Board/Score/Gates 分割・Score / VLM / SSE / export / vlm_model·provider） |
+| UI WeavePanel | **済**（Board/Score/Gates/RollbackCompare・Score/VLM/SSE/export・strict・framing workflow 切替） |
 | M6 VLM 固定4問 + WeaveScore + session SSE | **済**（attach 時フル VLM 試行→heuristic fallback。Spicer/mood/multi-seed は未＝lab） |
+| 仕上げ | **済**（author_style 必須・rollback 因果比較・memory モジュール・sample_steps） |
 
 API: `/api/weave/sessions...`  
 UI: ヘッダー「Weave」→ `WeavePanel.vue`  

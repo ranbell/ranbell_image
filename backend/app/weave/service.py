@@ -344,7 +344,9 @@ async def generate_story(
     await resolve_author_style(session, db)
     apply_topic_warnings(session)
     opts = options or {"temperature": 0.7}
-    author_style = str(inputs.get("author_style") or "")
+    author_style = str(inputs.get("author_style") or "").strip()
+    if not author_style:
+        raise WeaveError("author_style is required (preset or freeform)")
     bundle = await run_storywright(
         ollama,
         model=model,
@@ -377,6 +379,10 @@ async def recreate_story(
     from .character.authors import resolve_author_style
 
     await resolve_author_style(session, db)
+    inputs = session.get("inputs") or {}
+    author_style = str(inputs.get("author_style") or "").strip()
+    if not author_style:
+        raise WeaveError("author_style is required (preset or freeform)")
     constraints = chips_to_constraints(
         chips,
         current_motifs=list(session.get("avoid_motifs") or []),
@@ -396,6 +402,7 @@ async def recreate_story(
     topic_s = str(inputs.get("topic") or "").strip()
     if not topic_s:
         raise WeaveError("topic is required")
+    # author_style already validated above
     opts = options or {"temperature": 0.8}
     bundle = await run_storywright(
         ollama,
@@ -403,7 +410,7 @@ async def recreate_story(
         options=opts,
         topic=topic_s,
         character=session.get("character") or {},
-        author_style=str(inputs.get("author_style") or ""),
+        author_style=author_style,
         recreate_constraints=constraints,
         avoid_motifs=list(session.get("avoid_motifs") or []),
         previous_causality=str(prev_causal),
@@ -484,13 +491,11 @@ def rate_sample(
     panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
     if not panel:
         raise WeaveError(f"unknown panel {panel_key}")
-    session.setdefault("preference_log", []).append({
-        "at": time.time(),
-        "panel_key": panel_key,
-        "chips": list(chips),
-    })
+    from .memory import add_constraint, deactivate_constraints, log_rating
+
+    log_rating(session, panel_key=panel_key, chips=chips)
     for chip in chips:
-        if chip == "good":
+        if chip == "good" or chip == "良い":
             continue
         if chip == "unclear_story" or chip == "話がわからない":
             session["suggest_recreate"] = True
@@ -500,25 +505,25 @@ def rate_sample(
             )
             continue
         if chip in ("sparse", "寂しい"):
-            session.setdefault("constraints", []).append({
-                "id": f"c-env-{panel_key}",
-                "source": "user_comment",
-                "scope": panel_key,
-                "text": "env_boost",
-                "active": True,
-            })
+            add_constraint(
+                session,
+                id=f"c-env-{panel_key}",
+                text="env_boost",
+                scope=panel_key,
+                source="user_comment",
+            )
             compile_panel(session, panel_key, env_boost=True)
             continue
         if chip in ("too_close", "寄りすぎ"):
             panel["framing_fail_count"] = int(panel.get("framing_fail_count") or 0) + 1
             panel.setdefault("qa", {})["framing"] = "fail"
-            session.setdefault("constraints", []).append({
-                "id": f"c-framing-{panel_key}-{panel['framing_fail_count']}",
-                "source": "framing_guard",
-                "scope": panel_key,
-                "text": "negative: close-up, portrait, face focus",
-                "active": True,
-            })
+            add_constraint(
+                session,
+                id=f"c-framing-{panel_key}-{panel['framing_fail_count']}",
+                text="negative: close-up, portrait, face focus",
+                scope=panel_key,
+                source="framing_guard",
+            )
             # Guided repair: inject throughline place into must_show_resolved
             # and reinforce camera (compile uses CAMERA_FORCE_ADD + negatives).
             intent = panel.setdefault("intent", {})
@@ -537,13 +542,13 @@ def rate_sample(
             compile_all_panels(session)
             continue
         if chip in ("missing_prop", "小道具なし"):
-            session.setdefault("constraints", []).append({
-                "id": f"c-prop-{panel_key}",
-                "source": "user_comment",
-                "scope": panel_key,
-                "text": "emphasize signature_prop",
-                "active": True,
-            })
+            add_constraint(
+                session,
+                id=f"c-prop-{panel_key}",
+                text="emphasize signature_prop",
+                scope=panel_key,
+                source="user_comment",
+            )
             intent = panel.setdefault("intent", {})
             character = session.get("character") or {}
             sig = str(character.get("signature_prop") or "").strip()
@@ -562,13 +567,13 @@ def rate_sample(
             compile_all_panels(session)
             continue
         if chip in ("dead_expression", "表情死"):
-            session.setdefault("constraints", []).append({
-                "id": f"c-emo-{panel_key}",
-                "source": "user_comment",
-                "scope": panel_key,
-                "text": "face_visible_emotion",
-                "active": True,
-            })
+            add_constraint(
+                session,
+                id=f"c-emo-{panel_key}",
+                text="face_visible_emotion",
+                scope=panel_key,
+                source="user_comment",
+            )
             if panel.get("intent") is not None:
                 emo = str(panel["intent"].get("emotion") or "").strip()
                 if not emo or emo in ("serious", "expressionless", "blank"):
@@ -588,9 +593,9 @@ def rate_sample(
             character = session.get("character") or {}
             if character.get("gallery_spice"):
                 character["gallery_spice"] = []
-            for c in session.get("constraints") or []:
-                if c.get("text") == "face_visible_emotion" and c.get("scope") == panel_key:
-                    c["active"] = False
+            deactivate_constraints(
+                session, text="face_visible_emotion", scope=panel_key,
+            )
             compile_all_panels(session)
             append_timeline(
                 session, actor="system", type_="message",

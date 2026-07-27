@@ -180,11 +180,17 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
 
     if not g["G1"]["pass"]:
         topic_ok = bool(str(inputs.get("topic") or "").strip())
+        style_ok = bool(str(inputs.get("author_style") or "").strip())
+        needs = []
+        if not topic_ok:
+            needs.append("topic")
+        if not style_ok:
+            needs.append("author_style")
         return {
             "code": "generate_story",
             "label": "ストーリーを1本作る",
-            "enabled": topic_ok,
-            "needs": [] if topic_ok else ["topic"],
+            "enabled": topic_ok and style_ok,
+            "needs": needs,
         }
 
     if status in ("character", "story"):
@@ -210,8 +216,10 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
                 }
             return {
                 "code": "fix_framing_or_override",
-                "label": "構図を直す（再生成）/ 理由付きオーバーライド",
+                "label": "構図を直す（再生成 / 軽量workflow / オーバーライド）",
                 "enabled": True,
+                "suggest_workflow_switch": True,
+                "sample_steps": int((session.get("inputs") or {}).get("sample_steps") or 20),
             }
         if not g["G0_hard"]["pass"]:
             allow = bool(policy.get("allow_story_before_board", True))

@@ -106,7 +106,14 @@ def submit_sample_job(
 
     compiled = compile_panel_render(session, panel_key)
     seed = random.randint(0, (1 << 64) - 1)
-    base_sha = str((session.get("inputs") or {}).get("reference_image_id") or "")
+    inputs = session.get("inputs") or {}
+    base_sha = str(inputs.get("reference_image_id") or "")
+    steps_raw = inputs.get("sample_steps")
+    try:
+        steps = int(steps_raw) if steps_raw is not None else 20
+    except (TypeError, ValueError):
+        steps = 20
+    steps = max(8, min(40, steps))
     llm = _bound_llm(app, session)
     job_id = app.state.spooler.submit(
         JobLane.GENERATION,
@@ -126,7 +133,7 @@ def submit_sample_job(
         positive=compiled["positive"],
         negative=compiled["negative"],
         seed=seed,
-        steps=20,
+        steps=steps,
         base_sha256=base_sha,
         ollama=llm,
     )

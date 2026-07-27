@@ -80,7 +80,7 @@ def test_lint_and_compile_keeps_identity_and_prop_layers():
 
 
 def test_cta_story_before_board():
-    session = new_session_payload(topic="雨の日の書店")
+    session = new_session_payload(topic="雨の日の書店", author_style="静かな観察者の文体")
     session["character"]["identity_tags"] = ["1girl", "brown_hair"]
     session["character"]["identity_locked"] = True
     g = gates(session)
