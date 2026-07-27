@@ -60,6 +60,29 @@ def wipe_lookdev_state(session: dict[str, Any]) -> None:
     cross["finals_ready"] = False
 
 
+def reset_story_scope(session: dict[str, Any]) -> None:
+    """Drop everything a story was built on, so the next one starts clean.
+
+    Every path that invalidates the character (unlock, re-infer, preset apply)
+    must go through here — a partial wipe leaks the old run into the new one.
+    ``avoid_motifs`` in particular is fed to Storywright on every generate, so a
+    stale bank silently constrains a story about a different character.
+    """
+    session["story_bundle"] = {}
+    session["story_version"] = 0
+    session["story_history"] = []
+    session["last_lint"] = None
+    session["critic_report"] = None
+    session["avoid_motifs"] = []
+    session["recreate_constraints"] = []
+    session["preference_log"] = []
+    session["storybook_story_id"] = None
+    session["suggest_recreate"] = False
+    session["suggest_reinfer"] = False
+    session["status"] = "character"
+    wipe_lookdev_state(session)
+
+
 async def create_session_payload(**kwargs) -> dict[str, Any]:
     return new_session_payload(**kwargs)
 
@@ -95,15 +118,7 @@ def unlock_identity(session: dict[str, Any], *, confirm: bool = False) -> dict[s
     character["board_briefs"] = []
     character["lab_spice"] = []
     character["tag_diff"] = None
-    session["story_bundle"] = {}
-    session["story_version"] = 0
-    session["story_history"] = []
-    session["last_lint"] = None
-    session["critic_report"] = None
-    session["status"] = "character"
-    session["suggest_reinfer"] = False
-    session["suggest_recreate"] = False
-    wipe_lookdev_state(session)
+    reset_story_scope(session)
     append_timeline(
         session, actor="user", type_="unlock",
         text="identity unlocked — story invalidated; re-infer required",
@@ -202,6 +217,12 @@ async def infer_character(
     character["gallery_nn"] = None
     character["reference_mix"] = None
     character["lab_spice"] = []
+    # Preset-only fields: an LLM inference must not inherit the last preset's
+    # performance vocabulary.
+    character["expression_vocab"] = []
+    character["gesture_vocab"] = []
+    inputs["preset_id"] = ""
+    inputs["preset_key"] = ""
     base_identity = list(character.get("identity_tags") or [])
     # Invalidate story + look-dev if re-infer after a story existed
     had_story = int(session.get("story_version") or 0) > 0 or bool(session.get("story_bundle"))
@@ -209,12 +230,7 @@ async def infer_character(
         (p.get("sample") or {}).get("image_id") or (p.get("final") or {}).get("image_id")
         for p in (session.get("panels") or [])
     ):
-        session["story_bundle"] = {}
-        session["story_version"] = 0
-        session["last_lint"] = None
-        session["critic_report"] = None
-        session["status"] = "character"
-        wipe_lookdev_state(session)
+        reset_story_scope(session)
     append_timeline(
         session, actor="llm.personalitywright", type_="proposal",
         text=character.get("reasoning_ja") or "character inferred",
@@ -273,6 +289,58 @@ async def infer_character(
             session, actor="system", type_="message",
             text="topic/outfit warnings: " + "; ".join(w["problem"] for w in warns),
         )
+    return session
+
+
+def apply_preset(session: dict[str, Any], preset: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic character from a preset — no LLM.
+
+    Same invalidation rules as a re-infer: a locked identity must be unlocked
+    first, and any existing story/look-dev is dropped.
+    """
+    from .character.presets import personality_text_from_preset, preset_to_character
+    from .character.topic_fit import apply_topic_warnings
+
+    if (session.get("character") or {}).get("identity_locked"):
+        raise WeaveError(
+            "identity is locked — POST …/character/unlock with confirm=true first",
+            status_code=409,
+        )
+    if not preset:
+        raise WeaveError("preset not found", status_code=404)
+
+    fields = preset_to_character(preset)
+    if not fields.get("identity_tags"):
+        raise WeaveError("preset has no usable identity tags")
+
+    character = session.setdefault("character", {})
+    character.update(fields)
+    character["identity_locked"] = False
+    character["board"] = {"images": [], "accepted": False}
+    character["board_briefs"] = []
+    character["gallery_refs"] = []
+    character["gallery_spice"] = []
+    character["gallery_nn"] = None
+    character["reference_mix"] = None
+    character["lab_spice"] = []
+    character["tag_diff"] = None
+
+    inputs = session.setdefault("inputs", {})
+    inputs["preset_id"] = str(preset.get("_point_id") or "")
+    inputs["preset_key"] = str(preset.get("id") or "")
+    inputs["personality_text"] = personality_text_from_preset(
+        preset, locale=str(session.get("locale") or "ja"),
+    )
+    if preset.get("gender") and not str(inputs.get("gender_hint") or "").strip():
+        inputs["gender_hint"] = str(preset["gender"])
+
+    reset_story_scope(session)
+    append_timeline(
+        session, actor="user", type_="proposal",
+        text=f"preset applied: {(character.get('personality') or {}).get('preset_name') or ''}",
+        ref={"preset_key": inputs["preset_key"]},
+    )
+    apply_topic_warnings(session)
     return session
 
 

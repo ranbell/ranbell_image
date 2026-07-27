@@ -78,6 +78,14 @@ class FakeDb:
     async def get_config(self) -> dict:
         return {}
 
+    async def ensure_character_presets_collection(self) -> None:
+        self._qc.collections.setdefault("character_presets", {})
+
+    async def seed_presets(self) -> int:
+        from app.weave.character.presets import seed_presets_if_empty
+
+        return await seed_presets_if_empty(self, vector_dim=4)
+
     def stories(self) -> list[dict]:
         return list(self._qc.collections["stories"].values())
 
@@ -184,7 +192,9 @@ class FakeLLM:
 
     async def chat_text(self, prompt, *, model="", options=None, fmt=None, think=False, **kw):
         kind = self._kind(prompt)
-        self.calls.append({"kind": kind, "model": model, "options": options})
+        self.calls.append({
+            "kind": kind, "model": model, "options": options, "prompt": prompt,
+        })
         if kind == "personalitywright":
             return json.dumps(PERSONALITY_JSON, ensure_ascii=False)
         if kind == "critic":

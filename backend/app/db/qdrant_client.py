@@ -21,6 +21,7 @@ WD14_VOCAB_COLLECTION = "wd14_vocab"
 POSE_VOCAB_COLLECTION = "wd14_pose_vocab"
 SCENE_VOCAB_COLLECTION = "wd14_scene_vocab"
 AUTHORS_COLLECTION = "authors"
+CHARACTER_PRESETS_COLLECTION = "character_presets"
 STORIES_COLLECTION = "stories"
 WEAVE_SESSIONS_COLLECTION = "weave_sessions"
 
@@ -420,6 +421,14 @@ class QdrantDBClient:
             await seed_authors_if_empty(self, vector_dim=settings.embed_dim)
         except Exception as exc:
             logger.warning("authors seed failed: %s", exc)
+
+        # Weave character presets (same shape as authors: dummy embedding)
+        await self.ensure_character_presets_collection()
+        try:
+            from ..weave.character.presets import seed_presets_if_empty
+            await seed_presets_if_empty(self, vector_dim=settings.embed_dim)
+        except Exception as exc:
+            logger.warning("character presets seed failed: %s", exc)
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
@@ -1208,6 +1217,23 @@ class QdrantDBClient:
                 break
             offset = next_offset
         return docs
+
+    async def ensure_character_presets_collection(self) -> None:
+        """Weave character presets — dummy embedding, ids are uuid5 of preset key."""
+        if await self._qc.collection_exists(CHARACTER_PRESETS_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=CHARACTER_PRESETS_COLLECTION,
+            vectors_config={
+                "embedding": qm.VectorParams(
+                    size=settings.embed_dim,
+                    distance=qm.Distance.COSINE,
+                    on_disk=True,
+                ),
+            },
+            on_disk_payload=True,
+        )
+        logger.info("Created collection: %s", CHARACTER_PRESETS_COLLECTION)
 
     async def total_count(self) -> int:
         result = await self._qc.count(collection_name=IMAGES_COLLECTION, exact=True)

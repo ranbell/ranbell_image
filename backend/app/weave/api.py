@@ -165,6 +165,15 @@ async def weave_catalog(request: Request):
     return await build_chronicle_catalog(request.app)
 
 
+@router.get("/presets")
+async def weave_presets(request: Request):
+    """Character preset picker rows (summaries only — payloads stay server-side)."""
+    from .character.presets import list_presets
+
+    rows = await list_presets(request.app.state.db)
+    return {"presets": rows, "count": len(rows)}
+
+
 @router.post("/sessions")
 async def create_session(body: CreateSessionRequest, request: Request):
     from .character.authors import resolve_author_style
@@ -291,6 +300,26 @@ async def character_infer(session_id: str, body: InferRequest, request: Request)
         raise HTTPException(502, f"personalitywright failed: {e}") from e
     if body.story_model:
         session.setdefault("inputs", {})["story_model"] = body.story_model
+    return await _save(request, session_id, session)
+
+
+class ApplyPresetRequest(BaseModel):
+    preset_id: str
+
+
+@router.post("/sessions/{session_id}/character/preset")
+async def character_preset(session_id: str, body: ApplyPresetRequest, request: Request):
+    """Apply a character preset deterministically (no LLM call)."""
+    from .character.presets import get_preset
+
+    session = await _load(request, session_id)
+    preset = await get_preset(request.app.state.db, body.preset_id)
+    if not preset:
+        raise HTTPException(404, f"preset not found: {body.preset_id}")
+    try:
+        service.apply_preset(session, preset)
+    except service.WeaveError as e:
+        raise HTTPException(e.status_code, e.message) from e
     return await _save(request, session_id, session)
 
 

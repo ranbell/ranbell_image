@@ -281,6 +281,184 @@ def test_unknown_session_is_404():
     run(_run())
 
 
+def test_unlock_and_reinfer_leave_nothing_from_the_old_run():
+    """A new character must not inherit the previous one's story scope."""
+    async def _run():
+        llm = FakeLLM()
+        db = FakeDb()
+        app = build_app(llm=llm, db=db)
+        async with client_for(app) as client:
+            sid = (await _create(client))["session_id"]
+            await _lock_and_story(client, sid)
+
+            # Build up state that used to survive: avoid bank, history, ratings.
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/story/recreate", json={"chips": ["cliche"]},
+            )
+            assert r.status_code == 200, r.text
+            view = r.json()
+            assert view["avoid_motifs"]
+            assert view["story_history"]
+            assert view["recreate_constraints"]
+
+            r = await client.post(f"/api/weave/sessions/{sid}/lookdev")
+            assert r.status_code == 200, r.text
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/sample/rate",
+                json={"panel_key": "panel_1", "chips": ["good"]},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["preference_log"]
+
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/character/unlock", json={"confirm": True},
+            )
+            assert r.status_code == 200, r.text
+            r = await client.post(f"/api/weave/sessions/{sid}/character/infer", json={})
+            assert r.status_code == 200, r.text
+
+            view = r.json()
+            assert view["avoid_motifs"] == []
+            assert view["story_history"] == []
+            assert view["recreate_constraints"] == []
+            assert view["preference_log"] == []
+            assert view["story_bundle"] == {}
+            assert view["story_version"] == 0
+            assert view["storybook_story_id"] is None
+            assert view["status"] == "character"
+
+    run(_run())
+
+
+# ── Character presets ─────────────────────────────────────────────────────────
+def test_preset_applies_deterministically_without_an_llm():
+    async def _run():
+        from app.weave.character.presets import preset_point_id
+
+        llm = FakeLLM()
+        db = FakeDb()
+        await db.seed_presets()
+        app = build_app(llm=llm, db=db)
+        async with client_for(app) as client:
+            r = await client.get("/api/weave/presets")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["count"] == 100
+            row = next(p for p in body["presets"] if p["preset_key"] == "shy_bookworm")
+            assert row["name"] == "Quiet Reader"
+            assert row["name_ja"]
+            assert row["summary_ja"]
+
+            sid = (await _create(client))["session_id"]
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/character/preset",
+                json={"preset_id": preset_point_id("shy_bookworm")},
+            )
+            assert r.status_code == 200, r.text
+            view = r.json()
+            ch = view["character"]
+            assert ch["source"] == "preset"
+            assert "1girl" in ch["identity_tags"]
+            assert "black_hair" in ch["identity_tags"]
+            assert ch["signature_prop"] == "book"
+            assert "book" in ch["prop_tags"]
+            # Per-panel performance stays out of identity.
+            assert "blush" not in ch["identity_tags"]
+            assert "blush" in ch["expression_vocab"]
+            assert "holding_book" in ch["gesture_vocab"]
+            assert ch["personality"]["inner"] and ch["personality"]["inner_ja"]
+            # Applying a preset costs zero LLM calls.
+            assert llm.calls == []
+            # The picker fills what the CTA gate needs.
+            assert view["inputs"]["personality_text"]
+            assert view["next_cta"]["code"] == "lock_identity"
+
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/character/preset", json={"preset_id": "nope"},
+            )
+            assert r.status_code == 404
+
+            # Re-inferring with the LLM must not inherit the preset's vocabulary.
+            r = await client.post(f"/api/weave/sessions/{sid}/character/infer", json={})
+            assert r.status_code == 200, r.text
+            view = r.json()
+            assert view["character"]["source"] == "personality"
+            assert view["character"]["expression_vocab"] == []
+            assert view["character"]["gesture_vocab"] == []
+            assert view["inputs"]["preset_key"] == ""
+
+    run(_run())
+
+
+def test_preset_invalidates_the_story_and_respects_the_lock():
+    async def _run():
+        from app.weave.character.presets import preset_point_id
+
+        db = FakeDb()
+        await db.seed_presets()
+        app = build_app(db=db)
+        async with client_for(app) as client:
+            sid = (await _create(client))["session_id"]
+            await _lock_and_story(client, sid)
+
+            # Locked identity: preset apply is refused like a re-infer.
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/character/preset",
+                json={"preset_id": preset_point_id("cool_senpai")},
+            )
+            assert r.status_code == 409
+
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/character/unlock", json={"confirm": True},
+            )
+            assert r.status_code == 200, r.text
+            r = await client.post(
+                f"/api/weave/sessions/{sid}/character/preset",
+                json={"preset_id": preset_point_id("cool_senpai")},
+            )
+            assert r.status_code == 200, r.text
+            view = r.json()
+            assert view["character"]["personality"]["preset_key"] == "cool_senpai"
+            assert view["story_bundle"] == {}
+            assert view["story_version"] == 0
+            assert view["status"] == "character"
+            assert view["character"]["identity_locked"] is False
+
+    run(_run())
+
+
+def test_preset_feeds_the_story_prompt():
+    """Inner life and vocabulary reach Storywright — the point of the presets."""
+    async def _run():
+        from app.weave.character.presets import preset_point_id
+
+        llm = FakeLLM()
+        db = FakeDb()
+        await db.seed_presets()
+        app = build_app(llm=llm, db=db)
+        async with client_for(app) as client:
+            sid = (await _create(client))["session_id"]
+            await client.post(
+                f"/api/weave/sessions/{sid}/character/preset",
+                json={"preset_id": preset_point_id("shy_bookworm")},
+            )
+            await client.post(f"/api/weave/sessions/{sid}/character/lock")
+            r = await client.post(f"/api/weave/sessions/{sid}/story/generate", json={})
+            assert r.status_code == 200, r.text
+
+            prompt = next(c for c in llm.calls if c["kind"] == "storywright")["prompt"]
+            for needle in (
+                "notices far more than she says",   # inner
+                "secondhand books",                 # likes
+                "holding_book",                     # gesture_vocab
+                "blush",                            # expression_vocab
+                "afternoon sunbeam",                # vibe_keywords
+            ):
+                assert needle in prompt, needle
+
+    run(_run())
+
+
 # ── Guard rails ───────────────────────────────────────────────────────────────
 def test_locked_identity_blocks_reinfer_until_confirmed_unlock():
     async def _run():

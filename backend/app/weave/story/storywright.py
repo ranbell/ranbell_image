@@ -27,7 +27,13 @@ def build_story_prompt(
     user = {
         "topic": topic,
         "author_style": author_style,
+        "personality_summary": personality.get("summary") or personality.get("summary_ja") or "",
         "personality_summary_ja": personality.get("summary_ja") or "",
+        "traits": list(personality.get("traits") or [])[:8],
+        # What the character wants / hides — the hook for a non-generic conflict.
+        "inner": list(personality.get("inner") or [])[:4],
+        "likes": list(personality.get("likes") or [])[:6],
+        "dislikes": list(personality.get("dislikes") or [])[:6],
         # Continuity only — do NOT invent appearance in narratives (HARD RULE 4).
         "identity_tags": list(character.get("identity_tags") or [])[:16],
         "signature_prop": character.get("signature_prop") or "",
@@ -35,6 +41,11 @@ def build_story_prompt(
         "do_not": character.get("do_not") or [],
         "age_band": personality.get("age_band") or "",
         "occupation_hint": personality.get("occupation") or personality.get("occupation_hint") or "",
+        # Per-panel performance vocabulary owned by this character.
+        "expression_vocab": list(character.get("expression_vocab") or [])[:8],
+        "gesture_vocab": list(character.get("gesture_vocab") or [])[:8],
+        "outfit_style": personality.get("outfit_style") or "",
+        "vibe_keywords": list(personality.get("vibe_keywords") or [])[:6],
         "avoid_motifs": avoid_motifs or [],
         "recreate_constraints": recreate_constraints or [],
         "previous_causality_one_liner": previous_causality or "",

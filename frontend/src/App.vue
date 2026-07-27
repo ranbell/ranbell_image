@@ -2583,15 +2583,11 @@ function openWeave(img = null) {
   showStorybook.value = false
   // Dismiss gallery detail so it cannot cover Weave.
   selected.value = null
-  // Force a new object so WeavePanel watch fires even for the same sha.
-  weaveBase.value = base?.sha256 ? { ...base, sha256: base.sha256 } : base
-  // If already "open" but the Teleport blanked, bounce false→true to remount.
-  if (showWeave.value) {
-    showWeave.value = false
-    nextTick(() => { showWeave.value = true })
-  } else {
-    showWeave.value = true
-  }
+  // WeavePanel watches baseImage.sha256 and asks before abandoning a session
+  // woven from a different image. It is not v-if'd away, so it keeps its state
+  // across open/close — do not bounce `show` expecting a remount.
+  weaveBase.value = base
+  showWeave.value = true
 }
 
 function openStorybook() {

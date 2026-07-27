@@ -18,6 +18,13 @@ Output JSON only — no markdown fences, no prose, no candidate arrays.
 8. causality_one_liner: one sentence chaining panel1→2→3.
 9. Obey recreate_constraints as imperative instructions when present.
 10. author_style affects narrative voice only.
+11. Ground world.core_conflict in this character: tie it to one entry of
+    inner / likes / dislikes. A conflict that would fit any character is wrong.
+12. When expression_vocab / gesture_vocab are given, each panel's emotion and
+    gesture must come from those lists — this character performs with her own
+    repertoire, not generic anime faces.
+13. vibe_keywords and outfit_style are hints for choosing the place; they are
+    never copied into narrative_ja / visible_change.
 
 # OUTPUT SCHEMA
 {

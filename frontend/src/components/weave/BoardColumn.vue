@@ -3,6 +3,8 @@ import { useI18n } from 'vue-i18n'
 
 defineProps({
   personalityText: String,
+  presets: { type: Array, default: () => [] },
+  presetId: { type: String, default: '' },
   useGalleryNn: Boolean,
   useVlmAssist: Boolean,
   useSpicer: Boolean,
@@ -21,6 +23,7 @@ defineProps({
 })
 const emit = defineEmits([
   'update:personalityText',
+  'apply-preset',
   'update:useGalleryNn',
   'update:useVlmAssist',
   'update:useSpicer',
@@ -28,11 +31,34 @@ const emit = defineEmits([
   'update:multiSeed',
   'reinfer',
 ])
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+// Presets carry both languages; show the one the UI is running in.
+function presetLabel(p) {
+  return (String(locale.value).startsWith('ja') ? p.name_ja : p.name) || p.name || ''
+}
+function presetSummary(p) {
+  return (String(locale.value).startsWith('ja') ? p.summary_ja : p.summary) || p.summary || ''
+}
 </script>
 
 <template>
   <aside class="border-r border-gray-800 p-3 space-y-3 overflow-y-auto">
+    <label class="block text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.preset') }}</label>
+    <select
+      :value="presetId"
+      :disabled="busy"
+      class="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs disabled:opacity-40"
+      @change="emit('apply-preset', $event.target.value)"
+    >
+      <option value="">{{ t('weave.presetNone') }}</option>
+      <option v-for="p in presets" :key="p.id" :value="p.id">{{ presetLabel(p) }}</option>
+    </select>
+    <p v-if="presets.find(p => p.id === presetId)" class="text-[10px] text-gray-500 leading-snug">
+      {{ presetSummary(presets.find(p => p.id === presetId)) }}
+    </p>
+    <p v-else class="text-[10px] text-gray-500 leading-snug">{{ t('weave.presetHint') }}</p>
+
     <label class="block text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.personality') }}</label>
     <textarea
       :value="personalityText"

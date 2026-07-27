@@ -26,6 +26,8 @@ const topic = ref('')
 const authorStyle = ref('')
 const authorId = ref('')
 const authors = ref([])
+const presets = ref([])
+const presetId = ref('')
 const storyModel = ref('')
 const vlmModel = ref('')
 const llmProvider = ref('ollama')
@@ -42,18 +44,40 @@ const multiSeed = ref(1)
 const ageBand = ref('')
 const genderHint = ref('')
 const occupationHint = ref('')
-const framingDialog = ref({
-  show: false,
-  panelKey: '',
-  fails: 0,
-  limit: 2,
-})
+const emptyFramingDialog = () => ({ show: false, panelKey: '', fails: 0, limit: 2 })
+const framingDialog = ref(emptyFramingDialog())
 const selectedPanelKey = ref('panel_1')
 const editingNarrative = ref('')
 const pollTimer = ref(null)
 const trackedJobs = ref([]) // {job_id, kind, slot?, panel_key?}
 const eventSource = ref(null)
 const streamLive = ref(false)
+
+// Every ref belonging to ONE weave run. resetLocal() clears exactly this list,
+// so a new field is cleared by adding it here and nowhere else. Environment
+// settings (models / workflow / catalogs / gallery+VLM prefs) are deliberately
+// absent — they survive a reset on purpose.
+const SESSION_SCOPED_REFS = [
+  [session, () => null],
+  [errorMsg, () => ''],
+  [personalityText, () => ''],
+  [topic, () => ''],
+  [authorStyle, () => ''],
+  [authorId, () => ''],
+  [presetId, () => ''],
+  [ageBand, () => ''],
+  [genderHint, () => ''],
+  [occupationHint, () => ''],
+  [recreateChips, () => []],
+  [trackedJobs, () => []],
+  [framingDialog, emptyFramingDialog],
+  [selectedPanelKey, () => 'panel_1'],
+  [editingNarrative, () => ''],
+  [useStrictSeal, () => false],
+  [useSpicer, () => false],
+  [useMoodSlot, () => false],
+  [multiSeed, () => 1],
+]
 const RECREATE_OPTIONS = [
   { id: 'weak_plot', labelKey: 'weave.chip.weakPlot' },
   { id: 'too_dark', labelKey: 'weave.chip.tooDark' },
@@ -119,6 +143,13 @@ const weaveScore = computed(() =>
 )
 const vlmAnswers = computed(() => selectedPanel.value?.qa?.vlm || null)
 const crossQa = computed(() => session.value?.cross_panel_qa || {})
+const baseImageSha = computed(() => props.baseImage?.sha256 || '')
+// The panel is showing a session woven from a different image than the one the
+// gallery currently points at — the user declined to start over.
+const staleBaseImage = computed(() => {
+  const woven = session.value?.inputs?.reference_image_id || ''
+  return !!(woven && baseImageSha.value && woven !== baseImageSha.value)
+})
 
 function thumb(sha) {
   if (!sha || String(sha).startsWith('pending') || String(sha).startsWith('placeholder')) return ''
@@ -153,6 +184,37 @@ async function loadCatalog() {
     if (!workflow.value && suggested.workflow_name) workflow.value = suggested.workflow_name
   } catch (e) {
     console.warn('[Weave] catalog', e)
+  }
+  try {
+    // Separate from the catalog: the picker rows are 100 entries of their own.
+    const res = await api('/api/weave/presets')
+    presets.value = res?.presets || []
+  } catch (e) {
+    console.warn('[Weave] presets', e)
+  }
+}
+
+async function applyPreset(id) {
+  presetId.value = id
+  if (!id) return
+  errorMsg.value = ''
+  busy.value = true
+  try {
+    await ensureSession()
+    session.value = await api(
+      `/api/weave/sessions/${sessionId.value}/character/preset`,
+      { method: 'POST', body: JSON.stringify({ preset_id: id }) },
+    )
+    // Mirror the server's brief locally so the CTA gate is satisfied.
+    if (session.value?.inputs?.personality_text) {
+      personalityText.value = session.value.inputs.personality_text
+    }
+  } catch (e) {
+    presetId.value = ''
+    errorMsg.value = String(e.message || e)
+    emit('toast', { msg: errorMsg.value, type: 'error' })
+  } finally {
+    busy.value = false
   }
 }
 
@@ -661,15 +723,33 @@ function close() {
 
 function resetLocal() {
   closeStream()
-  session.value = null
-  errorMsg.value = ''
-  trackedJobs.value = []
-  recreateChips.value = []
-  // useGalleryNn preference is kept across reset
+  if (pollTimer.value) {
+    clearInterval(pollTimer.value)
+    pollTimer.value = null
+  }
+  for (const [target, make] of SESSION_SCOPED_REFS) target.value = make()
 }
+
+// Opening Weave from a different gallery image must not silently keep weaving
+// from the old one: the session already carries reference_image_id.
+watch(baseImageSha, (sha, prev) => {
+  if (!sha || sha === prev) return
+  const woven = session.value?.inputs?.reference_image_id || ''
+  if (!woven || woven === sha) return
+  if (window.confirm(t('weave.newBaseConfirm'))) resetLocal()
+})
 
 watch(session, (s) => {
   if (!s) return
+  // Resume: fill blanks from the server so a reopened session does not show an
+  // empty form (runAction PATCHes these back on every action).
+  if (!topic.value && s?.inputs?.topic) topic.value = s.inputs.topic
+  if (!personalityText.value && s?.inputs?.personality_text) {
+    personalityText.value = s.inputs.personality_text
+  }
+  if (!authorStyle.value && s?.inputs?.author_style) authorStyle.value = s.inputs.author_style
+  if (!authorId.value && s?.inputs?.author_id) authorId.value = s.inputs.author_id
+  if (!presetId.value && s?.inputs?.preset_id) presetId.value = s.inputs.preset_id
   const flag = s?.quality_policy?.gallery_nn ?? s?.inputs?.use_gallery_nn
   if (typeof flag === 'boolean') useGalleryNn.value = flag
   if (typeof s?.quality_policy?.vlm_assist === 'boolean') useVlmAssist.value = s.quality_policy.vlm_assist
@@ -725,6 +805,9 @@ onUnmounted(() => {
       <div class="flex items-center gap-3 border-b border-teal-900/50 px-4 py-3">
         <h2 class="text-sm font-semibold tracking-wide text-teal-200">{{ t('weave.title') }}</h2>
         <span v-if="session?.status" class="rounded bg-teal-950 px-2 py-0.5 text-[10px] text-teal-300/90">{{ session.status }}</span>
+        <span v-if="staleBaseImage"
+          class="rounded bg-amber-950 px-2 py-0.5 text-[10px] text-amber-300"
+          :title="t('weave.staleBaseImageHint')">{{ t('weave.staleBaseImage') }}</span>
         <span v-if="comfyOffline" class="text-[10px] text-amber-400">{{ t('weave.comfyOffline') }}</span>
         <div class="flex-1" />
         <button class="text-xs text-gray-400 hover:text-white" @click="resetLocal">{{ t('weave.reset') }}</button>
@@ -734,6 +817,9 @@ onUnmounted(() => {
       <div class="grid min-h-0 flex-1 grid-cols-1 gap-0 md:grid-cols-[240px_1fr_280px]">
         <BoardColumn
           v-model:personality-text="personalityText"
+          :presets="presets"
+          :preset-id="presetId"
+          @apply-preset="applyPreset"
           v-model:use-gallery-nn="useGalleryNn"
           v-model:use-vlm-assist="useVlmAssist"
           v-model:use-spicer="useSpicer"
