@@ -716,14 +716,16 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 
 | マイルストーン | 状態 |
 |----------------|------|
-| M0 セッション / CTA / G0-soft·hard | **済** `backend/app/weave/` |
+| M0 セッション / CTA / G0-soft·hard | **済** |
 | M1 類推 + Story 先行 + board キュー | **済**（Comfy `run_weave_image_generate`） |
-| M2 must_show / Recreate / rollback / compile | **済** |
-| M3 sample Comfy + rate/override | **済** |
-| M4 render_final Comfy + Seal | **済**（Storybook 投影は未） |
-| UI WeavePanel | **済**（Chronicle 併存） |
-| 旧 Chronicle 撤去 | 未 |
+| M2 must_show / Repairer×1 / Recreate / rollback / G1=lint | **済**（rollback UI・typo PATCH は薄い） |
+| M3 sample + framing heuristics + rate/override | **済**（VLM/WeaveScore は未） |
+| M4 render_final + Seal rubric (G6) | **済**（Storybook 投影・export/stream は未） |
+| M5 旧 Chronicle 撤去 | **済** |
+| ギャラリー近傍 `gallery_nn`（opt-in） | **済**（既定オフ） |
+| 参照髪・目ミックス + lock 前タグ差分 | **済** |
+| UI WeavePanel | **済**（分割コンポーネントは未） |
 
 API: `/api/weave/sessions...`  
 UI: ヘッダー「Weave」→ `WeavePanel.vue`  
-テスト: `tests/weave/`（11+）
+テスト: `tests/weave/`
