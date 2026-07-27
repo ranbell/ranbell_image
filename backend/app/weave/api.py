@@ -104,6 +104,15 @@ async def _load(request: Request, session_id: str) -> dict[str, Any]:
 async def _save(request: Request, session_id: str, session: dict) -> dict:
     await session_db.save_session(request.app.state.db, session_id, session)
     session["session_id"] = session_id
+    try:
+        from .events import publish
+
+        publish(session_id, {
+            "type": "session_updated",
+            "status": session.get("status"),
+        })
+    except Exception:
+        logger.debug("weave SSE publish failed", exc_info=True)
     return service.public_view(session)
 
 
@@ -463,6 +472,77 @@ async def sample_reeval_framing(session_id: str, request: Request):
     session = await _load(request, session_id)
     await service.reeval_framing(session, request.app.state.db)
     return await _save(request, session_id, session)
+
+
+class VlmAssistRequest(BaseModel):
+    panel_key: str = "panel_1"
+    force_heuristic: bool = False
+    vlm_model: str = ""
+
+
+@router.post("/sessions/{session_id}/sample/vlm-assist")
+async def sample_vlm_assist(
+    session_id: str, body: VlmAssistRequest, request: Request,
+):
+    """Fixed 4-question VLM assist (or WD14 heuristic) on a sample panel."""
+    session = await _load(request, session_id)
+    if body.vlm_model:
+        session.setdefault("inputs", {})["vlm_model"] = body.vlm_model
+    try:
+        result = await service.run_panel_vlm_assist(
+            session,
+            panel_key=body.panel_key,
+            db=request.app.state.db,
+            ollama=_ollama(request),
+            force_heuristic=body.force_heuristic,
+        )
+    except service.WeaveError as e:
+        raise HTTPException(e.status_code, e.message) from e
+    view = await _save(request, session_id, session)
+    view["vlm_assist"] = result
+    return view
+
+
+@router.post("/sessions/{session_id}/score")
+async def recompute_score(session_id: str, request: Request):
+    """Recompute WeaveScore (rules) for the session."""
+    session = await _load(request, session_id)
+    score = service.recompute_scores(session)
+    view = await _save(request, session_id, session)
+    view["weave_score"] = score
+    return view
+
+
+@router.get("/sessions/{session_id}/stream")
+async def stream_session(session_id: str, request: Request):
+    """SSE: session updates (render_attached / session_updated) + pings."""
+    from ..jobs.sse_stream import sse_response
+    from .events import publish, subscribe, unsubscribe
+
+    # Ensure session exists
+    await _load(request, session_id)
+    queue = await subscribe(session_id)
+    # Immediate hello so clients know the stream is live
+    publish(session_id, {"type": "hello", "status": "connected"})
+
+    async def _agen():
+        import asyncio
+        import json
+
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+        finally:
+            await unsubscribe(session_id, queue)
+
+    return sse_response(_agen())
 
 
 @router.get("/sessions/{session_id}/export")

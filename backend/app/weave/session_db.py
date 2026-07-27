@@ -97,9 +97,16 @@ async def attach_render_result(
             panel[bucket] = prev
             if kind == "sample":
                 from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
+                from .verify.score import apply_weave_scores
+                from .verify.vlm_assist import apply_heuristic_vlm
+                from .verify.cross_panel import refresh_cross_panel_qa
 
                 wd14 = await resolve_wd14_for_image(db, image_id)
                 apply_framing_to_panel(panel, wd14)
+                # Sync heuristic VLM (fixed 4Q). Full VLM is on-demand via API.
+                apply_heuristic_vlm(panel, session, wd14)
+                apply_weave_scores(session)
+                refresh_cross_panel_qa(session)
             break
         if kind == "final":
             finals = [
@@ -113,6 +120,17 @@ async def attach_render_result(
             if ready:
                 # Finals done → back to lookdev so CTA can offer Seal.
                 session["status"] = "lookdev"
-                session.setdefault("cross_panel_qa", {})["ready_for_final"] = True
                 session.setdefault("cross_panel_qa", {})["finals_ready"] = True
+                session.setdefault("cross_panel_qa", {})["ready_for_final"] = True
     await save_session(db, session_id, session)
+    try:
+        from .events import publish
+
+        publish(session_id, {
+            "type": "render_attached",
+            "kind": kind,
+            "target": target,
+            "image_id": image_id,
+        })
+    except Exception:
+        logger.debug("weave SSE publish failed", exc_info=True)

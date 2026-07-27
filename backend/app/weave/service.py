@@ -597,6 +597,9 @@ def override_framing(
 
 def mark_sample_placeholder(session: dict[str, Any], panel_key: str) -> dict[str, Any]:
     """M3 stub: mark a panel as sampled without Comfy (for CTA/gate testing)."""
+    from .verify.cross_panel import refresh_cross_panel_qa
+    from .verify.score import apply_weave_scores
+
     panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
     if not panel:
         raise WeaveError(f"unknown panel {panel_key}")
@@ -607,6 +610,8 @@ def mark_sample_placeholder(session: dict[str, Any], panel_key: str) -> dict[str
     }
     if (panel.get("intent") or {}).get("camera") == "long_shot":
         panel.setdefault("qa", {})["framing"] = "pass"
+    apply_weave_scores(session)
+    refresh_cross_panel_qa(session)
     append_timeline(
         session, actor="system", type_="sample",
         text=f"placeholder sample {panel_key}",
@@ -614,9 +619,26 @@ def mark_sample_placeholder(session: dict[str, Any], panel_key: str) -> dict[str
     return session
 
 
+def recompute_scores(session: dict[str, Any]) -> dict[str, Any]:
+    """Recompute WeaveScore + cross-panel QA (rules only)."""
+    from .verify.cross_panel import refresh_cross_panel_qa
+    from .verify.score import apply_weave_scores
+
+    score = apply_weave_scores(session)
+    refresh_cross_panel_qa(session)
+    append_timeline(
+        session, actor="system", type_="message",
+        text=f"weave_score overall={score.get('overall')}",
+    )
+    return score
+
+
 async def reeval_framing(session: dict[str, Any], db) -> dict[str, Any]:
     """Re-read WD14 for long_shot samples whose framing is unknown/pending."""
     from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
+    from .verify.cross_panel import refresh_cross_panel_qa
+    from .verify.score import apply_weave_scores
+    from .verify.vlm_assist import apply_heuristic_vlm
 
     updated = 0
     for panel in session.get("panels") or []:
@@ -631,12 +653,45 @@ async def reeval_framing(session: dict[str, Any], db) -> dict[str, Any]:
             continue
         wd14 = await resolve_wd14_for_image(db, iid)
         apply_framing_to_panel(panel, wd14)
+        apply_heuristic_vlm(panel, session, wd14)
         updated += 1
+    apply_weave_scores(session)
+    refresh_cross_panel_qa(session)
     append_timeline(
         session, actor="system", type_="message",
         text=f"framing re-evaluated on {updated} panel(s)",
     )
     return session
+
+
+async def run_panel_vlm_assist(
+    session: dict[str, Any],
+    *,
+    panel_key: str,
+    db,
+    ollama=None,
+    force_heuristic: bool = False,
+) -> dict[str, Any]:
+    """Run fixed-4Q VLM (or heuristic) on one sample panel."""
+    from .verify.cross_panel import refresh_cross_panel_qa
+    from .verify.score import apply_weave_scores
+    from .verify.vlm_assist import apply_vlm_assist_to_panel
+
+    panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
+    if not panel:
+        raise WeaveError(f"unknown panel {panel_key}")
+    if not (panel.get("sample") or {}).get("image_id"):
+        raise WeaveError("panel has no sample image")
+    result = await apply_vlm_assist_to_panel(
+        panel, session, db=db, ollama=ollama, force_heuristic=force_heuristic,
+    )
+    apply_weave_scores(session)
+    refresh_cross_panel_qa(session)
+    append_timeline(
+        session, actor="system", type_="message",
+        text=f"vlm_assist {panel_key} method={result.get('method')}",
+    )
+    return result
 
 
 async def project_to_storybook(session: dict[str, Any], db) -> str:

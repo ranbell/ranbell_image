@@ -719,12 +719,13 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 | M0 セッション / CTA / G0-soft·hard | **済** |
 | M1 類推 + Story 先行 + board キュー | **済**（Comfy `run_weave_image_generate`） |
 | M2 must_show / Repairer×1 / Critic / Recreate / rollback / typo PATCH | **済** |
-| M3 sample + framing heuristics + rate/override | **済**（WD14 同期評価・unknown≠pass。VLM/WeaveScore は未） |
-| M4 render_final + Seal rubric (G6) | **済**（finals×3 必須・Storybook 投影・`GET …/export`。SSE は未） |
+| M3 sample + framing heuristics + rate/override | **済**（WD14 同期評価・unknown≠pass。VLM/WeaveScore **済**） |
+| M4 render_final + Seal rubric (G6) | **済**（finals×3 必須・Storybook 投影・`GET …/export`。SSE **済**） |
 | M5 旧 Chronicle 撤去 | **済** |
 | ギャラリー近傍 `gallery_nn`（opt-in） | **済**（既定オフ） |
 | 参照髪・目ミックス + lock 前タグ差分 | **済** |
-| UI WeavePanel | **済**（分割コンポーネントは未） |
+| UI WeavePanel | **済**（Score / VLM 4問 / SSE。分割コンポーネントは未） |
+| M6 VLM 固定4問 + WeaveScore + session SSE | **済**（`vlm_assist` / `POST …/score` / `GET …/stream`） |
 
 API: `/api/weave/sessions...`  
 UI: ヘッダー「Weave」→ `WeavePanel.vue`  

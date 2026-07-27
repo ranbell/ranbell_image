@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getToken } from '../apiToken.js'
 
 const props = defineProps({
   show: Boolean,
@@ -30,7 +31,8 @@ const selectedPanelKey = ref('panel_1')
 const editingNarrative = ref('')
 const pollTimer = ref(null)
 const trackedJobs = ref([]) // {job_id, kind, slot?, panel_key?}
-
+const eventSource = ref(null)
+const streamLive = ref(false)
 const RECREATE_OPTIONS = [
   { id: 'weak_plot', labelKey: 'weave.chip.weakPlot' },
   { id: 'too_dark', labelKey: 'weave.chip.tooDark' },
@@ -75,6 +77,13 @@ const selectedPanel = computed(() =>
 )
 const compileLayers = computed(() => selectedPanel.value?.compile?.layers || null)
 const sessionId = computed(() => session.value?.session_id || '')
+const weaveScore = computed(() =>
+  session.value?.cross_panel_qa?.weave_score
+  || selectedPanel.value?.qa?.weave_score
+  || null
+)
+const vlmAnswers = computed(() => selectedPanel.value?.qa?.vlm || null)
+const crossQa = computed(() => session.value?.cross_panel_qa || {})
 
 function thumb(sha) {
   if (!sha || String(sha).startsWith('pending') || String(sha).startsWith('placeholder')) return ''
@@ -134,12 +143,45 @@ async function ensureSession() {
   }
   session.value = await api('/api/weave/sessions', { method: 'POST', body: JSON.stringify(body) })
   if (session.value?.inputs?.author_style) authorStyle.value = session.value.inputs.author_style
+  if (session.value?.session_id) connectStream(session.value.session_id)
   return session.value
 }
 
 async function refreshSession() {
   if (!sessionId.value) return
   session.value = await api(`/api/weave/sessions/${sessionId.value}`)
+}
+
+function closeStream() {
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
+  streamLive.value = false
+}
+
+function connectStream(id) {
+  if (!id) return
+  if (eventSource.value) {
+    const url = eventSource.value.url || ''
+    if (url.includes(id)) return
+    closeStream()
+  }
+  const es = new EventSource(
+    `/api/weave/sessions/${id}/stream?token=${encodeURIComponent(getToken())}`,
+  )
+  eventSource.value = es
+  es.onopen = () => { streamLive.value = true }
+  es.onmessage = async (e) => {
+    try {
+      const evt = JSON.parse(e.data)
+      if (!evt?.type || evt.type === 'hello' || evt.type === 'ping') return
+      await refreshSession()
+    } catch (err) {
+      console.debug('[Weave] stream event', err)
+    }
+  }
+  es.onerror = () => { streamLive.value = false }
 }
 
 function trackJobs(jobs) {
@@ -154,9 +196,10 @@ function trackJobs(jobs) {
 }
 
 function startPoll() {
+  // Prefer SSE; keep light poll as fallback when jobs are tracked
   if (pollTimer.value) return
   pollTimer.value = setInterval(async () => {
-    if (!propsJobs.value.length || !props.getJobsMap) return
+    if (!trackedJobs.value.length || !props.getJobsMap) return
     const map = props.getJobsMap()
     let changed = false
     const still = []
@@ -175,7 +218,7 @@ function startPoll() {
       clearInterval(pollTimer.value)
       pollTimer.value = null
     }
-  }, 1500)
+  }, 2000)
 }
 
 async function runAction(code) {
@@ -376,6 +419,38 @@ async function seal() {
   }
 }
 
+async function recomputeScore() {
+  if (!sessionId.value) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/weave/sessions/${sessionId.value}/score`, { method: 'POST' })
+  } catch (e) {
+    emit('toast', { msg: String(e.message || e), type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
+async function runVlmAssist(forceHeuristic = false) {
+  if (!sessionId.value || !selectedPanel.value) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/weave/sessions/${sessionId.value}/sample/vlm-assist`, {
+      method: 'POST',
+      body: JSON.stringify({
+        panel_key: selectedPanel.value.key,
+        force_heuristic: forceHeuristic,
+        vlm_model: storyModel.value,
+      }),
+    })
+  } catch (e) {
+    emit('toast', { msg: String(e.message || e), type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
+
 async function rollbackTo(version) {
   if (!sessionId.value) return
   if (!window.confirm(t('weave.rollbackConfirm', { v: version }))) return
@@ -455,10 +530,12 @@ watch(selectedPanel, (p) => {
 }, { immediate: true })
 
 function close() {
+  closeStream()
   emit('update:show', false)
 }
 
 function resetLocal() {
+  closeStream()
   session.value = null
   errorMsg.value = ''
   trackedJobs.value = []
@@ -470,15 +547,15 @@ watch(session, (s) => {
   if (!s) return
   const flag = s?.quality_policy?.gallery_nn ?? s?.inputs?.use_gallery_nn
   if (typeof flag === 'boolean') useGalleryNn.value = flag
+  if (s.session_id) connectStream(s.session_id)
 })
 
 watch(() => props.show, async (v) => {
   if (v) {
     await loadCatalog()
-    if (props.baseImage?.sha256 && !session.value) {
-      // keep reference for new session
-    }
+    if (sessionId.value) connectStream(sessionId.value)
   } else {
+    closeStream()
     if (pollTimer.value) {
       clearInterval(pollTimer.value)
       pollTimer.value = null
@@ -487,6 +564,7 @@ watch(() => props.show, async (v) => {
 })
 
 onUnmounted(() => {
+  closeStream()
   if (pollTimer.value) clearInterval(pollTimer.value)
 })
 </script>
@@ -719,6 +797,48 @@ onUnmounted(() => {
                 <span v-if="!(tags || []).length" class="text-[9px] text-gray-600">—</span>
               </div>
             </div>
+
+            <div class="rounded border border-gray-800/80 bg-gray-950/40 p-2 space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-[10px] uppercase text-teal-500/80">{{ t('weave.score') }}</div>
+                <button class="text-[10px] text-teal-300 disabled:opacity-40" :disabled="busy || !sessionId"
+                  @click="recomputeScore">{{ t('weave.scoreRefresh') }}</button>
+              </div>
+              <div v-if="weaveScore" class="space-y-1">
+                <div class="text-sm text-teal-100">
+                  {{ t('weave.scoreOverall') }}:
+                  <span class="font-mono">{{ Number(weaveScore.overall ?? weaveScore.session_overall ?? 0).toFixed(2) }}</span>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                  <span v-for="(v, k) in (weaveScore.dimensions || {})" :key="k"
+                    class="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-300">
+                    {{ k }} {{ typeof v === 'number' ? v.toFixed(2) : v }}
+                  </span>
+                </div>
+              </div>
+              <p v-else class="text-[10px] text-gray-600">{{ t('weave.scoreEmpty') }}</p>
+
+              <div class="flex items-center justify-between gap-2 pt-1">
+                <div class="text-[10px] uppercase text-cyan-500/80">{{ t('weave.vlm') }}</div>
+                <div class="flex gap-2">
+                  <button class="text-[10px] text-cyan-300 disabled:opacity-40" :disabled="busy || !selectedPanel?.sample?.image_id"
+                    @click="runVlmAssist(false)">{{ t('weave.vlmRun') }}</button>
+                  <button class="text-[10px] text-gray-400 disabled:opacity-40" :disabled="busy || !selectedPanel?.sample?.image_id"
+                    @click="runVlmAssist(true)">{{ t('weave.vlmHeuristic') }}</button>
+                </div>
+              </div>
+              <div v-if="vlmAnswers?.answers" class="grid grid-cols-2 gap-1">
+                <div v-for="(v, k) in vlmAnswers.answers" :key="k"
+                  class="rounded px-1.5 py-1 text-[10px]"
+                  :class="v === true ? 'bg-teal-950/60 text-teal-200' : v === false ? 'bg-amber-950/50 text-amber-200' : 'bg-gray-900 text-gray-500'">
+                  {{ k }}: {{ v === true ? '✓' : v === false ? '✗' : '?' }}
+                </div>
+                <div class="col-span-2 text-[9px] text-gray-500">
+                  {{ vlmAnswers.method }} · {{ selectedPanel?.key }}
+                </div>
+              </div>
+              <p v-else class="text-[10px] text-gray-600">{{ t('weave.vlmEmpty') }}</p>
+            </div>
           </div>
 
           <!-- recreate -->
@@ -762,12 +882,25 @@ onUnmounted(() => {
 
         <!-- RIGHT: gates / timeline -->
         <aside class="border-l border-gray-800 p-3 space-y-3 overflow-y-auto text-xs">
-          <div class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.gates') }}</div>
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.gates') }}</div>
+            <span class="text-[9px]" :class="streamLive ? 'text-teal-400' : 'text-gray-600'">
+              SSE {{ streamLive ? '●' : '○' }}
+            </span>
+          </div>
           <ul class="space-y-1">
             <li v-for="(g, key) in gates" :key="key" class="flex justify-between gap-2">
               <span class="text-gray-400">{{ key }}</span>
               <span :class="g.pass ? 'text-teal-400' : 'text-gray-600'">{{ g.pass ? '✓' : '·' }}</span>
             </li>
+          </ul>
+
+          <div class="text-[10px] uppercase tracking-wider text-cyan-500/80 pt-2">{{ t('weave.crossQa') }}</div>
+          <ul class="space-y-1 text-[10px] text-gray-400">
+            <li>cam {{ crossQa.camera_diversity ?? '—' }}</li>
+            <li>through {{ crossQa.throughline_coverage ?? '—' }}</li>
+            <li>drift {{ crossQa.identity_drift_risk ?? '—' }}</li>
+            <li>lookdev {{ crossQa.lookdev_ready ? '✓' : '·' }}</li>
           </ul>
 
           <div class="text-[10px] uppercase tracking-wider text-teal-500/80 pt-2">{{ t('weave.timeline') }}</div>
