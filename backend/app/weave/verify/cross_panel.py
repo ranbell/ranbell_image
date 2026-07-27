@@ -61,7 +61,11 @@ def _motif_repetition(session: dict[str, Any]) -> float | None:
 
 
 def refresh_cross_panel_qa(session: dict[str, Any]) -> dict[str, Any]:
-    """Update cross_panel_qa metrics (does not change G5 finals semantics)."""
+    """Update cross_panel_qa metrics.
+
+    ``ready_for_final`` / ``lookdev_ready`` = samples + framing (G5).
+    ``finals_ready`` is owned by attach/seal path and left untouched here.
+    """
     panels = list(session.get("panels") or [])
     qa = session.setdefault("cross_panel_qa", {})
     world = (session.get("story_bundle") or {}).get("world") or {}
@@ -98,8 +102,6 @@ def refresh_cross_panel_qa(session: dict[str, Any]) -> dict[str, Any]:
     min_samples = int(policy.get("min_sample_panels") or 1)
     lookdev_ready = samples >= min_samples and framing_ok
     qa["lookdev_ready"] = lookdev_ready
-    # Keep ready_for_final as "OK to start final" when lookdev gate clears.
-    # finals_ready remains the post-render flag (set by attach).
-    if lookdev_ready and not qa.get("finals_ready"):
-        qa["ready_for_final"] = True
+    # Always sync — do not sticky-True when lookdev regresses.
+    qa["ready_for_final"] = lookdev_ready
     return qa

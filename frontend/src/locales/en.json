@@ -1723,6 +1723,8 @@
     "scoreRefresh": "Recompute",
     "scoreOverall": "Overall",
     "scoreEmpty": "Score appears after sampling",
+    "vlmAssist": "VLM assist",
+    "vlmAssistHint": "Evaluate fixed 4Q on samples (skip when off)",
     "vlm": "VLM fixed 4Q",
     "vlmRun": "Run VLM",
     "vlmHeuristic": "Heuristic",

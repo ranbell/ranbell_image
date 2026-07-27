@@ -212,3 +212,63 @@ def test_sse_publish_subscribe():
         assert subscriber_count(sid) == 0
 
     asyncio.run(_run())
+
+
+def test_g5_is_lookdev_not_finals():
+    from app.weave.state_machine import gates
+
+    session = _session_with_story()
+    session["status"] = "lookdev"
+    g = gates(session)
+    assert g["G5"]["pass"] is False  # no samples yet
+    assert g["G5"].get("finals_ready") is False
+
+    session["panels"][0]["sample"] = {"image_id": "s" * 64}
+    session["panels"][0].setdefault("qa", {})["framing"] = "pass"
+    g = gates(session)
+    assert g["G5"]["pass"] is True
+    assert g["G5"]["detail"].startswith("cross_panel ready_for_final")
+    # finals still not ready
+    assert g["G5"]["finals_ready"] is False
+
+
+def test_story_apply_clears_lookdev_ready():
+    session = _session_with_story()
+    session["cross_panel_qa"]["lookdev_ready"] = True
+    session["cross_panel_qa"]["ready_for_final"] = True
+    session["cross_panel_qa"]["weave_score"] = {"overall": 0.9}
+    # re-apply story (recreate path)
+    apply_story_to_session(session, _ok_bundle())
+    assert session["cross_panel_qa"]["lookdev_ready"] is False
+    assert session["cross_panel_qa"]["ready_for_final"] is False
+    assert session["cross_panel_qa"]["weave_score"] is None
+
+
+def test_override_refreshes_ready_for_final():
+    from app.weave.service import override_framing
+
+    session = _session_with_story()
+    session["status"] = "lookdev"
+    p1 = session["panels"][0]
+    p1["sample"] = {"image_id": "s" * 64}
+    p1["qa"] = {"framing": "fail"}
+    p1["framing_fail_count"] = 2
+    refresh_cross_panel_qa(session)
+    assert session["cross_panel_qa"]["ready_for_final"] is False
+    override_framing(session, panel_key="panel_1", reason="acceptable crop")
+    assert p1["qa"]["framing"] == "overridden"
+    assert session["cross_panel_qa"]["ready_for_final"] is True
+    assert session["cross_panel_qa"]["lookdev_ready"] is True
+
+
+def test_ready_for_final_not_sticky():
+    session = _session_with_story()
+    session["panels"][0]["sample"] = {"image_id": "s"}
+    session["panels"][0]["qa"] = {"framing": "pass"}
+    refresh_cross_panel_qa(session)
+    assert session["cross_panel_qa"]["ready_for_final"] is True
+    # regress framing
+    session["panels"][0]["qa"]["framing"] = "fail"
+    refresh_cross_panel_qa(session)
+    assert session["cross_panel_qa"]["ready_for_final"] is False
+    assert session["cross_panel_qa"]["lookdev_ready"] is False

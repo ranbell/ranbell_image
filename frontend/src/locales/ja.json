@@ -1723,6 +1723,8 @@
     "scoreRefresh": "再計算",
     "scoreOverall": "総合",
     "scoreEmpty": "サンプル後にスコアが表示されます",
+    "vlmAssist": "VLM アシスト",
+    "vlmAssistHint": "サンプル時に固定4問を評価（オフでスキップ）",
     "vlm": "VLM 固定4問",
     "vlmRun": "VLM実行",
     "vlmHeuristic": "ヒューリスティック",

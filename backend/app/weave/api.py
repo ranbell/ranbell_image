@@ -42,6 +42,7 @@ class TopicPatch(BaseModel):
     author_id: str | None = None
     story_model: str = ""
     use_gallery_nn: bool | None = None
+    vlm_assist: bool | None = None
 
 
 class StoryGenerateRequest(BaseModel):
@@ -182,6 +183,8 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         inputs["story_model"] = body.story_model
     if body.use_gallery_nn is not None:
         set_gallery_nn_enabled(session, body.use_gallery_nn)
+    if body.vlm_assist is not None:
+        session.setdefault("quality_policy", {})["vlm_assist"] = bool(body.vlm_assist)
     await resolve_author_style(session, request.app.state.db)
     apply_topic_warnings(session)
     return await _save(request, session_id, session)
@@ -582,6 +585,9 @@ async def render_final(
         raise HTTPException(400, "framing must pass or be overridden before final render")
     if not g["G0_hard"]["pass"]:
         raise HTTPException(400, "board must be accepted before final render")
+    policy = session.get("quality_policy") or {}
+    if bool(policy.get("strict_seal")) and not g["G5"]["pass"]:
+        raise HTTPException(400, "strict: lookdev ready_for_final required before final render")
     try:
         jobs = submit_final_jobs(request.app, session_id, session)
     except ValueError as e:

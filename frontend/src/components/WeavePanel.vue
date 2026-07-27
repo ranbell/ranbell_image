@@ -27,6 +27,7 @@ const workflows = ref([])
 const ollamaModels = ref([])
 const recreateChips = ref([])
 const useGalleryNn = ref(false)
+const useVlmAssist = ref(true)
 const selectedPanelKey = ref('panel_1')
 const editingNarrative = ref('')
 const pollTimer = ref(null)
@@ -236,6 +237,7 @@ async function runAction(code) {
         author_id: authorId.value,
         story_model: storyModel.value,
         use_gallery_nn: useGalleryNn.value,
+        vlm_assist: useVlmAssist.value,
       }),
     })
 
@@ -547,6 +549,7 @@ watch(session, (s) => {
   if (!s) return
   const flag = s?.quality_policy?.gallery_nn ?? s?.inputs?.use_gallery_nn
   if (typeof flag === 'boolean') useGalleryNn.value = flag
+  if (typeof s?.quality_policy?.vlm_assist === 'boolean') useVlmAssist.value = s.quality_policy.vlm_assist
   if (s.session_id) connectStream(s.session_id)
 })
 
@@ -596,6 +599,14 @@ onUnmounted(() => {
             <span>
               <span class="block text-[11px] text-teal-100">{{ t('weave.galleryNn') }}</span>
               <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.galleryNnHint') }}</span>
+            </span>
+          </label>
+
+          <label class="flex items-start gap-2 rounded border border-gray-800 bg-gray-900/60 px-2 py-1.5 cursor-pointer">
+            <input v-model="useVlmAssist" type="checkbox" class="mt-0.5 accent-teal-500" />
+            <span>
+              <span class="block text-[11px] text-teal-100">{{ t('weave.vlmAssist') }}</span>
+              <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.vlmAssistHint') }}</span>
             </span>
           </label>
 
@@ -821,9 +832,11 @@ onUnmounted(() => {
               <div class="flex items-center justify-between gap-2 pt-1">
                 <div class="text-[10px] uppercase text-cyan-500/80">{{ t('weave.vlm') }}</div>
                 <div class="flex gap-2">
-                  <button class="text-[10px] text-cyan-300 disabled:opacity-40" :disabled="busy || !selectedPanel?.sample?.image_id"
+                  <button class="text-[10px] text-cyan-300 disabled:opacity-40"
+                    :disabled="busy || !useVlmAssist || !selectedPanel?.sample?.image_id"
                     @click="runVlmAssist(false)">{{ t('weave.vlmRun') }}</button>
-                  <button class="text-[10px] text-gray-400 disabled:opacity-40" :disabled="busy || !selectedPanel?.sample?.image_id"
+                  <button class="text-[10px] text-gray-400 disabled:opacity-40"
+                    :disabled="busy || !useVlmAssist || !selectedPanel?.sample?.image_id"
                     @click="runVlmAssist(true)">{{ t('weave.vlmHeuristic') }}</button>
                 </div>
               </div>

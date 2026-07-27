@@ -74,7 +74,9 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     seal = evaluate_seal_rubric(session) if has_story else {
         "pass": False, "full_pass": False, "strict": bool(policy.get("strict_seal")),
     }
-    finals_ready = _has_finals(session)
+    finals_ready = _has_finals(session) or bool(cross.get("finals_ready"))
+    # G5 = lookdev ready_for_final (live: samples + framing). Not finals×3.
+    lookdev_ready = samples_viewed >= min_samples and framing_ok
 
     return {
         "G0_soft": {
@@ -111,10 +113,10 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "pending": framing_pending,
         },
         "G5": {
-            # Warn: finals ready for seal (not "ready to start final").
-            "pass": finals_ready or bool(cross.get("finals_ready")),
-            "detail": "finals×3 ready for seal",
+            "pass": lookdev_ready,
+            "detail": "cross_panel ready_for_final (lookdev)",
             "warning": True,
+            "finals_ready": finals_ready,
         },
         "G6": {
             "pass": bool(seal.get("full_pass")),
@@ -217,6 +219,13 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
                 "code": "accept_board",
                 "label": "イメージボードを採用（本番前に必須）",
                 "enabled": allow,
+            }
+        # strict: G5 (ready_for_final) blocks final render
+        if bool(policy.get("strict_seal")) and not g["G5"]["pass"]:
+            return {
+                "code": "sample_panel",
+                "label": "Look-dev を完了してから本番へ（strict）",
+                "enabled": True,
             }
         if _has_finals(session):
             return {

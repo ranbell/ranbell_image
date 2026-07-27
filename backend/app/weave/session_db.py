@@ -103,8 +103,10 @@ async def attach_render_result(
 
                 wd14 = await resolve_wd14_for_image(db, image_id)
                 apply_framing_to_panel(panel, wd14)
-                # Sync heuristic VLM (fixed 4Q). Full VLM is on-demand via API.
-                apply_heuristic_vlm(panel, session, wd14)
+                policy = session.get("quality_policy") or {}
+                # Heuristic 4Q only when vlm_assist enabled; full VLM is on-demand.
+                if policy.get("vlm_assist", True):
+                    apply_heuristic_vlm(panel, session, wd14)
                 apply_weave_scores(session)
                 refresh_cross_panel_qa(session)
             break
@@ -121,7 +123,6 @@ async def attach_render_result(
                 # Finals done → back to lookdev so CTA can offer Seal.
                 session["status"] = "lookdev"
                 session.setdefault("cross_panel_qa", {})["finals_ready"] = True
-                session.setdefault("cross_panel_qa", {})["ready_for_final"] = True
     await save_session(db, session_id, session)
     try:
         from .events import publish

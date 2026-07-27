@@ -556,6 +556,9 @@ def rate_sample(
                 text="wrong person — confirm re-infer (story will be wiped)",
             )
             continue
+    from .verify.cross_panel import refresh_cross_panel_qa
+
+    refresh_cross_panel_qa(session)
     append_timeline(
         session, actor="user", type_="message",
         text=f"rated {panel_key}: {chips}",
@@ -569,6 +572,8 @@ def override_framing(
     panel_key: str,
     reason: str,
 ) -> dict[str, Any]:
+    from .verify.cross_panel import refresh_cross_panel_qa
+
     reason = (reason or "").strip()
     if not reason:
         raise WeaveError("override reason is required")
@@ -588,6 +593,7 @@ def override_framing(
     })
     if panel.get("qa"):
         panel["qa"]["framing"] = "overridden"
+    refresh_cross_panel_qa(session)
     append_timeline(
         session, actor="user", type_="decide",
         text=f"framing override {panel_key}: {reason}",

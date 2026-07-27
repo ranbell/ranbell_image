@@ -130,8 +130,12 @@ def apply_story_to_session(session: dict[str, Any], bundle: dict[str, Any]) -> N
         }
     session["framing_overrides"] = []
     session["constraints"] = []
-    session.setdefault("cross_panel_qa", {})["ready_for_final"] = False
-    session.setdefault("cross_panel_qa", {})["finals_ready"] = False
+    cross = session.setdefault("cross_panel_qa", {})
+    cross["ready_for_final"] = False
+    cross["finals_ready"] = False
+    cross["lookdev_ready"] = False
+    cross["weave_score"] = None
+    cross["identity_drift_risk"] = None
     session["updated_at"] = time.time()
 
 
