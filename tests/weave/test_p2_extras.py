@@ -174,6 +174,7 @@ def test_apply_weave_scores_on_panels():
 def test_placeholder_sample_scores():
     session = _session_with_story()
     session["status"] = "lookdev"
+    session["quality_policy"]["mode"] = "lab"
     mark_sample_placeholder(session, "panel_1")
     assert session["panels"][0]["sample"]["image_id"].startswith("placeholder:")
     assert session["cross_panel_qa"].get("weave_score")

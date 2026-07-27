@@ -28,6 +28,19 @@ _ENV_LEXICON: dict[str, list[str]] = {
     "雨": ["rain", "wet", "overcast"],
 }
 
+# 「寂しい」chip → thicken environment (design §9)
+_SPARSE_BOOST: list[str] = [
+    "bookshelf",
+    "rain",
+    "window_light",
+    "lamp",
+    "crowd_silhouette",
+    "detailed_background",
+    "scenery",
+    "depth_of_field",
+    "indoors",
+]
+
 
 def _dedupe(tags: list[str]) -> list[str]:
     out: list[str] = []
@@ -51,10 +64,17 @@ def _env_from_setting(setting: str, *, boost: bool = False) -> list[str]:
     for key, tags in _ENV_LEXICON.items():
         if key.lower() in low or key in text:
             hits.extend(tags)
-    if boost and hits:
-        hits.extend(["detailed_background", "scenery", "depth_of_field"])
-    elif boost:
-        hits.extend(["indoors", "detailed_background", "scenery"])
+    if boost:
+        hits.extend(_SPARSE_BOOST)
+        # Setting-specific extras when sparse
+        if "book" in low or "書店" in text:
+            hits.extend(["bookshelf", "stacked_books", "shop_interior"])
+        if "rain" in low or "雨" in text:
+            hits.extend(["rain", "wet_window", "overcast"])
+        if "cafe" in low or "カフェ" in text:
+            hits.extend(["window_light", "wooden_table", "steam"])
+        if not hits:
+            hits.extend(["indoors", "detailed_background", "scenery"])
     return _dedupe(hits)
 
 
@@ -133,6 +153,12 @@ def compile_panel(
         "spice": spice,
     }
     positive_tags = _dedupe(identity + throughline + body + spice)
+    from .budget import cap_positive_tags
+
+    positive_tags = cap_positive_tags(
+        positive_tags,
+        priority=_dedupe(identity + throughline),
+    )
     prose_bits = [
         str(intent.get("narrative_en") or "").strip(),
         str(world.get("setting") or "").strip(),
@@ -140,6 +166,7 @@ def compile_panel(
     prose = ". ".join(b for b in prose_bits if b)
     positive = ", ".join(positive_tags)
     if prose and prose.isascii():
+        # Keep prose short; tag budget already applied to tags
         positive = f"{positive}, {prose}" if positive else prose
 
     neg_extra = list(CAMERA_NEGATIVE.get(camera, []))

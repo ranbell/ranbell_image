@@ -109,7 +109,9 @@ def apply_story_to_session(session: dict[str, Any], bundle: dict[str, Any]) -> N
         }
         # Clear stale look-dev / final state on new story
         panel["sample"] = {"image_id": None, "job_id": None, "scorecard": None}
+        panel["sample_history"] = []
         panel["final"] = {"image_id": None, "job_id": None, "scorecard": None}
+        panel["final_alts"] = []
         panel["compile"] = {
             "positive": "",
             "negative": "",
@@ -121,6 +123,7 @@ def apply_story_to_session(session: dict[str, Any], bundle: dict[str, Any]) -> N
             "updated_at": 0,
         }
         panel["framing_fail_count"] = 0
+        panel["framing_counted_image_id"] = None
         panel["qa"] = {
             "drawability": None,
             "critic": None,

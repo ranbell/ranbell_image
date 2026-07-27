@@ -47,12 +47,26 @@ def evaluate_sample_framing(
     return evaluate_long_shot_framing(wd14_tags)
 
 
-def apply_framing_to_panel(panel: dict[str, Any], wd14_tags: list[str] | None) -> str:
+def apply_framing_to_panel(
+    panel: dict[str, Any],
+    wd14_tags: list[str] | None,
+    *,
+    image_id: str | None = None,
+) -> str:
+    """Set qa.framing. Fail count bumps once per distinct sample image_id."""
     cam = str((panel.get("intent") or {}).get("camera") or "")
     result = evaluate_sample_framing(cam, wd14_tags)
     panel.setdefault("qa", {})["framing"] = result
     if result == "fail":
-        panel["framing_fail_count"] = int(panel.get("framing_fail_count") or 0) + 1
+        iid = str(
+            image_id
+            or (panel.get("sample") or {}).get("image_id")
+            or ""
+        ).strip()
+        last = str(panel.get("framing_counted_image_id") or "").strip()
+        if iid and iid != last:
+            panel["framing_fail_count"] = int(panel.get("framing_fail_count") or 0) + 1
+            panel["framing_counted_image_id"] = iid
     return result
 
 

@@ -16,6 +16,7 @@ from app.weave.story.storywright import apply_story_to_session
 
 def test_lock_enter_lookdev_sample_rate_override():
     session = new_session_payload(topic="雨の日の書店", personality_text="慎重な店員")
+    session["quality_policy"]["mode"] = "lab"
     session["character"]["identity_tags"] = ["1girl", "brown_hair", "cardigan", "cloth_bookmark"]
     session["character"]["prop_tags"] = []
     session["character"]["signature_prop"] = "cloth_bookmark"

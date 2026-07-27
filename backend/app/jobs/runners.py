@@ -3040,9 +3040,19 @@ async def run_weave_image_generate(
 
     async def _finalize(sha256: str) -> None:
         try:
+            job = getattr(reporter, "_job", None)
+            jid = str(getattr(job, "id", "") or "")
+            meta = dict(getattr(job, "meta", None) or {})
+            si = meta.get("seed_index")
+            try:
+                si_int = int(si) if si is not None else None
+            except (TypeError, ValueError):
+                si_int = None
             await weave_db.attach_render_result(
                 db, session_id, kind=kind, target=target, image_id=sha256,
                 ollama=ollama,
+                job_id=jid,
+                seed_index=si_int,
             )
         except Exception as exc:
             logger.error(

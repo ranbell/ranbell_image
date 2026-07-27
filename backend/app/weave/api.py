@@ -86,6 +86,12 @@ class RateRequest(BaseModel):
     chips: list[str] = Field(default_factory=list)
 
 
+class AdoptSampleRequest(BaseModel):
+    panel_key: str
+    image_id: str = ""
+    history_index: int | None = None
+
+
 class OverrideFramingRequest(BaseModel):
     panel_key: str
     reason: str
@@ -522,6 +528,22 @@ async def sample_rate(session_id: str, body: RateRequest, request: Request):
     session = await _load(request, session_id)
     try:
         service.rate_sample(session, panel_key=body.panel_key, chips=body.chips)
+    except service.WeaveError as e:
+        raise HTTPException(e.status_code, e.message) from e
+    return await _save(request, session_id, session)
+
+
+@router.post("/sessions/{session_id}/sample/adopt")
+async def sample_adopt(session_id: str, body: AdoptSampleRequest, request: Request):
+    """Promote a multi-seed history entry to the primary sample."""
+    session = await _load(request, session_id)
+    try:
+        service.adopt_sample(
+            session,
+            panel_key=body.panel_key,
+            image_id=body.image_id,
+            history_index=body.history_index,
+        )
     except service.WeaveError as e:
         raise HTTPException(e.status_code, e.message) from e
     return await _save(request, session_id, session)

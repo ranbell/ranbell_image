@@ -370,7 +370,7 @@ async function runAction(code) {
           }),
         })
         session.value = res
-        trackJobs(res.job)
+        trackJobs(res.jobs || res.job?.jobs || res.job)
         emit('toast', { msg: t('weave.framingLightSteps'), type: 'ok' })
       } else if (c === '3') {
         const alt = window.prompt(t('weave.framingPickWorkflow'), workflow.value || '')
@@ -389,7 +389,7 @@ async function runAction(code) {
           }),
         })
         session.value = res
-        trackJobs(res.job)
+        trackJobs(res.jobs || res.job?.jobs || res.job)
       } else if (c === '4' || (fails >= limit && c !== '1')) {
         if (fails < limit && c === '4') {
           emit('toast', { msg: t('weave.overrideNeedFails', { limit }), type: 'warn' })
@@ -416,7 +416,7 @@ async function runAction(code) {
           }),
         })
         session.value = res
-        trackJobs(res.job)
+        trackJobs(res.jobs || res.job?.jobs || res.job)
       }
     } else {
       await refreshSession()
@@ -462,6 +462,22 @@ async function ratePanel(panelKey, chip) {
       method: 'POST',
       body: JSON.stringify({ panel_key: panelKey, chips: [chip] }),
     })
+  } catch (e) {
+    emit('toast', { msg: String(e.message || e), type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
+async function adoptSample(panelKey, imageId) {
+  if (!sessionId.value || !imageId) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/weave/sessions/${sessionId.value}/sample/adopt`, {
+      method: 'POST',
+      body: JSON.stringify({ panel_key: panelKey, image_id: imageId }),
+    })
+    emit('toast', { msg: t('weave.adopted'), type: 'ok' })
   } catch (e) {
     emit('toast', { msg: String(e.message || e), type: 'error' })
   } finally {
@@ -823,6 +839,27 @@ onUnmounted(() => {
                   class="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-300 hover:bg-gray-700"
                   @click="ratePanel(p.key, r.id)">{{ t(r.labelKey) }}</button>
               </div>
+            </div>
+          </div>
+
+          <!-- multi-seed sample history -->
+          <div v-if="selectedPanel?.sample_history?.some(h => h.image_id)"
+            class="rounded border border-violet-900/40 bg-violet-950/20 p-3 space-y-2">
+            <div class="text-[10px] uppercase text-violet-400/90">{{ t('weave.sampleHistory') }}</div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="(h, i) in selectedPanel.sample_history.filter(x => x.image_id)"
+                :key="h.image_id || i"
+                class="relative w-16 rounded border overflow-hidden"
+                :class="h.image_id === selectedPanel.sample?.image_id
+                  ? 'border-teal-500' : 'border-gray-700 hover:border-violet-500'"
+                :disabled="busy || h.pending"
+                @click="adoptSample(selectedPanel.key, h.image_id)">
+                <img v-if="thumb(h.image_id)" :src="thumb(h.image_id)" class="w-full aspect-square object-cover" />
+                <span class="absolute bottom-0 inset-x-0 bg-black/60 text-[8px] text-center py-0.5">
+                  {{ h.image_id === selectedPanel.sample?.image_id ? t('weave.adoptPrimary') : t('weave.adopt') }}
+                </span>
+              </button>
             </div>
           </div>
 

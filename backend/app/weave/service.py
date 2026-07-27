@@ -36,6 +36,30 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def wipe_lookdev_state(session: dict[str, Any]) -> None:
+    """Clear panels / overrides / look-dev QA after unlock or re-infer."""
+    from .schema import _empty_panel
+
+    session["panels"] = [
+        _empty_panel("panel_1", "setup", "long_shot"),
+        _empty_panel("panel_2", "turn", "medium_shot"),
+        _empty_panel("panel_3", "settle", "close_up"),
+    ]
+    session["framing_overrides"] = []
+    session["constraints"] = []
+    session["suggest_recreate"] = False
+    cross = session.setdefault("cross_panel_qa", {})
+    cross["causality_one_liner"] = ""
+    cross["throughline_coverage"] = None
+    cross["identity_drift_risk"] = None
+    cross["camera_diversity"] = None
+    cross["motif_repetition"] = None
+    cross["weave_score"] = None
+    cross["lookdev_ready"] = False
+    cross["ready_for_final"] = False
+    cross["finals_ready"] = False
+
+
 async def create_session_payload(**kwargs) -> dict[str, Any]:
     return new_session_payload(**kwargs)
 
@@ -68,13 +92,18 @@ def unlock_identity(session: dict[str, Any], *, confirm: bool = False) -> dict[s
     character = session.setdefault("character", {})
     character["identity_locked"] = False
     character["board"] = {"images": [], "accepted": False}
+    character["board_briefs"] = []
+    character["lab_spice"] = []
+    character["tag_diff"] = None
     session["story_bundle"] = {}
     session["story_version"] = 0
+    session["story_history"] = []
     session["last_lint"] = None
     session["critic_report"] = None
     session["status"] = "character"
     session["suggest_reinfer"] = False
     session["suggest_recreate"] = False
+    wipe_lookdev_state(session)
     append_timeline(
         session, actor="user", type_="unlock",
         text="identity unlocked — story invalidated; re-infer required",
@@ -132,6 +161,12 @@ async def infer_character(
 ) -> dict[str, Any]:
     from .character.gallery_nn import enrich_character_from_gallery, is_gallery_nn_enabled
 
+    if (session.get("character") or {}).get("identity_locked"):
+        raise WeaveError(
+            "identity is locked — POST …/character/unlock with confirm=true first",
+            status_code=409,
+        )
+
     inputs = session.setdefault("inputs", {})
     text = (personality_text or inputs.get("personality_text") or "").strip()
     if not text:
@@ -155,13 +190,20 @@ async def infer_character(
     character["gallery_spice"] = []
     character["gallery_nn"] = None
     character["reference_mix"] = None
+    character["lab_spice"] = []
     base_identity = list(character.get("identity_tags") or [])
-    # Invalidate story if re-infer
-    if int(session.get("story_version") or 0) > 0:
+    # Invalidate story + look-dev if re-infer after a story existed
+    had_story = int(session.get("story_version") or 0) > 0 or bool(session.get("story_bundle"))
+    if had_story or any(
+        (p.get("sample") or {}).get("image_id") or (p.get("final") or {}).get("image_id")
+        for p in (session.get("panels") or [])
+    ):
         session["story_bundle"] = {}
         session["story_version"] = 0
         session["last_lint"] = None
+        session["critic_report"] = None
         session["status"] = "character"
+        wipe_lookdev_state(session)
     append_timeline(
         session, actor="llm.personalitywright", type_="proposal",
         text=character.get("reasoning_ja") or "character inferred",
@@ -657,10 +699,17 @@ def override_framing(
 
 
 def mark_sample_placeholder(session: dict[str, Any], panel_key: str) -> dict[str, Any]:
-    """M3 stub: mark a panel as sampled without Comfy (for CTA/gate testing)."""
+    """Lab/test stub: mark a panel as sampled without Comfy (CTA/gate testing)."""
     from .verify.cross_panel import refresh_cross_panel_qa
     from .verify.score import apply_weave_scores
 
+    policy = session.get("quality_policy") or {}
+    mode = str(policy.get("mode") or "").lower()
+    if mode not in ("lab", "test") and not policy.get("allow_placeholder"):
+        raise WeaveError(
+            "placeholder samples require quality_policy.mode=lab (or allow_placeholder)",
+            status_code=400,
+        )
     panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
     if not panel:
         raise WeaveError(f"unknown panel {panel_key}")
@@ -677,6 +726,51 @@ def mark_sample_placeholder(session: dict[str, Any], panel_key: str) -> dict[str
         session, actor="system", type_="sample",
         text=f"placeholder sample {panel_key}",
     )
+    return session
+
+
+def adopt_sample(
+    session: dict[str, Any],
+    *,
+    panel_key: str,
+    image_id: str = "",
+    history_index: int | None = None,
+) -> dict[str, Any]:
+    """Promote a multi-seed sample_history entry to the primary sample."""
+    from .verify.cross_panel import refresh_cross_panel_qa
+    from .verify.score import apply_weave_scores
+
+    panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
+    if not panel:
+        raise WeaveError(f"unknown panel {panel_key}")
+    hist = list(panel.get("sample_history") or [])
+    entry = None
+    if history_index is not None:
+        if history_index < 0 or history_index >= len(hist):
+            raise WeaveError("history_index out of range")
+        entry = hist[history_index]
+    elif image_id:
+        entry = next((h for h in hist if h.get("image_id") == image_id), None)
+        if not entry:
+            raise WeaveError(f"image_id not in sample_history: {image_id}")
+    else:
+        raise WeaveError("image_id or history_index required")
+    iid = str(entry.get("image_id") or "").strip()
+    if not iid or entry.get("pending"):
+        raise WeaveError("chosen sample is still pending")
+    panel["sample"] = {
+        "image_id": iid,
+        "job_id": entry.get("job_id"),
+        "scorecard": None,
+        "adopted": True,
+        "seed": entry.get("seed"),
+    }
+    append_timeline(
+        session, actor="user", type_="sample",
+        text=f"adopted sample {panel_key} image={iid[:12]}",
+    )
+    apply_weave_scores(session)
+    refresh_cross_panel_qa(session)
     return session
 
 

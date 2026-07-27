@@ -522,6 +522,7 @@ positive =
 | `POST .../compile` | must_show 解決 + 決定論編譯 |
 | `POST .../sample` | サンプル |
 | `POST .../sample/rate` | チップ |
+| `POST .../sample/adopt` | multi-seed 候補を primary に採用 |
 | `POST .../sample/override-framing` | G4 理由付き突破 |
 | `POST .../render_final` | G0-hard 必須 |
 | `POST .../seal` | ルーブリック |
@@ -728,6 +729,7 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 | M6 VLM 固定4問 + WeaveScore + session SSE | **済**（attach 時フル VLM 試行→heuristic fallback） |
 | M6 lab: Spicer / mood スロット / multi-seed | **済**（既定オフ。`quality_policy.spicer` / `board_slots`+mood / `multi_seed` 1–3） |
 | 仕上げ | **済**（author_style 必須・rollback 因果比較・memory モジュール・sample_steps） |
+| P3 harden | **済**（locked reinfer=409・lookdev wipe・tag budget・sparse lexicon・framing 回数・placeholder lab 限定・sample adopt） |
 
 API: `/api/weave/sessions...`  
 UI: ヘッダー「Weave」→ `WeavePanel.vue`  

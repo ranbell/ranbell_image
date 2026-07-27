@@ -250,5 +250,19 @@ def submit_final_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
                 "scorecard": None,
                 "multi_seed": n,
             }
+            if n > 1:
+                panel["final_alts"] = [
+                    {
+                        "job_id": j["job_id"],
+                        "seed": j["seed"],
+                        "seed_index": j["seed_index"],
+                        "image_id": None,
+                        "pending": True,
+                    }
+                    for j in jobs
+                    if j["panel_key"] == panel_key and j["seed_index"] > 0
+                ]
+            else:
+                panel["final_alts"] = []
     session["status"] = "rendering"
     return jobs

@@ -63,6 +63,8 @@ async def attach_render_result(
     target: str,
     image_id: str,
     ollama=None,
+    job_id: str = "",
+    seed_index: int | None = None,
 ) -> None:
     """Link a finished Comfy image onto board/sample/final slots."""
     session = await get_session(db, session_id)
@@ -91,49 +93,105 @@ async def attach_render_result(
         for panel in session.get("panels") or []:
             if panel.get("key") != target:
                 continue
-            bucket = "sample" if kind == "sample" else "final"
-            prev = dict(panel.get(bucket) or {})
-            prev["image_id"] = image_id
-            prev["pending"] = False
-            panel[bucket] = prev
+            jid = str(job_id or "").strip()
             if kind == "sample":
-                # Record into sample_history (multi-seed)
                 hist = list(panel.get("sample_history") or [])
-                matched = False
-                for h in hist:
-                    if h.get("pending") and not h.get("image_id"):
-                        h["image_id"] = image_id
-                        h["pending"] = False
-                        matched = True
-                        break
-                if not matched:
-                    hist.append({"image_id": image_id, "pending": False})
+                matched = None
+                if jid:
+                    for h in hist:
+                        if str(h.get("job_id") or "") == jid:
+                            h["image_id"] = image_id
+                            h["pending"] = False
+                            matched = h
+                            break
+                if matched is None:
+                    for h in hist:
+                        if h.get("pending") and not h.get("image_id"):
+                            h["image_id"] = image_id
+                            h["pending"] = False
+                            if jid:
+                                h["job_id"] = jid
+                            matched = h
+                            break
+                if matched is None:
+                    matched = {
+                        "job_id": jid or None,
+                        "seed": None,
+                        "image_id": image_id,
+                        "pending": False,
+                        "seed_index": seed_index,
+                    }
+                    hist.append(matched)
                 panel["sample_history"] = hist[-9:]
-                from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
-                from .verify.score import apply_weave_scores
-                from .verify.vlm_assist import apply_heuristic_vlm, apply_vlm_assist_to_panel
-                from .verify.cross_panel import refresh_cross_panel_qa
 
-                wd14 = await resolve_wd14_for_image(db, image_id)
-                apply_framing_to_panel(panel, wd14)
-                policy = session.get("quality_policy") or {}
-                if policy.get("vlm_assist", True):
-                    inputs = session.get("inputs") or {}
-                    has_model = bool(
-                        str(inputs.get("vlm_model") or inputs.get("story_model") or "").strip()
+                primary_job = str((panel.get("sample") or {}).get("job_id") or "")
+                is_primary = (
+                    (jid and jid == primary_job)
+                    or (not primary_job and (seed_index in (None, 0)))
+                    or (
+                        not (panel.get("sample") or {}).get("image_id")
+                        and seed_index in (None, 0)
                     )
-                    if ollama is not None and has_model:
-                        try:
-                            await apply_vlm_assist_to_panel(
-                                panel, session, db=db, ollama=ollama, wd14_tags=wd14,
-                            )
-                        except Exception as exc:
-                            logger.warning("weave VLM assist failed: %s", exc)
+                )
+                if is_primary:
+                    prev = dict(panel.get("sample") or {})
+                    prev["image_id"] = image_id
+                    prev["pending"] = False
+                    if jid:
+                        prev["job_id"] = jid
+                    panel["sample"] = prev
+                    from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
+                    from .verify.score import apply_weave_scores
+                    from .verify.vlm_assist import apply_heuristic_vlm, apply_vlm_assist_to_panel
+                    from .verify.cross_panel import refresh_cross_panel_qa
+
+                    wd14 = await resolve_wd14_for_image(db, image_id)
+                    apply_framing_to_panel(panel, wd14, image_id=image_id)
+                    policy = session.get("quality_policy") or {}
+                    if policy.get("vlm_assist", True):
+                        inputs = session.get("inputs") or {}
+                        has_model = bool(
+                            str(inputs.get("vlm_model") or inputs.get("story_model") or "").strip()
+                        )
+                        if ollama is not None and has_model:
+                            try:
+                                await apply_vlm_assist_to_panel(
+                                    panel, session, db=db, ollama=ollama, wd14_tags=wd14,
+                                )
+                            except Exception as exc:
+                                logger.warning("weave VLM assist failed: %s", exc)
+                                apply_heuristic_vlm(panel, session, wd14)
+                        else:
                             apply_heuristic_vlm(panel, session, wd14)
-                    else:
-                        apply_heuristic_vlm(panel, session, wd14)
-                apply_weave_scores(session)
-                refresh_cross_panel_qa(session)
+                    apply_weave_scores(session)
+                    refresh_cross_panel_qa(session)
+            else:
+                # final
+                primary_job = str((panel.get("final") or {}).get("job_id") or "")
+                is_primary = (
+                    (jid and jid == primary_job)
+                    or (not primary_job and seed_index in (None, 0))
+                    or (
+                        not (panel.get("final") or {}).get("image_id")
+                        and seed_index in (None, 0)
+                    )
+                )
+                if is_primary:
+                    prev = dict(panel.get("final") or {})
+                    prev["image_id"] = image_id
+                    prev["pending"] = False
+                    if jid:
+                        prev["job_id"] = jid
+                    panel["final"] = prev
+                else:
+                    alts = list(panel.get("final_alts") or [])
+                    alts.append({
+                        "job_id": jid or None,
+                        "image_id": image_id,
+                        "seed_index": seed_index,
+                        "pending": False,
+                    })
+                    panel["final_alts"] = alts[-6:]
             break
         if kind == "final":
             finals = [
@@ -157,6 +215,8 @@ async def attach_render_result(
             "kind": kind,
             "target": target,
             "image_id": image_id,
+            "job_id": job_id or None,
+            "seed_index": seed_index,
         })
     except Exception:
         logger.debug("weave SSE publish failed", exc_info=True)
