@@ -22,6 +22,7 @@ POSE_VOCAB_COLLECTION = "wd14_pose_vocab"
 SCENE_VOCAB_COLLECTION = "wd14_scene_vocab"
 AUTHORS_COLLECTION = "authors"
 STORIES_COLLECTION = "stories"
+WEAVE_SESSIONS_COLLECTION = "weave_sessions"
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -369,6 +370,24 @@ class QdrantDBClient:
         ):
             await self._qc.create_payload_index(
                 collection_name=STORIES_COLLECTION,
+                field_name=field,
+                field_schema=schema,
+            )
+
+        # Weave co-creation sessions (payload-only)
+        if not await self._qc.collection_exists(WEAVE_SESSIONS_COLLECTION):
+            await self._qc.create_collection(
+                collection_name=WEAVE_SESSIONS_COLLECTION,
+                vectors_config={},
+                on_disk_payload=True,
+            )
+            logger.info("Created collection: %s", WEAVE_SESSIONS_COLLECTION)
+        for field, schema in (
+            ("status", qm.PayloadSchemaType.KEYWORD),
+            ("created_at", qm.PayloadSchemaType.FLOAT),
+        ):
+            await self._qc.create_payload_index(
+                collection_name=WEAVE_SESSIONS_COLLECTION,
                 field_name=field,
                 field_schema=schema,
             )
