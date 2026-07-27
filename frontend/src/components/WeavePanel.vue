@@ -6,6 +6,7 @@ import BoardColumn from './weave/BoardColumn.vue'
 import ScoreVlmBlock from './weave/ScoreVlmBlock.vue'
 import GatesColumn from './weave/GatesColumn.vue'
 import RollbackCompare from './weave/RollbackCompare.vue'
+import FramingDialog from './weave/FramingDialog.vue'
 
 const props = defineProps({
   show: Boolean,
@@ -38,6 +39,15 @@ const useStrictSeal = ref(false)
 const useSpicer = ref(false)
 const useMoodSlot = ref(false)
 const multiSeed = ref(1)
+const ageBand = ref('')
+const genderHint = ref('')
+const occupationHint = ref('')
+const framingDialog = ref({
+  show: false,
+  panelKey: '',
+  fails: 0,
+  limit: 2,
+})
 const selectedPanelKey = ref('panel_1')
 const editingNarrative = ref('')
 const pollTimer = ref(null)
@@ -256,6 +266,9 @@ async function runAction(code) {
         spicer: useSpicer.value,
         mood_slot: useMoodSlot.value,
         multi_seed: multiSeed.value,
+        age_band: ageBand.value,
+        gender_hint: genderHint.value,
+        occupation_hint: occupationHint.value,
       }),
     })
 
@@ -345,78 +358,16 @@ async function runAction(code) {
         method: 'POST',
       })
     } else if (code === 'fix_framing_or_override') {
-      const p = panels.value.find(p => p.qa?.framing === 'fail' || p.qa?.framing === 'unknown')
+      const p = panels.value.find(x => x.qa?.framing === 'fail' || x.qa?.framing === 'unknown')
       if (!p) {
         await refreshSession()
         return
       }
-      const fails = p.framing_fail_count || 0
-      const limit = session.value?.quality_policy?.framing_fail_limit || 2
-      const choice = window.prompt(
-        t('weave.framingFixChoices', { fails, limit }),
-        '1',
-      )
-      if (choice === null) return
-      const c = String(choice).trim()
-      if (c === '2') {
-        // lighter sample steps
-        const res = await api(`/api/weave/sessions/${id}/sample`, {
-          method: 'POST',
-          body: JSON.stringify({
-            panel_key: p.key,
-            placeholder: false,
-            workflow_sample: workflow.value,
-            sample_steps: 12,
-          }),
-        })
-        session.value = res
-        trackJobs(res.jobs || res.job?.jobs || res.job)
-        emit('toast', { msg: t('weave.framingLightSteps'), type: 'ok' })
-      } else if (c === '3') {
-        const alt = window.prompt(t('weave.framingPickWorkflow'), workflow.value || '')
-        if (!alt || !String(alt).trim()) {
-          emit('toast', { msg: t('weave.framingNeedWorkflow'), type: 'warn' })
-          return
-        }
-        workflow.value = String(alt).trim()
-        const res = await api(`/api/weave/sessions/${id}/sample`, {
-          method: 'POST',
-          body: JSON.stringify({
-            panel_key: p.key,
-            placeholder: false,
-            workflow_sample: workflow.value,
-            sample_steps: 16,
-          }),
-        })
-        session.value = res
-        trackJobs(res.jobs || res.job?.jobs || res.job)
-      } else if (c === '4' || (fails >= limit && c !== '1')) {
-        if (fails < limit && c === '4') {
-          emit('toast', { msg: t('weave.overrideNeedFails', { limit }), type: 'warn' })
-          return
-        }
-        const reason = window.prompt(t('weave.overrideReasonPh'), '')
-        if (!reason || !String(reason).trim()) {
-          emit('toast', { msg: t('weave.overrideNeedReason'), type: 'warn' })
-          return
-        }
-        session.value = await api(`/api/weave/sessions/${id}/sample/override-framing`, {
-          method: 'POST',
-          body: JSON.stringify({ panel_key: p.key, reason: String(reason).trim() }),
-        })
-      } else {
-        // 1 = resample same workflow
-        if (!window.confirm(t('weave.resampleConfirm'))) return
-        const res = await api(`/api/weave/sessions/${id}/sample`, {
-          method: 'POST',
-          body: JSON.stringify({
-            panel_key: p.key,
-            placeholder: false,
-            workflow_sample: workflow.value,
-          }),
-        })
-        session.value = res
-        trackJobs(res.jobs || res.job?.jobs || res.job)
+      framingDialog.value = {
+        show: true,
+        panelKey: p.key,
+        fails: p.framing_fail_count || 0,
+        limit: session.value?.quality_policy?.framing_fail_limit || 2,
       }
     } else {
       await refreshSession()
@@ -449,6 +400,67 @@ async function recreate() {
     recreateChips.value = []
   } catch (e) {
     errorMsg.value = String(e.message || e)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function onFramingChoose(payload) {
+  const panelKey = framingDialog.value.panelKey || 'panel_1'
+  framingDialog.value = { ...framingDialog.value, show: false }
+  const id = sessionId.value
+  if (!id) return
+  busy.value = true
+  errorMsg.value = ''
+  try {
+    const c = String(payload?.choice || '1')
+    if (c === '2') {
+      const res = await api(`/api/weave/sessions/${id}/sample`, {
+        method: 'POST',
+        body: JSON.stringify({
+          panel_key: panelKey,
+          placeholder: false,
+          workflow_sample: workflow.value,
+          sample_steps: 12,
+        }),
+      })
+      session.value = res
+      trackJobs(res.jobs || res.job?.jobs || res.job)
+      emit('toast', { msg: t('weave.framingLightSteps'), type: 'ok' })
+    } else if (c === '3') {
+      workflow.value = String(payload.workflow || '').trim()
+      const res = await api(`/api/weave/sessions/${id}/sample`, {
+        method: 'POST',
+        body: JSON.stringify({
+          panel_key: panelKey,
+          placeholder: false,
+          workflow_sample: workflow.value,
+          sample_steps: 16,
+        }),
+      })
+      session.value = res
+      trackJobs(res.jobs || res.job?.jobs || res.job)
+    } else if (c === '4') {
+      session.value = await api(`/api/weave/sessions/${id}/sample/override-framing`, {
+        method: 'POST',
+        body: JSON.stringify({ panel_key: panelKey, reason: String(payload.reason || '').trim() }),
+      })
+    } else {
+      if (!window.confirm(t('weave.resampleConfirm'))) return
+      const res = await api(`/api/weave/sessions/${id}/sample`, {
+        method: 'POST',
+        body: JSON.stringify({
+          panel_key: panelKey,
+          placeholder: false,
+          workflow_sample: workflow.value,
+        }),
+      })
+      session.value = res
+      trackJobs(res.jobs || res.job?.jobs || res.job)
+    }
+  } catch (e) {
+    errorMsg.value = String(e.message || e)
+    emit('toast', { msg: errorMsg.value, type: 'error' })
   } finally {
     busy.value = false
   }
@@ -655,6 +667,9 @@ watch(session, (s) => {
   if (ms >= 1 && ms <= 3) multiSeed.value = ms
   if (s?.inputs?.vlm_model) vlmModel.value = s.inputs.vlm_model
   if (s?.inputs?.llm_provider) llmProvider.value = s.inputs.llm_provider
+  if (typeof s?.inputs?.age_band === 'string') ageBand.value = s.inputs.age_band
+  if (typeof s?.inputs?.gender_hint === 'string') genderHint.value = s.inputs.gender_hint
+  if (typeof s?.inputs?.occupation_hint === 'string') occupationHint.value = s.inputs.occupation_hint
   if (s.session_id) connectStream(s.session_id)
 })
 
@@ -680,6 +695,17 @@ onUnmounted(() => {
 <template>
   <div v-if="show" class="fixed inset-0 z-[80] flex items-stretch justify-center bg-black/70 backdrop-blur-sm"
     @mousedown.self="close">
+    <FramingDialog
+      :show="framingDialog.show"
+      :panel-key="framingDialog.panelKey"
+      :fails="framingDialog.fails"
+      :limit="framingDialog.limit"
+      :workflows="workflows"
+      :current-workflow="workflow"
+      :busy="busy"
+      @close="framingDialog.show = false"
+      @choose="onFramingChoose"
+    />
     <div class="m-3 flex w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-teal-800/50 bg-gray-950 text-gray-100 shadow-2xl">
       <!-- header -->
       <div class="flex items-center gap-3 border-b border-teal-900/50 px-4 py-3">
@@ -761,6 +787,21 @@ onUnmounted(() => {
             <div class="col-span-2">
               <label class="text-[10px] text-gray-500">{{ t('weave.authorStyle') }}</label>
               <input v-model="authorStyle" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs" />
+            </div>
+            <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.ageBand') }}</label>
+              <input v-model="ageBand" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
+                :placeholder="t('weave.ageBandPh')" />
+            </div>
+            <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.genderHint') }}</label>
+              <input v-model="genderHint" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
+                :placeholder="t('weave.genderHintPh')" />
+            </div>
+            <div class="col-span-2">
+              <label class="text-[10px] text-gray-500">{{ t('weave.occupationHint') }}</label>
+              <input v-model="occupationHint" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
+                :placeholder="t('weave.occupationHintPh')" />
             </div>
           </div>
 

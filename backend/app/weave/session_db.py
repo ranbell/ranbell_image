@@ -140,13 +140,20 @@ async def attach_render_result(
                     if jid:
                         prev["job_id"] = jid
                     panel["sample"] = prev
-                    from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
+                    from .verify.heuristics import (
+                        apply_framing_to_panel,
+                        resolve_image_path,
+                        resolve_wd14_for_image,
+                    )
                     from .verify.score import apply_weave_scores
                     from .verify.vlm_assist import apply_heuristic_vlm, apply_vlm_assist_to_panel
                     from .verify.cross_panel import refresh_cross_panel_qa
 
                     wd14 = await resolve_wd14_for_image(db, image_id)
-                    apply_framing_to_panel(panel, wd14, image_id=image_id)
+                    img_path = await resolve_image_path(db, image_id)
+                    apply_framing_to_panel(
+                        panel, wd14, image_id=image_id, image_path=img_path,
+                    )
                     policy = session.get("quality_policy") or {}
                     if policy.get("vlm_assist", True):
                         inputs = session.get("inputs") or {}

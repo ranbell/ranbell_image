@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from .cameras import lint_cameras
+from .causality import lint_causality
 from .drawability import lint_drawability
 from .must_show_resolve import apply_must_show_resolution
 
@@ -37,6 +38,7 @@ def lint_story_bundle(
 
     panels = story_bundle.get("panels") or []
     defects.extend(lint_cameras(panels))
+    defects.extend(lint_causality(story_bundle))
 
     # Normalize panel shape: Storywright may emit flat panels or intent-wrapped.
     flat_panels: list[dict[str, Any]] = []

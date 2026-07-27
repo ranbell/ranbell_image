@@ -660,8 +660,8 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 | 品質 mode 既定 | standard |
 | 物語編集 | **Recreate / rollback のみ** |
 | framing 突破 | fail_limit 後に override_framing |
-| UI 名称 | 未決（Chronicle表示 / Weave） |
-| Storybook | 未決（まず互換投影を推奨） |
+| UI 名称 | Weave（ヘッダー表示） |
+| Storybook | 互換投影（Seal → Storybook） |
 
 ---
 
@@ -730,6 +730,7 @@ strict/lab、VLM、Spicer、mood スロット、multi-seed
 | M6 lab: Spicer / mood スロット / multi-seed | **済**（既定オフ。`quality_policy.spicer` / `board_slots`+mood / `multi_seed` 1–3） |
 | 仕上げ | **済**（author_style 必須・rollback 因果比較・memory モジュール・sample_steps） |
 | P3 harden | **済**（locked reinfer=409・lookdev wipe・tag budget・sparse lexicon・framing 回数・placeholder lab 限定・sample adopt） |
+| P4 polish | **済**（FramingDialog・Gates warn/block・因果 lint・中央密度近似・年齢/性別/職業ヒント・story に identity_tags 連続性） |
 
 API: `/api/weave/sessions...`  
 UI: ヘッダー「Weave」→ `WeavePanel.vue`  

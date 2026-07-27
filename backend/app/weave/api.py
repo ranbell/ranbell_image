@@ -52,6 +52,9 @@ class TopicPatch(BaseModel):
     mood_slot: bool | None = None
     multi_seed: int | None = None
     mode: Literal["standard", "lab"] | None = None
+    age_band: str | None = None
+    gender_hint: str | None = None
+    occupation_hint: str | None = None
 
 
 class StoryGenerateRequest(BaseModel):
@@ -245,6 +248,12 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         session.setdefault("quality_policy", {})["multi_seed"] = max(
             1, min(3, int(body.multi_seed)),
         )
+    if body.age_band is not None:
+        inputs["age_band"] = str(body.age_band).strip()
+    if body.gender_hint is not None:
+        inputs["gender_hint"] = str(body.gender_hint).strip()
+    if body.occupation_hint is not None:
+        inputs["occupation_hint"] = str(body.occupation_hint).strip()
     if body.mode is not None:
         session.setdefault("quality_policy", {})["mode"] = body.mode
         if body.mode == "lab" and body.spicer is None:

@@ -181,9 +181,20 @@ async def infer_character(
         personality_text=text,
         topic=str(inputs.get("topic") or ""),
         author_style=str(inputs.get("author_style") or ""),
+        age_band=str(inputs.get("age_band") or ""),
+        gender_hint=str(inputs.get("gender_hint") or ""),
+        occupation_hint=str(inputs.get("occupation_hint") or ""),
     )
     apply_inference_to_character(session.setdefault("character", {}), data)
     character = session["character"]
+    # Persist structured hints onto personality for story continuity
+    personality = character.setdefault("personality", {})
+    for key in ("age_band", "gender_hint", "occupation_hint"):
+        val = str(inputs.get(key) or "").strip()
+        if val and not personality.get(key):
+            personality[key] = val
+        if key == "occupation_hint" and val:
+            personality.setdefault("occupation", val)
     character["identity_locked"] = False
     character["board"] = {"images": [], "accepted": False}
     character["gallery_refs"] = []

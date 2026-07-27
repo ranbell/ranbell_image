@@ -23,13 +23,18 @@ def build_story_prompt(
     previous_causality: str = "",
 ) -> str:
     system = load_prompt("storywright.md")
+    personality = character.get("personality") or {}
     user = {
         "topic": topic,
         "author_style": author_style,
-        "personality_summary_ja": (character.get("personality") or {}).get("summary_ja") or "",
+        "personality_summary_ja": personality.get("summary_ja") or "",
+        # Continuity only — do NOT invent appearance in narratives (HARD RULE 4).
+        "identity_tags": list(character.get("identity_tags") or [])[:16],
         "signature_prop": character.get("signature_prop") or "",
         "prop_tags": character.get("prop_tags") or [],
         "do_not": character.get("do_not") or [],
+        "age_band": personality.get("age_band") or "",
+        "occupation_hint": personality.get("occupation") or personality.get("occupation_hint") or "",
         "avoid_motifs": avoid_motifs or [],
         "recreate_constraints": recreate_constraints or [],
         "previous_causality_one_liner": previous_causality or "",

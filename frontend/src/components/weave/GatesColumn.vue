@@ -11,6 +11,30 @@ defineProps({
 })
 const emit = defineEmits(['seal', 'export', 'open-storybook'])
 const { t } = useI18n()
+
+function gateClass(g) {
+  if (!g) return 'text-gray-600'
+  if (g.pass) return 'text-teal-400'
+  if (g.pending) return 'text-amber-300'
+  if (g.warning) return 'text-amber-400'
+  return 'text-rose-400/80'
+}
+
+function gateMark(g) {
+  if (!g) return '·'
+  if (g.pass) return '✓'
+  if (g.pending) return '…'
+  if (g.warning) return '!'
+  return '×'
+}
+
+function gateKind(g) {
+  if (!g) return ''
+  if (g.pass) return t('weave.gatePass')
+  if (g.pending) return t('weave.gatePending')
+  if (g.warning) return t('weave.gateWarn')
+  return t('weave.gateBlock')
+}
 </script>
 
 <template>
@@ -21,10 +45,15 @@ const { t } = useI18n()
         SSE {{ streamLive ? '●' : '○' }}
       </span>
     </div>
-    <ul class="space-y-1">
-      <li v-for="(g, key) in gates" :key="key" class="flex justify-between gap-2">
-        <span class="text-gray-400">{{ key }}</span>
-        <span :class="g.pass ? 'text-teal-400' : 'text-gray-600'">{{ g.pass ? '✓' : '·' }}</span>
+    <ul class="space-y-1.5">
+      <li v-for="(g, key) in gates" :key="key" class="flex justify-between gap-2 items-start">
+        <span class="min-w-0">
+          <span class="text-gray-400">{{ key }}</span>
+          <span v-if="!g.pass" class="block text-[9px] text-gray-600 truncate" :title="g.detail">
+            {{ gateKind(g) }}{{ g.detail ? ` · ${g.detail}` : '' }}
+          </span>
+        </span>
+        <span class="shrink-0 font-mono" :class="gateClass(g)" :title="gateKind(g)">{{ gateMark(g) }}</span>
       </li>
     </ul>
 

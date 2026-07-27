@@ -19,6 +19,7 @@ def build_personality_prompt(
     author_style: str = "",
     age_band: str = "",
     gender_hint: str = "",
+    occupation_hint: str = "",
 ) -> str:
     system = load_prompt("personalitywright.md")
     user = {
@@ -27,6 +28,7 @@ def build_personality_prompt(
         "author_style": author_style,
         "age_band": age_band,
         "gender_hint": gender_hint,
+        "occupation_hint": occupation_hint,
     }
     return (
         system
@@ -65,11 +67,17 @@ async def run_personalitywright(
     personality_text: str,
     topic: str = "",
     author_style: str = "",
+    age_band: str = "",
+    gender_hint: str = "",
+    occupation_hint: str = "",
 ) -> dict[str, Any]:
     prompt = build_personality_prompt(
         personality_text=personality_text,
         topic=topic,
         author_style=author_style,
+        age_band=age_band,
+        gender_hint=gender_hint,
+        occupation_hint=occupation_hint,
     )
     raw = await ollama.chat_text(
         prompt,

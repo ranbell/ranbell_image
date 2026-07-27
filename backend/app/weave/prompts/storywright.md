@@ -8,6 +8,8 @@ Output JSON only — no markdown fences, no prose, no candidate arrays.
 3. Cameras must be three distinct values from: long_shot, medium_shot, close_up.
    Default: panel_1=long_shot, panel_2=medium_shot, panel_3=close_up.
 4. Do NOT output character appearance tags — identity is locked elsewhere.
+   identity_tags in INPUT are for continuity only (same person); never copy them
+   into narrative_ja / visible_change / world fields.
 5. throughline_prop should reuse signature_prop when provided.
 6. Each panel needs visible_change (what visibly differs) and must_show including
    throughline_prop and throughline_place keys.
