@@ -45,6 +45,7 @@ def test_narrative_typo_ok_and_reject_rewrite():
                 "narrative_ja": "しおりを手に取る",
                 "visible_change": "取る",
                 "camera": "long_shot",
+                "time_marker": "afternoon",
                 "must_show": ["throughline_prop", "throughline_place"],
             },
             {
@@ -52,6 +53,7 @@ def test_narrative_typo_ok_and_reject_rewrite():
                 "narrative_ja": "棚が濡れる",
                 "visible_change": "濡れる",
                 "camera": "medium_shot",
+                "time_marker": "dusk",
                 "must_show": ["throughline_prop", "throughline_place"],
             },
             {
@@ -59,6 +61,7 @@ def test_narrative_typo_ok_and_reject_rewrite():
                 "narrative_ja": "色がにじむ",
                 "visible_change": "にじむ",
                 "camera": "close_up",
+                "time_marker": "night",
                 "must_show": ["throughline_prop", "throughline_place"],
             },
         ],

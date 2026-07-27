@@ -15,7 +15,11 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ...db.qdrant_client import CHARACTER_PRESETS_COLLECTION
-from .split_tags import enforce_identity_prop_split, soft_normalize_tag
+from .split_tags import (
+    enforce_identity_prop_split,
+    soft_normalize_tag,
+    split_identity_and_outfit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +28,17 @@ _ASSET = Path(__file__).resolve().parent.parent / "assets" / "personality_preset
 # re-seed does not invalidate ids the UI already holds.
 _ID_NAMESPACE = uuid.UUID("6f9b8f4e-1c7a-5d2b-9a31-7c0e5b2a4d18")
 
-# Preset tag buckets that describe the person (same across every panel).
+# Preset tag buckets that describe the body — locked, same in every panel.
 _IDENTITY_BUCKETS = (
     "hair_color",
     "hair_style",
     "eyes",
     "body",
     "ears_tails_wings",
-    "favorite_clothes",
-    "footwear",
 )
+# Her usual wardrobe. Kept separate so a topic can dress her for the occasion
+# (a beach story must not put her in a cardigan and loafers).
+_OUTFIT_BUCKETS = ("favorite_clothes", "footwear")
 # Worn things → prop layer. The story's throughline prop is the top-level
 # ``signature_prop`` field, which takes precedence over these.
 _PROP_BUCKETS = ("headwear_accessory",)
@@ -117,6 +122,11 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     identity, props, signature = enforce_identity_prop_split(
         identity, props, signature_prop=signature,
     )
+    # Anything wearable that slipped into identity joins the default wardrobe.
+    identity, stray_outfit = split_identity_and_outfit(identity)
+    outfit = stray_outfit + [
+        t for t in _tags(preset, *_OUTFIT_BUCKETS) if t not in stray_outfit
+    ]
 
     preferences = preset.get("preferences") or {}
     scene = preset.get("default_scene") or {}
@@ -140,6 +150,7 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     return {
         "personality": personality,
         "identity_tags": identity,
+        "outfit_tags": outfit,
         "prop_tags": props,
         "signature_prop": signature,
         "palette": _strings(preferences.get("favorite_colors")),

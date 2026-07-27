@@ -68,6 +68,14 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     # lint stores ratio 0..1 (panels_with_resolved / 3)
     through_ok = coverage is None or float(coverage or 0) >= 0.999
 
+    # WeaveScore already measures whether the topic reached the story at all
+    # (0.25 = not one topic word anywhere). Surface it instead of shipping a
+    # story about the character's default scene.
+    score = (session.get("cross_panel_qa") or {}).get("weave_score") or {}
+    topic_fit = (score.get("dimensions") or {}).get("topic_fit")
+    topic_fit = float(topic_fit) if isinstance(topic_fit, (int, float)) else None
+    topic_off = topic_fit is not None and topic_fit < 0.35
+
     cross = session.get("cross_panel_qa") or {}
     from .verify.seal import evaluate_seal_rubric
 
@@ -95,9 +103,15 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "defects": list((lint or {}).get("defects") or []),
         },
         "G2": {
-            "pass": (not has_story) or (cam_ok and through_ok),
-            "detail": f"cameras_unique={cam_ok} throughline={through_ok}",
+            "pass": (not has_story) or (cam_ok and through_ok and not topic_off),
+            "detail": (
+                f"topic_fit={topic_fit:.2f} — the story is not about the topic"
+                if topic_off else
+                f"cameras_unique={cam_ok} throughline={through_ok}"
+            ),
             "warning": True,
+            "topic_fit": topic_fit,
+            "topic_off": topic_off,
         },
         "G3": {
             "pass": samples_viewed >= min_samples,
@@ -175,6 +189,15 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
             "code": "recreate_story",
             "label": "理由を付けて再作成",
             "enabled": True,
+            "defects": defects,
+        }
+
+    if story_version > 0 and g["G2"].get("topic_off"):
+        return {
+            "code": "recreate_story",
+            "label": "お題が反映されていません — 理由を付けて再作成",
+            "enabled": True,
+            "suggest_chips": ["off_topic"],
             "defects": defects,
         }
 

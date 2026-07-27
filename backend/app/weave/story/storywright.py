@@ -21,11 +21,20 @@ def build_story_prompt(
     recreate_constraints: list[str] | None = None,
     avoid_motifs: list[str] | None = None,
     previous_causality: str = "",
+    time_scale: str = "hours",
 ) -> str:
+    from ...story.generator import TIME_SCALES, normalize_time_scale
+    from ...story.topic_anchors import topic_anchor_groups
+
     system = load_prompt("storywright.md")
     personality = character.get("personality") or {}
+    scale = normalize_time_scale(time_scale, default="hours")
     user = {
         "topic": topic,
+        # The nouns the story must actually land on (JA topics carry EN aliases).
+        "topic_anchors": [g for g in topic_anchor_groups(topic)][:6],
+        "time_scale": scale,
+        "time_scale_meaning": f"the three panels are {TIME_SCALES[scale]} apart",
         "author_style": author_style,
         "personality_summary": personality.get("summary") or personality.get("summary_ja") or "",
         "personality_summary_ja": personality.get("summary_ja") or "",
@@ -44,8 +53,10 @@ def build_story_prompt(
         # Per-panel performance vocabulary owned by this character.
         "expression_vocab": list(character.get("expression_vocab") or [])[:8],
         "gesture_vocab": list(character.get("gesture_vocab") or [])[:8],
-        "outfit_style": personality.get("outfit_style") or "",
-        "vibe_keywords": list(personality.get("vibe_keywords") or [])[:6],
+        # Texture hints only — HARD RULE 18 forbids using these to pick a place.
+        "usual_outfit_style": personality.get("outfit_style") or "",
+        "usual_vibe_keywords": list(personality.get("vibe_keywords") or [])[:6],
+        "default_outfit_tags": list(character.get("outfit_tags") or [])[:6],
         "avoid_motifs": avoid_motifs or [],
         "recreate_constraints": recreate_constraints or [],
         "previous_causality_one_liner": previous_causality or "",
@@ -58,10 +69,34 @@ def build_story_prompt(
     )
 
 
-def normalize_story_bundle(data: dict[str, Any]) -> dict[str, Any]:
+def _tag_list(value: Any, *, limit: int = 6) -> list[str]:
+    """LLM tag columns → clean ASCII danbooru-style tags (never prose)."""
+    from ..character.split_tags import soft_normalize_tag
+
+    out: list[str] = []
+    raw = value if isinstance(value, (list, tuple)) else ([value] if value else [])
+    for item in raw:
+        for piece in str(item or "").split(","):
+            t = soft_normalize_tag(piece)
+            # Drop non-ASCII and runaway phrases — those belong in the prose fields.
+            if not t or not t.isascii() or t.count("_") > 3:
+                continue
+            if t not in out:
+                out.append(t)
+    return out[:limit]
+
+
+def normalize_story_bundle(data: dict[str, Any], *, time_scale: str = "") -> dict[str, Any]:
     """Ensure keys / beats / cameras; do not invent plot."""
+    from ...story.generator import normalize_time_scale
+
     out = dict(data)
     world = dict(out.get("world") or {})
+    world["time_scale"] = normalize_time_scale(
+        world.get("time_scale") or time_scale, default=time_scale or "hours",
+    )
+    world["place_tags"] = _tag_list(world.get("place_tags"))
+    world["outfit_tags"] = _tag_list(world.get("outfit_tags"))
     out["world"] = world
     panels_in = list(out.get("panels") or [])
     panels: list[dict[str, Any]] = []
@@ -86,6 +121,7 @@ def normalize_story_bundle(data: dict[str, Any]) -> dict[str, Any]:
             "focus": str(src.get("focus") or ""),
             "time_marker": str(src.get("time_marker") or ""),
             "emotion": str(src.get("emotion") or ""),
+            "state_tags": _tag_list(src.get("state_tags"), limit=4),
             "must_show": list(src.get("must_show") or ["throughline_prop", "throughline_place"]),
             "must_show_resolved": list(src.get("must_show_resolved") or []),
         })
@@ -118,6 +154,7 @@ def apply_story_to_session(session: dict[str, Any], bundle: dict[str, Any]) -> N
             "focus": src.get("focus"),
             "time_marker": src.get("time_marker"),
             "emotion": src.get("emotion"),
+            "state_tags": src.get("state_tags") or [],
             "must_show": src.get("must_show") or [],
             "must_show_resolved": src.get("must_show_resolved") or [],
             "must_not": [],
@@ -169,6 +206,7 @@ async def run_storywright(
     recreate_constraints: list[str] | None = None,
     avoid_motifs: list[str] | None = None,
     previous_causality: str = "",
+    time_scale: str = "hours",
 ) -> dict[str, Any]:
     prompt = build_story_prompt(
         topic=topic,
@@ -177,6 +215,7 @@ async def run_storywright(
         recreate_constraints=recreate_constraints,
         avoid_motifs=avoid_motifs,
         previous_causality=previous_causality,
+        time_scale=time_scale,
     )
     raw = await ollama.chat_text(
         prompt,
@@ -186,4 +225,4 @@ async def run_storywright(
         think=True,
     )
     data = parse_json_object(raw)
-    return normalize_story_bundle(data)
+    return normalize_story_bundle(data, time_scale=time_scale)

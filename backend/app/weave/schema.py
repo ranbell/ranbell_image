@@ -25,6 +25,8 @@ RATE_CHIPS = (
 )
 
 RECREATE_CHIPS = (
+    "off_topic",
+    "same_moment",
     "weak_plot",
     "too_dark",
     "place_scatters",
@@ -48,6 +50,7 @@ def _empty_panel(key: str, beat: str, camera: str) -> dict[str, Any]:
             "focus": "",
             "time_marker": "",
             "emotion": "",
+            "state_tags": [],
             "must_show": ["throughline_prop", "throughline_place"],
             "must_show_resolved": [],
             "must_not": [],
@@ -65,8 +68,10 @@ def _empty_panel(key: str, beat: str, camera: str) -> dict[str, Any]:
             "negative": "",
             "layers": {
                 "identity": [],
+                "outfit": [],
                 "camera": [],
                 "throughline": [],
+                "state": [],
                 "action": [],
                 "emotion": [],
                 "environment": [],
@@ -130,6 +135,8 @@ def new_session_payload(
             "age_band": "",
             "gender_hint": "",
             "occupation_hint": "",
+            # How far apart the three panels sit (story.generator.TIME_SCALES).
+            "time_scale": "hours",
             "reference_image_id": reference_image_id or "",
             "story_model": story_model or "",
             "critic_model": "",
@@ -142,6 +149,8 @@ def new_session_payload(
         "character": {
             "personality": {},
             "identity_tags": [],
+            # Default wardrobe. The story may override it per topic/season.
+            "outfit_tags": [],
             "prop_tags": [],
             "signature_prop": "",
             "palette": [],

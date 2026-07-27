@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from ..character.split_tags import soft_normalize_tag
 
-# Anime image models degrade past ~20–24 tags.
-WEAVE_MAX_TAGS = 24
+# Anime image models degrade past ~20–24 tags, but a three-panel story needs
+# room for identity + wardrobe + place + this panel's own state on top of the
+# framing boilerplate. 24 starved the story layer; 32 leaves it a few slots.
+WEAVE_MAX_TAGS = 32
 
 _SUBJECT_ANCHORS = frozenset({
     "1girl", "2girls", "3girls", "1boy", "2boys", "multiple_girls",

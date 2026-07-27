@@ -29,6 +29,14 @@ CHIP_TEMPLATES: dict[str, str] = {
     "unclear_story": (
         "Rewrite so each panel's visible_change alone explains the causal chain."
     ),
+    "off_topic": (
+        "Rebuild the story so the USER TOPIC is the situation, the place and the "
+        "season. The character's usual scene and usual prop must not replace it."
+    ),
+    "same_moment": (
+        "The three panels must sit time_scale apart, not be three angles on one "
+        "moment. Give each a distinct time_marker and change the place's state."
+    ),
 }
 
 # Japanese UI labels mapped to chip ids
@@ -42,6 +50,8 @@ CHIP_ALIASES: dict[str, str] = {
     "もっと日常": "more_everyday",
     "もっと事件": "more_incident",
     "話がわからない": "unclear_story",
+    "お題と違う": "off_topic",
+    "同じ場面ばかり": "same_moment",
 }
 
 

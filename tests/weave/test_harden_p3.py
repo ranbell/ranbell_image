@@ -44,6 +44,7 @@ def _ok_bundle():
                 "narrative_ja": "n1",
                 "visible_change": "v1",
                 "camera": "long_shot",
+                "time_marker": "afternoon",
                 "must_show": ["throughline_prop", "throughline_place"],
             },
             {
@@ -51,6 +52,7 @@ def _ok_bundle():
                 "narrative_ja": "n2",
                 "visible_change": "v2",
                 "camera": "medium_shot",
+                "time_marker": "dusk",
                 "must_show": ["throughline_prop", "throughline_place"],
             },
             {
@@ -58,6 +60,7 @@ def _ok_bundle():
                 "narrative_ja": "n3",
                 "visible_change": "v3",
                 "camera": "close_up",
+                "time_marker": "night",
                 "must_show": ["throughline_prop", "throughline_place"],
             },
         ],

@@ -37,6 +37,32 @@ def soft_normalize_tag(tag: str) -> str:
     return t
 
 
+def is_outfit_tag(tag: str) -> bool:
+    """Clothing / footwear — hers by default, but overridable per story.
+
+    Kept out of identity_tags so a topic (beach, winter, festival) can dress her
+    for the occasion without changing who she is.
+    """
+    t = soft_normalize_tag(tag)
+    if not t or t in _IDENTITY_HINTS:
+        return False
+    return bool(_OUTFIT_RE.search(t))
+
+
+def split_identity_and_outfit(tags: list[str] | None) -> tuple[list[str], list[str]]:
+    """Return (body tags, outfit tags), order preserved."""
+    body: list[str] = []
+    outfit: list[str] = []
+    for raw in tags or []:
+        t = soft_normalize_tag(raw)
+        if not t:
+            continue
+        target = outfit if is_outfit_tag(t) else body
+        if t not in target:
+            target.append(t)
+    return body, outfit
+
+
 def _is_prop_tag(tag: str) -> bool:
     t = soft_normalize_tag(tag)
     if not t or t in _IDENTITY_HINTS:

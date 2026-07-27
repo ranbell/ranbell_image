@@ -1810,7 +1810,9 @@
       "cliche": "Cliche",
       "moreEveryday": "More everyday",
       "moreIncident": "More incident",
-      "unclearStory": "Unclear story"
+      "unclearStory": "Unclear story",
+      "offTopic": "off topic",
+      "sameMoment": "same moment ×3"
     },
     "rate": {
       "good": "Good",
@@ -1820,6 +1822,15 @@
       "sparse": "Sparse",
       "wrongPerson": "Wrong person",
       "unclearStory": "Unclear"
+    },
+    "timeScale": "Time scale",
+    "timeScaleHint": "How far apart the three beats sit",
+    "timeScaleOpt": {
+      "tens_of_minutes": "tens of minutes",
+      "hours": "a few hours",
+      "days": "a few days",
+      "months": "a few months",
+      "years": "a few years"
     }
   }
 }

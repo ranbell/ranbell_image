@@ -7,7 +7,7 @@ from typing import Any
 
 from ..json_util import parse_json_object
 from ..prompt_loader import load_prompt
-from .split_tags import enforce_identity_prop_split
+from .split_tags import enforce_identity_prop_split, split_identity_and_outfit
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,12 @@ def apply_inference_to_character(character: dict[str, Any], data: dict[str, Any]
         list(visual.get("prop_tags") or []),
         signature_prop=str(visual.get("signature_prop") or ""),
     )
+    # Clothing is her default wardrobe, not her identity — the story dresses her
+    # for the topic (see weave/prompts/storywright.md HARD RULE 20).
+    identity, outfit = split_identity_and_outfit(identity)
     character["personality"] = personality
     character["identity_tags"] = identity
+    character["outfit_tags"] = outfit
     character["prop_tags"] = props
     character["signature_prop"] = sig
     character["palette"] = list(visual.get("palette") or [])

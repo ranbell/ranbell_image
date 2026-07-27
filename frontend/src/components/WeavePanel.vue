@@ -44,6 +44,7 @@ const multiSeed = ref(1)
 const ageBand = ref('')
 const genderHint = ref('')
 const occupationHint = ref('')
+const timeScale = ref('hours')
 const emptyFramingDialog = () => ({ show: false, panelKey: '', fails: 0, limit: 2 })
 const framingDialog = ref(emptyFramingDialog())
 const selectedPanelKey = ref('panel_1')
@@ -68,6 +69,7 @@ const SESSION_SCOPED_REFS = [
   [ageBand, () => ''],
   [genderHint, () => ''],
   [occupationHint, () => ''],
+  [timeScale, () => 'hours'],
   [recreateChips, () => []],
   [trackedJobs, () => []],
   [framingDialog, emptyFramingDialog],
@@ -79,6 +81,8 @@ const SESSION_SCOPED_REFS = [
   [multiSeed, () => 1],
 ]
 const RECREATE_OPTIONS = [
+  { id: 'off_topic', labelKey: 'weave.chip.offTopic' },
+  { id: 'same_moment', labelKey: 'weave.chip.sameMoment' },
   { id: 'weak_plot', labelKey: 'weave.chip.weakPlot' },
   { id: 'too_dark', labelKey: 'weave.chip.tooDark' },
   { id: 'place_scatters', labelKey: 'weave.chip.placeScatters' },
@@ -345,6 +349,7 @@ async function runAction(code) {
         age_band: ageBand.value,
         gender_hint: genderHint.value,
         occupation_hint: occupationHint.value,
+        time_scale: timeScale.value,
       }),
     })
 
@@ -764,6 +769,7 @@ watch(session, (s) => {
   if (typeof s?.inputs?.age_band === 'string') ageBand.value = s.inputs.age_band
   if (typeof s?.inputs?.gender_hint === 'string') genderHint.value = s.inputs.gender_hint
   if (typeof s?.inputs?.occupation_hint === 'string') occupationHint.value = s.inputs.occupation_hint
+  if (s?.inputs?.time_scale) timeScale.value = s.inputs.time_scale
   if (s.session_id) connectStream(s.session_id)
 })
 
@@ -898,10 +904,21 @@ onUnmounted(() => {
               <input v-model="genderHint" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
                 :placeholder="t('weave.genderHintPh')" />
             </div>
-            <div class="col-span-2">
+            <div>
               <label class="text-[10px] text-gray-500">{{ t('weave.occupationHint') }}</label>
               <input v-model="occupationHint" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
                 :placeholder="t('weave.occupationHintPh')" />
+            </div>
+            <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.timeScale') }}</label>
+              <select v-model="timeScale" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs">
+                <option value="tens_of_minutes">{{ t('weave.timeScaleOpt.tens_of_minutes') }}</option>
+                <option value="hours">{{ t('weave.timeScaleOpt.hours') }}</option>
+                <option value="days">{{ t('weave.timeScaleOpt.days') }}</option>
+                <option value="months">{{ t('weave.timeScaleOpt.months') }}</option>
+                <option value="years">{{ t('weave.timeScaleOpt.years') }}</option>
+              </select>
+              <p class="mt-0.5 text-[10px] text-gray-500">{{ t('weave.timeScaleHint') }}</p>
             </div>
           </div>
 

@@ -1810,7 +1810,9 @@
       "cliche": "ありきたり",
       "moreEveryday": "もっと日常",
       "moreIncident": "もっと事件",
-      "unclearStory": "話がわからない"
+      "unclearStory": "話がわからない",
+      "offTopic": "お題と違う",
+      "sameMoment": "同じ場面ばかり"
     },
     "rate": {
       "good": "良い",
@@ -1820,6 +1822,15 @@
       "sparse": "寂しい",
       "wrongPerson": "別人",
       "unclearStory": "話不明"
+    },
+    "timeScale": "時間スケール",
+    "timeScaleHint": "三幕をどれだけ離すか",
+    "timeScaleOpt": {
+      "tens_of_minutes": "数十分",
+      "hours": "数時間",
+      "days": "数日",
+      "months": "数か月",
+      "years": "数年"
     }
   }
 }

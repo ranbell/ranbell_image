@@ -101,6 +101,12 @@ def compile_panel(
 
     camera = str(intent.get("camera") or "medium_shot")
     identity = list(character.get("identity_tags") or [])
+    # The story dresses her for its own place and season; her wardrobe is only
+    # the fallback (see storywright.md HARD RULE 20).
+    outfit = _dedupe(
+        [str(t) for t in (world.get("outfit_tags") or [])]
+        or [str(t) for t in (character.get("outfit_tags") or [])]
+    )
     prop_tags = list(character.get("prop_tags") or [])
     if character.get("signature_prop"):
         prop_tags = _dedupe(prop_tags + [str(character["signature_prop"])])
@@ -116,10 +122,19 @@ def compile_panel(
     )
 
     cam_tags = list(CAMERA_FORCE_ADD.get(camera, [camera]))
-    action = _dedupe([str(intent.get("gesture") or "")])
+    action = _dedupe([str(intent.get("gesture") or ""), str(intent.get("focus") or "")])
     emotion = _dedupe([str(intent.get("emotion") or "")])
     time_marker = _dedupe([str(intent.get("time_marker") or "")])
-    environment = _env_from_setting(str(world.get("setting") or ""), boost=env_boost)
+    # What is visibly different in THIS panel — the only per-panel signal the
+    # renderer gets. Without it the three panels compile to the same picture.
+    state = _dedupe([str(t) for t in (intent.get("state_tags") or [])])
+    # Place tags come from the story (topic-driven); the lexicon is a fallback
+    # for the settings it happens to know.
+    environment = _dedupe([str(t) for t in (world.get("place_tags") or [])])
+    if not environment or env_boost:
+        environment = _dedupe(
+            environment + _env_from_setting(str(world.get("setting") or ""), boost=env_boost)
+        )
     # Optional gallery-NN atmosphere / style tags (never mixed into identity).
     spice = _dedupe([str(t) for t in (character.get("gallery_spice") or [])])
     # Lab Spicer tags (quality_policy.spicer) — also spice layer only.
@@ -140,24 +155,29 @@ def compile_panel(
 
     # Merge then strip framing conflicts (never drop identity/throughline cores)
     body = strip_framing_conflicts(
-        _dedupe(cam_tags + action + emotion + time_marker + environment),
+        _dedupe(cam_tags + state + action + emotion + time_marker + environment),
         camera,
     )
     layers = {
         "identity": identity,
+        "outfit": outfit,
         "camera": cam_tags,
         "throughline": throughline,
+        "state": state,
         "action": action,
         "emotion": emotion,
         "environment": environment,
         "spice": spice,
     }
-    positive_tags = _dedupe(identity + throughline + body + spice)
+    positive_tags = _dedupe(identity + outfit + throughline + body + spice)
     from .budget import cap_positive_tags
 
+    # Priority is the body, the throughline prop and THIS panel's own state.
+    # Wardrobe and camera boilerplate yield first — the topic must survive.
+    sig = soft_normalize_tag(str(character.get("signature_prop") or ""))
     positive_tags = cap_positive_tags(
         positive_tags,
-        priority=_dedupe(identity + throughline),
+        priority=_dedupe(identity + ([sig] if sig else []) + state + environment),
     )
     prose_bits = [
         str(intent.get("narrative_en") or "").strip(),

@@ -55,6 +55,7 @@ class TopicPatch(BaseModel):
     age_band: str | None = None
     gender_hint: str | None = None
     occupation_hint: str | None = None
+    time_scale: str | None = None
 
 
 class StoryGenerateRequest(BaseModel):
@@ -263,6 +264,10 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         inputs["gender_hint"] = str(body.gender_hint).strip()
     if body.occupation_hint is not None:
         inputs["occupation_hint"] = str(body.occupation_hint).strip()
+    if body.time_scale is not None:
+        from ..story.generator import normalize_time_scale
+
+        inputs["time_scale"] = normalize_time_scale(body.time_scale, default="hours")
     if body.mode is not None:
         session.setdefault("quality_policy", {})["mode"] = body.mode
         if body.mode == "lab" and body.spicer is None:

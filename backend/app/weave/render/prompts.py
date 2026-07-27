@@ -18,7 +18,11 @@ _BOARD_PURPOSE: dict[str, list[str]] = {
 
 def compile_board_slot(session: dict[str, Any], slot: str) -> dict[str, str]:
     character = session.get("character") or {}
-    identity = list(character.get("identity_tags") or [])
+    # Board shows who she is in her own clothes — the story's per-topic wardrobe
+    # belongs to the panels, not to the reference sheet.
+    identity = list(character.get("identity_tags") or []) + list(
+        character.get("outfit_tags") or []
+    )
     props = list(character.get("prop_tags") or [])
     sig = soft_normalize_tag(str(character.get("signature_prop") or ""))
     if sig and sig not in props:

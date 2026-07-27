@@ -43,9 +43,9 @@ def test_causality_ok_chain():
             "causality_one_liner": "しおりを見つけ、雨で濡れ、色がにじむ",
         },
         "panels": [
-            {"key": "panel_1", "visible_change": "しおりを手に取る"},
-            {"key": "panel_2", "visible_change": "棚が濡れる"},
-            {"key": "panel_3", "visible_change": "色がにじむ"},
+            {"key": "panel_1", "visible_change": "しおりを手に取る", "time_marker": "afternoon"},
+            {"key": "panel_2", "visible_change": "棚が濡れる", "time_marker": "dusk"},
+            {"key": "panel_3", "visible_change": "色がにじむ", "time_marker": "night"},
         ],
     }
     assert lint_causality(bundle) == []
@@ -71,6 +71,7 @@ def test_story_lint_includes_causality():
             {
                 "key": "panel_1",
                 "camera": "long_shot",
+                "time_marker": "afternoon",
                 "visible_change": "a",
                 "must_show": ["throughline_prop", "throughline_place"],
                 "narrative_ja": "n1",
@@ -78,6 +79,7 @@ def test_story_lint_includes_causality():
             {
                 "key": "panel_2",
                 "camera": "medium_shot",
+                "time_marker": "dusk",
                 "visible_change": "b",
                 "must_show": ["throughline_prop", "throughline_place"],
                 "narrative_ja": "n2",
@@ -85,6 +87,7 @@ def test_story_lint_includes_causality():
             {
                 "key": "panel_3",
                 "camera": "close_up",
+                "time_marker": "night",
                 "visible_change": "c",
                 "must_show": ["throughline_prop", "throughline_place"],
                 "narrative_ja": "n3",

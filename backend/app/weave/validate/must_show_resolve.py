@@ -17,8 +17,11 @@ def _place_tags(place: str) -> list[str]:
     p = soft_normalize_tag(place)
     if not p:
         return []
-    # Keep both the raw token and a mild expansion hint.
-    out = [p]
+    has_latin = any(c.isascii() and c.isalpha() for c in place)
+    # A Japanese place name is not a danbooru tag — emitting it poisoned the
+    # prompt. Only the mapped expansions below survive; world.place_tags is the
+    # real route for the location.
+    out = [p] if has_latin else []
     if "bookstore" in p or "bookshop" in p or "書店" in place:
         out.extend(["bookstore", "bookshelf"])
     if "cafe" in p or "カフェ" in place:
@@ -27,9 +30,7 @@ def _place_tags(place: str) -> list[str]:
         out.append("train_station")
     if "classroom" in p or "教室" in place:
         out.append("classroom")
-    # Japanese free text — keep a generic indoors/outdoors hint only when Latin missing.
-    if not any(c.isascii() and c.isalpha() for c in place):
-        out.append("indoors")
+    # No indoors/outdoors guess: it used to tag outdoor topics (花火大会) indoors.
     return list(dict.fromkeys(t for t in out if t))
 
 

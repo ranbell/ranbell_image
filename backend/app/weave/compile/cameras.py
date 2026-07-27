@@ -1,13 +1,12 @@
 """Camera supremacy tables for deterministic compile."""
 from __future__ import annotations
 
+# Framing is boilerplate: keep it to the few tags that actually move the model,
+# so the budget goes to the story instead (long_shot used to spend 6 slots).
 CAMERA_FORCE_ADD: dict[str, list[str]] = {
-    "long_shot": [
-        "long_shot", "full_body", "small_figure", "wide_shot",
-        "expansive_background", "deep_space",
-    ],
-    "medium_shot": ["medium_shot", "upper_body", "cowboy_shot"],
-    "close_up": ["close-up", "upper_body", "detailed_face"],
+    "long_shot": ["long_shot", "full_body", "wide_shot"],
+    "medium_shot": ["medium_shot", "upper_body"],
+    "close_up": ["close-up", "detailed_face"],
 }
 
 CAMERA_FORCE_REMOVE: dict[str, list[str]] = {

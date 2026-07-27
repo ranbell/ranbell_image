@@ -51,6 +51,25 @@ def lint_causality(story_bundle: dict[str, Any]) -> list[dict[str, str]]:
             "fix": "Each panel needs a distinct visible change",
         })
 
+    # Time is the spine: three panels must sit apart on the chosen scale, not be
+    # three angles on one moment (the "same story three times" failure).
+    markers = [
+        str(((p.get("intent") if isinstance(p.get("intent"), dict) else p) or {})
+            .get("time_marker") or "").strip().lower()
+        for p in panels
+    ]
+    filled_markers = [m for m in markers if m]
+    if panels and (not filled_markers or len(set(filled_markers)) < 2):
+        defects.append({
+            "code": "TIME_MARKER_FLAT",
+            "panel": "",
+            "problem": (
+                "time_marker is empty or identical across panels — the beats do not "
+                "sit apart in time"
+            ),
+            "fix": "Give each panel a distinct time_marker spanning world.time_scale",
+        })
+
     # Soft chain cue: one_liner should reference progression (arrows / then / て / →)
     if one and filled:
         chain_cue = bool(re.search(r"(→|->|then|そして|てから|→|→)", one, re.I))

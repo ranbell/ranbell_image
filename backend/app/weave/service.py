@@ -96,7 +96,15 @@ def lock_identity(session: dict[str, Any]) -> dict[str, Any]:
         character.get("prop_tags"),
         signature_prop=str(character.get("signature_prop") or ""),
     )
+    from .character.split_tags import split_identity_and_outfit
+
+    # Only the body is locked. Clothing stays overridable per story so the topic
+    # can dress her for its own place and season.
+    identity, stray_outfit = split_identity_and_outfit(identity)
+    outfit = list(character.get("outfit_tags") or [])
+    outfit += [t for t in stray_outfit if t not in outfit]
     character["identity_tags"] = identity
+    character["outfit_tags"] = outfit
     character["prop_tags"] = props
     character["signature_prop"] = sig
     character["identity_locked"] = True
@@ -221,6 +229,7 @@ async def infer_character(
     # performance vocabulary.
     character["expression_vocab"] = []
     character["gesture_vocab"] = []
+    character["outfit_tags"] = []
     inputs["preset_id"] = ""
     inputs["preset_key"] = ""
     base_identity = list(character.get("identity_tags") or [])
@@ -479,6 +488,7 @@ async def generate_story(
         character=session.get("character") or {},
         author_style=author_style,
         avoid_motifs=list(session.get("avoid_motifs") or []),
+        time_scale=str(inputs.get("time_scale") or "hours"),
     )
     return await _lint_repair_apply(
         session, bundle, ollama,
@@ -538,6 +548,7 @@ async def recreate_story(
         recreate_constraints=constraints,
         avoid_motifs=list(session.get("avoid_motifs") or []),
         previous_causality=str(prev_causal),
+        time_scale=str(inputs.get("time_scale") or "hours"),
     )
     await _lint_repair_apply(
         session, bundle, ollama,
