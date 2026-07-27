@@ -21,6 +21,17 @@ def _workflow(session: dict[str, Any], *, sample: bool) -> str:
     return str(inputs.get("workflow_final") or "").strip()
 
 
+def _bound_llm(app, session: dict[str, Any]):
+    gw = getattr(app.state, "ollama", None)
+    if gw is None:
+        return None
+    provider = str((session.get("inputs") or {}).get("llm_provider") or "ollama")
+    bind = getattr(gw, "bind", None)
+    if callable(bind):
+        return bind(provider)
+    return gw
+
+
 def submit_board_jobs(app, session_id: str, session: dict[str, Any]) -> list[dict[str, Any]]:
     from ...jobs.runners import run_weave_image_generate
 
@@ -35,6 +46,7 @@ def submit_board_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
     images: list[dict[str, Any]] = []
     jobs: list[dict[str, Any]] = []
     base_sha = str((session.get("inputs") or {}).get("reference_image_id") or "")
+    llm = _bound_llm(app, session)
 
     for b in briefs:
         slot = str(b.get("slot") or "").strip()
@@ -62,6 +74,7 @@ def submit_board_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
             seed=seed,
             steps=20,
             base_sha256=base_sha,
+            ollama=llm,
         )
         images.append({
             "slot": slot,
@@ -94,6 +107,7 @@ def submit_sample_job(
     compiled = compile_panel_render(session, panel_key)
     seed = random.randint(0, (1 << 64) - 1)
     base_sha = str((session.get("inputs") or {}).get("reference_image_id") or "")
+    llm = _bound_llm(app, session)
     job_id = app.state.spooler.submit(
         JobLane.GENERATION,
         "weave_sample",
@@ -114,6 +128,7 @@ def submit_sample_job(
         seed=seed,
         steps=20,
         base_sha256=base_sha,
+        ollama=llm,
     )
     panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
     if panel is not None:
@@ -137,6 +152,7 @@ def submit_final_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
 
     jobs: list[dict[str, Any]] = []
     base_sha = str((session.get("inputs") or {}).get("reference_image_id") or "")
+    llm = _bound_llm(app, session)
     for panel_key in ("panel_1", "panel_2", "panel_3"):
         compiled = compile_panel_render(session, panel_key)
         seed = random.randint(0, (1 << 64) - 1)
@@ -160,6 +176,7 @@ def submit_final_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
             seed=seed,
             steps=None,
             base_sha256=base_sha,
+            ollama=llm,
         )
         panel = next((p for p in session.get("panels") or [] if p.get("key") == panel_key), None)
         if panel is not None:

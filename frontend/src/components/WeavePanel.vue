@@ -2,6 +2,9 @@
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
+import BoardColumn from './weave/BoardColumn.vue'
+import ScoreVlmBlock from './weave/ScoreVlmBlock.vue'
+import GatesColumn from './weave/GatesColumn.vue'
 
 const props = defineProps({
   show: Boolean,
@@ -22,6 +25,8 @@ const authorStyle = ref('')
 const authorId = ref('')
 const authors = ref([])
 const storyModel = ref('')
+const vlmModel = ref('')
+const llmProvider = ref('ollama')
 const workflow = ref('')
 const workflows = ref([])
 const ollamaModels = ref([])
@@ -136,6 +141,8 @@ async function ensureSession() {
     author_style: authorStyle.value,
     author_id: authorId.value,
     story_model: storyModel.value,
+    vlm_model: vlmModel.value || storyModel.value,
+    llm_provider: llmProvider.value,
     workflow_final: workflow.value,
     workflow_sample: workflow.value,
     reference_image_id: props.baseImage?.sha256 || '',
@@ -236,6 +243,8 @@ async function runAction(code) {
         author_style: authorStyle.value,
         author_id: authorId.value,
         story_model: storyModel.value,
+        vlm_model: vlmModel.value || storyModel.value,
+        llm_provider: llmProvider.value,
         use_gallery_nn: useGalleryNn.value,
         vlm_assist: useVlmAssist.value,
       }),
@@ -442,7 +451,7 @@ async function runVlmAssist(forceHeuristic = false) {
       body: JSON.stringify({
         panel_key: selectedPanel.value.key,
         force_heuristic: forceHeuristic,
-        vlm_model: storyModel.value,
+        vlm_model: vlmModel.value || storyModel.value,
       }),
     })
   } catch (e) {
@@ -531,6 +540,26 @@ watch(selectedPanel, (p) => {
   editingNarrative.value = p?.intent?.narrative_ja || ''
 }, { immediate: true })
 
+async function exportSession() {
+  if (!sessionId.value) return
+  busy.value = true
+  try {
+    const data = await api(`/api/weave/sessions/${sessionId.value}/export`)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `weave-${sessionId.value.slice(0, 8)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    emit('toast', { msg: t('weave.exported'), type: 'ok' })
+  } catch (e) {
+    emit('toast', { msg: String(e.message || e), type: 'error' })
+  } finally {
+    busy.value = false
+  }
+}
+
 function close() {
   closeStream()
   emit('update:show', false)
@@ -550,6 +579,8 @@ watch(session, (s) => {
   const flag = s?.quality_policy?.gallery_nn ?? s?.inputs?.use_gallery_nn
   if (typeof flag === 'boolean') useGalleryNn.value = flag
   if (typeof s?.quality_policy?.vlm_assist === 'boolean') useVlmAssist.value = s.quality_policy.vlm_assist
+  if (s?.inputs?.vlm_model) vlmModel.value = s.inputs.vlm_model
+  if (s?.inputs?.llm_provider) llmProvider.value = s.inputs.llm_provider
   if (s.session_id) connectStream(s.session_id)
 })
 
@@ -587,108 +618,22 @@ onUnmounted(() => {
       </div>
 
       <div class="grid min-h-0 flex-1 grid-cols-1 gap-0 md:grid-cols-[240px_1fr_280px]">
-        <!-- LEFT: character board -->
-        <aside class="border-r border-gray-800 p-3 space-y-3 overflow-y-auto">
-          <label class="block text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.personality') }}</label>
-          <textarea v-model="personalityText" rows="4"
-            class="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
-            :placeholder="t('weave.personalityPh')" />
-
-          <label class="flex items-start gap-2 rounded border border-gray-800 bg-gray-900/60 px-2 py-1.5 cursor-pointer">
-            <input v-model="useGalleryNn" type="checkbox" class="mt-0.5 accent-teal-500" />
-            <span>
-              <span class="block text-[11px] text-teal-100">{{ t('weave.galleryNn') }}</span>
-              <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.galleryNnHint') }}</span>
-            </span>
-          </label>
-
-          <label class="flex items-start gap-2 rounded border border-gray-800 bg-gray-900/60 px-2 py-1.5 cursor-pointer">
-            <input v-model="useVlmAssist" type="checkbox" class="mt-0.5 accent-teal-500" />
-            <span>
-              <span class="block text-[11px] text-teal-100">{{ t('weave.vlmAssist') }}</span>
-              <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.vlmAssistHint') }}</span>
-            </span>
-          </label>
-
-          <div class="space-y-1">
-            <div class="text-[10px] text-gray-500">identity</div>
-            <div class="flex flex-wrap gap-1">
-              <span v-for="tag in (character.identity_tags || [])" :key="'i'+tag"
-                class="rounded bg-teal-950/80 px-1.5 py-0.5 text-[10px] text-teal-200">{{ tag }}</span>
-            </div>
-            <div class="text-[10px] text-gray-500 mt-2">prop</div>
-            <div class="flex flex-wrap gap-1">
-              <span v-for="tag in (character.prop_tags || [])" :key="'p'+tag"
-                class="rounded bg-amber-950/80 px-1.5 py-0.5 text-[10px] text-amber-200">{{ tag }}</span>
-            </div>
-            <template v-if="gallerySpice.length">
-              <div class="text-[10px] text-gray-500 mt-2">{{ t('weave.gallerySpice') }}</div>
-              <div class="flex flex-wrap gap-1">
-                <span v-for="tag in gallerySpice" :key="'s'+tag"
-                  class="rounded bg-cyan-950/80 px-1.5 py-0.5 text-[10px] text-cyan-200">{{ tag }}</span>
-              </div>
-            </template>
-          </div>
-
-          <div v-if="tagDiff && (tagDiff.added?.length || tagDiff.removed?.length || tagDiff.spice?.length)"
-            class="rounded border border-cyan-900/50 bg-cyan-950/20 p-2 space-y-1">
-            <div class="text-[10px] uppercase tracking-wider text-cyan-400/90">{{ t('weave.tagDiff') }}</div>
-            <div v-if="tagDiff.added_from_reference?.length" class="text-[10px] text-teal-200">
-              ref: +{{ tagDiff.added_from_reference.join(', ') }}
-            </div>
-            <div v-if="tagDiff.added_from_gallery?.length" class="text-[10px] text-cyan-200">
-              gallery: +{{ tagDiff.added_from_gallery.join(', ') }}
-            </div>
-            <div v-if="tagDiff.removed?.length" class="text-[10px] text-amber-300">
-              −{{ tagDiff.removed.join(', ') }}
-            </div>
-            <div class="text-[10px] text-gray-500">{{ t('weave.tagDiffHint') }}</div>
-          </div>
-
-          <p v-if="useGalleryNn && galleryNnStatus && !galleryNnStatus.applied && galleryNnStatus.reason && galleryNnStatus.reason !== 'skipped'"
-            class="text-[10px] text-amber-400/90">
-            {{ t('weave.galleryNnSkip', { reason: galleryNnStatus.reason }) }}
-          </p>
-
-          <div v-if="galleryRefs.length" class="space-y-1">
-            <div class="text-[10px] uppercase tracking-wider text-cyan-500/80">{{ t('weave.galleryRefs') }}</div>
-            <div class="grid grid-cols-3 gap-1">
-              <a v-for="ref in galleryRefs" :key="ref.sha256"
-                :href="`/api/images/${ref.sha256}`" target="_blank" rel="noopener"
-                class="rounded border border-gray-800 overflow-hidden bg-gray-900"
-                :title="ref.name || ref.sha256">
-                <img v-if="thumb(ref.sha256)" :src="thumb(ref.sha256)" class="w-full aspect-square object-cover" />
-              </a>
-            </div>
-          </div>
-          <p v-else-if="useGalleryNn && character.identity_tags?.length && galleryNnStatus?.applied === false"
-            class="text-[10px] text-gray-500">{{ t('weave.galleryEmpty') }}</p>
-
-          <div class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.board') }}</div>
-          <div class="grid grid-cols-1 gap-2">
-            <div v-for="img in boardImages" :key="img.slot"
-              class="rounded border border-gray-800 bg-gray-900/80 overflow-hidden">
-              <div class="px-2 py-1 text-[10px] text-gray-400 flex justify-between">
-                <span>{{ img.slot }}</span>
-                <span v-if="img.pending || !img.image_id" class="text-amber-400">…</span>
-              </div>
-              <img v-if="thumb(img.image_id)" :src="thumb(img.image_id)" class="w-full aspect-[3/4] object-cover" />
-              <div v-else class="aspect-[3/4] flex items-center justify-center text-[10px] text-gray-600">{{ t('weave.noImage') }}</div>
-            </div>
-          </div>
-          <div class="text-[10px] text-gray-500" v-if="character.reasoning_ja">{{ character.reasoning_ja }}</div>
-
-          <div v-if="characterWarnings.length" class="rounded border border-amber-800/50 bg-amber-950/20 p-2 space-y-1">
-            <div class="text-[10px] text-amber-400">{{ t('weave.warnings') }}</div>
-            <p v-for="(w, i) in characterWarnings" :key="i" class="text-[10px] text-amber-100/90">{{ w.problem }}</p>
-          </div>
-
-          <button v-if="character.identity_locked || session?.suggest_reinfer"
-            class="w-full rounded border border-amber-700/40 bg-amber-950/40 px-2 py-1.5 text-[11px] text-amber-100 disabled:opacity-40"
-            :disabled="busy" @click="confirmReinfer">
-            {{ t('weave.reinfer') }}
-          </button>
-        </aside>
+        <BoardColumn
+          v-model:personality-text="personalityText"
+          v-model:use-gallery-nn="useGalleryNn"
+          v-model:use-vlm-assist="useVlmAssist"
+          :character="character"
+          :board-images="boardImages"
+          :gallery-refs="galleryRefs"
+          :gallery-spice="gallerySpice"
+          :tag-diff="tagDiff"
+          :gallery-nn-status="galleryNnStatus"
+          :character-warnings="characterWarnings"
+          :suggest-reinfer="!!session?.suggest_reinfer"
+          :busy="busy"
+          :thumb="thumb"
+          @reinfer="confirmReinfer"
+        />
 
         <!-- CENTER -->
         <main class="p-4 space-y-4 overflow-y-auto">
@@ -703,6 +648,20 @@ onUnmounted(() => {
               <select v-model="storyModel" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs font-mono">
                 <option value="">—</option>
                 <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.vlmModel') }}</label>
+              <select v-model="vlmModel" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs font-mono">
+                <option value="">{{ t('weave.vlmModelSame') }}</option>
+                <option v-for="m in ollamaModels" :key="'v'+m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.llmProvider') }}</label>
+              <select v-model="llmProvider" class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs">
+                <option value="ollama">ollama</option>
+                <option value="openai">openai</option>
               </select>
             </div>
             <div>
@@ -809,49 +768,16 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="rounded border border-gray-800/80 bg-gray-950/40 p-2 space-y-2">
-              <div class="flex items-center justify-between gap-2">
-                <div class="text-[10px] uppercase text-teal-500/80">{{ t('weave.score') }}</div>
-                <button class="text-[10px] text-teal-300 disabled:opacity-40" :disabled="busy || !sessionId"
-                  @click="recomputeScore">{{ t('weave.scoreRefresh') }}</button>
-              </div>
-              <div v-if="weaveScore" class="space-y-1">
-                <div class="text-sm text-teal-100">
-                  {{ t('weave.scoreOverall') }}:
-                  <span class="font-mono">{{ Number(weaveScore.overall ?? weaveScore.session_overall ?? 0).toFixed(2) }}</span>
-                </div>
-                <div class="flex flex-wrap gap-1">
-                  <span v-for="(v, k) in (weaveScore.dimensions || {})" :key="k"
-                    class="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-300">
-                    {{ k }} {{ typeof v === 'number' ? v.toFixed(2) : v }}
-                  </span>
-                </div>
-              </div>
-              <p v-else class="text-[10px] text-gray-600">{{ t('weave.scoreEmpty') }}</p>
-
-              <div class="flex items-center justify-between gap-2 pt-1">
-                <div class="text-[10px] uppercase text-cyan-500/80">{{ t('weave.vlm') }}</div>
-                <div class="flex gap-2">
-                  <button class="text-[10px] text-cyan-300 disabled:opacity-40"
-                    :disabled="busy || !useVlmAssist || !selectedPanel?.sample?.image_id"
-                    @click="runVlmAssist(false)">{{ t('weave.vlmRun') }}</button>
-                  <button class="text-[10px] text-gray-400 disabled:opacity-40"
-                    :disabled="busy || !useVlmAssist || !selectedPanel?.sample?.image_id"
-                    @click="runVlmAssist(true)">{{ t('weave.vlmHeuristic') }}</button>
-                </div>
-              </div>
-              <div v-if="vlmAnswers?.answers" class="grid grid-cols-2 gap-1">
-                <div v-for="(v, k) in vlmAnswers.answers" :key="k"
-                  class="rounded px-1.5 py-1 text-[10px]"
-                  :class="v === true ? 'bg-teal-950/60 text-teal-200' : v === false ? 'bg-amber-950/50 text-amber-200' : 'bg-gray-900 text-gray-500'">
-                  {{ k }}: {{ v === true ? '✓' : v === false ? '✗' : '?' }}
-                </div>
-                <div class="col-span-2 text-[9px] text-gray-500">
-                  {{ vlmAnswers.method }} · {{ selectedPanel?.key }}
-                </div>
-              </div>
-              <p v-else class="text-[10px] text-gray-600">{{ t('weave.vlmEmpty') }}</p>
-            </div>
+            <ScoreVlmBlock
+              :weave-score="weaveScore"
+              :vlm-answers="vlmAnswers"
+              :selected-panel="selectedPanel"
+              :use-vlm-assist="useVlmAssist"
+              :busy="busy"
+              :session-id="sessionId"
+              @score="recomputeScore"
+              @vlm="runVlmAssist"
+            />
           </div>
 
           <!-- recreate -->
@@ -893,48 +819,17 @@ onUnmounted(() => {
           </div>
         </main>
 
-        <!-- RIGHT: gates / timeline -->
-        <aside class="border-l border-gray-800 p-3 space-y-3 overflow-y-auto text-xs">
-          <div class="flex items-center justify-between">
-            <div class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.gates') }}</div>
-            <span class="text-[9px]" :class="streamLive ? 'text-teal-400' : 'text-gray-600'">
-              SSE {{ streamLive ? '●' : '○' }}
-            </span>
-          </div>
-          <ul class="space-y-1">
-            <li v-for="(g, key) in gates" :key="key" class="flex justify-between gap-2">
-              <span class="text-gray-400">{{ key }}</span>
-              <span :class="g.pass ? 'text-teal-400' : 'text-gray-600'">{{ g.pass ? '✓' : '·' }}</span>
-            </li>
-          </ul>
-
-          <div class="text-[10px] uppercase tracking-wider text-cyan-500/80 pt-2">{{ t('weave.crossQa') }}</div>
-          <ul class="space-y-1 text-[10px] text-gray-400">
-            <li>cam {{ crossQa.camera_diversity ?? '—' }}</li>
-            <li>through {{ crossQa.throughline_coverage ?? '—' }}</li>
-            <li>drift {{ crossQa.identity_drift_risk ?? '—' }}</li>
-            <li>lookdev {{ crossQa.lookdev_ready ? '✓' : '·' }}</li>
-          </ul>
-
-          <div class="text-[10px] uppercase tracking-wider text-teal-500/80 pt-2">{{ t('weave.timeline') }}</div>
-          <ul class="space-y-2 max-h-64 overflow-y-auto">
-            <li v-for="ev in (session?.timeline || []).slice().reverse()" :key="ev.id"
-              class="rounded bg-gray-900/80 px-2 py-1.5">
-              <div class="text-[9px] text-gray-500">{{ ev.actor }} · {{ ev.type }}</div>
-              <div class="text-[11px] text-gray-300">{{ ev.text }}</div>
-            </li>
-          </ul>
-
-          <button v-if="session?.status === 'lookdev' || session?.status === 'rendering'"
-            class="w-full rounded border border-teal-700/40 px-2 py-1.5 text-teal-200 hover:bg-teal-950"
-            :disabled="busy" @click="seal">
-            {{ t('weave.seal') }}
-          </button>
-          <button class="w-full rounded border border-gray-700 px-2 py-1.5 text-gray-400 hover:bg-gray-900"
-            @click="emit('open-storybook')">
-            {{ t('weave.openStorybook') }}
-          </button>
-        </aside>
+        <GatesColumn
+          :gates="gates"
+          :cross-qa="crossQa"
+          :timeline="session?.timeline || []"
+          :stream-live="streamLive"
+          :session-status="session?.status || ''"
+          :busy="busy"
+          @seal="seal"
+          @export="exportSession"
+          @open-storybook="emit('open-storybook')"
+        />
       </div>
     </div>
   </div>

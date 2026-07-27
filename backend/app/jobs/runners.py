@@ -2980,6 +2980,7 @@ async def run_weave_image_generate(
     seed: int | None,
     steps: int | None = None,
     base_sha256: str = "",
+    ollama=None,
 ) -> dict:
     """GEN lane for Weave board / sample / final images.
 
@@ -3041,6 +3042,7 @@ async def run_weave_image_generate(
         try:
             await weave_db.attach_render_result(
                 db, session_id, kind=kind, target=target, image_id=sha256,
+                ollama=ollama,
             )
         except Exception as exc:
             logger.error(

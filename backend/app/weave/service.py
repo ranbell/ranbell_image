@@ -519,6 +519,21 @@ def rate_sample(
                 "text": "negative: close-up, portrait, face focus",
                 "active": True,
             })
+            # Guided repair: inject throughline place into must_show_resolved
+            # and reinforce camera (compile uses CAMERA_FORCE_ADD + negatives).
+            intent = panel.setdefault("intent", {})
+            world = (session.get("story_bundle") or {}).get("world") or {}
+            place = str(world.get("throughline_place") or "").strip()
+            setting = str(world.get("setting") or "").strip()
+            resolved = list(intent.get("must_show_resolved") or [])
+            for token in (place, setting):
+                if token and token not in resolved:
+                    resolved.append(token)
+            intent["must_show_resolved"] = resolved
+            # Prefer long/medium framing language on next compile
+            cam = str(intent.get("camera") or "")
+            if cam == "close_up":
+                intent["camera"] = "medium_shot"
             compile_all_panels(session)
             continue
         if chip in ("missing_prop", "小道具なし"):
@@ -529,10 +544,21 @@ def rate_sample(
                 "text": "emphasize signature_prop",
                 "active": True,
             })
-            if panel.get("intent") is not None:
-                panel["intent"]["focus"] = str(
-                    (session.get("character") or {}).get("signature_prop") or "prop"
-                )
+            intent = panel.setdefault("intent", {})
+            character = session.get("character") or {}
+            sig = str(character.get("signature_prop") or "").strip()
+            prop_tags = [str(t) for t in (character.get("prop_tags") or []) if t]
+            intent["focus"] = sig or "prop"
+            # Double-inject props into must_show_resolved (throughline layer)
+            resolved = list(intent.get("must_show_resolved") or [])
+            for token in ([sig] if sig else []) + prop_tags:
+                if token and token not in resolved:
+                    resolved.append(token)
+            world = (session.get("story_bundle") or {}).get("world") or {}
+            tprop = str(world.get("throughline_prop") or "").strip()
+            if tprop and tprop not in resolved:
+                resolved.append(tprop)
+            intent["must_show_resolved"] = resolved
             compile_all_panels(session)
             continue
         if chip in ("dead_expression", "表情死"):
@@ -551,9 +577,24 @@ def rate_sample(
             continue
         if chip in ("wrong_person", "別人"):
             session["suggest_reinfer"] = True
+            # State noise removal: drop volatile emotion/gesture that may fight identity
+            intent = panel.get("intent")
+            if isinstance(intent, dict):
+                for noisy in ("emotion", "gesture", "focus"):
+                    val = str(intent.get(noisy) or "").strip().lower()
+                    if val in ("looking_at_viewer", "expressionless", "blank", "pose", ""):
+                        intent[noisy] = ""
+                # Clear gallery spice bleed for next board/sample compile
+            character = session.get("character") or {}
+            if character.get("gallery_spice"):
+                character["gallery_spice"] = []
+            for c in session.get("constraints") or []:
+                if c.get("text") == "face_visible_emotion" and c.get("scope") == panel_key:
+                    c["active"] = False
+            compile_all_panels(session)
             append_timeline(
                 session, actor="system", type_="message",
-                text="wrong person — confirm re-infer (story will be wiped)",
+                text="wrong person — confirm re-infer (story will be wiped); state noise cleared",
             )
             continue
     from .verify.cross_panel import refresh_cross_panel_qa

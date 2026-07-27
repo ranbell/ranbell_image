@@ -22,6 +22,7 @@ class CreateSessionRequest(BaseModel):
     author_style: str = ""
     reference_image_id: str = ""
     story_model: str = ""
+    vlm_model: str = ""
     llm_provider: Literal["ollama", "openai"] = "ollama"
     workflow_final: str = ""
     workflow_sample: str = ""
@@ -41,6 +42,8 @@ class TopicPatch(BaseModel):
     author_style: str = ""
     author_id: str | None = None
     story_model: str = ""
+    vlm_model: str = ""
+    llm_provider: Literal["ollama", "openai"] | None = None
     use_gallery_nn: bool | None = None
     vlm_assist: bool | None = None
 
@@ -91,8 +94,29 @@ def _model_from(session: dict, body_model: str = "") -> str:
     return (body_model or (session.get("inputs") or {}).get("story_model") or "").strip()
 
 
+def _vlm_model_from(session: dict, body_model: str = "") -> str:
+    inputs = session.get("inputs") or {}
+    return (
+        body_model
+        or str(inputs.get("vlm_model") or "").strip()
+        or str(inputs.get("story_model") or "").strip()
+    )
+
+
 def _ollama(request: Request):
     return request.app.state.ollama
+
+
+def _llm(request: Request, session: dict[str, Any] | None = None):
+    """Bind Weave LLM/VLM to session ``inputs.llm_provider`` (default ollama)."""
+    gw = request.app.state.ollama
+    provider = "ollama"
+    if session:
+        provider = str((session.get("inputs") or {}).get("llm_provider") or "ollama")
+    bind = getattr(gw, "bind", None)
+    if callable(bind):
+        return bind(provider)
+    return gw
 
 
 async def _load(request: Request, session_id: str) -> dict[str, Any]:
@@ -141,6 +165,8 @@ async def create_session(body: CreateSessionRequest, request: Request):
         locale=body.locale,
         use_gallery_nn=body.use_gallery_nn,
     )
+    if body.vlm_model:
+        payload.setdefault("inputs", {})["vlm_model"] = body.vlm_model
     await resolve_author_style(payload, request.app.state.db)
     session_id = await session_db.create_session(request.app.state.db, payload)
     session = await session_db.get_session(request.app.state.db, session_id)
@@ -181,6 +207,10 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
                 inputs["author_style"] = ""
     if body.story_model:
         inputs["story_model"] = body.story_model
+    if body.vlm_model:
+        inputs["vlm_model"] = body.vlm_model
+    if body.llm_provider is not None:
+        inputs["llm_provider"] = body.llm_provider
     if body.use_gallery_nn is not None:
         set_gallery_nn_enabled(session, body.use_gallery_nn)
     if body.vlm_assist is not None:
@@ -203,7 +233,7 @@ async def character_infer(session_id: str, body: InferRequest, request: Request)
     try:
         await service.infer_character(
             session,
-            _ollama(request),
+            _llm(request, session),
             model=model,
             options={"temperature": body.temperature},
             personality_text=body.personality_text or None,
@@ -329,7 +359,7 @@ async def story_generate(session_id: str, body: StoryGenerateRequest, request: R
     try:
         await service.generate_story(
             session,
-            _ollama(request),
+            _llm(request, session),
             model=model,
             options={"temperature": body.temperature},
             topic=body.topic or None,
@@ -374,7 +404,7 @@ async def story_recreate(session_id: str, body: RecreateRequest, request: Reques
     try:
         await service.recreate_story(
             session,
-            _ollama(request),
+            _llm(request, session),
             model=model,
             chips=body.chips,
             options={"temperature": body.temperature},
@@ -489,14 +519,15 @@ async def sample_vlm_assist(
 ):
     """Fixed 4-question VLM assist (or WD14 heuristic) on a sample panel."""
     session = await _load(request, session_id)
-    if body.vlm_model:
-        session.setdefault("inputs", {})["vlm_model"] = body.vlm_model
+    resolved_vlm = _vlm_model_from(session, body.vlm_model)
+    if resolved_vlm:
+        session.setdefault("inputs", {})["vlm_model"] = resolved_vlm
     try:
         result = await service.run_panel_vlm_assist(
             session,
             panel_key=body.panel_key,
             db=request.app.state.db,
-            ollama=_ollama(request),
+            ollama=_llm(request, session),
             force_heuristic=body.force_heuristic,
         )
     except service.WeaveError as e:

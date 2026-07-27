@@ -62,6 +62,7 @@ async def attach_render_result(
     kind: str,
     target: str,
     image_id: str,
+    ollama=None,
 ) -> None:
     """Link a finished Comfy image onto board/sample/final slots."""
     session = await get_session(db, session_id)
@@ -98,15 +99,27 @@ async def attach_render_result(
             if kind == "sample":
                 from .verify.heuristics import apply_framing_to_panel, resolve_wd14_for_image
                 from .verify.score import apply_weave_scores
-                from .verify.vlm_assist import apply_heuristic_vlm
+                from .verify.vlm_assist import apply_heuristic_vlm, apply_vlm_assist_to_panel
                 from .verify.cross_panel import refresh_cross_panel_qa
 
                 wd14 = await resolve_wd14_for_image(db, image_id)
                 apply_framing_to_panel(panel, wd14)
                 policy = session.get("quality_policy") or {}
-                # Heuristic 4Q only when vlm_assist enabled; full VLM is on-demand.
                 if policy.get("vlm_assist", True):
-                    apply_heuristic_vlm(panel, session, wd14)
+                    inputs = session.get("inputs") or {}
+                    has_model = bool(
+                        str(inputs.get("vlm_model") or inputs.get("story_model") or "").strip()
+                    )
+                    if ollama is not None and has_model:
+                        try:
+                            await apply_vlm_assist_to_panel(
+                                panel, session, db=db, ollama=ollama, wd14_tags=wd14,
+                            )
+                        except Exception as exc:
+                            logger.warning("weave VLM assist failed: %s", exc)
+                            apply_heuristic_vlm(panel, session, wd14)
+                    else:
+                        apply_heuristic_vlm(panel, session, wd14)
                 apply_weave_scores(session)
                 refresh_cross_panel_qa(session)
             break
