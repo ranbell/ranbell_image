@@ -984,6 +984,52 @@ def test_writes_publish_session_events():
     run(_run())
 
 
+def test_sampling_follows_the_model_and_stays_adjustable():
+    """Gemma wants temperature 1.0 / top_k 64 / top_p 0.95; 0.7 was off-spec.
+
+    The old Chronicle path sent exactly those (jobs/runners._chronicle_llm_options);
+    Weave hardcoded 0.7 and sent no top_k/top_p at all.
+    """
+    from app.weave.llm_options import default_temperature, weave_options
+
+    gemma = "huihui_ai/gemma-4-abliterated:E4b-qat"
+    assert default_temperature(gemma) == 1.0
+    assert default_temperature("qwen2.5:14b") is None
+
+    auto = weave_options(model=gemma, story=True)
+    assert auto["temperature"] == 1.0
+    assert auto["top_k"] == 64 and auto["top_p"] == 0.95
+    assert auto["num_ctx"] == 32768
+
+    # The session value wins — the model is selectable, so this must be too.
+    picked = weave_options(model=gemma, temperature=0.6, story=True)
+    assert picked["temperature"] == 0.6
+    assert picked["top_k"] == 64
+
+    # Unknown family: impose nothing, let the modelfile decide.
+    unknown = weave_options(model="qwen2.5:14b")
+    assert "temperature" not in unknown and "top_k" not in unknown
+
+
+def test_session_temperature_reaches_the_call():
+    async def _run():
+        llm = FakeLLM()
+        app = build_app(llm=llm)
+        async with client_for(app) as client:
+            sid = (await _create(client))["session_id"]
+            r = await client.patch(
+                f"/api/weave/sessions/{sid}/inputs", json={"temperature": 0.45},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["inputs"]["temperature"] == 0.45
+
+            await _lock_and_story(client, sid)
+            for call in llm.calls:
+                assert (call["options"] or {}).get("temperature") == 0.45, call["kind"]
+
+    run(_run())
+
+
 def test_every_llm_call_gets_a_context_window():
     """Ollama defaults num_ctx to 2048; the story prompt alone is bigger.
 

@@ -1833,6 +1833,10 @@
       "years": "a few years"
     },
     "boardRender": "Render",
-    "boardRerender": "Re-render"
+    "boardRerender": "Re-render",
+    "temperature": "Temperature",
+    "temperatureHint": "Blank follows the model's own",
+    "temperatureAuto": "model default",
+    "temperatureModelDefault": "model default {value}"
   }
 }

@@ -211,9 +211,7 @@ async def run_vlm_assist(
             prompt,
             [image_bytes],
             model=model,
-            options=weave_options(
-                options or {"num_predict": 120}, temperature=0.1,
-            ),
+            options=weave_options(options or {"num_predict": 120}, model=model),
             think=False,
         )
         data = parse_json_object(raw)

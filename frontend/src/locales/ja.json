@@ -1833,6 +1833,10 @@
       "years": "数年"
     },
     "boardRender": "生成",
-    "boardRerender": "再生成"
+    "boardRerender": "再生成",
+    "temperature": "温度",
+    "temperatureHint": "空欄ならモデル推奨値",
+    "temperatureAuto": "モデル既定",
+    "temperatureModelDefault": "モデル推奨 {value}"
   }
 }

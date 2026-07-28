@@ -33,7 +33,7 @@ class CreateSessionRequest(BaseModel):
 class InferRequest(BaseModel):
     personality_text: str = ""
     story_model: str = ""
-    temperature: float = 0.7
+    temperature: float | None = None
     use_gallery_nn: bool | None = None
 
 
@@ -55,12 +55,13 @@ class TopicPatch(BaseModel):
     gender_hint: str | None = None
     occupation_hint: str | None = None
     time_scale: str | None = None
+    temperature: float | None = None
 
 
 class StoryGenerateRequest(BaseModel):
     topic: str = ""
     story_model: str = ""
-    temperature: float = 0.7
+    temperature: float | None = None
     author_style: str = ""
 
 
@@ -77,7 +78,7 @@ class NarrativePatchRequest(BaseModel):
 class RecreateRequest(BaseModel):
     chips: list[str] = Field(default_factory=list)
     story_model: str = ""
-    temperature: float = 0.8
+    temperature: float | None = None
 
 
 class RollbackRequest(BaseModel):
@@ -163,6 +164,18 @@ async def weave_catalog(request: Request):
     """Workflows, LLM models, authors — shared capability catalog for Weave UI."""
     from ..story.catalog import build_chronicle_catalog
     return await build_chronicle_catalog(request.app)
+
+
+@router.get("/model-defaults")
+async def weave_model_defaults(model: str = ""):
+    """Sampling the UI should pre-fill for a model (empty → the model's own)."""
+    from .llm_options import default_temperature, family_sampling
+
+    return {
+        "model": model,
+        "temperature": default_temperature(model),
+        "sampling": family_sampling(model),
+    }
 
 
 @router.get("/presets")
@@ -263,6 +276,11 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         from ..story.generator import normalize_time_scale
 
         inputs["time_scale"] = normalize_time_scale(body.time_scale, default="hours")
+    if body.temperature is not None:
+        # 0 clears it back to the model family's own default.
+        inputs["temperature"] = (
+            max(0.0, min(2.0, float(body.temperature))) or None
+        )
     if body.mode is not None:
         session.setdefault("quality_policy", {})["mode"] = body.mode
         if body.mode == "lab" and body.spicer is None:
@@ -288,7 +306,7 @@ async def character_infer(session_id: str, body: InferRequest, request: Request)
             session,
             _llm(request, session),
             model=model,
-            options={"temperature": body.temperature},
+            options={"temperature": body.temperature} if body.temperature is not None else None,
             personality_text=body.personality_text or None,
             db=request.app.state.db,
             embed_model=str(cfg.get("embed_model") or "nomic-embed-text"),
@@ -430,7 +448,7 @@ async def story_generate(session_id: str, body: StoryGenerateRequest, request: R
             session,
             _llm(request, session),
             model=model,
-            options={"temperature": body.temperature},
+            options={"temperature": body.temperature} if body.temperature is not None else None,
             topic=body.topic or None,
             db=request.app.state.db,
         )
@@ -476,7 +494,7 @@ async def story_recreate(session_id: str, body: RecreateRequest, request: Reques
             _llm(request, session),
             model=model,
             chips=body.chips,
-            options={"temperature": body.temperature},
+            options={"temperature": body.temperature} if body.temperature is not None else None,
             db=request.app.state.db,
         )
     except service.WeaveError as e:

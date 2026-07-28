@@ -185,7 +185,9 @@ async def infer_character(
     data = await run_personalitywright(
         ollama,
         model=model,
-        options=await weave_options_from_config(db, options, temperature=0.7),
+        options=await weave_options_from_config(
+            db, options, model=model, temperature=inputs.get("temperature"),
+        ),
         personality_text=text,
         topic=str(inputs.get("topic") or ""),
         author_style=str(inputs.get("author_style") or ""),
@@ -411,7 +413,10 @@ async def _lint_repair_apply(
                 report = await run_critic(
                     ollama,
                     model=model,
-                    options=weave_options(options, temperature=0.2),
+                    options=weave_options(
+                        options, model=model,
+                        temperature=(session.get("inputs") or {}).get("temperature"),
+                    ),
                     story_bundle=bundle,
                     defects=defects,
                     topic=topic,
@@ -460,7 +465,9 @@ async def generate_story(
 
     await resolve_author_style(session, db)
     apply_topic_warnings(session)
-    opts = await weave_options_from_config(db, options, temperature=0.7)
+    opts = await weave_options_from_config(
+        db, options, model=model, temperature=inputs.get("temperature"), story=True,
+    )
     author_style = str(inputs.get("author_style") or "").strip()
     if not author_style:
         raise WeaveError("author_style is required (preset or freeform)")
@@ -521,7 +528,9 @@ async def recreate_story(
     if not topic_s:
         raise WeaveError("topic is required")
     # author_style already validated above
-    opts = await weave_options_from_config(db, options, temperature=0.8)
+    opts = await weave_options_from_config(
+        db, options, model=model, temperature=inputs.get("temperature"), story=True,
+    )
     bundle = await run_storywright(
         ollama,
         model=model,

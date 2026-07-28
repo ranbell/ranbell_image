@@ -141,6 +141,8 @@ def new_session_payload(
             "time_scale": "hours",
             "reference_image_id": reference_image_id or "",
             "story_model": story_model or "",
+            # Empty → the model family's published default (see llm_options).
+            "temperature": None,
             "critic_model": "",
             "vlm_model": "",
             "llm_provider": llm_provider or "ollama",

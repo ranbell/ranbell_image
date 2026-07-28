@@ -44,6 +44,9 @@ const ageBand = ref('')
 const genderHint = ref('')
 const occupationHint = ref('')
 const timeScale = ref('hours')
+// Empty string = follow the model family's published default.
+const temperature = ref('')
+const modelDefaultTemp = ref(null)
 const emptyFramingDialog = () => ({ show: false, panelKey: '', fails: 0, limit: 2 })
 const framingDialog = ref(emptyFramingDialog())
 const selectedPanelKey = ref('panel_1')
@@ -69,6 +72,7 @@ const SESSION_SCOPED_REFS = [
   [genderHint, () => ''],
   [occupationHint, () => ''],
   [timeScale, () => 'hours'],
+  [temperature, () => ''],
   [recreateChips, () => []],
   [trackedJobs, () => []],
   [framingDialog, emptyFramingDialog],
@@ -195,6 +199,15 @@ async function loadCatalog() {
     console.warn('[Weave] presets', e)
   }
 }
+
+watch(storyModel, async (m) => {
+  modelDefaultTemp.value = null
+  if (!m) return
+  try {
+    const res = await api(`/api/weave/model-defaults?model=${encodeURIComponent(m)}`)
+    modelDefaultTemp.value = res?.temperature ?? null
+  } catch { /* placeholder only */ }
+}, { immediate: true })
 
 async function renderBoard() {
   // Queues portrait/full/prop. Callable again: a board that failed or that you
@@ -375,6 +388,7 @@ async function runAction(code) {
         gender_hint: genderHint.value,
         occupation_hint: occupationHint.value,
         time_scale: timeScale.value,
+        temperature: temperature.value === '' ? null : Number(temperature.value),
       }),
     })
 
@@ -795,6 +809,7 @@ watch(session, (s) => {
   if (typeof s?.inputs?.gender_hint === 'string') genderHint.value = s.inputs.gender_hint
   if (typeof s?.inputs?.occupation_hint === 'string') occupationHint.value = s.inputs.occupation_hint
   if (s?.inputs?.time_scale) timeScale.value = s.inputs.time_scale
+  if (typeof s?.inputs?.temperature === 'number') temperature.value = String(s.inputs.temperature)
   if (s.session_id) connectStream(s.session_id)
 })
 
@@ -944,6 +959,15 @@ onUnmounted(() => {
                 <option value="years">{{ t('weave.timeScaleOpt.years') }}</option>
               </select>
               <p class="mt-0.5 text-[10px] text-gray-500">{{ t('weave.timeScaleHint') }}</p>
+            </div>
+            <div>
+              <label class="text-[10px] text-gray-500">{{ t('weave.temperature') }}</label>
+              <input v-model="temperature" type="number" step="0.05" min="0" max="2"
+                class="mt-0.5 w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs"
+                :placeholder="modelDefaultTemp !== null
+                  ? t('weave.temperatureModelDefault', { value: modelDefaultTemp })
+                  : t('weave.temperatureAuto')" />
+              <p class="mt-0.5 text-[10px] text-gray-500">{{ t('weave.temperatureHint') }}</p>
             </div>
           </div>
 
