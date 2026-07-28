@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..character.split_tags import soft_normalize_tag
+from ..llm_options import weave_options
 from ..json_util import parse_json_object
 from .heuristics import evaluate_sample_framing
 
@@ -210,7 +211,9 @@ async def run_vlm_assist(
             prompt,
             [image_bytes],
             model=model,
-            options=options or {"temperature": 0.1, "num_predict": 120},
+            options=weave_options(
+                options or {"num_predict": 120}, temperature=0.1,
+            ),
             think=False,
         )
         data = parse_json_object(raw)

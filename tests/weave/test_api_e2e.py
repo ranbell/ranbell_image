@@ -973,3 +973,33 @@ def test_writes_publish_session_events():
                 await unsubscribe(sid, queue)
 
     run(_run())
+
+
+def test_every_llm_call_gets_a_context_window():
+    """Ollama defaults num_ctx to 2048; the story prompt alone is bigger.
+
+    On the default window the front of the prompt — role, hard rules, output
+    schema — was silently truncated, which is why bundles came back with an
+    empty world.setting and unparseable JSON.
+    """
+    async def _run():
+        from app.weave.llm_options import WEAVE_NUM_CTX
+        from app.weave.story.storywright import build_story_prompt
+
+        llm = FakeLLM()
+        app = build_app(llm=llm)
+        async with client_for(app) as client:
+            sid = (await _create(client))["session_id"]
+            await _lock_and_story(client, sid)
+
+        assert llm.calls, "no LLM calls recorded"
+        for call in llm.calls:
+            ctx = (call["options"] or {}).get("num_ctx")
+            assert ctx and ctx >= 8192, f"{call['kind']} ran with num_ctx={ctx}"
+
+        # The prompt really does not fit in Ollama's default window.
+        prompt = build_story_prompt(topic="x", character={}, author_style="y")
+        assert len(prompt) > 2048, "guard is pointless if the prompt got small"
+        assert WEAVE_NUM_CTX >= 16384
+
+    run(_run())
