@@ -201,3 +201,26 @@ def test_upload_image_subfolder_form():
     client._http = _Http()
     out = asyncio.run(client.upload_image(b"png", "chronicle_ref.png"))
     assert out == "input/chr/chronicle_ref.png"
+
+
+def test_append_negative_ignores_a_wired_input():
+    """A linked negative used to be stringified into the prompt as "['99', 0]"."""
+    client = ComfyUIClient.__new__(ComfyUIClient)
+    wf = _minimal_workflow()
+    # Negative text comes from another node instead of being a literal.
+    wf["3"]["inputs"]["text"] = ["99", 0]
+
+    out = client.patch_workflow(wf, "pos tags", "lowres, worst quality", append_negative=True)
+    text = out["3"]["inputs"]["text"]
+
+    assert isinstance(text, str)
+    assert text == "lowres, worst quality"
+    assert "99" not in text
+
+
+def test_append_negative_still_extends_a_literal():
+    client = ComfyUIClient.__new__(ComfyUIClient)
+    out = client.patch_workflow(
+        _minimal_workflow(), "pos", "lowres", append_negative=True,
+    )
+    assert out["3"]["inputs"]["text"] == "neg, lowres"

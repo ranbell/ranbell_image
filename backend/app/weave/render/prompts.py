@@ -8,16 +8,14 @@ from ..compile.cameras import CAMERA_FORCE_ADD, strip_framing_conflicts
 from ..compile.layers import WEAVE_NEGATIVE, compile_panel
 
 
-_BOARD_PURPOSE: dict[str, list[str]] = {
-    "portrait": ["close-up", "upper_body", "detailed_face", "looking_away"],
-    "full": ["long_shot", "full_body", "small_figure", "wide_shot"],
-    "prop": ["medium_shot", "upper_body"],
-}
+# Only two board renders exist: the sheet (fed to panel generation as the
+# reference) and a close-up so a human can judge the face at full size.
+_PORTRAIT_PURPOSE = ["close-up", "upper_body", "detailed_face", "looking_away"]
 
 
-# The mood slot is one sheet showing the same person across four lives, not a
-# single atmospheric shot — `multiple_views` plus polaroid framing does the work.
-_MOOD_FALLBACK = {
+# The sheet shows the same person across four lives in one image —
+# `multiple_views` plus polaroid framing does the work.
+_SHEET_FALLBACK = {
     "hobby": ("reading book", "casual clothes"),
     "active": ("tennis", "sportswear"),
     "food": ("eating", "crepe"),
@@ -36,15 +34,15 @@ def _first(values: Any, limit: int = 1) -> list[str]:
     return [str(v).strip() for v in (values or []) if str(v).strip()][:limit]
 
 
-def _mood_vignettes(character: dict[str, Any]) -> list[str]:
+def _sheet_vignettes(character: dict[str, Any]) -> list[str]:
     """Four life slices for the sheet, drawn from the character where possible."""
     personality = character.get("personality") or {}
     gestures = [str(g) for g in (character.get("gesture_vocab") or []) if g]
     outfit = _first(character.get("outfit_tags"), 2)
     likes = [str(x).lower() for x in (personality.get("likes") or [])]
 
-    hobby_act = gestures[0] if gestures else _MOOD_FALLBACK["hobby"][0]
-    hobby_wear = ", ".join(outfit) if outfit else _MOOD_FALLBACK["hobby"][1]
+    hobby_act = gestures[0] if gestures else _SHEET_FALLBACK["hobby"][0]
+    hobby_wear = ", ".join(outfit) if outfit else _SHEET_FALLBACK["hobby"][1]
 
     # The sheet is about range: an active slice identical to the hobby slice
     # wastes one of the four frames.
@@ -53,26 +51,26 @@ def _mood_vignettes(character: dict[str, Any]) -> list[str]:
             g for g in gestures
             if any(h in g for h in _ACTIVE_HINTS) and g != hobby_act
         ),
-        _MOOD_FALLBACK["active"][0],
+        _SHEET_FALLBACK["active"][0],
     )
     # Likes are prose ("tea gone cold") — take the food word, not the sentence.
     food = next(
         (h for like in likes for h in _FOOD_HINTS if h in like),
-        _MOOD_FALLBACK["food"][1],
+        _SHEET_FALLBACK["food"][1],
     )
     job = str(
         personality.get("occupation") or personality.get("occupation_hint") or ""
-    ).strip() or _MOOD_FALLBACK["work"][0]
+    ).strip() or _SHEET_FALLBACK["work"][0]
 
     return [
         f"{hobby_act}, {hobby_wear}",
-        f"{active}, {_MOOD_FALLBACK['active'][1]}",
-        f"{_MOOD_FALLBACK['food'][0]}, {food}",
-        f"{job}, {_MOOD_FALLBACK['work'][1]}",
+        f"{active}, {_SHEET_FALLBACK['active'][1]}",
+        f"{_SHEET_FALLBACK['food'][0]}, {food}",
+        f"{job}, {_SHEET_FALLBACK['work'][1]}",
     ]
 
 
-def compile_mood_sheet(session: dict[str, Any]) -> dict[str, str]:
+def compile_character_sheet(session: dict[str, Any]) -> dict[str, str]:
     """One image, several views: centre pose plus four polaroid vignettes."""
     character = session.get("character") or {}
     identity = [str(t) for t in (character.get("identity_tags") or []) if t]
@@ -88,8 +86,13 @@ def compile_mood_sheet(session: dict[str, Any]) -> dict[str, str]:
         (e for e in expressions if any(w in e for w in ("smile", "grin", "blush"))),
         "smile",
     )
-    centre = ", ".join(["casual", "leaning_forward", "dynamic posture", warm])
-    vignettes = "\n".join(f" - {v}" for v in _mood_vignettes(character))
+    # The centre also carries the throughline prop — there is no prop slot to
+    # confirm it separately any more.
+    centre = ", ".join(
+        ["casual", "leaning_forward", "dynamic posture", warm]
+        + ([f"holding {sig}"] if sig else [])
+    )
+    vignettes = "\n".join(f" - {v}" for v in _sheet_vignettes(character))
     positive = (
         f"Character: {', '.join(identity + outfit)},\n"
         f"Accessories: {', '.join(props) if props else 'none'}\n"
@@ -111,13 +114,13 @@ def compile_mood_sheet(session: dict[str, Any]) -> dict[str, str]:
         "positive": positive,
         "negative": ", ".join(neg_bits),
         "camera": "long_shot",
-        "slot": "mood",
+        "slot": "sheet",
     }
 
 
 def compile_board_slot(session: dict[str, Any], slot: str) -> dict[str, str]:
-    if slot == "mood":
-        return compile_mood_sheet(session)
+    if slot == "sheet":
+        return compile_character_sheet(session)
 
     character = session.get("character") or {}
     # Board shows who she is in her own clothes — the story's per-topic wardrobe
@@ -130,15 +133,9 @@ def compile_board_slot(session: dict[str, Any], slot: str) -> dict[str, str]:
     if sig and sig not in props:
         props.append(sig)
 
-    purpose = list(_BOARD_PURPOSE.get(slot, ["medium_shot"]))
-    camera = "close_up" if slot == "portrait" else (
-        "long_shot" if slot == "full" else "medium_shot"
-    )
-    cam_tags = list(CAMERA_FORCE_ADD.get(camera, purpose))
+    camera = "close_up"
+    cam_tags = list(CAMERA_FORCE_ADD.get(camera, _PORTRAIT_PURPOSE))
     tags = identity + cam_tags
-    if slot == "prop":
-        tags.extend(props)
-        tags.append("holding")
     # Strip framing conflicts for the intended camera
     tags = strip_framing_conflicts(tags, camera if camera != "close_up" else "close_up")
     # Dedup

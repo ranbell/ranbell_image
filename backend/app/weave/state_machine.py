@@ -16,13 +16,13 @@ def _has_finals(session: dict[str, Any]) -> bool:
 
 
 def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    from .schema import board_is_usable
+
     character = session.get("character") or {}
     board = character.get("board") or {}
-    images = board.get("images") or []
-    slots = {img.get("slot") for img in images if img.get("image_id")}
     identity_locked = bool(character.get("identity_locked"))
     board_accepted = bool(board.get("accepted"))
-    has_portrait_full = "portrait" in slots and "full" in slots
+    has_board = board_is_usable(session)
 
     story_version = int(session.get("story_version") or 0)
     bundle = session.get("story_bundle") or {}
@@ -92,8 +92,8 @@ def gates(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "detail": "identity_locked",
         },
         "G0_hard": {
-            "pass": board_accepted and has_portrait_full,
-            "detail": "board.accepted with portrait+full",
+            "pass": board_accepted and has_board,
+            "detail": "board.accepted with a rendered sheet and portrait",
         },
         "G1": {
             "pass": has_story and lint_pass,
@@ -247,13 +247,14 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
         if not g["G0_hard"]["pass"]:
             # Offering "accept" for a board that was never rendered is a dead end:
             # the accept call refuses it and there is no other way to queue one.
+            from .schema import board_is_usable
+
             board = (character.get("board") or {})
             images = board.get("images") or []
-            rendered = {img.get("slot") for img in images if img.get("image_id")}
             pending = any(
                 img.get("pending") or not img.get("image_id") for img in images
             )
-            if not {"portrait", "full"} <= rendered:
+            if not board_is_usable(session):
                 if pending and any(img.get("job_id") for img in images):
                     return {
                         "code": "wait_board",

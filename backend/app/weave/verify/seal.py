@@ -16,10 +16,10 @@ def _finals_ready(panels: list[dict[str, Any]]) -> bool:
 
 def evaluate_seal_rubric(session: dict[str, Any]) -> dict[str, Any]:
     """Rubric: same person / same story / framing / causality / finals×3."""
+    from ..schema import board_is_usable
+
     character = session.get("character") or {}
     board = character.get("board") or {}
-    images = board.get("images") or []
-    slots = {img.get("slot") for img in images if img.get("image_id")}
     world = (session.get("story_bundle") or {}).get("world") or {}
     lint = session.get("last_lint") or {}
     panels = session.get("panels") or []
@@ -47,9 +47,7 @@ def evaluate_seal_rubric(session: dict[str, Any]) -> dict[str, Any]:
 
     checks = {
         "identity_locked": bool(character.get("identity_locked")),
-        "board_accepted": bool(board.get("accepted")) and (
-            "portrait" in slots and "full" in slots
-        ),
+        "board_accepted": bool(board.get("accepted")) and board_is_usable(session),
         "story_lint": bool(lint.get("pass")),
         "framing_ok": framing_ok,
         "causality": bool(str(world.get("causality_one_liner") or "").strip()),

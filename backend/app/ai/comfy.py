@@ -221,9 +221,22 @@ class ComfyUIClient:
                 # append_negative extends the workflow's baked negative instead of
                 # replacing it, so caller-supplied tags add to (not wipe) the default.
                 if append_negative:
-                    existing = str(
-                        wf[neg_target]["inputs"].get("text") or ""
-                    ).strip()
+                    raw = wf[neg_target]["inputs"].get("text")
+                    # An API-format input is either a literal or a link
+                    # ["<node_id>", <slot>]. str() on a link used to paste
+                    # "['99', 0]" into the prompt, and the assignment below
+                    # severs the link anyway — so treat a link as "nothing to
+                    # keep" and say so rather than losing it silently.
+                    if isinstance(raw, str):
+                        existing = raw.strip()
+                    else:
+                        existing = ""
+                        if raw is not None:
+                            logger.info(
+                                "[comfy] node %s negative text is wired from %s; "
+                                "its content cannot be appended to",
+                                neg_target, raw,
+                            )
                     wf[neg_target]["inputs"]["text"] = (
                         f"{existing}, {negative}" if existing else negative
                     )

@@ -8,7 +8,6 @@ defineProps({
   useGalleryNn: Boolean,
   useVlmAssist: Boolean,
   useSpicer: Boolean,
-  useMoodSlot: Boolean,
   multiSeed: { type: Number, default: 1 },
   character: { type: Object, default: () => ({}) },
   boardImages: { type: Array, default: () => [] },
@@ -28,7 +27,6 @@ const emit = defineEmits([
   'update:useGalleryNn',
   'update:useVlmAssist',
   'update:useSpicer',
-  'update:useMoodSlot',
   'update:multiSeed',
   'reinfer',
 ])
@@ -92,19 +90,6 @@ function presetSummary(p) {
       <span>
         <span class="block text-[11px] text-teal-100">{{ t('weave.vlmAssist') }}</span>
         <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.vlmAssistHint') }}</span>
-      </span>
-    </label>
-
-    <label class="flex items-start gap-2 rounded border border-gray-800 bg-gray-900/60 px-2 py-1.5 cursor-pointer">
-      <input
-        :checked="useMoodSlot"
-        type="checkbox"
-        class="mt-0.5 accent-teal-500"
-        @change="emit('update:useMoodSlot', $event.target.checked)"
-      />
-      <span>
-        <span class="block text-[11px] text-teal-100">{{ t('weave.moodSlot') }}</span>
-        <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.moodSlotHint') }}</span>
       </span>
     </label>
 

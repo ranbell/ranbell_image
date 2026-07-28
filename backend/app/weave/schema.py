@@ -10,9 +10,10 @@ STATUSES = ("character", "story", "lookdev", "rendering", "sealed")
 PANEL_KEYS = ("panel_1", "panel_2", "panel_3")
 BEATS = ("setup", "turn", "settle")
 CAMERAS = ("long_shot", "medium_shot", "close_up")
-# mood is the multi-view character sheet — on by default, it is the quickest
-# read on whether the character holds together across situations.
-DEFAULT_BOARD_SLOTS = ("portrait", "full", "prop", "mood")
+# Two renders, two jobs: the sheet is what panel generation references, the
+# portrait is where a human judges the face. Nothing else earned its GPU time.
+BOARD_SLOTS = ("sheet", "portrait")
+DEFAULT_BOARD_SLOTS = BOARD_SLOTS
 
 # Rate chips → used by look-dev / recreate
 RATE_CHIPS = (
@@ -119,7 +120,6 @@ def new_session_payload(
             "min_sample_panels": 1,
             "critic": "on_lint_fail",
             "vlm_assist": True,
-            "board_slots": list(DEFAULT_BOARD_SLOTS),
             "framing_fail_limit": 2,
             "strict_seal": False,
             "allow_story_before_board": True,
@@ -191,6 +191,30 @@ def new_session_payload(
         "created_at": now,
         "updated_at": now,
     }
+
+
+def rendered_board_slots(session: dict[str, Any], *, allow_pending: bool = False) -> set[str]:
+    board = (session.get("character") or {}).get("board") or {}
+    out: set[str] = set()
+    for img in board.get("images") or []:
+        iid = str(img.get("image_id") or "")
+        slot = str(img.get("slot") or "")
+        if not iid or not slot:
+            continue
+        if iid.startswith(("pending:", "placeholder:")) and not allow_pending:
+            continue
+        out.add(slot)
+    return out
+
+
+def board_is_usable(session: dict[str, Any], *, allow_pending: bool = False) -> bool:
+    """A face plus a full-body view exist.
+
+    ``sheet`` is the current full-body view; ``full`` is the retired slot kept
+    here so sessions started before the board was cut down still pass.
+    """
+    slots = rendered_board_slots(session, allow_pending=allow_pending)
+    return "portrait" in slots and bool(slots & {"sheet", "full"})
 
 
 def append_timeline(

@@ -123,7 +123,6 @@ def unlock_identity(session: dict[str, Any], *, confirm: bool = False) -> dict[s
     character = session.setdefault("character", {})
     character["identity_locked"] = False
     character["board"] = {"images": [], "accepted": False}
-    character["board_briefs"] = []
     character["lab_spice"] = []
     character["tag_diff"] = None
     reset_story_scope(session)
@@ -135,38 +134,23 @@ def unlock_identity(session: dict[str, Any], *, confirm: bool = False) -> dict[s
 
 
 def accept_board(session: dict[str, Any], *, allow_pending: bool = False) -> dict[str, Any]:
-    from .character.board_slots import sync_board_briefs
+    from .schema import BOARD_SLOTS, board_is_usable
 
     board = session.setdefault("character", {}).setdefault("board", {})
-    images = board.get("images") or []
-
-    def _usable(img: dict) -> bool:
-        iid = str(img.get("image_id") or "")
-        if not iid:
-            return False
-        if iid.startswith("pending:") or iid.startswith("placeholder:"):
-            return allow_pending
-        return True
-
-    slots = {img.get("slot") for img in images if _usable(img)}
-    if "portrait" not in slots or "full" not in slots:
+    if not board_is_usable(session, allow_pending=allow_pending):
         # Test / dry path: synthesize placeholders only when explicitly allowed
-        sync_board_briefs(session)
-        briefs = (session.get("character") or {}).get("board_briefs") or []
-        if allow_pending and briefs and not any(_usable(i) for i in images):
+        if allow_pending and not (board.get("images") or []):
             board["images"] = [
                 {
-                    "slot": b.get("slot"),
-                    "image_id": f"placeholder:{b.get('slot')}",
+                    "slot": slot,
+                    "image_id": f"placeholder:{slot}",
                     "positive": "",
                     "pending": False,
                 }
-                for b in briefs
-                if b.get("slot") in ("portrait", "full", "prop", "mood")
+                for slot in BOARD_SLOTS
             ]
-            slots = {img.get("slot") for img in board["images"] if _usable(img)}
-        if "portrait" not in slots or "full" not in slots:
-            raise WeaveError("board needs rendered portrait and full images before accept")
+        if not board_is_usable(session, allow_pending=allow_pending):
+            raise WeaveError("board needs a rendered sheet and portrait before accept")
     board["accepted"] = True
     append_timeline(session, actor="user", type_="lock", text="board accepted")
     return session
@@ -326,7 +310,6 @@ def apply_preset(session: dict[str, Any], preset: dict[str, Any]) -> dict[str, A
     character.update(fields)
     character["identity_locked"] = False
     character["board"] = {"images": [], "accepted": False}
-    character["board_briefs"] = []
     character["gallery_refs"] = []
     character["gallery_spice"] = []
     character["gallery_nn"] = None

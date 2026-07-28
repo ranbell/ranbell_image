@@ -34,17 +34,13 @@ def _bound_llm(app, session: dict[str, Any]):
 
 def submit_board_jobs(app, session_id: str, session: dict[str, Any]) -> list[dict[str, Any]]:
     from ...jobs.runners import run_weave_image_generate
-    from ..character.board_slots import resolve_board_slots, sync_board_briefs
+    from ..schema import BOARD_SLOTS
 
     workflow = _workflow(session, sample=True)
     if not workflow:
         raise ValueError("workflow_final or workflow_sample is required for board render")
 
-    sync_board_briefs(session)
-    slots = resolve_board_slots(session)
-    briefs = (session.get("character") or {}).get("board_briefs") or [
-        {"slot": s} for s in slots
-    ]
+    briefs = [{"slot": slot} for slot in BOARD_SLOTS]
     board = session.setdefault("character", {}).setdefault("board", {})
     images: list[dict[str, Any]] = []
     jobs: list[dict[str, Any]] = []
@@ -95,6 +91,30 @@ def submit_board_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
     return jobs
 
 
+def panel_reference_sha(session: dict[str, Any]) -> str:
+    """What the panel renders are conditioned on.
+
+    The design calls the board "the visual truth", but every render used to be
+    conditioned on the gallery image the panel was opened from — so the board
+    was generated, admired and thrown away, and a preset-only session had no
+    visual reference at all. The accepted sheet is the reference now; the
+    gallery image seeds the board and feeds reference_mix's tag extraction.
+    """
+    from ..schema import rendered_board_slots
+
+    character = session.get("character") or {}
+    board = character.get("board") or {}
+    if board.get("accepted"):
+        usable = rendered_board_slots(session)
+        for slot in ("sheet", "portrait"):
+            if slot not in usable:
+                continue
+            for img in board.get("images") or []:
+                if img.get("slot") == slot and img.get("image_id"):
+                    return str(img["image_id"])
+    return str((session.get("inputs") or {}).get("reference_image_id") or "")
+
+
 def _multi_seed_count(session: dict[str, Any]) -> int:
     policy = session.get("quality_policy") or {}
     try:
@@ -119,7 +139,7 @@ def submit_sample_job(
 
     compiled = compile_panel_render(session, panel_key)
     inputs = session.get("inputs") or {}
-    base_sha = str(inputs.get("reference_image_id") or "")
+    base_sha = panel_reference_sha(session)
     steps_raw = inputs.get("sample_steps")
     try:
         steps = int(steps_raw) if steps_raw is not None else 20
@@ -200,7 +220,7 @@ def submit_final_jobs(app, session_id: str, session: dict[str, Any]) -> list[dic
         raise ValueError("workflow_final is required for final render")
 
     jobs: list[dict[str, Any]] = []
-    base_sha = str((session.get("inputs") or {}).get("reference_image_id") or "")
+    base_sha = panel_reference_sha(session)
     llm = _bound_llm(app, session)
     n = _multi_seed_count(session)
     for panel_key in ("panel_1", "panel_2", "panel_3"):

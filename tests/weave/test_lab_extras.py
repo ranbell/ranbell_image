@@ -1,4 +1,4 @@
-"""Lab extras: Spicer, mood board slot, multi-seed."""
+"""Lab extras: Spicer and multi-seed."""
 from __future__ import annotations
 
 import sys
@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.weave.character.board_slots import resolve_board_slots, set_mood_slot, sync_board_briefs
 from app.weave.character.spicer import harvest_spice_tags, is_spicer_enabled, run_spicer, set_spicer_enabled
 from app.weave.compile.layers import compile_panel
 from app.weave.render.prompts import compile_board_slot
@@ -115,27 +114,18 @@ def test_spicer_off_clears_and_excludes_from_compile():
         assert t not in out["layers"]["spice"]
 
 
-def test_mood_slot_sync_briefs():
-    session = new_session_payload()
-    # The character sheet ships on by default.
-    assert resolve_board_slots(session) == ["portrait", "full", "prop", "mood"]
-    slots = set_mood_slot(session, True)
-    assert "mood" in slots
-    briefs = session["character"]["board_briefs"]
-    assert [b["slot"] for b in briefs] == ["portrait", "full", "prop", "mood"]
-    set_mood_slot(session, False)
-    assert "mood" not in resolve_board_slots(session)
-    assert all(b["slot"] != "mood" for b in session["character"]["board_briefs"])
+def test_board_is_a_fixed_pair():
+    """No slot machinery any more: a sheet to reference and a face to check."""
+    from app.weave.schema import BOARD_SLOTS
+
+    assert BOARD_SLOTS == ("sheet", "portrait")
 
 
-def test_mood_board_is_a_multi_view_sheet():
-    """Mood is one sheet of several views, not another single atmospheric shot."""
+def test_sheet_is_a_multi_view_image():
     session = _session_rainy()
     set_spicer_enabled(session, True)
     run_spicer(session)
-    sync_board_briefs(session)
-    set_mood_slot(session, True)
-    compiled = compile_board_slot(session, "mood")
+    compiled = compile_board_slot(session, "sheet")
     pos = compiled["positive"]
     assert "multiple_views" in pos
     assert "** Chronicles of Character **" in pos

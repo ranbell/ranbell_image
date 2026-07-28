@@ -1,33 +1,37 @@
-"""Force identity vs prop tag separation (P5)."""
+"""Tag shape and routing helpers.
+
+Buckets are decided by the producer (preset buckets, LLM fields) and, where a
+loose tag must still be placed, by the WD14-derived classifier in
+``app.tags.catalog``. There is deliberately no hand-written vocabulary here:
+the previous 30-word outfit regex misfiled 16 of 19 real garment tags —
+``swimsuit`` and ``bikini`` among them — because anything it did not match fell
+through to identity and got locked to the character forever.
+"""
 from __future__ import annotations
 
-import re
+# What a danbooru-style tag looks like. Anything else (a sentence, a Japanese
+# phrase) is not forced into tag shape — it goes to the prompt's prose side.
+_MAX_TAG_WORDS = 4
+_MAX_TAG_CHARS = 40
+_SENTENCE_MARKS = (".", ",", "!", "?", ";", ":", "'", '"')
 
-_PROP_HINTS = frozenset({
-    "bookmark", "cloth_bookmark", "book", "umbrella", "bag", "tote_bag",
-    "handbag", "briefcase", "lantern", "candle", "key", "letter", "envelope",
-    "cup", "mug", "phone", "smartphone", "flower", "bouquet", "scarf",
-    "gloves", "watch", "pendant", "necklace", "ring", "brooch",
-})
-
-# Tags that belong on the body / face / outfit — never treat as prop alone.
-_IDENTITY_HINTS = frozenset({
+_IDENTITY_SUBJECTS = frozenset({
     "1girl", "1boy", "1other", "solo", "multiple_girls", "multiple_boys",
     "adult_male", "adult_female",
 })
 
-_HAIR_EYE_RE = re.compile(
-    r"(hair|eyes?|bangs|ponytail|twintails|braid|ahoge|sidelocks|"
-    r"skin|mole|freckles|hetero)$",
-    re.I,
-)
-_OUTFIT_RE = re.compile(
-    r"(shirt|skirt|dress|coat|jacket|cardigan|hoodie|sweater|blouse|"
-    r"uniform|kimono|yukata|apron|pants|jeans|shorts|boots|shoes|"
-    r"sneakers|sandals|socks|ribbon|bow|hat|cap|beret|cloak|vest|"
-    r"coverall|overalls|serafuku|sailor)$",
-    re.I,
-)
+# axis (app.tags.catalog.get_tag_axis) → compile layer
+AXIS_TO_LAYER: dict[str, str] = {
+    "hair": "identity",
+    "always_fixed": "identity",
+    "parts": "identity",
+    "clothing": "outfit",
+    "action": "action",
+    "emotion": "emotion",
+    "location": "environment",
+    "time_weather": "environment",
+    "visual": "environment",
+}
 
 
 def soft_normalize_tag(tag: str) -> str:
@@ -37,58 +41,67 @@ def soft_normalize_tag(tag: str) -> str:
     return t
 
 
-def is_outfit_tag(tag: str) -> bool:
-    """Clothing / footwear — hers by default, but overridable per story.
+def is_tag_like(value: str) -> bool:
+    """True when a value can go in the tag list without being mangled.
 
-    Kept out of identity_tags so a topic (beach, winter, festival) can dress her
-    for the occasion without changing who she is.
+    Prose fails here and is routed to the prose side of the prompt instead of
+    being underscore-joined into a fake tag like
+    ``the_character's_strained_expression_during_the_peak_rotation_of_the_ride.``
+    """
+    raw = (value or "").strip()
+    if not raw or not raw.isascii():
+        return False
+    if len(raw) > _MAX_TAG_CHARS:
+        return False
+    if any(mark in raw for mark in _SENTENCE_MARKS):
+        return False
+    return len(raw.replace("_", " ").split()) <= _MAX_TAG_WORDS
+
+
+def tag_layer(tag: str) -> str | None:
+    """Which compile layer a loose tag belongs to, or None when unclassified.
+
+    None is not a failure: the caller passes those through as natural language,
+    which the image models understand.
     """
     t = soft_normalize_tag(tag)
-    if not t or t in _IDENTITY_HINTS:
-        return False
-    return bool(_OUTFIT_RE.search(t))
+    if not t:
+        return None
+    if t in _IDENTITY_SUBJECTS:
+        return "identity"
+    from ...tags.catalog import get_tag_axis
+
+    axis = get_tag_axis(t) or get_tag_axis(t.replace("-", "_"))
+    return AXIS_TO_LAYER.get(axis or "")
 
 
 def split_identity_and_outfit(tags: list[str] | None) -> tuple[list[str], list[str]]:
-    """Return (body tags, outfit tags), order preserved."""
-    body: list[str] = []
+    """Return (identity, outfit) — only moving what the classifier calls clothing.
+
+    A tag the classifier does not know (``geta``, ``thighhighs``) stays in
+    identity rather than being guessed at; the story's own ``outfit_tags``
+    override the wardrobe anyway, and unknowns reach the image as prose.
+    """
+    ident: list[str] = []
     outfit: list[str] = []
     for raw in tags or []:
         t = soft_normalize_tag(raw)
         if not t:
             continue
-        target = outfit if is_outfit_tag(t) else body
+        target = outfit if tag_layer(t) == "outfit" else ident
         if t not in target:
             target.append(t)
-    return body, outfit
+    return ident, outfit
 
 
-def _is_prop_tag(tag: str) -> bool:
+def is_prop_tag(tag: str) -> bool:
+    """Accessories / held objects, per the classifier."""
     t = soft_normalize_tag(tag)
-    if not t or t in _IDENTITY_HINTS:
+    if not t or t in _IDENTITY_SUBJECTS:
         return False
-    if t in _PROP_HINTS:
-        return True
-    for hint in _PROP_HINTS:
-        if hint in t:
-            return True
-    return False
+    from ...tags.catalog import ACCESSORIES
 
-
-def _is_identity_tag(tag: str) -> bool:
-    t = soft_normalize_tag(tag)
-    if not t:
-        return False
-    if t in _IDENTITY_HINTS:
-        return True
-    if _is_prop_tag(t):
-        return False
-    if _HAIR_EYE_RE.search(t) or t.endswith("_hair") or t.endswith("_eyes"):
-        return True
-    if _OUTFIT_RE.search(t):
-        return True
-    # Colors often prefix identity (brown_hair already caught); keep bare colors out.
-    return False
+    return t in ACCESSORIES
 
 
 def enforce_identity_prop_split(
@@ -97,7 +110,12 @@ def enforce_identity_prop_split(
     *,
     signature_prop: str = "",
 ) -> tuple[list[str], list[str], str]:
-    """Return (identity_tags, prop_tags, signature_prop) with props removed from identity."""
+    """Return (identity, props, signature_prop).
+
+    Only moves a tag when the classifier is sure: a declared prop stays a prop,
+    and an identity tag is relocated solely if the classifier calls it an
+    accessory. Unknown tags stay exactly where the producer put them.
+    """
     ident: list[str] = []
     props: list[str] = []
     seen_i: set[str] = set()
@@ -107,7 +125,7 @@ def enforce_identity_prop_split(
         t = soft_normalize_tag(raw)
         if not t:
             continue
-        if _is_prop_tag(t):
+        if is_prop_tag(t):
             if t not in seen_p:
                 props.append(t)
                 seen_p.add(t)
@@ -120,12 +138,6 @@ def enforce_identity_prop_split(
         t = soft_normalize_tag(raw)
         if not t or t in seen_p:
             continue
-        # If someone put hair into prop_tags, bounce to identity.
-        if _is_identity_tag(t) and not _is_prop_tag(t):
-            if t not in seen_i:
-                ident.append(t)
-                seen_i.add(t)
-            continue
         props.append(t)
         seen_p.add(t)
 
@@ -134,7 +146,7 @@ def enforce_identity_prop_split(
         if sig not in seen_p:
             props.append(sig)
             seen_p.add(sig)
-        # Never keep signature prop inside identity.
+        # The throughline prop is never part of the locked identity.
         ident = [t for t in ident if t != sig]
     elif props:
         sig = props[0]

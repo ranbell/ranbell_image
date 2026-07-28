@@ -48,8 +48,11 @@ def apply_inference_to_character(character: dict[str, Any], data: dict[str, Any]
         signature_prop=str(visual.get("signature_prop") or ""),
     )
     # Clothing is her default wardrobe, not her identity — the story dresses her
-    # for the topic (see weave/prompts/storywright.md HARD RULE 20).
-    identity, outfit = split_identity_and_outfit(identity)
+    # for the topic (see weave/prompts/storywright.md HARD RULE 20). The prompt
+    # asks for outfit_tags; the split only catches what still lands in identity.
+    identity, stray = split_identity_and_outfit(identity)
+    outfit = [str(t) for t in (visual.get("outfit_tags") or []) if str(t).strip()]
+    outfit += [t for t in stray if t not in outfit]
     character["personality"] = personality
     character["identity_tags"] = identity
     character["outfit_tags"] = outfit
@@ -58,7 +61,6 @@ def apply_inference_to_character(character: dict[str, Any], data: dict[str, Any]
     character["palette"] = list(visual.get("palette") or [])
     character["do_not"] = list(visual.get("do_not") or [])
     character["reasoning_ja"] = str(visual.get("reasoning_ja") or "")
-    character["board_briefs"] = list(data.get("board_briefs") or [])
     character["source"] = "personality"
     return character
 

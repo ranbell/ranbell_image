@@ -97,8 +97,8 @@ def test_full_session_character_to_seal():
             )
             assert r.status_code == 200, r.text
             board_jobs = r.json()["jobs"]
-            assert {j["slot"] for j in board_jobs} == {"portrait", "full", "prop", "mood"}
-            assert len(app.state.spooler.by_title("weave_board")) == 4
+            assert {j["slot"] for j in board_jobs} == {"sheet", "portrait"}
+            assert len(app.state.spooler.by_title("weave_board")) == 2
 
             # ── story ────────────────────────────────────────────────────────
             r = await client.post(f"/api/weave/sessions/{sid}/story/generate", json={})
@@ -175,7 +175,7 @@ def test_full_session_character_to_seal():
             assert r.status_code == 200, r.text
 
             # ── board acceptance (G0-hard) ───────────────────────────────────
-            for slot, iid in (("portrait", "img-b1"), ("full", "img-b2"), ("prop", "img-b3")):
+            for slot, iid in (("portrait", "img-b1"), ("sheet", "img-b2")):
                 await _attach(db, sid, kind="board", target=slot, image_id=iid)
             r = await client.post(f"/api/weave/sessions/{sid}/character/accept-board", json={})
             assert r.status_code == 200, r.text

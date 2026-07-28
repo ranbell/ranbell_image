@@ -5,7 +5,7 @@ import hashlib
 import time
 from typing import Any
 
-from ..character.split_tags import soft_normalize_tag
+from ..character.split_tags import is_tag_like, soft_normalize_tag
 from .cameras import CAMERA_FORCE_ADD, CAMERA_NEGATIVE, strip_framing_conflicts
 
 WEAVE_NEGATIVE = (
@@ -122,9 +122,26 @@ def compile_panel(
     )
 
     cam_tags = list(CAMERA_FORCE_ADD.get(camera, [camera]))
-    action = _dedupe([str(intent.get("gesture") or ""), str(intent.get("focus") or "")])
-    emotion = _dedupe([str(intent.get("emotion") or "")])
-    time_marker = _dedupe([str(intent.get("time_marker") or "")])
+    # gesture / focus / emotion / time_marker are free text in the bundle. A
+    # sentence used to be underscore-joined into a fake tag; keep only what is
+    # already tag-shaped and let the rest through as prose further down.
+    prose_extras: list[str] = []
+
+    def _tags_or_prose(*values: str) -> list[str]:
+        out: list[str] = []
+        for value in values:
+            v = str(value or "").strip()
+            if not v:
+                continue
+            if is_tag_like(v):
+                out.append(v)
+            elif v not in prose_extras:
+                prose_extras.append(v)
+        return _dedupe(out)
+
+    action = _tags_or_prose(intent.get("gesture"), intent.get("focus"))
+    emotion = _tags_or_prose(intent.get("emotion"))
+    time_marker = _tags_or_prose(intent.get("time_marker"))
     # What is visibly different in THIS panel — the only per-panel signal the
     # renderer gets. Without it the three panels compile to the same picture.
     state = _dedupe([str(t) for t in (intent.get("state_tags") or [])])
@@ -169,24 +186,30 @@ def compile_panel(
         "environment": environment,
         "spice": spice,
     }
-    positive_tags = _dedupe(identity + outfit + throughline + body + spice)
+    positive_tags_full = _dedupe(identity + outfit + throughline + body + spice)
     from .budget import cap_positive_tags
 
     # Priority is the body, the throughline prop and THIS panel's own state.
     # Wardrobe and camera boilerplate yield first — the topic must survive.
     sig = soft_normalize_tag(str(character.get("signature_prop") or ""))
     positive_tags = cap_positive_tags(
-        positive_tags,
+        positive_tags_full,
         priority=_dedupe(identity + ([sig] if sig else []) + state + environment),
     )
+    # Whatever the budget cut, plus the free-text fields that were not tags.
+    # Nothing is silently dropped: the models read the prose side too, which is
+    # why the story's own sentences already show up in the rendered images.
+    dropped = [t for t in positive_tags_full if t not in set(positive_tags)]
     prose_bits = [
         str(intent.get("narrative_en") or "").strip(),
         str(world.get("setting") or "").strip(),
+        *prose_extras,
     ]
-    prose = ". ".join(b for b in prose_bits if b)
+    if dropped:
+        prose_bits.append("also " + ", ".join(dropped))
+    prose = ". ".join(b for b in prose_bits if b and str(b).isascii())
     positive = ", ".join(positive_tags)
-    if prose and prose.isascii():
-        # Keep prose short; tag budget already applied to tags
+    if prose:
         positive = f"{positive}, {prose}" if positive else prose
 
     neg_extra = list(CAMERA_NEGATIVE.get(camera, []))

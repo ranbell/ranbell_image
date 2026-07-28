@@ -39,7 +39,6 @@ const useGalleryNn = ref(false)
 const useVlmAssist = ref(true)
 const useStrictSeal = ref(false)
 const useSpicer = ref(false)
-const useMoodSlot = ref(true)
 const multiSeed = ref(1)
 const ageBand = ref('')
 const genderHint = ref('')
@@ -77,7 +76,6 @@ const SESSION_SCOPED_REFS = [
   [editingNarrative, () => ''],
   [useStrictSeal, () => false],
   [useSpicer, () => false],
-  [useMoodSlot, () => true],
   [multiSeed, () => 1],
 ]
 const RECREATE_OPTIONS = [
@@ -372,7 +370,6 @@ async function runAction(code) {
         vlm_assist: useVlmAssist.value,
         strict_seal: useStrictSeal.value,
         spicer: useSpicer.value,
-        mood_slot: useMoodSlot.value,
         multi_seed: multiSeed.value,
         age_band: ageBand.value,
         gender_hint: genderHint.value,
@@ -790,8 +787,6 @@ watch(session, (s) => {
   if (typeof s?.quality_policy?.vlm_assist === 'boolean') useVlmAssist.value = s.quality_policy.vlm_assist
   if (typeof s?.quality_policy?.strict_seal === 'boolean') useStrictSeal.value = s.quality_policy.strict_seal
   if (typeof s?.quality_policy?.spicer === 'boolean') useSpicer.value = s.quality_policy.spicer
-  const slots = s?.quality_policy?.board_slots
-  if (Array.isArray(slots)) useMoodSlot.value = slots.includes('mood')
   const ms = Number(s?.quality_policy?.multi_seed)
   if (ms >= 1 && ms <= 3) multiSeed.value = ms
   if (s?.inputs?.vlm_model) vlmModel.value = s.inputs.vlm_model
@@ -860,7 +855,6 @@ onUnmounted(() => {
           v-model:use-gallery-nn="useGalleryNn"
           v-model:use-vlm-assist="useVlmAssist"
           v-model:use-spicer="useSpicer"
-          v-model:use-mood-slot="useMoodSlot"
           v-model:multi-seed="multiSeed"
           :character="character"
           :board-images="boardImages"

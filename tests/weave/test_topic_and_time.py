@@ -226,3 +226,82 @@ def test_off_topic_chip_has_an_imperative():
     assert len(constraints) == 2
     assert "USER TOPIC" in constraints[0]
     assert "time_scale" in constraints[1]
+
+
+# ── Prompt hygiene: nothing is mangled and nothing is silently dropped ────────
+def test_prose_fields_never_become_fake_tags():
+    """The reported break: a whole sentence underscore-joined into one tag."""
+    session = _beach_session()
+    bundle = _beach_bundle()
+    sentence = "The character's strained expression during the peak rotation of the ride."
+    bundle["panels"][0]["focus"] = sentence
+    bundle["panels"][0]["emotion"] = "a slow smile that arrives a beat late"
+
+    out = _compiled(session, bundle)["panel_1"]
+    tags = out["positive"].split(", ")
+
+    assert "the_character's_strained_expression_during_the_peak_rotation_of_the_ride." not in tags
+    for layer in out["layers"].values():
+        assert not any("strained_expression" in t for t in layer)
+    # Not dropped either — it reaches the model as the prose it always was.
+    assert sentence in out["positive"]
+    assert "a slow smile that arrives a beat late" in out["positive"]
+
+
+def test_short_values_are_still_tags():
+    session = _beach_session()
+    bundle = _beach_bundle()
+    bundle["panels"][0]["gesture"] = "holding_book"
+    bundle["panels"][0]["emotion"] = "light_smile"
+
+    out = _compiled(session, bundle)["panel_1"]
+    assert "holding_book" in out["layers"]["action"]
+    assert "light_smile" in out["layers"]["emotion"]
+
+
+def test_budget_overflow_lands_in_prose_instead_of_vanishing():
+    session = _beach_session()
+    bundle = _beach_bundle()
+    bundle["panels"][0]["state_tags"] = [f"state_{i}" for i in range(4)]
+    bundle["world"]["place_tags"] = [f"place_{i}" for i in range(6)]
+    session["character"]["identity_tags"] = [f"body_{i}" for i in range(20)]
+
+    out = _compiled(session, bundle)["panel_1"]
+    # Everything the budget cut is still visible to the model.
+    for tag in bundle["world"]["place_tags"]:
+        assert tag in out["positive"], tag
+
+
+def test_garments_are_classified_not_guessed():
+    """The hand-written regex locked swimsuits into identity."""
+    from app.weave.character.split_tags import split_identity_and_outfit, tag_layer
+
+    body, outfit = split_identity_and_outfit(
+        ["1girl", "black_hair", "swimsuit", "bikini", "yukata", "obi", "geta"],
+    )
+    assert {"swimsuit", "bikini", "yukata", "obi"} <= set(outfit)
+    assert {"1girl", "black_hair"} <= set(body)
+    # Unknown to the classifier: left where it was rather than mis-bucketed.
+    assert tag_layer("geta") is None
+
+
+# ── The board is what the panels are conditioned on ──────────────────────────
+def test_panels_reference_the_accepted_sheet():
+    from app.weave.render.submit import panel_reference_sha
+
+    session = _beach_session()
+    session["inputs"]["reference_image_id"] = "gallery-sha"
+    # Before acceptance the gallery seed is all there is.
+    assert panel_reference_sha(session) == "gallery-sha"
+
+    session["character"]["board"] = {
+        "accepted": False,
+        "images": [
+            {"slot": "sheet", "image_id": "sheet-sha"},
+            {"slot": "portrait", "image_id": "portrait-sha"},
+        ],
+    }
+    assert panel_reference_sha(session) == "gallery-sha"
+
+    session["character"]["board"]["accepted"] = True
+    assert panel_reference_sha(session) == "sheet-sha"

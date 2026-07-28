@@ -14,10 +14,10 @@ from collections import Counter
 from typing import Any
 
 from .split_tags import (
-    _is_identity_tag,
-    _is_prop_tag,
     enforce_identity_prop_split,
+    is_prop_tag,
     soft_normalize_tag,
+    tag_layer,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,10 +110,15 @@ def merge_gallery_tags(
             t = soft_normalize_tag(str(raw))
             if not t or t in _SPICE_BLOCK:
                 continue
-            if _is_prop_tag(t):
+            layer = tag_layer(t)
+            if is_prop_tag(t):
                 prop_votes[t] += 1
-            elif _is_identity_tag(t):
+            elif layer == "identity":
                 identity_votes[t] += 1
+            elif layer == "outfit":
+                # The story dresses her per topic and season; a neighbour's
+                # wardrobe must not leak into every panel.
+                continue
             else:
                 # Atmosphere / style / place-ish — spice only (never identity).
                 spice_votes[t] += 1

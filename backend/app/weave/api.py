@@ -49,7 +49,6 @@ class TopicPatch(BaseModel):
     strict_seal: bool | None = None
     sample_steps: int | None = None
     spicer: bool | None = None
-    mood_slot: bool | None = None
     multi_seed: int | None = None
     mode: Literal["standard", "lab"] | None = None
     age_band: str | None = None
@@ -250,10 +249,6 @@ async def patch_inputs(session_id: str, body: TopicPatch, request: Request):
         from .character.spicer import set_spicer_enabled
 
         set_spicer_enabled(session, bool(body.spicer))
-    if body.mood_slot is not None:
-        from .character.board_slots import set_mood_slot
-
-        set_mood_slot(session, bool(body.mood_slot))
     if body.multi_seed is not None:
         session.setdefault("quality_policy", {})["multi_seed"] = max(
             1, min(3, int(body.multi_seed)),
@@ -395,21 +390,12 @@ async def character_board(
     if body.dry_pending or not (
         inputs.get("workflow_final") or inputs.get("workflow_sample")
     ):
-        from .character.board_slots import sync_board_briefs
+        from .schema import BOARD_SLOTS
 
-        sync_board_briefs(session)
-        briefs = (session.get("character") or {}).get("board_briefs") or [
-            {"slot": "portrait"}, {"slot": "full"}, {"slot": "prop"},
-        ]
         board = session.setdefault("character", {}).setdefault("board", {})
         board["images"] = [
-            {
-                "slot": b.get("slot"),
-                "image_id": None,
-                "job_id": None,
-                "pending": True,
-            }
-            for b in briefs if b.get("slot")
+            {"slot": slot, "image_id": None, "job_id": None, "pending": True}
+            for slot in BOARD_SLOTS
         ]
         board["accepted"] = False
         append_timeline(

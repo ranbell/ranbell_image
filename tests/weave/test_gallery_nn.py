@@ -59,8 +59,10 @@ def test_merge_adds_voted_identity_and_spice():
     # Hair/eyes missing → single-vote fill allowed for brown_hair / green_eyes
     assert "brown_hair" in merged["identity_tags"]
     assert "green_eyes" in merged["identity_tags"]
-    # Outfit with ≥2 votes
-    assert "cardigan" in merged["identity_tags"]
+    # Clothing from a neighbour must NOT become identity: the story dresses her
+    # per topic, and a locked cardigan would follow her to the beach.
+    assert "cardigan" not in merged["identity_tags"]
+    assert "cardigan" not in merged["gallery_spice"]
     # Atmosphere spice (not identity)
     assert "bookstore" in merged["gallery_spice"] or "indoors" in merged["gallery_spice"]
     # Prop vote only thickens when signature/prop exists — bookmark may land in props
