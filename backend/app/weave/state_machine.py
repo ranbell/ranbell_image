@@ -245,6 +245,26 @@ def next_cta(session: dict[str, Any]) -> dict[str, Any]:
                 "sample_steps": int((session.get("inputs") or {}).get("sample_steps") or 20),
             }
         if not g["G0_hard"]["pass"]:
+            # Offering "accept" for a board that was never rendered is a dead end:
+            # the accept call refuses it and there is no other way to queue one.
+            board = (character.get("board") or {})
+            images = board.get("images") or []
+            rendered = {img.get("slot") for img in images if img.get("image_id")}
+            pending = any(
+                img.get("pending") or not img.get("image_id") for img in images
+            )
+            if not {"portrait", "full"} <= rendered:
+                if pending and any(img.get("job_id") for img in images):
+                    return {
+                        "code": "wait_board",
+                        "label": "イメージボードを生成中",
+                        "enabled": False,
+                    }
+                return {
+                    "code": "render_board",
+                    "label": "イメージボードを生成",
+                    "enabled": True,
+                }
             allow = bool(policy.get("allow_story_before_board", True))
             return {
                 "code": "accept_board",

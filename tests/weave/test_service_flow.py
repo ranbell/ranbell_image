@@ -66,8 +66,12 @@ def test_lock_enter_lookdev_sample_rate_override():
     assert session["panels"][0]["framing_fail_count"] == 2
     service.override_framing(session, panel_key="panel_1", reason="acceptable wide enough")
     cta = next_cta(session)
-    # board not accepted yet
-    assert cta["code"] in ("accept_board", "render_final", "fix_framing_or_override", "sample_panel")
+    # No board images yet, so the CTA must offer to render one — accepting an
+    # empty board is refused by the service.
+    assert cta["code"] in (
+        "render_board", "wait_board", "accept_board",
+        "render_final", "fix_framing_or_override", "sample_panel",
+    )
 
     session["character"]["board_briefs"] = [
         {"slot": "portrait"}, {"slot": "full"}, {"slot": "prop"},

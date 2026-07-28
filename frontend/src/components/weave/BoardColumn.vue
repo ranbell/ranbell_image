@@ -24,6 +24,7 @@ defineProps({
 const emit = defineEmits([
   'update:personalityText',
   'apply-preset',
+  'render-board',
   'update:useGalleryNn',
   'update:useVlmAssist',
   'update:useSpicer',
@@ -94,6 +95,19 @@ function presetSummary(p) {
       </span>
     </label>
 
+    <label class="flex items-start gap-2 rounded border border-gray-800 bg-gray-900/60 px-2 py-1.5 cursor-pointer">
+      <input
+        :checked="useMoodSlot"
+        type="checkbox"
+        class="mt-0.5 accent-teal-500"
+        @change="emit('update:useMoodSlot', $event.target.checked)"
+      />
+      <span>
+        <span class="block text-[11px] text-teal-100">{{ t('weave.moodSlot') }}</span>
+        <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.moodSlotHint') }}</span>
+      </span>
+    </label>
+
     <div class="rounded border border-violet-900/40 bg-violet-950/20 p-2 space-y-2">
       <div class="text-[10px] uppercase tracking-wider text-violet-400/90">{{ t('weave.lab') }}</div>
       <label class="flex items-start gap-2 cursor-pointer">
@@ -106,18 +120,6 @@ function presetSummary(p) {
         <span>
           <span class="block text-[11px] text-violet-100">{{ t('weave.spicer') }}</span>
           <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.spicerHint') }}</span>
-        </span>
-      </label>
-      <label class="flex items-start gap-2 cursor-pointer">
-        <input
-          :checked="useMoodSlot"
-          type="checkbox"
-          class="mt-0.5 accent-violet-500"
-          @change="emit('update:useMoodSlot', $event.target.checked)"
-        />
-        <span>
-          <span class="block text-[11px] text-violet-100">{{ t('weave.moodSlot') }}</span>
-          <span class="block text-[10px] text-gray-500 leading-snug">{{ t('weave.moodSlotHint') }}</span>
         </span>
       </label>
       <label class="flex items-center gap-2 text-[11px] text-violet-100">
@@ -196,7 +198,14 @@ function presetSummary(p) {
     <p v-else-if="useGalleryNn && character.identity_tags?.length && galleryNnStatus?.applied === false"
       class="text-[10px] text-gray-500">{{ t('weave.galleryEmpty') }}</p>
 
-    <div class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.board') }}</div>
+    <div class="flex items-center justify-between">
+      <span class="text-[10px] uppercase tracking-wider text-teal-500/80">{{ t('weave.board') }}</span>
+      <button v-if="character.identity_locked"
+        class="rounded border border-teal-800/60 px-1.5 py-0.5 text-[10px] text-teal-200 hover:bg-teal-900/40 disabled:opacity-40"
+        :disabled="busy" @click="emit('render-board')">
+        {{ boardImages.length ? t('weave.boardRerender') : t('weave.boardRender') }}
+      </button>
+    </div>
     <div class="grid grid-cols-1 gap-2">
       <div v-for="img in boardImages" :key="img.slot"
         class="rounded border border-gray-800 bg-gray-900/80 overflow-hidden">

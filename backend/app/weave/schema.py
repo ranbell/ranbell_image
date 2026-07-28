@@ -10,7 +10,9 @@ STATUSES = ("character", "story", "lookdev", "rendering", "sealed")
 PANEL_KEYS = ("panel_1", "panel_2", "panel_3")
 BEATS = ("setup", "turn", "settle")
 CAMERAS = ("long_shot", "medium_shot", "close_up")
-DEFAULT_BOARD_SLOTS = ("portrait", "full", "prop")
+# mood is the multi-view character sheet — on by default, it is the quickest
+# read on whether the character holds together across situations.
+DEFAULT_BOARD_SLOTS = ("portrait", "full", "prop", "mood")
 
 # Rate chips → used by look-dev / recreate
 RATE_CHIPS = (

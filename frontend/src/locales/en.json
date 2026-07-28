@@ -1738,8 +1738,8 @@
     "lab": "Lab (optional)",
     "spicer": "Spicer",
     "spicerHint": "Atmosphere tags from topic/setting into spice layer (off by default)",
-    "moodSlot": "Mood board slot",
-    "moodSlotHint": "Add mood to portrait/full/prop board slots",
+    "moodSlot": "Character sheet (mood)",
+    "moodSlotHint": "One sheet: a centre pose plus four vignettes — shows whether she holds together",
     "multiSeed": "Multi-seed",
     "multiSeedHint": "Queue sample/final with 1–3 seeds",
     "labSpice": "lab spice",
@@ -1831,6 +1831,8 @@
       "days": "a few days",
       "months": "a few months",
       "years": "a few years"
-    }
+    },
+    "boardRender": "Render",
+    "boardRerender": "Re-render"
   }
 }

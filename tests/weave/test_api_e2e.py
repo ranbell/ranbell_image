@@ -97,8 +97,8 @@ def test_full_session_character_to_seal():
             )
             assert r.status_code == 200, r.text
             board_jobs = r.json()["jobs"]
-            assert {j["slot"] for j in board_jobs} == {"portrait", "full", "prop"}
-            assert len(app.state.spooler.by_title("weave_board")) == 3
+            assert {j["slot"] for j in board_jobs} == {"portrait", "full", "prop", "mood"}
+            assert len(app.state.spooler.by_title("weave_board")) == 4
 
             # ── story ────────────────────────────────────────────────────────
             r = await client.post(f"/api/weave/sessions/{sid}/story/generate", json={})

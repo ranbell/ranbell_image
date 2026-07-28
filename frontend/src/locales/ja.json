@@ -1738,8 +1738,8 @@
     "lab": "Lab（任意）",
     "spicer": "Spicer",
     "spicerHint": "お題・設定から雰囲気タグを spice 層へ（既定オフ）",
-    "moodSlot": "mood ボード",
-    "moodSlotHint": "portrait/full/prop に mood スロットを追加",
+    "moodSlot": "キャラクターシート（mood）",
+    "moodSlotHint": "中央ポーズ＋4カットを1枚に。人物が場面をまたいで保つか一目で分かる",
     "multiSeed": "multi-seed",
     "multiSeedHint": "sample/final を複数 seed でキュー",
     "labSpice": "lab spice",
@@ -1831,6 +1831,8 @@
       "days": "数日",
       "months": "数か月",
       "years": "数年"
-    }
+    },
+    "boardRender": "生成",
+    "boardRerender": "再生成"
   }
 }

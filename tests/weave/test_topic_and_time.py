@@ -189,6 +189,38 @@ def test_low_topic_fit_routes_to_recreate():
     assert cta["suggest_chips"] == ["off_topic"]
 
 
+def test_unrendered_board_offers_render_not_accept():
+    """Accept refuses an empty board, so offering accept was a dead end."""
+    session = _beach_session()
+    bundle = _beach_bundle()
+    lint = lint_story_bundle(bundle, session["character"])
+    apply_story_to_session(session, bundle)
+    session["last_lint"] = lint
+    session["status"] = "lookdev"
+    # Past the sample and framing gates, so the board is what is left.
+    session["panels"][0]["sample"] = {"image_id": "img-s", "job_id": None}
+    session["panels"][0]["qa"]["framing"] = "pass"
+    board = session["character"]["board"]
+
+    # Nothing queued yet (the lock-time render failed or never ran).
+    assert next_cta(session)["code"] == "render_board"
+
+    # Jobs in flight → wait, do not offer a second render.
+    board["images"] = [
+        {"slot": s, "image_id": None, "job_id": f"gen-{s}", "pending": True}
+        for s in ("portrait", "full", "prop")
+    ]
+    cta = next_cta(session)
+    assert cta["code"] == "wait_board"
+    assert cta["enabled"] is False
+
+    # Rendered → accept becomes the real next step.
+    for img in board["images"]:
+        img["image_id"] = f"img-{img['slot']}"
+        img["pending"] = False
+    assert next_cta(session)["code"] == "accept_board"
+
+
 def test_off_topic_chip_has_an_imperative():
     constraints = chips_to_constraints(["off_topic", "same_moment"])
     assert len(constraints) == 2

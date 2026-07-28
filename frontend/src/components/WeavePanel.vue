@@ -39,7 +39,7 @@ const useGalleryNn = ref(false)
 const useVlmAssist = ref(true)
 const useStrictSeal = ref(false)
 const useSpicer = ref(false)
-const useMoodSlot = ref(false)
+const useMoodSlot = ref(true)
 const multiSeed = ref(1)
 const ageBand = ref('')
 const genderHint = ref('')
@@ -77,7 +77,7 @@ const SESSION_SCOPED_REFS = [
   [editingNarrative, () => ''],
   [useStrictSeal, () => false],
   [useSpicer, () => false],
-  [useMoodSlot, () => false],
+  [useMoodSlot, () => true],
   [multiSeed, () => 1],
 ]
 const RECREATE_OPTIONS = [
@@ -195,6 +195,34 @@ async function loadCatalog() {
     presets.value = res?.presets || []
   } catch (e) {
     console.warn('[Weave] presets', e)
+  }
+}
+
+async function renderBoard() {
+  // Queues portrait/full/prop. Callable again: a board that failed or that you
+  // dislike can be reshot without touching the story.
+  const res = await api(`/api/weave/sessions/${sessionId.value}/character/board`, {
+    method: 'POST',
+    body: JSON.stringify({
+      workflow_final: workflow.value,
+      workflow_sample: workflow.value,
+    }),
+  })
+  trackJobs(res.jobs)
+  return res
+}
+
+async function reRenderBoard() {
+  if (!sessionId.value) return
+  errorMsg.value = ''
+  busy.value = true
+  try {
+    session.value = await renderBoard()
+  } catch (e) {
+    errorMsg.value = String(e.message || e)
+    emit('toast', { msg: errorMsg.value, type: 'error' })
+  } finally {
+    busy.value = false
   }
 }
 
@@ -416,6 +444,8 @@ async function runAction(code) {
       })
       session.value = res
       trackJobs(res.jobs || res.job?.jobs || res.job)
+    } else if (code === 'render_board') {
+      session.value = await renderBoard()
     } else if (code === 'accept_board') {
       session.value = await api(`/api/weave/sessions/${id}/character/accept-board`, {
         method: 'POST',
@@ -826,6 +856,7 @@ onUnmounted(() => {
           :presets="presets"
           :preset-id="presetId"
           @apply-preset="applyPreset"
+          @render-board="reRenderBoard"
           v-model:use-gallery-nn="useGalleryNn"
           v-model:use-vlm-assist="useVlmAssist"
           v-model:use-spicer="useSpicer"

@@ -117,7 +117,8 @@ def test_spicer_off_clears_and_excludes_from_compile():
 
 def test_mood_slot_sync_briefs():
     session = new_session_payload()
-    assert resolve_board_slots(session) == ["portrait", "full", "prop"]
+    # The character sheet ships on by default.
+    assert resolve_board_slots(session) == ["portrait", "full", "prop", "mood"]
     slots = set_mood_slot(session, True)
     assert "mood" in slots
     briefs = session["character"]["board_briefs"]
@@ -127,7 +128,8 @@ def test_mood_slot_sync_briefs():
     assert all(b["slot"] != "mood" for b in session["character"]["board_briefs"])
 
 
-def test_mood_board_prompt_uses_atmosphere():
+def test_mood_board_is_a_multi_view_sheet():
+    """Mood is one sheet of several views, not another single atmospheric shot."""
     session = _session_rainy()
     set_spicer_enabled(session, True)
     run_spicer(session)
@@ -135,9 +137,10 @@ def test_mood_board_prompt_uses_atmosphere():
     set_mood_slot(session, True)
     compiled = compile_board_slot(session, "mood")
     pos = compiled["positive"]
-    assert "atmospheric" in pos or "soft_lighting" in pos
-    # mood should not force holding/prop clutter as primary
-    assert "holding" not in pos
+    assert "multiple_views" in pos
+    assert "** Chronicles of Character **" in pos
+    assert len([l for l in pos.splitlines() if l.startswith(" - ")]) == 4
+    assert compiled["camera"] == "long_shot"
 
 
 def test_multi_seed_clamp():
