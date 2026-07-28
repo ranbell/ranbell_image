@@ -56,6 +56,9 @@ Output JSON only — no markdown fences, no prose, no candidate arrays.
     only per-panel visual difference the renderer gets, so make them differ.
 22. At least one `topic_anchors` term must appear in `place_tags` or in some
     panel's `state_tags`.
+23. `gesture`, `focus`, `emotion` and `time_marker` are short tags too — one to
+    three words, no sentences (`holding_book`, `light_smile`, `late_afternoon`).
+    Put description in narrative_ja / narrative_en, which is what they are for.
 
 # OUTPUT SCHEMA
 {
