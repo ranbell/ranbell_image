@@ -448,13 +448,22 @@ def test_preset_feeds_the_story_prompt():
 
             prompt = next(c for c in llm.calls if c["kind"] == "storywright")["prompt"]
             for needle in (
-                "notices far more than she says",   # inner
-                "secondhand books",                 # likes
+                "notices far more than she says",   # inner — how she reacts
                 "holding_book",                     # gesture_vocab
                 "blush",                            # expression_vocab
-                "afternoon sunbeam",                # vibe_keywords
             ):
                 assert needle in prompt, needle
+            # Her usual scene and her possessions must NOT reach the story:
+            # the model kept lifting those nouns into the setting, which is how
+            # a topic that only said "she is crouching and drawing" became a
+            # study room full of maps and timetables.
+            for banned in (
+                "afternoon sunbeam",    # vibe_keywords
+                "dust motes",
+                "secondhand books",     # likes
+                "crowded aisles",       # dislikes
+            ):
+                assert banned not in prompt, banned
 
     run(_run())
 

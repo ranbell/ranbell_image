@@ -1,4 +1,11 @@
-"""Single-frame drawability lint (code, no LLM)."""
+"""Single-frame drawability lint (code, no LLM).
+
+Scoped to the fields the renderer actually reads. ``narrative_ja`` is prose for
+the reader written in the author's voice, so policing it for interiority made
+the lint punish exactly what an author preset asks for — a soft light-novel
+style that mentions a feeling was reported as a defect while the picture it
+described was perfectly drawable.
+"""
 from __future__ import annotations
 
 import re
@@ -26,7 +33,7 @@ def lint_drawability(panel: dict[str, Any]) -> list[dict[str, str]]:
     defects: list[dict[str, str]] = []
     text = " ".join(
         str(panel.get(k) or "")
-        for k in ("narrative_ja", "narrative_en", "visible_change", "gesture")
+        for k in ("visible_change", "gesture", "focus")
     )
     if not str(panel.get("visible_change") or "").strip():
         defects.append({

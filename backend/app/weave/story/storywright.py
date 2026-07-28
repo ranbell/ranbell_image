@@ -29,6 +29,11 @@ def build_story_prompt(
     system = load_prompt("storywright.md")
     personality = character.get("personality") or {}
     scale = normalize_time_scale(time_scale, default="hours")
+    # The topic comes first and the character material is kept small on purpose.
+    # When the profile outweighed the topic the model wrote the character's
+    # biography instead of the story: a "spring planner" preset turned the topic
+    # 「しゃがんで絵を書いています」into a study room full of maps and timetables,
+    # lifted straight from her vibe_keywords.
     user = {
         "topic": topic,
         # The nouns the story must actually land on (JA topics carry EN aliases).
@@ -36,30 +41,31 @@ def build_story_prompt(
         "time_scale": scale,
         "time_scale_meaning": f"the three panels are {TIME_SCALES[scale]} apart",
         "author_style": author_style,
-        "personality_summary": personality.get("summary") or personality.get("summary_ja") or "",
-        "personality_summary_ja": personality.get("summary_ja") or "",
-        "traits": list(personality.get("traits") or [])[:8],
-        # What the character wants / hides — the hook for a non-generic conflict.
-        "inner": list(personality.get("inner") or [])[:4],
-        "likes": list(personality.get("likes") or [])[:6],
-        "dislikes": list(personality.get("dislikes") or [])[:6],
-        # Continuity only — do NOT invent appearance in narratives (HARD RULE 4).
-        "identity_tags": list(character.get("identity_tags") or [])[:16],
-        "signature_prop": character.get("signature_prop") or "",
-        "prop_tags": character.get("prop_tags") or [],
-        "do_not": character.get("do_not") or [],
-        "age_band": personality.get("age_band") or "",
-        "occupation_hint": personality.get("occupation") or personality.get("occupation_hint") or "",
-        # Per-panel performance vocabulary owned by this character.
-        "expression_vocab": list(character.get("expression_vocab") or [])[:8],
-        "gesture_vocab": list(character.get("gesture_vocab") or [])[:8],
-        # Texture hints only — HARD RULE 18 forbids using these to pick a place.
-        "usual_outfit_style": personality.get("outfit_style") or "",
-        "usual_vibe_keywords": list(personality.get("vibe_keywords") or [])[:6],
-        "default_outfit_tags": list(character.get("outfit_tags") or [])[:6],
         "avoid_motifs": avoid_motifs or [],
         "recreate_constraints": recreate_constraints or [],
         "previous_causality_one_liner": previous_causality or "",
+        # How she meets the situation — never what the situation is. Her usual
+        # scene (vibe_keywords / outfit_style) is deliberately absent: it kept
+        # becoming the setting no matter how the rules were worded.
+        "character": {
+            "summary": personality.get("summary") or personality.get("summary_ja") or "",
+            "traits": list(personality.get("traits") or [])[:4],
+            # Psychology only. `likes` / `dislikes` are object lists ("printed
+            # timetables", "a tight transfer that works") and the model reached
+            # for those nouns as props, which is how a drawing topic became a
+            # room full of maps. They stay on the character sheet, not here.
+            "inner": list(personality.get("inner") or [])[:2],
+            "age_band": personality.get("age_band") or "",
+            "occupation_hint": (
+                personality.get("occupation") or personality.get("occupation_hint") or ""
+            ),
+            # Continuity only — never copied into any output field.
+            "identity_tags": list(character.get("identity_tags") or [])[:12],
+            "signature_prop": character.get("signature_prop") or "",
+            "do_not": character.get("do_not") or [],
+            "expression_vocab": list(character.get("expression_vocab") or [])[:8],
+            "gesture_vocab": list(character.get("gesture_vocab") or [])[:8],
+        },
     }
     return (
         system
