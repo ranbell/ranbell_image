@@ -168,6 +168,7 @@ async def list_images(
     category: str | None = None,   # "AI" | "NR" — batch_category filter
     align_min: float | None = None, # 0.0-1.0 — minimum alignment score filter
     date_seek: str = "",           # ISO datetime string — seek to date position (overrides cursor)
+    include_drafts: bool = False,  # Muse board sketches are hidden unless asked for
 ):
     import base64 as _b64
 
@@ -202,6 +203,7 @@ async def list_images(
         all_docs = await db.scroll_all(
             models=dir_model_list or None, star_min=star_min,
             category=category, sha256_ids=align_sha256s,
+            exclude_drafts=not include_drafts,
         )
         docs = sort_docs([d for d in all_docs if _in_dir(d)], sort)
         return {"total": len(docs), "next_cursor": None, "images": docs,
@@ -234,6 +236,7 @@ async def list_images(
                 star_min=star_min,
                 category=category,
                 sha256_ids=align_sha256s,
+                exclude_drafts=not include_drafts,
             )
             sha_to_doc = {d["sha256"]: d for d in docs}
             # Order by alignment score, then append unscored docs at the end
@@ -308,6 +311,7 @@ async def list_images(
             star_min=star_min,
             category=category,
             sha256_ids=align_sha256s,
+            exclude_drafts=not include_drafts,
         )
 
         available_tags: list[str] = []
@@ -316,6 +320,7 @@ async def list_images(
             model_scope_task = db.scroll_all(
                 models=model_list, keyword=keyword,
                 star_min=star_min, category=category, sha256_ids=align_sha256s,
+                exclude_drafts=not include_drafts,
             )
             page_task = db.scroll_filtered_page(
                 limit=limit, cursor=cursor or None, sort=sort, **filter_kwargs
@@ -346,8 +351,9 @@ async def list_images(
             cursor=cursor or None,
             limit=limit,
             sort=sort,
+            exclude_drafts=not include_drafts,
         )
-        total = await db.total_count()
+        total = await db.total_count(exclude_drafts=not include_drafts)
         return {
             "total": total,
             "next_cursor": next_cursor,

@@ -1,8 +1,7 @@
-/* Night Archive — shared Storybook / Chronicle shell tokens & controls */
+/* Night Archive — shared panel shell tokens & controls (Muse). */
 
 .sb-theme,
-.storybook-root,
-.weave-root,
+.muse-root,
 .sb-overlay-bg,
 .sb-detail-panel {
   --sb-font-display: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
@@ -15,7 +14,7 @@
   --sb-muted: #8b929e;
   --sb-faint: #5c6470;
   font-family: var(--sb-font-ui);
-  /* Detail overlay is a Teleport sibling of .storybook-root — without these
+  /* The detail overlay is a Teleport sibling of .muse-root — without these
      tokens, Tailwind `text-[var(--sb-*)]` becomes invalid and falls back to
      near-black ink on the dark panel (unreadable in dark UI). */
   color: #e5e7eb;
@@ -24,11 +23,8 @@
 
 /* Hard z-index so Tailwind arbitrary `z-[var(--z-*)]` never leaves these
    overlays at auto (gallery/job re-renders would paint over them mid-expand). */
-.storybook-root {
-  z-index: var(--z-panel-story, 620) !important;
-}
-.weave-root {
-  z-index: var(--z-panel-weave, 640) !important;
+.muse-root {
+  z-index: var(--z-panel-muse, 640) !important;
 }
 
 .sb-display { font-family: var(--sb-font-display); font-weight: 600; }
@@ -46,14 +42,14 @@
   border-radius: 1rem;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
 }
-.weave-root .sb-shell {
+.muse-root .sb-shell {
   background:
     linear-gradient(165deg, rgba(45, 212, 191, 0.07) 0%, transparent 42%),
     var(--sb-panel);
   border-color: rgba(45, 212, 191, 0.22);
 }
 .sb-hairline { border-bottom: 1px solid var(--sb-rule); }
-.weave-root .sb-hairline { border-bottom-color: rgba(45, 212, 191, 0.18); }
+.muse-root .sb-hairline { border-bottom-color: rgba(45, 212, 191, 0.18); }
 
 .sb-btn {
   display: inline-flex;

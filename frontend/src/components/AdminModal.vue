@@ -49,7 +49,7 @@ const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
 
-// Author presets (Weave / Storybook)
+// Author presets
 const authorsList = ref([])
 const authorsLoading = ref(false)
 const authorForm = ref({ id: '', name: '', genre_tag: '', style_description: '' })
@@ -1199,6 +1199,22 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                     placeholder="gemma4:e2b"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.utilityModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.utility_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.utilityModelFallback') }}</option>
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.utility_model && !ollamaModels.includes(adminConfig.utility_model)"
+                      :value="adminConfig.utility_model">{{ adminConfig.utility_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.utility_model" type="text"
+                    placeholder="gemma4:e4b"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.utilityModelHint') }}</p>
+                </div>
               </div>
               <div>
                 <label class="text-xs text-gray-500 flex justify-between mb-1">
@@ -1521,7 +1537,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             </button>
           </div>
 
-          <!-- ── Author presets (Weave / Storybook) ── -->
+          <!-- ── Author presets ── -->
           <div v-if="adminTab === 'authors'" class="space-y-4">
             <div class="bg-gray-800 rounded-xl p-4 space-y-3">
               <div class="flex items-start justify-between gap-3">

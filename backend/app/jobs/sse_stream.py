@@ -1,6 +1,6 @@
 """Shared SSE streaming helpers for PROMPT-lane job queues.
 
-Refine / Chronicle encode queue items as JSON dicts.
+Refine encodes queue items as JSON dicts.
 Inspire / enhance-prompt often put pre-framed ``data: …\\n\\n`` strings on the queue.
 """
 from __future__ import annotations
@@ -35,10 +35,10 @@ async def iter_queue_sse(
 
     Client disconnect handling:
     - Proxies / browsers often flap ``is_disconnected()`` during long silent
-      LLM stretches (Chronicle "Pinning down the action", etc.).
+      LLM stretches.
     - Require the client to stay disconnected for ``disconnect_grace_seconds``
       before ending the stream.
-    - When ``cancel_on_disconnect`` is False (Chronicle), never cancel the job
+    - When ``cancel_on_disconnect`` is False, never cancel the job
       from the stream — only the explicit Cancel button should abort work.
     Always pops ``registry_key`` from ``registry`` in ``finally``.
     """

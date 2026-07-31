@@ -11,6 +11,7 @@ from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
 from ..ingest import extract_from_image
 from ..thumbnails.generator import ensure_thumbnail, thumbnail_exists
+from .drafts import is_draft_path
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +327,7 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
             "mtime": mtime,
             "scanned_at": now,
             "is_reference": path.is_relative_to(settings.source_images_dir),
+            "is_draft": is_draft_path(path),
         })
         if not thumbnail_exists(sha256):
             await ensure_thumbnail(path, sha256)
@@ -355,6 +357,8 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
         "embedding_status": "pending",
         "batch_category": "AI" if result.raw_metadata.format in ("a1111", "comfyui") else "NR",
         "is_reference": path.is_relative_to(settings.source_images_dir),
+        # Board sketches stay searchable but are kept out of the default gallery.
+        "is_draft": is_draft_path(path),
     }
 
     await db.upsert_new(sha256, payload)

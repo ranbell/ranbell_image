@@ -18,12 +18,9 @@ CONFIG_COLLECTION = "app_config"
 CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
 WD14_VOCAB_COLLECTION = "wd14_vocab"
-POSE_VOCAB_COLLECTION = "wd14_pose_vocab"
-SCENE_VOCAB_COLLECTION = "wd14_scene_vocab"
 AUTHORS_COLLECTION = "authors"
 CHARACTER_PRESETS_COLLECTION = "character_presets"
-STORIES_COLLECTION = "stories"
-WEAVE_SESSIONS_COLLECTION = "weave_sessions"
+MUSE_SESSIONS_COLLECTION = "muse_sessions"
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -349,46 +346,21 @@ class QdrantDBClient:
         await self._create_alignment_indexes()
 
         await self._ensure_wd14_vocab_collection()
-        await self._ensure_pose_vocab_collection()
 
-        if not await self._qc.collection_exists(STORIES_COLLECTION):
+        # Muse sessions (payload-only)
+        if not await self._qc.collection_exists(MUSE_SESSIONS_COLLECTION):
             await self._qc.create_collection(
-                collection_name=STORIES_COLLECTION,
-                vectors_config={
-                    "embedding": qm.VectorParams(
-                        size=settings.embed_dim,
-                        distance=qm.Distance.COSINE,
-                        on_disk=True,
-                    ),
-                },
-                on_disk_payload=True,
-            )
-            logger.info("Created collection: %s", STORIES_COLLECTION)
-        for field, schema in (
-            ("group_id", qm.PayloadSchemaType.KEYWORD),
-            ("base_image_id", qm.PayloadSchemaType.KEYWORD),
-            ("created_at", qm.PayloadSchemaType.FLOAT),
-        ):
-            await self._qc.create_payload_index(
-                collection_name=STORIES_COLLECTION,
-                field_name=field,
-                field_schema=schema,
-            )
-
-        # Weave co-creation sessions (payload-only)
-        if not await self._qc.collection_exists(WEAVE_SESSIONS_COLLECTION):
-            await self._qc.create_collection(
-                collection_name=WEAVE_SESSIONS_COLLECTION,
+                collection_name=MUSE_SESSIONS_COLLECTION,
                 vectors_config={},
                 on_disk_payload=True,
             )
-            logger.info("Created collection: %s", WEAVE_SESSIONS_COLLECTION)
+            logger.info("Created collection: %s", MUSE_SESSIONS_COLLECTION)
         for field, schema in (
             ("status", qm.PayloadSchemaType.KEYWORD),
             ("created_at", qm.PayloadSchemaType.FLOAT),
         ):
             await self._qc.create_payload_index(
-                collection_name=WEAVE_SESSIONS_COLLECTION,
+                collection_name=MUSE_SESSIONS_COLLECTION,
                 field_name=field,
                 field_schema=schema,
             )
@@ -417,15 +389,15 @@ class QdrantDBClient:
             pass
         try:
             # Empty collection → insert defaults. Non-empty → leave untouched.
-            from ..story.authors import seed_authors_if_empty
+            from ..authors.authors import seed_authors_if_empty
             await seed_authors_if_empty(self, vector_dim=settings.embed_dim)
         except Exception as exc:
             logger.warning("authors seed failed: %s", exc)
 
-        # Weave character presets (same shape as authors: dummy embedding)
+        # Character presets (same shape as authors: dummy embedding)
         await self.ensure_character_presets_collection()
         try:
-            from ..weave.character.presets import seed_presets_if_empty
+            from ..characters.presets import seed_presets_if_empty
             await seed_presets_if_empty(self, vector_dim=settings.embed_dim)
         except Exception as exc:
             logger.warning("character presets seed failed: %s", exc)
@@ -551,6 +523,12 @@ class QdrantDBClient:
         await self._qc.create_payload_index(
             collection_name=IMAGES_COLLECTION,
             field_name="is_reference",
+            field_schema=qm.PayloadSchemaType.BOOL,
+        )
+        # Board sketches. Every gallery query filters on this, so it must be indexed.
+        await self._qc.create_payload_index(
+            collection_name=IMAGES_COLLECTION,
+            field_name="is_draft",
             field_schema=qm.PayloadSchemaType.BOOL,
         )
         await self._qc.create_payload_index(
@@ -685,8 +663,10 @@ class QdrantDBClient:
         cursor: str | None = None,
         limit: int = 100,
         sort: str = "newest",
+        exclude_drafts: bool = True,
     ) -> tuple[list[dict], str | None]:
         sort_def = _SORT_ORDER_BY.get(sort, _SORT_ORDER_BY["newest"])
+        scroll_filter = self._draft_filter() if exclude_drafts else None
 
         # Decode cursor: {start: <sort_field_value>, last_id: <sha256>}
         start_from, last_id = _decode_scroll_cursor(cursor)
@@ -703,6 +683,7 @@ class QdrantDBClient:
         fetch_limit = limit + 2 if last_id else limit + 1
         points, _ = await self._qc.scroll(
             collection_name=IMAGES_COLLECTION,
+            scroll_filter=scroll_filter,
             order_by=order,
             limit=fetch_limit,
             with_payload=True,
@@ -727,6 +708,14 @@ class QdrantDBClient:
 
         return docs, next_cursor
 
+    @staticmethod
+    def _draft_exclude_cond() -> "qm.FieldCondition":
+        return qm.FieldCondition(key="is_draft", match=qm.MatchValue(value=True))
+
+    def _draft_filter(self) -> qm.Filter:
+        """Filter that hides board sketches — the gallery default."""
+        return qm.Filter(must_not=[self._draft_exclude_cond()])
+
     def _make_filter(
         self,
         *,
@@ -738,10 +727,13 @@ class QdrantDBClient:
         star_min: int | None = None,
         category: str | None = None,
         sha256_ids: set[str] | None = None,
+        exclude_drafts: bool = True,
     ) -> qm.Filter | None:
         """Build a Qdrant Filter from common image query parameters."""
         must: list = []
         must_not: list = []
+        if exclude_drafts:
+            must_not.append(self._draft_exclude_cond())
         if tags_include:
             if tag_logic == "or":
                 must.append(qm.FieldCondition(key="wd14_tags", match=qm.MatchAny(any=tags_include)))
@@ -775,12 +767,13 @@ class QdrantDBClient:
         star_min: int | None = None,
         category: str | None = None,
         sha256_ids: set[str] | None = None,
+        exclude_drafts: bool = True,
     ) -> list[dict]:
         """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions."""
         scroll_filter = self._make_filter(
             tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
             keyword=keyword, models=models, star_min=star_min,
-            category=category, sha256_ids=sha256_ids,
+            category=category, sha256_ids=sha256_ids, exclude_drafts=exclude_drafts,
         )
         all_docs: list[dict] = []
         offset = None
@@ -813,6 +806,7 @@ class QdrantDBClient:
         star_min: int | None = None,
         category: str | None = None,
         sha256_ids: set[str] | None = None,
+        exclude_drafts: bool = True,
     ) -> tuple[list[dict], str | None, int]:
         """Fetch one page of filtered results using order_by cursor pagination.
 
@@ -824,7 +818,7 @@ class QdrantDBClient:
         scroll_filter = self._make_filter(
             tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
             keyword=keyword, models=models, star_min=star_min,
-            category=category, sha256_ids=sha256_ids,
+            category=category, sha256_ids=sha256_ids, exclude_drafts=exclude_drafts,
         )
 
         # Approximate total (avoids full collection scan)
@@ -1219,7 +1213,7 @@ class QdrantDBClient:
         return docs
 
     async def ensure_character_presets_collection(self) -> None:
-        """Weave character presets — dummy embedding, ids are uuid5 of preset key."""
+        """Character presets — dummy embedding, ids are uuid5 of preset key."""
         if await self._qc.collection_exists(CHARACTER_PRESETS_COLLECTION):
             return
         await self._qc.create_collection(
@@ -1235,8 +1229,12 @@ class QdrantDBClient:
         )
         logger.info("Created collection: %s", CHARACTER_PRESETS_COLLECTION)
 
-    async def total_count(self) -> int:
-        result = await self._qc.count(collection_name=IMAGES_COLLECTION, exact=True)
+    async def total_count(self, *, exclude_drafts: bool = False) -> int:
+        result = await self._qc.count(
+            collection_name=IMAGES_COLLECTION,
+            count_filter=self._draft_filter() if exclude_drafts else None,
+            exact=True,
+        )
         return result.count
 
     async def count_with_embedding(self) -> int:
@@ -2440,109 +2438,6 @@ class QdrantDBClient:
         except Exception as e:
             logger.warning("search_wd14_vocab failed: %s", e)
             return []
-
-    # ── Pose / Scene Vocab (wd14_pose_vocab / wd14_scene_vocab) ────────────────────
-
-    async def _ensure_tag_vocab_collection(self, collection: str) -> None:
-        if await self._qc.collection_exists(collection):
-            logger.info("Collection exists: %s", collection)
-            return
-        await self._qc.create_collection(
-            collection_name=collection,
-            vectors_config=qm.VectorParams(
-                size=settings.embed_dim,
-                distance=qm.Distance.COSINE,
-                quantization_config=qm.ScalarQuantization(
-                    scalar=qm.ScalarQuantizationConfig(
-                        type=qm.ScalarType.INT8,
-                        quantile=0.99,
-                        always_ram=True,
-                    )
-                ),
-            ),
-            on_disk_payload=True,
-        )
-        await self._qc.create_payload_index(
-            collection_name=collection,
-            field_name="name",
-            field_schema=qm.PayloadSchemaType.KEYWORD,
-        )
-        logger.info("Created collection: %s (embed_dim=%d)", collection, settings.embed_dim)
-
-    async def _ensure_pose_vocab_collection(self) -> None:
-        await self._ensure_tag_vocab_collection(POSE_VOCAB_COLLECTION)
-
-    async def _ensure_scene_vocab_collection(self) -> None:
-        await self._ensure_tag_vocab_collection(SCENE_VOCAB_COLLECTION)
-
-    async def _count_tag_vocab(self, collection: str) -> int:
-        try:
-            result = await self._qc.count(collection)
-            return result.count
-        except Exception:
-            return 0
-
-    async def count_pose_vocab(self) -> int:
-        return await self._count_tag_vocab(POSE_VOCAB_COLLECTION)
-
-    async def count_scene_vocab(self) -> int:
-        return await self._count_tag_vocab(SCENE_VOCAB_COLLECTION)
-
-    async def _upsert_tag_vocab(self, collection: str, points: list[dict]) -> None:
-        """Batch upsert vocab points. Each dict: {id, vector, name, frequency, count}."""
-        batch_size = 100
-        for i in range(0, len(points), batch_size):
-            batch = points[i:i + batch_size]
-            qdrant_points = [
-                qm.PointStruct(
-                    id=p["id"],
-                    vector=p["vector"],
-                    payload={
-                        "name":      p["name"],
-                        "frequency": p["frequency"],
-                        "count":     p["count"],
-                    },
-                )
-                for p in batch
-            ]
-            await self._qc.upsert(collection_name=collection, points=qdrant_points)
-
-    async def upsert_pose_vocab(self, points: list[dict]) -> None:
-        await self._upsert_tag_vocab(POSE_VOCAB_COLLECTION, points)
-
-    async def upsert_scene_vocab(self, points: list[dict]) -> None:
-        await self._upsert_tag_vocab(SCENE_VOCAB_COLLECTION, points)
-
-    async def _scroll_tag_vocab_all(self, collection: str) -> list[tuple[str, list[float]]]:
-        """Load a whole tag vocabulary (name, vector) — ≤800 tags, kept in
-        process memory for hybrid ranking (legacy; Chronicle no longer uses pose vocab)."""
-        out: list[tuple[str, list[float]]] = []
-        offset = None
-        try:
-            while True:
-                pts, next_offset = await self._qc.scroll(
-                    collection_name=collection,
-                    limit=500,
-                    offset=offset,
-                    with_payload=["name"],
-                    with_vectors=True,
-                )
-                for p in pts:
-                    if p.payload and p.payload.get("name") and p.vector is not None:
-                        out.append((p.payload["name"], p.vector))
-                if next_offset is None:
-                    break
-                offset = next_offset
-        except Exception as e:
-            logger.warning("scroll %s failed: %s", collection, e)
-            return []
-        return out
-
-    async def scroll_pose_vocab_all(self) -> list[tuple[str, list[float]]]:
-        return await self._scroll_tag_vocab_all(POSE_VOCAB_COLLECTION)
-
-    async def scroll_scene_vocab_all(self) -> list[tuple[str, list[float]]]:
-        return await self._scroll_tag_vocab_all(SCENE_VOCAB_COLLECTION)
 
     async def get_aligned_sha256s(self, min_score: float) -> set[str]:
         """Return image_ids whose alignment score >= min_score."""

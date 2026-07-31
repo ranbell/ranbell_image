@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/admin")
 class ConfigBody(BaseModel):
     embed_model: str | None = None
     vlm_model: str | None = None
+    # Small/fast model for short structured calls. Empty → falls back to vlm_model.
+    utility_model: str | None = None
     wd14_threshold: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     wd14_model_dir: str | None = None
     ollama_url: str | None = None
@@ -443,33 +445,3 @@ async def invoke_import_wd14_vocab(request: Request):
     return {"status": "queued", "job_id": job_id}
 
 
-# ── Chronicle Pose Vocab (WD14 pose/action subset → Qdrant) ──────────────────
-
-@router.get("/chronicle/pose-vocab-status")
-async def chronicle_pose_vocab_status(request: Request):
-    db = request.app.state.db
-    count = await db.count_pose_vocab()
-    scene_count = await db.count_scene_vocab()
-    return {
-        "imported": count > 0 and scene_count > 0,
-        "tag_count": count,
-        "scene_tag_count": scene_count,
-    }
-
-
-@router.post("/chronicle/import-pose-vocab")
-async def chronicle_import_pose_vocab(request: Request):
-    """Embed the pose/action subset of selected_tags.csv into wd14_pose_vocab."""
-    from ..jobs.runners import run_import_pose_vocab
-    from ..spooler.models import JobLane
-    spooler = request.app.state.spooler
-    db = request.app.state.db
-    ollama = request.app.state.ollama
-    job_id = spooler.submit(
-        JobLane.SYNC,
-        "import_pose_vocab",
-        run_import_pose_vocab,
-        db=db,
-        ollama=ollama,
-    )
-    return {"status": "queued", "job_id": job_id}

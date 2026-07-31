@@ -6,7 +6,7 @@
    Single source of truth for every full-screen overlay. All overlays (both
    `Teleport to body` panels and inline App overlays) compete in the root
    stacking context, so use these named tiers instead of ad-hoc numbers.
-   Reference via Tailwind arbitrary values, e.g. `z-[var(--z-panel-weave)]`.
+   Reference via Tailwind arbitrary values, e.g. `z-[var(--z-panel-muse)]`.
    Never write a raw `z-50` on a full-screen overlay: anything under
    --z-header (100) ends up painted over by the sticky top bar. */
 :root {
@@ -18,11 +18,9 @@
   --z-gallery-zoom:    550;  /* focus/lightbox zoom (above the detail it launched from) */
   --z-panel:           600;  /* major panels: Invoke / Refine / Analyzer / Inspire / About */
   --z-panel-child:     610;  /* panel-owned sub-detail (Analyzer detail, etc.) */
-  --z-panel-story:     620;  /* Storybook shell */
-  --z-panel-story-top: 630;  /* Storybook story detail */
-  --z-panel-weave:     640;  /* Weave shell (top-most panel) */
-  --z-panel-weave-child: 650; /* Weave-owned dialogs (framing fix, …) */
-  --z-panel-media:     700;  /* Storybook pinup lightbox / panel-owned media zoom */
+  --z-panel-muse:      640;  /* Muse shell (top-most panel) */
+  --z-panel-muse-child: 650; /* Muse-owned dialogs */
+  --z-panel-media:     700;  /* panel-owned media zoom / lightbox */
   --z-modal:           800;  /* blocking confirms + Admin: instruction / AI reset / raw metadata / token prompt */
   --z-toast:           900;  /* toasts & context menus — always above content */
   --z-system:         1000;  /* Control Room */

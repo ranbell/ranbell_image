@@ -117,6 +117,10 @@ class BrainstormRequest(BaseModel):
     sha256s: list[str]
     extra_tags: list[str] = []
     lang: str = "ja"
+    # Supply the tag set directly instead of harvesting it from library docs.
+    # Muse uses this: its board images are tagged at a lower threshold than the
+    # library pipeline uses, and that merged set is what it wants ideas about.
+    reference_tags: list[str] | None = None
 
 
 class DiscoverRequest(BaseModel):
@@ -683,7 +687,7 @@ def _extract_spec_category_tags(world_spec: dict) -> dict[str, list[str]]:
         "lighting_tags":   "lighting_desc",
     }
     out = {cat: _extract_embedded_tags(world_spec.get(src, "")) for cat, src in cat_map.items()}
-    # subject_tags: Chronicle/Refine Visual Spec parity (9 categories)
+    # subject_tags: Refine Visual Spec parity (9 categories)
     subject = _extract_embedded_tags(world_spec.get("character_desc", ""))
     out["subject_tags"] = subject
     return out
@@ -1441,7 +1445,7 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     )
     # Extract per-category tags from STEP3 danbooru-embedded *_desc fields
     ws_cat_tags = _extract_spec_category_tags(world_spec)
-    # Subject anchors from fixed character tags (Refine/Chronicle parity)
+    # Subject anchors from fixed character tags (Refine parity)
     from ..tags.subject_anchors import SUBJECT_ANCHOR_TAGS
     _subj = [
         t for t in fixed_tags
@@ -1660,14 +1664,21 @@ async def _brainstorm_stream(
     ollama,
     cfg: dict,
     lang: str = "ja",
+    reference_tags: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
-    wd14_tags: list[str] = []
-    for sha256 in sha256s[:6]:
-        doc = await db.get(sha256)
-        if doc and doc.get("wd14_tags"):
-            wd14_tags.extend(doc["wd14_tags"][:20])
-
-    unique_tags = list(dict.fromkeys(wd14_tags))[:50]
+    # ``reference_tags`` lets a caller supply the tag set directly instead of
+    # harvesting it from library documents. Muse needs that: its board images
+    # are re-tagged at a much lower threshold than the library pipeline uses,
+    # and the merged result is the whole point of the step feeding this one.
+    if reference_tags is not None:
+        unique_tags = list(dict.fromkeys(reference_tags))[:50]
+    else:
+        wd14_tags: list[str] = []
+        for sha256 in sha256s[:6]:
+            doc = await db.get(sha256)
+            if doc and doc.get("wd14_tags"):
+                wd14_tags.extend(doc["wd14_tags"][:20])
+        unique_tags = list(dict.fromkeys(wd14_tags))[:50]
     must_tags = list(dict.fromkeys(extra_tags)) if extra_tags else []
 
     if lang == "en":

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.jobs.sse_stream import iter_queue_sse
-from app.story.topic_anchors import topic_anchor_groups, topic_anchor_tokens
+from app.tags.topic_anchors import topic_anchor_groups, topic_anchor_tokens
 
 
 def test_iter_queue_sse_json_and_cleanup():

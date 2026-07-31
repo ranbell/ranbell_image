@@ -56,6 +56,17 @@ class ComfyUIClient:
         "KSampler", "KSamplerAdvanced", "KSamplerSelect", "KSamplerCustom",
         "KSamplerCustomAdvanced",
     }
+    # Turbo / Lightning graphs split sampling apart: the KSampler node has no
+    # `steps` at all and the step count lives on a scheduler feeding it. Patching
+    # only _KSAMPLER_TYPES silently did nothing on those workflows, so a caller
+    # asking for a cheap 2-step draft got a full-price render and no warning.
+    _SCHEDULER_TYPES = {
+        "BasicScheduler", "KarrasScheduler", "ExponentialScheduler",
+        "PolyexponentialScheduler", "VPScheduler", "BetaSamplingScheduler",
+        "SDTurboScheduler", "AlignYourStepsScheduler", "LTXVScheduler",
+        "LaplaceScheduler", "GITSScheduler",
+    }
+    _STEP_NODE_TYPES = _KSAMPLER_TYPES | _SCHEDULER_TYPES
     _CLIP_ENCODE_TYPES = {
         "CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeSDXLRefiner",
         "BNK_CLIPTextEncodeAdvanced", "smZ CLIPTextEncode",
@@ -179,6 +190,30 @@ class ComfyUIClient:
             return True
         return False
 
+    @classmethod
+    def patchable_fields(cls, workflow: dict) -> dict[str, int]:
+        """How many nodes ``patch_workflow`` could write each knob to.
+
+        A zero means the corresponding argument will be accepted and then do
+        nothing — which is worth telling the user about *before* they wait for a
+        render that ignored their settings.
+        """
+        counts = {"steps": 0, "cfg": 0, "width": 0, "height": 0, "seed": 0}
+        for node in workflow.values():
+            class_type = node.get("class_type")
+            inputs = node.get("inputs", {}) or {}
+            if class_type in cls._STEP_NODE_TYPES and "steps" in inputs:
+                counts["steps"] += 1
+            if class_type in cls._KSAMPLER_TYPES and "cfg" in inputs:
+                counts["cfg"] += 1
+            if class_type in cls._LATENT_NODE_TYPES:
+                for dim in ("width", "height"):
+                    if dim in inputs:
+                        counts[dim] += 1
+            if "seed" in inputs or "noise_seed" in inputs:
+                counts["seed"] += 1
+        return counts
+
     def patch_workflow(
         self,
         workflow: dict,
@@ -263,7 +298,8 @@ class ComfyUIClient:
 
         if steps is not None or cfg is not None:
             for node_id, node in wf.items():
-                if node.get("class_type") not in self._KSAMPLER_TYPES:
+                class_type = node.get("class_type")
+                if class_type not in self._STEP_NODE_TYPES:
                     continue
                 inputs = node.setdefault("inputs", {})
                 if steps is not None and "steps" in inputs:
@@ -273,7 +309,8 @@ class ComfyUIClient:
                         self._patch_node_int_field(wf, node_id, "steps", int(steps))
                     elif isinstance(cur, (int, float)):
                         inputs["steps"] = int(steps)
-                if cfg is not None and "cfg" in inputs:
+                # cfg belongs to the sampler, never to a scheduler.
+                if cfg is not None and class_type in self._KSAMPLER_TYPES and "cfg" in inputs:
                     cur = inputs["cfg"]
                     if isinstance(cur, list) and len(cur) >= 1:
                         up = wf.get(str(cur[0]))

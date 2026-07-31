@@ -1,0 +1,157 @@
+"""Character registry API: pick one, edit one, draw its reference board."""
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from ..config import settings
+from ..spooler.models import JobLane
+from . import presets as presets_db
+from .board import compile_board_slot
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/characters")
+
+# Reference boards are keepers, not drafts: they are how the user recognises a
+# character in the picker, so they go in their own folder and stay in the gallery.
+CHARACTER_SUBDIR = "characters"
+
+
+class CharacterCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    name_ja: str = ""
+    summary: str = ""
+    summary_ja: str = ""
+    gender: str = ""
+    subject_tag: str = "1girl"
+    signature_prop: str = ""
+    personality: list[str] = []
+    appearance: dict = {}
+    tags: dict = {}
+    preferences: dict = {}
+    default_scene: dict = {}
+
+
+class CharacterUpdate(BaseModel):
+    name: str | None = None
+    name_ja: str | None = None
+    summary: str | None = None
+    summary_ja: str | None = None
+    gender: str | None = None
+    subject_tag: str | None = None
+    signature_prop: str | None = None
+    personality: list[str] | None = None
+    appearance: dict | None = None
+    tags: dict | None = None
+    preferences: dict | None = None
+    default_scene: dict | None = None
+
+
+class BoardRequest(BaseModel):
+    workflow_name: str = Field(..., min_length=1)
+    slots: list[str] = []          # empty → every slot
+    width: int = 768
+    height: int = 1152
+    steps: int | None = None       # None → the workflow's own
+    cfg: float | None = None
+    seed: int | None = None
+
+
+@router.get("")
+async def list_characters(request: Request):
+    rows = await presets_db.list_presets(request.app.state.db, limit=500)
+    return {"characters": rows, "count": len(rows), "board_slots": list(presets_db.BOARD_SLOTS)}
+
+
+@router.get("/{character_id}")
+async def get_character(character_id: str, request: Request):
+    preset = await presets_db.get_preset(request.app.state.db, character_id)
+    if preset is None:
+        raise HTTPException(404, "character not found")
+    return {
+        "character": presets_db.preset_to_character(preset),
+        "preset": preset,
+        "summary": presets_db.preset_summary(preset, point_id=character_id),
+    }
+
+
+@router.post("")
+async def create_character(body: CharacterCreate, request: Request):
+    row = await presets_db.create_preset(
+        request.app.state.db,
+        body.model_dump(),
+        vector_dim=settings.embed_dim,
+    )
+    return row
+
+
+@router.put("/{character_id}")
+async def update_character(character_id: str, body: CharacterUpdate, request: Request):
+    row = await presets_db.update_preset(
+        request.app.state.db, character_id, body.model_dump(exclude_none=True),
+    )
+    if row is None:
+        raise HTTPException(404, "character not found")
+    return row
+
+
+@router.delete("/{character_id}")
+async def delete_character(character_id: str, request: Request):
+    if not await presets_db.delete_preset(request.app.state.db, character_id):
+        raise HTTPException(404, "character not found")
+    return {"ok": True}
+
+
+@router.post("/{character_id}/board")
+async def render_character_board(character_id: str, body: BoardRequest, request: Request):
+    """Queue one render per board slot; each attaches itself when it lands."""
+    db = request.app.state.db
+    spooler = request.app.state.spooler
+    comfy = request.app.state.comfy
+
+    preset = await presets_db.get_preset(db, character_id)
+    if preset is None:
+        raise HTTPException(404, "character not found")
+
+    slots = [s for s in (body.slots or presets_db.BOARD_SLOTS) if s in presets_db.BOARD_SLOTS]
+    if not slots:
+        raise HTTPException(400, f"no valid slot in {body.slots}")
+
+    from ..jobs.render import run_render
+
+    jobs: list[dict] = []
+    for slot in slots:
+        positive, negative = compile_board_slot(preset, slot)
+
+        def _attach(slot_name: str):
+            async def _inner(sha256: str, _meta: dict) -> None:
+                await presets_db.attach_board_image(db, character_id, slot_name, sha256)
+            return _inner
+
+        job_id = spooler.submit(
+            JobLane.GENERATION,
+            f"character_board:{slot}",
+            run_render,
+            meta={"character_id": character_id, "slot": slot},
+            db=db,
+            comfy=comfy,
+            workflow_name=body.workflow_name,
+            positive=positive,
+            negative=negative,
+            width=body.width,
+            height=body.height,
+            steps=body.steps,
+            cfg=body.cfg,
+            seed=body.seed,
+            subdir=CHARACTER_SUBDIR,
+            prefix=f"char_{slot}",
+            method="character_board",
+            payload_extra={"character_id": character_id, "character_slot": slot},
+            attach=_attach(slot),
+        )
+        jobs.append({"slot": slot, "job_id": job_id, "positive": positive})
+
+    return {"status": "queued", "jobs": jobs}

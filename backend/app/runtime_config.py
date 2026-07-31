@@ -11,13 +11,11 @@ CONFIG_ID = "app_config"
 _defaults = {
     "embed_model":          settings.embed_model,
     "vlm_model":            settings.vlm_model,
-    "story_model":          settings.story_model,
     "utility_model":        settings.utility_model,
-    "story_think":          settings.story_think,
     "wd14_threshold":       settings.wd14_threshold,
     "wd14_model_dir":       settings.wd14_model_dir,
     "ollama_url":           settings.ollama_url,
-    "llm_provider":         settings.llm_provider,  # Chronicles UI default only
+    "llm_provider":         settings.llm_provider,
     "openai_base_url":      settings.openai_base_url,
     "openai_api_key":       settings.openai_api_key,
     "openai_model":         settings.openai_model,
@@ -35,6 +33,9 @@ _defaults = {
         "worst quality", "normal quality",
     ],
     "prompt_removal_tags": [],
+    # Shown in the Admin tag panel alongside the two lists above. It was in
+    # ConfigBody but not here, so every save read back empty.
+    "cluster_common_tags": [],
     "ollama_num_ctx":          16384,
     "frozenset_classification": True,
     # Invoke / Genesis

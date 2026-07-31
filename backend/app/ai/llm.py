@@ -2,7 +2,7 @@
 
 ``app.state.ollama`` is this gateway. By default, ``generate_*`` always uses
 Ollama so Invoke / Refine / Inspire keep working unchanged. Callers that want
-an OpenAI-compatible backend (Chronicles) must pass ``provider=`` or use
+an OpenAI-compatible backend must pass ``provider=`` or use
 ``bind("openai")``.
 
 Embeddings always go through Ollama so Qdrant vector dimensions stay stable.
@@ -26,7 +26,7 @@ def apply_llm_runtime_config(llm: "LlmGateway", cfg: dict) -> None:
     """Push Admin / env connection settings onto the live gateway.
 
     Does **not** change the default text/VLM route — that stays Ollama unless a
-    caller explicitly binds/overrides (Chronicles).
+    caller explicitly binds or overrides.
     """
     llm.configure(
         # Keep the shared gateway on Ollama; feature-level bind() chooses OpenAI.
@@ -66,7 +66,7 @@ class LlmGateway:
         """Return a view that forces text/VLM onto ``provider`` (default ollama).
 
         Shares the same underlying HTTP clients / config. Embeddings still hit
-        Ollama. Use from Chronicles so the rest of the app stays on Ollama.
+        Ollama. Use from one feature so the rest of the app stays on Ollama.
         """
         p: Provider = "openai" if provider == "openai" else "ollama"
         if p == self.provider:

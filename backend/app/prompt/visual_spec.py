@@ -1,4 +1,4 @@
-"""Refine / Chronicle Visual Spec: labeled category footer + parsers."""
+"""Refine Visual Spec: labeled category footer + parsers."""
 from __future__ import annotations
 
 import re
@@ -16,8 +16,7 @@ VISUAL_SPEC_CAT_FIELDS: tuple[str, ...] = (
     "lighting_tags",
 )
 
-# Back-compat aliases
-CHRONICLE_CAT_FIELDS = VISUAL_SPEC_CAT_FIELDS
+# Back-compat alias
 REFINE_CAT_FIELDS = VISUAL_SPEC_CAT_FIELDS
 
 # Visual Script prose length (paragraph count). Models differ in what length
@@ -77,22 +76,6 @@ LABELED_TAG_FOOTER = (
     "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
 )
 
-
-def chronicle_labeled_tag_footer(
-    paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
-) -> str:
-    n = clamp_prose_paragraphs(paragraphs)
-    return (
-        f"After the {n}-paragraph prose (still inside POSITIVE, after the prose), "
-        "output ONLY these labeled category lines. Prefer tags already present in "
-        "the PASS 1 TAG LINE — do not invent a parallel taxonomy. Leave a bucket "
-        "empty if nothing fits:\n\n"
-        f"{LABELED_TAG_FOOTER}"
-    )
-
-
-# Chronicle prose prompt wraps the footer with Pass-1 instructions.
-CHRONICLE_LABELED_TAG_FOOTER = chronicle_labeled_tag_footer(DEFAULT_PROSE_PARAGRAPHS)
 
 VS_LABEL_RE = re.compile(
     r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|BODY_PARTS|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",

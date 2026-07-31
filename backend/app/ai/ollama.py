@@ -293,7 +293,7 @@ class OllamaClient:
     ) -> str:
         """Chat completion via ``/api/chat`` (required for native think on bonsai/gemma).
 
-        Prefer this for Chronicle story-first creative calls with ``num_ctx`` ≥ 16384.
+        Prefer this for long creative calls with ``num_ctx`` ≥ 16384.
         ``prompt`` alone becomes a single user message; pass ``messages`` to override.
         """
         merged_options = {"num_predict": -1, **(options or {})}

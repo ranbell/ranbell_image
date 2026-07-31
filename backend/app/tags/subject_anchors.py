@@ -1,4 +1,4 @@
-"""Unified subject / person-count anchors for Refine, Chronicle, and Inspire."""
+"""Unified subject / person-count anchors for Refine, Muse, and Inspire."""
 from __future__ import annotations
 
 # Superset of former runners._PERSON_COUNT_TAGS, ai._SUBJECT_ANCHOR_TAGS,

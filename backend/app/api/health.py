@@ -65,7 +65,7 @@ async def detailed_health(request: Request):
             return {"ok": False, "error": "接続エラー", "url": settings.ollama_url, "models": []}
 
     async def check_llm():
-        """OpenAI-compatible endpoint health (used by Chronicles when selected)."""
+        """OpenAI-compatible endpoint health (used when a feature selects it)."""
         try:
             cfg = await get_runtime_config(db)
             url = cfg.get("openai_base_url") or settings.openai_base_url
@@ -148,7 +148,7 @@ async def ollama_models(request: Request):
 
 @router.get("/llm/models")
 async def llm_models(request: Request):
-    """OpenAI-compatible model list (for Chronicles endpoint config)."""
+    """OpenAI-compatible model list (for the OpenAI-compatible endpoint config)."""
     llm = request.app.state.ollama
     db = request.app.state.db
     try:

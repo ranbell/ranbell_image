@@ -1,6 +1,6 @@
 """OpenAI-compatible chat client (llama.cpp / Bonsai / vLLM / LM Studio / …).
 
-Implements the same generate_* surface as OllamaClient so Chronicles and the
+Implements the same generate_* surface as OllamaClient so features and the
 rest of the app can switch providers without call-site changes.
 
 Embeddings stay on Ollama — this client is text + vision only.

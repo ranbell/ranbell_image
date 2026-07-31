@@ -18,23 +18,19 @@ class Settings(BaseSettings):
     ollama_url: str = "http://host.docker.internal:11434"
     embed_model: str = "nomic-embed-text"
     vlm_model: str = "gemma4:e2b"
-    # Stage-tiered Chronicle models (Ollama provider only). Empty → fall back
-    # to vlm_model (no model swap on single-GPU Ollama). story = creative
-    # story-arc / polish calls (e.g. "hasutsubomi:9b"); utility = translations.
-    story_model: str = ""
+    # Small, fast model for short structured calls (theme splitting, two-sentence
+    # descriptions, translations). Empty → fall back to vlm_model, since a single
+    # GPU cannot afford to swap models mid-pipeline anyway.
     utility_model: str = ""
-    # Native `think` for the creative story calls. bonsai-class models break
-    # with think=True (measured); qwen-class reasoning models need it.
-    story_think: bool = False
     # HTTP timeout for all Ollama / OpenAI-compat requests. A hung backend
     # otherwise blocks the single-worker PROMPT lane for this long — lower it
     # if that matters more than very long generations.
     ollama_timeout_sec: float = 300.0
 
-    # Text / VLM provider selection is per-feature (Chronicles UI). The shared
-    # gateway always defaults to Ollama. These settings only configure the
-    # OpenAI-compatible endpoint used when Chronicles chooses it.
-    llm_provider: str = "ollama"  # default for Chronicles UI only
+    # Text / VLM provider selection is per-feature. The shared gateway always
+    # defaults to Ollama; these settings only configure the OpenAI-compatible
+    # endpoint a feature can opt into.
+    llm_provider: str = "ollama"
     openai_base_url: str = "http://host.docker.internal:8080/v1"
     openai_api_key: str = "not-needed"
     openai_model: str = "bonsai"

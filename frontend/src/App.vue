@@ -7,8 +7,7 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
-import WeavePanel from './components/WeavePanel.vue'
-import Storybook from './components/Storybook.vue'
+import MusePanel from './components/MusePanel.vue'
 import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
@@ -74,7 +73,7 @@ async function waitForBackend() {
 
 // ── Job stream ────────────────────────────────────────────────────────────────
 const jobsMap = ref(new Map())   // job.id -> job dict
-// Stable getter so WeavePanel can sample jobs without re-rendering on every map update.
+// Stable getter so MusePanel can sample jobs without re-rendering on every map update.
 function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
 
@@ -160,6 +159,9 @@ const activeModels = ref([])        // selected model names (OR logic)
 const modelFilteredTagSet = ref(null) // Set<string> | null — tags in model-only filtered results
 const starFilter = ref(null)        // null | 1..5 — ≥N stars filter
 const categoryFilter = ref('all')   // 'all' | 'AI' | 'NR'
+// Muse board sketches are registered in the library but hidden here by
+// default — six 512px throwaways per run would otherwise bury everything.
+const showDrafts = ref(false)
 const alignMinFilter = ref(null)    // null | 0.6 | 0.7 | 0.8
 const colorPickerVisible = ref(false)
 
@@ -1432,6 +1434,7 @@ async function fetchImages(reset = false) {
       if (activeModels.value.length) params.set('models', activeModels.value.join(','))
       if (starFilter.value) params.set('star_min', starFilter.value)
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
+      if (showDrafts.value) params.set('include_drafts', 'true')
       if (alignMinFilter.value !== null) params.set('align_min', alignMinFilter.value)
       if (sliderTimestamp.value && ['newest', 'oldest'].includes(sortOrder.value)) {
         params.set('date_seek', new Date(sliderTimestamp.value).toISOString())
@@ -2568,48 +2571,18 @@ function openInspire() { showInspire.value = true }
 // ── Invoke Panel ───────────────────────────────────────────────────────────────
 const showInvoke = ref(false)
 
-// ── Weave / Storybook ─────────────────────────────────────────────────────────
-const showWeave = ref(false)
-const showStorybook = ref(false)
-const weaveBase = ref(null)
+// ── Muse ──────────────────────────────────────────────────────────────────────
+const showMuse = ref(false)
 
-function openWeave(img = null) {
-  let base = img || selected.value || null
-  if (!base && selectedIds.value.size) {
-    const first = [...selectedIds.value][0]
-    base = images.value.find(i => i.sha256 === first) || { sha256: first }
-  }
-  // Storybook sits under Weave on the z-scale — close it so Weave is visible.
-  showStorybook.value = false
-  // Dismiss gallery detail so it cannot cover Weave.
+function openMuse() {
+  // Dismiss gallery detail so it cannot cover the panel.
   selected.value = null
-  // WeavePanel watches baseImage.sha256 and asks before abandoning a session
-  // woven from a different image. It is not v-if'd away, so it keeps its state
-  // across open/close — do not bounce `show` expecting a remount.
-  weaveBase.value = base
-  showWeave.value = true
+  // MusePanel is not v-if'd away — it keeps its session across open/close, so
+  // do not bounce `show` expecting a remount.
+  showMuse.value = true
 }
 
-function openStorybook() {
-  // Weave sits above Storybook — close it so Storybook is visible.
-  showWeave.value = false
-  selected.value = null
-  showStorybook.value = true
-}
-
-function openWeaveFromTray() {
-  const first = [...selectedIds.value][0]
-  if (!first) return
-  openWeave(images.value.find(i => i.sha256 === first) || { sha256: first })
-}
-
-function openWeaveFromStorybook(sha256) {
-  // Keep Storybook mounted underneath; open a fresh Weave session.
-  weaveBase.value = { sha256 }
-  showWeave.value = true
-}
-
-function openImageFromStorybook(sha256) {
+function openImageBySha(sha256) {
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
     selected.value = img
@@ -2661,9 +2634,6 @@ function handleSendToRefineDirect({ shas, directPrompt, directNegativePrompt = '
   refineInspireContext.value = inspireContext
   refineStyle.value = 'natural'
   if (workflow_name) refineWorkflow.value = workflow_name
-  // Storybook sits above Refine in z-order — dismiss it so Refine is usable.
-  // User can reopen Storybook anytime; prompts remain in Refine for repeated runs.
-  if (source === 'storybook') showStorybook.value = false
   openRefine()
 }
 
@@ -2736,7 +2706,7 @@ function _onGlobalKey(e) {
     return
   }
   if (e.key === 'Escape') {
-    // Gallery image detail sits above Storybook; close it before Storybook handles Esc.
+    // Gallery image detail sits above the panels; close it before they handle Esc.
     if (showLightbox.value) {
       closeLightbox()
       e.preventDefault()
@@ -2924,14 +2894,10 @@ onUnmounted(() => {
             class="px-3 py-1.5 bg-violet-900/70 hover:bg-violet-800/80 border border-violet-600/40 hover:border-violet-500/60 rounded-lg text-xs font-medium text-violet-200 transition-colors whitespace-nowrap">
             {{ $t('header.invoke') }}
           </button>
-          <button @click="openWeave()"
-            :title="$t('header.weaveTitle')"
+          <button @click="openMuse()"
+            :title="$t('header.museTitle')"
             class="px-3 py-1.5 bg-cyan-900/70 hover:bg-cyan-800/80 border border-cyan-600/40 hover:border-cyan-500/60 rounded-lg text-xs font-medium text-cyan-200 transition-colors whitespace-nowrap">
-            {{ $t('header.weave') }}
-          </button>
-          <button @click="openStorybook()"
-            class="px-3 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 border border-amber-600/40 hover:border-amber-500/60 rounded-lg text-xs font-medium text-amber-200 transition-colors whitespace-nowrap">
-            {{ $t('header.storybook') }}
+            {{ $t('header.muse') }}
           </button>
           <button @click="triggerScan" :disabled="scanState?.state === 'running'"
             class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
@@ -2956,6 +2922,14 @@ onUnmounted(() => {
             :class="categoryFilter === 'NR' ? 'bg-amber-700 text-white border-amber-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
             class="px-2 py-0.5 rounded-full border transition-colors">{{ $t('header.filter.categoryNR') }}</button>
         </div>
+
+        <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
+
+        <!-- Muse board sketches -->
+        <button @click="showDrafts = !showDrafts; fetchImages(true)"
+          :title="$t('gallery.showDraftsHint')"
+          :class="showDrafts ? 'bg-teal-800 text-teal-100 border-teal-600' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
+          class="px-2 py-0.5 rounded-full border transition-colors flex-shrink-0">{{ $t('gallery.showDrafts') }}</button>
 
         <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
 
@@ -3538,7 +3512,6 @@ onUnmounted(() => {
                           : refineDirectPromptSource === 'history' ? '📜'
                           : refineDirectPromptSource === 'invoke'  ? '✨'
                           : refineDirectPromptSource === 'detail'  ? '🎨'
-                          : refineDirectPromptSource === 'storybook' ? '📖'
                           : '📥'
                         }}</span>
                         <div class="min-w-0">
@@ -3547,7 +3520,6 @@ onUnmounted(() => {
                             : refineDirectPromptSource === 'history' ? $t('refine.directFromHistory')
                             : refineDirectPromptSource === 'invoke'  ? $t('refine.directFromInvoke')
                             : refineDirectPromptSource === 'detail'  ? $t('refine.directFromDetail')
-                            : refineDirectPromptSource === 'storybook' ? $t('refine.directFromStorybook')
                             : $t('refine.directFromDirect')
                           }}</p>
                           <p class="text-[10px] text-cyan-600 mt-0.5">
@@ -4550,11 +4522,6 @@ onUnmounted(() => {
                   ✨ {{ $t('detail.refineFromThis') }}
                 </button>
                 <button
-                  @click="openWeave(selected)"
-                  class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
-                  {{ $t('detail.weaveFromThis') }}
-                </button>
-                <button
                   v-if="selected.positive_prompt"
                   @click="handleSendToRefineDirect({ shas: [selected.sha256], directPrompt: selected.positive_prompt, directNegativePrompt: selected.negative_prompt || '', source: 'detail' })"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
@@ -5145,11 +5112,6 @@ onUnmounted(() => {
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-purple-800/60 hover:bg-purple-700/80 border border-purple-500/40 hover:border-purple-400/60 rounded-xl text-xs font-medium text-purple-200 transition-all duration-150">
                   {{ $t('tray.refine') }}
                 </button>
-                <button @click="openWeaveFromTray"
-                  :title="$t('tray.weaveTitle')"
-                  class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/60 hover:bg-cyan-800/80 border border-cyan-500/40 hover:border-cyan-400/60 rounded-xl text-xs font-medium text-cyan-200 transition-all duration-150">
-                  {{ $t('tray.weave') }}
-                </button>
                 <button @click="clearSelection"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/60 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-all duration-150">
                   {{ $t('tray.clear') }}
@@ -5195,22 +5157,12 @@ onUnmounted(() => {
       @select-image="openImageFromOracle($event)"
     />
 
-    <WeavePanel
-      :show="showWeave"
-      :base-image="weaveBase"
+    <MusePanel
+      :show="showMuse"
       :comfyOffline="comfyOffline"
       :get-jobs-map="getJobsMap"
-      @update:show="showWeave = $event"
-      @toast="showToast($event.msg, $event.type)"
-      @open-storybook="openStorybook()"
-    />
-
-    <!-- ── Storybook ── -->
-    <Storybook
-      :show="showStorybook"
-      @update:show="showStorybook = $event"
-      @select-image="openImageFromStorybook($event)"
-      @weave-from="openWeaveFromStorybook($event)"
+      @update:show="showMuse = $event"
+      @select-image="openImageBySha($event)"
       @send-to-refine-direct="handleSendToRefineDirect($event)"
       @toast="showToast($event.msg, $event.type)"
     />
