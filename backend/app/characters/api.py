@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..spooler.models import JobLane
 from . import presets as presets_db
-from .board import SLOT_SIZE, compile_board_slot
+from .board import SLOT_SIZE, compile_board_slot, plan_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,9 @@ class CharacterUpdate(BaseModel):
 class BoardRequest(BaseModel):
     workflow_name: str = Field(..., min_length=1)
     slots: list[str] = []          # empty → every slot
+    # Model that decides what she is doing in the five frames. Empty (or
+    # unreachable) falls back to the fixed hobby/active/food/work slots.
+    plan_model: str = ""
     # None → each slot's own canvas (see board.SLOT_SIZE). A full-body sheet and
     # a bust shot want different aspect ratios; one size for both is why the
     # portrait slot used to render a second full-body image.
@@ -125,9 +128,17 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
 
     from ..jobs.render import run_render
 
+    # One small call, before any render: what she is doing in the five frames,
+    # read off her personality rather than picked from four fixed slots.
+    plan = None
+    if "sheet" in slots:
+        plan = await plan_sheet(
+            preset, request.app.state.ollama, model=body.plan_model,
+        )
+
     jobs: list[dict] = []
     for slot in slots:
-        positive, negative = compile_board_slot(preset, slot)
+        positive, negative = compile_board_slot(preset, slot, plan)
         default_w, default_h = SLOT_SIZE.get(slot, (1024, 1344))
         width = body.width or default_w
         height = body.height or default_h
@@ -161,4 +172,4 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
         jobs.append({"slot": slot, "job_id": job_id, "positive": positive,
                      "size": [width, height]})
 
-    return {"status": "queued", "jobs": jobs}
+    return {"status": "queued", "jobs": jobs, "plan": plan}

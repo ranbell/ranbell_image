@@ -162,3 +162,88 @@ def test_each_slot_has_its_own_canvas():
 def test_unknown_slot_is_rejected():
     with pytest.raises(ValueError):
         compile_board_slot(PRESET, "closeup")
+
+
+# ── the LLM plan ────────────────────────────────────────────────────────────
+class _PlanLLM:
+    """Returns a canned plan and records the prompt it was handed."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.prompt = ""
+
+    async def generate_text(self, prompt, model=None, options=None, fmt=None):
+        import json
+        self.prompt = prompt
+        return json.dumps(self.payload) if not isinstance(self.payload, str) else self.payload
+
+
+GOOD_PLAN = {
+    "center": "standing straight, calm expression, holding book_cart",
+    "vignettes": ["walking down a street, trench coat",
+                  "reading near window, cardigan",
+                  "carrying cart up stairs, tired expression",
+                  "sitting in corner, pajamas, blanket"],
+}
+
+
+def _plan(payload):
+    import asyncio
+
+    from app.characters.board import plan_sheet
+    return asyncio.run(plan_sheet(PRESET, _PlanLLM(payload)))
+
+
+def test_a_good_plan_is_accepted():
+    plan = _plan(GOOD_PLAN)
+    assert plan["center"] == GOOD_PLAN["center"]
+    assert len(plan["vignettes"]) == 4
+
+
+def test_the_plan_replaces_the_fixed_slots_in_the_sheet():
+    positive, _ = compile_board_slot(PRESET, "sheet", GOOD_PLAN)
+    assert "sitting in corner, pajamas, blanket" in positive
+    assert "eating, crepe" not in positive, "the fixed food slot must be gone"
+    centre = next(ln for ln in positive.splitlines() if ln.startswith("Center/Main"))
+    assert "calm expression" in centre
+
+
+def test_no_plan_still_renders_the_fixed_slots():
+    """A board that renders something beats a board that renders nothing."""
+    positive, _ = compile_board_slot(PRESET, "sheet", None)
+    bullets = [ln[3:] for ln in positive.splitlines() if ln.startswith(" - ")]
+    assert bullets == sheet_vignettes(CHARACTER)
+    assert "dynamic posture" in positive, "the fixed centre is still used"
+
+
+def test_a_plan_that_repeats_itself_is_refused():
+    """Four identical frames are worse than the fixed slots, which at least vary."""
+    assert _plan({**GOOD_PLAN, "vignettes": ["reading, cardigan"] * 4}) is None
+
+
+def test_a_short_plan_is_refused():
+    assert _plan({**GOOD_PLAN, "vignettes": GOOD_PLAN["vignettes"][:3]}) is None
+
+
+def test_a_plan_with_no_centre_is_refused():
+    assert _plan({**GOOD_PLAN, "center": ""}) is None
+
+
+def test_unparseable_output_falls_back():
+    assert _plan("not json") is None
+
+
+def test_the_plan_prompt_carries_the_personality_and_bans_appearance():
+    import asyncio
+
+    from app.characters.board import plan_sheet
+    llm = _PlanLLM(GOOD_PLAN)
+    asyncio.run(plan_sheet(PRESET, llm))
+    assert CHARACTER["personality"]["summary"][:20] in llm.prompt
+    assert "Never mention hair colour" in llm.prompt
+    assert CHARACTER["signature_prop"] in llm.prompt
+
+
+def test_plan_lines_are_tidied():
+    plan = _plan({**GOOD_PLAN, "center": '  "- standing,  smile ,"  '})
+    assert plan["center"] == "standing, smile"

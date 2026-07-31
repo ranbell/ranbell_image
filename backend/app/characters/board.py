@@ -26,10 +26,13 @@ bare-shouldered.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ..tags.split_tags import soft_normalize_tag
 from .presets import BOARD_SLOTS, preset_to_character
+
+logger = logging.getLogger(__name__)
 
 # Canvas per slot. The sheet needs room for five frames; the portrait needs a
 # shape with nowhere to put the legs.
@@ -72,8 +75,117 @@ _PORTRAIT_NEGATIVE = _NEGATIVE + (
 )
 
 
+_PLAN_PROMPT = """\
+# ROLE
+You are casting five frames of a character reference sheet. You decide what she
+is doing in each one.
+
+# THE CHARACTER
+{name}
+{summary}
+Personality: {traits}
+Likes: {likes}
+Habits and hobbies: {gestures}
+Usual clothes: {outfit}
+Carries: {props}
+
+# WHAT TO WRITE
+A centre pose, and four moments from her life.
+
+- The centre is the biggest frame and it must read as a POSE, not an activity.
+  Give it a body posture, a facial expression, and the thing she carries
+  ({signature}). It is her standing there being herself, in her usual clothes.
+  Shape: "casual, leaning_forward, dynamic posture, smile, holding {signature}".
+- The four moments must be four *different* lives — different activity,
+  different clothes, different place. Two frames of her reading are one frame
+  wasted, and none of them should repeat the centre. Draw them from her
+  personality, not from a generic list.
+- Each moment is short: a few danbooru-style tags, an action plus what she
+  wears or holds. Shape: "tennis, sportswear, headband".
+
+# RULES
+- Never mention hair colour, eye colour, body type or age. Those are fixed
+  elsewhere and repeating them here can only contradict them.
+- Actions and clothes only. No lighting, no camera, no background scenery.
+- English only, lowercase, comma-separated.
+
+# OUTPUT (JSON only)
+{{"center": "<pose and expression>", "vignettes": ["<1>", "<2>", "<3>", "<4>"]}}"""
+
+
 def _first(values: Any, limit: int = 1) -> list[str]:
     return [str(v).strip() for v in (values or []) if str(v).strip()][:limit]
+
+
+def _joined(values: Any, limit: int = 8) -> str:
+    out = [str(v).strip() for v in (values or []) if str(v).strip()][:limit]
+    return ", ".join(out) if out else "(unknown)"
+
+
+async def plan_sheet(
+    preset: dict[str, Any],
+    ollama,
+    *,
+    model: str = "",
+    num_ctx: int | None = None,
+) -> dict[str, Any] | None:
+    """Ask a model what she should be doing in the five frames.
+
+    The deterministic version picks from four fixed slots — hobby, something
+    active, eating, working — which is fine and always the same. A character
+    who repairs clocks and hates crowds gets the same tennis-and-crepe sheet as
+    everyone else. This reads her personality instead.
+
+    Returns None on any failure; the caller falls back to the fixed slots, since
+    a board that renders something is worth more than a board that renders
+    nothing.
+    """
+    from ..ai.json_util import parse_json_object
+    from ..ai.llm_options import llm_options
+
+    character = preset_to_character(preset)
+    personality = character.get("personality") or {}
+    signature = soft_normalize_tag(str(character.get("signature_prop") or "")) or "her usual thing"
+    prompt = _PLAN_PROMPT.format(
+        signature=signature,
+        name=str(preset.get("name") or preset.get("name_ja") or "").strip() or "(unnamed)",
+        summary=str(personality.get("summary") or "").strip() or "(no summary)",
+        traits=_joined(personality.get("traits")),
+        likes=_joined(personality.get("likes"), 6),
+        gestures=_joined(character.get("gesture_vocab"), 8),
+        outfit=_joined(character.get("outfit_tags"), 6),
+        props=_joined(character.get("prop_tags"), 6),
+    )
+    try:
+        raw = await ollama.generate_text(
+            prompt,
+            model=model or None,
+            options=llm_options(model=model, num_ctx=num_ctx),
+            fmt="json",
+        )
+        parsed = parse_json_object(raw if isinstance(raw, str) else str(raw))
+    except Exception as exc:
+        logger.warning("[characters] sheet plan failed: %s", exc)
+        return None
+
+    centre = _clean_line(parsed.get("center"))
+    vignettes = [_clean_line(v) for v in (parsed.get("vignettes") or [])]
+    vignettes = [v for v in vignettes if v]
+    # Four distinct frames or nothing: a plan that repeats itself is worse than
+    # the fixed slots, which at least vary by construction.
+    if not centre or len(vignettes) < 4 or len({v.lower() for v in vignettes[:4]}) < 4:
+        logger.info("[characters] sheet plan unusable, falling back")
+        return None
+    return {"center": centre, "vignettes": vignettes[:4]}
+
+
+def _clean_line(value: Any) -> str:
+    """One vignette line: comma-separated, no stray quoting or numbering."""
+    if isinstance(value, (list, tuple)):
+        value = ", ".join(str(v) for v in value)
+    text = str(value or "").strip().strip('"').strip()
+    parts = [p.strip().strip("-").strip() for p in text.split(",")]
+    return ", ".join(p for p in parts if p)[:160]
 
 
 def sheet_vignettes(character: dict[str, Any]) -> list[str]:
@@ -109,7 +221,9 @@ def sheet_vignettes(character: dict[str, Any]) -> list[str]:
     ]
 
 
-def _compile_sheet(character: dict[str, Any]) -> tuple[str, str]:
+def _compile_sheet(
+    character: dict[str, Any], plan: dict[str, Any] | None = None,
+) -> tuple[str, str]:
     identity = [str(t) for t in (character.get("identity_tags") or []) if t]
     outfit = [str(t) for t in (character.get("outfit_tags") or []) if t]
     props = [str(t) for t in (character.get("prop_tags") or []) if t]
@@ -117,18 +231,23 @@ def _compile_sheet(character: dict[str, Any]) -> tuple[str, str]:
     if sig and sig not in props:
         props.insert(0, sig)
 
-    # The centre frame carries the sheet, so it gets an open expression rather
-    # than the closed_mouth end of her repertoire.
-    expressions = [str(e) for e in (character.get("expression_vocab") or []) if e]
-    warm = next(
-        (e for e in expressions if any(w in e for w in ("smile", "grin", "blush"))),
-        "smile",
-    )
-    centre = ", ".join(
-        ["casual", "leaning_forward", "dynamic posture", warm]
-        + ([f"holding {sig}"] if sig else [])
-    )
-    vignettes = "\n".join(f" - {v}" for v in sheet_vignettes(character))
+    if plan:
+        centre = str(plan.get("center") or "")
+        lines = list(plan.get("vignettes") or [])
+    else:
+        # The centre frame carries the sheet, so it gets an open expression
+        # rather than the closed_mouth end of her repertoire.
+        expressions = [str(e) for e in (character.get("expression_vocab") or []) if e]
+        warm = next(
+            (e for e in expressions if any(w in e for w in ("smile", "grin", "blush"))),
+            "smile",
+        )
+        centre = ", ".join(
+            ["casual", "leaning_forward", "dynamic posture", warm]
+            + ([f"holding {sig}"] if sig else [])
+        )
+        lines = sheet_vignettes(character)
+    vignettes = "\n".join(f" - {v}" for v in lines)
 
     positive = (
         f"Character: {', '.join(identity + outfit)},\n"
@@ -192,9 +311,18 @@ def _is_head_prop(tag: str) -> bool:
     return any(h in name for h in _HEAD_PROP_HINTS)
 
 
-def compile_board_slot(preset: dict[str, Any], slot: str) -> tuple[str, str]:
-    """``(positive, negative)`` for one board slot of one character."""
+def compile_board_slot(
+    preset: dict[str, Any], slot: str, plan: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """``(positive, negative)`` for one board slot of one character.
+
+    ``plan`` is ``plan_sheet``'s output. Without one the sheet falls back to the
+    fixed four slots, so this stays a pure function and the board still renders
+    when no model is reachable.
+    """
     if slot not in BOARD_SLOTS:
         raise ValueError(f"unknown board slot: {slot}")
     character = preset_to_character(preset)
-    return _compile_sheet(character) if slot == "sheet" else _compile_portrait(character)
+    if slot == "sheet":
+        return _compile_sheet(character, plan)
+    return _compile_portrait(character)
