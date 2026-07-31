@@ -1329,7 +1329,15 @@
     "harvest": {
       "title": "Tags read back off the board",
       "fromBackground": "From background",
-      "fromPerson": "From character"
+      "fromPerson": "From character",
+      "cleaned": "Dropped by the model",
+      "cleanedHint": "What the rules could not judge. Unusual tags are kept on purpose",
+      "reason": {
+        "wrong_track": "belongs to the other track",
+        "franchise": "a franchise or existing character",
+        "artifact": "the draft's own layout",
+        "contradicts": "contradicts the chosen character"
+      }
     },
     "merge": {
       "title": "Merged tags",
@@ -1378,7 +1386,9 @@
     "subtractStrength": "Track separation",
     "subtractStrengthHint": "Subtracts people from the background search and scenery from the character one. 0 disables it",
     "popularityWeight": "Drawability weight",
-    "popularityWeightHint": "Mixes the Danbooru post count into semantic distance. Never applied to the surprise layers"
+    "popularityWeightHint": "Mixes the Danbooru post count into semantic distance. Never applied to the surprise layers",
+    "llmCleanup": "Let a model tidy the tags",
+    "llmCleanupHint": "Reviews each track's read-back tags and drops what belongs to the other track, names a franchise, or is the draft's own layout"
   },
   "characters": {
     "title": "Characters",

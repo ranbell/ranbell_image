@@ -1329,7 +1329,15 @@
     "harvest": {
       "title": "絵から拾ったタグ",
       "fromBackground": "背景から",
-      "fromPerson": "人物から"
+      "fromPerson": "人物から",
+      "cleaned": "LLM が落としたタグ",
+      "cleanedHint": "ルールでは判別できなかったもの。意外性のあるタグは残す方針",
+      "reason": {
+        "wrong_track": "もう片方のトラックのもの",
+        "franchise": "版権・既存キャラ",
+        "artifact": "下書きの体裁が写り込んだもの",
+        "contradicts": "選択キャラと矛盾"
+      }
     },
     "merge": {
       "title": "まとめたタグ",
@@ -1378,7 +1386,9 @@
     "subtractStrength": "トラック分離の強さ",
     "subtractStrengthHint": "背景の検索から人物を、人物の検索から風景を差し引く。0 で無効",
     "popularityWeight": "描きやすさの重み",
-    "popularityWeightHint": "Danbooru 投稿数を意味的近さに混ぜる。意外性の層にはかからない"
+    "popularityWeightHint": "Danbooru 投稿数を意味的近さに混ぜる。意外性の層にはかからない",
+    "llmCleanup": "LLM でタグを整理する",
+    "llmCleanupHint": "絵から拾ったタグを背景/人物それぞれ見て、片方にしか属さないもの・版権名・下書きの体裁を落とす"
   },
   "characters": {
     "title": "キャラクター",

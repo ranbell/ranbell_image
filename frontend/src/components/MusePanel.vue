@@ -51,6 +51,7 @@ const character = computed(() => session.value?.character || null)
 const seedTags = computed(() => session.value?.seed_tags || {})
 const board = computed(() => session.value?.board || {})
 const harvest = computed(() => session.value?.harvest || {})
+const harvestDropped = computed(() => session.value?.harvest_dropped || {})
 const merged = computed(() => session.value?.merged || {})
 const scene = computed(() => session.value?.scene || {})
 const final = computed(() => session.value?.final || {})
@@ -499,6 +500,14 @@ function close() { emit('update:show', false) }
                        @change="patchInputs({ drop_character_tags: $event.target.checked })" />
                 {{ t('muse.dropCharacterTags') }}
               </label>
+              <label class="flex items-start gap-2 text-[10px] text-gray-500">
+                <input type="checkbox" :checked="inputs.llm_cleanup"
+                       @change="patchInputs({ llm_cleanup: $event.target.checked })" />
+                <span>
+                  {{ t('muse.llmCleanup') }}
+                  <span class="block text-gray-600">{{ t('muse.llmCleanupHint') }}</span>
+                </span>
+              </label>
             </div>
           </details>
         </aside>
@@ -619,6 +628,18 @@ function close() { emit('update:show', false) }
                       : 'border-white/10 bg-black/30 text-gray-400'"
                     :title="`score ${row.score} · ${row.count} image(s)`"
                   >{{ row.tag }}</span>
+                </div>
+                <div v-if="(harvestDropped[track] || []).length" class="mt-2">
+                  <p class="sb-label mb-1">{{ t('muse.harvest.cleaned') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="row in harvestDropped[track]"
+                      :key="row.tag"
+                      class="px-1.5 py-0.5 rounded border border-rose-800/30 bg-rose-950/20 text-[10px] font-mono text-rose-400/60 line-through"
+                      :title="t(`muse.harvest.reason.${row.reason}`)"
+                    >{{ row.tag }}</span>
+                  </div>
+                  <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.harvest.cleanedHint') }}</p>
                 </div>
               </div>
             </div>

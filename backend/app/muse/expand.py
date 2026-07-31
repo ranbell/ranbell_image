@@ -212,6 +212,17 @@ def belongs_to_track(tag: str, track: str) -> bool:
     return not is_scene_tag(tag)
 
 
+# Sections that describe what is happening rather than what is worn. Repeated
+# in the person query because the character section is wardrobe-only once a
+# character is locked, and a query of pure clothing words retrieves pure
+# clothing — one run came back as kimono, maid_headdress, chinese_clothes and
+# rendered a costume chart instead of a girl in a library.
+_QUERY_EMPHASIS: dict[str, tuple[str, ...]] = {
+    "person": ("action",),
+    "background": ("background",),
+}
+
+
 def track_query(theme: str, split: dict[str, str], track: str) -> str:
     """The text this track's vocabulary search runs against.
 
@@ -221,9 +232,12 @@ def track_query(theme: str, split: dict[str, str], track: str) -> str:
     vocabulary the embedding index was built from.
     """
     parts = [str(split.get(s) or "") for s in TRACK_SECTIONS[track]]
+    emphasis = [str(split.get(s) or "") for s in _QUERY_EMPHASIS.get(track, ())]
     anchors = topic_anchor_groups(theme)
     bridged = [word for group in anchors for word in group]
-    return " ".join([theme, *parts, *bridged]).strip()
+    # The theme twice: it is the one thing the user actually asked for, and a
+    # single mention loses to six sections of generated tags.
+    return " ".join([theme, theme, *parts, *emphasis, *bridged]).strip()
 
 
 async def track_query_vector(

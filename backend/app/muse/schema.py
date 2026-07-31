@@ -59,6 +59,7 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "rejected_tags": [],      # user-clicked exclusions, applied from S2 onward
         "board": {t: [] for t in TRACKS},   # track → [{seed, image_id, job_id, pending}]
         "harvest": {},            # track → [{tag, score, count, category}]
+        "harvest_dropped": {},    # track → [{tag, reason}] the LLM cleanup removed
         "merged": {},             # {tags[], protected[], removed[], context, analysis}
         "scene": {},              # {candidates: [{title, body}], chosen, text}
         "final": {},              # {positive, negative, image_id, job_id}

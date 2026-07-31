@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
-from .defaults import BOARD_DEFAULTS, MERGE_DEFAULTS
+from .defaults import ALL_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +198,7 @@ async def build_muse_catalog(
             "board_workflow": suggested_workflow,
             "final_workflow": suggested_workflow,
             "locale": "ja",
-            **BOARD_DEFAULTS,
-            **MERGE_DEFAULTS,
+            **ALL_DEFAULTS,
         },
         "notes": {
             "wd14_vocab_required": (

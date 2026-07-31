@@ -17,10 +17,12 @@ rather than a flat tag list, because that is what makes the model lay the frames
 out instead of blending them; and ``multiple_views`` is in the *positive*, where
 every other prompt in this codebase bans it.
 
-The **portrait** is the opposite: a close-up, identity only, so a human can
-judge the face at full size. It carries no wardrobe and no props — a long skirt
-and a floor-standing prop are both votes for showing the whole body, which is
-how this slot used to come back as a second full-body render.
+The **portrait** is the opposite: a close-up so a human can judge the face at
+full size. It keeps her identity and the clothes on her top half, and drops
+everything that argues for showing the legs — a long skirt, footwear, a
+floor-standing prop. Keeping those is how this slot used to come back as a
+second full-body render; dropping the wardrobe entirely is how it came back
+bare-shouldered.
 """
 from __future__ import annotations
 
@@ -143,14 +145,30 @@ def _compile_sheet(character: dict[str, Any]) -> tuple[str, str]:
     return positive, _NEGATIVE
 
 
+_LOWER_BODY_HINTS = (
+    "skirt", "pants", "trousers", "shorts", "jeans", "legwear", "pantyhose",
+    "thighhighs", "kneehighs", "socks", "stockings", "shoes", "boots",
+    "loafers", "sandals", "sneakers", "heels", "footwear",
+)
+
+
+def _shows_the_legs(tag: str) -> bool:
+    name = tag.lower()
+    return any(h in name for h in _LOWER_BODY_HINTS)
+
+
 def _compile_portrait(character: dict[str, Any]) -> tuple[str, str]:
     identity = [str(t) for t in (character.get("identity_tags") or []) if t]
+    # Her top half still needs clothes — dropping the wardrobe wholesale left
+    # one render bare-shouldered. Only garments that argue for showing the legs
+    # come out.
+    upper = [t for t in (character.get("outfit_tags") or []) if not _shows_the_legs(str(t))]
     # Worn-on-the-head accessories are part of the face; everything else she
     # carries argues for a wider shot.
     worn = [t for t in (character.get("prop_tags") or []) if _is_head_prop(str(t))]
 
     ordered: list[str] = []
-    for group in (identity, worn, _PORTRAIT_FRAMING):
+    for group in (identity, upper, worn, _PORTRAIT_FRAMING):
         for tag in group:
             if tag and tag not in ordered:
                 ordered.append(tag)

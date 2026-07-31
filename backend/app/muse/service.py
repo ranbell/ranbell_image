@@ -16,7 +16,7 @@ from ..prompt.tag_merge import removal_tag_set
 from ..runtime_config import get_runtime_config
 from ..scanner.drafts import PLAYGROUND_SUBDIR
 from ..spooler.models import JobLane
-from . import expand, harvest, merge, scene, session_db
+from . import cleanup, expand, harvest, merge, scene, session_db
 from .schema import TRACKS, new_session, public_view
 
 logger = logging.getLogger(__name__)
@@ -225,7 +225,7 @@ def _unpatchable(comfy, workflow_name: str, inputs: dict[str, Any]) -> list[str]
 
 
 # ── S5 harvest ──────────────────────────────────────────────────────────────
-async def run_harvest(db, session: dict[str, Any]) -> dict[str, Any]:
+async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any]:
     from pathlib import Path
 
     inputs = _inputs(session)
@@ -266,9 +266,28 @@ async def run_harvest(db, session: dict[str, Any]) -> dict[str, Any]:
             rerank=bool(inputs.get("harvest_rerank", False)),
         )
 
+    # Rules got the easy cases. One small model now says which tags belong to
+    # the other track, name somebody else's character, or describe the draft's
+    # own layout — none of which a frozenset can know.
+    dropped: dict[str, list[dict[str, str]]] = {t: [] for t in TRACKS}
+    if ollama is not None and inputs.get("llm_cleanup", True):
+        identity = list((session.get("character") or {}).get("identity_tags") or [])
+        for track in TRACKS:
+            result[track], dropped[track] = await cleanup.clean_track(
+                result[track], track, ollama,
+                theme=str(inputs.get("theme") or ""),
+                identity_tags=identity,
+                model=str(inputs.get("light_model") or ""),
+                num_ctx=cfg.get("ollama_num_ctx"),
+            )
+
     session["harvest"] = result
+    session["harvest_dropped"] = dropped
     session["merged"] = {}
-    session_db.log(session, "harvest", " / ".join(f"{t}:{len(result[t])}" for t in TRACKS))
+    session_db.log(
+        session, "harvest",
+        " / ".join(f"{t}:{len(result[t])}(-{len(dropped[t])})" for t in TRACKS),
+    )
     await session_db.save(db, session)
     return session
 

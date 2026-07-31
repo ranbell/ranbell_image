@@ -46,6 +46,7 @@ class InputsPatch(BaseModel):
     harvest_rerank: bool | None = None
     drop_rating_tags: bool | None = None
     drop_character_tags: bool | None = None
+    llm_cleanup: bool | None = None
     character_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     merge_common_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     merge_unique_count: int | None = Field(default=None, ge=1, le=100)
@@ -179,7 +180,9 @@ async def run_board(session_id: str, request: Request):
 @router.post("/sessions/{session_id}/harvest")
 async def run_harvest(session_id: str, request: Request):
     session = await _session(request, session_id)
-    return await _run(request, session, service.run_harvest(_db(request), session))
+    return await _run(request, session, service.run_harvest(
+        _db(request), session, _llm(request, session),
+    ))
 
 
 @router.post("/sessions/{session_id}/merge")

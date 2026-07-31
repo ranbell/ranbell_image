@@ -35,6 +35,10 @@ HARVEST_DEFAULTS: dict[str, object] = {
     "harvest_rerank_top_n": 40,
     "drop_rating_tags": False,   # no censoring unless the user asks
     "drop_character_tags": True,  # WD14 category 4 = named characters
+    # One small LLM call per track after the read-back, to catch what no
+    # frozenset can: a tag that presupposes a person, a franchise name, or the
+    # draft's own layout leaking in. Bounded so it can never gut the list.
+    "llm_cleanup": True,
 }
 
 # ── Tag merge ──────────────────────────────────────────────────────────────

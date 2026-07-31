@@ -25,6 +25,11 @@ _FRAME_JUNK = frozenset({
     "split_screen", "diptych", "triptych", "cropped", "out_of_frame",
     "image_sample", "sample_watermark", "watermark", "signature", "artist_name",
     "username", "web_address", "logo", "text_focus",
+    # Literal instructions to draw a costume chart. A person board that picks
+    # these up comes back as eight outfit variants of the same girl instead of
+    # one character in one scene.
+    "alternate_costume", "official_alternate_costume", "alternate_hairstyle",
+    "variations", "costume_switch", "cosplay",
 })
 
 # Rating tags with no visual meaning at all. `questionable` / `explicit` do

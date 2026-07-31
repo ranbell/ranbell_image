@@ -105,11 +105,19 @@ def test_portrait_is_a_close_up():
     assert "full_body" not in tags
 
 
-def test_portrait_drops_the_wardrobe_that_argues_for_a_full_figure():
-    """`long_skirt` and `loafers` are each a vote for showing the legs."""
+def test_portrait_drops_only_the_wardrobe_that_shows_the_legs():
+    """`long_skirt` and `loafers` are each a vote for showing the legs. Her top
+    half still needs clothes — dropping the wardrobe wholesale came back
+    bare-shouldered."""
     positive, _ = _portrait()
-    for tag in CHARACTER["outfit_tags"]:
+    lower = [t for t in CHARACTER["outfit_tags"]
+             if any(h in t for h in ("skirt", "shoes", "loafers", "socks", "pantyhose"))]
+    upper = [t for t in CHARACTER["outfit_tags"] if t not in lower]
+    assert lower, "the fixture character should own something below the waist"
+    for tag in lower:
         assert tag not in positive
+    for tag in upper:
+        assert tag in positive
 
 
 def test_portrait_keeps_worn_head_accessories():
