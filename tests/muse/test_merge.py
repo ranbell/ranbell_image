@@ -87,3 +87,44 @@ def test_weights_are_reported():
     out = merge_tracks(FOLDED, character_weight=0.75)
     assert out["weights"]["person"] > out["weights"]["background"]
     assert abs(out["weights"]["person"] + out["weights"]["background"] - 1.0) < 1e-6
+
+
+def test_protected_tags_evict_what_contradicts_them():
+    """Leading with the locked eye colour does nothing while a rival one is
+    still listed — the model sees both and picks one. This is the defect that
+    produced a prompt containing brown_eyes, blue_eyes, 1girl and
+    multiple_girls all at once."""
+    folded = {
+        "background": BACKGROUND,
+        "person": PERSON + [{"tag": "blue_eyes", "score": 0.91},
+                            {"tag": "blue_hair", "score": 0.87}],
+    }
+    out = merge_tracks(folded, character_weight=0.5, protected_tags=IDENTITY)
+    assert "green_eyes" in out["tags"], "the protected eye colour itself stays"
+    assert "purple_hair" in out["tags"]
+    assert "blue_eyes" not in out["tags"]
+    assert "blue_hair" not in out["tags"]
+    assert set(out["evicted"]) == {"blue_eyes", "blue_hair"}
+
+
+def test_eviction_does_not_touch_unrelated_tags():
+    folded = {"background": BACKGROUND, "person": PERSON}
+    out = merge_tracks(folded, character_weight=0.5, protected_tags=IDENTITY)
+    for tag in ("rooftop", "school_uniform", "puddle"):
+        assert tag not in out["evicted"]
+
+
+def test_no_protection_means_no_eviction():
+    out = merge_tracks({"background": BACKGROUND, "person": PERSON}, character_weight=0.5)
+    assert out["evicted"] == []
+
+
+def test_junk_never_survives_the_merge():
+    folded = {
+        "background": BACKGROUND + [{"tag": "no_humans", "score": 0.8},
+                                    {"tag": "black_border", "score": 0.7}],
+        "person": PERSON,
+    }
+    out = merge_tracks(folded, character_weight=0.5, protected_tags=IDENTITY)
+    assert "no_humans" not in out["tags"]
+    assert "black_border" not in out["tags"]

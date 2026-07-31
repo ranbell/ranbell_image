@@ -459,6 +459,22 @@ function close() { emit('update:show', false) }
                        @change="patchInputs({ merge_unique_count: +$event.target.value })" />
               </label>
               <label class="block text-[10px] text-gray-500">
+                {{ t('muse.subtractStrength') }}
+                <span class="float-right font-mono text-teal-400">{{ inputs.subtract_strength }}</span>
+                <input type="range" class="w-full" min="0" max="1.5" step="0.1"
+                       :value="inputs.subtract_strength"
+                       @change="patchInputs({ subtract_strength: +$event.target.value })" />
+                <span class="block text-[10px] text-gray-600">{{ t('muse.subtractStrengthHint') }}</span>
+              </label>
+              <label class="block text-[10px] text-gray-500">
+                {{ t('muse.popularityWeight') }}
+                <span class="float-right font-mono text-teal-400">{{ inputs.popularity_weight }}</span>
+                <input type="range" class="w-full" min="0" max="1" step="0.05"
+                       :value="inputs.popularity_weight"
+                       @change="patchInputs({ popularity_weight: +$event.target.value })" />
+                <span class="block text-[10px] text-gray-600">{{ t('muse.popularityWeightHint') }}</span>
+              </label>
+              <label class="block text-[10px] text-gray-500">
                 {{ t('muse.harvestThreshold') }}
                 <span class="float-right font-mono text-teal-400">{{ inputs.harvest_threshold }}</span>
                 <input type="range" class="w-full" min="0.05" max="0.9" step="0.05"
@@ -620,6 +636,17 @@ function close() { emit('update:show', false) }
                   ? 'border-teal-400/50 bg-teal-800/40 text-teal-100'
                   : 'border-white/10 bg-black/30 text-gray-300'"
               >{{ tag }}</span>
+            </div>
+            <div v-if="merged.evicted?.length" class="mb-3">
+              <p class="sb-label mb-1">{{ t('muse.merge.evicted') }}</p>
+              <div class="flex flex-wrap gap-1">
+                <span
+                  v-for="tag in merged.evicted"
+                  :key="tag"
+                  class="px-1.5 py-0.5 rounded border border-rose-700/30 bg-rose-950/30 text-[10px] font-mono text-rose-400/70 line-through"
+                >{{ tag }}</span>
+              </div>
+              <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.merge.evictedHint') }}</p>
             </div>
             <div v-if="merged.removed?.length">
               <p class="sb-label mb-1">{{ t('muse.merge.removed') }}</p>

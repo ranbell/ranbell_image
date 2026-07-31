@@ -27,6 +27,8 @@ from ..prompt.tag_merge import (
     _resolve_weights,
     filter_tag_list,
 )
+from ..tags.conflict import contradicts_any
+from ..tags.junk import is_junk_tag
 from ..tags.subject_anchors import ensure_subject_anchor, insert_after_anchors
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,26 @@ def merge_tracks(
     line = ensure_subject_anchor(line, docs)
 
     tags = [t.strip() for t in line.split(",") if t.strip()]
+    tags = [t for t in tags if not is_junk_tag(t)]
+
+    # Putting `brown_eyes` at the head does nothing while `blue_eyes` is still
+    # in the list — the model sees both and picks one. Protection has to evict,
+    # not just lead. `_build_weighted_wd14_context` already drops conflicts, but
+    # only across images: two contradictory tags harvested from the same track
+    # both survive it.
+    evicted: list[str] = []
+    if protected:
+        protected_set = {t.lower() for t in protected}
+        keep: list[str] = []
+        for tag in tags:
+            if tag.lower() in protected_set:
+                keep.append(tag)
+            elif contradicts_any(tag, protected):
+                evicted.append(tag)
+            else:
+                keep.append(tag)
+        tags = keep
+
     removed: list[str] = []
     if removal:
         kept = filter_tag_list(tags, removal)
@@ -102,6 +124,7 @@ def merge_tracks(
         "tags": tags,
         "positive": ", ".join(tags),
         "protected": protected,
+        "evicted": evicted,
         "removed": removed,
         "context": context,
         "analysis": analysis,

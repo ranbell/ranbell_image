@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from ..ai.wd14 import CATEGORY_CHARACTER, CATEGORY_RATING, tags_scored_from_bytes
+from ..tags.junk import is_junk_tag
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,10 @@ async def harvest_image(
     )
     out: list[dict[str, Any]] = []
     for name, score, category in scored:
+        # `no_humans` off a background draft, `black_border` off a framed one —
+        # both read correctly off the image and both wreck the final prompt.
+        if is_junk_tag(name):
+            continue
         # Named characters are copyrighted people the checkpoint happens to
         # recognise in its own draft. Letting one through means the final render
         # is of somebody else's character.

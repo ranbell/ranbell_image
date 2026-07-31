@@ -2412,7 +2412,17 @@ class QdrantDBClient:
     ) -> list[dict]:
         """Semantic search in wd14_vocab with frequency range filter.
 
-        Returns list of {name, frequency, score}.
+        Returns list of {name, frequency, count, score}.
+
+        ``query_vec`` is any dense vector of ``embed_dim`` floats — it does not
+        have to be a single embedded string. Composing it (see ``ai.vecmath``)
+        is how a caller searches for one concept while steering away from
+        another.
+
+        ``count`` is the raw Danbooru post count. ``frequency`` is that count
+        divided by the most common tag's, so the two rank identically; count is
+        carried for display, where "2,300 posts" means something and "0.0004"
+        does not.
         """
         filt = qm.Filter(must=[
             qm.FieldCondition(key="category", match=qm.MatchValue(value=category)),
@@ -2431,6 +2441,7 @@ class QdrantDBClient:
                 {
                     "name":      r.payload["name"],
                     "frequency": r.payload["frequency"],
+                    "count":     r.payload.get("count", 0),
                     "score":     round(r.score, 4),
                 }
                 for r in result.points

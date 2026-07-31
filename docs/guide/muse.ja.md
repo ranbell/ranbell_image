@@ -106,7 +106,30 @@ Inspire のブレストをそのまま呼ぶ。結合タグを `reference_tags` 
 
 `character_presets` コレクション。同梱 100 体 + ユーザー作成。プリセットは既に Danbooru タグを持っているので、キャラ確定は**純粋関数で LLM を通さない**（[`characters/presets.py`](../../backend/app/characters/presets.py) `preset_to_character`）。キャラは全画像で同一であるべき唯一の部分で、そこに LLM を挟むのが髪色・目の色をパネル間でドリフトさせていた原因だった。
 
-参照ボードは `sheet`（全身）と `portrait`（バストアップ）の2枚。`generated/characters/` に保存され、ピッカーで見た目から選べるようになる。プロンプトは identity → outfit → props → フレーミングの決定論的な並び（[`characters/board.py`](../../backend/app/characters/board.py)）。
+参照ボードは `sheet` と `portrait` の2枚で、`generated/characters/` に保存される（[`characters/board.py`](../../backend/app/characters/board.py)）。
+
+**sheet は Chronicle 時代に辿り着いた合成形式**を使う。中央に全身、周囲にポラロイド枠の4カット（趣味 / 運動 / 食べ物 / 仕事）を並べた1枚で、同じ人物が4つの生活の中でも同じ人物に見えるかを確認できる。
+
+この形式は2点が効いている。**平坦なタグ列ではなくラベル付きの行**で書くこと（そうしないとモデルは並べずに混ぜる）、そして **`multiple_views` をポジティブに入れる**こと（このコードベースの他の全プロンプトでは禁止しているタグ）。`full_body, standing` の平坦なタグ列で書くとマネキンの立ち絵になり、portrait と見分けがつかなくなる。
+
+```
+Character: 1girl, black_hair, very_long_hair, straight_hair, brown_eyes, tall, cardigan, long_skirt, loafers,
+Accessories: book_cart, glasses
+
+** Chronicles of Character **
+Center/Main : casual, leaning_forward, dynamic posture, smile, holding book_cart
+Around 4 chronicles with polaroid frame ** same hair and eye color **:
+ - holding_book, cardigan, long_skirt
+ - walking, sportswear
+ - eating, crepe
+ - cafe staff, working
+Shot: wide_shot, full_body,
+Effect: cinematic, kodak color, film_grain, blurry_background, hdr, bokeh, multiple_views, cute,
+```
+
+4カットはキャラ自身から引く（`hobby_actions` → 趣味と運動、`preferences.likes` の中の食べ物語 → 食事、`occupation` → 仕事）。無ければ固定のフォールバック。運動カットは趣味カットと必ず別のものを選ぶ — 同じでは4枠のうち1枠が無駄になる。
+
+**portrait は逆で、顔を等倍で確認するための寄り**。identity と頭部に着けるもの（眼鏡・髪飾り）だけを載せ、服装と手持ちの小物は落とす。`long_skirt` も `book_cart` も「全身を見せろ」という票なので、これらが残っていると portrait が2枚目の立ち絵として返ってくる。ネガティブに `full_body` / `wide_shot` / `multiple_views` を入れ、キャンバスも 512×512 の正方形にして足を置く場所を無くしてある。
 
 ## API
 

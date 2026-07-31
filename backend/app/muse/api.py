@@ -52,6 +52,8 @@ class InputsPatch(BaseModel):
     topic_tag_limit: int | None = Field(default=None, ge=5, le=60)
     wildness: int | None = Field(default=None, ge=1, le=3)
     frontier_count: int | None = Field(default=None, ge=0, le=30)
+    subtract_strength: float | None = Field(default=None, ge=0.0, le=1.5)
+    popularity_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     final_seed: int | None = None
 
 

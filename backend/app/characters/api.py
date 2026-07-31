@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..spooler.models import JobLane
 from . import presets as presets_db
-from .board import compile_board_slot
+from .board import SLOT_SIZE, compile_board_slot
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +53,11 @@ class CharacterUpdate(BaseModel):
 class BoardRequest(BaseModel):
     workflow_name: str = Field(..., min_length=1)
     slots: list[str] = []          # empty → every slot
-    width: int = 768
-    height: int = 1152
+    # None → each slot's own canvas (see board.SLOT_SIZE). A full-body sheet and
+    # a bust shot want different aspect ratios; one size for both is why the
+    # portrait slot used to render a second full-body image.
+    width: int | None = None
+    height: int | None = None
     steps: int | None = None       # None → the workflow's own
     cfg: float | None = None
     seed: int | None = None
@@ -125,6 +128,9 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
     jobs: list[dict] = []
     for slot in slots:
         positive, negative = compile_board_slot(preset, slot)
+        default_w, default_h = SLOT_SIZE.get(slot, (1024, 1344))
+        width = body.width or default_w
+        height = body.height or default_h
 
         def _attach(slot_name: str):
             async def _inner(sha256: str, _meta: dict) -> None:
@@ -141,8 +147,8 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
             workflow_name=body.workflow_name,
             positive=positive,
             negative=negative,
-            width=body.width,
-            height=body.height,
+            width=width,
+            height=height,
             steps=body.steps,
             cfg=body.cfg,
             seed=body.seed,
@@ -152,6 +158,7 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
             payload_extra={"character_id": character_id, "character_slot": slot},
             attach=_attach(slot),
         )
-        jobs.append({"slot": slot, "job_id": job_id, "positive": positive})
+        jobs.append({"slot": slot, "job_id": job_id, "positive": positive,
+                     "size": [width, height]})
 
     return {"status": "queued", "jobs": jobs}

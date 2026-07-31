@@ -1335,7 +1335,9 @@
       "title": "Merged tags",
       "protected": "Protected",
       "removed": "Removed",
-      "removedHint": "Admin exclusions plus the tags you rejected"
+      "removedHint": "Admin exclusions plus the tags you rejected",
+      "evicted": "Dropped — contradicted the character",
+      "evictedHint": "These filled the same attribute slot as a locked tag with a different value"
     },
     "brainstorm": {
       "title": "Scene ideas",
@@ -1372,7 +1374,11 @@
       "needs": "Set these first: {items}"
     },
     "reset": "Start over",
-    "resetConfirm": "Discard this session and start over?"
+    "resetConfirm": "Discard this session and start over?",
+    "subtractStrength": "Track separation",
+    "subtractStrengthHint": "Subtracts people from the background search and scenery from the character one. 0 disables it",
+    "popularityWeight": "Drawability weight",
+    "popularityWeightHint": "Mixes the Danbooru post count into semantic distance. Never applied to the surprise layers"
   },
   "characters": {
     "title": "Characters",

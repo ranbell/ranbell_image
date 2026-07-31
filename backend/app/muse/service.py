@@ -72,8 +72,10 @@ async def run_split(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         raise MuseError("light_model is required")
 
     cfg = await get_runtime_config(db)
+    identity = list((session.get("character") or {}).get("identity_tags") or [])
     session["split"] = await expand.split_theme(
         theme, ollama, model=model, num_ctx=cfg.get("ollama_num_ctx"),
+        identity_tags=identity,
     )
     session_db.log(session, "split", theme)
     await session_db.save(db, session)
@@ -101,6 +103,9 @@ async def run_tags(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             topic_tag_limit=int(inputs.get("topic_tag_limit", 25)),
             wildness=int(inputs.get("wildness", 3)),
             frontier_count=int(inputs.get("frontier_count", 8)),
+            subtract_strength=float(inputs.get("subtract_strength", 1.0)),
+            popularity_weight=float(inputs.get("popularity_weight", 0.35)),
+            model=str(inputs.get("light_model") or ""),
         )
         rows, gone = expand.apply_rejections(rows, rejected, removal)
         seed_tags[track] = rows
@@ -118,12 +123,18 @@ def track_prompt(session: dict[str, Any], track: str) -> tuple[str, str]:
     """The positive/negative a board render for this track uses."""
     rows = (session.get("seed_tags") or {}).get(track) or []
     tags = [r["tag"] for r in rows]
+    negative = str(_inputs(session).get("negative_prompt") or "")
     if track == "person":
-        # Identity leads, so the draft is at least the right person even at two
-        # steps. Everything after it is the theme's reading of her.
+        # Identity leads, so the draft is at least the right person. Everything
+        # after it is the theme's reading of her.
         identity = list((session.get("character") or {}).get("identity_tags") or [])
         tags = identity + [t for t in tags if t not in identity]
-    negative = str(_inputs(session).get("negative_prompt") or "")
+    else:
+        # Removing person tags from the positive is not enough to keep people
+        # out of a background: the checkpoint puts a figure in a library because
+        # libraries have figures in them. Say so in the negative.
+        away = expand.TRACK_AWAY_FROM["background_negative"]
+        negative = f"{negative}, {away}" if negative else away
     return ", ".join(tags), negative
 
 

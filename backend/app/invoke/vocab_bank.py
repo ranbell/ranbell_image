@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 
 logger = logging.getLogger(__name__)
@@ -404,18 +405,43 @@ def _section_pairs(pro_sections: dict | None) -> list[tuple[str, str]]:
     ]
 
 
+def popularity_score(count: int) -> float:
+    """0..1 "can the model actually draw this", from the Danbooru post count.
+
+    Log-scaled, because post counts span six orders of magnitude and the
+    interesting distinction is between a tag with 40 examples and one with
+    40,000 — not between 40,000 and 400,000.
+    """
+    if count <= 0:
+        return 0.0
+    # ~1.8M is the most common tag; anything past ~100k is equally "well known".
+    return min(math.log10(count + 1) / 5.0, 1.0)
+
+
 async def get_topic_tags(
     db,
     ollama,
     topic: str,
     pro_sections: dict | None = None,
     limit: int = 25,
+    *,
+    query_vec: list[float] | None = None,
+    popularity_weight: float = 0.0,
+    model: str = "",
 ) -> list[str]:
     """お題テキスト + sections から WD14 ベクトル検索し、VLM でお題に特徴的なタグを返す。
 
     limit=25 で返すことでスピリット別にティア分配できる（上位がコア、下位が発散的）。
     Falls back to raw candidates when VLM call fails.
     Returns [] when WD14 vocab is not imported.
+
+    ``query_vec`` skips the internal embed. Pass one when the query is composed
+    rather than a single string — e.g. "background minus people".
+
+    ``popularity_weight`` mixes the Danbooru post count into the ranking, so a
+    tag that is semantically perfect but has forty examples in the training data
+    loses to one the model has actually seen. Leave it at 0 to rank on semantic
+    distance alone (the historical behaviour).
     """
     count = await _get_vocab_count(db)
     if not topic or count == 0:
@@ -424,11 +450,13 @@ async def get_topic_tags(
     pairs = _section_pairs(pro_sections)
     query_parts = [topic] + [v for _, v in pairs]
 
-    try:
-        vec = await ollama.embed(" ".join(query_parts))
-    except Exception as e:
-        logger.warning("get_topic_tags embed failed: %s", e)
-        return []
+    vec = query_vec
+    if vec is None:
+        try:
+            vec = await ollama.embed(" ".join(query_parts))
+        except Exception as e:
+            logger.warning("get_topic_tags embed failed: %s", e)
+            return []
 
     try:
         hits = await db.search_wd14_vocab(
@@ -437,6 +465,12 @@ async def get_topic_tags(
     except Exception as e:
         logger.warning("get_topic_tags search failed: %s", e)
         return []
+
+    if popularity_weight > 0:
+        hits.sort(
+            key=lambda h: h["score"] + popularity_weight * popularity_score(h.get("count", 0)),
+            reverse=True,
+        )
 
     candidates = [h["name"] for h in hits if not _is_species_tag(h["name"])]
     if not candidates:
@@ -458,7 +492,7 @@ async def get_topic_tags(
     )
 
     try:
-        raw = await ollama.generate_text(prompt, fmt="json")
+        raw = await ollama.generate_text(prompt, model=model or None, fmt="json")
         raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
         raw = re.sub(r"\s*```$", "", raw.strip())
         selected = json.loads(raw)

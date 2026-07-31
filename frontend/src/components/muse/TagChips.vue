@@ -51,6 +51,13 @@ const grouped = computed(() => {
 function chipClass(row) {
   return SOURCE_CLASS[row.source] || 'border-gray-600/40 bg-gray-800/40 text-gray-300'
 }
+
+// The Danbooru post count, so the user can see why a tag looks obscure before
+// deciding whether to keep it.
+function chipTitle(row) {
+  const hint = t('muse.tags.rejectHint')
+  return row.count ? `${row.tag} — ${row.count.toLocaleString()} posts\n${hint}` : hint
+}
 </script>
 
 <template>
@@ -63,7 +70,7 @@ function chipClass(row) {
           :key="row.tag"
           type="button"
           :disabled="busy"
-          :title="t('muse.tags.rejectHint')"
+          :title="chipTitle(row)"
           class="px-2 py-0.5 rounded border text-[11px] font-mono transition-opacity hover:opacity-60 disabled:cursor-not-allowed"
           :class="chipClass(row)"
           @click="emit('reject', row.tag)"

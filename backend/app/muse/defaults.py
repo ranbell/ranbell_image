@@ -53,6 +53,14 @@ EXPAND_DEFAULTS: dict[str, object] = {
     "topic_tag_limit": 25,
     "wildness": 3,        # vocab_bank: 3 adds rare-band tags on top of lunatic
     "frontier_count": 8,  # tags the library has never used at all
+    # How hard each track's query is steered away from the other one's subject.
+    # 0 disables it; much above 1 the query starts meaning "the opposite of a
+    # person" rather than "this scene, without a person in it".
+    "subtract_strength": 1.0,
+    # How much a tag's Danbooru post count counts alongside semantic distance.
+    # Applies to the grounded layer only — weighting the surprise layers by
+    # popularity would rank the surprise straight back out.
+    "popularity_weight": 0.35,
 }
 
 ALL_DEFAULTS: dict[str, object] = {

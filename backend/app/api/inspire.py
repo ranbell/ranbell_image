@@ -15,6 +15,7 @@ from ..ai.tile_image import create_tile_image
 from ..jobs.sse_stream import queue_sse_response
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
+from ..ai import vecmath
 from ..tags import catalog as tag_catalog
 from .inspire_axes import (
     AXIS_DEFINITIONS, ALL_AXES, AXIS_ALIAS_MAP,
@@ -158,24 +159,11 @@ class OutlierRequest(BaseModel):
 
 
 # ── Vector math helpers ────────────────────────────────────────────────────────
-
-def _normalize(vec: list[float]) -> list[float]:
-    mag = math.sqrt(sum(x * x for x in vec))
-    if mag == 0:
-        return vec
-    return [x / mag for x in vec]
-
-
-def _vec_add(a: list[float], b: list[float]) -> list[float]:
-    return [x + y for x, y in zip(a, b)]
-
-
-def _vec_sub(a: list[float], b: list[float]) -> list[float]:
-    return [x - y for x, y in zip(a, b)]
-
-
-def _vec_lerp(a: list[float], b: list[float], t: float) -> list[float]:
-    return [x + t * (y - x) for x, y in zip(a, b)]
+# Now shared with Muse; kept aliased here so the handlers below read unchanged.
+_normalize = vecmath.normalize
+_vec_add = vecmath.vec_add
+_vec_sub = vecmath.vec_sub
+_vec_lerp = vecmath.vec_lerp
 
 
 def _sse(data: dict) -> str:
