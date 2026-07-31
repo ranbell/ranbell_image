@@ -50,11 +50,9 @@ class InputsPatch(BaseModel):
     character_weight: float | None = Field(default=None, ge=0.0, le=1.0)
     merge_common_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     merge_unique_count: int | None = Field(default=None, ge=1, le=100)
-    topic_tag_limit: int | None = Field(default=None, ge=5, le=60)
-    wildness: int | None = Field(default=None, ge=1, le=3)
-    frontier_count: int | None = Field(default=None, ge=0, le=30)
-    subtract_strength: float | None = Field(default=None, ge=0.0, le=1.5)
-    popularity_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    compose_tag_count: int | None = Field(default=None, ge=8, le=60)
+    topup_picks: int | None = Field(default=None, ge=0, le=15)
+    topup_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     final_seed: int | None = None
 
 
@@ -153,18 +151,18 @@ async def reject_tags(session_id: str, body: TagReject, request: Request):
     ))
 
 
-@router.post("/sessions/{session_id}/split")
-async def run_split(session_id: str, request: Request):
+@router.post("/sessions/{session_id}/compose")
+async def run_compose(session_id: str, request: Request):
     session = await _session(request, session_id)
-    return await _run(request, session, service.run_split(
+    return await _run(request, session, service.run_compose(
         _db(request), _llm(request, session), session,
     ))
 
 
-@router.post("/sessions/{session_id}/tags")
-async def run_tags(session_id: str, request: Request):
+@router.post("/sessions/{session_id}/topup")
+async def run_topup(session_id: str, request: Request):
     session = await _session(request, session_id)
-    return await _run(request, session, service.run_tags(
+    return await _run(request, session, service.run_topup(
         _db(request), _llm(request, session), session,
     ))
 

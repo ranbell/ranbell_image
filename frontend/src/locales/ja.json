@@ -1293,30 +1293,20 @@
     "dropRatingTags": "NSFW タグを除外する",
     "dropCharacterTags": "版権キャラ名を除外する",
     "steps": {
-      "split": "お題を分ける",
-      "tags": "タグを集める",
+      "compose": "タグを書く",
       "board": "下書きを描く",
       "harvest": "絵からタグを拾う",
+      "topup": "足りないものを足す",
       "merge": "タグをまとめる",
       "brainstorm": "シーンを考える",
       "render": "本番を描く"
     },
-    "split": {
-      "title": "お題の分解",
-      "character": "人物",
-      "background": "背景",
-      "props": "小物",
-      "action": "動き",
-      "mood": "雰囲気",
-      "camera": "カメラ"
-    },
     "tags": {
       "title": "タグ候補",
-      "topic": "お題から",
-      "lunatic": "遠いところから",
-      "frontier": "使ったことのない語",
       "rejectHint": "クリックで除外。除外したタグは以降のステップに出てこない",
-      "rejected": "除外したタグ"
+      "rejected": "除外したタグ",
+      "composed": "LLM が書いた",
+      "topup": "後から足した"
     },
     "board": {
       "title": "イメージボード",
@@ -1360,10 +1350,10 @@
       "negative": "ネガティブ"
     },
     "cta": {
-      "split": "お題を分ける",
-      "tags": "タグを集める",
+      "compose": "タグを書く",
       "board": "下書きを描く",
       "harvest": "絵からタグを拾う",
+      "topup": "足りないものを足す",
       "merge": "タグをまとめる",
       "brainstorm": "シーンを考える",
       "render": "本番を描く",
@@ -1383,12 +1373,22 @@
     },
     "reset": "最初からやり直す",
     "resetConfirm": "このセッションを捨てて最初からやり直しますか？",
-    "subtractStrength": "トラック分離の強さ",
-    "subtractStrengthHint": "背景の検索から人物を、人物の検索から風景を差し引く。0 で無効",
-    "popularityWeight": "描きやすさの重み",
-    "popularityWeightHint": "Danbooru 投稿数を意味的近さに混ぜる。意外性の層にはかからない",
     "llmCleanup": "LLM でタグを整理する",
-    "llmCleanupHint": "絵から拾ったタグを背景/人物それぞれ見て、片方にしか属さないもの・版権名・下書きの体裁を落とす"
+    "llmCleanupHint": "絵から拾ったタグを背景/人物それぞれ見て、片方にしか属さないもの・版権名・下書きの体裁を落とす",
+    "compose": {
+      "title": "書かれたタグ",
+      "hint": "お題とキャラから LLM が直接書いたもの。これが下書きにそのまま渡る"
+    },
+    "topup": {
+      "title": "足したタグ",
+      "hint": "お題が示唆するのに絵に無かったものから、LLM が補強に役立つものを選んだ",
+      "none": "追加なし（選ばないのも正しい答え）",
+      "candidates": "候補"
+    },
+    "composeCount": "1トラックあたりのタグ数",
+    "composeCountHint": "多すぎると LLM が考えなくなり、列挙になる",
+    "topupPicks": "補強タグの上限",
+    "topupPicksHint": "絵が主でこれは味付け。少ないほうが良い"
   },
   "characters": {
     "title": "キャラクター",

@@ -1293,30 +1293,20 @@
     "dropRatingTags": "Drop NSFW tags",
     "dropCharacterTags": "Drop named-character tags",
     "steps": {
-      "split": "Split the theme",
-      "tags": "Gather tags",
+      "compose": "Write the tags",
       "board": "Draw the board",
       "harvest": "Re-tag the board",
+      "topup": "Add what is missing",
       "merge": "Merge the tags",
       "brainstorm": "Imagine the scene",
       "render": "Render for real"
     },
-    "split": {
-      "title": "Theme split",
-      "character": "Character",
-      "background": "Background",
-      "props": "Props",
-      "action": "Action",
-      "mood": "Mood",
-      "camera": "Camera"
-    },
     "tags": {
       "title": "Candidate tags",
-      "topic": "From the theme",
-      "lunatic": "From further out",
-      "frontier": "Never used before",
       "rejectHint": "Click to reject. Rejected tags stay out of every later step",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "composed": "Written by the model",
+      "topup": "Added afterwards"
     },
     "board": {
       "title": "Image board",
@@ -1360,10 +1350,10 @@
       "negative": "Negative"
     },
     "cta": {
-      "split": "Split the theme",
-      "tags": "Gather tags",
+      "compose": "Write the tags",
       "board": "Draw the board",
       "harvest": "Re-tag the board",
+      "topup": "Add what is missing",
       "merge": "Merge the tags",
       "brainstorm": "Imagine the scene",
       "render": "Render for real",
@@ -1383,12 +1373,22 @@
     },
     "reset": "Start over",
     "resetConfirm": "Discard this session and start over?",
-    "subtractStrength": "Track separation",
-    "subtractStrengthHint": "Subtracts people from the background search and scenery from the character one. 0 disables it",
-    "popularityWeight": "Drawability weight",
-    "popularityWeightHint": "Mixes the Danbooru post count into semantic distance. Never applied to the surprise layers",
     "llmCleanup": "Let a model tidy the tags",
-    "llmCleanupHint": "Reviews each track's read-back tags and drops what belongs to the other track, names a franchise, or is the draft's own layout"
+    "llmCleanupHint": "Reviews each track's read-back tags and drops what belongs to the other track, names a franchise, or is the draft's own layout",
+    "compose": {
+      "title": "Composed tags",
+      "hint": "Written directly by the model from the theme and the character. This is what the board renders"
+    },
+    "topup": {
+      "title": "Reinforcements",
+      "hint": "Chosen from what the theme suggests but the picture did not have",
+      "none": "Nothing added (a valid answer)",
+      "candidates": "Candidates"
+    },
+    "composeCount": "Tags per track",
+    "composeCountHint": "Past a point the model stops thinking and starts listing",
+    "topupPicks": "Reinforcement limit",
+    "topupPicksHint": "The image is the dish; this is seasoning. Fewer is better"
   },
   "characters": {
     "title": "Characters",

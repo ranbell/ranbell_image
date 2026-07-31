@@ -16,10 +16,10 @@ from .defaults import ALL_DEFAULTS
 # The linear pipeline. Each step consumes the one before it, so the panel can
 # render progress generically from `step_state` without knowing any of this.
 STEPS: tuple[str, ...] = (
-    "split",       # theme → character / background / props / action / mood / camera
-    "tags",        # each side → WD14 vocabulary, plus the surprise layer
+    "compose",     # theme + character → ~30 danbooru tags per track, written by the model
     "board",       # cheap renders, 3 per track
     "harvest",     # read the boards back at a low threshold
+    "topup",       # vocabulary the theme suggests and the picture lacks
     "merge",       # weighted background/character merge into one tag line
     "brainstorm",  # scene ideas from the merged tags
     "render",      # the real image
@@ -27,14 +27,9 @@ STEPS: tuple[str, ...] = (
 
 TRACKS: tuple[str, ...] = ("background", "person")
 
-SPLIT_SECTIONS: tuple[str, ...] = (
-    "character", "background", "props", "action", "mood", "camera",
-)
-
-# Where a candidate tag came from. The panel colours chips by this, and it is
-# the only honest way to tell "the theme asked for this" from "the vocabulary
-# search wandered over here".
-TAG_SOURCES: tuple[str, ...] = ("topic", "lunatic", "stranger", "frontier", "split")
+# Where a tag came from. The panel colours chips by this: what the model wrote
+# for the board, versus what retrieval added once the picture existed.
+TAG_SOURCES: tuple[str, ...] = ("compose", "topup")
 
 
 def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -54,12 +49,13 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "negative_prompt": "",
         }, **(inputs or {})},
         "character": {},          # preset_to_character() output, frozen at pick time
-        "split": {},              # SPLIT_SECTIONS → comma-separated tag string
-        "seed_tags": {},          # track → [{tag, source}]
+        "seed_tags": {},          # track → [{tag, source}] — what the board renders
         "rejected_tags": [],      # user-clicked exclusions, applied from S2 onward
         "board": {t: [] for t in TRACKS},   # track → [{seed, image_id, job_id, pending}]
         "harvest": {},            # track → [{tag, score, count, category}]
         "harvest_dropped": {},    # track → [{tag, reason}] the LLM cleanup removed
+        "topup": [],              # [{tag, why}] reinforcements chosen after the read-back
+        "topup_candidates": [],   # what was offered, so the choice is inspectable
         "merged": {},             # {tags[], protected[], removed[], context, analysis}
         "scene": {},              # {candidates: [{title, body}], chosen, text}
         "final": {},              # {positive, negative, image_id, job_id}
@@ -85,17 +81,9 @@ def step_state(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
         return len(d.get(key) or [])
 
     return {
-        "split": {
-            "done": bool(session.get("split")),
-            "detail": ", ".join(
-                k for k in SPLIT_SECTIONS if (session.get("split") or {}).get(k)
-            ),
-        },
-        "tags": {
+        "compose": {
             "done": any(seed_tags.get(t) for t in TRACKS),
-            "detail": " / ".join(
-                f"{t}: {_count(seed_tags, t)}" for t in TRACKS
-            ),
+            "detail": " / ".join(f"{t}: {_count(seed_tags, t)}" for t in TRACKS),
         },
         "board": {
             "done": bool(board_images) and len(landed) == len(board_images),
@@ -105,6 +93,12 @@ def step_state(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
         "harvest": {
             "done": any(harvest.get(t) for t in TRACKS),
             "detail": " / ".join(f"{t}: {_count(harvest, t)}" for t in TRACKS),
+        },
+        "topup": {
+            # Choosing nothing is a valid answer, so "done" follows the step
+            # having run rather than having added something.
+            "done": bool(session.get("topup_candidates")) or bool(session.get("topup")),
+            "detail": f"+{len(session.get('topup') or [])}",
         },
         "merge": {
             "done": bool(merged.get("tags")),
@@ -135,11 +129,14 @@ def missing_inputs(session: dict[str, Any], step: str) -> list[str]:
     """Which inputs this step needs and does not have."""
     inputs = session.get("inputs") or {}
     needs: list[str] = []
-    if step in ("split", "tags", "board", "harvest", "merge", "brainstorm", "render"):
-        if not str(inputs.get("theme") or "").strip():
-            needs.append("theme")
-    if step in ("split", "brainstorm") and not str(inputs.get("light_model") or "").strip():
+    if not str(inputs.get("theme") or "").strip():
+        needs.append("theme")
+    if step in ("compose", "topup", "brainstorm") and not str(
+        inputs.get("light_model") or ""
+    ).strip():
         needs.append("lightModel")
+    if step == "compose" and not str(inputs.get("character_id") or "").strip():
+        needs.append("character")
     if step == "board":
         if not str(inputs.get("character_id") or "").strip():
             needs.append("character")

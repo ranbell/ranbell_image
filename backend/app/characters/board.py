@@ -41,8 +41,12 @@ SLOT_SIZE: dict[str, tuple[int, int]] = {
     "portrait": (512, 512),
 }
 
-# What a close-up is, stated firmly enough to beat the character's own tags.
-_PORTRAIT_FRAMING = ["close-up", "upper_body", "detailed_face", "looking_at_viewer"]
+# A bust shot, not a face crop. `close-up` + `detailed_face` framed so tightly
+# that it cut above the collarbone, and the cardigan it had been handed never
+# entered the picture — the render came back bare-shouldered.
+_PORTRAIT_FRAMING = [
+    "upper_body", "portrait", "detailed_face", "looking_at_viewer", "cowboy_shot",
+]
 
 # Four life slices. Used when the character herself does not supply one.
 _VIGNETTE_FALLBACK = {
@@ -71,7 +75,8 @@ _NEGATIVE = (
 # this is per-slot rather than shared.
 _PORTRAIT_NEGATIVE = _NEGATIVE + (
     ", multiple_views, reference_sheet, character_sheet, collage, split_screen, "
-    "full_body, wide_shot, long_shot, multiple_girls, multiple_boys"
+    "full_body, wide_shot, long_shot, multiple_girls, multiple_boys, "
+    "nude, topless, bare_shoulders, face_focus, extreme_close-up"
 )
 
 
@@ -96,12 +101,18 @@ A centre pose, and four moments from her life.
   Give it a body posture, a facial expression, and the thing she carries
   ({signature}). It is her standing there being herself, in her usual clothes.
   Shape: "casual, leaning_forward, dynamic posture, smile, holding {signature}".
-- The four moments must be four *different* lives — different activity,
-  different clothes, different place. Two frames of her reading are one frame
-  wasted, and none of them should repeat the centre. Draw them from her
-  personality, not from a generic list.
-- Each moment is short: a few danbooru-style tags, an action plus what she
-  wears or holds. Shape: "tennis, sportswear, headband".
+- The four moments fill four fixed roles, in this order:
+    1. what she does for a living, or the thing she is known for
+    2. resting or off duty — somewhere that is NOT her workplace
+    3. moving her body: sport, walking, anything physical
+    4. eating or drinking something
+  Fill each role from HER — her habits, her tastes — but keep the roles. Four
+  frames of her at work is three frames wasted, and none should repeat the
+  centre. Different clothes and a different place in every one.
+- Each moment is TAGS, not a sentence: three to five danbooru-style tags, an
+  action plus what she wears or holds. Write "tennis, sportswear, headband",
+  never "she plays tennis on a summer afternoon". A sentence makes the frame
+  render as a landscape instead of a portrait of her.
 
 # RULES
 - Never mention hair colour, eye colour, body type or age. Those are fixed

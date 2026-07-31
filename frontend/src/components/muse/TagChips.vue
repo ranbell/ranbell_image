@@ -20,30 +20,21 @@ const emit = defineEmits(['reject', 'restore'])
 const { t } = useI18n()
 
 const SOURCE_CLASS = {
-  split: 'border-teal-500/40 bg-teal-900/30 text-teal-200',
-  topic: 'border-cyan-500/40 bg-cyan-900/30 text-cyan-200',
-  stranger: 'border-amber-500/40 bg-amber-900/30 text-amber-200',
-  lunatic: 'border-amber-400/50 bg-amber-800/40 text-amber-100',
-  frontier: 'border-violet-500/40 bg-violet-900/30 text-violet-200',
+  compose: 'border-cyan-500/40 bg-cyan-900/30 text-cyan-200',
+  topup: 'border-violet-500/40 bg-violet-900/30 text-violet-200',
 }
 
 const SOURCE_LABEL = {
-  split: 'tags.topic',
-  topic: 'tags.topic',
-  stranger: 'tags.lunatic',
-  lunatic: 'tags.lunatic',
-  frontier: 'tags.frontier',
+  compose: 'tags.composed',
+  topup: 'tags.topup',
 }
 
 const grouped = computed(() => {
-  const order = ['split', 'topic', 'stranger', 'lunatic', 'frontier']
   const byLabel = new Map()
-  for (const key of order) {
+  for (const key of ['compose', 'topup']) {
     const rows = props.rows.filter(r => r.source === key)
     if (!rows.length) continue
-    const label = SOURCE_LABEL[key] || 'tags.topic'
-    if (!byLabel.has(label)) byLabel.set(label, { label, key, rows: [] })
-    byLabel.get(label).rows.push(...rows)
+    byLabel.set(key, { label: SOURCE_LABEL[key], key, rows })
   }
   return [...byLabel.values()]
 })

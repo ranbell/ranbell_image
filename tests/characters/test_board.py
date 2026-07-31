@@ -97,12 +97,16 @@ def test_vignettes_prefer_the_character_over_the_fallback():
 
 
 # ── the portrait is a face ──────────────────────────────────────────────────
-def test_portrait_is_a_close_up():
-    positive, _ = _portrait()
+def test_portrait_is_a_bust_shot_not_a_face_crop():
+    """A tight `close-up` cropped above the collarbone and the cardigan never
+    made it into frame — the render came back bare-shouldered."""
+    positive, negative = _portrait()
     tags = [t.strip() for t in positive.split(",")]
-    assert "close-up" in tags
+    assert "upper_body" in tags
     assert "detailed_face" in tags
     assert "full_body" not in tags
+    assert "close-up" not in tags
+    assert "extreme_close-up" in negative and "bare_shoulders" in negative
 
 
 def test_portrait_drops_only_the_wardrobe_that_shows_the_legs():

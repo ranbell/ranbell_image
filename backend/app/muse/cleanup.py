@@ -40,10 +40,16 @@ _TRACK_ROLE = {
 }
 
 _TRACK_FOREIGN = {
-    "background": "anything that only makes sense as part of a person",
+    "background": (
+        "anything that only makes sense as part of a person. Be strict here: a "
+        "count of people (1girl, solo, 2girls), a garment, a body part, a facial "
+        "feature or a pose is ALWAYS wrong on a list that describes a place, "
+        "even when the draft really did contain a person"
+    ),
     "background_examples": (
-        "zettai_ryouiki, thighhighs, closed_eyes, maid_headdress, hood_down, "
-        "1girl, solo, blush"
+        "1girl, solo, 2girls, multiple_girls, zettai_ryouiki, thighhighs, "
+        "black_dress, long_sleeves, footwear, closed_eyes, blush, "
+        "maid_headdress, hood_down, standing, wings, tail"
     ),
     "person": "anything that describes the location or the backdrop rather than her",
     "person_examples": (

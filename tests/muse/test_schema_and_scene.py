@@ -13,33 +13,49 @@ from app.muse.scene import (
 from app.muse.schema import missing_inputs, new_session, next_step, public_view, step_state
 
 
-def test_a_fresh_session_starts_at_the_split():
-    session = new_session({"theme": "雨上がりの屋上", "light_model": "gemma4:e4b"})
-    assert next_step(session) == "split"
-    assert missing_inputs(session, "split") == []
+def test_a_fresh_session_starts_at_compose():
+    session = new_session({
+        "theme": "雨上がりの屋上", "light_model": "gemma4:e4b", "character_id": "abc",
+    })
+    assert next_step(session) == "compose"
+    assert missing_inputs(session, "compose") == []
 
 
 def test_missing_inputs_names_what_the_step_needs():
     session = new_session()
-    assert "theme" in missing_inputs(session, "split")
-    assert "lightModel" in missing_inputs(session, "split")
-    assert "character" in missing_inputs(session, "board")
+    assert "theme" in missing_inputs(session, "compose")
+    assert "lightModel" in missing_inputs(session, "compose")
+    assert "character" in missing_inputs(session, "compose")
     assert "boardWorkflow" in missing_inputs(session, "board")
     assert "finalWorkflow" in missing_inputs(session, "render")
 
 
 def test_steps_advance_as_results_land():
-    session = new_session({"theme": "t", "light_model": "m"})
-    session["split"] = {"character": "1girl", "background": "rooftop"}
-    assert next_step(session) == "tags"
+    session = new_session({"theme": "t", "light_model": "m", "character_id": "abc"})
+    assert next_step(session) == "compose"
 
-    session["seed_tags"] = {"background": [{"tag": "rooftop", "source": "split"}], "person": []}
+    session["seed_tags"] = {
+        "background": [{"tag": "rooftop", "source": "compose"}], "person": [],
+    }
     assert next_step(session) == "board"
+
+
+def test_topup_counts_as_done_even_when_it_adds_nothing():
+    """Choosing nothing is a valid answer, so the step must not block on it."""
+    session = new_session({"theme": "t", "light_model": "m", "character_id": "abc"})
+    session["seed_tags"] = {"background": [{"tag": "a"}], "person": [{"tag": "b"}]}
+    session["board"] = {"background": [{"seed_index": 0, "image_id": "x"}],
+                        "person": [{"seed_index": 0, "image_id": "y"}]}
+    session["harvest"] = {"background": [{"tag": "a"}], "person": [{"tag": "b"}]}
+    assert next_step(session) == "topup"
+
+    session["topup_candidates"] = [{"tag": "lamp"}]
+    session["topup"] = []
+    assert next_step(session) == "merge"
 
 
 def test_board_is_pending_until_every_slot_lands():
     session = new_session({"theme": "t", "light_model": "m"})
-    session["split"] = {"character": "x"}
     session["seed_tags"] = {"background": [{"tag": "a"}], "person": [{"tag": "b"}]}
     session["board"] = {
         "background": [{"seed_index": 0, "image_id": "aaa"}],
@@ -56,7 +72,7 @@ def test_board_is_pending_until_every_slot_lands():
 
 def test_public_view_carries_the_state_the_panel_renders():
     view = public_view(new_session({"theme": "t"}))
-    assert view["next_step"] == "split"
+    assert view["next_step"] == "compose"
     assert set(view["step_state"]) == set(view["steps"])
     assert "lightModel" in view["needs"]
 

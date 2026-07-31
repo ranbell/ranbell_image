@@ -1,9 +1,9 @@
 """Each track must stop doing the other track's job.
 
-A background query for "library, rain, stained glass" returns `closed_eyes` and
-`kimono` too, because people get photographed in libraries — and the background
-board then rendered a cat-girl. A person query returns `simple_background` and
-`blue_background`, and the character board came out on a plain studio backdrop.
+A model asked for thirty background tags will still slip `1girl` into the list,
+and one asked for a character will still reach for `simple_background`. Both
+render the wrong thing: a figure in a room that was meant to be empty, and a
+character on a plain studio wall instead of in the scene.
 """
 from __future__ import annotations
 
@@ -14,15 +14,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse.expand import (
-    TRACK_AWAY_FROM,
-    TRACK_SECTIONS,
+from app.muse.tracks import (
+    BACKGROUND_NEGATIVE,
     belongs_to_track,
-    conflicts_with_identity,
     is_person_tag,
     is_scene_tag,
-    split_tag_text,
 )
+from app.tags.conflict import contradicts_any
 
 IDENTITY = ["1girl", "black_hair", "very_long_hair", "brown_eyes", "tall"]
 
@@ -69,29 +67,20 @@ def test_person_and_scene_classifiers_disagree_about_nothing_obvious():
 # ── identity conflicts out of the split ─────────────────────────────────────
 @pytest.mark.parametrize("tag", ["dark_blue_hair", "blue_hair", "blue_eyes", "short_hair"])
 def test_appearance_that_contradicts_the_character_is_rejected(tag):
-    assert conflicts_with_identity(tag, IDENTITY)
+    assert contradicts_any(tag, IDENTITY)
 
 
 @pytest.mark.parametrize("tag", ["pleated_skirt", "blouse", "ribbon", "umbrella", "socks"])
 def test_wardrobe_is_not_a_conflict(tag):
     """The split is supposed to dress her for the theme — that must survive."""
-    assert not conflicts_with_identity(tag, IDENTITY)
+    assert not contradicts_any(tag, IDENTITY)
 
 
 def test_no_identity_means_no_rejection():
-    assert not conflicts_with_identity("blue_hair", [])
+    assert not contradicts_any("blue_hair", [])
 
 
 # ── plumbing ────────────────────────────────────────────────────────────────
-def test_tracks_own_disjoint_sections():
-    person, background = set(TRACK_SECTIONS["person"]), set(TRACK_SECTIONS["background"])
-    assert not person & background
-
-
 def test_background_has_a_negative_prompt_naming_people():
-    negative = TRACK_AWAY_FROM["background_negative"]
-    assert "1girl" in negative and "solo" in negative
-
-
-def test_split_tag_text_normalizes_spacing():
-    assert split_tag_text("long hair, blue eyes ,  ") == ["long_hair", "blue_eyes"]
+    for word in ("1girl", "solo", "multiple_girls"):
+        assert word in BACKGROUND_NEGATIVE

@@ -54,6 +54,7 @@ def merge_tracks(
     unique_count: int = 30,
     protected_tags: list[str] | None = None,
     removal: set[str] | None = None,
+    reinforcements: list[str] | None = None,
 ) -> dict[str, Any]:
     """Merge both tracks into ``{tags, positive, protected, removed, analysis}``.
 
@@ -90,6 +91,12 @@ def merge_tracks(
     line = ensure_subject_anchor(line, docs)
 
     tags = [t.strip() for t in line.split(",") if t.strip()]
+    # What the picture was missing, chosen after it existed. Appended rather
+    # than budgeted: five tags cannot outweigh a hundred read off the canvas,
+    # and they are the only ones here nobody has seen rendered yet.
+    for tag in (reinforcements or []):
+        if tag and tag.lower() not in {t.lower() for t in tags}:
+            tags.append(tag)
     tags = [t for t in tags if not is_junk_tag(t)]
 
     # Putting `brown_eyes` at the head does nothing while `blue_eyes` is still
@@ -124,6 +131,7 @@ def merge_tracks(
         "tags": tags,
         "positive": ", ".join(tags),
         "protected": protected,
+        "reinforcements": list(reinforcements or []),
         "evicted": evicted,
         "removed": removed,
         "context": context,

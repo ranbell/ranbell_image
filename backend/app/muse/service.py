@@ -16,7 +16,7 @@ from ..prompt.tag_merge import removal_tag_set
 from ..runtime_config import get_runtime_config
 from ..scanner.drafts import PLAYGROUND_SUBDIR
 from ..spooler.models import JobLane
-from . import cleanup, expand, harvest, merge, scene, session_db
+from . import cleanup, compose, harvest, merge, scene, session_db, topup, tracks
 from .schema import TRACKS, new_session, public_view
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,9 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
     return session
 
 
-# ── S1 split ────────────────────────────────────────────────────────────────
-async def run_split(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+# ── S1 compose ──────────────────────────────────────────────────────────────
+async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """The model writes both board prompts. No retrieval — see compose.py."""
     inputs = _inputs(session)
     theme = str(inputs.get("theme") or "").strip()
     if not theme:
@@ -72,49 +73,35 @@ async def run_split(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         raise MuseError("light_model is required")
 
     cfg = await get_runtime_config(db)
-    identity = list((session.get("character") or {}).get("identity_tags") or [])
-    session["split"] = await expand.split_theme(
-        theme, ollama, model=model, num_ctx=cfg.get("ollama_num_ctx"),
-        identity_tags=identity,
+    tracks = await compose.compose_tracks(
+        theme,
+        session.get("character") or {},
+        ollama,
+        model=model,
+        num_ctx=cfg.get("ollama_num_ctx"),
+        count=int(inputs.get("compose_tag_count", compose.TAGS_PER_TRACK)),
     )
-    session_db.log(session, "split", theme)
-    await session_db.save(db, session)
-    return session
 
-
-# ── S2 tags ─────────────────────────────────────────────────────────────────
-async def run_tags(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    inputs = _inputs(session)
-    theme = str(inputs.get("theme") or "").strip()
-    split = session.get("split") or {}
-    if not split:
-        raise MuseError("run the split step first")
-
-    cfg = await get_runtime_config(db)
     removal = removal_tag_set(cfg)
     rejected = list(session.get("rejected_tags") or [])
-
-    seed_tags: dict[str, list[dict[str, Any]]] = {}
-    dropped: list[str] = []
-    for track in TRACKS:
-        rows = await expand.gather_tags(
-            db, ollama,
-            theme=theme, split=split, track=track,
-            topic_tag_limit=int(inputs.get("topic_tag_limit", 25)),
-            wildness=int(inputs.get("wildness", 3)),
-            frontier_count=int(inputs.get("frontier_count", 8)),
-            subtract_strength=float(inputs.get("subtract_strength", 1.0)),
-            popularity_weight=float(inputs.get("popularity_weight", 0.35)),
-            model=str(inputs.get("light_model") or ""),
-        )
-        rows, gone = expand.apply_rejections(rows, rejected, removal)
-        seed_tags[track] = rows
-        dropped.extend(gone)
-
-    session["seed_tags"] = seed_tags
-    if not any(seed_tags.values()):
-        _warn(session, "wd14_vocab returned nothing — is the vocabulary imported?")
-    session_db.log(session, "tags", " / ".join(f"{t}:{len(seed_tags[t])}" for t in TRACKS))
+    blocked = {t.strip().lower().replace(" ", "_") for t in rejected if str(t).strip()}
+    blocked |= {str(t).lower() for t in removal}
+    session["seed_tags"] = {
+        track: [r for r in rows if r["tag"].lower() not in blocked]
+        for track, rows in tracks.items()
+    }
+    if not any(session["seed_tags"].values()):
+        _warn(session, "the model returned no usable tags — try another light model")
+    # Everything downstream described the previous picture.
+    session["board"] = {t: [] for t in TRACKS}
+    session["harvest"] = {}
+    session["topup"] = []
+    session["topup_candidates"] = []
+    session["merged"] = {}
+    session_db.log(
+        session, "compose",
+        " / ".join(f"{t}:{len(session['seed_tags'][t])}" for t in TRACKS),
+    )
     await session_db.save(db, session)
     return session
 
@@ -133,7 +120,7 @@ def track_prompt(session: dict[str, Any], track: str) -> tuple[str, str]:
         # Removing person tags from the positive is not enough to keep people
         # out of a background: the checkpoint puts a figure in a library because
         # libraries have figures in them. Say so in the negative.
-        away = expand.TRACK_AWAY_FROM["background_negative"]
+        away = tracks.BACKGROUND_NEGATIVE
         negative = f"{negative}, {away}" if negative else away
     return ", ".join(tags), negative
 
@@ -145,7 +132,7 @@ async def submit_board(db, comfy, spooler, session: dict[str, Any]) -> dict[str,
     if not workflow:
         raise MuseError("board_workflow is required")
     if not any((session.get("seed_tags") or {}).values()):
-        raise MuseError("gather tags first")
+        raise MuseError("compose the tags first")
 
     count = max(1, int(inputs.get("board_count", 3)))
     session_id = session["session_id"]
@@ -233,7 +220,9 @@ async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any
     threshold = float(inputs.get("harvest_threshold", 0.15))
     model_dir = cfg.get("wd14_model_dir")
 
-    split_tags = {
+    # What the model asked the board to draw. A harvested tag that matches one
+    # is the board doing as it was told, which is worth ranking up.
+    asked_for = {
         r["tag"].lower()
         for rows in (session.get("seed_tags") or {}).values()
         for r in rows
@@ -261,7 +250,7 @@ async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any
             ))
         result[track] = harvest.fold_track(
             per_image,
-            seed_tags=list(split_tags),
+            seed_tags=list(asked_for),
             frequency=frequency,
             rerank=bool(inputs.get("harvest_rerank", False)),
         )
@@ -283,6 +272,8 @@ async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any
 
     session["harvest"] = result
     session["harvest_dropped"] = dropped
+    session["topup"] = []
+    session["topup_candidates"] = []
     session["merged"] = {}
     session_db.log(
         session, "harvest",
@@ -316,6 +307,40 @@ async def _vocab_frequency(db) -> dict[str, float]:
         return {}
 
 
+# ── S4 top-up ───────────────────────────────────────────────────────────────
+async def run_topup(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """Ask retrieval what the theme suggests that the picture does not have."""
+    harvested = session.get("harvest") or {}
+    if not any(harvested.values()):
+        raise MuseError("harvest the board first")
+
+    inputs = _inputs(session)
+    cfg = await get_runtime_config(db)
+    theme = str(inputs.get("theme") or "").strip()
+
+    present = [r["tag"] for rows in harvested.values() for r in rows]
+    candidates = await topup.collect_candidates(
+        db, ollama,
+        theme=theme,
+        present=set(present),
+        min_score=float(inputs.get("topup_min_score", topup.DEFAULT_MIN_SCORE)),
+    )
+    picked = await topup.pick_reinforcements(
+        candidates, ollama,
+        theme=theme,
+        present=present,
+        model=str(inputs.get("light_model") or ""),
+        num_ctx=cfg.get("ollama_num_ctx"),
+        picks=int(inputs.get("topup_picks", topup.DEFAULT_PICKS)),
+    )
+    session["topup_candidates"] = candidates
+    session["topup"] = picked
+    session["merged"] = {}
+    session_db.log(session, "topup", f"{len(picked)}/{len(candidates)}")
+    await session_db.save(db, session)
+    return session
+
+
 # ── S6 merge ────────────────────────────────────────────────────────────────
 async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
     harvested = session.get("harvest") or {}
@@ -338,6 +363,7 @@ async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
         unique_count=int(inputs.get("merge_unique_count", 30)),
         protected_tags=list(character.get("identity_tags") or []),
         removal=removal,
+        reinforcements=[r["tag"] for r in (session.get("topup") or [])],
     )
     session["scene"] = {}
     session_db.log(session, "merge", f"{len(session['merged'].get('tags') or [])} tags")

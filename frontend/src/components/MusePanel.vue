@@ -52,6 +52,8 @@ const seedTags = computed(() => session.value?.seed_tags || {})
 const board = computed(() => session.value?.board || {})
 const harvest = computed(() => session.value?.harvest || {})
 const harvestDropped = computed(() => session.value?.harvest_dropped || {})
+const topup = computed(() => session.value?.topup || [])
+const topupCandidates = computed(() => session.value?.topup_candidates || [])
 const merged = computed(() => session.value?.merged || {})
 const scene = computed(() => session.value?.scene || {})
 const final = computed(() => session.value?.final || {})
@@ -460,20 +462,18 @@ function close() { emit('update:show', false) }
                        @change="patchInputs({ merge_unique_count: +$event.target.value })" />
               </label>
               <label class="block text-[10px] text-gray-500">
-                {{ t('muse.subtractStrength') }}
-                <span class="float-right font-mono text-teal-400">{{ inputs.subtract_strength }}</span>
-                <input type="range" class="w-full" min="0" max="1.5" step="0.1"
-                       :value="inputs.subtract_strength"
-                       @change="patchInputs({ subtract_strength: +$event.target.value })" />
-                <span class="block text-[10px] text-gray-600">{{ t('muse.subtractStrengthHint') }}</span>
+                {{ t('muse.composeCount') }}
+                <input type="number" class="sb-input" min="8" max="60"
+                       :value="inputs.compose_tag_count"
+                       @change="patchInputs({ compose_tag_count: +$event.target.value })" />
+                <span class="block text-[10px] text-gray-600">{{ t('muse.composeCountHint') }}</span>
               </label>
               <label class="block text-[10px] text-gray-500">
-                {{ t('muse.popularityWeight') }}
-                <span class="float-right font-mono text-teal-400">{{ inputs.popularity_weight }}</span>
-                <input type="range" class="w-full" min="0" max="1" step="0.05"
-                       :value="inputs.popularity_weight"
-                       @change="patchInputs({ popularity_weight: +$event.target.value })" />
-                <span class="block text-[10px] text-gray-600">{{ t('muse.popularityWeightHint') }}</span>
+                {{ t('muse.topupPicks') }}
+                <input type="number" class="sb-input" min="0" max="15"
+                       :value="inputs.topup_picks"
+                       @change="patchInputs({ topup_picks: +$event.target.value })" />
+                <span class="block text-[10px] text-gray-600">{{ t('muse.topupPicksHint') }}</span>
               </label>
               <label class="block text-[10px] text-gray-500">
                 {{ t('muse.harvestThreshold') }}
@@ -549,25 +549,16 @@ function close() { emit('update:show', false) }
             </p>
           </div>
 
-          <!-- S1 split -->
-          <section v-if="session?.split && Object.keys(session.split).length" class="sb-shell p-3">
-            <p class="sb-label mb-2">{{ t('muse.split.title') }}</p>
-            <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
-              <template v-for="(val, key) in session.split" :key="key">
-                <div v-if="val" class="min-w-0">
-                  <dt class="text-[10px] text-gray-500">{{ t(`muse.split.${key}`) }}</dt>
-                  <dd class="text-[11px] font-mono text-gray-300 break-words">{{ val }}</dd>
-                </div>
-              </template>
-            </dl>
-          </section>
-
-          <!-- S2 tags -->
+          <!-- S1 compose -->
           <section v-if="seedTags.background?.length || seedTags.person?.length" class="sb-shell p-3">
-            <p class="sb-label mb-2">{{ t('muse.tags.title') }}</p>
+            <p class="sb-label mb-2">{{ t('muse.compose.title') }}</p>
+            <p class="text-[10px] text-gray-600 mb-2">{{ t('muse.compose.hint') }}</p>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div v-for="track in boardTracks" :key="track">
-                <p class="text-[11px] text-gray-400 mb-1">{{ t(`muse.board.${track}`) }}</p>
+                <p class="text-[11px] text-gray-400 mb-1">
+                  {{ t(`muse.board.${track}`) }}
+                  <span class="text-gray-600">({{ (seedTags[track] || []).length }})</span>
+                </p>
                 <TagChips
                   :rows="seedTags[track] || []"
                   :rejected="track === 'background' ? (session.rejected_tags || []) : []"
@@ -645,6 +636,34 @@ function close() { emit('update:show', false) }
             </div>
           </section>
 
+          <!-- S4 top-up -->
+          <section v-if="topupCandidates.length || topup.length" class="sb-shell p-3">
+            <p class="sb-label mb-1">{{ t('muse.topup.title') }}</p>
+            <p class="text-[10px] text-gray-600 mb-2">{{ t('muse.topup.hint') }}</p>
+            <div v-if="topup.length" class="flex flex-wrap gap-1 mb-2">
+              <span
+                v-for="row in topup"
+                :key="row.tag"
+                class="px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-900/30 text-[10px] font-mono text-violet-200"
+                :title="row.why"
+              >{{ row.tag }}</span>
+            </div>
+            <p v-else class="text-[11px] text-gray-500 mb-2">{{ t('muse.topup.none') }}</p>
+            <details v-if="topupCandidates.length">
+              <summary class="sb-label cursor-pointer">
+                {{ t('muse.topup.candidates') }} ({{ topupCandidates.length }})
+              </summary>
+              <div class="flex flex-wrap gap-1 mt-1">
+                <span
+                  v-for="c in topupCandidates"
+                  :key="c.tag"
+                  class="px-1.5 py-0.5 rounded border border-white/10 bg-black/30 text-[10px] font-mono text-gray-500"
+                  :title="`score ${c.score}`"
+                >{{ c.tag }}</span>
+              </div>
+            </details>
+          </section>
+
           <!-- S6 merge -->
           <section v-if="merged.tags?.length" class="sb-shell p-3">
             <p class="sb-label mb-2">{{ t('muse.merge.title') }}</p>
@@ -655,7 +674,9 @@ function close() { emit('update:show', false) }
                 class="px-1.5 py-0.5 rounded border text-[10px] font-mono"
                 :class="(merged.protected || []).includes(tag)
                   ? 'border-teal-400/50 bg-teal-800/40 text-teal-100'
-                  : 'border-white/10 bg-black/30 text-gray-300'"
+                  : (merged.reinforcements || []).includes(tag)
+                    ? 'border-violet-500/40 bg-violet-900/30 text-violet-200'
+                    : 'border-white/10 bg-black/30 text-gray-300'"
               >{{ tag }}</span>
             </div>
             <div v-if="merged.evicted?.length" class="mb-3">

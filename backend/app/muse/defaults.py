@@ -17,8 +17,9 @@ BOARD_DEFAULTS: dict[str, object] = {
     "board_height": 512,
     "board_steps": 16,
     # Low CFG lets the checkpoint drift toward what it is good at instead of
-    # forcing every tag literally. That drift is where the surprise comes from.
-    "board_cfg": 3.0,
+    # forcing every tag literally. That drift is where the surprise comes from,
+    # now that the vocabulary search no longer supplies any.
+    "board_cfg": 2.0,
     "board_count": 3,          # per track, so 3 background + 3 character
 }
 
@@ -52,24 +53,22 @@ MERGE_DEFAULTS: dict[str, object] = {
     "character_weight": 0.5,
 }
 
-# ── Tag expansion ──────────────────────────────────────────────────────────
-EXPAND_DEFAULTS: dict[str, object] = {
-    "topic_tag_limit": 25,
-    "wildness": 3,        # vocab_bank: 3 adds rare-band tags on top of lunatic
-    "frontier_count": 8,  # tags the library has never used at all
-    # How hard each track's query is steered away from the other one's subject.
-    # 0 disables it; much above 1 the query starts meaning "the opposite of a
-    # person" rather than "this scene, without a person in it".
-    "subtract_strength": 1.0,
-    # How much a tag's Danbooru post count counts alongside semantic distance.
-    # Applies to the grounded layer only — weighting the surprise layers by
-    # popularity would rank the surprise straight back out.
-    "popularity_weight": 0.35,
+# ── Composition and top-up ─────────────────────────────────────────────────
+COMPOSE_DEFAULTS: dict[str, object] = {
+    # Roughly how many danbooru tags the model writes per track. Thirty is
+    # enough to describe a scene without becoming a list it stops thinking about.
+    "compose_tag_count": 30,
+    # After the board exists, how many theme-adjacent tags it may gain.
+    # Seasoning, not the dish.
+    "topup_picks": 5,
+    # Cosine cutoff on the vocabulary search. Below this the "neighbours" of a
+    # theme are only loosely related and the candidate list becomes noise.
+    "topup_min_score": 0.3,
 }
 
 ALL_DEFAULTS: dict[str, object] = {
     **BOARD_DEFAULTS,
     **HARVEST_DEFAULTS,
     **MERGE_DEFAULTS,
-    **EXPAND_DEFAULTS,
+    **COMPOSE_DEFAULTS,
 }
