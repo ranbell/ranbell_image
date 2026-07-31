@@ -60,6 +60,7 @@ const final = computed(() => session.value?.final || {})
 const warnings = computed(() => session.value?.warnings || [])
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
+const shots = computed(() => catalog.value?.shots || ['auto'])
 const models = computed(() => catalog.value?.llm?.ollama?.models || [])
 const vocabMissing = computed(() => catalog.value && !catalog.value.wd14_vocab?.imported)
 
@@ -70,6 +71,14 @@ const boardTracks = computed(() => ['background', 'person'])
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
+
+// Same string↔list bridge Admin uses for its exclusion lists.
+const mustTagsText = computed({
+  get: () => (inputs.value.must_tags || []).join(', '),
+  set: val => patchInputs({
+    must_tags: val.split(/[\n,]/).map(t => t.trim()).filter(Boolean),
+  }),
+})
 
 // ── fetch ─────────────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
@@ -380,6 +389,25 @@ function close() { emit('update:show', false) }
 
           <section class="space-y-2">
             <div>
+              <p class="sb-label mb-1">{{ t('muse.shot') }}</p>
+              <select class="sb-select" :value="inputs.shot"
+                      @change="patchInputs({ shot: $event.target.value })">
+                <option v-for="s in shots" :key="s" :value="s">{{ t(`muse.shots.${s}`) }}</option>
+              </select>
+              <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.shotHint') }}</p>
+            </div>
+            <div>
+              <p class="sb-label mb-1">{{ t('muse.mustTags') }}</p>
+              <textarea
+                class="sb-textarea"
+                rows="2"
+                :placeholder="t('muse.mustTagsPlaceholder')"
+                :value="mustTagsText"
+                @change="mustTagsText = $event.target.value"
+              ></textarea>
+              <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.mustTagsHint') }}</p>
+            </div>
+            <div>
               <p class="sb-label mb-1">{{ t('muse.lightModel') }}</p>
               <select class="sb-select" :value="inputs.light_model"
                       @change="patchInputs({ light_model: $event.target.value })">
@@ -672,12 +700,26 @@ function close() { emit('update:show', false) }
                 v-for="tag in merged.tags"
                 :key="tag"
                 class="px-1.5 py-0.5 rounded border text-[10px] font-mono"
-                :class="(merged.protected || []).includes(tag)
-                  ? 'border-teal-400/50 bg-teal-800/40 text-teal-100'
+                :class="(merged.forced || []).includes(tag)
+                  ? 'border-rose-400/50 bg-rose-900/40 text-rose-100'
+                  : (merged.protected || []).includes(tag)
+                    ? 'border-teal-400/50 bg-teal-800/40 text-teal-100'
                   : (merged.reinforcements || []).includes(tag)
                     ? 'border-violet-500/40 bg-violet-900/30 text-violet-200'
                     : 'border-white/10 bg-black/30 text-gray-300'"
               >{{ tag }}</span>
+            </div>
+            <div v-if="merged.framing_dropped?.length" class="mb-3">
+              <p class="sb-label mb-1">
+                {{ t('muse.merge.framingDropped', { shot: t(`muse.shots.${merged.shot || 'auto'}`) }) }}
+              </p>
+              <div class="flex flex-wrap gap-1">
+                <span
+                  v-for="tag in merged.framing_dropped"
+                  :key="tag"
+                  class="px-1.5 py-0.5 rounded border border-sky-800/30 bg-sky-950/30 text-[10px] font-mono text-sky-400/60 line-through"
+                >{{ tag }}</span>
+              </div>
             </div>
             <div v-if="merged.evicted?.length" class="mb-3">
               <p class="sb-label mb-1">{{ t('muse.merge.evicted') }}</p>

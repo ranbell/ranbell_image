@@ -51,6 +51,13 @@ MERGE_DEFAULTS: dict[str, object] = {
     # 0.0 = all background, 1.0 = all character. The dial between a wide
     # establishing shot and a portrait.
     "character_weight": 0.5,
+    # Framing, named rather than left to whichever of three seeds won the
+    # budget. "auto" keeps whatever the drafts produced.
+    "shot": "auto",
+    # Tags the user will not have dropped, ranked with the character's own
+    # identity. `solo` is the reason this exists: it was in a prompt and lost
+    # anyway to a poolside scene full of people.
+    "must_tags": [],
 }
 
 # ── Composition and top-up ─────────────────────────────────────────────────

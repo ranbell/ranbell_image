@@ -34,7 +34,7 @@ _PROMPT = """\
 # ROLE
 An illustration already exists. You are choosing a few tags to strengthen it.
 
-# THEME
+# THEME — what the picture is meant to be about
 {theme}
 
 # WHAT THE PICTURE ALREADY HAS
@@ -48,10 +48,16 @@ Pick the ones that would make the existing picture *more* what it is — a
 concrete thing the scene plainly lacks, a detail that sharpens the mood it
 already has.
 
-Do NOT pick:
-- anything that would change the subject, the place or the time of day
+You are ADDING to this picture, never editing it. Do NOT pick:
+- an ALTERNATIVE to something the picture already has. If she is wearing a
+  bikini, one-piece_swimsuit is wrong. If she is walking, sitting is wrong.
+  "another option for X" is exactly the answer this step does not want.
+- anything that changes the subject, the action, the place or the time of day
 - anything redundant with a tag the picture already has
 - a person, a body or clothing if the picture is a place; a place if it is a person
+
+Ask of each one: "is this a thing that could be added to the picture without
+changing anything already in it?" If the answer is no, leave it.
 
 Fewer is better. Choosing nothing is a valid answer.
 

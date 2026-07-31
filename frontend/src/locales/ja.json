@@ -1335,7 +1335,8 @@
       "removed": "除いたタグ",
       "removedHint": "管理画面の除外ワードと、あなたが弾いたタグ",
       "evicted": "キャラと矛盾して除いたタグ",
-      "evictedHint": "選択キャラの固定タグと同じ属性を別の値で埋めていたもの"
+      "evictedHint": "選択キャラの固定タグと同じ属性を別の値で埋めていたもの",
+      "framingDropped": "画角「{shot}」と矛盾して除いたタグ"
     },
     "brainstorm": {
       "title": "シーン案",
@@ -1388,7 +1389,20 @@
     "composeCount": "1トラックあたりのタグ数",
     "composeCountHint": "多すぎると LLM が考えなくなり、列挙になる",
     "topupPicks": "補強タグの上限",
-    "topupPicksHint": "絵が主でこれは味付け。少ないほうが良い"
+    "topupPicksHint": "絵が主でこれは味付け。少ないほうが良い",
+    "shot": "画角",
+    "shotHint": "選ぶと、これと矛盾する画角タグは結合時に除去される",
+    "mustTags": "強制注入タグ",
+    "mustTagsPlaceholder": "solo, looking_at_viewer",
+    "mustTagsHint": "必ず先頭に入り、除外ワードでも消えない。矛盾するタグは追い出される。他人が写り込むなら solo を",
+    "shots": {
+      "auto": "おまかせ",
+      "wide_shot": "引き（情景）",
+      "full_body": "全身",
+      "cowboy_shot": "膝上",
+      "upper_body": "上半身",
+      "close_up": "寄り（顔）"
+    }
   },
   "characters": {
     "title": "キャラクター",

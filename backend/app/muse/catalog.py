@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
+from .camera import SHOTS
 from .defaults import ALL_DEFAULTS
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,7 @@ async def build_muse_catalog(
         "wd14_vocab": {"count": vocab_count, "imported": vocab_count > 0},
         "characters": {"count": character_count},
         "locales": ["ja", "en"],
+        "shots": list(SHOTS),
         "admin_defaults": {
             "llm_provider": provider,
             "vlm_model": admin_vlm,

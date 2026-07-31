@@ -51,6 +51,8 @@ class InputsPatch(BaseModel):
     merge_common_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     merge_unique_count: int | None = Field(default=None, ge=1, le=100)
     compose_tag_count: int | None = Field(default=None, ge=8, le=60)
+    must_tags: list[str] | None = None
+    shot: str | None = None
     topup_picks: int | None = Field(default=None, ge=0, le=15)
     topup_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     final_seed: int | None = None
@@ -223,6 +225,7 @@ async def run_brainstorm(session_id: str, request: Request):
             "sha256s": board_shas,
             "extra_tags": tags[:12],
             "reference_tags": tags,
+            "theme": str(inputs.get("theme") or ""),
             "lang": str(inputs.get("locale") or "ja"),
         },
         db=_db(request),

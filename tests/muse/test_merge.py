@@ -128,3 +128,57 @@ def test_junk_never_survives_the_merge():
     out = merge_tracks(folded, character_weight=0.5, protected_tags=IDENTITY)
     assert "no_humans" not in out["tags"]
     assert "black_border" not in out["tags"]
+
+
+def test_forced_tags_rank_with_the_character_and_survive_everything():
+    """`solo` was in a prompt and lost anyway to a poolside scene a checkpoint
+    knows is full of people. The user needs a slot that cannot be outvoted."""
+    out = merge_tracks(
+        FOLDED, character_weight=0.5,
+        protected_tags=IDENTITY, must_tags=["solo"],
+        removal={"solo", "rooftop"},
+    )
+    assert out["tags"][0] == "solo", "forced tags lead"
+    assert out["forced"] == ["solo"]
+    assert "solo" not in out["removed"], "an Admin exclusion must not erase it"
+    assert "rooftop" in out["removed"], "ordinary tags still obey the list"
+
+
+def test_forced_tags_evict_their_contradictions_too():
+    folded = {**FOLDED, "person": PERSON + [{"tag": "2girls", "score": 0.8}]}
+    out = merge_tracks(folded, character_weight=0.5, must_tags=["solo"])
+    assert "2girls" not in out["tags"]
+    assert "2girls" in out["evicted"]
+
+
+def test_a_chosen_shot_removes_the_framings_that_fight_it():
+    folded = {
+        "background": BACKGROUND + [{"tag": "close-up", "score": 0.6}],
+        "person": PERSON + [{"tag": "full_body", "score": 0.7}],
+    }
+    out = merge_tracks(folded, character_weight=0.5, shot="wide_shot")
+    assert "close-up" not in out["tags"]
+    assert "close-up" in out["framing_dropped"]
+    assert "wide_shot" in out["tags"]
+    assert out["shot"] == "wide_shot"
+
+
+def test_auto_leaves_the_framing_to_the_drafts():
+    folded = {**FOLDED, "person": PERSON + [{"tag": "close-up", "score": 0.6}]}
+    out = merge_tracks(folded, character_weight=0.5, shot="auto")
+    assert out["framing_dropped"] == []
+
+
+def test_a_girl_never_keeps_menswear():
+    """`male_swimwear` reached a board for a 1girl character and rendered
+    trunks over a bikini top. Gender contradiction needs no shared head noun."""
+    folded = {**FOLDED, "person": PERSON + [{"tag": "male_swimwear", "score": 0.9}]}
+    out = merge_tracks(folded, character_weight=0.5, protected_tags=IDENTITY)
+    assert "male_swimwear" not in out["tags"]
+    assert "male_swimwear" in out["evicted"]
+
+
+def test_reinforcements_are_appended_and_reported():
+    out = merge_tracks(FOLDED, character_weight=0.5, reinforcements=["puddle_reflection"])
+    assert "puddle_reflection" in out["tags"]
+    assert out["reinforcements"] == ["puddle_reflection"]

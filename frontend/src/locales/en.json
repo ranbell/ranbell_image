@@ -1335,7 +1335,8 @@
       "removed": "Removed",
       "removedHint": "Admin exclusions plus the tags you rejected",
       "evicted": "Dropped — contradicted the character",
-      "evictedHint": "These filled the same attribute slot as a locked tag with a different value"
+      "evictedHint": "These filled the same attribute slot as a locked tag with a different value",
+      "framingDropped": "Dropped — fights the {shot} framing"
     },
     "brainstorm": {
       "title": "Scene ideas",
@@ -1388,7 +1389,20 @@
     "composeCount": "Tags per track",
     "composeCountHint": "Past a point the model stops thinking and starts listing",
     "topupPicks": "Reinforcement limit",
-    "topupPicksHint": "The image is the dish; this is seasoning. Fewer is better"
+    "topupPicksHint": "The image is the dish; this is seasoning. Fewer is better",
+    "shot": "Framing",
+    "shotHint": "Choosing one removes the framing tags that fight it at merge time",
+    "mustTags": "Always keep",
+    "mustTagsPlaceholder": "solo, looking_at_viewer",
+    "mustTagsHint": "Leads the prompt, survives the exclusion list, and evicts whatever contradicts it. Add solo when strangers keep appearing",
+    "shots": {
+      "auto": "Auto",
+      "wide_shot": "Wide",
+      "full_body": "Full body",
+      "cowboy_shot": "Cowboy",
+      "upper_body": "Upper body",
+      "close_up": "Close-up"
+    }
   },
   "characters": {
     "title": "Characters",

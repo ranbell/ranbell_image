@@ -122,6 +122,7 @@ class BrainstormRequest(BaseModel):
     # Muse uses this: its board images are tagged at a lower threshold than the
     # library pipeline uses, and that merged set is what it wants ideas about.
     reference_tags: list[str] | None = None
+    theme: str = ""
 
 
 class DiscoverRequest(BaseModel):
@@ -1653,6 +1654,7 @@ async def _brainstorm_stream(
     cfg: dict,
     lang: str = "ja",
     reference_tags: list[str] | None = None,
+    theme: str = "",
 ) -> AsyncGenerator[str, None]:
     # ``reference_tags`` lets a caller supply the tag set directly instead of
     # harvesting it from library documents. Muse needs that: its board images
@@ -1669,8 +1671,14 @@ async def _brainstorm_stream(
         unique_tags = list(dict.fromkeys(wd14_tags))[:50]
     must_tags = list(dict.fromkeys(extra_tags)) if extra_tags else []
 
+    # Without this the proposals are built from tags alone and can wander off
+    # what was actually asked for — a run themed "came to swim" produced four
+    # ideas about sunbathing, because the tags allowed it and nothing said no.
+    theme_str = f"The picture must be about: {theme}\n\n" if theme else ""
+    theme_str_ja = f"この絵のお題は「{theme}」です。提案は必ずこのお題に沿ってください。\n\n" if theme else ""
+
     if lang == "en":
-        must_str = (
+        must_str = theme_str + (
             f"You MUST center the proposals around these concepts: {', '.join(must_tags)}\n\n"
             if must_tags else ""
         )
@@ -1689,7 +1697,7 @@ async def _brainstorm_stream(
             "Output in Markdown format (## Idea N: Title) in English."
         )
     else:
-        must_str = (
+        must_str = theme_str_ja + (
             f"必ず以下のコンセプトを中心に据えた提案にしてください：{', '.join(must_tags)}\n\n"
             if must_tags else ""
         )

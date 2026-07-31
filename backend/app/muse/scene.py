@@ -25,6 +25,9 @@ _CONDENSE_PROMPT = """\
 # ROLE
 You describe a single illustration in plain prose, for an image generation model.
 
+# WHAT THE PICTURE IS ABOUT
+{theme}
+
 # THE SCENE
 {idea}
 
@@ -35,7 +38,7 @@ You describe a single illustration in plain prose, for an image generation model
 - Exactly two sentences. No more.
 - Describe only what is visible in one frame: subject, what she is doing, where
   she is, the light. No backstory, no interior monologue, no "she remembers".
-- Do not contradict the tags. Do not list them either — write prose.
+- Do not contradict the tags or the theme. Do not list them either — write prose.
 - English only.
 
 # OUTPUT (JSON only)
@@ -71,9 +74,11 @@ async def condense_to_two_sentences(
     *,
     model: str,
     num_ctx: int | None = None,
+    theme: str = "",
 ) -> str:
     """A chosen brainstorm idea → the two sentences that ship with the prompt."""
     prompt = _CONDENSE_PROMPT.format(
+        theme=theme or "(none given)",
         idea=str(idea or "").strip()[:2000],
         tags=", ".join(tags[:60]),
     )

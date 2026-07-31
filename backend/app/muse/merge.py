@@ -29,6 +29,7 @@ from ..prompt.tag_merge import (
 )
 from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
+from . import camera
 from ..tags.subject_anchors import ensure_subject_anchor, insert_after_anchors
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,8 @@ def merge_tracks(
     protected_tags: list[str] | None = None,
     removal: set[str] | None = None,
     reinforcements: list[str] | None = None,
+    must_tags: list[str] | None = None,
+    shot: str = "auto",
 ) -> dict[str, Any]:
     """Merge both tracks into ``{tags, positive, protected, removed, analysis}``.
 
@@ -84,7 +87,13 @@ def merge_tracks(
     line = ", ".join(ordered)
     # The character's own tags go back in regardless of what the budget did to
     # them, and ahead of everything else.
-    protected = [t for t in (protected_tags or []) if t]
+    # The user's own must-keeps rank with the character's identity. `solo` is
+    # the case that made this necessary: it was in the prompt and lost anyway
+    # to a poolside scene that a checkpoint knows is full of people.
+    forced = [t.strip() for t in (must_tags or []) if str(t).strip()]
+    protected = forced + [
+        t for t in (protected_tags or []) if t and t not in forced
+    ]
     if protected:
         line = insert_after_anchors(line, [])
         line = _prepend(line, protected)
@@ -98,6 +107,10 @@ def merge_tracks(
         if tag and tag.lower() not in {t.lower() for t in tags}:
             tags.append(tag)
     tags = [t for t in tags if not is_junk_tag(t)]
+
+    # One framing, chosen deliberately. Three seeds produce three framings and
+    # the merge would otherwise keep all of them.
+    tags, framing_dropped = camera.apply(tags, shot)
 
     # Putting `brown_eyes` at the head does nothing while `blue_eyes` is still
     # in the list — the model sees both and picks one. Protection has to evict,
@@ -122,16 +135,22 @@ def merge_tracks(
         kept = filter_tag_list(tags, removal)
         removed = [t for t in tags if t not in kept]
         # A protected tag survives the removal list too — the user picked this
-        # character on purpose, and Admin's list is about prompt hygiene.
-        keep_back = [t for t in removed if t in protected]
-        tags = kept + keep_back
-        removed = [t for t in removed if t not in protected]
+        # character on purpose, and Admin's list is about prompt hygiene. It has
+        # to go back where it was, not on the end: leading the prompt is the
+        # whole point of protecting it, and a rescued tag appended to the tail
+        # is in the part of the prompt attention no longer reaches.
+        rescued = {t for t in removed if t in protected}
+        tags = [t for t in tags if t in kept or t in rescued]
+        removed = [t for t in removed if t not in rescued]
 
     return {
         "tags": tags,
         "positive": ", ".join(tags),
         "protected": protected,
+        "forced": forced,
         "reinforcements": list(reinforcements or []),
+        "shot": shot,
+        "framing_dropped": framing_dropped,
         "evicted": evicted,
         "removed": removed,
         "context": context,

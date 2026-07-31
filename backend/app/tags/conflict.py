@@ -32,6 +32,50 @@ _LENGTHS = frozenset({
 # only when their modifiers come from the same family.
 _FAMILIES: tuple[frozenset[str], ...] = (_COLOURS, _LENGTHS)
 
+# Subject gender is its own kind of contradiction: it does not need a shared
+# head noun. A theme composed `male_swimwear` for a character whose identity
+# says `1girl`, and the board rendered men's trunks over a bikini top.
+_FEMALE_MARKERS = frozenset({
+    "1girl", "2girls", "3girls", "multiple_girls", "girl", "girls",
+    "female", "woman", "women", "adult_female", "mature_female",
+})
+_MALE_MARKERS = frozenset({
+    "1boy", "2boys", "3boys", "multiple_boys", "boy", "boys",
+    "male", "man", "men", "adult_male", "mature_male",
+})
+
+
+# How many subjects the picture has is the other slot that needs no shared
+# noun. `solo` and `2girls` disagree about the whole picture, and a prompt
+# holding both renders whichever the checkpoint prefers.
+_SINGLE_MARKERS = frozenset({"solo", "solo_focus", "1girl", "1boy", "1other"})
+_MULTI_MARKERS = frozenset({
+    "2girls", "3girls", "4girls", "5girls", "6+girls", "multiple_girls",
+    "2boys", "3boys", "4boys", "multiple_boys", "multiple_others",
+    "group", "crowd", "couple", "duo", "trio",
+})
+
+
+def _count(tag: str) -> str | None:
+    """"one" / "many" when this tag says how many subjects there are."""
+    name = str(tag or "").strip().lower().replace(" ", "_")
+    if name in _SINGLE_MARKERS:
+        return "one"
+    if name in _MULTI_MARKERS:
+        return "many"
+    return None
+
+
+def _gender(tag: str) -> str | None:
+    """"female" / "male" when this tag asserts one, else None."""
+    tokens = set(str(tag or "").strip().lower().replace(" ", "_").split("_"))
+    name = str(tag or "").strip().lower().replace(" ", "_")
+    if name in _FEMALE_MARKERS or tokens & _FEMALE_MARKERS:
+        return "female"
+    if name in _MALE_MARKERS or tokens & _MALE_MARKERS:
+        return "male"
+    return None
+
 
 def _parts(tag: str) -> tuple[str, frozenset[str]]:
     """``('hair', {'very', 'long'})`` for ``very_long_hair``."""
@@ -43,6 +87,14 @@ def _parts(tag: str) -> tuple[str, frozenset[str]]:
 
 def contradicts(tag: str, other: str) -> bool:
     """True when both tags fill the same attribute slot with different values."""
+    a_gender, b_gender = _gender(tag), _gender(other)
+    if a_gender and b_gender and a_gender != b_gender:
+        return True
+
+    a_count, b_count = _count(tag), _count(other)
+    if a_count and b_count and a_count != b_count:
+        return True
+
     a_noun, a_mod = _parts(tag)
     b_noun, b_mod = _parts(other)
     if not a_noun or a_noun != b_noun:

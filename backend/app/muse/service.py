@@ -16,7 +16,7 @@ from ..prompt.tag_merge import removal_tag_set
 from ..runtime_config import get_runtime_config
 from ..scanner.drafts import PLAYGROUND_SUBDIR
 from ..spooler.models import JobLane
-from . import cleanup, compose, harvest, merge, scene, session_db, topup, tracks
+from . import camera, cleanup, compose, harvest, merge, scene, session_db, topup, tracks
 from .schema import TRACKS, new_session, public_view
 
 logger = logging.getLogger(__name__)
@@ -364,6 +364,8 @@ async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
         protected_tags=list(character.get("identity_tags") or []),
         removal=removal,
         reinforcements=[r["tag"] for r in (session.get("topup") or [])],
+        must_tags=list(inputs.get("must_tags") or []),
+        shot=str(inputs.get("shot") or "auto"),
     )
     session["scene"] = {}
     session_db.log(session, "merge", f"{len(session['merged'].get('tags') or [])} tags")
@@ -395,6 +397,7 @@ async def choose_scene(db, ollama, session: dict[str, Any], index: int) -> dict[
         ollama,
         model=str(inputs.get("light_model") or ""),
         num_ctx=cfg.get("ollama_num_ctx"),
+        theme=str(inputs.get("theme") or ""),
     )
     session["scene"] = {**current, "chosen": index, "text": text}
     session_db.log(session, "scene", text)
@@ -415,6 +418,9 @@ async def submit_final(db, comfy, spooler, session: dict[str, Any]) -> dict[str,
 
     positive = scene.compose_final_prompt(tags, (session.get("scene") or {}).get("text", ""))
     negative = str(inputs.get("negative_prompt") or "")
+    shot_negative = camera.negative_for(str(inputs.get("shot") or "auto"))
+    if shot_negative:
+        negative = f"{negative}, {shot_negative}" if negative else shot_negative
     session_id = session["session_id"]
 
     async def _attach(sha256: str, meta: dict) -> None:

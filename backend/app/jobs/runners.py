@@ -843,7 +843,7 @@ async def run_brainstorm(
     try:
         async for sse_str in _brainstorm_stream(
             body.sha256s, body.extra_tags, db, ollama, cfg,
-            lang=body.lang, reference_tags=body.reference_tags,
+            lang=body.lang, reference_tags=body.reference_tags, theme=body.theme,
         ):
             if _abort.is_set():
                 raise JobCancelled()

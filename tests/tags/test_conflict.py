@@ -65,3 +65,25 @@ def test_contradicts_any_scans_the_locked_set():
 
 def test_matching_ignores_case_and_spacing():
     assert contradicts("Blue Eyes", "brown_eyes")
+
+
+@pytest.mark.parametrize("a,b", [
+    ("male_swimwear", "1girl"),
+    ("1boy", "1girl"),
+    ("mature_male", "adult_female"),
+    ("male_focus", "multiple_girls"),
+])
+def test_subject_gender_contradicts_without_a_shared_noun(a, b):
+    """`male_swimwear` and `1girl` share no word, and the board rendered
+    trunks over a bikini top."""
+    assert contradicts(a, b)
+    assert contradicts(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("swimsuit", "1girl"),
+    ("male_swimwear", "1boy"),
+    ("female_pervert", "1girl"),
+])
+def test_agreeing_or_neutral_tags_do_not_contradict(a, b):
+    assert not contradicts(a, b)
