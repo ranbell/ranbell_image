@@ -30,6 +30,7 @@ from ..prompt.tag_merge import (
 from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
 from . import camera
+from . import slots as slot_defs
 from ..tags.subject_anchors import ensure_subject_anchor, insert_after_anchors
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,13 @@ def merge_tracks(
     reinforcements: list[str] | None = None,
     must_tags: list[str] | None = None,
     shot: str = "auto",
+    user_slots: dict[str, list[str]] | None = None,
+    theme: str = "",
 ) -> dict[str, Any]:
-    """Merge both tracks into ``{tags, positive, protected, removed, analysis}``.
+    """Merge both tracks into a slotted prompt.
+
+    ``user_slots`` are the aspects the user owns outright (style, shot, effect)
+    and they overwrite whatever landed in the same key.
 
     ``character_weight`` is the dial: 0.0 is all background (a wide establishing
     shot), 1.0 is all character (a portrait).
@@ -143,9 +149,46 @@ def merge_tracks(
         tags = [t for t in tags if t in kept or t in rescued]
         removed = [t for t in removed if t not in rescued]
 
+    # Re-slot the survivors so the prompt comes out aspect by aspect. A flat
+    # comma list lets one aspect dominate by sheer repetition, which is what
+    # put three swimsuit tags in one prompt and a swimsuit across one frame.
+    filled: dict[str, list[str]] = {}
+    unplaced: list[str] = []
+    reinforced = {t.lower() for t in (reinforcements or [])}
+
+    def _slot_of(tag: str) -> str:
+        # Anything no slot claims still belongs in the picture; Object is where
+        # a loose noun does least harm.
+        return slot_defs.place_tag(tag) or "object"
+
+    # Reinforcements first, so the cap trims the harvested tail rather than the
+    # handful somebody chose *because* the picture lacked them.
+    for tag in tags:
+        if tag.lower() in reinforced:
+            filled.setdefault(_slot_of(tag), []).append(tag)
+    for tag in tags:
+        if tag.lower() in reinforced:
+            continue
+        key = slot_defs.place_tag(tag)
+        if key is None:
+            unplaced.append(tag)
+            key = "object"
+        filled.setdefault(key, []).append(tag)
+
+    if protected:
+        filled["character"] = protected + (filled.get("character") or [])
+    for key, slot in slot_defs.BY_KEY.items():
+        if key in filled:
+            filled[key] = slot_defs.dedupe_slot(filled[key], slot.cap)
+    for key, values in (user_slots or {}).items():
+        if values:
+            filled[key] = list(values)
+
     return {
-        "tags": tags,
-        "positive": ", ".join(tags),
+        "tags": slot_defs.flatten(filled),
+        "slots": filled,
+        "positive": slot_defs.render_prompt(filled, theme=theme),
+        "unplaced": unplaced,
         "protected": protected,
         "forced": forced,
         "reinforcements": list(reinforcements or []),

@@ -178,7 +178,7 @@ def test_a_girl_never_keeps_menswear():
     assert "male_swimwear" in out["evicted"]
 
 
-def test_reinforcements_are_appended_and_reported():
-    out = merge_tracks(FOLDED, character_weight=0.5, reinforcements=["puddle_reflection"])
-    assert "puddle_reflection" in out["tags"]
-    assert out["reinforcements"] == ["puddle_reflection"]
+def test_reinforcements_are_placed_and_reported():
+    out = merge_tracks(FOLDED, character_weight=0.5, reinforcements=["neon_sign"])
+    assert "neon_sign" in out["tags"]
+    assert out["reinforcements"] == ["neon_sign"]

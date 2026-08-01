@@ -58,19 +58,24 @@ MERGE_DEFAULTS: dict[str, object] = {
     # identity. `solo` is the reason this exists: it was in a prompt and lost
     # anyway to a poolside scene full of people.
     "must_tags": [],
+    # The aesthetic. Not derived from the theme — the same theme in two styles
+    # is two different pictures, and that is the user's call, not the model's.
+    "style": "anime illustration, detailed",
+    "effect": "kodak color, film_grain, bokeh",
 }
 
 # ── Composition and top-up ─────────────────────────────────────────────────
 COMPOSE_DEFAULTS: dict[str, object] = {
-    # Roughly how many danbooru tags the model writes per track. Thirty is
-    # enough to describe a scene without becoming a list it stops thinking about.
-    "compose_tag_count": 30,
+    # Per-aspect caps live in slots.py, where the aspects are defined.
     # After the board exists, how many theme-adjacent tags it may gain.
     # Seasoning, not the dish.
     "topup_picks": 5,
     # Cosine cutoff on the vocabulary search. Below this the "neighbours" of a
     # theme are only loosely related and the candidate list becomes noise.
     "topup_min_score": 0.3,
+    # Let retrieval top up a slot the model left short. Off means the prompt is
+    # exactly what the model wrote.
+    "vocab_supplement": True,
 }
 
 ALL_DEFAULTS: dict[str, object] = {

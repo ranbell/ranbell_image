@@ -9,6 +9,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from .camera import SHOTS
+from .slots import SLOTS
 from .defaults import ALL_DEFAULTS
 
 logger = logging.getLogger(__name__)
@@ -185,6 +186,17 @@ async def build_muse_catalog(
         "characters": {"count": character_count},
         "locales": ["ja", "en"],
         "shots": list(SHOTS),
+        "slots": [
+            {
+                "key": slot.key,
+                "label": slot.label,
+                "cap": slot.cap,
+                "track": slot.track,
+                # Locked slots come off the character; user slots are inputs.
+                "editable": not slot.locked and not slot.user_owned,
+            }
+            for slot in SLOTS
+        ],
         "admin_defaults": {
             "llm_provider": provider,
             "vlm_model": admin_vlm,

@@ -1,20 +1,23 @@
-"""S1: the LLM writes the board prompts directly.
+"""S1: fill the prompt's slots.
 
-This used to be two steps — split the theme into six sections, then search
-``wd14_vocab`` for tags near each one — and the search was where every run went
-wrong. Asked for "library, rain, stained glass" it returned ``closed_eyes`` and
-``kimono``, because people get photographed in libraries; asked for a character
-whose section had become wardrobe-only it returned ``maid_headdress`` and
-``chinese_clothes`` and the board came back as a costume chart. Vector
-neighbours of a theme are not a description of a picture.
+The model writes each slot; the vocabulary tops it up; every slot is capped.
 
-So the model writes the tags. It is good at "thirty danbooru tags for a rainy
-library", which is a much easier request than the one the search was answering,
-and the result goes straight to the board.
+Two earlier shapes failed here. A vector search over the whole theme returned
+neighbours of a phrase rather than a description of a picture — ``closed_eyes``
+for "library, rain", because people get photographed in libraries. Then the
+model wrote thirty free tags per track and padded with synonyms of whatever it
+found most interesting: ``swimwear``, ``black_bikini``, ``bikini``, one fact
+written three times and weighted three times in the render.
 
-The vocabulary search still exists — it moved to ``topup``, after the image is
-real, where its job is small and checkable: name a few things the picture is
-missing. Retrieval is better at that than at inventing a picture from a phrase.
+Slots fix both. The model answers one small question per aspect instead of one
+big one, so it cannot spend the whole budget on swimwear. And the vocabulary
+search comes back with a *narrow* query — "clothing for a pool scene" rather
+than "a pool scene" — which is the kind of question retrieval is actually good
+at, the same reason ``topup`` works.
+
+Order of operations per slot: the model proposes, the vocabulary supplements up
+to the cap, near-restatements are dropped, and the user can replace the whole
+thing afterwards.
 """
 from __future__ import annotations
 
@@ -26,45 +29,35 @@ from ..ai.llm_options import llm_options
 from ..api.inspire import _normalize_section
 from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
-from .schema import TRACKS
-from .tracks import belongs_to_track
+from . import slots as slot_defs
+from .slots import COMPOSED, Slot
 
 logger = logging.getLogger(__name__)
 
-TAGS_PER_TRACK = 30
-
 _PROMPT = """\
 # ROLE
-You are a Danbooru tag expert writing the prompt for one illustration. You write
-two tag lists: one for the SETTING, one for the CHARACTER in it.
+You are writing the prompt for one illustration, one aspect at a time.
 
 # THEME
 {theme}
 {character_block}
-# BACKGROUND — about {count} tags
-The place and nothing else: architecture, furniture, weather, time of day, the
-quality of the light, objects sitting in the scene.
-NO people. No bodies, no faces, no clothing, no poses — not even "1girl".
-Somebody else is drawing the character; you are drawing the room she walks into.
+# THE ASPECTS
+{aspects}
 
-# CHARACTER — about {count} tags
-Her, in this scene: the clothes this theme calls for, what she is holding, her
-pose, her hands, her expression.
-NO location, NO backdrop, NO weather, no "simple_background", no scenery.
-
-# RULES FOR BOTH
+# RULES
 - Real Danbooru tags, underscore_format (long_hair, stained_glass, holding_book).
+- **{cap_rule}** Do not pad. If an aspect only warrants one tag, give one.
+- Never write two tags that say the same thing. "swimwear, black_bikini, bikini"
+  is one fact spent three times; write the fact once and move on.
 - Be specific and visual. "old" and "light" say nothing; "peeling_paint" and
   "backlighting" say something.
 - Never negate. Leave a thing out instead of writing no_humans or no_eyes.
-- No quality words (masterpiece, best_quality, highres, absurdres).
-- No framing or sheet words (multiple_views, reference_sheet, alternate_costume,
-  border, fisheye, chibi).
+- No quality words (masterpiece, best_quality, highres), no framing words
+  (wide_shot, close-up, multiple_views) — those are chosen elsewhere.
 {identity_rule}
-- Do not repeat a tag across the two lists.
 
 # OUTPUT (JSON only)
-{{"background": "tag, tag, ...", "person": "tag, tag, ..."}}"""
+{{{output_shape}}}"""
 
 _IDENTITY_RULE_LOCKED = (
     "- The character's hair, eyes and body are FIXED above. Never write a hair\n"
@@ -72,8 +65,8 @@ _IDENTITY_RULE_LOCKED = (
     "  write there can only contradict her."
 )
 _IDENTITY_RULE_FREE = (
-    "- Give the character a hair colour, eye colour and hair style; nobody has\n"
-    "  chosen them yet."
+    "- Nobody has chosen her hair or eye colour yet; the Outfit aspect may\n"
+    "  assume any."
 )
 
 
@@ -92,61 +85,135 @@ def _character_block(character: dict[str, Any]) -> str:
     return "\n".join(bits) + "\n"
 
 
-async def compose_tracks(
+def _aspect_lines(active: tuple[Slot, ...]) -> str:
+    return "\n".join(
+        f"- {s.label} (at most {s.cap}): {s.guidance}" for s in active
+    )
+
+
+async def compose_slots(
     theme: str,
     character: dict[str, Any],
     ollama,
     *,
     model: str,
     num_ctx: int | None = None,
-    count: int = TAGS_PER_TRACK,
+    db=None,
+    supplement: bool = True,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Theme (+ character) → ``{track: [{tag, source}]}`` ready to render.
+    """Theme (+ character) → ``{slot: [{tag, source}]}``.
 
-    Both lists come out of one call so they describe the same picture; two
-    calls drift into two pictures that happen to share a theme.
+    ``source`` is ``compose`` for what the model wrote and ``vocab`` for what
+    retrieval added, so the panel can show which is which and the user can throw
+    either away.
     """
+    active = COMPOSED
     identity = [t for t in (character.get("identity_tags") or []) if t]
     prompt = _PROMPT.format(
         theme=theme,
-        count=count,
         character_block=_character_block(character),
+        aspects=_aspect_lines(active),
+        cap_rule="Never exceed an aspect's limit.",
         identity_rule=_IDENTITY_RULE_LOCKED if identity else _IDENTITY_RULE_FREE,
+        output_shape=", ".join(f'"{s.key}": "tag, tag"' for s in active),
     )
-    raw = await ollama.generate_text(
-        prompt,
-        model=model,
-        options=llm_options(model=model, num_ctx=num_ctx),
-        fmt="json",
-    )
-    parsed = parse_json_object(raw if isinstance(raw, str) else str(raw))
 
-    out: dict[str, list[dict[str, Any]]] = {}
-    for track in TRACKS:
-        out[track] = _clean(parsed.get(track), track, identity)
-    return out
+    parsed: dict[str, Any] = {}
+    try:
+        raw = await ollama.generate_text(
+            prompt,
+            model=model,
+            options=llm_options(model=model, num_ctx=num_ctx),
+            fmt="json",
+        )
+        parsed = parse_json_object(raw if isinstance(raw, str) else str(raw))
+    except Exception as exc:
+        logger.warning("[muse] compose failed: %s", exc)
+
+    filled: dict[str, list[dict[str, Any]]] = {}
+    for slot in active:
+        written = _clean(parsed.get(slot.key), slot, identity)
+        filled[slot.key] = [{"tag": t, "source": "compose"} for t in written]
+
+    if supplement and db is not None:
+        await _supplement(filled, active, theme, identity, db, ollama)
+
+    # Cap and de-restate last, so a slot the vocabulary padded is trimmed too.
+    for slot in active:
+        rows = filled.get(slot.key) or []
+        kept = slot_defs.dedupe_slot([r["tag"] for r in rows], slot.cap)
+        by_tag = {r["tag"]: r for r in rows}
+        filled[slot.key] = [by_tag[t] for t in kept]
+    return filled
 
 
-def _clean(raw: Any, track: str, identity: list[str]) -> list[dict[str, Any]]:
-    """Normalise, then drop what this track should never carry.
-
-    The model is told all of this in the prompt and mostly obeys. The filter is
-    here because "mostly" put ``1girl`` in a background list often enough to
-    render a person into an empty room.
-    """
+def _clean(raw: Any, slot: Slot, identity: list[str]) -> list[str]:
     if isinstance(raw, (list, tuple)):
         raw = ", ".join(str(v) for v in raw)
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
+    out: list[str] = []
     for piece in str(raw or "").split(","):
-        tag = _normalize_section(piece.strip()) or piece.strip()
-        tag = tag.strip().replace(" ", "_")
-        if not tag or tag.lower() in seen:
-            continue
-        if is_junk_tag(tag) or not belongs_to_track(tag, track):
+        tag = (_normalize_section(piece.strip()) or piece.strip()).strip().replace(" ", "_")
+        if not tag or is_junk_tag(tag):
             continue
         if identity and contradicts_any(tag, identity):
             continue
-        seen.add(tag.lower())
-        out.append({"tag": tag, "source": "compose"})
+        out.append(tag)
     return out
+
+
+async def _supplement(
+    filled: dict[str, list[dict[str, Any]]],
+    active: tuple[Slot, ...],
+    theme: str,
+    identity: list[str],
+    db,
+    ollama,
+) -> None:
+    """Top each short slot up from the vocabulary.
+
+    The query is the slot's own question plus the theme — "clothing and garments
+    / came to swim at a pool" — which is narrow enough that the neighbours are
+    about clothing rather than about pools in general. This is the same reason
+    the top-up step works and the old whole-theme search did not.
+    """
+    for slot in active:
+        rows = filled.get(slot.key) or []
+        if len(rows) >= slot.cap or not slot.query:
+            continue
+        try:
+            vec = await ollama.embed(f"{slot.query} / {theme}")
+            hits = await db.search_wd14_vocab(
+                vec, min_freq=0.01, max_freq=0.80, limit=40,
+            )
+        except Exception as exc:
+            logger.warning("[muse] slot supplement failed for %s: %s", slot.key, exc)
+            continue
+
+        have = {r["tag"].lower() for r in rows}
+        for hit in hits:
+            if len(rows) >= slot.cap:
+                break
+            tag = str(hit.get("name") or "").strip().replace(" ", "_")
+            key = tag.lower()
+            if not tag or key in have or is_junk_tag(tag):
+                continue
+            # Retrieval is only allowed to fill the slot it was asked about.
+            # Without this the pool search puts `swimsuit` into Place.
+            if not slot_defs.accepts(slot, tag):
+                continue
+            if identity and contradicts_any(tag, identity):
+                continue
+            have.add(key)
+            rows.append({"tag": tag, "source": "vocab"})
+        filled[slot.key] = rows
+
+
+def locked_slots(character: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Character and Body, straight off the chosen preset."""
+    identity = [t for t in (character.get("identity_tags") or []) if t]
+    body_slot = slot_defs.BY_KEY["body"]
+    body = [t for t in identity if slot_defs.accepts(body_slot, t)]
+    return {
+        "character": [{"tag": t, "source": "character"} for t in identity if t not in body],
+        "body": [{"tag": t, "source": "character"} for t in body],
+    }

@@ -53,6 +53,9 @@ class InputsPatch(BaseModel):
     compose_tag_count: int | None = Field(default=None, ge=8, le=60)
     must_tags: list[str] | None = None
     shot: str | None = None
+    style: str | None = None
+    effect: str | None = None
+    vocab_supplement: bool | None = None
     topup_picks: int | None = Field(default=None, ge=0, le=15)
     topup_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     final_seed: int | None = None
@@ -73,6 +76,12 @@ class BrainstormRecord(BaseModel):
 
 class SceneChoice(BaseModel):
     index: int = Field(..., ge=0)
+
+
+class SlotEdit(BaseModel):
+    """Replace one aspect's tags outright — the user's swap affordance."""
+    slot: str = Field(..., min_length=1)
+    tags: list[str]
 
 
 def _db(request: Request):
@@ -150,6 +159,14 @@ async def reject_tags(session_id: str, body: TagReject, request: Request):
     session = await _session(request, session_id)
     return await _run(request, session, service.reject_tags(
         _db(request), session, body.tags, remove=body.remove,
+    ))
+
+
+@router.post("/sessions/{session_id}/slots")
+async def edit_slot(session_id: str, body: SlotEdit, request: Request):
+    session = await _session(request, session_id)
+    return await _run(request, session, service.set_slot(
+        _db(request), session, body.slot, body.tags,
     ))
 
 

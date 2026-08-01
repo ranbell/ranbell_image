@@ -1,0 +1,211 @@
+"""The prompt has slots, and each slot has a budget.
+
+Asking a model for "thirty danbooru tags" gets thirty tags, but not thirty
+facts. It latches onto whatever the theme suggests hardest and pads with
+synonyms of it — a pool theme came back with ``swimwear``, ``black_bikini`` and
+``bikini``, three slots of the list saying one thing. The picture then weighted
+that one thing three times and the swimsuit ate the frame.
+
+A budget per *aspect* rather than per track fixes it at the root: outfit gets
+three tags whether or not outfit is what the model finds most interesting, and
+place gets its own four regardless. Nothing can flood, because nothing shares a
+pool with anything else.
+
+The shape below is the one that has been working by hand:
+
+    Theme: ...
+    Style: ...
+    Character: 1girl, brown_hair, blue_eyes
+    Emotion: joyful, excited
+    Outfit: one-piece_swimsuit
+    Body: slender
+    Action: swimming, kicking_legs
+    Accessories: goggles, swim_cap
+    Shot: medium_shot, eye_level
+    Place: swimming_pool, sunshine
+    Object: clear_water, poolside_chair, inflatable_toy
+    Effect: kodak color, detailed
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from ..tags import catalog as tag_catalog
+
+
+@dataclass(frozen=True)
+class Slot:
+    key: str
+    label: str            # what the prompt line is called
+    track: str            # "person" | "background" | "global"
+    cap: int              # how many tags may sit here
+    axes: tuple[str, ...] = ()      # get_tag_axis values that belong here
+    sets: tuple[str, ...] = ()      # tag_catalog frozenset names that belong here
+    user_owned: bool = False        # filled from session inputs, never composed
+    locked: bool = False            # comes from the character, not from anything else
+    query: str = ""                 # what to search the vocabulary for
+    guidance: str = ""              # what to tell the model this slot is
+
+
+# Order matters: this is the order the prompt lines come out in, and the head of
+# a prompt is where attention actually reaches.
+SLOTS: tuple[Slot, ...] = (
+    Slot("theme", "Theme", "global", 1, user_owned=True),
+    Slot("style", "Style", "global", 4, user_owned=True),
+    Slot(
+        "character", "Character", "person", 8, locked=True,
+        axes=("hair",), sets=("COUNT", "EYE_SHAPES"),
+    ),
+    Slot(
+        "body", "Body", "person", 3, locked=True, sets=("BODY",),
+    ),
+    Slot(
+        "emotion", "Emotion", "person", 3,
+        axes=("emotion",), sets=("EXPRESSION",),
+        query="facial expression and mood of the character",
+        guidance="how she feels, on her face and in her posture",
+    ),
+    Slot(
+        "outfit", "Outfit", "person", 4,
+        axes=("clothing",), sets=("CLOTHING_EXPLICIT",),
+        query="clothing and garments",
+        guidance="what she is wearing, dressed for this theme",
+    ),
+    Slot(
+        "action", "Action", "person", 4,
+        axes=("action",), sets=("POSE",),
+        query="pose, gesture and action",
+        guidance="what she is doing with her body and hands",
+    ),
+    Slot(
+        "accessories", "Accessories", "person", 3,
+        sets=("ACCESSORIES", "PROPS"),
+        query="worn accessories and held items",
+        guidance="what she wears on top of her clothes, and what she holds",
+    ),
+    Slot("shot", "Shot", "global", 4, user_owned=True),
+    Slot(
+        "place", "Place", "background", 4,
+        axes=("location", "time_weather"),
+        sets=("BACKGROUND", "ENVIRONMENT"),
+        query="location, architecture, time of day and weather",
+        guidance="where this happens — the room, the building, the hour, the weather",
+    ),
+    Slot(
+        "object", "Object", "background", 5,
+        sets=("PROPS",),
+        query="objects and props sitting in the scene",
+        guidance="things in the scene that nobody is holding",
+    ),
+    Slot(
+        "light", "Light", "background", 3,
+        axes=("visual",), sets=("VISUAL_LIGHTING",),
+        query="lighting and atmosphere",
+        guidance="the quality and direction of the light",
+    ),
+    Slot("effect", "Effect", "global", 5, user_owned=True),
+)
+
+BY_KEY: dict[str, Slot] = {s.key: s for s in SLOTS}
+
+# Slots the model writes and the vocabulary tops up.
+COMPOSED = tuple(s for s in SLOTS if not s.user_owned and not s.locked)
+# Slots that come from the chosen character and must not be second-guessed.
+LOCKED = tuple(s for s in SLOTS if s.locked)
+# Slots the user owns outright.
+USER = tuple(s for s in SLOTS if s.user_owned)
+
+
+def slots_for(track: str) -> tuple[Slot, ...]:
+    """The slots a board render of this track should carry."""
+    return tuple(s for s in SLOTS if s.track in (track, "global"))
+
+
+def accepts(slot: Slot, tag: str) -> bool:
+    """Whether a harvested tag plausibly belongs in this slot.
+
+    Deliberately permissive: this routes tags that already exist, it does not
+    police them. A tag nothing accepts simply goes unplaced.
+    """
+    name = str(tag or "").strip().lower()
+    if slot.axes and tag_catalog.get_tag_axis(name) in slot.axes:
+        return True
+    for set_name in slot.sets:
+        member = getattr(tag_catalog, set_name, None)
+        if member and name in member:
+            return True
+    return False
+
+
+def place_tag(tag: str) -> str | None:
+    """Which slot a loose tag belongs to, or None when nothing claims it."""
+    for slot in SLOTS:
+        if slot.user_owned or slot.locked:
+            continue
+        if accepts(slot, tag):
+            return slot.key
+    return None
+
+
+def _tokens(tag: str) -> set[str]:
+    return {t for t in str(tag or "").lower().replace("-", "_").split("_") if len(t) >= 3}
+
+
+def restates(tag: str, existing: list[str]) -> bool:
+    """True when ``tag`` says again what something in ``existing`` already says."""
+    tokens = _tokens(tag)
+    if not tokens:
+        return False
+    return any(tokens & _tokens(other) for other in existing)
+
+
+def dedupe_slot(tags: list[str], cap: int) -> list[str]:
+    """Trim a slot to ``cap``, dropping restatements of what is already there.
+
+    ``bikini`` and ``black_bikini`` in the same slot are one fact written twice,
+    and the budget should be spent on a second fact instead. Sharing a
+    three-letter-plus token is a crude test and a sufficient one — within a
+    slot, two tags sharing a noun almost always mean the same thing.
+    """
+    kept: list[str] = []
+    seen_tokens: set[str] = set()
+    for tag in tags:
+        name = str(tag or "").strip()
+        if not name or len(kept) >= cap:
+            continue
+        tokens = _tokens(name)
+        if tokens and tokens & seen_tokens:
+            continue
+        if any(k.lower() == name.lower() for k in kept):
+            continue
+        kept.append(name)
+        seen_tokens |= tokens
+    return kept
+
+
+def render_prompt(filled: dict[str, list[str]], *, theme: str = "") -> str:
+    """The labelled prompt. Empty slots are left out rather than left blank."""
+    lines: list[str] = []
+    for slot in SLOTS:
+        if slot.key == "theme":
+            if theme:
+                lines.append(f"Theme: {theme}")
+            continue
+        tags = [t for t in (filled.get(slot.key) or []) if t]
+        if tags:
+            lines.append(f"{slot.label}: {', '.join(tags)}")
+    return "\n".join(lines)
+
+
+def flatten(filled: dict[str, list[str]]) -> list[str]:
+    """Every placed tag, in slot order, deduped."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for slot in SLOTS:
+        if slot.key == "theme":
+            continue
+        for tag in filled.get(slot.key) or []:
+            if tag and tag.lower() not in seen:
+                seen.add(tag.lower())
+                out.append(tag)
+    return out

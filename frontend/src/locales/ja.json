@@ -1377,8 +1377,8 @@
     "llmCleanup": "LLM でタグを整理する",
     "llmCleanupHint": "絵から拾ったタグを背景/人物それぞれ見て、片方にしか属さないもの・版権名・下書きの体裁を落とす",
     "compose": {
-      "title": "書かれたタグ",
-      "hint": "お題とキャラから LLM が直接書いたもの。これが下書きにそのまま渡る"
+      "title": "プロンプトの構成",
+      "hint": "面ごとに上限がある。LLM が書き、足りない枠を WD14 語彙が補い、あなたが差し替える"
     },
     "topup": {
       "title": "足したタグ",
@@ -1386,8 +1386,6 @@
       "none": "追加なし（選ばないのも正しい答え）",
       "candidates": "候補"
     },
-    "composeCount": "1トラックあたりのタグ数",
-    "composeCountHint": "多すぎると LLM が考えなくなり、列挙になる",
     "topupPicks": "補強タグの上限",
     "topupPicksHint": "絵が主でこれは味付け。少ないほうが良い",
     "shot": "画角",
@@ -1402,6 +1400,17 @@
       "cowboy_shot": "膝上",
       "upper_body": "上半身",
       "close_up": "寄り（顔）"
+    },
+    "style": "作風 (Style)",
+    "effect": "効果 (Effect)",
+    "effectHint": "フィルム調・質感など。お題ごとに変えるものではないのでユーザー設定",
+    "vocabSupplement": "WD14 語彙で足りない枠を補う",
+    "vocabSupplementHint": "LLM が埋め切れなかったスロットだけ、その枠に合う語で補完する",
+    "slots": {
+      "hint": "タグをクリックで削除、右端の欄で追加。枠ごとに上限があり、溢れないので一面に集中しない",
+      "removeHint": "クリックで削除",
+      "lockedHint": "キャラまたは設定から入るので、ここでは編集しない",
+      "addPlaceholder": "＋タグ"
     }
   },
   "characters": {

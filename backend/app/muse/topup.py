@@ -20,6 +20,7 @@ from typing import Any
 from ..ai.json_util import parse_json_object
 from ..ai.llm_options import llm_options
 from ..tags.junk import is_junk_tag
+from .slots import restates
 from .tracks import belongs_to_track
 
 logger = logging.getLogger(__name__)
@@ -88,11 +89,18 @@ async def collect_candidates(
         logger.warning("[muse] topup search failed: %s", exc)
         return []
 
+    present_list = list(present)
     lowered = {t.lower() for t in present}
     out: list[dict[str, Any]] = []
     for hit in hits:
         name = str(hit.get("name") or "").strip().replace(" ", "_")
         if not name or name.lower() in lowered:
+            continue
+        # Exact absence is not enough. `puddle_reflection` is not `puddle`, but
+        # offering it to a picture that already has `puddle` spends a pick on a
+        # word for something already there — and the slot cap would drop it
+        # again downstream anyway.
+        if restates(name, present_list):
             continue
         if float(hit.get("score") or 0.0) < min_score:
             continue

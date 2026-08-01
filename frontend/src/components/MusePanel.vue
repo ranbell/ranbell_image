@@ -13,6 +13,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterPicker from './muse/CharacterPicker.vue'
+import SlotEditor from './muse/SlotEditor.vue'
 import TagChips from './muse/TagChips.vue'
 
 const props = defineProps({
@@ -49,6 +50,9 @@ const nextStep = computed(() => session.value?.next_step || 'split')
 const needs = computed(() => session.value?.needs || [])
 const character = computed(() => session.value?.character || null)
 const seedTags = computed(() => session.value?.seed_tags || {})
+const slotTags = computed(() => session.value?.slots || {})
+const slotSpec = computed(() => (catalog.value?.slots || [])
+  .filter(s => s.key !== 'theme'))
 const board = computed(() => session.value?.board || {})
 const harvest = computed(() => session.value?.harvest || {})
 const harvestDropped = computed(() => session.value?.harvest_dropped || {})
@@ -232,6 +236,16 @@ async function reloadCharacters() {
   try { characters.value = (await api('/api/characters')).characters || [] } catch (err) { fail(err) }
 }
 
+async function setSlot({ slot, tags }) {
+  if (!session.value) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/muse/sessions/${session.value.session_id}/slots`, {
+      method: 'POST', body: JSON.stringify({ slot, tags }),
+    })
+  } catch (err) { fail(err) } finally { busy.value = false }
+}
+
 async function rejectTag(tag) {
   if (!session.value) return
   try {
@@ -397,6 +411,19 @@ function close() { emit('update:show', false) }
               <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.shotHint') }}</p>
             </div>
             <div>
+              <p class="sb-label mb-1">{{ t('muse.style') }}</p>
+              <input class="sb-input" type="text"
+                     :value="inputs.style"
+                     @change="patchInputs({ style: $event.target.value })" />
+            </div>
+            <div>
+              <p class="sb-label mb-1">{{ t('muse.effect') }}</p>
+              <input class="sb-input" type="text"
+                     :value="inputs.effect"
+                     @change="patchInputs({ effect: $event.target.value })" />
+              <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.effectHint') }}</p>
+            </div>
+            <div>
               <p class="sb-label mb-1">{{ t('muse.mustTags') }}</p>
               <textarea
                 class="sb-textarea"
@@ -489,12 +516,13 @@ function close() { emit('update:show', false) }
                        :value="inputs.merge_unique_count"
                        @change="patchInputs({ merge_unique_count: +$event.target.value })" />
               </label>
-              <label class="block text-[10px] text-gray-500">
-                {{ t('muse.composeCount') }}
-                <input type="number" class="sb-input" min="8" max="60"
-                       :value="inputs.compose_tag_count"
-                       @change="patchInputs({ compose_tag_count: +$event.target.value })" />
-                <span class="block text-[10px] text-gray-600">{{ t('muse.composeCountHint') }}</span>
+              <label class="flex items-start gap-2 text-[10px] text-gray-500">
+                <input type="checkbox" :checked="inputs.vocab_supplement"
+                       @change="patchInputs({ vocab_supplement: $event.target.checked })" />
+                <span>
+                  {{ t('muse.vocabSupplement') }}
+                  <span class="block text-gray-600">{{ t('muse.vocabSupplementHint') }}</span>
+                </span>
               </label>
               <label class="block text-[10px] text-gray-500">
                 {{ t('muse.topupPicks') }}
@@ -578,24 +606,15 @@ function close() { emit('update:show', false) }
           </div>
 
           <!-- S1 compose -->
-          <section v-if="seedTags.background?.length || seedTags.person?.length" class="sb-shell p-3">
+          <section v-if="Object.keys(slotTags).length" class="sb-shell p-3">
             <p class="sb-label mb-2">{{ t('muse.compose.title') }}</p>
             <p class="text-[10px] text-gray-600 mb-2">{{ t('muse.compose.hint') }}</p>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div v-for="track in boardTracks" :key="track">
-                <p class="text-[11px] text-gray-400 mb-1">
-                  {{ t(`muse.board.${track}`) }}
-                  <span class="text-gray-600">({{ (seedTags[track] || []).length }})</span>
-                </p>
-                <TagChips
-                  :rows="seedTags[track] || []"
-                  :rejected="track === 'background' ? (session.rejected_tags || []) : []"
-                  :busy="busy"
-                  @reject="rejectTag"
-                  @restore="restoreTag"
-                />
-              </div>
-            </div>
+            <SlotEditor
+              :slots="slotTags"
+              :spec="slotSpec"
+              :busy="busy"
+              @set="setSlot"
+            />
           </section>
 
           <!-- S4 board -->
@@ -695,6 +714,7 @@ function close() { emit('update:show', false) }
           <!-- S6 merge -->
           <section v-if="merged.tags?.length" class="sb-shell p-3">
             <p class="sb-label mb-2">{{ t('muse.merge.title') }}</p>
+            <pre v-if="merged.positive" class="text-[11px] font-mono text-gray-300 whitespace-pre-wrap mb-3 border-l-2 border-white/10 pl-2">{{ merged.positive }}</pre>
             <div class="flex flex-wrap gap-1 mb-3">
               <span
                 v-for="tag in merged.tags"

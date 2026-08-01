@@ -27,9 +27,8 @@ STEPS: tuple[str, ...] = (
 
 TRACKS: tuple[str, ...] = ("background", "person")
 
-# Where a tag came from. The panel colours chips by this: what the model wrote
-# for the board, versus what retrieval added once the picture existed.
-TAG_SOURCES: tuple[str, ...] = ("compose", "topup")
+# Where a tag came from. The panel colours chips by this.
+TAG_SOURCES: tuple[str, ...] = ("compose", "vocab", "harvest", "topup", "character", "user")
 
 
 def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -49,7 +48,8 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "negative_prompt": "",
         }, **(inputs or {})},
         "character": {},          # preset_to_character() output, frozen at pick time
-        "seed_tags": {},          # track → [{tag, source}] — what the board renders
+        "slots": {},              # slot key → [{tag, source}] — the prompt, aspect by aspect
+        "seed_tags": {},          # track → [{tag, source}] — flattened, what the board renders
         "rejected_tags": [],      # user-clicked exclusions, applied from S2 onward
         "board": {t: [] for t in TRACKS},   # track → [{seed, image_id, job_id, pending}]
         "harvest": {},            # track → [{tag, score, count, category}]

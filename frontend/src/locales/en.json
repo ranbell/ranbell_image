@@ -1377,8 +1377,8 @@
     "llmCleanup": "Let a model tidy the tags",
     "llmCleanupHint": "Reviews each track's read-back tags and drops what belongs to the other track, names a franchise, or is the draft's own layout",
     "compose": {
-      "title": "Composed tags",
-      "hint": "Written directly by the model from the theme and the character. This is what the board renders"
+      "title": "The prompt, aspect by aspect",
+      "hint": "Each aspect is capped. The model writes, the vocabulary fills the gaps, you swap what you like"
     },
     "topup": {
       "title": "Reinforcements",
@@ -1386,8 +1386,6 @@
       "none": "Nothing added (a valid answer)",
       "candidates": "Candidates"
     },
-    "composeCount": "Tags per track",
-    "composeCountHint": "Past a point the model stops thinking and starts listing",
     "topupPicks": "Reinforcement limit",
     "topupPicksHint": "The image is the dish; this is seasoning. Fewer is better",
     "shot": "Framing",
@@ -1402,6 +1400,17 @@
       "cowboy_shot": "Cowboy",
       "upper_body": "Upper body",
       "close_up": "Close-up"
+    },
+    "style": "Style",
+    "effect": "Effect",
+    "effectHint": "Film look, finish. Not something that changes per theme, so it is yours",
+    "vocabSupplement": "Top short slots up from the vocabulary",
+    "vocabSupplementHint": "Only slots the model left short, and only with tags that fit that slot",
+    "slots": {
+      "hint": "Click a tag to drop it, type to add one. Each aspect has its own budget, so none can flood the prompt",
+      "removeHint": "Click to remove",
+      "lockedHint": "Comes from the character or your settings",
+      "addPlaceholder": "+ tag"
     }
   },
   "characters": {

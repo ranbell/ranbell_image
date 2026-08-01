@@ -16,7 +16,10 @@ from ..prompt.tag_merge import removal_tag_set
 from ..runtime_config import get_runtime_config
 from ..scanner.drafts import PLAYGROUND_SUBDIR
 from ..spooler.models import JobLane
-from . import camera, cleanup, compose, harvest, merge, scene, session_db, topup, tracks
+from . import (
+    camera, cleanup, compose, harvest, merge, scene, session_db, topup, tracks,
+)
+from . import slots as slot_defs
 from .schema import TRACKS, new_session, public_view
 
 logger = logging.getLogger(__name__)
@@ -63,7 +66,7 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
 
 # ── S1 compose ──────────────────────────────────────────────────────────────
 async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    """The model writes both board prompts. No retrieval — see compose.py."""
+    """Fill the prompt's slots: model writes, vocabulary tops up, caps apply."""
     inputs = _inputs(session)
     theme = str(inputs.get("theme") or "").strip()
     if not theme:
@@ -73,26 +76,28 @@ async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         raise MuseError("light_model is required")
 
     cfg = await get_runtime_config(db)
-    tracks = await compose.compose_tracks(
-        theme,
-        session.get("character") or {},
-        ollama,
+    character = session.get("character") or {}
+    filled = await compose.compose_slots(
+        theme, character, ollama,
         model=model,
         num_ctx=cfg.get("ollama_num_ctx"),
-        count=int(inputs.get("compose_tag_count", compose.TAGS_PER_TRACK)),
+        db=db,
+        supplement=bool(inputs.get("vocab_supplement", True)),
     )
+    filled.update(compose.locked_slots(character))
 
     removal = removal_tag_set(cfg)
-    rejected = list(session.get("rejected_tags") or [])
-    blocked = {t.strip().lower().replace(" ", "_") for t in rejected if str(t).strip()}
+    blocked = {t.strip().lower().replace(" ", "_")
+               for t in (session.get("rejected_tags") or []) if str(t).strip()}
     blocked |= {str(t).lower() for t in removal}
-    session["seed_tags"] = {
-        track: [r for r in rows if r["tag"].lower() not in blocked]
-        for track, rows in tracks.items()
+    session["slots"] = {
+        key: [r for r in rows if r["tag"].lower() not in blocked]
+        for key, rows in filled.items()
     }
+    session["seed_tags"] = _tracks_from_slots(session["slots"])
     if not any(session["seed_tags"].values()):
         _warn(session, "the model returned no usable tags — try another light model")
-    # Everything downstream described the previous picture.
+
     session["board"] = {t: [] for t in TRACKS}
     session["harvest"] = {}
     session["topup"] = []
@@ -100,29 +105,61 @@ async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["merged"] = {}
     session_db.log(
         session, "compose",
-        " / ".join(f"{t}:{len(session['seed_tags'][t])}" for t in TRACKS),
+        " / ".join(f"{k}:{len(v)}" for k, v in session["slots"].items() if v),
     )
     await session_db.save(db, session)
     return session
 
 
+def _tracks_from_slots(filled: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    """Flatten the slots into the two board prompts."""
+    out: dict[str, list[dict[str, Any]]] = {t: [] for t in TRACKS}
+    for slot in slot_defs.SLOTS:
+        if slot.track not in TRACKS:
+            continue
+        out[slot.track].extend(filled.get(slot.key) or [])
+    return out
+
+
+def user_slots(session: dict[str, Any]) -> dict[str, list[str]]:
+    """Style / Shot / Effect — the aspects the user owns."""
+    inputs = _inputs(session)
+    shot = str(inputs.get("shot") or "auto")
+    return {
+        "style": _as_tags(inputs.get("style")),
+        "effect": _as_tags(inputs.get("effect")),
+        "shot": camera.tags_for(shot),
+    }
+
+
+def _as_tags(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [t.strip() for t in str(value or "").split(",") if t.strip()]
+
+
 def track_prompt(session: dict[str, Any], track: str) -> tuple[str, str]:
     """The positive/negative a board render for this track uses."""
-    rows = (session.get("seed_tags") or {}).get(track) or []
-    tags = [r["tag"] for r in rows]
     negative = str(_inputs(session).get("negative_prompt") or "")
+    # The board gets the same labelled shape the final prompt has. A flat list
+    # lets one aspect dominate by repetition; the labels keep each in its lane.
+    filled = {
+        slot.key: [r["tag"] for r in (session.get("slots") or {}).get(slot.key) or []]
+        for slot in slot_defs.slots_for(track)
+    }
+    filled.update({k: v for k, v in user_slots(session).items() if v})
     if track == "person":
-        # Identity leads, so the draft is at least the right person. Everything
-        # after it is the theme's reading of her.
         identity = list((session.get("character") or {}).get("identity_tags") or [])
-        tags = identity + [t for t in tags if t not in identity]
+        if identity:
+            filled["character"] = identity
     else:
         # Removing person tags from the positive is not enough to keep people
         # out of a background: the checkpoint puts a figure in a library because
         # libraries have figures in them. Say so in the negative.
         away = tracks.BACKGROUND_NEGATIVE
         negative = f"{negative}, {away}" if negative else away
-    return ", ".join(tags), negative
+    theme = str(_inputs(session).get("theme") or "")
+    return slot_defs.render_prompt(filled, theme=theme), negative
 
 
 # ── S4 board ────────────────────────────────────────────────────────────────
@@ -224,7 +261,7 @@ async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any
     # is the board doing as it was told, which is worth ranking up.
     asked_for = {
         r["tag"].lower()
-        for rows in (session.get("seed_tags") or {}).values()
+        for rows in (session.get("slots") or {}).values()
         for r in rows
     }
     frequency = await _vocab_frequency(db) if inputs.get("harvest_rerank") else None
@@ -366,6 +403,8 @@ async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
         reinforcements=[r["tag"] for r in (session.get("topup") or [])],
         must_tags=list(inputs.get("must_tags") or []),
         shot=str(inputs.get("shot") or "auto"),
+        user_slots=user_slots(session),
+        theme=str(inputs.get("theme") or ""),
     )
     session["scene"] = {}
     session_db.log(session, "merge", f"{len(session['merged'].get('tags') or [])} tags")
@@ -449,6 +488,25 @@ async def submit_final(db, comfy, spooler, session: dict[str, Any]) -> dict[str,
     }
     session["status"] = "rendering"
     session_db.log(session, "render", workflow)
+    await session_db.save(db, session)
+    return session
+
+
+async def set_slot(
+    db, session: dict[str, Any], slot: str, tags: list[str],
+) -> dict[str, Any]:
+    """Replace one aspect outright. The user always gets the last word."""
+    if slot not in slot_defs.BY_KEY:
+        raise MuseError(f"no such slot: {slot}")
+    cap = slot_defs.BY_KEY[slot].cap
+    cleaned = slot_defs.dedupe_slot(
+        [str(t).strip().replace(" ", "_") for t in tags if str(t).strip()], cap,
+    )
+    session.setdefault("slots", {})[slot] = [
+        {"tag": t, "source": "user"} for t in cleaned
+    ]
+    session["seed_tags"] = _tracks_from_slots(session["slots"])
+    session_db.log(session, "slot", f"{slot}={len(cleaned)}")
     await session_db.save(db, session)
     return session
 

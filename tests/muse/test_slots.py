@@ -1,0 +1,135 @@
+"""Slot budgets, routing, and the labelled prompt they render to."""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
+
+from app.muse.slots import (
+    BY_KEY,
+    COMPOSED,
+    SLOTS,
+    USER,
+    dedupe_slot,
+    flatten,
+    place_tag,
+    render_prompt,
+    restates,
+    slots_for,
+)
+
+
+# ── the budget ──────────────────────────────────────────────────────────────
+def test_a_slot_is_trimmed_to_its_cap():
+    assert dedupe_slot(["a_one", "b_two", "c_three", "d_four"], 2) == ["a_one", "b_two"]
+
+
+def test_restatements_lose_their_place_to_a_second_fact():
+    """`swimwear, black_bikini, bikini` is one fact spent three times."""
+    kept = dedupe_slot(["bikini", "black_bikini", "swimwear", "sun_hat"], 3)
+    assert "sun_hat" in kept
+    assert len([t for t in kept if "bikini" in t]) == 1
+
+
+def test_short_tokens_do_not_collapse_unrelated_tags():
+    """Two-letter overlaps are noise; the test only looks at real words."""
+    kept = dedupe_slot(["a_cat", "a_dog"], 3)
+    assert kept == ["a_cat", "a_dog"]
+
+
+def test_exact_duplicates_collapse_regardless_of_case():
+    assert dedupe_slot(["Bikini", "bikini"], 3) == ["Bikini"]
+
+
+def test_restates_matches_across_a_list():
+    assert restates("puddle_reflection", ["rooftop", "puddle"])
+    assert not restates("neon_sign", ["rooftop", "puddle"])
+    assert not restates("", ["puddle"])
+
+
+# ── routing ─────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("tag,slot", [
+    ("smile", "emotion"),
+    ("school_uniform", "outfit"),
+    ("library", "place"),
+    ("standing", "action"),
+])
+def test_tags_land_in_the_aspect_they_describe(tag, slot):
+    assert place_tag(tag) == slot
+
+
+def test_a_tag_nothing_claims_is_left_unplaced():
+    assert place_tag("qwertyuiop_thing") is None
+
+
+def test_routing_never_targets_a_locked_or_user_slot():
+    for tag in ("1girl", "wide_shot", "kodak_color"):
+        assert place_tag(tag) not in {"character", "body", "style", "shot", "effect", "theme"}
+
+
+# ── the shape ───────────────────────────────────────────────────────────────
+def test_the_prompt_is_labelled_line_by_line():
+    text = render_prompt(
+        {"character": ["1girl", "brown_hair"], "outfit": ["swimsuit"],
+         "place": ["pool"], "effect": ["kodak color"]},
+        theme="came to swim",
+    )
+    assert text.splitlines()[0] == "Theme: came to swim"
+    assert "Character: 1girl, brown_hair" in text
+    assert "Outfit: swimsuit" in text
+    assert "Effect: kodak color" in text
+
+
+def test_empty_aspects_are_left_out_rather_than_left_blank():
+    text = render_prompt({"outfit": [], "place": ["pool"]})
+    assert "Outfit" not in text
+    assert "Place: pool" in text
+
+
+def test_the_prompt_keeps_the_declared_order():
+    text = render_prompt({"effect": ["grain"], "character": ["1girl"], "place": ["pool"]})
+    lines = [ln.split(":")[0] for ln in text.splitlines()]
+    assert lines == ["Character", "Place", "Effect"]
+
+
+def test_flatten_walks_the_slots_in_order_and_dedupes():
+    flat = flatten({"character": ["1girl"], "outfit": ["swimsuit", "1girl"], "place": ["pool"]})
+    assert flat == ["1girl", "swimsuit", "pool"]
+
+
+# ── the table itself ────────────────────────────────────────────────────────
+def test_the_hand_written_format_is_covered():
+    labels = {s.label for s in SLOTS}
+    assert {"Theme", "Style", "Character", "Emotion", "Outfit", "Body",
+            "Action", "Accessories", "Shot", "Place", "Object", "Effect"} <= labels
+
+
+def test_the_user_owns_the_aesthetic_and_the_framing():
+    assert {s.key for s in USER} == {"theme", "style", "shot", "effect"}
+
+
+def test_every_composed_slot_can_be_searched_for_and_explained():
+    for slot in COMPOSED:
+        assert slot.query, f"{slot.key} has nothing to search the vocabulary for"
+        assert slot.guidance, f"{slot.key} has nothing to tell the model"
+
+
+def test_every_slot_has_a_positive_budget():
+    for slot in SLOTS:
+        assert slot.cap > 0
+
+
+def test_a_board_render_gets_its_own_track_plus_the_global_slots():
+    keys = {s.key for s in slots_for("background")}
+    assert "place" in keys and "object" in keys
+    assert "outfit" not in keys
+    assert "style" in keys and "shot" in keys
+
+
+def test_character_and_body_are_separate_budgets():
+    """Body words in the Character line crowd out hair and eye colour."""
+    assert BY_KEY["character"].locked and BY_KEY["body"].locked
+    assert BY_KEY["character"].cap >= 6

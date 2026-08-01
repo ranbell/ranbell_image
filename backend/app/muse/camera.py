@@ -99,5 +99,10 @@ def apply(tags: list[str], shot: str) -> tuple[list[str], list[str]]:
     return lead + kept, dropped
 
 
+def tags_for(shot: str) -> list[str]:
+    """What the Shot slot says for this choice. Empty for ``auto``."""
+    return list(_FORCE_ADD.get(shot, ()))
+
+
 def negative_for(shot: str) -> str:
     return ", ".join(_NEGATIVE.get(shot, ()))
