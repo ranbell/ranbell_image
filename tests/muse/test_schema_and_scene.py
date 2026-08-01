@@ -96,3 +96,29 @@ def test_final_prompt_puts_tags_before_prose():
 
 def test_final_prompt_without_a_scene_is_just_the_tags():
     assert compose_final_prompt(["1girl", "rooftop"], "") == "1girl, rooftop"
+
+
+# ── the brainstorm split ────────────────────────────────────────────────────
+def test_ideas_are_found_at_whatever_heading_level_they_arrive_at():
+    """One run wrote four `###` proposals under a single `##` covering letter.
+    Splitting on `##` alone made that one card containing all four, and the
+    chooser could only offer the whole document."""
+    md = ("## Proposal from the director\n\nSome preamble.\n\n"
+          "### Idea 1\n\nfirst\n\n### Idea 2\n\nsecond\n\n### Idea 3\n\nthird")
+    cards = parse_brainstorm_sections(md)
+    assert [c["title"] for c in cards] == ["Idea 1", "Idea 2", "Idea 3"]
+    assert cards[0]["body"] == "first"
+
+
+def test_plain_level_two_ideas_still_split():
+    cards = parse_brainstorm_sections("## A\n\nfirst\n\n## B\n\nsecond")
+    assert [c["title"] for c in cards] == ["A", "B"]
+
+
+def test_a_tie_prefers_the_shallower_level():
+    cards = parse_brainstorm_sections("## A\n\nx\n\n### B\n\ny")
+    assert [c["title"] for c in cards] == ["A"]
+
+
+def test_a_document_with_no_headings_is_one_card():
+    assert parse_brainstorm_sections("just prose") == [{"title": "", "body": "just prose"}]

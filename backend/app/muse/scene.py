@@ -19,7 +19,7 @@ from ..ai.llm_options import llm_options
 
 logger = logging.getLogger(__name__)
 
-_HEADING_RE = re.compile(r"^##\s+(.*)$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^(#{2,4})\s+(.*)$", re.MULTILINE)
 
 _PROSE_PROMPT = """\
 # ROLE
@@ -53,6 +53,13 @@ def parse_brainstorm_sections(markdown: str) -> list[dict[str, str]]:
 
     Mirrors what InspirePanel does client-side, so the panel can show the same
     cards without re-implementing the split.
+
+    The heading level the ideas arrive at is not stable. One run wrote four
+    ``###`` proposals under a single ``##`` covering letter; splitting on ``##``
+    alone made that one card containing all four, and the chooser could only
+    offer the whole document. So the cards are whichever level occurs most
+    often — that is the level the model is using to separate ideas — and the
+    shallower one wins a tie.
     """
     text = str(markdown or "").strip()
     if not text:
@@ -60,11 +67,18 @@ def parse_brainstorm_sections(markdown: str) -> list[dict[str, str]]:
     matches = list(_HEADING_RE.finditer(text))
     if not matches:
         return [{"title": "", "body": text}]
+
+    counts: dict[int, int] = {}
+    for m in matches:
+        counts[len(m.group(1))] = counts.get(len(m.group(1)), 0) + 1
+    level = min(counts, key=lambda d: (-counts[d], d))
+    cards = [m for m in matches if len(m.group(1)) == level]
+
     out: list[dict[str, str]] = []
-    for i, m in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+    for i, m in enumerate(cards):
+        end = cards[i + 1].start() if i + 1 < len(cards) else len(text)
         out.append({
-            "title": m.group(1).strip(),
+            "title": m.group(2).strip(),
             "body": text[m.end():end].strip(),
         })
     return out
