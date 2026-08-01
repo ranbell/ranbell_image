@@ -190,3 +190,71 @@ def test_the_supplement_refuses_what_contradicts_the_character():
     db = FakeDB([{"name": "blue_hair", "score": 0.9}, {"name": "hair_ribbon", "score": 0.8}])
     out, _ = _compose({**WRITTEN, "accessories": ""}, db=db, supplement=True)
     assert "blue_hair" not in _tags(out, "accessories")
+
+
+# ── the vocabulary band ─────────────────────────────────────────────────────
+def test_the_supplement_refuses_a_weak_hit_even_when_the_slot_accepts_it():
+    """This step takes the first thing its slot accepts, however far down the
+    list. A stargazing theme reached rank 22, 31 and 37 of 40 to find `katana`,
+    `umbrella` and `sword` — the only PROPS common enough to clear the old
+    frequency floor, all at 0.37 while the real hits sat at 0.45."""
+    db = FakeDB([{"name": "katana", "score": 0.38}, {"name": "telescope", "score": 0.46}])
+    out, _ = _compose({**WRITTEN, "object": ""}, db=db, supplement=True)
+    tags = _tags(out, "object")
+    assert "telescope" in tags
+    assert "katana" not in tags
+
+
+def test_the_supplement_asks_for_a_band_that_contains_specific_nouns():
+    """`min_freq=0.01` is 51,000 posts: it excluded `telescope` (1,319) and
+    `oven` (653) while admitting `sword` (235,273). The floor was selecting for
+    genericness, which is how a bakery got a sword."""
+    from app.muse import vocab
+
+    class Recording(FakeDB):
+        def __init__(self):
+            super().__init__([])
+            self.kw = {}
+
+        async def search_wd14_vocab(self, vec, **kw):
+            self.kw = kw
+            return []
+
+    db = Recording()
+    _compose({**WRITTEN, "object": ""}, db=db, supplement=True)
+    assert db.kw["min_freq"] == vocab.MIN_FREQ < 0.001
+
+
+# ── filing and settling ─────────────────────────────────────────────────────
+def test_a_prop_written_as_an_action_is_moved_to_where_it_belongs():
+    """A stargazing theme put `binoculars` under Action, spending a pose on a
+    prop and leaving the pose unwritten."""
+    out, _ = _compose({**WRITTEN, "action": "standing, binoculars"})
+    assert "binoculars" not in _tags(out, "action")
+    assert "binoculars" in _tags(out, "accessories")
+
+
+def test_a_tag_its_own_slot_accepts_is_left_where_it_was_put():
+    """`PROPS` belongs to Accessories and Object both, on purpose. Preferring
+    the first claimant would drag every prop out of the room and into her
+    hands."""
+    out, _ = _compose({**WRITTEN, "object": "book, lamp"})
+    assert "book" in _tags(out, "object")
+
+
+def test_a_later_aspect_may_not_reopen_a_settled_one():
+    """Place said `night` and Light said `twilight`, and the render averaged
+    two hours that cannot both be true. Contradiction was checked inside a slot
+    and against the character, never across slots."""
+    out, _ = _compose({**WRITTEN, "place": "hill, night", "light": "twilight, starlight"})
+    assert "night" in _tags(out, "place")
+    assert "twilight" not in _tags(out, "light")
+    assert "starlight" in _tags(out, "light")
+
+
+def test_a_description_written_as_a_tag_is_put_back_into_prose():
+    """Told "underscore_format" at the top of the rules, the model obeys it for
+    the sentence too."""
+    out, _ = _compose({**WRITTEN,
+                       "description": "a_slim_girl_is_looking_through_a_telescope"})
+    assert _tags(out, "description") == ["a slim girl is looking through a telescope"]

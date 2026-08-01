@@ -22,6 +22,7 @@ from ..ai.llm_options import llm_options
 from ..tags import catalog as tag_catalog
 from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
+from . import vocab
 from .slots import is_thing, place_tag, restates
 from .tracks import belongs_to_track
 
@@ -97,7 +98,9 @@ async def collect_candidates(
         logger.warning("[muse] topup embed failed: %s", exc)
         return []
     try:
-        hits = await db.search_wd14_vocab(vec, min_freq=0.01, max_freq=0.80, limit=limit)
+        hits = await db.search_wd14_vocab(
+            vec, min_freq=vocab.MIN_FREQ, max_freq=vocab.MAX_FREQ, limit=limit,
+        )
     except Exception as exc:
         logger.warning("[muse] topup search failed: %s", exc)
         return []

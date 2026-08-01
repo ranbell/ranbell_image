@@ -30,6 +30,7 @@ from ..api.inspire import _normalize_section
 from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
 from . import slots as slot_defs
+from . import vocab
 from .slots import COMPOSED, Slot
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ You are writing the prompt for one illustration, one aspect at a time.
 
 # RULES
 - Real Danbooru tags, underscore_format (long_hair, stained_glass, holding_book).
+  Description is the one exception: it is an English sentence, written with
+  spaces like ordinary prose. Never underscore it.
 - **{cap_rule}** Do not pad. If an aspect only warrants one tag, give one.
 - Never write two tags that say the same thing. "swimwear, black_bikini, bikini"
   is one fact spent three times; write the fact once and move on.
@@ -139,8 +142,12 @@ async def compose_slots(
         written = _clean(parsed.get(slot.key), slot, identity)
         filled[slot.key] = [{"tag": t, "source": "compose"} for t in written]
 
+    _rehome(filled, active)
+
     if supplement and db is not None:
         await _supplement(filled, active, theme, identity, db, ollama)
+
+    _settle(filled, active)
 
     # Cap and de-restate last, so a slot the vocabulary padded is trimmed too.
     for slot in active:
@@ -151,6 +158,58 @@ async def compose_slots(
     return filled
 
 
+def _rehome(filled: dict[str, list[dict[str, Any]]], active: tuple[Slot, ...]) -> None:
+    """Move a written tag to the aspect the catalog says it belongs to.
+
+    The model answers each aspect separately and still files things under the
+    wrong one — a stargazing theme put ``binoculars`` under Action, spending a
+    pose on a prop and leaving the pose unwritten.
+
+    Moves only when the slot it was written into *rejects* it and another slot
+    claims it. Several slots share a catalog set on purpose — ``PROPS`` belongs
+    to both Accessories and Object, because "what she holds" and "what is in the
+    room" are the same nouns — so preferring the first claimant would drag every
+    prop forward into Accessories. If the slot it is in accepts it, the model's
+    placement stands, and an unrouted tag stays too: the catalog's silence is
+    not an opinion.
+    """
+    keys = {s.key for s in active}
+    for slot in active:
+        rows = filled.get(slot.key) or []
+        staying: list[dict[str, Any]] = []
+        for row in rows:
+            if slot_defs.accepts(slot, row["tag"]):
+                staying.append(row)
+                continue
+            home = slot_defs.place_tag(row["tag"])
+            if home and home != slot.key and home in keys:
+                filled.setdefault(home, []).append(row)
+            else:
+                staying.append(row)
+        filled[slot.key] = staying
+
+
+def _settle(filled: dict[str, list[dict[str, Any]]], active: tuple[Slot, ...]) -> None:
+    """Drop what a later aspect says that an earlier one has already settled.
+
+    Contradiction was checked inside a slot and against the character, never
+    across slots — so Place said ``night`` and Light said ``twilight``, and the
+    render averaged two hours that cannot both be true. Slot order decides:
+    Place comes before Light, so the hour the scene is in wins over the hour
+    its lighting implies.
+    """
+    accepted: list[str] = []
+    for slot in active:
+        keep: list[dict[str, Any]] = []
+        for row in filled.get(slot.key) or []:
+            # Description is a sentence; it settles nothing and contradicts nothing.
+            if slot.key != "description" and contradicts_any(row["tag"], accepted):
+                continue
+            keep.append(row)
+            accepted.append(row["tag"])
+        filled[slot.key] = keep
+
+
 def _clean(raw: Any, slot: Slot, identity: list[str]) -> list[str]:
     if isinstance(raw, (list, tuple)):
         raw = ", ".join(str(v) for v in raw)
@@ -158,7 +217,11 @@ def _clean(raw: Any, slot: Slot, identity: list[str]) -> list[str]:
     # pieces turned "A pink haired girl walks along a row of cherry trees" into
     # one enormous tag, which is not a sentence and not a tag either.
     if slot.key == "description":
-        text = " ".join(str(raw or "").split())
+        # Told "underscore_format" at the top of the rules, the model obeys it
+        # here too and writes `a_slim_girl_is_looking_through_telescope_on_hill`
+        # — a sentence wearing a tag's clothes. The rules now say otherwise;
+        # this puts the spaces back when they are ignored anyway.
+        text = " ".join(str(raw or "").replace("_", " ").split())
         return [text] if text else []
     out: list[str] = []
     for piece in str(raw or "").split(","):
@@ -196,7 +259,7 @@ async def _supplement(
         try:
             vec = await ollama.embed(f"{slot.query} / {theme}")
             hits = await db.search_wd14_vocab(
-                vec, min_freq=0.01, max_freq=0.80, limit=40,
+                vec, min_freq=vocab.MIN_FREQ, max_freq=vocab.MAX_FREQ, limit=40,
             )
         except Exception as exc:
             logger.warning("[muse] slot supplement failed for %s: %s", slot.key, exc)
@@ -209,6 +272,11 @@ async def _supplement(
             tag = str(hit.get("name") or "").strip().replace(" ", "_")
             key = tag.lower()
             if not tag or key in have or is_junk_tag(tag):
+                continue
+            # This step takes the first thing its slot accepts, however far
+            # down the list that is. Without a floor the Object slot reached
+            # rank 37 of 40 to find `sword`.
+            if float(hit.get("score") or 0.0) < vocab.SUPPLEMENT_MIN_SCORE:
                 continue
             # Retrieval is only allowed to fill the slot it was asked about.
             # Without this the pool search puts `swimsuit` into Place.
