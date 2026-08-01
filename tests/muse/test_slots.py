@@ -218,3 +218,13 @@ def test_a_modified_body_part_is_still_a_body_part(tag):
 
 def test_a_compound_gerund_is_not_caught_by_the_bare_gerund_rule():
     assert is_thing("steaming_kettle") and is_thing("glowing_mushroom")
+
+
+def test_the_description_does_not_go_to_a_background_board():
+    """It names who is in the picture, so a background board that carries it
+    renders her — one read "A girl with blue hair is looking through a
+    telescope" in the positive while the negative said `1girl, solo, person`,
+    and the sentence won."""
+    keys = {s.key for s in slots_for("background")}
+    assert "description" not in keys
+    assert "description" in {s.key for s in slots_for("person")}

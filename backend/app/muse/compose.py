@@ -202,8 +202,19 @@ def _settle(filled: dict[str, list[dict[str, Any]]], active: tuple[Slot, ...]) -
     for slot in active:
         keep: list[dict[str, Any]] = []
         for row in filled.get(slot.key) or []:
-            # Description is a sentence; it settles nothing and contradicts nothing.
-            if slot.key != "description" and contradicts_any(row["tag"], accepted):
+            # Description is a sentence; it settles nothing and contradicts
+            # nothing, and its words are not tags anyone can restate.
+            if slot.key == "description":
+                keep.append(row)
+                continue
+            if contradicts_any(row["tag"], accepted):
+                continue
+            # One fact spent three times is what the budgets exist to stop, and
+            # they only ever stopped it inside a slot. A stargazing theme wrote
+            # `looking_through_telescope`, `telescope` and `large_telescope`
+            # into three different aspects and the render weighted the telescope
+            # three times. Whichever aspect claims it first keeps it.
+            if slot_defs.restates(row["tag"], accepted):
                 continue
             keep.append(row)
             accepted.append(row["tag"])
@@ -248,7 +259,16 @@ async def _supplement(
     / came to swim at a pool" — which is narrow enough that the neighbours are
     about clothing rather than about pools in general. This is the same reason
     the top-up step works and the old whole-theme search did not.
+
+    A hit is spent once. Slots share catalog sets deliberately, so the same tag
+    is acceptable to several of them and every short one took a copy —
+    ``hair_ribbon`` landed in Outfit and Accessories both, one fact holding two
+    budgets. The first short slot that accepts it keeps it.
     """
+    spent: set[str] = {
+        r["tag"].lower()
+        for rows in filled.values() for r in rows or []
+    }
     for slot in active:
         rows = filled.get(slot.key) or []
         if len(rows) >= slot.cap or not slot.query:
@@ -271,7 +291,7 @@ async def _supplement(
                 break
             tag = str(hit.get("name") or "").strip().replace(" ", "_")
             key = tag.lower()
-            if not tag or key in have or is_junk_tag(tag):
+            if not tag or key in have or key in spent or is_junk_tag(tag):
                 continue
             # This step takes the first thing its slot accepts, however far
             # down the list that is. Without a floor the Object slot reached
@@ -289,6 +309,7 @@ async def _supplement(
             if contradicts_any(tag, [r["tag"] for r in rows]):
                 continue
             have.add(key)
+            spent.add(key)
             rows.append({"tag": tag, "source": "vocab"})
         filled[slot.key] = rows
 

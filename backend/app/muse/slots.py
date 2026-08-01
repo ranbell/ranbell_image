@@ -68,8 +68,14 @@ SLOTS: tuple[Slot, ...] = (
     # One sentence, in English, naming what the picture is. It comes before any
     # tag so the tags read as details of a thing rather than as a pile of
     # competing suggestions.
+    # Person, not global. The sentence names who is in the picture and what she
+    # is doing, so a background board that carries it renders her: one read
+    # "A girl with blue hair is looking through a telescope on top of a hill"
+    # in the positive while the negative said `1girl, solo, person`, and the
+    # sentence won every time. The final prompt still gets it — merge assembles
+    # every slot regardless of track, and `track` only decides board prompts.
     Slot(
-        "description", "Description", "global", 1,
+        "description", "Description", "person", 1,
         guidance=(
             "ONE plain English sentence naming what this picture is — who is in "
             'it and what they are doing. Like "A bunny girl pilot is standing '

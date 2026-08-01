@@ -159,7 +159,25 @@ def track_prompt(session: dict[str, Any], track: str) -> tuple[str, str]:
         # libraries have figures in them. Say so in the negative.
         away = tracks.BACKGROUND_NEGATIVE
         negative = f"{negative}, {away}" if negative else away
+        # And do not ask for one in the positive at the same time. The user's
+        # Effect line is written for the finished picture, so it says things
+        # like "detailed character" — which on a background board contradicts
+        # the negative word for word. Drop only the parts naming what the
+        # negative already forbids; the rest of their setting stands.
+        for key in ("style", "effect"):
+            filled[key] = [t for t in (filled.get(key) or []) if not _names_a_person(t)]
     return slot_defs.render_prompt(filled), negative
+
+
+_PERSON_WORDS = frozenset(
+    w.strip().replace("_", " ") for w in tracks.BACKGROUND_NEGATIVE.split(",")
+)
+
+
+def _names_a_person(phrase: str) -> bool:
+    """Whether a free-text style/effect phrase asks for a person."""
+    words = set(str(phrase or "").lower().replace("_", " ").split())
+    return bool(words & _PERSON_WORDS)
 
 
 # ── S4 board ────────────────────────────────────────────────────────────────

@@ -127,7 +127,10 @@ def test_a_short_slot_is_topped_up_from_the_vocabulary():
         {"name": "hair_ribbon", "score": 0.6},   # an accessory
         {"name": "library", "score": 0.5},       # wrong slot, must be refused
     ])
-    out, _ = _compose({**WRITTEN, "accessories": "glasses"}, db=db, supplement=True)
+    # Outfit is full, so Accessories is the first short slot that accepts it.
+    full_outfit = ", ".join(f"garment_{i}" for i in range(BY_KEY["outfit"].cap))
+    out, _ = _compose({**WRITTEN, "outfit": full_outfit, "accessories": "glasses"},
+                      db=db, supplement=True)
     tags = _tags(out, "accessories")
     assert "hair_ribbon" in tags
     assert "library" not in tags, "retrieval may only fill the slot it was asked about"
@@ -199,7 +202,10 @@ def test_the_supplement_refuses_a_weak_hit_even_when_the_slot_accepts_it():
     `umbrella` and `sword` — the only PROPS common enough to clear the old
     frequency floor, all at 0.37 while the real hits sat at 0.45."""
     db = FakeDB([{"name": "katana", "score": 0.38}, {"name": "telescope", "score": 0.46}])
-    out, _ = _compose({**WRITTEN, "object": ""}, db=db, supplement=True)
+    # Accessories claims both words too, so fill it and let Object be the short one.
+    full = ", ".join(f"item_{i}" for i in range(BY_KEY["accessories"].cap))
+    out, _ = _compose({**WRITTEN, "accessories": full, "object": ""},
+                      db=db, supplement=True)
     tags = _tags(out, "object")
     assert "telescope" in tags
     assert "katana" not in tags
@@ -258,3 +264,29 @@ def test_a_description_written_as_a_tag_is_put_back_into_prose():
     out, _ = _compose({**WRITTEN,
                        "description": "a_slim_girl_is_looking_through_a_telescope"})
     assert _tags(out, "description") == ["a slim girl is looking through a telescope"]
+
+
+def test_one_fact_is_not_spent_across_three_aspects():
+    """The budgets exist to stop this and only ever stopped it inside a slot.
+    A stargazing theme wrote `looking_through_telescope`, `telescope` and
+    `large_telescope` into three aspects, and the render weighted the telescope
+    three times."""
+    out, _ = _compose({**WRITTEN,
+                       "action": "looking_through_telescope",
+                       "accessories": "telescope",
+                       "object": "large_telescope, cardboard_box"})
+    named = [t for rows in out.values() for r in [rows] for t in
+             [x["tag"] for x in r] if "telescope" in t]
+    assert named == ["looking_through_telescope"], "the first aspect keeps it"
+    assert "cardboard_box" in _tags(out, "object"), "the budget reaches a second fact"
+
+
+def test_the_vocabulary_spends_a_hit_once():
+    """Slots share catalog sets on purpose, so the same tag is acceptable to
+    several of them and every short one took a copy — `hair_ribbon` landed in
+    Outfit and Accessories both, one fact holding two budgets."""
+    db = FakeDB([{"name": "hair_ribbon", "score": 0.9}])
+    out, _ = _compose({**WRITTEN, "outfit": "cardigan", "accessories": "glasses"},
+                      db=db, supplement=True)
+    homes = [k for k in ("outfit", "accessories") if "hair_ribbon" in _tags(out, k)]
+    assert len(homes) == 1, f"spent in {homes}"
