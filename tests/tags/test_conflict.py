@@ -87,3 +87,27 @@ def test_subject_gender_contradicts_without_a_shared_noun(a, b):
 ])
 def test_agreeing_or_neutral_tags_do_not_contradict(a, b):
     assert not contradicts(a, b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("night", "dawn"),
+    ("dawn", "sunset"),
+    ("morning", "midnight"),
+    ("evening", "daytime"),
+])
+def test_a_picture_happens_at_one_hour(a, b):
+    """The top-up step offered `night` to strengthen the "pre-dawn feeling" of
+    a scene already lit by `dawn`, and the render obeyed the darker of the
+    two. These share no head noun, so nothing else catches them."""
+    assert contradicts(a, b)
+    assert contradicts(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("dawn", "warm_glow"),
+    ("morning", "sunlight"),
+    ("night", "neon_sign"),
+    ("evening", "1girl"),
+])
+def test_an_hour_does_not_fight_what_merely_suits_it(a, b):
+    assert not contradicts(a, b)

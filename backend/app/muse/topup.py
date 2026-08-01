@@ -20,8 +20,9 @@ from typing import Any
 from ..ai.json_util import parse_json_object
 from ..ai.llm_options import llm_options
 from ..tags import catalog as tag_catalog
+from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
-from .slots import restates
+from .slots import is_thing, place_tag, restates
 from .tracks import belongs_to_track
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,19 @@ async def collect_candidates(
         # The model was told not to pick these and picked `legs` and `thighs`
         # anyway, reasoning that "detail on the body enhances the beauty".
         if name.lower() in tag_catalog.BODY_PARTS or name.lower() in _BARE_BODY_PARTS:
+            continue
+        # The prompt says "never pick an alternative to something already
+        # there", and the model still offered `night` to a picture lit by
+        # `dawn`, calling it reinforcement. An hour, a colour or a subject count
+        # the picture has already settled is not open for a second opinion.
+        if contradicts_any(name, present_list):
+            continue
+        # A reinforcement has to be something the picture could gain. `glowing`
+        # and `sweat` were picked, no slot claimed either, and the Object
+        # fallback then asserted that a glow and a sweat were sitting in the
+        # kitchen. Unrouted is fine — `desk_lamp` is unrouted too — but it has
+        # to be a thing.
+        if place_tag(name) is None and not is_thing(name):
             continue
         out.append({
             "tag": name,

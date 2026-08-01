@@ -355,7 +355,16 @@ async def run_topup(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     cfg = await get_runtime_config(db)
     theme = str(inputs.get("theme") or "").strip()
 
+    # What the picture has is not only what the drafts drew. The composed slots
+    # reach the finished prompt too, and a step that cannot see them mistakes
+    # them for gaps: `dawn` was in Light, the drafts never rendered an hour, and
+    # `night` was duly offered as a way to strengthen the pre-dawn mood.
     present = [r["tag"] for rows in harvested.values() for r in rows]
+    for rows in (session.get("slots") or {}).values():
+        for row in rows or []:
+            tag = str((row or {}).get("tag") or "").strip()
+            if tag and tag not in present:
+                present.append(tag)
     candidates = await topup.collect_candidates(
         db, ollama,
         theme=theme,

@@ -56,6 +56,24 @@ _MULTI_MARKERS = frozenset({
 })
 
 
+# A picture happens at one hour. These share no head noun — `night` and `dawn`
+# have no word in common — so nothing above catches them, and a top-up step
+# offered `night` to "strengthen the pre-dawn feeling" of a scene whose light
+# was already `dawn`. The render obeyed the darker of the two.
+_TIME_OF_DAY = frozenset({
+    "dawn", "sunrise", "early_morning", "morning", "daybreak",
+    "noon", "midday", "daytime", "day", "afternoon",
+    "evening", "sunset", "dusk", "twilight", "golden_hour",
+    "night", "midnight", "late_at_night", "nighttime",
+})
+
+
+def _hour(tag: str) -> str | None:
+    """The tag itself when it names an hour of the day, else None."""
+    name = str(tag or "").strip().lower().replace(" ", "_")
+    return name if name in _TIME_OF_DAY else None
+
+
 def _count(tag: str) -> str | None:
     """"one" / "many" when this tag says how many subjects there are."""
     name = str(tag or "").strip().lower().replace(" ", "_")
@@ -93,6 +111,10 @@ def contradicts(tag: str, other: str) -> bool:
 
     a_count, b_count = _count(tag), _count(other)
     if a_count and b_count and a_count != b_count:
+        return True
+
+    a_hour, b_hour = _hour(tag), _hour(other)
+    if a_hour and b_hour and a_hour != b_hour:
         return True
 
     a_noun, a_mod = _parts(tag)

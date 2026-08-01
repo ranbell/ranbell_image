@@ -32,6 +32,17 @@ _FRAME_JUNK = frozenset({
     "variations", "costume_switch", "cosplay",
 })
 
+# Tags that delete the background. Muse always composes a Place — the whole
+# pipeline is a scene and a character put together — so a tag whose meaning is
+# "there is no scene" can only fight that. One run had `white_background` sitting
+# in the Light slot next to `warm_glow` and `dawn`; it is not a light, it is an
+# instruction to throw the kitchen away.
+_BLANK_BACKGROUND = frozenset({
+    "simple_background", "white_background", "grey_background", "gray_background",
+    "black_background", "transparent_background", "plain_background",
+    "monochrome_background", "blank_background", "studio_background",
+})
+
 # Rating tags with no visual meaning at all. `questionable` / `explicit` do
 # describe content, so they stay under the NSFW switch rather than here.
 _EMPTY_RATING = frozenset({"general", "sensitive", "rating_general", "rating_safe"})
@@ -45,7 +56,7 @@ def is_junk_tag(tag: str) -> bool:
     # Negations. Guarded on the underscore so `nose_blush` and `noodles` stay.
     if name.startswith("no_"):
         return True
-    return name in _FRAME_JUNK or name in _EMPTY_RATING
+    return name in _FRAME_JUNK or name in _EMPTY_RATING or name in _BLANK_BACKGROUND
 
 
 def strip_junk(tags: list[str]) -> list[str]:

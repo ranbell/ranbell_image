@@ -161,10 +161,15 @@ def merge_tracks(
 
     protected_set = {t.lower() for t in protected}
 
-    def _slot_of(tag: str) -> str:
+    def _slot_of(tag: str) -> str | None:
         # Anything no slot claims still belongs in the picture; Object is where
-        # a loose noun does least harm.
-        return slot_defs.place_tag(tag) or "object"
+        # a loose noun does least harm. A loose *adjective* does harm there,
+        # though — the line asserts that whatever is on it is a thing in the
+        # room — so those are left out rather than mislabelled.
+        key = slot_defs.place_tag(tag)
+        if key:
+            return key
+        return "object" if slot_defs.is_thing(tag) else None
 
     def _is_the_character(tag: str) -> bool:
         # `1girl` and `pink_hair` are claimed by no routable slot, because
@@ -176,27 +181,58 @@ def merge_tracks(
     # handful somebody chose *because* the picture lacked them.
     for tag in tags:
         if tag.lower() in reinforced:
-            filled.setdefault(_slot_of(tag), []).append(tag)
+            key = _slot_of(tag)
+            if key:
+                filled.setdefault(key, []).append(tag)
+            else:
+                unplaced.append(tag)
     for tag in tags:
         if tag.lower() in reinforced or _is_the_character(tag):
             continue
         key = slot_defs.place_tag(tag)
         if key is None:
             unplaced.append(tag)
-            key = "object"
+            key = _slot_of(tag)
+            if key is None:
+                continue
         filled.setdefault(key, []).append(tag)
 
     if protected:
-        filled["character"] = protected + (filled.get("character") or [])
+        # The character's own words split the same way the preset did: `toned`
+        # is a body word and belongs in Body. Leading Character with the whole
+        # identity list put it in both, and the prompt said it twice.
+        body_slot = slot_defs.BY_KEY["body"]
+        head = [t for t in protected if not slot_defs.accepts(body_slot, t)]
+        body = [t for t in protected if t not in head]
+        filled["character"] = head + (filled.get("character") or [])
+        if body:
+            filled["body"] = body + [
+                t for t in (filled.get("body") or []) if t not in body
+            ]
+
+    # The theme's own answer leads the slots that carry intent, ahead of what
+    # the drafts showed. Everywhere else the canvas still wins outright.
+    #
+    # These face the junk filter too. It ran over the harvested tags only, so
+    # `white_background` — composed into Light, never rendered, never harvested
+    # — walked straight past it into the finished prompt.
+    for key, values in (composed_slots or {}).items():
+        slot = slot_defs.BY_KEY.get(key)
+        values = [t for t in (values or []) if not is_junk_tag(t)]
+        if not values or slot is None:
+            continue
+        if not filled.get(key):
+            filled[key] = list(values)
+        elif slot.intent:
+            # Half the budget, not all of it. The theme's verb has to survive,
+            # but the drafts did see the picture and their half is worth
+            # keeping — the failure was the overwrite, not the observation.
+            lead = list(values)[: max(1, slot.cap // 2)]
+            filled[key] = lead + [t for t in filled[key] if t not in lead]
+
     for key, slot in slot_defs.BY_KEY.items():
         if key in filled:
             filled[key] = slot_defs.dedupe_slot(filled[key], slot.cap)
-    # Description is written at compose time and nothing harvests it back off a
-    # canvas, so it has to be carried across or it disappears from the finished
-    # prompt — which is where it matters most.
-    for key, values in (composed_slots or {}).items():
-        if values and not filled.get(key):
-            filled[key] = list(values)
     for key, values in (user_slots or {}).items():
         if values:
             filled[key] = list(values)

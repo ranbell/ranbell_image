@@ -152,3 +152,21 @@ def test_the_prompt_shows_what_the_picture_already_has():
 def test_reinforcements_are_routed_to_a_track():
     assert track_for("desk_lamp") == "background"
     assert track_for("closed_eyes") == "person"
+
+
+def test_an_hour_the_picture_has_settled_is_not_offered():
+    """`night` was offered to a dawn-lit kitchen to "strengthen the pre-dawn
+    feeling", and the finished prompt read `Place: night` / `Light: dawn`."""
+    hits = HITS + [{"name": "night", "score": 0.7, "count": 90000}]
+    names = [c["tag"] for c in _candidates(present=("library", "dawn"), hits=hits)]
+    assert "night" not in names
+
+
+def test_only_tags_a_slot_will_take_are_offered():
+    """`glowing` and `sweat` were picked, no slot claimed either, and the
+    fallback asserted in the prompt that they were objects in the room."""
+    hits = HITS + [{"name": "glowing", "score": 0.7, "count": 20000},
+                   {"name": "sweat", "score": 0.65, "count": 30000}]
+    names = [c["tag"] for c in _candidates(hits=hits)]
+    assert "glowing" not in names and "sweat" not in names
+    assert "desk_lamp" in names, "a routable candidate still gets through"

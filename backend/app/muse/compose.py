@@ -51,6 +51,10 @@ You are writing the prompt for one illustration, one aspect at a time.
   is one fact spent three times; write the fact once and move on.
 - Be specific and visual. "old" and "light" say nothing; "peeling_paint" and
   "backlighting" say something.
+- Every tag must be a thing that is plainly there in THIS scene. Not a thing the
+  previous tag reminded you of: a bakery has a knife, and a knife is not a
+  reason to write sword. Whatever you write, the picture will contain.
+- One body can hold one pose. "standing, kneeling" is two pictures; pick one.
 - Never negate. Leave a thing out instead of writing no_humans or no_eyes.
 - No quality words (masterpiece, best_quality, highres), no framing words
   (wide_shot, close-up, multiple_views) — those are chosen elsewhere.

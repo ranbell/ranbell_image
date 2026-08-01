@@ -68,3 +68,21 @@ def test_strip_junk_keeps_order():
     assert strip_junk(["1girl", "no_humans", "rooftop", "black_border", "rain"]) == [
         "1girl", "rooftop", "rain",
     ]
+
+
+@pytest.mark.parametrize("tag", [
+    "white_background", "simple_background", "grey_background",
+    "transparent_background",
+])
+def test_the_background_may_not_be_deleted(tag):
+    """Muse always composes a Place, so a tag meaning "there is no scene" can
+    only fight it. `white_background` reached the Light slot next to
+    `warm_glow` and `dawn` — it is not a light, it is an eraser."""
+    assert is_junk_tag(tag)
+
+
+@pytest.mark.parametrize("tag", [
+    "background", "blurry_background", "outdoor_background", "night_sky",
+])
+def test_a_real_background_survives(tag):
+    assert not is_junk_tag(tag)

@@ -49,6 +49,16 @@ class Slot:
     # already answered puts `expressionless` next to `happy`, which is a second
     # answer rather than a top-up.
     exclusive: bool = False
+    # What the theme asked for outranks what the drafts happened to show.
+    #
+    # "The canvas is the source of truth" is right for Outfit and Place — those
+    # are facts a 512px sketch reports reliably. It is wrong for Action. A cheap
+    # draft rarely renders a specific verb, so a bakery theme composed
+    # `kneading_dough` and the drafts came back `sitting, eating`; harvest
+    # overwrote the slot and the finished prompt had the character eating bread
+    # instead of baking it. The verb the theme named is the one aspect that
+    # needs saying *again* precisely because the draft failed to show it.
+    intent: bool = False
 
 
 # Order matters: this is the order the prompt lines come out in, and the head of
@@ -65,6 +75,7 @@ SLOTS: tuple[Slot, ...] = (
             'it and what they are doing. Like "A bunny girl pilot is standing '
             'near an airplane." Not tags; a sentence.'
         ),
+        intent=True,
     ),
     Slot(
         "character", "Character", "person", 8, locked=True,
@@ -95,6 +106,7 @@ SLOTS: tuple[Slot, ...] = (
         axes=("action",), sets=("POSE",),
         query="pose, gesture and action",
         guidance="what she is doing with her body and hands",
+        intent=True,
     ),
     Slot(
         "accessories", "Accessories", "person", 3,
@@ -164,6 +176,47 @@ def place_tag(tag: str) -> str | None:
         if accepts(slot, tag):
             return slot.key
     return None
+
+
+# Head nouns that make a tag a body part however it is modified. `thighs` is in
+# the catalog and `medium_breasts` is not, so membership alone is not enough.
+_BODY_NOUNS = frozenset({
+    "breast", "breasts", "thigh", "thighs", "leg", "legs", "arm", "arms",
+    "hand", "hands", "foot", "feet", "shoulder", "shoulders", "hip", "hips",
+    "waist", "navel", "stomach", "back", "neck", "chest", "skin", "body",
+    "face", "eye", "eyes", "lip", "lips", "nose", "ear", "ears", "tongue",
+    "butt", "ass", "cleavage", "midriff", "collarbone",
+})
+
+
+def is_thing(tag: str) -> bool:
+    """Whether a tag names an object that could sit in the scene.
+
+    The catalog knows nothing about compound nouns — ``desk_lamp``,
+    ``cooking_pot`` and ``neon_sign`` are all unrouted — so Object has to stay
+    the fallback for whatever no slot claims, and that is right for those.
+
+    It is wrong for the two kinds of tag that also arrive unrouted and are not
+    objects at all. ``sweat`` is a detail on a body, and ``glowing`` is a
+    quality of light. Both were chosen as reinforcements for a bakery scene and
+    the prompt then read ``Object: glowing, sweat, cooking_pot`` — asserting
+    that a glow and a sweat were sitting on the counter.
+    """
+    name = str(tag or "").strip().lower().replace(" ", "_")
+    if not name:
+        return False
+    if name in tag_catalog.SKIN_FACE or name in tag_catalog.BODY_PARTS:
+        return False
+    # The catalog lists `thighs` but not `medium_breasts`, and Object took the
+    # latter happily. What a tag is a *part of* is its last word, so test that
+    # too: the modifier changes the size, not the category.
+    if name.rsplit("_", 1)[-1] in _BODY_NOUNS:
+        return False
+    # A bare gerund is a quality or an act, never a noun in the room. Compounds
+    # are exempt: `glowing_eyes` and `holding_book` are not this.
+    if "_" not in name and name.endswith("ing"):
+        return False
+    return True
 
 
 def _tokens(tag: str) -> set[str]:

@@ -216,3 +216,61 @@ def test_what_the_drafts_showed_beats_what_was_composed():
     )
     assert "school_uniform" in out["slots"]["outfit"]
     assert "swimsuit" not in out["slots"]["outfit"]
+
+
+def test_the_themes_verb_survives_what_the_drafts_failed_to_draw():
+    """A bakery theme composed `kneading_dough`; the cheap drafts drew her
+    sitting and eating, harvest overwrote Action wholesale, and the finished
+    prompt had the character eating bread instead of baking it. A 512px sketch
+    is not evidence about a verb."""
+    folded = {
+        "background": BACKGROUND,
+        "person": PERSON + [{"tag": "sitting", "score": 0.9},
+                            {"tag": "eating", "score": 0.85}],
+    }
+    out = merge_tracks(
+        folded, character_weight=0.5,
+        composed_slots={"action": ["kneading_dough", "brushing_flour"]},
+    )
+    assert "kneading_dough" in out["slots"]["action"]
+    assert out["slots"]["action"][0] == "kneading_dough", "the verb leads"
+
+
+def test_the_drafts_keep_half_of_an_intent_slot():
+    """The overwrite was the failure, not the observation."""
+    folded = {
+        "background": BACKGROUND,
+        "person": PERSON + [{"tag": "sitting", "score": 0.9}],
+    }
+    out = merge_tracks(
+        folded, character_weight=0.5,
+        composed_slots={"action": ["kneading_dough", "brushing_flour",
+                                   "standing", "kneeling"]},
+    )
+    action = out["slots"]["action"]
+    assert "sitting" in action, "the canvas still gets its share"
+    assert len([t for t in action if t in ("kneading_dough", "brushing_flour")]) == 2
+
+
+def test_a_body_word_is_never_said_twice():
+    """`toned` is in identity_tags, so protection led Character with it while
+    the preset had already placed it in Body."""
+    out = merge_tracks(
+        FOLDED, character_weight=0.5,
+        protected_tags=IDENTITY + ["toned"],
+        composed_slots={"body": ["toned"]},
+    )
+    assert "toned" in out["slots"]["body"]
+    assert "toned" not in out["slots"]["character"]
+    assert out["tags"].count("toned") == 1
+
+
+def test_a_composed_slot_faces_the_junk_filter_too():
+    """The junk pass ran over the harvested tags only, so `white_background` —
+    composed into Light, never rendered, never harvested — walked past it into
+    the finished prompt and told the render to throw the kitchen away."""
+    out = merge_tracks(
+        FOLDED, character_weight=0.5,
+        composed_slots={"light": ["warm_glow", "white_background"]},
+    )
+    assert out["slots"]["light"] == ["warm_glow"]

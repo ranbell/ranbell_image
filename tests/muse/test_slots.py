@@ -15,6 +15,7 @@ from app.muse.slots import (
     USER,
     dedupe_slot,
     flatten,
+    is_thing,
     place_tag,
     render_prompt,
     restates,
@@ -193,3 +194,27 @@ def test_character_and_body_are_separate_budgets():
     """Body words in the Character line crowd out hair and eye colour."""
     assert BY_KEY["character"].locked and BY_KEY["body"].locked
     assert BY_KEY["character"].cap >= 6
+
+
+@pytest.mark.parametrize("tag", ["desk_lamp", "cooking_pot", "neon_sign", "bread_slice"])
+def test_an_unrouted_noun_is_still_a_thing(tag):
+    """The catalog knows no compound nouns, so Object has to keep taking them."""
+    assert is_thing(tag)
+
+
+@pytest.mark.parametrize("tag", ["glowing", "sweat", "shining", "thighs"])
+def test_a_quality_is_not_a_thing(tag):
+    """`Object: glowing, sweat, cooking_pot` asserted that a glow and a sweat
+    were sitting on the counter."""
+    assert not is_thing(tag)
+
+
+@pytest.mark.parametrize("tag", ["medium_breasts", "bare_thighs", "closed_eyes"])
+def test_a_modified_body_part_is_still_a_body_part(tag):
+    """The catalog lists `thighs` and not `medium_breasts`, and Object took
+    the latter happily. The head noun is what decides the category."""
+    assert not is_thing(tag)
+
+
+def test_a_compound_gerund_is_not_caught_by_the_bare_gerund_rule():
+    assert is_thing("steaming_kettle") and is_thing("glowing_mushroom")
