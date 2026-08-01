@@ -249,3 +249,11 @@ def test_the_description_does_not_go_to_a_background_board():
     keys = {s.key for s in slots_for("background")}
     assert "description" not in keys
     assert "description" in {s.key for s in slots_for("person")}
+
+
+@pytest.mark.parametrize("tag", ["pov", "from_above", "close-up", "profile"])
+def test_where_the_camera_stands_is_not_a_thing(tag):
+    """Framing is chosen deliberately in Shot and Angle, because three drafts
+    otherwise produce three framings and the merge keeps all of them. A top-up
+    offered `pov` and Object announced a point of view was in the room."""
+    assert not is_thing(tag)

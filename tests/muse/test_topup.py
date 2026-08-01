@@ -184,3 +184,11 @@ def test_a_shorter_word_for_something_already_there_is_not_offered():
 def test_a_short_word_inside_an_unrelated_one_is_still_offered():
     hits = [{"name": "cat", "score": 0.6, "count": 90000}]
     assert [c["tag"] for c in _candidates(present=("catalog",), hits=hits)] == ["cat"]
+
+
+def test_framing_is_never_offered_as_a_reinforcement():
+    """It is the user's Shot and Angle, not something the picture lacks."""
+    hits = HITS + [{"name": "pov", "score": 0.6, "count": 60000},
+                   {"name": "from_above", "score": 0.55, "count": 40000}]
+    names = [c["tag"] for c in _candidates(hits=hits)]
+    assert "pov" not in names and "from_above" not in names

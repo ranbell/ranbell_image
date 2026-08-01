@@ -196,6 +196,18 @@ _BODY_NOUNS = frozenset({
 })
 
 
+def is_framing(tag: str) -> bool:
+    """Whether a tag says where the camera is standing.
+
+    Muse chooses framing deliberately, in the user's Shot and Angle, because
+    three drafts otherwise produce three framings and the merge keeps all of
+    them. Such a tag belongs on the Shot line, never in the scene: a top-up
+    offered `pov` and Object announced that a point of view was in the room.
+    """
+    name = str(tag or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return name in tag_catalog.COMPOSITION
+
+
 def is_thing(tag: str) -> bool:
     """Whether a tag names an object that could sit in the scene.
 
@@ -213,6 +225,8 @@ def is_thing(tag: str) -> bool:
     if not name:
         return False
     if name in tag_catalog.SKIN_FACE or name in tag_catalog.BODY_PARTS:
+        return False
+    if is_framing(name):
         return False
     # The catalog lists `thighs` but not `medium_breasts`, and Object took the
     # latter happily. What a tag is a *part of* is its last word, so test that

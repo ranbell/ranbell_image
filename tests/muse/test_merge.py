@@ -274,3 +274,20 @@ def test_a_composed_slot_faces_the_junk_filter_too():
         composed_slots={"light": ["warm_glow", "white_background"]},
     )
     assert out["slots"]["light"] == ["warm_glow"]
+
+
+def test_a_framing_tag_lands_on_the_shot_line_not_among_the_furniture():
+    """Shot is user-owned so `place_tag` never targets it, and the Object
+    fallback took the tag instead — a top-up picked `pov` and the prompt
+    announced that a point of view was in the room."""
+    folded = {**FOLDED, "person": PERSON + [{"tag": "pov", "score": 0.8}]}
+    out = merge_tracks(folded, character_weight=0.5, reinforcements=["pov"])
+    assert "pov" not in (out["slots"].get("object") or [])
+    assert "pov" in (out["slots"].get("shot") or [])
+
+
+def test_a_shot_the_user_chose_still_owns_the_line():
+    folded = {**FOLDED, "person": PERSON + [{"tag": "from_above", "score": 0.8}]}
+    out = merge_tracks(folded, character_weight=0.5,
+                       user_slots={"shot": ["wide_shot", "eye_level"]})
+    assert out["slots"]["shot"] == ["wide_shot", "eye_level"]

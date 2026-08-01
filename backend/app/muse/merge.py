@@ -169,6 +169,13 @@ def merge_tracks(
         key = slot_defs.place_tag(tag)
         if key:
             return key
+        # A framing word has a slot of its own, it is just not a routable one:
+        # Shot is user-owned, so `place_tag` never targets it. Sending it there
+        # rather than to Object keeps `wide_shot` in the prompt as a framing
+        # instead of announcing it as furniture, and a Shot the user has chosen
+        # still overwrites the whole line afterwards.
+        if slot_defs.is_framing(tag):
+            return "shot"
         return "object" if slot_defs.is_thing(tag) else None
 
     def _is_the_character(tag: str) -> bool:
