@@ -59,8 +59,10 @@ def merge_tracks(
     reinforcements: list[str] | None = None,
     must_tags: list[str] | None = None,
     shot: str = "auto",
+    angle: str = "auto",
     user_slots: dict[str, list[str]] | None = None,
-    theme: str = "",
+    texts: list[dict[str, str]] | None = None,
+    prose: str = "",
 ) -> dict[str, Any]:
     """Merge both tracks into a slotted prompt.
 
@@ -116,7 +118,7 @@ def merge_tracks(
 
     # One framing, chosen deliberately. Three seeds produce three framings and
     # the merge would otherwise keep all of them.
-    tags, framing_dropped = camera.apply(tags, shot)
+    tags, framing_dropped = camera.apply(tags, shot, angle)
 
     # Putting `brown_eyes` at the head does nothing while `blue_eyes` is still
     # in the list — the model sees both and picks one. Protection has to evict,
@@ -187,12 +189,13 @@ def merge_tracks(
     return {
         "tags": slot_defs.flatten(filled),
         "slots": filled,
-        "positive": slot_defs.render_prompt(filled, theme=theme),
+        "positive": slot_defs.render_prompt(filled, texts=texts, prose=prose),
         "unplaced": unplaced,
         "protected": protected,
         "forced": forced,
         "reinforcements": list(reinforcements or []),
         "shot": shot,
+        "angle": angle,
         "framing_dropped": framing_dropped,
         "evicted": evicted,
         "removed": removed,

@@ -65,6 +65,18 @@ const warnings = computed(() => session.value?.warnings || [])
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
 const shots = computed(() => catalog.value?.shots || ['auto'])
+const angles = computed(() => catalog.value?.angles || ['auto'])
+// [{text, where}] rendered as `text "X" on Y` at the tail of the prompt.
+const textsText = computed({
+  get: () => (inputs.value.texts || [])
+    .map(t => (t.where ? `${t.text} @ ${t.where}` : t.text)).join('\n'),
+  set: val => patchInputs({
+    texts: val.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+      const [text, where] = line.split('@').map(x => x.trim())
+      return { text, where: where || '' }
+    }),
+  }),
+})
 const models = computed(() => catalog.value?.llm?.ollama?.models || [])
 const vocabMissing = computed(() => catalog.value && !catalog.value.wd14_vocab?.imported)
 
@@ -411,6 +423,13 @@ function close() { emit('update:show', false) }
               <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.shotHint') }}</p>
             </div>
             <div>
+              <p class="sb-label mb-1">{{ t('muse.angle') }}</p>
+              <select class="sb-select" :value="inputs.angle"
+                      @change="patchInputs({ angle: $event.target.value })">
+                <option v-for="a in angles" :key="a" :value="a">{{ t(`muse.angles.${a}`) }}</option>
+              </select>
+            </div>
+            <div>
               <p class="sb-label mb-1">{{ t('muse.style') }}</p>
               <input class="sb-input" type="text"
                      :value="inputs.style"
@@ -422,6 +441,14 @@ function close() { emit('update:show', false) }
                      :value="inputs.effect"
                      @change="patchInputs({ effect: $event.target.value })" />
               <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.effectHint') }}</p>
+            </div>
+            <div>
+              <p class="sb-label mb-1">{{ t('muse.texts') }}</p>
+              <textarea class="sb-textarea" rows="2"
+                        :placeholder="t('muse.textsPlaceholder')"
+                        :value="textsText"
+                        @change="textsText = $event.target.value"></textarea>
+              <p class="text-[10px] text-gray-600 mt-1">{{ t('muse.textsHint') }}</p>
             </div>
             <div>
               <p class="sb-label mb-1">{{ t('muse.mustTags') }}</p>

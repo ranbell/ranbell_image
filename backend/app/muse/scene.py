@@ -21,28 +21,31 @@ logger = logging.getLogger(__name__)
 
 _HEADING_RE = re.compile(r"^##\s+(.*)$", re.MULTILINE)
 
-_CONDENSE_PROMPT = """\
+_PROSE_PROMPT = """\
 # ROLE
-You describe a single illustration in plain prose, for an image generation model.
+You describe one illustration in plain prose, for an image generation model.
 
-# WHAT THE PICTURE IS ABOUT
-{theme}
+# WHAT THE PICTURE IS
+{description}
 
-# THE SCENE
-{idea}
-
-# THE TAGS THAT MUST HOLD
-{tags}
+# THE PICTURE, ASPECT BY ASPECT
+{slots}
+{idea_block}
+# WRITE THREE SENTENCES
+1. The subject and what she is doing, where.
+2. Her appearance and what she is wearing or carrying — the details that make
+   her recognisable.
+3. The framing, the light and the style.
 
 # RULES
-- Exactly two sentences. No more.
-- Describe only what is visible in one frame: subject, what she is doing, where
-  she is, the light. No backstory, no interior monologue, no "she remembers".
-- Do not contradict the tags or the theme. Do not list them either — write prose.
+- Say the same things the aspects above say. Do not add a fact that is not
+  there, and do not leave out the character.
+- Prose, not tags. Do not list.
+- No backstory, no interior monologue, no "she remembers".
 - English only.
 
 # OUTPUT (JSON only)
-{{"scene": "<two sentences>"}}"""
+{{"prose": "<three sentences>"}}"""
 
 
 def parse_brainstorm_sections(markdown: str) -> list[dict[str, str]]:
@@ -67,20 +70,34 @@ def parse_brainstorm_sections(markdown: str) -> list[dict[str, str]]:
     return out
 
 
-async def condense_to_two_sentences(
-    idea: str,
-    tags: list[str],
+async def write_prose(
+    filled: dict[str, list[str]],
     ollama,
     *,
     model: str,
     num_ctx: int | None = None,
-    theme: str = "",
+    idea: str = "",
 ) -> str:
-    """A chosen brainstorm idea → the two sentences that ship with the prompt."""
-    prompt = _CONDENSE_PROMPT.format(
-        theme=theme or "(none given)",
-        idea=str(idea or "").strip()[:2000],
-        tags=", ".join(tags[:60]),
+    """The closing paragraph, written from the slots.
+
+    Earlier this condensed a chosen brainstorm idea, and the result could
+    disagree with the tags above it — a run themed "came to swim" ended with
+    prose about sunbathing while the tags said swimming. Writing from the slots
+    cannot contradict them, and the brainstorm idea rides along as flavour
+    rather than as the source.
+    """
+    from . import slots as slot_defs
+
+    description = " ".join(filled.get("description") or []) or "(not given)"
+    lines = "\n".join(
+        f"{slot.label}: {', '.join(filled.get(slot.key) or [])}"
+        for slot in slot_defs.SLOTS
+        if filled.get(slot.key) and slot.key != "description"
+    )
+    prompt = _PROSE_PROMPT.format(
+        description=description,
+        slots=lines or "(nothing)",
+        idea_block=f"\n# THE MOOD SOMEBODY CHOSE\n{str(idea).strip()[:800]}\n" if idea else "",
     )
     try:
         raw = await ollama.generate_text(
@@ -90,14 +107,13 @@ async def condense_to_two_sentences(
             fmt="json",
         )
         parsed = parse_json_object(raw if isinstance(raw, str) else str(raw))
-        scene = str(parsed.get("scene") or "").strip()
-        if scene:
-            return scene
+        prose = str(parsed.get("prose") or "").strip()
+        if prose:
+            return prose
     except Exception as exc:
-        logger.warning("[muse] scene condense failed: %s", exc)
-    # Falling back to the idea's own first sentences is better than shipping
-    # nothing: the tags carry the image either way, this is the seasoning.
-    return _first_sentences(idea, 2)
+        logger.warning("[muse] prose failed: %s", exc)
+    # The tags carry the image either way; this is the seasoning.
+    return _first_sentences(idea, 3)
 
 
 def _first_sentences(text: str, n: int) -> str:
@@ -109,9 +125,8 @@ def _first_sentences(text: str, n: int) -> str:
 def compose_final_prompt(tags: list[str], scene_text: str) -> str:
     """Tags first, prose second.
 
-    The tag line is what the model actually conditions on; the prose nudges
-    composition and mood. Putting the prose first buries the tags past the point
-    where attention still reaches them.
+    Kept for the flat-tag path. The slotted prompt assembles itself in
+    ``slots.render_prompt``, which puts the prose in the same place.
     """
     line = ", ".join(t for t in tags if t)
     scene = str(scene_text or "").strip()

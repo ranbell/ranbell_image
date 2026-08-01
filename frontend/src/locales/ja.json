@@ -1411,6 +1411,19 @@
       "removeHint": "クリックで削除",
       "lockedHint": "キャラまたは設定から入るので、ここでは編集しない",
       "addPlaceholder": "＋タグ"
+    },
+    "angle": "カメラ角度",
+    "texts": "画中の文字",
+    "textsPlaceholder": "34L @ runway\nBunny Air @ 制服のバッジ",
+    "textsHint": "1行1つ。「文字 @ どこに」の形。プロンプト末尾に text \"…\" として付く",
+    "angles": {
+      "auto": "おまかせ",
+      "eye_level": "目線の高さ",
+      "from_above": "俯瞰",
+      "from_below": "煽り",
+      "dutch_angle": "斜め（ダッチ）",
+      "from_side": "横から",
+      "from_behind": "後ろから"
     }
   },
   "characters": {

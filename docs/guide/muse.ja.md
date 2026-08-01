@@ -34,20 +34,31 @@ Muse は路線を反転させる。**LLM に絵を describe させるのをや�
 **プロンプトには面（スロット）があり、面ごとに予算がある。**
 
 ```
-Theme: プールに泳ぎに来た
-Style: anime illustration, detailed
-Character: 1girl, brown_hair, long_hair, ponytail, brown_eyes
-Body: toned
-Emotion: happy
-Outfit: swimming_trunks, bikini
-Action: swimming
-Accessories: wristwatch
-Shot: medium_shot
-Place: indoor_pool, blue_water
-Object: lane_markers, pool
-Light: bright_daylight
-Effect: kodak color, film_grain
+Style: cute anime illustration
+Description: A bunny girl pilot is standing near an airplane.
+Character: 1girl, light_blue_hair, emerald_green_eyes
+Body: medium_breasts
+Emotion: confident
+Outfit: airline_uniform
+Action: hand_on_hip, looking_away
+Accessories: rabbit_ears, suitcase, wristwatch
+Shot: long_shot, dutch_angle
+Place: airport
+Object: airplane, runway
+Effect: kodak color, detailed character, very_detailed_background
+
+text "34L" on runway
+
+A confident bunny girl pilot stands proudly on the runway beside her airplane.
 ```
+
+`Description` は1行分の価値がある。**タグが来る前に「この絵が何か」を1文で言い切る**と、以降のタグはその細部として読まれる — 言い切らないと、タグは互いに競合する提案の山になる。末尾の散文が反対側から同じ仕事をする。
+
+お題そのものは行にならない。日本語だがチェックポイントは日本語ではないので、`Description` がその英語版として同じことを言う。
+
+**画中の文字**は `text "34L" on runway` の形で末尾に付く。**画角は距離と角度が別軸**（`long_shot` と `dutch_angle` は別の指定で、一緒くたにすると「斜めの引き」が頼めない）。
+
+**末尾の散文はスロットから書く。** 以前はブレスト案を2文に圧縮していて、タグと食い違うことがあった — 「泳ぎに来た」の run で、タグは swimming なのに散文は日光浴だった。スロットから書けば矛盾しようがなく、ブレスト案は「雰囲気」として添えるだけになる。
 
 ここは2度作り直している。**ベクトル検索**はお題全体で引いていて、「library, rain」の近傍に `closed_eyes` を返した — 図書室では人が撮られるから。次の**平坦な30語**は、モデルが一番面白いと思った話題の言い換えで埋めた。プールのお題が `swimwear, black_bikini, bikini` を返し、1つの事実を3枠使って書き、絵はそれを3回重み付けして水着が画面を食った。
 

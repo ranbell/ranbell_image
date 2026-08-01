@@ -53,7 +53,9 @@ class InputsPatch(BaseModel):
     compose_tag_count: int | None = Field(default=None, ge=8, le=60)
     must_tags: list[str] | None = None
     shot: str | None = None
+    angle: str | None = None
     style: str | None = None
+    texts: list[dict] | None = None
     effect: str | None = None
     vocab_supplement: bool | None = None
     topup_picks: int | None = Field(default=None, ge=0, le=15)

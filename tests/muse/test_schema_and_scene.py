@@ -6,10 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse.scene import (
-    compose_final_prompt,
-    parse_brainstorm_sections,
-)
+from app.muse.scene import compose_final_prompt, parse_brainstorm_sections
 from app.muse.schema import missing_inputs, new_session, next_step, public_view, step_state
 
 

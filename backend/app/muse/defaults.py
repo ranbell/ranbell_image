@@ -60,8 +60,16 @@ MERGE_DEFAULTS: dict[str, object] = {
     "must_tags": [],
     # The aesthetic. Not derived from the theme — the same theme in two styles
     # is two different pictures, and that is the user's call, not the model's.
-    "style": "anime illustration, detailed",
-    "effect": "kodak color, film_grain, bokeh",
+    "style": "cute anime illustration",
+    # `detailed character` is not decoration. Without it the pipeline drifts
+    # toward beautiful scenery with a small figure in it — a picture of a place
+    # that happens to contain someone, rather than a picture of someone.
+    "effect": "kodak color, detailed character, very_detailed_background",
+    # Where the camera is, separately from how close it is.
+    "angle": "auto",
+    # Literal strings to render, as [{text, where}]. The checkpoints this app
+    # targets can write short words when asked plainly.
+    "texts": [],
 }
 
 # ── Composition and top-up ─────────────────────────────────────────────────

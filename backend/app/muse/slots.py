@@ -50,8 +50,18 @@ class Slot:
 # Order matters: this is the order the prompt lines come out in, and the head of
 # a prompt is where attention actually reaches.
 SLOTS: tuple[Slot, ...] = (
-    Slot("theme", "Theme", "global", 1, user_owned=True),
     Slot("style", "Style", "global", 4, user_owned=True),
+    # One sentence, in English, naming what the picture is. It comes before any
+    # tag so the tags read as details of a thing rather than as a pile of
+    # competing suggestions.
+    Slot(
+        "description", "Description", "global", 1,
+        guidance=(
+            "ONE plain English sentence naming what this picture is — who is in "
+            'it and what they are doing. Like "A bunny girl pilot is standing '
+            'near an airplane." Not tags; a sentence.'
+        ),
+    ),
     Slot(
         "character", "Character", "person", 8, locked=True,
         axes=("hair",), sets=("COUNT", "EYE_SHAPES"),
@@ -183,18 +193,41 @@ def dedupe_slot(tags: list[str], cap: int) -> list[str]:
     return kept
 
 
-def render_prompt(filled: dict[str, list[str]], *, theme: str = "") -> str:
-    """The labelled prompt. Empty slots are left out rather than left blank."""
+def render_prompt(
+    filled: dict[str, list[str]],
+    *,
+    texts: list[dict[str, str]] | None = None,
+    prose: str = "",
+) -> str:
+    """The labelled prompt. Empty slots are left out rather than left blank.
+
+    ``texts`` are literal strings to render in the image; ``prose`` is the
+    closing restatement. Both sit after the tag lines, which is where they have
+    been working by hand.
+
+    The user's theme does not get a line. It is Japanese and the checkpoint is
+    not; ``Description`` is its English form and says the same thing in a way
+    the model can use.
+    """
     lines: list[str] = []
     for slot in SLOTS:
-        if slot.key == "theme":
-            if theme:
-                lines.append(f"Theme: {theme}")
-            continue
         tags = [t for t in (filled.get(slot.key) or []) if t]
-        if tags:
-            lines.append(f"{slot.label}: {', '.join(tags)}")
-    return "\n".join(lines)
+        if not tags:
+            continue
+        # Description is a sentence, not a comma list.
+        joiner = " " if slot.key == "description" else ", "
+        lines.append(f"{slot.label}: {joiner.join(tags)}")
+
+    body = "\n".join(lines)
+    for entry in texts or []:
+        literal = str(entry.get("text") or "").strip()
+        if not literal:
+            continue
+        where = str(entry.get("where") or "").strip()
+        body += f'\n\ntext "{literal}"' + (f" on {where}" if where else "")
+    if prose.strip():
+        body += "\n\n" + prose.strip()
+    return body
 
 
 def flatten(filled: dict[str, list[str]]) -> list[str]:

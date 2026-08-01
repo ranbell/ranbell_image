@@ -19,6 +19,23 @@ SHOTS: tuple[str, ...] = (
     "auto", "wide_shot", "full_body", "cowboy_shot", "upper_body", "close_up",
 )
 
+# Where the camera is, which is a different question from how close it is.
+# "long_shot, dutch_angle" is one distance and one angle, and conflating them
+# meant a tilted wide shot could not be asked for at all.
+ANGLES: tuple[str, ...] = (
+    "auto", "eye_level", "from_above", "from_below", "dutch_angle",
+    "from_side", "from_behind",
+)
+
+_ANGLE_REMOVE: dict[str, tuple[str, ...]] = {
+    "eye_level": ("from_above", "from_below", "dutch_angle", "aerial_view"),
+    "from_above": ("from_below", "eye_level", "aerial_view"),
+    "from_below": ("from_above", "eye_level", "aerial_view"),
+    "dutch_angle": ("eye_level",),
+    "from_side": ("from_behind", "from_front"),
+    "from_behind": ("from_side", "from_front", "looking_at_viewer"),
+}
+
 # Tags that state the chosen framing. Put at the head of the prompt.
 _FORCE_ADD: dict[str, list[str]] = {
     "wide_shot": ["wide_shot", "scenery", "full_body"],
@@ -67,41 +84,51 @@ _NEGATIVE: dict[str, list[str]] = {
 def is_framing_tag(tag: str) -> bool:
     """True when this tag says something about how the shot is framed."""
     name = _key(tag)
-    for removals in _FORCE_REMOVE.values():
-        if name in {_key(t) for t in removals}:
+    for group in (*_FORCE_REMOVE.values(), *_FORCE_ADD.values(), *_ANGLE_REMOVE.values()):
+        if name in {_key(t) for t in group}:
             return True
-    for adds in _FORCE_ADD.values():
-        if name in {_key(t) for t in adds}:
-            return True
-    return False
+    return name in {_key(a) for a in ANGLES if a != "auto"}
 
 
 def _key(tag: str) -> str:
     return str(tag or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
-def apply(tags: list[str], shot: str) -> tuple[list[str], list[str]]:
-    """``(tags, dropped)`` with ``shot``'s framing enforced.
+def apply(
+    tags: list[str], shot: str, angle: str = "auto",
+) -> tuple[list[str], list[str]]:
+    """``(tags, dropped)`` with the chosen distance and angle enforced.
 
-    ``auto`` returns the list untouched, which is the honest thing to do when
-    the user has not expressed a preference — the drafts had one.
+    ``auto`` on either axis returns that axis untouched, which is the honest
+    thing to do when the user has not expressed a preference — the drafts had
+    one.
     """
-    if shot not in _FORCE_ADD:
+    banned = set()
+    lead: list[str] = []
+    if shot in _FORCE_ADD:
+        banned |= {_key(t) for t in _FORCE_REMOVE.get(shot, ())}
+        lead += list(_FORCE_ADD[shot])
+    if angle in _ANGLE_REMOVE:
+        banned |= {_key(t) for t in _ANGLE_REMOVE[angle]}
+        lead.append(angle)
+    if not banned and not lead:
         return list(tags), []
 
-    banned = {_key(t) for t in _FORCE_REMOVE.get(shot, ())}
     kept: list[str] = []
     dropped: list[str] = []
     for tag in tags:
         (dropped if _key(tag) in banned else kept).append(tag)
 
-    lead = [t for t in _FORCE_ADD[shot] if _key(t) not in {_key(k) for k in kept}]
-    return lead + kept, dropped
+    have = {_key(k) for k in kept}
+    return [t for t in lead if _key(t) not in have] + kept, dropped
 
 
-def tags_for(shot: str) -> list[str]:
-    """What the Shot slot says for this choice. Empty for ``auto``."""
-    return list(_FORCE_ADD.get(shot, ()))
+def tags_for(shot: str, angle: str = "auto") -> list[str]:
+    """What the Shot slot says for these choices. Empty when both are ``auto``."""
+    out = list(_FORCE_ADD.get(shot, ()))
+    if angle in _ANGLE_REMOVE:
+        out.append(angle)
+    return out
 
 
 def negative_for(shot: str) -> str:

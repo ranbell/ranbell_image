@@ -72,12 +72,12 @@ def test_routing_never_targets_a_locked_or_user_slot():
 
 # ── the shape ───────────────────────────────────────────────────────────────
 def test_the_prompt_is_labelled_line_by_line():
-    text = render_prompt(
-        {"character": ["1girl", "brown_hair"], "outfit": ["swimsuit"],
-         "place": ["pool"], "effect": ["kodak color"]},
-        theme="came to swim",
-    )
-    assert text.splitlines()[0] == "Theme: came to swim"
+    text = render_prompt({
+        "description": ["A girl swims in a pool."],
+        "character": ["1girl", "brown_hair"], "outfit": ["swimsuit"],
+        "place": ["pool"], "effect": ["kodak color"],
+    })
+    assert "Description: A girl swims in a pool." in text
     assert "Character: 1girl, brown_hair" in text
     assert "Outfit: swimsuit" in text
     assert "Effect: kodak color" in text
@@ -87,6 +87,22 @@ def test_empty_aspects_are_left_out_rather_than_left_blank():
     text = render_prompt({"outfit": [], "place": ["pool"]})
     assert "Outfit" not in text
     assert "Place: pool" in text
+
+
+def test_the_prompt_carries_literal_text_and_closing_prose():
+    text = render_prompt(
+        {"place": ["runway"]},
+        texts=[{"text": "34L", "where": "runway"}, {"text": "Bunny Air"}],
+        prose="A pilot stands by her plane.",
+    )
+    assert 'text "34L" on runway' in text
+    assert 'text "Bunny Air"' in text and "on " not in text.split('"Bunny Air"')[1][:4]
+    assert text.rstrip().endswith("A pilot stands by her plane.")
+
+
+def test_nothing_extra_is_added_when_there_is_nothing_extra():
+    text = render_prompt({"place": ["runway"]})
+    assert text == "Place: runway"
 
 
 def test_the_prompt_keeps_the_declared_order():
@@ -103,18 +119,33 @@ def test_flatten_walks_the_slots_in_order_and_dedupes():
 # ── the table itself ────────────────────────────────────────────────────────
 def test_the_hand_written_format_is_covered():
     labels = {s.label for s in SLOTS}
-    assert {"Theme", "Style", "Character", "Emotion", "Outfit", "Body",
+    assert {"Style", "Description", "Character", "Emotion", "Outfit", "Body",
             "Action", "Accessories", "Shot", "Place", "Object", "Effect"} <= labels
 
 
+def test_description_leads_the_tags():
+    """One sentence naming the subject, before any tag list, so the tags read
+    as details of a thing rather than competing suggestions."""
+    keys = [s.key for s in SLOTS]
+    assert keys.index("description") < keys.index("character")
+    assert keys.index("description") < keys.index("place")
+
+
 def test_the_user_owns_the_aesthetic_and_the_framing():
-    assert {s.key for s in USER} == {"theme", "style", "shot", "effect"}
+    assert {s.key for s in USER} == {"style", "shot", "effect"}
 
 
-def test_every_composed_slot_can_be_searched_for_and_explained():
+def test_every_composed_slot_is_explained_to_the_model():
     for slot in COMPOSED:
-        assert slot.query, f"{slot.key} has nothing to search the vocabulary for"
         assert slot.guidance, f"{slot.key} has nothing to tell the model"
+
+
+def test_every_tag_slot_can_be_searched_for():
+    """Description is prose, so it has nothing to look up. Everything else does."""
+    for slot in COMPOSED:
+        if slot.key == "description":
+            continue
+        assert slot.query, f"{slot.key} has nothing to search the vocabulary for"
 
 
 def test_every_slot_has_a_positive_budget():

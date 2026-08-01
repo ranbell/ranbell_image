@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
-from .camera import SHOTS
+from .camera import ANGLES, SHOTS
 from .slots import SLOTS
 from .defaults import ALL_DEFAULTS
 
@@ -186,6 +186,7 @@ async def build_muse_catalog(
         "characters": {"count": character_count},
         "locales": ["ja", "en"],
         "shots": list(SHOTS),
+        "angles": list(ANGLES),
         "slots": [
             {
                 "key": slot.key,

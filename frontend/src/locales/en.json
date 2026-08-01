@@ -1411,6 +1411,19 @@
       "removeHint": "Click to remove",
       "lockedHint": "Comes from the character or your settings",
       "addPlaceholder": "+ tag"
+    },
+    "angle": "Camera angle",
+    "texts": "Text in the image",
+    "textsPlaceholder": "34L @ runway\nBunny Air @ uniform badge",
+    "textsHint": "One per line, as `text @ where`. Appended to the prompt as text \"…\"",
+    "angles": {
+      "auto": "Auto",
+      "eye_level": "Eye level",
+      "from_above": "From above",
+      "from_below": "From below",
+      "dutch_angle": "Dutch angle",
+      "from_side": "From the side",
+      "from_behind": "From behind"
     }
   },
   "characters": {

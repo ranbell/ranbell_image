@@ -124,11 +124,12 @@ def _tracks_from_slots(filled: dict[str, list[dict[str, Any]]]) -> dict[str, lis
 def user_slots(session: dict[str, Any]) -> dict[str, list[str]]:
     """Style / Shot / Effect — the aspects the user owns."""
     inputs = _inputs(session)
-    shot = str(inputs.get("shot") or "auto")
     return {
         "style": _as_tags(inputs.get("style")),
         "effect": _as_tags(inputs.get("effect")),
-        "shot": camera.tags_for(shot),
+        "shot": camera.tags_for(
+            str(inputs.get("shot") or "auto"), str(inputs.get("angle") or "auto"),
+        ),
     }
 
 
@@ -158,8 +159,7 @@ def track_prompt(session: dict[str, Any], track: str) -> tuple[str, str]:
         # libraries have figures in them. Say so in the negative.
         away = tracks.BACKGROUND_NEGATIVE
         negative = f"{negative}, {away}" if negative else away
-    theme = str(_inputs(session).get("theme") or "")
-    return slot_defs.render_prompt(filled, theme=theme), negative
+    return slot_defs.render_prompt(filled), negative
 
 
 # ── S4 board ────────────────────────────────────────────────────────────────
@@ -403,8 +403,9 @@ async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
         reinforcements=[r["tag"] for r in (session.get("topup") or [])],
         must_tags=list(inputs.get("must_tags") or []),
         shot=str(inputs.get("shot") or "auto"),
+        angle=str(inputs.get("angle") or "auto"),
         user_slots=user_slots(session),
-        theme=str(inputs.get("theme") or ""),
+        texts=list(inputs.get("texts") or []),
     )
     session["scene"] = {}
     session_db.log(session, "merge", f"{len(session['merged'].get('tags') or [])} tags")
@@ -430,15 +431,25 @@ async def choose_scene(db, ollama, session: dict[str, Any], index: int) -> dict[
     inputs = _inputs(session)
     cfg = await get_runtime_config(db)
     idea = candidates[index]
-    text = await scene.condense_to_two_sentences(
-        f"{idea.get('title', '')}\n{idea.get('body', '')}",
-        (session.get("merged") or {}).get("tags") or [],
+    merged = session.get("merged") or {}
+    text = await scene.write_prose(
+        merged.get("slots") or {},
         ollama,
         model=str(inputs.get("light_model") or ""),
         num_ctx=cfg.get("ollama_num_ctx"),
-        theme=str(inputs.get("theme") or ""),
+        idea=f"{idea.get('title', '')}\n{idea.get('body', '')}",
     )
     session["scene"] = {**current, "chosen": index, "text": text}
+    # The prompt carries the prose, so it has to be rebuilt once there is some.
+    if merged.get("slots"):
+        session["merged"] = {
+            **merged,
+            "positive": slot_defs.render_prompt(
+                merged["slots"],
+                texts=list(inputs.get("texts") or []),
+                prose=text,
+            ),
+        }
     session_db.log(session, "scene", text)
     await session_db.save(db, session)
     return session
@@ -455,7 +466,10 @@ async def submit_final(db, comfy, spooler, session: dict[str, Any]) -> dict[str,
     if not tags:
         raise MuseError("merge the tags first")
 
-    positive = scene.compose_final_prompt(tags, (session.get("scene") or {}).get("text", ""))
+    # The slotted prompt already carries its prose and text directives.
+    positive = merged.get("positive") or scene.compose_final_prompt(
+        tags, (session.get("scene") or {}).get("text", ""),
+    )
     negative = str(inputs.get("negative_prompt") or "")
     shot_negative = camera.negative_for(str(inputs.get("shot") or "auto"))
     if shot_negative:

@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse.camera import SHOTS, apply, is_framing_tag, negative_for
+from app.muse.camera import ANGLES, SHOTS, apply, is_framing_tag, negative_for, tags_for
 
 MIXED = ["1girl", "pool", "close-up", "full_body", "cowboy_shot", "palm_tree"]
 
@@ -79,3 +79,33 @@ def test_framing_tags_are_recognised(tag):
 @pytest.mark.parametrize("tag", ["1girl", "pool", "black_hair", "umbrella"])
 def test_content_tags_are_not_framing(tag):
     assert not is_framing_tag(tag)
+
+
+# ── the angle axis ──────────────────────────────────────────────────────────
+def test_distance_and_angle_are_asked_for_separately():
+    """`long_shot, dutch_angle` is one distance and one angle. Conflating them
+    meant a tilted wide shot could not be requested at all."""
+    tags, _ = apply(["1girl", "pool"], "wide_shot", "dutch_angle")
+    assert "wide_shot" in tags and "dutch_angle" in tags
+
+
+def test_an_angle_removes_the_angles_that_fight_it():
+    tags, dropped = apply(["1girl", "from_above", "eye_level"], "auto", "from_below")
+    assert "from_above" in dropped and "eye_level" in dropped
+    assert "from_below" in tags
+
+
+def test_auto_angle_leaves_the_angle_alone():
+    tags, dropped = apply(["1girl", "from_above"], "auto", "auto")
+    assert dropped == [] and tags == ["1girl", "from_above"]
+
+
+def test_the_shot_slot_states_both_choices():
+    assert set(tags_for("wide_shot", "dutch_angle")) >= {"wide_shot", "dutch_angle"}
+    assert tags_for("auto", "auto") == []
+
+
+def test_angles_are_recognised_as_framing():
+    for angle in ANGLES:
+        if angle != "auto":
+            assert is_framing_tag(angle)
