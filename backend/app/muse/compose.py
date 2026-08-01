@@ -150,6 +150,12 @@ async def compose_slots(
 def _clean(raw: Any, slot: Slot, identity: list[str]) -> list[str]:
     if isinstance(raw, (list, tuple)):
         raw = ", ".join(str(v) for v in raw)
+    # Description is a sentence. Splitting it on commas and underscoring the
+    # pieces turned "A pink haired girl walks along a row of cherry trees" into
+    # one enormous tag, which is not a sentence and not a tag either.
+    if slot.key == "description":
+        text = " ".join(str(raw or "").split())
+        return [text] if text else []
     out: list[str] = []
     for piece in str(raw or "").split(","):
         tag = (_normalize_section(piece.strip()) or piece.strip()).strip().replace(" ", "_")
@@ -180,6 +186,9 @@ async def _supplement(
         rows = filled.get(slot.key) or []
         if len(rows) >= slot.cap or not slot.query:
             continue
+        # An exclusive slot the model already answered is not short, it is done.
+        if slot.exclusive and rows:
+            continue
         try:
             vec = await ollama.embed(f"{slot.query} / {theme}")
             hits = await db.search_wd14_vocab(
@@ -202,6 +211,10 @@ async def _supplement(
             if not slot_defs.accepts(slot, tag):
                 continue
             if identity and contradicts_any(tag, identity):
+                continue
+            # `expressionless` next to `happy`, `kneeling` next to `walking` —
+            # the slot already answered, and a second answer is not a top-up.
+            if contradicts_any(tag, [r["tag"] for r in rows]):
                 continue
             have.add(key)
             rows.append({"tag": tag, "source": "vocab"})

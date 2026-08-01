@@ -76,6 +76,15 @@ def test_candidates_drop_junk():
     assert "black_border" not in [c["tag"] for c in _candidates()]
 
 
+def test_body_parts_are_never_offered():
+    """The model was told not to pick these and picked `legs` and `thighs`
+    anyway, reasoning that detail on the body enhances the beauty."""
+    hits = HITS + [{"name": "legs", "score": 0.6, "count": 9000},
+                   {"name": "thighs", "score": 0.55, "count": 8000}]
+    names = [c["tag"] for c in _candidates(hits=hits)]
+    assert "legs" not in names and "thighs" not in names
+
+
 def test_candidates_carry_the_post_count_for_display():
     lamp = next(c for c in _candidates() if c["tag"] == "desk_lamp")
     assert lamp["count"] == 9000

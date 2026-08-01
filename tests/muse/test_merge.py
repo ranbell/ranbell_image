@@ -182,3 +182,37 @@ def test_reinforcements_are_placed_and_reported():
     out = merge_tracks(FOLDED, character_weight=0.5, reinforcements=["neon_sign"])
     assert "neon_sign" in out["tags"]
     assert out["reinforcements"] == ["neon_sign"]
+
+
+def test_the_character_is_never_named_twice():
+    """`1girl` and `pink_hair` are claimed by no routable slot, because
+    Character is locked and excluded from routing. Without a guard they fell
+    into Object and the prompt described her all over again."""
+    out = merge_tracks(FOLDED, character_weight=0.5, protected_tags=IDENTITY)
+    for tag in IDENTITY:
+        assert tag in (out["slots"].get("character") or [])
+        assert tag not in (out["slots"].get("object") or [])
+    assert out["tags"].count("1girl") == 1
+
+
+def test_description_survives_the_merge():
+    """Nothing harvests a sentence back off a canvas, so it has to be carried
+    across or it vanishes from the prompt where it matters most."""
+    out = merge_tracks(
+        FOLDED, character_weight=0.5,
+        composed_slots={"description": ["A girl stands on a rooftop."],
+                        "outfit": ["cardigan"]},
+    )
+    assert out["slots"]["description"] == ["A girl stands on a rooftop."]
+    assert "Description: A girl stands on a rooftop." in out["positive"]
+
+
+def test_what_the_drafts_showed_beats_what_was_composed():
+    """The image is the source of truth; the composed slot is only a fallback
+    for aspects the canvas cannot report."""
+    out = merge_tracks(
+        FOLDED, character_weight=0.5,
+        composed_slots={"outfit": ["swimsuit"]},
+    )
+    assert "school_uniform" in out["slots"]["outfit"]
+    assert "swimsuit" not in out["slots"]["outfit"]

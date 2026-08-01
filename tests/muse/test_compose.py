@@ -160,3 +160,33 @@ def test_the_character_slots_come_off_the_preset():
     assert "1girl" in character and "black_hair" in character
     assert "petite" in body, "body words belong in Body, not Character"
     assert "petite" not in character
+
+
+def test_description_stays_a_sentence():
+    """Splitting it on commas and underscoring the pieces turned a sentence
+    into one enormous tag, which is neither."""
+    out, _ = _compose({**WRITTEN,
+                       "description": "A pink haired girl walks along a row of cherry trees."})
+    assert _tags(out, "description") == [
+        "A pink haired girl walks along a row of cherry trees."
+    ]
+
+
+def test_an_exclusive_slot_the_model_answered_is_left_alone():
+    """One face has one expression. Retrieval topping this up put
+    `expressionless` next to `happy` — a second answer, not a top-up."""
+    db = FakeDB([{"name": "expressionless", "score": 0.7}])
+    out, _ = _compose({**WRITTEN, "emotion": "happy"}, db=db, supplement=True)
+    assert _tags(out, "emotion") == ["happy"]
+
+
+def test_an_exclusive_slot_the_model_left_empty_is_still_filled():
+    db = FakeDB([{"name": "smile", "score": 0.7}])
+    out, _ = _compose({**WRITTEN, "emotion": ""}, db=db, supplement=True)
+    assert _tags(out, "emotion") == ["smile"]
+
+
+def test_the_supplement_refuses_what_contradicts_the_character():
+    db = FakeDB([{"name": "blue_hair", "score": 0.9}, {"name": "hair_ribbon", "score": 0.8}])
+    out, _ = _compose({**WRITTEN, "accessories": ""}, db=db, supplement=True)
+    assert "blue_hair" not in _tags(out, "accessories")

@@ -61,6 +61,7 @@ def merge_tracks(
     shot: str = "auto",
     angle: str = "auto",
     user_slots: dict[str, list[str]] | None = None,
+    composed_slots: dict[str, list[str]] | None = None,
     texts: list[dict[str, str]] | None = None,
     prose: str = "",
 ) -> dict[str, Any]:
@@ -158,10 +159,18 @@ def merge_tracks(
     unplaced: list[str] = []
     reinforced = {t.lower() for t in (reinforcements or [])}
 
+    protected_set = {t.lower() for t in protected}
+
     def _slot_of(tag: str) -> str:
         # Anything no slot claims still belongs in the picture; Object is where
         # a loose noun does least harm.
         return slot_defs.place_tag(tag) or "object"
+
+    def _is_the_character(tag: str) -> bool:
+        # `1girl` and `pink_hair` are claimed by no routable slot, because
+        # Character is locked and excluded from routing. Without this they fell
+        # into Object and the prompt named her twice.
+        return tag.lower() in protected_set
 
     # Reinforcements first, so the cap trims the harvested tail rather than the
     # handful somebody chose *because* the picture lacked them.
@@ -169,7 +178,7 @@ def merge_tracks(
         if tag.lower() in reinforced:
             filled.setdefault(_slot_of(tag), []).append(tag)
     for tag in tags:
-        if tag.lower() in reinforced:
+        if tag.lower() in reinforced or _is_the_character(tag):
             continue
         key = slot_defs.place_tag(tag)
         if key is None:
@@ -182,6 +191,12 @@ def merge_tracks(
     for key, slot in slot_defs.BY_KEY.items():
         if key in filled:
             filled[key] = slot_defs.dedupe_slot(filled[key], slot.cap)
+    # Description is written at compose time and nothing harvests it back off a
+    # canvas, so it has to be carried across or it disappears from the finished
+    # prompt — which is where it matters most.
+    for key, values in (composed_slots or {}).items():
+        if values and not filled.get(key):
+            filled[key] = list(values)
     for key, values in (user_slots or {}).items():
         if values:
             filled[key] = list(values)

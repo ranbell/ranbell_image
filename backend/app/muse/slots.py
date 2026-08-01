@@ -45,6 +45,10 @@ class Slot:
     locked: bool = False            # comes from the character, not from anything else
     query: str = ""                 # what to search the vocabulary for
     guidance: str = ""              # what to tell the model this slot is
+    # One face has one expression. Retrieval topping up a slot the model has
+    # already answered puts `expressionless` next to `happy`, which is a second
+    # answer rather than a top-up.
+    exclusive: bool = False
 
 
 # Order matters: this is the order the prompt lines come out in, and the head of
@@ -74,6 +78,7 @@ SLOTS: tuple[Slot, ...] = (
         axes=("emotion",), sets=("EXPRESSION",),
         query="facial expression and mood of the character",
         guidance="how she feels, on her face and in her posture",
+        exclusive=True,
     ),
     Slot(
         "outfit", "Outfit", "person", 4,

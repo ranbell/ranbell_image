@@ -19,6 +19,7 @@ from typing import Any
 
 from ..ai.json_util import parse_json_object
 from ..ai.llm_options import llm_options
+from ..tags import catalog as tag_catalog
 from ..tags.junk import is_junk_tag
 from .slots import restates
 from .tracks import belongs_to_track
@@ -30,6 +31,15 @@ DEFAULT_PICKS = 5
 # are only loosely related and the candidate list turns into noise the model has
 # to wade through.
 DEFAULT_MIN_SCORE = 0.3
+
+# `tag_catalog.BODY_PARTS` has `thighs` but not `legs`, `breasts` or `feet`.
+# The model reaches for these when it runs out of ideas — one run picked `legs`
+# and `thighs` reasoning that "detail on the body enhances the beauty" — and a
+# body part is never a thing the picture lacks.
+_BARE_BODY_PARTS = frozenset({
+    "legs", "leg", "feet", "foot", "hands", "hand", "arms", "breasts",
+    "back", "shoulders", "skin", "body", "face", "eyes", "hair", "lips",
+})
 
 _PROMPT = """\
 # ROLE
@@ -56,6 +66,8 @@ You are ADDING to this picture, never editing it. Do NOT pick:
 - anything that changes the subject, the action, the place or the time of day
 - anything redundant with a tag the picture already has
 - a person, a body or clothing if the picture is a place; a place if it is a person
+- a BODY PART. legs, thighs, breasts, feet — the character already has those,
+  and naming one only tells the picture to stare at it
 
 Ask of each one: "is this a thing that could be added to the picture without
 changing anything already in it?" If the answer is no, leave it.
@@ -105,6 +117,10 @@ async def collect_candidates(
         if float(hit.get("score") or 0.0) < min_score:
             continue
         if is_junk_tag(name):
+            continue
+        # The model was told not to pick these and picked `legs` and `thighs`
+        # anyway, reasoning that "detail on the body enhances the beauty".
+        if name.lower() in tag_catalog.BODY_PARTS or name.lower() in _BARE_BODY_PARTS:
             continue
         out.append({
             "tag": name,

@@ -405,6 +405,10 @@ async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
         shot=str(inputs.get("shot") or "auto"),
         angle=str(inputs.get("angle") or "auto"),
         user_slots=user_slots(session),
+        composed_slots={
+            key: [r["tag"] for r in rows]
+            for key, rows in (session.get("slots") or {}).items()
+        },
         texts=list(inputs.get("texts") or []),
     )
     session["scene"] = {}
