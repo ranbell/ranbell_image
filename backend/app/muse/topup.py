@@ -80,6 +80,21 @@ Fewer is better. Choosing nothing is a valid answer.
 {{"add": [{{"tag": "<exact candidate>", "why": "<a few words>"}}]}}"""
 
 
+def _is_contained_in(name: str, present: list[str]) -> bool:
+    """Whether a shorter word for something already in the picture.
+
+    ``restates`` splits on underscores, so ``scope`` and ``telescope`` look like
+    different tags to it. The model offered ``scope`` to a picture that already
+    had a telescope and said so in its own reason — "refers specifically to a
+    telescope". Four letters is long enough that containment means sameness and
+    short enough to catch this; below that, ``cat`` matches ``catalog``.
+    """
+    word = name.lower()
+    if len(word) < 4:
+        return False
+    return any(word in other.lower() and word != other.lower() for other in present)
+
+
 async def collect_candidates(
     db,
     ollama,
@@ -116,7 +131,7 @@ async def collect_candidates(
         # offering it to a picture that already has `puddle` spends a pick on a
         # word for something already there — and the slot cap would drop it
         # again downstream anyway.
-        if restates(name, present_list):
+        if restates(name, present_list) or _is_contained_in(name, present_list):
             continue
         if float(hit.get("score") or 0.0) < min_score:
             continue

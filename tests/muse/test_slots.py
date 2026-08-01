@@ -54,9 +54,30 @@ def test_replacing_does_not_free_up_budget():
     assert kept == ["white_shirt", "hat", "scarf"]
 
 
-def test_overlapping_tags_that_are_not_refinements_keep_the_first():
-    """`sleeves_past_wrists` is not `long_sleeves` said better."""
-    assert dedupe_slot(["long_sleeves", "sleeves_past_wrists"], 4) == ["long_sleeves"]
+def test_overlapping_tags_that_are_not_refinements_both_survive():
+    """`sleeves_past_wrists` is not `long_sleeves` said better, and sharing a
+    word is not enough to call it one. Collapsing on any shared word is what
+    destroyed the character — see below."""
+    assert dedupe_slot(["long_sleeves", "sleeves_past_wrists"], 4) == [
+        "long_sleeves", "sleeves_past_wrists",
+    ]
+
+
+def test_the_character_survives_her_own_slot():
+    """Given `1girl, blue_hair, very_long_hair, straight_hair, blue_eyes, slim`
+    the shared-word rule kept `1girl, blue_hair, slim`: hair length and hair
+    style share "hair" with hair colour, and `blue_eyes` shares "blue". A girl
+    may have very long straight blue hair and blue eyes. Identity drift is what
+    the previous pipeline was abandoned over."""
+    identity = ["1girl", "blue_hair", "very_long_hair", "straight_hair",
+                "blue_eyes", "slim"]
+    assert dedupe_slot(identity, BY_KEY["character"].cap) == identity
+
+
+def test_one_feature_still_takes_one_value():
+    """The point of collapsing at all: a girl has one hair colour."""
+    assert dedupe_slot(["blue_hair", "black_hair"], 4) == ["blue_hair"]
+    assert dedupe_slot(["blue_eyes", "green_eyes"], 4) == ["blue_eyes"]
 
 
 def test_the_outfit_slot_asks_for_a_colour():

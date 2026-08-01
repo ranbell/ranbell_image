@@ -70,6 +70,10 @@ A confident bunny girl pilot stands proudly on the runway beside her airplane.
 2. **WD14 語彙が足りない面だけ補う** — クエリは面自身の問い＋お題（「clothing and garments / プールに泳ぎに来た」）。**この狭さが肝**で、お題全体で引いて失敗したのと同じ検索が、面を指定すれば機能する（topup が機能するのと同じ理由）。補完はその面に該当するタグしか入れない
 3. **上限で切り、言い換えを落とす** — `bikini` と `black_bikini` が同じ面にあれば1つの事実を2回書いているので、予算は2つ目の事実に使う
 
+**言い換えの判定は厳しくしないと、キャラが消える。** 「単語を共有していれば言い換え」で始めたところ、identity `1girl, blue_hair, very_long_hair, straight_hair, blue_eyes, slim` が `1girl, blue_hair, slim` になった — 髪の長さも髪型も「hair」を髪色と共有し、`blue_eyes` は「blue」を共有する。青い長いストレートの髪と青い目は1人のキャラであって、1つのことの4通りの言い方ではない。**identity のドリフトは旧パイプラインを捨てた理由そのもの**で、白服対策として入れたこの判定がそれを再導入していた。判定は「一方の語がもう一方を含む（＝より詳しい言い方）」か「主名詞が同じで修飾語が同じファミリー（＝両立しない）」のどちらかに限る。
+
+同じ判定は**面をまたいでも**掛ける。天体観測のお題が `looking_through_telescope` / `telescope` / `large_telescope` を3つの面に書き、望遠鏡が3回重み付けされた。面ごとの予算は面の中でしかこれを止めていなかった。語彙補完も同じヒットを受け取れる全ての面に配っていた（`PROPS` は Accessories と Object の両方に属する）ので、1ヒットにつき1回に。
+
 そのあと**ユーザーが各面を差し替えられる**（`POST /sessions/{id}/slots`）。パネルは面ごとにチップを並べ、`2/4` のように残り予算を出す。
 
 モデルへの指示で2つ念を押す。**書いたタグは絵に出る** — パン屋のお題の Object が `knife, sword` になり、ボードが剣を描き、WD14 が剣を拾い直し、最終プロンプトの Accessories に剣が残った。連想の一歩先ではなく、その情景に実際にあるものだけ。そして**体は1つのポーズしか取れない** — `standing, kneeling` は2枚の絵。
@@ -83,6 +87,8 @@ A confident bunny girl pilot stands proudly on the runway beside her airplane.
 背景×3 + 人物×3 を GEN レーンへ。既定 512×512 / 16 steps / **CFG 2.0**。低 CFG はタグを字義通り強制せず、チェックポイントが得意な方向へ漂わせるため。語彙検索由来の意外性を外した今、その漂いが意外性の主な出所になる。
 
 背景ボードのネガティブには `1girl, solo, multiple_girls, portrait, face` が入る。ポジティブから人物タグを消すだけでは人は消えない — チェックポイントは図書室に人がいるものだと知っているので、明示的に言う必要がある。
+
+**ただしポジティブで同時に人を頼んではいけない。** `Description` を global スロットとして定義していたせいで、背景ボードのポジティブが「A girl with blue hair is looking through a telescope on top of a hill」と言い、ネガティブが `1girl, solo, person` と言う状態になっていた。文のほうが勝ち、背景ボード2枚ともキャラが描かれた。Description は person スロット（最終プロンプトは merge が track を無視して全スロットを組むので影響しない。`track` はボードのプロンプトだけを決める）。ユーザー設定の Effect も同じ形で、`detailed character` がネガティブの `character` と単語レベルで衝突していたため、**背景ボードに限り**ネガティブが禁じている語を含む部分を落とす。
 
 `generated/playground/` に落ち、`is_draft` が立つ。Qdrant には載る（サムネも sha 参照も検索もタダで手に入る）が、ギャラリー一覧からは既定で外れる。「下書きも表示」で出せる。
 

@@ -170,3 +170,17 @@ def test_only_tags_a_slot_will_take_are_offered():
     names = [c["tag"] for c in _candidates(hits=hits)]
     assert "glowing" not in names and "sweat" not in names
     assert "desk_lamp" in names, "a routable candidate still gets through"
+
+
+def test_a_shorter_word_for_something_already_there_is_not_offered():
+    """`restates` splits on underscores, so `scope` and `telescope` look like
+    different tags to it. The model picked `scope` for a picture that already
+    had a telescope, and said so itself — "refers specifically to a telescope"."""
+    hits = HITS + [{"name": "scope", "score": 0.6, "count": 8000}]
+    names = [c["tag"] for c in _candidates(present=("telescope",), hits=hits)]
+    assert "scope" not in names
+
+
+def test_a_short_word_inside_an_unrelated_one_is_still_offered():
+    hits = [{"name": "cat", "score": 0.6, "count": 90000}]
+    assert [c["tag"] for c in _candidates(present=("catalog",), hits=hits)] == ["cat"]

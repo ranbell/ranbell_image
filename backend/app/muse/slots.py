@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..tags import catalog as tag_catalog
+from ..tags.conflict import contradicts
 
 
 @dataclass(frozen=True)
@@ -241,17 +242,26 @@ def dedupe_slot(tags: list[str], cap: int) -> list[str]:
     """Trim a slot to ``cap``, keeping the most specific of any restatement.
 
     ``bikini`` and ``black_bikini`` in the same slot are one fact written twice,
-    and the budget should be spent on a second fact instead. Sharing a
-    three-letter-plus token is a crude test and a sufficient one — within a
-    slot, two tags sharing a noun almost always mean the same thing.
+    and the budget should be spent on a second fact instead.
 
-    Which of the two survives matters more than it looks. Order comes from the
-    harvest ranking, and a generic tag always wins that: ``shirt`` appears on
-    far more images than ``white_shirt``, so it scores higher and agrees across
-    more drafts, and a first-wins rule dropped every colour the drafts had
-    actually shown. Clothing with no colour comes out white — that was the
-    cause. So when one tag's words contain another's, the longer one wins the
-    place: it says the same thing and one more fact besides.
+    Two tags restate each other when one's words *contain* the other's — a
+    refinement — or when they contradict outright, meaning the same head noun
+    modified from the same family. Nothing weaker will do. Sharing any word was
+    the first attempt and it destroyed the character: given the identity
+    ``1girl, blue_hair, very_long_hair, straight_hair, blue_eyes, slim`` it kept
+    ``1girl, blue_hair, slim``, because hair length and hair style share "hair"
+    with hair colour, and ``blue_eyes`` shares "blue". A girl may have very long
+    straight blue hair and blue eyes; that is one character, not four ways of
+    saying one thing. Identity drift is what the previous pipeline was abandoned
+    over, and this reintroduced it.
+
+    Which of two restatements survives matters more than it looks. Order comes
+    from the harvest ranking, and a generic tag always wins that: ``shirt``
+    appears on far more images than ``white_shirt``, so it scores higher and
+    agrees across more drafts, and a first-wins rule dropped every colour the
+    drafts had actually shown. Clothing with no colour comes out white — that
+    was the cause. So the longer one wins the place: it says the same thing and
+    one more fact besides.
     """
     kept: list[str] = []
     for tag in tags:
@@ -262,7 +272,8 @@ def dedupe_slot(tags: list[str], cap: int) -> list[str]:
         replaced = False
         for i, existing in enumerate(kept):
             other = _tokens(existing)
-            if not (tokens & other):
+            refines = bool(tokens & other) and (tokens > other or other > tokens)
+            if not refines and not contradicts(name, existing):
                 continue
             # Same thing said more precisely — take the place rather than a new one.
             if tokens > other:
