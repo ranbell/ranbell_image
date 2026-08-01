@@ -1414,8 +1414,8 @@
     },
     "angle": "カメラ角度",
     "texts": "画中の文字",
-    "textsPlaceholder": "34L @ runway\nBunny Air @ 制服のバッジ",
-    "textsHint": "1行1つ。「文字 @ どこに」の形。プロンプト末尾に text \"…\" として付く",
+    "textsPlaceholder": "34L {'@'} runway\nBunny Air {'@'} 制服のバッジ",
+    "textsHint": "1行1つ。「文字 {'@'} どこに」の形。プロンプト末尾に text \"…\" として付く",
     "angles": {
       "auto": "おまかせ",
       "eye_level": "目線の高さ",

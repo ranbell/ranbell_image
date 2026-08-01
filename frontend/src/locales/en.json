@@ -1414,8 +1414,8 @@
     },
     "angle": "Camera angle",
     "texts": "Text in the image",
-    "textsPlaceholder": "34L @ runway\nBunny Air @ uniform badge",
-    "textsHint": "One per line, as `text @ where`. Appended to the prompt as text \"…\"",
+    "textsPlaceholder": "34L {'@'} runway\nBunny Air {'@'} uniform badge",
+    "textsHint": "One per line, as `text {'@'} where`. Appended to the prompt as text \"…\"",
     "angles": {
       "auto": "Auto",
       "eye_level": "Eye level",
