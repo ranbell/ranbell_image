@@ -83,8 +83,12 @@ SLOTS: tuple[Slot, ...] = (
     Slot(
         "outfit", "Outfit", "person", 4,
         axes=("clothing",), sets=("CLOTHING_EXPLICIT",),
-        query="clothing and garments",
-        guidance="what she is wearing, dressed for this theme",
+        query="clothing and garments with colours",
+        guidance=(
+            "what she is wearing, dressed for this theme. Name a COLOUR or a "
+            "material on each garment — white_blouse, navy_pleated_skirt, denim "
+            "jacket. A garment with no colour renders white every time"
+        ),
     ),
     Slot(
         "action", "Action", "person", 4,
@@ -175,26 +179,39 @@ def restates(tag: str, existing: list[str]) -> bool:
 
 
 def dedupe_slot(tags: list[str], cap: int) -> list[str]:
-    """Trim a slot to ``cap``, dropping restatements of what is already there.
+    """Trim a slot to ``cap``, keeping the most specific of any restatement.
 
     ``bikini`` and ``black_bikini`` in the same slot are one fact written twice,
     and the budget should be spent on a second fact instead. Sharing a
     three-letter-plus token is a crude test and a sufficient one — within a
     slot, two tags sharing a noun almost always mean the same thing.
+
+    Which of the two survives matters more than it looks. Order comes from the
+    harvest ranking, and a generic tag always wins that: ``shirt`` appears on
+    far more images than ``white_shirt``, so it scores higher and agrees across
+    more drafts, and a first-wins rule dropped every colour the drafts had
+    actually shown. Clothing with no colour comes out white — that was the
+    cause. So when one tag's words contain another's, the longer one wins the
+    place: it says the same thing and one more fact besides.
     """
     kept: list[str] = []
-    seen_tokens: set[str] = set()
     for tag in tags:
         name = str(tag or "").strip()
-        if not name or len(kept) >= cap:
+        if not name or any(k.lower() == name.lower() for k in kept):
             continue
         tokens = _tokens(name)
-        if tokens and tokens & seen_tokens:
-            continue
-        if any(k.lower() == name.lower() for k in kept):
-            continue
-        kept.append(name)
-        seen_tokens |= tokens
+        replaced = False
+        for i, existing in enumerate(kept):
+            other = _tokens(existing)
+            if not (tokens & other):
+                continue
+            # Same thing said more precisely — take the place rather than a new one.
+            if tokens > other:
+                kept[i] = name
+            replaced = True
+            break
+        if not replaced and len(kept) < cap:
+            kept.append(name)
     return kept
 
 

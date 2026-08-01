@@ -34,6 +34,35 @@ def test_restatements_lose_their_place_to_a_second_fact():
     assert len([t for t in kept if "bikini" in t]) == 1
 
 
+def test_the_more_specific_of_two_restatements_wins():
+    """Order comes from the harvest ranking and a generic tag always wins it —
+    `shirt` is on far more images than `white_shirt`. A first-wins rule dropped
+    every colour the drafts had shown, and clothing with no colour renders
+    white."""
+    assert dedupe_slot(["shirt", "white_shirt"], 4) == ["white_shirt"]
+    assert dedupe_slot(["skirt", "navy_pleated_skirt"], 4) == ["navy_pleated_skirt"]
+
+
+def test_a_specific_tag_already_in_place_is_not_replaced_by_a_vaguer_one():
+    assert dedupe_slot(["white_shirt", "shirt"], 4) == ["white_shirt"]
+
+
+def test_replacing_does_not_free_up_budget():
+    """A restatement takes the place it restates, it does not buy another."""
+    kept = dedupe_slot(["shirt", "white_shirt", "hat", "scarf", "boots"], 3)
+    assert kept == ["white_shirt", "hat", "scarf"]
+
+
+def test_overlapping_tags_that_are_not_refinements_keep_the_first():
+    """`sleeves_past_wrists` is not `long_sleeves` said better."""
+    assert dedupe_slot(["long_sleeves", "sleeves_past_wrists"], 4) == ["long_sleeves"]
+
+
+def test_the_outfit_slot_asks_for_a_colour():
+    assert "COLOUR" in BY_KEY["outfit"].guidance
+    assert "renders white" in BY_KEY["outfit"].guidance
+
+
 def test_short_tokens_do_not_collapse_unrelated_tags():
     """Two-letter overlaps are noise; the test only looks at real words."""
     kept = dedupe_slot(["a_cat", "a_dog"], 3)
