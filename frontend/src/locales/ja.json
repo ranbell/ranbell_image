@@ -1444,6 +1444,21 @@
     "name": "名前",
     "summary": "説明",
     "empty": "キャラクターがありません",
-    "boardHint": "参照ボードを描いておくと、一覧から見た目で選べる"
+    "boardHint": "参照ボードを描いておくと、一覧から見た目で選べる",
+    "search": "名前・性格で検索",
+    "count": "{shown} / {total} 体",
+    "workflow": "ワークフロー",
+    "needWorkflow": "先にワークフローを選んでください",
+    "draw": "描く",
+    "redraw": "描き直す",
+    "drawMissing": "未生成をまとめて描く ({n})",
+    "candidates": "候補",
+    "useThis": "これを使う",
+    "noPortrait": "まだ描かれていません",
+    "chosen": "選択中",
+    "clearFilter": "解除",
+    "queued": "キューに入れました",
+    "queuedN": "{n} 件をキューに入れました",
+    "open": "キャラクターを選ぶ"
   }
 }

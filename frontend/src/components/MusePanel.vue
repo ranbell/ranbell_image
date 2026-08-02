@@ -12,7 +12,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
-import CharacterPicker from './muse/CharacterPicker.vue'
+import CharacterGallery from './CharacterGallery.vue'
 import SlotEditor from './muse/SlotEditor.vue'
 import TagChips from './muse/TagChips.vue'
 
@@ -232,16 +232,11 @@ async function pickCharacter(id) {
   } catch (err) { fail(err) } finally { busy.value = false }
 }
 
-async function drawCharacterBoard(id) {
-  const workflow = inputs.value.board_workflow || inputs.value.final_workflow
-  if (!workflow) { fail(new Error(t('muse.needs.boardWorkflow'))); return }
-  busy.value = true
-  try {
-    await api(`/api/characters/${id}/board`, {
-      method: 'POST', body: JSON.stringify({ workflow_name: workflow }),
-    })
-    emit('toast', { msg: t('characters.generateBoard'), type: 'info' })
-  } catch (err) { fail(err) } finally { busy.value = false }
+// Drawing a character now belongs to the gallery, which owns the whole screen
+// and can show what came back. Picking one here just closes it.
+async function pickFromGallery(id) {
+  await pickCharacter(id)
+  showPicker.value = false
 }
 
 async function reloadCharacters() {
@@ -370,29 +365,23 @@ function close() { emit('update:show', false) }
             <button
               type="button"
               class="w-full flex items-center gap-2 p-2 rounded-lg border border-white/10 hover:border-white/25 text-left"
-              @click="showPicker = !showPicker"
+              @click="showPicker = true"
             >
               <img
                 v-if="character?.board?.portrait || character?.board?.sheet"
                 :src="thumb(character.board.portrait || character.board.sheet)"
-                class="w-10 h-10 rounded object-cover" alt=""
+                class="w-14 h-[74px] rounded object-cover shrink-0" alt=""
               />
-              <span v-else class="w-10 h-10 rounded bg-black/40 shrink-0"></span>
-              <span class="text-xs text-gray-200 truncate">
-                {{ (isJa ? character?.name_ja : character?.name) || t('muse.noCharacter') }}
+              <span v-else class="w-14 h-[74px] rounded bg-black/40 shrink-0"></span>
+              <span class="min-w-0">
+                <span class="block text-xs text-gray-200 truncate">
+                  {{ (isJa ? character?.name_ja : character?.name) || t('muse.noCharacter') }}
+                </span>
+                <span class="block text-[10px] text-gray-500 truncate">
+                  {{ t('characters.open') }}
+                </span>
               </span>
             </button>
-            <div v-if="showPicker" class="max-h-80 flex flex-col">
-              <CharacterPicker
-                :characters="characters"
-                :selected-id="inputs.character_id || ''"
-                :busy="busy"
-                :can-draw-board="true"
-                @pick="pickCharacter"
-                @draw-board="drawCharacterBoard"
-              />
-              <button class="sb-btn justify-center mt-2" @click="reloadCharacters">↻</button>
-            </div>
             <div v-if="character?.identity_tags?.length" class="flex flex-wrap gap-1">
               <span
                 v-for="tag in character.identity_tags"
@@ -845,5 +834,16 @@ function close() { emit('update:show', false) }
         </main>
       </div>
     </div>
+
+    <CharacterGallery
+      :show="showPicker"
+      :selected-id="inputs.character_id || ''"
+      :workflows="workflows"
+      :workflow="inputs.board_workflow || inputs.final_workflow || ''"
+      @pick="pickFromGallery"
+      @close="showPicker = false; reloadCharacters()"
+      @toast="emit('toast', $event)"
+      @update:workflow="patchInputs({ board_workflow: $event })"
+    />
   </div>
 </template>

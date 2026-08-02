@@ -1444,6 +1444,21 @@
     "name": "Name",
     "summary": "Summary",
     "empty": "No characters yet",
-    "boardHint": "With a reference board drawn, the picker shows what she looks like"
+    "boardHint": "With a reference board drawn, the picker shows what she looks like",
+    "search": "Search by name or trait",
+    "count": "{shown} of {total}",
+    "workflow": "Workflow",
+    "needWorkflow": "Choose a workflow first",
+    "draw": "Draw",
+    "redraw": "Draw again",
+    "drawMissing": "Draw the missing ones ({n})",
+    "candidates": "Candidates",
+    "useThis": "Use this one",
+    "noPortrait": "Not drawn yet",
+    "chosen": "Chosen",
+    "clearFilter": "Clear",
+    "queued": "Queued",
+    "queuedN": "Queued {n}",
+    "open": "Choose a character"
   }
 }
