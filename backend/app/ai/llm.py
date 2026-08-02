@@ -215,6 +215,9 @@ class LlmGateway:
     async def list_ollama_models(self, url: str | None = None) -> list[str]:
         return await self._ollama.list_models(url)
 
+    async def vision_ollama_models(self, url: str | None = None) -> list[str]:
+        return await self._ollama.vision_models(url)
+
     async def list_openai_models(self, url: str | None = None) -> list[str]:
         return await self._openai.list_models(url)
 

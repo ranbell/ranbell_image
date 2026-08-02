@@ -715,6 +715,7 @@
       "ollamaUrl": "Ollama URL",
       "embedModel": "埋め込みモデル",
       "vlmModel": "テキスト / VLM モデル",
+      "vlmModelNoVision": "このモデルは vision 非対応です。参照画像は警告なく無視され、タグだけからプロンプトが書かれます。",
       "llmProvider": "OpenAI 互換エンドポイント",
       "openaiCompat": "OpenAI 互換",
       "llmProviderHint": "接続設定のみです。テキスト／VLM の切り替えは各機能側で選びます。既定は常に Ollama です。Bonsai は llama-server（:8080/v1）を指定。",

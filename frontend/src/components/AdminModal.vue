@@ -33,6 +33,14 @@ const emit = defineEmits([
 // ── Admin internal state ──────────────────────────────────────────────────────
 const adminTab = ref('diag')
 const ollamaModels = ref([])
+const ollamaVisionModels = ref([])
+// Only warn once we actually know which models have vision; an empty list means
+// the capability probe failed, not that every model is text-only.
+const vlmModelLacksVision = computed(() =>
+  ollamaVisionModels.value.length > 0 &&
+  !!adminConfig.value?.vlm_model &&
+  !ollamaVisionModels.value.includes(adminConfig.value.vlm_model)
+)
 const llmModels = ref([])
 const showAdvanced = ref(false)
 const adminStats = ref(null)
@@ -302,7 +310,11 @@ async function fetchAiStatus() {
 async function fetchOllamaModels() {
   try {
     const r = await fetch('/api/ollama/models')
-    if (r.ok) ollamaModels.value = (await r.json()).models ?? []
+    if (r.ok) {
+      const d = await r.json()
+      ollamaModels.value = d.models ?? []
+      ollamaVisionModels.value = d.vision_models ?? []
+    }
   } catch {}
 }
 
@@ -1198,6 +1210,9 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   <input v-else v-model="adminConfig.vlm_model" type="text"
                     placeholder="gemma4:e2b"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p v-if="vlmModelLacksVision" class="mt-1 text-[11px] text-amber-400">
+                    ⚠ {{ $t('admin.config.vlmModelNoVision') }}
+                  </p>
                 </div>
                 <div>
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">

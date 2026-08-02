@@ -137,6 +137,80 @@ class OllamaClient:
             events.extend(parser.feed(chunk))
         return events
 
+    async def _generate_stream(
+        self, payload: dict, *, model: str | None = None
+    ) -> AsyncGenerator[dict, None]:
+        """Shared /api/generate streaming loop for the text and vision callers.
+
+        A reasoning model that runs out of token budget mid-thought returns an
+        empty ``response`` with the whole answer stranded in the thinking
+        channel. Callers keep only ``token`` events, so they would end up with
+        nothing at all and go on to build a prompt out of an empty string.
+        When the stream produced no token, the thinking text is re-emitted as
+        one token event; ``_extract_generate_text`` already does the same for
+        the non-streaming path.
+        """
+        parser = StreamParser()
+        thinking_parts: list[str] = []
+        saw_token = False
+
+        def _track(events: list[dict]) -> list[dict]:
+            nonlocal saw_token
+            for ev in events:
+                if ev["type"] == "token" and ev["text"]:
+                    saw_token = True
+                elif ev["type"] == "think":
+                    thinking_parts.append(ev["text"])
+            return events
+
+        def _fallback() -> list[dict]:
+            if saw_token:
+                return []
+            recovered = "".join(thinking_parts).strip()
+            if not recovered:
+                return []
+            logger.warning(
+                "[ollama] %s streamed no response text; recovering %d chars "
+                "from the thinking channel",
+                model or payload.get("model"),
+                len(recovered),
+            )
+            return [{"type": "token", "text": recovered}]
+
+        async with self._acquire(), self._client.stream(
+            "POST",
+            f"{self.base_url}/api/generate",
+            json=payload,
+            timeout=settings.ollama_timeout_sec,
+        ) as resp:
+            if resp.is_error:
+                body = await resp.aread()
+                try:
+                    msg = json.loads(body).get("error") or body[:500].decode()
+                except Exception:
+                    msg = body[:500].decode()
+                logger.error("[ollama] %s %s — %s", resp.status_code, resp.url, msg)
+                resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+                for event in _track(self._stream_chunk_events(parser, data)):
+                    yield event
+                if data.get("done"):
+                    for event in _track(parser.flush()):
+                        yield event
+                    for event in _fallback():
+                        yield event
+                    return
+        for event in _track(parser.flush()):
+            yield event
+        for event in _fallback():
+            yield event
+
     async def generate_vlm(
         self,
         prompt: str,
@@ -173,47 +247,21 @@ class OllamaClient:
         think: bool | str | None = None,
     ) -> AsyncGenerator[dict, None]:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
-        parser = StreamParser()
+        model_name = model or settings.vlm_model
+        # num_predict=-1 for the same reason generate_text sets it: without it a
+        # Modelfile default (often 128–512) truncates the answer, and a model
+        # that thinks first can spend the whole budget before writing a word.
         payload = self._with_think(
             {
-                "model": model or settings.vlm_model,
+                "model": model_name,
                 "prompt": prompt,
                 "images": images_b64,
                 "stream": True,
-                "options": options or {},
+                "options": {"num_predict": -1, **(options or {})},
             },
             think,
         )
-
-        async with self._acquire(), self._client.stream(
-            "POST",
-            f"{self.base_url}/api/generate",
-            json=payload,
-            timeout=settings.ollama_timeout_sec,
-        ) as resp:
-            if resp.is_error:
-                body = await resp.aread()
-                try:
-                    msg = json.loads(body).get("error") or body[:500].decode()
-                except Exception:
-                    msg = body[:500].decode()
-                logger.error("[ollama] %s %s — %s", resp.status_code, resp.url, msg)
-                resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except Exception:
-                    continue
-                for event in self._stream_chunk_events(parser, data):
-                    yield event
-                if data.get("done"):
-                    for event in parser.flush():
-                        yield event
-                    return
-
-        for event in parser.flush():
+        async for event in self._generate_stream(payload, model=model_name):
             yield event
 
     @staticmethod
@@ -323,44 +371,17 @@ class OllamaClient:
         think: bool | str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Stream text generation without vision inputs."""
-        parser = StreamParser()
+        model_name = model or settings.vlm_model
         payload = self._with_think(
             {
-                "model": model or settings.vlm_model,
+                "model": model_name,
                 "prompt": prompt,
                 "stream": True,
                 "options": {"num_predict": -1, **(options or {})},
             },
             think,
         )
-        async with self._acquire(), self._client.stream(
-            "POST",
-            f"{self.base_url}/api/generate",
-            json=payload,
-            timeout=settings.ollama_timeout_sec,
-        ) as resp:
-            if resp.is_error:
-                body = await resp.aread()
-                try:
-                    msg = json.loads(body).get("error") or body[:500].decode()
-                except Exception:
-                    msg = body[:500].decode()
-                logger.error("[ollama] %s %s — %s", resp.status_code, resp.url, msg)
-                resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except Exception:
-                    continue
-                for event in self._stream_chunk_events(parser, data):
-                    yield event
-                if data.get("done"):
-                    for event in parser.flush():
-                        yield event
-                    return
-        for event in parser.flush():
+        async for event in self._generate_stream(payload, model=model_name):
             yield event
 
     async def health(self, url: str | None = None) -> bool:
@@ -381,6 +402,27 @@ class OllamaClient:
             return [m["name"] for m in r.json().get("models", [])]
         except Exception:
             return []
+
+    async def vision_models(self, url: str | None = None) -> list[str]:
+        """Subset of installed models that can actually accept images.
+
+        A text-only model given images does not fail — Ollama drops them and
+        answers from the prompt alone, so a reference-image pipeline silently
+        degrades into guesswork. Callers use this to say so up front.
+        """
+        base = (url or self.base_url).rstrip("/")
+        out: list[str] = []
+        for name in await self.list_models(url):
+            try:
+                r = await self._client.post(
+                    f"{base}/api/show", json={"model": name}, timeout=5.0
+                )
+                r.raise_for_status()
+                if "vision" in (r.json().get("capabilities") or []):
+                    out.append(name)
+            except Exception:
+                continue
+        return out
 
     async def close(self) -> None:
         await self._client.aclose()

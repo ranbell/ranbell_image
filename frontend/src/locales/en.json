@@ -715,6 +715,7 @@
       "ollamaUrl": "Ollama URL",
       "embedModel": "Embedding model",
       "vlmModel": "Text / VLM model",
+      "vlmModelNoVision": "This model has no vision capability. Reference images will be silently ignored, and prompts will be written from tags alone.",
       "llmProvider": "OpenAI-compatible endpoint",
       "openaiCompat": "OpenAI Compatible",
       "llmProviderHint": "Connection settings only. A feature chooses Ollama vs OpenAI Compatible per run; the default is always Ollama. For Bonsai, point at llama-server (:8080/v1).",

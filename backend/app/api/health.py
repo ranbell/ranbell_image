@@ -136,14 +136,25 @@ async def detailed_health(request: Request):
 
 @router.get("/ollama/models")
 async def ollama_models(request: Request):
-    """Embedding-model list from Ollama (always)."""
+    """Embedding-model list from Ollama (always).
+
+    ``vision_models`` is the subset that accepts images, so the config UI can
+    warn before a text-only model is picked for a job that sends references.
+    """
     llm = request.app.state.ollama
     try:
         list_fn = getattr(llm, "list_ollama_models", llm.list_models)
         models = await list_fn()
-        return {"models": models}
     except Exception:
-        return {"models": []}
+        return {"models": [], "vision_models": []}
+    try:
+        vision_fn = getattr(llm, "vision_ollama_models", None) or getattr(
+            llm, "vision_models", None
+        )
+        vision = await vision_fn() if vision_fn else []
+    except Exception:
+        vision = []
+    return {"models": models, "vision_models": vision}
 
 
 @router.get("/llm/models")

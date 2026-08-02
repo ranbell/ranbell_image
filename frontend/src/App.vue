@@ -2441,11 +2441,15 @@ async function runRefine() {
       buffer = lines.pop() ?? ''
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
-        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch (err) { console.debug('[refine] stream event failed', err) }
+        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch (err) { console.warn('[refine] stream event failed', err) }
       }
     }
   } catch (e) {
-    if (e?.name !== 'AbortError') console.error('Refine error:', e)
+    // Without this the panel just flips to 'done' and looks like it succeeded.
+    if (e?.name !== 'AbortError') {
+      console.error('Refine error:', e)
+      refineErrorMsg.value = e?.message || t('refine.error')
+    }
   } finally {
     refineAbortController = null
     refining.value = false
@@ -4322,10 +4326,15 @@ onUnmounted(() => {
                       {{ $t('refine.newJob') }}
                     </button>
                   </div>
-                  <!-- Error message -->
-                  <div v-if="refineErrorMsg" class="px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg">
-                    <p class="text-xs text-red-300 break-all">⚠ {{ refineErrorMsg }}</p>
-                  </div>
+                </div>
+
+                <!-- Error message. Outside the ComfyUI block on purpose: a run that
+                     fails before queuing ends in phase 'done' with no images, and
+                     while this lived inside that block its gate was never true, so
+                     the message was unreachable exactly when it mattered. -->
+                <div v-if="refineStarted && refineErrorMsg"
+                  class="px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg">
+                  <p class="text-xs text-red-300 break-all">⚠ {{ refineErrorMsg }}</p>
                 </div>
 
               </div>

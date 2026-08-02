@@ -1038,11 +1038,14 @@ async def run_refine_prompt(
         negative = (body.direct_negative_prompt or "").strip()
         _put({"type": "done", "positive": positive, "negative": negative,
                "auto_submit": body.auto_submit, "prose_missing": False})
-        if body.auto_submit and body.workflow_name:
+        if body.auto_submit and not body.workflow_name:
+            _put({"type": "error", "message": "Auto-submit is on but no workflow was selected"})
+        elif body.auto_submit:
             try:
                 gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
                 _put({"type": "comfy_job_id", "job_id": gen_job_id})
             except Exception as exc:
+                logger.error("Refine direct auto-submit failed: %s", exc)
                 _put({"type": "error", "message": f"Generation job error: {exc}"})
         _put(None)
         return
@@ -1372,8 +1375,10 @@ async def run_refine_prompt(
     except Exception as exc:
         logger.error("Ollama stream error in run_refine_prompt: %s", exc)
         _put({"type": "error", "message": str(exc)})
+        # Sentinel first so the SSE stream closes, then fail the job for real —
+        # reporting "Done" here is what let a dead run look like a finished one.
         _put(None)
-        return
+        raise
 
     # 5. post-process: forced-tag removal + literal directive injection
     _phase("parsingOutput", 0.90, "Parsing output...")
@@ -1396,6 +1401,14 @@ async def run_refine_prompt(
             _v_pos = _append_literal_texts(_v_pos, literal_texts)
         variants.append({"positive": _v_pos, "temperature": _vt})
 
+    # A model that answers with nothing at all still reaches here with an empty
+    # prompt. Submitting it burns a full render on whitespace, so refuse — same
+    # shape as the direct_prompt check above.
+    if not positive.strip():
+        _put({"type": "error", "message": "The model returned an empty prompt"})
+        _put(None)
+        raise RuntimeError("run_refine_prompt produced an empty positive prompt")
+
     _put({
         "type": "done",
         "positive": positive,
@@ -1413,15 +1426,25 @@ async def run_refine_prompt(
     })
 
     # 6. auto_submit: queue a ComfyUI generation job (one per fan-out variant)
-    if body.auto_submit and body.workflow_name:
+    if body.auto_submit and not body.workflow_name:
+        # Silently skipping here is indistinguishable from a successful run that
+        # simply never generated anything.
+        _put({"type": "error", "message": "Auto-submit is on but no workflow was selected"})
+    elif body.auto_submit:
         try:
             _phase("queuingGeneration", 0.97, "Queuing generation job...")
             gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
-            for v in variants:
-                _submit_gen_direct(spooler, comfy, db, body, v["positive"], negative, seed=seed_for_gen)
         except Exception as exc:
+            logger.error("Refine auto-submit failed: %s", exc)
             _put({"type": "error", "message": f"Generation job error: {exc}"})
+        # One bad variant must not cost the others their render.
+        for v in variants:
+            try:
+                _submit_gen_direct(spooler, comfy, db, body, v["positive"], negative, seed=seed_for_gen)
+            except Exception as exc:
+                logger.error("Refine variant submit failed: %s", exc)
+                _put({"type": "error", "message": f"Variant job error: {exc}"})
 
     reporter.update(1.0, "Done")
     _put(None)
