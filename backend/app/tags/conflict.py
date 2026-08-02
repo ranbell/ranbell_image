@@ -91,6 +91,24 @@ _TIME_OF_DAY = frozenset({
 })
 
 
+# A picture happens in one room. Like the hours these share no head noun, so
+# nothing caught `bathroom` arriving next to the `kitchen` a dishwashing theme
+# had already named. Only rooms — `library` and `bookshelf` are the same place
+# at two scales, and `kitchen` and `window` are not rivals at all.
+_ROOMS = frozenset({
+    "kitchen", "bathroom", "bedroom", "living_room", "dining_room",
+    "classroom", "library", "office", "gymnasium", "hallway", "corridor",
+    "basement", "attic", "garage", "laundry_room", "locker_room",
+    "infirmary", "cafeteria", "restaurant", "cafe", "bar", "shop",
+    "hospital", "church", "train_interior", "car_interior", "elevator",
+})
+
+
+def _room(tag: str) -> str | None:
+    name = str(tag or "").strip().lower().replace(" ", "_")
+    return name if name in _ROOMS else None
+
+
 def _hour(tag: str) -> str | None:
     """The tag itself when it names an hour of the day, else None."""
     name = str(tag or "").strip().lower().replace(" ", "_")
@@ -138,6 +156,10 @@ def contradicts(tag: str, other: str) -> bool:
 
     a_hour, b_hour = _hour(tag), _hour(other)
     if a_hour and b_hour and a_hour != b_hour:
+        return True
+
+    a_room, b_room = _room(tag), _room(other)
+    if a_room and b_room and a_room != b_room:
         return True
 
     a_noun, a_mod = _parts(tag)

@@ -38,3 +38,17 @@ MAX_FREQ = 0.80
 # to find `katana`, `umbrella` and `sword` at 0.373–0.386, while the hits the
 # theme actually produced sat at 0.45+ and belonged to other slots.
 SUPPLEMENT_MIN_SCORE = 0.42
+
+# How full a slot has to be before the supplement leaves it alone.
+#
+# It used to fill to the cap, which was fine while the caps were three and four
+# and became a problem the moment they were eight and ten: a model that had
+# written four good garments got four more from a vector search, and the search
+# is working from a theme phrase, not a picture. Everything it added across six
+# runs was wrong in the same way — `holding_own_foot` for a summer festival,
+# `rain` for a scene in harsh sun, `bathroom` beside `kitchen`,
+# `hands_in_opposite_sleeves` filed as clothing.
+#
+# A slot with three answers is not short. This is a floor to reach, not a
+# budget to spend.
+SUPPLEMENT_TARGET = 3

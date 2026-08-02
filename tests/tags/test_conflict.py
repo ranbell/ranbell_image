@@ -147,3 +147,24 @@ def test_the_colours_a_model_actually_reaches_for(a, b):
     `blue_scarf` and a `plaid_scarf` at once, and a `dark_coat` over a
     `black_coat`."""
     assert contradicts(a, b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("kitchen", "bathroom"),
+    ("classroom", "gymnasium"),
+    ("bedroom", "office"),
+])
+def test_a_picture_happens_in_one_room(a, b):
+    """A dishwashing theme had already named the kitchen and retrieval added
+    `bathroom`. Like the hours, these share no head noun."""
+    assert contradicts(a, b)
+    assert contradicts(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("library", "bookshelf"),
+    ("kitchen", "window"),
+    ("kitchen", "sink"),
+])
+def test_a_room_and_what_is_in_it_are_not_rivals(a, b):
+    assert not contradicts(a, b)

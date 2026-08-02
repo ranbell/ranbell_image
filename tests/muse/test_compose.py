@@ -376,3 +376,24 @@ def test_a_model_saying_the_aspect_does_not_apply_is_not_a_tag():
     out, _ = _compose({**WRITTEN, "body": "none", "light": "N/A"})
     assert _tags(out, "body") == []
     assert _tags(out, "light") == []
+
+
+def test_the_supplement_leaves_a_slot_the_model_answered_alone():
+    """It filled to the cap, which was fine at three and four and became a
+    problem at eight and ten: a model that wrote four good garments got four
+    more from a vector search working off a theme phrase. Everything it added
+    across six runs was wrong the same way — `rain` for a scene in harsh sun,
+    `bathroom` beside `kitchen`, `hands_in_opposite_sleeves` filed as clothing."""
+    db = FakeDB([{"name": "hair_ribbon", "score": 0.9},
+                 {"name": "hat", "score": 0.85}])
+    out, _ = _compose(
+        {**WRITTEN, "outfit": "cardigan, long_skirt, boots, scarf"},
+        db=db, supplement=True,
+    )
+    assert all(r["source"] == "compose" for r in out["outfit"])
+
+
+def test_a_slot_the_model_barely_answered_is_still_topped_up():
+    db = FakeDB([{"name": "hair_ribbon", "score": 0.9}])
+    out, _ = _compose({**WRITTEN, "outfit": "cardigan"}, db=db, supplement=True)
+    assert "hair_ribbon" in _tags(out, "outfit")

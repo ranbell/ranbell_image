@@ -326,7 +326,8 @@ async def _supplement(
     }
     for slot in active:
         rows = filled.get(slot.key) or []
-        if len(rows) >= slot.cap or not slot.query:
+        target = min(slot.cap, vocab.SUPPLEMENT_TARGET)
+        if len(rows) >= target or not slot.query:
             continue
         # An exclusive slot the model already answered is not short, it is done.
         if slot.exclusive and rows:
@@ -342,7 +343,7 @@ async def _supplement(
 
         have = {r["tag"].lower() for r in rows}
         for hit in hits:
-            if len(rows) >= slot.cap:
+            if len(rows) >= target:
                 break
             tag = str(hit.get("name") or "").strip().replace(" ", "_")
             key = tag.lower()
