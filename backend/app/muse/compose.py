@@ -214,6 +214,13 @@ def _rehome(filled: dict[str, list[dict[str, Any]]], active: tuple[Slot, ...]) -
     """
     keys = {s.key for s in active}
     for slot in active:
+        # Description is a sentence, and no slot accepts a sentence — least of
+        # all Description itself, which has no catalog behind it. Left in, this
+        # filed "A blue-haired girl is waiting for a bus at a bus stop in the
+        # pouring rain." under Action, because the routing found the word
+        # "waiting" in it.
+        if slot.key == "description":
+            continue
         rows = filled.get(slot.key) or []
         staying: list[dict[str, Any]] = []
         for row in rows:
@@ -354,7 +361,14 @@ async def _supplement(
 
 
 def locked_slots(character: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """Character and Body, straight off the chosen preset."""
+    """Character and Body, straight off the chosen preset.
+
+    Character replaces whatever was composed — it is hers and not open to a
+    second opinion. Body only *seeds*: what she is built like is hers, but
+    which parts the picture shows is the theme's, and the caller merges the two.
+    Overwriting Body here discarded everything the model had written about the
+    situation, so a run about soaked legs came back holding only `slim`.
+    """
     identity = [t for t in (character.get("identity_tags") or []) if t]
     body_slot = slot_defs.BY_KEY["body"]
     body = [t for t in identity if slot_defs.accepts(body_slot, t)]
@@ -362,3 +376,21 @@ def locked_slots(character: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
         "character": [{"tag": t, "source": "character"} for t in identity if t not in body],
         "body": [{"tag": t, "source": "character"} for t in body],
     }
+
+
+def seed_locked(
+    filled: dict[str, list[dict[str, Any]]], character: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """Apply ``locked_slots`` to a composed set: replace Character, seed Body."""
+    locked = locked_slots(character)
+    out = dict(filled)
+    out["character"] = locked["character"]
+    seed = locked["body"]
+    seeded = {r["tag"].lower() for r in seed}
+    rest = [r for r in (out.get("body") or []) if r["tag"].lower() not in seeded]
+    kept = slot_defs.dedupe_slot(
+        [r["tag"] for r in seed + rest], slot_defs.BY_KEY["body"].cap,
+    )
+    by_tag = {r["tag"]: r for r in seed + rest}
+    out["body"] = [by_tag[t] for t in kept]
+    return out

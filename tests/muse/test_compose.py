@@ -329,3 +329,30 @@ def test_the_prompt_asks_for_parts_but_keeps_the_build_fixed():
     _, llm = _compose(character=PERSONALITY)
     assert "build word like slim" in llm.prompt
     assert "name the legs and name them wet" in llm.prompt
+
+
+def test_the_description_is_never_refiled_as_something_else():
+    """No slot accepts a sentence, least of all Description, which has no
+    catalog behind it — so re-filing sent "A blue-haired girl is waiting for a
+    bus at a bus stop in the pouring rain." to Action, having found the word
+    "waiting" in it."""
+    line = "A blue-haired girl is waiting for a bus at a bus stop in the pouring rain."
+    out, _ = _compose({**WRITTEN, "description": line})
+    assert _tags(out, "description") == [line]
+    assert line not in _tags(out, "action")
+
+
+def test_the_preset_seeds_body_without_erasing_the_situation():
+    """`locked_slots` used to overwrite Body, discarding everything the model
+    had written about the theme — a run about soaked legs came back holding
+    only `slim`."""
+    from app.muse.compose import seed_locked
+    composed = {"body": [{"tag": "wet_legs", "source": "compose"},
+                         {"tag": "wet_clothes", "source": "compose"}],
+                "outfit": [{"tag": "coat", "source": "compose"}]}
+    out = seed_locked(composed, {"identity_tags": ["1girl", "black_hair", "toned"]})
+    body = [r["tag"] for r in out["body"]]
+    assert body[0] == "toned", "what she is built like leads"
+    assert {"wet_legs", "wet_clothes"} <= set(body)
+    assert [r["tag"] for r in out["character"]] == ["1girl", "black_hair"]
+    assert out["outfit"] == composed["outfit"]

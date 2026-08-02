@@ -84,7 +84,7 @@ async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         db=db,
         supplement=bool(inputs.get("vocab_supplement", True)),
     )
-    filled.update(compose.locked_slots(character))
+    filled = compose.seed_locked(filled, character)
 
     removal = removal_tag_set(cfg)
     blocked = {t.strip().lower().replace(" ", "_")
