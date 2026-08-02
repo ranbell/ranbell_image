@@ -286,3 +286,11 @@ def test_where_the_camera_stands_is_not_a_thing(tag):
     otherwise produce three framings and the merge keeps all of them. A top-up
     offered `pov` and Object announced a point of view was in the room."""
     assert not is_thing(tag)
+
+
+@pytest.mark.parametrize("tag", ["crossed_legs", "holding_own_foot"])
+def test_a_pose_named_after_a_body_part_is_still_a_pose(tag):
+    """Body sits ahead of Action in the prompt, so a single routing pass let it
+    take these on the strength of the last word in them. The head noun is a
+    guess and must not outrank the catalog."""
+    assert place_tag(tag) == "action"

@@ -137,12 +137,12 @@ SLOTS: tuple[Slot, ...] = (
         head_nouns=_BODY_PART_NOUNS, names=_BODY_STATES,
         query="visible body parts, skin and their condition",
         guidance=(
-            "the parts of her the situation puts on show, and what state they "
-            "are in — wet_legs and wet_clothes if she was caught in rain, "
-            "bare_shoulders off a slipped strap, sweat after running. Name the "
-            "part whenever the theme happens TO it; the picture cannot show a "
-            "soaked leg it was never told about. Her build is fixed elsewhere "
-            "— write parts, never slim or petite"
+            "which parts of HER the theme puts on show, and what state they are "
+            "in. Read the theme for the part it names: if it says her legs got "
+            "soaked, write legs and wet_legs; if a strap slipped, write "
+            "bare_shoulders. The picture cannot show a soaked leg it was never "
+            "told about. Hair and clothes are not parts and have their own "
+            "aspects. Her build is fixed elsewhere — never slim or petite"
         ),
         intent=True,
     ),
@@ -175,10 +175,10 @@ SLOTS: tuple[Slot, ...] = (
         axes=("action",), sets=("POSE",),
         query="pose, gesture and action",
         guidance=(
-            "what she is doing with her body and hands — what THIS person would "
-            "be doing here. A patient character waits; a loud one is already "
-            "halfway somewhere. Her habits are listed above and are worth using "
-            "when they fit the theme"
+            "what she is doing with her body and hands HERE. A patient "
+            "character waits; a loud one is already halfway somewhere. Her "
+            "habits above say how she does things, they are not a list to copy "
+            "— a girl who usually looks up at the sky is still waiting for a bus"
         ),
         intent=True,
     ),
@@ -237,6 +237,11 @@ def accepts(slot: Slot, tag: str) -> bool:
     Deliberately permissive: this routes tags that already exist, it does not
     police them. A tag nothing accepts simply goes unplaced.
     """
+    return _by_catalog(slot, tag) or _by_head_noun(slot, tag)
+
+
+def _by_catalog(slot: Slot, tag: str) -> bool:
+    """The confident half: this tag is listed as belonging here."""
     name = str(tag or "").strip().lower().replace(" ", "_")
     if slot.axes and tag_catalog.get_tag_axis(name) in slot.axes:
         return True
@@ -244,18 +249,29 @@ def accepts(slot: Slot, tag: str) -> bool:
         member = getattr(tag_catalog, set_name, None)
         if member and name in member:
             return True
-    if name in slot.names:
-        return True
-    return name.replace("-", "_").rsplit("_", 1)[-1] in slot.head_nouns
+    return name in slot.names
+
+
+def _by_head_noun(slot: Slot, tag: str) -> bool:
+    """The guess: whatever this tag is a part of, it ends with."""
+    name = str(tag or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return bool(name) and name.rsplit("_", 1)[-1] in slot.head_nouns
 
 
 def place_tag(tag: str) -> str | None:
-    """Which slot a loose tag belongs to, or None when nothing claims it."""
-    for slot in SLOTS:
-        if slot.user_owned or slot.locked:
-            continue
-        if accepts(slot, tag):
-            return slot.key
+    """Which slot a loose tag belongs to, or None when nothing claims it.
+
+    The catalog gets asked first and the head noun only afterwards, because the
+    head noun is a guess and a guess must not outrank a fact. Body sits ahead of
+    Action in the prompt, so a single pass let it take `crossed_legs` and
+    `holding_own_foot` — poses the catalog files under Action, claimed on the
+    strength of the last word in them.
+    """
+    routable = [s for s in SLOTS if not s.user_owned and not s.locked]
+    for test in (_by_catalog, _by_head_noun):
+        for slot in routable:
+            if test(slot, tag):
+                return slot.key
     return None
 
 
