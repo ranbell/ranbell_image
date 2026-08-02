@@ -247,11 +247,12 @@ def accepts(slot: Slot, tag: str) -> bool:
     Deliberately permissive: this routes tags that already exist, it does not
     police them. A tag nothing accepts simply goes unplaced.
     """
-    return _by_catalog(slot, tag) or _by_head_noun(slot, tag)
+    return accepts_listed(slot, tag) or _by_head_noun(slot, tag)
 
 
-def _by_catalog(slot: Slot, tag: str) -> bool:
-    """The confident half: this tag is listed as belonging here."""
+def accepts_listed(slot: Slot, tag: str) -> bool:
+    """The confident half of ``accepts``: this tag is *listed* as belonging
+    here, rather than guessed at from its last word."""
     name = str(tag or "").strip().lower().replace(" ", "_")
     if slot.axes and tag_catalog.get_tag_axis(name) in slot.axes:
         return True
@@ -278,7 +279,7 @@ def place_tag(tag: str) -> str | None:
     strength of the last word in them.
     """
     routable = [s for s in SLOTS if not s.user_owned and not s.locked]
-    for test in (_by_catalog, _by_head_noun):
+    for test in (accepts_listed, _by_head_noun):
         for slot in routable:
             if test(slot, tag):
                 return slot.key

@@ -348,6 +348,14 @@ async def _supplement(
             # Without this the pool search puts `swimsuit` into Place.
             if not slot_defs.accepts(slot, tag):
                 continue
+            # And `accepts` alone is too generous where a slot guesses by head
+            # noun: Body accepted `holding_own_foot` on the strength of "foot"
+            # while the catalog files it under Action. Routing already settles
+            # that — a guess does not outrank a fact — so defer to it whenever
+            # this slot is only guessing.
+            if not slot_defs.accepts_listed(slot, tag) \
+                    and slot_defs.place_tag(tag) != slot.key:
+                continue
             if identity and contradicts_any(tag, identity):
                 continue
             # `expressionless` next to `happy`, `kneeling` next to `walking` —

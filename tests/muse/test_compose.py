@@ -356,3 +356,15 @@ def test_the_preset_seeds_body_without_erasing_the_situation():
     assert {"wet_legs", "wet_clothes"} <= set(body)
     assert [r["tag"] for r in out["character"]] == ["1girl", "black_hair"]
     assert out["outfit"] == composed["outfit"]
+
+
+def test_the_supplement_defers_to_routing_where_its_slot_is_only_guessing():
+    """Body accepts `holding_own_foot` on the strength of "foot" while the
+    catalog files it under Action. `accepts` alone let the supplement put a
+    pose in Body; routing already settles it."""
+    db = FakeDB([{"name": "holding_own_foot", "score": 0.9},
+                 {"name": "wet_legs", "score": 0.8}])
+    out, _ = _compose({**WRITTEN, "body": ""}, db=db, supplement=True)
+    tags = _tags(out, "body")
+    assert "wet_legs" in tags, "a part the slot really claims still gets in"
+    assert "holding_own_foot" not in tags
