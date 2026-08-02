@@ -2614,7 +2614,12 @@ async def run_emotion_tag(
     cancel.raise_if_set()
 
     if sha256s:
-        docs = [doc async for doc in _iter_sha256_docs(db, sha256s)]
+        docs = []
+        for sha256 in sha256s:
+            cancel.raise_if_set()
+            doc = await db.get(sha256)
+            if doc:
+                docs.append(doc)
     else:
         docs = []
         offset = None

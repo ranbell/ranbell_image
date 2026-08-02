@@ -5,6 +5,7 @@ import logging
 import random
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 
 from qdrant_client import AsyncQdrantClient, models as qm
 
