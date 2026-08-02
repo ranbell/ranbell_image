@@ -1481,6 +1481,7 @@
     "dislikes": "Dislikes",
     "palette": "Her colours",
     "signatureProp": "Always has",
-    "build": "Build"
+    "build": "Build",
+    "watching": "waiting for the render"
   }
 }

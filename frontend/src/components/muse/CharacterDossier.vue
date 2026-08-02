@@ -14,6 +14,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { eyeSwatch, hairSwatch, colorWord, paletteSwatch } from './colorSwatch.js'
+import { useRenderWatch } from '../../composables/useRenderWatch.js'
 
 const props = defineProps({
   characterId: { type: String, default: '' },
@@ -63,6 +64,13 @@ async function load() {
   catch (err) { fail(err) } finally { loading.value = false }
 }
 
+// A queued render attaches itself minutes later and nothing announces it, so
+// without this the new candidate only appeared if you closed this and reopened.
+const { watch: watchRenders, watching } = useRenderWatch(async () => {
+  await load()
+  emit('changed')
+})
+
 async function draw(slot) {
   if (!props.workflow) { emit('toast', { msg: t('characters.needWorkflow'), type: 'error' }); return }
   busy.value = true
@@ -72,6 +80,7 @@ async function draw(slot) {
       body: JSON.stringify({ workflow_name: props.workflow, slots: [slot] }),
     })
     emit('toast', { msg: t('characters.queued'), type: 'info' })
+    watchRenders(180)
   } catch (err) { fail(err) } finally { busy.value = false }
 }
 
@@ -163,6 +172,7 @@ watch(() => props.characterId, load, { immediate: true })
           <div class="flex items-center gap-2">
             <p class="sb-label mr-auto">
               {{ t('characters.candidates') }} ({{ candidates(bigSlot).length }})
+              <span v-if="watching" class="text-teal-300/80">· {{ t('characters.watching') }}</span>
             </p>
             <button class="sb-btn" :disabled="busy" @click="draw(bigSlot)">
               {{ t('characters.drawWithThis') }}

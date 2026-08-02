@@ -1481,6 +1481,7 @@
     "dislikes": "嫌いなもの",
     "palette": "好きな色",
     "signatureProp": "相棒",
-    "build": "体つき"
+    "build": "体つき",
+    "watching": "描き上がりを待っています"
   }
 }

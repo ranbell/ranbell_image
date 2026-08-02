@@ -21,6 +21,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CharacterDossier from './muse/CharacterDossier.vue'
 import { eyeSwatch, hairSwatch, colorWord } from './muse/colorSwatch.js'
+import { useRenderWatch } from '../composables/useRenderWatch.js'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -154,6 +155,9 @@ function needsWorkflow() {
   return true
 }
 
+// Nothing tells this screen when a render lands, so it looks until it does.
+const { watch: watchRenders, watching } = useRenderWatch(reload)
+
 async function draw(id) {
   if (needsWorkflow()) return
   try {
@@ -161,6 +165,7 @@ async function draw(id) {
       method: 'POST', body: JSON.stringify({ workflow_name: props.workflow }),
     })
     emit('toast', { msg: t('characters.queued'), type: 'info' })
+    watchRenders(180)
   } catch (err) { fail(err) }
 }
 
@@ -173,6 +178,8 @@ async function drawMissing() {
     })
     bulkGroup.value = r.group_id || ''
     emit('toast', { msg: t('characters.queuedN', { n: r.queued }), type: 'info' })
+    // Two hundred renders take a while; watch for as long as that could run.
+    watchRenders(Math.max(300, r.queued * 45))
   } catch (err) { fail(err) } finally { loading.value = false }
 }
 
@@ -182,6 +189,7 @@ async function stopBulk() {
     await api(`/api/jobs/groups/${encodeURIComponent(bulkGroup.value)}/cancel`, { method: 'POST' })
     emit('toast', { msg: t('characters.stopped'), type: 'info' })
     bulkGroup.value = ''
+    watchRenders(20)
   } catch (err) { fail(err) }
 }
 
@@ -215,6 +223,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <h2 class="sb-display text-base text-[var(--sb-amber)]">{{ t('characters.title') }}</h2>
           <p class="text-[11px] text-[var(--sb-muted)]">
             {{ t('characters.count', { shown: filtered.length, total: characters.length }) }}
+            <span v-if="watching" class="text-teal-300/80">· {{ t('characters.watching') }}</span>
           </p>
         </div>
 
