@@ -282,6 +282,19 @@ def merge_tracks(
             lead = list(values)[: max(1, slot.cap // 2)]
             filled[key] = lead + [t for t in filled[key] if t not in lead]
 
+    # One tag, one line. Routing already places each tag once, but a composed
+    # slot can name something the drafts put somewhere else: `bus_stop` is in
+    # no catalog, so the harvested copy landed in Object while the composed one
+    # led Place, and the prompt listed the bus stop twice. The earlier slot
+    # keeps it, which is the more specific one — Place before Object.
+    claimed: set[str] = set()
+    for slot in slot_defs.SLOTS:
+        rows = filled.get(slot.key)
+        if not rows:
+            continue
+        filled[slot.key] = [t for t in rows if t.lower() not in claimed]
+        claimed |= {t.lower() for t in filled[slot.key]}
+
     for key, slot in slot_defs.BY_KEY.items():
         if key in filled:
             filled[key] = slot_defs.dedupe_slot(filled[key], slot.cap)

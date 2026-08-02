@@ -359,3 +359,29 @@ def test_the_scene_being_wet_does_not_delete_her_wet_legs():
     out = merge_tracks(folded, character_weight=0.5)
     assert {"wet_legs", "wet_clothes"} <= set(out["slots"].get("body") or [])
     assert "wet_ground" in out["tags"], "and the pavement is still wet"
+
+
+def test_a_tag_appears_on_exactly_one_line():
+    """`bus_stop` is in no catalog, so the harvested copy landed in Object
+    while the composed one led Place, and the prompt listed it twice."""
+    folded = {"background": BACKGROUND + [{"tag": "bus_stop", "score": 0.9}],
+              "person": PERSON}
+    out = merge_tracks(folded, character_weight=0.5,
+                       composed_slots={"place": ["bus_stop", "raining"]})
+    assert "bus_stop" in out["slots"]["place"]
+    assert "bus_stop" not in (out["slots"].get("object") or [])
+    assert out["positive"].count("bus_stop") == 1
+
+
+def test_the_theme_names_the_place_and_the_character_owns_the_mood():
+    """Place filled with `outdoors, scenery` — the two vaguest tags in the
+    picture — while the one word the theme gave went to Object. And the drafts'
+    `blush` overwrote the mood the character block had just produced, undoing
+    the whole point of reading her personality."""
+    folded = {"background": BACKGROUND + [{"tag": "outdoors", "score": 0.95}],
+              "person": PERSON + [{"tag": "blush", "score": 0.95}]}
+    out = merge_tracks(folded, character_weight=0.5,
+                       composed_slots={"place": ["bus_stop"], "emotion": ["patient"]})
+    assert out["slots"]["place"][0] == "bus_stop"
+    assert out["slots"]["emotion"][0] == "patient"
+    assert "blush" in out["slots"]["emotion"], "the canvas keeps its share"

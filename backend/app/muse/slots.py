@@ -150,6 +150,11 @@ SLOTS: tuple[Slot, ...] = (
         "emotion", "Emotion", "person", 3,
         axes=("emotion",), sets=("EXPRESSION",),
         query="facial expression and mood of the character",
+        # Whose feeling it is, is not something a 512px sketch gets a vote on.
+        # The drafts came back `blush` for the patient, solitary observer and
+        # overwrote the `patient, dreamy` the character block had produced —
+        # undoing, at the last step, the whole point of reading her personality.
+        intent=True,
         guidance=(
             "how she feels about being HERE, on her face. Read her traits: the "
             "same rained-on bus stop is misery to one character and a good "
@@ -200,6 +205,11 @@ SLOTS: tuple[Slot, ...] = (
         sets=("BACKGROUND", "ENVIRONMENT"),
         query="location, architecture, time of day and weather",
         guidance="where this happens — the room, the building, the hour, the weather",
+        # The theme names the place; the drafts only report what a place looks
+        # like. `bus_stop` is in no catalog, so the harvested copy went to
+        # Object while Place filled with `outdoors, scenery` — the two vaguest
+        # tags in the picture beating the one word the theme actually gave.
+        intent=True,
     ),
     Slot(
         "object", "Object", "background", 5,
