@@ -134,3 +134,16 @@ def test_one_garment_has_one_pattern_and_one_length(a, b):
 def test_a_colour_and_a_pattern_can_describe_one_garment(a, b):
     """A brown plaid scarf is a scarf, not two scarves."""
     assert not contradicts(a, b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("indigo_scarf", "blue_scarf"),
+    ("dark_coat", "black_coat"),
+    ("navy_skirt", "blue_skirt"),
+])
+def test_the_colours_a_model_actually_reaches_for(a, b):
+    """A character's palette is written in words like indigo and navy, and the
+    family had none of them — so one prompt asked for an `indigo_scarf`, a
+    `blue_scarf` and a `plaid_scarf` at once, and a `dark_coat` over a
+    `black_coat`."""
+    assert contradicts(a, b)

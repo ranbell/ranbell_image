@@ -21,6 +21,15 @@ _COLOURS = frozenset({
     "violet", "teal", "cyan", "magenta", "beige", "tan", "gold", "golden",
     "platinum", "auburn", "ginger", "lavender", "crimson", "scarlet",
     "multicolored", "rainbow", "two-tone", "gradient", "streaked",
+    # The ones a model reaches for when told to name a colour, and the ones a
+    # character's palette is written in. Without them a prompt asked for an
+    # `indigo_scarf`, a `blue_scarf` and a `plaid_scarf` at once, and for a
+    # `dark_coat` over a `black_coat` — one garment, described until it became
+    # three.
+    "indigo", "navy", "dark", "light", "pale", "deep", "bright",
+    "maroon", "burgundy", "olive", "khaki", "turquoise", "mint", "peach",
+    "charcoal", "cream", "ivory", "bronze", "copper", "rose", "coral",
+    "amber", "emerald", "sapphire", "ruby", "pastel", "neon", "monochrome",
 })
 
 _LENGTHS = frozenset({
