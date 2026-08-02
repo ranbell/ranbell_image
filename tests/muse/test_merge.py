@@ -207,15 +207,32 @@ def test_description_survives_the_merge():
     assert "Description: A girl stands on a rooftop." in out["positive"]
 
 
-def test_what_the_drafts_showed_beats_what_was_composed():
-    """The image is the source of truth; the composed slot is only a fallback
-    for aspects the canvas cannot report."""
+def test_what_the_drafts_showed_still_fills_most_of_the_wardrobe():
+    """The image remains the source of truth for what she has on; the composed
+    half only leads, and half is all it gets."""
     out = merge_tracks(
         FOLDED, character_weight=0.5,
         composed_slots={"outfit": ["swimsuit"]},
     )
     assert "school_uniform" in out["slots"]["outfit"]
-    assert "swimsuit" not in out["slots"]["outfit"]
+    assert "hair_ribbon" in out["slots"]["outfit"]
+
+
+def test_the_colour_the_character_wore_is_not_read_back_out_of_the_prompt():
+    """WD14 reports garments reliably but generically: it read the indigo coat
+    the board had rendered as `coat`. A plain garment always outscores its
+    coloured variant because it is on far more images, so `black_coat` at 0.56
+    sat below the budget line while `coat` at 0.81 sailed through — and the
+    clothes went back to having no colour, which renders white."""
+    folded = {"background": BACKGROUND,
+              "person": PERSON + [{"tag": "coat", "score": 0.81}]}
+    out = merge_tracks(
+        folded, character_weight=0.5,
+        composed_slots={"outfit": ["long_indigo_coat", "silver_scarf"]},
+    )
+    outfit = out["slots"]["outfit"]
+    assert "long_indigo_coat" in outfit
+    assert "coat" not in outfit, "the plain word is the same garment said worse"
 
 
 def test_the_themes_verb_survives_what_the_drafts_failed_to_draw():

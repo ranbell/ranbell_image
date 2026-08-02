@@ -23,7 +23,7 @@ from ..tags import catalog as tag_catalog
 from ..tags.conflict import contradicts_any
 from ..tags.junk import is_junk_tag
 from . import vocab
-from .slots import is_thing, place_tag, restates
+from .slots import BY_KEY, is_thing, place_tag, restates
 from .tracks import belongs_to_track
 
 logger = logging.getLogger(__name__)
@@ -153,6 +153,12 @@ async def collect_candidates(
         # kitchen. Unrouted is fine — `desk_lamp` is unrouted too — but it has
         # to be a thing.
         if place_tag(name) is None and not is_thing(name):
+            continue
+        # An exclusive slot has one answer by definition, and this step only
+        # knows how to add. It offered `crying` to a face the character block
+        # had settled as `calm_determination`, and the prompt asked for both.
+        home = BY_KEY.get(place_tag(name) or "")
+        if home is not None and home.exclusive:
             continue
         out.append({
             "tag": name,

@@ -174,6 +174,13 @@ SLOTS: tuple[Slot, ...] = (
             "the colours from HERS where they suit the scene. Dress her in "
             "layers: a coat is also a collar, a sleeve and what is under it"
         ),
+        # For the colours, and only for them. WD14 reports garments reliably
+        # but generically: it read the indigo coat the board had rendered as
+        # `coat`, and a plain garment always outscores its coloured variant
+        # because it appears on far more images — so `black_coat` at 0.56 sat
+        # below the budget line while `coat` at 0.81 sailed through, and the
+        # prompt went back to colourless clothes that render white.
+        intent=True,
     ),
     Slot(
         "action", "Action", "person", 4,

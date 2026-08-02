@@ -195,3 +195,11 @@ def test_framing_is_never_offered_as_a_reinforcement():
                    {"name": "from_above", "score": 0.55, "count": 40000}]
     names = [c["tag"] for c in _candidates(hits=hits)]
     assert "pov" not in names and "from_above" not in names
+
+
+def test_an_exclusive_slot_is_never_offered_a_second_answer():
+    """One face has one expression, and this step only knows how to add. It
+    offered `crying` to a face the character block had settled as
+    `calm_determination`, and the prompt asked for both."""
+    hits = HITS + [{"name": "crying", "score": 0.6, "count": 50000}]
+    assert "crying" not in [c["tag"] for c in _candidates(hits=hits)]
