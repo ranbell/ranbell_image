@@ -54,6 +54,10 @@ _GESTURE_BUCKET = "hobby_actions"
 # actually render the way they read.
 BOARD_SLOTS: tuple[str, ...] = ("sheet", "portrait")
 
+# How many portraits of one character to keep around to choose between. Enough
+# to re-roll a few times and still see the one you liked three tries ago.
+GALLERY_LIMIT = 12
+
 _seed_cache: list[dict[str, Any]] | None = None
 
 
@@ -186,6 +190,9 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "tag_count": sum(len(v or []) for v in tags.values()),
         # What the picker shows. A bundled preset has none until one is drawn.
         "board": {slot: str(board.get(slot) or "") for slot in BOARD_SLOTS},
+        # Every portrait drawn for her, so the picker can offer the choice
+        # without fetching the whole preset.
+        "gallery": [str(s) for s in (preset.get("gallery") or []) if s],
         "user_created": bool(preset.get("user_created")),
     }
 
@@ -230,11 +237,16 @@ async def seed_presets_if_empty(db, *, vector_dim: int) -> int:
 
 
 async def reset_presets_to_defaults(db, *, vector_dim: int) -> dict[str, int]:
-    """Wipe and re-insert the bundled presets (explicit reload)."""
-    try:
-        await db._qc.delete_collection(CHARACTER_PRESETS_COLLECTION)
-    except Exception as exc:
-        logger.warning("[presets] drop failed: %s", exc)
+    """Re-read the bundled presets from the asset file.
+
+    This used to drop the collection, which took every character's pictures with
+    it — one run of it left all 100 with no portrait, because a preset's images
+    are stored on the preset. It no longer deletes anything: the bundled ids are
+    `uuid5(namespace, preset_key)` and therefore stable, so the same rows can be
+    written over in place, and `_insert_seed_presets` carries the artwork across.
+
+    User-authored characters have random ids, so nothing here can reach them.
+    """
     await db.ensure_character_presets_collection()
     inserted = await _insert_seed_presets(db, vector_dim=vector_dim)
     return {"inserted": inserted}
@@ -289,7 +301,13 @@ async def delete_preset(db, preset_id: str) -> bool:
 
 
 async def attach_board_image(db, preset_id: str, slot: str, image_id: str) -> dict | None:
-    """Record a rendered reference image against one board slot."""
+    """Record a rendered reference image against one board slot.
+
+    The newest render becomes the slot, and every portrait ever drawn for her is
+    also kept in ``gallery`` so re-rolling is a choice rather than a replacement:
+    the fifth attempt is not automatically better than the second, and only the
+    user can say which face is hers.
+    """
     if slot not in BOARD_SLOTS:
         return None
     current = await get_preset(db, preset_id)
@@ -297,6 +315,32 @@ async def attach_board_image(db, preset_id: str, slot: str, image_id: str) -> di
         return None
     board = dict(current.get("board") or {})
     board[slot] = image_id
+    payload: dict[str, Any] = {"board": board}
+    if slot == "portrait":
+        payload["gallery"] = _with_candidate(current.get("gallery"), image_id)
+    await db._qc.set_payload(
+        collection_name=CHARACTER_PRESETS_COLLECTION,
+        payload=payload,
+        points=[preset_id],
+    )
+    return board
+
+
+def _with_candidate(gallery: Any, image_id: str) -> list[str]:
+    """Newest first, no duplicates, oldest dropped past the limit."""
+    kept = [str(s) for s in (gallery or []) if s and str(s) != image_id]
+    return [image_id, *kept][:GALLERY_LIMIT]
+
+
+async def choose_thumbnail(db, preset_id: str, image_id: str) -> dict | None:
+    """Adopt one of her existing candidates as the face she is shown by."""
+    current = await get_preset(db, preset_id)
+    if current is None:
+        return None
+    gallery = [str(s) for s in (current.get("gallery") or []) if s]
+    if image_id not in gallery:
+        return None
+    board = {**(current.get("board") or {}), "portrait": image_id}
     await db._qc.set_payload(
         collection_name=CHARACTER_PRESETS_COLLECTION,
         payload={"board": board},
@@ -305,17 +349,50 @@ async def attach_board_image(db, preset_id: str, slot: str, image_id: str) -> di
     return board
 
 
+async def _existing_artwork(db) -> dict[str, dict[str, Any]]:
+    """``{point_id: {board, gallery}}`` for whatever is already stored."""
+    out: dict[str, dict[str, Any]] = {}
+    offset = None
+    try:
+        while True:
+            points, offset = await db._qc.scroll(
+                collection_name=CHARACTER_PRESETS_COLLECTION,
+                limit=256, offset=offset, with_payload=True, with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                art = {k: payload[k] for k in ("board", "gallery") if payload.get(k)}
+                if art:
+                    out[str(point.id)] = art
+            if offset is None:
+                break
+    except Exception as exc:
+        # An empty or missing collection is the normal first-run case.
+        logger.debug("[presets] no existing artwork to carry over: %s", exc)
+    return out
+
+
 async def _insert_seed_presets(db, *, vector_dim: int) -> int:
+    """Write the bundled presets in, keeping whatever has been drawn for them.
+
+    The asset file describes who a character is; it says nothing about her
+    pictures, and it never will — those are rendered later and recorded on the
+    row. Writing the file over the row therefore has to carry `board` and
+    `gallery` across, or re-reading the file destroys every portrait in the app.
+    """
     seeds = load_seed_presets()
     if not seeds:
         return 0
+    kept = await _existing_artwork(db)
     points = [
         qm.PointStruct(
-            id=preset_point_id(str(p.get("id") or "")),
+            id=point_id,
             vector={"embedding": _dummy_vector(vector_dim)},
-            payload=p,
+            payload={**p, **kept.get(point_id, {})},
         )
-        for p in seeds
+        for p, point_id in (
+            (p, preset_point_id(str(p.get("id") or ""))) for p in seeds
+        )
     ]
     for i in range(0, len(points), 100):
         await db._qc.upsert(

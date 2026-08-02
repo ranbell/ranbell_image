@@ -129,12 +129,67 @@ async def delete_character(character_id: str, request: Request):
     return {"ok": True}
 
 
+class ThumbnailChoice(BaseModel):
+    sha256: str = Field(..., min_length=8)
+
+
+class BulkThumbnailRequest(BaseModel):
+    workflow_name: str = Field(..., min_length=1)
+    limit: int = Field(default=200, ge=1, le=500)
+    steps: int | None = None
+    cfg: float | None = None
+
+
+@router.post("/{character_id}/thumbnail")
+async def choose_character_thumbnail(
+    character_id: str, body: ThumbnailChoice, request: Request,
+):
+    """Adopt one of her existing candidates as the face she is shown by.
+
+    Re-rolling a portrait keeps the old ones (`presets.GALLERY_LIMIT` of them),
+    because the fifth attempt is not automatically better than the second.
+    """
+    board = await presets_db.choose_thumbnail(
+        request.app.state.db, character_id, body.sha256,
+    )
+    if board is None:
+        raise HTTPException(404, "character or candidate not found")
+    return {"ok": True, "board": board}
+
+
+@router.post("/thumbnails/missing")
+async def render_missing_thumbnails(body: BulkThumbnailRequest, request: Request):
+    """Draw a portrait for every character who has none.
+
+    A hundred characters shown as a hundred name labels is the list this was
+    meant to replace, so the gallery is only worth having once they all have a
+    face. Portraits only — the full sheet is 1024×1344 and this is a hundred of
+    them.
+    """
+    db = request.app.state.db
+    rows = await presets_db.list_presets(db, limit=500)
+    pending = [r for r in rows if not (r.get("board") or {}).get("portrait")]
+    pending = pending[: body.limit]
+
+    queued: list[dict] = []
+    for row in pending:
+        preset = await presets_db.get_preset(db, row["id"])
+        if preset is None:
+            continue
+        queued += await _queue_board_slots(
+            request, preset, row["id"], ["portrait"],
+            workflow_name=body.workflow_name, steps=body.steps, cfg=body.cfg,
+        )
+    logger.info("[characters] queued %d missing portraits", len(queued))
+    return {"queued": len(queued), "remaining": max(0, len(
+        [r for r in rows if not (r.get("board") or {}).get("portrait")]
+    ) - len(queued)), "jobs": queued}
+
+
 @router.post("/{character_id}/board")
 async def render_character_board(character_id: str, body: BoardRequest, request: Request):
     """Queue one render per board slot; each attaches itself when it lands."""
     db = request.app.state.db
-    spooler = request.app.state.spooler
-    comfy = request.app.state.comfy
 
     preset = await presets_db.get_preset(db, character_id)
     if preset is None:
@@ -144,8 +199,6 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
     if not slots:
         raise HTTPException(400, f"no valid slot in {body.slots}")
 
-    from ..jobs.render import run_render
-
     # One small call, before any render: what she is doing in the five frames,
     # read off her personality rather than picked from four fixed slots.
     plan = None
@@ -154,12 +207,42 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
             preset, request.app.state.ollama, model=body.plan_model,
         )
 
+    jobs = await _queue_board_slots(
+        request, preset, character_id, slots,
+        workflow_name=body.workflow_name, plan=plan,
+        width=body.width, height=body.height,
+        steps=body.steps, cfg=body.cfg, seed=body.seed,
+    )
+    return {"status": "queued", "jobs": jobs, "plan": plan}
+
+
+async def _queue_board_slots(
+    request: Request,
+    preset: dict,
+    character_id: str,
+    slots: list[str],
+    *,
+    workflow_name: str,
+    plan=None,
+    width: int | None = None,
+    height: int | None = None,
+    steps: int | None = None,
+    cfg: float | None = None,
+    seed: int | None = None,
+) -> list[dict]:
+    """Queue a render per slot; each attaches itself to the preset when it lands."""
+    db = request.app.state.db
+    spooler = request.app.state.spooler
+    comfy = request.app.state.comfy
+
+    from ..jobs.render import run_render
+
     jobs: list[dict] = []
     for slot in slots:
         positive, negative = compile_board_slot(preset, slot, plan)
         default_w, default_h = SLOT_SIZE.get(slot, (1024, 1344))
-        width = body.width or default_w
-        height = body.height or default_h
+        slot_w = width or default_w
+        slot_h = height or default_h
 
         def _attach(slot_name: str):
             async def _inner(sha256: str, _meta: dict) -> None:
@@ -173,21 +256,21 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
             meta={"character_id": character_id, "slot": slot},
             db=db,
             comfy=comfy,
-            workflow_name=body.workflow_name,
+            workflow_name=workflow_name,
             positive=positive,
             negative=negative,
-            width=width,
-            height=height,
-            steps=body.steps,
-            cfg=body.cfg,
-            seed=body.seed,
+            width=slot_w,
+            height=slot_h,
+            steps=steps,
+            cfg=cfg,
+            seed=seed,
             subdir=CHARACTER_SUBDIR,
             prefix=f"char_{slot}",
             method="character_board",
             payload_extra={"character_id": character_id, "character_slot": slot},
             attach=_attach(slot),
         )
-        jobs.append({"slot": slot, "job_id": job_id, "positive": positive,
-                     "size": [width, height]})
+        jobs.append({"slot": slot, "job_id": job_id, "character_id": character_id,
+                     "positive": positive, "size": [slot_w, slot_h]})
 
-    return {"status": "queued", "jobs": jobs, "plan": plan}
+    return jobs

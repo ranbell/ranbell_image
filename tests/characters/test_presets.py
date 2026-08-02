@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 import pytest
 
 from app.characters.presets import (
+    GALLERY_LIMIT,
+    _with_candidate,
     load_seed_presets,
     personality_text_from_preset,
     preset_point_id,
@@ -151,7 +153,8 @@ def test_summary_row_is_light():
     row = preset_summary(PRESETS[0])
     assert set(row) == {
         "id", "preset_key", "name", "name_ja", "summary", "summary_ja",
-        "gender", "subject_tag", "traits", "tag_count", "board", "user_created",
+        "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
+        "user_created",
     }
     assert row["tag_count"] > 0
 
@@ -167,3 +170,35 @@ def test_summary_carries_board_images_once_drawn():
     row = preset_summary({**PRESETS[0], "board": {"sheet": "abc123"}, "user_created": True})
     assert row["board"] == {"sheet": "abc123", "portrait": ""}
     assert row["user_created"] is True
+
+
+# ── the artwork survives a re-seed ──────────────────────────────────────────
+def test_a_preset_id_is_stable_across_reseeds():
+    """This is what lets the asset be re-read without dropping the collection.
+    Dropping it took every character's portrait with it — one run left all 100
+    with no face, because a preset's pictures live on the preset."""
+    for preset in PRESETS[:5]:
+        assert preset_point_id(preset["id"]) == preset_point_id(preset["id"])
+    ids = {preset_point_id(p["id"]) for p in PRESETS}
+    assert len(ids) == len(PRESETS), "two characters sharing a row would overwrite"
+
+
+def test_a_re_roll_keeps_the_earlier_candidates():
+    """The fifth attempt is not automatically better than the second, and only
+    the user can say which face is hers."""
+    gallery = []
+    for sha in ("aaa", "bbb", "ccc"):
+        gallery = _with_candidate(gallery, sha)
+    assert gallery == ["ccc", "bbb", "aaa"], "newest first"
+
+
+def test_drawing_the_same_portrait_twice_does_not_duplicate_it():
+    assert _with_candidate(["aaa", "bbb"], "bbb") == ["bbb", "aaa"]
+
+
+def test_the_candidate_list_has_an_end():
+    gallery = []
+    for i in range(GALLERY_LIMIT + 5):
+        gallery = _with_candidate(gallery, f"sha{i}")
+    assert len(gallery) == GALLERY_LIMIT
+    assert gallery[0] == f"sha{GALLERY_LIMIT + 4}", "the newest is kept"
