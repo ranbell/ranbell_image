@@ -232,6 +232,22 @@ Inspire のブレストをそのまま呼ぶ。**お題**と結合タグ（`refe
 
 `タグ行 \n\n シーン2文` の順で本番ワークフローへ。タグが先なのは、モデルが実際に条件付けするのはタグ行で、散文は構図と雰囲気を寄せるだけだから。散文を先に置くとタグが注意の届かない位置まで押し出される。
 
+**AUTO はブレストの4案を全部描く。** 4案作って1枚しか描かないのは、このパイプラインで一番おかしな点だった — 一番面白い出力を出すステップが、1枚も見ないうちに4分の3を捨てさせていた。案ごとに散文を書き（軽量モデルの小さな呼び出し×4）、案の数だけレンダーをキューに積む。
+
+`session["final"]`（単数）は **`session["finals"]`（配列）**になった。各レンダーは**キューに積んだときの位置**を持ち回る — レンダーが返す meta は ComfyUI の prompt id で、こちらの job_id とは突き合わせられないため。1枚しか無かった頃のように `final` を丸ごと上書きしていると、**4枚目の着地が他の3枚を消す**。`render` が done になるのは最後の1枚が着地したときで、4分の3埋まったグリッドは「進行中」であって「完成」ではない。
+
+## AUTO と MANUAL
+
+**AUTO** は1回押すと全工程を通しで走り、4案すべてを描く。**MANUAL** は1工程ずつ止まり、タグに口を出せる。
+
+**AUTO では「足りないもの」の意味が変わる。** `missing_inputs` は工程ごとに答えるので、compose の時点では `final_workflow` を要求しない。1工程ずつ押すなら正しいが、1回で全部走る AUTO では**本番ワークフロー未選択のまま走り出し、ボードのレンダーを使い切った6工程先で壁に当たる**。AUTO では全工程の不足を最初から返し、全部埋まるまでボタンは押せない。
+
+**ワークフローとモデルは AUTO でも必ず訊く。** 都度変えるものなので隠さない。隠すのは**調整ノブだけ**（board の幅・steps・cfg・枚数、harvest 閾値と rerank、merge 比率、`unique_count`）で、AUTO ではその既定値であることが本題。
+
+**案の選択は AUTO が飛ばす工程。** そのため `brainstorm` の done 判定はモードで変わる — AUTO は候補が揃った時点で、MANUAL は1案が選ばれた時点で done。
+
+画面も入れ替わる。AUTO は**結果のグリッドが先頭**で、7枚の工程カードは1つの summary の後ろに畳まれる。MANUAL では途中生成物こそが成果物なので、順番に並んだまま。
+
 ## キャラクター
 
 `character_presets` コレクション。同梱 100 体 + ユーザー作成。プリセットは既に Danbooru タグを持っているので、キャラ確定は**純粋関数で LLM を通さない**（[`characters/presets.py`](../../backend/app/characters/presets.py) `preset_to_character`）。キャラは全画像で同一であるべき唯一の部分で、そこに LLM を挟むのが髪色・目の色をパネル間でドリフトさせていた原因だった。
@@ -270,6 +286,12 @@ Effect: cinematic, kodak color, film_grain, blurry_background, hdr, bokeh, multi
 
 LLM が落ちた場合・4カットが重複した場合は固定枠へフォールバックする。何も描けないボードより、同じでも描けるボードのほうがましなため。
 
+**キャラは何枚でも描け、表に出す1枚は選べる。** 同じキャラを画像モデルを変えて描き比べるためで、候補は**スロットごと**に、**描いたチェックポイントを添えて**残る（`gallery`、新しい順に12枚）。`board.{sheet,portrait}` が今おもてに出している1枚で、`POST /{id}/board-image` で候補から差し替える。平坦な sha のリストだった頃はどのモデルの絵か分からず、2枚持つ意味が無かった。
+
+**プリセットの再読み込みは絵を消さない。** 同梱 id は `uuid5(namespace, preset_key)` で安定しているので、コレクションを捨てずに同じ行を上書きし、`board` と `gallery` は読んでから引き継ぐ。以前は `delete_collection` していて、**アセットを直して再シードした1回で100体全員の顔が消えた**（キャラの絵はプリセット行に載っているため）。ユーザー作成キャラはランダム id なのでここからは届かない。
+
+`POST /api/characters/boards/missing` が未生成を全部キューに積む。200枚を事故で始めると重いので、全ジョブに1つの `group_id` が付き、[`POST /api/jobs/groups/{id}/cancel`](../../backend/app/api/jobs.py) で止められる。
+
 **portrait は逆で、顔を等倍で確認するための寄り**。identity と上半身の衣類と頭部に着けるもの（眼鏡・髪飾り）を載せ、脚を見せる要素（スカート・靴・レッグウェア）と手持ちの小物を落とす。`long_skirt` も `book_cart` も「全身を見せろ」という票で、残すと portrait が2枚目の立ち絵として返ってくる。逆に服を全部落とすと素肌で返ってくるので、上半身は残す。ネガティブに `full_body` / `wide_shot` / `multiple_views` を入れ、キャンバスも 512×512 の正方形にして足を置く場所を無くしてある。
 
 ## API
@@ -281,7 +303,7 @@ LLM が落ちた場合・4カットが重複した場合は固定枠へフォー
 | `PATCH /sessions/{id}/inputs` | 全パラメータ |
 | `POST /sessions/{id}/character` | キャラ確定（この時点で凍結される） |
 | `POST /sessions/{id}/reject-tags` | `{tags, remove}` — 除外の追加／解除 |
-| `POST /sessions/{id}/{compose,board,harvest,topup,merge,render}` | 各ステップ |
+| `POST /sessions/{id}/{compose,board,harvest,topup,merge,render}` | 各ステップ。`/render` は `{every_idea}` を取り、既定はモード次第 |
 | `POST /sessions/{id}/brainstorm` | ブレストをキュー → `job_id` |
 | `POST /sessions/{id}/brainstorm/record` | ストリームで受けた markdown を戻す |
 | `POST /sessions/{id}/scene` | `{index}` — 案を選んで2文に圧縮 |
