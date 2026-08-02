@@ -1359,7 +1359,8 @@
       "merge": "Merge the tags",
       "brainstorm": "Imagine the scene",
       "render": "Render for real",
-      "done": "Done"
+      "done": "Done",
+      "auto": "Draw"
     },
     "needs": {
       "theme": "a theme",
@@ -1425,6 +1426,10 @@
       "dutch_angle": "Dutch angle",
       "from_side": "From the side",
       "from_behind": "From behind"
+    },
+    "mode": {
+      "auto": "AUTO",
+      "manual": "MANUAL"
     }
   },
   "characters": {

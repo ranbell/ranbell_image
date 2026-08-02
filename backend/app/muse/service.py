@@ -103,6 +103,7 @@ async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["topup"] = []
     session["topup_candidates"] = []
     session["merged"] = {}
+    session["finals"] = []
     session_db.log(
         session, "compose",
         " / ".join(f"{k}:{len(v)}" for k, v in session["slots"].items() if v),
@@ -239,6 +240,7 @@ async def submit_board(db, comfy, spooler, session: dict[str, Any]) -> dict[str,
     session["board"] = board
     session["harvest"] = {}
     session["merged"] = {}
+    session["finals"] = []
     session["status"] = "rendering"
     session_db.log(session, "board", f"{count} per track, {workflow}")
     await session_db.save(db, session)
@@ -330,6 +332,7 @@ async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any
     session["topup"] = []
     session["topup_candidates"] = []
     session["merged"] = {}
+    session["finals"] = []
     session_db.log(
         session, "harvest",
         " / ".join(f"{t}:{len(result[t])}(-{len(dropped[t])})" for t in TRACKS),
@@ -400,6 +403,7 @@ async def run_topup(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["topup_candidates"] = candidates
     session["topup"] = picked
     session["merged"] = {}
+    session["finals"] = []
     session_db.log(session, "topup", f"{len(picked)}/{len(candidates)}")
     await session_db.save(db, session)
     return session
@@ -471,50 +475,115 @@ async def choose_scene(db, ollama, session: dict[str, Any], index: int) -> dict[
         idea=f"{idea.get('title', '')}\n{idea.get('body', '')}",
     )
     session["scene"] = {**current, "chosen": index, "text": text}
-    # The prompt carries the prose, so it has to be rebuilt once there is some.
-    if merged.get("slots"):
-        session["merged"] = {
-            **merged,
-            "positive": slot_defs.render_prompt(
-                merged["slots"],
-                texts=list(inputs.get("texts") or []),
-                prose=text,
-            ),
-        }
+    session["merged"] = _with_prose(merged, inputs, text)
     session_db.log(session, "scene", text)
     await session_db.save(db, session)
     return session
 
 
+def _with_prose(merged: dict[str, Any], inputs: dict[str, Any], text: str) -> dict[str, Any]:
+    """The slotted prompt carries the prose, so it is rebuilt once there is some."""
+    if not merged.get("slots"):
+        return merged
+    return {
+        **merged,
+        "positive": slot_defs.render_prompt(
+            merged["slots"], texts=list(inputs.get("texts") or []), prose=text,
+        ),
+    }
+
+
+async def write_all_scenes(db, ollama, session: dict[str, Any]) -> list[dict[str, Any]]:
+    """One closing paragraph per brainstorm idea.
+
+    Each idea is a different picture — the same tags lit and framed a different
+    way — so each needs its own prose, and therefore its own prompt. Four small
+    calls to the light model, which is what it is for.
+    """
+    candidates = (session.get("scene") or {}).get("candidates") or []
+    if not candidates:
+        raise MuseError("brainstorm first")
+    inputs = _inputs(session)
+    cfg = await get_runtime_config(db)
+    slots = (session.get("merged") or {}).get("slots") or {}
+
+    out: list[dict[str, Any]] = []
+    for i, idea in enumerate(candidates):
+        text = await scene.write_prose(
+            slots, ollama,
+            model=str(inputs.get("light_model") or ""),
+            num_ctx=cfg.get("ollama_num_ctx"),
+            idea=f"{idea.get('title', '')}\n{idea.get('body', '')}",
+        )
+        out.append({"index": i, "title": str(idea.get("title") or ""), "text": text})
+    return out
+
+
 # ── S8 render ───────────────────────────────────────────────────────────────
-async def submit_final(db, comfy, spooler, session: dict[str, Any]) -> dict[str, Any]:
+async def submit_final(
+    db, comfy, spooler, session: dict[str, Any],
+    *, ollama=None, every_idea: bool = False,
+) -> dict[str, Any]:
+    """Draw the picture — or, when asked, every idea the brainstorm had.
+
+    Four ideas and one render was always the odd part of this: the step that
+    produces the most interesting output made you throw three quarters of it
+    away before seeing any of it.
+    """
     inputs = _inputs(session)
     workflow = str(inputs.get("final_workflow") or "").strip()
     if not workflow:
         raise MuseError("final_workflow is required")
     merged = session.get("merged") or {}
-    tags = merged.get("tags") or []
-    if not tags:
+    if not (merged.get("tags") or []):
         raise MuseError("merge the tags first")
 
-    # The slotted prompt already carries its prose and text directives.
+    if every_idea:
+        if ollama is None:
+            raise MuseError("a model is required to write every scene")
+        scenes = await write_all_scenes(db, ollama, session)
+    else:
+        chosen = session.get("scene") or {}
+        scenes = [{
+            "index": chosen.get("chosen", 0),
+            "title": "",
+            "text": chosen.get("text", ""),
+        }]
+
+    session["finals"] = []
+    for entry in scenes:
+        _queue_one_final(db, comfy, spooler, session, workflow, entry)
+    session["status"] = "rendering"
+    session_db.log(session, "render", f"{workflow} ×{len(session['finals'])}")
+    await session_db.save(db, session)
+    return session
+
+
+def _queue_one_final(
+    db, comfy, spooler, session: dict[str, Any], workflow: str, entry: dict[str, Any],
+) -> None:
+    inputs = _inputs(session)
+    merged = _with_prose(session.get("merged") or {}, inputs, entry.get("text") or "")
     positive = merged.get("positive") or scene.compose_final_prompt(
-        tags, (session.get("scene") or {}).get("text", ""),
+        merged.get("tags") or [], entry.get("text") or "",
     )
     negative = str(inputs.get("negative_prompt") or "")
     shot_negative = camera.negative_for(str(inputs.get("shot") or "auto"))
     if shot_negative:
         negative = f"{negative}, {shot_negative}" if negative else shot_negative
     session_id = session["session_id"]
+    # Its place in the grid, decided before it is queued: the meta a render
+    # hands back carries Comfy's prompt id, which cannot be matched to the job.
+    index = len(session.setdefault("finals", []))
 
     async def _attach(sha256: str, meta: dict) -> None:
-        await session_db.attach_final_image(db, session_id, sha256, meta)
+        await session_db.attach_final_image(db, session_id, sha256, meta, index=index)
 
     job_id = spooler.submit(
         JobLane.GENERATION,
         "muse_final",
         _render_runner(),
-        meta={"session_id": session_id},
+        meta={"session_id": session_id, "group_id": f"muse:{session_id}"},
         db=db,
         comfy=comfy,
         workflow_name=workflow,
@@ -527,14 +596,13 @@ async def submit_final(db, comfy, spooler, session: dict[str, Any]) -> dict[str,
         payload_extra={"muse_session_id": session_id},
         attach=_attach,
     )
-    session["final"] = {
+    session.setdefault("finals", []).append({
+        "idea_index": int(entry.get("index") or 0),
+        "title": str(entry.get("title") or ""),
+        "prose": str(entry.get("text") or ""),
         "positive": positive, "negative": negative,
         "job_id": job_id, "image_id": "",
-    }
-    session["status"] = "rendering"
-    session_db.log(session, "render", workflow)
-    await session_db.save(db, session)
-    return session
+    })
 
 
 async def set_slot(

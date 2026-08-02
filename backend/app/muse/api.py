@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
 from ..spooler.models import JobLane
-from . import events, service, session_db
+from . import events, schema, service, session_db
 from .catalog import build_muse_catalog
 from .schema import STEPS
 
@@ -37,6 +37,7 @@ class InputsPatch(BaseModel):
     llm_provider: str | None = None
     locale: str | None = None
     negative_prompt: str | None = None
+    mode: str | None = None
     board_width: int | None = Field(default=None, ge=256, le=2048)
     board_height: int | None = Field(default=None, ge=256, le=2048)
     board_steps: int | None = Field(default=None, ge=1, le=40)
@@ -271,11 +272,20 @@ async def choose_scene(session_id: str, body: SceneChoice, request: Request):
     ))
 
 
+class RenderRequest(BaseModel):
+    # AUTO draws every brainstorm idea rather than making you pick one before
+    # you have seen any of them.
+    every_idea: bool | None = None
+
+
 @router.post("/sessions/{session_id}/render")
-async def run_render(session_id: str, request: Request):
+async def run_render(session_id: str, request: Request, body: RenderRequest | None = None):
     session = await _session(request, session_id)
+    every = (body.every_idea if body and body.every_idea is not None
+             else schema.is_auto(session))
     return await _run(request, session, service.submit_final(
         _db(request), request.app.state.comfy, request.app.state.spooler, session,
+        ollama=_llm(request, session), every_idea=every,
     ))
 
 

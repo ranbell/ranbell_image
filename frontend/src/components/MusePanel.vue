@@ -60,7 +60,14 @@ const topup = computed(() => session.value?.topup || [])
 const topupCandidates = computed(() => session.value?.topup_candidates || [])
 const merged = computed(() => session.value?.merged || {})
 const scene = computed(() => session.value?.scene || {})
-const final = computed(() => session.value?.final || {})
+const finals = computed(() => {
+  const list = session.value?.finals
+  if (Array.isArray(list)) return list
+  const legacy = session.value?.final
+  return legacy && legacy.positive ? [legacy] : []
+})
+const mode = computed(() => inputs.value.mode || 'auto')
+const isAuto = computed(() => mode.value === 'auto')
 const warnings = computed(() => session.value?.warnings || [])
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
@@ -80,7 +87,12 @@ const textsText = computed({
 const models = computed(() => catalog.value?.llm?.ollama?.models || [])
 const vocabMissing = computed(() => catalog.value && !catalog.value.wd14_vocab?.imported)
 
-const ctaLabel = computed(() => t(`muse.cta.${nextStep.value}`))
+// One press in AUTO, so the button names the whole job rather than the step.
+const ctaLabel = computed(() => (
+  isAuto.value && nextStep.value !== 'done'
+    ? t('muse.cta.auto')
+    : t(`muse.cta.${nextStep.value}`)
+))
 const ctaBlocked = computed(() => needs.value.length > 0 || nextStep.value === 'done')
 
 const boardTracks = computed(() => ['background', 'person'])
@@ -203,7 +215,9 @@ async function step(name) {
   busyStep.value = name
   try {
     session.value = await api(`/api/muse/sessions/${session.value.session_id}/${name}`, {
-      method: 'POST',
+      // An empty body with a JSON content type is a 422 on routes that declare
+      // one, and `/render` now does.
+      method: 'POST', body: '{}',
     })
     if (name === 'merge') brainstormText.value = ''
   } catch (err) {
@@ -215,10 +229,46 @@ async function step(name) {
 }
 
 async function runCta() {
+  if (isAuto.value) return runToEnd()
   const name = nextStep.value
   if (name === 'brainstorm') return runBrainstorm()
   if (name === 'done') return
   await step(name)
+}
+
+/*
+ * AUTO: one press, the whole chain.
+ *
+ * Two steps do not fit the "post and read the answer back" shape and have to be
+ * waited for by hand — the board queues six renders that land later, and the
+ * brainstorm streams. Everything else is a single call, so the loop just keeps
+ * asking the server what comes next until nothing does.
+ */
+const autoRunning = ref(false)
+
+async function runToEnd() {
+  if (autoRunning.value || ctaBlocked.value) return
+  autoRunning.value = true
+  try {
+    for (let guard = 0; guard < 40; guard++) {
+      const name = nextStep.value
+      if (name === 'done') break
+      if (name === 'brainstorm') await runBrainstorm()
+      else await step(name)
+      if (name === 'board') await waitFor(() => !stepState.value.board?.pending, 900)
+      // A step that refuses to advance would otherwise spin here forever.
+      if (nextStep.value === name && name !== 'render') break
+    }
+  } catch (err) { fail(err) } finally { autoRunning.value = false }
+}
+
+async function waitFor(ready, tries) {
+  for (let i = 0; i < tries; i++) {
+    if (ready()) return true
+    await new Promise(r => setTimeout(r, 2000))
+    await refresh()
+  }
+  return false
 }
 
 async function pickCharacter(id) {
@@ -325,11 +375,12 @@ async function chooseScene(index) {
 }
 
 function sendFinalToRefine() {
-  if (!final.value.positive) return
+  const first = finals.value.find(f => f.image_id) || finals.value[0]
+  if (!first?.positive) return
   emit('send-to-refine-direct', {
-    shas: final.value.image_id ? [final.value.image_id] : [],
-    directPrompt: final.value.positive,
-    directNegativePrompt: final.value.negative || '',
+    shas: first.image_id ? [first.image_id] : [],
+    directPrompt: first.positive,
+    directNegativePrompt: first.negative || '',
     source: 'muse',
   })
 }
@@ -351,6 +402,19 @@ function close() { emit('update:show', false) }
           <p class="text-[11px] text-[var(--sb-muted)] truncate">{{ t('muse.subtitle') }}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          <!-- AUTO walks the whole chain and draws every idea; MANUAL stops
+               after each step and is where the tuning knobs live. -->
+          <div class="sb-seg">
+            <button
+              v-for="m in ['auto', 'manual']"
+              :key="m"
+              type="button"
+              class="sb-seg-btn"
+              :class="mode === m ? 'is-on-teal' : ''"
+              :disabled="busy || autoRunning"
+              @click="patchInputs({ mode: m })"
+            >{{ t(`muse.mode.${m}`) }}</button>
+          </div>
           <span class="text-[10px] text-[var(--sb-faint)]">SSE {{ streamLive ? '●' : '○' }}</span>
           <button class="sb-btn" :disabled="busy" @click="resetSession">{{ t('muse.reset') }}</button>
           <button class="sb-icon-btn" :title="t('muse.close')" @click="close">✕</button>
@@ -613,9 +677,12 @@ function close() { emit('update:show', false) }
           <div class="flex items-center gap-3">
             <button
               class="px-4 py-2 rounded-lg bg-teal-800/70 hover:bg-teal-700/80 border border-teal-500/40 text-sm text-teal-100 disabled:opacity-40"
-              :disabled="busy || brainstorming || ctaBlocked"
+              :disabled="busy || brainstorming || autoRunning || ctaBlocked"
               @click="runCta"
-            >{{ busy ? '…' : ctaLabel }}</button>
+            >{{ busy || autoRunning ? '…' : ctaLabel }}</button>
+            <p v-if="autoRunning" class="text-[11px] text-teal-300">
+              {{ t(`muse.cta.${nextStep}`) }}
+            </p>
             <p v-if="needs.length" class="text-[11px] text-amber-400">
               {{ t('muse.warn.needs', { items: needs.map(n => t(`muse.needs.${n}`)).join(' / ') }) }}
             </p>
@@ -810,25 +877,46 @@ function close() { emit('update:show', false) }
             <p v-if="scene.text" class="sb-prose mt-3 text-[12px] border-t border-white/5 pt-2">{{ scene.text }}</p>
           </section>
 
-          <!-- S8 final -->
-          <section v-if="final.positive || final.image_id" class="sb-shell p-3">
-            <p class="sb-label mb-2">{{ t('muse.render.title') }}</p>
-            <div class="flex gap-3">
-              <div class="w-48 shrink-0 rounded border border-white/10 bg-black/40 overflow-hidden aspect-square flex items-center justify-center">
-                <img
-                  v-if="final.image_id"
-                  :src="thumb(final.image_id)"
-                  class="w-full h-full object-cover cursor-pointer"
-                  alt=""
-                  @click="emit('select-image', final.image_id)"
-                />
-                <span v-else class="text-[10px] text-gray-600 animate-pulse">{{ t('muse.board.pending') }}</span>
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="sb-label">{{ t('muse.render.positive') }}</p>
-                <p class="text-[11px] font-mono text-gray-300 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{{ final.positive }}</p>
-                <button class="sb-btn mt-2" @click="sendFinalToRefine">→ Refine</button>
-              </div>
+          <!-- S8 finals — one per idea in AUTO. The point of having four ideas
+               is seeing all four drawn, so they get the room to be looked at. -->
+          <section v-if="finals.length" class="sb-shell p-3">
+            <div class="flex items-baseline gap-2 mb-2">
+              <p class="sb-label mr-auto">{{ t('muse.render.title') }}</p>
+              <p class="text-[10px] text-gray-500">{{ stepState.render?.detail }}</p>
+              <button class="sb-btn !py-0.5 !text-[10px]" @click="sendFinalToRefine">→ Refine</button>
+            </div>
+            <div
+              class="grid gap-3"
+              :class="finals.length > 1 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-1'"
+            >
+              <figure v-for="(f, i) in finals" :key="f.job_id || i" class="min-w-0">
+                <div class="rounded-lg border border-white/10 bg-black/40 overflow-hidden
+                            aspect-[3/4] flex items-center justify-center">
+                  <img
+                    v-if="f.image_id"
+                    :src="thumb(f.image_id)"
+                    class="w-full h-full object-cover cursor-pointer
+                           transition-transform hover:scale-[1.03]"
+                    alt=""
+                    @click="emit('select-image', f.image_id)"
+                  />
+                  <span v-else class="text-[10px] text-gray-600 animate-pulse">
+                    {{ t('muse.board.pending') }}
+                  </span>
+                </div>
+                <figcaption class="mt-1">
+                  <p class="text-[11px] text-gray-300 truncate" :title="f.title">
+                    {{ f.title || t('muse.render.title') }}
+                  </p>
+                  <details class="mt-0.5">
+                    <summary class="text-[10px] text-gray-600 cursor-pointer">
+                      {{ t('muse.render.positive') }}
+                    </summary>
+                    <p class="text-[10px] font-mono text-gray-400 whitespace-pre-wrap
+                              break-words max-h-40 overflow-y-auto mt-1">{{ f.positive }}</p>
+                  </details>
+                </figcaption>
+              </figure>
             </div>
           </section>
         </main>

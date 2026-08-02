@@ -1359,7 +1359,8 @@
       "merge": "タグをまとめる",
       "brainstorm": "シーンを考える",
       "render": "本番を描く",
-      "done": "完成"
+      "done": "完成",
+      "auto": "描く"
     },
     "needs": {
       "theme": "お題",
@@ -1425,6 +1426,10 @@
       "dutch_angle": "斜め（ダッチ）",
       "from_side": "横から",
       "from_behind": "後ろから"
+    },
+    "mode": {
+      "auto": "AUTO",
+      "manual": "MANUAL"
     }
   },
   "characters": {

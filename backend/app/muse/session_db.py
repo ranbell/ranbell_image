@@ -8,7 +8,7 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ..db.qdrant_client import MUSE_SESSIONS_COLLECTION
-from . import events
+from . import events, schema
 
 logger = logging.getLogger(__name__)
 
@@ -90,17 +90,33 @@ async def attach_board_image(
     })
 
 
-async def attach_final_image(db, session_id: str, image_id: str, meta: dict) -> None:
+async def attach_final_image(
+    db, session_id: str, image_id: str, meta: dict, *, index: int = 0,
+) -> None:
+    """Fill in the render that was queued at ``index``.
+
+    A run draws one image per brainstorm idea and they land in whatever order
+    the queue reaches them, so each render carries its own position — the meta a
+    render hands back is Comfy's prompt id, which is not the job id we filed it
+    under. Writing to `final` wholesale, which is what this did when there was
+    only ever one, meant the fourth image to arrive erased the other three.
+    """
     session = await load(db, session_id)
     if session is None:
         return
-    final = dict(session.get("final") or {})
-    final["image_id"] = image_id
-    final["seed"] = meta.get("seed", final.get("seed"))
-    session["final"] = final
-    session["status"] = "done"
+    finals = [dict(f) for f in schema.finals_of(session)]
+    if not 0 <= index < len(finals):
+        return
+    finals[index]["image_id"] = image_id
+    finals[index]["seed"] = meta.get("seed", finals[index].get("seed"))
+    session["finals"] = finals
+    if all(f.get("image_id") for f in finals):
+        session["status"] = "done"
     await save(db, session, publish=False)
-    events.publish(session_id, {"type": "final_attached", "image_id": image_id})
+    events.publish(session_id, {
+        "type": "final_attached", "image_id": image_id,
+        "done": sum(1 for f in finals if f.get("image_id")), "total": len(finals),
+    })
 
 
 def log(session: dict[str, Any], step: str, detail: str) -> None:
