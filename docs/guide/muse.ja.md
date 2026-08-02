@@ -236,6 +236,8 @@ Inspire のブレストをそのまま呼ぶ。**お題**と結合タグ（`refe
 
 `character_presets` コレクション。同梱 100 体 + ユーザー作成。プリセットは既に Danbooru タグを持っているので、キャラ確定は**純粋関数で LLM を通さない**（[`characters/presets.py`](../../backend/app/characters/presets.py) `preset_to_character`）。キャラは全画像で同一であるべき唯一の部分で、そこに LLM を挟むのが髪色・目の色をパネル間でドリフトさせていた原因だった。
 
+`Character` はプリセットで上書きされるが、**`Body` は種を蒔くだけ**。体格は彼女のものでも、どの部位を絵が見せるかはお題のものだから。`dict.update` で上書きしていた頃は、LLM が状況から書いた部位が全部消えて `slim` だけが残っていた。
+
 参照ボードは `sheet` と `portrait` の2枚で、`generated/characters/` に保存される（[`characters/board.py`](../../backend/app/characters/board.py)）。
 
 **sheet は Chronicle 時代に辿り着いた合成形式**を使う。中央に全身、周囲にポラロイド枠の4カットを並べた1枚で、同じ人物が4つの生活の中でも同じ人物に見えるかを確認できる。
