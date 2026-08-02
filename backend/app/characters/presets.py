@@ -190,9 +190,14 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "tag_count": sum(len(v or []) for v in tags.values()),
         # What the picker shows. A bundled preset has none until one is drawn.
         "board": {slot: str(board.get(slot) or "") for slot in BOARD_SLOTS},
-        # Every portrait drawn for her, so the picker can offer the choice
+        # Everything drawn for her, per slot, so the picker can offer the choice
         # without fetching the whole preset.
-        "gallery": [str(s) for s in (preset.get("gallery") or []) if s],
+        "gallery": normalise_gallery(preset.get("gallery")),
+        # What the gallery filters by. Hair and eye colour are the two things a
+        # person searching a hundred characters actually has in mind, and they
+        # were buried inside `tags` where a list view could not reach them.
+        "hair_color": (tags.get("hair_color") or [""])[0],
+        "eye_color": (tags.get("eyes") or [""])[0],
         "user_created": bool(preset.get("user_created")),
     }
 
@@ -300,13 +305,44 @@ async def delete_preset(db, preset_id: str) -> bool:
     return True
 
 
-async def attach_board_image(db, preset_id: str, slot: str, image_id: str) -> dict | None:
+def normalise_gallery(gallery: Any) -> dict[str, list[dict[str, Any]]]:
+    """``{slot: [{sha, workflow, at}]}`` from whatever is stored.
+
+    The first version of this was a flat list of portrait shas, which could not
+    say which checkpoint had drawn one — and drawing the same character on two
+    checkpoints to compare them is the whole point of keeping more than one.
+    """
+    out: dict[str, list[dict[str, Any]]] = {slot: [] for slot in BOARD_SLOTS}
+    if isinstance(gallery, list):        # the old shape: portraits, no provenance
+        out["portrait"] = [
+            {"sha": str(s), "workflow": "", "at": 0.0} for s in gallery if s
+        ]
+        return out
+    for slot in BOARD_SLOTS:
+        for row in (gallery or {}).get(slot) or []:
+            sha = str((row or {}).get("sha") or row or "")
+            if not sha:
+                continue
+            out[slot].append({
+                "sha": sha,
+                "workflow": str((row or {}).get("workflow") or "")
+                if isinstance(row, dict) else "",
+                "at": float((row or {}).get("at") or 0.0)
+                if isinstance(row, dict) else 0.0,
+            })
+    return out
+
+
+async def attach_board_image(
+    db, preset_id: str, slot: str, image_id: str, *, workflow: str = "",
+) -> dict | None:
     """Record a rendered reference image against one board slot.
 
-    The newest render becomes the slot, and every portrait ever drawn for her is
-    also kept in ``gallery`` so re-rolling is a choice rather than a replacement:
-    the fifth attempt is not automatically better than the second, and only the
-    user can say which face is hers.
+    The newest render becomes the slot, and every image ever drawn for that slot
+    is kept as a candidate, with the checkpoint that drew it. Re-rolling is a
+    choice rather than a replacement: the fifth attempt is not automatically
+    better than the second, and comparing two checkpoints only works if both
+    stay around and you can tell them apart.
     """
     if slot not in BOARD_SLOTS:
         return None
@@ -315,32 +351,38 @@ async def attach_board_image(db, preset_id: str, slot: str, image_id: str) -> di
         return None
     board = dict(current.get("board") or {})
     board[slot] = image_id
-    payload: dict[str, Any] = {"board": board}
-    if slot == "portrait":
-        payload["gallery"] = _with_candidate(current.get("gallery"), image_id)
+    gallery = normalise_gallery(current.get("gallery"))
+    gallery[slot] = _with_candidate(gallery[slot], image_id, workflow)
     await db._qc.set_payload(
         collection_name=CHARACTER_PRESETS_COLLECTION,
-        payload=payload,
+        payload={"board": board, "gallery": gallery},
         points=[preset_id],
     )
     return board
 
 
-def _with_candidate(gallery: Any, image_id: str) -> list[str]:
+def _with_candidate(
+    candidates: list[dict[str, Any]], image_id: str, workflow: str,
+) -> list[dict[str, Any]]:
     """Newest first, no duplicates, oldest dropped past the limit."""
-    kept = [str(s) for s in (gallery or []) if s and str(s) != image_id]
-    return [image_id, *kept][:GALLERY_LIMIT]
+    kept = [c for c in candidates if c.get("sha") != image_id]
+    entry = {"sha": image_id, "workflow": workflow, "at": time.time()}
+    return [entry, *kept][:GALLERY_LIMIT]
 
 
-async def choose_thumbnail(db, preset_id: str, image_id: str) -> dict | None:
-    """Adopt one of her existing candidates as the face she is shown by."""
+async def choose_board_image(
+    db, preset_id: str, slot: str, image_id: str,
+) -> dict | None:
+    """Adopt one of her candidates as the image that slot shows."""
+    if slot not in BOARD_SLOTS:
+        return None
     current = await get_preset(db, preset_id)
     if current is None:
         return None
-    gallery = [str(s) for s in (current.get("gallery") or []) if s]
-    if image_id not in gallery:
+    gallery = normalise_gallery(current.get("gallery"))
+    if image_id not in {c["sha"] for c in gallery[slot]}:
         return None
-    board = {**(current.get("board") or {}), "portrait": image_id}
+    board = {**(current.get("board") or {}), slot: image_id}
     await db._qc.set_payload(
         collection_name=CHARACTER_PRESETS_COLLECTION,
         payload={"board": board},

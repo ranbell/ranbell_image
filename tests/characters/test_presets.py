@@ -18,6 +18,7 @@ from app.characters.presets import (
     GALLERY_LIMIT,
     _with_candidate,
     load_seed_presets,
+    normalise_gallery,
     personality_text_from_preset,
     preset_point_id,
     preset_summary,
@@ -154,7 +155,7 @@ def test_summary_row_is_light():
     assert set(row) == {
         "id", "preset_key", "name", "name_ja", "summary", "summary_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
-        "user_created",
+        "hair_color", "eye_color", "user_created",
     }
     assert row["tag_count"] > 0
 
@@ -186,19 +187,53 @@ def test_a_preset_id_is_stable_across_reseeds():
 def test_a_re_roll_keeps_the_earlier_candidates():
     """The fifth attempt is not automatically better than the second, and only
     the user can say which face is hers."""
-    gallery = []
+    kept = []
     for sha in ("aaa", "bbb", "ccc"):
-        gallery = _with_candidate(gallery, sha)
-    assert gallery == ["ccc", "bbb", "aaa"], "newest first"
+        kept = _with_candidate(kept, sha, "W.json")
+    assert [c["sha"] for c in kept] == ["ccc", "bbb", "aaa"], "newest first"
 
 
-def test_drawing_the_same_portrait_twice_does_not_duplicate_it():
-    assert _with_candidate(["aaa", "bbb"], "bbb") == ["bbb", "aaa"]
+def test_a_candidate_remembers_which_checkpoint_drew_it():
+    """Drawing one character on two models to compare them only works if you
+    can tell the results apart."""
+    kept = _with_candidate([], "aaa", "API_Anima_RIN.json")
+    kept = _with_candidate(kept, "bbb", "API_Anima_Ribeya.json")
+    assert [c["workflow"] for c in kept] == ["API_Anima_Ribeya.json", "API_Anima_RIN.json"]
+    assert kept[0]["at"] >= kept[1]["at"]
+
+
+def test_drawing_the_same_image_twice_does_not_duplicate_it():
+    kept = _with_candidate([{"sha": "aaa", "workflow": "", "at": 1.0},
+                            {"sha": "bbb", "workflow": "", "at": 0.0}], "bbb", "W.json")
+    assert [c["sha"] for c in kept] == ["bbb", "aaa"]
 
 
 def test_the_candidate_list_has_an_end():
-    gallery = []
+    kept = []
     for i in range(GALLERY_LIMIT + 5):
-        gallery = _with_candidate(gallery, f"sha{i}")
-    assert len(gallery) == GALLERY_LIMIT
-    assert gallery[0] == f"sha{GALLERY_LIMIT + 4}", "the newest is kept"
+        kept = _with_candidate(kept, f"sha{i}", "W.json")
+    assert len(kept) == GALLERY_LIMIT
+    assert kept[0]["sha"] == f"sha{GALLERY_LIMIT + 4}", "the newest is kept"
+
+
+def test_the_old_flat_portrait_list_still_reads():
+    """The first version could not say which checkpoint drew a candidate."""
+    out = normalise_gallery(["aaa", "bbb"])
+    assert [c["sha"] for c in out["portrait"]] == ["aaa", "bbb"]
+    assert out["sheet"] == []
+
+
+def test_candidates_are_kept_per_slot():
+    out = normalise_gallery({"sheet": [{"sha": "s1", "workflow": "W.json", "at": 3}],
+                             "portrait": [{"sha": "p1", "workflow": "V.json", "at": 4}]})
+    assert out["sheet"][0]["workflow"] == "W.json"
+    assert out["portrait"][0]["sha"] == "p1"
+
+
+def test_the_summary_carries_the_colours_the_gallery_filters_by():
+    """Hair and eye colour are what a person searching a hundred characters
+    has in mind, and they were buried inside `tags`."""
+    for preset in PRESETS:
+        row = preset_summary(preset)
+        assert row["hair_color"], preset["id"]
+        assert row["eye_color"], preset["id"]

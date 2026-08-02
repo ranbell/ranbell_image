@@ -1460,6 +1460,27 @@
     "clearFilter": "Clear",
     "queued": "Queued",
     "queuedN": "Queued {n}",
-    "open": "Choose a character"
+    "open": "Choose a character",
+    "view": {
+      "grid": "Grid",
+      "deck": "Deck"
+    },
+    "surprise": "Surprise me",
+    "hair": "Hair",
+    "eyes": "Eyes",
+    "drawWithHer": "Draw with her",
+    "drawWithThis": "Draw with this model",
+    "readMore": "Read more",
+    "deckHint": "← → or scroll",
+    "stop": "Stop",
+    "stopped": "Stopped",
+    "noneYet": "Not drawn yet",
+    "unknownModel": "Unknown model",
+    "inner": "Privately",
+    "likes": "Likes",
+    "dislikes": "Dislikes",
+    "palette": "Her colours",
+    "signatureProp": "Always has",
+    "build": "Build"
   }
 }

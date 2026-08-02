@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -81,7 +82,9 @@ async def reset_characters(request: Request):
     install — `petite` stayed on 71 characters for a whole release after it was
     removed from the file. This is the only way to pick the edits up.
 
-    It drops the collection, so any user-authored character goes with it.
+    It writes the bundled rows over in place and carries their artwork across,
+    so nothing that has been drawn is lost and user-authored characters, which
+    have random ids, are not touched.
     """
     result = await presets_db.reset_presets_to_defaults(
         request.app.state.db, vector_dim=settings.embed_dim,
@@ -129,61 +132,79 @@ async def delete_character(character_id: str, request: Request):
     return {"ok": True}
 
 
-class ThumbnailChoice(BaseModel):
+class BoardImageChoice(BaseModel):
+    slot: str = Field(..., min_length=1)
     sha256: str = Field(..., min_length=8)
 
 
-class BulkThumbnailRequest(BaseModel):
+class BulkBoardRequest(BaseModel):
     workflow_name: str = Field(..., min_length=1)
-    limit: int = Field(default=200, ge=1, le=500)
+    slots: list[str] = []          # empty → every slot
+    limit: int = Field(default=500, ge=1, le=1000)
     steps: int | None = None
     cfg: float | None = None
 
 
-@router.post("/{character_id}/thumbnail")
-async def choose_character_thumbnail(
-    character_id: str, body: ThumbnailChoice, request: Request,
+@router.post("/{character_id}/board-image")
+async def choose_character_board_image(
+    character_id: str, body: BoardImageChoice, request: Request,
 ):
-    """Adopt one of her existing candidates as the face she is shown by.
+    """Adopt one of her candidates as the image that slot shows.
 
-    Re-rolling a portrait keeps the old ones (`presets.GALLERY_LIMIT` of them),
-    because the fifth attempt is not automatically better than the second.
+    Every render is kept (`presets.GALLERY_LIMIT` per slot) with the checkpoint
+    that drew it, so the same character can be drawn on two models and compared.
     """
-    board = await presets_db.choose_thumbnail(
-        request.app.state.db, character_id, body.sha256,
+    board = await presets_db.choose_board_image(
+        request.app.state.db, character_id, body.slot, body.sha256,
     )
     if board is None:
-        raise HTTPException(404, "character or candidate not found")
+        raise HTTPException(404, "character, slot or candidate not found")
     return {"ok": True, "board": board}
 
 
-@router.post("/thumbnails/missing")
-async def render_missing_thumbnails(body: BulkThumbnailRequest, request: Request):
-    """Draw a portrait for every character who has none.
+@router.post("/boards/missing")
+async def render_missing_boards(body: BulkBoardRequest, request: Request):
+    """Draw whatever each character is missing.
 
-    A hundred characters shown as a hundred name labels is the list this was
-    meant to replace, so the gallery is only worth having once they all have a
-    face. Portraits only — the full sheet is 1024×1344 and this is a hundred of
-    them.
+    A hundred characters shown as a hundred name labels is the list the gallery
+    is meant to replace, so it is only worth having once they all have a picture.
+    Both slots by default: the sheet is what says who she is — a centre pose and
+    four moments from her life — and the portrait is the face that identifies her
+    at a glance.
+
+    Every job carries one `group_id`, so two hundred renders can be called off
+    from one button.
     """
     db = request.app.state.db
+    slots = [s for s in (body.slots or presets_db.BOARD_SLOTS)
+             if s in presets_db.BOARD_SLOTS]
+    if not slots:
+        raise HTTPException(400, f"no valid slot in {body.slots}")
+
     rows = await presets_db.list_presets(db, limit=500)
-    pending = [r for r in rows if not (r.get("board") or {}).get("portrait")]
-    pending = pending[: body.limit]
+    group_id = f"character_boards:{uuid4().hex[:8]}"
 
     queued: list[dict] = []
-    for row in pending:
+    for row in rows:
+        if len(queued) >= body.limit:
+            break
+        board = row.get("board") or {}
+        wanted = [s for s in slots if not board.get(s)]
+        if not wanted:
+            continue
         preset = await presets_db.get_preset(db, row["id"])
         if preset is None:
             continue
+        plan = None
+        if "sheet" in wanted:
+            plan = await plan_sheet(preset, request.app.state.ollama)
         queued += await _queue_board_slots(
-            request, preset, row["id"], ["portrait"],
-            workflow_name=body.workflow_name, steps=body.steps, cfg=body.cfg,
+            request, preset, row["id"], wanted,
+            workflow_name=body.workflow_name, plan=plan,
+            steps=body.steps, cfg=body.cfg, group_id=group_id,
         )
-    logger.info("[characters] queued %d missing portraits", len(queued))
-    return {"queued": len(queued), "remaining": max(0, len(
-        [r for r in rows if not (r.get("board") or {}).get("portrait")]
-    ) - len(queued)), "jobs": queued}
+    logger.info("[characters] queued %d board renders as %s", len(queued), group_id)
+    return {"queued": len(queued), "group_id": group_id, "jobs": queued}
 
 
 @router.post("/{character_id}/board")
@@ -229,6 +250,7 @@ async def _queue_board_slots(
     steps: int | None = None,
     cfg: float | None = None,
     seed: int | None = None,
+    group_id: str = "",
 ) -> list[dict]:
     """Queue a render per slot; each attaches itself to the preset when it lands."""
     db = request.app.state.db
@@ -245,15 +267,22 @@ async def _queue_board_slots(
         slot_h = height or default_h
 
         def _attach(slot_name: str):
+            # The checkpoint is closed over rather than read off the render's
+            # meta, which carries only the seed and the prompt id. Without it a
+            # candidate cannot say which model drew it, and comparing two models
+            # is the reason for keeping more than one.
             async def _inner(sha256: str, _meta: dict) -> None:
-                await presets_db.attach_board_image(db, character_id, slot_name, sha256)
+                await presets_db.attach_board_image(
+                    db, character_id, slot_name, sha256, workflow=workflow_name,
+                )
             return _inner
 
         job_id = spooler.submit(
             JobLane.GENERATION,
             f"character_board:{slot}",
             run_render,
-            meta={"character_id": character_id, "slot": slot},
+            meta={"character_id": character_id, "slot": slot,
+                  **({"group_id": group_id} if group_id else {})},
             db=db,
             comfy=comfy,
             workflow_name=workflow_name,

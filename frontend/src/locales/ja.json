@@ -1460,6 +1460,27 @@
     "clearFilter": "解除",
     "queued": "キューに入れました",
     "queuedN": "{n} 件をキューに入れました",
-    "open": "キャラクターを選ぶ"
+    "open": "キャラクターを選ぶ",
+    "view": {
+      "grid": "一覧",
+      "deck": "めくる"
+    },
+    "surprise": "おまかせで1人",
+    "hair": "髪",
+    "eyes": "瞳",
+    "drawWithHer": "この子で描く",
+    "drawWithThis": "このモデルで描く",
+    "readMore": "もっと見る",
+    "deckHint": "← → ／ ホイールでめくる",
+    "stop": "止める",
+    "stopped": "止めました",
+    "noneYet": "まだ描かれていません",
+    "unknownModel": "モデル不明",
+    "inner": "内心",
+    "likes": "好きなもの",
+    "dislikes": "嫌いなもの",
+    "palette": "好きな色",
+    "signatureProp": "相棒",
+    "build": "体つき"
   }
 }
