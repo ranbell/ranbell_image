@@ -1430,7 +1430,8 @@
     "mode": {
       "auto": "AUTO",
       "manual": "MANUAL"
-    }
+    },
+    "workings": "Show the working"
   },
   "characters": {
     "title": "Characters",

@@ -1430,7 +1430,8 @@
     "mode": {
       "auto": "AUTO",
       "manual": "MANUAL"
-    }
+    },
+    "workings": "途中の工程を見る"
   },
   "characters": {
     "title": "キャラクター",

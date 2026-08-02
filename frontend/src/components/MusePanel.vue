@@ -540,7 +540,9 @@ function close() { emit('update:show', false) }
             </div>
           </section>
 
-          <details class="space-y-2">
+          <!-- The knobs. In AUTO their defaults are the point; showing them
+               turns the first screen into a settings page. -->
+          <details v-if="!isAuto" class="space-y-2">
             <summary class="sb-label cursor-pointer">{{ t('muse.boardParams') }}</summary>
             <div class="grid grid-cols-2 gap-2 pt-2">
               <label class="text-[10px] text-gray-500">
@@ -570,7 +572,7 @@ function close() { emit('update:show', false) }
             </div>
           </details>
 
-          <details class="space-y-2">
+          <details v-if="!isAuto" class="space-y-2">
             <summary class="sb-label cursor-pointer">{{ t('muse.mergeParams') }}</summary>
             <div class="pt-2 space-y-3">
               <label class="block text-[10px] text-gray-500">
@@ -649,7 +651,7 @@ function close() { emit('update:show', false) }
         </aside>
 
         <!-- ── right: the cascade ── -->
-        <main class="overflow-y-auto p-4 space-y-4 min-h-0">
+        <main class="overflow-y-auto p-4 min-h-0 flex flex-col gap-4">
           <div v-if="vocabMissing" class="sb-shell p-3 text-xs text-amber-300 border-amber-600/30">
             {{ t('muse.warn.vocabMissing') }}
           </div>
@@ -687,6 +689,20 @@ function close() { emit('update:show', false) }
               {{ t('muse.warn.needs', { items: needs.map(n => t(`muse.needs.${n}`)).join(' / ') }) }}
             </p>
           </div>
+
+          <!-- In AUTO the pictures are the answer, so they come first and the
+               working is folded behind them; in MANUAL the working IS the
+               product and stays laid out in order. -->
+          <component
+            :is="isAuto ? 'details' : 'div'"
+            :class="isAuto ? 'order-2' : ''"
+          >
+            <summary v-if="isAuto" class="sb-label cursor-pointer select-none mb-3">
+              {{ t('muse.workings') }}
+            </summary>
+            <!-- The layout lives here rather than on the <details>: a flex
+                 <details> stops hiding its own contents in some engines. -->
+            <div class="flex flex-col gap-4">
 
           <!-- S1 compose -->
           <section v-if="Object.keys(slotTags).length" class="sb-shell p-3">
@@ -877,9 +893,12 @@ function close() { emit('update:show', false) }
             <p v-if="scene.text" class="sb-prose mt-3 text-[12px] border-t border-white/5 pt-2">{{ scene.text }}</p>
           </section>
 
+            </div>
+          </component>
+
           <!-- S8 finals — one per idea in AUTO. The point of having four ideas
                is seeing all four drawn, so they get the room to be looked at. -->
-          <section v-if="finals.length" class="sb-shell p-3">
+          <section v-if="finals.length" class="sb-shell p-3" :class="isAuto ? 'order-1' : ''">
             <div class="flex items-baseline gap-2 mb-2">
               <p class="sb-label mr-auto">{{ t('muse.render.title') }}</p>
               <p class="text-[10px] text-gray-500">{{ stepState.render?.detail }}</p>
