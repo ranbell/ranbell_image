@@ -15,6 +15,7 @@ contradicts a higher-weight one, which is what stops ``blonde_hair`` and
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 
 from ..tags.subject_anchors import (
