@@ -111,3 +111,26 @@ def test_a_picture_happens_at_one_hour(a, b):
 ])
 def test_an_hour_does_not_fight_what_merely_suits_it(a, b):
     assert not contradicts(a, b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("plaid_scarf", "striped_scarf"),
+    ("denim_jacket", "leather_jacket"),
+    ("knee_boots", "ankle_boots"),
+    ("thigh_boots", "knee_boots"),
+])
+def test_one_garment_has_one_pattern_and_one_length(a, b):
+    """Three drafts of one character came back with `knee_boots`,
+    `ankle_boots` and `lace-up_boots`; only one pair is on her feet."""
+    assert contradicts(a, b)
+    assert contradicts(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("brown_scarf", "plaid_scarf"),
+    ("wool_coat", "blue_coat"),
+    ("blue_coat", "open_coat"),
+])
+def test_a_colour_and_a_pattern_can_describe_one_garment(a, b):
+    """A brown plaid scarf is a scarf, not two scarves."""
+    assert not contradicts(a, b)

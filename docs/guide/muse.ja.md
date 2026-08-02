@@ -64,6 +64,39 @@ A confident bunny girl pilot stands proudly on the runway beside her airplane.
 
 **面ごとの予算が根本的に効く。** Outfit は Outfit が一番面白かろうがなかろうが上限本数で、Place は自分の枠を別に持つ。プールを共有しないので、どの面も溢れられない。
 
+**ただし上限が厳しすぎると絵がのっぺりする。** 天体観測の run は人物ボードから服タグを25個収穫して、上限4で21個捨てていた。上着の重ね方も足元もタイツも消える。Outfit 8 / Accessories 5 / Body 10 に広げ、代わりに**合意の床**で守る（後述）。
+
+### Body は「体型」ではなく「状況が要求する部位」
+
+**これが一番重い欠陥だった。** 「足が濡れた」というお題なのに `legs` がプロンプトに無ければ描画は破綻する。調べると **`place_tag` は体の部位タグ全てに `None` を返していた**:
+
+| | `legs` | `thighs` | `bare_shoulders` | `wet` | `wet_clothes` | `medium_breasts` |
+|---|---|---|---|---|---|---|
+| `place_tag` | None | None | None | None | None | None |
+
+Body が `locked=True` で `sets=("BODY",)`（体格語のみ）だったため、compose は部位を書けと言われず、収穫した部位は行き先が無く merge で**完全に削除**されていた。`wet` と `wet_clothes` も `BODY_PARTS` に入っているので、濡れていること自体も消えていた。
+
+Body のロックを外し、以下を受けるようにした:
+
+- **主名詞が体の部位**なら受ける。カタログは `thighs` を持つが `legs` を持たず、`thigh_gap` を持つが `medium_breasts` を持たないので、列挙では足りない。タグが何の**部位か**は最後の語で決まり、修飾語はサイズか状態を変えるだけ
+- `wet` / `wet_clothes` / `sweat` / `barefoot` のような**状態語**
+- 顔は除く。目の色はキャラの持ち物で、表情は Emotion のもの。`blue_eyes` を Body に流すと identity がまた壊れる
+- `intent=True` — ドラフトが描かなかった部位こそ本番で言い直す必要がある
+
+プリセットの `tags.body` からは `petite`（18件）と `slim`（53件）を削除した。**何にでも割り振られる曖昧な体格語**で、部位が拾えるなら要らない。`tan`（肌）/ `toned`（見える筋肉）/ `mature_female`（プロポーション）/ `tall` / `small_breasts` は具体的な特徴なので残す。
+
+### 合意の床 — 上限を広げるための前提
+
+上限を広げると**3枚のドラフトの食い違いがそのまま入る**。`fold_track` が既に記録している `agreement`（3枚中何枚に写ったか）がこれを分ける:
+
+```
+agreement 1.00  scarf, boots, coat, long_sleeves      ← 本当に着ている
+agreement 0.67  brown_scarf, blue_coat, pantyhose     ← 本当に着ている
+agreement 0.33  sweater, jacket, skirt, winter_coat   ← 1枚のシードが逸れただけ
+```
+
+`AGREEMENT_FLOOR = 0.5` 未満の収穫タグは面の枠を消費しない。compose 由来・補強タグ・保護タグは対象外（ドラフトに写っていないのは当然なので）。ボード1枚設定なら全タグが 1.0 になり床は無効化される — 1枚は自分と食い違えないので、これが正しい挙動。
+
 埋める順は3段:
 
 1. **LLM が各面を書く** — 「30個」ではなく「この面に最大4つ」という小さな問いを面の数だけ。同じことを2回書くなとも言う
@@ -75,6 +108,15 @@ A confident bunny girl pilot stands proudly on the runway beside her airplane.
 同じ判定は**面をまたいでも**掛ける。天体観測のお題が `looking_through_telescope` / `telescope` / `large_telescope` を3つの面に書き、望遠鏡が3回重み付けされた。面ごとの予算は面の中でしかこれを止めていなかった。語彙補完も同じヒットを受け取れる全ての面に配っていた（`PROPS` は Accessories と Object の両方に属する）ので、1ヒットにつき1回に。
 
 そのあと**ユーザーが各面を差し替えられる**（`POST /sessions/{id}/slots`）。パネルは面ごとにチップを並べ、`2/4` のように残り予算を出す。
+
+**キャラは見た目だけではない。** `_character_block` は identity / 服 / 小道具の3つしか渡しておらず、同じ状況で2人のキャラが違って見えるべき面が全部同じになっていた。星見の観察者（`patient, precise, dreamy, solitary`）の Emotion が `blush` になり、likes の2番目にある `thermos coffee` は寒い丘に届かなかった。プリセットは最初から全部持っていて、誰も訊いていなかっただけ。
+
+traits / summary / inner / likes / dislikes / `expression_vocab` / `gesture_vocab` / `palette` / `outfit_style` を渡す。形は [`characters/board.py`](../../backend/app/characters/board.py) がシート5枚をキャスティングするのに使っているものと同じ — 「この人はここで何をするか」という同じ問いだから。対応する指示を4面に入れる:
+
+- **Emotion** — 「雨のバス停は、あるキャラには惨めで、別のキャラには良い口実」
+- **Action** — 「辛抱強いキャラは待つ。うるさいキャラはもう半分どこかへ行っている」
+- **Accessories** — 「likes を見ろ。魔法瓶コーヒーが好きなキャラは寒い丘に魔法瓶を持ってきていて、その1つがコートをもう1枚足すより雄弁」
+- **Outfit** — 色は**キャラ自身の palette** から取る。今までは「色を必ず書け」と LLM に丸投げしていた
 
 モデルへの指示で2つ念を押す。**書いたタグは絵に出る** — パン屋のお題の Object が `knife, sword` になり、ボードが剣を描き、WD14 が剣を拾い直し、最終プロンプトの Accessories に剣が残った。連想の一歩先ではなく、その情景に実際にあるものだけ。そして**体は1つのポーズしか取れない** — `standing, kneeling` は2枚の絵。
 

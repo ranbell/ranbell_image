@@ -164,11 +164,14 @@ def test_an_hour_the_picture_has_settled_is_not_offered():
 
 def test_only_tags_a_slot_will_take_are_offered():
     """`glowing` and `sweat` were picked, no slot claimed either, and the
-    fallback asserted in the prompt that they were objects in the room."""
+    fallback asserted in the prompt that they were objects in the room.
+
+    `sweat` has a slot now — Body takes the state her body is in — so it is a
+    legitimate offer again. `glowing` still has nowhere to be."""
     hits = HITS + [{"name": "glowing", "score": 0.7, "count": 20000},
                    {"name": "sweat", "score": 0.65, "count": 30000}]
     names = [c["tag"] for c in _candidates(hits=hits)]
-    assert "glowing" not in names and "sweat" not in names
+    assert "glowing" not in names
     assert "desk_lamp" in names, "a routable candidate still gets through"
 
 

@@ -291,3 +291,71 @@ def test_a_shot_the_user_chose_still_owns_the_line():
     out = merge_tracks(folded, character_weight=0.5,
                        user_slots={"shot": ["wide_shot", "eye_level"]})
     assert out["slots"]["shot"] == ["wide_shot", "eye_level"]
+
+
+# ── agreement ───────────────────────────────────────────────────────────────
+def _worn(tag, agreement, score=0.8):
+    return {"tag": tag, "score": score, "agreement": agreement}
+
+
+def test_a_tag_only_one_draft_showed_does_not_spend_the_budget():
+    """Outfit's cap of four used to hide the disagreement by only letting the
+    top few through. Widened to eight, the three drafts' private opinions —
+    a sweater, a jacket, a skirt none of the others saw — walk straight in."""
+    folded = {
+        "background": BACKGROUND,
+        "person": PERSON + [_worn("blue_coat", 0.67), _worn("pantyhose", 0.67),
+                            _worn("sweater", 0.33), _worn("jacket", 0.33)],
+    }
+    out = merge_tracks(folded, character_weight=0.5)
+    outfit = out["slots"].get("outfit") or []
+    assert "blue_coat" in outfit and "pantyhose" in outfit
+    assert "sweater" not in outfit and "jacket" not in outfit
+    assert set(out["outvoted"]) >= {"sweater", "jacket"}
+
+
+def test_a_single_draft_cannot_disagree_with_itself():
+    """With one board image per track everything scores 1.0 and the floor is a
+    no-op — which is right, not a lucky accident."""
+    folded = {"background": BACKGROUND,
+              "person": PERSON + [_worn("sweater", 1.0)]}
+    out = merge_tracks(folded, character_weight=0.5)
+    assert "sweater" in (out["slots"].get("outfit") or [])
+    assert out["outvoted"] == []
+
+
+def test_the_character_is_never_outvoted():
+    folded = {"background": BACKGROUND,
+              "person": [{**r, "agreement": 0.33} for r in PERSON]}
+    out = merge_tracks(folded, character_weight=0.5, protected_tags=IDENTITY,
+                       must_tags=["solo"])
+    for tag in IDENTITY + ["solo"]:
+        assert tag in out["tags"]
+
+
+def test_a_harvested_body_part_lands_in_body_rather_than_being_deleted():
+    """`place_tag` returned None for every body part, so merge dropped them —
+    a theme about wet legs reached the render with no legs in it."""
+    folded = {
+        "background": BACKGROUND,
+        "person": PERSON + [_worn("wet_legs", 1.0), _worn("wet_clothes", 1.0),
+                            _worn("medium_breasts", 1.0)],
+    }
+    out = merge_tracks(folded, character_weight=0.5)
+    body = out["slots"].get("body") or []
+    assert {"wet_legs", "wet_clothes", "medium_breasts"} <= set(body)
+    assert not ({"wet_legs", "wet_clothes"} & set(out["slots"].get("object") or []))
+
+
+def test_the_scene_being_wet_does_not_delete_her_wet_legs():
+    """Refine's conflict rule is any shared word of three letters or more,
+    which is right for six photographs of one subject and wrong for a place
+    merged with a person. `wet_ground` on the pavement deleted `wet_legs` on
+    the girl, in the one theme where the wet legs are the whole point."""
+    folded = {
+        "background": BACKGROUND,   # carries `wet_ground`
+        "person": PERSON + [_worn("wet_legs", 1.0), _worn("wet_clothes", 1.0)],
+    }
+    out = merge_tracks(folded, character_weight=0.5)
+    assert {"wet_legs", "wet_clothes"} <= set(out["slots"].get("body") or [])
+    assert "wet_ground" in out["tags"], "and the pavement is still wet"

@@ -33,6 +33,41 @@ from dataclasses import dataclass, field
 from ..tags import catalog as tag_catalog
 from ..tags.conflict import contradicts
 
+# Head nouns that make a tag a body part however it is modified.
+#
+# The catalog is no help here on its own: it lists `thighs` but not `legs`,
+# `thigh_gap` but not `medium_breasts`, so membership misses most of what WD14
+# actually reads off a picture. What a tag is a part *of* is its last word, and
+# the modifier only changes the size or the state.
+_BODY_PART_NOUNS = frozenset({
+    "breast", "breasts", "thigh", "thighs", "leg", "legs", "arm", "arms",
+    "hand", "hands", "foot", "feet", "shoulder", "shoulders", "hip", "hips",
+    "waist", "navel", "stomach", "back", "neck", "chest", "skin", "body",
+    "butt", "ass", "cleavage", "midriff", "collarbone", "knee", "knees",
+    "ankle", "ankles", "wrist", "wrists", "calf", "calves", "throat",
+})
+
+# The face is a body part but it is not *this* slot's body part. Eye colour is
+# the character's and belongs on her line; an expression is the Emotion slot's.
+# Routing `blue_eyes` into Body would take the identity apart again.
+_FACE_NOUNS = frozenset({
+    "face", "eye", "eyes", "lip", "lips", "nose", "ear", "ears", "tongue",
+    "cheek", "cheeks", "chin", "forehead", "eyebrow", "eyebrows",
+})
+
+# Everything the Object line must refuse: a body part is never furniture.
+_BODY_NOUNS = _BODY_PART_NOUNS | _FACE_NOUNS
+
+# What state her body and clothes are in. These have no body-part head noun and
+# no slot claimed them, so `wet` and `wet_clothes` were deleted alongside the
+# legs they belonged to — a theme about being caught in the rain reached the
+# render with nothing wet in it.
+_BODY_STATES = frozenset({
+    "wet", "wet_clothes", "wet_hair", "wet_skin", "soaked", "damp",
+    "sweat", "sweaty", "steam", "dirty", "muddy", "dusty", "bloody",
+    "covered_in_mud", "goosebumps", "shivering", "flushed", "barefoot",
+})
+
 
 @dataclass(frozen=True)
 class Slot:
@@ -42,6 +77,8 @@ class Slot:
     cap: int              # how many tags may sit here
     axes: tuple[str, ...] = ()      # get_tag_axis values that belong here
     sets: tuple[str, ...] = ()      # tag_catalog frozenset names that belong here
+    head_nouns: frozenset[str] = frozenset()   # accept anything ending in one
+    names: frozenset[str] = frozenset()        # accept these tags exactly
     user_owned: bool = False        # filled from session inputs, never composed
     locked: bool = False            # comes from the character, not from anything else
     query: str = ""                 # what to search the vocabulary for
@@ -88,38 +125,73 @@ SLOTS: tuple[Slot, ...] = (
         "character", "Character", "person", 8, locked=True,
         axes=("hair",), sets=("COUNT", "EYE_SHAPES"),
     ),
+    # Not locked, and not a build. This is the part of her the situation puts
+    # on show: soaked legs, bare shoulders, a sweating back. Locked, it took
+    # only build words from the preset — and because `place_tag` never targets
+    # a locked slot, every body part harvested off the drafts came back
+    # homeless and was deleted at merge. A theme about wet legs reached the
+    # render with no `legs` in it, and the picture made no sense.
     Slot(
-        "body", "Body", "person", 3, locked=True, sets=("BODY",),
+        "body", "Body", "person", 10,
+        sets=("BODY", "BODY_PARTS", "SKIN_FACE"),
+        head_nouns=_BODY_PART_NOUNS, names=_BODY_STATES,
+        query="visible body parts, skin and their condition",
+        guidance=(
+            "the parts of her the situation puts on show, and what state they "
+            "are in — wet_legs and wet_clothes if she was caught in rain, "
+            "bare_shoulders off a slipped strap, sweat after running. Name the "
+            "part whenever the theme happens TO it; the picture cannot show a "
+            "soaked leg it was never told about. Her build is fixed elsewhere "
+            "— write parts, never slim or petite"
+        ),
+        intent=True,
     ),
     Slot(
         "emotion", "Emotion", "person", 3,
         axes=("emotion",), sets=("EXPRESSION",),
         query="facial expression and mood of the character",
-        guidance="how she feels, on her face and in her posture",
+        guidance=(
+            "how she feels about being HERE, on her face. Read her traits: the "
+            "same rained-on bus stop is misery to one character and a good "
+            "excuse to another. Her usual expressions are listed above as a "
+            "starting point, not an obligation"
+        ),
         exclusive=True,
     ),
     Slot(
-        "outfit", "Outfit", "person", 4,
+        "outfit", "Outfit", "person", 8,
         axes=("clothing",), sets=("CLOTHING_EXPLICIT",),
         query="clothing and garments with colours",
         guidance=(
             "what she is wearing, dressed for this theme. Name a COLOUR or a "
             "material on each garment — white_blouse, navy_pleated_skirt, denim "
-            "jacket. A garment with no colour renders white every time"
+            "jacket. A garment with no colour renders white every time, so take "
+            "the colours from HERS where they suit the scene. Dress her in "
+            "layers: a coat is also a collar, a sleeve and what is under it"
         ),
     ),
     Slot(
         "action", "Action", "person", 4,
         axes=("action",), sets=("POSE",),
         query="pose, gesture and action",
-        guidance="what she is doing with her body and hands",
+        guidance=(
+            "what she is doing with her body and hands — what THIS person would "
+            "be doing here. A patient character waits; a loud one is already "
+            "halfway somewhere. Her habits are listed above and are worth using "
+            "when they fit the theme"
+        ),
         intent=True,
     ),
     Slot(
-        "accessories", "Accessories", "person", 3,
+        "accessories", "Accessories", "person", 5,
         sets=("ACCESSORIES", "PROPS"),
         query="worn accessories and held items",
-        guidance="what she wears on top of her clothes, and what she holds",
+        guidance=(
+            "what she wears on top of her clothes, and what she holds. Look at "
+            "what she LIKES: a character who likes thermos coffee has brought a "
+            "thermos to the cold hilltop, and that one object says more about "
+            "her than another coat would"
+        ),
     ),
     Slot("shot", "Shot", "global", 4, user_owned=True),
     Slot(
@@ -165,14 +237,16 @@ def accepts(slot: Slot, tag: str) -> bool:
     Deliberately permissive: this routes tags that already exist, it does not
     police them. A tag nothing accepts simply goes unplaced.
     """
-    name = str(tag or "").strip().lower()
+    name = str(tag or "").strip().lower().replace(" ", "_")
     if slot.axes and tag_catalog.get_tag_axis(name) in slot.axes:
         return True
     for set_name in slot.sets:
         member = getattr(tag_catalog, set_name, None)
         if member and name in member:
             return True
-    return False
+    if name in slot.names:
+        return True
+    return name.replace("-", "_").rsplit("_", 1)[-1] in slot.head_nouns
 
 
 def place_tag(tag: str) -> str | None:
@@ -185,15 +259,6 @@ def place_tag(tag: str) -> str | None:
     return None
 
 
-# Head nouns that make a tag a body part however it is modified. `thighs` is in
-# the catalog and `medium_breasts` is not, so membership alone is not enough.
-_BODY_NOUNS = frozenset({
-    "breast", "breasts", "thigh", "thighs", "leg", "legs", "arm", "arms",
-    "hand", "hands", "foot", "feet", "shoulder", "shoulders", "hip", "hips",
-    "waist", "navel", "stomach", "back", "neck", "chest", "skin", "body",
-    "face", "eye", "eyes", "lip", "lips", "nose", "ear", "ears", "tongue",
-    "butt", "ass", "cleavage", "midriff", "collarbone",
-})
 
 
 def is_framing(tag: str) -> bool:

@@ -213,8 +213,37 @@ def test_a_board_render_gets_its_own_track_plus_the_global_slots():
 
 def test_character_and_body_are_separate_budgets():
     """Body words in the Character line crowd out hair and eye colour."""
-    assert BY_KEY["character"].locked and BY_KEY["body"].locked
+    assert BY_KEY["character"].locked
     assert BY_KEY["character"].cap >= 6
+
+
+def test_the_body_slot_is_open_to_the_situation():
+    """Locked, Body took only build words off the preset, and `place_tag` never
+    targets a locked slot — so every body part the drafts showed came back
+    homeless and was deleted at merge. A theme about wet legs reached the render
+    with no `legs` in it."""
+    body = BY_KEY["body"]
+    assert not body.locked
+    assert body.cap >= 10
+    assert body.intent, "the theme's parts must survive what the drafts missed"
+
+
+@pytest.mark.parametrize("tag", [
+    "legs", "bare_legs", "wet_legs", "thighs", "feet", "bare_shoulders",
+    "medium_breasts", "navel", "collarbone", "knees", "pale_skin",
+    "wet", "wet_clothes", "sweat", "barefoot",
+])
+def test_a_body_part_has_somewhere_to_go(tag):
+    """`place_tag` returned None for every one of these, so merge deleted them.
+    `wet` and `wet_clothes` too — the rain vanished along with the legs."""
+    assert place_tag(tag) == "body"
+
+
+@pytest.mark.parametrize("tag", ["blue_eyes", "brown_eyes", "closed_eyes"])
+def test_the_face_does_not_get_pulled_into_body(tag):
+    """Eye colour is the character's and an expression is Emotion's. Routing
+    `blue_eyes` into Body would take the identity apart again."""
+    assert place_tag(tag) != "body"
 
 
 @pytest.mark.parametrize("tag", ["desk_lamp", "cooking_pot", "neon_sign", "bread_slice"])

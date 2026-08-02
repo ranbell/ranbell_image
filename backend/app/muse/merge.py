@@ -27,7 +27,7 @@ from ..prompt.tag_merge import (
     _resolve_weights,
     filter_tag_list,
 )
-from ..tags.conflict import contradicts_any
+from ..tags.conflict import contradicts, contradicts_any
 from ..tags.junk import is_junk_tag
 from . import camera
 from . import slots as slot_defs
@@ -40,12 +40,42 @@ logger = logging.getLogger(__name__)
 TRACK_ROLES = {"background": "style", "person": "content"}
 
 
+# How many of a track's drafts must have shown a tag for it to count as a fact
+# about the picture rather than an accident of one seed.
+#
+# The slot budgets used to hide the difference by only letting the top few tags
+# through: a stargazing run harvested 25 clothing tags and Outfit's cap of four
+# cut it to four. Widening the cap to eight without this floor lets the
+# disagreement in — the three drafts had put her in a sweater, a jacket, a skirt
+# and a winter coat between them, none of which more than one of them agreed on.
+#
+#     agreement 1.00  scarf, boots, coat, long_sleeves      ← she is wearing these
+#     agreement 0.67  brown_scarf, blue_coat, pantyhose     ← she is wearing these
+#     agreement 0.33  sweater, jacket, skirt, winter_coat   ← one seed wandered off
+#
+# With one board image per track every tag scores 1.0 and the floor does
+# nothing, which is the right behaviour: one draft cannot disagree with itself.
+AGREEMENT_FLOOR = 0.5
+
+
 def _as_document(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """A folded track, shaped like an image document for the Refine merge."""
     return {
         "wd14_tags": [r["tag"] for r in rows],
         "wd14_tags_scores": [float(r.get("score") or 0.0) for r in rows],
     }
+
+
+def _agreement_of(folded: dict[str, list[dict[str, Any]]]) -> dict[str, float]:
+    """``{tag: agreement}`` across both tracks, best score wins."""
+    out: dict[str, float] = {}
+    for rows in folded.values():
+        for row in rows or []:
+            key = str(row.get("tag") or "").lower()
+            value = float(row.get("agreement", 1.0) or 0.0)
+            if key and value > out.get(key, 0.0):
+                out[key] = value
+    return out
 
 
 def merge_tracks(
@@ -86,6 +116,12 @@ def merge_tracks(
         common_ratio=common_ratio,
         unique_count=unique_count,
         roles=roles,
+        # Refine's own rule — any shared word of three letters or more — is
+        # right for six photographs of one subject and wrong for these two
+        # documents, which describe a place and a person and are *supposed* to
+        # differ. `wet_ground` on the pavement deleted `wet_legs` on the girl,
+        # in the one theme where the wet legs are the whole point.
+        conflicts=contradicts,
     )
 
     ordered = list(analysis.get("common_tags") or [])
@@ -193,8 +229,17 @@ def merge_tracks(
                 filled.setdefault(key, []).append(tag)
             else:
                 unplaced.append(tag)
+    agreement = _agreement_of(folded)
+    weak: list[str] = []
     for tag in tags:
         if tag.lower() in reinforced or _is_the_character(tag):
+            continue
+        # One draft in three is not evidence. The forced tags and the character
+        # are already past; the composed slots never went through a draft at all
+        # and are carried in further down, so this only judges what the canvas
+        # claimed to have seen.
+        if agreement.get(tag.lower(), 1.0) < AGREEMENT_FLOOR:
+            weak.append(tag)
             continue
         key = slot_defs.place_tag(tag)
         if key is None:
@@ -257,6 +302,7 @@ def merge_tracks(
         "framing_dropped": framing_dropped,
         "evicted": evicted,
         "removed": removed,
+        "outvoted": weak,
         "context": context,
         "analysis": analysis,
         "weights": {"background": weights[0], "person": weights[1]},

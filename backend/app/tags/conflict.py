@@ -26,11 +26,25 @@ _COLOURS = frozenset({
 _LENGTHS = frozenset({
     "long", "short", "medium", "very", "absurdly", "waist", "knee",
     "shoulder", "chin", "ear", "hip", "floor",
+    # Where a boot or a sock stops. Three drafts of one character came back
+    # with `knee_boots`, `ankle_boots` and `lace-up_boots`; only one pair is
+    # on her feet.
+    "ankle", "calf", "thigh", "mid", "over-the-knee", "crotch",
+})
+
+# What a garment is made of or patterned with. One scarf has one pattern, and
+# `brown_scarf` beside `plaid_scarf` survived the colour test because `plaid`
+# is not a colour — so the prompt asked for two scarves.
+_PATTERNS = frozenset({
+    "plaid", "striped", "vertical-striped", "horizontal-striped",
+    "checkered", "polka_dot", "floral", "argyle", "houndstooth",
+    "denim", "leather", "knit", "wool", "lace", "fur", "silk", "satin",
+    "velvet", "corduroy", "tweed", "mesh", "sheer", "camouflage",
 })
 
 # Modifier families that occupy one slot. Two tags on the same head noun clash
 # only when their modifiers come from the same family.
-_FAMILIES: tuple[frozenset[str], ...] = (_COLOURS, _LENGTHS)
+_FAMILIES: tuple[frozenset[str], ...] = (_COLOURS, _LENGTHS, _PATTERNS)
 
 # Subject gender is its own kind of contradiction: it does not need a shared
 # head noun. A theme composed `male_swimwear` for a character whose identity

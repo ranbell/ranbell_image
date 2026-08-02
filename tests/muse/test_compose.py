@@ -290,3 +290,42 @@ def test_the_vocabulary_spends_a_hit_once():
                       db=db, supplement=True)
     homes = [k for k in ("outfit", "accessories") if "hair_ribbon" in _tags(out, k)]
     assert len(homes) == 1, f"spent in {homes}"
+
+
+# ── the person, not just the face ───────────────────────────────────────────
+PERSONALITY = {
+    **CHARACTER,
+    "personality": {
+        "traits": ["patient", "solitary"],
+        "summary": "Waits hours for one clear minute.",
+        "inner": ["prefers things that take a long time to arrive"],
+        "likes": ["thermos coffee", "clear cold nights"],
+        "dislikes": ["city glow"],
+        "outfit_style": "long coat over layers",
+    },
+    "expression_vocab": ["parted_lips"],
+    "gesture_vocab": ["looking_up"],
+    "palette": ["indigo", "silver"],
+}
+
+
+def test_the_prompt_says_who_she_is_and_not_only_what_she_looks_like():
+    """Everything below was already on the preset and nothing asked for it, so
+    the patient solitary observer got `Emotion: blush` and her thermos never
+    reached a cold hilltop."""
+    _, llm = _compose(character=PERSONALITY)
+    for fragment in ("patient, solitary", "Waits hours for one clear minute.",
+                     "thermos coffee", "city glow", "parted_lips",
+                     "looking_up", "indigo, silver", "long coat over layers"):
+        assert fragment in llm.prompt, fragment
+
+
+def test_a_character_with_no_personality_still_composes():
+    _, llm = _compose(character=CHARACTER)
+    assert "THE CHARACTER" in llm.prompt
+
+
+def test_the_prompt_asks_for_parts_but_keeps_the_build_fixed():
+    _, llm = _compose(character=PERSONALITY)
+    assert "build word like slim" in llm.prompt
+    assert "name the legs and name them wet" in llm.prompt

@@ -67,9 +67,12 @@ You are writing the prompt for one illustration, one aspect at a time.
 {{{output_shape}}}"""
 
 _IDENTITY_RULE_LOCKED = (
-    "- The character's hair, eyes and body are FIXED above. Never write a hair\n"
-    "  colour, hair length, eye colour, body type, age or species — anything you\n"
-    "  write there can only contradict her."
+    "- The character's hair, eyes and BUILD are FIXED above. Never write a hair\n"
+    "  colour, hair length, eye colour, age, species, or a build word like slim\n"
+    "  or petite — anything you write there can only contradict her.\n"
+    "- Her body PARTS are not fixed and the Body aspect wants them. Which parts\n"
+    "  the picture must show is decided by the theme, not by her: if she was\n"
+    "  caught in the rain, name the legs and name them wet."
 )
 _IDENTITY_RULE_FREE = (
     "- Nobody has chosen her hair or eye colour yet; the Outfit aspect may\n"
@@ -77,15 +80,51 @@ _IDENTITY_RULE_FREE = (
 )
 
 
+def _joined(values: Any, limit: int) -> str:
+    kept = [str(v).strip() for v in list(values or []) if str(v).strip()]
+    return ", ".join(kept[:limit])
+
+
 def _character_block(character: dict[str, Any]) -> str:
+    """Who she is, not just what she looks like.
+
+    This carried the identity tags, her wardrobe and her props, and stopped
+    there — so every aspect that should differ between two characters in the
+    same situation didn't. A stargazing theme gave the patient, solitary
+    observer `Emotion: blush`, and her `thermos coffee` never reached a cold
+    hilltop although it is the second thing on her list of likes.
+
+    The preset has all of it and always did; nothing here asked. The shape is
+    the one ``characters/board.py`` uses to cast her reference sheet, which is
+    the same question in a different frame: what does *this* person do here.
+    """
     identity = [t for t in (character.get("identity_tags") or []) if t]
     if not identity:
         return ""
     bits = ["\n# THE CHARACTER (FIXED — do not redescribe)", ", ".join(identity)]
+
+    person = character.get("personality") or {}
+    for label, value in (
+        ("She is",        _joined(person.get("traits"), 6)),
+        ("In one line",   str(person.get("summary") or "").strip()),
+        ("Privately",     _joined(person.get("inner"), 2)),
+        ("Likes",         _joined(person.get("likes"), 5)),
+        ("Dislikes",      _joined(person.get("dislikes"), 3)),
+        ("Her face does", _joined(character.get("expression_vocab"), 4)),
+        ("She tends to",  _joined(character.get("gesture_vocab"), 4)),
+        ("Her colours",   _joined(character.get("palette"), 4)),
+    ):
+        if value:
+            bits.append(f"{label}: {value}")
+
+    style = str(person.get("outfit_style") or "").strip()
     wardrobe = [t for t in (character.get("outfit_tags") or []) if t]
     if wardrobe:
-        bits.append("Her usual clothes (change them if the theme calls for it): "
-                    + ", ".join(wardrobe))
+        line = "Her usual clothes (change them if the theme calls for it): " \
+               + ", ".join(wardrobe)
+        bits.append(f"{line} — {style}" if style else line)
+    elif style:
+        bits.append(f"She usually dresses: {style}")
     props = [t for t in (character.get("prop_tags") or []) if t]
     if props:
         bits.append("She usually carries: " + ", ".join(props))

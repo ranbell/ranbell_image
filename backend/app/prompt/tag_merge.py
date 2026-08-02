@@ -15,6 +15,7 @@ contradicts a higher-weight one, which is what stops ``blonde_hair`` and
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from ..tags.subject_anchors import (
     SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHOR_TAGS,
@@ -103,10 +104,17 @@ def _build_weighted_wd14_context(
     unique_count: int = 20,
     must_threshold: float = _WD14_MUST_INCLUDE_THRESHOLD,
     roles: list[str] | None = None,
+    conflicts: Callable[[str, str], bool] = _tags_conflict,
 ) -> tuple[str, dict]:
     """Build VLM context with common/unique tag decomposition.
 
     roles: optional per-image role aligned by original index ('both'|'style'|'content').
+
+    conflicts: how to decide that two tags cannot both survive. The default is
+    right for several images of one subject, where a shared word usually does
+    mean a disagreement and losing a borderline tag costs nothing. It is wrong
+    when the documents describe *different* things — Muse merges a scene with a
+    person, and `wet_ground` on the pavement deleted `wet_legs` on the girl.
 
     Returns (context_str, analysis_dict).
     analysis_dict: common_tags, unique_by_image.
@@ -210,7 +218,7 @@ def _build_weighted_wd14_context(
                 if tag_low in removal.get(lower_idx, set()):
                     continue
                 for tag_high in higher_tags:
-                    if _tags_conflict(tag_low, tag_high):
+                    if conflicts(tag_low, tag_high):
                         removal.setdefault(lower_idx, set()).add(tag_low)
                         break
 
