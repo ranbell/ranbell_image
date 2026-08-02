@@ -72,6 +72,24 @@ async def list_characters(request: Request):
     return {"characters": rows, "count": len(rows), "board_slots": list(presets_db.BOARD_SLOTS)}
 
 
+@router.post("/reset")
+async def reset_characters(request: Request):
+    """Re-seed the bundled presets from the shipped asset file.
+
+    The presets live in Qdrant and are seeded once, when the collection is
+    empty, so editing the asset file and deploying changes nothing on a running
+    install — `petite` stayed on 71 characters for a whole release after it was
+    removed from the file. This is the only way to pick the edits up.
+
+    It drops the collection, so any user-authored character goes with it.
+    """
+    result = await presets_db.reset_presets_to_defaults(
+        request.app.state.db, vector_dim=settings.embed_dim,
+    )
+    logger.info("[characters] reset to defaults: %s", result)
+    return result
+
+
 @router.get("/{character_id}")
 async def get_character(character_id: str, request: Request):
     preset = await presets_db.get_preset(request.app.state.db, character_id)

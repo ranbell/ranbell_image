@@ -80,6 +80,15 @@ _IDENTITY_RULE_FREE = (
 )
 
 
+# How a model says "this aspect does not apply". Asked which parts of her the
+# theme puts on show, and given a theme that puts none, it answered "none" —
+# and the answer went into the prompt as a tag.
+_NOTHING = frozenset({
+    "none", "n/a", "na", "null", "nil", "-", "--", "empty", "nothing",
+    "not_applicable", "no_tags", "unspecified",
+})
+
+
 def _joined(values: Any, limit: int) -> str:
     kept = [str(v).strip() for v in list(values or []) if str(v).strip()]
     return ", ".join(kept[:limit])
@@ -283,7 +292,7 @@ def _clean(raw: Any, slot: Slot, identity: list[str]) -> list[str]:
     out: list[str] = []
     for piece in str(raw or "").split(","):
         tag = (_normalize_section(piece.strip()) or piece.strip()).strip().replace(" ", "_")
-        if not tag or is_junk_tag(tag):
+        if not tag or tag.lower() in _NOTHING or is_junk_tag(tag):
             continue
         if identity and contradicts_any(tag, identity):
             continue

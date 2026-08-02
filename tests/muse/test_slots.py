@@ -191,12 +191,22 @@ def test_every_composed_slot_is_explained_to_the_model():
         assert slot.guidance, f"{slot.key} has nothing to tell the model"
 
 
-def test_every_tag_slot_can_be_searched_for():
-    """Description is prose, so it has nothing to look up. Everything else does."""
+def test_every_tag_slot_that_retrieval_can_help_can_be_searched_for():
+    """Description is prose, so it has nothing to look up.
+
+    Body has nothing retrieval can answer: which part of her the picture must
+    show is decided by what happens TO her, and a theme vector knows nothing
+    about that. Asked for body parts near a summer festival the bank returned
+    `looking_through_legs` and `panties_around_one_leg`, and a cap of ten found
+    room for both."""
     for slot in COMPOSED:
-        if slot.key == "description":
+        if slot.key in ("description", "body"):
             continue
         assert slot.query, f"{slot.key} has nothing to search the vocabulary for"
+
+
+def test_retrieval_is_kept_out_of_the_body_slot():
+    assert not BY_KEY["body"].query
 
 
 def test_every_slot_has_a_positive_budget():

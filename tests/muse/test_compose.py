@@ -358,13 +358,21 @@ def test_the_preset_seeds_body_without_erasing_the_situation():
     assert out["outfit"] == composed["outfit"]
 
 
-def test_the_supplement_defers_to_routing_where_its_slot_is_only_guessing():
-    """Body accepts `holding_own_foot` on the strength of "foot" while the
-    catalog files it under Action. `accepts` alone let the supplement put a
-    pose in Body; routing already settles it."""
-    db = FakeDB([{"name": "holding_own_foot", "score": 0.9},
-                 {"name": "wet_legs", "score": 0.8}])
+def test_retrieval_never_fills_the_body_slot():
+    """Which part of her the picture must show is decided by what happens TO
+    her, and a theme vector knows nothing about that. Asked for "visible body
+    parts, skin and their condition" near a summer festival, the bank returned
+    `looking_through_legs`, `panties_around_one_leg` and `hands_on_feet`, and a
+    cap of ten gave all three a home — on two different characters."""
+    db = FakeDB([{"name": "panties_around_one_leg", "score": 0.9},
+                 {"name": "colored_skin", "score": 0.85}])
     out, _ = _compose({**WRITTEN, "body": ""}, db=db, supplement=True)
-    tags = _tags(out, "body")
-    assert "wet_legs" in tags, "a part the slot really claims still gets in"
-    assert "holding_own_foot" not in tags
+    assert _tags(out, "body") == []
+
+
+def test_a_model_saying_the_aspect_does_not_apply_is_not_a_tag():
+    """Asked which parts of her the theme puts on show, and given a theme that
+    puts none, it answered "none" — and the answer went into the prompt."""
+    out, _ = _compose({**WRITTEN, "body": "none", "light": "N/A"})
+    assert _tags(out, "body") == []
+    assert _tags(out, "light") == []

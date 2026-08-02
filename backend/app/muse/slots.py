@@ -135,7 +135,14 @@ SLOTS: tuple[Slot, ...] = (
         "body", "Body", "person", 10,
         sets=("BODY", "BODY_PARTS", "SKIN_FACE"),
         head_nouns=_BODY_PART_NOUNS, names=_BODY_STATES,
-        query="visible body parts, skin and their condition",
+        # No query, so retrieval never fills this. Which part of her the picture
+        # must show is decided by what happens TO her, and nothing about a theme
+        # vector knows that: asked for "visible body parts, skin and their
+        # condition" near a summer festival, the bank returned
+        # `looking_through_legs`, `panties_around_one_leg` and `hands_on_feet`,
+        # and a cap of ten gave them all a home. A theme that puts no part on
+        # show should leave this line empty, and only the model can tell.
+        query="",
         guidance=(
             "which parts of HER the theme puts on show, and what state they are "
             "in. Read the theme for the part it names: if it says her legs got "
