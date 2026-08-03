@@ -13,6 +13,28 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 
+# Eight bytes in the documented layout; a few dozen more once a metadata blob is
+# in front of the image.
+_PREVIEW_HEADER_MAX = 256
+
+
+def _preview_image(payload: bytes) -> bytes | None:
+    """Strip the binary header off a websocket preview frame.
+
+    The frame is a 4-byte event type, a 4-byte image format and then the image,
+    but newer builds can put a metadata blob in between. Looking for the magic
+    survives both layouts; anything without one is not a preview.
+
+    The search is bounded to the header: unbounded, a byte pair deep inside some
+    other binary message would be read as the start of an image.
+    """
+    for magic in (b"\xff\xd8\xff", b"\x89PNG"):
+        idx = payload.find(magic, 0, _PREVIEW_HEADER_MAX)
+        if idx >= 0:
+            return payload[idx:]
+    return None
+
+
 class ComfyUIClient:
     def __init__(self) -> None:
         self._http = httpx.AsyncClient(timeout=60.0)
@@ -420,11 +442,19 @@ class ComfyUIClient:
         r.raise_for_status()
         return r.content
 
-    async def queue_prompt(self, workflow: dict) -> str:
-        r = await self._http.post(
-            f"{settings.comfyui_url}/prompt",
-            json={"prompt": workflow, "client_id": self.client_id},
-        )
+    async def queue_prompt(self, workflow: dict, *, preview: bool = False) -> str:
+        """Queue a graph. ``preview`` turns on in-flight latent previews.
+
+        ComfyUI takes the preview method **per prompt**, not per server — the web
+        UI sends it on every queue call, which is why previews appear there while
+        an API client that omits it sees none, however the server was started.
+        It is opt-in because the frames are one JPEG per sampler step and only
+        Muse, which lets you watch a draft form and abort it, has any use for them.
+        """
+        body: dict = {"prompt": workflow, "client_id": self.client_id}
+        if preview:
+            body["extra_data"] = {"preview_method": "auto"}
+        r = await self._http.post(f"{settings.comfyui_url}/prompt", json=body)
         r.raise_for_status()
         return r.json()["prompt_id"]
 
@@ -446,8 +476,16 @@ class ComfyUIClient:
         last_progress_time = 0.0
 
         try:
-            async with websockets.connect(ws_url) as ws:
+            async with websockets.connect(ws_url, max_size=None) as ws:
                 async for raw in ws:
+                    if isinstance(raw, (bytes, bytearray)):
+                        jpeg = _preview_image(bytes(raw))
+                        if jpeg is not None:
+                            # Preview frames carry no prompt_id. ComfyUI runs one
+                            # graph at a time, so the frame belongs to whatever
+                            # this client is currently waiting on.
+                            yield {"type": "comfy_preview", "image": jpeg}
+                        continue
                     try:
                         msg = json.loads(raw)
                     except Exception:

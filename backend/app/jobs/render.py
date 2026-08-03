@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any, Awaitable, Callable
 
 from ..creation.schema import CreationRecord
@@ -21,6 +22,13 @@ from ..spooler.models import CancelToken, ProgressReporter
 logger = logging.getLogger(__name__)
 
 AttachFn = Callable[[str, dict], Awaitable[None]]
+PreviewFn = Callable[[bytes], Awaitable[None]]
+
+# One preview frame per sampler step is more than any viewer needs and more than
+# an SSE stream should carry, so frames inside this window are dropped. Nothing
+# is lost at the end: the finished image lands through comfy_output, which is the
+# real picture rather than a decoded latent.
+PREVIEW_MIN_INTERVAL = 0.4
 
 
 async def run_render(
@@ -37,11 +45,13 @@ async def run_render(
     steps: int | None = None,
     cfg: float | None = None,
     seed: int | None = None,
+    batch_count: int = 1,
     subdir: str = "",
     prefix: str = "gen",
     method: str = "muse",
     payload_extra: dict[str, Any] | None = None,
     attach: AttachFn | None = None,
+    preview: PreviewFn | None = None,
 ) -> dict:
     """Render one image and hand the sha256 back to ``attach``.
 
@@ -66,12 +76,12 @@ async def run_render(
         )
 
     patched = comfy.patch_workflow(
-        wf, positive, negative, "", "", 1,
+        wf, positive, negative, "", "", max(1, int(batch_count)),
         seed=seed, width=width, height=height, steps=steps, cfg=cfg,
         append_negative=True,
     )
 
-    prompt_id = await comfy.queue_prompt(patched)
+    prompt_id = await comfy.queue_prompt(patched, preview=preview is not None)
     reporter.update(0.0, "Waiting in ComfyUI queue...")
 
     queued = True
@@ -126,6 +136,8 @@ async def run_render(
             except Exception as exc:
                 logger.error("[render] attach failed for %s: %s", sha256, exc)
 
+    last_preview = 0.0
+
     async for event in comfy.stream_progress(prompt_id):
         cancel.raise_if_set()
         queued = False
@@ -133,6 +145,14 @@ async def run_render(
             v = event.get("value", 0)
             m = max(event.get("max", 1), 1)
             reporter.update(v / m, f"Step {v}/{m}")
+        elif event["type"] == "comfy_preview" and preview is not None:
+            now = time.monotonic()
+            if now - last_preview >= PREVIEW_MIN_INTERVAL:
+                last_preview = now
+                try:
+                    await preview(event["image"])
+                except Exception as exc:
+                    logger.warning("[render] preview publish failed: %s", exc)
         elif event["type"] == "comfy_output":
             for img_ref in event.get("images", []):
                 cancel.raise_if_set()

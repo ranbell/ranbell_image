@@ -218,6 +218,7 @@ class OllamaClient:
         model: str | None = None,
         options: dict | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
     ) -> str:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
         payload = self._with_think(
@@ -230,6 +231,8 @@ class OllamaClient:
             },
             think,
         )
+        if system:
+            payload["system"] = system
         async with self._acquire():
             r = await self._client.post(
                 f"{self.base_url}/api/generate",
@@ -306,6 +309,7 @@ class OllamaClient:
         options: dict | None = None,
         fmt: str | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
     ) -> str:
         """Generate text without vision inputs (text-only LLM call)."""
         # num_predict=-1 means unlimited; callers can override via options.
@@ -324,10 +328,30 @@ class OllamaClient:
         )
         if fmt:
             payload["format"] = fmt
+        if system:
+            payload["system"] = system
         async with self._acquire():
             r = await self._client.post(f"{self.base_url}/api/generate", json=payload)
         self._raise_with_body(r)
         return self._extract_generate_text(r.json(), model=model_name)
+
+    async def unload(self, model: str | None = None) -> None:
+        """Drop a model from VRAM now instead of waiting out its keep_alive.
+
+        On a single 16GB card a 26B MoE holds ~13GB, which leaves ComfyUI too
+        little to allocate a multi-image latent — the LLM and the checkpoint
+        cannot both be resident. Callers that hand straight over to a render
+        call this at the seam.
+        """
+        try:
+            async with self._acquire():
+                await self._client.post(
+                    f"{self.base_url}/api/generate",
+                    json={"model": model or settings.vlm_model, "keep_alive": 0},
+                    timeout=30.0,
+                )
+        except Exception as exc:
+            logger.warning("[ollama] unload of %s failed: %s", model, exc)
 
     async def chat_text(
         self,
