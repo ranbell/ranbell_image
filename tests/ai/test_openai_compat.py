@@ -95,8 +95,14 @@ class _FakeBackend:
         self.calls.append(f"embed_batch:{self.name}")
         return [[0.1]] * len(texts)
 
-    async def generate_text(self, prompt, model=None, options=None, fmt=None, think=None):
-        self.calls.append(f"gen:{self.name}:{think}:{fmt}")
+    async def generate_text(self, prompt, model=None, options=None, fmt=None,
+                            think=None, system=None):
+        self.calls.append(f"gen:{self.name}:{think}:{fmt}:{bool(system)}")
+        return f"from-{self.name}"
+
+    async def generate_vlm(self, prompt, image_bytes_list, model=None, options=None,
+                           think=None, system=None):
+        self.calls.append(f"vlm:{self.name}:{len(image_bytes_list)}:{bool(system)}")
         return f"from-{self.name}"
 
     async def generate_text_stream(self, prompt, model=None, options=None, think=None):

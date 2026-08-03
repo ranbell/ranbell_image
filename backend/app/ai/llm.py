@@ -126,9 +126,11 @@ class LlmGateway:
         fmt: str | None = None,
         think: bool | str | None = None,
         provider: str | None = None,
+        system: str | None = None,
     ) -> str:
         return await self._gen(provider).generate_text(
-            prompt, model=model, options=options, fmt=fmt, think=think
+            prompt, model=model, options=options, fmt=fmt, think=think,
+            system=system,
         )
 
     async def chat_text(
@@ -175,9 +177,11 @@ class LlmGateway:
         options: dict | None = None,
         think: bool | str | None = None,
         provider: str | None = None,
+        system: str | None = None,
     ) -> str:
         return await self._gen(provider).generate_vlm(
-            prompt, image_bytes_list, model=model, options=options, think=think
+            prompt, image_bytes_list, model=model, options=options, think=think,
+            system=system,
         )
 
     async def generate_vlm_stream(
@@ -217,6 +221,14 @@ class LlmGateway:
 
     async def vision_ollama_models(self, url: str | None = None) -> list[str]:
         return await self._ollama.vision_models(url)
+
+    async def unload(self, model: str | None = None) -> None:
+        """Free the card before handing over to a renderer.
+
+        Only Ollama holds a model resident, so there is nothing to do for the
+        OpenAI-compatible backend — it is a remote service either way.
+        """
+        await self._ollama.unload(model)
 
     async def list_openai_models(self, url: str | None = None) -> list[str]:
         return await self._openai.list_models(url)

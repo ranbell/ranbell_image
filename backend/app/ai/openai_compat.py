@@ -199,11 +199,16 @@ class OpenAICompatClient:
         options: dict | None = None,
         fmt: str | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
         stream: bool = False,
     ) -> httpx.Response:
+        messages: list[dict[str, Any]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append(build_user_message(prompt, image_bytes_list))
         payload: dict[str, Any] = {
             "model": model or self.default_model or settings.vlm_model,
-            "messages": [build_user_message(prompt, image_bytes_list)],
+            "messages": messages,
             "stream": stream,
         }
         payload.update(map_openai_options(options, fmt=fmt, think=think))
@@ -221,6 +226,7 @@ class OpenAICompatClient:
         options: dict | None = None,
         fmt: str | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
     ) -> str:
         merged = {"num_predict": -1, **(options or {})}
         async with self._acquire():
@@ -230,6 +236,7 @@ class OpenAICompatClient:
                 options=merged,
                 fmt=fmt,
                 think=think,
+                system=system,
                 stream=False,
             )
         self._raise_with_body(r)
@@ -331,6 +338,7 @@ class OpenAICompatClient:
         model: str | None = None,
         options: dict | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
     ) -> str:
         async with self._acquire():
             r = await self._chat(
@@ -339,6 +347,7 @@ class OpenAICompatClient:
                 model=model,
                 options=options or {},
                 think=think,
+                system=system,
                 stream=False,
             )
         self._raise_with_body(r)

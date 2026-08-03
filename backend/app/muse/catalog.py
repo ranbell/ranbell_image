@@ -81,7 +81,9 @@ async def build_muse_catalog(
         if list_fn:
             models = list(await list_fn(ollama_url or None) or [])
             ollama_ok = ollama_ok or bool(models)
-        vision_fn = getattr(llm, "vision_models", None)
+        # The gateway names it per provider; the bare client does not.
+        vision_fn = (getattr(llm, "vision_ollama_models", None)
+                     or getattr(llm, "vision_models", None))
         if vision_fn:
             vision = list(await vision_fn(ollama_url or None) or [])
     except Exception as exc:
