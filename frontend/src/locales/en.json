@@ -1267,171 +1267,80 @@
     "comfyOfflineHint": "ComfyUI is unreachable — images will queue and generate when it reconnects."
   },
   "muse": {
-    "title": "Muse — image board generation",
-    "subtitle": "Sketch from a theme and a character, re-read tags off the sketch, then render for real",
+    "title": "Muse — grown from a draft",
+    "subtitle": "Four drafts from a theme and a character, then redraw the one you pick while looking at it",
     "close": "Close",
+    "reset": "Start over",
+    "resetConfirm": "Throw this session away and start again?",
     "character": "Character",
     "pickCharacter": "Pick a character",
-    "noCharacter": "None selected",
+    "noCharacter": "None",
     "theme": "Theme",
     "themePlaceholder": "e.g. waiting for someone on a rooftop after the rain",
-    "boardWorkflow": "Board workflow",
-    "finalWorkflow": "Final workflow",
-    "lightModel": "Light model",
-    "boardParams": "Board settings",
-    "boardSize": "Resolution",
-    "boardSteps": "Steps",
-    "boardCfg": "CFG",
-    "boardCount": "Images per track",
-    "mergeParams": "Tag merge",
-    "characterWeight": "Background ⇔ Character",
-    "characterWeightHint": "Toward background gives a wide shot; toward character gives a close one",
-    "commonRatio": "Shared tags kept",
-    "uniqueCount": "Distinctive tags per side",
-    "harvestThreshold": "Re-tag confidence",
-    "harvestRerank": "Re-rank by confidence and frequency",
-    "harvestRerankHint": "Tidier, but less surprising. Off by default",
+    "workflow": "Workflow",
+    "workflowHint": "One workflow draws the drafts and every stage after — only steps and cfg differ",
+    "model": "Model",
+    "modelHint": "Every stage after the draft shows the model the previous image, so it must read pictures",
+    "notVision": "This model cannot read images — they will be dropped silently",
+    "style": "Style",
+    "negative": "Negative",
+    "draftParams": "Draft settings",
+    "refineParams": "Redraw settings",
+    "size": "Size",
+    "draftSteps": "Draft steps",
+    "draftCfg": "Draft CFG",
+    "draftCount": "Drafts",
+    "finalSteps": "Steps",
+    "finalCfg": "CFG",
+    "refineStages": "Stages",
+    "refineStagesHint": "B, C and D. Lowering this stops early",
+    "wd14Threshold": "Tag confidence",
     "dropRatingTags": "Drop NSFW tags",
     "dropCharacterTags": "Drop named-character tags",
+    "brief": "What the model is told",
+    "briefHint": "This whole block is sent again on every stage",
     "steps": {
-      "compose": "Write the tags",
-      "board": "Draw the board",
-      "harvest": "Re-tag the board",
-      "topup": "Add what is missing",
-      "merge": "Merge the tags",
-      "brainstorm": "Imagine the scene",
-      "render": "Render for real"
-    },
-    "tags": {
-      "title": "Candidate tags",
-      "rejectHint": "Click to reject. Rejected tags stay out of every later step",
-      "rejected": "Rejected",
-      "composed": "Written by the model",
-      "topup": "Added afterwards"
-    },
-    "board": {
-      "title": "Image board",
-      "background": "Background",
-      "person": "Character",
-      "redraw": "Redraw",
-      "stepsNotPatched": "This workflow has no node the step count can be written to — the value is ignored",
-      "pending": "Rendering"
-    },
-    "harvest": {
-      "title": "Tags read back off the board",
-      "fromBackground": "From background",
-      "fromPerson": "From character",
-      "cleaned": "Dropped by the model",
-      "cleanedHint": "What the rules could not judge. Unusual tags are kept on purpose",
-      "reason": {
-        "wrong_track": "belongs to the other track",
-        "franchise": "a franchise or existing character",
-        "artifact": "the draft's own layout",
-        "contradicts": "contradicts the chosen character"
-      }
-    },
-    "merge": {
-      "title": "Merged tags",
-      "protected": "Protected",
-      "removed": "Removed",
-      "removedHint": "Admin exclusions plus the tags you rejected",
-      "evicted": "Dropped — contradicted the character",
-      "evictedHint": "These filled the same attribute slot as a locked tag with a different value",
-      "framingDropped": "Dropped — fights the {shot} framing"
-    },
-    "brainstorm": {
-      "title": "Scene ideas",
-      "pick": "Use this one",
-      "regenerate": "Think again",
-      "chosen": "In use"
-    },
-    "render": {
-      "title": "Final render",
-      "run": "Render for real",
-      "positive": "Positive",
-      "negative": "Negative"
+      "draft": "Draft",
+      "refine": "Redraw"
     },
     "cta": {
-      "compose": "Write the tags",
-      "board": "Draw the board",
-      "harvest": "Re-tag the board",
-      "topup": "Add what is missing",
-      "merge": "Merge the tags",
-      "brainstorm": "Imagine the scene",
-      "render": "Render for real",
-      "done": "Done",
-      "auto": "Draw"
+      "draft": "Draw the drafts",
+      "refine": "Redraw what you picked",
+      "done": "Done"
     },
     "needs": {
-      "theme": "a theme",
-      "character": "a character",
-      "boardWorkflow": "a board workflow",
-      "finalWorkflow": "a final workflow",
-      "lightModel": "a light model"
+      "theme": "theme",
+      "character": "character",
+      "workflow": "workflow",
+      "model": "model"
+    },
+    "draft": {
+      "title": "Drafts",
+      "prompt": "Draft prompt",
+      "pending": "Rendering",
+      "cancel": "Stop and re-roll",
+      "cancelHint": "Watch it form; if it is wrong, stop here and draw the prompt again",
+      "select": "Pick this one",
+      "selected": "Picked",
+      "empty": "Nothing drawn yet",
+      "hint": "Four from one seed and one latent. Pick the good one — more than one is allowed"
+    },
+    "refine": {
+      "title": "Redraw",
+      "wd14": "Tags read off this picture",
+      "wd14Hint": "These become the base from here on; stage A's prose is dropped",
+      "pending": "Rendering",
+      "empty": "Pick a draft and the stages appear here",
+      "stage": {
+        "reinforce": "B — objects and setting",
+        "cinematic": "C — angle and light",
+        "angle": "D — a decisively new camera"
+      }
     },
     "warn": {
-      "vocabMissing": "The WD14 vocabulary has not been imported. Until it is, no tags come back at all",
       "comfyOffline": "ComfyUI is unreachable",
-      "needs": "Set these first: {items}"
-    },
-    "reset": "Start over",
-    "resetConfirm": "Discard this session and start over?",
-    "llmCleanup": "Let a model tidy the tags",
-    "llmCleanupHint": "Reviews each track's read-back tags and drops what belongs to the other track, names a franchise, or is the draft's own layout",
-    "compose": {
-      "title": "The prompt, aspect by aspect",
-      "hint": "Each aspect is capped. The model writes, the vocabulary fills the gaps, you swap what you like"
-    },
-    "topup": {
-      "title": "Reinforcements",
-      "hint": "Chosen from what the theme suggests but the picture did not have",
-      "none": "Nothing added (a valid answer)",
-      "candidates": "Candidates"
-    },
-    "topupPicks": "Reinforcement limit",
-    "topupPicksHint": "The image is the dish; this is seasoning. Fewer is better",
-    "shot": "Framing",
-    "shotHint": "Choosing one removes the framing tags that fight it at merge time",
-    "mustTags": "Always keep",
-    "mustTagsPlaceholder": "solo, looking_at_viewer",
-    "mustTagsHint": "Leads the prompt, survives the exclusion list, and evicts whatever contradicts it. Add solo when strangers keep appearing",
-    "shots": {
-      "auto": "Auto",
-      "wide_shot": "Wide",
-      "full_body": "Full body",
-      "cowboy_shot": "Cowboy",
-      "upper_body": "Upper body",
-      "close_up": "Close-up"
-    },
-    "style": "Style",
-    "effect": "Effect",
-    "effectHint": "Film look, finish. Not something that changes per theme, so it is yours",
-    "vocabSupplement": "Top short slots up from the vocabulary",
-    "vocabSupplementHint": "Only slots the model left short, and only with tags that fit that slot",
-    "slots": {
-      "hint": "Click a tag to drop it, type to add one. Each aspect has its own budget, so none can flood the prompt",
-      "removeHint": "Click to remove",
-      "lockedHint": "Comes from the character or your settings",
-      "addPlaceholder": "+ tag"
-    },
-    "angle": "Camera angle",
-    "texts": "Text in the image",
-    "textsPlaceholder": "34L {'@'} runway\nBunny Air {'@'} uniform badge",
-    "textsHint": "One per line, as `text {'@'} where`. Appended to the prompt as text \"…\"",
-    "angles": {
-      "auto": "Auto",
-      "eye_level": "Eye level",
-      "from_above": "From above",
-      "from_below": "From below",
-      "dutch_angle": "Dutch angle",
-      "from_side": "From the side",
-      "from_behind": "From behind"
-    },
-    "mode": {
-      "auto": "AUTO",
-      "manual": "MANUAL"
-    },
-    "workings": "Show the working"
+      "title": "Note"
+    }
   },
   "characters": {
     "title": "Characters",

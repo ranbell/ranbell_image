@@ -1267,171 +1267,80 @@
     "comfyOfflineHint": "ComfyUI に接続できません — 画像は再接続後に生成されます。"
   },
   "muse": {
-    "title": "Muse — イメージボード生成",
-    "subtitle": "お題とキャラから下書きを描き、その絵からタグを拾い直して本番を描く",
+    "title": "Muse — 下書きから育てる",
+    "subtitle": "お題とキャラから下書きを4枚描き、選んだ1枚を絵を見ながら描き直していく",
     "close": "閉じる",
+    "reset": "やり直す",
+    "resetConfirm": "このセッションを捨てて最初からやり直しますか？",
     "character": "キャラクター",
     "pickCharacter": "キャラクターを選ぶ",
     "noCharacter": "未選択",
     "theme": "お題",
     "themePlaceholder": "例: 雨上がりの屋上で、誰かを待っている",
-    "boardWorkflow": "下書きワークフロー",
-    "finalWorkflow": "本番ワークフロー",
-    "lightModel": "軽量モデル",
-    "boardParams": "下書きの設定",
-    "boardSize": "解像度",
-    "boardSteps": "ステップ数",
-    "boardCfg": "CFG",
-    "boardCount": "1トラックあたりの枚数",
-    "mergeParams": "タグ結合の設定",
-    "characterWeight": "背景 ⇔ 人物",
-    "characterWeightHint": "背景寄りにすると引きの絵、人物寄りにすると寄りの絵になる",
-    "commonRatio": "共通タグの採用率",
-    "uniqueCount": "固有タグの本数",
-    "harvestThreshold": "逆タグ抽出の確度",
-    "harvestRerank": "確度と頻度で二段選別する",
-    "harvestRerankHint": "整うが意外性は減る。既定はオフ",
+    "workflow": "ワークフロー",
+    "workflowHint": "下書きも本番も同じワークフローで描く。違うのはステップ数と CFG だけ",
+    "model": "モデル",
+    "modelHint": "B以降は前の絵をモデルに見せるので、画像を読めるモデルを選ぶこと",
+    "notVision": "このモデルは画像を読めません。指定しても無視されます",
+    "style": "画風",
+    "negative": "ネガティブ",
+    "draftParams": "下書きの設定",
+    "refineParams": "描き直しの設定",
+    "size": "解像度",
+    "draftSteps": "下書きのステップ数",
+    "draftCfg": "下書きの CFG",
+    "draftCount": "下書きの枚数",
+    "finalSteps": "本番のステップ数",
+    "finalCfg": "本番の CFG",
+    "refineStages": "描き直す回数",
+    "refineStagesHint": "B・C・D の3段。減らすと途中で止まる",
+    "wd14Threshold": "タグ抽出の確度",
     "dropRatingTags": "NSFW タグを除外する",
     "dropCharacterTags": "版権キャラ名を除外する",
+    "brief": "モデルに渡す指示",
+    "briefHint": "全ステージに毎回この全文を渡している",
     "steps": {
-      "compose": "タグを書く",
-      "board": "下書きを描く",
-      "harvest": "絵からタグを拾う",
-      "topup": "足りないものを足す",
-      "merge": "タグをまとめる",
-      "brainstorm": "シーンを考える",
-      "render": "本番を描く"
-    },
-    "tags": {
-      "title": "タグ候補",
-      "rejectHint": "クリックで除外。除外したタグは以降のステップに出てこない",
-      "rejected": "除外したタグ",
-      "composed": "LLM が書いた",
-      "topup": "後から足した"
-    },
-    "board": {
-      "title": "イメージボード",
-      "background": "背景",
-      "person": "人物",
-      "redraw": "描き直す",
-      "stepsNotPatched": "このワークフローにはステップ数を書き込めるノードがありません。指定は無視されます",
-      "pending": "生成中"
-    },
-    "harvest": {
-      "title": "絵から拾ったタグ",
-      "fromBackground": "背景から",
-      "fromPerson": "人物から",
-      "cleaned": "LLM が落としたタグ",
-      "cleanedHint": "ルールでは判別できなかったもの。意外性のあるタグは残す方針",
-      "reason": {
-        "wrong_track": "もう片方のトラックのもの",
-        "franchise": "版権・既存キャラ",
-        "artifact": "下書きの体裁が写り込んだもの",
-        "contradicts": "選択キャラと矛盾"
-      }
-    },
-    "merge": {
-      "title": "まとめたタグ",
-      "protected": "保護したタグ",
-      "removed": "除いたタグ",
-      "removedHint": "管理画面の除外ワードと、あなたが弾いたタグ",
-      "evicted": "キャラと矛盾して除いたタグ",
-      "evictedHint": "選択キャラの固定タグと同じ属性を別の値で埋めていたもの",
-      "framingDropped": "画角「{shot}」と矛盾して除いたタグ"
-    },
-    "brainstorm": {
-      "title": "シーン案",
-      "pick": "この案にする",
-      "regenerate": "考え直す",
-      "chosen": "採用中"
-    },
-    "render": {
-      "title": "本番",
-      "run": "本番を描く",
-      "positive": "ポジティブ",
-      "negative": "ネガティブ"
+      "draft": "下書きを描く",
+      "refine": "描き直す"
     },
     "cta": {
-      "compose": "タグを書く",
-      "board": "下書きを描く",
-      "harvest": "絵からタグを拾う",
-      "topup": "足りないものを足す",
-      "merge": "タグをまとめる",
-      "brainstorm": "シーンを考える",
-      "render": "本番を描く",
-      "done": "完成",
-      "auto": "描く"
+      "draft": "下書きを描く",
+      "refine": "選んだ絵を描き直す",
+      "done": "完成"
     },
     "needs": {
       "theme": "お題",
       "character": "キャラクター",
-      "boardWorkflow": "下書きワークフロー",
-      "finalWorkflow": "本番ワークフロー",
-      "lightModel": "軽量モデル"
+      "workflow": "ワークフロー",
+      "model": "モデル"
+    },
+    "draft": {
+      "title": "下書き",
+      "prompt": "下書きのプロンプト",
+      "pending": "生成中",
+      "cancel": "止めて振り直す",
+      "cancelHint": "途中経過を見て違うと思ったら、ここで止めてプロンプトから引き直せる",
+      "select": "この絵を選ぶ",
+      "selected": "選択中",
+      "empty": "まだ描いていません",
+      "hint": "同じシード・同じ latent の4枚。良いものを選ぶ（複数選べる）"
+    },
+    "refine": {
+      "title": "描き直し",
+      "wd14": "この絵から拾ったタグ",
+      "wd14Hint": "ここから先はこのタグが土台になる。Aの文章は捨てられる",
+      "pending": "生成中",
+      "empty": "下書きを選ぶとここに出ます",
+      "stage": {
+        "reinforce": "B — 物と情景を足す",
+        "cinematic": "C — 画角と光を決める",
+        "angle": "D — カメラを大きく動かす"
+      }
     },
     "warn": {
-      "vocabMissing": "WD14 語彙が未取り込みです。管理画面から取り込むまでタグが一つも出ません",
-      "comfyOffline": "ComfyUI に繋がりません",
-      "needs": "先に指定してください: {items}"
-    },
-    "reset": "最初からやり直す",
-    "resetConfirm": "このセッションを捨てて最初からやり直しますか？",
-    "llmCleanup": "LLM でタグを整理する",
-    "llmCleanupHint": "絵から拾ったタグを背景/人物それぞれ見て、片方にしか属さないもの・版権名・下書きの体裁を落とす",
-    "compose": {
-      "title": "プロンプトの構成",
-      "hint": "面ごとに上限がある。LLM が書き、足りない枠を WD14 語彙が補い、あなたが差し替える"
-    },
-    "topup": {
-      "title": "足したタグ",
-      "hint": "お題が示唆するのに絵に無かったものから、LLM が補強に役立つものを選んだ",
-      "none": "追加なし（選ばないのも正しい答え）",
-      "candidates": "候補"
-    },
-    "topupPicks": "補強タグの上限",
-    "topupPicksHint": "絵が主でこれは味付け。少ないほうが良い",
-    "shot": "画角",
-    "shotHint": "選ぶと、これと矛盾する画角タグは結合時に除去される",
-    "mustTags": "強制注入タグ",
-    "mustTagsPlaceholder": "solo, looking_at_viewer",
-    "mustTagsHint": "必ず先頭に入り、除外ワードでも消えない。矛盾するタグは追い出される。他人が写り込むなら solo を",
-    "shots": {
-      "auto": "おまかせ",
-      "wide_shot": "引き（情景）",
-      "full_body": "全身",
-      "cowboy_shot": "膝上",
-      "upper_body": "上半身",
-      "close_up": "寄り（顔）"
-    },
-    "style": "作風 (Style)",
-    "effect": "効果 (Effect)",
-    "effectHint": "フィルム調・質感など。お題ごとに変えるものではないのでユーザー設定",
-    "vocabSupplement": "WD14 語彙で足りない枠を補う",
-    "vocabSupplementHint": "LLM が埋め切れなかったスロットだけ、その枠に合う語で補完する",
-    "slots": {
-      "hint": "タグをクリックで削除、右端の欄で追加。枠ごとに上限があり、溢れないので一面に集中しない",
-      "removeHint": "クリックで削除",
-      "lockedHint": "キャラまたは設定から入るので、ここでは編集しない",
-      "addPlaceholder": "＋タグ"
-    },
-    "angle": "カメラ角度",
-    "texts": "画中の文字",
-    "textsPlaceholder": "34L {'@'} runway\nBunny Air {'@'} 制服のバッジ",
-    "textsHint": "1行1つ。「文字 {'@'} どこに」の形。プロンプト末尾に text \"…\" として付く",
-    "angles": {
-      "auto": "おまかせ",
-      "eye_level": "目線の高さ",
-      "from_above": "俯瞰",
-      "from_below": "煽り",
-      "dutch_angle": "斜め（ダッチ）",
-      "from_side": "横から",
-      "from_behind": "後ろから"
-    },
-    "mode": {
-      "auto": "AUTO",
-      "manual": "MANUAL"
-    },
-    "workings": "途中の工程を見る"
+      "comfyOffline": "ComfyUI に接続できません",
+      "title": "注意"
+    }
   },
   "characters": {
     "title": "キャラクター",

@@ -5169,10 +5169,8 @@ onUnmounted(() => {
     <MusePanel
       :show="showMuse"
       :comfyOffline="comfyOffline"
-      :get-jobs-map="getJobsMap"
       @update:show="showMuse = $event"
       @select-image="openImageBySha($event)"
-      @send-to-refine-direct="handleSendToRefineDirect($event)"
       @toast="showToast($event.msg, $event.type)"
     />
 

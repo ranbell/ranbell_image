@@ -1,0 +1,135 @@
+"""GEN-lane job that walks one chosen draft through the refine stages.
+
+The chain cannot be queued as independent jobs: every stage needs the picture
+the stage before it produced. So it is one job that alternates LLM and renderer,
+and it calls :func:`run_render` directly rather than reimplementing it — the
+workflow patching, the unpatchable-knob warning, the image saving and the
+CreationRecord are all wanted here unchanged.
+
+The model is dropped from VRAM before each render. On one 16GB card a 26B MoE
+holds about 13GB, and while a single-image latent still fits beside it, nothing
+larger does; the unload also stops ComfyUI from paging its checkpoint in and out
+around a resident LLM.
+"""
+from __future__ import annotations
+
+import base64
+import logging
+from pathlib import Path
+from typing import Any
+
+from . import chain, events, harvest, session_db
+from .runtime import render_settings
+
+logger = logging.getLogger(__name__)
+
+
+async def _image_bytes(db, sha256: str) -> bytes:
+    doc = await db.get(sha256)
+    path = Path(str((doc or {}).get("path") or ""))
+    if not path.exists():
+        raise RuntimeError(f"image missing on disk: {sha256}")
+    return path.read_bytes()
+
+
+def preview_publisher(session_id: str, label: str):
+    """Forward latent frames to the session's SSE stream.
+
+    The frame is the payload rather than a nudge to refetch: there is nowhere on
+    the server it is kept, and by the time a client came back for it the render
+    would have moved on.
+    """
+    async def _publish(jpeg: bytes) -> None:
+        events.publish(session_id, {
+            "type": "preview", "label": label,
+            "image": base64.b64encode(jpeg).decode(),
+        })
+    return _publish
+
+
+async def run_chain_job(
+    reporter, cancel, *, db, comfy, ollama, session_id: str, chain_index: int,
+) -> dict[str, Any]:
+    """Run every refine stage of one chain, rendering after each."""
+    # Deferred: importing the render job at module scope drags in the scanner and
+    # the image API, which is a heavy tail for a module the tests import directly.
+    from ..jobs.render import run_render
+    from ..scanner.drafts import PLAYGROUND_SUBDIR
+
+    session = await session_db.load(db, session_id)
+    if session is None:
+        raise RuntimeError("session is gone")
+
+    inputs = session.get("inputs") or {}
+    chains = session.get("chains") or []
+    if not 0 <= chain_index < len(chains):
+        raise RuntimeError("no such chain")
+    link = chains[chain_index]
+
+    model = str(inputs.get("model") or "")
+    brief = str(session.get("brief") or "")
+    render = render_settings(inputs, draft=False)
+    num_ctx = inputs.get("ollama_num_ctx")
+
+    image = await _image_bytes(db, str(link.get("source_image_id") or ""))
+
+    # Read the draft back once. Every later stage works from the previous
+    # stage's prompt instead, because by then there is a prompt that was written
+    # while looking at a picture — which beats a tag list read off one.
+    tags = await harvest.read_tags(
+        image,
+        threshold=float(inputs.get("wd14_threshold", 0.2)),
+        model_dir=(await _wd14_dir(db)),
+        drop_rating_tags=bool(inputs.get("drop_rating_tags", False)),
+        drop_character_tags=bool(inputs.get("drop_character_tags", True)),
+    )
+    await session_db.record_wd14(db, session_id, chain_index, tags)
+
+    previous = ""
+    for stage_index, (stage, prompt_file) in enumerate(
+        chain.stages_for(inputs.get("refine_stages", 3))
+    ):
+        cancel.raise_if_set()
+        reporter.indeterminate()
+        reporter.update(0.0, f"{chain.STAGE_LABELS.get(stage, stage)} — writing")
+
+        prompt = await chain.run_refine(
+            ollama, stage_file=prompt_file, brief=brief, previous=previous,
+            image=image, model=model, num_ctx=num_ctx,
+            tags=tags if stage_index == 0 else "",
+        )
+        await session_db.record_stage_prompt(db, session_id, chain_index,
+                                             stage_index, prompt)
+        await ollama.unload(model)
+
+        result = await run_render(
+            reporter, cancel,
+            db=db, comfy=comfy,
+            workflow_name=str(inputs.get("workflow") or ""),
+            positive=prompt,
+            negative=str(inputs.get("negative_prompt") or ""),
+            seed=int(link.get("seed") or 0) or None,
+            subdir=PLAYGROUND_SUBDIR,
+            prefix=f"muse_{stage}",
+            method="muse_refine",
+            payload_extra={"muse_session_id": session_id, "muse_stage": stage},
+            preview=preview_publisher(session_id, f"{chain_index}:{stage}"),
+            **render,
+        )
+        shas = result.get("sha256s") or []
+        if not shas:
+            raise RuntimeError(f"stage {stage} rendered nothing")
+
+        await session_db.attach_stage_image(
+            db, session_id, chain_index, stage_index, shas[0], result,
+        )
+        image = await _image_bytes(db, shas[0])
+        previous = prompt
+
+    return {"chain": chain_index}
+
+
+async def _wd14_dir(db) -> str | None:
+    from ..runtime_config import get_runtime_config
+    cfg = await get_runtime_config(db)
+    return cfg.get("wd14_model_dir")

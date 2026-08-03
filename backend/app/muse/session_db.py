@@ -64,59 +64,91 @@ async def delete(db, session_id: str) -> None:
     )
 
 
-async def attach_board_image(
-    db, session_id: str, track: str, seed_index: int, image_id: str, meta: dict,
-) -> None:
-    """Land a finished board render on its slot.
+async def attach_draft_image(db, session_id: str, image_id: str, meta: dict) -> None:
+    """Land one image of the draft batch.
 
-    Renders come back out of order and from a different task than the one that
-    queued them, so the session is re-read here rather than closed over.
+    The four drafts come from a single job — one seed, one latent, batch of four
+    — so this is called once per image as each is saved, in batch order. The
+    session is re-read rather than closed over because the render runs in a
+    different task from the one that queued it.
     """
     session = await load(db, session_id)
     if session is None:
-        logger.warning("[muse] board landed for a session that is gone: %s", session_id)
+        logger.warning("[muse] draft landed for a session that is gone: %s", session_id)
         return
-    slots = (session.get("board") or {}).get(track) or []
-    for slot in slots:
-        if slot.get("seed_index") == seed_index:
-            slot["image_id"] = image_id
-            slot["pending"] = False
-            slot["seed"] = meta.get("seed", slot.get("seed"))
-            break
+    draft = session.setdefault("draft", {})
+    images = draft.setdefault("images", [])
+    images.append({"index": len(images), "image_id": image_id,
+                   "seed": meta.get("seed", draft.get("seed"))})
+    expected = int((session.get("inputs") or {}).get("draft_count") or 0)
+    if expected and len(images) >= expected:
+        draft["pending"] = False
     await save(db, session, publish=False)
     events.publish(session_id, {
-        "type": "board_attached", "track": track,
-        "seed_index": seed_index, "image_id": image_id,
+        "type": "draft_attached", "index": len(images) - 1,
+        "image_id": image_id, "total": expected,
     })
 
 
-async def attach_final_image(
-    db, session_id: str, image_id: str, meta: dict, *, index: int = 0,
+async def attach_stage_image(
+    db, session_id: str, chain_index: int, stage_index: int,
+    image_id: str, meta: dict,
 ) -> None:
-    """Fill in the render that was queued at ``index``.
-
-    A run draws one image per brainstorm idea and they land in whatever order
-    the queue reaches them, so each render carries its own position — the meta a
-    render hands back is Comfy's prompt id, which is not the job id we filed it
-    under. Writing to `final` wholesale, which is what this did when there was
-    only ever one, meant the fourth image to arrive erased the other three.
-    """
+    """Land the render for one refine stage of one chain."""
     session = await load(db, session_id)
     if session is None:
         return
-    finals = [dict(f) for f in schema.finals_of(session)]
-    if not 0 <= index < len(finals):
+    chains = session.get("chains") or []
+    if not 0 <= chain_index < len(chains):
         return
-    finals[index]["image_id"] = image_id
-    finals[index]["seed"] = meta.get("seed", finals[index].get("seed"))
-    session["finals"] = finals
-    if all(f.get("image_id") for f in finals):
+    stages = chains[chain_index].get("stages") or []
+    if not 0 <= stage_index < len(stages):
+        return
+    stages[stage_index]["image_id"] = image_id
+    stages[stage_index]["pending"] = False
+    stages[stage_index]["seed"] = meta.get("seed", stages[stage_index].get("seed"))
+    landed = [s for s in schema.all_stages(session) if s.get("image_id")]
+    total = len(schema.all_stages(session))
+    if landed and len(landed) == total:
         session["status"] = "done"
     await save(db, session, publish=False)
     events.publish(session_id, {
-        "type": "final_attached", "image_id": image_id,
-        "done": sum(1 for f in finals if f.get("image_id")), "total": len(finals),
+        "type": "stage_attached", "chain": chain_index, "stage": stage_index,
+        "image_id": image_id, "done": len(landed), "total": total,
     })
+
+
+async def record_wd14(db, session_id: str, chain_index: int, tags: str) -> None:
+    session = await load(db, session_id)
+    if session is None:
+        return
+    chains = session.get("chains") or []
+    if 0 <= chain_index < len(chains):
+        chains[chain_index]["wd14"] = tags
+        await save(db, session)
+
+
+async def record_stage_prompt(
+    db, session_id: str, chain_index: int, stage_index: int, prompt: str,
+) -> None:
+    """Store a stage's prompt as soon as it is written.
+
+    Written before the render rather than after it, so the panel can show what
+    is being drawn while it is being drawn — and so a render that fails still
+    leaves behind the prompt that caused it.
+    """
+    session = await load(db, session_id)
+    if session is None:
+        return
+    chains = session.get("chains") or []
+    if not 0 <= chain_index < len(chains):
+        return
+    stages = chains[chain_index].get("stages") or []
+    if not 0 <= stage_index < len(stages):
+        return
+    stages[stage_index]["prompt"] = prompt
+    stages[stage_index]["pending"] = True
+    await save(db, session)
 
 
 def log(session: dict[str, Any], step: str, detail: str) -> None:

@@ -1,9 +1,14 @@
-"""Muse orchestration: one function per pipeline step.
+"""Muse orchestration.
 
-Each step reads the session, does its work, writes the session back, and
-publishes an SSE event. Steps are separately callable on purpose — the whole
-value of the pipeline is being able to look at an intermediate result and run
-that step again with different settings, which is also why nothing here caches.
+    theme + character  ->  brief
+    brief              ->  stage A prompt      ->  N drafts, one seed, one latent
+    a chosen draft     ->  WD14                ->  B -> C -> D, rendering each
+
+Two steps with a person between them. There is no mode that skips the choice:
+the draft decides how good the rest of the run can be, and no arrangement of
+instructions judges four pictures as well as looking at them does. The draft
+render streams previews for the same reason — the useful moment to abandon a
+prompt is five steps in, not after four images have finished.
 """
 from __future__ import annotations
 
@@ -12,15 +17,13 @@ import random
 from typing import Any
 
 from ..characters import presets as presets_db
-from ..prompt.tag_merge import removal_tag_set
 from ..runtime_config import get_runtime_config
 from ..scanner.drafts import PLAYGROUND_SUBDIR
 from ..spooler.models import JobLane
-from . import (
-    camera, cleanup, compose, harvest, merge, scene, session_db, topup, tracks,
-)
-from . import slots as slot_defs
-from .schema import TRACKS, new_session, public_view
+from . import brief as brief_mod
+from . import chain, events, runner, session_db
+from .runtime import render_settings
+from .schema import missing_inputs, new_session
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +43,9 @@ async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, 
 
 
 async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    session["inputs"] = {**_inputs(session), **{k: v for k, v in patch.items() if v is not None}}
+    session["inputs"] = {**_inputs(session),
+                         **{k: v for k, v in patch.items() if v is not None}}
+    _rebuild_brief(session)
     await session_db.save(db, session)
     return session
 
@@ -49,8 +54,8 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
     preset = await presets_db.get_preset(db, character_id)
     if preset is None:
         raise MuseError("character not found")
-    # Frozen at pick time: if the registry entry is edited later, a run in
-    # progress keeps rendering the character it started with.
+    # Frozen at pick time: editing the registry later does not change a run that
+    # has already started drawing this person.
     session["character"] = {
         **presets_db.preset_to_character(preset),
         "character_id": character_id,
@@ -59,606 +64,183 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
         "name_ja": preset.get("name_ja") or preset.get("name") or "",
     }
     session["inputs"] = {**_inputs(session), "character_id": character_id}
+    _rebuild_brief(session)
     session_db.log(session, "character", session["character"].get("name", ""))
     await session_db.save(db, session)
     return session
 
 
-# ── S1 compose ──────────────────────────────────────────────────────────────
-async def run_compose(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    """Fill the prompt's slots: model writes, vocabulary tops up, caps apply."""
-    inputs = _inputs(session)
-    theme = str(inputs.get("theme") or "").strip()
-    if not theme:
-        raise MuseError("theme is required")
-    model = str(inputs.get("light_model") or "").strip()
-    if not model:
-        raise MuseError("light_model is required")
+def _rebuild_brief(session: dict[str, Any]) -> None:
+    """Keep the brief in step with the inputs it is built from.
 
-    cfg = await get_runtime_config(db)
+    Stored rather than assembled per call because every stage is handed the same
+    text, and a brief that drifted between stage B and stage D would be exactly
+    the identity drift this design removed the machinery for.
+    """
+    inputs = _inputs(session)
     character = session.get("character") or {}
-    filled = await compose.compose_slots(
-        theme, character, ollama,
-        model=model,
-        num_ctx=cfg.get("ollama_num_ctx"),
-        db=db,
-        supplement=bool(inputs.get("vocab_supplement", True)),
+    if not character or not str(inputs.get("theme") or "").strip():
+        session["brief"] = ""
+        return
+    session["brief"] = brief_mod.build(
+        character,
+        str(inputs.get("theme") or ""),
+        str(inputs.get("style") or ""),
     )
-    filled = compose.seed_locked(filled, character)
-
-    removal = removal_tag_set(cfg)
-    blocked = {t.strip().lower().replace(" ", "_")
-               for t in (session.get("rejected_tags") or []) if str(t).strip()}
-    blocked |= {str(t).lower() for t in removal}
-    session["slots"] = {
-        key: [r for r in rows if r["tag"].lower() not in blocked]
-        for key, rows in filled.items()
-    }
-    session["seed_tags"] = _tracks_from_slots(session["slots"])
-    if not any(session["seed_tags"].values()):
-        _warn(session, "the model returned no usable tags — try another light model")
-
-    session["board"] = {t: [] for t in TRACKS}
-    session["harvest"] = {}
-    session["topup"] = []
-    session["topup_candidates"] = []
-    session["merged"] = {}
-    session["finals"] = []
-    session_db.log(
-        session, "compose",
-        " / ".join(f"{k}:{len(v)}" for k, v in session["slots"].items() if v),
-    )
-    await session_db.save(db, session)
-    return session
 
 
-def _tracks_from_slots(filled: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
-    """Flatten the slots into the two board prompts."""
-    out: dict[str, list[dict[str, Any]]] = {t: [] for t in TRACKS}
-    for slot in slot_defs.SLOTS:
-        if slot.track not in TRACKS:
-            continue
-        out[slot.track].extend(filled.get(slot.key) or [])
-    return out
+# ── draft ───────────────────────────────────────────────────────────────────
+async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict[str, Any]:
+    """Stage A, then one render job that produces every draft at once."""
+    missing = missing_inputs(session)
+    if missing:
+        raise MuseError(f"missing: {', '.join(missing)}")
 
-
-def user_slots(session: dict[str, Any]) -> dict[str, list[str]]:
-    """Style / Shot / Effect — the aspects the user owns."""
     inputs = _inputs(session)
-    return {
-        "style": _as_tags(inputs.get("style")),
-        "effect": _as_tags(inputs.get("effect")),
-        "shot": camera.tags_for(
-            str(inputs.get("shot") or "auto"), str(inputs.get("angle") or "auto"),
-        ),
-    }
+    _rebuild_brief(session)
+    cfg = await get_runtime_config(db)
+    model = str(inputs.get("model") or "")
 
+    try:
+        prompt = await chain.run_pose(
+            ollama, brief=session["brief"], model=model,
+            num_ctx=cfg.get("ollama_num_ctx"),
+        )
+    except chain.ChainError as exc:
+        raise MuseError(str(exc)) from exc
+    # Hand the card over before asking ComfyUI for a four-image latent.
+    await ollama.unload(model)
 
-def _as_tags(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple)):
-        return [str(v).strip() for v in value if str(v).strip()]
-    return [t.strip() for t in str(value or "").split(",") if t.strip()]
-
-
-def track_prompt(session: dict[str, Any], track: str) -> tuple[str, str]:
-    """The positive/negative a board render for this track uses."""
-    negative = str(_inputs(session).get("negative_prompt") or "")
-    # The board gets the same labelled shape the final prompt has. A flat list
-    # lets one aspect dominate by repetition; the labels keep each in its lane.
-    filled = {
-        slot.key: [r["tag"] for r in (session.get("slots") or {}).get(slot.key) or []]
-        for slot in slot_defs.slots_for(track)
-    }
-    filled.update({k: v for k, v in user_slots(session).items() if v})
-    if track == "person":
-        identity = list((session.get("character") or {}).get("identity_tags") or [])
-        if identity:
-            filled["character"] = identity
-    else:
-        # Removing person tags from the positive is not enough to keep people
-        # out of a background: the checkpoint puts a figure in a library because
-        # libraries have figures in them. Say so in the negative.
-        away = tracks.BACKGROUND_NEGATIVE
-        negative = f"{negative}, {away}" if negative else away
-        # And do not ask for one in the positive at the same time. The user's
-        # Effect line is written for the finished picture, so it says things
-        # like "detailed character" — which on a background board contradicts
-        # the negative word for word. Drop only the parts naming what the
-        # negative already forbids; the rest of their setting stands.
-        for key in ("style", "effect"):
-            filled[key] = [t for t in (filled.get(key) or []) if not _names_a_person(t)]
-    return slot_defs.render_prompt(filled), negative
-
-
-_PERSON_WORDS = frozenset(
-    w.strip().replace("_", " ") for w in tracks.BACKGROUND_NEGATIVE.split(",")
-)
-
-
-def _names_a_person(phrase: str) -> bool:
-    """Whether a free-text style/effect phrase asks for a person."""
-    words = set(str(phrase or "").lower().replace("_", " ").split())
-    return bool(words & _PERSON_WORDS)
-
-
-# ── S4 board ────────────────────────────────────────────────────────────────
-async def submit_board(db, comfy, spooler, session: dict[str, Any]) -> dict[str, Any]:
-    inputs = _inputs(session)
-    workflow = str(inputs.get("board_workflow") or "").strip()
-    if not workflow:
-        raise MuseError("board_workflow is required")
-    if not any((session.get("seed_tags") or {}).values()):
-        raise MuseError("compose the tags first")
-
-    count = max(1, int(inputs.get("board_count", 3)))
     session_id = session["session_id"]
-    board: dict[str, list[dict[str, Any]]] = {t: [] for t in TRACKS}
-    warned_unpatched = False
+    seed = random.randint(0, (1 << 64) - 1)
+    count = max(1, int(inputs.get("draft_count", 4)))
 
-    for track in TRACKS:
-        positive, negative = track_prompt(session, track)
-        for index in range(count):
-            seed = random.randint(0, (1 << 64) - 1)
+    async def _attach(sha256: str, meta: dict) -> None:
+        await session_db.attach_draft_image(db, session_id, sha256, meta)
 
-            def _attach(tr: str, idx: int):
-                async def _inner(sha256: str, meta: dict) -> None:
-                    await session_db.attach_board_image(db, session_id, tr, idx, sha256, meta)
-                return _inner
+    job_id = spooler.submit(
+        JobLane.GENERATION,
+        "muse_draft",
+        _render_runner(),
+        meta={"session_id": session_id, "step": "draft"},
+        db=db,
+        comfy=comfy,
+        workflow_name=str(inputs.get("workflow") or ""),
+        positive=prompt,
+        negative=str(inputs.get("negative_prompt") or ""),
+        seed=seed,
+        batch_count=count,
+        subdir=PLAYGROUND_SUBDIR,
+        prefix="muse_draft",
+        method="muse_draft",
+        payload_extra={"muse_session_id": session_id, "muse_stage": "draft"},
+        attach=_attach,
+        preview=runner.preview_publisher(session_id, "draft"),
+        **render_settings(inputs, draft=True),
+    )
 
-            job_id = spooler.submit(
-                JobLane.GENERATION,
-                f"muse_board:{track}",
-                _render_runner(),
-                meta={"session_id": session_id, "track": track, "seed_index": index},
-                db=db,
-                comfy=comfy,
-                workflow_name=workflow,
-                positive=positive,
-                negative=negative,
-                width=int(inputs.get("board_width", 512)),
-                height=int(inputs.get("board_height", 512)),
-                steps=int(inputs.get("board_steps", 16)),
-                cfg=float(inputs.get("board_cfg", 3.0)),
-                seed=seed,
-                subdir=PLAYGROUND_SUBDIR,
-                prefix=f"muse_{track}",
-                method="muse_board",
-                payload_extra={"muse_session_id": session_id, "muse_track": track},
-                attach=_attach(track, index),
-            )
-            board[track].append({
-                "seed_index": index, "seed": seed, "job_id": job_id,
-                "image_id": "", "pending": True,
-            })
-
-    # Tell the user now if this workflow cannot take the board settings, rather
-    # than after six full-price renders come back looking nothing like drafts.
-    unpatched = _unpatchable(comfy, workflow, inputs)
-    if unpatched and not warned_unpatched:
+    unpatched = _unpatchable(comfy, str(inputs.get("workflow") or ""),
+                             render_settings(inputs, draft=True))
+    if unpatched:
         _warn(session, f"workflow ignores: {', '.join(unpatched)}")
 
-    session["board"] = board
-    session["harvest"] = {}
-    session["merged"] = {}
-    session["finals"] = []
-    session["status"] = "rendering"
-    session_db.log(session, "board", f"{count} per track, {workflow}")
+    session["draft"] = {"prompt": prompt, "seed": seed, "job_id": job_id,
+                        "images": [], "pending": True}
+    session["selected"] = []
+    session["chains"] = []
+    session["status"] = "drafting"
+    session_db.log(session, "draft", f"{count} variations, seed {seed}")
     await session_db.save(db, session)
     return session
 
 
+async def cancel_draft(db, spooler, session: dict[str, Any]) -> dict[str, Any]:
+    """Stop a draft mid-render so stage A can be run again.
+
+    The whole batch goes: the previews show one latent of the four, and a prompt
+    judged wrong from that latent is wrong for all of them.
+    """
+    job_id = str((session.get("draft") or {}).get("job_id") or "")
+    if job_id:
+        await spooler.cancel(job_id)
+    session["draft"] = {}
+    session["selected"] = []
+    session["chains"] = []
+    session["status"] = "draft"
+    session_db.log(session, "draft", "cancelled")
+    await session_db.save(db, session)
+    return session
+
+
+# ── refine ──────────────────────────────────────────────────────────────────
+async def run_refine(
+    db, ollama, comfy, spooler, session: dict[str, Any], indices: list[int],
+) -> dict[str, Any]:
+    """Send one or more drafts down the chain. Each becomes its own job."""
+    images = {i["index"]: i for i in ((session.get("draft") or {}).get("images") or [])
+              if i.get("image_id")}
+    chosen = [i for i in dict.fromkeys(indices) if i in images]
+    if not chosen:
+        raise MuseError("choose a draft that has finished rendering")
+
+    inputs = _inputs(session)
+    stages = chain.stages_for(inputs.get("refine_stages", 3))
+    seed = int((session.get("draft") or {}).get("seed") or 0)
+
+    session["selected"] = chosen
+    session["chains"] = [
+        {
+            "draft_index": idx,
+            "source_image_id": images[idx]["image_id"],
+            "seed": seed,
+            "wd14": "",
+            "stages": [{"stage": name, "prompt": "", "image_id": "", "pending": True}
+                       for name, _ in stages],
+        }
+        for idx in chosen
+    ]
+    session["status"] = "refining"
+    await session_db.save(db, session)
+
+    session_id = session["session_id"]
+    for chain_index in range(len(chosen)):
+        spooler.submit(
+            JobLane.GENERATION,
+            f"muse_refine:{chosen[chain_index]}",
+            runner.run_chain_job,
+            meta={"session_id": session_id, "step": "refine", "chain": chain_index},
+            db=db, comfy=comfy, ollama=ollama,
+            session_id=session_id, chain_index=chain_index,
+        )
+
+    session_db.log(session, "refine",
+                   f"{len(chosen)} draft(s) × {len(stages)} stages")
+    await session_db.save(db, session)
+    return session
+
+
+# ── plumbing ────────────────────────────────────────────────────────────────
 def _render_runner():
     from ..jobs.render import run_render
     return run_render
 
 
-def _unpatchable(comfy, workflow_name: str, inputs: dict[str, Any]) -> list[str]:
+def _unpatchable(comfy, workflow_name: str, wanted: dict[str, Any]) -> list[str]:
+    """Knobs this workflow has nowhere to put.
+
+    Worth saying up front: a draft asked for at 12 steps that quietly renders at
+    30 costs full price and looks nothing like a draft.
+    """
     try:
         wf = comfy.load_workflow(workflow_name)
         patchable = comfy.patchable_fields(wf)
     except Exception as exc:
         logger.warning("[muse] could not inspect %s: %s", workflow_name, exc)
         return []
-    wanted = {
-        "steps": inputs.get("board_steps"),
-        "cfg": inputs.get("board_cfg"),
-        "width": inputs.get("board_width"),
-        "height": inputs.get("board_height"),
-    }
     return [k for k, v in wanted.items() if v is not None and not patchable.get(k)]
-
-
-# ── S5 harvest ──────────────────────────────────────────────────────────────
-async def run_harvest(db, session: dict[str, Any], ollama=None) -> dict[str, Any]:
-    from pathlib import Path
-
-    inputs = _inputs(session)
-    cfg = await get_runtime_config(db)
-    threshold = float(inputs.get("harvest_threshold", 0.15))
-    model_dir = cfg.get("wd14_model_dir")
-
-    # What the model asked the board to draw. A harvested tag that matches one
-    # is the board doing as it was told, which is worth ranking up.
-    asked_for = {
-        r["tag"].lower()
-        for rows in (session.get("slots") or {}).values()
-        for r in rows
-    }
-    frequency = await _vocab_frequency(db) if inputs.get("harvest_rerank") else None
-
-    result: dict[str, list[dict[str, Any]]] = {}
-    for track in TRACKS:
-        per_image: list[list[dict[str, Any]]] = []
-        for slot in (session.get("board") or {}).get(track) or []:
-            sha = slot.get("image_id")
-            if not sha:
-                continue
-            doc = await db.get(sha)
-            path = Path(str((doc or {}).get("path") or ""))
-            if not path.exists():
-                logger.warning("[muse] board image missing on disk: %s", sha)
-                continue
-            per_image.append(await harvest.harvest_image(
-                path.read_bytes(),
-                threshold=threshold,
-                model_dir=model_dir,
-                drop_rating_tags=bool(inputs.get("drop_rating_tags", False)),
-                drop_character_tags=bool(inputs.get("drop_character_tags", True)),
-            ))
-        result[track] = harvest.fold_track(
-            per_image,
-            seed_tags=list(asked_for),
-            frequency=frequency,
-            rerank=bool(inputs.get("harvest_rerank", False)),
-        )
-
-    # Rules got the easy cases. One small model now says which tags belong to
-    # the other track, name somebody else's character, or describe the draft's
-    # own layout — none of which a frozenset can know.
-    dropped: dict[str, list[dict[str, str]]] = {t: [] for t in TRACKS}
-    if ollama is not None and inputs.get("llm_cleanup", True):
-        identity = list((session.get("character") or {}).get("identity_tags") or [])
-        for track in TRACKS:
-            result[track], dropped[track] = await cleanup.clean_track(
-                result[track], track, ollama,
-                theme=str(inputs.get("theme") or ""),
-                identity_tags=identity,
-                model=str(inputs.get("light_model") or ""),
-                num_ctx=cfg.get("ollama_num_ctx"),
-            )
-
-    session["harvest"] = result
-    session["harvest_dropped"] = dropped
-    session["topup"] = []
-    session["topup_candidates"] = []
-    session["merged"] = {}
-    session["finals"] = []
-    session_db.log(
-        session, "harvest",
-        " / ".join(f"{t}:{len(result[t])}(-{len(dropped[t])})" for t in TRACKS),
-    )
-    await session_db.save(db, session)
-    return session
-
-
-async def _vocab_frequency(db) -> dict[str, float]:
-    """Danbooru frequency per tag, for the optional re-rank."""
-    try:
-        from ..db.qdrant_client import WD14_VOCAB_COLLECTION
-        out: dict[str, float] = {}
-        offset = None
-        while True:
-            points, offset = await db._qc.scroll(
-                collection_name=WD14_VOCAB_COLLECTION,
-                limit=1000, offset=offset, with_payload=True, with_vectors=False,
-            )
-            for p in points:
-                payload = p.payload or {}
-                name = str(payload.get("name") or "").lower()
-                if name:
-                    out[name] = float(payload.get("frequency") or 0.0)
-            if offset is None:
-                break
-        return out
-    except Exception as exc:
-        logger.warning("[muse] vocab frequency scan failed: %s", exc)
-        return {}
-
-
-# ── S4 top-up ───────────────────────────────────────────────────────────────
-async def run_topup(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    """Ask retrieval what the theme suggests that the picture does not have."""
-    harvested = session.get("harvest") or {}
-    if not any(harvested.values()):
-        raise MuseError("harvest the board first")
-
-    inputs = _inputs(session)
-    cfg = await get_runtime_config(db)
-    theme = str(inputs.get("theme") or "").strip()
-
-    # What the picture has is not only what the drafts drew. The composed slots
-    # reach the finished prompt too, and a step that cannot see them mistakes
-    # them for gaps: `dawn` was in Light, the drafts never rendered an hour, and
-    # `night` was duly offered as a way to strengthen the pre-dawn mood.
-    present = [r["tag"] for rows in harvested.values() for r in rows]
-    for rows in (session.get("slots") or {}).values():
-        for row in rows or []:
-            tag = str((row or {}).get("tag") or "").strip()
-            if tag and tag not in present:
-                present.append(tag)
-    candidates = await topup.collect_candidates(
-        db, ollama,
-        theme=theme,
-        present=set(present),
-        min_score=float(inputs.get("topup_min_score", topup.DEFAULT_MIN_SCORE)),
-    )
-    picked = await topup.pick_reinforcements(
-        candidates, ollama,
-        theme=theme,
-        present=present,
-        model=str(inputs.get("light_model") or ""),
-        num_ctx=cfg.get("ollama_num_ctx"),
-        picks=int(inputs.get("topup_picks", topup.DEFAULT_PICKS)),
-    )
-    session["topup_candidates"] = candidates
-    session["topup"] = picked
-    session["merged"] = {}
-    session["finals"] = []
-    session_db.log(session, "topup", f"{len(picked)}/{len(candidates)}")
-    await session_db.save(db, session)
-    return session
-
-
-# ── S6 merge ────────────────────────────────────────────────────────────────
-async def run_merge(db, session: dict[str, Any]) -> dict[str, Any]:
-    harvested = session.get("harvest") or {}
-    if not any(harvested.values()):
-        raise MuseError("harvest the board first")
-
-    inputs = _inputs(session)
-    cfg = await get_runtime_config(db)
-    removal = removal_tag_set(cfg)
-    removal |= {
-        str(t).strip().lower().replace(" ", "_")
-        for t in (session.get("rejected_tags") or []) if str(t).strip()
-    }
-
-    character = session.get("character") or {}
-    session["merged"] = merge.merge_tracks(
-        harvested,
-        character_weight=float(inputs.get("character_weight", 0.5)),
-        common_ratio=float(inputs.get("merge_common_ratio", 0.5)),
-        unique_count=int(inputs.get("merge_unique_count", 30)),
-        protected_tags=list(character.get("identity_tags") or []),
-        removal=removal,
-        reinforcements=[r["tag"] for r in (session.get("topup") or [])],
-        must_tags=list(inputs.get("must_tags") or []),
-        shot=str(inputs.get("shot") or "auto"),
-        angle=str(inputs.get("angle") or "auto"),
-        user_slots=user_slots(session),
-        composed_slots={
-            key: [r["tag"] for r in rows]
-            for key, rows in (session.get("slots") or {}).items()
-        },
-        texts=list(inputs.get("texts") or []),
-    )
-    session["scene"] = {}
-    session_db.log(session, "merge", f"{len(session['merged'].get('tags') or [])} tags")
-    await session_db.save(db, session)
-    return session
-
-
-# ── S7 scene ────────────────────────────────────────────────────────────────
-async def record_brainstorm(db, session: dict[str, Any], markdown: str) -> dict[str, Any]:
-    candidates = scene.parse_brainstorm_sections(markdown)
-    session["scene"] = {"candidates": candidates, "markdown": markdown, "chosen": -1, "text": ""}
-    session_db.log(session, "brainstorm", scene.summarise_for_log(candidates))
-    await session_db.save(db, session)
-    return session
-
-
-async def choose_scene(db, ollama, session: dict[str, Any], index: int) -> dict[str, Any]:
-    current = session.get("scene") or {}
-    candidates = current.get("candidates") or []
-    if not 0 <= index < len(candidates):
-        raise MuseError("no such scene idea")
-
-    inputs = _inputs(session)
-    cfg = await get_runtime_config(db)
-    idea = candidates[index]
-    merged = session.get("merged") or {}
-    text = await scene.write_prose(
-        merged.get("slots") or {},
-        ollama,
-        model=str(inputs.get("light_model") or ""),
-        num_ctx=cfg.get("ollama_num_ctx"),
-        idea=f"{idea.get('title', '')}\n{idea.get('body', '')}",
-    )
-    session["scene"] = {**current, "chosen": index, "text": text}
-    session["merged"] = _with_prose(merged, inputs, text)
-    session_db.log(session, "scene", text)
-    await session_db.save(db, session)
-    return session
-
-
-def _with_prose(merged: dict[str, Any], inputs: dict[str, Any], text: str) -> dict[str, Any]:
-    """The slotted prompt carries the prose, so it is rebuilt once there is some."""
-    if not merged.get("slots"):
-        return merged
-    return {
-        **merged,
-        "positive": slot_defs.render_prompt(
-            merged["slots"], texts=list(inputs.get("texts") or []), prose=text,
-        ),
-    }
-
-
-async def write_all_scenes(db, ollama, session: dict[str, Any]) -> list[dict[str, Any]]:
-    """One closing paragraph per brainstorm idea.
-
-    Each idea is a different picture — the same tags lit and framed a different
-    way — so each needs its own prose, and therefore its own prompt. Four small
-    calls to the light model, which is what it is for.
-    """
-    candidates = (session.get("scene") or {}).get("candidates") or []
-    if not candidates:
-        raise MuseError("brainstorm first")
-    inputs = _inputs(session)
-    cfg = await get_runtime_config(db)
-    slots = (session.get("merged") or {}).get("slots") or {}
-
-    out: list[dict[str, Any]] = []
-    for i, idea in enumerate(candidates):
-        text = await scene.write_prose(
-            slots, ollama,
-            model=str(inputs.get("light_model") or ""),
-            num_ctx=cfg.get("ollama_num_ctx"),
-            idea=f"{idea.get('title', '')}\n{idea.get('body', '')}",
-        )
-        out.append({"index": i, "title": str(idea.get("title") or ""), "text": text})
-    return out
-
-
-# ── S8 render ───────────────────────────────────────────────────────────────
-async def submit_final(
-    db, comfy, spooler, session: dict[str, Any],
-    *, ollama=None, every_idea: bool = False,
-) -> dict[str, Any]:
-    """Draw the picture — or, when asked, every idea the brainstorm had.
-
-    Four ideas and one render was always the odd part of this: the step that
-    produces the most interesting output made you throw three quarters of it
-    away before seeing any of it.
-    """
-    inputs = _inputs(session)
-    workflow = str(inputs.get("final_workflow") or "").strip()
-    if not workflow:
-        raise MuseError("final_workflow is required")
-    merged = session.get("merged") or {}
-    if not (merged.get("tags") or []):
-        raise MuseError("merge the tags first")
-
-    if every_idea:
-        if ollama is None:
-            raise MuseError("a model is required to write every scene")
-        scenes = await write_all_scenes(db, ollama, session)
-    else:
-        chosen = session.get("scene") or {}
-        scenes = [{
-            "index": chosen.get("chosen", 0),
-            "title": "",
-            "text": chosen.get("text", ""),
-        }]
-
-    session["finals"] = []
-    for entry in scenes:
-        _queue_one_final(db, comfy, spooler, session, workflow, entry)
-    session["status"] = "rendering"
-    session_db.log(session, "render", f"{workflow} ×{len(session['finals'])}")
-    await session_db.save(db, session)
-    return session
-
-
-def _queue_one_final(
-    db, comfy, spooler, session: dict[str, Any], workflow: str, entry: dict[str, Any],
-) -> None:
-    inputs = _inputs(session)
-    merged = _with_prose(session.get("merged") or {}, inputs, entry.get("text") or "")
-    positive = merged.get("positive") or scene.compose_final_prompt(
-        merged.get("tags") or [], entry.get("text") or "",
-    )
-    negative = str(inputs.get("negative_prompt") or "")
-    shot_negative = camera.negative_for(str(inputs.get("shot") or "auto"))
-    if shot_negative:
-        negative = f"{negative}, {shot_negative}" if negative else shot_negative
-    session_id = session["session_id"]
-    # Its place in the grid, decided before it is queued: the meta a render
-    # hands back carries Comfy's prompt id, which cannot be matched to the job.
-    index = len(session.setdefault("finals", []))
-
-    async def _attach(sha256: str, meta: dict) -> None:
-        await session_db.attach_final_image(db, session_id, sha256, meta, index=index)
-
-    job_id = spooler.submit(
-        JobLane.GENERATION,
-        "muse_final",
-        _render_runner(),
-        meta={"session_id": session_id, "group_id": f"muse:{session_id}"},
-        db=db,
-        comfy=comfy,
-        workflow_name=workflow,
-        positive=positive,
-        negative=negative,
-        seed=inputs.get("final_seed"),
-        subdir="",
-        prefix="muse",
-        method="muse",
-        payload_extra={"muse_session_id": session_id},
-        attach=_attach,
-    )
-    session.setdefault("finals", []).append({
-        "idea_index": int(entry.get("index") or 0),
-        "title": str(entry.get("title") or ""),
-        "prose": str(entry.get("text") or ""),
-        "positive": positive, "negative": negative,
-        "job_id": job_id, "image_id": "",
-    })
-
-
-async def set_slot(
-    db, session: dict[str, Any], slot: str, tags: list[str],
-) -> dict[str, Any]:
-    """Replace one aspect outright. The user always gets the last word."""
-    if slot not in slot_defs.BY_KEY:
-        raise MuseError(f"no such slot: {slot}")
-    cap = slot_defs.BY_KEY[slot].cap
-    cleaned = slot_defs.dedupe_slot(
-        [str(t).strip().replace(" ", "_") for t in tags if str(t).strip()], cap,
-    )
-    session.setdefault("slots", {})[slot] = [
-        {"tag": t, "source": "user"} for t in cleaned
-    ]
-    session["seed_tags"] = _tracks_from_slots(session["slots"])
-    session_db.log(session, "slot", f"{slot}={len(cleaned)}")
-    await session_db.save(db, session)
-    return session
-
-
-# ── shared ──────────────────────────────────────────────────────────────────
-async def reject_tags(
-    db, session: dict[str, Any], tags: list[str], *, remove: bool = False,
-) -> dict[str, Any]:
-    """Edit the exclusion list.
-
-    Rejecting also drops the tag from what is already gathered, so the chip
-    disappears immediately. Un-rejecting cannot put it back the same way — the
-    tag has to be retrieved again — so the caller re-runs the tags step.
-    """
-    current = list(session.get("rejected_tags") or [])
-    names = [str(t or "").strip() for t in tags if str(t or "").strip()]
-    if remove:
-        lowered = {n.lower() for n in names}
-        current = [t for t in current if t.lower() not in lowered]
-    else:
-        for name in names:
-            if name not in current:
-                current.append(name)
-    session["rejected_tags"] = current
-
-    blocked = {t.lower() for t in current}
-    session["seed_tags"] = {
-        track: [r for r in rows if r["tag"].lower() not in blocked]
-        for track, rows in (session.get("seed_tags") or {}).items()
-    }
-    await session_db.save(db, session)
-    return session
 
 
 def _warn(session: dict[str, Any], message: str) -> None:
     warnings = session.setdefault("warnings", [])
     if message not in warnings:
         warnings.append(message)
-
-
-def view(session: dict[str, Any]) -> dict[str, Any]:
-    return public_view(session)
