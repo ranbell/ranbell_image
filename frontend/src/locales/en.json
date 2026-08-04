@@ -1342,7 +1342,29 @@
       "title": "Note"
     },
     "think": "Let the model reason first",
-    "thinkHint": "Fewer contradictory poses and undrawable lines, a shorter denser prompt — and roughly eight times the wait per stage"
+    "thinkHint": "Fewer contradictory poses and undrawable lines, a shorter denser prompt — and roughly eight times the wait per stage",
+    "act": {
+      "draft": "Draft",
+      "choose": "Choose",
+      "refine": "Redraw"
+    },
+    "stage": {
+      "a": "A — what she is doing",
+      "reinforce": "B — objects and setting",
+      "cinematic": "C — angle and light",
+      "angle": "D — a new camera"
+    },
+    "elapsed": "{s} elapsed",
+    "enlarge": "Enlarge",
+    "setupTitle": "What shall we draw?",
+    "chooseTitle": "Which one grows up?",
+    "chooseHint": "{n} from one seed and one latent. Pick more than one and each is redrawn separately",
+    "chosen": "{n} picked",
+    "doneTitle": "Results",
+    "settings": "Settings",
+    "renderingStage": "Drawing {stage}",
+    "writingStage": "Writing {stage}",
+    "backToCurrent": "Back to where it is"
   },
   "characters": {
     "title": "Characters",

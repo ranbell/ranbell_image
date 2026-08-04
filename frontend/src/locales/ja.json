@@ -1342,7 +1342,29 @@
       "title": "注意"
     },
     "think": "モデルに考えさせる",
-    "thinkHint": "姿勢の矛盾や描けない記述が減り、プロンプトが短く濃くなる。1段あたり8倍ほど時間がかかる"
+    "thinkHint": "姿勢の矛盾や描けない記述が減り、プロンプトが短く濃くなる。1段あたり8倍ほど時間がかかる",
+    "act": {
+      "draft": "下書き",
+      "choose": "選ぶ",
+      "refine": "描き直す"
+    },
+    "stage": {
+      "a": "A — 何をしているか",
+      "reinforce": "B — 物と情景",
+      "cinematic": "C — 画角と光",
+      "angle": "D — カメラを動かす"
+    },
+    "elapsed": "経過 {s}",
+    "enlarge": "拡大",
+    "setupTitle": "何を描きますか",
+    "chooseTitle": "どれを育てますか",
+    "chooseHint": "同じシード・同じ latent の {n} 枚。複数選ぶと、それぞれ別に描き直します",
+    "chosen": "{n} 枚選択中",
+    "doneTitle": "できあがり",
+    "settings": "設定",
+    "renderingStage": "{stage} を描いています",
+    "writingStage": "{stage} を考えています",
+    "backToCurrent": "今の工程に戻る"
   },
   "characters": {
     "title": "キャラクター",
