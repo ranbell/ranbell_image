@@ -1340,7 +1340,9 @@
     "warn": {
       "comfyOffline": "ComfyUI is unreachable",
       "title": "Note"
-    }
+    },
+    "think": "Let the model reason first",
+    "thinkHint": "Fewer contradictory poses and undrawable lines, a shorter denser prompt — and roughly eight times the wait per stage"
   },
   "characters": {
     "title": "Characters",

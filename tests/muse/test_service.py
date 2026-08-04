@@ -1,9 +1,10 @@
-"""What the two steps actually submit.
+"""What the two steps actually submit, and what they do with what comes back.
 
 These are the wiring facts that no unit test above covers and that cost real
 generations to get wrong: the drafts are one batched job rather than four, the
-model is dropped from VRAM before the render, previews are asked for, and each
-chosen draft becomes its own chain seeded from the draft's own seed.
+model is dropped from VRAM before the render, each chosen draft becomes its own
+chain seeded from the draft's own seed, and a workflow that ends in an upscale
+does not get its finished picture thrown away.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
-from app.muse import service, session_db
+from app.muse import runner, service, session_db
 
 
 class FakeSpooler:
@@ -43,9 +44,15 @@ class FakeComfy:
 class FakeOllama:
     def __init__(self):
         self.unloaded: list[str] = []
+        self.calls: list[dict] = []
 
-    async def generate_text(self, prompt, **kw):
-        return "STAGE A PROMPT"
+    def generate_text_stream(self, prompt, **kw):
+        self.calls.append(kw)
+
+        async def _stream():
+            yield {"type": "think", "text": "deliberating"}
+            yield {"type": "token", "text": "STAGE A PROMPT"}
+        return _stream()
 
     async def unload(self, model=None):
         self.unloaded.append(model)
@@ -69,17 +76,6 @@ class FakeDb:
         return [_P(self.rows[i]) for i in ids if i in self.rows]
 
 
-def _render_stub():
-    """Stand-in for ``jobs.render.run_render``.
-
-    The real one is only reachable through the scanner and the image API, whose
-    import tail needs scikit-learn. What these tests check is the shape of the
-    submission, so the runner is a sentinel; the container's boot is what proves
-    the import resolves.
-    """
-    return _render_stub
-
-
 @pytest.fixture(autouse=True)
 def _no_runtime_config(monkeypatch):
     async def _cfg(db):
@@ -88,7 +84,6 @@ def _no_runtime_config(monkeypatch):
     # suite stubs `app.runtime_config` in sys.modules, and resolving the name
     # again picks up that stub instead of what this module imported.
     monkeypatch.setattr(service, "get_runtime_config", _cfg)
-    monkeypatch.setattr(service, "_render_runner", _render_stub)
 
 
 async def _ready_session(db):
@@ -104,24 +99,33 @@ async def _ready_session(db):
 
 
 @pytest.mark.asyncio
-async def test_draft_submits_one_batched_job_and_frees_the_card_first():
+async def test_draft_submits_one_job_and_frees_the_card_first():
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db)
 
     session = await service.run_draft(db, ollama, FakeComfy(), spooler, session)
 
-    assert len(spooler.jobs) == 1, "four drafts are one batch, not four jobs"
+    assert len(spooler.jobs) == 1, "every draft comes from one batched render"
     job = spooler.jobs[0]
-    assert job["batch_count"] == session["inputs"]["draft_count"] == 4
-    assert job["positive"] == "STAGE A PROMPT"
-    assert job["preview"] is not None, "the draft is the step you watch and abort"
-    assert job["steps"] == 12 and job["cfg"] == 4.0
-    # A 26B model and a four-image latent do not fit on one 16GB card.
+    assert job["func"] is runner.run_draft_job
+    # The runner reads the prompt and the seed back out of the session, so there
+    # is one copy of what is being drawn rather than two that can disagree.
+    assert job["session_id"] == session["session_id"]
+    # A 26B model and a multi-image latent do not fit on one 16GB card.
     assert ollama.unloaded == ["m"]
 
     assert session["draft"]["prompt"] == "STAGE A PROMPT"
     assert session["draft"]["pending"] is True
     assert session["draft"]["seed"] > 0
+    assert session["draft"]["job_id"]
+
+
+def test_the_workflows_last_image_is_the_one_worth_keeping():
+    # Workflows here often end in an upscale or a detailer, which is a second
+    # output node. Taking the first sha kept the raw sampler output and dropped
+    # the finished picture the graph went on to write.
+    assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
+    assert runner.finished_image(["only"]) == "only"
 
 
 @pytest.mark.asyncio
@@ -183,6 +187,44 @@ async def test_cancelling_a_draft_clears_it_so_stage_a_can_be_run_again():
     assert session["draft"] == {}
     assert session["chains"] == []
     assert session["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_images_keep_arriving_until_the_job_says_it_has_stopped():
+    db = FakeDb()
+    session = await _ready_session(db)
+    session["draft"] = {"job_id": "job-1", "seed": 7, "images": [], "pending": True}
+    await session_db.save(db, session)
+    sid = session["session_id"]
+
+    for sha in ("a", "b", "c", "d", "e"):
+        await session_db.attach_draft_image(db, sid, sha, {"seed": 7})
+    s = await session_db.load(db, sid)
+    # Five images from a batch of four is a workflow with two output nodes, not
+    # an error — and it is still running as far as anyone here knows.
+    assert len(s["draft"]["images"]) == 5
+    assert s["draft"]["pending"] is True
+
+    await session_db.finish_draft(db, sid)
+    s = await session_db.load(db, sid)
+    assert s["draft"]["pending"] is False
+    assert s["status"] == "drafted"
+
+
+@pytest.mark.asyncio
+async def test_finishing_does_not_resurrect_a_draft_that_was_cancelled():
+    # cancel_draft clears the draft; the job then unwinds and reports in. Putting
+    # an empty draft back would leave the panel with a finished step and no
+    # pictures, and no way to press the button again.
+    db, spooler = FakeDb(), FakeSpooler()
+    session = await _ready_session(db)
+    session["draft"] = {"job_id": "job-1", "images": [], "pending": True}
+    session = await service.cancel_draft(db, spooler, session)
+
+    await session_db.finish_draft(db, session["session_id"], error="cancelled")
+    s = await session_db.load(db, session["session_id"])
+    assert s["draft"] == {}
+    assert s["status"] == "draft"
 
 
 @pytest.mark.asyncio

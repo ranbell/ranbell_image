@@ -163,9 +163,10 @@ class LlmGateway:
         options: dict | None = None,
         think: bool | str | None = None,
         provider: str | None = None,
+        system: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         async for event in self._gen(provider).generate_text_stream(
-            prompt, model=model, options=options, think=think
+            prompt, model=model, options=options, think=think, system=system,
         ):
             yield event
 
@@ -192,9 +193,11 @@ class LlmGateway:
         options: dict | None = None,
         think: bool | str | None = None,
         provider: str | None = None,
+        system: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         async for event in self._gen(provider).generate_vlm_stream(
-            prompt, image_bytes_list, model=model, options=options, think=think
+            prompt, image_bytes_list, model=model, options=options, think=think,
+            system=system,
         ):
             yield event
 

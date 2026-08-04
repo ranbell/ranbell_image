@@ -65,12 +65,18 @@ async def delete(db, session_id: str) -> None:
 
 
 async def attach_draft_image(db, session_id: str, image_id: str, meta: dict) -> None:
-    """Land one image of the draft batch.
+    """Land one image of the draft batch, as each is saved.
 
-    The four drafts come from a single job — one seed, one latent, batch of four
-    — so this is called once per image as each is saved, in batch order. The
+    The drafts come from a single job — one seed, one latent, one batch — so
+    this runs once per image and they appear in the panel as they arrive. The
     session is re-read rather than closed over because the render runs in a
     different task from the one that queued it.
+
+    It does not decide when the draft is finished. A workflow may end in an
+    upscale or a detailer, in which case it emits one image per batch item *per
+    output node*: a batch of four came back as eight. Counting against
+    ``draft_count`` marked the step done halfway through, and the panel went
+    from done back to pending as the rest landed.
     """
     session = await load(db, session_id)
     if session is None:
@@ -80,14 +86,30 @@ async def attach_draft_image(db, session_id: str, image_id: str, meta: dict) -> 
     images = draft.setdefault("images", [])
     images.append({"index": len(images), "image_id": image_id,
                    "seed": meta.get("seed", draft.get("seed"))})
-    expected = int((session.get("inputs") or {}).get("draft_count") or 0)
-    if expected and len(images) >= expected:
-        draft["pending"] = False
     await save(db, session, publish=False)
     events.publish(session_id, {
-        "type": "draft_attached", "index": len(images) - 1,
-        "image_id": image_id, "total": expected,
+        "type": "draft_attached", "index": len(images) - 1, "image_id": image_id,
     })
+
+
+async def finish_draft(db, session_id: str, *, error: str = "") -> None:
+    """The draft job has stopped. Whatever landed is what there is."""
+    session = await load(db, session_id)
+    if session is None:
+        return
+    draft = session.get("draft") or {}
+    if not draft:
+        # Cancelled: the session already dropped the draft, and putting an empty
+        # one back would leave the panel with a finished step and no pictures.
+        return
+    draft["pending"] = False
+    if error:
+        draft["error"] = error
+        warnings = session.setdefault("warnings", [])
+        if error not in warnings:
+            warnings.append(error)
+    session["status"] = "drafted" if draft.get("images") else "draft"
+    await save(db, session)
 
 
 async def attach_stage_image(

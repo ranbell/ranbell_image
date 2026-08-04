@@ -60,16 +60,21 @@ def all_stages(session: dict[str, Any]) -> list[dict[str, Any]]:
 
 def step_state(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Per-step {done, pending, detail} for the panel. The server decides."""
-    images = draft_images(session)
-    landed = [i for i in images if i.get("image_id")]
+    draft = session.get("draft") or {}
+    landed = [i for i in draft_images(session) if i.get("image_id")]
     stages = all_stages(session)
     done_stages = [s for s in stages if s.get("image_id")]
 
+    # How many images a draft yields is not known in advance: a workflow ending
+    # in an upscale writes one per batch item per output node. So the job saying
+    # it has stopped is what finishes this step, not a count reaching a target.
+    drafting = bool(draft.get("pending"))
+
     return {
         "draft": {
-            "done": bool(images) and len(landed) == len(images),
-            "pending": bool(session.get("draft")) and len(landed) < len(images or [1]),
-            "detail": f"{len(landed)}/{len(images)}" if images else "",
+            "done": bool(draft) and not drafting and bool(landed),
+            "pending": drafting,
+            "detail": str(len(landed)) if landed else "",
         },
         "refine": {
             # Every stage of every chosen draft has to land. A half-filled grid

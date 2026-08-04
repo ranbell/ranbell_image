@@ -18,17 +18,25 @@ from app.muse import chain
 
 
 class FakeOllama:
-    def __init__(self, reply="a prompt"):
+    """Streams like the real client: reasoning and answer on separate channels."""
+
+    def __init__(self, reply="a prompt", thinking=""):
         self.reply = reply
+        self.thinking = thinking
         self.calls: list[dict] = []
 
-    async def generate_text(self, prompt, **kw):
-        self.calls.append({"kind": "text", "prompt": prompt, **kw})
-        return self.reply
+    async def _stream(self):
+        if self.thinking:
+            yield {"type": "think", "text": self.thinking}
+        yield {"type": "token", "text": self.reply}
 
-    async def generate_vlm(self, prompt, images, **kw):
+    def generate_text_stream(self, prompt, **kw):
+        self.calls.append({"kind": "text", "prompt": prompt, **kw})
+        return self._stream()
+
+    def generate_vlm_stream(self, prompt, images, **kw):
         self.calls.append({"kind": "vlm", "prompt": prompt, "images": images, **kw})
-        return self.reply
+        return self._stream()
 
 
 def test_every_stage_has_a_prompt_file_and_an_output_format():
@@ -50,15 +58,32 @@ def test_stages_for_clamps_to_the_instructions_that_exist():
 
 
 @pytest.mark.asyncio
-async def test_pose_is_text_only_and_disables_thinking():
+async def test_pose_is_text_only_and_carries_the_thinking_switch():
     llm = FakeOllama()
-    out = await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=16000)
+    out = await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=32768)
     assert out == "a prompt"
     call = llm.calls[0]
     assert call["kind"] == "text"
     assert call["prompt"] == "BRIEF"
-    assert call["think"] is False
-    assert call["options"]["num_ctx"] == 16000
+    assert call["think"] is False, "thinking is opt-in; it costs ~8x the wall clock"
+    assert call["options"]["num_ctx"] == 32768
+    # Unbounded output regardless: with thinking on, reasoning runs for thousands
+    # of tokens before the answer begins, and a default budget cuts the answer
+    # off before it is written.
+    assert call["options"]["num_predict"] == -1
+
+    await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=None, think=True)
+    assert llm.calls[1]["think"] is True
+
+
+@pytest.mark.asyncio
+async def test_reasoning_is_not_mistaken_for_the_prompt():
+    # Ollama sends reasoning on its own channel and leaves the answer empty
+    # until it is done. Reading the whole stream as one string would paste
+    # thousands of words of deliberation into the image prompt.
+    llm = FakeOllama(reply="the prompt", thinking="a" * 5000)
+    got = await chain.run_pose(llm, brief="B", model="m", num_ctx=None, think=True)
+    assert got == "the prompt"
 
 
 @pytest.mark.asyncio
@@ -71,6 +96,7 @@ async def test_refine_sends_the_image_and_uses_tags_only_for_the_first_stage():
     call = llm.calls[0]
     assert call["kind"] == "vlm"
     assert call["images"] == [b"jpeg"]
+    assert call["think"] is False
     assert call["prompt"] == "BRIEF,1girl, sky"
 
     await chain.run_refine(

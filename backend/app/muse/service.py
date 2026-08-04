@@ -18,7 +18,6 @@ from typing import Any
 
 from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
-from ..scanner.drafts import PLAYGROUND_SUBDIR
 from ..spooler.models import JobLane
 from . import brief as brief_mod
 from . import chain, events, runner, session_db
@@ -34,6 +33,15 @@ class MuseError(Exception):
 
 def _inputs(session: dict[str, Any]) -> dict[str, Any]:
     return session.get("inputs") or {}
+
+
+def _num_ctx(inputs: dict[str, Any], cfg: dict[str, Any]) -> int | None:
+    """Muse asks for a bigger window than the app default when it can.
+
+    Thinking spends thousands of tokens before the answer begins, on top of a
+    brief and an image that are already in the window.
+    """
+    return int(inputs.get("num_ctx") or cfg.get("ollama_num_ctx") or 0) or None
 
 
 async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -104,7 +112,8 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     try:
         prompt = await chain.run_pose(
             ollama, brief=session["brief"], model=model,
-            num_ctx=cfg.get("ollama_num_ctx"),
+            num_ctx=_num_ctx(inputs, cfg),
+            think=bool(inputs.get("think", False)),
         )
     except chain.ChainError as exc:
         raise MuseError(str(exc)) from exc
@@ -115,40 +124,28 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     seed = random.randint(0, (1 << 64) - 1)
     count = max(1, int(inputs.get("draft_count", 4)))
 
-    async def _attach(sha256: str, meta: dict) -> None:
-        await session_db.attach_draft_image(db, session_id, sha256, meta)
-
-    job_id = spooler.submit(
-        JobLane.GENERATION,
-        "muse_draft",
-        _render_runner(),
-        meta={"session_id": session_id, "step": "draft"},
-        db=db,
-        comfy=comfy,
-        workflow_name=str(inputs.get("workflow") or ""),
-        positive=prompt,
-        negative=str(inputs.get("negative_prompt") or ""),
-        seed=seed,
-        batch_count=count,
-        subdir=PLAYGROUND_SUBDIR,
-        prefix="muse_draft",
-        method="muse_draft",
-        payload_extra={"muse_session_id": session_id, "muse_stage": "draft"},
-        attach=_attach,
-        preview=runner.preview_publisher(session_id, "draft"),
-        **render_settings(inputs, draft=True),
-    )
-
     unpatched = _unpatchable(comfy, str(inputs.get("workflow") or ""),
                              render_settings(inputs, draft=True))
     if unpatched:
         _warn(session, f"workflow ignores: {', '.join(unpatched)}")
 
-    session["draft"] = {"prompt": prompt, "seed": seed, "job_id": job_id,
+    # Written before the job is queued: the runner reads the prompt and the seed
+    # back out of the session rather than being handed them, so there is one
+    # copy of what is being drawn.
+    session["draft"] = {"prompt": prompt, "seed": seed, "job_id": "",
                         "images": [], "pending": True}
     session["selected"] = []
     session["chains"] = []
     session["status"] = "drafting"
+    await session_db.save(db, session)
+
+    session["draft"]["job_id"] = spooler.submit(
+        JobLane.GENERATION,
+        "muse_draft",
+        runner.run_draft_job,
+        meta={"session_id": session_id, "step": "draft"},
+        db=db, comfy=comfy, session_id=session_id,
+    )
     session_db.log(session, "draft", f"{count} variations, seed {seed}")
     await session_db.save(db, session)
     return session
@@ -220,11 +217,6 @@ async def run_refine(
 
 
 # ── plumbing ────────────────────────────────────────────────────────────────
-def _render_runner():
-    from ..jobs.render import run_render
-    return run_render
-
-
 def _unpatchable(comfy, workflow_name: str, wanted: dict[str, Any]) -> list[str]:
     """Knobs this workflow has nowhere to put.
 

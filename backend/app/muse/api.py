@@ -44,6 +44,9 @@ class InputsPatch(BaseModel):
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
     # B, C, D. There is no fourth instruction, so this only ever stops early.
     refine_stages: int | None = Field(default=None, ge=1, le=3)
+    # Reasoning before answering. Better prompts, roughly eight times the wait.
+    think: bool | None = None
+    num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
     drop_rating_tags: bool | None = None
     drop_character_tags: bool | None = None

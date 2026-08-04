@@ -301,6 +301,14 @@ function togglePick(index) {
               <input class="sb-input" type="text" :value="inputs.style"
                      @change="patchInputs({ style: $event.target.value })" />
             </div>
+            <label class="flex items-start gap-2 text-[11px] text-gray-400">
+              <input type="checkbox" class="mt-0.5" :checked="inputs.think"
+                     @change="patchInputs({ think: $event.target.checked })" />
+              <span>
+                {{ t('muse.think') }}
+                <span class="block text-[10px] text-gray-600">{{ t('muse.thinkHint') }}</span>
+              </span>
+            </label>
           </section>
 
           <section class="space-y-2">

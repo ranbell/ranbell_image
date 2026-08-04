@@ -4,6 +4,9 @@ this image: keep what worked, fix what did not.
 
 - The theme is absolute. Everything the theme names — the clothing, the place,
   the hour, the props — must survive into your prompt.
+- Where the tags and the theme disagree, the theme wins. The tags were read off
+  a cheap draft by a tagger that guesses, and it guesses worst about clothing:
+  it has called trousers a skirt off nothing but a crouching pose.
 - The brief contains a <REFERENCE> block. It is there so you can sense the mood
   of what she would do. Do not copy its words into the prompt unless the scene
   genuinely calls for them.

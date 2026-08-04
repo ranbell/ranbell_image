@@ -248,6 +248,7 @@ class OllamaClient:
         model: str | None = None,
         options: dict | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
         model_name = model or settings.vlm_model
@@ -261,6 +262,7 @@ class OllamaClient:
                 "images": images_b64,
                 "stream": True,
                 "options": {"num_predict": -1, **(options or {})},
+                **({"system": system} if system else {}),
             },
             think,
         )
@@ -393,6 +395,7 @@ class OllamaClient:
         model: str | None = None,
         options: dict | None = None,
         think: bool | str | None = None,
+        system: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Stream text generation without vision inputs."""
         model_name = model or settings.vlm_model
@@ -402,6 +405,7 @@ class OllamaClient:
                 "prompt": prompt,
                 "stream": True,
                 "options": {"num_predict": -1, **(options or {})},
+                **({"system": system} if system else {}),
             },
             think,
         )

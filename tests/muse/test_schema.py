@@ -28,13 +28,28 @@ def test_a_new_session_needs_nothing_once_the_four_inputs_are_set():
     ]
 
 
-def test_draft_is_not_done_until_every_variation_has_landed():
-    s = _session(draft={"job_id": "j", "images": [
-        {"index": 0, "image_id": "a"}, {"index": 1, "image_id": ""},
+def test_draft_is_done_when_the_job_stops_not_when_a_count_is_reached():
+    # A workflow ending in an upscale writes one image per batch item per output
+    # node, so a batch of four came back as eight. Counting to `draft_count`
+    # marked the step done halfway and then un-did it as the rest arrived.
+    s = _session(draft={"job_id": "j", "pending": True, "images": [
+        {"index": 0, "image_id": "a"}, {"index": 1, "image_id": "b"},
+        {"index": 2, "image_id": "c"}, {"index": 3, "image_id": "d"},
     ]})
+    s["inputs"]["draft_count"] = 4
     assert schema.step_state(s)["draft"]["done"] is False
-    s["draft"]["images"][1]["image_id"] = "b"
-    assert schema.step_state(s)["draft"]["done"] is True
+    assert schema.step_state(s)["draft"]["pending"] is True
+
+    s["draft"]["images"] += [{"index": 4, "image_id": "e"}]
+    s["draft"]["pending"] = False
+    state = schema.step_state(s)
+    assert state["draft"]["done"] is True
+    assert state["draft"]["detail"] == "5"
+
+
+def test_a_draft_job_that_produced_nothing_is_not_done():
+    s = _session(draft={"job_id": "j", "pending": False, "images": []})
+    assert schema.step_state(s)["draft"]["done"] is False
 
 
 def test_refine_is_not_done_while_any_stage_is_still_blank():
@@ -51,7 +66,8 @@ def test_refine_is_not_done_while_any_stage_is_still_blank():
 def test_next_step_walks_draft_then_refine():
     s = _session()
     assert schema.next_step(s) == "draft"
-    s["draft"] = {"job_id": "j", "images": [{"index": 0, "image_id": "a"}]}
+    s["draft"] = {"job_id": "j", "pending": False,
+                  "images": [{"index": 0, "image_id": "a"}]}
     assert schema.next_step(s) == "refine"
     s["chains"] = [{"stages": [{"stage": "reinforce", "image_id": "x"}]}]
     assert schema.next_step(s) == "done"

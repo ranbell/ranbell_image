@@ -47,6 +47,64 @@ def preview_publisher(session_id: str, label: str):
     return _publish
 
 
+def finished_image(shas: list[str]) -> str:
+    """The picture a workflow meant to end on.
+
+    A render returns every image it saved, in the order the graph produced them.
+    Workflows here often end in an upscale or a detailer, which is a second
+    output node: taking the first sha kept the raw sampler output and threw the
+    finished one away — every refine stage came back at 896×1152 while the
+    workflow had also written a larger, cleaner version.
+    """
+    return shas[-1]
+
+
+async def run_draft_job(
+    reporter, cancel, *, db, comfy, session_id: str,
+) -> dict[str, Any]:
+    """Render the draft batch and mark the step finished when it stops.
+
+    Completion cannot be inferred from how many images arrive: a workflow with
+    an upscale tail emits one per batch item *per output node*, so a batch of
+    four lands as eight. The job knowing it is over is the only reliable signal.
+    """
+    from ..jobs.render import run_render
+    from ..scanner.drafts import PLAYGROUND_SUBDIR
+
+    session = await session_db.load(db, session_id)
+    if session is None:
+        raise RuntimeError("session is gone")
+    inputs = session.get("inputs") or {}
+    draft = session.get("draft") or {}
+
+    async def _attach(sha256: str, meta: dict) -> None:
+        await session_db.attach_draft_image(db, session_id, sha256, meta)
+
+    error = ""
+    try:
+        return await run_render(
+            reporter, cancel,
+            db=db, comfy=comfy,
+            workflow_name=str(inputs.get("workflow") or ""),
+            positive=str(draft.get("prompt") or ""),
+            negative=str(inputs.get("negative_prompt") or ""),
+            seed=int(draft.get("seed") or 0) or None,
+            batch_count=max(1, int(inputs.get("draft_count", 4))),
+            subdir=PLAYGROUND_SUBDIR,
+            prefix="muse_draft",
+            method="muse_draft",
+            payload_extra={"muse_session_id": session_id, "muse_stage": "draft"},
+            attach=_attach,
+            preview=preview_publisher(session_id, "draft"),
+            **render_settings(inputs, draft=True),
+        )
+    except Exception as exc:
+        error = str(exc)
+        raise
+    finally:
+        await session_db.finish_draft(db, session_id, error=error)
+
+
 async def run_chain_job(
     reporter, cancel, *, db, comfy, ollama, session_id: str, chain_index: int,
 ) -> dict[str, Any]:
@@ -69,7 +127,8 @@ async def run_chain_job(
     model = str(inputs.get("model") or "")
     brief = str(session.get("brief") or "")
     render = render_settings(inputs, draft=False)
-    num_ctx = inputs.get("ollama_num_ctx")
+    num_ctx = int(inputs.get("num_ctx") or 0) or None
+    think = bool(inputs.get("think", False))
 
     image = await _image_bytes(db, str(link.get("source_image_id") or ""))
 
@@ -95,7 +154,7 @@ async def run_chain_job(
 
         prompt = await chain.run_refine(
             ollama, stage_file=prompt_file, brief=brief, previous=previous,
-            image=image, model=model, num_ctx=num_ctx,
+            image=image, model=model, num_ctx=num_ctx, think=think,
             tags=tags if stage_index == 0 else "",
         )
         await session_db.record_stage_prompt(db, session_id, chain_index,
@@ -120,10 +179,11 @@ async def run_chain_job(
         if not shas:
             raise RuntimeError(f"stage {stage} rendered nothing")
 
+        kept = finished_image(shas)
         await session_db.attach_stage_image(
-            db, session_id, chain_index, stage_index, shas[0], result,
+            db, session_id, chain_index, stage_index, kept, result,
         )
-        image = await _image_bytes(db, shas[0])
+        image = await _image_bytes(db, kept)
         previous = prompt
 
     return {"chain": chain_index}

@@ -60,41 +60,52 @@ class ChainError(Exception):
 
 
 async def _call(ollama, *, system: str, prompt: str, model: str,
-                images: list[bytes] | None, num_ctx: int | None) -> str:
-    options: dict[str, Any] = {}
+                images: list[bytes] | None, num_ctx: int | None,
+                think: bool) -> str:
+    """One stage, always streamed.
+
+    Streaming is not for progress here — nothing watches it — it is what makes
+    thinking usable at all. Ollama sends reasoning on a separate channel and
+    leaves ``response`` empty until it is done, so a non-streaming call with the
+    model's default output budget comes back with an empty prompt and thousands
+    of tokens of reasoning nobody sees. Read as a stream, the two channels are
+    simply told apart, and ``num_predict: -1`` means the answer cannot be cut
+    off by however long the thinking ran.
+    """
+    options: dict[str, Any] = {"num_predict": -1}
     if num_ctx:
         options["num_ctx"] = int(num_ctx)
-    kwargs = dict(model=model, options=options, system=system,
-                  # Explicit. Left unset, a reasoning model spends its whole
-                  # budget thinking and returns an empty response — measured at
-                  # 2048 tokens of reasoning and not one word of prompt.
-                  think=False)
-    if images:
-        text = await ollama.generate_vlm(prompt, images, **kwargs)
-    else:
-        text = await ollama.generate_text(prompt, **kwargs)
+    kwargs = dict(model=model, options=options, system=system, think=think)
 
-    text = (text or "").strip()
+    stream = (ollama.generate_vlm_stream(prompt, images, **kwargs) if images
+              else ollama.generate_text_stream(prompt, **kwargs))
+    parts: list[str] = []
+    async for event in stream:
+        if event.get("type") == "token" and event.get("text"):
+            parts.append(event["text"])
+
+    text = "".join(parts).strip()
     if not text:
         raise ChainError("the model returned an empty prompt")
     return text
 
 
-async def run_pose(ollama, *, brief: str, model: str, num_ctx: int | None) -> str:
+async def run_pose(ollama, *, brief: str, model: str, num_ctx: int | None,
+                   think: bool = False) -> str:
     """Stage A. No image exists yet, so this is the only text-only call."""
     return await _call(
         ollama, system=system_prompt("a_pose.md"), prompt=brief,
-        model=model, images=None, num_ctx=num_ctx,
+        model=model, images=None, num_ctx=num_ctx, think=think,
     )
 
 
 async def run_refine(ollama, *, stage_file: str, brief: str, previous: str,
                      image: bytes, model: str, num_ctx: int | None,
-                     tags: str = "") -> str:
+                     tags: str = "", think: bool = False) -> str:
     """One refine stage. ``tags`` is set for B only, where WD14 replaces the prose."""
     prompt = (brief_mod.with_tags(brief, tags) if tags
               else brief_mod.with_prompt(brief, previous))
     return await _call(
         ollama, system=system_prompt(stage_file), prompt=prompt,
-        model=model, images=[image], num_ctx=num_ctx,
+        model=model, images=[image], num_ctx=num_ctx, think=think,
     )

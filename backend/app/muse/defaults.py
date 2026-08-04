@@ -38,6 +38,30 @@ REFINE_DEFAULTS: dict[str, object] = {
     "drop_rating_tags": False,
 }
 
+# ── The model's own reasoning ──────────────────────────────────────────────
+LLM_DEFAULTS: dict[str, object] = {
+    # Off by default, on when the prompt matters more than the wait — it costs
+    # about eight times the wall clock of a stage without it, and a run is four
+    # stages.
+    #
+    # What it buys is a different prompt, not a tidier one. Without it a stage
+    # writes four postures into one paragraph — "stands", "hunched", "leans
+    # forward", "steady and still" — and the image model picks one, unguided;
+    # it also writes things nothing can draw, and lets the reference block leak
+    # in. With it the pose resolves to one, the undrawable lines go, and the
+    # prompt comes out a third shorter.
+    #
+    # It is not a substitute for telling a stage what to prefer: with thinking
+    # on and no ordering rule, stage B took the tagger's "skirt" over the
+    # theme's trousers three times out of three, and talked itself into
+    # "theme preserved" while doing it.
+    "think": False,
+    # Sized for thinking being on: reasoning runs to thousands of tokens before
+    # the answer starts, and the brief and an image are already in the window.
+    # 16k was tight; this is the size both were measured at.
+    "num_ctx": 32768,
+}
+
 # ── The look, which is the user's call and not the model's ─────────────────
 STYLE_DEFAULTS: dict[str, object] = {
     # Goes in at the top of the brief and every stage is told to obey it. The
@@ -54,5 +78,6 @@ STYLE_DEFAULTS: dict[str, object] = {
 ALL_DEFAULTS: dict[str, object] = {
     **DRAFT_DEFAULTS,
     **REFINE_DEFAULTS,
+    **LLM_DEFAULTS,
     **STYLE_DEFAULTS,
 }
