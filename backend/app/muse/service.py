@@ -198,9 +198,6 @@ def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]
     )
     _publish_chat(session["session_id"], msg)
     events.publish(session["session_id"], {
-        "type": "muse_speaking", "muse_id": turn.muse_id, "name": name,
-    })
-    events.publish(session["session_id"], {
         "type": "craft_updated", "prompt": turn.prompt, "muse_id": turn.muse_id,
     })
     return msg
