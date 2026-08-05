@@ -57,6 +57,9 @@ LLM_DEFAULTS: dict[str, object] = {
     "unload_vlm": False,
     # Cast preset for the table-read crew (see muse.crew.PRESETS).
     "crew_preset": "gallery",
+    # Banter between craft passes. light = Ollama-friendly (fewer side calls);
+    # full = previous speaker + occasional heckler; off = craft only.
+    "banter_mode": "light",
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────

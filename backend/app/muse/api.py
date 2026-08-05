@@ -50,6 +50,7 @@ class InputsPatch(BaseModel):
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
     think: bool | None = None
     unload_vlm: bool | None = None
+    banter_mode: str | None = None
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
     drop_rating_tags: bool | None = None
@@ -70,6 +71,16 @@ class InputsPatch(BaseModel):
         if value not in crew.PRESETS:
             raise ValueError(f"crew_preset must be one of: {', '.join(crew.PRESETS)}")
         return value
+
+    @field_validator("banter_mode")
+    @classmethod
+    def _banter(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        mode = str(value).strip().lower()
+        if mode not in ("light", "full", "off"):
+            raise ValueError("banter_mode must be one of: light, full, off")
+        return mode
 
 
 class CharacterPick(BaseModel):

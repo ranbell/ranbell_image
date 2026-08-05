@@ -113,12 +113,11 @@ async def test_table_builds_craft_and_chat_without_submitting_comfy():
     assert "blue_hair" in session["craft"]["prompt"]
     assert session["craft"]["pose_intent"] == "STAGE A PROMPT"
     assert "blue_hair" not in session["craft"]["pose_intent"]
-    # System open + each muse + wrap ask + banter asides.
+    # System open + each muse + wrap ask (+ light banter by default).
     assert any(m["role"] == "muse" for m in session["chat"])
-    assert any(m.get("kind") == "banter" for m in session["chat"]), "crew should heckle"
     assert any(m.get("kind") == "craft" for m in session["chat"])
     assert ollama.unloaded == []
-    assert len(ollama.calls) >= 2  # lightning crew + finisher
+    assert len(ollama.calls) >= 2  # lightning crew + actress + finisher
 
 
 @pytest.mark.asyncio
@@ -277,7 +276,57 @@ def test_the_workflows_last_image_is_the_one_worth_keeping():
 
 
 def test_pick_responders_routes_outfit_notes_to_wardrobe():
-    crew_ids = ["beat", "spine", "lens", "wardrobe", "gaffer", "finisher"]
+    crew_ids = ["beat", "spine", "lens", "wardrobe", "gaffer", "actress", "finisher"]
     got = service._pick_responders("服をコートにして", crew_ids)
     assert "wardrobe" in got
     assert got[-1] == "finisher"
+
+
+def test_pick_responders_routes_charm_notes_to_actress():
+    crew_ids = ["beat", "wardrobe", "faces", "hook", "actress", "finisher"]
+    got = service._pick_responders("もっと可愛く、魅力出して", crew_ids)
+    assert "actress" in got
+    assert "faces" in got or "hook" in got
+    assert got[-1] == "finisher"
+    assert len(got) <= 5  # cap craft + finisher for Ollama
+
+
+@pytest.mark.asyncio
+async def test_showrunner_comment_reruns_a_short_turn():
+    """The loop the Showrunner is testing: note → specialists revise → chat again."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, banter_mode="off")  # craft-only for speed
+    session = await service.start_table(db, ollama, session)
+    before = session["craft"]["prompt"]
+    n_chat = len(session["chat"])
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session,
+        "もっと可愛くして。ビキニにして魅力出して",
+    )
+
+    assert session["status"] == "chat"
+    assert spooler.jobs == []  # comment is LLM turns, not Comfy
+    assert any(m["role"] == "user" and "ビキニ" in m["text"] for m in session["chat"])
+    spoken = [m.get("muse_id") for m in session["chat"][n_chat:] if m.get("role") == "muse"]
+    assert "wardrobe" in spoken or "actress" in spoken
+    assert "finisher" in spoken
+    assert len(session["chat"]) > n_chat
+    # Craft was touched by at least one responder (FakeOllama always rewrites).
+    assert session["craft"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_light_banter_mode_fires_fewer_side_calls_than_full():
+    db, ollama_light, ollama_full = FakeDb(), FakeOllama(), FakeOllama()
+    s_light = await _ready_session(db, banter_mode="light", crew_preset="lightning")
+    s_light = await service.start_table(db, ollama_light, s_light)
+    light_banter = sum(1 for m in s_light["chat"] if m.get("kind") == "banter")
+
+    db2 = FakeDb()
+    s_full = await _ready_session(db2, banter_mode="full", crew_preset="lightning")
+    s_full = await service.start_table(db2, ollama_full, s_full)
+    full_banter = sum(1 for m in s_full["chat"] if m.get("kind") == "banter")
+
+    assert light_banter < full_banter
+    assert light_banter >= 1

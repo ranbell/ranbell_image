@@ -315,24 +315,39 @@ async def _run_banter(
     return msg
 
 
+def _banter_mode(session: dict[str, Any]) -> str:
+    mode = str(_inputs(session).get("banter_mode") or "light").strip().lower()
+    return mode if mode in ("light", "full", "off") else "light"
+
+
 def _pick_banter_reactor(
-    crew_ids: list[str], *, current: str, previous: str | None, index: int,
+    session: dict[str, Any], crew_ids: list[str], *,
+    current: str, previous: str | None, index: int,
 ) -> str | None:
-    """Previous speaker reacts; every 3rd craft also pulls Hook/Faces if cast."""
+    """Who heckles after a craft pass. light mode keeps Ollama call counts sane."""
+    mode = _banter_mode(session)
+    if mode == "off":
+        return None
+    # light: every other pass, or always after the actress (personality beat).
+    if mode == "light" and current != "actress" and index % 2 == 0:
+        return None
     if previous and previous != current and previous in crew_ids:
         return previous
-    for mid in ("hook", "faces", "spine", "beat"):
+    for mid in ("hook", "faces", "actress", "spine", "beat"):
         if mid in crew_ids and mid != current:
             return mid
     return None
 
 
 def _pick_extra_heckler(
-    crew_ids: list[str], *, current: str, reactor: str | None, index: int,
+    session: dict[str, Any], crew_ids: list[str], *,
+    current: str, reactor: str | None, index: int,
 ) -> str | None:
+    """Second heckler — full mode only (too expensive for local Ollama otherwise)."""
+    if _banter_mode(session) != "full":
+        return None
     if index % 3 != 2:
         return None
-    # Actress often piles on — personality check from the lead.
     for mid in ("actress", "hook", "faces", "cutout", "propshop"):
         if mid in crew_ids and mid not in (current, reactor):
             return mid
@@ -384,7 +399,7 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         await session_db.save(db, session, publish=False)
 
         reactor = _pick_banter_reactor(
-            cast, current=muse_id, previous=previous, index=i,
+            session, cast, current=muse_id, previous=previous, index=i,
         )
         if reactor and last_say:
             await _run_banter(
@@ -394,7 +409,7 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             await session_db.save(db, session, publish=False)
 
         heckler = _pick_extra_heckler(
-            cast, current=muse_id, reactor=reactor, index=i,
+            session, cast, current=muse_id, reactor=reactor, index=i,
         )
         if heckler and last_say:
             await _run_banter(
@@ -469,14 +484,17 @@ async def post_chat(
         last_say = str(msg.get("text") or "")
         await session_db.save(db, session, publish=False)
 
-    # One crew heckle after the note is applied — keeps the room alive.
-    if last_responder and last_say:
+    # One heckle after the note — prefer the actress so personality stays in chat.
+    if last_responder and last_say and _banter_mode(session) != "off":
         cast = _crew_ids(session)
-        heckler = _pick_extra_heckler(
-            cast, current=last_responder, reactor=None, index=2,
-        ) or _pick_banter_reactor(
-            cast, current=last_responder, previous=responders[0], index=1,
-        )
+        heckler = None
+        if "actress" in cast and "actress" not in responders:
+            heckler = "actress"
+        else:
+            heckler = _pick_banter_reactor(
+                session, cast, current=last_responder,
+                previous=responders[0] if responders else None, index=1,
+            )
         if heckler and heckler != last_responder:
             await _run_banter(
                 ollama, session, heckler,
@@ -501,11 +519,15 @@ async def post_chat(
 
 
 def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
-    """Heuristic cast for a showrunner note — always ends with finisher if cast."""
+    """Heuristic cast for a showrunner note — always ends with finisher if cast.
+
+    Charm / cuteness notes always pull the actress seat so personality can answer.
+    Cap keeps local Ollama turns short enough to re-spin after each comment.
+    """
     n = note.lower()
     want: list[str] = []
     pairs = [
-        (r"服|衣装|outfit|dress|cloth|ウェア|コーデ", "wardrobe"),
+        (r"服|衣装|outfit|dress|cloth|ウェア|コーデ|水着|ビキニ|swimsuit|bikini", "wardrobe"),
         (r"カメラ|画角|アングル|寄り|引き|lens|camera|構図", "lens"),
         (r"光|照明|影|逆光|light", "gaffer"),
         (r"背景|場所|物|セット|prop|background", "propshop"),
@@ -514,15 +536,19 @@ def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
         (r"色|カラー|color", "palette"),
         (r"天気|霧|雨|空気|atmosphere", "weather"),
         (r"画風|スタイル|style", "ink"),
+        (r"可愛|かわいい|魅力|虜|キュート|cute|charm|adorable|kawaii", "actress"),
+        (r"可愛|かわいい|魅力|虜|cute|charm|kawaii", "faces"),
+        (r"可愛|かわいい|魅力|虜|cute|charm|hook|インパクト", "hook"),
+        (r"性格|本人|女優|actress|personality|内面", "actress"),
     ]
     for pat, mid in pairs:
         if re.search(pat, n) and mid in crew_ids:
             want.append(mid)
     if not want:
-        for mid in ("beat", "spine", "lens", "wardrobe", "hook"):
+        for mid in ("actress", "beat", "spine", "lens", "wardrobe", "hook"):
             if mid in crew_ids:
                 want.append(mid)
-    # Unique, catalog order, cap 4, always finisher last if in crew.
+    # Unique, catalog order, cap 4 craft turns + finisher (Ollama-friendly).
     ordered = [m for m in crew_ids if m in set(want) and m != "finisher"][:4]
     if "finisher" in crew_ids:
         ordered.append("finisher")
