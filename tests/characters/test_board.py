@@ -16,6 +16,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.characters.board import (
+    _ACTIVE_HINTS,
+    centre_pose,
     SLOT_SIZE,
     compile_board_slot,
     sheet_vignettes,
@@ -75,7 +77,11 @@ def test_sheet_centre_holds_the_signature_prop():
     centre = next(ln for ln in positive.splitlines() if ln.startswith("Center/Main"))
     if sig:
         assert f"holding {sig}" in centre
-    assert "dynamic posture" in centre
+    # Her own posture, not the house one. Every character used to be handed
+    # "casual, leaning_forward, dynamic posture", so thirty sheets came back
+    # with thirty people leaning at the viewer in different clothes.
+    assert CHARACTER["gesture_vocab"][0] in centre
+    assert "leaning_forward" not in centre or "leaning_forward" in CHARACTER["gesture_vocab"]
 
 
 def test_vignettes_are_four_distinct_lives():
@@ -91,9 +97,14 @@ def test_vignettes_prefer_the_character_over_the_fallback():
         "personality": {**CHARACTER["personality"], "likes": ["warm parfait in winter"]},
     }
     vignettes = sheet_vignettes(made_up)
+    # Roles in order — the same four the plan prompt asks a model for:
+    # what she is known for, off duty, moving, eating.
     assert "painting" in vignettes[0]
-    assert "swimming" in vignettes[1], "the active slice must differ from the hobby one"
-    assert "parfait" in vignettes[2]
+    assert "swimming" in vignettes[2], "the moving slice takes her own sport"
+    assert "sportswear" in vignettes[2], "and dresses for it, because it is one"
+    assert "swimming" not in vignettes[1], "off duty must not swallow her only sport"
+    assert "parfait" in vignettes[3]
+    assert len(set(vignettes)) == 4
 
 
 # ── the portrait is a face ──────────────────────────────────────────────────
@@ -217,7 +228,7 @@ def test_no_plan_still_renders_the_fixed_slots():
     positive, _ = compile_board_slot(PRESET, "sheet", None)
     bullets = [ln[3:] for ln in positive.splitlines() if ln.startswith(" - ")]
     assert bullets == sheet_vignettes(CHARACTER)
-    assert "dynamic posture" in positive, "the fixed centre is still used"
+    assert CHARACTER["gesture_vocab"][0] in positive, "the derived centre is still used"
 
 
 def test_a_plan_that_repeats_itself_is_refused():
@@ -251,3 +262,70 @@ def test_the_plan_prompt_carries_the_personality_and_bans_appearance():
 def test_plan_lines_are_tidied():
     plan = _plan({**GOOD_PLAN, "center": '  "- standing,  smile ,"  '})
     assert plan["center"] == "standing, smile"
+
+
+ALL = load_seed_presets()
+
+
+def test_no_two_characters_get_the_same_centre_pose():
+    """Every sheet used to open with `casual, leaning_forward, dynamic posture`,
+    so thirty reference boards came back as thirty people leaning at the viewer
+    in different clothes, and the slot could not tell you whether the character
+    rendered."""
+    poses = [centre_pose(preset_to_character(p)).split(",")[0] for p in ALL]
+    assert len(set(poses)) >= len(ALL) * 0.8, sorted(set(poses))
+    # And where it does appear it is because she actually does it.
+    for preset in ALL:
+        character = preset_to_character(preset)
+        pose = centre_pose(character)
+        if "leaning_forward" in pose:
+            assert "leaning_forward" in character["gesture_vocab"], preset["id"]
+
+
+def test_the_centre_pose_prefers_her_hands_over_her_furniture():
+    """`holding_book` says who she is; `sitting` says she has a chair."""
+    character = {
+        **CHARACTER,
+        "gesture_vocab": ["sitting", "holding_book", "reading"],
+    }
+    assert centre_pose(character).startswith("holding_book")
+
+
+def test_both_slots_put_her_somewhere():
+    """With no scene the board renders against seamless white, which proves the
+    tags parse and nothing about whether she belongs anywhere."""
+    for preset in ALL:
+        for slot in ("sheet", "portrait"):
+            positive, _ = compile_board_slot(preset, slot)
+            assert "Scene:" in positive, f"{preset['id']}/{slot}"
+        vibe = (preset.get("default_scene") or {}).get("vibe_keywords") or []
+        assert vibe[0] in compile_board_slot(preset, "sheet")[0], preset["id"]
+
+
+def test_the_portrait_shows_a_face_doing_something():
+    """It used to carry no expression at all, so thirty characters came back
+    with the same neutral stare."""
+    for preset in ALL:
+        positive, _ = compile_board_slot(preset, "portrait")
+        faces = preset["tags"]["expression"]
+        assert any(f in positive for f in faces), preset["id"]
+
+
+def test_only_an_actual_athlete_is_dressed_for_sport():
+    """`walking` is on the active hint list and was also the fallback, so the
+    fallback matched it and twenty-nine of thirty went jogging."""
+    dressed = 0
+    for preset in ALL:
+        character = preset_to_character(preset)
+        moving = sheet_vignettes(character)[2]
+        if "sportswear" in moving:
+            dressed += 1
+            assert any(
+                h in g for g in character["gesture_vocab"] for h in _ACTIVE_HINTS
+            ), f"{preset['id']} is in sportswear without a sport"
+    assert dressed < len(ALL) // 2, "most of the roster is not athletic"
+
+
+def test_the_moving_frame_is_not_one_stock_frame_for_everyone():
+    frames = [sheet_vignettes(preset_to_character(p))[2] for p in ALL]
+    assert len(set(frames)) >= len(ALL) * 0.8, sorted(set(frames))

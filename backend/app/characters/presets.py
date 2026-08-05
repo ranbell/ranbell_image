@@ -175,9 +175,17 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
         "appearance": dict(preset.get("appearance") or {}),
         "outfit_style": str(scene.get("outfit_style") or ""),
         "vibe_keywords": _strings(scene.get("vibe_keywords")),
+        # The one image that is most her. The reference board builds its centre
+        # frame around it, so the sheet shows this person rather than a
+        # mannequin in her clothes.
+        "signature_moment": str(scene.get("signature_moment") or ""),
         "preset_key": str(preset.get("id") or ""),
         "preset_name": str(preset.get("name") or ""),
         "preset_name_ja": str(preset.get("name_ja") or preset.get("name") or ""),
+        # What she is known for. The reference board uses it where it needs an
+        # occupation, which the roster does not otherwise record.
+        "title": str(preset.get("title") or ""),
+        "title_ja": str(preset.get("title_ja") or preset.get("title") or ""),
     }
     return {
         "personality": personality,
