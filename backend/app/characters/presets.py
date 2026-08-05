@@ -291,23 +291,118 @@ async def seed_presets_if_empty(db, *, vector_dim: int) -> int:
     )
     if existing:
         return 0
-    return await _insert_seed_presets(db, vector_dim=vector_dim)
+    inserted, _ = await _insert_seed_presets(db, vector_dim=vector_dim, stored={})
+    return inserted
 
 
-async def reset_presets_to_defaults(db, *, vector_dim: int) -> dict[str, int]:
-    """Re-read the bundled presets from the asset file.
+def seed_point_ids() -> set[str]:
+    """The rows the bundled asset currently claims."""
+    return {preset_point_id(str(p.get("id") or "")) for p in load_seed_presets()}
 
-    This used to drop the collection, which took every character's pictures with
-    it — one run of it left all 100 with no portrait, because a preset's images
-    are stored on the preset. It no longer deletes anything: the bundled ids are
-    `uuid5(namespace, preset_key)` and therefore stable, so the same rows can be
-    written over in place, and `_insert_seed_presets` carries the artwork across.
 
-    User-authored characters have random ids, so nothing here can reach them.
+def plan_reset(
+    stored: dict[str, dict[str, Any]], *, wipe: bool = False,
+) -> dict[str, Any]:
+    """What a reset would do to ``{point_id: payload}``. Pure, so it is testable
+    and so the UI can show the numbers before anything is destroyed.
+
+    A row is the user's if it says so. Everything else came from a version of
+    the asset file, and the file is a *set*, not an accumulation: a row that the
+    file no longer claims is a character who no longer exists.
+    """
+    seed_ids = seed_point_ids()
+    mine = {pid: p for pid, p in stored.items() if not p.get("user_created")}
+    refreshed = sorted(seed_ids & set(mine))
+    stale = sorted(set(mine) - seed_ids)
+    users = sorted(set(stored) - set(mine))
+    doomed = stale + (users if wipe else [])
+    return {
+        "seeds": len(seed_ids),
+        # Bundled rows already present that are written over in place.
+        "refreshed": len(refreshed),
+        # Bundled rows from an older asset that nothing claims any more.
+        "stale": stale,
+        # User-authored rows: left alone unless `wipe`.
+        "kept": 0 if wipe else len(users),
+        "removed": doomed,
+        # Reference images belonging to rows about to go. They stay in the
+        # gallery — this is here so a removal never happens silently.
+        "orphan_images": sorted({
+            sha
+            for pid in doomed
+            for sha in _artwork_shas(stored.get(pid) or {})
+        }),
+        "labels": [preset_label(stored[pid]) for pid in doomed][:60],
+    }
+
+
+async def reset_presets_to_defaults(
+    db, *, vector_dim: int, wipe: bool = False, dry_run: bool = False,
+) -> dict[str, Any]:
+    """Make the collection say what the asset file says.
+
+    Three rules, in the order they were learned:
+
+    1. Do not drop the collection. That took every character's pictures with it
+       — one run left all 100 with no portrait, because a preset's images are
+       stored on the preset. Bundled ids are `uuid5(namespace, preset_key)` and
+       therefore stable, so rows are written over in place instead.
+    2. Do delete what the file has stopped claiming. Writing over in place alone
+       is not a reset: renumbering the roster (`darkroom_photo` → `c007`) moved
+       every point, so the previous hundred characters stayed in the collection
+       for good — no id the UI knew, no delete button, and a re-seed that could
+       only ever add to them.
+    3. Carry the artwork by name as well as by id, so rule 2 does not become the
+       next version of the problem the first time a character is renumbered.
+
+    ``wipe`` extends the deletion to user-authored characters — the only way to
+    get an empty roster back. ``dry_run`` reports the same numbers and changes
+    nothing.
     """
     await db.ensure_character_presets_collection()
-    inserted = await _insert_seed_presets(db, vector_dim=vector_dim)
-    return {"inserted": inserted}
+    stored = await _stored_rows(db)
+    plan = plan_reset(stored, wipe=wipe)
+
+    if dry_run:
+        return {"dry_run": True, "inserted": 0, **_reset_report(plan, carried=0)}
+
+    await _delete_points(db, plan["removed"])
+    # `stored` is the pre-deletion snapshot on purpose: a row on its way out is
+    # exactly where a renumbered character's pictures are, and it is the last
+    # moment they can be claimed.
+    inserted, carried = await _insert_seed_presets(
+        db, vector_dim=vector_dim, stored=stored,
+    )
+    result = {"dry_run": False, "inserted": inserted,
+              **_reset_report(plan, carried=carried)}
+    logger.info(
+        "[presets] reset: %d written, %d removed (%s), %d user rows kept, "
+        "%d boards carried across, %d images now unreferenced",
+        inserted, len(plan["removed"]), ", ".join(plan["labels"][:10]) or "-",
+        plan["kept"], carried, len(plan["orphan_images"]),
+    )
+    return result
+
+
+def _reset_report(plan: dict[str, Any], *, carried: int) -> dict[str, Any]:
+    """The plan, sized down to what an API response and a toast can use."""
+    return {
+        "seeds": plan["seeds"],
+        "refreshed": plan["refreshed"],
+        "removed": len(plan["removed"]),
+        "kept": plan["kept"],
+        "carried_over": carried,
+        "orphan_images": len(plan["orphan_images"]),
+        "removed_labels": plan["labels"],
+    }
+
+
+async def _delete_points(db, point_ids: list[str]) -> None:
+    for i in range(0, len(point_ids), 100):
+        await db._qc.delete(
+            collection_name=CHARACTER_PRESETS_COLLECTION,
+            points_selector=qm.PointIdsList(points=point_ids[i:i + 100]),
+        )
 
 
 async def create_preset(db, payload: dict[str, Any], *, vector_dim: int) -> dict[str, Any]:
@@ -444,8 +539,8 @@ async def choose_board_image(
     return board
 
 
-async def _existing_artwork(db) -> dict[str, dict[str, Any]]:
-    """``{point_id: {board, gallery}}`` for whatever is already stored."""
+async def _stored_rows(db) -> dict[str, dict[str, Any]]:
+    """``{point_id: payload}`` for everything already in the collection."""
     out: dict[str, dict[str, Any]] = {}
     offset = None
     try:
@@ -455,44 +550,94 @@ async def _existing_artwork(db) -> dict[str, dict[str, Any]]:
                 limit=256, offset=offset, with_payload=True, with_vectors=False,
             )
             for point in points:
-                payload = point.payload or {}
-                art = {k: payload[k] for k in ("board", "gallery") if payload.get(k)}
-                if art:
-                    out[str(point.id)] = art
+                out[str(point.id)] = point.payload or {}
             if offset is None:
                 break
     except Exception as exc:
         # An empty or missing collection is the normal first-run case.
-        logger.debug("[presets] no existing artwork to carry over: %s", exc)
+        logger.debug("[presets] nothing stored yet: %s", exc)
     return out
 
 
-async def _insert_seed_presets(db, *, vector_dim: int) -> int:
+def _artwork(payload: dict[str, Any]) -> dict[str, Any]:
+    return {k: payload[k] for k in ("board", "gallery") if payload.get(k)}
+
+
+def _artwork_shas(payload: dict[str, Any]) -> list[str]:
+    board = payload.get("board") or {}
+    shas = [str(v) for v in board.values() if v]
+    for candidates in normalise_gallery(payload.get("gallery")).values():
+        shas += [c["sha"] for c in candidates]
+    return shas
+
+
+def _identity_keys(payload: dict[str, Any]) -> set[str]:
+    """How to recognise the same character in a row whose point id has moved.
+
+    Her id was descriptive once (`darkroom_photo`) and is `c007` now, and the id
+    is the seed for her point — so renumbering the roster orphans everything
+    drawn for her. The slug is the name that survives a renumbering, and a
+    legacy row's `id` *was* that slug, so both are worth matching on.
+    """
+    return {str(payload.get(k) or "").strip() for k in ("slug", "id")} - {""}
+
+
+def _artwork_by_name(stored: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for payload in stored.values():
+        art = _artwork(payload)
+        if art:
+            for key in _identity_keys(payload):
+                out.setdefault(key, art)
+    return out
+
+
+async def _insert_seed_presets(
+    db, *, vector_dim: int, stored: dict[str, dict[str, Any]] | None = None,
+) -> tuple[int, int]:
     """Write the bundled presets in, keeping whatever has been drawn for them.
+
+    Returns ``(written, carried_from_another_row)``.
 
     The asset file describes who a character is; it says nothing about her
     pictures, and it never will — those are rendered later and recorded on the
     row. Writing the file over the row therefore has to carry `board` and
     `gallery` across, or re-reading the file destroys every portrait in the app.
+    Her own row is the first place to look; her slug is the second, which is
+    what makes a renumbered roster survive.
     """
     seeds = load_seed_presets()
     if not seeds:
-        return 0
-    kept = await _existing_artwork(db)
-    points = [
-        qm.PointStruct(
+        return 0, 0
+    if stored is None:
+        stored = await _stored_rows(db)
+    by_name = _artwork_by_name(stored)
+
+    points: list[qm.PointStruct] = []
+    carried = 0
+    for seed in seeds:
+        point_id = preset_point_id(str(seed.get("id") or ""))
+        art = _artwork(stored.get(point_id) or {})
+        if not art:
+            for key in (str(seed.get("slug") or ""), str(seed.get("id") or "")):
+                art = by_name.get(key) or {}
+                if art:
+                    carried += 1
+                    logger.info(
+                        "[presets] %s: carried the board over from %s",
+                        preset_label(seed), key,
+                    )
+                    break
+        points.append(qm.PointStruct(
             id=point_id,
             vector={"embedding": _dummy_vector(vector_dim)},
-            payload={**p, **kept.get(point_id, {})},
-        )
-        for p, point_id in (
-            (p, preset_point_id(str(p.get("id") or ""))) for p in seeds
-        )
-    ]
+            payload={**seed, **art},
+        ))
+
     for i in range(0, len(points), 100):
         await db._qc.upsert(
             collection_name=CHARACTER_PRESETS_COLLECTION,
             points=points[i:i + 100],
         )
     logger.info("[presets] seeded %d character presets", len(points))
-    return len(points)
+    return len(points), carried

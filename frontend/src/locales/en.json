@@ -1432,8 +1432,11 @@
     "knownFor": "Known for",
     "stopN": "Stop ({n})",
     "resetRoster": "Re-seed",
-    "resetHint": "Re-read the bundled character sheets (drawn pictures are kept)",
-    "resetConfirm": "Re-read the bundled characters from the shipped file.\nEdits to them are lost; everything drawn for them is kept. Go ahead?",
-    "resetDone": "Re-read {n} characters"
+    "resetHint": "Re-read the bundled character sheets: edits are re-applied, characters the file has dropped are removed, drawn pictures are kept",
+    "resetConfirm": "Re-read the {n} bundled characters from the shipped file.\nEdits to them are lost; everything drawn for them is kept.",
+    "resetRemoves": "{n} characters are no longer in the file and will be deleted: {who} …",
+    "resetOrphanImages": "{n} reference images stay in the gallery, no longer attached to anyone.",
+    "resetKeepsMine": "{n} characters you made yourself are left alone.",
+    "resetDone": "Re-read {n} characters, removed {removed}"
   }
 }

@@ -95,23 +95,39 @@ async def list_characters(request: Request):
     return {"characters": rows, "count": len(rows), "board_slots": list(presets_db.BOARD_SLOTS)}
 
 
+class ResetRequest(BaseModel):
+    # Also delete user-authored characters — the only way back to a roster that
+    # is exactly the shipped one.
+    wipe: bool = False
+    # Report the same numbers and change nothing, so the confirm dialog can say
+    # what is about to be deleted instead of asking the user to trust it.
+    dry_run: bool = False
+
+
 @router.post("/reset")
-async def reset_characters(request: Request):
-    """Re-seed the bundled presets from the shipped asset file.
+async def reset_characters(request: Request, body: ResetRequest | None = None):
+    """Make the roster say what the shipped asset file says.
 
     The presets live in Qdrant and are seeded once, when the collection is
     empty, so editing the asset file and deploying changes nothing on a running
     install — `petite` stayed on 71 characters for a whole release after it was
     removed from the file. This is the only way to pick the edits up.
 
-    It writes the bundled rows over in place and carries their artwork across,
-    so nothing that has been drawn is lost and user-authored characters, which
-    have random ids, are not touched.
+    It writes the bundled rows over in place, carrying their artwork across, and
+    deletes bundled rows the file has stopped claiming. That second half is new:
+    without it, renumbering the roster left the previous hundred characters in
+    the collection with no id the UI knew and no way to remove them, and reset
+    could only ever add to the pile.
+
+    User-authored characters survive unless `wipe`.
     """
+    opts = body or ResetRequest()
     result = await presets_db.reset_presets_to_defaults(
         request.app.state.db, vector_dim=settings.embed_dim,
+        wipe=opts.wipe, dry_run=opts.dry_run,
     )
-    logger.info("[characters] reset to defaults: %s", result)
+    logger.info("[characters] reset (%s): %s",
+                "preview" if opts.dry_run else "applied", result)
     return result
 
 

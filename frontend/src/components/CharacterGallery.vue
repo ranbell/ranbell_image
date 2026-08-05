@@ -269,16 +269,46 @@ async function stopBulk() {
   } catch (err) { fail(err) }
 }
 
+/*
+ * Re-read the shipped roster.
+ *
+ * It deletes now — a character the file has stopped claiming is removed —  so
+ * it asks with the real numbers rather than with a sentence about what usually
+ * happens. The preview is the same call with `dry_run`, which is the only way
+ * the dialog can say "and these 100 go" without being a guess.
+ */
 async function resetRoster() {
-  if (!window.confirm(t('characters.resetConfirm'))) return
   loading.value = true
   try {
-    const r = await api('/api/characters/reset', { method: 'POST' })
-    emit('toast', { msg: t('characters.resetDone', { n: r.inserted || 0 }), type: 'info' })
+    const plan = await api('/api/characters/reset', {
+      method: 'POST', body: JSON.stringify({ dry_run: true }),
+    })
+    if (!window.confirm(resetPrompt(plan))) return
+    const r = await api('/api/characters/reset', {
+      method: 'POST', body: JSON.stringify({}),
+    })
+    emit('toast', {
+      msg: t('characters.resetDone', { n: r.inserted || 0, removed: r.removed || 0 }),
+      type: 'info',
+    })
     clearFilters()
     query.value = ''
     await reload()
   } catch (err) { fail(err) } finally { loading.value = false }
+}
+
+function resetPrompt(plan) {
+  const lines = [t('characters.resetConfirm', { n: plan.seeds || 0 })]
+  if (plan.removed) {
+    lines.push(t('characters.resetRemoves', {
+      n: plan.removed, who: (plan.removed_labels || []).slice(0, 6).join(', '),
+    }))
+  }
+  if (plan.orphan_images) {
+    lines.push(t('characters.resetOrphanImages', { n: plan.orphan_images }))
+  }
+  if (plan.kept) lines.push(t('characters.resetKeepsMine', { n: plan.kept }))
+  return lines.join('\n')
 }
 
 function onKey(e) {

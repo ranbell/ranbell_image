@@ -6,9 +6,11 @@ appearance that only echoes the tags) fails here.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
@@ -21,9 +23,13 @@ from app.characters.presets import (
     load_seed_presets,
     normalise_gallery,
     personality_text_from_preset,
+    plan_reset,
     preset_point_id,
     preset_summary,
     preset_to_character,
+    reset_presets_to_defaults,
+    seed_point_ids,
+    seed_presets_if_empty,
 )
 from app.tags.body import AGE_TAGS, BODY_SLOTS, BREAST_TAGS, filter_body_tags
 from app.tags.split_tags import soft_normalize_tag
@@ -411,6 +417,162 @@ def test_the_roster_is_not_one_figure_thirty_times():
     chest = [t for p in PRESETS for t in p["tags"]["body"] if t in _BREAST]
     assert len(set(chest)) >= 3, sorted(set(chest))
     assert max(chest.count(c) for c in set(chest)) <= len(PRESETS) * 0.5
+
+
+# ── what a reset actually resets ────────────────────────────────────────────
+class _FakeQC:
+    """Enough Qdrant to run the seed / reset path against."""
+
+    def __init__(self, points: dict | None = None):
+        self.points: dict[str, dict] = dict(points or {})
+
+    async def scroll(self, *, collection_name, limit=200, offset=None,
+                     with_payload=True, with_vectors=False, scroll_filter=None):
+        items = sorted(self.points.items())
+        start = int(offset or 0)
+        chunk = items[start:start + limit]
+        nxt = start + limit if start + limit < len(items) else None
+        return [SimpleNamespace(id=pid, payload=p if with_payload else None)
+                for pid, p in chunk], nxt
+
+    async def upsert(self, *, collection_name, points):
+        for p in points:
+            self.points[str(p.id)] = dict(p.payload or {})
+
+    async def delete(self, *, collection_name, points_selector):
+        for pid in points_selector.points:
+            self.points.pop(str(pid), None)
+
+
+class _FakeDB:
+    def __init__(self, points: dict | None = None):
+        self._qc = _FakeQC(points)
+
+    async def ensure_character_presets_collection(self):
+        return None
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _legacy_row(key: str, **extra) -> dict:
+    """A row from the roster before the ids were renumbered: the descriptive
+    key sat in `id`, and there was no `slug`."""
+    return {"id": key, "name": key, **extra}
+
+
+BOARD = {"sheet": "sheet_sha", "portrait": "portrait_sha"}
+
+
+def test_a_character_the_file_no_longer_claims_is_removed():
+    """The bug this is here for: renumbering the roster (`darkroom_photo` →
+    `c007`) moved every point id, so re-seeding wrote 30 new rows *beside* the
+    previous 100 instead of replacing them — 130 characters, 100 of which no UI
+    could name and no reset could reach."""
+    legacy = {preset_point_id(k): _legacy_row(k)
+              for k in ("shrine_maiden", "night_bakery", "library_cat")}
+    db = _FakeDB(legacy)
+
+    result = _run(reset_presets_to_defaults(db, vector_dim=4))
+
+    assert result["removed"] == 3
+    assert result["inserted"] == len(PRESETS)
+    assert set(db._qc.points) == seed_point_ids()
+
+
+def test_a_character_you_wrote_yourself_survives_a_reset():
+    mine = {"11111111-2222-3333-4444-555555555555":
+            {"id": "user-abc", "name": "Mine", "user_created": True}}
+    db = _FakeDB(mine)
+
+    result = _run(reset_presets_to_defaults(db, vector_dim=4))
+
+    assert result["kept"] == 1
+    assert "11111111-2222-3333-4444-555555555555" in db._qc.points
+    assert len(db._qc.points) == len(PRESETS) + 1
+
+
+def test_wipe_is_the_way_back_to_only_the_shipped_roster():
+    db = _FakeDB({"11111111-2222-3333-4444-555555555555":
+                  {"id": "user-abc", "user_created": True}})
+
+    result = _run(reset_presets_to_defaults(db, vector_dim=4, wipe=True))
+
+    assert result["kept"] == 0
+    assert result["removed"] == 1
+    assert set(db._qc.points) == seed_point_ids()
+
+
+def test_a_dry_run_reports_the_same_numbers_and_changes_nothing():
+    """The confirm dialog says "and these 100 go" only because it asked."""
+    legacy = {preset_point_id(k): _legacy_row(k, board=dict(BOARD))
+              for k in ("shrine_maiden", "night_bakery")}
+    db = _FakeDB(legacy)
+
+    plan = _run(reset_presets_to_defaults(db, vector_dim=4, dry_run=True))
+
+    assert plan["dry_run"] is True
+    assert plan["removed"] == 2
+    assert plan["seeds"] == len(PRESETS)
+    assert plan["orphan_images"] == 2, "both slots of one board are the same shas"
+    assert sorted(plan["removed_labels"]) == ["night_bakery", "shrine_maiden"]
+    assert db._qc.points == legacy, "a preview must not touch the collection"
+
+
+def test_her_own_pictures_survive_a_re_seed():
+    """Dropping the collection took every portrait with it. Writing rows over in
+    place must not quietly do the same thing."""
+    point_id = preset_point_id(PRESETS[0]["id"])
+    db = _FakeDB({point_id: {**PRESETS[0], "board": dict(BOARD)}})
+
+    _run(reset_presets_to_defaults(db, vector_dim=4))
+
+    assert db._qc.points[point_id]["board"] == BOARD
+
+
+def test_pictures_follow_a_character_whose_id_was_renumbered():
+    """The rescue that stops rule 2 from becoming the next version of the bug:
+    her slug is the name that survives a renumbering, so her board is claimed
+    off the row being deleted rather than deleted with it."""
+    seed = PRESETS[0]
+    old_id = preset_point_id(seed["slug"])         # when the slug *was* the id
+    db = _FakeDB({old_id: _legacy_row(seed["slug"], board=dict(BOARD))})
+
+    result = _run(reset_presets_to_defaults(db, vector_dim=4))
+
+    assert result["carried_over"] == 1
+    assert old_id not in db._qc.points
+    assert db._qc.points[preset_point_id(seed["id"])]["board"] == BOARD
+
+
+def test_an_edit_to_a_bundled_character_is_what_a_reset_undoes():
+    point_id = preset_point_id(PRESETS[0]["id"])
+    db = _FakeDB({point_id: {**PRESETS[0], "name_ja": "書き換えた名前"}})
+
+    _run(reset_presets_to_defaults(db, vector_dim=4))
+
+    assert db._qc.points[point_id]["name_ja"] == PRESETS[0]["name_ja"]
+
+
+def test_seeding_an_empty_collection_still_only_runs_once():
+    db = _FakeDB()
+    assert _run(seed_presets_if_empty(db, vector_dim=4)) == len(PRESETS)
+    assert _run(seed_presets_if_empty(db, vector_dim=4)) == 0
+    assert len(db._qc.points) == len(PRESETS)
+
+
+def test_the_plan_is_readable_without_a_database():
+    stored = {
+        preset_point_id(PRESETS[0]["id"]): dict(PRESETS[0]),   # current
+        preset_point_id("shrine_maiden"): _legacy_row("shrine_maiden"),  # stale
+        "11111111-2222-3333-4444-555555555555": {"id": "user-a", "user_created": True},
+    }
+    plan = plan_reset(stored)
+    assert plan["refreshed"] == 1
+    assert plan["stale"] == [preset_point_id("shrine_maiden")]
+    assert plan["kept"] == 1
+    assert plan["removed"] == plan["stale"]
 
 
 # ── what the picker filters by ──────────────────────────────────────────────
