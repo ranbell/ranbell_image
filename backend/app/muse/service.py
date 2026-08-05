@@ -160,7 +160,7 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     tags = _identity_tags(session)
 
     try:
-        prompt = await chain.run_pose(
+        result = await chain.run_pose(
             ollama, brief=session["brief"], model=model,
             num_ctx=_num_ctx(inputs, cfg),
             think=bool(inputs.get("think", False)),
@@ -170,7 +170,7 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
         )
     except chain.ChainError as exc:
         raise MuseError(str(exc)) from exc
-    _prompt_done(session_id, "pose", prompt)
+    _prompt_done(session_id, "pose", result.prompt)
     # Hand the card over before asking ComfyUI for a four-image latent.
     await ollama.unload(model)
 
@@ -186,8 +186,8 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     # back out of the session rather than being handed them, so there is one
     # copy of what is being drawn.
     session["draft"] = {
-        "prompt": prompt,
-        "pose_intent": identity.pose_summary(prompt),
+        "prompt": result.prompt,
+        "pose_intent": result.pose_intent,
         "seed": seed,
         "job_id": "",
         "images": [],
@@ -266,7 +266,7 @@ async def run_refine(
 
     session_id = session["session_id"]
     for chain_index in range(len(chosen)):
-        spooler.submit(
+        job_id = spooler.submit(
             JobLane.GENERATION,
             f"muse_refine:{chosen[chain_index]}",
             runner.run_chain_job,
@@ -274,6 +274,7 @@ async def run_refine(
             db=db, comfy=comfy, ollama=ollama,
             session_id=session_id, chain_index=chain_index,
         )
+        session["chains"][chain_index]["job_id"] = job_id
 
     session_db.log(session, "refine",
                    f"{len(chosen)} draft(s) × {len(stages)} stages")

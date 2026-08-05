@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,13 @@ from . import brief as brief_mod
 from . import identity
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StageResult:
+    """Assembled Comfy positive, plus the SCENE-side pose intent when useful."""
+    prompt: str
+    pose_intent: str = ""
 
 PROMPTS = Path(__file__).parent / "prompts"
 
@@ -99,7 +107,7 @@ async def _call(
 def _finish(
     raw: str, *, identity_tags: list[str] | None, framing: str,
     brief: str,
-) -> str:
+) -> StageResult:
     tags, scene = identity.parse_hybrid(raw)
     positive = identity.assemble_positive(
         identity_tags, tags, scene, framing=framing,
@@ -107,14 +115,17 @@ def _finish(
     identity.warn_reference_leak(brief, positive)
     if not positive.strip():
         raise ChainError("the model returned an empty prompt")
-    return positive
+    # Pose intent comes from SCENE (or prose fallback), never from the stapled
+    # identity tag prefix — that would poison stage B with hair/body tags.
+    intent = identity.pose_summary(scene or raw)
+    return StageResult(prompt=positive, pose_intent=intent)
 
 
 async def run_pose(
     ollama, *, brief: str, model: str, num_ctx: int | None,
     think: bool = False, identity_tags: list[str] | None = None,
     framing: str = "auto", on_token: TokenCallback | None = None,
-) -> str:
+) -> StageResult:
     """Stage A. No image exists yet, so this is the only text-only call."""
     raw = await _call(
         ollama, system=system_prompt("a_pose.md"), prompt=brief,
@@ -130,7 +141,7 @@ async def run_refine(
     tags: str = "", pose: str = "", think: bool = False,
     identity_tags: list[str] | None = None, framing: str = "auto",
     on_token: TokenCallback | None = None,
-) -> str:
+) -> StageResult:
     """One refine stage. ``tags`` / ``pose`` are set for B only."""
     prompt = (brief_mod.with_tags(brief, tags, pose=pose) if tags or pose
               else brief_mod.with_prompt(brief, previous))

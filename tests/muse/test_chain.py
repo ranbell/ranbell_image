@@ -70,9 +70,10 @@ async def test_pose_is_text_only_and_carries_the_thinking_switch():
         llm, brief="BRIEF", model="m", num_ctx=32768,
         identity_tags=["1girl", "small_breasts"],
     )
-    assert out.startswith("1girl, small_breasts")
-    assert "standing" in out
-    assert "a prompt" in out
+    assert out.prompt.startswith("1girl, small_breasts")
+    assert "standing" in out.prompt
+    assert "a prompt" in out.prompt
+    assert out.pose_intent == "a prompt"
     call = llm.calls[0]
     assert call["kind"] == "text"
     assert call["prompt"] == "BRIEF"
@@ -94,7 +95,8 @@ async def test_reasoning_is_not_mistaken_for_the_prompt():
     # thousands of words of deliberation into the image prompt.
     llm = FakeOllama(reply="the prompt", thinking="a" * 5000)
     got = await chain.run_pose(llm, brief="B", model="m", num_ctx=None, think=True)
-    assert got == "the prompt"
+    assert got.prompt == "the prompt"
+    assert got.pose_intent == "the prompt"
 
 
 @pytest.mark.asyncio

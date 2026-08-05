@@ -116,7 +116,9 @@ async def test_draft_submits_one_job_and_frees_the_card_first():
 
     assert "STAGE A PROMPT" in session["draft"]["prompt"]
     assert "blue_hair" in session["draft"]["prompt"]  # identity lock stapled on
-    assert session["draft"]["pose_intent"]
+    # Pose intent is SCENE only — not the stapled identity prefix.
+    assert session["draft"]["pose_intent"] == "STAGE A PROMPT"
+    assert "blue_hair" not in session["draft"]["pose_intent"]
     assert session["draft"]["pending"] is True
     assert session["draft"]["seed"] > 0
     assert session["draft"]["job_id"]
@@ -168,6 +170,7 @@ async def test_each_chosen_draft_becomes_its_own_chain_at_the_draft_seed():
         "reinforce", "cinematic",
     ]
     assert session["chains"][0]["pose_intent"] == "She waits on the roof."
+    assert all(c.get("job_id") for c in session["chains"])
     assert len(spooler.jobs) == 2
     assert {j["chain_index"] for j in spooler.jobs} == {0, 1}
 

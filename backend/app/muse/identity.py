@@ -61,7 +61,7 @@ _TAGS_RE = re.compile(
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
-_FRAMING_ALIASES = {
+FRAMING_ALIASES = {
     "face_close_up": "face_closeup",
     "close_up": "face_closeup",
     "closeup": "face_closeup",
@@ -72,12 +72,28 @@ _FRAMING_ALIASES = {
 }
 
 
-def normalize_framing(value: str | None) -> str:
+def _framing_key(value: str | None) -> str:
     key = str(value or "auto").strip().lower().replace("-", "_").replace(" ", "_")
     while "__" in key:
         key = key.replace("__", "_")
-    key = _FRAMING_ALIASES.get(key, key)
+    return FRAMING_ALIASES.get(key, key)
+
+
+def normalize_framing(value: str | None) -> str:
+    """Lenient: unknown values become auto (safe for brief rebuild)."""
+    key = _framing_key(value)
     return key if key in FRAMINGS else "auto"
+
+
+def parse_framing(value: str) -> str:
+    """Strict: reject unknown framing spellings (API input)."""
+    key = _framing_key(value)
+    if key not in FRAMINGS:
+        raise ValueError(
+            "framing must be one of: auto, full_body, upper_body, "
+            "face_closeup, from_behind"
+        )
+    return key
 
 
 def framing_tags(framing: str | None) -> list[str]:

@@ -252,6 +252,10 @@ function connectStream(id) {
       await refresh()
       return
     }
+    if (evt.type === 'stage_attached' || evt.type === 'draft_attached') {
+      promptLive.value = ''
+      preview.value = ''
+    }
     await refresh()
   }
   eventSource.onerror = () => { streamLive.value = false }
@@ -284,9 +288,21 @@ function startPoll() {
 }
 
 function sampleJob() {
-  const id = draft.value.job_id
   const map = props.getJobsMap?.()
-  job.value = (id && map?.get) ? (map.get(id) || null) : null
+  if (!map?.get) { job.value = null; return }
+  // Draft job first; while refining, follow the active chain's job for Comfy steps.
+  const draftId = draft.value.job_id
+  if (act.value === 'drafting' && draftId) {
+    job.value = map.get(draftId) || null
+    return
+  }
+  const pending = chains.value.find(c => (c.stages || []).some(s => !s.image_id))
+  const refineId = pending?.job_id
+  if (refineId) {
+    job.value = map.get(refineId) || null
+    return
+  }
+  job.value = draftId ? (map.get(draftId) || null) : null
 }
 
 async function refresh() {

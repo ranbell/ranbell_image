@@ -183,7 +183,7 @@ async def run_chain_job(
                 "text": text,
             })
 
-        prompt = await chain.run_refine(
+        stage_result = await chain.run_refine(
             ollama, stage_file=prompt_file, brief=brief, previous=previous,
             image=image, model=model, num_ctx=num_ctx, think=False,
             tags=tags if stage_index == 0 else "",
@@ -192,6 +192,7 @@ async def run_chain_job(
             framing=framing,
             on_token=_on_token,
         )
+        prompt = stage_result.prompt
         await session_db.record_stage_prompt(db, session_id, chain_index,
                                              stage_index, prompt)
         events.publish(session_id, {
@@ -202,7 +203,7 @@ async def run_chain_job(
         })
         await ollama.unload(model)
 
-        result = await run_render(
+        render_result = await run_render(
             reporter, cancel,
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
@@ -216,13 +217,13 @@ async def run_chain_job(
             preview=preview_publisher(session_id, f"{chain_index}:{stage}"),
             **render,
         )
-        shas = result.get("sha256s") or []
+        shas = render_result.get("sha256s") or []
         if not shas:
             raise RuntimeError(f"stage {stage} rendered nothing")
 
         kept = finished_image(shas)
         await session_db.attach_stage_image(
-            db, session_id, chain_index, stage_index, kept, result,
+            db, session_id, chain_index, stage_index, kept, render_result,
         )
         image = await _image_bytes(db, kept)
         previous = prompt

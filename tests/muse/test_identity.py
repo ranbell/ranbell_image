@@ -63,8 +63,26 @@ def test_pose_summary_keeps_two_sentences_from_scene():
 def test_framing_tags_and_normalize():
     assert identity.normalize_framing("Face Close-Up") == "face_closeup"
     assert identity.normalize_framing("nope") == "auto"
+    assert identity.parse_framing("from_behind") == "from_behind"
+    try:
+        identity.parse_framing("nope")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
     assert "from_behind" in identity.framing_tags("from_behind")
     assert "full_body" in identity.framing_negative("face_closeup")
+
+
+def test_pose_intent_comes_from_scene_not_identity_prefix():
+    from app.muse import chain
+
+    raw = "TAGS: standing, rooftop\n\nSCENE: She waits in the rain."
+    result = chain._finish(
+        raw, identity_tags=["1girl", "small_breasts"], framing="auto", brief="B",
+    )
+    assert result.prompt.startswith("1girl, small_breasts")
+    assert result.pose_intent == "She waits in the rain."
+    assert "small_breasts" not in result.pose_intent
 
 
 def test_merge_negative_dedupes():

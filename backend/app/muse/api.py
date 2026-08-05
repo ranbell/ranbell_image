@@ -6,10 +6,10 @@ import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.responses import StreamingResponse
 
-from . import events, service, session_db
+from . import events, identity, service, session_db
 from .catalog import build_muse_catalog
 from .schema import STEPS, public_view
 
@@ -55,6 +55,13 @@ class InputsPatch(BaseModel):
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
     drop_rating_tags: bool | None = None
     drop_character_tags: bool | None = None
+
+    @field_validator("framing")
+    @classmethod
+    def _normalize_framing(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return identity.parse_framing(value)
 
 
 class CharacterPick(BaseModel):
