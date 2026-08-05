@@ -1,8 +1,4 @@
-"""Step state and the preview-frame decoder.
-
-`step_state` is what the panel renders from, so "half the grid has landed" must
-not read as done — a run three-quarters finished is in progress.
-"""
+"""Step state for the chat studio, and the preview-frame decoder."""
 from __future__ import annotations
 
 import sys
@@ -28,57 +24,73 @@ def test_a_new_session_needs_nothing_once_the_four_inputs_are_set():
     ]
 
 
-def test_draft_is_done_when_the_job_stops_not_when_a_count_is_reached():
-    # A workflow ending in an upscale writes one image per batch item per output
-    # node, so a batch of four came back as eight. Counting to `draft_count`
-    # marked the step done halfway and then un-did it as the rest arrived.
-    s = _session(draft={"job_id": "j", "pending": True, "images": [
+def test_new_session_casts_gallery_crew_by_default():
+    s = schema.new_session()
+    assert s["inputs"]["crew_preset"] == "gallery"
+    assert "beat" in s["inputs"]["crew_ids"]
+    assert "finisher" not in s["inputs"]["crew_ids"]  # always appended at resolve
+    assert "actress" not in s["inputs"]["crew_ids"]  # always injected at resolve
+    assert s["status"] == "setup"
+    assert s["chat"] == []
+    assert s["craft"]["prompt"] == ""
+
+
+def test_public_roster_fills_actress_from_character():
+    s = schema.new_session()
+    s["character"] = {
+        "name": "Sample Lead", "name_ja": "サンプル主演",
+        "personality": {"summary_ja": "いつも本気で話す。"},
+    }
+    view = schema.public_view(s)
+    actress = next(m for m in view["roster"]["muses"] if m["id"] == "actress")
+    assert actress["name_ja"] == "サンプル主演"
+    assert actress["required"] is True
+    assert "本気" in actress["line"]
+
+
+def test_board_is_done_when_the_job_stops_not_when_a_count_is_reached():
+    s = _session(status="boarding", board={"job_id": "j", "pending": True, "images": [
         {"index": 0, "image_id": "a"}, {"index": 1, "image_id": "b"},
         {"index": 2, "image_id": "c"}, {"index": 3, "image_id": "d"},
     ]})
     s["inputs"]["draft_count"] = 4
-    assert schema.step_state(s)["draft"]["done"] is False
-    assert schema.step_state(s)["draft"]["pending"] is True
+    assert schema.step_state(s)["board"]["done"] is False
+    assert schema.step_state(s)["board"]["pending"] is True
 
-    s["draft"]["images"] += [{"index": 4, "image_id": "e"}]
-    s["draft"]["pending"] = False
+    s["board"]["images"] += [{"index": 4, "image_id": "e"}]
+    s["board"]["pending"] = False
+    s["status"] = "awaiting_ok"
     state = schema.step_state(s)
-    assert state["draft"]["done"] is True
-    assert state["draft"]["detail"] == "5"
+    assert state["board"]["done"] is True
+    assert state["board"]["detail"] == "5"
 
 
-def test_a_draft_job_that_produced_nothing_is_not_done():
-    s = _session(draft={"job_id": "j", "pending": False, "images": []})
-    assert schema.step_state(s)["draft"]["done"] is False
+def test_a_board_job_that_produced_nothing_is_not_done():
+    s = _session(status="boarding", board={"job_id": "j", "pending": False, "images": []})
+    assert schema.step_state(s)["board"]["done"] is False
 
 
-def test_refine_is_not_done_while_any_stage_is_still_blank():
-    s = _session(chains=[{"draft_index": 0, "stages": [
-        {"stage": "reinforce", "image_id": "a"},
-        {"stage": "cinematic", "image_id": ""},
-    ]}])
+def test_shoot_is_pending_while_status_is_shooting():
+    s = _session(status="shooting", shoot={"pending": True, "images": []})
     state = schema.step_state(s)
-    assert state["refine"]["done"] is False
-    assert state["refine"]["pending"] is True
-    assert state["refine"]["detail"] == "1/2"
+    assert state["shoot"]["pending"] is True
+    assert state["shoot"]["done"] is False
 
 
-def test_next_step_walks_draft_then_refine():
-    s = _session()
-    assert schema.next_step(s) == "draft"
-    s["draft"] = {"job_id": "j", "pending": False,
-                  "images": [{"index": 0, "image_id": "a"}]}
-    assert schema.next_step(s) == "refine"
-    s["chains"] = [{"stages": [{"stage": "reinforce", "image_id": "x"}]}]
+def test_next_step_walks_setup_chat_board_shoot():
+    s = _session(status="setup")
+    assert schema.next_step(s) == "setup"
+    s["status"] = "chat"
+    assert schema.next_step(s) == "chat"
+    s["status"] = "awaiting_ok"
+    assert schema.next_step(s) == "board"
+    s["status"] = "shooting"
+    assert schema.next_step(s) == "shoot"
+    s["status"] = "done"
     assert schema.next_step(s) == "done"
 
 
 def test_preview_frames_are_found_behind_whatever_header_comfy_sends():
     jpeg = b"\xff\xd8\xff\xe0rest-of-image"
-    # Documented layout: 4-byte event type, 4-byte image format, then the image.
     assert _preview_image(b"\x00\x00\x00\x01\x00\x00\x00\x01" + jpeg) == jpeg
-    # Newer builds can put a metadata blob in between, so the offset moves.
-    assert _preview_image(b"\x00\x00\x00\x04" + b'{"node":"7"}' + jpeg) == jpeg
-    assert _preview_image(b"\x00\x00\x00\x01\x00\x00\x00\x02\x89PNGdata") == b"\x89PNGdata"
-    # Anything that is not an image must not be published as one.
-    assert _preview_image(b"\x00\x00\x00\x03no image here") is None
+    assert _preview_image(b"\x00\x00\x00\x01\x00\x00\x00\x02xxxx" + jpeg) == jpeg

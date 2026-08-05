@@ -39,29 +39,57 @@ class FakeOllama:
         return self._stream()
 
 
-def test_every_stage_has_a_prompt_file_and_an_output_format():
+def test_legacy_prompt_files_still_exist_for_pickup_docs():
     for _, filename in chain.REFINE_STAGES:
         text = chain.system_prompt(filename)
         assert "OUTPUT FORMAT" in text
-        # The instructions are English on purpose: written in Japanese, the model
-        # sometimes answered in Japanese, which the image model cannot use.
+        assert "TAGS:" in text
+        assert "SCENE:" in text
         assert "English only" in text
-    assert "OUTPUT FORMAT" in chain.system_prompt("a_pose.md")
+    b = chain.system_prompt("b_reinforce.md")
+    assert "ten or more objects" in b.lower()
+    a = chain.system_prompt("a_pose.md")
+    assert "face_closeup" in a
+    assert "from_behind" in a
 
 
 def test_stages_for_clamps_to_the_instructions_that_exist():
     assert len(chain.stages_for(3)) == 3
     assert len(chain.stages_for(1)) == 1
     assert len(chain.stages_for(0)) == 1
-    # There is no fourth instruction, so asking for more repeats nothing.
     assert len(chain.stages_for(9)) == 3
 
 
 @pytest.mark.asyncio
+async def test_run_muse_streams_say_and_locks_identity():
+    llm = FakeOllama(reply=(
+        "SAY: Director, one beat.\n\n"
+        "TAGS: standing, rooftop\n\n"
+        "SCENE: She waits in the rain."
+    ))
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m",
+        num_ctx=None, identity_tags=["1girl", "blue_hair"],
+        framing="auto", brief="BRIEF",
+    )
+    assert turn.say.startswith("Director")
+    assert turn.prompt.startswith("1girl, blue_hair")
+    assert turn.pose_intent == "She waits in the rain."
+    assert llm.calls[0]["kind"] == "text"
+    assert "You are Beat" in llm.calls[0]["system"]
+
+
+@pytest.mark.asyncio
 async def test_pose_is_text_only_and_carries_the_thinking_switch():
-    llm = FakeOllama()
-    out = await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=32768)
-    assert out == "a prompt"
+    llm = FakeOllama(reply="TAGS: standing\n\nSCENE: a prompt")
+    out = await chain.run_pose(
+        llm, brief="BRIEF", model="m", num_ctx=32768,
+        identity_tags=["1girl", "small_breasts"],
+    )
+    assert out.prompt.startswith("1girl, small_breasts")
+    assert "standing" in out.prompt
+    assert "a prompt" in out.prompt
+    assert out.pose_intent == "a prompt"
     call = llm.calls[0]
     assert call["kind"] == "text"
     assert call["prompt"] == "BRIEF"
@@ -83,27 +111,41 @@ async def test_reasoning_is_not_mistaken_for_the_prompt():
     # thousands of words of deliberation into the image prompt.
     llm = FakeOllama(reply="the prompt", thinking="a" * 5000)
     got = await chain.run_pose(llm, brief="B", model="m", num_ctx=None, think=True)
-    assert got == "the prompt"
+    assert got.prompt == "the prompt"
+    assert got.pose_intent == "the prompt"
 
 
 @pytest.mark.asyncio
 async def test_refine_sends_the_image_and_uses_tags_only_for_the_first_stage():
-    llm = FakeOllama()
+    llm = FakeOllama(reply="TAGS: sky\n\nSCENE: repaired")
     await chain.run_refine(
         llm, stage_file="b_reinforce.md", brief="BRIEF", previous="",
         image=b"jpeg", model="m", num_ctx=None, tags="1girl, sky",
+        pose="she waits",
     )
     call = llm.calls[0]
     assert call["kind"] == "vlm"
     assert call["images"] == [b"jpeg"]
     assert call["think"] is False
-    assert call["prompt"] == "BRIEF,1girl, sky"
+    assert "Pose intent: she waits" in call["prompt"]
+    assert call["prompt"].endswith(",1girl, sky") or ",1girl, sky" in call["prompt"]
 
     await chain.run_refine(
         llm, stage_file="c_cinematic.md", brief="BRIEF", previous="prev prompt",
         image=b"jpeg2", model="m", num_ctx=None,
     )
     assert llm.calls[1]["prompt"] == "BRIEF,prev prompt"
+
+
+@pytest.mark.asyncio
+async def test_on_token_forwards_answer_pieces_for_sse():
+    llm = FakeOllama(reply="TAGS: x\n\nSCENE: y")
+    seen: list[str] = []
+    await chain.run_pose(
+        llm, brief="B", model="m", num_ctx=None,
+        on_token=seen.append,
+    )
+    assert "".join(seen) == "TAGS: x\n\nSCENE: y"
 
 
 @pytest.mark.asyncio

@@ -1,25 +1,21 @@
 """Read the chosen draft back as tags — the one place WD14 is still used.
 
-This runs once, on the draft, and its output replaces stage A's prose as the
-text stage B works from. That substitution is the point of the whole design: A
-describes the picture it wants, WD14 describes the picture that exists, and only
-one of those is a fact.
+This runs once, on the draft, and its output feeds stage B together with a short
+pose intent from A. That substitution is the point of the design: A describes
+the picture it wants, WD14 describes the picture that exists, and B repairs
+toward the theme without inventing a new body.
 
 The threshold is well under the library default so the weak tail comes through.
-The tail is where the checkpoint's own ideas are — things nobody asked for that
-the draft drew anyway — and stage B is being asked to build on the drawing, not
-on the request.
-
-Nothing is cleaned up here. Muse used to run an LLM pass to prune this list and
-a rules pass before that; both existed to protect a downstream that turned tags
-into prompt lines with per-aspect budgets. Stage B is a vision model looking at
-the same image, so a wrong tag is contradicted by what it can see.
+Body tags that fight the character's locked identity are dropped here — a draft
+that drew a larger chest must not become the refine chain's "fact".
 """
 from __future__ import annotations
 
 import logging
+from typing import Iterable
 
 from ..ai.wd14 import CATEGORY_CHARACTER, CATEGORY_RATING, tags_scored_from_bytes
+from .identity import drop_conflicting_tags
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +27,7 @@ async def read_tags(
     model_dir: str | None = None,
     drop_rating_tags: bool = False,
     drop_character_tags: bool = True,
+    identity_tags: Iterable[str] | None = None,
 ) -> str:
     """One image → a comma-separated tag string, strongest first."""
     scored = await tags_scored_from_bytes(
@@ -46,4 +43,5 @@ async def read_tags(
         if drop_rating_tags and category == CATEGORY_RATING:
             continue
         names.append(name)
-    return ", ".join(names)
+    tags = ", ".join(names)
+    return drop_conflicting_tags(tags, identity_tags)

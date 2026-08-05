@@ -21,45 +21,45 @@ DRAFT_DEFAULTS: dict[str, object] = {
     "draft_count": 4,
 }
 
-# ── The refine chain ───────────────────────────────────────────────────────
+# ── Board / shoot ───────────────────────────────────────────────────────────
 REFINE_DEFAULTS: dict[str, object] = {
     "final_steps": 30,
     "final_cfg": 4.5,
-    # B, C and D. Cutting to 1 or 2 stops early; there is no fourth instruction,
-    # so this cannot go higher. Every stage's image is kept either way, because
-    # which one is best depends on how good the draft was, not on how late it is.
-    "refine_stages": 3,
-    # Well below the library default of 0.35. The weak tail is the point: it is
-    # what the checkpoint drew without being asked, and stage B builds on it.
+    # Legacy key kept for older panels; B/C/D pickup is removed.
+    "refine_stages": 0,
     "wd14_threshold": 0.2,
-    # WD14 category 4 is named characters — the checkpoint recognising somebody
-    # else's character inside its own draft, which then becomes the final image.
     "drop_character_tags": True,
     "drop_rating_tags": False,
 }
 
 # ── The model's own reasoning ──────────────────────────────────────────────
 LLM_DEFAULTS: dict[str, object] = {
-    # Off by default, on when the prompt matters more than the wait — it costs
-    # about eight times the wall clock of a stage without it, and a run is four
-    # stages.
+    # Off by default. When on, it applies to stage A only — pose is where
+    # contradictory postures used to pile up. Refine stages stay fast.
     #
-    # What it buys is a different prompt, not a tidier one. Without it a stage
-    # writes four postures into one paragraph — "stands", "hunched", "leans
-    # forward", "steady and still" — and the image model picks one, unguided;
-    # it also writes things nothing can draw, and lets the reference block leak
-    # in. With it the pose resolves to one, the undrawable lines go, and the
-    # prompt comes out a third shorter.
+    # What it buys on A is a different prompt, not a tidier one. Without it a
+    # stage writes four postures into one paragraph and the image model picks
+    # one, unguided; it also writes things nothing can draw, and lets the
+    # reference block leak in. With it the pose resolves to one.
     #
-    # It is not a substitute for telling a stage what to prefer: with thinking
-    # on and no ordering rule, stage B took the tagger's "skirt" over the
-    # theme's trousers three times out of three, and talked itself into
-    # "theme preserved" while doing it.
+    # It costs about eight times the wall clock of a stage without it.
     "think": False,
     # Sized for thinking being on: reasoning runs to thousands of tokens before
     # the answer starts, and the brief and an image are already in the window.
     # 16k was tight; this is the size both were measured at.
     "num_ctx": 32768,
+    # Empty = reuse `model` for B/C/D. Set a vision-capable model here and a
+    # cheaper text model in `model` to cut stage A's wait.
+    "vision_model": "",
+    # Composition bias for every stage. auto lets the theme decide.
+    "framing": "auto",
+    # Drop the VLM from VRAM before each Comfy render. Off by default.
+    "unload_vlm": False,
+    # Cast preset for the table-read crew (see muse.crew.PRESETS).
+    "crew_preset": "gallery",
+    # Banter between craft passes. light = Ollama-friendly (fewer side calls);
+    # full = previous speaker + occasional heckler; off = craft only.
+    "banter_mode": "light",
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────

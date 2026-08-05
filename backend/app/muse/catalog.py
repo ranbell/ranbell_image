@@ -129,11 +129,16 @@ async def build_muse_catalog(
             "locale": "ja",
             **ALL_DEFAULTS,
         },
+        "framings": [
+            "auto", "full_body", "upper_body", "face_closeup", "from_behind",
+        ],
         "notes": {
             "vision_model_required": (
                 "Stages B, C and D send the previous render to the model. A "
                 "text-only model does not fail — Ollama silently drops the "
-                "images — so pick one listed under llm.vision_models."
+                "images — so pick one listed under llm.vision_models. Stage A "
+                "can use a cheaper text model via inputs.model while "
+                "inputs.vision_model covers the refine stages."
             ),
             "workflow_required": (
                 "One workflow renders both the drafts and every refine stage. "

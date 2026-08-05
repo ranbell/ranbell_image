@@ -305,7 +305,7 @@
     "newImagesAvailable": "新しい画像があります — 更新",
     "loadCap": "表示上限 {n} 枚に達しました。検索やフィルタで絞り込んでください。",
     "showDrafts": "下書きも表示",
-    "showDraftsHint": "Muse の下書きは既定で一覧から隠れている"
+    "showDraftsHint": "Muse のボード下書きは既定で一覧から隠れている"
   },
   "detail": {
     "fullscreen": "クリックで全画面表示",
@@ -1267,45 +1267,52 @@
     "comfyOfflineHint": "ComfyUI に接続できません — 画像は再接続後に生成されます。"
   },
   "muse": {
-    "title": "Muse — 下書きから育てる",
-    "subtitle": "お題とキャラから下書きを4枚描き、選んだ1枚を絵を見ながら描き直していく",
+    "title": "Muse — 総監督スタジオ",
+    "subtitle": "班とチャットで詰め、イメージボードで確認し、OKで本番撮影",
     "close": "閉じる",
     "reset": "やり直す",
     "resetConfirm": "このセッションを捨てて最初からやり直しますか？",
+    "cast": "キャスト",
     "character": "キャラクター",
     "pickCharacter": "キャラクターを選ぶ",
     "noCharacter": "未選択",
     "theme": "お題",
-    "themePlaceholder": "例: 雨上がりの屋上で、誰かを待っている",
+    "themePlaceholder": "お題を自由に（場所・時間・行動など）",
+    "studioHint": "あなたが総監督。班が議論し、途中でイメージボードを出します。OKが出たら本番です。",
+    "crewPreset": "班の編成",
+    "presets": {
+      "lightning": "ライトニング（少人数）",
+      "gallery": "ギャラリー（標準）",
+      "everyone": "全員集合",
+      "motion": "モーション重視",
+      "night": "ナイトムード"
+    },
     "workflow": "ワークフロー",
-    "workflowHint": "下書きも本番も同じワークフローで描く。違うのはステップ数と CFG だけ",
+    "workflowHint": "ボードも本番も同じワークフロー。違うのはステップ数と CFG だけ",
     "model": "モデル",
-    "modelHint": "B以降は前の絵をモデルに見せるので、画像を読めるモデルを選ぶこと",
+    "modelHint": "打ち合わせはテキスト。軽いモデルでもよい",
+    "visionModel": "Visionモデル",
+    "visionModelSame": "モデルと同じ",
     "notVision": "このモデルは画像を読めません。指定しても無視されます",
+    "framing": "構図",
+    "framingHint": "顔アップや後ろ姿を全身に引き戻さないための固定",
+    "framingOpts": {
+      "auto": "自動（お題から）",
+      "full_body": "全身",
+      "upper_body": "上半身",
+      "face_closeup": "顔アップ",
+      "from_behind": "後ろ姿"
+    },
     "style": "画風",
     "negative": "ネガティブ",
-    "draftParams": "下書きの設定",
-    "refineParams": "描き直しの設定",
     "size": "解像度",
-    "draftSteps": "下書きのステップ数",
-    "draftCfg": "下書きの CFG",
-    "draftCount": "下書きの枚数",
+    "draftSteps": "ボードのステップ数",
+    "draftCfg": "ボードの CFG",
+    "draftCount": "ボードの枚数",
     "finalSteps": "本番のステップ数",
     "finalCfg": "本番の CFG",
-    "refineStages": "描き直す回数",
-    "refineStagesHint": "B・C・D の3段。減らすと途中で止まる",
-    "wd14Threshold": "タグ抽出の確度",
-    "dropRatingTags": "NSFW タグを除外する",
-    "dropCharacterTags": "版権キャラ名を除外する",
-    "brief": "モデルに渡す指示",
-    "briefHint": "全ステージに毎回この全文を渡している",
-    "steps": {
-      "draft": "下書きを描く",
-      "refine": "描き直す"
-    },
     "cta": {
-      "draft": "下書きを描く",
-      "refine": "選んだ絵を描き直す",
+      "table": "打ち合わせを始める",
       "done": "完成"
     },
     "needs": {
@@ -1314,57 +1321,40 @@
       "workflow": "ワークフロー",
       "model": "モデル"
     },
-    "draft": {
-      "title": "下書き",
-      "prompt": "下書きのプロンプト",
-      "pending": "生成中",
-      "cancel": "止めて振り直す",
-      "cancelHint": "途中経過を見て違うと思ったら、ここで止めてプロンプトから引き直せる",
-      "select": "この絵を選ぶ",
-      "selected": "選択中",
-      "empty": "まだ描いていません",
-      "hint": "同じシード・同じ latent の4枚。良いものを選ぶ（複数選べる）"
+    "showrunner": "総監督",
+    "banter": "つぶやき",
+    "chatPlaceholder": "無理難題歓迎。服・画角・光…コメントすると班が答えます",
+    "send": "送る",
+    "quick": {
+      "board": "ボード",
+      "ok": "OK"
     },
-    "refine": {
-      "title": "描き直し",
-      "wd14": "この絵から拾ったタグ",
-      "wd14Hint": "ここから先はこのタグが土台になる。Aの文章は捨てられる",
-      "pending": "生成中",
-      "empty": "下書きを選ぶとここに出ます",
-      "stage": {
-        "reinforce": "B — 物と情景を足す",
-        "cinematic": "C — 画角と光を決める",
-        "angle": "D — カメラを大きく動かす"
-      }
-    },
+    "boardTitle": "イメージボード",
+    "boardAsk": "これでいい？ OKなら本番、ダメなら指摘をどうぞ",
+    "shootTitle": "本番",
+    "craft": "いまの台本（プロンプト）",
     "warn": {
       "comfyOffline": "ComfyUI に接続できません",
       "title": "注意"
     },
-    "think": "モデルに考えさせる",
-    "thinkHint": "姿勢の矛盾や描けない記述が減り、プロンプトが短く濃くなる。1段あたり8倍ほど時間がかかる",
-    "act": {
-      "draft": "下書き",
-      "choose": "選ぶ",
-      "refine": "描き直す"
+    "unloadVlm": "描画の前に VLM をアンロードする",
+    "unloadVlmHint": "通常はオフ。打ち合わせを速く保つ。VRAM が足りないときだけオン",
+    "status": {
+      "chat": "コメント待ち",
+      "discussing": "班が議論中",
+      "boarding": "イメージボードを描いています",
+      "awaitingOk": "ボード確認待ち — OK or コメント",
+      "shooting": "本番撮影中",
+      "done": "完成",
+      "chatting": "返答中",
+      "ready": "準備完了"
     },
-    "stage": {
-      "a": "A — 何をしているか",
-      "reinforce": "B — 物と情景",
-      "cinematic": "C — 画角と光",
-      "angle": "D — カメラを動かす"
-    },
+    "speaking": "{name} が話しています",
+    "working": "作業中…",
     "elapsed": "経過 {s}",
     "enlarge": "拡大",
     "setupTitle": "何を描きますか",
-    "chooseTitle": "どれを育てますか",
-    "chooseHint": "同じシード・同じ latent の {n} 枚。複数選ぶと、それぞれ別に描き直します",
-    "chosen": "{n} 枚選択中",
-    "doneTitle": "できあがり",
-    "settings": "設定",
-    "renderingStage": "{stage} を描いています",
-    "writingStage": "{stage} を考えています",
-    "backToCurrent": "今の工程に戻る"
+    "settings": "設定"
   },
   "characters": {
     "title": "キャラクター",
