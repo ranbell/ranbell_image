@@ -2,7 +2,7 @@
 
     theme + character  ->  brief
     brief              ->  stage A prompt      ->  N drafts, one seed, one latent
-    a chosen draft     ->  WD14                ->  B -> C -> D, rendering each
+    a chosen draft     ->  WD14                ->  B -> C (-> D), rendering each
 
 Two steps with a person between them. There is no mode that skips the choice:
 the draft decides how good the rest of the run can be, and no arrangement of
@@ -20,7 +20,7 @@ from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import brief as brief_mod
-from . import chain, events, runner, session_db
+from . import chain, events, identity, runner, session_db
 from .runtime import render_settings
 from .schema import missing_inputs, new_session
 
@@ -35,6 +35,23 @@ def _inputs(session: dict[str, Any]) -> dict[str, Any]:
     return session.get("inputs") or {}
 
 
+def _identity_tags(session: dict[str, Any]) -> list[str]:
+    character = session.get("character") or {}
+    return [str(t) for t in (character.get("identity_tags") or []) if str(t).strip()]
+
+
+def _framing(inputs: dict[str, Any]) -> str:
+    return identity.normalize_framing(str(inputs.get("framing") or "auto"))
+
+
+def _text_model(inputs: dict[str, Any]) -> str:
+    return str(inputs.get("model") or "")
+
+
+def _vision_model(inputs: dict[str, Any]) -> str:
+    return str(inputs.get("vision_model") or inputs.get("model") or "")
+
+
 def _num_ctx(inputs: dict[str, Any], cfg: dict[str, Any]) -> int | None:
     """Muse asks for a bigger window than the app default when it can.
 
@@ -42,6 +59,25 @@ def _num_ctx(inputs: dict[str, Any], cfg: dict[str, Any]) -> int | None:
     brief and an image that are already in the window.
     """
     return int(inputs.get("num_ctx") or cfg.get("ollama_num_ctx") or 0) or None
+
+
+def _prompt_token_publisher(session_id: str, stage: str):
+    """Forward answer tokens to the session SSE stream while a stage writes."""
+    def _publish(text: str) -> None:
+        events.publish(session_id, {
+            "type": "prompt_delta",
+            "stage": stage,
+            "text": text,
+        })
+    return _publish
+
+
+def _prompt_done(session_id: str, stage: str, prompt: str) -> None:
+    events.publish(session_id, {
+        "type": "prompt_done",
+        "stage": stage,
+        "prompt": prompt,
+    })
 
 
 async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -94,6 +130,17 @@ def _rebuild_brief(session: dict[str, Any]) -> None:
         character,
         str(inputs.get("theme") or ""),
         str(inputs.get("style") or ""),
+        framing=_framing(inputs),
+    )
+
+
+def negative_for(session: dict[str, Any]) -> str:
+    """Base negative plus opposing body tags and framing exclusions."""
+    inputs = _inputs(session)
+    return identity.merge_negative(
+        str(inputs.get("negative_prompt") or ""),
+        identity.opposing_negative(_identity_tags(session)),
+        identity.framing_negative(_framing(inputs)),
     )
 
 
@@ -107,20 +154,26 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     inputs = _inputs(session)
     _rebuild_brief(session)
     cfg = await get_runtime_config(db)
-    model = str(inputs.get("model") or "")
+    model = _text_model(inputs)
+    session_id = session["session_id"]
+    framing = _framing(inputs)
+    tags = _identity_tags(session)
 
     try:
         prompt = await chain.run_pose(
             ollama, brief=session["brief"], model=model,
             num_ctx=_num_ctx(inputs, cfg),
             think=bool(inputs.get("think", False)),
+            identity_tags=tags,
+            framing=framing,
+            on_token=_prompt_token_publisher(session_id, "pose"),
         )
     except chain.ChainError as exc:
         raise MuseError(str(exc)) from exc
+    _prompt_done(session_id, "pose", prompt)
     # Hand the card over before asking ComfyUI for a four-image latent.
     await ollama.unload(model)
 
-    session_id = session["session_id"]
     seed = random.randint(0, (1 << 64) - 1)
     count = max(1, int(inputs.get("draft_count", 4)))
 
@@ -132,8 +185,14 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     # Written before the job is queued: the runner reads the prompt and the seed
     # back out of the session rather than being handed them, so there is one
     # copy of what is being drawn.
-    session["draft"] = {"prompt": prompt, "seed": seed, "job_id": "",
-                        "images": [], "pending": True}
+    session["draft"] = {
+        "prompt": prompt,
+        "pose_intent": identity.pose_summary(prompt),
+        "seed": seed,
+        "job_id": "",
+        "images": [],
+        "pending": True,
+    }
     session["selected"] = []
     session["chains"] = []
     session["status"] = "drafting"
@@ -181,8 +240,13 @@ async def run_refine(
         raise MuseError("choose a draft that has finished rendering")
 
     inputs = _inputs(session)
-    stages = chain.stages_for(inputs.get("refine_stages", 3))
+    stages = chain.stages_for(inputs.get("refine_stages", 2))
     seed = int((session.get("draft") or {}).get("seed") or 0)
+    pose_intent = str((session.get("draft") or {}).get("pose_intent") or "")
+    if not pose_intent:
+        pose_intent = identity.pose_summary(
+            str((session.get("draft") or {}).get("prompt") or ""),
+        )
 
     session["selected"] = chosen
     session["chains"] = [
@@ -190,6 +254,7 @@ async def run_refine(
             "draft_index": idx,
             "source_image_id": images[idx]["image_id"],
             "seed": seed,
+            "pose_intent": pose_intent,
             "wd14": "",
             "stages": [{"stage": name, "prompt": "", "image_id": "", "pending": True}
                        for name, _ in stages],

@@ -1,30 +1,30 @@
 """The LLM stages. One system prompt per stage, one call each.
 
-    A  pose      text only     brief                    -> the draft's prompt
-    B  reinforce sees draft    brief + WD14 tags        -> objects, theme repair
-    C  cinematic sees B        brief + B's prompt       -> angle, ordering, light
-    D  angle     sees C        brief + C's prompt       -> a decisively new camera
+    A  pose      text only     brief                    -> draft prompt
+    B  reinforce sees draft    brief + pose + WD14      -> theme repair
+    C  cinematic sees B        brief + B's prompt       -> light / composition
+    D  angle     sees C        brief + C's prompt       -> optional new camera
 
 Each stage sees the picture the previous one made and the prompt that made it,
 never the whole history. The chain is short because the useful information is in
 the image, and the image is always the most recent thing.
 
-Stage A's prose is dropped at B rather than carried: WD14 reads the draft back at
-a low threshold and *those* tags become the base. A cheap render says what the
-checkpoint actually drew, which is more use downstream than what it was asked for.
+Stage A's full prose is dropped at B rather than carried: a short pose intent
+keeps the action, and WD14 reads the draft back at a low threshold. Those tags
+plus the pose intent become B's base.
 
-Nothing here parses the output. The stages return prose that goes into a prompt
-box, so a stray sentence costs a slightly worse image, not a crash — which is why
-the instructions carry an OUTPUT FORMAT block instead of this module carrying a
-parser.
+Answers are TAGS: / SCENE: blocks. ``identity.assemble_positive`` staples the
+locked character tags onto whatever the model wrote before Comfy sees it.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from . import brief as brief_mod
+from . import identity
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,12 @@ REFINE_STAGES: tuple[tuple[str, str], ...] = (
 
 STAGE_LABELS = {
     "pose": "A — what she is doing",
-    "reinforce": "B — objects and theme",
+    "reinforce": "B — theme repair",
     "cinematic": "C — angle and light",
     "angle": "D — a new camera",
 }
+
+TokenCallback = Callable[[str], None]
 
 
 def system_prompt(filename: str) -> str:
@@ -59,18 +61,17 @@ class ChainError(Exception):
     """A stage produced nothing usable."""
 
 
-async def _call(ollama, *, system: str, prompt: str, model: str,
-                images: list[bytes] | None, num_ctx: int | None,
-                think: bool) -> str:
+async def _call(
+    ollama, *, system: str, prompt: str, model: str,
+    images: list[bytes] | None, num_ctx: int | None,
+    think: bool, on_token: TokenCallback | None = None,
+) -> str:
     """One stage, always streamed.
 
-    Streaming is not for progress here — nothing watches it — it is what makes
-    thinking usable at all. Ollama sends reasoning on a separate channel and
-    leaves ``response`` empty until it is done, so a non-streaming call with the
-    model's default output budget comes back with an empty prompt and thousands
-    of tokens of reasoning nobody sees. Read as a stream, the two channels are
-    simply told apart, and ``num_predict: -1`` means the answer cannot be cut
-    off by however long the thinking ran.
+    Streaming is what makes thinking usable at all — Ollama sends reasoning on a
+    separate channel and leaves ``response`` empty until it is done — and it is
+    also how the panel shows the prompt forming. ``on_token`` is optional; when
+    set, each answer token is forwarded for SSE.
     """
     options: dict[str, Any] = {"num_predict": -1}
     if num_ctx:
@@ -83,6 +84,11 @@ async def _call(ollama, *, system: str, prompt: str, model: str,
     async for event in stream:
         if event.get("type") == "token" and event.get("text"):
             parts.append(event["text"])
+            if on_token is not None:
+                try:
+                    on_token(event["text"])
+                except Exception:
+                    logger.debug("[muse.chain] on_token failed", exc_info=True)
 
     text = "".join(parts).strip()
     if not text:
@@ -90,22 +96,47 @@ async def _call(ollama, *, system: str, prompt: str, model: str,
     return text
 
 
-async def run_pose(ollama, *, brief: str, model: str, num_ctx: int | None,
-                   think: bool = False) -> str:
+def _finish(
+    raw: str, *, identity_tags: list[str] | None, framing: str,
+    brief: str,
+) -> str:
+    tags, scene = identity.parse_hybrid(raw)
+    positive = identity.assemble_positive(
+        identity_tags, tags, scene, framing=framing,
+    )
+    identity.warn_reference_leak(brief, positive)
+    if not positive.strip():
+        raise ChainError("the model returned an empty prompt")
+    return positive
+
+
+async def run_pose(
+    ollama, *, brief: str, model: str, num_ctx: int | None,
+    think: bool = False, identity_tags: list[str] | None = None,
+    framing: str = "auto", on_token: TokenCallback | None = None,
+) -> str:
     """Stage A. No image exists yet, so this is the only text-only call."""
-    return await _call(
+    raw = await _call(
         ollama, system=system_prompt("a_pose.md"), prompt=brief,
         model=model, images=None, num_ctx=num_ctx, think=think,
+        on_token=on_token,
     )
+    return _finish(raw, identity_tags=identity_tags, framing=framing, brief=brief)
 
 
-async def run_refine(ollama, *, stage_file: str, brief: str, previous: str,
-                     image: bytes, model: str, num_ctx: int | None,
-                     tags: str = "", think: bool = False) -> str:
-    """One refine stage. ``tags`` is set for B only, where WD14 replaces the prose."""
-    prompt = (brief_mod.with_tags(brief, tags) if tags
+async def run_refine(
+    ollama, *, stage_file: str, brief: str, previous: str,
+    image: bytes, model: str, num_ctx: int | None,
+    tags: str = "", pose: str = "", think: bool = False,
+    identity_tags: list[str] | None = None, framing: str = "auto",
+    on_token: TokenCallback | None = None,
+) -> str:
+    """One refine stage. ``tags`` / ``pose`` are set for B only."""
+    prompt = (brief_mod.with_tags(brief, tags, pose=pose) if tags or pose
               else brief_mod.with_prompt(brief, previous))
-    return await _call(
+    raw = await _call(
         ollama, system=system_prompt(stage_file), prompt=prompt,
         model=model, images=[image], num_ctx=num_ctx, think=think,
+        on_token=on_token,
     )
+    return _finish(raw, identity_tags=identity_tags, framing=framing, brief=brief)

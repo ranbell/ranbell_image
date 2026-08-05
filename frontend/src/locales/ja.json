@@ -1279,9 +1279,20 @@
     "themePlaceholder": "例: 雨上がりの屋上で、誰かを待っている",
     "workflow": "ワークフロー",
     "workflowHint": "下書きも本番も同じワークフローで描く。違うのはステップ数と CFG だけ",
-    "model": "モデル",
-    "modelHint": "B以降は前の絵をモデルに見せるので、画像を読めるモデルを選ぶこと",
+    "model": "下書きモデル（A）",
+    "modelHint": "Aはテキストだけなので、軽いモデルでもよい",
+    "visionModel": "Visionモデル（B–D）",
+    "visionModelSame": "下書きモデルと同じ",
     "notVision": "このモデルは画像を読めません。指定しても無視されます",
+    "framing": "構図",
+    "framingHint": "顔アップや後ろ姿を全身に引き戻さないための固定",
+    "framingOpts": {
+      "auto": "自動（お題から）",
+      "full_body": "全身",
+      "upper_body": "上半身",
+      "face_closeup": "顔アップ",
+      "from_behind": "後ろ姿"
+    },
     "style": "画風",
     "negative": "ネガティブ",
     "draftParams": "下書きの設定",
@@ -1293,7 +1304,7 @@
     "finalSteps": "本番のステップ数",
     "finalCfg": "本番の CFG",
     "refineStages": "描き直す回数",
-    "refineStagesHint": "B・C・D の3段。減らすと途中で止まる",
+    "refineStagesHint": "既定は B+C（2）。3にすると D のカメラ変更も走る",
     "wd14Threshold": "タグ抽出の確度",
     "dropRatingTags": "NSFW タグを除外する",
     "dropCharacterTags": "版権キャラ名を除外する",
@@ -1328,11 +1339,11 @@
     "refine": {
       "title": "描き直し",
       "wd14": "この絵から拾ったタグ",
-      "wd14Hint": "ここから先はこのタグが土台になる。Aの文章は捨てられる",
+      "wd14Hint": "短いポーズ意図と一緒に B の土台になる。体型タグの衝突は落とす",
       "pending": "生成中",
       "empty": "下書きを選ぶとここに出ます",
       "stage": {
-        "reinforce": "B — 物と情景を足す",
+        "reinforce": "B — テーマ修復",
         "cinematic": "C — 画角と光を決める",
         "angle": "D — カメラを大きく動かす"
       }
@@ -1341,8 +1352,8 @@
       "comfyOffline": "ComfyUI に接続できません",
       "title": "注意"
     },
-    "think": "モデルに考えさせる",
-    "thinkHint": "姿勢の矛盾や描けない記述が減り、プロンプトが短く濃くなる。1段あたり8倍ほど時間がかかる",
+    "think": "Aだけ考えさせる",
+    "thinkHint": "下書きのポーズ用。姿勢の矛盾が減る代わりに A だけ約8倍かかる",
     "act": {
       "draft": "下書き",
       "choose": "選ぶ",
@@ -1350,9 +1361,12 @@
     },
     "stage": {
       "a": "A — 何をしているか",
-      "reinforce": "B — 物と情景",
+      "reinforce": "B — テーマ修復",
       "cinematic": "C — 画角と光",
       "angle": "D — カメラを動かす"
+    },
+    "status": {
+      "readingTags": "下書きからタグを読んでいます"
     },
     "elapsed": "経過 {s}",
     "enlarge": "拡大",

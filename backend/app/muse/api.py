@@ -23,6 +23,7 @@ class SessionCreate(BaseModel):
     character_id: str = ""
     workflow: str = ""
     model: str = ""
+    vision_model: str = ""
     locale: str = "ja"
 
 
@@ -31,10 +32,14 @@ class InputsPatch(BaseModel):
     character_id: str | None = None
     workflow: str | None = None
     model: str | None = None
+    # Vision model for B/C/D. Empty = reuse model. Prefer a vision-capable id.
+    vision_model: str | None = None
     llm_provider: str | None = None
     locale: str | None = None
     negative_prompt: str | None = None
     style: str | None = None
+    # Composition bias: auto | full_body | upper_body | face_closeup | from_behind
+    framing: str | None = None
     width: int | None = Field(default=None, ge=256, le=2048)
     height: int | None = Field(default=None, ge=256, le=2048)
     draft_steps: int | None = Field(default=None, ge=1, le=60)
@@ -42,9 +47,9 @@ class InputsPatch(BaseModel):
     draft_count: int | None = Field(default=None, ge=1, le=8)
     final_steps: int | None = Field(default=None, ge=1, le=100)
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
-    # B, C, D. There is no fourth instruction, so this only ever stops early.
+    # B, C, D. Default is 2 (B+C). There is no fourth instruction.
     refine_stages: int | None = Field(default=None, ge=1, le=3)
-    # Reasoning before answering. Better prompts, roughly eight times the wait.
+    # Reasoning on stage A only. Better poses, roughly eight times the wait.
     think: bool | None = None
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
@@ -159,9 +164,9 @@ async def run_refine(session_id: str, body: RefineRequest, request: Request):
 async def stream(session_id: str, request: Request):
     """Server-sent events for one session.
 
-    Most events just mean "refetch". The exception is ``preview``, which carries
-    a base64 JPEG of the latent mid-render — that one is the payload, because
-    there is nothing on the server to refetch it from.
+    Most events just mean "refetch". Exceptions that carry their own payload:
+    ``preview`` (latent JPEG), ``prompt_delta`` / ``prompt_done`` (LLM tokens
+    while a stage is writing).
     """
     async def _gen():
         queue = await events.subscribe(session_id)

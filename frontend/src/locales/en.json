@@ -1279,9 +1279,20 @@
     "themePlaceholder": "e.g. waiting for someone on a rooftop after the rain",
     "workflow": "Workflow",
     "workflowHint": "One workflow draws the drafts and every stage after — only steps and cfg differ",
-    "model": "Model",
-    "modelHint": "Every stage after the draft shows the model the previous image, so it must read pictures",
+    "model": "Draft model (A)",
+    "modelHint": "Stage A is text-only — a smaller model is fine here",
+    "visionModel": "Vision model (B–D)",
+    "visionModelSame": "Same as draft model",
     "notVision": "This model cannot read images — they will be dropped silently",
+    "framing": "Framing",
+    "framingHint": "Locks crop so close-ups and rear views are not pulled back to full body",
+    "framingOpts": {
+      "auto": "Auto (from theme)",
+      "full_body": "Full body",
+      "upper_body": "Upper body",
+      "face_closeup": "Face close-up",
+      "from_behind": "From behind"
+    },
     "style": "Style",
     "negative": "Negative",
     "draftParams": "Draft settings",
@@ -1293,7 +1304,7 @@
     "finalSteps": "Steps",
     "finalCfg": "CFG",
     "refineStages": "Stages",
-    "refineStagesHint": "B, C and D. Lowering this stops early",
+    "refineStagesHint": "Default is B+C (2). Set 3 to also run D's camera change",
     "wd14Threshold": "Tag confidence",
     "dropRatingTags": "Drop NSFW tags",
     "dropCharacterTags": "Drop named-character tags",
@@ -1328,11 +1339,11 @@
     "refine": {
       "title": "Redraw",
       "wd14": "Tags read off this picture",
-      "wd14Hint": "These become the base from here on; stage A's prose is dropped",
+      "wd14Hint": "These feed stage B with a short pose intent; conflicting body tags are dropped",
       "pending": "Rendering",
       "empty": "Pick a draft and the stages appear here",
       "stage": {
-        "reinforce": "B — objects and setting",
+        "reinforce": "B — theme repair",
         "cinematic": "C — angle and light",
         "angle": "D — a decisively new camera"
       }
@@ -1341,8 +1352,8 @@
       "comfyOffline": "ComfyUI is unreachable",
       "title": "Note"
     },
-    "think": "Let the model reason first",
-    "thinkHint": "Fewer contradictory poses and undrawable lines, a shorter denser prompt — and roughly eight times the wait per stage",
+    "think": "Let stage A reason first",
+    "thinkHint": "Applies to the draft pose only. Fewer contradictory postures — about eight times the wait for A",
     "act": {
       "draft": "Draft",
       "choose": "Choose",
@@ -1350,9 +1361,12 @@
     },
     "stage": {
       "a": "A — what she is doing",
-      "reinforce": "B — objects and setting",
+      "reinforce": "B — theme repair",
       "cinematic": "C — angle and light",
       "angle": "D — a new camera"
+    },
+    "status": {
+      "readingTags": "Reading tags off the draft"
     },
     "elapsed": "{s} elapsed",
     "enlarge": "Enlarge",

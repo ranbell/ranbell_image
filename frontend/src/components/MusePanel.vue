@@ -38,10 +38,13 @@ const streamLive = ref(false)
 const showPicker = ref(false)
 const showSettings = ref(false)
 const preview = ref('')            // latest latent frame, as a data URL
+const promptLive = ref('')         // answer tokens while a stage is writing
+const promptStage = ref('')        // stage id for the live prompt
 const picked = ref([])
 const viewAct = ref('')            // a past act the user clicked back to
 const job = ref(null)              // the running render, for progress
 const elapsed = ref(0)
+const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
 
 let eventSource = null
 let pollTimer = null
@@ -60,8 +63,9 @@ const warnings = computed(() => session.value?.warnings || [])
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
 const models = computed(() => catalog.value?.llm?.models || [])
 const visionModels = computed(() => catalog.value?.llm?.vision_models || [])
+const visionModel = computed(() => inputs.value.vision_model || inputs.value.model || '')
 const modelIsBlind = computed(() => {
-  const m = inputs.value.model
+  const m = visionModel.value
   return Boolean(m) && visionModels.value.length > 0 && !visionModels.value.includes(m)
 })
 const isJa = computed(() => String(locale.value).startsWith('ja'))
@@ -112,9 +116,52 @@ const currentStage = computed(() =>
   stageFlow.value.find(s => !s.image_id) || landedStages.value.at(-1) || null)
 const heroStage = computed(() => landedStages.value.at(-1) || null)
 
+/* Stage A (writing) + draft render, or refine stages with Comfy sub-progress. */
+const compositeProgress = computed(() => {
+  if (act.value === 'drafting') {
+    if (preview.value || job.value?.progress) {
+      return 0.35 + 0.65 * Math.min(1, Number(job.value?.progress || 0))
+    }
+    // Prompt tokens growing ≈ first third of the draft act.
+    return promptLive.value ? Math.min(0.34, 0.05 + promptLive.value.length / 4000) : 0.02
+  }
+  if (act.value !== 'refining' || !stageFlow.value.length) return 0
+  const n = stageFlow.value.length
+  const done = landedStages.value.length
+  const writing = Boolean(promptLive.value && currentStage.value && !currentStage.value.image_id)
+  const drawing = Boolean(preview.value || (job.value?.progress && currentStage.value && !currentStage.value.image_id))
+  let frac = done / n
+  if (writing) frac += (0.35 / n) * Math.min(1, promptLive.value.length / 3000)
+  else if (drawing) frac += (0.35 + 0.65 * Math.min(1, Number(job.value?.progress || 0))) / n
+  return Math.min(0.99, frac)
+})
+
+const statusCopy = computed(() => {
+  if (act.value === 'drafting') {
+    if (preview.value || job.value?.progress) {
+      return job.value?.progress_text || t('muse.draft.pending')
+    }
+    return t('muse.writingStage', { stage: stageLabel('a') })
+  }
+  if (act.value === 'refining') {
+    const stage = currentStage.value?.stage || 'reinforce'
+    if (preview.value || (job.value?.progress && currentStage.value && !currentStage.value.image_id)) {
+      return t('muse.renderingStage', { stage: stageLabel(stage) })
+    }
+    if (stage === 'reinforce' && !currentStage.value?.prompt && !promptLive.value) {
+      return t('muse.status.readingTags')
+    }
+    return t('muse.writingStage', { stage: stageLabel(stage) })
+  }
+  return ''
+})
+
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
-function stageLabel(name) { return t(`muse.stage.${name}`) }
+function stageLabel(name) {
+  if (name === 'pose') return t('muse.stage.a')
+  return t(`muse.stage.${name}`)
+}
 function clock(s) {
   const m = Math.floor(s / 60)
   return m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`
@@ -160,6 +207,8 @@ async function startSession() {
   })
   picked.value = []
   preview.value = ''
+  promptLive.value = ''
+  promptStage.value = ''
   showSettings.value = false
   connectStream(session.value.session_id)
 }
@@ -183,9 +232,24 @@ function connectStream(id) {
     let evt = null
     try { evt = JSON.parse(e.data) } catch { return }
     if (!evt?.type || evt.type === 'hello' || evt.type === 'ping') return
-    // A preview carries its own payload; everything else means "refetch".
+    // Live payloads — do not wait for a session refetch.
     if (evt.type === 'preview') {
       preview.value = `data:image/jpeg;base64,${evt.image}`
+      promptLive.value = ''
+      return
+    }
+    if (evt.type === 'prompt_delta') {
+      if (promptStage.value !== evt.stage) {
+        promptStage.value = evt.stage || ''
+        promptLive.value = ''
+      }
+      promptLive.value += evt.text || ''
+      return
+    }
+    if (evt.type === 'prompt_done') {
+      promptLive.value = evt.prompt || promptLive.value
+      promptStage.value = evt.stage || promptStage.value
+      await refresh()
       return
     }
     await refresh()
@@ -257,6 +321,8 @@ async function runStep() {
   const step = act.value === 'choose' ? 'refine' : 'draft'
   busy.value = true
   preview.value = ''
+  promptLive.value = ''
+  promptStage.value = step === 'draft' ? 'pose' : 'reinforce'
   startedAt = Date.now()
   elapsed.value = 0
   showSettings.value = false
@@ -275,6 +341,8 @@ async function cancelDraft() {
     session.value = await api(
       `/api/muse/sessions/${session.value.session_id}/draft/cancel`, { method: 'POST' })
     preview.value = ''
+    promptLive.value = ''
+    promptStage.value = ''
     picked.value = []
   } catch (err) { fail(err) } finally { busy.value = false }
 }
@@ -402,9 +470,29 @@ function lookBack(step) {
                 <option value="">—</option>
                 <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
               </select>
+              <span class="block text-[10px] text-[var(--sb-faint)] mt-1">{{ t('muse.modelHint') }}</span>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block">
+              <span class="sb-label">{{ t('muse.visionModel') }}</span>
+              <select class="sb-select" :value="inputs.vision_model || ''"
+                      @change="patchInputs({ vision_model: $event.target.value })">
+                <option value="">{{ t('muse.visionModelSame') }}</option>
+                <option v-for="m in (visionModels.length ? visionModels : models)" :key="m" :value="m">{{ m }}</option>
+              </select>
               <span v-if="modelIsBlind" class="block text-[10px] text-amber-400 mt-1">
                 {{ t('muse.notVision') }}
               </span>
+            </label>
+            <label class="block">
+              <span class="sb-label">{{ t('muse.framing') }}</span>
+              <select class="sb-select" :value="inputs.framing || 'auto'"
+                      @change="patchInputs({ framing: $event.target.value })">
+                <option v-for="f in FRAMINGS" :key="f" :value="f">{{ t(`muse.framingOpts.${f}`) }}</option>
+              </select>
+              <span class="block text-[10px] text-[var(--sb-faint)] mt-1">{{ t('muse.framingHint') }}</span>
             </label>
           </div>
         </section>
@@ -412,10 +500,24 @@ function lookBack(step) {
         <!-- 2 · drafting ---------------------------------------------------->
         <section v-else-if="shown === 'drafting'"
                  class="h-full flex flex-col items-center justify-center gap-4 p-6">
-          <div class="relative">
+          <ol class="flex items-center gap-2 text-[10px] text-[var(--sb-faint)]">
+            <li :class="promptLive || draft.prompt ? 'text-[var(--sb-teal)]' : ''">
+              {{ t('muse.stage.a') }}
+            </li>
+            <li class="opacity-40">→</li>
+            <li :class="preview || job?.progress ? 'text-[var(--sb-teal)]' : ''">
+              {{ t('muse.draft.pending') }}
+            </li>
+          </ol>
+
+          <div class="relative w-full max-w-xl flex flex-col items-center gap-3">
             <img v-if="preview" :src="preview" alt=""
-                 class="max-h-[58vh] rounded-lg border border-white/10 shadow-2xl" />
-            <div v-else
+                 class="max-h-[48vh] rounded-lg border border-white/10 shadow-2xl" />
+            <pre v-if="promptLive && !preview"
+                 class="w-full max-h-[40vh] overflow-y-auto whitespace-pre-wrap font-mono
+                        text-[11px] text-gray-300 bg-black/40 border border-white/10
+                        rounded-lg p-3">{{ promptLive }}<span class="animate-pulse">▍</span></pre>
+            <div v-else-if="!preview"
                  class="w-[300px] h-[386px] rounded-lg border border-white/10 bg-black/40
                         flex items-center justify-center">
               <span class="text-[11px] text-[var(--sb-faint)] animate-pulse">…</span>
@@ -424,12 +526,12 @@ function lookBack(step) {
 
           <div class="w-full max-w-md space-y-2">
             <div class="flex items-baseline justify-between text-[11px]">
-              <span class="text-gray-300">{{ job?.progress_text || t('muse.draft.pending') }}</span>
+              <span class="text-gray-300">{{ statusCopy }}</span>
               <span class="text-[var(--sb-faint)]">{{ t('muse.elapsed', { s: clock(elapsed) }) }}</span>
             </div>
             <div class="h-1 rounded bg-white/10 overflow-hidden">
               <div class="h-full bg-[var(--sb-teal)] transition-all duration-300"
-                   :style="{ width: `${Math.round((job?.progress || 0) * 100)}%` }"></div>
+                   :style="{ width: `${Math.round(compositeProgress * 100)}%` }"></div>
             </div>
             <div class="flex items-center justify-between gap-3 pt-1">
               <p class="text-[10px] text-[var(--sb-faint)] flex-1">{{ t('muse.draft.cancelHint') }}</p>
@@ -497,21 +599,38 @@ function lookBack(step) {
 
           <!-- the one being drawn, or the newest finished -->
           <div v-if="shown === 'refining'" class="flex flex-col items-center gap-3">
+            <ol class="flex flex-wrap items-center justify-center gap-2 text-[10px]">
+              <li
+                v-for="(s, i) in stageFlow" :key="`${s.chain}-${s.index}`"
+                class="px-2 py-0.5 rounded border"
+                :class="s.image_id
+                  ? 'border-[var(--sb-teal)]/50 text-[var(--sb-teal)]'
+                  : (currentStage && currentStage.chain === s.chain && currentStage.index === s.index)
+                    ? 'border-[var(--sb-amber)] text-[var(--sb-amber)]'
+                    : 'border-white/10 text-[var(--sb-faint)]'"
+              >
+                <span v-if="i" class="opacity-30 mr-1">·</span>
+                {{ stageLabel(s.stage) }}
+              </li>
+            </ol>
+
             <img v-if="preview" :src="preview" alt=""
-                 class="max-h-[52vh] rounded-lg border border-white/10 shadow-2xl" />
-            <img v-else-if="heroStage" :src="full(heroStage.image_id)" alt=""
-                 class="max-h-[52vh] rounded-lg border border-white/10 shadow-2xl" />
+                 class="max-h-[46vh] rounded-lg border border-white/10 shadow-2xl" />
+            <img v-else-if="heroStage && !promptLive" :src="full(heroStage.image_id)" alt=""
+                 class="max-h-[46vh] rounded-lg border border-white/10 shadow-2xl" />
+            <pre v-if="promptLive && !preview"
+                 class="w-full max-w-xl max-h-[36vh] overflow-y-auto whitespace-pre-wrap font-mono
+                        text-[11px] text-gray-300 bg-black/40 border border-white/10
+                        rounded-lg p-3">{{ promptLive }}<span class="animate-pulse">▍</span></pre>
+
             <div class="w-full max-w-md space-y-2">
               <div class="flex items-baseline justify-between text-[11px]">
-                <span class="text-gray-300">
-                  {{ t(preview ? 'muse.renderingStage' : 'muse.writingStage',
-                       { stage: stageLabel(currentStage?.stage || 'reinforce') }) }}
-                </span>
+                <span class="text-gray-300">{{ statusCopy }}</span>
                 <span class="text-[var(--sb-faint)]">{{ t('muse.elapsed', { s: clock(elapsed) }) }}</span>
               </div>
               <div class="h-1 rounded bg-white/10 overflow-hidden">
                 <div class="h-full bg-[var(--sb-teal)] transition-all duration-500"
-                     :style="{ width: `${Math.round(landedStages.length / Math.max(stageFlow.length, 1) * 100)}%` }"></div>
+                     :style="{ width: `${Math.round(compositeProgress * 100)}%` }"></div>
               </div>
             </div>
           </div>
@@ -559,6 +678,21 @@ function lookBack(step) {
           <span class="sb-label">{{ t('muse.style') }}</span>
           <input class="sb-input" type="text" :value="inputs.style"
                  @change="patchInputs({ style: $event.target.value })" />
+        </label>
+        <label class="block">
+          <span class="sb-label">{{ t('muse.framing') }}</span>
+          <select class="sb-select" :value="inputs.framing || 'auto'"
+                  @change="patchInputs({ framing: $event.target.value })">
+            <option v-for="f in FRAMINGS" :key="f" :value="f">{{ t(`muse.framingOpts.${f}`) }}</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="sb-label">{{ t('muse.visionModel') }}</span>
+          <select class="sb-select" :value="inputs.vision_model || ''"
+                  @change="patchInputs({ vision_model: $event.target.value })">
+            <option value="">{{ t('muse.visionModelSame') }}</option>
+            <option v-for="m in (visionModels.length ? visionModels : models)" :key="m" :value="m">{{ m }}</option>
+          </select>
         </label>
         <label class="flex items-start gap-2 col-span-2 text-gray-400">
           <input type="checkbox" class="mt-0.5" :checked="inputs.think"

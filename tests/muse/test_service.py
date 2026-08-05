@@ -51,7 +51,7 @@ class FakeOllama:
 
         async def _stream():
             yield {"type": "think", "text": "deliberating"}
-            yield {"type": "token", "text": "STAGE A PROMPT"}
+            yield {"type": "token", "text": "TAGS: standing, rooftop\n\nSCENE: STAGE A PROMPT"}
         return _stream()
 
     async def unload(self, model=None):
@@ -114,7 +114,9 @@ async def test_draft_submits_one_job_and_frees_the_card_first():
     # A 26B model and a multi-image latent do not fit on one 16GB card.
     assert ollama.unloaded == ["m"]
 
-    assert session["draft"]["prompt"] == "STAGE A PROMPT"
+    assert "STAGE A PROMPT" in session["draft"]["prompt"]
+    assert "blue_hair" in session["draft"]["prompt"]  # identity lock stapled on
+    assert session["draft"]["pose_intent"]
     assert session["draft"]["pending"] is True
     assert session["draft"]["seed"] > 0
     assert session["draft"]["job_id"]
@@ -141,10 +143,15 @@ async def test_draft_refuses_to_run_with_anything_missing():
 async def test_each_chosen_draft_becomes_its_own_chain_at_the_draft_seed():
     db, spooler = FakeDb(), FakeSpooler()
     session = await _ready_session(db)
-    session["draft"] = {"seed": 4242, "job_id": "job-1", "images": [
-        {"index": 0, "image_id": "sha0"}, {"index": 1, "image_id": "sha1"},
-        {"index": 2, "image_id": ""},
-    ]}
+    session["draft"] = {
+        "seed": 4242, "job_id": "job-1",
+        "prompt": "TAGS: standing\n\nSCENE: She waits on the roof.",
+        "pose_intent": "She waits on the roof.",
+        "images": [
+            {"index": 0, "image_id": "sha0"}, {"index": 1, "image_id": "sha1"},
+            {"index": 2, "image_id": ""},
+        ],
+    }
     await session_db.save(db, session)
 
     session = await service.run_refine(
@@ -156,10 +163,11 @@ async def test_each_chosen_draft_becomes_its_own_chain_at_the_draft_seed():
     assert [c["source_image_id"] for c in session["chains"]] == ["sha1", "sha0"]
     assert all(c["seed"] == 4242 for c in session["chains"])
     # Same seed and same canvas throughout: the only thing that changes between
-    # a draft and its stages is the prompt.
+    # a draft and its stages is the prompt. Default refine_stages is B+C.
     assert [s["stage"] for s in session["chains"][0]["stages"]] == [
-        "reinforce", "cinematic", "angle",
+        "reinforce", "cinematic",
     ]
+    assert session["chains"][0]["pose_intent"] == "She waits on the roof."
     assert len(spooler.jobs) == 2
     assert {j["chain_index"] for j in spooler.jobs} == {0, 1}
 

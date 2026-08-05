@@ -18,8 +18,25 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from . import chain, events, harvest, session_db
+from . import chain, events, harvest, identity, session_db
 from .runtime import render_settings
+
+
+def _negative_for(session: dict[str, Any]) -> str:
+    inputs = session.get("inputs") or {}
+    tags = [
+        str(t) for t in ((session.get("character") or {}).get("identity_tags") or [])
+        if str(t).strip()
+    ]
+    return identity.merge_negative(
+        str(inputs.get("negative_prompt") or ""),
+        identity.opposing_negative(tags),
+        identity.framing_negative(str(inputs.get("framing") or "auto")),
+    )
+
+
+def _vision_model(inputs: dict[str, Any]) -> str:
+    return str(inputs.get("vision_model") or inputs.get("model") or "")
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +104,7 @@ async def run_draft_job(
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
             positive=str(draft.get("prompt") or ""),
-            negative=str(inputs.get("negative_prompt") or ""),
+            negative=_negative_for(session),
             seed=int(draft.get("seed") or 0) or None,
             batch_count=max(1, int(inputs.get("draft_count", 4))),
             subdir=PLAYGROUND_SUBDIR,
@@ -124,41 +141,65 @@ async def run_chain_job(
         raise RuntimeError("no such chain")
     link = chains[chain_index]
 
-    model = str(inputs.get("model") or "")
+    model = _vision_model(inputs)
     brief = str(session.get("brief") or "")
     render = render_settings(inputs, draft=False)
     num_ctx = int(inputs.get("num_ctx") or 0) or None
-    think = bool(inputs.get("think", False))
+    framing = identity.normalize_framing(str(inputs.get("framing") or "auto"))
+    identity_tags = [
+        str(t) for t in ((session.get("character") or {}).get("identity_tags") or [])
+        if str(t).strip()
+    ]
+    pose_intent = str(link.get("pose_intent") or "")
+    negative = _negative_for(session)
 
     image = await _image_bytes(db, str(link.get("source_image_id") or ""))
 
-    # Read the draft back once. Every later stage works from the previous
-    # stage's prompt instead, because by then there is a prompt that was written
-    # while looking at a picture — which beats a tag list read off one.
+    # Read the draft back once. Body tags that fight the locked identity are
+    # dropped so a draft guess cannot become the chain's figure.
     tags = await harvest.read_tags(
         image,
         threshold=float(inputs.get("wd14_threshold", 0.2)),
         model_dir=(await _wd14_dir(db)),
         drop_rating_tags=bool(inputs.get("drop_rating_tags", False)),
         drop_character_tags=bool(inputs.get("drop_character_tags", True)),
+        identity_tags=identity_tags,
     )
     await session_db.record_wd14(db, session_id, chain_index, tags)
 
     previous = ""
     for stage_index, (stage, prompt_file) in enumerate(
-        chain.stages_for(inputs.get("refine_stages", 3))
+        chain.stages_for(inputs.get("refine_stages", 2))
     ):
         cancel.raise_if_set()
         reporter.indeterminate()
         reporter.update(0.0, f"{chain.STAGE_LABELS.get(stage, stage)} — writing")
 
+        def _on_token(text: str, _stage=stage) -> None:
+            events.publish(session_id, {
+                "type": "prompt_delta",
+                "stage": _stage,
+                "chain": chain_index,
+                "text": text,
+            })
+
         prompt = await chain.run_refine(
             ollama, stage_file=prompt_file, brief=brief, previous=previous,
-            image=image, model=model, num_ctx=num_ctx, think=think,
+            image=image, model=model, num_ctx=num_ctx, think=False,
             tags=tags if stage_index == 0 else "",
+            pose=pose_intent if stage_index == 0 else "",
+            identity_tags=identity_tags,
+            framing=framing,
+            on_token=_on_token,
         )
         await session_db.record_stage_prompt(db, session_id, chain_index,
                                              stage_index, prompt)
+        events.publish(session_id, {
+            "type": "prompt_done",
+            "stage": stage,
+            "chain": chain_index,
+            "prompt": prompt,
+        })
         await ollama.unload(model)
 
         result = await run_render(
@@ -166,7 +207,7 @@ async def run_chain_job(
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
             positive=prompt,
-            negative=str(inputs.get("negative_prompt") or ""),
+            negative=negative,
             seed=int(link.get("seed") or 0) or None,
             subdir=PLAYGROUND_SUBDIR,
             prefix=f"muse_{stage}",
