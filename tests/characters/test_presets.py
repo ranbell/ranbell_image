@@ -16,6 +16,7 @@ import pytest
 
 from app.characters.presets import (
     GALLERY_LIMIT,
+    preset_label,
     _with_candidate,
     load_seed_presets,
     normalise_gallery,
@@ -161,7 +162,7 @@ def test_personality_text_prefers_locale():
 def test_summary_row_is_light():
     row = preset_summary(PRESETS[0])
     assert set(row) == {
-        "id", "preset_key", "name", "name_ja", "title", "title_ja",
+        "id", "preset_key", "slug", "name", "name_ja", "title", "title_ja",
         "summary", "summary_ja", "charm_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
         "hair_color", "eye_color", "user_created",
@@ -351,3 +352,23 @@ def test_the_roster_does_not_look_like_one_character_thirty_times():
     assert len(hair) >= 15, sorted(hair)
     assert len(eyes) >= 12, sorted(eyes)
     assert len({p["name_ja"] for p in PRESETS}) == len(PRESETS)
+
+
+def test_ids_are_sequential_and_the_readable_key_survives():
+    """A descriptive id reads well right up until a character is rewritten and
+    it describes who she used to be — and renaming one moves her Qdrant point
+    and orphans whatever has been drawn for her."""
+    assert [p["id"] for p in PRESETS] == [f"c{n:03d}" for n in range(1, len(PRESETS) + 1)]
+    slugs = [p["slug"] for p in PRESETS]
+    assert all(slugs), "the readable key is what a log line needs"
+    assert len(set(slugs)) == len(slugs)
+    assert all(s == s.lower() and " " not in s for s in slugs)
+
+
+def test_a_log_line_still_says_who_she_is():
+    label = preset_label(PRESETS[13])
+    assert PRESETS[13]["id"] in label
+    assert PRESETS[13]["slug"] in label
+    # A preset without one degrades to the id rather than to "None".
+    assert preset_label({"id": "c999"}) == "c999"
+    assert preset_label({}) == "?"

@@ -24,6 +24,9 @@ CHARACTER_SUBDIR = "characters"
 class CharacterCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     name_ja: str = ""
+    # A readable key beside the sequential id, so a log line and the search box
+    # can still say which character this is.
+    slug: str = ""
     # What she is known for, beside her name. The bundled roster carries it and
     # a hand-made character has no way to say it without this.
     title: str = ""
@@ -50,6 +53,7 @@ class CharacterCreate(BaseModel):
 class CharacterUpdate(BaseModel):
     name: str | None = None
     name_ja: str | None = None
+    slug: str | None = None
     title: str | None = None
     title_ja: str | None = None
     summary: str | None = None

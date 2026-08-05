@@ -68,6 +68,18 @@ def preset_point_id(preset_key: str) -> str:
     return str(uuid.uuid5(_ID_NAMESPACE, str(preset_key or "")))
 
 
+def preset_label(preset: dict[str, Any]) -> str:
+    """What to call her in a log line.
+
+    Ids are sequential now, and "c014: refused body tags" says nothing about
+    which character that was. The descriptive key is kept on the preset for
+    exactly this.
+    """
+    slug = str(preset.get("slug") or "").strip()
+    pid = str(preset.get("id") or "?").strip()
+    return f"{pid}/{slug}" if slug else pid
+
+
 def load_seed_presets() -> list[dict[str, Any]]:
     """Read the bundled preset asset once per process."""
     global _seed_cache
@@ -92,7 +104,7 @@ def _tags(preset: dict[str, Any], *buckets: str) -> list[str]:
             if refused:
                 logger.info(
                     "[presets] %s: refused body tags %s (age or unknown build)",
-                    preset.get("id") or "?", ", ".join(refused),
+                    preset_label(preset), ", ".join(refused),
                 )
         for raw in values:
             t = soft_normalize_tag(raw)
@@ -180,6 +192,7 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
         # mannequin in her clothes.
         "signature_moment": str(scene.get("signature_moment") or ""),
         "preset_key": str(preset.get("id") or ""),
+        "preset_slug": str(preset.get("slug") or ""),
         "preset_name": str(preset.get("name") or ""),
         "preset_name_ja": str(preset.get("name_ja") or preset.get("name") or ""),
         # What she is known for. The reference board uses it where it needs an
@@ -211,6 +224,7 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
     return {
         "id": point_id or preset_point_id(str(preset.get("id") or "")),
         "preset_key": str(preset.get("id") or ""),
+        "slug": str(preset.get("slug") or ""),
         "name": str(preset.get("name") or ""),
         "name_ja": str(preset.get("name_ja") or preset.get("name") or ""),
         "summary": str(preset.get("summary") or ""),

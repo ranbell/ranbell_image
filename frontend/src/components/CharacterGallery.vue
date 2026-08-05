@@ -83,7 +83,8 @@ const filtered = computed(() => {
         && !activeTraits.value.every(x => (c.traits || []).includes(x))) return false
     if (!q) return true
     return `${c.name} ${c.name_ja} ${c.title} ${c.title_ja} ${c.summary} `
-         + `${c.summary_ja} ${c.charm_ja || ''} ${(c.traits || []).join(' ')}`
+         + `${c.summary_ja} ${c.charm_ja || ''} ${c.slug || ''} `
+         + `${(c.traits || []).join(' ')}`
       .toLowerCase().includes(q)
   })
 })

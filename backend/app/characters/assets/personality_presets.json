@@ -1,6 +1,7 @@
 [
   {
-    "id": "darkroom_photo",
+    "id": "c001",
+    "slug": "darkroom_photo",
     "name": "Minamo Shirase",
     "name_ja": "白瀬 みなも",
     "title": "The Darkroom Regular",
@@ -112,7 +113,8 @@
     }
   },
   {
-    "id": "library_counter",
+    "id": "c002",
+    "slug": "library_counter",
     "name": "Kaho Yanagi",
     "name_ja": "柳 かほ",
     "title": "Behind the Lending Desk",
@@ -224,7 +226,8 @@
     }
   },
   {
-    "id": "reed_clarinet",
+    "id": "c003",
+    "slug": "reed_clarinet",
     "name": "Nao Isobe",
     "name_ja": "磯部 なお",
     "title": "Last One in the Music Room",
@@ -336,7 +339,8 @@
     }
   },
   {
-    "id": "ink_and_paper",
+    "id": "c004",
+    "slug": "ink_and_paper",
     "name": "Suzu Amagai",
     "name_ja": "天貝 すず",
     "title": "The Calligraphy Room at Dusk",
@@ -448,7 +452,8 @@
     }
   },
   {
-    "id": "rooftop_lunch",
+    "id": "c005",
+    "slug": "rooftop_lunch",
     "name": "Hazuki Tono",
     "name_ja": "東野 はづき",
     "title": "The Roof at Lunchtime",
@@ -558,7 +563,8 @@
     }
   },
   {
-    "id": "gym_storage",
+    "id": "c006",
+    "slug": "gym_storage",
     "name": "Rin Ogata",
     "name_ja": "緒方 りん",
     "title": "Loses, Demands a Rematch",
@@ -670,7 +676,8 @@
     }
   },
   {
-    "id": "broadcast_booth",
+    "id": "c007",
+    "slug": "broadcast_booth",
     "name": "Mio Kagami",
     "name_ja": "各務 みお",
     "title": "The Voice on the PA",
@@ -782,7 +789,8 @@
     }
   },
   {
-    "id": "greenhouse_club",
+    "id": "c008",
+    "slug": "greenhouse_club",
     "name": "Wakana Serizawa",
     "name_ja": "芹沢 わかな",
     "title": "The Greenhouse at the Back",
@@ -894,7 +902,8 @@
     }
   },
   {
-    "id": "stage_wings",
+    "id": "c009",
+    "slug": "stage_wings",
     "name": "Chika Munakata",
     "name_ja": "宗像 ちか",
     "title": "Stage Left, With the Rope",
@@ -1006,7 +1015,8 @@
     }
   },
   {
-    "id": "shogi_afternoon",
+    "id": "c010",
+    "slug": "shogi_afternoon",
     "name": "Yuki Sagara",
     "name_ja": "相良 ゆき",
     "title": "Thinks for Six Minutes",
@@ -1118,7 +1128,8 @@
     }
   },
   {
-    "id": "predawn_baker",
+    "id": "c011",
+    "slug": "predawn_baker",
     "name": "Hinata Kuroki",
     "name_ja": "黒木 ひなた",
     "title": "Four in the Morning",
@@ -1230,7 +1241,8 @@
     }
   },
   {
-    "id": "arcade_second",
+    "id": "c012",
+    "slug": "arcade_second",
     "name": "Rui Tachibana",
     "name_ja": "橘 るい",
     "title": "Second Place, Every Time",
@@ -1342,7 +1354,8 @@
     }
   },
   {
-    "id": "counter_barista",
+    "id": "c013",
+    "slug": "counter_barista",
     "name": "Nagisa Fuwa",
     "name_ja": "不破 なぎさ",
     "title": "Three Months on the Machine",
@@ -1454,7 +1467,8 @@
     }
   },
   {
-    "id": "flower_wrapper",
+    "id": "c014",
+    "slug": "flower_wrapper",
     "name": "Sumire Hiraoka",
     "name_ja": "平岡 すみれ",
     "title": "Wraps It Better Than You Asked",
@@ -1566,7 +1580,8 @@
     }
   },
   {
-    "id": "night_register",
+    "id": "c015",
+    "slug": "night_register",
     "name": "Akari Tsuzuki",
     "name_ja": "都築 あかり",
     "title": "The Two A.M. Shift",
@@ -1678,7 +1693,8 @@
     }
   },
   {
-    "id": "tank_guide",
+    "id": "c016",
+    "slug": "tank_guide",
     "name": "Umi Sakaki",
     "name_ja": "榊 うみ",
     "title": "In Front of the Big Tank",
@@ -1790,7 +1806,8 @@
     }
   },
   {
-    "id": "record_bins",
+    "id": "c017",
+    "slug": "record_bins",
     "name": "Kotoha Nikaido",
     "name_ja": "二階堂 ことは",
     "title": "Second Bin From the Left",
@@ -1902,7 +1919,8 @@
     }
   },
   {
-    "id": "clinic_desk",
+    "id": "c018",
+    "slug": "clinic_desk",
     "name": "Momo Kirishima",
     "name_ja": "桐島 もも",
     "title": "The Vet's Front Desk",
@@ -2014,7 +2032,8 @@
     }
   },
   {
-    "id": "ramen_counter",
+    "id": "c019",
+    "slug": "ramen_counter",
     "name": "Sae Todoroki",
     "name_ja": "轟 さえ",
     "title": "Nine Seats, One Ladle",
@@ -2126,7 +2145,8 @@
     }
   },
   {
-    "id": "bike_courier",
+    "id": "c020",
+    "slug": "bike_courier",
     "name": "Tsubasa Amemiya",
     "name_ja": "雨宮 つばさ",
     "title": "Beats the Estimate",
@@ -2238,7 +2258,8 @@
     }
   },
   {
-    "id": "hydrangea_rain",
+    "id": "c021",
+    "slug": "hydrangea_rain",
     "name": "Shizuku Aoyagi",
     "name_ja": "青柳 しずく",
     "title": "Waits Out the Rain on Purpose",
@@ -2348,7 +2369,8 @@
     }
   },
   {
-    "id": "festival_yukata",
+    "id": "c022",
+    "slug": "festival_yukata",
     "name": "Kanade Ninomiya",
     "name_ja": "二宮 かなで",
     "title": "Loses the Group Every Year",
@@ -2460,7 +2482,8 @@
     }
   },
   {
-    "id": "snow_gloves",
+    "id": "c023",
+    "slug": "snow_gloves",
     "name": "Yuki Nanjo",
     "name_ja": "南条 ゆき",
     "title": "Two Gloves, One Owner",
@@ -2572,7 +2595,8 @@
     }
   },
   {
-    "id": "sakura_shutter",
+    "id": "c024",
+    "slug": "sakura_shutter",
     "name": "Koharu Sena",
     "name_ja": "瀬名 こはる",
     "title": "Two Hundred Photos of the Same Tree",
@@ -2684,7 +2708,8 @@
     }
   },
   {
-    "id": "kotatsu_winter",
+    "id": "c025",
+    "slug": "kotatsu_winter",
     "name": "Nono Ichikawa",
     "name_ja": "市川 のの",
     "title": "Has Not Left the Kotatsu",
@@ -2794,7 +2819,8 @@
     }
   },
   {
-    "id": "planetarium_seat",
+    "id": "c026",
+    "slug": "planetarium_seat",
     "name": "Subaru Asakura",
     "name_ja": "朝倉 すばる",
     "title": "Stays for the Second Showing",
@@ -2904,7 +2930,8 @@
     }
   },
   {
-    "id": "bus_stop_wait",
+    "id": "c027",
+    "slug": "bus_stop_wait",
     "name": "Sena Tsukishiro",
     "name_ja": "月城 せな",
     "title": "Twelve Minutes Early",
@@ -3016,7 +3043,8 @@
     }
   },
   {
-    "id": "goldfish_scoop",
+    "id": "c028",
+    "slug": "goldfish_scoop",
     "name": "Mio Hazama",
     "name_ja": "狭間 みお",
     "title": "One More Try, Definitely",
@@ -3128,7 +3156,8 @@
     }
   },
   {
-    "id": "laundry_roof",
+    "id": "c029",
+    "slug": "laundry_roof",
     "name": "Asahi Kurata",
     "name_ja": "倉田 あさひ",
     "title": "Best Drying Weather All Year",
@@ -3240,7 +3269,8 @@
     }
   },
   {
-    "id": "moving_boxes",
+    "id": "c030",
+    "slug": "moving_boxes",
     "name": "Riko Naruse",
     "name_ja": "成瀬 りこ",
     "title": "Unpacks in Reverse Order",
