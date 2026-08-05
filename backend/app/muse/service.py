@@ -562,6 +562,10 @@ def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
         (r"可愛|かわいい|魅力|虜|キュート|cute|charm|adorable|kawaii", "actress"),
         (r"可愛|かわいい|魅力|虜|cute|charm|kawaii", "faces"),
         (r"可愛|かわいい|魅力|虜|cute|charm|hook|インパクト", "hook"),
+        (r"セクシー|色気|エロ|色っぽ|セクシー|sexy|sensual|alluring|seductive", "actress"),
+        (r"セクシー|色気|エロ|色っぽ|sexy|sensual|alluring|seductive|張りつ", "wardrobe"),
+        (r"セクシー|色気|エロ|色っぽ|sexy|sensual|alluring|seductive", "faces"),
+        (r"セクシー|色気|虜|sexy|sensual|alluring", "hook"),
         (r"性格|本人|女優|actress|personality|内面", "actress"),
     ]
     for pat, mid in pairs:
