@@ -23,11 +23,34 @@ from .schema import missing_inputs, new_session
 logger = logging.getLogger(__name__)
 
 # Showrunner approval — Japanese / English.
+# Exact one-liners, plus short natural phrases like「Ok 本番よろしく」.
 _OK_RE = re.compile(
     r"^\s*(ok|okay|lgtm|ship\s*it|go|yes|yep|approved?|いいよ|よし|おｋ|おけ|"
     r"OK|これでいい|それでいい|撮って|撮影|本番|決定|確定|ゴー)\s*[!！.。]*\s*$",
     re.I,
 )
+_OK_NATURAL_RE = re.compile(
+    r"(?i)\b(ok|okay|lgtm|go)\b|お[ｋkけ]|いいよ|よし|ゴー|"
+    r"これでいい|それでいい|撮って|撮影|本番|決定|確定|approved?"
+)
+_OK_DENY_RE = re.compile(
+    r"じゃない|じゃなく|ではなく|だめ|ダメ|もっと|やめて|待って|まだ|"
+    r"not\s*ok|don't|dont|wait|more|nope",
+    re.I,
+)
+
+
+def _is_approve(text: str) -> bool:
+    """True when the showrunner is green-lighting the shoot."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _OK_RE.match(t):
+        return True
+    # Short approval with fluff —「Ok 本番よろしく」「よし撮って！」
+    if len(t) <= 48 and _OK_NATURAL_RE.search(t) and not _OK_DENY_RE.search(t):
+        return True
+    return False
 
 
 class MuseError(Exception):
@@ -460,7 +483,7 @@ async def post_chat(
     _publish_chat(sid, user_msg)
     await session_db.save(db, session)
 
-    if _OK_RE.match(text) or text.strip() in ("OK", "ok", "ＯＫ"):
+    if _is_approve(text):
         return await approve_and_shoot(db, comfy, spooler, session, ollama=ollama)
 
     if re.search(r"ボード|board|試写|イメージ", text, re.I):

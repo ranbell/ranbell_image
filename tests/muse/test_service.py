@@ -275,6 +275,16 @@ def test_the_workflows_last_image_is_the_one_worth_keeping():
     assert runner.finished_image(["only"]) == "only"
 
 
+def test_is_approve_accepts_natural_ok_phrases():
+    assert service._is_approve("OK")
+    assert service._is_approve("本番")
+    assert service._is_approve("Ok 本番よろしく")
+    assert service._is_approve("よし撮って！")
+    assert not service._is_approve("OKじゃない、もっと可愛く")
+    assert not service._is_approve("ボード出して")
+    assert not service._is_approve("服をもっと派手に")
+
+
 def test_pick_responders_routes_outfit_notes_to_wardrobe():
     crew_ids = ["beat", "spine", "lens", "wardrobe", "gaffer", "actress", "finisher"]
     got = service._pick_responders("服をコートにして", crew_ids)
