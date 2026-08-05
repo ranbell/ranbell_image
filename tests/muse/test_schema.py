@@ -27,7 +27,7 @@ def test_a_new_session_needs_nothing_once_the_four_inputs_are_set():
 def test_new_session_casts_the_standard_crew_by_default():
     s = schema.new_session()
     assert s["inputs"]["crew_preset"] == "standard"
-    assert "beat" in s["inputs"]["crew_ids"]
+    assert "beat:ichibyou" in s["inputs"]["crew_ids"]
     assert "finisher" not in s["inputs"]["crew_ids"]  # always appended at resolve
     assert "actress" not in s["inputs"]["crew_ids"]  # always injected at resolve
     assert s["status"] == "setup"
@@ -42,7 +42,7 @@ def test_public_roster_fills_actress_from_character():
         "personality": {"summary_ja": "いつも本気で話す。"},
     }
     view = schema.public_view(s)
-    actress = next(m for m in view["roster"]["muses"] if m["id"] == "actress")
+    actress = next(m for m in view["roster"]["muses"] if m["id"] == "actress:cast")
     assert actress["name_ja"] == "サンプル主演"
     assert actress["required"] is True
     assert "本気" in actress["line"]

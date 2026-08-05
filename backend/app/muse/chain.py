@@ -99,7 +99,10 @@ async def run_muse(
     on_token: TokenCallback | None = None,
 ) -> MuseTurn:
     """One Muse at the table. Text by default; images optional for board review."""
-    if muse_id not in crew.MUSES:
+    # Callers may name a job ("beat") or a person ("beat:ichibyou"). A job
+    # resolves to whoever does it by default.
+    muse_id = crew.resolve_member(muse_id)
+    if not muse_id:
         raise ChainError(f"unknown muse: {muse_id}")
     raw = await _call(
         ollama,
@@ -123,7 +126,8 @@ async def run_banter(
     on_token: TokenCallback | None = None,
 ) -> str:
     """Side comment only — returns SAY text, does not touch craft."""
-    if muse_id not in crew.MUSES:
+    muse_id = crew.resolve_member(muse_id)
+    if not muse_id:
         raise ChainError(f"unknown muse: {muse_id}")
     raw = await _call(
         ollama,

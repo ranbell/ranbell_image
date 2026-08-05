@@ -1287,6 +1287,7 @@
       "flat": "Flat / cel",
       "classic": "Classic",
       "bold": "Bold",
+      "calm": "Calm",
       "everyone": "Everyone"
     },
     "workflow": "Workflow",
@@ -1366,7 +1367,8 @@
       "novel": "Bold",
       "novelLow": "Classic",
       "base": "This crew's base look",
-      "hint": "Swap a seat and the picture changes"
+      "hint": "Swap a seat and the picture changes",
+      "people": "Pick who does it"
     },
     "nick": "Nickname"
   },

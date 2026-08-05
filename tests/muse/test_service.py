@@ -382,8 +382,8 @@ async def test_showrunner_comment_reruns_a_short_turn():
         m["role"] == "user" and "落ち着いた" in m["text"] for m in session["chat"]
     )
     spoken = [m.get("muse_id") for m in session["chat"][n_chat:] if m.get("role") == "muse"]
-    assert "actress" in spoken
-    assert "finisher" in spoken
+    assert "actress:cast" in spoken
+    assert "finisher:maku" in spoken
     assert len(session["chat"]) > n_chat
     # Craft was touched by at least one responder (FakeOllama always rewrites).
     assert session["craft"]["prompt"]
@@ -414,12 +414,13 @@ async def test_choosing_a_preset_replaces_the_crew_it_does_not_merge():
 
     session = await service.patch_inputs(db, session, {"crew_preset": "flat"})
     flat = list(session["inputs"]["crew_ids"])
-    assert "ink" in flat and "lens" not in flat
+    # Both crews light and shoot; they send different people to do it.
+    assert "ink:ipponsen" in flat and "gaffer:gyakkou" not in flat
 
     session = await service.patch_inputs(db, session, {"crew_preset": "photoreal"})
     real = list(session["inputs"]["crew_ids"])
     assert real != flat
-    assert "lens" in real and "ink" not in real
+    assert "lens:pinto" in real and "ink:atsunuri" in real
 
 
 @pytest.mark.asyncio
@@ -427,10 +428,10 @@ async def test_toggling_a_seat_keeps_the_rest_of_the_crew():
     db = FakeDb()
     session = await service.create_session(db, {})
     session = await service.patch_inputs(db, session, {"crew_preset": "standard"})
-    kept = [i for i in session["inputs"]["crew_ids"] if i != "gaffer"]
+    kept = [i for i in session["inputs"]["crew_ids"] if i != "gaffer:gyakkou"]
 
     session = await service.patch_inputs(db, session, {"crew_ids": kept})
-    assert "gaffer" not in session["inputs"]["crew_ids"]
+    assert "gaffer:gyakkou" not in session["inputs"]["crew_ids"]
     assert session["inputs"]["crew_ids"] == kept
 
 

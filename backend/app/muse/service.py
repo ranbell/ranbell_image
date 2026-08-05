@@ -160,7 +160,9 @@ async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> di
             preset=str(inputs.get("crew_preset") or crew.DEFAULT_PRESET),
             crew_ids=None if chose_preset else (list(inputs.get("crew_ids") or []) or None),
         )
-        inputs["crew_ids"] = [i for i in ids if i not in ("finisher", "actress")]
+        inputs["crew_ids"] = [
+            i for i in ids if crew.role_of(i) not in ("finisher", "actress")
+        ]
         inputs["crew_preset"] = str(inputs.get("crew_preset") or crew.DEFAULT_PRESET)
     session["inputs"] = inputs
     _rebuild_brief(session)
@@ -235,7 +237,7 @@ async def _run_muse_turn(
 
 
 def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
-    if muse_id == "actress":
+    if crew.role_of(muse_id) == "actress":
         ch = session.get("character") or {}
         p = ch.get("personality") or {}
         locale = str(_inputs(session).get("locale") or "ja")
@@ -245,11 +247,12 @@ def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
                 or ch.get("name") or p.get("preset_name") or "女優"
             )
         return str(ch.get("name") or p.get("preset_name") or "Actress")
-    m = crew.MUSES[muse_id]
+    m = crew.MUSES[crew.resolve_member(muse_id)]
     locale = str(_inputs(session).get("locale") or "ja")
     if locale.startswith("ja"):
-        return str(m.get("name_ja") or m["name"])
-    return str(m["name"])
+        # Job plus nickname: two people share 照明, and the log has to say which.
+        return f"{m['name_ja']}「{m['nick_ja']}」"
+    return f"{m['name']} ({m['nick']})"
 
 
 def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]:
@@ -257,7 +260,7 @@ def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]
     craft["prompt"] = turn.prompt
     craft["tags"] = turn.tags
     craft["scene"] = turn.scene
-    if turn.muse_id in ("beat", "spine") or not craft.get("pose_intent"):
+    if crew.role_of(turn.muse_id) in ("beat", "spine") or not craft.get("pose_intent"):
         craft["pose_intent"] = turn.pose_intent
     name = _muse_display_name(session, turn.muse_id)
     say = turn.say or f"（{name}が台本を更新した。）"
@@ -369,6 +372,11 @@ def _banter_mode(session: dict[str, Any]) -> str:
     return mode if mode in ("light", "full", "off") else "light"
 
 
+def _cast_in_role(crew_ids: list[str], role: str) -> str | None:
+    """Whoever is doing that job in this cast, if anyone is."""
+    return next((m for m in crew_ids if crew.role_of(m) == role), None)
+
+
 def _pick_banter_reactor(
     session: dict[str, Any], crew_ids: list[str], *,
     current: str, previous: str | None, index: int,
@@ -378,12 +386,13 @@ def _pick_banter_reactor(
     if mode == "off":
         return None
     # light: every other pass, or always after the actress (personality beat).
-    if mode == "light" and current != "actress" and index % 2 == 0:
+    if mode == "light" and crew.role_of(current) != "actress" and index % 2 == 0:
         return None
     if previous and previous != current and previous in crew_ids:
         return previous
-    for mid in ("hook", "faces", "actress", "spine", "beat"):
-        if mid in crew_ids and mid != current:
+    for role in ("hook", "faces", "actress", "spine", "beat"):
+        mid = _cast_in_role(crew_ids, role)
+        if mid and mid != current:
             return mid
     return None
 
@@ -397,8 +406,9 @@ def _pick_extra_heckler(
         return None
     if index % 3 != 2:
         return None
-    for mid in ("actress", "hook", "faces", "cutout", "propshop"):
-        if mid in crew_ids and mid not in (current, reactor):
+    for role in ("actress", "hook", "faces", "cutout", "propshop"):
+        mid = _cast_in_role(crew_ids, role)
+        if mid and mid not in (current, reactor):
             return mid
     return None
 
@@ -580,14 +590,15 @@ def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
         "actress", "beat", "spine", "lens", "wardrobe",
         "faces", "hook", "gaffer", "propshop",
     )
-    ordered = [m for m in priority if m in crew_ids][:4]
-    if "finisher" in crew_ids:
-        ordered.append("finisher")
+    ordered = [m for m in (_cast_in_role(crew_ids, r) for r in priority) if m][:4]
+    closer = _cast_in_role(crew_ids, "finisher")
+    if closer:
+        ordered.append(closer)
     if ordered:
         return ordered
     head = [crew_ids[0]] if crew_ids else []
-    if "finisher" in crew_ids and "finisher" not in head:
-        head.append("finisher")
+    if closer and closer not in head:
+        head.append(closer)
     return head
 
 

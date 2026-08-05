@@ -22,16 +22,19 @@ _SITUATION_BANNED = (
 
 def test_resolve_crew_always_ends_with_finisher():
     ids = crew.resolve_crew(preset="classic")
-    assert ids[-1] == "finisher"
-    assert "beat" in ids
-    assert "wardrobe" in ids
-    assert "actress" in ids
-    assert ids.index("actress") < ids.index("faces")
+    roles = [crew.role_of(i) for i in ids]
+    assert roles[-1] == "finisher"
+    assert "beat" in roles
+    assert "wardrobe" in roles
+    assert "actress" in roles
+    assert roles.index("actress") < roles.index("faces")
+    # One person per job, never two.
+    assert len(roles) == len(set(roles))
 
 
 def test_resolve_crew_honours_explicit_ids():
-    ids = crew.resolve_crew(crew_ids=["lens", "wardrobe", "unknown"])
-    assert ids == ["lens", "wardrobe", "actress", "finisher"]
+    ids = crew.resolve_crew(crew_ids=["lens:teiten", "wardrobe", "unknown"])
+    assert ids == ["lens:teiten", "wardrobe:shiwa", "actress:cast", "finisher:maku"]
 
 
 def test_actress_prompt_pulls_selected_character_personality():
@@ -68,8 +71,9 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert "口調 (JA)" in text
     assert "EXAMPLE SAY" in text
     assert "conversation" in text.lower() or "RECENT TABLE TALK" in text
-    assert len(crew.MUSES["beat"]["say_examples"]) >= 3
-    assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
+    assert len(crew.MUSES["beat:ichibyou"]["say_examples"]) >= 3
+    assert (crew.MUSES["spine:bane"]["voice_ja"]
+            != crew.MUSES["faces:mabataki"]["voice_ja"])
 
 
 def test_production_muse_copy_has_no_situation_specific_anchors():
@@ -122,7 +126,7 @@ def test_public_roster_has_no_real_creator_names():
 
 
 def test_every_seat_has_a_job_a_nickname_and_a_taste():
-    for mid in crew.MUSE_ORDER:
+    for mid in crew.MUSES:
         m = crew.MUSES[mid]
         assert m["name_ja"], mid
         assert m["nick_ja"], mid
@@ -167,13 +171,61 @@ def test_the_showrunner_outranks_the_room():
 
 
 def test_the_example_line_varies_between_sessions_but_holds_within_one():
-    seeds = {crew._pick_say_example("beat", f"session-{i}") for i in range(40)}
+    who = "beat:ichibyou"
+    seeds = {crew._pick_say_example(who, f"session-{i}") for i in range(40)}
     assert len(seeds) > 1, "every session would sound identical"
-    assert crew._pick_say_example("beat", "s1") == crew._pick_say_example("beat", "s1")
+    assert crew._pick_say_example(who, "s1") == crew._pick_say_example(who, "s1")
 
 
 def test_the_base_look_reaches_the_seat_that_guards_style():
-    text = crew.system_prompt_for("ink", base_style="vivid flat anime cel shading")
+    text = crew.system_prompt_for("ink:ipponsen", base_style="vivid flat anime cel shading")
     assert "vivid flat anime cel shading" in text
     assert "You own the base look" in text
     assert "cel_shading" in text  # its own flavour
+
+
+def test_a_job_has_more_than_one_person_who_does_it():
+    """Two lighting artists both light the scene. One hands you hard rim light,
+    the other something soft enough to sleep in — that is the range."""
+    multi = [r for r in crew.ROLE_ORDER if len(crew.members_of(r)) > 1]
+    assert len(multi) >= 12, [crew.ROLES[r]["name_ja"] for r in multi]
+    for rid in multi:
+        people = [crew.MUSES[m] for m in crew.members_of(rid)]
+        nicks = {p["nick_ja"] for p in people}
+        assert len(nicks) == len(people), rid
+        # Same job, different pull — otherwise the choice is decoration.
+        tastes = {tuple(sorted(p["taste"].items())) for p in people}
+        assert len(tastes) == len(people), f"{rid}: identical taste"
+
+
+def test_one_person_per_job_and_a_later_pick_replaces_an_earlier_one():
+    ids = crew.resolve_crew(crew_ids=["gaffer:gyakkou", "gaffer:andon"])
+    lighting = [i for i in ids if crew.role_of(i) == "gaffer"]
+    assert lighting == ["gaffer:andon"]
+
+
+def test_an_old_session_naming_bare_jobs_still_resolves():
+    """Sessions stored crew_ids as job ids before people existed."""
+    ids = crew.resolve_crew(crew_ids=["gaffer", "palette"])
+    assert ids[:2] == ["gaffer:gyakkou", "palette:itten"]
+    assert crew.resolve_member("gaffer") == crew.DEFAULT_MEMBER["gaffer"]
+    assert crew.resolve_member("nonsense") == ""
+
+
+def test_swapping_one_person_moves_the_look():
+    """Same jobs, one different person, different picture."""
+    hard = crew.style_direction(["gaffer:gyakkou", "palette:itten", "ink:ipponsen"])
+    soft = crew.style_direction(["gaffer:andon", "palette:aku", "ink:ipponsen"])
+    assert hard["scores"]["vivid"] > soft["scores"]["vivid"]
+    assert hard["base"] != soft["base"]
+    assert "rim_lighting" in hard["flavor_tags"]
+    assert "soft_lighting" in soft["flavor_tags"]
+
+
+def test_the_roster_groups_people_under_the_job_they_do():
+    roster = crew.public_roster(crew_ids=list(crew.PRESETS["flat"]))
+    by_id = {r["id"]: r for r in roster["roles"]}
+    assert len(roster["roles"]) == len(crew.ROLE_ORDER)
+    assert len(by_id["gaffer"]["people"]) == 2
+    cast = [p["id"] for r in roster["roles"] for p in r["people"] if p["cast"]]
+    assert "ink:ipponsen" in cast and "ink:atsunuri" not in cast

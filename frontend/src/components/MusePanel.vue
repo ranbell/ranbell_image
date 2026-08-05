@@ -32,7 +32,7 @@ const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
 const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
-const PRESETS = ['standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'everyone']
+const PRESETS = ['standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'calm', 'everyone']
 
 let eventSource = null
 let pollTimer = null
@@ -51,6 +51,9 @@ const warnings = computed(() => session.value?.warnings || [])
 const status = computed(() => session.value?.status || 'setup')
 const roster = computed(() => session.value?.roster || catalog.value?.roster || {})
 const muses = computed(() => roster.value.muses || [])
+// Jobs, each with the people who can do it. Casting is picking a person, not
+// a job — two lighting artists both light the scene, differently.
+const crewRoles = computed(() => roster.value.roles || [])
 const crewIds = computed(() => new Set(inputs.value.crew_ids || []))
 // Where this cast pulls the picture. Recomputed server-side on every patch, so
 // toggling a seat moves the meter and the base look in the same breath.
@@ -137,7 +140,7 @@ async function startSession() {
       model: suggested.model || '',
       workflow: suggested.workflow || '',
       locale: isJa.value ? 'ja' : 'en',
-      crew_preset: 'gallery',
+      crew_preset: 'standard',
     }),
   })
   preview.value = ''
@@ -263,12 +266,25 @@ async function setPreset(p) {
   await patchInputs({ crew_preset: p })
 }
 
-async function toggleMuse(id) {
-  if (id === 'finisher') return
-  const next = new Set(crewIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  await patchInputs({ crew_ids: [...next] })
+async function toggleRole(role) {
+  if (role.required) return
+  // Off if anyone from this job is cast, otherwise on with the first person.
+  const next = (inputs.value.crew_ids || []).filter(
+    id => !role.people.some(p => p.id === id))
+  if (next.length === (inputs.value.crew_ids || []).length) next.push(role.people[0].id)
+  await patchInputs({ crew_ids: next })
+}
+
+async function pickPerson(role, person) {
+  if (role.required) return
+  const next = (inputs.value.crew_ids || []).filter(
+    id => !role.people.some(p => p.id === id))
+  next.push(person.id)
+  await patchInputs({ crew_ids: next })
+}
+
+function castPerson(role) {
+  return role.people.find(p => crewIds.value.has(p.id)) || null
 }
 
 async function startTable() {
@@ -561,30 +577,45 @@ async function onChatKey(e) {
           </p>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <button
-            v-for="m in muses" :key="m.id" type="button"
-            class="text-left p-2 rounded border text-[11px] transition-colors"
-            :class="m.required || crewIds.has(m.id)
-              ? 'border-[var(--sb-amber)]/50 bg-amber-950/20'
-              : 'border-white/10 opacity-50'"
-            :disabled="m.required || act !== 'setup'"
-            @click="toggleMuse(m.id)"
-          >
-            <span class="block text-[var(--sb-amber)]">
-              {{ museLabel(m) }}
-              <span v-if="museNick(m) && museNick(m) !== museLabel(m)"
-                    class="ml-1 text-[10px] text-[var(--sb-teal)]">「{{ museNick(m) }}」</span>
+        <!-- one row per job; pick which person does it -->
+        <div class="space-y-1.5">
+          <div v-for="r in crewRoles" :key="r.id"
+               class="flex items-start gap-2 rounded border p-2 transition-colors"
+               :class="r.required || castPerson(r)
+                 ? 'border-[var(--sb-amber)]/40 bg-amber-950/10'
+                 : 'border-white/10 opacity-45'">
+            <button type="button"
+                    class="w-24 shrink-0 text-left text-[11px] text-[var(--sb-amber)]"
+                    :disabled="r.required || act !== 'setup'"
+                    :title="isJa ? r.role_ja : r.role"
+                    @click="toggleRole(r)">
+              {{ isJa ? r.name_ja : r.name }}
+            </button>
+            <div class="flex flex-1 flex-wrap gap-1.5">
+              <button
+                v-for="p in r.people" :key="p.id" type="button"
+                class="rounded border px-2 py-1 text-left text-[10px] transition-colors"
+                :class="crewIds.has(p.id) || r.required
+                  ? 'border-[var(--sb-teal)] text-[var(--sb-teal)] bg-teal-950/20'
+                  : 'border-white/10 text-gray-400 hover:border-white/30'"
+                :disabled="r.required || act !== 'setup'"
+                :title="isJa ? (p.line_ja || p.line) : p.line"
+                @click="pickPerson(r, p)"
+              >
+                <span class="block">「{{ museNick(p) }}」</span>
+                <span v-if="p.taste" class="mt-0.5 flex gap-1 text-[9px] text-[var(--sb-faint)]">
+                  <span v-for="a in tasteAxes" :key="a.id"
+                        :class="p.taste[a.id] ? 'text-[var(--sb-teal)]' : ''">
+                    {{ a.high.slice(0, 2) }}{{ tasteBar(p.taste[a.id]) }}
+                  </span>
+                </span>
+              </button>
+            </div>
+            <span class="hidden md:block w-56 shrink-0 text-[10px] text-gray-500">
+              {{ isJa ? (castPerson(r)?.line_ja || r.people[0].line_ja)
+                      : (castPerson(r)?.line || r.people[0].line) }}
             </span>
-            <span class="block text-[10px] text-[var(--sb-faint)]">{{ isJa ? m.role_ja : m.role }}</span>
-            <span class="block text-[10px] text-gray-400 mt-1">{{ isJa ? (m.line_ja || m.line) : m.line }}</span>
-            <span v-if="m.taste" class="mt-1 flex gap-1.5 text-[9px] text-[var(--sb-faint)]">
-              <span v-for="a in tasteAxes" :key="a.id"
-                    :class="m.taste[a.id] ? 'text-[var(--sb-teal)]' : ''">
-                {{ a.high.slice(0, 2) }}{{ tasteBar(m.taste[a.id]) }}
-              </span>
-            </span>
-          </button>
+          </div>
         </div>
       </section>
 
