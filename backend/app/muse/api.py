@@ -25,7 +25,7 @@ class SessionCreate(BaseModel):
     model: str = ""
     vision_model: str = ""
     locale: str = "ja"
-    crew_preset: str = "gallery"
+    crew_preset: str = "standard"
 
 
 class InputsPatch(BaseModel):

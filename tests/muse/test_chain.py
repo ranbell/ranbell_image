@@ -76,7 +76,7 @@ async def test_run_muse_streams_say_and_locks_identity():
     assert turn.prompt.startswith("1girl, blue_hair")
     assert turn.pose_intent == "She waits in the rain."
     assert llm.calls[0]["kind"] == "text"
-    assert "You are Beat" in llm.calls[0]["system"]
+    assert "演出" in llm.calls[0]["system"]
 
 
 @pytest.mark.asyncio

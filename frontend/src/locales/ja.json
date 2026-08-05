@@ -1281,11 +1281,13 @@
     "studioHint": "あなたが総監督。班が議論し、途中でイメージボードを出します。OKが出たら本番です。",
     "crewPreset": "班の編成",
     "presets": {
-      "lightning": "ライトニング（少人数）",
-      "gallery": "ギャラリー（標準）",
-      "everyone": "全員集合",
-      "motion": "モーション重視",
-      "night": "ナイトムード"
+      "standard": "標準",
+      "vivid": "鮮やか寄り",
+      "photoreal": "実写寄り",
+      "flat": "フラット寄り",
+      "classic": "王道",
+      "bold": "斬新",
+      "everyone": "全員集合"
     },
     "workflow": "ワークフロー",
     "workflowHint": "ボードも本番も同じワークフロー。違うのはステップ数と CFG だけ",
@@ -1354,7 +1356,19 @@
     "elapsed": "経過 {s}",
     "enlarge": "拡大",
     "setupTitle": "何を描きますか",
-    "settings": "設定"
+    "settings": "設定",
+    "taste": {
+      "title": "作風",
+      "vivid": "鮮やか",
+      "vividLow": "渋い",
+      "real": "実写的",
+      "realLow": "フラット",
+      "novel": "斬新",
+      "novelLow": "定番",
+      "base": "この編成の基調",
+      "hint": "スタッフを入れ替えると絵が変わります"
+    },
+    "nick": "あだ名"
   },
   "characters": {
     "title": "キャラクター",

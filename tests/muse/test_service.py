@@ -90,7 +90,7 @@ async def _ready_session(db, **over):
     session = await service.create_session(db, {
         "theme": "a quiet indoor moment", "character_id": "c1",
         "workflow": "w.json", "model": "m",
-        "crew_preset": "lightning",
+        "crew_preset": "classic",
         **over,
     })
     session["character"] = {"identity_tags": ["1girl", "blue_hair"],
@@ -117,7 +117,7 @@ async def test_table_builds_craft_and_chat_without_submitting_comfy():
     assert any(m["role"] == "muse" for m in session["chat"])
     assert any(m.get("kind") == "craft" for m in session["chat"])
     assert ollama.unloaded == []
-    assert len(ollama.calls) >= 2  # lightning crew + actress + finisher
+    assert len(ollama.calls) >= 2  # classic crew + actress + finisher
 
 
 @pytest.mark.asyncio
@@ -392,12 +392,12 @@ async def test_showrunner_comment_reruns_a_short_turn():
 @pytest.mark.asyncio
 async def test_light_banter_mode_fires_fewer_side_calls_than_full():
     db, ollama_light, ollama_full = FakeDb(), FakeOllama(), FakeOllama()
-    s_light = await _ready_session(db, banter_mode="light", crew_preset="lightning")
+    s_light = await _ready_session(db, banter_mode="light", crew_preset="classic")
     s_light = await service.start_table(db, ollama_light, s_light)
     light_banter = sum(1 for m in s_light["chat"] if m.get("kind") == "banter")
 
     db2 = FakeDb()
-    s_full = await _ready_session(db2, banter_mode="full", crew_preset="lightning")
+    s_full = await _ready_session(db2, banter_mode="full", crew_preset="classic")
     s_full = await service.start_table(db2, ollama_full, s_full)
     full_banter = sum(1 for m in s_full["chat"] if m.get("kind") == "banter")
 

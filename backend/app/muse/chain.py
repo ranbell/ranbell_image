@@ -95,6 +95,7 @@ async def run_muse(
     images: list[bytes] | None = None,
     character: dict[str, Any] | None = None,
     style: str = "", cast: list[dict] | None = None,
+    seed: str = "",
     on_token: TokenCallback | None = None,
 ) -> MuseTurn:
     """One Muse at the table. Text by default; images optional for board review."""
@@ -102,7 +103,9 @@ async def run_muse(
         raise ChainError(f"unknown muse: {muse_id}")
     raw = await _call(
         ollama,
-        system=crew.system_prompt_for(muse_id, character=character),
+        system=crew.system_prompt_for(
+            muse_id, character=character, base_style=style, seed=seed,
+        ),
         prompt=user_prompt,
         model=model, images=images, num_ctx=num_ctx, think=think,
         on_token=on_token,

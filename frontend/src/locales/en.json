@@ -1281,11 +1281,13 @@
     "studioHint": "You are the showrunner. The crew debates, puts up an image board, and shoots on your OK.",
     "crewPreset": "Crew preset",
     "presets": {
-      "lightning": "Lightning (lean)",
-      "gallery": "Gallery (standard)",
-      "everyone": "Everyone",
-      "motion": "Motion-first",
-      "night": "Night mood"
+      "standard": "Standard",
+      "vivid": "Vivid",
+      "photoreal": "Photoreal",
+      "flat": "Flat / cel",
+      "classic": "Classic",
+      "bold": "Bold",
+      "everyone": "Everyone"
     },
     "workflow": "Workflow",
     "workflowHint": "One workflow draws the board and the final — only steps and cfg differ",
@@ -1354,7 +1356,19 @@
     "elapsed": "{s} elapsed",
     "enlarge": "Enlarge",
     "setupTitle": "What shall we draw?",
-    "settings": "Settings"
+    "settings": "Settings",
+    "taste": {
+      "title": "Look",
+      "vivid": "Vivid",
+      "vividLow": "Muted",
+      "real": "Photoreal",
+      "realLow": "Flat",
+      "novel": "Bold",
+      "novelLow": "Classic",
+      "base": "This crew's base look",
+      "hint": "Swap a seat and the picture changes"
+    },
+    "nick": "Nickname"
   },
   "characters": {
     "title": "Characters",

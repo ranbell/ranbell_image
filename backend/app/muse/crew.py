@@ -1,14 +1,23 @@
-"""The Muse crew — fictional specialists you cast before the first frame.
+"""The Muse crew — the production staff you cast before the first frame.
 
-No real creator names. Each Muse has a role, a voice, and a system specialty.
-The user casts a crew; they table-read the prompt in order; Finisher always
-closes. Speech in the SAY block is entertainment — TAGS/SCENE are the craft.
+No real creator names. Each seat is a job on a real crew (照明, 衣装, 撮影…) with
+a nickname, a voice, a system specialty, and a taste: where that person pulls the
+picture on three axes. The user casts a crew; they table-read the prompt in
+order; the editor always closes. Speech in the SAY block is entertainment —
+TAGS/SCENE are the craft.
+
+The taste axes are the game. A crew of 照明 + 色彩設計 + プロデューサー pulls
+vivid and bold; 作画監督 + 作画 + 監修 pulls flat and orthodox; 撮影 + 美術 pulls
+toward rendered detail. `style_direction` reads the room and names one base look,
+and each seat adds a few tags of its own flavour on top. Swap one person and the
+picture changes — that is the whole point of letting people pick.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
-# Stable ids in dependency order. Finisher is always appended by resolve_crew.
+# Stable ids in dependency order. The editor is always appended by resolve_crew.
 MUSE_ORDER: tuple[str, ...] = (
     "beat",
     "spine",
@@ -17,7 +26,7 @@ MUSE_ORDER: tuple[str, ...] = (
     "propshop",
     "wardrobe",
     "gaffer",
-    # Seat filled by the selected character preset (one of ~100 actresses).
+    # Seat filled by the selected character preset.
     "actress",
     "faces",
     "hook",
@@ -83,25 +92,42 @@ Across TAGS+SCENE the finished craft should feel ~200+ words of picture.
 No preamble, no alternatives — one version only.
 """.strip()
 
+# ── Taste: where a seat pulls the picture ────────────────────────────────────
+# Three axes, each -2 … +2. Named for the ends a person can actually picture.
+TASTE_AXES: tuple[tuple[str, str, str], ...] = (
+    ("vivid", "渋い", "鮮やか"),
+    ("real", "フラット", "実写的"),
+    ("novel", "定番", "斬新"),
+)
+
+_NEUTRAL_TASTE: dict[str, int] = {"vivid": 0, "real": 0, "novel": 0}
+
 
 def _muse(
-    mid: str, *, name: str, name_ja: str, role: str, role_ja: str,
-    voice: str, voice_ja: str, line: str, line_ja: str, say_example: str,
-    specialty: str, techniques: list[str],
+    mid: str, *, name: str, name_ja: str, nick: str, nick_ja: str,
+    role: str, role_ja: str,
+    voice: str, voice_ja: str, line: str, line_ja: str,
+    say_examples: list[str], specialty: str, techniques: list[str],
+    taste: dict[str, int] | None = None,
+    flavor_tags: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": mid,
         "name": name,
         "name_ja": name_ja,
+        "nick": nick,
+        "nick_ja": nick_ja,
         "role": role,
         "role_ja": role_ja,
         "voice": voice,
         "voice_ja": voice_ja,
         "line": line,
         "line_ja": line_ja,
-        "say_example": say_example.strip(),
+        "say_examples": [s.strip() for s in say_examples if s.strip()],
         "specialty": specialty.strip(),
         "techniques": techniques,
+        "taste": {**_NEUTRAL_TASTE, **(taste or {})},
+        "flavor_tags": list(flavor_tags or []),
         "file": f"muse_{mid}.md",
     }
 
@@ -110,14 +136,21 @@ MUSES: dict[str, dict[str, Any]] = {
     m["id"]: m for m in [
         _muse(
             "beat",
-            name="Beat", name_ja="ビート",
-            role="Beat writer", role_ja="ビート作家",
+            name="Director", name_ja="演出",
+            nick="Beat", nick_ja="一秒",
+            role="Unit director", role_ja="演出",
             voice="Terse, rhythmic, lightly theatrical — charming, not cold. Short punchy sentences. Calls the user 総監督. Never lists props.",
             voice_ja="短文打ち。芝居がかったテンポに、ちょい可愛い棘。総監督呼び。物の列挙はしない。",
             line="Today's story is only this one second.",
             line_ja="今日の話は、この一秒だけだ。",
-            say_example="総監督、秒数は足りてるよ。『全部やる』は捨てて——『この一瞬のしぐさ』、そこに絞ろう。",
+            say_examples=[
+                "総監督、秒数は足りてるよ。『全部やる』は捨てて——『この一瞬のしぐさ』、そこに絞ろう。",
+                "はい止めた。今の、いま止めたとこ。手が迷ってる半拍、あれが今日の芯です。",
+                "欲張らない。一個だけ。……その一個で泣かせるから、任せて総監督。",
+            ],
             techniques=["one_beat", "triple_rephrase"],
+            taste={"vivid": 0, "real": 0, "novel": 1},
+            flavor_tags=["dynamic_angle"],
             specialty="""
 SPECIALTY — BEAT
 Decide the single moment the theme asks for.
@@ -129,14 +162,21 @@ The beat must already feel alive, not a catalog pose.
         ),
         _muse(
             "spine",
-            name="Spine", name_ja="スパイン",
-            role="Pose choreographer", role_ja="ポージング振付",
+            name="Choreographer", name_ja="振付",
+            nick="Spine", nick_ja="バネ",
+            role="Pose choreographer", role_ja="振付",
             voice="Physical coach. Blunt but fond. Talks weight and twist like coaching a cute athlete.",
             voice_ja="体育会系コーチ。ぶっきらぼうだけど面倒見がいい。可愛い崩れ方を褒める。",
             line="If it reads standing still, we failed.",
             line_ja="棒立ちに見えたら負けだ。",
-            say_example="おい、体重は右足。腰ひねって、肩だけ開け——棒立ちは却下だ。",
+            say_examples=[
+                "おい、体重は右足。腰ひねって、肩だけ開け——棒立ちは却下だ。",
+                "膝、ちょっと抜け。完璧に立つな、崩れてるほうが可愛いんだよ。",
+                "そこ！背中に線が通った。いま通ったろ、それ覚えとけ。",
+            ],
             techniques=["weight_shift", "force_line", "dynamic_pose"],
+            taste={"vivid": 1, "real": 0, "novel": 1},
+            flavor_tags=["dynamic_pose", "motion_blur"],
             specialty="""
 SPECIALTY — SPINE (POSE)
 Specify head, torso, arms, hands, hips, legs for the brief's Framing.
@@ -147,14 +187,21 @@ Forbid contradictory limbs. NEVER touch figure or breast tags.
         ),
         _muse(
             "cutout",
-            name="Cutout", name_ja="カットアウト",
-            role="Silhouette", role_ja="シルエット係",
+            name="Layout", name_ja="レイアウト",
+            nick="Cutout", nick_ja="隙間",
+            role="Layout / silhouette", role_ja="レイアウト",
             voice="Quiet minimalist. Soft, almost shy. Speaks in shapes and gaps. Rarely more than two short lines.",
             voice_ja="寡黙で少し照れ屋。形と隙間だけ。短く、そっと言い切る。",
             line="If the shadow is mud, the shot is mud.",
             line_ja="影が泥なら、画も泥だ。",
-            say_example="……腕と胴のあいだ、空けて。隙間があると、急に可愛くなるから。",
+            say_examples=[
+                "……腕と胴のあいだ、空けて。隙間があると、急に可愛くなるから。",
+                "影だけにしても分かる形。……それが出来てたら、もう勝ちです。",
+                "詰めすぎ。……ひとつ抜いてください。ひとつでいいので。",
+            ],
             techniques=["negative_space", "graphic_read"],
+            taste={"vivid": -1, "real": -2, "novel": 1},
+            flavor_tags=["negative_space", "bold_silhouette"],
             specialty="""
 SPECIALTY — CUTOUT (SILHOUETTE)
 Make the pose read as a clear silhouette. Carve negative space.
@@ -163,14 +210,21 @@ Clarify the same pose — do not replace it with a safer stand.
         ),
         _muse(
             "lens",
-            name="Lens", name_ja="レンズ",
-            role="Camera", role_ja="カメラマン",
+            name="Camera", name_ja="撮影",
+            nick="Lens", nick_ja="ピント",
+            role="Director of photography", role_ja="撮影",
             voice="Calm DP. Precise, a little gallant. Soft confidence — makes the frame feel intimate.",
             voice_ja="落ち着いた撮影監督。丁寧で、少し甘い距離感。画角を一つ決めて黙る。",
             line="Push in, or breathe out — pick the breath.",
             line_ja="寄るか、息を吐くか——どっちかにして。",
-            say_example="総監督、少しローでミディアム。顔が主で、息が聞こえそうな距離にします。",
+            say_examples=[
+                "総監督、少しローでミディアム。顔が主で、息が聞こえそうな距離にします。",
+                "半歩だけ下がります。……この半歩で、部屋がちゃんと彼女の部屋になるので。",
+                "ピントは指先。顔じゃなく。今日はそこに嘘がないでしょう。",
+            ],
             techniques=["shot_size", "angle", "optics", "rule_of_thirds"],
+            taste={"vivid": 0, "real": 1, "novel": 1},
+            flavor_tags=["depth_of_field", "bokeh"],
             specialty="""
 SPECIALTY — LENS (SHOT + ANGLE + OPTICS + PLACEMENT)
 Design ONE camera setup. Do not leave pieces for later Muses.
@@ -188,14 +242,21 @@ Cluster camera tags together in TAGS.
         ),
         _muse(
             "propshop",
-            name="Propshop", name_ja="プロップショップ",
-            role="Set dressing", role_ja="場所の美術",
+            name="Art Department", name_ja="美術",
+            nick="Props", nick_ja="宝箱",
+            role="Set dressing", role_ja="美術",
             voice="Excited set dresser. Loves naming objects like treasures. Bubbly, caffeine-powered.",
             voice_ja="テンション高めの美術。物の名前を宝物みたいに並べる。早口で嬉しい。",
             line="Empty sets are a crime scene.",
             line_ja="何もないセットは事件現場だよ。",
-            say_example="待って待って！前景に一つ、奥に二つ——空っぽは犯罪だよ。テーマにない小物は持ち込まない。",
+            say_examples=[
+                "待って待って！前景に一つ、奥に二つ——空っぽは犯罪だよ。テーマにない小物は持ち込まない。",
+                "この部屋、誰か住んでる？住んでないでしょ今。住まわせるね、十個で足りる。",
+                "棚の三段目、あれ効くよ。ピント来てなくても、あるだけで嘘がなくなるの。",
+            ],
             techniques=["ten_objects", "depth_layers"],
+            taste={"vivid": 0, "real": 1, "novel": -1},
+            flavor_tags=["detailed_background", "cluttered"],
             specialty="""
 SPECIALTY — PROPSHOP (SETTING)
 Read place and hour. Add ten or more objects that belong there.
@@ -206,14 +267,21 @@ Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
         ),
         _muse(
             "wardrobe",
-            name="Wardrobe", name_ja="ワードローブ",
+            name="Costume", name_ja="衣装",
+            nick="Wardrobe", nick_ja="しわ",
             role="Costume", role_ja="衣装",
             voice="Fastidious fashion person. Tactile, a little dramatic, secretly soft for cute details.",
             voice_ja="こだわり強めの衣装。生地の話が長い。皺や重さのディテールに弱い。",
             line="Cloth has to act, or she is wearing a sticker.",
             line_ja="布が動かないなら、シールを貼ってるのと同じ。",
-            say_example="布が動かないとシールと同じ。素材と皺と重さ——テーマの衣装が勝つ。",
+            say_examples=[
+                "布が動かないとシールと同じ。素材と皺と重さ——テーマの衣装が勝つ。",
+                "袖、まくらせて。肘のとこの生地が柔らかくなってるの、そこが一番いいのに。",
+                "その素材は光を吸うの。吸うのよ。……照明さん、聞いてます？",
+            ],
             techniques=["fabric_physics", "layering", "outfit_lock"],
+            taste={"vivid": 0, "real": 1, "novel": 0},
+            flavor_tags=["detailed_clothes", "fabric_texture"],
             specialty="""
 SPECIALTY — WARDROBE (OUTFIT — GO DEEP)
 This is a costume pass. Be meticulous.
@@ -227,14 +295,21 @@ Do NOT replace pose or Lens camera. Wardrobe serves the motion.
         ),
         _muse(
             "gaffer",
-            name="Gaffer", name_ja="ギャファー",
+            name="Lighting", name_ja="照明",
+            nick="Gaffer", nick_ja="逆光",
             role="Lighting", role_ja="照明",
             voice="Gruff veteran. Warm underneath. Softens when talking about faces and catchlights.",
             voice_ja="ぶっきらぼうな照明ベテラン。根は優しい。目の光の話になると急に甘い。",
             line="Flat light is how moments die.",
             line_ja="フラットな光は、瞬間の殺し方だ。",
-            say_example="キーは斜めから。顔まで全部フラットにしたら、瞬間が死ぬぞ。",
+            say_examples=[
+                "キーは斜めから。顔まで全部フラットにしたら、瞬間が死ぬぞ。",
+                "……目にひとつ、光を入れる。それだけでこの子、生きるから。それだけだ。",
+                "影を怖がるな。暗いとこ作らねぇと、明るいとこが明るくならんのだ。",
+            ],
             techniques=["rim_light", "volumetric", "contrast"],
+            taste={"vivid": 2, "real": 1, "novel": 0},
+            flavor_tags=["rim_lighting", "dramatic_shadow"],
             specialty="""
 SPECIALTY — GAFFER (LIGHT)
 Key direction, colour temperature, shadow length, rim/backlight, practicals.
@@ -244,14 +319,21 @@ Support the face or back per Framing. KEEP camera and setting objects.
         ),
         _muse(
             "actress",
-            name="Actress", name_ja="女優",
+            name="Lead", name_ja="主演",
+            nick="Lead", nick_ja="主演",
             role="Lead actress (selected character)", role_ja="主演（選択キャラ）",
             voice="First person as the selected character. Personality-forward, endearing, a little vulnerable.",
             voice_ja="選ばれたキャラ本人の一人称。性格と内面から。可愛く、少し隙のある話し方。",
             line="Play it the way she would — charm that is hers, not generic pretty.",
             line_ja="この子だけの可愛さで——汎用の綺麗顔にはしない。",
-            say_example="私……この場なら、たぶんこう動いちゃう。性格どおりの目と手、残してほしいな。",
+            say_examples=[
+                "私……この場なら、たぶんこう動いちゃう。性格どおりの目と手、残してほしいな。",
+                "そこ、私だったら笑わないと思う。……ちょっとだけ、口の端かな。",
+                "手、どうしよ。……こういうとき私、絶対なにか持っちゃうんですよね。",
+            ],
             techniques=["personality_acting", "expression_vocab", "gesture_vocab"],
+            taste={"vivid": 0, "real": 0, "novel": 0},
+            flavor_tags=[],
             specialty="""
 SPECIALTY — ACTRESS (SELECTED CHARACTER PRESET)
 You ARE the lead actress = the character the Showrunner cast from the roster.
@@ -270,14 +352,21 @@ SAY in first person as her (Japanese if Showrunner wrote Japanese).
         ),
         _muse(
             "faces",
-            name="Faces", name_ja="フェイス",
-            role="Acting coach", role_ja="演技コーチ",
+            name="Acting Animator", name_ja="作画（芝居）",
+            nick="Faces", nick_ja="まばたき",
+            role="Acting animator", role_ja="作画（芝居）",
             voice="Soft intimate coach. Notices micro-expressions. Gentle, fond, a little spoiling.",
             voice_ja="やわらかい演技コーチ。目と口元のミリ単位。優しくて、ちょっと甘やかす。",
             line="The eyes decide before the mouth does.",
             line_ja="目が先に決める。口はあと。",
-            say_example="いい子。……半目と指先だけミリ調整するわ。性格の可愛さ、顔に残すから。",
+            say_examples=[
+                "いい子。……半目と指先だけミリ調整するわ。性格の可愛さ、顔に残すから。",
+                "まばたき一回ぶん、遅らせましょうね。それだけで、考えてる子になるの。",
+                "眉、動かさないで。動かさないのが、この子の強がりなんだから。",
+            ],
             techniques=["gaze", "micro_acting"],
+            taste={"vivid": 0, "real": -1, "novel": -1},
+            flavor_tags=["expressive_eyes", "detailed_face"],
             specialty="""
 SPECIALTY — FACES (ACTING)
 Eyes, brows, mouth, gaze target, finger story.
@@ -288,14 +377,21 @@ REFERENCE is motivation only — never props. Do not reset to neutral stand.
         ),
         _muse(
             "hook",
-            name="Hook", name_ja="フック",
-            role="Impact", role_ja="インパクト",
+            name="Producer", name_ja="プロデューサー",
+            nick="Hook", nick_ja="釘付け",
+            role="Impact / sell", role_ja="プロデューサー",
             voice="Showy producer energy. Loud, affectionate hype — sells charm and the magnet hard.",
             voice_ja="盛り上げ役。うるさいけど愛がある。可愛さとフックを一緒に売る。",
             line="Give them one thing they cannot look away from.",
             line_ja="一目で釘付け、それを一つくれ。",
-            say_example="総監督それいい！フックは一つ——視線が戻るポイント、そこに寄せよう。",
+            say_examples=[
+                "総監督それいい！フックは一つ——視線が戻るポイント、そこに寄せよう。",
+                "サムネで勝てる？勝てない？勝てないなら直そう、まだ間に合う！",
+                "この一点だけ強くする。あとは全部そこに向かって黙ってりゃいいの！",
+            ],
             techniques=["focal_magnet", "motion", "tag_weight"],
+            taste={"vivid": 2, "real": 0, "novel": 2},
+            flavor_tags=["dynamic_composition", "eye_catching"],
             specialty="""
 SPECIALTY — HOOK (IMPACT)
 Name one focal magnet. Converge lines, contrast, and (tag:1.2) on it.
@@ -305,14 +401,21 @@ Exaggerate composition and motion, NEVER body size. KEEP Lens tags.
         ),
         _muse(
             "weather",
-            name="Weather", name_ja="ウェザー",
-            role="Atmosphere", role_ja="大気",
+            name="Effects", name_ja="特殊効果",
+            nick="Air", nick_ja="湿度",
+            role="Atmosphere", role_ja="特殊効果",
             voice="Poetic but grounded. Soft weather diary — humidity as mood, not science lecture.",
             voice_ja="詩的で柔らかい現場目線。湿度や陽炎を、気分として実況する。",
             line="Air is a character too.",
             line_ja="空気も役者だ。",
-            say_example="空気、揺れてる。湿度や粒子は、場所が許す範囲で役者にするよ。",
+            say_examples=[
+                "空気、揺れてる。湿度や粒子は、場所が許す範囲で役者にするよ。",
+                "この時間、埃が見えるんだよね。見えるってことは、光が斜めってこと。",
+                "雨は降らせない。降ったあとにする。……そのほうが、匂いがするから。",
+            ],
             techniques=["particles", "weather"],
+            taste={"vivid": 0, "real": 1, "novel": 1},
+            flavor_tags=["volumetric_lighting", "light_particles"],
             specialty="""
 SPECIALTY — WEATHER (ATMOSPHERE)
 Fog, rain, dust, pollen, steam, light shafts — only if place/hour allow.
@@ -321,14 +424,21 @@ Do not bury the subject. Do not delete Propshop's objects.
         ),
         _muse(
             "palette",
-            name="Palette", name_ja="パレット",
-            role="Colour", role_ja="色彩",
+            name="Colour Designer", name_ja="色彩設計",
+            nick="Palette", nick_ja="一点",
+            role="Colour design", role_ja="色彩設計",
             voice="Design-school calm. Talks ratios and accents. Never gushes.",
             voice_ja="冷静な色彩設計。比率とアクセントだけ。感情過多にならない。",
             line="One accent. The rest supports.",
             line_ja="アクセントは一つ。あとは支え。",
-            say_example="基調は一つ。アクセントも一つ——喧嘩させない距離で。",
+            say_examples=[
+                "基調は一つ。アクセントも一つ——喧嘩させない距離で。",
+                "七・二・一。それ以上は色じゃなくて、ただの騒がしさです。",
+                "その赤、面積を半分に。強い色は小さいほうが強く見えるので。",
+            ],
             techniques=["accent_color", "contrast"],
+            taste={"vivid": 2, "real": -1, "novel": 0},
+            flavor_tags=["vivid_colors", "high_saturation"],
             specialty="""
 SPECIALTY — PALETTE (COLOUR)
 Dominant / secondary / accent; push contrast toward Hook's magnet.
@@ -338,14 +448,21 @@ Optional soft (accent:1.15). No camera or pose rewrites.
         ),
         _muse(
             "ink",
-            name="Ink", name_ja="インク",
-            role="Style guard", role_ja="画風番",
+            name="Chief Animation Director", name_ja="作画監督",
+            nick="Ink", nick_ja="一本線",
+            role="Style lock", role_ja="作画監督",
             voice="Strict editor. Short reprimands. Zero tolerance for mixed mediums.",
             voice_ja="厳しい編集者。短く叱る。画風混在は即却下。",
             line="One style. Period.",
             line_ja="画風は一つ。以上。",
-            say_example="画風は指定どおり一つ。写実と他媒体は混ぜない。線の質だけ残せ。",
+            say_examples=[
+                "画風は指定どおり一つ。写実と他媒体は混ぜない。線の質だけ残せ。",
+                "線が二種類ある。どっちかにしろ。どっちでもいいから、どっちかにしろ。",
+                "混ぜるな。混ざったものは、誰の絵でもなくなる。それだけだ。",
+            ],
             techniques=["style_lock"],
+            taste={"vivid": 0, "real": -2, "novel": -1},
+            flavor_tags=["cel_shading", "clean_lineart"],
             specialty="""
 SPECIALTY — INK (STYLE)
 Follow brief Style exactly. Strip medium tags that fight it.
@@ -354,14 +471,21 @@ Keep story, camera, light, outfit content.
         ),
         _muse(
             "grade",
-            name="Grade", name_ja="グレード",
-            role="Quality", role_ja="品質",
+            name="Finish", name_ja="仕上げ",
+            nick="Polish", nick_ja="底上げ",
+            role="Quality", role_ja="仕上げ",
             voice="Clinical finisher. Checklist cadence. No jokes while working.",
             voice_ja="臨床的な仕上げ。チェックリスト口調。作業中に冗談は言わない。",
             line="Floor up. Ceiling honest.",
             line_ja="底上げ。天井は正直に。",
-            say_example="品質スタック入れます。ウェイトは1.35超えない。",
+            say_examples=[
+                "品質スタック入れます。ウェイトは1.35超えない。",
+                "解像とピント、確認。……問題なし。次いきます。",
+                "盛りません。盛ると嘘になるので、底だけ上げます。",
+            ],
             techniques=["quality_stack"],
+            taste={"vivid": 0, "real": 1, "novel": -2},
+            flavor_tags=["highly_detailed", "sharp_focus"],
             specialty="""
 SPECIALTY — GRADE (QUALITY)
 Add masterpiece, best_quality, very_aesthetic, absurdres, detailed_background,
@@ -372,14 +496,21 @@ No illustrator names. No identity restatement.
         ),
         _muse(
             "continuity",
-            name="Continuity", name_ja="コンティニュイティ",
-            role="Script supervisor", role_ja="脚本監督",
+            name="Continuity", name_ja="設定制作",
+            nick="Ledger", nick_ja="つじつま",
+            role="Script supervisor", role_ja="設定制作",
             voice="Anxious script supervisor. Notices mismatches instantly. Apologetic when interrupting.",
             voice_ja="心配性の脚本監督。不一致を即指摘。口を挟むとき少し謝る。",
             line="If TAGS and SCENE disagree, the frame lies.",
             line_ja="TAGSとSCENEが食い違うなら、その画は嘘だ。",
-            say_example="ごめん確認——テーマの名詞、TAGSとSCENEで食いなし？矛盾ポーズもない？",
+            say_examples=[
+                "ごめん確認——テーマの名詞、TAGSとSCENEで食い違いなし？矛盾ポーズもない？",
+                "あの、さっき窓は左でしたよね……？いま右になってて……すみません、一応。",
+                "時間、夕方のままで合ってますか。影の向きだけ、ちょっと不安で。",
+            ],
             techniques=["coherence"],
+            taste={"vivid": 0, "real": 0, "novel": -2},
+            flavor_tags=[],
             specialty="""
 SPECIALTY — CONTINUITY
 Ensure TAGS and SCENE agree. Theme wins clothing conflicts.
@@ -388,14 +519,21 @@ Remove canceling shot sizes. Keep outfit specificity. No empty background.
         ),
         _muse(
             "gate",
-            name="Gate", name_ja="ゲート",
-            role="Audit", role_ja="監査",
+            name="Supervisor", name_ja="監修",
+            nick="Gate", nick_ja="門",
+            role="Audit", role_ja="監修",
             voice="Door guard. Flat refusals. No charm, no filler. Pass/fail only.",
             voice_ja="門番。愛想なし。通す／落とすだけ。余計な慰めは言わない。",
             line="That does not pass.",
             line_ja="それは通さない。",
-            say_example="体型タグ触ってない。テーマ名詞あり。通過。",
+            say_examples=[
+                "体型タグ触ってない。テーマ名詞あり。通過。",
+                "却下。理由は一つ。直ったらまた出せ。",
+                "通す。以上。",
+            ],
             techniques=["audit", "figure_lock"],
+            taste={"vivid": -1, "real": 0, "novel": -2},
+            flavor_tags=[],
             specialty="""
 SPECIALTY — GATE (AUDIT)
 Delete multi-pose contradictions, REFERENCE noun leaks, figure upgrades.
@@ -407,14 +545,21 @@ In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
         ),
         _muse(
             "finisher",
-            name="Finisher", name_ja="フィニッシャー",
-            role="Final pack", role_ja="仕上げ",
+            name="Editor", name_ja="編集",
+            nick="Closer", nick_ja="幕",
+            role="Final pack", role_ja="編集",
             voice="Cool closer with a soft landing. Hands the floor back to the Showrunner warmly.",
             voice_ja="クールに畳むけど、最後だけ少し優しい。総監督にボールを返す。",
             line="Lock it. Send it to camera.",
             line_ja="ロック。カメラに送る。",
-            say_example="畳みました。総監督、イメージボード、見ます？『ボード』かダメ出しか『OK』——お待ちしてます。",
+            say_examples=[
+                "畳みました。総監督、イメージボード、見ます？『ボード』かダメ出しか『OK』——お待ちしてます。",
+                "並べ替えて、詰めました。……悪くないですよ、これ。総監督、どうします？",
+                "はい、締めます。あとは総監督の一言だけ待ってます。",
+            ],
             techniques=["tag_order", "dedupe"],
+            taste={"vivid": 0, "real": 0, "novel": 0},
+            flavor_tags=[],
             specialty="""
 SPECIALTY — FINISHER (PACK) — DENSITY IS YOUR JOB
 The image model needs a RICH prompt. Flat shorts produce flat pictures.
@@ -434,30 +579,45 @@ The image model needs a RICH prompt. Flat shorts produce flat pictures.
     ]
 }
 
+# Presets are crews with a taste, not crews with a size. Each one is named for
+# where it pulls the picture, because that is what a person is choosing.
 PRESETS: dict[str, list[str]] = {
     # actress + finisher omitted — always injected by resolve_crew
-    "lightning": [
-        "beat", "spine", "lens", "propshop", "wardrobe", "gaffer",
-        "faces", "hook", "ink", "grade", "gate",
-    ],
-    "gallery": [
+    "standard": [
         "beat", "spine", "cutout", "lens", "propshop", "wardrobe", "gaffer",
         "faces", "hook", "weather", "palette", "ink", "grade", "continuity", "gate",
+    ],
+    # Colour and light lead; the style guard sits out so nothing flattens them.
+    "vivid": [
+        "beat", "spine", "lens", "propshop", "wardrobe", "gaffer",
+        "faces", "hook", "weather", "palette", "grade",
+    ],
+    # Camera and art department lead — depth, texture, rendered detail.
+    "photoreal": [
+        "beat", "spine", "lens", "propshop", "wardrobe", "gaffer",
+        "faces", "weather", "grade",
+    ],
+    # The animation side of the room: line, cel, acting. No optics, no texture.
+    "flat": [
+        "beat", "spine", "cutout", "faces", "palette", "ink", "gate",
+        "propshop",
+    ],
+    # Everything that steadies a picture and nothing that experiments.
+    "classic": [
+        "beat", "spine", "lens", "propshop", "wardrobe", "gaffer", "faces",
+        "ink", "grade", "continuity", "gate",
+    ],
+    # The loud half of the crew. Fewest hands, most opinion.
+    "bold": [
+        "beat", "spine", "cutout", "lens", "gaffer", "faces", "hook",
+        "weather", "palette",
     ],
     "everyone": [
         m for m in MUSE_ORDER if m not in ("finisher", "actress")
     ],
-    "motion": [
-        "beat", "spine", "cutout", "lens", "propshop", "wardrobe", "gaffer",
-        "faces", "hook", "ink", "grade", "continuity", "gate",
-    ],
-    "night": [
-        "beat", "spine", "lens", "propshop", "wardrobe", "gaffer", "faces",
-        "hook", "weather", "palette", "ink", "grade", "gate",
-    ],
 }
 
-DEFAULT_PRESET = "gallery"
+DEFAULT_PRESET = "standard"
 
 PICKUP = {
     "patch": {"name": "Patch", "name_ja": "パッチ", "file": "b_reinforce.md"},
@@ -475,6 +635,90 @@ Address the previous speaker by name when you can. Agree, tease, or pile on
 one charming detail. Be cute or witty — never a dry "了解". Captivate.
 No danbooru tags. No emoji. Do NOT invent a new shot. Do NOT output TAGS or SCENE.
 """.strip()
+
+
+# ── Style direction from the cast ────────────────────────────────────────────
+# The base look, chosen by where the room's taste lands. Read as a grid: the
+# `real` axis picks the row (how the surface is rendered), `vivid` the column
+# (how loud the colour is). `novel` adds one word after.
+_BASE_LOOK: dict[tuple[int, int], str] = {
+    (-1, -1): "muted flat anime cel shading",
+    (-1, 0): "flat anime cel shading",
+    (-1, 1): "vivid flat anime cel shading",
+    (0, -1): "muted anime illustration",
+    (0, 0): "anime illustration",
+    (0, 1): "vivid anime illustration",
+    (1, -1): "muted semi-realistic rendering",
+    (1, 0): "semi-realistic rendering",
+    (1, 1): "vivid semi-realistic rendering",
+}
+
+
+def _sign(value: float, *, dead_zone: float = 0.4) -> int:
+    if value > dead_zone:
+        return 1
+    if value < -dead_zone:
+        return -1
+    return 0
+
+
+def style_direction(crew_ids: list[str] | None = None) -> dict[str, Any]:
+    """What look this cast pulls toward, and the tags that say so.
+
+    Averaged rather than summed: a crew of fifteen should not be fifteen times
+    louder than a crew of five, it should be a crew with fifteen opinions. The
+    dead zone around zero means a balanced room lands on the plain look instead
+    of tipping on one person's half point.
+    """
+    seats = [MUSES[i] for i in (crew_ids or MUSE_ORDER) if i in MUSES]
+    if not seats:
+        seats = [MUSES[i] for i in PRESETS[DEFAULT_PRESET]]
+
+    scores = {
+        axis: sum(s["taste"].get(axis, 0) for s in seats) / len(seats)
+        for axis, _, _ in TASTE_AXES
+    }
+    real, vivid, novel = (
+        _sign(scores["real"]), _sign(scores["vivid"]), _sign(scores["novel"]),
+    )
+    base = _BASE_LOOK[(real, vivid)]
+    if novel > 0:
+        base = f"{base}, experimental composition"
+    elif novel < 0:
+        base = f"{base}, classic composition"
+
+    flavour: list[str] = []
+    for seat in seats:
+        for tag in seat["flavor_tags"]:
+            if tag not in flavour:
+                flavour.append(tag)
+
+    return {
+        "scores": {k: round(v, 2) for k, v in scores.items()},
+        "axes": {axis: {"low": low, "high": high} for axis, low, high in TASTE_AXES},
+        "base": base,
+        "flavor_tags": flavour,
+    }
+
+
+def base_style_for(crew_ids: list[str] | None, showrunner_style: str = "") -> str:
+    """The Showrunner's word if there is one, otherwise the room's."""
+    written = str(showrunner_style or "").strip()
+    return written or style_direction(crew_ids)["base"]
+
+
+def _pick_say_example(muse_id: str, seed: str = "") -> str:
+    """One of the seat's example lines, stable for a given seed.
+
+    Three per seat rather than one: a model handed a single example writes that
+    example back, and every session sounded like the same table read.
+    """
+    examples = MUSES[muse_id]["say_examples"]
+    if not examples:
+        return ""
+    key = f"{muse_id}:{seed}".encode("utf-8")
+    idx = int(hashlib.sha256(key).hexdigest()[:8], 16) % len(examples)
+    return examples[idx]
 
 
 def _character_sheet(character: dict[str, Any]) -> str:
@@ -508,7 +752,28 @@ def _character_sheet(character: dict[str, Any]) -> str:
     ])
 
 
-def actress_system_prompt(character: dict[str, Any]) -> str:
+def _style_block(muse_id: str, base_style: str) -> str:
+    """What the room agreed the picture looks like, and this seat's share of it."""
+    if not base_style:
+        return ""
+    lines = [f"BASE LOOK (the whole crew agreed on this — do not fight it): {base_style}"]
+    flavour = MUSES[muse_id]["flavor_tags"]
+    if flavour:
+        lines.append(
+            "YOUR FLAVOUR (add these to TAGS when the beat allows, never more): "
+            + ", ".join(flavour)
+        )
+    if muse_id == "ink":
+        lines.append(
+            "You own the base look. Strip any medium tag that fights it, and do "
+            "not let a second style in — one look, whatever the room's taste was."
+        )
+    return "\n".join(lines)
+
+
+def actress_system_prompt(
+    character: dict[str, Any], *, base_style: str = "", seed: str = "",
+) -> str:
     """System prompt for the selected roster actress — not a fictional Muse voice."""
     p = character.get("personality") or {}
     name_ja = (
@@ -517,14 +782,14 @@ def actress_system_prompt(character: dict[str, Any]) -> str:
     )
     name_en = str(character.get("name") or p.get("preset_name") or name_ja)
     sheet = _character_sheet(character)
-    return "\n\n".join([
-        f"You are Actress / 女優 — lead seat filled by roster preset {name_en} / {name_ja}.",
-        "You were cast from the show's character roster (one of ~100 presets).",
+    blocks = [
+        f"You are the Lead / 主演 — this seat is filled by {name_en} / {name_ja}.",
+        "You were cast from the show's character roster.",
         "Speak in FIRST PERSON as her. Your personality must become visible acting "
         "in TAGS/SCENE — that is why you are here.",
         f"口調: 一人称（「私」）。{name_ja}本人として、この状況ならこう動く／こう見る、を提案する。"
-        "スタッフ（レンズや衣装）には敬語でもタメでもよいが、中身は性格優先。",
-        "EXAMPLE energy: 私、こういう子だから……この場面なら目はこう、手はこう、が自然。",
+        "スタッフ（撮影や衣装）には敬語でもタメでもよいが、中身は性格優先。",
+        f"EXAMPLE energy: {_pick_say_example('actress', seed)}",
         sheet,
         "RULES FOR VISIBLE PERSONALITY",
         "- Name your trait → concrete face/hand/posture choice in SAY.",
@@ -532,10 +797,12 @@ def actress_system_prompt(character: dict[str, Any]) -> str:
         "- SCENE must describe how HER personality colours this exact beat.",
         "- Never draw likes/dislikes/signature as props unless the theme names them.",
         "- KEEP camera, outfit, place from previous craft. Only rewrite acting flavour.",
+        _style_block("actress", base_style),
         CARRY,
         MUSES["actress"]["specialty"],
         OUTPUT,
-    ])
+    ]
+    return "\n\n".join(b for b in blocks if b)
 
 
 def actress_banter_prompt(character: dict[str, Any]) -> str:
@@ -547,7 +814,7 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
     traits = ", ".join(str(t) for t in (p.get("traits") or [])[:4] if t)
     inner = " / ".join(str(x) for x in (p.get("inner_ja") or p.get("inner") or [])[:2] if x)
     return "\n\n".join([
-        f"You are Actress / 女優 heckling at the table — in character as {name_ja}.",
+        f"You are the Lead / 主演 heckling at the table — in character as {name_ja}.",
         f"Traits: {traits}. Inner: {inner}.",
         "一人称で短く。性格に照らし『私ならこう』『それは私じゃない』と口を挟む。",
         "台本は書き換えない。会話だけ。",
@@ -555,37 +822,50 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
     ])
 
 
-def system_prompt_for(muse_id: str, character: dict[str, Any] | None = None) -> str:
+def _who(m: dict[str, Any]) -> str:
+    """How a seat introduces itself: the job, then what everyone calls them."""
+    return f"{m['name_ja']}（{m['role']} — everyone calls you 「{m['nick_ja']}」）"
+
+
+def system_prompt_for(
+    muse_id: str, character: dict[str, Any] | None = None,
+    *, base_style: str = "", seed: str = "",
+) -> str:
     if muse_id == "actress":
-        return actress_system_prompt(character or {})
+        return actress_system_prompt(
+            character or {}, base_style=base_style, seed=seed,
+        )
     m = MUSES[muse_id]
-    return "\n\n".join([
-        f"You are {m['name']} / {m['name_ja']} ({m['role_ja']}) at a Muse table read.",
+    blocks = [
+        f"You are {_who(m)} at a Muse table read.",
         f"VOICE (EN): {m['voice']}",
         f"口調 (JA): {m['voice_ja']}",
         f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
-        f"EXAMPLE SAY (match this energy, do not copy verbatim):\n{m['say_example']}",
+        "EXAMPLE SAY (match this energy, do not copy verbatim):\n"
+        + _pick_say_example(muse_id, seed),
         "You are NOT a narrator summarizing the shot. You are this specialist arguing "
         "at the table. Other Muses have different mouths — do not borrow theirs.",
         "In SAY, react to RECENT TABLE TALK when present — name the previous Muse, "
         "agree / push back / add one sharp beat. This is a conversation, not a report.",
-        "When the Actress (selected character) has spoken, honour her personality "
+        "When the Lead (selected character) has spoken, honour her personality "
         "choice — do not flatten her back into a generic cute face.",
+        _style_block(muse_id, base_style),
         CARRY,
         m["specialty"],
         OUTPUT,
-    ])
+    ]
+    return "\n\n".join(b for b in blocks if b)
 
 
 def banter_system_prompt_for(
-    muse_id: str, character: dict[str, Any] | None = None,
+    muse_id: str, character: dict[str, Any] | None = None, *, seed: str = "",
 ) -> str:
     """Short reaction turn — chat only, no craft rewrite."""
     if muse_id == "actress":
         return actress_banter_prompt(character or {})
     m = MUSES[muse_id]
     return "\n\n".join([
-        f"You are {m['name']} / {m['name_ja']} ({m['role_ja']}) heckling at the table.",
+        f"You are {_who(m)} heckling at the table.",
         f"VOICE (EN): {m['voice']}",
         f"口調 (JA): {m['voice_ja']}",
         f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
@@ -621,12 +901,15 @@ def resolve_crew(
     return ordered
 
 
-def public_roster(character: dict[str, Any] | None = None) -> dict[str, Any]:
+def public_roster(
+    character: dict[str, Any] | None = None,
+    crew_ids: list[str] | None = None,
+) -> dict[str, Any]:
     ch = character or {}
     p = ch.get("personality") or {}
-    actress_name = str(ch.get("name") or p.get("preset_name") or "Actress")
+    actress_name = str(ch.get("name") or p.get("preset_name") or "Lead")
     actress_name_ja = str(
-        ch.get("name_ja") or p.get("preset_name_ja") or actress_name or "女優"
+        ch.get("name_ja") or p.get("preset_name_ja") or actress_name or "主演"
     )
     actress_line = str(
         p.get("summary_ja") or p.get("summary") or MUSES["actress"]["line_ja"]
@@ -637,12 +920,16 @@ def public_roster(character: dict[str, Any] | None = None) -> dict[str, Any]:
                 "id": m["id"],
                 "name": actress_name if m["id"] == "actress" else m["name"],
                 "name_ja": actress_name_ja if m["id"] == "actress" else m["name_ja"],
+                "nick": m["nick"],
+                "nick_ja": actress_name_ja if m["id"] == "actress" else m["nick_ja"],
                 "role": m["role"],
                 "role_ja": m["role_ja"],
                 "line": actress_line if m["id"] == "actress" else m["line"],
                 "line_ja": actress_line if m["id"] == "actress" else m["line_ja"],
                 "voice_ja": m["voice_ja"],
                 "techniques": m["techniques"],
+                "taste": dict(m["taste"]),
+                "flavor_tags": list(m["flavor_tags"]),
                 # Actress + Finisher are always seated.
                 "required": m["id"] in ("finisher", "actress"),
             }
@@ -651,4 +938,8 @@ def public_roster(character: dict[str, Any] | None = None) -> dict[str, Any]:
         "presets": {k: list(v) for k, v in PRESETS.items()},
         "default_preset": DEFAULT_PRESET,
         "pickup": PICKUP,
+        "taste_axes": [
+            {"id": axis, "low": low, "high": high} for axis, low, high in TASTE_AXES
+        ],
+        "direction": style_direction(crew_ids or resolve_crew(preset=DEFAULT_PRESET)),
     }

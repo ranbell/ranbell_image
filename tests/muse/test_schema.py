@@ -24,9 +24,9 @@ def test_a_new_session_needs_nothing_once_the_four_inputs_are_set():
     ]
 
 
-def test_new_session_casts_gallery_crew_by_default():
+def test_new_session_casts_the_standard_crew_by_default():
     s = schema.new_session()
-    assert s["inputs"]["crew_preset"] == "gallery"
+    assert s["inputs"]["crew_preset"] == "standard"
     assert "beat" in s["inputs"]["crew_ids"]
     assert "finisher" not in s["inputs"]["crew_ids"]  # always appended at resolve
     assert "actress" not in s["inputs"]["crew_ids"]  # always injected at resolve

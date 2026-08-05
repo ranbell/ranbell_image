@@ -77,7 +77,14 @@ def _cast(session: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _style(session: dict[str, Any]) -> str:
-    return str(_inputs(session).get("style") or "")
+    """The look everything downstream obeys.
+
+    The Showrunner's Style box wins when it has a word in it. When it is empty
+    the cast decides: a room of lighting, colour and the producer pulls vivid, a
+    room of the animation director and the supervisor pulls flat, and swapping
+    one person moves the picture. That is the reason to let people pick a crew.
+    """
+    return crew.base_style_for(_crew_ids(session), _inputs(session).get("style") or "")
 
 
 def _text_model(inputs: dict[str, Any]) -> str:
@@ -182,7 +189,7 @@ def _rebuild_brief(session: dict[str, Any]) -> None:
     session["brief"] = brief_mod.build(
         character,
         str(inputs.get("theme") or ""),
-        str(inputs.get("style") or ""),
+        _style(session),
         framing=_framing(inputs),
     )
 
@@ -216,6 +223,7 @@ async def _run_muse_turn(
         character=session.get("character") or {},
         style=_style(session),
         cast=_cast(session),
+        seed=str(session.get("session_id") or ""),
         on_token=_token_publisher(sid, muse_id),
     )
 

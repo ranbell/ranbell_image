@@ -21,7 +21,7 @@ _SITUATION_BANNED = (
 
 
 def test_resolve_crew_always_ends_with_finisher():
-    ids = crew.resolve_crew(preset="lightning")
+    ids = crew.resolve_crew(preset="classic")
     assert ids[-1] == "finisher"
     assert "beat" in ids
     assert "wardrobe" in ids
@@ -64,11 +64,11 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert "TAGS:" in text
     assert "SCENE:" in text
     assert "English only" in text
-    assert "You are Beat" in text
+    assert "演出" in text and "一秒" in text
     assert "口調 (JA)" in text
     assert "EXAMPLE SAY" in text
     assert "conversation" in text.lower() or "RECENT TABLE TALK" in text
-    assert crew.MUSES["beat"]["say_example"]
+    assert len(crew.MUSES["beat"]["say_examples"]) >= 3
     assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
 
 
@@ -117,5 +117,63 @@ def test_public_roster_has_no_real_creator_names():
     # Guard against accidentally shipping real creator shout-outs.
     for banned in ("greg", "rutkowski", "artis", "wlop", "mucha"):
         assert banned not in names
-    assert roster["default_preset"] == "gallery"
-    assert "lightning" in roster["presets"]
+    assert roster["default_preset"] == "standard"
+    assert "vivid" in roster["presets"]
+
+
+def test_every_seat_has_a_job_a_nickname_and_a_taste():
+    for mid in crew.MUSE_ORDER:
+        m = crew.MUSES[mid]
+        assert m["name_ja"], mid
+        assert m["nick_ja"], mid
+        assert set(m["taste"]) == {"vivid", "real", "novel"}, mid
+        for axis, score in m["taste"].items():
+            assert -2 <= score <= 2, f"{mid}.{axis} = {score}"
+        assert len(m["say_examples"]) >= 3, mid
+        # Three lines that are actually three lines, not one written thrice.
+        assert len(set(m["say_examples"])) == len(m["say_examples"]), mid
+
+
+def test_swapping_the_crew_moves_the_look():
+    """The whole reason a person picks a crew."""
+    flat = crew.style_direction(crew.PRESETS["flat"])
+    real = crew.style_direction(crew.PRESETS["photoreal"])
+    loud = crew.style_direction(crew.PRESETS["vivid"])
+    classic = crew.style_direction(crew.PRESETS["classic"])
+
+    assert flat["base"] != real["base"]
+    assert "flat" in flat["base"]
+    assert "semi-realistic" in real["base"]
+    assert "vivid" in loud["base"]
+    assert "classic composition" in classic["base"]
+
+    assert flat["scores"]["real"] < real["scores"]["real"]
+    assert loud["scores"]["vivid"] > classic["scores"]["vivid"]
+
+
+def test_a_crew_is_averaged_not_summed():
+    """Fifteen people are fifteen opinions, not fifteen times the volume."""
+    one = crew.style_direction(["gaffer"])
+    many = crew.style_direction(["gaffer"] + list(crew.PRESETS["standard"]))
+    assert one["scores"]["vivid"] >= many["scores"]["vivid"]
+    assert -2 <= many["scores"]["vivid"] <= 2
+
+
+def test_the_showrunner_outranks_the_room():
+    written = crew.base_style_for(crew.PRESETS["flat"], "watercolour storybook")
+    assert written == "watercolour storybook"
+    assert crew.base_style_for(crew.PRESETS["flat"], "  ") == \
+        crew.style_direction(crew.PRESETS["flat"])["base"]
+
+
+def test_the_example_line_varies_between_sessions_but_holds_within_one():
+    seeds = {crew._pick_say_example("beat", f"session-{i}") for i in range(40)}
+    assert len(seeds) > 1, "every session would sound identical"
+    assert crew._pick_say_example("beat", "s1") == crew._pick_say_example("beat", "s1")
+
+
+def test_the_base_look_reaches_the_seat_that_guards_style():
+    text = crew.system_prompt_for("ink", base_style="vivid flat anime cel shading")
+    assert "vivid flat anime cel shading" in text
+    assert "You own the base look" in text
+    assert "cel_shading" in text  # its own flavour

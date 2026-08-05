@@ -56,7 +56,7 @@ LLM_DEFAULTS: dict[str, object] = {
     # Drop the VLM from VRAM before each Comfy render. Off by default.
     "unload_vlm": False,
     # Cast preset for the table-read crew (see muse.crew.PRESETS).
-    "crew_preset": "gallery",
+    "crew_preset": "standard",
     # Banter between craft passes. light = Ollama-friendly (fewer side calls);
     # full = previous speaker + occasional heckler; off = craft only.
     "banter_mode": "light",
