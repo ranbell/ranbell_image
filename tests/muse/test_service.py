@@ -348,8 +348,8 @@ def test_pick_responders_is_fixed_desk_not_keyword_router():
         "actress", "faces", "hook", "finisher",
     ]
     a = service._pick_responders("服をコートにして", crew_ids)
-    b = service._pick_responders("ちょっとセクシーにしましょう", crew_ids)
-    c = service._pick_responders("もっと可愛く、魅力出して", crew_ids)
+    b = service._pick_responders("トーンを変えて", crew_ids)
+    c = service._pick_responders("雰囲気をもっと出して", crew_ids)
     d = service._pick_responders("画角を寄せて", crew_ids)
     assert a == b == c == d
     assert a[0] == "actress"
