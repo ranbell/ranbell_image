@@ -793,6 +793,23 @@
       "resetConfirmDesc": "The current list will be wiped and only the seed set will remain.",
       "resetDone": "Reset done (deleted {deleted} / inserted {inserted})"
     },
+    "characters": {
+      "title": "Characters",
+      "desc": "The Muse roster. Bundled characters are seeded once, when the collection is empty, so an updated ship file is only picked up here.",
+      "refresh": "Reload",
+      "total": "Registered",
+      "drawn": "With a board",
+      "mine": "Written here",
+      "resetTitle": "Re-read the bundled roster",
+      "resetDesc": "Bundled characters are restored to the shipped text and ones the file has dropped are deleted. Drawn pictures are kept; characters you wrote yourself are left alone.",
+      "resetBtn": "Re-seed",
+      "resetConfirm": "Re-read the {n} bundled characters from the shipped file?",
+      "resetRemoves": "{n} characters are no longer in the file and will be deleted: {who} …",
+      "resetOrphanImages": "{n} reference images stay in the gallery with nobody attached.",
+      "resetKeepsMine": "{n} characters you wrote yourself are left alone.",
+      "resetNothingToRemove": "Nothing to delete — the bundled text is re-applied and every picture is kept.",
+      "resetDone": "Re-read {n} characters, removed {removed}"
+    },
     "connection": {
       "title": "Connections",
       "status": "Connection status",
@@ -1430,13 +1447,6 @@
     "watching": "waiting for the render",
     "charm": "Hidden charm",
     "knownFor": "Known for",
-    "stopN": "Stop ({n})",
-    "resetRoster": "Re-seed",
-    "resetHint": "Re-read the bundled character sheets: edits are re-applied, characters the file has dropped are removed, drawn pictures are kept",
-    "resetConfirm": "Re-read the {n} bundled characters from the shipped file.\nEdits to them are lost; everything drawn for them is kept.",
-    "resetRemoves": "{n} characters are no longer in the file and will be deleted: {who} …",
-    "resetOrphanImages": "{n} reference images stay in the gallery, no longer attached to anyone.",
-    "resetKeepsMine": "{n} characters you made yourself are left alone.",
-    "resetDone": "Re-read {n} characters, removed {removed}"
+    "stopN": "Stop ({n})"
   }
 }

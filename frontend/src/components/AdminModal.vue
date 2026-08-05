@@ -63,6 +63,10 @@ const authorsLoading = ref(false)
 const authorForm = ref({ id: '', name: '', genre_tag: '', style_description: '' })
 const authorEditing = ref(false)
 
+// Muse character roster
+const rosterLoading = ref(false)
+const roster = ref(null)         // { total, mine, drawn }
+
 const configWorkflows = ref([])
 
 // Connection tab
@@ -371,6 +375,7 @@ function switchAdminTab(id) {
   if (id === 'info') { fetchInfo(); fetchAiStatus() }
   if (id === 'system') fetchInfo()
   if (id === 'authors') fetchAuthors()
+  if (id === 'characters') fetchCharacterRoster()
 }
 
 async function fetchAuthors() {
@@ -498,6 +503,77 @@ function resetAuthorsToDefaults() {
   )
 }
 
+// ── Muse character roster ─────────────────────────────────────────────────────
+async function fetchCharacterRoster() {
+  rosterLoading.value = true
+  try {
+    const r = await fetch('/api/characters')
+    if (!r.ok) throw new Error(r.statusText)
+    const rows = (await r.json()).characters || []
+    roster.value = {
+      total: rows.length,
+      mine: rows.filter(c => c.user_created).length,
+      drawn: rows.filter(c => Object.values(c.board || {}).some(Boolean)).length,
+    }
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
+/*
+ * Re-read the shipped roster.
+ *
+ * It deletes — a character the asset file has stopped claiming is removed — so
+ * it asks with the real numbers rather than with a sentence about what usually
+ * happens. The preview is the same call with `dry_run`, and it is the only way
+ * the confirmation can say "and these 100 go" without being a guess.
+ */
+async function resetCharacterRoster() {
+  rosterLoading.value = true
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/characters/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true }),
+    })
+    if (!r.ok) throw new Error(r.statusText)
+    const plan = await r.json()
+    confirmThen(
+      t('admin.characters.resetConfirm', { n: plan.seeds ?? 0 }),
+      resetPlanDescription(plan),
+      () => adminAction('characterReset', '/api/characters/reset', {
+        body: JSON.stringify({}),
+        successMsg: d => t('admin.characters.resetDone', {
+          n: d.inserted ?? 0, removed: d.removed ?? 0,
+        }),
+        after: fetchCharacterRoster,
+      }),
+    )
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
+function resetPlanDescription(plan) {
+  const lines = []
+  if (plan.removed) {
+    lines.push(t('admin.characters.resetRemoves', {
+      n: plan.removed, who: (plan.removed_labels || []).slice(0, 6).join(', '),
+    }))
+  }
+  if (plan.orphan_images) {
+    lines.push(t('admin.characters.resetOrphanImages', { n: plan.orphan_images }))
+  }
+  if (plan.kept) lines.push(t('admin.characters.resetKeepsMine', { n: plan.kept }))
+  if (!lines.length) lines.push(t('admin.characters.resetNothingToRemove'))
+  return lines.join(' ')
+}
+
 // Proxy functions that emit to App.vue
 function triggerPipelineAll() {
   emit('trigger-pipeline', [])
@@ -555,6 +631,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             { id: 'ai',          label: $t('admin.ai.title') },
             { id: 'config',      label: $t('admin.config.title') },
             { id: 'authors',     label: $t('admin.authors.title') },
+            { id: 'characters',  label: $t('admin.characters.title') },
             { id: 'system',      label: $t('admin.system.title') },
             { id: 'jobs',        label: 'Jobs' },
             { id: 'connection',  label: $t('admin.connection.title') },
@@ -1634,6 +1711,51 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
               <button type="button" @click="resetAuthorsToDefaults" :disabled="!!adminLoading"
                 class="px-3 py-1.5 bg-amber-800/70 hover:bg-amber-700 disabled:opacity-40 rounded-lg text-xs text-amber-50 font-medium">
                 {{ $t('admin.authors.resetBtn') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Muse characters tab ── -->
+          <div v-if="adminTab === 'characters'" class="space-y-4">
+            <div class="bg-gray-800 rounded-xl p-4 space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    {{ $t('admin.characters.title') }}
+                  </p>
+                  <p class="text-[11px] text-gray-500 mt-1">{{ $t('admin.characters.desc') }}</p>
+                </div>
+                <button type="button" @click="fetchCharacterRoster" :disabled="rosterLoading"
+                  class="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40 shrink-0">
+                  {{ $t('admin.characters.refresh') }}
+                </button>
+              </div>
+
+              <div v-if="rosterLoading && !roster" class="text-xs text-gray-500 py-4 text-center">
+                {{ $t('admin.loading') }}
+              </div>
+              <div v-else-if="roster" class="grid grid-cols-3 gap-3">
+                <div class="bg-gray-900/50 rounded-lg px-3 py-2">
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.characters.total') }}</p>
+                  <p class="text-xl font-bold text-gray-100">{{ roster.total }}</p>
+                </div>
+                <div class="bg-gray-900/50 rounded-lg px-3 py-2">
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.characters.drawn') }}</p>
+                  <p class="text-xl font-bold text-purple-400">{{ roster.drawn }}</p>
+                </div>
+                <div class="bg-gray-900/50 rounded-lg px-3 py-2">
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.characters.mine') }}</p>
+                  <p class="text-xl font-bold text-teal-400">{{ roster.mine }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-amber-300/90">{{ $t('admin.characters.resetTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.characters.resetDesc') }}</p>
+              <button type="button" @click="resetCharacterRoster" :disabled="!!adminLoading || rosterLoading"
+                class="px-3 py-1.5 bg-amber-800/70 hover:bg-amber-700 disabled:opacity-40 rounded-lg text-xs text-amber-50 font-medium">
+                {{ $t('admin.characters.resetBtn') }}
               </button>
             </div>
           </div>

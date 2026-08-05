@@ -793,6 +793,23 @@
       "resetConfirmDesc": "現在の一覧はすべて削除され、初期シードのみが入ります。",
       "resetDone": "初期化完了（削除 {deleted} / 投入 {inserted}）"
     },
+    "characters": {
+      "title": "キャラクター",
+      "desc": "Muse の名簿。同梱キャラはコレクションが空のときに一度だけ投入されるので、更新された同梱ファイルはここからしか反映できません。",
+      "refresh": "再読込",
+      "total": "登録数",
+      "drawn": "参照ボードあり",
+      "mine": "自作",
+      "resetTitle": "同梱の名簿を読み直す",
+      "resetDesc": "同梱キャラを出荷時の内容に戻し、名簿から消えたキャラを削除します。描いた絵は残り、自作キャラには触れません。",
+      "resetBtn": "初期化",
+      "resetConfirm": "同梱キャラクター {n} 体を最新の内容に戻しますか？",
+      "resetRemoves": "名簿から消えた {n} 体を削除します: {who} …",
+      "resetOrphanImages": "参照画像 {n} 枚は誰にも紐づかない状態でギャラリーに残ります。",
+      "resetKeepsMine": "自作キャラクター {n} 体はそのまま残します。",
+      "resetNothingToRemove": "削除対象はありません。同梱の内容を書き戻すだけで、絵はすべて残ります。",
+      "resetDone": "{n} 体を読み直し、{removed} 体を削除しました"
+    },
     "connection": {
       "title": "接続確認",
       "status": "接続ステータス",
@@ -1430,13 +1447,6 @@
     "watching": "描き上がりを待っています",
     "charm": "隠れた魅力",
     "knownFor": "肩書き",
-    "stopN": "止める ({n})",
-    "resetRoster": "初期化",
-    "resetHint": "同梱のキャラクター設定を読み直します（更新分は反映、名簿から消えた分は削除、描いた絵はそのまま）",
-    "resetConfirm": "同梱キャラクター {n} 体を最新の内容に戻します。\n手を入れた内容は失われますが、描いた絵は残ります。",
-    "resetRemoves": "名簿から消えた {n} 体を削除します: {who} …",
-    "resetOrphanImages": "参照画像 {n} 枚は誰にも紐づかない状態でギャラリーに残ります。",
-    "resetKeepsMine": "自作キャラクター {n} 体はそのまま残します。",
-    "resetDone": "{n} 体を読み直し、{removed} 体を削除しました"
+    "stopN": "止める ({n})"
   }
 }
