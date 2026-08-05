@@ -48,12 +48,17 @@ LLM_DEFAULTS: dict[str, object] = {
     # the answer starts, and the brief and an image are already in the window.
     # 16k was tight; this is the size both were measured at.
     "num_ctx": 32768,
-    # Empty = reuse `model` for B/C/D. Set a vision-capable model here and a
-    # cheaper text model in `model` to cut stage A's wait.
+    # Empty = reuse `model` for the turns that are shown the board. Set a
+    # vision-capable model here and a cheaper text model in `model` to keep the
+    # text-only passes fast. A model that cannot read images does not error — it
+    # returns nothing — so the chain retries blind once and says so in chat.
     "vision_model": "",
     # Composition bias for every stage. auto lets the theme decide.
     "framing": "auto",
-    # Drop the VLM from VRAM before each Comfy render. Off by default.
+    # Drop the VLM from VRAM before each Comfy render. Off, and it should stay
+    # off: an MoE text model sits around 8GB of active weights, so it and image
+    # generation fit on the card together. Unloading also costs the crew the
+    # board — they are handed the render to look at after it lands.
     "unload_vlm": False,
     # Cast preset for the table-read crew (see muse.crew.PRESETS).
     "crew_preset": "standard",

@@ -18,6 +18,11 @@ from typing import Any
 
 # Job order. Dependency order, not importance — the editor always closes.
 ROLE_ORDER: tuple[str, ...] = (
+    # Settles where and when before anyone describes it. First for a reason: a
+    # theme thin enough to leave the place open let the character sheet become
+    # the only concrete material in the room, and the picture turned into her
+    # biography instead of the situation.
+    "plan",
     "beat",
     "spine",
     "cutout",
@@ -46,6 +51,9 @@ CONTEXT CARRY (do not break the chain)
 You are revising the previous TAGS/SCENE at the table read, not starting over.
 - Follow THIS theme only. Never drag in props, outfits, or weather from some
   other stock situation the theme did not name.
+- OBEY PLAN when the brief carries one. Its place, hour, light and nouns are
+  settled. You may make them more specific; you may not move, re-time or
+  re-expose them.
 - KEEP the same moment, action, place and hour.
 - KEEP every concrete noun the theme named.
 - KEEP setting objects once they exist; KEEP outfit decisions once they exist.
@@ -54,8 +62,28 @@ You are revising the previous TAGS/SCENE at the table read, not starting over.
   your specialty.
 - NEVER change hair style, hair colour, eye colour, or figure/body size.
   Exaggerate pose, camera, light, cloth motion and impact instead.
-- REFERENCE = acting motivation only. Never invent props from it.
+- REFERENCE = acting motivation only. Never invent props from it, and never
+  write it as mood, metaphor or imagery in SCENE either. Her history is why she
+  behaves this way; it is not something the picture is about.
+
+NO RELATIVE ADJUSTMENTS (this is how a frame bottoms out)
+Every seat sharpens the seat before it, so a nudge in one direction is applied
+again by everyone downstream until the picture saturates.
+- Never write "darker", "brighter", "deeper shadows", "more contrast",
+  "push saturation", "richer", "lower the key" — not in SAY, not in SCENE.
+- State the ABSOLUTE state instead: what the light IS, what the key IS.
+- If the current light already matches PLAN's LIGHT, keep the existing light
+  tags untouched and say that it is already right.
 """.strip()
+
+# Every seat that can nudge exposure downstream of the gaffer gets this. Without
+# it, colour, style, quality, audit and pack all applied one more turn of the
+# same screw.
+NO_EXPOSURE = (
+    "You do NOT change exposure. Hue, saturation and material are yours; the "
+    "brightness level and key are already set by PLAN and the Gaffer. Leave the "
+    "light tags as they stand."
+)
 
 OUTPUT = """
 OUTPUT FORMAT — Exactly three labelled blocks, nothing else:
@@ -91,6 +119,27 @@ No headings, no bullets inside SCENE.
 
 Across TAGS+SCENE the finished craft should feel ~200+ words of picture.
 No preamble, no alternatives — one version only.
+""".strip()
+
+PLAN_OUTPUT = """
+OUTPUT FORMAT — one SAY block, then five labelled lines, nothing else:
+
+SAY: 2–3 sentences of table banter in YOUR voice, settling the situation.
+If the Showrunner wrote Japanese, write SAY in natural Japanese (口調どおり).
+Name the place and the hour out loud so the Showrunner can veto them.
+No danbooru tags inside SAY. No emoji.
+
+PLACE: <English. One specific place, and where in it she is.>
+HOUR: <English. Time of day and season.>
+LIGHT: <English. The absolute key and where the light comes from. Never a
+       direction of change — no "darker", no "brighter".>
+ACTION: <English. What she is doing right now, one clause.>
+MUST APPEAR: <English. Ten or more comma-separated objects for this place and
+             hour. Plain nouns, underscores fine. No objects from her
+             background — only what the place and the theme imply.>
+
+Exactly these five labels, one line each, in this order. No other blocks.
+Do NOT output TAGS: or SCENE: — that is not your seat.
 """.strip()
 
 # ── Taste: where a person pulls the picture ─────────────────────────────────
@@ -143,6 +192,42 @@ def _role(
 
 
 ROLES: dict[str, dict[str, Any]] = {r["id"]: r for r in [
+    _role(
+        "plan",
+        name="Planner", name_ja="構成", role="Scene planner", role_ja="構成",
+        techniques=["place_lock", "object_ledger"],
+        specialty="""
+SPECIALTY — PLAN (WHERE, WHEN, WHAT IS IN IT)
+You do not write TAGS or SCENE. You settle the situation everyone else works in.
+- PLACE: one specific place, and where in it she is. Not a region — a spot.
+- HOUR: time of day and season, concrete enough to imply the light.
+- LIGHT: the absolute key — how bright the frame is, where the light comes from.
+  State a level, never a direction of change.
+- ACTION: what she is doing right now, in one clause.
+- MUST APPEAR: ten or more objects that belong to THIS place and hour, named
+  plainly. This is the ledger every later seat is checked against.
+Derive all of it from the theme and the Showrunner's standing orders — never
+from her background. If the theme is thin, choose something ordinary and commit;
+a plain place beats a poetic one nobody can draw.
+When you are shown the board, compare it to the previous plan: keep what the
+picture already got right, and re-state whatever went missing.
+""",
+        people=[
+            _person(
+                "madori", name="Layout", nick="Planner", nick_ja="間取り",
+                voice="Practical planner. Draws the floor before the drama. Warm, brisk, allergic to vagueness.",
+                voice_ja="現実的な構成。芝居より先に間取りを描く。あたたかいが手早く、曖昧さを嫌う。",
+                line="Where is she, exactly? Everything else waits on that.",
+                line_ja="で、どこ？　それが決まらないと全部が待ちだ。",
+                say_examples=[
+                    "場所と時間、先に決めますね。ここが決まってないと、みんな別の絵を描いちゃうので。",
+                    "はい確定。ここ、この時間、この明るさ。以降これで固定でお願いします。",
+                    "物、十個は要ります。……ええ、地味なやつでいいんです。地味なやつが場所を作るので。",
+                ],
+                flavor_tags=[],
+            ),
+        ],
+    ),
     _role(
         "beat",
         name="Director", name_ja="演出", role="Unit director", role_ja="演出",
@@ -413,6 +498,10 @@ SPECIALTY — GAFFER (LIGHT)
 Key direction, colour temperature, shadow length, rim/backlight, practicals.
 Vivid contrast; forbid flat even lighting unless the theme is fog-soft.
 Support the face or back per Framing. KEEP camera and setting objects.
+You are the ONLY seat that sets exposure, and you set it once, in absolutes:
+name the key level PLAN's LIGHT asked for and where the light comes from.
+Never phrase it as a change from what is there — no "darker", no "brighter".
+Shape the light; do not turn it down.
 """,
         people=[
             _person(
@@ -610,10 +699,12 @@ Do not bury the subject. Do not delete Propshop's objects.
         techniques=["accent_color", "contrast"],
         specialty="""
 SPECIALTY — PALETTE (COLOUR)
-Dominant / secondary / accent; push contrast toward Hook's magnet.
+Dominant / secondary / accent, stated as the colours they ARE.
+Put the accent where Hook's magnet is — by placing colour, not by sinking the
+rest of the frame.
 Theme colours win over character palette on conflict.
 Optional soft (accent:1.15). No camera or pose rewrites.
-""",
+""" + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "itten", name="Accent", nick="Palette", nick_ja="一点",
@@ -654,7 +745,8 @@ Optional soft (accent:1.15). No camera or pose rewrites.
 SPECIALTY — INK (STYLE)
 Follow brief Style exactly. Strip medium tags that fight it.
 Keep story, camera, light, outfit content.
-""",
+Line quality and edge treatment are yours.
+""" + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "ipponsen", name="Line", nick="Ink", nick_ja="一本線",
@@ -696,7 +788,7 @@ Add masterpiece, best_quality, very_aesthetic, absurdres, detailed_background,
 beautiful_skin, sharp_focus as Style allows.
 Weights (masterpiece:1.2), (best_quality:1.1) — never above 1.35.
 No illustrator names. No identity restatement.
-""",
+""" + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "sokoage", name="Floor", nick="Polish", nick_ja="底上げ",
@@ -736,7 +828,11 @@ No illustrator names. No identity restatement.
 SPECIALTY — CONTINUITY
 Ensure TAGS and SCENE agree. Theme wins clothing conflicts.
 Remove canceling shot sizes. Keep outfit specificity. No empty background.
-""",
+Check the craft against PLAN's MUST APPEAR line by line. Anything on that list
+that is missing, put back. That list is the ledger — you audit against it, you
+do not negotiate with it, and you never agree to drop an item because it does
+not suit the mood.
+""" + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "tsujitsuma", name="Ledger", nick="Ledger", nick_ja="つじつま",
@@ -760,11 +856,14 @@ Remove canceling shot sizes. Keep outfit specificity. No empty background.
         specialty="""
 SPECIALTY — GATE (AUDIT)
 Delete multi-pose contradictions, REFERENCE noun leaks, figure upgrades.
+Also delete REFERENCE that leaked as mood or metaphor rather than as an object.
 Reinstate missing theme-critical nouns and theme outfit.
 Verify Lens camera still present and consistent with Framing.
-Verify ≥10 setting objects remain. Verify wardrobe still readable.
+Verify every item on PLAN's MUST APPEAR is still in the craft; restore any that
+are not. Verify wardrobe still readable.
+Verify PLACE and HOUR still match PLAN — a drifted location is a fail.
 In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
-""",
+""" + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "mon", name="Gate", nick="Gate", nick_ja="門",
@@ -798,8 +897,10 @@ The image model needs a RICH prompt. Flat shorts produce flat pictures.
    camera, and her personality in eyes/hands. Keep the same moment.
    Do not invent a new place or outfit the theme did not ask for.
 4) Preserve outfit and camera clusters. Never strip place objects below 10.
+   When the brief carries a PLAN, its MUST APPEAR list is the floor: every item
+   on it ships.
 5) Assembled positive (tags+scene) should land around 200+ words total.
-""",
+""" + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "maku", name="Closer", nick="Closer", nick_ja="幕",
@@ -870,7 +971,16 @@ def _crew(*refs: str) -> list[str]:
 
 PRESETS: dict[str, list[str]] = {
     # actress + finisher omitted — always injected by resolve_crew
+    #
+    # The smallest room that still works: someone to settle where and when,
+    # someone to call the moment, and her. Fewer seats is not a lesser version —
+    # every extra seat rewrites the whole script once more, and the objects the
+    # planner listed have to survive all of those rewrites to reach the render.
+    "trio": _crew("plan:madori", "beat:ichibyou"),
+    # Same room with a camera in it.
+    "quartet": _crew("plan:madori", "beat:ichibyou", "lens:pinto"),
     "standard": _crew(
+        "plan:madori",
         "beat:ichibyou", "spine:bane", "cutout:gakubuchi", "lens:pinto",
         "propshop:takarabako", "wardrobe:shiwa", "gaffer:gyakkou",
         "faces:mabataki", "hook:kugizuke", "weather:shitsudo", "palette:itten",
@@ -896,6 +1006,7 @@ PRESETS: dict[str, list[str]] = {
     ),
     # Everything that steadies a picture and nothing that experiments.
     "classic": _crew(
+        "plan:madori",
         "beat:nagamawashi", "spine:juushin", "cutout:gakubuchi", "lens:teiten",
         "propshop:takarabako", "wardrobe:shiwa", "gaffer:andon",
         "faces:mabataki", "hook:kuchikomi", "weather:mufuu", "ink:ipponsen",
@@ -933,8 +1044,11 @@ OUTPUT FORMAT — Exactly one labelled block, nothing else:
 
 SAY: 1–2 short sentences IN YOUR VOICE. Live table heckle / reaction only.
 If the Showrunner wrote Japanese, write SAY in Japanese (口調どおり).
-Address the previous speaker by name when you can. Agree, tease, or pile on
-one charming detail. Be cute or witty — never a dry "了解". Captivate.
+Address the previous speaker by name when you can. Tease them, or answer them
+with something of your own. Be cute or witty — never a dry "了解". Captivate.
+Do NOT repeat their key nouns or their turn of phrase back at them. A heckle
+that echoes the last line is not a reaction, it is a mirror — bring your own
+image or push against theirs.
 No danbooru tags. No emoji. Do NOT invent a new shot. Do NOT output TAGS or SCENE.
 """.strip()
 
@@ -1022,7 +1136,15 @@ def _pick_say_example(muse_id: str, seed: str = "") -> str:
 
 
 def _character_sheet(character: dict[str, Any]) -> str:
-    """Pull the selected preset's personality into the actress prompt."""
+    """The selected preset's personality, split by what it is allowed to do.
+
+    Traits, charm and the two vocabularies drive the performance: they become a
+    way of speaking and a set of expression / gesture tags, which is personality
+    the picture can actually carry. Summary and inner life only set the pitch of
+    her voice. They are separated here because handed over flat they became
+    something she recited — a run where she narrated her own backstory every turn
+    put none of it in the frame, and the whole script drifted to match.
+    """
     p = character.get("personality") or {}
     name = (
         str(character.get("name_ja") or p.get("preset_name_ja") or "")
@@ -1042,15 +1164,22 @@ def _character_sheet(character: dict[str, Any]) -> str:
     charm = str(p.get("charm_ja") or p.get("charm") or "")
     return "\n".join([
         f"CHARACTER NAME: {name_en} / {name}",
+        "",
+        "WHAT DRIVES THE PERFORMANCE (use these — they become face, hands, voice)",
         f"TRAITS: {traits or '(unspecified)'}",
-        f"SUMMARY: {summary or '(none)'}",
-        f"INNER: {inner or '(none)'}",
         f"HIDDEN CHARM (the gap that makes her worth drawing): {charm or '(none)'}",
-        f"TASTE CUES likes (never props): {likes or '(none)'}",
-        f"TASTE CUES dislikes (never props): {dislikes or '(none)'}",
         f"EXPRESSION VOCAB (prefer in TAGS when they fit): {expr or '(none)'}",
         f"GESTURE VOCAB (prefer in TAGS when they fit): {gest or '(none)'}",
         f"VIBE: {vibe or '(none)'}",
+        f"TASTE CUES likes (never props): {likes or '(none)'}",
+        f"TASTE CUES dislikes (never props): {dislikes or '(none)'}",
+        "",
+        "BACKGROUND — TONE ONLY. This sets how loudly and how carefully she "
+        "speaks, nothing else. Never mention it in SAY. Never make it the subject "
+        "of a line. Never let it reach TAGS or SCENE, not even as imagery. "
+        "内気なら口調が内気になる、それが正解。過去の出来事を語るのは不正解。",
+        f"SUMMARY: {summary or '(none)'}",
+        f"INNER: {inner or '(none)'}",
     ])
 
 
@@ -1099,6 +1228,12 @@ def actress_system_prompt(
         "- SCENE must describe how HER personality colours this exact beat.",
         "- The hidden charm is the point of her — let it show through the composure, "
         "  in one small place, without announcing it.",
+        "- Your personality shows in HOW you speak and in the expression / gesture "
+        "tags you choose — never in what you recount. Do not narrate your backstory, "
+        "your past, or what you have seen before. None of that reaches the picture; "
+        "a tilt of the head does.",
+        "- Talk about the situation in front of you — this place, this hour, what "
+        "your hands are doing. Not about yourself.",
         "- Never draw likes/dislikes/signature as props unless the theme names them.",
         "- KEEP camera, outfit, place from previous craft. Only rewrite acting flavour.",
         _style_block(lead, base_style),
@@ -1110,17 +1245,20 @@ def actress_system_prompt(
 
 
 def actress_banter_prompt(character: dict[str, Any]) -> str:
+    """Traits only. Her inner life used to be pasted in here too, and a heckle is
+    exactly the turn where a model reaches for the most quotable line it can
+    see — which is how a backstory ended up narrated at the table every round."""
     p = character.get("personality") or {}
     name_ja = (
         str(character.get("name_ja") or p.get("preset_name_ja") or "")
         or "女優"
     )
     traits = ", ".join(str(t) for t in (p.get("traits") or [])[:4] if t)
-    inner = " / ".join(str(x) for x in (p.get("inner_ja") or p.get("inner") or [])[:2] if x)
     return "\n\n".join([
         f"You are the Lead / 主演 heckling at the table — in character as {name_ja}.",
-        f"Traits: {traits}. Inner: {inner}.",
+        f"Traits: {traits}.",
         "一人称で短く。性格に照らし『私ならこう』『それは私じゃない』と口を挟む。",
+        "性格は口調に出す。過去の話や自分の背景は語らない — いま目の前の場面の話だけ。",
         "台本は書き換えない。会話だけ。",
         BANTER_OUTPUT,
     ])
@@ -1129,6 +1267,26 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
 def _who(m: dict[str, Any]) -> str:
     """How a person introduces themselves: the job, then what the room calls them."""
     return f"{m['name_ja']}（{m['role']} — everyone calls you 「{m['nick_ja']}」）"
+
+
+def plan_system_prompt(muse_id: str = "", *, seed: str = "") -> str:
+    """The planner's turn. Labelled lines, not craft — see PLAN_OUTPUT."""
+    mid = resolve_member(muse_id or DEFAULT_MEMBER["plan"])
+    m = MUSES[mid]
+    return "\n\n".join([
+        f"You are {_who(m)} at a Muse table read.",
+        f"VOICE (EN): {m['voice']}",
+        f"口調 (JA): {m['voice_ja']}",
+        f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
+        "EXAMPLE SAY (match this energy, do not copy verbatim):\n"
+        + _pick_say_example(mid, seed),
+        "You speak FIRST, before anyone describes anything. Everything the rest "
+        "of the crew writes is bounded by what you settle here.",
+        "Derive the situation from the theme and the Showrunner's standing orders. "
+        "Never from the lead's background — her history is not a location.",
+        m["specialty"],
+        PLAN_OUTPUT,
+    ])
 
 
 def system_prompt_for(
@@ -1140,6 +1298,8 @@ def system_prompt_for(
         return actress_system_prompt(
             character or {}, base_style=base_style, seed=seed,
         )
+    if role_of(mid) == "plan":
+        return plan_system_prompt(mid, seed=seed)
     m = MUSES[mid]
     blocks = [
         f"You are {_who(m)} at a Muse table read.",
@@ -1153,7 +1313,11 @@ def system_prompt_for(
         "You are NOT a narrator summarizing the shot. You are this specialist arguing "
         "at the table. Other Muses have different mouths — do not borrow theirs.",
         "In SAY, react to RECENT TABLE TALK when present — name the previous Muse, "
-        "agree / push back / add one sharp beat. This is a conversation, not a report.",
+        "then contribute ONE concrete thing from your own specialty that nobody has "
+        "named yet. This is a conversation, not a report.",
+        "Do not restate another Muse's phrase, image or metaphor — not in SAY and "
+        "not in SCENE. If the last three speakers all reached for the same idea, "
+        "that idea is finished; your job is the part of the picture still missing.",
         "When the Lead (selected character) has spoken, honour her personality "
         "choice — do not flatten her back into a generic cute face.",
         _style_block(mid, base_style),

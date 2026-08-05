@@ -1298,6 +1298,8 @@
     "studioHint": "あなたが総監督。班が議論し、途中でイメージボードを出します。OKが出たら本番です。",
     "crewPreset": "班の編成",
     "presets": {
+      "trio": "少人数（主演・演出・構成）",
+      "quartet": "少人数＋撮影",
       "standard": "標準",
       "vivid": "鮮やか寄り",
       "photoreal": "実写寄り",

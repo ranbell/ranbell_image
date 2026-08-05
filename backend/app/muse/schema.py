@@ -42,6 +42,16 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         }, **(inputs or {})},
         "character": {},
         "brief": "",
+        # The same brief with the reference block cut down to traits. Every seat
+        # that is not acting reads this one.
+        "brief_lite": "",
+        # Where, when, how lit, and the object ledger — settled by the plan seat
+        # and re-stated in every brief so a chain of rewrites cannot relocate the
+        # picture.
+        "plan": {},
+        # Everything the Showrunner has said, kept forever. A note used to live
+        # only in the turn that answered it.
+        "notes": [],
         # Working craft the crew is building toward the board / shoot.
         "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
         "chat": [],           # [{id, role, muse_id, name, text, at}]

@@ -6,8 +6,9 @@ chats; the crew answers until they ask for a board or the showrunner says OK.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,10 @@ class MuseTurn:
     tags: str
     scene: str
     raw: str
+    # True when the turn was offered the board and could not use it. A model
+    # that cannot read images does not error — it returns nothing, or garbage —
+    # so the retry is silent unless somebody surfaces this.
+    blind: bool = False
 
 
 class ChainError(Exception):
@@ -88,6 +93,39 @@ def _finish_turn(
     )
 
 
+async def _call_seeing(
+    ollama, *, system: str, prompt: str, model: str,
+    images: list[bytes] | None, num_ctx: int | None, think: bool,
+    on_token: TokenCallback | None = None,
+) -> tuple[str, bool]:
+    """Call with the board attached, falling back to text when it cannot read it.
+
+    A model without vision does not refuse the image — it returns an empty
+    response, which reads exactly like a bad turn. One retry without the picture
+    keeps the table moving; the flag lets the caller say so out loud rather than
+    quietly degrading for the rest of the session.
+    """
+    if not images:
+        return await _call(
+            ollama, system=system, prompt=prompt, model=model, images=None,
+            num_ctx=num_ctx, think=think, on_token=on_token,
+        ), False
+    try:
+        return await _call(
+            ollama, system=system, prompt=prompt, model=model, images=images,
+            num_ctx=num_ctx, think=think, on_token=on_token,
+        ), False
+    except ChainError:
+        logger.warning(
+            "[muse.chain] model %s returned nothing for an image turn — "
+            "retrying blind", model,
+        )
+    return await _call(
+        ollama, system=system, prompt=prompt, model=model, images=None,
+        num_ctx=num_ctx, think=think, on_token=on_token,
+    ), True
+
+
 async def run_muse(
     ollama, *, muse_id: str, user_prompt: str, model: str,
     num_ctx: int | None, identity_tags: list[str] | None,
@@ -98,13 +136,13 @@ async def run_muse(
     seed: str = "",
     on_token: TokenCallback | None = None,
 ) -> MuseTurn:
-    """One Muse at the table. Text by default; images optional for board review."""
+    """One Muse at the table. Text by default; images once a board exists."""
     # Callers may name a job ("beat") or a person ("beat:ichibyou"). A job
     # resolves to whoever does it by default.
     muse_id = crew.resolve_member(muse_id)
     if not muse_id:
         raise ChainError(f"unknown muse: {muse_id}")
-    raw = await _call(
+    raw, blind = await _call_seeing(
         ollama,
         system=crew.system_prompt_for(
             muse_id, character=character, base_style=style, seed=seed,
@@ -113,10 +151,77 @@ async def run_muse(
         model=model, images=images, num_ctx=num_ctx, think=think,
         on_token=on_token,
     )
-    return _finish_turn(
+    turn = _finish_turn(
         raw, muse_id=muse_id, identity_tags=identity_tags,
         framing=framing, brief=brief, style=style, cast=cast,
     )
+    return turn if not blind else replace(turn, blind=True)
+
+
+# The planner answers in labelled lines rather than TAGS/SCENE, so it gets its
+# own parser. Deliberately lenient about the label spelling — a run that loses
+# the plan because the model wrote "MUST APPEAR :" is a run that loses its place.
+_PLAN_LABELS: dict[str, str] = {
+    label.replace(" ", ""): key for key, label in brief_mod.PLAN_FIELDS
+}
+_PLAN_LINE_RE = re.compile(
+    r"(?im)^[\s>*_#-]*(" + "|".join(
+        label.replace(" ", r"\s*") for _, label in brief_mod.PLAN_FIELDS
+    ) + r")[\s*_]*[:：]\s*(.+?)\s*$"
+)
+_LIST_FIELDS = {"must_appear"}
+
+
+def parse_plan(raw: str) -> dict[str, Any]:
+    """Return {say, place, hour, light, action, must_appear} from a planner turn.
+
+    Returns {} when no labelled line came back at all — the caller keeps the
+    plan it already had rather than replacing a good one with nothing.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    matches = list(_PLAN_LINE_RE.finditer(text))
+    if not matches:
+        return {}
+
+    out: dict[str, Any] = {}
+    for m in matches:
+        key = _PLAN_LABELS.get(re.sub(r"\s+", "", m.group(1)).upper())
+        value = m.group(2).strip().strip("*_").strip()
+        if not key or not value or key in out:
+            continue
+        if key in _LIST_FIELDS:
+            items = [v.strip().strip("*_") for v in value.split(",")]
+            out[key] = [v for v in items if v]
+        else:
+            out[key] = value
+
+    say = text[:matches[0].start()].strip()
+    say = re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
+    if say:
+        out["say"] = say
+    return out
+
+
+async def run_plan(
+    ollama, *, user_prompt: str, model: str, num_ctx: int | None,
+    muse_id: str = "plan", images: list[bytes] | None = None,
+    think: bool = False, seed: str = "",
+    on_token: TokenCallback | None = None,
+) -> dict[str, Any]:
+    """Settle place, hour, light, action and the object ledger for this shoot."""
+    mid = crew.resolve_member(muse_id) or crew.DEFAULT_MEMBER["plan"]
+    raw, blind = await _call_seeing(
+        ollama,
+        system=crew.plan_system_prompt(mid, seed=seed),
+        prompt=user_prompt, model=model, images=images,
+        num_ctx=num_ctx, think=think, on_token=on_token,
+    )
+    plan = parse_plan(raw)
+    if plan:
+        plan["blind"] = blind
+    return plan
 
 
 async def run_banter(

@@ -5,11 +5,13 @@ showrunner says OK. There is no B/C/D pickup chain anymore.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from ..characters import presets as presets_db
@@ -189,17 +191,46 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
 
 
 def _rebuild_brief(session: dict[str, Any]) -> None:
+    """Two briefs: the full sheet for the seats that act, a digest for the rest.
+
+    Lighting, colour and the audit desk were being handed her summary, inner
+    life and tastes on every call. None of it is their craft, and it was the
+    most evocative text in their context — so it became the language the whole
+    script was written in, and the theme lost.
+    """
     inputs = _inputs(session)
     character = session.get("character") or {}
     if not character or not str(inputs.get("theme") or "").strip():
         session["brief"] = ""
+        session["brief_lite"] = ""
         return
-    session["brief"] = brief_mod.build(
-        character,
-        str(inputs.get("theme") or ""),
-        _style(session),
+    common = dict(
+        theme=str(inputs.get("theme") or ""),
+        style=_style(session),
         framing=_framing(inputs),
+        plan=session.get("plan") or {},
+        notes=list(session.get("notes") or []),
     )
+    session["brief"] = brief_mod.build(
+        character, common["theme"], common["style"],
+        framing=common["framing"], plan=common["plan"], notes=common["notes"],
+        reference="full",
+    )
+    session["brief_lite"] = brief_mod.build(
+        character, common["theme"], common["style"],
+        framing=common["framing"], plan=common["plan"], notes=common["notes"],
+        reference="digest",
+    )
+
+
+# The seats whose craft IS the performance. Only these read her inner life.
+_ACTING_ROLES = ("actress", "faces")
+
+
+def _brief_for(session: dict[str, Any], muse_id: str = "") -> str:
+    if crew.role_of(muse_id) in _ACTING_ROLES:
+        return str(session.get("brief") or "")
+    return str(session.get("brief_lite") or session.get("brief") or "")
 
 
 def _crew_ids(session: dict[str, Any]) -> list[str]:
@@ -210,9 +241,102 @@ def _crew_ids(session: dict[str, Any]) -> list[str]:
     )
 
 
+# Long edge the board is scaled to before the VLM sees it. The 300px thumbnail
+# is too small to judge composition on, and the full 896x1152 render is a lot of
+# tokens to spend once per seat.
+_VLM_LONG_EDGE = 768
+# One decode per board round, not one per seat.
+_BOARD_CACHE: dict[tuple[str, int, str], bytes] = {}
+
+
+def _vision_model(inputs: dict[str, Any]) -> str:
+    """A vision-capable model when one is configured, else the text model."""
+    return str(inputs.get("vision_model") or "") or str(inputs.get("model") or "")
+
+
+def _downscale(raw: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(raw)) as img:
+        img = img.convert("RGB")
+        img.thumbnail((_VLM_LONG_EDGE, _VLM_LONG_EDGE), Image.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=88)
+    return buf.getvalue()
+
+
+async def board_images(db, session: dict[str, Any], *, limit: int = 1) -> list[bytes]:
+    """The board the crew is being asked about, small enough to hand to a VLM.
+
+    Empty when there is no board yet, when the store cannot resolve the image,
+    or when anything about reading it fails — a screening that cannot load is a
+    reason to keep talking, never a reason to stop the table.
+    """
+    board = session.get("board") or {}
+    shots = [
+        str(i.get("image_id") or "") for i in (board.get("images") or [])
+        if isinstance(i, dict) and i.get("image_id")
+    ][:max(1, int(limit))]
+    if not shots or board.get("pending"):
+        return []
+    sid = str(session.get("session_id") or "")
+    rnd = int(board.get("round") or 0)
+
+    out: list[bytes] = []
+    for sha in shots:
+        key = (sid, rnd, sha)
+        if key in _BOARD_CACHE:
+            out.append(_BOARD_CACHE[key])
+            continue
+        try:
+            docs = await db.get_by_sha256s([sha])
+            path = Path(str((docs or [{}])[0].get("path") or ""))
+            if not path.is_file():
+                continue
+            data = await asyncio.to_thread(
+                lambda p=path: _downscale(p.read_bytes()),
+            )
+        except Exception:
+            logger.debug("[muse] board image %s unreadable", sha[:8], exc_info=True)
+            continue
+        _BOARD_CACHE[key] = data
+        out.append(data)
+
+    # Keep the map from growing for the life of the process.
+    if len(_BOARD_CACHE) > 24:
+        for stale in list(_BOARD_CACHE)[:-8]:
+            _BOARD_CACHE.pop(stale, None)
+    return out
+
+
+SCREENING_JA = (
+    "あなたはいま、実際に上がったボードを見ている。\n"
+    "- まず絵に写っているものを一つ挙げ、台本との差を言う。\n"
+    "- 露出は絶対値で判定する（明るすぎ／暗すぎ／ちょうどよい）。"
+    "ちょうどよければ光には一切触らない。\n"
+    "- 台本に書いたのに写っていないものがあれば、それを直すのが最優先。\n"
+    "- 写っているものを褒めるだけの発言はしない。"
+)
+SCREENING_EN = (
+    "You are looking at the board that actually came back.\n"
+    "- Name one thing that IS in the picture, and say how it differs from the craft.\n"
+    "- Judge exposure in absolutes (too bright / too dark / correct). If it is "
+    "correct, do not touch the light at all.\n"
+    "- Anything the craft asked for that is not in the frame is the first fix.\n"
+    "- Do not spend the turn praising what is already there."
+)
+
+
+def _screening_note(session: dict[str, Any]) -> str:
+    locale = str(_inputs(session).get("locale") or "ja")
+    return SCREENING_JA if locale.startswith("ja") else SCREENING_EN
+
+
 async def _run_muse_turn(
     ollama, session: dict[str, Any], muse_id: str, user_prompt: str,
-    *, cfg: dict[str, Any],
+    *, cfg: dict[str, Any], images: list[bytes] | None = None,
 ) -> chain.MuseTurn:
     inputs = _inputs(session)
     sid = session["session_id"]
@@ -222,12 +346,15 @@ async def _run_muse_turn(
     })
     return await chain.run_muse(
         ollama, muse_id=muse_id, user_prompt=user_prompt,
-        model=_text_model(inputs),
+        model=_vision_model(inputs) if images else _text_model(inputs),
         num_ctx=_num_ctx(inputs, cfg),
         identity_tags=_identity_tags(session),
         framing=_framing(inputs),
+        # Leak detection always reads the full sheet, even when the seat was
+        # only handed the digest — narrowing it would narrow what counts as a leak.
         brief=str(session.get("brief") or ""),
         think=False,
+        images=images or None,
         character=session.get("character") or {},
         style=_style(session),
         cast=_cast(session),
@@ -275,10 +402,15 @@ def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]
     return msg
 
 
-def _recent_talk(session: dict[str, Any], *, limit: int = 6) -> str:
+def _recent_talk(
+    session: dict[str, Any], *, limit: int = 6,
+    kinds: tuple[str, ...] | None = None,
+) -> str:
     lines: list[str] = []
     for m in (session.get("chat") or [])[-limit:]:
         if m.get("role") != "muse":
+            continue
+        if kinds and m.get("kind") not in kinds:
             continue
         name = m.get("name") or m.get("muse_id") or "?"
         mark = "（つぶやき）" if m.get("kind") == "banter" else ""
@@ -286,18 +418,26 @@ def _recent_talk(session: dict[str, Any], *, limit: int = 6) -> str:
     return "\n".join(lines)
 
 
-def _table_user_prompt(session: dict[str, Any], *, note: str = "") -> str:
+def _table_user_prompt(
+    session: dict[str, Any], *, muse_id: str = "", note: str = "",
+    screening: str = "",
+) -> str:
     craft = session.get("craft") or {}
     previous = str(craft.get("prompt") or "")
     pose = str(craft.get("pose_intent") or "")
     base = brief_mod.with_previous(
-        str(session.get("brief") or ""), previous, pose=pose,
+        _brief_for(session, muse_id), previous, pose=pose, analysis=screening,
     )
-    talk = _recent_talk(session)
+    # Craft turns only, and only a few. Banter carries no craft and every seat is
+    # told to be charming in it, so feeding it back here was a loop with nothing
+    # damping it: one image ("the gap between her knees") got restated by six
+    # consecutive speakers until it was what the picture was about.
+    talk = _recent_talk(session, limit=3, kinds=("craft",))
     if talk:
         base = (
             f"{base}\n\n"
-            f"RECENT TABLE TALK (react in SAY — name someone, push or pile on):\n"
+            f"RECENT TABLE TALK (for SAY only — do NOT carry their nouns, "
+            f"metaphors, or light/colour adjustments into TAGS/SCENE):\n"
             f"{talk}"
         )
     if note.strip():
@@ -367,6 +507,107 @@ async def _run_banter(
     return msg
 
 
+def _plan_user_prompt(session: dict[str, Any], *, note: str = "") -> str:
+    """Theme + standing orders + whatever place was already settled."""
+    inputs = _inputs(session)
+    parts = [
+        f"Style: {_style(session)}",
+        f"Framing: {_framing(inputs)}",
+        f"THEME (the situation to plan — this is the whole assignment):\n"
+        f"{str(inputs.get('theme') or '').strip()}",
+    ]
+    orders = brief_mod.orders_block(list(session.get("notes") or []))
+    if orders:
+        parts.append(orders)
+    previous = brief_mod.plan_block(session.get("plan") or {})
+    if previous:
+        parts.append(
+            "PREVIOUS PLAN (keep what still holds; change only what the orders "
+            "or the board force you to change):\n" + previous
+        )
+    if note.strip():
+        parts.append(
+            "SHOW RUNNER NOTE (総監督 — treat as absolute creative direction):\n"
+            f"{note.strip()}\n"
+            "Re-settle PLACE / HOUR / LIGHT / ACTION / MUST APPEAR so this note "
+            "is simply true. If they asked for a different place, move there — do "
+            "not keep the old one alongside it."
+        )
+    return "\n\n".join(parts)
+
+
+async def _run_plan_turn(
+    db, ollama, session: dict[str, Any], *, cfg: dict[str, Any], note: str = "",
+) -> bool:
+    """Settle the situation. Returns True when the plan changed.
+
+    Runs before anyone describes anything, and again whenever the Showrunner
+    says something — a note that only reached the turn answering it was outvoted
+    by the original theme on every call after that, so「make it X」never became
+    the thing the render was of.
+    """
+    if ollama is None:
+        return False
+    inputs = _inputs(session)
+    sid = session["session_id"]
+    mid = _cast_in_role(_crew_ids(session), "plan") or crew.DEFAULT_MEMBER["plan"]
+    images = await board_images(db, session)
+    events.publish(sid, {
+        "type": "muse_speaking", "muse_id": mid,
+        "name": _muse_display_name(session, mid),
+    })
+    try:
+        plan = await chain.run_plan(
+            ollama, muse_id=mid,
+            user_prompt=_plan_user_prompt(session, note=note),
+            model=_vision_model(inputs) if images else _text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+            images=images or None,
+            seed=str(sid),
+            on_token=_token_publisher(sid, mid),
+        )
+    except chain.ChainError:
+        logger.warning("[muse] plan turn produced nothing", exc_info=True)
+        return False
+    if not plan:
+        logger.info("[muse] planner answered without labelled lines; keeping plan")
+        return False
+
+    blind = bool(plan.pop("blind", False))
+    say = str(plan.pop("say", "") or "")
+    session["plan"] = plan
+    _rebuild_brief(session)
+    if say:
+        msg = _chat_append(
+            session, role="muse", text=say, muse_id=mid,
+            name=_muse_display_name(session, mid), kind="craft",
+        )
+        _publish_chat(sid, msg)
+    if blind and images:
+        _note_blind(session)
+    session_db.log(session, "plan", str(plan.get("place") or ""))
+    return True
+
+
+def _note_blind(session: dict[str, Any]) -> None:
+    """Say out loud that the board did not reach the model."""
+    if session.get("_blind_said"):
+        return
+    session["_blind_said"] = True
+    locale = str(_inputs(session).get("locale") or "ja")
+    msg = _chat_append(
+        session, role="system", name="Studio",
+        text=(
+            "このモデルは絵を読めないようなので、ボードは渡さずテキストだけで進めます。"
+            "vision_model に画像を読めるモデルを指定すると、班が実際の絵を見て話せます。"
+            if locale.startswith("ja") else
+            "This model could not read the board — continuing on text alone. "
+            "Set vision_model to an image-capable model so the crew can see it."
+        ),
+    )
+    _publish_chat(session["session_id"], msg)
+
+
 def _banter_mode(session: dict[str, Any]) -> str:
     mode = str(_inputs(session).get("banter_mode") or "light").strip().lower()
     return mode if mode in ("light", "full", "off") else "light"
@@ -428,6 +669,8 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
     session["board"] = {}
     session["shoot"] = {}
+    session["plan"] = {}
+    session.pop("_blind_said", None)
     await session_db.save(db, session)
 
     locale = str(_inputs(session).get("locale") or "ja")
@@ -447,11 +690,19 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     _publish_chat(sid, sys_msg)
 
     cast = _crew_ids(session)
+    # Where and when, before anyone starts describing it.
+    if _cast_in_role(cast, "plan"):
+        await _run_plan_turn(db, ollama, session, cfg=cfg)
+        await session_db.save(db, session, publish=False)
+
     previous: str | None = None
     last_say = ""
     for i, muse_id in enumerate(cast):
+        if crew.role_of(muse_id) == "plan":
+            continue  # already spoke, and does not write craft
         turn = await _run_muse_turn(
-            ollama, session, muse_id, _table_user_prompt(session), cfg=cfg,
+            ollama, session, muse_id,
+            _table_user_prompt(session, muse_id=muse_id), cfg=cfg,
         )
         msg = _apply_turn(session, turn)
         last_say = str(msg.get("text") or "")
@@ -526,26 +777,48 @@ async def post_chat(
         return await request_board(db, comfy, spooler, session, ollama=ollama)
 
     # Crew answers the hard note — pick specialists by keyword, else core desk.
-    responders = _pick_responders(text, _crew_ids(session))
+    cast = _crew_ids(session)
+    responders = _pick_responders(text, cast)
     session["status"] = "discussing"
+    # The note is standing direction from here on, not a remark about one turn.
+    session.setdefault("notes", []).append(text)
+    _rebuild_brief(session)
     await session_db.save(db, session)
     cfg = await get_runtime_config(db)
+
+    # Re-settle where and when first: a note like "make it somewhere else" has
+    # to move the locked place, or the original theme keeps winning downstream.
+    if _cast_in_role(cast, "plan"):
+        await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
+        await session_db.save(db, session, publish=False)
+
+    # Once a board exists the crew answers while looking at it, which is the
+    # only thing in the loop that can tell them the frame is already too dark or
+    # that the place they wrote never made it into the picture.
+    images = await board_images(db, session)
+    screening = _screening_note(session) if images else ""
 
     last_responder = ""
     last_say = ""
     for muse_id in responders:
         turn = await _run_muse_turn(
             ollama, session, muse_id,
-            _table_user_prompt(session, note=text), cfg=cfg,
+            _table_user_prompt(
+                session, muse_id=muse_id, note=text, screening=screening,
+            ),
+            cfg=cfg, images=images,
         )
         msg = _apply_turn(session, turn)
+        if turn.blind and images:
+            _note_blind(session)
+            images = []
+            screening = ""
         last_responder = muse_id
         last_say = str(msg.get("text") or "")
         await session_db.save(db, session, publish=False)
 
     # One heckle after the note — prefer the actress so personality stays in chat.
     if last_responder and last_say and _banter_mode(session) != "off":
-        cast = _crew_ids(session)
         heckler = None
         if "actress" in cast and "actress" not in responders:
             heckler = "actress"
@@ -614,18 +887,27 @@ async def _maybe_unload(ollama, session: dict[str, Any]) -> None:
         logger.debug("[muse] unload_vlm failed", exc_info=True)
 
 
-def _densify_user_prompt(session: dict[str, Any]) -> str:
+def _densify_user_prompt(session: dict[str, Any], *, screening: str = "") -> str:
     """Force Finisher to thicken a thin craft before Comfy sees it."""
     craft = session.get("craft") or {}
-    base = _table_user_prompt(session)
+    closer = crew.DEFAULT_MEMBER["finisher"]
+    base = _table_user_prompt(session, muse_id=closer, screening=screening)
+    must = [str(m) for m in ((session.get("plan") or {}).get("must_appear") or [])]
+    ledger = (
+        "- Every one of these must be in SCENE: " + ", ".join(must) + "\n"
+        if must else
+        "- ≥10 place objects implied by THIS theme.\n"
+    )
     return (
         f"{base}\n\n"
         "DENSITY PACK (mandatory — SCENE was thin):\n"
-        "- Expand SCENE to 140–200 English words covering pose, cloth, ≥10 place objects\n"
-        "  implied by THIS theme, light/atmosphere, camera, personality in eyes/hands.\n"
+        "- Expand SCENE to 140–200 English words covering pose, cloth, place objects,\n"
+        "  light/atmosphere, camera, personality in eyes/hands.\n"
+        f"{ledger}"
         "- TAGS: 35–55 strong tags. Do not shrink.\n"
         "- Keep the same moment and theme. Densify, do not restart or relocate.\n"
         "- Do not inject props/outfits from a different situation.\n"
+        "- Do not change the light level while densifying.\n"
         f"- Current SCENE word count: {identity.word_count(str(craft.get('scene') or ''))}.\n"
         f"- Current positive word count: {identity.word_count(str(craft.get('prompt') or ''))}."
     )
@@ -655,11 +937,18 @@ async def densify_craft_if_needed(
         ),
     )
     _publish_chat(session["session_id"], note)
+    images = await board_images(db, session)
     try:
         turn = await _run_muse_turn(
-            ollama, session, "finisher", _densify_user_prompt(session), cfg=cfg,
+            ollama, session, "finisher",
+            _densify_user_prompt(
+                session, screening=_screening_note(session) if images else "",
+            ),
+            cfg=cfg, images=images,
         )
         _apply_turn(session, turn)
+        if turn.blind and images:
+            _note_blind(session)
     except chain.ChainError:
         logger.warning("[muse] densify failed; rendering thin craft", exc_info=True)
     await session_db.save(db, session, publish=False)

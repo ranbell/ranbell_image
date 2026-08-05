@@ -1298,6 +1298,8 @@
     "studioHint": "You are the showrunner. The crew debates, puts up an image board, and shoots on your OK.",
     "crewPreset": "Crew preset",
     "presets": {
+      "trio": "Small room (lead, director, planner)",
+      "quartet": "Small room + camera",
       "standard": "Standard",
       "vivid": "Vivid",
       "photoreal": "Photoreal",

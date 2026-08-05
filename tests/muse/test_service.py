@@ -450,3 +450,233 @@ async def test_the_crew_decides_the_look_when_the_showrunner_did_not():
 
     session = await service.patch_inputs(db, session, {"style": "watercolour storybook"})
     assert service._style(session) == "watercolour storybook"
+
+
+class PlanningOllama(FakeOllama):
+    """Answers the planner in labelled lines and everyone else in craft."""
+
+    PLAN = (
+        "SAY: 場所と時間、決めますね。\n\n"
+        "PLACE: a narrow upstairs room\n"
+        "HOUR: late afternoon\n"
+        "LIGHT: even daylight from one window, mid-key, normal exposure\n"
+        "ACTION: she has just sat down\n"
+        "MUST APPEAR: low_table, cushion, window, curtain, mug, rug\n"
+    )
+
+    def generate_text_stream(self, prompt, **kw):
+        self.calls.append({**kw, "prompt": prompt})
+        plan = "settle the situation" in (kw.get("system") or "").lower() \
+            or "PLAN (WHERE, WHEN" in (kw.get("system") or "")
+
+        async def _stream():
+            yield {"type": "token", "text": self.PLAN if plan else (
+                "SAY: Director, the beat is locked.\n\n"
+                "TAGS: standing, indoor\n\n"
+                "SCENE: STAGE A PROMPT"
+            )}
+        return _stream()
+
+    def generate_vlm_stream(self, prompt, images, **kw):
+        self.calls.append({**kw, "prompt": prompt, "images": images})
+        return self.generate_text_stream(prompt, **kw)
+
+
+class SeeingDb(FakeDb):
+    """Resolves a board sha to a real file on disk."""
+
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = path
+        self.looked_up: list[list[str]] = []
+
+    async def get_by_sha256s(self, shas):
+        self.looked_up.append(list(shas))
+        return [{"path": self.path, "sha256": s} for s in shas]
+
+
+@pytest.fixture
+def board_file(tmp_path):
+    from PIL import Image
+    p = tmp_path / "board.png"
+    Image.new("RGB", (896, 1152), (40, 60, 90)).save(p)
+    return str(p)
+
+
+@pytest.mark.asyncio
+async def test_the_planner_settles_the_place_before_anyone_describes_it():
+    db, ollama = FakeDb(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+
+    session = await service.start_table(db, ollama, session)
+
+    assert session["plan"]["place"] == "a narrow upstairs room"
+    assert "low_table" in session["plan"]["must_appear"]
+    # It is re-stated to every seat, so a chain of rewrites cannot relocate it.
+    assert "PLACE: a narrow upstairs room" in session["brief"]
+    assert "PLACE: a narrow upstairs room" in session["brief_lite"]
+    # And it spoke in chat, so the Showrunner can veto the place.
+    assert any(m.get("muse_id") == "plan:madori" for m in session["chat"])
+    # The planner does not write craft.
+    assert "STAGE A PROMPT" in session["craft"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_showrunner_note_becomes_standing_direction():
+    """The bug this exists for: a note reached only the turn that answered it,
+    so the original theme outvoted it on every later call and never rendered."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "屋内にして、椅子に座らせて",
+    )
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もっと明るく",
+    )
+
+    assert session["notes"] == ["屋内にして、椅子に座らせて", "もっと明るく"]
+    for note in session["notes"]:
+        assert note in session["brief"]
+        assert note in session["brief_lite"]
+
+
+@pytest.mark.asyncio
+async def test_a_note_re_settles_the_plan_rather_than_appending_to_it():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    plans_before = sum(1 for e in session["timeline"] if e["step"] == "plan")
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "別の場所にして",
+    )
+
+    assert sum(1 for e in session["timeline"] if e["step"] == "plan") > plans_before
+
+
+@pytest.mark.asyncio
+async def test_the_crew_is_shown_the_board_when_answering_a_note(board_file):
+    db, spooler, ollama = SeeingDb(board_file), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {
+        "seed": 7, "round": 1, "pending": False,
+        "images": [{"index": 0, "image_id": "sha0"}],
+    }
+    await session_db.save(db, session)
+    ollama.calls.clear()
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "背景が違う",
+    )
+
+    seen = [c for c in ollama.calls if c.get("images")]
+    assert seen, "the crew answered a note about the board without looking at it"
+    # Downscaled for the VLM rather than shipped at render size.
+    assert all(len(img) > 0 for c in seen for img in c["images"])
+    assert any("露出" in c["prompt"] or "exposure" in c["prompt"] for c in seen)
+
+
+@pytest.mark.asyncio
+async def test_no_board_means_no_images_and_no_screening_note():
+    db, spooler, ollama = SeeingDb("/nonexistent"), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    ollama.calls.clear()
+
+    await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もう少し寄って",
+    )
+
+    assert not any(c.get("images") for c in ollama.calls)
+    assert db.looked_up == []
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_board_does_not_stop_the_table(board_file):
+    db, spooler, ollama = SeeingDb("/nonexistent/board.png"), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {
+        "seed": 7, "round": 1, "pending": False,
+        "images": [{"index": 0, "image_id": "sha0"}],
+    }
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "背景が違う",
+    )
+    assert session["status"] == "chat"
+    assert not any(c.get("images") for c in ollama.calls)
+
+
+@pytest.mark.asyncio
+async def test_banter_never_reaches_the_prompt_that_writes_the_picture():
+    """Heckles carry no craft and every seat is told to charm in them. Fed back
+    into the craft turn they were a loop with nothing damping it."""
+    session = {"chat": [
+        {"role": "muse", "kind": "craft", "name": "A", "text": "craft line"},
+        {"role": "muse", "kind": "banter", "name": "B", "text": "heckle line"},
+        {"role": "user", "kind": "user", "name": "総監督", "text": "user line"},
+    ]}
+    craft_only = service._recent_talk(session, kinds=("craft",))
+    everything = service._recent_talk(session)
+
+    assert "craft line" in craft_only
+    assert "heckle line" not in craft_only
+    assert "heckle line" in everything
+    assert "user line" not in everything
+
+
+@pytest.mark.asyncio
+async def test_only_the_acting_seats_read_her_inner_life():
+    db = FakeDb()
+    session = await _ready_session(db)
+    session["character"]["personality"] = {
+        "traits": ["quiet"], "inner": ["a private thing she never says"],
+        "likes": ["a thing she likes"],
+    }
+    service._rebuild_brief(session)
+
+    acting = service._brief_for(session, "actress:cast")
+    lighting = service._brief_for(session, "gaffer:gyakkou")
+    assert "a private thing she never says" in acting
+    assert "a private thing she never says" not in lighting
+    assert "quiet" in lighting
+
+
+@pytest.mark.asyncio
+async def test_a_blind_model_is_reported_rather_than_silently_degraded(board_file):
+    class BlindOllama(PlanningOllama):
+        def generate_vlm_stream(self, prompt, images, **kw):
+            self.calls.append({**kw, "prompt": prompt, "images": images})
+
+            async def _empty():
+                yield {"type": "token", "text": "  "}
+            return _empty()
+
+    db, spooler, ollama = SeeingDb(board_file), FakeSpooler(), BlindOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {
+        "seed": 7, "round": 1, "pending": False,
+        "images": [{"index": 0, "image_id": "sha0"}],
+    }
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "背景が違う",
+    )
+
+    said = " ".join(m["text"] for m in session["chat"] if m["role"] == "system")
+    assert "絵を読めない" in said or "could not read" in said
+    assert session["craft"]["prompt"], "the table kept moving"
+
+
+def test_the_small_room_is_the_lead_the_director_and_the_planner():
+    from app.muse import crew
+    roles = [crew.role_of(i) for i in crew.resolve_crew(preset="trio")]
+    assert roles == ["plan", "beat", "actress", "finisher"]
+    assert crew.role_of(crew.resolve_crew(preset="quartet")[2]) == "lens"

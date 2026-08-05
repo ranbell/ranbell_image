@@ -155,3 +155,82 @@ async def test_an_empty_answer_is_an_error_rather_than_an_empty_prompt():
     llm = FakeOllama(reply="   ")
     with pytest.raises(chain.ChainError):
         await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=None)
+
+
+@pytest.mark.asyncio
+async def test_the_planner_answers_in_labelled_lines_not_craft():
+    llm = FakeOllama(reply=(
+        "SAY: 場所と時間、先に決めますね。\n\n"
+        "PLACE: a narrow upstairs room, she is on the floor by the low table\n"
+        "HOUR: late afternoon, early autumn\n"
+        "LIGHT: even daylight from one window, mid-key, normal exposure\n"
+        "ACTION: she has just set down what she was carrying\n"
+        "MUST APPEAR: low_table, cushion, window, curtain, mug, paper_bag, "
+        "bookshelf, rug, wall_clock, slippers\n"
+    ))
+    plan = await chain.run_plan(llm, user_prompt="THEME", model="m", num_ctx=None)
+
+    assert plan["place"].startswith("a narrow upstairs room")
+    assert plan["hour"] == "late afternoon, early autumn"
+    assert "normal exposure" in plan["light"]
+    assert len(plan["must_appear"]) == 10
+    assert plan["say"].startswith("場所と時間")
+    assert "構成" in llm.calls[0]["system"]
+    # It settles the situation; it does not write the picture.
+    assert "TAGS:" not in llm.calls[0]["system"].split("PLACE:")[0][-400:]
+
+
+def test_a_planner_answer_without_labels_leaves_the_old_plan_alone():
+    # A model that replies with craft, or with nothing, must not blank the plan
+    # the crew is already working to.
+    assert chain.parse_plan("SAY: hi\n\nTAGS: a, b\n\nSCENE: something") == {}
+    assert chain.parse_plan("") == {}
+    assert chain.parse_plan("   ") == {}
+
+
+def test_the_planner_parser_tolerates_sloppy_labels():
+    plan = chain.parse_plan(
+        "- **PLACE** : a stairwell\n"
+        "HOUR：dawn\n"
+        "must appear: railing, step, bulb\n"
+    )
+    assert plan["place"] == "a stairwell"
+    assert plan["hour"] == "dawn"
+    assert plan["must_appear"] == ["railing", "step", "bulb"]
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_cannot_read_the_board_retries_blind_and_says_so():
+    """Ollama does not error for a text-only model handed an image — it returns
+    nothing, which is indistinguishable from a bad turn unless we flag it."""
+
+    class BlindOllama(FakeOllama):
+        def generate_vlm_stream(self, prompt, images, **kw):
+            self.calls.append({"kind": "vlm", "prompt": prompt, "images": images})
+
+            async def _empty():
+                yield {"type": "token", "text": "   "}
+            return _empty()
+
+    llm = BlindOllama(reply="SAY: ok\n\nTAGS: sky\n\nSCENE: She waits.")
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m", num_ctx=None,
+        identity_tags=["1girl"], framing="auto", brief="BRIEF",
+        images=[b"jpeg"],
+    )
+    assert turn.blind is True
+    assert turn.prompt.startswith("1girl")
+    assert [c["kind"] for c in llm.calls] == ["vlm", "text"]
+
+
+@pytest.mark.asyncio
+async def test_a_seeing_turn_sends_the_board_and_is_not_flagged_blind():
+    llm = FakeOllama(reply="SAY: ok\n\nTAGS: sky\n\nSCENE: She waits.")
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m", num_ctx=None,
+        identity_tags=["1girl"], framing="auto", brief="BRIEF",
+        images=[b"jpeg"],
+    )
+    assert turn.blind is False
+    assert llm.calls[0]["kind"] == "vlm"
+    assert llm.calls[0]["images"] == [b"jpeg"]

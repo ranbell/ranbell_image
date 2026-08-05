@@ -93,3 +93,65 @@ def test_stage_b_gets_tags_pose_intent_and_later_stages_get_the_previous_prompt(
     assert brief.with_tags("BRIEF", "  ") == "BRIEF"
     assert brief.with_prompt("BRIEF", "a prompt") == "BRIEF,a prompt"
     assert brief.with_prompt("BRIEF", "") == "BRIEF"
+
+
+def test_the_plan_is_stated_before_the_reference_and_the_theme_still_closes(stargazer):
+    plan = {
+        "place": "a stairwell landing",
+        "hour": "dawn",
+        "light": "even daylight from one window, mid-key, normal exposure",
+        "action": "she has stopped halfway up",
+        "must_appear": ["railing", "step", "bulb"],
+    }
+    theme = "she stops on the way up"
+    text = brief.build(stargazer, theme, "anime", plan=plan)
+
+    assert "PLACE: a stairwell landing" in text
+    assert "MUST APPEAR: railing, step, bulb" in text
+    # Style still leads, reference still fenced, theme still closes.
+    assert text.startswith("Style: anime")
+    assert text.index("PLACE:") < text.index(brief.REFERENCE_OPEN)
+    assert text.index(brief.REFERENCE_CLOSE) < text.index(theme)
+    assert text.rstrip().endswith(theme)
+
+
+def test_showrunner_orders_survive_every_later_call(stargazer):
+    """A note used to live only in the turn that answered it, so the original
+    theme outvoted it on every call after that."""
+    text = brief.build(
+        stargazer, "a theme", "anime",
+        notes=["make it somewhere indoors", "she should be sitting"],
+    )
+    assert "make it somewhere indoors" in text
+    assert "she should be sitting" in text
+    assert text.index("make it somewhere indoors") < text.index(brief.REFERENCE_OPEN)
+
+
+def test_a_plan_with_no_fields_adds_no_dangling_header(stargazer):
+    text = brief.build(stargazer, "a theme", "anime", plan={}, notes=[])
+    assert brief.PLAN_HEADER not in text
+    assert brief.ORDERS_HEADER not in text
+
+
+def test_only_the_acting_seats_are_handed_her_inner_life(stargazer):
+    """Lighting and colour do not act, and her inner life was the most evocative
+    text in their context — so it became the language of the whole script."""
+    full = brief.build(stargazer, "a theme", "anime", reference="full")
+    digest = brief.build(stargazer, "a theme", "anime", reference="digest")
+
+    for phrase in stargazer["personality"]["likes"]:
+        assert phrase in full
+        assert phrase not in digest
+    for phrase in stargazer["personality"]["inner"]:
+        assert phrase in full
+        assert phrase not in digest
+
+    # Traits survive: how she carries herself is craft everyone can use.
+    for trait in stargazer["personality"]["traits"]:
+        assert trait in digest
+    # And the fence is still a fence.
+    assert digest.index(brief.REFERENCE_OPEN) < digest.index(brief.REFERENCE_CLOSE)
+    # Identity and theme are untouched by the cut.
+    for tag in stargazer["identity_tags"]:
+        assert tag in digest
+    assert digest.rstrip().endswith("a theme")
