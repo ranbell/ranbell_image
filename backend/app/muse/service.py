@@ -542,44 +542,27 @@ async def post_chat(
 
 
 def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
-    """Heuristic cast for a showrunner note — always ends with finisher if cast.
+    """Fixed short desk for every showrunner note.
 
-    Charm / cuteness notes always pull the actress seat so personality can answer.
-    Cap keeps local Ollama turns short enough to re-spin after each comment.
+    Do NOT branch on mood or situation keywords in Python.
+    The note is already injected into the VLM user prompt — specialists read it
+    in dialogue and revise craft. Python only caps turn count for local Ollama.
     """
-    n = note.lower()
-    want: list[str] = []
-    pairs = [
-        (r"服|衣装|outfit|dress|cloth|ウェア|コーデ|水着|ビキニ|swimsuit|bikini", "wardrobe"),
-        (r"カメラ|画角|アングル|寄り|引き|lens|camera|構図", "lens"),
-        (r"光|照明|影|逆光|light", "gaffer"),
-        (r"背景|場所|物|セット|prop|background", "propshop"),
-        (r"ポーズ|動き|姿勢|pose", "spine"),
-        (r"顔|表情|目線|face|expression", "faces"),
-        (r"色|カラー|color", "palette"),
-        (r"天気|霧|雨|空気|atmosphere", "weather"),
-        (r"画風|スタイル|style", "ink"),
-        (r"可愛|かわいい|魅力|虜|キュート|cute|charm|adorable|kawaii", "actress"),
-        (r"可愛|かわいい|魅力|虜|cute|charm|kawaii", "faces"),
-        (r"可愛|かわいい|魅力|虜|cute|charm|hook|インパクト", "hook"),
-        (r"セクシー|色気|エロ|色っぽ|セクシー|sexy|sensual|alluring|seductive", "actress"),
-        (r"セクシー|色気|エロ|色っぽ|sexy|sensual|alluring|seductive|張りつ", "wardrobe"),
-        (r"セクシー|色気|エロ|色っぽ|sexy|sensual|alluring|seductive", "faces"),
-        (r"セクシー|色気|虜|sexy|sensual|alluring", "hook"),
-        (r"性格|本人|女優|actress|personality|内面", "actress"),
-    ]
-    for pat, mid in pairs:
-        if re.search(pat, n) and mid in crew_ids:
-            want.append(mid)
-    if not want:
-        for mid in ("actress", "beat", "spine", "lens", "wardrobe", "hook"):
-            if mid in crew_ids:
-                want.append(mid)
-    # Unique, catalog order, cap 4 craft turns + finisher (Ollama-friendly).
-    ordered = [m for m in crew_ids if m in set(want) and m != "finisher"][:4]
+    _ = note  # intentional: routing ignores note text; VLM interprets it
+    # Stable priority — actress first so personality can answer any note.
+    priority = (
+        "actress", "beat", "spine", "lens", "wardrobe",
+        "faces", "hook", "gaffer", "propshop",
+    )
+    ordered = [m for m in priority if m in crew_ids][:4]
     if "finisher" in crew_ids:
         ordered.append("finisher")
-    return ordered or [crew_ids[0], "finisher"]
+    if ordered:
+        return ordered
+    head = [crew_ids[0]] if crew_ids else []
+    if "finisher" in crew_ids and "finisher" not in head:
+        head.append("finisher")
+    return head
 
 
 # ── image board ─────────────────────────────────────────────────────────────

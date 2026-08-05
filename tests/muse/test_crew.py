@@ -61,6 +61,18 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
 
 
+def test_say_examples_are_not_tied_to_a_demo_situation():
+    """Voice samples must stay generic — no beach/cafe/swimsuit demo residue."""
+    blob = " ".join(m.get("say_example") or "" for m in crew.MUSES.values())
+    blob += " " + " ".join(m.get("specialty") or "" for m in crew.MUSES.values())
+    for banned in (
+        "水着", "ビキニ", "パラソル", "カフェ", "泳ぐ", "暑さ",
+        "懐中電灯", "スタッフベスト", "砂ベージュ", "ターコイズ",
+        "sexy", "swimsuit", "bikini", "flashlight",
+    ):
+        assert banned not in blob, banned
+
+
 def test_finisher_demands_dense_scene():
     text = crew.system_prompt_for("finisher")
     assert "140–200" in text or "140-200" in text
