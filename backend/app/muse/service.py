@@ -70,6 +70,16 @@ def _framing(inputs: dict[str, Any]) -> str:
     return identity.normalize_framing(str(inputs.get("framing") or "auto"))
 
 
+def _cast(session: dict[str, Any]) -> list[dict[str, Any]]:
+    """Everyone in frame. One seat today; the shape is ready for more."""
+    character = session.get("character") or {}
+    return [character] if character else []
+
+
+def _style(session: dict[str, Any]) -> str:
+    return str(_inputs(session).get("style") or "")
+
+
 def _text_model(inputs: dict[str, Any]) -> str:
     return str(inputs.get("model") or "")
 
@@ -204,6 +214,8 @@ async def _run_muse_turn(
         brief=str(session.get("brief") or ""),
         think=False,
         character=session.get("character") or {},
+        style=_style(session),
+        cast=_cast(session),
         on_token=_token_publisher(sid, muse_id),
     )
 

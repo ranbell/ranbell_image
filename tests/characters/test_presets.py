@@ -113,7 +113,13 @@ def test_preset_maps_to_character(preset):
 
     assert ch["identity_tags"], preset["id"]
     assert ch["source"] == "preset"
-    assert soft_normalize_tag(preset["subject_tag"]) in ch["identity_tags"]
+    # Count is a fact about the scene, not about her. Locked into identity it
+    # said "one girl" in every prompt and made a second character impossible.
+    subject = soft_normalize_tag(preset["subject_tag"])
+    assert subject not in ch["identity_tags"], (
+        f"{preset['id']}: {subject} must not be locked to the character"
+    )
+    assert ch["subject_tag"] == subject, preset["id"]
 
     # Expression and gesture are per-panel performance — never baked into identity.
     for tag in (preset["tags"].get("expression") or []):

@@ -134,8 +134,13 @@ def personality_text_from_preset(preset: dict[str, Any], *, locale: str = "ja") 
 
 def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     """Deterministic preset → character fields (no LLM)."""
+    # `subject_tag` is deliberately NOT part of identity. It says how many people
+    # are in the picture, which is a fact about the scene, not about her — baked
+    # into her identity it insisted there was one girl in frame and made a second
+    # character impossible. `app.muse.identity.subject_tags` derives the count
+    # from the cast instead; the field is still carried for that.
     subject = soft_normalize_tag(str(preset.get("subject_tag") or ""))
-    identity = ([subject] if subject else []) + _tags(preset, *_IDENTITY_BUCKETS)
+    identity = _tags(preset, *_IDENTITY_BUCKETS)
     # The carried item the story can put through its paces, then worn accessories.
     signature = soft_normalize_tag(str(preset.get("signature_prop") or ""))
     props = ([signature] if signature else []) + _tags(preset, *_PROP_BUCKETS)
@@ -172,6 +177,8 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     return {
         "personality": personality,
         "identity_tags": identity,
+        # Carried beside identity, not inside it — the cast decides the count.
+        "subject_tag": subject,
         "outfit_tags": outfit,
         "prop_tags": props,
         "signature_prop": signature,

@@ -70,11 +70,13 @@ async def _call(
 
 def _finish_turn(
     raw: str, *, muse_id: str, identity_tags: list[str] | None,
-    framing: str, brief: str,
+    framing: str, brief: str, style: str = "",
+    cast: list[dict] | None = None,
 ) -> MuseTurn:
     say, tags, scene = identity.parse_table_read(raw)
     positive = identity.assemble_positive(
-        identity_tags, tags, scene, framing=framing,
+        identity_tags, tags, scene, framing=framing, style=style,
+        subject=identity.subject_tags(cast),
     )
     identity.warn_reference_leak(brief, positive)
     if not positive.strip():
@@ -92,6 +94,7 @@ async def run_muse(
     framing: str, brief: str, think: bool = False,
     images: list[bytes] | None = None,
     character: dict[str, Any] | None = None,
+    style: str = "", cast: list[dict] | None = None,
     on_token: TokenCallback | None = None,
 ) -> MuseTurn:
     """One Muse at the table. Text by default; images optional for board review."""
@@ -106,7 +109,7 @@ async def run_muse(
     )
     return _finish_turn(
         raw, muse_id=muse_id, identity_tags=identity_tags,
-        framing=framing, brief=brief,
+        framing=framing, brief=brief, style=style, cast=cast,
     )
 
 

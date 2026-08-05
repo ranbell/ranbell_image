@@ -220,18 +220,84 @@ def parse_table_read(raw: str) -> tuple[str, str, str]:
     return "", "", text
 
 
+_COUNT_TAGS: dict[str, tuple[str, ...]] = {
+    "1girl": ("1girl", "2girls", "3girls", "4girls", "5girls", "6+girls"),
+    "1boy": ("1boy", "2boys", "3boys", "4boys", "5boys", "6+boys"),
+    "1other": ("1other", "2others", "3others", "4others", "5others", "6+others"),
+}
+
+
+def subject_tags(cast: Iterable[dict] | None) -> list[str]:
+    """How many people are in frame, derived from who was actually cast.
+
+    This used to be baked into each character's identity as `1girl`, which meant
+    a second character could not be added without the prompt insisting there was
+    one girl in the picture. Count belongs to the scene, not to a person, so it
+    is computed here from the cast and prepended once.
+    """
+    members = [c for c in (cast or []) if isinstance(c, dict)]
+    if not members:
+        return []
+    counts: dict[str, int] = {}
+    for member in members:
+        key = _norm(member.get("subject_tag") or "1girl")
+        if key not in _COUNT_TAGS:
+            key = "1girl"
+        counts[key] = counts.get(key, 0) + 1
+
+    out: list[str] = []
+    for key, n in counts.items():
+        scale = _COUNT_TAGS[key]
+        out.append(scale[min(n, len(scale)) - 1])
+    if len(members) == 1:
+        out.append("solo")
+    return out
+
+
+def style_tags(style: str) -> list[str]:
+    """The chosen look, as tags the sampler reads.
+
+    A style is written for a person ("Cute 2D Anime Style"), so it arrives as a
+    phrase. Split it on commas and let each part stand as its own tag; a phrase
+    with no commas stays one tag with its spaces turned into underscores, which
+    is the shape every other tag in the prompt has.
+    """
+    out: list[str] = []
+    for part in str(style or "").split(","):
+        tag = _norm(part)
+        if tag and tag not in out:
+            out.append(tag)
+    return out
+
+
 def assemble_positive(
     identity_tags: Iterable[str] | None,
     tags: str,
     scene: str,
     *,
     framing: str | None = "auto",
+    style: str = "",
+    subject: Iterable[str] | None = None,
 ) -> str:
-    """Final Comfy positive: locked identity, model tags, framing, scene prose."""
+    """Final Comfy positive: subject, identity, style, model tags, framing, prose.
+
+    Style sits directly after identity because it colours everything that
+    follows. It used to reach the brief and stop there: the panel's Style box
+    was handed to the LLM as a request and never became a tag, so a run asking
+    for cute 2D anime rendered at whatever the checkpoint defaults to.
+    """
     head = identity_list(identity_tags)
+    lead = [t for t in identity_list(subject) if t not in head]
     banned = conflicting_body_tags(head)
+    seen = set(head) | set(lead)
+
+    look: list[str] = []
+    for tag in style_tags(style):
+        if tag not in seen:
+            seen.add(tag)
+            look.append(tag)
+
     model_tags: list[str] = []
-    seen = set(head)
     for part in (tags or "").split(","):
         tag = _norm(part)
         if not tag or tag in seen or tag in banned:
@@ -243,9 +309,8 @@ def assemble_positive(
         if tag not in seen:
             seen.add(tag)
             model_tags.append(tag)
-    chunks = [", ".join(head)] if head else []
-    if model_tags:
-        chunks.append(", ".join(model_tags))
+
+    chunks = [", ".join(c) for c in (lead, head, look, model_tags) if c]
     if (scene or "").strip():
         chunks.append(scene.strip())
     return ", ".join(c for c in chunks if c)

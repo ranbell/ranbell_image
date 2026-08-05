@@ -132,3 +132,48 @@ def test_reference_leak_detects_fenced_likes():
         text, "a girl with a thermos coffee on the roof",
     )
     assert any("thermos coffee" in x for x in leaked)
+
+
+def test_the_style_reaches_the_prompt_not_only_the_brief():
+    """The panel's Style box used to stop at the brief.
+
+    It was handed to the LLM as a request and never became a tag, so a run
+    asking for cute 2D anime rendered at whatever the checkpoint defaults to.
+    """
+    positive = identity.assemble_positive(
+        ["black_hair", "blue_eyes"], "standing, workshop", "She stands.",
+        framing="upper_body", style="Cute 2D Anime Style",
+    )
+    assert "cute_2d_anime_style" in positive
+    # Directly after identity: the look colours everything that follows.
+    assert positive.index("blue_eyes") < positive.index("cute_2d_anime_style")
+    assert positive.index("cute_2d_anime_style") < positive.index("standing")
+
+
+def test_a_comma_written_style_becomes_several_tags():
+    positive = identity.assemble_positive(
+        [], "standing", "", style="flat colour, bold outlines",
+    )
+    assert "flat_colour" in positive and "bold_outlines" in positive
+
+
+def test_subject_count_comes_from_the_cast_not_the_character():
+    one = identity.subject_tags([{"subject_tag": "1girl"}])
+    assert one == ["1girl", "solo"]
+
+    two = identity.subject_tags([{"subject_tag": "1girl"}, {"subject_tag": "1girl"}])
+    assert two == ["2girls"]
+    assert "solo" not in two
+
+    mixed = identity.subject_tags([{"subject_tag": "1girl"}, {"subject_tag": "1boy"}])
+    assert set(mixed) == {"1girl", "1boy"}
+
+    assert identity.subject_tags([]) == []
+
+
+def test_the_count_leads_the_prompt_and_never_repeats_identity():
+    positive = identity.assemble_positive(
+        ["black_hair"], "standing", "She stands.",
+        subject=identity.subject_tags([{"subject_tag": "1girl"}]),
+    )
+    assert positive.startswith("1girl, solo, black_hair")
