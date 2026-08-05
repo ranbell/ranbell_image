@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import identity
+from app.tags.body import BREAST_TAGS as _BREAST_SIZES
 
 
 def test_conflicting_breast_tags_are_banned_when_small_is_locked():
@@ -177,3 +178,41 @@ def test_the_count_leads_the_prompt_and_never_repeats_identity():
         subject=identity.subject_tags([{"subject_tag": "1girl"}]),
     )
     assert positive.startswith("1girl, solo, black_hair")
+
+
+def test_the_figure_lock_strips_a_size_the_model_invented():
+    """The whole point of putting a chest tag in identity: with the bucket empty
+    the slot has nothing 'present', so nothing gets banned and a draft's guess
+    walks straight into the prompt."""
+    locked = ["black_hair", "small_breasts", "slim"]
+    positive = identity.assemble_positive(
+        locked, "large_breasts, curvy, standing, workshop", "She stands.",
+    )
+    assert "small_breasts" in positive and "slim" in positive
+    assert "large_breasts" not in positive
+    assert "curvy" not in positive
+    assert "standing" in positive and "workshop" in positive
+
+
+def test_the_opposites_reach_the_negative():
+    negative = identity.opposing_negative(["black_hair", "small_breasts"])
+    assert "large_breasts" in negative and "flat_chest" in negative
+    assert "small_breasts" not in negative, "her own figure must not be negated"
+    # The extremes are pushed against whenever any chest tag is locked.
+    assert "huge_breasts" in negative and "gigantic_breasts" in negative
+
+
+def test_an_empty_figure_locks_nothing():
+    """Documents why the roster needed one: this is the state it was in."""
+    banned = identity.conflicting_body_tags(["black_hair", "blue_eyes"])
+    assert not (banned & set(_BREAST_SIZES)), sorted(banned & set(_BREAST_SIZES))
+
+
+def test_petite_is_refused_whatever_she_is():
+    """A slot only bans its other members when something is in it, and most
+    characters name no height at all — so `petite` needed the unconditional
+    treatment rather than a slot mate."""
+    for locked in (["black_hair"], ["black_hair", "tall"], ["black_hair", "small_breasts"]):
+        positive = identity.assemble_positive(locked, "petite, standing", "She stands.")
+        assert "petite" not in positive, locked
+    assert "petite" in identity.opposing_negative(["black_hair", "small_breasts"])

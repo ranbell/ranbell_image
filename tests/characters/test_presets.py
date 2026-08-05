@@ -25,7 +25,7 @@ from app.characters.presets import (
     preset_summary,
     preset_to_character,
 )
-from app.tags.body import AGE_TAGS, filter_body_tags
+from app.tags.body import AGE_TAGS, BODY_SLOTS, BREAST_TAGS, filter_body_tags
 from app.tags.split_tags import soft_normalize_tag
 
 PRESETS = load_seed_presets()
@@ -372,3 +372,42 @@ def test_a_log_line_still_says_who_she_is():
     # A preset without one degrades to the id rather than to "None".
     assert preset_label({"id": "c999"}) == "c999"
     assert preset_label({}) == "?"
+
+
+_BREAST = set(BREAST_TAGS)
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p["id"])
+def test_every_character_has_a_figure(preset):
+    """The body-slot lock only works if something is in the slot. With the chest
+    bucket empty — which it was for all thirty — `conflicting_body_tags` returns
+    nothing and the whole mechanism idles."""
+    body = preset["tags"]["body"]
+    chest = [t for t in body if t in _BREAST]
+    assert len(chest) == 1, f"{preset['id']}: chest tags {chest}"
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p["id"])
+def test_one_tag_per_body_slot(preset):
+    """Two from one slot leaves both 'present', so neither bans the other and
+    the lock quietly stops working."""
+    body = preset["tags"]["body"]
+    for slot in BODY_SLOTS:
+        hit = [t for t in body if t in slot]
+        assert len(hit) <= 1, f"{preset['id']}: {hit} are the same measurement"
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p["id"])
+def test_the_roster_avoids_the_builds_that_overshoot(preset):
+    """`petite` renders her markedly smaller than her sheet says. The extremes
+    at the other end are what `opposing_negative` already pushes against, so
+    authoring one would fight our own machinery."""
+    body = set(preset["tags"]["body"])
+    assert "petite" not in body, preset["id"]
+    assert not (body & {"huge_breasts", "gigantic_breasts"}), preset["id"]
+
+
+def test_the_roster_is_not_one_figure_thirty_times():
+    chest = [t for p in PRESETS for t in p["tags"]["body"] if t in _BREAST]
+    assert len(set(chest)) >= 3, sorted(set(chest))
+    assert max(chest.count(c) for c in set(chest)) <= len(PRESETS) * 0.5

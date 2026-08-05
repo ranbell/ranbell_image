@@ -56,10 +56,21 @@ AGE_TAGS: frozenset[str] = frozenset({
 })
 
 
+# Builds that are never wanted, whoever is in frame. `petite` stays in
+# BODY_SLOTS so it is still refused when a model reaches for it, but it renders
+# a character markedly smaller than her sheet says and is never authored.
+# The extreme chest tags are handled separately, in `opposing_negative`, which
+# already pushes against them whenever any chest tag is locked.
+UNWANTED_TAGS: frozenset[str] = frozenset({"petite"})
+
+# Everything refused outright, in identity and in a model's answer alike.
+REFUSED_TAGS: frozenset[str] = AGE_TAGS | UNWANTED_TAGS
+
+
 def is_allowed_body_tag(tag: str) -> bool:
     """True when a tag may be locked into a character's identity."""
     t = str(tag or "").strip().lower().replace(" ", "_")
-    return bool(t) and t not in AGE_TAGS and t in ALLOWED_BODY_TAGS
+    return bool(t) and t not in REFUSED_TAGS and t in ALLOWED_BODY_TAGS
 
 
 def filter_body_tags(tags: list[str]) -> tuple[list[str], list[str]]:

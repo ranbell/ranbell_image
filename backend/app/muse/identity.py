@@ -13,7 +13,7 @@ from typing import Iterable
 
 # The body vocabulary lives in app.tags.body so the character registry and this
 # module cannot drift apart about what may be locked to a character.
-from ..tags.body import AGE_TAGS
+from ..tags.body import AGE_TAGS, REFUSED_TAGS
 from ..tags.body import BODY_SLOTS as _BODY_SLOTS
 from ..tags.body import BREAST_TAGS as _BREAST_TAGS
 
@@ -121,10 +121,12 @@ def conflicting_body_tags(identity_tags: Iterable[str] | None) -> set[str]:
     Age tags are always in the set, whatever the character sheet says. They are
     refused from identity upstream, so the only way one reaches a prompt is the
     model reaching for it — and `mature_female` on a character written as a
-    student is the failure this whole path exists to stop.
+    student is the failure this whole path exists to stop. `petite` rides along
+    for the same reason: a slot only bans its other members when something is in
+    it, and most characters name no height at all.
     """
     locked = set(identity_list(identity_tags))
-    banned: set[str] = set(AGE_TAGS)
+    banned: set[str] = set(REFUSED_TAGS)
     for slot in _BODY_SLOTS:
         present = [t for t in slot if t in locked]
         if not present:
@@ -159,12 +161,12 @@ def drop_conflicting_tags(tags: str, identity_tags: Iterable[str] | None) -> str
 # The negative is read by the sampler, not by a filter, so it stays short. The
 # full age list is stripped from the positive instead — putting twenty-odd age
 # words in every negative buys nothing and crowds out the tags that matter.
-_AGE_NEGATIVE: tuple[str, ...] = ("mature_female", "old", "loli", "child")
+_AGE_NEGATIVE: tuple[str, ...] = ("mature_female", "old", "loli", "child", "petite")
 
 
 def opposing_negative(identity_tags: Iterable[str] | None) -> str:
     """Negative prompt fragment that pushes against inventing a different body."""
-    slot_banned = conflicting_body_tags(identity_tags) - AGE_TAGS
+    slot_banned = conflicting_body_tags(identity_tags) - REFUSED_TAGS
     banned = sorted(slot_banned)
     # Always discourage the most extreme upgrades when any breast tag is locked.
     locked = set(identity_list(identity_tags))
