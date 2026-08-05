@@ -148,11 +148,17 @@ async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, 
 
 async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     inputs = {**_inputs(session), **{k: v for k, v in patch.items() if v is not None}}
-    # Resolve crew when preset or ids change.
+    # Resolve crew when preset or ids change. Which one asked decides who wins:
+    # picking a preset means "give me that crew", so the stored ids are rebuilt
+    # from it. Toggling a seat means "keep mine with this change", so the ids
+    # stand. Reading both from the merged inputs made the ids win every time,
+    # and since a new session already carries ids, choosing a preset did nothing
+    # at all after the first one.
     if "crew_preset" in patch or "crew_ids" in patch:
+        chose_preset = patch.get("crew_preset") is not None
         ids = crew.resolve_crew(
             preset=str(inputs.get("crew_preset") or crew.DEFAULT_PRESET),
-            crew_ids=list(inputs.get("crew_ids") or []) or None,
+            crew_ids=None if chose_preset else (list(inputs.get("crew_ids") or []) or None),
         )
         inputs["crew_ids"] = [i for i in ids if i not in ("finisher", "actress")]
         inputs["crew_preset"] = str(inputs.get("crew_preset") or crew.DEFAULT_PRESET)

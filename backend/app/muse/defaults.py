@@ -64,9 +64,16 @@ LLM_DEFAULTS: dict[str, object] = {
 
 # ── The look, which is the user's call and not the model's ─────────────────
 STYLE_DEFAULTS: dict[str, object] = {
-    # Goes in at the top of the brief and every stage is told to obey it. The
-    # same theme in two styles is two different pictures.
-    "style": "Cute 2D Anime Style",
+    # Goes in at the top of the brief, into the positive right after identity,
+    # and every stage is told to obey it. The same theme in two styles is two
+    # different pictures.
+    #
+    # Empty by default so the cast decides: `crew.style_direction` reads the
+    # room's taste and names a base look. Filled in with a fixed phrase it wins
+    # outright, which is right when someone has an opinion and wrong as a
+    # default — a preset style meant swapping the whole crew changed nothing
+    # about how the picture was rendered.
+    "style": "",
     # Appended to whatever the workflow already carries.
     "negative_prompt": (
         "bad quality, bad anatomy, simple, simple_background, border, "

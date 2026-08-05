@@ -907,9 +907,11 @@ def public_roster(
 ) -> dict[str, Any]:
     ch = character or {}
     p = ch.get("personality") or {}
-    actress_name = str(ch.get("name") or p.get("preset_name") or "Lead")
+    actress_name = str(ch.get("name") or p.get("preset_name") or MUSES["actress"]["name"])
+    # Falling through to the English name left the Japanese panel showing "Lead"
+    # on the one seat that is supposed to read as a person.
     actress_name_ja = str(
-        ch.get("name_ja") or p.get("preset_name_ja") or actress_name or "主演"
+        ch.get("name_ja") or p.get("preset_name_ja") or MUSES["actress"]["name_ja"]
     )
     actress_line = str(
         p.get("summary_ja") or p.get("summary") or MUSES["actress"]["line_ja"]

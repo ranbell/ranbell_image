@@ -129,11 +129,19 @@ def missing_inputs(session: dict[str, Any]) -> list[str]:
 
 def public_view(session: dict[str, Any]) -> dict[str, Any]:
     from . import crew as crew_mod
+    inputs = session.get("inputs") or {}
+    # The roster carries this session's own direction, so the panel can show
+    # what the current cast is pulling toward as seats are toggled.
+    cast = crew_mod.resolve_crew(
+        preset=str(inputs.get("crew_preset") or crew_mod.DEFAULT_PRESET),
+        crew_ids=list(inputs.get("crew_ids") or []) or None,
+    )
     return {
         **session,
         "steps": list(STEPS),
         "step_state": step_state(session),
         "next_step": next_step(session),
         "needs": missing_inputs(session),
-        "roster": crew_mod.public_roster(session.get("character") or {}),
+        "roster": crew_mod.public_roster(session.get("character") or {}, cast),
+        "style_in_use": crew_mod.base_style_for(cast, inputs.get("style") or ""),
     }

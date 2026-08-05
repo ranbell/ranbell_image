@@ -32,7 +32,7 @@ const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
 const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
-const PRESETS = ['lightning', 'gallery', 'everyone', 'motion', 'night']
+const PRESETS = ['standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'everyone']
 
 let eventSource = null
 let pollTimer = null
@@ -52,6 +52,11 @@ const status = computed(() => session.value?.status || 'setup')
 const roster = computed(() => session.value?.roster || catalog.value?.roster || {})
 const muses = computed(() => roster.value.muses || [])
 const crewIds = computed(() => new Set(inputs.value.crew_ids || []))
+// Where this cast pulls the picture. Recomputed server-side on every patch, so
+// toggling a seat moves the meter and the base look in the same breath.
+const direction = computed(() => roster.value.direction || {})
+const tasteAxes = computed(() => roster.value.taste_axes || [])
+const baseLook = computed(() => session.value?.style_in_use || direction.value.base || '')
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
 const models = computed(() => catalog.value?.llm?.models || [])
@@ -79,6 +84,18 @@ function full(sha) { return sha ? `/api/originals/${sha}` : '' }
 function museLabel(m) {
   if (!m) return ''
   return isJa.value ? (m.name_ja || m.name) : m.name
+}
+function museNick(m) {
+  if (!m) return ''
+  return isJa.value ? (m.nick_ja || '') : (m.nick || '')
+}
+// -2…+2 becomes a five-step bar the eye can compare across seats.
+function tasteBar(score) {
+  const n = Math.max(-2, Math.min(2, Number(score) || 0))
+  return '−・0・＋'.split('・')[n < 0 ? 0 : n > 0 ? 2 : 1] + (n ? Math.abs(n) : '')
+}
+function tasteWidth(score) {
+  return `${(Math.max(-2, Math.min(2, Number(score) || 0)) + 2) / 4 * 100}%`
 }
 function museById(id) {
   return muses.value.find(m => m.id === id)
@@ -520,6 +537,30 @@ async function onChatKey(e) {
             @click="setPreset(p)"
           >{{ t(`muse.presets.${p}`) }}</button>
         </div>
+        <!-- what this cast is pulling toward -->
+        <div v-if="tasteAxes.length" class="rounded border border-white/10 bg-black/30 p-3">
+          <div class="flex items-baseline justify-between gap-2 mb-2">
+            <span class="sb-label">{{ t('muse.taste.title') }}</span>
+            <span class="text-[10px] text-[var(--sb-faint)]">{{ t('muse.taste.hint') }}</span>
+          </div>
+          <div class="space-y-1.5">
+            <div v-for="a in tasteAxes" :key="a.id" class="flex items-center gap-2">
+              <span class="w-16 shrink-0 text-right text-[10px] text-[var(--sb-faint)]">{{ a.low }}</span>
+              <span class="relative h-1.5 flex-1 rounded bg-white/10">
+                <span class="absolute inset-y-0 w-px bg-white/25" style="left:50%"></span>
+                <span class="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2
+                             rounded-full bg-[var(--sb-teal)] transition-all duration-300"
+                      :style="{ left: tasteWidth((direction.scores || {})[a.id]) }"></span>
+              </span>
+              <span class="w-16 shrink-0 text-[10px] text-[var(--sb-faint)]">{{ a.high }}</span>
+            </div>
+          </div>
+          <p class="mt-2 text-[11px]">
+            <span class="sb-label">{{ t('muse.taste.base') }}</span>
+            <span class="ml-2 font-mono text-[var(--sb-amber)]">{{ baseLook || '—' }}</span>
+          </p>
+        </div>
+
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
           <button
             v-for="m in muses" :key="m.id" type="button"
@@ -530,9 +571,19 @@ async function onChatKey(e) {
             :disabled="m.required || act !== 'setup'"
             @click="toggleMuse(m.id)"
           >
-            <span class="block text-[var(--sb-amber)]">{{ museLabel(m) }}</span>
+            <span class="block text-[var(--sb-amber)]">
+              {{ museLabel(m) }}
+              <span v-if="museNick(m) && museNick(m) !== museLabel(m)"
+                    class="ml-1 text-[10px] text-[var(--sb-teal)]">「{{ museNick(m) }}」</span>
+            </span>
             <span class="block text-[10px] text-[var(--sb-faint)]">{{ isJa ? m.role_ja : m.role }}</span>
             <span class="block text-[10px] text-gray-400 mt-1">{{ isJa ? (m.line_ja || m.line) : m.line }}</span>
+            <span v-if="m.taste" class="mt-1 flex gap-1.5 text-[9px] text-[var(--sb-faint)]">
+              <span v-for="a in tasteAxes" :key="a.id"
+                    :class="m.taste[a.id] ? 'text-[var(--sb-teal)]' : ''">
+                {{ a.high.slice(0, 2) }}{{ tasteBar(m.taste[a.id]) }}
+              </span>
+            </span>
           </button>
         </div>
       </section>

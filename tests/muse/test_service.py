@@ -403,3 +403,49 @@ async def test_light_banter_mode_fires_fewer_side_calls_than_full():
 
     assert light_banter < full_banter
     assert light_banter >= 1
+
+
+@pytest.mark.asyncio
+async def test_choosing_a_preset_replaces_the_crew_it_does_not_merge():
+    """A new session already carries crew_ids, and both were read from the
+    merged inputs, so the ids always won and picking a preset did nothing."""
+    db = FakeDb()
+    session = await service.create_session(db, {})
+
+    session = await service.patch_inputs(db, session, {"crew_preset": "flat"})
+    flat = list(session["inputs"]["crew_ids"])
+    assert "ink" in flat and "lens" not in flat
+
+    session = await service.patch_inputs(db, session, {"crew_preset": "photoreal"})
+    real = list(session["inputs"]["crew_ids"])
+    assert real != flat
+    assert "lens" in real and "ink" not in real
+
+
+@pytest.mark.asyncio
+async def test_toggling_a_seat_keeps_the_rest_of_the_crew():
+    db = FakeDb()
+    session = await service.create_session(db, {})
+    session = await service.patch_inputs(db, session, {"crew_preset": "standard"})
+    kept = [i for i in session["inputs"]["crew_ids"] if i != "gaffer"]
+
+    session = await service.patch_inputs(db, session, {"crew_ids": kept})
+    assert "gaffer" not in session["inputs"]["crew_ids"]
+    assert session["inputs"]["crew_ids"] == kept
+
+
+@pytest.mark.asyncio
+async def test_the_crew_decides_the_look_when_the_showrunner_did_not():
+    db = FakeDb()
+    session = await service.create_session(db, {})
+    session = await service.patch_inputs(db, session, {"crew_preset": "flat"})
+    flat_look = service._style(session)
+
+    session = await service.patch_inputs(db, session, {"crew_preset": "photoreal"})
+    real_look = service._style(session)
+
+    assert flat_look != real_look
+    assert "flat" in flat_look and "semi-realistic" in real_look
+
+    session = await service.patch_inputs(db, session, {"style": "watercolour storybook"})
+    assert service._style(session) == "watercolour storybook"
