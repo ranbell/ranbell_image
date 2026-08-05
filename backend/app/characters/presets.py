@@ -165,6 +165,11 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
         "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
         "inner": _strings(preset.get("inner")),
         "inner_ja": _strings(preset.get("inner_ja")),
+        # The gap between how she reads and what she actually is. It is the
+        # reason to draw her rather than a generically pretty face, so it goes
+        # to the acting seat by name instead of being buried in the summary.
+        "charm": str(preset.get("charm") or ""),
+        "charm_ja": str(preset.get("charm_ja") or preset.get("charm") or ""),
         "likes": _strings(preferences.get("likes")),
         "dislikes": _strings(preferences.get("dislikes")),
         "appearance": dict(preset.get("appearance") or {}),
@@ -205,6 +210,9 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "gender": str(preset.get("gender") or ""),
         "subject_tag": str(preset.get("subject_tag") or ""),
         "traits": _strings(preset.get("personality"))[:5],
+        "title": str(preset.get("title") or ""),
+        "title_ja": str(preset.get("title_ja") or preset.get("title") or ""),
+        "charm_ja": str(preset.get("charm_ja") or preset.get("charm") or ""),
         "tag_count": sum(len(v or []) for v in tags.values()),
         # What the picker shows. A bundled preset has none until one is drawn.
         "board": {slot: str(board.get(slot) or "") for slot in BOARD_SLOTS},

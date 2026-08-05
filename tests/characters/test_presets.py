@@ -160,7 +160,8 @@ def test_personality_text_prefers_locale():
 def test_summary_row_is_light():
     row = preset_summary(PRESETS[0])
     assert set(row) == {
-        "id", "preset_key", "name", "name_ja", "summary", "summary_ja",
+        "id", "preset_key", "name", "name_ja", "title", "title_ja",
+        "summary", "summary_ja", "charm_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
         "hair_color", "eye_color", "user_created",
     }
