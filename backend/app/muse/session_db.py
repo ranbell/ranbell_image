@@ -8,7 +8,7 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ..db.qdrant_client import MUSE_SESSIONS_COLLECTION
-from . import events, schema
+from . import events
 
 logger = logging.getLogger(__name__)
 
@@ -64,113 +64,86 @@ async def delete(db, session_id: str) -> None:
     )
 
 
-async def attach_draft_image(db, session_id: str, image_id: str, meta: dict) -> None:
-    """Land one image of the draft batch, as each is saved.
-
-    The drafts come from a single job — one seed, one latent, one batch — so
-    this runs once per image and they appear in the panel as they arrive. The
-    session is re-read rather than closed over because the render runs in a
-    different task from the one that queued it.
-
-    It does not decide when the draft is finished. A workflow may end in an
-    upscale or a detailer, in which case it emits one image per batch item *per
-    output node*: a batch of four came back as eight. Counting against
-    ``draft_count`` marked the step done halfway through, and the panel went
-    from done back to pending as the rest landed.
-    """
+async def attach_board_image(db, session_id: str, image_id: str, meta: dict) -> None:
     session = await load(db, session_id)
     if session is None:
-        logger.warning("[muse] draft landed for a session that is gone: %s", session_id)
+        logger.warning("[muse] board landed for a session that is gone: %s", session_id)
         return
-    draft = session.setdefault("draft", {})
-    images = draft.setdefault("images", [])
-    images.append({"index": len(images), "image_id": image_id,
-                   "seed": meta.get("seed", draft.get("seed"))})
+    board = session.setdefault("board", {})
+    images = board.setdefault("images", [])
+    images.append({
+        "index": len(images), "image_id": image_id,
+        "seed": meta.get("seed", board.get("seed")),
+    })
     await save(db, session, publish=False)
     events.publish(session_id, {
-        "type": "draft_attached", "index": len(images) - 1, "image_id": image_id,
+        "type": "board_attached", "index": len(images) - 1, "image_id": image_id,
     })
 
 
-async def finish_draft(db, session_id: str, *, error: str = "") -> None:
-    """The draft job has stopped. Whatever landed is what there is."""
+async def finish_board(db, session_id: str, *, error: str = "") -> None:
     session = await load(db, session_id)
     if session is None:
         return
-    draft = session.get("draft") or {}
-    if not draft:
-        # Cancelled: the session already dropped the draft, and putting an empty
-        # one back would leave the panel with a finished step and no pictures.
+    board = session.get("board") or {}
+    if not board:
         return
-    draft["pending"] = False
+    board["pending"] = False
     if error:
-        draft["error"] = error
+        board["error"] = error
         warnings = session.setdefault("warnings", [])
         if error not in warnings:
             warnings.append(error)
-    session["status"] = "drafted" if draft.get("images") else "draft"
+    session["status"] = "awaiting_ok" if board.get("images") else "chat"
     await save(db, session)
+    if board.get("images"):
+        events.publish(session_id, {
+            "type": "board_ready",
+            "count": len(board["images"]),
+            "question": True,
+        })
 
 
-async def attach_stage_image(
-    db, session_id: str, chain_index: int, stage_index: int,
-    image_id: str, meta: dict,
-) -> None:
-    """Land the render for one refine stage of one chain."""
+async def attach_shoot_image(db, session_id: str, image_id: str, meta: dict) -> None:
     session = await load(db, session_id)
     if session is None:
         return
-    chains = session.get("chains") or []
-    if not 0 <= chain_index < len(chains):
-        return
-    stages = chains[chain_index].get("stages") or []
-    if not 0 <= stage_index < len(stages):
-        return
-    stages[stage_index]["image_id"] = image_id
-    stages[stage_index]["pending"] = False
-    stages[stage_index]["seed"] = meta.get("seed", stages[stage_index].get("seed"))
-    landed = [s for s in schema.all_stages(session) if s.get("image_id")]
-    total = len(schema.all_stages(session))
-    if landed and len(landed) == total:
-        session["status"] = "done"
+    shoot = session.setdefault("shoot", {})
+    images = shoot.setdefault("images", [])
+    images.append({
+        "index": len(images), "image_id": image_id,
+        "seed": meta.get("seed", shoot.get("seed")),
+    })
     await save(db, session, publish=False)
     events.publish(session_id, {
-        "type": "stage_attached", "chain": chain_index, "stage": stage_index,
-        "image_id": image_id, "done": len(landed), "total": total,
+        "type": "shoot_attached", "index": len(images) - 1, "image_id": image_id,
     })
 
 
-async def record_wd14(db, session_id: str, chain_index: int, tags: str) -> None:
+async def finish_shoot(db, session_id: str, *, error: str = "") -> None:
     session = await load(db, session_id)
     if session is None:
         return
-    chains = session.get("chains") or []
-    if 0 <= chain_index < len(chains):
-        chains[chain_index]["wd14"] = tags
-        await save(db, session)
-
-
-async def record_stage_prompt(
-    db, session_id: str, chain_index: int, stage_index: int, prompt: str,
-) -> None:
-    """Store a stage's prompt as soon as it is written.
-
-    Written before the render rather than after it, so the panel can show what
-    is being drawn while it is being drawn — and so a render that fails still
-    leaves behind the prompt that caused it.
-    """
-    session = await load(db, session_id)
-    if session is None:
+    shoot = session.get("shoot") or {}
+    if not shoot:
         return
-    chains = session.get("chains") or []
-    if not 0 <= chain_index < len(chains):
-        return
-    stages = chains[chain_index].get("stages") or []
-    if not 0 <= stage_index < len(stages):
-        return
-    stages[stage_index]["prompt"] = prompt
-    stages[stage_index]["pending"] = True
+    shoot["pending"] = False
+    if error:
+        shoot["error"] = error
+        warnings = session.setdefault("warnings", [])
+        if error not in warnings:
+            warnings.append(error)
+    session["status"] = "done" if shoot.get("images") else "awaiting_ok"
     await save(db, session)
+
+
+# Legacy aliases used by older draft helpers / tests.
+async def attach_draft_image(db, session_id: str, image_id: str, meta: dict) -> None:
+    await attach_board_image(db, session_id, image_id, meta)
+
+
+async def finish_draft(db, session_id: str, *, error: str = "") -> None:
+    await finish_board(db, session_id, error=error)
 
 
 def log(session: dict[str, Any], step: str, detail: str) -> None:

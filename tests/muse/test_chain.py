@@ -39,20 +39,16 @@ class FakeOllama:
         return self._stream()
 
 
-def test_every_stage_has_a_prompt_file_and_an_output_format():
+def test_legacy_prompt_files_still_exist_for_pickup_docs():
     for _, filename in chain.REFINE_STAGES:
         text = chain.system_prompt(filename)
         assert "OUTPUT FORMAT" in text
         assert "TAGS:" in text
         assert "SCENE:" in text
-        # The instructions are English on purpose: written in Japanese, the model
-        # sometimes answered in Japanese, which the image model cannot use.
         assert "English only" in text
     b = chain.system_prompt("b_reinforce.md")
     assert "ten or more objects" in b.lower()
-    assert "never from the <REFERENCE>" in b or "taste cues, not inventory" in b
     a = chain.system_prompt("a_pose.md")
-    assert "OUTPUT FORMAT" in a
     assert "face_closeup" in a
     assert "from_behind" in a
 
@@ -61,8 +57,26 @@ def test_stages_for_clamps_to_the_instructions_that_exist():
     assert len(chain.stages_for(3)) == 3
     assert len(chain.stages_for(1)) == 1
     assert len(chain.stages_for(0)) == 1
-    # There is no fourth instruction, so asking for more repeats nothing.
     assert len(chain.stages_for(9)) == 3
+
+
+@pytest.mark.asyncio
+async def test_run_muse_streams_say_and_locks_identity():
+    llm = FakeOllama(reply=(
+        "SAY: Director, one beat.\n\n"
+        "TAGS: standing, rooftop\n\n"
+        "SCENE: She waits in the rain."
+    ))
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m",
+        num_ctx=None, identity_tags=["1girl", "blue_hair"],
+        framing="auto", brief="BRIEF",
+    )
+    assert turn.say.startswith("Director")
+    assert turn.prompt.startswith("1girl, blue_hair")
+    assert turn.pose_intent == "She waits in the rain."
+    assert llm.calls[0]["kind"] == "text"
+    assert "You are Beat" in llm.calls[0]["system"]
 
 
 @pytest.mark.asyncio

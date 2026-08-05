@@ -1,8 +1,8 @@
-"""Muse session shape and step state.
+"""Muse session shape — chat studio with the user as showrunner.
 
-The session keeps every prompt and every image the run produced, not just the
-last one. That is deliberate: which stage came out best depends on how good the
-draft was, so there is no "final" — there are results, and a person picks.
+Flow: cast a crew → table-read chat → image board ("これでいい？") →
+showrunner OK → final shoot. Pickup refine (B/C/D) is gone; discussion and
+boards replace it.
 """
 from __future__ import annotations
 
@@ -10,23 +10,26 @@ import time
 import uuid
 from typing import Any
 
+from . import crew
 from .defaults import ALL_DEFAULTS
 
-# Two steps and a choice between them. There is no AUTO mode: the choice of
-# draft is a person looking at four pictures, and a pipeline that skips it is
-# the pipeline Muse used to be.
+# Acts the panel rails through. "refine" removed — boards + OK replace it.
 STEPS: tuple[str, ...] = (
-    "draft",    # one LLM call, then N variations from one seed
-    "refine",   # per chosen draft: WD14 -> B -> C -> D, rendering after each
+    "setup",   # theme, character, cast
+    "chat",    # table read + showrunner notes
+    "board",   # image board awaiting OK
+    "shoot",   # final render after OK
 )
 
 
 def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+    preset = str((inputs or {}).get("crew_preset") or crew.DEFAULT_PRESET)
+    crew_ids = crew.resolve_crew(preset=preset)
     return {
         "session_id": str(uuid.uuid4()),
         "created_at": time.time(),
         "updated_at": time.time(),
-        "status": "draft",
+        "status": "setup",
         "inputs": {**ALL_DEFAULTS, **{
             "theme": "",
             "character_id": "",
@@ -34,73 +37,83 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "model": "",
             "llm_provider": "ollama",
             "locale": "ja",
+            "crew_preset": preset,
+            "crew_ids": [i for i in crew_ids if i != "finisher"],
         }, **(inputs or {})},
-        "character": {},      # preset_to_character() output, frozen at pick time
-        "brief": "",          # character sheet + theme, re-sent on every LLM call
-        # {prompt, seed, job_id, images: [{index, image_id}], pending}
+        "character": {},
+        "brief": "",
+        # Working craft the crew is building toward the board / shoot.
+        "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
+        "chat": [],           # [{id, role, muse_id, name, text, at}]
+        "board": {},          # image board round
+        "shoot": {},          # final images after OK
+        # Legacy keys kept empty so older clients/tests do not explode.
         "draft": {},
-        "selected": [],       # draft indices the user sent onward
-        # one per selected draft:
-        # {draft_index, wd14, stages: [{stage, prompt, job_id, image_id, pending}]}
+        "selected": [],
         "chains": [],
-        "timeline": [],       # append-only log
+        "timeline": [],
         "warnings": [],
     }
 
 
-def draft_images(session: dict[str, Any]) -> list[dict[str, Any]]:
-    return [i for i in ((session.get("draft") or {}).get("images") or [])
-            if isinstance(i, dict)]
+def board_images(session: dict[str, Any]) -> list[dict[str, Any]]:
+    return [i for i in ((session.get("board") or {}).get("images") or [])
+            if isinstance(i, dict) and i.get("image_id")]
 
 
-def all_stages(session: dict[str, Any]) -> list[dict[str, Any]]:
-    return [s for chain in (session.get("chains") or [])
-            for s in (chain.get("stages") or []) if isinstance(s, dict)]
+def shoot_images(session: dict[str, Any]) -> list[dict[str, Any]]:
+    return [i for i in ((session.get("shoot") or {}).get("images") or [])
+            if isinstance(i, dict) and i.get("image_id")]
 
 
 def step_state(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Per-step {done, pending, detail} for the panel. The server decides."""
-    draft = session.get("draft") or {}
-    landed = [i for i in draft_images(session) if i.get("image_id")]
-    stages = all_stages(session)
-    done_stages = [s for s in stages if s.get("image_id")]
-
-    # How many images a draft yields is not known in advance: a workflow ending
-    # in an upscale writes one per batch item per output node. So the job saying
-    # it has stopped is what finishes this step, not a count reaching a target.
-    drafting = bool(draft.get("pending"))
+    status = str(session.get("status") or "setup")
+    board = session.get("board") or {}
+    shoot = session.get("shoot") or {}
+    chat = session.get("chat") or []
+    boarded = board_images(session)
+    shot = shoot_images(session)
 
     return {
-        "draft": {
-            "done": bool(draft) and not drafting and bool(landed),
-            "pending": drafting,
-            "detail": str(len(landed)) if landed else "",
+        "setup": {
+            "done": status != "setup" or bool(session.get("brief")),
+            "pending": False,
+            "detail": "",
         },
-        "refine": {
-            # Every stage of every chosen draft has to land. A half-filled grid
-            # is a run in progress, not a finished one.
-            "done": bool(stages) and len(done_stages) == len(stages),
-            "pending": bool(stages) and len(done_stages) < len(stages),
-            "detail": f"{len(done_stages)}/{len(stages)}" if stages else "",
+        "chat": {
+            "done": status in ("awaiting_ok", "shooting", "done") or bool(boarded),
+            "pending": status == "discussing",
+            "detail": str(len(chat)),
+        },
+        "board": {
+            "done": bool(boarded) and not board.get("pending"),
+            "pending": bool(board.get("pending")),
+            "detail": str(len(boarded)) if boarded else "",
+        },
+        "shoot": {
+            "done": status == "done" and bool(shot),
+            "pending": bool(shoot.get("pending")) or status == "shooting",
+            "detail": str(len(shot)) if shot else "",
         },
     }
 
 
 def next_step(session: dict[str, Any]) -> str:
-    state = step_state(session)
-    for step in STEPS:
-        if not state[step]["done"]:
-            return step
-    return "done"
+    status = str(session.get("status") or "setup")
+    if status in ("setup",):
+        return "setup"
+    if status in ("chat", "discussing"):
+        return "chat"
+    if status in ("boarding", "awaiting_ok"):
+        return "board"
+    if status in ("shooting",):
+        return "shoot"
+    if status == "done":
+        return "done"
+    return "chat"
 
 
 def missing_inputs(session: dict[str, Any]) -> list[str]:
-    """What the run cannot start without.
-
-    Answered for the whole run rather than per step. Both steps need the same
-    four things, and finding out at the refine stage that no model was chosen
-    would mean having spent the draft renders to learn it.
-    """
     inputs = session.get("inputs") or {}
     needs: list[str] = []
     if not str(inputs.get("theme") or "").strip():
@@ -115,11 +128,12 @@ def missing_inputs(session: dict[str, Any]) -> list[str]:
 
 
 def public_view(session: dict[str, Any]) -> dict[str, Any]:
-    """What the panel gets: the session plus the state it should render."""
+    from . import crew as crew_mod
     return {
         **session,
         "steps": list(STEPS),
         "step_state": step_state(session),
         "next_step": next_step(session),
         "needs": missing_inputs(session),
+        "roster": crew_mod.public_roster(),
     }

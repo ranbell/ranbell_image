@@ -1,4 +1,4 @@
-"""Muse API — two steps, a choice between them, and a session event stream."""
+"""Muse API — showrunner chat studio."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from starlette.responses import StreamingResponse
 
-from . import events, identity, service, session_db
+from . import crew, events, identity, service, session_db
 from .catalog import build_muse_catalog
 from .schema import STEPS, public_view
 
@@ -25,6 +25,7 @@ class SessionCreate(BaseModel):
     model: str = ""
     vision_model: str = ""
     locale: str = "ja"
+    crew_preset: str = "gallery"
 
 
 class InputsPatch(BaseModel):
@@ -32,14 +33,14 @@ class InputsPatch(BaseModel):
     character_id: str | None = None
     workflow: str | None = None
     model: str | None = None
-    # Vision model for B/C/D. Empty = reuse model. Prefer a vision-capable id.
     vision_model: str | None = None
     llm_provider: str | None = None
     locale: str | None = None
     negative_prompt: str | None = None
     style: str | None = None
-    # Composition bias: auto | full_body | upper_body | face_closeup | from_behind
     framing: str | None = None
+    crew_preset: str | None = None
+    crew_ids: list[str] | None = None
     width: int | None = Field(default=None, ge=256, le=2048)
     height: int | None = Field(default=None, ge=256, le=2048)
     draft_steps: int | None = Field(default=None, ge=1, le=60)
@@ -47,11 +48,7 @@ class InputsPatch(BaseModel):
     draft_count: int | None = Field(default=None, ge=1, le=8)
     final_steps: int | None = Field(default=None, ge=1, le=100)
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
-    # B, C, D. There is no fourth instruction, so this only ever stops early.
-    refine_stages: int | None = Field(default=None, ge=1, le=3)
-    # Reasoning on stage A only. Better poses, roughly eight times the wait.
     think: bool | None = None
-    # Drop the VLM before each Comfy render. Default off — keep it warm.
     unload_vlm: bool | None = None
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
@@ -65,14 +62,22 @@ class InputsPatch(BaseModel):
             return None
         return identity.parse_framing(value)
 
+    @field_validator("crew_preset")
+    @classmethod
+    def _preset(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in crew.PRESETS:
+            raise ValueError(f"crew_preset must be one of: {', '.join(crew.PRESETS)}")
+        return value
+
 
 class CharacterPick(BaseModel):
     character_id: str = Field(..., min_length=1)
 
 
-class RefineRequest(BaseModel):
-    """Which drafts go on. More than one is allowed — each becomes its own chain."""
-    drafts: list[int] = Field(default_factory=list)
+class ChatMessage(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
 
 
 def _db(request: Request):
@@ -87,7 +92,6 @@ async def _session(request: Request, session_id: str) -> dict:
 
 
 def _llm(request: Request, session: dict):
-    """Bind the gateway to whichever provider this session chose."""
     provider = str((session.get("inputs") or {}).get("llm_provider") or "ollama")
     gateway = request.app.state.ollama
     bind = getattr(gateway, "bind", None)
@@ -103,7 +107,14 @@ async def _run(coro) -> dict:
 
 @router.get("/catalog")
 async def catalog(request: Request):
-    return await build_muse_catalog(request.app)
+    data = await build_muse_catalog(request.app)
+    data["roster"] = crew.public_roster()
+    return data
+
+
+@router.get("/roster")
+async def roster():
+    return crew.public_roster()
 
 
 @router.get("/sessions")
@@ -142,6 +153,44 @@ async def pick_character(session_id: str, body: CharacterPick, request: Request)
     return await _run(service.pick_character(_db(request), session, body.character_id))
 
 
+@router.post("/sessions/{session_id}/table")
+async def start_table(session_id: str, request: Request):
+    """Open the table read — crew discusses before any board."""
+    session = await _session(request, session_id)
+    return await _run(service.start_table(
+        _db(request), _llm(request, session), session,
+    ))
+
+
+@router.post("/sessions/{session_id}/chat")
+async def post_chat(session_id: str, body: ChatMessage, request: Request):
+    """Showrunner message — note, board, or OK."""
+    session = await _session(request, session_id)
+    return await _run(service.post_chat(
+        _db(request), _llm(request, session),
+        request.app.state.comfy, request.app.state.spooler, session, body.text,
+    ))
+
+
+@router.post("/sessions/{session_id}/board")
+async def request_board(session_id: str, request: Request):
+    session = await _session(request, session_id)
+    return await _run(service.request_board(
+        _db(request), request.app.state.comfy, request.app.state.spooler, session,
+        ollama=_llm(request, session),
+    ))
+
+
+@router.post("/sessions/{session_id}/approve")
+async def approve(session_id: str, request: Request):
+    session = await _session(request, session_id)
+    return await _run(service.approve_and_shoot(
+        _db(request), request.app.state.comfy, request.app.state.spooler, session,
+        ollama=_llm(request, session),
+    ))
+
+
+# Legacy aliases
 @router.post("/sessions/{session_id}/draft")
 async def run_draft(session_id: str, request: Request):
     session = await _session(request, session_id)
@@ -153,7 +202,6 @@ async def run_draft(session_id: str, request: Request):
 
 @router.post("/sessions/{session_id}/draft/cancel")
 async def cancel_draft(session_id: str, request: Request):
-    """Abandon a draft that is still rendering and go back to stage A."""
     session = await _session(request, session_id)
     return await _run(service.cancel_draft(
         _db(request), request.app.state.spooler, session,
@@ -161,22 +209,16 @@ async def cancel_draft(session_id: str, request: Request):
 
 
 @router.post("/sessions/{session_id}/refine")
-async def run_refine(session_id: str, body: RefineRequest, request: Request):
+async def run_refine(session_id: str, request: Request):
     session = await _session(request, session_id)
     return await _run(service.run_refine(
         _db(request), _llm(request, session),
-        request.app.state.comfy, request.app.state.spooler, session, body.drafts,
+        request.app.state.comfy, request.app.state.spooler, session, [],
     ))
 
 
 @router.get("/sessions/{session_id}/stream")
 async def stream(session_id: str, request: Request):
-    """Server-sent events for one session.
-
-    Most events just mean "refetch". Exceptions that carry their own payload:
-    ``preview`` (latent JPEG), ``prompt_delta`` / ``prompt_done`` (LLM tokens
-    while a stage is writing).
-    """
     async def _gen():
         queue = await events.subscribe(session_id)
         try:

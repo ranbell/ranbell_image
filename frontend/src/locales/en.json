@@ -305,7 +305,7 @@
     "newImagesAvailable": "New images available — Refresh",
     "loadCap": "Reached the display cap of {n} images. Narrow down with search or filters.",
     "showDrafts": "Show drafts",
-    "showDraftsHint": "Muse board sketches are hidden from the gallery by default"
+    "showDraftsHint": "Muse image boards are hidden from the gallery by default"
   },
   "detail": {
     "fullscreen": "Click to view fullscreen",
@@ -1267,22 +1267,32 @@
     "comfyOfflineHint": "ComfyUI is unreachable — images will queue and generate when it reconnects."
   },
   "muse": {
-    "title": "Muse — grown from a draft",
-    "subtitle": "Four drafts from a theme and a character, then redraw the one you pick while looking at it",
+    "title": "Muse — showrunner studio",
+    "subtitle": "Chat with the crew, check an image board, OK to shoot",
     "close": "Close",
     "reset": "Start over",
     "resetConfirm": "Throw this session away and start again?",
+    "cast": "Cast",
     "character": "Character",
     "pickCharacter": "Pick a character",
     "noCharacter": "None",
     "theme": "Theme",
     "themePlaceholder": "e.g. waiting for someone on a rooftop after the rain",
+    "studioHint": "You are the showrunner. The crew debates, puts up an image board, and shoots on your OK.",
+    "crewPreset": "Crew preset",
+    "presets": {
+      "lightning": "Lightning (lean)",
+      "gallery": "Gallery (standard)",
+      "everyone": "Everyone",
+      "motion": "Motion-first",
+      "night": "Night mood"
+    },
     "workflow": "Workflow",
-    "workflowHint": "One workflow draws the drafts and every stage after — only steps and cfg differ",
-    "model": "Draft model (A)",
-    "modelHint": "Stage A is text-only — a smaller model is fine here",
-    "visionModel": "Vision model (B–D)",
-    "visionModelSame": "Same as draft model",
+    "workflowHint": "One workflow draws the board and the final — only steps and cfg differ",
+    "model": "Model",
+    "modelHint": "Table-read is text-only — a smaller model is fine",
+    "visionModel": "Vision model",
+    "visionModelSame": "Same as model",
     "notVision": "This model cannot read images — they will be dropped silently",
     "framing": "Framing",
     "framingHint": "Locks crop so close-ups and rear views are not pulled back to full body",
@@ -1295,28 +1305,14 @@
     },
     "style": "Style",
     "negative": "Negative",
-    "draftParams": "Draft settings",
-    "refineParams": "Redraw settings",
     "size": "Size",
-    "draftSteps": "Draft steps",
-    "draftCfg": "Draft CFG",
-    "draftCount": "Drafts",
-    "finalSteps": "Steps",
-    "finalCfg": "CFG",
-    "refineStages": "Stages",
-    "refineStagesHint": "B, C and D. Lowering this stops early",
-    "wd14Threshold": "Tag confidence",
-    "dropRatingTags": "Drop NSFW tags",
-    "dropCharacterTags": "Drop named-character tags",
-    "brief": "What the model is told",
-    "briefHint": "This whole block is sent again on every stage",
-    "steps": {
-      "draft": "Draft",
-      "refine": "Redraw"
-    },
+    "draftSteps": "Board steps",
+    "draftCfg": "Board CFG",
+    "draftCount": "Board count",
+    "finalSteps": "Final steps",
+    "finalCfg": "Final CFG",
     "cta": {
-      "draft": "Draw the drafts",
-      "refine": "Redraw what you picked",
+      "table": "Open the table",
       "done": "Done"
     },
     "needs": {
@@ -1325,62 +1321,39 @@
       "workflow": "workflow",
       "model": "model"
     },
-    "draft": {
-      "title": "Drafts",
-      "prompt": "Draft prompt",
-      "pending": "Rendering",
-      "cancel": "Stop and re-roll",
-      "cancelHint": "Watch it form; if it is wrong, stop here and draw the prompt again",
-      "select": "Pick this one",
-      "selected": "Picked",
-      "empty": "Nothing drawn yet",
-      "hint": "Four from one seed and one latent. Pick the good one — more than one is allowed"
+    "showrunner": "Showrunner",
+    "chatPlaceholder": "Hard notes welcome — outfit, angle, light… the crew will answer",
+    "send": "Send",
+    "quick": {
+      "board": "Board",
+      "ok": "OK"
     },
-    "refine": {
-      "title": "Redraw",
-      "wd14": "Tags read off this picture",
-      "wd14Hint": "These feed stage B with a short pose intent; conflicting body tags are dropped",
-      "pending": "Rendering",
-      "empty": "Pick a draft and the stages appear here",
-      "stage": {
-        "reinforce": "B — theme repair",
-        "cinematic": "C — angle and light",
-        "angle": "D — a decisively new camera"
-      }
-    },
+    "boardTitle": "Image board",
+    "boardAsk": "Good? OK to shoot, or leave a note",
+    "shootTitle": "Final",
+    "craft": "Current craft (prompt)",
     "warn": {
       "comfyOffline": "ComfyUI is unreachable",
       "title": "Note"
     },
-    "think": "Let stage A reason first",
-    "thinkHint": "Applies to the draft pose only. Fewer contradictory postures — about eight times the wait for A",
     "unloadVlm": "Unload VLM before each render",
-    "unloadVlmHint": "Off by default so B/C/D stay fast. Turn on only if Comfy runs out of VRAM",
-    "act": {
-      "draft": "Draft",
-      "choose": "Choose",
-      "refine": "Redraw"
-    },
-    "stage": {
-      "a": "A — what she is doing",
-      "reinforce": "B — theme repair",
-      "cinematic": "C — angle and light",
-      "angle": "D — a new camera"
-    },
+    "unloadVlmHint": "Off by default so the table stays fast. Turn on only if Comfy runs out of VRAM",
     "status": {
-      "readingTags": "Reading tags off the draft"
+      "chat": "Waiting for notes",
+      "discussing": "Crew discussing",
+      "boarding": "Drawing the image board",
+      "awaitingOk": "Board up — OK or comment",
+      "shooting": "Final shoot",
+      "done": "Done",
+      "chatting": "Replying",
+      "ready": "Ready"
     },
+    "speaking": "{name} speaking",
+    "working": "Working…",
     "elapsed": "{s} elapsed",
     "enlarge": "Enlarge",
     "setupTitle": "What shall we draw?",
-    "chooseTitle": "Which one grows up?",
-    "chooseHint": "{n} from one seed and one latent. Pick more than one and each is redrawn separately",
-    "chosen": "{n} picked",
-    "doneTitle": "Results",
-    "settings": "Settings",
-    "renderingStage": "Drawing {stage}",
-    "writingStage": "Writing {stage}",
-    "backToCurrent": "Back to where it is"
+    "settings": "Settings"
   },
   "characters": {
     "title": "Characters",

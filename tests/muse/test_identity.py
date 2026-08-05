@@ -77,12 +77,24 @@ def test_pose_intent_comes_from_scene_not_identity_prefix():
     from app.muse import chain
 
     raw = "TAGS: standing, rooftop\n\nSCENE: She waits in the rain."
-    result = chain._finish(
-        raw, identity_tags=["1girl", "small_breasts"], framing="auto", brief="B",
+    result = chain._finish_turn(
+        raw, muse_id="beat", identity_tags=["1girl", "small_breasts"],
+        framing="auto", brief="B",
     )
     assert result.prompt.startswith("1girl, small_breasts")
     assert result.pose_intent == "She waits in the rain."
     assert "small_breasts" not in result.pose_intent
+
+
+def test_parse_table_read_keeps_say_separate_from_craft():
+    say, tags, scene = identity.parse_table_read(
+        "SAY: 総監督、寄りましょう。\n\n"
+        "TAGS: close_up, rain\n\n"
+        "SCENE: She leans into the frame."
+    )
+    assert "総監督" in say
+    assert tags == "close_up, rain"
+    assert scene == "She leans into the frame."
 
 
 def test_merge_negative_dedupes():

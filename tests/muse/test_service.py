@@ -1,10 +1,7 @@
-"""What the two steps actually submit, and what they do with what comes back.
+"""Chat studio wiring: table → note → board → OK → shoot.
 
-These are the wiring facts that no unit test above covers and that cost real
-generations to get wrong: the drafts are one batched job rather than four, the
-model is dropped from VRAM before the render, each chosen draft becomes its own
-chain seeded from the draft's own seed, and a workflow that ends in an upscale
-does not get its finished picture thrown away.
+BCD refine is gone. The showrunner chats; the crew revises craft; a board asks
+「これでいい？」; OK submits the final shoot.
 """
 from __future__ import annotations
 
@@ -51,7 +48,14 @@ class FakeOllama:
 
         async def _stream():
             yield {"type": "think", "text": "deliberating"}
-            yield {"type": "token", "text": "TAGS: standing, rooftop\n\nSCENE: STAGE A PROMPT"}
+            yield {
+                "type": "token",
+                "text": (
+                    "SAY: Director, the beat is waiting on the roof.\n\n"
+                    "TAGS: standing, rooftop\n\n"
+                    "SCENE: STAGE A PROMPT"
+                ),
+            }
         return _stream()
 
     async def unload(self, model=None):
@@ -59,7 +63,6 @@ class FakeOllama:
 
 
 class FakeDb:
-    """Just enough of the Qdrant wrapper for session save/load."""
     def __init__(self):
         self.rows: dict[str, dict] = {}
         self._qc = self
@@ -80,16 +83,15 @@ class FakeDb:
 def _no_runtime_config(monkeypatch):
     async def _cfg(db):
         return {"ollama_num_ctx": 16000}
-    # Patched through the module object rather than by dotted string: another
-    # suite stubs `app.runtime_config` in sys.modules, and resolving the name
-    # again picks up that stub instead of what this module imported.
     monkeypatch.setattr(service, "get_runtime_config", _cfg)
 
 
-async def _ready_session(db):
+async def _ready_session(db, **over):
     session = await service.create_session(db, {
         "theme": "on a rooftop", "character_id": "c1",
         "workflow": "w.json", "model": "m",
+        "crew_preset": "lightning",
+        **over,
     })
     session["character"] = {"identity_tags": ["1girl", "blue_hair"],
                             "personality": {}, "palette": [], "signature_prop": ""}
@@ -99,165 +101,181 @@ async def _ready_session(db):
 
 
 @pytest.mark.asyncio
-async def test_draft_submits_one_job_and_frees_the_card_first():
+async def test_table_builds_craft_and_chat_without_submitting_comfy():
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db)
 
-    session = await service.run_draft(db, ollama, FakeComfy(), spooler, session)
+    session = await service.start_table(db, ollama, session)
 
-    assert len(spooler.jobs) == 1, "every draft comes from one batched render"
-    job = spooler.jobs[0]
-    assert job["func"] is runner.run_draft_job
-    # The runner reads the prompt and the seed back out of the session, so there
-    # is one copy of what is being drawn rather than two that can disagree.
-    assert job["session_id"] == session["session_id"]
-    # Unload is opt-in; default keeps the VLM warm for the next call.
+    assert spooler.jobs == []
+    assert session["status"] == "chat"
+    assert "STAGE A PROMPT" in session["craft"]["prompt"]
+    assert "blue_hair" in session["craft"]["prompt"]
+    assert session["craft"]["pose_intent"] == "STAGE A PROMPT"
+    assert "blue_hair" not in session["craft"]["pose_intent"]
+    # System open + each muse + wrap ask.
+    assert any(m["role"] == "muse" for m in session["chat"])
     assert ollama.unloaded == []
-
-    assert "STAGE A PROMPT" in session["draft"]["prompt"]
-    assert "blue_hair" in session["draft"]["prompt"]  # identity lock stapled on
-    # Pose intent is SCENE only — not the stapled identity prefix.
-    assert session["draft"]["pose_intent"] == "STAGE A PROMPT"
-    assert "blue_hair" not in session["draft"]["pose_intent"]
-    assert session["draft"]["pending"] is True
-    assert session["draft"]["seed"] > 0
-    assert session["draft"]["job_id"]
-
-
-def test_the_workflows_last_image_is_the_one_worth_keeping():
-    # Workflows here often end in an upscale or a detailer, which is a second
-    # output node. Taking the first sha kept the raw sampler output and dropped
-    # the finished picture the graph went on to write.
-    assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
-    assert runner.finished_image(["only"]) == "only"
+    assert len(ollama.calls) >= 2  # lightning crew + finisher
 
 
 @pytest.mark.asyncio
-async def test_draft_refuses_to_run_with_anything_missing():
+async def test_board_submits_one_job_from_craft():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+
+    session = await service.request_board(db, FakeComfy(), spooler, session, ollama=ollama)
+
+    assert len(spooler.jobs) == 1
+    job = spooler.jobs[0]
+    assert job["func"] is runner.run_board_job
+    assert job["session_id"] == session["session_id"]
+    assert session["board"]["pending"] is True
+    assert session["board"]["seed"] > 0
+    assert session["board"]["job_id"]
+    assert session["status"] == "boarding"
+    assert ollama.unloaded == []
+
+
+@pytest.mark.asyncio
+async def test_chat_ok_shoots_with_board_seed():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {"seed": 4242, "images": [{"image_id": "sha0"}], "pending": False}
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "OK",
+    )
+
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_shoot_job
+    assert session["shoot"]["seed"] == 4242
+    assert session["status"] == "shooting"
+
+
+@pytest.mark.asyncio
+async def test_chat_note_revises_craft_without_comfy():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+    n_calls = len(ollama.calls)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もっと寄って、服をコートに",
+    )
+
+    assert spooler.jobs == []
+    assert session["status"] == "chat"
+    assert len(ollama.calls) > n_calls
+    assert any(m["role"] == "user" and "コート" in m["text"] for m in session["chat"])
+
+
+@pytest.mark.asyncio
+async def test_chat_board_keyword_requests_board():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "ボード出して",
+    )
+
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_board_job
+
+
+@pytest.mark.asyncio
+async def test_refine_is_removed():
+    db = FakeDb()
+    session = await _ready_session(db)
+    with pytest.raises(service.MuseError) as err:
+        await service.run_refine(db, FakeOllama(), FakeComfy(), FakeSpooler(),
+                                 session, [0])
+    assert "廃止" in str(err.value) or "removed" in str(err.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_table_refuses_missing_inputs():
     db = FakeDb()
     session = await service.create_session(db, {"theme": "t"})
     with pytest.raises(service.MuseError) as err:
-        await service.run_draft(db, FakeOllama(), FakeComfy(), FakeSpooler(), session)
+        await service.start_table(db, FakeOllama(), session)
     assert "character" in str(err.value)
 
 
 @pytest.mark.asyncio
-async def test_each_chosen_draft_becomes_its_own_chain_at_the_draft_seed():
+async def test_cancelling_a_board_clears_it():
     db, spooler = FakeDb(), FakeSpooler()
     session = await _ready_session(db)
-    session["draft"] = {
-        "seed": 4242, "job_id": "job-1",
-        "prompt": "TAGS: standing\n\nSCENE: She waits on the roof.",
-        "pose_intent": "She waits on the roof.",
-        "images": [
-            {"index": 0, "image_id": "sha0"}, {"index": 1, "image_id": "sha1"},
-            {"index": 2, "image_id": ""},
-        ],
-    }
-    await session_db.save(db, session)
-
-    session = await service.run_refine(
-        db, FakeOllama(), FakeComfy(), spooler, session, [1, 0, 2],
-    )
-
-    # Index 2 has not landed yet, so it cannot be sent on.
-    assert session["selected"] == [1, 0]
-    assert [c["source_image_id"] for c in session["chains"]] == ["sha1", "sha0"]
-    assert all(c["seed"] == 4242 for c in session["chains"])
-    # Same seed and same canvas throughout: the only thing that changes between
-    # a draft and its stages is the prompt. Default refine_stages is B+C+D.
-    assert [s["stage"] for s in session["chains"][0]["stages"]] == [
-        "reinforce", "cinematic", "angle",
-    ]
-    assert session["chains"][0]["pose_intent"] == "She waits on the roof."
-    assert all(c.get("job_id") for c in session["chains"])
-    assert len(spooler.jobs) == 2
-    assert {j["chain_index"] for j in spooler.jobs} == {0, 1}
-
-
-@pytest.mark.asyncio
-async def test_refine_needs_a_draft_that_finished():
-    db = FakeDb()
-    session = await _ready_session(db)
-    session["draft"] = {"images": [{"index": 0, "image_id": ""}]}
-    with pytest.raises(service.MuseError):
-        await service.run_refine(db, FakeOllama(), FakeComfy(), FakeSpooler(),
-                                 session, [0])
-
-
-@pytest.mark.asyncio
-async def test_cancelling_a_draft_clears_it_so_stage_a_can_be_run_again():
-    db, spooler = FakeDb(), FakeSpooler()
-    session = await _ready_session(db)
-    session["draft"] = {"job_id": "job-1", "images": [], "pending": True}
-    session["chains"] = [{"stages": []}]
+    session["board"] = {"job_id": "job-1", "images": [], "pending": True}
+    session["craft"] = {"prompt": "x"}
 
     session = await service.cancel_draft(db, spooler, session)
 
     assert spooler.cancelled == ["job-1"]
-    assert session["draft"] == {}
-    assert session["chains"] == []
-    assert session["status"] == "draft"
+    assert session["board"] == {}
+    assert session["status"] == "chat"
 
 
 @pytest.mark.asyncio
-async def test_images_keep_arriving_until_the_job_says_it_has_stopped():
+async def test_board_images_keep_arriving_until_finish():
     db = FakeDb()
     session = await _ready_session(db)
-    session["draft"] = {"job_id": "job-1", "seed": 7, "images": [], "pending": True}
+    session["board"] = {"job_id": "job-1", "seed": 7, "images": [], "pending": True}
+    session["status"] = "boarding"
     await session_db.save(db, session)
     sid = session["session_id"]
 
     for sha in ("a", "b", "c", "d", "e"):
-        await session_db.attach_draft_image(db, sid, sha, {"seed": 7})
+        await session_db.attach_board_image(db, sid, sha, {"seed": 7})
     s = await session_db.load(db, sid)
-    # Five images from a batch of four is a workflow with two output nodes, not
-    # an error — and it is still running as far as anyone here knows.
-    assert len(s["draft"]["images"]) == 5
-    assert s["draft"]["pending"] is True
+    assert len(s["board"]["images"]) == 5
+    assert s["board"]["pending"] is True
 
-    await session_db.finish_draft(db, sid)
+    await session_db.finish_board(db, sid)
     s = await session_db.load(db, sid)
-    assert s["draft"]["pending"] is False
-    assert s["status"] == "drafted"
+    assert s["board"]["pending"] is False
+    assert s["status"] == "awaiting_ok"
 
 
 @pytest.mark.asyncio
-async def test_finishing_does_not_resurrect_a_draft_that_was_cancelled():
-    # cancel_draft clears the draft; the job then unwinds and reports in. Putting
-    # an empty draft back would leave the panel with a finished step and no
-    # pictures, and no way to press the button again.
+async def test_finishing_does_not_resurrect_a_cancelled_board():
     db, spooler = FakeDb(), FakeSpooler()
     session = await _ready_session(db)
-    session["draft"] = {"job_id": "job-1", "images": [], "pending": True}
+    session["board"] = {"job_id": "job-1", "images": [], "pending": True}
     session = await service.cancel_draft(db, spooler, session)
 
-    await session_db.finish_draft(db, session["session_id"], error="cancelled")
+    await session_db.finish_board(db, session["session_id"], error="cancelled")
     s = await session_db.load(db, session["session_id"])
-    assert s["draft"] == {}
-    assert s["status"] == "draft"
+    assert s["board"] == {}
+    assert s["status"] == "chat"
 
 
 @pytest.mark.asyncio
-async def test_refine_stages_can_stop_early_but_not_go_further():
-    db, spooler = FakeDb(), FakeSpooler()
-    session = await _ready_session(db)
-    session["inputs"]["refine_stages"] = 2
-    session["draft"] = {"seed": 1, "images": [{"index": 0, "image_id": "sha0"}]}
-    session = await service.run_refine(db, FakeOllama(), FakeComfy(), spooler,
-                                       session, [0])
-    assert [s["stage"] for s in session["chains"][0]["stages"]] == [
-        "reinforce", "cinematic",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_unload_vlm_is_opt_in_on_draft():
+async def test_unload_vlm_is_opt_in_on_board():
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db)
     session["inputs"]["unload_vlm"] = True
-    await session_db.save(db, session)
+    session = await service.start_table(db, ollama, session)
+    ollama.unloaded.clear()
 
-    session = await service.run_draft(db, ollama, FakeComfy(), spooler, session)
+    session = await service.request_board(
+        db, FakeComfy(), spooler, session, ollama=ollama,
+    )
 
     assert ollama.unloaded == ["m"]
+
+
+def test_the_workflows_last_image_is_the_one_worth_keeping():
+    assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
+    assert runner.finished_image(["only"]) == "only"
+
+
+def test_pick_responders_routes_outfit_notes_to_wardrobe():
+    crew_ids = ["beat", "spine", "lens", "wardrobe", "gaffer", "finisher"]
+    got = service._pick_responders("服をコートにして", crew_ids)
+    assert "wardrobe" in got
+    assert got[-1] == "finisher"

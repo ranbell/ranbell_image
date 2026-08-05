@@ -54,12 +54,15 @@ def build(
     """
     personality = character.get("personality") or {}
     identity = [str(t) for t in (character.get("identity_tags") or []) if str(t).strip()]
+    outfit = [str(t) for t in (character.get("outfit_tags") or []) if str(t).strip()]
     frame = normalize_framing(framing)
 
     head = [
         f"Style: {style.strip()}" if style.strip() else "",
         f"Framing: {frame}",
         f"Character: {', '.join(identity)}, " if identity else "",
+        # Outfit is locked craft for Wardrobe — not REFERENCE taste.
+        f"Outfit: {', '.join(outfit)}, " if outfit else "",
     ]
 
     # Behaviour first. Concrete likes stay inside the fence as taste cues only.
@@ -114,3 +117,16 @@ def with_prompt(brief: str, prompt: str) -> str:
     rather than reproducing an accident of two differently configured nodes.
     """
     return f"{brief},{prompt}" if prompt.strip() else brief
+
+
+def with_previous(
+    brief: str, previous: str, *, pose: str = "", analysis: str = "",
+) -> str:
+    """Table-read / pickup input: brief, frozen pose, analysis, previous craft."""
+    parts = [brief]
+    if pose.strip():
+        parts.append(f"Pose intent: {pose.strip()}")
+    if analysis.strip():
+        parts.append(f"Screening notes:\n{analysis.strip()}")
+    body = "\n\n".join(parts)
+    return f"{body},{previous}" if previous.strip() else body

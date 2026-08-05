@@ -58,6 +58,10 @@ _FRAMING_NEGATIVE: dict[str, str] = {
 _TAGS_RE = re.compile(
     r"(?is)^\s*TAGS\s*:\s*(.*?)\s*SCENE\s*:\s*(.*?)\s*$",
 )
+# Table-read banter + craft blocks.
+_SAY_TAGS_SCENE_RE = re.compile(
+    r"(?is)^\s*SAY\s*:\s*(.*?)\s*TAGS\s*:\s*(.*?)\s*SCENE\s*:\s*(.*?)\s*$",
+)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -186,18 +190,29 @@ def merge_negative(base: str, *extras: str) -> str:
 
 
 def parse_hybrid(raw: str) -> tuple[str, str]:
-    """Split a TAGS:/SCENE: answer, or treat the whole string as SCENE prose."""
+    """Split TAGS:/SCENE: (optional SAY:), or treat the whole string as SCENE."""
+    say, tags, scene = parse_table_read(raw)
+    _ = say
+    return tags, scene
+
+
+def parse_table_read(raw: str) -> tuple[str, str, str]:
+    """Return (say, tags, scene) from a Muse table-read answer."""
     text = (raw or "").strip()
     if not text:
-        return "", ""
+        return "", "", ""
+    m = _SAY_TAGS_SCENE_RE.match(text)
+    if m:
+        say = m.group(1).strip()
+        tags = re.sub(r"\s+", " ", m.group(2)).strip().strip(",")
+        scene = m.group(3).strip()
+        return say, tags, scene
     m = _TAGS_RE.match(text)
     if m:
         tags = re.sub(r"\s+", " ", m.group(1)).strip().strip(",")
         scene = m.group(2).strip()
-        return tags, scene
-    # Model ignored the format — keep the prose, leave tags empty so identity
-    # lock still leads and we do not invent a tag list.
-    return "", text
+        return "", tags, scene
+    return "", "", text
 
 
 def assemble_positive(
