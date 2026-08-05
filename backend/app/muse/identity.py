@@ -11,27 +11,13 @@ import logging
 import re
 from typing import Iterable
 
+# The body vocabulary lives in app.tags.body so the character registry and this
+# module cannot drift apart about what may be locked to a character.
+from ..tags.body import AGE_TAGS
+from ..tags.body import BODY_SLOTS as _BODY_SLOTS
+from ..tags.body import BREAST_TAGS as _BREAST_TAGS
+
 logger = logging.getLogger(__name__)
-
-# Mutually exclusive breast-size tags. Presence of one in identity means every
-# other member of the set is a conflict if WD14 or the LLM invents it.
-_BREAST_TAGS: tuple[str, ...] = (
-    "flat_chest",
-    "small_breasts",
-    "medium_breasts",
-    "large_breasts",
-    "huge_breasts",
-    "gigantic_breasts",
-    "perky_breasts",
-)
-
-# Broader body-type slots that should not be upgraded by a draft guess.
-_BODY_SLOTS: tuple[tuple[str, ...], ...] = (
-    _BREAST_TAGS,
-    ("petite", "tall", "short", "loli"),
-    ("slim", "slender", "skinny", "curvy", "plump", "fat", "muscular",
-     "athletic", "toned", "abs"),
-)
 
 FRAMINGS: tuple[str, ...] = (
     "auto",
@@ -41,11 +27,16 @@ FRAMINGS: tuple[str, ...] = (
     "from_behind",
 )
 
+# One crop per framing. These used to stack synonyms — `upper_body` asked for
+# `upper_body, cowboy_shot, portrait` at once, which is waist-up, mid-thigh-up
+# and head-and-shoulders simultaneously, and the sampler picked whichever it
+# liked. The negative below is what pushes back on the crops we do not want;
+# the positive only has to name the one we do.
 _FRAMING_TAGS: dict[str, tuple[str, ...]] = {
-    "full_body": ("full_body", "wide_shot"),
-    "upper_body": ("upper_body", "cowboy_shot", "portrait"),
-    "face_closeup": ("close_up", "portrait", "face_focus", "looking_at_viewer"),
-    "from_behind": ("from_behind", "back", "looking_back"),
+    "full_body": ("full_body",),
+    "upper_body": ("upper_body",),
+    "face_closeup": ("close_up", "face_focus"),
+    "from_behind": ("from_behind",),
 }
 
 _FRAMING_NEGATIVE: dict[str, str] = {
@@ -125,9 +116,15 @@ def identity_list(tags: Iterable[str] | None) -> list[str]:
 
 
 def conflicting_body_tags(identity_tags: Iterable[str] | None) -> set[str]:
-    """Every body tag that would contradict the character's locked figure."""
+    """Every body tag that would contradict the character's locked figure.
+
+    Age tags are always in the set, whatever the character sheet says. They are
+    refused from identity upstream, so the only way one reaches a prompt is the
+    model reaching for it — and `mature_female` on a character written as a
+    student is the failure this whole path exists to stop.
+    """
     locked = set(identity_list(identity_tags))
-    banned: set[str] = set()
+    banned: set[str] = set(AGE_TAGS)
     for slot in _BODY_SLOTS:
         present = [t for t in slot if t in locked]
         if not present:
@@ -159,15 +156,23 @@ def drop_conflicting_tags(tags: str, identity_tags: Iterable[str] | None) -> str
     return ", ".join(kept)
 
 
+# The negative is read by the sampler, not by a filter, so it stays short. The
+# full age list is stripped from the positive instead — putting twenty-odd age
+# words in every negative buys nothing and crowds out the tags that matter.
+_AGE_NEGATIVE: tuple[str, ...] = ("mature_female", "old", "loli", "child")
+
+
 def opposing_negative(identity_tags: Iterable[str] | None) -> str:
     """Negative prompt fragment that pushes against inventing a different body."""
-    banned = sorted(conflicting_body_tags(identity_tags))
+    slot_banned = conflicting_body_tags(identity_tags) - AGE_TAGS
+    banned = sorted(slot_banned)
     # Always discourage the most extreme upgrades when any breast tag is locked.
     locked = set(identity_list(identity_tags))
     if locked & set(_BREAST_TAGS):
         for t in ("huge_breasts", "gigantic_breasts", "hyper_breasts"):
             if t not in locked and t not in banned:
                 banned.append(t)
+    banned.extend(t for t in _AGE_NEGATIVE if t not in locked and t not in banned)
     return ", ".join(banned)
 
 

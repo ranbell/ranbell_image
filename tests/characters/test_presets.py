@@ -24,6 +24,7 @@ from app.characters.presets import (
     preset_summary,
     preset_to_character,
 )
+from app.tags.body import AGE_TAGS, filter_body_tags
 from app.tags.split_tags import soft_normalize_tag
 
 PRESETS = load_seed_presets()
@@ -237,3 +238,33 @@ def test_the_summary_carries_the_colours_the_gallery_filters_by():
         row = preset_summary(preset)
         assert row["hair_color"], preset["id"]
         assert row["eye_color"], preset["id"]
+
+
+def test_no_age_tag_reaches_a_character():
+    """Age is written setting, never a tag.
+
+    `mature_female` on a character written as a student rendered a woman two
+    decades older, in every picture she was ever in, with nothing downstream
+    able to remove it. The bucket is allowlisted now — this is the guard that
+    says so out loud.
+    """
+    for preset in PRESETS:
+        identity = preset_to_character(preset)["identity_tags"]
+        leaked = sorted(set(identity) & AGE_TAGS)
+        assert not leaked, f"{preset['id']}: age tag in identity: {leaked}"
+
+
+def test_the_asset_itself_names_no_age():
+    """Refusing the tag at the mapping is not enough — the asset should not
+    carry one either, or the next reader copies it into a new preset."""
+    for preset in PRESETS:
+        for bucket, values in (preset.get("tags") or {}).items():
+            found = sorted({soft_normalize_tag(str(v)) for v in values or []} & AGE_TAGS)
+            assert not found, f"{preset['id']}: tags.{bucket} carries {found}"
+
+
+def test_body_bucket_is_allowlisted_not_denylisted():
+    """A build the vocabulary does not know is dropped, not locked in."""
+    kept, refused = filter_body_tags(["tall", "mature_female", "wearing_a_hat"])
+    assert kept == ["tall"]
+    assert refused == ["mature_female", "wearing_a_hat"]

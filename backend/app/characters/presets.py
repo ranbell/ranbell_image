@@ -17,6 +17,7 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ..db.qdrant_client import CHARACTER_PRESETS_COLLECTION
+from ..tags.body import filter_body_tags
 from ..tags.split_tags import (
     enforce_identity_prop_split,
     soft_normalize_tag,
@@ -31,6 +32,8 @@ _ASSET = Path(__file__).resolve().parent / "assets" / "personality_presets.json"
 _ID_NAMESPACE = uuid.UUID("6f9b8f4e-1c7a-5d2b-9a31-7c0e5b2a4d18")
 
 # Preset tag buckets that describe the body — locked, same in every panel.
+# ``body`` is the one bucket that is filtered rather than trusted: see
+# ``app.tags.body`` for why an age tag must never reach identity.
 _IDENTITY_BUCKETS = (
     "hair_color",
     "hair_style",
@@ -83,8 +86,16 @@ def _tags(preset: dict[str, Any], *buckets: str) -> list[str]:
     out: list[str] = []
     tags = preset.get("tags") or {}
     for bucket in buckets:
-        for raw in tags.get(bucket) or []:
-            t = soft_normalize_tag(str(raw))
+        values = [str(v) for v in (tags.get(bucket) or [])]
+        if bucket == "body":
+            values, refused = filter_body_tags(values)
+            if refused:
+                logger.info(
+                    "[presets] %s: refused body tags %s (age or unknown build)",
+                    preset.get("id") or "?", ", ".join(refused),
+                )
+        for raw in values:
+            t = soft_normalize_tag(raw)
             if t and t not in out:
                 out.append(t)
     return out
