@@ -20,6 +20,9 @@ const props = defineProps({
   characterId: { type: String, default: '' },
   workflows: { type: Array, default: () => [] },
   workflow: { type: String, default: '' },
+  // Unlike the gallery, this is `v-if`'d away on close, so its watch dies with
+  // it. The renders do not — so on open, ask the jobs what is still coming.
+  getJobsMap: { type: Function, default: () => () => new Map() },
 })
 const emit = defineEmits(['close', 'pick', 'toast', 'update:workflow', 'changed'])
 const { t, locale } = useI18n()
@@ -64,6 +67,7 @@ async function load() {
   loading.value = true
   try { detail.value = await api(`/api/characters/${props.characterId}`) }
   catch (err) { fail(err) } finally { loading.value = false }
+  resumeWatch()
 }
 
 // A queued render attaches itself minutes later and nothing announces it, so
@@ -72,6 +76,18 @@ const { watch: watchRenders, watching } = useRenderWatch(async () => {
   await load()
   emit('changed')
 })
+
+const ACTIVE_STATES = new Set(['queued', 'running', 'cancelling'])
+
+/** Renders of *this* character that have not landed yet. */
+function resumeWatch() {
+  const map = props.getJobsMap?.()
+  if (!map?.values) return
+  const mine = [...map.values()].filter(
+    j => j?.meta?.character_id === props.characterId && ACTIVE_STATES.has(j.state),
+  )
+  if (mine.length && !watching.value) watchRenders(Math.max(60, mine.length * 45))
+}
 
 async function draw(slot) {
   if (!props.workflow) { emit('toast', { msg: t('characters.needWorkflow'), type: 'error' }); return }

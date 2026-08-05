@@ -411,3 +411,56 @@ def test_the_roster_is_not_one_figure_thirty_times():
     chest = [t for p in PRESETS for t in p["tags"]["body"] if t in _BREAST]
     assert len(set(chest)) >= 3, sorted(set(chest))
     assert max(chest.count(c) for c in set(chest)) <= len(PRESETS) * 0.5
+
+
+# ── what the picker filters by ──────────────────────────────────────────────
+def test_every_trait_reaches_the_picker():
+    """The row used to carry `personality[:5]`. The picker filters and searches
+    on it, so the cap made two of every character's seven traits unfindable —
+    and left ten of the thirty unreachable by any trait chip at all."""
+    for preset in PRESETS:
+        assert preset_summary(preset)["traits"] == preset["personality"]
+
+
+def test_a_trait_chip_can_reach_most_of_the_roster():
+    """The picker only offers a trait three or more characters share — a trait
+    one character has is a name, not a filter. That threshold is only useful if
+    the shared traits cover most of the roster."""
+    from collections import Counter
+
+    rows = [preset_summary(p) for p in PRESETS]
+    counts = Counter(t for r in rows for t in r["traits"])
+    offered = {t for t, n in counts.items() if n >= 3}
+    reachable = [r for r in rows if set(r["traits"]) & offered]
+    assert len(offered) >= 10, sorted(offered)
+    assert len(reachable) >= len(rows) * 0.8, f"{len(reachable)}/{len(rows)}"
+
+
+def test_every_colour_on_the_roster_has_a_swatch():
+    """The picker filters by colour as a colour — a dot you glance at rather
+    than a word you read. `colorSwatch.js` held plain colour names only, so
+    `chestnut_hair`, `pale_blue_eyes` and nine others rendered the same
+    fallback grey: a third of the roster, all one indistinguishable dot.
+
+    Parsed rather than imported because it is the frontend's table and there is
+    no JS test runner here; the point is to fail when a new character is
+    authored in a colour the swatches cannot draw.
+    """
+    src = (Path(__file__).parent.parent.parent
+           / "frontend/src/components/muse/colorSwatch.js").read_text(encoding="utf-8")
+    bases = set(re.findall(r"^  (\w+): '#", src, re.M))
+    modifiers = set(re.findall(r"(\w+): -?[\d.]+",
+                               re.findall(r"SHADE = \{([^}]+)\}", src)[0]))
+
+    def base_of(tag: str, noun: str) -> str:
+        word = tag.removesuffix(f"_{noun}")
+        head, _, rest = word.partition("_")
+        return rest if rest and head in modifiers else word
+
+    unpaintable = set()
+    for preset in PRESETS:
+        for tag, noun in ((preset["tags"]["hair_color"][0], "hair"),
+                          (preset["tags"]["eyes"][0], "eyes")):
+            if base_of(tag, noun) not in bases:
+                unpaintable.add(tag)
+    assert not unpaintable, f"no swatch for {sorted(unpaintable)}"

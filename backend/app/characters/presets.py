@@ -231,7 +231,12 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
         "gender": str(preset.get("gender") or ""),
         "subject_tag": str(preset.get("subject_tag") or ""),
-        "traits": _strings(preset.get("personality"))[:5],
+        # All of them, not the first five. The card shows three and the deck
+        # shows the rest, but the picker also filters and searches on this, and
+        # the cap quietly made two of every character's seven traits
+        # unsearchable — enough that only 20 of 30 could be reached by any
+        # trait chip at all.
+        "traits": _strings(preset.get("personality")),
         "title": str(preset.get("title") or ""),
         "title_ja": str(preset.get("title_ja") or preset.get("title") or ""),
         "charm_ja": str(preset.get("charm_ja") or preset.get("charm") or ""),

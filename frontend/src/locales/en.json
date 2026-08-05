@@ -1429,6 +1429,11 @@
     "build": "Build",
     "watching": "waiting for the render",
     "charm": "Hidden charm",
-    "knownFor": "Known for"
+    "knownFor": "Known for",
+    "stopN": "Stop ({n})",
+    "resetRoster": "Re-seed",
+    "resetHint": "Re-read the bundled character sheets (drawn pictures are kept)",
+    "resetConfirm": "Re-read the bundled characters from the shipped file.\nEdits to them are lost; everything drawn for them is kept. Go ahead?",
+    "resetDone": "Re-read {n} characters"
   }
 }

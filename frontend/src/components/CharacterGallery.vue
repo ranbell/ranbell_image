@@ -20,7 +20,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CharacterDossier from './muse/CharacterDossier.vue'
-import { eyeSwatch, hairSwatch, colorWord } from './muse/colorSwatch.js'
+import {
+  colorFamily, colorWord, eyeSwatch, familySwatch, hairSwatch,
+} from './muse/colorSwatch.js'
 import { useRenderWatch } from '../composables/useRenderWatch.js'
 
 const props = defineProps({
@@ -30,6 +32,10 @@ const props = defineProps({
   // for here rather than assumed.
   workflows: { type: Array, default: () => [] },
   workflow: { type: String, default: '' },
+  // The live job map. A bulk of sixty renders outlives this screen and outlives
+  // the page, so what is still running is read from the jobs rather than
+  // remembered in a local ref that a reload throws away.
+  getJobsMap: { type: Function, default: () => () => new Map() },
 })
 const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow'])
 const { t, locale } = useI18n()
@@ -70,15 +76,30 @@ function options(field, min) {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([v]) => v)
 }
-const hairOptions = computed(() => options('hair_color', 1))
-const eyeOptions = computed(() => options('eye_color', 1))
+// Colours filter by family, not by word. The roster distinguishes `brown`,
+// `dark_brown`, `light_brown` and `chestnut`; a person clicking a brown dot
+// means all four.
+function colorOptions(field, kind) {
+  const counts = new Map()
+  for (const c of characters.value) {
+    const family = colorFamily(c[field], kind)
+    if (family) counts.set(family, (counts.get(family) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([v]) => v)
+}
+const hairOptions = computed(() => colorOptions('hair_color', 'hair'))
+const eyeOptions = computed(() => colorOptions('eye_color', 'eyes'))
 const traitOptions = computed(() => options('traits', 3).slice(0, 14))
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
   return characters.value.filter(c => {
-    if (activeHair.value.length && !activeHair.value.includes(c.hair_color)) return false
-    if (activeEyes.value.length && !activeEyes.value.includes(c.eye_color)) return false
+    if (activeHair.value.length
+        && !activeHair.value.includes(colorFamily(c.hair_color, 'hair'))) return false
+    if (activeEyes.value.length
+        && !activeEyes.value.includes(colorFamily(c.eye_color, 'eyes'))) return false
     if (activeTraits.value.length
         && !activeTraits.value.every(x => (c.traits || []).includes(x))) return false
     if (!q) return true
@@ -98,10 +119,15 @@ const anyFilter = computed(
 )
 const current = computed(() => filtered.value[deckAt.value] || null)
 
+// `list` is the array, not the ref. Vue unwraps a `<script setup>` ref before
+// it reaches a template handler, so `toggle(activeHair, h)` hands this the
+// array — and the version that reached for `list.value` threw
+// `Cannot read properties of undefined` on every click. Nothing caught it, so
+// the filter bar looked alive and filtered nothing: colours and traits both.
 function toggle(list, value) {
-  const i = list.value.indexOf(value)
-  if (i >= 0) list.value.splice(i, 1)
-  else list.value.push(value)
+  const i = list.indexOf(value)
+  if (i >= 0) list.splice(i, 1)
+  else list.push(value)
   deckAt.value = 0
 }
 function clearFilters() {
@@ -189,14 +215,70 @@ async function drawMissing() {
   } catch (err) { fail(err) } finally { loading.value = false }
 }
 
+/*
+ * What is still being drawn, read off the live job list.
+ *
+ * This used to be a single local ref set by `drawMissing`, which meant the run
+ * only existed as long as the page did: reload during a bulk of sixty and the
+ * stop button vanished, nothing watched for the pictures landing, and the
+ * button offered to draw the same sixty again — queueing a second sixty behind
+ * the first. Every character-board job carries `meta.character_id`, so the
+ * answer is in `/api/jobs`, which App.vue already holds and re-snapshots on
+ * reconnect.
+ */
+const ACTIVE_STATES = new Set(['queued', 'running', 'cancelling'])
+const outstanding = ref([])
+let jobTimer = null
+
+function boardJobs() {
+  const map = props.getJobsMap?.()
+  if (!map?.values) return []
+  return [...map.values()].filter(
+    j => j?.meta?.character_id && ACTIVE_STATES.has(j.state),
+  )
+}
+
+function syncFromJobs() {
+  const jobs = boardJobs()
+  outstanding.value = jobs
+  const group = jobs.map(j => j.meta.group_id).find(Boolean) || ''
+  if (group) bulkGroup.value = group
+  else if (!jobs.length) bulkGroup.value = ''
+  // Renders queued before this screen was opened still attach themselves to
+  // the presets, and nothing announces it, so pick the watch back up.
+  if (jobs.length && !watching.value) watchRenders(Math.max(60, jobs.length * 45))
+}
+
 async function stopBulk() {
-  if (!bulkGroup.value) return
+  const jobs = outstanding.value
+  const groups = [...new Set(jobs.map(j => j.meta.group_id).filter(Boolean))]
+  if (bulkGroup.value && !groups.includes(bulkGroup.value)) groups.push(bulkGroup.value)
   try {
-    await api(`/api/jobs/groups/${encodeURIComponent(bulkGroup.value)}/cancel`, { method: 'POST' })
+    for (const g of groups) {
+      await api(`/api/jobs/groups/${encodeURIComponent(g)}/cancel`, { method: 'POST' })
+    }
+    // A single character's redraw carries no group and would otherwise survive
+    // a "stop" that claims to have stopped everything.
+    for (const j of jobs.filter(x => !x.meta.group_id)) {
+      await api(`/api/jobs/${encodeURIComponent(j.id)}/cancel`, { method: 'POST' })
+    }
     emit('toast', { msg: t('characters.stopped'), type: 'info' })
     bulkGroup.value = ''
+    outstanding.value = []
     watchRenders(20)
   } catch (err) { fail(err) }
+}
+
+async function resetRoster() {
+  if (!window.confirm(t('characters.resetConfirm'))) return
+  loading.value = true
+  try {
+    const r = await api('/api/characters/reset', { method: 'POST' })
+    emit('toast', { msg: t('characters.resetDone', { n: r.inserted || 0 }), type: 'info' })
+    clearFilters()
+    query.value = ''
+    await reload()
+  } catch (err) { fail(err) } finally { loading.value = false }
 }
 
 function onKey(e) {
@@ -206,14 +288,29 @@ function onKey(e) {
   if (e.key === 'ArrowLeft') { step(-1); e.preventDefault() }
 }
 
-watch(() => props.show, open => {
-  if (open) { reload(); deckAt.value = 0 }
-})
+// The job map is a plain Map behind a getter, deliberately not reactive — App
+// keeps it that way so a hundred job events a minute do not re-render the
+// gallery. So sample it on a tick while the screen is open, the way MusePanel
+// samples its own job.
+function openGallery() {
+  reload()
+  deckAt.value = 0
+  syncFromJobs()
+  if (!jobTimer) jobTimer = setInterval(syncFromJobs, 2000)
+}
+function closeGallery() {
+  if (jobTimer) { clearInterval(jobTimer); jobTimer = null }
+}
+
+watch(() => props.show, open => (open ? openGallery() : closeGallery()))
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  if (props.show) reload()
+  if (props.show) openGallery()
 })
-onUnmounted(() => window.removeEventListener('keydown', onKey))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  closeGallery()
+})
 </script>
 
 <template>
@@ -252,12 +349,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <option value="">{{ t('characters.workflow') }} —</option>
           <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
         </select>
-        <button v-if="bulkGroup" type="button" class="sb-btn" @click="stopBulk">
-          {{ t('characters.stop') }}
+        <button v-if="outstanding.length" type="button" class="sb-btn" @click="stopBulk">
+          {{ t('characters.stopN', { n: outstanding.length }) }}
         </button>
         <button v-else-if="missingCount" type="button" class="sb-btn"
                 :disabled="loading" @click="drawMissing">
           {{ t('characters.drawMissing', { n: missingCount }) }}
+        </button>
+        <button type="button" class="sb-btn" :title="t('characters.resetHint')"
+                :disabled="loading" @click="resetRoster">
+          {{ t('characters.resetRoster') }}
         </button>
         <button class="sb-icon-btn" :title="t('muse.close')" @click="emit('close')">✕</button>
       </header>
@@ -273,7 +374,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             class="w-5 h-5 rounded-full border transition-transform hover:scale-110"
             :class="activeHair.includes(h)
               ? 'border-teal-300 ring-2 ring-teal-400/50' : 'border-white/25'"
-            :style="{ background: hairSwatch(h) }"
+            :style="{ background: familySwatch(h, 'hair') }"
             :title="colorWord(h)"
             @click="toggle(activeHair, h)"
           />
@@ -287,7 +388,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             class="w-5 h-5 rounded-full border transition-transform hover:scale-110"
             :class="activeEyes.includes(e)
               ? 'border-teal-300 ring-2 ring-teal-400/50' : 'border-white/25'"
-            :style="{ background: eyeSwatch(e) }"
+            :style="{ background: familySwatch(e, 'eyes') }"
             :title="colorWord(e)"
             @click="toggle(activeEyes, e)"
           />
@@ -472,6 +573,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       :character-id="dossierId"
       :workflows="workflows"
       :workflow="workflow"
+      :get-jobs-map="getJobsMap"
       @close="dossierId = ''"
       @pick="emit('pick', $event)"
       @toast="emit('toast', $event)"

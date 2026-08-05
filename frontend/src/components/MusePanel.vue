@@ -652,6 +652,7 @@ async function onChatKey(e) {
       :selected-id="inputs.character_id"
       :workflows="workflows"
       :workflow="inputs.workflow"
+      :get-jobs-map="getJobsMap"
       @pick="pickCharacter"
       @close="showPicker = false"
       @toast="emit('toast', $event)"
