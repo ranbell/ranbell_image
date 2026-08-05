@@ -46,6 +46,9 @@ const dislikes = computed(() => preset.value?.preferences?.dislikes || [])
 const palette = computed(() => preset.value?.preferences?.favorite_colors || [])
 const appearance = computed(() => preset.value?.appearance || {})
 const identity = computed(() => detail.value?.character?.identity_tags || [])
+// The draw buttons name what they produce — "全身" or "バストアップ" — because
+// the header's button used to say "draw with her" and did not draw anything.
+const slotName = computed(() => t(`characters.${bigSlot.value}`))
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
@@ -154,7 +157,7 @@ watch(() => props.characterId, load, { immediate: true })
           <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
         </select>
         <button class="sb-btn" @click="emit('pick', characterId)">
-          {{ t('characters.drawWithHer') }}
+          {{ t('characters.useCharacter') }}
         </button>
         <button class="sb-icon-btn" :title="t('muse.close')" @click="emit('close')">✕</button>
       </header>
@@ -186,7 +189,7 @@ watch(() => props.characterId, load, { immediate: true })
             <div v-else class="text-center p-8">
               <p class="text-xs text-gray-500 mb-3">{{ t('characters.noneYet') }}</p>
               <button class="sb-btn" :disabled="busy" @click="draw(bigSlot)">
-                {{ t('characters.draw') }}
+                {{ t('characters.drawSlot', { slot: slotName }) }}
               </button>
             </div>
           </div>
@@ -198,7 +201,7 @@ watch(() => props.characterId, load, { immediate: true })
               <span v-if="watching" class="text-teal-300/80">· {{ t('characters.watching') }}</span>
             </p>
             <button class="sb-btn" :disabled="busy" @click="draw(bigSlot)">
-              {{ t('characters.drawWithThis') }}
+              {{ t('characters.drawSlotMore', { slot: slotName }) }}
             </button>
           </div>
           <div v-if="candidates(bigSlot).length" class="flex gap-2 overflow-x-auto pb-2">

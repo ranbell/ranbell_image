@@ -476,10 +476,10 @@ onUnmounted(() => {
               <div class="flex gap-1 pt-0.5">
                 <button type="button" class="sb-btn flex-1 justify-center !py-1 !text-[10px]"
                         @click="emit('pick', c.id)">
-                  {{ t('characters.drawWithHer') }}
+                  {{ t('characters.useCharacter') }}
                 </button>
                 <button type="button" class="sb-icon-btn !w-7 !h-7 !text-[11px]"
-                        :title="t('characters.draw')" @click="draw(c.id)">✎</button>
+                        :title="t('characters.drawReference')" @click="draw(c.id)">✎</button>
               </div>
             </div>
           </article>
@@ -515,7 +515,7 @@ onUnmounted(() => {
               />
               <div v-else class="p-16 text-center">
                 <p class="text-xs text-gray-500 mb-3">{{ t('characters.noPortrait') }}</p>
-                <button class="sb-btn" @click="draw(current.id)">{{ t('characters.draw') }}</button>
+                <button class="sb-btn" @click="draw(current.id)">{{ t('characters.drawReference') }}</button>
               </div>
             </div>
 
@@ -538,7 +538,7 @@ onUnmounted(() => {
               </div>
               <div class="flex gap-2 justify-center mt-3">
                 <button class="sb-btn" @click="emit('pick', current.id)">
-                  {{ t('characters.drawWithHer') }}
+                  {{ t('characters.useCharacter') }}
                 </button>
                 <button class="sb-btn" @click="dossierId = current.id">
                   {{ t('characters.readMore') }}
