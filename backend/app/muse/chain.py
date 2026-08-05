@@ -49,7 +49,7 @@ REFINE_STAGES: tuple[tuple[str, str], ...] = (
 
 STAGE_LABELS = {
     "pose": "A — what she is doing",
-    "reinforce": "B — theme repair",
+    "reinforce": "B — place objects and theme",
     "cinematic": "C — angle and light",
     "angle": "D — a new camera",
 }

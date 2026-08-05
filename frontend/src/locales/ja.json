@@ -1304,7 +1304,7 @@
     "finalSteps": "本番のステップ数",
     "finalCfg": "本番の CFG",
     "refineStages": "描き直す回数",
-    "refineStagesHint": "既定は B+C（2）。3にすると D のカメラ変更も走る",
+    "refineStagesHint": "B・C・D の3段。減らすと途中で止まる",
     "wd14Threshold": "タグ抽出の確度",
     "dropRatingTags": "NSFW タグを除外する",
     "dropCharacterTags": "版権キャラ名を除外する",
@@ -1354,6 +1354,8 @@
     },
     "think": "Aだけ考えさせる",
     "thinkHint": "下書きのポーズ用。姿勢の矛盾が減る代わりに A だけ約8倍かかる",
+    "unloadVlm": "描画の前に VLM をアンロードする",
+    "unloadVlmHint": "通常はオフ。B/C/D を速く保つ。VRAM が足りないときだけオン",
     "act": {
       "draft": "下書き",
       "choose": "選ぶ",

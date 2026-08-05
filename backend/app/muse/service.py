@@ -171,8 +171,9 @@ async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict
     except chain.ChainError as exc:
         raise MuseError(str(exc)) from exc
     _prompt_done(session_id, "pose", result.prompt)
-    # Hand the card over before asking ComfyUI for a four-image latent.
-    await ollama.unload(model)
+    # Optional: free VRAM before Comfy. Off by default so the VLM stays warm.
+    if bool(inputs.get("unload_vlm", False)):
+        await ollama.unload(model)
 
     seed = random.randint(0, (1 << 64) - 1)
     count = max(1, int(inputs.get("draft_count", 4)))
@@ -240,7 +241,7 @@ async def run_refine(
         raise MuseError("choose a draft that has finished rendering")
 
     inputs = _inputs(session)
-    stages = chain.stages_for(inputs.get("refine_stages", 2))
+    stages = chain.stages_for(inputs.get("refine_stages", 3))
     seed = int((session.get("draft") or {}).get("seed") or 0)
     pose_intent = str((session.get("draft") or {}).get("pose_intent") or "")
     if not pose_intent:

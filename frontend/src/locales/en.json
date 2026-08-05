@@ -1304,7 +1304,7 @@
     "finalSteps": "Steps",
     "finalCfg": "CFG",
     "refineStages": "Stages",
-    "refineStagesHint": "Default is B+C (2). Set 3 to also run D's camera change",
+    "refineStagesHint": "B, C and D. Lowering this stops early",
     "wd14Threshold": "Tag confidence",
     "dropRatingTags": "Drop NSFW tags",
     "dropCharacterTags": "Drop named-character tags",
@@ -1354,6 +1354,8 @@
     },
     "think": "Let stage A reason first",
     "thinkHint": "Applies to the draft pose only. Fewer contradictory postures — about eight times the wait for A",
+    "unloadVlm": "Unload VLM before each render",
+    "unloadVlmHint": "Off by default so B/C/D stay fast. Turn on only if Comfy runs out of VRAM",
     "act": {
       "draft": "Draft",
       "choose": "Choose",

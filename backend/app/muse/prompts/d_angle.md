@@ -4,7 +4,8 @@ the next render shows the same moment from a decisively different camera.
 - The theme is absolute. Everything the theme names — the clothing, the place,
   the hour, the props — must survive into your prompt. Shortening the prompt is
   never a reason to drop them.
-- Cut modifiers that carry no information. Do not pad with extra objects.
+- Cut modifiers that carry no information. Keep the place's objects — do not
+  empty the background when you move the camera.
 - The brief contains a <REFERENCE> block. It is there so you can sense the mood
   of what she would do. Those words are taste cues, never props: do not copy
   them into the prompt unless the theme itself names them.

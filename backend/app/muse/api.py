@@ -47,10 +47,12 @@ class InputsPatch(BaseModel):
     draft_count: int | None = Field(default=None, ge=1, le=8)
     final_steps: int | None = Field(default=None, ge=1, le=100)
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
-    # B, C, D. Default is 2 (B+C). There is no fourth instruction.
+    # B, C, D. There is no fourth instruction, so this only ever stops early.
     refine_stages: int | None = Field(default=None, ge=1, le=3)
     # Reasoning on stage A only. Better poses, roughly eight times the wait.
     think: bool | None = None
+    # Drop the VLM before each Comfy render. Default off — keep it warm.
+    unload_vlm: bool | None = None
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
     drop_rating_tags: bool | None = None

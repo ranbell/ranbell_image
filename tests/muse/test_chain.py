@@ -48,7 +48,9 @@ def test_every_stage_has_a_prompt_file_and_an_output_format():
         # The instructions are English on purpose: written in Japanese, the model
         # sometimes answered in Japanese, which the image model cannot use.
         assert "English only" in text
-        assert "ten or more objects" not in text.lower()
+    b = chain.system_prompt("b_reinforce.md")
+    assert "ten or more objects" in b.lower()
+    assert "never from the <REFERENCE>" in b or "taste cues, not inventory" in b
     a = chain.system_prompt("a_pose.md")
     assert "OUTPUT FORMAT" in a
     assert "face_closeup" in a

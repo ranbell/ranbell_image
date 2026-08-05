@@ -6,10 +6,9 @@ and it calls :func:`run_render` directly rather than reimplementing it — the
 workflow patching, the unpatchable-knob warning, the image saving and the
 CreationRecord are all wanted here unchanged.
 
-The model is dropped from VRAM before each render. On one 16GB card a 26B MoE
-holds about 13GB, and while a single-image latent still fits beside it, nothing
-larger does; the unload also stops ComfyUI from paging its checkpoint in and out
-around a resident LLM.
+Unload before each render is opt-in (``inputs.unload_vlm``). Left resident with
+think off, the VLM answers B/C/D in seconds; that is the point of the multi-stage
+prompt chain. Turn unload on only when Comfy and the VLM fight for the card.
 """
 from __future__ import annotations
 
@@ -167,9 +166,10 @@ async def run_chain_job(
     )
     await session_db.record_wd14(db, session_id, chain_index, tags)
 
+    unload_vlm = bool(inputs.get("unload_vlm", False))
     previous = ""
     for stage_index, (stage, prompt_file) in enumerate(
-        chain.stages_for(inputs.get("refine_stages", 2))
+        chain.stages_for(inputs.get("refine_stages", 3))
     ):
         cancel.raise_if_set()
         reporter.indeterminate()
@@ -201,7 +201,8 @@ async def run_chain_job(
             "chain": chain_index,
             "prompt": prompt,
         })
-        await ollama.unload(model)
+        if unload_vlm:
+            await ollama.unload(model)
 
         render_result = await run_render(
             reporter, cancel,

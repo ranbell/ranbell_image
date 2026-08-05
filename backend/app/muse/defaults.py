@@ -25,10 +25,10 @@ DRAFT_DEFAULTS: dict[str, object] = {
 REFINE_DEFAULTS: dict[str, object] = {
     "final_steps": 30,
     "final_cfg": 4.5,
-    # B and C by default. D is a camera mutation — useful, but it costs a full
-    # VLM + final render and often trades identity for novelty. Set to 3 when
-    # you specifically want a decisively new angle.
-    "refine_stages": 2,
+    # B, C and D. With think off the VLM answers in seconds when left resident,
+    # so the three prompt passes are cheap; each still renders so the next
+    # stage can look at what was drawn. Cut to 1 or 2 to stop early.
+    "refine_stages": 3,
     # Well below the library default of 0.35. The weak tail is the point: it is
     # what the checkpoint drew without being asked, and stage B builds on it.
     "wd14_threshold": 0.2,
@@ -59,6 +59,11 @@ LLM_DEFAULTS: dict[str, object] = {
     "vision_model": "",
     # Composition bias for every stage. auto lets the theme decide.
     "framing": "auto",
+    # Drop the VLM from VRAM before each Comfy render. Off by default: on one
+    # card the latent usually still fits beside a resident VLM, and keeping it
+    # loaded is what makes B/C/D answer in seconds. Turn on only if Comfy starts
+    # paging around the model.
+    "unload_vlm": False,
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────

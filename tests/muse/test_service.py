@@ -111,8 +111,8 @@ async def test_draft_submits_one_job_and_frees_the_card_first():
     # The runner reads the prompt and the seed back out of the session, so there
     # is one copy of what is being drawn rather than two that can disagree.
     assert job["session_id"] == session["session_id"]
-    # A 26B model and a multi-image latent do not fit on one 16GB card.
-    assert ollama.unloaded == ["m"]
+    # Unload is opt-in; default keeps the VLM warm for the next call.
+    assert ollama.unloaded == []
 
     assert "STAGE A PROMPT" in session["draft"]["prompt"]
     assert "blue_hair" in session["draft"]["prompt"]  # identity lock stapled on
@@ -165,9 +165,9 @@ async def test_each_chosen_draft_becomes_its_own_chain_at_the_draft_seed():
     assert [c["source_image_id"] for c in session["chains"]] == ["sha1", "sha0"]
     assert all(c["seed"] == 4242 for c in session["chains"])
     # Same seed and same canvas throughout: the only thing that changes between
-    # a draft and its stages is the prompt. Default refine_stages is B+C.
+    # a draft and its stages is the prompt. Default refine_stages is B+C+D.
     assert [s["stage"] for s in session["chains"][0]["stages"]] == [
-        "reinforce", "cinematic",
+        "reinforce", "cinematic", "angle",
     ]
     assert session["chains"][0]["pose_intent"] == "She waits on the roof."
     assert all(c.get("job_id") for c in session["chains"])
@@ -249,3 +249,15 @@ async def test_refine_stages_can_stop_early_but_not_go_further():
     assert [s["stage"] for s in session["chains"][0]["stages"]] == [
         "reinforce", "cinematic",
     ]
+
+
+@pytest.mark.asyncio
+async def test_unload_vlm_is_opt_in_on_draft():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session["inputs"]["unload_vlm"] = True
+    await session_db.save(db, session)
+
+    session = await service.run_draft(db, ollama, FakeComfy(), spooler, session)
+
+    assert ollama.unloaded == ["m"]

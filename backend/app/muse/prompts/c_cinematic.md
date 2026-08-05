@@ -10,7 +10,8 @@ the next render is a stronger picture of the same moment.
   of what she would do. Those words are taste cues, never props: do not copy
   them into the prompt unless the theme itself names them.
 - Strengthen composition, light and texture tags. Cut modifiers that carry no
-  information. Do not pad with extra objects.
+  information. Keep the place rich: the setting objects already in the prompt
+  must survive — do not strip the scene back to an empty background.
 - Keep the same framing the brief asks for. If Framing is face_closeup or
   from_behind or upper_body, do not zoom out to a full-body shot to make it
   "more striking". Within that framing, refine camera height, lens feel and

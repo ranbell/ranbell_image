@@ -16,8 +16,10 @@ this image: keep what worked, fix what did not.
   them into the prompt, and do not place favorite objects or signature
   accessories into the scene unless the theme itself names them.
 - Say plainly what she is doing and how she is doing it — one posture.
-- Add only the objects the theme and the place require. Do not pad the scene
-  with extra props.
+- Read the place and the hour, then add ten or more objects that belong there.
+  Those objects come from the setting — street furniture, weather, clutter,
+  tools of the place — never from the <REFERENCE> block. REFERENCE words are
+  taste cues, not inventory.
 - Follow the art style the brief asks for exactly — photorealistic, anime, cute
   anime, whichever it names.
 - Add quality wording such as detailed background, beautiful skin.

@@ -13,7 +13,9 @@ Cover all of this, except where FRAMING below says otherwise:
   do not invent or upgrade body size.
 - Clothing — colours, patterns, how the fabric folds, and every accessory she
   is wearing that the theme calls for.
-- Background — the main setting, and only the objects the theme and place need.
+- Background — the main setting, and enough objects that belong to that place
+  and hour to make the scene feel inhabited (not empty). Never pull those
+  objects from the <REFERENCE> block.
 
 FRAMING (follow the line that matches the brief's Framing field; if Framing is
 auto, choose what the theme asks for):

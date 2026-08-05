@@ -718,6 +718,14 @@ function lookBack(step) {
             <span class="block text-[10px] text-[var(--sb-faint)]">{{ t('muse.thinkHint') }}</span>
           </span>
         </label>
+        <label class="flex items-start gap-2 col-span-2 text-gray-400">
+          <input type="checkbox" class="mt-0.5" :checked="inputs.unload_vlm"
+                 @change="patchInputs({ unload_vlm: $event.target.checked })" />
+          <span>
+            {{ t('muse.unloadVlm') }}
+            <span class="block text-[10px] text-[var(--sb-faint)]">{{ t('muse.unloadVlmHint') }}</span>
+          </span>
+        </label>
 
         <label class="block"><span class="sb-label">{{ t('muse.size') }}</span>
           <input class="sb-input" type="number" step="64" :value="inputs.width"
