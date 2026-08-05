@@ -17,6 +17,7 @@ from ..ai.color_extractor import rgb_to_lab
 from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
 from ..thumbnails.generator import get_thumbnail_path
+from .cache import Cached
 from .sort_utils import sort_docs
 from .tag_categories import guess_category
 
@@ -29,71 +30,55 @@ MEDIA_TYPES = {
     ".webp": "image/webp",
 }
 
-_tags_cache: dict = {"data": None, "ts": 0.0}
-_TAGS_TTL = 60.0
+# Each of these wraps a scroll over the whole collection. See api/cache.py for
+# why they hold a lock and why a failed rebuild serves the old value instead of
+# turning a working page into a 500.
+_tags_cache = Cached(900.0, what="tag histogram")  # a whole-library histogram barely moves
+_dirs_cache = Cached(60.0, what="dir list")
+_name_cache = Cached(300.0, what="name index")
+_align_sort_cache = Cached(120.0, what="alignment sort")
+_facets_cache = Cached(120.0, what="model facets")
+_date_range_cache = Cached(300.0, what="date range")
 
-_dirs_cache: dict = {"data": None, "ts": 0.0}
-_DIRS_TTL = 60.0
-
-_name_cache: dict = {"name_asc": None, "name_desc": None, "ts": 0.0}
-_NAME_CACHE_TTL = 300.0  # 5 minutes
-
-_align_sort_cache: dict = {"data": None, "ts": 0.0}
-_ALIGN_SORT_TTL = 120.0  # 2 minutes
-
-_facets_cache: dict = {"data": None, "ts": 0.0}
-_FACETS_TTL = 120.0
-
-_date_range_cache: dict = {"data": None, "ts": 0.0}
-_DATE_RANGE_TTL = 300.0
+_ALL_CACHES = (
+    _tags_cache, _dirs_cache, _name_cache,
+    _align_sort_cache, _facets_cache, _date_range_cache,
+)
 
 
 def invalidate_image_caches() -> None:
     """Force-expire all in-memory caches. Call after scan or AI pipeline completes."""
-    _tags_cache.update({"data": None, "ts": 0.0})
-    _dirs_cache.update({"data": None, "ts": 0.0})
-    _name_cache.update({"name_asc": None, "name_desc": None, "ts": 0.0})
-    _align_sort_cache.update({"data": None, "ts": 0.0})
-    _facets_cache.update({"data": None, "ts": 0.0})
-    _date_range_cache.update({"data": None, "ts": 0.0})
+    for cache in _ALL_CACHES:
+        cache.clear()
 
 
 async def _get_name_sorted(db, sort: str) -> list[str]:
     """Return sha256 list sorted by name (cached, built from minimal payload scroll)."""
-    now = time.time()
-    if _name_cache["name_asc"] is not None and now - _name_cache["ts"] < _NAME_CACHE_TTL:
-        return _name_cache[sort]
-    pairs = await db.scroll_name_index()
-    pairs.sort(key=lambda x: x[0])
-    asc = [sha for _, sha in pairs]
-    _name_cache["name_asc"] = asc
-    _name_cache["name_desc"] = list(reversed(asc))
-    _name_cache["ts"] = now
-    return _name_cache[sort]
+    async def _build() -> dict[str, list[str]]:
+        pairs = await db.scroll_name_index()
+        pairs.sort(key=lambda x: x[0])
+        asc = [sha for _, sha in pairs]
+        return {"name_asc": asc, "name_desc": list(reversed(asc))}
+
+    both = await _name_cache.get(_build)
+    return both[sort]
 
 
 async def _get_align_sorted(db) -> list[str]:
     """Return sha256 list sorted by alignment score DESC (cached)."""
-    now = time.time()
-    if _align_sort_cache["data"] is not None and now - _align_sort_cache["ts"] < _ALIGN_SORT_TTL:
-        return _align_sort_cache["data"]
-    shas = await db.get_alignment_sorted_sha256s()
-    _align_sort_cache["data"] = shas
-    _align_sort_cache["ts"] = now
-    return shas
+    return await _align_sort_cache.get(db.get_alignment_sorted_sha256s)
 
 
 @router.get("/dirs")
 async def list_dirs_route(request: Request):
-    now = time.time()
-    if _dirs_cache["data"] is not None and now - _dirs_cache["ts"] < _DIRS_TTL:
-        return {"dirs": _dirs_cache["data"]}
-    dirs = await _db(request).list_dirs(
-        [str(settings.source_images_dir), str(settings.generated_images_dir)]
-    )
-    _dirs_cache["data"] = dirs
-    _dirs_cache["ts"] = now
-    return {"dirs": dirs}
+    db = _db(request)
+
+    async def _build():
+        return await db.list_dirs(
+            [str(settings.source_images_dir), str(settings.generated_images_dir)]
+        )
+
+    return {"dirs": await _dirs_cache.get(_build)}
 
 
 def _as_str(v) -> str:
@@ -129,27 +114,24 @@ def _opposite_hue_ranges(hue_deg: float, arc: float = 60.0) -> list[tuple[float,
 @router.get("/images/facets")
 async def get_image_facets(request: Request):
     """Return unique model names with image counts for use as a filter facet."""
-    now = time.monotonic()
-    if _facets_cache["data"] is not None and now - _facets_cache["ts"] < _FACETS_TTL:
-        return _facets_cache["data"]
     db = _db(request)
-    facets = await db.scroll_model_facets()
-    result = {"models": facets}
-    _facets_cache["data"] = result
-    _facets_cache["ts"] = now
-    return result
+
+    async def _build():
+        return {"models": await db.scroll_model_facets()}
+
+    return await _facets_cache.get(_build)
 
 
 @router.get("/images/date-range")
 async def get_date_range(request: Request):
     """Return min and max mtime across all images for the timeline slider."""
-    now = time.monotonic()
-    if _date_range_cache["data"] is not None and now - _date_range_cache["ts"] < _DATE_RANGE_TTL:
-        return _date_range_cache["data"]
-    min_mtime, max_mtime = await _db(request).get_mtime_range()
-    result = {"min_mtime": min_mtime, "max_mtime": max_mtime}
-    _date_range_cache.update({"data": result, "ts": now})
-    return result
+    db = _db(request)
+
+    async def _build():
+        min_mtime, max_mtime = await db.get_mtime_range()
+        return {"min_mtime": min_mtime, "max_mtime": max_mtime}
+
+    return await _date_range_cache.get(_build)
 
 
 @router.get("/images")
@@ -460,44 +442,44 @@ async def set_image_rating(sha256: str, body: RatingBody, request: Request):
 
 @router.get("/tags")
 async def get_tags(request: Request, limit: int = 1000):
-    now = time.monotonic()
-    if _tags_cache["data"] is not None and now - _tags_cache["ts"] < _TAGS_TTL:
-        return _tags_cache.get("data_filtered", _tags_cache["data"])[:limit]
-
     db = _db(request)
-    docs = await db.scroll_tags()
 
-    tag_count: dict[str, int] = {}
-    for doc in docs:
-        prompt = doc.get("positive_prompt", "")
-        if isinstance(prompt, str) and prompt:
-            for t in prompt.split(","):
-                t = t.strip().lower()
-                if 2 < len(t) < 60:
+    async def _build() -> dict[str, list[dict]]:
+        docs = await db.scroll_tags()
+
+        tag_count: dict[str, int] = {}
+        for doc in docs:
+            prompt = doc.get("positive_prompt", "")
+            if isinstance(prompt, str) and prompt:
+                for t in prompt.split(","):
+                    t = t.strip().lower()
+                    if 2 < len(t) < 60:
+                        tag_count[t] = tag_count.get(t, 0) + 1
+            for t in (doc.get("wd14_tags") or []):
+                if isinstance(t, str) and 2 < len(t) < 60:
                     tag_count[t] = tag_count.get(t, 0) + 1
-        for t in (doc.get("wd14_tags") or []):
-            if isinstance(t, str) and 2 < len(t) < 60:
-                tag_count[t] = tag_count.get(t, 0) + 1
 
-    top = sorted(tag_count.items(), key=lambda x: -x[1])[:1000]
-    data = [{"tag": t, "count": c, "category": guess_category(t)} for t, c in top]
+        top = sorted(tag_count.items(), key=lambda x: -x[1])[:1000]
+        data = [{"tag": t, "count": c, "category": guess_category(t)} for t, c in top]
 
-    from ..runtime_config import get_runtime_config
-    cfg = await get_runtime_config(db)
-    noise = set(cfg.get("graph_noise_tags", []))
-    data_filtered = [d for d in data if d["tag"] not in noise]
+        from ..runtime_config import get_runtime_config
+        cfg = await get_runtime_config(db)
+        noise = set(cfg.get("graph_noise_tags", []))
+        return {
+            "data": data,
+            "data_filtered": [d for d in data if d["tag"] not in noise],
+        }
 
-    _tags_cache["data"] = data
-    _tags_cache["data_filtered"] = data_filtered
-    _tags_cache["ts"] = now
-    return data_filtered[:limit]
+    built = await _tags_cache.get(_build)
+    return built["data_filtered"][:limit]
 
 
 @router.get("/tags/suggest")
 async def suggest_tags(q: str = "", limit: int = 10):
     if not q or len(q) < 1:
         return []
-    source = _tags_cache.get("data_filtered") or _tags_cache.get("data")
+    built = _tags_cache.data or {}
+    source = built.get("data_filtered") or built.get("data")
     if not source:
         return []
     q_lower = q.lower().strip()
