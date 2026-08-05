@@ -29,9 +29,23 @@ def test_new_session_casts_gallery_crew_by_default():
     assert s["inputs"]["crew_preset"] == "gallery"
     assert "beat" in s["inputs"]["crew_ids"]
     assert "finisher" not in s["inputs"]["crew_ids"]  # always appended at resolve
+    assert "actress" not in s["inputs"]["crew_ids"]  # always injected at resolve
     assert s["status"] == "setup"
     assert s["chat"] == []
     assert s["craft"]["prompt"] == ""
+
+
+def test_public_roster_fills_actress_from_character():
+    s = schema.new_session()
+    s["character"] = {
+        "name": "The Tank Guide", "name_ja": "水族館ガイド",
+        "personality": {"summary_ja": "同じ魚の話を日に四十回する。"},
+    }
+    view = schema.public_view(s)
+    actress = next(m for m in view["roster"]["muses"] if m["id"] == "actress")
+    assert actress["name_ja"] == "水族館ガイド"
+    assert actress["required"] is True
+    assert "四十回" in actress["line"]
 
 
 def test_board_is_done_when_the_job_stops_not_when_a_count_is_reached():

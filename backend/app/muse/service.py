@@ -114,7 +114,7 @@ async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> di
             preset=str(inputs.get("crew_preset") or crew.DEFAULT_PRESET),
             crew_ids=list(inputs.get("crew_ids") or []) or None,
         )
-        inputs["crew_ids"] = [i for i in ids if i != "finisher"]
+        inputs["crew_ids"] = [i for i in ids if i not in ("finisher", "actress")]
         inputs["crew_preset"] = str(inputs.get("crew_preset") or crew.DEFAULT_PRESET)
     session["inputs"] = inputs
     _rebuild_brief(session)
@@ -180,11 +180,22 @@ async def _run_muse_turn(
         framing=_framing(inputs),
         brief=str(session.get("brief") or ""),
         think=False,
+        character=session.get("character") or {},
         on_token=_token_publisher(sid, muse_id),
     )
 
 
 def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
+    if muse_id == "actress":
+        ch = session.get("character") or {}
+        p = ch.get("personality") or {}
+        locale = str(_inputs(session).get("locale") or "ja")
+        if locale.startswith("ja"):
+            return str(
+                ch.get("name_ja") or p.get("preset_name_ja")
+                or ch.get("name") or p.get("preset_name") or "女優"
+            )
+        return str(ch.get("name") or p.get("preset_name") or "Actress")
     m = crew.MUSES[muse_id]
     locale = str(_inputs(session).get("locale") or "ja")
     if locale.startswith("ja"):
@@ -290,6 +301,7 @@ async def _run_banter(
             ),
             model=_text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),
+            character=session.get("character") or {},
             on_token=_token_publisher(sid, muse_id),
         )
     except chain.ChainError:
@@ -320,7 +332,8 @@ def _pick_extra_heckler(
 ) -> str | None:
     if index % 3 != 2:
         return None
-    for mid in ("hook", "faces", "cutout", "propshop"):
+    # Actress often piles on — personality check from the lead.
+    for mid in ("actress", "hook", "faces", "cutout", "propshop"):
         if mid in crew_ids and mid not in (current, reactor):
             return mid
     return None

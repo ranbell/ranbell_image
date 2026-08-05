@@ -91,13 +91,16 @@ async def run_muse(
     num_ctx: int | None, identity_tags: list[str] | None,
     framing: str, brief: str, think: bool = False,
     images: list[bytes] | None = None,
+    character: dict[str, Any] | None = None,
     on_token: TokenCallback | None = None,
 ) -> MuseTurn:
     """One Muse at the table. Text by default; images optional for board review."""
     if muse_id not in crew.MUSES:
         raise ChainError(f"unknown muse: {muse_id}")
     raw = await _call(
-        ollama, system=crew.system_prompt_for(muse_id), prompt=user_prompt,
+        ollama,
+        system=crew.system_prompt_for(muse_id, character=character),
+        prompt=user_prompt,
         model=model, images=images, num_ctx=num_ctx, think=think,
         on_token=on_token,
     )
@@ -110,13 +113,15 @@ async def run_muse(
 async def run_banter(
     ollama, *, muse_id: str, user_prompt: str, model: str,
     num_ctx: int | None, think: bool = False,
+    character: dict[str, Any] | None = None,
     on_token: TokenCallback | None = None,
 ) -> str:
     """Side comment only — returns SAY text, does not touch craft."""
     if muse_id not in crew.MUSES:
         raise ChainError(f"unknown muse: {muse_id}")
     raw = await _call(
-        ollama, system=crew.banter_system_prompt_for(muse_id),
+        ollama,
+        system=crew.banter_system_prompt_for(muse_id, character=character),
         prompt=user_prompt, model=model, images=None,
         num_ctx=num_ctx, think=think, on_token=on_token,
     )

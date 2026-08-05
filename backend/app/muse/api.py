@@ -114,6 +114,7 @@ async def catalog(request: Request):
 
 @router.get("/roster")
 async def roster():
+    """Static roster seats. Session public_view fills Actress from the cast character."""
     return crew.public_roster()
 
 

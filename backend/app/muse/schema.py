@@ -38,7 +38,7 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "llm_provider": "ollama",
             "locale": "ja",
             "crew_preset": preset,
-            "crew_ids": [i for i in crew_ids if i != "finisher"],
+            "crew_ids": [i for i in crew_ids if i not in ("finisher", "actress")],
         }, **(inputs or {})},
         "character": {},
         "brief": "",
@@ -135,5 +135,5 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         "step_state": step_state(session),
         "next_step": next_step(session),
         "needs": missing_inputs(session),
-        "roster": crew_mod.public_roster(),
+        "roster": crew_mod.public_roster(session.get("character") or {}),
     }

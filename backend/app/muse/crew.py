@@ -17,6 +17,8 @@ MUSE_ORDER: tuple[str, ...] = (
     "propshop",
     "wardrobe",
     "gaffer",
+    # Seat filled by the selected character preset (one of ~100 actresses).
+    "actress",
     "faces",
     "hook",
     "weather",
@@ -225,18 +227,45 @@ Support the face or back per Framing. KEEP camera and setting objects.
 """,
         ),
         _muse(
+            "actress",
+            name="Actress", name_ja="女優",
+            role="Lead actress (selected character)", role_ja="主演（選択キャラ）",
+            voice="Speaks in first person as the selected character. Personality-forward.",
+            voice_ja="選ばれたキャラ本人の一人称。性格と内面から演技を提案する。",
+            line="Play it the way she would — not a generic pretty face.",
+            line_ja="この子ならこうする——汎用の可愛い顔にはしない。",
+            say_example="私、同じ説明を四十回しても本気なタイプだから……暑い休憩でも、誰かに話したくなる目は残したいな。",
+            techniques=["personality_acting", "expression_vocab", "gesture_vocab"],
+            specialty="""
+SPECIALTY — ACTRESS (SELECTED CHARACTER PRESET)
+You ARE the lead actress = the character the Showrunner cast from the roster.
+The dynamic prompt fills your name, traits, inner life, expression_vocab and
+gesture_vocab — obey those, not a generic idol template.
+
+Visible personality (what must land in the picture):
+- Choose expression + micro-gesture that ONLY this personality would do here.
+- Prefer tags from expression_vocab / gesture_vocab when they fit the beat.
+- Inner life becomes eyes, mouth, hand story, shoulder tone — never props.
+- Likes/dislikes are taste cues for HOW she acts, never objects to draw.
+- KEEP Lens camera, wardrobe, and setting. Do not relocate.
+
+SAY in first person as her (Japanese if Showrunner wrote Japanese).
+""",
+        ),
+        _muse(
             "faces",
             name="Faces", name_ja="フェイス",
             role="Acting coach", role_ja="演技コーチ",
             voice="Soft intimate coach. Notices micro-expressions. Speaks gently, almost whispering certainty.",
-            voice_ja="やわらかい演技コーチ。目と口元のミリ単位。声は低めで確か。",
+            voice_ja="やわらかい演技コーチ。目と口元のミリ単位。声は低めで確か。女優の方針をミリで実装する。",
             line="The eyes decide before the mouth does.",
             line_ja="目が先に決める。口はあと。",
-            say_example="笑顔はいらない。半目で息を吐く——『ガイドの元気』は今日オフ。ほっとした疲れだけ残して。",
+            say_example="女優の方針、受け取った。半目と指先だけミリ調整する——性格が顔に残るように。",
             techniques=["gaze", "micro_acting"],
             specialty="""
 SPECIALTY — FACES (ACTING)
 Eyes, brows, mouth, gaze target, finger story.
+Honour the Actress pass when present — refine her personality choice in millimetres.
 from_behind: nape, shoulder tension, optional looking_back.
 REFERENCE is motivation only — never props. Do not reset to neutral stand.
 """,
@@ -383,16 +412,18 @@ Preserve outfit and camera clusters intact.
 }
 
 PRESETS: dict[str, list[str]] = {
-    # finisher omitted — always appended
+    # actress + finisher omitted — always injected by resolve_crew
     "lightning": [
         "beat", "spine", "lens", "propshop", "wardrobe", "gaffer",
-        "hook", "ink", "grade", "gate",
+        "faces", "hook", "ink", "grade", "gate",
     ],
     "gallery": [
         "beat", "spine", "cutout", "lens", "propshop", "wardrobe", "gaffer",
         "faces", "hook", "weather", "palette", "ink", "grade", "continuity", "gate",
     ],
-    "everyone": [m for m in MUSE_ORDER if m != "finisher"],
+    "everyone": [
+        m for m in MUSE_ORDER if m not in ("finisher", "actress")
+    ],
     "motion": [
         "beat", "spine", "cutout", "lens", "propshop", "wardrobe", "gaffer",
         "faces", "hook", "ink", "grade", "continuity", "gate",
@@ -412,7 +443,97 @@ PICKUP = {
 }
 
 
-def system_prompt_for(muse_id: str) -> str:
+BANTER_OUTPUT = """
+OUTPUT FORMAT — Exactly one labelled block, nothing else:
+
+SAY: 1–2 short sentences IN YOUR VOICE. Live table heckle / reaction only.
+If the Showrunner wrote Japanese, write SAY in Japanese (口調どおり).
+Address the previous speaker by name when you can. Agree, push back, or pile on
+one detail. No danbooru tags. Do NOT invent a new shot. Do NOT output TAGS or SCENE.
+""".strip()
+
+
+def _character_sheet(character: dict[str, Any]) -> str:
+    """Pull the selected preset's personality into the actress prompt."""
+    p = character.get("personality") or {}
+    name = (
+        str(character.get("name_ja") or p.get("preset_name_ja") or "")
+        or str(character.get("name") or p.get("preset_name") or "Actress")
+    )
+    name_en = str(character.get("name") or p.get("preset_name") or name)
+    traits = ", ".join(str(t) for t in (p.get("traits") or []) if t)
+    summary = str(p.get("summary_ja") or p.get("summary") or "")
+    inner = " / ".join(
+        str(x) for x in (p.get("inner_ja") or p.get("inner") or []) if x
+    )
+    likes = ", ".join(str(x) for x in (p.get("likes") or [])[:6] if x)
+    dislikes = ", ".join(str(x) for x in (p.get("dislikes") or [])[:6] if x)
+    expr = ", ".join(str(t) for t in (character.get("expression_vocab") or [])[:10] if t)
+    gest = ", ".join(str(t) for t in (character.get("gesture_vocab") or [])[:10] if t)
+    vibe = ", ".join(str(x) for x in (p.get("vibe_keywords") or [])[:6] if x)
+    return "\n".join([
+        f"CHARACTER NAME: {name_en} / {name}",
+        f"TRAITS: {traits or '(unspecified)'}",
+        f"SUMMARY: {summary or '(none)'}",
+        f"INNER: {inner or '(none)'}",
+        f"TASTE CUES likes (never props): {likes or '(none)'}",
+        f"TASTE CUES dislikes (never props): {dislikes or '(none)'}",
+        f"EXPRESSION VOCAB (prefer in TAGS when they fit): {expr or '(none)'}",
+        f"GESTURE VOCAB (prefer in TAGS when they fit): {gest or '(none)'}",
+        f"VIBE: {vibe or '(none)'}",
+    ])
+
+
+def actress_system_prompt(character: dict[str, Any]) -> str:
+    """System prompt for the selected roster actress — not a fictional Muse voice."""
+    p = character.get("personality") or {}
+    name_ja = (
+        str(character.get("name_ja") or p.get("preset_name_ja") or "")
+        or str(character.get("name") or p.get("preset_name") or "女優")
+    )
+    name_en = str(character.get("name") or p.get("preset_name") or name_ja)
+    sheet = _character_sheet(character)
+    return "\n\n".join([
+        f"You are Actress / 女優 — lead seat filled by roster preset {name_en} / {name_ja}.",
+        "You were cast from the show's character roster (one of ~100 presets).",
+        "Speak in FIRST PERSON as her. Your personality must become visible acting "
+        "in TAGS/SCENE — that is why you are here.",
+        f"口調: 一人称（「私」）。{name_ja}本人として、この状況ならこう動く／こう見る、を提案する。"
+        "スタッフ（レンズや衣装）には敬語でもタメでもよいが、中身は性格優先。",
+        "EXAMPLE energy: 私、こういう子だから……この場面なら目はこう、手はこう、が自然。",
+        sheet,
+        "RULES FOR VISIBLE PERSONALITY",
+        "- Name your trait → concrete face/hand/posture choice in SAY.",
+        "- Put that choice into TAGS using expression_vocab / gesture_vocab when possible.",
+        "- SCENE must describe how HER personality colours this exact beat.",
+        "- Never draw likes/dislikes/signature as props unless the theme names them.",
+        "- KEEP camera, outfit, place from previous craft. Only rewrite acting flavour.",
+        CARRY,
+        MUSES["actress"]["specialty"],
+        OUTPUT,
+    ])
+
+
+def actress_banter_prompt(character: dict[str, Any]) -> str:
+    p = character.get("personality") or {}
+    name_ja = (
+        str(character.get("name_ja") or p.get("preset_name_ja") or "")
+        or "女優"
+    )
+    traits = ", ".join(str(t) for t in (p.get("traits") or [])[:4] if t)
+    inner = " / ".join(str(x) for x in (p.get("inner_ja") or p.get("inner") or [])[:2] if x)
+    return "\n\n".join([
+        f"You are Actress / 女優 heckling at the table — in character as {name_ja}.",
+        f"Traits: {traits}. Inner: {inner}.",
+        "一人称で短く。性格に照らし『私ならこう』『それは私じゃない』と口を挟む。",
+        "台本は書き換えない。会話だけ。",
+        BANTER_OUTPUT,
+    ])
+
+
+def system_prompt_for(muse_id: str, character: dict[str, Any] | None = None) -> str:
+    if muse_id == "actress":
+        return actress_system_prompt(character or {})
     m = MUSES[muse_id]
     return "\n\n".join([
         f"You are {m['name']} / {m['name_ja']} ({m['role_ja']}) at a Muse table read.",
@@ -424,24 +545,20 @@ def system_prompt_for(muse_id: str) -> str:
         "at the table. Other Muses have different mouths — do not borrow theirs.",
         "In SAY, react to RECENT TABLE TALK when present — name the previous Muse, "
         "agree / push back / add one sharp beat. This is a conversation, not a report.",
+        "When the Actress (selected character) has spoken, honour her personality "
+        "choice — do not flatten her back into a generic cute face.",
         CARRY,
         m["specialty"],
         OUTPUT,
     ])
 
 
-BANTER_OUTPUT = """
-OUTPUT FORMAT — Exactly one labelled block, nothing else:
-
-SAY: 1–2 short sentences IN YOUR VOICE. Live table heckle / reaction only.
-If the Showrunner wrote Japanese, write SAY in Japanese (口調どおり).
-Address the previous speaker by name when you can. Agree, push back, or pile on
-one detail. No danbooru tags. Do NOT invent a new shot. Do NOT output TAGS or SCENE.
-""".strip()
-
-
-def banter_system_prompt_for(muse_id: str) -> str:
+def banter_system_prompt_for(
+    muse_id: str, character: dict[str, Any] | None = None,
+) -> str:
     """Short reaction turn — chat only, no craft rewrite."""
+    if muse_id == "actress":
+        return actress_banter_prompt(character or {})
     m = MUSES[muse_id]
     return "\n\n".join([
         f"You are {m['name']} / {m['name_ja']} ({m['role_ja']}) heckling at the table.",
@@ -459,33 +576,51 @@ def resolve_crew(
     preset: str | None = None,
     crew_ids: list[str] | None = None,
 ) -> list[str]:
-    """Ordered muse ids for this run. Finisher always last."""
+    """Ordered muse ids. Actress seat + Finisher always present."""
+    skip = {"finisher", "actress"}
     if crew_ids:
-        wanted = {i for i in crew_ids if i in MUSES and i != "finisher"}
+        wanted = {i for i in crew_ids if i in MUSES and i not in skip}
     else:
         key = preset if preset in PRESETS else DEFAULT_PRESET
         wanted = set(PRESETS[key])
-    ordered = [m for m in MUSE_ORDER if m in wanted and m != "finisher"]
+    ordered = [m for m in MUSE_ORDER if m in wanted and m not in skip]
     if not ordered:
-        ordered = list(PRESETS[DEFAULT_PRESET])
+        ordered = [m for m in PRESETS[DEFAULT_PRESET] if m not in skip]
+    # Actress (selected character) sits before Faces when Faces is cast,
+    # otherwise before Finisher.
+    if "faces" in ordered:
+        i = ordered.index("faces")
+        ordered = ordered[:i] + ["actress"] + ordered[i:]
+    else:
+        ordered.append("actress")
     ordered.append("finisher")
     return ordered
 
 
-def public_roster() -> dict[str, Any]:
+def public_roster(character: dict[str, Any] | None = None) -> dict[str, Any]:
+    ch = character or {}
+    p = ch.get("personality") or {}
+    actress_name = str(ch.get("name") or p.get("preset_name") or "Actress")
+    actress_name_ja = str(
+        ch.get("name_ja") or p.get("preset_name_ja") or actress_name or "女優"
+    )
+    actress_line = str(
+        p.get("summary_ja") or p.get("summary") or MUSES["actress"]["line_ja"]
+    )
     return {
         "muses": [
             {
                 "id": m["id"],
-                "name": m["name"],
-                "name_ja": m["name_ja"],
+                "name": actress_name if m["id"] == "actress" else m["name"],
+                "name_ja": actress_name_ja if m["id"] == "actress" else m["name_ja"],
                 "role": m["role"],
                 "role_ja": m["role_ja"],
-                "line": m["line"],
-                "line_ja": m["line_ja"],
+                "line": actress_line if m["id"] == "actress" else m["line"],
+                "line_ja": actress_line if m["id"] == "actress" else m["line_ja"],
                 "voice_ja": m["voice_ja"],
                 "techniques": m["techniques"],
-                "required": m["id"] == "finisher",
+                # Actress + Finisher are always seated.
+                "required": m["id"] in ("finisher", "actress"),
             }
             for m in (MUSES[i] for i in MUSE_ORDER)
         ],

@@ -532,7 +532,7 @@ async function onChatKey(e) {
           >
             <span class="block text-[var(--sb-amber)]">{{ museLabel(m) }}</span>
             <span class="block text-[10px] text-[var(--sb-faint)]">{{ isJa ? m.role_ja : m.role }}</span>
-            <span class="block text-[10px] text-gray-400 mt-1">{{ m.line }}</span>
+            <span class="block text-[10px] text-gray-400 mt-1">{{ isJa ? (m.line_ja || m.line) : m.line }}</span>
           </button>
         </div>
       </section>
