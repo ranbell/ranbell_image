@@ -345,20 +345,26 @@ def test_is_approve_accepts_natural_ok_phrases():
     assert not service._is_approve("服をもっと派手に")
 
 
-def test_pick_responders_routes_outfit_notes_to_wardrobe():
-    crew_ids = ["beat", "spine", "lens", "wardrobe", "gaffer", "actress", "finisher"]
-    got = service._pick_responders("服をコートにして", crew_ids)
-    assert "wardrobe" in got
-    assert got[-1] == "finisher"
-
-
-def test_pick_responders_routes_charm_notes_to_actress():
-    crew_ids = ["beat", "wardrobe", "faces", "hook", "actress", "finisher"]
-    got = service._pick_responders("もっと可愛く、魅力出して", crew_ids)
-    assert "actress" in got
-    assert "faces" in got or "hook" in got
-    assert got[-1] == "finisher"
-    assert len(got) <= 5  # cap craft + finisher for Ollama
+def test_pick_responders_is_fixed_desk_not_keyword_router():
+    """Mood/situation words must not change the cast — VLM reads the note."""
+    crew_ids = [
+        "beat", "spine", "lens", "wardrobe", "gaffer",
+        "actress", "faces", "hook", "finisher",
+    ]
+    a = service._pick_responders("服をコートにして", crew_ids)
+    b = service._pick_responders("ちょっとセクシーにしましょう", crew_ids)
+    c = service._pick_responders("もっと可愛く、魅力出して", crew_ids)
+    d = service._pick_responders("画角を寄せて", crew_ids)
+    assert a == b == c == d
+    assert a[0] == "actress"
+    assert a[-1] == "finisher"
+    assert len(a) <= 5  # cap craft + finisher for Ollama
+    # No keyword→muse pattern table — note text must not be inspected.
+    import inspect
+    src = inspect.getsource(service._pick_responders)
+    assert "re.search" not in src
+    assert "pairs" not in src
+    assert "want" not in src
 
 
 @pytest.mark.asyncio
@@ -367,19 +373,20 @@ async def test_showrunner_comment_reruns_a_short_turn():
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db, banter_mode="off")  # craft-only for speed
     session = await service.start_table(db, ollama, session)
-    before = session["craft"]["prompt"]
     n_chat = len(session["chat"])
 
     session = await service.post_chat(
         db, ollama, FakeComfy(), spooler, session,
-        "もっと可愛くして。ビキニにして魅力出して",
+        "もう少し落ち着いた雰囲気にして",
     )
 
     assert session["status"] == "chat"
     assert spooler.jobs == []  # comment is LLM turns, not Comfy
-    assert any(m["role"] == "user" and "ビキニ" in m["text"] for m in session["chat"])
+    assert any(
+        m["role"] == "user" and "落ち着いた" in m["text"] for m in session["chat"]
+    )
     spoken = [m.get("muse_id") for m in session["chat"][n_chat:] if m.get("role") == "muse"]
-    assert "wardrobe" in spoken or "actress" in spoken
+    assert "actress" in spoken
     assert "finisher" in spoken
     assert len(session["chat"]) > n_chat
     # Craft was touched by at least one responder (FakeOllama always rewrites).
