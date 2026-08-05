@@ -113,8 +113,10 @@ async def test_table_builds_craft_and_chat_without_submitting_comfy():
     assert "blue_hair" in session["craft"]["prompt"]
     assert session["craft"]["pose_intent"] == "STAGE A PROMPT"
     assert "blue_hair" not in session["craft"]["pose_intent"]
-    # System open + each muse + wrap ask.
+    # System open + each muse + wrap ask + banter asides.
     assert any(m["role"] == "muse" for m in session["chat"])
+    assert any(m.get("kind") == "banter" for m in session["chat"]), "crew should heckle"
+    assert any(m.get("kind") == "craft" for m in session["chat"])
     assert ollama.unloaded == []
     assert len(ollama.calls) >= 2  # lightning crew + finisher
 

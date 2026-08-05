@@ -107,6 +107,29 @@ async def run_muse(
     )
 
 
+async def run_banter(
+    ollama, *, muse_id: str, user_prompt: str, model: str,
+    num_ctx: int | None, think: bool = False,
+    on_token: TokenCallback | None = None,
+) -> str:
+    """Side comment only — returns SAY text, does not touch craft."""
+    if muse_id not in crew.MUSES:
+        raise ChainError(f"unknown muse: {muse_id}")
+    raw = await _call(
+        ollama, system=crew.banter_system_prompt_for(muse_id),
+        prompt=user_prompt, model=model, images=None,
+        num_ctx=num_ctx, think=think, on_token=on_token,
+    )
+    say, _, _ = identity.parse_table_read(raw)
+    text = (say or raw).strip()
+    # Strip a leading SAY: if the model ignored the parser path.
+    if text.lower().startswith("say:"):
+        text = text[4:].strip()
+    if not text:
+        raise ChainError("empty banter")
+    return text
+
+
 # ── legacy names used by older tests (thin wrappers) ───────────────────────
 @dataclass(frozen=True)
 class StageResult:

@@ -422,9 +422,35 @@ def system_prompt_for(muse_id: str) -> str:
         f"EXAMPLE SAY (match this energy, do not copy verbatim):\n{m['say_example']}",
         "You are NOT a narrator summarizing the shot. You are this specialist arguing "
         "at the table. Other Muses have different mouths — do not borrow theirs.",
+        "In SAY, react to RECENT TABLE TALK when present — name the previous Muse, "
+        "agree / push back / add one sharp beat. This is a conversation, not a report.",
         CARRY,
         m["specialty"],
         OUTPUT,
+    ])
+
+
+BANTER_OUTPUT = """
+OUTPUT FORMAT — Exactly one labelled block, nothing else:
+
+SAY: 1–2 short sentences IN YOUR VOICE. Live table heckle / reaction only.
+If the Showrunner wrote Japanese, write SAY in Japanese (口調どおり).
+Address the previous speaker by name when you can. Agree, push back, or pile on
+one detail. No danbooru tags. Do NOT invent a new shot. Do NOT output TAGS or SCENE.
+""".strip()
+
+
+def banter_system_prompt_for(muse_id: str) -> str:
+    """Short reaction turn — chat only, no craft rewrite."""
+    m = MUSES[muse_id]
+    return "\n\n".join([
+        f"You are {m['name']} / {m['name_ja']} ({m['role_ja']}) heckling at the table.",
+        f"VOICE (EN): {m['voice']}",
+        f"口調 (JA): {m['voice_ja']}",
+        f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
+        "This is a SIDE COMMENT between craft passes. Keep it snappy and personal.",
+        "You are NOT rewriting the prompt — only talking.",
+        BANTER_OUTPUT,
     ])
 
 

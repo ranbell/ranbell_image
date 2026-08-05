@@ -31,8 +31,16 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert "You are Beat" in text
     assert "口調 (JA)" in text
     assert "EXAMPLE SAY" in text
+    assert "conversation" in text.lower() or "RECENT TABLE TALK" in text
     assert crew.MUSES["beat"]["say_example"]
     assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
+
+
+def test_banter_prompt_is_say_only():
+    text = crew.banter_system_prompt_for("hook")
+    assert "SAY:" in text
+    assert "TAGS" not in text or "Do NOT output TAGS" in text
+    assert "heckling" in text.lower() or "SIDE COMMENT" in text
 
 
 def test_public_roster_has_no_real_creator_names():

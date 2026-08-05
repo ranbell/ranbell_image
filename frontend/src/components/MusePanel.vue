@@ -395,18 +395,25 @@ async function onChatKey(e) {
               <div
                 v-for="m in chat" :key="m.id"
                 class="flex flex-col gap-0.5"
-                :class="m.role === 'user' ? 'items-end' : 'items-start'"
+                :class="[
+                  m.role === 'user' ? 'items-end' : 'items-start',
+                  m.kind === 'banter' ? 'pl-4 opacity-90' : '',
+                ]"
               >
                 <span class="text-[10px] text-[var(--sb-faint)]">
-                  {{ m.role === 'user' ? t('muse.showrunner') : (m.name || 'Studio') }}
+                  <template v-if="m.role === 'user'">{{ t('muse.showrunner') }}</template>
+                  <template v-else-if="m.kind === 'banter'">{{ m.name }} · {{ t('muse.banter') }}</template>
+                  <template v-else>{{ m.name || 'Studio' }}</template>
                 </span>
                 <div
-                  class="max-w-[90%] rounded-lg px-3 py-2 text-[12px] whitespace-pre-wrap"
+                  class="max-w-[90%] whitespace-pre-wrap"
                   :class="m.role === 'user'
-                    ? 'bg-[var(--sb-teal)]/20 border border-teal-700/40 text-gray-100'
+                    ? 'rounded-lg px-3 py-2 text-[12px] bg-[var(--sb-teal)]/20 border border-teal-700/40 text-gray-100'
                     : m.role === 'system'
-                      ? 'bg-white/5 border border-white/10 text-gray-400'
-                      : 'bg-black/40 border border-white/10 text-gray-200'"
+                      ? 'rounded-lg px-3 py-2 text-[12px] bg-white/5 border border-white/10 text-gray-400'
+                      : m.kind === 'banter'
+                        ? 'rounded px-2.5 py-1.5 text-[11px] bg-amber-950/20 border border-amber-800/30 text-amber-100/90 italic'
+                        : 'rounded-lg px-3 py-2 text-[12px] bg-black/40 border border-white/10 text-gray-200'"
                 >{{ m.text }}</div>
               </div>
 
