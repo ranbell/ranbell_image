@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
-from app.muse import runner, service, session_db
+from app.muse import identity, runner, service, session_db
 
 
 class FakeSpooler:
@@ -137,6 +137,66 @@ async def test_board_submits_one_job_from_craft():
     assert session["board"]["job_id"]
     assert session["status"] == "boarding"
     assert ollama.unloaded == []
+
+
+@pytest.mark.asyncio
+async def test_thin_craft_is_densified_before_board():
+    """Board must not ship a tweet-length SCENE — Finisher packs density first."""
+    db, spooler = FakeDb(), FakeSpooler()
+
+    class DenseOllama(FakeOllama):
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append(kw)
+            dense_scene = (
+                "She sinks into a wooden seaside cafe chair in a damp one-piece swimsuit, "
+                "right elbow braced on the table, aqua braid fraying over one shoulder while "
+                "heat haze shimmers beyond the railing. A sweating iced drink beads on the "
+                "grain, a sticky menu stand and crumpled napkin crowd the foreground, wet "
+                "footprints fade toward bright sand, and a striped parasol throws broken "
+                "stripe shadows across her light blush and parted lips as if she still wants "
+                "to explain something to someone. Noon bleaches the ocean white behind her; "
+                "the camera holds a slight low medium shot across the table so her hand, "
+                "half-lifted in a small guide gesture, reads as charm rather than blank cute. "
+                "Salt dusts the swimsuit straps, cloth clinging at the ribs, plastic chair "
+                "legs sunk in grit, string lights unlit in daylight, a seashell ashtray and "
+                "straw catching a rim of sun while humid air sticks under the shade."
+            )
+            # pad to clear 140 words
+            dense_scene = dense_scene + " " + " ".join(["detail"] * 40)
+            text = (
+                "SAY: 密度上げました。のっぺりさせません。\n\n"
+                "TAGS: masterpiece, best_quality, sitting, leaning_on_table, "
+                "one-piece_swimsuit, wet_swimsuit, beach_cafe, parasol, wooden_table, "
+                "condensation, glass, ice_cubes, menu_stand, napkin, wet_footprints, "
+                "heat_haze, dappled_sunlight, from_side, slightly_from_below, "
+                "medium_shot, upper_body, light_blush, smile, open_mouth, hand_up, "
+                "looking_at_viewer, bare_shoulders, depth_of_field, charming\n\n"
+                f"SCENE: {dense_scene}"
+            )
+
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    ollama = DenseOllama()
+    session = await _ready_session(db, banter_mode="off")
+    session["craft"] = {
+        "prompt": "1girl, aqua_hair, sitting, smile, She sits.",
+        "scene": "She sits.",
+        "tags": "sitting, smile",
+        "pose_intent": "She sits.",
+    }
+    session["status"] = "chat"
+    session["brief"] = "x"
+    await session_db.save(db, session)
+
+    session = await service.request_board(
+        db, FakeComfy(), spooler, session, ollama=ollama,
+    )
+    assert identity.word_count(session["board"]["prompt"]) >= 160
+    assert "dens" in " ".join(
+        m["text"].lower() for m in session["chat"] if m.get("role") == "system"
+    ) or any("密度" in m["text"] for m in session["chat"])
 
 
 @pytest.mark.asyncio

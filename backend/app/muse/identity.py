@@ -246,6 +246,25 @@ def assemble_positive(
     return ", ".join(c for c in chunks if c)
 
 
+def word_count(text: str) -> int:
+    return len([w for w in (text or "").split() if w])
+
+
+def craft_is_thin(
+    prompt: str, scene: str = "", *, min_total: int = 160, min_scene: int = 100,
+) -> bool:
+    """True when the assembled craft is too short for a rich render."""
+    scene_words = word_count(scene) if scene.strip() else 0
+    # If scene was already folded into prompt, count the whole positive.
+    total = word_count(prompt)
+    if scene.strip() and scene.strip() in (prompt or ""):
+        return total < min_total or scene_words < min_scene
+    # Prompt may be tags-only; require scene separately when provided.
+    if scene.strip():
+        return total + scene_words < min_total or scene_words < min_scene
+    return total < min_total
+
+
 def pose_summary(prompt: str, *, max_sentences: int = 2) -> str:
     """Keep the action intent from stage A without carrying the whole prose."""
     text = (prompt or "").strip()

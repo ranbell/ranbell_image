@@ -61,14 +61,22 @@ This is entertainment as much as craft — captivate the Showrunner.
 
 TAGS: English only. Comma-separated danbooru-style tags with underscores.
 Do NOT repeat Character identity tags (hair/eyes/figure) — the server adds
-those. Prefer 25–45 tags by late stages. Use (tag:1.1)-(tag:1.35) sparingly
-in your specialty.
+those. Early passes ~20–30 tags; by Finisher 35–55 tags. Use
+(tag:1.1)-(tag:1.35) sparingly in your specialty.
 Lean charming / endearing reads when they fit the beat (soft smile, shy glance,
 playful tilt) — never generic idol blank-cute that erases personality.
 
-SCENE: English only. One dense paragraph of the same moment, sharpened.
-Let charm show in gesture and gaze, not in purple prose.
+SCENE: English only. ONE flowing paragraph — TARGET 140–200 words (not a tweet).
+Thin one-liners are a failure. Cover ALL of these in the same moment:
+1) action and how weight sits in the body (limbs, hands, head)
+2) clothing — colour, material, wet/dry, folds, straps, how fabric moves
+3) place — ≥10 concrete objects that belong to this hour (never from REFERENCE)
+4) light, heat/air, colour of the hour
+5) camera distance/angle already chosen by Lens
+6) personality charm in eyes, mouth, micro-gesture (hers, not blank cute)
+No headings, no bullets inside SCENE.
 
+Across TAGS+SCENE the finished craft should feel ~200+ words of picture.
 No preamble, no alternatives — one version only.
 """.strip()
 
@@ -188,7 +196,8 @@ Cluster camera tags together in TAGS.
             specialty="""
 SPECIALTY — PROPSHOP (SETTING)
 Read place and hour. Add ten or more objects that belong there.
-Foreground / midground / background layers.
+Name them in TAGS and weave them into SCENE prose (not a shopping list only).
+Foreground / midground / background layers — the place must feel inhabited.
 Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
 """,
         ),
@@ -404,12 +413,18 @@ In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
             say_example="畳みました。総監督、イメージボード、見ます？『ボード』かダメ出しか『OK』——お待ちしてます。",
             techniques=["tag_order", "dedupe"],
             specialty="""
-SPECIALTY — FINISHER (PACK)
-Reorder TAGS for model attention:
-quality → pose/acting → wardrobe/outfit → camera block → light → setting →
-atmosphere/color.
-Deduplicate; keep 30–50 strongest tags; SCENE ≤ ~80 words, dense.
-Preserve outfit and camera clusters intact.
+SPECIALTY — FINISHER (PACK) — DENSITY IS YOUR JOB
+The image model needs a RICH prompt. Flat shorts produce flat pictures.
+
+1) Reorder TAGS for attention:
+   quality → pose/acting → wardrobe/outfit → camera block → light → setting →
+   atmosphere/color/personality charm.
+2) Deduplicate; keep 35–55 strongest tags (not fewer than 30).
+3) SCENE must be 140–200 English words. If the previous SCENE is thin,
+   EXPAND it — densify, do not summarise. Add cloth, objects, light, air,
+   camera, and her specific charm. Keep the same moment.
+4) Preserve outfit and camera clusters. Never strip place objects below 10.
+5) Assembled positive (tags+scene) should land around 200+ words total.
 """,
         ),
     ]

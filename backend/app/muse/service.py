@@ -590,6 +590,57 @@ async def _maybe_unload(ollama, session: dict[str, Any]) -> None:
         logger.debug("[muse] unload_vlm failed", exc_info=True)
 
 
+def _densify_user_prompt(session: dict[str, Any]) -> str:
+    """Force Finisher to thicken a thin craft before Comfy sees it."""
+    craft = session.get("craft") or {}
+    base = _table_user_prompt(session)
+    return (
+        f"{base}\n\n"
+        "DENSITY PACK (mandatory — the last render looked flat because SCENE was thin):\n"
+        "- Expand SCENE to 140–200 English words covering pose, cloth, ≥10 place objects,\n"
+        "  light/air, camera, and her personality charm in eyes/hands.\n"
+        "- TAGS: 35–55 strong tags. Do not shrink.\n"
+        "- Keep the same moment. Densify, do not restart.\n"
+        f"- Current SCENE word count: {identity.word_count(str(craft.get('scene') or ''))}.\n"
+        f"- Current positive word count: {identity.word_count(str(craft.get('prompt') or ''))}."
+    )
+
+
+async def densify_craft_if_needed(
+    db, ollama, session: dict[str, Any],
+) -> dict[str, Any]:
+    """Run Finisher once when craft is too thin for a rich render."""
+    if ollama is None:
+        return session
+    craft = session.get("craft") or {}
+    prompt = str(craft.get("prompt") or "")
+    scene = str(craft.get("scene") or "")
+    if not prompt:
+        return session
+    if not identity.craft_is_thin(prompt, scene):
+        return session
+    cfg = await get_runtime_config(db)
+    locale = str(_inputs(session).get("locale") or "ja")
+    note = _chat_append(
+        session, role="system", name="Studio",
+        text=(
+            "台本が薄いのでフィニッシャーが密度を上げます（のっぺり防止）。"
+            if locale.startswith("ja") else
+            "Craft is thin — Finisher is densifying before render."
+        ),
+    )
+    _publish_chat(session["session_id"], note)
+    try:
+        turn = await _run_muse_turn(
+            ollama, session, "finisher", _densify_user_prompt(session), cfg=cfg,
+        )
+        _apply_turn(session, turn)
+    except chain.ChainError:
+        logger.warning("[muse] densify failed; rendering thin craft", exc_info=True)
+    await session_db.save(db, session, publish=False)
+    return session
+
+
 async def request_board(
     db, comfy, spooler, session: dict[str, Any], ollama=None,
 ) -> dict[str, Any]:
@@ -597,6 +648,10 @@ async def request_board(
     prompt = str(craft.get("prompt") or "")
     if not prompt:
         raise MuseError("no craft yet — start the table first")
+
+    session = await densify_craft_if_needed(db, ollama, session)
+    craft = session.get("craft") or {}
+    prompt = str(craft.get("prompt") or "")
 
     inputs = _inputs(session)
     sid = session["session_id"]
@@ -646,6 +701,10 @@ async def approve_and_shoot(
     prompt = str(craft.get("prompt") or "")
     if not prompt:
         raise MuseError("nothing to shoot yet")
+
+    session = await densify_craft_if_needed(db, ollama, session)
+    craft = session.get("craft") or {}
+    prompt = str(craft.get("prompt") or "")
 
     inputs = _inputs(session)
     sid = session["session_id"]

@@ -44,8 +44,9 @@ TAGS: comma-separated danbooru-style tags for pose, clothing details, setting,
 composition and quality. Do NOT repeat the Character identity tags from the
 brief (hair, eyes, figure) — those are added by the server.
 
-SCENE: one short paragraph of flowing prose for action, light and air. No
-headings, no bullet points, no labels inside this block.
+SCENE: one dense paragraph of flowing prose (target 140–200 words) for action,
+cloth, place objects, light and air. No headings, no bullet points, no labels
+inside this block.
 
-- 300 words or fewer across both blocks.
+- Aim for ~200+ words across both blocks; never a one-line SCENE.
 - No preamble, no closing remark, no explanation, no alternatives.

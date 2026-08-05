@@ -33,7 +33,8 @@ OUTPUT FORMAT
 TAGS: comma-separated danbooru-style tags for camera, composition, light and
 quality. Do NOT repeat the Character identity tags from the brief.
 
-SCENE: one short paragraph of flowing prose for action, light and place.
+SCENE: one dense paragraph (target 140–200 words) of flowing prose for action,
+new camera, light and place.
 
 - 500 words or fewer across both blocks.
 - No preamble, no closing remark, no explanation of what you changed, no

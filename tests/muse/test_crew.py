@@ -61,6 +61,15 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
 
 
+def test_finisher_demands_dense_scene():
+    text = crew.system_prompt_for("finisher")
+    assert "140–200" in text or "140-200" in text
+    assert "35–55" in text or "35-55" in text
+    assert "Densify" in text or "densify" in text or "EXPAND" in text
+    assert "80 words" not in text  # old thin cap must stay gone
+    assert "140–200" in crew.OUTPUT or "140-200" in crew.OUTPUT
+
+
 def test_banter_prompt_is_say_only():
     text = crew.banter_system_prompt_for("hook")
     assert "SAY:" in text
