@@ -34,6 +34,8 @@ CARRY = """
 CONTEXT CARRY (do not break the chain)
 
 You are revising the previous TAGS/SCENE at the table read, not starting over.
+- Follow THIS theme only. Never drag in props, outfits, or weather from some
+  other stock situation the theme did not name.
 - KEEP the same moment, action, place and hour.
 - KEEP every concrete noun the theme named.
 - KEEP setting objects once they exist; KEEP outfit decisions once they exist.
@@ -63,17 +65,18 @@ TAGS: English only. Comma-separated danbooru-style tags with underscores.
 Do NOT repeat Character identity tags (hair/eyes/figure) — the server adds
 those. Early passes ~20–30 tags; by Finisher 35–55 tags. Use
 (tag:1.1)-(tag:1.35) sparingly in your specialty.
-Lean charming / endearing reads when they fit the beat (soft smile, shy glance,
-playful tilt) — never generic idol blank-cute that erases personality.
+Expression tags must follow the beat and the Actress personality — never a
+blank idol template that erases who she is.
 
 SCENE: English only. ONE flowing paragraph — TARGET 140–200 words (not a tweet).
 Thin one-liners are a failure. Cover ALL of these in the same moment:
 1) action and how weight sits in the body (limbs, hands, head)
-2) clothing — colour, material, wet/dry, folds, straps, how fabric moves
-3) place — ≥10 concrete objects that belong to this hour (never from REFERENCE)
-4) light, heat/air, colour of the hour
+2) clothing — colour, material, fit, folds, how fabric sits on the pose
+3) place — ≥10 concrete objects that belong to THIS theme's place/hour
+   (never from REFERENCE; invent nothing the theme did not imply)
+4) light and atmosphere of the hour
 5) camera distance/angle already chosen by Lens
-6) personality charm in eyes, mouth, micro-gesture (hers, not blank cute)
+6) personality in eyes, mouth, micro-gesture (hers, not a blank template)
 No headings, no bullets inside SCENE.
 
 Across TAGS+SCENE the finished craft should feel ~200+ words of picture.
@@ -217,7 +220,7 @@ This is a costume pass. Be meticulous.
 - Theme outfit beats default character clothes when they conflict.
   Honour Outfit tags only when the theme allows.
 - Enrich with material, weave, sheen, wear, how seams sit on the pose.
-- Fabric physics: weight, drape, wind, stretch, cling, wear marks.
+- Fabric physics: weight, drape, stretch, tension, wear — only as the theme allows.
 - Micro detail: stitching, straps, hardware. Never REFERENCE likes as props.
 Do NOT replace pose or Lens camera. Wardrobe serves the motion.
 """,
@@ -422,7 +425,8 @@ The image model needs a RICH prompt. Flat shorts produce flat pictures.
 2) Deduplicate; keep 35–55 strongest tags (not fewer than 30).
 3) SCENE must be 140–200 English words. If the previous SCENE is thin,
    EXPAND it — densify, do not summarise. Add cloth, objects, light, air,
-   camera, and her specific charm. Keep the same moment.
+   camera, and her personality in eyes/hands. Keep the same moment.
+   Do not invent a new place or outfit the theme did not ask for.
 4) Preserve outfit and camera clusters. Never strip place objects below 10.
 5) Assembled positive (tags+scene) should land around 200+ words total.
 """,

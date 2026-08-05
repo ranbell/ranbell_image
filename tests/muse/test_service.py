@@ -51,8 +51,8 @@ class FakeOllama:
             yield {
                 "type": "token",
                 "text": (
-                    "SAY: Director, the beat is waiting on the roof.\n\n"
-                    "TAGS: standing, rooftop\n\n"
+                    "SAY: Director, the beat is locked.\n\n"
+                    "TAGS: standing, indoor\n\n"
                     "SCENE: STAGE A PROMPT"
                 ),
             }
@@ -88,7 +88,7 @@ def _no_runtime_config(monkeypatch):
 
 async def _ready_session(db, **over):
     session = await service.create_session(db, {
-        "theme": "on a rooftop", "character_id": "c1",
+        "theme": "a quiet indoor moment", "character_id": "c1",
         "workflow": "w.json", "model": "m",
         "crew_preset": "lightning",
         **over,
@@ -148,29 +148,25 @@ async def test_thin_craft_is_densified_before_board():
         def generate_text_stream(self, prompt, **kw):
             self.calls.append(kw)
             dense_scene = (
-                "She sinks into a wooden seaside cafe chair in a damp one-piece swimsuit, "
-                "right elbow braced on the table, aqua braid fraying over one shoulder while "
-                "heat haze shimmers beyond the railing. A sweating iced drink beads on the "
-                "grain, a sticky menu stand and crumpled napkin crowd the foreground, wet "
-                "footprints fade toward bright sand, and a striped parasol throws broken "
-                "stripe shadows across her light blush and parted lips as if she still wants "
-                "to explain something to someone. Noon bleaches the ocean white behind her; "
-                "the camera holds a slight low medium shot across the table so her hand, "
-                "half-lifted in a small guide gesture, reads as charm rather than blank cute. "
-                "Salt dusts the swimsuit straps, cloth clinging at the ribs, plastic chair "
-                "legs sunk in grit, string lights unlit in daylight, a seashell ashtray and "
-                "straw catching a rim of sun while humid air sticks under the shade."
+                "She sits at a wooden desk by a tall window, weight on her right elbow, "
+                "shoulders soft, braid falling forward as afternoon light cuts across the "
+                "grain. A ceramic cup, open notebook, pencil, stacked books, desk lamp, "
+                "curtain fold, window latch, potted plant, chair back and scattered papers "
+                "fill the near space so the room feels lived-in. She looks toward the viewer "
+                "with a small attentive expression, one hand resting near the page as if mid "
+                "thought, while soft shadow holds under her chin and the camera stays a "
+                "slight low medium shot that keeps face and hands readable without emptying "
+                "the desk clutter that makes the moment specific to this theme."
             )
             # pad to clear 140 words
             dense_scene = dense_scene + " " + " ".join(["detail"] * 40)
             text = (
                 "SAY: 密度上げました。のっぺりさせません。\n\n"
                 "TAGS: masterpiece, best_quality, sitting, leaning_on_table, "
-                "one-piece_swimsuit, wet_swimsuit, beach_cafe, parasol, wooden_table, "
-                "condensation, glass, ice_cubes, menu_stand, napkin, wet_footprints, "
-                "heat_haze, dappled_sunlight, from_side, slightly_from_below, "
-                "medium_shot, upper_body, light_blush, smile, open_mouth, hand_up, "
-                "looking_at_viewer, bare_shoulders, depth_of_field, charming\n\n"
+                "wooden_desk, window, notebook, pencil, books, desk_lamp, curtain, "
+                "potted_plant, papers, cup, from_side, slightly_from_below, "
+                "medium_shot, upper_body, light_blush, smile, hand_up, "
+                "looking_at_viewer, depth_of_field, soft_lighting\n\n"
                 f"SCENE: {dense_scene}"
             )
 

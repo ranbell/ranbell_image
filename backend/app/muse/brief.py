@@ -9,10 +9,9 @@ positive after the LLM answers.
 
 The <REFERENCE> block is the other half. Personality, likes and dislikes make a
 character behave differently in the same situation, but pasted into a prompt they
-become things the picture must contain — a run that named `thermos coffee` in the
-prompt drew a thermos on a rooftop with no coffee in the scene. Fencing the block
-off and saying "do not copy these words" keeps the influence and drops the
-contamination.
+become things the picture must contain — taste nouns leak into props. Fencing
+the block off and saying "do not copy these words" keeps the influence and drops
+the contamination.
 
 The fence tags are `</start REFERENCE ONLY>` and `</end REFERENCE ONLY>`. Both
 are written with a closing slash. That is not a typo to fix — it is the exact

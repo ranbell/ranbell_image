@@ -8,6 +8,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import crew
 
+# Situation nouns must never be baked into Muse production copy.
+# Themes come from the Showrunner + VLM dialogue — not from code samples.
+_SITUATION_BANNED = (
+    "水着", "ビキニ", "パラソル", "カフェ", "泳ぐ", "暑さ", "海辺", "ビーチ",
+    "懐中電灯", "スタッフベスト", "砂ベージュ", "ターコイズ", "真夏",
+    "屋上", "雨上がり",
+    "sexy", "sensual", "swimsuit", "bikini", "parasol", "beach", "seaside",
+    "flashlight", "rooftop", "wet/dry", "wet_swimsuit", "beach_cafe",
+    "thermos", "coffee",
+)
+
 
 def test_resolve_crew_always_ends_with_finisher():
     ids = crew.resolve_crew(preset="lightning")
@@ -25,22 +36,22 @@ def test_resolve_crew_honours_explicit_ids():
 
 def test_actress_prompt_pulls_selected_character_personality():
     character = {
-        "name": "The Tank Guide",
-        "name_ja": "水族館ガイド",
+        "name": "Sample Lead",
+        "name_ja": "サンプル主演",
         "personality": {
             "traits": ["enthusiastic", "sincere"],
-            "summary_ja": "同じ魚の話を日に四十回する。",
-            "inner_ja": ["一人になると大水槽の前で黙る"],
-            "likes": ["feeding time"],
-            "dislikes": ["tapping on glass"],
+            "summary_ja": "いつも本気で話す。",
+            "inner_ja": ["ひとりのとき少し静かになる"],
+            "likes": ["clear explanations"],
+            "dislikes": ["being rushed"],
         },
         "expression_vocab": ["smile", "open_mouth"],
         "gesture_vocab": ["walking", "looking_up"],
     }
     text = crew.actress_system_prompt(character)
-    assert "水族館ガイド" in text
+    assert "サンプル主演" in text
     assert "enthusiastic" in text
-    assert "一人になると大水槽の前で黙る" in text
+    assert "ひとりのとき少し静かになる" in text
     assert "smile" in text
     assert "FIRST PERSON" in text or "一人称" in text
     assert "never props" in text.lower() or "Never draw likes" in text
@@ -61,16 +72,27 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
 
 
-def test_say_examples_are_not_tied_to_a_demo_situation():
-    """Voice samples must stay generic — no beach/cafe/swimsuit demo residue."""
-    blob = " ".join(m.get("say_example") or "" for m in crew.MUSES.values())
-    blob += " " + " ".join(m.get("specialty") or "" for m in crew.MUSES.values())
-    for banned in (
-        "水着", "ビキニ", "パラソル", "カフェ", "泳ぐ", "暑さ",
-        "懐中電灯", "スタッフベスト", "砂ベージュ", "ターコイズ",
-        "sexy", "swimsuit", "bikini", "flashlight",
-    ):
-        assert banned not in blob, banned
+def test_production_muse_copy_has_no_situation_specific_anchors():
+    """Any theme must work — forbid demo/situation nouns in shipped Muse text."""
+    root = Path(__file__).resolve().parents[2] / "backend" / "app" / "muse"
+    blobs: list[str] = []
+    for path in root.rglob("*"):
+        if path.suffix not in {".py", ".md"}:
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        blobs.append(path.read_text(encoding="utf-8"))
+    # Also scan Muse UI placeholders (must not name a sample scene).
+    locales = Path(__file__).resolve().parents[2] / "frontend" / "src" / "locales"
+    for name in ("ja.json", "en.json"):
+        text = (locales / name).read_text(encoding="utf-8")
+        # Only the muse.themePlaceholder value matters for this rule.
+        import json
+        data = json.loads(text)
+        blobs.append(str((data.get("muse") or {}).get("themePlaceholder") or ""))
+    joined = "\n".join(blobs)
+    for banned in _SITUATION_BANNED:
+        assert banned not in joined, f"situation-specific '{banned}' found in Muse production copy"
 
 
 def test_finisher_demands_dense_scene():
