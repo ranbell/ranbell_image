@@ -92,15 +92,21 @@ is doing in each one.
 {name} — known for: {title}
 {summary}
 Personality: {traits}
+Inner life: {inner}
+What makes her worth drawing: {charm}
 Likes: {likes}
-Habits and hobbies: {gestures}
+Dislikes: {dislikes}
+A habit of hers: {habit}
+How she reads at first: {first_impression}
+Habits and hobbies (danbooru tags): {gestures}
+Faces she makes (danbooru tags): {faces}
 Usual clothes: {outfit}
 Carries: {props}
 The moment that is most her: {moment}
 Where she usually is: {vibe}
 
 # WHAT TO WRITE
-A centre pose, a scene, and four moments from her life.
+A centre pose, a scene, four moments from her life, and a portrait.
 
 - The centre is the biggest frame and it must read as a POSE, not an activity.
   Give it a body posture, a facial expression, and the thing she carries
@@ -124,6 +130,12 @@ A centre pose, a scene, and four moments from her life.
   action plus what she wears or holds. Write "tennis, sportswear, headband",
   never "she plays tennis on a summer afternoon". A sentence makes the frame
   render as a landscape instead of a portrait of her.
+- The PORTRAIT is a separate bust shot: her face and what it is doing. Two or
+  three expression tags and one small gesture of the hands or head — the thing
+  she does that makes her recognisable close up. Build it from what makes her
+  worth drawing, above: the composed face is not the reason to draw her, and
+  the half-second it slips is. Give the portrait its own scene, quieter and
+  closer than the centre's.
 
 # RULES
 - Never mention hair colour, eye colour, body type or age. Those are fixed
@@ -133,7 +145,9 @@ A centre pose, a scene, and four moments from her life.
 
 # OUTPUT (JSON only)
 {{"center": "<pose and expression>", "scene": "<where the centre happens>",
- "vignettes": ["<1>", "<2>", "<3>", "<4>"]}}"""
+ "vignettes": ["<1>", "<2>", "<3>", "<4>"],
+ "portrait": "<expression tags and one small gesture>",
+ "portrait_scene": "<where the bust shot happens>"}}"""
 
 
 def _first(values: Any, limit: int = 1) -> list[str]:
@@ -168,6 +182,7 @@ async def plan_sheet(
 
     character = preset_to_character(preset)
     personality = character.get("personality") or {}
+    appearance = personality.get("appearance") or {}
     signature = soft_normalize_tag(str(character.get("signature_prop") or "")) or "her usual thing"
     prompt = _PLAN_PROMPT.format(
         signature=signature,
@@ -181,6 +196,16 @@ async def plan_sheet(
         props=_joined(character.get("prop_tags"), 6),
         moment=str(personality.get("signature_moment") or "").strip() or "(none recorded)",
         vibe=_joined(personality.get("vibe_keywords"), 4),
+        # The half of the sheet that was never asked about. A character is a
+        # personality before she is a tag list, and a user-authored one may be
+        # almost nothing but personality — free text and no vocabulary at all.
+        inner=_joined(personality.get("inner"), 5),
+        charm=str(personality.get("charm") or "").strip() or "(not recorded)",
+        dislikes=_joined(personality.get("dislikes"), 4),
+        habit=str(appearance.get("habit") or "").strip() or "(none recorded)",
+        first_impression=str(appearance.get("first_impression") or "").strip()
+        or "(none recorded)",
+        faces=_joined(character.get("expression_vocab"), 6),
     )
     try:
         raw = await ollama.generate_text(
@@ -196,6 +221,8 @@ async def plan_sheet(
 
     centre = _clean_line(parsed.get("center"))
     scene = _clean_line(parsed.get("scene"))
+    portrait = _clean_line(parsed.get("portrait"))
+    portrait_scene = _clean_line(parsed.get("portrait_scene"))
     vignettes = [_clean_line(v) for v in (parsed.get("vignettes") or [])]
     vignettes = [v for v in vignettes if v]
     # Four distinct frames or nothing: a plan that repeats itself is worse than
@@ -203,7 +230,16 @@ async def plan_sheet(
     if not centre or len(vignettes) < 4 or len({v.lower() for v in vignettes[:4]}) < 4:
         logger.info("[characters] sheet plan unusable, falling back")
         return None
-    return {"center": centre, "scene": scene, "vignettes": vignettes[:4]}
+    # The portrait half is optional: a model that got the sheet right and the
+    # bust shot wrong should not cost us the sheet. Missing keys fall through to
+    # the deterministic portrait, which is a complete answer on its own.
+    return {
+        "center": centre,
+        "scene": scene,
+        "vignettes": vignettes[:4],
+        "portrait": portrait,
+        "portrait_scene": portrait_scene,
+    }
 
 
 def _clean_line(value: Any) -> str:
@@ -402,7 +438,25 @@ def _shows_the_legs(tag: str) -> bool:
     return any(h in name for h in _LOWER_BODY_HINTS)
 
 
-def _compile_portrait(character: dict[str, Any]) -> tuple[str, str]:
+# Where she is looking. Two of these in one prompt is two portraits.
+#
+# Matched on the whole tag rather than by substring: `half_closed_eyes` is an
+# eyelid, not a direction, and she can perfectly well hold eye contact through
+# one. Reading it as a gaze stripped `looking_at_viewer` from every character
+# whose default expression happened to be sleepy.
+_GAZE_DIRECTIONS = frozenset({
+    "eye_contact", "closed_eyes", "eyes_closed", "averted_eyes", "eyes_averted",
+})
+
+
+def _is_a_gaze(tag: str) -> bool:
+    name = str(tag).strip().lower().replace(" ", "_")
+    return name.startswith("looking_") or name in _GAZE_DIRECTIONS
+
+
+def _compile_portrait(
+    character: dict[str, Any], plan: dict[str, Any] | None = None,
+) -> tuple[str, str]:
     identity = [str(t) for t in (character.get("identity_tags") or []) if t]
     # Her top half still needs clothes — dropping the wardrobe wholesale left
     # one render bare-shouldered. Only garments that argue for showing the legs
@@ -415,13 +469,28 @@ def _compile_portrait(character: dict[str, Any]) -> tuple[str, str]:
     # Her face, not a passport photo. The bust shot used to carry no expression
     # at all, so thirty characters came back with the same neutral stare and the
     # slot could not tell you whether the personality reads.
-    expressions = [str(e) for e in (character.get("expression_vocab") or []) if e]
-    face = expressions[:2]
-    scene = scene_line(character)
+    #
+    # The plan wins where it has an opinion. Two expression tags off a preset
+    # cannot say "her ears go red before her face catches up"; a model reading
+    # her charm can, and that is the whole reason the bust shot exists.
+    planned_face = str((plan or {}).get("portrait") or "").strip()
+    planned_scene = str((plan or {}).get("portrait_scene") or "").strip()
+    if planned_face:
+        face = [t.strip() for t in planned_face.split(",") if t.strip()]
+    else:
+        face = [str(e) for e in (character.get("expression_vocab") or []) if e][:2]
+    scene = planned_scene or scene_line(character)
     background = ["blurry_background", "depth_of_field"] if scene else []
 
+    # The framing block asks for eye contact. When the plan has decided she is
+    # looking somewhere else — which is the point of a portrait built from her
+    # charm — asking for both puts two gazes in one prompt and the sampler picks.
+    framing = list(_PORTRAIT_FRAMING)
+    if any(_is_a_gaze(t) for t in face):
+        framing = [t for t in framing if not _is_a_gaze(t)]
+
     ordered: list[str] = []
-    for group in (identity, upper, worn, face, _PORTRAIT_FRAMING, background):
+    for group in (identity, upper, worn, face, framing, background):
         for tag in group:
             if tag and tag not in ordered:
                 ordered.append(tag)
@@ -462,4 +531,4 @@ def compile_board_slot(
     character = preset_to_character(preset)
     if slot == "sheet":
         return _compile_sheet(character, plan)
-    return _compile_portrait(character)
+    return _compile_portrait(character, plan)

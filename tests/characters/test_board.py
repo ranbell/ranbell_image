@@ -8,6 +8,7 @@ which is exactly what happened before this format was restored.
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -17,7 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.characters.board import (
     _ACTIVE_HINTS,
+    _is_a_gaze,
     centre_pose,
+    plan_sheet,
     SLOT_SIZE,
     compile_board_slot,
     sheet_vignettes,
@@ -329,3 +332,66 @@ def test_only_an_actual_athlete_is_dressed_for_sport():
 def test_the_moving_frame_is_not_one_stock_frame_for_everyone():
     frames = [sheet_vignettes(preset_to_character(p))[2] for p in ALL]
     assert len(set(frames)) >= len(ALL) * 0.8, sorted(set(frames))
+
+
+def test_the_planner_is_shown_the_whole_personality():
+    """A character is a personality before she is a tag list, and a
+    user-authored one may be almost nothing but personality. Half of it was
+    never reaching the prompt."""
+    captured = {}
+
+    class Recording:
+        async def generate_text(self, prompt, **kw):
+            captured["prompt"] = prompt
+            return "{}"
+
+    asyncio.run(plan_sheet(PRESET, Recording()))
+    prompt = captured["prompt"]
+    personality = CHARACTER["personality"]
+    for field in ("charm", "signature_moment"):
+        assert personality[field][:24] in prompt, field
+    assert personality["inner"][0][:24] in prompt
+    assert (personality["appearance"]["habit"])[:24] in prompt
+    assert (personality["appearance"]["first_impression"])[:24] in prompt
+    # And it is told what shape to answer in, so the format stays ours.
+    assert '"center"' in prompt and '"portrait"' in prompt
+
+
+def test_the_portrait_takes_its_face_from_the_plan():
+    """Two expression tags off a preset cannot say 'her ears go red before her
+    face catches up'. A model reading her charm can."""
+    plan = {"portrait": "blush, covering_mouth", "portrait_scene": "red safelight"}
+    positive, _ = compile_board_slot(PRESET, "portrait", plan)
+    assert "covering_mouth" in positive
+    assert "Scene: red safelight" in positive
+    # Identity is never the plan's to decide.
+    for tag in CHARACTER["identity_tags"]:
+        assert tag in positive
+
+
+def test_a_planned_gaze_replaces_the_stock_one():
+    """The framing block asks for eye contact; a portrait built from her charm
+    often looks away. Both in one prompt is two portraits."""
+    positive, _ = compile_board_slot(
+        PRESET, "portrait", {"portrait": "blush, looking_away"},
+    )
+    assert "looking_away" in positive
+    assert "looking_at_viewer" not in positive
+
+
+def test_an_eyelid_is_not_a_gaze():
+    """`half_closed_eyes` matched the `closed_eyes` substring and stripped eye
+    contact from every character whose default face was sleepy."""
+    assert not _is_a_gaze("half_closed_eyes")
+    assert not _is_a_gaze("narrowed_eyes")
+    assert _is_a_gaze("looking_away")
+    assert _is_a_gaze("closed_eyes")
+
+
+def test_a_plan_without_a_portrait_still_renders_one():
+    """The bust shot is optional in the plan: a model that got the sheet right
+    and the face wrong should not cost us the sheet."""
+    positive, _ = compile_board_slot(PRESET, "portrait", {"center": "x", "portrait": ""})
+    faces = PRESET["tags"]["expression"]
+    assert any(f in positive for f in faces)
+    assert "Scene:" in positive

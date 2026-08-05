@@ -24,8 +24,19 @@ CHARACTER_SUBDIR = "characters"
 class CharacterCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     name_ja: str = ""
+    # What she is known for, beside her name. The bundled roster carries it and
+    # a hand-made character has no way to say it without this.
+    title: str = ""
+    title_ja: str = ""
     summary: str = ""
     summary_ja: str = ""
+    # The gap between how she reads and what she is. It reaches the acting seat
+    # by name and the board planner reads it, so a character authored without
+    # one is drawn with less to go on than a bundled one.
+    charm: str = ""
+    charm_ja: str = ""
+    inner: list[str] = []
+    inner_ja: list[str] = []
     gender: str = ""
     subject_tag: str = "1girl"
     signature_prop: str = ""
@@ -39,8 +50,14 @@ class CharacterCreate(BaseModel):
 class CharacterUpdate(BaseModel):
     name: str | None = None
     name_ja: str | None = None
+    title: str | None = None
+    title_ja: str | None = None
     summary: str | None = None
     summary_ja: str | None = None
+    charm: str | None = None
+    charm_ja: str | None = None
+    inner: list[str] | None = None
+    inner_ja: list[str] | None = None
     gender: str | None = None
     subject_tag: str | None = None
     signature_prop: str | None = None
@@ -54,8 +71,9 @@ class CharacterUpdate(BaseModel):
 class BoardRequest(BaseModel):
     workflow_name: str = Field(..., min_length=1)
     slots: list[str] = []          # empty → every slot
-    # Model that decides what she is doing in the five frames. Empty (or
-    # unreachable) falls back to the fixed hobby/active/food/work slots.
+    # Model that decides what she is doing in the five frames and what her face
+    # is doing in the portrait. Empty (or unreachable) falls back to the fixed
+    # slots, which are a complete answer built from her tags.
     plan_model: str = ""
     # None → each slot's own canvas (see board.SLOT_SIZE). A full-body sheet and
     # a bust shot want different aspect ratios; one size for both is why the
@@ -195,9 +213,10 @@ async def render_missing_boards(body: BulkBoardRequest, request: Request):
         preset = await presets_db.get_preset(db, row["id"])
         if preset is None:
             continue
-        plan = None
-        if "sheet" in wanted:
-            plan = await plan_sheet(preset, request.app.state.ollama)
+        # Both slots read the plan now — the portrait takes its face and its
+        # scene from it — so asking only when the sheet is wanted left a
+        # portrait-only re-render on the deterministic path for no reason.
+        plan = await plan_sheet(preset, request.app.state.ollama) if wanted else None
         queued += await _queue_board_slots(
             request, preset, row["id"], wanted,
             workflow_name=body.workflow_name, plan=plan,
@@ -220,13 +239,12 @@ async def render_character_board(character_id: str, body: BoardRequest, request:
     if not slots:
         raise HTTPException(400, f"no valid slot in {body.slots}")
 
-    # One small call, before any render: what she is doing in the five frames,
-    # read off her personality rather than picked from four fixed slots.
-    plan = None
-    if "sheet" in slots:
-        plan = await plan_sheet(
-            preset, request.app.state.ollama, model=body.plan_model,
-        )
+    # One small call, before any render: what she is doing in the five frames
+    # and what her face is doing in the sixth, read off her personality rather
+    # than picked from fixed slots.
+    plan = await plan_sheet(
+        preset, request.app.state.ollama, model=body.plan_model,
+    )
 
     jobs = await _queue_board_slots(
         request, preset, character_id, slots,
