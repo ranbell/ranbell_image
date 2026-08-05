@@ -160,7 +160,7 @@ async def _run_muse_turn(
     sid = session["session_id"]
     events.publish(sid, {
         "type": "muse_speaking", "muse_id": muse_id,
-        "name": crew.MUSES[muse_id]["name"],
+        "name": _muse_display_name(session, muse_id),
     })
     return await chain.run_muse(
         ollama, muse_id=muse_id, user_prompt=user_prompt,
@@ -174,6 +174,14 @@ async def _run_muse_turn(
     )
 
 
+def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
+    m = crew.MUSES[muse_id]
+    locale = str(_inputs(session).get("locale") or "ja")
+    if locale.startswith("ja"):
+        return str(m.get("name_ja") or m["name"])
+    return str(m["name"])
+
+
 def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]:
     m = crew.MUSES[turn.muse_id]
     craft = session.setdefault("craft", {})
@@ -182,12 +190,16 @@ def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]
     craft["scene"] = turn.scene
     if turn.muse_id in ("beat", "spine") or not craft.get("pose_intent"):
         craft["pose_intent"] = turn.pose_intent
-    say = turn.say or f"({m['name']} updated the craft.)"
+    name = _muse_display_name(session, turn.muse_id)
+    say = turn.say or f"（{name}が台本を更新した。）"
     msg = _chat_append(
         session, role="muse", text=say,
-        muse_id=turn.muse_id, name=m["name"],
+        muse_id=turn.muse_id, name=name,
     )
     _publish_chat(session["session_id"], msg)
+    events.publish(session["session_id"], {
+        "type": "muse_speaking", "muse_id": turn.muse_id, "name": name,
+    })
     events.publish(session["session_id"], {
         "type": "craft_updated", "prompt": turn.prompt, "muse_id": turn.muse_id,
     })
@@ -384,7 +396,8 @@ async def request_board(
     await _maybe_unload(ollama, session)
 
     ask = _chat_append(
-        session, role="muse", muse_id="lens", name="Lens",
+        session, role="muse", muse_id="lens",
+        name=_muse_display_name(session, "lens"),
         text=(
             "総監督、イメージボード上げます。これでいい？OKなら本番、ダメなら指摘ください。"
             if locale.startswith("ja") else

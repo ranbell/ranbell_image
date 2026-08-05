@@ -29,6 +29,10 @@ def test_system_prompt_keeps_say_tags_scene_and_english_craft():
     assert "SCENE:" in text
     assert "English only" in text
     assert "You are Beat" in text
+    assert "口調 (JA)" in text
+    assert "EXAMPLE SAY" in text
+    assert crew.MUSES["beat"]["say_example"]
+    assert crew.MUSES["spine"]["voice_ja"] != crew.MUSES["faces"]["voice_ja"]
 
 
 def test_public_roster_has_no_real_creator_names():
