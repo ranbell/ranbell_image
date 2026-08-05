@@ -24,10 +24,11 @@ ASSET = (Path(__file__).parent.parent.parent / "backend" / "app" / "characters"
 
 @pytest.fixture(scope="module")
 def stargazer() -> dict:
+    """Any shipped character will do — the brief's shape is what is under test,
+    and pinning one id meant the roster could not be rewritten without this
+    file failing for reasons that had nothing to do with the brief."""
     presets = json.loads(ASSET.read_text(encoding="utf-8"))
-    return preset_to_character(
-        next(p for p in presets if p["id"] == "stargazer_girl")
-    )
+    return preset_to_character(presets[0])
 
 
 def test_identity_tags_are_all_present(stargazer):

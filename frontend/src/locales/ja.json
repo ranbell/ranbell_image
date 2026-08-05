@@ -1427,6 +1427,8 @@
     "palette": "好きな色",
     "signatureProp": "相棒",
     "build": "体つき",
-    "watching": "描き上がりを待っています"
+    "watching": "描き上がりを待っています",
+    "charm": "隠れた魅力",
+    "knownFor": "肩書き"
   }
 }

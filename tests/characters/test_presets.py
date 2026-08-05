@@ -40,7 +40,8 @@ REQUIRED_TAG_BUCKETS = IDENTITY_BUCKETS + (
 
 
 def test_asset_loads_with_unique_ids():
-    assert len(PRESETS) >= 100
+    # Thirty written properly beat a hundred that read like a spreadsheet.
+    assert len(PRESETS) >= 30
     keys = [p["id"] for p in PRESETS]
     assert len(set(keys)) == len(keys)
     assert len({preset_point_id(k) for k in keys}) == len(keys)
@@ -275,3 +276,78 @@ def test_body_bucket_is_allowlisted_not_denylisted():
     kept, refused = filter_body_tags(["tall", "mature_female", "wearing_a_hat"])
     assert kept == ["tall"]
     assert refused == ["mature_female", "wearing_a_hat"]
+
+
+# The gap between how she reads and what she actually is. A picture of a
+# composed face is not worth drawing; the half-second the composure slips is.
+_BODY_WORDS = ("耳", "頬", "ほっぺ", "目", "口", "手", "指", "肩", "声",
+               "足", "首", "背中", "膝", "髪", "顔", "まつげ")
+# Faces that are not the composed one. At least one, or the gap cannot be drawn.
+_SLIPPING = {
+    "blush", "embarrassed", "pout", "wavering_eyes", "surprised", "happy",
+    "sleepy", "light_smile", "smile", "grin", "flustered", "tearing_up", "shy",
+}
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p["id"])
+def test_every_character_has_a_name_and_a_title(preset):
+    """`name_ja` used to be a description — 「クールな先輩」 — which left the
+    panel with nothing to call anybody. The name is a name; the title is what
+    she is known for."""
+    for field in ("title", "title_ja"):
+        assert str(preset.get(field) or "").strip(), f"{preset['id']}: {field} empty"
+    assert _JA.search(preset["title_ja"]), f"{preset['id']}: title_ja must be Japanese"
+    assert not _JA.search(preset["title"]), f"{preset['id']}: title must be English"
+    assert preset["name_ja"] != preset["title_ja"], preset["id"]
+    # A person's name, not a label: 「白瀬 みなも」 not 「静かな写真部」. Family
+    # name, a space, given name — a description does not have that shape, and
+    # the ending is no help here because 「せな」 and 「わかな」 are names too.
+    name = preset["name_ja"]
+    family, _, given = name.replace("　", " ").partition(" ")
+    assert family and given, f"{preset['id']}: name_ja '{name}' has no given name"
+    assert len(name) <= 10, f"{preset['id']}: name_ja '{name}' reads as a description"
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p["id"])
+def test_the_hidden_charm_is_something_a_picture_can_show(preset):
+    """It reaches the acting seat as HIDDEN CHARM and is supposed to become a
+    face. An abstract one ('she is lonely inside') cannot be drawn and quietly
+    does nothing."""
+    for field in ("charm", "charm_ja"):
+        assert str(preset.get(field) or "").strip(), f"{preset['id']}: {field} empty"
+    assert not _JA.search(preset["charm"]), f"{preset['id']}: charm must be English"
+    charm = preset["charm_ja"]
+    assert _JA.search(charm), f"{preset['id']}: charm_ja must be Japanese"
+    assert any(w in charm for w in _BODY_WORDS), (
+        f"{preset['id']}: charm_ja names no part of her: {charm[:40]}"
+    )
+
+    faces = set(preset["tags"]["expression"])
+    assert faces & _SLIPPING, (
+        f"{preset['id']}: no face for the gap to land on: {sorted(faces)}"
+    )
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=lambda p: p["id"])
+def test_the_writing_is_thick_enough_to_want_to_draw(preset):
+    """The old asset averaged 25 characters of summary and two lines of inner
+    life, which reads as a spreadsheet row rather than a person."""
+    assert len(preset["summary_ja"]) >= 85, (
+        f"{preset['id']}: summary_ja is {len(preset['summary_ja'])} chars"
+    )
+    assert len(preset["personality"]) >= 6, preset["id"]
+    assert len(preset["inner_ja"]) >= 3, preset["id"]
+    ap = preset["appearance"]
+    for key in ("voice", "habit", "first_impression"):
+        assert str(ap.get(key) or "").strip(), f"{preset['id']}: appearance.{key} empty"
+    assert str((preset["default_scene"] or {}).get("signature_moment") or "").strip(), (
+        f"{preset['id']}: no signature_moment"
+    )
+
+
+def test_the_roster_does_not_look_like_one_character_thirty_times():
+    hair = {p["tags"]["hair_color"][0] for p in PRESETS}
+    eyes = {p["tags"]["eyes"][0] for p in PRESETS}
+    assert len(hair) >= 15, sorted(hair)
+    assert len(eyes) >= 12, sorted(eyes)
+    assert len({p["name_ja"] for p in PRESETS}) == len(PRESETS)

@@ -1427,6 +1427,8 @@
     "palette": "Her colours",
     "signatureProp": "Always has",
     "build": "Build",
-    "watching": "waiting for the render"
+    "watching": "waiting for the render",
+    "charm": "Hidden charm",
+    "knownFor": "Known for"
   }
 }

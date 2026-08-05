@@ -36,6 +36,8 @@ const row = computed(() => detail.value?.summary || null)
 const name = computed(() => (isJa.value ? preset.value?.name_ja : preset.value?.name) || '')
 const blurb = computed(() => (isJa.value ? preset.value?.summary_ja : preset.value?.summary) || '')
 const inner = computed(() => (isJa.value ? preset.value?.inner_ja : preset.value?.inner) || [])
+const title = computed(() => (isJa.value ? preset.value?.title_ja : preset.value?.title) || '')
+const charm = computed(() => (isJa.value ? preset.value?.charm_ja : preset.value?.charm) || '')
 const likes = computed(() => preset.value?.preferences?.likes || [])
 const dislikes = computed(() => preset.value?.preferences?.dislikes || [])
 const palette = computed(() => preset.value?.preferences?.favorite_colors || [])
@@ -108,7 +110,12 @@ watch(() => props.characterId, load, { immediate: true })
     <div class="sb-shell w-full max-w-[1200px] flex flex-col min-h-0">
       <header class="flex items-center gap-3 px-4 py-3 sb-hairline shrink-0">
         <div class="min-w-0 mr-auto">
-          <h2 class="sb-display text-base text-[var(--sb-amber)] truncate">{{ name || '…' }}</h2>
+          <h2 class="sb-display text-base text-[var(--sb-amber)] truncate">
+            {{ name || '…' }}
+            <span v-if="title" class="ml-2 text-[11px] text-[var(--sb-teal)] font-normal">
+              {{ title }}
+            </span>
+          </h2>
           <p v-if="row" class="flex items-center gap-2 text-[11px] text-[var(--sb-muted)]">
             <span class="inline-flex items-center gap-1">
               <i class="w-2.5 h-2.5 rounded-full border border-white/25"
@@ -219,6 +226,12 @@ watch(() => props.characterId, load, { immediate: true })
                      text-[10px] text-teal-200"
             >{{ trait }}</span>
           </div>
+
+          <section v-if="charm" class="space-y-1">
+            <p class="sb-label">{{ t('characters.charm') }}</p>
+            <p class="text-[12px] text-teal-200/90 leading-relaxed pl-2
+                      border-l-2 border-[var(--sb-teal)]/50">{{ charm }}</p>
+          </section>
 
           <section v-if="inner.length" class="space-y-1">
             <p class="sb-label">{{ t('characters.inner') }}</p>

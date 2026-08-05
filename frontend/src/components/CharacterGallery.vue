@@ -48,6 +48,10 @@ const bulkGroup = ref('')
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 function label(c) { return (isJa.value ? c.name_ja : c.name) || c.name || c.preset_key }
 function blurb(c) { return (isJa.value ? c.summary_ja : c.summary) || '' }
+function title(c) { return (isJa.value ? c.title_ja : c.title) || '' }
+// The gap that makes her worth drawing. Shown on the card because it is the
+// line that decides whether you pick her.
+function charm(c) { return c.charm_ja || '' }
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function sheet(c) { return thumb(c.board?.sheet || '') }
 function face(c) { return thumb(c.board?.portrait || '') }
@@ -78,7 +82,8 @@ const filtered = computed(() => {
     if (activeTraits.value.length
         && !activeTraits.value.every(x => (c.traits || []).includes(x))) return false
     if (!q) return true
-    return `${c.name} ${c.name_ja} ${c.summary} ${c.summary_ja} ${(c.traits || []).join(' ')}`
+    return `${c.name} ${c.name_ja} ${c.title} ${c.title_ja} ${c.summary} `
+         + `${c.summary_ja} ${c.charm_ja || ''} ${(c.traits || []).join(' ')}`
       .toLowerCase().includes(q)
   })
 })
@@ -353,7 +358,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
             <div class="p-2.5 flex flex-col gap-1.5 grow">
               <div class="flex items-center gap-1.5">
-                <p class="text-[13px] text-gray-100 font-medium truncate mr-auto">{{ label(c) }}</p>
+                <p class="text-[13px] text-gray-100 font-medium truncate mr-auto">
+                  {{ label(c) }}
+                  <span v-if="title(c)" class="block text-[10px] text-[var(--sb-amber)] font-normal truncate">
+                    {{ title(c) }}
+                  </span>
+                </p>
                 <i class="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
                    :style="{ background: hairSwatch(c.hair_color) }" :title="colorWord(c.hair_color)"></i>
                 <i class="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
@@ -362,6 +372,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <!-- the whole line, not an ellipsis: it is the only thing that
                    says what she is like before you open her -->
               <p class="text-[11px] text-gray-400 leading-relaxed">{{ blurb(c) }}</p>
+              <p v-if="charm(c)"
+                 class="text-[11px] text-teal-200/80 leading-relaxed pl-2 border-l border-teal-600/30">
+                {{ charm(c) }}
+              </p>
               <div class="flex flex-wrap gap-1 mt-auto pt-1">
                 <span
                   v-for="trait in (c.traits || []).slice(0, 3)"
