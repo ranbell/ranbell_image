@@ -583,11 +583,12 @@ def _densify_user_prompt(session: dict[str, Any]) -> str:
     base = _table_user_prompt(session)
     return (
         f"{base}\n\n"
-        "DENSITY PACK (mandatory — the last render looked flat because SCENE was thin):\n"
-        "- Expand SCENE to 140–200 English words covering pose, cloth, ≥10 place objects,\n"
-        "  light/air, camera, and her personality charm in eyes/hands.\n"
+        "DENSITY PACK (mandatory — SCENE was thin):\n"
+        "- Expand SCENE to 140–200 English words covering pose, cloth, ≥10 place objects\n"
+        "  implied by THIS theme, light/atmosphere, camera, personality in eyes/hands.\n"
         "- TAGS: 35–55 strong tags. Do not shrink.\n"
-        "- Keep the same moment. Densify, do not restart.\n"
+        "- Keep the same moment and theme. Densify, do not restart or relocate.\n"
+        "- Do not inject props/outfits from a different situation.\n"
         f"- Current SCENE word count: {identity.word_count(str(craft.get('scene') or ''))}.\n"
         f"- Current positive word count: {identity.word_count(str(craft.get('prompt') or ''))}."
     )

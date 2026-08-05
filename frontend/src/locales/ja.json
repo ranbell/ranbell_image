@@ -1277,7 +1277,7 @@
     "pickCharacter": "キャラクターを選ぶ",
     "noCharacter": "未選択",
     "theme": "お題",
-    "themePlaceholder": "例: 雨上がりの屋上で、誰かを待っている",
+    "themePlaceholder": "お題を自由に（場所・時間・行動など）",
     "studioHint": "あなたが総監督。班が議論し、途中でイメージボードを出します。OKが出たら本番です。",
     "crewPreset": "班の編成",
     "presets": {

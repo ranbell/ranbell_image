@@ -38,14 +38,14 @@ def test_new_session_casts_gallery_crew_by_default():
 def test_public_roster_fills_actress_from_character():
     s = schema.new_session()
     s["character"] = {
-        "name": "The Tank Guide", "name_ja": "水族館ガイド",
-        "personality": {"summary_ja": "同じ魚の話を日に四十回する。"},
+        "name": "Sample Lead", "name_ja": "サンプル主演",
+        "personality": {"summary_ja": "いつも本気で話す。"},
     }
     view = schema.public_view(s)
     actress = next(m for m in view["roster"]["muses"] if m["id"] == "actress")
-    assert actress["name_ja"] == "水族館ガイド"
+    assert actress["name_ja"] == "サンプル主演"
     assert actress["required"] is True
-    assert "四十回" in actress["line"]
+    assert "本気" in actress["line"]
 
 
 def test_board_is_done_when_the_job_stops_not_when_a_count_is_reached():

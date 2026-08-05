@@ -1277,7 +1277,7 @@
     "pickCharacter": "Pick a character",
     "noCharacter": "None",
     "theme": "Theme",
-    "themePlaceholder": "e.g. waiting for someone on a rooftop after the rain",
+    "themePlaceholder": "Any theme (place, time, action — freeform)",
     "studioHint": "You are the showrunner. The crew debates, puts up an image board, and shoots on your OK.",
     "crewPreset": "Crew preset",
     "presets": {

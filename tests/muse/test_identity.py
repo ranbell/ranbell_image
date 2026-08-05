@@ -100,7 +100,7 @@ def test_parse_table_read_keeps_say_separate_from_craft():
 def test_craft_is_thin_flags_short_scene():
     assert identity.craft_is_thin("1girl, smile", "She sits.")
     rich_scene = " ".join(["word"] * 160)
-    rich_prompt = "1girl, aqua_hair, sitting, parasol, " + rich_scene
+    rich_prompt = "1girl, aqua_hair, sitting, window, " + rich_scene
     assert identity.word_count(rich_prompt) >= 160
     assert not identity.craft_is_thin(rich_prompt, rich_scene)
 
