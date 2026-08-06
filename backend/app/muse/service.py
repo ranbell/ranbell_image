@@ -458,14 +458,19 @@ async def _probe_split(db, comfy, session: dict[str, Any]) -> dict[str, critique
         negative=negative_for(session),
         slot_order=crew.SLOT_ORDER,
     )
-    results = await asyncio.gather(
-        *(_take_probe(db, comfy, session, s) for s in shots),
-        return_exceptions=True,
-    )
+    # One at a time — see probe.SEQUENTIAL. Running the pair through
+    # asyncio.gather hung the session outright: both renders share one ComfyUI
+    # websocket client id, so the second connection swallowed the first's
+    # completion message and that probe waited forever.
     out: dict[str, critique.Reading] = {}
-    for s, r in zip(shots, results):
-        if isinstance(r, critique.Reading):
-            out[s.kind] = r
+    for s in shots:
+        try:
+            reading = await _take_probe(db, comfy, session, s)
+        except Exception:
+            logger.warning("[muse] %s probe failed", s.kind, exc_info=True)
+            continue
+        if reading is not None:
+            out[s.kind] = reading
     return out
 
 

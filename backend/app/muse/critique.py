@@ -14,6 +14,7 @@ It is told that it is, and asked which words did it.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Iterable
@@ -39,7 +40,10 @@ class Limits:
     luma_min: float = 40.0
     luma_max: float = 195.0
     dead_max: float = 0.40
-    white_max: float = 0.15
+    # Full boards measured 0.1–5% blown, but a setting probe of a sunlit room is
+    # mostly window and came back at 22% — correct, and rejected by a threshold
+    # picked without looking. This only catches a frame that is genuinely nuked.
+    white_max: float = 0.35
     ledger_min: float = 0.6
 
 
@@ -108,6 +112,41 @@ def _dead_area(grey) -> float:
     return float(((mean <= _DEAD_LUMA) & (std <= _DEAD_STD)).mean())
 
 
+def _stem(word: str) -> str:
+    """Crude singular. The ledger says `curtain`, WD14 says `curtains`."""
+    for suffix, cut in (("ies", 3), ("ses", 2), ("es", 2), ("s", 1)):
+        if len(word) > cut + 2 and word.endswith(suffix):
+            return word[:-cut] + ("y" if suffix == "ies" else "")
+    return word
+
+
+def _words(text: str) -> list[str]:
+    return [_stem(w) for w in re.split(r"[^a-z0-9]+", text.lower()) if w]
+
+
+def _rendered(item: str, seen: Iterable[str]) -> bool:
+    """Did the tagger see this ledger item?
+
+    Matching whole phrases fails almost every time and says so with confidence:
+    a probe that plainly contained a desk, a mug and an open notebook was
+    reported as "10 of 11 ledger objects did not render", because the ledger
+    says `glass mug` and `wooden table` while WD14 says `mug` and `desk`. The
+    head noun is what both sides agree on, so that is what is compared.
+    """
+    words = _words(item)
+    if not words:
+        return False
+    head = words[-1]
+    for tag in seen:
+        tag_words = set(_words(tag))
+        if head in tag_words:
+            return True
+        # Also accept the other direction: ledger "menu", tag "menu board".
+        if len(words) > 1 and tag_words and tag_words <= set(words):
+            return True
+    return False
+
+
 def measure(
     data: bytes,
     *,
@@ -138,8 +177,7 @@ def measure(
 
     wanted = [str(m).strip() for m in (must_appear or []) if str(m).strip()]
     visible = [str(t).strip() for t in (seen_tags or []) if str(t).strip()]
-    hay = " ".join(visible).lower().replace("_", " ")
-    missing = [w for w in wanted if w.lower().replace("_", " ") not in hay]
+    missing = [w for w in wanted if not _rendered(w, visible)]
     hit = 1.0 if not wanted else (len(wanted) - len(missing)) / len(wanted)
 
     failures: list[str] = []

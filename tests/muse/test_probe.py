@@ -158,3 +158,29 @@ def test_the_measurement_block_states_the_verdict_as_fact():
     note = critique.measure((FIXTURES / "board_void.jpg").read_bytes()).as_note()
     assert "facts, not opinions" in note
     assert "VERDICT: FAIL" in note
+
+
+def test_the_ledger_is_matched_on_head_nouns_not_whole_phrases():
+    """A probe that plainly contained a desk, a mug and an open notebook was
+    reported as '10 of 11 ledger objects did not render': the ledger says
+    `glass mug`, WD14 says `mug`."""
+    ledger = ["wooden table", "glass mug", "open notebook", "bookshelf",
+              "curtain", "window", "reading glasses", "pen", "chair", "drawer"]
+    wd14 = ["desk", "mug", "notebook", "bookshelf", "curtains", "window",
+            "glasses", "pen", "chair", "drawer", "indoors", "no humans"]
+    r = critique.measure((FIXTURES / "board_ok.jpg").read_bytes(),
+                         must_appear=ledger, seen_tags=wd14)
+    assert r.ledger_hit >= 0.8, r.missing
+    # Plurals are the same object.
+    assert "curtain" not in r.missing
+    # A true absence is still reported.
+    r2 = critique.measure((FIXTURES / "board_ok.jpg").read_bytes(),
+                          must_appear=["parasol"], seen_tags=wd14)
+    assert r2.missing == ["parasol"]
+
+
+def test_a_sunlit_window_is_not_a_blown_out_failure():
+    """A setting probe of a bright room is mostly window. The first threshold
+    was picked without looking at one and rejected a correct render at 22%."""
+    lim = critique.Limits()
+    assert lim.white_max > 0.22

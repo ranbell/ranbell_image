@@ -53,6 +53,14 @@ class ProbeShot:
     negative: str
 
 
+# ComfyUI is driven one graph at a time: `stream_progress` opens a websocket
+# keyed on a single client id, so two overlapping renders fight over the same
+# connection and one of them waits forever for a completion message delivered to
+# the other. Rendering the pair concurrently looked like an easy win and hung
+# the whole session. They are seconds apart at this size; keep them in order.
+SEQUENTIAL = True
+
+
 def split_prompts(
     shot: dict[str, Any],
     *,
