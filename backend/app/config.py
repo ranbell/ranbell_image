@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # otherwise blocks the single-worker PROMPT lane for this long — lower it
     # if that matters more than very long generations.
     ollama_timeout_sec: float = 300.0
+    # How long a model stays resident after a request. Ollama's own default is
+    # five minutes, which is shorter than the gap between two Muse sessions: a
+    # 26B MoE was being evicted and reloaded, and that reload measured ~200s of
+    # the 513s one table read took. "-1" pins it indefinitely. Only inference
+    # resets this timer — polling /api/tags or /api/ps does not — so it has to
+    # ride on the generate calls themselves.
+    ollama_keep_alive: str = "30m"
 
     # Text / VLM provider selection is per-feature. The shared gateway always
     # defaults to Ollama; these settings only configure the OpenAI-compatible
