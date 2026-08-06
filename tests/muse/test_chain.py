@@ -1,9 +1,9 @@
-"""The chain's contract: labelled lines, and nobody retyping anyone's work.
+"""The chain's contract with the model: system prompts, think=False, images.
 
 Two of these guard failures that cost a whole run before they were understood.
 A model given no explicit `think` spends its budget reasoning and returns an
 empty string; a text-only model given images is not an error in Ollama, it
-simply returns nothing. Both look like "the crew stopped improving".
+simply ignores them. Both look like "the chain stopped improving".
 """
 from __future__ import annotations
 
@@ -14,22 +14,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
-from app.muse import chain, crew
-
-PLAN_ANSWER = (
-    "SAY: 場所と時間を決めます。窓際で、午後の光がまっすぐ入る形に。総監督、これで進めます。\n\n"
-    "PLACE: a corner seat by a large window\n"
-    "HOUR: mid-afternoon, late summer\n"
-    "LIGHT: even daylight through the glass, normal exposure\n"
-    "ACTION: resting with a cold drink\n"
-    "MUST APPEAR: wooden table, chair, glass mug, napkin, menu, spoon\n"
-)
+from app.muse import chain
 
 
 class FakeOllama:
     """Streams like the real client: reasoning and answer on separate channels."""
 
-    def __init__(self, reply=PLAN_ANSWER, thinking=""):
+    def __init__(self, reply="a prompt", thinking=""):
         self.reply = reply
         self.thinking = thinking
         self.calls: list[dict] = []
@@ -48,104 +39,172 @@ class FakeOllama:
         return self._stream()
 
 
-def test_labelled_lines_parse_into_fields_and_say():
-    say, fields = chain.parse_seat(PLAN_ANSWER, crew.FIELDS["plan"], crew.LIST_FIELDS)
-    assert say.startswith("場所と時間")
-    assert fields["PLACE"] == "a corner seat by a large window"
-    assert fields["MUST APPEAR"][0] == "wooden table"
-    assert len(fields["MUST APPEAR"]) == 6
+def test_legacy_prompt_files_still_exist_for_pickup_docs():
+    for _, filename in chain.REFINE_STAGES:
+        text = chain.system_prompt(filename)
+        assert "OUTPUT FORMAT" in text
+        assert "TAGS:" in text
+        assert "SCENE:" in text
+        assert "English only" in text
+    b = chain.system_prompt("b_reinforce.md")
+    assert "ten or more objects" in b.lower()
+    a = chain.system_prompt("a_pose.md")
+    assert "face_closeup" in a
+    assert "from_behind" in a
 
 
-def test_the_parser_tolerates_sloppy_labels():
-    _, fields = chain.parse_seat(
-        "- **PLACE** : a stairwell\nHOUR：dawn\nmust appear: railing, step, bulb\n",
-        crew.FIELDS["plan"], crew.LIST_FIELDS,
-    )
-    assert fields["PLACE"] == "a stairwell"
-    assert fields["HOUR"] == "dawn"
-    assert fields["MUST APPEAR"] == ["railing", "step", "bulb"]
-
-
-def test_a_blank_line_means_nothing_to_say_not_a_failed_turn():
-    """Reduce cutting nothing is a real answer."""
-    say, fields = chain.parse_seat(
-        "SAY: 今回は切るものがありません。\nREMOVE:\n",
-        crew.FIELDS["reduce"], crew.LIST_FIELDS,
-    )
-    assert say.startswith("今回は")
-    assert fields == {}
-    _, fields2 = chain.parse_seat(
-        "SAY: なし。\nREMOVE: (none)\n", crew.FIELDS["reduce"], crew.LIST_FIELDS,
-    )
-    assert fields2 == {}
-
-
-def test_a_seat_may_only_write_its_own_slots():
-    """The drift this whole shape exists to stop."""
-    turn = chain.SeatTurn(seat="enrich", say="", fields={
-        "CAMERA": "medium shot", "WARDROBE": "linen", "LIGHT": "MUCH DARKER",
-    })
-    shot = chain.apply_turn({"light": "even daylight"}, turn)
-    assert shot["camera"] == "medium shot"
-    assert shot["light"] == "even daylight", "enrich must not reach the light"
-
-
-def test_enrich_appends_while_the_planner_settles():
-    shot = {"objects": ["table"], "place": "a hallway"}
-    shot = chain.apply_turn(shot, chain.SeatTurn(
-        seat="enrich", say="", fields={"OBJECTS": ["lamp"]}))
-    assert shot["objects"] == ["table", "lamp"]
-
-    # A note that moves the scene must replace the room, not add a second one.
-    shot = chain.apply_turn(shot, chain.SeatTurn(
-        seat="plan", say="", fields={"PLACE": "a stairwell", "MUST APPEAR": ["bench"]}))
-    assert shot["place"] == "a stairwell"
-    assert shot["objects"] == ["bench"]
-
-
-def test_reduce_can_cut_from_a_slot_it_does_not_own():
-    """Otherwise the light only ever goes one way — which is exactly how a board
-    came back 66% black with nobody able to undo it."""
-    shot = {"light": "even daylight, deep shadows", "camera": "medium shot"}
-    shot = chain.apply_turn(shot, chain.SeatTurn(
-        seat="reduce", say="", fields={"REMOVE": ["deep shadows"]}))
-    assert "deep shadows" not in shot["light"]
-    assert "even daylight" in shot["light"]
+def test_stages_for_clamps_to_the_instructions_that_exist():
+    assert len(chain.stages_for(3)) == 3
+    assert len(chain.stages_for(1)) == 1
+    assert len(chain.stages_for(0)) == 1
+    assert len(chain.stages_for(9)) == 3
 
 
 @pytest.mark.asyncio
-async def test_run_seat_sends_the_seat_prompt_and_returns_parsed_fields():
-    llm = FakeOllama()
-    turn = await chain.run_seat(llm, seat="plan", user_prompt="BRIEF", model="m")
-    assert turn.seat == "plan"
-    assert turn.fields["HOUR"] == "mid-afternoon, late summer"
+async def test_run_muse_streams_say_and_locks_identity():
+    llm = FakeOllama(reply=(
+        "SAY: Director, one beat.\n\n"
+        "TAGS: standing, rooftop\n\n"
+        "SCENE: She waits in the rain."
+    ))
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m",
+        num_ctx=None, identity_tags=["1girl", "blue_hair"],
+        framing="auto", brief="BRIEF",
+    )
+    assert turn.say.startswith("Director")
+    assert turn.prompt.startswith("1girl, blue_hair")
+    assert turn.pose_intent == "She waits in the rain."
+    assert llm.calls[0]["kind"] == "text"
+    assert "演出" in llm.calls[0]["system"]
+
+
+@pytest.mark.asyncio
+async def test_pose_is_text_only_and_carries_the_thinking_switch():
+    llm = FakeOllama(reply="TAGS: standing\n\nSCENE: a prompt")
+    out = await chain.run_pose(
+        llm, brief="BRIEF", model="m", num_ctx=32768,
+        identity_tags=["1girl", "small_breasts"],
+    )
+    assert out.prompt.startswith("1girl, small_breasts")
+    assert "standing" in out.prompt
+    assert "a prompt" in out.prompt
+    assert out.pose_intent == "a prompt"
     call = llm.calls[0]
     assert call["kind"] == "text"
+    assert call["prompt"] == "BRIEF"
     assert call["think"] is False, "thinking is opt-in; it costs ~8x the wall clock"
+    assert call["options"]["num_ctx"] == 32768
+    # Unbounded output regardless: with thinking on, reasoning runs for thousands
+    # of tokens before the answer begins, and a default budget cuts the answer
+    # off before it is written.
     assert call["options"]["num_predict"] == -1
-    assert "構成" in call["system"]
+
+    await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=None, think=True)
+    assert llm.calls[1]["think"] is True
 
 
 @pytest.mark.asyncio
-async def test_reasoning_is_not_mistaken_for_the_answer():
-    llm = FakeOllama(thinking="a" * 5000)
-    turn = await chain.run_seat(llm, seat="plan", user_prompt="B", model="m")
-    assert turn.fields["PLACE"] == "a corner seat by a large window"
+async def test_reasoning_is_not_mistaken_for_the_prompt():
+    # Ollama sends reasoning on its own channel and leaves the answer empty
+    # until it is done. Reading the whole stream as one string would paste
+    # thousands of words of deliberation into the image prompt.
+    llm = FakeOllama(reply="the prompt", thinking="a" * 5000)
+    got = await chain.run_pose(llm, brief="B", model="m", num_ctx=None, think=True)
+    assert got.prompt == "the prompt"
+    assert got.pose_intent == "the prompt"
+
+
+@pytest.mark.asyncio
+async def test_refine_sends_the_image_and_uses_tags_only_for_the_first_stage():
+    llm = FakeOllama(reply="TAGS: sky\n\nSCENE: repaired")
+    await chain.run_refine(
+        llm, stage_file="b_reinforce.md", brief="BRIEF", previous="",
+        image=b"jpeg", model="m", num_ctx=None, tags="1girl, sky",
+        pose="she waits",
+    )
+    call = llm.calls[0]
+    assert call["kind"] == "vlm"
+    assert call["images"] == [b"jpeg"]
+    assert call["think"] is False
+    assert "Pose intent: she waits" in call["prompt"]
+    assert call["prompt"].endswith(",1girl, sky") or ",1girl, sky" in call["prompt"]
+
+    await chain.run_refine(
+        llm, stage_file="c_cinematic.md", brief="BRIEF", previous="prev prompt",
+        image=b"jpeg2", model="m", num_ctx=None,
+    )
+    assert llm.calls[1]["prompt"] == "BRIEF,prev prompt"
+
+
+@pytest.mark.asyncio
+async def test_on_token_forwards_answer_pieces_for_sse():
+    llm = FakeOllama(reply="TAGS: x\n\nSCENE: y")
+    seen: list[str] = []
+    await chain.run_pose(
+        llm, brief="B", model="m", num_ctx=None,
+        on_token=seen.append,
+    )
+    assert "".join(seen) == "TAGS: x\n\nSCENE: y"
 
 
 @pytest.mark.asyncio
 async def test_an_empty_answer_is_an_error_rather_than_an_empty_prompt():
+    # Rendering an empty positive prompt costs a full generation and produces
+    # something unrelated to the theme, which is worse than stopping.
     llm = FakeOllama(reply="   ")
     with pytest.raises(chain.ChainError):
-        await chain.run_seat(llm, seat="plan", user_prompt="B", model="m")
+        await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=None)
 
 
 @pytest.mark.asyncio
-async def test_a_model_that_cannot_read_the_render_retries_blind_and_says_so():
-    """Ollama does not error for a text-only model handed an image — it returns
-    nothing, indistinguishable from a bad turn unless we flag it."""
+async def test_the_planner_answers_in_labelled_lines_not_craft():
+    llm = FakeOllama(reply=(
+        "SAY: 場所と時間、先に決めますね。\n\n"
+        "PLACE: a narrow upstairs room, she is on the floor by the low table\n"
+        "HOUR: late afternoon, early autumn\n"
+        "LIGHT: even daylight from one window, mid-key, normal exposure\n"
+        "ACTION: she has just set down what she was carrying\n"
+        "MUST APPEAR: low_table, cushion, window, curtain, mug, paper_bag, "
+        "bookshelf, rug, wall_clock, slippers\n"
+    ))
+    plan = await chain.run_plan(llm, user_prompt="THEME", model="m", num_ctx=None)
 
-    class Blind(FakeOllama):
+    assert plan["place"].startswith("a narrow upstairs room")
+    assert plan["hour"] == "late afternoon, early autumn"
+    assert "normal exposure" in plan["light"]
+    assert len(plan["must_appear"]) == 10
+    assert plan["say"].startswith("場所と時間")
+    assert "構成" in llm.calls[0]["system"]
+    # It settles the situation; it does not write the picture.
+    assert "TAGS:" not in llm.calls[0]["system"].split("PLACE:")[0][-400:]
+
+
+def test_a_planner_answer_without_labels_leaves_the_old_plan_alone():
+    # A model that replies with craft, or with nothing, must not blank the plan
+    # the crew is already working to.
+    assert chain.parse_plan("SAY: hi\n\nTAGS: a, b\n\nSCENE: something") == {}
+    assert chain.parse_plan("") == {}
+    assert chain.parse_plan("   ") == {}
+
+
+def test_the_planner_parser_tolerates_sloppy_labels():
+    plan = chain.parse_plan(
+        "- **PLACE** : a stairwell\n"
+        "HOUR：dawn\n"
+        "must appear: railing, step, bulb\n"
+    )
+    assert plan["place"] == "a stairwell"
+    assert plan["hour"] == "dawn"
+    assert plan["must_appear"] == ["railing", "step", "bulb"]
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_cannot_read_the_board_retries_blind_and_says_so():
+    """Ollama does not error for a text-only model handed an image — it returns
+    nothing, which is indistinguishable from a bad turn unless we flag it."""
+
+    class BlindOllama(FakeOllama):
         def generate_vlm_stream(self, prompt, images, **kw):
             self.calls.append({"kind": "vlm", "prompt": prompt, "images": images})
 
@@ -153,20 +212,24 @@ async def test_a_model_that_cannot_read_the_render_retries_blind_and_says_so():
                 yield {"type": "token", "text": "   "}
             return _empty()
 
-    llm = Blind()
-    turn = await chain.run_seat(
-        llm, seat="plan", user_prompt="B", model="m", images=[b"jpeg"],
+    llm = BlindOllama(reply="SAY: ok\n\nTAGS: sky\n\nSCENE: She waits.")
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m", num_ctx=None,
+        identity_tags=["1girl"], framing="auto", brief="BRIEF",
+        images=[b"jpeg"],
     )
     assert turn.blind is True
-    assert turn.fields["PLACE"]
+    assert turn.prompt.startswith("1girl")
     assert [c["kind"] for c in llm.calls] == ["vlm", "text"]
 
 
 @pytest.mark.asyncio
-async def test_a_seeing_turn_sends_the_render_and_is_not_flagged_blind():
-    llm = FakeOllama()
-    turn = await chain.run_seat(
-        llm, seat="check", user_prompt="B", model="m", images=[b"jpeg"],
+async def test_a_seeing_turn_sends_the_board_and_is_not_flagged_blind():
+    llm = FakeOllama(reply="SAY: ok\n\nTAGS: sky\n\nSCENE: She waits.")
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m", num_ctx=None,
+        identity_tags=["1girl"], framing="auto", brief="BRIEF",
+        images=[b"jpeg"],
     )
     assert turn.blind is False
     assert llm.calls[0]["kind"] == "vlm"

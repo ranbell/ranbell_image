@@ -24,9 +24,6 @@ const streamLive = ref(false)
 const showPicker = ref(false)
 const showSettings = ref(false)
 const showCast = ref(false)
-// Latest probe frame per kind (pose / setting / merged). Never persisted —
-// these arrive over SSE and are thrown away with the page.
-const probes = ref({})
 const preview = ref('')
 const speaking = ref('')          // muse id currently streaming
 const liveSay = ref('')
@@ -35,6 +32,7 @@ const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
 const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
+const PRESETS = ['standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'calm', 'everyone']
 
 let eventSource = null
 let pollTimer = null
@@ -52,13 +50,16 @@ const shootImages = computed(() => shoot.value.images || [])
 const warnings = computed(() => session.value?.warnings || [])
 const status = computed(() => session.value?.status || 'setup')
 const roster = computed(() => session.value?.roster || catalog.value?.roster || {})
-// Five fixed seats. There is nothing to pick any more: casting a crew turned
-// out to cost the picture more than it bought.
+const muses = computed(() => roster.value.muses || [])
+// Jobs, each with the people who can do it. Casting is picking a person, not
+// a job — two lighting artists both light the scene, differently.
 const crewRoles = computed(() => roster.value.roles || [])
-const shot = computed(() => session.value?.shot || {})
-const slotOrder = computed(() => roster.value.slot_order || [])
-const probeReadings = computed(() => session.value?.probes || {})
-const baseLook = computed(() => session.value?.style_in_use || '')
+const crewIds = computed(() => new Set(inputs.value.crew_ids || []))
+// Where this cast pulls the picture. Recomputed server-side on every patch, so
+// toggling a seat moves the meter and the base look in the same breath.
+const direction = computed(() => roster.value.direction || {})
+const tasteAxes = computed(() => roster.value.taste_axes || [])
+const baseLook = computed(() => session.value?.style_in_use || direction.value.base || '')
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
 const models = computed(() => catalog.value?.llm?.models || [])
@@ -87,12 +88,20 @@ function museLabel(m) {
   if (!m) return ''
   return isJa.value ? (m.name_ja || m.name) : m.name
 }
-function museById(id) {
-  return crewRoles.value.find(r => r.id === id)
+function museNick(m) {
+  if (!m) return ''
+  return isJa.value ? (m.nick_ja || '') : (m.nick || '')
 }
-function slotText(slot) {
-  const v = shot.value[slot]
-  return Array.isArray(v) ? v.join(', ') : (v || '')
+// -2…+2 becomes a five-step bar the eye can compare across seats.
+function tasteBar(score) {
+  const n = Math.max(-2, Math.min(2, Number(score) || 0))
+  return '−・0・＋'.split('・')[n < 0 ? 0 : n > 0 ? 2 : 1] + (n ? Math.abs(n) : '')
+}
+function tasteWidth(score) {
+  return `${(Math.max(-2, Math.min(2, Number(score) || 0)) + 2) / 4 * 100}%`
+}
+function museById(id) {
+  return muses.value.find(m => m.id === id)
 }
 function clock(s) {
   const m = Math.floor(s / 60)
@@ -131,6 +140,7 @@ async function startSession() {
       model: suggested.model || '',
       workflow: suggested.workflow || '',
       locale: isJa.value ? 'ja' : 'en',
+      crew_preset: 'standard',
     }),
   })
   preview.value = ''
@@ -157,14 +167,6 @@ function connectStream(id) {
     let evt = null
     try { evt = JSON.parse(e.data) } catch { return }
     if (!evt?.type || evt.type === 'hello' || evt.type === 'ping') return
-    if (evt.type === 'probe') {
-      probes.value = { ...probes.value, [evt.kind]: {
-        src: `data:image/png;base64,${evt.image}`,
-        ok: evt.ok, failures: evt.failures || [],
-      } }
-      preview.value = ''
-      return
-    }
     if (evt.type === 'preview') {
       preview.value = `data:image/jpeg;base64,${evt.image}`
       return
@@ -258,6 +260,31 @@ async function pickCharacter(id) {
       method: 'POST', body: JSON.stringify({ character_id: id }),
     })
   } catch (err) { fail(err) }
+}
+
+async function setPreset(p) {
+  await patchInputs({ crew_preset: p })
+}
+
+async function toggleRole(role) {
+  if (role.required) return
+  // Off if anyone from this job is cast, otherwise on with the first person.
+  const next = (inputs.value.crew_ids || []).filter(
+    id => !role.people.some(p => p.id === id))
+  if (next.length === (inputs.value.crew_ids || []).length) next.push(role.people[0].id)
+  await patchInputs({ crew_ids: next })
+}
+
+async function pickPerson(role, person) {
+  if (role.required) return
+  const next = (inputs.value.crew_ids || []).filter(
+    id => !role.people.some(p => p.id === id))
+  next.push(person.id)
+  await patchInputs({ crew_ids: next })
+}
+
+function castPerson(role) {
+  return role.people.find(p => crewIds.value.has(p.id)) || null
 }
 
 async function startTable() {
@@ -376,6 +403,16 @@ async function onChatKey(e) {
               </label>
             </div>
 
+            <div>
+              <span class="sb-label">{{ t('muse.crewPreset') }}</span>
+              <div class="flex flex-wrap gap-2 mt-1">
+                <button
+                  v-for="p in PRESETS" :key="p" type="button" class="sb-btn text-[10px]"
+                  :class="inputs.crew_preset === p ? 'border-[var(--sb-teal)] text-[var(--sb-teal)]' : ''"
+                  @click="setPreset(p)"
+                >{{ t(`muse.presets.${p}`) }}</button>
+              </div>
+            </div>
 
             <button class="sb-btn w-full py-2" :disabled="!canStart" @click="startTable">
               {{ busy ? '…' : t('muse.cta.table') }}
@@ -472,25 +509,6 @@ async function onChatKey(e) {
             </div>
           </div>
 
-          <!-- probes: her on white, the room with nobody in it, side by side.
-               These are 512px throwaways — never saved, only looked at. -->
-          <div v-if="Object.keys(probes).length" class="space-y-2">
-            <h4 class="text-[11px] text-[var(--sb-amber)]">{{ t('muse.probeTitle') }}</h4>
-            <p class="text-[10px] text-[var(--sb-muted)]">{{ t('muse.probeAsk') }}</p>
-            <div class="grid grid-cols-2 gap-2">
-              <figure v-for="(pr, kind) in probes" :key="kind"
-                      class="rounded overflow-hidden border"
-                      :class="pr.ok ? 'border-[var(--sb-teal)]/40' : 'border-amber-500/50'">
-                <img :src="pr.src" class="w-full block" alt="" />
-                <figcaption class="px-1.5 py-1 text-[10px]"
-                            :class="pr.ok ? 'text-[var(--sb-faint)]' : 'text-amber-400'">
-                  {{ t(`muse.probeKind.${kind}`) }}
-                  <span v-if="!pr.ok"> · {{ pr.failures.join('; ') }}</span>
-                </figcaption>
-              </figure>
-            </div>
-          </div>
-
           <div v-if="boardImages.length" class="space-y-2">
             <h4 class="text-[11px] text-[var(--sb-amber)]">{{ t('muse.boardTitle') }}</h4>
             <p class="text-[10px] text-[var(--sb-muted)]">{{ t('muse.boardAsk') }}</p>
@@ -525,41 +543,79 @@ async function onChatKey(e) {
         </section>
       </main>
 
-      <!-- the crew, and the sheet they are writing -->
+      <!-- cast drawer -->
       <section v-if="showCast"
                class="shrink-0 max-h-[40vh] overflow-y-auto border-t border-white/10 p-4 space-y-3">
-        <p class="text-[11px] text-[var(--sb-faint)]">{{ t('muse.crewHint') }}</p>
-        <div class="space-y-1.5">
-          <div v-for="r in crewRoles" :key="r.id"
-               class="flex items-start gap-2 rounded border border-white/10 p-2">
-            <span class="w-20 shrink-0 text-[11px] text-[var(--sb-amber)]"
-                  :title="isJa ? r.role_ja : r.role">
-              {{ isJa ? r.name_ja : r.name }}
-            </span>
-            <span class="flex flex-wrap gap-1">
-              <span v-for="slot in r.owns" :key="slot"
-                    class="rounded border border-[var(--sb-teal)]/40 px-1.5 py-0.5
-                           text-[10px] text-[var(--sb-teal)]">{{ slot }}</span>
-              <span v-if="!r.owns.length" class="text-[10px] text-gray-500">
-                {{ t('muse.cutsOnly') }}
-              </span>
-            </span>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="p in PRESETS" :key="p" type="button" class="sb-btn text-[10px]"
+            :class="inputs.crew_preset === p ? 'border-[var(--sb-teal)] text-[var(--sb-teal)]' : ''"
+            @click="setPreset(p)"
+          >{{ t(`muse.presets.${p}`) }}</button>
+        </div>
+        <!-- what this cast is pulling toward -->
+        <div v-if="tasteAxes.length" class="rounded border border-white/10 bg-black/30 p-3">
+          <div class="flex items-baseline justify-between gap-2 mb-2">
+            <span class="sb-label">{{ t('muse.taste.title') }}</span>
+            <span class="text-[10px] text-[var(--sb-faint)]">{{ t('muse.taste.hint') }}</span>
           </div>
+          <div class="space-y-1.5">
+            <div v-for="a in tasteAxes" :key="a.id" class="flex items-center gap-2">
+              <span class="w-16 shrink-0 text-right text-[10px] text-[var(--sb-faint)]">{{ a.low }}</span>
+              <span class="relative h-1.5 flex-1 rounded bg-white/10">
+                <span class="absolute inset-y-0 w-px bg-white/25" style="left:50%"></span>
+                <span class="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2
+                             rounded-full bg-[var(--sb-teal)] transition-all duration-300"
+                      :style="{ left: tasteWidth((direction.scores || {})[a.id]) }"></span>
+              </span>
+              <span class="w-16 shrink-0 text-[10px] text-[var(--sb-faint)]">{{ a.high }}</span>
+            </div>
+          </div>
+          <p class="mt-2 text-[11px]">
+            <span class="sb-label">{{ t('muse.taste.base') }}</span>
+            <span class="ml-2 font-mono text-[var(--sb-amber)]">{{ baseLook || '—' }}</span>
+          </p>
         </div>
 
-        <!-- the shot sheet: one named slot per thing, so you can see who wrote what -->
-        <div v-if="slotOrder.length" class="rounded border border-white/10 bg-black/30 p-3">
-          <span class="sb-label">{{ t('muse.shotSheet') }}</span>
-          <dl class="mt-1 space-y-0.5 text-[11px]">
-            <div v-for="slot in slotOrder" :key="slot" class="flex gap-2">
-              <dt class="w-20 shrink-0 text-[var(--sb-faint)]">{{ slot }}</dt>
-              <dd class="flex-1 text-gray-300">{{ slotText(slot) || '—' }}</dd>
+        <!-- one row per job; pick which person does it -->
+        <div class="space-y-1.5">
+          <div v-for="r in crewRoles" :key="r.id"
+               class="flex items-start gap-2 rounded border p-2 transition-colors"
+               :class="r.required || castPerson(r)
+                 ? 'border-[var(--sb-amber)]/40 bg-amber-950/10'
+                 : 'border-white/10 opacity-45'">
+            <button type="button"
+                    class="w-24 shrink-0 text-left text-[11px] text-[var(--sb-amber)]"
+                    :disabled="r.required || act !== 'setup'"
+                    :title="isJa ? r.role_ja : r.role"
+                    @click="toggleRole(r)">
+              {{ isJa ? r.name_ja : r.name }}
+            </button>
+            <div class="flex flex-1 flex-wrap gap-1.5">
+              <button
+                v-for="p in r.people" :key="p.id" type="button"
+                class="rounded border px-2 py-1 text-left text-[10px] transition-colors"
+                :class="crewIds.has(p.id) || r.required
+                  ? 'border-[var(--sb-teal)] text-[var(--sb-teal)] bg-teal-950/20'
+                  : 'border-white/10 text-gray-400 hover:border-white/30'"
+                :disabled="r.required || act !== 'setup'"
+                :title="isJa ? (p.line_ja || p.line) : p.line"
+                @click="pickPerson(r, p)"
+              >
+                <span class="block">「{{ museNick(p) }}」</span>
+                <span v-if="p.taste" class="mt-0.5 flex gap-1 text-[9px] text-[var(--sb-faint)]">
+                  <span v-for="a in tasteAxes" :key="a.id"
+                        :class="p.taste[a.id] ? 'text-[var(--sb-teal)]' : ''">
+                    {{ a.high.slice(0, 2) }}{{ tasteBar(p.taste[a.id]) }}
+                  </span>
+                </span>
+              </button>
             </div>
-          </dl>
-          <p v-if="baseLook" class="mt-2 text-[11px]">
-            <span class="sb-label">{{ t('muse.taste.base') }}</span>
-            <span class="ml-2 font-mono text-[var(--sb-amber)]">{{ baseLook }}</span>
-          </p>
+            <span class="hidden md:block w-56 shrink-0 text-[10px] text-gray-500">
+              {{ isJa ? (castPerson(r)?.line_ja || r.people[0].line_ja)
+                      : (castPerson(r)?.line || r.people[0].line) }}
+            </span>
+          </div>
         </div>
       </section>
 

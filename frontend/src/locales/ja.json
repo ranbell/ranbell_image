@@ -1296,6 +1296,19 @@
     "theme": "お題",
     "themePlaceholder": "お題を自由に（場所・時間・行動など）",
     "studioHint": "あなたが総監督。班が議論し、途中でイメージボードを出します。OKが出たら本番です。",
+    "crewPreset": "班の編成",
+    "presets": {
+      "trio": "少人数（主演・演出・構成）",
+      "quartet": "少人数＋撮影",
+      "standard": "標準",
+      "vivid": "鮮やか寄り",
+      "photoreal": "実写寄り",
+      "flat": "フラット寄り",
+      "classic": "王道",
+      "bold": "斬新",
+      "calm": "静か",
+      "everyone": "全員集合"
+    },
     "workflow": "ワークフロー",
     "workflowHint": "ボードも本番も同じワークフロー。違うのはステップ数と CFG だけ",
     "model": "モデル",
@@ -1331,6 +1344,7 @@
       "model": "モデル"
     },
     "showrunner": "総監督",
+    "banter": "つぶやき",
     "chatPlaceholder": "無理難題歓迎。服・画角・光…コメントすると班が答えます",
     "send": "送る",
     "quick": {
@@ -1364,19 +1378,18 @@
     "setupTitle": "何を描きますか",
     "settings": "設定",
     "taste": {
-      "base": "この編成の基調"
+      "title": "作風",
+      "vivid": "鮮やか",
+      "vividLow": "渋い",
+      "real": "実写的",
+      "realLow": "フラット",
+      "novel": "斬新",
+      "novelLow": "定番",
+      "base": "この編成の基調",
+      "hint": "スタッフを入れ替えると絵が変わります",
+      "people": "担当を選ぶ"
     },
-    "nick": "あだ名",
-    "crewHint": "5席。各席は自分の持ち場だけを書き、整理だけが全体から削れます。",
-    "cutsOnly": "削るだけ",
-    "shotSheet": "ショットシート",
-    "probeTitle": "試写（512px）",
-    "probeAsk": "人物と背景を別々に描いています。どちらか直すならコメントを、進めるなら「OK」を。",
-    "probeKind": {
-      "pose": "人物",
-      "setting": "背景",
-      "merged": "合成"
-    }
+    "nick": "あだ名"
   },
   "characters": {
     "title": "キャラクター",

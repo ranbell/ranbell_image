@@ -23,6 +23,8 @@ STEPS: tuple[str, ...] = (
 
 
 def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+    preset = str((inputs or {}).get("crew_preset") or crew.DEFAULT_PRESET)
+    crew_ids = crew.resolve_crew(preset=preset)
     return {
         "session_id": str(uuid.uuid4()),
         "created_at": time.time(),
@@ -35,6 +37,8 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "model": "",
             "llm_provider": "ollama",
             "locale": "ja",
+            "crew_preset": preset,
+            "crew_ids": [i for i in crew_ids if i not in ("finisher", "actress")],
         }, **(inputs or {})},
         "character": {},
         "brief": "",
@@ -48,15 +52,8 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # Everything the Showrunner has said, kept forever. A note used to live
         # only in the turn that answered it.
         "notes": [],
-        # The shot sheet: one named slot per thing, each owned by one seat. This
-        # replaced a single blob that every seat rewrote in turn — which is how
-        # the set dresser's objects vanished twelve passes later.
-        "shot": {},
-        # Assembled prompt for the last render, and how many refine rounds ran.
-        "craft": {"prompt": "", "round": 0},
-        # Latest probe readings, keyed by kind (pose / setting / merged). Small
-        # enough to keep on the session; the images themselves are never stored.
-        "probes": {},
+        # Working craft the crew is building toward the board / shoot.
+        "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
         "chat": [],           # [{id, role, muse_id, name, text, at}]
         "board": {},          # image board round
         "shoot": {},          # final images after OK
@@ -143,12 +140,18 @@ def missing_inputs(session: dict[str, Any]) -> list[str]:
 def public_view(session: dict[str, Any]) -> dict[str, Any]:
     from . import crew as crew_mod
     inputs = session.get("inputs") or {}
+    # The roster carries this session's own direction, so the panel can show
+    # what the current cast is pulling toward as seats are toggled.
+    cast = crew_mod.resolve_crew(
+        preset=str(inputs.get("crew_preset") or crew_mod.DEFAULT_PRESET),
+        crew_ids=list(inputs.get("crew_ids") or []) or None,
+    )
     return {
         **session,
         "steps": list(STEPS),
         "step_state": step_state(session),
         "next_step": next_step(session),
         "needs": missing_inputs(session),
-        "roster": crew_mod.public_roster(session.get("character") or {}),
-        "style_in_use": str(inputs.get("style") or ""),
+        "roster": crew_mod.public_roster(session.get("character") or {}, cast),
+        "style_in_use": crew_mod.base_style_for(cast, inputs.get("style") or ""),
     }

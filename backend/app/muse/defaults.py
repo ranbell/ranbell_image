@@ -55,23 +55,18 @@ LLM_DEFAULTS: dict[str, object] = {
     "vision_model": "",
     # Composition bias for every stage. auto lets the theme decide.
     "framing": "auto",
-    # ── Probes ──────────────────────────────────────────────────────────────
-    # Small enough to be nearly free, big enough to judge composition and
-    # exposure on. The crew looks at one of these between passes instead of
-    # arguing about a picture nobody has seen.
-    "probe_size": 512,
-    "probe_steps": 12,
-    # How many enrich/reduce/probe rounds before showing the board regardless.
-    # A failure at the cap is announced, never shipped quietly.
-    "probe_max_rounds": 3,
-    # Drop the LLM from VRAM before each render. Off: the two share this card in
-    # normal operation. A ComfyUI OOM mid-run looked like proof they cannot,
-    # but the cause was a probe rendering outside the job scheduler while the
-    # card was already committed — renders serialise through the GENERATION
-    # resource, and that probe was holding nothing. Turn this on only for a card
-    # that really is too small; it costs a model reload in each direction.
-    # Large latents (batch ≥ 2 at full size) are what make the margin thin.
-    "unload_vlm": False,
+    # Drop the LLM from VRAM before each Comfy render. On: a model left resident
+    # is still holding the card when ComfyUI wants it, and a full-size latent
+    # then has nowhere to go. Setting `keep_alive` on the Ollama side made that
+    # worse rather than better — giving the memory back is the entire point of
+    # the unload, so pinning the model defeats it. Turn this off only for a card
+    # big enough to hold a checkpoint and the model at the same time.
+    "unload_vlm": True,
+    # Cast preset for the table-read crew (see muse.crew.PRESETS).
+    "crew_preset": "standard",
+    # Banter between craft passes. light = Ollama-friendly (fewer side calls);
+    # full = previous speaker + occasional heckler; off = craft only.
+    "banter_mode": "light",
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────
@@ -80,9 +75,11 @@ STYLE_DEFAULTS: dict[str, object] = {
     # and every stage is told to obey it. The same theme in two styles is two
     # different pictures.
     #
-    # Empty means the checkpoint's own look. There is no crew taste to average
-    # any more — picking people to move the style cost the picture more than it
-    # bought, so a look is something you type here or do not get.
+    # Empty by default so the cast decides: `crew.style_direction` reads the
+    # room's taste and names a base look. Filled in with a fixed phrase it wins
+    # outright, which is right when someone has an opinion and wrong as a
+    # default — a preset style meant swapping the whole crew changed nothing
+    # about how the picture was rendered.
     "style": "",
     # Appended to whatever the workflow already carries.
     "negative_prompt": (

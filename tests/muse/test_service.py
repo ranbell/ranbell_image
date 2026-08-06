@@ -1,47 +1,41 @@
-"""The five acts: brief, look, ask, tighten, shoot.
+"""Chat studio wiring: table → note → board → OK → shoot.
 
-What these pin is the shape, not the wording. The version this replaced ran
-eighteen seats to completion before the Showrunner saw anything — 513 seconds,
-and if the direction was wrong you learned that eight minutes late — while the
-seats argued about a picture none of them had been shown.
+BCD refine is gone. The showrunner chats; the crew revises craft; a board asks
+「これでいい？」; OK submits the final shoot.
 """
 from __future__ import annotations
 
 import sys
-import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
-from app.muse import probe, runner, service, session_db
-from app.spooler.models import JobLane
+from app.muse import identity, runner, service, session_db
 
-FIXTURES = Path(__file__).parent / "fixtures"
-GOOD = (FIXTURES / "board_ok.jpg").read_bytes()
-VOID = (FIXTURES / "board_void.jpg").read_bytes()
 
-PLAN = (
-    "SAY: 場所と時間を決めます。総監督、これで進めます。\n"
-    "PLACE: a corner seat by a tall window\n"
-    "HOUR: mid-afternoon\n"
-    "LIGHT: even daylight, normal exposure\n"
-    "ACTION: resting\n"
-    "MUST APPEAR: wooden table, chair, glass mug, napkin\n"
-)
-ACTRESS = (
-    "SAY: このくらいの姿勢が自然だと思います。\n"
-    "SUBJECT: a girl at a table\nPOSE: chin on hand\nMOOD: quietly pleased\n"
-)
-ENRICH = (
-    "SAY: カメラを決めます。寄ると手元の温度が出ます。\n"
-    "WARDROBE: grey cardigan\nCAMERA: medium shot\nOBJECTS: spoon\n"
-)
-REDUCE = "SAY: ひとつ切ります。\nREMOVE: spoon\n"
-CHECK = "SAY: 見ました。\nREMOVE: deep shadows\nADD: soft daylight\n"
+class FakeSpooler:
+    def __init__(self):
+        self.jobs: list[dict] = []
+        self.cancelled: list[str] = []
 
-ANSWERS = {"構成": PLAN, "主演": ACTRESS, "加筆": ENRICH, "整理": REDUCE, "試写": CHECK}
+    def submit(self, lane, title, func, meta=None, **kw):
+        self.jobs.append({"lane": lane, "title": title, "func": func,
+                          "meta": meta or {}, **kw})
+        return f"job-{len(self.jobs)}"
+
+    async def cancel(self, job_id):
+        self.cancelled.append(job_id)
+        return True
+
+
+class FakeComfy:
+    def load_workflow(self, name):
+        return {}
+
+    def patchable_fields(self, wf):
+        return {"steps": 1, "cfg": 1, "width": 1, "height": 1}
 
 
 class FakeOllama:
@@ -49,89 +43,23 @@ class FakeOllama:
         self.unloaded: list[str] = []
         self.calls: list[dict] = []
 
-    def _reply_for(self, system: str) -> str:
-        for marker, answer in ANSWERS.items():
-            if marker in system:
-                return answer
-        return PLAN
-
-    def _stream(self, system):
-        async def _gen():
-            yield {"type": "token", "text": self._reply_for(system)}
-        return _gen()
-
     def generate_text_stream(self, prompt, **kw):
-        self.calls.append({"kind": "text", "prompt": prompt, **kw})
-        return self._stream(kw.get("system", ""))
+        self.calls.append(kw)
 
-    def generate_vlm_stream(self, prompt, images, **kw):
-        self.calls.append({"kind": "vlm", "prompt": prompt, "images": images, **kw})
-        return self._stream(kw.get("system", ""))
+        async def _stream():
+            yield {"type": "think", "text": "deliberating"}
+            yield {
+                "type": "token",
+                "text": (
+                    "SAY: Director, the beat is locked.\n\n"
+                    "TAGS: standing, indoor\n\n"
+                    "SCENE: STAGE A PROMPT"
+                ),
+            }
+        return _stream()
 
     async def unload(self, model=None):
         self.unloaded.append(model)
-
-
-class FakeComfy:
-    """Renders whatever `frame` is set to, and records what it was asked for."""
-
-    def __init__(self, frame: bytes = GOOD):
-        self.frame = frame
-        self.rendered: list[dict] = []
-
-    def load_workflow(self, name):
-        return {}
-
-    def patchable_fields(self, wf):
-        return {"steps": 1, "cfg": 1, "width": 1, "height": 1}
-
-    def patch_workflow(self, wf, pos, neg, *a, **kw):
-        self.rendered.append({"positive": pos, "negative": neg, **kw})
-        return {}
-
-    async def queue_prompt(self, wf, preview=False):
-        return "pid"
-
-    async def stream_progress(self, pid):
-        yield {"type": "comfy_output",
-               "images": [{"filename": "p.png", "subfolder": "", "type": "output"}]}
-
-    async def fetch_history(self, pid):
-        return []
-
-    async def fetch_image(self, filename, subfolder="", type_="output"):
-        return self.frame
-
-
-class FakeSpooler:
-    """Runs submitted jobs the way the real one does: on the lane, awaitable."""
-
-    def __init__(self):
-        self.jobs: list[dict] = []
-        self.cancelled: list[str] = []
-        self._results: dict[str, object] = {}
-
-    def submit(self, lane, title, func, meta=None, *, priority=0, **kw):
-        job_id = f"job-{len(self.jobs) + 1}"
-        self.jobs.append({"id": job_id, "lane": lane, "title": title, "func": func,
-                          "meta": meta or {}, "priority": priority, **kw})
-        return job_id
-
-    async def wait(self, job_id):
-        job = next(j for j in self.jobs if j["id"] == job_id)
-        if job_id not in self._results:
-            reporter = types.SimpleNamespace(
-                indeterminate=lambda: None, update=lambda *a, **k: None)
-            cancel = types.SimpleNamespace(
-                raise_if_set=lambda: None, on_cancel=lambda *a: None)
-            kw = {k: v for k, v in job.items()
-                  if k not in ("id", "lane", "title", "func", "meta", "priority")}
-            self._results[job_id] = await job["func"](reporter, cancel, **kw)
-        return self._results[job_id]
-
-    async def cancel(self, job_id):
-        self.cancelled.append(job_id)
-        return True
 
 
 class FakeDb:
@@ -152,236 +80,184 @@ class FakeDb:
 
 
 @pytest.fixture(autouse=True)
-def _stub_environment(monkeypatch):
+def _no_runtime_config(monkeypatch):
     async def _cfg(db):
         return {"ollama_num_ctx": 16000}
     monkeypatch.setattr(service, "get_runtime_config", _cfg)
 
-    # WD14 is a real model load; the ledger check is exercised in test_probe.
-    async def _tags(db, data, session):
-        return ["wooden table", "chair", "glass mug", "napkin"]
-    monkeypatch.setattr(service, "_wd14", _tags)
 
-
-async def _ready(db, **over):
+async def _ready_session(db, **over):
     session = await service.create_session(db, {
         "theme": "a quiet indoor moment", "character_id": "c1",
-        "workflow": "w.json", "model": "m", **over,
+        "workflow": "w.json", "model": "m",
+        "crew_preset": "classic",
+        **over,
     })
-    session["character"] = {
-        "identity_tags": ["navy_hair"], "personality": {"traits": ["quiet"]},
-        "palette": [], "signature_prop": "", "subject_tag": "1girl",
-    }
+    session["character"] = {"identity_tags": ["1girl", "blue_hair"],
+                            "personality": {}, "palette": [], "signature_prop": ""}
     service._rebuild_brief(session)
     await session_db.save(db, session)
     return session
 
 
-# ── Act 1 + 2 ───────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_the_brief_is_two_seats_and_two_probes_before_anyone_is_asked():
-    """Not eighteen seats and eight minutes."""
-    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
-    session = await _ready(db)
+async def test_table_builds_craft_and_chat_without_submitting_comfy():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
 
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
+    session = await service.start_table(db, ollama, session)
 
-    spoke = [m["muse_id"] for m in session["chat"] if m["role"] == "muse"]
-    assert spoke[:2] == ["plan", "actress"]
-    assert "enrich" not in spoke and "reduce" not in spoke
-    # Two probes: her on white, the room with nobody in it.
-    assert len(comfy.rendered) == 2
-    assert set(session["probes"]) == {probe.POSE, probe.SETTING}
-    assert session["status"] == "chat"
-
-
-@pytest.mark.asyncio
-async def test_the_two_probes_are_actually_separated():
-    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
-    session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-
-    pose, setting = (r["positive"].lower() for r in comfy.rendered)
-    assert "white background" in pose and "chin on hand" in pose
-    assert "wooden table" not in pose
-    assert "no humans" in setting and "wooden table" in setting
-    assert "chin on hand" not in setting and "navy_hair" not in setting
-
-
-@pytest.mark.asyncio
-async def test_the_probe_seed_is_fixed_so_rounds_are_comparable():
-    """If it moved between rounds there would be no telling whether a change
-    helped or the dice did."""
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
-    session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
-    seeds = {r["seed"] for r in comfy.rendered}
-    assert len(seeds) == 1
-    first = seeds.pop()
-
-    await service.post_chat(db, llm, comfy, spooler, session, "もっと明るく")
-    assert {r["seed"] for r in comfy.rendered} == {first}
-
-
-@pytest.mark.asyncio
-async def test_probe_bytes_never_reach_the_saved_session():
-    """The session is serialised into Qdrant; a few hundred KB of PNG per round
-    has no business in the document store."""
-    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
-    session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-    saved = db.rows[session["session_id"]]
-    assert not any(isinstance(v, bytes) for v in saved.values())
-    assert "_probe_bytes" not in saved
-    # But the crew can still see them.
-    assert service._frames(session)
-
-
-@pytest.mark.asyncio
-async def test_a_probe_never_goes_through_the_spooler():
-    """Forty throwaway 512s in the image library is worse than no probe."""
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
-    session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     assert spooler.jobs == []
-    assert comfy.rendered, "but it did render"
+    assert session["status"] == "chat"
+    assert "STAGE A PROMPT" in session["craft"]["prompt"]
+    assert "blue_hair" in session["craft"]["prompt"]
+    assert session["craft"]["pose_intent"] == "STAGE A PROMPT"
+    assert "blue_hair" not in session["craft"]["pose_intent"]
+    # System open + each muse + wrap ask (+ light banter by default).
+    assert any(m["role"] == "muse" for m in session["chat"])
+    assert any(m.get("kind") == "craft" for m in session["chat"])
+    assert ollama.unloaded == []
+    assert len(ollama.calls) >= 2  # classic crew + actress + finisher
 
 
-# ── Act 3 ───────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_a_note_becomes_standing_direction_and_re_settles_one_place():
-    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
-    session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
+async def test_board_submits_one_job_from_craft():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+
+    session = await service.request_board(db, FakeComfy(), spooler, session, ollama=ollama)
+
+    assert len(spooler.jobs) == 1
+    job = spooler.jobs[0]
+    assert job["func"] is runner.run_board_job
+    assert job["session_id"] == session["session_id"]
+    assert session["board"]["pending"] is True
+    assert session["board"]["seed"] > 0
+    assert session["board"]["job_id"]
+    assert session["status"] == "boarding"
+    # The LLM comes off the card before the render: it is still holding VRAM
+    # otherwise, and a full-size latent then has nowhere to go.
+    assert ollama.unloaded == ["m"]
+
+
+@pytest.mark.asyncio
+async def test_thin_craft_is_densified_before_board():
+    """Board must not ship a tweet-length SCENE — Finisher packs density first."""
+    db, spooler = FakeDb(), FakeSpooler()
+
+    class DenseOllama(FakeOllama):
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append(kw)
+            dense_scene = (
+                "She sits at a wooden desk by a tall window, weight on her right elbow, "
+                "shoulders soft, braid falling forward as afternoon light cuts across the "
+                "grain. A ceramic cup, open notebook, pencil, stacked books, desk lamp, "
+                "curtain fold, window latch, potted plant, chair back and scattered papers "
+                "fill the near space so the room feels lived-in. She looks toward the viewer "
+                "with a small attentive expression, one hand resting near the page as if mid "
+                "thought, while soft shadow holds under her chin and the camera stays a "
+                "slight low medium shot that keeps face and hands readable without emptying "
+                "the desk clutter that makes the moment specific to this theme."
+            )
+            # pad to clear 140 words
+            dense_scene = dense_scene + " " + " ".join(["detail"] * 40)
+            text = (
+                "SAY: 密度上げました。のっぺりさせません。\n\n"
+                "TAGS: masterpiece, best_quality, sitting, leaning_on_table, "
+                "wooden_desk, window, notebook, pencil, books, desk_lamp, curtain, "
+                "potted_plant, papers, cup, from_side, slightly_from_below, "
+                "medium_shot, upper_body, light_blush, smile, hand_up, "
+                "looking_at_viewer, depth_of_field, soft_lighting\n\n"
+                f"SCENE: {dense_scene}"
+            )
+
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    ollama = DenseOllama()
+    session = await _ready_session(db, banter_mode="off")
+    session["craft"] = {
+        "prompt": "1girl, aqua_hair, sitting, smile, She sits.",
+        "scene": "She sits.",
+        "tags": "sitting, smile",
+        "pose_intent": "She sits.",
+    }
+    session["status"] = "chat"
+    session["brief"] = "x"
+    await session_db.save(db, session)
+
+    session = await service.request_board(
+        db, FakeComfy(), spooler, session, ollama=ollama,
+    )
+    assert identity.word_count(session["board"]["prompt"]) >= 160
+    assert "dens" in " ".join(
+        m["text"].lower() for m in session["chat"] if m.get("role") == "system"
+    ) or any("密度" in m["text"] for m in session["chat"])
+
+
+@pytest.mark.asyncio
+async def test_chat_ok_shoots_with_board_seed():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {"seed": 4242, "images": [{"image_id": "sha0"}], "pending": False}
+    await session_db.save(db, session)
 
     session = await service.post_chat(
-        db, llm, comfy, FakeSpooler(), session, "屋内にして、椅子に座らせて",
+        db, ollama, FakeComfy(), spooler, session, "OK",
     )
-    assert session["notes"] == ["屋内にして、椅子に座らせて"]
-    assert "屋内にして" in session["brief"]
-    # One place, not two.
-    assert session["shot"]["place"] == "a corner seat by a tall window"
+
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_shoot_job
+    assert session["shoot"]["seed"] == 4242
+    assert session["status"] == "shooting"
+
+
+@pytest.mark.asyncio
+async def test_chat_note_revises_craft_without_comfy():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+    n_calls = len(ollama.calls)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もっと寄って、服をコートに",
+    )
+
+    assert spooler.jobs == []
     assert session["status"] == "chat"
+    assert len(ollama.calls) > n_calls
+    assert any(m["role"] == "user" and "コート" in m["text"] for m in session["chat"])
 
 
 @pytest.mark.asyncio
-async def test_a_note_does_not_start_the_shoot():
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
-    session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-    await service.post_chat(db, llm, comfy, spooler, session, "もう少し寄って")
-    # Probes are jobs too now; what a note must not do is start a render.
-    assert [j["title"] for j in spooler.jobs] == ["muse_probe"] * len(spooler.jobs)
-    assert not any(j["func"] is runner.run_shoot_job for j in spooler.jobs)
+async def test_chat_board_keyword_requests_board():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
 
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "ボード出して",
+    )
 
-# ── Act 4 ───────────────────────────────────────────────────────────────────
-@pytest.mark.asyncio
-async def test_ok_tightens_first_and_only_shoots_once_a_board_exists():
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
-    session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
-
-    session = await service.post_chat(db, llm, comfy, spooler, session, "OK")
-    renders = [j["func"] for j in spooler.jobs if j["title"] != "muse_probe"]
-    assert renders == [runner.run_board_job]
-    spoke = [m["muse_id"] for m in session["chat"] if m["role"] == "muse"]
-    assert "enrich" in spoke and "reduce" in spoke
-
-    session["board"]["images"] = [{"image_id": "sha0"}]
-    session["board"]["pending"] = False
-    session = await service.post_chat(db, llm, comfy, spooler, session, "OK")
-    assert spooler.jobs[-1]["func"] is runner.run_shoot_job
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_board_job
 
 
 @pytest.mark.asyncio
-async def test_a_passing_probe_stops_the_loop_early():
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(GOOD), FakeSpooler()
-    session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-    before = len(comfy.rendered)
-
-    session = await service.refine(db, llm, comfy, spooler, session)
-    # One merged probe, then out: the numbers passed.
-    assert len(comfy.rendered) - before == 1
-    assert session["craft"]["round"] == 1
-
-
-@pytest.mark.asyncio
-async def test_a_failing_probe_runs_the_cap_and_says_what_it_could_not_fix():
-    """Never ship a quiet failure."""
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(VOID), FakeSpooler()
-    session = await _ready(db, probe_max_rounds=2)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-
-    session = await service.refine(db, llm, comfy, spooler, session)
-    assert session["craft"]["round"] == 2
-    said = " ".join(m["text"] for m in session["chat"] if m["role"] == "system")
-    assert "直りませんでした" in said
-    assert "empty black" in said or "too dark" in said
-    # And it still put the board up rather than stalling.
-    assert spooler.jobs[-1]["func"] is runner.run_board_job
-
-
-@pytest.mark.asyncio
-async def test_the_checker_is_handed_the_measurements_and_the_frame():
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(VOID), FakeSpooler()
-    session = await _ready(db, probe_max_rounds=1)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-    llm.calls.clear()
-    await service.refine(db, llm, comfy, spooler, session)
-
-    seeing = [c for c in llm.calls if c.get("images")]
-    assert seeing, "the checker answered without being shown the render"
-    assert any("facts, not opinions" in c["prompt"] for c in seeing)
-    assert any("VERDICT: FAIL" in c["prompt"] for c in seeing)
-
-
-# ── wiring that must not regress ────────────────────────────────────────────
-@pytest.mark.asyncio
-async def test_only_the_lead_is_handed_her_inner_life():
+async def test_refine_is_removed():
     db = FakeDb()
-    session = await _ready(db)
-    session["character"]["personality"] = {
-        "traits": ["quiet"], "inner": ["a private thing she never says"],
-        "likes": ["a thing she likes"],
-    }
-    service._rebuild_brief(session)
-    assert "a private thing she never says" in service._brief_for(session, "actress")
-    assert "a private thing she never says" not in service._brief_for(session, "enrich")
-    assert "quiet" in service._brief_for(session, "enrich")
+    session = await _ready_session(db)
+    with pytest.raises(service.MuseError) as err:
+        await service.run_refine(db, FakeOllama(), FakeComfy(), FakeSpooler(),
+                                 session, [0])
+    assert "廃止" in str(err.value) or "removed" in str(err.value).lower()
 
 
 @pytest.mark.asyncio
-async def test_a_blind_model_is_reported_rather_than_silently_degraded():
-    class Blind(FakeOllama):
-        def generate_vlm_stream(self, prompt, images, **kw):
-            self.calls.append({"kind": "vlm", "prompt": prompt, "images": images})
-
-            async def _empty():
-                yield {"type": "token", "text": "  "}
-            return _empty()
-
-    db, llm, comfy = FakeDb(), Blind(), FakeComfy()
-    session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-
-    said = " ".join(m["text"] for m in session["chat"] if m["role"] == "system")
-    assert "絵を読めない" in said
-    assert session["shot"], "the crew kept working"
-
-
-@pytest.mark.asyncio
-async def test_no_comfy_still_briefs_rather_than_failing():
-    db, llm = FakeDb(), FakeOllama()
-    session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=None)
-    assert session["shot"]["place"]
-    assert session["status"] == "chat"
-
-
-@pytest.mark.asyncio
-async def test_the_table_refuses_missing_inputs():
+async def test_table_refuses_missing_inputs():
     db = FakeDb()
     session = await service.create_session(db, {"theme": "t"})
     with pytest.raises(service.MuseError) as err:
@@ -392,76 +268,417 @@ async def test_the_table_refuses_missing_inputs():
 @pytest.mark.asyncio
 async def test_cancelling_a_board_clears_it():
     db, spooler = FakeDb(), FakeSpooler()
-    session = await _ready(db)
+    session = await _ready_session(db)
     session["board"] = {"job_id": "job-1", "images": [], "pending": True}
+    session["craft"] = {"prompt": "x"}
+
     session = await service.cancel_draft(db, spooler, session)
+
     assert spooler.cancelled == ["job-1"]
     assert session["board"] == {}
+    assert session["status"] == "chat"
 
 
 @pytest.mark.asyncio
-async def test_unload_vlm_is_opt_in():
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
-    session = await _ready(db, unload_vlm=True)
-    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-    llm.unloaded.clear()
-    await service.request_board(db, comfy, spooler, session, ollama=llm)
-    assert llm.unloaded == ["m"]
-
-
-@pytest.mark.asyncio
-async def test_the_old_refine_chain_is_removed():
+async def test_board_images_keep_arriving_until_finish():
     db = FakeDb()
-    session = await _ready(db)
-    with pytest.raises(service.MuseError) as err:
-        await service.run_refine(db, FakeOllama(), FakeComfy(), FakeSpooler(), session, [0])
-    assert "廃止" in str(err.value)
+    session = await _ready_session(db)
+    session["board"] = {"job_id": "job-1", "seed": 7, "images": [], "pending": True}
+    session["status"] = "boarding"
+    await session_db.save(db, session)
+    sid = session["session_id"]
+
+    for sha in ("a", "b", "c", "d", "e"):
+        await session_db.attach_board_image(db, sid, sha, {"seed": 7})
+    s = await session_db.load(db, sid)
+    assert len(s["board"]["images"]) == 5
+    assert s["board"]["pending"] is True
+
+    await session_db.finish_board(db, sid)
+    s = await session_db.load(db, sid)
+    assert s["board"]["pending"] is False
+    assert s["status"] == "awaiting_ok"
+
+
+@pytest.mark.asyncio
+async def test_finishing_does_not_resurrect_a_cancelled_board():
+    db, spooler = FakeDb(), FakeSpooler()
+    session = await _ready_session(db)
+    session["board"] = {"job_id": "job-1", "images": [], "pending": True}
+    session = await service.cancel_draft(db, spooler, session)
+
+    await session_db.finish_board(db, session["session_id"], error="cancelled")
+    s = await session_db.load(db, session["session_id"])
+    assert s["board"] == {}
+    assert s["status"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_unload_vlm_is_opt_in_on_board():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session["inputs"]["unload_vlm"] = True
+    session = await service.start_table(db, ollama, session)
+    ollama.unloaded.clear()
+
+    session = await service.request_board(
+        db, FakeComfy(), spooler, session, ollama=ollama,
+    )
+
+    assert ollama.unloaded == ["m"]
+
+
+def test_the_workflows_last_image_is_the_one_worth_keeping():
+    assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
+    assert runner.finished_image(["only"]) == "only"
 
 
 def test_is_approve_accepts_natural_ok_phrases():
     assert service._is_approve("OK")
     assert service._is_approve("本番")
     assert service._is_approve("Ok 本番よろしく")
-    assert service._is_approve("進めて")
+    assert service._is_approve("よし撮って！")
     assert not service._is_approve("OKじゃない、もっと可愛く")
     assert not service._is_approve("ボード出して")
     assert not service._is_approve("服をもっと派手に")
 
 
-def test_the_workflows_last_image_is_the_one_worth_keeping():
-    assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
+def test_pick_responders_is_fixed_desk_not_keyword_router():
+    """Mood/situation words must not change the cast — VLM reads the note."""
+    crew_ids = [
+        "beat", "spine", "lens", "wardrobe", "gaffer",
+        "actress", "faces", "hook", "finisher",
+    ]
+    a = service._pick_responders("服をコートにして", crew_ids)
+    b = service._pick_responders("トーンを変えて", crew_ids)
+    c = service._pick_responders("雰囲気をもっと出して", crew_ids)
+    d = service._pick_responders("画角を寄せて", crew_ids)
+    assert a == b == c == d
+    assert a[0] == "actress"
+    assert a[-1] == "finisher"
+    assert len(a) <= 5  # cap craft + finisher for Ollama
+    # No keyword→muse pattern table — note text must not be inspected.
+    import inspect
+    src = inspect.getsource(service._pick_responders)
+    assert "re.search" not in src
+    assert "pairs" not in src
+    assert "want" not in src
 
 
 @pytest.mark.asyncio
-async def test_the_card_is_shared_by_default_and_eviction_is_opt_in():
-    """Ollama and ComfyUI coexist here in normal operation. A ComfyUI OOM looked
-    like proof otherwise; the cause was a probe rendering outside the scheduler,
-    not the two of them sharing."""
-    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
-    session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
-    assert llm.unloaded == []
+async def test_showrunner_comment_reruns_a_short_turn():
+    """The loop the Showrunner is testing: note → specialists revise → chat again."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, banter_mode="off")  # craft-only for speed
+    session = await service.start_table(db, ollama, session)
+    n_chat = len(session["chat"])
 
-    db2, llm2 = FakeDb(), FakeOllama()
-    session2 = await _ready(db2, unload_vlm=True)
-    await service.start_table(db2, llm2, session2, comfy=FakeComfy())
-    assert llm2.unloaded == ["m", "m"], "once per probe"
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session,
+        "もう少し落ち着いた雰囲気にして",
+    )
+
+    assert session["status"] == "chat"
+    assert spooler.jobs == []  # comment is LLM turns, not Comfy
+    assert any(
+        m["role"] == "user" and "落ち着いた" in m["text"] for m in session["chat"]
+    )
+    spoken = [m.get("muse_id") for m in session["chat"][n_chat:] if m.get("role") == "muse"]
+    assert "actress:cast" in spoken
+    assert "finisher:maku" in spoken
+    assert len(session["chat"]) > n_chat
+    # Craft was touched by at least one responder (FakeOllama always rewrites).
+    assert session["craft"]["prompt"]
 
 
 @pytest.mark.asyncio
-async def test_a_probe_is_a_job_on_the_generation_lane():
-    """This is the one that actually mattered. Probes called queue_prompt
-    directly at first, so five renders in a session showed up nowhere in the
-    job list, could not be cancelled, and ignored a paused lane entirely."""
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
-    session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
+async def test_light_banter_mode_fires_fewer_side_calls_than_full():
+    db, ollama_light, ollama_full = FakeDb(), FakeOllama(), FakeOllama()
+    s_light = await _ready_session(db, banter_mode="light", crew_preset="classic")
+    s_light = await service.start_table(db, ollama_light, s_light)
+    light_banter = sum(1 for m in s_light["chat"] if m.get("kind") == "banter")
 
-    probes = [j for j in spooler.jobs if j["title"] == "muse_probe"]
-    assert len(probes) == 2, [j["title"] for j in spooler.jobs]
-    for j in probes:
-        assert j["lane"] is JobLane.GENERATION
-        assert j["meta"]["session_id"] == session["session_id"]
-        assert j["meta"]["kind"] in (probe.POSE, probe.SETTING)
-        # Ahead of a queued board: the crew is blocked on this, the board is not.
-        assert j["priority"] > 0
+    db2 = FakeDb()
+    s_full = await _ready_session(db2, banter_mode="full", crew_preset="classic")
+    s_full = await service.start_table(db2, ollama_full, s_full)
+    full_banter = sum(1 for m in s_full["chat"] if m.get("kind") == "banter")
+
+    assert light_banter < full_banter
+    assert light_banter >= 1
+
+
+@pytest.mark.asyncio
+async def test_choosing_a_preset_replaces_the_crew_it_does_not_merge():
+    """A new session already carries crew_ids, and both were read from the
+    merged inputs, so the ids always won and picking a preset did nothing."""
+    db = FakeDb()
+    session = await service.create_session(db, {})
+
+    session = await service.patch_inputs(db, session, {"crew_preset": "flat"})
+    flat = list(session["inputs"]["crew_ids"])
+    # Both crews light and shoot; they send different people to do it.
+    assert "ink:ipponsen" in flat and "gaffer:gyakkou" not in flat
+
+    session = await service.patch_inputs(db, session, {"crew_preset": "photoreal"})
+    real = list(session["inputs"]["crew_ids"])
+    assert real != flat
+    assert "lens:pinto" in real and "ink:atsunuri" in real
+
+
+@pytest.mark.asyncio
+async def test_toggling_a_seat_keeps_the_rest_of_the_crew():
+    db = FakeDb()
+    session = await service.create_session(db, {})
+    session = await service.patch_inputs(db, session, {"crew_preset": "standard"})
+    kept = [i for i in session["inputs"]["crew_ids"] if i != "gaffer:gyakkou"]
+
+    session = await service.patch_inputs(db, session, {"crew_ids": kept})
+    assert "gaffer:gyakkou" not in session["inputs"]["crew_ids"]
+    assert session["inputs"]["crew_ids"] == kept
+
+
+@pytest.mark.asyncio
+async def test_the_crew_decides_the_look_when_the_showrunner_did_not():
+    db = FakeDb()
+    session = await service.create_session(db, {})
+    session = await service.patch_inputs(db, session, {"crew_preset": "flat"})
+    flat_look = service._style(session)
+
+    session = await service.patch_inputs(db, session, {"crew_preset": "photoreal"})
+    real_look = service._style(session)
+
+    assert flat_look != real_look
+    assert "flat" in flat_look and "semi-realistic" in real_look
+
+    session = await service.patch_inputs(db, session, {"style": "watercolour storybook"})
+    assert service._style(session) == "watercolour storybook"
+
+
+class PlanningOllama(FakeOllama):
+    """Answers the planner in labelled lines and everyone else in craft."""
+
+    PLAN = (
+        "SAY: 場所と時間、決めますね。\n\n"
+        "PLACE: a narrow upstairs room\n"
+        "HOUR: late afternoon\n"
+        "LIGHT: even daylight from one window, mid-key, normal exposure\n"
+        "ACTION: she has just sat down\n"
+        "MUST APPEAR: low_table, cushion, window, curtain, mug, rug\n"
+    )
+
+    def generate_text_stream(self, prompt, **kw):
+        self.calls.append({**kw, "prompt": prompt})
+        plan = "settle the situation" in (kw.get("system") or "").lower() \
+            or "PLAN (WHERE, WHEN" in (kw.get("system") or "")
+
+        async def _stream():
+            yield {"type": "token", "text": self.PLAN if plan else (
+                "SAY: Director, the beat is locked.\n\n"
+                "TAGS: standing, indoor\n\n"
+                "SCENE: STAGE A PROMPT"
+            )}
+        return _stream()
+
+    def generate_vlm_stream(self, prompt, images, **kw):
+        self.calls.append({**kw, "prompt": prompt, "images": images})
+        return self.generate_text_stream(prompt, **kw)
+
+
+class SeeingDb(FakeDb):
+    """Resolves a board sha to a real file on disk."""
+
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = path
+        self.looked_up: list[list[str]] = []
+
+    async def get_by_sha256s(self, shas):
+        self.looked_up.append(list(shas))
+        return [{"path": self.path, "sha256": s} for s in shas]
+
+
+@pytest.fixture
+def board_file(tmp_path):
+    from PIL import Image
+    p = tmp_path / "board.png"
+    Image.new("RGB", (896, 1152), (40, 60, 90)).save(p)
+    return str(p)
+
+
+@pytest.mark.asyncio
+async def test_the_planner_settles_the_place_before_anyone_describes_it():
+    db, ollama = FakeDb(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+
+    session = await service.start_table(db, ollama, session)
+
+    assert session["plan"]["place"] == "a narrow upstairs room"
+    assert "low_table" in session["plan"]["must_appear"]
+    # It is re-stated to every seat, so a chain of rewrites cannot relocate it.
+    assert "PLACE: a narrow upstairs room" in session["brief"]
+    assert "PLACE: a narrow upstairs room" in session["brief_lite"]
+    # And it spoke in chat, so the Showrunner can veto the place.
+    assert any(m.get("muse_id") == "plan:madori" for m in session["chat"])
+    # The planner does not write craft.
+    assert "STAGE A PROMPT" in session["craft"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_showrunner_note_becomes_standing_direction():
+    """The bug this exists for: a note reached only the turn that answered it,
+    so the original theme outvoted it on every later call and never rendered."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "屋内にして、椅子に座らせて",
+    )
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もっと明るく",
+    )
+
+    assert session["notes"] == ["屋内にして、椅子に座らせて", "もっと明るく"]
+    for note in session["notes"]:
+        assert note in session["brief"]
+        assert note in session["brief_lite"]
+
+
+@pytest.mark.asyncio
+async def test_a_note_re_settles_the_plan_rather_than_appending_to_it():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    plans_before = sum(1 for e in session["timeline"] if e["step"] == "plan")
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "別の場所にして",
+    )
+
+    assert sum(1 for e in session["timeline"] if e["step"] == "plan") > plans_before
+
+
+@pytest.mark.asyncio
+async def test_the_crew_is_shown_the_board_when_answering_a_note(board_file):
+    db, spooler, ollama = SeeingDb(board_file), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {
+        "seed": 7, "round": 1, "pending": False,
+        "images": [{"index": 0, "image_id": "sha0"}],
+    }
+    await session_db.save(db, session)
+    ollama.calls.clear()
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "背景が違う",
+    )
+
+    seen = [c for c in ollama.calls if c.get("images")]
+    assert seen, "the crew answered a note about the board without looking at it"
+    # Downscaled for the VLM rather than shipped at render size.
+    assert all(len(img) > 0 for c in seen for img in c["images"])
+    assert any("露出" in c["prompt"] or "exposure" in c["prompt"] for c in seen)
+
+
+@pytest.mark.asyncio
+async def test_no_board_means_no_images_and_no_screening_note():
+    db, spooler, ollama = SeeingDb("/nonexistent"), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    ollama.calls.clear()
+
+    await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もう少し寄って",
+    )
+
+    assert not any(c.get("images") for c in ollama.calls)
+    assert db.looked_up == []
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_board_does_not_stop_the_table(board_file):
+    db, spooler, ollama = SeeingDb("/nonexistent/board.png"), FakeSpooler(), PlanningOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {
+        "seed": 7, "round": 1, "pending": False,
+        "images": [{"index": 0, "image_id": "sha0"}],
+    }
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "背景が違う",
+    )
+    assert session["status"] == "chat"
+    assert not any(c.get("images") for c in ollama.calls)
+
+
+@pytest.mark.asyncio
+async def test_banter_never_reaches_the_prompt_that_writes_the_picture():
+    """Heckles carry no craft and every seat is told to charm in them. Fed back
+    into the craft turn they were a loop with nothing damping it."""
+    session = {"chat": [
+        {"role": "muse", "kind": "craft", "name": "A", "text": "craft line"},
+        {"role": "muse", "kind": "banter", "name": "B", "text": "heckle line"},
+        {"role": "user", "kind": "user", "name": "総監督", "text": "user line"},
+    ]}
+    craft_only = service._recent_talk(session, kinds=("craft",))
+    everything = service._recent_talk(session)
+
+    assert "craft line" in craft_only
+    assert "heckle line" not in craft_only
+    assert "heckle line" in everything
+    assert "user line" not in everything
+
+
+@pytest.mark.asyncio
+async def test_only_the_acting_seats_read_her_inner_life():
+    db = FakeDb()
+    session = await _ready_session(db)
+    session["character"]["personality"] = {
+        "traits": ["quiet"], "inner": ["a private thing she never says"],
+        "likes": ["a thing she likes"],
+    }
+    service._rebuild_brief(session)
+
+    acting = service._brief_for(session, "actress:cast")
+    lighting = service._brief_for(session, "gaffer:gyakkou")
+    assert "a private thing she never says" in acting
+    assert "a private thing she never says" not in lighting
+    assert "quiet" in lighting
+
+
+@pytest.mark.asyncio
+async def test_a_blind_model_is_reported_rather_than_silently_degraded(board_file):
+    class BlindOllama(PlanningOllama):
+        def generate_vlm_stream(self, prompt, images, **kw):
+            self.calls.append({**kw, "prompt": prompt, "images": images})
+
+            async def _empty():
+                yield {"type": "token", "text": "  "}
+            return _empty()
+
+    db, spooler, ollama = SeeingDb(board_file), FakeSpooler(), BlindOllama()
+    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {
+        "seed": 7, "round": 1, "pending": False,
+        "images": [{"index": 0, "image_id": "sha0"}],
+    }
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "背景が違う",
+    )
+
+    said = " ".join(m["text"] for m in session["chat"] if m["role"] == "system")
+    assert "絵を読めない" in said or "could not read" in said
+    assert session["craft"]["prompt"], "the table kept moving"
+
+
+def test_the_small_room_is_the_lead_the_director_and_the_planner():
+    from app.muse import crew
+    roles = [crew.role_of(i) for i in crew.resolve_crew(preset="trio")]
+    assert roles == ["plan", "beat", "actress", "finisher"]
+    assert crew.role_of(crew.resolve_crew(preset="quartet")[2]) == "lens"

@@ -119,20 +119,10 @@ class OllamaClient:
         return r.json()["embeddings"]
 
     @staticmethod
-    def _with_runtime(payload: dict, think: bool | str | None) -> dict:
-        """Attach Ollama native `think` and the residency window.
-
-        `keep_alive` matters more than it looks. Ollama's default is five
-        minutes, and nothing here ever set it, so a 26B MoE was evicted between
-        one Muse session and the next — a measured 200s of the 513s a table read
-        took was the reload. Only inference on /api/generate and /api/chat
-        resets that timer; polling /api/tags or /api/ps does not, so there is no
-        way to keep a model warm from the outside. It has to ride on the calls
-        we already make.
-        """
+    def _with_think(payload: dict, think: bool | str | None) -> dict:
+        """Attach Ollama native `think` when requested (Gemma 4 / reasoning models)."""
         if think is not None:
             payload["think"] = think
-        payload.setdefault("keep_alive", settings.ollama_keep_alive)
         return payload
 
     @staticmethod
@@ -231,7 +221,7 @@ class OllamaClient:
         system: str | None = None,
     ) -> str:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
-        payload = self._with_runtime(
+        payload = self._with_think(
             {
                 "model": model or settings.vlm_model,
                 "prompt": prompt,
@@ -265,7 +255,7 @@ class OllamaClient:
         # num_predict=-1 for the same reason generate_text sets it: without it a
         # Modelfile default (often 128–512) truncates the answer, and a model
         # that thinks first can spend the whole budget before writing a word.
-        payload = self._with_runtime(
+        payload = self._with_think(
             {
                 "model": model_name,
                 "prompt": prompt,
@@ -329,7 +319,7 @@ class OllamaClient:
         # tokens) and will silently truncate structured JSON responses.
         merged_options = {"num_predict": -1, **(options or {})}
         model_name = model or settings.vlm_model
-        payload: dict = self._with_runtime(
+        payload: dict = self._with_think(
             {
                 "model": model_name,
                 "prompt": prompt,
@@ -383,7 +373,7 @@ class OllamaClient:
         merged_options = {"num_predict": -1, **(options or {})}
         model_name = model or settings.vlm_model
         msgs = messages or [{"role": "user", "content": prompt}]
-        payload: dict = self._with_runtime(
+        payload: dict = self._with_think(
             {
                 "model": model_name,
                 "messages": msgs,
@@ -409,7 +399,7 @@ class OllamaClient:
     ) -> AsyncGenerator[dict, None]:
         """Stream text generation without vision inputs."""
         model_name = model or settings.vlm_model
-        payload = self._with_runtime(
+        payload = self._with_think(
             {
                 "model": model_name,
                 "prompt": prompt,

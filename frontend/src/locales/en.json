@@ -1296,6 +1296,19 @@
     "theme": "Theme",
     "themePlaceholder": "Any theme (place, time, action — freeform)",
     "studioHint": "You are the showrunner. The crew debates, puts up an image board, and shoots on your OK.",
+    "crewPreset": "Crew preset",
+    "presets": {
+      "trio": "Small room (lead, director, planner)",
+      "quartet": "Small room + camera",
+      "standard": "Standard",
+      "vivid": "Vivid",
+      "photoreal": "Photoreal",
+      "flat": "Flat / cel",
+      "classic": "Classic",
+      "bold": "Bold",
+      "calm": "Calm",
+      "everyone": "Everyone"
+    },
     "workflow": "Workflow",
     "workflowHint": "One workflow draws the board and the final — only steps and cfg differ",
     "model": "Model",
@@ -1331,6 +1344,7 @@
       "model": "model"
     },
     "showrunner": "Showrunner",
+    "banter": "aside",
     "chatPlaceholder": "Hard notes welcome — outfit, angle, light… the crew will answer",
     "send": "Send",
     "quick": {
@@ -1364,19 +1378,18 @@
     "setupTitle": "What shall we draw?",
     "settings": "Settings",
     "taste": {
-      "base": "This crew's base look"
+      "title": "Look",
+      "vivid": "Vivid",
+      "vividLow": "Muted",
+      "real": "Photoreal",
+      "realLow": "Flat",
+      "novel": "Bold",
+      "novelLow": "Classic",
+      "base": "This crew's base look",
+      "hint": "Swap a seat and the picture changes",
+      "people": "Pick who does it"
     },
-    "nick": "Nickname",
-    "crewHint": "Five seats. Each writes only its own slots; only Reduce may cut across all of them.",
-    "cutsOnly": "cuts only",
-    "shotSheet": "Shot sheet",
-    "probeTitle": "Probe (512px)",
-    "probeAsk": "Character and setting drawn separately. Comment on either, or say OK to continue.",
-    "probeKind": {
-      "pose": "Character",
-      "setting": "Setting",
-      "merged": "Merged"
-    }
+    "nick": "Nickname"
   },
   "characters": {
     "title": "Characters",

@@ -1,10 +1,4 @@
-"""Five seats, disjoint slots, and no personas.
-
-The roster this replaced had seventeen jobs, two people each, and taste axes
-that averaged into a house style. It lost: every seat rewrote the whole prompt,
-so adding seats made the picture worse rather than better. These tests pin the
-properties that made the new shape necessary.
-"""
+"""Fictional Muse roster — cast presets and table-read voice."""
 from __future__ import annotations
 
 import sys
@@ -26,147 +20,212 @@ _SITUATION_BANNED = (
 )
 
 
-def test_the_crew_is_five_seats_in_a_fixed_order():
-    assert crew.ROLE_ORDER == ("plan", "actress", "enrich", "reduce", "check")
-    assert crew.resolve_crew() == list(crew.ROLE_ORDER)
-    # There is no crew to pick any more; the argument is accepted and ignored.
-    assert crew.resolve_crew(preset="anything", crew_ids=["nonsense"]) == list(crew.ROLE_ORDER)
+def test_resolve_crew_always_ends_with_finisher():
+    ids = crew.resolve_crew(preset="classic")
+    roles = [crew.role_of(i) for i in ids]
+    assert roles[-1] == "finisher"
+    assert "beat" in roles
+    assert "wardrobe" in roles
+    assert "actress" in roles
+    assert roles.index("actress") < roles.index("faces")
+    # One person per job, never two.
+    assert len(roles) == len(set(roles))
 
 
-def test_every_slot_has_exactly_one_owner():
-    """The whole reason for the rewrite: when everyone could write everything,
-    the objects named at seat five were gone by seat seventeen."""
-    owners: dict[str, list[str]] = {}
-    for rid in crew.ROLE_ORDER:
-        for slot in crew.ROLES[rid]["owns"]:
-            owners.setdefault(slot, []).append(rid)
-    # `objects` is shared on purpose: the planner seeds the ledger, enrich adds.
-    for slot, who in owners.items():
-        assert len(who) == 1 or slot == "objects", f"{slot} written by {who}"
-    assert set(crew.SLOT_OWNER) <= set(crew.SLOT_ORDER)
+def test_resolve_crew_honours_explicit_ids():
+    ids = crew.resolve_crew(crew_ids=["lens:teiten", "wardrobe", "unknown"])
+    assert ids == ["lens:teiten", "wardrobe:shiwa", "actress:cast", "finisher:maku"]
 
 
-def test_the_seats_that_only_cut_own_nothing():
-    """Reduce and check must not be able to write, or the loop has two authors
-    for the same words and drifts the way the old chain did."""
-    assert crew.ROLES["reduce"]["owns"] == ()
-    assert crew.ROLES["check"]["owns"] == ()
-    assert "REMOVE" in crew.FIELDS["reduce"]
-    assert set(crew.FIELDS["reduce"]) == {"REMOVE"}
-
-
-def test_no_seat_is_told_that_contrast_is_good():
-    """Lighting and colour design were the measured culprits: one was told to
-    'forbid flat even lighting', the other sank the frame to make an accent
-    pop, and nothing downstream could undo either."""
-    # Only the job descriptions: NO_PUSHING names these phrases in order to ban
-    # them, so scanning it would be self-defeating.
-    low = "\n".join(r["specialty"] for r in crew.ROLES.values()).lower()
-    for phrase in ("vivid contrast", "forbid flat", "dramatic shadow",
-                   "carve negative space", "deeper shadow"):
-        assert phrase not in low, phrase
-    # And the ban has to name the Japanese too — the old one listed only
-    # English words while the seats were speaking Japanese.
-    for word in ("深く", "沈める", "もっと", "研ぎ澄ます"):
-        assert word in crew.NO_PUSHING, word
-
-
-def test_the_seats_that_can_add_light_are_told_not_to_push_it():
-    for rid in ("plan", "enrich"):
-        assert crew.NO_PUSHING in crew.system_prompt_for(rid)
-    # Reduce is deliberately NOT given it: it has to be free to cut light words.
-    assert crew.NO_PUSHING not in crew.system_prompt_for("reduce")
-
-
-def test_say_asks_for_a_reason_a_decision_and_its_effect():
-    """Plain speech, not thin speech. The camera seat in the old roster was the
-    one worth keeping: it answered with a reason, decided one thing, and said
-    what that did to the picture."""
-    spec = crew.SAY_SPEC
-    assert "REASON" in spec
-    assert "ONE concrete decision" in spec
-    assert "what that decision does to the picture" in spec
-    # And no personas.
-    assert "catchphrase" in spec.lower()
-
-
-def test_no_seat_carries_a_persona():
-    for rid in crew.ROLE_ORDER:
-        r = crew.ROLES[rid]
-        for gone in ("say_examples", "voice", "voice_ja", "line", "line_ja",
-                     "taste", "flavor_tags", "nick", "nick_ja"):
-            assert gone not in r, f"{rid} still carries {gone}"
-    for gone in ("PRESETS", "TASTE_AXES", "style_direction", "DEFAULT_PRESET",
-                 "BANTER_OUTPUT", "actress_banter_prompt"):
-        assert not hasattr(crew, gone), gone
-
-
-def test_every_seat_gets_an_output_format_it_can_be_parsed_from():
-    for rid in crew.ROLE_ORDER:
-        text = crew.system_prompt_for(rid, character={"personality": {}})
-        assert "OUTPUT FORMAT" in text
-        assert "SAY:" in text
-        for label in crew.FIELDS[rid]:
-            assert f"{label}:" in text, f"{rid} never names {label}"
-
-
-def test_the_lead_is_driven_by_traits_and_fenced_from_her_backstory():
+def test_actress_prompt_pulls_selected_character_personality():
     character = {
-        "name": "Sample Lead", "name_ja": "サンプル主演",
+        "name": "Sample Lead",
+        "name_ja": "サンプル主演",
         "personality": {
-            "traits": ["quiet", "stubborn"],
+            "traits": ["enthusiastic", "sincere"],
             "summary_ja": "いつも本気で話す。",
             "inner_ja": ["ひとりのとき少し静かになる"],
             "likes": ["clear explanations"],
+            "dislikes": ["being rushed"],
         },
-        "expression_vocab": ["smile"], "gesture_vocab": ["looking_up"],
+        "expression_vocab": ["smile", "open_mouth"],
+        "gesture_vocab": ["walking", "looking_up"],
     }
-    text = crew.system_prompt_for("actress", character=character)
+    text = crew.actress_system_prompt(character)
     assert "サンプル主演" in text
-    assert "quiet" in text and "smile" in text
-    # The inner life is present but explicitly fenced to tone.
+    assert "enthusiastic" in text
     assert "ひとりのとき少し静かになる" in text
-    assert "TONE ONLY" in text
-    assert "Do not narrate your past" in text
+    assert "smile" in text
+    assert "FIRST PERSON" in text or "一人称" in text
+    assert "never props" in text.lower() or "Never draw likes" in text
 
 
-def test_the_planner_is_told_the_light_must_be_readable():
-    import re
-    text = re.sub(r"\s+", " ", crew.system_prompt_for("plan"))
-    assert "State a LEVEL a person could read the picture by" in text
-    assert "her history is not a location" in text.lower()
-
-
-def test_the_checker_may_not_argue_with_the_measurements():
-    """A VLM handed a 66%-black frame called it 'artistically correct'. The
-    numbers decide; the model only explains and prescribes."""
-    text = crew.system_prompt_for("check")
-    assert "facts, not opinions" in text
-    assert "do not" in text.lower() and "intentional" in text.lower()
+def test_system_prompt_keeps_say_tags_scene_and_english_craft():
+    text = crew.system_prompt_for("beat")
+    assert "OUTPUT FORMAT" in text
+    assert "SAY:" in text
+    assert "TAGS:" in text
+    assert "SCENE:" in text
+    assert "English only" in text
+    assert "演出" in text and "一秒" in text
+    assert "口調 (JA)" in text
+    assert "EXAMPLE SAY" in text
+    assert "conversation" in text.lower() or "RECENT TABLE TALK" in text
+    assert len(crew.MUSES["beat:ichibyou"]["say_examples"]) >= 3
+    assert (crew.MUSES["spine:bane"]["voice_ja"]
+            != crew.MUSES["faces:mabataki"]["voice_ja"])
 
 
 def test_production_muse_copy_has_no_situation_specific_anchors():
     """Any theme must work — forbid demo/situation nouns in shipped Muse text."""
-    import json
-
     root = Path(__file__).resolve().parents[2] / "backend" / "app" / "muse"
     blobs: list[str] = []
     for path in root.rglob("*"):
-        if path.suffix not in {".py", ".md"} or "__pycache__" in path.parts:
+        if path.suffix not in {".py", ".md"}:
+            continue
+        if "__pycache__" in path.parts:
             continue
         blobs.append(path.read_text(encoding="utf-8"))
+    # Also scan Muse UI placeholders (must not name a sample scene).
     locales = Path(__file__).resolve().parents[2] / "frontend" / "src" / "locales"
     for name in ("ja.json", "en.json"):
-        data = json.loads((locales / name).read_text(encoding="utf-8"))
+        text = (locales / name).read_text(encoding="utf-8")
+        # Only the muse.themePlaceholder value matters for this rule.
+        import json
+        data = json.loads(text)
         blobs.append(str((data.get("muse") or {}).get("themePlaceholder") or ""))
     joined = "\n".join(blobs)
     for banned in _SITUATION_BANNED:
-        assert banned not in joined, f"situation-specific '{banned}' in Muse copy"
+        assert banned not in joined, f"situation-specific '{banned}' found in Muse production copy"
 
 
-def test_public_roster_names_five_seats_and_the_lead():
-    roster = crew.public_roster({"name": "Sample", "name_ja": "サンプル"})
-    assert [r["id"] for r in roster["roles"]] == list(crew.ROLE_ORDER)
-    lead = next(r for r in roster["roles"] if r["id"] == "actress")
-    assert lead["name_ja"] == "サンプル"
-    assert roster["slot_order"] == list(crew.SLOT_ORDER)
+def test_finisher_demands_dense_scene():
+    text = crew.system_prompt_for("finisher")
+    assert "140–200" in text or "140-200" in text
+    assert "35–55" in text or "35-55" in text
+    assert "Densify" in text or "densify" in text or "EXPAND" in text
+    assert "80 words" not in text  # old thin cap must stay gone
+    assert "140–200" in crew.OUTPUT or "140-200" in crew.OUTPUT
+
+
+def test_banter_prompt_is_say_only():
+    text = crew.banter_system_prompt_for("hook")
+    assert "SAY:" in text
+    assert "TAGS" not in text or "Do NOT output TAGS" in text
+    assert "heckling" in text.lower() or "SIDE COMMENT" in text
+
+
+def test_public_roster_has_no_real_creator_names():
+    roster = crew.public_roster()
+    names = " ".join(m["name"] for m in roster["muses"]).lower()
+    # Guard against accidentally shipping real creator shout-outs.
+    for banned in ("greg", "rutkowski", "artis", "wlop", "mucha"):
+        assert banned not in names
+    assert roster["default_preset"] == "standard"
+    assert "vivid" in roster["presets"]
+
+
+def test_every_seat_has_a_job_a_nickname_and_a_taste():
+    for mid in crew.MUSES:
+        m = crew.MUSES[mid]
+        assert m["name_ja"], mid
+        assert m["nick_ja"], mid
+        assert set(m["taste"]) == {"vivid", "real", "novel"}, mid
+        for axis, score in m["taste"].items():
+            assert -2 <= score <= 2, f"{mid}.{axis} = {score}"
+        assert len(m["say_examples"]) >= 3, mid
+        # Three lines that are actually three lines, not one written thrice.
+        assert len(set(m["say_examples"])) == len(m["say_examples"]), mid
+
+
+def test_swapping_the_crew_moves_the_look():
+    """The whole reason a person picks a crew."""
+    flat = crew.style_direction(crew.PRESETS["flat"])
+    real = crew.style_direction(crew.PRESETS["photoreal"])
+    loud = crew.style_direction(crew.PRESETS["vivid"])
+    classic = crew.style_direction(crew.PRESETS["classic"])
+
+    assert flat["base"] != real["base"]
+    assert "flat" in flat["base"]
+    assert "semi-realistic" in real["base"]
+    assert "vivid" in loud["base"]
+    assert "classic composition" in classic["base"]
+
+    assert flat["scores"]["real"] < real["scores"]["real"]
+    assert loud["scores"]["vivid"] > classic["scores"]["vivid"]
+
+
+def test_a_crew_is_averaged_not_summed():
+    """Fifteen people are fifteen opinions, not fifteen times the volume."""
+    one = crew.style_direction(["gaffer"])
+    many = crew.style_direction(["gaffer"] + list(crew.PRESETS["standard"]))
+    assert one["scores"]["vivid"] >= many["scores"]["vivid"]
+    assert -2 <= many["scores"]["vivid"] <= 2
+
+
+def test_the_showrunner_outranks_the_room():
+    written = crew.base_style_for(crew.PRESETS["flat"], "watercolour storybook")
+    assert written == "watercolour storybook"
+    assert crew.base_style_for(crew.PRESETS["flat"], "  ") == \
+        crew.style_direction(crew.PRESETS["flat"])["base"]
+
+
+def test_the_example_line_varies_between_sessions_but_holds_within_one():
+    who = "beat:ichibyou"
+    seeds = {crew._pick_say_example(who, f"session-{i}") for i in range(40)}
+    assert len(seeds) > 1, "every session would sound identical"
+    assert crew._pick_say_example(who, "s1") == crew._pick_say_example(who, "s1")
+
+
+def test_the_base_look_reaches_the_seat_that_guards_style():
+    text = crew.system_prompt_for("ink:ipponsen", base_style="vivid flat anime cel shading")
+    assert "vivid flat anime cel shading" in text
+    assert "You own the base look" in text
+    assert "cel_shading" in text  # its own flavour
+
+
+def test_a_job_has_more_than_one_person_who_does_it():
+    """Two lighting artists both light the scene. One hands you hard rim light,
+    the other something soft enough to sleep in — that is the range."""
+    multi = [r for r in crew.ROLE_ORDER if len(crew.members_of(r)) > 1]
+    assert len(multi) >= 12, [crew.ROLES[r]["name_ja"] for r in multi]
+    for rid in multi:
+        people = [crew.MUSES[m] for m in crew.members_of(rid)]
+        nicks = {p["nick_ja"] for p in people}
+        assert len(nicks) == len(people), rid
+        # Same job, different pull — otherwise the choice is decoration.
+        tastes = {tuple(sorted(p["taste"].items())) for p in people}
+        assert len(tastes) == len(people), f"{rid}: identical taste"
+
+
+def test_one_person_per_job_and_a_later_pick_replaces_an_earlier_one():
+    ids = crew.resolve_crew(crew_ids=["gaffer:gyakkou", "gaffer:andon"])
+    lighting = [i for i in ids if crew.role_of(i) == "gaffer"]
+    assert lighting == ["gaffer:andon"]
+
+
+def test_an_old_session_naming_bare_jobs_still_resolves():
+    """Sessions stored crew_ids as job ids before people existed."""
+    ids = crew.resolve_crew(crew_ids=["gaffer", "palette"])
+    assert ids[:2] == ["gaffer:gyakkou", "palette:itten"]
+    assert crew.resolve_member("gaffer") == crew.DEFAULT_MEMBER["gaffer"]
+    assert crew.resolve_member("nonsense") == ""
+
+
+def test_swapping_one_person_moves_the_look():
+    """Same jobs, one different person, different picture."""
+    hard = crew.style_direction(["gaffer:gyakkou", "palette:itten", "ink:ipponsen"])
+    soft = crew.style_direction(["gaffer:andon", "palette:aku", "ink:ipponsen"])
+    assert hard["scores"]["vivid"] > soft["scores"]["vivid"]
+    assert hard["base"] != soft["base"]
+    assert "rim_lighting" in hard["flavor_tags"]
+    assert "soft_lighting" in soft["flavor_tags"]
+
+
+def test_the_roster_groups_people_under_the_job_they_do():
+    roster = crew.public_roster(crew_ids=list(crew.PRESETS["flat"]))
+    by_id = {r["id"]: r for r in roster["roles"]}
+    assert len(roster["roles"]) == len(crew.ROLE_ORDER)
+    assert len(by_id["gaffer"]["people"]) == 2
+    cast = [p["id"] for r in roster["roles"] for p in r["people"] if p["cast"]]
+    assert "ink:ipponsen" in cast and "ink:atsunuri" not in cast
