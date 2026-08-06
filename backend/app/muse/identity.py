@@ -318,6 +318,149 @@ def assemble_positive(
     return ", ".join(c for c in chunks if c)
 
 
+# ── The shot sheet ───────────────────────────────────────────────────────────
+# Anima reads Danbooru tags, natural language, or any mix, and it was trained
+# with tag dropout — it does not need every relevant tag listed. The old shape
+# handed the model 78 tags and asked an LLM to retype all of them every turn,
+# which is both more than the checkpoint wants and how `tatami_mat` became
+# `tat_mat` on the last pass with nobody left to notice. Slots are rendered
+# here, in Python, so nothing is ever retyped.
+
+_WEIGHT_RE = re.compile(r"\(([^():]+):(\d+(?:\.\d+)?)\)")
+# The Grade seat's own spec said never above 1.35 and two 1.4s shipped anyway,
+# because the cap lived in a prompt instead of in code.
+MAX_WEIGHT = 1.35
+# Anima does not need a wall of tags. This is a ceiling, not a target.
+MAX_TAGS = 20
+
+
+def clamp_weights(text: str, *, cap: float = MAX_WEIGHT) -> str:
+    """Pull `(tag:1.4)` back to the cap. Unweighted text passes through."""
+    def _fix(m: re.Match[str]) -> str:
+        value = float(m.group(2))
+        if value <= cap:
+            return m.group(0)
+        return f"({m.group(1)}:{cap:g})"
+    return _WEIGHT_RE.sub(_fix, text or "")
+
+
+def _phrase(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v).strip() for v in value if str(v).strip())
+    return str(value or "").strip().rstrip(",")
+
+
+def render_shot(
+    shot: dict[str, Any],
+    *,
+    identity_tags: Iterable[str] | None = None,
+    subject: Iterable[str] | None = None,
+    style: str = "",
+    framing: str | None = "auto",
+    slot_order: Iterable[str] = (),
+    quality: Iterable[str] = ("masterpiece", "best quality"),
+) -> str:
+    """Shot sheet → one Anima prompt: locked tags first, then a plain paragraph.
+
+    Identity, count and framing stay as tags because they are the parts that may
+    not drift; everything the crew wrote becomes prose, in a fixed slot order,
+    because that is what this checkpoint reads best and because a fixed order is
+    one the model cannot scramble.
+    """
+    head = identity_list(subject) + [
+        t for t in identity_list(identity_tags) if t not in set(identity_list(subject))
+    ]
+    seen = set(head)
+    lead: list[str] = []
+    for group in (style_tags(style), framing_tags(framing), quality):
+        for tag in group:
+            tag = str(tag).strip()
+            key = _norm(tag)
+            if tag and key not in seen:
+                seen.add(key)
+                lead.append(tag)
+
+    tags = (head + lead)[:MAX_TAGS]
+
+    body: list[str] = []
+    for slot in (slot_order or shot.keys()):
+        text = _phrase(shot.get(slot))
+        if text:
+            body.append(clamp_weights(text))
+
+    parts = [", ".join(tags)] if tags else []
+    if body:
+        parts.append(". ".join(p.rstrip(".") for p in body) + ".")
+    return ", ".join(p for p in parts if p)
+
+
+def apply_delta(
+    shot: dict[str, Any],
+    *,
+    add: dict[str, Any] | None = None,
+    remove: Iterable[str] | None = None,
+    allowed: Iterable[str] | None = None,
+    list_slots: Iterable[str] = (),
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Apply one seat's edit without anyone retyping the sheet.
+
+    ``add`` writes only slots the seat owns (``allowed``); everything else is
+    dropped rather than trusted, because a seat reaching outside its slots is
+    exactly the drift this shape exists to stop. ``remove`` holds phrases to
+    delete and is deliberately not restricted — the reduce seat has to be able
+    to cut a darkening word out of a slot it does not own, or the light only
+    ever goes one way.
+
+    ``overwrite`` is for the seats that *settle* a slot rather than add to it.
+    When the Showrunner moves the scene somewhere else, the planner's new place
+    has to replace the old one; appending would leave the picture in two rooms.
+    """
+    out = {k: (list(v) if isinstance(v, list) else v) for k, v in (shot or {}).items()}
+    permitted = set(allowed) if allowed is not None else None
+    declared = set(list_slots)
+
+    def _is_list(slot: str) -> bool:
+        # Declared, or already holding a list. Reading it off the data as well
+        # means a caller that forgets to declare a slot does not silently get a
+        # comma-joined string where a list belongs.
+        return slot in declared or isinstance(out.get(slot), list)
+
+    for slot, value in (add or {}).items():
+        if permitted is not None and slot not in permitted:
+            logger.info("[muse.identity] %s is not this seat's slot; ignored", slot)
+            continue
+        text = _phrase(value)
+        if not text:
+            continue
+        items = [i.strip() for i in text.split(",") if i.strip()]
+        if _is_list(slot) or isinstance(value, (list, tuple)):
+            if overwrite:
+                out[slot] = items
+                continue
+            have = {_norm(i) for i in out.get(slot) or []}
+            out.setdefault(slot, [])
+            out[slot].extend(i for i in items if _norm(i) not in have)
+        else:
+            current = "" if overwrite else _phrase(out.get(slot))
+            out[slot] = f"{current}, {text}" if current else text
+
+    for raw in remove or []:
+        target = _norm(raw)
+        if not target:
+            continue
+        for slot, value in list(out.items()):
+            if isinstance(value, list):
+                out[slot] = [i for i in value if _norm(i) != target]
+            elif isinstance(value, str) and value:
+                kept = [
+                    p.strip() for p in value.split(",")
+                    if p.strip() and target not in _norm(p)
+                ]
+                out[slot] = ", ".join(kept)
+    return out
+
+
 def word_count(text: str) -> int:
     return len([w for w in (text or "").split() if w])
 

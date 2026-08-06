@@ -55,16 +55,20 @@ LLM_DEFAULTS: dict[str, object] = {
     "vision_model": "",
     # Composition bias for every stage. auto lets the theme decide.
     "framing": "auto",
+    # ── Probes ──────────────────────────────────────────────────────────────
+    # Small enough to be nearly free, big enough to judge composition and
+    # exposure on. The crew looks at one of these between passes instead of
+    # arguing about a picture nobody has seen.
+    "probe_size": 512,
+    "probe_steps": 12,
+    # How many enrich/reduce/probe rounds before showing the board regardless.
+    # A failure at the cap is announced, never shipped quietly.
+    "probe_max_rounds": 3,
     # Drop the VLM from VRAM before each Comfy render. Off, and it should stay
     # off: an MoE text model sits around 8GB of active weights, so it and image
     # generation fit on the card together. Unloading also costs the crew the
-    # board — they are handed the render to look at after it lands.
+    # probe — they are handed each render to look at after it lands.
     "unload_vlm": False,
-    # Cast preset for the table-read crew (see muse.crew.PRESETS).
-    "crew_preset": "standard",
-    # Banter between craft passes. light = Ollama-friendly (fewer side calls);
-    # full = previous speaker + occasional heckler; off = craft only.
-    "banter_mode": "light",
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────

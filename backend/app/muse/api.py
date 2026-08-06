@@ -25,7 +25,6 @@ class SessionCreate(BaseModel):
     model: str = ""
     vision_model: str = ""
     locale: str = "ja"
-    crew_preset: str = "standard"
 
 
 class InputsPatch(BaseModel):
@@ -39,8 +38,6 @@ class InputsPatch(BaseModel):
     negative_prompt: str | None = None
     style: str | None = None
     framing: str | None = None
-    crew_preset: str | None = None
-    crew_ids: list[str] | None = None
     width: int | None = Field(default=None, ge=256, le=2048)
     height: int | None = Field(default=None, ge=256, le=2048)
     draft_steps: int | None = Field(default=None, ge=1, le=60)
@@ -50,7 +47,11 @@ class InputsPatch(BaseModel):
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
     think: bool | None = None
     unload_vlm: bool | None = None
-    banter_mode: str | None = None
+    # Probe knobs: small and cheap on purpose — the crew looks at one of these
+    # between passes instead of arguing about a picture nobody has seen.
+    probe_size: int | None = Field(default=None, ge=256, le=1024)
+    probe_steps: int | None = Field(default=None, ge=1, le=30)
+    probe_max_rounds: int | None = Field(default=None, ge=1, le=6)
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)
     drop_rating_tags: bool | None = None
@@ -62,25 +63,6 @@ class InputsPatch(BaseModel):
         if value is None:
             return None
         return identity.parse_framing(value)
-
-    @field_validator("crew_preset")
-    @classmethod
-    def _preset(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value not in crew.PRESETS:
-            raise ValueError(f"crew_preset must be one of: {', '.join(crew.PRESETS)}")
-        return value
-
-    @field_validator("banter_mode")
-    @classmethod
-    def _banter(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        mode = str(value).strip().lower()
-        if mode not in ("light", "full", "off"):
-            raise ValueError("banter_mode must be one of: light, full, off")
-        return mode
 
 
 class CharacterPick(BaseModel):
@@ -171,6 +153,7 @@ async def start_table(session_id: str, request: Request):
     session = await _session(request, session_id)
     return await _run(service.start_table(
         _db(request), _llm(request, session), session,
+        comfy=request.app.state.comfy,
     ))
 
 

@@ -74,17 +74,43 @@ def test_framing_tags_and_normalize():
     assert "full_body" in identity.framing_negative("face_closeup")
 
 
-def test_pose_intent_comes_from_scene_not_identity_prefix():
-    from app.muse import chain
+def test_the_shot_sheet_renders_identity_first_then_prose_in_slot_order():
+    """Anima reads tags, natural language or a mix, and was trained with tag
+    dropout — it does not want a wall of tags. Identity stays tagged because it
+    is the part that may not drift; the crew's own writing becomes prose in an
+    order the model cannot scramble."""
+    from app.muse import crew
 
-    raw = "TAGS: standing, rooftop\n\nSCENE: She waits in the rain."
-    result = chain._finish_turn(
-        raw, muse_id="beat", identity_tags=["1girl", "small_breasts"],
-        framing="auto", brief="B",
+    shot = {
+        "subject": "a girl at a table", "pose": "chin on hand",
+        "place": "a narrow room", "light": "even daylight, normal exposure",
+        "camera": "(medium shot:1.4)", "mood": "quietly pleased",
+    }
+    out = identity.render_shot(
+        shot, identity_tags=["navy_hair", "small_breasts"],
+        subject=["1girl", "solo"], style="anime illustration",
+        framing="upper_body", slot_order=crew.SLOT_ORDER,
     )
-    assert result.prompt.startswith("1girl, small_breasts")
-    assert result.pose_intent == "She waits in the rain."
-    assert "small_breasts" not in result.pose_intent
+    assert out.startswith("1girl, solo, navy_hair, small_breasts")
+    assert out.index("a girl at a table") < out.index("chin on hand")
+    assert out.index("chin on hand") < out.index("a narrow room")
+    # The weight cap lived in a prompt before, and two 1.4s shipped anyway.
+    assert "(medium shot:1.35)" in out
+    assert "1.4" not in out
+
+
+def test_a_seat_that_only_deletes_can_reach_a_slot_it_does_not_own():
+    shot = {"light": "even daylight, deep shadows", "objects": ["mug", "napkin"]}
+    out = identity.apply_delta(shot, remove=["deep shadows", "napkin"])
+    assert out["light"] == "even daylight"
+    assert out["objects"] == ["mug"]
+
+
+def test_writing_outside_your_slots_is_dropped_not_trusted():
+    out = identity.apply_delta(
+        {"light": "even daylight"}, add={"light": "pitch black"}, allowed=("camera",),
+    )
+    assert out["light"] == "even daylight"
 
 
 def test_parse_table_read_keeps_say_separate_from_craft():

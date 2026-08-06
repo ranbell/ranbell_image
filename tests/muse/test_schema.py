@@ -24,28 +24,31 @@ def test_a_new_session_needs_nothing_once_the_four_inputs_are_set():
     ]
 
 
-def test_new_session_casts_the_standard_crew_by_default():
+def test_a_new_session_starts_with_an_empty_shot_sheet():
+    """There is no crew to pick any more — every seat is always seated, and the
+    working state is a shot sheet rather than one blob everyone rewrites."""
     s = schema.new_session()
-    assert s["inputs"]["crew_preset"] == "standard"
-    assert "beat:ichibyou" in s["inputs"]["crew_ids"]
-    assert "finisher" not in s["inputs"]["crew_ids"]  # always appended at resolve
-    assert "actress" not in s["inputs"]["crew_ids"]  # always injected at resolve
     assert s["status"] == "setup"
     assert s["chat"] == []
+    assert s["shot"] == {}
+    assert s["plan"] == {}
+    assert s["probes"] == {}
     assert s["craft"]["prompt"] == ""
+    for gone in ("crew_preset", "crew_ids", "banter_mode"):
+        assert gone not in s["inputs"], gone
 
 
-def test_public_roster_fills_actress_from_character():
+def test_public_roster_fills_the_lead_from_the_character():
     s = schema.new_session()
     s["character"] = {
         "name": "Sample Lead", "name_ja": "サンプル主演",
         "personality": {"summary_ja": "いつも本気で話す。"},
     }
     view = schema.public_view(s)
-    actress = next(m for m in view["roster"]["muses"] if m["id"] == "actress:cast")
-    assert actress["name_ja"] == "サンプル主演"
-    assert actress["required"] is True
-    assert "本気" in actress["line"]
+    seats = view["roster"]["roles"]
+    assert [r["id"] for r in seats] == ["plan", "actress", "enrich", "reduce", "check"]
+    lead = next(r for r in seats if r["id"] == "actress")
+    assert lead["name_ja"] == "サンプル主演"
 
 
 def test_board_is_done_when_the_job_stops_not_when_a_count_is_reached():
