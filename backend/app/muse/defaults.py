@@ -64,11 +64,15 @@ LLM_DEFAULTS: dict[str, object] = {
     # How many enrich/reduce/probe rounds before showing the board regardless.
     # A failure at the cap is announced, never shipped quietly.
     "probe_max_rounds": 3,
-    # Drop the VLM from VRAM before each Comfy render. Off, and it should stay
-    # off: an MoE text model sits around 8GB of active weights, so it and image
-    # generation fit on the card together. Unloading also costs the crew the
-    # probe — they are handed each render to look at after it lands.
-    "unload_vlm": False,
+    # Drop the LLM from VRAM before each render. ON, because they do not fit:
+    # measured on this box, a 26B MoE holds 12.5GB of a 15.6GB card and ComfyUI
+    # OOMs on the 0.8GB left. This was False for a while on the strength of an
+    # "MoE is only ~8GB active" claim that was never measured. Set it False only
+    # if your card can genuinely hold a checkpoint and the model at once; the
+    # cost of leaving it on is a model reload between the talking and the
+    # drawing, which `ollama_keep_alive` cannot help with because the point is
+    # to give the memory back.
+    "unload_vlm": True,
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────
@@ -77,11 +81,9 @@ STYLE_DEFAULTS: dict[str, object] = {
     # and every stage is told to obey it. The same theme in two styles is two
     # different pictures.
     #
-    # Empty by default so the cast decides: `crew.style_direction` reads the
-    # room's taste and names a base look. Filled in with a fixed phrase it wins
-    # outright, which is right when someone has an opinion and wrong as a
-    # default — a preset style meant swapping the whole crew changed nothing
-    # about how the picture was rendered.
+    # Empty means the checkpoint's own look. There is no crew taste to average
+    # any more — picking people to move the style cost the picture more than it
+    # bought, so a look is something you type here or do not get.
     "style": "",
     # Appended to whatever the workflow already carries.
     "negative_prompt": (

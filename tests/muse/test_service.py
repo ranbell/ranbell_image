@@ -409,3 +409,48 @@ def test_is_approve_accepts_natural_ok_phrases():
 
 def test_the_workflows_last_image_is_the_one_worth_keeping():
     assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
+
+
+@pytest.mark.asyncio
+async def test_the_model_comes_off_the_card_before_anything_renders():
+    """They do not share. Measured: a 26B MoE holds 12.5GB of a 15.6GB card and
+    ComfyUI OOMs on what is left. This is the seam where they take turns."""
+    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
+    session = await _ready(db)
+    await service.start_table(db, llm, session, comfy=comfy)
+    assert llm.unloaded, "a probe rendered with the LLM still resident"
+
+
+@pytest.mark.asyncio
+async def test_sharing_the_card_is_opt_in_not_the_default():
+    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
+    session = await _ready(db, unload_vlm=False)
+    await service.start_table(db, llm, session, comfy=comfy)
+    assert llm.unloaded == []
+
+
+@pytest.mark.asyncio
+async def test_a_probe_holds_the_gpu_the_way_a_render_job_does():
+    """Probes are awaited inline rather than submitted, so they have to take the
+    generation resource by hand or they can land on the card mid-board."""
+    held: list[str] = []
+
+    class Gpu:
+        def acquire(self):
+            import contextlib
+
+            @contextlib.asynccontextmanager
+            async def _ctx():
+                held.append("in")
+                yield
+                held.append("out")
+            return _ctx()
+
+    class ResourceSpooler(FakeSpooler):
+        def resource_for(self, lane):
+            return Gpu()
+
+    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), ResourceSpooler()
+    session = await _ready(db)
+    await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
+    assert held == ["in", "out", "in", "out"], held

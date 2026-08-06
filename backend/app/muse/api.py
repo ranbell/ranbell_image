@@ -153,7 +153,7 @@ async def start_table(session_id: str, request: Request):
     session = await _session(request, session_id)
     return await _run(service.start_table(
         _db(request), _llm(request, session), session,
-        comfy=request.app.state.comfy,
+        comfy=request.app.state.comfy, spooler=request.app.state.spooler,
     ))
 
 

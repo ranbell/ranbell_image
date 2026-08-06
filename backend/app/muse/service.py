@@ -29,6 +29,7 @@ import random
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 from ..characters import presets as presets_db
@@ -39,6 +40,11 @@ from . import chain, crew, critique, events, harvest, identity, probe, runner, s
 from .schema import missing_inputs, new_session
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _nullcontext():
+    yield
 
 # The last probe frames, per session. Deliberately NOT on the session dict —
 # that is serialised into Qdrant, and a few hundred KB of PNG per round has no
@@ -405,18 +411,27 @@ async def _wd14(db, data: bytes, session: dict[str, Any]) -> list[str]:
 
 async def _take_probe(
     db, comfy, session: dict[str, Any], shot: probe.ProbeShot,
+    *, spooler=None, ollama=None,
 ) -> critique.Reading | None:
     inputs = _inputs(session)
-    data = await probe.render(
-        comfy,
-        workflow_name=str(inputs.get("workflow") or ""),
-        positive=shot.positive,
-        negative=identity.merge_negative(negative_for(session), shot.negative),
-        seed=_probe_seed(session),
-        size=int(inputs.get("probe_size") or 512),
-        steps=int(inputs.get("probe_steps") or 12),
-        cfg=float(inputs.get("draft_cfg") or 4.0),
-    )
+    # A probe is a render like any other. It is awaited inline rather than
+    # submitted, so it has to take the GPU resource by hand — otherwise it can
+    # put a second graph on the card while a board is being drawn.
+    getter = getattr(spooler, "resource_for", None) if spooler else None
+    gpu = getter(JobLane.GENERATION) if getter else None
+    ctx = gpu.acquire() if gpu is not None else _nullcontext()
+    async with ctx:
+        await _free_the_card(ollama, session)
+        data = await probe.render(
+            comfy,
+            workflow_name=str(inputs.get("workflow") or ""),
+            positive=shot.positive,
+            negative=identity.merge_negative(negative_for(session), shot.negative),
+            seed=_probe_seed(session),
+            size=int(inputs.get("probe_size") or 512),
+            steps=int(inputs.get("probe_steps") or 12),
+            cfg=float(inputs.get("draft_cfg") or 4.0),
+        )
     if not data:
         return None
 
@@ -447,7 +462,9 @@ async def _take_probe(
     return reading
 
 
-async def _probe_split(db, comfy, session: dict[str, Any]) -> dict[str, critique.Reading]:
+async def _probe_split(
+    db, comfy, session: dict[str, Any], *, spooler=None, ollama=None,
+) -> dict[str, critique.Reading]:
     """Her on white, the room with nobody in it. Rendered concurrently."""
     shots = probe.split_prompts(
         _shot(session),
@@ -465,7 +482,8 @@ async def _probe_split(db, comfy, session: dict[str, Any]) -> dict[str, critique
     out: dict[str, critique.Reading] = {}
     for s in shots:
         try:
-            reading = await _take_probe(db, comfy, session, s)
+            reading = await _take_probe(db, comfy, session, s,
+                                        spooler=spooler, ollama=ollama)
         except Exception:
             logger.warning("[muse] %s probe failed", s.kind, exc_info=True)
             continue
@@ -474,11 +492,13 @@ async def _probe_split(db, comfy, session: dict[str, Any]) -> dict[str, critique
     return out
 
 
-async def _probe_merged(db, comfy, session: dict[str, Any]) -> critique.Reading | None:
+async def _probe_merged(
+    db, comfy, session: dict[str, Any], *, spooler=None, ollama=None,
+) -> critique.Reading | None:
     shot = probe.ProbeShot(
         kind=probe.MERGED, positive=_render_prompt(session), negative="",
     )
-    return await _take_probe(db, comfy, session, shot)
+    return await _take_probe(db, comfy, session, shot, spooler=spooler, ollama=ollama)
 
 
 def _screening_note(readings: dict[str, critique.Reading]) -> str:
@@ -489,7 +509,9 @@ def _screening_note(readings: dict[str, critique.Reading]) -> str:
 
 
 # ── Act 1 + 2: brief, then look ─────────────────────────────────────────────
-async def start_table(db, ollama, session: dict[str, Any], comfy=None) -> dict[str, Any]:
+async def start_table(
+    db, ollama, session: dict[str, Any], comfy=None, spooler=None,
+) -> dict[str, Any]:
     """Settle the situation and the performance, then show two probes."""
     missing = missing_inputs(session)
     if missing:
@@ -517,20 +539,22 @@ async def start_table(db, ollama, session: dict[str, Any], comfy=None) -> dict[s
         await _run_seat(ollama, session, seat, cfg=cfg)
         await session_db.save(db, session, publish=False)
 
-    await _show_probes(db, ollama, comfy, session, cfg=cfg)
+    await _show_probes(db, ollama, comfy, session, cfg=cfg, spooler=spooler)
     session["status"] = "chat"
     session_db.log(session, "brief", str((session.get("plan") or {}).get("place", "")))
     await session_db.save(db, session)
     return session
 
 
-async def _show_probes(db, ollama, comfy, session: dict[str, Any], *, cfg: dict) -> None:
+async def _show_probes(
+    db, ollama, comfy, session: dict[str, Any], *, cfg: dict, spooler=None,
+) -> None:
     """Render the split probes, measure them, and let the checker say one thing."""
     if comfy is None:
         _studio(session, "（ComfyUI に接続していないので試写は省略します）",
                 "(no ComfyUI connection — skipping the probe)")
         return
-    readings = await _probe_split(db, comfy, session)
+    readings = await _probe_split(db, comfy, session, spooler=spooler, ollama=ollama)
     if not readings:
         _studio(session, "試写が撮れませんでした。台本のまま進めます。",
                 "Could not take the probe. Continuing from the script.")
@@ -561,7 +585,7 @@ async def post_chat(
     if missing_inputs(session):
         raise MuseError(f"missing: {', '.join(missing_inputs(session))}")
     if not _shot(session):
-        session = await start_table(db, ollama, session, comfy=comfy)
+        session = await start_table(db, ollama, session, comfy=comfy, spooler=spooler)
 
     sid = session["session_id"]
     _publish_chat(sid, _chat_append(session, role="user", text=text, name="総監督"))
@@ -588,7 +612,7 @@ async def post_chat(
         await _run_seat(ollama, session, seat, cfg=cfg, note=text)
         await session_db.save(db, session, publish=False)
 
-    await _show_probes(db, ollama, comfy, session, cfg=cfg)
+    await _show_probes(db, ollama, comfy, session, cfg=cfg, spooler=spooler)
     session["status"] = "chat"
     await session_db.save(db, session)
     return session
@@ -615,7 +639,7 @@ async def refine(
 
         if comfy is None:
             break
-        reading = await _probe_merged(db, comfy, session)
+        reading = await _probe_merged(db, comfy, session, spooler=spooler, ollama=ollama)
         session["craft"]["round"] = i + 1
         await session_db.save(db, session, publish=False)
         if reading is None:
@@ -645,13 +669,23 @@ async def refine(
 
 
 # ── Act 5: board and shoot ──────────────────────────────────────────────────
-async def _maybe_unload(ollama, session: dict[str, Any]) -> None:
-    if ollama is None or not bool(_inputs(session).get("unload_vlm")):
+async def _free_the_card(ollama, session: dict[str, Any]) -> None:
+    """Take the language model off the GPU before anything renders.
+
+    Measured on the box this runs on: a 15.6GB card, and the 26B MoE holding
+    12.5GB of it. ComfyUI was left 0.8GB and ComfyUI died. They do not share —
+    the LLM and the sampler have to take turns, and the seam is here.
+
+    `unload_vlm` is the escape hatch for a card big enough to hold both, not the
+    switch that enables this. It used to default to off on the strength of a
+    claim nobody had measured.
+    """
+    if ollama is None or _inputs(session).get("unload_vlm") is False:
         return
     try:
         await ollama.unload(str(_inputs(session).get("model") or "") or None)
     except Exception:
-        logger.debug("[muse] unload_vlm failed", exc_info=True)
+        logger.debug("[muse] could not unload before render", exc_info=True)
 
 
 async def request_board(
@@ -663,7 +697,7 @@ async def request_board(
     session["craft"]["prompt"] = prompt
 
     sid = session["session_id"]
-    await _maybe_unload(ollama, session)
+    await _free_the_card(ollama, session)
     _studio(session, "ボードを上げます。これでいい？OKなら本番、ダメなら指摘ください。",
             "Board going up. Good? OK to shoot, or say what to fix.")
 
@@ -694,7 +728,7 @@ async def approve_and_shoot(
 
     sid = session["session_id"]
     seed = int((session.get("board") or {}).get("seed") or 0) or random.randint(0, (1 << 64) - 1)
-    await _maybe_unload(ollama, session)
+    await _free_the_card(ollama, session)
     _studio(session, "OK受領。本番撮影に入ります。", "OK received. Going to final shoot.")
 
     session["shoot"] = {"prompt": prompt, "seed": seed, "job_id": "",
@@ -725,7 +759,7 @@ async def cancel_draft(db, spooler, session: dict[str, Any]) -> dict[str, Any]:
 
 # ── legacy entry points (older clients) ─────────────────────────────────────
 async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict[str, Any]:
-    session = await start_table(db, ollama, session, comfy=comfy)
+    session = await start_table(db, ollama, session, comfy=comfy, spooler=spooler)
     return await refine(db, ollama, comfy, spooler, session)
 
 
