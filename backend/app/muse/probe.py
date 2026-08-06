@@ -60,6 +60,10 @@ class ProbeShot:
 # the whole session. They are seconds apart at this size; keep them in order.
 SEQUENTIAL = True
 
+# Probes queue ahead of a board. A board takes tens of seconds and the crew is
+# blocked on the probe it is about to look at; the board is not going anywhere.
+PRIORITY = 10
+
 
 def split_prompts(
     shot: dict[str, Any],
@@ -98,6 +102,27 @@ def split_prompts(
             negative=identity.merge_negative(negative, _NEGATIVE[kind]),
         ))
     return out
+
+
+async def run_probe_job(
+    reporter, cancel, *, comfy, workflow_name: str, positive: str,
+    negative: str = "", seed: int, size: int = 512, steps: int = 12,
+    cfg: float = 4.0,
+) -> bytes | None:
+    """GEN-lane entry point. A probe is a render, so it is a job like any other.
+
+    It went in as a direct `queue_prompt` call at first, which held the GPU only
+    by taking the lane's semaphore by hand. That serialises, but it leaves the
+    work invisible: nothing in the job list, nothing to cancel, and pausing the
+    generation lane did not stop it. Going through the spooler gets all of that
+    for free, and `run_with_resource` takes the GPU on the job's behalf.
+    """
+    reporter.indeterminate()
+    cancel.raise_if_set()
+    return await render(
+        comfy, workflow_name=workflow_name, positive=positive,
+        negative=negative, seed=seed, size=size, steps=steps, cfg=cfg,
+    )
 
 
 async def render(

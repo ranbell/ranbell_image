@@ -8,6 +8,7 @@ seats argued about a picture none of them had been shown.
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 import pytest
 
 from app.muse import probe, runner, service, session_db
+from app.spooler.models import JobLane
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GOOD = (FIXTURES / "board_ok.jpg").read_bytes()
@@ -102,14 +104,30 @@ class FakeComfy:
 
 
 class FakeSpooler:
+    """Runs submitted jobs the way the real one does: on the lane, awaitable."""
+
     def __init__(self):
         self.jobs: list[dict] = []
         self.cancelled: list[str] = []
+        self._results: dict[str, object] = {}
 
-    def submit(self, lane, title, func, meta=None, **kw):
-        self.jobs.append({"lane": lane, "title": title, "func": func,
-                          "meta": meta or {}, **kw})
-        return f"job-{len(self.jobs)}"
+    def submit(self, lane, title, func, meta=None, *, priority=0, **kw):
+        job_id = f"job-{len(self.jobs) + 1}"
+        self.jobs.append({"id": job_id, "lane": lane, "title": title, "func": func,
+                          "meta": meta or {}, "priority": priority, **kw})
+        return job_id
+
+    async def wait(self, job_id):
+        job = next(j for j in self.jobs if j["id"] == job_id)
+        if job_id not in self._results:
+            reporter = types.SimpleNamespace(
+                indeterminate=lambda: None, update=lambda *a, **k: None)
+            cancel = types.SimpleNamespace(
+                raise_if_set=lambda: None, on_cancel=lambda *a: None)
+            kw = {k: v for k, v in job.items()
+                  if k not in ("id", "lane", "title", "func", "meta", "priority")}
+            self._results[job_id] = await job["func"](reporter, cancel, **kw)
+        return self._results[job_id]
 
     async def cancel(self, job_id):
         self.cancelled.append(job_id)
@@ -166,7 +184,7 @@ async def test_the_brief_is_two_seats_and_two_probes_before_anyone_is_asked():
     db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
     session = await _ready(db)
 
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
 
     spoke = [m["muse_id"] for m in session["chat"] if m["role"] == "muse"]
     assert spoke[:2] == ["plan", "actress"]
@@ -181,7 +199,7 @@ async def test_the_brief_is_two_seats_and_two_probes_before_anyone_is_asked():
 async def test_the_two_probes_are_actually_separated():
     db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
     session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy)
+    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
 
     pose, setting = (r["positive"].lower() for r in comfy.rendered)
     assert "white background" in pose and "chin on hand" in pose
@@ -194,14 +212,14 @@ async def test_the_two_probes_are_actually_separated():
 async def test_the_probe_seed_is_fixed_so_rounds_are_comparable():
     """If it moved between rounds there would be no telling whether a change
     helped or the dice did."""
-    db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
+    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
     session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy)
+    await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
     seeds = {r["seed"] for r in comfy.rendered}
     assert len(seeds) == 1
     first = seeds.pop()
 
-    await service.post_chat(db, llm, comfy, FakeSpooler(), session, "もっと明るく")
+    await service.post_chat(db, llm, comfy, spooler, session, "もっと明るく")
     assert {r["seed"] for r in comfy.rendered} == {first}
 
 
@@ -211,7 +229,7 @@ async def test_probe_bytes_never_reach_the_saved_session():
     has no business in the document store."""
     db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
     session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy)
+    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     saved = db.rows[session["session_id"]]
     assert not any(isinstance(v, bytes) for v in saved.values())
     assert "_probe_bytes" not in saved
@@ -224,7 +242,7 @@ async def test_a_probe_never_goes_through_the_spooler():
     """Forty throwaway 512s in the image library is worse than no probe."""
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
     session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy)
+    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     assert spooler.jobs == []
     assert comfy.rendered, "but it did render"
 
@@ -234,7 +252,7 @@ async def test_a_probe_never_goes_through_the_spooler():
 async def test_a_note_becomes_standing_direction_and_re_settles_one_place():
     db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
     session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
 
     session = await service.post_chat(
         db, llm, comfy, FakeSpooler(), session, "屋内にして、椅子に座らせて",
@@ -250,9 +268,11 @@ async def test_a_note_becomes_standing_direction_and_re_settles_one_place():
 async def test_a_note_does_not_start_the_shoot():
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
     session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     await service.post_chat(db, llm, comfy, spooler, session, "もう少し寄って")
-    assert spooler.jobs == []
+    # Probes are jobs too now; what a note must not do is start a render.
+    assert [j["title"] for j in spooler.jobs] == ["muse_probe"] * len(spooler.jobs)
+    assert not any(j["func"] is runner.run_shoot_job for j in spooler.jobs)
 
 
 # ── Act 4 ───────────────────────────────────────────────────────────────────
@@ -260,10 +280,11 @@ async def test_a_note_does_not_start_the_shoot():
 async def test_ok_tightens_first_and_only_shoots_once_a_board_exists():
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
     session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
 
     session = await service.post_chat(db, llm, comfy, spooler, session, "OK")
-    assert [j["func"] for j in spooler.jobs] == [runner.run_board_job]
+    renders = [j["func"] for j in spooler.jobs if j["title"] != "muse_probe"]
+    assert renders == [runner.run_board_job]
     spoke = [m["muse_id"] for m in session["chat"] if m["role"] == "muse"]
     assert "enrich" in spoke and "reduce" in spoke
 
@@ -277,7 +298,7 @@ async def test_ok_tightens_first_and_only_shoots_once_a_board_exists():
 async def test_a_passing_probe_stops_the_loop_early():
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(GOOD), FakeSpooler()
     session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     before = len(comfy.rendered)
 
     session = await service.refine(db, llm, comfy, spooler, session)
@@ -291,7 +312,7 @@ async def test_a_failing_probe_runs_the_cap_and_says_what_it_could_not_fix():
     """Never ship a quiet failure."""
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(VOID), FakeSpooler()
     session = await _ready(db, probe_max_rounds=2)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
 
     session = await service.refine(db, llm, comfy, spooler, session)
     assert session["craft"]["round"] == 2
@@ -306,7 +327,7 @@ async def test_a_failing_probe_runs_the_cap_and_says_what_it_could_not_fix():
 async def test_the_checker_is_handed_the_measurements_and_the_frame():
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(VOID), FakeSpooler()
     session = await _ready(db, probe_max_rounds=1)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     llm.calls.clear()
     await service.refine(db, llm, comfy, spooler, session)
 
@@ -343,7 +364,7 @@ async def test_a_blind_model_is_reported_rather_than_silently_degraded():
 
     db, llm, comfy = FakeDb(), Blind(), FakeComfy()
     session = await _ready(db)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
 
     said = " ".join(m["text"] for m in session["chat"] if m["role"] == "system")
     assert "絵を読めない" in said
@@ -382,7 +403,7 @@ async def test_cancelling_a_board_clears_it():
 async def test_unload_vlm_is_opt_in():
     db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
     session = await _ready(db, unload_vlm=True)
-    session = await service.start_table(db, llm, session, comfy=comfy)
+    session = await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     llm.unloaded.clear()
     await service.request_board(db, comfy, spooler, session, ollama=llm)
     assert llm.unloaded == ["m"]
@@ -418,7 +439,7 @@ async def test_the_card_is_shared_by_default_and_eviction_is_opt_in():
     not the two of them sharing."""
     db, llm, comfy = FakeDb(), FakeOllama(), FakeComfy()
     session = await _ready(db)
-    await service.start_table(db, llm, session, comfy=comfy)
+    await service.start_table(db, llm, session, comfy=comfy, spooler=FakeSpooler())
     assert llm.unloaded == []
 
     db2, llm2 = FakeDb(), FakeOllama()
@@ -428,29 +449,19 @@ async def test_the_card_is_shared_by_default_and_eviction_is_opt_in():
 
 
 @pytest.mark.asyncio
-async def test_a_probe_holds_the_gpu_the_way_a_render_job_does():
-    """This is the one that actually mattered. A probe calls queue_prompt
-    directly and is awaited inline, so unless it takes the generation resource
-    it can land on the card while a full-size board is drawing — and a large
-    latent on a committed card is what killed ComfyUI mid-run."""
-    held: list[str] = []
-
-    class Gpu:
-        def acquire(self):
-            import contextlib
-
-            @contextlib.asynccontextmanager
-            async def _ctx():
-                held.append("in")
-                yield
-                held.append("out")
-            return _ctx()
-
-    class ResourceSpooler(FakeSpooler):
-        def resource_for(self, lane):
-            return Gpu()
-
-    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), ResourceSpooler()
+async def test_a_probe_is_a_job_on_the_generation_lane():
+    """This is the one that actually mattered. Probes called queue_prompt
+    directly at first, so five renders in a session showed up nowhere in the
+    job list, could not be cancelled, and ignored a paused lane entirely."""
+    db, llm, comfy, spooler = FakeDb(), FakeOllama(), FakeComfy(), FakeSpooler()
     session = await _ready(db)
     await service.start_table(db, llm, session, comfy=comfy, spooler=spooler)
-    assert held == ["in", "out", "in", "out"], held
+
+    probes = [j for j in spooler.jobs if j["title"] == "muse_probe"]
+    assert len(probes) == 2, [j["title"] for j in spooler.jobs]
+    for j in probes:
+        assert j["lane"] is JobLane.GENERATION
+        assert j["meta"]["session_id"] == session["session_id"]
+        assert j["meta"]["kind"] in (probe.POSE, probe.SETTING)
+        # Ahead of a queued board: the crew is blocked on this, the board is not.
+        assert j["priority"] > 0

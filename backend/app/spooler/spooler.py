@@ -299,16 +299,6 @@ class JobSpooler:
     def resources_snapshot(self) -> list[dict]:
         return [r.to_dict() for r in self._resources.values()]
 
-    def resource_for(self, lane: JobLane):
-        """The whole-job resource a lane holds, if it holds one.
-
-        Exposed for work that renders outside the job queue — Muse's probes are
-        awaited inline rather than submitted, and without taking this they can
-        put a second graph on the GPU while a board is being drawn.
-        """
-        name = self._lane_resource.get(lane)
-        return self._resources.get(name) if name else None
-
     # ── SSE stream ─────────────────────────────────────────────────────────────
 
     async def stream(self) -> AsyncGenerator[str, None]:

@@ -29,7 +29,6 @@ import random
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
 from typing import Any
 
 from ..characters import presets as presets_db
@@ -40,11 +39,6 @@ from . import chain, crew, critique, events, harvest, identity, probe, runner, s
 from .schema import missing_inputs, new_session
 
 logger = logging.getLogger(__name__)
-
-
-@asynccontextmanager
-async def _nullcontext():
-    yield
 
 # The last probe frames, per session. Deliberately NOT on the session dict —
 # that is serialised into Qdrant, and a few hundred KB of PNG per round has no
@@ -414,24 +408,37 @@ async def _take_probe(
     *, spooler=None, ollama=None,
 ) -> critique.Reading | None:
     inputs = _inputs(session)
-    # A probe is a render like any other. It is awaited inline rather than
-    # submitted, so it has to take the GPU resource by hand — otherwise it can
-    # put a second graph on the card while a board is being drawn.
-    getter = getattr(spooler, "resource_for", None) if spooler else None
-    gpu = getter(JobLane.GENERATION) if getter else None
-    ctx = gpu.acquire() if gpu is not None else _nullcontext()
-    async with ctx:
-        await _maybe_unload(ollama, session)
-        data = await probe.render(
-            comfy,
-            workflow_name=str(inputs.get("workflow") or ""),
-            positive=shot.positive,
-            negative=identity.merge_negative(negative_for(session), shot.negative),
-            seed=_probe_seed(session),
-            size=int(inputs.get("probe_size") or 512),
-            steps=int(inputs.get("probe_steps") or 12),
-            cfg=float(inputs.get("draft_cfg") or 4.0),
+    await _maybe_unload(ollama, session)
+    kwargs = dict(
+        comfy=comfy,
+        workflow_name=str(inputs.get("workflow") or ""),
+        positive=shot.positive,
+        negative=identity.merge_negative(negative_for(session), shot.negative),
+        seed=_probe_seed(session),
+        size=int(inputs.get("probe_size") or 512),
+        steps=int(inputs.get("probe_steps") or 12),
+        cfg=float(inputs.get("draft_cfg") or 4.0),
+    )
+    # A probe is a render, so it goes through the scheduler like every other
+    # render: queued in the GEN lane, visible, cancellable, and stopped when the
+    # lane is paused. Submitting and waiting rather than calling ComfyUI
+    # directly is the whole difference between "serialised" and "governed".
+    if spooler is not None:
+        job_id = spooler.submit(
+            JobLane.GENERATION, "muse_probe", probe.run_probe_job,
+            meta={"session_id": session["session_id"], "step": "probe",
+                  "kind": shot.kind},
+            priority=probe.PRIORITY, **kwargs,
         )
+        try:
+            data = await spooler.wait(job_id)
+        except Exception:
+            logger.warning("[muse] %s probe job did not finish", shot.kind,
+                           exc_info=True)
+            return None
+    else:
+        # No scheduler (tests, and the legacy draft entry point).
+        data = await probe.render(**kwargs)
     if not data:
         return None
 
