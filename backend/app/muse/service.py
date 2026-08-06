@@ -35,6 +35,7 @@ _OK_NATURAL_RE = re.compile(
     r"(?i)\b(ok|okay|lgtm|go)\b|お[ｋkけ]|いいよ|よし|ゴー|"
     r"これでいい|それでいい|撮って|撮影|本番|決定|確定|approved?"
 )
+_BOARD_RE = re.compile(r"ボード|board|試写|イメージ", re.I)
 _OK_DENY_RE = re.compile(
     r"じゃない|じゃなく|ではなく|だめ|ダメ|もっと|やめて|待って|まだ|"
     r"not\s*ok|don't|dont|wait|more|nope",
@@ -382,8 +383,38 @@ def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
     return f"{m['name']} ({m['nick']})"
 
 
+def record_ledger(
+    session: dict[str, Any], *, muse_id: str, name: str,
+    before: str, after: str,
+) -> dict[str, Any] | None:
+    """Note which tags one seat put in and which it took out.
+
+    The session only ever kept the final craft, so a frame carrying tags nobody
+    asked for had no way to name the seat that asked. A run that ended in
+    `(neck_tension:1.4)`, a school blazer and an extreme close-up could be read
+    off the chat only by guessing which speaker meant which tag.
+    """
+    was = identity.tag_names(before)
+    now = identity.tag_names(after)
+    added = [t for t in now if t not in set(was)]
+    dropped = [t for t in was if t not in set(now)]
+    if not added and not dropped:
+        return None
+    entry = {
+        "muse_id": muse_id, "name": name,
+        "added": added, "dropped": dropped, "at": time.time(),
+    }
+    session.setdefault("ledger", []).append(entry)
+    return entry
+
+
 def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]:
     craft = session.setdefault("craft", {})
+    record_ledger(
+        session, muse_id=turn.muse_id,
+        name=_muse_display_name(session, turn.muse_id),
+        before=str(craft.get("tags") or ""), after=turn.tags,
+    )
     craft["prompt"] = turn.prompt
     craft["tags"] = turn.tags
     craft["scene"] = turn.scene
@@ -428,6 +459,17 @@ def _table_user_prompt(
     base = brief_mod.with_previous(
         _brief_for(session, muse_id), previous, pose=pose, analysis=screening,
     )
+    # The planner already pulled these out of the tag list. The prose is the
+    # other half of the prompt and only the seats writing it can clear that.
+    struck = [str(s) for s in (session.get("struck") or []) if str(s).strip()]
+    if struck:
+        base = (
+            f"{base}\n\n"
+            f"STRUCK FROM THE SET (the plan no longer has these — they belong to "
+            f"a place or a moment we have left). Delete them from TAGS and from "
+            f"SCENE. Do not describe them, and do not replace them with synonyms:"
+            f"\n{', '.join(struck)}"
+        )
     # Craft turns only, and only a few. Banter carries no craft and every seat is
     # told to be charming in it, so feeding it back here was a loop with nothing
     # damping it: one image ("the gap between her knees") got restated by six
@@ -450,6 +492,13 @@ def _table_user_prompt(
     return base
 
 
+def _times_spoken(session: dict[str, Any], muse_id: str) -> int:
+    return sum(
+        1 for m in (session.get("chat") or [])
+        if m.get("muse_id") == muse_id and m.get("kind") == "banter"
+    )
+
+
 def _banter_prompt(
     session: dict[str, Any], *, speaker_id: str, about_id: str, about_text: str,
 ) -> str:
@@ -457,13 +506,19 @@ def _banter_prompt(
     about_name = _muse_display_name(session, about_id)
     self_name = _muse_display_name(session, speaker_id)
     talk = _recent_talk(session, limit=4)
+    # The Lead gets a different move each time. Left alone the model gave her
+    # one — a soft「……しちゃいそう」— and every line she had ended the same way.
+    stance = ""
+    if crew.role_of(speaker_id) == "actress":
+        stance = crew.actress_stance(_times_spoken(session, speaker_id))
     if locale.startswith("ja"):
         return (
             f"あなたは{self_name}。いま{about_name}がこう言った:\n"
             f"「{about_text}」\n\n"
             f"直近の会話:\n{talk or '（まだ少ない）'}\n\n"
-            f"口調どおりに1〜2文で反応して。同意・ツッコミ・乗せ、どれでもいい。"
-            f"台本のTAGS/SCENEは書き換えない。会話だけ。"
+            + (f"今回の返し方: {stance}\n\n" if stance else "")
+            + "口調どおりに1〜2文で反応して。"
+            "台本のTAGS/SCENEは書き換えない。会話だけ。"
         )
     return (
         f"You are {self_name}. {about_name} just said:\n"
@@ -536,6 +591,71 @@ def _plan_user_prompt(session: dict[str, Any], *, note: str = "") -> str:
     return "\n\n".join(parts)
 
 
+def _ledger_items(plan: dict[str, Any] | None) -> list[str]:
+    return [
+        identity.bare_tag(x)
+        for x in ((plan or {}).get("must_appear") or [])
+        if identity.bare_tag(x)
+    ]
+
+
+def _still_meant(old: str, new_items: list[str]) -> bool:
+    """True when a new ledger entry is plainly the same thing renamed.
+
+    `microphone` → `wireless_microphone` is the planner being more specific, not
+    the planner throwing the microphone away. Without this, a re-spelled ledger
+    would strike its own contents.
+    """
+    return any(old in new or new in old for new in new_items)
+
+
+def strike_dropped_props(
+    session: dict[str, Any], previous_plan: dict[str, Any] | None,
+) -> list[str]:
+    """Take the old ledger's props out of the craft when the planner drops them.
+
+    CARRY tells every seat to KEEP setting objects once they exist, which is a
+    ratchet with no release: a note that moved the shoot somewhere else left the
+    previous location's props sitting in the craft, and clearing them out was
+    manual work for the Showrunner on every single note.
+
+    Only what the *planner* listed and then dropped is struck. Anything the art
+    department added on top of the ledger belongs to the room it dressed and
+    survives — that dressing is the part of the picture that works.
+    """
+    was = _ledger_items(previous_plan)
+    now = _ledger_items(session.get("plan"))
+    if not was:
+        return []
+    struck = [t for t in was if t not in now and not _still_meant(t, now)]
+    if not struck:
+        return []
+
+    craft = session.setdefault("craft", {})
+    gone = set(struck)
+    kept = [
+        p.strip() for p in str(craft.get("tags") or "").split(",")
+        if p.strip() and identity.bare_tag(p) not in gone
+    ]
+    before = str(craft.get("tags") or "")
+    craft["tags"] = ", ".join(kept)
+    craft["prompt"] = identity.assemble_positive(
+        _identity_tags(session), craft["tags"], str(craft.get("scene") or ""),
+        framing=_framing(_inputs(session)), style=_style(session),
+        subject=identity.subject_tags(_cast(session)),
+    )
+    # The prose still names them, and the tag list is only half the prompt. The
+    # seats that write next are told outright, which is the only thing that gets
+    # them out of SCENE.
+    session["struck"] = struck
+    record_ledger(
+        session, muse_id=_cast_in_role(_crew_ids(session), "plan") or "plan",
+        name=_muse_display_name(session, "plan"),
+        before=before, after=craft["tags"],
+    )
+    return struck
+
+
 async def _run_plan_turn(
     db, ollama, session: dict[str, Any], *, cfg: dict[str, Any], note: str = "",
 ) -> bool:
@@ -575,8 +695,24 @@ async def _run_plan_turn(
 
     blind = bool(plan.pop("blind", False))
     say = str(plan.pop("say", "") or "")
+    previous_plan = session.get("plan") or {}
     session["plan"] = plan
+    session.pop("struck", None)
+    struck = strike_dropped_props(session, previous_plan)
     _rebuild_brief(session)
+    if struck:
+        locale = str(inputs.get("locale") or "ja")
+        tidied = _chat_append(
+            session, role="system", name="Studio",
+            text=(
+                f"（{_muse_display_name(session, mid)}が片付けました: "
+                f"{'、'.join(struck)}）"
+                if locale.startswith("ja") else
+                f"(Struck from the set by "
+                f"{_muse_display_name(session, mid)}: {', '.join(struck)})"
+            ),
+        )
+        _publish_chat(sid, tidied)
     if say:
         msg = _chat_append(
             session, role="muse", text=say, muse_id=mid,
@@ -629,9 +765,15 @@ def _pick_banter_reactor(
     # light: every other pass, or always after the actress (personality beat).
     if mode == "light" and crew.role_of(current) != "actress" and index % 2 == 0:
         return None
+    # The Lead gets a fixed share rather than third place in a fallback list
+    # that almost never ran — `previous` took nearly every heckle, and she came
+    # out of a full eighteen-seat session with three lines.
+    lead = _cast_in_role(crew_ids, "actress")
+    if lead and lead != current and index % 4 == 1:
+        return lead
     if previous and previous != current and previous in crew_ids:
         return previous
-    for role in ("hook", "faces", "actress", "spine", "beat"):
+    for role in ("hook", "actress", "faces", "spine", "beat"):
         mid = _cast_in_role(crew_ids, role)
         if mid and mid != current:
             return mid
@@ -655,8 +797,88 @@ def _pick_extra_heckler(
 
 
 # ── open the table ──────────────────────────────────────────────────────────
-async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    """Cast crew opens: craft passes with banter between them."""
+# The three seats that meet before anything is drawn: someone to settle where
+# and when, her, and a camera. Everyone else waits for a frame to argue with.
+#
+# The table used to open with all eighteen and no picture anywhere, and the
+# result was a run where「カラオケボックスで歌っている」became a live house: twenty
+# turns of prose agreeing with each other, and the Showrunner then spent the
+# session deleting props that had accumulated in the dark. A real studio shoots
+# a still first and talks about the still.
+OPENING_ROLES: tuple[str, ...] = ("actress", "lens")
+
+
+async def _craft_pass(
+    db, ollama, session: dict[str, Any], cast: list[str], seats: list[str], *,
+    cfg: dict[str, Any], images: list[bytes] | None = None,
+    screening: str = "", note: str = "", first_index: int = 0,
+) -> str:
+    """Run these seats in order, with the banter that goes between them."""
+    previous: str | None = None
+    last_say = ""
+    for offset, muse_id in enumerate(seats):
+        index = first_index + offset
+        turn = await _run_muse_turn(
+            ollama, session, muse_id,
+            _table_user_prompt(
+                session, muse_id=muse_id, note=note, screening=screening,
+            ),
+            cfg=cfg, images=images,
+        )
+        msg = _apply_turn(session, turn)
+        last_say = str(msg.get("text") or "")
+        if turn.blind and images:
+            _note_blind(session)
+            images = []
+            screening = ""
+        await session_db.save(db, session, publish=False)
+
+        reactor = _pick_banter_reactor(
+            session, cast, current=muse_id, previous=previous, index=index,
+        )
+        if reactor and last_say:
+            await _run_banter(
+                ollama, session, reactor,
+                about_id=muse_id, about_text=last_say, cfg=cfg,
+            )
+            await session_db.save(db, session, publish=False)
+
+        heckler = _pick_extra_heckler(
+            session, cast, current=muse_id, reactor=reactor, index=index,
+        )
+        if heckler and last_say:
+            await _run_banter(
+                ollama, session, heckler,
+                about_id=muse_id, about_text=last_say, cfg=cfg,
+            )
+            await session_db.save(db, session, publish=False)
+
+        previous = muse_id
+    return last_say
+
+
+def _writing_seats(cast: list[str], *, only: tuple[str, ...] = (),
+                   without: tuple[str, ...] = ()) -> list[str]:
+    """Cast members who hold a pen, in table order."""
+    out = []
+    for mid in cast:
+        role = crew.role_of(mid)
+        if role == "plan" or role in crew.BANTER_ONLY or role in without:
+            continue
+        if only and role not in only:
+            continue
+        out.append(mid)
+    return out
+
+
+async def start_table(
+    db, ollama, session: dict[str, Any], *, comfy=None, spooler=None,
+) -> dict[str, Any]:
+    """Read-through, act one: place, her, a camera — then a still to argue with.
+
+    With no renderer wired (`comfy`/`spooler` omitted) there is no still to wait
+    for, so the whole table meets at once as it used to.
+    """
     missing = missing_inputs(session)
     if missing:
         raise MuseError(f"missing: {', '.join(missing)}")
@@ -667,21 +889,37 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["status"] = "discussing"
     session["chat"] = []
     session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
+    session["ledger"] = []
     session["board"] = {}
     session["shoot"] = {}
     session["plan"] = {}
     session.pop("_blind_said", None)
+    session.pop("struck", None)
+    still_first = comfy is not None and spooler is not None
+    session["table_stage"] = "brief" if still_first else "full"
     await session_db.save(db, session)
 
     locale = str(_inputs(session).get("locale") or "ja")
-    open_ja = (
-        "総監督、打ち合わせを始めます。班が台本を継ぎつつ、お互いにちょこちょこ口を挟みます。"
-        "無理難題歓迎です。途中でイメージボードを出しますので、OKかコメントをください。"
-    )
-    open_en = (
-        "Showrunner, table read is open. The crew will pass the craft and heckle "
-        "each other along the way. Hard notes welcome. Board coming — OK or comment."
-    )
+    if still_first:
+        open_ja = (
+            "総監督、まず場所と芝居だけ決めます。構成・主演・撮影の三人で当たりを付けて、"
+            "スチールを一枚撮ります。それを見てから「こういう絵が欲しい」を聞かせてください。"
+            "そこから全班で詰めます。"
+        )
+        open_en = (
+            "Showrunner — place and performance first. The planner, the Lead and "
+            "the camera will rough it in, then we shoot one still. Tell us what "
+            "picture you want off that, and the full crew takes it from there."
+        )
+    else:
+        open_ja = (
+            "総監督、打ち合わせを始めます。班が台本を継ぎつつ、お互いにちょこちょこ口を挟みます。"
+            "無理難題歓迎です。途中でイメージボードを出しますので、OKかコメントをください。"
+        )
+        open_en = (
+            "Showrunner, table read is open. The crew will pass the craft and heckle "
+            "each other along the way. Hard notes welcome. Board coming — OK or comment."
+        )
     sys_msg = _chat_append(
         session, role="system",
         text=open_ja if locale.startswith("ja") else open_en,
@@ -695,40 +933,15 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         await _run_plan_turn(db, ollama, session, cfg=cfg)
         await session_db.save(db, session, publish=False)
 
-    previous: str | None = None
-    last_say = ""
-    for i, muse_id in enumerate(cast):
-        if crew.role_of(muse_id) == "plan":
-            continue  # already spoke, and does not write craft
-        turn = await _run_muse_turn(
-            ollama, session, muse_id,
-            _table_user_prompt(session, muse_id=muse_id), cfg=cfg,
-        )
-        msg = _apply_turn(session, turn)
-        last_say = str(msg.get("text") or "")
-        await session_db.save(db, session, publish=False)
+    seats = (_writing_seats(cast, only=OPENING_ROLES) if still_first
+             else _writing_seats(cast))
+    await _craft_pass(db, ollama, session, cast, seats, cfg=cfg)
 
-        reactor = _pick_banter_reactor(
-            session, cast, current=muse_id, previous=previous, index=i,
+    if still_first:
+        session_db.log(session, "table", f"brief · {len(seats)} seats")
+        return await request_board(
+            db, comfy, spooler, session, ollama=ollama, still=True,
         )
-        if reactor and last_say:
-            await _run_banter(
-                ollama, session, reactor,
-                about_id=muse_id, about_text=last_say, cfg=cfg,
-            )
-            await session_db.save(db, session, publish=False)
-
-        heckler = _pick_extra_heckler(
-            session, cast, current=muse_id, reactor=reactor, index=i,
-        )
-        if heckler and last_say:
-            await _run_banter(
-                ollama, session, heckler,
-                about_id=muse_id, about_text=last_say, cfg=cfg,
-            )
-            await session_db.save(db, session, publish=False)
-
-        previous = muse_id
 
     ask_ja = (
         "一通り集まりました。イメージボードを出して確認しますか？"
@@ -751,6 +964,45 @@ async def start_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
+async def run_full_table(
+    db, ollama, session: dict[str, Any], *, note: str = "",
+) -> dict[str, Any]:
+    """Act two: everyone else joins, looking at the still that came back."""
+    cfg = await get_runtime_config(db)
+    sid = session["session_id"]
+    cast = _crew_ids(session)
+    locale = str(_inputs(session).get("locale") or "ja")
+    session["status"] = "discussing"
+
+    seats = _writing_seats(cast, without=OPENING_ROLES)
+    if not seats:
+        session["table_stage"] = "full"
+        return session
+
+    msg = _chat_append(
+        session, role="system", name="Studio",
+        text=(
+            "全班入ります。スチールを見ながら詰めます。"
+            if locale.startswith("ja") else
+            "Full crew joining — they are working from the still."
+        ),
+    )
+    _publish_chat(sid, msg)
+    await session_db.save(db, session, publish=False)
+
+    images = await board_images(db, session)
+    await _craft_pass(
+        db, ollama, session, cast, seats, cfg=cfg, images=images,
+        screening=_screening_note(session) if images else "", note=note,
+        # Offset so the banter rota does not restart on the same seats.
+        first_index=len(OPENING_ROLES),
+    )
+    session["table_stage"] = "full"
+    session_db.log(session, "table", f"full · {len(seats)} seats")
+    await session_db.save(db, session, publish=False)
+    return session
+
+
 # ── showrunner message ──────────────────────────────────────────────────────
 async def post_chat(
     db, ollama, comfy, spooler, session: dict[str, Any], text: str,
@@ -763,17 +1015,55 @@ async def post_chat(
         raise MuseError(f"missing: {', '.join(missing_inputs(session))}")
     if not (session.get("craft") or {}).get("prompt"):
         # Auto-open table if they chat first.
-        session = await start_table(db, ollama, session)
+        session = await start_table(
+            db, ollama, session, comfy=comfy, spooler=spooler,
+        )
 
     sid = session["session_id"]
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
     await session_db.save(db, session)
 
-    if _is_approve(text):
+    approving = _is_approve(text)
+    wants_board = bool(_BOARD_RE.search(text))
+    # Anything that is not one of those two words is creative direction, and it
+    # stands from here on — a note used to live only in the turn that answered it.
+    direction = "" if (approving or wants_board) else text
+
+    # The still is up and only three seats have spoken: this is the note the
+    # rest of the crew has been waiting for. Whatever it says, the full table
+    # meets once, first — otherwise a bare OK ships a prompt three seats wrote.
+    if str(session.get("table_stage") or "full") == "brief":
+        if direction:
+            session.setdefault("notes", []).append(direction)
+            _rebuild_brief(session)
+            await session_db.save(db, session)
+            cfg = await get_runtime_config(db)
+            if _cast_in_role(_crew_ids(session), "plan"):
+                await _run_plan_turn(db, ollama, session, cfg=cfg, note=direction)
+                await session_db.save(db, session, publish=False)
+        session = await run_full_table(db, ollama, session, note=direction)
+        if direction:
+            locale = str(_inputs(session).get("locale") or "ja")
+            wrap = _chat_append(
+                session, role="system", name="Studio",
+                text=(
+                    "全班そろいました。イメージボードを見る？「ボード」／本番なら「OK」／"
+                    "まだ詰めるなら続けてどうぞ。"
+                    if locale.startswith("ja") else
+                    "Full crew is in. \"board\" for a screening, \"OK\" to shoot, "
+                    "or keep the notes coming."
+                ),
+            )
+            _publish_chat(sid, wrap)
+            session["status"] = "chat"
+            await session_db.save(db, session)
+            return session
+
+    if approving:
         return await approve_and_shoot(db, comfy, spooler, session, ollama=ollama)
 
-    if re.search(r"ボード|board|試写|イメージ", text, re.I):
+    if wants_board:
         return await request_board(db, comfy, spooler, session, ollama=ollama)
 
     # Crew answers the hard note — pick specialists by keyword, else core desk.
@@ -859,9 +1149,13 @@ def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
     """
     _ = note  # intentional: routing ignores note text; VLM interprets it
     # Stable priority — actress first so personality can answer any note.
-    priority = (
-        "actress", "beat", "spine", "lens", "wardrobe",
-        "faces", "hook", "gaffer", "propshop",
+    # Banter-only seats are not here: the Producer answered every note by
+    # restating the beat with `dynamic_composition` on it.
+    priority = tuple(
+        r for r in (
+            "actress", "beat", "spine", "lens", "wardrobe",
+            "faces", "gaffer", "propshop",
+        ) if r not in crew.BANTER_ONLY
     )
     ordered = [m for m in (_cast_in_role(crew_ids, r) for r in priority) if m][:4]
     closer = _cast_in_role(crew_ids, "finisher")
@@ -956,16 +1250,24 @@ async def densify_craft_if_needed(
 
 
 async def request_board(
-    db, comfy, spooler, session: dict[str, Any], ollama=None,
+    db, comfy, spooler, session: dict[str, Any], ollama=None, *, still: bool = False,
 ) -> dict[str, Any]:
+    """One render for the crew and the Showrunner to look at.
+
+    `still` is the opening frame, shot off three seats before the rest of the
+    crew has said anything: one image rather than four, because at that point
+    there is not enough craft for four to differ, and the whole point is to get
+    something on the wall fast.
+    """
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if not prompt:
         raise MuseError("no craft yet — start the table first")
 
-    session = await densify_craft_if_needed(db, ollama, session)
-    craft = session.get("craft") or {}
-    prompt = str(craft.get("prompt") or "")
+    if not still:
+        session = await densify_craft_if_needed(db, ollama, session)
+        craft = session.get("craft") or {}
+        prompt = str(craft.get("prompt") or "")
 
     inputs = _inputs(session)
     sid = session["session_id"]
@@ -974,14 +1276,21 @@ async def request_board(
 
     await _maybe_unload(ollama, session)
 
-    ask = _chat_append(
-        session, role="muse", muse_id="lens",
-        name=_muse_display_name(session, "lens"),
-        text=(
+    if still:
+        ask_text = (
+            "当たりを一枚撮ります。少し待ってください。"
+            if locale.startswith("ja") else
+            "Taking one still. One moment."
+        )
+    else:
+        ask_text = (
             "総監督、イメージボード上げます。これでいい？OKなら本番、ダメなら指摘ください。"
             if locale.startswith("ja") else
             "Showrunner — image board going up. Good? OK to shoot, or note what to fix."
-        ),
+        )
+    ask = _chat_append(
+        session, role="muse", muse_id="lens",
+        name=_muse_display_name(session, "lens"), text=ask_text,
     )
     _publish_chat(sid, ask)
 
@@ -991,6 +1300,7 @@ async def request_board(
         "job_id": "",
         "images": [],
         "pending": True,
+        "still": bool(still),
         "round": int((session.get("board") or {}).get("round") or 0) + 1,
     }
     session["status"] = "boarding"

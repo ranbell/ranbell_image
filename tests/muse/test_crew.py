@@ -229,3 +229,54 @@ def test_the_roster_groups_people_under_the_job_they_do():
     assert len(by_id["gaffer"]["people"]) == 2
     cast = [p["id"] for r in roster["roles"] for p in r["people"] if p["cast"]]
     assert "ink:ipponsen" in cast and "ink:atsunuri" not in cast
+
+
+# ── the seats that were doing damage ────────────────────────────────────────
+def test_the_frame_seat_is_gone_and_nothing_still_points_at_it():
+    """「額縁」turned "compose it" into a literal picture frame with a black and
+    white border — which is in the negative prompt precisely because nobody
+    wants it. The layout job stays; that person does not."""
+    assert "cutout:gakubuchi" not in crew.MUSES
+    for name, ids in crew.PRESETS.items():
+        assert all(m in crew.MUSES for m in ids), name
+    text = crew.system_prompt_for(crew.DEFAULT_MEMBER["cutout"])
+    for banned in ("silhouette", "negative space", "Carve"):
+        assert banned.lower() not in text.lower(), banned
+    assert "border" in text.lower() and "frame" in text.lower()
+
+
+def test_the_choreographer_asks_for_posture_not_contortion():
+    """`(neck_tension:1.4)` and `(shoulder_tension:1.3)` shipped from this seat,
+    and at that weight the body arches far enough to break the outfit and the
+    face. The voice is untouched — it is the instruction that was too strong."""
+    text = crew.system_prompt_for("spine:bane")
+    assert "DYNAMIC POSTURE" in text
+    assert "Exaggerate weight shift" not in text
+    assert "1.35" in text
+    assert "arch" in text.lower()
+    # The coach still sounds like the coach.
+    assert "棒立ち" in text
+    assert "motion_blur" not in crew.MUSES["spine:bane"]["flavor_tags"]
+
+
+def test_the_producer_keeps_the_chair_and_loses_the_pen():
+    assert "hook" in crew.BANTER_ONLY
+    assert "hook" in crew.ROLE_ORDER          # still cast, still heckles
+    assert "hook:kugizuke" in crew.MUSES
+    # And it is still allowed to talk.
+    assert "SAY:" in crew.banter_system_prompt_for("hook:kugizuke")
+
+
+def test_carry_says_how_things_leave_the_script_not_only_how_they_stay():
+    """KEEP with no release is what left a live house's monitors on the floor of
+    a karaoke booth after the Showrunner moved the shoot."""
+    assert "STRUCK FROM THE SET" in crew.CARRY
+    text = crew.system_prompt_for("gate:mon")
+    assert "belongs to a place we are not in" in text
+    assert "MUST APPEAR" in text  # the dressing that fits the room still stays
+
+
+def test_the_camera_states_a_size_instead_of_tightening_each_round():
+    text = crew.system_prompt_for("lens:pinto")
+    assert "ONE SHOT SIZE" in text
+    assert "MUST APPEAR" in text

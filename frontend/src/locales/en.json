@@ -1355,6 +1355,8 @@
     "boardAsk": "Good? OK to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",
+    "ledger": "Tag ledger",
+    "ledgerHint": "Every tag still in the craft, and the seat that added it.",
     "warn": {
       "comfyOffline": "ComfyUI is unreachable",
       "title": "Note"

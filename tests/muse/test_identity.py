@@ -216,3 +216,48 @@ def test_petite_is_refused_whatever_she_is():
         positive = identity.assemble_positive(locked, "petite, standing", "She stands.")
         assert "petite" not in positive, locked
     assert "petite" in identity.opposing_negative(["black_hair", "small_breasts"])
+
+
+# ── emphasis ────────────────────────────────────────────────────────────────
+def test_emphasis_above_the_cap_is_brought_back_down():
+    """The 1.35 ceiling lived in the Finisher's specialty text and nowhere else.
+
+    A real run shipped `(neck_tension:1.4)` and `(shoulder_tension:1.3)` from the
+    choreographer; at 1.4 the sampler arches the whole body far enough to break
+    the clothing silhouette and the face, which is what the frame came back as.
+    """
+    assert identity.clamp_weight("(neck_tension:1.4)") == "(neck_tension:1.35)"
+    assert identity.clamp_weight("(shoulder_tension:1.3)") == "(shoulder_tension:1.3)"
+    assert identity.clamp_weight("standing") == "standing"
+    assert identity.clamp_weights(
+        "a, (b:1.9), (c:1.2)",
+    ) == "a, (b:1.35), (c:1.2)"
+
+
+def test_the_assembled_prompt_carries_no_emphasis_over_the_cap():
+    positive = identity.assemble_positive(
+        ["black_hair"], "(neck_tension:1.4), (extreme_close-up:1.4)", "She sings.",
+    )
+    assert "1.4" not in positive, positive
+    assert "(neck_tension:1.35)" in positive
+
+
+def test_emphasis_no_longer_smuggles_a_tag_past_the_identity_lock():
+    """`_norm` left the parentheses on, so a weighted tag matched nothing: it did
+    not collide with the identity tag already in the prompt, and it walked past
+    the banned-body check that exists to stop exactly this."""
+    positive = identity.assemble_positive(
+        ["silver_hair", "small_breasts"],
+        "(silver_hair:1.2), (large_breasts:1.3), singing",
+        "She sings.",
+    )
+    assert positive.count("silver_hair") == 1, positive
+    assert "large_breasts" not in positive, positive
+
+
+def test_bare_tag_and_tag_names_read_through_the_emphasis():
+    assert identity.bare_tag("(neck_tension:1.4)") == "neck_tension"
+    assert identity.bare_tag(" Wireless Microphone ") == "wireless_microphone"
+    assert identity.tag_names(
+        "singing, (singing:1.2), tambourine, ",
+    ) == ["singing", "tambourine"]

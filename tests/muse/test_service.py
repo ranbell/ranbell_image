@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
-from app.muse import identity, runner, service, session_db
+from app.muse import crew, identity, runner, service, session_db
 
 
 class FakeSpooler:
@@ -682,3 +682,279 @@ def test_the_small_room_is_the_lead_the_director_and_the_planner():
     roles = [crew.role_of(i) for i in crew.resolve_crew(preset="trio")]
     assert roles == ["plan", "beat", "actress", "finisher"]
     assert crew.role_of(crew.resolve_crew(preset="quartet")[2]) == "lens"
+
+
+# ── the ledger ──────────────────────────────────────────────────────────────
+def test_the_ledger_names_the_seat_that_added_each_tag():
+    """A run ended in `(neck_tension:1.4)`, a school blazer and an extreme
+    close-up, and the only way to find out who asked for them was to guess from
+    the chat. The session kept the final craft and nothing else."""
+    session = {"session_id": "s", "inputs": {"locale": "ja"}}
+    first = service.record_ledger(
+        session, muse_id="spine:bane", name="振付「バネ」",
+        before="", after="singing, weight_shift, (neck_tension:1.4)",
+    )
+    assert first["added"] == ["singing", "weight_shift", "neck_tension"]
+    assert first["dropped"] == []
+
+    second = service.record_ledger(
+        session, muse_id="lens:pinto", name="撮影「ピント」",
+        before="singing, weight_shift, (neck_tension:1.4)",
+        after="singing, (neck_tension:1.35), extreme_close-up, macro_lens",
+    )
+    # Emphasis is not a different tag — re-weighting is neither an add nor a drop.
+    assert second["added"] == ["extreme_close-up", "macro_lens"]
+    assert second["dropped"] == ["weight_shift"]
+    assert [e["muse_id"] for e in session["ledger"]] == ["spine:bane", "lens:pinto"]
+
+
+def test_a_seat_that_changed_nothing_leaves_no_ledger_row():
+    session = {"session_id": "s", "inputs": {}}
+    assert service.record_ledger(
+        session, muse_id="gate:mon", name="監修「門」",
+        before="a, b", after="b, a",
+    ) is None
+    assert not session.get("ledger")
+
+
+# ── the plan takes its own props back ───────────────────────────────────────
+def _relocating_session(craft_tags: str) -> dict:
+    return {
+        "session_id": "s",
+        "inputs": {"locale": "ja", "crew_preset": "standard", "framing": "auto"},
+        "character": {"identity_tags": ["silver_hair"]},
+        "craft": {"tags": craft_tags, "scene": "She sings.", "prompt": ""},
+        "plan": {},
+    }
+
+
+def test_moving_the_shoot_takes_the_old_places_props_with_it():
+    """CARRY tells every seat to KEEP setting objects once they exist, which is a
+    ratchet with no release. A note that moved the shoot left the old location's
+    props in the craft and the Showrunner cleared them out by hand every time."""
+    session = _relocating_session(
+        "singing, microphone_stand, stage_monitor, amplifier, drum_kit, "
+        "wireless_microphone, lyric_monitor, spilled_cola, crumpled_napkin",
+    )
+    session["plan"] = {
+        "place": "karaoke booth",
+        "must_appear": ["wireless_microphone", "lyric_monitor", "small_table"],
+    }
+    struck = service.strike_dropped_props(session, {
+        "place": "live house stage",
+        "must_appear": [
+            "microphone", "microphone_stand", "stage_monitor", "amplifier",
+            "drum_kit", "cables",
+        ],
+    })
+
+    assert set(struck) == {
+        "microphone_stand", "stage_monitor", "amplifier", "drum_kit", "cables",
+    }
+    tags = session["craft"]["tags"]
+    for gone in ("microphone_stand", "stage_monitor", "amplifier", "drum_kit"):
+        assert gone not in tags, tags
+    # "microphone" survives as `wireless_microphone` — the planner got more
+    # specific, it did not throw the microphone away.
+    assert "wireless_microphone" in tags
+    # The art department's floor dressing is not on the ledger and is the part
+    # of the picture that works. It stays.
+    assert "spilled_cola" in tags and "crumpled_napkin" in tags
+    # The seats that write next have to clear the prose too.
+    assert session["struck"] == struck
+    assert session["ledger"][-1]["dropped"]
+
+
+def test_a_plan_that_only_gains_props_strikes_nothing():
+    session = _relocating_session("singing, tambourine")
+    session["plan"] = {"must_appear": ["tambourine", "plastic_cup"]}
+    assert service.strike_dropped_props(session, {"must_appear": ["tambourine"]}) == []
+    assert "tambourine" in session["craft"]["tags"]
+    assert "struck" not in session
+
+
+def test_the_first_plan_of_a_session_strikes_nothing():
+    session = _relocating_session("singing")
+    session["plan"] = {"must_appear": ["microphone"]}
+    assert service.strike_dropped_props(session, {}) == []
+
+
+# ── the Lead talks more, and differently each time ──────────────────────────
+def test_the_lead_gets_a_real_share_of_the_heckles():
+    """A full eighteen-seat session gave her three lines. `previous` — whoever
+    happened to speak last — took nearly every slot, and she sat third in the
+    fallback list that ran when it did not."""
+    cast = crew.resolve_crew(preset="standard")
+    lead = crew.DEFAULT_MEMBER["actress"]
+    session = {"session_id": "s", "inputs": {"banter_mode": "light"}}
+
+    picks = []
+    previous = None
+    for i, mid in enumerate(cast):
+        if crew.role_of(mid) in ("plan", *crew.BANTER_ONLY):
+            continue
+        picks.append(service._pick_banter_reactor(
+            session, cast, current=mid, previous=previous, index=i,
+        ))
+        previous = mid
+
+    spoke = [p for p in picks if p]
+    assert spoke, "light mode must still produce banter"
+    assert picks.count(lead) >= 3, picks
+    # And it is not only her — the table still argues with itself.
+    assert len({p for p in spoke}) >= 3, spoke
+
+
+def test_the_lead_is_never_asked_to_heckle_herself():
+    cast = crew.resolve_crew(preset="standard")
+    lead = crew.DEFAULT_MEMBER["actress"]
+    session = {"session_id": "s", "inputs": {"banter_mode": "light"}}
+    for i in range(len(cast)):
+        assert service._pick_banter_reactor(
+            session, cast, current=lead, previous=None, index=i,
+        ) != lead
+
+
+def test_the_lead_is_handed_a_different_move_each_time_she_speaks():
+    session = {
+        "session_id": "s", "inputs": {"locale": "ja"},
+        "character": {"name_ja": "みお"},
+        "chat": [],
+    }
+    lead = crew.DEFAULT_MEMBER["actress"]
+    seen = []
+    for _ in range(4):
+        text = service._banter_prompt(
+            session, speaker_id=lead, about_id="lens:pinto", about_text="寄ります",
+        )
+        stance = text.split("今回の返し方: ")[1].split("\n")[0]
+        seen.append(stance)
+        session["chat"].append(
+            {"muse_id": lead, "kind": "banter", "text": "…", "role": "muse"},
+        )
+    assert len(set(seen)) == 4, seen
+    assert all(s in crew.ACTRESS_STANCES for s in seen)
+
+
+def test_a_staff_seat_gets_no_stance_line():
+    session = {"session_id": "s", "inputs": {"locale": "ja"}, "chat": []}
+    text = service._banter_prompt(
+        session, speaker_id="hook:kugizuke", about_id="lens:pinto", about_text="寄ります",
+    )
+    assert "今回の返し方" not in text
+
+
+# ── act one: three seats and a still ────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_the_table_opens_on_three_seats_and_shoots_a_still():
+    """Eighteen seats talking with no picture anywhere is how「カラオケボックスで
+    歌っている」became a live house: twenty turns of prose agreeing with each
+    other, and the Showrunner then deleting props for the rest of the session."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, crew_preset="standard")
+
+    session = await service.start_table(
+        db, ollama, session, comfy=FakeComfy(), spooler=spooler,
+    )
+
+    assert session["table_stage"] == "brief"
+    spoke = {m["muse_id"] for m in session["chat"] if m.get("kind") == "craft"}
+    roles = {crew.role_of(m) for m in spoke}
+    assert roles <= {"plan", "actress", "lens"}, roles
+    assert "actress" in roles and "lens" in roles
+    # And a still is on the way, as one frame rather than four.
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_board_job
+    assert session["board"]["still"] is True
+    assert session["status"] == "boarding"
+
+
+@pytest.mark.asyncio
+async def test_with_no_renderer_the_whole_table_still_meets_at_once():
+    """Legacy callers and tests hand no comfy/spooler. There is no still to wait
+    for, so waiting for one would hang the read-through forever."""
+    db, ollama = FakeDb(), FakeOllama()
+    session = await _ready_session(db, crew_preset="standard")
+
+    session = await service.start_table(db, ollama, session)
+
+    assert session["table_stage"] == "full"
+    assert session["status"] == "chat"
+    roles = {
+        crew.role_of(m["muse_id"]) for m in session["chat"]
+        if m.get("kind") == "craft"
+    }
+    assert "gaffer" in roles and "finisher" in roles
+
+
+@pytest.mark.asyncio
+async def test_the_first_note_after_the_still_convenes_the_rest_of_the_crew():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, crew_preset="standard")
+    session = await service.start_table(
+        db, ollama, session, comfy=FakeComfy(), spooler=spooler,
+    )
+    session["board"]["pending"] = False
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session,
+        "もっと狭い部屋で、一人カラオケの感じにして",
+    )
+
+    assert session["table_stage"] == "full"
+    roles = {
+        crew.role_of(m["muse_id"]) for m in session["chat"]
+        if m.get("kind") == "craft"
+    }
+    assert "gaffer" in roles and "finisher" in roles
+    # The note is standing direction from here on, not a remark about one turn.
+    assert "もっと狭い部屋で、一人カラオケの感じにして" in session["notes"]
+    # It did not sneak a second render in on the way.
+    assert len(spooler.jobs) == 1
+    assert session["status"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_ok_straight_off_the_still_gathers_the_crew_before_shooting():
+    """Otherwise a bare OK ships a prompt three seats wrote."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, crew_preset="standard")
+    session = await service.start_table(
+        db, ollama, session, comfy=FakeComfy(), spooler=spooler,
+    )
+    session["board"]["pending"] = False
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "OK",
+    )
+
+    assert session["table_stage"] == "full"
+    assert session["status"] == "shooting"
+    assert [j["func"] for j in spooler.jobs][-1] is runner.run_shoot_job
+    # "OK" is not creative direction and must not become a standing order.
+    assert "OK" not in (session.get("notes") or [])
+
+
+@pytest.mark.asyncio
+async def test_the_full_table_only_ever_meets_once():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, crew_preset="standard")
+    session = await service.start_table(
+        db, ollama, session, comfy=FakeComfy(), spooler=spooler,
+    )
+    session["board"]["pending"] = False
+    await session_db.save(db, session)
+
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "青い照明にして",
+    )
+    first = len([m for m in session["chat"] if m.get("kind") == "craft"])
+    session = await service.post_chat(
+        db, ollama, FakeComfy(), spooler, session, "もう少し明るく",
+    )
+    second = len([m for m in session["chat"] if m.get("kind") == "craft"])
+
+    # The second note goes to the short responder desk, not another full read.
+    assert second - first <= 6, (first, second)

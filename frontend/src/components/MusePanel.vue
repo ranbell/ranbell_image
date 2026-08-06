@@ -103,6 +103,35 @@ function tasteWidth(score) {
 function museById(id) {
   return muses.value.find(m => m.id === id)
 }
+
+// The Lead's face, small, beside the things she says. She is the one person at
+// the table the Showrunner actually cast, and in a wall of nicknames her lines
+// were indistinguishable from the crew's.
+const leadFace = computed(() => thumb(
+  character.value?.board?.portrait || character.value?.board?.sheet || '',
+))
+function isLead(m) {
+  return String(m?.muse_id || '').split(':')[0] === 'actress'
+}
+
+// Who put which tag in. Folded newest-first so a tag reads as "whoever last
+// touched it", which is the question being asked when a frame comes back wrong.
+const ledger = computed(() => session.value?.ledger || [])
+const tagCredits = computed(() => {
+  const live = new Set(
+    String(craft.value.tags || '')
+      .split(',')
+      .map(t => t.trim().replace(/^\(|:[\d.]+\)$|\)$/g, '').toLowerCase().replace(/ /g, '_'))
+      .filter(Boolean),
+  )
+  const seen = new Map()
+  for (const row of ledger.value) {
+    for (const tag of row.added || []) {
+      if (live.has(tag)) seen.set(tag, row.name || row.muse_id)
+    }
+  }
+  return [...seen].map(([tag, who]) => ({ tag, who }))
+})
 function clock(s) {
   const m = Math.floor(s / 60)
   return m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`
@@ -433,7 +462,13 @@ async function onChatKey(e) {
                   m.kind === 'banter' ? 'pl-4 opacity-90' : '',
                 ]"
               >
-                <span class="text-[10px] text-[var(--sb-faint)]">
+                <span class="flex items-center gap-1 text-[10px] text-[var(--sb-faint)]">
+                  <img
+                    v-if="isLead(m) && leadFace"
+                    :src="leadFace" alt=""
+                    class="w-5 h-5 rounded-full object-cover shrink-0
+                           ring-1 ring-amber-700/40"
+                  />
                   <template v-if="m.role === 'user'">{{ t('muse.showrunner') }}</template>
                   <template v-else-if="m.kind === 'banter'">{{ m.name }} · {{ t('muse.banter') }}</template>
                   <template v-else>{{ m.name || 'Studio' }}</template>
@@ -539,6 +574,20 @@ async function onChatKey(e) {
           <details v-if="craft.prompt" class="text-[10px] text-[var(--sb-faint)]">
             <summary class="cursor-pointer">{{ t('muse.craft') }}</summary>
             <p class="whitespace-pre-wrap font-mono mt-1 text-gray-400">{{ craft.prompt }}</p>
+          </details>
+
+          <!-- who put which tag in -->
+          <details v-if="tagCredits.length" class="text-[10px] text-[var(--sb-faint)]">
+            <summary class="cursor-pointer">
+              {{ t('muse.ledger') }} · {{ tagCredits.length }}
+            </summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.ledgerHint') }}</p>
+            <ul class="space-y-0.5">
+              <li v-for="c in tagCredits" :key="c.tag" class="flex gap-2">
+                <span class="font-mono text-gray-300 break-all">{{ c.tag }}</span>
+                <span class="ml-auto shrink-0 text-[var(--sb-faint)]">{{ c.who }}</span>
+              </li>
+            </ul>
           </details>
         </section>
       </main>

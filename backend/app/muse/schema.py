@@ -54,6 +54,9 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "notes": [],
         # Working craft the crew is building toward the board / shoot.
         "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
+        # Who added which tag, in order. Without it a bad frame can only be
+        # traced back to a seat by guessing from the chat.
+        "ledger": [],
         "chat": [],           # [{id, role, muse_id, name, text, at}]
         "board": {},          # image board round
         "shoot": {},          # final images after OK

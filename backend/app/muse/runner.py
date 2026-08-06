@@ -60,11 +60,19 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             positive=str(board.get("prompt") or ""),
             negative=_negative_for(session),
             seed=int(board.get("seed") or 0) or None,
-            batch_count=max(1, int(inputs.get("draft_count", 4))),
             subdir=PLAYGROUND_SUBDIR,
-            prefix="muse_board",
+            # The opening still is one frame, not four: at three seats in there
+            # is not enough craft for four to differ, and the point of it is to
+            # get something on the wall before the crew keeps talking.
+            batch_count=1 if board.get("still") else max(
+                1, int(inputs.get("draft_count", 4)),
+            ),
+            prefix="muse_still" if board.get("still") else "muse_board",
             method="muse_board",
-            payload_extra={"muse_session_id": session_id, "muse_stage": "board"},
+            payload_extra={
+                "muse_session_id": session_id,
+                "muse_stage": "still" if board.get("still") else "board",
+            },
             attach=_attach,
             preview=preview_publisher(session_id, "board"),
             **render_settings(inputs, draft=True),

@@ -167,10 +167,11 @@ async def pick_character(session_id: str, body: CharacterPick, request: Request)
 
 @router.post("/sessions/{session_id}/table")
 async def start_table(session_id: str, request: Request):
-    """Open the table read — crew discusses before any board."""
+    """Open the table read: three seats rough it in, then a still goes up."""
     session = await _session(request, session_id)
     return await _run(service.start_table(
         _db(request), _llm(request, session), session,
+        comfy=request.app.state.comfy, spooler=request.app.state.spooler,
     ))
 
 

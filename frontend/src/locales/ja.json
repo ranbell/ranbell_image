@@ -1355,6 +1355,8 @@
     "boardAsk": "これでいい？ OKなら本番、ダメなら指摘をどうぞ",
     "shootTitle": "本番",
     "craft": "いまの台本（プロンプト）",
+    "ledger": "台帳（誰が足したか）",
+    "ledgerHint": "いま残っているタグと、それを入れた席。",
     "warn": {
       "comfyOffline": "ComfyUI に接続できません",
       "title": "注意"

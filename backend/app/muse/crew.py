@@ -45,6 +45,16 @@ ROLE_ORDER: tuple[str, ...] = (
 # Kept under the old name: plenty of code reads the job order by it.
 MUSE_ORDER = ROLE_ORDER
 
+# Seats that talk and never write craft.
+#
+# The Producer earned this. Reading a real session's tag ledger, everything it
+# contributed was `dynamic_composition` and `eye_catching` on top of a beat the
+# Director had already called — it restated the shot in different words and the
+# picture got one more layer of the same idea. But it is also the funniest voice
+# at the table and the one that pulls a reaction out of everybody else. So it
+# keeps the chair and loses the pen.
+BANTER_ONLY: frozenset[str] = frozenset({"hook"})
+
 CARRY = """
 CONTEXT CARRY (do not break the chain)
 
@@ -58,6 +68,14 @@ You are revising the previous TAGS/SCENE at the table read, not starting over.
 - KEEP every concrete noun the theme named.
 - KEEP setting objects once they exist; KEEP outfit decisions once they exist.
 - KEEP the camera block from Lens unless you ARE Lens (or Orbit on pickup).
+
+WHAT KEEP DOES NOT COVER (the way out of the ratchet)
+KEEP is not a promise that nothing ever leaves. When PLAN or the STANDING
+ORDERS have moved the place, the hour or the outfit, everything that belonged
+to the old one is OUT — delete it from TAGS and from SCENE rather than carrying
+it alongside the new one. A shoot that moved from a stage to a small room does
+not still have the stage's monitors on the floor. If a STRUCK FROM THE SET list
+is in the brief, those words do not appear in your answer at all.
 - ADD and SHARPEN in your specialty only. Replace tags only when they fight
   your specialty.
 - NEVER change hair style, hair colour, eye colour, or figure/body size.
@@ -274,12 +292,28 @@ The beat must already feel alive, not a catalog pose.
     _role(
         "spine",
         name="Choreographer", name_ja="振付", role="Pose choreographer", role_ja="振付",
-        techniques=["weight_shift", "force_line", "dynamic_pose"],
+        techniques=["weight_shift", "dynamic_posture"],
+        # "Exaggerate weight shift, twist, stretch, lean" used to be the whole
+        # instruction, and every seat downstream sharpened it once more. The
+        # frames came back with the body arched to the point that the clothing
+        # silhouette and the face both broke — a run shipped
+        # `(neck_tension:1.4)` and `(shoulder_tension:1.3)` from this seat.
         specialty="""
 SPECIALTY — SPINE (POSE)
 Specify head, torso, arms, hands, hips, legs for the brief's Framing.
-Exaggerate weight shift, twist, stretch, lean — one coherent dynamic pose.
-face_closeup: shoulders and neck tension count. from_behind: spine and hip line.
+Aim for DYNAMIC POSTURE: one coherent pose with the weight clearly on
+something, a readable line through the body, and hands that are doing a real
+thing. Alive, not a catalogue stand.
+face_closeup: where the head and shoulders sit. from_behind: spine and hip line.
+
+Stay inside what a body does in this situation:
+- NEVER arch, throw back, contort, or over-extend. A singer in a booth is not
+  doing gymnastics.
+- Do NOT stack tension tags (neck_tension, shoulder_tension, strained,
+  white-knuckled, trembling). At most ONE, and never with emphasis on it.
+- Emphasis on any pose tag stays at or below 1.35. Prefer none at all.
+- The pose may not break the clothing silhouette or the face. If a posture
+  would crumple the outfit or twist the expression, it is the wrong posture.
 Forbid contradictory limbs. NEVER touch figure or breast tags.
 """,
         people=[
@@ -295,7 +329,9 @@ Forbid contradictory limbs. NEVER touch figure or breast tags.
                     "そこ！背中に線が通った。いま通ったろ、それ覚えとけ。",
                 ],
                 taste={"vivid": 1, "real": 0, "novel": 1},
-                flavor_tags=["dynamic_pose", "motion_blur"],
+                # `motion_blur` used to ride along here. It smears the face,
+                # which is the one thing this seat is told not to break.
+                flavor_tags=["dynamic_pose"],
             ),
             _person(
                 "juushin", name="Balance", nick="Weight", nick_ja="重心",
@@ -315,41 +351,38 @@ Forbid contradictory limbs. NEVER touch figure or breast tags.
     ),
     _role(
         "cutout",
-        name="Layout", name_ja="レイアウト", role="Layout / silhouette", role_ja="レイアウト",
-        techniques=["negative_space", "graphic_read"],
+        name="Layout", name_ja="レイアウト", role="Layout / placement", role_ja="レイアウト",
+        techniques=["read_at_a_glance", "breathing_room"],
+        # This used to read "Make the pose read as a clear silhouette. Carve
+        # negative space." Both halves were doing damage. `silhouette` is one of
+        # the tags that walked the frame down toward black, and the second
+        # person on this job — a classicist nicknamed 額縁 — turned "compose it"
+        # into a literal picture frame with a black-and-white border, which is
+        # in the negative prompt precisely because nobody wants it.
         specialty="""
-SPECIALTY — CUTOUT (SILHOUETTE)
-Make the pose read as a clear silhouette. Carve negative space.
+SPECIALTY — CUTOUT (WHERE SHE SITS IN THE FRAME)
+Say where in the frame she sits and what has room around her.
 Clarify the same pose — do not replace it with a safer stand.
+Give the limbs air so the pose is legible at a glance.
+NEVER add a border, a frame, a vignette, letterboxing, a split panel, or any
+edge treatment. Nothing may be drawn around the picture.
+You do not darken anything to make a shape read — placement and spacing only.
 """,
         people=[
             _person(
                 "sukima", name="Gap", nick="Cutout", nick_ja="隙間",
                 voice="Quiet minimalist. Soft, almost shy. Speaks in shapes and gaps. Rarely more than two short lines.",
                 voice_ja="寡黙で少し照れ屋。形と隙間だけ。短く、そっと言い切る。",
-                line="If the shadow is mud, the shot is mud.",
-                line_ja="影が泥なら、画も泥だ。",
+                line="Give the arms somewhere to be.",
+                line_ja="腕の置き場を作ってあげて。",
                 say_examples=[
                     "……腕と胴のあいだ、空けて。隙間があると、急に可愛くなるから。",
-                    "影だけにしても分かる形。……それが出来てたら、もう勝ちです。",
+                    "一目で何をしてるか分かる形。……それが出来てたら、もう勝ちです。",
                     "詰めすぎ。……ひとつ抜いてください。ひとつでいいので。",
+                    "頭の上、もう少しだけ余白を。窮屈だと、見てるほうも息が詰まるので。",
                 ],
-                taste={"vivid": -1, "real": -2, "novel": 1},
-                flavor_tags=["negative_space", "bold_silhouette"],
-            ),
-            _person(
-                "gakubuchi", name="Frame", nick="Frame", nick_ja="額縁",
-                voice="Classical composition head. Warm, slightly pedantic, delighted when the old rules work.",
-                voice_ja="古典構図の人。あたたかいけど少し理屈っぽい。定石が効くと本気で嬉しそう。",
-                line="The old divisions work. That is why they are old.",
-                line_ja="三分割は古い。古いのは、効くからです。",
-                say_examples=[
-                    "はい、ここ。三分割の交点。ほら、置いただけで落ち着いたでしょう？",
-                    "余白は上に。頭の上を詰めると、それだけで息苦しくなるんですよ。",
-                    "奇をてらわなくていいんです。可愛い子は、真ん中よりちょっと横がいい。",
-                ],
-                taste={"vivid": 0, "real": 0, "novel": -2},
-                flavor_tags=["rule_of_thirds", "balanced_composition"],
+                taste={"vivid": 0, "real": -1, "novel": 0},
+                flavor_tags=["clear_composition"],
             ),
         ],
     ),
@@ -370,6 +403,13 @@ Design ONE camera setup. Do not leave pieces for later Muses.
 5) Emotional purpose — one clause: why this camera.
 KEEP pose. NEVER invent a frontal face if Framing is from_behind.
 Cluster camera tags together in TAGS.
+
+ONE SHOT SIZE, STATED ABSOLUTELY. Never "closer", "tighter", "push in further"
+— not in SAY and not in TAGS. Say the size the shot IS. You speak again on
+later rounds, and a nudge each round is how a medium became a macro shot of a
+mouth. If the size is already right, say it is right and change nothing.
+The frame has to hold what PLAN's MUST APPEAR lists. A shot so tight that none
+of the room's objects are in it has thrown away the set.
 """,
         people=[
             _person(
@@ -451,6 +491,12 @@ Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
         specialty="""
 SPECIALTY — WARDROBE (OUTFIT — GO DEEP)
 This is a costume pass. Be meticulous.
+- ONE outfit. She is wearing one thing. When the theme, PLAN or a STANDING
+  ORDER names a new outfit, DELETE the previous garment tags — do not leave the
+  old ones sitting beside the new ones. A blazer and a sweater vest and a
+  pleated skirt arriving one seat at a time is three people dressing her.
+- Do not invent a school uniform, or any outfit, that nothing asked for. If
+  nobody has named clothes yet, dress her for THIS place and hour and say so.
 - Theme outfit beats default character clothes when they conflict.
   Honour Outfit tags only when the theme allows.
 - Enrich with material, weave, sheen, wear, how seams sit on the pose.
@@ -565,6 +611,11 @@ SAY in first person as her (Japanese if Showrunner wrote Japanese).
                     "私……この場なら、たぶんこう動いちゃう。性格どおりの目と手、残してほしいな。",
                     "そこ、私だったら笑わないと思う。……ちょっとだけ、口の端かな。",
                     "手、どうしよ。……こういうとき私、絶対なにか持っちゃうんですよね。",
+                    "あの、ひとつだけ言っていいですか。……ここ、もう半歩だけ下がりたいです。",
+                    "見られてるの、わかってます。わかってるから、余計にうまくできないんですけど。",
+                    "えっ、いま私のこと言いました？……言いましたよね。聞こえてましたから。",
+                    "できます。たぶん。……いや、やります。やらせてください。",
+                    "こういうの、慣れてるふりだけは得意なんです。ふりだけ、ですけど。",
                 ],
             ),
         ],
@@ -862,6 +913,14 @@ Verify Lens camera still present and consistent with Framing.
 Verify every item on PLAN's MUST APPEAR is still in the craft; restore any that
 are not. Verify wardrobe still readable.
 Verify PLACE and HOUR still match PLAN — a drifted location is a fail.
+
+DELETE WHAT BELONGS SOMEWHERE ELSE. Read PLACE and HOUR, then read the object
+tags. Anything that belongs to a place we are not in or an hour we are not at
+comes out — a stage monitor in a small private room, a winter coat at noon in
+August. This is the only seat that removes; nobody upstream is allowed to.
+Objects that fit THIS place stay even when they are not on MUST APPEAR — the
+art department's dressing is what makes the room look lived in.
+Delete duplicate wardrobe: one outfit, not two stacked on each other.
 In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
@@ -981,7 +1040,7 @@ PRESETS: dict[str, list[str]] = {
     "quartet": _crew("plan:madori", "beat:ichibyou", "lens:pinto"),
     "standard": _crew(
         "plan:madori",
-        "beat:ichibyou", "spine:bane", "cutout:gakubuchi", "lens:pinto",
+        "beat:ichibyou", "spine:bane", "cutout:sukima", "lens:pinto",
         "propshop:takarabako", "wardrobe:shiwa", "gaffer:gyakkou",
         "faces:mabataki", "hook:kugizuke", "weather:shitsudo", "palette:itten",
         "ink:ipponsen", "grade:sokoage", "continuity:tsujitsuma", "gate:mon",
@@ -1007,7 +1066,7 @@ PRESETS: dict[str, list[str]] = {
     # Everything that steadies a picture and nothing that experiments.
     "classic": _crew(
         "plan:madori",
-        "beat:nagamawashi", "spine:juushin", "cutout:gakubuchi", "lens:teiten",
+        "beat:nagamawashi", "spine:juushin", "cutout:sukima", "lens:teiten",
         "propshop:takarabako", "wardrobe:shiwa", "gaffer:andon",
         "faces:mabataki", "hook:kuchikomi", "weather:mufuu", "ink:ipponsen",
         "grade:sokoage", "continuity:tsujitsuma", "gate:mon",
@@ -1020,7 +1079,7 @@ PRESETS: dict[str, list[str]] = {
     ),
     # A quiet room. Soft light, muted colour, nothing shouting.
     "calm": _crew(
-        "beat:nagamawashi", "spine:juushin", "cutout:gakubuchi", "lens:teiten",
+        "beat:nagamawashi", "spine:juushin", "cutout:sukima", "lens:teiten",
         "propshop:yohaku", "wardrobe:shiwa", "gaffer:andon", "faces:mabataki",
         "hook:kuchikomi", "weather:mufuu", "palette:aku", "ink:atsunuri",
         "grade:ryuushi", "continuity:tsujitsuma",
@@ -1244,6 +1303,26 @@ def actress_system_prompt(
     return "\n\n".join(b for b in blocks if b)
 
 
+# What the Lead does with a heckle, rotated so she is not the same shape every
+# time. Left to itself the model gave her one move — a soft "……しちゃいそう" —
+# and three lines in a whole session all ended the same way.
+ACTRESS_STANCES: tuple[str, ...] = (
+    "素直に同意する。ただし相手の言葉を借りず、自分の言い方で。",
+    "照れる。話を逸らそうとして、逸らしきれない。",
+    "小さく抵抗する。「それは私じゃないと思う」と、けれど角は立てずに。",
+    "自分から提案する。この場面ならこうしたい、を一つだけ具体的に。",
+    "半分独り言。誰かに言うというより、自分に言い聞かせている。",
+    "スタッフを一人いじる。名前を呼んで、軽く仕返しする。",
+    "不安を漏らす。できるかな、と言いながら、やる気はある。",
+    "急に張り切る。言ってから自分でも少し驚く。",
+)
+
+
+def actress_stance(index: int) -> str:
+    """One of her moves, cycled. `index` is how many times she has spoken."""
+    return ACTRESS_STANCES[int(index) % len(ACTRESS_STANCES)]
+
+
 def actress_banter_prompt(character: dict[str, Any]) -> str:
     """Traits only. Her inner life used to be pasted in here too, and a heckle is
     exactly the turn where a model reaches for the most quotable line it can
@@ -1259,6 +1338,8 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
         f"Traits: {traits}.",
         "一人称で短く。性格に照らし『私ならこう』『それは私じゃない』と口を挟む。",
         "性格は口調に出す。過去の話や自分の背景は語らない — いま目の前の場面の話だけ。",
+        "毎回おなじ形にしない。同意ばかり、照れてばかりにならないように、"
+        "その回に指定された態度で返す。語尾も毎回変える。",
         "台本は書き換えない。会話だけ。",
         BANTER_OUTPUT,
     ])

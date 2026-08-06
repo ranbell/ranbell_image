@@ -103,6 +103,62 @@ def _norm(tag: str) -> str:
     return str(tag or "").strip().lower().replace(" ", "_")
 
 
+# The ceiling every seat is told about and none of them keep. It was written
+# into the Finisher's specialty text only, so a choreographer shipping
+# `(neck_tension:1.4)` sailed through — and at that weight the sampler arches
+# the whole body far enough to break the clothing silhouette and the face.
+MAX_TAG_WEIGHT = 1.35
+
+_WEIGHT_RE = re.compile(r"^\(\s*(?P<body>.+?)\s*:\s*(?P<weight>-?\d+(?:\.\d+)?)\s*\)$")
+
+
+def split_weight(part: str) -> tuple[str, float | None]:
+    """A tag and the emphasis written around it, if any."""
+    text = str(part or "").strip()
+    match = _WEIGHT_RE.match(text)
+    if match:
+        return match.group("body").strip(), float(match.group("weight"))
+    return text.strip("()[]").strip(), None
+
+
+def bare_tag(part: str) -> str:
+    """The tag with its emphasis stripped, normalised for comparison.
+
+    `_norm` alone leaves the parentheses on, so `(silver_hair:1.2)` matched
+    nothing: it did not collide with `silver_hair` already in the prompt, and it
+    slipped past the banned-body-tag check that exists to stop exactly that.
+    """
+    return _norm(split_weight(part)[0])
+
+
+def clamp_weight(part: str, cap: float = MAX_TAG_WEIGHT) -> str:
+    """One tag, with any emphasis above the cap brought back down to it."""
+    body, weight = split_weight(part)
+    text = str(part or "").strip()
+    if weight is None or weight <= cap:
+        return text
+    return f"({body}:{cap:g})"
+
+
+def clamp_weights(tags: str, cap: float = MAX_TAG_WEIGHT) -> str:
+    """A whole tag string with every emphasis held at or below the cap."""
+    parts = [clamp_weight(p, cap) for p in str(tags or "").split(",")]
+    return ", ".join(p for p in parts if p)
+
+
+def tag_names(tags: str) -> list[str]:
+    """Bare tag names in the order written, deduplicated. Used for the ledger."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in str(tags or "").split(","):
+        tag = bare_tag(part)
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        out.append(tag)
+    return out
+
+
 def identity_list(tags: Iterable[str] | None) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -301,12 +357,15 @@ def assemble_positive(
 
     model_tags: list[str] = []
     for part in (tags or "").split(","):
-        tag = _norm(part)
+        # Compare on the bare name: emphasis used to hide a tag from both the
+        # duplicate check and the banned-body check, so `(silver_hair:1.2)`
+        # rode in beside the locked `silver_hair`.
+        tag = bare_tag(part)
         if not tag or tag in seen or tag in banned:
             continue
         # Identity owns hair/eyes/figure; do not let the model restate and drift.
         seen.add(tag)
-        model_tags.append(part.strip())
+        model_tags.append(clamp_weight(part.strip()))
     for tag in framing_tags(framing):
         if tag not in seen:
             seen.add(tag)
