@@ -421,7 +421,7 @@ async def _take_probe(
     gpu = getter(JobLane.GENERATION) if getter else None
     ctx = gpu.acquire() if gpu is not None else _nullcontext()
     async with ctx:
-        await _free_the_card(ollama, session)
+        await _maybe_unload(ollama, session)
         data = await probe.render(
             comfy,
             workflow_name=str(inputs.get("workflow") or ""),
@@ -436,10 +436,15 @@ async def _take_probe(
         return None
 
     ledger = [str(o) for o in (_shot(session).get("objects") or [])]
-    reading = critique.measure(
+    seen = await _wd14(db, data, session)
+    # Decoding and measuring is 40-60ms of straight-line CPU. Small, until you
+    # remember it would run on the event loop and hold up every other request
+    # in the process. WD14 already puts its own inference on a thread.
+    reading = await asyncio.to_thread(
+        critique.measure,
         data,
         must_appear=ledger if shot.kind != probe.POSE else [],
-        seen_tags=await _wd14(db, data, session),
+        seen_tags=seen,
         # A pose probe is rendered on white on purpose; its brightness says
         # nothing about the picture being built.
         check_exposure=shot.kind != probe.POSE,
@@ -669,23 +674,22 @@ async def refine(
 
 
 # ── Act 5: board and shoot ──────────────────────────────────────────────────
-async def _free_the_card(ollama, session: dict[str, Any]) -> None:
-    """Take the language model off the GPU before anything renders.
+async def _maybe_unload(ollama, session: dict[str, Any]) -> None:
+    """Opt-in eviction before a render. Off by default, and that is right.
 
-    Measured on the box this runs on: a 15.6GB card, and the 26B MoE holding
-    12.5GB of it. ComfyUI was left 0.8GB and ComfyUI died. They do not share —
-    the LLM and the sampler have to take turns, and the seam is here.
-
-    `unload_vlm` is the escape hatch for a card big enough to hold both, not the
-    switch that enables this. It used to default to off on the strength of a
-    claim nobody had measured.
+    Ollama and ComfyUI share this card routinely without trouble. What makes a
+    render fail is a large latent — batch of two or more at full size — landing
+    while the card is already committed. That is a scheduling problem, and the
+    fix for it is that every render takes the generation resource, which is what
+    the caller now does. Unloading is the blunt instrument for a card that is
+    genuinely too small, and it costs a model reload each way.
     """
-    if ollama is None or _inputs(session).get("unload_vlm") is False:
+    if ollama is None or not bool(_inputs(session).get("unload_vlm")):
         return
     try:
         await ollama.unload(str(_inputs(session).get("model") or "") or None)
     except Exception:
-        logger.debug("[muse] could not unload before render", exc_info=True)
+        logger.debug("[muse] unload_vlm failed", exc_info=True)
 
 
 async def request_board(
@@ -697,7 +701,7 @@ async def request_board(
     session["craft"]["prompt"] = prompt
 
     sid = session["session_id"]
-    await _free_the_card(ollama, session)
+    await _maybe_unload(ollama, session)
     _studio(session, "ボードを上げます。これでいい？OKなら本番、ダメなら指摘ください。",
             "Board going up. Good? OK to shoot, or say what to fix.")
 
@@ -728,7 +732,7 @@ async def approve_and_shoot(
 
     sid = session["session_id"]
     seed = int((session.get("board") or {}).get("seed") or 0) or random.randint(0, (1 << 64) - 1)
-    await _free_the_card(ollama, session)
+    await _maybe_unload(ollama, session)
     _studio(session, "OK受領。本番撮影に入ります。", "OK received. Going to final shoot.")
 
     session["shoot"] = {"prompt": prompt, "seed": seed, "job_id": "",

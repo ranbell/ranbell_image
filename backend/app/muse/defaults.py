@@ -64,15 +64,14 @@ LLM_DEFAULTS: dict[str, object] = {
     # How many enrich/reduce/probe rounds before showing the board regardless.
     # A failure at the cap is announced, never shipped quietly.
     "probe_max_rounds": 3,
-    # Drop the LLM from VRAM before each render. ON, because they do not fit:
-    # measured on this box, a 26B MoE holds 12.5GB of a 15.6GB card and ComfyUI
-    # OOMs on the 0.8GB left. This was False for a while on the strength of an
-    # "MoE is only ~8GB active" claim that was never measured. Set it False only
-    # if your card can genuinely hold a checkpoint and the model at once; the
-    # cost of leaving it on is a model reload between the talking and the
-    # drawing, which `ollama_keep_alive` cannot help with because the point is
-    # to give the memory back.
-    "unload_vlm": True,
+    # Drop the LLM from VRAM before each render. Off: the two share this card in
+    # normal operation. A ComfyUI OOM mid-run looked like proof they cannot,
+    # but the cause was a probe rendering outside the job scheduler while the
+    # card was already committed — renders serialise through the GENERATION
+    # resource, and that probe was holding nothing. Turn this on only for a card
+    # that really is too small; it costs a model reload in each direction.
+    # Large latents (batch ≥ 2 at full size) are what make the margin thin.
+    "unload_vlm": False,
 }
 
 # ── The look, which is the user's call and not the model's ─────────────────
