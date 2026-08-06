@@ -10,6 +10,25 @@ import httpx
 
 from ..config import settings
 
+# How long the render websocket may say nothing at all before we give up on it.
+# ComfyUI emits progress every step, so silence this long means the far end is
+# gone rather than busy.
+STREAM_IDLE_TIMEOUT = 600.0
+
+
+async def _with_idle_timeout(ws, timeout: float):
+    """Iterate a websocket, raising if it goes quiet for too long."""
+    it = ws.__aiter__()
+    while True:
+        try:
+            yield await asyncio.wait_for(it.__anext__(), timeout=timeout)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"ComfyUI sent nothing for {timeout:.0f}s — assuming it died"
+            ) from exc
+
 logger = logging.getLogger(__name__)
 
 
@@ -458,7 +477,9 @@ class ComfyUIClient:
         r.raise_for_status()
         return r.json()["prompt_id"]
 
-    async def stream_progress(self, prompt_id: str) -> AsyncGenerator[dict, None]:
+    async def stream_progress(
+        self, prompt_id: str, *, idle_timeout: float = STREAM_IDLE_TIMEOUT,
+    ) -> AsyncGenerator[dict, None]:
         try:
             import websockets  # type: ignore
         except ImportError:
@@ -477,7 +498,12 @@ class ComfyUIClient:
 
         try:
             async with websockets.connect(ws_url, max_size=None) as ws:
-                async for raw in ws:
+                # Last resort. `execution_error` covers the failures ComfyUI
+                # announces; this covers the ones it does not — a hard crash, a
+                # killed worker, a dropped socket that never raises. Generous,
+                # because a slow sampler is normal and a wrong guess here kills
+                # a good render. Holding the GPU forever is still worse.
+                async for raw in _with_idle_timeout(ws, idle_timeout):
                     if isinstance(raw, (bytes, bytearray)):
                         jpeg = _preview_image(bytes(raw))
                         if jpeg is not None:
@@ -524,6 +550,28 @@ class ComfyUIClient:
                         images = output.get("images", [])
                         if images:
                             yield {"type": "comfy_output", "images": images}
+
+                    elif mtype in ("execution_error", "execution_interrupted"):
+                        # ComfyUI reports a failure and then goes quiet — no
+                        # `executing: None` ever arrives. Without this the loop
+                        # waits forever, the job stays `running`, and it holds
+                        # the GPU resource until the process restarts. An OOM
+                        # took the whole app down that way.
+                        node = data.get("node_type") or data.get("node_id") or "?"
+                        detail = (
+                            data.get("exception_message")
+                            or data.get("exception_type")
+                            or mtype
+                        )
+                        logger.error(
+                            "ComfyUI %s at node %s: %s", mtype, node, detail,
+                        )
+                        yield {
+                            "type": "comfy_failed",
+                            "message": f"{node}: {detail}",
+                            "node": str(node),
+                        }
+                        return
 
         except asyncio.CancelledError:
             raise

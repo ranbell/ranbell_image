@@ -160,6 +160,13 @@ async def run_render(
                     await _keep(img_ref)
                 except Exception as exc:
                     logger.error("[render] image save error: %s", exc)
+        elif event["type"] in ("comfy_failed", "error"):
+            # Let it out. Swallowing this is what left a dead render looking
+            # like a live one: the job stayed `running`, kept the GPU resource,
+            # and the generation lane queued behind a job nobody could cancel.
+            raise RuntimeError(
+                f"ComfyUI failed: {event.get('message') or 'unknown error'}"
+            )
 
     # The websocket drops frames under load; /history is the backstop.
     for img_ref in await comfy.fetch_history(prompt_id):
