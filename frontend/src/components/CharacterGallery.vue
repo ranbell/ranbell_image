@@ -47,6 +47,7 @@ const activeTraits = ref([])
 const activeHair = ref([])
 const activeEyes = ref([])
 const view = ref('grid')          // 'grid' | 'deck'
+const imageDisplayMode = ref('sheet') // 'sheet' | 'portrait' — top-bar one-tap toggle!
 const deckAt = ref(0)
 const dossierId = ref('')
 const bulkGroup = ref('')
@@ -62,6 +63,11 @@ function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function sheet(c) { return thumb(c.board?.sheet || '') }
 function face(c) { return thumb(c.board?.portrait || '') }
 function anyImage(c) { return sheet(c) || face(c) }
+function cardImage(c) {
+  if (imageDisplayMode.value === 'portrait') return face(c) || sheet(c)
+  return sheet(c) || face(c)
+}
+
 
 // Only offer a filter that narrows something. A trait one character has is not
 // a filter, it is a name.
@@ -321,6 +327,24 @@ onUnmounted(() => {
           </p>
         </div>
 
+        <!-- 🌸 Top-bar picture mode toggle button (Portrait ↔ Sheet) -->
+        <div class="sb-seg border-pink-500/30">
+          <button
+            type="button"
+            class="sb-seg-btn text-[11px] px-2.5"
+            :class="imageDisplayMode === 'portrait' ? 'bg-pink-500/80 text-white font-semibold' : ''"
+            title="顔サムネイル一覧に一発切り替え"
+            @click="imageDisplayMode = 'portrait'"
+          >🌸 {{ isJa ? '顔サムネイル' : 'Portrait' }}</button>
+          <button
+            type="button"
+            class="sb-seg-btn text-[11px] px-2.5"
+            :class="imageDisplayMode === 'sheet' ? 'bg-rose-500/80 text-white font-semibold' : ''"
+            title="印象的な写真一覧に一発切り替え"
+            @click="imageDisplayMode = 'sheet'"
+          >✨ {{ isJa ? '印象的な写真' : 'Sheet' }}</button>
+        </div>
+
         <div class="sb-seg">
           <button
             v-for="v in ['grid', 'deck']"
@@ -332,6 +356,7 @@ onUnmounted(() => {
           >{{ t(`characters.view.${v}`) }}</button>
         </div>
         <button class="sb-btn" :title="t('characters.surprise')" @click="surprise">🎲</button>
+
 
         <input v-model="query" type="search" class="sb-input w-48"
                :placeholder="t('characters.search')" />
@@ -418,12 +443,13 @@ onUnmounted(() => {
               <span class="block aspect-[3/4] bg-black/50 overflow-hidden">
                 <img
                   v-if="anyImage(c)"
-                  :src="sheet(c) || face(c)"
+                  :src="cardImage(c)"
                   :alt="label(c)"
                   loading="lazy"
                   class="w-full h-full object-cover transition-transform duration-500
                          group-hover:scale-105"
                 />
+
                 <span v-else
                       class="w-full h-full grid place-items-center text-[10px] text-gray-600 px-3 text-center">
                   {{ t('characters.noPortrait') }}
@@ -509,10 +535,11 @@ onUnmounted(() => {
               <img
                 v-if="anyImage(current)"
                 :key="current.id"
-                :src="sheet(current) || face(current)"
+                :src="cardImage(current)"
                 :alt="label(current)"
                 class="ch-deck-img max-h-[56vh] w-auto object-contain"
               />
+
               <div v-else class="p-16 text-center">
                 <p class="text-xs text-gray-500 mb-3">{{ t('characters.noPortrait') }}</p>
                 <button class="sb-btn" @click="draw(current.id)">{{ t('characters.drawReference') }}</button>

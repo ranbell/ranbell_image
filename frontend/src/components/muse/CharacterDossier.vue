@@ -15,6 +15,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { eyeSwatch, hairSwatch, colorWord, paletteSwatch } from './colorSwatch.js'
 import { useRenderWatch } from '../../composables/useRenderWatch.js'
+import ActressDiaryModal from './ActressDiaryModal.vue'
 
 const props = defineProps({
   characterId: { type: String, default: '' },
@@ -31,6 +32,20 @@ const detail = ref(null)
 const loading = ref(false)
 const busy = ref(false)
 const bigSlot = ref('sheet')
+const showDiary = ref(false)
+const unreadDiaryCount = ref(0)
+
+async function checkUnreadDiaries() {
+  if (!props.characterId) return
+  try {
+    const res = await api(`/api/characters/${props.characterId}/diaries`)
+    const diaries = res.diaries || []
+    unreadDiaryCount.value = diaries.filter(d => !d.read).length
+  } catch (err) {
+    console.debug('Failed to check unread diaries', err)
+  }
+}
+
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const preset = computed(() => detail.value?.preset || null)
@@ -68,10 +83,13 @@ function fail(err) { emit('toast', { msg: String(err?.message || err), type: 'er
 async function load() {
   if (!props.characterId) { detail.value = null; return }
   loading.value = true
-  try { detail.value = await api(`/api/characters/${props.characterId}`) }
-  catch (err) { fail(err) } finally { loading.value = false }
+  try {
+    detail.value = await api(`/api/characters/${props.characterId}`)
+    await checkUnreadDiaries()
+  } catch (err) { fail(err) } finally { loading.value = false }
   resumeWatch()
 }
+
 
 // A queued render attaches itself minutes later and nothing announces it, so
 // without this the new candidate only appeared if you closed this and reopened.
@@ -148,11 +166,24 @@ watch(() => props.characterId, load, { immediate: true })
             </span>
           </p>
         </div>
+        <button
+          type="button"
+          class="relative sb-btn bg-pink-900/40 hover:bg-pink-800/60 border-pink-500/40 text-pink-200 flex items-center gap-1.5"
+          @click="showDiary = true"
+        >
+          <span>📖 ひみつの日記帳</span>
+          <span
+            v-if="unreadDiaryCount > 0"
+            class="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-rose-500 text-white animate-pulse"
+          >{{ unreadDiaryCount }}</span>
+        </button>
+
         <select
           class="sb-select w-56"
           :value="workflow"
           @change="emit('update:workflow', $event.target.value)"
         >
+
           <option value="">{{ t('characters.workflow') }} —</option>
           <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
         </select>
@@ -310,5 +341,16 @@ watch(() => props.characterId, load, { immediate: true })
         </aside>
       </div>
     </div>
+
+    <ActressDiaryModal
+      v-if="showDiary"
+      :show="showDiary"
+      :character-id="characterId"
+      :character-name="name"
+      @close="showDiary = false"
+      @diary-read="checkUnreadDiaries"
+      @toast="emit('toast', $event)"
+    />
   </div>
 </template>
+

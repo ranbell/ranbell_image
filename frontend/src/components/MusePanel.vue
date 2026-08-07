@@ -362,12 +362,29 @@ async function sendChat(text) {
 
 function quick(cmd) { sendChat(cmd) }
 
+async function finishSession() {
+  if (!session.value || busy.value) return
+  if (!window.confirm('起用をおしまいにして、撮影日記の執筆を女優に頼みますか？🌸')) return
+  busy.value = true
+  try {
+    session.value = await api(`/api/muse/sessions/${session.value.session_id}/finish`, {
+      method: 'POST'
+    })
+    emit('toast', { msg: 'お疲れ様でした！撮影日記の執筆ジョブを投入しました 🎀', type: 'info' })
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function onChatKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     await sendChat()
   }
 }
+
 </script>
 
 <template>
@@ -550,7 +567,17 @@ async function onChatKey(e) {
                           @click="quick(DUET_SHOT)">
                     {{ t('muse.quick.testShot') }}
                   </button>
+                  <button
+                    type="button"
+                    class="sb-btn text-[10px] bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 ml-auto"
+                    :disabled="chatLocked"
+                    title="起用を終了して撮影日記の生成ジョブをバックグラウンドへ投入"
+                    @click="finishSession"
+                  >
+                    🎀 起用はおしまい。お疲れ様
+                  </button>
                 </template>
+
                 <template v-else>
                   <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick(isJa ? 'ボード' : 'board')">
                     {{ t('muse.quick.board') }}

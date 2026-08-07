@@ -641,3 +641,63 @@ async def _insert_seed_presets(
         )
     logger.info("[presets] seeded %d character presets", len(points))
     return len(points), carried
+
+
+# ── Preset Diaries (Qdrant payload) ──────────────────────────────────────────
+async def get_preset_diaries(db, preset_id: str) -> list[dict[str, Any]]:
+    """Retrieve all diary entries for a given preset_id."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return []
+    return list(preset.get("diaries") or [])
+
+
+async def add_preset_diary(db, preset_id: str, diary: dict[str, Any]) -> dict[str, Any] | None:
+    """Append a new diary entry to a character preset."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return None
+    diaries = list(preset.get("diaries") or [])
+    diaries.append(diary)
+    await update_preset(db, preset_id, {"diaries": diaries})
+    return diary
+
+
+async def mark_diary_read(db, preset_id: str, diary_id: str) -> dict[str, Any] | None:
+    """Mark a diary entry as read (read = True) and return the updated diary."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return None
+    diaries = list(preset.get("diaries") or [])
+    target = None
+    for d in diaries:
+        if str(d.get("id") or "") == str(diary_id):
+            d["read"] = True
+            target = d
+            break
+    if target:
+        await update_preset(db, preset_id, {"diaries": diaries})
+    return target
+
+
+async def mark_secret_banter_fired(db, preset_id: str, diary_id: str) -> None:
+    """Mark that the one-off secret banter reaction for reading this diary has been fired."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return
+    diaries = list(preset.get("diaries") or [])
+    for d in diaries:
+        if str(d.get("id") or "") == str(diary_id):
+            d["secret_banter_fired"] = True
+            break
+    await update_preset(db, preset_id, {"diaries": diaries})
+
+
+async def get_recent_diary_summaries(db, preset_id: str, limit: int = 3) -> list[dict[str, Any]]:
+    """Get recent diary summaries (up to `limit`) for prompt injection."""
+    diaries = await get_preset_diaries(db, preset_id)
+    if not diaries:
+        return []
+    sorted_diaries = sorted(diaries, key=lambda d: d.get("timestamp") or 0.0, reverse=True)
+    return sorted_diaries[:limit]
+

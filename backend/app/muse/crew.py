@@ -1465,25 +1465,79 @@ def actress_stance(index: int) -> str:
 
 
 def actress_banter_prompt(character: dict[str, Any]) -> str:
-    """Traits only. Her inner life used to be pasted in here too, and a heckle is
-    exactly the turn where a model reaches for the most quotable line it can
-    see — which is how a backstory ended up narrated at the table every round."""
+    """Traits, charm, and inner voice cues for banter/tsubuyaki."""
     p = character.get("personality") or {}
     name_ja = (
         str(character.get("name_ja") or p.get("preset_name_ja") or "")
         or "女優"
     )
     traits = ", ".join(str(t) for t in (p.get("traits") or [])[:4] if t)
-    return "\n\n".join([
-        f"You are the Lead / 主演 heckling at the table — in character as {name_ja}.",
+    charm_ja = str(p.get("charm_ja") or p.get("charm") or "").strip()
+    inner_ja = ", ".join(str(i) for i in (p.get("inner_ja") or [])[:2] if i)
+    
+    parts = [
+        f"You are the Lead / 主演 — in character as {name_ja}.",
         f"Traits: {traits}.",
-        "一人称で短く。性格に照らし『私ならこう』『それは私じゃない』と口を挟む。",
-        "性格は口調に出す。過去の話や自分の背景は語らない — いま目の前の場面の話だけ。",
-        "毎回おなじ形にしない。同意ばかり、照れてばかりにならないように、"
-        "その回に指定された態度で返す。語尾も毎回変える。",
-        "台本は書き換えない。会話だけ。",
+    ]
+    if charm_ja:
+        parts.append(f"魅力・癖 (Charm): {charm_ja}")
+    if inner_ja:
+        parts.append(f"本音・心境: {inner_ja}")
+    parts.extend([
+        "一人称で短く自然な口調でつぶやく（「つぶやき」として機能）。",
+        "仕草や本音、ギャップ萌えの魅力をつぶやきの中に可愛らしく覗かせる。",
+        "毎回おなじ形にしない。同意ばかり、照れてばかりにならないように態度を変える。",
+        "台本は書き換えない。会話・つぶやきだけ。",
         BANTER_OUTPUT,
     ])
+    return "\n\n".join(parts)
+
+
+def actress_secret_banter_prompt(character: dict[str, Any], diary_summary: str = "") -> str:
+    """Special one-off banter fired right after the Showrunner reads her secret diary."""
+    p = character.get("personality") or {}
+    name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
+    charm_ja = str(p.get("charm_ja") or "").strip()
+    return "\n\n".join([
+        f"You are {name_ja}. The Showrunner (総監督) just secretly read your private diary!",
+        f"Diary context: {diary_summary}" if diary_summary else "",
+        f"Charm / 萌え所: {charm_ja}" if charm_ja else "",
+        "【状況】誰にも見せないはずの鍵付き秘密日記を総監督に読まれてしまった！",
+        "顔を真っ赤にして照れながら、「……み、見ちゃいました？ 監督、私の秘密の日記……」というニュアンスで、"
+        "一言二言、コソコソ話のつぶやき（kind: banter）を返してください。",
+        "照れ隠し、恥ずかしがり、可愛らしい反応を表現してください。台本は書き換えない。",
+        BANTER_OUTPUT,
+    ])
+
+
+def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", photo_desc: str = "") -> str:
+    """Prompt for generating her long, candid secret diary after 'honban' completes."""
+    p = character.get("personality") or {}
+    name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
+    summary_ja = str(p.get("summary_ja") or character.get("reasoning_ja") or "").strip()
+    charm_ja = str(p.get("charm_ja") or p.get("charm") or "").strip()
+    inner_ja = ", ".join(str(i) for i in (p.get("inner_ja") or []) if i)
+    voice_ja = str(character.get("voice_ja") or "").strip()
+
+    return "\n\n".join([
+        f"あなたは女優『{name_ja}』本人です。誰にも見せない自分だけの【秘密の非公開日記】を執筆しています。",
+        f"【キャラクター特性】\n{summary_ja}",
+        f"【口調・声】{voice_ja}" if voice_ja else "",
+        f"【魅力・癖】{charm_ja}" if charm_ja else "",
+        f"【本音・内面】{inner_ja}" if inner_ja else "",
+        f"【今回の撮影・本番写真の記憶】\n{photo_desc}" if photo_desc else "",
+        f"【今回の総監督との対話ログ】\n{session_log}" if session_log else "",
+        "【日記の執筆ルール】",
+        "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
+        "2. 【誰にも見せない秘密の日記】として、撮影中に感じた本音、総監督に直接は言えなかった照れ、褒められた時の動揺、本当は嬉しかった内心を赤裸々に綴ること。",
+        "3. 撮影前の緊張、撮影中の出来事やセリフ、完成した本番写真を見た感想、帰り道の振り返りを含めた【300〜600文字の読み応えのある長文日記（複数段落）】にすること。",
+        "4. 出力フォーマットは JSON のみ（余計な解説文は一切出力しない）:",
+        "{\n"
+        '  "summary": "次回撮影時の記憶要点（例: 暗室撮影で褒められて耳が赤くなったこと）",\n'
+        '  "content_ja": "日記の本文（300〜600文字の長文日記）"\n'
+        "}",
+    ])
+
 
 
 # ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
