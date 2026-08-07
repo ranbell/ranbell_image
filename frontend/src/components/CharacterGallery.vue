@@ -333,17 +333,18 @@ onUnmounted(() => {
             type="button"
             class="sb-seg-btn text-[11px] px-2.5"
             :class="imageDisplayMode === 'portrait' ? 'bg-pink-500/80 text-white font-semibold' : ''"
-            title="顔サムネイル一覧に一発切り替え"
+            :title="t('characters.modePortrait')"
             @click="imageDisplayMode = 'portrait'"
-          >🌸 {{ isJa ? '顔サムネイル' : 'Portrait' }}</button>
+          >{{ t('characters.modePortrait') }}</button>
           <button
             type="button"
             class="sb-seg-btn text-[11px] px-2.5"
             :class="imageDisplayMode === 'sheet' ? 'bg-rose-500/80 text-white font-semibold' : ''"
-            title="印象的な写真一覧に一発切り替え"
+            :title="t('characters.modeSheet')"
             @click="imageDisplayMode = 'sheet'"
-          >✨ {{ isJa ? '印象的な写真' : 'Sheet' }}</button>
+          >{{ t('characters.modeSheet') }}</button>
         </div>
+
 
         <div class="sb-seg">
           <button
@@ -471,7 +472,7 @@ onUnmounted(() => {
                 v-if="c.id === selectedId"
                 class="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[10px] font-bold
                        bg-gradient-to-r from-pink-500 to-rose-400 text-white shadow-md animate-pulse"
-              >💖 指名中</span>
+              >{{ t('characters.chosenBadge') }}</span>
             </button>
 
             <div class="p-3 flex flex-col gap-1.5 grow bg-slate-900/40">
@@ -508,8 +509,9 @@ onUnmounted(() => {
               <div class="flex gap-1.5 pt-1">
                 <button type="button" class="sb-btn flex-1 justify-center !py-1.5 !text-[11px] font-bold bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white border-0 shadow-md rounded-xl transition-all"
                         @click="emit('pick', c.id)">
-                  🌸 この子とペアを組む
+                  {{ t('characters.pairButton') }}
                 </button>
+
                 <button type="button" class="sb-icon-btn !w-8 !h-8 !text-xs border-pink-500/30 text-pink-300 hover:bg-pink-900/40 rounded-xl"
                         :title="t('characters.drawReference')" @click="draw(c.id)">✎</button>
               </div>

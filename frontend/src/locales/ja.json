@@ -1404,11 +1404,23 @@
       "hint": "スタッフを入れ替えると絵が変わります",
       "people": "担当を選ぶ"
     },
-    "nick": "あだ名"
+    "nick": "あだ名",
+    "finishBtn": "🎀 起用はおしまい。お疲れ様",
+    "finishTitle": "起用を終了して撮影日記の生成ジョブをバックグラウンドへ投入",
+    "finishConfirm": "起用をおしまいにして、撮影日記の執筆を女優に頼みますか？🌸",
+    "finishToast": "お疲れ様でした！撮影日記の執筆ジョブを投入しました 🎀",
+    "secretBanterTitle": "💭💕 内緒のつぶやき",
+    "leadThinking": "💖 考え中..."
   },
   "characters": {
     "title": "キャラクター",
+    "modePortrait": "🌸 顔サムネイル",
+    "modeSheet": "✨ 印象的な写真",
+    "chosenBadge": "💖 指名中",
+    "pairButton": "🌸 この子とペアを組む",
+    "secretDiary": "📖 ひみつの日記帳",
     "pick": "選ぶ",
+
     "board": "参照ボード",
     "generateBoard": "参照ボードを描く",
     "regenerateBoard": "描き直す",

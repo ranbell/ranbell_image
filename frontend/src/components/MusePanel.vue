@@ -364,19 +364,20 @@ function quick(cmd) { sendChat(cmd) }
 
 async function finishSession() {
   if (!session.value || busy.value) return
-  if (!window.confirm('起用をおしまいにして、撮影日記の執筆を女優に頼みますか？🌸')) return
+  if (!window.confirm(t('muse.finishConfirm'))) return
   busy.value = true
   try {
     session.value = await api(`/api/muse/sessions/${session.value.session_id}/finish`, {
       method: 'POST'
     })
-    emit('toast', { msg: 'お疲れ様でした！撮影日記の執筆ジョブを投入しました 🎀', type: 'info' })
+    emit('toast', { msg: t('muse.finishToast'), type: 'info' })
   } catch (err) {
     fail(err)
   } finally {
     busy.value = false
   }
 }
+
 
 async function onChatKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -532,7 +533,7 @@ async function onChatKey(e) {
                     :class="isDuet ? 'w-9 h-9' : 'w-6 h-6'"
                   />
                   <template v-if="m.role === 'user'">🎬 {{ t('muse.showrunner') }}</template>
-                  <template v-else-if="m.kind === 'banter'">💭💕 {{ m.name }} · 内緒のつぶやき</template>
+                  <template v-else-if="m.kind === 'banter'">{{ t('muse.secretBanterTitle') }} {{ m.name }}</template>
                   <template v-else>🌸 {{ m.name || 'Studio' }}</template>
                 </span>
                 <div
@@ -549,7 +550,7 @@ async function onChatKey(e) {
 
               <div v-if="speaking && liveSay" class="flex flex-col items-start gap-1 my-1">
                 <span class="text-[10px] text-pink-300 font-bold animate-pulse flex items-center gap-1">
-                  <span>💖</span> {{ museLabel(museById(speaking)) || speaking }} 考え中...
+                  <span>💖</span> {{ museLabel(museById(speaking)) || speaking }} {{ t('muse.leadThinking') }}
                 </span>
                 <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
                             bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md">
@@ -575,11 +576,12 @@ async function onChatKey(e) {
                     type="button"
                     class="sb-btn text-[10px] bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 ml-auto"
                     :disabled="chatLocked"
-                    title="起用を終了して撮影日記の生成ジョブをバックグラウンドへ投入"
+                    :title="t('muse.finishTitle')"
                     @click="finishSession"
                   >
-                    🎀 起用はおしまい。お疲れ様
+                    {{ t('muse.finishBtn') }}
                   </button>
+
                 </template>
 
                 <template v-else>

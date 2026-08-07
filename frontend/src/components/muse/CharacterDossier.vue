@@ -171,12 +171,13 @@ watch(() => props.characterId, load, { immediate: true })
           class="relative sb-btn bg-pink-900/40 hover:bg-pink-800/60 border-pink-500/40 text-pink-200 flex items-center gap-1.5"
           @click="showDiary = true"
         >
-          <span>📖 ひみつの日記帳</span>
+          <span>{{ t('characters.secretDiary') }}</span>
           <span
             v-if="unreadDiaryCount > 0"
             class="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-rose-500 text-white animate-pulse"
           >{{ unreadDiaryCount }}</span>
         </button>
+
 
         <select
           class="sb-select w-56"

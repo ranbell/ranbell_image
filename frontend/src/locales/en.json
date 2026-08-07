@@ -1404,11 +1404,23 @@
       "hint": "Swap a seat and the picture changes",
       "people": "Pick who does it"
     },
-    "nick": "Nickname"
+    "nick": "Nickname",
+    "finishBtn": "🎀 Wrap Up & Finish",
+    "finishTitle": "Finish session & queue post-shoot secret diary job",
+    "finishConfirm": "Wrap up session and ask the actress to write a post-shoot diary? 🌸",
+    "finishToast": "Thank you for your hard work! Secret diary writing job spooled 🎀",
+    "secretBanterTitle": "💭💕 Secret Whispers",
+    "leadThinking": "💖 Thinking..."
   },
   "characters": {
     "title": "Characters",
+    "modePortrait": "🌸 Portrait",
+    "modeSheet": "✨ Sheet",
+    "chosenBadge": "💖 Selected",
+    "pairButton": "🌸 Pair with Her",
+    "secretDiary": "📖 Secret Diary",
     "pick": "Pick",
+
     "board": "Reference board",
     "generateBoard": "Draw the reference board",
     "regenerateBoard": "Redraw",
