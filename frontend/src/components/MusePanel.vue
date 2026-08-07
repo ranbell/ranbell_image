@@ -635,7 +635,7 @@ async function onChatKey(e) {
                  : 'border-white/10 opacity-45'">
             <button type="button"
                     class="w-24 shrink-0 text-left text-[11px] text-[var(--sb-amber)]"
-                    :disabled="r.required || act !== 'setup'"
+                    :disabled="r.required || chatLocked"
                     :title="isJa ? r.role_ja : r.role"
                     @click="toggleRole(r)">
               {{ isJa ? r.name_ja : r.name }}
@@ -647,7 +647,7 @@ async function onChatKey(e) {
                 :class="crewIds.has(p.id) || r.required
                   ? 'border-[var(--sb-teal)] text-[var(--sb-teal)] bg-teal-950/20'
                   : 'border-white/10 text-gray-400 hover:border-white/30'"
-                :disabled="r.required || act !== 'setup'"
+                :disabled="r.required || chatLocked"
                 :title="isJa ? (p.line_ja || p.line) : p.line"
                 @click="pickPerson(r, p)"
               >

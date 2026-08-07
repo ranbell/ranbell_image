@@ -1005,3 +1005,50 @@ async def test_a_planner_that_omits_the_ledger_does_not_empty_the_room():
     ]
     assert not session.get("struck")
     assert "wireless_microphone" in session["craft"]["tags"]
+
+
+# ── casting stays editable ──────────────────────────────────────────────────
+def test_a_seat_cast_after_the_read_through_gets_a_pass_before_it_opines():
+    """The drawer used to freeze the moment the table opened. Now that
+    「今日は照明いいや」works mid-session, so does bringing lighting back — and it
+    has never read the script."""
+    cast = crew.resolve_crew(preset="standard")
+    session = {
+        "session_id": "s", "inputs": {},
+        "spoken": [m for m in cast if crew.role_of(m) != "gaffer"],
+    }
+    fresh = service.newcomers(session, cast)
+    assert fresh == [crew.DEFAULT_MEMBER["gaffer"]]
+
+    # And it leads the responder desk, because a seat cast halfway through is
+    # usually cast because of the note that follows.
+    responders = fresh + [
+        m for m in service._pick_responders("照明を戻して", cast) if m not in fresh
+    ]
+    assert responders[0] == crew.DEFAULT_MEMBER["gaffer"]
+
+
+def test_a_crew_that_has_all_spoken_has_nobody_catching_up():
+    cast = crew.resolve_crew(preset="standard")
+    session = {"session_id": "s", "inputs": {}, "spoken": list(cast)}
+    assert service.newcomers(session, cast) == []
+
+
+def test_swapping_a_whole_preset_mid_session_does_not_queue_a_dozen_turns():
+    cast = crew.resolve_crew(preset="everyone")
+    session = {"session_id": "s", "inputs": {}, "spoken": []}
+    assert len(service.newcomers(session, cast)) == service.MAX_CATCHUP
+
+
+@pytest.mark.asyncio
+async def test_writing_craft_is_what_marks_a_seat_as_having_spoken():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, crew_preset="standard")
+    session = await service.start_table(
+        db, ollama, session, comfy=FakeComfy(), spooler=spooler,
+    )
+    spoken = {crew.role_of(m) for m in session["spoken"]}
+    assert spoken == {"actress", "lens"}, spoken
+    # The planner does not write craft, so it is not on the list and never
+    # queues itself for a catch-up pass.
+    assert "plan" not in spoken

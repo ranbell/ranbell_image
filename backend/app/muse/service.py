@@ -427,6 +427,12 @@ def _apply_turn(
     craft["prompt"] = turn.prompt
     craft["tags"] = turn.tags
     craft["scene"] = turn.scene
+    # Seats can be swapped mid-session. One brought in after the read-through
+    # has never seen the script, and answering a note is not a substitute for
+    # a first pass over it.
+    spoken = session.setdefault("spoken", [])
+    if turn.muse_id not in spoken:
+        spoken.append(turn.muse_id)
     if crew.role_of(turn.muse_id) in ("beat", "spine") or not craft.get("pose_intent"):
         craft["pose_intent"] = turn.pose_intent
     name = _muse_display_name(session, turn.muse_id)
@@ -906,6 +912,7 @@ async def start_table(
     session["chat"] = []
     session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
     session["ledger"] = []
+    session["spoken"] = []
     session["board"] = {}
     session["shoot"] = {}
     session["plan"] = {}
@@ -1084,7 +1091,11 @@ async def post_chat(
 
     # Crew answers the hard note — pick specialists by keyword, else core desk.
     cast = _crew_ids(session)
-    responders = _pick_responders(text, cast)
+    # Anyone brought in since the read-through has never seen the script. They
+    # go first, and they get the note too — a seat cast halfway through is
+    # usually cast *because* of the note.
+    fresh = newcomers(session, cast)
+    responders = fresh + [m for m in _pick_responders(text, cast) if m not in fresh]
     session["status"] = "discussing"
     # The note is standing direction from here on, not a remark about one turn.
     session.setdefault("notes", []).append(text)
@@ -1154,6 +1165,25 @@ async def post_chat(
     session["status"] = "chat"
     await session_db.save(db, session)
     return session
+
+
+# How many never-spoken seats can catch up on one note. The cast is editable at
+# any time, so somebody swapping a preset mid-session could otherwise queue a
+# dozen turns behind one remark.
+MAX_CATCHUP = 4
+
+
+def newcomers(session: dict[str, Any], crew_ids: list[str]) -> list[str]:
+    """Cast members who write craft and have not written any yet, in table order.
+
+    The casting drawer used to be frozen the moment the table opened, so this
+    could not happen. Now that「今日は照明いいや」works mid-session, the reverse is
+    also true: bring lighting back and it has never read the script. Letting it
+    answer a note without a first pass gives an opinion on a scene it has not
+    been told about.
+    """
+    already = set(session.get("spoken") or [])
+    return [m for m in _writing_seats(crew_ids) if m not in already][:MAX_CATCHUP]
 
 
 def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:

@@ -57,6 +57,9 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # Who added which tag, in order. Without it a bad frame can only be
         # traced back to a seat by guessing from the chat.
         "ledger": [],
+        # Seats that have written craft. The cast is editable mid-session, so
+        # one brought in late has to read the script before it gets opinions.
+        "spoken": [],
         "chat": [],           # [{id, role, muse_id, name, text, at}]
         "board": {},          # image board round
         "shoot": {},          # final images after OK
