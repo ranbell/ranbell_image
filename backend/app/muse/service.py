@@ -1692,6 +1692,105 @@ async def approve_and_shoot(
     return session
 
 
+async def finish_session(
+    db, spooler, session: dict[str, Any], ollama=None
+) -> dict[str, Any]:
+    """Wrap up session, mark as finished, and queue background post-shoot secret diary job."""
+    session["status"] = "finished"
+    sid = session["session_id"]
+    session_db.log(session, "finish", "session wrapped up")
+    await session_db.save(db, session)
+
+    char_id = str((session.get("inputs") or {}).get("character_id") or "")
+    if char_id and spooler:
+        spooler.submit(
+            JobLane.UTILITY,
+            "generate_actress_diary",
+            run_generate_actress_diary_job,
+            meta={"session_id": sid, "character_id": char_id},
+            db=db,
+            ollama=ollama,
+            session=session,
+            character_id=char_id,
+        )
+    return session
+
+
+async def run_generate_actress_diary_job(
+    job_id: str,
+    cancel_event,
+    progress_callback,
+    *,
+    db,
+    ollama,
+    session: dict[str, Any],
+    character_id: str,
+):
+    """Background runner job that invokes LLM for dual-language (JA & EN) secret diary."""
+    from app.characters import presets as char_presets
+    from app.muse import crew as muse_crew
+
+    char = await char_presets.get_preset(db, character_id)
+    if not char:
+        return {"status": "skipped", "reason": "character not found"}
+
+    # Extract session logs
+    chat_list = session.get("chat") or []
+    session_log_lines = []
+    for m in chat_list[-15:]:
+        session_log_lines.append(f"{m.get('name')}: {m.get('text')}")
+    session_log = "\n".join(session_log_lines)
+
+    # Extract photo description from shoot prompt
+    photo_desc = str((session.get("shoot") or {}).get("prompt") or "")
+    shoot_images = (session.get("shoot") or {}).get("images") or []
+    image_id = str(shoot_images[0]) if shoot_images else ""
+
+    prompt = muse_crew.actress_diary_prompt(char, session_log=session_log, photo_desc=photo_desc)
+    model = session.get("inputs", {}).get("model") or "qwen2.5:14b"
+
+    raw_resp = await _llm_call(ollama, model=model, prompt=prompt, temperature=0.7)
+    
+    # Parse JSON
+    parsed = {}
+    import json, re, uuid, time
+    try:
+        match = re.search(r"\{.*\}", raw_resp, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(0))
+        else:
+            parsed = json.loads(raw_resp)
+    except Exception:
+        parsed = {
+            "summary_ja": "本番撮影の思い出",
+            "summary_en": "Memories of the shoot",
+            "content_ja": raw_resp,
+            "content_en": raw_resp,
+        }
+
+    summary_ja = str(parsed.get("summary_ja") or parsed.get("summary") or "本番撮影の思い出").strip()
+    summary_en = str(parsed.get("summary_en") or parsed.get("summary") or "Memories of the shoot").strip()
+    content_ja = str(parsed.get("content_ja") or parsed.get("content") or raw_resp).strip()
+    content_en = str(parsed.get("content_en") or parsed.get("content") or content_ja).strip()
+
+    diary_entry = {
+        "id": str(uuid.uuid4()),
+        "timestamp": time.time(),
+        "summary_ja": summary_ja,
+        "summary_en": summary_en,
+        "summary": summary_ja,
+        "content_ja": content_ja,
+        "content_en": content_en,
+        "content": content_ja,
+        "image_id": image_id,
+        "read": False,
+    }
+
+    await char_presets.add_preset_diary(db, character_id, diary_entry)
+    return {"status": "ok", "diary_id": diary_entry["id"]}
+
+
+
 # ── legacy entry points (tests / old clients) ───────────────────────────────
 async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict[str, Any]:
     """Compatibility: open table then immediately request a board."""

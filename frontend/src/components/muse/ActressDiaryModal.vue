@@ -9,11 +9,25 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'diary-read', 'toast'])
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const diaries = ref([])
 const loading = ref(false)
 const selectedDiary = ref(null)
+
+const isEn = computed(() => locale.value === 'en')
+
+function getDiarySummary(d) {
+  if (!d) return ''
+  if (isEn.value && d.summary_en) return d.summary_en
+  return d.summary_ja || d.summary || t('characters.diary.defaultSummary')
+}
+
+function getDiaryContent(d) {
+  if (!d) return ''
+  if (isEn.value && d.content_en) return d.content_en
+  return d.content_ja || d.content || ''
+}
 
 function thumb(sha) {
   return sha ? `/api/thumbnails/${sha}.webp` : ''
@@ -104,21 +118,20 @@ watch(() => props.show, (val) => {
           <span class="text-2xl">📖</span>
           <div>
             <h3 class="font-bold text-pink-900 dark:text-pink-200 text-base tracking-wide">
-              {{ characterName }} のひみつの日記
+              {{ t('characters.diary.title', { name: characterName }) }}
             </h3>
             <p class="text-[11px] text-pink-600/80 dark:text-pink-400">
-              誰にも見せない大切な思い出 🔒
+              {{ t('characters.diary.subtitle') }}
             </p>
           </div>
         </div>
 
         <div v-if="loading" class="text-xs text-pink-500 py-8 text-center animate-pulse">
-          日記帳をひらいています... 🎀
+          {{ t('characters.diary.loading') }}
         </div>
 
-        <div v-else-if="!diaries.length" class="text-xs text-pink-400/80 py-12 text-center">
-          まだ日記は書かれていません ✨<br/>
-          （撮影を終了すると日記が届きます）
+        <div v-else-if="!diaries.length" class="text-xs text-pink-400/80 py-12 text-center whitespace-pre-wrap">
+          {{ t('characters.diary.empty') }}
         </div>
 
         <div v-else class="flex flex-col gap-2 overflow-y-auto max-h-[60vh] pr-1">
@@ -141,12 +154,12 @@ watch(() => props.show, (val) => {
                 v-if="!d.read"
                 class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-500 text-white shadow-sm animate-bounce"
               >
-                未読 💌
+                {{ t('characters.diary.unread') }}
               </span>
             </div>
 
             <p class="text-xs font-semibold text-pink-950 dark:text-pink-100 line-clamp-2">
-              {{ d.summary || '撮影の思い出' }}
+              {{ getDiarySummary(d) }}
             </p>
           </button>
         </div>
@@ -155,7 +168,7 @@ watch(() => props.show, (val) => {
       <!-- Right Main: Selected Diary Page -->
       <main class="flex-1 p-6 overflow-y-auto flex flex-col gap-4 relative bg-amber-50/30 dark:bg-slate-900/50">
         <div v-if="!selectedDiary" class="flex-1 flex flex-col items-center justify-center text-pink-400 text-xs py-12">
-          <span>👈 左のリストから日記を選んでね 🌸</span>
+          <span>{{ t('characters.diary.selectPrompt') }}</span>
         </div>
 
         <div v-else class="flex flex-col gap-4 animate-fade-in">
@@ -163,10 +176,10 @@ watch(() => props.show, (val) => {
           <div class="border-b border-pink-200/60 dark:border-pink-800/40 pb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-200/60 dark:bg-pink-900/60 text-pink-700 dark:text-pink-300">
-                🎀 撮影記録日記
+                {{ t('characters.diary.entryBadge') }}
               </span>
               <h2 class="text-lg font-bold text-pink-950 dark:text-pink-100 mt-1">
-                {{ selectedDiary.summary }}
+                {{ getDiarySummary(selectedDiary) }}
               </h2>
             </div>
             <span class="text-xs text-pink-600/70 dark:text-pink-400">
@@ -185,11 +198,11 @@ watch(() => props.show, (val) => {
               
               <img
                 :src="full(selectedDiary.image_id) || thumb(selectedDiary.image_id)"
-                :alt="selectedDiary.summary"
+                :alt="getDiarySummary(selectedDiary)"
                 class="w-full h-auto rounded object-cover aspect-[3/4] bg-pink-100 dark:bg-slate-900"
               />
               <p class="text-center font-handwriting text-pink-600 dark:text-pink-300 text-xs mt-3 font-semibold">
-                📸 本番写真の思い出
+                {{ t('characters.diary.photoMemory') }}
               </p>
             </div>
           </div>
@@ -197,7 +210,7 @@ watch(() => props.show, (val) => {
           <!-- Handwritten style Diary Content -->
           <div class="relative bg-white/70 dark:bg-slate-800/70 p-5 rounded-2xl border border-pink-200/50 dark:border-pink-900/50 shadow-inner">
             <p class="whitespace-pre-wrap text-sm leading-relaxed text-pink-950 dark:text-pink-100 font-serif">
-              {{ selectedDiary.content_ja }}
+              {{ getDiaryContent(selectedDiary) }}
             </p>
           </div>
         </div>
@@ -205,6 +218,7 @@ watch(() => props.show, (val) => {
     </div>
   </div>
 </template>
+
 
 <style scoped>
 @keyframes fade-in {

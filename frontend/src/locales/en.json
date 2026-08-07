@@ -1419,7 +1419,19 @@
     "chosenBadge": "💖 Selected",
     "pairButton": "🌸 Pair with Her",
     "secretDiary": "📖 Secret Diary",
+    "diary": {
+      "title": "{name}'s Secret Diary",
+      "subtitle": "Precious memories kept secret 🔒",
+      "loading": "Opening the diary... 🎀",
+      "empty": "No diary entries written yet ✨\n(A new entry arrives when you wrap up a shoot)",
+      "unread": "New 💌",
+      "photoMemory": "📸 Honban Photo Memory",
+      "selectPrompt": "👈 Pick a diary entry from the list 🌸",
+      "entryBadge": "🎀 Shooting Log Diary",
+      "defaultSummary": "Memories of the shoot"
+    },
     "pick": "Pick",
+
 
     "board": "Reference board",
     "generateBoard": "Draw the reference board",

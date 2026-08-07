@@ -1511,7 +1511,7 @@ def actress_secret_banter_prompt(character: dict[str, Any], diary_summary: str =
 
 
 def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", photo_desc: str = "") -> str:
-    """Prompt for generating her long, candid secret diary after 'honban' completes."""
+    """Prompt for generating her long, candid secret diary after 'honban' completes in both JA and EN."""
     p = character.get("personality") or {}
     name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
     summary_ja = str(p.get("summary_ja") or character.get("reasoning_ja") or "").strip()
@@ -1530,13 +1530,17 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
         "【日記の執筆ルール】",
         "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
         "2. 【誰にも見せない秘密の日記】として、撮影中に感じた本音、総監督に直接は言えなかった照れ、褒められた時の動揺、本当は嬉しかった内心を赤裸々に綴ること。",
-        "3. 撮影前の緊張、撮影中の出来事やセリフ、完成した本番写真を見た感想、帰り道の振り返りを含めた【300〜600文字の読み応えのある長文日記（複数段落）】にすること。",
-        "4. 出力フォーマットは JSON のみ（余計な解説文は一切出力しない）:",
+        "3. 撮影前の緊張、撮影中の出来事やセリフ、完成した本番写真を見た感想を含めた【長文日記（複数段落）】にする。",
+        "4. 多言語表示 (i18n) 対応のため、日本語版 (content_ja) と英語版 (content_en) の両方を執筆すること（英語版も彼女の雰囲気を活かした自然な英語で表現）。",
+        "5. 出力フォーマットは JSON のみ（余計な解説文は一切出力しない）:",
         "{\n"
-        '  "summary": "次回撮影時の記憶要点（例: 暗室撮影で褒められて耳が赤くなったこと）",\n'
-        '  "content_ja": "日記の本文（300〜600文字の長文日記）"\n'
+        '  "summary_ja": "日本語の記憶要点（例: 暗室撮影で褒められて耳が赤くなったこと）",\n'
+        '  "summary_en": "English summary of key memory",\n'
+        '  "content_ja": "日本語の日記本文（300〜600文字）",\n'
+        '  "content_en": "English secret diary content (matching her persona)"\n'
         "}",
     ])
+
 
 
 

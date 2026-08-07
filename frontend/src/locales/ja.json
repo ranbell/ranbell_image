@@ -1419,7 +1419,19 @@
     "chosenBadge": "💖 指名中",
     "pairButton": "🌸 この子とペアを組む",
     "secretDiary": "📖 ひみつの日記帳",
+    "diary": {
+      "title": "{name} のひみつの日記",
+      "subtitle": "誰にも見せない大切な思い出 🔒",
+      "loading": "日記帳をひらいています... 🎀",
+      "empty": "まだ日記は書かれていません ✨\n（撮影を終了すると日記が届きます）",
+      "unread": "未読 💌",
+      "photoMemory": "📸 本番写真の思い出",
+      "selectPrompt": "👈 左のリストから日記を選んでね 🌸",
+      "entryBadge": "🎀 撮影記録日記",
+      "defaultSummary": "本番撮影の思い出"
+    },
     "pick": "選ぶ",
+
 
     "board": "参照ボード",
     "generateBoard": "参照ボードを描く",

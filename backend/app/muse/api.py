@@ -227,7 +227,16 @@ async def approve(session_id: str, request: Request):
     ))
 
 
+@router.post("/sessions/{session_id}/finish")
+async def finish_session(session_id: str, request: Request):
+    session = await _session(request, session_id)
+    return await _run(service.finish_session(
+        _db(request), request.app.state.spooler, session, ollama=_llm(request, session)
+    ))
+
+
 # Legacy aliases
+
 @router.post("/sessions/{session_id}/draft")
 async def run_draft(session_id: str, request: Request):
     session = await _session(request, session_id)

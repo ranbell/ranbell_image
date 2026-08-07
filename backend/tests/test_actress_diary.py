@@ -68,7 +68,7 @@ async def test_preset_diaries_crud():
 
 @pytest.mark.asyncio
 async def test_actress_diary_prompts():
-    """Test actress diary system prompt creation."""
+    """Test actress diary system prompt creation for JA and EN."""
     char = {
         "name_ja": "アリス",
         "voice_ja": "丁寧でおしとやか",
@@ -81,8 +81,10 @@ async def test_actress_diary_prompts():
     prompt = muse_crew.actress_diary_prompt(char, session_log="総監督: 素晴らしい表情だね", photo_desc="暗室での微笑み")
     assert "アリス" in prompt
     assert "秘密の非公開日記" in prompt
-    assert "300〜600文字" in prompt
+    assert "content_ja" in prompt
+    assert "content_en" in prompt
     assert "総監督の言葉が嬉しい" in prompt
+
 
 
 @pytest.mark.asyncio
