@@ -157,9 +157,21 @@ PATTERN: <named motif and scale, or "solid">
 FABRIC: <cloth / weave / drape / how it takes light>
 CONDITION: <new / worn-in / damp / distressed>
 HERO: <the one piece that defines the outfit>
+GARMENTS: top=<tags> / bottom=<tags> / feet=<tags> / extras=<tags>
 
-Seven labelled lines, one each, in this order. This is the LOCKED costume every
-later seat re-reads — fill all seven concretely, and never leave one blank.
+Eight labelled lines, one each, in this order. This is the LOCKED costume every
+later seat re-reads — fill all eight concretely, and never leave one blank.
+
+GARMENTS is the coverage list and the only place the outfit exists as tags:
+- danbooru tags with underscores, comma-separated inside a slot. No prose.
+- Fill every slot. LAYERS says how the cloth stacks; GARMENTS says what is
+  actually ON each part of her. A blank bottom is a girl with nothing below the
+  waist, and the renderer will invent something to cover it.
+- One garment that covers both halves: write it in top and put
+  `bottom=covered_by_top`. Never invent a second piece to fill the slot.
+- A single word often names a whole outfit — one noun, two pieces. Split it and
+  name the top and the bottom yourself; nothing downstream knows it was two.
+- Every tag written here must also appear in TAGS.
 """.strip()
 
 PLAN_OUTPUT = """

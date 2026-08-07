@@ -26,9 +26,10 @@ call and never reached the render.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from .identity import normalize_framing
+from .identity import bare_tag, normalize_framing
 
 REFERENCE_HEADER = (
     "** This is her background — taste cues for how she would act, never props. "
@@ -76,6 +77,32 @@ COSTUME_FIELDS: tuple[tuple[str, str], ...] = (
     ("fabric", "FABRIC"),
     ("condition", "CONDITION"),
     ("hero", "HERO"),
+    # LAYERS is an under/mid/outer axis — how the cloth stacks. It is not a
+    # coverage axis, and nothing else in the seven checked whether the girl had
+    # anything on below the waist: 体操着 (one Japanese word implying a top AND a
+    # bottom) shipped as `base_layer / short_sleeved_jersey` with no legs at all,
+    # and a model asked for a shirt and trousers called the trousers the "inner"
+    # layer. GARMENTS is the coverage axis, in slots, so a missing bottom is a
+    # blank a seat can see rather than an omission nobody can name.
+    ("garments", "GARMENTS"),
+)
+
+# Slot values that mean "nothing goes here", so a one-piece does not have a
+# phantom skirt invented to fill the bottom slot.
+_GARMENT_NONE = frozenset({
+    "covered_by_top", "covered_by_the_top", "none", "n/a", "n_a", "na",
+    "nothing", "same_as_top", "one_piece", "onepiece", "not_visible",
+    "not_shown", "unseen", "-", "--",
+})
+_GARMENT_SLOTS = ("top", "bottom", "feet", "extras")
+# Slots are asked for as `top=… / bottom=…`, and half the models write them
+# comma-separated instead. Splitting on the separator therefore cannot work: it
+# put the literal string `bottom=covered_by_top` into the craft as a tag. Match
+# the labels and let each value run until the next one.
+_GARMENT_SLOT_RE = re.compile(
+    r"(?i)\b(?:" + "|".join(_GARMENT_SLOTS) + r")\s*[:=]\s*"
+    r"(.*?)(?=[\s/|,;]*\b(?:" + "|".join(_GARMENT_SLOTS) + r")\s*[:=]|$)",
+    re.S,
 )
 
 PLAN_HEADER = (
@@ -124,6 +151,36 @@ def costume_block(costume: dict[str, Any] | None) -> str:
     return "\n".join([COSTUME_HEADER, *lines]) if lines else ""
 
 
+def garment_tags(costume: dict[str, Any] | None) -> list[str]:
+    """The concrete garment tags off the COSTUME's GARMENTS slots, in order.
+
+    This is what "the outfit" means everywhere a tag set is needed. It used to be
+    derived from the ledger diff of Wardrobe's turn — everything that seat added
+    to the craft — which is not clothing: one real session recorded the entire
+    pool set (tile coping, drain grate, lifeguard chair, the light, the action)
+    as the costume, so rebuilding the outfit struck the location.
+
+    Tolerates an unslotted line (`GARMENTS: <tags>`) and either separator, so a
+    seat that writes the shape loosely still yields its garments. Single letters
+    are dropped because `n/a` splits into two of them.
+    """
+    raw = str((costume or {}).get("garments") or "").strip()
+    if not raw:
+        return []
+    # No slot labels at all → the whole line is a bare tag list.
+    values = _GARMENT_SLOT_RE.findall(raw) or [raw]
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for part in re.split(r"[,/|;]", value):
+            tag = bare_tag(part)
+            if len(tag) < 2 or tag in seen or tag in _GARMENT_NONE:
+                continue
+            seen.add(tag)
+            out.append(tag)
+    return out
+
+
 def orders_block(notes: list[str] | None) -> str:
     kept = [str(n).strip() for n in (notes or []) if str(n).strip()]
     return "\n".join([ORDERS_HEADER, *(f"- {n}" for n in kept)]) if kept else ""
@@ -159,19 +216,20 @@ def build(
     """
     personality = character.get("personality") or {}
     identity = [str(t) for t in (character.get("identity_tags") or []) if str(t).strip()]
-    outfit = [str(t) for t in (character.get("outfit_tags") or []) if str(t).strip()]
     frame = normalize_framing(framing)
 
     head = [
         f"Style: {style.strip()}" if style.strip() else "",
         f"Framing: {frame}",
         f"Character: {', '.join(identity)}, " if identity else "",
-        # The character's default outfit is Wardrobe's starting rail. Once
-        # Wardrobe has set COSTUME, that block is the authority and this line
-        # drops, so the two can never contradict (this line was where the
-        # character's default clothes used to sit beside a garment the theme
-        # had named).
-        (f"Outfit: {', '.join(outfit)}, " if outfit and not (costume or {}) else ""),
+        # The character's default outfit is NOT here. It used to sit on this line
+        # whenever COSTUME was unset — which is exactly Wardrobe's own turn, the
+        # one seat that decides clothes, and the planner's turn before it. A bare
+        # ASCII tag list (`Outfit: uniform, collared_shirt, long_sleeves`) near
+        # the top beat the garment the theme named in Japanese at the tail, on
+        # every model tried, 7 runs out of 7. The rail is now handed to Wardrobe
+        # alone, once, with its discard rule attached: see
+        # `service._wardrobe_rail`.
     ]
 
     # Behaviour first. Concrete likes stay inside the fence as taste cues only.

@@ -354,7 +354,9 @@ def test_pick_responders_is_fixed_desk_not_keyword_router():
     c = service._pick_responders("雰囲気をもっと出して", crew_ids)
     d = service._pick_responders("画角を寄せて", crew_ids)
     assert a == b == c == d
-    assert a[0] == "actress"
+    # Wardrobe leads: it owns the locked COSTUME, so a note that changes the
+    # clothes has to reach it, and every seat after it reads the new outfit.
+    assert a[0] == "wardrobe"
     assert a[-1] == "finisher"
     assert len(a) <= 5  # cap craft + finisher for Ollama
     # No keyword→muse pattern table — note text must not be inspected.

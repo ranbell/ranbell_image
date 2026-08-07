@@ -429,7 +429,7 @@ def _apply_turn(
     session: dict[str, Any], turn: chain.MuseTurn, *, ms: int = 0,
 ) -> dict[str, Any]:
     craft = session.setdefault("craft", {})
-    entry = record_ledger(
+    record_ledger(
         session, muse_id=turn.muse_id,
         name=_muse_display_name(session, turn.muse_id),
         before=str(craft.get("tags") or ""), after=turn.tags, ms=ms,
@@ -437,18 +437,26 @@ def _apply_turn(
     craft["prompt"] = turn.prompt
     craft["tags"] = turn.tags
     craft["scene"] = turn.scene
-    # Wardrobe alone owns the locked COSTUME. Capture it, record its concrete tag
-    # set (what this turn added, plus any of the previous outfit it re-listed),
-    # strike the old outfit, and re-inject COSTUME so the NEXT seat re-reads it.
+    # Wardrobe alone owns the locked COSTUME. Capture it, take the old outfit out
+    # of the craft, make sure the new one is actually in the tags, and re-inject
+    # COSTUME so the NEXT seat re-reads it.
     if turn.costume is not None and crew.role_of(turn.muse_id) == "wardrobe":
         prev = session.get("costume") or {}
-        added = set((entry or {}).get("added", []))
-        now_tags = set(identity.tag_names(turn.tags))
-        kept = [t for t in prev.get("tags", []) if t in now_tags]
         costume = dict(turn.costume)
-        costume["tags"] = sorted(added | set(kept))
+        # The outfit's tags are the GARMENTS slots and nothing else. They used to
+        # be the ledger diff of this turn — every tag Wardrobe added — which is
+        # not clothing: one session filed the whole pool set under the costume,
+        # so a change of clothes would have struck the location.
+        garments = brief_mod.garment_tags(costume)
+        # A turn that dropped the GARMENTS line tells us nothing about what she
+        # has on. Keep the outfit already settled and strike nothing; an empty
+        # set here reads as "she is wearing nothing now" and would take the whole
+        # outfit out of the craft.
+        costume["tags"] = garments or list(prev.get("tags") or [])
         session["costume"] = costume
-        strike_dropped_costume(session, prev)
+        if garments:
+            strike_dropped_costume(session, prev)
+            _ensure_garments(session, garments)
         _rebuild_brief(session)
         craft = session.setdefault("craft", {})
     # Seats can be swapped mid-session. One brought in after the read-through
@@ -488,6 +496,43 @@ def _recent_talk(
     return "\n".join(lines)
 
 
+def _wardrobe_rail(session: dict[str, Any], muse_id: str) -> str:
+    """The character's usual clothes, for Wardrobe's first turn only.
+
+    This used to be a bare `Outfit: <tags>` line in the brief itself, which every
+    seat saw until COSTUME was set — and COSTUME is unset for exactly the turn
+    that decides the clothes. A concrete ASCII tag list near the top of the
+    prompt beat the garment the theme named, in Japanese, on the unfenced last
+    line: her default clothes shipped instead, on every model tried, seven runs
+    out of seven.
+
+    So the rail is handed to the one seat it belongs to, once, and the theme is
+    asked for first. Order is the fix — the discard rule has to be read before
+    the garments it discards, or the tag list wins again.
+    """
+    if crew.role_of(muse_id) != "wardrobe" or (session.get("costume") or {}):
+        return ""
+    outfit = [
+        str(t) for t in ((session.get("character") or {}).get("outfit_tags") or [])
+        if str(t).strip()
+    ]
+    lines = [
+        "WHAT SHE WEARS — settle this before anything else.",
+        "1. Read the theme — the final line of the brief above. If it names a "
+        "garment, THAT is the outfit. Write it into GARMENTS and stop "
+        "reconsidering it.",
+        "2. Only if the theme names no clothing, dress her for this place and "
+        "hour, starting from the rail below.",
+    ]
+    if outfit:
+        lines.append(
+            f"DEFAULT RAIL (what she usually wears — DISCARD IT ENTIRELY if the "
+            f"theme named a garment; do not layer it under the new one): "
+            f"{', '.join(outfit)}"
+        )
+    return "\n".join(lines)
+
+
 def _table_user_prompt(
     session: dict[str, Any], *, muse_id: str = "", note: str = "",
     screening: str = "",
@@ -498,6 +543,9 @@ def _table_user_prompt(
     base = brief_mod.with_previous(
         _brief_for(session, muse_id), previous, pose=pose, analysis=screening,
     )
+    rail = _wardrobe_rail(session, muse_id)
+    if rail:
+        base = f"{base}\n\n{rail}"
     # The planner already pulled these out of the tag list. The prose is the
     # other half of the prompt and only the seats writing it can clear that.
     struck = [str(s) for s in (session.get("struck") or []) if str(s).strip()]
@@ -648,6 +696,41 @@ def _still_meant(old: str, new_items: list[str]) -> bool:
     return any(old in new or new in old for new in new_items)
 
 
+def _reassemble(session: dict[str, Any]) -> None:
+    """Rebuild the Comfy positive from the craft's current tags and prose."""
+    craft = session.setdefault("craft", {})
+    craft["prompt"] = identity.assemble_positive(
+        _identity_tags(session), str(craft.get("tags") or ""),
+        str(craft.get("scene") or ""),
+        framing=_framing(_inputs(session)), style=_style(session),
+        subject=identity.subject_tags(_cast(session)),
+    )
+
+
+def garment_tags(session: dict[str, Any]) -> list[str]:
+    """What she currently has on, as tags. The outfit's owner is Wardrobe alone,
+    so this is the set every other removal path has to leave standing."""
+    return brief_mod.garment_tags(session.get("costume") or {})
+
+
+def _ensure_garments(session: dict[str, Any], garments: list[str]) -> list[str]:
+    """Put back any garment COSTUME names that the turn forgot to write in TAGS.
+
+    COSTUME is prose the seats re-read; the render only ever sees tags. A garment
+    that exists in one and not the other is the outfit being left to the
+    checkpoint, which is the failure the COSTUME block was built to end.
+    """
+    craft = session.setdefault("craft", {})
+    have = set(identity.tag_names(str(craft.get("tags") or "")))
+    missing = [t for t in garments if t not in have]
+    if not missing:
+        return []
+    parts = [p.strip() for p in str(craft.get("tags") or "").split(",") if p.strip()]
+    craft["tags"] = ", ".join(parts + missing)
+    _reassemble(session)
+    return missing
+
+
 def strike_dropped_props(
     session: dict[str, Any], previous_plan: dict[str, Any] | None,
 ) -> list[str]:
@@ -666,7 +749,16 @@ def strike_dropped_props(
     now = _ledger_items(session.get("plan"))
     if not was:
         return []
-    struck = [t for t in was if t not in now and not _still_meant(t, now)]
+    # Clothes are not the planner's to drop. A garment that reaches MUST APPEAR
+    # is a mistake the COSTUME header already warns about ("a garment word in
+    # MUST APPEAR is an object on the floor"), and it must not become a way for
+    # a change of scene to undress her — holding the outfit while the place moves
+    # is a thing the Showrunner does on purpose.
+    worn = set(garment_tags(session))
+    struck = [
+        t for t in was
+        if t not in now and t not in worn and not _still_meant(t, now)
+    ]
     if not struck:
         return []
 
@@ -678,11 +770,7 @@ def strike_dropped_props(
     ]
     before = str(craft.get("tags") or "")
     craft["tags"] = ", ".join(kept)
-    craft["prompt"] = identity.assemble_positive(
-        _identity_tags(session), craft["tags"], str(craft.get("scene") or ""),
-        framing=_framing(_inputs(session)), style=_style(session),
-        subject=identity.subject_tags(_cast(session)),
-    )
+    _reassemble(session)
     # The prose still names them, and the tag list is only half the prompt. The
     # seats that write next are told outright, which is the only thing that gets
     # them out of SCENE.
@@ -705,6 +793,11 @@ def strike_dropped_costume(
     alongside the new ones. Mirrors ``strike_dropped_props`` — only the PREVIOUS
     costume's own tag set is struck (a known set, no dictionary), and
     ``_still_meant`` protects a rename (skirt → pleated_skirt).
+
+    That tag set is the GARMENTS slots now, so this strikes clothes and only
+    clothes. It was the ledger diff of Wardrobe's turn, which meant the pool she
+    happened to be standing beside was filed as part of her outfit and came off
+    with it.
     """
     was = [
         identity.bare_tag(t)
@@ -726,11 +819,7 @@ def strike_dropped_costume(
     ]
     before = str(craft.get("tags") or "")
     craft["tags"] = ", ".join(kept)
-    craft["prompt"] = identity.assemble_positive(
-        _identity_tags(session), craft["tags"], str(craft.get("scene") or ""),
-        framing=_framing(_inputs(session)), style=_style(session),
-        subject=identity.subject_tags(_cast(session)),
-    )
+    _reassemble(session)
     prior = list(session.get("struck") or [])
     session["struck"] = prior + [t for t in struck if t not in prior]
     record_ledger(
@@ -1471,12 +1560,24 @@ def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
     in dialogue and revise craft. Python only caps turn count for local Ollama.
     """
     _ = note  # intentional: routing ignores note text; VLM interprets it
-    # Stable priority — actress first so personality can answer any note.
+    # Stable priority. Wardrobe leads, for the same reason it opens the
+    # read-through: dress her, then frame her (OPENING_SEQUENCE). It used to sit
+    # fifth against a cap of four, so on the standard preset the one seat that
+    # owns clothes never answered a note — and COSTUME tells every other seat the
+    # outfit is locked and only the Showrunner may change it. The Showrunner's
+    # note then reached a table with nobody who could act on it: the lock
+    # swallowed the instruction and `strike_dropped_costume` could never fire.
+    #
+    # Lens gives up the seat rather than the desk growing, because the cap is
+    # what keeps a note affordable on local Ollama. The camera is the cheaper
+    # loss — its tags are writable by any seat, while COSTUME is locked to this
+    # one, so nobody else can stand in for Wardrobe.
+    #
     # Banter-only seats are not here: the Producer answered every note by
     # restating the beat with `dynamic_composition` on it.
     priority = tuple(
         r for r in (
-            "actress", "beat", "spine", "lens", "wardrobe",
+            "wardrobe", "actress", "beat", "spine", "lens",
             "faces", "gaffer", "propshop",
         ) if r not in crew.BANTER_ONLY
     )
