@@ -315,3 +315,37 @@ def test_the_choreographer_no_longer_optimises_against_standing_still():
         assert banned in text, banned
     assert "NO emphasis on posture tags" in text
     assert crew.MUSES["spine:bane"]["flavor_tags"] == []
+
+
+# ── the planner dresses the room, not her ───────────────────────────────────
+def test_the_planner_is_told_clothes_are_not_its_choice():
+    """It had no line for clothes, so it put them in MUST APPEAR — where a
+    garment reads as "an object in this room" and gets re-chosen to suit
+    whatever place the planner picked. A theme that named an outfit lost it."""
+    text = crew.plan_system_prompt()
+    assert "WEARING" in text
+    assert "You dress the room. You do not dress her." in text
+    assert "(not named)" in text
+    assert "OBJECTS IN THE ROOM ONLY" in text
+    assert "never clothing" in text
+    # And it may not quietly resolve a clash by re-dressing her.
+    assert "THE CLOTHES CHOOSE THE PLACE" in text
+
+
+def test_the_seats_that_dress_her_are_told_the_theme_outranks_the_room():
+    for mid in ("wardrobe:shiwa", "wardrobe:iroawase"):
+        text = crew.system_prompt_for(mid)
+        assert "PLAN's WEARING comes first" in text, mid
+        assert "(not named)" in text, mid
+    lead = crew.actress_system_prompt({"name_ja": "みお"})
+    assert "PLAN's WEARING" in lead
+    assert "even if it is odd for the room" in lead
+    assert "outranks the\n  place, the hour, the weather" in crew.CARRY
+
+
+def test_a_named_outfit_is_carried_not_reconsidered_when_orders_change_it():
+    """A later Showrunner order must be able to change her clothes; the room
+    must never be able to."""
+    text = crew.plan_system_prompt()
+    assert "STANDING ORDER" in text
+    assert "A later order replaces an\n  earlier one; the room never does." in text

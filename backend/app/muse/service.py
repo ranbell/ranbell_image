@@ -723,6 +723,10 @@ async def _run_plan_turn(
     # every later seat with nothing to be audited against.
     if not plan.get("must_appear") and previous_plan.get("must_appear"):
         plan["must_appear"] = list(previous_plan["must_appear"])
+    # Same for the outfit: a line the planner did not retype is not the
+    # Showrunner taking her clothes back.
+    if not plan.get("wearing") and previous_plan.get("wearing"):
+        plan["wearing"] = previous_plan["wearing"]
     session["plan"] = plan
     session.pop("struck", None)
     struck = strike_dropped_props(session, previous_plan)

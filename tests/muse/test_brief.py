@@ -155,3 +155,16 @@ def test_only_the_acting_seats_are_handed_her_inner_life(stargazer):
     for tag in stargazer["identity_tags"]:
         assert tag in digest
     assert digest.rstrip().endswith("a theme")
+
+
+def test_the_plan_block_carries_what_she_is_wearing():
+    """Clothes had no line of their own, so they rode in MUST APPEAR and were
+    treated as furniture."""
+    block = brief.plan_block({
+        "place": "a changing room", "hour": "midday, summer",
+        "wearing": "the outfit the theme named",
+        "must_appear": ["bench", "locker"],
+    })
+    assert "WEARING: the outfit the theme named" in block
+    # Order matters: it is read before the room's contents.
+    assert block.index("WEARING") < block.index("MUST APPEAR")

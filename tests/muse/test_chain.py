@@ -234,3 +234,27 @@ async def test_a_seeing_turn_sends_the_board_and_is_not_flagged_blind():
     assert turn.blind is False
     assert llm.calls[0]["kind"] == "vlm"
     assert llm.calls[0]["images"] == [b"jpeg"]
+
+
+def test_the_planner_answer_is_parsed_with_the_outfit_line():
+    plan = chain.parse_plan(
+        "SAY: ここでいきましょう。\n"
+        "PLACE: A changing room, standing by the bench.\n"
+        "HOUR: Midday, summer.\n"
+        "LIGHT: Flat overhead fluorescent.\n"
+        "ACTION: Tying a shoelace.\n"
+        "WEARING: what the theme asked for.\n"
+        "MUST APPEAR: bench, locker, tiled_floor, drain, mirror\n"
+    )
+    assert plan["wearing"] == "what the theme asked for."
+    assert plan["must_appear"][0] == "bench"
+    assert plan["place"].startswith("A changing room")
+
+
+def test_an_outfit_line_left_out_is_not_a_parse_failure():
+    plan = chain.parse_plan(
+        "PLACE: A hallway.\nHOUR: Night.\nLIGHT: One bulb.\n"
+        "ACTION: Waiting.\nMUST APPEAR: door, shoes\n"
+    )
+    assert "wearing" not in plan
+    assert plan["place"] == "A hallway."

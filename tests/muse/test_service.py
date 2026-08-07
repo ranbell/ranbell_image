@@ -1052,3 +1052,28 @@ async def test_writing_craft_is_what_marks_a_seat_as_having_spoken():
     # The planner does not write craft, so it is not on the list and never
     # queues itself for a catch-up pass.
     assert "plan" not in spoken
+
+
+@pytest.mark.asyncio
+async def test_an_outfit_line_the_planner_skipped_does_not_undress_her():
+    db = FakeDb()
+
+    class TersePlan(FakeOllama):
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append(kw)
+
+            async def _stream():
+                yield {"type": "token", "text": (
+                    "PLACE: A quiet room.\nHOUR: Evening.\nLIGHT: One lamp.\n"
+                    "ACTION: Sitting.\nMUST APPEAR: lamp, chair, rug\n"
+                )}
+            return _stream()
+
+    session = await _ready_session(db, banter_mode="off")
+    session["plan"] = {"place": "A quiet room", "wearing": "what the theme asked for",
+                       "must_appear": ["lamp", "chair"]}
+    session["craft"] = {"tags": "sitting", "scene": "x", "prompt": "", "pose_intent": ""}
+    await session_db.save(db, session)
+
+    await service._run_plan_turn(db, TersePlan(), session, cfg={})
+    assert session["plan"]["wearing"] == "what the theme asked for"

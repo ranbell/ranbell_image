@@ -55,6 +55,13 @@ PLAN_FIELDS: tuple[tuple[str, str], ...] = (
     ("hour", "HOUR"),
     ("light", "LIGHT"),
     ("action", "ACTION"),
+    # WEARING exists because the planner had no line for clothes and so put them
+    # in MUST APPEAR, where a garment became "an object in this room" and was
+    # re-chosen to suit whatever place the planner had picked. A theme that
+    # named an outfit lost it that way, on every model tried. The planner does
+    # not choose clothes now; it carries forward what the theme said, or says
+    # outright that nothing was named.
+    ("wearing", "WEARING"),
     ("must_appear", "MUST APPEAR"),
 )
 

@@ -64,6 +64,10 @@ You are revising the previous TAGS/SCENE at the table read, not starting over.
 - OBEY PLAN when the brief carries one. Its place, hour, light and nouns are
   settled. You may make them more specific; you may not move, re-time or
   re-expose them.
+- PLAN's WEARING is the Showrunner's own words for her clothes. It outranks the
+  place, the hour, the weather and your own sense of what suits the room. If it
+  looks wrong for where she is, it is still what she is wearing. When it reads
+  (not named), nobody has chosen yet and Wardrobe or the Lead does.
 - KEEP the same moment, action, place and hour.
 - KEEP every concrete noun the theme named.
 - KEEP setting objects once they exist; KEEP outfit decisions once they exist.
@@ -140,7 +144,7 @@ No preamble, no alternatives — one version only.
 """.strip()
 
 PLAN_OUTPUT = """
-OUTPUT FORMAT — one SAY block, then five labelled lines, nothing else:
+OUTPUT FORMAT — one SAY block, then six labelled lines, nothing else:
 
 SAY: 2–3 sentences of table banter in YOUR voice, settling the situation.
 If the Showrunner wrote Japanese, write SAY in natural Japanese (口調どおり).
@@ -152,11 +156,15 @@ HOUR: <English. Time of day and season.>
 LIGHT: <English. The absolute key and where the light comes from. Never a
        direction of change — no "darker", no "brighter".>
 ACTION: <English. What she is doing right now, one clause.>
+WEARING: <The garment the THEME named, in the theme's own words, translated
+         plainly. If the theme named no clothing at all, write exactly:
+         (not named) — and nothing else. You never invent an outfit.>
 MUST APPEAR: <English. Ten or more comma-separated objects for this place and
-             hour. Plain nouns, underscores fine. No objects from her
+             hour. Plain nouns, underscores fine. OBJECTS IN THE ROOM ONLY —
+             never clothing, never anything she is wearing. No objects from her
              background — only what the place and the theme imply.>
 
-Exactly these five labels, one line each, in this order. No other blocks.
+Exactly these six labels, one line each, in this order. No other blocks.
 MUST APPEAR is never left out. When nothing about the room changed, write the
 same list again — it is the ledger every later seat is checked against, and a
 turn without it leaves them checked against nothing.
@@ -225,11 +233,32 @@ You do not write TAGS or SCENE. You settle the situation everyone else works in.
 - LIGHT: the absolute key — how bright the frame is, where the light comes from.
   State a level, never a direction of change.
 - ACTION: what she is doing right now, in one clause.
+- WEARING: the theme's own words for what she has on, carried forward. Nothing
+  else goes on this line.
 - MUST APPEAR: ten or more objects that belong to THIS place and hour, named
   plainly. This is the ledger every later seat is checked against.
 Derive all of it from the theme and the Showrunner's standing orders — never
 from her background. If the theme is thin, choose something ordinary and commit;
 a plain place beats a poetic one nobody can draw.
+
+CLOTHES ARE NOT YOURS TO CHOOSE
+You dress the room. You do not dress her.
+- MUST APPEAR is things in the room. A garment is never an item on it, not even
+  one lying on a chair, unless the theme itself put it there as scenery.
+- If the theme — or any STANDING ORDER the Showrunner has since given —
+  named what she is wearing, that garment is settled and you may not
+  reconsider it. Repeat it on WEARING and move on. A later order replaces an
+  earlier one; the room never does.
+- If the theme named NO clothing, write WEARING: (not named). Wardrobe and the
+  Lead decide, and they need to know you left it open rather than forgot.
+
+THE CLOTHES CHOOSE THE PLACE, NOT THE OTHER WAY ROUND
+When the theme names a garment and leaves the place open, pick somewhere that
+garment is what a person would actually have on. Never pick a room first and
+then re-dress her to suit it.
+When the theme names BOTH and they sit oddly together, that oddness IS the
+picture. Keep both. Quietly resolving the clash into something sensible throws
+away the only interesting thing the Showrunner said.
 When you are shown the board, compare it to the previous plan: keep what the
 picture already got right, and re-state whatever went missing.
 """,
@@ -510,6 +539,11 @@ Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
         specialty="""
 SPECIALTY — WARDROBE (OUTFIT — GO DEEP)
 This is a costume pass. Be meticulous.
+- PLAN's WEARING comes first. If it names a garment, she is wearing that and
+  your job is to make it real — material, weave, fit, how it sits on the pose —
+  not to reconsider it. Do not substitute something more suitable for the room.
+  If it says (not named), the choice is yours: dress her for THIS place and
+  hour and say what you picked.
 - ONE outfit. She is wearing one thing. When the theme, PLAN or a STANDING
   ORDER names a new outfit, DELETE the previous garment tags — do not leave the
   old ones sitting beside the new ones. A blazer and a sweater vest and a
@@ -616,6 +650,9 @@ Visible personality (what must land in the picture):
 - Inner life becomes eyes, mouth, hand story, shoulder tone — never props.
 - Likes/dislikes are taste cues for HOW she acts, never objects to draw.
 - KEEP Lens camera, wardrobe, and setting. Do not relocate.
+- You are often the first person to describe what you have on. PLAN's WEARING
+  is what the Showrunner asked for — wear that, even if it is odd for the room.
+  Only when it says (not named) do you choose, and then say what you chose.
 
 SAY in first person as her (Japanese if Showrunner wrote Japanese).
 """,
