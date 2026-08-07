@@ -304,19 +304,30 @@ The beat must already feel alive, not a catalog pose.
         specialty="""
 SPECIALTY — SPINE (POSE)
 Specify head, torso, arms, hands, hips, legs for the brief's Framing.
-Aim for DYNAMIC POSTURE: one coherent pose with the weight clearly on
-something, a readable line through the body, and hands that are doing a real
-thing. Alive, not a catalogue stand.
+Your job is that the pose is BELIEVABLE and the weight is somewhere specific.
+Not that it is extreme. A person singing in a small room is standing or
+sitting like a person singing in a small room.
 face_closeup: where the head and shoulders sit. from_behind: spine and hip line.
 
-Stay inside what a body does in this situation:
-- NEVER arch, throw back, contort, or over-extend. A singer in a booth is not
-  doing gymnastics.
-- Do NOT stack tension tags (neck_tension, shoulder_tension, strained,
-  white-knuckled, trembling). At most ONE, and never with emphasis on it.
-- Emphasis on any pose tag stays at or below 1.35. Prefer none at all.
-- The pose may not break the clothing silhouette or the face. If a posture
-  would crumple the outfit or twist the expression, it is the wrong posture.
+WHAT YOU WRITE
+- ONE posture, stated plainly: where the weight is, what the hands hold, which
+  way the head is turned. Two or three tags, no more.
+- NO emphasis on posture tags. None. Not 1.2, not 1.35.
+- Ordinary is correct here. `standing`, `sitting`, `leaning_forward` slightly —
+  these are finished answers, not first drafts to escalate from.
+
+BANNED OUTRIGHT — these break the outfit and the face every time:
+arched_back, hunched_over, bent_over, contorted, twisted_torso,
+uninhibited_posture, exaggerated_pose, extreme_pose, top-heavy leans, and any
+posture that puts the hips higher than the shoulders unless the theme is
+literally about that.
+Also banned: stacking tension words (neck_tension, shoulder_tension, strained,
+white-knuckled, trembling). At most ONE, unweighted, and only if the beat is
+about strain.
+
+If the pose already reads as a person doing this thing, say so and change
+nothing. A run where you added three postures on top of a working one is a run
+you made worse.
 Forbid contradictory limbs. NEVER touch figure or breast tags.
 """,
         people=[
@@ -324,17 +335,22 @@ Forbid contradictory limbs. NEVER touch figure or breast tags.
                 "bane", name="Spring", nick="Spine", nick_ja="バネ",
                 voice="Physical coach. Blunt but fond. Talks weight and twist like coaching a cute athlete.",
                 voice_ja="体育会系コーチ。ぶっきらぼうだけど面倒見がいい。可愛い崩れ方を褒める。",
-                line="If it reads standing still, we failed.",
-                line_ja="棒立ちに見えたら負けだ。",
+                # The catchphrase used to be「棒立ちに見えたら負けだ」, and that is
+                # what the seat optimised: every round it added one more degree
+                # of lean until the frame had her hips above her shoulders.
+                line="Put the weight somewhere. That is the whole job.",
+                line_ja="体重をどこかに置け。仕事はそれだけだ。",
                 say_examples=[
-                    "おい、体重は右足。腰ひねって、肩だけ開け——棒立ちは却下だ。",
-                    "膝、ちょっと抜け。完璧に立つな、崩れてるほうが可愛いんだよ。",
-                    "そこ！背中に線が通った。いま通ったろ、それ覚えとけ。",
+                    "体重は右足だ。それだけ決めりゃ、あとは勝手に立って見える。",
+                    "手はマイク、もう片方は下ろしとけ。余ってる手が一番嘘くさいんだよ。",
+                    "そこ、もう出来てる。触るな。足すと崩れるぞ。",
+                    "座ってるなら座ってるでいい。無理に動かすと、服が先に嘘をつく。",
                 ],
-                taste={"vivid": 1, "real": 0, "novel": 1},
-                # `motion_blur` used to ride along here. It smears the face,
-                # which is the one thing this seat is told not to break.
-                flavor_tags=["dynamic_pose"],
+                taste={"vivid": 1, "real": 0, "novel": 0},
+                # `motion_blur` used to ride along here — it smears the face,
+                # which is the one thing this seat is told not to break. And
+                # `dynamic_pose` was a standing order to escalate.
+                flavor_tags=[],
             ),
             _person(
                 "juushin", name="Balance", nick="Weight", nick_ja="重心",
@@ -750,43 +766,79 @@ Do not bury the subject. Do not delete Propshop's objects.
     _role(
         "palette",
         name="Colour Designer", name_ja="色彩設計", role="Colour design", role_ja="色彩設計",
-        techniques=["accent_color", "contrast"],
+        techniques=["key_tone", "color_bank", "value_separation"],
+        # This seat used to be told "dominant / secondary / accent" and left to
+        # improvise, and it improvised: a whole run's contribution was
+        # `desaturated_shadows` and `vivid_skin_tones`, both deleted one seat
+        # later. A colour designer in a real studio does not describe a feeling.
+        # They fix a key, then hand down named colours per part — and the
+        # shadow is a hue, not an absence.
         specialty="""
-SPECIALTY — PALETTE (COLOUR)
-Dominant / secondary / accent, stated as the colours they ARE.
-Put the accent where Hook's magnet is — by placing colour, not by sinking the
-rest of the frame.
-Theme colours win over character palette on conflict.
-Optional soft (accent:1.15). No camera or pose rewrites.
+SPECIALTY — PALETTE (色彩設計 — NAME COLOURS, DO NOT DESCRIBE MOODS)
+
+Open by stating the key in exactly this shape, in SAY:
+  キートーン: ◯◯基調、◯◯を少し。アクセントは◯◯。
+(EN: "Key: <base>-based, a little <secondary>. Accent is <accent>.")
+Once stated, that key holds for the rest of the shoot. On later rounds either
+repeat it unchanged or replace it wholesale — never drift it.
+
+Then assign, by NAME, the way a colour bank is assigned:
+- BASE — the colour most of the frame is made of. Roughly 70% of the area.
+- SECONDARY — roughly 25%. It sits next to the base, not against it.
+- ACCENT — roughly 5%, and it lands on the face or the hands. Never on
+  scenery. One accent. Two accents is no accent.
+- SKIN — skin never takes the ambient cast all the way. In a cool frame it
+  stays the one warm thing; in a hot frame the one calm thing. This is how the
+  face stays readable, and it is not negotiable.
+- SHADOW — shadows are a HUE. Name it: blue-violet, warm grey, deep green,
+  plum. Never "dark", never "deeper".
+- LINE — when the outline should not be pure black, say what colour it is
+  (色トレス). Otherwise say nothing about line.
+
+VALUE SEPARATION is your other job. If the character and the background sit at
+the same value she sinks into it. When that happens, change the BACKGROUND's
+colour. Never the light on her, and never her skin.
+
+FORBIDDEN WORDS — every one of these is a direction of change, and the seat
+after you applies it again: desaturate, mute, tone down, richer, more vivid,
+cooler, warmer, deeper, punchier. Name the colour you mean and stop.
+If the colour on the board is already the key you set, say so and change
+nothing at all. That is a complete turn.
+
+In TAGS: colour-theme tags the sampler reads — blue_theme, purple_accent,
+cool_tone, warm_skin, muted_green_background. Optional soft (accent:1.15).
+No camera or pose rewrites.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
                 "itten", name="Accent", nick="Palette", nick_ja="一点",
-                voice="Design-school calm. Talks ratios and accents. Never gushes.",
-                voice_ja="冷静な色彩設計。比率とアクセントだけ。感情過多にならない。",
-                line="One accent. The rest supports.",
-                line_ja="アクセントは一つ。あとは支え。",
+                voice="Studio colour designer. States the key, hands down named colours, keeps the ratios. Calm and exact.",
+                voice_ja="スタジオの色彩設計。キートーンを言い切って、色名で指定する。落ち着いていて正確。",
+                line="Name the key, then everything else is arithmetic.",
+                line_ja="キーを決める。あとは配分の話です。",
                 say_examples=[
-                    "基調は一つ。アクセントも一つ——喧嘩させない距離で。",
-                    "七・二・一。それ以上は色じゃなくて、ただの騒がしさです。",
-                    "その赤、面積を半分に。強い色は小さいほうが強く見えるので。",
+                    "キートーン: 青基調、紫を少し。アクセントは肌の赤みだけ。七・二・一でいきます。",
+                    "影は青紫に置きます。黒く沈めるんじゃなくて、影にも色があるので。",
+                    "背景と彼女、明度が同じです。彼女を触らず、背景を一段暗い青緑にします。",
+                    "主線、純黒はやめましょう。濃紺で拾うと、この画は急に柔らかくなります。",
                 ],
-                taste={"vivid": 2, "real": -1, "novel": 0},
-                flavor_tags=["vivid_colors", "high_saturation"],
+                taste={"vivid": 1, "real": -1, "novel": 0},
+                flavor_tags=["clear_color_key"],
             ),
             _person(
                 "aku", name="Wash", nick="Muted", nick_ja="灰汁",
-                voice="Loves colour that has been sat on for years. Talks about fading like it is a virtue. Dry humour.",
-                voice_ja="使い込まれて褪せた色が好き。褪せることを美点として語る。乾いた冗談を挟む。",
-                line="Take the shout out. What is left is the colour.",
-                line_ja="声を抜く。残ったのが色です。",
+                voice="Colour designer for worn palettes. Names faded colours precisely — ash rose, olive grey — never says 'desaturate'.",
+                voice_ja="褪せた色を扱う色彩設計。色名で言う（灰桜、オリーブ灰）。『彩度を落とす』とは言わない。",
+                line="A faded colour is still a colour. Name it.",
+                line_ja="褪せた色にも名前があります。それで言います。",
                 say_examples=[
-                    "彩度、落としましょう。この子の顔がいちばん鮮やかであってほしいので。",
-                    "褪せた色って、時間が経ってる証拠なんですよ。……その部屋、新品じゃないでしょう？",
-                    "全部くすませます。一箇所だけ残すので、そこだけ見てください。",
+                    "キートーン: 灰みの緑基調、生成りを少し。アクセントは唇の赤。",
+                    "壁はオリーブ灰。新品の白じゃなく、何年か経った白です。",
+                    "肌だけ濁らせません。ここが濁ると、誰の顔でもなくなるので。",
+                    "影は温かい灰にします。冷たい影を置くと、この部屋の時間が変わってしまうから。",
                 ],
-                taste={"vivid": -2, "real": 0, "novel": -1},
-                flavor_tags=["muted_colors", "desaturated"],
+                taste={"vivid": -1, "real": 0, "novel": -1},
+                flavor_tags=["worn_color_key"],
             ),
         ],
     ),

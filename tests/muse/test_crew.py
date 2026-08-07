@@ -250,12 +250,11 @@ def test_the_choreographer_asks_for_posture_not_contortion():
     and at that weight the body arches far enough to break the outfit and the
     face. The voice is untouched — it is the instruction that was too strong."""
     text = crew.system_prompt_for("spine:bane")
-    assert "DYNAMIC POSTURE" in text
+    assert "BELIEVABLE" in text
     assert "Exaggerate weight shift" not in text
-    assert "1.35" in text
     assert "arch" in text.lower()
-    # The coach still sounds like the coach.
-    assert "棒立ち" in text
+    # The coach still sounds like the coach — blunt, fond, about bodies.
+    assert "体重" in text
     assert "motion_blur" not in crew.MUSES["spine:bane"]["flavor_tags"]
 
 
@@ -280,3 +279,39 @@ def test_the_camera_states_a_size_instead_of_tightening_each_round():
     text = crew.system_prompt_for("lens:pinto")
     assert "ONE SHOT SIZE" in text
     assert "MUST APPEAR" in text
+
+
+def test_the_colour_designer_names_colours_instead_of_describing_a_mood():
+    """A whole run's contribution from this seat was `desaturated_shadows` and
+    `vivid_skin_tones`, both deleted one seat later. A studio colour designer
+    fixes a key and hands down named colours; the shadow is a hue, not an
+    absence."""
+    text = crew.system_prompt_for("palette:itten")
+    assert "キートーン" in text
+    assert "70%" in text and "5%" in text
+    for banned in ("desaturate", "mute", "richer", "more vivid", "cooler", "warmer"):
+        assert banned in text, f"{banned} must be named as forbidden"
+    assert "shadows are a HUE" in text
+    assert "VALUE SEPARATION" in text
+    # And it still may not touch exposure.
+    assert "You do NOT change exposure" in text
+
+
+def test_both_colourists_state_a_key_rather_than_a_direction_of_change():
+    for mid in crew.members_of("palette"):
+        examples = " ".join(crew.MUSES[mid]["say_examples"])
+        assert "キートーン" in examples, mid
+        assert "彩度、落とし" not in examples, mid
+        assert "くすませ" not in examples, mid
+
+
+def test_the_choreographer_no_longer_optimises_against_standing_still():
+    """The catchphrase was「棒立ちに見えたら負けだ」and that is what the seat
+    optimised: one more degree of lean every round until the hips were above
+    the shoulders."""
+    text = crew.system_prompt_for("spine:bane")
+    assert "棒立ち" not in text
+    for banned in ("arched_back", "hunched_over", "uninhibited_posture"):
+        assert banned in text, banned
+    assert "NO emphasis on posture tags" in text
+    assert crew.MUSES["spine:bane"]["flavor_tags"] == []
