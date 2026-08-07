@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..muse import chain as muse_chain
+from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import presets as presets_db
 from .board import SLOT_SIZE, compile_board_slot, plan_sheet
@@ -168,6 +170,55 @@ async def delete_character(character_id: str, request: Request):
     if not await presets_db.delete_preset(request.app.state.db, character_id):
         raise HTTPException(404, "character not found")
     return {"ok": True}
+
+
+# ── her secret diary ────────────────────────────────────────────────────────
+# Written by the Muse diary job when the Showrunner wraps a session; read here.
+# The persistence already lived in `presets`, on the character's own payload —
+# these two routes are what the panel was calling all along and never got.
+
+@router.get("/{character_id}/diaries")
+async def list_character_diaries(character_id: str, request: Request):
+    """Newest first — the panel opens on the top entry."""
+    if await presets_db.get_preset(request.app.state.db, character_id) is None:
+        raise HTTPException(404, "character not found")
+    diaries = await presets_db.get_preset_diaries(request.app.state.db, character_id)
+    diaries.sort(key=lambda d: d.get("timestamp") or 0.0, reverse=True)
+    return {"diaries": diaries}
+
+
+@router.post("/{character_id}/diaries/{diary_id}/read")
+async def read_character_diary(character_id: str, diary_id: str, request: Request):
+    """Mark one entry read, and let her react to being read — once, ever.
+
+    The reaction is generated here rather than spooled because the panel shows
+    the entry before this call resolves, so the wait costs nothing on screen.
+    A model that is down must not cost the Showrunner the read receipt, so a
+    failed reaction is an empty string and never an error.
+    """
+    db = request.app.state.db
+    diary = await presets_db.mark_diary_read(db, character_id, diary_id)
+    if diary is None:
+        raise HTTPException(404, "diary not found")
+
+    banter = ""
+    if not diary.get("secret_banter_fired"):
+        preset = await presets_db.get_preset(db, character_id)
+        cfg = await get_runtime_config(db)
+        try:
+            banter = await muse_chain.run_secret_banter(
+                request.app.state.ollama,
+                character=preset or {},
+                diary_summary=str(diary.get("summary_ja") or diary.get("summary") or ""),
+                model=str(cfg.get("vlm_model") or ""),
+                num_ctx=int(cfg.get("ollama_num_ctx") or 0) or None,
+            )
+        except Exception:
+            logger.warning("[characters] secret banter failed", exc_info=True)
+        if banter:
+            await presets_db.mark_secret_banter_fired(db, character_id, diary_id)
+
+    return {"diary": diary, "banter": banter}
 
 
 class BoardImageChoice(BaseModel):

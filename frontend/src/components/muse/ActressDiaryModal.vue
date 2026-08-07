@@ -14,6 +14,9 @@ const { t, locale } = useI18n()
 const diaries = ref([])
 const loading = ref(false)
 const selectedDiary = ref(null)
+// Her one-off reaction to being read. Arrives with the read receipt, after the
+// entry is already on screen, so it appears rather than delaying anything.
+const secretBanter = ref('')
 
 const isEn = computed(() => locale.value === 'en')
 
@@ -64,12 +67,16 @@ async function loadDiaries() {
 
 async function openDiary(diary) {
   selectedDiary.value = diary
+  secretBanter.value = ''
   if (diary && !diary.read) {
     try {
-      await api(`/api/characters/${props.characterId}/diaries/${diary.id}/read`, {
+      const res = await api(`/api/characters/${props.characterId}/diaries/${diary.id}/read`, {
         method: 'POST'
       })
       diary.read = true
+      // Only if she is still the entry on screen — the Showrunner may have
+      // clicked on to another one while she was thinking.
+      if (selectedDiary.value === diary) secretBanter.value = res.banter || ''
       emit('diary-read', diary.id)
     } catch (err) {
       console.warn('Failed to mark diary as read', err)
@@ -211,6 +218,19 @@ watch(() => props.show, (val) => {
           <div class="relative bg-white/70 dark:bg-slate-800/70 p-5 rounded-2xl border border-pink-200/50 dark:border-pink-900/50 shadow-inner">
             <p class="whitespace-pre-wrap text-sm leading-relaxed text-pink-950 dark:text-pink-100 font-serif">
               {{ getDiaryContent(selectedDiary) }}
+            </p>
+          </div>
+
+          <!-- Caught: she says one thing about having been read, once ever. -->
+          <div
+            v-if="secretBanter"
+            class="animate-fade-in rounded-2xl border border-rose-300/60 dark:border-rose-800/60 bg-rose-50/80 dark:bg-rose-950/40 p-4"
+          >
+            <div class="text-[11px] font-semibold text-rose-500 dark:text-rose-300 mb-1">
+              {{ t('muse.secretBanterTitle') }}
+            </div>
+            <p class="whitespace-pre-wrap text-sm leading-relaxed text-rose-900 dark:text-rose-100">
+              {{ secretBanter }}
             </p>
           </div>
         </div>

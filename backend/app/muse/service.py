@@ -6,6 +6,7 @@ showrunner says OK. There is no B/C/D pickup chain anymore.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -1225,6 +1226,24 @@ def is_duet(session: dict[str, Any]) -> bool:
     return str(session.get("mode") or "") == "duet"
 
 
+def _memory_block(session: dict[str, Any]) -> str:
+    """What she remembers of the last few shoots, from her own diary.
+
+    Labelled with what it is not, for the reason REFERENCE is fenced: material
+    handed over as plain text becomes something the picture has to contain, and
+    last month's umbrella turns up in today's frame. It is here to colour how
+    she meets the Showrunner, not to be described.
+    """
+    lines = [str(m).strip() for m in (session.get("memories") or []) if str(m).strip()]
+    if not lines:
+        return ""
+    return "\n".join([
+        "前に総監督と撮ったときのこと（あなたの日記から。覚えている、というだけ。"
+        "今日の画に写すものではないし、SCENE に書くものでもない）:",
+        *(f"- {m}" for m in lines[:3]),
+    ])
+
+
 def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     """What she is handed. In talk mode, the conversation; in prep, the script."""
     inputs = _inputs(session)
@@ -1235,6 +1254,9 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
         if m.get("role") in ("user", "muse")
     )
     parts = [f"お題（総監督が最初に言ったこと）:\n{theme}" if theme else ""]
+    memories = _memory_block(session)
+    if memories:
+        parts.append(memories)
     orders = brief_mod.orders_block(list(session.get("notes") or []))
     if orders:
         parts.append(orders)
@@ -1385,9 +1407,32 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["costume"] = {}
     session["notes"] = []
     session.pop("_blind_said", None)
+    # Read her diary once, here, rather than on every turn: it is a Qdrant round
+    # trip and it cannot change mid-session. Talking has to stay cheap enough to
+    # feel like talking.
+    session["memories"] = await _recent_memories(db, session)
     await session_db.save(db, session)
     session_db.log(session, "duet", "opened")
     return await _duet_talk(db, ollama, session, "", cfg=cfg)
+
+
+async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[str]:
+    """Her own summaries of the last few shoots, in the Showrunner's language."""
+    inputs = _inputs(session)
+    char_id = str(inputs.get("character_id") or "")
+    if not char_id:
+        return []
+    entries = await presets_db.get_recent_diary_summaries(db, char_id, limit=limit)
+    ja = str(inputs.get("locale") or "ja").startswith("ja")
+    out: list[str] = []
+    for e in entries:
+        text = str(
+            (e.get("summary_ja") if ja else e.get("summary_en"))
+            or e.get("summary") or ""
+        ).strip()
+        if text:
+            out.append(text)
+    return out
 
 
 # ── showrunner message ──────────────────────────────────────────────────────
@@ -1804,8 +1849,14 @@ async def finish_session(
 
     char_id = str((session.get("inputs") or {}).get("character_id") or "")
     if char_id and spooler:
+        cfg = await get_runtime_config(db)
+        inputs = _inputs(session)
         spooler.submit(
-            JobLane.UTILITY,
+            # Every Ollama call in the app goes through PROMPT, and that lane is
+            # the one bound to the GPU resource when Ollama is local. There is no
+            # UTILITY lane — naming one raised AttributeError inside the request,
+            # so the diary job was never queued at all.
+            JobLane.PROMPT,
             "generate_actress_diary",
             run_generate_actress_diary_job,
             meta={"session_id": sid, "character_id": char_id},
@@ -1813,25 +1864,29 @@ async def finish_session(
             ollama=ollama,
             session=session,
             character_id=char_id,
+            model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
+            num_ctx=_num_ctx(inputs, cfg),
         )
     return session
 
 
 async def run_generate_actress_diary_job(
-    job_id: str,
-    cancel_event,
-    progress_callback,
+    reporter,
+    cancel,
     *,
     db,
     ollama,
     session: dict[str, Any],
     character_id: str,
+    model: str = "",
+    num_ctx: int | None = None,
 ):
-    """Background runner job that invokes LLM for dual-language (JA & EN) secret diary."""
-    from app.characters import presets as char_presets
-    from app.muse import crew as muse_crew
+    """Background runner job that invokes LLM for dual-language (JA & EN) secret diary.
 
-    char = await char_presets.get_preset(db, character_id)
+    Two positional arguments, like every other job: the spooler calls
+    ``job._func(reporter, cancel_token, **kwargs)``.
+    """
+    char = await presets_db.get_preset(db, character_id)
     if not char:
         return {"status": "skipped", "reason": "character not found"}
 
@@ -1847,21 +1902,28 @@ async def run_generate_actress_diary_job(
     shoot_images = (session.get("shoot") or {}).get("images") or []
     image_id = str(shoot_images[0]) if shoot_images else ""
 
-    prompt = muse_crew.actress_diary_prompt(char, session_log=session_log, photo_desc=photo_desc)
-    model = session.get("inputs", {}).get("model") or "qwen2.5:14b"
+    # The prompt carries her voice, the material and the output contract, so it
+    # is the system side; the user turn only has to ask for the thing.
+    raw_resp = await chain._call(
+        ollama,
+        system=crew.actress_diary_prompt(
+            char, session_log=session_log, photo_desc=photo_desc,
+        ),
+        prompt="今日の撮影の秘密の日記を書いて。JSON だけを返すこと。",
+        model=model, images=None, num_ctx=num_ctx, think=False,
+    )
 
-    raw_resp = await _llm_call(ollama, model=model, prompt=prompt, temperature=0.7)
-    
-    # Parse JSON
-    parsed = {}
-    import json, re, uuid, time
+    # Parse JSON. She is asked for JSON only, but a diary that arrives as plain
+    # prose is still her diary — keep it rather than losing the shoot's memory.
+    parsed: Any = {}
     try:
         match = re.search(r"\{.*\}", raw_resp, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group(0))
-        else:
-            parsed = json.loads(raw_resp)
+        parsed = json.loads(match.group(0) if match else raw_resp)
     except Exception:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    if not parsed:
         parsed = {
             "summary_ja": "本番撮影の思い出",
             "summary_en": "Memories of the shoot",
@@ -1887,7 +1949,7 @@ async def run_generate_actress_diary_job(
         "read": False,
     }
 
-    await char_presets.add_preset_diary(db, character_id, diary_entry)
+    await presets_db.add_preset_diary(db, character_id, diary_entry)
     return {"status": "ok", "diary_id": diary_entry["id"]}
 
 

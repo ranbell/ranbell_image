@@ -572,16 +572,6 @@ async function onChatKey(e) {
                           @click="quick(DUET_SHOT)">
                     {{ t('muse.quick.testShot') }}
                   </button>
-                  <button
-                    type="button"
-                    class="sb-btn text-[10px] bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 ml-auto"
-                    :disabled="chatLocked"
-                    :title="t('muse.finishTitle')"
-                    @click="finishSession"
-                  >
-                    {{ t('muse.finishBtn') }}
-                  </button>
-
                 </template>
 
                 <template v-else>
@@ -592,6 +582,18 @@ async function onChatKey(e) {
                     {{ t('muse.quick.ok') }}
                   </button>
                 </template>
+
+                <!-- Wrapping is how the diary gets written, so it cannot be a
+                     二人芝居 privilege: the crewed studio had no way to finish. -->
+                <button
+                  type="button"
+                  class="sb-btn text-[10px] bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 ml-auto"
+                  :disabled="chatLocked"
+                  :title="t('muse.finishTitle')"
+                  @click="finishSession"
+                >
+                  {{ t('muse.finishBtn') }}
+                </button>
               </div>
               <div class="flex gap-2">
                 <textarea
