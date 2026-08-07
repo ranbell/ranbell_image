@@ -1026,6 +1026,180 @@ async def run_full_table(
     return session
 
 
+# ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
+# Two words drive it. Everything else is conversation, which is the point: the
+# eighteen-seat table is a production meeting you watch, and this is being in
+# the room with her.
+_PREP_RE = re.compile(r"撮影準備|準備し|支度|用意し|get\s*ready|prep", re.I)
+_TESTSHOT_RE = re.compile(r"試し撮り|試写|一枚|撮ろう|test\s*shot", re.I)
+
+
+def is_duet(session: dict[str, Any]) -> bool:
+    return str(session.get("mode") or "") == "duet"
+
+
+def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
+    """What she is handed. In talk mode, the conversation; in prep, the script."""
+    inputs = _inputs(session)
+    theme = str(inputs.get("theme") or "").strip()
+    talk = "\n".join(
+        f"- {'総監督' if m.get('role') == 'user' else '私'}: {m.get('text')}"
+        for m in (session.get("chat") or [])[-12:]
+        if m.get("role") in ("user", "muse")
+    )
+    parts = [f"お題（総監督が最初に言ったこと）:\n{theme}" if theme else ""]
+    orders = brief_mod.orders_block(list(session.get("notes") or []))
+    if orders:
+        parts.append(orders)
+    if talk:
+        parts.append(f"ここまでの会話:\n{talk}")
+    if text.strip():
+        parts.append(f"総監督がいま言ったこと:\n{text.strip()}")
+
+    if not prep:
+        return "\n\n".join(p for p in parts if p)
+
+    previous = str((session.get("craft") or {}).get("prompt") or "")
+    if previous:
+        parts.append(
+            "さっき自分で組んだ台本（変える必要のないところは変えない）:\n" + previous
+        )
+    parts.append(
+        "ここまでの話から、撮る画を一つに決めて。場所・時間・光・小物十個以上・"
+        "衣装・カメラ・自分のポーズと表情、全部あなたが決める。\n"
+        "決めたら、SAY でフレームに何が入っているかを自分の言葉で総監督に読み上げて。"
+        "小物は名前で。総監督はそれを聞いて「これ足して」と言えるので、隠さないこと。\n"
+        "場面が変わったなら、残す言葉だけ残して、捨てるものは口に出してから捨てて。"
+    )
+    return "\n\n".join(p for p in parts if p)
+
+
+async def _duet_talk(
+    db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Conversation only — no craft is written, so this stays fast."""
+    inputs = _inputs(session)
+    sid = session["session_id"]
+    lead = crew.DEFAULT_MEMBER["actress"]
+    name = _muse_display_name(session, lead)
+    events.publish(sid, {"type": "muse_speaking", "muse_id": lead, "name": name})
+    images = await board_images(db, session)
+    try:
+        say, blind = await chain.run_duet_talk(
+            ollama,
+            user_prompt=_duet_user_prompt(session, text, prep=False),
+            model=_vision_model(inputs) if images else _text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+            character=session.get("character") or {},
+            images=images or None, seed=str(sid),
+            on_token=_token_publisher(sid, lead),
+        )
+    except chain.ChainError as exc:
+        raise MuseError("うまく言葉が出てこないみたいです。もう一度話しかけてください。") from exc
+    if blind and images:
+        _note_blind(session)
+    msg = _chat_append(session, role="muse", text=say, muse_id=lead,
+                       name=name, kind="craft")
+    _publish_chat(sid, msg)
+    session["status"] = "chat"
+    await session_db.save(db, session)
+    return session
+
+
+async def _duet_prep(
+    db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """She builds the whole shot and reads the frame back, object by object."""
+    inputs = _inputs(session)
+    sid = session["session_id"]
+    lead = crew.DEFAULT_MEMBER["actress"]
+    session["status"] = "discussing"
+    await session_db.save(db, session)
+
+    events.publish(sid, {
+        "type": "muse_speaking", "muse_id": lead,
+        "name": _muse_display_name(session, lead),
+    })
+    images = await board_images(db, session)
+    started = time.monotonic()
+    try:
+        turn = await chain.run_duet_prep(
+            ollama,
+            user_prompt=_duet_user_prompt(session, text, prep=True),
+            model=_vision_model(inputs) if images else _text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+            identity_tags=_identity_tags(session),
+            framing=_framing(inputs),
+            brief=str(session.get("brief") or ""),
+            character=session.get("character") or {},
+            style=_style(session), cast=_cast(session),
+            images=images or None, seed=str(sid),
+            on_token=_token_publisher(sid, lead),
+        )
+    except chain.ChainError as exc:
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        raise MuseError("台本がうまく組めませんでした。もう少し話してから試してください。") from exc
+    if turn.blind and images:
+        _note_blind(session)
+    _apply_turn(session, turn, ms=int((time.monotonic() - started) * 1000))
+    session["status"] = "chat"
+    await session_db.save(db, session)
+    return session
+
+
+async def post_duet_chat(
+    db, ollama, comfy, spooler, session: dict[str, Any], text: str,
+) -> dict[str, Any]:
+    """One turn of the two-hander. Talk, get ready, or take the picture."""
+    sid = session["session_id"]
+    user_msg = _chat_append(session, role="user", text=text, name="総監督")
+    _publish_chat(sid, user_msg)
+    await session_db.save(db, session)
+
+    craft_ready = bool((session.get("craft") or {}).get("prompt"))
+    # Order matters: 「撮って」reads as approval in the crewed studio, and here it
+    # means take the test shot. The two words win before anything else looks.
+    if _TESTSHOT_RE.search(text) and craft_ready:
+        return await request_board(db, comfy, spooler, session, ollama=ollama)
+    if _PREP_RE.search(text) or (_TESTSHOT_RE.search(text) and not craft_ready):
+        cfg = await get_runtime_config(db)
+        session.setdefault("notes", []).append(text)
+        session = await _duet_prep(db, ollama, session, text, cfg=cfg)
+        return session
+    if _is_approve(text) and craft_ready:
+        return await approve_and_shoot(db, comfy, spooler, session, ollama=ollama)
+
+    cfg = await get_runtime_config(db)
+    # Everything she is told is standing direction, the same as in the studio —
+    # a note that lives only in the turn answering it never reaches the render.
+    session.setdefault("notes", []).append(text)
+    return await _duet_talk(db, ollama, session, text, cfg=cfg)
+
+
+async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """Open the two-hander. She speaks first, about the theme, and that is all."""
+    missing = [m for m in missing_inputs(session) if m != "workflow"]
+    if missing:
+        raise MuseError(f"missing: {', '.join(missing)}")
+    _rebuild_brief(session)
+    cfg = await get_runtime_config(db)
+    session["mode"] = "duet"
+    session["status"] = "discussing"
+    session["chat"] = []
+    session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
+    session["ledger"] = []
+    session["spoken"] = []
+    session["board"] = {}
+    session["shoot"] = {}
+    session["plan"] = {}
+    session["notes"] = []
+    session.pop("_blind_said", None)
+    await session_db.save(db, session)
+    session_db.log(session, "duet", "opened")
+    return await _duet_talk(db, ollama, session, "", cfg=cfg)
+
+
 # ── showrunner message ──────────────────────────────────────────────────────
 async def post_chat(
     db, ollama, comfy, spooler, session: dict[str, Any], text: str,
@@ -1036,6 +1210,8 @@ async def post_chat(
         raise MuseError("empty message")
     if missing_inputs(session):
         raise MuseError(f"missing: {', '.join(missing_inputs(session))}")
+    if is_duet(session):
+        return await post_duet_chat(db, ollama, comfy, spooler, session, text)
     if not (session.get("craft") or {}).get("prompt"):
         # Auto-open table if they chat first.
         session = await start_table(

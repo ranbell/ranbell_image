@@ -41,6 +41,10 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "crew_ids": [i for i in crew_ids if i not in ("finisher", "actress")],
         }, **(inputs or {})},
         "character": {},
+        # "" is the crewed studio. "duet" is 二人芝居 — the Showrunner and the
+        # Lead, nobody else, and the craft is written only when she is asked to
+        # get ready.
+        "mode": str((inputs or {}).get("mode") or ""),
         "brief": "",
         # The same brief with the reference block cut down to traits. Every seat
         # that is not acting reads this one.

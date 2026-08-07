@@ -26,6 +26,8 @@ class SessionCreate(BaseModel):
     vision_model: str = ""
     locale: str = "ja"
     crew_preset: str = "standard"
+    # "duet" opens 二人芝居 — the Showrunner and the Lead, nobody else.
+    mode: str = ""
 
 
 class InputsPatch(BaseModel):
@@ -172,6 +174,15 @@ async def start_table(session_id: str, request: Request):
     return await _run(service.start_table(
         _db(request), _llm(request, session), session,
         comfy=request.app.state.comfy, spooler=request.app.state.spooler,
+    ))
+
+
+@router.post("/sessions/{session_id}/duet")
+async def start_duet(session_id: str, request: Request):
+    """二人芝居 — no crew, no table. She opens, and the two of you work it out."""
+    session = await _session(request, session_id)
+    return await _run(service.start_duet(
+        _db(request), _llm(request, session), session,
     ))
 
 

@@ -226,6 +226,58 @@ async def run_plan(
     return plan
 
 
+async def run_duet_talk(
+    ollama, *, user_prompt: str, model: str, num_ctx: int | None,
+    character: dict[str, Any] | None = None, seed: str = "",
+    images: list[bytes] | None = None,
+    on_token: TokenCallback | None = None,
+) -> tuple[str, bool]:
+    """A two-hander conversation turn. Nothing is written down.
+
+    Returns her line and whether she was handed a picture she could not read.
+    The craft is deliberately untouched: in 二人芝居 the script does not exist
+    until the Showrunner asks to get ready, so that talking stays cheap and
+    fast enough to feel like talking.
+    """
+    raw, blind = await _call_seeing(
+        ollama,
+        system=crew.actress_duet_prompt(character or {}, mode="talk", seed=seed),
+        prompt=user_prompt, model=model, images=images,
+        num_ctx=num_ctx, think=False, on_token=on_token,
+    )
+    say, _, _ = identity.parse_table_read(raw)
+    text = (say or raw).strip()
+    if text.lower().startswith("say:"):
+        text = text[4:].strip()
+    if not text:
+        raise ChainError("empty duet turn")
+    return text, blind
+
+
+async def run_duet_prep(
+    ollama, *, user_prompt: str, model: str, num_ctx: int | None,
+    identity_tags: list[str] | None, framing: str, brief: str,
+    character: dict[str, Any] | None = None, style: str = "",
+    cast: list[dict] | None = None, seed: str = "",
+    images: list[bytes] | None = None,
+    on_token: TokenCallback | None = None,
+) -> MuseTurn:
+    """The turn where she builds the whole shot and reads the frame back."""
+    raw, blind = await _call_seeing(
+        ollama,
+        system=crew.actress_duet_prompt(
+            character or {}, mode="prep", base_style=style, seed=seed,
+        ),
+        prompt=user_prompt, model=model, images=images,
+        num_ctx=num_ctx, think=False, on_token=on_token,
+    )
+    turn = _finish_turn(
+        raw, muse_id=crew.DEFAULT_MEMBER["actress"], identity_tags=identity_tags,
+        framing=framing, brief=brief, style=style, cast=cast,
+    )
+    return turn if not blind else replace(turn, blind=True)
+
+
 async def run_banter(
     ollama, *, muse_id: str, user_prompt: str, model: str,
     num_ctx: int | None, think: bool = False,

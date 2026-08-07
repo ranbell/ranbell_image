@@ -1400,6 +1400,126 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
     ])
 
 
+# ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
+# A two-hander. No crew, no table, no seats arguing: the director and the
+# actress work it out between them, and the only other thing in the room is a
+# camera that goes off when they are both ready.
+#
+# The eighteen-seat table is a different pleasure and it stays. What this is for
+# is the run where you want to be in the room with her rather than watching a
+# production meeting — so nothing else may speak, and the machinery that makes
+# a picture drawable has to move behind her lines instead of beside them.
+DUET_TALK_OUTPUT = """
+OUTPUT FORMAT — one block, nothing else:
+
+SAY: 2–5 sentences. You are talking with the Showrunner about what you are
+about to shoot. In character, first person, in natural Japanese (口調どおり)
+when they wrote Japanese.
+- This is a CONVERSATION, not a report. Ask things. Have opinions. Say what
+  you would rather do, and why it is you who would do it.
+- Nothing is being written down yet. Do not list tags, do not describe a
+  finished picture, do not output TAGS or SCENE.
+- If they have said enough for you to picture it, say so, and tell them you
+  can get ready whenever they want.
+No danbooru tags. No emoji. No labels other than SAY.
+""".strip()
+
+DUET_PREP_OUTPUT = """
+OUTPUT FORMAT — three labelled blocks, nothing else:
+
+SAY: You have just worked out what the shot is, and you are describing it back
+to the Showrunner in your own words, in character, in natural Japanese.
+- Say WHERE you are, WHAT you are doing, and then NAME THE THINGS that are in
+  the frame with you — plainly, one after another, as if looking around the
+  room. Ten or so. The small ones matter most.
+- This is how they find out what you put in, so nothing may be hidden. If you
+  added something they did not ask for, name it and say why.
+- End by leaving it open: something to add, something to take out.
+- 4–8 sentences. Still you, not a checklist read aloud.
+
+TAGS: English only. Comma-separated danbooru-style tags with underscores.
+Do NOT repeat Character identity tags (hair/eyes/figure) — the server adds
+those. 30–45 tags. You are the only one writing, so this covers everything:
+place, objects, hour, light, your pose, your expression, your clothes, and the
+camera. Weights (tag:1.1)–(tag:1.35) sparingly, and never on posture.
+
+SCENE: English only. ONE flowing paragraph, 140–200 words, covering the same
+moment: what your body is doing and where the weight is, your clothes and how
+the fabric sits, the place and ten or more concrete objects in it, the light of
+that hour, the camera distance and angle, and what your face is doing. No
+headings, no bullets.
+""".strip()
+
+DUET_OWNS_THE_FRAME = """
+YOU ARE THE WHOLE CREW TODAY
+There is no planner, no camera, no wardrobe, no lighting. Nobody will fill in
+what you leave out and nobody will overrule you, so decide all of it:
+
+- PLACE and HOUR, specific enough to light itself. A spot in a room, not a
+  region.
+- TEN OR MORE OBJECTS that belong to that place and hour. This is the single
+  thing that makes a picture look like somewhere rather than a backdrop. Dull
+  objects are the good ones — a cable, a cup someone left, a scuff on the wall.
+- WHAT YOU ARE WEARING, chosen for this place and this hour.
+- THE LIGHT, stated as what it IS: where it comes from and how bright. Never as
+  a change from something.
+- ONE CAMERA: how far away, what angle, and what it is on. Wide enough that the
+  objects you just named are actually in the frame — a shot tight on your face
+  throws the whole room away.
+- YOUR POSE, believable and ordinary. Weight somewhere specific. Never arched,
+  hunched, contorted or over-extended, and no emphasis on posture tags.
+
+WHEN THE SHOWRUNNER CHANGES THE SCENE
+You keep only the words that still belong, and you drop the rest yourself —
+say out loud which ones you are letting go of. A room you have left does not
+keep its furniture. Nobody else is going to clear it for you.
+""".strip()
+
+
+def actress_duet_prompt(
+    character: dict[str, Any], *, mode: str = "talk",
+    base_style: str = "", seed: str = "",
+) -> str:
+    """The Lead working alone with the Showrunner.
+
+    `mode` is "talk" while they are still deciding — she is a person in a
+    conversation and nothing is written down — and "prep" on the turn she
+    actually builds the shot and reads the frame back to them.
+    """
+    p = character.get("personality") or {}
+    name_ja = (
+        str(character.get("name_ja") or p.get("preset_name_ja") or "")
+        or str(character.get("name") or p.get("preset_name") or "女優")
+    )
+    name_en = str(character.get("name") or p.get("preset_name") or name_ja)
+    lead = DEFAULT_MEMBER["actress"]
+    blocks = [
+        f"You are {name_en} / {name_ja}, and today it is just you and the "
+        f"Showrunner (総監督). No crew, no table read — the two of you are "
+        f"making this picture together.",
+        "Speak in FIRST PERSON as her, always. 口調は一人称（「私」）。"
+        "総監督とは、現場でふたりきりで話しているときの距離感で。",
+        f"EXAMPLE energy: {_pick_say_example(lead, seed)}",
+        _character_sheet(character),
+        "Your personality shows in HOW you speak and in what you choose to do "
+        "with your face and hands — never in what you recount. Do not narrate "
+        "your backstory. Talk about what is in front of you.",
+    ]
+    if mode == "prep":
+        blocks += [
+            DUET_OWNS_THE_FRAME,
+            _style_block(lead, base_style),
+            DUET_PREP_OUTPUT,
+        ]
+    else:
+        blocks += [
+            "Nothing is being written down on this turn. You are deciding "
+            "together what the picture even is. Be good company.",
+            DUET_TALK_OUTPUT,
+        ]
+    return "\n\n".join(b for b in blocks if b)
+
+
 def _who(m: dict[str, Any]) -> str:
     """How a person introduces themselves: the job, then what the room calls them."""
     return f"{m['name_ja']}（{m['role']} — everyone calls you 「{m['nick_ja']}」）"
