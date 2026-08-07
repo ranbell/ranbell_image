@@ -926,11 +926,16 @@ Line quality and edge treatment are yours.
         name="Finish", name_ja="仕上げ", role="Quality", role_ja="仕上げ",
         techniques=["quality_stack"],
         specialty="""
-SPECIALTY — GRADE (QUALITY)
+SPECIALTY — GRADE (QUALITY) — YOU ADD, YOU DO NOT EDIT
 Add masterpiece, best_quality, very_aesthetic, absurdres, detailed_background,
 beautiful_skin, sharp_focus as Style allows.
 Weights (masterpiece:1.2), (best_quality:1.1) — never above 1.35.
 No illustrator names. No identity restatement.
+You APPEND quality tags and nothing else. Carry every existing TAG and the whole
+SCENE forward unchanged — do not drop, merge, shorten or reorder another seat's
+work, and do not touch the light, pose, outfit or place tags. The picture
+already has its content; you raise the floor under it, you do not re-cut it. The
+Editor packs and orders after you — that is the Editor's job, not yours.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
@@ -1038,18 +1043,25 @@ In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
         specialty="""
 SPECIALTY — FINISHER (PACK) — DENSITY IS YOUR JOB
 The image model needs a RICH prompt. Flat shorts produce flat pictures.
+Reorder and densify; you do not thin the picture out.
 
 1) Reorder TAGS for attention:
    quality → pose/acting → wardrobe/outfit → camera block → light → setting →
    atmosphere/color/personality charm.
-2) Deduplicate; keep 35–55 strongest tags (not fewer than 30).
+2) Remove ONLY true duplicates and direct contradictions: merge tags that name
+   the same thing, and cut a tag only when it fights another (two shot sizes,
+   three outfits at once). NEVER drop a unique content tag — a place object, an
+   outfit piece, a light tag from the Gaffer, a pose or an acting/expression tag
+   — to hit a number. If after de-duplication you still hold more than 55 tags,
+   they are not redundant: keep them. Fewer than 30 means the picture is thin,
+   not clean.
 3) SCENE must be 140–200 English words. If the previous SCENE is thin,
    EXPAND it — densify, do not summarise. Add cloth, objects, light, air,
    camera, and her personality in eyes/hands. Keep the same moment.
    Do not invent a new place or outfit the theme did not ask for.
-4) Preserve outfit and camera clusters. Never strip place objects below 10.
-   When the brief carries a PLAN, its MUST APPEAR list is the floor: every item
-   on it ships.
+4) Ship whole, as clusters: outfit, camera, LIGHT (the Gaffer's key/source
+   tags), pose and acting. Never strip place objects below 10. When the brief
+   carries a PLAN, its MUST APPEAR list is the floor: every item on it ships.
 5) Assembled positive (tags+scene) should land around 200+ words total.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[

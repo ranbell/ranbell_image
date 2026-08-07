@@ -102,10 +102,24 @@ def test_production_muse_copy_has_no_situation_specific_anchors():
 def test_finisher_demands_dense_scene():
     text = crew.system_prompt_for("finisher")
     assert "140–200" in text or "140-200" in text
-    assert "35–55" in text or "35-55" in text
     assert "Densify" in text or "densify" in text or "EXPAND" in text
     assert "80 words" not in text  # old thin cap must stay gone
     assert "140–200" in crew.OUTPUT or "140-200" in crew.OUTPUT
+    # Density, not thinning: the Editor removes only redundancy, keeps a floor of
+    # 30, and never caps to a "strongest N" that would drop unique content.
+    assert "duplicate" in text.lower()
+    assert "30" in text
+    assert "strongest" not in text
+
+
+def test_grade_is_add_only():
+    """The Finish seat raises quality; it must not re-cut another seat's work
+    (the scorecard had it deleting 17 content tags on its turn)."""
+    text = crew.system_prompt_for("grade")
+    assert "APPEND" in text or "append" in text
+    assert "unchanged" in text
+    # It is told explicitly not to touch the content clusters.
+    assert "light" in text.lower() and "pose" in text.lower()
 
 
 def test_banter_prompt_is_say_only():
