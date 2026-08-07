@@ -32,6 +32,9 @@ class SessionCreate(BaseModel):
 
 class InputsPatch(BaseModel):
     theme: str | None = None
+    # "" is the crewed studio, "duet" is 二人芝居. Settable before the session
+    # opens so the panel can hide the casting drawer.
+    mode: str | None = None
     character_id: str | None = None
     workflow: str | None = None
     model: str | None = None
@@ -73,6 +76,16 @@ class InputsPatch(BaseModel):
         if value not in crew.PRESETS:
             raise ValueError(f"crew_preset must be one of: {', '.join(crew.PRESETS)}")
         return value
+
+    @field_validator("mode")
+    @classmethod
+    def _mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        mode = str(value).strip().lower()
+        if mode not in ("", "duet"):
+            raise ValueError('mode must be "" or "duet"')
+        return mode
 
     @field_validator("banter_mode")
     @classmethod

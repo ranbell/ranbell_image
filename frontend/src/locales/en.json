@@ -1334,6 +1334,7 @@
     "finalSteps": "Final steps",
     "finalCfg": "Final CFG",
     "cta": {
+      "duet": "Start with her",
       "table": "Open the table",
       "done": "Done"
     },
@@ -1347,11 +1348,23 @@
     "banter": "aside",
     "chatPlaceholder": "Hard notes welcome — outfit, angle, light… the crew will answer",
     "send": "Send",
+    "mode": {
+      "studio": "Studio",
+      "studioHint": "Cast a crew and work it out together",
+      "duet": "Two-hander",
+      "duetHint": "Just her and you",
+      "duetLong": "No crew. Talk it through with her, then \"get ready\" and she reads the frame back to you. \"Test shot\" takes one."
+    },
     "quick": {
+      "prep": "Get ready",
+      "testShot": "Test shot",
+      "prepFirst": "Ask her to get ready first",
       "board": "Board",
       "ok": "OK"
     },
     "boardTitle": "Image board",
+    "stillTitle": "Test shot",
+    "stillAsk": "How is it? Tell her what to change and she will take another",
     "boardAsk": "Good? OK to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",

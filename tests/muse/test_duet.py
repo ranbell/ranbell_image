@@ -194,3 +194,22 @@ def test_the_talking_prompt_writes_nothing_down():
     assert "Nothing is being written down" in text
     assert "do not output TAGS or SCENE" in text
     assert "TEN OR MORE OBJECTS" not in text
+
+
+@pytest.mark.asyncio
+async def test_the_mode_can_be_set_before_anything_opens():
+    """The panel has to know which door to use, and whether to show a casting
+    drawer at all, before the session starts."""
+    db = FakeDb()
+    session = await service.create_session(db, {"theme": "t", "model": "m"})
+    assert session["mode"] == ""
+
+    session = await service.patch_inputs(db, session, {"mode": "duet"})
+    assert session["mode"] == "duet"
+    assert service.is_duet(session)
+
+    session = await service.patch_inputs(db, session, {"theme": "別のお題"})
+    assert session["mode"] == "duet", "an unrelated patch must not clear it"
+
+    session = await service.patch_inputs(db, session, {"mode": ""})
+    assert not service.is_duet(session)

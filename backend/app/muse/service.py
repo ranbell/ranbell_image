@@ -151,6 +151,11 @@ async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, 
 
 async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     inputs = {**_inputs(session), **{k: v for k, v in patch.items() if v is not None}}
+    # The mode lives on the session, not in inputs — `is_duet` reads it there and
+    # so does the panel, which has to know before anything starts whether to
+    # show a casting drawer at all.
+    if patch.get("mode") is not None:
+        session["mode"] = str(patch["mode"])
     # Resolve crew when preset or ids change. Which one asked decides who wins:
     # picking a preset means "give me that crew", so the stored ids are rebuilt
     # from it. Toggling a seat means "keep mine with this change", so the ids

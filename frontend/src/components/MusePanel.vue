@@ -76,6 +76,13 @@ const act = computed(() => {
   return 'setup'
 })
 
+// 二人芝居: the Showrunner and the Lead, nobody else. There is no crew to cast,
+// the craft is only written when she is asked to get ready, and the two words
+// that drive it replace「ボード」/「OK」.
+const isDuet = computed(() => session.value?.mode === 'duet')
+const DUET_PREP = '撮影準備'
+const DUET_SHOT = '試し撮り'
+
 const canStart = computed(() =>
   !busy.value && needs.value.length === 0 && act.value === 'setup')
 const chatLocked = computed(() =>
@@ -322,10 +329,21 @@ async function startTable() {
   startedAt = Date.now()
   elapsed.value = 0
   try {
+    // 二人芝居 opens on her, not on a table read, so it is a different door.
     session.value = await api(
-      `/api/muse/sessions/${session.value.session_id}/table`, { method: 'POST' })
+      `/api/muse/sessions/${session.value.session_id}/${isDuet.value ? 'duet' : 'table'}`,
+      { method: 'POST' })
     scrollChat()
   } catch (err) { fail(err) } finally { busy.value = false }
+}
+
+async function setMode(mode) {
+  if (!session.value || act.value !== 'setup') return
+  try {
+    session.value = await api(`/api/muse/sessions/${session.value.session_id}/inputs`, {
+      method: 'PATCH', body: JSON.stringify({ mode }),
+    })
+  } catch (err) { fail(err) }
 }
 
 async function sendChat(text) {
@@ -366,7 +384,8 @@ async function onChatKey(e) {
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <span class="text-[10px] text-[var(--sb-faint)]">SSE {{ streamLive ? '●' : '○' }}</span>
-          <button class="sb-btn" :disabled="busy" @click="showCast = !showCast">{{ t('muse.cast') }}</button>
+          <button v-if="!isDuet" class="sb-btn" :disabled="busy"
+                  @click="showCast = !showCast">{{ t('muse.cast') }}</button>
           <button class="sb-btn" :disabled="busy" @click="showSettings = !showSettings">{{ t('muse.settings') }}</button>
           <button class="sb-btn" :disabled="busy" @click="resetSession">{{ t('muse.reset') }}</button>
           <button class="sb-icon-btn" :title="t('muse.close')" @click="close">✕</button>
@@ -382,7 +401,29 @@ async function onChatKey(e) {
           <!-- setup -->
           <div v-if="act === 'setup'" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-2xl mx-auto w-full">
             <h3 class="sb-display text-lg text-[var(--sb-amber)]">{{ t('muse.setupTitle') }}</h3>
-            <p class="text-[11px] text-[var(--sb-muted)]">{{ t('muse.studioHint') }}</p>
+
+            <!-- a room full of people, or just her -->
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                v-for="m in [{ id: '', k: 'studio' }, { id: 'duet', k: 'duet' }]"
+                :key="m.k" type="button"
+                class="rounded-lg border p-3 text-left transition-colors"
+                :class="(session?.mode || '') === m.id
+                  ? 'border-[var(--sb-amber)]/60 bg-amber-950/20'
+                  : 'border-white/10 hover:border-white/25'"
+                :disabled="busy"
+                @click="setMode(m.id)"
+              >
+                <span class="block text-sm text-gray-200">{{ t(`muse.mode.${m.k}`) }}</span>
+                <span class="mt-0.5 block text-[10px] text-[var(--sb-faint)]">
+                  {{ t(`muse.mode.${m.k}Hint`) }}
+                </span>
+              </button>
+            </div>
+
+            <p class="text-[11px] text-[var(--sb-muted)]">
+              {{ isDuet ? t('muse.mode.duetLong') : t('muse.studioHint') }}
+            </p>
 
             <label class="block space-y-1">
               <span class="sb-label">{{ t('muse.theme') }}</span>
@@ -432,7 +473,8 @@ async function onChatKey(e) {
               </label>
             </div>
 
-            <div>
+            <!-- no crew to cast when it is just the two of you -->
+            <div v-if="!isDuet">
               <span class="sb-label">{{ t('muse.crewPreset') }}</span>
               <div class="flex flex-wrap gap-2 mt-1">
                 <button
@@ -444,7 +486,7 @@ async function onChatKey(e) {
             </div>
 
             <button class="sb-btn w-full py-2" :disabled="!canStart" @click="startTable">
-              {{ busy ? '…' : t('muse.cta.table') }}
+              {{ busy ? '…' : isDuet ? t('muse.cta.duet') : t('muse.cta.table') }}
             </button>
             <p v-if="needs.length" class="text-[11px] text-amber-400">
               {{ needs.map(n => t(`muse.needs.${n}`)).join(' / ') }}
@@ -466,8 +508,8 @@ async function onChatKey(e) {
                   <img
                     v-if="isLead(m) && leadFace"
                     :src="leadFace" alt=""
-                    class="w-5 h-5 rounded-full object-cover shrink-0
-                           ring-1 ring-amber-700/40"
+                    class="rounded-full object-cover shrink-0 ring-1 ring-amber-700/40"
+                    :class="isDuet ? 'w-8 h-8' : 'w-5 h-5'"
                   />
                   <template v-if="m.role === 'user'">{{ t('muse.showrunner') }}</template>
                   <template v-else-if="m.kind === 'banter'">{{ m.name }} · {{ t('muse.banter') }}</template>
@@ -498,12 +540,25 @@ async function onChatKey(e) {
 
             <div class="shrink-0 border-t border-white/10 p-3 space-y-2">
               <div class="flex flex-wrap gap-2">
-                <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick(isJa ? 'ボード' : 'board')">
-                  {{ t('muse.quick.board') }}
-                </button>
-                <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick('OK')">
-                  {{ t('muse.quick.ok') }}
-                </button>
+                <template v-if="isDuet">
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked"
+                          @click="quick(DUET_PREP)">
+                    {{ t('muse.quick.prep') }}
+                  </button>
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked || !craft.prompt"
+                          :title="craft.prompt ? '' : t('muse.quick.prepFirst')"
+                          @click="quick(DUET_SHOT)">
+                    {{ t('muse.quick.testShot') }}
+                  </button>
+                </template>
+                <template v-else>
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick(isJa ? 'ボード' : 'board')">
+                    {{ t('muse.quick.board') }}
+                  </button>
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick('OK')">
+                    {{ t('muse.quick.ok') }}
+                  </button>
+                </template>
               </div>
               <div class="flex gap-2">
                 <textarea
@@ -545,8 +600,12 @@ async function onChatKey(e) {
           </div>
 
           <div v-if="boardImages.length" class="space-y-2">
-            <h4 class="text-[11px] text-[var(--sb-amber)]">{{ t('muse.boardTitle') }}</h4>
-            <p class="text-[10px] text-[var(--sb-muted)]">{{ t('muse.boardAsk') }}</p>
+            <h4 class="text-[11px] text-[var(--sb-amber)]">
+              {{ isDuet ? t('muse.stillTitle') : t('muse.boardTitle') }}
+            </h4>
+            <p class="text-[10px] text-[var(--sb-muted)]">
+              {{ isDuet ? t('muse.stillAsk') : t('muse.boardAsk') }}
+            </p>
             <div class="grid grid-cols-2 gap-2">
               <figure
                 v-for="img in boardImages" :key="img.image_id"
