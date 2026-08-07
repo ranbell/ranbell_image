@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from starlette.responses import StreamingResponse
 
-from . import crew, events, identity, service, session_db
+from . import crew, events, identity, report, service, session_db
 from .catalog import build_muse_catalog
 from .schema import STEPS, public_view
 
@@ -252,6 +252,29 @@ async def stream(session_id: str, request: Request):
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
+
+
+@router.get("/report")
+async def crew_report(request: Request, limit: int = 40):
+    """Which seats keep their work across recent sessions, and what they cost.
+
+    The retire/merge decision. One session is an anecdote — a seat can survive
+    at 0% because it had a bad round — so this walks the recent ones and sums.
+    """
+    db = _db(request)
+    rows = await session_db.list_recent(db, limit=max(1, min(int(limit), 200)))
+    sessions = []
+    for row in rows:
+        loaded = await session_db.load(db, row["session_id"])
+        if loaded is not None:
+            sessions.append(loaded)
+    return report.aggregate(sessions)
+
+
+@router.get("/sessions/{session_id}/report")
+async def session_report(session_id: str, request: Request):
+    """One session's seats: what each added, what survived, what it cost."""
+    return report.session_report(await _session(request, session_id))
 
 
 @router.get("/steps")

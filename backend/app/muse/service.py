@@ -338,14 +338,15 @@ def _screening_note(session: dict[str, Any]) -> str:
 async def _run_muse_turn(
     ollama, session: dict[str, Any], muse_id: str, user_prompt: str,
     *, cfg: dict[str, Any], images: list[bytes] | None = None,
-) -> chain.MuseTurn:
+) -> tuple[chain.MuseTurn, int]:
     inputs = _inputs(session)
     sid = session["session_id"]
     events.publish(sid, {
         "type": "muse_speaking", "muse_id": muse_id,
         "name": _muse_display_name(session, muse_id),
     })
-    return await chain.run_muse(
+    started = time.monotonic()
+    turn = await chain.run_muse(
         ollama, muse_id=muse_id, user_prompt=user_prompt,
         model=_vision_model(inputs) if images else _text_model(inputs),
         num_ctx=_num_ctx(inputs, cfg),
@@ -362,6 +363,7 @@ async def _run_muse_turn(
         seed=str(session.get("session_id") or ""),
         on_token=_token_publisher(sid, muse_id),
     )
+    return turn, int((time.monotonic() - started) * 1000)
 
 
 def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
@@ -385,35 +387,42 @@ def _muse_display_name(session: dict[str, Any], muse_id: str) -> str:
 
 def record_ledger(
     session: dict[str, Any], *, muse_id: str, name: str,
-    before: str, after: str,
+    before: str, after: str, ms: int = 0,
 ) -> dict[str, Any] | None:
-    """Note which tags one seat put in and which it took out.
+    """Note which tags one seat put in, which it took out, and what it cost.
 
     The session only ever kept the final craft, so a frame carrying tags nobody
     asked for had no way to name the seat that asked. A run that ended in
     `(neck_tension:1.4)`, a school blazer and an extreme close-up could be read
     off the chat only by guessing which speaker meant which tag.
+
+    `ms` is what the turn took. Paired with how much of a seat's work is still
+    in the finished prompt, it is the only honest way to decide which jobs are
+    worth their wall clock and which two could be one.
     """
     was = identity.tag_names(before)
     now = identity.tag_names(after)
     added = [t for t in now if t not in set(was)]
     dropped = [t for t in was if t not in set(now)]
-    if not added and not dropped:
+    if not added and not dropped and not ms:
         return None
     entry = {
         "muse_id": muse_id, "name": name,
-        "added": added, "dropped": dropped, "at": time.time(),
+        "added": added, "dropped": dropped,
+        "ms": int(ms), "at": time.time(),
     }
     session.setdefault("ledger", []).append(entry)
     return entry
 
 
-def _apply_turn(session: dict[str, Any], turn: chain.MuseTurn) -> dict[str, Any]:
+def _apply_turn(
+    session: dict[str, Any], turn: chain.MuseTurn, *, ms: int = 0,
+) -> dict[str, Any]:
     craft = session.setdefault("craft", {})
     record_ledger(
         session, muse_id=turn.muse_id,
         name=_muse_display_name(session, turn.muse_id),
-        before=str(craft.get("tags") or ""), after=turn.tags,
+        before=str(craft.get("tags") or ""), after=turn.tags, ms=ms,
     )
     craft["prompt"] = turn.prompt
     craft["tags"] = turn.tags
@@ -825,14 +834,14 @@ async def _craft_pass(
     last_say = ""
     for offset, muse_id in enumerate(seats):
         index = first_index + offset
-        turn = await _run_muse_turn(
+        turn, ms = await _run_muse_turn(
             ollama, session, muse_id,
             _table_user_prompt(
                 session, muse_id=muse_id, note=note, screening=screening,
             ),
             cfg=cfg, images=images,
         )
-        msg = _apply_turn(session, turn)
+        msg = _apply_turn(session, turn, ms=ms)
         last_say = str(msg.get("text") or "")
         if turn.blind and images:
             _note_blind(session)
@@ -1098,14 +1107,14 @@ async def post_chat(
     last_responder = ""
     last_say = ""
     for muse_id in responders:
-        turn = await _run_muse_turn(
+        turn, ms = await _run_muse_turn(
             ollama, session, muse_id,
             _table_user_prompt(
                 session, muse_id=muse_id, note=text, screening=screening,
             ),
             cfg=cfg, images=images,
         )
-        msg = _apply_turn(session, turn)
+        msg = _apply_turn(session, turn, ms=ms)
         if turn.blind and images:
             _note_blind(session)
             images = []
@@ -1240,14 +1249,14 @@ async def densify_craft_if_needed(
     _publish_chat(session["session_id"], note)
     images = await board_images(db, session)
     try:
-        turn = await _run_muse_turn(
+        turn, ms = await _run_muse_turn(
             ollama, session, "finisher",
             _densify_user_prompt(
                 session, screening=_screening_note(session) if images else "",
             ),
             cfg=cfg, images=images,
         )
-        _apply_turn(session, turn)
+        _apply_turn(session, turn, ms=ms)
         if turn.blind and images:
             _note_blind(session)
     except chain.ChainError:
