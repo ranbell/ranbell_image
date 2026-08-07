@@ -429,10 +429,10 @@ onUnmounted(() => {
           <article
             v-for="(c, i) in filtered"
             :key="c.id"
-            class="ch-card flex flex-col rounded-xl border overflow-hidden transition-all duration-200"
+            class="ch-card flex flex-col rounded-2xl border overflow-hidden transition-all duration-300 shadow-md"
             :class="c.id === selectedId
-              ? 'border-teal-400/80 ring-2 ring-teal-400/40'
-              : 'border-white/10 hover:border-white/30 hover:-translate-y-1'"
+              ? 'border-rose-400 bg-rose-950/20 ring-2 ring-rose-400/60 shadow-[0_8px_25px_rgba(244,114,182,0.3)]'
+              : 'border-pink-500/20 bg-slate-900/60 hover:border-pink-300/60 hover:shadow-[0_10px_25px_rgba(244,114,182,0.25)] hover:-translate-y-1.5'"
             :style="{ animationDelay: `${Math.min(i, 24) * 22}ms` }"
           >
             <button
@@ -440,75 +440,82 @@ onUnmounted(() => {
               class="group relative block w-full text-left"
               @click="dossierId = c.id"
             >
-              <span class="block aspect-[3/4] bg-black/50 overflow-hidden">
+              <span class="block aspect-[3/4] bg-black/50 overflow-hidden relative">
                 <img
                   v-if="anyImage(c)"
                   :src="cardImage(c)"
                   :alt="label(c)"
                   loading="lazy"
-                  class="w-full h-full object-cover transition-transform duration-500
-                         group-hover:scale-105"
+                  class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
 
                 <span v-else
-                      class="w-full h-full grid place-items-center text-[10px] text-gray-600 px-3 text-center">
+                      class="w-full h-full grid place-items-center text-[10px] text-gray-400 px-3 text-center">
                   {{ t('characters.noPortrait') }}
                 </span>
               </span>
-              <!-- her face, so you know who this is even when the sheet is busy -->
+
+              <!-- 🌸 Enlarged Face Portrait (w-16 h-16 = 64px) with cute double ring -->
               <img
                 v-if="face(c)"
                 :src="face(c)"
-                class="absolute top-2 left-2 w-11 h-11 rounded-full object-cover
-                       border-2 border-black/60 shadow-lg"
+                class="absolute top-2.5 left-2.5 w-16 h-16 rounded-full object-cover
+                       border-2 border-pink-100 ring-2 ring-pink-400/80 shadow-xl
+                       transition-transform duration-300 group-hover:scale-105"
                 alt=""
                 loading="lazy"
               />
+
+              <!-- Cute Chosen Badge -->
               <span
                 v-if="c.id === selectedId"
-                class="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[10px]
-                       bg-teal-500/90 text-black font-medium"
-              >{{ t('characters.chosen') }}</span>
+                class="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[10px] font-bold
+                       bg-gradient-to-r from-pink-500 to-rose-400 text-white shadow-md animate-pulse"
+              >💖 指名中</span>
             </button>
 
-            <div class="p-2.5 flex flex-col gap-1.5 grow">
+            <div class="p-3 flex flex-col gap-1.5 grow bg-slate-900/40">
               <div class="flex items-center gap-1.5">
-                <p class="text-[13px] text-gray-100 font-medium truncate mr-auto">
+                <p class="text-sm text-pink-50 font-bold truncate mr-auto tracking-wide">
                   {{ label(c) }}
-                  <span v-if="title(c)" class="block text-[10px] text-[var(--sb-amber)] font-normal truncate">
+                  <span v-if="title(c)" class="block text-[10px] text-pink-300/90 font-normal truncate">
                     {{ title(c) }}
                   </span>
                 </p>
-                <i class="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
+                <i class="w-3 h-3 rounded-full border border-pink-200/40 shrink-0 shadow-xs"
                    :style="{ background: hairSwatch(c.hair_color) }" :title="colorWord(c.hair_color)"></i>
-                <i class="w-2.5 h-2.5 rounded-full border border-white/25 shrink-0"
+                <i class="w-3 h-3 rounded-full border border-pink-200/40 shrink-0 shadow-xs"
                    :style="{ background: eyeSwatch(c.eye_color) }" :title="colorWord(c.eye_color)"></i>
               </div>
-              <!-- the whole line, not an ellipsis: it is the only thing that
-                   says what she is like before you open her -->
-              <p class="text-[11px] text-gray-400 leading-relaxed">{{ blurb(c) }}</p>
+
+              <p class="text-[11px] text-gray-300/90 leading-relaxed line-clamp-2">{{ blurb(c) }}</p>
+              
+              <!-- Cute Speech Bubble Charm Point -->
               <p v-if="charm(c)"
-                 class="text-[11px] text-teal-200/80 leading-relaxed pl-2 border-l border-teal-600/30">
-                {{ charm(c) }}
+                 class="text-[11px] text-pink-200 leading-relaxed p-2 rounded-xl bg-pink-950/40 border border-pink-500/30 relative">
+                💕 {{ charm(c) }}
               </p>
+
               <div class="flex flex-wrap gap-1 mt-auto pt-1">
                 <span
                   v-for="trait in (c.traits || []).slice(0, 3)"
                   :key="trait"
-                  class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10
-                         text-[9px] text-gray-400"
+                  class="px-2 py-0.5 rounded-full bg-pink-950/50 border border-pink-500/30
+                         text-[9px] text-pink-200"
                 >{{ trait }}</span>
               </div>
-              <div class="flex gap-1 pt-0.5">
-                <button type="button" class="sb-btn flex-1 justify-center !py-1 !text-[10px]"
+
+              <div class="flex gap-1.5 pt-1">
+                <button type="button" class="sb-btn flex-1 justify-center !py-1.5 !text-[11px] font-bold bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white border-0 shadow-md rounded-xl transition-all"
                         @click="emit('pick', c.id)">
-                  {{ t('characters.useCharacter') }}
+                  🌸 この子とペアを組む
                 </button>
-                <button type="button" class="sb-icon-btn !w-7 !h-7 !text-[11px]"
+                <button type="button" class="sb-icon-btn !w-8 !h-8 !text-xs border-pink-500/30 text-pink-300 hover:bg-pink-900/40 rounded-xl"
                         :title="t('characters.drawReference')" @click="draw(c.id)">✎</button>
               </div>
             </div>
           </article>
+
         </div>
       </div>
 

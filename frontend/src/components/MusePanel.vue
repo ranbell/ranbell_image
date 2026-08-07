@@ -390,24 +390,27 @@ async function onChatKey(e) {
 <template>
   <div
     v-if="show"
-    class="muse-root fixed inset-0 flex items-stretch justify-center bg-black/70 backdrop-blur-sm p-3"
+    class="muse-root fixed inset-0 flex items-stretch justify-center bg-slate-950/80 backdrop-blur-md p-3"
     @mousedown.self="close"
   >
-    <div class="sb-shell w-full max-w-[1500px] flex flex-col min-h-0">
-      <header class="flex items-center justify-between gap-3 px-4 py-3 sb-hairline shrink-0">
+    <div class="sb-shell w-full max-w-[1500px] flex flex-col min-h-0 bg-slate-900/90 border-2 border-pink-500/30 rounded-3xl shadow-2xl overflow-hidden">
+      <header class="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-pink-500/20 shrink-0 bg-pink-950/20">
         <div class="min-w-0">
-          <h2 class="sb-display text-base text-[var(--sb-amber)]">{{ t('muse.title') }}</h2>
-          <p class="text-[11px] text-[var(--sb-muted)] truncate">{{ t('muse.subtitle') }}</p>
+          <h2 class="sb-display text-base text-pink-300 font-bold tracking-wide flex items-center gap-1.5">
+            <span>🎬</span> {{ t('muse.title') }}
+          </h2>
+          <p class="text-[11px] text-pink-400/80 truncate">{{ t('muse.subtitle') }}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <span class="text-[10px] text-[var(--sb-faint)]">SSE {{ streamLive ? '●' : '○' }}</span>
+          <span class="text-[10px] text-pink-400/70 font-mono">SSE {{ streamLive ? '●' : '○' }}</span>
           <button v-if="!isDuet" class="sb-btn" :disabled="busy"
                   @click="showCast = !showCast">{{ t('muse.cast') }}</button>
           <button class="sb-btn" :disabled="busy" @click="showSettings = !showSettings">{{ t('muse.settings') }}</button>
           <button class="sb-btn" :disabled="busy" @click="resetSession">{{ t('muse.reset') }}</button>
-          <button class="sb-icon-btn" :title="t('muse.close')" @click="close">✕</button>
+          <button class="sb-icon-btn hover:bg-pink-950/60 rounded-full" :title="t('muse.close')" @click="close">✕</button>
         </div>
       </header>
+
 
       <p v-for="w in warnings" :key="w" class="px-4 py-1 text-[11px] text-amber-400 shrink-0">{{ w }}</p>
       <p v-if="comfyOffline" class="px-4 py-1 text-[11px] text-red-400 shrink-0">{{ t('muse.warn.comfyOffline') }}</p>
@@ -515,44 +518,45 @@ async function onChatKey(e) {
             <div ref="chatEl" class="flex-1 overflow-y-auto p-3 space-y-2">
               <div
                 v-for="m in chat" :key="m.id"
-                class="flex flex-col gap-0.5"
+                class="flex flex-col gap-1 my-1"
                 :class="[
                   m.role === 'user' ? 'items-end' : 'items-start',
-                  m.kind === 'banter' ? 'pl-4 opacity-90' : '',
+                  m.kind === 'banter' ? 'pl-4' : '',
                 ]"
               >
-                <span class="flex items-center gap-1 text-[10px] text-[var(--sb-faint)]">
+                <span class="flex items-center gap-1.5 text-[10px] text-pink-300/80 font-medium">
                   <img
                     v-if="isLead(m) && leadFace"
                     :src="leadFace" alt=""
-                    class="rounded-full object-cover shrink-0 ring-1 ring-amber-700/40"
-                    :class="isDuet ? 'w-8 h-8' : 'w-5 h-5'"
+                    class="rounded-full object-cover shrink-0 ring-2 ring-pink-400/80 shadow-md border border-pink-100 transition-transform hover:scale-110"
+                    :class="isDuet ? 'w-9 h-9' : 'w-6 h-6'"
                   />
-                  <template v-if="m.role === 'user'">{{ t('muse.showrunner') }}</template>
-                  <template v-else-if="m.kind === 'banter'">{{ m.name }} · {{ t('muse.banter') }}</template>
-                  <template v-else>{{ m.name || 'Studio' }}</template>
+                  <template v-if="m.role === 'user'">🎬 {{ t('muse.showrunner') }}</template>
+                  <template v-else-if="m.kind === 'banter'">💭💕 {{ m.name }} · 内緒のつぶやき</template>
+                  <template v-else>🌸 {{ m.name || 'Studio' }}</template>
                 </span>
                 <div
-                  class="max-w-[90%] whitespace-pre-wrap"
+                  class="max-w-[88%] whitespace-pre-wrap leading-relaxed shadow-sm transition-all"
                   :class="m.role === 'user'
-                    ? 'rounded-lg px-3 py-2 text-[12px] bg-[var(--sb-teal)]/20 border border-teal-700/40 text-gray-100'
+                    ? 'rounded-2xl rounded-tr-xs px-3.5 py-2 text-[12px] bg-emerald-950/50 border border-emerald-500/40 text-emerald-100 shadow-md'
                     : m.role === 'system'
-                      ? 'rounded-lg px-3 py-2 text-[12px] bg-white/5 border border-white/10 text-gray-400'
+                      ? 'rounded-xl px-3 py-2 text-[11px] bg-slate-900/60 border border-slate-700/40 text-gray-400'
                       : m.kind === 'banter'
-                        ? 'rounded px-2.5 py-1.5 text-[11px] bg-amber-950/20 border border-amber-800/30 text-amber-100/90 italic'
-                        : 'rounded-lg px-3 py-2 text-[12px] bg-black/40 border border-white/10 text-gray-200'"
+                        ? 'rounded-2xl px-3.5 py-2 text-[11px] bg-gradient-to-r from-pink-950/70 to-rose-950/70 border border-pink-400/50 text-pink-200 shadow-lg italic'
+                        : 'rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/80 border border-pink-500/30 text-pink-50 shadow-md'"
                 >{{ m.text }}</div>
               </div>
 
-              <div v-if="speaking && liveSay" class="flex flex-col items-start gap-0.5">
-                <span class="text-[10px] text-[var(--sb-amber)] animate-pulse">
-                  {{ museLabel(museById(speaking)) || speaking }} …
+              <div v-if="speaking && liveSay" class="flex flex-col items-start gap-1 my-1">
+                <span class="text-[10px] text-pink-300 font-bold animate-pulse flex items-center gap-1">
+                  <span>💖</span> {{ museLabel(museById(speaking)) || speaking }} 考え中...
                 </span>
-                <div class="max-w-[90%] rounded-lg px-3 py-2 text-[12px] whitespace-pre-wrap
-                            bg-black/40 border border-amber-700/30 text-gray-300">
-                  {{ liveSay }}<span class="animate-pulse">▍</span>
+                <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
+                            bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md">
+                  {{ liveSay }}<span class="animate-pulse text-pink-400 font-bold">▍</span>
                 </div>
               </div>
+
             </div>
 
             <div class="shrink-0 border-t border-white/10 p-3 space-y-2">
