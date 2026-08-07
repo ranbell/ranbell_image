@@ -958,3 +958,50 @@ async def test_the_full_table_only_ever_meets_once():
 
     # The second note goes to the short responder desk, not another full read.
     assert second - first <= 6, (first, second)
+
+
+@pytest.mark.asyncio
+async def test_a_planner_that_omits_the_ledger_does_not_empty_the_room():
+    """Observed on a real run. The planner answered PLACE / HOUR / LIGHT /
+    ACTION and no MUST APPEAR, which is a line it did not retype — not a room
+    that has been emptied. Read as an empty ledger it struck all twelve props
+    from a karaoke booth, including the wireless microphone the Showrunner had
+    asked for by name in the very note that triggered the re-plan."""
+    db = FakeDb()
+
+    class TerseplanOllama(FakeOllama):
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append(kw)
+
+            async def _stream():
+                yield {"type": "token", "text": (
+                    "SAY: 場所は変えずに中身を整理します。\n"
+                    "PLACE: A private karaoke booth, leaning over a low table.\n"
+                    "HOUR: 2:00 AM, mid-winter.\n"
+                    "LIGHT: Dim; blue glow from the monitor.\n"
+                    "ACTION: Singing into a wireless microphone.\n"
+                )}
+            return _stream()
+
+    ollama = TerseplanOllama()
+    session = await _ready_session(db, banter_mode="off")
+    session["plan"] = {
+        "place": "A private karaoke booth.",
+        "must_appear": ["wireless_microphone", "karaoke_monitor", "tambourine"],
+    }
+    session["craft"] = {
+        "prompt": "1girl, singing", "scene": "She sings.",
+        "tags": "singing, wireless_microphone, karaoke_monitor, tambourine",
+        "pose_intent": "",
+    }
+    await session_db.save(db, session)
+
+    await service._run_plan_turn(
+        db, ollama, session, cfg={}, note="マイクはワイヤレスのハンドマイクだよ",
+    )
+
+    assert session["plan"]["must_appear"] == [
+        "wireless_microphone", "karaoke_monitor", "tambourine",
+    ]
+    assert not session.get("struck")
+    assert "wireless_microphone" in session["craft"]["tags"]

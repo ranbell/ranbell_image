@@ -696,6 +696,13 @@ async def _run_plan_turn(
     blind = bool(plan.pop("blind", False))
     say = str(plan.pop("say", "") or "")
     previous_plan = session.get("plan") or {}
+    # A planner answering PLACE / HOUR / LIGHT / ACTION and no ledger is a line
+    # it did not retype, not a room that has been emptied. Read as an empty
+    # ledger it struck all twelve props from a karaoke booth — including the
+    # wireless microphone the Showrunner had just asked for by name — and left
+    # every later seat with nothing to be audited against.
+    if not plan.get("must_appear") and previous_plan.get("must_appear"):
+        plan["must_appear"] = list(previous_plan["must_appear"])
     session["plan"] = plan
     session.pop("struck", None)
     struck = strike_dropped_props(session, previous_plan)

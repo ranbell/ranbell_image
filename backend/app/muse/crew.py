@@ -157,6 +157,9 @@ MUST APPEAR: <English. Ten or more comma-separated objects for this place and
              background — only what the place and the theme imply.>
 
 Exactly these five labels, one line each, in this order. No other blocks.
+MUST APPEAR is never left out. When nothing about the room changed, write the
+same list again — it is the ledger every later seat is checked against, and a
+turn without it leaves them checked against nothing.
 Do NOT output TAGS: or SCENE: — that is not your seat.
 """.strip()
 

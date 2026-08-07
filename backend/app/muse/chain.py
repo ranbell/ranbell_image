@@ -192,7 +192,9 @@ def parse_plan(raw: str) -> dict[str, Any]:
         if not key or not value or key in out:
             continue
         if key in _LIST_FIELDS:
-            items = [v.strip().strip("*_") for v in value.split(",")]
+            # The sentence-ending period on the last item rides into the tag
+            # otherwise, and `dim_ceiling_spotlight.` matches nothing.
+            items = [v.strip().strip("*_").rstrip(".、,") for v in value.split(",")]
             out[key] = [v for v in items if v]
         else:
             out[key] = value
