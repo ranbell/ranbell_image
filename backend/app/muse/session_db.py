@@ -38,23 +38,39 @@ async def load(db, session_id: str) -> dict[str, Any] | None:
     return dict(points[0].payload or {}) if points else None
 
 
+# Qdrant's scroll has no ordering, so "recent" means read everything and then
+# sort. Asking it for `limit` points and sorting those returned an arbitrary
+# handful — a report over "the last five sessions" was five sessions picked at
+# random, which is worse than useless when the whole point is a trend.
+_SCROLL_PAGE = 256
+_LIST_FIELDS = ["session_id", "status", "inputs", "created_at"]
+
+
 async def list_recent(db, *, limit: int = 20) -> list[dict[str, Any]]:
-    points, _ = await db._qc.scroll(
-        collection_name=MUSE_SESSIONS_COLLECTION,
-        limit=limit,
-        with_payload=True,
-    )
-    rows = [
-        {
-            "session_id": (p.payload or {}).get("session_id", str(p.id)),
-            "status": (p.payload or {}).get("status", ""),
-            "theme": ((p.payload or {}).get("inputs") or {}).get("theme", ""),
-            "created_at": (p.payload or {}).get("created_at", 0.0),
-        }
-        for p in points
-    ]
+    rows: list[dict[str, Any]] = []
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_SESSIONS_COLLECTION,
+            limit=_SCROLL_PAGE,
+            offset=offset,
+            # Payload subset: the chat log is the bulk of a session and no
+            # caller of this list has ever wanted it.
+            with_payload=_LIST_FIELDS,
+        )
+        rows.extend(
+            {
+                "session_id": (p.payload or {}).get("session_id", str(p.id)),
+                "status": (p.payload or {}).get("status", ""),
+                "theme": ((p.payload or {}).get("inputs") or {}).get("theme", ""),
+                "created_at": (p.payload or {}).get("created_at", 0.0),
+            }
+            for p in points
+        )
+        if offset is None or not points:
+            break
     rows.sort(key=lambda r: r.get("created_at") or 0.0, reverse=True)
-    return rows
+    return rows[:max(1, int(limit))]
 
 
 async def delete(db, session_id: str) -> None:

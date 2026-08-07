@@ -13,6 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
+import pytest
+
 from app.muse import report
 
 
@@ -161,3 +163,46 @@ def test_a_seat_that_never_keeps_anything_is_named_outright():
         "masterpiece",
     )
     assert report.aggregate([session, session])["keeping_least"] == ["照明"]
+
+
+# ── the list the report reads ───────────────────────────────────────────────
+class _ScrollDb:
+    """Qdrant's scroll has no ordering and pages via an offset cursor."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self._qc = self
+        self.pages = 0
+
+    async def scroll(self, collection_name, limit, offset=None, with_payload=True):
+        class _P:
+            def __init__(self, payload):
+                self.payload = payload
+                self.id = payload["session_id"]
+        start = int(offset or 0)
+        page = self.rows[start:start + limit]
+        self.pages += 1
+        nxt = start + limit if start + limit < len(self.rows) else None
+        return [_P(r) for r in page], nxt
+
+
+@pytest.mark.asyncio
+async def test_recent_sessions_are_the_newest_not_an_arbitrary_handful():
+    """Scroll returns points in no particular order, so asking it for `limit`
+    and sorting those gave five sessions picked at random. A report over "the
+    last five sessions" built on that is worse than useless."""
+    from app.muse import session_db
+
+    rows = [
+        {"session_id": f"s{i}", "status": "done", "created_at": float(i),
+         "inputs": {"theme": f"t{i}"}}
+        for i in range(600)
+    ]
+    # Shuffled the way an unordered scan would hand them back.
+    rows = rows[300:] + rows[:300]
+    db = _ScrollDb(rows)
+
+    out = await session_db.list_recent(db, limit=5)
+
+    assert [r["session_id"] for r in out] == ["s599", "s598", "s597", "s596", "s595"]
+    assert db.pages > 1, "must page through the whole collection, not one window"
