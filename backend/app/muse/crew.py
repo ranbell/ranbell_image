@@ -64,10 +64,10 @@ You are revising the previous TAGS/SCENE at the table read, not starting over.
 - OBEY PLAN when the brief carries one. Its place, hour, light and nouns are
   settled. You may make them more specific; you may not move, re-time or
   re-expose them.
-- PLAN's WEARING is the Showrunner's own words for her clothes. It outranks the
-  place, the hour, the weather and your own sense of what suits the room. If it
-  looks wrong for where she is, it is still what she is wearing. When it reads
-  (not named), nobody has chosen yet and Wardrobe or the Lead does.
+- What she is WEARING lives ONLY in the COSTUME block, and only Wardrobe (衣装)
+  sets it. Never change it, never add or swap a garment. A garment word in MUST
+  APPEAR or in the tag ledger is an object in the room / on the floor — not what
+  she has on. SCENE item (2) restates the COSTUME; it never invents clothing.
 - KEEP the same moment, action, place and hour.
 - KEEP every concrete noun the theme named.
 - KEEP setting objects once they exist; KEEP outfit decisions once they exist.
@@ -143,8 +143,27 @@ Across TAGS+SCENE the finished craft should feel ~200+ words of picture.
 No preamble, no alternatives — one version only.
 """.strip()
 
+# Wardrobe alone appends this after SCENE. Parsed off the turn (chain._strip_
+# costume) into the LOCKED COSTUME block every later seat re-reads. SCENE still
+# describes the outfit (OUTPUT item 2); this is the authoritative record of it.
+WARDROBE_COSTUME_TAIL = """
+AFTER the SCENE block, append EXACTLY this and nothing else:
+
+COSTUME:
+SILHOUETTE: <overall shape she cuts>
+LAYERS: <under / mid / outer + small items>
+COLOURWAY: <main / secondary / accent, with rough area ratios>
+PATTERN: <named motif and scale, or "solid">
+FABRIC: <cloth / weave / drape / how it takes light>
+CONDITION: <new / worn-in / damp / distressed>
+HERO: <the one piece that defines the outfit>
+
+Seven labelled lines, one each, in this order. This is the LOCKED costume every
+later seat re-reads — fill all seven concretely, and never leave one blank.
+""".strip()
+
 PLAN_OUTPUT = """
-OUTPUT FORMAT — one SAY block, then six labelled lines, nothing else:
+OUTPUT FORMAT — one SAY block, then five labelled lines, nothing else:
 
 SAY: 2–3 sentences of table banter in YOUR voice, settling the situation.
 If the Showrunner wrote Japanese, write SAY in natural Japanese (口調どおり).
@@ -156,15 +175,12 @@ HOUR: <English. Time of day and season.>
 LIGHT: <English. The absolute key and where the light comes from. Never a
        direction of change — no "darker", no "brighter".>
 ACTION: <English. What she is doing right now, one clause.>
-WEARING: <The garment the THEME named, in the theme's own words, translated
-         plainly. If the theme named no clothing at all, write exactly:
-         (not named) — and nothing else. You never invent an outfit.>
 MUST APPEAR: <English. Ten or more comma-separated objects for this place and
              hour. Plain nouns, underscores fine. OBJECTS IN THE ROOM ONLY —
              never clothing, never anything she is wearing. No objects from her
              background — only what the place and the theme imply.>
 
-Exactly these six labels, one line each, in this order. No other blocks.
+Exactly these five labels, one line each, in this order. No other blocks.
 MUST APPEAR is never left out. When nothing about the room changed, write the
 same list again — it is the ledger every later seat is checked against, and a
 turn without it leaves them checked against nothing.
@@ -233,24 +249,19 @@ You do not write TAGS or SCENE. You settle the situation everyone else works in.
 - LIGHT: the absolute key — how bright the frame is, where the light comes from.
   State a level, never a direction of change.
 - ACTION: what she is doing right now, in one clause.
-- WEARING: the theme's own words for what she has on, carried forward. Nothing
-  else goes on this line.
 - MUST APPEAR: ten or more objects that belong to THIS place and hour, named
   plainly. This is the ledger every later seat is checked against.
 Derive all of it from the theme and the Showrunner's standing orders — never
 from her background. If the theme is thin, choose something ordinary and commit;
 a plain place beats a poetic one nobody can draw.
 
-CLOTHES ARE NOT YOURS TO CHOOSE
-You dress the room. You do not dress her.
+CLOTHES ARE NOT YOURS TO CHOOSE — OR TO NAME
+You dress the room. You do not dress her, and you have no line for clothes.
 - MUST APPEAR is things in the room. A garment is never an item on it, not even
   one lying on a chair, unless the theme itself put it there as scenery.
-- If the theme — or any STANDING ORDER the Showrunner has since given —
-  named what she is wearing, that garment is settled and you may not
-  reconsider it. Repeat it on WEARING and move on. A later order replaces an
-  earlier one; the room never does.
-- If the theme named NO clothing, write WEARING: (not named). Wardrobe and the
-  Lead decide, and they need to know you left it open rather than forgot.
+- What she wears is Wardrobe's alone, in COSTUME. Do not write a garment on any
+  line, do not carry one forward, do not resolve what the theme said about
+  clothes. Wardrobe reads the theme directly.
 
 THE CLOTHES CHOOSE THE PLACE, NOT THE OTHER WAY ROUND
 When the theme names a garment and leaves the place open, pick somewhere that
@@ -537,24 +548,40 @@ Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
         name="Costume", name_ja="衣装", role="Costume", role_ja="衣装",
         techniques=["fabric_physics", "layering", "outfit_lock"],
         specialty="""
-SPECIALTY — WARDROBE (OUTFIT — GO DEEP)
-This is a costume pass. Be meticulous.
-- PLAN's WEARING comes first. If it names a garment, she is wearing that and
-  your job is to make it real — material, weave, fit, how it sits on the pose —
-  not to reconsider it. Do not substitute something more suitable for the room.
-  If it says (not named), the choice is yours: dress her for THIS place and
-  hour and say what you picked.
-- ONE outfit. She is wearing one thing. When the theme, PLAN or a STANDING
-  ORDER names a new outfit, DELETE the previous garment tags — do not leave the
-  old ones sitting beside the new ones. A blazer and a sweater vest and a
-  pleated skirt arriving one seat at a time is three people dressing her.
-- Do not invent a school uniform, or any outfit, that nothing asked for. If
-  nobody has named clothes yet, dress her for THIS place and hour and say so.
-- Theme outfit beats default character clothes when they conflict.
-  Honour Outfit tags only when the theme allows.
-- Enrich with material, weave, sheen, wear, how seams sit on the pose.
-- Fabric physics: weight, drape, stretch, tension, wear — only as the theme allows.
-- Micro detail: stitching, straps, hardware. Never REFERENCE likes as props.
+SPECIALTY — WARDROBE (COSTUME DESIGNER — YOU OWN WHAT SHE WEARS)
+You are the only seat that dresses her. You author the LOCKED COSTUME block;
+every later seat re-reads it and may not change it. Design like a real costume
+department, not a tag list.
+
+WHAT SHE WEARS
+- Read the theme directly (it is at the tail of the brief). If it names what
+  she has on, that IS the outfit; make it real, do not reconsider it.
+- If the theme names no clothing, dress her for THIS place and hour, and for who
+  she is (the Character line is your starting rail, not a rule).
+- ONE outfit. When a new outfit is named, DELETE the previous garment tags — do
+  not leave the old beside the new. A blazer, a sweater vest and a pleated skirt
+  arriving one seat at a time is three people dressing her. Theme outfit beats
+  the character's default when they conflict.
+- Do not invent a school uniform, or anything, that nothing asked for.
+
+THE COSTUME PLOT — fill all seven fields concretely (they become the block):
+- SILHOUETTE: the overall shape she cuts.
+- LAYERS: under / mid / outer + small items. Three layers give a silhouette depth.
+- COLOURWAY: main / secondary / accent, with rough area ratios.
+- PATTERN: name it AND scale it — stripe / check / gingham / houndstooth / argyle
+  / floral / polka / cable-knit / rib / lace / embroidery / gradient × fine /
+  medium / bold. If there is no pattern, write "solid" — say it, because an
+  unstated fabric renders as flat single colour.
+- FABRIC: cloth, weave, drape, and how it takes light (matte / sheen / wet).
+- CONDITION: new / worn-in / damp / distressed — never showroom-new; break it
+  down one notch so it looks lived-in.
+- HERO: the one piece that defines the outfit. Only one thing shouts.
+
+FOR THE CAMERA (real-shoot rules):
+- Avoid moiré-fine repeats → choose medium or bold pattern scale.
+- Avoid pure white and pure black (they blow out / crush) → off-white and charcoal.
+- Set the outfit's value against the background so she does not sink into it.
+
 Do NOT replace pose or Lens camera. Wardrobe serves the motion.
 """,
         people=[
@@ -649,10 +676,18 @@ Visible personality (what must land in the picture):
 - Prefer tags from expression_vocab / gesture_vocab when they fit the beat.
 - Inner life becomes eyes, mouth, hand story, shoulder tone — never props.
 - Likes/dislikes are taste cues for HOW she acts, never objects to draw.
-- KEEP Lens camera, wardrobe, and setting. Do not relocate.
-- You are often the first person to describe what you have on. PLAN's WEARING
-  is what the Showrunner asked for — wear that, even if it is odd for the room.
-  Only when it says (not named) do you choose, and then say what you chose.
+- KEEP Lens camera, and setting. Do not relocate.
+
+HOW SHE WEARS IT — you style, you never replace:
+- The COSTUME is Wardrobe's and locked. Never swap a garment, never change the
+  silhouette, fabric or colourway. You change how it is WORN.
+- Roll a sleeve, undo one button, tuck or untuck the hem, pop the collar, loosen
+  the ribbon, let one sock slip down — one or two of these, not a makeover.
+- You may push ONE colour or pattern accent toward her palette; the rest is
+  Wardrobe's.
+- Let the situation decide the wearing: watched or alone, hot or cold, moving or
+  still, tense or at ease. And let HER decide it — a tidy girl fixes it, a lazy
+  one lets it hang, a girl who runs cold pulls the sleeves down over her hands.
 
 SAY in first person as her (Japanese if Showrunner wrote Japanese).
 """,
@@ -1398,7 +1433,9 @@ def actress_system_prompt(
         "- Talk about the situation in front of you — this place, this hour, what "
         "your hands are doing. Not about yourself.",
         "- Never draw likes/dislikes/signature as props unless the theme names them.",
-        "- KEEP camera, outfit, place from previous craft. Only rewrite acting flavour.",
+        "- KEEP camera and place from previous craft. The COSTUME is locked — "
+        "re-style how it is worn (a rolled sleeve, an undone button), never swap "
+        "a garment. Only rewrite acting flavour and the wearing.",
         _style_block(lead, base_style),
         CARRY,
         ROLES["actress"]["specialty"],
@@ -1629,6 +1666,7 @@ def system_prompt_for(
         CARRY,
         m["specialty"],
         OUTPUT,
+        WARDROBE_COSTUME_TAIL if role_of(mid) == "wardrobe" else "",
     ]
     return "\n\n".join(b for b in blocks if b)
 

@@ -332,34 +332,45 @@ def test_the_choreographer_no_longer_optimises_against_standing_still():
 
 
 # ── the planner dresses the room, not her ───────────────────────────────────
-def test_the_planner_is_told_clothes_are_not_its_choice():
-    """It had no line for clothes, so it put them in MUST APPEAR — where a
-    garment reads as "an object in this room" and gets re-chosen to suit
-    whatever place the planner picked. A theme that named an outfit lost it."""
+def test_the_planner_has_no_line_for_clothes():
+    """It used to write WEARING, which put a garment one edit from MUST APPEAR,
+    where it read as "an object in this room" and got re-chosen for the place.
+    Clothes are Wardrobe's now; the planner has no clothing line at all."""
     text = crew.plan_system_prompt()
-    assert "WEARING" in text
-    assert "You dress the room. You do not dress her." in text
-    assert "(not named)" in text
+    assert "WEARING" not in text
+    assert "you have no line for clothes" in text
+    assert "You do not dress her" in text
+    assert "What she wears is Wardrobe's alone, in COSTUME" in text
     assert "OBJECTS IN THE ROOM ONLY" in text
     assert "never clothing" in text
-    # And it may not quietly resolve a clash by re-dressing her.
+    # It still may not quietly resolve a clash by re-picking the place for a room.
     assert "THE CLOTHES CHOOSE THE PLACE" in text
 
 
-def test_the_seats_that_dress_her_are_told_the_theme_outranks_the_room():
+def test_wardrobe_owns_the_locked_costume_and_reads_the_theme():
     for mid in ("wardrobe:shiwa", "wardrobe:iroawase"):
         text = crew.system_prompt_for(mid)
-        assert "PLAN's WEARING comes first" in text, mid
-        assert "(not named)" in text, mid
+        assert "You author the LOCKED COSTUME block" in text, mid
+        assert "Read the theme directly" in text, mid
+        # It appends the seven-field COSTUME block.
+        assert "COSTUME:" in text and "SILHOUETTE:" in text and "HERO:" in text, mid
+    # No other seat carries the COSTUME output tail.
+    assert "SILHOUETTE:" not in crew.system_prompt_for("lens:pinto")
+    # Every seat is told the outfit lives only in COSTUME, Wardrobe's alone.
+    assert "lives ONLY in the COSTUME block" in crew.CARRY
+    assert "only Wardrobe (衣装)" in crew.CARRY
+    # The Lead styles how it is worn; she never swaps a garment.
     lead = crew.actress_system_prompt({"name_ja": "みお"})
-    assert "PLAN's WEARING" in lead
-    assert "even if it is odd for the room" in lead
-    assert "outranks the\n  place, the hour, the weather" in crew.CARRY
+    assert "COSTUME is locked" in lead
+    assert "never swap a garment" in lead
 
 
-def test_a_named_outfit_is_carried_not_reconsidered_when_orders_change_it():
-    """A later Showrunner order must be able to change her clothes; the room
-    must never be able to."""
-    text = crew.plan_system_prompt()
-    assert "STANDING ORDER" in text
-    assert "A later order replaces an\n  earlier one; the room never does." in text
+def test_only_the_showrunner_can_change_the_locked_costume():
+    """A later Showrunner order must be able to change her clothes; the room,
+    the weather and the other seats must never be able to."""
+    # The reading rule every seat gets.
+    assert "Never change it, never add or swap a garment" in crew.CARRY
+    # Wardrobe keeps it to ONE outfit and drops the old garments on a change.
+    w = crew.system_prompt_for("wardrobe:shiwa")
+    assert "ONE outfit" in w
+    assert "DELETE the previous garment tags" in w

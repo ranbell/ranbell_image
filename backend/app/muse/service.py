@@ -215,16 +215,21 @@ def _rebuild_brief(session: dict[str, Any]) -> None:
         style=_style(session),
         framing=_framing(inputs),
         plan=session.get("plan") or {},
+        costume=session.get("costume") or {},
         notes=list(session.get("notes") or []),
     )
+    # COSTUME is locked craft, not inner life — both the full and digest briefs
+    # carry it so every seat (acting or not) re-reads the same outfit.
     session["brief"] = brief_mod.build(
         character, common["theme"], common["style"],
-        framing=common["framing"], plan=common["plan"], notes=common["notes"],
+        framing=common["framing"], plan=common["plan"],
+        costume=common["costume"], notes=common["notes"],
         reference="full",
     )
     session["brief_lite"] = brief_mod.build(
         character, common["theme"], common["style"],
-        framing=common["framing"], plan=common["plan"], notes=common["notes"],
+        framing=common["framing"], plan=common["plan"],
+        costume=common["costume"], notes=common["notes"],
         reference="digest",
     )
 
@@ -424,7 +429,7 @@ def _apply_turn(
     session: dict[str, Any], turn: chain.MuseTurn, *, ms: int = 0,
 ) -> dict[str, Any]:
     craft = session.setdefault("craft", {})
-    record_ledger(
+    entry = record_ledger(
         session, muse_id=turn.muse_id,
         name=_muse_display_name(session, turn.muse_id),
         before=str(craft.get("tags") or ""), after=turn.tags, ms=ms,
@@ -432,6 +437,20 @@ def _apply_turn(
     craft["prompt"] = turn.prompt
     craft["tags"] = turn.tags
     craft["scene"] = turn.scene
+    # Wardrobe alone owns the locked COSTUME. Capture it, record its concrete tag
+    # set (what this turn added, plus any of the previous outfit it re-listed),
+    # strike the old outfit, and re-inject COSTUME so the NEXT seat re-reads it.
+    if turn.costume is not None and crew.role_of(turn.muse_id) == "wardrobe":
+        prev = session.get("costume") or {}
+        added = set((entry or {}).get("added", []))
+        now_tags = set(identity.tag_names(turn.tags))
+        kept = [t for t in prev.get("tags", []) if t in now_tags]
+        costume = dict(turn.costume)
+        costume["tags"] = sorted(added | set(kept))
+        session["costume"] = costume
+        strike_dropped_costume(session, prev)
+        _rebuild_brief(session)
+        craft = session.setdefault("craft", {})
     # Seats can be swapped mid-session. One brought in after the read-through
     # has never seen the script, and answering a note is not a substitute for
     # a first pass over it.
@@ -676,6 +695,52 @@ def strike_dropped_props(
     return struck
 
 
+def strike_dropped_costume(
+    session: dict[str, Any], previous_costume: dict[str, Any] | None,
+) -> list[str]:
+    """Take the old outfit's tags out of the craft when Wardrobe rebuilds COSTUME.
+
+    The §2-5 release valve: when the Showrunner says "change the clothes",
+    Wardrobe writes a new COSTUME and last outfit's garments must not ride
+    alongside the new ones. Mirrors ``strike_dropped_props`` — only the PREVIOUS
+    costume's own tag set is struck (a known set, no dictionary), and
+    ``_still_meant`` protects a rename (skirt → pleated_skirt).
+    """
+    was = [
+        identity.bare_tag(t)
+        for t in (previous_costume or {}).get("tags", [])
+        if identity.bare_tag(t)
+    ]
+    now = (session.get("costume") or {}).get("tags", [])
+    if not was:
+        return []
+    struck = [t for t in was if t not in now and not _still_meant(t, now)]
+    if not struck:
+        return []
+
+    craft = session.setdefault("craft", {})
+    gone = set(struck)
+    kept = [
+        p.strip() for p in str(craft.get("tags") or "").split(",")
+        if p.strip() and identity.bare_tag(p) not in gone
+    ]
+    before = str(craft.get("tags") or "")
+    craft["tags"] = ", ".join(kept)
+    craft["prompt"] = identity.assemble_positive(
+        _identity_tags(session), craft["tags"], str(craft.get("scene") or ""),
+        framing=_framing(_inputs(session)), style=_style(session),
+        subject=identity.subject_tags(_cast(session)),
+    )
+    prior = list(session.get("struck") or [])
+    session["struck"] = prior + [t for t in struck if t not in prior]
+    record_ledger(
+        session, muse_id=_cast_in_role(_crew_ids(session), "wardrobe") or "wardrobe",
+        name=_muse_display_name(session, "wardrobe"),
+        before=before, after=craft["tags"],
+    )
+    return struck
+
+
 async def _run_plan_turn(
     db, ollama, session: dict[str, Any], *, cfg: dict[str, Any], note: str = "",
 ) -> bool:
@@ -723,10 +788,9 @@ async def _run_plan_turn(
     # every later seat with nothing to be audited against.
     if not plan.get("must_appear") and previous_plan.get("must_appear"):
         plan["must_appear"] = list(previous_plan["must_appear"])
-    # Same for the outfit: a line the planner did not retype is not the
-    # Showrunner taking her clothes back.
-    if not plan.get("wearing") and previous_plan.get("wearing"):
-        plan["wearing"] = previous_plan["wearing"]
+    # The planner no longer has a clothing line; what she wears lives in COSTUME,
+    # owned by Wardrobe. A stray `wearing` from an old session is dropped.
+    plan.pop("wearing", None)
     session["plan"] = plan
     session.pop("struck", None)
     struck = strike_dropped_props(session, previous_plan)
@@ -828,15 +892,27 @@ def _pick_extra_heckler(
 
 
 # ── open the table ──────────────────────────────────────────────────────────
-# The three seats that meet before anything is drawn: someone to settle where
-# and when, her, and a camera. Everyone else waits for a frame to argue with.
+# The seats that meet before anything is drawn: someone to settle where and
+# when, someone to dress her, her, and a camera. Everyone else waits for a frame
+# to argue with.
 #
 # The table used to open with all eighteen and no picture anywhere, and the
 # result was a run where「カラオケボックスで歌っている」became a live house: twenty
 # turns of prose agreeing with each other, and the Showrunner then spent the
 # session deleting props that had accumulated in the dark. A real studio shoots
 # a still first and talks about the still.
-OPENING_ROLES: tuple[str, ...] = ("actress", "lens")
+#
+# Wardrobe joined this set because the outfit had no owner in the opening: the
+# camera, writing first into an empty craft, authored the clothes, and a garment
+# the theme named ended up layered under the character's default clothes. It runs
+# FIRST now (dress her, then frame her) — see OPENING_SEQUENCE. Being here takes
+# it OUT of act two (`without=OPENING_ROLES`), which is fine: the COSTUME it
+# sets is locked, so act two re-reads it rather than re-deriving it.
+OPENING_ROLES: tuple[str, ...] = ("wardrobe", "actress", "lens")
+# Dressing order for the opening: Wardrobe dresses her, the camera frames the
+# dressed figure, she acts last. `_writing_seats(only=...)` returns cast order
+# (ROLE_ORDER: lens before wardrobe), so the opening sorts by this explicitly.
+OPENING_SEQUENCE: tuple[str, ...] = ("wardrobe", "lens", "actress")
 
 
 async def _craft_pass(
@@ -902,6 +978,18 @@ def _writing_seats(cast: list[str], *, only: tuple[str, ...] = (),
     return out
 
 
+def _opening_seats(cast: list[str]) -> list[str]:
+    """The opening writing seats in DRESSING order, not cast order.
+
+    Wardrobe dresses her before the camera frames her, so the outfit is owned
+    before anyone else writes. ROLE_ORDER puts lens before wardrobe, so the
+    opening is sorted explicitly by OPENING_SEQUENCE rather than table order.
+    """
+    rank = {r: i for i, r in enumerate(OPENING_SEQUENCE)}
+    seats = _writing_seats(cast, only=OPENING_ROLES)
+    return sorted(seats, key=lambda m: rank.get(crew.role_of(m), 99))
+
+
 async def start_table(
     db, ollama, session: dict[str, Any], *, comfy=None, spooler=None,
 ) -> dict[str, Any]:
@@ -925,6 +1013,7 @@ async def start_table(
     session["board"] = {}
     session["shoot"] = {}
     session["plan"] = {}
+    session["costume"] = {}
     session.pop("_blind_said", None)
     session.pop("struck", None)
     still_first = comfy is not None and spooler is not None
@@ -965,7 +1054,7 @@ async def start_table(
         await _run_plan_turn(db, ollama, session, cfg=cfg)
         await session_db.save(db, session, publish=False)
 
-    seats = (_writing_seats(cast, only=OPENING_ROLES) if still_first
+    seats = (_opening_seats(cast) if still_first
              else _writing_seats(cast))
     await _craft_pass(db, ollama, session, cast, seats, cfg=cfg)
 
@@ -1202,6 +1291,9 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["board"] = {}
     session["shoot"] = {}
     session["plan"] = {}
+    # Stays {} for the whole duet: no Wardrobe seat, and the actress owns her own
+    # clothes there, so the COSTUME lock is never applied (二人芝居 untouched).
+    session["costume"] = {}
     session["notes"] = []
     session.pop("_blind_said", None)
     await session_db.save(db, session)

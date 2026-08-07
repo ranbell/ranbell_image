@@ -157,14 +157,34 @@ def test_only_the_acting_seats_are_handed_her_inner_life(stargazer):
     assert digest.rstrip().endswith("a theme")
 
 
-def test_the_plan_block_carries_what_she_is_wearing():
+def test_clothes_live_in_a_locked_costume_block_not_the_plan():
     """Clothes had no line of their own, so they rode in MUST APPEAR and were
-    treated as furniture."""
-    block = brief.plan_block({
+    treated as furniture. They live in a locked COSTUME block Wardrobe owns now;
+    the plan seat has no clothing line at all."""
+    plan = brief.plan_block({
         "place": "a changing room", "hour": "midday, summer",
-        "wearing": "the outfit the theme named",
+        "wearing": "the outfit the theme named",  # a stray legacy field
         "must_appear": ["bench", "locker"],
     })
-    assert "WEARING: the outfit the theme named" in block
-    # Order matters: it is read before the room's contents.
-    assert block.index("WEARING") < block.index("MUST APPEAR")
+    assert "WEARING" not in plan  # the planner no longer dresses her
+
+    cos = brief.costume_block({
+        "silhouette": "A-line", "layers": "tee / cardigan",
+        "colourway": "navy / white / red", "pattern": "solid",
+        "fabric": "cotton", "condition": "worn-in", "hero": "red scarf",
+    })
+    assert "COSTUME (LOCKED" in cos
+    assert "SILHOUETTE: A-line" in cos and "HERO: red scarf" in cos
+    assert "tags" not in cos.lower()  # the concrete tag set is never rendered
+    assert brief.costume_block({}) == ""
+
+
+def test_the_costume_block_sits_between_plan_and_theme():
+    out = brief.build(
+        {"identity_tags": ["blue_eyes"]}, "泳ぐ話", "anime",
+        plan={"place": "a pool"},
+        costume={"silhouette": "sporty one-piece", "hero": "goggles"},
+    )
+    assert "COSTUME (LOCKED" in out
+    assert out.index("PLAN (LOCKED") < out.index("COSTUME (LOCKED")
+    assert out.index("COSTUME (LOCKED") < out.index("泳ぐ話")  # theme stays last

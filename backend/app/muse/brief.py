@@ -55,19 +55,39 @@ PLAN_FIELDS: tuple[tuple[str, str], ...] = (
     ("hour", "HOUR"),
     ("light", "LIGHT"),
     ("action", "ACTION"),
-    # WEARING exists because the planner had no line for clothes and so put them
-    # in MUST APPEAR, where a garment became "an object in this room" and was
-    # re-chosen to suit whatever place the planner had picked. A theme that
-    # named an outfit lost it that way, on every model tried. The planner does
-    # not choose clothes now; it carries forward what the theme said, or says
-    # outright that nothing was named.
-    ("wearing", "WEARING"),
+    # Clothing is deliberately NOT here. The planner writing WEARING put garments
+    # one edit away from MUST APPEAR, where a dress became "an object in the room"
+    # and got re-chosen to suit the place — a theme that named an outfit lost it
+    # that way on every model tried. Clothes now live in COSTUME (below), owned by
+    # Wardrobe alone; the planner does not touch them.
     ("must_appear", "MUST APPEAR"),
+)
+
+# The fields Wardrobe settles, shown in this order. Only Wardrobe writes COSTUME;
+# every other seat re-reads it and may not change it. Symmetric to PLAN_FIELDS so
+# parse/plan-block machinery mirrors cleanly (see chain.parse_costume). `tags`
+# (the outfit's concrete danbooru set, kept for the Showrunner-override strike)
+# is stored on the costume dict but is not a rendered field here.
+COSTUME_FIELDS: tuple[tuple[str, str], ...] = (
+    ("silhouette", "SILHOUETTE"),
+    ("layers", "LAYERS"),
+    ("colourway", "COLOURWAY"),
+    ("pattern", "PATTERN"),
+    ("fabric", "FABRIC"),
+    ("condition", "CONDITION"),
+    ("hero", "HERO"),
 )
 
 PLAN_HEADER = (
     "PLAN (LOCKED — the crew already settled this. Every noun below must survive "
     "to the render. Do not relocate, do not re-time, do not re-expose.)"
+)
+COSTUME_HEADER = (
+    "COSTUME (LOCKED — Wardrobe set this. Only the Showrunner (総監督) can change "
+    "it. Not the room, not the weather, not any other seat.)\n"
+    "What she is WEARING is only here. A garment word in MUST APPEAR or in the "
+    "tag ledger is an object in the room / on the floor — never what she has on. "
+    "SCENE restates this outfit; it never invents clothing."
 )
 ORDERS_HEADER = (
     "SHOWRUNNER STANDING ORDERS (absolute — 総監督 said these and they stay said, "
@@ -89,6 +109,21 @@ def plan_block(plan: dict[str, Any] | None) -> str:
     return "\n".join([PLAN_HEADER, *lines]) if lines else ""
 
 
+def costume_block(costume: dict[str, Any] | None) -> str:
+    """The locked outfit, in the shape every seat re-reads. Empty until Wardrobe
+    has spoken (`{}` → ""), symmetric to plan_block. `tags` is never rendered."""
+    data = costume or {}
+    lines: list[str] = []
+    for key, label in COSTUME_FIELDS:
+        value = data.get(key)
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v).strip() for v in value if str(v).strip())
+        value = str(value or "").strip()
+        if value:
+            lines.append(f"{label}: {value}")
+    return "\n".join([COSTUME_HEADER, *lines]) if lines else ""
+
+
 def orders_block(notes: list[str] | None) -> str:
     kept = [str(n).strip() for n in (notes or []) if str(n).strip()]
     return "\n".join([ORDERS_HEADER, *(f"- {n}" for n in kept)]) if kept else ""
@@ -106,6 +141,7 @@ def build(
     *,
     framing: str = "auto",
     plan: dict[str, Any] | None = None,
+    costume: dict[str, Any] | None = None,
     notes: list[str] | None = None,
     reference: str = "full",
 ) -> str:
@@ -130,8 +166,12 @@ def build(
         f"Style: {style.strip()}" if style.strip() else "",
         f"Framing: {frame}",
         f"Character: {', '.join(identity)}, " if identity else "",
-        # Outfit is locked craft for Wardrobe — not REFERENCE taste.
-        f"Outfit: {', '.join(outfit)}, " if outfit else "",
+        # The character's default outfit is Wardrobe's starting rail. Once
+        # Wardrobe has set COSTUME, that block is the authority and this line
+        # drops, so the two can never contradict (this line was where the
+        # character's default clothes used to sit beside a garment the theme
+        # had named).
+        (f"Outfit: {', '.join(outfit)}, " if outfit and not (costume or {}) else ""),
     ]
 
     # Behaviour first. Concrete likes stay inside the fence as taste cues only.
@@ -171,6 +211,7 @@ def build(
     return "\n\n".join(b for b in [
         "\n".join(h for h in head if h),
         plan_block(plan),
+        costume_block(costume),
         orders_block(notes),
         block,
         theme.strip(),

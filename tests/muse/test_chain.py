@@ -236,19 +236,42 @@ async def test_a_seeing_turn_sends_the_board_and_is_not_flagged_blind():
     assert llm.calls[0]["images"] == [b"jpeg"]
 
 
-def test_the_planner_answer_is_parsed_with_the_outfit_line():
+def test_the_planner_answer_no_longer_carries_a_clothing_line():
     plan = chain.parse_plan(
         "SAY: ここでいきましょう。\n"
         "PLACE: A changing room, standing by the bench.\n"
         "HOUR: Midday, summer.\n"
         "LIGHT: Flat overhead fluorescent.\n"
         "ACTION: Tying a shoelace.\n"
-        "WEARING: what the theme asked for.\n"
+        "WEARING: what the theme asked for.\n"  # even if a model still emits it,
         "MUST APPEAR: bench, locker, tiled_floor, drain, mirror\n"
     )
-    assert plan["wearing"] == "what the theme asked for."
+    assert "wearing" not in plan  # clothes are Wardrobe's, not the planner's
     assert plan["must_appear"][0] == "bench"
     assert plan["place"].startswith("A changing room")
+
+
+def test_a_wardrobe_costume_tail_is_parsed_and_stripped():
+    """The COSTUME block is appended after SCENE; it must be split off before
+    parse_table_read or the greedy SCENE capture swallows it."""
+    raw = (
+        "SAY: こう着せます。\n\n"
+        "TAGS: 1girl, red_scarf, cardigan\n\n"
+        "SCENE: she stands by the bench in a worn cardigan.\n\n"
+        "COSTUME:\n"
+        "SILHOUETTE: A-line\nLAYERS: tee, cardigan\n"
+        "COLOURWAY: navy 60 / white 30 / red 10\nPATTERN : solid\n"
+        "FABRIC: cotton, matte\nCONDITION: worn-in\nHERO: red scarf\n"
+    )
+    head, cos = chain._strip_costume(raw)
+    assert "COSTUME" not in head  # stripped, so SCENE stays clean
+    assert cos["silhouette"] == "A-line"
+    assert cos["pattern"] == "solid"       # tolerant of "PATTERN :"
+    assert cos["hero"] == "red scarf"
+    assert set(cos) == {"silhouette", "layers", "colourway", "pattern",
+                        "fabric", "condition", "hero"}
+    # A turn without a COSTUME block comes back unchanged.
+    assert chain._strip_costume("SCENE: just a scene.") == ("SCENE: just a scene.", {})
 
 
 def test_an_outfit_line_left_out_is_not_a_parse_failure():

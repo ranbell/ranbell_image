@@ -53,6 +53,9 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # and re-stated in every brief so a chain of rewrites cannot relocate the
         # picture.
         "plan": {},
+        # The locked outfit. Only Wardrobe writes it; costume_block re-states it in
+        # every brief so no other seat can re-dress her. {} until Wardrobe speaks.
+        "costume": {},
         # Everything the Showrunner has said, kept forever. A note used to live
         # only in the turn that answered it.
         "notes": [],

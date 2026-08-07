@@ -860,8 +860,9 @@ async def test_the_table_opens_on_three_seats_and_shoots_a_still():
     assert session["table_stage"] == "brief"
     spoke = {m["muse_id"] for m in session["chat"] if m.get("kind") == "craft"}
     roles = {crew.role_of(m) for m in spoke}
-    assert roles <= {"plan", "actress", "lens"}, roles
-    assert "actress" in roles and "lens" in roles
+    # Wardrobe joined the opening (it dresses her before the camera frames her).
+    assert roles <= {"plan", "wardrobe", "actress", "lens"}, roles
+    assert {"wardrobe", "actress", "lens"} <= roles
     # And a still is on the way, as one frame rather than four.
     assert len(spooler.jobs) == 1
     assert spooler.jobs[0]["func"] is runner.run_board_job
@@ -1048,14 +1049,16 @@ async def test_writing_craft_is_what_marks_a_seat_as_having_spoken():
         db, ollama, session, comfy=FakeComfy(), spooler=spooler,
     )
     spoken = {crew.role_of(m) for m in session["spoken"]}
-    assert spoken == {"actress", "lens"}, spoken
+    assert spoken == {"wardrobe", "actress", "lens"}, spoken
     # The planner does not write craft, so it is not on the list and never
     # queues itself for a catch-up pass.
     assert "plan" not in spoken
 
 
 @pytest.mark.asyncio
-async def test_an_outfit_line_the_planner_skipped_does_not_undress_her():
+async def test_the_planner_no_longer_keeps_a_clothing_line():
+    """The planner used to carry a WEARING line forward; clothes are Wardrobe's
+    now, so a stray one is dropped while the room's ledger is still kept."""
     db = FakeDb()
 
     class TersePlan(FakeOllama):
@@ -1076,4 +1079,6 @@ async def test_an_outfit_line_the_planner_skipped_does_not_undress_her():
     await session_db.save(db, session)
 
     await service._run_plan_turn(db, TersePlan(), session, cfg={})
-    assert session["plan"]["wearing"] == "what the theme asked for"
+    assert "wearing" not in session["plan"]  # dropped, not carried forward
+    # The room ledger is still settled (that carry-forward stays).
+    assert session["plan"]["must_appear"] == ["lamp", "chair", "rug"]

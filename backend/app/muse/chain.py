@@ -35,6 +35,9 @@ class MuseTurn:
     # that cannot read images does not error — it returns nothing, or garbage —
     # so the retry is silent unless somebody surfaces this.
     blind: bool = False
+    # The locked outfit, parsed off a wardrobe turn's trailing COSTUME block.
+    # None for every seat that is not Wardrobe (and for duet prep).
+    costume: dict[str, Any] | None = None
 
 
 class ChainError(Exception):
@@ -78,6 +81,12 @@ def _finish_turn(
     framing: str, brief: str, style: str = "",
     cast: list[dict] | None = None,
 ) -> MuseTurn:
+    # Only Wardrobe carries a COSTUME tail; strip it before parse_table_read so
+    # the SCENE capture (greedy to end-of-string) does not swallow it.
+    costume: dict[str, Any] | None = None
+    if crew.role_of(muse_id) == "wardrobe":
+        raw, parsed = _strip_costume(raw)
+        costume = parsed or None
     say, tags, scene = identity.parse_table_read(raw)
     positive = identity.assemble_positive(
         identity_tags, tags, scene, framing=framing, style=style,
@@ -90,6 +99,7 @@ def _finish_turn(
     return MuseTurn(
         muse_id=muse_id, say=say or "", prompt=positive,
         pose_intent=intent, tags=tags, scene=scene, raw=raw,
+        costume=costume,
     )
 
 
@@ -204,6 +214,42 @@ def parse_plan(raw: str) -> dict[str, Any]:
     if say:
         out["say"] = say
     return out
+
+
+# Wardrobe appends a COSTUME block after SCENE. The SCENE capture is greedy to
+# end-of-string (identity._SAY_TAGS_SCENE_RE), so the block has to be split off
+# BEFORE parse_table_read or it is swallowed into the prose. Same lenient-label
+# spirit as parse_plan.
+_COSTUME_LABELS: dict[str, str] = {
+    label.replace(" ", ""): key for key, label in brief_mod.COSTUME_FIELDS
+}
+_COSTUME_LINE_RE = re.compile(
+    r"(?im)^[\s>*_#-]*(" + "|".join(
+        label.replace(" ", r"\s*") for _, label in brief_mod.COSTUME_FIELDS
+    ) + r")[\s*_]*[:：]\s*(.+?)\s*$"
+)
+_COSTUME_HEAD_RE = re.compile(r"(?im)^[\s>*_#-]*COSTUME[\s*_]*[:：]?\s*$")
+
+
+def _strip_costume(raw: str) -> tuple[str, dict[str, Any]]:
+    """Split a trailing COSTUME block off a wardrobe turn.
+
+    Returns (raw_without_costume, costume_dict). No `COSTUME:` header → the raw
+    is returned unchanged and the dict is empty, so a wardrobe turn that forgot
+    the block still parses as an ordinary turn.
+    """
+    text = raw or ""
+    m = _COSTUME_HEAD_RE.search(text)
+    if not m:
+        return text, {}
+    head, tail = text[:m.start()], text[m.end():]
+    out: dict[str, Any] = {}
+    for mm in _COSTUME_LINE_RE.finditer(tail):
+        key = _COSTUME_LABELS.get(re.sub(r"\s+", "", mm.group(1)).upper())
+        value = mm.group(2).strip().strip("*_").strip()
+        if key and value and key not in out:
+            out[key] = value
+    return head.rstrip(), out
 
 
 async def run_plan(
