@@ -1368,6 +1368,9 @@
     "boardAsk": "Good? OK to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",
+    "banned": "Removed",
+    "bannedHint": "What you took out. Gone from the craft and in the negative prompt. Click to ask for it back.",
+    "bannedRestore": "Ask for this back",
     "ledger": "Tag ledger",
     "ledgerHint": "Every tag still in the craft, and the seat that added it.",
     "warn": {

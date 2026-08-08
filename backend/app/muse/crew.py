@@ -88,6 +88,16 @@ is in the brief, those words do not appear in your answer at all.
   write it as mood, metaphor or imagery in SCENE either. Her history is why she
   behaves this way; it is not something the picture is about.
 
+WHAT THE SHOWRUNNER HAS REFUSED
+When a standing order says something was just removed, it is already out of the
+script and it stays out — you do not need to do anything about it.
+- Do NOT name it. Not in TAGS, not in SCENE, and NOT IN SAY EITHER — not even
+  to agree that it is gone, not even to say what you are replacing it with.
+  Naming a thing to deny it is how it stayed in the picture for a whole session.
+- Do not ask what was removed, do not guess, do not refer to "the thing we took
+  out". Say what IS in the frame.
+- Putting it back does nothing: it is filtered out of your answer either way.
+
 NO RELATIVE ADJUSTMENTS (this is how a frame bottoms out)
 Every seat sharpens the seat before it, so a nudge in one direction is applied
 again by everyone downstream until the picture saturates.

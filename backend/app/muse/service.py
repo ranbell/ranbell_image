@@ -20,6 +20,7 @@ from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import brief as brief_mod
 from . import chain, crew, events, identity, runner, session_db
+from .runtime import negative_for as runtime_negative_for
 from .runtime import render_settings
 from .schema import missing_inputs, new_session
 
@@ -135,13 +136,9 @@ def _token_publisher(session_id: str, muse_id: str):
     return _pub
 
 
-def negative_for(session: dict[str, Any]) -> str:
-    inputs = _inputs(session)
-    return identity.merge_negative(
-        str(inputs.get("negative_prompt") or ""),
-        identity.opposing_negative(_identity_tags(session)),
-        identity.framing_negative(_framing(inputs)),
-    )
+# Kept as a name anything outside may have imported. The body lives in
+# `runtime` because the GEN-lane runner needs it and cannot import this module.
+negative_for = runtime_negative_for
 
 
 async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -218,6 +215,12 @@ def _rebuild_brief(session: dict[str, Any]) -> None:
         plan=session.get("plan") or {},
         costume=session.get("costume") or {},
         notes=list(session.get("notes") or []),
+        # Refusals already carried out drop out of the orders — they are
+        # enforced by `drop_banned` and the negative prompt now, and leaving
+        # the words in is what kept the crew talking about them.
+        carried_out=list(session.get("carried_out") or []),
+        removed_now=list(session.get("just_banned") or []),
+        restored_now=list(session.get("just_restored") or []),
     )
     # COSTUME is locked craft, not inner life — both the full and digest briefs
     # carry it so every seat (acting or not) re-reads the same outfit.
@@ -225,13 +228,15 @@ def _rebuild_brief(session: dict[str, Any]) -> None:
         character, common["theme"], common["style"],
         framing=common["framing"], plan=common["plan"],
         costume=common["costume"], notes=common["notes"],
-        reference="full",
+        carried_out=common["carried_out"], removed_now=common["removed_now"],
+        restored_now=common["restored_now"], reference="full",
     )
     session["brief_lite"] = brief_mod.build(
         character, common["theme"], common["style"],
         framing=common["framing"], plan=common["plan"],
         costume=common["costume"], notes=common["notes"],
-        reference="digest",
+        carried_out=common["carried_out"], removed_now=common["removed_now"],
+        restored_now=common["restored_now"], reference="digest",
     )
 
 
@@ -426,18 +431,45 @@ def record_ledger(
     return entry
 
 
+def banned_tags(session: dict[str, Any]) -> list[str]:
+    """Everything the Showrunner has taken out of this picture."""
+    return [str(t) for t in (session.get("banned") or []) if str(t).strip()]
+
+
+def drop_banned(session: dict[str, Any], tags: str) -> str:
+    """Strip anything the Showrunner has refused, whoever just wrote it.
+
+    This is the enforcement. Telling seats not to reintroduce something means
+    naming it in their prompt every turn, which is what kept a refused prop
+    alive in the conversation for the rest of the session. A filter needs to
+    say nothing at all.
+    """
+    gone = set(banned_tags(session))
+    if not gone or not str(tags or "").strip():
+        return tags
+    return ", ".join(
+        p.strip() for p in str(tags).split(",")
+        if p.strip() and identity.bare_tag(p) not in gone
+    )
+
+
 def _apply_turn(
     session: dict[str, Any], turn: chain.MuseTurn, *, ms: int = 0,
 ) -> dict[str, Any]:
     craft = session.setdefault("craft", {})
+    # Filter before the ledger reads it, so a seat that keeps reaching for a
+    # refused tag shows up as never having added it rather than as a fight.
+    kept = drop_banned(session, turn.tags)
     record_ledger(
         session, muse_id=turn.muse_id,
         name=_muse_display_name(session, turn.muse_id),
-        before=str(craft.get("tags") or ""), after=turn.tags, ms=ms,
+        before=str(craft.get("tags") or ""), after=kept, ms=ms,
     )
     craft["prompt"] = turn.prompt
-    craft["tags"] = turn.tags
+    craft["tags"] = kept
     craft["scene"] = turn.scene
+    if kept != turn.tags:
+        _reassemble(session)
     # Wardrobe alone owns the locked COSTUME. Capture it, take the old outfit out
     # of the craft, make sure the new one is actually in the tags, and re-inject
     # COSTUME so the NEXT seat re-reads it.
@@ -730,6 +762,115 @@ def _ensure_garments(session: dict[str, Any], garments: list[str]) -> list[str]:
     craft["tags"] = ", ".join(parts + missing)
     _reassemble(session)
     return missing
+
+
+def apply_removals(
+    session: dict[str, Any], remove: list[str], restore: list[str],
+) -> tuple[list[str], list[str]]:
+    """Carry out a refusal: take it out, and keep it out.
+
+    A refusal used to be the one instruction the studio could not perform. It
+    was stored as a standing order in the Showrunner's own words and re-read by
+    every seat on every turn, so the refused noun stayed in front of everyone
+    forever and the crew kept discussing it; no code path could delete a prop
+    the art department had added; and the sampler never heard about it at all,
+    because the negative prompt is built from settings and never from what the
+    Showrunner said. Saying "no" made the thing more present, not less.
+
+    So a refusal changes state instead of adding text. The tag comes out now,
+    ``drop_banned`` keeps it out however many times a seat reaches for it, and
+    ``negative_for`` hands it to the sampler — the one place in the pipeline
+    where "not this" actually works.
+    """
+    gone = set(banned_tags(session))
+    freed = [t for t in restore if t in gone]
+    added = [t for t in remove if t not in gone]
+    if not freed and not added:
+        return [], []
+
+    gone.update(added)
+    gone.difference_update(freed)
+    # Ordered for a stable negative prompt and a readable panel.
+    session["banned"] = sorted(gone)
+    # Only this turn's refusals are shown to the crew, and only on this turn —
+    # the seats answering the note need to know why something vanished, and
+    # nobody after them needs the noun at all.
+    session["just_banned"] = list(added)
+    session["just_restored"] = list(freed)
+
+    craft = session.setdefault("craft", {})
+    before = str(craft.get("tags") or "")
+    craft["tags"] = drop_banned(session, before)
+    if craft["tags"] != before:
+        _reassemble(session)
+        record_ledger(
+            session, muse_id="showrunner", name="総監督",
+            before=before, after=craft["tags"],
+        )
+    return added, freed
+
+
+async def take_note(
+    db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Record a Showrunner note, and carry out whatever it refuses.
+
+    The strike turn runs on every note rather than behind a "does this look
+    like a refusal?" pattern. Patterns miss the phrasings nobody thought of,
+    and this cannot: a note that removes nothing simply comes back empty.
+    """
+    notes = session.setdefault("notes", [])
+    notes.append(text)
+    index = len(notes) - 1
+    session["just_banned"] = []
+    session["just_restored"] = []
+
+    removed: list[str] = []
+    restored: list[str] = []
+    if ollama is not None:
+        inputs = _inputs(session)
+        try:
+            picked, back = await chain.run_strike(
+                ollama, note=text,
+                tags=identity.tag_names(str((session.get("craft") or {}).get("tags") or "")),
+                removed=banned_tags(session),
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            )
+        except Exception:
+            logger.warning("[muse] strike turn failed; nothing removed", exc_info=True)
+            picked, back = [], []
+        removed, restored = apply_removals(session, picked, back)
+
+    if removed:
+        # The note's own words drop out of the standing orders from the next
+        # turn on. Its effect is a filter and a negative prompt now, and leaving
+        # the refused noun in front of every seat is what kept them talking
+        # about it for the rest of the session.
+        session.setdefault("carried_out", []).append(index)
+        locale = str(_inputs(session).get("locale") or "ja")
+        msg = _chat_append(
+            session, role="system", name="Studio",
+            text=(
+                f"（外しました: {'、'.join(removed)}。以降は書き戻されません）"
+                if locale.startswith("ja") else
+                f"(Removed: {', '.join(removed)} — and kept out from here on.)"
+            ),
+        )
+        _publish_chat(session["session_id"], msg)
+    if restored:
+        locale = str(_inputs(session).get("locale") or "ja")
+        msg = _chat_append(
+            session, role="system", name="Studio",
+            text=(
+                f"（戻しました: {'、'.join(restored)}）"
+                if locale.startswith("ja") else
+                f"(Restored: {', '.join(restored)}.)"
+            ),
+        )
+        _publish_chat(session["session_id"], msg)
+
+    _rebuild_brief(session)
+    return removed, restored
 
 
 def strike_dropped_props(
@@ -1099,6 +1240,8 @@ async def start_table(
     session["chat"] = []
     session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
     session["ledger"] = []
+    session["banned"] = []
+    session["carried_out"] = []
     session["spoken"] = []
     session["board"] = {}
     session["shoot"] = {}
@@ -1398,6 +1541,8 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["chat"] = []
     session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
     session["ledger"] = []
+    session["banned"] = []
+    session["carried_out"] = []
     session["spoken"] = []
     session["board"] = {}
     session["shoot"] = {}
@@ -1469,10 +1614,9 @@ async def post_chat(
     # meets once, first — otherwise a bare OK ships a prompt three seats wrote.
     if str(session.get("table_stage") or "full") == "brief":
         if direction:
-            session.setdefault("notes", []).append(direction)
-            _rebuild_brief(session)
-            await session_db.save(db, session)
             cfg = await get_runtime_config(db)
+            await take_note(db, ollama, session, direction, cfg=cfg)
+            await session_db.save(db, session)
             if _cast_in_role(_crew_ids(session), "plan"):
                 await _run_plan_turn(db, ollama, session, cfg=cfg, note=direction)
                 await session_db.save(db, session, publish=False)
@@ -1508,11 +1652,11 @@ async def post_chat(
     fresh = newcomers(session, cast)
     responders = fresh + [m for m in _pick_responders(text, cast) if m not in fresh]
     session["status"] = "discussing"
-    # The note is standing direction from here on, not a remark about one turn.
-    session.setdefault("notes", []).append(text)
-    _rebuild_brief(session)
-    await session_db.save(db, session)
     cfg = await get_runtime_config(db)
+    # The note is standing direction from here on, not a remark about one turn —
+    # and whatever it refuses comes out of the picture before anyone answers it.
+    await take_note(db, ollama, session, text, cfg=cfg)
+    await session_db.save(db, session)
 
     # Re-settle where and when first: a note like "make it somewhere else" has
     # to move the locked place, or the original theme keeps winning downstream.

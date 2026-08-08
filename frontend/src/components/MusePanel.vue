@@ -124,6 +124,9 @@ function isLead(m) {
 // Who put which tag in. Folded newest-first so a tag reads as "whoever last
 // touched it", which is the question being asked when a frame comes back wrong.
 const ledger = computed(() => session.value?.ledger || [])
+// What the Showrunner refused. Kept out by a filter and handed to the
+// sampler as a negative, so this list is the only place the words appear.
+const banned = computed(() => session.value?.banned || [])
 const tagCredits = computed(() => {
   const live = new Set(
     String(craft.value.tags || '')
@@ -682,6 +685,26 @@ async function onChatKey(e) {
                 <span class="ml-auto shrink-0 text-[var(--sb-faint)]">{{ c.who }}</span>
               </li>
             </ul>
+          </details>
+
+          <!-- what the Showrunner took out. Click one to ask for it back. -->
+          <details v-if="banned.length" class="text-[10px] text-[var(--sb-faint)]">
+            <summary class="cursor-pointer">
+              {{ t('muse.banned') }} · {{ banned.length }}
+            </summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.bannedHint') }}</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="tag in banned" :key="tag" type="button"
+                class="rounded border border-white/10 px-2 py-1 font-mono
+                       text-[10px] text-gray-400 line-through
+                       hover:border-[var(--sb-teal)] hover:text-[var(--sb-teal)]
+                       hover:no-underline disabled:opacity-40"
+                :disabled="chatLocked"
+                :title="t('muse.bannedRestore')"
+                @click="sendChat(`${tag} を戻して`)"
+              >{{ tag }}</button>
+            </div>
           </details>
         </section>
       </main>

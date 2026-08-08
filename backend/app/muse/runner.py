@@ -6,23 +6,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from . import events, identity, session_db
-from .runtime import render_settings
+from . import events, session_db
+from .runtime import negative_for, render_settings
 
 logger = logging.getLogger(__name__)
-
-
-def _negative_for(session: dict[str, Any]) -> str:
-    inputs = session.get("inputs") or {}
-    tags = [
-        str(t) for t in ((session.get("character") or {}).get("identity_tags") or [])
-        if str(t).strip()
-    ]
-    return identity.merge_negative(
-        str(inputs.get("negative_prompt") or ""),
-        identity.opposing_negative(tags),
-        identity.framing_negative(str(inputs.get("framing") or "auto")),
-    )
 
 
 def preview_publisher(session_id: str, label: str):
@@ -58,7 +45,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
             positive=str(board.get("prompt") or ""),
-            negative=_negative_for(session),
+            negative=negative_for(session),
             seed=int(board.get("seed") or 0) or None,
             subdir=PLAYGROUND_SUBDIR,
             # The opening still is one frame, not four: at three seats in there
@@ -104,7 +91,7 @@ async def run_shoot_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
             positive=str(shoot.get("prompt") or ""),
-            negative=_negative_for(session),
+            negative=negative_for(session),
             seed=int(shoot.get("seed") or 0) or None,
             batch_count=max(1, int(inputs.get("draft_count", 4))),
             subdir=PLAYGROUND_SUBDIR,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -270,6 +270,87 @@ async def run_plan(
     if plan:
         plan["blind"] = blind
     return plan
+
+
+STRIKE_SYSTEM = """
+You are the script supervisor's clerk. You do not write craft and you do not
+have opinions. One job: read what the Showrunner (総監督) just said, look at the
+tags currently in the script, and report which of them the Showrunner no longer
+wants — and which, if any, they are asking to bring back.
+
+RULES
+- Answer ONLY with tags copied EXACTLY from the CURRENT TAGS / CURRENTLY
+  REMOVED lists you are given. Never invent, translate, pluralise or reword.
+- Most notes remove nothing. A note that asks for something *different* is not
+  a removal unless the old thing plainly cannot stay alongside the new one.
+- Remove what the Showrunner named, and the tags that are plainly the same
+  thing under another name. Nothing else. Do not tidy, do not simplify, do not
+  remove things you personally think are wrong.
+- If the Showrunner asks for something back that is on the CURRENTLY REMOVED
+  list, put it under RESTORE.
+- Empty lists are the normal answer and a complete answer.
+
+OUTPUT FORMAT — exactly two lines, nothing else, no explanation:
+
+REMOVE: <comma-separated tags from CURRENT TAGS, or the word none>
+RESTORE: <comma-separated tags from CURRENTLY REMOVED, or the word none>
+""".strip()
+
+_STRIKE_LINE_RE = re.compile(r"(?im)^[\s>*_-]*(REMOVE|RESTORE)[\s*_]*[:：]\s*(.*)$")
+
+
+def parse_strike(
+    raw: str, present: Iterable[str], removed: Iterable[str],
+) -> tuple[list[str], list[str]]:
+    """Read the clerk's two lines, keeping only tags that actually exist.
+
+    The model picks from a closed list, and this is what closes it: anything it
+    returns that is not already in the script (or not already removed) is
+    dropped on the floor. That is the whole reason this is a separate turn
+    rather than free-form extraction — a wrong answer can only ever be a
+    smaller answer, never an invented noun.
+    """
+    here = {identity.bare_tag(t): identity.bare_tag(t) for t in present if t}
+    gone = {identity.bare_tag(t): identity.bare_tag(t) for t in removed if t}
+    out: dict[str, list[str]] = {"REMOVE": [], "RESTORE": []}
+    for match in _STRIKE_LINE_RE.finditer(raw or ""):
+        pool = here if match.group(1).upper() == "REMOVE" else gone
+        for part in match.group(2).split(","):
+            tag = identity.bare_tag(part)
+            if tag and tag in pool and tag not in out[match.group(1).upper()]:
+                out[match.group(1).upper()].append(pool[tag])
+    return out["REMOVE"], out["RESTORE"]
+
+
+async def run_strike(
+    ollama, *, note: str, tags: Iterable[str], removed: Iterable[str] = (),
+    model: str, num_ctx: int | None, on_token: TokenCallback | None = None,
+) -> tuple[list[str], list[str]]:
+    """What the Showrunner just took out of the picture, and what they want back.
+
+    Runs on every note. Detecting "is this a removal?" with a pattern would miss
+    the phrasings nobody thought of, and this cannot: a note that removes
+    nothing simply comes back empty.
+    """
+    present = [t for t in tags if t]
+    if not present and not list(removed):
+        return [], []
+    prompt = "\n\n".join([
+        f"CURRENT TAGS:\n{', '.join(present)}",
+        f"CURRENTLY REMOVED:\n{', '.join(removed) or '(none)'}",
+        f"総監督がいま言ったこと:\n{note.strip()}",
+    ])
+    try:
+        raw = await _call(
+            ollama, system=STRIKE_SYSTEM, prompt=prompt, model=model,
+            images=None, num_ctx=num_ctx, think=False, on_token=on_token,
+        )
+    except ChainError:
+        # A clerk who cannot answer removes nothing. Guessing here would delete
+        # the Showrunner's picture out from under them.
+        logger.warning("[muse.chain] strike turn produced nothing", exc_info=True)
+        return [], []
+    return parse_strike(raw, present, removed)
 
 
 async def run_duet_talk(

@@ -27,6 +27,7 @@ call and never reached the render.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from .identity import bare_tag, normalize_framing
@@ -117,8 +118,9 @@ COSTUME_HEADER = (
     "SCENE restates this outfit; it never invents clothing."
 )
 ORDERS_HEADER = (
-    "SHOWRUNNER STANDING ORDERS (absolute — 総監督 said these and they stay said, "
-    "on this turn and every turn after it)"
+    "SHOWRUNNER STANDING ORDERS (absolute — 総監督 said these and they stay said. "
+    "NEWEST FIRST: when two of these disagree, the one nearer the top wins and "
+    "the older one is dead.)"
 )
 
 
@@ -181,9 +183,54 @@ def garment_tags(costume: dict[str, Any] | None) -> list[str]:
     return out
 
 
-def orders_block(notes: list[str] | None) -> str:
-    kept = [str(n).strip() for n in (notes or []) if str(n).strip()]
-    return "\n".join([ORDERS_HEADER, *(f"- {n}" for n in kept)]) if kept else ""
+def orders_block(
+    notes: list[str] | None,
+    *,
+    carried_out: Iterable[int] = (),
+    removed_now: Iterable[str] = (),
+    restored_now: Iterable[str] = (),
+) -> str:
+    """The Showrunner's standing orders, newest first.
+
+    Two things were wrong with dumping every note in the order they arrived.
+
+    Later orders did not visibly beat earlier ones, so「冬にして」and a later
+    「やっぱり夏」sat side by side, both labelled absolute, and the crew was left
+    to pick. Newest first, said out loud.
+
+    And a refusal stayed on the list forever in the Showrunner's own words, so
+    「◯◯は使わないで」kept the refused noun in front of every seat on every turn —
+    which is exactly why the crew went on discussing something that had been
+    vetoed. Once a refusal has been carried out it is enforced by a filter and
+    by the negative prompt, so its text is dropped here: `carried_out` is the
+    indices of those notes. Anything else the note asked for has by then been
+    written into the craft by the seats that answered it.
+    """
+    done = {int(i) for i in carried_out}
+    kept = [
+        str(n).strip() for i, n in enumerate(notes or [])
+        if str(n).strip() and i not in done
+    ]
+    lines = [f"- {n}" for n in reversed(kept)]
+
+    # Named for one turn only: the seats answering this note need to know why
+    # something just vanished, or they put it straight back. Nobody after them
+    # is told the noun at all.
+    out = [str(t) for t in removed_now if str(t).strip()]
+    back = [str(t) for t in restored_now if str(t).strip()]
+    if out:
+        lines.append(
+            "- 総監督がたったいま外した: " + ", ".join(out)
+            + " — 台本から削除済み。書き戻さないこと。以後この語には触れない。"
+        )
+    if back:
+        lines.append("- 総監督が戻した: " + ", ".join(back))
+    if done and not out:
+        lines.append(
+            "- （以前に外されたものがある。台本から削除済みで、書き戻しても落ちる。"
+            "何が外されたかを詮索しないこと）"
+        )
+    return "\n".join([ORDERS_HEADER, *lines]) if lines else ""
 
 
 def _line(label: str, values: list[str], sep: str = " · ") -> str:
@@ -200,6 +247,9 @@ def build(
     plan: dict[str, Any] | None = None,
     costume: dict[str, Any] | None = None,
     notes: list[str] | None = None,
+    carried_out: Iterable[int] = (),
+    removed_now: Iterable[str] = (),
+    restored_now: Iterable[str] = (),
     reference: str = "full",
 ) -> str:
     """Character sheet + theme, in the shape the chain was validated against.
@@ -270,7 +320,10 @@ def build(
         "\n".join(h for h in head if h),
         plan_block(plan),
         costume_block(costume),
-        orders_block(notes),
+        orders_block(
+            notes, carried_out=carried_out,
+            removed_now=removed_now, restored_now=restored_now,
+        ),
         block,
         theme.strip(),
     ] if b)

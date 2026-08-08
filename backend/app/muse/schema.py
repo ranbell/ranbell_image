@@ -64,6 +64,15 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # Who added which tag, in order. Without it a bad frame can only be
         # traced back to a seat by guessing from the chat.
         "ledger": [],
+        # What the Showrunner has refused. A refusal is state, not a sentence:
+        # these are filtered out of every seat's answer and handed to the
+        # sampler as a negative, because saying "do not draw X" in a positive
+        # prompt makes X more likely, not less.
+        "banned": [],
+        # Indices of notes whose refusal has been carried out. Their text drops
+        # out of the standing orders so the refused noun stops being re-read by
+        # every seat on every turn.
+        "carried_out": [],
         # Seats that have written craft. The cast is editable mid-session, so
         # one brought in late has to read the script before it gets opinions.
         "spoken": [],
