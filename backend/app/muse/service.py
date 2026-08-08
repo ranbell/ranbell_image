@@ -1424,6 +1424,14 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
         parts.append(f"総監督がいま言ったこと:\n{text.strip()}")
 
     if not prep:
+        parts.append(
+            "このターンの話し方:\n"
+            "- 総監督がすでに言った場所・行為・服装・ポーズ・表情は決まった事実。"
+            "同じことを聞き返さない。\n"
+            "- まだ開いている撮影の軸（服装 / ポーズ / 表情 / 小物など）があれば、"
+            "質問で埋めず、自分から具体案を一つ出す。\n"
+            "- 準備できた・用意して・get ready とは言わない。"
+        )
         return "\n\n".join(p for p in parts if p)
 
     previous = str((session.get("craft") or {}).get("prompt") or "")

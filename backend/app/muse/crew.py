@@ -1578,15 +1578,31 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
 DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — one block, nothing else:
 
-SAY: 2–5 sentences. You are talking with the Showrunner about what you are
-about to shoot. In character, first person, in natural Japanese (口調どおり)
-when they wrote Japanese.
-- This is a CONVERSATION, not a report. Ask things. Have opinions. Say what
-  you would rather do, and why it is you who would do it.
-- Nothing is being written down yet. Do not list tags, do not describe a
-  finished picture, do not output TAGS or SCENE.
-- If they have said enough for you to picture it, say so, and tell them you
-  can get ready whenever they want.
+SAY: 2–5 sentences. Live conversation with the Showrunner about the shot you
+are building together. First person, in character, matching their language
+(Japanese when they wrote Japanese — Japanese only, no English phrases).
+
+HOW EACH TURN WORKS
+1. React to what they just said — specifically, not with a vague acknowledgment.
+2. Propose something concrete of your own: clothing, pose, expression, or a
+   small prop — whichever axis is still open. Prefer "I would do X" over
+   asking them to invent it.
+3. At most ONE short question, and only if something critical is still blank.
+   Prefer a two-choice pitch over an open question.
+
+SETTLED FACTS
+Anything the Showrunner already said about place, action, clothing, pose, or
+expression is DECIDED. Do not re-ask it. Build on it.
+
+FORBIDDEN
+- Do not interview them. Do not keep gathering "just in case".
+- Do not say you are getting ready, can get ready, want to prepare, or ask
+  when to get ready / 準備 / 用意. Prep is a separate button — not your line.
+- No AI-assistant stock phrases (もしよろしければ, 流れに合わせて準備, etc.).
+- No tags, no finished-picture inventory, no TAGS or SCENE blocks.
+
+Have opinions. Speak with your quirks. Say what you would rather do and why
+it is you.
 No danbooru tags. No emoji. No labels other than SAY.
 """.strip()
 
@@ -1642,9 +1658,62 @@ keep its furniture. Nobody else is going to clear it for you.
 """.strip()
 
 
+def _voice_field(character: dict[str, Any], key: str, default: str = "") -> str:
+    """Read a dialogue field from top-level or personality (presets put both)."""
+    p = character.get("personality") or {}
+    raw = character.get(key)
+    if raw is None or raw == "" or raw == []:
+        raw = p.get(key)
+    if isinstance(raw, list):
+        return "\n".join(f"- {str(x).strip()}" for x in raw if str(x).strip())
+    return str(raw or default).strip()
+
+
+def _voice_block(character: dict[str, Any], *, locale: str = "ja", seed: str = "") -> str:
+    """First person, address, quirks, and say-examples for duet talk."""
+    is_en = locale == "en"
+    first = _voice_field(
+        character,
+        "first_person_en" if is_en else "first_person_ja",
+        "I" if is_en else "私",
+    )
+    if not first:
+        first = _voice_field(character, "first_person_ja", "私")
+    addr = _voice_field(
+        character,
+        "user_address_en" if is_en else "user_address_ja",
+        "Showrunner" if is_en else "総監督",
+    )
+    if not addr:
+        addr = _voice_field(character, "user_address_ja", "総監督")
+    quirks = _voice_field(
+        character, "talk_quirks_en" if is_en else "talk_quirks",
+    )
+    if not quirks:
+        quirks = _voice_field(character, "talk_quirks")
+    examples = _voice_field(
+        character,
+        "duet_say_examples_en" if is_en else "duet_say_examples",
+    )
+    if not examples:
+        examples = _voice_field(character, "duet_say_examples")
+    if not examples:
+        examples = _pick_say_example(DEFAULT_MEMBER["actress"], seed)
+
+    lines = [
+        "VOICE (how she actually talks — obey these)",
+        f"一人称 / first person: {first}",
+        f"総監督の呼び方 / address: {addr}",
+    ]
+    if quirks:
+        lines.append(f"口調の癖 / talk quirks: {quirks}")
+    lines.append(f"EXAMPLE energy (match this rhythm, do not copy verbatim):\n{examples}")
+    return "\n".join(lines)
+
+
 def actress_duet_prompt(
     character: dict[str, Any], *, mode: str = "talk",
-    base_style: str = "", seed: str = "",
+    base_style: str = "", seed: str = "", locale: str = "ja",
 ) -> str:
     """The Lead working alone with the Showrunner.
 
@@ -1659,14 +1728,17 @@ def actress_duet_prompt(
     )
     name_en = str(character.get("name") or p.get("preset_name") or name_ja)
     lead = DEFAULT_MEMBER["actress"]
+    first = _voice_field(character, "first_person_ja", "私")
+    addr = _voice_field(character, "user_address_ja", "総監督")
     blocks = [
         f"You are {name_en} / {name_ja}, and today it is just you and the "
         f"Showrunner (総監督). No crew, no table read — the two of you are "
         f"making this picture together.",
-        "Speak in FIRST PERSON as her, always. 口調は一人称（「私」）。"
-        "総監督とは、現場でふたりきりで話しているときの距離感で。",
-        f"EXAMPLE energy: {_pick_say_example(lead, seed)}",
-        _character_sheet(character),
+        f"Speak in FIRST PERSON as her, always. 一人称は「{first}」。"
+        f"総監督の呼び方は「{addr}」。"
+        "現場でふたりきりで話しているときの距離感で。",
+        _voice_block(character, locale=locale, seed=seed),
+        _character_sheet(character, locale=locale),
         "Your personality shows in HOW you speak and in what you choose to do "
         "with your face and hands — never in what you recount. Do not narrate "
         "your backstory. Talk about what is in front of you.",
@@ -1679,8 +1751,9 @@ def actress_duet_prompt(
         ]
     else:
         blocks += [
-            "Nothing is being written down on this turn. You are deciding "
-            "together what the picture even is. Be good company.",
+            "Nothing is being written down on this turn. You two are working "
+            "out the shot in conversation — react, propose clothing or pose "
+            "or expression, settle facts as you go. Do not interview them.",
             DUET_TALK_OUTPUT,
         ]
     return "\n\n".join(b for b in blocks if b)
@@ -1880,15 +1953,23 @@ def public_roster(
 W_DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — one block, nothing else:
 
-SAY: 2–6 lines of live conversation. You are playing BOTH Lead Muse A and Partner Muse B in a three-way session with the Showrunner (総監督).
+SAY: 2–6 lines of live conversation. You are playing BOTH Lead Muse A and
+Partner Muse B in a three-way session with the Showrunner (総監督).
 Format SAY with character name prefixes in Japanese:
 <Name A>: <her lines in character>
 <Name B>: <her lines in character>
 
 CRITICAL RULES FOR W-MUSE SAY:
-- ABSOLUTELY NO AI ASSISTANT SPEECH: Never output generic summaries or reports.
-- LIVE DIALOGUE BETWEEN THE TWO MUSES & SHOWRUNNER: They interact with each other and the Showrunner, reacting to each other's presence, posing together, teasing or helping each other.
-- Use specified first-person and address terms for each Muse.
+- ABSOLUTELY NO AI ASSISTANT SPEECH: never summaries, reports, or stock
+  courtesy (もしよろしければ, 流れに合わせて準備, etc.).
+- LIVE DIALOGUE: the two Muses react to each other and the Showrunner —
+  propose poses, clothing, or expressions together; tease or help.
+- Settled facts stay settled. Do not re-ask place/action/clothes/pose/expression
+  the Showrunner already chose. Prefer concrete two-choice pitches over open
+  questions. At most one question between both of them per turn.
+- Never talk about getting ready / 準備 / 用意 — prep is a separate button.
+- Match the Showrunner's language (Japanese only when they wrote Japanese).
+- Use each Muse's first-person and address terms.
 - Do NOT list tags, do not output TAGS or SCENE.
 No danbooru tags. No emoji.
 """.strip()
@@ -1915,10 +1996,22 @@ def w_actress_duet_prompt(
 
     name_a = str((character_a.get("name") if is_en else None) or character_a.get("name_ja") or pa.get("preset_name_ja") or character_a.get("name") or "Muse A")
     name_b = str((character_b.get("name") if is_en else None) or character_b.get("name_ja") or pb.get("preset_name_ja") or character_b.get("name") or "Muse B")
-    first_a = str((pa.get("first_person_en") if is_en else None) or pa.get("first_person_ja") or "私")
-    first_b = str((pb.get("first_person_en") if is_en else None) or pb.get("first_person_ja") or "私")
-    addr_a = str((pa.get("user_address_en") if is_en else None) or pa.get("user_address_ja") or "総監督")
-    addr_b = str((pb.get("user_address_en") if is_en else None) or pb.get("user_address_ja") or "総監督")
+    first_a = (
+        _voice_field(character_a, "first_person_en" if is_en else "first_person_ja")
+        or _voice_field(character_a, "first_person_ja", "私")
+    )
+    first_b = (
+        _voice_field(character_b, "first_person_en" if is_en else "first_person_ja")
+        or _voice_field(character_b, "first_person_ja", "私")
+    )
+    addr_a = (
+        _voice_field(character_a, "user_address_en" if is_en else "user_address_ja")
+        or _voice_field(character_a, "user_address_ja", "総監督")
+    )
+    addr_b = (
+        _voice_field(character_b, "user_address_en" if is_en else "user_address_ja")
+        or _voice_field(character_b, "user_address_ja", "総監督")
+    )
 
     lead = DEFAULT_MEMBER["actress"]
     blocks = [
@@ -1935,8 +2028,14 @@ def w_actress_duet_prompt(
         "- Combine identity tags for BOTH characters cleanly without contradictions (e.g. both hair colours/styles present).",
         "- Include interaction tags like `looking_at_each_other`, `back-to-back`, `holding_hands`, `standing_side_by_side`, `hug`.",
         "",
+        "--- MUSE A VOICE ---",
+        _voice_block(character_a, locale=locale, seed=seed),
+        "",
         "--- MUSE A SHEET ---",
         _character_sheet(character_a, locale=locale),
+        "",
+        "--- MUSE B VOICE ---",
+        _voice_block(character_b, locale=locale, seed=seed + "b"),
         "",
         "--- MUSE B SHEET ---",
         _character_sheet(character_b, locale=locale),

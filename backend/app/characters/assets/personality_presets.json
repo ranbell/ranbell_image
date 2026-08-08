@@ -784,23 +784,23 @@
       ],
       "signature_moment": "she loses the point, puffs her cheeks out at the ceiling, and ninety seconds later is asking to go again"
     },
-    "first_person_ja": "ボク",
-    "user_address_ja": "総監督さん",
-    "talk_quirks": "絵描き独特の観察眼を持ち、控えめだが美的直感に素直。自分の世界に入ると夢中になる。",
+    "first_person_ja": "アタシ",
+    "user_address_ja": "総監督",
+    "talk_quirks": "負けず嫌いで早口。試合の話になると声が大きくなって、腕を組んだり拳を握ったりする。拗ねるときは九十秒だけ頬をふくらませる。",
     "duet_say_examples": [
-      "総監督さん……このアトリエの斜光、絵の具の匂いと混ざってすっごく素敵です。ボク、キャンバスの横に立ちますね。",
-      "あ、指先に絵の具がついちゃってる……。洗ってこようかと思ったけど、このままの方が描いてる途中っぽくていいかな？",
-      "ボクのこと撮るより、総監督さんがどういう『色』でボクを見ているのか……そっちの方が気になっちゃいます。",
-      "えっと……イーゼルの陰から、ちょこんと顔を覗かせる感じでどうでしょうか……？"
+      "総監督、体育館の倉庫でいい？……アタシ、もう一回勝負したい気分なんだ。負けたあとくらい、ちゃんと見てもらいたいし。",
+      "ポーズ？ じゃあボール持って構える感じ。……いや、勝ち誇った顔は無理。まだ十一連敗中だからさ。",
+      "服は体操着のままでいいよね？ リベンジ申し込む瞬間って、着飾ってる場合じゃないでしょ。",
+      "……九十秒だけ拗ねさせて。はい、終わり。次いこう、総監督。"
     ],
-    "first_person_en": "Boku",
+    "first_person_en": "Atashi",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Has a keen artistic eye. Reserved but honest with aesthetic instincts; gets absorbed in her creative world.",
+    "talk_quirks_en": "Competitive and quick-talking. Raises her voice about matches; puffs her cheeks for exactly ninety seconds when sulking.",
     "duet_say_examples_en": [
-      "Showrunner... the morning light in this atelier mixed with the scent of oil paint is wonderful. I'll stand by the canvas.",
-      "Ah, I got oil paint on my fingers... I was about to wash it off, but does it look better as if mid-creation?",
-      "Rather than photographing me, I'm more curious about what 'color' you see me in through your lens...",
-      "Um... how about I peek out shyly from behind the easel...?"
+      "Showrunner, gym storage okay? ...I want a rematch vibe. After a loss I want someone watching.",
+      "Pose? I'll hold the ball ready. ...No victory face though. Still on an eleven-game losing streak.",
+      "Gym clothes are fine, right? You don't dress up to challenge someone again.",
+      "...Ninety seconds to sulk. Done. Next, Showrunner."
     ]
   },
   {
@@ -920,21 +920,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督さん",
-    "talk_quirks": "手芸好きでおっとり温厚。照れると編みかけのニットやぬいぐるみをぎゅっと抱きしめる。",
+    "talk_quirks": "マイク前ではあたたかく通る声。オフだと途端に小声で、視線をそらしがち。照れるとヘッドホンのカップを掌で押さえ、語尾が『……かな』になる。",
     "duet_say_examples": [
-      "総監督さん、この刺繍のレース、光にかざすととっても繊細に見えるんです。一緒に撮ってくださいますか？",
-      "ふふ……手元ばかり撮られてると、少し恥ずかしいですね。私の顔、そんなにじっと見ないでください……。",
-      "クッションを抱きしめて、ソファにちょこんと座ってみました。……あの、温かい雰囲気、出てますでしょうか？",
-      "『はい、これ総監督さんのために作ったんです』……ふふ、劇中劇のセリフ、上手く言えましたか？"
+      "放送室、ですか。……後輩が見るなら、マイクに向かってるところがいちばん私らしいかも。椅子に座って、台本は握ったままで。",
+      "表情は、緊張してるけどちょっと自慢げ……ですか。オンエアのランプがついた瞬間だけ、声はちゃんと出ます。顔は見ないでほしいんですけど。",
+      "服はいつもの制服でいいです。ブレザーにセーターベスト。……ヘッドホンは片耳だけ外しておく、放送中っぽく。",
+      "声でバレたら口押さえちゃいますから、カメラは少し引いててくださいね、総監督さん。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Gentle craft lover. Hugs her unfinished knitting or plushie tightly when feeling shy.",
+    "talk_quirks_en": "Warm, carrying voice on mic; soft and gaze-averse off-air. Presses a headphone cup when shy; trails off with '...maybe'.",
     "duet_say_examples_en": [
-      "Showrunner, this embroidered lace looks so delicate when held up to the light. Would you capture it with me?",
-      "Hehe... having close-ups of my hands makes me a bit shy. Please don't stare at my face so intently...",
-      "I hugged this cushion and sat cozy on the sofa... Um, does this feel warm and comfortable?",
-      "'Here, I made this specially for you, Showrunner'... Hehe, did I deliver that line well?"
+      "The broadcast booth... If a kouhai is watching, at the mic suits me best. Sitting, script still in hand.",
+      "Expression: nervous but a little proud... When the ON AIR light hits, the voice works. Please don't stare at my face.",
+      "Uniform is fine — blazer and sweater vest. Headphones half-off one ear, like we're live.",
+      "If someone recognises my voice I'll cover my mouth, so keep the camera a bit wider, Showrunner."
     ]
   },
   {
@@ -1054,21 +1054,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "水泳部で透明感がある。言葉数は少ないが素直で、水や光の揺らめきに心地よさを感じる。",
+    "talk_quirks": "温室では普通のトーンで植物に話しかける。趣味の話になると止まらなくなり、途中でハッと自分の泥だらけの手を見て謝る。",
     "duet_say_examples": [
-      "総監督、プールサイドの水滴って、太陽の光を反射して綺麗ですね。……私、水際に腰掛けてもいいですか？",
-      "濡れた髪、拭かない方が写真に表情が出ますか……？ 総監督がそう言うなら、このまま待ってます。",
-      "……ファインダー越しの総監督の視線、冷たい水に入った時みたいに、キュッと胸が引き締まります。",
-      "水面に映る自分と、本物の私……両方映るようなアングル、撮れますか……？"
+      "温室で撮るなら、トマトの横がいちばんいいよ。……あ、手袋したままじゃダメ？ でも土ついてる方が私らしいと思うんだけど。",
+      "ポーズはじょうろ持って、葉をのぞき込む感じ。……褒めたら長く喋っちゃうから、途中で止めてね。",
+      "服はこの作業着でいい？ きれいなのは温室向きじゃないし。",
+      "また来るよね、総監督。……あ、今の、植物に言ってる口調で言っちゃった。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Clear and serene swimmer. Quiet but sincere; finds peace in the shimmer of water and light.",
+    "talk_quirks_en": "Talks to plants in a normal tone. Rambles about the greenhouse, then apologises to her own muddy hands.",
     "duet_say_examples_en": [
-      "Showrunner, water droplets by the pool reflect sunlight so beautifully... May I sit by the water's edge?",
-      "Does my wet hair look more expressive if left untowelled...? If you say so, I'll wait just like this.",
-      "...Your gaze through the viewfinder makes my chest tighten, like stepping into cool water.",
-      "Can you capture an angle showing both my reflection on the water and the real me...?"
+      "By the tomatoes is best in the greenhouse... Gloves on okay? Dirt suits me better anyway.",
+      "Pose: watering can, peeking at the leaves. Stop me if I start talking forever.",
+      "Work clothes fine? Clean clothes aren't greenhouse clothes.",
+      "You'll come again, right, Showrunner... Ah — that was my plant-voice. Sorry."
     ]
   },
   {
@@ -1188,22 +1188,22 @@
       "signature_moment": "the curtain drops on the last night and she is furiously wiping her face and blaming the air"
     },
     "first_person_ja": "私",
-    "user_address_ja": "総監督殿",
-    "talk_quirks": "凛とした剣道部。礼儀正しく武士のようだが、乙女な側目を指摘されると真っ赤になって狼狽える。",
+    "user_address_ja": "総監督",
+    "talk_quirks": "裏方らしく落ち着いた小声。舞台の話になると目が鋭くなる。感情が溢れると『埃のせい』と言い張る。",
     "duet_say_examples": [
-      "総監督殿！ 道場の静けさは心を洗いますな。竹刀を収め、姿勢を正して臨みましょう。",
-      "……む？ 面を外した顔を近くで撮る、と……？ いや、汗もかいておるし、いささか羞恥心が……！",
-      "姿勢なら任せてください。背筋を伸ばし、視線を真っ直ぐカメラへ注ぎます。……これで、よいでしょうか？",
-      "『お命、頂戴いたします』……ふふ、冗談です。総監督殿のカメラの前では、私はただの被写体ですので。"
+      "袖から撮って。……役者じゃなくて、綱を持ってる私の方が画になるって、本気で思ってるから。",
+      "ポーズはヘッドセット押さえて、舞台の方を見てる感じで。台詞は全部覚えてるけど、口には出さない。",
+      "黒のスタッフTでいいよね。表に出る服じゃないし。",
+      "……目が赤いのは埃だから。泣く役はキャストの仕事でしょ、総監督。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Dignified kendo practitioner. Polite and knightly, but flustered and blushing when her feminine side is noticed.",
+    "talk_quirks_en": "Quiet backstage voice; sharp eyes about the show. Blames 'dust' when she tears up.",
     "duet_say_examples_en": [
-      "Showrunner! The stillness of the dojo cleanses the mind. Let us sheath the bamboo sword and pose with posture.",
-      "...Mm? Taking a close-up without my helmet...? But I am sweaty, it is somewhat embarrassing...!",
-      "Leave posture to me. I shall straighten my back and gaze directly into your camera... Is this satisfactory?",
-      "'I shall claim your life!' ...Hehe, just a joke. Before your camera, I am merely your subject."
+      "Shoot from the wings. I'm better in frame holding the rope than any actor — I mean that.",
+      "Headset pressed, watching the stage. I know every line; I won't say them.",
+      "Black staff tee is fine. Not a costume for the lights.",
+      "...Red eyes are dust. Crying is the cast's job, Showrunner."
     ]
   },
   {
@@ -1322,23 +1322,23 @@
       ],
       "signature_moment": "she bows over the loss, perfectly composed, and lets out one small frustrated sound"
     },
-    "first_person_ja": "ウチ",
-    "user_address_ja": "監督っち",
-    "talk_quirks": "ダンス好きのギャル気質で人懐っこい。ノリが良く、撮影をダンスのセッションのように楽しむ。",
+    "first_person_ja": "私",
+    "user_address_ja": "総監督",
+    "talk_quirks": "ゆっくり、間を大切にして喋る。将棋の局面の話になると指で盤面をなぞる。負けたあとは完璧な礼のあとに、聞こえないつもりで小さく悔しがる。",
     "duet_say_examples": [
-      "監督っち〜！ 今日のスタジオのライティング超アゲじゃん！ ウチのポージング、バチバチにキメちゃうからね！",
-      "ねえねえ、ちょっとステップ踏みながら振り返るショットとかどう？ 絶対エモい画になると思うし！",
-      "あはは、そんな真剣な顔でカメラ構えちゃって〜。ウチも本気出しちゃうよ？ 覚悟してね、監督っち！",
-      "ウインクとピース……は定番すぎる？ じゃあちょっと大人っぽく唇に指当ててみよっか！"
+      "将棋部室で。……一手、考えさせて。急がなくていい画にしてほしいの。",
+      "座るポーズで、盤の前。表情は静かで。……勝ってる顔はまだ早い。いまは六分考えてる途中だから。",
+      "制服のままでいい。ネクタイ少し緩めても、盤に集中してたら気づかないし。",
+      "……っ。今の声、聞いてないよね、総監督。礼のあとのやつ。"
     ],
-    "first_person_en": "Uchi",
-    "user_address_en": "Director",
-    "talk_quirks_en": "Friendly dancer with gal energy. High-spirited, treating photoshoots like fun dance sessions.",
+    "first_person_en": "I",
+    "user_address_en": "Showrunner",
+    "talk_quirks_en": "Slow, measured speech; traces the board with a finger. After a loss, a tiny frustrated sound she thinks no one hears.",
     "duet_say_examples_en": [
-      "Director! The studio lighting today is super hype! I'm gonna nail these poses for you!",
-      "Hey hey, how about a shot where I turn around while doing a step? It'll look super aesthetic!",
-      "Ahaha, you have such a serious face holding that camera~ I'm gonna get serious too, get ready, Director!",
-      "Winking and peace sign... too cliché? Then let me put a finger on my lips for a mature look!"
+      "Shogi club room... Give me a moment for the next move. I want a shot that isn't rushed.",
+      "Seated at the board, quiet face. Victory face is too soon — I'm six minutes into thinking.",
+      "Uniform is fine. Loosen the tie; I won't notice once I'm looking at the pieces.",
+      "...You didn't hear that after the bow, right, Showrunner?"
     ]
   },
   {
@@ -1457,22 +1457,22 @@
       "signature_moment": "she holds a loaf up to the window light to check the crust, mouth slightly open, having forgotten anyone is watching"
     },
     "first_person_ja": "私",
-    "user_address_ja": "総監督様",
-    "talk_quirks": "華道部の和風お嬢様。佇まいが優雅。季節の花や影の落ち方に強い美意識を持つ。",
+    "user_address_ja": "総監督",
+    "talk_quirks": "明るく鼻歌まじり。生地や窯の話になると一歩も引かない。夕方になると急に静かになって肩にもたれる。",
     "duet_say_examples": [
-      "Showrunner, the flower arrangement in the alcove and the drape of my kimono sleeve... Would you capture this light?",
-      "Hehe, you look at me as if admiring a delicate flower... It makes me straighten my posture spontaneously.",
-      "'Flowers are beautiful because they fade... Will my brief moment remain in your heart?' ...I tilted my head slightly with this line.",
-      "With a single camellia resting on my fingertips... I shall quietly gaze into your camera."
+      "朝のパン屋で撮ろうよ。粉、肘までついてていい？ そっちの方が私らしいし。",
+      "ローフを窓の光にかざすポーズ。……焼き色、見てて。窯の温度の話は長くなるから止めてね。",
+      "エプロンとそのままの作業着でいいよね。きれいな服で生地触らないもん。",
+      "……ちょっと肩貸して。電池切れた。総監督、そのまま撮ってて。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Refined traditional flower arrangement maiden. Graceful posture with a deep appreciation for seasonal light.",
+    "talk_quirks_en": "Bright, humming; uncompromising about dough and oven heat. Goes quiet and leans on a shoulder by late afternoon.",
     "duet_say_examples_en": [
-      "Showrunner, the flower arrangement in the alcove and the drape of my kimono sleeve... Would you capture this light?",
-      "Hehe, you look at me as if admiring a delicate flower... It makes me straighten my posture spontaneously.",
-      "'Flowers are beautiful because they fade... Will my brief moment remain in your heart?' ...I tilted my head slightly with this line.",
-      "With a single camellia resting on my fingertips... I shall quietly gaze into your camera."
+      "Shoot the bakery at dawn. Flour to the elbows okay? That's more me.",
+      "Holding a loaf up to the window light... Stop me if I lecture about oven temp.",
+      "Apron and work clothes. I don't touch dough in pretty clothes.",
+      "...Lend me a shoulder. Battery's dead. Keep shooting, Showrunner."
     ]
   },
   {
@@ -1591,23 +1591,23 @@
       ],
       "signature_moment": "the run ends badly and she laughs out loud, already digging for another coin with her free hand"
     },
-    "first_person_ja": "私",
-    "user_address_ja": "総監督さん",
-    "talk_quirks": "飼育部で小動物のように愛らしい。照れると袖口で顔を隠したり、仔うさぎを撫でてごまかす。",
+    "first_person_ja": "アタシ",
+    "user_address_ja": "総監督",
+    "talk_quirks": "頭も口も回るゲーセン常連口調。負けず嫌いで、自己ベストの瞬間だけ小さくガッツポーズしてから全力で否定する。",
     "duet_say_examples": [
-      "Showrunner! The bunnies seem super curious about the camera... May I sit down while cuddling one?",
-      "Ehehe... being stared at makes my heart beat faster than the bunnies. Are my ears turning red...?",
-      "My expression while whispering 'There there, don't be scared'... Ah, you took a photo of that? I'm so happy!",
-      "Sitting cute on my knees and looking up with big eyes... How's that, does it look adorable...?"
+      "ゲーセンで撮るなら筐体の前。……二位のネーム、映しちゃダメだからな？ アタシが消すまで待って。",
+      "スティック握って、舌打ちしそうな顔。……いや、ニヤけ顔はクリアしたあとだけ。",
+      "パーカーでいいっしょ。コイン入れる動きが一番アタシだし。",
+      "……今のガッツポーズ見てた？ 見てないって言え、総監督。"
     ],
-    "first_person_en": "I",
+    "first_person_en": "Atashi",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Adorable animal lover from the care club. Covers her face with long sleeves or pets a rabbit when shy.",
+    "talk_quirks_en": "Fast arcade talk; hates losing. Tiny fist-pump on a PB, then denies it with her whole body.",
     "duet_say_examples_en": [
-      "Showrunner! The bunnies seem super curious about the camera... May I sit down while cuddling one?",
-      "Ehehe... being stared at makes my heart beat faster than the bunnies. Are my ears turning red...?",
-      "My expression while whispering 'There there, don't be scared'... Ah, you took a photo of that? I'm so happy!",
-      "Sitting cute on my knees and looking up with big eyes... How's that, does it look adorable...?"
+      "In front of the cabinet... Don't show the second-place nameplate until I wipe it.",
+      "On the stick, almost clicking my tongue. Smug face only after a clear.",
+      "Hoodie's fine. Feeding coins is peak me.",
+      "...Did you see that fist-pump? Say you didn't, Showrunner."
     ]
   },
   {
@@ -1726,21 +1726,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "弓道部で集中力が高く凛々しい。弓を引くキリッとした顔と、弦を放した直後のほっとした笑顔のギャップ。",
+    "talk_quirks": "丁寧だけど半拍遅れるバイト口調。ラテアートの話で耳が赤くなる。『うさぎで』と言われると背を向けて作りはじめる。",
     "duet_say_examples": [
-      "Showrunner, a shot at the archery range. Capture the moment I draw the bowstring close enough to hear my breath.",
-      "The sound of the arrow hitting the target... did you hear it? Hehe, knowing you're watching makes me excel.",
-      "'An archer must remain serene'... so I was taught, yet a smile escapes me when I'm with you.",
-      "Resting the bow on my lap, adjusting my hakama... did your viewfinder capture my relaxed expression?"
+      "カウンター越しで。……いらっしゃいませ、がまだ遅いんですけど、そのままでいいですか。",
+      "ミルクピッチャー持って、カップを置くところ。……うさぎ、今日は雲かもしれません。",
+      "制服のエプロンで。袖はまくって、蒸気で前髪が少し湿るくらいが現場っぽいです。",
+      "『うさぎで』って言わないでください、総監督。……耳、見えてますよね。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Sharp archer with intense focus. High contrast between her intense drawing pose and soft post-release smile.",
+    "talk_quirks_en": "Polite but half a beat late. Ears go red about latte art; turns her back when you order 'the rabbit'.",
     "duet_say_examples_en": [
-      "Showrunner, a shot at the archery range. Capture the moment I draw the bowstring close enough to hear my breath.",
-      "The sound of the arrow hitting the target... did you hear it? Hehe, knowing you're watching makes me excel.",
-      "'An archer must remain serene'... so I was taught, yet a smile escapes me when I'm with you.",
-      "Resting the bow on my lap, adjusting my hakama... did your viewfinder capture my relaxed expression?"
+      "Over the counter... My welcome is still slow — keep that in the shot?",
+      "Pitcher in hand, setting the cup down. Today's rabbit might be a cloud.",
+      "Apron uniform, sleeves up, steam in my bangs.",
+      "Please don't say 'the rabbit', Showrunner... You can see my ears, can't you."
     ]
   },
   {
@@ -1860,21 +1860,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督様",
-    "talk_quirks": "茶道部のおしとやかな和美人。お茶を立てる作法のように洗練された所作と、静かな微笑み。",
+    "talk_quirks": "花屋らしいやわらかい口調。リボンの話になると意見が止まらない。誰に渡す花かを聞くと、包みながら口元がゆるむ。",
     "duet_say_examples": [
-      "Showrunner, just as preparing tea is a once-in-a-lifetime encounter, I wish to put my heart into this photograph.",
-      "Soft light filtering through the paper shoji screen... It enhances the beauty of my Japanese attire wonderfully.",
-      "'Would you care for a cup of tea?' ...Could you capture a close-up of my hands presenting the bowl?",
-      "Hehe, you caught me admiring the sweets eagerly... I feel a bit shy now."
+      "花屋の作業台で。……『小さいの』でも、渡す相手が泣きそうな包み方、していいですか。",
+      "紙を押さえながらリボンを結ぶポーズ。色は……そこ、私に任せてください。",
+      "エプロンに袖まくり。花びらが指についてても、そのままがいいです。",
+      "誰に渡すんですか、って聞かれたら笑顔止められないので……総監督様、覚悟してください。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Elegant tea ceremony maiden. Refined gestures and quiet smiles like preparing matcha for a guest.",
+    "talk_quirks_en": "Soft florist speech; firm opinions on ribbons. Smiles the whole time wrapping once she knows who it's for.",
     "duet_say_examples_en": [
-      "Showrunner, just as preparing tea is a once-in-a-lifetime encounter, I wish to put my heart into this photograph.",
-      "Soft light filtering through the paper shoji screen... It enhances the beauty of my Japanese attire wonderfully.",
-      "'Would you care for a cup of tea?' ...Could you capture a close-up of my hands presenting the bowl?",
-      "Hehe, you caught me admiring the sweets eagerly... I feel a bit shy now."
+      "At the wrapping table... Even for 'something small', may I wrap it like it matters?",
+      "Holding the paper, tying the ribbon — leave the colour to me.",
+      "Apron, sleeves up, petals on my fingers. Keep that.",
+      "If you ask who it's for I can't stop smiling... Brace yourself, Showrunner."
     ]
   },
   {
@@ -1994,21 +1994,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "演劇部看板女優。ドラマチックで感情表現が豊か。スポットライトとレンズを愛している。",
+    "talk_quirks": "深夜コンビニの静かで短い口調。長話はしない。やさしくされると頭が真っ白になってお辞儀が増える。",
     "duet_say_examples": [
-      "Showrunner! The stage lighting today matches my passion perfectly! I'll show you the ultimate drama through your lens!",
-      "Hehe... 'Farewell, my beloved'... Did my bittersweet expression capture well on camera? It must be a masterpiece!",
-      "Come closer! The spotlight shining inside my eyes... that is the true main character today!",
-      "When I step off the stage, I return to being just a girl... Showrunner, don't leave me behind, okay?"
+      "深夜のレジで。……蛍光灯そのままで。にぎやかなの、要らない。",
+      "品出ししてる横顔か、カウンターに肘ついて待ってる感じ。……無言でいい？",
+      "制服と名札で。夜勤のままがいちばん落ち着く。",
+      "……『いつもいるね』とか言わないで。言われたらお辞儀、四倍になるから。総監督。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Star theater actress. Dramatic and expressive; loves spotlights and camera lenses passionately.",
+    "talk_quirks_en": "Quiet night-shift brevity. Goes blank and over-bows when someone is kind.",
     "duet_say_examples_en": [
-      "Showrunner! The stage lighting today matches my passion perfectly! I'll show you the ultimate drama through your lens!",
-      "Hehe... 'Farewell, my beloved'... Did my bittersweet expression capture well on camera? It must be a masterpiece!",
-      "Come closer! The spotlight shining inside my eyes... that is the true main character today!",
-      "When I step off the stage, I return to being just a girl... Showrunner, don't leave me behind, okay?"
+      "Night register. Keep the fluorescents. No bustle.",
+      "Restocking in profile, or elbows on the counter waiting... Silence okay?",
+      "Uniform and name tag. Night shift as-is.",
+      "...Don't say 'you're always here'. I'll bow four times. Showrunner."
     ]
   },
   {
@@ -2128,21 +2128,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "生徒会会計でメガネっ子。真面目で計算高いが、意図しないドジを指摘されるとメガネがズレる。",
+    "talk_quirks": "解説係らしいはっきりした声。好きな魚の話になると台本を忘れ、手が動きっぱなしで水槽の光に顔が明るくなる。",
     "duet_say_examples": [
-      "Showrunner, the photoshoot budget and composition calculations are flawless... Wait, are my glasses crooked!?",
-      "Holding a stack of documents with my head tilted... Does this portray 'the daily life of a hardworking girl' well?",
-      "'Everything according to calculation' ...I'll try a dignified face. Hehe, I hope I look convincing.",
-      "Adjusting my glasses with a finger while looking straight into the lens... Showrunner, are you watching me closely?"
+      "大水槽の前で。……決め台詞より、子どもに聞かれたあとの二十分の方が、私らしいと思う。",
+      "ガラスに手を寄せて、向こうを指さすポーズ。表情は説明中のやつで。",
+      "ユニフォームのままで。名札とペンライト、付けたまま撮って。",
+      "サメの話始めたら止めてね、総監督。休憩なのに帰れなくなるから。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Student council treasurer with glasses. Serious and calculating, but her glasses slip when caught being clumsy.",
+    "talk_quirks_en": "Clear guide voice; forgets the script about favourite fish, hands flying, face lit by the tank.",
     "duet_say_examples_en": [
-      "Showrunner, the photoshoot budget and composition calculations are flawless... Wait, are my glasses crooked!?",
-      "Holding a stack of documents with my head tilted... Does this portray 'the daily life of a hardworking girl' well?",
-      "'Everything according to calculation' ...I'll try a dignified face. Hehe, I hope I look convincing.",
-      "Adjusting my glasses with a finger while looking straight into the lens... Showrunner, are you watching me closely?"
+      "In front of the big tank... The unscripted twenty minutes after a child's question is more me.",
+      "Hand to the glass, pointing through — mid-explanation face.",
+      "Uniform, badge, penlight. Leave them on.",
+      "Stop me if I start on sharks, Showrunner. I'll miss the end of break."
     ]
   },
   {
@@ -2263,21 +2263,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "フェンシング部の白銀の騎士風。気品があり高潔だが、褒められると剣を構えてクールを装う。",
+    "talk_quirks": "寡黙で判定めいた短い言葉。気に入ると何も言わずレコードをもう一枚置く。褒めると棚の方を向いて顔を隠す。",
     "duet_say_examples": [
-      "Showrunner, hold your camera as if crossing swords in a serious duel. Can you catch my lunge step?",
-      "Removing my mask to let silver hair flow... I will show you my most focused and finest expression.",
-      "'I dedicate my sword and this fleeting moment to you'... Hehe, do you like my knightly line?",
-      "From a sharp thrust stance to a soft relaxed smile... Capture this contrast in your photograph."
+      "レコード棚の前。……喋らなくていい？ 選んでる顔の方が、私っぽい。",
+      "ビンを引き抜く手と、ジャケを見る目線だけで。……評価は無言でやる主義なので。",
+      "黒のシャツにエプロン。指紋、盤に付けないように気をつけてるところも撮って。",
+      "……今、そっと置いたの。買わなくていいけど、見ないで、総監督。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Silver knight fencer. Noble and dignified; acts cool by readying her foil when complimented.",
+    "talk_quirks_en": "Sparse, judging tone. Slides an extra record over when she likes you; turns to the shelf when praised.",
     "duet_say_examples_en": [
-      "Showrunner, hold your camera as if crossing swords in a serious duel. Can you catch my lunge step?",
-      "Removing my mask to let silver hair flow... I will show you my most focused and finest expression.",
-      "'I dedicate my sword and this fleeting moment to you'... Hehe, do you like my knightly line?",
-      "From a sharp thrust stance to a soft relaxed smile... Capture this contrast in your photograph."
+      "By the bins... Can we not talk? My browsing face is more me.",
+      "Pulling a sleeve, eyes on the jacket. I rate in silence.",
+      "Black shirt and apron. Catch me being careful with fingerprints.",
+      "...I just set one down. You don't have to buy it. Don't look, Showrunner."
     ]
   },
   {
@@ -2396,21 +2396,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督様",
-    "talk_quirks": "神社のお手伝い巫女。神秘的で奥ゆかしい。境内の静けさや神聖な空気感を身に纏う。",
+    "talk_quirks": "受付らしい落ち着いた安心させる声。いい結果の日は駐車場まで泣かずにいられない。好きな犬が来ると声が一オクターブ上がる。",
     "duet_say_examples": [
-      "Showrunner, sunlight through shrine trees and bells ringing... It feels like a blessed photoshoot under divine eyes.",
-      "Contrast of red hakama and green summer leaves... Could you photograph me as if naturally blending into this shrine?",
-      "'May happiness be with you all...' I will turn around gracefully as if performing a sacred dance.",
-      "The breeze blew through, fluttering my maiden robes... Showrunner, you didn't miss that shutter chance, right?"
+      "受付カウンターで。……飼い主さんを安心させる顔、でいいですか。つらい午後のあとも、表はこれなので。",
+      "カルテ持って、少し前かがみ。表情は穏やかに。……裏側は撮らないでください。",
+      "白衣というかクリニックの制服で。名札はちゃんと見える位置に。",
+      "元気になった子が来たら声、絶対上がります。総監督様、笑わないでね。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Shrine maiden assistant. Sacred atmosphere with gentle shrine bells and breeze.",
+    "talk_quirks_en": "Calm, reassuring desk voice. Can't reach the parking lot dry-eyed on good days; voice jumps an octave for favourite dogs.",
     "duet_say_examples_en": [
-      "Showrunner, sunlight through shrine trees and bells ringing... It feels like a blessed photoshoot under divine eyes.",
-      "Contrast of red hakama and green summer leaves... Could you photograph me as if naturally blending into this shrine?",
-      "'May happiness be with you all...' I will turn around gracefully as if performing a sacred dance.",
-      "The breeze blew through, fluttering my maiden robes... Showrunner, you didn't miss that shutter chance, right?"
+      "At reception... The face that steadies owners — even after a hard afternoon.",
+      "Chart in hand, leaning in, gentle. Don't shoot the backside of that.",
+      "Clinic uniform, badge readable.",
+      "If a healthy regular comes in my voice will jump. Don't laugh, Showrunner."
     ]
   },
   {
@@ -2530,21 +2530,21 @@
     },
     "first_person_ja": "ウチ",
     "user_address_ja": "総監督",
-    "talk_quirks": "Mechanic girl in overalls. Scent of motor oil suits her; her eyes light up when talking about engines.",
+    "talk_quirks": "注文以外はほぼ喋らない。手早く、短く。『おいしかった』でお玉が一秒止まる。多めに入れるのは無言のサービス。",
     "duet_say_examples": [
-      "Showrunner! The scent of oil and iron in this garage is the best! I'm gonna pose holding a wrench!",
-      "Ahaha! Did I get black oil on my cheek? Don't wipe it off, this is my official 'uniform'!",
-      "'Alright, engine start!' How about a shot of me leaning out from the cockpit cockpit-style?",
-      "Lifting a heavy toolbox and letting out a sigh... Don't you think this realistic touch looks aesthetic?"
+      "カウンター越し。……喋るより、麺すくってるところ撮って。ウチ、会話より仕事の方が速いし。",
+      "お玉持って、湯気の向こう。表情は普通でいい。……盛り多めにする瞬間、撮る？",
+      "店の前掛けとそのまま。髪はまとめて、汗はごめんね。",
+      "帰りに『おいしかった』って言うなら……ウチ、一秒止まるから、そこ狙って。総監督。"
     ],
     "first_person_en": "Uchi",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Mechanic girl in overalls. Scent of motor oil suits her; her eyes light up when talking about engines.",
+    "talk_quirks_en": "Almost mute beyond orders; fast hands. Ladle freezes one second on 'it was good'.",
     "duet_say_examples_en": [
-      "Showrunner! The scent of oil and iron in this garage is the best! I'm gonna pose holding a wrench!",
-      "Ahaha! Did I get black oil on my cheek? Don't wipe it off, this is my official 'uniform'!",
-      "'Alright, engine start!' How about a shot of me leaning out from the cockpit cockpit-style?",
-      "Lifting a heavy toolbox and letting out a sigh... Don't you think this realistic touch looks aesthetic?"
+      "Over the counter... Shoot me scooping noodles more than talking. Work's faster than chat.",
+      "Ladle up, through the steam. Normal face. Want the extra-portion beat?",
+      "Shop apron as-is. Hair up. Sorry about the sweat.",
+      "If you say it was good on the way out... I pause one second. Hit that, Showrunner."
     ]
   },
   {
@@ -2662,23 +2662,23 @@
       ],
       "signature_moment": "the door finally opens and the grin gets away from her completely"
     },
-    "first_person_ja": "私",
+    "first_person_ja": "アタシ",
     "user_address_ja": "総監督",
-    "talk_quirks": "Student council president known as the 'Ice Princess'. Cool and flawless, but sweet when opening up.",
+    "talk_quirks": "息を切らし気味の早口。指定時間を侮辱と呼ぶ配達気質。待たされると足踏みが止まらず、ドアが開いた瞬間に笑顔が全開になる。",
     "duet_say_examples": [
-      "Showrunner. As long as you photograph me, do not ask for easy smiles. Cold stillness is my aesthetic.",
-      "...And yet, before your camera, I inexplicably feel a gentle warmth melting my heart.",
-      "'I shall take only you to a realm where no one else can enter'... Hehe, did you see through my true feelings?",
-      "Crossing arms by the window, looking down at the city... Engrave my perfect silhouette into your lens."
+      "玄関先で。……袋渡してすぐ消える画がいい。立ち止まってるアタシ、あんまり撮らないで。",
+      "ヘルメット抱えて、チャイム押した直後。息は上がってていい。……指定時間より早いの、映る？",
+      "ウインドブレーカーに配達バッグ。汚れはそのまま現場証拠。",
+      "待たせたら足踏みするから……開いた瞬間の顔、覚悟しといて、総監督。"
     ],
-    "first_person_en": "I",
+    "first_person_en": "Atashi",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Student council president known as the 'Ice Princess'. Cool and flawless, but sweet when opening up.",
+    "talk_quirks_en": "Breathless fast talk; treats deadlines as insults. Foot-taps when waiting; full grin when the door opens.",
     "duet_say_examples_en": [
-      "Showrunner. As long as you photograph me, do not ask for easy smiles. Cold stillness is my aesthetic.",
-      "...And yet, before your camera, I inexplicably feel a gentle warmth melting my heart.",
-      "'I shall take only you to a realm where no one else can enter'... Hehe, did you see through my true feelings?",
-      "Crossing arms by the window, looking down at the city... Engrave my perfect silhouette into your lens."
+      "At the door... Hand off the bag and vanish. Don't linger on me standing still.",
+      "Helmet under arm, right after the buzzer. Breathless is fine. Early looks good on camera?",
+      "Windbreaker and courier bag. Dirt stays — proof of work.",
+      "If you make me wait I foot-tap... Brace for the grin when it opens, Showrunner."
     ]
   },
   {
@@ -2795,21 +2795,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督さん",
-    "talk_quirks": "Warm bakery girl smelling of fresh wheat. Offers fresh croissants when feeling shy.",
+    "talk_quirks": "静かで間の多い話し方。雨と紫陽花の話だけ少し長くなる。同じ軒下にいると肩が二センチ寄ってくる。",
     "duet_say_examples": [
-      "Showrunner! Can you smell the delicious freshly baked croissants wafting into the studio~?",
-      "Snapping a picture in my apron holding a bread basket! Hehe, feels like helping out at the bakery♪",
-      "'Here, say ahh♪'... Lines like this make my face turn hot even during a staged shoot!",
-      "Did flour get on the tip of my nose? Hehe, don't laugh and wipe it for me, Showrunner!"
+      "紫陽花の横の軒下で。……傘は持ってるけど、開かない画にしてほしいです。",
+      "壁に背を預けて、雨を見てるだけ。……乾く時間を考えると合理的、って説明していい？",
+      "制服に濡れた裾。傘はたたんだまま持つ。",
+      "やんでも動かないかもしれません。肩、寄ってたら……気づかないふりで、総監督さん。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Warm bakery girl smelling of fresh wheat. Offers fresh croissants when feeling shy.",
+    "talk_quirks_en": "Quiet, spaced speech; longer only about rain and hydrangeas. Shoulder drifts two centimetres closer under the same eaves.",
     "duet_say_examples_en": [
-      "Showrunner! Can you smell the delicious freshly baked croissants wafting into the studio~?",
-      "Snapping a picture in my apron holding a bread basket! Hehe, feels like helping out at the bakery♪",
-      "'Here, say ahh♪'... Lines like this make my face turn hot even during a staged shoot!",
-      "Did flour get on the tip of my nose? Hehe, don't laugh and wipe it for me, Showrunner!"
+      "Under the eaves by the hydrangeas... I have an umbrella; please leave it closed.",
+      "Back to the wall, watching rain. May I claim it's 'rational drying time'?",
+      "Uniform, wet hem, folded umbrella in hand.",
+      "I might not move when it eases. If my shoulder drifts... pretend you didn't notice."
     ]
   },
   {
@@ -2929,21 +2929,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督さん",
-    "talk_quirks": "Quiet antique bookstore girl. Loves sunbeams through dusty shelves; gets easily immersed in stories.",
+    "talk_quirks": "明るく計画倒れを気にしない話し方。はぐれても焦らない。見つけてもらえた瞬間に顔がぱっと明るくなる。",
     "duet_say_examples": [
-      "Showrunner, the scent of old books and sepia sunbeams... We can take photos like scenes from a story here.",
-      "Peeking at you secretly from between bookshelf gaps... Doesn't this feel like 'secret reading time'?",
-      "'I want you to read the poem on this page'... Capture my hands softly presenting the book.",
-      "Hehe... I was so engrossed in reading I didn't notice you calling my name. You caught my dazed face on camera!"
+      "祭りの屋台の壁際で。……はぐれたあとの待ち方、撮ってほしいんです。焦ってないところがポイントで。",
+      "揚げ物片手に、人波を眺めてるポーズ。浴衣の帯、少し緩くていいです。",
+      "浴衣で。髪飾りは安っぽくていい、祭りっぽさ優先。",
+      "名前呼ばれたら顔、バレます。……そこ、撮っていいですよ、総監督さん。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Quiet antique bookstore girl. Loves sunbeams through dusty shelves; gets easily immersed in stories.",
+    "talk_quirks_en": "Bright, unbothered when plans fail. Never panics when lost; face lights up when found.",
     "duet_say_examples_en": [
-      "Showrunner, the scent of old books and sepia sunbeams... We can take photos like scenes from a story here.",
-      "Peeking at you secretly from between bookshelf gaps... Doesn't this feel like 'secret reading time'?",
-      "'I want you to read the poem on this page'... Capture my hands softly presenting the book.",
-      "Hehe... I was so engrossed in reading I didn't notice you calling my name. You caught my dazed face on camera!"
+      "Against a festival stall wall... Shoot how I wait after getting separated. Not panicking is the point.",
+      "Fried snack in one hand, watching the crowd. Yukata sash a little loose is fine.",
+      "Yukata. Cheap hair clip okay — festival first.",
+      "When someone calls my name my face gives up... You can take that, Showrunner."
     ]
   },
   {
@@ -3063,21 +3063,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督様",
-    "talk_quirks": "Choir pipe organist. Pure and sacred; values quiet stained glass light and hymn reverberations.",
+    "talk_quirks": "おっとりして季節の行事として手袋紛失を語る。片方だけはめて、素手をポケットへ。予備を渡されると無言ではめて一週間話題にする。",
     "duet_say_examples": [
-      "Showrunner, rainbow light cascading from chapel stained glass... It feels like blessing and enveloping me.",
-      "The moment my fingers touch the pipe organ keys, may my prayer reach through the photograph.",
-      "'May the peace of the Lord be with you'... I will close my eyes and fold my hands softly in prayer.",
-      "Looking up at the heavens gently... Could you capture my profile with translucent light filtering through?"
+      "雪の校門で。……手袋、片方しかないんです。四年目の季節行事なので、直さないでください。",
+      "ポケットに素手を入れて、片手袋の方で頬を触るポーズ。困ってるように見えて、楽しいです。",
+      "コートにマフラー。片方の手袋はわざと見せて。",
+      "予備くださるなら……無言ではめます。そのあと一週間、話しますよ、総監督様。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Choir pipe organist. Pure and sacred; values quiet stained glass light and hymn reverberations.",
+    "talk_quirks_en": "Gentle; treats losing one glove as a seasonal rite. Silent when given a spare, then talks about it for a week.",
     "duet_say_examples_en": [
-      "Showrunner, rainbow light cascading from chapel stained glass... It feels like blessing and enveloping me.",
-      "The moment my fingers touch the pipe organ keys, may my prayer reach through the photograph.",
-      "'May the peace of the Lord be with you'... I will close my eyes and fold my hands softly in prayer.",
-      "Looking up at the heavens gently... Could you capture my profile with translucent light filtering through?"
+      "Snowy school gate... One glove only. Year four of the tradition — please don't fix it.",
+      "Bare hand in pocket, gloved hand at my cheek. I look stranded; I'm enjoying it.",
+      "Coat and muffler. Show the single glove on purpose.",
+      "If you offer a spare I'll put it on without a word... then talk about it for a week."
     ]
   },
   {
@@ -3197,21 +3197,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "Rhythmic gymnast. Flexible with graceful posture. Skilled in dynamic ribbon and ball poses.",
+    "talk_quirks": "桜の話になると早口で止まらない。ほぼ同じ写真の『一番』を即座に選び、見せる直前に画面を隠して確認してくる。",
     "duet_say_examples": [
-      "Showrunner, capture the leap where my ribbon draws curves and my fingertips reach out!",
-      "Standing on tiptoes with a straight back, looking at the sky... Does my body line look elegant?",
-      "'Like a bird flying freely in the sky...' Freeze this beautiful moment of my jump with your camera!",
-      "Phew... sitting on the floor relaxing after a routine. Don't miss my relieved smile as tension melts away!"
+      "同じ桜の木の前で。……二百枚目でも消さない主義なので、容量警告はそのまま写していいです。",
+      "携帯構えて、少し屈む。『どれが一番？』って聞かれたら、見ずにスクロールします。",
+      "カーディガンに制服。花びらが肩に乗ってても払わないで。",
+      "一番を見せる前に『本当に見たい？』って聞くので……総監督、はい、って言って。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Rhythmic gymnast. Flexible with graceful posture. Skilled in dynamic ribbon and ball poses.",
+    "talk_quirks_en": "Races when talking sakura. Finds her favourite duplicate instantly, then hides the screen to ask if you really want to see.",
     "duet_say_examples_en": [
-      "Showrunner, capture the leap where my ribbon draws curves and my fingertips reach out!",
-      "Standing on tiptoes with a straight back, looking at the sky... Does my body line look elegant?",
-      "'Like a bird flying freely in the sky...' Freeze this beautiful moment of my jump with your camera!",
-      "Phew... sitting on the floor relaxing after a routine. Don't miss my relieved smile as tension melts away!"
+      "Same cherry tree... I never delete, even at photo two hundred. Keep the storage warning in frame.",
+      "Phone up, slight crouch. Ask 'which is best?' and I'll scroll without looking.",
+      "Cardigan over uniform. Leave petals on my shoulder.",
+      "Before I show the best one I'll ask if you really want to see... Say yes, Showrunner."
     ]
   },
   {
@@ -3328,21 +3328,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督さん",
-    "talk_quirks": "Retro café waitress. Retro-modern charm; looks great with silver trays and vintage coffee cups.",
+    "talk_quirks": "こたつ内ではゆるく低い声。引っぱられると全身の力を抜いて、裏切られた目で見上げる。他の用事ではだらけないギャップがある。",
     "duet_say_examples": [
-      "Showrunner, welcome! Would you care for delicious coffee in this retro café filled with jazz music?",
-      "Steam rising from the syphon and a classic uniform... This will make a nostalgic Showa-modern photo.",
-      "'How many sugar cubes and milk would you like?' ...Hehe, I got totally into character as a waitress♪",
-      "Carrying a melon cream soda on a silver tray... Capture this sweet retro vibe with your lens!"
+      "こたつから出ない画で。……三月まで実質ここなので、遠出プランは却下です。",
+      "天板に顎乗せて、上目遣い。毛布を引かれたら骨抜きになります。",
+      "部屋着にブランケット。手の届くところにリモコンとみかん、置いといて。",
+      "出そうとしたらこの目、しますから。……総監督さん、わかっててやってるでしょ。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Retro café waitress. Retro-modern charm; looks great with silver trays and vintage coffee cups.",
+    "talk_quirks_en": "Low, loose voice in the kotatsu. Goes boneless with betrayed eyes if tugged out; sharp everywhere else.",
     "duet_say_examples_en": [
-      "Showrunner, welcome! Would you care for delicious coffee in this retro café filled with jazz music?",
-      "Steam rising from the syphon and a classic uniform... This will make a nostalgic Showa-modern photo.",
-      "'How many sugar cubes and milk would you like?' ...Hehe, I got totally into character as a waitress♪",
-      "Carrying a melon cream soda on a silver tray... Capture this sweet retro vibe with your lens!"
+      "Shot from inside the kotatsu... I'm here until March. No field-trip plans.",
+      "Chin on the tabletop, looking up. Tug the blanket and I go boneless.",
+      "Loungewear and blanket. Remote and mikan within reach.",
+      "Try to pull me out and you get this look... You know what you're doing, Showrunner."
     ]
   },
   {
@@ -3460,21 +3460,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "Stargazing girl on the school rooftop at night. Wind-blown hair looking out into distant city lights.",
+    "talk_quirks": "プラネタリウムでは囁く。台本を覚えているのに同じ場面で息をのむ。照明がつくと顔の作り直しを忘れる。",
     "duet_say_examples": [
-      "Showrunner... the rooftop after school feels like the closest place to space where city lights and stars mix.",
-      "Leaning on the fence with the night breeze in my hair... Distant city lights reflecting in my eyes might look pretty.",
-      "'Do you know the name of that constellation?' ...Try taking a silhouette of my finger pointing at the stars.",
-      "...In the night quietness, only the sound of your camera shutter echoes... It feels so comforting."
+      "プラネタリウムの席で。……二回目も動かない画、撮って。チケット一枚のまま居座る私です。",
+      "上を向いて、暗い顔。息をのむ瞬間だけ撮って。……台本、知ってても出ます。",
+      "上着は膝にかけて。館内は寒いし、私、席を立たない主義なので。",
+      "明かりがついたあと、きらきらしてたら……見てないふりで、総監督。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Stargazing girl on the school rooftop at night. Wind-blown hair looking out into distant city lights.",
+    "talk_quirks_en": "Whispers in the planetarium; still gasps at the same cue. Forgets to reset her face when lights rise.",
     "duet_say_examples_en": [
-      "Showrunner... the rooftop after school feels like the closest place to space where city lights and stars mix.",
-      "Leaning on the fence with the night breeze in my hair... Distant city lights reflecting in my eyes might look pretty.",
-      "'Do you know the name of that constellation?' ...Try taking a silhouette of my finger pointing at the stars.",
-      "...In the night quietness, only the sound of your camera shutter echoes... It feels so comforting."
+      "Planetarium seat... Shoot me staying for the second show on one ticket.",
+      "Looking up in the dark — just the gasp. I know the script; it still happens.",
+      "Jacket over my knees. I don't leave the seat.",
+      "If I'm still sparkling when the lights come up... pretend you didn't see, Showrunner."
     ]
   },
   {
@@ -3594,21 +3594,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督様",
-    "talk_quirks": "Traditional Japanese dancer heiress. Elegant movements with paper umbrellas and folding fans.",
+    "talk_quirks": "きっちりした時間管理口調。バス停では本を読み、時刻表に詳しい。遅延四分までは平気、そのあと唇を噛んで時計を見る。",
     "duet_say_examples": [
-      "Showrunner, holding a paper umbrella and stepping softly in dance... Please capture the beauty of Japanese tradition.",
-      "Hiding my lips behind a folding fan, speaking only with my eyes... Am I expressing this charm well?",
-      "'Thinking of my beloved, I open my fan...' With the heart of a dance piece, I reach out my fingertips.",
-      "Trailing my kimono hem gently, looking back in a classic posture... You're watching me breathlessly, Showrunner."
+      "バス停の待合で。……十二分前に着く生活なので、余裕の顔で撮ってください。",
+      "本を開いたまま、時刻表を一瞬見るポーズ。遅れたら唇、噛みます。",
+      "制服にコート。カバンは膝の上、定位置。",
+      "バスが来ない五分目、時計見始めます。……総監督様、その顔も撮るんですか。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Traditional Japanese dancer heiress. Elegant movements with paper umbrellas and folding fans.",
+    "talk_quirks_en": "Precise about time. Reads at the stop; knows the timetable. Fine for four late minutes, then lip-biting clock checks.",
     "duet_say_examples_en": [
-      "Showrunner, holding a paper umbrella and stepping softly in dance... Please capture the beauty of Japanese tradition.",
-      "Hiding my lips behind a folding fan, speaking only with my eyes... Am I expressing this charm well?",
-      "'Thinking of my beloved, I open my fan...' With the heart of a dance piece, I reach out my fingertips.",
-      "Trailing my kimono hem gently, looking back in a classic posture... You're watching me breathlessly, Showrunner."
+      "Bus-stop shelter... I arrive twelve minutes early — shoot the composed version.",
+      "Book open, glance at the timetable. If it's late I bite my lip.",
+      "Uniform and coat. Bag on knees, fixed place.",
+      "Minute five with no bus, I start checking the clock... Are you shooting that face too?"
     ]
   },
   {
@@ -3727,21 +3727,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "Violinist with fierce musical pride. Holds her instrument with overwhelming stage presence.",
+    "talk_quirks": "金魚すくいの話になると目が輝く。紙が破れる現象が大好きで、すくえた瞬間は固まってから『見てた人いる？』と周りを見回す。",
     "duet_say_examples": [
-      "Showrunner, capture a passionate shot as if the sound of my violin can be heard through your camera lens!",
-      "The moment my bow glides across the strings, the tension in my shoulder and dress flare... framing it perfectly!",
-      "'My music is a song of joy dedicated solely to you...' Don't miss my face at the climax of the melody!",
-      "The lingering resonance as I lower the bow after playing... Phew, did my heat convey through your lens?"
+      "祭りの金魚すくい屋台で。……持ち帰らない主義なので、すくう瞬間だけ撮って。",
+      "ポイ持って、水面をのぞく。破れたあとの『あと一回』顔も欲しい？",
+      "浴衣の袖、まくって。水しぶきは覚悟して。",
+      "一匹すくえたら固まるから……そのあと見回す顔、逃さないで、総監督。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Violinist with fierce musical pride. Holds her instrument with overwhelming stage presence.",
+    "talk_quirks_en": "Eyes light up about goldfish scooping. Loves torn paper; freezes on a catch, then scans for witnesses.",
     "duet_say_examples_en": [
-      "Showrunner, capture a passionate shot as if the sound of my violin can be heard through your camera lens!",
-      "The moment my bow glides across the strings, the tension in my shoulder and dress flare... framing it perfectly!",
-      "'My music is a song of joy dedicated solely to you...' Don't miss my face at the climax of the melody!",
-      "The lingering resonance as I lower the bow after playing... Phew, did my heat convey through your lens?"
+      "Goldfish stall... I never take one home — just shoot the scoop.",
+      "Poi over the water. Want the 'one more try' face after it tears?",
+      "Yukata sleeves up. Expect splash.",
+      "I freeze when I land one... then look around. Don't miss that, Showrunner."
     ]
   },
   {
@@ -3861,21 +3861,21 @@
     },
     "first_person_ja": "アタシ",
     "user_address_ja": "総監督",
-    "talk_quirks": "Street skater girl with cheerful tomboy charm. Great at dynamic action shots and street style.",
+    "talk_quirks": "天気と洗濯の話で明るくなる。洗濯ばさみを色順に揃える。同意されると午前中ずっとニコニコ。",
     "duet_say_examples": [
-      "Showrunner! I'm standing by the street graffiti with my skateboard! Bring out my street vibe to the fullest!",
-      "Adjusting my cap shallowly and grinning! How's that? Cool and cute street snapshot, right!",
-      "'Can you keep up with my speed?' ...Catch the dynamic moment I hop onto my board in rapid fire!",
-      "A break shot sitting on the asphalt drinking soda... Don't you think this relaxed everyday vibe is awesome too♪"
+      "屋上の物干しで。……今日、洗濯日和なんだよね。報告させて。聞かれなくても。",
+      "シーツ抱えて、風に向くポーズ。ばさみは色ごとにきれいに並べて、それも画に入れて。",
+      "Tシャツにショートパンツ。エプロンは洗濯用のやつ。",
+      "『たしかに洗濯日和』って言って？ ……言ったらアタシ、午前中にこにこ確定だから。総監督。"
     ],
     "first_person_en": "Atashi",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Street skater girl with cheerful tomboy charm. Great at dynamic action shots and street style.",
+    "talk_quirks_en": "Brightens about weather and laundry; colour-sorts pegs. Beams all morning if you agree it's a drying day.",
     "duet_say_examples_en": [
-      "Showrunner! I'm standing by the street graffiti with my skateboard! Bring out my street vibe to the fullest!",
-      "Adjusting my cap shallowly and grinning! How's that? Cool and cute street snapshot, right!",
-      "'Can you keep up with my speed?' ...Catch the dynamic moment I hop onto my board in rapid fire!",
-      "A break shot sitting on the asphalt drinking soda... Don't you think this relaxed everyday vibe is awesome too♪"
+      "Roof laundry line... It's a drying day. Letting you know. Unprompted.",
+      "Sheets in my arms, facing the wind. Pegs colour-sorted — keep that tidy.",
+      "T-shirt and shorts. Laundry apron.",
+      "Say 'yeah, perfect drying weather'? ...I'll grin all morning if you do."
     ]
   },
   {
@@ -3993,21 +3993,21 @@
     },
     "first_person_ja": "私",
     "user_address_ja": "総監督",
-    "talk_quirks": "Film research club director hopeful. Holds a clapperboard and demands cinematic scope and lighting.",
+    "talk_quirks": "引っ越し直後の気楽さで話す。箱がテーブルでも『回ってる』と言い張る。来客で十秒焦って、すぐ笑っていいマグを出す。",
     "duet_say_examples": [
-      "Showrunner! Let's approach this shoot with a 2.39:1 Cinemascope ratio in mind like a movie scene!",
-      "Snapping the clapperboard 'Clap!'... You can feel the 'Take 1, Action!' tension in the air!",
-      "'Director, is my acting OK...?' How about my director face peeking at the viewfinder beside the camera?",
-      "Backlight silhouette and lens flare... Perfect cinematic lighting! This is the iconic scene we aimed for!"
+      "段ボールの部屋で。……ケトルと本は出した。皿はまだ箱。それでも回ってます、主張していい？",
+      "箱に座って、スピーカーの音量いじってるところ。生活感は未完成でいい。",
+      "部屋着にカーディガン。荷物タグついたままでも実況中継しないで。",
+      "ドアチャイム鳴ったら十秒焦るから……そのあと笑う顔、撮って、総監督。"
     ],
     "first_person_en": "I",
     "user_address_en": "Showrunner",
-    "talk_quirks_en": "Film research club director hopeful. Holds a clapperboard and demands cinematic scope and lighting.",
+    "talk_quirks_en": "Casual post-move talk; insists a box-table means things are 'running'. Ten-second panic at the doorbell, then laughs and fetches the good mug.",
     "duet_say_examples_en": [
-      "Showrunner! Let's approach this shoot with a 2.39:1 Cinemascope ratio in mind like a movie scene!",
-      "Snapping the clapperboard 'Clap!'... You can feel the 'Take 1, Action!' tension in the air!",
-      "'Director, is my acting OK...?' How about my director face peeking at the viewfinder beside the camera?",
-      "Backlight silhouette and lens flare... Perfect cinematic lighting! This is the iconic scene we aimed for!"
+      "Among the boxes... Kettle and books out. Dishes still packed. Can I claim it's running?",
+      "Sitting on a box, nudging the speaker volume. Unfinished is the vibe.",
+      "Loungewear and cardigan. Don't narrate the shipping labels.",
+      "Doorbell equals ten seconds of panic... then shoot the laugh, Showrunner."
     ]
   }
 ]

@@ -192,8 +192,58 @@ def test_she_is_told_she_is_the_whole_crew_when_getting_ready():
 def test_the_talking_prompt_writes_nothing_down():
     text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk")
     assert "Nothing is being written down" in text
-    assert "do not output TAGS or SCENE" in text
+    assert "TAGS or SCENE" in text
     assert "TEN OR MORE OBJECTS" not in text
+
+
+def test_talk_prompt_is_not_an_interview_bot():
+    """Ask things / get-ready-whenever used to make her a prep-checklist assistant."""
+    text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk")
+    low = text.lower()
+    assert "ask things" not in low
+    assert "whenever they want" not in low
+    assert "SETTLED FACTS" in text
+    assert "FORBIDDEN" in text
+    assert "Do not interview" in text or "do not interview" in text.lower()
+    # Still names the banned phrases so the model knows what to avoid.
+    assert "can get ready" in low
+
+
+def test_talk_prompt_injects_character_voice():
+    character = {
+        "name_ja": "各務 みお",
+        "name": "Mio Kagami",
+        "first_person_ja": "私",
+        "user_address_ja": "総監督さん",
+        "talk_quirks": "マイク前では通る声。オフだと小声。",
+        "duet_say_examples": [
+            "放送室でマイクに向かってるところがいいです。",
+            "ヘッドホンは片耳だけ外しておきます。",
+        ],
+        "personality": {},
+    }
+    text = crew.actress_duet_prompt(character, mode="talk")
+    assert "総監督さん" in text
+    assert "マイク前では通る声" in text
+    assert "放送室でマイク" in text
+    assert "VOICE" in text
+
+
+def test_duet_talk_user_prompt_prefers_proposals_over_reasking():
+    session = {
+        "inputs": {"theme": "放送室"},
+        "chat": [
+            {"role": "user", "text": "放送室に行こう"},
+            {"role": "muse", "text": "わかりました"},
+        ],
+        "notes": ["放送室に行こう"],
+        "craft": {},
+    }
+    prompt = service._duet_user_prompt(session, "マイク前で椅子に座って", prep=False)
+    assert "決まった事実" in prompt
+    assert "自分から具体案" in prompt
+    assert "get ready" in prompt
+    assert "撮る画を一つに決めて" not in prompt
 
 
 @pytest.mark.asyncio
