@@ -104,6 +104,11 @@ class CharacterPick(BaseModel):
     character_id: str = Field(..., min_length=1)
 
 
+class PartnerPick(BaseModel):
+    # "" clears the partner, so unlike the lead this one may be empty.
+    partner_preset: str = ""
+
+
 class ChatMessage(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
 
@@ -180,6 +185,18 @@ async def patch_inputs(session_id: str, body: InputsPatch, request: Request):
 async def pick_character(session_id: str, body: CharacterPick, request: Request):
     session = await _session(request, session_id)
     return await _run(service.pick_character(_db(request), session, body.character_id))
+
+
+@router.post("/sessions/{session_id}/partner")
+async def pick_partner(session_id: str, body: PartnerPick, request: Request):
+    """Cast the second Muse in 二人芝居, or clear her with an empty id.
+
+    Separate from the inputs patch because casting resolves the character then
+    and there: storing the id alone left the panel showing "no partner" until
+    she spoke, which read as the pick having failed.
+    """
+    session = await _session(request, session_id)
+    return await _run(service.pick_partner(_db(request), session, body.partner_preset or ""))
 
 
 @router.post("/sessions/{session_id}/table")

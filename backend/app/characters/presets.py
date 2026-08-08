@@ -810,15 +810,37 @@ async def get_preset_diaries(db, preset_id: str) -> list[dict[str, Any]]:
     return list(preset.get("diaries") or [])
 
 
+# Her diary lives on the character's own Qdrant payload, so it grows every time
+# a session is wrapped and nothing ever removed one. Far more than this is not a
+# memory, it is a payload.
+MAX_DIARIES = 50
+
+
 async def add_preset_diary(db, preset_id: str, diary: dict[str, Any]) -> dict[str, Any] | None:
-    """Append a new diary entry to a character preset."""
+    """Append a new diary entry to a character preset, oldest dropped past the cap."""
     preset = await get_preset(db, preset_id)
     if not preset:
         return None
     diaries = list(preset.get("diaries") or [])
     diaries.append(diary)
+    if len(diaries) > MAX_DIARIES:
+        diaries.sort(key=lambda d: d.get("timestamp") or 0.0)
+        diaries = diaries[-MAX_DIARIES:]
     await update_preset(db, preset_id, {"diaries": diaries})
     return diary
+
+
+async def delete_preset_diary(db, preset_id: str, diary_id: str) -> bool:
+    """Remove one entry. True when something was actually removed."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return False
+    diaries = list(preset.get("diaries") or [])
+    kept = [d for d in diaries if str(d.get("id") or "") != str(diary_id)]
+    if len(kept) == len(diaries):
+        return False
+    await update_preset(db, preset_id, {"diaries": kept})
+    return True
 
 
 async def mark_diary_read(db, preset_id: str, diary_id: str) -> dict[str, Any] | None:
@@ -838,17 +860,41 @@ async def mark_diary_read(db, preset_id: str, diary_id: str) -> dict[str, Any] |
     return target
 
 
-async def mark_secret_banter_fired(db, preset_id: str, diary_id: str) -> None:
-    """Mark that the one-off secret banter reaction for reading this diary has been fired."""
+async def get_unacknowledged_read_diaries(db, preset_id: str) -> list[dict[str, Any]]:
+    """Entries the Showrunner has read but she has never said anything about.
+
+    Newest first. This is what makes her bring it up at the top of the next
+    session instead of the instant the panel opened the page.
+    """
+    diaries = await get_preset_diaries(db, preset_id)
+    caught = [
+        d for d in diaries
+        if d.get("read") and not d.get("secret_banter_fired")
+    ]
+    caught.sort(key=lambda d: d.get("timestamp") or 0.0, reverse=True)
+    return caught
+
+
+async def mark_secret_banter_fired(db, preset_id: str, diary_ids: list[str]) -> None:
+    """Mark these entries as ones she has already been caught over.
+
+    Takes the whole set, not one id: being caught is a single moment, however
+    many pages they turned. Anything read *after* this becomes a fresh catch.
+    """
+    wanted = {str(i) for i in diary_ids if i}
+    if not wanted:
+        return
     preset = await get_preset(db, preset_id)
     if not preset:
         return
     diaries = list(preset.get("diaries") or [])
+    touched = False
     for d in diaries:
-        if str(d.get("id") or "") == str(diary_id):
+        if str(d.get("id") or "") in wanted and not d.get("secret_banter_fired"):
             d["secret_banter_fired"] = True
-            break
-    await update_preset(db, preset_id, {"diaries": diaries})
+            touched = True
+    if touched:
+        await update_preset(db, preset_id, {"diaries": diaries})
 
 
 async def get_recent_diary_summaries(db, preset_id: str, limit: int = 3) -> list[dict[str, Any]]:

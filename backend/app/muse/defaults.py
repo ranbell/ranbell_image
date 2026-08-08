@@ -7,18 +7,24 @@ runs, so the comments say what breaks when it moves.
 from __future__ import annotations
 
 # ── The draft ──────────────────────────────────────────────────────────────
-# Four variations from one seed and one latent, so the batch is what varies and
-# nothing else. They are cheap in steps but full size: the draft is not a
-# thumbnail to be re-tagged and thrown away, it is the picture the rest of the
-# chain argues with, and at 12 steps it is already good enough to keep.
+# One full-size frame, not a thumbnail: the test shot is the picture the rest of
+# the chain argues with, so it has to be the real thing.
 DRAFT_DEFAULTS: dict[str, object] = {
     "width": 896,
     "height": 1152,
-    "draft_steps": 12,
+    # 12 was where the variations-in-a-batch design left it — enough to judge a
+    # composition four ways. Shooting one frame instead buys the steps back, and
+    # at 20 the test shot is worth keeping rather than only worth reading.
+    "draft_steps": 20,
     # Low enough that the checkpoint fills in what the prompt did not say, high
     # enough that it still obeys. Below 3 the theme starts slipping.
     "draft_cfg": 4.0,
-    "draft_count": 4,
+    # One. A batch of four was four opinions to choose between, but it is also
+    # the thing that makes a full-size latent run out of card (see CLAUDE.md:
+    # batch 2 and up is where the margin goes), and the chain only ever argues
+    # with one of them. This is the final shoot's batch too — `run_shoot_job`
+    # reads the same key.
+    "draft_count": 1,
 }
 
 # ── Board / shoot ───────────────────────────────────────────────────────────

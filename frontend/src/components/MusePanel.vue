@@ -8,6 +8,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterGallery from './CharacterGallery.vue'
+import ActressDiaryModal from './muse/ActressDiaryModal.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -23,6 +24,7 @@ const busy = ref(false)
 const streamLive = ref(false)
 const showPicker = ref(false)
 const showPartnerPicker = ref(false)
+const showDiary = ref(false)
 const showSettings = ref(false)
 const showCast = ref(false)
 const preview = ref('')
@@ -84,14 +86,39 @@ const act = computed(() => {
 // the craft is only written when she is asked to get ready, and the two words
 // that drive it replace「ボード」/「OK」.
 const isDuet = computed(() => session.value?.mode === 'duet')
+// Getting ready still goes through chat — what she is told is standing
+// direction, and the note has to be on the record. The two stages that produce
+// pictures are buttons on their own endpoints (`runStage`).
 const DUET_PREP = '撮影準備'
-const DUET_SHOT = '試し撮り'
 
 const canStart = computed(() =>
   !busy.value && needs.value.length === 0 && act.value === 'setup')
 const chatLocked = computed(() =>
   busy.value || status.value === 'discussing' || status.value === 'boarding' ||
   status.value === 'shooting')
+
+// Nothing can be photographed before she has written a prompt. Both stages said
+// so only by failing after the click; now they say so by not being clickable.
+const hasPrompt = computed(() => Boolean(craft.value.prompt))
+// Her diary is written from the final shoot, so wrapping is only offered once
+// there is one — and only once, because each wrap used to queue another diary.
+const diaryState = computed(() => session.value?.diary || {})
+const diaryWriting = computed(() => diaryState.value.status === 'writing')
+const diaryDone = computed(() => diaryState.value.status === 'ok')
+const canFinish = computed(() =>
+  Boolean(shootImages.value.length) && !diaryWriting.value && !diaryDone.value)
+const finishHint = computed(() => {
+  if (!shootImages.value.length) return t('muse.finishNeedsShoot')
+  if (diaryWriting.value) return t('muse.diaryWriting')
+  if (diaryDone.value) return t('muse.diaryDone')
+  return t('muse.finishTitle')
+})
+
+// Whether a model is busy on our behalf at all — the thinking bubble used to
+// wait for the first token, which is precisely the stretch where the model is
+// being loaded and the panel looks frozen.
+const thinking = computed(() =>
+  Boolean(speaking.value) || status.value === 'discussing')
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
@@ -262,6 +289,17 @@ function connectStream(id) {
       scrollChat()
       return
     }
+    if (evt.type === 'diary_status') {
+      await refresh()
+      if (evt.status === 'ok') {
+        emit('toast', { msg: t('muse.diaryReady'), type: 'info' })
+      } else if (evt.status === 'failed') {
+        // Silence was the old behaviour, and the Showrunner waited for an entry
+        // that was never coming.
+        emit('toast', { msg: t('muse.diaryFailed'), type: 'error' })
+      }
+      return
+    }
     if (evt.type === 'board_ready' || evt.type === 'board_attached' ||
         evt.type === 'shoot_attached' || evt.type === 'craft_updated' ||
         evt.type === 'session_updated') {
@@ -335,17 +373,26 @@ async function pickCharacter(id) {
   } catch (err) { fail(err) }
 }
 
+// Casting resolves the character server-side and hands it straight back, so the
+// card fills in on the click. Patching the id alone left `partner_character`
+// empty until she happened to speak, and picking somebody looked like it had
+// silently failed.
 async function pickPartnerCharacter(id) {
   showPartnerPicker.value = false
+  if (!session.value) return
   if (id && inputs.value.character_id === id) {
-    emit('toast', { msg: '主演とは異なる Muse をパートナーに選んでください。', type: 'error' })
+    emit('toast', { msg: t('muse.partnerMustDiffer'), type: 'error' })
     return
   }
-  await patchInputs({ partner_preset: id })
+  try {
+    session.value = await api(`/api/muse/sessions/${session.value.session_id}/partner`, {
+      method: 'POST', body: JSON.stringify({ partner_preset: id || '' }),
+    })
+  } catch (err) { fail(err) }
 }
 
 async function clearPartnerCharacter() {
-  await patchInputs({ partner_preset: '' })
+  await pickPartnerCharacter('')
 }
 
 async function setPreset(p) {
@@ -407,10 +454,34 @@ async function sendChat(text) {
       method: 'POST', body: JSON.stringify({ text: body }),
     })
     scrollChat()
-  } catch (err) { fail(err) } finally { busy.value = false }
+  } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
+}
+
+// A turn that failed never sends its closing chat_message, so without this the
+// dots would keep dancing over a session that has stopped.
+function stopThinking() {
+  speaking.value = ''
+  liveSay.value = ''
 }
 
 function quick(cmd) { sendChat(cmd) }
+
+// The test shot and the final are buttons on their own endpoints, not the words
+// "試し撮り" and "OK" typed into chat for a regex to recognise. Typing them still
+// works; pressing them no longer depends on the phrasing surviving a round trip.
+async function runStage(path) {
+  if (!session.value || chatLocked.value) return
+  busy.value = true
+  startedAt = Date.now()
+  elapsed.value = 0
+  try {
+    session.value = await api(
+      `/api/muse/sessions/${session.value.session_id}/${path}`, { method: 'POST' })
+    scrollChat()
+  } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
+}
+const testShot = () => runStage('board')
+const finalShot = () => runStage('approve')
 
 async function finishSession() {
   if (!session.value || busy.value) return
@@ -626,9 +697,26 @@ async function onChatKey(e) {
                   <span class="block text-[9px] text-pink-300/70">W-Muse ダブル主演セッション中</span>
                 </div>
               </div>
-              <span class="px-2.5 py-1 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300 text-[10px] font-mono flex items-center gap-1 animate-pulse">
-                <span>✨</span> ケミストリー活性化中
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="px-2.5 py-1 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300 text-[10px] font-mono flex items-center gap-1 motion-safe:animate-pulse">
+                  <span>✨</span> ケミストリー活性化中
+                </span>
+                <button type="button" class="sb-btn text-[10px]" @click="showPartnerPicker = true">
+                  {{ t('muse.changePartner') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Casting the second Muse lived in the setup screen only, so once
+                 the two-hander had opened there was no way to add or change her. -->
+            <div
+              v-else-if="isDuet"
+              class="shrink-0 px-4 py-1.5 border-b border-white/10 flex items-center justify-between gap-2"
+            >
+              <span class="text-[10px] text-[var(--sb-faint)]">{{ t('muse.noPartner') }}</span>
+              <button type="button" class="sb-btn text-[10px]" @click="showPartnerPicker = true">
+                ✨ {{ t('muse.pickPartnerCharacter') }}
+              </button>
             </div>
 
             <div ref="chatEl" class="flex-1 overflow-y-auto p-3 space-y-2">
@@ -687,13 +775,25 @@ async function onChatKey(e) {
                 </template>
               </div>
 
-              <div v-if="speaking && liveSay" class="flex flex-col items-start gap-1 my-1">
-                <span class="text-[10px] text-pink-300 font-bold animate-pulse flex items-center gap-1">
-                  <span>💖</span> {{ museLabel(museById(speaking)) || speaking }} {{ t('muse.leadThinking') }}
+              <!-- Shown from the moment a model is working, not from the first
+                   token. The model is dropped from VRAM before every render, so
+                   the load is paid on every turn — and that whole stretch used
+                   to be a blank panel with no sign anything was happening. -->
+              <div v-if="thinking" class="flex flex-col items-start gap-1 my-1">
+                <span class="text-[10px] text-pink-300 font-bold flex items-center gap-1">
+                  <span>💖</span>
+                  {{ museLabel(museById(speaking)) || t('muse.someone') }}
+                  {{ t('muse.leadThinking') }}
+                  <span v-if="elapsed" class="text-pink-400/70 font-mono">{{ clock(elapsed) }}</span>
                 </span>
                 <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
                             bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md">
-                  {{ liveSay }}<span class="animate-pulse text-pink-400 font-bold">▍</span>
+                  <template v-if="liveSay">
+                    {{ liveSay }}<span class="caret">▍</span>
+                  </template>
+                  <span v-else class="dots" :aria-label="t('muse.leadThinking')">
+                    <span>.</span><span>.</span><span>.</span>
+                  </span>
                 </div>
               </div>
 
@@ -703,13 +803,22 @@ async function onChatKey(e) {
               <div class="flex flex-wrap gap-2">
                 <template v-if="isDuet">
                   <button class="sb-btn text-[10px]" :disabled="chatLocked"
+                          :title="t('muse.quick.prepTitle')"
                           @click="quick(DUET_PREP)">
                     {{ t('muse.quick.prep') }}
                   </button>
-                  <button class="sb-btn text-[10px]" :disabled="chatLocked || !craft.prompt"
-                          :title="craft.prompt ? '' : t('muse.quick.prepFirst')"
-                          @click="quick(DUET_SHOT)">
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked || !hasPrompt"
+                          :title="hasPrompt ? t('muse.quick.testShotTitle') : t('muse.quick.prepFirst')"
+                          @click="testShot">
                     {{ t('muse.quick.testShot') }}
+                  </button>
+                  <button
+                    class="sb-btn text-[10px] bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200"
+                    :disabled="chatLocked || !hasPrompt"
+                    :title="hasPrompt ? t('muse.quick.finalTitle') : t('muse.quick.prepFirst')"
+                    @click="finalShot"
+                  >
+                    {{ t('muse.quick.final') }}
                   </button>
 
                   <template v-if="isWMuse">
@@ -729,24 +838,42 @@ async function onChatKey(e) {
                 </template>
 
                 <template v-else>
-                  <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick(isJa ? 'ボード' : 'board')">
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked || !hasPrompt"
+                          :title="hasPrompt ? t('muse.quick.testShotTitle') : t('muse.quick.tableFirst')"
+                          @click="testShot">
                     {{ t('muse.quick.board') }}
                   </button>
-                  <button class="sb-btn text-[10px]" :disabled="chatLocked" @click="quick('OK')">
-                    {{ t('muse.quick.ok') }}
+                  <button
+                    class="sb-btn text-[10px] bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200"
+                    :disabled="chatLocked || !hasPrompt"
+                    :title="hasPrompt ? t('muse.quick.finalTitle') : t('muse.quick.tableFirst')"
+                    @click="finalShot"
+                  >
+                    {{ t('muse.quick.final') }}
                   </button>
                 </template>
 
                 <!-- Wrapping is how the diary gets written, so it cannot be a
-                     二人芝居 privilege: the crewed studio had no way to finish. -->
+                     二人芝居 privilege: the crewed studio had no way to finish.
+                     It needs a finished shoot to write about, and it is offered
+                     exactly once — a second press queued a second diary. -->
                 <button
                   type="button"
                   class="sb-btn text-[10px] bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 ml-auto"
-                  :disabled="chatLocked"
-                  :title="t('muse.finishTitle')"
+                  :disabled="chatLocked || !canFinish"
+                  :title="finishHint"
                   @click="finishSession"
                 >
-                  {{ t('muse.finishBtn') }}
+                  {{ diaryWriting ? t('muse.diaryWritingBtn')
+                     : diaryDone ? t('muse.diaryDoneBtn') : t('muse.finishBtn') }}
+                </button>
+                <button
+                  v-if="diaryDone && inputs.character_id"
+                  type="button"
+                  class="sb-btn text-[10px] bg-pink-950/40 hover:bg-pink-900/60 border-pink-500/50 text-pink-200"
+                  @click="showDiary = true"
+                >
+                  {{ t('muse.openDiary') }}
                 </button>
               </div>
               <div class="flex gap-2">
@@ -766,7 +893,8 @@ async function onChatKey(e) {
                    status === 'boarding' ? t('muse.status.boarding') :
                    status === 'awaiting_ok' ? t('muse.status.awaitingOk') :
                    status === 'shooting' ? t('muse.status.shooting') :
-                   status === 'done' ? t('muse.status.done') : t('muse.status.chat') }}
+                   status === 'done' ? t('muse.status.done') :
+                   status === 'finished' ? t('muse.status.finished') : t('muse.status.chat') }}
                 <span v-if="elapsed"> · {{ t('muse.elapsed', { s: clock(elapsed) }) }}</span>
               </p>
             </div>
@@ -987,5 +1115,39 @@ async function onChatKey(e) {
       @toast="emit('toast', $event)"
       @update:workflow="patchInputs({ workflow: $event })"
     />
+
+    <ActressDiaryModal
+      v-if="showDiary && inputs.character_id"
+      :show="showDiary"
+      :character-id="inputs.character_id"
+      :character-name="(isJa ? character?.name_ja : character?.name) || ''"
+      @close="showDiary = false"
+      @toast="emit('toast', $event)"
+    />
   </div>
 </template>
+
+<style scoped>
+/* Three dots that actually move. A static "..." cannot be told apart from a
+   panel that has stopped, which is the question being asked while a model
+   loads. Held still for anyone who asked for less motion. */
+.dots span {
+  display: inline-block;
+  animation: dot-bounce 1.2s infinite ease-in-out both;
+  font-weight: 700;
+}
+.dots span:nth-child(2) { animation-delay: 0.16s; }
+.dots span:nth-child(3) { animation-delay: 0.32s; }
+.caret { animation: caret-blink 1s step-end infinite; }
+
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+  40% { transform: translateY(-0.35em); opacity: 1; }
+}
+@keyframes caret-blink {
+  50% { opacity: 0.2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dots span, .caret { animation: none; opacity: 1; }
+}
+</style>

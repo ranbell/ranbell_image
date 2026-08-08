@@ -1371,11 +1371,16 @@
       "duetLong": "班はいません。彼女と二人で話しながら決めて、「撮影準備」で彼女がフレームの中身を読み上げます。「試し撮り」で一枚。"
     },
     "quick": {
-      "prep": "撮影準備",
-      "testShot": "試し撮り",
-      "prepFirst": "先に「撮影準備」を",
-      "board": "ボード",
-      "ok": "OK"
+      "prep": "① 撮影準備（プロンプト生成）",
+      "prepTitle": "台本＝画像生成プロンプトを書いてもらいます。画像はまだ出ません",
+      "testShot": "② 試し撮り（サンプル画像）",
+      "testShotTitle": "いまの台本でサンプルを1枚生成します（低ステップ・お試し）",
+      "final": "③ 本番（高品質画像）",
+      "finalTitle": "いまの台本で本番撮影します（高ステップ・仕上がり品質）",
+      "prepFirst": "先に「撮影準備」でプロンプトを作ってください",
+      "tableFirst": "先に台本ができてから押せます",
+      "board": "② 試し撮り（サンプル画像）",
+      "ok": "③ 本番（高品質画像）"
     },
     "boardTitle": "イメージボード",
     "stillTitle": "試し撮り",
@@ -1401,6 +1406,7 @@
       "awaitingOk": "ボード確認待ち — OK or コメント",
       "shooting": "本番撮影中",
       "done": "完成",
+      "finished": "撮影終了",
       "chatting": "返答中",
       "ready": "準備完了"
     },
@@ -1428,7 +1434,18 @@
     "finishConfirm": "今日はおしまいにして、撮影日記の執筆を女優に頼みますか？🌸",
     "finishToast": "お疲れ様でした！撮影日記の執筆ジョブを投入しました 🎀",
     "secretBanterTitle": "💭💕 内緒のつぶやき",
-    "leadThinking": "💖 考え中..."
+    "leadThinking": "💖 考え中",
+    "someone": "Muse",
+    "finishNeedsShoot": "本番の写真ができてから終了できます",
+    "diaryWriting": "日記を書いてもらっています…",
+    "diaryWritingBtn": "🖊 日記を執筆中…",
+    "diaryDone": "今日の日記はもう書き上がりました",
+    "diaryDoneBtn": "🎀 撮影終了ずみ",
+    "diaryReady": "日記が書き上がりました 📖",
+    "diaryFailed": "日記の執筆に失敗しました。もう一度お願いしてみてください",
+    "openDiary": "📖 日記を読む",
+    "partnerMustDiffer": "主演とは異なる Muse をパートナーに選んでください。",
+    "changePartner": "相手を変える"
   },
   "characters": {
     "title": "キャラクター",
@@ -1446,7 +1463,14 @@
       "photoMemory": "📸 本番写真の思い出",
       "selectPrompt": "👈 左のリストから日記を選んでね 🌸",
       "entryBadge": "🎀 撮影記録日記",
-      "defaultSummary": "本番撮影の思い出"
+      "defaultSummary": "本番撮影の思い出",
+      "emptyEntry": "（このページには何も書かれていません）",
+      "themeLabel": "お題",
+      "close": "日記帳を閉じる",
+      "delete": "この日記を捨てる",
+      "deleteConfirm": "この日記を削除しますか？ 元には戻せません。",
+      "photoZoom": "写真を拡大する",
+      "willNotice": "……読んだこと、本人はまだ知りません。次に撮影で会ったら、何か言われるかも 👀"
     },
     "pick": "選ぶ",
 

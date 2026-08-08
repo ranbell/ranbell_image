@@ -389,7 +389,7 @@ watch(() => props.characterId, load, { immediate: true })
       :show="showDiary"
       :character-id="characterId"
       :character-name="name"
-      @close="showDiary = false"
+      @close="showDiary = false; checkUnreadDiaries()"
       @diary-read="checkUnreadDiaries"
       @toast="emit('toast', $event)"
     />

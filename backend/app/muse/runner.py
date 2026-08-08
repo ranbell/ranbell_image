@@ -52,7 +52,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             # is not enough craft for four to differ, and the point of it is to
             # get something on the wall before the crew keeps talking.
             batch_count=1 if board.get("still") else max(
-                1, int(inputs.get("draft_count", 4)),
+                1, int(inputs.get("draft_count", 1)),
             ),
             prefix="muse_still" if board.get("still") else "muse_board",
             method="muse_board",
@@ -93,7 +93,7 @@ async def run_shoot_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             positive=str(shoot.get("prompt") or ""),
             negative=negative_for(session),
             seed=int(shoot.get("seed") or 0) or None,
-            batch_count=max(1, int(inputs.get("draft_count", 4))),
+            batch_count=max(1, int(inputs.get("draft_count", 1))),
             subdir=PLAYGROUND_SUBDIR,
             prefix="muse_shoot",
             method="muse_shoot",

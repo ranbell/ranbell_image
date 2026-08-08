@@ -13,6 +13,7 @@ if str(root_dir) not in sys.path:
 from backend.app.characters import api as characters_api
 from backend.app.characters import presets as presets_db
 from backend.app.muse import chain as muse_chain
+from backend.app.muse import diary as muse_diary
 from backend.app.muse import service as muse_service
 from backend.app.muse import crew as muse_crew
 from backend.app.spooler.models import JobLane
@@ -114,8 +115,11 @@ async def test_actress_diary_prompts():
     prompt = muse_crew.actress_diary_prompt(char, session_log="総監督: 素晴らしい表情だね", photo_desc="暗室での微笑み")
     assert "アリス" in prompt
     assert "秘密の非公開日記" in prompt
-    assert "content_ja" in prompt
-    assert "content_en" in prompt
+    # Labelled blocks, not JSON: her prose breaks JSON and a broken object used
+    # to reach the panel as her diary.
+    for label in ("SUMMARY_JA", "SUMMARY_EN", "CONTENT_JA", "CONTENT_EN"):
+        assert label in prompt
+    assert "JSON にはしない" in prompt
     assert "総監督の言葉が嬉しい" in prompt
 
 
@@ -138,16 +142,81 @@ def test_actress_diary_prompt_accepts_raw_preset_with_list_personality():
 
 
 
-@pytest.mark.asyncio
-async def test_secret_banter_prompt():
-    """Test actress secret banter reaction prompt creation."""
-    char = {
-        "name_ja": "アリス",
-        "personality": {"charm_ja": "耳がすぐ赤くなる"}
-    }
-    prompt = muse_crew.actress_secret_banter_prompt(char, diary_summary="褒められて照れたこと")
-    assert "アリス" in prompt
-    assert "見ちゃいました？" in prompt
+def test_caught_block_is_a_line_she_says_not_a_prompt_of_its_own():
+    """Being read is raised in conversation now, so it rides on her turn."""
+    block = muse_crew.caught_block("褒められて照れたこと")
+    assert "見ちゃいました？" in block
+    assert "褒められて照れたこと" in block
+    assert "一度だけ" in block
+    # Same fence as a memory: a topic, never something the picture must contain.
+    assert "今日の画に写すものではない" in block
+
+
+# ── the parser, which is the whole reason a diary can be trusted on screen ──
+def test_parse_diary_reads_labelled_blocks_with_prose_that_breaks_json():
+    raw = (
+        "SUMMARY_JA: 夜のプールでの撮影\n"
+        "SUMMARY_EN: Night pool shoot\n"
+        "CONTENT_JA:\n"
+        "……やっと一人になれた。「監督、こっち見ないで」なんて言えるわけない。\n"
+        "\n"
+        "心臓が持たなかった。\n"
+        "CONTENT_EN:\n"
+        "Finally, I am alone. My heart has not stopped."
+    )
+    out = muse_diary.normalize(muse_diary.parse_diary(raw))
+    assert out["summary_ja"] == "夜のプールでの撮影"
+    assert "「監督、こっち見ないで」" in out["content_ja"]
+    assert out["content_ja"].endswith("心臓が持たなかった。")
+    assert out["content_en"].endswith("has not stopped.")
+
+
+def test_parse_diary_still_reads_json_including_a_fenced_one():
+    raw = (
+        "```json\n"
+        '{"summary_ja": "褒められた", "summary_en": "Praised",\n'
+        ' "content_ja": "日本語の日記です。", '
+        '"content_en": "An English diary, long enough to keep."}\n'
+        "```"
+    )
+    out = muse_diary.normalize(muse_diary.parse_diary(raw))
+    assert out["content_ja"] == "日本語の日記です。"
+    assert out["content_en"] == "An English diary, long enough to keep."
+
+
+def test_a_cut_off_english_tail_is_repaired_not_shown_mid_word():
+    """The reported failure: the generation stopped mid-word and the fragment
+    was saved verbatim. Length does not catch it — where the text stops does."""
+    raw = (
+        '{\n  "summary_ja": "夜のプールでの撮影。",\n'
+        '  "summary_en": "Night pool photoshoot. T",\n'
+        '  "content_ja": "……やっと一人になれた。今日の撮影、本当に心臓が持たなかった。",\n'
+        '  "content_en": "Finally, I am alone. My heart has not stopped racing since the shoot ended. A'
+    )
+    out = muse_diary.normalize(muse_diary.parse_diary(raw))
+    assert "やっと一人になれた" in out["content_ja"]
+    # She ends where she last finished a sentence; the dangling letter is gone.
+    assert out["content_en"] == (
+        "Finally, I am alone. My heart has not stopped racing since the shoot ended."
+    )
+    assert out["summary_en"] == "Night pool photoshoot."
+
+
+def test_a_tail_with_nothing_whole_left_falls_back_to_japanese():
+    out = muse_diary.normalize({
+        "content_ja": "……やっと一人になれた。今日の撮影、本当に心臓が持たなかった。",
+        "content_en": "Fin",
+    })
+    assert out["content_en"] == ""
+
+
+def test_scaffolding_never_becomes_her_writing():
+    """The bug this module exists for: the contract printed as her diary."""
+    for raw in ('{"summary_ja":', "```json\n{\n", '{"content_ja": ',
+                "SUMMARY_JA:", "SUMMARY_JA:\nCONTENT_JA:"):
+        out = muse_diary.normalize(muse_diary.parse_diary(raw))
+        assert out["content_ja"] == "", raw
+        assert not muse_diary.looks_like_json(out["content_ja"])
 
 
 # ── the write path: finish → spooler → job ──────────────────────────────────
@@ -191,6 +260,28 @@ async def test_finish_session_without_a_character_spools_nothing():
 
 
 @pytest.mark.asyncio
+async def test_wrapping_twice_writes_one_diary():
+    """The panel's button could be pressed again; each press used to queue a
+    whole second diary for the same shoot."""
+    db, spooler = FakeDB(), FakeSpooler()
+    session = _session()
+    await muse_service.finish_session(db, spooler, session, ollama="OLL")
+    await muse_service.finish_session(db, spooler, session, ollama="OLL")
+    assert len(spooler.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_wrapping_before_the_shoot_is_refused():
+    """She cannot write about a picture that was never taken."""
+    db, spooler = FakeDB(), FakeSpooler()
+    with pytest.raises(muse_service.MuseError):
+        await muse_service.finish_session(
+            db, spooler, _session(shoot={"prompt": "1girl", "images": []}), ollama="OLL",
+        )
+    assert spooler.calls == []
+
+
+@pytest.mark.asyncio
 async def test_diary_job_runs_the_way_the_spooler_calls_it(monkeypatch):
     """The spooler does `func(reporter, cancel_token, **kwargs)` — two
     positional arguments. The job declared three and would have raised
@@ -202,8 +293,9 @@ async def test_diary_job_runs_the_way_the_spooler_calls_it(monkeypatch):
     async def fake_call(ollama, *, system, prompt, model, images, num_ctx, think):
         seen.update(system=system, model=model, images=images,
                     num_ctx=num_ctx, think=think)
-        return ('{"summary_ja": "褒められた", "summary_en": "Praised",'
-                ' "content_ja": "日本語の日記", "content_en": "English diary"}')
+        return ("SUMMARY_JA: 褒められた\nSUMMARY_EN: Praised\n"
+                "CONTENT_JA:\n日本語の日記。\n"
+                "CONTENT_EN:\nEnglish diary, written out properly.")
 
     monkeypatch.setattr(muse_chain, "_call", fake_call)
 
@@ -224,15 +316,17 @@ async def test_diary_job_runs_the_way_the_spooler_calls_it(monkeypatch):
     diaries = await presets_db.get_preset_diaries(db, "c001")
     assert len(diaries) == 1
     entry = diaries[0]
-    assert entry["content_ja"] == "日本語の日記"
-    assert entry["content_en"] == "English diary"
+    assert entry["content_ja"] == "日本語の日記。"
+    assert entry["content_en"] == "English diary, written out properly."
     assert entry["summary_en"] == "Praised"
     assert entry["image_id"] == "sha-abc"
     assert entry["read"] is False
+    # Which shoot it was, so the entry can lead back to it.
+    assert entry["session_id"] == "s-1" and entry["character_id"] == "c001"
 
 
 @pytest.mark.asyncio
-async def test_diary_job_keeps_prose_when_she_ignores_the_json_contract(monkeypatch):
+async def test_diary_job_keeps_prose_when_she_ignores_the_contract(monkeypatch):
     fake_preset_store(monkeypatch, {"id": "c001", "diaries": []})
     monkeypatch.setattr(
         muse_chain, "_call",
@@ -245,6 +339,44 @@ async def test_diary_job_keeps_prose_when_she_ignores_the_json_contract(monkeypa
     diaries = await presets_db.get_preset_diaries(db, "c001")
     assert len(diaries) == 1                       # the memory is not thrown away
     assert "心臓がうるさかった" in diaries[0]["content_ja"]
+
+
+@pytest.mark.asyncio
+async def test_a_broken_object_is_retried_and_never_saved_as_her_diary(monkeypatch):
+    """What the Showrunner used to find on the page: the JSON itself."""
+    fake_preset_store(monkeypatch, {"id": "c001", "diaries": []})
+    calls = []
+
+    async def fake_call(ollama, *, system, prompt, model, images, num_ctx, think):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return '{\n  "summary_ja": "夜のプール",\n  "content_ja": '
+        return "SUMMARY_JA: 夜のプール\nCONTENT_JA:\n……やっと一人になれた。"
+
+    monkeypatch.setattr(muse_chain, "_call", fake_call)
+    db, spooler = FakeDB(), FakeSpooler()
+    await muse_service.finish_session(db, spooler, _session(), ollama="OLL")
+    result = await spooler.calls[0]["func"]("R", "C", **spooler.calls[0]["kwargs"])
+
+    assert result["status"] == "ok"
+    assert len(calls) == 2                          # one retry, contract restated
+    entry = (await presets_db.get_preset_diaries(db, "c001"))[0]
+    assert entry["content_ja"] == "……やっと一人になれた。"
+    assert not muse_diary.looks_like_json(entry["content_ja"])
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_saved_when_both_attempts_are_unreadable(monkeypatch):
+    fake_preset_store(monkeypatch, {"id": "c001", "diaries": []})
+    monkeypatch.setattr(
+        muse_chain, "_call", AsyncMock(return_value='{"summary_ja":'),
+    )
+    db, spooler = FakeDB(), FakeSpooler()
+    await muse_service.finish_session(db, spooler, _session(), ollama="OLL")
+    result = await spooler.calls[0]["func"]("R", "C", **spooler.calls[0]["kwargs"])
+
+    assert result["status"] == "failed"
+    assert await presets_db.get_preset_diaries(db, "c001") == []
 
 
 @pytest.mark.asyncio
@@ -269,33 +401,30 @@ async def test_list_diaries_is_newest_first(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reading_a_diary_makes_her_react_exactly_once(monkeypatch):
+async def test_turning_a_page_runs_no_model(monkeypatch):
+    """Reading used to cost a cold model load, and had her answer a click
+    nobody had told her about. The receipt is all this route does now."""
     fake_preset_store(monkeypatch, {"id": "c001", "name_ja": "アリス", "diaries": [
         {"id": "d1", "timestamp": 1.0, "summary_ja": "褒められた", "read": False},
     ]})
-    monkeypatch.setattr(
-        muse_chain, "_call", AsyncMock(return_value="SAY: ……み、見ちゃいました？"),
-    )
+    called = AsyncMock(side_effect=AssertionError("no model on the read path"))
+    monkeypatch.setattr(muse_chain, "_call", called)
     req = fake_request(FakeDB({"vlm_model": "cfg-model"}), ollama="OLL")
 
-    first = await characters_api.read_character_diary("c001", "d1", req)
-    assert first["diary"]["read"] is True
-    assert first["banter"] == "……み、見ちゃいました？"   # SAY: stripped
-
-    second = await characters_api.read_character_diary("c001", "d1", req)
-    assert second["banter"] == ""                  # one-off, ever
+    res = await characters_api.read_character_diary("c001", "d1", req)
+    assert res["diary"]["read"] is True
+    assert res["banter"] == ""
+    called.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_a_dead_model_still_returns_the_read_receipt(monkeypatch):
+async def test_deleting_a_diary(monkeypatch):
     fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
-        {"id": "d1", "timestamp": 1.0, "read": False},
+        {"id": "d1", "timestamp": 1.0}, {"id": "d2", "timestamp": 2.0},
     ]})
-    monkeypatch.setattr(muse_chain, "_call", AsyncMock(side_effect=RuntimeError("down")))
-    res = await characters_api.read_character_diary(
-        "c001", "d1", fake_request(FakeDB(), ollama="OLL"),
-    )
-    assert res["diary"]["read"] is True and res["banter"] == ""
+    db = FakeDB()
+    await characters_api.delete_character_diary("c001", "d1", fake_request(db))
+    assert [d["id"] for d in await presets_db.get_preset_diaries(db, "c001")] == ["d2"]
 
 
 @pytest.mark.asyncio
@@ -324,3 +453,84 @@ async def test_duet_prompt_carries_her_recent_memories(monkeypatch):
 
     session["memories"] = []
     assert "日記から" not in muse_service._duet_user_prompt(session, "x", prep=False)
+
+
+@pytest.mark.asyncio
+async def test_the_table_gets_her_memory_too_but_only_at_her_seat(monkeypatch):
+    """The eighteen-seat table never read her diary at all; putting it in the
+    shared brief would hand it to all eighteen."""
+    fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
+        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた"},
+    ]})
+    session = _session()
+    await muse_service._load_actress_memory(FakeDB(), session)
+    assert session["memories"] == ["暗室で褒められた"]
+
+    lead = muse_crew.DEFAULT_MEMBER["actress"]
+    hers = muse_service._table_user_prompt(session, muse_id=lead)
+    assert "暗室で褒められた" in hers
+    other = muse_service._table_user_prompt(session, muse_id="light")
+    assert "暗室で褒められた" not in other
+    assert "暗室で褒められた" not in str(session.get("brief") or "")
+
+
+@pytest.mark.asyncio
+async def test_casting_a_partner_fills_the_card_on_the_click(monkeypatch):
+    """Only the id used to be stored, and the panel reads `partner_character` —
+    so picking somebody showed "no partner" until she happened to speak."""
+    people = {
+        "c001": {"id": "c001", "name_ja": "アリス"},
+        "c002": {"id": "c002", "name_ja": "ベル", "name": "Bell"},
+    }
+
+    async def fake_get_preset(db, preset_id):
+        return people.get(preset_id)
+
+    monkeypatch.setattr(presets_db, "get_preset", fake_get_preset)
+    db = FakeDB()
+    session = await muse_service.pick_partner(db, _session(), "c002")
+    assert session["inputs"]["partner_preset"] == "c002"
+    assert session["partner_character"]["name_ja"] == "ベル"
+
+    with pytest.raises(muse_service.MuseError):        # the lead is not her own partner
+        await muse_service.pick_partner(db, session, "c001")
+
+    cleared = await muse_service.pick_partner(db, session, "")
+    assert cleared["inputs"]["partner_preset"] == ""
+    assert await muse_service._partner_character(db, cleared) is None
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_shot_before_there_is_a_prompt():
+    """In 二人芝居 an OK with no craft fell through to another line of talk, so
+    the button looked like it did nothing."""
+    db = FakeDB()
+    with pytest.raises(muse_service.MuseError):
+        await muse_service.approve_and_shoot(db, None, FakeSpooler(), _session(craft={}))
+    with pytest.raises(muse_service.MuseError):
+        await muse_service.request_board(db, None, FakeSpooler(), _session(craft={}))
+
+
+# ── being caught: said once, in conversation, at the next session ───────────
+@pytest.mark.asyncio
+async def test_she_brings_up_a_read_diary_once_and_then_never_again(monkeypatch):
+    preset = fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
+        {"id": "d1", "timestamp": 1.0, "summary_ja": "褒められた", "read": True},
+        {"id": "d2", "timestamp": 2.0, "summary_ja": "雨の日", "read": True},
+        {"id": "d3", "timestamp": 3.0, "summary_ja": "まだ見てない", "read": False},
+    ]})
+    db = FakeDB()
+    session = _session()
+    await muse_service._load_actress_memory(db, session)
+    assert session["caught"]["ids"] == ["d2", "d1"]        # not the unread one
+    assert "見ちゃいました？" in muse_service._duet_user_prompt(session, "", prep=False)
+
+    await muse_service._consume_caught(db, session)
+    assert session["caught"] == {}
+    assert "見ちゃいました？" not in muse_service._duet_user_prompt(session, "", prep=False)
+    fired = {d["id"] for d in preset["diaries"] if d.get("secret_banter_fired")}
+    assert fired == {"d1", "d2"}
+
+    # Next session: nothing owed until they read something new.
+    await muse_service._load_actress_memory(db, session)
+    assert session["caught"] == {}

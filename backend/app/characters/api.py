@@ -8,8 +8,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
-from ..muse import chain as muse_chain
-from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import presets as presets_db
 from .board import SLOT_SIZE, compile_board_slot, plan_sheet
@@ -211,36 +209,26 @@ async def list_character_diaries(character_id: str, request: Request):
 
 @router.post("/{character_id}/diaries/{diary_id}/read")
 async def read_character_diary(character_id: str, diary_id: str, request: Request):
-    """Mark one entry read, and let her react to being read — once, ever.
+    """Mark one entry read. No model runs here.
 
-    The reaction is generated here rather than spooled because the panel shows
-    the entry before this call resolves, so the wait costs nothing on screen.
-    A model that is down must not cost the Showrunner the read receipt, so a
-    failed reaction is an empty string and never an error.
+    Her reaction to having been read used to be generated on this call, which
+    made turning a page cost a cold model load, and had her answer a click
+    nobody had told her about. She brings it up herself at the top of the next
+    session now (`muse.service` reads `get_unacknowledged_read_diaries`), so all
+    this route does is remember that the page was turned.
     """
-    db = request.app.state.db
-    diary = await presets_db.mark_diary_read(db, character_id, diary_id)
+    diary = await presets_db.mark_diary_read(request.app.state.db, character_id, diary_id)
     if diary is None:
         raise HTTPException(404, "diary not found")
+    # `banter` stays in the response, always empty, for panels still reading it.
+    return {"diary": diary, "banter": ""}
 
-    banter = ""
-    if not diary.get("secret_banter_fired"):
-        preset = await presets_db.get_preset(db, character_id)
-        cfg = await get_runtime_config(db)
-        try:
-            banter = await muse_chain.run_secret_banter(
-                request.app.state.ollama,
-                character=preset or {},
-                diary_summary=str(diary.get("summary_ja") or diary.get("summary") or ""),
-                model=str(cfg.get("vlm_model") or ""),
-                num_ctx=int(cfg.get("ollama_num_ctx") or 0) or None,
-            )
-        except Exception:
-            logger.warning("[characters] secret banter failed", exc_info=True)
-        if banter:
-            await presets_db.mark_secret_banter_fired(db, character_id, diary_id)
 
-    return {"diary": diary, "banter": banter}
+@router.delete("/{character_id}/diaries/{diary_id}")
+async def delete_character_diary(character_id: str, diary_id: str, request: Request):
+    if not await presets_db.delete_preset_diary(request.app.state.db, character_id, diary_id):
+        raise HTTPException(404, "diary not found")
+    return {"ok": True}
 
 
 class BoardImageChoice(BaseModel):

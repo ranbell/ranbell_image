@@ -1521,22 +1521,22 @@ def _personality_map(character: dict[str, Any]) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def actress_secret_banter_prompt(character: dict[str, Any], diary_summary: str = "") -> str:
-    """Special one-off banter fired right after the Showrunner reads her secret diary."""
-    p = _personality_map(character)
-    name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
-    charm_ja = str(
-        p.get("charm_ja") or character.get("charm_ja") or p.get("charm") or ""
-    ).strip()
-    return "\n\n".join([
-        f"You are {name_ja}. The Showrunner (総監督) just secretly read your private diary!",
-        f"Diary context: {diary_summary}" if diary_summary else "",
-        f"Charm / 萌え所: {charm_ja}" if charm_ja else "",
-        "【状況】誰にも見せないはずの鍵付き秘密日記を総監督に読まれてしまった！",
-        "顔を真っ赤にして照れながら、「……み、見ちゃいました？ 監督、私の秘密の日記……」というニュアンスで、"
-        "一言二言、コソコソ話のつぶやき（kind: banter）を返してください。",
-        "照れ隠し、恥ずかしがり、可愛らしい反応を表現してください。台本は書き換えない。",
-        BANTER_OUTPUT,
+def caught_block(diary_summary: str = "") -> str:
+    """She knows the Showrunner read her diary — said once, in conversation.
+
+    This is a block for the *user* side of her turn, not a prompt of its own.
+    Reacting the instant the panel opened an entry meant she answered a click
+    nobody had told her about; saying it when they next meet is both how a
+    person would find out and one fewer model load, since the turn it rides on
+    was going to run anyway.
+    """
+    return "\n".join([
+        "【今日いちばん最初に触れること】",
+        "総監督に秘密の日記を読まれたのを、あなたは知ってしまった。"
+        + (f"（読まれた回の要点: {diary_summary}）" if diary_summary else ""),
+        "最初のセリフの冒頭で一度だけ、照れながら「……見ちゃいました？」というニュアンスで切り出してから、"
+        "そのまま今日の本題に入る。二度は言わない。日記の中身を読み上げない。",
+        "これは会話の話題であって、今日の画に写すものではない。SCENE にも書かない。",
     ])
 
 
@@ -1545,6 +1545,13 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
 
     Accepts either a session character (`personality` dict from preset_to_character)
     or a raw preset row (`personality` is a trait list; summary/charm live on top).
+
+    The output contract is labelled blocks, not JSON. Several paragraphs of her
+    voice in two languages — full of 「」 and line breaks — is the payload local
+    models break JSON on, and a broken object used to reach the panel as her
+    diary. Japanese comes first so that a generation which runs out of room
+    loses the English half rather than the entry (`muse.diary` drops a tail that
+    stopped mid-word).
     """
     p = _personality_map(character)
     name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
@@ -1580,14 +1587,16 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
         "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
         "2. 【誰にも見せない秘密の日記】として、撮影中に感じた本音、総監督に直接は言えなかった照れ、褒められた時の動揺、本当は嬉しかった内心を赤裸々に綴ること。",
         "3. 撮影前の緊張、撮影中の出来事やセリフ、完成した本番写真を見た感想を含めた【長文日記（複数段落）】にする。",
-        "4. 多言語表示 (i18n) 対応のため、日本語版 (content_ja) と英語版 (content_en) の両方を執筆すること（英語版も彼女の雰囲気を活かした自然な英語で表現）。",
-        "5. 出力フォーマットは JSON のみ（余計な解説文は一切出力しない）:",
-        "{\n"
-        '  "summary_ja": "日本語の記憶要点（例: 暗室撮影で褒められて耳が赤くなったこと）",\n'
-        '  "summary_en": "English summary of key memory",\n'
-        '  "content_ja": "日本語の日記本文（300〜600文字）",\n'
-        '  "content_en": "English secret diary content (matching her persona)"\n'
-        "}",
+        "4. 多言語表示 (i18n) 対応のため、日本語版と英語版の両方を執筆すること（英語版も彼女の雰囲気を活かした自然な英語で表現）。",
+        "5. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
+        "見出し以外の解説文・コードフェンス・箇条書き記号は一切出力しない。"
+        "本文には改行も「」も自由に使ってよい（見出し行以外は本文として扱われる）:",
+        "SUMMARY_JA: 日本語の記憶要点を一行（例: 暗室撮影で褒められて耳が赤くなったこと）\n"
+        "SUMMARY_EN: One line English summary of the same memory\n"
+        "CONTENT_JA:\n"
+        "日本語の日記本文（300〜600文字、複数段落）\n"
+        "CONTENT_EN:\n"
+        "English secret diary content, matching her persona",
     ])
 
 

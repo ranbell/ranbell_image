@@ -441,29 +441,10 @@ async def run_banter(
     return text
 
 
-async def run_secret_banter(
-    ollama, *, character: dict[str, Any], diary_summary: str = "",
-    model: str, num_ctx: int | None,
-) -> str:
-    """Her one-off reaction to the Showrunner having read her private diary.
-
-    Same shape as ``run_banter`` — SAY only, nothing written down — but the
-    system prompt is the dedicated one, because she is not heckling a seat at
-    the table here; she has just been caught.
-    """
-    raw = await _call(
-        ollama,
-        system=crew.actress_secret_banter_prompt(character, diary_summary),
-        prompt="日記を読まれてしまった。いま思っていることを一言二言。",
-        model=model, images=None, num_ctx=num_ctx, think=False,
-    )
-    say, _, _ = identity.parse_table_read(raw)
-    text = (say or raw).strip()
-    if text.lower().startswith("say:"):
-        text = text[4:].strip()
-    if not text:
-        raise ChainError("empty secret banter")
-    return text
+# Being caught reading her diary used to be its own call, made while the panel
+# waited on a read receipt. It is now a block on her next turn's user prompt
+# (`crew.caught_block`) — she brings it up when they next meet, which is both
+# how a person would find out and one fewer model load.
 
 
 # ── legacy names used by older tests (thin wrappers) ───────────────────────

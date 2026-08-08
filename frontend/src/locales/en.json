@@ -1371,11 +1371,16 @@
       "duetLong": "No crew. Talk it through with her, then \"get ready\" and she reads the frame back to you. \"Test shot\" takes one."
     },
     "quick": {
-      "prep": "Get ready",
-      "testShot": "Test shot",
-      "prepFirst": "Ask her to get ready first",
-      "board": "Board",
-      "ok": "OK"
+      "prep": "① Get ready (write prompt)",
+      "prepTitle": "She writes the image prompt. No picture yet",
+      "testShot": "② Test shot (sample image)",
+      "testShotTitle": "One sample from the current prompt — few steps, quick look",
+      "final": "③ Final (high quality)",
+      "finalTitle": "Shoot the current prompt for real — full steps, finished quality",
+      "prepFirst": "Ask her to get ready first — there is no prompt yet",
+      "tableFirst": "Available once there is a prompt to shoot",
+      "board": "② Test shot (sample image)",
+      "ok": "③ Final (high quality)"
     },
     "boardTitle": "Image board",
     "stillTitle": "Test shot",
@@ -1401,6 +1406,7 @@
       "awaitingOk": "Board up — OK or comment",
       "shooting": "Final shoot",
       "done": "Done",
+      "finished": "Wrapped up",
       "chatting": "Replying",
       "ready": "Ready"
     },
@@ -1428,7 +1434,18 @@
     "finishConfirm": "Wrap up session and ask the actress to write a post-shoot diary? 🌸",
     "finishToast": "Thank you for your hard work! Secret diary writing job spooled 🎀",
     "secretBanterTitle": "💭💕 Secret Whispers",
-    "leadThinking": "💖 Thinking..."
+    "leadThinking": "💖 Thinking",
+    "someone": "Muse",
+    "finishNeedsShoot": "Take the final shot before wrapping up",
+    "diaryWriting": "She is writing her diary…",
+    "diaryWritingBtn": "🖊 Writing her diary…",
+    "diaryDone": "Today's diary is already written",
+    "diaryDoneBtn": "🎀 Wrapped",
+    "diaryReady": "Her diary is written 📖",
+    "diaryFailed": "The diary could not be written. Try asking again",
+    "openDiary": "📖 Read her diary",
+    "partnerMustDiffer": "Pick a Muse other than the lead as her partner.",
+    "changePartner": "Change partner"
   },
   "characters": {
     "title": "Characters",
@@ -1446,7 +1463,14 @@
       "photoMemory": "📸 Photo from the shoot",
       "selectPrompt": "👈 Pick a diary entry from the list 🌸",
       "entryBadge": "🎀 Shooting Log Diary",
-      "defaultSummary": "Memories of the shoot"
+      "defaultSummary": "Memories of the shoot",
+      "emptyEntry": "(Nothing is written on this page)",
+      "themeLabel": "Theme",
+      "close": "Close the diary",
+      "delete": "Throw this entry away",
+      "deleteConfirm": "Delete this diary entry? This cannot be undone.",
+      "photoZoom": "Enlarge the photo",
+      "willNotice": "…she does not know you read it yet. She may say something next time you shoot together 👀"
     },
     "pick": "Pick",
 

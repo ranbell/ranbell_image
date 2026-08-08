@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
@@ -14,22 +14,36 @@ const { t, locale } = useI18n()
 const diaries = ref([])
 const loading = ref(false)
 const selectedDiary = ref(null)
-// Her one-off reaction to being read. Arrives with the read receipt, after the
-// entry is already on screen, so it appears rather than delaying anything.
-const secretBanter = ref('')
+// Set when an unread entry is opened: she does not know yet, and will say
+// something about it the next time they work together.
+const justCaught = ref(false)
+const zoomed = ref(false)
+const dialogEl = ref(null)
+const listEl = ref(null)
 
-const isEn = computed(() => locale.value === 'en')
+// `=== 'en'` missed en-US, and the rest of the panel decides the same question
+// with startsWith('ja'). Both halves are stored, so the toggle is free.
+const uiIsJa = computed(() => String(locale.value).startsWith('ja'))
+const forced = ref('')          // '', 'ja', 'en' — per-entry override
+const showJa = computed(() => (forced.value ? forced.value === 'ja' : uiIsJa.value))
+
+function pick(d, key) {
+  if (!d) return ''
+  const ja = d[`${key}_ja`] || d[key] || ''
+  const en = d[`${key}_en`] || ''
+  if (showJa.value) return ja || en
+  return en || ja
+}
+const bothLanguages = computed(() => {
+  const d = selectedDiary.value
+  return Boolean(d && (d.content_ja || d.content) && d.content_en)
+})
 
 function getDiarySummary(d) {
-  if (!d) return ''
-  if (isEn.value && d.summary_en) return d.summary_en
-  return d.summary_ja || d.summary || t('characters.diary.defaultSummary')
+  return pick(d, 'summary') || t('characters.diary.defaultSummary')
 }
-
 function getDiaryContent(d) {
-  if (!d) return ''
-  if (isEn.value && d.content_en) return d.content_en
-  return d.content_ja || d.content || ''
+  return pick(d, 'content')
 }
 
 function thumb(sha) {
@@ -55,9 +69,6 @@ async function loadDiaries() {
   try {
     const res = await api(`/api/characters/${props.characterId}/diaries`)
     diaries.value = res.diaries || []
-    if (diaries.value.length > 0 && !selectedDiary.value) {
-      openDiary(diaries.value[0])
-    }
   } catch (err) {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
@@ -65,33 +76,72 @@ async function loadDiaries() {
   }
 }
 
+// Opening the panel used to open the newest entry, which marked it read before
+// the Showrunner had chosen to read anything. A page is only turned on purpose.
 async function openDiary(diary) {
   selectedDiary.value = diary
-  secretBanter.value = ''
-  if (diary && !diary.read) {
-    try {
-      const res = await api(`/api/characters/${props.characterId}/diaries/${diary.id}/read`, {
-        method: 'POST'
-      })
-      diary.read = true
-      // Only if she is still the entry on screen — the Showrunner may have
-      // clicked on to another one while she was thinking.
-      if (selectedDiary.value === diary) secretBanter.value = res.banter || ''
-      emit('diary-read', diary.id)
-    } catch (err) {
-      console.warn('Failed to mark diary as read', err)
-    }
+  forced.value = ''
+  zoomed.value = false
+  justCaught.value = false
+  if (!diary || diary.read) return
+  try {
+    await api(`/api/characters/${props.characterId}/diaries/${diary.id}/read`, {
+      method: 'POST'
+    })
+    diary.read = true
+    if (selectedDiary.value === diary) justCaught.value = true
+    emit('diary-read', diary.id)
+  } catch (err) {
+    console.warn('Failed to mark diary as read', err)
+  }
+}
+
+async function removeDiary(diary) {
+  if (!diary || !window.confirm(t('characters.diary.deleteConfirm'))) return
+  try {
+    await api(`/api/characters/${props.characterId}/diaries/${diary.id}`, { method: 'DELETE' })
+    diaries.value = diaries.value.filter(d => d.id !== diary.id)
+    if (selectedDiary.value?.id === diary.id) selectedDiary.value = null
+    emit('diary-read', diary.id)
+  } catch (err) {
+    emit('toast', { msg: String(err?.message || err), type: 'error' })
   }
 }
 
 function formatDate(ts) {
   if (!ts) return ''
-  const d = new Date(ts * 1000)
-  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  try {
+    return new Intl.DateTimeFormat(locale.value, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    }).format(new Date(ts * 1000))
+  } catch {
+    return new Date(ts * 1000).toLocaleString()
+  }
 }
 
-watch(() => props.show, (val) => {
-  if (val) loadDiaries()
+// Arrow keys walk the shelf; Escape closes. Neither worked before.
+function onKeydown(e) {
+  if (!props.show) return
+  if (e.key === 'Escape') { emit('close'); return }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  if (!diaries.value.length) return
+  e.preventDefault()
+  const at = diaries.value.findIndex(d => d.id === selectedDiary.value?.id)
+  const next = e.key === 'ArrowDown'
+    ? Math.min(diaries.value.length - 1, at + 1)
+    : Math.max(0, at < 0 ? 0 : at - 1)
+  openDiary(diaries.value[next])
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
+watch(() => props.show, async (val) => {
+  if (!val) return
+  await loadDiaries()
+  await nextTick()
+  dialogEl.value?.focus()
 }, { immediate: true })
 </script>
 
@@ -104,13 +154,19 @@ watch(() => props.show, (val) => {
   >
     <!-- Cute Secret Diary Container -->
     <div
-      class="relative w-full max-w-4xl max-h-[90vh] flex flex-col md:flex-row rounded-3xl
+      ref="dialogEl"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="diary-title"
+      tabindex="-1"
+      class="relative w-full max-w-4xl max-h-[90vh] flex flex-col md:flex-row rounded-3xl outline-none
              bg-gradient-to-br from-pink-50/95 via-rose-50/95 to-amber-50/95 dark:from-slate-900/95 dark:via-pink-950/90 dark:to-slate-900/95
              border-2 border-pink-300/60 dark:border-pink-500/40 shadow-2xl overflow-hidden"
     >
       <!-- Close Ribbon Button -->
       <button
         type="button"
+        :aria-label="t('characters.diary.close')"
         class="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-pink-200/80 hover:bg-pink-300 text-pink-700
                dark:bg-pink-900/80 dark:hover:bg-pink-800 dark:text-pink-200 flex items-center justify-center
                font-bold text-lg shadow-md transition-transform hover:scale-110"
@@ -124,7 +180,7 @@ watch(() => props.show, (val) => {
         <div class="flex items-center gap-2 px-1 py-1">
           <span class="text-2xl">📖</span>
           <div>
-            <h3 class="font-bold text-pink-900 dark:text-pink-200 text-base tracking-wide">
+            <h3 id="diary-title" class="font-bold text-pink-900 dark:text-pink-200 text-base tracking-wide">
               {{ t('characters.diary.title', { name: characterName }) }}
             </h3>
             <p class="text-[11px] text-pink-600/80 dark:text-pink-400">
@@ -133,7 +189,7 @@ watch(() => props.show, (val) => {
           </div>
         </div>
 
-        <div v-if="loading" class="text-xs text-pink-500 py-8 text-center animate-pulse">
+        <div v-if="loading" class="text-xs text-pink-500 py-8 text-center motion-safe:animate-pulse">
           {{ t('characters.diary.loading') }}
         </div>
 
@@ -141,11 +197,12 @@ watch(() => props.show, (val) => {
           {{ t('characters.diary.empty') }}
         </div>
 
-        <div v-else class="flex flex-col gap-2 overflow-y-auto max-h-[60vh] pr-1">
+        <div v-else ref="listEl" class="flex flex-col gap-2 overflow-y-auto max-h-[38vh] md:max-h-[60vh] pr-1">
           <button
             v-for="d in diaries"
             :key="d.id"
             type="button"
+            :aria-current="selectedDiary?.id === d.id ? 'true' : undefined"
             class="group relative text-left p-3 rounded-2xl border transition-all duration-200 flex flex-col gap-1"
             :class="selectedDiary?.id === d.id
               ? 'bg-pink-200/80 dark:bg-pink-900/60 border-pink-400 dark:border-pink-500 shadow-sm scale-[1.02]'
@@ -159,7 +216,7 @@ watch(() => props.show, (val) => {
               <!-- Unread Cute Badge -->
               <span
                 v-if="!d.read"
-                class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-500 text-white shadow-sm animate-bounce"
+                class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-500 text-white shadow-sm motion-safe:animate-bounce"
               >
                 {{ t('characters.diary.unread') }}
               </span>
@@ -188,49 +245,83 @@ watch(() => props.show, (val) => {
               <h2 class="text-lg font-bold text-pink-950 dark:text-pink-100 mt-1">
                 {{ getDiarySummary(selectedDiary) }}
               </h2>
+              <p v-if="selectedDiary.theme" class="text-[11px] text-pink-600/70 dark:text-pink-400 mt-0.5">
+                {{ t('characters.diary.themeLabel') }}: {{ selectedDiary.theme }}
+              </p>
             </div>
-            <span class="text-xs text-pink-600/70 dark:text-pink-400">
-              {{ formatDate(selectedDiary.timestamp) }}
-            </span>
+            <div class="flex items-center gap-2">
+              <!-- Both halves are written and stored; reading her in her own
+                   language is worth one button. -->
+              <div v-if="bothLanguages" class="flex rounded-full overflow-hidden border border-pink-300/60 dark:border-pink-700/60 text-[10px]">
+                <button
+                  type="button" class="px-2 py-0.5"
+                  :class="showJa ? 'bg-pink-400 text-white' : 'text-pink-600 dark:text-pink-300'"
+                  @click="forced = 'ja'"
+                >日本語</button>
+                <button
+                  type="button" class="px-2 py-0.5"
+                  :class="!showJa ? 'bg-pink-400 text-white' : 'text-pink-600 dark:text-pink-300'"
+                  @click="forced = 'en'"
+                >EN</button>
+              </div>
+              <span class="text-xs text-pink-600/70 dark:text-pink-400">
+                {{ formatDate(selectedDiary.timestamp) }}
+              </span>
+              <button
+                type="button"
+                class="text-[10px] text-pink-500/70 hover:text-rose-500 underline"
+                @click="removeDiary(selectedDiary)"
+              >
+                {{ t('characters.diary.delete') }}
+              </button>
+            </div>
           </div>
 
-          <!-- Polaroid Photo Attachment -->
+          <!-- Polaroid Photo Attachment. The thumbnail carries the page; the
+               original is a click away rather than loaded into a 20rem frame. -->
           <div v-if="selectedDiary.image_id" class="self-center my-2 group">
-            <div
-              class="relative bg-white dark:bg-slate-800 p-3 pb-8 rounded-lg shadow-xl border border-pink-200/50 dark:border-pink-900/50
+            <button
+              type="button"
+              class="relative block bg-white dark:bg-slate-800 p-3 pb-8 rounded-lg shadow-xl border border-pink-200/50 dark:border-pink-900/50
                      transform -rotate-1 transition-transform duration-300 group-hover:rotate-0 group-hover:scale-105 max-w-xs"
+              :aria-label="t('characters.diary.photoZoom')"
+              @click="zoomed = !zoomed"
             >
               <!-- Washi Tape Effect -->
               <div class="absolute -top-3 left-1/2 -translate-x-1/2 w-20 h-6 bg-pink-200/60 dark:bg-pink-700/40 backdrop-blur-xs border-dashed border-pink-300/60 rotate-2 shadow-xs"></div>
-              
+
               <img
-                :src="full(selectedDiary.image_id) || thumb(selectedDiary.image_id)"
+                :src="zoomed ? full(selectedDiary.image_id) : thumb(selectedDiary.image_id)"
                 :alt="getDiarySummary(selectedDiary)"
+                loading="lazy"
                 class="w-full h-auto rounded object-cover aspect-[3/4] bg-pink-100 dark:bg-slate-900"
               />
-              <p class="text-center font-handwriting text-pink-600 dark:text-pink-300 text-xs mt-3 font-semibold">
+              <p class="text-center font-serif italic text-pink-600 dark:text-pink-300 text-xs mt-3 font-semibold">
                 {{ t('characters.diary.photoMemory') }}
               </p>
-            </div>
+            </button>
           </div>
 
           <!-- Handwritten style Diary Content -->
           <div class="relative bg-white/70 dark:bg-slate-800/70 p-5 rounded-2xl border border-pink-200/50 dark:border-pink-900/50 shadow-inner">
-            <p class="whitespace-pre-wrap text-sm leading-relaxed text-pink-950 dark:text-pink-100 font-serif">
+            <p
+              v-if="getDiaryContent(selectedDiary)"
+              class="whitespace-pre-wrap text-sm leading-relaxed text-pink-950 dark:text-pink-100 font-serif"
+            >
               {{ getDiaryContent(selectedDiary) }}
+            </p>
+            <p v-else class="text-xs text-pink-400 italic">
+              {{ t('characters.diary.emptyEntry') }}
             </p>
           </div>
 
-          <!-- Caught: she says one thing about having been read, once ever. -->
+          <!-- She does not know yet. She will, next time they work together. -->
           <div
-            v-if="secretBanter"
-            class="animate-fade-in rounded-2xl border border-rose-300/60 dark:border-rose-800/60 bg-rose-50/80 dark:bg-rose-950/40 p-4"
+            v-if="justCaught"
+            class="animate-fade-in rounded-2xl border border-rose-300/60 dark:border-rose-800/60 bg-rose-50/80 dark:bg-rose-950/40 p-3"
           >
-            <div class="text-[11px] font-semibold text-rose-500 dark:text-rose-300 mb-1">
-              {{ t('muse.secretBanterTitle') }}
-            </div>
-            <p class="whitespace-pre-wrap text-sm leading-relaxed text-rose-900 dark:text-rose-100">
-              {{ secretBanter }}
+            <p class="text-[11px] text-rose-600 dark:text-rose-300">
+              {{ t('characters.diary.willNotice') }}
             </p>
           </div>
         </div>
@@ -247,5 +338,8 @@ watch(() => props.show, (val) => {
 }
 .animate-fade-in {
   animation: fade-in 220ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in { animation: none; }
 }
 </style>

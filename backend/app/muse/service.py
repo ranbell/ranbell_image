@@ -19,7 +19,7 @@ from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import brief as brief_mod
-from . import chain, crew, events, identity, runner, session_db
+from . import chain, crew, diary as diary_mod, events, identity, runner, session_db
 from .runtime import negative_for as runtime_negative_for
 from .runtime import render_settings
 from .schema import missing_inputs, new_session
@@ -207,6 +207,71 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
     session_db.log(session, "character", session["character"].get("name", ""))
     await session_db.save(db, session)
     return session
+
+
+async def pick_partner(db, session: dict[str, Any], preset_id: str) -> dict[str, Any]:
+    """The second Muse in 二人芝居. Empty string casts nobody.
+
+    Resolved here rather than on her first line. Storing only the id meant the
+    panel — which reads `partner_character` — showed "no partner" until she
+    happened to speak, so picking somebody looked like it had not worked.
+    """
+    preset_id = (preset_id or "").strip()
+    if not preset_id:
+        session["partner_character"] = {}
+        session["inputs"] = {**_inputs(session), "partner_preset": ""}
+        await session_db.save(db, session)
+        return session
+    if preset_id == str(_inputs(session).get("character_id") or ""):
+        raise MuseError("主演とは異なる Muse をパートナーに選んでください。")
+    preset = await presets_db.get_preset(db, preset_id)
+    if preset is None:
+        raise MuseError("character not found")
+    session["partner_character"] = {
+        **presets_db.preset_to_character(preset),
+        "character_id": preset_id,
+        "board": preset.get("board") or {},
+        "name": preset.get("name") or "",
+        "name_ja": preset.get("name_ja") or preset.get("name") or "",
+    }
+    session["inputs"] = {**_inputs(session), "partner_preset": preset_id}
+    session_db.log(session, "partner", session["partner_character"].get("name", ""))
+    await session_db.save(db, session)
+    return session
+
+
+async def _partner_character(db, session: dict[str, Any]) -> dict[str, Any] | None:
+    """Whoever is cast opposite her, resolving and caching once if need be.
+
+    `pick_partner` fills this in at the moment of casting. The lookup stays here
+    for sessions whose id was set some other way (an inputs patch, an older
+    session): it used to be copy-pasted into both duet turns, which is why the
+    panel and the prompt could disagree about who was in the room.
+    """
+    preset_id = str(_inputs(session).get("partner_preset") or "").strip()
+    if not preset_id:
+        session.pop("partner_character", None)
+        return None
+    cached = session.get("partner_character") or {}
+    if str(cached.get("character_id") or "") == preset_id or (
+        (cached.get("personality") or {}).get("preset_key") == preset_id
+    ):
+        return cached
+    try:
+        preset = await presets_db.get_preset(db, preset_id)
+    except Exception:
+        logger.debug("[muse] partner lookup failed", exc_info=True)
+        return None
+    if not preset:
+        return None
+    session["partner_character"] = {
+        **presets_db.preset_to_character(preset),
+        "character_id": preset_id,
+        "board": preset.get("board") or {},
+        "name": preset.get("name") or "",
+        "name_ja": preset.get("name_ja") or preset.get("name") or "",
+    }
+    return session["partner_character"]
 
 
 def _rebuild_brief(session: dict[str, Any]) -> None:
@@ -594,6 +659,12 @@ def _table_user_prompt(
     rail = _wardrobe_rail(session, muse_id)
     if rail:
         base = f"{base}\n\n{rail}"
+    # Her diary is hers. It goes to the seat she is sitting in and nowhere else —
+    # in the brief, the whole table would be reading it.
+    if crew.role_of(muse_id) == "actress":
+        for block in (_memory_block(session), _caught_block(session)):
+            if block:
+                base = f"{base}\n\n{block}"
     # The planner already pulled these out of the tag list. The prose is the
     # other half of the prompt and only the seats writing it can clear that.
     struck = [str(s) for s in (session.get("struck") or []) if str(s).strip()]
@@ -1184,6 +1255,8 @@ async def _craft_pass(
             _note_blind(session)
             images = []
             screening = ""
+        if crew.role_of(muse_id) == "actress":
+            await _consume_caught(db, session)
         await session_db.save(db, session, publish=False)
 
         reactor = _pick_banter_reactor(
@@ -1264,6 +1337,10 @@ async def start_table(
     session["costume"] = {}
     session.pop("_blind_said", None)
     session.pop("struck", None)
+    # The table gets the same memory the two-hander does. It reaches her seat
+    # only — see `_table_user_prompt`; in the shared brief all eighteen seats
+    # would be reading her diary.
+    await _load_actress_memory(db, session)
     still_first = comfy is not None and spooler is not None
     session["table_stage"] = "brief" if still_first else "full"
     await session_db.save(db, session)
@@ -1402,6 +1479,33 @@ def _memory_block(session: dict[str, Any]) -> str:
     ])
 
 
+def _caught_block(session: dict[str, Any]) -> str:
+    """The one-off line about her diary having been read, if one is owed."""
+    caught = session.get("caught") or {}
+    if not caught.get("ids"):
+        return ""
+    return crew.caught_block(str(caught.get("summary") or ""))
+
+
+async def _consume_caught(db, session: dict[str, Any]) -> None:
+    """She has said it. Never again for those entries.
+
+    Called after the turn that carried the block, not before it: a turn that
+    fell over must not spend the moment.
+    """
+    caught = session.get("caught") or {}
+    ids = [str(i) for i in (caught.get("ids") or []) if i]
+    if not ids:
+        return
+    session["caught"] = {}
+    char_id = str(_inputs(session).get("character_id") or "")
+    if char_id:
+        try:
+            await presets_db.mark_secret_banter_fired(db, char_id, ids)
+        except Exception:
+            logger.warning("[muse] could not mark diaries acknowledged", exc_info=True)
+
+
 def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     """What she is handed. In talk mode, the conversation; in prep, the script."""
     inputs = _inputs(session)
@@ -1415,6 +1519,9 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
+    caught = _caught_block(session)
+    if caught:
+        parts.append(caught)
     orders = brief_mod.orders_block(list(session.get("notes") or []))
     if orders:
         parts.append(orders)
@@ -1465,22 +1572,7 @@ async def _duet_talk(
     events.publish(sid, {"type": "muse_speaking", "muse_id": lead, "name": name})
     images = await board_images(db, session)
 
-    partner_preset_id = str(inputs.get("partner_preset") or "").strip()
-    partner_character = None
-    if partner_preset_id:
-        cached = session.get("partner_character") or {}
-        if cached.get("personality", {}).get("preset_key") == partner_preset_id:
-            partner_character = cached
-        else:
-            try:
-                p_preset = await presets_db.get_preset(db, partner_preset_id)
-                if p_preset:
-                    partner_character = presets_db.preset_to_character(p_preset)
-                    session["partner_character"] = partner_character
-            except Exception:
-                partner_character = None
-    else:
-        session.pop("partner_character", None)
+    partner_character = await _partner_character(db, session)
 
     try:
         say, blind = await chain.run_duet_talk(
@@ -1501,6 +1593,7 @@ async def _duet_talk(
                        name=name, kind="craft")
     _publish_chat(sid, msg)
     session["status"] = "chat"
+    await _consume_caught(db, session)
     await session_db.save(db, session)
     return session
 
@@ -1522,22 +1615,7 @@ async def _duet_prep(
     images = await board_images(db, session)
     started = time.monotonic()
 
-    partner_preset_id = str(inputs.get("partner_preset") or "").strip()
-    partner_character = None
-    if partner_preset_id:
-        cached = session.get("partner_character") or {}
-        if cached.get("personality", {}).get("preset_key") == partner_preset_id:
-            partner_character = cached
-        else:
-            try:
-                p_preset = await presets_db.get_preset(db, partner_preset_id)
-                if p_preset:
-                    partner_character = presets_db.preset_to_character(p_preset)
-                    session["partner_character"] = partner_character
-            except Exception:
-                partner_character = None
-    else:
-        session.pop("partner_character", None)
+    partner_character = await _partner_character(db, session)
 
     try:
         turn = await chain.run_duet_prep(
@@ -1618,10 +1696,7 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["costume"] = {}
     session["notes"] = []
     session.pop("_blind_said", None)
-    # Read her diary once, here, rather than on every turn: it is a Qdrant round
-    # trip and it cannot change mid-session. Talking has to stay cheap enough to
-    # feel like talking.
-    session["memories"] = await _recent_memories(db, session)
+    await _load_actress_memory(db, session)
     await session_db.save(db, session)
     session_db.log(session, "duet", "opened")
     return await _duet_talk(db, ollama, session, "", cfg=cfg)
@@ -1644,6 +1719,38 @@ async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[
         if text:
             out.append(text)
     return out
+
+
+async def _load_actress_memory(db, session: dict[str, Any]) -> None:
+    """Read her diary once per session — what she remembers, and what she caught.
+
+    Once, at the open, rather than on every turn: it is a Qdrant round trip and
+    neither answer can change mid-session. Both the two-hander and the
+    eighteen-seat table call this; the table only ever fed the crew the brief,
+    so she used to walk into it having forgotten every shoot she had written
+    about.
+    """
+    session["memories"] = await _recent_memories(db, session)
+    session["caught"] = {}
+    char_id = str(_inputs(session).get("character_id") or "")
+    if not char_id:
+        return
+    try:
+        caught = await presets_db.get_unacknowledged_read_diaries(db, char_id)
+    except Exception:
+        logger.debug("[muse] could not read diary acknowledgements", exc_info=True)
+        return
+    if not caught:
+        return
+    ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+    newest = caught[0]
+    session["caught"] = {
+        "ids": [str(d.get("id") or "") for d in caught if d.get("id")],
+        "summary": str(
+            (newest.get("summary_ja") if ja else newest.get("summary_en"))
+            or newest.get("summary") or ""
+        ).strip(),
+    }
 
 
 # ── showrunner message ──────────────────────────────────────────────────────
@@ -1941,7 +2048,9 @@ async def request_board(
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if not prompt:
-        raise MuseError("no craft yet — start the table first")
+        # Both buttons are disabled until there is a prompt; this is the same
+        # rule stated where it cannot be clicked around.
+        raise MuseError("まだ台本がありません。先に「撮影準備」でプロンプトを作ってください。")
 
     if not still:
         session = await densify_craft_if_needed(db, ollama, session)
@@ -2003,7 +2112,9 @@ async def approve_and_shoot(
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if not prompt:
-        raise MuseError("nothing to shoot yet")
+        # In 二人芝居 an "OK" with no craft used to fall through to another line
+        # of conversation, so pressing the button looked like nothing happened.
+        raise MuseError("まだ台本がありません。先に「撮影準備」でプロンプトを作ってください。")
 
     session = await densify_craft_if_needed(db, ollama, session)
     craft = session.get("craft") or {}
@@ -2048,19 +2159,41 @@ async def approve_and_shoot(
     return session
 
 
+def _has_shot(session: dict[str, Any]) -> bool:
+    """Did the final shoot actually produce something?
+
+    Deliberately looser than `schema.shoot_images`: older sessions store bare
+    sha strings here, and the diary job already reads both shapes.
+    """
+    return bool((session.get("shoot") or {}).get("images"))
+
+
 async def finish_session(
     db, spooler, session: dict[str, Any], ollama=None
 ) -> dict[str, Any]:
-    """Wrap up session, mark as finished, and queue background post-shoot secret diary job."""
-    session["status"] = "finished"
+    """Wrap up session, mark as finished, and queue background post-shoot secret diary job.
+
+    Two guards, both of which used to be missing and both of which the
+    Showrunner could trip from the panel: wrapping twice wrote two diaries for
+    one shoot, and wrapping before the shoot asked her to write about a picture
+    that does not exist.
+    """
     sid = session["session_id"]
+    if (session.get("diary") or {}).get("queued_at") or session.get("status") == "finished":
+        return session
+    if not _has_shot(session):
+        raise MuseError("本番撮影が終わってから終了してください。")
+
+    session["status"] = "finished"
     session_db.log(session, "finish", "session wrapped up")
-    await session_db.save(db, session)
 
     char_id = str((session.get("inputs") or {}).get("character_id") or "")
     if char_id and spooler:
         cfg = await get_runtime_config(db)
         inputs = _inputs(session)
+        session["diary"] = {"status": "writing", "queued_at": time.time()}
+        await session_db.save(db, session)
+        events.publish(sid, {"type": "diary_status", "status": "writing"})
         spooler.submit(
             # Every Ollama call in the app goes through PROMPT, and that lane is
             # the one bound to the GPU resource when Ollama is local. There is no
@@ -2077,6 +2210,8 @@ async def finish_session(
             model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
             num_ctx=_num_ctx(inputs, cfg),
         )
+    else:
+        await session_db.save(db, session)
     return session
 
 
@@ -2096,8 +2231,11 @@ async def run_generate_actress_diary_job(
     Two positional arguments, like every other job: the spooler calls
     ``job._func(reporter, cancel_token, **kwargs)``.
     """
+    sid = str(session.get("session_id") or "")
+    _report(reporter, 0.05, "日記を書いてもらっています")
     preset = await presets_db.get_preset(db, character_id)
     if not preset:
+        await _record_diary_result(db, sid, status="failed", error="character not found")
         return {"status": "skipped", "reason": "character not found"}
     # Session may already hold the converted character; otherwise map the preset.
     # Raw presets keep `personality` as a trait list — never pass that straight
@@ -2119,61 +2257,126 @@ async def run_generate_actress_diary_job(
 
     # Extract photo description from shoot prompt
     photo_desc = str((session.get("shoot") or {}).get("prompt") or "")
-    shoot_images = (session.get("shoot") or {}).get("images") or []
-    if shoot_images and isinstance(shoot_images[0], dict):
-        image_id = str(shoot_images[0].get("image_id") or "")
+    shot = (session.get("shoot") or {}).get("images") or []
+    if shot and isinstance(shot[0], dict):
+        image_id = str(shot[0].get("image_id") or "")
     else:
-        image_id = str(shoot_images[0]) if shoot_images else ""
+        image_id = str(shot[0]) if shot else ""
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
-    raw_resp = await chain._call(
-        ollama,
-        system=crew.actress_diary_prompt(
-            char, session_log=session_log, photo_desc=photo_desc,
-        ),
-        prompt="今日の撮影の秘密の日記を書いて。JSON だけを返すこと。",
-        model=model, images=None, num_ctx=num_ctx, think=False,
+    system = crew.actress_diary_prompt(
+        char, session_log=session_log, photo_desc=photo_desc,
     )
+    _report(reporter, 0.2, "日記を書いてもらっています")
 
-    # Parse JSON. She is asked for JSON only, but a diary that arrives as plain
-    # prose is still her diary — keep it rather than losing the shoot's memory.
-    parsed: Any = {}
-    try:
-        match = re.search(r"\{.*\}", raw_resp, re.DOTALL)
-        parsed = json.loads(match.group(0) if match else raw_resp)
-    except Exception:
-        parsed = {}
-    if not isinstance(parsed, dict):
-        parsed = {}
-    if not parsed:
-        parsed = {
-            "summary_ja": "本番撮影の思い出",
-            "summary_en": "Memories of the shoot",
-            "content_ja": raw_resp,
-            "content_en": raw_resp,
-        }
+    fields: dict[str, str] = {}
+    for attempt, ask in enumerate(_DIARY_ASKS):
+        raise_if_cancelled = getattr(cancel, "raise_if_set", None)
+        if raise_if_cancelled is not None:
+            raise_if_cancelled()
+        try:
+            raw_resp = await chain._call(
+                ollama, system=system, prompt=ask,
+                model=model, images=None, num_ctx=num_ctx, think=False,
+            )
+        except Exception as exc:
+            logger.warning("[muse] diary generation failed: %s", exc)
+            await _record_diary_result(db, sid, status="failed", error=str(exc))
+            return {"status": "failed", "reason": str(exc)}
+        fields = diary_mod.normalize(
+            diary_mod.parse_diary(raw_resp), fallback_ja="本番撮影の思い出",
+        )
+        if fields.get("content_ja"):
+            break
+        # One retry, with the contract restated. The diary is a background job
+        # on a model that is already resident, so trying twice is cheap — and
+        # what the old code did instead was save the broken response as her
+        # writing, which is how a JSON object ended up on the page.
+        logger.info("[muse] diary output unusable (attempt %d), retrying", attempt + 1)
+        _report(reporter, 0.5, "書き直してもらっています")
 
-    summary_ja = str(parsed.get("summary_ja") or parsed.get("summary") or "本番撮影の思い出").strip()
-    summary_en = str(parsed.get("summary_en") or parsed.get("summary") or "Memories of the shoot").strip()
-    content_ja = str(parsed.get("content_ja") or parsed.get("content") or raw_resp).strip()
-    content_en = str(parsed.get("content_en") or parsed.get("content") or content_ja).strip()
+    if not fields.get("content_ja"):
+        # Nothing survived that is safe to show. A missing diary is recoverable;
+        # scaffolding printed in her handwriting is not.
+        await _record_diary_result(db, sid, status="failed", error="unreadable diary output")
+        return {"status": "failed", "reason": "unreadable diary output"}
 
+    _report(reporter, 0.9, "日記をしまっています")
+    inputs = _inputs(session)
     diary_entry = {
         "id": str(uuid.uuid4()),
         "timestamp": time.time(),
-        "summary_ja": summary_ja,
-        "summary_en": summary_en,
-        "summary": summary_ja,
-        "content_ja": content_ja,
-        "content_en": content_en,
-        "content": content_ja,
+        "summary_ja": fields["summary_ja"],
+        "summary_en": fields["summary_en"],
+        "summary": fields["summary_ja"],
+        "content_ja": fields["content_ja"],
+        "content_en": fields["content_en"],
+        "content": fields["content_ja"],
         "image_id": image_id,
+        # Which shoot this was, so the entry can lead back to it.
+        "session_id": sid,
+        "character_id": character_id,
+        "theme": str(inputs.get("theme") or ""),
         "read": False,
     }
 
     await presets_db.add_preset_diary(db, character_id, diary_entry)
+    await _record_diary_result(db, sid, status="ok", diary_id=diary_entry["id"])
+    _report(reporter, 1.0, "日記が書き上がりました")
     return {"status": "ok", "diary_id": diary_entry["id"]}
+
+
+# The second ask restates the contract. Models that wandered off it once tend to
+# come back when told plainly what shape failed.
+_DIARY_ASKS: tuple[str, ...] = (
+    "今日の撮影の秘密の日記を書いて。SUMMARY_JA / SUMMARY_EN / CONTENT_JA / CONTENT_EN "
+    "の4つの見出しだけを使うこと。",
+    "さっきの出力は読み取れませんでした。もう一度、日記だけを書いてください。"
+    "1行目は必ず `SUMMARY_JA: ` で始め、続けて SUMMARY_EN / CONTENT_JA / CONTENT_EN。"
+    "JSON にしない。コードフェンスも使わない。",
+)
+
+
+def _report(reporter, progress: float, message: str) -> None:
+    """Progress for the jobs panel. The diary job used to report nothing at all."""
+    update = getattr(reporter, "update", None)
+    if update is None:
+        return
+    try:
+        update(progress, message)
+    except Exception:
+        logger.debug("[muse] diary reporter failed", exc_info=True)
+
+
+async def _record_diary_result(
+    db, session_id: str, *, status: str, diary_id: str = "", error: str = "",
+) -> None:
+    """Write the outcome back onto the session and tell the panel.
+
+    Nothing announced the diary before this: the Showrunner wrapped the session
+    and the entry appeared on the character, minutes later, unmentioned.
+    """
+    if not session_id:
+        return
+    events.publish(session_id, {
+        "type": "diary_status", "status": status,
+        "diary_id": diary_id, "error": error,
+    })
+    try:
+        stored = await session_db.load(db, session_id)
+    except Exception:
+        stored = None
+    if stored is None:
+        return
+    stored["diary"] = {
+        **(stored.get("diary") or {}),
+        "status": status,
+        "diary_id": diary_id,
+        "error": error,
+        "at": time.time(),
+    }
+    await session_db.save(db, stored, publish=False)
 
 
 
