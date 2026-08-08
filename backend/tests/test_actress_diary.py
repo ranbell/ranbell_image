@@ -119,6 +119,24 @@ async def test_actress_diary_prompts():
     assert "総監督の言葉が嬉しい" in prompt
 
 
+def test_actress_diary_prompt_accepts_raw_preset_with_list_personality():
+    """finish_session loads the preset row; personality there is a trait list."""
+    preset = {
+        "id": "c007",
+        "name_ja": "各務 みお",
+        "summary_ja": "放送部。マイクの前では動じない。",
+        "charm_ja": "声で気づかれると口を押さえる。",
+        "inner_ja": ["部屋ひとつ分だけ離れていれば勇気が出る"],
+        "personality": ["articulate", "shy_offstage", "warm"],
+        "appearance": {"voice": "低めで温かい"},
+    }
+    prompt = muse_crew.actress_diary_prompt(preset, session_log="総監督: いいね", photo_desc="broadcast")
+    assert "各務 みお" in prompt
+    assert "放送部" in prompt
+    assert "口を押さえる" in prompt
+    assert "部屋ひとつ分" in prompt
+
+
 
 @pytest.mark.asyncio
 async def test_secret_banter_prompt():

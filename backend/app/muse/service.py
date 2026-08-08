@@ -1426,25 +1426,30 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     if not prep:
         parts.append(
             "このターンの話し方:\n"
-            "- 総監督がすでに言った場所・行為・服装・ポーズ・表情は決まった事実。"
-            "同じことを聞き返さない。\n"
-            "- まだ開いている撮影の軸（服装 / ポーズ / 表情 / 小物など）があれば、"
-            "質問で埋めず、自分から具体案を一つ出す。\n"
+            "- 総監督のいちばん新しい発言が勝つ。場所・ポーズ・カメラ・服・表情を"
+            "言い直したら、前の案は捨てて新しい方に合わせる"
+            "（聞き返さないことと、変えないことは別）。\n"
+            "- まだ開いている軸だけ、自分から具体案を一つ出す。\n"
+            "- ボード画像があっても、それは古いテイク。文言の最新指示を優先。\n"
             "- 準備できた・用意して・get ready とは言わない。"
+            "英語の見出しやルール名をセリフに出さない。"
         )
         return "\n\n".join(p for p in parts if p)
 
     previous = str((session.get("craft") or {}).get("prompt") or "")
     if previous:
         parts.append(
-            "さっき自分で組んだ台本（変える必要のないところは変えない）:\n" + previous
+            "さっき自分で組んだ台本（参考。総監督の新しい指示と矛盾する場所・小物・"
+            "服・カメラ・ポーズは必ず捨てて書き直す。ボード画像も古いテイク）:\n"
+            + previous
         )
     parts.append(
-        "ここまでの話から、撮る画を一つに決めて。場所・時間・光・小物十個以上・"
-        "衣装・カメラ・自分のポーズと表情、全部あなたが決める。\n"
+        "ここまでの話と、総監督の最新の指示から、撮る画を一つに決めて。"
+        "場所・時間・光・小物十個以上・衣装・カメラ・自分のポーズと表情、全部あなたが決める。\n"
+        "最新指示が場所やカメラやポーズを変えていたら、TAGS/SCENE にも必ず反映する。"
+        "教室を放送室に直す・後ろから撮る・振り返る、など言われたことは省略しない。\n"
         "決めたら、SAY でフレームに何が入っているかを自分の言葉で総監督に読み上げて。"
-        "小物は名前で。総監督はそれを聞いて「これ足して」と言えるので、隠さないこと。\n"
-        "場面が変わったなら、残す言葉だけ残して、捨てるものは口に出してから捨てて。"
+        "小物は名前で。捨てたものも一言言う。隠さないこと。"
     )
     return "\n\n".join(p for p in parts if p)
 
@@ -2091,21 +2096,34 @@ async def run_generate_actress_diary_job(
     Two positional arguments, like every other job: the spooler calls
     ``job._func(reporter, cancel_token, **kwargs)``.
     """
-    char = await presets_db.get_preset(db, character_id)
-    if not char:
+    preset = await presets_db.get_preset(db, character_id)
+    if not preset:
         return {"status": "skipped", "reason": "character not found"}
+    # Session may already hold the converted character; otherwise map the preset.
+    # Raw presets keep `personality` as a trait list — never pass that straight
+    # into actress_diary_prompt without normalizing.
+    session_char = session.get("character") or {}
+    if isinstance(session_char.get("personality"), dict) or session_char.get("reasoning_ja"):
+        char = session_char
+    else:
+        char = presets_db.preset_to_character(preset)
 
     # Extract session logs
     chat_list = session.get("chat") or []
     session_log_lines = []
     for m in chat_list[-15:]:
+        if not isinstance(m, dict):
+            continue
         session_log_lines.append(f"{m.get('name')}: {m.get('text')}")
     session_log = "\n".join(session_log_lines)
 
     # Extract photo description from shoot prompt
     photo_desc = str((session.get("shoot") or {}).get("prompt") or "")
     shoot_images = (session.get("shoot") or {}).get("images") or []
-    image_id = str(shoot_images[0]) if shoot_images else ""
+    if shoot_images and isinstance(shoot_images[0], dict):
+        image_id = str(shoot_images[0].get("image_id") or "")
+    else:
+        image_id = str(shoot_images[0]) if shoot_images else ""
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.

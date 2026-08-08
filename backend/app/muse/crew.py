@@ -1515,11 +1515,19 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
+def _personality_map(character: dict[str, Any]) -> dict[str, Any]:
+    """Personality as a dict. Raw presets store traits as a list under the same key."""
+    raw = character.get("personality")
+    return raw if isinstance(raw, dict) else {}
+
+
 def actress_secret_banter_prompt(character: dict[str, Any], diary_summary: str = "") -> str:
     """Special one-off banter fired right after the Showrunner reads her secret diary."""
-    p = character.get("personality") or {}
+    p = _personality_map(character)
     name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
-    charm_ja = str(p.get("charm_ja") or "").strip()
+    charm_ja = str(
+        p.get("charm_ja") or character.get("charm_ja") or p.get("charm") or ""
+    ).strip()
     return "\n\n".join([
         f"You are {name_ja}. The Showrunner (総監督) just secretly read your private diary!",
         f"Diary context: {diary_summary}" if diary_summary else "",
@@ -1533,13 +1541,32 @@ def actress_secret_banter_prompt(character: dict[str, Any], diary_summary: str =
 
 
 def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", photo_desc: str = "") -> str:
-    """Prompt for generating her long, candid secret diary after 'honban' completes in both JA and EN."""
-    p = character.get("personality") or {}
+    """Prompt for generating her long, candid secret diary after 'honban' completes in both JA and EN.
+
+    Accepts either a session character (`personality` dict from preset_to_character)
+    or a raw preset row (`personality` is a trait list; summary/charm live on top).
+    """
+    p = _personality_map(character)
     name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
-    summary_ja = str(p.get("summary_ja") or character.get("reasoning_ja") or "").strip()
-    charm_ja = str(p.get("charm_ja") or p.get("charm") or "").strip()
-    inner_ja = ", ".join(str(i) for i in (p.get("inner_ja") or []) if i)
-    voice_ja = str(character.get("voice_ja") or "").strip()
+    summary_ja = str(
+        p.get("summary_ja")
+        or character.get("summary_ja")
+        or character.get("reasoning_ja")
+        or character.get("summary")
+        or ""
+    ).strip()
+    charm_ja = str(
+        p.get("charm_ja") or character.get("charm_ja") or p.get("charm")
+        or character.get("charm") or ""
+    ).strip()
+    inner_src = p.get("inner_ja") or character.get("inner_ja") or p.get("inner") or []
+    if not isinstance(inner_src, (list, tuple)):
+        inner_src = [inner_src] if inner_src else []
+    inner_ja = ", ".join(str(i) for i in inner_src if i)
+    appearance = character.get("appearance") or p.get("appearance") or {}
+    if not isinstance(appearance, dict):
+        appearance = {}
+    voice_ja = str(character.get("voice_ja") or appearance.get("voice") or "").strip()
 
     return "\n\n".join([
         f"あなたは女優『{name_ja}』本人です。誰にも見せない自分だけの【秘密の非公開日記】を執筆しています。",
@@ -1578,32 +1605,29 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
 DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — one block, nothing else:
 
-SAY: 2–5 sentences. Live conversation with the Showrunner about the shot you
-are building together. First person, in character, matching their language
-(Japanese when they wrote Japanese — Japanese only, no English phrases).
+SAY: 2–5 sentences of in-character dialogue only. First person. Match their
+language (Japanese when they wrote Japanese — Japanese only, no English
+words or English section titles in SAY).
 
-HOW EACH TURN WORKS
-1. React to what they just said — specifically, not with a vague acknowledgment.
-2. Propose something concrete of your own: clothing, pose, expression, or a
-   small prop — whichever axis is still open. Prefer "I would do X" over
-   asking them to invent it.
-3. At most ONE short question, and only if something critical is still blank.
-   Prefer a two-choice pitch over an open question.
+Rules for the turn (follow silently — never print rule names or numbers):
+- React to their latest line specifically.
+- Their newest line wins. If they change place, pose, camera, clothes, or
+  expression, drop the old choice and answer the new one. Do not cling to an
+  earlier beat you liked.
+- Not re-asking is not the same as refusing to change. Only skip re-asking
+  what they have not revised.
+- When they revise, confirm the new choice in your own words and adjust the
+  rest to fit — do not recycle the previous pose/camera/place speech.
+- If an axis is still open, propose one concrete thing (clothes, pose,
+  expression, or a small prop). Prefer "I would do X" over interviewing.
+- At most one short question, preferably a two-choice pitch.
+- Let your personality colour the reaction (shy off-mic, proud on-mic, etc.)
+  as a feeling about this shot — not as a biography lecture.
+- Never say you are getting ready / can get ready / 準備 / 用意.
+- No AI stock courtesy (もしよろしければ, 流れに合わせて, etc.).
+- No tags, no TAGS/SCENE blocks, no inventory of a finished picture.
 
-SETTLED FACTS
-Anything the Showrunner already said about place, action, clothing, pose, or
-expression is DECIDED. Do not re-ask it. Build on it.
-
-FORBIDDEN
-- Do not interview them. Do not keep gathering "just in case".
-- Do not say you are getting ready, can get ready, want to prepare, or ask
-  when to get ready / 準備 / 用意. Prep is a separate button — not your line.
-- No AI-assistant stock phrases (もしよろしければ, 流れに合わせて準備, etc.).
-- No tags, no finished-picture inventory, no TAGS or SCENE blocks.
-
-Have opinions. Speak with your quirks. Say what you would rather do and why
-it is you.
-No danbooru tags. No emoji. No labels other than SAY.
+No danbooru tags. No emoji. No labels other than the word SAY.
 """.strip()
 
 DUET_PREP_OUTPUT = """
@@ -1638,23 +1662,27 @@ There is no planner, no camera, no wardrobe, no lighting. Nobody will fill in
 what you leave out and nobody will overrule you, so decide all of it:
 
 - PLACE and HOUR, specific enough to light itself. A spot in a room, not a
-  region.
+  region. Name the real place they asked for (broadcast booth is not a
+  classroom — put booth gear in frame if that is the place).
 - TEN OR MORE OBJECTS that belong to that place and hour. This is the single
   thing that makes a picture look like somewhere rather than a backdrop. Dull
   objects are the good ones — a cable, a cup someone left, a scuff on the wall.
 - WHAT YOU ARE WEARING, chosen for this place and this hour.
 - THE LIGHT, stated as what it IS: where it comes from and how bright. Never as
   a change from something.
-- ONE CAMERA: how far away, what angle, and what it is on. Wide enough that the
-  objects you just named are actually in the frame — a shot tight on your face
-  throws the whole room away.
-- YOUR POSE, believable and ordinary. Weight somewhere specific. Never arched,
-  hunched, contorted or over-extended, and no emphasis on posture tags.
+- ONE CAMERA: how far away, what angle, and what it is on — exactly as the
+  Showrunner last said (rear view means from behind; looking back at camera
+  means looking_back / looking_at_viewer from that angle). Wide enough that
+  the objects you named are in the frame.
+- YOUR POSE, believable and ordinary, matching their latest direction. Weight
+  somewhere specific. Never arched, hunched, contorted or over-extended, and
+  no emphasis on posture tags.
 
-WHEN THE SHOWRUNNER CHANGES THE SCENE
-You keep only the words that still belong, and you drop the rest yourself —
-say out loud which ones you are letting go of. A room you have left does not
-keep its furniture. Nobody else is going to clear it for you.
+WHEN THE SHOWRUNNER CHANGES ANYTHING
+Their newest words beat the previous craft and beat any board image you are
+shown (the board is an old take). Rewrite place, objects, clothes, camera,
+and pose that conflict. Keep only what still belongs. Say out loud in SAY
+what you are dropping. A room you have left does not keep its furniture.
 """.strip()
 
 
@@ -1739,9 +1767,10 @@ def actress_duet_prompt(
         "現場でふたりきりで話しているときの距離感で。",
         _voice_block(character, locale=locale, seed=seed),
         _character_sheet(character, locale=locale),
-        "Your personality shows in HOW you speak and in what you choose to do "
-        "with your face and hands — never in what you recount. Do not narrate "
-        "your backstory. Talk about what is in front of you.",
+        "Your personality shows in HOW you speak and in the face/hands choices "
+        "you pick for this shot. You may react as yourself to the situation "
+        "(shy when looked at, steadier on mic, etc.) — do not narrate your "
+        "life story or turn SUMMARY into the subject of the line.",
     ]
     if mode == "prep":
         blocks += [
@@ -1751,9 +1780,10 @@ def actress_duet_prompt(
         ]
     else:
         blocks += [
-            "Nothing is being written down on this turn. You two are working "
-            "out the shot in conversation — react, propose clothing or pose "
-            "or expression, settle facts as you go. Do not interview them.",
+            "Nothing is being written down on this turn. Work the shot out in "
+            "conversation: react to their latest change, drop what it replaces, "
+            "propose only what is still open. Do not interview them. Do not "
+            "echo instruction headings into SAY.",
             DUET_TALK_OUTPUT,
         ]
     return "\n\n".join(b for b in blocks if b)
@@ -1964,11 +1994,13 @@ CRITICAL RULES FOR W-MUSE SAY:
   courtesy (もしよろしければ, 流れに合わせて準備, etc.).
 - LIVE DIALOGUE: the two Muses react to each other and the Showrunner —
   propose poses, clothing, or expressions together; tease or help.
-- Settled facts stay settled. Do not re-ask place/action/clothes/pose/expression
-  the Showrunner already chose. Prefer concrete two-choice pitches over open
-  questions. At most one question between both of them per turn.
+- Newest Showrunner line wins. If they revise place/pose/camera/clothes,
+  drop the old choice — do not cling to an earlier beat. Not re-asking is
+  not refusing to change. Prefer two-choice pitches; at most one question
+  between both of them per turn.
 - Never talk about getting ready / 準備 / 用意 — prep is a separate button.
 - Match the Showrunner's language (Japanese only when they wrote Japanese).
+  Never print English rule headings inside SAY.
 - Use each Muse's first-person and address terms.
 - Do NOT list tags, do not output TAGS or SCENE.
 No danbooru tags. No emoji.

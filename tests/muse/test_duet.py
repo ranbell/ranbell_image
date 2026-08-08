@@ -184,8 +184,9 @@ def test_she_is_told_she_is_the_whole_crew_when_getting_ready():
     assert "TEN OR MORE OBJECTS" in text
     assert "ONE CAMERA" in text
     assert "no planner, no camera, no wardrobe, no lighting" in text
-    # And she clears the set herself, because nobody else will.
-    assert "WHEN THE SHOWRUNNER CHANGES THE SCENE" in text
+    # And she clears the set herself when direction changes — newest wins.
+    assert "WHEN THE SHOWRUNNER CHANGES ANYTHING" in text
+    assert "newest words beat" in text.lower()
     assert "NAME THE THINGS that are in" in text
 
 
@@ -202,11 +203,26 @@ def test_talk_prompt_is_not_an_interview_bot():
     low = text.lower()
     assert "ask things" not in low
     assert "whenever they want" not in low
-    assert "SETTLED FACTS" in text
-    assert "FORBIDDEN" in text
-    assert "Do not interview" in text or "do not interview" in text.lower()
-    # Still names the banned phrases so the model knows what to avoid.
+    assert "how each turn works" not in low
+    assert "settled facts" not in low
+    assert "newest line wins" in low
+    assert "do not interview" in low
     assert "can get ready" in low
+
+
+def test_talk_prompt_accepts_revisions_not_only_clothes():
+    text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk")
+    low = text.lower()
+    assert "drop the old choice" in low
+    assert "refusing to change" in low
+    assert "echo instruction headings" in low
+
+
+def test_prep_prompt_overrides_sticky_previous_craft():
+    text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="prep")
+    assert "変える必要のないところは変えない" not in text
+    assert "board image" in text.lower() or "old take" in text.lower()
+    assert "newest words beat" in text.lower()
 
 
 def test_talk_prompt_injects_character_voice():
@@ -229,7 +245,7 @@ def test_talk_prompt_injects_character_voice():
     assert "VOICE" in text
 
 
-def test_duet_talk_user_prompt_prefers_proposals_over_reasking():
+def test_duet_talk_user_prompt_prefers_latest_over_sticky():
     session = {
         "inputs": {"theme": "放送室"},
         "chat": [
@@ -240,10 +256,24 @@ def test_duet_talk_user_prompt_prefers_proposals_over_reasking():
         "craft": {},
     }
     prompt = service._duet_user_prompt(session, "マイク前で椅子に座って", prep=False)
-    assert "決まった事実" in prompt
+    assert "いちばん新しい発言が勝つ" in prompt
     assert "自分から具体案" in prompt
     assert "get ready" in prompt
     assert "撮る画を一つに決めて" not in prompt
+
+
+def test_duet_prep_user_prompt_rewrites_against_previous_craft():
+    session = {
+        "inputs": {"theme": "放送室"},
+        "chat": [],
+        "notes": ["教室じゃなくて放送室", "後ろから"],
+        "craft": {"prompt": "classroom, wooden_desk, covering_mouth"},
+    }
+    prompt = service._duet_user_prompt(session, "撮影準備", prep=True)
+    assert "変える必要のないところは変えない" not in prompt
+    assert "矛盾する" in prompt
+    assert "TAGS/SCENE にも必ず反映" in prompt
+    assert "classroom, wooden_desk" in prompt
 
 
 @pytest.mark.asyncio

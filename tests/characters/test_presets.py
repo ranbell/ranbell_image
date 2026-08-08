@@ -27,14 +27,17 @@ from app.characters.presets import (
     preset_point_id,
     preset_summary,
     preset_to_character,
+    preset_version,
+    reload_seed_presets,
     reset_presets_to_defaults,
     seed_point_ids,
     seed_presets_if_empty,
+    sync_muse_presets_from_asset,
 )
 from app.tags.body import AGE_TAGS, BODY_SLOTS, BREAST_TAGS, filter_body_tags
 from app.tags.split_tags import soft_normalize_tag
 
-PRESETS = load_seed_presets()
+PRESETS = reload_seed_presets()
 
 _JA = re.compile(r"[ぁ-んァ-ヶ一-龥]")
 IDENTITY_BUCKETS = (
@@ -44,6 +47,15 @@ IDENTITY_BUCKETS = (
 REQUIRED_TAG_BUCKETS = IDENTITY_BUCKETS + (
     "expression", "headwear_accessory", "hobby_actions",
 )
+
+
+def test_every_bundled_muse_has_a_non_negative_version():
+    """Admin sync compares asset version to Qdrant; missing version is treated
+    as older than 0, but the file itself must declare it explicitly."""
+    for preset in PRESETS:
+        assert "version" in preset, preset.get("id")
+        assert preset_version(preset) >= 0
+        assert isinstance(preset["version"], int)
 
 
 def test_asset_loads_with_unique_ids():
@@ -529,6 +541,62 @@ def test_her_own_pictures_survive_a_re_seed():
     _run(reset_presets_to_defaults(db, vector_dim=4))
 
     assert db._qc.points[point_id]["board"] == BOARD
+
+
+def test_her_diaries_survive_a_re_seed():
+    point_id = preset_point_id(PRESETS[0]["id"])
+    diary = [{"id": "d1", "summary_ja": "褒められた", "content_ja": "秘密", "read": False}]
+    db = _FakeDB({point_id: {**PRESETS[0], "diaries": diary, "board": dict(BOARD)}})
+
+    _run(reset_presets_to_defaults(db, vector_dim=4))
+
+    assert db._qc.points[point_id]["diaries"] == diary
+    assert db._qc.points[point_id]["board"] == BOARD
+
+
+def test_muse_sync_updates_only_when_asset_version_is_newer():
+    point_id = preset_point_id(PRESETS[0]["id"])
+    diary = [{"id": "keep-me", "content_ja": "消さないで"}]
+    stale = {
+        **PRESETS[0],
+        "version": -1,  # treated older than asset 0… use missing instead
+        "name_ja": "古い名前",
+        "diaries": diary,
+        "board": dict(BOARD),
+    }
+    del stale["version"]  # pre-version installs
+    db = _FakeDB({point_id: stale})
+
+    preview = _run(sync_muse_presets_from_asset(db, vector_dim=4, dry_run=True))
+    assert preview["updated"] == 1
+    assert preview["inserted"] == len(PRESETS) - 1
+    assert db._qc.points[point_id]["name_ja"] == "古い名前"
+
+    result = _run(sync_muse_presets_from_asset(db, vector_dim=4))
+    assert result["updated"] == 1
+    assert result["inserted"] == len(PRESETS) - 1
+    row = db._qc.points[point_id]
+    assert row["name_ja"] == PRESETS[0]["name_ja"]
+    assert row["version"] == PRESETS[0]["version"]
+    assert row["diaries"] == diary
+    assert row["board"] == BOARD
+
+    again = _run(sync_muse_presets_from_asset(db, vector_dim=4))
+    assert again["updated"] == 0
+    assert again["inserted"] == 0
+    assert again["skipped"] == len(PRESETS)
+
+
+def test_muse_sync_does_not_delete_stale_bundled_rows():
+    """Unlike reset, sync never removes anyone — only inserts/updates by version."""
+    legacy_id = preset_point_id("shrine_maiden")
+    db = _FakeDB({legacy_id: _legacy_row("shrine_maiden", diaries=[{"id": "x"}])})
+
+    result = _run(sync_muse_presets_from_asset(db, vector_dim=4))
+
+    assert legacy_id in db._qc.points
+    assert db._qc.points[legacy_id]["diaries"] == [{"id": "x"}]
+    assert result["inserted"] == len(PRESETS)
 
 
 def test_pictures_follow_a_character_whose_id_was_renumbered():

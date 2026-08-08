@@ -123,3 +123,7 @@ def test_muse_dialogue_attributes_completeness(preset_id):
         f"{preset_id} ({preset.get('name_ja')}) talk_quirks/examples missing "
         f"motif tokens {tokens}: {voice_blob[:120]!r}"
     )
+
+    # 10. Asset version for admin Muse sync
+    assert isinstance(preset.get("version"), int), f"{preset_id} missing int version"
+    assert preset["version"] >= 0

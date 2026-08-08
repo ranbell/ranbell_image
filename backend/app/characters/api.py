@@ -133,6 +133,28 @@ async def reset_characters(request: Request, body: ResetRequest | None = None):
     return result
 
 
+class MuseSyncRequest(BaseModel):
+    """Preview or apply versioned Muse asset updates without touching diaries."""
+    dry_run: bool = False
+
+
+@router.post("/sync-muse")
+async def sync_muse_characters(request: Request, body: MuseSyncRequest | None = None):
+    """Update bundled Muse rows when the asset ``version`` is newer than Qdrant.
+
+    Unlike ``/reset``, this never deletes roster rows. Diaries, boards, and
+    galleries on each point are preserved; only fields present in
+    ``personality_presets.json`` are rewritten.
+    """
+    opts = body or MuseSyncRequest()
+    result = await presets_db.sync_muse_presets_from_asset(
+        request.app.state.db, vector_dim=settings.embed_dim, dry_run=opts.dry_run,
+    )
+    logger.info("[characters] muse sync (%s): %s",
+                "preview" if opts.dry_run else "applied", result)
+    return result
+
+
 @router.get("/{character_id}")
 async def get_character(character_id: str, request: Request):
     preset = await presets_db.get_preset(request.app.state.db, character_id)

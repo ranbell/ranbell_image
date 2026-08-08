@@ -574,6 +574,47 @@ function resetPlanDescription(plan) {
   return lines.join(' ')
 }
 
+/*
+ * Versioned Muse asset sync — JSON fields only; diaries / boards stay put.
+ */
+async function syncMuseRoster() {
+  rosterLoading.value = true
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/characters/sync-muse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true }),
+    })
+    if (!r.ok) throw new Error(r.statusText)
+    const plan = await r.json()
+    const detail = (plan.inserted || plan.updated)
+      ? t('admin.characters.syncPreview', {
+          inserted: plan.inserted ?? 0,
+          updated: plan.updated ?? 0,
+          skipped: plan.skipped ?? 0,
+        })
+      : t('admin.characters.syncNothing')
+    confirmThen(
+      t('admin.characters.syncConfirm', { n: plan.seeds ?? 0 }),
+      detail,
+      () => adminAction('characterMuseSync', '/api/characters/sync-muse', {
+        body: JSON.stringify({}),
+        successMsg: d => t('admin.characters.syncDone', {
+          inserted: d.inserted ?? 0,
+          updated: d.updated ?? 0,
+          skipped: d.skipped ?? 0,
+        }),
+        after: fetchCharacterRoster,
+      }),
+    )
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
 // Proxy functions that emit to App.vue
 function triggerPipelineAll() {
   emit('trigger-pipeline', [])
@@ -1748,6 +1789,15 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   <p class="text-xl font-bold text-teal-400">{{ roster.mine }}</p>
                 </div>
               </div>
+            </div>
+
+            <div class="bg-teal-950/30 border border-teal-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-teal-300/90">{{ $t('admin.characters.syncTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.characters.syncDesc') }}</p>
+              <button type="button" @click="syncMuseRoster" :disabled="!!adminLoading || rosterLoading"
+                class="px-3 py-1.5 bg-teal-800/70 hover:bg-teal-700 disabled:opacity-40 rounded-lg text-xs text-teal-50 font-medium">
+                {{ $t('admin.characters.syncBtn') }}
+              </button>
             </div>
 
             <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 space-y-2">

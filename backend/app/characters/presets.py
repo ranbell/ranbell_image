@@ -63,6 +63,17 @@ GALLERY_LIMIT = 12
 
 _seed_cache: list[dict[str, Any]] | None = None
 
+# Runtime fields that live on the Qdrant point but never in the asset file.
+# Sync / re-seed must carry these across or diaries and boards are destroyed.
+_RUNTIME_KEYS: tuple[str, ...] = (
+    "board",
+    "gallery",
+    "diaries",
+    "user_created",
+    "created_at",
+    "updated_at",
+)
+
 
 def preset_point_id(preset_key: str) -> str:
     return str(uuid.uuid5(_ID_NAMESPACE, str(preset_key or "")))
@@ -92,6 +103,23 @@ def load_seed_presets() -> list[dict[str, Any]]:
             logger.warning("[presets] asset load failed: %s", exc)
             _seed_cache = []
     return _seed_cache
+
+
+def reload_seed_presets() -> list[dict[str, Any]]:
+    """Drop the in-process cache and re-read the asset (tests / hot reload)."""
+    global _seed_cache
+    _seed_cache = None
+    return load_seed_presets()
+
+
+def preset_version(payload: dict[str, Any] | None) -> int:
+    """Asset / stored Muse schema version. Missing means older than any shipped row."""
+    if not payload:
+        return -1
+    try:
+        return int(payload.get("version"))
+    except (TypeError, ValueError):
+        return -1
 
 
 def _tags(preset: dict[str, Any], *buckets: str) -> list[str]:
@@ -579,7 +607,15 @@ async def _stored_rows(db) -> dict[str, dict[str, Any]]:
 
 
 def _artwork(payload: dict[str, Any]) -> dict[str, Any]:
+    """Board / gallery only — used when matching artwork across renumbered ids."""
     return {k: payload[k] for k in ("board", "gallery") if payload.get(k)}
+
+
+def _runtime_fields(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Everything the asset file must not overwrite (diaries, boards, …)."""
+    if not payload:
+        return {}
+    return {k: payload[k] for k in _RUNTIME_KEYS if k in payload and payload[k] is not None}
 
 
 def _artwork_shas(payload: dict[str, Any]) -> list[str]:
@@ -614,16 +650,16 @@ def _artwork_by_name(stored: dict[str, dict[str, Any]]) -> dict[str, dict[str, A
 async def _insert_seed_presets(
     db, *, vector_dim: int, stored: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[int, int]:
-    """Write the bundled presets in, keeping whatever has been drawn for them.
+    """Write the bundled presets in, keeping runtime fields on the row.
 
     Returns ``(written, carried_from_another_row)``.
 
     The asset file describes who a character is; it says nothing about her
-    pictures, and it never will — those are rendered later and recorded on the
-    row. Writing the file over the row therefore has to carry `board` and
-    `gallery` across, or re-reading the file destroys every portrait in the app.
-    Her own row is the first place to look; her slug is the second, which is
-    what makes a renumbered roster survive.
+    pictures or diaries. Writing the file over the row therefore has to carry
+    `board`, `gallery`, and `diaries` across, or re-reading the file destroys
+    every portrait and every letter in the app. Her own row is the first place
+    to look; her slug is the second, which is what makes a renumbered roster
+    survive.
     """
     seeds = load_seed_presets()
     if not seeds:
@@ -636,21 +672,31 @@ async def _insert_seed_presets(
     carried = 0
     for seed in seeds:
         point_id = preset_point_id(str(seed.get("id") or ""))
-        art = _artwork(stored.get(point_id) or {})
+        existing = stored.get(point_id) or {}
+        runtime = _runtime_fields(existing)
+        art = _artwork(existing)
         if not art:
             for key in (str(seed.get("slug") or ""), str(seed.get("id") or "")):
                 art = by_name.get(key) or {}
                 if art:
                     carried += 1
+                    runtime = {**runtime, **art}
                     logger.info(
                         "[presets] %s: carried the board over from %s",
                         preset_label(seed), key,
                     )
                     break
+        else:
+            runtime = {**runtime, **art}
+        # Never let the asset invent empty diaries over a full book.
+        payload = {**seed, **runtime}
+        if "created_at" not in payload:
+            payload["created_at"] = time.time()
+        payload["updated_at"] = time.time()
         points.append(qm.PointStruct(
             id=point_id,
             vector={"embedding": _dummy_vector(vector_dim)},
-            payload={**seed, **art},
+            payload=payload,
         ))
 
     for i in range(0, len(points), 100):
@@ -660,6 +706,99 @@ async def _insert_seed_presets(
         )
     logger.info("[presets] seeded %d character presets", len(points))
     return len(points), carried
+
+
+async def sync_muse_presets_from_asset(
+    db, *, vector_dim: int, dry_run: bool = False,
+) -> dict[str, Any]:
+    """Apply bundled JSON rows whose ``version`` is newer than Qdrant.
+
+    Only asset fields are rewritten. ``diaries``, ``board``, ``gallery``, and
+    other runtime keys are kept verbatim. Rows the file does not claim are not
+    deleted (that remains ``reset``). User-authored characters are skipped.
+    """
+    await db.ensure_character_presets_collection()
+    # Always re-read the file so an edited asset is visible without restart.
+    seeds = reload_seed_presets()
+    stored = await _stored_rows(db)
+
+    to_insert: list[dict[str, Any]] = []
+    to_update: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    skipped: list[dict[str, str]] = []
+
+    for seed in seeds:
+        preset_key = str(seed.get("id") or "")
+        point_id = preset_point_id(preset_key)
+        existing = stored.get(point_id)
+        seed_ver = preset_version(seed)
+
+        if existing and existing.get("user_created"):
+            skipped.append({
+                "id": preset_key,
+                "reason": "user_created",
+                "label": preset_label(existing),
+            })
+            continue
+
+        if existing is None:
+            to_insert.append(seed)
+            continue
+
+        stored_ver = preset_version(existing)
+        if seed_ver > stored_ver:
+            to_update.append((point_id, seed, existing))
+        else:
+            skipped.append({
+                "id": preset_key,
+                "reason": "up_to_date",
+                "label": preset_label(existing),
+                "stored_version": stored_ver,
+                "asset_version": seed_ver,
+            })
+
+    report = {
+        "dry_run": dry_run,
+        "seeds": len(seeds),
+        "inserted": len(to_insert),
+        "updated": len(to_update),
+        "skipped": len(skipped),
+        "inserted_ids": [str(s.get("id") or "") for s in to_insert],
+        "updated_ids": [str(s.get("id") or "") for _, s, _ in to_update],
+        "skipped_detail": skipped[:60],
+    }
+    if dry_run:
+        return report
+
+    points: list[qm.PointStruct] = []
+    now = time.time()
+    for seed in to_insert:
+        point_id = preset_point_id(str(seed.get("id") or ""))
+        points.append(qm.PointStruct(
+            id=point_id,
+            vector={"embedding": _dummy_vector(vector_dim)},
+            payload={**seed, "created_at": now, "updated_at": now},
+        ))
+    for point_id, seed, existing in to_update:
+        runtime = _runtime_fields(existing)
+        payload = {**seed, **runtime, "updated_at": now}
+        if "created_at" not in payload:
+            payload["created_at"] = existing.get("created_at") or now
+        points.append(qm.PointStruct(
+            id=point_id,
+            vector={"embedding": _dummy_vector(vector_dim)},
+            payload=payload,
+        ))
+
+    for i in range(0, len(points), 100):
+        await db._qc.upsert(
+            collection_name=CHARACTER_PRESETS_COLLECTION,
+            points=points[i:i + 100],
+        )
+    logger.info(
+        "[presets] muse sync: %d inserted, %d updated, %d skipped",
+        report["inserted"], report["updated"], report["skipped"],
+    )
+    return report
 
 
 # ── Preset Diaries (Qdrant payload) ──────────────────────────────────────────

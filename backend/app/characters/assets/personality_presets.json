@@ -1,6 +1,7 @@
 [
   {
     "id": "c001",
+    "version": 0,
     "slug": "darkroom_photo",
     "name": "Minamo Shirase",
     "name_ja": "白瀬 みなも",
@@ -135,6 +136,7 @@
   },
   {
     "id": "c002",
+    "version": 0,
     "slug": "library_counter",
     "name": "Kaho Yanagi",
     "name_ja": "柳 かほ",
@@ -269,6 +271,7 @@
   },
   {
     "id": "c003",
+    "version": 0,
     "slug": "reed_clarinet",
     "name": "Nao Isobe",
     "name_ja": "磯部 なお",
@@ -277,7 +280,7 @@
     "summary": "Clarinetist lingering in the empty music room after hours, meticulously adjusting her reed. Her ear for tone is absurdly sharp; she can tell the room's temperature and humidity just from a single warm-up note. Muttering 'today's G-natural is a bit stiff,' her slender fingers polishing the keys carry the absolute aesthetic of a dedicated woodwind musician.",
     "summary_ja": "放課後の誰もいない音楽室で、クラリネットのリードを熱心にお手入れしている木管パート。音色に対するこだわりが人一倍強く、一音聴いただけでその日の温度や湿度を見抜いてしまう。『今日のソの音、少し硬い……』とつぶやきながら、楽器のキーを磨く指先には妥協のない職人の美学が宿っているの。",
     "charm": "The contrast between her poised, dignified posture during performance and the way she lets out a long breath afterward, anxiously asking 'did that sound okay...?'",
-    "charm_ja": "演奏中の凛とした格好いい立ち姿と、曲が終わった後に息をふーっと吐いて『うまく吹けた……？』と不安そうにこちらを覗き込む可憐さの落差。",
+    "charm_ja": "演奏中の凛とした格好いい立ち姿と、曲が終わった後に息をふーっと吐いて『うまく吹けた……？』と不安そうに顔を覗き込む可憐さの落差。",
     "gender": "female",
     "subject_tag": "1girl",
     "signature_prop": "clarinet",
@@ -403,6 +406,7 @@
   },
   {
     "id": "c004",
+    "version": 0,
     "slug": "ink_and_paper",
     "name": "Suzu Amagai",
     "name_ja": "天貝 すず",
@@ -538,6 +542,7 @@
   },
   {
     "id": "c005",
+    "version": 0,
     "slug": "rooftop_lunch",
     "name": "Hazuki Tono",
     "name_ja": "東野 はづき",
@@ -670,6 +675,7 @@
   },
   {
     "id": "c006",
+    "version": 0,
     "slug": "gym_storage",
     "name": "Rin Ogata",
     "name_ja": "緒方 りん",
@@ -805,6 +811,7 @@
   },
   {
     "id": "c007",
+    "version": 0,
     "slug": "broadcast_booth",
     "name": "Mio Kagami",
     "name_ja": "各務 みお",
@@ -939,6 +946,7 @@
   },
   {
     "id": "c008",
+    "version": 0,
     "slug": "greenhouse_club",
     "name": "Wakana Serizawa",
     "name_ja": "芹沢 わかな",
@@ -1073,6 +1081,7 @@
   },
   {
     "id": "c009",
+    "version": 0,
     "slug": "stage_wings",
     "name": "Chika Munakata",
     "name_ja": "宗像 ちか",
@@ -1208,6 +1217,7 @@
   },
   {
     "id": "c010",
+    "version": 0,
     "slug": "shogi_afternoon",
     "name": "Yuki Sagara",
     "name_ja": "相良 ゆき",
@@ -1343,6 +1353,7 @@
   },
   {
     "id": "c011",
+    "version": 0,
     "slug": "predawn_baker",
     "name": "Hinata Kuroki",
     "name_ja": "黒木 ひなた",
@@ -1477,6 +1488,7 @@
   },
   {
     "id": "c012",
+    "version": 0,
     "slug": "arcade_second",
     "name": "Rui Tachibana",
     "name_ja": "橘 るい",
@@ -1612,6 +1624,7 @@
   },
   {
     "id": "c013",
+    "version": 0,
     "slug": "counter_barista",
     "name": "Nagisa Fuwa",
     "name_ja": "不破 なぎさ",
@@ -1745,6 +1758,7 @@
   },
   {
     "id": "c014",
+    "version": 0,
     "slug": "flower_wrapper",
     "name": "Sumire Hiraoka",
     "name_ja": "平岡 すみれ",
@@ -1879,6 +1893,7 @@
   },
   {
     "id": "c015",
+    "version": 0,
     "slug": "night_register",
     "name": "Akari Tsuzuki",
     "name_ja": "都築 あかり",
@@ -2013,6 +2028,7 @@
   },
   {
     "id": "c016",
+    "version": 0,
     "slug": "tank_guide",
     "name": "Umi Sakaki",
     "name_ja": "榊 うみ",
@@ -2147,6 +2163,7 @@
   },
   {
     "id": "c017",
+    "version": 0,
     "slug": "record_bins",
     "name": "Kotoha Nikaido",
     "name_ja": "二階堂 ことは",
@@ -2282,6 +2299,7 @@
   },
   {
     "id": "c018",
+    "version": 0,
     "slug": "clinic_desk",
     "name": "Momo Kirishima",
     "name_ja": "桐島 もも",
@@ -2415,6 +2433,7 @@
   },
   {
     "id": "c019",
+    "version": 0,
     "slug": "ramen_counter",
     "name": "Sae Todoroki",
     "name_ja": "轟 さえ",
@@ -2549,6 +2568,7 @@
   },
   {
     "id": "c020",
+    "version": 0,
     "slug": "bike_courier",
     "name": "Tsubasa Amemiya",
     "name_ja": "雨宮 つばさ",
@@ -2683,6 +2703,7 @@
   },
   {
     "id": "c021",
+    "version": 0,
     "slug": "hydrangea_rain",
     "name": "Shizuku Aoyagi",
     "name_ja": "青柳 しずく",
@@ -2814,6 +2835,7 @@
   },
   {
     "id": "c022",
+    "version": 0,
     "slug": "festival_yukata",
     "name": "Kanade Ninomiya",
     "name_ja": "二宮 かなで",
@@ -2948,6 +2970,7 @@
   },
   {
     "id": "c023",
+    "version": 0,
     "slug": "snow_gloves",
     "name": "Yuki Nanjo",
     "name_ja": "南条 ゆき",
@@ -3082,6 +3105,7 @@
   },
   {
     "id": "c024",
+    "version": 0,
     "slug": "sakura_shutter",
     "name": "Koharu Sena",
     "name_ja": "瀬名 こはる",
@@ -3216,6 +3240,7 @@
   },
   {
     "id": "c025",
+    "version": 0,
     "slug": "kotatsu_winter",
     "name": "Nono Ichikawa",
     "name_ja": "市川 のの",
@@ -3347,6 +3372,7 @@
   },
   {
     "id": "c026",
+    "version": 0,
     "slug": "planetarium_seat",
     "name": "Subaru Asakura",
     "name_ja": "朝倉 すばる",
@@ -3479,6 +3505,7 @@
   },
   {
     "id": "c027",
+    "version": 0,
     "slug": "bus_stop_wait",
     "name": "Sena Tsukishiro",
     "name_ja": "月城 せな",
@@ -3613,6 +3640,7 @@
   },
   {
     "id": "c028",
+    "version": 0,
     "slug": "goldfish_scoop",
     "name": "Mio Hazama",
     "name_ja": "狭間 みお",
@@ -3746,6 +3774,7 @@
   },
   {
     "id": "c029",
+    "version": 0,
     "slug": "laundry_roof",
     "name": "Asahi Kurata",
     "name_ja": "倉田 あさひ",
@@ -3880,6 +3909,7 @@
   },
   {
     "id": "c030",
+    "version": 0,
     "slug": "moving_boxes",
     "name": "Riko Naruse",
     "name_ja": "成瀬 りこ",
