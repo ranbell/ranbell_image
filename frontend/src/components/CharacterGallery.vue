@@ -491,6 +491,16 @@ onUnmounted(() => {
 
               <p class="text-[11px] text-gray-300/90 leading-relaxed line-clamp-2">{{ blurb(c) }}</p>
               
+              <!-- First Person & Call Sign badge -->
+              <div v-if="c.first_person_ja || c.first_person_en" class="flex items-center gap-1.5 text-[10px] text-amber-300 font-mono">
+                <span class="px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-500/30">
+                  {{ t('muse.firstPerson') }}: {{ isJa ? c.first_person_ja : (c.first_person_en || c.first_person_ja) }}
+                </span>
+                <span v-if="c.user_address_ja || c.user_address_en" class="px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-500/30">
+                  {{ t('muse.userAddress') }}: {{ isJa ? c.user_address_ja : (c.user_address_en || c.user_address_ja) }}
+                </span>
+              </div>
+
               <!-- Cute Speech Bubble Charm Point -->
               <p v-if="charm(c)"
                  class="text-[11px] text-pink-200 leading-relaxed p-2 rounded-xl bg-pink-950/40 border border-pink-500/30 relative">

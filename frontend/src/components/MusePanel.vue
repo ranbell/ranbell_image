@@ -22,6 +22,7 @@ const catalog = ref(null)
 const busy = ref(false)
 const streamLive = ref(false)
 const showPicker = ref(false)
+const showPartnerPicker = ref(false)
 const showSettings = ref(false)
 const showCast = ref(false)
 const preview = ref('')
@@ -41,6 +42,9 @@ let startedAt = 0
 const inputs = computed(() => session.value?.inputs || {})
 const needs = computed(() => session.value?.needs || [])
 const character = computed(() => session.value?.character || null)
+const partnerCharacter = computed(() => session.value?.partner_character || null)
+const partnerPreset = computed(() => inputs.value.partner_preset || '')
+const isWMuse = computed(() => isDuet.value && Boolean(partnerPreset.value))
 const chat = computed(() => session.value?.chat || [])
 const craft = computed(() => session.value?.craft || {})
 const board = computed(() => session.value?.board || {})
@@ -117,8 +121,38 @@ function museById(id) {
 const leadFace = computed(() => thumb(
   character.value?.board?.portrait || character.value?.board?.sheet || '',
 ))
+const partnerFace = computed(() => thumb(
+  partnerCharacter.value?.board?.portrait || partnerCharacter.value?.board?.sheet || '',
+))
+
 function isLead(m) {
   return String(m?.muse_id || '').split(':')[0] === 'actress'
+}
+
+function getMessageFace(m, lineSpeakerName) {
+  if (lineSpeakerName) {
+    const nameA = isJa.value ? character.value?.name_ja : character.value?.name
+    const nameB = isJa.value ? partnerCharacter.value?.name_ja : partnerCharacter.value?.name
+    if (nameA && lineSpeakerName.includes(nameA)) return leadFace.value
+    if (nameB && lineSpeakerName.includes(nameB)) return partnerFace.value
+  }
+  return isLead(m) ? leadFace.value : ''
+}
+
+function parseWMuseLines(text) {
+  if (!text || typeof text !== 'string') return null
+  if (!text.includes(':') && !text.includes('：')) return null
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  const parsed = []
+  for (const line of lines) {
+    const match = line.match(/^([^:：]+)[:：]\s*(.+)$/)
+    if (match) {
+      parsed.push({ speaker: match[1].trim(), content: match[2].trim() })
+    } else {
+      parsed.push({ speaker: null, content: line })
+    }
+  }
+  return parsed.length > 0 ? parsed : null
 }
 
 // Who put which tag in. Folded newest-first so a tag reads as "whoever last
@@ -301,6 +335,19 @@ async function pickCharacter(id) {
   } catch (err) { fail(err) }
 }
 
+async function pickPartnerCharacter(id) {
+  showPartnerPicker.value = false
+  if (id && inputs.value.character_id === id) {
+    emit('toast', { msg: '主演とは異なる Muse をパートナーに選んでください。', type: 'error' })
+    return
+  }
+  await patchInputs({ partner_preset: id })
+}
+
+async function clearPartnerCharacter() {
+  await patchInputs({ partner_preset: '' })
+}
+
 async function setPreset(p) {
   await patchInputs({ crew_preset: p })
 }
@@ -402,6 +449,9 @@ async function onChatKey(e) {
         <div class="min-w-0">
           <h2 class="sb-display text-base text-pink-300 font-bold tracking-wide flex items-center gap-1.5">
             <span>🎬</span> {{ t('muse.title') }}
+            <span v-if="isWMuse" class="ml-2 px-2 py-0.5 rounded-full bg-pink-500/30 border border-pink-400/40 text-pink-200 text-[10px] font-medium animate-pulse">
+              ✨ {{ t('muse.wMuseMode') }}
+            </span>
           </h2>
           <p class="text-[11px] text-pink-400/80 truncate">{{ t('muse.subtitle') }}</p>
         </div>
@@ -459,24 +509,67 @@ async function onChatKey(e) {
               ></textarea>
             </label>
 
-            <button
-              type="button"
-              class="w-full flex items-center gap-3 p-3 rounded-lg border border-white/10 hover:border-white/25 text-left"
-              @click="showPicker = true"
-            >
-              <img
-                v-if="character?.board?.portrait || character?.board?.sheet"
-                :src="thumb(character.board.portrait || character.board.sheet)"
-                class="w-16 h-[84px] rounded object-cover shrink-0" alt=""
-              />
-              <span v-else class="w-16 h-[84px] rounded bg-black/40 shrink-0"></span>
-              <span class="min-w-0 flex-1">
-                <span class="block text-sm text-gray-200 truncate">
-                  {{ (isJa ? character?.name_ja : character?.name) || t('muse.noCharacter') }}
+            <!-- Main Character Picker -->
+            <div class="space-y-1">
+              <span class="sb-label">{{ isDuet ? t('muse.character') + ' (主演)' : t('muse.character') }}</span>
+              <button
+                type="button"
+                class="w-full flex items-center gap-3 p-3 rounded-lg border border-white/10 hover:border-white/25 text-left bg-black/20"
+                @click="showPicker = true"
+              >
+                <img
+                  v-if="character?.board?.portrait || character?.board?.sheet"
+                  :src="thumb(character.board.portrait || character.board.sheet)"
+                  class="w-16 h-[84px] rounded object-cover shrink-0" alt=""
+                />
+                <span v-else class="w-16 h-[84px] rounded bg-black/40 shrink-0"></span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-semibold text-gray-200 truncate">
+                    {{ (isJa ? character?.name_ja : character?.name) || t('muse.noCharacter') }}
+                  </span>
+                  <span class="block text-[10px] text-[var(--sb-faint)]">{{ t('muse.pickCharacter') }}</span>
                 </span>
-                <span class="block text-[10px] text-[var(--sb-faint)]">{{ t('muse.pickCharacter') }}</span>
-              </span>
-            </button>
+              </button>
+            </div>
+
+            <!-- W-Muse Partner Picker (only in Duet mode) -->
+            <div v-if="isDuet" class="space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="sb-label text-pink-300 font-medium flex items-center gap-1">
+                  <span>✨</span> {{ t('muse.partnerCharacter') }}
+                </span>
+                <button
+                  v-if="partnerPreset"
+                  type="button"
+                  class="text-[10px] text-pink-400 hover:text-pink-200 underline"
+                  @click="clearPartnerCharacter"
+                >
+                  {{ t('muse.noPartner') }}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                class="w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all"
+                :class="partnerPreset
+                  ? 'border-pink-500/50 bg-pink-950/30'
+                  : 'border-dashed border-white/20 hover:border-white/40 bg-black/20'"
+                @click="showPartnerPicker = true"
+              >
+                <img
+                  v-if="partnerCharacter?.board?.portrait || partnerCharacter?.board?.sheet"
+                  :src="thumb(partnerCharacter.board.portrait || partnerCharacter.board.sheet)"
+                  class="w-16 h-[84px] rounded object-cover shrink-0 ring-2 ring-pink-500/50" alt=""
+                />
+                <span v-else class="w-16 h-[84px] rounded bg-pink-950/40 grid place-items-center text-pink-400 shrink-0 text-xl">👥</span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-semibold text-pink-100 truncate">
+                    {{ (isJa ? partnerCharacter?.name_ja : partnerCharacter?.name) || t('muse.noPartner') }}
+                  </span>
+                  <span class="block text-[10px] text-pink-300/70">{{ t('muse.pickPartnerCharacter') }}</span>
+                </span>
+              </button>
+            </div>
 
             <div class="grid grid-cols-2 gap-3">
               <label class="block">
@@ -519,6 +612,25 @@ async function onChatKey(e) {
 
           <!-- chat -->
           <template v-else>
+            <!-- 🌟 Live W-Muse Duet Visualizer Banner -->
+            <div v-if="isWMuse" class="shrink-0 px-4 py-2 bg-gradient-to-r from-pink-950/80 via-rose-950/80 to-purple-950/80 border-b border-pink-500/30 flex items-center justify-between shadow-lg">
+              <div class="flex items-center gap-2">
+                <div class="flex items-center -space-x-2">
+                  <img :src="leadFace" class="w-8 h-8 rounded-full object-cover ring-2 ring-pink-400 shadow-md" alt="" />
+                  <img :src="partnerFace" class="w-8 h-8 rounded-full object-cover ring-2 ring-purple-400 shadow-md" alt="" />
+                </div>
+                <div>
+                  <span class="block text-[11px] font-bold text-pink-200">
+                    {{ (isJa ? character?.name_ja : character?.name) || 'Muse A' }} × {{ (isJa ? partnerCharacter?.name_ja : partnerCharacter?.name) || 'Muse B' }}
+                  </span>
+                  <span class="block text-[9px] text-pink-300/70">W-Muse ダブル主演セッション中</span>
+                </div>
+              </div>
+              <span class="px-2.5 py-1 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300 text-[10px] font-mono flex items-center gap-1 animate-pulse">
+                <span>✨</span> ケミストリー活性化中
+              </span>
+            </div>
+
             <div ref="chatEl" class="flex-1 overflow-y-auto p-3 space-y-2">
               <div
                 v-for="m in chat" :key="m.id"
@@ -528,27 +640,51 @@ async function onChatKey(e) {
                   m.kind === 'banter' ? 'pl-4' : '',
                 ]"
               >
-                <span class="flex items-center gap-1.5 text-[10px] text-pink-300/80 font-medium">
-                  <img
-                    v-if="isLead(m) && leadFace"
-                    :src="leadFace" alt=""
-                    class="rounded-full object-cover shrink-0 ring-2 ring-pink-400/80 shadow-md border border-pink-100 transition-transform hover:scale-110"
-                    :class="isDuet ? 'w-9 h-9' : 'w-6 h-6'"
-                  />
-                  <template v-if="m.role === 'user'">🎬 {{ t('muse.showrunner') }}</template>
-                  <template v-else-if="m.kind === 'banter'">{{ t('muse.secretBanterTitle') }} {{ m.name }}</template>
-                  <template v-else>🌸 {{ m.name || 'Studio' }}</template>
-                </span>
-                <div
-                  class="max-w-[88%] whitespace-pre-wrap leading-relaxed shadow-sm transition-all"
-                  :class="m.role === 'user'
-                    ? 'rounded-2xl rounded-tr-xs px-3.5 py-2 text-[12px] bg-emerald-950/50 border border-emerald-500/40 text-emerald-100 shadow-md'
-                    : m.role === 'system'
-                      ? 'rounded-xl px-3 py-2 text-[11px] bg-slate-900/60 border border-slate-700/40 text-gray-400'
-                      : m.kind === 'banter'
-                        ? 'rounded-2xl px-3.5 py-2 text-[11px] bg-gradient-to-r from-pink-950/70 to-rose-950/70 border border-pink-400/50 text-pink-200 shadow-lg italic'
-                        : 'rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/80 border border-pink-500/30 text-pink-50 shadow-md'"
-                >{{ m.text }}</div>
+                <template v-if="m.role !== 'user' && m.role !== 'system' && parseWMuseLines(m.text)">
+                  <div class="flex flex-col gap-2 w-full max-w-[90%]">
+                    <div
+                      v-for="(sub, sIdx) in parseWMuseLines(m.text)"
+                      :key="sIdx"
+                      class="flex flex-col items-start gap-1"
+                    >
+                      <span class="flex items-center gap-1.5 text-[10px] text-pink-300 font-bold">
+                        <img
+                          v-if="getMessageFace(m, sub.speaker)"
+                          :src="getMessageFace(m, sub.speaker)" alt=""
+                          class="w-7 h-7 rounded-full object-cover ring-2 ring-pink-400/80 shadow-md border border-pink-100 shrink-0"
+                        />
+                        <span>🌸 {{ sub.speaker || m.name }}</span>
+                      </span>
+                      <div class="rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/90 border border-pink-400/40 text-pink-50 shadow-md whitespace-pre-wrap leading-relaxed">
+                        {{ sub.content }}
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else>
+                  <span class="flex items-center gap-1.5 text-[10px] text-pink-300/80 font-medium">
+                    <img
+                      v-if="isLead(m) && leadFace"
+                      :src="leadFace" alt=""
+                      class="rounded-full object-cover shrink-0 ring-2 ring-pink-400/80 shadow-md border border-pink-100 transition-transform hover:scale-110"
+                      :class="isDuet ? 'w-9 h-9' : 'w-6 h-6'"
+                    />
+                    <template v-if="m.role === 'user'">🎬 {{ t('muse.showrunner') }}</template>
+                    <template v-else-if="m.kind === 'banter'">{{ t('muse.secretBanterTitle') }} {{ m.name }}</template>
+                    <template v-else>🌸 {{ m.name || 'Studio' }}</template>
+                  </span>
+                  <div
+                    class="max-w-[88%] whitespace-pre-wrap leading-relaxed shadow-sm transition-all"
+                    :class="m.role === 'user'
+                      ? 'rounded-2xl rounded-tr-xs px-3.5 py-2 text-[12px] bg-emerald-950/50 border border-emerald-500/40 text-emerald-100 shadow-md'
+                      : m.role === 'system'
+                        ? 'rounded-xl px-3 py-2 text-[11px] bg-slate-900/60 border border-slate-700/40 text-gray-400'
+                        : m.kind === 'banter'
+                          ? 'rounded-2xl px-3.5 py-2 text-[11px] bg-gradient-to-r from-pink-950/70 to-rose-950/70 border border-pink-400/50 text-pink-200 shadow-lg italic'
+                          : 'rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/80 border border-pink-500/30 text-pink-50 shadow-md'"
+                  >{{ m.text }}</div>
+                </template>
               </div>
 
               <div v-if="speaking && liveSay" class="flex flex-col items-start gap-1 my-1">
@@ -575,6 +711,21 @@ async function onChatKey(e) {
                           @click="quick(DUET_SHOT)">
                     {{ t('muse.quick.testShot') }}
                   </button>
+
+                  <template v-if="isWMuse">
+                    <button class="sb-btn text-[10px] border-pink-400/50 bg-pink-950/40 text-pink-200" :disabled="chatLocked"
+                            @click="quick('二人で背中合わせのポーズで決めてみて！')">
+                      🤝 背中合わせ
+                    </button>
+                    <button class="sb-btn text-[10px] border-pink-400/50 bg-pink-950/40 text-pink-200" :disabled="chatLocked"
+                            @click="quick('手をつないで微笑み合うショットを見せて！')">
+                      💕 手をつなぐ
+                    </button>
+                    <button class="sb-btn text-[10px] border-pink-400/50 bg-pink-950/40 text-pink-200" :disabled="chatLocked"
+                            @click="quick('お互いに顔を見合わせて内緒話するポーズで！')">
+                      🤫 内緒話
+                    </button>
+                  </template>
                 </template>
 
                 <template v-else>
@@ -821,6 +972,18 @@ async function onChatKey(e) {
       :get-jobs-map="getJobsMap"
       @pick="pickCharacter"
       @close="showPicker = false"
+      @toast="emit('toast', $event)"
+      @update:workflow="patchInputs({ workflow: $event })"
+    />
+
+    <CharacterGallery
+      :show="showPartnerPicker"
+      :selected-id="partnerPreset"
+      :workflows="workflows"
+      :workflow="inputs.workflow"
+      :get-jobs-map="getJobsMap"
+      @pick="pickPartnerCharacter"
+      @close="showPartnerPicker = false"
       @toast="emit('toast', $event)"
       @update:workflow="patchInputs({ workflow: $event })"
     />

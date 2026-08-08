@@ -67,8 +67,17 @@ def _inputs(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _identity_tags(session: dict[str, Any]) -> list[str]:
-    character = session.get("character") or {}
-    return [str(t) for t in (character.get("identity_tags") or []) if str(t).strip()]
+    character_a = session.get("character") or {}
+    partner_character = session.get("partner_character") or {}
+    tags_a = [str(t) for t in (character_a.get("identity_tags") or []) if str(t).strip()]
+    if partner_character:
+        tags_b = [str(t) for t in (partner_character.get("identity_tags") or []) if str(t).strip()]
+        combined = ["2girls"]
+        for t in tags_a + tags_b:
+            if t not in ("1girl", "solo") and t not in combined:
+                combined.append(t)
+        return combined
+    return tags_a
 
 
 def _framing(inputs: dict[str, Any]) -> str:
@@ -76,9 +85,15 @@ def _framing(inputs: dict[str, Any]) -> str:
 
 
 def _cast(session: dict[str, Any]) -> list[dict[str, Any]]:
-    """Everyone in frame. One seat today; the shape is ready for more."""
-    character = session.get("character") or {}
-    return [character] if character else []
+    """Everyone in frame. Single Actress or W-Muse pair."""
+    character_a = session.get("character") or {}
+    partner_character = session.get("partner_character") or {}
+    res = []
+    if character_a:
+        res.append(character_a)
+    if partner_character:
+        res.append(partner_character)
+    return res
 
 
 def _style(session: dict[str, Any]) -> str:
@@ -1436,6 +1451,24 @@ async def _duet_talk(
     name = _muse_display_name(session, lead)
     events.publish(sid, {"type": "muse_speaking", "muse_id": lead, "name": name})
     images = await board_images(db, session)
+
+    partner_preset_id = str(inputs.get("partner_preset") or "").strip()
+    partner_character = None
+    if partner_preset_id:
+        cached = session.get("partner_character") or {}
+        if cached.get("personality", {}).get("preset_key") == partner_preset_id:
+            partner_character = cached
+        else:
+            try:
+                p_preset = await presets_db.get_preset(db, partner_preset_id)
+                if p_preset:
+                    partner_character = presets_db.preset_to_character(p_preset)
+                    session["partner_character"] = partner_character
+            except Exception:
+                partner_character = None
+    else:
+        session.pop("partner_character", None)
+
     try:
         say, blind = await chain.run_duet_talk(
             ollama,
@@ -1443,6 +1476,7 @@ async def _duet_talk(
             model=_vision_model(inputs) if images else _text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),
             character=session.get("character") or {},
+            partner_character=partner_character,
             images=images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),
         )
@@ -1474,6 +1508,24 @@ async def _duet_prep(
     })
     images = await board_images(db, session)
     started = time.monotonic()
+
+    partner_preset_id = str(inputs.get("partner_preset") or "").strip()
+    partner_character = None
+    if partner_preset_id:
+        cached = session.get("partner_character") or {}
+        if cached.get("personality", {}).get("preset_key") == partner_preset_id:
+            partner_character = cached
+        else:
+            try:
+                p_preset = await presets_db.get_preset(db, partner_preset_id)
+                if p_preset:
+                    partner_character = presets_db.preset_to_character(p_preset)
+                    session["partner_character"] = partner_character
+            except Exception:
+                partner_character = None
+    else:
+        session.pop("partner_character", None)
+
     try:
         turn = await chain.run_duet_prep(
             ollama,
@@ -1484,6 +1536,7 @@ async def _duet_prep(
             framing=_framing(inputs),
             brief=str(session.get("brief") or ""),
             character=session.get("character") or {},
+            partner_character=partner_character,
             style=_style(session), cast=_cast(session),
             images=images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),

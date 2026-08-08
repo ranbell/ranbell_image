@@ -28,6 +28,7 @@ class SessionCreate(BaseModel):
     crew_preset: str = "standard"
     # "duet" opens 二人芝居 — the Showrunner and the Lead, nobody else.
     mode: str = ""
+    partner_preset: str | None = None
 
 
 class InputsPatch(BaseModel):
@@ -36,6 +37,7 @@ class InputsPatch(BaseModel):
     # opens so the panel can hide the casting drawer.
     mode: str | None = None
     character_id: str | None = None
+    partner_preset: str | None = None
     workflow: str | None = None
     model: str | None = None
     vision_model: str | None = None

@@ -355,20 +355,22 @@ async def run_strike(
 
 async def run_duet_talk(
     ollama, *, user_prompt: str, model: str, num_ctx: int | None,
-    character: dict[str, Any] | None = None, seed: str = "",
+    character: dict[str, Any] | None = None,
+    partner_character: dict[str, Any] | None = None, seed: str = "",
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
 ) -> tuple[str, bool]:
-    """A two-hander conversation turn. Nothing is written down.
+    """A two-hander (or W-Muse three-hander) conversation turn. Nothing is written down."""
+    if partner_character:
+        system = crew.w_actress_duet_prompt(
+            character or {}, partner_character, mode="talk", seed=seed,
+        )
+    else:
+        system = crew.actress_duet_prompt(character or {}, mode="talk", seed=seed)
 
-    Returns her line and whether she was handed a picture she could not read.
-    The craft is deliberately untouched: in 二人芝居 the script does not exist
-    until the Showrunner asks to get ready, so that talking stays cheap and
-    fast enough to feel like talking.
-    """
     raw, blind = await _call_seeing(
         ollama,
-        system=crew.actress_duet_prompt(character or {}, mode="talk", seed=seed),
+        system=system,
         prompt=user_prompt, model=model, images=images,
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
@@ -384,17 +386,25 @@ async def run_duet_talk(
 async def run_duet_prep(
     ollama, *, user_prompt: str, model: str, num_ctx: int | None,
     identity_tags: list[str] | None, framing: str, brief: str,
-    character: dict[str, Any] | None = None, style: str = "",
+    character: dict[str, Any] | None = None,
+    partner_character: dict[str, Any] | None = None, style: str = "",
     cast: list[dict] | None = None, seed: str = "",
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
 ) -> MuseTurn:
-    """The turn where she builds the whole shot and reads the frame back."""
+    """The turn where she (or they) build the whole shot and read the frame back."""
+    if partner_character:
+        system = crew.w_actress_duet_prompt(
+            character or {}, partner_character, mode="prep", base_style=style, seed=seed,
+        )
+    else:
+        system = crew.actress_duet_prompt(
+            character or {}, mode="prep", base_style=style, seed=seed,
+        )
+
     raw, blind = await _call_seeing(
         ollama,
-        system=crew.actress_duet_prompt(
-            character or {}, mode="prep", base_style=style, seed=seed,
-        ),
+        system=system,
         prompt=user_prompt, model=model, images=images,
         num_ctx=num_ctx, think=False, on_token=on_token,
     )

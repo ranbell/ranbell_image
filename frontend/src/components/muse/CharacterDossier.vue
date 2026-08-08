@@ -56,6 +56,10 @@ const blurb = computed(() => (isJa.value ? preset.value?.summary_ja : preset.val
 const inner = computed(() => (isJa.value ? preset.value?.inner_ja : preset.value?.inner) || [])
 const title = computed(() => (isJa.value ? preset.value?.title_ja : preset.value?.title) || '')
 const charm = computed(() => (isJa.value ? preset.value?.charm_ja : preset.value?.charm) || '')
+const firstPerson = computed(() => (isJa.value ? preset.value?.first_person_ja : (preset.value?.first_person_en || preset.value?.first_person_ja)) || '')
+const userAddress = computed(() => (isJa.value ? preset.value?.user_address_ja : (preset.value?.user_address_en || preset.value?.user_address_ja)) || '')
+const talkQuirks = computed(() => (isJa.value ? preset.value?.talk_quirks : (preset.value?.talk_quirks_en || preset.value?.talk_quirks)) || '')
+const sayExamples = computed(() => (isJa.value ? preset.value?.duet_say_examples : (preset.value?.duet_say_examples_en || preset.value?.duet_say_examples)) || [])
 const likes = computed(() => preset.value?.preferences?.likes || [])
 const dislikes = computed(() => preset.value?.preferences?.dislikes || [])
 const palette = computed(() => preset.value?.preferences?.favorite_colors || [])
@@ -282,6 +286,43 @@ watch(() => props.characterId, load, { immediate: true })
             <p class="sb-label">{{ t('characters.charm') }}</p>
             <p class="text-[12px] text-teal-200/90 leading-relaxed pl-2
                       border-l-2 border-[var(--sb-teal)]/50">{{ charm }}</p>
+          </section>
+
+          <!-- Dialogue & Personality Profile -->
+          <section v-if="firstPerson || userAddress || talkQuirks" class="space-y-1.5 p-2.5 rounded-lg bg-amber-950/20 border border-amber-500/20">
+            <p class="sb-label text-amber-300 font-semibold flex items-center gap-1">
+              <span>💬</span> {{ t('muse.firstPerson') }} / {{ t('muse.userAddress') }}
+            </p>
+            <div class="grid grid-cols-2 gap-2 text-[11px] text-amber-100/90">
+              <div v-if="firstPerson">
+                <span class="text-gray-400 block text-[9px]">{{ t('muse.firstPerson') }}</span>
+                <span class="font-bold text-amber-200">{{ firstPerson }}</span>
+              </div>
+              <div v-if="userAddress">
+                <span class="text-gray-400 block text-[9px]">{{ t('muse.userAddress') }}</span>
+                <span class="font-bold text-amber-200">{{ userAddress }}</span>
+              </div>
+            </div>
+            <p v-if="talkQuirks" class="text-[11px] text-amber-200/80 pt-1 border-t border-amber-500/10">
+              <span class="text-gray-400 block text-[9px]">{{ t('muse.talkQuirks') }}</span>
+              {{ talkQuirks }}
+            </p>
+          </section>
+
+          <!-- Duet Dialogue Examples -->
+          <section v-if="sayExamples.length" class="space-y-1.5">
+            <p class="sb-label text-pink-300 font-semibold flex items-center gap-1">
+              <span>🎭</span> {{ t('muse.sayExamples') }}
+            </p>
+            <div class="space-y-1.5">
+              <div
+                v-for="(line, idx) in sayExamples"
+                :key="idx"
+                class="p-2 rounded bg-pink-950/30 border border-pink-500/20 text-[11px] text-pink-100/90 leading-snug italic"
+              >
+                「{{ line }}」
+              </div>
+            </div>
           </section>
 
           <section v-if="inner.length" class="space-y-1">

@@ -213,3 +213,13 @@ async def test_the_mode_can_be_set_before_anything_opens():
 
     session = await service.patch_inputs(db, session, {"mode": ""})
     assert not service.is_duet(session)
+
+
+def test_w_actress_duet_prompt():
+    char_a = {"name_ja": "みなも", "personality": {"first_person_ja": "私", "user_address_ja": "総監督"}}
+    char_b = {"name_ja": "かほ", "personality": {"first_person_ja": "私", "user_address_ja": "総監督"}}
+    text = crew.w_actress_duet_prompt(char_a, char_b, mode="talk")
+    assert "W-MUSE" in text
+    assert "みなも" in text
+    assert "かほ" in text
+    assert "2girls" in crew.w_actress_duet_prompt(char_a, char_b, mode="prep")

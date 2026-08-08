@@ -1355,7 +1355,7 @@ def _pick_say_example(muse_id: str, seed: str = "") -> str:
     return examples[idx]
 
 
-def _character_sheet(character: dict[str, Any]) -> str:
+def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
     """The selected preset's personality, split by what it is allowed to do.
 
     Traits, charm and the two vocabularies drive the performance: they become a
@@ -1423,7 +1423,7 @@ def _style_block(muse_id: str, base_style: str) -> str:
 
 
 def actress_system_prompt(
-    character: dict[str, Any], *, base_style: str = "", seed: str = "",
+    character: dict[str, Any], *, base_style: str = "", seed: str = "", locale: str = "ja",
 ) -> str:
     """System prompt for the selected roster actress — not a fictional Muse voice."""
     p = character.get("personality") or {}
@@ -1441,7 +1441,7 @@ def actress_system_prompt(
         f"口調: 一人称（「私」）。{name_ja}本人として、この状況ならこう動く／こう見る、を提案する。"
         "スタッフ（撮影や衣装）には敬語でもタメでもよいが、中身は性格優先。",
         f"EXAMPLE energy: {_pick_say_example(lead, seed)}",
-        _character_sheet(character),
+        _character_sheet(character, locale=locale),
         "RULES FOR VISIBLE PERSONALITY",
         "- Name your trait → concrete face/hand/posture choice in SAY.",
         "- Put that choice into TAGS using expression_vocab / gesture_vocab when possible.",
@@ -1874,3 +1874,82 @@ def public_roster(
             crew_ids or resolve_crew(preset=DEFAULT_PRESET),
         ),
     }
+
+
+# ── W-Muse (ダブル主演二人芝居) — Two Muses and the Showrunner ─────────────────
+W_DUET_TALK_OUTPUT = """
+OUTPUT FORMAT — one block, nothing else:
+
+SAY: 2–6 lines of live conversation. You are playing BOTH Lead Muse A and Partner Muse B in a three-way session with the Showrunner (総監督).
+Format SAY with character name prefixes in Japanese:
+<Name A>: <her lines in character>
+<Name B>: <her lines in character>
+
+CRITICAL RULES FOR W-MUSE SAY:
+- ABSOLUTELY NO AI ASSISTANT SPEECH: Never output generic summaries or reports.
+- LIVE DIALOGUE BETWEEN THE TWO MUSES & SHOWRUNNER: They interact with each other and the Showrunner, reacting to each other's presence, posing together, teasing or helping each other.
+- Use specified first-person and address terms for each Muse.
+- Do NOT list tags, do not output TAGS or SCENE.
+No danbooru tags. No emoji.
+""".strip()
+
+W_DUET_PREP_OUTPUT = """
+OUTPUT FORMAT — three labelled blocks, in this order, nothing else:
+
+SAY: 2–4 lines of live dialogue between Muse A and Muse B settling the two-person pose or composition together with the Showrunner.
+
+TAGS: English only. MUST INCLUDE `2girls` or `multiple_girls`. Describe BOTH characters' positions, expressions, outfits, interaction (e.g. `looking_at_each_other`, `back-to-back`, `holding_hands`, `standing_side_by_side`), place, objects, hour, light, and camera. 35–55 tags.
+
+SCENE: English only. ONE flowing paragraph, 150–220 words, covering BOTH girls in the same moment: their body poses, weight, interaction, clothes, place with 10+ objects, light, camera distance/angle, and expressions. No headings, no bullets.
+""".strip()
+
+
+def w_actress_duet_prompt(
+    character_a: dict[str, Any], character_b: dict[str, Any],
+    *, mode: str = "talk", base_style: str = "", seed: str = "", locale: str = "ja",
+) -> str:
+    """Two Muses (W-Muse) working together with the Showrunner."""
+    pa = character_a.get("personality") or {}
+    pb = character_b.get("personality") or {}
+    is_en = locale == "en"
+
+    name_a = str((character_a.get("name") if is_en else None) or character_a.get("name_ja") or pa.get("preset_name_ja") or character_a.get("name") or "Muse A")
+    name_b = str((character_b.get("name") if is_en else None) or character_b.get("name_ja") or pb.get("preset_name_ja") or character_b.get("name") or "Muse B")
+    first_a = str((pa.get("first_person_en") if is_en else None) or pa.get("first_person_ja") or "私")
+    first_b = str((pb.get("first_person_en") if is_en else None) or pb.get("first_person_ja") or "私")
+    addr_a = str((pa.get("user_address_en") if is_en else None) or pa.get("user_address_ja") or "総監督")
+    addr_b = str((pb.get("user_address_en") if is_en else None) or pb.get("user_address_ja") or "総監督")
+
+    lead = DEFAULT_MEMBER["actress"]
+    blocks = [
+        f"You are directing a W-MUSE (二人劇 / ダブル主演) session featuring TWO Muses: {name_a} (一人称: {first_a}) and {name_b} (一人称: {first_b}), together with the Showrunner (総監督).",
+        "--- W-MUSE CHEMISTRY & DYNAMICS (掛け合いのダイナミズム) ---",
+        f"- {name_a} and {name_b} are in the studio together. They MUST interact with each other and reacting to each other's presence!",
+        f"- {name_a} speaks in her voice ({first_a}) and calls the Showrunner {addr_a}.",
+        f"- {name_b} speaks in her voice ({first_b}) and calls the Showrunner {addr_b}.",
+        "- Contrast their personalities! Let them tease each other, agree or disagree on poses, and try out in-character lines together.",
+        "- Offer vivid two-option pitches to the Showrunner (e.g. 『背中合わせでクールに決める？ それとも手をつないで微笑み合う？』).",
+        "",
+        "--- 2GIRLS IDENTITY & TAG RULES ---",
+        "- When writing TAGS, ALWAYS include `2girls` or `multiple_girls`.",
+        "- Combine identity tags for BOTH characters cleanly without contradictions (e.g. both hair colours/styles present).",
+        "- Include interaction tags like `looking_at_each_other`, `back-to-back`, `holding_hands`, `standing_side_by_side`, `hug`.",
+        "",
+        "--- MUSE A SHEET ---",
+        _character_sheet(character_a, locale=locale),
+        "",
+        "--- MUSE B SHEET ---",
+        _character_sheet(character_b, locale=locale),
+    ]
+    if mode == "prep":
+        blocks += [
+            DUET_OWNS_THE_FRAME,
+            _style_block(lead, base_style),
+            W_DUET_PREP_OUTPUT,
+        ]
+    else:
+        blocks += [
+            "Nothing is written down yet. The two Muses and Showrunner are bouncing ideas off each other.",
+            W_DUET_TALK_OUTPUT,
+        ]
+    return "\n\n".join(blocks)

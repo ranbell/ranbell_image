@@ -199,6 +199,15 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
         # occupation, which the roster does not otherwise record.
         "title": str(preset.get("title") or ""),
         "title_ja": str(preset.get("title_ja") or preset.get("title") or ""),
+        # Direct dialogue & duet personality traits for natural conversation.
+        "first_person_ja": str(preset.get("first_person_ja") or "私"),
+        "user_address_ja": str(preset.get("user_address_ja") or "総監督"),
+        "duet_say_examples": _strings(preset.get("duet_say_examples")),
+        "talk_quirks": str(preset.get("talk_quirks") or ""),
+        "first_person_en": str(preset.get("first_person_en") or "I"),
+        "user_address_en": str(preset.get("user_address_en") or "Showrunner"),
+        "duet_say_examples_en": _strings(preset.get("duet_say_examples_en")),
+        "talk_quirks_en": str(preset.get("talk_quirks_en") or ""),
     }
     return {
         "personality": personality,
@@ -208,6 +217,16 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
         "outfit_tags": outfit,
         "prop_tags": props,
         "signature_prop": signature,
+        "name": str(preset.get("name") or ""),
+        "name_ja": str(preset.get("name_ja") or preset.get("name") or ""),
+        "first_person_ja": str(preset.get("first_person_ja") or "私"),
+        "user_address_ja": str(preset.get("user_address_ja") or "総監督"),
+        "duet_say_examples": _strings(preset.get("duet_say_examples")),
+        "talk_quirks": str(preset.get("talk_quirks") or ""),
+        "first_person_en": str(preset.get("first_person_en") or "I"),
+        "user_address_en": str(preset.get("user_address_en") or "Showrunner"),
+        "duet_say_examples_en": _strings(preset.get("duet_say_examples_en")),
+        "talk_quirks_en": str(preset.get("talk_quirks_en") or ""),
         "palette": _strings(preferences.get("favorite_colors")),
         "do_not": [],
         "reasoning_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),

@@ -124,10 +124,13 @@ def session_report(session: dict[str, Any]) -> dict[str, Any]:
         key=lambda s: (s["survival"] if s["survival"] is not None else -1,
                        -s["seconds"]),
     )
+    partner_preset = str((session.get("inputs") or {}).get("partner_preset") or "")
     return {
         "session_id": session.get("session_id", ""),
         "theme": str((session.get("inputs") or {}).get("theme") or ""),
         "crew_preset": str((session.get("inputs") or {}).get("crew_preset") or ""),
+        "partner_preset": partner_preset,
+        "is_w_muse": bool(partner_preset),
         "final_tags": len(final),
         "total_seconds": round(sum(s["ms"] for s in seats.values()) / 1000, 1),
         "seats": ordered,
