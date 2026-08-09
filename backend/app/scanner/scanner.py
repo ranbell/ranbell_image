@@ -18,12 +18,25 @@ logger = logging.getLogger(__name__)
 SCAN_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 _registering: set[Path] = set()
+_self_registered: set[Path] = set()
 
 
 async def wait_for_registration(path: Path) -> None:
     """Wait until path is no longer being registered."""
     while path in _registering:
         await asyncio.sleep(0.05)
+
+
+def consume_self_registered(path: Path) -> bool:
+    """True and clears the mark: was this path successfully registered by
+    register_image()? One-shot check — the watcher uses this to decide whether
+    a generated_dir event still needs a scan_heal fallback, or whether the
+    synchronous save path already handled it.
+    """
+    if path in _self_registered:
+        _self_registered.discard(path)
+        return True
+    return False
 
 
 class ScanState(BaseModel):
@@ -63,6 +76,7 @@ class ScanState(BaseModel):
 
 
 scan_state = ScanState()
+_last_heal_counts: tuple[int, int] | None = None  # (disk_count, db_count)
 
 
 def _sha256_file(path: Path) -> str:
@@ -127,12 +141,38 @@ async def run_heal(db: QdrantDBClient) -> None:
       2. Walk filesystem; skip SHA256 hashing when path+mtime match
       3. Detect and remove points whose files no longer exist
     """
+    global _last_heal_counts
     if scan_state.running:
         return
 
     scan_state.reset("heal")
 
     try:
+        loop = asyncio.get_event_loop()
+        files = await loop.run_in_executor(None, _collect_all_files)
+        scan_state.total = len(files)
+        disk_count = len(files)
+        db_count = await db.total_count()
+
+        if _last_heal_counts == (disk_count, db_count):
+            # Disk/Qdrant counts match what they were the last time we checked
+            # — cheap proxy for "nothing added or removed since then". Compared
+            # against the *previous* check rather than against each other
+            # directly, because content-duplicate files (same sha256 at more
+            # than one path) permanently skew disk_count above db_count —
+            # Qdrant is content-addressed, so duplicates collapse to one point
+            # — which would make an absolute disk==db comparison never match
+            # and defeat this short-circuit forever. Comparing consecutive
+            # snapshots still catches real adds/deletes (either count moves)
+            # while tolerating a stable duplicate-driven skew.
+            scan_state.skipped = disk_count
+            logger.info(
+                "Heal: disk=%d db=%d unchanged since last check — short-circuit",
+                disk_count, db_count,
+            )
+            return
+        _last_heal_counts = (disk_count, db_count)
+
         # ── 0. Remove duplicate-path entries ────────────────────────────────
         dedup_count = await _dedup_paths(db)
         if dedup_count:
@@ -145,9 +185,6 @@ async def run_heal(db: QdrantDBClient) -> None:
         logger.info("Heal: %d known docs in Qdrant", len(known))
 
         # ── 2. Walk filesystem (both source and generated dirs) ──────────────
-        loop = asyncio.get_event_loop()
-        files = await loop.run_in_executor(None, _collect_all_files)
-        scan_state.total = len(files)
         logger.info("Heal: %d files on disk", len(files))
 
         seen_paths: set[str] = set()
@@ -300,6 +337,7 @@ async def register_image(path: Path, db: QdrantDBClient) -> str:
     _registering.add(path)
     try:
         await _process_image(path, db)
+        _self_registered.add(path)
         loop = asyncio.get_event_loop()
         sha256 = await loop.run_in_executor(None, _sha256_file, path)
         return sha256
