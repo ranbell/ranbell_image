@@ -671,6 +671,15 @@
       "backfillBtn": "Backfill color data",
       "backfillStart": "Backfill started"
     },
+    "characterCompat": {
+      "title": "Character Chemistry Vectors",
+      "embedded": "Characters embedded",
+      "needsBackfill": "{n} characters missing chemistry vectors. Run backfill.",
+      "allDone": "✓ Every character has chemistry vectors",
+      "running": "Backfilling...",
+      "backfillBtn": "Backfill chemistry vectors",
+      "backfillStart": "Backfill started"
+    },
     "clear": {
       "title": "Bulk Clear AI Tags",
       "desc": "Writing-style presets. On startup, defaults are created only if empty.",
@@ -757,33 +766,6 @@
       "deleteConfirm": "Delete all image data?",
       "deleteConfirmDesc": "It will disappear from the dropdown and cannot be undone.",
       "deleted": "{n} deleted. Starting full scan."
-    },
-    "authors": {
-      "title": "Author presets",
-      "desc": "Writing-style presets. On startup, defaults are created only if empty.",
-      "refresh": "Refresh",
-      "namePh": "Display name (required)",
-      "genrePh": "Genre (optional) e.g. light novel / mystery",
-      "stylePh": "Style text (required). Passed through as author_style",
-      "add": "Add",
-      "saveEdit": "Save",
-      "cancelEdit": "Cancel edit",
-      "edit": "Edit",
-      "delete": "Delete",
-      "listTitle": "Presets ({n})",
-      "empty": "No presets. Add one, or reload the built-in defaults.",
-      "needFields": "Name and style text are required",
-      "created": "Author preset created",
-      "updated": "Author preset updated",
-      "deleted": "Deleted",
-      "deleteConfirm": "Delete “{name}”?",
-      "deleteConfirmDesc": "It will disappear from the dropdown and cannot be undone.",
-      "resetTitle": "Reload initial presets",
-      "resetDesc": "Deletes all registered presets and restores the built-in default set. Custom entries are removed.",
-      "resetBtn": "Reset to defaults",
-      "resetConfirm": "Reset author presets to defaults?",
-      "resetConfirmDesc": "The current list will be wiped and only the seed set will remain.",
-      "resetDone": "Reset done (deleted {deleted} / inserted {inserted})"
     },
     "characters": {
       "title": "Characters",

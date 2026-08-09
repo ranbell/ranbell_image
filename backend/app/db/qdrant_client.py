@@ -19,7 +19,6 @@ CONFIG_COLLECTION = "app_config"
 CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
 WD14_VOCAB_COLLECTION = "wd14_vocab"
-AUTHORS_COLLECTION = "authors"
 CHARACTER_PRESETS_COLLECTION = "character_presets"
 MUSE_SESSIONS_COLLECTION = "muse_sessions"
 # Chemistry's appearance/personality vectors — kept out of
@@ -372,36 +371,7 @@ class QdrantDBClient:
                 field_schema=schema,
             )
 
-        # Author archetypes (dummy embedding; payload filter by name)
-        if not await self._qc.collection_exists(AUTHORS_COLLECTION):
-            await self._qc.create_collection(
-                collection_name=AUTHORS_COLLECTION,
-                vectors_config={
-                    "embedding": qm.VectorParams(
-                        size=settings.embed_dim,
-                        distance=qm.Distance.COSINE,
-                        on_disk=True,
-                    ),
-                },
-                on_disk_payload=True,
-            )
-            logger.info("Created collection: %s", AUTHORS_COLLECTION)
-        try:
-            await self._qc.create_payload_index(
-                collection_name=AUTHORS_COLLECTION,
-                field_name="name",
-                field_schema=qm.PayloadSchemaType.KEYWORD,
-            )
-        except Exception:
-            pass
-        try:
-            # Empty collection → insert defaults. Non-empty → leave untouched.
-            from ..authors.authors import seed_authors_if_empty
-            await seed_authors_if_empty(self, vector_dim=settings.embed_dim)
-        except Exception as exc:
-            logger.warning("authors seed failed: %s", exc)
-
-        # Character presets (same shape as authors: dummy embedding)
+        # Character presets (same shape as the old authors collection: dummy embedding)
         await self.ensure_character_presets_collection()
         try:
             from ..characters.presets import seed_presets_if_empty

@@ -308,7 +308,7 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
     }
 
 
-# ── Qdrant CRUD (mirrors authors/authors.py) ──────────────────────────────────
+# ── Qdrant CRUD ────────────────────────────────────────────────────────────
 def _dummy_vector(dim: int) -> list[float]:
     return [0.0] * dim
 

@@ -52,15 +52,10 @@ const vocabStatus = ref(null)   // {imported: bool, tag_count: int}
 const vocabImporting = ref(false)
 const mrlStatus = ref(null)
 const colorStatus = ref(null)
+const characterCompatStatus = ref(null)
 const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
-
-// Author presets
-const authorsList = ref([])
-const authorsLoading = ref(false)
-const authorForm = ref({ id: '', name: '', genre_tag: '', style_description: '' })
-const authorEditing = ref(false)
 
 // Muse character roster
 const rosterLoading = ref(false)
@@ -240,6 +235,11 @@ async function fetchColorStatus() {
   colorStatus.value = await r.json()
 }
 
+async function fetchCharacterCompatStatus() {
+  const r = await fetch('/api/admin/character-compat/status')
+  if (r.ok) characterCompatStatus.value = await r.json()
+}
+
 async function fetchDuplicates() {
   duplicatesLoading.value = true
   try {
@@ -365,133 +365,7 @@ function switchAdminTab(id) {
   }
   if (id === 'info') { fetchInfo(); fetchAiStatus() }
   if (id === 'system') fetchInfo()
-  if (id === 'authors') fetchAuthors()
   if (id === 'characters') fetchCharacterRoster()
-}
-
-async function fetchAuthors() {
-  authorsLoading.value = true
-  try {
-    const r = await fetch('/api/authors')
-    if (!r.ok) throw new Error(r.statusText)
-    const data = await r.json()
-    authorsList.value = data.authors || []
-  } catch (e) {
-    adminError.value = e.message || String(e)
-  } finally {
-    authorsLoading.value = false
-  }
-}
-
-function resetAuthorForm() {
-  authorForm.value = { id: '', name: '', genre_tag: '', style_description: '' }
-  authorEditing.value = false
-}
-
-function editAuthor(row) {
-  authorForm.value = {
-    id: row.id,
-    name: row.name || '',
-    genre_tag: row.genre_tag || '',
-    style_description: row.style_description || '',
-  }
-  authorEditing.value = true
-}
-
-async function saveAuthor() {
-  const f = authorForm.value
-  if (!f.name.trim() || !f.style_description.trim()) {
-    adminError.value = t('admin.authors.needFields')
-    return
-  }
-  adminLoading.value = 'authorSave'
-  adminError.value = ''
-  try {
-    const payload = {
-      name: f.name.trim(),
-      style_description: f.style_description.trim(),
-      genre_tag: f.genre_tag.trim(),
-    }
-    const r = await fetch(
-      authorEditing.value ? `/api/authors/${encodeURIComponent(f.id)}` : '/api/authors',
-      {
-        method: authorEditing.value ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      },
-    )
-    if (!r.ok) {
-      let detail = r.statusText
-      try { detail = (await r.json()).detail || detail } catch { /* */ }
-      throw new Error(detail)
-    }
-    adminSuccess.value = authorEditing.value
-      ? t('admin.authors.updated')
-      : t('admin.authors.created')
-    setTimeout(() => { adminSuccess.value = '' }, 3000)
-    resetAuthorForm()
-    await fetchAuthors()
-  } catch (e) {
-    adminError.value = e.message || String(e)
-  } finally {
-    adminLoading.value = ''
-  }
-}
-
-async function deleteAuthor(row) {
-  confirmThen(
-    t('admin.authors.deleteConfirm', { name: row.name }),
-    t('admin.authors.deleteConfirmDesc'),
-    async () => {
-      adminLoading.value = 'authorDelete'
-      adminError.value = ''
-      try {
-        const r = await fetch(`/api/authors/${encodeURIComponent(row.id)}`, { method: 'DELETE' })
-        if (!r.ok) throw new Error(r.statusText)
-        adminSuccess.value = t('admin.authors.deleted')
-        setTimeout(() => { adminSuccess.value = '' }, 3000)
-        if (authorForm.value.id === row.id) resetAuthorForm()
-        await fetchAuthors()
-      } catch (e) {
-        adminError.value = e.message || String(e)
-      } finally {
-        adminLoading.value = ''
-        adminConfirm.value = null
-      }
-    },
-  )
-}
-
-function resetAuthorsToDefaults() {
-  confirmThen(
-    t('admin.authors.resetConfirm'),
-    t('admin.authors.resetConfirmDesc'),
-    async () => {
-      adminLoading.value = 'authorReset'
-      adminError.value = ''
-      try {
-        const r = await fetch('/api/authors/reset-defaults', { method: 'POST' })
-        if (!r.ok) {
-          let detail = r.statusText
-          try { detail = (await r.json()).detail || detail } catch { /* */ }
-          throw new Error(detail)
-        }
-        const data = await r.json()
-        adminSuccess.value = t('admin.authors.resetDone', {
-          deleted: data.deleted ?? 0,
-          inserted: data.inserted ?? 0,
-        })
-        setTimeout(() => { adminSuccess.value = '' }, 4000)
-        resetAuthorForm()
-        await fetchAuthors()
-      } catch (e) {
-        adminError.value = e.message || String(e)
-      } finally {
-        adminLoading.value = ''
-        adminConfirm.value = null
-      }
-    },
-  )
 }
 
 // ── Muse character roster ─────────────────────────────────────────────────────
@@ -632,7 +506,10 @@ watch(() => props.show, async (val) => {
     backendOffline.value = false
     adminStats.value = null
     adminConfig.value = null
-    await Promise.all([fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus()])
+    await Promise.all([
+      fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(),
+      fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus(), fetchCharacterCompatStatus(),
+    ])
   }
 })
 
@@ -642,6 +519,9 @@ watch(() => props.jobs?.find(j => j.title === 'color_extract')?.state, (state) =
 })
 watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) => {
   if (state) fetchMrlStatus()
+})
+watch(() => props.jobs?.find(j => j.title === 'character_compat_backfill')?.state, (state) => {
+  if (state) fetchCharacterCompatStatus()
 })
 </script>
 
@@ -662,7 +542,6 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             { id: 'overview',    label: $t('admin.overview.title') },
             { id: 'ai',          label: $t('admin.ai.title') },
             { id: 'config',      label: $t('admin.config.title') },
-            { id: 'authors',     label: $t('admin.authors.title') },
             { id: 'characters',  label: $t('admin.characters.title') },
             { id: 'system',      label: $t('admin.system.title') },
             { id: 'jobs',        label: 'Jobs' },
@@ -1164,6 +1043,44 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   </button>
                 </div>
 
+                <!-- Character chemistry vectors -->
+                <div v-if="characterCompatStatus" class="bg-gray-800 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.characterCompat.title') }}</p>
+                    <button @click="fetchCharacterCompatStatus" class="text-xs text-gray-600 hover:text-gray-400">↺</button>
+                  </div>
+                  <div class="bg-gray-900/60 rounded-lg p-2.5 space-y-1 text-xs">
+                    <p class="text-gray-500">{{ $t('admin.characterCompat.embedded') }}</p>
+                    <p :class="characterCompatStatus.needs_backfill ? 'text-yellow-400' : 'text-green-400'" class="font-mono">
+                      {{ characterCompatStatus.embedded.toLocaleString() }} / {{ characterCompatStatus.total.toLocaleString() }}
+                    </p>
+                  </div>
+                  <div v-if="characterCompatStatus.backfill.running" class="text-xs text-blue-400 flex items-center gap-2">
+                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    {{ characterCompatStatus.backfill.progress_text || $t('admin.characterCompat.running') }}
+                  </div>
+                  <div v-else-if="characterCompatStatus.needs_backfill" class="text-xs text-yellow-500/80 bg-yellow-900/20 rounded-lg px-3 py-2">
+                    {{ $t('admin.characterCompat.needsBackfill', { n: characterCompatStatus.total - characterCompatStatus.embedded }) }}
+                  </div>
+                  <div v-else class="text-xs text-green-500/80">
+                    {{ $t('admin.characterCompat.allDone') }}
+                  </div>
+                  <button
+                    v-if="!characterCompatStatus.backfill.running"
+                    @click="adminAction('characterCompatBackfill', '/api/admin/character-compat/backfill',
+                      { successMsg: () => $t('admin.characterCompat.backfillStart') }).then(fetchCharacterCompatStatus)"
+                    :disabled="!!adminLoading"
+                    :class="characterCompatStatus.needs_backfill
+                      ? 'bg-indigo-900/40 hover:bg-indigo-800/60 border-indigo-700/40 text-indigo-300'
+                      : 'bg-gray-800/60 hover:bg-gray-700/60 border-gray-700/40 text-gray-500'"
+                    class="w-full py-2 border rounded-lg text-xs disabled:opacity-40 transition-colors">
+                    {{ $t('admin.characterCompat.backfillBtn') }}
+                  </button>
+                </div>
+
                 <!-- Duplicate file detection -->
                 <div class="bg-gray-800 rounded-xl p-4 space-y-3">
                   <div class="flex items-center justify-between">
@@ -1626,92 +1543,6 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
               class="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
               {{ adminLoading === 'config' ? $t('admin.config.saving') : $t('admin.config.save') }}
             </button>
-          </div>
-
-          <!-- ── Author presets ── -->
-          <div v-if="adminTab === 'authors'" class="space-y-4">
-            <div class="bg-gray-800 rounded-xl p-4 space-y-3">
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                    {{ $t('admin.authors.title') }}
-                  </p>
-                  <p class="text-[11px] text-gray-500 mt-1">{{ $t('admin.authors.desc') }}</p>
-                </div>
-                <button type="button" @click="fetchAuthors" :disabled="authorsLoading"
-                  class="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40 shrink-0">
-                  {{ $t('admin.authors.refresh') }}
-                </button>
-              </div>
-
-              <div class="grid grid-cols-1 gap-2">
-                <input v-model="authorForm.name" type="text"
-                  :placeholder="$t('admin.authors.namePh')"
-                  class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" />
-                <input v-model="authorForm.genre_tag" type="text"
-                  :placeholder="$t('admin.authors.genrePh')"
-                  class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" />
-                <textarea v-model="authorForm.style_description" rows="3"
-                  :placeholder="$t('admin.authors.stylePh')"
-                  class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200" />
-                <div class="flex gap-2">
-                  <button type="button" @click="saveAuthor"
-                    :disabled="!!adminLoading"
-                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs text-white font-medium">
-                    {{ authorEditing ? $t('admin.authors.saveEdit') : $t('admin.authors.add') }}
-                  </button>
-                  <button v-if="authorEditing" type="button" @click="resetAuthorForm"
-                    class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs text-gray-300">
-                    {{ $t('admin.authors.cancelEdit') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="bg-gray-800 rounded-xl p-4 space-y-2">
-              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                {{ $t('admin.authors.listTitle', { n: authorsList.length }) }}
-              </p>
-              <div v-if="authorsLoading" class="text-xs text-gray-500 py-4 text-center">
-                {{ $t('admin.loading') }}
-              </div>
-              <div v-else-if="!authorsList.length" class="text-xs text-gray-500 py-4 text-center">
-                {{ $t('admin.authors.empty') }}
-              </div>
-              <div v-else class="space-y-2 max-h-[40vh] overflow-y-auto">
-                <div v-for="row in authorsList" :key="row.id"
-                  class="rounded-lg border border-gray-700/80 bg-gray-900/50 px-3 py-2 space-y-1">
-                  <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <p class="text-sm text-gray-200 font-medium truncate">
-                        <span v-if="row.genre_tag" class="text-purple-300/80 text-[11px] mr-1">[{{ row.genre_tag }}]</span>
-                        {{ row.name }}
-                      </p>
-                      <p class="text-[11px] text-gray-500 line-clamp-2 mt-0.5">{{ row.style_description }}</p>
-                    </div>
-                    <div class="flex gap-1 shrink-0">
-                      <button type="button" @click="editAuthor(row)"
-                        class="px-2 py-1 text-[11px] rounded bg-gray-700 hover:bg-gray-600 text-gray-200">
-                        {{ $t('admin.authors.edit') }}
-                      </button>
-                      <button type="button" @click="deleteAuthor(row)" :disabled="!!adminLoading"
-                        class="px-2 py-1 text-[11px] rounded bg-red-950/60 hover:bg-red-900/70 text-red-300 disabled:opacity-40">
-                        {{ $t('admin.authors.delete') }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 space-y-2">
-              <p class="text-xs font-semibold text-amber-300/90">{{ $t('admin.authors.resetTitle') }}</p>
-              <p class="text-[11px] text-gray-400">{{ $t('admin.authors.resetDesc') }}</p>
-              <button type="button" @click="resetAuthorsToDefaults" :disabled="!!adminLoading"
-                class="px-3 py-1.5 bg-amber-800/70 hover:bg-amber-700 disabled:opacity-40 rounded-lg text-xs text-amber-50 font-medium">
-                {{ $t('admin.authors.resetBtn') }}
-              </button>
-            </div>
           </div>
 
           <!-- ── Muse characters tab ── -->

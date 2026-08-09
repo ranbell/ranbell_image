@@ -182,29 +182,71 @@ async def run_character_compat_embed(
 
 
 async def run_character_compat_backfill(reporter, cancel, *, db, ollama) -> dict[str, Any]:
-    """Embed every character missing appearance/personality vectors."""
-    reporter.indeterminate()
-    done = 0
+    """Embed every character missing appearance/personality vectors.
+
+    Two passes: list everyone first (cheap, no embed calls) so the reporter
+    can show done/total instead of the indeterminate spinner the images-side
+    MRL backfill has to use for lack of a cheap total.
+    """
+    presets: list[tuple[str, dict[str, Any]]] = []
     offset = None
     while True:
-        raise_if_cancelled = getattr(cancel, "raise_if_set", None)
-        if raise_if_cancelled is not None:
-            raise_if_cancelled()
         points, offset = await db._qc.scroll(
             collection_name=CHARACTER_PRESETS_COLLECTION,
             limit=64, offset=offset, with_payload=True, with_vectors=False,
         )
-        for point in points:
-            character_id = str(point.id)
-            if await _get_vectors(db, character_id):
-                continue
-            try:
-                vectors = await embed_character(ollama, point.payload or {})
-            except Exception as exc:
-                logger.warning("[compat] backfill embed failed for %s: %s", character_id, exc)
-                continue
-            await upsert_character_compat(db, character_id, vectors)
-            done += 1
+        presets.extend((str(p.id), p.payload or {}) for p in points)
         if offset is None or not points:
             break
-    return {"done": done}
+
+    total = len(presets)
+    done = 0
+    reporter.update(0.0, f"0 / {total}")
+    for character_id, payload in presets:
+        raise_if_cancelled = getattr(cancel, "raise_if_set", None)
+        if raise_if_cancelled is not None:
+            raise_if_cancelled()
+        if await _get_vectors(db, character_id):
+            continue
+        try:
+            vectors = await embed_character(ollama, payload)
+        except Exception as exc:
+            logger.warning("[compat] backfill embed failed for %s: %s", character_id, exc)
+            continue
+        await upsert_character_compat(db, character_id, vectors)
+        done += 1
+        reporter.update(done / total if total else 1.0, f"{done} / {total}")
+    return {"done": done, "total": total}
+
+
+async def compat_status(db) -> dict[str, Any]:
+    """How many characters already have chemistry vectors, for the admin panel."""
+    embedded_ids: set[str] = set()
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=CHARACTER_COMPAT_COLLECTION,
+            limit=256, offset=offset, with_payload=False, with_vectors=True,
+        )
+        for p in points:
+            vec = p.vector if isinstance(p.vector, dict) else None
+            if vec and vec.get("appearance") and vec.get("personality"):
+                embedded_ids.add(str(p.id))
+        if offset is None or not points:
+            break
+
+    total = 0
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=CHARACTER_PRESETS_COLLECTION,
+            limit=256, offset=offset, with_payload=False, with_vectors=False,
+        )
+        total += len(points)
+        if offset is None or not points:
+            break
+
+    return {
+        "total": total, "embedded": len(embedded_ids),
+        "needs_backfill": len(embedded_ids) < total,
+    }

@@ -27,7 +27,6 @@ from .api.jobs import router as jobs_router
 from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
-from .authors.api import router as authors_router
 from .characters.api import router as characters_router
 from .muse.api import router as muse_router
 
@@ -211,7 +210,6 @@ app.include_router(jobs_router)
 app.include_router(analyzer_router)
 app.include_router(alignment_router)
 app.include_router(invoke_router)
-app.include_router(authors_router)
 app.include_router(characters_router)
 app.include_router(muse_router)
 

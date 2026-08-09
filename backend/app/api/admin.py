@@ -247,6 +247,26 @@ async def start_mrl_backfill(request: Request):
 
 # ── Character chemistry vectors ──────────────────────────────────────────────
 
+@router.get("/character-compat/status")
+async def character_compat_status(request: Request):
+    from ..characters.compat import compat_status
+    status = await compat_status(request.app.state.db)
+    spooler = request.app.state.spooler
+    backfill_job = next(
+        (j for j in spooler.snapshot() if j.get("title") == "character_compat_backfill"),
+        None,
+    )
+    status["backfill"] = (
+        {
+            "running": backfill_job["state"] == "running",
+            "progress": backfill_job["progress"],
+            "progress_text": backfill_job["progress_text"],
+        }
+        if backfill_job else {"running": False, "progress": 0.0, "progress_text": None}
+    )
+    return status
+
+
 @router.post("/character-compat/backfill")
 async def start_character_compat_backfill(request: Request):
     """Embed every character still missing appearance/personality vectors."""
