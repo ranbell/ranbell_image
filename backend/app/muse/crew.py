@@ -1594,6 +1594,54 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
     ])
 
 
+_CHEMISTRY_TIER_JA = {
+    "acquaintance": "顔見知り",
+    "close": "仲良し",
+    "best_friend": "大親友",
+}
+
+
+def actress_chemistry_prompt(
+    character_a: dict[str, Any],
+    character_b: dict[str, Any],
+    diary_a: dict[str, Any],
+    diary_b: dict[str, Any],
+    *,
+    tier: str = "acquaintance",
+) -> str:
+    """Prompt for the relationship note generated once both actors in a duet
+    shoot have written their diary. Same labelled-block contract as the diary
+    itself (SUMMARY_JA/SUMMARY_EN/CONTENT_JA/CONTENT_EN), reusing `diary.py`'s
+    parser rather than inventing a second one — see the note on that module
+    about JSON output reaching the page unparsed.
+    """
+    name_a = str(character_a.get("name_ja") or character_a.get("name") or "彼女")
+    name_b = str(character_b.get("name_ja") or character_b.get("name") or "相手")
+    tier_ja = _CHEMISTRY_TIER_JA.get(tier, "顔見知り")
+    diary_a_text = str(diary_a.get("content_ja") or diary_a.get("summary_ja") or "").strip()
+    diary_b_text = str(diary_b.get("content_ja") or diary_b.get("summary_ja") or "").strip()
+
+    return "\n\n".join([
+        f"あなたは『{name_a}』と『{name_b}』、二人の女優と一緒に仕事をしてきた撮影スタッフです。"
+        "二人が同じ撮影に立ち会った後、それぞれが書いた秘密の日記を読み比べて、"
+        "二人の間に生まれている『相性・関係性』についての短いメモを書いてください。",
+        f"【二人の関係の目安】{tier_ja}\n"
+        "この目安を土台にしつつ、日記の内容から実際に感じ取れる距離感を優先すること。",
+        f"【{name_a}の日記】\n{diary_a_text}" if diary_a_text else "",
+        f"【{name_b}の日記】\n{diary_b_text}" if diary_b_text else "",
+        "【執筆ルール】",
+        "1. 二人の関係性が撮影を重ねてどう変わってきたかを、日記から読み取れる具体的な様子を交えて書くこと。",
+        "2. 断定しすぎず、あくまで『傍から見た印象』として書くこと。",
+        "3. 多言語対応のため日本語版・英語版の両方を執筆すること。",
+        "4. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
+        "見出し以外の解説文・コードフェンス・箇条書き記号は一切出力しない:",
+        "SUMMARY_JA: 二人の関係を一言で（例: 気づけば呼び方が変わっていた）\n"
+        "SUMMARY_EN: One line English summary of the same relationship\n"
+        "CONTENT_JA:\n"
+        "日本語の本文（150〜300文字程度）\n"
+        "CONTENT_EN:\n"
+        "English version, matching the same tone",
+    ])
 
 
 # ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
@@ -1982,14 +2030,23 @@ def public_roster(
 
 
 # ── W-Muse (ダブル主演二人芝居) — Two Muses and the Showrunner ─────────────────
+#
+# SAY prefixes are the fixed tokens `A:` / `B:` — never a name. Asking the
+# model to substitute a real name into `<Name A>:` is exactly what let a
+# generic label ("System A:", "Muse A:") leak straight through: nothing
+# downstream validated the substitution, so an unresolved placeholder was
+# indistinguishable from a real line and got rendered as one. `identity.
+# parse_duet_speakers` only ever trusts these two literal markers — anything
+# else in the SAY block is narration, not a misattributed speaker.
 W_DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — one block, nothing else:
 
 SAY: 2–6 lines of live conversation. You are playing BOTH Lead Muse A and
 Partner Muse B in a three-way session with the Showrunner (総監督).
-Format SAY with character name prefixes in Japanese:
-<Name A>: <her lines in character>
-<Name B>: <her lines in character>
+Prefix every line with exactly `A:` for Muse A's lines and exactly `B:` for
+Muse B's lines — never her name, never anything else as a line prefix:
+A: <her lines in character>
+B: <her lines in character>
 
 CRITICAL RULES FOR W-MUSE SAY:
 - ABSOLUTELY NO AI ASSISTANT SPEECH: never summaries, reports, or stock
@@ -2003,7 +2060,9 @@ CRITICAL RULES FOR W-MUSE SAY:
 - Never talk about getting ready / 準備 / 用意 — prep is a separate button.
 - Match the Showrunner's language (Japanese only when they wrote Japanese).
   Never print English rule headings inside SAY.
-- Use each Muse's first-person and address terms.
+- Use each Muse's own first-person pronoun for herself in every line — never
+  her own name in the third person (a line like 「{name}は嬉しい」 spoken by
+  {name} herself is wrong; 「{first}、嬉しい」 is right).
 - Do NOT list tags, do not output TAGS or SCENE.
 No danbooru tags. No emoji.
 """.strip()
@@ -2011,7 +2070,7 @@ No danbooru tags. No emoji.
 W_DUET_PREP_OUTPUT = """
 OUTPUT FORMAT — three labelled blocks, in this order, nothing else:
 
-SAY: 2–4 lines of live dialogue between Muse A and Muse B settling the two-person pose or composition together with the Showrunner.
+SAY: 2–4 lines of live dialogue between Muse A and Muse B settling the two-person pose or composition together with the Showrunner. Same `A:` / `B:` line-prefix contract as a talk turn — never a name as the prefix, and each Muse uses her own first-person for herself, never her own name.
 
 TAGS: English only. MUST INCLUDE `2girls` or `multiple_girls`. Describe BOTH characters' positions, expressions, outfits, interaction (e.g. `looking_at_each_other`, `back-to-back`, `holding_hands`, `standing_side_by_side`), place, objects, hour, light, and camera. 35–55 tags.
 
@@ -2022,6 +2081,7 @@ SCENE: English only. ONE flowing paragraph, 150–220 words, covering BOTH girls
 def w_actress_duet_prompt(
     character_a: dict[str, Any], character_b: dict[str, Any],
     *, mode: str = "talk", base_style: str = "", seed: str = "", locale: str = "ja",
+    tier: str = "",
 ) -> str:
     """Two Muses (W-Muse) working together with the Showrunner."""
     pa = character_a.get("personality") or {}
@@ -2056,6 +2116,13 @@ def w_actress_duet_prompt(
         f"- {name_b} speaks in her voice ({first_b}) and calls the Showrunner {addr_b}.",
         "- Contrast their personalities! Let them tease each other, agree or disagree on poses, and try out in-character lines together.",
         "- Offer vivid two-option pitches to the Showrunner (e.g. 『背中合わせでクールに決める？ それとも手をつないで微笑み合う？』).",
+        (
+            f"- Their established relationship, from their chemistry score, is "
+            f"『{_CHEMISTRY_TIER_JA.get(tier, '顔見知り')}』程度 ({tier}). Let the distance and "
+            "warmth between their lines actually reflect that — acquaintances stay a little "
+            "more polite and careful with each other; best friends tease more freely and finish "
+            "each other's thoughts. Do not overrule this with a closeness the shoot itself hasn't earned."
+        ) if tier else "",
         "",
         "--- 2GIRLS IDENTITY & TAG RULES ---",
         "- When writing TAGS, ALWAYS include `2girls` or `multiple_girls`.",

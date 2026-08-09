@@ -259,6 +259,42 @@ def parse_hybrid(raw: str) -> tuple[str, str]:
     return tags, scene
 
 
+_DUET_SPEAKER_RE = re.compile(r"(?im)^\s*([AB])\s*[:：]\s*(.*)$")
+_LEADING_SAY_RE = re.compile(r"(?is)^\s*SAY\s*:\s*")
+
+
+def parse_duet_speakers(raw: str) -> list[dict[str, str]] | None:
+    """Split a duet SAY block into per-speaker turns.
+
+    Trusts only the fixed `A:` / `B:` line markers the duet prompt asks for —
+    never a name, never anything resembling one. A model that echoes the old
+    `<Name A>:` style prompt (or invents a label like "System A:") produces no
+    match here, and that is the point: a line this cannot attribute becomes
+    either a continuation of the previous speaker's line (the common case — a
+    sentence that wrapped) or, before any speaker has been recognised yet,
+    dropped as preamble. It is never turned into a fake speaker.
+
+    Returns `None` on total parse failure (no `A:`/`B:` line found anywhere),
+    so the caller can fall back to treating the whole raw text as one
+    lead-attributed turn instead of guessing.
+    """
+    text = _LEADING_SAY_RE.sub("", (raw or "").strip(), count=1).strip()
+    if not text:
+        return None
+    turns: list[dict[str, str]] = []
+    for line in text.splitlines():
+        m = _DUET_SPEAKER_RE.match(line)
+        if m:
+            turns.append({"speaker": m.group(1).upper(), "text": m.group(2).strip()})
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if turns:
+            turns[-1]["text"] = f"{turns[-1]['text']} {stripped}".strip()
+    return turns or None
+
+
 def parse_table_read(raw: str) -> tuple[str, str, str]:
     """Return (say, tags, scene) from a Muse table-read answer."""
     text = (raw or "").strip()

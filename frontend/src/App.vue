@@ -2588,10 +2588,19 @@ const museGalleryWorkflow = ref('')
 // against its own session and no-ops once it has already been applied.
 const musePendingCharacterId = ref('')
 
-function openMuse() {
+async function openMuse() {
   // Dismiss gallery detail so it cannot cover the panel.
   selected.value = null
   showMuseGallery.value = true
+  // `workflows` is otherwise only populated by openRefine()/Admin — Muse used
+  // to be reachable without either ever having run, leaving the gallery's and
+  // dossier's workflow pickers permanently empty.
+  if (workflows.value.length === 0) {
+    try {
+      const r = await fetch('/api/comfy/workflows')
+      if (r.ok) workflows.value = await r.json()
+    } catch {}
+  }
 }
 
 function pickMuseCharacter(id) {

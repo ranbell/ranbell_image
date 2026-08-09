@@ -165,6 +165,20 @@ async def get_character(character_id: str, request: Request):
     }
 
 
+def _queue_compat_embed(request: Request, character_id: str) -> None:
+    """(Re)compute her chemistry vectors — best-effort, never blocks the response."""
+    from .compat import run_character_compat_embed
+    spooler = getattr(request.app.state, "spooler", None)
+    ollama = getattr(request.app.state, "ollama", None)
+    if spooler is None or ollama is None or not character_id:
+        return
+    spooler.submit(
+        JobLane.EMBEDDING, "character_compat_embed", run_character_compat_embed,
+        meta={"character_id": character_id},
+        db=request.app.state.db, ollama=ollama, character_id=character_id,
+    )
+
+
 @router.post("")
 async def create_character(body: CharacterCreate, request: Request):
     row = await presets_db.create_preset(
@@ -172,6 +186,7 @@ async def create_character(body: CharacterCreate, request: Request):
         body.model_dump(),
         vector_dim=settings.embed_dim,
     )
+    _queue_compat_embed(request, str(row.get("id") or ""))
     return row
 
 
@@ -182,6 +197,10 @@ async def update_character(character_id: str, body: CharacterUpdate, request: Re
     )
     if row is None:
         raise HTTPException(404, "character not found")
+    # Only her appearance/personality fields actually move the vectors, but
+    # re-embedding on every edit is cheap and "did this patch touch a relevant
+    # field" is not worth tracking separately.
+    _queue_compat_embed(request, character_id)
     return row
 
 

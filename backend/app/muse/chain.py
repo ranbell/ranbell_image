@@ -38,6 +38,10 @@ class MuseTurn:
     # The locked outfit, parsed off a wardrobe turn's trailing COSTUME block.
     # None for every seat that is not Wardrobe (and for duet prep).
     costume: dict[str, Any] | None = None
+    # Per-speaker split of `say`, duet-only. `identity.parse_duet_speakers`
+    # already resolved this — `service._apply_turn` maps "A"/"B" onto the two
+    # cast character ids, it does not re-parse anything.
+    turns: tuple[dict[str, str], ...] | None = None
 
 
 class ChainError(Exception):
@@ -359,11 +363,12 @@ async def run_duet_talk(
     partner_character: dict[str, Any] | None = None, seed: str = "",
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
-) -> tuple[str, bool]:
+    tier: str = "",
+) -> tuple[str, tuple[dict[str, str], ...] | None, bool]:
     """A two-hander (or W-Muse three-hander) conversation turn. Nothing is written down."""
     if partner_character:
         system = crew.w_actress_duet_prompt(
-            character or {}, partner_character, mode="talk", seed=seed,
+            character or {}, partner_character, mode="talk", seed=seed, tier=tier,
         )
     else:
         system = crew.actress_duet_prompt(character or {}, mode="talk", seed=seed)
@@ -380,7 +385,9 @@ async def run_duet_talk(
         text = text[4:].strip()
     if not text:
         raise ChainError("empty duet turn")
-    return text, blind
+    turns = identity.parse_duet_speakers(text) if partner_character else None
+    turns_out = tuple(turns) if turns else None
+    return text, turns_out, blind
 
 
 async def run_duet_prep(
@@ -391,11 +398,13 @@ async def run_duet_prep(
     cast: list[dict] | None = None, seed: str = "",
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
+    tier: str = "",
 ) -> MuseTurn:
     """The turn where she (or they) build the whole shot and read the frame back."""
     if partner_character:
         system = crew.w_actress_duet_prompt(
             character or {}, partner_character, mode="prep", base_style=style, seed=seed,
+            tier=tier,
         )
     else:
         system = crew.actress_duet_prompt(
@@ -412,6 +421,9 @@ async def run_duet_prep(
         raw, muse_id=crew.DEFAULT_MEMBER["actress"], identity_tags=identity_tags,
         framing=framing, brief=brief, style=style, cast=cast,
     )
+    if partner_character:
+        turns = identity.parse_duet_speakers(turn.say)
+        turn = replace(turn, turns=tuple(turns) if turns else None)
     return turn if not blind else replace(turn, blind=True)
 
 

@@ -39,7 +39,25 @@ const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
 const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
-const PRESETS = ['standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'calm', 'everyone']
+// trio/quartet ("半分の編成") already exist in crew.PRESETS on the backend and
+// were fully translated — they were just never added to this list, so the
+// smaller-crew formations were unreachable from the UI.
+const PRESETS = [
+  'trio', 'quartet', 'standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'calm', 'everyone',
+]
+// One accent colour per formation, so the picked one reads at a glance instead
+// of every preset sharing the same teal highlight. `custom` is a status colour,
+// not a pickable preset — see the inert pill next to these buttons.
+const PRESET_COLORS = {
+  trio: '#38bdf8', quartet: '#a78bfa', standard: '#2dd4bf', vivid: '#fb7185',
+  photoreal: '#fbbf24', flat: '#a3e635', classic: '#fb923c', bold: '#e879f9',
+  calm: '#22d3ee', everyone: '#34d399', custom: '#f472b6',
+}
+function presetStyle(p) {
+  if (inputs.value.crew_preset !== p) return {}
+  const c = PRESET_COLORS[p] || PRESET_COLORS.standard
+  return { borderColor: c, color: c, backgroundColor: `${c}22` }
+}
 
 let eventSource = null
 let pollTimer = null
@@ -160,16 +178,21 @@ function isLead(m) {
   return String(m?.muse_id || '').split(':')[0] === 'actress'
 }
 
-function getMessageFace(m, lineSpeakerName) {
-  if (lineSpeakerName) {
-    const nameA = isJa.value ? character.value?.name_ja : character.value?.name
-    const nameB = isJa.value ? partnerCharacter.value?.name_ja : partnerCharacter.value?.name
-    if (nameA && lineSpeakerName.includes(nameA)) return leadFace.value
-    if (nameB && lineSpeakerName.includes(nameB)) return partnerFace.value
+// The backend already resolved identity (identity.parse_duet_speakers +
+// service._resolve_duet_turns) — this matches ids, it does not re-guess from
+// a name substring. `speakerId` is a `character_id`, not a display name.
+function getMessageFace(m, speakerId) {
+  if (speakerId) {
+    if (speakerId === character.value?.character_id) return leadFace.value
+    if (speakerId === partnerCharacter.value?.character_id) return partnerFace.value
+    return ''
   }
   return isLead(m) ? leadFace.value : ''
 }
 
+// Legacy fallback only: sessions whose chat log was persisted before the
+// backend started sending `m.turns` have no structured speaker split at all.
+// Never used for anything newly generated — see `m.turns` in the template.
 function parseWMuseLines(text) {
   if (!text || typeof text !== 'string') return null
   if (!text.includes(':') && !text.includes('：')) return null
@@ -711,9 +734,13 @@ async function onChatKey(e) {
               <div class="flex flex-wrap gap-2 mt-1">
                 <button
                   v-for="p in PRESETS" :key="p" type="button" class="sb-btn text-[10px]"
-                  :class="inputs.crew_preset === p ? 'border-[var(--sb-teal)] text-[var(--sb-teal)]' : ''"
+                  :style="presetStyle(p)"
                   @click="setPreset(p)"
                 >{{ t(`muse.presets.${p}`) }}</button>
+                <span
+                  class="sb-btn text-[10px] cursor-default select-none"
+                  :style="inputs.crew_preset === 'custom' ? presetStyle('custom') : { opacity: 0.35 }"
+                >{{ t('muse.presets.custom') }}</span>
               </div>
             </div>
 
@@ -772,17 +799,19 @@ async function onChatKey(e) {
                   m.kind === 'banter' ? 'pl-4' : '',
                 ]"
               >
-                <template v-if="m.role !== 'user' && m.role !== 'system' && parseWMuseLines(m.text)">
+                <template v-if="m.role !== 'user' && m.role !== 'system' && (m.turns?.length || parseWMuseLines(m.text))">
                   <div class="flex flex-col gap-2 w-full max-w-[90%]">
                     <div
-                      v-for="(sub, sIdx) in parseWMuseLines(m.text)"
+                      v-for="(sub, sIdx) in (m.turns?.length
+                        ? m.turns.map(t => ({ speaker: t.speaker_name, speakerId: t.speaker_id, content: t.text }))
+                        : parseWMuseLines(m.text))"
                       :key="sIdx"
                       class="flex flex-col items-start gap-1"
                     >
                       <span class="flex items-center gap-1.5 text-[10px] text-pink-300 font-bold">
                         <img
-                          v-if="getMessageFace(m, sub.speaker)"
-                          :src="getMessageFace(m, sub.speaker)" alt=""
+                          v-if="getMessageFace(m, sub.speakerId || sub.speaker)"
+                          :src="getMessageFace(m, sub.speakerId || sub.speaker)" alt=""
                           class="w-7 h-7 rounded-full object-cover ring-2 ring-pink-400/80 shadow-md border border-pink-100 shrink-0"
                         />
                         <span>🌸 {{ sub.speaker || m.name }}</span>
@@ -1038,9 +1067,13 @@ async function onChatKey(e) {
         <div class="flex flex-wrap gap-2">
           <button
             v-for="p in PRESETS" :key="p" type="button" class="sb-btn text-[10px]"
-            :class="inputs.crew_preset === p ? 'border-[var(--sb-teal)] text-[var(--sb-teal)]' : ''"
+            :style="presetStyle(p)"
             @click="setPreset(p)"
           >{{ t(`muse.presets.${p}`) }}</button>
+          <span
+            class="sb-btn text-[10px] cursor-default select-none"
+            :style="inputs.crew_preset === 'custom' ? presetStyle('custom') : { opacity: 0.35 }"
+          >{{ t('muse.presets.custom') }}</span>
         </div>
         <!-- what this cast is pulling toward -->
         <div v-if="tasteAxes.length" class="rounded border border-white/10 bg-black/30 p-3">

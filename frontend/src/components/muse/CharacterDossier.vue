@@ -60,6 +60,20 @@ const firstPerson = computed(() => (isJa.value ? preset.value?.first_person_ja :
 const userAddress = computed(() => (isJa.value ? preset.value?.user_address_ja : (preset.value?.user_address_en || preset.value?.user_address_ja)) || '')
 const talkQuirks = computed(() => (isJa.value ? preset.value?.talk_quirks : (preset.value?.talk_quirks_en || preset.value?.talk_quirks)) || '')
 const sayExamples = computed(() => (isJa.value ? preset.value?.duet_say_examples : (preset.value?.duet_say_examples_en || preset.value?.duet_say_examples)) || [])
+// Newest first — a chemistry note from a shoot two months ago is less
+// interesting than what just happened.
+const chemistry = computed(
+  () => [...(preset.value?.chemistry || [])].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)),
+)
+function chemistryPartnerName(rec) {
+  return (isJa.value ? rec.partner_name_ja : (rec.partner_name || rec.partner_name_ja)) || ''
+}
+function chemistryText(rec) {
+  return (isJa.value ? rec.content_ja : (rec.content_en || rec.content_ja)) || ''
+}
+function sourceSummary(src) {
+  return (isJa.value ? src.summary_ja : (src.summary_en || src.summary_ja)) || ''
+}
 const likes = computed(() => preset.value?.preferences?.likes || [])
 const dislikes = computed(() => preset.value?.preferences?.dislikes || [])
 const palette = computed(() => preset.value?.preferences?.favorite_colors || [])
@@ -182,16 +196,6 @@ watch(() => props.characterId, load, { immediate: true })
           >{{ unreadDiaryCount }}</span>
         </button>
 
-
-        <select
-          class="sb-select w-56"
-          :value="workflow"
-          @change="emit('update:workflow', $event.target.value)"
-        >
-
-          <option value="">{{ t('characters.workflow') }} —</option>
-          <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
-        </select>
         <button class="sb-btn" @click="emit('pick', characterId)">
           {{ t('characters.useCharacter') }}
         </button>
@@ -223,10 +227,8 @@ watch(() => props.characterId, load, { immediate: true })
               class="max-h-[62vh] w-auto object-contain"
             />
             <div v-else class="text-center p-8">
-              <p class="text-xs text-gray-500 mb-3">{{ t('characters.noneYet') }}</p>
-              <button class="sb-btn" :disabled="busy" @click="draw(bigSlot)">
-                {{ t('characters.drawSlot', { slot: slotName }) }}
-              </button>
+              <p class="text-xs text-gray-500">{{ t('characters.noneYet') }}</p>
+              <p class="text-[11px] text-gray-600 mt-1">{{ t('characters.createBelow') }}</p>
             </div>
           </div>
 
@@ -236,9 +238,6 @@ watch(() => props.characterId, load, { immediate: true })
               {{ t('characters.candidates') }} ({{ candidates(bigSlot).length }})
               <span v-if="watching" class="text-teal-300/80">· {{ t('characters.watching') }}</span>
             </p>
-            <button class="sb-btn" :disabled="busy" @click="draw(bigSlot)">
-              {{ t('characters.drawSlotMore', { slot: slotName }) }}
-            </button>
           </div>
           <div v-if="candidates(bigSlot).length" class="flex gap-2 overflow-x-auto pb-2">
             <button
@@ -250,12 +249,17 @@ watch(() => props.characterId, load, { immediate: true })
               @click="choose(bigSlot, c.sha)"
             >
               <span
-                class="block rounded-lg border overflow-hidden aspect-[3/4]"
+                class="relative block rounded-lg border overflow-hidden aspect-[3/4]"
                 :class="c.sha === chosen(bigSlot)
                   ? 'border-teal-400/80 ring-1 ring-teal-400/40'
                   : 'border-white/10 group-hover:border-white/40'"
               >
                 <img :src="thumb(c.sha)" class="w-full h-full object-cover" alt="" loading="lazy" />
+                <span
+                  v-if="c.sha === chosen(bigSlot)"
+                  class="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold
+                         bg-teal-500/90 text-white shadow"
+                >📌 {{ t('characters.pinnedLabel') }}</span>
               </span>
               <span class="block text-[9px] text-gray-500 truncate mt-1" :title="c.workflow">
                 {{ c.workflow || t('characters.unknownModel') }}
@@ -325,6 +329,47 @@ watch(() => props.characterId, load, { immediate: true })
             </div>
           </section>
 
+          <!-- Chemistry — a duet's relationship note, read from her diary
+               against her partner's. Hover a card to see which diary entries
+               it came from. -->
+          <section v-if="chemistry.length" class="space-y-1.5">
+            <p class="sb-label text-rose-300 font-semibold flex items-center gap-1">
+              <span>💞</span> {{ t('characters.chemistry') }}
+            </p>
+            <div class="space-y-1.5">
+              <div
+                v-for="rec in chemistry"
+                :key="rec.id"
+                class="group relative p-2 rounded bg-rose-950/30 border border-rose-500/20
+                       text-[11px] text-rose-100/90 leading-snug cursor-default"
+              >
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-500/80 text-white">
+                    {{ t(`characters.chemistryTier.${rec.tier || 'acquaintance'}`) }}
+                  </span>
+                  <span v-if="chemistryPartnerName(rec)" class="text-rose-300/70 text-[10px]">
+                    {{ chemistryPartnerName(rec) }}
+                  </span>
+                </div>
+                <p>{{ chemistryText(rec) }}</p>
+
+                <div
+                  v-if="(rec.sources || []).length"
+                  class="hidden group-hover:block absolute z-10 left-0 top-full mt-1 w-64 p-2
+                         rounded-lg bg-black/95 border border-rose-500/30 shadow-xl
+                         text-[10px] text-gray-300 space-y-1.5"
+                >
+                  <p class="text-rose-300 font-semibold">{{ t('characters.chemistrySources') }}</p>
+                  <p
+                    v-for="src in rec.sources"
+                    :key="src.diary_id"
+                    class="border-l-2 border-rose-500/40 pl-1.5"
+                  >{{ sourceSummary(src) }}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section v-if="inner.length" class="space-y-1">
             <p class="sb-label">{{ t('characters.inner') }}</p>
             <p v-for="line in inner" :key="line"
@@ -382,6 +427,26 @@ watch(() => props.characterId, load, { immediate: true })
           </section>
         </aside>
       </div>
+
+      <!-- Workflow selection and creation live down here, not up top — the
+           header used to hold both, and a picker that opens with nothing
+           picked yet reads as broken before you scroll down to what she
+           actually looks like. -->
+      <footer v-if="preset" class="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sb-hairline shrink-0">
+        <select
+          class="sb-select w-56"
+          :value="workflow"
+          @change="emit('update:workflow', $event.target.value)"
+        >
+          <option value="">{{ t('characters.workflow') }} —</option>
+          <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
+        </select>
+        <button class="sb-btn" :disabled="busy" @click="draw(bigSlot)">
+          {{ chosen(bigSlot)
+            ? t('characters.drawSlotMore', { slot: slotName })
+            : t('characters.drawSlot', { slot: slotName }) }}
+        </button>
+      </footer>
     </div>
 
     <ActressDiaryModal

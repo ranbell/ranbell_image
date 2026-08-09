@@ -23,10 +23,19 @@ def negative_for(session: dict[str, Any]) -> str:
         str(t) for t in ((session.get("character") or {}).get("identity_tags") or [])
         if str(t).strip()
     ]
+    # A duet locks two identities, but only the lead's ever pushed back against
+    # the sampler inventing a different body/hair/eyes — her partner's tags
+    # went into the positive prompt with no matching negative-side guard at
+    # all, which left her the one more likely to drift.
+    partner_tags = [
+        str(t) for t in ((session.get("partner_character") or {}).get("identity_tags") or [])
+        if str(t).strip()
+    ]
     banned = [str(t) for t in (session.get("banned") or []) if str(t).strip()]
     return identity.merge_negative(
         str(inputs.get("negative_prompt") or ""),
         identity.opposing_negative(tags),
+        identity.opposing_negative(partner_tags) if partner_tags else "",
         identity.framing_negative(str(inputs.get("framing") or "auto")),
         # What the Showrunner refused. This is the only place in the pipeline
         # where "do not draw this" is a mechanism rather than a request — put it

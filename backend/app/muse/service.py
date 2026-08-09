@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..characters import compat as compat_mod
 from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
@@ -67,6 +68,17 @@ def _inputs(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _identity_tags(session: dict[str, Any]) -> list[str]:
+    # Each character's tags stay contiguous (A fully before B) — that much
+    # this already did. What it does not do, and what a flat comma-joined tag
+    # stream cannot do on its own, is bind an attribute to a subject: two
+    # different hair-colour tokens sitting next to each other with nothing
+    # marking the boundary is a known cause of cross-binding on a 2-subject
+    # render. A1111-style `BREAK` chunking would fix this properly, but that
+    # depends on the live ComfyUI graph actually honouring it — no workflow
+    # JSON ships in this repo to check against (they live on the render host),
+    # so it is not safe to bake in unverified. `runtime.negative_for` at least
+    # gives the partner the same opposing-negative protection the lead always
+    # had, which was a real asymmetry and a real (if partial) fix.
     character_a = session.get("character") or {}
     partner_character = session.get("partner_character") or {}
     tags_a = [str(t) for t in (character_a.get("identity_tags") or []) if str(t).strip()]
@@ -118,6 +130,7 @@ def _num_ctx(inputs: dict[str, Any], cfg: dict[str, Any]) -> int | None:
 def _chat_append(
     session: dict[str, Any], *, role: str, text: str,
     muse_id: str = "", name: str = "", kind: str = "",
+    turns: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     if not kind:
         if role == "muse":
@@ -134,9 +147,50 @@ def _chat_append(
         "kind": kind,
         "text": text,
         "at": time.time(),
+        # Per-speaker split of a duet turn — see identity.parse_duet_speakers.
+        # Empty for every non-duet message; the frontend falls back to `text`.
+        "turns": turns or [],
     }
     session.setdefault("chat", []).append(msg)
     return msg
+
+
+def _duet_speaker_label(session: dict[str, Any], speaker: str) -> tuple[str, str]:
+    """`'A'`/`'B'` (from identity.parse_duet_speakers) -> (character_id, display name)."""
+    char = (session.get("partner_character") if speaker == "B" else session.get("character")) or {}
+    return str(char.get("character_id") or ""), str(char.get("name_ja") or char.get("name") or "")
+
+
+def _resolve_duet_turns(session: dict[str, Any], raw_turns) -> list[dict[str, str]]:
+    if not raw_turns:
+        return []
+    out: list[dict[str, str]] = []
+    for t in raw_turns:
+        cid, cname = _duet_speaker_label(session, str((t or {}).get("speaker") or ""))
+        out.append({
+            "speaker_id": cid, "speaker_name": cname, "text": str((t or {}).get("text") or ""),
+        })
+    return out
+
+
+async def _duet_tier(db, session: dict[str, Any], partner_character: dict[str, Any] | None) -> str:
+    """Cached on the session so a chat turn does not re-scroll every duet
+    session in the collection (co_appearance_count) on every single message.
+    """
+    if not partner_character:
+        session.pop("duet_tier", None)
+        return ""
+    lead_id = str((session.get("character") or {}).get("character_id") or "")
+    partner_id = str(partner_character.get("character_id") or "")
+    if not lead_id or not partner_id:
+        return ""
+    cached = session.get("duet_tier") or {}
+    if cached.get("partner_id") == partner_id:
+        return str(cached.get("tier") or "")
+    compat = await compat_mod.compatibility(db, lead_id, partner_id)
+    tier = str(compat.get("tier") or "")
+    session["duet_tier"] = {"partner_id": partner_id, "tier": tier}
+    return tier
 
 
 def _publish_chat(session_id: str, msg: dict[str, Any]) -> None:
@@ -184,7 +238,26 @@ async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> di
         inputs["crew_ids"] = [
             i for i in ids if crew.role_of(i) not in ("finisher", "actress")
         ]
-        inputs["crew_preset"] = str(inputs.get("crew_preset") or crew.DEFAULT_PRESET)
+        if chose_preset:
+            inputs["crew_preset"] = str(inputs.get("crew_preset") or crew.DEFAULT_PRESET)
+        else:
+            # A hand-toggled seat can drift from every named preset's roster —
+            # the pill used to keep showing whichever preset was picked last,
+            # forever, because nothing here ever noticed the ids no longer
+            # matched it. "custom" is a real value here, not just a frontend
+            # label, so any client sees the same answer.
+            current = set(inputs["crew_ids"])
+            matched = next(
+                (
+                    name for name in crew.PRESETS
+                    if {
+                        i for i in crew.resolve_crew(preset=name, crew_ids=None)
+                        if crew.role_of(i) not in ("finisher", "actress")
+                    } == current
+                ),
+                "",
+            )
+            inputs["crew_preset"] = matched or "custom"
     session["inputs"] = inputs
     _rebuild_brief(session)
     await session_db.save(db, session)
@@ -585,6 +658,7 @@ def _apply_turn(
     msg = _chat_append(
         session, role="muse", text=say,
         muse_id=turn.muse_id, name=name, kind="craft",
+        turns=_resolve_duet_turns(session, turn.turns),
     )
     _publish_chat(session["session_id"], msg)
     events.publish(session["session_id"], {
@@ -1573,9 +1647,10 @@ async def _duet_talk(
     images = await board_images(db, session)
 
     partner_character = await _partner_character(db, session)
+    tier = await _duet_tier(db, session, partner_character)
 
     try:
-        say, blind = await chain.run_duet_talk(
+        say, raw_turns, blind = await chain.run_duet_talk(
             ollama,
             user_prompt=_duet_user_prompt(session, text, prep=False),
             model=_vision_model(inputs) if images else _text_model(inputs),
@@ -1584,13 +1659,14 @@ async def _duet_talk(
             partner_character=partner_character,
             images=images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),
+            tier=tier,
         )
     except chain.ChainError as exc:
         raise MuseError("うまく言葉が出てこないみたいです。もう一度話しかけてください。") from exc
     if blind and images:
         _note_blind(session)
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
-                       name=name, kind="craft")
+                       name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
     session["status"] = "chat"
     await _consume_caught(db, session)
@@ -1616,6 +1692,7 @@ async def _duet_prep(
     started = time.monotonic()
 
     partner_character = await _partner_character(db, session)
+    tier = await _duet_tier(db, session, partner_character)
 
     try:
         turn = await chain.run_duet_prep(
@@ -1631,6 +1708,7 @@ async def _duet_prep(
             style=_style(session), cast=_cast(session),
             images=images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),
+            tier=tier,
         )
     except chain.ChainError as exc:
         session["status"] = "chat"
@@ -2188,28 +2266,46 @@ async def finish_session(
     session_db.log(session, "finish", "session wrapped up")
 
     char_id = str((session.get("inputs") or {}).get("character_id") or "")
-    if char_id and spooler:
+    partner_id = ""
+    if is_duet(session):
+        partner_char = await _partner_character(db, session)
+        partner_id = str((partner_char or {}).get("character_id") or "")
+    seen: set[str] = set()
+    char_ids = [
+        cid for cid in (char_id, partner_id)
+        if cid and not (cid in seen or seen.add(cid))
+    ]
+
+    if char_ids and spooler:
         cfg = await get_runtime_config(db)
         inputs = _inputs(session)
-        session["diary"] = {"status": "writing", "queued_at": time.time()}
+        session["diary"] = {
+            "status": "writing",
+            "queued_at": time.time(),
+            "entries": {cid: {"status": "writing"} for cid in char_ids},
+        }
         await session_db.save(db, session)
         events.publish(sid, {"type": "diary_status", "status": "writing"})
-        spooler.submit(
-            # Every Ollama call in the app goes through PROMPT, and that lane is
-            # the one bound to the GPU resource when Ollama is local. There is no
-            # UTILITY lane — naming one raised AttributeError inside the request,
-            # so the diary job was never queued at all.
-            JobLane.PROMPT,
-            "generate_actress_diary",
-            run_generate_actress_diary_job,
-            meta={"session_id": sid, "character_id": char_id},
-            db=db,
-            ollama=ollama,
-            session=session,
-            character_id=char_id,
-            model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
-            num_ctx=_num_ctx(inputs, cfg),
-        )
+        for cid in char_ids:
+            spooler.submit(
+                # Every Ollama call in the app goes through PROMPT, and that lane is
+                # the one bound to the GPU resource when Ollama is local. There is no
+                # UTILITY lane — naming one raised AttributeError inside the request,
+                # so the diary job was never queued at all.
+                JobLane.PROMPT,
+                "generate_actress_diary",
+                run_generate_actress_diary_job,
+                meta={"session_id": sid, "character_id": cid},
+                db=db,
+                ollama=ollama,
+                session=session,
+                character_id=cid,
+                model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
+                num_ctx=_num_ctx(inputs, cfg),
+                # Passed through so the second diary to land in a duet can
+                # queue the chemistry job itself — see _record_diary_result.
+                spooler=spooler,
+            )
     else:
         await session_db.save(db, session)
     return session
@@ -2225,6 +2321,7 @@ async def run_generate_actress_diary_job(
     character_id: str,
     model: str = "",
     num_ctx: int | None = None,
+    spooler=None,
 ):
     """Background runner job that invokes LLM for dual-language (JA & EN) secret diary.
 
@@ -2235,14 +2332,27 @@ async def run_generate_actress_diary_job(
     _report(reporter, 0.05, "日記を書いてもらっています")
     preset = await presets_db.get_preset(db, character_id)
     if not preset:
-        await _record_diary_result(db, sid, status="failed", error="character not found")
+        await _record_diary_result(
+            db, sid, character_id=character_id, status="failed", error="character not found",
+        )
         return {"status": "skipped", "reason": "character not found"}
     # Session may already hold the converted character; otherwise map the preset.
     # Raw presets keep `personality` as a trait list — never pass that straight
-    # into actress_diary_prompt without normalizing.
+    # into actress_diary_prompt without normalizing. A duet has two of these
+    # cached on the session (`character` for the lead, `partner_character` for
+    # her partner) — matching only against the lead used to narrate the
+    # partner's diary in the lead's voice.
+    def _cached_match(candidate: dict[str, Any]) -> bool:
+        return str(candidate.get("character_id") or "") == character_id and (
+            isinstance(candidate.get("personality"), dict) or candidate.get("reasoning_ja")
+        )
+
     session_char = session.get("character") or {}
-    if isinstance(session_char.get("personality"), dict) or session_char.get("reasoning_ja"):
+    partner_char = session.get("partner_character") or {}
+    if _cached_match(session_char):
         char = session_char
+    elif _cached_match(partner_char):
+        char = partner_char
     else:
         char = presets_db.preset_to_character(preset)
 
@@ -2282,7 +2392,9 @@ async def run_generate_actress_diary_job(
             )
         except Exception as exc:
             logger.warning("[muse] diary generation failed: %s", exc)
-            await _record_diary_result(db, sid, status="failed", error=str(exc))
+            await _record_diary_result(
+                db, sid, character_id=character_id, status="failed", error=str(exc),
+            )
             return {"status": "failed", "reason": str(exc)}
         fields = diary_mod.normalize(
             diary_mod.parse_diary(raw_resp), fallback_ja="本番撮影の思い出",
@@ -2299,7 +2411,10 @@ async def run_generate_actress_diary_job(
     if not fields.get("content_ja"):
         # Nothing survived that is safe to show. A missing diary is recoverable;
         # scaffolding printed in her handwriting is not.
-        await _record_diary_result(db, sid, status="failed", error="unreadable diary output")
+        await _record_diary_result(
+            db, sid, character_id=character_id, status="failed",
+            error="unreadable diary output",
+        )
         return {"status": "failed", "reason": "unreadable diary output"}
 
     _report(reporter, 0.9, "日記をしまっています")
@@ -2322,7 +2437,26 @@ async def run_generate_actress_diary_job(
     }
 
     await presets_db.add_preset_diary(db, character_id, diary_entry)
-    await _record_diary_result(db, sid, status="ok", diary_id=diary_entry["id"])
+    chemistry_pair = await _record_diary_result(
+        db, sid, character_id=character_id, status="ok", diary_id=diary_entry["id"],
+    )
+    if chemistry_pair and spooler is not None:
+        (char_a_id, diary_a_id), (char_b_id, diary_b_id) = chemistry_pair
+        spooler.submit(
+            JobLane.PROMPT,
+            "generate_actress_chemistry",
+            run_generate_chemistry_job,
+            meta={"session_id": sid},
+            db=db,
+            ollama=ollama,
+            session_id=sid,
+            character_a_id=char_a_id,
+            character_b_id=char_b_id,
+            diary_id_a=diary_a_id,
+            diary_id_b=diary_b_id,
+            model=model,
+            num_ctx=num_ctx,
+        )
     _report(reporter, 1.0, "日記が書き上がりました")
     return {"status": "ok", "diary_id": diary_entry["id"]}
 
@@ -2333,6 +2467,112 @@ _DIARY_ASKS: tuple[str, ...] = (
     "今日の撮影の秘密の日記を書いて。SUMMARY_JA / SUMMARY_EN / CONTENT_JA / CONTENT_EN "
     "の4つの見出しだけを使うこと。",
     "さっきの出力は読み取れませんでした。もう一度、日記だけを書いてください。"
+    "1行目は必ず `SUMMARY_JA: ` で始め、続けて SUMMARY_EN / CONTENT_JA / CONTENT_EN。"
+    "JSON にしない。コードフェンスも使わない。",
+)
+
+
+async def run_generate_chemistry_job(
+    reporter,
+    cancel,
+    *,
+    db,
+    ollama,
+    session_id: str,
+    character_a_id: str,
+    character_b_id: str,
+    diary_id_a: str,
+    diary_id_b: str,
+    model: str = "",
+    num_ctx: int | None = None,
+):
+    """Runs once per duet, right after both actors' diaries from the same shoot
+    have landed (queued from _record_diary_result, never twice for one shoot).
+
+    Reads the two fresh entries and asks for a short relationship note,
+    informed by them and by where the pair's compatibility vectors + shared
+    history currently sit, then stores it on both characters via
+    `presets_db.add_chemistry_record` — no session-side state to track once
+    this returns; the dossier reads it straight off the character payload.
+    """
+    _report(reporter, 0.1, "二人の相性を読み解いています")
+    preset_a = await presets_db.get_preset(db, character_a_id)
+    preset_b = await presets_db.get_preset(db, character_b_id)
+    if not preset_a or not preset_b:
+        return {"status": "skipped", "reason": "character not found"}
+
+    diaries_a = await presets_db.get_preset_diaries(db, character_a_id)
+    diaries_b = await presets_db.get_preset_diaries(db, character_b_id)
+    diary_a = next((d for d in diaries_a if str(d.get("id") or "") == diary_id_a), None)
+    diary_b = next((d for d in diaries_b if str(d.get("id") or "") == diary_id_b), None)
+    if not diary_a or not diary_b:
+        return {"status": "skipped", "reason": "diary not found"}
+
+    compat = await compat_mod.compatibility(db, character_a_id, character_b_id)
+    system = crew.actress_chemistry_prompt(
+        presets_db.preset_to_character(preset_a),
+        presets_db.preset_to_character(preset_b),
+        diary_a, diary_b, tier=compat["tier"],
+    )
+    _report(reporter, 0.4, "二人の相性を読み解いています")
+
+    fields: dict[str, str] = {}
+    for attempt, ask in enumerate(_CHEMISTRY_ASKS):
+        raise_if_cancelled = getattr(cancel, "raise_if_set", None)
+        if raise_if_cancelled is not None:
+            raise_if_cancelled()
+        try:
+            raw_resp = await chain._call(
+                ollama, system=system, prompt=ask,
+                model=model, images=None, num_ctx=num_ctx, think=False,
+            )
+        except Exception as exc:
+            logger.warning("[muse] chemistry generation failed: %s", exc)
+            return {"status": "failed", "reason": str(exc)}
+        fields = diary_mod.normalize(
+            diary_mod.parse_diary(raw_resp), fallback_ja="いい雰囲気で撮影していた",
+        )
+        if fields.get("content_ja"):
+            break
+        logger.info("[muse] chemistry output unusable (attempt %d), retrying", attempt + 1)
+        _report(reporter, 0.6, "書き直してもらっています")
+
+    if not fields.get("content_ja"):
+        return {"status": "failed", "reason": "unreadable chemistry output"}
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "timestamp": time.time(),
+        "session_id": session_id,
+        "summary_ja": fields["summary_ja"],
+        "summary_en": fields["summary_en"],
+        "content_ja": fields["content_ja"],
+        "content_en": fields["content_en"],
+        "tier": compat["tier"],
+        "score": compat["score"],
+        "sources": [
+            {
+                "diary_id": diary_a.get("id"), "character_id": character_a_id,
+                "summary_ja": diary_a.get("summary_ja"), "summary_en": diary_a.get("summary_en"),
+                "timestamp": diary_a.get("timestamp"),
+            },
+            {
+                "diary_id": diary_b.get("id"), "character_id": character_b_id,
+                "summary_ja": diary_b.get("summary_ja"), "summary_en": diary_b.get("summary_en"),
+                "timestamp": diary_b.get("timestamp"),
+            },
+        ],
+    }
+    await presets_db.add_chemistry_record(db, character_a_id, character_b_id, record)
+    _report(reporter, 1.0, "相性メモができました")
+    events.publish(session_id, {"type": "chemistry_ready", "tier": compat["tier"]})
+    return {"status": "ok"}
+
+
+_CHEMISTRY_ASKS: tuple[str, ...] = (
+    "二人の日記を読んで、相性についての短いメモを書いて。SUMMARY_JA / SUMMARY_EN / "
+    "CONTENT_JA / CONTENT_EN の4つの見出しだけを使うこと。",
+    "さっきの出力は読み取れませんでした。もう一度、メモだけを書いてください。"
     "1行目は必ず `SUMMARY_JA: ` で始め、続けて SUMMARY_EN / CONTENT_JA / CONTENT_EN。"
     "JSON にしない。コードフェンスも使わない。",
 )
@@ -2350,17 +2590,26 @@ def _report(reporter, progress: float, message: str) -> None:
 
 
 async def _record_diary_result(
-    db, session_id: str, *, status: str, diary_id: str = "", error: str = "",
-) -> None:
-    """Write the outcome back onto the session and tell the panel.
+    db, session_id: str, *, character_id: str, status: str, diary_id: str = "", error: str = "",
+) -> list[tuple[str, str]] | None:
+    """Write one actor's outcome back onto the session and tell the panel.
 
     Nothing announced the diary before this: the Showrunner wrapped the session
-    and the entry appeared on the character, minutes later, unmentioned.
+    and the entry appeared on the character, minutes later, unmentioned. A duet
+    queues two of these jobs, so the session tracks one entry per character_id
+    and only reports "done" once every entry has landed — a fast lead diary
+    used to flip the aggregate to "ok" while her partner's was still writing.
+
+    Returns ``[(character_id, diary_id), (character_id, diary_id)]`` exactly
+    once per duet — to whichever of the two jobs happens to be the one that
+    completes the pair — as the signal to queue chemistry generation. A
+    `chemistry_queued` flag on the session stops the other job (or a retry)
+    from queueing it twice; `None` means "not your job to queue it."
     """
     if not session_id:
-        return
+        return None
     events.publish(session_id, {
-        "type": "diary_status", "status": status,
+        "type": "diary_status", "status": status, "character_id": character_id,
         "diary_id": diary_id, "error": error,
     })
     try:
@@ -2368,15 +2617,42 @@ async def _record_diary_result(
     except Exception:
         stored = None
     if stored is None:
-        return
-    stored["diary"] = {
-        **(stored.get("diary") or {}),
-        "status": status,
-        "diary_id": diary_id,
+        return None
+    diary = dict(stored.get("diary") or {})
+    entries = dict(diary.get("entries") or {})
+    entries[character_id] = {
+        "status": status, "diary_id": diary_id, "error": error, "at": time.time(),
+    }
+    diary["entries"] = entries
+    statuses = [str(e.get("status") or "") for e in entries.values()]
+    if any(s == "writing" for s in statuses):
+        aggregate = "writing"
+    elif any(s == "ok" for s in statuses):
+        aggregate = "ok"
+    else:
+        aggregate = "failed"
+    diary.update({
+        "status": aggregate,
+        "diary_id": diary_id if status == "ok" else diary.get("diary_id", ""),
         "error": error,
         "at": time.time(),
-    }
+    })
+
+    chemistry_pair: list[tuple[str, str]] | None = None
+    if is_duet(stored) and not diary.get("chemistry_queued"):
+        all_settled = not any(s == "writing" for s in statuses)
+        ok_pairs = [
+            (cid, str(e.get("diary_id") or ""))
+            for cid, e in entries.items()
+            if e.get("status") == "ok" and e.get("diary_id")
+        ]
+        if all_settled and len(entries) >= 2 and len(ok_pairs) >= 2:
+            diary["chemistry_queued"] = True
+            chemistry_pair = ok_pairs[:2]
+
+    stored["diary"] = diary
     await session_db.save(db, stored, publish=False)
+    return chemistry_pair
 
 
 

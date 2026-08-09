@@ -22,6 +22,12 @@ WD14_VOCAB_COLLECTION = "wd14_vocab"
 AUTHORS_COLLECTION = "authors"
 CHARACTER_PRESETS_COLLECTION = "character_presets"
 MUSE_SESSIONS_COLLECTION = "muse_sessions"
+# Chemistry's appearance/personality vectors — kept out of
+# CHARACTER_PRESETS_COLLECTION on purpose: that collection's own reset code
+# documents "do not drop the collection" as a hard rule (a past re-seed took
+# every character's pictures with it), so a new vector shape goes in a new,
+# freely-recreatable collection instead of touching that one's schema.
+CHARACTER_COMPAT_COLLECTION = "character_compat"
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -402,6 +408,11 @@ class QdrantDBClient:
             await seed_presets_if_empty(self, vector_dim=settings.embed_dim)
         except Exception as exc:
             logger.warning("character presets seed failed: %s", exc)
+
+        # Chemistry vectors — empty collection only; populated by the create/
+        # update hook and the admin backfill, both of which call Ollama and so
+        # do not belong on the startup path.
+        await self.ensure_character_compat_collection()
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
@@ -1229,6 +1240,29 @@ class QdrantDBClient:
             on_disk_payload=True,
         )
         logger.info("Created collection: %s", CHARACTER_PRESETS_COLLECTION)
+
+    async def ensure_character_compat_collection(self) -> None:
+        """Appearance/personality vectors for chemistry scoring.
+
+        Point ids are the *same* uuid as the matching row in
+        CHARACTER_PRESETS_COLLECTION, so the two collections can be
+        cross-referenced by character_id with no extra lookup table.
+        """
+        if await self._qc.collection_exists(CHARACTER_COMPAT_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=CHARACTER_COMPAT_COLLECTION,
+            vectors_config={
+                "appearance": qm.VectorParams(
+                    size=settings.embed_dim, distance=qm.Distance.COSINE, on_disk=True,
+                ),
+                "personality": qm.VectorParams(
+                    size=settings.embed_dim, distance=qm.Distance.COSINE, on_disk=True,
+                ),
+            },
+            on_disk_payload=True,
+        )
+        logger.info("Created collection: %s", CHARACTER_COMPAT_COLLECTION)
 
     async def total_count(self, *, exclude_drafts: bool = False) -> int:
         result = await self._qc.count(

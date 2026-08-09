@@ -23,6 +23,7 @@ import CharacterDossier from './muse/CharacterDossier.vue'
 import {
   colorFamily, colorWord, eyeSwatch, familySwatch, hairSwatch,
 } from './muse/colorSwatch.js'
+import { traitLabel } from './muse/traitLabels.js'
 import { useRenderWatch } from '../composables/useRenderWatch.js'
 
 const props = defineProps({
@@ -42,10 +43,10 @@ const { t, locale } = useI18n()
 
 const characters = ref([])
 const loading = ref(false)
-const query = ref('')
 const activeTraits = ref([])
 const activeHair = ref([])
 const activeEyes = ref([])
+const unreadOnly = ref(false)
 const view = ref('grid')          // 'grid' | 'deck'
 const imageDisplayMode = ref('sheet') // 'sheet' | 'portrait' — top-bar one-tap toggle!
 const deckAt = ref(0)
@@ -100,7 +101,6 @@ const eyeOptions = computed(() => colorOptions('eye_color', 'eyes'))
 const traitOptions = computed(() => options('traits', 3).slice(0, 14))
 
 const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase()
   return characters.value.filter(c => {
     if (activeHair.value.length
         && !activeHair.value.includes(colorFamily(c.hair_color, 'hair'))) return false
@@ -108,11 +108,8 @@ const filtered = computed(() => {
         && !activeEyes.value.includes(colorFamily(c.eye_color, 'eyes'))) return false
     if (activeTraits.value.length
         && !activeTraits.value.every(x => (c.traits || []).includes(x))) return false
-    if (!q) return true
-    return `${c.name} ${c.name_ja} ${c.title} ${c.title_ja} ${c.summary} `
-         + `${c.summary_ja} ${c.charm_ja || ''} ${c.slug || ''} `
-         + `${(c.traits || []).join(' ')}`
-      .toLowerCase().includes(q)
+    if (unreadOnly.value && !(c.diary_unread_count > 0)) return false
+    return true
   })
 })
 
@@ -120,8 +117,16 @@ const missingCount = computed(
   () => characters.value.reduce(
     (n, c) => n + (c.board?.sheet ? 0 : 1) + (c.board?.portrait ? 0 : 1), 0),
 )
+// Only 3+ characters missing an image at all justifies surfacing bulk creation
+// here — below that, the individual page's own workflow picker (footer) is the
+// more direct path, and this screen's selector used to sit there unused with
+// nothing to apply it to.
+const noImageCount = computed(
+  () => characters.value.filter(c => !anyImage(c)).length,
+)
 const anyFilter = computed(
-  () => activeHair.value.length || activeEyes.value.length || activeTraits.value.length,
+  () => activeHair.value.length || activeEyes.value.length
+    || activeTraits.value.length || unreadOnly.value,
 )
 const current = computed(() => filtered.value[deckAt.value] || null)
 
@@ -137,7 +142,8 @@ function toggle(list, value) {
   deckAt.value = 0
 }
 function clearFilters() {
-  activeHair.value = []; activeEyes.value = []; activeTraits.value = []; deckAt.value = 0
+  activeHair.value = []; activeEyes.value = []; activeTraits.value = []
+  unreadOnly.value = false; deckAt.value = 0
 }
 function step(n) {
   const total = filtered.value.length
@@ -359,9 +365,7 @@ onUnmounted(() => {
         <button class="sb-btn" :title="t('characters.surprise')" @click="surprise">🎲</button>
 
 
-        <input v-model="query" type="search" class="sb-input w-48"
-               :placeholder="t('characters.search')" />
-        <select class="sb-select w-56" :value="workflow"
+        <select v-if="noImageCount >= 3" class="sb-select w-56" :value="workflow"
                 @change="emit('update:workflow', $event.target.value)">
           <option value="">{{ t('characters.workflow') }} —</option>
           <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
@@ -369,7 +373,7 @@ onUnmounted(() => {
         <button v-if="outstanding.length" type="button" class="sb-btn" @click="stopBulk">
           {{ t('characters.stopN', { n: outstanding.length }) }}
         </button>
-        <button v-else-if="missingCount" type="button" class="sb-btn"
+        <button v-else-if="missingCount && noImageCount >= 3" type="button" class="sb-btn"
                 :disabled="loading" @click="drawMissing">
           {{ t('characters.drawMissing', { n: missingCount }) }}
         </button>
@@ -413,9 +417,16 @@ onUnmounted(() => {
             type="button"
             class="sb-chip"
             :class="activeTraits.includes(trait) ? 'is-chip-on-teal' : ''"
+            :title="traitLabel(trait)"
             @click="toggle(activeTraits, trait)"
-          >{{ trait }}</button>
+          >{{ trait }} <span class="opacity-70">({{ traitLabel(trait) }})</span></button>
         </div>
+        <button
+          type="button"
+          class="sb-chip"
+          :class="unreadOnly ? 'is-chip-on-teal' : ''"
+          @click="unreadOnly = !unreadOnly"
+        >💌 {{ t('characters.unreadOnly') }}</button>
         <button v-if="anyFilter" type="button" class="sb-chip" @click="clearFilters">
           ✕ {{ t('characters.clearFilter') }}
         </button>
@@ -473,6 +484,15 @@ onUnmounted(() => {
                 class="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[10px] font-bold
                        bg-gradient-to-r from-pink-500 to-rose-400 text-white shadow-md animate-pulse"
               >{{ t('characters.chosenBadge') }}</span>
+
+              <!-- Unread diary count — cute pulsing badge -->
+              <span
+                v-if="c.diary_unread_count > 0"
+                class="absolute bottom-2.5 right-2.5 min-w-[20px] h-5 px-1.5 rounded-full
+                       text-[10px] font-bold grid place-items-center
+                       bg-rose-500 text-white shadow-md animate-pulse"
+                :title="t('characters.unreadCount', { n: c.diary_unread_count })"
+              >💌 {{ c.diary_unread_count }}</span>
             </button>
 
             <div class="p-3 flex flex-col gap-1.5 grow bg-slate-900/40">
@@ -522,7 +542,7 @@ onUnmounted(() => {
                   {{ t('characters.pairButton') }}
                 </button>
 
-                <button type="button" class="sb-icon-btn !w-8 !h-8 !text-xs border-pink-500/30 text-pink-300 hover:bg-pink-900/40 rounded-xl"
+                <button v-if="noImageCount >= 3" type="button" class="sb-icon-btn !w-8 !h-8 !text-xs border-pink-500/30 text-pink-300 hover:bg-pink-900/40 rounded-xl"
                         :title="t('characters.drawReference')" @click="draw(c.id)">✎</button>
               </div>
             </div>

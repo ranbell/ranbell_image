@@ -69,6 +69,7 @@ _RUNTIME_KEYS: tuple[str, ...] = (
     "board",
     "gallery",
     "diaries",
+    "chemistry",
     "user_created",
     "created_at",
     "updated_at",
@@ -299,6 +300,11 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "hair_color": (tags.get("hair_color") or [""])[0],
         "eye_color": (tags.get("eyes") or [""])[0],
         "user_created": bool(preset.get("user_created")),
+        # Free off the payload the gallery already loads — an unread badge per
+        # card used to mean one `/diaries` fetch per character just to count.
+        "diary_unread_count": sum(
+            1 for d in (preset.get("diaries") or []) if not d.get("read")
+        ),
     }
 
 
@@ -841,6 +847,39 @@ async def delete_preset_diary(db, preset_id: str, diary_id: str) -> bool:
         return False
     await update_preset(db, preset_id, {"diaries": kept})
     return True
+
+
+# ── Chemistry (Qdrant payload, mirrors diaries) ──────────────────────────────
+# Generated far less often than diaries — one per duet shoot at most, and only
+# once both actors' diaries have landed — so the cap is smaller.
+MAX_CHEMISTRY = 30
+
+
+async def add_chemistry_record(
+    db, char_a_id: str, char_b_id: str, base_record: dict[str, Any],
+) -> None:
+    """Store one chemistry entry on both characters — same content, each side's
+    copy pointing at the other as `partner_character_id` (plus her name, so the
+    dossier can label the entry with no cross-fetch)."""
+    presets_by_id = {
+        cid: await get_preset(db, cid) for cid in (char_a_id, char_b_id)
+    }
+    for owner_id, partner_id in ((char_a_id, char_b_id), (char_b_id, char_a_id)):
+        preset = presets_by_id.get(owner_id)
+        if not preset:
+            continue
+        partner_preset = presets_by_id.get(partner_id) or {}
+        records = list(preset.get("chemistry") or [])
+        records.append({
+            **base_record,
+            "partner_character_id": partner_id,
+            "partner_name_ja": partner_preset.get("name_ja") or partner_preset.get("name") or "",
+            "partner_name": partner_preset.get("name") or "",
+        })
+        if len(records) > MAX_CHEMISTRY:
+            records.sort(key=lambda r: r.get("timestamp") or 0.0)
+            records = records[-MAX_CHEMISTRY:]
+        await update_preset(db, owner_id, {"chemistry": records})
 
 
 async def mark_diary_read(db, preset_id: str, diary_id: str) -> dict[str, Any] | None:

@@ -245,6 +245,21 @@ async def start_mrl_backfill(request: Request):
     return {"status": "queued", "job_id": job_id}
 
 
+# ── Character chemistry vectors ──────────────────────────────────────────────
+
+@router.post("/character-compat/backfill")
+async def start_character_compat_backfill(request: Request):
+    """Embed every character still missing appearance/personality vectors."""
+    from ..characters.compat import run_character_compat_backfill
+    from ..spooler.models import JobLane
+    spooler = request.app.state.spooler
+    job_id = spooler.submit(
+        JobLane.EMBEDDING, "character_compat_backfill", run_character_compat_backfill,
+        db=request.app.state.db, ollama=request.app.state.ollama,
+    )
+    return {"status": "queued", "job_id": job_id}
+
+
 # ── Color Palette Backfill ───────────────────────────────────────────────────
 
 @router.get("/colors/status")
