@@ -8,6 +8,7 @@ import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
 import MusePanel from './components/MusePanel.vue'
+import CharacterGallery from './components/CharacterGallery.vue'
 import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
@@ -2576,11 +2577,26 @@ function openInspire() { showInspire.value = true }
 const showInvoke = ref(false)
 
 // ── Muse ──────────────────────────────────────────────────────────────────────
+// The header button opens the roster first, not the studio directly — who to
+// shoot with is chosen before the shooting screen exists at all. Picking one
+// there is what actually opens MusePanel (`pickMuseCharacter`, below).
 const showMuse = ref(false)
+const showMuseGallery = ref(false)
+const museGalleryWorkflow = ref('')
+// What the roster screen decided, read by MusePanel once on the tick `showMuse`
+// flips true. Left as-is (not cleared) afterward — MusePanel compares it
+// against its own session and no-ops once it has already been applied.
+const musePendingCharacterId = ref('')
 
 function openMuse() {
   // Dismiss gallery detail so it cannot cover the panel.
   selected.value = null
+  showMuseGallery.value = true
+}
+
+function pickMuseCharacter(id) {
+  showMuseGallery.value = false
+  musePendingCharacterId.value = id
   // MusePanel is not v-if'd away — it keeps its session across open/close, so
   // do not bounce `show` expecting a remount.
   showMuse.value = true
@@ -5166,10 +5182,27 @@ onUnmounted(() => {
       @select-image="openImageFromOracle($event)"
     />
 
+    <!-- Muse roster — the "who with" screen, one layer under the studio.
+         Plain --z-panel (600) here is deliberate: MusePanel's root forces
+         --z-panel-muse (640) via the .muse-root rule in night-archive.css
+         regardless of DOM order, so the studio always paints over this list
+         once picking a Muse opens it. Do not raise this above --z-panel-muse. -->
+    <CharacterGallery
+      :show="showMuseGallery"
+      :workflows="workflows"
+      :workflow="museGalleryWorkflow"
+      :get-jobs-map="getJobsMap"
+      @pick="pickMuseCharacter"
+      @close="showMuseGallery = false"
+      @toast="showToast($event.msg, $event.type)"
+      @update:workflow="museGalleryWorkflow = $event"
+    />
+
     <MusePanel
       :show="showMuse"
       :comfyOffline="comfyOffline"
       :get-jobs-map="getJobsMap"
+      :initial-character-id="musePendingCharacterId"
       @update:show="showMuse = $event"
       @select-image="openImageBySha($event)"
       @toast="showToast($event.msg, $event.type)"

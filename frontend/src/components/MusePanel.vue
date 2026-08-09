@@ -14,6 +14,10 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   comfyOffline: { type: Boolean, default: false },
   getJobsMap: { type: Function, default: () => () => new Map() },
+  // Who to shoot with, chosen on the list screen one layer up, before this
+  // screen was even shown. Empty means "whatever session is already sitting
+  // here" — reopening after ✕ with nothing newly picked.
+  initialCharacterId: { type: String, default: '' },
 })
 const emit = defineEmits(['update:show', 'toast', 'select-image'])
 const { t, locale } = useI18n()
@@ -226,11 +230,39 @@ watch(() => props.show, async open => {
   if (!open) { closeStream(); return }
   try {
     if (!catalog.value) catalog.value = await api('/api/muse/catalog')
-    if (!session.value) await startSession()
-    else connectStream(session.value.session_id)
+    await enterWithCharacter(props.initialCharacterId)
   } catch (err) { fail(err) }
 })
 onBeforeUnmount(closeStream)
+
+// The list screen one layer up already asked "who with" — this only decides
+// whether that answer can land on the session already sitting here, or needs
+// a clean one instead. Reusing a session that has already spoken is how one
+// girl's dialogue used to end up captioned with another's name; an untouched
+// setup screen has nothing to lose, so it is fine to relabel silently.
+async function enterWithCharacter(characterId) {
+  const switching = Boolean(session.value)
+    && characterId && characterId !== inputs.value.character_id
+  if (switching) {
+    const untouched = !chat.value.length && status.value === 'setup'
+    if (!untouched) {
+      if (!window.confirm(t('muse.resetConfirm'))) {
+        emit('update:show', false)
+        return
+      }
+      closeStream()
+      session.value = null
+    }
+  }
+  if (!session.value) {
+    await startSession()
+  } else {
+    connectStream(session.value.session_id)
+  }
+  if (characterId && characterId !== inputs.value.character_id) {
+    await pickCharacter(characterId)
+  }
+}
 
 async function startSession() {
   const suggested = catalog.value?.suggested_run || {}
@@ -510,6 +542,17 @@ async function onChatKey(e) {
 </script>
 
 <template>
+  <!-- The whole screen — dim backdrop and shell together — rises from the
+       bottom edge, as one element under one transform. Splitting the backdrop
+       fade from the shell slide would need two nested Transition instances
+       staying in lockstep on the way out; sliding both together as a unit
+       cannot go out of sync. -->
+  <Transition
+    enter-active-class="transition-transform duration-300 ease-out motion-reduce:duration-0"
+    leave-active-class="transition-transform duration-200 ease-in motion-reduce:duration-0"
+    enter-from-class="translate-y-full"
+    leave-to-class="translate-y-full"
+  >
   <div
     v-if="show"
     class="muse-root fixed inset-0 flex items-stretch justify-center bg-slate-950/80 backdrop-blur-md p-3"
@@ -1125,6 +1168,7 @@ async function onChatKey(e) {
       @toast="emit('toast', $event)"
     />
   </div>
+  </Transition>
 </template>
 
 <style scoped>
