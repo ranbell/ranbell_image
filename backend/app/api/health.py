@@ -64,36 +64,6 @@ async def detailed_health(request: Request):
             logger.error("Ollama health check failed: %s", e)
             return {"ok": False, "error": "接続エラー", "url": settings.ollama_url, "models": []}
 
-    async def check_llm():
-        """OpenAI-compatible endpoint health (used when a feature selects it)."""
-        try:
-            cfg = await get_runtime_config(db)
-            url = cfg.get("openai_base_url") or settings.openai_base_url
-            health_fn = getattr(llm, "health_openai", None)
-            list_fn = getattr(llm, "list_openai_models", None)
-            ok = await health_fn(url) if health_fn else False
-            models = await list_fn(url) if ok and list_fn else []
-            openai_model = cfg.get("openai_model") or "bonsai"
-            return {
-                "ok": ok,
-                "provider": "openai",
-                "url": url,
-                "models": models,
-                "vlm_model": openai_model,
-                "vlm_model_available": bool(
-                    ok and (not models or _model_available(openai_model, models) or openai_model)
-                ),
-            }
-        except Exception as e:
-            logger.error("OpenAI-compat health check failed: %s", e)
-            return {
-                "ok": False,
-                "error": "接続エラー",
-                "provider": "openai",
-                "url": settings.openai_base_url,
-                "models": [],
-            }
-
     async def check_comfy():
         try:
             c = request.app.state.comfy
@@ -111,25 +81,14 @@ async def detailed_health(request: Request):
             workflows = c.list_workflows() if c else []
             return {"ok": False, "error": "接続エラー", "url": settings.comfyui_url, "workflows": workflows}
 
-    qdrant_res, ollama_res, llm_res, comfy_res = await asyncio.gather(
-        check_qdrant(), check_ollama(), check_llm(), check_comfy()
+    qdrant_res, ollama_res, comfy_res = await asyncio.gather(
+        check_qdrant(), check_ollama(), check_comfy()
     )
-
-    # Backward-compatible ollama block + optional OpenAI-compat endpoint info
-    ollama_merged = {
-        **ollama_res,
-        "provider": "ollama",
-        "llm_url": llm_res.get("url"),
-        "llm_ok": llm_res.get("ok"),
-        "llm_models": llm_res.get("models", []),
-        "openai_model": llm_res.get("vlm_model"),
-    }
 
     return {
         "backend": {"ok": True, "version": "0.3.1"},
         "qdrant": qdrant_res,
-        "ollama": ollama_merged,
-        "llm": llm_res,
+        "ollama": {**ollama_res, "provider": "ollama"},
         "comfyui": comfy_res,
     }
 
@@ -155,20 +114,3 @@ async def ollama_models(request: Request):
     except Exception:
         vision = []
     return {"models": models, "vision_models": vision}
-
-
-@router.get("/llm/models")
-async def llm_models(request: Request):
-    """OpenAI-compatible model list (for the OpenAI-compatible endpoint config)."""
-    llm = request.app.state.ollama
-    db = request.app.state.db
-    try:
-        cfg = await get_runtime_config(db)
-        list_fn = getattr(llm, "list_openai_models", None)
-        if list_fn:
-            models = await list_fn(cfg.get("openai_base_url"))
-        else:
-            models = []
-        return {"provider": "openai", "models": models}
-    except Exception:
-        return {"provider": "openai", "models": []}

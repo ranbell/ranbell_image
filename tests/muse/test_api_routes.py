@@ -95,9 +95,7 @@ def test_api_sessions_all_endpoints(api_client, monkeypatch):
     monkeypatch.setattr("app.muse.service.request_board", mock_service_call)
     monkeypatch.setattr("app.muse.service.approve_and_shoot", mock_service_call)
     monkeypatch.setattr("app.muse.service.finish_session", mock_service_call)
-    monkeypatch.setattr("app.muse.service.run_draft", mock_service_call)
-    monkeypatch.setattr("app.muse.service.cancel_draft", mock_service_call)
-    monkeypatch.setattr("app.muse.service.run_refine", mock_service_call)
+    monkeypatch.setattr("app.muse.service.cancel_board", mock_service_call)
     monkeypatch.setattr("app.muse.service.pick_character", mock_service_call)
 
     # 1. Post character pick
@@ -128,19 +126,11 @@ def test_api_sessions_all_endpoints(api_client, monkeypatch):
     res = api_client.post("/api/muse/sessions/sess_api_test_002/finish")
     assert res.status_code == 200
 
-    # 8. Post draft
-    res = api_client.post("/api/muse/sessions/sess_api_test_002/draft")
+    # 8. Post board cancel
+    res = api_client.post("/api/muse/sessions/sess_api_test_002/board/cancel")
     assert res.status_code == 200
 
-    # 9. Post draft cancel
-    res = api_client.post("/api/muse/sessions/sess_api_test_002/draft/cancel")
-    assert res.status_code == 200
-
-    # 10. Post refine
-    res = api_client.post("/api/muse/sessions/sess_api_test_002/refine")
-    assert res.status_code == 200
-
-    # 11. Get session report
+    # 9. Get session report
     def mock_sess_report(session):
         return {"report": "ok"}
     monkeypatch.setattr("app.muse.report.session_report", mock_sess_report)

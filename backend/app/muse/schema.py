@@ -35,7 +35,6 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
             "character_id": "",
             "workflow": "",
             "model": "",
-            "llm_provider": "ollama",
             "locale": "ja",
             "crew_preset": preset,
             "crew_ids": [i for i in crew_ids if i not in ("finisher", "actress")],

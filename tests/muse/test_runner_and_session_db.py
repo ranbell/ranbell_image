@@ -67,10 +67,6 @@ async def test_runner_jobs(monkeypatch):
     res = await runner.run_shoot_job(MagicMock(), MagicMock(), db=db, comfy=fake_comfy, session_id="sess_123")
     assert res["shas"] == ["sha_abc123"]
 
-    # 3. Legacy draft job
-    res = await runner.run_draft_job(MagicMock(), MagicMock(), db=db, comfy=fake_comfy, session_id="sess_123")
-    assert res["shas"] == ["sha_abc123"]
-
 
 def test_runner_preview_publisher_and_finished_image():
     """Test preview_publisher and finished_image helpers."""

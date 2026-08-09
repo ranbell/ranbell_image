@@ -1,9 +1,9 @@
 """Merging WD14 tag sets from several images into one prompt.
 
-Refine built this to fuse up to six source images; Muse reuses it to fuse a
-background track with a character track. It is all pure functions over plain
-dicts — no FastAPI, no database, no model — which is why it lives here rather
-than in the route module it grew up in.
+Refine built this to fuse up to six source images. It is all pure functions
+over plain dicts — no FastAPI, no database, no model — which is why it lives
+here rather than in the route module it grew up in. This is Inspire/Refine's
+asset; Muse does not use it (see CLAUDE.md).
 
 The interesting part is the common/unique decomposition: tags every source
 agrees on are ranked by mean confidence and kept down to ``common_ratio``, while

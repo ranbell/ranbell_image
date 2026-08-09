@@ -22,18 +22,10 @@ class Settings(BaseSettings):
     # descriptions, translations). Empty → fall back to vlm_model, since a single
     # GPU cannot afford to swap models mid-pipeline anyway.
     utility_model: str = ""
-    # HTTP timeout for all Ollama / OpenAI-compat requests. A hung backend
-    # otherwise blocks the single-worker PROMPT lane for this long — lower it
-    # if that matters more than very long generations.
+    # HTTP timeout for all Ollama requests. A hung backend otherwise blocks the
+    # single-worker PROMPT lane for this long — lower it if that matters more
+    # than very long generations.
     ollama_timeout_sec: float = 300.0
-
-    # Text / VLM provider selection is per-feature. The shared gateway always
-    # defaults to Ollama; these settings only configure the OpenAI-compatible
-    # endpoint a feature can opt into.
-    llm_provider: str = "ollama"
-    openai_base_url: str = "http://host.docker.internal:8080/v1"
-    openai_api_key: str = "not-needed"
-    openai_model: str = "bonsai"
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"

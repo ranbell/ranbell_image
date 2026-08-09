@@ -112,7 +112,6 @@ async def build_muse_catalog(
             "url": ollama_url,
             "models": models,
             "vision_models": vision,
-            "providers": ["ollama", "openai"],
         },
         "characters": {"count": character_count},
         "locales": ["ja", "en"],
@@ -122,7 +121,6 @@ async def build_muse_catalog(
             "wd14_model_dir": cfg.get("wd14_model_dir"),
         },
         "suggested_run": {
-            "llm_provider": "ollama",
             "model": suggested_model,
             "model_is_vision": _model_available(suggested_model, vision),
             "workflow": suggested_workflow,
@@ -134,20 +132,20 @@ async def build_muse_catalog(
         ],
         "notes": {
             "vision_model_required": (
-                "Stages B, C and D send the previous render to the model. A "
-                "text-only model does not fail — Ollama silently drops the "
-                "images — so pick one listed under llm.vision_models. Stage A "
-                "can use a cheaper text model via inputs.model while "
-                "inputs.vision_model covers the refine stages."
+                "Once a board exists, chat turns are shown it. A text-only "
+                "model does not fail — Ollama silently drops the images — so "
+                "pick one listed under llm.vision_models. inputs.model can "
+                "stay a cheaper text model for turns before a board exists; "
+                "inputs.vision_model covers turns after."
             ),
             "workflow_required": (
-                "One workflow renders both the drafts and every refine stage. "
-                "Draft and refine differ only in steps and cfg."
+                "One workflow renders both the draft and the final shoot. "
+                "They differ only in steps and cfg."
             ),
             "draft_steps": (
-                "12 steps at cfg 4.0 is the validated draft. It is cheap in "
-                "steps but full size — the draft is what the chain argues with, "
-                "not a thumbnail."
+                "20 steps at cfg 4.0 is the validated draft. It is cheap in "
+                "steps but full size, one frame — the crew argues over it in "
+                "chat, it is not a thumbnail."
             ),
         },
         "endpoints": {
@@ -157,9 +155,11 @@ async def build_muse_catalog(
             "session": "GET /api/muse/sessions/{session_id}",
             "patch_inputs": "PATCH /api/muse/sessions/{session_id}/inputs",
             "character": "POST /api/muse/sessions/{session_id}/character",
-            "draft": "POST /api/muse/sessions/{session_id}/draft",
-            "cancel_draft": "POST /api/muse/sessions/{session_id}/draft/cancel",
-            "refine": "POST /api/muse/sessions/{session_id}/refine",
+            "chat": "POST /api/muse/sessions/{session_id}/chat",
+            "board": "POST /api/muse/sessions/{session_id}/board",
+            "cancel_board": "POST /api/muse/sessions/{session_id}/board/cancel",
+            "approve": "POST /api/muse/sessions/{session_id}/approve",
+            "finish": "POST /api/muse/sessions/{session_id}/finish",
             "stream": "GET /api/muse/sessions/{session_id}/stream",
         },
     }

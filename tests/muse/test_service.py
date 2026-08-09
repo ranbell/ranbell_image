@@ -247,16 +247,6 @@ async def test_chat_board_keyword_requests_board():
 
 
 @pytest.mark.asyncio
-async def test_refine_is_removed():
-    db = FakeDb()
-    session = await _ready_session(db)
-    with pytest.raises(service.MuseError) as err:
-        await service.run_refine(db, FakeOllama(), FakeComfy(), FakeSpooler(),
-                                 session, [0])
-    assert "廃止" in str(err.value) or "removed" in str(err.value).lower()
-
-
-@pytest.mark.asyncio
 async def test_table_refuses_missing_inputs():
     db = FakeDb()
     session = await service.create_session(db, {"theme": "t"})
@@ -272,7 +262,7 @@ async def test_cancelling_a_board_clears_it():
     session["board"] = {"job_id": "job-1", "images": [], "pending": True}
     session["craft"] = {"prompt": "x"}
 
-    session = await service.cancel_draft(db, spooler, session)
+    session = await service.cancel_board(db, spooler, session)
 
     assert spooler.cancelled == ["job-1"]
     assert session["board"] == {}
@@ -305,7 +295,7 @@ async def test_finishing_does_not_resurrect_a_cancelled_board():
     db, spooler = FakeDb(), FakeSpooler()
     session = await _ready_session(db)
     session["board"] = {"job_id": "job-1", "images": [], "pending": True}
-    session = await service.cancel_draft(db, spooler, session)
+    session = await service.cancel_board(db, spooler, session)
 
     await session_db.finish_board(db, session["session_id"], error="cancelled")
     s = await session_db.load(db, session["session_id"])

@@ -150,9 +150,6 @@ cp docker-compose.override.yml.example docker-compose.override.yml
 | `OLLAMA_URL` | Ollama のURL（埋め込みは常にこちら）。デフォルト: `http://host.docker.internal:11434` |
 | `EMBED_MODEL` | 埋め込みモデル名。デフォルト: `embeddinggemma:300m` |
 | `VLM_MODEL` | テキスト / VLM モデル名（Ollama・他機能用）。デフォルト: `gemma4:e2b` |
-| `OPENAI_BASE_URL` | OpenAI 互換サーバの URL。デフォルト: `http://host.docker.internal:8080/v1` |
-| `OPENAI_API_KEY` | Bearer token（未検証サーバは任意文字列で可）。デフォルト: `not-needed` |
-| `OPENAI_MODEL` | OpenAI 互換を選んだときのモデル ID。デフォルト: `bonsai` |
 | `EMBED_DIM` | 埋め込みモデルの出力次元数。モデルと**必ず一致させること**。デフォルト: `768` |
 | `EMBED_DIM_SMALL` | 高速プリフェッチ用の縮小次元数。デフォルト: `256` |
 | `COMFYUI_URL` | ComfyUI のURL。デフォルト: `http://host.docker.internal:8188` |

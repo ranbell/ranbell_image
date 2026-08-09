@@ -41,7 +41,6 @@ class InputsPatch(BaseModel):
     workflow: str | None = None
     model: str | None = None
     vision_model: str | None = None
-    llm_provider: str | None = None
     locale: str | None = None
     negative_prompt: str | None = None
     style: str | None = None
@@ -124,10 +123,7 @@ async def _session(request: Request, session_id: str) -> dict:
 
 
 def _llm(request: Request, session: dict):
-    provider = str((session.get("inputs") or {}).get("llm_provider") or "ollama")
-    gateway = request.app.state.ollama
-    bind = getattr(gateway, "bind", None)
-    return bind(provider) if bind and provider in ("ollama", "openai") else gateway
+    return request.app.state.ollama
 
 
 async def _run(coro) -> dict:
@@ -253,31 +249,11 @@ async def finish_session(session_id: str, request: Request):
     ))
 
 
-# Legacy aliases
-
-@router.post("/sessions/{session_id}/draft")
-async def run_draft(session_id: str, request: Request):
+@router.post("/sessions/{session_id}/board/cancel")
+async def cancel_board(session_id: str, request: Request):
     session = await _session(request, session_id)
-    return await _run(service.run_draft(
-        _db(request), _llm(request, session),
-        request.app.state.comfy, request.app.state.spooler, session,
-    ))
-
-
-@router.post("/sessions/{session_id}/draft/cancel")
-async def cancel_draft(session_id: str, request: Request):
-    session = await _session(request, session_id)
-    return await _run(service.cancel_draft(
+    return await _run(service.cancel_board(
         _db(request), request.app.state.spooler, session,
-    ))
-
-
-@router.post("/sessions/{session_id}/refine")
-async def run_refine(session_id: str, request: Request):
-    session = await _session(request, session_id)
-    return await _run(service.run_refine(
-        _db(request), _llm(request, session),
-        request.app.state.comfy, request.app.state.spooler, session, [],
     ))
 
 

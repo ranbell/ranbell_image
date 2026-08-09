@@ -109,12 +109,3 @@ async def run_shoot_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
         await session_db.finish_shoot(db, session_id, error=error)
 
 
-# Legacy name — board job doubles as old draft for any leftover callers.
-async def run_draft_job(reporter, cancel, *, db, comfy, session_id: str) -> dict[str, Any]:
-    return await run_board_job(reporter, cancel, db=db, comfy=comfy, session_id=session_id)
-
-
-async def run_chain_job(
-    reporter, cancel, *, db, comfy, ollama, session_id: str, chain_index: int,
-) -> dict[str, Any]:
-    raise RuntimeError("muse refine chain removed — use chat + board + OK")

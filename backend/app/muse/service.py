@@ -2380,14 +2380,7 @@ async def _record_diary_result(
 
 
 
-# ── legacy entry points (tests / old clients) ───────────────────────────────
-async def run_draft(db, ollama, comfy, spooler, session: dict[str, Any]) -> dict[str, Any]:
-    """Compatibility: open table then immediately request a board."""
-    session = await start_table(db, ollama, session)
-    return await request_board(db, comfy, spooler, session, ollama=ollama)
-
-
-async def cancel_draft(db, spooler, session: dict[str, Any]) -> dict[str, Any]:
+async def cancel_board(db, spooler, session: dict[str, Any]) -> dict[str, Any]:
     job_id = str((session.get("board") or {}).get("job_id") or "")
     if job_id:
         await spooler.cancel(job_id)
@@ -2396,12 +2389,3 @@ async def cancel_draft(db, spooler, session: dict[str, Any]) -> dict[str, Any]:
     session_db.log(session, "board", "cancelled")
     await session_db.save(db, session)
     return session
-
-
-async def run_refine(
-    db, ollama, comfy, spooler, session: dict[str, Any], indices: list[int],
-) -> dict[str, Any]:
-    """BCD removed — approving the board shoots instead."""
-    raise MuseError(
-        "描き直しチェーンは廃止しました。チャットで指示するか、OKで本番撮影してください。"
-    )

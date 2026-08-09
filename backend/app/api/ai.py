@@ -34,9 +34,9 @@ from .sort_utils import sort_docs
 
 logger = logging.getLogger(__name__)
 
-# Tag-merge helpers now live in prompt/tag_merge.py (they are pure functions and
-# Muse needs them without dragging in the whole route module). Re-exported here
-# because runners.py and inspire.py import them from this module.
+# Tag-merge helpers now live in prompt/tag_merge.py (they are pure functions,
+# which is why they don't need to drag in the whole route module). Re-exported
+# here because runners.py imports them from this module.
 from ..prompt.tag_merge import (  # noqa: E402
     _WD14_MUST_INCLUDE_THRESHOLD,
     _ROLE_CONTEXT_LABELS,

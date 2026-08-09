@@ -8,7 +8,6 @@ from .config import settings
 
 from .db.qdrant_client import QdrantDBClient
 from .ai.ollama import OllamaClient
-from .ai.openai_compat import OpenAICompatClient
 from .ai.llm import LlmGateway, apply_llm_runtime_config
 from .ai.comfy import ComfyUIClient
 from .core.runtime_cache import RuntimeConfigCache
@@ -87,13 +86,7 @@ async def lifespan(app: FastAPI):
     db = QdrantDBClient()
     await db.start()
 
-    ollama_backend = OllamaClient()
-    openai_backend = OpenAICompatClient()
-    ollama = LlmGateway(
-        ollama_backend,
-        openai_backend,
-        provider=settings.llm_provider if settings.llm_provider in ("ollama", "openai") else "ollama",
-    )
+    ollama = LlmGateway(OllamaClient())
     comfy = ComfyUIClient()
 
     from .config import settings as _settings
