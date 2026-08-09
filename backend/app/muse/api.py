@@ -55,7 +55,6 @@ class InputsPatch(BaseModel):
     draft_count: int | None = Field(default=None, ge=1, le=8)
     final_steps: int | None = Field(default=None, ge=1, le=100)
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
-    think: bool | None = None
     unload_vlm: bool | None = None
     banter_mode: str | None = None
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)

@@ -414,10 +414,10 @@ def _compile_sheet(
         f"Character: {', '.join(identity + outfit)},\n"
         f"Accessories: {', '.join(props) if props else 'none'}\n"
         "\n"
-        "** Chronicles of Character **\n"
+        "** Character Sheet **\n"
         f"Center/Main : {centre}\n"
         + (f"Scene: {scene}\n" if scene else "")
-        + "Around 4 chronicles with polaroid frame ** same hair and eye color **:\n"
+        + "Around 4 vignettes with polaroid frame ** same hair and eye color **:\n"
         f"{vignettes}\n"
         "Shot: wide_shot, full_body,\n"
         "Effect: cinematic, kodak color, film_grain, blurry_background, hdr, "

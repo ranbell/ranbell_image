@@ -1252,12 +1252,6 @@ PRESETS: dict[str, list[str]] = {
 
 DEFAULT_PRESET = "standard"
 
-PICKUP = {
-    "patch": {"name": "Patch", "name_ja": "パッチ", "file": "b_reinforce.md"},
-    "punch": {"name": "Punch", "name_ja": "パンチ", "file": "c_cinematic.md"},
-    "orbit": {"name": "Orbit", "name_ja": "オービット", "file": "d_angle.md"},
-}
-
 
 BANTER_OUTPUT = """
 OUTPUT FORMAT — Exactly one labelled block, nothing else:
@@ -1978,7 +1972,6 @@ def public_roster(
         "muses": [row for r in roles for row in r["people"]],
         "presets": {k: list(v) for k, v in PRESETS.items()},
         "default_preset": DEFAULT_PRESET,
-        "pickup": PICKUP,
         "taste_axes": [
             {"id": axis, "low": low, "high": high} for axis, low, high in TASTE_AXES
         ],

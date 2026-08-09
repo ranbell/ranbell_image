@@ -42,7 +42,7 @@ def _portrait():
 # ── the sheet is a composite ────────────────────────────────────────────────
 def test_sheet_uses_the_labelled_layout():
     positive, _ = _sheet()
-    for label in ("Character:", "Accessories:", "** Chronicles of Character **",
+    for label in ("Character:", "Accessories:", "** Character Sheet **",
                   "Center/Main :", "Shot:", "Effect:"):
         assert label in positive
 
@@ -168,7 +168,7 @@ def test_the_two_slots_are_genuinely_different_shots():
     sheet, _ = _sheet()
     portrait, _ = _portrait()
     assert sheet != portrait
-    assert "Chronicles of Character" not in portrait
+    assert "Character Sheet" not in portrait
 
 
 def test_each_slot_has_its_own_canvas():

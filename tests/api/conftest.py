@@ -3,7 +3,7 @@ can run in a minimal venv without installing the full application stack.
 
 The third-party stubs are process-wide, so they are only installed when the
 real package is missing — otherwise a full-suite run would hand the mocks to
-later test modules (tests/story) that need the genuine pydantic.
+later test modules that need the genuine pydantic.
 """
 import importlib.util
 import sys

@@ -15,13 +15,13 @@ services:
       # API authentication token — must match the token stored in the frontend localStorage
       API_TOKEN: RANBELL_IMAGE_API_TOKEN
 
-      # Ollama (embeddings + default text/VLM for all features except Chronicles override)
+      # Ollama (embeddings + default text/VLM, unless overridden below)
       OLLAMA_URL: http://host.docker.internal:11434
       EMBED_MODEL: embeddinggemma:300m
       VLM_MODEL: gemma4:e2b
 
-      # OpenAI-compatible endpoint for Chronicles (optional). Select it in
-      # Chronicles → Advanced; other features stay on Ollama.
+      # OpenAI-compatible endpoint (optional). Select it in
+      # Admin → Advanced; other features stay on Ollama.
       # OPENAI_BASE_URL: http://host.docker.internal:8080/v1
       # OPENAI_API_KEY: not-needed
       # OPENAI_MODEL: bonsai

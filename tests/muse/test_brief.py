@@ -83,18 +83,6 @@ def test_framing_is_in_the_brief_head():
     assert "Framing: face_closeup" in text
 
 
-def test_stage_b_gets_tags_pose_intent_and_later_stages_get_the_previous_prompt():
-    # Stage A's full prose is not carried past the draft: a short pose intent
-    # keeps the action, and WD14 describes what was drawn.
-    assert brief.with_tags("BRIEF", "1girl, sky") == "BRIEF,1girl, sky"
-    assert brief.with_tags("BRIEF", "1girl", pose="she leans on the rail") == (
-        "BRIEF\n\nPose intent: she leans on the rail,1girl"
-    )
-    assert brief.with_tags("BRIEF", "  ") == "BRIEF"
-    assert brief.with_prompt("BRIEF", "a prompt") == "BRIEF,a prompt"
-    assert brief.with_prompt("BRIEF", "") == "BRIEF"
-
-
 def test_the_plan_is_stated_before_the_reference_and_the_theme_still_closes(stargazer):
     plan = {
         "place": "a stairwell landing",

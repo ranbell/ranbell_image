@@ -329,30 +329,6 @@ def build(
     ] if b)
 
 
-def with_tags(brief: str, tags: str, *, pose: str = "") -> str:
-    """Stage B's input: the brief, optional pose intent, then WD14 tags.
-
-    Stage A's full prose is deliberately *not* carried forward. A short pose
-    intent keeps the action; the tags describe the picture that exists.
-    """
-    parts = [brief]
-    if pose.strip():
-        parts.append(f"Pose intent: {pose.strip()}")
-    body = "\n\n".join(parts)
-    return f"{body},{tags}" if tags.strip() else body
-
-
-def with_prompt(brief: str, prompt: str) -> str:
-    """A later stage's input: the brief, then the prompt that made what it sees.
-
-    The workflow this came from joined stage C's input with no separator at all
-    and stage D's with a comma — the theme's last word ran straight into the next
-    prompt's first. Both produced good images, so the comma is used for both here
-    rather than reproducing an accident of two differently configured nodes.
-    """
-    return f"{brief},{prompt}" if prompt.strip() else brief
-
-
 def with_previous(
     brief: str, previous: str, *, pose: str = "", analysis: str = "",
 ) -> str:

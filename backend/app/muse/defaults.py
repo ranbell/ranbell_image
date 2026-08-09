@@ -31,8 +31,6 @@ DRAFT_DEFAULTS: dict[str, object] = {
 REFINE_DEFAULTS: dict[str, object] = {
     "final_steps": 30,
     "final_cfg": 4.5,
-    # Legacy key kept for older panels; B/C/D pickup is removed.
-    "refine_stages": 0,
     "wd14_threshold": 0.2,
     "drop_character_tags": True,
     "drop_rating_tags": False,
@@ -40,19 +38,12 @@ REFINE_DEFAULTS: dict[str, object] = {
 
 # ── The model's own reasoning ──────────────────────────────────────────────
 LLM_DEFAULTS: dict[str, object] = {
-    # Off by default. When on, it applies to stage A only — pose is where
-    # contradictory postures used to pile up. Refine stages stay fast.
+    # Thinking is hardcoded off for every Muse turn (see chain.py) — each turn
+    # is a role-limited agent with one narrow job, so the reasoning pass only
+    # adds latency, not quality. Not exposed as a session setting.
     #
-    # What it buys on A is a different prompt, not a tidier one. Without it a
-    # stage writes four postures into one paragraph and the image model picks
-    # one, unguided; it also writes things nothing can draw, and lets the
-    # reference block leak in. With it the pose resolves to one.
-    #
-    # It costs about eight times the wall clock of a stage without it.
-    "think": False,
-    # Sized for thinking being on: reasoning runs to thousands of tokens before
-    # the answer starts, and the brief and an image are already in the window.
-    # 16k was tight; this is the size both were measured at.
+    # 32768 headroom regardless: the brief and an image are already in the
+    # window before the model writes a word.
     "num_ctx": 32768,
     # Empty = reuse `model` for the turns that are shown the board. Set a
     # vision-capable model here and a cheaper text model in `model` to keep the

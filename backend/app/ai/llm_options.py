@@ -19,8 +19,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Long creative calls get the bigger window.
-STORY_NUM_CTX = 32768
 DEFAULT_NUM_CTX = 16384
 
 # Published per-family sampling. Keys are matched against the model name.
@@ -50,7 +48,6 @@ def llm_options(
     model: str = "",
     temperature: float | None = None,
     num_ctx: int | None = None,
-    story: bool = False,
 ) -> dict[str, Any]:
     """Family sampling → session temperature → caller options → context window."""
     out: dict[str, Any] = family_sampling(model)
@@ -60,33 +57,5 @@ def llm_options(
         if value is not None:
             out[key] = value
     if not out.get("num_ctx"):
-        default = STORY_NUM_CTX if story else DEFAULT_NUM_CTX
-        out["num_ctx"] = max(int(num_ctx or default), default if story else 1)
+        out["num_ctx"] = max(int(num_ctx or DEFAULT_NUM_CTX), 1)
     return out
-
-
-async def llm_options_from_config(
-    db,
-    options: dict[str, Any] | None = None,
-    *,
-    model: str = "",
-    temperature: float | None = None,
-    story: bool = False,
-) -> dict[str, Any]:
-    """Same, but honour the admin-configured ``ollama_num_ctx`` when reachable."""
-    configured = None
-    if db is not None:
-        try:
-            from ..runtime_config import get_runtime_config
-
-            cfg = await get_runtime_config(db)
-            configured = int(cfg.get("ollama_num_ctx") or 0) or None
-        except Exception:
-            configured = None
-    return llm_options(
-        options,
-        model=model,
-        temperature=temperature,
-        num_ctx=configured,
-        story=story,
-    )

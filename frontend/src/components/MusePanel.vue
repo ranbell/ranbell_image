@@ -241,8 +241,8 @@ onBeforeUnmount(closeStream)
 // girl's dialogue used to end up captioned with another's name; an untouched
 // setup screen has nothing to lose, so it is fine to relabel silently.
 async function enterWithCharacter(characterId) {
-  const switching = Boolean(session.value)
-    && characterId && characterId !== inputs.value.character_id
+  const requestedNew = Boolean(characterId) && characterId !== inputs.value.character_id
+  const switching = Boolean(session.value) && requestedNew
   if (switching) {
     const untouched = !chat.value.length && status.value === 'setup'
     if (!untouched) {
@@ -250,8 +250,7 @@ async function enterWithCharacter(characterId) {
         emit('update:show', false)
         return
       }
-      closeStream()
-      session.value = null
+      discardSession()
     }
   }
   if (!session.value) {
@@ -259,9 +258,7 @@ async function enterWithCharacter(characterId) {
   } else {
     connectStream(session.value.session_id)
   }
-  if (characterId && characterId !== inputs.value.character_id) {
-    await pickCharacter(characterId)
-  }
+  if (requestedNew) await pickCharacter(characterId)
 }
 
 async function startSession() {
@@ -282,10 +279,14 @@ async function startSession() {
   connectStream(session.value.session_id)
 }
 
-async function resetSession() {
-  if (!window.confirm(t('muse.resetConfirm'))) return
+function discardSession() {
   closeStream()
   session.value = null
+}
+
+async function resetSession() {
+  if (!window.confirm(t('muse.resetConfirm'))) return
+  discardSession()
   await startSession()
 }
 function close() { emit('update:show', false) }

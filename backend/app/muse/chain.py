@@ -255,7 +255,7 @@ def _strip_costume(raw: str) -> tuple[str, dict[str, Any]]:
 async def run_plan(
     ollama, *, user_prompt: str, model: str, num_ctx: int | None,
     muse_id: str = "plan", images: list[bytes] | None = None,
-    think: bool = False, seed: str = "",
+    seed: str = "",
     on_token: TokenCallback | None = None,
 ) -> dict[str, Any]:
     """Settle place, hour, light, action and the object ledger for this shoot."""
@@ -264,7 +264,7 @@ async def run_plan(
         ollama,
         system=crew.plan_system_prompt(mid, seed=seed),
         prompt=user_prompt, model=model, images=images,
-        num_ctx=num_ctx, think=think, on_token=on_token,
+        num_ctx=num_ctx, think=False, on_token=on_token,
     )
     plan = parse_plan(raw)
     if plan:
@@ -417,7 +417,7 @@ async def run_duet_prep(
 
 async def run_banter(
     ollama, *, muse_id: str, user_prompt: str, model: str,
-    num_ctx: int | None, think: bool = False,
+    num_ctx: int | None,
     character: dict[str, Any] | None = None,
     on_token: TokenCallback | None = None,
 ) -> str:
@@ -429,7 +429,7 @@ async def run_banter(
         ollama,
         system=crew.banter_system_prompt_for(muse_id, character=character),
         prompt=user_prompt, model=model, images=None,
-        num_ctx=num_ctx, think=think, on_token=on_token,
+        num_ctx=num_ctx, think=False, on_token=on_token,
     )
     say, _, _ = identity.parse_table_read(raw)
     text = (say or raw).strip()
@@ -445,69 +445,3 @@ async def run_banter(
 # waited on a read receipt. It is now a block on her next turn's user prompt
 # (`crew.caught_block`) — she brings it up when they next meet, which is both
 # how a person would find out and one fewer model load.
-
-
-# ── legacy names used by older tests (thin wrappers) ───────────────────────
-@dataclass(frozen=True)
-class StageResult:
-    prompt: str
-    pose_intent: str = ""
-
-
-REFINE_STAGES: tuple[tuple[str, str], ...] = (
-    ("reinforce", "b_reinforce.md"),
-    ("cinematic", "c_cinematic.md"),
-    ("angle", "d_angle.md"),
-)
-
-STAGE_LABELS = {
-    "pose": "Beat",
-    "reinforce": "Patch",
-    "cinematic": "Punch",
-    "angle": "Orbit",
-}
-
-
-def stages_for(count: int) -> tuple[tuple[str, str], ...]:
-    return REFINE_STAGES[:max(1, min(int(count), len(REFINE_STAGES)))]
-
-
-async def run_pose(ollama, *, brief: str, model: str, num_ctx: int | None,
-                   think: bool = False, identity_tags: list[str] | None = None,
-                   framing: str = "auto", on_token: TokenCallback | None = None,
-                   ) -> StageResult:
-    turn = await run_muse(
-        ollama, muse_id="beat", user_prompt=brief, model=model,
-        num_ctx=num_ctx, identity_tags=identity_tags, framing=framing,
-        brief=brief, think=think, on_token=on_token,
-    )
-    return StageResult(prompt=turn.prompt, pose_intent=turn.pose_intent)
-
-
-async def run_refine(
-    ollama, *, stage_file: str, brief: str, previous: str,
-    image: bytes, model: str, num_ctx: int | None,
-    tags: str = "", pose: str = "", think: bool = False,
-    identity_tags: list[str] | None = None, framing: str = "auto",
-    on_token: TokenCallback | None = None,
-) -> StageResult:
-    prompt = (brief_mod.with_tags(brief, tags, pose=pose) if tags or pose
-              else brief_mod.with_prompt(brief, previous))
-    raw = await _call(
-        ollama, system=system_prompt(stage_file), prompt=prompt,
-        model=model, images=[image], num_ctx=num_ctx, think=think,
-        on_token=on_token,
-    )
-    say, tag_s, scene = identity.parse_table_read(raw)
-    _ = say
-    if not tag_s and not scene:
-        tag_s, scene = identity.parse_hybrid(raw)
-    positive = identity.assemble_positive(
-        identity_tags, tag_s, scene, framing=framing,
-    )
-    if not positive.strip():
-        raise ChainError("the model returned an empty prompt")
-    return StageResult(
-        prompt=positive,
-        pose_intent=identity.pose_summary(scene or raw),
-    )

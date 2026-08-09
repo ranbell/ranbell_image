@@ -39,27 +39,6 @@ class FakeOllama:
         return self._stream()
 
 
-def test_legacy_prompt_files_still_exist_for_pickup_docs():
-    for _, filename in chain.REFINE_STAGES:
-        text = chain.system_prompt(filename)
-        assert "OUTPUT FORMAT" in text
-        assert "TAGS:" in text
-        assert "SCENE:" in text
-        assert "English only" in text
-    b = chain.system_prompt("b_reinforce.md")
-    assert "ten or more objects" in b.lower()
-    a = chain.system_prompt("a_pose.md")
-    assert "face_closeup" in a
-    assert "from_behind" in a
-
-
-def test_stages_for_clamps_to_the_instructions_that_exist():
-    assert len(chain.stages_for(3)) == 3
-    assert len(chain.stages_for(1)) == 1
-    assert len(chain.stages_for(0)) == 1
-    assert len(chain.stages_for(9)) == 3
-
-
 @pytest.mark.asyncio
 async def test_run_muse_streams_say_and_locks_identity():
     llm = FakeOllama(reply=(
@@ -80,27 +59,32 @@ async def test_run_muse_streams_say_and_locks_identity():
 
 
 @pytest.mark.asyncio
-async def test_pose_is_text_only_and_carries_the_thinking_switch():
-    llm = FakeOllama(reply="TAGS: standing\n\nSCENE: a prompt")
-    out = await chain.run_pose(
-        llm, brief="BRIEF", model="m", num_ctx=32768,
-        identity_tags=["1girl", "small_breasts"],
+async def test_run_muse_carries_the_thinking_switch():
+    # Every live caller hardcodes think=False (service.py) — the crew are
+    # role-limited agents with one narrow job each, and reasoning only adds
+    # latency, not quality. This checks the switch itself still works, since
+    # it is the one thing standing between a live call and an 8x-slower turn.
+    llm = FakeOllama(reply="SAY: ok\n\nTAGS: standing\n\nSCENE: a prompt")
+    await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m",
+        num_ctx=32768, identity_tags=["1girl", "small_breasts"],
+        framing="auto", brief="BRIEF",
     )
-    assert out.prompt.startswith("1girl, small_breasts")
-    assert "standing" in out.prompt
-    assert "a prompt" in out.prompt
-    assert out.pose_intent == "a prompt"
     call = llm.calls[0]
     assert call["kind"] == "text"
     assert call["prompt"] == "BRIEF"
-    assert call["think"] is False, "thinking is opt-in; it costs ~8x the wall clock"
+    assert call["think"] is False
     assert call["options"]["num_ctx"] == 32768
     # Unbounded output regardless: with thinking on, reasoning runs for thousands
     # of tokens before the answer begins, and a default budget cuts the answer
     # off before it is written.
     assert call["options"]["num_predict"] == -1
 
-    await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=None, think=True)
+    await chain.run_muse(
+        llm, muse_id="beat", user_prompt="BRIEF", model="m",
+        num_ctx=None, identity_tags=None, framing="auto", brief="BRIEF",
+        think=True,
+    )
     assert llm.calls[1]["think"] is True
 
 
@@ -110,39 +94,21 @@ async def test_reasoning_is_not_mistaken_for_the_prompt():
     # until it is done. Reading the whole stream as one string would paste
     # thousands of words of deliberation into the image prompt.
     llm = FakeOllama(reply="the prompt", thinking="a" * 5000)
-    got = await chain.run_pose(llm, brief="B", model="m", num_ctx=None, think=True)
-    assert got.prompt == "the prompt"
-    assert got.pose_intent == "the prompt"
-
-
-@pytest.mark.asyncio
-async def test_refine_sends_the_image_and_uses_tags_only_for_the_first_stage():
-    llm = FakeOllama(reply="TAGS: sky\n\nSCENE: repaired")
-    await chain.run_refine(
-        llm, stage_file="b_reinforce.md", brief="BRIEF", previous="",
-        image=b"jpeg", model="m", num_ctx=None, tags="1girl, sky",
-        pose="she waits",
+    turn = await chain.run_muse(
+        llm, muse_id="beat", user_prompt="B", model="m", num_ctx=None,
+        identity_tags=None, framing="auto", brief="B", think=True,
     )
-    call = llm.calls[0]
-    assert call["kind"] == "vlm"
-    assert call["images"] == [b"jpeg"]
-    assert call["think"] is False
-    assert "Pose intent: she waits" in call["prompt"]
-    assert call["prompt"].endswith(",1girl, sky") or ",1girl, sky" in call["prompt"]
-
-    await chain.run_refine(
-        llm, stage_file="c_cinematic.md", brief="BRIEF", previous="prev prompt",
-        image=b"jpeg2", model="m", num_ctx=None,
-    )
-    assert llm.calls[1]["prompt"] == "BRIEF,prev prompt"
+    assert turn.prompt == "the prompt"
+    assert turn.pose_intent == "the prompt"
 
 
 @pytest.mark.asyncio
 async def test_on_token_forwards_answer_pieces_for_sse():
     llm = FakeOllama(reply="TAGS: x\n\nSCENE: y")
     seen: list[str] = []
-    await chain.run_pose(
-        llm, brief="B", model="m", num_ctx=None,
+    await chain.run_muse(
+        llm, muse_id="beat", user_prompt="B", model="m", num_ctx=None,
+        identity_tags=None, framing="auto", brief="B",
         on_token=seen.append,
     )
     assert "".join(seen) == "TAGS: x\n\nSCENE: y"
@@ -154,7 +120,10 @@ async def test_an_empty_answer_is_an_error_rather_than_an_empty_prompt():
     # something unrelated to the theme, which is worse than stopping.
     llm = FakeOllama(reply="   ")
     with pytest.raises(chain.ChainError):
-        await chain.run_pose(llm, brief="BRIEF", model="m", num_ctx=None)
+        await chain.run_muse(
+            llm, muse_id="beat", user_prompt="BRIEF", model="m", num_ctx=None,
+            identity_tags=None, framing="auto", brief="BRIEF",
+        )
 
 
 @pytest.mark.asyncio
