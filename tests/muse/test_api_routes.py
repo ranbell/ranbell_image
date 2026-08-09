@@ -8,9 +8,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock
 
-from app.muse.api import router
-from app.muse import service
-
 
 class FakeDb:
     def __init__(self):
@@ -18,13 +15,24 @@ class FakeDb:
         self._qc.upsert = AsyncMock()
         self._qc.search = AsyncMock(return_value=[])
         self._qc.scroll = AsyncMock(return_value=([], None))
+        self._qc.retrieve = AsyncMock(return_value=[])
 
 
 @pytest.fixture
 def api_client(tmp_path):
+    # Import here, not at module scope: some sibling test directories purge
+    # every "app.*" entry from sys.modules during collection (to force a
+    # clean re-import of the real app for tests that need it, undoing the
+    # stubs tests/api/conftest.py installs). A module-level import above
+    # would bind this fixture's router to whichever "app.muse.api" object
+    # existed at collection time — a different object than the one
+    # monkeypatch.setattr("app.muse.api....", ...) resolves at test-run
+    # time, so patches silently miss and the real implementation runs.
+    from app.muse.api import router
+
     app = FastAPI()
     app.include_router(router)
-    
+
     app.state.db_path = str(tmp_path / "test_muse.db")
     app.state.comfy = MagicMock()
     app.state.spooler = MagicMock()
