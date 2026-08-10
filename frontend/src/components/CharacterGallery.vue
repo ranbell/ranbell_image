@@ -420,6 +420,13 @@ onUnmounted(() => {
           @click="showCompatViewer = true"
         >💞</button>
 
+        <button
+          type="button"
+          class="sb-chip"
+          :class="unreadOnly ? 'is-chip-on-teal' : ''"
+          @click="unreadOnly = !unreadOnly"
+        >💌 {{ t('characters.unreadOnly') }}</button>
+
         <button class="sb-icon-btn" :title="t('muse.close')" @click="emit('close')">✕</button>
       </header>
 
@@ -464,12 +471,6 @@ onUnmounted(() => {
             @click="toggle(activeTraits, trait)"
           >{{ trait }} <span class="opacity-70">({{ traitLabel(trait) }})</span></button>
         </div>
-        <button
-          type="button"
-          class="sb-chip"
-          :class="unreadOnly ? 'is-chip-on-teal' : ''"
-          @click="unreadOnly = !unreadOnly"
-        >💌 {{ t('characters.unreadOnly') }}</button>
         <button v-if="anyFilter" type="button" class="sb-chip" @click="clearFilters">
           ✕ {{ t('characters.clearFilter') }}
         </button>
