@@ -306,6 +306,45 @@ async def compat_matrix(db) -> dict[str, Any]:
     return {"characters": characters, "pairs": pairs}
 
 
+async def friends_of(
+    db, char_id: str, *, min_tier: str = "close", limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Close / best-friend neighbours for lounge reactions.
+
+    Uses the same bulk matrix path as the chemistry viewer so co-appearance
+    counts are not re-scrolled per pair. Empty when embeddings are missing.
+    """
+    if not char_id:
+        return []
+    min_rank = {"acquaintance": 0, "close": 1, "best_friend": 2}.get(min_tier, 1)
+    matrix = await compat_matrix(db)
+    by_id = {c["id"]: c for c in matrix.get("characters") or []}
+    ranked: list[dict[str, Any]] = []
+    for pair in matrix.get("pairs") or []:
+        a, b = str(pair.get("a") or ""), str(pair.get("b") or "")
+        if char_id not in (a, b):
+            continue
+        tier = str(pair.get("tier") or "acquaintance")
+        if {"acquaintance": 0, "close": 1, "best_friend": 2}.get(tier, 0) < min_rank:
+            continue
+        other_id = b if a == char_id else a
+        other = by_id.get(other_id) or {"id": other_id}
+        ranked.append({
+            "id": other_id,
+            "name": other.get("name") or "",
+            "name_ja": other.get("name_ja") or other.get("name") or "",
+            "board": other.get("board") or {},
+            "score": float(pair.get("score") or 0.0),
+            "tier": tier,
+            "co_appearances": int(pair.get("co_appearances") or 0),
+        })
+    ranked.sort(key=lambda r: (
+        0 if r["tier"] == "best_friend" else 1,
+        -r["score"],
+    ))
+    return ranked[: max(0, int(limit or 5))]
+
+
 async def compat_status(db) -> dict[str, Any]:
     """How many characters already have chemistry vectors, for the admin panel."""
     embedded_ids: set[str] = set()

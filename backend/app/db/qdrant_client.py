@@ -27,6 +27,10 @@ MUSE_SESSIONS_COLLECTION = "muse_sessions"
 # every character's pictures with it), so a new vector shape goes in a new,
 # freely-recreatable collection instead of touching that one's schema.
 CHARACTER_COMPAT_COLLECTION = "character_compat"
+# Muse lounge threads (wrap shares, friend replies) and studio handpost pages.
+# Payload-only — same shape as muse_sessions.
+MUSE_LOUNGE_COLLECTION = "muse_lounge"
+MUSE_HANDPOST_COLLECTION = "muse_handpost"
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -383,6 +387,10 @@ class QdrantDBClient:
         # update hook and the admin backfill, both of which call Ollama and so
         # do not belong on the startup path.
         await self.ensure_character_compat_collection()
+
+        # Lounge threads + studio handpost (payload-only social layer).
+        await self.ensure_muse_lounge_collection()
+        await self.ensure_muse_handpost_collection()
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
@@ -1233,6 +1241,49 @@ class QdrantDBClient:
             on_disk_payload=True,
         )
         logger.info("Created collection: %s", CHARACTER_COMPAT_COLLECTION)
+
+    async def ensure_muse_lounge_collection(self) -> None:
+        """Wrap-share threads and short friend replies after a shoot."""
+        if await self._qc.collection_exists(MUSE_LOUNGE_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=MUSE_LOUNGE_COLLECTION,
+            vectors_config={},
+            on_disk_payload=True,
+        )
+        for field, schema in (
+            ("kind", qm.PayloadSchemaType.KEYWORD),
+            ("created_at", qm.PayloadSchemaType.FLOAT),
+            ("session_id", qm.PayloadSchemaType.KEYWORD),
+            ("author_character_id", qm.PayloadSchemaType.KEYWORD),
+        ):
+            await self._qc.create_payload_index(
+                collection_name=MUSE_LOUNGE_COLLECTION,
+                field_name=field,
+                field_schema=schema,
+            )
+        logger.info("Created collection: %s", MUSE_LOUNGE_COLLECTION)
+
+    async def ensure_muse_handpost_collection(self) -> None:
+        """Studio handpost pages — director notices and preference history."""
+        if await self._qc.collection_exists(MUSE_HANDPOST_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=MUSE_HANDPOST_COLLECTION,
+            vectors_config={},
+            on_disk_payload=True,
+        )
+        for field, schema in (
+            ("pinned", qm.PayloadSchemaType.BOOL),
+            ("updated_at", qm.PayloadSchemaType.FLOAT),
+            ("author", qm.PayloadSchemaType.KEYWORD),
+        ):
+            await self._qc.create_payload_index(
+                collection_name=MUSE_HANDPOST_COLLECTION,
+                field_name=field,
+                field_schema=schema,
+            )
+        logger.info("Created collection: %s", MUSE_HANDPOST_COLLECTION)
 
     async def total_count(self, *, exclude_drafts: bool = False) -> int:
         result = await self._qc.count(

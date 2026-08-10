@@ -316,3 +316,107 @@ async def session_report(session_id: str, request: Request):
 @router.get("/steps")
 async def list_steps():
     return {"steps": list(STEPS)}
+
+
+# ── Lounge + studio handpost ─────────────────────────────────────────────────
+
+class HandpostBody(BaseModel):
+    title: str = ""
+    body_ja: str = ""
+    body_en: str = ""
+    pinned: bool = False
+
+
+class HandpostPatch(BaseModel):
+    title: str | None = None
+    body_ja: str | None = None
+    body_en: str | None = None
+    pinned: bool | None = None
+
+
+@router.get("/lounge/threads")
+async def lounge_threads(request: Request, limit: int = 40, kind: str = ""):
+    from . import lounge_db
+    rows = await lounge_db.list_threads(_db(request), limit=limit, kind=kind)
+    return {"threads": rows}
+
+
+@router.get("/lounge/threads/{thread_id}")
+async def lounge_thread(thread_id: str, request: Request):
+    from . import lounge_db
+    row = await lounge_db.get_thread(_db(request), thread_id)
+    if row is None:
+        raise HTTPException(404, "thread not found")
+    return row
+
+
+@router.get("/lounge/trends")
+async def lounge_trends(request: Request):
+    from . import lounge_db
+    return {"trends": await lounge_db.get_trends(_db(request))}
+
+
+@router.get("/lounge/summary")
+async def lounge_summary(request: Request, since: float = 0.0):
+    """Gallery badge: new threads since last peek + unanswered pitches."""
+    from . import lounge_db
+    return await lounge_db.summary(_db(request), since=since)
+
+
+@router.get("/handpost")
+async def handpost_list(request: Request, pinned_only: bool = False):
+    from . import handpost_db
+    return {"pages": await handpost_db.list_pages(_db(request), pinned_only=pinned_only)}
+
+
+@router.post("/handpost")
+async def handpost_create(body: HandpostBody, request: Request):
+    from . import handpost_db
+    page = await handpost_db.save_page(_db(request), {
+        "title": body.title,
+        "body_ja": body.body_ja,
+        "body_en": body.body_en,
+        "pinned": body.pinned,
+        "author": "director",
+    })
+    return page
+
+
+@router.patch("/handpost/{page_id}")
+async def handpost_update(page_id: str, body: HandpostPatch, request: Request):
+    from . import handpost_db
+    db = _db(request)
+    existing = await handpost_db.get_page(db, page_id)
+    if existing is None:
+        raise HTTPException(404, "page not found")
+    patch = body.model_dump(exclude_unset=True)
+    existing.update(patch)
+    return await handpost_db.save_page(db, existing)
+
+
+@router.delete("/handpost/{page_id}")
+async def handpost_delete(page_id: str, request: Request):
+    from . import handpost_db
+    ok = await handpost_db.delete_page(_db(request), page_id)
+    if not ok:
+        raise HTTPException(404, "page not found")
+    return {"ok": True}
+
+
+class LoungeReplyBody(BaseModel):
+    text: str = ""
+    locale: str = "ja"
+
+
+@router.post("/lounge/threads/{thread_id}/reply")
+async def lounge_reply(thread_id: str, body: LoungeReplyBody, request: Request):
+    return await _run(service.reply_lounge_thread(
+        _db(request), thread_id, text=body.text, locale=body.locale or "ja",
+    ))
+
+
+@router.post("/lounge/threads/{thread_id}/promote")
+async def lounge_promote(thread_id: str, request: Request, locale: str = "ja"):
+    return await _run(service.promote_lounge_pitch(
+        _db(request), thread_id, locale=locale or "ja",
+    ))

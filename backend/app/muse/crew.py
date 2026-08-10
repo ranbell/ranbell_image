@@ -1600,6 +1600,155 @@ _CHEMISTRY_TIER_JA = {
     "best_friend": "大親友",
 }
 
+_LOUNGE_TEMPLATE_HINTS = {
+    "report": "どこで撮ってどんな感じだったかを、友達に報告する口調で。",
+    "praise": "総監督が良いと言っていたポーズ・服・表情があればそれを中心に共有する。なければ雰囲気の報告。",
+    "soft_flex": "うまくいったところを軽く自慢する（自慢しすぎない・可愛く）。",
+    "ask_friend": "次に試したいことや迷ったことを、友達にちょっと相談する口調で。",
+    "vibe": "場所の空気や撮影の温度感をぼやく。技術用語は出さない。",
+}
+
+
+def lounge_share_prompt(
+    character: dict[str, Any],
+    *,
+    session_log: str = "",
+    photo_desc: str = "",
+    template: str = "report",
+    director_highlights: str = "",
+) -> str:
+    """Public lounge post after wrap — friend-facing, not the secret diary."""
+    p = _personality_map(character)
+    name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
+    summary_ja = str(
+        p.get("summary_ja") or character.get("summary_ja")
+        or character.get("summary") or ""
+    ).strip()
+    voice_ja = str(
+        character.get("voice_ja")
+        or (character.get("appearance") or {}).get("voice")
+        or ""
+    ).strip()
+    hint = _LOUNGE_TEMPLATE_HINTS.get(template) or _LOUNGE_TEMPLATE_HINTS["report"]
+    return "\n\n".join(x for x in [
+        f"あなたは女優『{name_ja}』本人です。スタジオの【楽屋】チャンネルに、友達の Muse へ短く投稿します。",
+        f"【キャラクター】\n{summary_ja}" if summary_ja else "",
+        f"【口調】{voice_ja}" if voice_ja else "",
+        f"【今回の撮影あらまし】\n{photo_desc}" if photo_desc else "",
+        f"【総監督との対話の要点】\n{session_log}" if session_log else "",
+        f"【総監督が良いと言っていたこと】\n{director_highlights}" if director_highlights else "",
+        "【投稿の型】" + hint,
+        "【ルール】",
+        "1. 秘密の日記の本音・照れ・内心は書かない。友達への情報共有として書く。",
+        "2. 80〜180字程度の短文。毎回同じ言い回しにしない。",
+        "3. システムの言葉や「私はAI」は出さない。",
+        "4. 出力は下の見出しだけ。JSON やコードフェンスは禁止:",
+        "TEXT_JA: 日本語の投稿本文\n"
+        "TEXT_EN: English version of the same post\n"
+        "POSE: 触れたポーズ（なければ空）\n"
+        "OUTFIT: 触れた服装（なければ空）\n"
+        "EXPRESSION: 触れた表情（なければ空）\n"
+        "PLACE: 場所（なければ空）\n"
+        "VIBE: 空気感一言（なければ空）",
+    ] if x)
+
+
+def lounge_pitch_prompt(
+    character: dict[str, Any],
+    *,
+    session_log: str = "",
+    photo_desc: str = "",
+    director_highlights: str = "",
+) -> str:
+    """A short 'how about this?' pitch to the showrunner after wrap."""
+    p = _personality_map(character)
+    name_ja = str(character.get("name_ja") or p.get("preset_name_ja") or "女優")
+    summary_ja = str(
+        p.get("summary_ja") or character.get("summary_ja")
+        or character.get("summary") or ""
+    ).strip()
+    voice_ja = str(
+        character.get("voice_ja")
+        or (character.get("appearance") or {}).get("voice")
+        or ""
+    ).strip()
+    return "\n\n".join(x for x in [
+        f"あなたは女優『{name_ja}』本人です。撮影のあと、総監督とみんなに見える【楽屋】へ"
+        "『こんなのどうでしょう？』と短い提案を投稿します。",
+        f"【キャラクター】\n{summary_ja}" if summary_ja else "",
+        f"【口調】{voice_ja}" if voice_ja else "",
+        f"【今回の撮影あらまし】\n{photo_desc}" if photo_desc else "",
+        f"【対話の要点】\n{session_log}" if session_log else "",
+        f"【総監督の好みの手がかり】\n{director_highlights}" if director_highlights else "",
+        "【ルール】",
+        "1. 次の撮影のアイデアを一つだけ。ポーズ・服・表情・場所・小道具のいずれか。",
+        "2. 命令しない。相談・提案の口調。60〜140字。",
+        "3. 秘密の日記の本音は書かない。システムの言葉は出さない。",
+        "4. 出力は見出しだけ:",
+        "TEXT_JA: 日本語の提案\n"
+        "TEXT_EN: English pitch",
+    ] if x)
+
+
+def showrunner_habit_prompt(
+    *,
+    notes: str = "",
+    session_log: str = "",
+    muse_name: str = "",
+) -> str:
+    """She writes one line about the showrunner's taste into the studio handpost."""
+    who = muse_name or "ある Muse"
+    return "\n\n".join(x for x in [
+        f"あなたはスタジオの記録係です。{who} の撮影で見えた総監督の癖・好みを、"
+        "彼女たち語りで【スタジオ手帖】に一文だけ残します。",
+        f"【総監督の指示メモ】\n{notes}" if notes else "",
+        f"【会話の断片】\n{session_log}" if session_log else "",
+        "【ルール】",
+        "1. 撮り方のノウハウ集にしない。『監督は〜が好き』『深夜にこだわり出す』のような癖の観察。",
+        "2. 生のプロンプトや強度の数字は載せない。短く、可愛く、少し気恥ずかしい程度。",
+        "3. 出力は見出しだけ:",
+        "TITLE_JA: 短い見出し\n"
+        "TITLE_EN: short title\n"
+        "BODY_JA: 本文（1〜3文）\n"
+        "BODY_EN: English body",
+    ] if x)
+
+
+def lounge_reactions_prompt(
+    author: dict[str, Any],
+    post_text_ja: str,
+    friends: list[dict[str, Any]],
+    *,
+    tags: dict[str, str] | None = None,
+) -> str:
+    """1–2 close friends like + comment; whole thread in one generation."""
+    author_name = str(author.get("name_ja") or author.get("name") or "彼女")
+    tag_line = ", ".join(f"{k}={v}" for k, v in (tags or {}).items() if v)
+    friend_lines = []
+    for i, f in enumerate(friends[:2], start=1):
+        friend_lines.append(
+            f"{i}. id={f.get('id')} 名前={f.get('name_ja') or f.get('name')} "
+            f"関係={_CHEMISTRY_TIER_JA.get(str(f.get('tier') or ''), '仲良し')}"
+        )
+    return "\n\n".join(x for x in [
+        f"スタジオの楽屋で、{author_name} が撮影後にこう投稿した:",
+        post_text_ja,
+        f"【投稿から拾える要素】{tag_line}" if tag_line else "",
+        "次の親友たちがリアクションする。リアルな友達の書き込みとして、短く・温かく・陰口なし。",
+        "【反応する人】\n" + "\n".join(friend_lines),
+        "【ルール】",
+        "1. 各人1コメントのみ。いいね絵文字＋一言。合計で会話は1〜2ターンで完了。",
+        "2. STANCE は try（今度試したい）/ twist（自分なら別案）/ skip（今回はパス）のいずれか。",
+        "3. twist のときは TWIST に自分なりのアレンジを短く。それ以外は TWIST を空に。",
+        "4. 出力は見出しだけ。JSON 禁止:",
+        "REACTOR_1_REACTION: 絵文字1つ\n"
+        "REACTOR_1_JA: 日本語コメント\n"
+        "REACTOR_1_EN: English comment\n"
+        "REACTOR_1_STANCE: try|twist|skip\n"
+        "REACTOR_1_TWIST: （twistのときだけ）\n"
+        "（2人目がいれば REACTOR_2_* も同じ形で）",
+    ] if x)
+
 
 def actress_chemistry_prompt(
     character_a: dict[str, Any],

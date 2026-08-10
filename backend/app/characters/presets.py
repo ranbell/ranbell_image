@@ -7,6 +7,7 @@ what used to make hair and eye colour drift between panels.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -25,6 +26,9 @@ from ..tags.split_tags import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Duet wrap jobs can append seeds to both partners at once — serialize RMW.
+_social_seeds_lock = asyncio.Lock()
 
 _ASSET = Path(__file__).resolve().parent / "assets" / "personality_presets.json"
 # Stable point ids: the same preset key always maps to the same Qdrant id, so a
@@ -70,10 +74,14 @@ _RUNTIME_KEYS: tuple[str, ...] = (
     "gallery",
     "diaries",
     "chemistry",
+    "social_seeds",
     "user_created",
     "created_at",
     "updated_at",
 )
+
+# Short-lived lounge whispers — trend tips and friend feedback for the next few shoots.
+MAX_SOCIAL_SEEDS = 5
 
 
 def preset_point_id(preset_key: str) -> str:
@@ -967,4 +975,59 @@ async def get_recent_diary_summaries(db, preset_id: str, limit: int = 3) -> list
         return []
     sorted_diaries = sorted(diaries, key=lambda d: d.get("timestamp") or 0.0, reverse=True)
     return sorted_diaries[:limit]
+
+
+async def get_social_seeds(db, preset_id: str) -> list[dict[str, Any]]:
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return []
+    return [
+        s for s in list(preset.get("social_seeds") or [])
+        if int(s.get("uses_left") if s.get("uses_left") is not None else 1) > 0
+    ]
+
+
+async def add_social_seed(db, preset_id: str, seed: dict[str, Any]) -> dict[str, Any] | None:
+    """Append a lounge whisper; oldest dropped past the cap. Newest first in storage."""
+    async with _social_seeds_lock:
+        preset = await get_preset(db, preset_id)
+        if not preset:
+            return None
+        seeds = list(preset.get("social_seeds") or [])
+        entry = {
+            "id": str(seed.get("id") or uuid.uuid4()),
+            "timestamp": float(seed.get("timestamp") or time.time()),
+            "source_thread_id": str(seed.get("source_thread_id") or ""),
+            "kind": str(seed.get("kind") or "trend"),
+            "summary_ja": str(seed.get("summary_ja") or "").strip(),
+            "summary_en": str(seed.get("summary_en") or "").strip(),
+            "stance": str(seed.get("stance") or "try"),
+            "uses_left": int(seed.get("uses_left") if seed.get("uses_left") is not None else 3),
+        }
+        if not entry["summary_ja"] and not entry["summary_en"]:
+            return None
+        seeds.insert(0, entry)
+        seeds = seeds[:MAX_SOCIAL_SEEDS]
+        await update_preset(db, preset_id, {"social_seeds": seeds})
+        return entry
+
+
+async def consume_social_seeds(db, preset_id: str, seed_ids: list[str]) -> None:
+    """Decrement uses_left for seeds that coloured a session; drop spent ones."""
+    wanted = {str(i) for i in seed_ids if i}
+    if not wanted:
+        return
+    async with _social_seeds_lock:
+        preset = await get_preset(db, preset_id)
+        if not preset:
+            return
+        kept: list[dict[str, Any]] = []
+        for seed in list(preset.get("social_seeds") or []):
+            if str(seed.get("id") or "") in wanted:
+                left = int(seed.get("uses_left") or 0) - 1
+                if left <= 0:
+                    continue
+                seed = {**seed, "uses_left": left}
+            kept.append(seed)
+        await update_preset(db, preset_id, {"social_seeds": kept[:MAX_SOCIAL_SEEDS]})
 

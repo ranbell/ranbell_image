@@ -21,6 +21,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CharacterDossier from './muse/CharacterDossier.vue'
 import CharacterCompatViewer from './muse/CharacterCompatViewer.vue'
+import LoungePanel from './muse/LoungePanel.vue'
 import {
   colorFamily, colorWord, eyeSwatch, familySwatch, hairSwatch,
 } from './muse/colorSwatch.js'
@@ -60,12 +61,37 @@ const bulkGroup = ref('')
 const compatStatus = ref(null)
 const compatLoading = ref(false)
 const showCompatViewer = ref(false)
+const showLounge = ref(false)
+const loungeSummary = ref(null)
+const LOUNGE_SEEN_KEY = 'muse.lounge.lastSeenAt'
+
+function loungeSeenAt() {
+  const n = Number(localStorage.getItem(LOUNGE_SEEN_KEY) || 0)
+  return Number.isFinite(n) ? n : 0
+}
+function markLoungeSeen() {
+  localStorage.setItem(LOUNGE_SEEN_KEY, String(Date.now() / 1000))
+  loungeSummary.value = { ...(loungeSummary.value || {}), unread: 0, new_threads: 0 }
+}
+const loungeUnread = computed(() => Number(loungeSummary.value?.unread || 0))
 
 async function fetchCompatStatus() {
   try {
     const r = await fetch('/api/admin/character-compat/status')
     if (r.ok) compatStatus.value = await r.json()
   } catch { /* transient — the badge just won't update this pass */ }
+}
+
+async function fetchLoungeSummary() {
+  try {
+    const r = await fetch(`/api/muse/lounge/summary?since=${loungeSeenAt()}`)
+    if (r.ok) loungeSummary.value = await r.json()
+  } catch { /* badge stays quiet */ }
+}
+
+function openLounge() {
+  showLounge.value = true
+  markLoungeSeen()
 }
 
 async function runCompatBackfill() {
@@ -314,7 +340,7 @@ async function stopBulk() {
 // deletes: it lives in the admin screen's characters tab now.
 
 function onKey(e) {
-  if (!props.show || dossierId.value) return
+  if (!props.show || dossierId.value || showLounge.value || showCompatViewer.value) return
   if (view.value !== 'deck') return
   if (e.key === 'ArrowRight') { step(1); e.preventDefault() }
   if (e.key === 'ArrowLeft') { step(-1); e.preventDefault() }
@@ -329,6 +355,7 @@ function openGallery() {
   deckAt.value = 0
   syncFromJobs()
   fetchCompatStatus()
+  fetchLoungeSummary()
   if (!jobTimer) jobTimer = setInterval(syncFromJobs, 2000)
 }
 function closeGallery() {
@@ -419,6 +446,19 @@ onUnmounted(() => {
           type="button" class="sb-icon-btn" :title="t('characters.compat.viewerTitle')"
           @click="showCompatViewer = true"
         >💞</button>
+        <button
+          type="button" class="sb-icon-btn relative" :title="t('muse.lounge.title')"
+          @click="openLounge"
+        >
+          💬
+          <span
+            v-if="loungeUnread > 0"
+            class="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-0.5
+                   rounded-full bg-rose-500 text-white text-[9px] leading-[1.1rem]
+                   text-center shadow"
+            :title="t('muse.lounge.unreadCount', { n: loungeUnread })"
+          >{{ loungeUnread > 9 ? '9+' : loungeUnread }}</span>
+        </button>
 
         <button
           type="button"
@@ -684,6 +724,13 @@ onUnmounted(() => {
       @toast="emit('toast', $event)"
       @open-character="showCompatViewer = false; dossierId = $event"
       @start-duet-pair="showCompatViewer = false; emit('start-duet-pair', $event)"
+    />
+
+    <LoungePanel
+      :show="showLounge"
+      @close="showLounge = false; fetchLoungeSummary()"
+      @toast="emit('toast', $event)"
+      @seen="markLoungeSeen"
     />
   </div>
 </template>

@@ -22,6 +22,7 @@ from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import brief as brief_mod
 from . import chain, crew, diary as diary_mod, events, identity, runner, session_db
+from . import handpost_db, lounge as lounge_mod, lounge_db
 from .runtime import negative_for as runtime_negative_for
 from .runtime import render_settings
 from .schema import missing_inputs, new_session
@@ -731,7 +732,12 @@ def _table_user_prompt(
     # Her diary is hers. It goes to the seat she is sitting in and nowhere else —
     # in the brief, the whole table would be reading it.
     if crew.role_of(muse_id) == "actress":
-        for block in (_memory_block(session), _caught_block(session)):
+        for block in (
+            _memory_block(session),
+            _social_block(session),
+            _handpost_block(session),
+            _caught_block(session),
+        ):
             if block:
                 base = f"{base}\n\n{block}"
     # The planner already pulled these out of the tag list. The prose is the
@@ -1325,7 +1331,7 @@ async def _craft_pass(
             images = []
             screening = ""
         if crew.role_of(muse_id) == "actress":
-            await _consume_caught(db, session)
+            await _after_actress_spoke(db, session)
         await session_db.save(db, session, publish=False)
 
         reactor = _pick_banter_reactor(
@@ -1550,6 +1556,31 @@ def _memory_block(session: dict[str, Any]) -> str:
     ])
 
 
+def _social_block(session: dict[str, Any]) -> str:
+    """Lounge whispers — trends and friend feedback. Soft hints only."""
+    lines = [str(m).strip() for m in (session.get("social_seeds") or []) if str(m).strip()]
+    if not lines:
+        return ""
+    return "\n".join([
+        "【なかまから聞いたこと（状況が合うときだけ）】",
+        "楽屋で友達と話したことの覚え。お題やシチュエーションが合うときだけ、"
+        "「今回はこれを試そうかな」程度に滲ませてよい。合わなければ無視。"
+        "画の材料に無理に足さない。小道具の単語を増やさない。",
+        *(f"- {m}" for m in lines[:5]),
+    ])
+
+
+def _handpost_block(session: dict[str, Any]) -> str:
+    """Pinned studio handpost notices — short standing guidance."""
+    lines = [str(m).strip() for m in (session.get("handpost_notices") or []) if str(m).strip()]
+    if not lines:
+        return ""
+    return "\n".join([
+        "【スタジオ手帖の周知（短く守る。画に無理に写さない）】",
+        *(f"- {m}" for m in lines[:3]),
+    ])
+
+
 def _caught_block(session: dict[str, Any]) -> str:
     """The one-off line about her diary having been read, if one is owed."""
     caught = session.get("caught") or {}
@@ -1577,6 +1608,12 @@ async def _consume_caught(db, session: dict[str, Any]) -> None:
             logger.warning("[muse] could not mark diaries acknowledged", exc_info=True)
 
 
+async def _after_actress_spoke(db, session: dict[str, Any]) -> None:
+    """Spend one-shot memory that rode on the turn that just landed."""
+    await _consume_caught(db, session)
+    await _consume_social_seeds(db, session)
+
+
 def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     """What she is handed. In talk mode, the conversation; in prep, the script."""
     inputs = _inputs(session)
@@ -1590,6 +1627,12 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
+    social = _social_block(session)
+    if social:
+        parts.append(social)
+    handpost = _handpost_block(session)
+    if handpost:
+        parts.append(handpost)
     caught = _caught_block(session)
     if caught:
         parts.append(caught)
@@ -1678,7 +1721,7 @@ async def _duet_talk(
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
     session["status"] = "chat"
-    await _consume_caught(db, session)
+    await _after_actress_spoke(db, session)
     await session_db.save(db, session)
     return session
 
@@ -1731,6 +1774,7 @@ async def _duet_prep(
         _note_blind(session)
     _apply_turn(session, turn, ms=int((time.monotonic() - started) * 1000))
     session["status"] = "chat"
+    await _after_actress_spoke(db, session)
     await session_db.save(db, session)
     return session
 
@@ -1834,6 +1878,8 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     """
     session["memories"] = await _recent_memories(db, session)
     session["caught"] = {}
+    await _load_social_seeds(db, session)
+    await _load_handpost_notices(db, session)
     char_id = str(_inputs(session).get("character_id") or "")
     if not char_id:
         return
@@ -1853,6 +1899,64 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
             or newest.get("summary") or ""
         ).strip(),
     }
+
+
+async def _load_social_seeds(db, session: dict[str, Any]) -> None:
+    """Lounge whispers for this open. Uses are spent after the first actress turn."""
+    session["social_seeds"] = []
+    session["social_seed_ids"] = []
+    char_id = str(_inputs(session).get("character_id") or "")
+    if not char_id:
+        return
+    ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+    try:
+        seeds = await presets_db.get_social_seeds(db, char_id)
+    except Exception:
+        logger.debug("[muse] could not load social seeds", exc_info=True)
+        return
+    lines: list[str] = []
+    ids: list[str] = []
+    for seed in seeds:
+        text = str(
+            (seed.get("summary_ja") if ja else seed.get("summary_en"))
+            or seed.get("summary_ja") or seed.get("summary_en") or ""
+        ).strip()
+        if not text:
+            continue
+        stance = str(seed.get("stance") or "try")
+        if stance == "twist":
+            text = f"{text}（自分なりにアレンジしてもいい）"
+        elif stance == "skip":
+            text = f"{text}（無理ならパスしてよい）"
+        lines.append(text)
+        if seed.get("id"):
+            ids.append(str(seed["id"]))
+    session["social_seeds"] = lines
+    session["social_seed_ids"] = ids
+
+
+async def _consume_social_seeds(db, session: dict[str, Any]) -> None:
+    """Spend the whispers that coloured this session — once, after she speaks."""
+    ids = [str(i) for i in (session.get("social_seed_ids") or []) if i]
+    if not ids:
+        return
+    session["social_seed_ids"] = []
+    char_id = str(_inputs(session).get("character_id") or "")
+    if not char_id:
+        return
+    try:
+        await presets_db.consume_social_seeds(db, char_id, ids)
+    except Exception:
+        logger.debug("[muse] could not consume social seeds", exc_info=True)
+
+
+async def _load_handpost_notices(db, session: dict[str, Any]) -> None:
+    session["handpost_notices"] = []
+    ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+    try:
+        session["handpost_notices"] = await handpost_db.pinned_notice_lines(db, ja=ja, limit=3)
+    except Exception:
+        logger.debug("[muse] could not load handpost notices", exc_info=True)
 
 
 # ── showrunner message ──────────────────────────────────────────────────────
@@ -1954,6 +2058,8 @@ async def post_chat(
             screening = ""
         last_responder = muse_id
         last_say = str(msg.get("text") or "")
+        if crew.role_of(muse_id) == "actress":
+            await _after_actress_spoke(db, session)
         await session_db.save(db, session, publish=False)
 
     # One heckle after the note — prefer the actress so personality stays in chat.
@@ -2327,6 +2433,8 @@ async def finish_session(
             }
             await session_db.save(db, session)
             events.publish(sid, {"type": "diary_status", "status": "writing"})
+            model = _text_model(inputs) or str(cfg.get("vlm_model") or "")
+            num_ctx = _num_ctx(inputs, cfg)
             for cid in char_ids:
                 spooler.submit(
                     # Every Ollama call in the app goes through PROMPT, and that lane is
@@ -2341,12 +2449,59 @@ async def finish_session(
                     ollama=ollama,
                     session=session,
                     character_id=cid,
-                    model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
-                    num_ctx=_num_ctx(inputs, cfg),
+                    model=model,
+                    num_ctx=num_ctx,
                     # Passed through so the second diary to land in a duet can
                     # queue the chemistry job itself — see _record_diary_result.
                     spooler=spooler,
                 )
+                # Lounge share is friend-facing (not the secret diary). Same
+                # PROMPT lane; reactions are queued from inside the share job.
+                spooler.submit(
+                    JobLane.PROMPT,
+                    "generate_lounge_share",
+                    run_generate_lounge_share_job,
+                    meta={"session_id": sid, "character_id": cid},
+                    db=db,
+                    ollama=ollama,
+                    session=session,
+                    character_id=cid,
+                    model=model,
+                    num_ctx=num_ctx,
+                    spooler=spooler,
+                )
+            # Pitch / habit are independent of share succeeding — queue them
+            # for the lead only so a failed wrap post does not silence ideas.
+            lead_id = char_id
+            if lead_id:
+                lead_preset = await presets_db.get_preset(db, lead_id)
+                lead_char = _character_for_id(session, lead_preset or {}, lead_id) if lead_preset else {}
+                if lounge_mod.should_pitch(lead_char, lead_preset):
+                    spooler.submit(
+                        JobLane.PROMPT,
+                        "generate_lounge_pitch",
+                        run_generate_lounge_pitch_job,
+                        meta={"session_id": sid, "character_id": lead_id},
+                        db=db,
+                        ollama=ollama,
+                        session=session,
+                        character_id=lead_id,
+                        model=model,
+                        num_ctx=num_ctx,
+                    )
+                if lounge_mod.should_write_habit(notes=list(session.get("notes") or [])):
+                    spooler.submit(
+                        JobLane.PROMPT,
+                        "generate_handpost_habit",
+                        run_generate_handpost_habit_job,
+                        meta={"session_id": sid, "character_id": lead_id},
+                        db=db,
+                        ollama=ollama,
+                        session=session,
+                        character_id=lead_id,
+                        model=model,
+                        num_ctx=num_ctx,
+                    )
         else:
             await session_db.save(db, session)
         return session
@@ -2695,6 +2850,443 @@ async def _record_diary_result(
     await session_db.save(db, stored, publish=False)
     return chemistry_pair
 
+
+
+def _session_chat_log(session: dict[str, Any], *, limit: int = 15) -> str:
+    lines = []
+    for m in (session.get("chat") or [])[-limit:]:
+        if not isinstance(m, dict):
+            continue
+        lines.append(f"{m.get('name')}: {m.get('text')}")
+    return "\n".join(lines)
+
+
+def _director_highlights(session: dict[str, Any]) -> str:
+    notes = [str(n).strip() for n in (session.get("notes") or []) if str(n).strip()]
+    return "\n".join(f"- {n}" for n in notes[-8:])
+
+
+def _shoot_image_id(session: dict[str, Any]) -> str:
+    shot = (session.get("shoot") or {}).get("images") or []
+    if shot and isinstance(shot[0], dict):
+        return str(shot[0].get("image_id") or "")
+    return str(shot[0]) if shot else ""
+
+
+def _character_for_id(session: dict[str, Any], preset: dict[str, Any], character_id: str) -> dict[str, Any]:
+    def _cached_match(candidate: dict[str, Any]) -> bool:
+        return str(candidate.get("character_id") or "") == character_id and (
+            isinstance(candidate.get("personality"), dict) or candidate.get("reasoning_ja")
+        )
+
+    session_char = session.get("character") or {}
+    partner_char = session.get("partner_character") or {}
+    if _cached_match(session_char):
+        return session_char
+    if _cached_match(partner_char):
+        return partner_char
+    return presets_db.preset_to_character(preset)
+
+
+async def run_generate_lounge_share_job(
+    reporter, cancel, *, db, ollama, session: dict[str, Any], character_id: str,
+    model: str = "", num_ctx: int | None = None, spooler=None,
+):
+    """Friend-facing wrap post to the lounge (not the secret diary)."""
+    sid = str(session.get("session_id") or "")
+    _report(reporter, 0.05, "楽屋に書き込んでいます")
+    preset = await presets_db.get_preset(db, character_id)
+    if not preset:
+        return {"status": "skipped", "reason": "character not found"}
+    char = _character_for_id(session, preset, character_id)
+    template = lounge_mod.pick_share_template()
+    system = crew.lounge_share_prompt(
+        char,
+        session_log=_session_chat_log(session),
+        photo_desc=str((session.get("shoot") or {}).get("prompt") or ""),
+        template=template,
+        director_highlights=_director_highlights(session),
+    )
+    ask = (
+        "楽屋への投稿を書いて。TEXT_JA / TEXT_EN と任意の POSE/OUTFIT/EXPRESSION/PLACE/VIBE。"
+        "秘密の日記の本音は書かない。"
+    )
+    try:
+        raw = await chain._call(
+            ollama, system=system, prompt=ask,
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception as exc:
+        logger.warning("[muse] lounge share failed: %s", exc)
+        return {"status": "failed", "reason": str(exc)}
+    fields = lounge_mod.normalize_share(lounge_mod.parse_labelled(raw))
+    if not fields.get("text_ja"):
+        logger.info("[muse] lounge share empty for %s", character_id)
+        return {"status": "failed", "reason": "empty lounge share"}
+
+    inputs = _inputs(session)
+    thread = {
+        "id": str(uuid.uuid4()),
+        "kind": "wrap_share",
+        "author_character_id": character_id,
+        "author_role": "muse",
+        "author_name_ja": str(char.get("name_ja") or preset.get("name_ja") or ""),
+        "author_name": str(char.get("name") or preset.get("name") or ""),
+        "session_id": sid,
+        "image_id": _shoot_image_id(session),
+        "theme": str(inputs.get("theme") or ""),
+        "template": template,
+        "text_ja": fields["text_ja"],
+        "text_en": fields["text_en"],
+        "tags": fields.get("tags") or {},
+        "messages": [{
+            "id": str(uuid.uuid4()),
+            "turn": 0,
+            "character_id": character_id,
+            "name_ja": str(char.get("name_ja") or ""),
+            "name": str(char.get("name") or ""),
+            "text_ja": fields["text_ja"],
+            "text_en": fields["text_en"],
+            "reaction": "",
+        }],
+        "created_at": time.time(),
+    }
+    await lounge_db.save_thread(db, thread)
+    events.publish(sid, {"type": "lounge_status", "status": "shared", "thread_id": thread["id"]})
+    _report(reporter, 0.6, "親友の反応を待っています")
+    if spooler is not None:
+        spooler.submit(
+            JobLane.PROMPT,
+            "generate_lounge_reactions",
+            run_generate_lounge_reactions_job,
+            meta={"session_id": sid, "thread_id": thread["id"]},
+            db=db,
+            ollama=ollama,
+            thread_id=thread["id"],
+            model=model,
+            num_ctx=num_ctx,
+        )
+    _report(reporter, 1.0, "楽屋に投稿しました")
+    return {"status": "ok", "thread_id": thread["id"]}
+
+
+async def run_generate_lounge_reactions_job(
+    reporter, cancel, *, db, ollama, thread_id: str,
+    model: str = "", num_ctx: int | None = None,
+):
+    """Close friends like + 1–2 short comments; seeds trend/feedback memories."""
+    _report(reporter, 0.1, "楽屋の反応を集めています")
+    thread = await lounge_db.get_thread(db, thread_id)
+    if not thread:
+        return {"status": "skipped", "reason": "thread not found"}
+    author_id = str(thread.get("author_character_id") or "")
+    if not author_id:
+        return {"status": "skipped", "reason": "no author"}
+    friends = await compat_mod.friends_of(db, author_id, min_tier="close", limit=2)
+    if not friends:
+        # Soft fallback: any acquaintance neighbour so the lounge still breathes
+        # when chemistry vectors are thin.
+        friends = await compat_mod.friends_of(db, author_id, min_tier="acquaintance", limit=2)
+    if not friends:
+        return {"status": "skipped", "reason": "no friends"}
+
+    author_preset = await presets_db.get_preset(db, author_id) or {}
+    author = {
+        "name_ja": thread.get("author_name_ja") or author_preset.get("name_ja") or "",
+        "name": thread.get("author_name") or author_preset.get("name") or "",
+    }
+    system = crew.lounge_reactions_prompt(
+        author,
+        str(thread.get("text_ja") or ""),
+        friends,
+        tags=dict(thread.get("tags") or {}),
+    )
+    ask = "親友のリアクションを書いて。REACTOR_1_*（と必要なら REACTOR_2_*）。"
+    try:
+        raw = await chain._call(
+            ollama, system=system, prompt=ask,
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception as exc:
+        logger.warning("[muse] lounge reactions failed: %s", exc)
+        return {"status": "failed", "reason": str(exc)}
+
+    reactions = lounge_mod.normalize_reactions(lounge_mod.parse_labelled(raw), friends)
+    if not reactions:
+        return {"status": "failed", "reason": "empty reactions"}
+
+    messages = list(thread.get("messages") or [])
+    for turn, react in enumerate(reactions, start=1):
+        messages.append({
+            "id": str(uuid.uuid4()),
+            "turn": turn,
+            "character_id": react["character_id"],
+            "name_ja": react["name_ja"],
+            "name": react["name"],
+            "text_ja": react["text_ja"],
+            "text_en": react["text_en"],
+            "reaction": react["reaction"],
+            "stance": react["stance"],
+            "twist": react.get("twist") or "",
+        })
+        # Friend keeps a trend tip (what they might try next).
+        tip_ja = react["text_ja"]
+        if react["stance"] == "twist" and react.get("twist"):
+            tip_ja = f"{react['twist']}（{author.get('name_ja') or '彼女'}の話を聞いて）"
+        await presets_db.add_social_seed(db, react["character_id"], {
+            "source_thread_id": thread_id,
+            "kind": "trend",
+            "summary_ja": tip_ja[:160],
+            "summary_en": (react["text_en"] or tip_ja)[:160],
+            "stance": react["stance"],
+            "uses_left": 3,
+        })
+        # Author keeps friend feedback.
+        await presets_db.add_social_seed(db, author_id, {
+            "source_thread_id": thread_id,
+            "kind": "friend_feedback",
+            "summary_ja": f"{react['name_ja'] or react['name']}: {react['text_ja']}"[:160],
+            "summary_en": f"{react['name'] or react['name_ja']}: {react['text_en']}"[:160],
+            "stance": "try",
+            "uses_left": 3,
+        })
+
+    thread["messages"] = messages
+    thread["reaction_count"] = len(reactions)
+    await lounge_db.save_thread(db, thread)
+
+    tags = thread.get("tags") or {}
+    trend_bits = [v for k, v in tags.items() if v and k in ("pose", "outfit", "expression", "vibe")]
+    twists = [
+        {
+            "character_id": r["character_id"],
+            "name_ja": r["name_ja"],
+            "name": r["name"],
+            "stance": r["stance"],
+            "twist": r.get("twist") or "",
+            "text_ja": r["text_ja"],
+            "text_en": r["text_en"],
+        }
+        for r in reactions
+        if r.get("stance") in ("twist", "try")
+    ]
+    if trend_bits or twists:
+        await lounge_db.push_trend(db, {
+            "from_character_id": author_id,
+            "from_name_ja": author.get("name_ja") or "",
+            "from_name": author.get("name") or "",
+            "thread_id": thread_id,
+            "summary_ja": (" / ".join(trend_bits) if trend_bits else (reactions[0]["text_ja"][:80]))[:120],
+            "summary_en": (" / ".join(trend_bits) if trend_bits else (reactions[0]["text_en"][:80]))[:120],
+            "tags": tags,
+            "twists": twists,
+        })
+
+    sid = str(thread.get("session_id") or "")
+    if sid:
+        events.publish(sid, {
+            "type": "lounge_status", "status": "reacted", "thread_id": thread_id,
+        })
+    _report(reporter, 1.0, "楽屋の反応が付きました")
+    return {"status": "ok", "thread_id": thread_id, "reactions": len(reactions)}
+
+
+async def run_generate_lounge_pitch_job(
+    reporter, cancel, *, db, ollama, session: dict[str, Any], character_id: str,
+    model: str = "", num_ctx: int | None = None,
+):
+    """Occasional 'how about this?' pitch visible to the showrunner in the lounge."""
+    sid = str(session.get("session_id") or "")
+    _report(reporter, 0.1, "提案を楽屋に書いています")
+    preset = await presets_db.get_preset(db, character_id)
+    if not preset:
+        return {"status": "skipped", "reason": "character not found"}
+    char = _character_for_id(session, preset, character_id)
+    system = crew.lounge_pitch_prompt(
+        char,
+        session_log=_session_chat_log(session),
+        photo_desc=str((session.get("shoot") or {}).get("prompt") or ""),
+        director_highlights=_director_highlights(session),
+    )
+    try:
+        raw = await chain._call(
+            ollama, system=system, prompt="提案を書いて。TEXT_JA / TEXT_EN だけ。",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception as exc:
+        logger.warning("[muse] lounge pitch failed: %s", exc)
+        return {"status": "failed", "reason": str(exc)}
+    fields = lounge_mod.normalize_pitch(lounge_mod.parse_labelled(raw))
+    if not fields.get("text_ja"):
+        return {"status": "failed", "reason": "empty pitch"}
+
+    inputs = _inputs(session)
+    thread = {
+        "id": str(uuid.uuid4()),
+        "kind": "pitch",
+        "status": "open",
+        "author_character_id": character_id,
+        "author_role": "muse",
+        "author_name_ja": str(char.get("name_ja") or preset.get("name_ja") or ""),
+        "author_name": str(char.get("name") or preset.get("name") or ""),
+        "session_id": sid,
+        "image_id": _shoot_image_id(session),
+        "theme": str(inputs.get("theme") or ""),
+        "text_ja": fields["text_ja"],
+        "text_en": fields["text_en"],
+        "tags": {},
+        "messages": [{
+            "id": str(uuid.uuid4()),
+            "turn": 0,
+            "character_id": character_id,
+            "role": "muse",
+            "name_ja": str(char.get("name_ja") or ""),
+            "name": str(char.get("name") or ""),
+            "text_ja": fields["text_ja"],
+            "text_en": fields["text_en"],
+        }],
+        "created_at": time.time(),
+    }
+    await lounge_db.save_thread(db, thread)
+    if sid:
+        events.publish(sid, {"type": "lounge_status", "status": "pitch", "thread_id": thread["id"]})
+    _report(reporter, 1.0, "提案を楽屋に出しました")
+    return {"status": "ok", "thread_id": thread["id"]}
+
+
+async def run_generate_handpost_habit_job(
+    reporter, cancel, *, db, ollama, session: dict[str, Any], character_id: str,
+    model: str = "", num_ctx: int | None = None,
+):
+    """Rare handpost line about the showrunner's taste (not a how-to wiki)."""
+    _report(reporter, 0.1, "手帖に癖を書き留めています")
+    preset = await presets_db.get_preset(db, character_id) or {}
+    notes = _director_highlights(session)
+    if not notes.strip():
+        return {"status": "skipped", "reason": "no notes"}
+    name_ja = str(preset.get("name_ja") or preset.get("name") or "")
+    system = crew.showrunner_habit_prompt(
+        notes=notes,
+        session_log=_session_chat_log(session, limit=10),
+        muse_name=name_ja,
+    )
+    try:
+        raw = await chain._call(
+            ollama, system=system,
+            prompt="手帖の一文を書いて。TITLE_JA / TITLE_EN / BODY_JA / BODY_EN。",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception as exc:
+        logger.warning("[muse] handpost habit failed: %s", exc)
+        return {"status": "failed", "reason": str(exc)}
+    fields = lounge_mod.normalize_habit(lounge_mod.parse_labelled(raw))
+    if not fields.get("body_ja"):
+        return {"status": "failed", "reason": "empty habit"}
+    ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+    title = fields["title"] or ("総監督の癖" if ja else "Showrunner habits")
+    if not ja and fields.get("title_en"):
+        title = fields["title_en"]
+    page = await handpost_db.save_page(db, {
+        "title": title,
+        "title_ja": fields["title"] or "総監督の癖",
+        "title_en": fields.get("title_en") or fields["title"] or "Showrunner habits",
+        "body_ja": fields["body_ja"],
+        "body_en": fields["body_en"],
+        "pinned": False,
+        "author": "system",
+        "kind": "habit",
+        "source_session_id": str(session.get("session_id") or ""),
+        "source_character_id": character_id,
+    })
+    sid = str(session.get("session_id") or "")
+    if sid:
+        events.publish(sid, {"type": "lounge_status", "status": "habit", "page_id": page["id"]})
+    _report(reporter, 1.0, "手帖に書き留めました")
+    return {"status": "ok", "page_id": page["id"]}
+
+
+async def reply_lounge_thread(
+    db, thread_id: str, *, text: str, locale: str = "ja",
+) -> dict[str, Any]:
+    """Showrunner replies on a lounge thread (pitch or wrap)."""
+    text = (text or "").strip()
+    if not text:
+        raise MuseError("empty reply" if not str(locale).startswith("ja") else "返信が空です。")
+    thread = await lounge_db.get_thread(db, thread_id)
+    if thread is None:
+        raise MuseError("thread not found" if not str(locale).startswith("ja") else "スレが見つかりません。")
+    msg = {
+        "id": str(uuid.uuid4()),
+        "role": "director",
+        "character_id": "",
+        "name_ja": "総監督",
+        "name": "Showrunner",
+        "text_ja": text,
+        "text_en": text,
+        "reaction": "",
+    }
+    updated = await lounge_db.append_message(db, thread_id, msg)
+    if updated is None:
+        raise MuseError("thread not found" if not str(locale).startswith("ja") else "スレが見つかりません。")
+    # Don't clobber "promoted" — a later reply used to revive the promote button.
+    if (
+        str(updated.get("kind") or "") == "pitch"
+        and str(updated.get("status") or "open") == "open"
+    ):
+        updated["status"] = "answered"
+        updated = await lounge_db.save_thread(db, updated)
+    return updated
+
+
+async def promote_lounge_pitch(db, thread_id: str, *, locale: str = "ja") -> dict[str, Any]:
+    """Turn a pitch (+ director reply if any) into a pinned handpost notice."""
+    thread = await lounge_db.get_thread(db, thread_id)
+    if thread is None:
+        raise MuseError("thread not found" if not str(locale).startswith("ja") else "スレが見つかりません。")
+    if str(thread.get("kind") or "") != "pitch":
+        raise MuseError(
+            "only pitches can be promoted" if not str(locale).startswith("ja")
+            else "提案スレだけ周知に載せられます。"
+        )
+    # Idempotent: a second click must not mint another handpost page.
+    if str(thread.get("status") or "") == "promoted" and thread.get("promoted_page_id"):
+        page = await handpost_db.get_page(db, str(thread["promoted_page_id"]))
+        if page is not None:
+            return {"thread": thread, "page": page}
+    author_ja = str(thread.get("author_name_ja") or thread.get("author_name") or "Muse")
+    author_en = str(thread.get("author_name") or thread.get("author_name_ja") or "Muse")
+    pitch_ja = str(thread.get("text_ja") or "")
+    pitch_en = str(thread.get("text_en") or pitch_ja)
+    director_bits_ja: list[str] = []
+    director_bits_en: list[str] = []
+    for m in thread.get("messages") or []:
+        if str(m.get("role") or "") != "director":
+            continue
+        director_bits_ja.append(str(m.get("text_ja") or m.get("text_en") or "").strip())
+        director_bits_en.append(str(m.get("text_en") or m.get("text_ja") or "").strip())
+    body_ja = f"{author_ja}の提案:\n{pitch_ja}"
+    body_en = f"Pitch from {author_en}:\n{pitch_en}"
+    if director_bits_ja:
+        body_ja += "\n\n総監督:\n" + "\n".join(b for b in director_bits_ja if b)
+        body_en += "\n\nShowrunner:\n" + "\n".join(b for b in director_bits_en if b)
+    ja = str(locale or "ja").startswith("ja")
+    title_ja = f"提案採用 — {author_ja}"
+    title_en = f"Adopted pitch — {author_en}"
+    page = await handpost_db.save_page(db, {
+        "title": title_ja if ja else title_en,
+        "title_ja": title_ja,
+        "title_en": title_en,
+        "body_ja": body_ja,
+        "body_en": body_en,
+        "pinned": True,
+        "author": "director",
+        "kind": "promoted_pitch",
+        "source_thread_id": thread_id,
+    })
+    thread["status"] = "promoted"
+    thread["promoted_page_id"] = page["id"]
+    await lounge_db.save_thread(db, thread)
+    return {"thread": thread, "page": page}
 
 
 async def cancel_board(db, spooler, session: dict[str, Any]) -> dict[str, Any]:

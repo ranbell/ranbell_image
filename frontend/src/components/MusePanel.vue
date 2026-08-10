@@ -66,6 +66,7 @@ function presetStyle(p) {
 let eventSource = null
 let pollTimer = null
 let startedAt = 0
+let loungeToastAt = 0
 
 const inputs = computed(() => session.value?.inputs || {})
 const needs = computed(() => session.value?.needs || [])
@@ -377,6 +378,15 @@ function connectStream(id) {
         // Silence was the old behaviour, and the Showrunner waited for an entry
         // that was never coming.
         emit('toast', { msg: t('muse.diaryFailed'), type: 'error' })
+      }
+      return
+    }
+    if (evt.type === 'lounge_status' && ['shared', 'reacted', 'pitch', 'habit'].includes(evt.status)) {
+      // Duet wrap can fire several of these in a row — one toast per few seconds.
+      const now = Date.now()
+      if (!loungeToastAt || now - loungeToastAt > 4000) {
+        loungeToastAt = now
+        emit('toast', { msg: t('muse.loungeReady'), type: 'info' })
       }
       return
     }
