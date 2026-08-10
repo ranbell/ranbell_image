@@ -1,4 +1,4 @@
-"""二人芝居 — the Showrunner and the Lead, nobody else.
+"""主演撮り (lead shoot) — one or two Muses with the Showrunner, no crew.
 
 The crewed studio is a production meeting you watch. This is being in the room
 with her, so the rules are different: talking is only talking, the script does

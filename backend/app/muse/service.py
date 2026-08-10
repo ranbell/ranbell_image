@@ -271,7 +271,7 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
 
 
 async def pick_partner(db, session: dict[str, Any], preset_id: str) -> dict[str, Any]:
-    """The second Muse in 二人芝居. Empty string casts nobody.
+    """The second Muse in 主演撮り (lead shoot). Empty string casts nobody.
 
     Resolved here rather than on her first line. Storing only the id meant the
     panel — which reads `partner_character` — showed "no partner" until she
@@ -1521,7 +1521,7 @@ async def run_full_table(
     return session
 
 
-# ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
+# ── 主演撮り (lead shoot) — one or two Muses, no crew ─────────────────────────
 # Prep, test shot and approve are their own buttons (`duet_prep_stage`,
 # `request_board`, `approve_and_shoot`). Everything typed here is
 # conversation, which is the point: the eighteen-seat table is a production
@@ -2214,7 +2214,7 @@ async def approve_and_shoot(
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if not prompt:
-        # In 二人芝居 an "OK" with no craft used to fall through to another line
+        # In 主演撮り an "OK" with no craft used to fall through to another line
         # of conversation, so pressing the button looked like nothing happened.
         raise MuseError(_msg(
             session,

@@ -26,14 +26,14 @@ class SessionCreate(BaseModel):
     vision_model: str = ""
     locale: str = "ja"
     crew_preset: str = "standard"
-    # "duet" opens 二人芝居 — the Showrunner and the Lead, nobody else.
+    # "duet" opens 主演撮り (lead shoot) — one or two Muses, no crew.
     mode: str = ""
     partner_preset: str | None = None
 
 
 class InputsPatch(BaseModel):
     theme: str | None = None
-    # "" is the crewed studio, "duet" is 二人芝居. Settable before the session
+    # "" is the crewed studio, "duet" is 主演撮り. Settable before the session
     # opens so the panel can hide the casting drawer.
     mode: str | None = None
     character_id: str | None = None
@@ -184,7 +184,7 @@ async def pick_character(session_id: str, body: CharacterPick, request: Request)
 
 @router.post("/sessions/{session_id}/partner")
 async def pick_partner(session_id: str, body: PartnerPick, request: Request):
-    """Cast the second Muse in 二人芝居, or clear her with an empty id.
+    """Cast the second Muse in 主演撮り, or clear her with an empty id.
 
     Separate from the inputs patch because casting resolves the character then
     and there: storing the id alone left the panel showing "no partner" until
@@ -206,7 +206,7 @@ async def start_table(session_id: str, request: Request):
 
 @router.post("/sessions/{session_id}/duet")
 async def start_duet(session_id: str, request: Request):
-    """二人芝居 — no crew, no table. She opens, and the two of you work it out."""
+    """主演撮り — no crew, no table. One or two Muses open, and you work it out."""
     session = await _session(request, session_id)
     return await _run(service.start_duet(
         _db(request), _llm(request, session), session,

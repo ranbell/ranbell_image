@@ -1644,7 +1644,7 @@ def actress_chemistry_prompt(
     ])
 
 
-# ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
+# ── 主演撮り (lead shoot) — one or two Muses, no crew ─────────────────────────
 # A two-hander. No crew, no table, no seats arguing: the director and the
 # actress work it out between them, and the only other thing in the room is a
 # camera that goes off when they are both ready.
@@ -2030,7 +2030,7 @@ def public_roster(
     }
 
 
-# ── W-Muse (ダブル主演二人芝居) — Two Muses and the Showrunner ─────────────────
+# ── 主演撮り（ダブル）— Two Muses and the Showrunner ──────────────────────────
 #
 # SAY prefixes are the fixed tokens `A:` / `B:` — never a name. Asking the
 # model to substitute a real name into `<Name A>:` is exactly what let a

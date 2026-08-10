@@ -1280,11 +1280,11 @@
     "partnerCharacter": "Partner Muse (W-Muse)",
     "pickPartnerCharacter": "Pick a 2nd Muse",
     "noPartner": "None (Solo)",
-    "wMuseMode": "W-Muse (Co-Lead Duet)",
+    "wMuseMode": "Lead shoot (duo)",
     "firstPerson": "First person",
     "userAddress": "Calls Showrunner",
     "talkQuirks": "Speech Quirks",
-    "sayExamples": "Duet Dialogue Examples",
+    "sayExamples": "Lead-shoot dialogue examples",
     "noCharacter": "None",
     "theme": "Theme",
     "themePlaceholder": "Any theme (place, time, action — freeform)",
@@ -1345,9 +1345,9 @@
     "mode": {
       "studio": "Studio",
       "studioHint": "Cast a crew and work it out together",
-      "duet": "Two-hander",
-      "duetHint": "Just her and you",
-      "duetLong": "No crew. Talk it through with her, then \"get ready\" and she reads the frame back to you. \"Test shot\" takes one."
+      "duet": "Lead shoot",
+      "duetHint": "No crew. One or two Muses with you",
+      "duetLong": "No crew. Work it out with one or two Muses, then \"get ready\" and they read the frame back to you. \"Test shot\" takes one."
     },
     "quick": {
       "prep": "① Get ready (write prompt)",
@@ -1431,7 +1431,7 @@
     "openDiary": "📖 Read her diary",
     "partnerMustDiffer": "Pick a Muse other than the lead as her partner.",
     "changePartner": "Change partner",
-    "wMuseSessionActive": "W-Muse double-lead session live",
+    "wMuseSessionActive": "Lead shoot (duo) session live",
     "chemistryActive": "Chemistry active",
     "defaultActressName": "Actress"
   },
@@ -1482,9 +1482,9 @@
       "viewerTitle": "Chemistry Vector Viewer",
       "empty": "No chemistry data yet",
       "neighbors": "Neighbors",
-      "shiftHint": "Shift+click to pick two, then right-click to start a duet",
+      "shiftHint": "Shift+click to pick two, then right-click to start a lead shoot",
       "viewDetail": "View detail",
-      "startDuetPair": "Start a duet with these two"
+      "startDuetPair": "Start a lead shoot with these two"
     },
     "save": "Save",
     "saveAs": "Save as new",

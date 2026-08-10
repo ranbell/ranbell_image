@@ -125,7 +125,7 @@ const act = computed(() => {
   return 'setup'
 })
 
-// 二人芝居: the Showrunner and the Lead, nobody else. There is no crew to cast,
+// 主演撮り (lead shoot): one or two Muses with the Showrunner, no crew.
 // and the craft is only written when "①撮影準備" is pressed — its own endpoint
 // (`duetPrep`), same as the test shot and final buttons.
 const isDuet = computed(() => session.value?.mode === 'duet')
@@ -506,7 +506,7 @@ async function startTable() {
   startedAt = Date.now()
   elapsed.value = 0
   try {
-    // 二人芝居 opens on her, not on a table read, so it is a different door.
+    // 主演撮り opens on her, not on a table read, so it is a different door.
     session.value = await api(
       `/api/muse/sessions/${session.value.session_id}/${isDuet.value ? 'duet' : 'table'}`,
       { method: 'POST' })
@@ -952,7 +952,7 @@ async function onChatKey(e) {
                 </template>
 
                 <!-- Wrapping is how the diary gets written, so it cannot be a
-                     二人芝居 privilege: the crewed studio had no way to finish.
+                     主演撮り privilege: the crewed studio had no way to finish.
                      It needs a finished shoot to write about, and it is offered
                      exactly once — a second press queued a second diary. -->
                 <button

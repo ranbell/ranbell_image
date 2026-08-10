@@ -611,7 +611,7 @@ async def test_casting_a_partner_fills_the_card_on_the_click(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_nothing_is_shot_before_there_is_a_prompt():
-    """In 二人芝居 an OK with no craft fell through to another line of talk, so
+    """In 主演撮り an OK with no craft fell through to another line of talk, so
     the button looked like it did nothing."""
     db = FakeDB()
     with pytest.raises(muse_service.MuseError):
