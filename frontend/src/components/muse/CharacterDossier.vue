@@ -46,6 +46,14 @@ async function checkUnreadDiaries() {
   }
 }
 
+// The gallery card's unread badge is a snapshot taken when the list loaded —
+// reading an entry here never told it to update, so the badge (and the
+// 未読のみ filter) kept counting entries that had already been read.
+async function onDiaryRead() {
+  await checkUnreadDiaries()
+  emit('changed')
+}
+
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const preset = computed(() => detail.value?.preset || null)
@@ -454,8 +462,8 @@ watch(() => props.characterId, load, { immediate: true })
       :show="showDiary"
       :character-id="characterId"
       :character-name="name"
-      @close="showDiary = false; checkUnreadDiaries()"
-      @diary-read="checkUnreadDiaries"
+      @close="showDiary = false; onDiaryRead()"
+      @diary-read="onDiaryRead"
       @toast="emit('toast', $event)"
     />
   </div>

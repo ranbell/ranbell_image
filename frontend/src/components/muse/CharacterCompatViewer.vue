@@ -27,11 +27,15 @@ const neighborLimit = ref(6)
 const canvasRef = ref(null)
 const contextMenu = ref(null)   // { screenX, screenY, node } | null
 const selectedIds = ref([])     // shift-clicked node ids, oldest-first, capped at 2
+// Plain click/drag on a node: her connected network lights up orange and
+// stays that way — a different, single-node focus from the shift-click pair
+// selection above, which is about picking two for a duet, not reading one.
+const highlightedId = ref(null)
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 function nameFor(c) { return (isJa.value ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }
 function thumbUrl(c) {
-  const sha = c.board?.sheet || c.board?.portrait || ''
+  const sha = c.board?.portrait || c.board?.sheet || ''
   return sha ? `/api/thumbnails/${sha}.webp` : ''
 }
 
@@ -78,6 +82,7 @@ async function load() {
 watch(() => props.show, async (val) => {
   if (!val) return
   selectedIds.value = []
+  highlightedId.value = null
   contextMenu.value = null
   await load()
   await nextTick()
@@ -97,6 +102,7 @@ let _draggingNode = null
 let _dragMoved = false
 let _dragStartX = 0
 let _dragStartY = 0
+let _prevHighlightedId = null
 const DRAG_THRESHOLD = 4
 
 function _nodeAt(x, y) {
@@ -133,6 +139,18 @@ function _startSim() {
     source: idxById[p.a], target: idxById[p.b], score: p.score, tier: p.tier,
   })).filter(l => l.source !== undefined && l.target !== undefined)
 
+  // Relative thickness: what matters on screen is who is closer than whom
+  // *among the pairs actually shown*, not the raw 0..1 score — a roster
+  // where nobody has met yet would otherwise render as uniformly hairline.
+  const scores = _links.map(l => l.score)
+  const scoreMin = scores.length ? Math.min(...scores) : 0
+  const scoreMax = scores.length ? Math.max(...scores) : 1
+  const scoreSpan = scoreMax - scoreMin
+  function relWidth(score) {
+    const t = scoreSpan > 0 ? (score - scoreMin) / scoreSpan : 0.5
+    return 1.5 + t * 5.5
+  }
+
   Promise.all(_nodes.map(n => {
     const url = thumbUrl(charById.value.get(n.id) || {})
     if (!url) return Promise.resolve()
@@ -147,21 +165,37 @@ function _startSim() {
   function draw() {
     ctx.clearRect(0, 0, W, H)
 
+    const hl = highlightedId.value
+    // Highlighted node's own edges are drawn last (on top, thick orange);
+    // everything else is drawn first and dimmed while a highlight is active.
+    const normalLinks = [], hotLinks = []
     for (const link of _links) {
       const src = typeof link.source === 'object' ? link.source : _nodes[link.source]
       const tgt = typeof link.target === 'object' ? link.target : _nodes[link.target]
       if (src?.x == null || tgt?.x == null) continue
+      const connected = hl && (src.id === hl || tgt.id === hl)
+      ;(connected ? hotLinks : normalLinks).push({ link, src, tgt })
+    }
+    for (const { link, src, tgt } of normalLinks) {
       ctx.beginPath()
       ctx.moveTo(src.x, src.y); ctx.lineTo(tgt.x, tgt.y)
-      const opacity = 0.15 + link.score * 0.5
+      const opacity = (0.15 + link.score * 0.5) * (hl ? 0.25 : 1)
       ctx.strokeStyle = `rgba(139,92,246,${opacity.toFixed(2)})`
-      ctx.lineWidth = Math.max(1, link.score * 4)
+      ctx.lineWidth = relWidth(link.score)
+      ctx.stroke()
+    }
+    for (const { link, src, tgt } of hotLinks) {
+      ctx.beginPath()
+      ctx.moveTo(src.x, src.y); ctx.lineTo(tgt.x, tgt.y)
+      ctx.strokeStyle = '#fb923c'
+      ctx.lineWidth = relWidth(link.score) + 2.5
       ctx.stroke()
     }
 
     for (const node of _nodes) {
       if (node.x == null) continue
       const isSelected = selectedIds.value.includes(node.id)
+      const isHighlighted = node.id === hl
       const bestTier = pairs.value
         .filter(p => p.a === node.id || p.b === node.id)
         .reduce((best, p) => (!best || p.score > best.score) ? p : best, null)
@@ -170,6 +204,11 @@ function _startSim() {
         ctx.beginPath()
         ctx.arc(node.x, node.y, NODE_R + 6, 0, Math.PI * 2)
         ctx.fillStyle = 'rgba(251,191,36,0.25)'
+        ctx.fill()
+      } else if (isHighlighted) {
+        ctx.beginPath()
+        ctx.arc(node.x, node.y, NODE_R + 6, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(251,146,60,0.3)'
         ctx.fill()
       }
 
@@ -193,6 +232,10 @@ function _startSim() {
       if (isSelected) {
         ctx.setLineDash([6, 3])
         ctx.strokeStyle = '#fbbf24'
+        ctx.lineWidth = 3
+      } else if (isHighlighted) {
+        ctx.setLineDash([])
+        ctx.strokeStyle = '#fb923c'
         ctx.lineWidth = 3
       } else {
         ctx.setLineDash([])
@@ -234,13 +277,25 @@ function _startSim() {
     if (contextMenu.value) { contextMenu.value = null; return }
     const rect = canvas.getBoundingClientRect()
     const node = _nodeAt(e.clientX - rect.left, e.clientY - rect.top)
-    if (!node) return
+    if (!node) {
+      highlightedId.value = null
+      draw()
+      return
+    }
     _draggingNode = node
     _dragMoved = false
     _dragStartX = e.clientX
     _dragStartY = e.clientY
     node.fx = node.x; node.fy = node.y
     _sim.alphaTarget(0.15).restart()
+    // Lit as soon as she's pressed, not just clicked — a drag needs to show
+    // the network the whole time it is being dragged, and staying lit after
+    // release is the "維持" the Showrunner asked for.
+    if (!e.shiftKey) {
+      _prevHighlightedId = highlightedId.value
+      highlightedId.value = node.id
+      draw()
+    }
     e.preventDefault()
   }
   const _onMousemove = e => {
@@ -274,7 +329,11 @@ function _startSim() {
       draw()
       return
     }
-    emit('open-character', node.id)
+    // A plain click already lit her network on mousedown; clicking the same
+    // node again is how it turns back off. Detail view moved to the
+    // right-click menu, since a click here now means "show me who she's
+    // close to," not "open her page."
+    if (_prevHighlightedId === node.id) { highlightedId.value = null; draw() }
   }
   const _onContextmenu = e => {
     e.preventDefault()
@@ -349,7 +408,7 @@ function ctxStartDuetPair() {
     class="fixed inset-0 z-[var(--z-modal,9999)] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
     @click.self="emit('close')"
   >
-    <div class="relative w-full max-w-5xl h-[85vh] flex flex-col rounded-2xl overflow-hidden
+    <div class="relative w-[92vw] h-[88vh] flex flex-col rounded-2xl overflow-hidden
                 bg-gray-900 border border-rose-500/30 shadow-2xl">
       <header class="flex items-center gap-4 px-4 py-2.5 border-b border-gray-800 shrink-0">
         <h2 class="sb-display text-sm text-rose-200 shrink-0">
