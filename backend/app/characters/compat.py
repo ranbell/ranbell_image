@@ -241,6 +241,7 @@ async def compat_matrix(db) -> dict[str, Any]:
                 "name": payload.get("name") or "",
                 "name_ja": payload.get("name_ja") or payload.get("name") or "",
                 "title_ja": payload.get("title_ja") or payload.get("title") or "",
+                "board": payload.get("board") or {},
             })
         if offset is None or not points:
             break

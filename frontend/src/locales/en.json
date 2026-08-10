@@ -1480,9 +1480,11 @@
     },
     "compat": {
       "viewerTitle": "Chemistry Vector Viewer",
-      "filterPlaceholder": "Filter by name",
       "empty": "No chemistry data yet",
-      "coAppearances": "{n} shoots together"
+      "neighbors": "Neighbors",
+      "shiftHint": "Shift+click to pick two, then right-click to start a duet",
+      "viewDetail": "View detail",
+      "startDuetPair": "Start a duet with these two"
     },
     "save": "Save",
     "saveAs": "Save as new",

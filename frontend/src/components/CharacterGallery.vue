@@ -39,7 +39,7 @@ const props = defineProps({
   // remembered in a local ref that a reload throws away.
   getJobsMap: { type: Function, default: () => () => new Map() },
 })
-const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow'])
+const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow', 'start-duet-pair'])
 const { t, locale } = useI18n()
 
 const characters = ref([])
@@ -681,6 +681,8 @@ onUnmounted(() => {
       :show="showCompatViewer"
       @close="showCompatViewer = false"
       @toast="emit('toast', $event)"
+      @open-character="showCompatViewer = false; dossierId = $event"
+      @start-duet-pair="showCompatViewer = false; emit('start-duet-pair', $event)"
     />
   </div>
 </template>

@@ -1480,9 +1480,11 @@
     },
     "compat": {
       "viewerTitle": "相性ベクトル ビューワ",
-      "filterPlaceholder": "名前で絞り込み",
       "empty": "相性データがありません",
-      "coAppearances": "共演 {n} 回"
+      "neighbors": "近傍数",
+      "shiftHint": "Shift+クリックで2人選択 → 右クリックで二人芝居を開始",
+      "viewDetail": "詳細を見る",
+      "startDuetPair": "この2人で二人芝居を始める"
     },
     "save": "保存",
     "saveAs": "名前を付けて保存",

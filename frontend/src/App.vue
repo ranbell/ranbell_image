@@ -2614,6 +2614,16 @@ const museGalleryWorkflow = ref('')
 // flips true. Left as-is (not cleared) afterward — MusePanel compares it
 // against its own session and no-ops once it has already been applied.
 const musePendingCharacterId = ref('')
+// Set alongside it when the Compat Viewer's "start a duet with these two"
+// action fires — read once by MusePanel the same tick `showMuse` flips true.
+const musePendingPartnerId = ref('')
+
+function startDuetPair({ leadId, partnerId }) {
+  showMuseGallery.value = false
+  musePendingCharacterId.value = leadId
+  musePendingPartnerId.value = partnerId
+  showMuse.value = true
+}
 
 async function openMuse() {
   // Dismiss gallery detail so it cannot cover the panel.
@@ -2633,6 +2643,7 @@ async function openMuse() {
 function pickMuseCharacter(id) {
   showMuseGallery.value = false
   musePendingCharacterId.value = id
+  musePendingPartnerId.value = ''
   // MusePanel is not v-if'd away — it keeps its session across open/close, so
   // do not bounce `show` expecting a remount.
   showMuse.value = true
@@ -5243,6 +5254,7 @@ onUnmounted(() => {
       @close="showMuseGallery = false"
       @toast="showToast($event.msg, $event.type)"
       @update:workflow="museGalleryWorkflow = $event"
+      @start-duet-pair="startDuetPair"
     />
 
     <ActressDiaryModal
@@ -5259,6 +5271,7 @@ onUnmounted(() => {
       :comfyOffline="comfyOffline"
       :get-jobs-map="getJobsMap"
       :initial-character-id="musePendingCharacterId"
+      :initial-partner-id="musePendingPartnerId"
       @update:show="showMuse = $event"
       @select-image="openImageBySha($event)"
       @toast="showToast($event.msg, $event.type)"

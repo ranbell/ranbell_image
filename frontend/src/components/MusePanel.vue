@@ -18,6 +18,10 @@ const props = defineProps({
   // screen was even shown. Empty means "whatever session is already sitting
   // here" — reopening after ✕ with nothing newly picked.
   initialCharacterId: { type: String, default: '' },
+  // Set together with `initialCharacterId` when the Compat Viewer's "start a
+  // duet with these two" action opens this panel — casts both in one go and
+  // switches straight to duet mode instead of leaving the second seat empty.
+  initialPartnerId: { type: String, default: '' },
 })
 const emit = defineEmits(['update:show', 'toast', 'select-image'])
 const { t, locale } = useI18n()
@@ -266,7 +270,7 @@ watch(() => props.show, async open => {
   if (!open) { closeStream(); return }
   try {
     if (!catalog.value) catalog.value = await api('/api/muse/catalog')
-    await enterWithCharacter(props.initialCharacterId)
+    await enterWithCharacter(props.initialCharacterId, props.initialPartnerId)
   } catch (err) { fail(err) }
 })
 onBeforeUnmount(closeStream)
@@ -276,7 +280,7 @@ onBeforeUnmount(closeStream)
 // a clean one instead. Reusing a session that has already spoken is how one
 // girl's dialogue used to end up captioned with another's name; an untouched
 // setup screen has nothing to lose, so it is fine to relabel silently.
-async function enterWithCharacter(characterId) {
+async function enterWithCharacter(characterId, partnerId = '') {
   const requestedNew = Boolean(characterId) && characterId !== inputs.value.character_id
   const switching = Boolean(session.value) && requestedNew
   if (switching) {
@@ -295,6 +299,13 @@ async function enterWithCharacter(characterId) {
     connectStream(session.value.session_id)
   }
   if (requestedNew) await pickCharacter(characterId)
+  // Both seats were chosen together (Compat Viewer's duet-pair action) — cast
+  // her opposite number and switch to duet mode in the same breath, rather
+  // than leaving the second seat for the Showrunner to fill by hand.
+  if (requestedNew && partnerId) {
+    await setMode('duet')
+    await pickPartnerCharacter(partnerId)
+  }
 }
 
 async function startSession() {
