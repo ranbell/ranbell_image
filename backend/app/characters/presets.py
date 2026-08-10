@@ -822,6 +822,14 @@ async def get_preset_diaries(db, preset_id: str) -> list[dict[str, Any]]:
 MAX_DIARIES = 50
 
 
+async def find_preset_diary_by_image(db, preset_id: str, image_id: str) -> dict[str, Any] | None:
+    """Reverse lookup for the Creation Record panel: did this shot get written up?"""
+    if not image_id:
+        return None
+    diaries = await get_preset_diaries(db, preset_id)
+    return next((d for d in diaries if d.get("image_id") == image_id), None)
+
+
 async def add_preset_diary(db, preset_id: str, diary: dict[str, Any]) -> dict[str, Any] | None:
     """Append a new diary entry to a character preset, oldest dropped past the cap."""
     preset = await get_preset(db, preset_id)

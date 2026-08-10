@@ -267,6 +267,13 @@ async def character_compat_status(request: Request):
     return status
 
 
+@router.get("/character-compat/matrix")
+async def character_compat_matrix(request: Request):
+    """Every pairwise chemistry score at once, for the viewer on the Characters screen."""
+    from ..characters.compat import compat_matrix
+    return await compat_matrix(request.app.state.db)
+
+
 @router.post("/character-compat/backfill")
 async def start_character_compat_backfill(request: Request):
     """Embed every character still missing appearance/personality vectors."""

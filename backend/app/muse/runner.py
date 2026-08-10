@@ -25,6 +25,25 @@ def finished_image(shas: list[str]) -> str:
     return shas[-1]
 
 
+def _character_payload_extra(session: dict) -> dict[str, Any]:
+    """Who was cast, snapshotted onto every image she appears in.
+
+    Presets can be renamed later; this keeps the record honest about who she
+    was called at the time, and lets the image find its way back to her
+    without a session lookup.
+    """
+    extra: dict[str, Any] = {}
+    lead = session.get("character") or {}
+    if lead.get("character_id"):
+        extra["character_id"] = lead["character_id"]
+        extra["character_name"] = lead.get("name_ja") or lead.get("name") or ""
+    partner = session.get("partner_character") or {}
+    if partner.get("character_id"):
+        extra["partner_character_id"] = partner["character_id"]
+        extra["partner_character_name"] = partner.get("name_ja") or partner.get("name") or ""
+    return extra
+
+
 async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict[str, Any]:
     from ..jobs.render import run_render
     from ..scanner.drafts import PLAYGROUND_SUBDIR
@@ -59,6 +78,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             payload_extra={
                 "muse_session_id": session_id,
                 "muse_stage": "still" if board.get("still") else "board",
+                **_character_payload_extra(session),
             },
             attach=_attach,
             preview=preview_publisher(session_id, "board"),
@@ -97,7 +117,11 @@ async def run_shoot_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             subdir=PLAYGROUND_SUBDIR,
             prefix="muse_shoot",
             method="muse_shoot",
-            payload_extra={"muse_session_id": session_id, "muse_stage": "shoot"},
+            payload_extra={
+                "muse_session_id": session_id,
+                "muse_stage": "shoot",
+                **_character_payload_extra(session),
+            },
             attach=_attach,
             preview=preview_publisher(session_id, "shoot"),
             **render_settings(inputs, draft=False),

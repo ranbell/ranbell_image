@@ -5,7 +5,10 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps({
   characterId: { type: String, required: true },
   characterName: { type: String, default: '' },
-  show: { type: Boolean, default: false }
+  show: { type: Boolean, default: false },
+  // Set when opened from a specific image's Creation Record: jumps straight
+  // to that entry instead of leaving the shelf unopened.
+  openDiaryId: { type: String, default: '' }
 })
 
 const emit = defineEmits(['close', 'diary-read', 'toast'])
@@ -140,6 +143,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 watch(() => props.show, async (val) => {
   if (!val) return
   await loadDiaries()
+  if (props.openDiaryId) {
+    const target = diaries.value.find(d => d.id === props.openDiaryId)
+    if (target) await openDiary(target)
+  }
   await nextTick()
   dialogEl.value?.focus()
 }, { immediate: true })

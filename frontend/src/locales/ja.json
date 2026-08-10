@@ -351,6 +351,10 @@
     "creationMethod_refine": "VLM錬成",
     "creationMethod_direct": "直接入力",
     "creationMethod_external": "外部取り込み",
+    "creationMethod_muse_board": "Muse 試し撮り",
+    "creationMethod_muse_shoot": "Muse 本番撮影",
+    "creationCharacter": "出演",
+    "creationDiaryLink": "秘密の日記を見る",
     "creationInspireMode": "Inspireモード",
     "creationWorkflow": "ワークフロー",
     "creationStyle": "スタイル",
@@ -1473,6 +1477,12 @@
       "acquaintance": "顔見知り",
       "close": "仲良し",
       "best_friend": "大親友"
+    },
+    "compat": {
+      "viewerTitle": "相性ベクトル ビューワ",
+      "filterPlaceholder": "名前で絞り込み",
+      "empty": "相性データがありません",
+      "coAppearances": "共演 {n} 回"
     },
     "save": "保存",
     "saveAs": "名前を付けて保存",

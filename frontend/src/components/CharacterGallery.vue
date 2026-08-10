@@ -20,6 +20,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CharacterDossier from './muse/CharacterDossier.vue'
+import CharacterCompatViewer from './muse/CharacterCompatViewer.vue'
 import {
   colorFamily, colorWord, eyeSwatch, familySwatch, hairSwatch,
 } from './muse/colorSwatch.js'
@@ -52,6 +53,34 @@ const imageDisplayMode = ref('sheet') // 'sheet' | 'portrait' — top-bar one-ta
 const deckAt = ref(0)
 const dossierId = ref('')
 const bulkGroup = ref('')
+
+// Character chemistry vectors — moved here from the Admin panel: this is where
+// the characters themselves live, and the viewer that reads them belongs next
+// to the button that fills them in.
+const compatStatus = ref(null)
+const compatLoading = ref(false)
+const showCompatViewer = ref(false)
+
+async function fetchCompatStatus() {
+  try {
+    const r = await fetch('/api/admin/character-compat/status')
+    if (r.ok) compatStatus.value = await r.json()
+  } catch { /* transient — the badge just won't update this pass */ }
+}
+
+async function runCompatBackfill() {
+  compatLoading.value = true
+  try {
+    const r = await fetch('/api/admin/character-compat/backfill', { method: 'POST' })
+    if (!r.ok) throw new Error(`${r.status}`)
+    emit('toast', { msg: t('admin.characterCompat.backfillStart'), type: 'success' })
+    await fetchCompatStatus()
+  } catch (err) {
+    emit('toast', { msg: String(err?.message || err), type: 'error' })
+  } finally {
+    compatLoading.value = false
+  }
+}
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 function label(c) { return (isJa.value ? c.name_ja : c.name) || c.name || c.preset_key }
@@ -299,6 +328,7 @@ function openGallery() {
   reload()
   deckAt.value = 0
   syncFromJobs()
+  fetchCompatStatus()
   if (!jobTimer) jobTimer = setInterval(syncFromJobs, 2000)
 }
 function closeGallery() {
@@ -377,6 +407,19 @@ onUnmounted(() => {
                 :disabled="loading" @click="drawMissing">
           {{ t('characters.drawMissing', { n: missingCount }) }}
         </button>
+
+        <!-- Character chemistry vectors: fill them in, and see them all. -->
+        <button
+          v-if="compatStatus?.needs_backfill && !compatStatus?.backfill?.running"
+          type="button" class="sb-btn text-[11px]" :disabled="compatLoading"
+          :title="t('admin.characterCompat.needsBackfill', { n: compatStatus.total - compatStatus.embedded })"
+          @click="runCompatBackfill"
+        >🧬 {{ t('admin.characterCompat.backfillBtn') }}</button>
+        <button
+          type="button" class="sb-icon-btn" :title="t('characters.compat.viewerTitle')"
+          @click="showCompatViewer = true"
+        >💞</button>
+
         <button class="sb-icon-btn" :title="t('muse.close')" @click="emit('close')">✕</button>
       </header>
 
@@ -632,6 +675,12 @@ onUnmounted(() => {
       @toast="emit('toast', $event)"
       @changed="reload"
       @update:workflow="emit('update:workflow', $event)"
+    />
+
+    <CharacterCompatViewer
+      :show="showCompatViewer"
+      @close="showCompatViewer = false"
+      @toast="emit('toast', $event)"
     />
   </div>
 </template>

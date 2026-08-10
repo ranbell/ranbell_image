@@ -219,6 +219,92 @@ async def run_character_compat_backfill(reporter, cancel, *, db, ollama) -> dict
     return {"done": done, "total": total}
 
 
+async def compat_matrix(db) -> dict[str, Any]:
+    """Every pairwise chemistry score at once, for the viewer.
+
+    `compatibility()` re-scrolls MUSE_SESSIONS_COLLECTION per pair, which is
+    fine for one pair on demand but would be an O(characters^2) scan for a
+    full matrix. Here the session scroll and the vector scroll each happen
+    once, and every pair is scored from the resulting in-memory maps.
+    """
+    characters: list[dict[str, Any]] = []
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=CHARACTER_PRESETS_COLLECTION,
+            limit=256, offset=offset, with_payload=True, with_vectors=False,
+        )
+        for p in points:
+            payload = p.payload or {}
+            characters.append({
+                "id": str(p.id),
+                "name": payload.get("name") or "",
+                "name_ja": payload.get("name_ja") or payload.get("name") or "",
+                "title_ja": payload.get("title_ja") or payload.get("title") or "",
+            })
+        if offset is None or not points:
+            break
+
+    vectors: dict[str, dict[str, list[float]]] = {}
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=CHARACTER_COMPAT_COLLECTION,
+            limit=256, offset=offset, with_payload=False, with_vectors=True,
+        )
+        for p in points:
+            vec = p.vector if isinstance(p.vector, dict) else None
+            appearance = vec.get("appearance") if vec else None
+            personality = vec.get("personality") if vec else None
+            if appearance and personality:
+                vectors[str(p.id)] = {"appearance": appearance, "personality": personality}
+        if offset is None or not points:
+            break
+
+    co_counts: dict[frozenset[str], int] = {}
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_SESSIONS_COLLECTION,
+            limit=256, offset=offset, with_payload=["status", "inputs"],
+        )
+        for p in points:
+            payload = p.payload or {}
+            if str(payload.get("status") or "") != "finished":
+                continue
+            inputs = payload.get("inputs") or {}
+            char_id = str(inputs.get("character_id") or "")
+            partner_id = str(inputs.get("partner_preset") or "")
+            if not char_id or not partner_id:
+                continue
+            pair = frozenset((char_id, partner_id))
+            co_counts[pair] = co_counts.get(pair, 0) + 1
+        if offset is None or not points:
+            break
+
+    pairs: list[dict[str, Any]] = []
+    for i, a in enumerate(characters):
+        va = vectors.get(a["id"])
+        for b in characters[i + 1:]:
+            vb = vectors.get(b["id"])
+            if not va or not vb:
+                base = 0.0
+            else:
+                base = (
+                    WEIGHT_APPEARANCE * cosine(va["appearance"], vb["appearance"])
+                    + WEIGHT_PERSONALITY * cosine(va["personality"], vb["personality"])
+                )
+            co = co_counts.get(frozenset((a["id"], b["id"])), 0)
+            score = min(1.0, max(0.0, base + co * AMPLIFY_STEP))
+            pairs.append({
+                "a": a["id"], "b": b["id"],
+                "base": base, "co_appearances": co, "score": score,
+                "tier": _tier_for(score),
+            })
+
+    return {"characters": characters, "pairs": pairs}
+
+
 async def compat_status(db) -> dict[str, Any]:
     """How many characters already have chemistry vectors, for the admin panel."""
     embedded_ids: set[str] = set()

@@ -139,6 +139,27 @@ async def test_add_preset_diary_rejects_duplicate_session_and_character(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_find_preset_diary_by_image_reverse_lookup(monkeypatch):
+    """The Creation Record panel's link back to her diary: given the shot's
+    sha256, find whatever entry she wrote about it."""
+    mock_db = MagicMock()
+    fake_preset_store(monkeypatch, {
+        "id": "c001", "slug": "test_actress", "name": "Test Actress", "diaries": [],
+    })
+    await presets_db.add_preset_diary(mock_db, "c001", {
+        "id": "diary-1", "session_id": "s-1", "character_id": "c001",
+        "image_id": "sha-of-the-shot", "timestamp": time.time(),
+    })
+
+    found = await presets_db.find_preset_diary_by_image(mock_db, "c001", "sha-of-the-shot")
+    assert found is not None
+    assert found["id"] == "diary-1"
+
+    assert await presets_db.find_preset_diary_by_image(mock_db, "c001", "sha-of-some-other-shot") is None
+    assert await presets_db.find_preset_diary_by_image(mock_db, "c001", "") is None
+
+
+@pytest.mark.asyncio
 async def test_actress_diary_prompts():
     """Test actress diary system prompt creation for JA and EN."""
     char = {

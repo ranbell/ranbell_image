@@ -351,6 +351,10 @@
     "creationMethod_refine": "VLM Refine",
     "creationMethod_direct": "Direct prompt",
     "creationMethod_external": "External",
+    "creationMethod_muse_board": "Muse test shot",
+    "creationMethod_muse_shoot": "Muse final shoot",
+    "creationCharacter": "Starring",
+    "creationDiaryLink": "Read her secret diary",
     "creationInspireMode": "Inspire mode",
     "creationWorkflow": "Workflow",
     "creationStyle": "Style",
@@ -1473,6 +1477,12 @@
       "acquaintance": "Acquaintance",
       "close": "Close",
       "best_friend": "Best friends"
+    },
+    "compat": {
+      "viewerTitle": "Chemistry Vector Viewer",
+      "filterPlaceholder": "Filter by name",
+      "empty": "No chemistry data yet",
+      "coAppearances": "{n} shoots together"
     },
     "save": "Save",
     "saveAs": "Save as new",

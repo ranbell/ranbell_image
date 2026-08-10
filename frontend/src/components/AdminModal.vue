@@ -52,7 +52,6 @@ const vocabStatus = ref(null)   // {imported: bool, tag_count: int}
 const vocabImporting = ref(false)
 const mrlStatus = ref(null)
 const colorStatus = ref(null)
-const characterCompatStatus = ref(null)
 const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
@@ -233,11 +232,6 @@ async function fetchColorStatus() {
   const r = await fetch('/api/admin/colors/status')
   if (!r.ok) return
   colorStatus.value = await r.json()
-}
-
-async function fetchCharacterCompatStatus() {
-  const r = await fetch('/api/admin/character-compat/status')
-  if (r.ok) characterCompatStatus.value = await r.json()
 }
 
 async function fetchDuplicates() {
@@ -508,7 +502,7 @@ watch(() => props.show, async (val) => {
     adminConfig.value = null
     await Promise.all([
       fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(),
-      fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus(), fetchCharacterCompatStatus(),
+      fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus(),
     ])
   }
 })
@@ -519,9 +513,6 @@ watch(() => props.jobs?.find(j => j.title === 'color_extract')?.state, (state) =
 })
 watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) => {
   if (state) fetchMrlStatus()
-})
-watch(() => props.jobs?.find(j => j.title === 'character_compat_backfill')?.state, (state) => {
-  if (state) fetchCharacterCompatStatus()
 })
 </script>
 
@@ -1040,44 +1031,6 @@ watch(() => props.jobs?.find(j => j.title === 'character_compat_backfill')?.stat
                       : 'bg-gray-800/60 hover:bg-gray-700/60 border-gray-700/40 text-gray-500'"
                     class="w-full py-2 border rounded-lg text-xs disabled:opacity-40 transition-colors">
                     {{ $t('admin.color.backfillBtn') }}
-                  </button>
-                </div>
-
-                <!-- Character chemistry vectors -->
-                <div v-if="characterCompatStatus" class="bg-gray-800 rounded-xl p-4 space-y-3">
-                  <div class="flex items-center justify-between">
-                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.characterCompat.title') }}</p>
-                    <button @click="fetchCharacterCompatStatus" class="text-xs text-gray-600 hover:text-gray-400">↺</button>
-                  </div>
-                  <div class="bg-gray-900/60 rounded-lg p-2.5 space-y-1 text-xs">
-                    <p class="text-gray-500">{{ $t('admin.characterCompat.embedded') }}</p>
-                    <p :class="characterCompatStatus.needs_backfill ? 'text-yellow-400' : 'text-green-400'" class="font-mono">
-                      {{ characterCompatStatus.embedded.toLocaleString() }} / {{ characterCompatStatus.total.toLocaleString() }}
-                    </p>
-                  </div>
-                  <div v-if="characterCompatStatus.backfill.running" class="text-xs text-blue-400 flex items-center gap-2">
-                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                    </svg>
-                    {{ characterCompatStatus.backfill.progress_text || $t('admin.characterCompat.running') }}
-                  </div>
-                  <div v-else-if="characterCompatStatus.needs_backfill" class="text-xs text-yellow-500/80 bg-yellow-900/20 rounded-lg px-3 py-2">
-                    {{ $t('admin.characterCompat.needsBackfill', { n: characterCompatStatus.total - characterCompatStatus.embedded }) }}
-                  </div>
-                  <div v-else class="text-xs text-green-500/80">
-                    {{ $t('admin.characterCompat.allDone') }}
-                  </div>
-                  <button
-                    v-if="!characterCompatStatus.backfill.running"
-                    @click="adminAction('characterCompatBackfill', '/api/admin/character-compat/backfill',
-                      { successMsg: () => $t('admin.characterCompat.backfillStart') }).then(fetchCharacterCompatStatus)"
-                    :disabled="!!adminLoading"
-                    :class="characterCompatStatus.needs_backfill
-                      ? 'bg-indigo-900/40 hover:bg-indigo-800/60 border-indigo-700/40 text-indigo-300'
-                      : 'bg-gray-800/60 hover:bg-gray-700/60 border-gray-700/40 text-gray-500'"
-                    class="w-full py-2 border rounded-lg text-xs disabled:opacity-40 transition-colors">
-                    {{ $t('admin.characterCompat.backfillBtn') }}
                   </button>
                 </div>
 

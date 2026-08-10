@@ -226,6 +226,18 @@ async def list_character_diaries(character_id: str, request: Request):
     return {"diaries": diaries}
 
 
+@router.get("/{character_id}/diaries/by-image/{image_id}")
+async def find_character_diary_by_image(character_id: str, image_id: str, request: Request):
+    """Reverse lookup used by the Creation Record panel: does a diary entry
+    already exist for this specific shot?"""
+    diary = await presets_db.find_preset_diary_by_image(
+        request.app.state.db, character_id, image_id,
+    )
+    if diary is None:
+        raise HTTPException(404, "diary not found")
+    return {"diary": diary}
+
+
 @router.post("/{character_id}/diaries/{diary_id}/read")
 async def read_character_diary(character_id: str, diary_id: str, request: Request):
     """Mark one entry read. No model runs here.

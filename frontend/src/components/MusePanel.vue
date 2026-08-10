@@ -70,6 +70,23 @@ const partnerCharacter = computed(() => session.value?.partner_character || null
 const partnerPreset = computed(() => inputs.value.partner_preset || '')
 const isWMuse = computed(() => isDuet.value && Boolean(partnerPreset.value))
 const chat = computed(() => session.value?.chat || [])
+// The director's opening instruction (`inputs.theme`) is never itself appended
+// to `session.chat` — `start_table`/`start_duet` reset the log to `[]` and only
+// Studio's own follow-up gets written. Shown here as the log's first entry so
+// it does not vanish once the conversation has moved past it; from there it
+// scrolls with everything else like any other message. Kept separate from
+// `chat` itself, which several `act`/`canStart` checks read as "has the
+// conversation actually started" — the synthetic entry must not trip those
+// while the theme is still being typed on the setup screen.
+const displayChat = computed(() => {
+  const raw = chat.value
+  if (!raw.length) return raw
+  const theme = String(inputs.value.theme || '').trim()
+  if (!theme) return raw
+  return [{
+    id: '__director_theme__', role: 'user', kind: 'instruction', text: theme,
+  }, ...raw]
+})
 const craft = computed(() => session.value?.craft || {})
 const board = computed(() => session.value?.board || {})
 const shoot = computed(() => session.value?.shoot || {})
@@ -789,7 +806,7 @@ async function onChatKey(e) {
 
             <div ref="chatEl" class="flex-1 overflow-y-auto p-3 space-y-2">
               <div
-                v-for="m in chat" :key="m.id"
+                v-for="m in displayChat" :key="m.id"
                 class="flex flex-col gap-1 my-1"
                 :class="[
                   m.role === 'user' ? 'items-end' : 'items-start',
