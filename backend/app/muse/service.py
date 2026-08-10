@@ -1,15 +1,16 @@
-"""Muse studio — showrunner chat, crew table-read, board, OK, shoot.
+"""Muse studio — showrunner chat, crew table-read, board, approve, shoot.
 
 The user is 総監督. Muses discuss in character until a board is shown and the
-showrunner says OK. There is no B/C/D pickup chain anymore.
+showrunner presses approve. Board and approve are explicit actions, not words
+matched out of chat text. There is no B/C/D pickup chain anymore.
 """
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import logging
 import random
-import re
 import time
 import uuid
 from pathlib import Path
@@ -27,37 +28,10 @@ from .schema import missing_inputs, new_session
 
 logger = logging.getLogger(__name__)
 
-# Showrunner approval — Japanese / English.
-# Exact one-liners, plus short natural phrases like「Ok 本番よろしく」.
-_OK_RE = re.compile(
-    r"^\s*(ok|okay|lgtm|ship\s*it|go|yes|yep|approved?|いいよ|よし|おｋ|おけ|"
-    r"OK|これでいい|それでいい|撮って|撮影|本番|決定|確定|ゴー)\s*[!！.。]*\s*$",
-    re.I,
-)
-_OK_NATURAL_RE = re.compile(
-    r"(?i)\b(ok|okay|lgtm|go)\b|お[ｋkけ]|いいよ|よし|ゴー|"
-    r"これでいい|それでいい|撮って|撮影|本番|決定|確定|approved?"
-)
-_BOARD_RE = re.compile(r"ボード|board|試写|イメージ", re.I)
-_OK_DENY_RE = re.compile(
-    r"じゃない|じゃなく|ではなく|だめ|ダメ|もっと|やめて|待って|まだ|"
-    r"not\s*ok|don't|dont|wait|more|nope",
-    re.I,
-)
-
-
-def _is_approve(text: str) -> bool:
-    """True when the showrunner is green-lighting the shoot."""
-    t = (text or "").strip()
-    if not t:
-        return False
-    if _OK_RE.match(t):
-        return True
-    # Short approval with fluff —「Ok 本番よろしく」「よし撮って！」
-    if len(t) <= 48 and _OK_NATURAL_RE.search(t) and not _OK_DENY_RE.search(t):
-        return True
-    return False
-
+# One lock per session so two concurrent `finish_session` calls (double-click,
+# a second tab, a retried request) cannot both pass the "already queued" guard
+# before either has written `queued_at`.
+_finish_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 
 class MuseError(Exception):
     """A step could not run. The message goes straight to the user."""
@@ -65,6 +39,20 @@ class MuseError(Exception):
 
 def _inputs(session: dict[str, Any]) -> dict[str, Any]:
     return session.get("inputs") or {}
+
+
+def _locale(session: dict[str, Any]) -> str:
+    return str(_inputs(session).get("locale") or "ja")
+
+
+def _msg(session: dict[str, Any], *, ja: str, en: str) -> str:
+    """Pick the Showrunner-facing error text for the session's locale.
+
+    `MuseError` messages go straight to the user, same as the chat text
+    elsewhere in this module — they follow the same locale branch everyone
+    else does instead of being the one place stuck in one language.
+    """
+    return ja if _locale(session).startswith("ja") else en
 
 
 def _identity_tags(session: dict[str, Any]) -> list[str]:
@@ -267,7 +255,7 @@ async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> di
 async def pick_character(db, session: dict[str, Any], character_id: str) -> dict[str, Any]:
     preset = await presets_db.get_preset(db, character_id)
     if preset is None:
-        raise MuseError("character not found")
+        raise MuseError(_msg(session, ja="キャラクターが見つかりません。", en="character not found"))
     session["character"] = {
         **presets_db.preset_to_character(preset),
         "character_id": character_id,
@@ -296,10 +284,14 @@ async def pick_partner(db, session: dict[str, Any], preset_id: str) -> dict[str,
         await session_db.save(db, session)
         return session
     if preset_id == str(_inputs(session).get("character_id") or ""):
-        raise MuseError("主演とは異なる Muse をパートナーに選んでください。")
+        raise MuseError(_msg(
+            session,
+            ja="主演とは異なる Muse をパートナーに選んでください。",
+            en="Pick a Muse other than the lead as your partner.",
+        ))
     preset = await presets_db.get_preset(db, preset_id)
     if preset is None:
-        raise MuseError("character not found")
+        raise MuseError(_msg(session, ja="キャラクターが見つかりません。", en="character not found"))
     session["partner_character"] = {
         **presets_db.preset_to_character(preset),
         "character_id": preset_id,
@@ -623,10 +615,13 @@ def _apply_turn(
     craft["scene"] = turn.scene
     if kept != turn.tags:
         _reassemble(session)
-    # Wardrobe alone owns the locked COSTUME. Capture it, take the old outfit out
-    # of the craft, make sure the new one is actually in the tags, and re-inject
-    # COSTUME so the NEXT seat re-reads it.
-    if turn.costume is not None and crew.role_of(turn.muse_id) == "wardrobe":
+    # Wardrobe owns the locked COSTUME in the crewed studio; in a duet she is
+    # the only seat, so her own prep turns own it instead. Capture it, take
+    # the old outfit out of the craft, make sure the new one is actually in
+    # the tags, and re-inject COSTUME so the NEXT turn re-reads it.
+    if turn.costume is not None and (
+        crew.role_of(turn.muse_id) == "wardrobe" or is_duet(session)
+    ):
         prev = session.get("costume") or {}
         costume = dict(turn.costume)
         # The outfit's tags are the GARMENTS slots and nothing else. They used to
@@ -1393,7 +1388,11 @@ async def start_table(
     """
     missing = missing_inputs(session)
     if missing:
-        raise MuseError(f"missing: {', '.join(missing)}")
+        raise MuseError(_msg(
+            session,
+            ja=f"入力が不足しています: {', '.join(missing)}",
+            en=f"missing: {', '.join(missing)}",
+        ))
 
     _rebuild_brief(session)
     cfg = await get_runtime_config(db)
@@ -1434,11 +1433,11 @@ async def start_table(
     else:
         open_ja = (
             "総監督、打ち合わせを始めます。班が台本を継ぎつつ、お互いにちょこちょこ口を挟みます。"
-            "無理難題歓迎です。途中でイメージボードを出しますので、OKかコメントをください。"
+            "無理難題歓迎です。途中でイメージボードを出しますので、コメントをください。"
         )
         open_en = (
             "Showrunner, table read is open. The crew will pass the craft and heckle "
-            "each other along the way. Hard notes welcome. Board coming — OK or comment."
+            "each other along the way. Hard notes welcome. Board coming — leave a comment."
         )
     sys_msg = _chat_append(
         session, role="system",
@@ -1464,13 +1463,12 @@ async def start_table(
         )
 
     ask_ja = (
-        "一通り集まりました。イメージボードを出して確認しますか？"
-        "「ボード」で試写、「OK」でこの台本のまま本番撮影です。"
-        "まだならコメントをください — 班が答えます。"
+        "一通り集まりました。「②試し撮り」でイメージボード、「③本番」でこの台本のまま"
+        "本番撮影です。まだならコメントをください — 班が答えます。"
     )
     ask_en = (
-        "First pass done. Want an image board? Say \"board\" for a screening, "
-        "\"OK\" to shoot this craft, or leave a note and the crew will answer."
+        "First pass done. Use \"test shot\" for an image board, \"final\" to "
+        "shoot this craft, or leave a note and the crew will answer."
     )
     ask = _chat_append(
         session, role="system",
@@ -1524,11 +1522,10 @@ async def run_full_table(
 
 
 # ── 二人芝居 — the Showrunner and the Lead, nobody else ──────────────────────
-# Two words drive it. Everything else is conversation, which is the point: the
-# eighteen-seat table is a production meeting you watch, and this is being in
-# the room with her.
-_PREP_RE = re.compile(r"撮影準備|準備し|支度|用意し|get\s*ready|prep", re.I)
-_TESTSHOT_RE = re.compile(r"試し撮り|試写|一枚|撮ろう|test\s*shot", re.I)
+# Prep, test shot and approve are their own buttons (`duet_prep_stage`,
+# `request_board`, `approve_and_shoot`). Everything typed here is
+# conversation, which is the point: the eighteen-seat table is a production
+# meeting you watch, and this is being in the room with her.
 
 
 def is_duet(session: dict[str, Any]) -> bool:
@@ -1596,7 +1593,12 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     caught = _caught_block(session)
     if caught:
         parts.append(caught)
-    orders = brief_mod.orders_block(list(session.get("notes") or []))
+    orders = brief_mod.orders_block(
+        list(session.get("notes") or []),
+        carried_out=list(session.get("carried_out") or []),
+        removed_now=list(session.get("just_banned") or []),
+        restored_now=list(session.get("just_restored") or []),
+    )
     if orders:
         parts.append(orders)
     if talk:
@@ -1620,8 +1622,8 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     previous = str((session.get("craft") or {}).get("prompt") or "")
     if previous:
         parts.append(
-            "さっき自分で組んだ台本（参考。総監督の新しい指示と矛盾する場所・小物・"
-            "服・カメラ・ポーズは必ず捨てて書き直す。ボード画像も古いテイク）:\n"
+            "前回の準備ターンで組んだ台本（それ以降の会話も踏まえて書き直す。総監督の新しい"
+            "指示と矛盾する場所・小物・服・カメラ・ポーズは必ず捨てる。ボード画像も古いテイク）:\n"
             + previous
         )
     parts.append(
@@ -1629,6 +1631,9 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
         "場所・時間・光・小物十個以上・衣装・カメラ・自分のポーズと表情、全部あなたが決める。\n"
         "最新指示が場所やカメラやポーズを変えていたら、TAGS/SCENE にも必ず反映する。"
         "教室を放送室に直す・後ろから撮る・振り返る、など言われたことは省略しない。\n"
+        "最新指示が衣装や小物を変えていたら、場所やカメラやポーズと同じ扱いで"
+        "TAGS/SCENE にも必ず反映する。パンツをスカートに直す・小物を外す、など"
+        "言われたことは省略しない。\n"
         "決めたら、SAY でフレームに何が入っているかを自分の言葉で総監督に読み上げて。"
         "小物は名前で。捨てたものも一言言う。隠さないこと。"
     )
@@ -1662,7 +1667,11 @@ async def _duet_talk(
             tier=tier,
         )
     except chain.ChainError as exc:
-        raise MuseError("うまく言葉が出てこないみたいです。もう一度話しかけてください。") from exc
+        raise MuseError(_msg(
+            session,
+            ja="うまく言葉が出てこないみたいです。もう一度話しかけてください。",
+            en="The words didn't come out right. Try talking to her again.",
+        )) from exc
     if blind and images:
         _note_blind(session)
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
@@ -1713,7 +1722,11 @@ async def _duet_prep(
     except chain.ChainError as exc:
         session["status"] = "chat"
         await session_db.save(db, session)
-        raise MuseError("台本がうまく組めませんでした。もう少し話してから試してください。") from exc
+        raise MuseError(_msg(
+            session,
+            ja="台本がうまく組めませんでした。もう少し話してから試してください。",
+            en="Couldn't put the shot together. Talk it through a bit more and try again.",
+        )) from exc
     if turn.blind and images:
         _note_blind(session)
     _apply_turn(session, turn, ms=int((time.monotonic() - started) * 1000))
@@ -1722,32 +1735,35 @@ async def _duet_prep(
     return session
 
 
+async def duet_prep_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """The explicit "①撮影準備" button. Builds the shot from notes said so far.
+
+    There used to be no button for this — the panel sent the literal chat
+    text "撮影準備" and a regex caught it. That made prep indistinguishable
+    from an ordinary note that happened to contain the same word, so it is
+    its own endpoint now, the same as board and approve.
+    """
+    cfg = await get_runtime_config(db)
+    return await _duet_prep(db, ollama, session, "", cfg=cfg)
+
+
 async def post_duet_chat(
-    db, ollama, comfy, spooler, session: dict[str, Any], text: str,
+    db, ollama, session: dict[str, Any], text: str,
 ) -> dict[str, Any]:
-    """One turn of the two-hander. Talk, get ready, or take the picture."""
+    """One turn of the two-hander. Board, prep and shoot are their own buttons
+    now — this is always conversation, and whatever she is told stands as
+    direction from here on, the same as in the studio.
+    """
     sid = session["session_id"]
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
     await session_db.save(db, session)
 
-    craft_ready = bool((session.get("craft") or {}).get("prompt"))
-    # Order matters: 「撮って」reads as approval in the crewed studio, and here it
-    # means take the test shot. The two words win before anything else looks.
-    if _TESTSHOT_RE.search(text) and craft_ready:
-        return await request_board(db, comfy, spooler, session, ollama=ollama)
-    if _PREP_RE.search(text) or (_TESTSHOT_RE.search(text) and not craft_ready):
-        cfg = await get_runtime_config(db)
-        session.setdefault("notes", []).append(text)
-        session = await _duet_prep(db, ollama, session, text, cfg=cfg)
-        return session
-    if _is_approve(text) and craft_ready:
-        return await approve_and_shoot(db, comfy, spooler, session, ollama=ollama)
-
     cfg = await get_runtime_config(db)
-    # Everything she is told is standing direction, the same as in the studio —
-    # a note that lives only in the turn answering it never reaches the render.
-    session.setdefault("notes", []).append(text)
+    # Whatever the note refuses comes out of the picture before she answers
+    # it — same strike pass the crewed studio runs on every note.
+    await take_note(db, ollama, session, text, cfg=cfg)
+    await session_db.save(db, session)
     return await _duet_talk(db, ollama, session, text, cfg=cfg)
 
 
@@ -1755,7 +1771,11 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     """Open the two-hander. She speaks first, about the theme, and that is all."""
     missing = [m for m in missing_inputs(session) if m != "workflow"]
     if missing:
-        raise MuseError(f"missing: {', '.join(missing)}")
+        raise MuseError(_msg(
+            session,
+            ja=f"入力が不足しています: {', '.join(missing)}",
+            en=f"missing: {', '.join(missing)}",
+        ))
     _rebuild_brief(session)
     cfg = await get_runtime_config(db)
     session["mode"] = "duet"
@@ -1769,8 +1789,12 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["board"] = {}
     session["shoot"] = {}
     session["plan"] = {}
-    # Stays {} for the whole duet: no Wardrobe seat, and the actress owns her own
-    # clothes there, so the COSTUME lock is never applied (二人芝居 untouched).
+    # Empty until her first prep turn writes a COSTUME block — same starting
+    # state as the crewed studio before Wardrobe's first turn. No Wardrobe
+    # seat here: she owns her own COSTUME (see chain._finish_turn's `duet`
+    # flag and _apply_turn's `is_duet` branch). W-Muse (two Muses) does not
+    # write one — a single GARMENTS slot set cannot say whose clothes are
+    # whose — so it stays untouched for that case.
     session["costume"] = {}
     session["notes"] = []
     session.pop("_blind_said", None)
@@ -1835,14 +1859,19 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
 async def post_chat(
     db, ollama, comfy, spooler, session: dict[str, Any], text: str,
 ) -> dict[str, Any]:
-    """Showrunner speaks. OK → shoot. board → image board. else → crew replies."""
+    """Showrunner speaks — always creative direction. Board and shoot are their
+    own buttons (`request_board` / `approve_and_shoot`), not words in here."""
     text = (text or "").strip()
     if not text:
-        raise MuseError("empty message")
+        raise MuseError(_msg(session, ja="メッセージが空です。", en="empty message"))
     if missing_inputs(session):
-        raise MuseError(f"missing: {', '.join(missing_inputs(session))}")
+        raise MuseError(_msg(
+            session,
+            ja=f"入力が不足しています: {', '.join(missing_inputs(session))}",
+            en=f"missing: {', '.join(missing_inputs(session))}",
+        ))
     if is_duet(session):
-        return await post_duet_chat(db, ollama, comfy, spooler, session, text)
+        return await post_duet_chat(db, ollama, session, text)
     if not (session.get("craft") or {}).get("prompt"):
         # Auto-open table if they chat first.
         session = await start_table(
@@ -1854,46 +1883,33 @@ async def post_chat(
     _publish_chat(sid, user_msg)
     await session_db.save(db, session)
 
-    approving = _is_approve(text)
-    wants_board = bool(_BOARD_RE.search(text))
-    # Anything that is not one of those two words is creative direction, and it
-    # stands from here on — a note used to live only in the turn that answered it.
-    direction = "" if (approving or wants_board) else text
-
     # The still is up and only three seats have spoken: this is the note the
     # rest of the crew has been waiting for. Whatever it says, the full table
-    # meets once, first — otherwise a bare OK ships a prompt three seats wrote.
+    # meets once, first — otherwise a note lands after a prompt three seats
+    # already wrote, unanswered.
     if str(session.get("table_stage") or "full") == "brief":
-        if direction:
-            cfg = await get_runtime_config(db)
-            await take_note(db, ollama, session, direction, cfg=cfg)
-            await session_db.save(db, session)
-            if _cast_in_role(_crew_ids(session), "plan"):
-                await _run_plan_turn(db, ollama, session, cfg=cfg, note=direction)
-                await session_db.save(db, session, publish=False)
-        session = await run_full_table(db, ollama, session, note=direction)
-        if direction:
-            locale = str(_inputs(session).get("locale") or "ja")
-            wrap = _chat_append(
-                session, role="system", name="Studio",
-                text=(
-                    "全班そろいました。イメージボードを見る？「ボード」／本番なら「OK」／"
-                    "まだ詰めるなら続けてどうぞ。"
-                    if locale.startswith("ja") else
-                    "Full crew is in. \"board\" for a screening, \"OK\" to shoot, "
-                    "or keep the notes coming."
-                ),
-            )
-            _publish_chat(sid, wrap)
-            session["status"] = "chat"
-            await session_db.save(db, session)
-            return session
-
-    if approving:
-        return await approve_and_shoot(db, comfy, spooler, session, ollama=ollama)
-
-    if wants_board:
-        return await request_board(db, comfy, spooler, session, ollama=ollama)
+        cfg = await get_runtime_config(db)
+        await take_note(db, ollama, session, text, cfg=cfg)
+        await session_db.save(db, session)
+        if _cast_in_role(_crew_ids(session), "plan"):
+            await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
+            await session_db.save(db, session, publish=False)
+        session = await run_full_table(db, ollama, session, note=text)
+        locale = str(_inputs(session).get("locale") or "ja")
+        wrap = _chat_append(
+            session, role="system", name="Studio",
+            text=(
+                "全班そろいました。「②試し撮り」でイメージボード、「③本番」で撮影に"
+                "入れます。まだ詰めるならコメントをどうぞ。"
+                if locale.startswith("ja") else
+                "Full crew is in. Use \"test shot\" for a screening, \"final\" to "
+                "shoot, or keep the notes coming."
+            ),
+        )
+        _publish_chat(sid, wrap)
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        return session
 
     # Crew answers the hard note — pick specialists by keyword, else core desk.
     cast = _crew_ids(session)
@@ -1962,9 +1978,11 @@ async def post_chat(
         session, role="system",
         name="Studio",
         text=(
-            "反映しました。イメージボードを見る？「ボード」／本番なら「OK」／まだ詰めるなら続けてどうぞ。"
+            "反映しました。「②試し撮り」でイメージボード、「③本番」で撮影に入れます。"
+            "まだ詰めるなら続けてどうぞ。"
             if locale.startswith("ja") else
-            "Applied. \"board\" for a screening, \"OK\" to shoot, or keep notes coming."
+            "Applied. Use \"test shot\" for a screening, \"final\" to shoot, "
+            "or keep notes coming."
         ),
     )
     _publish_chat(sid, wrap)
@@ -2128,7 +2146,11 @@ async def request_board(
     if not prompt:
         # Both buttons are disabled until there is a prompt; this is the same
         # rule stated where it cannot be clicked around.
-        raise MuseError("まだ台本がありません。先に「撮影準備」でプロンプトを作ってください。")
+        raise MuseError(_msg(
+            session,
+            ja="まだ台本がありません。先に「撮影準備」でプロンプトを作ってください。",
+            en="No script yet — build the prompt with \"prep\" first.",
+        ))
 
     if not still:
         session = await densify_craft_if_needed(db, ollama, session)
@@ -2150,9 +2172,11 @@ async def request_board(
         )
     else:
         ask_text = (
-            "総監督、イメージボード上げます。これでいい？OKなら本番、ダメなら指摘ください。"
+            "総監督、イメージボード上げます。これでいい？良ければ「③本番」、"
+            "ダメなら指摘ください。"
             if locale.startswith("ja") else
-            "Showrunner — image board going up. Good? OK to shoot, or note what to fix."
+            "Showrunner — image board going up. Good? Press \"final\" to shoot, "
+            "or note what to fix."
         )
     ask = _chat_append(
         session, role="muse", muse_id="lens",
@@ -2192,7 +2216,11 @@ async def approve_and_shoot(
     if not prompt:
         # In 二人芝居 an "OK" with no craft used to fall through to another line
         # of conversation, so pressing the button looked like nothing happened.
-        raise MuseError("まだ台本がありません。先に「撮影準備」でプロンプトを作ってください。")
+        raise MuseError(_msg(
+            session,
+            ja="まだ台本がありません。先に「撮影準備」でプロンプトを作ってください。",
+            en="No script yet — build the prompt with \"prep\" first.",
+        ))
 
     session = await densify_craft_if_needed(db, ollama, session)
     craft = session.get("craft") or {}
@@ -2208,9 +2236,9 @@ async def approve_and_shoot(
     msg = _chat_append(
         session, role="system", name="Studio",
         text=(
-            "OK受領。本番撮影に入ります。"
+            "承認を受け付けました。本番撮影に入ります。"
             if locale.startswith("ja") else
-            "OK received. Going to final shoot."
+            "Approved. Going to final shoot."
         ),
     )
     _publish_chat(sid, msg)
@@ -2257,58 +2285,71 @@ async def finish_session(
     that does not exist.
     """
     sid = session["session_id"]
-    if (session.get("diary") or {}).get("queued_at") or session.get("status") == "finished":
+    # A caller's `session` can be a stale snapshot — two concurrent requests
+    # (double-click, a second tab, a retry) each load their own copy before
+    # either writes `queued_at`, and both would otherwise pass the guard
+    # below. Re-read the authoritative state while holding the session's
+    # lock so only one caller ever gets past it.
+    async with _finish_locks[sid]:
+        fresh = await session_db.load(db, sid)
+        if fresh is not None:
+            session = fresh
+        if (session.get("diary") or {}).get("queued_at") or session.get("status") == "finished":
+            return session
+        if not _has_shot(session):
+            raise MuseError(_msg(
+                session,
+                ja="本番撮影が終わってから終了してください。",
+                en="Finish the final shoot before wrapping up.",
+            ))
+
+        session["status"] = "finished"
+        session_db.log(session, "finish", "session wrapped up")
+
+        char_id = str((session.get("inputs") or {}).get("character_id") or "")
+        partner_id = ""
+        if is_duet(session):
+            partner_char = await _partner_character(db, session)
+            partner_id = str((partner_char or {}).get("character_id") or "")
+        seen: set[str] = set()
+        char_ids = [
+            cid for cid in (char_id, partner_id)
+            if cid and not (cid in seen or seen.add(cid))
+        ]
+
+        if char_ids and spooler:
+            cfg = await get_runtime_config(db)
+            inputs = _inputs(session)
+            session["diary"] = {
+                "status": "writing",
+                "queued_at": time.time(),
+                "entries": {cid: {"status": "writing"} for cid in char_ids},
+            }
+            await session_db.save(db, session)
+            events.publish(sid, {"type": "diary_status", "status": "writing"})
+            for cid in char_ids:
+                spooler.submit(
+                    # Every Ollama call in the app goes through PROMPT, and that lane is
+                    # the one bound to the GPU resource when Ollama is local. There is no
+                    # UTILITY lane — naming one raised AttributeError inside the request,
+                    # so the diary job was never queued at all.
+                    JobLane.PROMPT,
+                    "generate_actress_diary",
+                    run_generate_actress_diary_job,
+                    meta={"session_id": sid, "character_id": cid},
+                    db=db,
+                    ollama=ollama,
+                    session=session,
+                    character_id=cid,
+                    model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
+                    num_ctx=_num_ctx(inputs, cfg),
+                    # Passed through so the second diary to land in a duet can
+                    # queue the chemistry job itself — see _record_diary_result.
+                    spooler=spooler,
+                )
+        else:
+            await session_db.save(db, session)
         return session
-    if not _has_shot(session):
-        raise MuseError("本番撮影が終わってから終了してください。")
-
-    session["status"] = "finished"
-    session_db.log(session, "finish", "session wrapped up")
-
-    char_id = str((session.get("inputs") or {}).get("character_id") or "")
-    partner_id = ""
-    if is_duet(session):
-        partner_char = await _partner_character(db, session)
-        partner_id = str((partner_char or {}).get("character_id") or "")
-    seen: set[str] = set()
-    char_ids = [
-        cid for cid in (char_id, partner_id)
-        if cid and not (cid in seen or seen.add(cid))
-    ]
-
-    if char_ids and spooler:
-        cfg = await get_runtime_config(db)
-        inputs = _inputs(session)
-        session["diary"] = {
-            "status": "writing",
-            "queued_at": time.time(),
-            "entries": {cid: {"status": "writing"} for cid in char_ids},
-        }
-        await session_db.save(db, session)
-        events.publish(sid, {"type": "diary_status", "status": "writing"})
-        for cid in char_ids:
-            spooler.submit(
-                # Every Ollama call in the app goes through PROMPT, and that lane is
-                # the one bound to the GPU resource when Ollama is local. There is no
-                # UTILITY lane — naming one raised AttributeError inside the request,
-                # so the diary job was never queued at all.
-                JobLane.PROMPT,
-                "generate_actress_diary",
-                run_generate_actress_diary_job,
-                meta={"session_id": sid, "character_id": cid},
-                db=db,
-                ollama=ollama,
-                session=session,
-                character_id=cid,
-                model=_text_model(inputs) or str(cfg.get("vlm_model") or ""),
-                num_ctx=_num_ctx(inputs, cfg),
-                # Passed through so the second diary to land in a duet can
-                # queue the chemistry job itself — see _record_diary_result.
-                spooler=spooler,
-            )
-    else:
-        await session_db.save(db, session)
-    return session
 
 
 async def run_generate_actress_diary_job(

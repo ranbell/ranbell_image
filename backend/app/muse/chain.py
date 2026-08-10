@@ -83,12 +83,14 @@ async def _call(
 def _finish_turn(
     raw: str, *, muse_id: str, identity_tags: list[str] | None,
     framing: str, brief: str, style: str = "",
-    cast: list[dict] | None = None,
+    cast: list[dict] | None = None, duet: bool = False,
 ) -> MuseTurn:
-    # Only Wardrobe carries a COSTUME tail; strip it before parse_table_read so
-    # the SCENE capture (greedy to end-of-string) does not swallow it.
+    # Wardrobe carries a COSTUME tail in the crewed studio; in a duet she is
+    # the only one who ever writes a shot, so she carries it on prep turns
+    # instead. Strip it before parse_table_read so the SCENE capture (greedy
+    # to end-of-string) does not swallow it.
     costume: dict[str, Any] | None = None
-    if crew.role_of(muse_id) == "wardrobe":
+    if crew.role_of(muse_id) == "wardrobe" or duet:
         raw, parsed = _strip_costume(raw)
         costume = parsed or None
     say, tags, scene = identity.parse_table_read(raw)
@@ -419,7 +421,7 @@ async def run_duet_prep(
     )
     turn = _finish_turn(
         raw, muse_id=crew.DEFAULT_MEMBER["actress"], identity_tags=identity_tags,
-        framing=framing, brief=brief, style=style, cast=cast,
+        framing=framing, brief=brief, style=style, cast=cast, duet=True,
     )
     if partner_character:
         turns = identity.parse_duet_speakers(turn.say)

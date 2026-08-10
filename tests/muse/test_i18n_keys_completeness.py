@@ -32,6 +32,9 @@ def test_i18n_ja_en_keys_match_and_complete():
         "userAddress",
         "talkQuirks",
         "sayExamples",
+        "wMuseSessionActive",
+        "chemistryActive",
+        "defaultActressName",
     ]
 
     for key in required_new_keys:
@@ -39,6 +42,22 @@ def test_i18n_ja_en_keys_match_and_complete():
         assert key in en_muse, f"Key '{key}' missing from en.json muse section!"
         assert isinstance(ja_muse[key], str) and len(ja_muse[key]) > 0
         assert isinstance(en_muse[key], str) and len(en_muse[key]) > 0
+
+    required_new_quick_keys = [
+        "backToBack",
+        "backToBackPrompt",
+        "handInHand",
+        "handInHandPrompt",
+        "secretTalk",
+        "secretTalkPrompt",
+    ]
+    ja_quick = ja_muse.get("quick", {})
+    en_quick = en_muse.get("quick", {})
+    for key in required_new_quick_keys:
+        assert key in ja_quick, f"Key 'quick.{key}' missing from ja.json muse section!"
+        assert key in en_quick, f"Key 'quick.{key}' missing from en.json muse section!"
+        assert isinstance(ja_quick[key], str) and len(ja_quick[key]) > 0
+        assert isinstance(en_quick[key], str) and len(en_quick[key]) > 0
 
 
 def test_i18n_all_top_level_keys_symmetry():

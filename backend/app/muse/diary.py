@@ -120,6 +120,20 @@ def _salvage(text: str) -> dict[str, str]:
 
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
 
+# An emoji outside the BMP is written as two `\uXXXX` escapes (a UTF-16
+# surrogate pair). Converting each half separately below produces two lone
+# surrogate codepoints, which break UTF-8 encoding downstream — this is the
+# "emoji shows as ?" bug. Merge pairs into one codepoint before the
+# single-escape pass ever sees them.
+_SURROGATE_PAIR_RE = re.compile(
+    r"\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})"
+)
+
+
+def _join_surrogate_pair(m: re.Match[str]) -> str:
+    high, low = int(m.group(1), 16), int(m.group(2), 16)
+    return chr(0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00))
+
 
 def _unescape(value: str) -> str:
     """Undo JSON string escapes only.
@@ -127,13 +141,21 @@ def _unescape(value: str) -> str:
     Deliberately not `unicode_escape`: that codec goes through latin-1 and
     either raises or mangles every Japanese character in the body.
     """
+    value = _SURROGATE_PAIR_RE.sub(_join_surrogate_pair, value)
+
     def _sub(m: re.Match[str]) -> str:
         token = m.group(1)
         if token.startswith("u"):
             try:
-                return chr(int(token[1:], 16))
+                code = int(token[1:], 16)
             except ValueError:
                 return m.group(0)
+            if 0xD800 <= code <= 0xDFFF:
+                # A lone/truncated surrogate — the pair above already caught
+                # every complete one, so this is a cut-off tail. Drop it
+                # rather than emit a codepoint that cannot be UTF-8 encoded.
+                return ""
+            return chr(code)
         return _ESCAPES.get(token, m.group(0))
 
     return re.sub(r"\\(u[0-9a-fA-F]{4}|.)", _sub, value)

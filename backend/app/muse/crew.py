@@ -1682,7 +1682,7 @@ No danbooru tags. No emoji. No labels other than the word SAY.
 """.strip()
 
 DUET_PREP_OUTPUT = """
-OUTPUT FORMAT — three labelled blocks, nothing else:
+OUTPUT FORMAT — three labelled blocks, then the COSTUME block below, nothing else:
 
 SAY: You have just worked out what the shot is, and you are describing it back
 to the Showrunner in your own words, in character, in natural Japanese.
@@ -1828,6 +1828,7 @@ def actress_duet_prompt(
             DUET_OWNS_THE_FRAME,
             _style_block(lead, base_style),
             DUET_PREP_OUTPUT,
+            WARDROBE_COSTUME_TAIL,
         ]
     else:
         blocks += [

@@ -1355,12 +1355,18 @@
       "prepFirst": "先に「撮影準備」でプロンプトを作ってください",
       "tableFirst": "先に台本ができてから押せます",
       "board": "② 試し撮り（サンプル画像）",
-      "ok": "③ 本番（高品質画像）"
+      "ok": "③ 本番（高品質画像）",
+      "backToBack": "🤝 背中合わせ",
+      "backToBackPrompt": "二人で背中合わせのポーズで決めてみて！",
+      "handInHand": "💕 手をつなぐ",
+      "handInHandPrompt": "手をつないで微笑み合うショットを見せて！",
+      "secretTalk": "🤫 内緒話",
+      "secretTalkPrompt": "お互いに顔を見合わせて内緒話するポーズで！"
     },
     "boardTitle": "イメージボード",
     "stillTitle": "試し撮り",
     "stillAsk": "どう？ 直すところを言ってもらえれば、撮り直します",
-    "boardAsk": "これでいい？ OKなら本番、ダメなら指摘をどうぞ",
+    "boardAsk": "これでいい？ 良ければ「③本番」、ダメなら指摘をどうぞ",
     "shootTitle": "本番",
     "craft": "いまの台本（プロンプト）",
     "banned": "外したもの",
@@ -1420,7 +1426,10 @@
     "diaryFailed": "日記の執筆に失敗しました。もう一度お願いしてみてください",
     "openDiary": "📖 日記を読む",
     "partnerMustDiffer": "主演とは異なる Muse をパートナーに選んでください。",
-    "changePartner": "相手を変える"
+    "changePartner": "相手を変える",
+    "wMuseSessionActive": "W-Muse ダブル主演セッション中",
+    "chemistryActive": "ケミストリー活性化中",
+    "defaultActressName": "女優"
   },
   "characters": {
     "title": "キャラクター",

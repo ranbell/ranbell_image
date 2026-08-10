@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
+from app.muse import brief as brief_mod
 from app.muse import crew, service, session_db
 from tests.muse.test_service import (  # noqa: E402
     FakeComfy, FakeDb, FakeOllama, FakeSpooler,
@@ -44,6 +45,62 @@ class TalkingOllama(FakeOllama):
         return _stream()
 
 
+class GarmentSwapOllama(FakeOllama):
+    """Two prep turns: the first settles on pants, the second — after the
+    Showrunner asks for a skirt — writes fresh TAGS that (realistically,
+    imperfectly) still carry the old "pants" alongside the new "long_skirt",
+    but a COSTUME/GARMENTS block that correctly names only the new one. The
+    strike clerk is told to remove nothing, so only the structural GARMENTS
+    diff (`strike_dropped_costume`, Bug 4 / Phase 2) can take "pants" back
+    out of the craft.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.preps = 0
+
+    def generate_text_stream(self, prompt, **kw):
+        self.calls.append({**kw, "prompt": prompt})
+        system = str(kw.get("system") or "")
+
+        async def _stream(text):
+            yield {"type": "token", "text": text}
+
+        if "script supervisor's clerk" in system:
+            # Only an explicit "パンツはやめて" (stop with the pants) reads as a
+            # removal — "スカートにして" (make it a skirt) is left for the
+            # structural GARMENTS diff to catch, on purpose (see the garment
+            # swap test below).
+            if "パンツはやめて" in str(prompt):
+                return _stream("REMOVE: pants\nRESTORE: none")
+            return _stream("REMOVE: none\nRESTORE: none")
+
+        if "撮る画を一つに決めて" in str(prompt):
+            self.preps += 1
+            first = self.preps == 1
+            tags = (
+                "sitting, messy_room, white_shirt, pants" if first else
+                "sitting, messy_room, white_shirt, pants, long_skirt"
+            )
+            bottom = "pants" if first else "long_skirt"
+            text = (
+                "SAY: わかりました、こんな感じです。\n\n"
+                f"TAGS: {tags}\n\n"
+                "SCENE: " + " ".join(["She sits in the small room"] * 30) + "\n\n"
+                "COSTUME:\n"
+                "SILHOUETTE: relaxed loungewear\n"
+                "LAYERS: base + top\n"
+                "COLOURWAY: white, navy\n"
+                "PATTERN: solid\n"
+                "FABRIC: cotton\n"
+                "CONDITION: worn-in\n"
+                "HERO: white_shirt\n"
+                f"GARMENTS: top=white_shirt / bottom={bottom} / feet=none / extras=none"
+            )
+            return _stream(text)
+        return _stream("SAY: えっと、そうですね。")
+
+
 async def _duet_session(db, **over):
     session = await service.create_session(db, {
         "theme": "深夜のカラオケで一人", "character_id": "c1",
@@ -65,7 +122,7 @@ async def test_talking_is_only_talking_and_writes_no_script():
 
     session = await service.start_duet(db, ollama, session)
     session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), FakeSpooler(), session, "もっと散らかってる感じがいいな",
+        db, ollama, session, "もっと散らかってる感じがいいな",
     )
 
     assert session["craft"]["prompt"] == ""
@@ -83,9 +140,7 @@ async def test_getting_ready_is_when_the_script_appears():
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
 
-    session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), FakeSpooler(), session, "撮影準備して",
-    )
+    session = await service.duet_prep_stage(db, ollama, session)
 
     assert "messy_room" in session["craft"]["tags"]
     assert "silver_hair" in session["craft"]["prompt"]
@@ -99,12 +154,10 @@ async def test_the_test_shot_renders_what_she_prepared():
     db, ollama, spooler = FakeDb(), TalkingOllama(), FakeSpooler()
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
-    session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), spooler, session, "撮影準備",
-    )
+    session = await service.duet_prep_stage(db, ollama, session)
 
-    session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), spooler, session, "じゃあ試し撮りして",
+    session = await service.request_board(
+        db, FakeComfy(), spooler, session, ollama=ollama,
     )
 
     assert len(spooler.jobs) == 1
@@ -112,36 +165,40 @@ async def test_the_test_shot_renders_what_she_prepared():
 
 
 @pytest.mark.asyncio
-async def test_asking_for_a_test_shot_with_no_script_gets_ready_first():
-    """Otherwise「試し撮り」on turn one renders an empty prompt."""
+async def test_typed_stage_words_never_auto_trigger_a_render():
+    """Prep, test shot and approve are buttons now (`duet_prep_stage`,
+    `request_board`, `approve_and_shoot`) — typed text, however phrased, is
+    always conversation and never itself moves the shoot forward a stage."""
     db, ollama, spooler = FakeDb(), TalkingOllama(), FakeSpooler()
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
 
     session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), spooler, session, "試し撮りして",
+        db, ollama, session, "試し撮りして。撮影準備もお願い。OK、本番でいこう。",
     )
 
     assert spooler.jobs == []
-    assert session["craft"]["prompt"], "she got ready instead"
+    assert session["craft"]["prompt"] == "", "text alone must never build a script"
+
+    with pytest.raises(service.MuseError):
+        await service.request_board(db, FakeComfy(), spooler, session, ollama=ollama)
 
 
 @pytest.mark.asyncio
-async def test_taking_the_picture_beats_reading_the_word_as_approval():
-    """「撮って」is an OK in the crewed studio. In here it means take the shot,
-    and going to the final render instead would skip the whole loop."""
+async def test_approval_sounding_chat_never_shoots_after_prep():
+    """「本番」「決定」「撮って」read as approval nowhere anymore — only pressing
+    the final button (`approve_and_shoot`) submits the render."""
     db, ollama, spooler = FakeDb(), TalkingOllama(), FakeSpooler()
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
-    session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), spooler, session, "撮影準備",
-    )
+    session = await service.duet_prep_stage(db, ollama, session)
 
     session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), spooler, session, "一枚撮ろう",
+        db, ollama, session, "一枚撮ろう。本番でいこう。",
     )
 
-    assert session["status"] == "boarding"
+    assert spooler.jobs == []
+    assert session["status"] != "boarding"
     assert session["shoot"] == {}
 
 
@@ -152,15 +209,68 @@ async def test_everything_she_is_told_stays_told():
     session = await service.start_duet(db, ollama, session)
 
     session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), FakeSpooler(), session, "冬にして。厚着で。",
+        db, ollama, session, "冬にして。厚着で。",
     )
     assert "冬にして。厚着で。" in session["notes"]
 
-    session = await service.post_duet_chat(
-        db, ollama, FakeComfy(), FakeSpooler(), session, "撮影準備",
-    )
+    session = await service.duet_prep_stage(db, ollama, session)
     prompt = ollama.calls[-1]["prompt"]
     assert "冬にして。厚着で。" in prompt, "a note must outlive the turn answering it"
+
+
+@pytest.mark.asyncio
+async def test_a_carried_out_refusal_drops_out_of_the_next_preps_orders():
+    """Bug 5: without `carried_out`/`removed_now` threaded through, every note
+    ever spoken piled up in `orders_block` forever. Wiring `take_note` (Bug 4/6
+    Phase 1) into duet fixes it the same way the crewed studio already works."""
+    db, ollama = FakeDb(), GarmentSwapOllama()
+    session = await _duet_session(db)
+    session = await service.start_duet(db, ollama, session)
+    session = await service.duet_prep_stage(db, ollama, session)
+
+    session = await service.post_duet_chat(db, ollama, session, "パンツはやめて")
+    assert session.get("carried_out"), "the strike pass must record what it resolved"
+
+    orders = brief_mod.orders_block(
+        list(session.get("notes") or []),
+        carried_out=list(session.get("carried_out") or []),
+        removed_now=list(session.get("just_banned") or []),
+        restored_now=list(session.get("just_restored") or []),
+    )
+    assert "パンツはやめて" not in orders, "a resolved note must not haunt the standing orders"
+
+
+@pytest.mark.asyncio
+async def test_costume_change_structurally_drops_the_old_garment():
+    """Bug 4: "change pants to a skirt" must actually remove pants from the
+    craft. The strike clerk here finds nothing to remove (a plausible LLM
+    judgment call), so this only passes because of the structural GARMENTS
+    diff (`strike_dropped_costume`) now wired into duet's prep turns."""
+    db, ollama = FakeDb(), GarmentSwapOllama()
+    session = await _duet_session(db)
+    session = await service.start_duet(db, ollama, session)
+
+    session = await service.duet_prep_stage(db, ollama, session)
+    assert "pants" in session["craft"]["tags"]
+
+    session = await service.post_duet_chat(db, ollama, session, "スカートにして")
+    session = await service.duet_prep_stage(db, ollama, session)
+
+    assert "long_skirt" in session["craft"]["tags"]
+    assert "pants" not in session["craft"]["tags"], (
+        "the model's own TAGS line still had pants — only the GARMENTS-slot "
+        "diff can be relied on to strike it"
+    )
+
+
+def test_prep_closing_instruction_reinforces_costume_and_props_too():
+    """Bug 6: the reminder to reflect the Showrunner's latest instruction
+    used to single out place/camera/pose and omit costume/props, which
+    biased the rewrite toward keeping whatever outfit was improvised early."""
+    prompt = service._duet_user_prompt({"inputs": {}, "chat": [], "notes": [],
+                                        "craft": {}}, "スカートにして", prep=True)
+    assert "衣装や小物を変えていたら" in prompt
+    assert "パンツをスカートに直す" in prompt
 
 
 @pytest.mark.asyncio

@@ -105,13 +105,9 @@ const act = computed(() => {
 })
 
 // 二人芝居: the Showrunner and the Lead, nobody else. There is no crew to cast,
-// the craft is only written when she is asked to get ready, and the two words
-// that drive it replace「ボード」/「OK」.
+// and the craft is only written when "①撮影準備" is pressed — its own endpoint
+// (`duetPrep`), same as the test shot and final buttons.
 const isDuet = computed(() => session.value?.mode === 'duet')
-// Getting ready still goes through chat — what she is told is standing
-// direction, and the note has to be on the record. The two stages that produce
-// pictures are buttons on their own endpoints (`runStage`).
-const DUET_PREP = '撮影準備'
 
 const canStart = computed(() =>
   !busy.value && needs.value.length === 0 && act.value === 'setup')
@@ -522,9 +518,9 @@ function stopThinking() {
 
 function quick(cmd) { sendChat(cmd) }
 
-// The test shot and the final are buttons on their own endpoints, not the words
-// "試し撮り" and "OK" typed into chat for a regex to recognise. Typing them still
-// works; pressing them no longer depends on the phrasing surviving a round trip.
+// Prep, test shot and final are buttons on their own endpoints — not words
+// typed into chat for a regex to recognise. Typed text is always creative
+// direction now; only these buttons move the shoot forward a stage.
 async function runStage(path) {
   if (!session.value || chatLocked.value) return
   busy.value = true
@@ -536,6 +532,7 @@ async function runStage(path) {
     scrollChat()
   } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
 }
+const duetPrep = () => runStage('duet/prep')
 const testShot = () => runStage('board')
 const finalShot = () => runStage('approve')
 
@@ -765,12 +762,12 @@ async function onChatKey(e) {
                   <span class="block text-[11px] font-bold text-pink-200">
                     {{ (isJa ? character?.name_ja : character?.name) || 'Muse A' }} × {{ (isJa ? partnerCharacter?.name_ja : partnerCharacter?.name) || 'Muse B' }}
                   </span>
-                  <span class="block text-[9px] text-pink-300/70">W-Muse ダブル主演セッション中</span>
+                  <span class="block text-[9px] text-pink-300/70">{{ t('muse.wMuseSessionActive') }}</span>
                 </div>
               </div>
               <div class="flex items-center gap-2">
                 <span class="px-2.5 py-1 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300 text-[10px] font-mono flex items-center gap-1 motion-safe:animate-pulse">
-                  <span>✨</span> ケミストリー活性化中
+                  <span>✨</span> {{ t('muse.chemistryActive') }}
                 </span>
                 <button type="button" class="sb-btn text-[10px]" @click="showPartnerPicker = true">
                   {{ t('muse.changePartner') }}
@@ -877,7 +874,7 @@ async function onChatKey(e) {
                 <template v-if="isDuet">
                   <button class="sb-btn text-[10px]" :disabled="chatLocked"
                           :title="t('muse.quick.prepTitle')"
-                          @click="quick(DUET_PREP)">
+                          @click="duetPrep">
                     {{ t('muse.quick.prep') }}
                   </button>
                   <button class="sb-btn text-[10px]" :disabled="chatLocked || !hasPrompt"
@@ -896,16 +893,16 @@ async function onChatKey(e) {
 
                   <template v-if="isWMuse">
                     <button class="sb-btn text-[10px] border-pink-400/50 bg-pink-950/40 text-pink-200" :disabled="chatLocked"
-                            @click="quick('二人で背中合わせのポーズで決めてみて！')">
-                      🤝 背中合わせ
+                            @click="quick(t('muse.quick.backToBackPrompt'))">
+                      {{ t('muse.quick.backToBack') }}
                     </button>
                     <button class="sb-btn text-[10px] border-pink-400/50 bg-pink-950/40 text-pink-200" :disabled="chatLocked"
-                            @click="quick('手をつないで微笑み合うショットを見せて！')">
-                      💕 手をつなぐ
+                            @click="quick(t('muse.quick.handInHandPrompt'))">
+                      {{ t('muse.quick.handInHand') }}
                     </button>
                     <button class="sb-btn text-[10px] border-pink-400/50 bg-pink-950/40 text-pink-200" :disabled="chatLocked"
-                            @click="quick('お互いに顔を見合わせて内緒話するポーズで！')">
-                      🤫 内緒話
+                            @click="quick(t('muse.quick.secretTalkPrompt'))">
+                      {{ t('muse.quick.secretTalk') }}
                     </button>
                   </template>
                 </template>

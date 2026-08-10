@@ -828,6 +828,22 @@ async def add_preset_diary(db, preset_id: str, diary: dict[str, Any]) -> dict[st
     if not preset:
         return None
     diaries = list(preset.get("diaries") or [])
+    # Defense in depth against a race in the caller (two `finish_session`
+    # calls both queuing a diary job for the same shoot): never file two
+    # entries for the same session + character.
+    session_id = diary.get("session_id")
+    character_id = diary.get("character_id")
+    if session_id and character_id:
+        existing = next(
+            (
+                d for d in diaries
+                if d.get("session_id") == session_id
+                and d.get("character_id") == character_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
     diaries.append(diary)
     if len(diaries) > MAX_DIARIES:
         diaries.sort(key=lambda d: d.get("timestamp") or 0.0)

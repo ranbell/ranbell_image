@@ -1355,12 +1355,18 @@
       "prepFirst": "Ask her to get ready first — there is no prompt yet",
       "tableFirst": "Available once there is a prompt to shoot",
       "board": "② Test shot (sample image)",
-      "ok": "③ Final (high quality)"
+      "ok": "③ Final (high quality)",
+      "backToBack": "🤝 Back to back",
+      "backToBackPrompt": "Strike a back-to-back pose, the two of you together!",
+      "handInHand": "💕 Hand in hand",
+      "handInHandPrompt": "Show a shot of you two holding hands and smiling at each other!",
+      "secretTalk": "🤫 Secret talk",
+      "secretTalkPrompt": "Pose like you're sharing a secret, looking at each other!"
     },
     "boardTitle": "Image board",
     "stillTitle": "Test shot",
     "stillAsk": "How is it? Tell her what to change and she will take another",
-    "boardAsk": "Good? OK to shoot, or leave a note",
+    "boardAsk": "Good? Press \"final\" to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",
     "banned": "Removed",
@@ -1420,7 +1426,10 @@
     "diaryFailed": "The diary could not be written. Try asking again",
     "openDiary": "📖 Read her diary",
     "partnerMustDiffer": "Pick a Muse other than the lead as her partner.",
-    "changePartner": "Change partner"
+    "changePartner": "Change partner",
+    "wMuseSessionActive": "W-Muse double-lead session live",
+    "chemistryActive": "Chemistry active",
+    "defaultActressName": "Actress"
   },
   "characters": {
     "title": "Characters",

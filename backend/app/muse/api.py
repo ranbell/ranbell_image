@@ -213,9 +213,18 @@ async def start_duet(session_id: str, request: Request):
     ))
 
 
+@router.post("/sessions/{session_id}/duet/prep")
+async def duet_prep(session_id: str, request: Request):
+    """The explicit "①撮影準備" button — builds the shot from notes said so far."""
+    session = await _session(request, session_id)
+    return await _run(service.duet_prep_stage(
+        _db(request), _llm(request, session), session,
+    ))
+
+
 @router.post("/sessions/{session_id}/chat")
 async def post_chat(session_id: str, body: ChatMessage, request: Request):
-    """Showrunner message — note, board, or OK."""
+    """Showrunner message — always creative direction, never a stage trigger."""
     session = await _session(request, session_id)
     return await _run(service.post_chat(
         _db(request), _llm(request, session),

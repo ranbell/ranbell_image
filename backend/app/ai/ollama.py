@@ -186,9 +186,9 @@ class OllamaClient:
             if resp.is_error:
                 body = await resp.aread()
                 try:
-                    msg = json.loads(body).get("error") or body[:500].decode()
+                    msg = json.loads(body).get("error") or body[:500].decode("utf-8", "replace")
                 except Exception:
-                    msg = body[:500].decode()
+                    msg = body[:500].decode("utf-8", "replace")
                 logger.error("[ollama] %s %s — %s", resp.status_code, resp.url, msg)
                 resp.raise_for_status()
             async for line in resp.aiter_lines():

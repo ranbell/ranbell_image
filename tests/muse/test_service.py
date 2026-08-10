@@ -198,7 +198,25 @@ async def test_thin_craft_is_densified_before_board():
 
 
 @pytest.mark.asyncio
-async def test_chat_ok_shoots_with_board_seed():
+async def test_approve_and_shoot_submits_shoot_job():
+    """Approval is the `/approve` button (`approve_and_shoot`) now, never a
+    word matched out of chat text."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+    session["board"] = {"seed": 4242, "images": [{"image_id": "sha0"}], "pending": False}
+    await session_db.save(db, session)
+
+    session = await service.approve_and_shoot(db, FakeComfy(), spooler, session, ollama=ollama)
+
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_shoot_job
+    assert session["shoot"]["seed"] == 4242
+    assert session["status"] == "shooting"
+
+
+@pytest.mark.asyncio
+async def test_chat_text_ok_no_longer_auto_shoots():
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db)
     session = await service.start_table(db, ollama, session)
@@ -209,10 +227,8 @@ async def test_chat_ok_shoots_with_board_seed():
         db, ollama, FakeComfy(), spooler, session, "OK",
     )
 
-    assert len(spooler.jobs) == 1
-    assert spooler.jobs[0]["func"] is runner.run_shoot_job
-    assert session["shoot"]["seed"] == 4242
-    assert session["status"] == "shooting"
+    assert spooler.jobs == []
+    assert session["status"] != "shooting"
 
 
 @pytest.mark.asyncio
@@ -233,7 +249,21 @@ async def test_chat_note_revises_craft_without_comfy():
 
 
 @pytest.mark.asyncio
-async def test_chat_board_keyword_requests_board():
+async def test_request_board_submits_board_job():
+    """The board is the `/board` button (`request_board`) now, never a word
+    matched out of chat text."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+
+    session = await service.request_board(db, FakeComfy(), spooler, session, ollama=ollama)
+
+    assert len(spooler.jobs) == 1
+    assert spooler.jobs[0]["func"] is runner.run_board_job
+
+
+@pytest.mark.asyncio
+async def test_chat_text_board_keyword_no_longer_requests_board():
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db)
     session = await service.start_table(db, ollama, session)
@@ -242,8 +272,7 @@ async def test_chat_board_keyword_requests_board():
         db, ollama, FakeComfy(), spooler, session, "ボード出して",
     )
 
-    assert len(spooler.jobs) == 1
-    assert spooler.jobs[0]["func"] is runner.run_board_job
+    assert spooler.jobs == []
 
 
 @pytest.mark.asyncio
@@ -253,6 +282,37 @@ async def test_table_refuses_missing_inputs():
     with pytest.raises(service.MuseError) as err:
         await service.start_table(db, FakeOllama(), session)
     assert "character" in str(err.value)
+
+
+@pytest.mark.asyncio
+async def test_muse_error_messages_follow_locale_en():
+    """MuseError text goes straight to the user, same as every other
+    Showrunner-facing string — it must follow the session's locale instead of
+    being stuck in Japanese regardless of who is asking."""
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db, locale="en")
+    session = await service.start_table(db, ollama, session)
+
+    with pytest.raises(service.MuseError) as err:
+        await service.request_board(db, FakeComfy(), spooler, {**session, "craft": {}})
+    assert "台本" not in str(err.value)
+    assert "prompt" in str(err.value).lower()
+
+    with pytest.raises(service.MuseError) as err:
+        await service.finish_session(db, spooler, session, ollama=ollama)
+    assert "本番撮影" not in str(err.value)
+    assert "shoot" in str(err.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_muse_error_messages_default_to_japanese():
+    db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
+    session = await _ready_session(db)
+    session = await service.start_table(db, ollama, session)
+
+    with pytest.raises(service.MuseError) as err:
+        await service.request_board(db, FakeComfy(), spooler, {**session, "craft": {}})
+    assert "台本" in str(err.value)
 
 
 @pytest.mark.asyncio
@@ -321,16 +381,6 @@ async def test_unload_vlm_is_opt_in_on_board():
 def test_the_workflows_last_image_is_the_one_worth_keeping():
     assert runner.finished_image(["raw", "upscaled"]) == "upscaled"
     assert runner.finished_image(["only"]) == "only"
-
-
-def test_is_approve_accepts_natural_ok_phrases():
-    assert service._is_approve("OK")
-    assert service._is_approve("本番")
-    assert service._is_approve("Ok 本番よろしく")
-    assert service._is_approve("よし撮って！")
-    assert not service._is_approve("OKじゃない、もっと可愛く")
-    assert not service._is_approve("ボード出して")
-    assert not service._is_approve("服をもっと派手に")
 
 
 def test_pick_responders_is_fixed_desk_not_keyword_router():
@@ -909,8 +959,9 @@ async def test_the_first_note_after_the_still_convenes_the_rest_of_the_crew():
 
 
 @pytest.mark.asyncio
-async def test_ok_straight_off_the_still_gathers_the_crew_before_shooting():
-    """Otherwise a bare OK ships a prompt three seats wrote."""
+async def test_ok_straight_off_the_still_gathers_the_crew_and_does_not_shoot():
+    """A bare "OK" is just text now — it gathers the full crew like any other
+    note, but shooting takes the explicit `/approve` button, not this word."""
     db, spooler, ollama = FakeDb(), FakeSpooler(), FakeOllama()
     session = await _ready_session(db, crew_preset="standard")
     session = await service.start_table(
@@ -918,16 +969,16 @@ async def test_ok_straight_off_the_still_gathers_the_crew_before_shooting():
     )
     session["board"]["pending"] = False
     await session_db.save(db, session)
+    n_jobs = len(spooler.jobs)
 
     session = await service.post_chat(
         db, ollama, FakeComfy(), spooler, session, "OK",
     )
 
     assert session["table_stage"] == "full"
-    assert session["status"] == "shooting"
-    assert [j["func"] for j in spooler.jobs][-1] is runner.run_shoot_job
-    # "OK" is not creative direction and must not become a standing order.
-    assert "OK" not in (session.get("notes") or [])
+    assert session["status"] == "chat"
+    assert len(spooler.jobs) == n_jobs, "no render job from chat text alone"
+    assert "OK" in (session.get("notes") or [])
 
 
 @pytest.mark.asyncio

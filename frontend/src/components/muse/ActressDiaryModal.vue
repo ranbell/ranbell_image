@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   characterId: { type: String, required: true },
-  characterName: { type: String, default: '女優' },
+  characterName: { type: String, default: '' },
   show: { type: Boolean, default: false }
 })
 
@@ -181,7 +181,7 @@ watch(() => props.show, async (val) => {
           <span class="text-2xl">📖</span>
           <div>
             <h3 id="diary-title" class="font-bold text-pink-900 dark:text-pink-200 text-base tracking-wide">
-              {{ t('characters.diary.title', { name: characterName }) }}
+              {{ t('characters.diary.title', { name: characterName || t('muse.defaultActressName') }) }}
             </h3>
             <p class="text-[11px] text-pink-600/80 dark:text-pink-400">
               {{ t('characters.diary.subtitle') }}

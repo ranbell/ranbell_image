@@ -1,4 +1,5 @@
 """Unit tests for Actress Secret Diary and JobSpooler Integration."""
+import asyncio
 import sys
 import time
 import types
@@ -35,14 +36,25 @@ def fake_preset_store(monkeypatch, preset):
 
 
 class FakeDB:
-    """Enough of the db for session_db.save and get_runtime_config."""
+    """Enough of the db for session_db.save/load and get_runtime_config."""
     def __init__(self, config=None):
         self._config = config or {}
-        self._qc = MagicMock()
-        self._qc.upsert = AsyncMock()
+        self._qc = self
+        self.rows: dict[str, dict] = {}
 
     async def get_config(self):
         return dict(self._config)
+
+    async def upsert(self, collection_name, points):
+        for p in points:
+            self.rows[str(p.id)] = dict(p.payload)
+
+    async def retrieve(self, collection_name, ids, with_payload=True):
+        class _Point:
+            def __init__(self, payload):
+                self.payload = payload
+                self.id = payload["session_id"]
+        return [_Point(self.rows[i]) for i in ids if i in self.rows]
 
 
 class FakeSpooler:
@@ -98,6 +110,32 @@ async def test_preset_diaries_crud(monkeypatch):
     summaries = await presets_db.get_recent_diary_summaries(mock_db, "c001", limit=3)
     assert len(summaries) == 1
     assert summaries[0]["summary"] == "暗室撮影で褒められて照れたこと"
+
+
+@pytest.mark.asyncio
+async def test_add_preset_diary_rejects_duplicate_session_and_character(monkeypatch):
+    """Defense in depth against the `finish_session` race: two diary jobs for
+    the same shoot must never file two entries."""
+    mock_db = MagicMock()
+    fake_preset_store(monkeypatch, {
+        "id": "c001", "slug": "test_actress", "name": "Test Actress", "diaries": [],
+    })
+
+    first = {
+        "id": "diary-1", "session_id": "s-1", "character_id": "c001",
+        "timestamp": time.time(), "content_ja": "最初の日記",
+    }
+    second = {
+        "id": "diary-2", "session_id": "s-1", "character_id": "c001",
+        "timestamp": time.time(), "content_ja": "同じ撮影の二通目",
+    }
+    added_first = await presets_db.add_preset_diary(mock_db, "c001", first)
+    added_second = await presets_db.add_preset_diary(mock_db, "c001", second)
+
+    assert added_first["id"] == "diary-1"
+    assert added_second["id"] == "diary-1", "the second write must return the existing entry"
+    diaries = await presets_db.get_preset_diaries(mock_db, "c001")
+    assert len(diaries) == 1
 
 
 @pytest.mark.asyncio
@@ -210,6 +248,35 @@ def test_a_tail_with_nothing_whole_left_falls_back_to_japanese():
     assert out["content_en"] == ""
 
 
+def test_unescape_reassembles_a_surrogate_pair_emoji():
+    """An emoji outside the BMP is JSON-escaped as two \\uXXXX halves. Undoing
+    them one at a time used to leave two lone surrogates, which cannot be
+    UTF-8 encoded — the "emoji shows as ?" bug."""
+    out = muse_diary._unescape(r"嬉しい😊です")
+    assert out == "嬉しい😊です"
+    out.encode("utf-8")  # must not raise
+
+
+def test_unescape_drops_a_truncated_lone_surrogate_instead_of_emitting_garbage():
+    """A response cut off mid-emoji leaves only the high half — that must be
+    dropped, not turned into an unencodable lone surrogate."""
+    out = muse_diary._unescape(r"最後に\ud83d")
+    assert out == "最後に"
+    out.encode("utf-8")
+
+
+def test_salvage_reassembles_a_surrogate_pair_emoji_from_broken_json():
+    """End to end: a truncated, JSON-shaped diary response whose content
+    contains an escaped emoji must still come out encodable and readable,
+    even on the field-level salvage path the primary JSON parser cannot use."""
+    raw = (
+        '{"content_ja": "今日はとても嬉しかった\\ud83d\\ude0a、で、まだ続く'
+    )
+    out = muse_diary.parse_diary(raw)
+    assert "😊" in out.get("content_ja", "")
+    out["content_ja"].encode("utf-8")
+
+
 def test_scaffolding_never_becomes_her_writing():
     """The bug this module exists for: the contract printed as her diary."""
     for raw in ('{"summary_ja":', "```json\n{\n", '{"content_ja": ',
@@ -267,6 +334,27 @@ async def test_wrapping_twice_writes_one_diary():
     session = _session()
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
+    assert len(spooler.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_requests_racing_finish_session_write_one_diary():
+    """A double-click or a second tab loads its own snapshot before either
+    write lands — two independent dicts, not the same mutated object like
+    above. Only the lock-and-reload inside `finish_session` catches this."""
+    db, spooler = FakeDB(), FakeSpooler()
+    from backend.app.muse import session_db
+    seed = _session()
+    await session_db.save(db, seed)
+
+    snap_a = await session_db.load(db, seed["session_id"])
+    snap_b = await session_db.load(db, seed["session_id"])
+    assert snap_a is not snap_b
+
+    await asyncio.gather(
+        muse_service.finish_session(db, spooler, snap_a, ollama="OLL"),
+        muse_service.finish_session(db, spooler, snap_b, ollama="OLL"),
+    )
     assert len(spooler.calls) == 1
 
 
