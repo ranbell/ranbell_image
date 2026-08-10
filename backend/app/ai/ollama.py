@@ -13,9 +13,42 @@ logger = logging.getLogger(__name__)
 
 _THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 
+# llama.cpp's detokenizer — the engine behind newer Ollama builds — falls back
+# to `<0xNN>` hex notation when it cannot assemble a multi-byte UTF-8
+# character, and that notation leaks straight through as text instead of the
+# character it stands for (every non-ASCII character is at risk: 「蹂躙」→
+# 「蹂<0xE8><0xBA><0x99>」). The real fix is upstream (an Ollama/engine
+# version), so this is a best-effort repair: reassemble a run of tokens into
+# the bytes they encode and decode as UTF-8; a run that isn't valid UTF-8 is
+# left exactly as it arrived rather than mangled further.
+_BYTE_TOKEN_RUN_RE = re.compile(r"(?:<0x[0-9A-Fa-f]{2}>)+")
+_BYTE_TOKEN_RE = re.compile(r"<0x([0-9A-Fa-f]{2})>")
+# A trailing run of complete tokens, or a token still being written (a bare
+# `<`, `<0`, `<0x`, or `<0x` + 1-2 hex digits) — either way it might still
+# grow with the next chunk, so it must never be repaired or emitted early.
+_TRAILING_BYTE_TOKENS_RE = re.compile(
+    r"(?:<0x[0-9A-Fa-f]{2}>)*<(?:0(?:x[0-9A-Fa-f]{0,2})?)?$"
+    r"|(?:<0x[0-9A-Fa-f]{2}>)+$"
+)
+
+
+def _repair_byte_fallback(text: str) -> str:
+    def _sub(m: re.Match[str]) -> str:
+        try:
+            return bytes(int(h, 16) for h in _BYTE_TOKEN_RE.findall(m.group(0))).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return m.group(0)
+    return _BYTE_TOKEN_RUN_RE.sub(_sub, text)
+
+
+def _split_trailing_byte_tokens(text: str) -> tuple[str, str]:
+    m = _TRAILING_BYTE_TOKENS_RE.search(text)
+    return (text[: m.start()], text[m.start():]) if m else (text, "")
+
 
 class StreamParser:
-    """Parse Ollama streaming text, splitting <think>...</think> from normal output."""
+    """Parse Ollama streaming text, splitting <think>...</think> from normal
+    output and repairing byte-fallback tokens (see `_repair_byte_fallback`)."""
 
     def __init__(self) -> None:
         self.in_think = False
@@ -24,6 +57,12 @@ class StreamParser:
     def feed(self, chunk: str) -> list[dict]:
         events: list[dict] = []
         self._buf += chunk
+
+        # Hold back a trailing token run that might still be growing; repair
+        # whatever's left (which may itself contain complete runs anywhere,
+        # not just at the end).
+        head, held_tail = _split_trailing_byte_tokens(self._buf)
+        self._buf = _repair_byte_fallback(head)
 
         while True:
             if not self.in_think:
@@ -53,13 +92,16 @@ class StreamParser:
                     self._buf = self._buf[idx + len("</think>"):]
                     self.in_think = False
 
+        self._buf += held_tail
         return events
 
     def flush(self) -> list[dict]:
         if not self._buf:
             return []
+        # Nothing more is coming, so a held-back tail is repaired now too —
+        # best-effort even on a genuinely incomplete run.
         event_type = "think" if self.in_think else "token"
-        events = [{"type": event_type, "text": self._buf}]
+        events = [{"type": event_type, "text": _repair_byte_fallback(self._buf)}]
         self._buf = ""
         return events
 
