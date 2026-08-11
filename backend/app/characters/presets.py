@@ -1031,3 +1031,37 @@ async def consume_social_seeds(db, preset_id: str, seed_ids: list[str]) -> None:
             kept.append(seed)
         await update_preset(db, preset_id, {"social_seeds": kept[:MAX_SOCIAL_SEEDS]})
 
+
+# ── Memory erase (admin) ─────────────────────────────────────────────────────
+# "記憶の消去" — reset every character's accrued memory (diary, chemistry notes,
+# lounge whispers) while leaving the character sheet, board and gallery photos
+# untouched. This is the payload-field half; the sibling collections
+# (muse_sessions, muse_lounge, muse_handpost, character_compat) are cleared by
+# their own modules — see characters/api.py's erase-memory endpoint.
+MEMORY_FIELDS: tuple[str, ...] = ("diaries", "chemistry", "social_seeds")
+
+
+async def plan_memory_erase(db) -> dict[str, Any]:
+    """Counts for the confirm dialog — nothing is changed."""
+    stored = await _stored_rows(db)
+    counts = {field: sum(len(p.get(field) or []) for p in stored.values()) for field in MEMORY_FIELDS}
+    affected = sum(1 for p in stored.values() if any(p.get(field) for field in MEMORY_FIELDS))
+    return {"characters": len(stored), "affected": affected, **counts}
+
+
+async def erase_all_memory_fields(db) -> int:
+    """Clear diaries/chemistry/social_seeds on every character.
+
+    A real overwrite via `update_preset` (Qdrant `set_payload`), not a flag —
+    the cleared lists are gone once this returns. Returns the number of
+    characters that had anything to clear.
+    """
+    stored = await _stored_rows(db)
+    touched = 0
+    for pid, payload in stored.items():
+        if not any(payload.get(field) for field in MEMORY_FIELDS):
+            continue
+        await update_preset(db, pid, {field: [] for field in MEMORY_FIELDS})
+        touched += 1
+    return touched
+

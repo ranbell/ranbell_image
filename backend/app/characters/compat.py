@@ -376,3 +376,23 @@ async def compat_status(db) -> dict[str, Any]:
         "total": total, "embedded": len(embedded_ids),
         "needs_backfill": len(embedded_ids) < total,
     }
+
+
+async def count_all(db) -> int:
+    result = await db._qc.count(collection_name=CHARACTER_COMPAT_COLLECTION, exact=True)
+    return result.count
+
+
+async def delete_all(db) -> int:
+    """Hard-delete every chemistry vector — used by the "記憶の消去" admin action.
+
+    Purely derived data (embeddings over appearance/personality text plus
+    diary-sourced records); `run_character_compat_backfill` rebuilds it.
+    """
+    n = await count_all(db)
+    if n:
+        await db._qc.delete(
+            collection_name=CHARACTER_COMPAT_COLLECTION,
+            points_selector=qm.FilterSelector(filter=qm.Filter()),
+        )
+    return n

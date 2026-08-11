@@ -643,6 +643,7 @@
     "execute": "Execute",
     "cancel": "Cancel",
     "loading": "Loading...",
+    "typeToConfirm": "Type “{phrase}” to confirm",
     "checking": "Checking...",
     "failed": "Failed to load",
     "ai": {
@@ -793,7 +794,15 @@
       "resetOrphanImages": "{n} reference images stay in the gallery with nobody attached.",
       "resetKeepsMine": "{n} characters you wrote yourself are left alone.",
       "resetNothingToRemove": "Nothing to delete — the bundled text is re-applied and every picture is kept.",
-      "resetDone": "Re-read {n} characters, removed {removed}"
+      "resetDone": "Re-read {n} characters, removed {removed}",
+      "eraseTitle": "Erase memory",
+      "eraseDesc": "Permanently deletes diaries, chemistry notes, lounge chatter, shoot sessions, and auto-generated handpost pages for every character at once. Bust-up and reference-sheet photos, and the character sheet itself, are never touched. This cannot be undone.",
+      "eraseBtn": "Erase memory",
+      "erasePhrase": "ERASE",
+      "eraseConfirm": "Permanently erase memory for {n} characters?",
+      "eraseConfirmDesc": "Deletes {diaries} diary entries, {chemistry} chemistry notes, {seeds} lounge whispers, {sessions} shoot sessions, {lounge} lounge threads, and {handpost} handpost pages. Photos and character sheets are kept. This cannot be undone.",
+      "eraseNothing": "There is no memory to erase.",
+      "eraseDone": "Erased memory for {n} characters (sessions {sessions}, lounge {lounge}, handpost {handpost})"
     },
     "connection": {
       "title": "Connections",

@@ -643,6 +643,7 @@
     "execute": "実行する",
     "cancel": "キャンセル",
     "loading": "読込中...",
+    "typeToConfirm": "確認のため「{phrase}」と入力してください",
     "checking": "確認中...",
     "failed": "取得に失敗しました",
     "ai": {
@@ -793,7 +794,15 @@
       "resetOrphanImages": "参照画像 {n} 枚は誰にも紐づかない状態でギャラリーに残ります。",
       "resetKeepsMine": "自作キャラクター {n} 体はそのまま残します。",
       "resetNothingToRemove": "削除対象はありません。同梱の内容を書き戻すだけで、絵はすべて残ります。",
-      "resetDone": "{n} 体を読み直し、{removed} 体を削除しました"
+      "resetDone": "{n} 体を読み直し、{removed} 体を削除しました",
+      "eraseTitle": "記憶の消去",
+      "eraseDesc": "日記・相性メモ・楽屋のやりとり・撮影セッション・自動生成された手帖ページを、全キャラクター分まとめて完全に削除します。バストアップやシートなどの写真、キャラクター設定は一切消えません。元には戻せません。",
+      "eraseBtn": "記憶を消去",
+      "erasePhrase": "消去する",
+      "eraseConfirm": "{n} 体分の記憶を完全に消去しますか？",
+      "eraseConfirmDesc": "日記 {diaries} 件・相性メモ {chemistry} 件・楽屋の呟き {seeds} 件・撮影セッション {sessions} 件・楽屋スレ {lounge} 件・手帖 {handpost} 件を削除します。写真とキャラクター設定は残ります。この操作は元に戻せません。",
+      "eraseNothing": "消去する記憶はありません。",
+      "eraseDone": "{n} 体分の記憶を消去しました（セッション {sessions} 件・楽屋 {lounge} 件・手帖 {handpost} 件）"
     },
     "connection": {
       "title": "接続確認",

@@ -89,6 +89,22 @@ async def delete(db, session_id: str) -> None:
     )
 
 
+async def count_all(db) -> int:
+    result = await db._qc.count(collection_name=MUSE_SESSIONS_COLLECTION, exact=True)
+    return result.count
+
+
+async def delete_all(db) -> int:
+    """Hard-delete every Muse session — used by the "記憶の消去" admin action."""
+    n = await count_all(db)
+    if n:
+        await db._qc.delete(
+            collection_name=MUSE_SESSIONS_COLLECTION,
+            points_selector=qm.FilterSelector(filter=qm.Filter()),
+        )
+    return n
+
+
 async def attach_board_image(db, session_id: str, image_id: str, meta: dict) -> None:
     session = await load(db, session_id)
     if session is None:

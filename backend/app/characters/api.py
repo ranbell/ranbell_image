@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..spooler.models import JobLane
+from . import compat as compat_mod
 from . import presets as presets_db
 from .board import SLOT_SIZE, compile_board_slot, plan_sheet
 
@@ -149,6 +150,56 @@ async def sync_muse_characters(request: Request, body: MuseSyncRequest | None = 
         request.app.state.db, vector_dim=settings.embed_dim, dry_run=opts.dry_run,
     )
     logger.info("[characters] muse sync (%s): %s",
+                "preview" if opts.dry_run else "applied", result)
+    return result
+
+
+class EraseMemoryRequest(BaseModel):
+    # Report the same numbers and change nothing, so the confirm dialog can
+    # say what is about to be deleted instead of asking the user to trust it.
+    dry_run: bool = False
+
+
+@router.post("/erase-memory")
+async def erase_character_memory(request: Request, body: EraseMemoryRequest | None = None):
+    """記憶の消去 — wipe every character's accrued memory, all at once.
+
+    Clears diaries / chemistry notes / lounge whispers from every character's
+    payload, deletes every Muse session, every lounge thread, every
+    auto-generated handpost page, and every chemistry vector (rebuildable).
+    The character sheet, board (bust-up + reference sheet) and gallery photos
+    are never touched — nothing here deletes an image.
+
+    Physical deletes throughout, not a flag: `presets_db.update_preset`
+    overwrites the payload fields in place, and the sibling collections use a
+    real Qdrant point delete.
+    """
+    db = request.app.state.db
+    opts = body or EraseMemoryRequest()
+    # Muse owns sessions/lounge/handpost; imported here rather than at module
+    # scope since this is the only characters/ endpoint that needs them.
+    from ..muse import handpost_db, lounge_db, session_db
+
+    if opts.dry_run:
+        plan = await presets_db.plan_memory_erase(db)
+        result = {
+            "dry_run": True,
+            **plan,
+            "sessions": await session_db.count_all(db),
+            "lounge_threads": await lounge_db.count_all(db),
+            "handpost_pages": await handpost_db.count_generated_pages(db),
+            "compat_vectors": await compat_mod.count_all(db),
+        }
+    else:
+        result = {
+            "dry_run": False,
+            "characters": await presets_db.erase_all_memory_fields(db),
+            "sessions": await session_db.delete_all(db),
+            "lounge_threads": await lounge_db.delete_all(db),
+            "handpost_pages": await handpost_db.purge_generated_pages(db),
+            "compat_vectors": await compat_mod.delete_all(db),
+        }
+    logger.info("[characters] erase-memory (%s): %s",
                 "preview" if opts.dry_run else "applied", result)
     return result
 

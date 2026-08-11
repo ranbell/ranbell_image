@@ -48,6 +48,10 @@ const adminLoading = ref('')
 const adminError = ref('')
 const adminSuccess = ref('')
 const adminConfirm = ref(null)
+// Set alongside adminConfirm when a destructive action wants more than a
+// click — the execute button stays disabled until this matches
+// adminConfirm.value.requirePhrase exactly.
+const adminConfirmInput = ref('')
 const vocabStatus = ref(null)   // {imported: bool, tag_count: int}
 const vocabImporting = ref(false)
 const mrlStatus = ref(null)
@@ -216,11 +220,13 @@ async function adminAction(key, url, opts = {}) {
   } finally {
     adminLoading.value = ''
     adminConfirm.value = null
+    adminConfirmInput.value = ''
   }
 }
 
-function confirmThen(message, description, action) {
-  adminConfirm.value = { message, description, action }
+function confirmThen(message, description, action, opts = {}) {
+  adminConfirm.value = { message, description, action, requirePhrase: opts.requirePhrase || '' }
+  adminConfirmInput.value = ''
 }
 
 async function fetchMrlStatus() {
@@ -434,6 +440,56 @@ function resetPlanDescription(plan) {
 }
 
 /*
+ * Wipe every character's diaries / chemistry notes / lounge whispers, plus
+ * every Muse session, lounge thread and auto-generated handpost page —
+ * all at once, for the whole roster. Never touches a photo or the character
+ * sheet. This is more destructive than the other two actions here (it is not
+ * scoped to "what the asset file no longer claims"), so on top of the usual
+ * dry-run preview it asks the operator to type a fixed phrase before the
+ * execute button will do anything.
+ */
+async function eraseCharacterMemory() {
+  rosterLoading.value = true
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/characters/erase-memory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true }),
+    })
+    if (!r.ok) throw new Error(r.statusText)
+    const plan = await r.json()
+    confirmThen(
+      t('admin.characters.eraseConfirm', { n: plan.affected ?? 0 }),
+      erasePlanDescription(plan),
+      () => adminAction('characterEraseMemory', '/api/characters/erase-memory', {
+        body: JSON.stringify({ dry_run: false }),
+        successMsg: d => t('admin.characters.eraseDone', {
+          n: d.characters ?? 0, sessions: d.sessions ?? 0,
+          lounge: d.lounge_threads ?? 0, handpost: d.handpost_pages ?? 0,
+        }),
+        after: fetchCharacterRoster,
+      }),
+      { requirePhrase: t('admin.characters.erasePhrase') },
+    )
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
+function erasePlanDescription(plan) {
+  if (!plan.affected && !plan.sessions && !plan.lounge_threads && !plan.handpost_pages) {
+    return t('admin.characters.eraseNothing')
+  }
+  return t('admin.characters.eraseConfirmDesc', {
+    diaries: plan.diaries ?? 0, chemistry: plan.chemistry ?? 0, seeds: plan.social_seeds ?? 0,
+    sessions: plan.sessions ?? 0, lounge: plan.lounge_threads ?? 0, handpost: plan.handpost_pages ?? 0,
+  })
+}
+
+/*
  * Versioned Muse asset sync — JSON fields only; diaries / boards stay put.
  */
 async function syncMuseRoster() {
@@ -564,13 +620,24 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
         <div v-if="adminConfirm" class="mx-6 mt-4 p-4 bg-red-950/60 border border-red-700/50 rounded-lg flex-shrink-0">
           <p class="text-sm font-medium text-red-300 mb-1">{{ adminConfirm.message }}</p>
           <p class="text-xs text-red-400/70 mb-3">{{ adminConfirm.description }}</p>
+          <div v-if="adminConfirm.requirePhrase" class="mb-3">
+            <label class="block text-[11px] text-red-400/80 mb-1">
+              {{ $t('admin.typeToConfirm', { phrase: adminConfirm.requirePhrase }) }}
+            </label>
+            <input
+              v-model="adminConfirmInput" type="text" autocomplete="off"
+              :placeholder="adminConfirm.requirePhrase"
+              class="w-full px-2 py-1.5 bg-black/40 border border-red-700/50 rounded text-xs
+                     text-red-100 placeholder-red-800/60 focus:outline-none focus:border-red-500"
+            />
+          </div>
           <div class="flex gap-2">
             <button @click="adminConfirm.action()"
-              :disabled="!!adminLoading"
+              :disabled="!!adminLoading || (adminConfirm.requirePhrase && adminConfirmInput !== adminConfirm.requirePhrase)"
               class="px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 rounded text-xs text-white font-medium">
               {{ $t('admin.execute') }}
             </button>
-            <button @click="adminConfirm = null" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300">
+            <button @click="adminConfirm = null; adminConfirmInput = ''" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300">
               {{ $t('admin.cancel') }}
             </button>
           </div>
@@ -1548,6 +1615,15 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
               <button type="button" @click="resetCharacterRoster" :disabled="!!adminLoading || rosterLoading"
                 class="px-3 py-1.5 bg-amber-800/70 hover:bg-amber-700 disabled:opacity-40 rounded-lg text-xs text-amber-50 font-medium">
                 {{ $t('admin.characters.resetBtn') }}
+              </button>
+            </div>
+
+            <div class="bg-red-950/30 border border-red-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-red-300/90">{{ $t('admin.characters.eraseTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.characters.eraseDesc') }}</p>
+              <button type="button" @click="eraseCharacterMemory" :disabled="!!adminLoading || rosterLoading"
+                class="px-3 py-1.5 bg-red-800/70 hover:bg-red-700 disabled:opacity-40 rounded-lg text-xs text-red-50 font-medium">
+                {{ $t('admin.characters.eraseBtn') }}
               </button>
             </div>
           </div>

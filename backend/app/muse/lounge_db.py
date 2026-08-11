@@ -144,6 +144,23 @@ async def summary(db, *, since: float = 0.0) -> dict[str, Any]:
     }
 
 
+async def count_all(db) -> int:
+    result = await db._qc.count(collection_name=MUSE_LOUNGE_COLLECTION, exact=True)
+    return result.count
+
+
+async def delete_all(db) -> int:
+    """Hard-delete every lounge thread and the trends doc — used by the
+    "記憶の消去" admin action."""
+    n = await count_all(db)
+    if n:
+        await db._qc.delete(
+            collection_name=MUSE_LOUNGE_COLLECTION,
+            points_selector=qm.FilterSelector(filter=qm.Filter()),
+        )
+    return n
+
+
 async def append_message(db, thread_id: str, message: dict[str, Any]) -> dict[str, Any] | None:
     thread = await get_thread(db, thread_id)
     if thread is None:

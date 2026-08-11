@@ -79,6 +79,36 @@ async def delete_page(db, page_id: str) -> bool:
     return True
 
 
+def _is_generated(page: dict[str, Any]) -> bool:
+    """True for pages the studio wrote on its own (habit notes, promoted
+    pitches) — as opposed to a notice the director typed by hand via
+    ``POST /handpost``, which carries neither a source thread nor character."""
+    return bool(
+        page.get("source_character_id") or page.get("source_thread_id")
+        or str(page.get("author") or "") != "director"
+    )
+
+
+async def count_generated_pages(db) -> int:
+    pages = await list_pages(db)
+    return sum(1 for p in pages if _is_generated(p))
+
+
+async def purge_generated_pages(db) -> int:
+    """Delete auto-generated handpost pages; hand-written director notices stay.
+
+    Used by the "記憶の消去" admin action — the director's own notes are not
+    a character's memory, so they are not part of what gets erased.
+    """
+    ids = [str(p["id"]) for p in await list_pages(db) if _is_generated(p)]
+    for i in range(0, len(ids), 100):
+        await db._qc.delete(
+            collection_name=MUSE_HANDPOST_COLLECTION,
+            points_selector=qm.PointIdsList(points=ids[i:i + 100]),
+        )
+    return len(ids)
+
+
 async def pinned_notice_lines(db, *, ja: bool = True, limit: int = 3) -> list[str]:
     pages = await list_pages(db, pinned_only=True)
     lines: list[str] = []
