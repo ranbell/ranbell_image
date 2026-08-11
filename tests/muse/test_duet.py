@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 import pytest
 
 from app.muse import brief as brief_mod
-from app.muse import crew, service, session_db
+from app.muse import crew, facets, service, session_db
 from tests.muse.test_service import (  # noqa: E402
     FakeComfy, FakeDb, FakeOllama, FakeSpooler,
 )
@@ -28,17 +28,55 @@ def _no_runtime_config(monkeypatch):
     monkeypatch.setattr(service, "get_runtime_config", _cfg)
 
 
+# A whole shot, in the parts the prep turn now writes.
+_OPENING = """SAY: わかりました。机の上にコーラの缶、脱ぎっぱなしの上着。
+PLACE TAGS: messy_room, indoors
+PLACE: A small cluttered room, she is on the floor by the low table.
+HOUR TAGS: night
+HOUR: Late at night.
+LIGHT TAGS: lamplight
+LIGHT: One warm lamp in the corner.
+PROPS TAGS: cola_can, thick_carpet, low_table, magazine
+PROPS: A cola can on the table, a thick carpet, magazines everywhere.
+COSTUME TAGS: white_shirt, pants
+COSTUME: She wears a loose white shirt and pants.
+POSE TAGS: sitting
+POSE: She sits on the carpet with her weight back on one hand.
+EXPRESSION TAGS: smile
+EXPRESSION: A small tired smile.
+CAMERA TAGS: from_front, upper_body
+CAMERA: A level shot from the front, waist up.
+
+COSTUME:
+SILHOUETTE: relaxed loungewear
+LAYERS: a single shirt
+COLOURWAY: white, navy
+PATTERN: solid
+FABRIC: cotton
+CONDITION: worn-in
+HERO: the white shirt
+GARMENTS: top=white_shirt / bottom=pants / feet=none / extras=none
+"""
+
+
 class TalkingOllama(FakeOllama):
-    """Answers a conversation turn with a line and nothing else."""
+    """Answers a conversation turn with a line, and a prep turn with a shot."""
+
+    def __init__(self, routes=None):
+        super().__init__()
+        self.routes = routes or {}
 
     def generate_text_stream(self, prompt, **kw):
         self.calls.append({**kw, "prompt": prompt})
-        crafty = "SAY: わかりました。机の上にコーラの缶、脱ぎっぱなしの上着。\n\n" + (
-            "TAGS: sitting, messy_room, cola_can, discarded_jacket, thick_carpet\n\n"
-            "SCENE: " + " ".join(["She sits in the small room"] * 30)
-        )
-        chat = "SAY: えっと……その場所なら、私はたぶん端っこに座っちゃうかも。"
-        text = crafty if "撮る画を一つに決めて" in str(prompt) else chat
+        system = str(kw.get("system") or "")
+        text = "SAY: えっと……その場所なら、私はたぶん端っこに座っちゃうかも。"
+        if "eight parts" in system:
+            text = next(
+                (v for k, v in self.routes.items() if k in str(prompt)),
+                "FACETS: none\nSTANDING: none",
+            )
+        elif "YOU ARE THE WHOLE CREW TODAY" in system:
+            text = _OPENING
 
         async def _stream():
             yield {"type": "token", "text": text}
@@ -47,12 +85,12 @@ class TalkingOllama(FakeOllama):
 
 class GarmentSwapOllama(FakeOllama):
     """Two prep turns: the first settles on pants, the second — after the
-    Showrunner asks for a skirt — writes fresh TAGS that (realistically,
-    imperfectly) still carry the old "pants" alongside the new "long_skirt",
-    but a COSTUME/GARMENTS block that correctly names only the new one. The
-    strike clerk is told to remove nothing, so only the structural GARMENTS
-    diff (`strike_dropped_costume`, Bug 4 / Phase 2) can take "pants" back
-    out of the craft.
+    Showrunner asks for a skirt — rewrites the costume part.
+
+    The interesting half is that the second turn still writes `pants` into its
+    own COSTUME TAGS line, exactly as a real model does. It does not matter.
+    The costume facet is replaced whole, and GARMENTS is the one garment
+    authority, so the old bottom cannot ride along beside the new one.
     """
 
     def __init__(self):
@@ -66,38 +104,35 @@ class GarmentSwapOllama(FakeOllama):
         async def _stream(text):
             yield {"type": "token", "text": text}
 
+        if "eight parts" in system:
+            if "スカート" in str(prompt):
+                return _stream("FACETS: costume\nCOSTUME: 下はスカート")
+            return _stream("FACETS: none\nSTANDING: none")
         if "script supervisor's clerk" in system:
-            # Only an explicit "パンツはやめて" (stop with the pants) reads as a
-            # removal — "スカートにして" (make it a skirt) is left for the
-            # structural GARMENTS diff to catch, on purpose (see the garment
-            # swap test below).
             if "パンツはやめて" in str(prompt):
                 return _stream("REMOVE: pants\nRESTORE: none")
             return _stream("REMOVE: none\nRESTORE: none")
 
-        if "撮る画を一つに決めて" in str(prompt):
+        if "YOU ARE THE WHOLE CREW TODAY" in system:
             self.preps += 1
-            first = self.preps == 1
-            tags = (
-                "sitting, messy_room, white_shirt, pants" if first else
-                "sitting, messy_room, white_shirt, pants, long_skirt"
-            )
-            bottom = "pants" if first else "long_skirt"
-            text = (
-                "SAY: わかりました、こんな感じです。\n\n"
-                f"TAGS: {tags}\n\n"
-                "SCENE: " + " ".join(["She sits in the small room"] * 30) + "\n\n"
+            if self.preps == 1:
+                return _stream(_OPENING)
+            return _stream(
+                "SAY: 下はスカートにしました。\n"
+                # The model's own line still names the old garment. GARMENTS
+                # below is what the outfit actually is.
+                "COSTUME TAGS: white_shirt, pants, long_skirt\n"
+                "COSTUME: She wears a white shirt and a long skirt.\n\n"
                 "COSTUME:\n"
                 "SILHOUETTE: relaxed loungewear\n"
-                "LAYERS: base + top\n"
+                "LAYERS: shirt over a skirt\n"
                 "COLOURWAY: white, navy\n"
                 "PATTERN: solid\n"
                 "FABRIC: cotton\n"
                 "CONDITION: worn-in\n"
-                "HERO: white_shirt\n"
-                f"GARMENTS: top=white_shirt / bottom={bottom} / feet=none / extras=none"
+                "HERO: the long skirt\n"
+                "GARMENTS: top=white_shirt / bottom=long_skirt / feet=none / extras=none"
             )
-            return _stream(text)
         return _stream("SAY: えっと、そうですね。")
 
 
@@ -142,6 +177,9 @@ async def test_getting_ready_is_when_the_script_appears():
 
     session = await service.duet_prep_stage(db, ollama, session)
 
+    # The shot exists in parts, and the craft is the view of it everything
+    # downstream still reads.
+    assert "messy_room" in facets.table_of(session)["place"]["tags"]
     assert "messy_room" in session["craft"]["tags"]
     assert "silver_hair" in session["craft"]["prompt"]
     # She reads the frame back, so there is something to say「これ足して」to.
@@ -204,48 +242,62 @@ async def test_approval_sounding_chat_never_shoots_after_prep():
 
 @pytest.mark.asyncio
 async def test_everything_she_is_told_stays_told():
-    db, ollama = FakeDb(), TalkingOllama()
+    """A note outlives the turn that answered it — as direction on the part it
+    was about, not as its own words replayed forever."""
+    db = FakeDb()
+    ollama = TalkingOllama(routes={"冬": "FACETS: hour\nHOUR: 真冬の夜"})
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
+    session = await service.duet_prep_stage(db, ollama, session)
 
-    session = await service.post_duet_chat(
-        db, ollama, session, "冬にして。厚着で。",
-    )
+    session = await service.post_duet_chat(db, ollama, session, "冬にして。厚着で。")
     assert "冬にして。厚着で。" in session["notes"]
+    assert session["directives"]["hour"]["text"] == "真冬の夜"
 
     session = await service.duet_prep_stage(db, ollama, session)
     prompt = ollama.calls[-1]["prompt"]
-    assert "冬にして。厚着で。" in prompt, "a note must outlive the turn answering it"
+    assert "真冬の夜" in prompt, "direction must outlive the turn answering it"
 
 
 @pytest.mark.asyncio
-async def test_a_carried_out_refusal_drops_out_of_the_next_preps_orders():
-    """Bug 5: without `carried_out`/`removed_now` threaded through, every note
-    ever spoken piled up in `orders_block` forever. Wiring `take_note` (Bug 4/6
-    Phase 1) into duet fixes it the same way the crewed studio already works."""
+async def test_a_refusal_is_still_carried_out_and_still_stops_being_read():
+    """A note that names no part of the shot is the other kind of instruction —
+    a standing refusal — and the strike clerk still owns it. Once carried out
+    its words drop out of what every turn re-reads, which is what stopped the
+    crew discussing a thing that had been vetoed."""
     db, ollama = FakeDb(), GarmentSwapOllama()
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
     session = await service.duet_prep_stage(db, ollama, session)
 
     session = await service.post_duet_chat(db, ollama, session, "パンツはやめて")
+    assert session["banned"] == ["pants"]
     assert session.get("carried_out"), "the strike pass must record what it resolved"
+    assert "pants" not in session["craft"]["tags"]
 
-    orders = brief_mod.orders_block(
-        list(session.get("notes") or []),
-        carried_out=list(session.get("carried_out") or []),
-        removed_now=list(session.get("just_banned") or []),
-        restored_now=list(session.get("just_restored") or []),
-    )
-    assert "パンツはやめて" not in orders, "a resolved note must not haunt the standing orders"
+    # A note that names no part rewrites nothing, so there is no prep turn to
+    # inspect — the refusal was carried out as state. The next turn that DOES
+    # write craft must not be handed the refused noun.
+    session = await service.post_duet_chat(db, ollama, session, "スカートにして")
+    session = await service.duet_prep_stage(db, ollama, session)
+    prep = ollama.calls[-1]["prompt"]
+    assert "パンツはやめて" not in prep
+    assert "pants" not in prep
+    # And it cannot be written back in, whatever the turn says.
+    assert "pants" not in session["craft"]["tags"]
 
 
 @pytest.mark.asyncio
-async def test_costume_change_structurally_drops_the_old_garment():
-    """Bug 4: "change pants to a skirt" must actually remove pants from the
-    craft. The strike clerk here finds nothing to remove (a plausible LLM
-    judgment call), so this only passes because of the structural GARMENTS
-    diff (`strike_dropped_costume`) now wired into duet's prep turns."""
+async def test_a_costume_change_replaces_the_outfit_in_every_place_it_lives():
+    """"Change the pants to a skirt" used to need a structural GARMENTS diff to
+    take the pants back out, because the craft was one flat bag and the model's
+    own tag line still named them.
+
+    It still names them. It no longer matters: the costume facet is replaced
+    whole, and GARMENTS is the one authority for what the outfit is. And the
+    check the old version could not make — that the old garment is gone from the
+    eight descriptive lines every later turn re-reads as LOCKED — is here too.
+    """
     db, ollama = FakeDb(), GarmentSwapOllama()
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
@@ -257,10 +309,12 @@ async def test_costume_change_structurally_drops_the_old_garment():
     session = await service.duet_prep_stage(db, ollama, session)
 
     assert "long_skirt" in session["craft"]["tags"]
-    assert "pants" not in session["craft"]["tags"], (
-        "the model's own TAGS line still had pants — only the GARMENTS-slot "
-        "diff can be relied on to strike it"
-    )
+    assert "pants" not in session["craft"]["tags"]
+    assert "pants" not in brief_mod.costume_block(session["costume"])
+    for value in facets.table_of(session)["costume"]["fields"].values():
+        assert "pants" not in str(value).lower()
+    # The room was not in the answer, so it cannot have been disturbed by it.
+    assert "cola_can" in session["craft"]["tags"]
 
 
 def test_prep_closing_instruction_reinforces_costume_and_props_too():

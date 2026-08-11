@@ -8,7 +8,7 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ..db.qdrant_client import MUSE_SESSIONS_COLLECTION
-from . import events
+from . import events, facets
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +30,21 @@ async def save(db, session: dict[str, Any], *, publish: bool = True) -> dict[str
 
 
 async def load(db, session_id: str) -> dict[str, Any] | None:
+    """Read a session, bringing it up to the current shape on the way out.
+
+    This is the one read funnel — the runner, the API, the report and the
+    service all come through here — so it is the one place a migration has to
+    be hooked. `facets.migrate` is idempotent and non-destructive: it builds the
+    facet table FROM the craft it finds, and leaves the craft where it was.
+    """
     points = await db._qc.retrieve(
         collection_name=MUSE_SESSIONS_COLLECTION,
         ids=[session_id],
         with_payload=True,
     )
-    return dict(points[0].payload or {}) if points else None
+    if not points:
+        return None
+    return facets.migrate(dict(points[0].payload or {}))
 
 
 # Qdrant's scroll has no ordering, so "recent" means read everything and then

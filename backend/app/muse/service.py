@@ -21,7 +21,8 @@ from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
 from . import brief as brief_mod
-from . import chain, crew, diary as diary_mod, events, identity, runner, session_db
+from . import chain, crew, diary as diary_mod, events, facets, identity, runner
+from . import session_db
 from . import handpost_db, lounge as lounge_mod, lounge_db
 from .runtime import negative_for as runtime_negative_for
 from .runtime import render_settings
@@ -890,9 +891,51 @@ def _still_meant(old: str, new_items: list[str]) -> bool:
     return any(old in new or new in old for new in new_items)
 
 
+def on_facets(session: dict[str, Any]) -> bool:
+    """True when this session's shot lives in the facet table.
+
+    The lead shoot with one Muse, and nothing else yet. W-Muse is excluded on
+    purpose: one `costume` / `pose` / `expression` facet cannot say whose
+    clothes and whose pose those are, which is the same reason `start_duet`
+    leaves `costume` untouched for a two-hander. Namespaced facets (`a.pose` /
+    `b.pose`) are the way in for it later. The crewed studio keeps its own
+    machinery until each seat declares the parts it owns.
+    """
+    return (
+        is_duet(session)
+        and not str(_inputs(session).get("partner_preset") or "").strip()
+    )
+
+
 def _reassemble(session: dict[str, Any]) -> None:
-    """Rebuild the Comfy positive from the craft's current tags and prose."""
+    """Rebuild the Comfy positive from the current shot.
+
+    On the facet path the tags and the prose are *derived* — the facet table is
+    the shot and `craft` is the view of it that the render, the ledger, the
+    report and the panel all read without knowing the difference. The prose is
+    the composed paragraph when one was composed from exactly this table, and
+    the facet sentences joined otherwise, so the positive is never blocked on a
+    model call: the panel can show what was just asked for the moment it lands.
+    """
     craft = session.setdefault("craft", {})
+    table = facets.table_of(session) if on_facets(session) else None
+    # An empty table is not an empty shot — it is a shot nobody has written into
+    # the table yet. Deriving from it would blank a craft that a turn had just
+    # filled in the old shape, so the projection only takes over once there is
+    # something in it to project.
+    if table is not None and facets.table_rev(table):
+        composed = session.get("composed") or {}
+        scene = str(composed.get("scene") or "").strip()
+        if not scene or int(composed.get("rev") or -1) != facets.table_rev(table):
+            scene = facets.nl_join(table)
+        craft["tags"] = facets.all_tags(table)
+        craft["scene"] = scene
+        craft["pose_intent"] = str(table["pose"].get("nl") or "")
+        # PLAN and COSTUME are not a second source of truth any more; they are
+        # this table in the shape `brief.plan_block` / `costume_block` expect,
+        # refreshed here so the brief cannot fall behind the shot.
+        session["plan"] = facets.to_plan(table)
+        session["costume"] = facets.to_costume(table)
     craft["prompt"] = identity.assemble_positive(
         _identity_tags(session), str(craft.get("tags") or ""),
         str(craft.get("scene") or ""),
@@ -913,10 +956,17 @@ def _ensure_garments(session: dict[str, Any], garments: list[str]) -> list[str]:
     COSTUME is prose the seats re-read; the render only ever sees tags. A garment
     that exists in one and not the other is the outfit being left to the
     checkpoint, which is the failure the COSTUME block was built to end.
+
+    Refused garments are not put back. This was the one way past ``drop_banned``:
+    a Showrunner who said「上着脱いで」had the jacket struck from the craft, and
+    then the next wardrobe turn re-read a COSTUME block that still named it and
+    stapled it straight back on. It came back as many times as she asked for it
+    to go.
     """
     craft = session.setdefault("craft", {})
+    gone = set(banned_tags(session))
     have = set(identity.tag_names(str(craft.get("tags") or "")))
-    missing = [t for t in garments if t not in have]
+    missing = [t for t in garments if t not in have and t not in gone]
     if not missing:
         return []
     parts = [p.strip() for p in str(craft.get("tags") or "").split(",") if p.strip()]
@@ -961,14 +1011,133 @@ def apply_removals(
 
     craft = session.setdefault("craft", {})
     before = str(craft.get("tags") or "")
-    craft["tags"] = drop_banned(session, before)
-    if craft["tags"] != before:
+    if on_facets(session):
+        # The craft is derived here, so striking it would last exactly until the
+        # next reassemble put the tag back from the table. A refusal has to
+        # reach the state, not the view of it — otherwise the refused thing goes
+        # on being handed to every turn as part of the shot.
+        table = facets.table_of(session)
+        stale = facets.strike(session, gone)
+        # A part whose tags just changed is a part whose sentence is now wrong,
+        # and the sentence is half the prompt. The old code told the next seats
+        # outright ("STRUCK FROM THE SET") and hoped; here the stale prose is
+        # dropped and the part is queued for rewrite, so nothing downstream is
+        # ever handed a sentence naming a thing that is no longer in the shot.
+        if stale:
+            routed = session.setdefault("routed", [])
+            routed.extend(n for n in stale if n not in routed)
         _reassemble(session)
+    else:
+        craft["tags"] = drop_banned(session, before)
+        if craft["tags"] != before:
+            _reassemble(session)
+    if craft.get("tags") != before:
         record_ledger(
             session, muse_id="showrunner", name="総監督",
-            before=before, after=craft["tags"],
+            before=before, after=str(craft.get("tags") or ""),
         )
     return added, freed
+
+
+def directives_block(session: dict[str, Any], *, only: list[str] | None = None) -> str:
+    """The Showrunner's direction, one line per part, newest at the bottom.
+
+    This is the whole of what the standing orders used to be, and it does not
+    grow. `orders_block` rendered every note ever said into every brief, newest
+    first, and left the crew to work out which of seventeen absolute
+    instructions won. Here a second camera order simply replaces the first, so a
+    twenty-turn session hands over the same eight lines a two-turn session does.
+    """
+    data = session.get("directives") or {}
+    lines: list[str] = []
+    for name, label in facets.FACETS:
+        if only is not None and name not in only:
+            continue
+        text = str((data.get(name) or {}).get("text") or "").strip()
+        if text:
+            lines.append(f"- {label}: {text}")
+    if not lines:
+        return ""
+    return "\n".join([
+        "SHOWRUNNER DIRECTION (総監督 said these and they stand until they are "
+        "said again):",
+        *lines,
+    ])
+
+
+async def set_facet_lock(
+    db, session: dict[str, Any], facet: str, locked: bool,
+) -> dict[str, Any]:
+    """Pin one part of the shot, or let it move again."""
+    if not on_facets(session):
+        raise MuseError(_msg(
+            session,
+            ja="この撮影では固定できません（主演撮りだけの機能です）。",
+            en="Parts can only be pinned in a lead shoot.",
+        ))
+    try:
+        facets.set_lock(session, facet, locked)
+    except ValueError as exc:
+        raise MuseError(f"unknown facet: {facet}") from exc
+    await session_db.save(db, session)
+    return session
+
+
+async def route_note(
+    db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+) -> tuple[list[str], str]:
+    """Work out which parts of the shot a note changes, and record it.
+
+    Returns (every part the note is ABOUT — locked or not — and the standing
+    rule it added). An empty list is the normal answer for「いい感じ」and means
+    the shot is untouched.
+
+    The caller uses this return value to decide whether the note is a
+    REPLACEMENT (skip the strike clerk) or an unroutable REFUSAL (run it). A
+    locked part still has to come back in this list even though nothing about
+    it is written: a note the router recognised as being about the camera is
+    replacement-shaped whether or not the camera happens to be pinned, and
+    routing it to the refusal clerk instead — because the pin quietly emptied
+    the list — was itself a bug (see 2026-08-11 e2e run, turn 15: 「真横から
+    撮って」while the camera was locked fell through to the clerk, which read
+    the note as retiring `from_front` and struck it out of the locked camera
+    facet anyway, because a refusal is allowed to override a pin. The note was
+    never a refusal; the lock only looked like one to the branch that decides).
+    """
+    if not on_facets(session) or ollama is None or not text.strip():
+        return [], ""
+    inputs = _inputs(session)
+    table = facets.table_of(session)
+    try:
+        named, lines, standing, digest = await chain.run_route(
+            ollama, note=text, table_block=facets.table_block(table),
+            current_digest=str(session.get("digest") or ""),
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.warning("[muse] route turn failed; nothing routed", exc_info=True)
+        return [], ""
+
+    writable = [n for n in named if not table[n].get("locked")]
+    session["locked_conflicts"] = [n for n in named if n not in writable]
+    directives = session.setdefault("directives", {})
+    now = time.time()
+    for name in writable:
+        # The clerk was asked for the finished value; when it gave none, the
+        # note's own words stand in. Worst case is today's behaviour, scoped to
+        # the part it is about.
+        directives[name] = {"text": lines.get(name) or text.strip(), "at": now}
+    if standing:
+        rules = session.setdefault("standing", [])
+        if standing not in rules:
+            rules.append(standing)
+    if digest:
+        # Rewritten, not appended — "added, then decided against" collapses to
+        # one line instead of surviving as two contradictory facts. `digest`
+        # is "" whenever the model left it unchanged, so the old value stands.
+        session["digest"] = digest
+    session["routed"] = writable
+    return named, standing
 
 
 async def take_note(
@@ -1636,12 +1805,22 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     caught = _caught_block(session)
     if caught:
         parts.append(caught)
-    orders = brief_mod.orders_block(
-        list(session.get("notes") or []),
-        carried_out=list(session.get("carried_out") or []),
-        removed_now=list(session.get("just_banned") or []),
-        restored_now=list(session.get("just_restored") or []),
-    )
+    # On the facet path the direction is reconciled — one line per part, the
+    # newest wins outright, and the list cannot grow past eight. `orders_block`
+    # rendered every note ever said, which is the O(turns) growth that made a
+    # long session drift.
+    if on_facets(session):
+        orders = "\n\n".join(b for b in [
+            directives_block(session),
+            facets.standing_block(list(session.get("standing") or [])),
+        ] if b)
+    else:
+        orders = brief_mod.orders_block(
+            list(session.get("notes") or []),
+            carried_out=list(session.get("carried_out") or []),
+            removed_now=list(session.get("just_banned") or []),
+            restored_now=list(session.get("just_restored") or []),
+        )
     if orders:
         parts.append(orders)
     if talk:
@@ -1680,6 +1859,67 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
         "決めたら、SAY でフレームに何が入っているかを自分の言葉で総監督に読み上げて。"
         "小物は名前で。捨てたものも一言言う。隠さないこと。"
     )
+    return "\n\n".join(p for p in parts if p)
+
+
+def _facet_prep_prompt(session: dict[str, Any], names: list[str]) -> str:
+    """What she is handed to rewrite some parts of the shot.
+
+    Deliberately short, and deliberately the same length on turn twenty as on
+    turn three. What is NOT here is the point: no transcript, no previous
+    assembled positive, no append-only order list. Those are what a long session
+    drowned in — the prep turn was handed twelve raw chat turns, every standing
+    order ever given, and the whole of the last prompt, and asked to work out
+    which parts of that were still true.
+
+    The shot is state now. The table says what the picture is; the direction
+    says what the Showrunner last asked of each part; the rest is conversation
+    and belongs to talk mode.
+    """
+    inputs = _inputs(session)
+    theme = str(inputs.get("theme") or "").strip()
+    table = facets.table_of(session)
+    opening = not facets.table_rev(table)
+
+    parts = [
+        f"お題（総監督が最初に言ったこと）:\n{theme}" if theme else "",
+        f"Style: {_style(session)}",
+        f"Framing: {_framing(inputs)}",
+    ]
+    digest = str(session.get("digest") or "").strip()
+    if digest:
+        # Shown to EVERY facet-writing turn, whether or not the router named
+        # this facet today — this is what closes the gap a routed directive
+        # alone cannot: the part being rewritten right now may hold a stale
+        # duplicate of something decided against on some earlier, unrelated
+        # turn, and only a standing reminder like this one reaches it. Placed
+        # ahead of "いまの画" on purpose: read this first, then the snapshot.
+        parts.append("ここまでの決定（会話の細部より、これを優先して読むこと）:\n"
+                     + digest)
+    if not opening:
+        parts.append("いまの画（すでに決まっている部分）:\n"
+                     + facets.table_block(table))
+    orders = directives_block(session, only=names if not opening else None)
+    if orders:
+        parts.append(orders)
+    standing = facets.standing_block(list(session.get("standing") or []))
+    if standing:
+        parts.append(standing)
+
+    labels = "・".join(facets.FACET_LABELS[n] for n in names)
+    if opening:
+        parts.append(
+            "この一枚を、全部あなたが決めて。場所・時間・光・小物・衣装・ポーズ・"
+            "表情・カメラ。決めたら SAY でフレームに何が入っているかを自分の言葉で"
+            "読み上げて。小物は名前で。隠さないこと。"
+        )
+    else:
+        parts.append(
+            f"総監督の指示で変わるのは {labels} だけ。そこだけ書き直して。\n"
+            "ほかの部分はもう決まっている。書き直さないし、触れない"
+            "（書いても捨てられる）。\n"
+            "SAY では、何をどう変えたか、捨てたものも含めて自分の言葉で言って。"
+        )
     return "\n\n".join(p for p in parts if p)
 
 
@@ -1726,10 +1966,140 @@ async def _duet_talk(
     return session
 
 
+def _facets_to_write(session: dict[str, Any]) -> list[str]:
+    """Which parts this prep turn rewrites.
+
+    Everything unlocked on the opening — there is no shot yet. After that, only
+    what the Showrunner's direction has actually touched since the last prep,
+    which is what makes an untouched part untouched by construction rather than
+    by the model remembering to leave it alone.
+    """
+    table = facets.table_of(session)
+    unlocked = [n for n, _ in facets.FACETS if not table[n].get("locked")]
+    if not facets.table_rev(table):
+        return unlocked
+    routed = [n for n in (session.get("routed") or []) if n in unlocked]
+    return routed
+
+
+def _apply_facet_turn(
+    session: dict[str, Any], written: dict[str, dict[str, Any]], *,
+    say: str, muse_id: str, ms: int = 0,
+    turns: tuple[dict[str, str], ...] | None = None,
+) -> dict[str, Any]:
+    """Write the parts this turn rewrote, and nothing else.
+
+    The ledger still records a before/after over the whole tag list, so
+    `report.py` and the panel are unaffected — from outside this looks like any
+    other turn that changed the craft.
+    """
+    before = str((session.get("craft") or {}).get("tags") or "")
+    blocked: list[str] = []
+    for name, slot in written.items():
+        report = facets.write(
+            session, name,
+            tags=slot.get("tags"), nl=slot.get("nl"),
+            fields=slot.get("fields"), by=muse_id,
+        )
+        blocked.extend(n for n in report["blocked"] if n not in blocked)
+    # Two parts of the shot disagreeing, where the one that would have yielded
+    # is pinned. The pin wins and the panel gets to say so — a change that
+    # silently did not take is the thing the Showrunner cannot debug.
+    session["facet_conflicts"] = blocked
+    _reassemble(session)
+    record_ledger(
+        session, muse_id=muse_id, name=_muse_display_name(session, muse_id),
+        before=before, after=str(session["craft"].get("tags") or ""), ms=ms,
+    )
+    spoken = session.setdefault("spoken", [])
+    if muse_id not in spoken:
+        spoken.append(muse_id)
+    # The direction has been carried out. Leaving it on the list is how a note
+    # answered three turns ago went on being answered.
+    session["routed"] = []
+    _rebuild_brief(session)
+
+    name = _muse_display_name(session, muse_id)
+    msg = _chat_append(
+        session, role="muse", text=say or f"（{name}が台本を更新した。）",
+        muse_id=muse_id, name=name, kind="craft",
+        turns=_resolve_duet_turns(session, turns),
+    )
+    _publish_chat(session["session_id"], msg)
+    events.publish(session["session_id"], {
+        "type": "craft_updated",
+        "prompt": str(session["craft"].get("prompt") or ""),
+        "muse_id": muse_id,
+    })
+    return msg
+
+
+async def _duet_prep_facets(
+    db, ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """The prep turn, scoped to the parts the Showrunner actually changed."""
+    inputs = _inputs(session)
+    sid = session["session_id"]
+    lead = crew.DEFAULT_MEMBER["actress"]
+    names = _facets_to_write(session)
+    if not names:
+        # Nothing was asked for, so nothing is rewritten. Saying "she rebuilt
+        # the shot" here is how an untouched part got touched.
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        return session
+
+    session["status"] = "discussing"
+    await session_db.save(db, session)
+    events.publish(sid, {
+        "type": "muse_speaking", "muse_id": lead,
+        "name": _muse_display_name(session, lead),
+    })
+    images = await board_images(db, session)
+    started = time.monotonic()
+    opening = not facets.table_rev(facets.table_of(session))
+
+    try:
+        say, written, blind = await chain.run_duet_facets(
+            ollama,
+            user_prompt=_facet_prep_prompt(session, names),
+            system=crew.actress_duet_prompt(
+                session.get("character") or {}, mode="prep",
+                base_style=_style(session), seed=str(sid),
+                facets=names, opening=opening,
+            ),
+            allowed=names,
+            model=_vision_model(inputs) if images else _text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+            images=images or None,
+            on_token=_token_publisher(sid, lead),
+        )
+    except chain.ChainError as exc:
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        raise MuseError(_msg(
+            session,
+            ja="台本がうまく組めませんでした。もう少し話してから試してください。",
+            en="Couldn't put the shot together. Talk it through a bit more and try again.",
+        )) from exc
+    if blind and images:
+        _note_blind(session)
+    _apply_facet_turn(
+        session, written, say=say, muse_id=lead,
+        ms=int((time.monotonic() - started) * 1000),
+    )
+    session["status"] = "chat"
+    await _after_actress_spoke(db, session)
+    await session_db.save(db, session)
+    return session
+
+
 async def _duet_prep(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> dict[str, Any]:
     """She builds the whole shot and reads the frame back, object by object."""
+    if on_facets(session):
+        return await _duet_prep_facets(db, ollama, session, cfg=cfg)
     inputs = _inputs(session)
     sid = session["session_id"]
     lead = crew.DEFAULT_MEMBER["actress"]
@@ -1804,9 +2174,41 @@ async def post_duet_chat(
     await session_db.save(db, session)
 
     cfg = await get_runtime_config(db)
-    # Whatever the note refuses comes out of the picture before she answers
-    # it — same strike pass the crewed studio runs on every note.
-    await take_note(db, ollama, session, text, cfg=cfg)
+    # Which parts of the shot this changes, before she answers it.
+    named, _ = await route_note(db, ollama, session, text, cfg=cfg)
+    # A note that names a part is a REPLACEMENT, and a replacement does not
+    # need a ban: 「上着脱いで」rewrites the costume facet, and a garment can
+    # only exist in that facet, so it cannot come back. Banning it would be
+    # worse than useless — it is permanent, and she should be able to put the
+    # jacket back on later if the Showrunner changes his mind.
+    #
+    # A note that names no part is the other kind — 「メガネは今後一切なし」—
+    # and that is what the strike clerk has always been for. One turn either
+    # way, so the cost per note is unchanged.
+    if not named:
+        await take_note(db, ollama, session, text, cfg=cfg)
+    else:
+        session.setdefault("notes", []).append(text)
+        session["just_banned"] = []
+        session["just_restored"] = []
+        locked = list(session.get("locked_conflicts") or [])
+        if locked and set(locked) == set(named):
+            # Every part this note was about is pinned. Saying nothing here is
+            # how the lock read as a bug: the note is real, it was understood,
+            # and it still did not move anything — the Showrunner needs to see
+            # that distinction, not infer it from an unchanged craft.
+            names_ja = "・".join(facets.FACET_LABELS[n] for n in locked)
+            locale = str(_inputs(session).get("locale") or "ja")
+            note = _chat_append(
+                session, role="system", name="Studio",
+                text=(
+                    f"（{names_ja}は固定されているので変更していません。固定を外せば動かせます）"
+                    if locale.startswith("ja") else
+                    f"({', '.join(facets.FACET_LABELS[n] for n in locked)} "
+                    "is pinned, so this did not change it. Unpin it to move it.)"
+                ),
+            )
+            _publish_chat(sid, note)
     await session_db.save(db, session)
     return await _duet_talk(db, ollama, session, text, cfg=cfg)
 
@@ -2195,12 +2597,66 @@ def _densify_user_prompt(session: dict[str, Any], *, screening: str = "") -> str
     )
 
 
+async def compose_scene_if_needed(
+    db, ollama, session: dict[str, Any],
+) -> dict[str, Any]:
+    """Render the facet table into prose, once per version of the shot.
+
+    This is the step that makes the parts read as one picture. It is a pure
+    function of the table: the prompt is the table and the standing rules and
+    nothing else — no chat, no theme, no brief, no previous prompt. Composing
+    was never what went wrong; being handed twenty turns of contradicting
+    history was, and a composer with no history cannot be confused by one.
+
+    Skipped when the table has not moved since the last composition, so an
+    unchanged shot costs nothing. Falls back to the joined facet sentences
+    whenever the composition cannot be trusted — the shot still renders.
+    """
+    if ollama is None or not on_facets(session):
+        return session
+    table = facets.table_of(session)
+    rev = facets.table_rev(table)
+    if not rev:
+        return session
+    composed = session.get("composed") or {}
+    if int(composed.get("rev") or -1) == rev and str(composed.get("scene") or ""):
+        return session
+
+    cfg = await get_runtime_config(db)
+    inputs = _inputs(session)
+    try:
+        scene = await chain.run_compose(
+            ollama,
+            table_block=facets.table_block(table),
+            standing=facets.standing_block(list(session.get("standing") or [])),
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+    except chain.ChainError:
+        logger.warning("[muse] compose failed; rendering the joined parts",
+                       exc_info=True)
+        return session
+
+    usable, _ = facets.warn_invented_nouns(
+        table, scene, banned=banned_tags(session),
+        extra=[_style(session), str((session.get("character") or {}).get("name") or "")],
+    )
+    if scene and usable:
+        session["composed"] = {"scene": scene, "rev": rev, "at": time.time()}
+        _reassemble(session)
+    await session_db.save(db, session, publish=False)
+    return session
+
+
 async def densify_craft_if_needed(
     db, ollama, session: dict[str, Any],
 ) -> dict[str, Any]:
     """Run Finisher once when craft is too thin for a rich render."""
     if ollama is None:
         return session
+    # The facet path composes instead: the table is dense by construction and
+    # the composer is told the word count, so there is nothing to thicken.
+    if on_facets(session):
+        return await compose_scene_if_needed(db, ollama, session)
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     scene = str(craft.get("scene") or "")

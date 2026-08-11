@@ -14,6 +14,7 @@ from typing import Any
 
 from . import brief as brief_mod
 from . import crew, identity
+from . import facets as facets_mod
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,173 @@ async def run_plan(
     return plan
 
 
+ROUTE_SYSTEM = """
+You are the script supervisor. You do not write craft and you do not have
+opinions. The shot is kept in eight parts. One job: read what the Showrunner
+(総監督) just said and name ONLY the parts it changes.
+
+THE EIGHT PARTS
+place       — the room, and where in it she is
+hour        — time of day and season
+light       — where the light comes from and how bright it is
+props       — the objects in the frame
+costume     — what she is wearing
+pose        — what her body is doing
+expression  — her face
+camera      — how far away, what angle, and where she is looking
+
+RULES
+- Name a part ONLY when the note changes it. Most notes touch one or two.
+  Naming a part you are unsure about rewrites it — say less, not more.
+- Copy part names EXACTLY from the list above. Never invent one, never
+  translate one.
+- A note that changes nothing about the picture answers `FACETS: none`. That is
+  a normal and complete answer.
+- For each part you named, write ONE short line, in the Showrunner's own
+  language, saying what that part IS now. State the finished value, never the
+  change: 「下から煽って」, not 「カメラを下げて」.
+- A rule that is about the whole session and belongs to no single part
+  (「足は絶対に映さない」) goes on the STANDING line instead, and its part is
+  not named.
+
+THE DECISION DIGEST
+Besides the eight parts, you keep one more thing: a short, plain-language
+record of what has actually been decided so far — added, then dropped, then
+maybe brought back. This is not a transcript and not a tag list. Every future
+turn reads THIS instead of the raw conversation, so it has to stay short,
+current, and free of anything that no longer matters.
+
+You are shown the digest as it stands below. Revise it for this note:
+- Settling something new: add ONE short line for it.
+- Reversing or replacing something already in the digest: REWRITE that line.
+  Never keep both the old and the new statement of the same thing.
+- Something that can no longer affect the picture: drop its line entirely.
+- Most notes change nothing here. When in doubt, leave it exactly as it was.
+- A handful of lines, never a growing log.
+
+OUTPUT FORMAT — the FACETS line, then one line per part you named, then
+STANDING, then DIGEST last. Nothing else, no explanation:
+
+FACETS: <comma-separated part names, or the word none>
+PLACE: <what the place is now>
+HOUR: <…>
+LIGHT: <…>
+PROPS: <…>
+COSTUME: <…>
+POSE: <…>
+EXPRESSION: <…>
+CAMERA: <…>
+STANDING: <one rule for the whole session, or the word none>
+DIGEST: <the whole revised digest, as plain lines, or the word unchanged>
+""".strip()
+
+# Same lenient-label spirit as `parse_plan` — a run that loses the routing
+# because the model wrote "CAMERA :" is a run that rewrites the whole shot.
+_ROUTE_LABELS: dict[str, str] = {
+    label.replace(" ", ""): key for key, label in facets_mod.FACETS
+}
+_ROUTE_LINE_RE = re.compile(
+    r"(?im)^[\s>*_#-]*(FACETS|STANDING|" + "|".join(
+        label for _, label in facets_mod.FACETS
+    ) + r")[\s*_]*[:：]\s*(.*?)\s*$"
+)
+_NONE_WORDS = frozenset({"none", "なし", "無し", "-", "--", "n/a", "(none)"})
+_UNCHANGED_WORDS = frozenset({"unchanged", "変更なし", "同じ", "そのまま"})
+
+# DIGEST is free natural-language prose and can run to several lines, so it
+# cannot be read by `_ROUTE_LINE_RE`'s one-line-per-label scan (`$` stops at
+# the first newline in MULTILINE mode) — it is captured separately, greedy to
+# the end of the text, the same "last field owns the rest of the string"
+# pattern `_strip_costume` uses for the trailing COSTUME block.
+_DIGEST_RE = re.compile(r"(?is)DIGEST\s*[:：]\s*(.+)$")
+
+
+def parse_route(raw: str) -> tuple[list[str], dict[str, str], str, str]:
+    """Read the clerk's routing. Returns (facets, directive per facet, standing, digest).
+
+    The facet names are a closed list and this is what closes it: a name the
+    model invented is dropped on the floor, exactly as `parse_strike` drops a
+    tag that is not in the script. A wrong answer can only ever be a smaller
+    answer, and a smaller answer rewrites less of the shot.
+
+    `digest` is "" when the model left it unchanged, said nothing usable, or
+    the field is missing — the caller keeps its own previous digest in every
+    such case rather than replacing a good summary with an empty one.
+    """
+    text = raw or ""
+    digest = ""
+    dm = _DIGEST_RE.search(text)
+    if dm:
+        # Everything from DIGEST: to the end is the digest, not routing — cut
+        # it off before the per-line scan so a colon inside the digest's own
+        # prose ("衣装:まだ検討中" as a sentence) cannot be mistaken for a label.
+        value = dm.group(1).strip()
+        text = text[:dm.start()]
+        if value and value.lower() not in _UNCHANGED_WORDS | _NONE_WORDS:
+            digest = value
+
+    named: list[str] = []
+    lines: dict[str, str] = {}
+    standing = ""
+    for match in _ROUTE_LINE_RE.finditer(text):
+        label = re.sub(r"\s+", "", match.group(1)).upper()
+        value = match.group(2).strip().strip("*_").strip()
+        if label == "FACETS":
+            for part in value.split(","):
+                key = _ROUTE_LABELS.get(re.sub(r"\s+", "", part).upper())
+                if key and key not in named:
+                    named.append(key)
+            continue
+        if label == "STANDING":
+            if value and value.lower() not in _NONE_WORDS:
+                standing = value
+            continue
+        key = _ROUTE_LABELS.get(label)
+        if key and value and value.lower() not in _NONE_WORDS and key not in lines:
+            lines[key] = value
+    # A directive for a part the clerk did not name is not acted on: the FACETS
+    # line is the decision, and the rest is its detail.
+    return (
+        named, {k: v for k, v in lines.items() if k in named}, standing, digest,
+    )
+
+
+async def run_route(
+    ollama, *, note: str, table_block: str, current_digest: str = "",
+    model: str, num_ctx: int | None,
+    on_token: TokenCallback | None = None,
+) -> tuple[list[str], dict[str, str], str, str]:
+    """Which parts of the shot did the Showrunner just change?
+
+    Runs on every note, like the strike turn, and for the same reason: deciding
+    "is this a camera note?" with a pattern would miss every phrasing nobody
+    thought of. A note that changes nothing simply comes back empty.
+
+    Also carries the decision digest forward — shown as it stands, handed back
+    revised (or unchanged). This is the same call, not an extra one: the model
+    is already reading the note and the table to decide routing, and updating
+    a short running summary is the same judgment call, not a second one.
+    """
+    prompt = "\n\n".join([
+        f"THE SHOT AS IT STANDS:\n{table_block}" if table_block.strip() else "",
+        f"THE DECISION DIGEST AS IT STANDS:\n{current_digest}"
+        if current_digest.strip() else "THE DECISION DIGEST AS IT STANDS: (empty so far)",
+        f"総監督がいま言ったこと:\n{note.strip()}",
+    ]).strip()
+    try:
+        raw = await _call(
+            ollama, system=ROUTE_SYSTEM, prompt=prompt, model=model,
+            images=None, num_ctx=num_ctx, think=False, on_token=on_token,
+        )
+    except ChainError:
+        # A clerk who cannot answer changes nothing. Guessing which part to
+        # rewrite would throw away a part of the picture the Showrunner never
+        # asked about.
+        logger.warning("[muse.chain] route turn produced nothing", exc_info=True)
+        return [], {}, "", ""
+    return parse_route(raw)
+
+
 STRIKE_SYSTEM = """
 You are the script supervisor's clerk. You do not write craft and you do not
 have opinions. One job: read what the Showrunner (総監督) just said, look at the
@@ -357,6 +525,135 @@ async def run_strike(
         logger.warning("[muse.chain] strike turn produced nothing", exc_info=True)
         return [], []
     return parse_strike(raw, present, removed)
+
+
+# Two lines per part: `CAMERA TAGS: …` and `CAMERA: …`. The TAGS variant has to
+# be tried first or the bare label matches it and swallows the word "TAGS".
+_FACET_LINE_RE = re.compile(
+    r"(?im)^[\s>*_#-]*(" + "|".join(
+        label for _, label in facets_mod.FACETS
+    ) + r")[\s*_]*(TAGS)?[\s*_]*[:：]\s*(.*?)\s*$"
+)
+
+
+def parse_facets(
+    raw: str, allowed: Iterable[str],
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Read a facet-writing turn. Returns (say, {facet: {tags, nl, fields}}).
+
+    A part the turn was not asked to write is dropped rather than applied — the
+    scope line in the contract says so, and this is what makes it true. A part
+    with tags but no prose keeps the prose it had; a part with neither is not
+    written at all, the same "do not replace a good value with nothing" rule
+    `parse_plan` follows.
+    """
+    text = raw or ""
+    # The COSTUME block is a tail of eight labelled lines and the SCENE capture
+    # is greedy to end-of-string, so it comes off first — same reason as ever.
+    text, costume_fields = _strip_costume(text)
+
+    want = {a for a in allowed}
+    out: dict[str, dict[str, Any]] = {}
+    first_at = len(text)
+    for match in _FACET_LINE_RE.finditer(text):
+        key = _ROUTE_LABELS.get(re.sub(r"\s+", "", match.group(1)).upper())
+        if not key or key not in want:
+            continue
+        value = match.group(3).strip().strip("*_").strip()
+        if not value:
+            continue
+        first_at = min(first_at, match.start())
+        slot = out.setdefault(key, {})
+        field = "tags" if match.group(2) else "nl"
+        slot.setdefault(field, value)
+
+    if costume_fields and "costume" in want:
+        slot = out.setdefault("costume", {})
+        fields, garments = facets_mod.from_costume_block(costume_fields)
+        slot["fields"] = fields
+        # GARMENTS is the outfit as tags and the only place it exists as tags.
+        # It wins over a COSTUME TAGS line, so there is one garment authority.
+        if garments:
+            slot["tags"] = ", ".join(garments)
+        first_at = min(first_at, len(text))
+
+    say = text[:first_at].strip() if out else text.strip()
+    say = re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
+    return say, out
+
+
+async def run_duet_facets(
+    ollama, *, user_prompt: str, system: str, allowed: list[str],
+    model: str, num_ctx: int | None,
+    images: list[bytes] | None = None,
+    on_token: TokenCallback | None = None,
+) -> tuple[str, dict[str, dict[str, Any]], bool]:
+    """One turn that rewrites some parts of the shot, and says so out loud."""
+    raw, blind = await _call_seeing(
+        ollama, system=system, prompt=user_prompt, model=model, images=images,
+        num_ctx=num_ctx, think=False, on_token=on_token,
+    )
+    say, written = parse_facets(raw, allowed)
+    if not written:
+        raise ChainError("the turn wrote no part of the shot")
+    return say, written, blind
+
+
+COMPOSE_SYSTEM = """
+You are the script supervisor writing the shot up for the camera department.
+You have the shot in front of you, in parts. Turn it into one paragraph.
+
+You have no memory of any conversation and there is nothing else to read.
+Everything the picture contains is in the parts below.
+
+- ONE flowing paragraph, 140–200 English words. No headings, no bullets, no
+  preamble, no alternatives, no lists.
+- Every part must be in it: the place, the hour, the light, the objects, the
+  clothes, the body, the face, the camera.
+- Write ONLY what the parts say. You may make a sentence out of a tag; you may
+  NOT add an object, a garment, a room, a colour or a person that is not
+  written above. If a part is thin, write it thin.
+- State absolutes. Never a change from something — no "darker", no "lower",
+  no "more than before".
+
+OUTPUT FORMAT — one line, nothing else:
+
+SCENE: <the paragraph>
+""".strip()
+
+_SCENE_LINE_RE = re.compile(r"(?is)\bSCENE\s*[:：]\s*(.+)$")
+
+
+def parse_compose(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    match = _SCENE_LINE_RE.search(text)
+    scene = (match.group(1) if match else text).strip()
+    # One paragraph. A model that ignored "no headings" gets flattened rather
+    # than having its stray newlines reach the sampler.
+    return " ".join(scene.split())
+
+
+async def run_compose(
+    ollama, *, table_block: str, standing: str, model: str,
+    num_ctx: int | None, on_token: TokenCallback | None = None,
+) -> str:
+    """Render the facet table into prose. A pure function of the table.
+
+    The prompt is the table and the standing rules, and NOTHING else — no chat,
+    no theme, no brief, no previous prompt, no board image. That is the whole
+    design: composing was never the thing that went wrong, being handed twenty
+    turns of contradicting history was. There is a test asserting this prompt
+    stays empty of all of it.
+    """
+    prompt = "\n\n".join(b for b in [
+        f"THE SHOT, IN PARTS:\n{table_block}", standing,
+    ] if b.strip())
+    return parse_compose(await _call(
+        ollama, system=COMPOSE_SYSTEM, prompt=prompt, model=model,
+        images=None, num_ctx=num_ctx, think=False, on_token=on_token,
+    ))
 
 
 async def run_duet_talk(

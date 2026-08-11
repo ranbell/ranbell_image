@@ -10,8 +10,12 @@ import time
 import uuid
 from typing import Any
 
-from . import crew
+from . import crew, facets
 from .defaults import ALL_DEFAULTS
+
+# Re-exported so callers have one obvious place to reach for it. The table
+# itself and the rules that maintain it live in `facets.py`.
+migrate = facets.migrate
 
 # Acts the panel rails through. "refine" removed — boards + OK replace it.
 STEPS: tuple[str, ...] = (
@@ -57,8 +61,40 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # Everything the Showrunner has said, kept forever. A note used to live
         # only in the turn that answered it.
         "notes": [],
-        # Working craft the crew is building toward the board / shoot.
+        # Working craft the crew is building toward the board / shoot. On the
+        # duet path this is DERIVED from `facets` below — see
+        # `service._reassemble`. Everything downstream (the render, the ledger,
+        # the report, the panel) still reads it and does not know the
+        # difference.
         "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
+        # The shot, in parts. Each part carries its own danbooru tags AND its
+        # own sentence, and is rewritten as a whole or not at all. This is what
+        # makes a camera move actually move the camera: nothing removes
+        # `from_above`, the camera facet is overwritten and `from_above` only
+        # ever lived there. See `facets.py`.
+        "facets": facets.blank_table(),
+        # The Showrunner's direction, reconciled instead of stacked: one entry
+        # per facet, and a new camera order REPLACES the previous camera order.
+        # `notes` below is still appended for the chat log and the diary, but
+        # on the facet path nothing renders it into a prompt — that append-only
+        # list re-read in full on every turn is what made long sessions drift.
+        "directives": {},     # facet -> {"text": str, "at": float}
+        # Rules that belong to no single facet ("never show her feet").
+        "standing": [],
+        # The third memory — neither the chat (kept for voice) nor a facet's
+        # current tags (the result). A short, plain-language record of what has
+        # actually been decided, rewritten rather than appended to every time
+        # the router reads a note: "added, then decided against" collapses to
+        # one line instead of surviving as two contradictory facts. Handed to
+        # every facet-writing turn, whether or not the router named that facet
+        # this turn — this is what lets a LATER, unrelated rewrite of a facet
+        # that quietly holds a stale duplicate correctly leave it out, because
+        # the model was told the truth, not because a filter stripped it after
+        # the fact. See `chain.ROUTE_SYSTEM`'s DIGEST field.
+        "digest": "",
+        # The composed prose, and the table revision it was composed from. An
+        # unchanged shot is never composed twice.
+        "composed": {"scene": "", "rev": 0, "at": 0.0},
         # Who added which tag, in order. Without it a bad frame can only be
         # traced back to a seat by guessing from the chat.
         "ledger": [],

@@ -1373,6 +1373,25 @@
     "boardAsk": "これでいい？ 良ければ「③本番」、ダメなら指摘をどうぞ",
     "shootTitle": "本番",
     "craft": "いまの台本（プロンプト）",
+    "facets": "いまの画（部分ごと）",
+    "digest": "決定の要約",
+    "digestHint": "会話とは別に、LLM が書き直し続けている「ここまでの決定」の要約。読み取り専用。",
+    "facetsHint": "画は部分に分かれていて、指示が触れた部分だけが書き直されます。鍵をかけた部分は誰も書き直しません。",
+    "facetLock": "この部分を固定する",
+    "facetLocked": "固定中。書き直されません（押すと解除）",
+    "facetEmpty": "まだ決まっていません",
+    "facetBy": "{who}",
+    "facetConflict": "固定した部分と食い違っています。固定のほうが優先されました",
+    "facetNames": {
+      "place": "場所",
+      "hour": "時間",
+      "light": "光",
+      "props": "小物",
+      "costume": "衣装",
+      "pose": "ポーズ",
+      "expression": "表情",
+      "camera": "カメラ"
+    },
     "banned": "外したもの",
     "bannedHint": "総監督が外したもの。台本から消えて、ネガティブに入っています。押すと戻せます。",
     "bannedRestore": "これを戻す",
@@ -1507,8 +1526,6 @@
       "willNotice": "……読んだこと、本人はまだ知りません。次に撮影で会ったら、何か言われるかも 👀"
     },
     "pick": "選ぶ",
-
-
     "board": "参照ボード",
     "generateBoard": "参照ボードを描く",
     "regenerateBoard": "描き直す",

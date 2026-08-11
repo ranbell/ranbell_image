@@ -14,7 +14,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.tags.conflict import contradicts, contradicts_any
+from app.muse import identity
+from app.tags.conflict import SLOTS, contradicts, contradicts_any, slot_of
 
 
 @pytest.mark.parametrize("a,b", [
@@ -168,3 +169,103 @@ def test_a_picture_happens_in_one_room(a, b):
 ])
 def test_a_room_and_what_is_in_it_are_not_rivals(a, b):
     assert not contradicts(a, b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("from_above", "from_below"),
+    ("high_angle", "low_angle"),
+    ("from_above", "low_angle"),
+    ("close-up", "full_body"),
+    ("upper_body", "full_body"),        # shares a head noun, but no family
+    ("from_front", "from_behind"),
+])
+def test_a_shot_is_taken_from_one_position(a, b):
+    """The angle the Showrunner asked for arrived and the angle they were
+    leaving stayed. These reduce to the head nouns "above" and "below", so the
+    modifier-family rule never saw them."""
+    assert contradicts(a, b)
+    assert contradicts(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("from_above", "from_side"),        # pitch and side are different slots
+    ("from_below", "close-up"),         # pitch and distance
+    ("from_above", "classroom"),
+])
+def test_the_axes_of_a_camera_do_not_fight_each_other(a, b):
+    """A low three-quarter close-up is one real shot, not three."""
+    assert not contradicts(a, b)
+    assert not contradicts(b, a)
+
+
+@pytest.mark.parametrize("angle,gaze", [
+    ("from_below", "looking_up"),
+    ("low_angle", "looking_up"),
+    ("from_above", "looking_down"),
+    ("high_angle", "looking_down"),
+    ("overhead_shot", "looking_down"),
+])
+def test_a_lens_position_rules_out_the_gaze_it_makes_impossible(angle, gaze):
+    """The reported failure: a shot moved from a high angle to a low one and
+    `looking_up` survived, because nothing knew the two tags were related."""
+    assert contradicts(angle, gaze)
+    assert contradicts(gaze, angle)
+
+
+@pytest.mark.parametrize("angle,gaze", [
+    ("from_above", "looking_up"),
+    ("from_below", "looking_down"),
+    ("high_angle", "looking_up"),
+])
+def test_an_angle_agrees_with_the_gaze_that_belongs_to_it(angle, gaze):
+    """The check that catches an over-eager fix. Looking up at a camera above
+    her is the whole point of shooting from above — an exclusion slot holding
+    both would delete the thing that makes the angle read."""
+    assert not contradicts(angle, gaze)
+    assert not contradicts(gaze, angle)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("standing", "sitting"),
+    ("kneeling", "lying"),
+    ("open_mouth", "closed_mouth"),
+    ("closed_eyes", "wide-eyed"),
+    ("crossed_arms", "arms_up"),
+    ("looking_at_viewer", "looking_away"),
+])
+def test_one_body_does_one_thing_at_a_time(a, b):
+    assert contradicts(a, b)
+    assert contradicts(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("sitting", "wariza"),              # a modifier of a posture, not a rival
+    ("smile", "open_mouth"),            # these co-occur constantly
+    ("looking_at_viewer", "looking_back"),   # she turned her head; both true
+    ("standing", "crossed_arms"),       # posture and arms are separate slots
+    ("sitting", "hand_on_own_hip"),     # one-hand tags are not the arms slot
+])
+def test_the_body_tags_that_belong_together_are_left_alone(a, b):
+    """Over-eviction costs more than under-eviction — the `long_hair` /
+    `hair_ribbon` lesson at the top of the module, applied to the body."""
+    assert not contradicts(a, b)
+    assert not contradicts(b, a)
+
+
+def test_the_slots_are_disjoint():
+    """A tag in two slots would answer to whichever the dict iterated first,
+    and the owning facet would change with an unrelated edit."""
+    seen: dict[str, str] = {}
+    for slot, members in SLOTS.items():
+        for tag in members:
+            assert tag not in seen, f"{tag} is in both {seen.get(tag)} and {slot}"
+            seen[tag] = slot
+
+
+def test_every_framing_tag_the_panel_can_emit_belongs_to_a_camera_slot():
+    """`identity._FRAMING_TAGS` and this module name the same crops in two
+    places. If they drift, the panel's framing dropdown writes a tag no slot
+    guards, and the old crop rides along beside the new one."""
+    for tags in identity._FRAMING_TAGS.values():
+        for tag in tags:
+            assert slot_of(tag) in ("camera_distance", "camera_side"), tag

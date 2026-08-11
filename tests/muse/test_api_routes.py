@@ -156,3 +156,39 @@ def test_api_session_error_handling(api_client, monkeypatch):
     # 404 HTTP Exception for non-existent session
     res = api_client.get("/api/muse/sessions/non_existent")
     assert res.status_code == 404
+
+
+def test_api_pins_and_releases_one_part_of_the_shot(api_client, monkeypatch):
+    """A pinned part is never rewritten by any turn."""
+    from app.muse import schema
+
+    session = schema.new_session({
+        "theme": "お題", "character_id": "c1", "workflow": "w.json",
+        "model": "m", "mode": "duet",
+    })
+    session["session_id"] = "sess_facet_lock"
+
+    async def mock_load(db, sid):
+        return session
+    async def mock_save(db, s, **kw):
+        return s
+
+    monkeypatch.setattr("app.muse.session_db.load", mock_load)
+    monkeypatch.setattr("app.muse.session_db.save", mock_save)
+
+    res = api_client.patch(
+        "/api/muse/sessions/sess_facet_lock/facets/camera", json={"locked": True},
+    )
+    assert res.status_code == 200
+    assert res.json()["facets"]["camera"]["locked"] is True
+
+    res = api_client.patch(
+        "/api/muse/sessions/sess_facet_lock/facets/camera", json={"locked": False},
+    )
+    assert res.json()["facets"]["camera"]["locked"] is False
+
+    # A part that does not exist is a client error, not a new part.
+    res = api_client.patch(
+        "/api/muse/sessions/sess_facet_lock/facets/vibes", json={"locked": True},
+    )
+    assert res.status_code == 400

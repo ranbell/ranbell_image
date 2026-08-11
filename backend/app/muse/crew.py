@@ -16,6 +16,10 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+# The parts of the shot. This module writes the copy that tells a Muse what each
+# part is; `facets` owns what the parts are and the rules that keep them apart.
+from .facets import FACET_LABELS
+
 # Job order. Dependency order, not importance — the editor always closes.
 ROLE_ORDER: tuple[str, ...] = (
     # Settles where and when before anyone describes it. First for a reason: a
@@ -1856,6 +1860,92 @@ that hour, the camera distance and angle, and what your face is doing. No
 headings, no bullets.
 """.strip()
 
+# What each part of the shot is, in the words the writer needs. Kept here rather
+# than in `facets.py` because it is copy, and copy for the model lives with the
+# rest of the copy for the model.
+FACET_BRIEFS: dict[str, str] = {
+    "place": "the room, and where in it she is",
+    "hour": "time of day and season",
+    "light": "where the light comes from and how bright it is",
+    "props": "the objects in the frame — ten or more, the small ones matter most",
+    "costume": "what she is wearing",
+    "pose": "what her body is doing, and where the weight sits",
+    "expression": "her face — eyes, mouth, the micro-gesture",
+    "camera": "how far away, what angle, and where she is looking",
+}
+
+
+def facet_output_block(names: list[str], *, opening: bool = False) -> str:
+    """The output contract for a turn that rewrites some parts of the shot.
+
+    Two lines per part: the danbooru tags, and one or two sentences of prose.
+    Splitting them is the point. The shot used to be one flat tag bag and one
+    140-200 word paragraph, so a note about the camera could only be answered by
+    rewriting everything, and whatever the model failed to notice survived. Here
+    a part that is not listed is not written, and cannot drift.
+    """
+    labels = [
+        (n, FACET_LABELS[n]) for n in names if n in FACET_LABELS
+    ]
+    if not labels:
+        return ""
+    rows: list[str] = []
+    for name, label in labels:
+        pad = " " * max(0, 10 - len(label))
+        rows.append(
+            f"{label} TAGS:{pad} <danbooru tags with underscores, "
+            f"comma-separated, 3–8 tags — {FACET_BRIEFS[name]}>"
+        )
+        rows.append(
+            f"{label}:{pad}       <ONE or TWO sentences of English prose. "
+            f"This part only.>"
+        )
+
+    scope = (
+        "This is the opening — every part of the shot is yours to decide, so "
+        "write all of them."
+        if opening else
+        "You are rewriting ONLY these parts: "
+        + ", ".join(label for _, label in labels)
+        + ".\nEvery other part of the shot is already settled. Do not restate "
+          "it, do not improve it, and do not mention it in TAGS or in prose — "
+          "it is not yours this turn and anything you write about it is thrown "
+          "away."
+    )
+
+    return "\n".join([
+        "OUTPUT FORMAT — SAY, then two lines for each part, nothing else:",
+        "",
+        "SAY: You have just worked out what the shot is, and you are describing",
+        "it back to the Showrunner in your own words, in character, in natural",
+        "Japanese.",
+        "- Say WHERE you are, WHAT you are doing, and then NAME THE THINGS that",
+        "  are in the frame with you — plainly, one after another, as if looking",
+        "  around the room. The small ones matter most.",
+        "- This is how they find out what you put in, so nothing may be hidden.",
+        "  If you changed something, say what you dropped.",
+        "- End by leaving it open: something to add, something to take out.",
+        "- 4–8 sentences. Still you, not a checklist read aloud.",
+        "",
+        scope,
+        "",
+        *rows,
+        "",
+        "- TAGS are that part and nothing else. A garment tag under POSE is",
+        "  wrong; a room tag under CAMERA is wrong. Anything belonging to",
+        "  another part is thrown away, so writing it only costs you the slot.",
+        "- The prose line is that part and nothing else. One or two sentences,",
+        "  never a paragraph, never the whole picture — the parts are joined up",
+        "  afterwards and you are writing one of them.",
+        "- Do NOT repeat Character identity tags (hair/eyes/figure) — the server",
+        "  adds those. English only, in both lines.",
+        "- State the ABSOLUTE value. Never \"lower\", \"darker\", \"more\" — what it",
+        "  IS. A relative nudge gets applied again every turn until the frame",
+        "  bottoms out.",
+        "- Weights (tag:1.1)–(tag:1.35) sparingly, and never on posture.",
+    ])
+
+
 DUET_OWNS_THE_FRAME = """
 YOU ARE THE WHOLE CREW TODAY
 There is no planner, no camera, no wardrobe, no lighting. Nobody will fill in
@@ -1883,6 +1973,44 @@ Their newest words beat the previous craft and beat any board image you are
 shown (the board is an old take). Rewrite place, objects, clothes, camera,
 and pose that conflict. Keep only what still belongs. Say out loud in SAY
 what you are dropping. A room you have left does not keep its furniture.
+""".strip()
+
+
+# The same craft standards, for a turn that writes the shot in parts. What is
+# gone is the whole "rewrite everything that conflicts" section: a part she was
+# not asked to write is not in her output format at all, so there is nothing
+# left for it to conflict with. That paragraph was asking a model to do, every
+# turn, what the shape of the answer now does for free — and the two reported
+# failures are both cases where it did not.
+DUET_OWNS_THE_FRAME_SCOPED = """
+YOU ARE THE WHOLE CREW TODAY
+There is no planner, no camera, no wardrobe, no lighting. Nobody will fill in
+what you leave out and nobody will overrule you. The shot is kept in parts, and
+this turn you are writing the parts listed in the output format below.
+
+Whichever of them are yours this turn, these are the standards:
+
+- PLACE and HOUR, specific enough to light itself. A spot in a room, not a
+  region. Name the real place they asked for (a broadcast booth is not a
+  classroom — put booth gear in frame if that is the place).
+- PROPS: ten or more objects that belong to that place and hour. This is the
+  single thing that makes a picture look like somewhere rather than a backdrop.
+  Dull objects are the good ones — a cable, a cup someone left, a scuff.
+- COSTUME chosen for this place and this hour.
+- LIGHT stated as what it IS: where it comes from and how bright.
+- CAMERA: how far away, what angle, and what it is on — exactly as the
+  Showrunner last said. A rear view means from behind; looking back at the
+  camera means looking_back with looking_at_viewer from that angle. An angle
+  brings its gaze with it: from below she is looking down at the lens, from
+  above she is looking up at it. Wide enough that the objects are in frame.
+- POSE believable and ordinary. Weight somewhere specific. Never arched,
+  hunched, contorted or over-extended, and no emphasis on posture tags.
+- EXPRESSION that is hers, not a blank idol template.
+
+THE PARTS YOU WERE NOT ASKED FOR
+They are already settled and they are not yours this turn. Do not restate them,
+do not improve them, do not carry them into another part's tags. A board image
+you are shown is an old take and is not the shot; the parts above it are.
 """.strip()
 
 
@@ -1942,6 +2070,7 @@ def _voice_block(character: dict[str, Any], *, locale: str = "ja", seed: str = "
 def actress_duet_prompt(
     character: dict[str, Any], *, mode: str = "talk",
     base_style: str = "", seed: str = "", locale: str = "ja",
+    facets: list[str] | None = None, opening: bool = False,
 ) -> str:
     """The Lead working alone with the Showrunner.
 
@@ -1972,7 +2101,19 @@ def actress_duet_prompt(
         "(shy when looked at, steadier on mic, etc.) — do not narrate your "
         "life story or turn SUMMARY into the subject of the line.",
     ]
-    if mode == "prep":
+    if mode == "prep" and facets is not None:
+        # The scoped contract. DUET_OWNS_THE_FRAME's "rewrite everything that
+        # conflicts" half is what scoped replacement makes unnecessary: a part
+        # she was not asked to write is not in her output format at all, so
+        # there is nothing for it to conflict with.
+        blocks += [
+            DUET_OWNS_THE_FRAME_SCOPED,
+            _style_block(lead, base_style),
+            facet_output_block(list(facets), opening=opening),
+        ]
+        if "costume" in facets:
+            blocks.append(WARDROBE_COSTUME_TAIL)
+    elif mode == "prep":
         blocks += [
             DUET_OWNS_THE_FRAME,
             _style_block(lead, base_style),

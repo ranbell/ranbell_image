@@ -1373,6 +1373,25 @@
     "boardAsk": "Good? Press \"final\" to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",
+    "facets": "The shot, in parts",
+    "digest": "Decision digest",
+    "digestHint": "A running summary of what has been decided, kept separate from the chat log and revised (not appended to) by the model. Read-only.",
+    "facetsHint": "The shot is kept in parts. A note rewrites only the parts it changes; a pinned part is never rewritten.",
+    "facetLock": "Pin this part",
+    "facetLocked": "Pinned — no turn rewrites this (click to release)",
+    "facetEmpty": "Not settled yet",
+    "facetBy": "{who}",
+    "facetConflict": "Disagrees with a pinned part. The pin won.",
+    "facetNames": {
+      "place": "Place",
+      "hour": "Hour",
+      "light": "Light",
+      "props": "Props",
+      "costume": "Costume",
+      "pose": "Pose",
+      "expression": "Expression",
+      "camera": "Camera"
+    },
     "banned": "Removed",
     "bannedHint": "What you took out. Gone from the craft and in the negative prompt. Click to ask for it back.",
     "bannedRestore": "Ask for this back",
@@ -1507,8 +1526,6 @@
       "willNotice": "…she does not know you read it yet. She may say something next time you shoot together 👀"
     },
     "pick": "Pick",
-
-
     "board": "Reference board",
     "generateBoard": "Draw the reference board",
     "regenerateBoard": "Redraw",

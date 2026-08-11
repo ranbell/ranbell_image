@@ -248,6 +248,32 @@ const tagCredits = computed(() => {
   }
   return [...seen].map(([tag, who]) => ({ tag, who }))
 })
+// The shot, in parts. Declaration order is the order it reads on a shot sheet:
+// where, when, how lit, what is there, what she has on, what she is doing, her
+// face, the lens. The server orders them differently for the prompt itself.
+const FACET_NAMES = [
+  'place', 'hour', 'light', 'props', 'costume', 'pose', 'expression', 'camera',
+]
+const facetRows = computed(() => {
+  const table = session.value?.facets || {}
+  return FACET_NAMES
+    .map(name => ({ name, ...(table[name] || {}) }))
+    .filter(f => (f.tags || []).length || String(f.nl || '').trim() || f.locked)
+})
+// Two parts of the shot disagreeing, where one of them is pinned. The pinned
+// one wins; this is so the panel can say why the other did not take.
+const facetConflicts = computed(() => session.value?.facet_conflicts || [])
+
+async function toggleFacetLock(facet) {
+  const was = !!(session.value?.facets?.[facet]?.locked)
+  try {
+    session.value = await api(
+      `/api/muse/sessions/${session.value.session_id}/facets/${facet}`,
+      { method: 'PATCH', body: JSON.stringify({ locked: !was }) },
+    )
+  } catch (err) { fail(err) }
+}
+
 function clock(s) {
   const m = Math.floor(s / 60)
   return m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`
@@ -1054,6 +1080,61 @@ async function onChatKey(e) {
               </figure>
             </div>
           </div>
+
+          <!-- the third memory: not chat, not a facet's tags — a short,
+               revised-not-appended record of what has actually been decided.
+               Read-only; the LLM writes it, the Showrunner just gets to see it. -->
+          <details v-if="session?.digest" class="text-[10px] text-[var(--sb-faint)]">
+            <summary class="cursor-pointer">{{ t('muse.digest') }}</summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.digestHint') }}</p>
+            <p class="whitespace-pre-wrap text-[var(--sb-muted)]">{{ session.digest }}</p>
+          </details>
+
+          <!-- the shot, in parts. Pin one and no turn rewrites it. -->
+          <details v-if="facetRows.length" open class="text-[10px] text-[var(--sb-faint)]">
+            <summary class="cursor-pointer">
+              {{ t('muse.facets') }} · {{ facetRows.length }}
+            </summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.facetsHint') }}</p>
+            <ul class="space-y-1.5">
+              <li
+                v-for="f in facetRows" :key="f.name"
+                class="rounded border px-2 py-1.5"
+                :class="f.locked
+                  ? 'border-[var(--sb-teal)]/50 bg-[var(--sb-teal)]/5'
+                  : 'border-white/10'"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-gray-300">
+                    {{ t(`muse.facetNames.${f.name}`) }}
+                  </span>
+                  <span v-if="facetConflicts.includes(f.name)"
+                        class="text-[var(--sb-amber)]" :title="t('muse.facetConflict')">!</span>
+                  <span v-if="f.by" class="ml-auto shrink-0 text-[var(--sb-faint)]">
+                    {{ t('muse.facetBy', { who: f.by }) }}
+                  </span>
+                  <button
+                    type="button" class="shrink-0 rounded border px-1.5 py-0.5
+                           disabled:opacity-40"
+                    :class="f.locked
+                      ? 'border-[var(--sb-teal)] text-[var(--sb-teal)]'
+                      : 'border-white/15 text-gray-400 hover:border-[var(--sb-teal)]'"
+                    :disabled="chatLocked"
+                    :title="f.locked ? t('muse.facetLocked') : t('muse.facetLock')"
+                    @click="toggleFacetLock(f.name)"
+                  >{{ f.locked ? '🔒' : '🔓' }}</button>
+                </div>
+                <p v-if="(f.tags || []).length"
+                   class="mt-0.5 font-mono text-gray-400 break-all">
+                  {{ (f.tags || []).join(', ') }}
+                </p>
+                <p v-if="f.nl" class="mt-0.5 text-[var(--sb-muted)]">{{ f.nl }}</p>
+                <p v-else class="mt-0.5 italic text-[var(--sb-faint)]">
+                  {{ t('muse.facetEmpty') }}
+                </p>
+              </li>
+            </ul>
+          </details>
 
           <details v-if="craft.prompt" class="text-[10px] text-[var(--sb-faint)]">
             <summary class="cursor-pointer">{{ t('muse.craft') }}</summary>

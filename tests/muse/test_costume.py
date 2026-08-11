@@ -140,6 +140,31 @@ def test_a_garment_named_in_costume_but_missing_from_tags_is_put_back():
     assert "school_swimsuit" in s["craft"]["prompt"]   # positive rebuilt too
 
 
+def test_a_refused_garment_is_not_put_back_by_the_costume_block():
+    """The one way past `drop_banned`.
+
+    A Showrunner who says「上着脱いで」has the garment struck from the craft and
+    banned. The next wardrobe turn then re-read a COSTUME block that still named
+    it, and `_ensure_garments` stapled it straight back on — so it came back as
+    many times as she asked for it to go.
+    """
+    s = _session()
+    service._apply_turn(s, _turn("wardrobe:shiwa", "poolside, midday",
+                                 costume=_costume()))
+    assert "goggles" in s["craft"]["tags"]
+
+    service.apply_removals(s, ["goggles"], [])
+    assert "goggles" not in s["craft"]["tags"]
+
+    # Wardrobe speaks again, still describing the goggles in her COSTUME block.
+    service._apply_turn(s, _turn("wardrobe:shiwa", "poolside, sunlight",
+                                 costume=_costume()))
+    assert "goggles" not in s["craft"]["tags"]
+    assert "goggles" not in s["craft"]["prompt"]
+    # The rest of the outfit is untouched — this is a refusal, not an undress.
+    assert "school_swimsuit" in s["craft"]["tags"]
+
+
 def test_a_turn_without_garments_keeps_the_outfit_and_strikes_nothing():
     s = _session()
     service._apply_turn(s, _turn("wardrobe:shiwa", "school_swimsuit",

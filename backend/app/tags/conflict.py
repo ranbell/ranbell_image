@@ -104,15 +104,139 @@ _ROOMS = frozenset({
 })
 
 
-def _room(tag: str) -> str | None:
-    name = str(tag or "").strip().lower().replace(" ", "_")
-    return name if name in _ROOMS else None
+# ── Slots that need no shared head noun ─────────────────────────────────────
+# `from_above` and `from_below` reduce to the head nouns "above" and "below",
+# so the modifier-family rule at the bottom of this file cannot see them at
+# all. Like the hours and the rooms above, these are whole-tag membership sets:
+# two members of one slot are two answers to a question that has one answer.
+
+# One lens position. A shot is taken from above or from below, and the pair
+# rode along together every time the Showrunner asked to move the camera: the
+# angle they asked for arrived and the angle they were leaving stayed.
+_CAMERA_PITCH = frozenset({
+    "from_above", "from_below", "high_angle", "low_angle", "straight-on",
+    "eye-level", "eye_level", "overhead_shot", "bird's-eye_view",
+    "worm's-eye_view", "top-down_view",
+})
+
+# Which side the lens is on. Deliberately a separate slot from pitch — a low
+# three-quarter is a real shot, and one slot holding both would evict half of
+# every angle worth asking for.
+_CAMERA_SIDE = frozenset({
+    "from_front", "from_side", "from_behind", "profile", "three-quarter_view",
+    "rear_view", "back_view", "front_view",
+})
+
+# How far away. `upper_body` and `full_body` do share a head noun, but "upper"
+# and "full" are in none of the modifier families, so nothing caught them.
+# Both spellings of the close-up are here because danbooru writes `close-up`
+# and `identity._FRAMING_TAGS` writes `close_up`; a slot that knows only one
+# of them leaves the panel's own framing tag unguarded.
+_CAMERA_DISTANCE = frozenset({
+    "extreme_close-up", "extreme_close_up", "close-up", "close_up",
+    "face_focus", "portrait", "bust", "upper_body", "cowboy_shot",
+    "half-body", "full_body", "wide_shot", "very_wide_shot", "long_shot",
+    "extreme_long_shot",
+})
+
+# Where the eyes point on the vertical. This is the one the camera drags with
+# it, and the reason this whole slot table exists — see _ANGLE_FORBIDS_GAZE.
+_GAZE_PITCH = frozenset({"looking_up", "looking_down", "looking_ahead"})
+
+# What the eyes are on. `looking_back` is deliberately NOT here: it is a head
+# turn, not a target, and looking back at the camera is one of the most common
+# real combinations there is. Evicting half of it would cost more than leaving
+# both standing.
+_GAZE_TARGET = frozenset({
+    "looking_at_viewer", "looking_away", "looking_afar", "looking_to_the_side",
+    "averting_eyes", "looking_at_another", "looking_elsewhere",
+})
+
+# What the whole body is doing. Short on purpose. `wariza`, `seiza`, `on_back`
+# and friends are modifiers of a posture already in this list, so `sitting,
+# wariza` has to survive; the job of this slot is to stop a stale `sitting`
+# riding beside a fresh `standing`.
+_POSTURE = frozenset({
+    "standing", "sitting", "kneeling", "squatting", "lying", "crouching",
+    "walking", "running", "jumping", "all_fours",
+})
+
+# Both arms at once. One-hand tags (`hand_on_own_hip`, `holding_*`) are not
+# here — she has two hands, and the `long_hair`/`hair_ribbon` lesson at the top
+# of this file says over-eviction costs more than under-eviction.
+_ARMS = frozenset({
+    "arms_up", "arms_at_sides", "arms_behind_back", "arms_behind_head",
+    "crossed_arms", "spread_arms", "outstretched_arms", "arms_under_breasts",
+})
+
+# Only the aperture is exclusive. `smile` is not here: `smile` and `open_mouth`
+# co-occur constantly and a slot holding both would delete the smile.
+_MOUTH = frozenset({"open_mouth", "closed_mouth", "parted_lips"})
+_EYES = frozenset({
+    "closed_eyes", "half-closed_eyes", "wide-eyed", "narrowed_eyes",
+})
 
 
-def _hour(tag: str) -> str | None:
-    """The tag itself when it names an hour of the day, else None."""
-    name = str(tag or "").strip().lower().replace(" ", "_")
-    return name if name in _TIME_OF_DAY else None
+# Slot name → its members. Callers outside this module name slots rather than
+# re-listing tags: `muse.facets.FACET_OWNS` says the camera facet owns
+# `camera_pitch` and `gaze_pitch`, which is how a tag written by the wrong
+# facet gets dropped before it ever reaches the prompt.
+SLOTS: dict[str, frozenset[str]] = {
+    "time_of_day": _TIME_OF_DAY,
+    "room": _ROOMS,
+    "camera_pitch": _CAMERA_PITCH,
+    "camera_side": _CAMERA_SIDE,
+    "camera_distance": _CAMERA_DISTANCE,
+    "gaze_pitch": _GAZE_PITCH,
+    "gaze_target": _GAZE_TARGET,
+    "posture": _POSTURE,
+    "arms": _ARMS,
+    "mouth": _MOUTH,
+    "eyes": _EYES,
+}
+
+
+# The gaze a lens position makes impossible. She cannot look up at a camera
+# that is already under her chin. This is not exclusion but implication, so it
+# cannot be a slot: `from_above` does not fight `looking_up`, it *requires* it.
+# The reported failure was a shot moved from a high angle to a low one where
+# `looking_up` survived, because nothing in the codebase knew the two tags had
+# anything to do with each other.
+_ANGLE_FORBIDS_GAZE: dict[str, frozenset[str]] = {
+    "from_above": frozenset({"looking_down"}),
+    "high_angle": frozenset({"looking_down"}),
+    "overhead_shot": frozenset({"looking_down"}),
+    "bird's-eye_view": frozenset({"looking_down"}),
+    "top-down_view": frozenset({"looking_down"}),
+    "from_below": frozenset({"looking_up"}),
+    "low_angle": frozenset({"looking_up"}),
+    "worm's-eye_view": frozenset({"looking_up"}),
+}
+
+# What this file cannot answer: `from_behind` rules out `looking_at_viewer`
+# only when `looking_back` is absent, and `contradicts(a, b)` is pairwise — it
+# never sees a third tag. That check belongs where the whole camera facet is
+# visible at once (`muse.facets.write`), not here.
+
+
+def _norm_tag(tag: str) -> str:
+    return str(tag or "").strip().lower().replace(" ", "_")
+
+
+def _slot(tag: str) -> str | None:
+    """The slot this tag fills, when it fills one on its own."""
+    name = _norm_tag(tag)
+    if not name:
+        return None
+    for slot, members in SLOTS.items():
+        if name in members:
+            return slot
+    return None
+
+
+def slot_of(tag: str) -> str | None:
+    """Public form of `_slot`, for callers deciding who owns a tag."""
+    return _slot(tag)
 
 
 def _count(tag: str) -> str | None:
@@ -154,12 +278,18 @@ def contradicts(tag: str, other: str) -> bool:
     if a_count and b_count and a_count != b_count:
         return True
 
-    a_hour, b_hour = _hour(tag), _hour(other)
-    if a_hour and b_hour and a_hour != b_hour:
+    # One slot, two different members. This covers the hours and the rooms it
+    # always covered, and now the camera and the body as well.
+    a_name, b_name = _norm_tag(tag), _norm_tag(other)
+    a_slot, b_slot = _slot(a_name), _slot(b_name)
+    if a_slot and a_slot == b_slot and a_name != b_name:
         return True
 
-    a_room, b_room = _room(tag), _room(other)
-    if a_room and b_room and a_room != b_room:
+    # An angle and the gaze it rules out. Checked both ways round so the
+    # contradiction is symmetric whichever tag is being offered.
+    if b_name in _ANGLE_FORBIDS_GAZE.get(a_name, frozenset()):
+        return True
+    if a_name in _ANGLE_FORBIDS_GAZE.get(b_name, frozenset()):
         return True
 
     a_noun, a_mod = _parts(tag)

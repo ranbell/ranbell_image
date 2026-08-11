@@ -111,6 +111,13 @@ class ChatMessage(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
 
 
+class FacetPatch(BaseModel):
+    """Pinning a part of the shot. Editing its tags directly is not offered —
+    the feel of the app is ひとこと / OK / リテイク, and a text box full of
+    danbooru tags is the sliders-everywhere director's chair this app is not."""
+    locked: bool
+
+
 def _db(request: Request):
     return request.app.state.db
 
@@ -173,6 +180,22 @@ async def patch_inputs(session_id: str, body: InputsPatch, request: Request):
     session = await _session(request, session_id)
     return await _run(service.patch_inputs(
         _db(request), session, body.model_dump(exclude_none=True),
+    ))
+
+
+@router.patch("/sessions/{session_id}/facets/{facet}")
+async def patch_facet(
+    session_id: str, facet: str, body: FacetPatch, request: Request,
+):
+    """Pin one part of the shot, or let it move again.
+
+    A locked part is never rewritten by any turn — it is the Showrunner saying
+    "not this one" about something the crew keeps reaching for. Refusals still
+    outrank it: a pin means "do not rewrite", not "keep something I took out".
+    """
+    session = await _session(request, session_id)
+    return await _run(service.set_facet_lock(
+        _db(request), session, facet, bool(body.locked),
     ))
 
 
