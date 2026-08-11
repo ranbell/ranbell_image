@@ -282,3 +282,60 @@ def test_bare_tag_reads_through_emphasis_written_without_parens():
 def test_clamp_weight_caps_emphasis_written_without_parens_too():
     over = f"low_angle:{identity.MAX_TAG_WEIGHT + 1}"
     assert identity.clamp_weight(over) == f"(low_angle:{identity.MAX_TAG_WEIGHT:g})"
+
+
+def test_backslash_escaped_underscores_are_stripped():
+    """A real production session's prompt was full of `straw\\_hat`,
+    `pink\\_camisole`, `cotton\\_blend` — the model's markdown-chat reflex of
+    escaping underscores, not prompt syntax. `\\_` unambiguously means `_`,
+    so both the comparison form (`bare_tag`) and the stored/displayed form
+    (`clamp_weight`, which returns the literal text that reaches the
+    prompt) need to come out clean, or the same tag under two spellings
+    evades every dedup/ban/conflict check that compares bare names."""
+    assert identity.bare_tag("straw\\_hat") == "straw_hat"
+    assert identity.clamp_weight("straw\\_hat") == "straw_hat"
+    assert identity.clamp_weight("pink\\_camisole (2.0)") == \
+        f"(pink_camisole:{identity.MAX_TAG_WEIGHT:g})"
+
+
+# ── sane_prose: a facet's nl and the decision digest are free prose ────────
+# A real W-Muse session baked two kinds of garbage permanently into the
+# picture, because `facets.write()`/`route_note` stored whatever the model
+# wrote with zero review: a "was X (→ now Y)" change-annotation instead of
+# the absolute value the contract asks for, and a bare comma-separated tag
+# list standing in for a sentence.
+
+def test_sane_prose_refuses_a_change_annotation():
+    bad = ("drying_clothes (→ **interior_laundry**, **balcony**)")
+    assert identity.sane_prose(bad) is None
+
+
+def test_sane_prose_refuses_a_before_after_paragraph():
+    bad = (
+        "We are standing on the expansive roof of an apartment building. "
+        "(→ We are now positioned within a brightly lit indoor utility "
+        "space.)"
+    )
+    assert identity.sane_prose(bad) is None
+
+
+def test_sane_prose_refuses_a_bare_tag_list():
+    assert identity.sane_prose("smile, happy, blush, soft_gaze.") is None
+
+
+def test_sane_prose_strips_markdown_bold_but_keeps_real_prose():
+    text = "A woven **straw hat** sits perfectly on my head."
+    assert identity.sane_prose(text) == "A woven straw hat sits perfectly on my head."
+
+
+def test_sane_prose_passes_ordinary_sentences_with_a_few_commas():
+    text = (
+        "It's the soft pastel blue cotton T-shirt and white shorts with a "
+        "light, loosely tied laundry apron, kept as is for this shot."
+    )
+    assert identity.sane_prose(text) == text
+
+
+def test_sane_prose_passes_through_empty():
+    assert identity.sane_prose("") == ""
+    assert identity.sane_prose(None) == ""

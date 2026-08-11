@@ -61,6 +61,22 @@ def test_writing_a_facet_replaces_it_whole():
     assert "high above" not in facets.table_of(s)["camera"]["nl"]
 
 
+def test_a_malformed_nl_does_not_overwrite_a_good_one():
+    """A real W-Muse session baked a `(→ ...)` change-annotation permanently
+    into a facet's prose because `write()` stored the `nl` field with zero
+    review. The good previous value must survive a bad rewrite, the same
+    'a bad answer does not overwrite a good one' rule `parse_facets` already
+    follows for tags."""
+    s = _session()
+    facets.write(s, "place", tags="rooftop", nl="A sunny rooftop.")
+    report = facets.write(
+        s, "place", tags="rooftop",
+        nl="drying_clothes (→ **interior_laundry**, **balcony**)",
+    )
+    assert facets.table_of(s)["place"]["nl"] == "A sunny rooftop."
+    assert report["written"] is True  # the tags side of the write still landed
+
+
 def test_a_camera_move_leaves_every_other_part_of_the_shot_alone():
     """The thesis. A full-rewrite turn could only ever promise this; a scoped
     write cannot do anything else."""

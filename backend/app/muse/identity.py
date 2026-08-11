@@ -99,8 +99,16 @@ def framing_negative(framing: str | None) -> str:
     return _FRAMING_NEGATIVE.get(normalize_framing(framing), "")
 
 
+# The model habitually escapes underscores the way it would in markdown
+# (`straw\_hat`, `pink\_camisole`) — a chat-formatting reflex, not prompt
+# syntax. `\_` unambiguously means `_`: no danbooru tag name contains a
+# backslash, so there is nothing to lose by stripping it unconditionally.
+def _strip_backslash_underscore(text: str) -> str:
+    return text.replace("\\_", "_")
+
+
 def _norm(tag: str) -> str:
-    return str(tag or "").strip().lower().replace(" ", "_")
+    return _strip_backslash_underscore(str(tag or "")).strip().lower().replace(" ", "_")
 
 
 # The ceiling every seat is told about and none of them keep. It was written
@@ -131,8 +139,8 @@ def split_weight(part: str) -> tuple[str, float | None]:
         or _SPACED_WEIGHT_RE.match(text)
     )
     if match:
-        return match.group("body").strip(), float(match.group("weight"))
-    return text.strip("()[]").strip(), None
+        return _strip_backslash_underscore(match.group("body").strip()), float(match.group("weight"))
+    return _strip_backslash_underscore(text.strip("()[]").strip()), None
 
 
 def bare_tag(part: str) -> str:
@@ -148,7 +156,7 @@ def bare_tag(part: str) -> str:
 def clamp_weight(part: str, cap: float = MAX_TAG_WEIGHT) -> str:
     """One tag, with any emphasis above the cap brought back down to it."""
     body, weight = split_weight(part)
-    text = str(part or "").strip()
+    text = _strip_backslash_underscore(str(part or "").strip())
     if weight is None or weight <= cap:
         return text
     return f"({body}:{cap:g})"
@@ -502,3 +510,33 @@ def warn_reference_leak(brief: str, prompt: str) -> list[str]:
         logger.warning("[muse.identity] reference leak into prompt: %s",
                        ", ".join(leaked[:8]))
     return leaked
+
+
+def sane_prose(text: str) -> str | None:
+    """A facet's `nl` and the decision digest are free prose the model writes
+    fresh every turn, with nothing to fall back on if it slips. A real
+    session produced two ways it slips: a "was X (→ now Y)" change-annotation
+    in place of the absolute value the contract asks for — literally baking
+    the stale value in beside the new one — and a bare, comma-heavy tag list
+    standing in for a sentence (`"smile, happy, blush, soft_gaze."`). Both
+    would otherwise become a permanent part of the picture the moment they
+    are written, since `nl_join` concatenates whatever is stored with no
+    review. This is the same "a bad answer does not overwrite a good one"
+    rule `parse_facets`/`parse_route`'s `unchanged` word already follow,
+    applied to prose instead of a labelled field.
+
+    Returns None when the text should be refused outright — the caller keeps
+    whatever was already stored. Otherwise returns the text with markdown
+    noise (`**bold**`) stripped.
+    """
+    s = str(text or "").strip()
+    if not s:
+        return s
+    if "→" in s:
+        return None
+    s = s.replace("**", "")
+    words = s.replace(",", " ").split()
+    commas = s.count(",")
+    if len(words) >= 2 and commas >= 3 and len(words) <= 8:
+        return None
+    return s

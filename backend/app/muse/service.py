@@ -1140,7 +1140,19 @@ async def route_note(
         # Rewritten, not appended — "added, then decided against" collapses to
         # one line instead of surviving as two contradictory facts. `digest`
         # is "" whenever the model left it unchanged, so the old value stands.
-        session["digest"] = digest
+        # A malformed revision (a change-annotation baked in, a bare tag list
+        # standing in for a sentence) is treated the same way: this is the
+        # one thing every future turn is told to prioritise over the
+        # conversation itself, so a bad rewrite here does more damage than a
+        # bad rewrite anywhere else in the session.
+        cleaned = identity.sane_prose(digest)
+        if cleaned:
+            session["digest"] = cleaned
+        else:
+            logger.warning(
+                "[muse] refused malformed digest, kept prior value: %r",
+                digest[:120],
+            )
     session["routed"] = writable
     return named, standing
 
@@ -2669,12 +2681,20 @@ async def compose_scene_if_needed(
 
     cfg = await get_runtime_config(db)
     inputs = _inputs(session)
+    partner_character = await _partner_character(db, session)
+    name_a = ""
+    name_b = ""
+    if partner_character:
+        char_a = session.get("character") or {}
+        name_a = str(char_a.get("name_ja") or char_a.get("name") or "")
+        name_b = str(partner_character.get("name_ja") or partner_character.get("name") or "")
     try:
         scene = await chain.run_compose(
             ollama,
             table_block=facets.table_block(table),
             standing=facets.standing_block(list(session.get("standing") or [])),
             model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            name_a=name_a, name_b=name_b,
         )
     except chain.ChainError:
         logger.warning("[muse] compose failed; rendering the joined parts",

@@ -668,27 +668,65 @@ async def run_duet_facets(
     return say, written, blind
 
 
-COMPOSE_SYSTEM = """
-You are the script supervisor writing the shot up for the camera department.
-You have the shot in front of you, in parts. Turn it into one paragraph.
+def compose_system(*, name_a: str = "", name_b: str = "") -> str:
+    """The composer's system prompt — solo alone, two-Muse-aware with a partner.
 
-You have no memory of any conversation and there is nothing else to read.
-Everything the picture contains is in the parts below.
+    `name_b` truthy is what switches this to the W-Muse form. The instruction
+    to cover every part unchanged; what is added is explicit enough that the
+    model cannot solve "two people" by quietly writing about one of them
+    (2026-08-11's real-session report: one Muse dominant, the other barely
+    present) — name both, give both real weight, and say what passes between
+    them rather than describing two people who happen to share a frame.
+    """
+    partner = bool(name_b)
+    parts = [
+        "You are the script supervisor writing the shot up for the camera "
+        "department. You have the shot in front of you, in parts. Turn it "
+        "into one paragraph.",
+        "",
+        "You have no memory of any conversation and there is nothing else to "
+        "read. Everything the picture contains is in the parts below.",
+        "",
+        "- ONE flowing paragraph, "
+        + ("180–260" if partner else "140–200")
+        + " English words. No headings, no bullets, no preamble, no "
+          "alternatives, no lists.",
+        "- Every part must be in it: the place, the hour, the light, the "
+        "objects, "
+        + (f"{name_a}'s clothes/body/face, {name_b}'s clothes/body/face, "
+           if partner else "the clothes, the body, the face, ")
+        + "the camera.",
+    ]
+    if partner:
+        parts += [
+            f"- BOTH {name_a} and {name_b} are in the picture. Name them "
+            "both. Give each of them a genuinely comparable share of the "
+            "paragraph — not one full sentence for one of them and a "
+            "trailing clause for the other.",
+            "- If the parts describe an interaction between them (facing "
+            "each other, side by side, a touch, a held object passed "
+            "between them), write it as something that happens between "
+            "two people, not as two separate descriptions that happen to "
+            "sit next to each other.",
+        ]
+    parts += [
+        "- Write ONLY what the parts say. You may make a sentence out of a "
+        "tag; you may NOT add an object, a garment, a room, a colour or a "
+        "person that is not written above. If a part is thin, write it "
+        "thin.",
+        "- State absolutes. Never a change from something — no \"darker\", "
+        "no \"lower\", no \"more than before\".",
+        "",
+        "OUTPUT FORMAT — one line, nothing else:",
+        "",
+        "SCENE: <the paragraph>",
+    ]
+    return "\n".join(parts).strip()
 
-- ONE flowing paragraph, 140–200 English words. No headings, no bullets, no
-  preamble, no alternatives, no lists.
-- Every part must be in it: the place, the hour, the light, the objects, the
-  clothes, the body, the face, the camera.
-- Write ONLY what the parts say. You may make a sentence out of a tag; you may
-  NOT add an object, a garment, a room, a colour or a person that is not
-  written above. If a part is thin, write it thin.
-- State absolutes. Never a change from something — no "darker", no "lower",
-  no "more than before".
 
-OUTPUT FORMAT — one line, nothing else:
-
-SCENE: <the paragraph>
-""".strip()
+# Kept as the solo system prompt, unchanged — anything reading `COMPOSE_SYSTEM`
+# directly (tests included) still sees exactly today's text.
+COMPOSE_SYSTEM = compose_system()
 
 _SCENE_LINE_RE = re.compile(r"(?is)\bSCENE\s*[:：]\s*(.+)$")
 
@@ -706,7 +744,8 @@ def parse_compose(raw: str) -> str:
 
 async def run_compose(
     ollama, *, table_block: str, standing: str, model: str,
-    num_ctx: int | None, on_token: TokenCallback | None = None,
+    num_ctx: int | None, name_a: str = "", name_b: str = "",
+    on_token: TokenCallback | None = None,
 ) -> str:
     """Render the facet table into prose. A pure function of the table.
 
@@ -715,12 +754,16 @@ async def run_compose(
     design: composing was never the thing that went wrong, being handed twenty
     turns of contradicting history was. There is a test asserting this prompt
     stays empty of all of it.
+
+    `name_b` present switches the system prompt to the W-Muse form — see
+    `compose_system`.
     """
     prompt = "\n\n".join(b for b in [
         f"THE SHOT, IN PARTS:\n{table_block}", standing,
     ] if b.strip())
+    system = compose_system(name_a=name_a, name_b=name_b) if name_b else COMPOSE_SYSTEM
     return parse_compose(await _call(
-        ollama, system=COMPOSE_SYSTEM, prompt=prompt, model=model,
+        ollama, system=system, prompt=prompt, model=model,
         images=None, num_ctx=num_ctx, think=False, on_token=on_token,
     ))
 

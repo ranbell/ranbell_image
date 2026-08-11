@@ -201,3 +201,84 @@ def test_a_bare_paragraph_with_no_label_is_still_read():
 
 def test_nothing_composes_to_nothing():
     assert chain.parse_compose("") == ""
+
+
+# ── W-Muse: compose knows there are two of them ─────────────────────────────
+# 2026-08-11's real-session report found compose actively harmful for W-Muse:
+# `facets._vocabulary()` only read the eight A-side facets, so any legitimate
+# mention of the second Muse read as an "invented" word and the composition
+# was discarded — every W-Muse render fell back to `nl_join`'s raw
+# concatenation, which is what actually produced the "one Muse dominant, the
+# other barely present, prose incoherent" images.
+
+async def _w_duet_session(db, **over):
+    session = await _duet_session(db, partner_preset="c2", **over)
+    session["character"]["name_ja"] = "倉田 あさひ"
+    session["partner_character"] = {
+        "character_id": "c2", "name_ja": "みなも",
+        "identity_tags": ["1girl", "black_hair"],
+        "personality": {}, "palette": [], "signature_prop": "",
+    }
+    await session_db.save(db, session)
+    return session
+
+
+async def _w_shot(db) -> dict:
+    s = await _w_duet_session(db)
+    s["mode"] = "duet"
+    facets.write(s, "place", tags="rooftop", nl="A rooftop laundry area.")
+    facets.write(s, "hour", tags="morning", nl="Saturday morning.")
+    facets.write(s, "light", tags="sunlight", nl="Bright direct sun.")
+    facets.write(s, "props", tags="clothesline", nl="A clothesline.")
+    facets.write(s, "costume", tags="t_shirt", nl="Asahi wears a plain white t-shirt.")
+    facets.write(s, "costume_b", tags="straw_hat, sundress",
+                 nl="Minamo wears a pale sundress and a straw hat.")
+    facets.write(s, "pose", tags="standing", nl="Asahi stands by the line.")
+    facets.write(s, "pose_b", tags="standing", nl="Minamo stands beside her.")
+    facets.write(s, "expression", tags="smile", nl="Asahi is smiling.")
+    facets.write(s, "expression_b", tags="smile", nl="Minamo is smiling too.")
+    facets.write(s, "camera", tags="wide_shot, standing_side_by_side, looking_at_each_other",
+                 nl="A wide shot of the two of them standing side by side, looking at each other.")
+    service._reassemble(s)
+    await session_db.save(db, s)
+    return s
+
+
+@pytest.mark.asyncio
+async def test_w_muse_composer_is_told_both_names_and_to_write_both():
+    db, ollama = FakeDb(), ComposingOllama("SCENE: The two of them share the rooftop light.")
+    s = await _w_shot(db)
+    await service.compose_scene_if_needed(db, ollama, s)
+
+    system = str(ollama.calls[-1].get("system") or "")
+    assert "倉田 あさひ" in system and "みなも" in system
+    assert "genuinely comparable share" in system
+    assert "as something that happens between" in system
+
+
+def test_solo_compose_system_is_unchanged():
+    """`COMPOSE_SYSTEM` (no partner) stays exactly what a solo session always
+    saw — the constant every solo call site still reads directly."""
+    assert chain.COMPOSE_SYSTEM == chain.compose_system()
+    assert "みなも" not in chain.COMPOSE_SYSTEM
+    assert "BOTH" not in chain.COMPOSE_SYSTEM
+
+
+@pytest.mark.asyncio
+async def test_the_vocabulary_check_knows_the_second_muses_facets():
+    """The bug: `_vocabulary` only read the eight A-side facets, so any real
+    mention of B's own words (her straw hat, her sundress) counted as
+    'invented' and a correct composition was thrown away for describing her
+    at all."""
+    db = FakeDb()
+    ollama = ComposingOllama(
+        "SCENE: Asahi stands by the line in her white t-shirt, smiling, "
+        "while Minamo, in her pale sundress and straw hat, stands close "
+        "beside her and smiles too, the two of them looking at each other "
+        "in the bright morning light."
+    )
+    s = await _w_shot(db)
+    await service.compose_scene_if_needed(db, ollama, s)
+    # The composition must have been ACCEPTED, not thrown away for inventing B.
+    assert s["craft"]["scene"].startswith("Asahi stands by the line")
+    assert "sundress" in s["craft"]["scene"] and "Minamo" in s["craft"]["scene"]

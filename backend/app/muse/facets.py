@@ -333,7 +333,14 @@ def write(
         report["blocked"].extend(_locked_conflicts(table, facet, kept))
 
     if nl is not None:
-        slot["nl"] = str(nl or "").strip()
+        cleaned = identity.sane_prose(nl)
+        if cleaned is None:
+            logger.warning(
+                "[muse.facets] %s: refused malformed nl, kept prior value: %r",
+                facet, str(nl or "")[:120],
+            )
+        else:
+            slot["nl"] = cleaned
     if fields is not None:
         slot["fields"] = dict(fields)
 
@@ -759,9 +766,18 @@ _STOPWORDS: frozenset[str] = frozenset({
 def _vocabulary(
     table: dict[str, dict[str, Any]], extra: list[str] | None = None,
 ) -> set[str]:
-    """Every word the composer is allowed to have got from somewhere."""
+    """Every word the composer is allowed to have got from somewhere.
+
+    `ALL_FACETS`, not `FACETS` — a W-Muse table's `costume_b`/`pose_b`/
+    `expression_b` are real vocabulary too. Reading only the eight A-side
+    facets meant every legitimate mention of the second Muse read as an
+    "invented" word, so `warn_invented_nouns` discarded a correct composition
+    for describing her at all, and every render fell back to `nl_join`'s raw
+    concatenation instead — this is the bug behind 2026-08-11's real-session
+    report (one Muse dominant, the other barely present, prose incoherent).
+    """
     words: set[str] = set()
-    for name, _ in FACETS:
+    for name, _ in ALL_FACETS:
         slot = table.get(name) or {}
         for tag in slot.get("tags") or []:
             words.update(_WORD_RE.findall(identity.bare_tag(tag).replace("_", " ")))

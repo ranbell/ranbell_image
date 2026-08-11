@@ -383,6 +383,29 @@ async def test_a_new_decision_is_recorded_in_the_digest():
 
 
 @pytest.mark.asyncio
+async def test_a_malformed_digest_does_not_overwrite_a_good_one():
+    """The digest is the one thing every future turn is told to prioritise
+    over the conversation itself (`_facet_prep_prompt`), so a bad rewrite
+    here does more damage than anywhere else — a real session's report of
+    a decision getting permanently 'stuck' is consistent with this. A bad
+    revision must not replace a good one, the same rule already covers a
+    bad `nl` write."""
+    db = FakeDb()
+    ollama = RoutingOllama({
+        "かぶせて": "FACETS: costume\nCOSTUME: 帽子あり\nDIGEST: 麦わら帽子: 着用中。",
+        "変な": "FACETS: costume\nCOSTUME: 帽子なし\n"
+               "DIGEST: 帽子 (→ **もう要らない**、以降は使わない)。",
+    })
+    s = await _duet_session(db)
+    await service.route_note(db, ollama, s, "麦わら帽子をかぶせて", cfg={})
+    good_digest = s["digest"]
+    assert good_digest == "麦わら帽子: 着用中。"
+
+    await service.route_note(db, ollama, s, "変な指示", cfg={})
+    assert s["digest"] == good_digest, "a malformed digest overwrote a good one"
+
+
+@pytest.mark.asyncio
 async def test_the_digest_is_revised_not_appended():
     """"Added, then decided against" collapses to one line instead of surviving
     as two contradictory facts."""
