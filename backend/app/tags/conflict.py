@@ -119,6 +119,21 @@ _CAMERA_PITCH = frozenset({
     "worm's-eye_view", "top-down_view",
 })
 
+# `_CAMERA_PITCH` partitioned into the three answers a pitch question actually
+# has. Members of one family are synonyms meant to ride together in one write
+# (`from_below, low_angle, looking_down` is the ordinary way to say one
+# angle); members of different families are the same question answered two
+# ways at once (`high_angle` and `eye-level` cannot both be the shot). Kept
+# separate from `_ANGLE_FORBIDS_GAZE` below: that table only has entries for
+# the two pitches with a gaze consequence, so `eye-level`/`straight-on` are
+# absent from it and were reading as "no family" — and so as compatible with
+# everything — when self-consistency needs them read as their own family.
+_PITCH_FAMILIES: tuple[frozenset[str], ...] = (
+    frozenset({"from_above", "high_angle", "overhead_shot", "bird's-eye_view", "top-down_view"}),
+    frozenset({"from_below", "low_angle", "worm's-eye_view"}),
+    frozenset({"straight-on", "eye-level", "eye_level"}),
+)
+
 # Which side the lens is on. Deliberately a separate slot from pitch — a low
 # three-quarter is a real shot, and one slot holding both would evict half of
 # every angle worth asking for.
@@ -237,6 +252,31 @@ def _slot(tag: str) -> str | None:
 def slot_of(tag: str) -> str | None:
     """Public form of `_slot`, for callers deciding who owns a tag."""
     return _slot(tag)
+
+
+def pitch_family(tag: str) -> frozenset[str] | None:
+    """Which of the three pitch answers (high / low / level) this tag is, or
+    None when the tag is not a `_CAMERA_PITCH` member at all.
+
+    Two pitch tags found together are synonyms of one angle when this comes
+    back equal for both (`from_above` and `high_angle` are both the "high"
+    family) and directly opposed when it does not (`high_angle` vs
+    `low_angle`, or either vs `eye-level`). Same-family synonyms are meant to
+    coexist in one write, the way `from_below, low_angle, looking_down` do
+    together.
+    """
+    name = _norm_tag(tag)
+    for family in _PITCH_FAMILIES:
+        if name in family:
+            return family
+    return None
+
+
+def pitch_forbidden_gaze(tag: str) -> frozenset[str]:
+    """The `gaze_pitch` values this camera-pitch tag rules out (empty when it
+    rules out none). Public form of `_ANGLE_FORBIDS_GAZE`, for a caller that
+    needs to apply the rule inside one write rather than between two."""
+    return _ANGLE_FORBIDS_GAZE.get(_norm_tag(tag), frozenset())
 
 
 def _count(tag: str) -> str | None:

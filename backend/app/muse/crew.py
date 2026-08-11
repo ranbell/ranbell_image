@@ -1872,6 +1872,13 @@ FACET_BRIEFS: dict[str, str] = {
     "pose": "what her body is doing, and where the weight sits",
     "expression": "her face — eyes, mouth, the micro-gesture",
     "camera": "how far away, what angle, and where she is looking",
+    # W-Muse only. The text is name-agnostic on purpose — `w_facet_output_block`
+    # prefixes each row with whose part it is, so the brief itself does not
+    # need to repeat a name that would otherwise have to be threaded through
+    # this module-level dict per session.
+    "costume_b": "what she is wearing",
+    "pose_b": "what her body is doing, and where the weight sits",
+    "expression_b": "her face — eyes, mouth, the micro-gesture",
 }
 
 
@@ -1939,6 +1946,110 @@ def facet_output_block(names: list[str], *, opening: bool = False) -> str:
         "  afterwards and you are writing one of them.",
         "- Do NOT repeat Character identity tags (hair/eyes/figure) — the server",
         "  adds those. English only, in both lines.",
+        "- State the ABSOLUTE value. Never \"lower\", \"darker\", \"more\" — what it",
+        "  IS. A relative nudge gets applied again every turn until the frame",
+        "  bottoms out.",
+        "- Weights (tag:1.1)–(tag:1.35) sparingly, and never on posture.",
+    ])
+
+
+# `_b` suffix -> which Muse it belongs to, purely for building the reader-
+# facing "this is {name}'s part only" line below. Not the same lookup as
+# `facets._side_of` (that one also classifies shared parts as `None`); this
+# one only ever gets called with a character-bound name.
+def _facet_owner_name(name: str, name_a: str, name_b: str) -> str:
+    return name_b if name.endswith("_b") else name_a
+
+
+def w_facet_output_block(
+    names: list[str], *, name_a: str, name_b: str, opening: bool = False,
+) -> str:
+    """The output contract for a W-Muse turn that rewrites some parts of the
+    shot — `facet_output_block` with a name attached to every character-bound
+    row.
+
+    This is the direct answer to the attribution problem a real 20-turn
+    session surfaced (`private/muse/e2e_2026-08-11_wmuse/REPORT.md`, finding
+    ①): nothing told the model how to say whose costume, pose or expression a
+    tag was about, so it invented an ad-hoc `(Asahi)`/`(Minamo)` notation on
+    its own turn 14 or so and only then kept it. Here the row itself already
+    says whose part it is — `costume_b` is never ambiguous, because it is
+    never both Muses' at once and the label says so before the model writes
+    a single tag.
+    """
+    labels = [
+        (n, FACET_LABELS[n]) for n in names if n in FACET_LABELS
+    ]
+    if not labels:
+        return ""
+    shared = {"place", "hour", "light", "props", "camera"}
+    rows: list[str] = []
+    for name, label in labels:
+        pad = " " * max(0, 12 - len(label))
+        brief = FACET_BRIEFS[name]
+        if name in shared:
+            who = f"shared — both {name_a} and {name_b}"
+            if name == "camera":
+                brief += (
+                    "; also the one place an interaction between them goes "
+                    "(looking_at_each_other, back-to-back, holding_hands, "
+                    "standing_side_by_side)"
+                )
+        else:
+            owner = _facet_owner_name(name, name_a, name_b)
+            other = name_b if owner == name_a else name_a
+            who = f"{owner} ONLY — not {other}"
+        rows.append(
+            f"{label} TAGS:{pad} <danbooru tags with underscores, "
+            f"comma-separated, 3–8 tags — {who} — {brief}>"
+        )
+        rows.append(
+            f"{label}:{pad}       <ONE or TWO sentences of English prose. "
+            f"{who}.>"
+        )
+
+    scope = (
+        "This is the opening — every part of the shot is yours to decide, so "
+        "write all of them. The two Muses may disagree and settle it in SAY, "
+        "but each of them decides HER OWN costume/pose/expression — neither "
+        "one writes for the other."
+        if opening else
+        "You are rewriting ONLY these parts: "
+        + ", ".join(label for _, label in labels)
+        + ".\nEvery other part of the shot is already settled. Do not restate "
+          "it, do not improve it, and do not mention it in TAGS or in prose — "
+          "it is not yours this turn and anything you write about it is thrown "
+          "away."
+    )
+
+    return "\n".join([
+        "OUTPUT FORMAT — SAY, then two lines for each part, nothing else:",
+        "",
+        "SAY: 2–4 lines of live dialogue between the two Muses settling this "
+        "with the Showrunner. Same `A:` / `B:` line-prefix contract as a talk "
+        "turn — never a name as the prefix, and each Muse uses her own "
+        "first-person for herself, never her own name.",
+        "- This is how the Showrunner finds out what got written, so nothing "
+        "may be hidden — if a Muse changed her own part, she says what she "
+        "dropped, in her own line.",
+        "- End by leaving it open: something to add, something to take out.",
+        "",
+        scope,
+        "",
+        *rows,
+        "",
+        "- TAGS are that part and nothing else. A garment tag under POSE is",
+        "  wrong; a room tag under CAMERA is wrong. Anything belonging to",
+        "  another part is thrown away, so writing it only costs you the slot.",
+        f"- A row marked `{name_a} ONLY` never contains a tag about {name_b}",
+        f"  and the reverse — even when they are dressed alike or posed",
+        "  alike, restate it in both rows rather than assuming one implies "
+        "the other.",
+        "- The prose line is that part and nothing else. One or two sentences,",
+        "  never a paragraph, never the whole picture — the parts are joined up",
+        "  afterwards and you are writing one of them.",
+        "- Do NOT repeat Character identity tags (hair/eyes/figure) — the server",
+        "  adds those, for both Muses. English only, in both lines.",
         "- State the ABSOLUTE value. Never \"lower\", \"darker\", \"more\" — what it",
         "  IS. A relative nudge gets applied again every turn until the frame",
         "  bottoms out.",
@@ -2372,7 +2483,7 @@ SCENE: English only. ONE flowing paragraph, 150–220 words, covering BOTH girls
 def w_actress_duet_prompt(
     character_a: dict[str, Any], character_b: dict[str, Any],
     *, mode: str = "talk", base_style: str = "", seed: str = "", locale: str = "ja",
-    tier: str = "",
+    tier: str = "", facets: list[str] | None = None, opening: bool = False,
 ) -> str:
     """Two Muses (W-Muse) working together with the Showrunner."""
     pa = character_a.get("personality") or {}
@@ -2432,7 +2543,20 @@ def w_actress_duet_prompt(
         "--- MUSE B SHEET ---",
         _character_sheet(character_b, locale=locale),
     ]
-    if mode == "prep":
+    if mode == "prep" and facets is not None:
+        # The scoped contract — see `actress_duet_prompt`'s twin branch. Each
+        # character-bound row already says whose part it is (see
+        # `w_facet_output_block`), which is what a full DUET_OWNS_THE_FRAME
+        # rewrite never had to say because it was one undivided TAGS/SCENE
+        # block covering both Muses at once.
+        blocks += [
+            DUET_OWNS_THE_FRAME_SCOPED,
+            _style_block(lead, base_style),
+            w_facet_output_block(
+                list(facets), name_a=name_a, name_b=name_b, opening=opening,
+            ),
+        ]
+    elif mode == "prep":
         blocks += [
             DUET_OWNS_THE_FRAME,
             _style_block(lead, base_style),

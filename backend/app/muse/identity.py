@@ -110,12 +110,26 @@ def _norm(tag: str) -> str:
 MAX_TAG_WEIGHT = 1.35
 
 _WEIGHT_RE = re.compile(r"^\(\s*(?P<body>.+?)\s*:\s*(?P<weight>-?\d+(?:\.\d+)?)\s*\)$")
+# The model is told `(tag:1.2)` and often writes the bare `tag:1.2` instead,
+# no parens. Still unambiguous — no danbooru tag name contains a colon — but
+# `_WEIGHT_RE` alone required the parens, so `low_angle:1.1` read as one
+# opaque tag that matched nothing: not `low_angle` in a slot lookup, not a
+# banned name, not its own duplicate written properly the next turn.
+_BARE_WEIGHT_RE = re.compile(r"^(?P<body>[^()]+?)\s*:\s*(?P<weight>-?\d+(?:\.\d+)?)$")
+# `tag (1.2)` — the number on its own, space-separated, still inside parens.
+# Unlike `tag(softly)` this is unambiguous too: the body is unquestionably a
+# number, not a qualifier word there is no safe way to guess a meaning for.
+_SPACED_WEIGHT_RE = re.compile(r"^(?P<body>[^()]+?)\s+\(\s*(?P<weight>-?\d+(?:\.\d+)?)\s*\)$")
 
 
 def split_weight(part: str) -> tuple[str, float | None]:
     """A tag and the emphasis written around it, if any."""
     text = str(part or "").strip()
-    match = _WEIGHT_RE.match(text)
+    match = (
+        _WEIGHT_RE.match(text)
+        or _BARE_WEIGHT_RE.match(text)
+        or _SPACED_WEIGHT_RE.match(text)
+    )
     if match:
         return match.group("body").strip(), float(match.group("weight"))
     return text.strip("()[]").strip(), None

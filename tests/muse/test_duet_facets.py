@@ -98,7 +98,7 @@ class FacetOllama(FakeOllama):
         system = str(kw.get("system") or "")
         text = "SAY: はい、わかりました。"
 
-        if "eight parts" in system:
+        if "eight parts" in system or "eleven parts" in system:
             text = next(
                 (v for k, v in self.routes.items() if k in str(prompt)),
                 "FACETS: none\nSTANDING: none",
@@ -408,3 +408,116 @@ async def test_a_locked_part_survives_direction_aimed_at_it():
     await service.post_duet_chat(db, ollama, s, "上着は脱いで")
     await service.duet_prep_stage(db, ollama, s)
     assert "jacket" in s["craft"]["tags"]
+
+
+# ── W-Muse: two Muses, two sides ────────────────────────────────────────────
+# The real 20-turn W-Muse session (private/muse/e2e_2026-08-11_wmuse/REPORT.md)
+# found the OLD, un-faceted path had no syntax for "whose state is this" — a
+# note aimed at one Muse had nowhere to land that the other Muse's facets
+# could not also be read as answering. These are the full-turn versions of
+# the side-isolation guarantees `test_facets.py` already proves structurally.
+
+OPENING_W = """SAY: A: 教室の窓際です。上着を着てます。 B: 私は麦わら帽子を被ってます。
+PLACE TAGS: classroom, window, indoors
+PLACE: An empty classroom, they stand by the tall windows.
+HOUR TAGS: late_afternoon
+HOUR: Late afternoon in autumn.
+LIGHT TAGS: sunlight, warm_light
+LIGHT: Low sun comes through the glass from the left.
+PROPS TAGS: desk, chalkboard, curtain, chair
+PROPS: Desks in rows, a chalkboard, curtains.
+COSTUME TAGS: jacket, pleated_skirt
+COSTUME: She wears a navy jacket over a pleated skirt.
+COSTUME_B TAGS: straw_hat, sundress
+COSTUME_B: She wears a straw hat over a pale sundress.
+POSE TAGS: standing, hand_on_own_hip
+POSE: She stands with her weight on one hip.
+POSE_B TAGS: standing, arms_behind_back
+POSE_B: She stands with her hands behind her back.
+EXPRESSION TAGS: smile, closed_mouth
+EXPRESSION: A small closed smile.
+EXPRESSION_B TAGS: smile, open_mouth
+EXPRESSION_B: A bright, open smile.
+CAMERA TAGS: wide_shot, eye_level, standing_side_by_side
+CAMERA: A wide shot of the two of them standing side by side.
+"""
+
+HAT_OFF_B = """SAY: B: 麦わら帽子は外しますね。
+COSTUME_B TAGS: sundress
+COSTUME_B: She wears just the pale sundress now, no hat.
+"""
+
+CARDIGAN_ON_A = """SAY: A: カーディガンを羽織ります。
+COSTUME TAGS: jacket, cardigan, pleated_skirt
+COSTUME: She adds a cardigan over the jacket and skirt.
+"""
+
+
+async def _w_duet_session(db, **over):
+    """A W-Muse session whose partner is already cached — see the identical
+    helper in test_route.py for why (`FakeDb` has no character presets to
+    resolve `partner_preset` against)."""
+    session = await _duet_session(db, partner_preset="c2", **over)
+    session["partner_character"] = {
+        "character_id": "c2", "name_ja": "みなも",
+        "identity_tags": ["1girl", "black_hair"],
+        "personality": {}, "palette": [], "signature_prop": "",
+    }
+    await session_db.save(db, session)
+    return session
+
+
+async def _w_opened(db, ollama):
+    s = await _w_duet_session(db)
+    await service.duet_prep_stage(db, ollama, s)
+    return s
+
+
+@pytest.mark.asyncio
+async def test_a_note_aimed_at_the_second_muse_never_rewrites_the_leads_facets():
+    db = FakeDb()
+    ollama = FacetOllama(
+        routes={"帽子は外して": "FACETS: costume_b\nCOSTUME_B: 麦わら帽子なし"},
+        preps=[OPENING_W, HAT_OFF_B],
+    )
+    s = await _w_opened(db, ollama)
+    lead_before = dict(facets.table_of(s)["costume"])
+
+    await service.post_duet_chat(db, ollama, s, "みなもの麦わら帽子は外して")
+    await service.duet_prep_stage(db, ollama, s)
+
+    b = facets.table_of(s)["costume_b"]
+    assert "straw_hat" not in b["tags"]
+    assert "sundress" in b["tags"]
+    lead_after = facets.table_of(s)["costume"]
+    assert lead_after["rev"] == lead_before["rev"]
+    assert lead_after["tags"] == lead_before["tags"]
+    assert "jacket" in s["craft"]["tags"], "the lead's jacket must still reach the render"
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_lead_side_rewrite_does_not_bring_the_hat_back():
+    """The removal reaches only `costume_b` structurally — same shape as the
+    single-Muse hat/props test above. A later, unrelated rewrite of the
+    LEAD's own costume must not touch B's facet at all, let alone restore
+    what was refused there."""
+    db = FakeDb()
+    ollama = FacetOllama(
+        routes={
+            "帽子は外して": "FACETS: costume_b\nCOSTUME_B: 麦わら帽子なし",
+            "カーディガン": "FACETS: costume\nCOSTUME: カーディガン追加",
+        },
+        preps=[OPENING_W, HAT_OFF_B, CARDIGAN_ON_A],
+    )
+    s = await _w_opened(db, ollama)
+
+    await service.post_duet_chat(db, ollama, s, "みなもの麦わら帽子は外して")
+    await service.duet_prep_stage(db, ollama, s)
+    b_rev = facets.table_of(s)["costume_b"]["rev"]
+
+    await service.post_duet_chat(db, ollama, s, "あさひはカーディガンを羽織って")
+    await service.duet_prep_stage(db, ollama, s)
+
+    assert facets.table_of(s)["costume_b"]["rev"] == b_rev, "B's facet was rewritten by a note about A"
+    assert "straw_hat" not in facets.table_of(s)["costume_b"]["tags"]
+    assert "cardigan" in facets.table_of(s)["costume"]["tags"]

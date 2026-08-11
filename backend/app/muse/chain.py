@@ -279,74 +279,136 @@ async def run_plan(
     return plan
 
 
-ROUTE_SYSTEM = """
-You are the script supervisor. You do not write craft and you do not have
-opinions. The shot is kept in eight parts. One job: read what the Showrunner
-(総監督) just said and name ONLY the parts it changes.
+def route_system(*, name_a: str = "", name_b: str = "") -> str:
+    """The router's system prompt — eight parts alone, eleven with a partner.
 
-THE EIGHT PARTS
-place       — the room, and where in it she is
-hour        — time of day and season
-light       — where the light comes from and how bright it is
-props       — the objects in the frame
-costume     — what she is wearing
-pose        — what her body is doing
-expression  — her face
-camera      — how far away, what angle, and where she is looking
+    `name_b` truthy is what means "W-Muse": the three character-bound parts
+    (`costume`/`pose`/`expression`) exist twice, once per Muse, and nothing
+    else does — `camera` stays the one shared lens on both of them, which is
+    also where an interaction (`looking_at_each_other`, `holding_hands`) goes,
+    since it belongs to neither Muse alone.
+    """
+    partner = bool(name_b)
+    a = name_a or "she"
+    parts = [
+        "place       — the room, and where in it they are",
+        "hour        — time of day and season",
+        "light       — where the light comes from and how bright it is",
+        "props       — the objects in the frame",
+        f"costume     — what {a} is wearing",
+        f"pose        — what {a}'s body is doing",
+        f"expression  — {a}'s face",
+        "camera      — how far away, what angle, where the lens is pointed, "
+        "and how the two of them relate to each other in frame (side by "
+        "side, facing, touching)" if partner else
+        "camera      — how far away, what angle, and where she is looking",
+    ] if partner else [
+        "place       — the room, and where in it she is",
+        "hour        — time of day and season",
+        "light       — where the light comes from and how bright it is",
+        "props       — the objects in the frame",
+        "costume     — what she is wearing",
+        "pose        — what her body is doing",
+        "expression  — her face",
+        "camera      — how far away, what angle, and where she is looking",
+    ]
+    if partner:
+        parts += [
+            f"costume_b    — what {name_b} is wearing",
+            f"pose_b       — what {name_b}'s body is doing",
+            f"expression_b — {name_b}'s face",
+        ]
+    n_parts = "eleven" if partner else "eight"
+    output_lines = [
+        "PLACE: <what the place is now>", "HOUR: <…>", "LIGHT: <…>",
+        "PROPS: <…>", "COSTUME: <…>", "POSE: <…>", "EXPRESSION: <…>",
+        "CAMERA: <…>",
+    ]
+    if partner:
+        output_lines += [
+            "COSTUME_B: <…>", "POSE_B: <…>", "EXPRESSION_B: <…>",
+        ]
+    return "\n".join([
+        "You are the script supervisor. You do not write craft and you do not "
+        f"have opinions. The shot is kept in {n_parts} parts. One job: read "
+        "what the Showrunner (総監督) just said and name ONLY the parts it "
+        "changes.",
+        "",
+        f"THE {n_parts.upper()} PARTS",
+        *parts,
+        "",
+        "RULES",
+        "- Name a part ONLY when the note changes it. Most notes touch one or "
+        "two. Naming a part you are unsure about rewrites it — say less, not "
+        "more.",
+        "- Copy part names EXACTLY from the list above. Never invent one, "
+        "never translate one.",
+        (
+            f"- A note that names {name_a} says nothing about {name_b} and "
+            f"the reverse — 「{name_a}の服を脱がせて」names `costume` only, "
+            "never `costume_b` too, even when they are dressed alike."
+            if partner else ""
+        ),
+        "- A note that changes nothing about the picture answers `FACETS: "
+        "none`. That is a normal and complete answer.",
+        "- For each part you named, write ONE short line, in the "
+        "Showrunner's own language, saying what that part IS now. State the "
+        "finished value, never the change: 「下から煽って」, not "
+        "「カメラを下げて」.",
+        "- A rule that is about the whole session and belongs to no single "
+        "part (「足は絶対に映さない」) goes on the STANDING line instead, "
+        "and its part is not named.",
+        "",
+        "THE DECISION DIGEST",
+        f"Besides the {n_parts} parts, you keep one more thing: a short, "
+        "plain-language record of what has actually been decided so far — "
+        "added, then dropped, then maybe brought back. This is not a "
+        "transcript and not a tag list. Every future turn reads THIS instead "
+        "of the raw conversation, so it has to stay short, current, and free "
+        "of anything that no longer matters.",
+        "",
+        "You are shown the digest as it stands below. Revise it for this "
+        "note:",
+        "- Settling something new: add ONE short line for it.",
+        "- Reversing or replacing something already in the digest: REWRITE "
+        "that line. Never keep both the old and the new statement of the "
+        "same thing.",
+        "- Something that can no longer affect the picture: drop its line "
+        "entirely.",
+        "- Most notes change nothing here. When in doubt, leave it exactly "
+        "as it was.",
+        "- A handful of lines, never a growing log.",
+        "",
+        "OUTPUT FORMAT — the FACETS line, then one line per part you named, "
+        "then STANDING, then DIGEST last. Nothing else, no explanation:",
+        "",
+        "FACETS: <comma-separated part names, or the word none>",
+        *output_lines,
+        "STANDING: <one rule for the whole session, or the word none>",
+        "DIGEST: <the whole revised digest, as plain lines, or the word "
+        "unchanged>",
+    ]).strip()
 
-RULES
-- Name a part ONLY when the note changes it. Most notes touch one or two.
-  Naming a part you are unsure about rewrites it — say less, not more.
-- Copy part names EXACTLY from the list above. Never invent one, never
-  translate one.
-- A note that changes nothing about the picture answers `FACETS: none`. That is
-  a normal and complete answer.
-- For each part you named, write ONE short line, in the Showrunner's own
-  language, saying what that part IS now. State the finished value, never the
-  change: 「下から煽って」, not 「カメラを下げて」.
-- A rule that is about the whole session and belongs to no single part
-  (「足は絶対に映さない」) goes on the STANDING line instead, and its part is
-  not named.
 
-THE DECISION DIGEST
-Besides the eight parts, you keep one more thing: a short, plain-language
-record of what has actually been decided so far — added, then dropped, then
-maybe brought back. This is not a transcript and not a tag list. Every future
-turn reads THIS instead of the raw conversation, so it has to stay short,
-current, and free of anything that no longer matters.
-
-You are shown the digest as it stands below. Revise it for this note:
-- Settling something new: add ONE short line for it.
-- Reversing or replacing something already in the digest: REWRITE that line.
-  Never keep both the old and the new statement of the same thing.
-- Something that can no longer affect the picture: drop its line entirely.
-- Most notes change nothing here. When in doubt, leave it exactly as it was.
-- A handful of lines, never a growing log.
-
-OUTPUT FORMAT — the FACETS line, then one line per part you named, then
-STANDING, then DIGEST last. Nothing else, no explanation:
-
-FACETS: <comma-separated part names, or the word none>
-PLACE: <what the place is now>
-HOUR: <…>
-LIGHT: <…>
-PROPS: <…>
-COSTUME: <…>
-POSE: <…>
-EXPRESSION: <…>
-CAMERA: <…>
-STANDING: <one rule for the whole session, or the word none>
-DIGEST: <the whole revised digest, as plain lines, or the word unchanged>
-""".strip()
+# Kept as the solo system prompt, unchanged — anything reading `ROUTE_SYSTEM`
+# directly (tests included) still sees exactly today's eight-part text.
+ROUTE_SYSTEM = route_system()
 
 # Same lenient-label spirit as `parse_plan` — a run that loses the routing
 # because the model wrote "CAMERA :" is a run that rewrites the whole shot.
+#
+# Built from `ALL_FACETS` (all eleven, partner ones included) unconditionally
+# rather than switched on partner presence: parsing a `COSTUME_B` line a solo
+# session's model never had a reason to write is harmless (nothing downstream
+# treats a name outside that turn's own `allowed`/`want` set as real — see
+# `parse_facets` and `service.route_note`'s `writable` filter), and it means
+# this file has one label map instead of building it fresh per call.
 _ROUTE_LABELS: dict[str, str] = {
-    label.replace(" ", ""): key for key, label in facets_mod.FACETS
+    label.replace(" ", ""): key for key, label in facets_mod.ALL_FACETS
 }
 _ROUTE_LINE_RE = re.compile(
     r"(?im)^[\s>*_#-]*(FACETS|STANDING|" + "|".join(
-        label for _, label in facets_mod.FACETS
+        label for _, label in facets_mod.ALL_FACETS
     ) + r")[\s*_]*[:：]\s*(.*?)\s*$"
 )
 _NONE_WORDS = frozenset({"none", "なし", "無し", "-", "--", "n/a", "(none)"})
@@ -413,6 +475,7 @@ def parse_route(raw: str) -> tuple[list[str], dict[str, str], str, str]:
 async def run_route(
     ollama, *, note: str, table_block: str, current_digest: str = "",
     model: str, num_ctx: int | None,
+    name_a: str = "", name_b: str = "",
     on_token: TokenCallback | None = None,
 ) -> tuple[list[str], dict[str, str], str, str]:
     """Which parts of the shot did the Showrunner just change?
@@ -425,6 +488,9 @@ async def run_route(
     revised (or unchanged). This is the same call, not an extra one: the model
     is already reading the note and the table to decide routing, and updating
     a short running summary is the same judgment call, not a second one.
+
+    `name_b` present is what switches the system prompt to the eleven-part
+    (W-Muse) form — see `route_system`.
     """
     prompt = "\n\n".join([
         f"THE SHOT AS IT STANDS:\n{table_block}" if table_block.strip() else "",
@@ -432,9 +498,10 @@ async def run_route(
         if current_digest.strip() else "THE DECISION DIGEST AS IT STANDS: (empty so far)",
         f"総監督がいま言ったこと:\n{note.strip()}",
     ]).strip()
+    system = route_system(name_a=name_a, name_b=name_b) if name_b else ROUTE_SYSTEM
     try:
         raw = await _call(
-            ollama, system=ROUTE_SYSTEM, prompt=prompt, model=model,
+            ollama, system=system, prompt=prompt, model=model,
             images=None, num_ctx=num_ctx, think=False, on_token=on_token,
         )
     except ChainError:
@@ -529,9 +596,11 @@ async def run_strike(
 
 # Two lines per part: `CAMERA TAGS: …` and `CAMERA: …`. The TAGS variant has to
 # be tried first or the bare label matches it and swallows the word "TAGS".
+# `ALL_FACETS`, same reasoning as `_ROUTE_LABELS` above — a solo turn's
+# `allowed` set never contains a `_b` name, so it cannot parse one out.
 _FACET_LINE_RE = re.compile(
     r"(?im)^[\s>*_#-]*(" + "|".join(
-        label for _, label in facets_mod.FACETS
+        label for _, label in facets_mod.ALL_FACETS
     ) + r")[\s*_]*(TAGS)?[\s*_]*[:：]\s*(.*?)\s*$"
 )
 

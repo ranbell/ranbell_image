@@ -894,17 +894,13 @@ def _still_meant(old: str, new_items: list[str]) -> bool:
 def on_facets(session: dict[str, Any]) -> bool:
     """True when this session's shot lives in the facet table.
 
-    The lead shoot with one Muse, and nothing else yet. W-Muse is excluded on
-    purpose: one `costume` / `pose` / `expression` facet cannot say whose
-    clothes and whose pose those are, which is the same reason `start_duet`
-    leaves `costume` untouched for a two-hander. Namespaced facets (`a.pose` /
-    `b.pose`) are the way in for it later. The crewed studio keeps its own
+    Covers W-Muse (a partner cast opposite the lead) too, now that
+    `costume_b`/`pose_b`/`expression_b` give the second Muse her own slots
+    instead of the one `costume`/`pose`/`expression` a single Muse used to
+    have to speak for both of them through. The crewed studio keeps its own
     machinery until each seat declares the parts it owns.
     """
-    return (
-        is_duet(session)
-        and not str(_inputs(session).get("partner_preset") or "").strip()
-    )
+    return is_duet(session)
 
 
 def _reassemble(session: dict[str, Any]) -> None:
@@ -1108,11 +1104,20 @@ async def route_note(
         return [], ""
     inputs = _inputs(session)
     table = facets.table_of(session)
+    partner_character = await _partner_character(db, session)
+    char_a = session.get("character") or {}
+    name_a = str(char_a.get("name_ja") or char_a.get("name") or "")
+    name_b = ""
+    label_names: dict[str, str] | None = None
+    if partner_character:
+        name_b = str(partner_character.get("name_ja") or partner_character.get("name") or "")
+        label_names = {"costume_b": name_b, "pose_b": name_b, "expression_b": name_b}
     try:
         named, lines, standing, digest = await chain.run_route(
-            ollama, note=text, table_block=facets.table_block(table),
+            ollama, note=text, table_block=facets.table_block(table, names=label_names),
             current_digest=str(session.get("digest") or ""),
             model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            name_a=name_a, name_b=name_b,
         )
     except Exception:
         logger.warning("[muse] route turn failed; nothing routed", exc_info=True)
@@ -1862,7 +1867,10 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
-def _facet_prep_prompt(session: dict[str, Any], names: list[str]) -> str:
+def _facet_prep_prompt(
+    session: dict[str, Any], names: list[str],
+    *, partner_character: dict[str, Any] | None = None,
+) -> str:
     """What she is handed to rewrite some parts of the shot.
 
     Deliberately short, and deliberately the same length on turn twenty as on
@@ -1881,6 +1889,14 @@ def _facet_prep_prompt(session: dict[str, Any], names: list[str]) -> str:
     table = facets.table_of(session)
     opening = not facets.table_rev(table)
 
+    char_a = session.get("character") or {}
+    name_a = str(char_a.get("name_ja") or char_a.get("name") or "")
+    name_b = ""
+    label_names: dict[str, str] | None = None
+    if partner_character:
+        name_b = str(partner_character.get("name_ja") or partner_character.get("name") or "")
+        label_names = {"costume_b": name_b, "pose_b": name_b, "expression_b": name_b}
+
     parts = [
         f"お題（総監督が最初に言ったこと）:\n{theme}" if theme else "",
         f"Style: {_style(session)}",
@@ -1898,7 +1914,7 @@ def _facet_prep_prompt(session: dict[str, Any], names: list[str]) -> str:
                      + digest)
     if not opening:
         parts.append("いまの画（すでに決まっている部分）:\n"
-                     + facets.table_block(table))
+                     + facets.table_block(table, names=label_names))
     orders = directives_block(session, only=names if not opening else None)
     if orders:
         parts.append(orders)
@@ -1906,8 +1922,25 @@ def _facet_prep_prompt(session: dict[str, Any], names: list[str]) -> str:
     if standing:
         parts.append(standing)
 
-    labels = "・".join(facets.FACET_LABELS[n] for n in names)
-    if opening:
+    def _label(n: str) -> str:
+        if n == "costume_b":
+            return f"{name_b}の衣装"
+        if n == "pose_b":
+            return f"{name_b}のポーズ"
+        if n == "expression_b":
+            return f"{name_b}の表情"
+        return facets.FACET_LABELS[n]
+
+    labels = "・".join(_label(n) for n in names)
+    if opening and partner_character:
+        parts.append(
+            f"この一枚を、{name_a}と{name_b}の二人で全部決めて。場所・時間・光・"
+            "小物・カメラは二人共通、衣装・ポーズ・表情はそれぞれ自分の分だけ"
+            f"（{name_a}は{name_a}の、{name_b}は{name_b}の）を決めて。"
+            "決めたら SAY でフレームに何が入っているかをそれぞれ自分の言葉で"
+            "読み上げて。小物は名前で。隠さないこと。"
+        )
+    elif opening:
         parts.append(
             "この一枚を、全部あなたが決めて。場所・時間・光・小物・衣装・ポーズ・"
             "表情・カメラ。決めたら SAY でフレームに何が入っているかを自分の言葉で"
@@ -1975,7 +2008,9 @@ def _facets_to_write(session: dict[str, Any]) -> list[str]:
     by the model remembering to leave it alone.
     """
     table = facets.table_of(session)
-    unlocked = [n for n, _ in facets.FACETS if not table[n].get("locked")]
+    partner = bool(str(_inputs(session).get("partner_preset") or "").strip())
+    opening_set = facets.ALL_FACETS if partner else facets.FACETS
+    unlocked = [n for n, _ in opening_set if not table[n].get("locked")]
     if not facets.table_rev(table):
         return unlocked
     routed = [n for n in (session.get("routed") or []) if n in unlocked]
@@ -2058,16 +2093,26 @@ async def _duet_prep_facets(
     images = await board_images(db, session)
     started = time.monotonic()
     opening = not facets.table_rev(facets.table_of(session))
+    partner_character = await _partner_character(db, session)
+    if partner_character:
+        tier = await _duet_tier(db, session, partner_character)
+        system = crew.w_actress_duet_prompt(
+            session.get("character") or {}, partner_character, mode="prep",
+            base_style=_style(session), seed=str(sid), tier=tier,
+            facets=names, opening=opening,
+        )
+    else:
+        system = crew.actress_duet_prompt(
+            session.get("character") or {}, mode="prep",
+            base_style=_style(session), seed=str(sid),
+            facets=names, opening=opening,
+        )
 
     try:
         say, written, blind = await chain.run_duet_facets(
             ollama,
-            user_prompt=_facet_prep_prompt(session, names),
-            system=crew.actress_duet_prompt(
-                session.get("character") or {}, mode="prep",
-                base_style=_style(session), seed=str(sid),
-                facets=names, opening=opening,
-            ),
+            user_prompt=_facet_prep_prompt(session, names, partner_character=partner_character),
+            system=system,
             allowed=names,
             model=_vision_model(inputs) if images else _text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),

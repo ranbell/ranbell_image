@@ -33,6 +33,17 @@ def _session() -> dict:
     return s
 
 
+def _w_session() -> dict:
+    """A W-Muse (主演撮り・二人) session: a lead and a partner, distinct bodies."""
+    s = _session()
+    s["inputs"]["partner_preset"] = "c2"
+    s["partner_character"] = {
+        "identity_tags": ["1girl", "black_hair", "small_breasts"],
+        "outfit_tags": [], "personality": {}, "palette": [], "signature_prop": "",
+    }
+    return s
+
+
 # ── replacement, not removal ────────────────────────────────────────────────
 
 def test_writing_a_facet_replaces_it_whole():
@@ -90,6 +101,200 @@ def test_an_angle_keeps_the_gaze_that_belongs_to_it():
     facets.table_of(s)["pose"]["tags"].append("looking_up")
     facets.write(s, "camera", tags="from_above, high_angle")
     assert "looking_up" in facets.table_of(s)["pose"]["tags"]
+
+
+def test_a_facets_own_write_cannot_contradict_itself():
+    """A real e2e run against fredrezones55/Gemma-4-Uncensored-HauhauCS-Aggressive
+    produced a CAMERA TAGS line answering "shoot from below" that named the
+    intended low angle plus a trailing high-angle hedge left in from the shot
+    it was replacing — both in the same line. Nothing used to look for a
+    contradiction inside a single facet's own fresh tags, only between facets,
+    so the stray opposite-family tag rode straight into the prompt. The first
+    pitch stated wins, same rule `parse_facets` already uses for a repeated
+    field.
+    """
+    s = _session()
+    facets.write(s, "camera",
+                 tags="low_angle, shot_from_below, looking_up_at_viewer, (high_angle:1.1)")
+    kept = facets.table_of(s)["camera"]["tags"]
+    assert "low_angle" in kept
+    assert not any(identity.bare_tag(t) == "high_angle" for t in kept)
+
+
+def test_a_level_pitch_contradicts_a_high_or_low_one_too():
+    """The same real run wrote `high_angle, eye_level` (and later `low_angle,
+    eye_level`) together, every turn that touched the camera, from the
+    opening prep onward. `eye-level`/`straight-on` are not in
+    `_ANGLE_FORBIDS_GAZE` — no gaze follows from a level shot — so an earlier
+    version of this check that only compared *that* table read them as having
+    no family at all, and so as compatible with anything. `pitch_family` now
+    partitions the whole `_CAMERA_PITCH` slot into three answers (high / low /
+    level) so a level shot is its own family too, not a neutral one. The bare
+    `tag:1.1` weight syntax (no parens) is included on purpose — the real
+    output used it, and `identity.split_weight` used to only recognise the
+    parenthesised form, which hid `low_angle:1.1` from every bare-tag
+    comparison in the codebase, this one included.
+    """
+    s = _session()
+    facets.write(s, "camera", tags="high_angle, eye_level, wide_shot")
+    kept = facets.table_of(s)["camera"]["tags"]
+    assert "high_angle" in kept
+    assert not any(identity.bare_tag(t) == "eye_level" for t in kept)
+
+    facets.write(s, "camera", tags="low_angle:1.1, eye-level, wide_shot")
+    kept = facets.table_of(s)["camera"]["tags"]
+    assert any(identity.bare_tag(t) == "low_angle" for t in kept)
+    assert not any(identity.bare_tag(t) == "eye-level" for t in kept)
+
+
+def test_a_facets_own_write_keeps_tags_that_do_not_conflict():
+    """The self-conflict pass must not turn into another over-eager eviction."""
+    s = _session()
+    facets.write(s, "camera", tags="from_below, low_angle, wide_shot, from_side")
+    kept = facets.table_of(s)["camera"]["tags"]
+    assert kept == ["from_below", "low_angle", "wide_shot", "from_side"]
+
+
+def test_a_facets_own_write_cannot_pair_an_angle_with_the_gaze_it_forbids():
+    """Same real run, a third variant of the same underlying gap: one
+    `CAMERA TAGS:` line named `low_angle` and, further down the same line,
+    `looking_up` — the exact gaze `_ANGLE_FORBIDS_GAZE` says a low angle rules
+    out. `_evict_conflicts` below already applies that rule *between*
+    facets; this is the same rule applied *inside* one write, which is a
+    different slot pair (`camera_pitch` vs `gaze_pitch`) and so is not
+    caught by `_resolve_self_slot_conflicts`. The gaze this pitch requires
+    must survive — `from_below, low_angle, looking_down` together is the
+    ordinary, correct way to write this angle.
+    """
+    s = _session()
+    facets.write(s, "camera", tags="low_angle, wide_shot, looking_up")
+    kept = facets.table_of(s)["camera"]["tags"]
+    assert "low_angle" in kept
+    assert not any(identity.bare_tag(t) == "looking_up" for t in kept)
+
+    s2 = _session()
+    facets.write(s2, "camera", tags="from_below, low_angle, looking_down")
+    kept2 = facets.table_of(s2)["camera"]["tags"]
+    assert {"from_below", "low_angle", "looking_down"} <= set(kept2)
+
+
+def test_self_conflict_resolution_is_not_limited_to_the_camera_facet():
+    """The same real run also wrote `morning, midday` together in one `HOUR`
+    line — the self-conflict problem is not camera-specific, so the fix is
+    not either. `time_of_day` has no synonym convention the way camera pitch
+    does, so any two distinct members are read as a straight contradiction.
+    """
+    s = _session()
+    facets.write(s, "hour", tags="morning, midday, saturday")
+    kept = facets.table_of(s)["hour"]["tags"]
+    assert "morning" in kept
+    assert "midday" not in kept
+    assert "saturday" in kept
+
+
+# ── W-Muse: two Muses, two sides ────────────────────────────────────────────
+# `costume_b`/`pose_b`/`expression_b` give the second Muse her own slots
+# instead of contending with the lead for one `costume`/`pose`/`expression`.
+# A real 20-turn W-Muse session (private/muse/e2e_2026-08-11_wmuse/REPORT.md)
+# showed the OLD, un-faceted path had no syntax at all for "whose state is
+# this" — the tests below are the structural guarantee the new one does.
+
+def test_a_write_to_the_second_muses_facet_leaves_the_leads_alone():
+    s = _w_session()
+    facets.write(s, "pose", tags="standing, arms_at_sides", nl="A stands.")
+    before = dict(facets.table_of(s)["pose"])
+
+    facets.write(s, "pose_b", tags="sitting, crossed_arms", nl="B sits.")
+
+    after = facets.table_of(s)["pose"]
+    assert after["rev"] == before["rev"]
+    assert after["tags"] == before["tags"]
+    # And the reverse never happened either — sitting and standing are
+    # opposite answers to the same `posture` slot, which is exactly the
+    # cross-character eviction that must never fire.
+    assert "standing" in after["tags"]
+    b = facets.table_of(s)["pose_b"]
+    assert "sitting" in b["tags"] and "standing" not in b["tags"]
+
+
+def test_a_write_to_the_leads_facet_leaves_the_second_muses_alone():
+    s = _w_session()
+    facets.write(s, "pose_b", tags="sitting, crossed_arms")
+    before = dict(facets.table_of(s)["pose_b"])
+
+    facets.write(s, "pose", tags="standing, arms_at_sides")
+
+    after = facets.table_of(s)["pose_b"]
+    assert after["rev"] == before["rev"]
+    assert after["tags"] == before["tags"]
+
+
+def test_a_shared_facet_still_evicts_across_both_sides():
+    """`camera` has no `_b` twin — one lens, one shared fact — so a stray gaze
+    tag on either Muse's side is still fair game for a camera move to evict,
+    exactly as it always was for the single-Muse camera/pose pair."""
+    s = _w_session()
+    facets.write(s, "pose_b", tags="standing, looking_up, crossed_arms")
+    facets.write(s, "camera", tags="from_below, low_angle")
+    assert "looking_up" not in facets.table_of(s)["pose_b"]["tags"]
+    assert "standing" in facets.table_of(s)["pose_b"]["tags"]
+
+
+def test_a_facets_own_write_is_checked_against_the_right_muses_body():
+    """The lead has no breast tag locked; the partner is locked to
+    `small_breasts`. A write to `pose_b` must be checked against the
+    partner's body, not the lead's — getting this backwards would mean one
+    Muse's write can be silently rejected for contradicting the OTHER Muse's
+    figure, which reads as a random, unexplained refusal."""
+    s = _w_session()
+    facets.write(s, "pose", tags="standing, huge_breasts")
+    assert "huge_breasts" in facets.table_of(s)["pose"]["tags"]
+
+    facets.write(s, "pose_b", tags="standing, huge_breasts")
+    assert "huge_breasts" not in facets.table_of(s)["pose_b"]["tags"]
+
+
+def test_own_slot_filter_accepts_posture_and_arms_tags_for_the_second_muse():
+    s = _w_session()
+    report = facets.write(s, "pose_b", tags="sitting, wariza, arms_up, looking_at_viewer")
+    kept = facets.table_of(s)["pose_b"]["tags"]
+    assert "sitting" in kept and "wariza" in kept and "arms_up" in kept
+    assert "looking_at_viewer" not in kept, "the lens decides where she looks, same as for the lead"
+    assert "looking_at_viewer" in report["rejected"]
+
+
+def test_a_locked_second_muse_facet_blocks_writes_the_same_way_the_leads_does():
+    s = _w_session()
+    facets.set_lock(s, "costume_b", True)
+    report = facets.write(s, "costume_b", tags="swimsuit")
+    assert report["blocked"] == ["costume_b"]
+    assert facets.table_of(s)["costume_b"]["tags"] == []
+
+
+def test_a_solo_session_never_gets_second_muse_facets_written():
+    """`_facets_to_write`'s "opening" default and a router hallucinating a
+    `_b` name are both guarded the same way: a solo table's `costume_b` stays
+    at rev 0 forever, because nothing in a solo session's own machinery ever
+    names it."""
+    s = _session()
+    assert "partner_character" not in s
+    table = facets.table_of(s)
+    assert table["costume_b"]["rev"] == 0
+    assert table["pose_b"]["rev"] == 0
+    assert table["expression_b"]["rev"] == 0
+
+
+def test_all_tags_and_nl_join_read_eleven_facets_without_side_awareness():
+    """The projection helpers do not need to know about sides at all — an
+    unwritten `_b` facet contributes nothing, so a solo table's output is
+    unaffected by the three extra, perpetually blank slots."""
+    s = _w_session()
+    facets.write(s, "pose", tags="standing", nl="She stands.")
+    facets.write(s, "pose_b", tags="sitting", nl="She sits.")
+    tags = facets.all_tags(facets.table_of(s))
+    assert "standing" in tags and "sitting" in tags
+    scene = facets.nl_join(facets.table_of(s))
+    assert "She stands." in scene and "She sits." in scene
 
 
 # ── who owns which tag ──────────────────────────────────────────────────────
@@ -448,9 +653,11 @@ def test_the_crewed_studio_is_not_on_the_facet_path():
     assert service.on_facets(s) is False
     s["mode"] = "duet"
     assert service.on_facets(s) is True
-    # W-Muse: one costume facet cannot say whose clothes those are.
+    # W-Muse is on the facet path too — costume_b/pose_b/expression_b give
+    # the second Muse her own slots instead of contending for the first
+    # Muse's one costume/pose/expression facet.
     s["inputs"]["partner_preset"] = "someone"
-    assert service.on_facets(s) is False
+    assert service.on_facets(s) is True
 
 
 def test_a_new_session_already_has_the_table():

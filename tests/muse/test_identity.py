@@ -261,3 +261,24 @@ def test_bare_tag_and_tag_names_read_through_the_emphasis():
     assert identity.tag_names(
         "singing, (singing:1.2), tambourine, ",
     ) == ["singing", "tambourine"]
+
+
+def test_bare_tag_reads_through_emphasis_written_without_parens():
+    """A real e2e run showed the model writing weight two other ways besides
+    `(tag:1.2)`: the bare `tag:1.2` with no parens at all, and `tag (1.2)`
+    with the number alone inside parens. `_WEIGHT_RE` only ever matched the
+    first form, so `low_angle:1.1` and `squinting (1.1)` read as one opaque
+    tag that matched nothing — not the plain tag in a slot lookup, not a
+    banned name, not its own duplicate written properly on another turn."""
+    assert identity.bare_tag("low_angle:1.1") == "low_angle"
+    assert identity.bare_tag("squinting (1.1)") == "squinting"
+    assert identity.split_weight("low_angle:1.1") == ("low_angle", 1.1)
+    assert identity.split_weight("squinting (1.1)") == ("squinting", 1.1)
+    # A parenthetical that is not a number at all is not guessed at — there is
+    # no safe rewrite for `closed_eyes (softly)`, only a flag for one.
+    assert identity.bare_tag("closed_eyes (softly)") != "closed_eyes"
+
+
+def test_clamp_weight_caps_emphasis_written_without_parens_too():
+    over = f"low_angle:{identity.MAX_TAG_WEIGHT + 1}"
+    assert identity.clamp_weight(over) == f"(low_angle:{identity.MAX_TAG_WEIGHT:g})"

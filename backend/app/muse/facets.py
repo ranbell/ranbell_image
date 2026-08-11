@@ -53,14 +53,32 @@ FACETS: tuple[tuple[str, str], ...] = (
     ("camera", "CAMERA"),
 )
 
-FACET_NAMES: frozenset[str] = frozenset(k for k, _ in FACETS)
-FACET_LABELS: dict[str, str] = {k: label for k, label in FACETS}
+# The three character-bound parts, duplicated for the second Muse in a W-Muse
+# (主演撮り・二人) session. `place`/`hour`/`light`/`props`/`camera` stay single
+# — one room, one lens, one shared moment — so they are not duplicated: two
+# people looking at each other is one `camera` fact, not two. Kept apart from
+# `FACETS` rather than merged into it so a solo session's shape (and every
+# test written against it) does not move by a single byte; these three are
+# always present in the table but stay blank and unrouted for a solo session.
+PARTNER_FACETS: tuple[tuple[str, str], ...] = (
+    ("costume_b", "COSTUME_B"),
+    ("pose_b", "POSE_B"),
+    ("expression_b", "EXPRESSION_B"),
+)
+ALL_FACETS: tuple[tuple[str, str], ...] = FACETS + PARTNER_FACETS
+
+FACET_NAMES: frozenset[str] = frozenset(k for k, _ in ALL_FACETS)
+FACET_LABELS: dict[str, str] = {k: label for k, label in ALL_FACETS}
 
 # The order facet tags are concatenated into the Comfy positive, which is NOT
 # the order above. Earlier tokens carry more weight, so composition and the
-# acting lead; the room and the hour are context and can sit at the back.
+# acting lead; the room and the hour are context and can sit at the back. Each
+# character-bound part sits next to its own kind (pose beside pose_b) rather
+# than segregated by Muse, so a shared `camera` framing tag is not read as
+# further from one performer's body than the other's.
 TAG_ORDER: tuple[str, ...] = (
-    "camera", "pose", "expression", "costume", "props", "place", "hour", "light",
+    "camera", "pose", "pose_b", "expression", "expression_b",
+    "costume", "costume_b", "props", "place", "hour", "light",
 )
 
 # Which conflict slots each facet owns. A tag whose slot belongs to another
@@ -88,6 +106,31 @@ _SLOT_OWNER: dict[str, str] = {
     slot: facet for facet, slots in FACET_OWNS.items() for slot in slots
 }
 
+# facet -> which Muse it belongs to, for the one thing that must never cross a
+# character line: whether a fresh tag on one side is allowed to evict a stale
+# one on the other. `None` means shared (`place`/`hour`/`light`/`props`/
+# `camera`) and interacts with both sides normally — a camera move may still
+# evict a stray gaze tag wherever it is hiding. `FACET_OWNS`/`_SLOT_OWNER`
+# above are NOT duplicated per side on purpose: `pose_b` answers to the same
+# `posture`/`arms` slots `pose` does (see `_canonical_facet` and
+# `_own_slot_filter` below), because the *kind* of thing a tag describes is
+# the same for both Muses — only *whose* fresh write gets to act on it differs,
+# which is a per-write question, not a per-tag one.
+_SIDE: dict[str, str] = {
+    "costume": "a", "pose": "a", "expression": "a",
+    "costume_b": "b", "pose_b": "b", "expression_b": "b",
+}
+
+
+def _side_of(facet: str) -> str | None:
+    return _SIDE.get(facet)
+
+
+def _canonical_facet(facet: str) -> str:
+    """`pose_b` answers to the same slot ownership `pose` does."""
+    return facet[:-2] if facet.endswith("_b") else facet
+
+
 # `from_behind` rules out `looking_at_viewer` only when `looking_back` is
 # absent — she turned her head, and both are true. `conflict.contradicts` is
 # pairwise and can never see that third tag, so the rule lives here, where the
@@ -104,10 +147,11 @@ def blank_facet() -> dict[str, Any]:
 
 
 def blank_table() -> dict[str, dict[str, Any]]:
-    table = {name: blank_facet() for name, _ in FACETS}
+    table = {name: blank_facet() for name, _ in ALL_FACETS}
     # The eight-line COSTUME block is load-bearing and validated, so it survives
     # verbatim as this facet's structured payload. `tags` stays the GARMENTS
-    # slots and nothing else — see `brief.garment_tags`.
+    # slots and nothing else — see `brief.garment_tags`. `costume_b` has no
+    # such block (see `crew.w_facet_output_block`) and needs no `fields`.
     table["costume"]["fields"] = {}
     return table
 
@@ -115,7 +159,7 @@ def blank_table() -> dict[str, dict[str, Any]]:
 def table_of(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """The session's facet table, filling in any facet a rollback left out."""
     table = session.setdefault("facets", blank_table())
-    for name, _ in FACETS:
+    for name, _ in ALL_FACETS:
         if not isinstance(table.get(name), dict):
             table[name] = blank_facet()
             if name == "costume":
@@ -146,13 +190,19 @@ def parse_tags(raw: Any) -> list[str]:
 
 
 def _own_slot_filter(facet: str, tags: list[str]) -> tuple[list[str], list[str]]:
-    """Drop tags whose slot belongs to a different facet."""
+    """Drop tags whose slot belongs to a different facet.
+
+    Checked against the canonical name (`pose_b` -> `pose`): the *kind* of
+    slot a tag fills does not depend on which Muse it is about, only whether
+    this facet is the right kind of facet to hold it at all.
+    """
+    canonical = _canonical_facet(facet)
     kept: list[str] = []
     rejected: list[str] = []
     for tag in tags:
         slot = conflict.slot_of(identity.bare_tag(tag))
         owner = _SLOT_OWNER.get(slot or "")
-        if owner and owner != facet:
+        if owner and owner != canonical:
             rejected.append(tag)
             continue
         kept.append(tag)
@@ -171,6 +221,68 @@ def _resolve_gaze_behind(tags: list[str]) -> list[str]:
     if names & _TURNED_HEAD:
         return tags
     return [t for t in tags if identity.bare_tag(t) not in _FACING_VIEWER]
+
+
+def _resolve_self_slot_conflicts(tags: list[str]) -> list[str]:
+    """Within one fresh write, two tags cannot fill the same objective slot
+    (`tags.conflict.SLOTS`) with two different answers.
+
+    Two real turns showed this happening inside a single facet's own output,
+    not between facets: one `CAMERA TAGS:` line named `low_angle` and, later
+    in the same line, a trailing `high_angle` hedge left over from the shot
+    it was replacing; an `HOUR` line named both `morning` and `midday`. This
+    runs after `_own_slot_filter`, so every tag here already belongs to this
+    facet — the question is only whether two of its own tags answer the same
+    objective question two different ways. `camera_pitch` is the one slot
+    with real synonyms meant to coexist in a single write (`from_below,
+    low_angle, looking_down` is the ordinary way to say one angle), so it is
+    grouped by `conflict.pitch_family` rather than by exact tag; every other
+    slot here has no such convention, so an exact match is required or the
+    tag is treated as a fresh, conflicting answer. The first answer stated
+    wins, the same rule `parse_facets` already uses when a field is repeated.
+    """
+    resolved: list[str] = []
+    chosen: dict[str, Any] = {}
+    dropped: list[str] = []
+    for tag in tags:
+        bare = identity.bare_tag(tag)
+        slot = conflict.slot_of(bare)
+        if slot is None:
+            resolved.append(tag)
+            continue
+        group: Any = conflict.pitch_family(bare) if slot == "camera_pitch" else bare
+        if slot in chosen:
+            if chosen[slot] != group:
+                dropped.append(tag)
+                continue
+        else:
+            chosen[slot] = group
+        resolved.append(tag)
+    if dropped:
+        logger.info("[muse.facets] self-conflicting tags dropped: %s", ", ".join(dropped))
+    return resolved
+
+
+def _resolve_self_pitch_gaze_conflicts(tags: list[str]) -> list[str]:
+    """A camera-pitch tag rules out a specific `gaze_pitch` value — "she
+    cannot look up at a camera already under her chin", the rule
+    `_ANGLE_FORBIDS_GAZE` exists to draw. `_evict_conflicts` below already
+    applies it *between* facets (a camera move evicts a stale gaze living in
+    `pose`); nothing had applied it *inside* one facet's own fresh write until
+    a real turn produced `low_angle, ..., looking_up` together in a single
+    `CAMERA TAGS:` line — an angle and the gaze it rules out, stated in the
+    same breath. `_resolve_self_slot_conflicts` above cannot catch this: pitch
+    and gaze are different slots, not two answers to the same one.
+    """
+    forbidden: set[str] = set()
+    for tag in tags:
+        forbidden |= conflict.pitch_forbidden_gaze(identity.bare_tag(tag))
+    if not forbidden:
+        return tags
+    dropped = [t for t in tags if identity.bare_tag(t) in forbidden]
+    if dropped:
+        logger.info("[muse.facets] pitch-forbidden gaze dropped: %s", ", ".join(dropped))
+    return [t for t in tags if identity.bare_tag(t) not in forbidden]
 
 
 def write(
@@ -202,12 +314,14 @@ def write(
         kept, rejected = _own_slot_filter(facet, parse_tags(tags))
         if facet == "camera":
             kept = _resolve_gaze_behind(kept)
+        kept = _resolve_self_slot_conflicts(kept)
+        kept = _resolve_self_pitch_gaze_conflicts(kept)
         # The Showrunner's refusals outrank whoever just wrote this, and the
         # locked body outranks everyone.
         from .service import drop_banned  # circular at import time, not at call
         kept = parse_tags(drop_banned(session, ", ".join(kept)))
         kept = parse_tags(identity.drop_conflicting_tags(
-            ", ".join(kept), _identity_tags(session),
+            ", ".join(kept), _identity_tags_for(session, facet),
         ))
         # This is the whole thesis. Nothing removed the old tags; the facet they
         # lived in was replaced, and they were only ever in it.
@@ -237,26 +351,43 @@ def write(
     return report
 
 
-def _identity_tags(session: dict[str, Any]) -> list[str]:
-    return [
-        str(t) for t in ((session.get("character") or {}).get("identity_tags") or [])
-        if str(t).strip()
-    ]
+def _identity_tags_for(session: dict[str, Any], facet: str) -> list[str]:
+    """The locked body a facet's write is checked against.
+
+    A `pose_b` write describes the second Muse, so it is her body — not the
+    lead's — that a tag like `huge_breasts` gets to fight with. Getting this
+    wrong does not just mis-report a conflict: it means one Muse's write could
+    be silently rejected for contradicting the OTHER Muse's figure, which
+    would look like a random, unexplained refusal to whoever is not the lead.
+    """
+    char = session.get("partner_character") if _side_of(facet) == "b" else session.get("character")
+    return [str(t) for t in ((char or {}).get("identity_tags") or []) if str(t).strip()]
 
 
 def _evict_conflicts(
     table: dict[str, dict[str, Any]], facet: str, new_tags: list[str],
 ) -> dict[str, list[str]]:
-    """Take contradicting tags out of the OTHER unlocked facets.
+    """Take contradicting tags out of the OTHER unlocked facets on the same side.
 
     A gaze tag that leaked into `pose` in an older session, or an hour tag the
     place facet picked up, is exactly what survived a camera move before. A
     locked facet is left alone on purpose — see `_locked_conflicts`.
+
+    Never crosses a character line: `pose` (Muse A) writing `standing` must
+    not evict `sitting` from `pose_b` (Muse B) just because both fill the same
+    `posture` slot — they are two different bodies' postures, not one
+    body's postures said twice. Shared facets (`side_of` is `None`, e.g.
+    `camera`) still interact with both sides normally, since those really are
+    one shared fact.
     """
+    side = _side_of(facet)
     names = [identity.bare_tag(t) for t in new_tags]
     out: dict[str, list[str]] = {}
-    for other, _ in FACETS:
+    for other, _ in ALL_FACETS:
         if other == facet:
+            continue
+        other_side = _side_of(other)
+        if side is not None and other_side is not None and other_side != side:
             continue
         slot = table[other]
         if slot.get("locked"):
@@ -277,11 +408,19 @@ def _evict_conflicts(
 def _locked_conflicts(
     table: dict[str, dict[str, Any]], facet: str, new_tags: list[str],
 ) -> list[str]:
-    """Locked facets that disagree with this write, so the panel can say so."""
+    """Locked facets that disagree with this write, so the panel can say so.
+
+    Same cross-character exclusion as `_evict_conflicts` — a lock on Muse B's
+    pose is not something Muse A's pose write can ever be reported to fight.
+    """
+    side = _side_of(facet)
     names = [identity.bare_tag(t) for t in new_tags]
     out: list[str] = []
-    for other, _ in FACETS:
+    for other, _ in ALL_FACETS:
         if other == facet or not table[other].get("locked"):
+            continue
+        other_side = _side_of(other)
+        if side is not None and other_side is not None and other_side != side:
             continue
         if any(
             conflict.contradicts_any(identity.bare_tag(t), names)
@@ -304,7 +443,7 @@ def strike(session: dict[str, Any], gone: set[str] | frozenset[str]) -> list[str
         return []
     table = table_of(session)
     touched: list[str] = []
-    for name, _ in FACETS:
+    for name, _ in ALL_FACETS:
         slot = table[name]
         kept = [t for t in slot["tags"] if identity.bare_tag(t) not in gone]
         if len(kept) == len(slot["tags"]):
@@ -341,7 +480,7 @@ def all_tags(table: dict[str, dict[str, Any]]) -> str:
 
 
 def nl_join(table: dict[str, dict[str, Any]]) -> str:
-    """The facet sentences as one paragraph, in `FACETS` order.
+    """The facet sentences as one paragraph, in `ALL_FACETS` order.
 
     A valid SCENE with no model call at all. `compose` makes this read better;
     it is never the thing that makes the shot exist, because a panel that has to
@@ -349,7 +488,7 @@ def nl_join(table: dict[str, dict[str, Any]]) -> str:
     that looks broken every time he types.
     """
     parts: list[str] = []
-    for name, _ in FACETS:
+    for name, _ in ALL_FACETS:
         text = str((table.get(name) or {}).get("nl") or "").strip()
         if not text:
             continue
@@ -365,18 +504,27 @@ def table_rev(table: dict[str, dict[str, Any]]) -> int:
     The compose cache key: an unchanged table composes to the same prose, so it
     is not composed twice.
     """
-    return sum(int((table.get(n) or {}).get("rev") or 0) for n, _ in FACETS)
+    return sum(int((table.get(n) or {}).get("rev") or 0) for n, _ in ALL_FACETS)
 
 
 def table_block(
     table: dict[str, dict[str, Any]], *, facets: list[str] | None = None,
+    names: dict[str, str] | None = None,
 ) -> str:
-    """The table as the LLM reads it. The analogue of `brief.plan_block`."""
-    want = [n for n, _ in FACETS if facets is None or n in facets]
+    """The table as the LLM reads it. The analogue of `brief.plan_block`.
+
+    `names` is the small, optional kindness for a W-Muse table: `{"costume_b":
+    "白瀬みなも"}` reads as `COSTUME_B (白瀬みなも)` instead of a bare label
+    nobody but the code knows the meaning of. Parsing never depends on it —
+    only the fixed English label before the parenthesis does.
+    """
+    want = [n for n, _ in ALL_FACETS if facets is None or n in facets]
     lines: list[str] = []
     for name in want:
         slot = table.get(name) or {}
         label = FACET_LABELS[name]
+        if names and names.get(name):
+            label = f"{label} ({names[name]})"
         tags = ", ".join(slot.get("tags") or [])
         nl = str(slot.get("nl") or "").strip()
         if not tags and not nl:

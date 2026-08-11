@@ -44,7 +44,9 @@ class RoutingOllama(FakeOllama):
         self.calls.append({**kw, "prompt": prompt})
         system = str(kw.get("system") or "")
         text = "SAY: はい。"
-        if "script supervisor" in system and "eight parts" in system:
+        if "script supervisor" in system and (
+            "eight parts" in system or "eleven parts" in system
+        ):
             text = next(
                 (v for k, v in self.routes.items() if k in str(prompt)),
                 "FACETS: none\nSTANDING: none",
@@ -101,6 +103,39 @@ def test_a_named_part_with_no_line_still_routes():
 def test_nothing_at_all_routes_nothing():
     assert chain.parse_route("SAY: こんにちは") == ([], {}, "", "")
     assert chain.parse_route("") == ([], {}, "", "")
+
+
+# ── W-Muse: the router recognises the second Muse's three parts too ────────
+# `parse_route`/`_ROUTE_LABELS` are built from all eleven facet names
+# unconditionally (see chain.py) — a solo turn's model has no reason to ever
+# write `COSTUME_B`, so there is no separate "solo mode" for the parser to
+# get wrong. `route_system`, not the parser, is what actually changes shape
+# between a solo and a W-Muse session.
+
+def test_the_router_recognises_the_second_muses_parts():
+    named, lines, _, _ = chain.parse_route(
+        "FACETS: costume, costume_b\nCOSTUME: Tシャツ一枚\nCOSTUME_B: 麦わら帽子"
+    )
+    assert set(named) == {"costume", "costume_b"}
+    assert lines["costume"] == "Tシャツ一枚"
+    assert lines["costume_b"] == "麦わら帽子"
+
+
+def test_route_system_default_is_unchanged_and_says_eight_parts():
+    """`ROUTE_SYSTEM` (no args) stays exactly what a solo session always saw —
+    the constant every solo call site still reads directly."""
+    assert chain.ROUTE_SYSTEM == chain.route_system()
+    assert "eight parts" in chain.ROUTE_SYSTEM
+    assert "COSTUME_B" not in chain.ROUTE_SYSTEM
+
+
+def test_route_system_with_a_partner_lists_eleven_parts_by_name():
+    system = chain.route_system(name_a="あさひ", name_b="みなも")
+    assert "eleven parts" in system
+    assert "COSTUME_B" in system and "POSE_B" in system and "EXPRESSION_B" in system
+    assert "あさひ" in system and "みなも" in system
+    # The shared parts still read as shared, not as either Muse's alone.
+    assert "camera" in system.lower()
 
 
 # ── the decision digest ─────────────────────────────────────────────────────
@@ -180,6 +215,41 @@ async def test_direction_for_different_parts_sits_side_by_side():
     block = service.directives_block(s)
     assert "CAMERA: 下から煽る" in block
     assert "COSTUME: 上着なし" in block
+
+
+async def _w_duet_session(db, **over):
+    """A W-Muse session whose partner is already cached, so `_partner_character`
+    resolves without a DB round trip — `FakeDb` has no character presets to
+    look up, only session rows (see `service._partner_character`'s cache-hit
+    branch: a `character_id` match on the cached dict short-circuits the
+    lookup)."""
+    session = await _duet_session(db, partner_preset="c2", **over)
+    session["partner_character"] = {
+        "character_id": "c2", "name_ja": "みなも",
+        "identity_tags": ["1girl", "black_hair"],
+        "personality": {}, "palette": [], "signature_prop": "",
+    }
+    await session_db.save(db, session)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_route_note_hands_the_router_the_eleven_part_w_muse_prompt():
+    """`route_note` threads both names through to `chain.run_route`, which is
+    what switches the system prompt from eight parts to eleven — the fix for
+    the attribution problem in private/muse/e2e_2026-08-11_wmuse/REPORT.md."""
+    db = FakeDb()
+    ollama = RoutingOllama({
+        "麦わら帽子": "FACETS: costume_b\nCOSTUME_B: 麦わら帽子をかぶっている",
+    })
+    s = await _w_duet_session(db)
+
+    await service.route_note(db, ollama, s, "みなもに麦わら帽子をかぶせて", cfg={})
+
+    assert "eleven parts" in ollama.systems()
+    assert "みなも" in ollama.systems()
+    assert list(s["directives"]) == ["costume_b"]
+    assert s["directives"]["costume_b"]["text"] == "麦わら帽子をかぶっている"
 
 
 @pytest.mark.asyncio
