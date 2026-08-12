@@ -1394,7 +1394,7 @@
       "gazeViewer": "looking at lens",
       "coach": "Pose coaching",
       "coachOn": "Coaching…",
-      "coachHint": "Cyan = hands / pink = feet (large grab targets). Left-drag orbit, right-drag pan, pinch zoom. Stage in overview → check the picture in shot view.",
+      "coachHint": "Drag the floor ring to move a body; yellow knob rotates yaw (or Alt-drag). Cyan = hands / pink = feet. Lap snap is a starting point — nudge freely. Stage in overview → check the picture in shot view.",
       "coachSend": "Coach: do it like this",
       "viewOverview": "Overview",
       "viewShot": "Shot view",
@@ -1403,7 +1403,8 @@
       "subjectB": "Subject B",
       "closer": "Closer",
       "farther": "Farther",
-      "lapPillow": "Lap pillow",
+      "lapPillow": "Snap to lap",
+      "resetPlace": "Reset places",
       "arms": {
         "arms_at_sides": "Arms down",
         "arms_up": "Arms up",

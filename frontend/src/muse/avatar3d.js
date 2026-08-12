@@ -474,14 +474,25 @@ export async function createAvatarStage(container, {
   let shotOverride = null // THREE.Vector3 | null
   /** Half-gap between duo subjects (world X). */
   let duoSpacing = 0.55
+  /**
+   * When true, skip auto duo layout — user dragged / snapped characters into place.
+   * Closer/Farther or resetPlacement clears this.
+   */
+  let freePlacement = false
   /** @type {'overview' | 'shot'} */
   let viewMode = 'overview'
-  let dragKind = null // 'shot' | 'ik' | null
+  let dragKind = null // 'shot' | 'ik' | 'body' | 'yaw' | null
   let dragIk = null // effector entry
+  /** @type {any | null} */
+  let dragBodyVrm = null
   let lastPointer = { x: 0, y: 0 }
   const dragPlane = new THREE.Plane()
   const dragHit = new THREE.Vector3()
   const viewDir = new THREE.Vector3()
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+  const _tmpV = new THREE.Vector3()
+  const _tmpV2 = new THREE.Vector3()
+  const _tmpE = new THREE.Euler()
   let overviewSnapshot = null // { position, target } to restore when leaving shot
 
   const orbit = new OrbitControls(viewCam, renderer.domElement)
@@ -511,6 +522,13 @@ export async function createAvatarStage(container, {
   handleRoot.visible = false
   scene.add(handleRoot)
 
+  /** Floor rings under each avatar for body move / yaw (duo coach). */
+  const placeRoot = new THREE.Group()
+  placeRoot.visible = false
+  scene.add(placeRoot)
+  /** @type {{ group: THREE.Group, ring: THREE.Mesh, yaw: THREE.Mesh, yawHit: THREE.Mesh, hit: THREE.Mesh, vrm: any, who: 'a'|'b' }[]} */
+  const placeHandles = []
+
   const IK_SPECS = [
     { id: 'leftHand', bones: [Bone.LeftUpperArm, Bone.LeftLowerArm], tip: Bone.LeftHand, color: 0x38bdf8, size: 0.05, hit: 0.12, side: 'left', kind: 'arm' },
     { id: 'rightHand', bones: [Bone.RightUpperArm, Bone.RightLowerArm], tip: Bone.RightHand, color: 0x38bdf8, size: 0.05, hit: 0.12, side: 'right', kind: 'arm' },
@@ -526,77 +544,262 @@ export async function createAvatarStage(container, {
     return coachSubject === 'b' && vrmB ? vrmB : vrmA
   }
 
+  function getSceneYaw(vrm) {
+    if (!vrm?.scene) return 0
+    _tmpE.setFromQuaternion(vrm.scene.quaternion, 'YXZ')
+    return _tmpE.y
+  }
+
+  function setSceneUpright(vrm) {
+    if (!vrm?.scene) return
+    const yaw = getSceneYaw(vrm)
+    const gy = Number.isFinite(vrm.scene.userData?.groundY) ? vrm.scene.userData.groundY : 0
+    const base = Number.isFinite(vrm.scene.userData?.baseRotY) ? vrm.scene.userData.baseRotY : 0
+    vrm.scene.rotation.order = 'YXZ'
+    vrm.scene.rotation.set(0, Number.isFinite(yaw) ? yaw : base, 0)
+    vrm.scene.position.y = gy
+    vrm.scene.userData.sceneLie = false
+  }
+
+  function setSceneLie(vrm, yaw = null) {
+    if (!vrm?.scene) return
+    const y = yaw == null ? getSceneYaw(vrm) : yaw
+    const gy = Number.isFinite(vrm.scene.userData?.groundY) ? vrm.scene.userData.groundY : 0
+    vrm.scene.rotation.order = 'YXZ'
+    vrm.scene.rotation.set(Math.PI / 2, y, 0)
+    vrm.scene.position.y = gy + 0.1
+    vrm.scene.userData.sceneLie = true
+  }
+
+  function worldBonePos(vrm, name, out = _tmpV) {
+    const n = bone(vrm, name)
+    if (!n) return null
+    n.updateWorldMatrix(true, false)
+    return n.getWorldPosition(out)
+  }
+
   function applyDuoSpacing() {
     if (vrmB) {
       const g = THREE.MathUtils.clamp(duoSpacing, 0.22, 1.35)
       duoSpacing = g
       vrmA.scene.position.x = -g
       vrmB.scene.position.x = g
-      // Clear any lap-pillow whole-scene tilt when using normal spacing
-      if (!activeInteractIsLap()) {
-        resetSceneOrient(vrmA)
-        resetSceneOrient(vrmB)
-      }
+      vrmA.scene.position.z = 0
+      vrmB.scene.position.z = 0
+      setSceneUpright(vrmA)
+      setSceneUpright(vrmB)
+      // Restore upright base yaw
+      const baseA = Number.isFinite(vrmA.scene.userData?.baseRotY) ? vrmA.scene.userData.baseRotY : 0
+      const baseB = Number.isFinite(vrmB.scene.userData?.baseRotY) ? vrmB.scene.userData.baseRotY : 0
+      vrmA.scene.rotation.set(0, baseA, 0)
+      vrmB.scene.rotation.set(0, baseB, 0)
     } else {
       vrmA.scene.position.x = 0
-      resetSceneOrient(vrmA)
+      vrmA.scene.position.z = 0
+      setSceneUpright(vrmA)
     }
-  }
-
-  function activeInteractIsLap() {
-    const m = coachMode && coachModel ? coachModel : activeModel()
-    const i = m?.interact || ''
-    return i === 'lap_pillow' || i === 'head_on_lap' || i === 'head_in_lap'
   }
 
   function resetSceneOrient(vrm) {
     if (!vrm?.scene) return
     const baseY = Number.isFinite(vrm.scene.userData?.baseRotY) ? vrm.scene.userData.baseRotY : 0
+    vrm.scene.rotation.order = 'YXZ'
     vrm.scene.rotation.set(0, baseY, 0)
     const gy = Number.isFinite(vrm.scene.userData?.groundY) ? vrm.scene.userData.groundY : 0
     vrm.scene.position.y = gy
     vrm.scene.position.z = 0
+    vrm.scene.userData.sceneLie = false
   }
 
   /**
-   * A = lap giver (sitting), B = receiver (lying, head toward A's lap).
+   * Bone-aware assist: sit A, lie B, place B's head on A's lap.
+   * Leaves freePlacement on so the user can nudge afterward.
    */
-  function applyLapPillowLayout() {
-    if (!vrmB) return
-    const gap = THREE.MathUtils.clamp(duoSpacing, 0.28, 0.7)
-    duoSpacing = gap
+  function doSnapHeadToLap() {
+    if (!vrmB) return false
+    freePlacement = true
 
-    const baseYA = Number.isFinite(vrmA.scene.userData?.baseRotY) ? vrmA.scene.userData.baseRotY : 0
-    const baseYB = Number.isFinite(vrmB.scene.userData?.baseRotY) ? vrmB.scene.userData.baseRotY : 0
-    const gyA = Number.isFinite(vrmA.scene.userData?.groundY) ? vrmA.scene.userData.groundY : 0
-    const gyB = Number.isFinite(vrmB.scene.userData?.groundY) ? vrmB.scene.userData.groundY : 0
+    const giver = vrmA
+    const recv = vrmB
 
-    // Giver sits slightly to +X
-    vrmA.scene.rotation.order = 'XYZ'
-    vrmA.scene.rotation.set(0, baseYA, 0)
-    vrmA.scene.position.set(gap * 0.45, gyA, 0)
+    if (coachModel) {
+      coachModel = {
+        ...coachModel,
+        interact: 'lap_pillow',
+        posture: 'sitting',
+        gazePitch: coachModel.gazePitch || 'looking_down',
+        empty: false,
+      }
+    }
 
-    // Receiver lies supine: +90° pitch (head toward -Z in local), then yaw so head faces +X (giver)
-    vrmB.scene.rotation.order = 'YXZ'
-    vrmB.scene.rotation.set(Math.PI / 2, baseYB + Math.PI / 2, 0)
-    // Head is roughly 0.7–0.9m from hips along the body axis after lying
-    vrmB.scene.position.set(-gap * 0.15, gyB + 0.12, 0.05)
-    vrmA.scene.updateMatrixWorld(true)
-    vrmB.scene.updateMatrixWorld(true)
+    applyVrmPose(giver, {
+      posture: 'sitting',
+      arms: 'arms_at_sides',
+      gazePitch: 'looking_down',
+      cameraPitch: 'eye',
+      cameraSide: 'side',
+      cameraDistance: 'upper',
+      empty: false,
+      active: ['sitting'],
+    })
+    applyVrmPose(recv, {
+      posture: 'lying',
+      arms: 'arms_at_sides',
+      gazePitch: 'looking_up',
+      cameraPitch: 'eye',
+      cameraSide: 'side',
+      cameraDistance: 'upper',
+      empty: false,
+      active: ['lying'],
+    })
+
+    setSceneUpright(giver)
+    const baseA = Number.isFinite(giver.scene.userData?.baseRotY) ? giver.scene.userData.baseRotY : 0
+    giver.scene.rotation.set(0, baseA, 0)
+    giver.scene.updateMatrixWorld(true)
+
+    const lap = new THREE.Vector3()
+    const lThigh = worldBonePos(giver, Bone.LeftUpperLeg, _tmpV)
+    const rThigh = worldBonePos(giver, Bone.RightUpperLeg, _tmpV2)
+    if (lThigh && rThigh) lap.copy(lThigh).add(rThigh).multiplyScalar(0.5)
+    else {
+      const hips = worldBonePos(giver, Bone.Hips, _tmpV)
+      if (hips) lap.copy(hips)
+      else lap.set(giver.scene.position.x, 0.45, giver.scene.position.z)
+    }
+    lap.y += 0.05
+
+    const hipsG = worldBonePos(giver, Bone.Hips, new THREE.Vector3()) || giver.scene.position.clone()
+    // Prefer yaw that points receiver's head toward giver and feet outward
+    let bestYaw = getSceneYaw(recv)
+    let bestScore = Infinity
+    for (let i = 0; i < 24; i++) {
+      const yaw = (i / 24) * Math.PI * 2
+      setSceneLie(recv, yaw)
+      recv.scene.updateMatrixWorld(true)
+      const head = worldBonePos(recv, Bone.Head, _tmpV)
+      if (!head) continue
+      const offset = head.clone().sub(recv.scene.position)
+      recv.scene.position.x = lap.x - offset.x
+      recv.scene.position.z = lap.z - offset.z
+      recv.scene.updateMatrixWorld(true)
+      const head2 = worldBonePos(recv, Bone.Head, _tmpV)
+      const hipsR = worldBonePos(recv, Bone.Hips, _tmpV2)
+      if (!head2 || !hipsR) continue
+      const headErr = head2.distanceTo(lap)
+      // Prefer hips farther from giver hips than head (head on lap, body out)
+      const headToG = head2.distanceTo(hipsG)
+      const hipsToG = hipsR.distanceTo(hipsG)
+      const score = headErr * 2.2 + Math.max(0, headToG - hipsToG) * 1.5
+      if (score < bestScore) {
+        bestScore = score
+        bestYaw = yaw
+      }
+    }
+
+    setSceneLie(recv, bestYaw)
+    recv.scene.updateMatrixWorld(true)
+    {
+      const head = worldBonePos(recv, Bone.Head, _tmpV)
+      if (head) {
+        const offset = head.clone().sub(recv.scene.position)
+        recv.scene.position.x = lap.x - offset.x
+        recv.scene.position.z = lap.z - offset.z
+      }
+    }
+    giver.scene.updateMatrixWorld(true)
+    recv.scene.updateMatrixWorld(true)
+    customLimbs = false
+    if (coachModel) coachModel.customLimbs = false
+    snapIkToTips()
+    syncPlaceHandles()
+    updateBadge()
+    return true
   }
 
   function applyDuoLayout(interact) {
+    if (freePlacement) {
+      syncPlaceHandles()
+      return
+    }
     if (!vrmB) {
       vrmA.scene.position.x = 0
       resetSceneOrient(vrmA)
+      syncPlaceHandles()
       return
     }
-    const i = String(interact || '')
-    if (i === 'lap_pillow' || i === 'head_on_lap' || i === 'head_in_lap') {
-      applyLapPillowLayout()
-      return
-    }
+    // Lap pillow is no longer a hard-coded layout — use snap assist or free drag.
+    // Side-by-side remains the only auto layout.
+    void interact
     applyDuoSpacing()
+    syncPlaceHandles()
+  }
+
+  function rebuildPlaceHandles() {
+    while (placeHandles.length) {
+      const h = placeHandles.pop()
+      placeRoot.remove(h.group)
+      h.ring.geometry?.dispose?.()
+      h.ring.material?.dispose?.()
+      h.yaw.geometry?.dispose?.()
+      h.yaw.material?.dispose?.()
+      h.yawHit.geometry?.dispose?.()
+      h.yawHit.material?.dispose?.()
+      h.hit.geometry?.dispose?.()
+      h.hit.material?.dispose?.()
+    }
+    if (!vrmB) return
+    const specs = [
+      { vrm: vrmA, who: 'a', color: 0xf59e0b },
+      { vrm: vrmB, who: 'b', color: 0x38bdf8 },
+    ]
+    for (const s of specs) {
+      const group = new THREE.Group()
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.3, 0.016, 8, 48),
+        new THREE.MeshBasicMaterial({
+          color: s.color, transparent: true, opacity: 0.8, depthWrite: false,
+        }),
+      )
+      ring.rotation.x = -Math.PI / 2
+      const hit = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.38, 0.38, 0.1, 20),
+        new THREE.MeshBasicMaterial({
+          transparent: true, opacity: 0, depthWrite: false, depthTest: false,
+        }),
+      )
+      hit.position.y = 0.02
+      const yaw = new THREE.Mesh(
+        new THREE.SphereGeometry(0.055, 12, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xfde68a, transparent: true, opacity: 0.95, depthWrite: false,
+        }),
+      )
+      yaw.position.set(0.34, 0.04, 0)
+      const yawHit = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 10, 8),
+        new THREE.MeshBasicMaterial({
+          transparent: true, opacity: 0, depthWrite: false, depthTest: false,
+        }),
+      )
+      yawHit.position.copy(yaw.position)
+      group.add(hit, ring, yawHit, yaw)
+      placeRoot.add(group)
+      placeHandles.push({ group, ring, yaw, yawHit, hit, vrm: s.vrm, who: s.who })
+    }
+    syncPlaceHandles()
+  }
+
+  function syncPlaceHandles() {
+    if (!placeHandles.length) return
+    for (const h of placeHandles) {
+      const p = h.vrm.scene.position
+      h.group.position.set(p.x, 0.02, p.z)
+      const on = coachSubject === h.who
+      h.ring.material.opacity = on ? 0.95 : 0.45
+      h.ring.scale.setScalar(on ? 1.08 : 1)
+      h.yaw.visible = on || freePlacement
+    }
   }
 
   function rebuildHandles() {
@@ -687,6 +890,8 @@ export async function createAvatarStage(container, {
     if (kind === 'ik') el.style.cursor = 'grabbing'
     else if (kind === 'hover') el.style.cursor = 'grab'
     else if (kind === 'shot') el.style.cursor = 'move'
+    else if (kind === 'body') el.style.cursor = 'move'
+    else if (kind === 'yaw') el.style.cursor = 'ew-resize'
     else el.style.cursor = viewMode === 'shot' || coachMode ? 'grab' : 'default'
   }
 
@@ -839,6 +1044,15 @@ export async function createAvatarStage(container, {
             }))
           }
         }
+        // Preserve scene lie flags when free-placing
+        if (freePlacement) {
+          if (vrmA.scene.userData?.sceneLie) setSceneLie(vrmA)
+          else setSceneUpright(vrmA)
+          if (vrmB) {
+            if (vrmB.scene.userData?.sceneLie) setSceneLie(vrmB)
+            else setSceneUpright(vrmB)
+          }
+        }
         applyDuoLayout(interact)
         snapIkToTips()
       } else {
@@ -877,6 +1091,8 @@ export async function createAvatarStage(container, {
       // Coach overview: keep director orbit; only refresh gizmo / badge
       shotGizmo.root.visible = true
       handleRoot.visible = true
+      placeRoot.visible = Boolean(vrmB)
+      syncPlaceHandles()
       updateBadge()
     }
     return coachMode && coachModel ? coachModel : model
@@ -899,6 +1115,46 @@ export async function createAvatarStage(container, {
           dragPlane.setFromNormalAndCoplanarPoint(viewDir.clone().negate(), dragIk.mesh.position)
           lastPointer = { x: ev.clientX, y: ev.clientY }
           setCanvasCursor('ik')
+          renderer.domElement.setPointerCapture?.(ev.pointerId)
+          ev.preventDefault()
+          return
+        }
+      }
+    }
+
+    // Duo body place / yaw rings (before shot gizmo so floor rings win nearby)
+    if (coachMode && placeRoot.visible && placeHandles.length && viewMode === 'overview') {
+      const yawHits = raycaster.intersectObjects(placeHandles.map((h) => h.yawHit), false)
+      if (yawHits.length) {
+        const ph = placeHandles.find((h) => h.yawHit === yawHits[0].object)
+        if (ph) {
+          dragKind = 'yaw'
+          dragBodyVrm = ph.vrm
+          coachSubject = ph.who
+          freePlacement = true
+          orbit.enabled = false
+          lastPointer = { x: ev.clientX, y: ev.clientY }
+          setCanvasCursor('yaw')
+          rebuildHandles()
+          syncPlaceHandles()
+          renderer.domElement.setPointerCapture?.(ev.pointerId)
+          ev.preventDefault()
+          return
+        }
+      }
+      const bodyHits = raycaster.intersectObjects(placeHandles.map((h) => h.hit), false)
+      if (bodyHits.length) {
+        const ph = placeHandles.find((h) => h.hit === bodyHits[0].object)
+        if (ph) {
+          dragKind = ev.altKey || ev.shiftKey ? 'yaw' : 'body'
+          dragBodyVrm = ph.vrm
+          coachSubject = ph.who
+          freePlacement = true
+          orbit.enabled = false
+          lastPointer = { x: ev.clientX, y: ev.clientY }
+          setCanvasCursor(dragKind === 'yaw' ? 'yaw' : 'body')
+          rebuildHandles()
+          syncPlaceHandles()
           renderer.domElement.setPointerCapture?.(ev.pointerId)
           ev.preventDefault()
           return
@@ -933,6 +1189,14 @@ export async function createAvatarStage(container, {
         hoverIk = next
         if (hoverIk) setIkHighlight(hoverIk, true)
         setCanvasCursor(hoverIk ? 'hover' : '')
+      } else if (!hoverIk && placeRoot.visible) {
+        const yawHover = raycaster.intersectObjects(placeHandles.map((h) => h.yawHit), false)
+        const bodyHover = !yawHover.length
+          ? raycaster.intersectObjects(placeHandles.map((h) => h.hit), false)
+          : []
+        if (yawHover.length) setCanvasCursor('yaw')
+        else if (bodyHover.length) setCanvasCursor('body')
+        else setCanvasCursor('')
       }
     }
 
@@ -962,6 +1226,27 @@ export async function createAvatarStage(container, {
       return
     }
 
+    if ((dragKind === 'body' || dragKind === 'yaw') && dragBodyVrm) {
+      setPointerNdc(ev)
+      raycaster.setFromCamera(pointerNdc, viewCam)
+      if (dragKind === 'body' && raycaster.ray.intersectPlane(groundPlane, dragHit)) {
+        dragBodyVrm.scene.position.x = THREE.MathUtils.clamp(dragHit.x, -2.2, 2.2)
+        dragBodyVrm.scene.position.z = THREE.MathUtils.clamp(dragHit.z, -2.2, 2.2)
+        syncPlaceHandles()
+        syncHandles()
+      } else if (dragKind === 'yaw') {
+        const yaw = getSceneYaw(dragBodyVrm) - dx * 0.015
+        if (dragBodyVrm.scene.userData?.sceneLie) setSceneLie(dragBodyVrm, yaw)
+        else {
+          dragBodyVrm.scene.rotation.order = 'YXZ'
+          dragBodyVrm.scene.rotation.y = yaw
+        }
+        syncPlaceHandles()
+        syncHandles()
+      }
+      return
+    }
+
     if (dragKind === 'shot' && viewMode === 'overview') {
       const model = coachMode && coachModel ? coachModel : activeModel()
       const base = shotOverride || shotCameraWorld(model, { duo: Boolean(vrmB) }).position
@@ -986,6 +1271,7 @@ export async function createAvatarStage(container, {
     if (dragIk) setIkHighlight(dragIk, Boolean(hoverIk === dragIk))
     dragKind = null
     dragIk = null
+    dragBodyVrm = null
     orbit.enabled = coachMode || viewMode === 'shot'
     setCanvasCursor(hoverIk ? 'hover' : '')
     try { renderer.domElement.releasePointerCapture?.(ev.pointerId) } catch { /* */ }
@@ -1025,6 +1311,7 @@ export async function createAvatarStage(container, {
         syncShotFromViewCam(model)
       }
       if (coachMode) syncHandles()
+      if (coachMode && placeRoot.visible) syncPlaceHandles()
     }
     renderer.render(scene, viewCam)
     raf = requestAnimationFrame(tick)
@@ -1052,6 +1339,7 @@ export async function createAvatarStage(container, {
       coachMode = Boolean(on)
       customLimbs = false
       shotOverride = null
+      freePlacement = false
       if (coachMode) {
         coachModel = {
           ...buildPoseSketch(latest.tags, {
@@ -1074,9 +1362,11 @@ export async function createAvatarStage(container, {
             active: ['standing'],
           })
         }
-        badge.textContent = '全景 · ポーズコーチング（IK＋カメラ移動）'
+        badge.textContent = '全景 · ポーズコーチング（配置・IK・カメラ）'
         orbit.enabled = true
         handleRoot.visible = true
+        placeRoot.visible = Boolean(vrmB)
+        rebuildPlaceHandles()
         rebuildHandles()
         const seedShot = shotCameraWorld(coachModel, { duo: Boolean(vrmB) })
         shotOverride = seedShot.position.clone()
@@ -1096,6 +1386,7 @@ export async function createAvatarStage(container, {
         badge.textContent = '撮影現場プレビュー · 全身＋ショットカメラ'
         orbit.enabled = false
         handleRoot.visible = false
+        placeRoot.visible = false
         shotGizmo.root.visible = true
         sync()
         applyViewMode()
@@ -1126,6 +1417,7 @@ export async function createAvatarStage(container, {
       if (coachMode) {
         rebuildHandles()
         snapIkToTips()
+        syncPlaceHandles()
         sync()
       }
     },
@@ -1137,8 +1429,14 @@ export async function createAvatarStage(container, {
           customLimbs = false
           coachModel.customLimbs = false
         }
-        applyVrmPose(coachVrm(), coachModel)
+        const target = coachVrm()
+        applyVrmPose(target, coachModel)
+        // Lying = flatten on floor (scene pitch); other postures stand upright — keep XZ.
+        if (partial.posture === 'lying') setSceneLie(target)
+        else if (partial.posture) setSceneUpright(target)
+        if (partial.posture) freePlacement = true
         snapIkToTips()
+        syncPlaceHandles()
       }
       if (partial.cameraPitch || partial.cameraSide || partial.cameraDistance) {
         shotOverride = shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position.clone()
@@ -1147,17 +1445,19 @@ export async function createAvatarStage(container, {
       return coachModel
     },
     getCoachSnapshot() {
-      const model = coachMode && coachModel ? { ...coachModel, customLimbs } : activeModel()
+      const model = coachMode && coachModel ? { ...coachModel, customLimbs, freePlacement } : activeModel()
       return {
         model,
         duo: Boolean(vrmB),
         subject: coachSubject,
         customLimbs,
+        freePlacement,
         duoSpacing,
         shot: shotOverride ? shotOverride.clone() : null,
       }
     },
     setDuoSpacing(gap) {
+      freePlacement = false
       duoSpacing = THREE.MathUtils.clamp(Number(gap) || 0.55, 0.22, 1.35)
       applyDuoLayout(coachModel?.interact || activeModel()?.interact)
       return duoSpacing
@@ -1168,7 +1468,39 @@ export async function createAvatarStage(container, {
     getDuoSpacing() {
       return duoSpacing
     },
-    /** One-tap duo interaction presets (e.g. lap_pillow). */
+    getFreePlacement() {
+      return freePlacement
+    },
+    /** Clear freehand offsets and restore side-by-side. */
+    resetPlacement() {
+      freePlacement = false
+      if (vrmA) setSceneUpright(vrmA)
+      if (vrmB) setSceneUpright(vrmB)
+      if (coachModel) coachModel = { ...coachModel, interact: '' }
+      applyDuoSpacing()
+      snapIkToTips()
+      syncPlaceHandles()
+      return true
+    },
+    /**
+     * Bone-aware lap-pillow assist, then leave freePlacement on for nudging.
+     * Prefer this over a hard-coded duo layout.
+     */
+    snapHeadToLap() {
+      if (!coachMode) return false
+      const ok = doSnapHeadToLap()
+      if (ok && coachModel) {
+        coachModel = {
+          ...coachModel,
+          interact: 'lap_pillow',
+          posture: 'sitting',
+          empty: false,
+        }
+      }
+      updateBadge()
+      return ok
+    },
+    /** One-tap duo interaction presets (e.g. lap_pillow → snap assist). */
     applyInteraction(name) {
       if (!coachMode || !coachModel) return null
       const n = String(name || '')
@@ -1181,7 +1513,10 @@ export async function createAvatarStage(container, {
         coachModel.gazePitch = 'looking_down'
         coachModel.cameraSide = coachModel.cameraSide || 'side'
         coachModel.cameraDistance = coachModel.cameraDistance === 'close' ? 'upper' : (coachModel.cameraDistance || 'full')
+        doSnapHeadToLap()
+        return coachModel
       }
+      freePlacement = false
       sync()
       return coachModel
     },

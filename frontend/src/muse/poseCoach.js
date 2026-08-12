@@ -168,7 +168,10 @@ export function buildPoseCoachMessage(model, opts = {}) {
     `カメラ: ${camBits.join('、')}。`,
   ]
   if (duo && (model.interact === 'lap_pillow' || model.interact === 'head_on_lap')) {
-    lines.push('関係: 一人が座って膝枕、もう一人が膝の上でやすんでいる。')
+    lines.push('関係: 一人が座って膝枕、もう一人が膝の上でやすんでいる（配置は見取り図の相対位置を優先）。')
+  }
+  if (duo && (model.freePlacement || opts.freePlacement)) {
+    lines.push('配置: 人が現場プレビューで動かした位置を尊重して。')
   }
   if (spacingLine) lines.push(`${spacingLine}。`)
   if (limbs) lines.push(`${limbs}。`)

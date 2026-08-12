@@ -163,6 +163,18 @@ function applyInteract(name) {
   refreshCoachPreview()
 }
 
+function resetPlacement() {
+  if (!stage?.resetPlacement || !coachOn.value) return
+  stage.resetPlacement()
+  refreshCoachPreview()
+}
+
+function snapLap() {
+  if (!stage?.snapHeadToLap || !coachOn.value) return
+  stage.snapHeadToLap()
+  refreshCoachPreview()
+}
+
 function sendCoach() {
   if (!stage || !coachOn.value) return
   refreshCoachPreview()
@@ -318,8 +330,13 @@ onBeforeUnmount(() => {
           type="button"
           class="rounded-lg border px-2.5 py-1 text-[10px]"
           :class="chipClass(coachState.interact === 'lap_pillow')"
-          @click="applyInteract('lap_pillow')"
+          @click="snapLap"
         >{{ t('muse.poseSketch.lapPillow') }}</button>
+        <button
+          type="button"
+          class="rounded-lg border border-white/15 px-2.5 py-1 text-[10px] text-gray-300 hover:border-white/40"
+          @click="resetPlacement"
+        >{{ t('muse.poseSketch.resetPlace') }}</button>
         <span class="text-[9px] text-[var(--sb-faint)]">{{ Math.round(duoGap * 100) }}</span>
       </div>
 
