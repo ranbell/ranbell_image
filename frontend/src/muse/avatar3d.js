@@ -8,6 +8,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { VRMLoaderPlugin, VRMUtils, VRMHumanBoneName } from '@pixiv/three-vrm'
 import { buildPoseSketch } from './poseSketch.js'
 import { cameraEnumsFromShotPosition } from './poseCoach.js'
+import { solveCcdIk } from './vrmIk.js'
 
 export const DEFAULT_VRM_URL = '/models/pose_avatar.vrm'
 
@@ -461,9 +462,12 @@ export async function createAvatarStage(container, {
   let coachSubject = 'a' // 'a' | 'b'
   let customLimbs = false
   let shotOverride = null // THREE.Vector3 | null
-  let dragKind = null // 'shot' | 'bone' | null
-  let dragBone = null
+  let dragKind = null // 'shot' | 'ik' | null
+  let dragIk = null // effector entry
   let lastPointer = { x: 0, y: 0 }
+  const dragPlane = new THREE.Plane()
+  const dragHit = new THREE.Vector3()
+  const viewDir = new THREE.Vector3()
 
   const orbit = new OrbitControls(viewCam, renderer.domElement)
   orbit.enableDamping = true
@@ -473,48 +477,78 @@ export async function createAvatarStage(container, {
   orbit.maxDistance = 12
   orbit.enabled = false
 
-  const handleMat = new THREE.MeshBasicMaterial({
-    color: 0xfbbf24, transparent: true, opacity: 0.85, depthWrite: false,
-  })
-  const handleGeom = new THREE.SphereGeometry(0.045, 12, 10)
   const handleRoot = new THREE.Group()
   handleRoot.visible = false
   scene.add(handleRoot)
 
-  const HANDLE_BONES = [
-    Bone.LeftUpperArm, Bone.RightUpperArm,
-    Bone.LeftLowerArm, Bone.RightLowerArm,
-    Bone.LeftUpperLeg, Bone.RightUpperLeg,
-    Bone.Spine, Bone.Head,
+  const IK_SPECS = [
+    { id: 'leftHand', bones: [Bone.LeftUpperArm, Bone.LeftLowerArm], tip: Bone.LeftHand, color: 0x38bdf8, size: 0.055 },
+    { id: 'rightHand', bones: [Bone.RightUpperArm, Bone.RightLowerArm], tip: Bone.RightHand, color: 0x38bdf8, size: 0.055 },
+    { id: 'leftFoot', bones: [Bone.LeftUpperLeg, Bone.LeftLowerLeg], tip: Bone.LeftFoot, color: 0xf472b6, size: 0.06 },
+    { id: 'rightFoot', bones: [Bone.RightUpperLeg, Bone.RightLowerLeg], tip: Bone.RightFoot, color: 0xf472b6, size: 0.06 },
   ]
-  /** @type {{ mesh: THREE.Mesh, name: string, vrm: any }[]} */
-  const handles = []
+
+  /** @type {{ mesh: THREE.Mesh, id: string, vrm: any, bones: any[], tip: any }[]} */
+  const ikEffectors = []
+
+  function coachVrm() {
+    return coachSubject === 'b' && vrmB ? vrmB : vrmA
+  }
 
   function rebuildHandles() {
-    while (handles.length) {
-      const h = handles.pop()
+    while (ikEffectors.length) {
+      const h = ikEffectors.pop()
       handleRoot.remove(h.mesh)
+      h.mesh.geometry?.dispose?.()
+      h.mesh.material?.dispose?.()
     }
-    const targets = coachSubject === 'b' && vrmB ? [vrmB] : [vrmA]
-    for (const v of targets) {
-      for (const name of HANDLE_BONES) {
-        const node = v.humanoid?.getNormalizedBoneNode(name)
-        if (!node) continue
-        const mesh = new THREE.Mesh(handleGeom, handleMat)
-        mesh.userData.handleBone = name
-        mesh.userData.handleVrm = v
-        handleRoot.add(mesh)
-        handles.push({ mesh, name, vrm: v })
-      }
+    const v = coachVrm()
+    for (const spec of IK_SPECS) {
+      const bones = spec.bones.map((n) => bone(v, n)).filter(Boolean)
+      const tip = bone(v, spec.tip)
+      if (bones.length < 2 || !tip) continue
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.size, 14, 12),
+        new THREE.MeshBasicMaterial({
+          color: spec.color,
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false,
+        }),
+      )
+      mesh.userData.ikId = spec.id
+      tip.getWorldPosition(mesh.position)
+      handleRoot.add(mesh)
+      ikEffectors.push({ mesh, id: spec.id, vrm: v, bones, tip })
+    }
+  }
+
+  function snapIkToTips() {
+    for (const h of ikEffectors) {
+      h.tip.updateWorldMatrix(true, false)
+      h.tip.getWorldPosition(h.mesh.position)
     }
   }
 
   function syncHandles() {
-    for (const h of handles) {
-      const node = h.vrm.humanoid?.getNormalizedBoneNode(h.name)
-      if (!node) continue
-      node.getWorldPosition(h.mesh.position)
+    // While dragging an effector, keep mesh where user put it; others follow tips.
+    for (const h of ikEffectors) {
+      if (dragKind === 'ik' && dragIk === h) continue
+      h.tip.updateWorldMatrix(true, false)
+      h.tip.getWorldPosition(h.mesh.position)
     }
+  }
+
+  function runIk(effector) {
+    if (!effector) return
+    solveCcdIk(effector.bones, effector.tip, effector.mesh.position, {
+      iterations: 16,
+      maxAngle: 0.55,
+    })
+    effector.vrm.humanoid?.update?.()
+    effector.vrm.update?.(0)
+    customLimbs = true
+    if (coachModel) coachModel.customLimbs = true
   }
 
   const raycaster = new THREE.Raycaster()
@@ -558,27 +592,34 @@ export async function createAvatarStage(container, {
     const model = activeModel()
     if (model.empty && !coachMode) return model
 
-    // In coach mode editing A: apply coachModel to A; keep B from notebook.
-    // Editing B: apply coachModel to B; keep A from notebook/tags.
+    // In coach mode: don't clobber IK-edited limbs with preset apply.
     if (coachMode && coachModel) {
-      if (coachSubject === 'b' && vrmB) {
-        applyVrmPose(vrmA, buildPoseSketch(latest.tags, {
-          beat: latest.beat, frame: latest.frame, duo: true,
-        }))
-        applyVrmPose(vrmB, coachModel)
-        vrmB.scene.position.x = 0.55
-        vrmA.scene.position.x = -0.55
-      } else {
-        applyVrmPose(vrmA, coachModel)
-        if (vrmB) {
-          applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
-            beat: latest.beatB || latest.beat, frame: latest.frame, duo: true,
+      if (!customLimbs) {
+        if (coachSubject === 'b' && vrmB) {
+          applyVrmPose(vrmA, buildPoseSketch(latest.tags, {
+            beat: latest.beat, frame: latest.frame, duo: true,
           }))
+          applyVrmPose(vrmB, coachModel)
           vrmB.scene.position.x = 0.55
           vrmA.scene.position.x = -0.55
         } else {
-          vrmA.scene.position.x = 0
+          applyVrmPose(vrmA, coachModel)
+          if (vrmB) {
+            applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
+              beat: latest.beatB || latest.beat, frame: latest.frame, duo: true,
+            }))
+            vrmB.scene.position.x = 0.55
+            vrmA.scene.position.x = -0.55
+          } else {
+            vrmA.scene.position.x = 0
+          }
         }
+        snapIkToTips()
+      } else if (duo) {
+        vrmA.scene.position.x = -0.55
+        if (vrmB) vrmB.scene.position.x = 0.55
+      } else {
+        vrmA.scene.position.x = 0
       }
     } else {
       applyVrmPose(vrmA, model)
@@ -611,12 +652,14 @@ export async function createAvatarStage(container, {
     setPointerNdc(ev)
     raycaster.setFromCamera(pointerNdc, viewCam)
 
-    if (handleRoot.visible) {
-      const hits = raycaster.intersectObjects(handles.map((h) => h.mesh), false)
+    if (handleRoot.visible && ikEffectors.length) {
+      const hits = raycaster.intersectObjects(ikEffectors.map((h) => h.mesh), false)
       if (hits.length) {
-        dragKind = 'bone'
-        dragBone = hits[0].object
+        dragKind = 'ik'
+        dragIk = ikEffectors.find((h) => h.mesh === hits[0].object) || null
         orbit.enabled = false
+        viewCam.getWorldDirection(viewDir)
+        dragPlane.setFromNormalAndCoplanarPoint(viewDir.negate(), hits[0].point)
         lastPointer = { x: ev.clientX, y: ev.clientY }
         ev.preventDefault()
         return
@@ -638,16 +681,12 @@ export async function createAvatarStage(container, {
     const dy = ev.clientY - lastPointer.y
     lastPointer = { x: ev.clientX, y: ev.clientY }
 
-    if (dragKind === 'bone' && dragBone) {
-      const vrm = dragBone.userData.handleVrm
-      const name = dragBone.userData.handleBone
-      const node = vrm?.humanoid?.getNormalizedBoneNode(name)
-      if (node) {
-        node.rotation.x += dy * 0.01
-        node.rotation.z += dx * 0.01
-        vrm.humanoid.update()
-        customLimbs = true
-        if (coachModel) coachModel.customLimbs = true
+    if (dragKind === 'ik' && dragIk) {
+      setPointerNdc(ev)
+      raycaster.setFromCamera(pointerNdc, viewCam)
+      if (raycaster.ray.intersectPlane(dragPlane, dragHit)) {
+        dragIk.mesh.position.copy(dragHit)
+        runIk(dragIk)
       }
       return
     }
@@ -655,7 +694,6 @@ export async function createAvatarStage(container, {
     if (dragKind === 'shot' && coachModel) {
       const base = shotOverride || shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position
       if (!shotOverride) shotOverride = base.clone()
-      // Drag: horizontal orbit-ish + vertical pitch
       const sph = new THREE.Spherical().setFromVector3(shotOverride)
       sph.theta -= dx * 0.01
       sph.phi = THREE.MathUtils.clamp(sph.phi + dy * 0.01, 0.15, Math.PI - 0.2)
@@ -672,7 +710,7 @@ export async function createAvatarStage(container, {
   function onPointerUp() {
     if (!coachMode) return
     dragKind = null
-    dragBone = null
+    dragIk = null
     orbit.enabled = true
   }
 
@@ -750,7 +788,7 @@ export async function createAvatarStage(container, {
             active: ['standing'],
           })
         }
-        badge.textContent = 'ポーズコーチング · ドラッグでカメラ／関節'
+        badge.textContent = 'ポーズコーチング · IK手足＋ショットカメラ'
         orbit.enabled = true
         handleRoot.visible = true
         rebuildHandles()
@@ -760,6 +798,7 @@ export async function createAvatarStage(container, {
         orbit.target.copy(seedShot.lookAt)
         orbit.update()
         sync()
+        snapIkToTips()
       } else {
         coachModel = null
         badge.textContent = '撮影現場プレビュー · 全身＋ショットカメラ'
@@ -773,19 +812,20 @@ export async function createAvatarStage(container, {
       coachSubject = who === 'b' ? 'b' : 'a'
       if (coachMode) {
         rebuildHandles()
+        snapIkToTips()
         sync()
       }
     },
     patchCoachModel(partial) {
       if (!coachMode) return null
       coachModel = { ...coachModel, ...partial, empty: false, customLimbs: customLimbs || Boolean(partial.customLimbs) }
-      // Preset posture/arms reset limb custom flag unless still marked
       if (partial.posture || partial.arms) {
         if (!partial.customLimbs) {
           customLimbs = false
           coachModel.customLimbs = false
         }
-        applyVrmPose(coachSubject === 'b' && vrmB ? vrmB : vrmA, coachModel)
+        applyVrmPose(coachVrm(), coachModel)
+        snapIkToTips()
       }
       if (partial.cameraPitch || partial.cameraSide || partial.cameraDistance) {
         shotOverride = shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position.clone()

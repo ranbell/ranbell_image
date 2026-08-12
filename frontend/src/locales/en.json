@@ -1394,7 +1394,7 @@
       "gazeViewer": "looking at lens",
       "coach": "Pose coaching",
       "coachOn": "Coaching…",
-      "coachHint": "Yellow dots = drag joints / blue cam = move shot / drag to orbit / Shift+wheel = distance. Then send “do it like this”.",
+      "coachHint": "Cyan = hand IK / pink = foot IK. Blue cam = shot. Drag empty space to orbit; Shift+wheel for distance. Then send “do it like this”.",
       "coachSend": "Coach: do it like this",
       "subjectA": "Subject A",
       "subjectB": "Subject B",
