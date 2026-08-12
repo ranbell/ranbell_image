@@ -31,6 +31,7 @@ export function applyVrmPose(vrm, model) {
   const arms = model.arms || 'arms_at_sides'
   const gaze = model.gazePitch || 'looking_ahead'
   const side = model.cameraSide || 'front'
+  const crouch = posture === 'squatting' || posture === 'crouching' || posture === 'kneeling'
 
   const hips = bone(vrm, Bone.Hips)
   const spine = bone(vrm, Bone.Spine)
@@ -48,16 +49,20 @@ export function applyVrmPose(vrm, model) {
   const lLowerArm = bone(vrm, Bone.LeftLowerArm)
   const rLowerArm = bone(vrm, Bone.RightLowerArm)
 
-  // Default: slight natural arm drop (avoid rigid T-pose)
-  setEuler(lUpperArm, 0, 0, 1.15)
-  setEuler(rUpperArm, 0, 0, -1.15)
-  setEuler(lLowerArm, 0, 0, 0.15)
-  setEuler(rLowerArm, 0, 0, -0.15)
+  // Whole-rig height: normalized hips.position is unreliable across VRMs.
+  if (posture === 'sitting') vrm.scene.position.y = -0.2
+  else if (crouch) vrm.scene.position.y = -0.15
+  else if (posture === 'lying') vrm.scene.position.y = -0.45
+  else if (posture === 'jumping') vrm.scene.position.y = 0.2
+  else vrm.scene.position.y = 0
+
+  // Default: arms down (avoid T-pose)
+  setEuler(lUpperArm, 0.15, 0.05, 1.2)
+  setEuler(rUpperArm, 0.15, -0.05, -1.2)
+  setEuler(lLowerArm, 0.2, 0, 0.1)
+  setEuler(rLowerArm, 0.2, 0, -0.1)
 
   if (posture === 'standing' || posture === 'walking' || posture === 'running') {
-    if (hips) hips.position.y = 0
-    setEuler(lUpperLeg, 0, 0, 0)
-    setEuler(rUpperLeg, 0, 0, 0)
     if (posture === 'walking' || posture === 'running') {
       const swing = posture === 'running' ? 0.55 : 0.3
       setEuler(lUpperLeg, -swing, 0, 0)
@@ -66,7 +71,6 @@ export function applyVrmPose(vrm, model) {
       setEuler(rLowerLeg, swing * 0.4, 0, 0)
     }
   } else if (posture === 'sitting') {
-    if (hips) hips.position.y = -0.35
     setEuler(spine, 0.1, 0, 0)
     setEuler(lUpperLeg, -Math.PI / 2, 0.08, 0)
     setEuler(rUpperLeg, -Math.PI / 2, -0.08, 0)
@@ -74,29 +78,23 @@ export function applyVrmPose(vrm, model) {
     setEuler(rLowerLeg, Math.PI / 2, 0, 0)
     setEuler(lFoot, 0.2, 0, 0)
     setEuler(rFoot, 0.2, 0, 0)
-  } else if (posture === 'squatting' || posture === 'crouching' || posture === 'kneeling') {
-    // Deep crouch — hero combo with side + low angle
-    if (hips) hips.position.y = -0.42
-    setEuler(spine, 0.18, 0, 0)
-    setEuler(chest, 0.08, 0, 0)
-    setEuler(lUpperLeg, -1.35, 0.12, 0.08)
-    setEuler(rUpperLeg, -1.35, -0.12, -0.08)
-    setEuler(lLowerLeg, 2.05, 0, 0)
-    setEuler(rLowerLeg, 2.05, 0, 0)
-    setEuler(lFoot, 0.35, 0, 0)
-    setEuler(rFoot, 0.35, 0, 0)
-    // Hands near knees
-    setEuler(lUpperArm, -0.4, 0.2, 0.9)
-    setEuler(rUpperArm, -0.4, -0.2, -0.9)
-    setEuler(lLowerArm, -0.6, 0, 0.2)
-    setEuler(rLowerArm, -0.6, 0, -0.2)
+  } else if (crouch) {
+    setEuler(spine, 0.22, 0, 0)
+    setEuler(chest, 0.1, 0, 0)
+    setEuler(lUpperLeg, -1.45, 0.15, 0.1)
+    setEuler(rUpperLeg, -1.45, -0.15, -0.1)
+    setEuler(lLowerLeg, 2.15, 0, 0)
+    setEuler(rLowerLeg, 2.15, 0, 0)
+    setEuler(lFoot, 0.4, 0, 0)
+    setEuler(rFoot, 0.4, 0, 0)
+    // Hands toward knees / ground
+    setEuler(lUpperArm, 0.55, 0.25, 0.85)
+    setEuler(rUpperArm, 0.55, -0.25, -0.85)
+    setEuler(lLowerArm, 0.35, 0.1, 0.15)
+    setEuler(rLowerArm, 0.35, -0.1, -0.15)
   } else if (posture === 'lying') {
-    if (hips) {
-      hips.position.y = -0.55
-      hips.rotation.z = Math.PI / 2
-    }
+    if (hips) hips.rotation.z = Math.PI / 2
   } else if (posture === 'jumping') {
-    if (hips) hips.position.y = 0.25
     setEuler(lUpperLeg, -0.4, 0, 0)
     setEuler(rUpperLeg, 0.35, 0, 0)
     setEuler(lLowerLeg, 0.6, 0, 0)
@@ -120,21 +118,13 @@ export function applyVrmPose(vrm, model) {
   }
 
   // Gaze
-  if (gaze === 'looking_up') {
-    setEuler(neck, -0.25, 0, 0)
-    setEuler(head, -0.35, 0, 0)
-  } else if (gaze === 'looking_down') {
-    setEuler(neck, 0.15, 0, 0)
-    setEuler(head, 0.35, 0, 0)
-  }
+  const headX = gaze === 'looking_up' ? -0.35 : gaze === 'looking_down' ? 0.35 : 0
+  const neckX = gaze === 'looking_up' ? -0.2 : gaze === 'looking_down' ? 0.12 : 0
+  const headY = side === 'side' ? -0.4 : 0
+  setEuler(neck, neckX, 0, 0)
+  setEuler(head, headX, headY, 0)
 
-  // Face camera on side shots: slight head yaw toward lens (+X)
-  if (side === 'side') {
-    setEuler(head, head?.rotation.x || 0, -0.35, 0)
-  } else if (side === 'behind') {
-    // keep looking away
-  }
-
+  vrm.humanoid.update()
   vrm.update(0)
 }
 
