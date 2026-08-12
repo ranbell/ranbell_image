@@ -673,6 +673,13 @@ function stopThinking() {
 
 function quick(cmd) { sendChat(cmd) }
 
+/** Pose coaching from VRM stage → chat as director instruction. */
+function onPoseCoach(payload) {
+  const msg = String(payload?.message || '').trim()
+  if (!msg) return
+  sendChat(msg)
+}
+
 // Prep, test shot and final are buttons on their own endpoints — not words
 // typed into chat for a regex to recognise. Typed text is always creative
 // direction now; only these buttons move the shoot forward a stage.
@@ -1235,6 +1242,7 @@ async function onChatKey(e) {
             :frame="String(session?.notebook?.frame || '')"
             :duo="isWMuse"
             :flash="Boolean(notebookFlash && ['beat','beat_b','frame'].includes(notebookFlash))"
+            @coach="onPoseCoach"
           />
 
           <div v-if="boardImages.length" class="space-y-2">

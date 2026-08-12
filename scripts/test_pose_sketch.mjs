@@ -46,4 +46,27 @@ function assert(cond, msg) {
   assert(h.cameraDistance === 'close', 'close')
 }
 
+{
+  const { buildPoseCoachMessage, poseModelToTags, cameraEnumsFromShotPosition } =
+    await import('../frontend/src/muse/poseCoach.js')
+  const model = {
+    posture: 'squatting',
+    arms: 'arms_at_sides',
+    gazePitch: 'looking_up',
+    cameraPitch: 'below',
+    cameraSide: 'side',
+    cameraDistance: 'full',
+  }
+  const msg = buildPoseCoachMessage(model)
+  assert(msg.includes('ポーズコーチング'), 'coach header')
+  assert(msg.includes('こうしてね'), 'coach ask')
+  assert(msg.includes('しゃがん'), 'posture ja')
+  const tags = poseModelToTags(model)
+  assert(tags.includes('from_side'), `tags ${tags}`)
+  assert(tags.includes('from_below') || tags.includes('low_angle'), `tags pitch ${tags}`)
+  const enums = cameraEnumsFromShotPosition(new THREE.Vector3(2.0, 0.1, 0.5), { crouch: true })
+  assert(enums.cameraSide === 'side', `infer side ${enums.cameraSide}`)
+  assert(enums.cameraPitch === 'below', `infer pitch ${enums.cameraPitch}`)
+}
+
 console.log('avatar pose contract ok')

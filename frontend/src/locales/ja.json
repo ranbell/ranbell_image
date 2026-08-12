@@ -1392,6 +1392,21 @@
       "hint3d": "全身＋ショットカメラ（VRM）",
       "loading": "モデルを読み込み中…",
       "gazeViewer": "レンズ目線",
+      "coach": "ポーズコーチング",
+      "coachOn": "コーチング中",
+      "coachHint": "黄色い点＝関節ドラッグ／青いカメラ＝ショット移動／ドラッグで見回し／Shift+ホイールで距離。決まったら下のボタンで「こうしてね」。",
+      "coachSend": "このポーズでこうしてね",
+      "subjectA": "一人目",
+      "subjectB": "二人目",
+      "arms": {
+        "arms_at_sides": "腕下ろし",
+        "arms_up": "腕上げ",
+        "crossed_arms": "腕組み",
+        "spread_arms": "腕広げ",
+        "outstretched_arms": "腕伸ばし",
+        "arms_behind_head": "頭後ろ",
+        "arms_behind_back": "後ろ手"
+      },
       "posture": {
         "standing": "立ち",
         "sitting": "座り",

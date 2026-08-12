@@ -4,8 +4,10 @@
  */
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { VRMLoaderPlugin, VRMUtils, VRMHumanBoneName } from '@pixiv/three-vrm'
 import { buildPoseSketch } from './poseSketch.js'
+import { cameraEnumsFromShotPosition } from './poseCoach.js'
 
 export const DEFAULT_VRM_URL = '/models/pose_avatar.vrm'
 
@@ -453,37 +455,253 @@ export async function createAvatarStage(container, {
   let raf = 0
   const clock = new THREE.Clock()
 
-  function sync() {
-    const model = buildPoseSketch(latest.tags, {
+  /** @type {null | ReturnType<typeof buildPoseSketch>} */
+  let coachModel = null
+  let coachMode = false
+  let coachSubject = 'a' // 'a' | 'b'
+  let customLimbs = false
+  let shotOverride = null // THREE.Vector3 | null
+  let dragKind = null // 'shot' | 'bone' | null
+  let dragBone = null
+  let lastPointer = { x: 0, y: 0 }
+
+  const orbit = new OrbitControls(viewCam, renderer.domElement)
+  orbit.enableDamping = true
+  orbit.dampingFactor = 0.08
+  orbit.maxPolarAngle = Math.PI * 0.49
+  orbit.minDistance = 1.2
+  orbit.maxDistance = 12
+  orbit.enabled = false
+
+  const handleMat = new THREE.MeshBasicMaterial({
+    color: 0xfbbf24, transparent: true, opacity: 0.85, depthWrite: false,
+  })
+  const handleGeom = new THREE.SphereGeometry(0.045, 12, 10)
+  const handleRoot = new THREE.Group()
+  handleRoot.visible = false
+  scene.add(handleRoot)
+
+  const HANDLE_BONES = [
+    Bone.LeftUpperArm, Bone.RightUpperArm,
+    Bone.LeftLowerArm, Bone.RightLowerArm,
+    Bone.LeftUpperLeg, Bone.RightUpperLeg,
+    Bone.Spine, Bone.Head,
+  ]
+  /** @type {{ mesh: THREE.Mesh, name: string, vrm: any }[]} */
+  const handles = []
+
+  function rebuildHandles() {
+    while (handles.length) {
+      const h = handles.pop()
+      handleRoot.remove(h.mesh)
+    }
+    const targets = coachSubject === 'b' && vrmB ? [vrmB] : [vrmA]
+    for (const v of targets) {
+      for (const name of HANDLE_BONES) {
+        const node = v.humanoid?.getNormalizedBoneNode(name)
+        if (!node) continue
+        const mesh = new THREE.Mesh(handleGeom, handleMat)
+        mesh.userData.handleBone = name
+        mesh.userData.handleVrm = v
+        handleRoot.add(mesh)
+        handles.push({ mesh, name, vrm: v })
+      }
+    }
+  }
+
+  function syncHandles() {
+    for (const h of handles) {
+      const node = h.vrm.humanoid?.getNormalizedBoneNode(h.name)
+      if (!node) continue
+      node.getWorldPosition(h.mesh.position)
+    }
+  }
+
+  const raycaster = new THREE.Raycaster()
+  const pointerNdc = new THREE.Vector2()
+
+  function setPointerNdc(ev) {
+    const rect = renderer.domElement.getBoundingClientRect()
+    pointerNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
+    pointerNdc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
+  }
+
+  function activeModel() {
+    if (coachMode && coachModel) return coachModel
+    return buildPoseSketch(latest.tags, {
       beat: latest.beat,
       beat_b: latest.beatB,
       frame: latest.frame,
       duo: latest.duo,
     })
-    if (model.empty) return model
-    applyVrmPose(vrmA, model)
-    if (vrmB) {
-      const modelB = buildPoseSketch(latest.tags, {
-        beat: latest.beatB || latest.beat,
-        frame: latest.frame,
-        duo: true,
-      })
-      applyVrmPose(vrmB, modelB)
-      vrmB.scene.position.x = 0.55
-    }
-    if (duo) vrmA.scene.position.x = -0.55
-    else vrmA.scene.position.x = 0
+  }
 
+  function placeShotFromModel(model) {
+    if (shotOverride) {
+      const crouch = ['squatting', 'crouching', 'kneeling'].includes(model.posture)
+      const lookY = crouch ? 0.45 : 0.95
+      const shot = {
+        position: shotOverride.clone(),
+        lookAt: new THREE.Vector3(duo ? 0 : 0, lookY, 0),
+        fov: 34,
+        subjectY: lookY,
+      }
+      shotGizmo.place(shot)
+      return shot
+    }
     const shot = shotCameraWorld(model, { duo: Boolean(vrmB) })
     shotGizmo.place(shot)
-    placeSetOverviewCamera(viewCam, model, shot, { duo: Boolean(vrmB) })
-    return model
+    return shot
   }
+
+  function sync() {
+    const model = activeModel()
+    if (model.empty && !coachMode) return model
+
+    // In coach mode editing A: apply coachModel to A; keep B from notebook.
+    // Editing B: apply coachModel to B; keep A from notebook/tags.
+    if (coachMode && coachModel) {
+      if (coachSubject === 'b' && vrmB) {
+        applyVrmPose(vrmA, buildPoseSketch(latest.tags, {
+          beat: latest.beat, frame: latest.frame, duo: true,
+        }))
+        applyVrmPose(vrmB, coachModel)
+        vrmB.scene.position.x = 0.55
+        vrmA.scene.position.x = -0.55
+      } else {
+        applyVrmPose(vrmA, coachModel)
+        if (vrmB) {
+          applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
+            beat: latest.beatB || latest.beat, frame: latest.frame, duo: true,
+          }))
+          vrmB.scene.position.x = 0.55
+          vrmA.scene.position.x = -0.55
+        } else {
+          vrmA.scene.position.x = 0
+        }
+      }
+    } else {
+      applyVrmPose(vrmA, model)
+      if (vrmB) {
+        applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
+          beat: latest.beatB || latest.beat,
+          frame: latest.frame,
+          duo: true,
+        }))
+        vrmB.scene.position.x = 0.55
+        vrmA.scene.position.x = -0.55
+      } else {
+        vrmA.scene.position.x = 0
+      }
+    }
+
+    const shot = placeShotFromModel(coachMode && coachModel ? coachModel : model)
+    if (!coachMode || !orbit.enabled) {
+      placeSetOverviewCamera(viewCam, coachMode && coachModel ? coachModel : model, shot, {
+        duo: Boolean(vrmB),
+      })
+      orbit.target.copy(shot.lookAt)
+      orbit.update()
+    }
+    return coachMode && coachModel ? coachModel : model
+  }
+
+  function onPointerDown(ev) {
+    if (!coachMode) return
+    setPointerNdc(ev)
+    raycaster.setFromCamera(pointerNdc, viewCam)
+
+    if (handleRoot.visible) {
+      const hits = raycaster.intersectObjects(handles.map((h) => h.mesh), false)
+      if (hits.length) {
+        dragKind = 'bone'
+        dragBone = hits[0].object
+        orbit.enabled = false
+        lastPointer = { x: ev.clientX, y: ev.clientY }
+        ev.preventDefault()
+        return
+      }
+    }
+
+    const gizmoHits = raycaster.intersectObject(shotGizmo.root, true)
+    if (gizmoHits.length) {
+      dragKind = 'shot'
+      orbit.enabled = false
+      lastPointer = { x: ev.clientX, y: ev.clientY }
+      ev.preventDefault()
+    }
+  }
+
+  function onPointerMove(ev) {
+    if (!coachMode || !dragKind) return
+    const dx = ev.clientX - lastPointer.x
+    const dy = ev.clientY - lastPointer.y
+    lastPointer = { x: ev.clientX, y: ev.clientY }
+
+    if (dragKind === 'bone' && dragBone) {
+      const vrm = dragBone.userData.handleVrm
+      const name = dragBone.userData.handleBone
+      const node = vrm?.humanoid?.getNormalizedBoneNode(name)
+      if (node) {
+        node.rotation.x += dy * 0.01
+        node.rotation.z += dx * 0.01
+        vrm.humanoid.update()
+        customLimbs = true
+        if (coachModel) coachModel.customLimbs = true
+      }
+      return
+    }
+
+    if (dragKind === 'shot' && coachModel) {
+      const base = shotOverride || shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position
+      if (!shotOverride) shotOverride = base.clone()
+      // Drag: horizontal orbit-ish + vertical pitch
+      const sph = new THREE.Spherical().setFromVector3(shotOverride)
+      sph.theta -= dx * 0.01
+      sph.phi = THREE.MathUtils.clamp(sph.phi + dy * 0.01, 0.15, Math.PI - 0.2)
+      sph.radius = THREE.MathUtils.clamp(sph.radius, 0.8, 5.5)
+      shotOverride.setFromSpherical(sph)
+      const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
+      Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
+      if (coachModel.cameraPitch === 'below') coachModel.gazePitch = 'looking_up'
+      else if (coachModel.cameraPitch === 'above') coachModel.gazePitch = 'looking_down'
+      placeShotFromModel(coachModel)
+    }
+  }
+
+  function onPointerUp() {
+    if (!coachMode) return
+    dragKind = null
+    dragBone = null
+    orbit.enabled = true
+  }
+
+  function onWheelShot(ev) {
+    if (!coachMode || !coachModel || !ev.shiftKey) return
+    ev.preventDefault()
+    const base = shotOverride || shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position
+    if (!shotOverride) shotOverride = base.clone()
+    const sph = new THREE.Spherical().setFromVector3(shotOverride)
+    sph.radius = THREE.MathUtils.clamp(sph.radius + ev.deltaY * 0.002, 0.8, 5.5)
+    shotOverride.setFromSpherical(sph)
+    const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
+    Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
+    placeShotFromModel(coachModel)
+  }
+
+  renderer.domElement.addEventListener('pointerdown', onPointerDown)
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+  renderer.domElement.addEventListener('wheel', onWheelShot, { passive: false })
 
   function tick() {
     const dt = clock.getDelta()
     vrmA.update(dt)
     if (vrmB) vrmB.update(dt)
+    if (coachMode) {
+      orbit.update()
+      syncHandles()
+    }
     renderer.render(scene, viewCam)
     raf = requestAnimationFrame(tick)
   }
@@ -503,11 +721,96 @@ export async function createAvatarStage(container, {
   return {
     update(payload) {
       latest = { ...latest, ...payload }
+      if (coachMode) return coachModel
       return sync()
+    },
+    setCoachMode(on) {
+      coachMode = Boolean(on)
+      customLimbs = false
+      shotOverride = null
+      if (coachMode) {
+        coachModel = {
+          ...buildPoseSketch(latest.tags, {
+            beat: latest.beat,
+            beat_b: latest.beatB,
+            frame: latest.frame,
+            duo: latest.duo,
+          }),
+        }
+        if (coachModel.empty) {
+          Object.assign(coachModel, {
+            posture: 'standing',
+            arms: 'arms_at_sides',
+            gazePitch: 'looking_ahead',
+            gazeTarget: '',
+            cameraPitch: 'eye',
+            cameraSide: 'front',
+            cameraDistance: 'full',
+            empty: false,
+            active: ['standing'],
+          })
+        }
+        badge.textContent = 'ポーズコーチング · ドラッグでカメラ／関節'
+        orbit.enabled = true
+        handleRoot.visible = true
+        rebuildHandles()
+        const seedShot = shotCameraWorld(coachModel, { duo: Boolean(vrmB) })
+        shotOverride = seedShot.position.clone()
+        placeSetOverviewCamera(viewCam, coachModel, seedShot, { duo: Boolean(vrmB) })
+        orbit.target.copy(seedShot.lookAt)
+        orbit.update()
+        sync()
+      } else {
+        coachModel = null
+        badge.textContent = '撮影現場プレビュー · 全身＋ショットカメラ'
+        orbit.enabled = false
+        handleRoot.visible = false
+        sync()
+      }
+      return coachModel
+    },
+    setCoachSubject(who) {
+      coachSubject = who === 'b' ? 'b' : 'a'
+      if (coachMode) {
+        rebuildHandles()
+        sync()
+      }
+    },
+    patchCoachModel(partial) {
+      if (!coachMode) return null
+      coachModel = { ...coachModel, ...partial, empty: false, customLimbs: customLimbs || Boolean(partial.customLimbs) }
+      // Preset posture/arms reset limb custom flag unless still marked
+      if (partial.posture || partial.arms) {
+        if (!partial.customLimbs) {
+          customLimbs = false
+          coachModel.customLimbs = false
+        }
+        applyVrmPose(coachSubject === 'b' && vrmB ? vrmB : vrmA, coachModel)
+      }
+      if (partial.cameraPitch || partial.cameraSide || partial.cameraDistance) {
+        shotOverride = shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position.clone()
+      }
+      sync()
+      return coachModel
+    },
+    getCoachSnapshot() {
+      const model = coachMode && coachModel ? { ...coachModel, customLimbs } : activeModel()
+      return {
+        model,
+        duo: Boolean(vrmB),
+        subject: coachSubject,
+        customLimbs,
+        shot: shotOverride ? shotOverride.clone() : null,
+      }
     },
     dispose() {
       cancelAnimationFrame(raf)
       ro.disconnect()
+      orbit.dispose()
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      renderer.domElement.removeEventListener('wheel', onWheelShot)
       renderer.dispose()
       renderer.domElement.remove()
       badge.remove()
