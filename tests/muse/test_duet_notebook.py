@@ -41,6 +41,12 @@ def _scripter_block(
     ])
 
 
+def _current_note(prompt: str) -> str:
+    """The instruction this scripter turn is answering, minus the transcript."""
+    head, sep, tail = str(prompt).partition("総監督がいま言ったこと:")
+    return tail if sep else head
+
+
 class NotebookOllama(FakeOllama):
     """Keyword → scripter labelled block; Muse always says a short SAY."""
 
@@ -55,9 +61,11 @@ class NotebookOllama(FakeOllama):
         text = "SAY: うん、その感じ。"
         if "studio scripter" in system or "shot notebook" in system:
             self.scripter_prompts.append(str(prompt))
-            # Longest keyword wins so later turns like "また煽って、カーディガン"
-            # do not match an earlier bare "煽って" script.
-            hits = [k for k in self.scripts if k in str(prompt)]
+            # Match on the current instruction only. The prompt also carries the
+            # conversation now, so matching the whole thing would let an earlier
+            # turn's keyword answer a later turn. Longest keyword wins within
+            # that line so "また煽って、カーディガン" does not match a bare "煽って".
+            hits = [k for k in self.scripts if k in _current_note(str(prompt))]
             key = max(hits, key=len) if hits else ""
             text = self.scripts.get(key) or _scripter_block(
                 intent="casual", vibe="chatting",
@@ -278,7 +286,13 @@ async def test_scripter_prompt_has_no_diary_injection():
 
 
 @pytest.mark.asyncio
-async def test_casual_chit_chat_skips_scripter():
+async def test_casual_chit_chat_runs_scripter_and_leaves_craft_alone():
+    """Chit-chat reaches the scripter and comes back `casual` — craft untouched.
+
+    There used to be a keyword gate in front of the scripter that decided from
+    the showrunner's wording whether to call it at all. It is the scripter's
+    call now: it answers `intent: casual` and nothing is compiled.
+    """
     db = FakeDb()
     ollama = NotebookOllama(scripts={
         "帽子": _scripter_block(
@@ -296,12 +310,131 @@ async def test_casual_chit_chat_skips_scripter():
     await service.post_duet_chat(db, ollama, s, "麦わら帽子かぶって")
     before = len(ollama.scripter_prompts)
     await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
-    assert len(ollama.scripter_prompts) == before
+    # Called — no keyword gate in front of it any more.
+    assert len(ollama.scripter_prompts) == before + 1
+    # …and it declined to change the picture.
+    assert s["scripter_intent"] == "casual"
     assert "straw_hat" in s["craft"]["tags"]
 
 
 @pytest.mark.asyncio
-async def test_open_affirm_promotes_and_compiles():
+async def test_wardrobe_change_without_any_keyword_still_lands():
+    """「浴衣に着替えて」— the exact shape the old keyword gate dropped.
+
+    `着替え` never matched the gate's `着て` (which needed 着 and て adjacent),
+    and the line carries neither 服 nor 衣装, so the turn was skipped: the Muse
+    replied about the yukata while the notebook and craft kept the old outfit.
+    """
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "浴衣": _scripter_block(
+            intent="shot",
+            scene="summer festival street",
+            wearing="navy yukata with a red obi",
+            beat="walking",
+            frame="eye level",
+            tags="yukata, obi, walking, festival",
+            craft_scene="She walks a festival street in a navy yukata.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "scene": "classroom", "wearing": "sailor uniform", "beat": "standing",
+    })
+    s["craft"] = {
+        "tags": "classroom, sailor_collar, standing",
+        "scene": "Classroom.", "prompt": "1girl, classroom", "pose_intent": "",
+    }
+    await session_db.save(db, s)
+
+    await service.post_duet_chat(db, ollama, s, "浴衣に着替えて")
+
+    assert "yukata" in s["notebook"]["wearing"]
+    assert "yukata" in s["craft"]["tags"]
+    assert "sailor_collar" not in s["craft"]["tags"]
+    assert "yukata" in s["craft"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_location_change_without_any_keyword_still_lands():
+    """「公園で撮ろう」— no 場所, and 撮ろう missed 撮影|撮り直|撮り方."""
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "公園": _scripter_block(
+            intent="shot",
+            scene="park under cherry trees",
+            wearing="sailor uniform",
+            beat="standing",
+            frame="eye level",
+            tags="park, cherry_blossoms, sailor_collar, standing",
+            craft_scene="A park under cherry trees.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "scene": "classroom", "wearing": "sailor uniform", "beat": "standing",
+    })
+    s["craft"] = {
+        "tags": "classroom, sailor_collar, standing",
+        "scene": "Classroom.", "prompt": "1girl, classroom", "pose_intent": "",
+    }
+    await session_db.save(db, s)
+
+    await service.post_duet_chat(db, ollama, s, "公園で撮ろう")
+
+    assert "park" in s["notebook"]["scene"]
+    assert "park" in s["craft"]["tags"]
+    assert "classroom" not in s["craft"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_notebook_moving_without_a_compile_marks_craft_dirty():
+    """A casual turn that still edits the notebook must not leave craft silently behind.
+
+    `apply_patch` runs whatever the intent is, so `rev` can climb on a casual
+    turn. Craft was only recompiled on shot/mixed and `craft_dirty` was only set
+    there too, so the notebook could run ahead of the rendered prompt with
+    nothing marking it — and densify's early return then declined to catch up.
+    """
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "そろそろ": _scripter_block(
+            intent="casual",
+            vibe="talking about the light going",
+            atmosphere="the light is going amber",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {"scene": "rooftop", "wearing": "cardigan"})
+    s["craft"] = {
+        "tags": "rooftop, cardigan", "scene": "Rooftop.",
+        "prompt": "1girl, rooftop, cardigan", "pose_intent": "",
+    }
+    s["notebook_rev_compiled"] = int(s["notebook"]["rev"])
+    s["craft_dirty"] = False
+    await session_db.save(db, s)
+
+    await service.post_duet_chat(db, ollama, s, "そろそろ暗くなってきたね")
+
+    assert s["scripter_intent"] == "casual"
+    assert s["notebook"]["atmosphere"]
+    assert int(s["notebook"]["rev"]) > int(s["notebook_rev_compiled"])
+    assert s["craft_dirty"] is True
+
+
+@pytest.mark.asyncio
+async def test_open_affirm_lands_in_craft():
+    """A bare「いいね」against a pending OPEN compiles the proposal in.
+
+    The affirm used to be recognised by regex, folded into the notebook by
+    `promote_open` (which guessed handheld-vs-worn off a noun list), and then
+    compiled by a second forced scripter call. The scripter sees the OPEN it
+    wrote and the「いいね」that accepted it in the conversation, and does all
+    three itself in one turn.
+    """
     db = FakeDb()
     ollama = NotebookOllama(scripts={
         "ベンチ": _scripter_block(
@@ -315,16 +448,13 @@ async def test_open_affirm_promotes_and_compiles():
             craft_scene="Park bench, no leaf yet.",
         ),
         "いいね": _scripter_block(
-            intent="casual",
-            vibe="happy",
-            clear_open="yes",
-        ),
-        "COMPILE ONLY": _scripter_block(
-            intent="shot",
+            intent="mixed",
             scene="park bench at dusk",
             wearing="thin cardigan",
             beat="sitting on a bench, holding one fallen leaf",
             frame="eye level",
+            vibe="happy",
+            clear_open="yes",
             tags="park, bench, cardigan, sitting, leaf",
             craft_scene="Park bench with one leaf in hand.",
         ),
@@ -336,8 +466,34 @@ async def test_open_affirm_promotes_and_compiles():
     assert s["notebook"]["open"]
     await service.post_duet_chat(db, ollama, s, "いいね")
     assert s["notebook"]["open"] == ""
-    assert "落ち葉" in (s["notebook"]["beat"] + s["notebook"]["wearing"])
+    assert "leaf" in s["notebook"]["beat"]
     assert "leaf" in s["craft"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_scripter_is_handed_the_conversation():
+    """The transcript is the fix — without it「いいね」cannot be resolved."""
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "ベンチ": _scripter_block(
+            intent="shot", scene="park bench", wearing="cardigan",
+            beat="sitting", frame="eye level",
+            open_="落ち葉を一枚だけ手に",
+            tags="park, bench, cardigan, sitting",
+            craft_scene="Park bench.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+    await service.post_duet_chat(db, ollama, s, "ベンチに座って")
+    await service.post_duet_chat(db, ollama, s, "いいね")
+
+    last = ollama.scripter_prompts[-1]
+    assert "ここまでの会話" in last
+    # Both sides of the exchange the affirm refers back to.
+    assert "ベンチに座って" in last
+    assert "総監督: いいね" in last
 
 
 @pytest.mark.asyncio
@@ -454,17 +610,17 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
             tags="rooftop, fence, sailor_collar, leaning, looking_at_viewer",
             craft_scene="Rooftop lean in sailor uniform.",
         ),
+        # The scripter reads the conversation, so it sees its own OPEN and the
+        # 「いいね」 that accepted it, and folds the prop in itself. This used to
+        # take a regex on the affirm plus a second forced COMPILE ONLY call.
         "いいね": _scripter_block(
-            intent="casual",
-            vibe="happy",
-            clear_open="yes",
-        ),
-        "COMPILE ONLY": _scripter_block(
-            intent="shot",
+            intent="mixed",
             scene="school rooftop at dusk",
             frame="eye level, looking at viewer",
             wearing="sailor uniform",
             beat="leaning on the fence, holding ramune",
+            vibe="happy",
+            clear_open="yes",
             tags="rooftop, fence, sailor_collar, leaning, ramune, looking_at_viewer",
             craft_scene="Rooftop lean with ramune.",
         ),
@@ -505,11 +661,11 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
     assert "関係" in joined_muse
     assert "GROUNDED_TOKENS" in joined_muse
 
-    # Casual skip — craft stays.
+    # Casual turn — the scripter still runs (no gate), and leaves craft alone.
     before_scripts = len(ollama.scripter_prompts)
     before_tags = str((s.get("craft") or {}).get("tags") or "")
     await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
-    assert len(ollama.scripter_prompts) == before_scripts
+    assert len(ollama.scripter_prompts) == before_scripts + 1
     assert str((s.get("craft") or {}).get("tags") or "") == before_tags
 
     # Shot + OPEN affirm.
@@ -564,3 +720,124 @@ def test_bond_and_taste_from_snapshot_are_short():
     assert bond["last"]
     assert "ローアングル" in taste["prefers"] or "セーラー" in taste["prefers"]
     assert "足" in taste["avoids"]
+
+
+@pytest.mark.asyncio
+async def test_densify_catches_up_when_the_notebook_ran_ahead():
+    """The board button recompiles a craft the notebook has outrun.
+
+    `densify_craft_if_needed` returned early unless craft was flagged dirty or
+    looked thin, so a notebook that had moved without a compile rendered the
+    previous prompt. The UI was already computing this exact condition
+    (`notebookAhead`) and warning about it; the server now checks it too.
+    """
+    from tests.muse.test_service import FakeComfy, FakeSpooler
+
+    db, spooler = FakeDb(), FakeSpooler()
+    ollama = NotebookOllama(scripts={
+        "DENSIFY": _scripter_block(
+            intent="shot",
+            scene="park under cherry trees",
+            wearing="navy yukata",
+            beat="walking",
+            frame="eye level",
+            tags="park, cherry_blossoms, yukata, walking, dusk, warm_light",
+            craft_scene="A long, thick paragraph about a park at dusk. " * 12,
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {"scene": "park", "wearing": "navy yukata"})
+    s["craft"] = {
+        "tags": "classroom, sailor_collar",
+        "scene": "A classroom. " * 30,
+        "prompt": "1girl, classroom, sailor_collar, " + "detail, " * 40,
+        "pose_intent": "",
+    }
+    # Craft is neither dirty nor thin — only the rev gap says it is stale.
+    s["craft_dirty"] = False
+    s["notebook_rev_compiled"] = int(s["notebook"]["rev"]) - 1
+    await session_db.save(db, s)
+
+    s = await service.request_board(db, FakeComfy(), spooler, s, ollama=ollama)
+
+    assert "yukata" in s["craft"]["tags"]
+    assert "classroom" not in s["craft"]["tags"]
+    assert "yukata" in s["board"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_densify_is_said_out_loud_not_swallowed():
+    """Both render buttons used to clear `craft_dirty` unconditionally.
+
+    That happened straight after densify, whether or not densify had worked, so
+    a failed compile went out on the previous prompt with the warning wiped and
+    nobody told. Keep the flag and say it in chat.
+    """
+    from tests.muse.test_service import FakeComfy, FakeSpooler
+
+    db, spooler = FakeDb(), FakeSpooler()
+    # No DENSIFY script → the fake answers `casual` with no tags → no compile.
+    ollama = NotebookOllama(scripts={})
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {"scene": "park", "wearing": "navy yukata"})
+    s["craft"] = {
+        "tags": "classroom, sailor_collar",
+        "scene": "A classroom.",
+        "prompt": "1girl, classroom",
+        "pose_intent": "",
+    }
+    s["craft_dirty"] = True
+    await session_db.save(db, s)
+
+    s = await service.request_board(db, FakeComfy(), spooler, s, ollama=ollama)
+
+    assert s["craft_dirty"] is True
+    # It still shoots — with the old prompt, and having said so.
+    assert len(spooler.jobs) == 1
+    said = "\n".join(
+        str(m.get("text") or "") for m in s["chat"] if m.get("role") == "system"
+    )
+    assert "追いついていません" in said
+
+
+@pytest.mark.asyncio
+async def test_w_muse_flat_tag_bag_still_moves_the_picture():
+    """An unsplit W-Muse bag compiles rather than freezing the shoot.
+
+    The refusal used to throw the whole compile away, so a model that kept
+    answering with one flat bag left craft on its last good compile — the
+    wardrobe and location from several turns back — for the rest of the session.
+    """
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "浴衣": (
+            "INTENT: shot\n"
+            "SCENE: summer festival street\n"
+            "WEARING: navy yukata\n"
+            "WEARING_B: white yukata\n"
+            "BEAT: walking\n"
+            "BEAT_B: walking beside her\n"
+            "FRAME: eye level\n"
+            "CLEAR_OPEN: no\nUNCHANGED: none\n"
+            "TAGS: 2girls, festival, yukata, walking\n"
+            "CRAFT_SCENE: Two girls in yukata on a festival street.\n"
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["inputs"]["partner_preset"] = "minamo"
+    notebook.apply_patch(s["notebook"], {"scene": "classroom", "wearing": "sailor uniform"})
+    s["craft"] = {
+        "tags": "classroom, sailor_collar",
+        "scene": "Classroom.", "prompt": "2girls, classroom", "pose_intent": "",
+    }
+    await session_db.save(db, s)
+
+    await service.post_duet_chat(db, ollama, s, "二人とも浴衣にして")
+
+    assert "yukata" in s["notebook"]["wearing"]
+    assert "yukata" in s["notebook"]["wearing_b"]
+    assert "yukata" in s["craft"]["tags"]
+    assert "classroom" not in s["craft"]["tags"]

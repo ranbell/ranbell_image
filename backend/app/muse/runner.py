@@ -25,8 +25,19 @@ def finished_image(shas: list[str]) -> str:
     return shas[-1]
 
 
+# The VRM / 3D on-set preview is switched off for this version. Flip this back
+# to True to re-enable the whole path — the stage (`frontend/src/muse/avatar3d.js`,
+# `vrmIk.js`, `components/muse/PoseSketch3D.vue`) is still in the tree, and the
+# panel needs its `<PoseSketch3D>` mount back. Everything downstream — storing
+# the still, handing it to the scripter, and OpenPose/DWPose injection on
+# board/shoot — reads through the two functions below.
+DIRECTION_STILL_ENABLED = False
+
+
 def direction_still_bytes(session: dict[str, Any]) -> bytes | None:
     """Latest coaching still saved on the session (JPEG bytes), if any."""
+    if not DIRECTION_STILL_ENABLED:
+        return None
     still = session.get("direction_still") or {}
     if not isinstance(still, dict):
         return None
@@ -42,7 +53,7 @@ def direction_still_bytes(session: dict[str, Any]) -> bytes | None:
 
 def store_direction_still(session: dict[str, Any], jpeg: bytes) -> None:
     """Keep the latest direction still for OpenPose injection on board/shoot."""
-    if not jpeg:
+    if not DIRECTION_STILL_ENABLED or not jpeg:
         return
     session["direction_still"] = {
         "jpeg_b64": base64.b64encode(jpeg).decode(),

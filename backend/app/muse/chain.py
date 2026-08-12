@@ -895,11 +895,29 @@ SCRIPTER_SYSTEM = """
 You are the studio scripter. You do not speak in character. You maintain the
 shot notebook and, when the picture changes, compile tags and craft_scene.
 
+You are given the conversation, not just the last line. Read it.
+
 INTENTS (pick one):
 - casual — chit-chat only. Do not change SHOT sections. vibe may update.
 - shot — showrunner changed the picture. Patch absolute values. Compile.
 - mixed — both chat and picture. Patch what changed. Compile.
 - recall — asking about past shoots. Do not change SHOT. vibe optional.
+
+READING THE ROOM:
+- Resolve what the showrunner means from the conversation. 「うん」/「それで」/
+  「いいね」 affirms whatever was just proposed;「さっきの」 points back at a
+  concrete earlier line. Nothing is pending unless the conversation says so.
+- A change a Muse proposed and the showrunner accepted is a change to the
+  picture. Patch it. Do not wait to be told a second time in plainer words.
+- A change is a change whatever words it arrived in. Judge by what the picture
+  would look like now versus the notebook — not by whether some keyword showed
+  up.「浴衣に着替えて」and「公園で撮ろう」are shot changes.
+- Decide from the conversation whose card an edit belongs to. An edit addressed
+  to one Muse never touches the other's wearing / beat. A change meant for both
+  patches both.
+- A held prop belongs in beat; something worn belongs in wearing. You decide.
+- When the picture did not move, say casual and change nothing. Do not repaint
+  the notebook to look busy.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
@@ -915,7 +933,8 @@ RULES:
 - On shot/mixed: always output tags and craft_scene from the WHOLE notebook
   after your patch (full replace, no merging with old tags). English only.
 - Partner shoots: use tags_shared + tags_a + tags_b (never one mixed bag).
-  Solo: use tags only.
+  Solo: use tags only. Getting this split right is how each Muse keeps her own
+  outfit — a flat bag lets the sampler put one Muse's clothes on the other.
 - Draft density: about 20–35 tags; craft_scene 60–120 words. Absolute values.
 - Do not invent diary props. Only the notebook + showrunner line.
 
@@ -925,56 +944,44 @@ clear that section; omit keys you are not changing.
 
 
 async def run_scripter(
-    ollama, *, notebook_block: str, note: str, theme: str = "",
-    style: str = "", framing: str = "", partner: bool = False,
-    model: str, num_ctx: int | None,
-    images: list[bytes] | None = None,
+    ollama, *, notebook_block: str, note: str, transcript: str = "",
+    theme: str = "", style: str = "", framing: str = "",
+    partner: bool = False, model: str, num_ctx: int | None,
 ) -> dict[str, Any]:
     """One non-stream scripter call: intent, notebook patch, optional craft.
+
+    ``transcript`` is the recent conversation, and it is the whole reason this
+    call works. The scripter used to get the notebook and one line of the
+    showrunner's, which made it an outside observer guessing at anaphora: it
+    could not tell what「うん」agreed to, or that a Muse had offered the change
+    herself. The gap was patched with keyword regexes until the keyword lists
+    were the bug. Same model as the talk turn — it was only ever short of
+    context.
 
     Uses Ollama JSON Schema `format` when available. Sampling follows the
     model card via `llm_options` (Gemma: temperature 1.0 — never force 0).
     Invalid output is validate-first: craft fields cleared so callers keep
     prior craft.
-
-    Optional ``images`` (direction stills) switch the call to VLM so the
-    scripter can match beat/frame/tags to what the 総監督 showed.
     """
     from ..ai.llm_options import llm_options
     from . import notebook as notebook_mod
 
-    direction = list(images or [])[:1]
     prompt = "\n\n".join(b for b in [
         f"THEME:\n{theme}" if theme.strip() else "",
         f"STYLE: {style}" if style.strip() else "",
         f"FRAMING: {framing}" if framing.strip() else "",
         f"NOTEBOOK NOW:\n{notebook_block}",
-        f"総監督がいま言ったこと:\n{note.strip()}",
         (
-            "DIRECTION SKETCH: An on-set preview still is attached (pose / "
-            "framing reference from the director). Match beat / frame / tags "
-            "to what you SEE. Prefer the image over vague prose when they conflict."
-        ) if direction else "",
+            "ここまでの会話（誰が何を言ったか。ノートに載せる値はここから読み取る）:\n"
+            f"{transcript.strip()}"
+        ) if transcript.strip() else "",
+        f"総監督がいま言ったこと:\n{note.strip()}",
         "Partner Muse sections wearing_b/beat_b apply." if partner else
         "Solo shoot — leave wearing_b and beat_b unused.",
         "Return JSON only.",
     ] if b.strip())
 
     raw = ""
-    if direction:
-        # Vision path — schema format is unreliable with images; parse+validate.
-        try:
-            raw = await _call(
-                ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
-                images=direction, num_ctx=num_ctx, think=False, on_token=None,
-            )
-        except ChainError:
-            logger.warning("[muse.chain] scripter VLM turn failed", exc_info=True)
-            raw = ""
-        parsed = notebook_mod.parse_scripter(raw)
-        validated = notebook_mod.validate_scripter(parsed, partner=partner)
-        return validated
-
     gen = getattr(ollama, "generate_text", None)
     if callable(gen):
         try:

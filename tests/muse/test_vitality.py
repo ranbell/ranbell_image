@@ -9,14 +9,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.muse import notebook, vitality
 
 
-def test_silence_whisper_is_sensory_template():
-    assert "つば" in vitality.silence_whisper("帽子外して煽って")
-    assert "mm" in vitality.silence_whisper("hat off", locale="en").lower() or "…" in vitality.silence_whisper("hat off", locale="en")
+def test_silence_whisper_is_a_plain_hold():
+    """It used to pick a body-line off the showrunner's wording ("…つば、押さえてる。"
+    for anything containing 帽子) and so narrated the wrong thing on ordinary
+    phrasing. A neutral hold is honest in every case."""
+    assert vitality.silence_whisper().strip()
+    assert vitality.silence_whisper(locale="en").strip()
 
 
-def test_notebook_flash_key():
-    assert vitality.notebook_flash_key("麦わら帽子かぶって") == "wearing"
-    assert vitality.notebook_flash_key("煽って") == "frame"
+def test_notebook_flash_key_reads_the_patch():
+    """Which row pulses comes from what the scripter changed, not from words."""
+    assert vitality.notebook_flash_key({"wearing": "yukata"}) == "wearing"
+    assert vitality.notebook_flash_key({"frame": "low angle"}) == "frame"
+    assert vitality.notebook_flash_key({"wearing_b": "dress"}) == "wearing_b"
+    assert vitality.notebook_flash_key({"vibe": "chatting"}) == "vibe"
+    assert vitality.notebook_flash_key(None) == "vibe"
 
 
 def test_taste_chips_short():
@@ -25,16 +32,32 @@ def test_taste_chips_short():
     assert any("足" in c for c in chips)
 
 
-def test_open_ignore_fades_after_two_turns():
+def test_open_ignore_fades_after_two_untouched_turns():
+    """Called after the scripter: an unchanged OPEN means nobody engaged."""
     s: dict = {}
-    assert vitality.tick_open_ignore(s, "かき氷どう？", open_text="靴脱ぎ") is False
-    assert vitality.tick_open_ignore(s, "いちごがいいかな", open_text="靴脱ぎ") is True
+    assert vitality.tick_open_ignore(s, open_text="靴脱ぎ") is False   # proposed
+    assert vitality.tick_open_ignore(s, open_text="靴脱ぎ") is False   # ignored once
+    assert vitality.tick_open_ignore(s, open_text="靴脱ぎ") is True    # and again
 
 
-def test_open_ignore_resets_on_affirm():
+def test_open_ignore_resets_when_the_scripter_rewrites_the_proposal():
+    """Engagement is the scripter changing OPEN, not the showrunner's wording.
+
+    This used to reset on any line containing いいね / うん / いらない, so a
+    sentence that merely happened to contain one kept a dead proposal alive.
+    """
     s: dict = {}
-    vitality.tick_open_ignore(s, "雑談1", open_text="靴脱ぎ")
-    assert vitality.tick_open_ignore(s, "いいね", open_text="靴脱ぎ") is False
+    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
+    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
+    assert vitality.tick_open_ignore(s, open_text="つばを押さえる") is False
+    assert s["open_ignore"]["count"] == 0
+
+
+def test_open_ignore_resets_when_the_proposal_is_cleared():
+    s: dict = {}
+    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
+    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
+    assert vitality.tick_open_ignore(s, open_text="") is False
     assert s["open_ignore"]["count"] == 0
 
 

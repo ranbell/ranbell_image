@@ -9,7 +9,8 @@ import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterGallery from './CharacterGallery.vue'
 import ActressDiaryModal from './muse/ActressDiaryModal.vue'
-import PoseSketch3D from './muse/PoseSketch3D.vue'
+// PoseSketch3D (VRM on-set preview) is switched off for this version — see the
+// note where it used to mount, and `runner.DIRECTION_STILL_ENABLED`.
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -44,8 +45,6 @@ const scripterWhisper = ref('')   // body-line while craft updates (no LLM)
 const notebookFlash = ref('')     // which notebook row to pulse
 const memoryHintSeen = ref(false)
 const chatInput = ref('')
-const directionOn = ref(false)    // pose-coaching ON → attach preview still to chat
-const poseSketchRef = ref(null)
 const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
@@ -461,9 +460,14 @@ function connectStream(id) {
       return
     }
     if (evt.type === 'scripter_working') {
-      scripterStatus.value = String(evt.message || '').trim() || t('muse.scripterUpdating')
-      scripterWhisper.value = String(evt.whisper || '').trim()
-      notebookFlash.value = String(evt.flash || '').trim()
+      // Sent more than once per turn: the opening event carries the status copy,
+      // and a later one carries the flash key once the scripter's patch says
+      // which row actually moved. Only overwrite what a given event brought.
+      if ('message' in evt) {
+        scripterStatus.value = String(evt.message || '').trim() || t('muse.scripterUpdating')
+      }
+      if ('whisper' in evt) scripterWhisper.value = String(evt.whisper || '').trim()
+      if ('flash' in evt) notebookFlash.value = String(evt.flash || '').trim()
       return
     }
     if (evt.type === 'scripter_done') {
@@ -665,14 +669,6 @@ async function sendChat(text, opts = {}) {
   startedAt = Date.now()
   try {
     const payload = { text: body }
-    // While direction (pose coaching) is ON, stream the shot-preview still.
-    let image = String(opts.image || '').trim()
-    if (!image && directionOn.value && poseSketchRef.value?.captureDirectionFrame) {
-      try {
-        image = String(poseSketchRef.value.captureDirectionFrame() || '').trim()
-      } catch { /* capture is best-effort */ }
-    }
-    if (image) payload.images = [image]
     session.value = await api(`/api/muse/sessions/${session.value.session_id}/chat`, {
       method: 'POST', body: JSON.stringify(payload),
     })
@@ -688,17 +684,6 @@ function stopThinking() {
 }
 
 function quick(cmd) { sendChat(cmd) }
-
-/** Pose coaching from VRM stage → chat as director instruction (+ still). */
-function onPoseCoach(payload) {
-  const msg = String(payload?.message || '').trim()
-  if (!msg) return
-  sendChat(msg, { image: payload?.image || '' })
-}
-
-function onCoachMode(on) {
-  directionOn.value = Boolean(on)
-}
 
 // Prep, test shot and final are buttons on their own endpoints — not words
 // typed into chat for a regex to recognise. Typed text is always creative
@@ -1261,23 +1246,9 @@ async function onChatKey(e) {
             </div>
           </div>
 
-          <!-- VRM on-set preview (Three.js) — posing + camera, no Comfy. SVG fallback inside. -->
-          <PoseSketch3D
-            v-if="isDuet && (craft.tags || notebookRows.length)"
-            ref="poseSketchRef"
-            :tags="String(craft.tags || '')"
-            :beat="String(session?.notebook?.beat || '')"
-            :beat-b="String(session?.notebook?.beat_b || '')"
-            :frame="String(session?.notebook?.frame || '')"
-            :duo="isWMuse"
-            :flash="Boolean(notebookFlash && ['beat','beat_b','frame'].includes(notebookFlash))"
-            @coach="onPoseCoach"
-            @coach-mode="onCoachMode"
-          />
-          <p
-            v-if="directionOn"
-            class="px-0.5 text-[9px] text-sky-200/75"
-          >{{ t('muse.poseSketch.directionImageHint') }}</p>
+          <!-- VRM on-set preview (Three.js) is switched off for this version.
+               The stage itself is still in the tree — restore this mount and
+               `runner.DIRECTION_STILL_ENABLED` together to bring it back. -->
 
           <div v-if="boardImages.length" class="space-y-2">
             <h4 class="text-[11px] text-[var(--sb-amber)]">

@@ -9,44 +9,24 @@ import hashlib
 import re
 from typing import Any
 
-# Soft body reactions while Scripter works (no extra LLM call).
-_WHISPER_JA: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"帽子|外して"), "…ん、つば、押さえてる。"),
-    (re.compile(r"煽|下から|ロー"), "…あ、視点が下がる。"),
-    (re.compile(r"見上げ|空"), "…空のほう、むいてみる。"),
-    (re.compile(r"服|セーラー|カーディガン|シャツ"), "…生地、指で確かめてる。"),
-    (re.compile(r"いいね|載せて"), "…それ、残すね。"),
-]
-_WHISPER_EN: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"hat|off", re.I), "…mm, holding the brim."),
-    (re.compile(r"low|below|angle", re.I), "…oh — camera drops."),
-    (re.compile(r"sky|look.?up", re.I), "…tilting toward the sky."),
-    (re.compile(r"outfit|dress|shirt", re.I), "…checking the fabric."),
-]
-
-_FLASH_KEYS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"帽子|外して|かぶ|hat|wearing", re.I), "wearing"),
-    (re.compile(r"煽|ロー|見上げ|カメラ|frame|angle", re.I), "frame"),
-    (re.compile(r"座|立|ポーズ|beat|shoulder", re.I), "beat"),
-    (re.compile(r"場所|scene|ベンチ", re.I), "scene"),
-]
+# These two used to guess from the showrunner's wording which notebook row was
+# about to move and what she would murmur about it — a keyword table that was
+# wrong whenever the wording was ordinary. The whisper is a plain hold now, and
+# the flash key comes from the patch the scripter actually returned.
+_ROW_PRIORITY = ("wearing", "wearing_b", "scene", "beat", "beat_b", "frame",
+                 "atmosphere")
 
 
-def silence_whisper(text: str, *, locale: str = "ja") -> str:
+def silence_whisper(*, locale: str = "ja") -> str:
     """One short body-line while craft updates — template only."""
-    t = str(text or "")
-    table = _WHISPER_JA if str(locale).startswith("ja") else _WHISPER_EN
-    for pat, line in table:
-        if pat.search(t):
-            return line
     return "…ん。" if str(locale).startswith("ja") else "…mm."
 
 
-def notebook_flash_key(text: str) -> str:
-    """Which notebook row to pulse in the UI during scripter_working."""
-    t = str(text or "")
-    for pat, key in _FLASH_KEYS:
-        if pat.search(t):
+def notebook_flash_key(patch: dict[str, Any] | None) -> str:
+    """Which notebook row to pulse in the UI, from the scripter's own patch."""
+    keys = {k for k, v in (patch or {}).items() if str(v or "").strip()}
+    for key in _ROW_PRIORITY:
+        if key in keys:
             return key
     return "vibe"
 
@@ -98,22 +78,21 @@ def tick_prop_age(session: dict[str, Any], nb: dict[str, Any]) -> str:
     return ""
 
 
-def tick_open_ignore(session: dict[str, Any], text: str, *, open_text: str) -> bool:
-    """Return True if OPEN should fade (ignored ~2 turns)."""
+def tick_open_ignore(session: dict[str, Any], *, open_text: str) -> bool:
+    """Return True if OPEN should fade (untouched ~2 turns).
+
+    Call this *after* the scripter has run: the scripter reads the conversation
+    and either clears OPEN, replaces it, or leaves it alone, so an unchanged
+    OPEN is the evidence that nobody engaged with the proposal. This used to
+    sniff the showrunner's line for「いいね|うん|いらない」before the scripter
+    got a say, and reset the counter on any sentence that happened to contain
+    one of those strings.
+    """
     open_ = str(open_text or "").strip()
     state = session.setdefault("open_ignore", {"text": "", "count": 0})
-    if not open_:
-        state["text"] = ""
-        state["count"] = 0
-        return False
-    if state.get("text") != open_:
+    # Cleared or rewritten by the scripter → it was engaged with. Start over.
+    if not open_ or state.get("text") != open_:
         state["text"] = open_
-        state["count"] = 0
-    # Affirm / dismiss / explicit engagement resets.
-    if re.search(r"(いいね|それで|うん|いらない|やめて|採用|その感じ)", str(text or "")):
-        state["count"] = 0
-        return False
-    if open_[:8] and open_[:8] in str(text or ""):
         state["count"] = 0
         return False
     state["count"] = int(state.get("count") or 0) + 1

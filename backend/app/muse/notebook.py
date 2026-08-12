@@ -127,29 +127,16 @@ def summary_for_muse(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") 
     return "\n".join(parts)
 
 
-_GAZE_IN_BEAT_RE = re.compile(
-    r"\b(looking_up|looking_down|looking_at_viewer|looking at viewer|"
-    r"looking up|looking down)\b"
-    r"|見上げ(?:て|る|た)?"
-    r"|見下ろ(?:し|す|して|した)?"
-    r"|カメラ目線"
-    r"|こちらを見(?:て|る)?",
-    re.I,
-)
-
 # Longevity caps (plan: VIBE≤5 lines, OPEN≤2, STANDING≤5).
 VIBE_MAX_LINES = 5
 VIBE_MAX_CHARS = 400
 OPEN_MAX_LINES = 2
 OPEN_MAX_CHARS = 240
 
-
-def strip_gaze_from_beat(text: str) -> str:
-    """Gaze belongs in FRAME only — drop looking_* / 見上げ phrases from BEAT."""
-    cleaned = _GAZE_IN_BEAT_RE.sub("", str(text or ""))
-    cleaned = re.sub(r"\s{2,}", " ", cleaned)
-    cleaned = re.sub(r"\s+,", ",", cleaned)
-    return cleaned.strip(" ,;")
+# Gaze used to be scrubbed out of BEAT here with a keyword regex. It is a rule
+# in SCRIPTER_SYSTEM now: the scripter reads the conversation and writes the
+# frame as one camera story. A word list cannot tell "見上げる" the pose from
+# "見上げる" the lens, and every phrase it missed shipped anyway.
 
 
 def _cap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
@@ -169,8 +156,6 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         if key not in patch:
             continue
         val = str(patch.get(key) or "").strip()
-        if key in ("beat", "beat_b"):
-            val = strip_gaze_from_beat(val)
         if key == "vibe" and val:
             val = _cap_lines(val, max_lines=VIBE_MAX_LINES, max_chars=VIBE_MAX_CHARS)
         if key == "open" and val:
@@ -201,47 +186,10 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return nb
 
 
-def promote_open(nb: dict[str, Any]) -> bool:
-    """When showrunner affirms, fold OPEN into the shot as an absolute value.
-
-    Small props / held items go to BEAT when they look handheld; otherwise they
-    merge into WEARING. OPEN is always cleared on success.
-    """
-    open_ = str(nb.get("open") or "").strip()
-    if not open_:
-        return False
-    handheld = bool(re.search(
-        r"(持|手に|つま|拾|葉|花|缶|瓶|本|伞|傘|スマホ|携帯|ラムネ|氷)",
-        open_,
-    ))
-    into = "beat" if handheld else "wearing"
-    cur = str(nb.get(into) or "").strip()
-    if not cur:
-        nb[into] = open_
-    elif open_ not in cur:
-        nb[into] = f"{cur}, {open_}"
-    nb["open"] = ""
-    nb["rev"] = int(nb.get("rev") or 0) + 1
-    nb["updated_at"] = time.time()
-    return True
-
-
-# Back-compat alias used by older call sites / tests.
-def promote_open_to_wearing(nb: dict[str, Any], *, into: str = "wearing") -> bool:
-    if into == "wearing":
-        return promote_open(nb)
-    open_ = str(nb.get("open") or "").strip()
-    if not open_:
-        return False
-    cur = str(nb.get(into) or "").strip()
-    if not cur:
-        nb[into] = open_
-    elif open_ not in cur:
-        nb[into] = f"{cur}, {open_}"
-    nb["open"] = ""
-    nb["rev"] = int(nb.get("rev") or 0) + 1
-    nb["updated_at"] = time.time()
-    return True
+# `promote_open` used to fold an affirmed OPEN into the shot here, guessing
+# from a noun list (持|手に|花|缶|傘|…) whether the thing was handheld (→ BEAT)
+# or worn (→ WEARING). The scripter reads the conversation now, sees the
+# affirmation itself, and writes the absolute value into the right section.
 
 
 def migrate(session: dict[str, Any]) -> dict[str, Any]:
@@ -351,35 +299,19 @@ def merge_tag_bags(
 
 
 def guard_partner_patch(
-    patch: dict[str, Any], note: str, *, name_a: str = "", name_b: str = "",
-    partner: bool = False,
+    patch: dict[str, Any], *, partner: bool = False,
 ) -> dict[str, Any]:
-    """Drop B-card edits when the showrunner only addressed Muse A (and vice versa)."""
+    """Drop the partner's sections on a solo shoot — nobody is standing there.
+
+    This is the whole guard now. Deciding *which* Muse an edit was addressed to
+    used to happen here too, off「だけ|のみ|ばっかり」and「二人|ふたり|一緒」;
+    it dropped the other card's edits on any line that named one Muse without
+    one of those words, which is most lines. The scripter is handed the
+    conversation and the speakers, and decides that itself.
+    """
     if not partner:
         patch.pop("wearing_b", None)
         patch.pop("beat_b", None)
-        return patch
-    text = str(note or "")
-    a = str(name_a or "").strip()
-    b = str(name_b or "").strip()
-    # Without both display names we cannot tell who was addressed — keep both.
-    if not a or not b:
-        return patch
-    mentions_a = bool(a in text)
-    mentions_b = bool(b in text)
-    # "あさひだけ…" / only-A patterns
-    only_a = bool(re.search(r"(だけ|のみ|ばっかり)", text)) and mentions_a and not mentions_b
-    only_b = bool(re.search(r"(だけ|のみ|ばっかり)", text)) and mentions_b and not mentions_a
-    if only_a or (mentions_a and not mentions_b and not re.search(
-        r"(二人|ふたり|一緒|おそろ|両方)", text,
-    )):
-        patch.pop("wearing_b", None)
-        patch.pop("beat_b", None)
-    if only_b or (mentions_b and not mentions_a and not re.search(
-        r"(二人|ふたり|一緒|おそろ|両方)", text,
-    )):
-        patch.pop("wearing", None)
-        patch.pop("beat", None)
     return patch
 
 
@@ -609,38 +541,27 @@ def validate_scripter(
     )
     scene = str(out.get("craft_scene") or "").strip()
     if intent in ("shot", "mixed"):
-        # Must compile something concrete; otherwise keep prior craft.
+        # Must compile something concrete; otherwise keep prior craft. This is
+        # the only hard refusal left — genuinely nothing to write down.
         if not tags and not scene:
             out["valid"] = False
             out["tags"] = ""
             out["craft_scene"] = ""
             return out
-        # W-Muse: require separated bags. A single flat TAGS bag is refused so
-        # we never overwrite craft with a mixed identity soup.
-        if partner:
-            has_split = bool(tags_a and tags_b)
-            if not has_split:
-                out["valid"] = False
-                out["tags"] = ""
-                out["craft_scene"] = ""
-                out["refuse_reason"] = "w_muse_tags_unsplit"
-                return out
+        # W-Muse wants separated bags so attributes bind to the right Muse. An
+        # unsplit bag used to be thrown away whole, which took the wardrobe and
+        # location changes riding along with it and froze the picture for the
+        # rest of the session. Flag it for the one repair pass instead; if the
+        # repair still comes back flat, ship it flat. A muddled attribution is
+        # visible on the board and fixable in the next line — last week's
+        # outfit, silently kept, is neither.
+        if partner and not (tags_a and tags_b):
+            out["refuse_reason"] = "w_muse_tags_unsplit"
+        elif partner:
             tags = merge_tag_bags(
                 tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
             )
-        low = tags.lower().replace(" ", "_")
-        if ("from_below" in low or "low_angle" in low) and "looking_up" in low:
-            out["valid"] = False
-            out["tags"] = ""
-            out["craft_scene"] = ""
-            out["refuse_reason"] = "low_angle_looking_up"
-            return out
-    # Strip gaze from beat patches even if the model ignored the rule.
-    patch = dict(out.get("patch") or {})
-    for key in ("beat", "beat_b"):
-        if key in patch:
-            patch[key] = strip_gaze_from_beat(str(patch.get(key) or ""))
-    out["patch"] = patch
+    out["patch"] = dict(out.get("patch") or {})
     out["tags"] = tags
     out["tags_shared"] = tags_shared
     out["tags_a"] = tags_a

@@ -149,10 +149,20 @@ def test_store_and_public_view_redacts_jpeg():
         jpeg = buf.getvalue()
     except Exception:
         pass
+    # The VRM direction still is switched off for this version, so storing one
+    # is a no-op and nothing reaches the GEN lane.
     muse_runner.store_direction_still(session, jpeg)
-    assert muse_runner.direction_still_bytes(session) == jpeg
+    assert session.get("direction_still") in (None, {})
+    assert muse_runner.direction_still_bytes(session) is None
+
+    # Redaction still has to hold for sessions persisted before the flag flipped:
+    # the blob stays in the payload and must never ride out on the public view.
+    session["direction_still"] = {
+        "jpeg_b64": base64.b64encode(jpeg).decode(),
+        "at": 1.0,
+        "bytes": len(jpeg),
+    }
     view = public_view(session)
     assert view["direction_still"]["ready"] is True
     assert "jpeg_b64" not in (view.get("direction_still") or {})
-    # raw session still has blob for GEN lane
     assert "jpeg_b64" in session["direction_still"]
