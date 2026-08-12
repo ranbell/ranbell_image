@@ -1369,6 +1369,12 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
         or str(character.get("name") or p.get("preset_name") or "Actress")
     )
     name_en = str(character.get("name") or p.get("preset_name") or name)
+    title_ja = str(p.get("title_ja") or character.get("title_ja") or "").strip()
+    title_en = str(p.get("title") or character.get("title") or "").strip()
+    title = (
+        f"{title_en} / {title_ja}" if title_en and title_ja and title_en != title_ja
+        else (title_ja or title_en)
+    )
     traits = ", ".join(str(t) for t in (p.get("traits") or []) if t)
     summary = str(p.get("summary_ja") or p.get("summary") or "")
     inner = " / ".join(
@@ -1380,8 +1386,22 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
     gest = ", ".join(str(t) for t in (character.get("gesture_vocab") or [])[:10] if t)
     vibe = ", ".join(str(x) for x in (p.get("vibe_keywords") or [])[:6] if x)
     charm = str(p.get("charm_ja") or p.get("charm") or "")
-    return "\n".join([
+    appearance = character.get("appearance") or p.get("appearance") or {}
+    if not isinstance(appearance, dict):
+        appearance = {}
+    first_impression = str(appearance.get("first_impression") or "").strip()
+    signature_moment = str(
+        p.get("signature_moment") or character.get("signature_moment") or ""
+    ).strip()
+    lines = [
         f"CHARACTER NAME: {name_en} / {name}",
+    ]
+    if title:
+        lines.append(
+            f"KNOWN AS / 肩書き: {title} — colours her world and confidence; "
+            "never introduce herself by job title every turn."
+        )
+    lines += [
         "",
         "WHAT DRIVES THE PERFORMANCE (use these — they become face, hands, voice)",
         f"TRAITS: {traits or '(unspecified)'}",
@@ -1391,6 +1411,18 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
         f"VIBE: {vibe or '(none)'}",
         f"TASTE CUES likes (never props): {likes or '(none)'}",
         f"TASTE CUES dislikes (never props): {dislikes or '(none)'}",
+    ]
+    if first_impression:
+        lines.append(
+            f"FIRST READ (how she lands at a glance — colour composure, "
+            f"do not announce): {first_impression}"
+        )
+    if signature_moment:
+        lines.append(
+            f"SIGNATURE BEAT (body language most her — show in hands/pose, "
+            f"never narrate as backstory): {signature_moment}"
+        )
+    lines += [
         "",
         "BACKGROUND — TONE ONLY. This sets how loudly and how carefully she "
         "speaks, nothing else. Never mention it in SAY. Never make it the subject "
@@ -1398,7 +1430,8 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
         "内気なら口調が内気になる、それが正解。過去の出来事を語るのは不正解。",
         f"SUMMARY: {summary or '(none)'}",
         f"INNER: {inner or '(none)'}",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def _style_block(muse_id: str, base_style: str) -> str:
@@ -1814,9 +1847,11 @@ language (Japanese when they wrote Japanese — Japanese only, no English
 words or English section titles in SAY).
 
 Rules for the turn (follow silently — never print rule names or numbers):
+- Voice contract first: use her 一人称 and 呼び方 exactly; keep talk quirks
+  and speaking-voice texture in every line. Generic soft-polite is a failure.
 - Sense and body first: react to how it feels (wind, cold bench, gaze,
-  embarrassment) before naming what changed. Never recite a change log
-  ("帽子を外しました、ローアングルです" is forbidden).
+  embarrassment) before naming what changed. Let her body habit colour the
+  line. Never recite a change log ("帽子を外しました、ローアングルです").
 - Their newest line wins. Drop what it replaces without clinging to an
   earlier beat you liked.
 - You may try on an OPEN proposal in SAY (play-act) even before it is
@@ -2139,6 +2174,7 @@ def _voice_field(character: dict[str, Any], key: str, default: str = "") -> str:
 def _voice_block(character: dict[str, Any], *, locale: str = "ja", seed: str = "") -> str:
     """First person, address, quirks, and say-examples for duet talk."""
     is_en = locale == "en"
+    p = character.get("personality") or {}
     first = _voice_field(
         character,
         "first_person_en" if is_en else "first_person_ja",
@@ -2167,13 +2203,39 @@ def _voice_block(character: dict[str, Any], *, locale: str = "ja", seed: str = "
     if not examples:
         examples = _pick_say_example(DEFAULT_MEMBER["actress"], seed)
 
+    appearance = character.get("appearance") or p.get("appearance") or {}
+    if not isinstance(appearance, dict):
+        appearance = {}
+    speaking_voice = str(appearance.get("voice") or "").strip()
+    habit = str(appearance.get("habit") or "").strip()
+    title_ja = str(p.get("title_ja") or character.get("title_ja") or "").strip()
+    title_en = str(p.get("title") or character.get("title") or "").strip()
+    title = title_ja or title_en
+
     lines = [
-        "VOICE (how she actually talks — obey these)",
-        f"一人称 / first person: {first}",
-        f"総監督の呼び方 / address: {addr}",
+        "VOICE (how she actually talks — obey these every SAY)",
+        f"一人称 / first person: {first} — never slip into another pronoun.",
+        f"総監督の呼び方 / address: {addr} — use this form, not a generic あなた.",
     ]
+    if title:
+        lines.append(
+            f"肩書きの気質 / known-as: {title} — lets her confidence and "
+            "topics lean her way without job-title self-intro."
+        )
+    if speaking_voice:
+        lines.append(f"声の質感 / speaking voice: {speaking_voice}")
+    if habit:
+        lines.append(
+            f"仕草の癖 / body habit while talking: {habit} — let hands/posture "
+            "hint this; do not announce the habit as a fact dump."
+        )
     if quirks:
         lines.append(f"口調の癖 / talk quirks: {quirks}")
+    lines.append(
+        "INDIVIDUALITY: a generic soft-polite actress voice is a FAILURE when "
+        "these quirks say otherwise. If another roster girl could say the same "
+        "line unchanged, rewrite it until only she would."
+    )
     lines.append(f"EXAMPLE energy (match this rhythm, do not copy verbatim):\n{examples}")
     return "\n".join(lines)
 
@@ -2207,10 +2269,17 @@ def actress_duet_prompt(
         "現場でふたりきりで話しているときの距離感で。",
         _voice_block(character, locale=locale, seed=seed),
         _character_sheet(character, locale=locale),
-        "Your personality shows in HOW you speak and in the face/hands choices "
-        "you pick for this shot. You may react as yourself to the situation "
-        "(shy when looked at, steadier on mic, etc.) — do not narrate your "
-        "life story or turn SUMMARY into the subject of the line.",
+        "INDIVIDUALITY LOCK — this girl is not interchangeable.",
+        "- Personality shows in HOW you speak and in the face/hands choices "
+        "you pick for this shot — first person, address, talk quirks, speaking "
+        "voice, and body habit must all be audible/visible in SAY.",
+        "- You may react as yourself to the situation (shy when looked at, "
+        "steadier on mic, etc.). Hidden charm shows as one small slip of "
+        "composure, never as self-description.",
+        "- Do not narrate your life story or turn SUMMARY / INNER / "
+        "signature_moment into the subject of the line.",
+        "- Swap-test: if the line still fits a different roster girl after "
+        "changing only the name, it is too generic — rewrite.",
     ]
     if mode == "prep" and facets is not None:
         # The scoped contract. DUET_OWNS_THE_FRAME's "rewrite everything that
@@ -2453,6 +2522,8 @@ B: <her lines in character>
 CRITICAL RULES FOR W-MUSE SAY:
 - ABSOLUTELY NO AI ASSISTANT SPEECH: never summaries, reports, or stock
   courtesy (もしよろしければ, 流れに合わせて準備, etc.).
+- CONTRAST VOICES: each Muse keeps her own 一人称 / 呼び方 / talk quirks /
+  speaking voice / body habit. If A and B sound interchangeable, rewrite.
 - LIVE DIALOGUE: sense and body first, then banter. React to each other —
   interrupt, tease, help. Do not recite a change-log of the shot.
 - Newest Showrunner line wins. Drop what it replaces. At most ONE shared
@@ -2519,7 +2590,10 @@ def w_actress_duet_prompt(
         f"- {name_a} and {name_b} are in the studio together. They MUST interact with each other and reacting to each other's presence!",
         f"- {name_a} speaks in her voice ({first_a}) and calls the Showrunner {addr_a}.",
         f"- {name_b} speaks in her voice ({first_b}) and calls the Showrunner {addr_b}.",
-        "- Contrast their personalities! Let them tease each other, agree or disagree on poses, and try out in-character lines together.",
+        "- Contrast their personalities hard — different first-person, address, "
+        "talk quirks, speaking voice, and body habit. Let them tease each other, "
+        "agree or disagree on poses, and try out in-character lines together. "
+        "Interchangeable soft-polite lines are a failure.",
         "- Offer vivid two-option pitches to the Showrunner (e.g. 『背中合わせでクールに決める？ それとも手をつないで微笑み合う？』).",
         (
             f"- Their established relationship, from their chemistry score, is "

@@ -443,6 +443,31 @@ def test_talk_prompt_injects_character_voice():
     assert "VOICE" in text
 
 
+def test_talk_prompt_injects_chara_json_individuality():
+    """Full personality_presets fields must reach the duet talk contract."""
+    from app.characters.presets import load_seed_presets, preset_to_character
+
+    rows = load_seed_presets()
+    preset = next(r for r in rows if r.get("id") == "c001")
+    ch = preset_to_character(preset)
+    text = crew.actress_duet_prompt(ch, mode="talk", seed="c001")
+    app = (ch.get("personality") or {}).get("appearance") or {}
+    assert ch["first_person_ja"] in text
+    assert "ちょっと声が低目で" in text
+    assert str(app.get("voice") or "")[:24] in text
+    assert str(app.get("habit") or "")[:24] in text
+    assert str((ch.get("personality") or {}).get("title_ja") or "")[:12] in text
+    assert "INDIVIDUALITY LOCK" in text
+    assert "SIGNATURE BEAT" in text
+    assert "FIRST READ" in text
+    # Distinctive girl vs generic soft-polite
+    tsuba = preset_to_character(next(r for r in rows if r.get("id") == "c020"))
+    tsuba_text = crew.actress_duet_prompt(tsuba, mode="talk", seed="c020")
+    assert "アタシ" in tsuba_text
+    assert "息を切らし気味の早口" in tsuba_text
+    assert "アタシ" not in text
+
+
 def test_duet_talk_user_prompt_prefers_latest_over_sticky():
     session = {
         "inputs": {"theme": "放送室"},

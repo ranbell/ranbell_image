@@ -337,27 +337,32 @@ async def main() -> None:
     lines.append("")
 
     # Structural gaps
-    lines.append("## 5. 構造ギャップ（JSONにあるが duet talk に届きにくい）\n")
+    lines.append("## 5. 構造ギャップ（残存）\n")
     talk0, _, _, _ = static_prompt_score(SAMPLE_IDS[0])
     gaps = []
     preset0 = load_preset(SAMPLE_IDS[0])
     app = preset0.get("appearance") or {}
+    ch0 = presets.preset_to_character(preset0)
     if app.get("voice") and str(app.get("voice")) not in talk0:
-        gaps.append(
-            "`appearance.voice` / `habit` / `first_impression` は "
-            "`_character_sheet` に出てこない（JSONにはある）"
-        )
-    if "signature_moment" in str(presets.preset_to_character(preset0).get("personality")):
-        sm = (presets.preset_to_character(preset0)["personality"].get("signature_moment") or "")
-        if sm and sm not in talk0:
-            gaps.append("`signature_moment` が talk シートに未注入")
+        gaps.append("`appearance.voice` が talk に未注入")
+    if app.get("habit") and str(app.get("habit")) not in talk0:
+        gaps.append("`appearance.habit` が talk に未注入")
+    fi = str((app.get("first_impression") or ""))
+    if fi and fi not in talk0:
+        gaps.append("`first_impression` が talk に未注入")
+    sm = str((ch0.get("personality") or {}).get("signature_moment") or "")
+    if sm and sm not in talk0:
+        gaps.append("`signature_moment` が talk に未注入")
+    title = str(preset0.get("title_ja") or "")
+    if title and title not in talk0:
+        gaps.append("`title_ja` が talk に未注入")
+    if not gaps:
+        gaps.append("JSONの主要個性信号は talk/prep 契約に到達済み")
     gaps.append(
-        "SUMMARY/INNER は「トーン専用・SAYに出すな」と強く封じている"
-        "（性格の核だが発話には間接利用）"
+        "SUMMARY/INNER は「トーン専用・SAYに出すな」と封じている（意図的）"
     )
     gaps.append(
-        "Fake/実モデル問わず、最終SAYが癖どおりかは生成モデル次第"
-        "（契約は厚いが保証はプロンプト依存）"
+        "最終SAYが癖どおりかは生成モデル次第（契約は厚くても保証はプロンプト依存）"
     )
     for g in gaps:
         lines.append(f"- {g}")
@@ -373,13 +378,12 @@ async def main() -> None:
     lines.append(
         f"- サンプル talk 平均カバー率: **{avg:.0f}%** → {judgment(int(avg))}\n"
         "- **判明できている:** 名前、一人称、呼び方、talk_quirks、duet_say_examples、"
-        "traits、charm、likes/dislikes、summary/inner（トーンとして）\n"
-        "- **弱いか未使用:** appearance.voice/habit/first_impression、"
-        "signature_moment（シート外）、タイトル職業の明示\n"
+        "traits、charm、likes、title、appearance.voice/habit、"
+        "first_impression、signature_moment、summary/inner（トーン）\n"
         "- **差は出る設計:** つばさ＝アタシ／早口、すみれ＝総監督様／花屋口調、"
-        "みなも＝……かな／レンズキャップ、かほ＝囁き丁寧 — JSONどおりプロンプトに分岐\n"
-        "- **限界:** 実Ollama未使用のため「喋った結果の性格再現」は未検証。"
-        "契約の厚さとしては中〜上、発話保証はモデル頼み。\n"
+        "みなも＝……かな／レンズキャップ、かほ＝囁き丁寧 — JSONどおり分岐\n"
+        "- **契約強化:** INDIVIDUALITY LOCK + 汎用ソフト丁寧口調を失敗扱い\n"
+        "- **限界:** 実Ollama未使用のため発話結果の性格再現は未検証。\n"
     )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
