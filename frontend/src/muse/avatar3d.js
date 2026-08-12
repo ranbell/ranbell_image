@@ -462,12 +462,15 @@ export async function createAvatarStage(container, {
   let coachSubject = 'a' // 'a' | 'b'
   let customLimbs = false
   let shotOverride = null // THREE.Vector3 | null
+  /** @type {'overview' | 'shot'} */
+  let viewMode = 'overview'
   let dragKind = null // 'shot' | 'ik' | null
   let dragIk = null // effector entry
   let lastPointer = { x: 0, y: 0 }
   const dragPlane = new THREE.Plane()
   const dragHit = new THREE.Vector3()
   const viewDir = new THREE.Vector3()
+  let overviewSnapshot = null // { position, target } to restore when leaving shot
 
   const orbit = new OrbitControls(viewCam, renderer.domElement)
   orbit.enableDamping = true
@@ -570,15 +573,20 @@ export async function createAvatarStage(container, {
     })
   }
 
-  function placeShotFromModel(model) {
+  function subjectLookAt(model) {
+    const crouch = ['squatting', 'crouching', 'kneeling'].includes(model?.posture)
+    const lookY = crouch ? 0.55 : (vrmB ? 1.0 : 0.95)
+    return new THREE.Vector3(0, lookY, 0)
+  }
+
+  function currentShot(model = activeModel()) {
     if (shotOverride) {
-      const crouch = ['squatting', 'crouching', 'kneeling'].includes(model.posture)
-      const lookY = crouch ? 0.45 : 0.95
+      const lookAt = subjectLookAt(model)
       const shot = {
         position: shotOverride.clone(),
-        lookAt: new THREE.Vector3(duo ? 0 : 0, lookY, 0),
-        fov: 34,
-        subjectY: lookY,
+        lookAt,
+        fov: model?.cameraDistance === 'close' ? 28 : model?.cameraDistance === 'upper' ? 32 : 34,
+        subjectY: lookAt.y,
       }
       shotGizmo.place(shot)
       return shot
@@ -586,6 +594,77 @@ export async function createAvatarStage(container, {
     const shot = shotCameraWorld(model, { duo: Boolean(vrmB) })
     shotGizmo.place(shot)
     return shot
+  }
+
+  function placeShotFromModel(model) {
+    return currentShot(model)
+  }
+
+  function updateBadge() {
+    if (viewMode === 'shot') {
+      badge.textContent = 'ショット視点 · この絵になるよ'
+      badge.style.color = 'rgba(125,211,252,0.98)'
+    } else if (coachMode) {
+      badge.textContent = '全景 · ポーズコーチング（IK＋カメラ移動）'
+      badge.style.color = 'rgba(253,224,71,0.95)'
+    } else {
+      badge.textContent = '撮影現場プレビュー · 全身＋ショットカメラ'
+      badge.style.color = 'rgba(253,224,71,0.95)'
+    }
+  }
+
+  function applyViewMode() {
+    const model = coachMode && coachModel ? coachModel : activeModel()
+    const shot = currentShot(model)
+    if (viewMode === 'shot') {
+      shotGizmo.root.visible = false
+      // Keep IK visible in shot mode so you can pose while checking the frame
+      handleRoot.visible = coachMode
+      viewCam.position.copy(shot.position)
+      viewCam.lookAt(shot.lookAt)
+      viewCam.fov = shot.fov || 34
+      viewCam.near = 0.05
+      viewCam.far = 40
+      viewCam.updateProjectionMatrix()
+      orbit.target.copy(shot.lookAt)
+      orbit.minDistance = 0.6
+      orbit.maxDistance = 6
+      orbit.enabled = true
+      orbit.update()
+    } else {
+      shotGizmo.root.visible = true
+      handleRoot.visible = coachMode
+      if (overviewSnapshot) {
+        viewCam.position.copy(overviewSnapshot.position)
+        orbit.target.copy(overviewSnapshot.target)
+        viewCam.fov = 42
+        viewCam.updateProjectionMatrix()
+        orbit.minDistance = 1.2
+        orbit.maxDistance = 12
+        orbit.enabled = coachMode
+        orbit.update()
+      } else {
+        placeSetOverviewCamera(viewCam, model, shot, { duo: Boolean(vrmB) })
+        orbit.target.copy(shot.lookAt)
+        orbit.minDistance = 1.2
+        orbit.maxDistance = 12
+        orbit.enabled = coachMode
+        orbit.update()
+      }
+    }
+    updateBadge()
+  }
+
+  function syncShotFromViewCam(model) {
+    if (viewMode !== 'shot') return
+    if (!shotOverride) shotOverride = new THREE.Vector3()
+    shotOverride.copy(viewCam.position)
+    if (model && coachMode && coachModel) {
+      const crouch = ['squatting', 'crouching', 'kneeling'].includes(model.posture)
+      Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
+      if (coachModel.cameraPitch === 'below') coachModel.gazePitch = 'looking_up'
+      else if (coachModel.cameraPitch === 'above') coachModel.gazePitch = 'looking_down'
+    }
   }
 
   function sync() {
@@ -637,22 +716,29 @@ export async function createAvatarStage(container, {
     }
 
     const shot = placeShotFromModel(coachMode && coachModel ? coachModel : model)
-    if (!coachMode || !orbit.enabled) {
-      placeSetOverviewCamera(viewCam, coachMode && coachModel ? coachModel : model, shot, {
-        duo: Boolean(vrmB),
-      })
+    if (viewMode === 'shot') {
+      applyViewMode()
+    } else if (!coachMode) {
+      placeSetOverviewCamera(viewCam, model, shot, { duo: Boolean(vrmB) })
       orbit.target.copy(shot.lookAt)
       orbit.update()
+      shotGizmo.root.visible = true
+      updateBadge()
+    } else {
+      // Coach overview: keep director orbit; only refresh gizmo / badge
+      shotGizmo.root.visible = true
+      handleRoot.visible = true
+      updateBadge()
     }
     return coachMode && coachModel ? coachModel : model
   }
 
   function onPointerDown(ev) {
-    if (!coachMode) return
+    if (!coachMode && viewMode !== 'shot') return
     setPointerNdc(ev)
     raycaster.setFromCamera(pointerNdc, viewCam)
 
-    if (handleRoot.visible && ikEffectors.length) {
+    if (coachMode && handleRoot.visible && ikEffectors.length) {
       const hits = raycaster.intersectObjects(ikEffectors.map((h) => h.mesh), false)
       if (hits.length) {
         dragKind = 'ik'
@@ -666,7 +752,9 @@ export async function createAvatarStage(container, {
       }
     }
 
-    const gizmoHits = raycaster.intersectObject(shotGizmo.root, true)
+    const gizmoHits = viewMode === 'overview'
+      ? raycaster.intersectObject(shotGizmo.root, true)
+      : []
     if (gizmoHits.length) {
       dragKind = 'shot'
       orbit.enabled = false
@@ -676,7 +764,7 @@ export async function createAvatarStage(container, {
   }
 
   function onPointerMove(ev) {
-    if (!coachMode || !dragKind) return
+    if ((!coachMode && viewMode !== 'shot') || !dragKind) return
     const dx = ev.clientX - lastPointer.x
     const dy = ev.clientY - lastPointer.y
     lastPointer = { x: ev.clientX, y: ev.clientY }
@@ -691,40 +779,48 @@ export async function createAvatarStage(container, {
       return
     }
 
-    if (dragKind === 'shot' && coachModel) {
-      const base = shotOverride || shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position
+    if (dragKind === 'shot' && viewMode === 'overview') {
+      const model = coachMode && coachModel ? coachModel : activeModel()
+      const base = shotOverride || shotCameraWorld(model, { duo: Boolean(vrmB) }).position
       if (!shotOverride) shotOverride = base.clone()
       const sph = new THREE.Spherical().setFromVector3(shotOverride)
       sph.theta -= dx * 0.01
       sph.phi = THREE.MathUtils.clamp(sph.phi + dy * 0.01, 0.15, Math.PI - 0.2)
       sph.radius = THREE.MathUtils.clamp(sph.radius, 0.8, 5.5)
       shotOverride.setFromSpherical(sph)
-      const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
-      Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
-      if (coachModel.cameraPitch === 'below') coachModel.gazePitch = 'looking_up'
-      else if (coachModel.cameraPitch === 'above') coachModel.gazePitch = 'looking_down'
-      placeShotFromModel(coachModel)
+      if (coachModel) {
+        const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
+        Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
+        if (coachModel.cameraPitch === 'below') coachModel.gazePitch = 'looking_up'
+        else if (coachModel.cameraPitch === 'above') coachModel.gazePitch = 'looking_down'
+      }
+      placeShotFromModel(model)
     }
   }
 
   function onPointerUp() {
-    if (!coachMode) return
+    if (!coachMode && viewMode !== 'shot') return
     dragKind = null
     dragIk = null
-    orbit.enabled = true
+    orbit.enabled = coachMode || viewMode === 'shot'
   }
 
   function onWheelShot(ev) {
-    if (!coachMode || !coachModel || !ev.shiftKey) return
+    if (!ev.shiftKey) return
+    if (!shotOverride && !(coachMode && coachModel)) return
     ev.preventDefault()
-    const base = shotOverride || shotCameraWorld(coachModel, { duo: Boolean(vrmB) }).position
+    const model = coachMode && coachModel ? coachModel : activeModel()
+    const base = shotOverride || shotCameraWorld(model, { duo: Boolean(vrmB) }).position
     if (!shotOverride) shotOverride = base.clone()
     const sph = new THREE.Spherical().setFromVector3(shotOverride)
     sph.radius = THREE.MathUtils.clamp(sph.radius + ev.deltaY * 0.002, 0.8, 5.5)
     shotOverride.setFromSpherical(sph)
-    const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
-    Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
-    placeShotFromModel(coachModel)
+    if (coachModel) {
+      const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
+      Object.assign(coachModel, cameraEnumsFromShotPosition(shotOverride, { crouch }))
+    }
+    if (viewMode === 'shot') applyViewMode()
+    else placeShotFromModel(model)
   }
 
   renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -736,9 +832,13 @@ export async function createAvatarStage(container, {
     const dt = clock.getDelta()
     vrmA.update(dt)
     if (vrmB) vrmB.update(dt)
-    if (coachMode) {
+    if (coachMode || viewMode === 'shot') {
       orbit.update()
-      syncHandles()
+      if (viewMode === 'shot' && !dragKind) {
+        const model = coachMode && coachModel ? coachModel : activeModel()
+        syncShotFromViewCam(model)
+      }
+      if (coachMode) syncHandles()
     }
     renderer.render(scene, viewCam)
     raf = requestAnimationFrame(tick)
@@ -788,7 +888,7 @@ export async function createAvatarStage(container, {
             active: ['standing'],
           })
         }
-        badge.textContent = 'ポーズコーチング · IK手足＋ショットカメラ'
+        badge.textContent = '全景 · ポーズコーチング（IK＋カメラ移動）'
         orbit.enabled = true
         handleRoot.visible = true
         rebuildHandles()
@@ -797,16 +897,43 @@ export async function createAvatarStage(container, {
         placeSetOverviewCamera(viewCam, coachModel, seedShot, { duo: Boolean(vrmB) })
         orbit.target.copy(seedShot.lookAt)
         orbit.update()
+        overviewSnapshot = {
+          position: viewCam.position.clone(),
+          target: orbit.target.clone(),
+        }
         sync()
         snapIkToTips()
+        applyViewMode()
       } else {
         coachModel = null
+        viewMode = 'overview'
         badge.textContent = '撮影現場プレビュー · 全身＋ショットカメラ'
         orbit.enabled = false
         handleRoot.visible = false
+        shotGizmo.root.visible = true
         sync()
+        applyViewMode()
       }
       return coachModel
+    },
+    setViewMode(mode) {
+      const next = mode === 'shot' ? 'shot' : 'overview'
+      if (next === viewMode) return viewMode
+      if (viewMode === 'overview' && next === 'shot') {
+        overviewSnapshot = {
+          position: viewCam.position.clone(),
+          target: orbit.target.clone(),
+        }
+        const model = coachMode && coachModel ? coachModel : activeModel()
+        const shot = currentShot(model)
+        if (!shotOverride) shotOverride = shot.position.clone()
+      }
+      viewMode = next
+      applyViewMode()
+      return viewMode
+    },
+    getViewMode() {
+      return viewMode
     },
     setCoachSubject(who) {
       coachSubject = who === 'b' ? 'b' : 'a'

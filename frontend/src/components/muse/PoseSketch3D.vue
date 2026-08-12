@@ -28,6 +28,7 @@ const err = ref('')
 const coachOn = ref(false)
 const coachSubject = ref('a')
 const coachPreview = ref('')
+const viewMode = ref('overview') // overview | shot
 let stage = null
 let dead = false
 
@@ -107,6 +108,12 @@ function toggleCoach() {
     coachPreview.value = ''
     pushPose()
   }
+  viewMode.value = stage.getViewMode?.() || viewMode.value
+}
+
+function setViewMode(mode) {
+  if (!stage?.setViewMode) return
+  viewMode.value = stage.setViewMode(mode)
 }
 
 function setSubject(who) {
@@ -204,15 +211,36 @@ onBeforeUnmount(() => {
   >
     <div class="flex items-center justify-between gap-2 px-2.5 pt-2 pb-0.5">
       <h4 class="text-[11px] text-[var(--sb-amber)]">{{ t('muse.poseSketch.title3d') }}</h4>
-      <button
-        type="button"
-        class="rounded-md border px-2 py-0.5 text-[10px] transition-colors"
-        :class="coachOn
-          ? 'border-[var(--sb-teal)]/60 bg-[var(--sb-teal)]/15 text-[var(--sb-teal)]'
-          : 'border-white/15 text-[var(--sb-faint)] hover:text-white'"
-        @click="toggleCoach"
-      >{{ coachOn ? t('muse.poseSketch.coachOn') : t('muse.poseSketch.coach') }}</button>
+      <div class="flex items-center gap-1">
+        <div class="flex rounded-md border border-white/15 overflow-hidden">
+          <button
+            type="button"
+            class="px-2 py-0.5 text-[10px]"
+            :class="viewMode === 'overview' ? 'bg-white/15 text-amber-200' : 'text-[var(--sb-faint)]'"
+            @click="setViewMode('overview')"
+          >{{ t('muse.poseSketch.viewOverview') }}</button>
+          <button
+            type="button"
+            class="px-2 py-0.5 text-[10px] border-l border-white/15"
+            :class="viewMode === 'shot' ? 'bg-sky-500/25 text-sky-200' : 'text-[var(--sb-faint)]'"
+            @click="setViewMode('shot')"
+          >{{ t('muse.poseSketch.viewShot') }}</button>
+        </div>
+        <button
+          type="button"
+          class="rounded-md border px-2 py-0.5 text-[10px] transition-colors"
+          :class="coachOn
+            ? 'border-[var(--sb-teal)]/60 bg-[var(--sb-teal)]/15 text-[var(--sb-teal)]'
+            : 'border-white/15 text-[var(--sb-faint)] hover:text-white'"
+          @click="toggleCoach"
+        >{{ coachOn ? t('muse.poseSketch.coachOn') : t('muse.poseSketch.coach') }}</button>
+      </div>
     </div>
+
+    <p
+      v-if="viewMode === 'shot'"
+      class="px-2.5 pt-1 text-[9px] text-sky-200/80"
+    >{{ t('muse.poseSketch.viewShotHint') }}</p>
 
     <div ref="host" class="w-full min-h-[220px] px-1 relative">
       <p

@@ -15,9 +15,13 @@
 </head>
 <body>
   <header>
-    <h1>撮影現場プレビュー（2人・ポーズコーチング）</h1>
-    <p>しゃがみ＋立ち · 横ロー · IK手足＋ショットカメラ</p>
+    <h1>撮影現場プレビュー（2人・全景⇄ショット）</h1>
+    <p>全景で配置 → ショット視点で「この絵になるよ」を確認</p>
   </header>
+  <div id="viewbar" style="display:flex;gap:8px;justify-content:center;padding:0 16px 8px">
+    <button data-mode="overview" type="button" style="border:1px solid #475569;border-radius:8px;padding:6px 12px;background:transparent;color:#94a3b8;cursor:pointer">全景</button>
+    <button data-mode="shot" type="button" style="border:1px solid #475569;border-radius:8px;padding:6px 12px;background:transparent;color:#94a3b8;cursor:pointer">ショット視点</button>
+  </div>
   <div id="stage"></div>
   <p class="tags">2girls · crouching + standing · from_side, from_below</p>
   <script type="module" src="/src/chibiDemoMain.js"></script>

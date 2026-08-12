@@ -1394,8 +1394,11 @@
       "gazeViewer": "looking at lens",
       "coach": "Pose coaching",
       "coachOn": "Coaching…",
-      "coachHint": "Cyan = hand IK / pink = foot IK. Blue cam = shot. Drag empty space to orbit; Shift+wheel for distance. Then send “do it like this”.",
+      "coachHint": "Cyan = hand IK / pink = foot IK. Move the cam in overview, check “the picture” in shot view. Drag to move; Shift+wheel for distance.",
       "coachSend": "Coach: do it like this",
+      "viewOverview": "Overview",
+      "viewShot": "Shot view",
+      "viewShotHint": "Through-the-lens preview. Drag to reframe.",
       "subjectA": "Subject A",
       "subjectB": "Subject B",
       "arms": {
