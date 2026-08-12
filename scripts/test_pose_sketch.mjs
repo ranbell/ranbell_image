@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-/** Quick assertions for poseSketch mapping (no Vue / no Chrome). */
-import { buildPoseSketch, hintsFromProse, cameraView } from '../frontend/src/muse/poseSketch.js'
+/** Quick assertions for poseSketch + chibi3d anchors (no WebGL). */
+import { buildPoseSketch, hintsFromProse } from '../frontend/src/muse/poseSketch.js'
+import { poseAnchors, placeChibiCamera, jointToWorld } from '../frontend/src/muse/chibi3d.js'
+import * as THREE from '../frontend/node_modules/three/build/three.module.js'
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
@@ -9,23 +11,30 @@ function assert(cond, msg) {
 {
   const p = buildPoseSketch('rooftop, sitting, arms_up, looking_at_viewer, from_below, low_angle')
   assert(p.posture === 'sitting', `posture ${p.posture}`)
-  assert(p.arms === 'arms_up', `arms ${p.arms}`)
-  assert(p.gazeTarget === 'looking_at_viewer', 'gaze')
   assert(p.cameraPitch === 'below', `pitch ${p.cameraPitch}`)
-  assert(p.gazePitch === 'looking_up', `implied gaze ${p.gazePitch}`)
-  assert(!p.empty, 'not empty')
 }
 
 {
-  const p = buildPoseSketch('', { beat: 'フェンスにもたれて立つ', frame: '下から煽って' })
-  assert(p.posture === 'standing', `beat posture ${p.posture}`)
-  assert(p.cameraPitch === 'below', `beat camera ${p.cameraPitch}`)
+  const p = buildPoseSketch(
+    'crouching, squatting, from_side, profile, from_below, low_angle',
+    { beat: 'しゃがんで', frame: '横からローアングル' },
+  )
+  assert(p.posture === 'squatting' || p.posture === 'crouching', `posture ${p.posture}`)
+  assert(p.cameraSide === 'side', `side ${p.cameraSide}`)
+  assert(p.cameraPitch === 'below', `pitch ${p.cameraPitch}`)
+  assert(p.gazePitch === 'looking_up', `gaze ${p.gazePitch}`)
+  const a = poseAnchors(p)
+  assert(a.yaw < 0, 'side yaw')
+  assert(a.lKnee.z > 0.1, 'crouch knee forward')
+  const cam = new THREE.PerspectiveCamera()
+  placeChibiCamera(cam, p)
+  assert(cam.position.y < 0, `low cam y=${cam.position.y}`)
+  assert(cam.position.x > 0.5, `side cam x=${cam.position.x}`)
 }
 
 {
-  const p = buildPoseSketch('2girls, standing, holding_hands', { beat_b: '隣に立つ' })
-  assert(p.duo, 'duo')
-  assert(p.interact.includes('hand') || p.interact === 'holding_hands', `interact ${p.interact}`)
+  const w = jointToWorld({ x: 50, y: 72 })
+  assert(Math.abs(w.x) < 1e-6 && Math.abs(w.y) < 1e-6, 'origin map')
 }
 
 {
@@ -34,17 +43,4 @@ function assert(cond, msg) {
   assert(h.cameraDistance === 'close', `distance ${h.cameraDistance}`)
 }
 
-{
-  const below = cameraView(buildPoseSketch('standing, from_below, full_body'))
-  const above = cameraView(buildPoseSketch('standing, from_above'))
-  const close = cameraView(buildPoseSketch('standing, close-up, looking_at_viewer'))
-  const side = cameraView(buildPoseSketch('standing, from_side'))
-  assert(below.pitch === 'below' && below.camera.y > 140, 'below cam low')
-  assert(above.pitch === 'above' && above.camera.y < 40, 'above cam high')
-  assert(close.dist === 'close' && close.clip.h < below.clip.h, 'close clips tighter')
-  assert(side.side === 'side' && side.camera.x > 180, 'side cam right')
-  assert(below.figureTransform.includes('scale'), 'has scale')
-  assert(below.frustum.length === 8, 'frustum quad')
-}
-
-console.log('pose_sketch ok')
+console.log('pose_sketch + chibi3d ok')

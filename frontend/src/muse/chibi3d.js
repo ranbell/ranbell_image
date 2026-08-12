@@ -1,266 +1,468 @@
 /**
- * Procedural cute chibi rig driven by poseSketch joints + cameraView.
- * Three.js — no external VRM / no Comfy.
+ * Cute procedural 3D chibi — closer to the PVC-figure look.
+ * Driven by poseSketch tags (posture / side / pitch / distance).
+ * Three.js only — no VRM / no Comfy.
  */
 import * as THREE from 'three'
-import { buildPoseSketch, figureJoints, cameraView } from './poseSketch.js'
+import { buildPoseSketch } from './poseSketch.js'
 
-const SKIN = 0xffe4e8
-const BLUSH = 0xfb7185
-const ACCENT = 0x2dd4bf
-const ACCENT_B = 0xfbbf24
-const OUTFIT = 0x5eead4
-const OUTFIT_B = 0xfcd34d
-const EYE = 0x1f2937
+const SKIN = 0xffe4e6
+const BLUSH = 0xff8fab
+const TEAL = 0x2ec4b6
+const TEAL_DEEP = 0x1a9e94
+const TEAL_SOFT = 0x7ee8de
+const SHIRT = 0xb8f3ee
+const WHITE = 0xfff8fb
+const EYE_TEAL = 0x1f9e96
+const EYE_DARK = 0x143d3a
 
-function skinMat(color = SKIN) {
-  return new THREE.MeshToonMaterial({ color })
+function toonGradient() {
+  // 4-step cel ramp for MeshToonMaterial
+  const data = new Uint8Array([
+    95, 95, 95, 255,
+    150, 150, 150, 255,
+    205, 205, 205, 255,
+    255, 255, 255, 255,
+  ])
+  const tex = new THREE.DataTexture(data, 4, 1, THREE.RGBAFormat)
+  tex.needsUpdate = true
+  tex.magFilter = THREE.NearestFilter
+  tex.minFilter = THREE.NearestFilter
+  return tex
 }
 
-function limbMesh(color) {
-  // Unit-length capsule along Y; placeCapsule scales Y to the joint distance.
-  const geo = new THREE.CapsuleGeometry(0.045, 1, 4, 8)
-  const mesh = new THREE.Mesh(geo, skinMat(color))
+const GRAD = toonGradient()
+
+function toon(color, opts = {}) {
+  return new THREE.MeshToonMaterial({
+    color,
+    gradientMap: GRAD,
+    ...opts,
+  })
+}
+
+function v(x, y, z) { return new THREE.Vector3(x, y, z) }
+
+/** Bone-ish limb: capsule between local points, updated each pose. */
+function makeLimb(radius, color) {
+  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, 1, 5, 10), toon(color))
   mesh.castShadow = true
   return mesh
 }
 
-/** Map 2D joint (100×140, y-down) → Three world. */
-export function jointToWorld(p, { xScale = 0.018, yScale = 0.018, z = 0 } = {}) {
-  return new THREE.Vector3(
-    (p.x - 50) * xScale,
-    (72 - p.y) * yScale,
-    z,
-  )
-}
-
-function placeCapsule(mesh, a, b) {
-  const start = a.clone()
-  const end = b.clone()
-  const dir = new THREE.Vector3().subVectors(end, start)
+function setLimb(mesh, a, b, radius = 0.045) {
+  const dir = v().subVectors(b, a)
   const len = dir.length()
-  if (len < 1e-4) {
-    mesh.visible = false
-    return
-  }
+  if (len < 1e-4) { mesh.visible = false; return }
   mesh.visible = true
-  // CapsuleGeometry(radius, length=1) total span ≈ length + 2r ≈ 1.09
-  const span = 1 + 2 * 0.045
-  mesh.scale.set(1, Math.max(0.08, len) / span, 1)
-  mesh.position.copy(start).add(end).multiplyScalar(0.5)
-  mesh.quaternion.setFromUnitVectors(
-    new THREE.Vector3(0, 1, 0),
-    dir.clone().normalize(),
-  )
+  const span = 1 + 2 * radius
+  const geoR = mesh.geometry.parameters?.radius ?? radius
+  mesh.scale.set(radius / geoR, Math.max(0.05, len) / span, radius / geoR)
+  mesh.position.copy(a).add(b).multiplyScalar(0.5)
+  mesh.quaternion.setFromUnitVectors(v(0, 1, 0), dir.normalize())
 }
 
-function makeChibi(accent = ACCENT, outfit = OUTFIT) {
+/**
+ * Build one cute uniform chibi (big head, teal bob, school-ish outfit, chunky shoes).
+ */
+export function makeChibi({ accent = TEAL, shirt = SHIRT } = {}) {
   const root = new THREE.Group()
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 24, 20), skinMat(SKIN))
-  head.castShadow = true
-  const hair = new THREE.Mesh(
-    new THREE.SphereGeometry(0.29, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
-    new THREE.MeshToonMaterial({ color: accent }),
-  )
-  hair.position.y = 0.06
-  hair.rotation.x = Math.PI
-  const ahoge = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.02, 0.14, 3, 6),
-    new THREE.MeshToonMaterial({ color: accent }),
-  )
-  ahoge.position.set(0.05, 0.38, 0.02)
-  ahoge.rotation.z = -0.4
 
-  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), new THREE.MeshToonMaterial({ color: EYE }))
-  const eyeR = eyeL.clone()
-  eyeL.position.set(-0.09, 0.02, 0.24)
-  eyeR.position.set(0.09, 0.02, 0.24)
-  const shineL = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 8), new THREE.MeshToonMaterial({ color: 0xffffff }))
-  const shineR = shineL.clone()
-  shineL.position.set(-0.08, 0.04, 0.275)
-  shineR.position.set(0.1, 0.04, 0.275)
+  // —— Head ——
+  const headG = new THREE.Group()
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 32, 24), toon(SKIN))
+  head.castShadow = true
+  // Hair bob (upper hemisphere + side volume)
+  const hairMat = toon(accent)
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.355, 28, 20), hairMat)
+  hairCap.scale.set(1.02, 0.92, 1.05)
+  hairCap.position.y = 0.04
+  const bang = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), hairMat)
+  bang.scale.set(1.15, 0.55, 0.55)
+  bang.position.set(0, 0.08, 0.28)
+  const sideL = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 12), hairMat)
+  const sideR = sideL.clone()
+  sideL.position.set(-0.28, -0.02, 0.05)
+  sideR.position.set(0.28, -0.02, 0.05)
+  const ahoge = new THREE.Mesh(new THREE.CapsuleGeometry(0.025, 0.18, 4, 8), hairMat)
+  ahoge.position.set(0.06, 0.48, 0.02)
+  ahoge.rotation.z = -0.55
+
+  // Eyes — teal, cute, matching the reference look
+  const eyeWhite = (x) => {
+    const g = new THREE.Group()
+    const w = new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 12), toon(WHITE))
+    w.scale.set(0.85, 1.05, 0.55)
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), toon(EYE_TEAL))
+    iris.position.z = 0.035
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), toon(EYE_DARK))
+    pupil.position.z = 0.055
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), toon(WHITE))
+    shine.position.set(0.015, 0.02, 0.07)
+    g.add(w, iris, pupil, shine)
+    g.position.set(x, 0.02, 0.29)
+    return g
+  }
+  const eyeL = eyeWhite(-0.1)
+  const eyeR = eyeWhite(0.1)
 
   const blushL = new THREE.Mesh(
-    new THREE.SphereGeometry(0.05, 10, 8),
-    new THREE.MeshToonMaterial({ color: BLUSH, transparent: true, opacity: 0.55 }),
+    new THREE.SphereGeometry(0.055, 10, 8),
+    toon(BLUSH, { transparent: true, opacity: 0.5 }),
   )
   const blushR = blushL.clone()
-  blushL.position.set(-0.16, -0.04, 0.2)
-  blushR.position.set(0.16, -0.04, 0.2)
-  blushL.scale.set(1, 0.55, 0.5)
-  blushR.scale.set(1, 0.55, 0.5)
+  blushL.position.set(-0.2, -0.06, 0.24)
+  blushR.position.set(0.2, -0.06, 0.24)
+  blushL.scale.set(1.1, 0.5, 0.45)
+  blushR.scale.set(1.1, 0.5, 0.45)
 
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 6), toon(0xffc6d0))
+  nose.position.set(0, -0.04, 0.33)
   const mouth = new THREE.Mesh(
-    new THREE.TorusGeometry(0.04, 0.01, 6, 10, Math.PI),
-    new THREE.MeshToonMaterial({ color: BLUSH }),
+    new THREE.TorusGeometry(0.035, 0.008, 6, 12, Math.PI),
+    toon(BLUSH),
   )
-  mouth.position.set(0, -0.1, 0.25)
+  mouth.position.set(0, -0.12, 0.3)
   mouth.rotation.x = Math.PI
 
-  const headGroup = new THREE.Group()
-  headGroup.add(head, hair, ahoge, eyeL, eyeR, shineL, shineR, blushL, blushR, mouth)
+  headG.add(head, hairCap, bang, sideL, sideR, ahoge, eyeL, eyeR, blushL, blushR, nose, mouth)
+  headG.position.y = 0.55
 
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.13, 0.18, 6, 12),
-    new THREE.MeshToonMaterial({ color: outfit }),
+  // —— Torso / uniform ——
+  const torsoG = new THREE.Group()
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.16, 6, 14), toon(shirt))
+  torso.castShadow = true
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.03, 8, 16, Math.PI * 1.3), toon(WHITE))
+  collar.position.set(0, 0.16, 0.02)
+  collar.rotation.x = Math.PI / 2
+  const tie = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.12, 8), toon(accent))
+  tie.position.set(0, 0.02, 0.13)
+  tie.rotation.x = Math.PI
+  // Pleated skirt approximation: ring of thin boxes
+  const skirt = new THREE.Group()
+  const pleatMat = toon(accent)
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.02), pleatMat)
+    p.position.set(Math.sin(a) * 0.15, -0.2, Math.cos(a) * 0.15)
+    p.lookAt(0, -0.2, 0)
+    skirt.add(p)
+  }
+  const skirtFill = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.17, 0.2, 0.12, 16, 1, true),
+    toon(TEAL_DEEP, { side: THREE.DoubleSide }),
   )
-  body.castShadow = true
+  skirtFill.position.y = -0.2
+  torsoG.add(torso, collar, tie, skirt, skirtFill)
+  torsoG.position.y = 0.05
 
-  const skirt = new THREE.Mesh(
-    new THREE.ConeGeometry(0.2, 0.16, 16, 1, true),
-    new THREE.MeshToonMaterial({ color: accent, side: THREE.DoubleSide }),
-  )
-  skirt.position.y = -0.16
-  skirt.rotation.x = Math.PI
+  // —— Limbs ——
+  const armL = makeLimb(0.045, SKIN)
+  const armR = makeLimb(0.045, SKIN)
+  const sleeveL = makeLimb(0.055, shirt)
+  const sleeveR = makeLimb(0.055, shirt)
+  const legL = makeLimb(0.05, SKIN)
+  const legR = makeLimb(0.05, SKIN)
+  const sockL = makeLimb(0.055, WHITE)
+  const sockR = makeLimb(0.055, WHITE)
 
-  const limbs = {
-    lArm: limbMesh(SKIN),
-    rArm: limbMesh(SKIN),
-    lLeg: limbMesh(SKIN),
-    rLeg: limbMesh(SKIN),
+  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), toon(SKIN))
+  const handR = handL.clone()
+
+  function makeShoe() {
+    const g = new THREE.Group()
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.28), toon(WHITE))
+    sole.position.y = -0.02
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.08, 4, 10), toon(accent))
+    upper.rotation.z = Math.PI / 2
+    upper.position.set(0, 0.04, 0.02)
+    g.add(sole, upper)
+    g.castShadow = true
+    return g
+  }
+  const shoeL = makeShoe()
+  const shoeR = makeShoe()
+
+  // Stripe on socks (decal spheres)
+  const stripe = (y) => {
+    const s = new THREE.Mesh(new THREE.TorusGeometry(0.056, 0.01, 6, 16), toon(accent))
+    s.rotation.x = Math.PI / 2
+    s.position.y = y
+    return s
   }
 
-  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 10), skinMat(SKIN))
-  const handR = handL.clone()
-  const footL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 10), new THREE.MeshToonMaterial({ color: accent }))
-  const footR = footL.clone()
-  footL.scale.set(1.2, 0.6, 1.4)
-  footR.scale.set(1.2, 0.6, 1.4)
-
-  root.add(headGroup, body, skirt, limbs.lArm, limbs.rArm, limbs.lLeg, limbs.rLeg, handL, handR, footL, footR)
+  root.add(
+    headG, torsoG,
+    armL, armR, sleeveL, sleeveR, handL, handR,
+    legL, legR, sockL, sockR, shoeL, shoeR,
+  )
 
   return {
-    root, headGroup, body, skirt, limbs, handL, handR, footL, footR,
-    eyeL, eyeR, mouth, accent,
+    root, headG, torsoG,
+    armL, armR, sleeveL, sleeveR, handL, handR,
+    legL, legR, sockL, sockR, shoeL, shoeR,
+    eyeL, eyeR, accent,
+    _stripeL1: stripe(0.08), _stripeL2: stripe(0.02),
+    _stripeR1: stripe(0.08), _stripeR2: stripe(0.02),
   }
 }
 
-function applyJoints(chibi, joints, opts = {}) {
-  const head = jointToWorld(joints.head, opts)
-  const neck = jointToWorld(joints.neck, opts)
-  const hip = jointToWorld(joints.hip, opts)
-  const lElbow = jointToWorld(joints.lElbow, opts)
-  const rElbow = jointToWorld(joints.rElbow, opts)
-  const lHand = jointToWorld(joints.lHand, opts)
-  const rHand = jointToWorld(joints.rHand, opts)
-  const lKnee = jointToWorld(joints.lKnee, opts)
-  const rKnee = jointToWorld(joints.rKnee, opts)
-  const lFoot = jointToWorld(joints.lFoot, opts)
-  const rFoot = jointToWorld(joints.rFoot, opts)
+/**
+ * Native 3D pose targets (world-ish local to character facing +Z).
+ * Returns anchor points for head / torso / limbs / shoes.
+ */
+export function poseAnchors(model) {
+  const posture = model.posture || 'standing'
+  const side = model.cameraSide || 'front'
+  const gaze = model.gazePitch || 'looking_ahead'
+  const arms = model.arms || 'arms_at_sides'
 
-  chibi.headGroup.position.copy(head)
-  // Face away when from_behind
-  chibi.headGroup.rotation.set(0, joints.behind ? Math.PI : (joints.profile ? 0.9 : 0), 0)
-  // Gaze pitch
-  if (joints.behind) {
-    chibi.headGroup.rotation.x = 0
+  // Default standing
+  let head = v(0, 0.55, 0)
+  let neck = v(0, 0.28, 0)
+  let hip = v(0, -0.05, 0)
+  let lShoulder = v(-0.16, 0.22, 0)
+  let rShoulder = v(0.16, 0.22, 0)
+  let lHand = v(-0.28, -0.02, 0.05)
+  let rHand = v(0.28, -0.02, 0.05)
+  let lKnee = v(-0.1, -0.35, 0.02)
+  let rKnee = v(0.1, -0.35, 0.02)
+  let lFoot = v(-0.1, -0.62, 0.04)
+  let rFoot = v(0.1, -0.62, 0.04)
+  let rootY = 0
+
+  if (posture === 'sitting') {
+    hip = v(0, -0.2, 0)
+    lKnee = v(-0.18, -0.22, 0.2)
+    rKnee = v(0.18, -0.22, 0.2)
+    lFoot = v(-0.18, -0.45, 0.28)
+    rFoot = v(0.18, -0.45, 0.28)
+    head = v(0, 0.42, 0)
+    neck = v(0, 0.18, 0)
+    rootY = -0.05
+  } else if (posture === 'squatting' || posture === 'crouching' || posture === 'kneeling') {
+    // Deep crouch — the hero pose from the reference
+    hip = v(0, -0.28, 0.02)
+    lKnee = v(-0.12, -0.32, 0.28)
+    rKnee = v(0.12, -0.32, 0.28)
+    lFoot = v(-0.14, -0.55, 0.08)
+    rFoot = v(0.14, -0.55, 0.08)
+    head = v(0, 0.28, 0.06)
+    neck = v(0, 0.05, 0.04)
+    lShoulder = v(-0.16, 0.0, 0.04)
+    rShoulder = v(0.16, 0.0, 0.04)
+    lHand = v(-0.22, -0.28, 0.22)
+    rHand = v(0.22, -0.28, 0.22)
+    rootY = -0.02
+  } else if (posture === 'lying') {
+    head = v(-0.45, -0.15, 0)
+    neck = v(-0.2, -0.15, 0)
+    hip = v(0.25, -0.18, 0)
+    lHand = v(-0.1, 0.05, 0.15)
+    rHand = v(-0.1, -0.35, 0.15)
+    lFoot = v(0.55, -0.05, 0.1)
+    rFoot = v(0.55, -0.3, 0.1)
+    lKnee = v(0.4, -0.08, 0.08)
+    rKnee = v(0.4, -0.28, 0.08)
+  } else if (posture === 'jumping') {
+    rootY = 0.25
+    lFoot = v(-0.12, -0.5, -0.05)
+    rFoot = v(0.12, -0.5, 0.05)
+  }
+
+  if (arms === 'arms_up' || arms === 'arms_behind_head') {
+    lHand = v(-0.28, 0.45, 0.05)
+    rHand = v(0.28, 0.45, 0.05)
+  } else if (arms === 'spread_arms' || arms === 'outstretched_arms') {
+    lHand = v(-0.5, 0.15, 0)
+    rHand = v(0.5, 0.15, 0)
+  }
+
+  // Gaze tips the head
+  if (gaze === 'looking_up') {
+    head = head.clone().add(v(0, 0.04, 0.03))
+  } else if (gaze === 'looking_down') {
+    head = head.clone().add(v(0, -0.02, -0.02))
+  }
+
+  // Character yaw: side = face +X (profile to camera on +X)
+  let yaw = 0
+  if (side === 'side') yaw = -Math.PI / 2
+  if (side === 'behind') yaw = Math.PI
+
+  return {
+    head, neck, hip, lShoulder, rShoulder, lHand, rHand,
+    lKnee, rKnee, lFoot, rFoot, rootY, yaw, gaze, side,
+  }
+}
+
+function applyPose(chibi, anchors) {
+  const {
+    head, neck, hip, lShoulder, rShoulder, lHand, rHand,
+    lKnee, rKnee, lFoot, rFoot, rootY, yaw, gaze, side,
+  } = anchors
+
+  chibi.root.rotation.y = yaw
+  chibi.root.position.y = rootY
+
+  chibi.headG.position.copy(head)
+  chibi.headG.rotation.set(0, 0, 0)
+  if (gaze === 'looking_up') chibi.headG.rotation.x = -0.35
+  else if (gaze === 'looking_down') chibi.headG.rotation.x = 0.3
+  // Profile: hide far eye slightly
+  if (side === 'side') {
+    chibi.eyeL.visible = false
+    chibi.eyeR.visible = true
+  } else if (side === 'behind') {
+    chibi.eyeL.visible = false
+    chibi.eyeR.visible = false
+  } else {
+    chibi.eyeL.visible = true
+    chibi.eyeR.visible = true
   }
 
   const mid = neck.clone().add(hip).multiplyScalar(0.5)
-  chibi.body.position.copy(mid)
-  const torsoDir = new THREE.Vector3().subVectors(neck, hip)
+  chibi.torsoG.position.copy(mid)
+  const torsoDir = v().subVectors(neck, hip)
   if (torsoDir.lengthSq() > 1e-6) {
-    chibi.body.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), torsoDir.normalize())
+    chibi.torsoG.quaternion.setFromUnitVectors(v(0, 1, 0), torsoDir.normalize())
+  } else {
+    chibi.torsoG.quaternion.identity()
   }
-  chibi.skirt.position.copy(hip).add(new THREE.Vector3(0, -0.02, 0))
 
-  placeCapsule(chibi.limbs.lArm, neck.clone().lerp(lElbow, 0.15), lHand)
-  placeCapsule(chibi.limbs.rArm, neck.clone().lerp(rElbow, 0.15), rHand)
-  placeCapsule(chibi.limbs.lLeg, hip.clone().lerp(lKnee, 0.1), lFoot)
-  placeCapsule(chibi.limbs.rLeg, hip.clone().lerp(rKnee, 0.1), rFoot)
-
+  setLimb(chibi.sleeveL, lShoulder, lHand.clone().lerp(lShoulder, 0.35), 0.055)
+  setLimb(chibi.sleeveR, rShoulder, rHand.clone().lerp(rShoulder, 0.35), 0.055)
+  setLimb(chibi.armL, lShoulder.clone().lerp(lHand, 0.25), lHand, 0.042)
+  setLimb(chibi.armR, rShoulder.clone().lerp(rHand, 0.25), rHand, 0.042)
   chibi.handL.position.copy(lHand)
   chibi.handR.position.copy(rHand)
-  chibi.footL.position.copy(lFoot)
-  chibi.footR.position.copy(rFoot)
 
-  // Hide face dots when behind — headGroup already rotated
-  const faceVisible = !joints.behind
-  chibi.eyeL.visible = faceVisible
-  chibi.eyeR.visible = faceVisible
-  chibi.mouth.visible = faceVisible
+  setLimb(chibi.legL, hip.clone().add(v(-0.07, 0, 0)), lFoot, 0.05)
+  setLimb(chibi.legR, hip.clone().add(v(0.07, 0, 0)), rFoot, 0.05)
+  // Socks: lower half of legs
+  setLimb(chibi.sockL, lKnee.clone().lerp(lFoot, 0.15), lFoot.clone().add(v(0, 0.06, 0)), 0.055)
+  setLimb(chibi.sockR, rKnee.clone().lerp(rFoot, 0.15), rFoot.clone().add(v(0, 0.06, 0)), 0.055)
+
+  chibi.shoeL.position.copy(lFoot)
+  chibi.shoeR.position.copy(rFoot)
+  chibi.shoeL.rotation.set(0, 0, 0)
+  chibi.shoeR.rotation.set(0, 0, 0)
 }
 
-function placeCamera(camera, view, duo) {
-  const pitch = view.pitch
-  const side = view.side
-  const dist = view.dist
-  let distMul = dist === 'close' ? 1.15 : dist === 'upper' ? 1.7 : 2.45
-  if (duo) distMul *= 1.15
+/** Dramatic camera from poseSketch camera fields. */
+export function placeChibiCamera(camera, model, { duo = false } = {}) {
+  const pitch = model.cameraPitch || 'eye'
+  const side = model.cameraSide || 'front'
+  const dist = model.cameraDistance || 'full'
+  const posture = model.posture || 'standing'
 
   let x = 0
   let y = 0.35
-  let z = distMul
-  if (pitch === 'below') { y = -0.15; z = distMul * 0.95 }
-  if (pitch === 'above') { y = 1.55; z = distMul * 0.7 }
-  if (side === 'side') { x = distMul * 0.95; z = distMul * 0.35; y = pitch === 'above' ? 1.2 : 0.4 }
-  if (side === 'behind') { z = -distMul; y = 0.45 }
+  let z = 2.4
+  let lookY = 0.25
+  let fov = 40
+
+  if (dist === 'close') { z = 1.25; fov = 30; lookY = 0.45 }
+  else if (dist === 'upper') { z = 1.7; fov = 36; lookY = 0.35 }
+
+  if (pitch === 'below') {
+    // Worm's-eye — hero of crouch reference
+    y = posture === 'squatting' || posture === 'crouching' ? -0.45 : -0.2
+    z = dist === 'close' ? 1.35 : 1.85
+    lookY = posture === 'squatting' || posture === 'crouching' ? 0.15 : 0.4
+    fov = 38
+  } else if (pitch === 'above') {
+    y = 1.8
+    z = 1.6
+    lookY = 0.05
+  }
+
+  if (side === 'side') {
+    x = pitch === 'below' ? 1.55 : 2.0
+    z = pitch === 'below' ? 0.55 : 0.7
+    if (pitch === 'below' && (posture === 'squatting' || posture === 'crouching')) {
+      // Match reference: low, slightly in front of the profile feet
+      x = 1.35
+      y = -0.55
+      z = 0.85
+      lookY = 0.05
+      fov = 36
+    }
+  } else if (side === 'behind') {
+    z = -Math.abs(z)
+    x = 0.15
+  }
+
+  if (duo) {
+    x *= 1.1
+    z *= 1.15
+    fov += 4
+  }
 
   camera.position.set(x, y, z)
-  const lookY = dist === 'close' ? 0.55 : 0.25
   camera.lookAt(0, lookY, 0)
-  camera.fov = dist === 'close' ? 32 : dist === 'upper' ? 38 : 42
+  camera.fov = fov
   camera.updateProjectionMatrix()
 }
 
 /**
- * Mount a live chibi stage into `container`. Returns { update, dispose }.
+ * Mount live stage. Returns { update, dispose, renderer, scene }.
  */
 export function createChibiStage(container, { duo = false } = {}) {
-  const width = () => Math.max(120, container.clientWidth || 280)
-  const height = () => Math.max(140, Math.min(320, (container.clientWidth || 280) * 0.72))
+  const width = () => Math.max(160, container.clientWidth || 320)
+  const height = () => Math.max(180, Math.min(380, (container.clientWidth || 320) * 0.85))
 
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x100e14)
+  scene.background = new THREE.Color(0x2a2a2e) // charcoal like the reference
 
-  const camera = new THREE.PerspectiveCamera(42, width() / height(), 0.1, 20)
+  const camera = new THREE.PerspectiveCamera(40, width() / height(), 0.05, 30)
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.setSize(width(), height())
   renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
   container.appendChild(renderer.domElement)
-  renderer.domElement.style.display = 'block'
-  renderer.domElement.style.width = '100%'
-  renderer.domElement.style.borderRadius = '0.75rem'
+  Object.assign(renderer.domElement.style, {
+    display: 'block', width: '100%', borderRadius: '0.75rem',
+  })
 
-  const hemi = new THREE.HemisphereLight(0xffe4f0, 0x1a2030, 1.1)
-  const key = new THREE.DirectionalLight(0xffffff, 0.85)
-  key.position.set(2, 4, 3)
+  // Soft studio lights
+  scene.add(new THREE.HemisphereLight(0xffe8f0, 0x1a1a22, 0.85))
+  const key = new THREE.DirectionalLight(0xffffff, 1.05)
+  key.position.set(3, 5, 4)
   key.castShadow = true
-  scene.add(hemi, key, new THREE.AmbientLight(0xffffff, 0.25))
+  key.shadow.mapSize.set(1024, 1024)
+  const fill = new THREE.DirectionalLight(0xa5f3fc, 0.35)
+  fill.position.set(-3, 2, -1)
+  const rim = new THREE.DirectionalLight(0xffc1d5, 0.4)
+  rim.position.set(-2, 3, -4)
+  scene.add(key, fill, rim, new THREE.AmbientLight(0xffffff, 0.2))
 
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(1.4, 48),
-    new THREE.MeshToonMaterial({ color: 0x2a2030 }),
+    new THREE.CircleGeometry(1.6, 64),
+    toon(0x3a3a40),
   )
   ground.rotation.x = -Math.PI / 2
-  ground.position.y = -0.55
+  ground.position.y = -0.62
   ground.receiveShadow = true
   scene.add(ground)
 
-  // Soft ring
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.55, 0.7, 48),
-    new THREE.MeshBasicMaterial({ color: 0xfb7185, transparent: true, opacity: 0.22, side: THREE.DoubleSide }),
-  )
-  ring.rotation.x = -Math.PI / 2
-  ring.position.y = -0.54
-  scene.add(ring)
-
-  const chibiA = makeChibi(ACCENT, OUTFIT)
-  const chibiB = duo ? makeChibi(ACCENT_B, OUTFIT_B) : null
+  const chibiA = makeChibi()
+  const chibiB = duo ? makeChibi({ accent: 0xfbbf24, shirt: 0xfde68a }) : null
   const stage = new THREE.Group()
   stage.add(chibiA.root)
-  if (chibiB) stage.add(chibiB.root)
+  if (chibiB) {
+    stage.add(chibiB.root)
+    chibiA.root.position.x = -0.42
+    chibiB.root.position.x = 0.42
+  }
   scene.add(stage)
 
+  let latest = { tags: '', beat: '', beatB: '', frame: '', duo }
   let raf = 0
-  let t0 = performance.now()
-  let latest = {
-    tags: '', beat: '', beatB: '', frame: '', duo,
-  }
+  const t0 = performance.now()
 
-  function syncPose() {
+  function sync() {
     const model = buildPoseSketch(latest.tags, {
       beat: latest.beat,
       beat_b: latest.beatB,
@@ -268,78 +470,71 @@ export function createChibiStage(container, { duo = false } = {}) {
       duo: latest.duo,
     })
     if (model.empty) return model
-
-    const view = cameraView(model)
-    const jointsA = figureJoints(model, { partner: false, interact: model.interact })
-    applyJoints(chibiA, jointsA)
-
+    const anchors = poseAnchors(model)
+    applyPose(chibiA, anchors)
     if (chibiB) {
       const modelB = buildPoseSketch(latest.tags, {
         beat: latest.beatB || latest.beat,
         frame: latest.frame,
         duo: true,
       })
-      const jointsB = figureJoints(modelB, { partner: true, interact: model.interact })
-      applyJoints(chibiB, jointsB)
-      chibiA.root.position.x = -0.38
-      chibiB.root.position.x = 0.38
-    } else {
-      chibiA.root.position.x = 0
+      applyPose(chibiB, poseAnchors(modelB))
     }
-
-    // Gaze pitch on head
-    if (!jointsA.behind) {
-      if (model.gazePitch === 'looking_up') chibiA.headGroup.rotation.x = -0.25
-      else if (model.gazePitch === 'looking_down') chibiA.headGroup.rotation.x = 0.28
-      else chibiA.headGroup.rotation.x = 0
-    }
-
-    placeCamera(camera, view, Boolean(chibiB))
+    placeChibiCamera(camera, model, { duo: Boolean(chibiB) })
     return model
   }
 
   function tick(now) {
     const t = (now - t0) / 1000
-    // Cute idle bob
-    stage.position.y = Math.sin(t * 2.2) * 0.02
-    ring.rotation.z = t * 0.25
+    stage.position.y = Math.sin(t * 1.8) * 0.012
     renderer.render(scene, camera)
     raf = requestAnimationFrame(tick)
   }
 
-  function onResize() {
+  const ro = new ResizeObserver(() => {
     const w = width()
     const h = height()
     camera.aspect = w / h
     camera.updateProjectionMatrix()
     renderer.setSize(w, h)
-  }
-
-  const ro = new ResizeObserver(onResize)
+  })
   ro.observe(container)
 
-  syncPose()
+  sync()
   raf = requestAnimationFrame(tick)
 
   return {
     update(payload) {
       latest = { ...latest, ...payload }
-      return syncPose()
+      return sync()
     },
     dispose() {
       cancelAnimationFrame(raf)
       ro.disconnect()
       renderer.dispose()
-      if (renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement)
-      }
+      renderer.domElement.remove()
       scene.traverse((obj) => {
         if (obj.geometry) obj.geometry.dispose()
         if (obj.material) {
-          if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose())
-          else obj.material.dispose()
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+          mats.forEach((m) => {
+            if (m !== GRAD && m.gradientMap !== GRAD) m.dispose()
+            else if (m.gradientMap === GRAD) {
+              // keep shared gradient; dispose material shell only
+              m.gradientMap = null
+              m.dispose()
+            } else m.dispose()
+          })
         }
       })
     },
+    renderer,
+    scene,
+    camera,
   }
+}
+
+// Keep old helper export for tests
+export function jointToWorld(p, { xScale = 0.018, yScale = 0.018, z = 0 } = {}) {
+  return new THREE.Vector3((p.x - 50) * xScale, (72 - p.y) * yScale, z)
 }
