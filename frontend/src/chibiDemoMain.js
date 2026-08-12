@@ -22,8 +22,8 @@ try {
   })
   stage.setCoachMode(true)
   stage.setDuoSpacing(0.5)
-  // Seed with bone snap, then leave freePlacement on for manual nudging
-  stage.snapHeadToLap()
+  // Do NOT auto-snap on load — that freezes software WebGL for seconds.
+  // User clicks「膝にスナップ」then nudges with floor rings.
   stage.setViewMode('overview')
   window.__avatarStage = stage
 
@@ -41,7 +41,16 @@ try {
   paintBar('overview')
 
   document.getElementById('btn-snap')?.addEventListener('click', () => {
-    stage.snapHeadToLap()
+    const btn = document.getElementById('btn-snap')
+    if (btn) btn.disabled = true
+    // Defer so the click paints before the (still non-trivial) snap work
+    requestAnimationFrame(() => {
+      try {
+        stage.snapHeadToLap()
+      } finally {
+        if (btn) btn.disabled = false
+      }
+    })
   })
   document.getElementById('btn-reset')?.addEventListener('click', () => {
     stage.resetPlacement()

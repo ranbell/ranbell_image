@@ -652,42 +652,52 @@ export async function createAvatarStage(container, {
       empty: false,
       active: ['lying'],
     })
+    // Force humanoid sync once (avoid leaving T-pose visuals)
+    try { giver.humanoid?.update?.() } catch { /* */ }
+    try { recv.humanoid?.update?.() } catch { /* */ }
+    try { giver.update?.(0) } catch { /* */ }
+    try { recv.update?.(0) } catch { /* */ }
 
     setSceneUpright(giver)
     const baseA = Number.isFinite(giver.scene.userData?.baseRotY) ? giver.scene.userData.baseRotY : 0
+    giver.scene.rotation.order = 'YXZ'
     giver.scene.rotation.set(0, baseA, 0)
     giver.scene.updateMatrixWorld(true)
 
     const lap = new THREE.Vector3()
-    const lThigh = worldBonePos(giver, Bone.LeftUpperLeg, _tmpV)
-    const rThigh = worldBonePos(giver, Bone.RightUpperLeg, _tmpV2)
+    const lThigh = worldBonePos(giver, Bone.LeftUpperLeg, new THREE.Vector3())
+    const rThigh = worldBonePos(giver, Bone.RightUpperLeg, new THREE.Vector3())
     if (lThigh && rThigh) lap.copy(lThigh).add(rThigh).multiplyScalar(0.5)
     else {
-      const hips = worldBonePos(giver, Bone.Hips, _tmpV)
+      const hips = worldBonePos(giver, Bone.Hips, new THREE.Vector3())
       if (hips) lap.copy(hips)
       else lap.set(giver.scene.position.x, 0.45, giver.scene.position.z)
     }
     lap.y += 0.05
 
     const hipsG = worldBonePos(giver, Bone.Hips, new THREE.Vector3()) || giver.scene.position.clone()
-    // Prefer yaw that points receiver's head toward giver and feet outward
-    let bestYaw = getSceneYaw(recv)
+
+    // Fast: 4 yaw candidates only (software WebGL chokes on 24 full graph updates)
+    let bestYaw = baseA + Math.PI / 2
     let bestScore = Infinity
-    for (let i = 0; i < 24; i++) {
-      const yaw = (i / 24) * Math.PI * 2
+    const yaws = [baseA, baseA + Math.PI / 2, baseA + Math.PI, baseA - Math.PI / 2]
+    for (const yaw of yaws) {
       setSceneLie(recv, yaw)
+      // park near giver before measuring offset
+      recv.scene.position.x = giver.scene.position.x
+      recv.scene.position.z = giver.scene.position.z + 0.5
       recv.scene.updateMatrixWorld(true)
       const head = worldBonePos(recv, Bone.Head, _tmpV)
       if (!head) continue
-      const offset = head.clone().sub(recv.scene.position)
-      recv.scene.position.x = lap.x - offset.x
-      recv.scene.position.z = lap.z - offset.z
+      const ox = head.x - recv.scene.position.x
+      const oz = head.z - recv.scene.position.z
+      recv.scene.position.x = lap.x - ox
+      recv.scene.position.z = lap.z - oz
       recv.scene.updateMatrixWorld(true)
       const head2 = worldBonePos(recv, Bone.Head, _tmpV)
       const hipsR = worldBonePos(recv, Bone.Hips, _tmpV2)
       if (!head2 || !hipsR) continue
       const headErr = head2.distanceTo(lap)
-      // Prefer hips farther from giver hips than head (head on lap, body out)
       const headToG = head2.distanceTo(hipsG)
       const hipsToG = hipsR.distanceTo(hipsG)
       const score = headErr * 2.2 + Math.max(0, headToG - hipsToG) * 1.5
@@ -702,9 +712,8 @@ export async function createAvatarStage(container, {
     {
       const head = worldBonePos(recv, Bone.Head, _tmpV)
       if (head) {
-        const offset = head.clone().sub(recv.scene.position)
-        recv.scene.position.x = lap.x - offset.x
-        recv.scene.position.z = lap.z - offset.z
+        recv.scene.position.x += lap.x - head.x
+        recv.scene.position.z += lap.z - head.z
       }
     }
     giver.scene.updateMatrixWorld(true)
@@ -1013,9 +1022,10 @@ export async function createAvatarStage(container, {
     if (model.empty && !coachMode) return model
 
     // In coach mode: don't clobber IK-edited limbs with preset apply.
+    // freePlacement: skip re-posing (user / snap already set bones + roots).
     if (coachMode && coachModel) {
       const interact = coachModel.interact || ''
-      if (!customLimbs) {
+      if (!customLimbs && !freePlacement) {
         if (interact === 'lap_pillow' || interact === 'head_on_lap' || interact === 'head_in_lap') {
           applyVrmPose(vrmA, {
             ...coachModel,
@@ -1044,16 +1054,10 @@ export async function createAvatarStage(container, {
             }))
           }
         }
-        // Preserve scene lie flags when free-placing
-        if (freePlacement) {
-          if (vrmA.scene.userData?.sceneLie) setSceneLie(vrmA)
-          else setSceneUpright(vrmA)
-          if (vrmB) {
-            if (vrmB.scene.userData?.sceneLie) setSceneLie(vrmB)
-            else setSceneUpright(vrmB)
-          }
-        }
         applyDuoLayout(interact)
+        snapIkToTips()
+      } else if (!customLimbs && freePlacement) {
+        syncPlaceHandles()
         snapIkToTips()
       } else {
         applyDuoLayout(interact)
@@ -1130,13 +1134,14 @@ export async function createAvatarStage(container, {
         if (ph) {
           dragKind = 'yaw'
           dragBodyVrm = ph.vrm
+          const prevWho = coachSubject
           coachSubject = ph.who
           freePlacement = true
           orbit.enabled = false
           lastPointer = { x: ev.clientX, y: ev.clientY }
           setCanvasCursor('yaw')
-          rebuildHandles()
-          syncPlaceHandles()
+          if (prevWho !== coachSubject) rebuildHandles()
+          else syncPlaceHandles()
           renderer.domElement.setPointerCapture?.(ev.pointerId)
           ev.preventDefault()
           return
@@ -1148,13 +1153,14 @@ export async function createAvatarStage(container, {
         if (ph) {
           dragKind = ev.altKey || ev.shiftKey ? 'yaw' : 'body'
           dragBodyVrm = ph.vrm
+          const prevWho = coachSubject
           coachSubject = ph.who
           freePlacement = true
           orbit.enabled = false
           lastPointer = { x: ev.clientX, y: ev.clientY }
           setCanvasCursor(dragKind === 'yaw' ? 'yaw' : 'body')
-          rebuildHandles()
-          syncPlaceHandles()
+          if (prevWho !== coachSubject) rebuildHandles()
+          else syncPlaceHandles()
           renderer.domElement.setPointerCapture?.(ev.pointerId)
           ev.preventDefault()
           return
@@ -1301,7 +1307,7 @@ export async function createAvatarStage(container, {
   renderer.domElement.addEventListener('wheel', onWheelShot, { passive: false })
 
   function tick() {
-    const dt = clock.getDelta()
+    const dt = Math.min(clock.getDelta(), 0.05)
     vrmA.update(dt)
     if (vrmB) vrmB.update(dt)
     if (coachMode || viewMode === 'shot') {
@@ -1313,7 +1319,10 @@ export async function createAvatarStage(container, {
       if (coachMode) syncHandles()
       if (coachMode && placeRoot.visible) syncPlaceHandles()
     }
-    renderer.render(scene, viewCam)
+    // Skip render while tab hidden — software WebGL pegs CPU otherwise
+    if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+      renderer.render(scene, viewCam)
+    }
     raf = requestAnimationFrame(tick)
   }
 
