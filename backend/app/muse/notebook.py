@@ -129,17 +129,35 @@ def summary_for_muse(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") 
 
 _GAZE_IN_BEAT_RE = re.compile(
     r"\b(looking_up|looking_down|looking_at_viewer|looking at viewer|"
-    r"looking up|looking down)\b",
+    r"looking up|looking down)\b"
+    r"|見上げ(?:て|る|た)?"
+    r"|見下ろ(?:し|す|して|した)?"
+    r"|カメラ目線"
+    r"|こちらを見(?:て|る)?",
     re.I,
 )
 
+# Longevity caps (plan: VIBE≤5 lines, OPEN≤2, STANDING≤5).
+VIBE_MAX_LINES = 5
+VIBE_MAX_CHARS = 400
+OPEN_MAX_LINES = 2
+OPEN_MAX_CHARS = 240
+
 
 def strip_gaze_from_beat(text: str) -> str:
-    """Gaze belongs in FRAME only — drop looking_* phrases from BEAT prose."""
+    """Gaze belongs in FRAME only — drop looking_* / 見上げ phrases from BEAT."""
     cleaned = _GAZE_IN_BEAT_RE.sub("", str(text or ""))
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     cleaned = re.sub(r"\s+,", ",", cleaned)
     return cleaned.strip(" ,;")
+
+
+def _cap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    body = "\n".join(lines[:max_lines]).strip()
+    if len(body) > max_chars:
+        body = body[:max_chars].rstrip()
+    return body
 
 
 def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -153,6 +171,10 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         val = str(patch.get(key) or "").strip()
         if key in ("beat", "beat_b"):
             val = strip_gaze_from_beat(val)
+        if key == "vibe" and val:
+            val = _cap_lines(val, max_lines=VIBE_MAX_LINES, max_chars=VIBE_MAX_CHARS)
+        if key == "open" and val:
+            val = _cap_lines(val, max_lines=OPEN_MAX_LINES, max_chars=OPEN_MAX_CHARS)
         if val != str(nb.get(key) or "").strip():
             nb[key] = val
             changed = True
@@ -179,16 +201,43 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return nb
 
 
+def promote_open(nb: dict[str, Any]) -> bool:
+    """When showrunner affirms, fold OPEN into the shot as an absolute value.
+
+    Small props / held items go to BEAT when they look handheld; otherwise they
+    merge into WEARING. OPEN is always cleared on success.
+    """
+    open_ = str(nb.get("open") or "").strip()
+    if not open_:
+        return False
+    handheld = bool(re.search(
+        r"(持|手に|つま|拾|葉|花|缶|瓶|本|伞|傘|スマホ|携帯|ラムネ|氷)",
+        open_,
+    ))
+    into = "beat" if handheld else "wearing"
+    cur = str(nb.get(into) or "").strip()
+    if not cur:
+        nb[into] = open_
+    elif open_ not in cur:
+        nb[into] = f"{cur}, {open_}"
+    nb["open"] = ""
+    nb["rev"] = int(nb.get("rev") or 0) + 1
+    nb["updated_at"] = time.time()
+    return True
+
+
+# Back-compat alias used by older call sites / tests.
 def promote_open_to_wearing(nb: dict[str, Any], *, into: str = "wearing") -> bool:
-    """When showrunner affirms, fold OPEN text into wearing if wearing empty-ish."""
+    if into == "wearing":
+        return promote_open(nb)
     open_ = str(nb.get("open") or "").strip()
     if not open_:
         return False
     cur = str(nb.get(into) or "").strip()
-    # Prefer appending as absolute completion note the scripter should have
-    # already written; if still only OPEN, copy it.
     if not cur:
         nb[into] = open_
+    elif open_ not in cur:
+        nb[into] = f"{cur}, {open_}"
     nb["open"] = ""
     nb["rev"] = int(nb.get("rev") or 0) + 1
     nb["updated_at"] = time.time()

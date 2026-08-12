@@ -1400,7 +1400,8 @@
       "wearing_b": "Partner wearing",
       "beat_b": "Partner beat",
       "vibe": "Vibe",
-      "open": "Open"
+      "open": "Open",
+      "standing": "Standing"
     },
     "facetLock": "Pin this part",
     "facetLocked": "Pinned — no turn rewrites this (click to release)",

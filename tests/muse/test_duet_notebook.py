@@ -265,9 +265,119 @@ async def test_scripter_prompt_has_no_diary_injection():
     s["mode"] = "duet"
     s["memories"] = ["堤防で傘をさしていた"]
     s["social_seeds"] = ["今度は赤い傘が流行ってる"]
+    s["caught"] = {"ids": ["x"], "summary": "日記を読まれた"}
+    s["handpost_notices"] = ["足は映さないで"]
     await session_db.save(db, s)
     await service.post_duet_chat(db, ollama, s, "公園のベンチで")
     joined = "\n".join(ollama.scripter_prompts)
     assert "傘" not in joined
     assert "流行" not in joined
+    assert "日記を読まれた" not in joined
+    assert "足は映さない" not in joined
     assert "NOTEBOOK NOW" in joined
+
+
+@pytest.mark.asyncio
+async def test_casual_chit_chat_skips_scripter():
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "帽子": _scripter_block(
+            intent="shot",
+            wearing="straw hat",
+            beat="standing",
+            frame="eye level",
+            tags="straw_hat, standing",
+            craft_scene="Hat.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+    await service.post_duet_chat(db, ollama, s, "麦わら帽子かぶって")
+    before = len(ollama.scripter_prompts)
+    await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
+    assert len(ollama.scripter_prompts) == before
+    assert "straw_hat" in s["craft"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_open_affirm_promotes_and_compiles():
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "ベンチ": _scripter_block(
+            intent="shot",
+            scene="park bench at dusk",
+            wearing="thin cardigan",
+            beat="sitting on a bench",
+            frame="eye level",
+            open_="落ち葉を一枚だけ手に",
+            tags="park, bench, cardigan, sitting",
+            craft_scene="Park bench, no leaf yet.",
+        ),
+        "いいね": _scripter_block(
+            intent="casual",
+            vibe="happy",
+            clear_open="yes",
+        ),
+        "COMPILE ONLY": _scripter_block(
+            intent="shot",
+            scene="park bench at dusk",
+            wearing="thin cardigan",
+            beat="sitting on a bench, holding one fallen leaf",
+            frame="eye level",
+            tags="park, bench, cardigan, sitting, leaf",
+            craft_scene="Park bench with one leaf in hand.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+    await service.post_duet_chat(db, ollama, s, "ベンチに座って薄いカーディガン")
+    assert s["notebook"]["open"]
+    await service.post_duet_chat(db, ollama, s, "いいね")
+    assert s["notebook"]["open"] == ""
+    assert "落ち葉" in (s["notebook"]["beat"] + s["notebook"]["wearing"])
+    assert "leaf" in s["craft"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_scripter_exception_keeps_craft_and_muse_talks():
+    db = FakeDb()
+
+    class Boom(NotebookOllama):
+        async def generate_text(self, prompt, **kw):
+            system = str(kw.get("system") or "")
+            if "studio scripter" in system or "shot notebook" in system:
+                raise RuntimeError("scripter down")
+            return await super().generate_text(prompt, **kw)
+
+        def generate_text_stream(self, prompt, **kw):
+            system = str(kw.get("system") or "")
+            if "studio scripter" in system or "shot notebook" in system:
+                async def _boom():
+                    raise RuntimeError("scripter down")
+                    yield {"type": "token", "text": ""}  # pragma: no cover
+                return _boom()
+            return super().generate_text_stream(prompt, **kw)
+
+    ollama = Boom(scripts={
+        "帽子": _scripter_block(
+            intent="shot",
+            wearing="straw hat",
+            beat="standing",
+            frame="eye level",
+            tags="straw_hat, standing",
+            craft_scene="Hat.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+    await service.post_duet_chat(db, ollama, s, "麦わら帽子")
+    before = s["craft"]["tags"]
+    # Force next scripter call to boom via keyword that needs scripter
+    ollama.scripts.clear()
+    await service.post_duet_chat(db, ollama, s, "帽子外して煽って")
+    assert s["craft"]["tags"] == before
+    assert s.get("craft_dirty") is True
+    assert any(m.get("role") == "muse" for m in s["chat"])

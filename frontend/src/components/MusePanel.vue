@@ -267,9 +267,14 @@ const NOTEBOOK_KEYS = [
 ]
 const notebookRows = computed(() => {
   const nb = session.value?.notebook || {}
-  return NOTEBOOK_KEYS
+  const rows = NOTEBOOK_KEYS
     .map(key => ({ key, text: String(nb[key] || '').trim() }))
     .filter(row => row.text)
+  const standing = (nb.standing || []).filter(Boolean)
+  if (standing.length) {
+    rows.push({ key: 'standing', text: standing.map(s => `- ${s}`).join('\n') })
+  }
+  return rows
 })
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.

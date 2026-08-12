@@ -1798,6 +1798,13 @@ _AFFIRM_RE = re.compile(
 _RECALL_HINT_RE = re.compile(
     r"(この間|前回|前に|覚えてる|どうだった|あのとき|あの回|ずっと前)",
 )
+# Cheap gate: skip Scripter on pure chit-chat (plan wait strategy).
+_SHOT_HINT_RE = re.compile(
+    r"(帽子|服|衣装|ポーズ|カメラ|煽|ローアングル|ハイアングル|見上げ|見下ろ|"
+    r"ベンチ|座|立|着|脱|外して|かぶ|持って|場所|屋上|海|公園|教室|"
+    r"セーラー|スカート|シャツ|カーディガン|スマホ|ラムネ|いいね|それで|"
+    r"うん|採用|その感じ|撮|画|ショット|構図|アングル|寄り|引き)",
+)
 
 
 def _looks_like_affirm(text: str) -> bool:
@@ -1806,6 +1813,24 @@ def _looks_like_affirm(text: str) -> bool:
 
 def _looks_like_recall(text: str) -> bool:
     return bool(_RECALL_HINT_RE.search(str(text or "")))
+
+
+def _needs_scripter(session: dict[str, Any], text: str) -> bool:
+    """False only for clear casual chit-chat — Muse-only, faster turns."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    nb = notebook_mod.of(session)
+    if _looks_like_affirm(t) and str(nb.get("open") or "").strip():
+        return True
+    if _looks_like_recall(t):
+        return True
+    if _SHOT_HINT_RE.search(t):
+        return True
+    # First shot still empty and theme-ish direction → still script.
+    if not notebook_mod.has_shot(nb) and len(t) >= 12:
+        return True
+    return False
 
 
 def _muse_names(session: dict[str, Any], partner_character: dict | None = None) -> tuple[str, str]:
@@ -1872,8 +1897,11 @@ async def _run_duet_scripter(
     nb = notebook_mod.of(session)
     inputs = _inputs(session)
     partner_character = await _partner_character(db, session)
+    partner = bool(partner_character) or bool(
+        str(inputs.get("partner_preset") or "").strip()
+    )
     name_a, name_b = _muse_names(session, partner_character)
-    block = notebook_mod.render(nb, name_a=name_a, name_b=name_b)
+    block = notebook_mod.render(nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""))
     sid = session["session_id"]
     events.publish(sid, {
         "type": "scripter_working",
@@ -1886,20 +1914,29 @@ async def _run_duet_scripter(
         theme=str(inputs.get("theme") or ""),
         style=_style(session),
         framing=_framing(inputs),
-        partner=bool(partner_character),
+        partner=partner,
         model=_text_model(inputs),
         num_ctx=_num_ctx(inputs, cfg),
     )
     intent = str(result.get("intent") or "casual")
     patch = dict(result.get("patch") or {})
+    affirmed = False
+    # Empty scripter output on a picture-changing line → keep craft, mark dirty.
+    if not str(result.get("raw") or "").strip() and _needs_scripter(session, text):
+        session["craft_dirty"] = True
 
     if _looks_like_affirm(text) and str(nb.get("open") or "").strip():
-        notebook_mod.promote_open_to_wearing(nb)
+        affirmed = notebook_mod.promote_open(nb)
         if intent == "casual":
             intent = "mixed"
         # Affirmation should compile even if the model only cleared OPEN.
         if "clear_open" not in patch:
             patch["clear_open"] = True
+
+    # Solo shoots must not accept partner cards from a confused model.
+    if not partner:
+        patch.pop("wearing_b", None)
+        patch.pop("beat_b", None)
 
     # Notebook patch still applies (absolute values). Craft is validate-first.
     notebook_mod.apply_patch(nb, patch)
@@ -1921,9 +1958,34 @@ async def _run_duet_scripter(
 
     valid = bool(result.get("valid", True))
     compiled = False
+    tags = str(result.get("tags") or "")
+    scene = str(result.get("craft_scene") or "")
+
+    # OPEN affirm must land in craft even when the model only said CLEAR_OPEN.
+    if affirmed and intent in ("shot", "mixed") and not (tags or scene):
+        try:
+            forced = await chain.run_scripter(
+                ollama,
+                notebook_block=notebook_mod.render(nb, name_a=name_a, name_b=name_b),
+                note=(
+                    "COMPILE ONLY from the notebook after OPEN was affirmed. "
+                    "INTENT: shot. Full TAGS + CRAFT_SCENE. Absolute values."
+                ),
+                theme=str(inputs.get("theme") or ""),
+                style=_style(session),
+                framing=_framing(inputs),
+                partner=bool(partner_character),
+                model=_text_model(inputs),
+                num_ctx=_num_ctx(inputs, cfg),
+            )
+            if forced.get("valid") and (forced.get("tags") or forced.get("craft_scene")):
+                tags = str(forced.get("tags") or "")
+                scene = str(forced.get("craft_scene") or "")
+                valid = True
+        except Exception:
+            logger.warning("[muse] affirm compile failed", exc_info=True)
+
     if intent in ("shot", "mixed"):
-        tags = str(result.get("tags") or "")
-        scene = str(result.get("craft_scene") or "")
         if valid and (tags or scene):
             compiled = _apply_compiled_craft(session, tags, scene)
             if not compiled:
@@ -2478,11 +2540,24 @@ async def post_duet_chat(
 
     cfg = await get_runtime_config(db)
     if uses_notebook(session):
-        try:
-            await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
-        except Exception:
-            logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
-            session["craft_dirty"] = True
+        # Pure chit-chat skips Scripter (plan wait strategy). Affirm / recall /
+        # shot hints still go through the notebook path.
+        if _needs_scripter(session, text):
+            try:
+                await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
+            except Exception:
+                logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
+                session["craft_dirty"] = True
+        else:
+            session["scripter_intent"] = "casual"
+            events.publish(sid, {
+                "type": "scripter_done",
+                "intent": "casual",
+                "compiled": False,
+                "valid": True,
+                "skipped": True,
+                "notebook_rev": int(notebook_mod.of(session).get("rev") or 0),
+            })
         await session_db.save(db, session)
         return await _duet_talk(db, ollama, session, text, cfg=cfg)
 
@@ -3076,14 +3151,14 @@ async def densify_craft_if_needed(
     # Notebook path: ask the scripter to thicken from the notebook. A Finisher
     # seat turn that returns only SAY would wipe a live compile — never do that.
     if uses_notebook(session):
-        before_tags = str(craft.get("tags") or "")
         try:
             result = await chain.run_scripter(
                 ollama,
                 notebook_block=notebook_mod.render(notebook_mod.of(session)),
                 note=(
                     "DENSIFY: expand TAGS (35–55) and CRAFT_SCENE (140–200 words) "
-                    "from the WHOLE notebook. Keep absolute values. INTENT: shot."
+                    "from the WHOLE notebook. Full replace — do not keep old tags. "
+                    "INTENT: shot. Absolute values."
                 ),
                 theme=str(_inputs(session).get("theme") or ""),
                 style=_style(session),
@@ -3094,11 +3169,9 @@ async def densify_craft_if_needed(
             )
             tags = str(result.get("tags") or "")
             scene_out = str(result.get("craft_scene") or "")
-            if tags or scene_out:
-                ok = _apply_compiled_craft(
-                    session, tags or before_tags, scene_out or scene,
-                )
-                if ok:
+            # Full compile only — never KEEP prior tags beside a partial densify.
+            if result.get("valid") and tags and scene_out:
+                if _apply_compiled_craft(session, tags, scene_out):
                     session["craft_dirty"] = False
         except Exception:
             logger.warning("[muse] notebook densify failed; keeping draft",

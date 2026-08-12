@@ -12,9 +12,22 @@ from app.muse import notebook
 def test_promote_open_clears_proposal():
     nb = notebook.blank()
     nb["open"] = "落ち葉を一枚だけ手に"
-    assert notebook.promote_open_to_wearing(nb)
-    assert "落ち葉" in nb["wearing"]
+    nb["wearing"] = "薄いカーディガン"
+    assert notebook.promote_open(nb)
+    # Handheld prop folds into beat, keeps existing wearing.
+    assert "落ち葉" in nb["beat"]
+    assert "カーディガン" in nb["wearing"]
     assert nb["open"] == ""
+
+
+def test_vibe_and_open_are_capped():
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {
+        "vibe": "\n".join(f"line{i}" for i in range(12)),
+        "open": "one\ntwo\nthree",
+    })
+    assert len(nb["vibe"].splitlines()) <= 5
+    assert len(nb["open"].splitlines()) <= 2
 
 
 def test_migrate_seeds_from_digest():
