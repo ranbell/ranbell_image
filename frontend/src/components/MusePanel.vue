@@ -260,6 +260,16 @@ const facetRows = computed(() => {
     .map(name => ({ name, ...(table[name] || {}) }))
     .filter(f => (f.tags || []).length || String(f.nl || '').trim() || f.locked)
 })
+const NOTEBOOK_KEYS = [
+  'atmosphere', 'scene', 'frame', 'wearing', 'beat',
+  'wearing_b', 'beat_b', 'vibe', 'open',
+]
+const notebookRows = computed(() => {
+  const nb = session.value?.notebook || {}
+  return NOTEBOOK_KEYS
+    .map(key => ({ key, text: String(nb[key] || '').trim() }))
+    .filter(row => row.text)
+})
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.
 const facetConflicts = computed(() => session.value?.facet_conflicts || [])
@@ -1090,8 +1100,31 @@ async function onChatKey(e) {
             <p class="whitespace-pre-wrap text-[var(--sb-muted)]">{{ session.digest }}</p>
           </details>
 
-          <!-- the shot, in parts. Pin one and no turn rewrites it. -->
-          <details v-if="facetRows.length" open class="text-[10px] text-[var(--sb-faint)]">
+          <!-- Living shot notebook — source of truth for duet craft. -->
+          <details v-if="notebookRows.length" open class="text-[10px] text-[var(--sb-faint)]">
+            <summary class="cursor-pointer">
+              {{ t('muse.notebook') }} · {{ notebookRows.length }}
+            </summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.notebookHint') }}</p>
+            <ul class="space-y-1.5">
+              <li
+                v-for="row in notebookRows" :key="row.key"
+                class="rounded border border-white/10 px-2 py-1.5"
+                :class="row.key === 'open' ? 'border-[var(--sb-amber)]/40' : ''"
+              >
+                <div class="font-semibold text-gray-300">
+                  {{ t(`muse.notebookNames.${row.key}`) }}
+                  <span v-if="row.key === 'open'" class="ml-1 font-normal text-[var(--sb-amber)]">
+                    {{ t('muse.notebookOpen') }}
+                  </span>
+                </div>
+                <p class="mt-0.5 whitespace-pre-wrap text-[var(--sb-muted)]">{{ row.text }}</p>
+              </li>
+            </ul>
+          </details>
+
+          <!-- Legacy facet table (older sessions). -->
+          <details v-if="facetRows.length && !notebookRows.length" class="text-[10px] text-[var(--sb-faint)]">
             <summary class="cursor-pointer">
               {{ t('muse.facets') }} · {{ facetRows.length }}
             </summary>

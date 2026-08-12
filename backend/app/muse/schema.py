@@ -10,12 +10,12 @@ import time
 import uuid
 from typing import Any
 
-from . import crew, facets
+from . import crew, facets, notebook
 from .defaults import ALL_DEFAULTS
 
-# Re-exported so callers have one obvious place to reach for it. The table
-# itself and the rules that maintain it live in `facets.py`.
-migrate = facets.migrate
+# Re-exported so callers have one obvious place to reach for it. Duet now
+# migrates through notebook (which still runs facets.migrate for legacy rows).
+migrate = notebook.migrate
 
 # Acts the panel rails through. "refine" removed — boards + OK replace it.
 STEPS: tuple[str, ...] = (
@@ -67,11 +67,13 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # the report, the panel) still reads it and does not know the
         # difference.
         "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
-        # The shot, in parts. Each part carries its own danbooru tags AND its
-        # own sentence, and is rewritten as a whole or not at all. This is what
-        # makes a camera move actually move the camera: nothing removes
-        # `from_above`, the camera facet is overwritten and `from_above` only
-        # ever lived there. See `facets.py`.
+        # Living shot notebook (plain language). Duet craft is compiled from
+        # this; facets below are legacy / migration only.
+        "notebook": notebook.blank(
+            partner=bool(str((inputs or {}).get("partner_preset") or "").strip())
+        ),
+        # The shot, in parts. Legacy table kept for older sessions and the
+        # crewed-studio adjacent helpers; duet no longer treats it as truth.
         "facets": facets.blank_table(),
         # The Showrunner's direction, reconciled instead of stacked: one entry
         # per facet, and a new camera order REPLACES the previous camera order.

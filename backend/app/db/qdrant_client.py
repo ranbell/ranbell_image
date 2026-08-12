@@ -21,6 +21,7 @@ ALIGNMENT_COLLECTION = "alignment"
 WD14_VOCAB_COLLECTION = "wd14_vocab"
 CHARACTER_PRESETS_COLLECTION = "character_presets"
 MUSE_SESSIONS_COLLECTION = "muse_sessions"
+MUSE_MEMORIES_COLLECTION = "muse_memories"
 # Chemistry's appearance/personality vectors — kept out of
 # CHARACTER_PRESETS_COLLECTION on purpose: that collection's own reset code
 # documents "do not drop the collection" as a hard rule (a past re-seed took
@@ -374,6 +375,13 @@ class QdrantDBClient:
                 field_name=field,
                 field_schema=schema,
             )
+
+        # Muse long-term shoot memories (embedded summaries)
+        try:
+            from ..muse import memories_db as muse_memories_db
+            await muse_memories_db.ensure_collection(self)
+        except Exception as exc:
+            logger.warning("muse_memories collection setup failed: %s", exc)
 
         # Character presets (same shape as the old authors collection: dummy embedding)
         await self.ensure_character_presets_collection()

@@ -1814,19 +1814,19 @@ language (Japanese when they wrote Japanese — Japanese only, no English
 words or English section titles in SAY).
 
 Rules for the turn (follow silently — never print rule names or numbers):
-- React to their latest line specifically.
-- Their newest line wins. If they change place, pose, camera, clothes, or
-  expression, drop the old choice and answer the new one. Do not cling to an
+- Sense and body first: react to how it feels (wind, cold bench, gaze,
+  embarrassment) before naming what changed. Never recite a change log
+  ("帽子を外しました、ローアングルです" is forbidden).
+- Their newest line wins. Drop what it replaces without clinging to an
   earlier beat you liked.
-- Not re-asking is not the same as refusing to change. Only skip re-asking
-  what they have not revised.
-- When they revise, confirm the new choice in your own words and adjust the
-  rest to fit — do not recycle the previous pose/camera/place speech.
-- If an axis is still open, propose one concrete thing (clothes, pose,
-  expression, or a small prop). Prefer "I would do X" over interviewing.
-- At most one short question, preferably a two-choice pitch.
-- Let your personality colour the reaction (shy off-mic, proud on-mic, etc.)
-  as a feeling about this shot — not as a biography lecture.
+- You may try on an OPEN proposal in SAY (play-act) even before it is
+  locked into the picture. Do not invent TAGS.
+- On a picture change, you may still pitch one small "I would…" idea.
+  Prefer one concrete offer over interviewing. At most one short question.
+- Atmosphere colours your voice; do not speak danbooru or section labels.
+- Past shoots: answer only from memories / CITED_MEMORIES you were given.
+  If it is not there, say you do not remember — do not invent details, and
+  do not rewrite today's picture to dodge the question.
 - Never say you are getting ready / can get ready / 準備 / 用意.
 - No AI stock courtesy (もしよろしければ, 流れに合わせて, etc.).
 - No tags, no TAGS/SCENE blocks, no inventory of a finished picture.
@@ -2233,10 +2233,10 @@ def actress_duet_prompt(
         ]
     else:
         blocks += [
-            "Nothing is being written down on this turn. Work the shot out in "
-            "conversation: react to their latest change, drop what it replaces, "
-            "propose only what is still open. Do not interview them. Do not "
-            "echo instruction headings into SAY.",
+            "Nothing is being written down on this turn (no TAGS/SCENE). Work "
+            "the shot out in conversation: sense and body first, newest line "
+            "wins, drop what it replaces, propose only what is still open. "
+            "Do not interview them. Do not echo instruction headings into SAY.",
             DUET_TALK_OUTPUT,
         ]
     return "\n\n".join(b for b in blocks if b)
@@ -2453,13 +2453,14 @@ B: <her lines in character>
 CRITICAL RULES FOR W-MUSE SAY:
 - ABSOLUTELY NO AI ASSISTANT SPEECH: never summaries, reports, or stock
   courtesy (もしよろしければ, 流れに合わせて準備, etc.).
-- LIVE DIALOGUE: the two Muses react to each other and the Showrunner —
-  propose poses, clothing, or expressions together; tease or help.
-- Newest Showrunner line wins. If they revise place/pose/camera/clothes,
-  drop the old choice — do not cling to an earlier beat. Not re-asking is
-  not refusing to change. Prefer two-choice pitches; at most one question
-  between both of them per turn.
-- Never talk about getting ready / 準備 / 用意 — prep is a separate button.
+- LIVE DIALOGUE: sense and body first, then banter. React to each other —
+  interrupt, tease, help. Do not recite a change-log of the shot.
+- Newest Showrunner line wins. Drop what it replaces. Prefer two-choice
+  pitches; at most one question between both of them per turn.
+- OPEN proposals may be play-acted in SAY before they are locked.
+- Past shoots: answer only from memories / CITED_MEMORIES. Otherwise say
+  you do not remember — do not invent, do not rewrite today's picture.
+- Never talk about getting ready / 準備 / 用意 — prep is polish, not the gate.
 - Match the Showrunner's language (Japanese only when they wrote Japanese).
   Never print English rule headings inside SAY.
 - Use each Muse's own first-person pronoun for herself in every line — never

@@ -1038,7 +1038,47 @@ async def consume_social_seeds(db, preset_id: str, seed_ids: list[str]) -> None:
 # untouched. This is the payload-field half; the sibling collections
 # (muse_sessions, muse_lounge, muse_handpost, character_compat) are cleared by
 # their own modules — see characters/api.py's erase-memory endpoint.
-MEMORY_FIELDS: tuple[str, ...] = ("diaries", "chemistry", "social_seeds")
+MEMORY_FIELDS: tuple[str, ...] = (
+    "diaries", "chemistry", "social_seeds", "shoot_recaps",
+)
+
+# Sticky detailed shoot recaps kept on the character (older ones go to Qdrant).
+MAX_SHOOT_RECAPS = 3
+
+
+async def get_shoot_recaps(db, preset_id: str, limit: int = 3) -> list[dict[str, Any]]:
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return []
+    rows = [r for r in list(preset.get("shoot_recaps") or []) if isinstance(r, dict)]
+    return rows[:limit]
+
+
+async def push_shoot_recap(
+    db, preset_id: str, recap: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Insert a detailed recap; return the overflowed oldest row if any."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return None
+    rows = [r for r in list(preset.get("shoot_recaps") or []) if isinstance(r, dict)]
+    entry = {
+        "id": str(recap.get("id") or uuid.uuid4()),
+        "timestamp": float(recap.get("timestamp") or time.time()),
+        "session_id": str(recap.get("session_id") or ""),
+        "when": str(recap.get("when") or "").strip(),
+        "feel": str(recap.get("feel") or "").strip(),
+        "liked": str(recap.get("liked") or "").strip(),
+        "shot": str(recap.get("shot") or "").strip(),
+    }
+    if not any(entry[k] for k in ("when", "feel", "liked", "shot")):
+        return None
+    rows.insert(0, entry)
+    overflow = None
+    if len(rows) > MAX_SHOOT_RECAPS:
+        overflow = rows.pop()
+    await update_preset(db, preset_id, {"shoot_recaps": rows[:MAX_SHOOT_RECAPS]})
+    return overflow
 
 
 async def plan_memory_erase(db) -> dict[str, Any]:

@@ -44,7 +44,7 @@ class FakeOllama:
         self.calls: list[dict] = []
 
     def generate_text_stream(self, prompt, **kw):
-        self.calls.append(kw)
+        self.calls.append({**kw, "prompt": prompt})
 
         async def _stream():
             yield {"type": "think", "text": "deliberating"}
@@ -57,6 +57,18 @@ class FakeOllama:
                 ),
             }
         return _stream()
+
+    async def generate_text(self, prompt, **kw):
+        """Non-stream helper used by the duet scripter."""
+        chunks: list[str] = []
+        async for event in self.generate_text_stream(prompt, **kw):
+            if event.get("type") == "token":
+                chunks.append(str(event.get("text") or ""))
+        return "".join(chunks)
+
+    async def embed(self, text, model=None):
+        # Deterministic tiny vector for muse_memories tests.
+        return [float((sum(ord(c) for c in str(text)) % 97) + 1)] * 8
 
     async def unload(self, model=None):
         self.unloaded.append(model)

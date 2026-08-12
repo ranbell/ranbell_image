@@ -868,3 +868,96 @@ async def run_banter(
 # waited on a read receipt. It is now a block on her next turn's user prompt
 # (`crew.caught_block`) — she brings it up when they next meet, which is both
 # how a person would find out and one fewer model load.
+
+
+SCRIPTER_SYSTEM = """
+You are the studio scripter. You do not speak in character. You maintain the
+shot notebook and, when the picture changes, compile TAGS and CRAFT_SCENE.
+
+INTENTS (pick one):
+- casual — chit-chat only. Do not change SHOT sections. VIBE may update.
+- shot — showrunner changed the picture. Patch absolute values. Compile.
+- mixed — both chat and picture. Patch what changed. Compile.
+- recall — asking about past shoots. Do not change SHOT. VIBE optional.
+
+RULES:
+- Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
+- WEARING is the only home for clothes, hats, accessories on the body.
+- BEAT is body action only. Never put looking_up / looking_down /
+  looking_at_viewer in BEAT — gaze belongs in FRAME with camera angle.
+- Low angle / 煽り → FRAME must say she looks down toward the lens.
+- If they ask to look at the sky, rewrite FRAME as one coherent camera story;
+  do not keep an old low-angle lens-gaze.
+- Leave sections unchanged by omitting them (or list under UNCHANGED).
+- OPEN is for Muse proposals not yet affirmed. CLEAR_OPEN: yes when affirming
+  or dropping them.
+- On shot/mixed: always output TAGS and CRAFT_SCENE from the WHOLE notebook
+  after your patch (full replace, no merging with old tags). English only.
+- Draft density: about 20–35 tags; CRAFT_SCENE 60–120 words. Absolute values.
+- Do not invent diary props. Only the notebook + showrunner line.
+
+OUTPUT — labelled lines only:
+INTENT: casual|shot|mixed|recall
+ATMOSPHERE: <absolute or omit>
+SCENE: <place/light/objects prose or omit>
+FRAME: <camera + gaze + relation or omit>
+WEARING: <full outfit including hat/accessories or omit>
+BEAT: <body action only or omit>
+WEARING_B: <partner outfit or omit>
+BEAT_B: <partner action or omit>
+VIBE: <session chat mood or omit>
+OPEN: <pending muse proposal or omit>
+STANDING: <session rules, one per line, or none>
+CLEAR_OPEN: yes|no
+UNCHANGED: <comma keys, or none>
+TAGS: <comma tags when shot/mixed, else none>
+CRAFT_SCENE: <English paragraph when shot/mixed, else none>
+""".strip()
+
+
+async def run_scripter(
+    ollama, *, notebook_block: str, note: str, theme: str = "",
+    style: str = "", framing: str = "", partner: bool = False,
+    model: str, num_ctx: int | None,
+) -> dict[str, Any]:
+    """One non-stream scripter call: intent, notebook patch, optional craft."""
+    from . import notebook as notebook_mod
+
+    prompt = "\n\n".join(b for b in [
+        f"THEME:\n{theme}" if theme.strip() else "",
+        f"STYLE: {style}" if style.strip() else "",
+        f"FRAMING: {framing}" if framing.strip() else "",
+        f"NOTEBOOK NOW:\n{notebook_block}",
+        f"総監督がいま言ったこと:\n{note.strip()}",
+        "Partner Muse sections WEARING_B/BEAT_B apply." if partner else
+        "Solo shoot — leave WEARING_B and BEAT_B unused.",
+    ] if b.strip())
+
+    # Prefer non-stream generate_text; fall back to streamed _call for fakes/tests.
+    raw = ""
+    gen = getattr(ollama, "generate_text", None)
+    if callable(gen):
+        try:
+            options: dict[str, Any] = {"temperature": 0}
+            if num_ctx:
+                options["num_ctx"] = int(num_ctx)
+            raw = await gen(
+                prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+            )
+        except Exception:
+            logger.warning("[muse.chain] scripter generate_text failed", exc_info=True)
+            raw = ""
+    if not str(raw or "").strip():
+        try:
+            raw = await _call(
+                ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
+                images=None, num_ctx=num_ctx, think=False, on_token=None,
+            )
+        except ChainError:
+            logger.warning("[muse.chain] scripter turn produced nothing", exc_info=True)
+            return {
+                "intent": "casual", "patch": {}, "tags": "", "craft_scene": "",
+                "raw": "",
+            }
+    return notebook_mod.parse_scripter(raw)

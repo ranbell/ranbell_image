@@ -8,7 +8,7 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ..db.qdrant_client import MUSE_SESSIONS_COLLECTION
-from . import events, facets
+from . import events, notebook
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ async def load(db, session_id: str) -> dict[str, Any] | None:
 
     This is the one read funnel — the runner, the API, the report and the
     service all come through here — so it is the one place a migration has to
-    be hooked. `facets.migrate` is idempotent and non-destructive: it builds the
-    facet table FROM the craft it finds, and leaves the craft where it was.
+    be hooked. `notebook.migrate` seeds the living notebook (and still runs
+    the legacy facet migrate for older rows).
     """
     points = await db._qc.retrieve(
         collection_name=MUSE_SESSIONS_COLLECTION,
@@ -44,7 +44,7 @@ async def load(db, session_id: str) -> dict[str, Any] | None:
     )
     if not points:
         return None
-    return facets.migrate(dict(points[0].payload or {}))
+    return notebook.migrate(dict(points[0].payload or {}))
 
 
 # Qdrant's scroll has no ordering, so "recent" means read everything and then
@@ -176,6 +176,13 @@ async def finish_shoot(db, session_id: str, *, error: str = "") -> None:
             warnings.append(error)
     session["status"] = "done" if shoot.get("images") else "awaiting_ok"
     await save(db, session)
+    # Continuity memory is written only after a successful final take.
+    if shoot.get("images") and not error:
+        try:
+            from . import service as muse_service
+            await muse_service.record_shoot_continuity(db, session)
+        except Exception:
+            logger.warning("[muse] continuity write failed", exc_info=True)
 
 
 # Legacy aliases used by older draft helpers / tests.
