@@ -143,6 +143,13 @@ const chatLocked = computed(() =>
 // Nothing can be photographed before she has written a prompt. Both stages said
 // so only by failing after the click; now they say so by not being clickable.
 const hasPrompt = computed(() => Boolean(craft.value.prompt))
+/** Notebook moved but craft compile refused / skipped — densify needed. */
+const craftDirty = computed(() => Boolean(session.value?.craft_dirty))
+const notebookAhead = computed(() => {
+  const rev = Number(session.value?.notebook?.rev || 0)
+  const compiled = Number(session.value?.notebook_rev_compiled || 0)
+  return rev > 0 && compiled > 0 && rev > compiled
+})
 // Her diary is written from the final shoot, so wrapping is only offered once
 // there is one — and only once, because each wrap used to queue another diary.
 const diaryState = computed(() => session.value?.diary || {})
@@ -1330,8 +1337,17 @@ async function onChatKey(e) {
             </ul>
           </details>
 
+          <p
+            v-if="craftDirty || notebookAhead"
+            class="text-[10px] text-[var(--sb-amber)] leading-relaxed"
+          >
+            {{ t('muse.craftDirtyHint') }}
+          </p>
           <details v-if="craft.prompt" class="text-[10px] text-[var(--sb-faint)]">
-            <summary class="cursor-pointer">{{ t('muse.craft') }}</summary>
+            <summary class="cursor-pointer">
+              {{ t('muse.craft') }}
+              <span v-if="craftDirty" class="ml-1 text-[var(--sb-amber)]">· {{ t('muse.craftDirtyBadge') }}</span>
+            </summary>
             <p class="whitespace-pre-wrap font-mono mt-1 text-gray-400">{{ craft.prompt }}</p>
           </details>
 

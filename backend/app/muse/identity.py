@@ -283,24 +283,68 @@ def parse_hybrid(raw: str) -> tuple[str, str]:
 
 _DUET_SPEAKER_RE = re.compile(r"(?im)^\s*([AB])\s*[:：]\s*(.*)$")
 _LEADING_SAY_RE = re.compile(r"(?is)^\s*SAY\s*:\s*")
+# Craft / notebook / rule labels that must never appear in chat SAY.
+_SAY_LEAK_LINE_RE = re.compile(
+    r"(?im)^\s*(?:[-*>•]\s*)?(?:"
+    r"TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|INTENT|ATMOSPHERE|FRAME|"
+    r"WEARING(?:_B)?|BEAT(?:_B)?|VIBE|OPEN|STANDING|CLEAR_OPEN|UNCHANGED|"
+    r"COSTUME(?:_B)?|PLACE|HOUR|LIGHT|PROPS|POSE(?:_B)?|EXPRESSION(?:_B)?|"
+    r"CAMERA|OUTPUT\s*FORMAT|CRITICAL\s*RULES|RULES(?:\s+FOR)?|"
+    r"2GIRLS|GROUNDED_TOKENS|CITED_MEMORIES|NOTEBOOK(?:\s+NOW)?|"
+    r"DUET_TALK|W_DUET|FORMAT\b"
+    r")\s*[:：].*$"
+)
+_SAY_LEAK_CUT_RE = re.compile(
+    r"(?im)^\s*(?:TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE)\s*[:：]"
+)
+_EN_HEADING_RE = re.compile(r"^[A-Z][A-Z0-9][A-Z0-9 _/&'-]{2,}$")
 
 
-def parse_duet_speakers(raw: str) -> list[dict[str, str]] | None:
+def _is_leaked_heading_line(line: str) -> bool:
+    if _SAY_LEAK_LINE_RE.match(line):
+        return True
+    stripped = line.strip().rstrip("：:").strip()
+    if not stripped or " " not in stripped:
+        return False
+    # Multi-word ALL-CAPS / Title-CASE rule banners (with or without colon).
+    if _EN_HEADING_RE.match(stripped):
+        return True
+    letters = [c for c in stripped if c.isalpha()]
+    if len(letters) >= 8 and sum(1 for c in letters if c.isupper()) / len(letters) >= 0.7:
+        return True
+    return False
+
+
+def sanitize_muse_say(text: str) -> str:
+    """Strip leaked craft labels / English rule headings from Muse chat text.
+
+    Talk turns sometimes truncate mid-format (``SAY:…\\nTAGS:…``) or echo
+    prompt headings. Those must not reach the Showrunner's bubble.
+    """
+    t = _LEADING_SAY_RE.sub("", (text or "").strip(), count=1).strip()
+    if not t:
+        return ""
+    cut = _SAY_LEAK_CUT_RE.search(t)
+    if cut:
+        t = t[: cut.start()].rstrip()
+    kept: list[str] = []
+    for line in t.splitlines():
+        if _is_leaked_heading_line(line):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def parse_duet_speakers(
+    raw: str, *, name_a: str = "", name_b: str = "",
+) -> list[dict[str, str]] | None:
     """Split a duet SAY block into per-speaker turns.
 
-    Trusts only the fixed `A:` / `B:` line markers the duet prompt asks for —
-    never a name, never anything resembling one. A model that echoes the old
-    `<Name A>:` style prompt (or invents a label like "System A:") produces no
-    match here, and that is the point: a line this cannot attribute becomes
-    either a continuation of the previous speaker's line (the common case — a
-    sentence that wrapped) or, before any speaker has been recognised yet,
-    dropped as preamble. It is never turned into a fake speaker.
-
-    Returns `None` on total parse failure (no `A:`/`B:` line found anywhere),
-    so the caller can fall back to treating the whole raw text as one
-    lead-attributed turn instead of guessing.
+    Prefers fixed `A:` / `B:` markers. If those are missing but both display
+    names are known, falls back to ``Name:`` lines mapped to A/B — never to
+    invented third speakers.
     """
-    text = _LEADING_SAY_RE.sub("", (raw or "").strip(), count=1).strip()
+    text = sanitize_muse_say(raw)
     if not text:
         return None
     turns: list[dict[str, str]] = []
@@ -314,6 +358,31 @@ def parse_duet_speakers(raw: str) -> list[dict[str, str]] | None:
             continue
         if turns:
             turns[-1]["text"] = f"{turns[-1]['text']} {stripped}".strip()
+    if turns:
+        return turns
+    return _parse_duet_speakers_by_name(text, name_a=name_a, name_b=name_b)
+
+
+def _parse_duet_speakers_by_name(
+    text: str, *, name_a: str, name_b: str,
+) -> list[dict[str, str]] | None:
+    a = str(name_a or "").strip()
+    b = str(name_b or "").strip()
+    if not a or not b or a == b:
+        return None
+    pat = re.compile(
+        rf"(?im)^\s*({re.escape(a)}|{re.escape(b)})\s*[:：]\s*(.*)$"
+    )
+    turns: list[dict[str, str]] = []
+    for line in text.splitlines():
+        m = pat.match(line)
+        if m:
+            who = "A" if m.group(1).strip() == a else "B"
+            turns.append({"speaker": who, "text": m.group(2).strip()})
+            continue
+        stripped = line.strip()
+        if stripped and turns:
+            turns[-1]["text"] = f"{turns[-1]['text']} {stripped}".strip()
     return turns or None
 
 
@@ -324,7 +393,7 @@ def parse_table_read(raw: str) -> tuple[str, str, str]:
         return "", "", ""
     m = _SAY_TAGS_SCENE_RE.match(text)
     if m:
-        say = m.group(1).strip()
+        say = sanitize_muse_say(m.group(1))
         tags = re.sub(r"\s+", " ", m.group(2)).strip().strip(",")
         scene = m.group(3).strip()
         return say, tags, scene
@@ -333,7 +402,16 @@ def parse_table_read(raw: str) -> tuple[str, str, str]:
         tags = re.sub(r"\s+", " ", m.group(1)).strip().strip(",")
         scene = m.group(2).strip()
         return "", tags, scene
-    return "", "", text
+    # Truncated talk: SAY then TAGS without SCENE — keep prose before TAGS.
+    if re.search(r"(?im)^\s*SAY\s*[:：]", text) and re.search(
+        r"(?im)^\s*TAGS\s*[:：]", text,
+    ):
+        say_m = re.search(
+            r"(?is)^\s*SAY\s*[:：]\s*(.*?)(?=\n\s*TAGS\s*[:：]|\Z)", text,
+        )
+        if say_m:
+            return sanitize_muse_say(say_m.group(1)), "", ""
+    return "", "", sanitize_muse_say(text)
 
 
 _COUNT_TAGS: dict[str, tuple[str, ...]] = {

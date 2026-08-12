@@ -2192,7 +2192,9 @@ async def _run_duet_scripter(
         "intent": intent,
         "compiled": compiled,
         "valid": valid,
+        "dirty": bool(session.get("craft_dirty")),
         "notebook_rev": int(nb.get("rev") or 0),
+        "notebook_rev_compiled": int(session.get("notebook_rev_compiled") or 0),
     })
     return result
 
@@ -2702,7 +2704,7 @@ async def _duet_prep_notebook(
     session["status"] = "discussing"
     await session_db.save(db, session)
     session = await densify_craft_if_needed(db, ollama, session)
-    session["craft_dirty"] = False
+    # Do not force-clear dirty: densify may have failed and left a thin draft.
 
     # Sensory SAY only — muse must not rewrite tags on prep anymore.
     return await _duet_talk(db, ollama, session, "", cfg=cfg, prep=True)
@@ -3467,19 +3469,26 @@ async def densify_craft_if_needed(
             )
             tags = str(result.get("tags") or "")
             scene_out = str(result.get("craft_scene") or "")
+            densify_ok = False
             # Full compile only — never KEEP prior tags beside a partial densify.
             if result.get("valid") and tags and scene_out:
                 if _apply_compiled_craft(session, tags, scene_out):
                     session["craft_dirty"] = False
+                    densify_ok = True
+            if not densify_ok:
+                session["craft_dirty"] = True
         except Exception:
             logger.warning("[muse] notebook densify failed; keeping draft",
                            exc_info=True)
+            session["craft_dirty"] = True
+            densify_ok = False
         if sid:
             events.publish(sid, {
                 "type": "scripter_done",
                 "intent": "shot",
-                "compiled": not bool(session.get("craft_dirty")),
-                "valid": True,
+                "compiled": bool(densify_ok),
+                "valid": bool(densify_ok),
+                "dirty": bool(session.get("craft_dirty")),
             })
         await session_db.save(db, session, publish=False)
         return session

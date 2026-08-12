@@ -792,12 +792,22 @@ async def run_duet_talk(
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
     say, _, _ = identity.parse_table_read(raw)
-    text = (say or raw).strip()
-    if text.lower().startswith("say:"):
-        text = text[4:].strip()
+    text = identity.sanitize_muse_say(say or raw)
     if not text:
         raise ChainError("empty duet turn")
-    turns = identity.parse_duet_speakers(text) if partner_character else None
+    turns = None
+    if partner_character:
+        name_a = str(
+            (character or {}).get("name_ja")
+            or (character or {}).get("name") or ""
+        )
+        name_b = str(
+            partner_character.get("name_ja")
+            or partner_character.get("name") or ""
+        )
+        turns = identity.parse_duet_speakers(
+            text, name_a=name_a, name_b=name_b,
+        )
     turns_out = tuple(turns) if turns else None
     return text, turns_out, blind
 
@@ -972,4 +982,45 @@ async def run_scripter(
             logger.warning("[muse.chain] scripter turn produced nothing", exc_info=True)
             return notebook_mod.validate_scripter(notebook_mod._blank_result(""))
     parsed = notebook_mod.parse_scripter(raw)
-    return notebook_mod.validate_scripter(parsed, partner=partner)
+    validated = notebook_mod.validate_scripter(parsed, partner=partner)
+    if validated.get("valid") or not str(raw or "").strip():
+        return validated
+    # One repair pass — ask for corrected JSON only (sampling unchanged).
+    if not callable(gen):
+        return validated
+    reason = str(validated.get("refuse_reason") or "invalid_or_unparseable")
+    repair_prompt = "\n\n".join([
+        "Your previous studio-scripter output was rejected "
+        f"({reason}). Return ONLY a corrected JSON object matching the schema. "
+        "No prose, no markdown fences.",
+        f"PREVIOUS OUTPUT:\n{str(raw)[:3500]}",
+        f"ORIGINAL REQUEST:\n{prompt}",
+    ])
+    try:
+        options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
+        try:
+            raw2 = await gen(
+                repair_prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+                fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
+            )
+        except TypeError:
+            raw2 = await gen(
+                repair_prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+            )
+        except Exception:
+            raw2 = await gen(
+                repair_prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+            )
+        if str(raw2 or "").strip():
+            repaired = notebook_mod.validate_scripter(
+                notebook_mod.parse_scripter(raw2), partner=partner,
+            )
+            if repaired.get("valid"):
+                logger.info("[muse.chain] scripter repair pass succeeded")
+                return repaired
+    except Exception:
+        logger.warning("[muse.chain] scripter repair pass failed", exc_info=True)
+    return validated

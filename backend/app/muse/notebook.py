@@ -395,17 +395,26 @@ def _blank_result(raw: str = "") -> dict[str, Any]:
 
 
 def parse_scripter_json(raw: str) -> dict[str, Any] | None:
-    """Parse Ollama JSON-format scripter output. None if not JSON."""
-    import json
+    """Parse Ollama JSON-format scripter output. None if not JSON.
+
+    Uses ``ai.json_util.parse_json_object`` so missing commas / truncated
+    tails can still salvage a usable object before falling back to labelled.
+    """
+    from ..ai.json_util import parse_json_object
+
     text = (raw or "").strip()
-    if not text or text[0] not in "{[":
-        # Sometimes models wrap JSON in fences.
-        m = re.search(r"\{[\s\S]*\}", text)
-        if not m:
-            return None
-        text = m.group(0)
+    if not text:
+        return None
+    # Fast reject for clearly labelled (non-JSON) blocks.
+    head = text.lstrip()[:200]
+    if (
+        not head.startswith(("{", "[", "`"))
+        and "INTENT" in head.upper()
+        and "{" not in head
+    ):
+        return None
     try:
-        data = json.loads(text)
+        data = parse_json_object(text)
     except Exception:
         return None
     if not isinstance(data, dict):

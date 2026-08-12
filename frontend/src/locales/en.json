@@ -1382,6 +1382,8 @@
     "boardAsk": "Good? Press \"final\" to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",
+    "craftDirtyBadge": "out of sync",
+    "craftDirtyHint": "The notebook moved but craft didn't fully catch up. Use prep or a test shot to densify.",
     "scripterUpdating": "Updating the craft…",
     "notebook": "Shot notebook",
     "notebookHint": "Living source of truth. Clothes, action, and camera are absolute values here; craft is recompiled from this.",
