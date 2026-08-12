@@ -1385,6 +1385,33 @@
     "craftDirtyBadge": "out of sync",
     "craftDirtyHint": "The notebook moved but craft didn't fully catch up. Use prep or a test shot to densify.",
     "scripterUpdating": "Updating the craft…",
+    "poseSketch": {
+      "title": "Pose sketch",
+      "hint": "from tags · no render",
+      "gazeViewer": "looking at lens",
+      "posture": {
+        "standing": "standing",
+        "sitting": "sitting",
+        "kneeling": "kneeling",
+        "squatting": "squatting",
+        "crouching": "crouching",
+        "lying": "lying",
+        "all_fours": "all fours",
+        "walking": "walking",
+        "running": "running",
+        "jumping": "jumping"
+      },
+      "camera": {
+        "above": "from above",
+        "below": "from below",
+        "eye": "eye level",
+        "side": "from side",
+        "behind": "from behind",
+        "close": "close-up",
+        "upper": "upper body",
+        "full": "full body"
+      }
+    },
     "notebook": "Shot notebook",
     "notebookHint": "Living source of truth. Clothes, action, and camera are absolute values here; craft is recompiled from this.",
     "notebookOpen": "Open proposal (not locked)",

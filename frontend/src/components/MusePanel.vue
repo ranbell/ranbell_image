@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterGallery from './CharacterGallery.vue'
 import ActressDiaryModal from './muse/ActressDiaryModal.vue'
+import PoseSketch from './muse/PoseSketch.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -1224,6 +1225,17 @@ async function onChatKey(e) {
                    :style="{ width: `${Math.round((job?.progress || 0) * 100)}%` }"></div>
             </div>
           </div>
+
+          <!-- Tag-driven stick figure — posing check without Comfy. -->
+          <PoseSketch
+            v-if="isDuet && (craft.tags || notebookRows.length)"
+            :tags="String(craft.tags || '')"
+            :beat="String(session?.notebook?.beat || '')"
+            :beat-b="String(session?.notebook?.beat_b || '')"
+            :frame="String(session?.notebook?.frame || '')"
+            :duo="isWMuse"
+            :flash="Boolean(notebookFlash && ['beat','beat_b','frame'].includes(notebookFlash))"
+          />
 
           <div v-if="boardImages.length" class="space-y-2">
             <h4 class="text-[11px] text-[var(--sb-amber)]">
