@@ -15,6 +15,8 @@ try {
     beat: 'しゃがんで',
     frame: '横からローアングルで煽って',
   })
+  // Demo default: pose-coaching with IK effectors visible
+  stage.setCoachMode(true)
   window.__avatarStage = stage
 } catch (err) {
   tip.textContent = `読込失敗: ${err?.message || err}`
