@@ -70,11 +70,45 @@ const caption = computed(() => {
 
 const chips = computed(() => model.value.active.slice(0, 8))
 
-const POSTURES = ['standing', 'squatting', 'sitting', 'kneeling', 'lying']
+const POSTURES = [
+  'standing', 'walking', 'running', 'jumping',
+  'squatting', 'crouching', 'kneeling', 'sitting', 'all_fours', 'lying',
+]
 const ARMS = ['arms_at_sides', 'arms_up', 'crossed_arms', 'spread_arms']
 const SIDES = ['front', 'side', 'behind']
 const PITCHES = ['eye', 'below', 'above']
 const DISTS = ['full', 'upper', 'close']
+
+// Bone-gizmo target list — mirrors avatar3d.js's TORSO_HEAD_BONES + finger
+// bones. Not raycast-picked in the 3D view (too fiddly on a dense mesh) —
+// chosen from this grouped list instead.
+const TORSO_BONES = ['spine', 'chest', 'upperChest', 'neck', 'head']
+const FINGERS = ['thumb', 'index', 'middle', 'ring', 'little']
+const SEGMENTS = ['Proximal', 'Intermediate', 'Distal']
+function fingerBoneName(side, finger, segment) {
+  return `${side}${finger[0].toUpperCase()}${finger.slice(1)}${segment}`
+}
+const BONE_GROUPS = [
+  { key: 'torso', labelKey: 'muse.poseSketch.boneGroup.torso', bones: TORSO_BONES.map((b) => ({ value: b, labelKey: `muse.poseSketch.bone.${b}` })) },
+  {
+    key: 'leftHand',
+    labelKey: 'muse.poseSketch.boneGroup.leftHand',
+    bones: FINGERS.flatMap((f) => SEGMENTS.map((s) => ({
+      value: fingerBoneName('left', f, s),
+      labelKey: `muse.poseSketch.bone.${f}${s}`,
+    }))),
+  },
+  {
+    key: 'rightHand',
+    labelKey: 'muse.poseSketch.boneGroup.rightHand',
+    bones: FINGERS.flatMap((f) => SEGMENTS.map((s) => ({
+      value: fingerBoneName('right', f, s),
+      labelKey: `muse.poseSketch.bone.${f}${s}`,
+    }))),
+  },
+]
+const boneModeOn = ref(false)
+const selectedBone = ref('')
 
 function pushPose() {
   if (!stage || coachOn.value) return
@@ -134,9 +168,28 @@ function toggleCoach() {
     refreshCoachPreview()
   } else {
     coachPreview.value = ''
+    boneModeOn.value = false
     pushPose()
   }
   viewMode.value = stage.getViewMode?.() || viewMode.value
+}
+
+function toggleBoneMode() {
+  if (!stage || !coachOn.value) return
+  boneModeOn.value = stage.setBoneMode(!boneModeOn.value)
+  if (!boneModeOn.value) selectedBone.value = ''
+  else if (selectedBone.value) stage.selectBone(selectedBone.value)
+}
+
+function onSelectBone() {
+  if (!stage || !boneModeOn.value) return
+  stage.selectBone(selectedBone.value || '')
+}
+
+function clearSelectedBone() {
+  if (!stage || !selectedBone.value) return
+  stage.clearBoneOverride(selectedBone.value)
+  refreshCoachPreview()
 }
 
 function captureDirectionFrame() {
@@ -394,6 +447,36 @@ onBeforeUnmount(() => {
           @click="patchCoach({ cameraDistance: d })"
         >{{ t(`muse.poseSketch.camera.${d}`) }}</button>
       </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 pt-0.5 border-t border-white/5">
+        <button
+          type="button"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="boneModeOn
+            ? 'border-amber-400/70 bg-amber-400/15 text-amber-100'
+            : 'border-white/10 bg-white/5 text-gray-300 hover:border-white/30'"
+          @click="toggleBoneMode"
+        >{{ t('muse.poseSketch.boneMode') }}</button>
+        <template v-if="boneModeOn">
+          <select
+            v-model="selectedBone"
+            class="rounded-lg border border-white/15 bg-black/30 px-2 py-1 text-[10px] text-gray-200"
+            @change="onSelectBone"
+          >
+            <option value="">{{ t('muse.poseSketch.boneSelectPlaceholder') }}</option>
+            <optgroup v-for="g in BONE_GROUPS" :key="g.key" :label="t(g.labelKey)">
+              <option v-for="b in g.bones" :key="b.value" :value="b.value">{{ t(b.labelKey) }}</option>
+            </optgroup>
+          </select>
+          <button
+            v-if="selectedBone"
+            type="button"
+            class="rounded-lg border border-white/15 px-2.5 py-1 text-[10px] text-gray-300 hover:border-white/40"
+            @click="clearSelectedBone"
+          >{{ t('muse.poseSketch.boneClear') }}</button>
+        </template>
+      </div>
+      <p v-if="boneModeOn" class="px-0.5 text-[9px] text-amber-200/75">{{ t('muse.poseSketch.boneModeHint') }}</p>
 
       <pre
         v-if="coachPreview"

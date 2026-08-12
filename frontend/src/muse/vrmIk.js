@@ -152,6 +152,40 @@ export function solveCcdIk(bones, tip, target, opts = {}) {
   }
 }
 
+const TORSO_HEAD_LIMITS = {
+  spine: { x: [-0.9, 1.0], y: [-0.6, 0.6], z: [-0.6, 0.6] },
+  chest: { x: [-0.6, 0.6], y: [-0.5, 0.5], z: [-0.5, 0.5] },
+  upperChest: { x: [-0.6, 0.6], y: [-0.5, 0.5], z: [-0.5, 0.5] },
+  neck: { x: [-0.6, 0.6], y: [-0.8, 0.8], z: [-0.4, 0.4] },
+  head: { x: [-0.6, 0.6], y: [-1.0, 1.0], z: [-0.5, 0.5] },
+}
+const FINGER_PROXIMAL_LIMIT = { x: [-0.2, 1.4], y: [-0.3, 0.3], z: [-0.3, 0.3] }
+const FINGER_OTHER_LIMIT = { x: [-0.1, 1.6], y: [-0.1, 0.1], z: [-0.1, 0.1] }
+
+function limitsForBone(name) {
+  const n = String(name || '')
+  if (TORSO_HEAD_LIMITS[n]) return TORSO_HEAD_LIMITS[n]
+  if (/thumb|index|middle|ring|little/i.test(n)) {
+    return /proximal/i.test(n) ? FINGER_PROXIMAL_LIMIT : FINGER_OTHER_LIMIT
+  }
+  return null
+}
+
+/**
+ * Clamp a manual bone-gizmo rotation (local Euler, radians) to a generous
+ * per-bone-group range so torso/neck/head/finger edits can't fold the rig
+ * inside out. Unknown bone names are a no-op — pass the value through.
+ */
+export function clampBoneRotation(name, euler) {
+  const limits = limitsForBone(name)
+  if (!limits || !euler) return { x: euler?.x || 0, y: euler?.y || 0, z: euler?.z || 0 }
+  return {
+    x: THREE.MathUtils.clamp(euler.x || 0, limits.x[0], limits.x[1]),
+    y: THREE.MathUtils.clamp(euler.y || 0, limits.y[0], limits.y[1]),
+    z: THREE.MathUtils.clamp(euler.z || 0, limits.z[0], limits.z[1]),
+  }
+}
+
 /**
  * Full limb solve: two-bone + light CCD polish.
  * poleHint: 'out' | 'back' | Vector3

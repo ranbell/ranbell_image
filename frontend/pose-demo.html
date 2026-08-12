@@ -11,10 +11,14 @@
     p { margin: 6px 0 0; font-size: 12px; color: #94a3b8; }
     #stage { width: min(560px, 100vw); margin: 0 auto; min-height: 500px; }
     .tags { padding: 8px 16px 24px; font-size: 11px; color: #7dd3fc; text-align: center; }
-    #viewbar, #tools { display:flex; gap:8px; justify-content:center; padding:0 16px 8px; flex-wrap:wrap; }
+    #viewbar, #tools, #bone-tools { display:flex; gap:8px; justify-content:center; padding:0 16px 8px; flex-wrap:wrap; }
     button {
       border:1px solid #475569; border-radius:8px; padding:6px 12px;
       background:transparent; color:#94a3b8; cursor:pointer; font-size:12px;
+    }
+    select {
+      border:1px solid #475569; border-radius:8px; padding:6px 8px;
+      background:#1a1a1e; color:#94a3b8; font-size:12px;
     }
   </style>
 </head>
@@ -32,6 +36,11 @@
     <button id="btn-reset" type="button">配置リセット</button>
     <button data-who="a" type="button">一人目</button>
     <button data-who="b" type="button">二人目</button>
+  </div>
+  <div id="bone-tools">
+    <button id="btn-bone-mode" type="button">ボーン</button>
+    <select id="bone-select"></select>
+    <button id="btn-bone-clear" type="button">リセット</button>
   </div>
   <div id="stage"></div>
   <p class="tags">リングドラッグで配置 · 2girls · free placement</p>

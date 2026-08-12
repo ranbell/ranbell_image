@@ -75,6 +75,36 @@ const CAM_DIST_TAG = {
   full: 'full_body',
 }
 
+function classifyBoneName(name) {
+  const n = String(name || '')
+  if (/thumb|index|middle|ring|little/i.test(n)) return 'finger'
+  if (/neck|head/i.test(n)) return 'head'
+  if (/spine|chest/i.test(n)) return 'torso'
+  return null
+}
+
+/**
+ * Summarize a `{ [boneName]: {x,y,z} }` manual bone-gizmo override map into
+ * chat-legible pieces — the LLM only ever sees enum fields + text/tags, so a
+ * torso twist / head tilt / finger shape needs to say so distinctly instead
+ * of collapsing into the generic `dynamic_pose` (IK hand/foot) signal.
+ */
+export function summarizeBoneOverrides(overrides) {
+  const bodyBits = []
+  const tags = []
+  if (!overrides) return { bodyBits, tags }
+  const groups = new Set()
+  for (const [name, e] of Object.entries(overrides)) {
+    if (!e) continue
+    const g = classifyBoneName(name)
+    if (g) groups.add(g)
+  }
+  if (groups.has('torso')) { bodyBits.push('腰から捻って'); tags.push('torso_twist') }
+  if (groups.has('head')) { bodyBits.push('首の向きも合わせて'); tags.push('head_tilt') }
+  if (groups.has('finger')) { bodyBits.push('指の形も作って'); tags.push('finger_gesture') }
+  return { bodyBits, tags }
+}
+
 /** Infer camera enums from a world-space shot position (subject≈origin). */
 export function cameraEnumsFromShotPosition(pos, { crouch = false } = {}) {
   const x = pos.x
@@ -117,6 +147,7 @@ export function poseModelToTags(model, { duo = false } = {}) {
   if (cs) parts.push(cs)
   if (cd) parts.push(cd)
   if (model.customLimbs) parts.push('dynamic_pose')
+  parts.push(...summarizeBoneOverrides(model.boneOverrides).tags)
   if (model.interact === 'lap_pillow' || model.interact === 'head_on_lap' || model.interact === 'head_in_lap') {
     parts.push('lap_pillow, head_on_lap')
   }
@@ -145,7 +176,8 @@ export function buildPoseCoachMessage(model, opts = {}) {
       ? '少し下を見て'
       : ''
 
-  const bodyBits = [who + posture, arms, gaze].filter(Boolean)
+  const boneBits = summarizeBoneOverrides(model.boneOverrides).bodyBits
+  const bodyBits = [who + posture, arms, gaze, ...boneBits].filter(Boolean)
   const camBits = [side, pitch, dist].filter(Boolean)
   const limbs = model.customLimbs || opts.customLimbs
     ? '手足の角度はいまの見取り図に合わせて'

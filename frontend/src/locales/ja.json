@@ -1438,6 +1438,37 @@
         "close": "寄り",
         "upper": "上半身",
         "full": "全身"
+      },
+      "boneMode": "ボーン",
+      "boneModeHint": "体幹・指のボーンを選んで、現場プレビュー内でドラッグして直接回転できます。",
+      "boneSelectPlaceholder": "ボーンを選択",
+      "boneClear": "リセット",
+      "boneGroup": {
+        "torso": "体幹",
+        "leftHand": "左手",
+        "rightHand": "右手"
+      },
+      "bone": {
+        "spine": "脊椎",
+        "chest": "胸",
+        "upperChest": "上胸",
+        "neck": "首",
+        "head": "頭",
+        "thumbProximal": "親指・根本",
+        "thumbIntermediate": "親指・中間",
+        "thumbDistal": "親指・先端",
+        "indexProximal": "人差し指・根本",
+        "indexIntermediate": "人差し指・中間",
+        "indexDistal": "人差し指・先端",
+        "middleProximal": "中指・根本",
+        "middleIntermediate": "中指・中間",
+        "middleDistal": "中指・先端",
+        "ringProximal": "薬指・根本",
+        "ringIntermediate": "薬指・中間",
+        "ringDistal": "薬指・先端",
+        "littleProximal": "小指・根本",
+        "littleIntermediate": "小指・中間",
+        "littleDistal": "小指・先端"
       }
     },
     "notebook": "ショットノート",

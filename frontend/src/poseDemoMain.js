@@ -65,6 +65,42 @@ try {
       })
     }
   })
+
+  // Bone-gizmo sub-mode: torso/head + finger bones, standalone harness for
+  // exercising avatar3d.js's TransformControls wiring without Vue/i18n.
+  const boneSelect = document.getElementById('bone-select')
+  const boneModeBtn = document.getElementById('btn-bone-mode')
+  const boneClearBtn = document.getElementById('btn-bone-clear')
+  const TORSO_BONES = ['spine', 'chest', 'upperChest', 'neck', 'head']
+  const FINGERS = ['thumb', 'index', 'middle', 'ring', 'little']
+  const SEGMENTS = ['Proximal', 'Intermediate', 'Distal']
+  function fingerBoneName(side, finger, segment) {
+    return `${side}${finger[0].toUpperCase()}${finger.slice(1)}${segment}`
+  }
+  if (boneSelect) {
+    const opts = ['']
+      .concat(TORSO_BONES)
+      .concat(['left', 'right'].flatMap((side) => FINGERS.flatMap((f) => SEGMENTS.map((s) => fingerBoneName(side, f, s)))))
+    boneSelect.replaceChildren(...opts.map((name) => {
+      const opt = document.createElement('option')
+      opt.value = name
+      opt.textContent = name || '(未選択)'
+      return opt
+    }))
+  }
+  let boneModeOn = false
+  boneModeBtn?.addEventListener('click', () => {
+    boneModeOn = stage.setBoneMode(!boneModeOn)
+    boneModeBtn.style.background = boneModeOn ? '#f59e0b33' : 'transparent'
+    boneModeBtn.style.color = boneModeOn ? '#e2e8f0' : '#94a3b8'
+    if (boneModeOn && boneSelect?.value) stage.selectBone(boneSelect.value)
+  })
+  boneSelect?.addEventListener('change', () => {
+    if (boneModeOn) stage.selectBone(boneSelect.value)
+  })
+  boneClearBtn?.addEventListener('click', () => {
+    if (boneSelect?.value) stage.clearBoneOverride(boneSelect.value)
+  })
 } catch (err) {
   tip.textContent = `読込失敗: ${err?.message || err}`
   tip.style.color = '#fca5a5'

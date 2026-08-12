@@ -1438,6 +1438,37 @@
         "close": "close-up",
         "upper": "upper body",
         "full": "full body"
+      },
+      "boneMode": "Bone",
+      "boneModeHint": "Pick a torso/finger bone, then drag its gizmo in the preview to rotate it directly.",
+      "boneSelectPlaceholder": "Select a bone",
+      "boneClear": "Reset",
+      "boneGroup": {
+        "torso": "Torso",
+        "leftHand": "Left hand",
+        "rightHand": "Right hand"
+      },
+      "bone": {
+        "spine": "Spine",
+        "chest": "Chest",
+        "upperChest": "Upper chest",
+        "neck": "Neck",
+        "head": "Head",
+        "thumbProximal": "Thumb · base",
+        "thumbIntermediate": "Thumb · mid",
+        "thumbDistal": "Thumb · tip",
+        "indexProximal": "Index · base",
+        "indexIntermediate": "Index · mid",
+        "indexDistal": "Index · tip",
+        "middleProximal": "Middle · base",
+        "middleIntermediate": "Middle · mid",
+        "middleDistal": "Middle · tip",
+        "ringProximal": "Ring · base",
+        "ringIntermediate": "Ring · mid",
+        "ringDistal": "Ring · tip",
+        "littleProximal": "Little · base",
+        "littleIntermediate": "Little · mid",
+        "littleDistal": "Little · tip"
       }
     },
     "notebook": "Shot notebook",

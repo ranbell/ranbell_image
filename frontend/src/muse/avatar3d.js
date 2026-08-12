@@ -5,10 +5,11 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { VRMLoaderPlugin, VRMUtils, VRMHumanBoneName } from '@pixiv/three-vrm'
 import { buildPoseSketch } from './poseSketch.js'
 import { cameraEnumsFromShotPosition } from './poseCoach.js'
-import { solveLimbIk } from './vrmIk.js'
+import { solveLimbIk, clampBoneRotation } from './vrmIk.js'
 
 export const DEFAULT_VRM_URL = '/models/pose_avatar.vrm'
 
@@ -21,6 +22,43 @@ function bone(vrm, name) {
 function setEuler(node, x = 0, y = 0, z = 0) {
   if (!node) return
   node.rotation.set(x, y, z)
+}
+
+/** Half-width used for duo body-vs-body collision (world units, ground plane). */
+export const AVATAR_COLLISION_RADIUS = 0.32
+
+/** Torso/head bones a posture chip conceptually owns — cleared of manual
+ * bone-gizmo overrides when a posture chip is clicked, so a preset never
+ * silently fights a stale twist. Finger overrides are untouched by this. */
+const TORSO_HEAD_BONES = [Bone.Spine, Bone.Chest, Bone.UpperChest, Bone.Neck, Bone.Head].filter(Boolean)
+
+/** All finger bone names (both hands), the other bone-gizmo target group. */
+const FINGER_BONES = [
+  'Thumb', 'Index', 'Middle', 'Ring', 'Little',
+].flatMap((finger) => ['Proximal', 'Intermediate', 'Distal'].map((seg) => {
+  const key = `${finger}${seg}`
+  return [Bone[`Left${key}`], Bone[`Right${key}`]]
+})).flat().filter(Boolean)
+
+/** Bones the gizmo sub-mode is allowed to touch — keeps it from overlapping
+ * the IK-driven arm/leg bones (selectBone rejects anything outside this). */
+const GIZMO_BONE_NAMES = new Set([...TORSO_HEAD_BONES, ...FINGER_BONES])
+
+/**
+ * Push a proposed (x, z) ground position out to at least `minDist` from
+ * `other`, sliding along the boundary instead of snapping back — so duo
+ * drag-to-move can't be used to overlap two characters.
+ */
+export function resolveDuoCollision(x, z, otherX, otherZ, minDist) {
+  const dx = x - otherX
+  const dz = z - otherZ
+  const dist = Math.hypot(dx, dz)
+  if (dist >= minDist || dist < 1e-6) {
+    if (dist < 1e-6) return { x: otherX + minDist, z: otherZ }
+    return { x, z }
+  }
+  const scale = minDist / dist
+  return { x: otherX + dx * scale, z: otherZ + dz * scale }
 }
 
 /**
@@ -106,6 +144,26 @@ export function applyVrmPose(vrm, model) {
     setEuler(lUpperLeg, -0.4, 0, 0)
     setEuler(rUpperLeg, 0.35, 0, 0)
     setEuler(lLowerLeg, 0.6, 0, 0)
+    // Default jump arms (overridden below if an explicit arms preset is set).
+    setEuler(lUpperArm, -1.7, 0.15, 0.5)
+    setEuler(rUpperArm, -1.7, -0.15, -0.5)
+    setEuler(lLowerArm, -0.3, 0, 0)
+    setEuler(rLowerArm, -0.3, 0, 0)
+  } else if (posture === 'all_fours') {
+    setEuler(spine, 0.55, 0, 0)
+    setEuler(chest, 0.25, 0, 0)
+    setEuler(neck, -0.25, 0, 0)
+    setEuler(lUpperLeg, -1.15, 0.1, 0)
+    setEuler(rUpperLeg, -1.15, -0.1, 0)
+    setEuler(lLowerLeg, 1.85, 0, 0)
+    setEuler(rLowerLeg, 1.85, 0, 0)
+    setEuler(lFoot, 0.5, 0, 0)
+    setEuler(rFoot, 0.5, 0, 0)
+    // Hands planted on the floor in front.
+    setEuler(lUpperArm, 1.15, 0.2, 0.35)
+    setEuler(rUpperArm, 1.15, -0.2, -0.35)
+    setEuler(lLowerArm, 0.1, 0, 0.05)
+    setEuler(rLowerArm, 0.1, 0, -0.05)
   }
 
   if (arms === 'arms_up' || arms === 'arms_behind_head') {
@@ -132,8 +190,27 @@ export function applyVrmPose(vrm, model) {
   setEuler(neck, neckX, 0, 0)
   setEuler(head, headX, headY, 0)
 
+  // Manual bone edits (torso twist, finger shapes, look-at head/neck, ...)
+  // always win over the enum defaults above.
+  applyBoneOverridesTo(vrm, model.boneOverrides)
+
   vrm.humanoid.update()
   vrm.update(0)
+}
+
+/**
+ * Apply a sparse { [VRMHumanBoneName]: {x,y,z} } local-Euler override map
+ * onto a VRM's bones, without touching resetNormalizedPose/other bones.
+ * Shared by applyVrmPose (full repose) and live gizmo edits (partial).
+ */
+export function applyBoneOverridesTo(vrm, overrides) {
+  if (!vrm?.humanoid || !overrides) return
+  for (const [name, e] of Object.entries(overrides)) {
+    if (!e) continue
+    const node = bone(vrm, name)
+    if (!node) continue
+    setEuler(node, e.x || 0, e.y || 0, e.z || 0)
+  }
 }
 
 /**
@@ -473,6 +550,8 @@ export async function createAvatarStage(container, {
   let coachMode = false
   let coachSubject = 'a' // 'a' | 'b'
   let customLimbs = false
+  /** Currently selected bone name for the bone-gizmo sub-mode, or null. */
+  let boneSelection = null
   let shotOverride = null // THREE.Vector3 | null
   /** Half-gap between duo subjects (world X). */
   let duoSpacing = 0.55
@@ -518,6 +597,43 @@ export async function createAvatarStage(container, {
   orbit.touches = {
     ONE: THREE.TOUCH.ROTATE,
     TWO: THREE.TOUCH.DOLLY_PAN,
+  }
+
+  // Bone-select + rotate gizmo (torso/neck/head/finger direct manipulation).
+  // three@0.170's TransformControls is not itself an Object3D — its visuals
+  // live on getHelper(); older builds return the controls object directly.
+  const boneGizmoControls = new TransformControls(viewCam, renderer.domElement)
+  boneGizmoControls.setMode('rotate')
+  boneGizmoControls.setSpace('local')
+  boneGizmoControls.size = 0.75
+  const boneGizmoHelper = typeof boneGizmoControls.getHelper === 'function'
+    ? boneGizmoControls.getHelper()
+    : boneGizmoControls
+  boneGizmoHelper.visible = false
+  scene.add(boneGizmoHelper)
+  let boneMode = false
+  boneGizmoControls.addEventListener('dragging-changed', (ev) => {
+    orbit.enabled = ev.value ? false : (coachMode || viewMode === 'shot')
+  })
+  boneGizmoControls.addEventListener('objectChange', () => {
+    if (!boneMode || !boneSelection || !coachModel || !boneGizmoControls.object) return
+    const node = boneGizmoControls.object
+    const clamped = clampBoneRotation(boneSelection, {
+      x: node.rotation.x, y: node.rotation.y, z: node.rotation.z,
+    })
+    coachModel.boneOverrides = { ...(coachModel.boneOverrides || {}), [boneSelection]: clamped }
+    setEuler(node, clamped.x, clamped.y, clamped.z)
+    coachVrm()?.humanoid?.update?.()
+  })
+  function attachBoneGizmo() {
+    const node = boneMode && boneSelection ? bone(coachVrm(), boneSelection) : null
+    if (node) {
+      boneGizmoControls.attach(node)
+      boneGizmoHelper.visible = true
+    } else {
+      boneGizmoControls.detach()
+      boneGizmoHelper.visible = false
+    }
   }
 
   const handleRoot = new THREE.Group()
@@ -1238,8 +1354,19 @@ export async function createAvatarStage(container, {
       setPointerNdc(ev)
       raycaster.setFromCamera(pointerNdc, viewCam)
       if (dragKind === 'body' && raycaster.ray.intersectPlane(groundPlane, dragHit)) {
-        dragBodyVrm.scene.position.x = THREE.MathUtils.clamp(dragHit.x, -2.2, 2.2)
-        dragBodyVrm.scene.position.z = THREE.MathUtils.clamp(dragHit.z, -2.2, 2.2)
+        let nx = THREE.MathUtils.clamp(dragHit.x, -2.2, 2.2)
+        let nz = THREE.MathUtils.clamp(dragHit.z, -2.2, 2.2)
+        const other = dragBodyVrm === vrmA ? vrmB : vrmA
+        if (other) {
+          const resolved = resolveDuoCollision(
+            nx, nz, other.scene.position.x, other.scene.position.z,
+            AVATAR_COLLISION_RADIUS * 2,
+          )
+          nx = resolved.x
+          nz = resolved.z
+        }
+        dragBodyVrm.scene.position.x = nx
+        dragBodyVrm.scene.position.z = nz
         syncPlaceHandles()
         syncHandles()
       } else if (dragKind === 'yaw') {
@@ -1348,30 +1475,36 @@ export async function createAvatarStage(container, {
     },
     setCoachMode(on) {
       coachMode = Boolean(on)
-      customLimbs = false
-      shotOverride = null
-      freePlacement = false
       if (coachMode) {
-        coachModel = {
-          ...buildPoseSketch(latest.tags, {
-            beat: latest.beat,
-            beat_b: latest.beatB,
-            frame: latest.frame,
-            duo: latest.duo,
-          }),
-        }
-        if (coachModel.empty) {
-          Object.assign(coachModel, {
-            posture: 'standing',
-            arms: 'arms_at_sides',
-            gazePitch: 'looking_ahead',
-            gazeTarget: '',
-            cameraPitch: 'eye',
-            cameraSide: 'front',
-            cameraDistance: 'full',
-            empty: false,
-            active: ['standing'],
-          })
+        // Only seed from tags the first time coaching is entered — re-entering
+        // (toggle off/on) must keep whatever pose/placement the user made,
+        // not discard it back to the tag-derived default.
+        const firstEntry = !coachModel
+        if (firstEntry) {
+          customLimbs = false
+          shotOverride = null
+          freePlacement = false
+          coachModel = {
+            ...buildPoseSketch(latest.tags, {
+              beat: latest.beat,
+              beat_b: latest.beatB,
+              frame: latest.frame,
+              duo: latest.duo,
+            }),
+          }
+          if (coachModel.empty) {
+            Object.assign(coachModel, {
+              posture: 'standing',
+              arms: 'arms_at_sides',
+              gazePitch: 'looking_ahead',
+              gazeTarget: '',
+              cameraPitch: 'eye',
+              cameraSide: 'front',
+              cameraDistance: 'full',
+              empty: false,
+              active: ['standing'],
+            })
+          }
         }
         badge.textContent = '全景 · ポーズコーチング（配置・IK・カメラ）'
         orbit.enabled = true
@@ -1379,26 +1512,35 @@ export async function createAvatarStage(container, {
         placeRoot.visible = Boolean(vrmB)
         rebuildPlaceHandles()
         rebuildHandles()
-        const seedShot = shotCameraWorld(coachModel, { duo: Boolean(vrmB) })
-        shotOverride = seedShot.position.clone()
-        placeSetOverviewCamera(viewCam, coachModel, seedShot, { duo: Boolean(vrmB) })
-        orbit.target.copy(seedShot.lookAt)
-        orbit.update()
-        overviewSnapshot = {
-          position: viewCam.position.clone(),
-          target: orbit.target.clone(),
+        if (firstEntry) {
+          const seedShot = shotCameraWorld(coachModel, { duo: Boolean(vrmB) })
+          shotOverride = seedShot.position.clone()
+          placeSetOverviewCamera(viewCam, coachModel, seedShot, { duo: Boolean(vrmB) })
+          orbit.target.copy(seedShot.lookAt)
+          orbit.update()
+          overviewSnapshot = {
+            position: viewCam.position.clone(),
+            target: orbit.target.clone(),
+          }
+        } else if (overviewSnapshot) {
+          viewCam.position.copy(overviewSnapshot.position)
+          orbit.target.copy(overviewSnapshot.target)
+          orbit.update()
         }
         sync()
         snapIkToTips()
         applyViewMode()
       } else {
-        coachModel = null
+        // Keep coachModel/customLimbs/freePlacement/shotOverride around so a
+        // later re-entry (see firstEntry above) restores the same pose.
         viewMode = 'overview'
         badge.textContent = '撮影現場プレビュー · 全身＋ショットカメラ'
         orbit.enabled = false
         handleRoot.visible = false
         placeRoot.visible = false
         shotGizmo.root.visible = true
+        boneMode = false
+        attachBoneGizmo()
         sync()
         applyViewMode()
       }
@@ -1429,12 +1571,32 @@ export async function createAvatarStage(container, {
         rebuildHandles()
         snapIkToTips()
         syncPlaceHandles()
+        attachBoneGizmo()
         sync()
       }
+    },
+    /** Enter/exit the bone-gizmo sub-mode (torso/neck/head/finger rotate). */
+    setBoneMode(on) {
+      boneMode = Boolean(on) && coachMode
+      attachBoneGizmo()
+      return boneMode
+    },
+    getBoneMode() {
+      return boneMode
     },
     patchCoachModel(partial) {
       if (!coachMode) return null
       coachModel = { ...coachModel, ...partial, empty: false, customLimbs: customLimbs || Boolean(partial.customLimbs) }
+      if (partial.posture) {
+        // A posture chip owns torso/head — drop any manual twist there so a
+        // preset never silently fights a stale bone-gizmo edit. Fingers and
+        // other manual bones are untouched (they're not posture's concern).
+        if (coachModel.boneOverrides) {
+          const overrides = { ...coachModel.boneOverrides }
+          for (const b of TORSO_HEAD_BONES) delete overrides[b]
+          coachModel.boneOverrides = overrides
+        }
+      }
       if (partial.posture || partial.arms) {
         if (!partial.customLimbs) {
           customLimbs = false
@@ -1454,6 +1616,44 @@ export async function createAvatarStage(container, {
       }
       sync()
       return coachModel
+    },
+    /** Merge one bone's manual rotation (rad, local space) and render it
+     * immediately — used by the bone-gizmo drag path. Safe regardless of
+     * customLimbs/freePlacement: it only touches this one bone node. */
+    patchBoneOverride(name, euler) {
+      if (!coachMode || !coachModel || !name) return null
+      const overrides = { ...(coachModel.boneOverrides || {}) }
+      overrides[name] = clampBoneRotation(name, euler)
+      coachModel.boneOverrides = overrides
+      applyBoneOverridesTo(coachVrm(), overrides)
+      return coachModel
+    },
+    clearBoneOverride(name) {
+      if (!coachMode || !coachModel?.boneOverrides || !name) return null
+      const overrides = { ...coachModel.boneOverrides }
+      delete overrides[name]
+      coachModel.boneOverrides = overrides
+      if (customLimbs) {
+        // Can't safely re-derive one bone from enum defaults mid-IK-drag
+        // (that needs a full resetNormalizedPose, which would also wipe the
+        // live IK-set limbs) — best effort: zero it out.
+        setEuler(bone(coachVrm(), name), 0, 0, 0)
+        coachVrm()?.humanoid?.update?.()
+      } else {
+        applyVrmPose(coachVrm(), coachModel)
+      }
+      return coachModel
+    },
+    getBoneOverride(name) {
+      return coachModel?.boneOverrides?.[name] || null
+    },
+    selectBone(name) {
+      boneSelection = name && GIZMO_BONE_NAMES.has(name) ? name : null
+      attachBoneGizmo()
+      return boneSelection
+    },
+    getBoneSelection() {
+      return boneSelection
     },
     getCoachSnapshot() {
       const model = coachMode && coachModel ? { ...coachModel, customLimbs, freePlacement } : activeModel()
@@ -1584,6 +1784,9 @@ export async function createAvatarStage(container, {
       cancelAnimationFrame(raf)
       ro.disconnect()
       orbit.dispose()
+      boneGizmoControls.detach()
+      boneGizmoControls.dispose()
+      scene.remove(boneGizmoHelper)
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
