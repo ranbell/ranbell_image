@@ -1,16 +1,8 @@
-"""The two failures that were reported from real sessions.
+"""Legacy facet-table e2e tests for 主演撮り.
 
-1. The camera moved from a high angle to a low one and `looking_up` survived,
-   so the picture broke.
-2. The Showrunner said「上着脱いで」and the jacket came back, for several turns.
-
-Both are here as end-to-end tests through `post_duet_chat` / `duet_prep_stage`,
-because both were end-to-end failures — every individual piece looked correct.
-
-The assertions that carry the most weight are the ones about parts nobody
-wrote. `rev` not moving on `place` while the camera changes is the difference
-between a model that was asked to leave the room alone and a shot where the
-room was never in the answer.
+Duet now compiles craft from the living notebook via the scripter
+(`test_duet_notebook.py`). These facet-router / scoped-prep cases are kept as
+reference but skipped on the live path.
 """
 from __future__ import annotations
 
@@ -18,6 +10,10 @@ import sys
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.skip(
+    reason="duet shot truth moved to notebook+scripter; see test_duet_notebook.py",
+)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 

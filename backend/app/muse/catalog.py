@@ -48,6 +48,7 @@ async def build_muse_catalog(
 
     # ── Workflows (local filesystem; independent of Comfy being online) ──────
     workflows: list[str] = []
+    workflow_caps: list[dict[str, Any]] = []
     comfy_ok = False
     resolved_comfy_url = comfy_url
     try:
@@ -56,6 +57,20 @@ async def build_muse_catalog(
             resolved_comfy_url = str(settings.comfyui_url or "")
         if comfy is not None:
             workflows = list(comfy.list_workflows() or [])
+            for name in workflows:
+                cap: dict[str, Any] = {
+                    "name": name,
+                    "has_openpose": False,
+                    "can_inject_image": False,
+                }
+                try:
+                    wf = comfy.load_workflow(name)
+                    info = comfy.inspect_workflow(wf)
+                    cap["has_openpose"] = bool(info.get("has_openpose"))
+                    cap["can_inject_image"] = bool(info.get("can_inject_image"))
+                except Exception:
+                    pass
+                workflow_caps.append(cap)
             try:
                 comfy_ok = bool(await comfy.is_available())
             except Exception:
@@ -106,6 +121,7 @@ async def build_muse_catalog(
             "ok": comfy_ok,
             "url": resolved_comfy_url,
             "workflows": workflows,
+            "workflow_caps": workflow_caps,
         },
         "llm": {
             "ok": ollama_ok,

@@ -408,6 +408,96 @@ class ComfyUIClient:
         "LoadImageBatch",
     })
 
+    # Nodes that take a photo and emit an OpenPose / DWPose map.
+    _POSE_PREPROCESS_HINTS = (
+        "openpose", "dwpose", "dwpreprocessor", "openposepreprocessor",
+        "animalpose", "poseestimator", "densepose",
+    )
+    _CONTROLNET_HINTS = (
+        "controlnetapply", "controlnetloader", "controlnet",
+        "acompatiblecontrolnet", "setunioncontrolnet",
+    )
+
+    @classmethod
+    def _class_norm(cls, class_type: str) -> str:
+        return str(class_type or "").lower().replace(" ", "").replace("_", "").replace("-", "")
+
+    @classmethod
+    def _is_pose_preprocessor(cls, class_type: str) -> bool:
+        n = cls._class_norm(class_type)
+        if not n:
+            return False
+        # AIO_Preprocessor can do many things; count it only with pose-ish name.
+        if "aio" in n and "preprocessor" in n:
+            return True
+        return any(h in n for h in cls._POSE_PREPROCESS_HINTS)
+
+    @classmethod
+    def _is_controlnet_node(cls, class_type: str) -> bool:
+        n = cls._class_norm(class_type)
+        return any(h in n for h in cls._CONTROLNET_HINTS)
+
+    @classmethod
+    def _resolve_load_image(cls, wf: dict, start_id: str) -> str | None:
+        """BFS upstream from start_id to a LoadImage-like node."""
+        visited: set[str] = set()
+        queue = [str(start_id)]
+        while queue:
+            nid = queue.pop(0)
+            if nid in visited:
+                continue
+            visited.add(nid)
+            node = wf.get(nid) or {}
+            if node.get("class_type") in cls._LOAD_IMAGE_TYPES:
+                return nid
+            for v in (node.get("inputs") or {}).values():
+                if isinstance(v, list) and len(v) >= 1:
+                    queue.append(str(v[0]))
+        return None
+
+    def inspect_workflow(self, workflow: dict) -> dict:
+        """Detect OpenPose / ControlNet lineage and a safe LoadImage injection point.
+
+        ``can_inject_image`` is True only when a LoadImage feeds a pose
+        preprocessor (photo → OpenPose map). ControlNet-only graphs that expect
+        a pre-baked skeleton are reported but not auto-injected.
+        """
+        pose_nodes: list[dict[str, str]] = []
+        controlnet_nodes: list[dict[str, str]] = []
+        load_image_nodes: list[str] = []
+        for nid, node in (workflow or {}).items():
+            if not isinstance(node, dict):
+                continue
+            ct = str(node.get("class_type") or "")
+            if ct in self._LOAD_IMAGE_TYPES:
+                load_image_nodes.append(str(nid))
+            if self._is_pose_preprocessor(ct):
+                pose_nodes.append({"id": str(nid), "class_type": ct})
+            if self._is_controlnet_node(ct):
+                controlnet_nodes.append({"id": str(nid), "class_type": ct})
+
+        image_node_id: str | None = None
+        for p in pose_nodes:
+            found = self._resolve_load_image(workflow, p["id"])
+            if found:
+                image_node_id = found
+                break
+        # Fallback: sole LoadImage in a graph that has pose preprocess.
+        if image_node_id is None and pose_nodes and len(load_image_nodes) == 1:
+            image_node_id = load_image_nodes[0]
+
+        has_pose = bool(pose_nodes)
+        has_cn = bool(controlnet_nodes)
+        return {
+            "has_openpose": has_pose or has_cn,
+            "has_pose_preprocessor": has_pose,
+            "can_inject_image": bool(has_pose and image_node_id),
+            "image_node_id": image_node_id if has_pose else None,
+            "pose_nodes": pose_nodes,
+            "controlnet_nodes": controlnet_nodes,
+            "load_image_nodes": load_image_nodes,
+        }
+
     def patch_load_image_nodes(self, workflow: dict, image_name: str) -> tuple[dict, int]:
         """Set ``inputs.image`` on every LoadImage-like node. Returns (wf, count)."""
         wf = copy.deepcopy(workflow)
@@ -417,6 +507,40 @@ class ComfyUIClient:
                 node.setdefault("inputs", {})["image"] = image_name
                 n += 1
         return wf, n
+
+    def patch_load_image_node(
+        self, workflow: dict, node_id: str, image_name: str,
+    ) -> dict:
+        """Set ``inputs.image`` on one LoadImage-like node (deepcopy)."""
+        wf = copy.deepcopy(workflow)
+        node = wf.get(str(node_id))
+        if isinstance(node, dict) and node.get("class_type") in self._LOAD_IMAGE_TYPES:
+            node.setdefault("inputs", {})["image"] = image_name
+        return wf
+
+    async def apply_openpose_reference(
+        self, workflow: dict, image_bytes: bytes, *, filename: str = "muse_direction.jpg",
+    ) -> tuple[dict, dict]:
+        """If the graph can take a photo for OpenPose, upload + patch LoadImage.
+
+        Returns ``(workflow, info)`` where ``info`` includes inspect result and
+        ``injected`` / ``comfy_name`` when applied. Never raises for inspect miss —
+        returns the original workflow when injection is not possible.
+        """
+        info = self.inspect_workflow(workflow)
+        info = {**info, "injected": False, "comfy_name": ""}
+        if not info.get("can_inject_image") or not image_bytes:
+            return workflow, info
+        node_id = str(info.get("image_node_id") or "")
+        try:
+            name = await self.upload_image(image_bytes, filename)
+            patched = self.patch_load_image_node(workflow, node_id, name)
+            info["injected"] = True
+            info["comfy_name"] = name
+            return patched, info
+        except Exception:
+            logger.warning("[comfy] openpose reference inject failed", exc_info=True)
+            return workflow, info
 
     async def upload_image(
         self,

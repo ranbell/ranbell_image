@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterGallery from './CharacterGallery.vue'
 import ActressDiaryModal from './muse/ActressDiaryModal.vue'
+import PoseSketch3D from './muse/PoseSketch3D.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -38,7 +39,13 @@ const showCast = ref(false)
 const preview = ref('')
 const speaking = ref('')          // muse id currently streaming
 const liveSay = ref('')
+const scripterStatus = ref('')    // live craft update status for duet
+const scripterWhisper = ref('')   // body-line while craft updates (no LLM)
+const notebookFlash = ref('')     // which notebook row to pulse
+const memoryHintSeen = ref(false)
 const chatInput = ref('')
+const directionOn = ref(false)    // pose-coaching ON → attach preview still to chat
+const poseSketchRef = ref(null)
 const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
@@ -112,6 +119,11 @@ const tasteAxes = computed(() => roster.value.taste_axes || [])
 const baseLook = computed(() => session.value?.style_in_use || direction.value.base || '')
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
+const workflowCaps = computed(() => catalog.value?.comfyui?.workflow_caps || [])
+const selectedWorkflowCap = computed(() => {
+  const name = String(inputs.value?.workflow || '')
+  return workflowCaps.value.find((c) => c?.name === name) || null
+})
 const models = computed(() => catalog.value?.llm?.models || [])
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 
@@ -127,8 +139,7 @@ const act = computed(() => {
 })
 
 // 主演撮り (lead shoot): one or two Muses with the Showrunner, no crew.
-// and the craft is only written when "①撮影準備" is pressed — its own endpoint
-// (`duetPrep`), same as the test shot and final buttons.
+// Shot notes compile into craft live from chat; ① is densify polish.
 const isDuet = computed(() => session.value?.mode === 'duet')
 
 const canStart = computed(() =>
@@ -140,6 +151,13 @@ const chatLocked = computed(() =>
 // Nothing can be photographed before she has written a prompt. Both stages said
 // so only by failing after the click; now they say so by not being clickable.
 const hasPrompt = computed(() => Boolean(craft.value.prompt))
+/** Notebook moved but craft compile refused / skipped — densify needed. */
+const craftDirty = computed(() => Boolean(session.value?.craft_dirty))
+const notebookAhead = computed(() => {
+  const rev = Number(session.value?.notebook?.rev || 0)
+  const compiled = Number(session.value?.notebook_rev_compiled || 0)
+  return rev > 0 && compiled > 0 && rev > compiled
+})
 // Her diary is written from the final shoot, so wrapping is only offered once
 // there is one — and only once, because each wrap used to queue another diary.
 const diaryState = computed(() => session.value?.diary || {})
@@ -158,7 +176,8 @@ const finishHint = computed(() => {
 // wait for the first token, which is precisely the stretch where the model is
 // being loaded and the panel looks frozen.
 const thinking = computed(() =>
-  Boolean(speaking.value) || status.value === 'discussing')
+  Boolean(speaking.value) || Boolean(scripterStatus.value) ||
+  status.value === 'discussing')
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
@@ -260,6 +279,69 @@ const facetRows = computed(() => {
     .map(name => ({ name, ...(table[name] || {}) }))
     .filter(f => (f.tags || []).length || String(f.nl || '').trim() || f.locked)
 })
+const NOTEBOOK_KEYS = [
+  'atmosphere', 'scene', 'frame', 'wearing', 'beat',
+  'wearing_b', 'beat_b', 'vibe', 'open',
+]
+const notebookRows = computed(() => {
+  const nb = session.value?.notebook || {}
+  const rows = NOTEBOOK_KEYS
+    .map(key => ({ key, text: String(nb[key] || '').trim() }))
+    .filter(row => row.text)
+  const standing = (nb.standing || []).filter(Boolean)
+  if (standing.length) {
+    rows.push({ key: 'standing', text: standing.map(s => `- ${s}`).join('\n') })
+  }
+  return rows
+})
+/** Muse's open proposal — light chips, never a modal. */
+const openProposal = computed(() => String(session.value?.notebook?.open || '').trim())
+const taste = computed(() => session.value?.showrunner_taste || {})
+const tasteChips = computed(() => {
+  const out = []
+  const prefers = String(taste.value.prefers || '').trim()
+  const avoids = String(taste.value.avoids || '').trim()
+  if (prefers) {
+    const bit = prefers.split(/[、,/]/)[0].trim().slice(0, 40)
+    if (bit) out.push(isJa.value ? `また${bit}？` : `Again: ${bit}?`)
+  }
+  if (avoids) {
+    const bit = avoids.split(/[、,/]/)[0].trim().slice(0, 40)
+    if (bit) out.push(isJa.value ? `${bit}は避けて` : `Skip ${bit}`)
+  }
+  return out.slice(0, 3)
+})
+const chemistryNotes = computed(() =>
+  (session.value?.chemistry_notes || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 2),
+)
+const showMemoryExpect = computed(() =>
+  Boolean(session.value?.memory_expect_hint) && !memoryHintSeen.value && isDuet.value,
+)
+/** Live W-Muse split while tokens stream (A:/B: prefixes). */
+const liveWTurns = computed(() => {
+  const text = liveSay.value || ''
+  if (!isWMuse.value || (!text.includes(':') && !text.includes('：'))) return null
+  const lines = text.split('\n')
+  const parsed = []
+  let cur = null
+  for (const raw of lines) {
+    const m = raw.match(/^\s*([ABab])\s*[:：]\s*(.*)$/)
+    if (m) {
+      cur = { speaker: m[1].toUpperCase() === 'B'
+        ? (partnerCharacter.value?.name_ja || partnerCharacter.value?.name || 'B')
+        : (character.value?.name_ja || character.value?.name || 'A'),
+        speakerId: m[1].toUpperCase() === 'B'
+          ? partnerCharacter.value?.character_id
+          : character.value?.character_id,
+        content: m[2] || '' }
+      parsed.push(cur)
+    } else if (cur) {
+      cur.content = `${cur.content}\n${raw}`.trim()
+    }
+  }
+  return parsed.length ? parsed : null
+})
+function dismissMemoryHint() { memoryHintSeen.value = true }
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.
 const facetConflicts = computed(() => session.value?.facet_conflicts || [])
@@ -378,7 +460,23 @@ function connectStream(id) {
       preview.value = `data:image/jpeg;base64,${evt.image}`
       return
     }
+    if (evt.type === 'scripter_working') {
+      scripterStatus.value = String(evt.message || '').trim() || t('muse.scripterUpdating')
+      scripterWhisper.value = String(evt.whisper || '').trim()
+      notebookFlash.value = String(evt.flash || '').trim()
+      return
+    }
+    if (evt.type === 'scripter_done') {
+      scripterStatus.value = ''
+      scripterWhisper.value = ''
+      notebookFlash.value = ''
+      await refresh()
+      return
+    }
     if (evt.type === 'muse_speaking') {
+      scripterStatus.value = ''
+      scripterWhisper.value = ''
+      notebookFlash.value = ''
       speaking.value = evt.muse_id || ''
       liveSay.value = ''
       return
@@ -559,15 +657,24 @@ async function setMode(mode) {
   } catch (err) { fail(err) }
 }
 
-async function sendChat(text) {
+async function sendChat(text, opts = {}) {
   const body = (text ?? chatInput.value).trim()
   if (!body || !session.value || chatLocked.value) return
   busy.value = true
   chatInput.value = ''
   startedAt = Date.now()
   try {
+    const payload = { text: body }
+    // While direction (pose coaching) is ON, stream the shot-preview still.
+    let image = String(opts.image || '').trim()
+    if (!image && directionOn.value && poseSketchRef.value?.captureDirectionFrame) {
+      try {
+        image = String(poseSketchRef.value.captureDirectionFrame() || '').trim()
+      } catch { /* capture is best-effort */ }
+    }
+    if (image) payload.images = [image]
     session.value = await api(`/api/muse/sessions/${session.value.session_id}/chat`, {
-      method: 'POST', body: JSON.stringify({ text: body }),
+      method: 'POST', body: JSON.stringify(payload),
     })
     scrollChat()
   } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
@@ -581,6 +688,17 @@ function stopThinking() {
 }
 
 function quick(cmd) { sendChat(cmd) }
+
+/** Pose coaching from VRM stage → chat as director instruction (+ still). */
+function onPoseCoach(payload) {
+  const msg = String(payload?.message || '').trim()
+  if (!msg) return
+  sendChat(msg, { image: payload?.image || '' })
+}
+
+function onCoachMode(on) {
+  directionOn.value = Boolean(on)
+}
 
 // Prep, test shot and final are buttons on their own endpoints — not words
 // typed into chat for a regex to recognise. Typed text is always creative
@@ -778,6 +896,14 @@ async function onChatKey(e) {
                   <option value="">—</option>
                   <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                 </select>
+                <span
+                  v-if="selectedWorkflowCap?.can_inject_image"
+                  class="mt-1 block text-[9px] text-sky-300/80"
+                >{{ t('muse.workflowOpenPoseReady') }}</span>
+                <span
+                  v-else-if="selectedWorkflowCap?.has_openpose"
+                  class="mt-1 block text-[9px] text-[var(--sb-faint)]"
+                >{{ t('muse.workflowOpenPosePartial') }}</span>
               </label>
               <label class="block">
                 <span class="sb-label">{{ t('muse.model') }}</span>
@@ -913,15 +1039,55 @@ async function onChatKey(e) {
                    token. The model is dropped from VRAM before every render, so
                    the load is paid on every turn — and that whole stretch used
                    to be a blank panel with no sign anything was happening. -->
-              <div v-if="thinking" class="flex flex-col items-start gap-1 my-1">
+              <div v-if="scripterStatus && !liveSay" class="flex flex-col items-start gap-1 my-1">
+                <span class="text-[10px] text-[var(--sb-teal)] font-bold">
+                  {{ scripterStatus }}
+                </span>
+                <div
+                  v-if="scripterWhisper"
+                  class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
+                         bg-pink-950/30 border border-pink-400/25 text-pink-100/90 italic"
+                >
+                  {{ scripterWhisper }}
+                </div>
+                <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
+                            bg-teal-950/30 border border-teal-400/30 text-teal-100">
+                  <span class="dots" :aria-label="scripterStatus">
+                    <span>.</span><span>.</span><span>.</span>
+                  </span>
+                </div>
+              </div>
+              <div v-if="thinking && (liveSay || speaking || (!scripterStatus && status === 'discussing'))"
+                   class="flex flex-col items-start gap-1 my-1">
                 <span class="text-[10px] text-pink-300 font-bold flex items-center gap-1">
                   <span>💖</span>
                   {{ museLabel(museById(speaking)) || t('muse.someone') }}
                   {{ t('muse.leadThinking') }}
                   <span v-if="elapsed" class="text-pink-400/70 font-mono">{{ clock(elapsed) }}</span>
                 </span>
-                <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
-                            bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md">
+                <template v-if="liveWTurns?.length">
+                  <div
+                    v-for="(sub, sIdx) in liveWTurns" :key="'live-'+sIdx"
+                    class="flex flex-col items-start gap-1 w-full max-w-[90%]"
+                  >
+                    <span class="flex items-center gap-1.5 text-[10px] text-pink-300 font-bold">
+                      <img
+                        v-if="getMessageFace({}, sub.speakerId)"
+                        :src="getMessageFace({}, sub.speakerId)" alt=""
+                        class="w-7 h-7 rounded-full object-cover ring-2 ring-pink-400/80 shadow-md border border-pink-100 shrink-0"
+                      />
+                      <span>🌸 {{ sub.speaker }}</span>
+                    </span>
+                    <div class="rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md whitespace-pre-wrap">
+                      {{ sub.content }}<span v-if="sIdx === liveWTurns.length - 1" class="caret">▍</span>
+                    </div>
+                  </div>
+                </template>
+                <div
+                  v-else
+                  class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
+                            bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md"
+                >
                   <template v-if="liveSay">
                     {{ liveSay }}<span class="caret">▍</span>
                   </template>
@@ -1010,6 +1176,51 @@ async function onChatKey(e) {
                   {{ t('muse.openDiary') }}
                 </button>
               </div>
+              <p
+                v-if="showMemoryExpect"
+                class="text-[10px] text-[var(--sb-faint)] flex items-start gap-2"
+              >
+                <span class="flex-1">{{ t('muse.memoryExpectHint') }}</span>
+                <button type="button" class="underline shrink-0" @click="dismissMemoryHint">
+                  {{ t('muse.memoryExpectDismiss') }}
+                </button>
+              </p>
+              <p
+                v-if="chemistryNotes.length && isWMuse"
+                class="text-[10px] text-[var(--sb-muted)]"
+              >
+                {{ t('muse.chemistryHint') }}
+                <span class="text-[var(--sb-faint)]"> — {{ chemistryNotes[0] }}</span>
+              </p>
+              <div
+                v-if="tasteChips.length && !chatLocked"
+                class="flex flex-wrap items-center gap-1.5 text-[10px]"
+              >
+                <span class="text-[var(--sb-faint)]">{{ t('muse.tasteChipLabel') }}</span>
+                <button
+                  v-for="chip in tasteChips" :key="chip"
+                  type="button"
+                  class="sb-btn text-[10px] px-2 py-0.5"
+                  @click="sendChat(chip)"
+                >{{ chip }}</button>
+              </div>
+              <div
+                v-if="openProposal && !chatLocked"
+                class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--sb-muted)]"
+              >
+                <span class="text-[var(--sb-amber)]">{{ t('muse.openChipLabel') }}</span>
+                <span class="truncate max-w-[14rem] text-[var(--sb-faint)]">{{ openProposal }}</span>
+                <button
+                  type="button"
+                  class="sb-btn text-[10px] px-2 py-0.5"
+                  @click="sendChat(t('muse.openChipYes'))"
+                >{{ t('muse.openChipYes') }}</button>
+                <button
+                  type="button"
+                  class="sb-btn text-[10px] px-2 py-0.5 opacity-80"
+                  @click="sendChat(t('muse.openChipNo'))"
+                >{{ t('muse.openChipNo') }}</button>
+              </div>
               <div class="flex gap-2">
                 <textarea
                   v-model="chatInput"
@@ -1049,6 +1260,24 @@ async function onChatKey(e) {
                    :style="{ width: `${Math.round((job?.progress || 0) * 100)}%` }"></div>
             </div>
           </div>
+
+          <!-- VRM on-set preview (Three.js) — posing + camera, no Comfy. SVG fallback inside. -->
+          <PoseSketch3D
+            v-if="isDuet && (craft.tags || notebookRows.length)"
+            ref="poseSketchRef"
+            :tags="String(craft.tags || '')"
+            :beat="String(session?.notebook?.beat || '')"
+            :beat-b="String(session?.notebook?.beat_b || '')"
+            :frame="String(session?.notebook?.frame || '')"
+            :duo="isWMuse"
+            :flash="Boolean(notebookFlash && ['beat','beat_b','frame'].includes(notebookFlash))"
+            @coach="onPoseCoach"
+            @coach-mode="onCoachMode"
+          />
+          <p
+            v-if="directionOn"
+            class="px-0.5 text-[9px] text-sky-200/75"
+          >{{ t('muse.poseSketch.directionImageHint') }}</p>
 
           <div v-if="boardImages.length" class="space-y-2">
             <h4 class="text-[11px] text-[var(--sb-amber)]">
@@ -1090,8 +1319,34 @@ async function onChatKey(e) {
             <p class="whitespace-pre-wrap text-[var(--sb-muted)]">{{ session.digest }}</p>
           </details>
 
-          <!-- the shot, in parts. Pin one and no turn rewrites it. -->
-          <details v-if="facetRows.length" open class="text-[10px] text-[var(--sb-faint)]">
+          <!-- Living shot notebook — source of truth for duet craft. -->
+          <details v-if="notebookRows.length" open class="text-[10px] text-[var(--sb-faint)]">
+            <summary class="cursor-pointer">
+              {{ t('muse.notebook') }} · {{ notebookRows.length }}
+            </summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.notebookHint') }}</p>
+            <ul class="space-y-1.5">
+              <li
+                v-for="row in notebookRows" :key="row.key"
+                class="rounded border border-white/10 px-2 py-1.5 transition-colors duration-500"
+                :class="[
+                  row.key === 'open' ? 'border-[var(--sb-amber)]/40' : '',
+                  notebookFlash === row.key ? 'border-[var(--sb-teal)] bg-teal-950/40' : '',
+                ]"
+              >
+                <div class="font-semibold text-gray-300">
+                  {{ t(`muse.notebookNames.${row.key}`) }}
+                  <span v-if="row.key === 'open'" class="ml-1 font-normal text-[var(--sb-amber)]">
+                    {{ t('muse.notebookOpen') }}
+                  </span>
+                </div>
+                <p class="mt-0.5 whitespace-pre-wrap text-[var(--sb-muted)]">{{ row.text }}</p>
+              </li>
+            </ul>
+          </details>
+
+          <!-- Legacy facet table (older sessions). -->
+          <details v-if="facetRows.length && !notebookRows.length" class="text-[10px] text-[var(--sb-faint)]">
             <summary class="cursor-pointer">
               {{ t('muse.facets') }} · {{ facetRows.length }}
             </summary>
@@ -1136,8 +1391,17 @@ async function onChatKey(e) {
             </ul>
           </details>
 
+          <p
+            v-if="craftDirty || notebookAhead"
+            class="text-[10px] text-[var(--sb-amber)] leading-relaxed"
+          >
+            {{ t('muse.craftDirtyHint') }}
+          </p>
           <details v-if="craft.prompt" class="text-[10px] text-[var(--sb-faint)]">
-            <summary class="cursor-pointer">{{ t('muse.craft') }}</summary>
+            <summary class="cursor-pointer">
+              {{ t('muse.craft') }}
+              <span v-if="craftDirty" class="ml-1 text-[var(--sb-amber)]">· {{ t('muse.craftDirtyBadge') }}</span>
+            </summary>
             <p class="whitespace-pre-wrap font-mono mt-1 text-gray-400">{{ craft.prompt }}</p>
           </details>
 

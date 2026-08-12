@@ -58,9 +58,10 @@ async def _call(
     images: list[bytes] | None, num_ctx: int | None,
     think: bool, on_token: TokenCallback | None = None,
 ) -> str:
-    options: dict[str, Any] = {"num_predict": -1}
-    if num_ctx:
-        options["num_ctx"] = int(num_ctx)
+    # Family sampling (Gemma → temp 1.0 / top_k 64 / top_p 0.95). Do not
+    # hardcode temperature — model-card defaults live in llm_options.
+    from ..ai.llm_options import llm_options
+    options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
     kwargs = dict(model=model, options=options, system=system, think=think)
 
     stream = (ollama.generate_vlm_stream(prompt, images, **kwargs) if images
@@ -791,12 +792,22 @@ async def run_duet_talk(
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
     say, _, _ = identity.parse_table_read(raw)
-    text = (say or raw).strip()
-    if text.lower().startswith("say:"):
-        text = text[4:].strip()
+    text = identity.sanitize_muse_say(say or raw)
     if not text:
         raise ChainError("empty duet turn")
-    turns = identity.parse_duet_speakers(text) if partner_character else None
+    turns = None
+    if partner_character:
+        name_a = str(
+            (character or {}).get("name_ja")
+            or (character or {}).get("name") or ""
+        )
+        name_b = str(
+            partner_character.get("name_ja")
+            or partner_character.get("name") or ""
+        )
+        turns = identity.parse_duet_speakers(
+            text, name_a=name_a, name_b=name_b,
+        )
     turns_out = tuple(turns) if turns else None
     return text, turns_out, blind
 
@@ -833,7 +844,17 @@ async def run_duet_prep(
         framing=framing, brief=brief, style=style, cast=cast, duet=True,
     )
     if partner_character:
-        turns = identity.parse_duet_speakers(turn.say)
+        name_a = str(
+            (character or {}).get("name_ja")
+            or (character or {}).get("name") or ""
+        )
+        name_b = str(
+            partner_character.get("name_ja")
+            or partner_character.get("name") or ""
+        )
+        turns = identity.parse_duet_speakers(
+            turn.say, name_a=name_a, name_b=name_b,
+        )
         turn = replace(turn, turns=tuple(turns) if turns else None)
     return turn if not blind else replace(turn, blind=True)
 
@@ -868,3 +889,172 @@ async def run_banter(
 # waited on a read receipt. It is now a block on her next turn's user prompt
 # (`crew.caught_block`) — she brings it up when they next meet, which is both
 # how a person would find out and one fewer model load.
+
+
+SCRIPTER_SYSTEM = """
+You are the studio scripter. You do not speak in character. You maintain the
+shot notebook and, when the picture changes, compile tags and craft_scene.
+
+INTENTS (pick one):
+- casual — chit-chat only. Do not change SHOT sections. vibe may update.
+- shot — showrunner changed the picture. Patch absolute values. Compile.
+- mixed — both chat and picture. Patch what changed. Compile.
+- recall — asking about past shoots. Do not change SHOT. vibe optional.
+
+RULES:
+- Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
+- wearing is the only home for clothes, hats, accessories on the body.
+- beat is body action only. Never put looking_up / looking_down /
+  looking_at_viewer in beat — gaze belongs in frame with camera angle.
+- Low angle / 煽り → frame must say she looks down toward the lens.
+- If they ask to look at the sky, rewrite frame as one coherent camera story;
+  do not keep an old low-angle lens-gaze.
+- Leave sections unchanged by omitting them (or list under unchanged).
+- open is for Muse proposals not yet affirmed. clear_open: true when affirming
+  or dropping them.
+- On shot/mixed: always output tags and craft_scene from the WHOLE notebook
+  after your patch (full replace, no merging with old tags). English only.
+- Partner shoots: use tags_shared + tags_a + tags_b (never one mixed bag).
+  Solo: use tags only.
+- Draft density: about 20–35 tags; craft_scene 60–120 words. Absolute values.
+- Do not invent diary props. Only the notebook + showrunner line.
+
+Respond with a single JSON object matching the schema. Empty string means
+clear that section; omit keys you are not changing.
+""".strip()
+
+
+async def run_scripter(
+    ollama, *, notebook_block: str, note: str, theme: str = "",
+    style: str = "", framing: str = "", partner: bool = False,
+    model: str, num_ctx: int | None,
+    images: list[bytes] | None = None,
+) -> dict[str, Any]:
+    """One non-stream scripter call: intent, notebook patch, optional craft.
+
+    Uses Ollama JSON Schema `format` when available. Sampling follows the
+    model card via `llm_options` (Gemma: temperature 1.0 — never force 0).
+    Invalid output is validate-first: craft fields cleared so callers keep
+    prior craft.
+
+    Optional ``images`` (direction stills) switch the call to VLM so the
+    scripter can match beat/frame/tags to what the 総監督 showed.
+    """
+    from ..ai.llm_options import llm_options
+    from . import notebook as notebook_mod
+
+    direction = list(images or [])[:1]
+    prompt = "\n\n".join(b for b in [
+        f"THEME:\n{theme}" if theme.strip() else "",
+        f"STYLE: {style}" if style.strip() else "",
+        f"FRAMING: {framing}" if framing.strip() else "",
+        f"NOTEBOOK NOW:\n{notebook_block}",
+        f"総監督がいま言ったこと:\n{note.strip()}",
+        (
+            "DIRECTION SKETCH: An on-set preview still is attached (pose / "
+            "framing reference from the director). Match beat / frame / tags "
+            "to what you SEE. Prefer the image over vague prose when they conflict."
+        ) if direction else "",
+        "Partner Muse sections wearing_b/beat_b apply." if partner else
+        "Solo shoot — leave wearing_b and beat_b unused.",
+        "Return JSON only.",
+    ] if b.strip())
+
+    raw = ""
+    if direction:
+        # Vision path — schema format is unreliable with images; parse+validate.
+        try:
+            raw = await _call(
+                ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
+                images=direction, num_ctx=num_ctx, think=False, on_token=None,
+            )
+        except ChainError:
+            logger.warning("[muse.chain] scripter VLM turn failed", exc_info=True)
+            raw = ""
+        parsed = notebook_mod.parse_scripter(raw)
+        validated = notebook_mod.validate_scripter(parsed, partner=partner)
+        return validated
+
+    gen = getattr(ollama, "generate_text", None)
+    if callable(gen):
+        try:
+            options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
+            # Prefer schema-constrained JSON; fall back without format if the
+            # backend rejects the schema object (older fakes / proxies).
+            try:
+                raw = await gen(
+                    prompt, model=model, options=options,
+                    system=SCRIPTER_SYSTEM, think=False,
+                    fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
+                )
+            except TypeError:
+                raw = await gen(
+                    prompt, model=model, options=options,
+                    system=SCRIPTER_SYSTEM, think=False,
+                )
+            except Exception:
+                logger.warning(
+                    "[muse.chain] scripter schema format failed; retry plain",
+                    exc_info=True,
+                )
+                raw = await gen(
+                    prompt, model=model, options=options,
+                    system=SCRIPTER_SYSTEM, think=False,
+                )
+        except Exception:
+            logger.warning("[muse.chain] scripter generate_text failed", exc_info=True)
+            raw = ""
+    if not str(raw or "").strip():
+        try:
+            # Stream fallback for tests/fakes — still ask for JSON; validation
+            # stays the gate (sampling already via llm_options in _call).
+            raw = await _call(
+                ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
+                images=None, num_ctx=num_ctx, think=False, on_token=None,
+            )
+        except ChainError:
+            logger.warning("[muse.chain] scripter turn produced nothing", exc_info=True)
+            return notebook_mod.validate_scripter(notebook_mod._blank_result(""))
+    parsed = notebook_mod.parse_scripter(raw)
+    validated = notebook_mod.validate_scripter(parsed, partner=partner)
+    if validated.get("valid") or not str(raw or "").strip():
+        return validated
+    # One repair pass — ask for corrected JSON only (sampling unchanged).
+    if not callable(gen):
+        return validated
+    reason = str(validated.get("refuse_reason") or "invalid_or_unparseable")
+    repair_prompt = "\n\n".join([
+        "Your previous studio-scripter output was rejected "
+        f"({reason}). Return ONLY a corrected JSON object matching the schema. "
+        "No prose, no markdown fences.",
+        f"PREVIOUS OUTPUT:\n{str(raw)[:3500]}",
+        f"ORIGINAL REQUEST:\n{prompt}",
+    ])
+    try:
+        options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
+        try:
+            raw2 = await gen(
+                repair_prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+                fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
+            )
+        except TypeError:
+            raw2 = await gen(
+                repair_prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+            )
+        except Exception:
+            raw2 = await gen(
+                repair_prompt, model=model, options=options,
+                system=SCRIPTER_SYSTEM, think=False,
+            )
+        if str(raw2 or "").strip():
+            repaired = notebook_mod.validate_scripter(
+                notebook_mod.parse_scripter(raw2), partner=partner,
+            )
+            if repaired.get("valid"):
+                logger.info("[muse.chain] scripter repair pass succeeded")
+                return repaired
+    except Exception:
+        logger.warning("[muse.chain] scripter repair pass failed", exc_info=True)
+    return validated

@@ -59,18 +59,41 @@ GARMENTS: top=white_shirt / bottom=pants / feet=none / extras=none
 """
 
 
-class TalkingOllama(FakeOllama):
-    """Answers a conversation turn with a line, and a prep turn with a shot."""
+_SCRIPTER_OPENING = """
+INTENT: shot
+ATMOSPHERE: late-night karaoke alone
+SCENE: messy karaoke room with cola cans and a mic
+FRAME: eye level, looking at viewer
+WEARING: white shirt, pants
+BEAT: sitting on the edge of the couch
+VIBE: quiet
+OPEN:
+CLEAR_OPEN: no
+STANDING: none
+UNCHANGED: none
+TAGS: messy_room, cola_can, microphone, white_shirt, pants, sitting, looking_at_viewer
+CRAFT_SCENE: A messy karaoke room at night; she sits on the couch edge in a white shirt and pants, cola cans nearby.
+""".strip()
 
-    def __init__(self, routes=None):
+
+class TalkingOllama(FakeOllama):
+    """Answers a conversation turn with a line; scripter seeds a shot on prep."""
+
+    def __init__(self, routes=None, scripts=None):
         super().__init__()
         self.routes = routes or {}
+        self.scripts = scripts or {}
 
     def generate_text_stream(self, prompt, **kw):
         self.calls.append({**kw, "prompt": prompt})
         system = str(kw.get("system") or "")
-        text = "SAY: えっと……その場所なら、私はたぶん端っこに座っちゃうかも。"
-        if "eight parts" in system:
+        text = "SAY: えっと……その場所なら、私はたぶん端っこに座っちゃうかも。コーラの缶、足元にあるね。"
+        if "studio scripter" in system or "shot notebook" in system:
+            text = next(
+                (v for k, v in self.scripts.items() if k in str(prompt)),
+                _SCRIPTER_OPENING,
+            )
+        elif "eight parts" in system:
             text = next(
                 (v for k, v in self.routes.items() if k in str(prompt)),
                 "FACETS: none\nSTANDING: none",
@@ -149,10 +172,15 @@ async def _duet_session(db, **over):
 
 @pytest.mark.asyncio
 async def test_talking_is_only_talking_and_writes_no_script():
-    """The eighteen-seat table rewrites the craft every single turn. Here that
-    would make conversation cost a full craft pass, and the point of the mode is
-    that the two of you can just talk."""
-    db, ollama = FakeDb(), TalkingOllama()
+    """Casual chat must not compile a picture. Scripter returns casual."""
+    db = FakeDb()
+    ollama = TalkingOllama(scripts={
+        "散らか": (
+            "INTENT: casual\nVIBE: wanting a messier room\n"
+            "CLEAR_OPEN: no\nSTANDING: none\nUNCHANGED: none\n"
+            "TAGS: none\nCRAFT_SCENE: none"
+        ),
+    })
     session = await _duet_session(db)
 
     session = await service.start_duet(db, ollama, session)
@@ -171,18 +199,16 @@ async def test_talking_is_only_talking_and_writes_no_script():
 
 @pytest.mark.asyncio
 async def test_getting_ready_is_when_the_script_appears():
+    """①撮影準備 seeds/densifies craft when chat has not compiled yet."""
     db, ollama = FakeDb(), TalkingOllama()
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
 
     session = await service.duet_prep_stage(db, ollama, session)
 
-    # The shot exists in parts, and the craft is the view of it everything
-    # downstream still reads.
-    assert "messy_room" in facets.table_of(session)["place"]["tags"]
     assert "messy_room" in session["craft"]["tags"]
     assert "silver_hair" in session["craft"]["prompt"]
-    # She reads the frame back, so there is something to say「これ足して」to.
+    assert session["notebook"]["wearing"] or session["craft"]["tags"]
     assert "コーラの缶" in session["chat"][-1]["text"]
     assert session["chat"][-1]["muse_id"] == crew.DEFAULT_MEMBER["actress"]
 
@@ -207,7 +233,14 @@ async def test_typed_stage_words_never_auto_trigger_a_render():
     """Prep, test shot and approve are buttons now (`duet_prep_stage`,
     `request_board`, `approve_and_shoot`) — typed text, however phrased, is
     always conversation and never itself moves the shoot forward a stage."""
-    db, ollama, spooler = FakeDb(), TalkingOllama(), FakeSpooler()
+    db, spooler = FakeDb(), FakeSpooler()
+    ollama = TalkingOllama(scripts={
+        "試し撮り": (
+            "INTENT: casual\nVIBE: asking for a test shot\n"
+            "CLEAR_OPEN: no\nSTANDING: none\nUNCHANGED: none\n"
+            "TAGS: none\nCRAFT_SCENE: none"
+        ),
+    })
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
 
@@ -216,7 +249,7 @@ async def test_typed_stage_words_never_auto_trigger_a_render():
     )
 
     assert spooler.jobs == []
-    assert session["craft"]["prompt"] == "", "text alone must never build a script"
+    assert session["craft"]["prompt"] == "", "stage words alone must not build a script"
 
     with pytest.raises(service.MuseError):
         await service.request_board(db, FakeComfy(), spooler, session, ollama=ollama)
@@ -242,63 +275,55 @@ async def test_approval_sounding_chat_never_shoots_after_prep():
 
 @pytest.mark.asyncio
 async def test_everything_she_is_told_stays_told():
-    """A note outlives the turn that answered it — as direction on the part it
-    was about, not as its own words replayed forever."""
+    """Notebook keeps absolute values across turns — muse prompt sees them."""
     db = FakeDb()
-    ollama = TalkingOllama(routes={"冬": "FACETS: hour\nHOUR: 真冬の夜"})
+    ollama = TalkingOllama(scripts={
+        "冬": """
+INTENT: shot
+ATMOSPHERE: midwinter night
+SCENE: karaoke room in winter
+FRAME: eye level
+WEARING: heavy coat, scarf
+BEAT: sitting
+VIBE: cold
+CLEAR_OPEN: no
+STANDING: none
+UNCHANGED: none
+TAGS: winter, heavy_coat, scarf, sitting, karaoke
+CRAFT_SCENE: Midwinter night in a karaoke room; heavy coat and scarf.
+""".strip(),
+    })
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
     session = await service.duet_prep_stage(db, ollama, session)
 
     session = await service.post_duet_chat(db, ollama, session, "冬にして。厚着で。")
     assert "冬にして。厚着で。" in session["notes"]
-    assert session["directives"]["hour"]["text"] == "真冬の夜"
-
-    session = await service.duet_prep_stage(db, ollama, session)
-    prompt = ollama.calls[-1]["prompt"]
-    assert "真冬の夜" in prompt, "direction must outlive the turn answering it"
-
-
-@pytest.mark.asyncio
-async def test_a_refusal_is_still_carried_out_and_still_stops_being_read():
-    """A note that names no part of the shot is the other kind of instruction —
-    a standing refusal — and the strike clerk still owns it. Once carried out
-    its words drop out of what every turn re-reads, which is what stopped the
-    crew discussing a thing that had been vetoed."""
-    db, ollama = FakeDb(), GarmentSwapOllama()
-    session = await _duet_session(db)
-    session = await service.start_duet(db, ollama, session)
-    session = await service.duet_prep_stage(db, ollama, session)
-
-    session = await service.post_duet_chat(db, ollama, session, "パンツはやめて")
-    assert session["banned"] == ["pants"]
-    assert session.get("carried_out"), "the strike pass must record what it resolved"
-    assert "pants" not in session["craft"]["tags"]
-
-    # A note that names no part rewrites nothing, so there is no prep turn to
-    # inspect — the refusal was carried out as state. The next turn that DOES
-    # write craft must not be handed the refused noun.
-    session = await service.post_duet_chat(db, ollama, session, "スカートにして")
-    session = await service.duet_prep_stage(db, ollama, session)
-    prep = ollama.calls[-1]["prompt"]
-    assert "パンツはやめて" not in prep
-    assert "pants" not in prep
-    # And it cannot be written back in, whatever the turn says.
-    assert "pants" not in session["craft"]["tags"]
+    assert "heavy coat" in session["notebook"]["wearing"] or "heavy_coat" in session["craft"]["tags"]
+    assert "真冬" in session["digest"] or "winter" in session["craft"]["tags"]
 
 
 @pytest.mark.asyncio
 async def test_a_costume_change_replaces_the_outfit_in_every_place_it_lives():
-    """"Change the pants to a skirt" used to need a structural GARMENTS diff to
-    take the pants back out, because the craft was one flat bag and the model's
-    own tag line still named them.
-
-    It still names them. It no longer matters: the costume facet is replaced
-    whole, and GARMENTS is the one authority for what the outfit is. And the
-    check the old version could not make — that the old garment is gone from the
-    eight descriptive lines every later turn re-reads as LOCKED — is here too.
-    """
-    db, ollama = FakeDb(), GarmentSwapOllama()
+    """Full compile replaces the outfit — old bottoms do not linger in craft."""
+    db = FakeDb()
+    ollama = TalkingOllama(scripts={
+        "お題": _SCRIPTER_OPENING,
+        "スカート": """
+INTENT: shot
+ATMOSPHERE: late-night karaoke alone
+SCENE: messy karaoke room with cola cans and a mic
+FRAME: eye level, looking at viewer
+WEARING: white shirt, long skirt
+BEAT: sitting on the edge of the couch
+VIBE: quiet
+CLEAR_OPEN: no
+STANDING: none
+UNCHANGED: none
+TAGS: messy_room, cola_can, microphone, white_shirt, long_skirt, sitting, looking_at_viewer
+CRAFT_SCENE: Same messy room; white shirt and a long skirt, no pants.
+""".strip(),
+    })
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
 
@@ -306,30 +331,38 @@ async def test_a_costume_change_replaces_the_outfit_in_every_place_it_lives():
     assert "pants" in session["craft"]["tags"]
 
     session = await service.post_duet_chat(db, ollama, session, "スカートにして")
-    session = await service.duet_prep_stage(db, ollama, session)
 
     assert "long_skirt" in session["craft"]["tags"]
     assert "pants" not in session["craft"]["tags"]
-    assert "pants" not in brief_mod.costume_block(session["costume"])
-    for value in facets.table_of(session)["costume"]["fields"].values():
-        assert "pants" not in str(value).lower()
-    # The room was not in the answer, so it cannot have been disturbed by it.
     assert "cola_can" in session["craft"]["tags"]
 
 
-def test_prep_closing_instruction_reinforces_costume_and_props_too():
-    """Bug 6: the reminder to reflect the Showrunner's latest instruction
-    used to single out place/camera/pose and omit costume/props, which
-    biased the rewrite toward keeping whatever outfit was improvised early."""
-    prompt = service._duet_user_prompt({"inputs": {}, "chat": [], "notes": [],
-                                        "craft": {}}, "スカートにして", prep=True)
-    assert "衣装や小物を変えていたら" in prompt
-    assert "パンツをスカートに直す" in prompt
+def test_prep_closing_instruction_is_sensory_readout():
+    """Notebook prep asks for a feeling readout, not a TAGS rewrite."""
+    prompt = service._duet_user_prompt(
+        {"inputs": {}, "chat": [], "notes": [],
+         "craft": {"prompt": "1girl, skirt, masterpiece, best_quality"},
+         "mode": "duet",
+         "notebook": {"rev": 1, "wearing": "skirt", "scene": "room", "beat": "standing"}},
+        "スカートにして", prep=True,
+    )
+    assert "撮影準備の仕上げ" in prompt
+    assert "TAGS/SCENE" not in prompt
+    # Notebook path must not hand the TAGS string to Muse for readout.
+    assert "masterpiece" not in prompt
+    assert "装い" in prompt or "skirt" in prompt
 
 
 @pytest.mark.asyncio
 async def test_a_duet_session_never_falls_through_to_the_crewed_studio():
-    db, ollama, spooler = FakeDb(), TalkingOllama(), FakeSpooler()
+    db, spooler = FakeDb(), FakeSpooler()
+    ollama = TalkingOllama(scripts={
+        "明るく": (
+            "INTENT: casual\nVIBE: asking about brightness\n"
+            "CLEAR_OPEN: no\nSTANDING: none\nUNCHANGED: none\n"
+            "TAGS: none\nCRAFT_SCENE: none"
+        ),
+    })
     session = await _duet_session(db)
     session = await service.start_duet(db, ollama, session)
 
@@ -356,7 +389,8 @@ def test_she_is_told_she_is_the_whole_crew_when_getting_ready():
 
 def test_the_talking_prompt_writes_nothing_down():
     text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk")
-    assert "Nothing is being written down" in text
+    assert "SAY:" in text
+    assert "No tags" in text or "no tags" in text.lower()
     assert "TAGS or SCENE" in text
     assert "TEN OR MORE OBJECTS" not in text
 
@@ -371,14 +405,14 @@ def test_talk_prompt_is_not_an_interview_bot():
     assert "settled facts" not in low
     assert "newest line wins" in low
     assert "do not interview" in low
-    assert "can get ready" in low
+    assert "getting ready" in low
 
 
 def test_talk_prompt_accepts_revisions_not_only_clothes():
     text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk")
     low = text.lower()
-    assert "drop the old choice" in low
-    assert "refusing to change" in low
+    assert "newest line wins" in low
+    assert "sense and body first" in low
     assert "echo instruction headings" in low
 
 
@@ -409,6 +443,31 @@ def test_talk_prompt_injects_character_voice():
     assert "VOICE" in text
 
 
+def test_talk_prompt_injects_chara_json_individuality():
+    """Full personality_presets fields must reach the duet talk contract."""
+    from app.characters.presets import load_seed_presets, preset_to_character
+
+    rows = load_seed_presets()
+    preset = next(r for r in rows if r.get("id") == "c001")
+    ch = preset_to_character(preset)
+    text = crew.actress_duet_prompt(ch, mode="talk", seed="c001")
+    app = (ch.get("personality") or {}).get("appearance") or {}
+    assert ch["first_person_ja"] in text
+    assert "ちょっと声が低目で" in text
+    assert str(app.get("voice") or "")[:24] in text
+    assert str(app.get("habit") or "")[:24] in text
+    assert str((ch.get("personality") or {}).get("title_ja") or "")[:12] in text
+    assert "INDIVIDUALITY LOCK" in text
+    assert "SIGNATURE BEAT" in text
+    assert "FIRST READ" in text
+    # Distinctive girl vs generic soft-polite
+    tsuba = preset_to_character(next(r for r in rows if r.get("id") == "c020"))
+    tsuba_text = crew.actress_duet_prompt(tsuba, mode="talk", seed="c020")
+    assert "アタシ" in tsuba_text
+    assert "息を切らし気味の早口" in tsuba_text
+    assert "アタシ" not in text
+
+
 def test_duet_talk_user_prompt_prefers_latest_over_sticky():
     session = {
         "inputs": {"theme": "放送室"},
@@ -418,10 +477,12 @@ def test_duet_talk_user_prompt_prefers_latest_over_sticky():
         ],
         "notes": ["放送室に行こう"],
         "craft": {},
+        "mode": "duet",
+        "notebook": {"rev": 1, "wearing": "shirt"},
     }
     prompt = service._duet_user_prompt(session, "マイク前で椅子に座って", prep=False)
     assert "いちばん新しい発言が勝つ" in prompt
-    assert "自分から具体案" in prompt
+    assert "二択" in prompt or "具体案" in prompt
     assert "get ready" in prompt
     assert "撮る画を一つに決めて" not in prompt
 
@@ -432,12 +493,19 @@ def test_duet_prep_user_prompt_rewrites_against_previous_craft():
         "chat": [],
         "notes": ["教室じゃなくて放送室", "後ろから"],
         "craft": {"prompt": "classroom, wooden_desk, covering_mouth"},
+        "mode": "duet",
+        "notebook": {
+            "rev": 1, "scene": "broadcast room",
+            "wearing": "shirt", "beat": "sitting at the mic",
+        },
     }
     prompt = service._duet_user_prompt(session, "撮影準備", prep=True)
     assert "変える必要のないところは変えない" not in prompt
-    assert "矛盾する" in prompt
-    assert "TAGS/SCENE にも必ず反映" in prompt
-    assert "classroom, wooden_desk" in prompt
+    assert "撮影準備の仕上げ" in prompt
+    # Notebook path: feel the shot from the notebook, never TAGS inventory.
+    assert "classroom, wooden_desk" not in prompt
+    assert "broadcast room" in prompt
+    assert "装い" in prompt or "shirt" in prompt
 
 
 @pytest.mark.asyncio

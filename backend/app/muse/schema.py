@@ -10,12 +10,12 @@ import time
 import uuid
 from typing import Any
 
-from . import crew, facets
+from . import crew, facets, notebook
 from .defaults import ALL_DEFAULTS
 
-# Re-exported so callers have one obvious place to reach for it. The table
-# itself and the rules that maintain it live in `facets.py`.
-migrate = facets.migrate
+# Re-exported so callers have one obvious place to reach for it. Duet now
+# migrates through notebook (which still runs facets.migrate for legacy rows).
+migrate = notebook.migrate
 
 # Acts the panel rails through. "refine" removed — boards + OK replace it.
 STEPS: tuple[str, ...] = (
@@ -61,17 +61,15 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # Everything the Showrunner has said, kept forever. A note used to live
         # only in the turn that answered it.
         "notes": [],
-        # Working craft the crew is building toward the board / shoot. On the
-        # duet path this is DERIVED from `facets` below — see
-        # `service._reassemble`. Everything downstream (the render, the ledger,
-        # the report, the panel) still reads it and does not know the
-        # difference.
+        # Working craft toward the board / shoot. On duet this is compiled from
+        # `notebook` by the scripter (full replace). Crewed studio still builds
+        # it seat-by-seat. Downstream (render, ledger, panel) always reads craft.
         "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
-        # The shot, in parts. Each part carries its own danbooru tags AND its
-        # own sentence, and is rewritten as a whole or not at all. This is what
-        # makes a camera move actually move the camera: nothing removes
-        # `from_above`, the camera facet is overwritten and `from_above` only
-        # ever lived there. See `facets.py`.
+        # Living shot notebook (plain language). Duet source of truth.
+        "notebook": notebook.blank(
+            partner=bool(str((inputs or {}).get("partner_preset") or "").strip())
+        ),
+        # Legacy facet table — migration / older helpers only. Not duet truth.
         "facets": facets.blank_table(),
         # The Showrunner's direction, reconciled instead of stacked: one entry
         # per facet, and a new camera order REPLACES the previous camera order.
@@ -202,7 +200,16 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         preset=str(inputs.get("crew_preset") or crew_mod.DEFAULT_PRESET),
         crew_ids=list(inputs.get("crew_ids") or []) or None,
     )
-    return {
+    still = session.get("direction_still") if isinstance(session.get("direction_still"), dict) else {}
+    # Never ship the JPEG blob to the panel — only a presence flag + size.
+    public_still = None
+    if still and still.get("jpeg_b64"):
+        public_still = {
+            "at": still.get("at"),
+            "bytes": still.get("bytes") or 0,
+            "ready": True,
+        }
+    view = {
         **session,
         "steps": list(STEPS),
         "step_state": step_state(session),
@@ -210,4 +217,6 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         "needs": missing_inputs(session),
         "roster": crew_mod.public_roster(session.get("character") or {}, cast),
         "style_in_use": crew_mod.base_style_for(cast, inputs.get("style") or ""),
+        "direction_still": public_still,
     }
+    return view

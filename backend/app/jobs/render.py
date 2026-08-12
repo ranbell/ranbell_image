@@ -52,6 +52,7 @@ async def run_render(
     payload_extra: dict[str, Any] | None = None,
     attach: AttachFn | None = None,
     preview: PreviewFn | None = None,
+    reference_image: bytes | None = None,
 ) -> dict:
     """Render one image and hand the sha256 back to ``attach``.
 
@@ -59,6 +60,9 @@ async def run_render(
     lists the knobs this workflow had nowhere to put — a draft asked for at
     2 steps that silently rendered at 30 is the single most confusing failure
     in this pipeline, so it is reported rather than swallowed.
+
+    Optional ``reference_image``: when the workflow has an OpenPose / DWPose
+    preprocessor fed by LoadImage, the still is uploaded and wired in.
     """
     reporter.indeterminate()
     if seed is None:
@@ -74,6 +78,26 @@ async def run_render(
             "[render] %s cannot take %s — those values are ignored",
             workflow_name, ", ".join(unpatched),
         )
+
+    openpose_info: dict[str, Any] = {}
+    if reference_image:
+        try:
+            wf, openpose_info = await comfy.apply_openpose_reference(
+                wf, reference_image,
+                filename=f"muse_direction_{prefix}.jpg",
+            )
+            if openpose_info.get("injected"):
+                logger.info(
+                    "[render] openpose reference injected into node %s (%s)",
+                    openpose_info.get("image_node_id"), workflow_name,
+                )
+            elif openpose_info.get("has_openpose"):
+                logger.info(
+                    "[render] workflow has openpose lineage but cannot auto-inject (%s)",
+                    workflow_name,
+                )
+        except Exception:
+            logger.warning("[render] openpose reference skipped", exc_info=True)
 
     patched = comfy.patch_workflow(
         wf, positive, negative, "", "", max(1, int(batch_count)),
@@ -183,4 +207,5 @@ async def run_render(
         "seed": seed,
         "prompt_id": prompt_id,
         "unpatched": unpatched,
+        "openpose": openpose_info,
     }

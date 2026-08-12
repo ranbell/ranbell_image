@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@pixiv/three-vrm": "^3.3.2",
     "d3-force": "^3.0.0",
     "plotly.js-dist-min": "^3.5.1",
+    "three": "^0.170.0",
     "vue": "^3.4.0",
     "vue-i18n": "^9.14.5"
   },

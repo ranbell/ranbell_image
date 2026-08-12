@@ -34,7 +34,12 @@ def test_w_muse_duet_prompt_matrix(id_a, id_b):
     prompt = crew.w_actress_duet_prompt(char_a, char_b, mode="talk")
     assert "W-MUSE" in prompt
     assert "W-MUSE CHEMISTRY & DYNAMICS" in prompt
-    assert "2GIRLS IDENTITY & TAG RULES" in prompt
+    # Talk is voices only — TAG rules stay on prep/scripter.
+    assert "2GIRLS IDENTITY & TAG RULES" not in prompt
+    assert "A:" in prompt and "B:" in prompt
+
+    prep = crew.w_actress_duet_prompt(char_a, char_b, mode="prep")
+    assert "2GIRLS IDENTITY & TAG RULES" in prep
 
 
 @pytest.mark.parametrize("mode", ["talk", "prep"])

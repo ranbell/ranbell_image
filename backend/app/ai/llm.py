@@ -56,7 +56,7 @@ class LlmGateway:
         prompt: str,
         model: str | None = None,
         options: dict | None = None,
-        fmt: str | None = None,
+        fmt: str | dict | None = None,
         think: bool | str | None = None,
         system: str | None = None,
     ) -> str:

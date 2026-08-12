@@ -44,7 +44,7 @@ class FakeOllama:
         self.calls: list[dict] = []
 
     def generate_text_stream(self, prompt, **kw):
-        self.calls.append(kw)
+        self.calls.append({**kw, "prompt": prompt})
 
         async def _stream():
             yield {"type": "think", "text": "deliberating"}
@@ -57,6 +57,19 @@ class FakeOllama:
                 ),
             }
         return _stream()
+
+    async def generate_text(self, prompt, **kw):
+        """Non-stream helper used by the duet scripter (fmt/schema ignored)."""
+        kw.pop("fmt", None)
+        chunks: list[str] = []
+        async for event in self.generate_text_stream(prompt, **kw):
+            if event.get("type") == "token":
+                chunks.append(str(event.get("text") or ""))
+        return "".join(chunks)
+
+    async def embed(self, text, model=None):
+        # Deterministic tiny vector for muse_memories tests.
+        return [float((sum(ord(c) for c in str(text)) % 97) + 1)] * 8
 
     async def unload(self, model=None):
         self.unloaded.append(model)
@@ -296,7 +309,7 @@ async def test_muse_error_messages_follow_locale_en():
     with pytest.raises(service.MuseError) as err:
         await service.request_board(db, FakeComfy(), spooler, {**session, "craft": {}})
     assert "台本" not in str(err.value)
-    assert "prompt" in str(err.value).lower()
+    assert "script" in str(err.value).lower() or "shot" in str(err.value).lower()
 
     with pytest.raises(service.MuseError) as err:
         await service.finish_session(db, spooler, session, ollama=ollama)

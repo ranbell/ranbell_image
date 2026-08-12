@@ -109,6 +109,9 @@ class PartnerPick(BaseModel):
 
 class ChatMessage(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
+    # Optional direction stills (base64 JPEG/PNG, max 1). Used while pose
+    # coaching / direction is ON — not persisted to the board.
+    images: list[str] | None = Field(default=None, max_length=1)
 
 
 class FacetPatch(BaseModel):
@@ -252,6 +255,7 @@ async def post_chat(session_id: str, body: ChatMessage, request: Request):
     return await _run(service.post_chat(
         _db(request), _llm(request, session),
         request.app.state.comfy, request.app.state.spooler, session, body.text,
+        images=body.images,
     ))
 
 
