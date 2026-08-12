@@ -1387,9 +1387,10 @@
     "scripterUpdating": "Updating the craft…",
     "poseSketch": {
       "title": "Pose sketch",
-      "hint": "chibi · camera-aware",
-      "title3d": "3D chibi sketch",
-      "hint3d": "cute figure · camera-linked",
+      "hint": "from tags (SVG)",
+      "title3d": "3D avatar sketch",
+      "hint3d": "VRM · pose/camera linked",
+      "loading": "Loading model…",
       "gazeViewer": "looking at lens",
       "posture": {
         "standing": "standing",

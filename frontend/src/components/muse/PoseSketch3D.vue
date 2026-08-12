@@ -1,7 +1,7 @@
 <script setup>
 /**
- * Cute procedural 3D chibi preview (Three.js) driven by the same tag/notebook
- * contract as the 2D sketch. Falls back to SVG PoseSketch if WebGL is missing.
+ * VRM avatar pose preview (normal proportions) driven by craft tags / notebook.
+ * Falls back to SVG PoseSketch if WebGL or VRM load fails.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -20,9 +20,10 @@ const props = defineProps({
 const { t } = useI18n()
 const host = ref(null)
 const use3d = ref(true)
-const ready = ref(false)
+const loading = ref(false)
 const err = ref('')
 let stage = null
+let dead = false
 
 const model = computed(() => buildPoseSketch(props.tags, {
   beat: props.beat,
@@ -64,21 +65,32 @@ function pushPose() {
   })
 }
 
-onMounted(async () => {
-  if (!show.value) return
+async function mountStage() {
+  if (dead || !host.value || !use3d.value) return
+  loading.value = true
+  err.value = ''
   try {
     const canvas = document.createElement('canvas')
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
     if (!gl) throw new Error('no webgl')
-    const { createChibiStage } = await import('../../muse/chibi3d.js')
-    if (!host.value) return
-    stage = createChibiStage(host.value, { duo: props.duo })
+    const { createAvatarStage } = await import('../../muse/avatar3d.js')
+    if (stage) {
+      stage.dispose()
+      stage = null
+    }
+    if (!host.value || dead) return
+    stage = await createAvatarStage(host.value, { duo: props.duo })
     pushPose()
-    ready.value = true
   } catch (e) {
     err.value = String(e?.message || e)
     use3d.value = false
+  } finally {
+    loading.value = false
   }
+}
+
+onMounted(() => {
+  if (show.value) mountStage()
 })
 
 watch(
@@ -88,45 +100,21 @@ watch(
 
 watch(
   () => props.duo,
-  async (duo) => {
-    if (!use3d.value || !host.value) return
-    if (stage) {
-      stage.dispose()
-      stage = null
-    }
-    try {
-      const { createChibiStage } = await import('../../muse/chibi3d.js')
-      stage = createChibiStage(host.value, { duo })
-      pushPose()
-    } catch (e) {
-      use3d.value = false
-      err.value = String(e?.message || e)
-    }
-  },
+  () => { if (use3d.value) mountStage() },
 )
 
-watch(show, async (v) => {
-  if (v && use3d.value && !stage && host.value) {
-    try {
-      const { createChibiStage } = await import('../../muse/chibi3d.js')
-      stage = createChibiStage(host.value, { duo: props.duo })
-      pushPose()
-      ready.value = true
-    } catch (e) {
-      use3d.value = false
-      err.value = String(e?.message || e)
-    }
-  }
+watch(show, (v) => {
+  if (v && use3d.value && !stage) mountStage()
 })
 
 onBeforeUnmount(() => {
+  dead = true
   if (stage) stage.dispose()
   stage = null
 })
 </script>
 
 <template>
-  <!-- WebGL missing → existing cute SVG sketch -->
   <PoseSketch
     v-if="show && !use3d"
     :tags="tags"
@@ -139,19 +127,24 @@ onBeforeUnmount(() => {
 
   <div
     v-else-if="show"
-    class="rounded-xl border border-pink-300/15 bg-gradient-to-b from-rose-950/25 via-black/30 to-teal-950/20 overflow-hidden transition-colors duration-500"
+    class="rounded-xl border border-white/10 bg-[#1a1a1e] overflow-hidden transition-colors duration-500"
     :class="flash ? 'border-[var(--sb-teal)]/70' : ''"
   >
     <div class="flex items-center justify-between px-2.5 pt-2 pb-0.5">
       <h4 class="text-[11px] text-[var(--sb-amber)]">{{ t('muse.poseSketch.title3d') }}</h4>
       <span class="text-[9px] text-[var(--sb-faint)]">{{ t('muse.poseSketch.hint3d') }}</span>
     </div>
-    <div ref="host" class="w-full min-h-[180px] px-1" />
+    <div ref="host" class="w-full min-h-[220px] px-1 relative">
+      <p
+        v-if="loading"
+        class="absolute inset-0 flex items-center justify-center text-[11px] text-[var(--sb-faint)]"
+      >{{ t('muse.poseSketch.loading') }}</p>
+    </div>
     <p v-if="caption" class="px-2.5 text-[10px] text-[var(--sb-muted)]">{{ caption }}</p>
     <div v-if="chips.length" class="flex flex-wrap gap-1 px-2.5 pb-2 pt-1">
       <span
         v-for="c in chips" :key="c"
-        class="rounded-full border border-pink-300/20 bg-white/5 px-2 py-0.5 font-mono text-[9px] text-gray-300"
+        class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[9px] text-gray-300"
       >{{ c }}</span>
     </div>
     <p v-if="err" class="px-2.5 pb-2 text-[9px] text-[var(--sb-faint)]">{{ err }}</p>
