@@ -1405,6 +1405,7 @@
       "farther": "Farther",
       "lapPillow": "Snap to lap",
       "resetPlace": "Reset places",
+      "directionImageHint": "While direction is ON, each chat turn includes the shot-preview still.",
       "arms": {
         "arms_at_sides": "Arms down",
         "arms_up": "Arms up",

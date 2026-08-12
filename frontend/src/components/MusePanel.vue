@@ -44,6 +44,8 @@ const scripterWhisper = ref('')   // body-line while craft updates (no LLM)
 const notebookFlash = ref('')     // which notebook row to pulse
 const memoryHintSeen = ref(false)
 const chatInput = ref('')
+const directionOn = ref(false)    // pose-coaching ON → attach preview still to chat
+const poseSketchRef = ref(null)
 const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
@@ -650,15 +652,24 @@ async function setMode(mode) {
   } catch (err) { fail(err) }
 }
 
-async function sendChat(text) {
+async function sendChat(text, opts = {}) {
   const body = (text ?? chatInput.value).trim()
   if (!body || !session.value || chatLocked.value) return
   busy.value = true
   chatInput.value = ''
   startedAt = Date.now()
   try {
+    const payload = { text: body }
+    // While direction (pose coaching) is ON, stream the shot-preview still.
+    let image = String(opts.image || '').trim()
+    if (!image && directionOn.value && poseSketchRef.value?.captureDirectionFrame) {
+      try {
+        image = String(poseSketchRef.value.captureDirectionFrame() || '').trim()
+      } catch { /* capture is best-effort */ }
+    }
+    if (image) payload.images = [image]
     session.value = await api(`/api/muse/sessions/${session.value.session_id}/chat`, {
-      method: 'POST', body: JSON.stringify({ text: body }),
+      method: 'POST', body: JSON.stringify(payload),
     })
     scrollChat()
   } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
@@ -673,11 +684,15 @@ function stopThinking() {
 
 function quick(cmd) { sendChat(cmd) }
 
-/** Pose coaching from VRM stage → chat as director instruction. */
+/** Pose coaching from VRM stage → chat as director instruction (+ still). */
 function onPoseCoach(payload) {
   const msg = String(payload?.message || '').trim()
   if (!msg) return
-  sendChat(msg)
+  sendChat(msg, { image: payload?.image || '' })
+}
+
+function onCoachMode(on) {
+  directionOn.value = Boolean(on)
 }
 
 // Prep, test shot and final are buttons on their own endpoints — not words
@@ -1236,6 +1251,7 @@ async function onChatKey(e) {
           <!-- Cute 3D chibi (Three.js) — posing + camera, no Comfy. SVG fallback inside. -->
           <PoseSketch3D
             v-if="isDuet && (craft.tags || notebookRows.length)"
+            ref="poseSketchRef"
             :tags="String(craft.tags || '')"
             :beat="String(session?.notebook?.beat || '')"
             :beat-b="String(session?.notebook?.beat_b || '')"
@@ -1243,7 +1259,12 @@ async function onChatKey(e) {
             :duo="isWMuse"
             :flash="Boolean(notebookFlash && ['beat','beat_b','frame'].includes(notebookFlash))"
             @coach="onPoseCoach"
+            @coach-mode="onCoachMode"
           />
+          <p
+            v-if="directionOn"
+            class="px-0.5 text-[9px] text-sky-200/75"
+          >{{ t('muse.poseSketch.directionImageHint') }}</p>
 
           <div v-if="boardImages.length" class="space-y-2">
             <h4 class="text-[11px] text-[var(--sb-amber)]">

@@ -18,7 +18,7 @@ const props = defineProps({
   flash: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['coach'])
+const emit = defineEmits(['coach', 'coach-mode'])
 
 const { t } = useI18n()
 const host = ref(null)
@@ -128,6 +128,7 @@ function toggleCoach() {
   if (!stage) return
   coachOn.value = !coachOn.value
   stage.setCoachMode(coachOn.value)
+  emit('coach-mode', coachOn.value)
   if (coachOn.value) {
     stage.setCoachSubject(coachSubject.value)
     refreshCoachPreview()
@@ -136,6 +137,15 @@ function toggleCoach() {
     pushPose()
   }
   viewMode.value = stage.getViewMode?.() || viewMode.value
+}
+
+function captureDirectionFrame() {
+  if (!stage?.captureFrame || !coachOn.value) return ''
+  try {
+    return stage.captureFrame({ mode: 'shot', quality: 0.82 }) || ''
+  } catch {
+    return ''
+  }
 }
 
 function setViewMode(mode) {
@@ -184,10 +194,17 @@ function sendCoach() {
     subject: props.duo ? coachSubject.value : 'a',
     customLimbs: snap.customLimbs,
     duoSpacing: snap.duoSpacing,
+    freePlacement: snap.freePlacement,
   })
   const tags = poseModelToTags(snap.model, { duo: snap.duo || props.duo })
-  emit('coach', { message, tags, model: snap.model })
+  const image = captureDirectionFrame()
+  emit('coach', { message, tags, model: snap.model, image })
 }
+
+defineExpose({
+  captureDirectionFrame,
+  isCoachOn: () => coachOn.value,
+})
 
 async function mountStage() {
   if (dead || !host.value || !use3d.value) return
@@ -215,6 +232,7 @@ async function mountStage() {
     err.value = String(e?.message || e)
     use3d.value = false
     coachOn.value = false
+    emit('coach-mode', false)
   } finally {
     loading.value = false
   }

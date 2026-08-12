@@ -928,6 +928,7 @@ async def run_scripter(
     ollama, *, notebook_block: str, note: str, theme: str = "",
     style: str = "", framing: str = "", partner: bool = False,
     model: str, num_ctx: int | None,
+    images: list[bytes] | None = None,
 ) -> dict[str, Any]:
     """One non-stream scripter call: intent, notebook patch, optional craft.
 
@@ -935,22 +936,45 @@ async def run_scripter(
     model card via `llm_options` (Gemma: temperature 1.0 — never force 0).
     Invalid output is validate-first: craft fields cleared so callers keep
     prior craft.
+
+    Optional ``images`` (direction stills) switch the call to VLM so the
+    scripter can match beat/frame/tags to what the 総監督 showed.
     """
     from ..ai.llm_options import llm_options
     from . import notebook as notebook_mod
 
+    direction = list(images or [])[:1]
     prompt = "\n\n".join(b for b in [
         f"THEME:\n{theme}" if theme.strip() else "",
         f"STYLE: {style}" if style.strip() else "",
         f"FRAMING: {framing}" if framing.strip() else "",
         f"NOTEBOOK NOW:\n{notebook_block}",
         f"総監督がいま言ったこと:\n{note.strip()}",
+        (
+            "DIRECTION SKETCH: An on-set preview still is attached (pose / "
+            "framing reference from the director). Match beat / frame / tags "
+            "to what you SEE. Prefer the image over vague prose when they conflict."
+        ) if direction else "",
         "Partner Muse sections wearing_b/beat_b apply." if partner else
         "Solo shoot — leave wearing_b and beat_b unused.",
         "Return JSON only.",
     ] if b.strip())
 
     raw = ""
+    if direction:
+        # Vision path — schema format is unreliable with images; parse+validate.
+        try:
+            raw = await _call(
+                ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
+                images=direction, num_ctx=num_ctx, think=False, on_token=None,
+            )
+        except ChainError:
+            logger.warning("[muse.chain] scripter VLM turn failed", exc_info=True)
+            raw = ""
+        parsed = notebook_mod.parse_scripter(raw)
+        validated = notebook_mod.validate_scripter(parsed, partner=partner)
+        return validated
+
     gen = getattr(ollama, "generate_text", None)
     if callable(gen):
         try:

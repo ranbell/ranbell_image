@@ -433,6 +433,38 @@ def _downscale(raw: bytes) -> bytes:
     return buf.getvalue()
 
 
+def decode_chat_images(
+    raw_list: list[str] | None, *, max_n: int = 1,
+) -> list[bytes]:
+    """Decode optional chat direction stills (base64) → downscaled JPEG bytes.
+
+    Accepts raw base64 or ``data:image/...;base64,...``. Empty / oversized /
+    undecodable entries are skipped. Never raises — bad attachments must not
+    kill the turn.
+    """
+    import base64
+
+    out: list[bytes] = []
+    for item in list(raw_list or [])[:max(1, int(max_n))]:
+        s = str(item or "").strip()
+        if not s:
+            continue
+        if s.startswith("data:") and "," in s:
+            s = s.split(",", 1)[1]
+        try:
+            raw = base64.b64decode(s, validate=False)
+        except Exception:
+            continue
+        if len(raw) < 32 or len(raw) > 4_000_000:
+            continue
+        try:
+            out.append(_downscale(raw))
+        except Exception:
+            logger.debug("[muse] direction image decode failed", exc_info=True)
+            continue
+    return out
+
+
 async def board_images(db, session: dict[str, Any], *, limit: int = 1) -> list[bytes]:
     """The board the crew is being asked about, small enough to hand to a VLM.
 
@@ -1812,7 +1844,8 @@ _SHOT_HINT_RE = re.compile(
     r"着て|着せ|厚着|薄着|脱い|外して|かぶ|持ってて|持たせ|場所|"
     r"セーラー|スカート|シャツ|カーディガン|コート|マフラー|スマホ|ラムネ|"
     r"ショット|構図|アングル|寄って|寄りで|引いて|引きで|"
-    r"撮影|撮り直|撮り方|画角|真冬)",
+    r"撮影|撮り直|撮り方|画角|真冬|"
+    r"膝枕|こんな感じ|見取り図|こうしてね)",
 )
 
 
@@ -2054,6 +2087,7 @@ def _apply_compiled_craft(
 
 async def _run_duet_scripter(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+    images: list[bytes] | None = None,
 ) -> dict[str, Any]:
     """INTENT + absolute notebook patch + optional full craft compile."""
     notebook_mod.migrate(session)
@@ -2085,6 +2119,7 @@ async def _run_duet_scripter(
                 f"{text}\n\n(AGAIN-THAT-FEEL clue from sticky memory — "
                 f"use only if INTENT is mixed/shot; do not invent props):\n{again}"
             )
+    direction = list(images or [])[:1]
     result = await chain.run_scripter(
         ollama,
         notebook_block=block,
@@ -2093,8 +2128,9 @@ async def _run_duet_scripter(
         style=_style(session),
         framing=_framing(inputs),
         partner=partner,
-        model=_text_model(inputs),
+        model=_vision_model(inputs) if direction else _text_model(inputs),
         num_ctx=_num_ctx(inputs, cfg),
+        images=direction or None,
     )
     intent = str(result.get("intent") or "casual")
     patch = dict(result.get("patch") or {})
@@ -2271,7 +2307,10 @@ def _format_duet_chat_line(session: dict[str, Any], msg: dict[str, Any]) -> list
     return [f"- {name}: {msg.get('text')}"]
 
 
-def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
+def _duet_user_prompt(
+    session: dict[str, Any], text: str, *, prep: bool,
+    direction_still: bool = False,
+) -> str:
     """What she is handed. Muse-only context (never the scripter's inputs)."""
     inputs = _inputs(session)
     theme = str(inputs.get("theme") or "").strip()
@@ -2347,6 +2386,12 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
         parts.append(f"ここまでの会話:\n{talk}")
     if text.strip():
         parts.append(f"総監督がいま言ったこと:\n{text.strip()}")
+    if direction_still:
+        parts.append(
+            "総監督が現場プレビューの見取り図（ポーズ／画角の参考静止画）を"
+            "一緒に送っている。画を見て、その感じを受け止めて答えて。"
+            "タグの点呼はしない。"
+        )
 
     partner_on = bool(
         (session.get("partner_character") or {})
@@ -2493,6 +2538,7 @@ def _facet_prep_prompt(
 async def _duet_talk(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
     prep: bool = False,
+    images: list[bytes] | None = None,
 ) -> dict[str, Any]:
     """Conversation only — Muse writes SAY; craft comes from the scripter."""
     inputs = _inputs(session)
@@ -2500,7 +2546,10 @@ async def _duet_talk(
     lead = crew.DEFAULT_MEMBER["actress"]
     name = _muse_display_name(session, lead)
     events.publish(sid, {"type": "muse_speaking", "muse_id": lead, "name": name})
-    images = await board_images(db, session)
+    # Prefer this-turn direction still over boarded Comfy stills (max 1).
+    direction = list(images or [])[:1]
+    board = await board_images(db, session) if not direction else []
+    vision_images = direction or board
 
     partner_character = await _partner_character(db, session)
     tier = await _duet_tier(db, session, partner_character)
@@ -2516,12 +2565,15 @@ async def _duet_talk(
     try:
         say, raw_turns, blind = await chain.run_duet_talk(
             ollama,
-            user_prompt=_duet_user_prompt(session, text, prep=prep),
-            model=_vision_model(inputs) if images else _text_model(inputs),
+            user_prompt=_duet_user_prompt(
+                session, text, prep=prep,
+                direction_still=bool(direction),
+            ),
+            model=_vision_model(inputs) if vision_images else _text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),
             character=session.get("character") or {},
             partner_character=partner_character,
-            images=images or None, seed=str(sid),
+            images=vision_images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),
             tier=tier,
         )
@@ -2531,7 +2583,7 @@ async def _duet_talk(
             ja="うまく言葉が出てこないみたいです。もう一度話しかけてください。",
             en="The words didn't come out right. Try talking to her again.",
         )) from exc
-    if blind and images:
+    if blind and vision_images:
         _note_blind(session)
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
@@ -2775,13 +2827,16 @@ async def duet_prep_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]
 
 async def post_duet_chat(
     db, ollama, session: dict[str, Any], text: str,
+    images: list[bytes] | None = None,
 ) -> dict[str, Any]:
     """One turn of the two-hander: scripter updates the notebook, then she talks.
 
     Board / prep / shoot stay their own buttons. Picture changes compile live —
-    prep is not the gate.
+    prep is not the gate. Optional ``images`` are direction stills for this turn
+    only (VRM shot preview) — not boarded.
     """
     sid = session["session_id"]
+    direction_images = list(images or [])[:1]
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
     await session_db.save(db, session)
@@ -2797,10 +2852,14 @@ async def post_duet_chat(
             session["notebook"] = nb
             session["open_faded"] = True
         # Pure chit-chat skips Scripter (plan wait strategy). Affirm / recall /
-        # shot hints still go through the notebook path.
-        if _needs_scripter(session, text):
+        # shot hints still go through the notebook path. A direction still
+        # always wakes Scripter — the picture is the instruction.
+        if _needs_scripter(session, text) or direction_images:
             try:
-                await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
+                await _run_duet_scripter(
+                    db, ollama, session, text, cfg=cfg,
+                    images=direction_images or None,
+                )
             except Exception:
                 logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
                 session["craft_dirty"] = True
@@ -2815,7 +2874,10 @@ async def post_duet_chat(
                 "notebook_rev": int(notebook_mod.of(session).get("rev") or 0),
             })
         await session_db.save(db, session)
-        return await _duet_talk(db, ollama, session, text, cfg=cfg)
+        return await _duet_talk(
+            db, ollama, session, text, cfg=cfg,
+            images=direction_images or None,
+        )
 
     # Legacy non-notebook path (should be rare).
     named, _ = await route_note(db, ollama, session, text, cfg=cfg)
@@ -2826,7 +2888,10 @@ async def post_duet_chat(
         session["just_banned"] = []
         session["just_restored"] = []
     await session_db.save(db, session)
-    return await _duet_talk(db, ollama, session, text, cfg=cfg)
+    return await _duet_talk(
+        db, ollama, session, text, cfg=cfg,
+        images=direction_images or None,
+    )
 
 
 async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
@@ -3127,6 +3192,7 @@ async def _load_handpost_notices(db, session: dict[str, Any]) -> None:
 # ── showrunner message ──────────────────────────────────────────────────────
 async def post_chat(
     db, ollama, comfy, spooler, session: dict[str, Any], text: str,
+    images: list[str] | None = None,
 ) -> dict[str, Any]:
     """Showrunner speaks — always creative direction. Board and shoot are their
     own buttons (`request_board` / `approve_and_shoot`), not words in here."""
@@ -3139,8 +3205,11 @@ async def post_chat(
             ja=f"入力が不足しています: {', '.join(missing_inputs(session))}",
             en=f"missing: {', '.join(missing_inputs(session))}",
         ))
+    direction = decode_chat_images(images, max_n=1)
     if is_duet(session):
-        return await post_duet_chat(db, ollama, session, text)
+        return await post_duet_chat(
+            db, ollama, session, text, images=direction or None,
+        )
     if not (session.get("craft") or {}).get("prompt"):
         # Auto-open table if they chat first.
         session = await start_table(

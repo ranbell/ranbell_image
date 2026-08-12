@@ -1405,6 +1405,7 @@
       "farther": "離す",
       "lapPillow": "膝にスナップ",
       "resetPlace": "配置リセット",
+      "directionImageHint": "ディレクションON中は、送信のたびにショット見取り図を一緒に送ります。",
       "arms": {
         "arms_at_sides": "腕下ろし",
         "arms_up": "腕上げ",

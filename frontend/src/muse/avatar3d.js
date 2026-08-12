@@ -397,6 +397,8 @@ export async function createAvatarStage(container, {
     alpha: false,
     powerPreference: 'low-power',
     failIfMajorPerformanceCaveat: false,
+    // Needed so captureFrame can read pixels after render (coach → chat).
+    preserveDrawingBuffer: true,
   })
   renderer.setPixelRatio(1)
   renderer.setSize(width(), height())
@@ -1508,6 +1510,55 @@ export async function createAvatarStage(container, {
       }
       updateBadge()
       return ok
+    },
+    /**
+     * Capture a JPEG still for direction chat (base64, no data: prefix).
+     * Defaults to shot-camera framing with gizmos hidden — "この絵".
+     */
+    captureFrame({ mode = 'shot', quality = 0.82 } = {}) {
+      const model = coachMode && coachModel ? coachModel : activeModel()
+      const shot = currentShot(model)
+      const prev = {
+        viewMode,
+        gizmo: shotGizmo.root.visible,
+        handles: handleRoot.visible,
+        place: placeRoot.visible,
+        badgeDisp: badge.style.display,
+        pos: viewCam.position.clone(),
+        target: orbit.target.clone(),
+        fov: viewCam.fov,
+      }
+      const useShot = mode !== 'overview'
+      try {
+        shotGizmo.root.visible = false
+        handleRoot.visible = false
+        placeRoot.visible = false
+        badge.style.display = 'none'
+        if (useShot) {
+          viewCam.position.copy(shot.position)
+          viewCam.lookAt(shot.lookAt)
+          viewCam.fov = shot.fov || 34
+          viewCam.updateProjectionMatrix()
+        }
+        renderer.render(scene, viewCam)
+        const dataUrl = renderer.domElement.toDataURL('image/jpeg', quality)
+        const m = /^data:image\/\w+;base64,(.+)$/.exec(dataUrl)
+        return m ? m[1] : ''
+      } catch {
+        return ''
+      } finally {
+        shotGizmo.root.visible = prev.gizmo
+        handleRoot.visible = prev.handles
+        placeRoot.visible = prev.place
+        badge.style.display = prev.badgeDisp
+        viewCam.position.copy(prev.pos)
+        orbit.target.copy(prev.target)
+        viewCam.fov = prev.fov
+        viewCam.updateProjectionMatrix()
+        orbit.update()
+        applyViewMode()
+        renderer.render(scene, viewCam)
+      }
     },
     /** One-tap duo interaction presets (e.g. lap_pillow → snap assist). */
     applyInteraction(name) {
