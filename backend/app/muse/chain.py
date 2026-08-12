@@ -893,6 +893,8 @@ RULES:
   or dropping them.
 - On shot/mixed: always output tags and craft_scene from the WHOLE notebook
   after your patch (full replace, no merging with old tags). English only.
+- Partner shoots: use tags_shared + tags_a + tags_b (never one mixed bag).
+  Solo: use tags only.
 - Draft density: about 20–35 tags; craft_scene 60–120 words. Absolute values.
 - Do not invent diary props. Only the notebook + showrunner line.
 
@@ -968,4 +970,4 @@ async def run_scripter(
             logger.warning("[muse.chain] scripter turn produced nothing", exc_info=True)
             return notebook_mod.validate_scripter(notebook_mod._blank_result(""))
     parsed = notebook_mod.parse_scripter(raw)
-    return notebook_mod.validate_scripter(parsed)
+    return notebook_mod.validate_scripter(parsed, partner=partner)

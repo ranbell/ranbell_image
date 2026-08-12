@@ -309,7 +309,7 @@ async def test_muse_error_messages_follow_locale_en():
     with pytest.raises(service.MuseError) as err:
         await service.request_board(db, FakeComfy(), spooler, {**session, "craft": {}})
     assert "台本" not in str(err.value)
-    assert "prompt" in str(err.value).lower()
+    assert "script" in str(err.value).lower() or "shot" in str(err.value).lower()
 
     with pytest.raises(service.MuseError) as err:
         await service.finish_session(db, spooler, session, ollama=ollama)

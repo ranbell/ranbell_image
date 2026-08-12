@@ -206,7 +206,9 @@ WEARING_B: sleeveless dress
 BEAT_B: standing beside the chair
 CLEAR_OPEN: no
 UNCHANGED: none
-TAGS: 2girls, room, chair, book, sitting, reading, cardigan, sleeveless_dress, standing
+TAGS_SHARED: 2girls, room, chair, book
+TAGS_A: sitting, reading, cardigan
+TAGS_B: standing, sleeveless_dress
 CRAFT_SCENE: A reads in a chair; B stands in a sleeveless dress.
 """.strip()
     scripts["肩"] = """
@@ -219,7 +221,9 @@ WEARING_B: sleeveless dress
 BEAT_B: standing close, receiving the hand on her shoulder
 CLEAR_OPEN: no
 UNCHANGED: none
-TAGS: 2girls, room, from_below, looking_down, hand_on_another's_shoulder, cardigan, sleeveless_dress, standing
+TAGS_SHARED: 2girls, room, from_below, looking_down, hand_on_another's_shoulder
+TAGS_A: cardigan, standing
+TAGS_B: sleeveless_dress, standing
 CRAFT_SCENE: Both standing; hand on shoulder; low angle looking down.
 """.strip()
     scripts["二人立ち"] = """
@@ -232,7 +236,9 @@ WEARING_B: sleeveless dress
 BEAT_B: standing side by side
 CLEAR_OPEN: no
 UNCHANGED: none
-TAGS: 2girls, room, standing, side-by-side, cardigan, sleeveless_dress, looking_at_viewer
+TAGS_SHARED: 2girls, room, standing, side-by-side, looking_at_viewer
+TAGS_A: cardigan
+TAGS_B: sleeveless_dress
 CRAFT_SCENE: Both standing side by side; sitting/reading gone.
 """.strip()
 
@@ -241,6 +247,17 @@ CRAFT_SCENE: Both standing side by side; sitting/reading gone.
     s = await _duet_session(db, partner_preset="p2")
     s["mode"] = "duet"
     s["inputs"]["partner_preset"] = "p2"
+    s["character"] = {
+        "identity_tags": ["1girl", "silver_hair"],
+        "name_ja": "あさひ",
+        "personality": {}, "palette": [], "signature_prop": "",
+    }
+    s["partner_character"] = {
+        "character_id": "p2",
+        "identity_tags": ["1girl", "brown_hair"],
+        "name_ja": "みなも",
+        "personality": {}, "palette": [], "signature_prop": "",
+    }
     await session_db.save(db, s)
 
     await service.post_duet_chat(db, ollama, s, "あさひは椅子で読書、みなもは立ってて")
@@ -331,3 +348,56 @@ async def test_invalid_scripter_does_not_overwrite_craft():
     await service.post_duet_chat(db, ollama, s, "壊す指示で煽りと見上げ同時")
     assert _tags(s) == before
     assert s.get("craft_dirty") is True
+
+
+def test_partner_flat_tags_refused():
+    raw = """
+INTENT: shot
+WEARING: cardigan
+BEAT: sitting
+WEARING_B: dress
+BEAT_B: standing
+TAGS: 2girls, cardigan, dress, sitting, standing
+CRAFT_SCENE: Two girls.
+""".strip()
+    result = notebook.validate_scripter(notebook.parse_scripter(raw), partner=True)
+    assert result["valid"] is False
+    assert result.get("refuse_reason") == "w_muse_tags_unsplit"
+
+
+def test_partner_split_tags_accepted():
+    raw = """
+INTENT: shot
+WEARING: cardigan
+BEAT: sitting
+WEARING_B: dress
+BEAT_B: standing
+TAGS_SHARED: 2girls, room
+TAGS_A: cardigan, sitting
+TAGS_B: dress, standing
+CRAFT_SCENE: Two girls.
+""".strip()
+    result = notebook.validate_scripter(notebook.parse_scripter(raw), partner=True)
+    assert result["valid"] is True
+    assert "cardigan" in result["tags"]
+    assert "dress" in result["tags"]
+
+
+def test_guard_partner_patch_drops_other_muse():
+    patch = {
+        "wearing": "cardigan", "beat": "sitting",
+        "wearing_b": "wrong dress", "beat_b": "wrong pose",
+    }
+    out = notebook.guard_partner_patch(
+        patch, "あさひだけ帽子かぶって",
+        name_a="あさひ", name_b="みなも", partner=True,
+    )
+    assert "wearing" in out
+    assert "wearing_b" not in out
+    assert "beat_b" not in out
+
+
+def test_scripter_status_message_is_sensory():
+    assert "帽子" in service._scripter_status_message("麦わら帽子かぶって")
+    assert "下から" in service._scripter_status_message("煽って撮って")
+    assert "Updating" in service._scripter_status_message("hat please", locale="en")

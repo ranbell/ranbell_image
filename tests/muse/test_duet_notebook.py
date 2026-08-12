@@ -381,3 +381,186 @@ async def test_scripter_exception_keeps_craft_and_muse_talks():
     assert s["craft"]["tags"] == before
     assert s.get("craft_dirty") is True
     assert any(m.get("role") == "muse" for m in s["chat"])
+
+
+@pytest.mark.asyncio
+async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
+    """再会 → recall → 雑談 → shot → OPEN肯定 のノート正本パス。"""
+    db = FakeDb()
+    bond_store = {
+        "distance": "もう顔見知り",
+        "inside": "堤防の夕焼けを一緒に見た",
+        "last": "堤防 / セーラー",
+    }
+    taste_store = {"prefers": "ローアングル", "avoids": "足", "notes": ""}
+
+    async def _bond(db, cid):
+        return dict(bond_store)
+
+    async def _taste(db, cid):
+        return dict(taste_store)
+
+    async def _chem(db, cid, limit=2):
+        return ["息が合いやすい"]
+
+    async def _set_bond(db, cid, bond):
+        bond_store.update(bond)
+        return {
+            "distance": bond_store["distance"],
+            "inside": bond_store["inside"],
+            "last": bond_store["last"],
+        }
+
+    async def _set_taste(db, cid, taste):
+        taste_store.update(taste)
+        return {
+            "prefers": taste_store.get("prefers", ""),
+            "avoids": taste_store.get("avoids", ""),
+            "notes": taste_store.get("notes", ""),
+        }
+
+    monkeypatch.setattr(service.presets_db, "get_bond", _bond)
+    monkeypatch.setattr(service.presets_db, "get_showrunner_taste", _taste)
+    monkeypatch.setattr(service.presets_db, "get_recent_chemistry_notes", _chem)
+    monkeypatch.setattr(service.presets_db, "update_bond", _set_bond)
+    monkeypatch.setattr(service.presets_db, "update_showrunner_taste", _set_taste)
+
+    async def _search(db, ollama, *, character_id, query, limit=3):
+        return [{
+            "when": "堤防の夕焼け",
+            "feel": "風が強かった",
+            "liked": "セーラー",
+            "shot": "looking_at_viewer, sailor_collar",
+        }]
+
+    monkeypatch.setattr(service.memories_db, "search", _search)
+
+    ollama = NotebookOllama(scripts={
+        "この前": (
+            "INTENT: recall\nVIBE: remembering the embankment\n"
+            "CLEAR_OPEN: no\nUNCHANGED: none\nTAGS: none\nCRAFT_SCENE: none"
+        ),
+        "かき氷": (
+            "INTENT: casual\nVIBE: chatting about shaved ice\n"
+            "CLEAR_OPEN: no\nUNCHANGED: none\nTAGS: none\nCRAFT_SCENE: none"
+        ),
+        "屋上": _scripter_block(
+            intent="shot",
+            scene="school rooftop at dusk",
+            frame="eye level, looking at viewer",
+            wearing="sailor uniform",
+            beat="leaning on the fence",
+            open_="ラムネを片手に",
+            tags="rooftop, fence, sailor_collar, leaning, looking_at_viewer",
+            craft_scene="Rooftop lean in sailor uniform.",
+        ),
+        "いいね": _scripter_block(
+            intent="casual",
+            vibe="happy",
+            clear_open="yes",
+        ),
+        "COMPILE ONLY": _scripter_block(
+            intent="shot",
+            scene="school rooftop at dusk",
+            frame="eye level, looking at viewer",
+            wearing="sailor uniform",
+            beat="leaning on the fence, holding ramune",
+            tags="rooftop, fence, sailor_collar, leaning, ramune, looking_at_viewer",
+            craft_scene="Rooftop lean with ramune.",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["character"]["name_ja"] = "あさひ"
+    await session_db.save(db, s)
+
+    s = await service.start_duet(db, ollama, s)
+    assert s.get("bond", {}).get("inside")
+    assert "堤防" in (s.get("bond") or {}).get("inside", "")
+    # Prior sticky notebook so chit-chat can skip scripter (empty shot would
+    # still call it for long theme-like lines).
+    notebook.apply_patch(s["notebook"], {
+        "scene": "embankment at dusk",
+        "frame": "eye level",
+        "wearing": "sailor uniform",
+        "beat": "standing in the wind",
+    })
+    s["craft"] = {
+        "tags": "embankment, sailor_collar, looking_at_viewer",
+        "scene": "Embankment at dusk.",
+        "prompt": "1girl, embankment",
+        "pose_intent": "",
+    }
+    await session_db.save(db, s)
+
+    # Reunion / recall — Muse prompt must ground cited nouns.
+    await service.post_duet_chat(db, ollama, s, "この前の堤防、覚えてる？")
+    muse_prompts = [
+        c["prompt"] for c in ollama.calls
+        if "studio scripter" not in str(c.get("system") or "")
+        and "shot notebook" not in str(c.get("system") or "")
+    ]
+    joined_muse = "\n".join(muse_prompts)
+    assert "CITED_MEMORIES" in joined_muse or "堤防" in joined_muse
+    assert "関係" in joined_muse
+    assert "GROUNDED_TOKENS" in joined_muse
+
+    # Casual skip — craft stays.
+    before_scripts = len(ollama.scripter_prompts)
+    before_tags = str((s.get("craft") or {}).get("tags") or "")
+    await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
+    assert len(ollama.scripter_prompts) == before_scripts
+    assert str((s.get("craft") or {}).get("tags") or "") == before_tags
+
+    # Shot + OPEN affirm.
+    await service.post_duet_chat(db, ollama, s, "屋上でセーラー、フェンスにもたれて")
+    assert "sailor" in s["notebook"]["wearing"] or "sailor" in s["craft"]["tags"]
+    assert s["notebook"]["open"]
+    await service.post_duet_chat(db, ollama, s, "いいね")
+    assert s["notebook"]["open"] == ""
+    assert "ramune" in s["craft"]["tags"] or "ラムネ" in s["notebook"]["beat"]
+
+    # Continuity write after ③ snapshot.
+    s["continuity_snapshot"] = {
+        "theme": "屋上",
+        "notebook": dict(s["notebook"]),
+        "craft_tags": s["craft"]["tags"],
+        "craft_scene": s["craft"]["scene"],
+    }
+    s["standing"] = ["足は映さない"]
+    s.pop("continuity", None)
+    await service.record_shoot_continuity(db, s, ollama=ollama)
+    assert "足" in taste_store.get("avoids", "")
+
+
+def test_cited_allowlist_extracts_grounded_tokens():
+    s = {
+        "memories": ["堤防で夕焼けを見た"],
+        "cited_memories": [{"when": "公園のベンチ", "feel": "風", "liked": "帽子"}],
+        "bond": {"distance": "", "inside": "セーラーが似合う", "last": ""},
+        "partner_memories": [],
+    }
+    allow = service._cited_allowlist(s)
+    joined = " ".join(allow)
+    assert "堤防" in joined
+    assert "セーラー" in joined or "公園" in joined
+
+
+def test_bond_and_taste_from_snapshot_are_short():
+    s = {
+        "continuity_snapshot": {
+            "theme": "屋上",
+            "notebook": {
+                "atmosphere": "夕暮れの屋上",
+                "vibe": "少し照れてる",
+                "wearing": "セーラー",
+                "frame": "low angle 煽り",
+                "open": "",
+            },
+        },
+        "standing": ["足は映さない"],
+    }
+    bond, taste = service._bond_and_taste_from_snapshot(s)
+    assert bond["last"]
+    assert "ローアングル" in taste["prefers"] or "セーラー" in taste["prefers"]
+    assert "足" in taste["avoids"]

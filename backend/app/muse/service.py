@@ -1801,7 +1801,7 @@ _RECALL_HINT_RE = re.compile(
 # Cheap gate: skip Scripter on pure chit-chat (plan wait strategy).
 _SHOT_HINT_RE = re.compile(
     r"(帽子|服|衣装|ポーズ|カメラ|煽|ローアングル|ハイアングル|見上げ|見下ろ|"
-    r"ベンチ|座|立|着|脱|外して|かぶ|持って|場所|屋上|海|公園|教室|"
+    r"ベンチ|座|立|着|脱|外して|かぶ|持って|場所|"
     r"セーラー|スカート|シャツ|カーディガン|スマホ|ラムネ|いいね|それで|"
     r"うん|採用|その感じ|撮|画|ショット|構図|アングル|寄り|引き)",
 )
@@ -1842,6 +1842,141 @@ def _muse_names(session: dict[str, Any], partner_character: dict | None = None) 
             partner_character.get("name_ja") or partner_character.get("name") or ""
         )
     return name_a, name_b
+
+
+def _scripter_status_message(text: str, *, locale: str = "ja") -> str:
+    """Sensory wait copy while the scripter updates the notebook."""
+    t = str(text or "")
+    ja = locale.startswith("ja")
+    if re.search(r"(外して|脱いで|はずして)", t):
+        return "帽子、外してる…" if ja and "帽子" in t else (
+            "いま、外してる…" if ja else "Taking that off…"
+        )
+    if re.search(r"(かぶ|帽子)", t):
+        return "帽子、合わせてる…" if ja else "Adjusting the hat…"
+    if re.search(r"(煽|ローアングル|下から)", t):
+        return "カメラ、下から寄せてる…" if ja else "Dropping the camera low…"
+    if re.search(r"(見上げ|空)", t):
+        return "視線、空のほうへ…" if ja else "Turning her gaze up…"
+    if re.search(r"(いいね|それで|うん|採用)", t):
+        return "それ、載せてる…" if ja else "Locking that in…"
+    if re.search(r"(服|シャツ|セーラー|スカート|カーディガン)", t):
+        return "服、いま合わせてる…" if ja else "Reworking the outfit…"
+    return "台本、いま合わせてる…" if ja else "Updating the craft…"
+
+
+def _bond_block(session: dict[str, Any]) -> str:
+    bond = session.get("bond") or {}
+    if not isinstance(bond, dict):
+        return ""
+    parts = [str(bond.get(k) or "").strip() for k in ("distance", "inside", "last")]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ""
+    return "\n".join([
+        "この総監督との関係（bond。画に写さない。聞かれたらこれで答える）:",
+        *(f"- {p}" for p in parts),
+    ])
+
+
+def _taste_block(session: dict[str, Any]) -> str:
+    taste = session.get("showrunner_taste") or {}
+    if not isinstance(taste, dict):
+        return ""
+    lines = []
+    if taste.get("prefers"):
+        lines.append(f"好み: {taste['prefers']}")
+    if taste.get("avoids"):
+        lines.append(f"避け: {taste['avoids']}")
+    if taste.get("notes"):
+        lines.append(f"メモ: {taste['notes']}")
+    if not lines:
+        return ""
+    return "\n".join([
+        "総監督の志向（showrunner_taste。画に無理に写さない）:",
+        *lines,
+    ])
+
+
+def _chemistry_block(session: dict[str, Any]) -> str:
+    lines = [str(m).strip() for m in (session.get("chemistry_notes") or []) if str(m).strip()]
+    if not lines:
+        return ""
+    return "\n".join([
+        "二人の相性メモ（短く。掛け合いの距離にだけ滲ませる。画の材料にしない）:",
+        *(f"- {m}" for m in lines[:2]),
+    ])
+
+
+def _cited_allowlist(session: dict[str, Any]) -> list[str]:
+    """Grounded tokens Muse may treat as remembered facts."""
+    blobs: list[str] = []
+    for m in list(session.get("memories") or []) + list(session.get("partner_memories") or []):
+        blobs.append(str(m))
+    for r in session.get("cited_memories") or []:
+        if isinstance(r, dict):
+            blobs.append(memories_db.format_recap_text(r))
+        else:
+            blobs.append(str(r))
+    bond = session.get("bond") or {}
+    if isinstance(bond, dict):
+        blobs.extend(str(bond.get(k) or "") for k in ("distance", "inside", "last"))
+    # Pull 2+ char JP / EN word-like tokens.
+    found: list[str] = []
+    seen: set[str] = set()
+    for blob in blobs:
+        for tok in re.findall(r"[一-龥ぁ-んァ-ヶ]{2,}|[A-Za-z][A-Za-z_]{2,}", blob):
+            key = tok.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(tok)
+            if len(found) >= 40:
+                return found
+    return found
+
+
+def _cited_allow_block(session: dict[str, Any]) -> str:
+    allow = _cited_allowlist(session)
+    if not allow or not (session.get("cited_memories") or session.get("memories")):
+        return ""
+    return (
+        "GROUNDED_TOKENS（この一覧と CITED/手元以外の固有の場所・小物・出来事は"
+        "『覚えてない』と言う。捏造しない）:\n"
+        + ", ".join(allow[:30])
+    )
+
+
+def _bond_and_taste_from_snapshot(session: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    """Deterministic continuity cards from the ③ snapshot (no extra LLM)."""
+    snap = session.get("continuity_snapshot") or {}
+    nb = snap.get("notebook") or {}
+    when = str(nb.get("atmosphere") or nb.get("scene") or snap.get("theme") or "").strip()
+    vibe = str(nb.get("vibe") or "").strip()
+    wearing = str(nb.get("wearing") or "").strip()
+    frame = str(nb.get("frame") or "").strip()
+    open_ = str(nb.get("open") or "").strip()
+    bond = {
+        "distance": "うち解けてきた" if vibe or when else "すこしずつ距離が縮まっている",
+        "inside": (vibe or "撮影の空気を共有している")[:240],
+        "last": " / ".join(p for p in (when, wearing, frame) if p)[:240],
+    }
+    prefers = []
+    avoids = []
+    if "足" in " ".join(str(s) for s in (session.get("standing") or [])):
+        avoids.append("足を映す")
+    if open_:
+        prefers.append(open_[:80])
+    if "low" in frame.lower() or "煽" in frame or "下" in frame:
+        prefers.append("ローアングルの近い距離")
+    if wearing:
+        prefers.append(wearing[:80])
+    taste = {
+        "prefers": "、".join(prefers[:4]) or "自然な空気",
+        "avoids": "、".join(avoids[:4]),
+        "notes": "雑談から入ることが多い" if vibe else "",
+    }
+    return bond, taste
 
 
 def _apply_compiled_craft(
@@ -1903,9 +2038,11 @@ async def _run_duet_scripter(
     name_a, name_b = _muse_names(session, partner_character)
     block = notebook_mod.render(nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""))
     sid = session["session_id"]
+    locale = str(inputs.get("locale") or "ja")
     events.publish(sid, {
         "type": "scripter_working",
         "status": "updating",
+        "message": _scripter_status_message(text, locale=locale),
     })
     result = await chain.run_scripter(
         ollama,
@@ -1934,9 +2071,10 @@ async def _run_duet_scripter(
             patch["clear_open"] = True
 
     # Solo shoots must not accept partner cards from a confused model.
-    if not partner:
-        patch.pop("wearing_b", None)
-        patch.pop("beat_b", None)
+    # Partner shoots: drop the other Muse's keys when the note only named one.
+    patch = notebook_mod.guard_partner_patch(
+        patch, text, name_a=name_a, name_b=name_b, partner=partner,
+    )
 
     # Notebook patch still applies (absolute values). Craft is validate-first.
     notebook_mod.apply_patch(nb, patch)
@@ -2088,6 +2226,14 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     cited = _cited_memories_block(session)
     if cited:
         parts.append(cited)
+    for block in (
+        _bond_block(session),
+        _taste_block(session),
+        _chemistry_block(session),
+        _cited_allow_block(session),
+    ):
+        if block:
+            parts.append(block)
     social = _social_block(session)
     if social:
         parts.append(social)
@@ -2702,6 +2848,15 @@ async def record_shoot_continuity(db, session: dict[str, Any], ollama=None) -> N
         else:
             # Shoot job may not carry ollama — flush later from finish_session.
             session.setdefault("pending_memory_embeds", []).append(overflow)
+    # Short Muse-only continuity cards — not scripter inputs.
+    try:
+        bond, taste = _bond_and_taste_from_snapshot(session)
+        session["bond"] = await presets_db.update_bond(db, char_id, bond)
+        session["showrunner_taste"] = await presets_db.update_showrunner_taste(
+            db, char_id, taste,
+        )
+    except Exception:
+        logger.warning("[muse] bond/taste write failed", exc_info=True)
     session["continuity"] = {"written_at": time.time()}
     await session_db.save(db, session, publish=False)
 
@@ -2738,6 +2893,9 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     """
     session["memories"] = await _recent_memories(db, session)
     session["partner_memories"] = []
+    session["bond"] = {}
+    session["showrunner_taste"] = {}
+    session["chemistry_notes"] = []
     # W-Muse: short partner sticky/diary for talk parity (never scripter).
     try:
         partner = await _partner_character(db, session)
@@ -2759,6 +2917,16 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     char_id = str(_inputs(session).get("character_id") or "")
     if not char_id:
         return
+    try:
+        session["bond"] = await presets_db.get_bond(db, char_id)
+        session["showrunner_taste"] = await presets_db.get_showrunner_taste(
+            db, char_id,
+        )
+        session["chemistry_notes"] = await presets_db.get_recent_chemistry_notes(
+            db, char_id, limit=2,
+        )
+    except Exception:
+        logger.debug("[muse] bond/taste/chemistry load failed", exc_info=True)
     try:
         caught = await presets_db.get_unacknowledged_read_diaries(db, char_id)
     except Exception:

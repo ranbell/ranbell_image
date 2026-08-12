@@ -297,7 +297,8 @@ _INTENT_RE = re.compile(
 _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*("
     r"ATMOSPHERE|SCENE|FRAME|WEARING|BEAT|WEARING_B|BEAT_B|"
-    r"VIBE|OPEN|STANDING|TAGS|CRAFT_SCENE|CLEAR_OPEN|UNCHANGED"
+    r"VIBE|OPEN|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
+    r"CRAFT_SCENE|CLEAR_OPEN|UNCHANGED"
     r")\s*[:：]\s*(.*)$"
 )
 
@@ -321,10 +322,65 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "clear_open": {"type": "boolean"},
         "unchanged": {"type": "string"},
         "tags": {"type": "string"},
+        "tags_shared": {"type": "string"},
+        "tags_a": {"type": "string"},
+        "tags_b": {"type": "string"},
         "craft_scene": {"type": "string"},
     },
     "required": ["intent"],
 }
+
+
+def merge_tag_bags(
+    *, tags: str = "", tags_shared: str = "", tags_a: str = "", tags_b: str = "",
+) -> str:
+    """Join SHARED/A/B (or flat tags) into one craft tag string, de-duped."""
+    parts: list[str] = []
+    seen: set[str] = set()
+    for bag in (tags_shared, tags_a, tags_b, tags):
+        for t in str(bag or "").split(","):
+            tok = t.strip()
+            if not tok:
+                continue
+            key = tok.lower().replace(" ", "_")
+            if key in seen or key in ("none", "なし", "-"):
+                continue
+            seen.add(key)
+            parts.append(tok)
+    return ", ".join(parts)
+
+
+def guard_partner_patch(
+    patch: dict[str, Any], note: str, *, name_a: str = "", name_b: str = "",
+    partner: bool = False,
+) -> dict[str, Any]:
+    """Drop B-card edits when the showrunner only addressed Muse A (and vice versa)."""
+    if not partner:
+        patch.pop("wearing_b", None)
+        patch.pop("beat_b", None)
+        return patch
+    text = str(note or "")
+    a = str(name_a or "").strip()
+    b = str(name_b or "").strip()
+    # Without both display names we cannot tell who was addressed — keep both.
+    if not a or not b:
+        return patch
+    mentions_a = bool(a in text)
+    mentions_b = bool(b in text)
+    # "あさひだけ…" / only-A patterns
+    only_a = bool(re.search(r"(だけ|のみ|ばっかり)", text)) and mentions_a and not mentions_b
+    only_b = bool(re.search(r"(だけ|のみ|ばっかり)", text)) and mentions_b and not mentions_a
+    if only_a or (mentions_a and not mentions_b and not re.search(
+        r"(二人|ふたり|一緒|おそろ|両方)", text,
+    )):
+        patch.pop("wearing_b", None)
+        patch.pop("beat_b", None)
+    if only_b or (mentions_b and not mentions_a and not re.search(
+        r"(二人|ふたり|一緒|おそろ|両方)", text,
+    )):
+        patch.pop("wearing", None)
+        patch.pop("beat", None)
+    return patch
 
 
 def _blank_result(raw: str = "") -> dict[str, Any]:
@@ -382,15 +438,35 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
     if data.get("clear_open") in (True, "yes", "true", "1", "クリア", "clear", "y"):
         patch["clear_open"] = True
     tags = str(data.get("tags") or "").strip()
+    tags_shared = str(data.get("tags_shared") or "").strip()
+    tags_a = str(data.get("tags_a") or "").strip()
+    tags_b = str(data.get("tags_b") or "").strip()
+    for bag_name, bag in (
+        ("tags", tags), ("tags_shared", tags_shared),
+        ("tags_a", tags_a), ("tags_b", tags_b),
+    ):
+        if bag.lower() in ("none", "なし", "-"):
+            if bag_name == "tags":
+                tags = ""
+            elif bag_name == "tags_shared":
+                tags_shared = ""
+            elif bag_name == "tags_a":
+                tags_a = ""
+            else:
+                tags_b = ""
+    merged = merge_tag_bags(
+        tags=tags, tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
+    )
     craft_scene = str(data.get("craft_scene") or "").strip()
-    if tags.lower() in ("none", "なし", "-"):
-        tags = ""
     if craft_scene.lower() in ("none", "なし", "-", "unchanged"):
         craft_scene = ""
     return {
         "intent": intent,
         "patch": patch,
-        "tags": tags,
+        "tags": merged,
+        "tags_shared": tags_shared,
+        "tags_a": tags_a,
+        "tags_b": tags_b,
         "craft_scene": craft_scene,
         "raw": raw,
         "valid": True,
@@ -458,19 +534,30 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
     if clear in ("yes", "true", "1", "クリア", "clear", "y"):
         patch["clear_open"] = True
 
-    tags = str(fields.get("TAGS") or "").strip()
+    def _clean_bag(key: str) -> str:
+        val = str(fields.get(key) or "").strip()
+        return "" if val.lower() in ("none", "なし", "-", "") else val
+
+    tags = _clean_bag("TAGS")
+    tags_shared = _clean_bag("TAGS_SHARED")
+    tags_a = _clean_bag("TAGS_A")
+    tags_b = _clean_bag("TAGS_B")
+    merged = merge_tag_bags(
+        tags=tags, tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
+    )
     craft_scene = str(fields.get("CRAFT_SCENE") or "").strip()
-    if tags.lower() in ("none", "なし", "-"):
-        tags = ""
     if craft_scene.lower() in ("none", "なし", "-", "unchanged"):
         craft_scene = ""
 
     # Labelled output counts as valid when INTENT was present or we got a patch.
-    valid = bool(m or patch or tags or craft_scene)
+    valid = bool(m or patch or merged or craft_scene)
     return {
         "intent": intent if intent in VALID_INTENTS else "casual",
         "patch": patch,
-        "tags": tags,
+        "tags": merged,
+        "tags_shared": tags_shared,
+        "tags_a": tags_a,
+        "tags_b": tags_b,
         "craft_scene": craft_scene,
         "raw": text,
         "valid": valid,
@@ -488,7 +575,9 @@ def parse_scripter(raw: str) -> dict[str, Any]:
     return parse_scripter_labelled(text)
 
 
-def validate_scripter(result: dict[str, Any]) -> dict[str, Any]:
+def validate_scripter(
+    result: dict[str, Any], *, partner: bool = False,
+) -> dict[str, Any]:
     """Validate-first gate. On failure: no craft fields, mark invalid.
 
     Notebook patch may still be usable when intent/patch look coherent; craft
@@ -503,7 +592,12 @@ def validate_scripter(result: dict[str, Any]) -> dict[str, Any]:
         out["craft_scene"] = ""
         return out
     out["intent"] = intent
-    tags = str(out.get("tags") or "").strip()
+    tags_shared = str(out.get("tags_shared") or "").strip()
+    tags_a = str(out.get("tags_a") or "").strip()
+    tags_b = str(out.get("tags_b") or "").strip()
+    tags = str(out.get("tags") or "").strip() or merge_tag_bags(
+        tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
+    )
     scene = str(out.get("craft_scene") or "").strip()
     if intent in ("shot", "mixed"):
         # Must compile something concrete; otherwise keep prior craft.
@@ -512,6 +606,19 @@ def validate_scripter(result: dict[str, Any]) -> dict[str, Any]:
             out["tags"] = ""
             out["craft_scene"] = ""
             return out
+        # W-Muse: require separated bags. A single flat TAGS bag is refused so
+        # we never overwrite craft with a mixed identity soup.
+        if partner:
+            has_split = bool(tags_a and tags_b)
+            if not has_split:
+                out["valid"] = False
+                out["tags"] = ""
+                out["craft_scene"] = ""
+                out["refuse_reason"] = "w_muse_tags_unsplit"
+                return out
+            tags = merge_tag_bags(
+                tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
+            )
         low = tags.lower().replace(" ", "_")
         if ("from_below" in low or "low_angle" in low) and "looking_up" in low:
             out["valid"] = False
@@ -526,6 +633,9 @@ def validate_scripter(result: dict[str, Any]) -> dict[str, Any]:
             patch[key] = strip_gaze_from_beat(str(patch.get(key) or ""))
     out["patch"] = patch
     out["tags"] = tags
+    out["tags_shared"] = tags_shared
+    out["tags_a"] = tags_a
+    out["tags_b"] = tags_b
     out["craft_scene"] = scene
     out.setdefault("valid", True)
     return out

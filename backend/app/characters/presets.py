@@ -1040,10 +1040,12 @@ async def consume_social_seeds(db, preset_id: str, seed_ids: list[str]) -> None:
 # their own modules — see characters/api.py's erase-memory endpoint.
 MEMORY_FIELDS: tuple[str, ...] = (
     "diaries", "chemistry", "social_seeds", "shoot_recaps",
+    "bond", "showrunner_taste",
 )
 
 # Sticky detailed shoot recaps kept on the character (older ones go to Qdrant).
 MAX_SHOOT_RECAPS = 3
+TASTE_MAX_LINES = 8
 
 
 async def get_shoot_recaps(db, preset_id: str, limit: int = 3) -> list[dict[str, Any]]:
@@ -1081,16 +1083,114 @@ async def push_shoot_recap(
     return overflow
 
 
+async def get_bond(db, preset_id: str) -> dict[str, str]:
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return {}
+    bond = preset.get("bond") or {}
+    if not isinstance(bond, dict):
+        return {}
+    return {
+        "distance": str(bond.get("distance") or "").strip(),
+        "inside": str(bond.get("inside") or "").strip(),
+        "last": str(bond.get("last") or "").strip(),
+    }
+
+
+async def update_bond(db, preset_id: str, bond: dict[str, Any]) -> dict[str, str]:
+    """Absolute rewrite of the short bond card (Muse-only continuity)."""
+    entry = {
+        "distance": str(bond.get("distance") or "").strip()[:160],
+        "inside": str(bond.get("inside") or "").strip()[:240],
+        "last": str(bond.get("last") or "").strip()[:240],
+        "updated_at": time.time(),
+    }
+    await update_preset(db, preset_id, {"bond": entry})
+    return {
+        "distance": entry["distance"],
+        "inside": entry["inside"],
+        "last": entry["last"],
+    }
+
+
+async def get_showrunner_taste(db, preset_id: str) -> dict[str, str]:
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return {}
+    taste = preset.get("showrunner_taste") or {}
+    if not isinstance(taste, dict):
+        return {}
+    return {
+        "prefers": str(taste.get("prefers") or "").strip(),
+        "avoids": str(taste.get("avoids") or "").strip(),
+        "notes": str(taste.get("notes") or "").strip(),
+    }
+
+
+async def update_showrunner_taste(
+    db, preset_id: str, taste: dict[str, Any],
+) -> dict[str, str]:
+    """Absolute rewrite of showrunner taste (≤8 lines total)."""
+    def _cap(text: str) -> str:
+        lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+        return "\n".join(lines[:TASTE_MAX_LINES])[:400]
+
+    entry = {
+        "prefers": _cap(taste.get("prefers") or ""),
+        "avoids": _cap(taste.get("avoids") or ""),
+        "notes": _cap(taste.get("notes") or ""),
+        "updated_at": time.time(),
+    }
+    await update_preset(db, preset_id, {"showrunner_taste": entry})
+    return {
+        "prefers": entry["prefers"],
+        "avoids": entry["avoids"],
+        "notes": entry["notes"],
+    }
+
+
+async def get_recent_chemistry_notes(
+    db, preset_id: str, limit: int = 2,
+) -> list[str]:
+    """Short prose from stored chemistry — Muse talk only."""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        return []
+    out: list[str] = []
+    for row in list(preset.get("chemistry") or [])[: max(0, limit * 2)]:
+        if not isinstance(row, dict):
+            continue
+        text = str(
+            row.get("summary_ja") or row.get("summary") or row.get("note") or ""
+        ).strip()
+        if text:
+            out.append(text[:200])
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def plan_memory_erase(db) -> dict[str, Any]:
     """Counts for the confirm dialog — nothing is changed."""
     stored = await _stored_rows(db)
-    counts = {field: sum(len(p.get(field) or []) for p in stored.values()) for field in MEMORY_FIELDS}
-    affected = sum(1 for p in stored.values() if any(p.get(field) for field in MEMORY_FIELDS))
+
+    def _count(payload: dict[str, Any], field: str) -> int:
+        val = payload.get(field)
+        if isinstance(val, list):
+            return len(val)
+        if isinstance(val, dict):
+            return 1 if any(str(v).strip() for v in val.values() if not isinstance(v, (int, float))) else 0
+        return 0
+
+    counts = {
+        field: sum(_count(p, field) for p in stored.values()) for field in MEMORY_FIELDS
+    }
+    affected = sum(1 for p in stored.values() if any(_count(p, f) for f in MEMORY_FIELDS))
     return {"characters": len(stored), "affected": affected, **counts}
 
 
 async def erase_all_memory_fields(db) -> int:
-    """Clear diaries/chemistry/social_seeds on every character.
+    """Clear diaries/chemistry/social_seeds/recaps/bond/taste on every character.
 
     A real overwrite via `update_preset` (Qdrant `set_payload`), not a flag —
     the cleared lists are gone once this returns. Returns the number of
@@ -1101,7 +1201,13 @@ async def erase_all_memory_fields(db) -> int:
     for pid, payload in stored.items():
         if not any(payload.get(field) for field in MEMORY_FIELDS):
             continue
-        await update_preset(db, pid, {field: [] for field in MEMORY_FIELDS})
+        clear: dict[str, Any] = {}
+        for field in MEMORY_FIELDS:
+            if field in ("bond", "showrunner_taste"):
+                clear[field] = {}
+            else:
+                clear[field] = []
+        await update_preset(db, pid, clear)
         touched += 1
     return touched
 

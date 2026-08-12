@@ -395,7 +395,7 @@ function connectStream(id) {
       return
     }
     if (evt.type === 'scripter_working') {
-      scripterStatus.value = t('muse.scripterUpdating')
+      scripterStatus.value = String(evt.message || '').trim() || t('muse.scripterUpdating')
       return
     }
     if (evt.type === 'scripter_done') {
