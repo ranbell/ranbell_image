@@ -119,6 +119,11 @@ const tasteAxes = computed(() => roster.value.taste_axes || [])
 const baseLook = computed(() => session.value?.style_in_use || direction.value.base || '')
 
 const workflows = computed(() => catalog.value?.comfyui?.workflows || [])
+const workflowCaps = computed(() => catalog.value?.comfyui?.workflow_caps || [])
+const selectedWorkflowCap = computed(() => {
+  const name = String(inputs.value?.workflow || '')
+  return workflowCaps.value.find((c) => c?.name === name) || null
+})
 const models = computed(() => catalog.value?.llm?.models || [])
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 
@@ -891,6 +896,14 @@ async function onChatKey(e) {
                   <option value="">—</option>
                   <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                 </select>
+                <span
+                  v-if="selectedWorkflowCap?.can_inject_image"
+                  class="mt-1 block text-[9px] text-sky-300/80"
+                >{{ t('muse.workflowOpenPoseReady') }}</span>
+                <span
+                  v-else-if="selectedWorkflowCap?.has_openpose"
+                  class="mt-1 block text-[9px] text-[var(--sb-faint)]"
+                >{{ t('muse.workflowOpenPosePartial') }}</span>
               </label>
               <label class="block">
                 <span class="sb-label">{{ t('muse.model') }}</span>

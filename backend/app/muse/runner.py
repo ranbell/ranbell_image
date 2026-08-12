@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from pathlib import Path
+import time
 from typing import Any
 
 from . import events, session_db
@@ -23,6 +23,32 @@ def preview_publisher(session_id: str, label: str):
 
 def finished_image(shas: list[str]) -> str:
     return shas[-1]
+
+
+def direction_still_bytes(session: dict[str, Any]) -> bytes | None:
+    """Latest coaching still saved on the session (JPEG bytes), if any."""
+    still = session.get("direction_still") or {}
+    if not isinstance(still, dict):
+        return None
+    b64 = str(still.get("jpeg_b64") or "").strip()
+    if not b64:
+        return None
+    try:
+        raw = base64.b64decode(b64, validate=False)
+    except Exception:
+        return None
+    return raw if len(raw) >= 32 else None
+
+
+def store_direction_still(session: dict[str, Any], jpeg: bytes) -> None:
+    """Keep the latest direction still for OpenPose injection on board/shoot."""
+    if not jpeg:
+        return
+    session["direction_still"] = {
+        "jpeg_b64": base64.b64encode(jpeg).decode(),
+        "at": time.time(),
+        "bytes": len(jpeg),
+    }
 
 
 def _character_payload_extra(session: dict) -> dict[str, Any]:
@@ -53,6 +79,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
         raise RuntimeError("session is gone")
     inputs = session.get("inputs") or {}
     board = session.get("board") or {}
+    ref = direction_still_bytes(session)
 
     async def _attach(sha256: str, meta: dict) -> None:
         await session_db.attach_board_image(db, session_id, sha256, meta)
@@ -82,6 +109,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
             },
             attach=_attach,
             preview=preview_publisher(session_id, "board"),
+            reference_image=ref,
             **render_settings(inputs, draft=True),
         )
     except Exception as exc:
@@ -102,6 +130,7 @@ async def run_shoot_job(
         raise RuntimeError("session is gone")
     inputs = session.get("inputs") or {}
     shoot = session.get("shoot") or {}
+    ref = direction_still_bytes(session)
 
     async def _attach(sha256: str, meta: dict) -> None:
         await session_db.attach_shoot_image(db, session_id, sha256, meta)
@@ -126,6 +155,7 @@ async def run_shoot_job(
             },
             attach=_attach,
             preview=preview_publisher(session_id, "shoot"),
+            reference_image=ref,
             **render_settings(inputs, draft=False),
         )
     except Exception as exc:

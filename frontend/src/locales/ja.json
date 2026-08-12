@@ -1314,6 +1314,8 @@
     },
     "workflow": "ワークフロー",
     "workflowHint": "ボードも本番も同じワークフロー。違うのはステップ数と CFG だけ",
+    "workflowOpenPoseReady": "OpenPose系統あり — 見取り図を流せます",
+    "workflowOpenPosePartial": "ControlNetはあるが、写真→OpenPose自動投入は不可",
     "model": "モデル",
     "modelHint": "打ち合わせはテキスト。軽いモデルでもよい",
     "visionModel": "Visionモデル",
@@ -1405,7 +1407,7 @@
       "farther": "離す",
       "lapPillow": "膝にスナップ",
       "resetPlace": "配置リセット",
-      "directionImageHint": "ディレクションON中は、送信のたびにショット見取り図を一緒に送ります。",
+      "directionImageHint": "ディレクションON中は見取り図を送信に添付。OpenPose系統のワークフローなら試し撮り／本番にも流します。",
       "arms": {
         "arms_at_sides": "腕下ろし",
         "arms_up": "腕上げ",

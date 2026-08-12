@@ -200,7 +200,16 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         preset=str(inputs.get("crew_preset") or crew_mod.DEFAULT_PRESET),
         crew_ids=list(inputs.get("crew_ids") or []) or None,
     )
-    return {
+    still = session.get("direction_still") if isinstance(session.get("direction_still"), dict) else {}
+    # Never ship the JPEG blob to the panel — only a presence flag + size.
+    public_still = None
+    if still and still.get("jpeg_b64"):
+        public_still = {
+            "at": still.get("at"),
+            "bytes": still.get("bytes") or 0,
+            "ready": True,
+        }
+    view = {
         **session,
         "steps": list(STEPS),
         "step_state": step_state(session),
@@ -208,4 +217,6 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         "needs": missing_inputs(session),
         "roster": crew_mod.public_roster(session.get("character") or {}, cast),
         "style_in_use": crew_mod.base_style_for(cast, inputs.get("style") or ""),
+        "direction_still": public_still,
     }
+    return view

@@ -1314,6 +1314,8 @@
     },
     "workflow": "Workflow",
     "workflowHint": "One workflow draws the board and the final — only steps and cfg differ",
+    "workflowOpenPoseReady": "OpenPose path ready — direction still can be injected",
+    "workflowOpenPosePartial": "ControlNet present, but photo→OpenPose auto-inject is not available",
     "model": "Model",
     "modelHint": "Table-read is text-only — a smaller model is fine",
     "visionModel": "Vision model",
@@ -1405,7 +1407,7 @@
       "farther": "Farther",
       "lapPillow": "Snap to lap",
       "resetPlace": "Reset places",
-      "directionImageHint": "While direction is ON, each chat turn includes the shot-preview still.",
+      "directionImageHint": "While direction is ON, each chat includes the shot still. OpenPose-capable workflows also receive it on board/final.",
       "arms": {
         "arms_at_sides": "Arms down",
         "arms_up": "Arms up",

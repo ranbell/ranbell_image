@@ -2837,6 +2837,9 @@ async def post_duet_chat(
     """
     sid = session["session_id"]
     direction_images = list(images or [])[:1]
+    if direction_images:
+        from .runner import store_direction_still
+        store_direction_still(session, direction_images[0])
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
     await session_db.save(db, session)
