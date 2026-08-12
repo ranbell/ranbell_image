@@ -1,11 +1,11 @@
 <script setup>
 /**
- * Lightweight pose sketch from craft.tags + notebook beat/frame.
- * Stick figures + camera chevron — no image model.
+ * Cute chibi pose sketch from craft.tags + notebook beat/frame.
+ * Camera pitch / side / distance reshape the view — no image model.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { buildPoseSketch, figureJoints } from '../../muse/poseSketch.js'
+import { buildPoseSketch, figureJoints, cameraView } from '../../muse/poseSketch.js'
 
 const props = defineProps({
   tags: { type: String, default: '' },
@@ -25,7 +25,6 @@ const model = computed(() => buildPoseSketch(props.tags, {
   duo: props.duo,
 }))
 
-/** Partner may differ only in beat_b prose when tags are shared. */
 const modelB = computed(() => {
   if (!model.value.duo) return null
   return buildPoseSketch(props.tags, {
@@ -36,6 +35,7 @@ const modelB = computed(() => {
 })
 
 const show = computed(() => !model.value.empty)
+const view = computed(() => cameraView(model.value))
 
 const figA = computed(() => figureJoints(model.value, {
   partner: false,
@@ -47,25 +47,8 @@ const figB = computed(() => (
     : null
 ))
 
-/** Camera glyph position in the 240×160 viewBox. */
-const camera = computed(() => {
-  const pitch = model.value.cameraPitch
-  const side = model.value.cameraSide
-  const dist = model.value.cameraDistance
-  let x = 120
-  let y = 148
-  if (pitch === 'below') { x = 120; y = 152 }
-  if (pitch === 'above') { x = 120; y = 18 }
-  if (side === 'side') x = pitch === 'above' || pitch === 'below' ? 200 : 210
-  if (side === 'behind') x = 120
-  // close framing: camera closer to figure
-  if (dist === 'close') y = pitch === 'above' ? 40 : 130
-  if (dist === 'upper' && pitch === 'eye') y = 140
-  return { x, y, pitch, side, dist }
-})
-
 function limbPath(a, b, c) {
-  return `M ${a.x} ${a.y} L ${b.x} ${b.y} L ${c.x} ${c.y}`
+  return `M ${a.x} ${a.y} Q ${b.x} ${b.y} ${c.x} ${c.y}`
 }
 
 function torsoPath(j) {
@@ -76,141 +59,233 @@ const chips = computed(() => model.value.active.slice(0, 8))
 
 const caption = computed(() => {
   const bits = []
-  if (model.value.posture) bits.push(t(`muse.poseSketch.posture.${model.value.posture}`, model.value.posture))
-  if (model.value.cameraPitch && model.value.cameraPitch !== 'eye') {
-    bits.push(t(`muse.poseSketch.camera.${model.value.cameraPitch}`, model.value.cameraPitch))
+  if (model.value.posture) {
+    bits.push(t(`muse.poseSketch.posture.${model.value.posture}`))
   }
+  const camKeys = []
+  if (model.value.cameraPitch && model.value.cameraPitch !== 'eye') {
+    camKeys.push(t(`muse.poseSketch.camera.${model.value.cameraPitch}`))
+  }
+  if (model.value.cameraSide && model.value.cameraSide !== 'front') {
+    camKeys.push(t(`muse.poseSketch.camera.${model.value.cameraSide}`))
+  }
+  if (model.value.cameraDistance && model.value.cameraDistance !== 'full') {
+    camKeys.push(t(`muse.poseSketch.camera.${model.value.cameraDistance}`))
+  }
+  if (camKeys.length) bits.push(camKeys.join('·'))
   if (model.value.gazeTarget === 'looking_at_viewer') {
     bits.push(t('muse.poseSketch.gazeViewer'))
   }
   return bits.join(' · ')
 })
+
+const frustumPoints = computed(() => view.value.frustum.join(' '))
 </script>
 
 <template>
   <div
     v-if="show"
-    class="rounded-lg border border-white/10 bg-black/35 overflow-hidden transition-colors duration-500"
-    :class="flash ? 'border-[var(--sb-teal)]/60 bg-teal-950/30' : ''"
+    class="rounded-xl border border-pink-300/15 bg-gradient-to-b from-rose-950/25 via-black/30 to-teal-950/20 overflow-hidden transition-colors duration-500"
+    :class="flash ? 'border-[var(--sb-teal)]/70 shadow-[0_0_0_1px_rgba(45,212,191,0.25)]' : ''"
   >
-    <div class="flex items-center justify-between px-2.5 pt-2 pb-1">
+    <div class="flex items-center justify-between px-2.5 pt-2 pb-0.5">
       <h4 class="text-[11px] text-[var(--sb-amber)]">{{ t('muse.poseSketch.title') }}</h4>
       <span class="text-[9px] text-[var(--sb-faint)]">{{ t('muse.poseSketch.hint') }}</span>
     </div>
 
     <svg
-      viewBox="0 0 240 160"
-      class="w-full h-auto max-h-[28vh] block"
+      viewBox="0 0 240 170"
+      class="w-full h-auto max-h-[30vh] block"
       role="img"
       :aria-label="caption || t('muse.poseSketch.title')"
     >
-      <!-- stage -->
-      <ellipse cx="120" cy="138" rx="78" ry="10" fill="rgba(255,255,255,0.04)" />
+      <defs>
+        <linearGradient id="poseStage" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="rgba(251,113,133,0.08)" />
+          <stop offset="100%" stop-color="rgba(45,212,191,0.06)" />
+        </linearGradient>
+        <clipPath id="poseLensClip">
+          <rect
+            :x="view.clip.x" :y="view.clip.y"
+            :width="view.clip.w" :height="view.clip.h"
+            rx="10"
+          />
+        </clipPath>
+      </defs>
 
-      <!-- figure A -->
-      <g :transform="model.duo ? 'translate(28,8) scale(0.95)' : 'translate(70,4)'">
-        <circle
-          :cx="figA.head.x" :cy="figA.head.y" r="11"
-          fill="none" stroke="var(--sb-teal)" stroke-width="2.2"
-        />
-        <!-- face cue (hidden from behind) -->
-        <g v-if="!figA.behind" stroke="var(--sb-teal)" stroke-width="1.4" fill="none" opacity="0.85">
-          <line
-            v-if="model.gazeTarget === 'looking_at_viewer' || !model.gazeTarget"
-            :x1="figA.head.x - 3" :y1="figA.head.y - 1"
-            :x2="figA.head.x - 3" :y2="figA.head.y + 1"
-          />
-          <line
-            v-if="model.gazeTarget === 'looking_at_viewer' || !model.gazeTarget"
-            :x1="figA.head.x + 3" :y1="figA.head.y - 1"
-            :x2="figA.head.x + 3" :y2="figA.head.y + 1"
-          />
-          <path
-            v-if="model.gazePitch === 'looking_up'"
-            :d="`M ${figA.head.x - 4} ${figA.head.y + 5} Q ${figA.head.x} ${figA.head.y + 2} ${figA.head.x + 4} ${figA.head.y + 5}`"
-          />
-          <path
-            v-else-if="model.gazePitch === 'looking_down'"
-            :d="`M ${figA.head.x - 4} ${figA.head.y + 4} Q ${figA.head.x} ${figA.head.y + 7} ${figA.head.x + 4} ${figA.head.y + 4}`"
-          />
-        </g>
-        <path :d="torsoPath(figA)" stroke="var(--sb-teal)" stroke-width="2.4" stroke-linecap="round" fill="none" />
-        <path
-          :d="limbPath(figA.neck, figA.lElbow, figA.lHand)"
-          stroke="var(--sb-teal)" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.9"
-        />
-        <path
-          :d="limbPath(figA.neck, figA.rElbow, figA.rHand)"
-          stroke="var(--sb-teal)" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.9"
-        />
-        <path
-          :d="limbPath(figA.hip, figA.lKnee, figA.lFoot)"
-          stroke="var(--sb-teal)" stroke-width="2.2" stroke-linecap="round" fill="none"
-        />
-        <path
-          :d="limbPath(figA.hip, figA.rKnee, figA.rFoot)"
-          stroke="var(--sb-teal)" stroke-width="2.2" stroke-linecap="round" fill="none"
-        />
-        <text
-          v-if="model.duo"
-          :x="figA.head.x" :y="8"
-          text-anchor="middle" fill="var(--sb-faint)" font-size="9"
-        >A</text>
-      </g>
+      <!-- soft stage -->
+      <rect x="0" y="0" width="240" height="170" fill="url(#poseStage)" />
+      <ellipse cx="120" cy="142" rx="82" ry="11" fill="rgba(255,182,193,0.08)" />
 
-      <!-- figure B -->
-      <g v-if="figB" transform="translate(118,8) scale(0.95)">
-        <circle
-          :cx="figB.head.x" :cy="figB.head.y" r="11"
-          fill="none" stroke="#fbbf24" stroke-width="2.2"
-        />
-        <g v-if="!figB.behind" stroke="#fbbf24" stroke-width="1.4" fill="none" opacity="0.85">
-          <line :x1="figB.head.x - 3" :y1="figB.head.y - 1" :x2="figB.head.x - 3" :y2="figB.head.y + 1" />
-          <line :x1="figB.head.x + 3" :y1="figB.head.y - 1" :x2="figB.head.x + 3" :y2="figB.head.y + 1" />
-        </g>
-        <path :d="torsoPath(figB)" stroke="#fbbf24" stroke-width="2.4" stroke-linecap="round" fill="none" />
-        <path
-          :d="limbPath(figB.neck, figB.lElbow, figB.lHand)"
-          stroke="#fbbf24" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.9"
-        />
-        <path
-          :d="limbPath(figB.neck, figB.rElbow, figB.rHand)"
-          stroke="#fbbf24" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.9"
-        />
-        <path
-          :d="limbPath(figB.hip, figB.lKnee, figB.lFoot)"
-          stroke="#fbbf24" stroke-width="2.2" stroke-linecap="round" fill="none"
-        />
-        <path
-          :d="limbPath(figB.hip, figB.rKnee, figB.rFoot)"
-          stroke="#fbbf24" stroke-width="2.2" stroke-linecap="round" fill="none"
-        />
-        <text :x="figB.head.x" y="8" text-anchor="middle" fill="var(--sb-faint)" font-size="9">B</text>
-      </g>
-
-      <!-- interaction cue -->
-      <line
-        v-if="model.duo && (model.interact.includes('hand') || model.interact === 'holding_hands')"
-        x1="108" y1="78" x2="132" y2="78"
-        stroke="rgba(255,255,255,0.35)" stroke-width="1.5" stroke-dasharray="3 2"
+      <!-- lens framing guide -->
+      <rect
+        :x="view.clip.x" :y="view.clip.y"
+        :width="view.clip.w" :height="view.clip.h"
+        rx="10"
+        fill="none"
+        stroke="rgba(255,255,255,0.14)"
+        stroke-width="1"
+        stroke-dasharray="4 3"
       />
 
-      <!-- camera -->
-      <g :transform="`translate(${camera.x}, ${camera.y})`">
-        <rect x="-10" y="-7" width="14" height="10" rx="1.5"
-              fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="1.4" />
-        <circle cx="0" cy="-2" r="2.2" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="1.2" />
-        <polygon
-          points="6,-5 14,-2 6,1"
-          fill="rgba(255,255,255,0.35)"
-          :transform="camera.pitch === 'above'
-            ? 'rotate(90 6 -2)'
-            : camera.pitch === 'below'
-              ? 'rotate(-90 6 -2)'
-              : camera.side === 'side'
-                ? 'rotate(0 6 -2)'
-                : 'rotate(-90 6 -2)'"
-        />
+      <!-- camera frustum (shows pitch / side / zoom) -->
+      <polygon
+        v-if="view.showFrustum"
+        :points="frustumPoints"
+        fill="rgba(125,211,252,0.10)"
+        stroke="rgba(125,211,252,0.35)"
+        stroke-width="1"
+      />
+
+      <g :clip-path="view.dist !== 'full' ? 'url(#poseLensClip)' : undefined">
+        <!-- figures under camera transform -->
+        <g :transform="view.figureTransform">
+          <g :transform="model.duo ? 'translate(-8 0) scale(0.92)' : 'translate(0 0)'">
+            <!-- A -->
+            <g>
+              <!-- soft body fill hint -->
+              <ellipse
+                :cx="(figA.neck.x + figA.hip.x) / 2"
+                :cy="(figA.neck.y + figA.hip.y) / 2 + 4"
+                rx="11" ry="16"
+                fill="rgba(45,212,191,0.10)"
+              />
+              <!-- head -->
+              <circle
+                :cx="figA.head.x" :cy="figA.head.y" :r="figA.headR"
+                fill="rgba(255,228,230,0.92)"
+                stroke="#2dd4bf" stroke-width="2"
+              />
+              <!-- ahoge -->
+              <path
+                v-if="!figA.behind"
+                :d="`M ${figA.head.x - 2} ${figA.head.y - figA.headR + 1} Q ${figA.head.x + 2} ${figA.head.y - figA.headR - 10} ${figA.head.x + 8} ${figA.head.y - figA.headR - 2}`"
+                fill="none" stroke="#2dd4bf" stroke-width="1.6" stroke-linecap="round"
+              />
+              <!-- hair back bump -->
+              <path
+                :d="`M ${figA.head.x - 14} ${figA.head.y - 2} Q ${figA.head.x - 18} ${figA.head.y - 14} ${figA.head.x - 4} ${figA.head.y - 16}`"
+                fill="none" stroke="#2dd4bf" stroke-width="1.5" opacity="0.7"
+              />
+              <!-- face -->
+              <g v-if="!figA.behind">
+                <!-- eyes -->
+                <template v-if="!figA.profile">
+                  <ellipse :cx="figA.head.x - 5" :cy="figA.head.y - 1" rx="2.2" ry="2.8" fill="#1f2937" />
+                  <ellipse :cx="figA.head.x + 5" :cy="figA.head.y - 1" rx="2.2" ry="2.8" fill="#1f2937" />
+                  <circle :cx="figA.head.x - 4.3" :cy="figA.head.y - 1.8" r="0.7" fill="#fff" />
+                  <circle :cx="figA.head.x + 5.7" :cy="figA.head.y - 1.8" r="0.7" fill="#fff" />
+                </template>
+                <template v-else>
+                  <ellipse :cx="figA.head.x + 4" :cy="figA.head.y - 1" rx="2" ry="2.6" fill="#1f2937" />
+                  <path
+                    :d="`M ${figA.head.x + 8} ${figA.head.y + 1} L ${figA.head.x + 12} ${figA.head.y + 2}`"
+                    stroke="#f9a8d4" stroke-width="1.2" stroke-linecap="round"
+                  />
+                </template>
+                <!-- blush -->
+                <ellipse :cx="figA.head.x - 9" :cy="figA.head.y + 4" rx="3" ry="1.6" fill="rgba(251,113,133,0.45)" />
+                <ellipse :cx="figA.head.x + 9" :cy="figA.head.y + 4" rx="3" ry="1.6" fill="rgba(251,113,133,0.45)" />
+                <!-- mouth -->
+                <path
+                  v-if="model.gazePitch === 'looking_up'"
+                  :d="`M ${figA.head.x - 3} ${figA.head.y + 7} Q ${figA.head.x} ${figA.head.y + 5} ${figA.head.x + 3} ${figA.head.y + 7}`"
+                  fill="none" stroke="#fb7185" stroke-width="1.3" stroke-linecap="round"
+                />
+                <path
+                  v-else
+                  :d="`M ${figA.head.x - 3} ${figA.head.y + 6} Q ${figA.head.x} ${figA.head.y + 9} ${figA.head.x + 3} ${figA.head.y + 6}`"
+                  fill="none" stroke="#fb7185" stroke-width="1.3" stroke-linecap="round"
+                />
+              </g>
+              <!-- limbs -->
+              <path :d="torsoPath(figA)" stroke="#2dd4bf" stroke-width="3.2" stroke-linecap="round" fill="none" />
+              <path :d="limbPath(figA.neck, figA.lElbow, figA.lHand)" stroke="#5eead4" stroke-width="2.6" stroke-linecap="round" fill="none" />
+              <path :d="limbPath(figA.neck, figA.rElbow, figA.rHand)" stroke="#5eead4" stroke-width="2.6" stroke-linecap="round" fill="none" />
+              <path :d="limbPath(figA.hip, figA.lKnee, figA.lFoot)" stroke="#2dd4bf" stroke-width="2.8" stroke-linecap="round" fill="none" />
+              <path :d="limbPath(figA.hip, figA.rKnee, figA.rFoot)" stroke="#2dd4bf" stroke-width="2.8" stroke-linecap="round" fill="none" />
+              <!-- tiny hands/feet dots -->
+              <circle :cx="figA.lHand.x" :cy="figA.lHand.y" r="2.4" fill="#99f6e4" />
+              <circle :cx="figA.rHand.x" :cy="figA.rHand.y" r="2.4" fill="#99f6e4" />
+              <ellipse :cx="figA.lFoot.x" :cy="figA.lFoot.y" rx="4" ry="2.2" fill="#2dd4bf" opacity="0.7" />
+              <ellipse :cx="figA.rFoot.x" :cy="figA.rFoot.y" rx="4" ry="2.2" fill="#2dd4bf" opacity="0.7" />
+              <text
+                v-if="model.duo"
+                :x="figA.head.x" :y="figA.head.y - figA.headR - 6"
+                text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="9"
+              >A</text>
+            </g>
+          </g>
+
+          <!-- B -->
+          <g v-if="figB" transform="translate(54 0) scale(0.92)">
+            <ellipse
+              :cx="(figB.neck.x + figB.hip.x) / 2"
+              :cy="(figB.neck.y + figB.hip.y) / 2 + 4"
+              rx="11" ry="16"
+              fill="rgba(251,191,36,0.10)"
+            />
+            <circle
+              :cx="figB.head.x" :cy="figB.head.y" :r="figB.headR"
+              fill="rgba(255,237,213,0.95)"
+              stroke="#fbbf24" stroke-width="2"
+            />
+            <path
+              v-if="!figB.behind"
+              :d="`M ${figB.head.x - 2} ${figB.head.y - figB.headR + 1} Q ${figB.head.x + 2} ${figB.head.y - figB.headR - 10} ${figB.head.x + 8} ${figB.head.y - figB.headR - 2}`"
+              fill="none" stroke="#fbbf24" stroke-width="1.6" stroke-linecap="round"
+            />
+            <g v-if="!figB.behind">
+              <ellipse :cx="figB.head.x - 5" :cy="figB.head.y - 1" rx="2.2" ry="2.8" fill="#1f2937" />
+              <ellipse :cx="figB.head.x + 5" :cy="figB.head.y - 1" rx="2.2" ry="2.8" fill="#1f2937" />
+              <ellipse :cx="figB.head.x - 9" :cy="figB.head.y + 4" rx="3" ry="1.6" fill="rgba(251,113,133,0.45)" />
+              <ellipse :cx="figB.head.x + 9" :cy="figB.head.y + 4" rx="3" ry="1.6" fill="rgba(251,113,133,0.45)" />
+              <path
+                :d="`M ${figB.head.x - 3} ${figB.head.y + 6} Q ${figB.head.x} ${figB.head.y + 9} ${figB.head.x + 3} ${figB.head.y + 6}`"
+                fill="none" stroke="#fb7185" stroke-width="1.3" stroke-linecap="round"
+              />
+            </g>
+            <path :d="torsoPath(figB)" stroke="#fbbf24" stroke-width="3.2" stroke-linecap="round" fill="none" />
+            <path :d="limbPath(figB.neck, figB.lElbow, figB.lHand)" stroke="#fcd34d" stroke-width="2.6" stroke-linecap="round" fill="none" />
+            <path :d="limbPath(figB.neck, figB.rElbow, figB.rHand)" stroke="#fcd34d" stroke-width="2.6" stroke-linecap="round" fill="none" />
+            <path :d="limbPath(figB.hip, figB.lKnee, figB.lFoot)" stroke="#fbbf24" stroke-width="2.8" stroke-linecap="round" fill="none" />
+            <path :d="limbPath(figB.hip, figB.rKnee, figB.rFoot)" stroke="#fbbf24" stroke-width="2.8" stroke-linecap="round" fill="none" />
+            <circle :cx="figB.lHand.x" :cy="figB.lHand.y" r="2.4" fill="#fde68a" />
+            <circle :cx="figB.rHand.x" :cy="figB.rHand.y" r="2.4" fill="#fde68a" />
+            <text
+              :x="figB.head.x" :y="figB.head.y - figB.headR - 6"
+              text-anchor="middle" fill="rgba(255,255,255,0.45)" font-size="9"
+            >B</text>
+          </g>
+
+          <line
+            v-if="model.duo && (model.interact.includes('hand') || model.interact === 'holding_hands')"
+            x1="48" y1="72" x2="72" y2="72"
+            stroke="rgba(255,182,193,0.55)" stroke-width="2" stroke-linecap="round"
+          />
+        </g>
+      </g>
+
+      <!-- camera body -->
+      <g :transform="`translate(${view.camera.x} ${view.camera.y})`">
+        <rect x="-11" y="-8" width="16" height="12" rx="3"
+              fill="rgba(15,23,42,0.75)" stroke="rgba(186,230,253,0.8)" stroke-width="1.4" />
+        <circle cx="-1" cy="-2" r="3.2" fill="rgba(56,189,248,0.25)" stroke="rgba(186,230,253,0.9)" stroke-width="1.2" />
+        <circle cx="-1" cy="-2" r="1.2" fill="rgba(125,211,252,0.9)" />
+        <!-- cute shutter blink mark -->
+        <rect x="6" y="-6" width="4" height="3" rx="0.8" fill="rgba(251,113,133,0.7)" />
+      </g>
+
+      <!-- distance / pitch badge -->
+      <g v-if="view.pitch !== 'eye' || view.dist !== 'full' || view.side !== 'front'">
+        <rect x="8" y="8" width="54" height="16" rx="8" fill="rgba(0,0,0,0.35)" />
+        <text x="35" y="19" text-anchor="middle" fill="#bae6fd" font-size="9">
+          {{ [
+            view.pitch !== 'eye' ? t(`muse.poseSketch.camera.${view.pitch}`) : '',
+            view.side !== 'front' ? t(`muse.poseSketch.camera.${view.side}`) : '',
+            view.dist !== 'full' ? t(`muse.poseSketch.camera.${view.dist}`) : '',
+          ].filter(Boolean).join(' ') }}
+        </text>
       </g>
     </svg>
 
@@ -218,7 +293,7 @@ const caption = computed(() => {
     <div v-if="chips.length" class="flex flex-wrap gap-1 px-2.5 pb-2 pt-1">
       <span
         v-for="c in chips" :key="c"
-        class="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[9px] text-gray-400"
+        class="rounded-full border border-pink-300/20 bg-white/5 px-2 py-0.5 font-mono text-[9px] text-gray-300"
       >{{ c }}</span>
     </div>
   </div>

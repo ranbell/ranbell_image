@@ -1,6 +1,6 @@
 /**
- * Map craft.tags (+ notebook beat/frame hints) → a lightweight pose sketch model.
- * No image model — just the exclusive slots muse already trusts.
+ * Map craft.tags (+ notebook beat/frame hints) → a cute chibi pose sketch.
+ * Camera pitch / side / distance reshape the figure — no image model.
  */
 
 const POSTURE_ORDER = [
@@ -74,7 +74,10 @@ function familyOf(tag, families) {
 /** Keyword fallback from notebook beat/frame prose (ja + en). */
 export function hintsFromProse(text) {
   const s = String(text || '')
-  const out = { posture: '', arms: '', gazePitch: '', gazeTarget: '', cameraPitch: '', cameraSide: '' }
+  const out = {
+    posture: '', arms: '', gazePitch: '', gazeTarget: '',
+    cameraPitch: '', cameraSide: '', cameraDistance: '',
+  }
   if (!s) return out
   const low = s.toLowerCase()
 
@@ -118,6 +121,14 @@ export function hintsFromProse(text) {
     out.cameraSide = 'behind'
   } else if (/横から|横顔|profile|from side/.test(s) || /from_side|profile/.test(low)) {
     out.cameraSide = 'side'
+  }
+
+  if (/寄り|アップ|close.?up|顔[だけ]?|バスト/.test(s) || /close_up|close-up|portrait|bust|face_focus/.test(low)) {
+    out.cameraDistance = 'close'
+  } else if (/上半身|カウボーイ|upper/.test(s) || /upper_body|cowboy_shot|half-body/.test(low)) {
+    out.cameraDistance = 'upper'
+  } else if (/全身|full.?body|wide/.test(s) || /full_body|wide_shot/.test(low)) {
+    out.cameraDistance = 'full'
   }
 
   return out
@@ -168,10 +179,11 @@ export function buildPoseSketch(tagStr, notebook = {}) {
   if (!gazeTarget && hint.gazeTarget) gazeTarget = hint.gazeTarget
   if (!cameraPitch && hint.cameraPitch) cameraPitch = hint.cameraPitch
   if (!cameraSide && hint.cameraSide) cameraSide = hint.cameraSide
+  if (!cameraDistance && hint.cameraDistance) cameraDistance = hint.cameraDistance
 
   if (!posture) posture = 'standing'
   if (!cameraPitch) cameraPitch = 'eye'
-  if (!cameraSide) cameraSide = cameraSide || 'front'
+  if (!cameraSide) cameraSide = 'front'
   if (!cameraDistance) cameraDistance = 'full'
 
   // Camera pitch implies gaze when gaze missing (same rule as conflict.py).
@@ -203,128 +215,249 @@ export function buildPoseSketch(tagStr, notebook = {}) {
   }
 }
 
-/** Joint layout in a 100×140 local figure space (head center ~ 50,28). */
+function pt(x, y) { return { x, y } }
+
+/**
+ * Chibi joint layout in a 100×140 local figure space.
+ * Big head, short limbs — cuteness first.
+ */
 export function figureJoints(pose, { partner = false, interact = '' } = {}) {
   const p = pose.posture || 'standing'
   const arms = pose.arms || 'arms_at_sides'
   const gaze = pose.gazePitch || 'looking_ahead'
   const side = pose.cameraSide || 'front'
   const behind = side === 'behind'
+  const profile = side === 'side'
 
-  // Base standing
-  let head = { x: 50, y: 22 }
-  let neck = { x: 50, y: 34 }
-  let hip = { x: 50, y: 72 }
-  let lKnee = { x: 42, y: 100 }
-  let rKnee = { x: 58, y: 100 }
-  let lFoot = { x: 40, y: 128 }
-  let rFoot = { x: 60, y: 128 }
-  let lHand = { x: 28, y: 78 }
-  let rHand = { x: 72, y: 78 }
-  let lElbow = { x: 34, y: 55 }
-  let rElbow = { x: 66, y: 55 }
+  // Chibi standing: head center ~50,26  r≈16 ; hip higher than adult stick
+  let head = pt(50, 26)
+  let neck = pt(50, 42)
+  let hip = pt(50, 68)
+  let lKnee = pt(42, 92)
+  let rKnee = pt(58, 92)
+  let lFoot = pt(40, 118)
+  let rFoot = pt(60, 118)
+  let lHand = pt(30, 72)
+  let rHand = pt(70, 72)
+  let lElbow = pt(34, 54)
+  let rElbow = pt(66, 54)
 
   if (p === 'sitting') {
-    hip = { x: 50, y: 86 }
-    lKnee = { x: 34, y: 86 }
-    rKnee = { x: 66, y: 86 }
-    lFoot = { x: 30, y: 120 }
-    rFoot = { x: 70, y: 120 }
-    neck = { x: 50, y: 40 }
-    head = { x: 50, y: 28 }
+    hip = pt(50, 82)
+    lKnee = pt(32, 82)
+    rKnee = pt(68, 82)
+    lFoot = pt(28, 112)
+    rFoot = pt(72, 112)
+    neck = pt(50, 46)
+    head = pt(50, 30)
   } else if (p === 'kneeling') {
-    // Torso lower; shins folded back so it reads as kneeling, not standing.
-    head = { x: 50, y: 30 }
-    neck = { x: 50, y: 42 }
-    hip = { x: 50, y: 78 }
-    lKnee = { x: 38, y: 108 }
-    rKnee = { x: 62, y: 108 }
-    lFoot = { x: 28, y: 108 }
-    rFoot = { x: 72, y: 108 }
+    head = pt(50, 32)
+    neck = pt(50, 48)
+    hip = pt(50, 74)
+    lKnee = pt(38, 102)
+    rKnee = pt(62, 102)
+    lFoot = pt(26, 102)
+    rFoot = pt(74, 102)
   } else if (p === 'squatting' || p === 'crouching') {
-    hip = { x: 50, y: 88 }
-    lKnee = { x: 36, y: 100 }
-    rKnee = { x: 64, y: 100 }
-    lFoot = { x: 34, y: 128 }
-    rFoot = { x: 66, y: 128 }
-    head = { x: 50, y: 30 }
+    head = pt(50, 34)
+    neck = pt(50, 50)
+    hip = pt(50, 84)
+    lKnee = pt(34, 96)
+    rKnee = pt(66, 96)
+    lFoot = pt(32, 118)
+    rFoot = pt(68, 118)
   } else if (p === 'lying') {
-    // Keep the whole figure inside 0..100 so the head stays attached on-canvas.
-    head = { x: 18, y: 70 }
-    neck = { x: 30, y: 70 }
-    hip = { x: 58, y: 72 }
-    lKnee = { x: 76, y: 62 }
-    rKnee = { x: 76, y: 82 }
-    lFoot = { x: 94, y: 58 }
-    rFoot = { x: 94, y: 86 }
-    lElbow = { x: 40, y: 56 }
-    rElbow = { x: 40, y: 84 }
-    lHand = { x: 36, y: 46 }
-    rHand = { x: 36, y: 94 }
+    head = pt(20, 72)
+    neck = pt(34, 72)
+    hip = pt(60, 74)
+    lKnee = pt(78, 64)
+    rKnee = pt(78, 84)
+    lFoot = pt(94, 60)
+    rFoot = pt(94, 88)
+    lElbow = pt(42, 58)
+    rElbow = pt(42, 86)
+    lHand = pt(38, 48)
+    rHand = pt(38, 96)
   } else if (p === 'all_fours') {
-    head = { x: 28, y: 48 }
-    neck = { x: 40, y: 56 }
-    hip = { x: 72, y: 70 }
-    lKnee = { x: 78, y: 100 }
-    rKnee = { x: 88, y: 100 }
-    lFoot = { x: 76, y: 120 }
-    rFoot = { x: 90, y: 120 }
-    lHand = { x: 36, y: 110 }
-    rHand = { x: 48, y: 110 }
-    lElbow = { x: 38, y: 84 }
-    rElbow = { x: 48, y: 84 }
+    head = pt(26, 50)
+    neck = pt(40, 58)
+    hip = pt(70, 72)
+    lKnee = pt(76, 98)
+    rKnee = pt(88, 98)
+    lFoot = pt(74, 116)
+    rFoot = pt(90, 116)
+    lHand = pt(36, 108)
+    rHand = pt(48, 108)
+    lElbow = pt(38, 82)
+    rElbow = pt(48, 82)
   } else if (p === 'jumping') {
-    head = { x: 50, y: 14 }
-    neck = { x: 50, y: 26 }
-    hip = { x: 50, y: 60 }
-    lKnee = { x: 40, y: 82 }
-    rKnee = { x: 60, y: 82 }
-    lFoot = { x: 36, y: 100 }
-    rFoot = { x: 64, y: 100 }
+    head = pt(50, 18)
+    neck = pt(50, 34)
+    hip = pt(50, 58)
+    lKnee = pt(40, 78)
+    rKnee = pt(60, 78)
+    lFoot = pt(36, 96)
+    rFoot = pt(64, 96)
   } else if (p === 'running' || p === 'walking') {
-    lFoot = { x: 32, y: 128 }
-    rFoot = { x: 68, y: 118 }
-    lKnee = { x: 38, y: 98 }
-    rKnee = { x: 62, y: 92 }
+    lFoot = pt(30, 118)
+    rFoot = pt(68, 108)
+    lKnee = pt(36, 90)
+    rKnee = pt(62, 84)
   }
 
   if (arms === 'arms_up' || arms === 'arms_behind_head') {
-    lHand = { x: arms === 'arms_behind_head' ? 40 : 30, y: 12 }
-    rHand = { x: arms === 'arms_behind_head' ? 60 : 70, y: 12 }
-    lElbow = { x: 36, y: 28 }
-    rElbow = { x: 64, y: 28 }
+    lHand = pt(arms === 'arms_behind_head' ? 38 : 26, 10)
+    rHand = pt(arms === 'arms_behind_head' ? 62 : 74, 10)
+    lElbow = pt(34, 28)
+    rElbow = pt(66, 28)
   } else if (arms === 'crossed_arms') {
-    lHand = { x: 58, y: 58 }
-    rHand = { x: 42, y: 62 }
-    lElbow = { x: 38, y: 52 }
-    rElbow = { x: 62, y: 52 }
+    lHand = pt(58, 58)
+    rHand = pt(42, 62)
+    lElbow = pt(36, 52)
+    rElbow = pt(64, 52)
   } else if (arms === 'spread_arms' || arms === 'outstretched_arms') {
-    lHand = { x: 10, y: 58 }
-    rHand = { x: 90, y: 58 }
-    lElbow = { x: 26, y: 50 }
-    rElbow = { x: 74, y: 50 }
+    lHand = pt(8, 56)
+    rHand = pt(92, 56)
+    lElbow = pt(24, 50)
+    rElbow = pt(76, 50)
   } else if (arms === 'arms_behind_back') {
-    lHand = { x: 46, y: 78 }
-    rHand = { x: 54, y: 78 }
-    lElbow = { x: 40, y: 62 }
-    rElbow = { x: 60, y: 62 }
+    lHand = pt(46, 74)
+    rHand = pt(54, 74)
+    lElbow = pt(38, 60)
+    rElbow = pt(62, 60)
   }
 
-  // Gaze tilts the head a little on the vertical.
-  if (gaze === 'looking_up') head = { x: head.x, y: head.y - 3 }
-  if (gaze === 'looking_down') head = { x: head.x, y: head.y + 3 }
+  // Gaze nudges the chibi head.
+  if (gaze === 'looking_up') head = pt(head.x, head.y - 2)
+  if (gaze === 'looking_down') head = pt(head.x, head.y + 2)
+  if (gaze === 'looking_up' && p !== 'lying') {
+    // tiny tip-back for cute "見上げ"
+    neck = pt(neck.x, neck.y + 1)
+  }
 
-  // Partner offset / interaction nudges (applied by caller via translate).
-  if (partner && interact) {
-    if (interact.includes('back')) {
-      // mirrored lean
-      head = { ...head, x: 100 - head.x }
-      neck = { ...neck, x: 100 - neck.x }
-      hip = { ...hip, x: 100 - hip.x }
-    }
+  if (partner && interact && interact.includes('back')) {
+    head = pt(100 - head.x, head.y)
+    neck = pt(100 - neck.x, neck.y)
+    hip = pt(100 - hip.x, hip.y)
+  }
+
+  // Profile: collapse toward a side silhouette (one arm/leg visible).
+  if (profile && p !== 'lying') {
+    const flatten = (q, toward = 50) => pt(toward + (q.x - toward) * 0.22, q.y)
+    head = flatten(head, 54)
+    neck = flatten(neck, 54)
+    hip = flatten(hip, 54)
+    lKnee = flatten(lKnee, 50)
+    rKnee = flatten(rKnee, 58)
+    lFoot = flatten(lFoot, 48)
+    rFoot = flatten(rFoot, 60)
+    lElbow = flatten(lElbow, 48)
+    rElbow = flatten(rElbow, 60)
+    lHand = flatten(lHand, 44)
+    rHand = flatten(rHand, 64)
   }
 
   return {
-    head, neck, hip, lKnee, rKnee, lFoot, rFoot, lElbow, rElbow, lHand, rHand, behind,
+    head, neck, hip, lKnee, rKnee, lFoot, rFoot, lElbow, rElbow, lHand, rHand,
+    behind, profile,
+    headR: 16,
+  }
+}
+
+/**
+ * Camera-driven view: foreshortening + placement + clip + camera glyph.
+ * viewBox is 240×170.
+ */
+export function cameraView(pose) {
+  const pitch = pose.cameraPitch || 'eye'
+  const side = pose.cameraSide || 'front'
+  const dist = pose.cameraDistance || 'full'
+
+  // Figure group transform (around stage center-ish).
+  let scaleX = 1
+  let scaleY = 1
+  let rotate = 0
+  let tx = 0
+  let ty = 0
+
+  if (pitch === 'below') {
+    // Worm's-eye: feet loom, head tips away — stretch lower body.
+    scaleX = 1.08
+    scaleY = 0.92
+    rotate = -6
+    ty = 6
+  } else if (pitch === 'above') {
+    // High angle: squash height, widen a little.
+    scaleX = 1.12
+    scaleY = 0.78
+    rotate = 5
+    ty = -4
+  }
+
+  if (side === 'side') {
+    scaleX *= 0.92
+  }
+
+  // Distance: zoom the whole figure toward camera.
+  if (dist === 'close') {
+    scaleX *= 1.75
+    scaleY *= 1.75
+    ty += pitch === 'above' ? 10 : 28
+  } else if (dist === 'upper') {
+    scaleX *= 1.28
+    scaleY *= 1.28
+    ty += 14
+  }
+
+  // Clip framing rectangle in viewBox coords (what the lens keeps).
+  let clip = { x: 28, y: 8, w: 184, h: 148 }
+  if (dist === 'close') clip = { x: 55, y: 6, w: 130, h: 100 }
+  else if (dist === 'upper') clip = { x: 40, y: 6, w: 160, h: 120 }
+
+  // Camera body position + look-at point (figure center ~120,70).
+  const lookAt = { x: 120, y: dist === 'close' ? 48 : 72 }
+  let cam = { x: 120, y: 158 }
+  if (pitch === 'below') cam = { x: side === 'side' ? 200 : 120, y: 162 }
+  else if (pitch === 'above') cam = { x: side === 'side' ? 200 : 120, y: 14 }
+  else if (side === 'side') cam = { x: 214, y: 90 }
+  else if (side === 'behind') cam = { x: 120, y: 158 }
+
+  if (dist === 'close' && pitch === 'eye') cam = { x: 120, y: 130 }
+  if (dist === 'close' && pitch === 'below') cam = { x: 120, y: 150 }
+  if (dist === 'close' && pitch === 'above') cam = { x: 120, y: 22 }
+
+  const figureTransform = `translate(120 78) rotate(${rotate}) scale(${scaleX} ${scaleY}) translate(-50 -70) translate(${tx} ${ty})`
+
+  // Frustum wedge from camera toward lookAt (cute soft cone).
+  const dx = lookAt.x - cam.x
+  const dy = lookAt.y - cam.y
+  const len = Math.hypot(dx, dy) || 1
+  const ux = dx / len
+  const uy = dy / len
+  const px = -uy
+  const py = ux
+  const near = 10
+  const far = Math.min(len * 0.72, 70)
+  const nearW = 5
+  const farW = dist === 'close' ? 18 : dist === 'upper' ? 26 : 34
+  const frustum = [
+    cam.x + ux * near + px * nearW,
+    cam.y + uy * near + py * nearW,
+    cam.x + ux * far + px * farW,
+    cam.y + uy * far + py * farW,
+    cam.x + ux * far - px * farW,
+    cam.y + uy * far - py * farW,
+    cam.x + ux * near - px * nearW,
+    cam.y + uy * near - py * nearW,
+  ]
+
+  return {
+    pitch, side, dist,
+    figureTransform,
+    clip,
+    camera: cam,
+    lookAt,
+    frustum,
+    showFrustum: true,
   }
 }

@@ -1387,7 +1387,7 @@
     "scripterUpdating": "Updating the craft…",
     "poseSketch": {
       "title": "Pose sketch",
-      "hint": "from tags · no render",
+      "hint": "chibi · camera-aware",
       "gazeViewer": "looking at lens",
       "posture": {
         "standing": "standing",
