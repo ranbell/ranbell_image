@@ -94,7 +94,14 @@ export function applyVrmPose(vrm, model) {
     setEuler(lLowerArm, 0.35, 0.1, 0.15)
     setEuler(rLowerArm, 0.35, -0.1, -0.15)
   } else if (posture === 'lying') {
-    if (hips) hips.rotation.z = Math.PI / 2
+    // Soft supine bone pose (scene may also be rotated by duo layouts)
+    setEuler(spine, 0.05, 0, 0)
+    setEuler(lUpperLeg, -0.15, 0.08, 0)
+    setEuler(rUpperLeg, -0.1, -0.08, 0)
+    setEuler(lLowerLeg, 0.25, 0, 0)
+    setEuler(rLowerLeg, 0.2, 0, 0)
+    setEuler(lUpperArm, 0.2, 0.3, 0.9)
+    setEuler(rUpperArm, 0.2, -0.3, -0.9)
   } else if (posture === 'jumping') {
     setEuler(lUpperLeg, -0.4, 0, 0)
     setEuler(rUpperLeg, 0.35, 0, 0)
@@ -366,6 +373,7 @@ async function loadVrm(url) {
   if (Number.isFinite(box.min.y)) vrm.scene.position.y -= box.min.y
   if (!vrm.scene.userData) vrm.scene.userData = {}
   vrm.scene.userData.groundY = vrm.scene.position.y
+  vrm.scene.userData.baseRotY = vrm.scene.rotation.y
   return vrm
 }
 
@@ -524,9 +532,67 @@ export async function createAvatarStage(container, {
       duoSpacing = g
       vrmA.scene.position.x = -g
       vrmB.scene.position.x = g
+      // Clear any lap-pillow whole-scene tilt when using normal spacing
+      if (!activeInteractIsLap()) {
+        resetSceneOrient(vrmA)
+        resetSceneOrient(vrmB)
+      }
     } else {
       vrmA.scene.position.x = 0
+      resetSceneOrient(vrmA)
     }
+  }
+
+  function activeInteractIsLap() {
+    const m = coachMode && coachModel ? coachModel : activeModel()
+    const i = m?.interact || ''
+    return i === 'lap_pillow' || i === 'head_on_lap' || i === 'head_in_lap'
+  }
+
+  function resetSceneOrient(vrm) {
+    if (!vrm?.scene) return
+    const baseY = Number.isFinite(vrm.scene.userData?.baseRotY) ? vrm.scene.userData.baseRotY : 0
+    vrm.scene.rotation.set(0, baseY, 0)
+    const gy = Number.isFinite(vrm.scene.userData?.groundY) ? vrm.scene.userData.groundY : 0
+    vrm.scene.position.y = gy
+    vrm.scene.position.z = 0
+  }
+
+  /**
+   * A = lap giver (sitting), B = receiver (lying, head toward A's lap).
+   */
+  function applyLapPillowLayout() {
+    if (!vrmB) return
+    const gap = THREE.MathUtils.clamp(duoSpacing, 0.28, 0.7)
+    duoSpacing = gap
+
+    const baseYA = Number.isFinite(vrmA.scene.userData?.baseRotY) ? vrmA.scene.userData.baseRotY : 0
+    const baseYB = Number.isFinite(vrmB.scene.userData?.baseRotY) ? vrmB.scene.userData.baseRotY : 0
+    const gyA = Number.isFinite(vrmA.scene.userData?.groundY) ? vrmA.scene.userData.groundY : 0
+    const gyB = Number.isFinite(vrmB.scene.userData?.groundY) ? vrmB.scene.userData.groundY : 0
+
+    // Giver sits slightly to +X, facing camera / default
+    vrmA.scene.rotation.set(0, baseYA, 0)
+    vrmA.scene.position.set(gap * 0.5, gyA, 0.04)
+
+    // Receiver: tip onto back so head points toward +X (giver)
+    // Standing head=+Y → after rot Z=-90°, head ≈ +X
+    vrmB.scene.rotation.set(0, baseYB, -Math.PI / 2)
+    vrmB.scene.position.set(-gap * 0.25, gyB + 0.1, 0.0)
+  }
+
+  function applyDuoLayout(interact) {
+    if (!vrmB) {
+      vrmA.scene.position.x = 0
+      resetSceneOrient(vrmA)
+      return
+    }
+    const i = String(interact || '')
+    if (i === 'lap_pillow' || i === 'head_on_lap' || i === 'head_in_lap') {
+      applyLapPillowLayout()
+      return
+    }
+    applyDuoSpacing()
   }
 
   function rebuildHandles() {
@@ -739,37 +805,56 @@ export async function createAvatarStage(container, {
 
     // In coach mode: don't clobber IK-edited limbs with preset apply.
     if (coachMode && coachModel) {
+      const interact = coachModel.interact || ''
       if (!customLimbs) {
-        if (coachSubject === 'b' && vrmB) {
+        if (interact === 'lap_pillow' || interact === 'head_on_lap' || interact === 'head_in_lap') {
+          applyVrmPose(vrmA, {
+            ...coachModel,
+            posture: 'sitting',
+            arms: coachModel.arms || 'arms_at_sides',
+            gazePitch: coachModel.gazePitch || 'looking_down',
+          })
+          if (vrmB) {
+            applyVrmPose(vrmB, {
+              ...coachModel,
+              posture: 'lying',
+              arms: 'arms_at_sides',
+              gazePitch: 'looking_up',
+            })
+          }
+        } else if (coachSubject === 'b' && vrmB) {
           applyVrmPose(vrmA, buildPoseSketch(latest.tags, {
             beat: latest.beat, frame: latest.frame, duo: true,
           }))
           applyVrmPose(vrmB, coachModel)
-          applyDuoSpacing()
         } else {
           applyVrmPose(vrmA, coachModel)
           if (vrmB) {
             applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
               beat: latest.beatB || latest.beat, frame: latest.frame, duo: true,
             }))
-            applyDuoSpacing()
-          } else {
-            vrmA.scene.position.x = 0
           }
         }
+        applyDuoLayout(interact)
         snapIkToTips()
       } else {
-        applyDuoSpacing()
+        applyDuoLayout(interact)
       }
     } else {
       applyVrmPose(vrmA, model)
       if (vrmB) {
-        applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
-          beat: latest.beatB || latest.beat,
-          frame: latest.frame,
-          duo: true,
-        }))
-        applyDuoSpacing()
+        const interact = model.interact || ''
+        if (interact === 'lap_pillow' || interact === 'head_on_lap' || interact === 'head_in_lap') {
+          applyVrmPose(vrmA, { ...model, posture: 'sitting', gazePitch: model.gazePitch || 'looking_down' })
+          applyVrmPose(vrmB, { ...model, posture: 'lying', arms: 'arms_at_sides', gazePitch: 'looking_up' })
+        } else {
+          applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
+            beat: latest.beatB || latest.beat,
+            frame: latest.frame,
+            duo: true,
+          }))
+        }
+        applyDuoLayout(interact || model.interact)
       } else {
         vrmA.scene.position.x = 0
       }
@@ -1070,7 +1155,7 @@ export async function createAvatarStage(container, {
     },
     setDuoSpacing(gap) {
       duoSpacing = THREE.MathUtils.clamp(Number(gap) || 0.55, 0.22, 1.35)
-      applyDuoSpacing()
+      applyDuoLayout(coachModel?.interact || activeModel()?.interact)
       return duoSpacing
     },
     nudgeDuoSpacing(delta = 0.08) {
@@ -1078,6 +1163,23 @@ export async function createAvatarStage(container, {
     },
     getDuoSpacing() {
       return duoSpacing
+    },
+    /** One-tap duo interaction presets (e.g. lap_pillow). */
+    applyInteraction(name) {
+      if (!coachMode || !coachModel) return null
+      const n = String(name || '')
+      coachModel = { ...coachModel, interact: n, empty: false }
+      customLimbs = false
+      coachModel.customLimbs = false
+      if (n === 'lap_pillow' || n === 'head_on_lap' || n === 'head_in_lap') {
+        duoSpacing = Math.min(duoSpacing, 0.42)
+        coachModel.posture = 'sitting'
+        coachModel.gazePitch = 'looking_down'
+        coachModel.cameraSide = coachModel.cameraSide || 'side'
+        coachModel.cameraDistance = coachModel.cameraDistance === 'close' ? 'upper' : (coachModel.cameraDistance || 'full')
+      }
+      sync()
+      return coachModel
     },
     dispose() {
       cancelAnimationFrame(raf)

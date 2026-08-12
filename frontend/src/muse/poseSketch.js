@@ -37,6 +37,7 @@ const CAMERA_DISTANCE = {
 const INTERACT = [
   'back-to-back', 'back_to_back', 'holding_hands', 'hand_holding',
   'hug', 'hugging', 'standing_side_by_side', 'looking_at_each_other',
+  'lap_pillow', 'head_on_lap', 'head_in_lap',
 ]
 
 function normTag(raw) {
@@ -76,10 +77,14 @@ export function hintsFromProse(text) {
   const s = String(text || '')
   const out = {
     posture: '', arms: '', gazePitch: '', gazeTarget: '',
-    cameraPitch: '', cameraSide: '', cameraDistance: '',
+    cameraPitch: '', cameraSide: '', cameraDistance: '', interact: '',
   }
   if (!s) return out
   const low = s.toLowerCase()
+
+  if (/膝枕|head[_ ]?(on|in)[_ ]?lap|lap[_ ]?pillow/.test(s) || /lap_pillow|head_on_lap/.test(low)) {
+    out.interact = 'lap_pillow'
+  }
 
   if (/寝[てるろ]|横た|lying|on_back|on back/.test(s) || /lying/.test(low)) out.posture = 'lying'
   else if (/四つん|all[_ ]?fours/.test(s) || /all_fours/.test(low)) out.posture = 'all_fours'
@@ -90,6 +95,7 @@ export function hintsFromProse(text) {
   else if (/走|run/.test(s) || /running/.test(low)) out.posture = 'running'
   else if (/歩|walk/.test(s) || /walking/.test(low)) out.posture = 'walking'
   else if (/立[っちて]|もたれ|lean|stand/.test(s) || /standing|leaning/.test(low)) out.posture = 'standing'
+  else if (out.interact === 'lap_pillow') out.posture = 'sitting'
 
   if (/腕[を]?[上あ]|両手[を]?[上あ]|arms? up|hands? up/.test(s) || /arms_up/.test(low)) out.arms = 'arms_up'
   else if (/頭の後ろ|arms? behind (the )?head/.test(s) || /arms_behind_head/.test(low)) out.arms = 'arms_behind_head'
@@ -180,6 +186,11 @@ export function buildPoseSketch(tagStr, notebook = {}) {
   if (!cameraPitch && hint.cameraPitch) cameraPitch = hint.cameraPitch
   if (!cameraSide && hint.cameraSide) cameraSide = hint.cameraSide
   if (!cameraDistance && hint.cameraDistance) cameraDistance = hint.cameraDistance
+  const interactFinal = interact || hint.interact || ''
+  if (interactFinal === 'lap_pillow' || interactFinal === 'head_on_lap' || interactFinal === 'head_in_lap') {
+    // Giver defaults to sitting when interaction is lap pillow
+    if (!firstHit(set, POSTURE_ORDER) && !hint.posture) posture = 'sitting'
+  }
 
   if (!posture) posture = 'standing'
   if (!cameraPitch) cameraPitch = 'eye'
@@ -197,7 +208,7 @@ export function buildPoseSketch(tagStr, notebook = {}) {
     cameraPitch !== 'eye' ? cameraPitch : '',
     cameraSide !== 'front' ? cameraSide : '',
     cameraDistance !== 'full' ? cameraDistance : '',
-    interact,
+    interactFinal,
   ].filter(Boolean)
 
   return {
@@ -209,7 +220,7 @@ export function buildPoseSketch(tagStr, notebook = {}) {
     cameraSide,
     cameraDistance,
     duo,
-    interact: interact || '',
+    interact: interactFinal || '',
     active,
     empty: !String(tagStr || '').trim() && !String(prose || '').trim(),
   }

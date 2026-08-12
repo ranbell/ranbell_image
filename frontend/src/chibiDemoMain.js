@@ -13,29 +13,16 @@ try {
   const stage = await createAvatarStage(el, { duo: true })
   tip.remove()
   stage.update({
-    tags: '2girls, crouching, squatting, from_side, profile, from_below, low_angle, looking_up, arms_at_sides',
-    beat: 'しゃがんで',
-    beatB: '立って少し前を向いて',
-    frame: '横からローアングルで煽って',
+    tags: '2girls, lap_pillow, sitting, from_side, upper_body',
+    beat: '膝枕してあげて',
+    beatB: '膝の上でやすんで',
+    frame: '横からやさしく',
     duo: true,
   })
   stage.setCoachMode(true)
-  stage.setCoachSubject('a')
-  stage.patchCoachModel({
-    posture: 'squatting',
-    arms: 'arms_at_sides',
-    cameraSide: 'side',
-    cameraPitch: 'below',
-    cameraDistance: 'full',
-    gazePitch: 'looking_up',
-  })
-  stage.setCoachSubject('b')
-  stage.patchCoachModel({
-    posture: 'standing',
-    arms: 'arms_at_sides',
-    gazePitch: 'looking_ahead',
-  })
-  stage.setCoachSubject('a')
+  stage.setDuoSpacing(0.38)
+  stage.applyInteraction('lap_pillow')
+  stage.setViewMode('overview')
   window.__avatarStage = stage
 
   function paintBar(mode) {
@@ -47,16 +34,9 @@ try {
     })
   }
   bar?.querySelectorAll('button').forEach((b) => {
-    b.onclick = () => {
-      const mode = stage.setViewMode(b.dataset.mode)
-      paintBar(mode)
-    }
+    b.onclick = () => paintBar(stage.setViewMode(b.dataset.mode))
   })
   paintBar('overview')
-  // Start on shot view so the demo shows "this is the picture"
-  setTimeout(() => {
-    paintBar(stage.setViewMode('shot'))
-  }, 400)
 } catch (err) {
   tip.textContent = `読込失敗: ${err?.message || err}`
   tip.style.color = '#fca5a5'

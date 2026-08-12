@@ -117,6 +117,9 @@ export function poseModelToTags(model, { duo = false } = {}) {
   if (cs) parts.push(cs)
   if (cd) parts.push(cd)
   if (model.customLimbs) parts.push('dynamic_pose')
+  if (model.interact === 'lap_pillow' || model.interact === 'head_on_lap' || model.interact === 'head_in_lap') {
+    parts.push('lap_pillow, head_on_lap')
+  }
   return parts.filter(Boolean).join(', ')
 }
 
@@ -164,6 +167,9 @@ export function buildPoseCoachMessage(model, opts = {}) {
     `体: ${bodyBits.join('、')}。`,
     `カメラ: ${camBits.join('、')}。`,
   ]
+  if (duo && (model.interact === 'lap_pillow' || model.interact === 'head_on_lap')) {
+    lines.push('関係: 一人が座って膝枕、もう一人が膝の上でやすんでいる。')
+  }
   if (spacingLine) lines.push(`${spacingLine}。`)
   if (limbs) lines.push(`${limbs}。`)
   lines.push(`タグ目安: ${tags}`)

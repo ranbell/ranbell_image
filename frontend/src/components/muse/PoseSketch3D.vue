@@ -35,6 +35,7 @@ const coachState = ref({
   cameraSide: 'front',
   cameraPitch: 'eye',
   cameraDistance: 'full',
+  interact: '',
 })
 const duoGap = ref(0.55)
 let stage = null
@@ -99,6 +100,7 @@ function refreshCoachPreview() {
       cameraSide: snap.model.cameraSide || 'front',
       cameraPitch: snap.model.cameraPitch || 'eye',
       cameraDistance: snap.model.cameraDistance || 'full',
+      interact: snap.model.interact || '',
     }
   }
   if (Number.isFinite(snap?.duoSpacing)) duoGap.value = snap.duoSpacing
@@ -152,6 +154,12 @@ function setSubject(who) {
 function nudgeGap(dir) {
   if (!stage?.nudgeDuoSpacing || !props.duo) return
   duoGap.value = stage.nudgeDuoSpacing(dir < 0 ? -0.08 : 0.08)
+  refreshCoachPreview()
+}
+
+function applyInteract(name) {
+  if (!stage?.applyInteraction || !coachOn.value) return
+  stage.applyInteraction(name)
   refreshCoachPreview()
 }
 
@@ -306,6 +314,12 @@ onBeforeUnmount(() => {
           class="rounded-lg border border-white/15 px-2.5 py-1 text-[10px] text-gray-300 hover:border-white/40"
           @click="nudgeGap(1)"
         >{{ t('muse.poseSketch.farther') }}</button>
+        <button
+          type="button"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="chipClass(coachState.interact === 'lap_pillow')"
+          @click="applyInteract('lap_pillow')"
+        >{{ t('muse.poseSketch.lapPillow') }}</button>
         <span class="text-[9px] text-[var(--sb-faint)]">{{ Math.round(duoGap * 100) }}</span>
       </div>
 
