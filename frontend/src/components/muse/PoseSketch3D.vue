@@ -29,6 +29,13 @@ const coachOn = ref(false)
 const coachSubject = ref('a')
 const coachPreview = ref('')
 const viewMode = ref('overview') // overview | shot
+const coachState = ref({
+  posture: 'standing',
+  arms: 'arms_at_sides',
+  cameraSide: 'front',
+  cameraPitch: 'eye',
+  cameraDistance: 'full',
+})
 let stage = null
 let dead = false
 
@@ -84,11 +91,26 @@ function refreshCoachPreview() {
     return
   }
   const snap = stage.getCoachSnapshot()
+  if (snap?.model) {
+    coachState.value = {
+      posture: snap.model.posture || 'standing',
+      arms: snap.model.arms || 'arms_at_sides',
+      cameraSide: snap.model.cameraSide || 'front',
+      cameraPitch: snap.model.cameraPitch || 'eye',
+      cameraDistance: snap.model.cameraDistance || 'full',
+    }
+  }
   coachPreview.value = buildPoseCoachMessage(snap.model, {
     duo: snap.duo || props.duo,
     subject: props.duo ? (snap.subject === 'b' ? 'b' : snap.duo ? 'both' : 'a') : 'a',
     customLimbs: snap.customLimbs,
   })
+}
+
+function chipClass(active) {
+  return active
+    ? 'border-amber-400/70 bg-amber-400/15 text-amber-100'
+    : 'border-white/10 bg-white/5 text-gray-300 hover:border-white/30'
 }
 
 function patchCoach(partial) {
@@ -242,65 +264,74 @@ onBeforeUnmount(() => {
       class="px-2.5 pt-1 text-[9px] text-sky-200/80"
     >{{ t('muse.poseSketch.viewShotHint') }}</p>
 
-    <div ref="host" class="w-full min-h-[220px] px-1 relative">
+    <div
+      ref="host"
+      class="w-full px-1 relative"
+      :class="coachOn || viewMode === 'shot' ? 'min-h-[280px]' : 'min-h-[220px]'"
+    >
       <p
         v-if="loading"
         class="absolute inset-0 flex items-center justify-center text-[11px] text-[var(--sb-faint)]"
       >{{ t('muse.poseSketch.loading') }}</p>
     </div>
 
-    <div v-if="coachOn" class="space-y-1.5 px-2.5 pb-2 pt-1 border-t border-white/5">
-      <p class="text-[9px] text-[var(--sb-muted)]">{{ t('muse.poseSketch.coachHint') }}</p>
+    <div v-if="coachOn" class="space-y-2 px-2.5 pb-2.5 pt-1.5 border-t border-white/5">
+      <p class="text-[9px] leading-relaxed text-[var(--sb-muted)]">{{ t('muse.poseSketch.coachHint') }}</p>
 
-      <div v-if="duo" class="flex flex-wrap gap-1">
+      <div v-if="duo" class="flex flex-wrap gap-1.5">
         <button
           v-for="who in ['a', 'b']" :key="who" type="button"
-          class="rounded-full border px-2 py-0.5 text-[9px]"
-          :class="coachSubject === who ? 'border-amber-400/70 text-amber-200' : 'border-white/10 text-gray-400'"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="coachSubject === who ? 'border-amber-400/70 text-amber-200 bg-amber-400/10' : 'border-white/10 text-gray-400'"
           @click="setSubject(who)"
         >{{ who === 'a' ? t('muse.poseSketch.subjectA') : t('muse.poseSketch.subjectB') }}</button>
       </div>
 
-      <div class="flex flex-wrap gap-1">
+      <div class="flex flex-wrap gap-1.5">
         <button
           v-for="p in POSTURES" :key="p" type="button"
-          class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300 hover:border-white/30"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="chipClass(coachState.posture === p)"
           @click="patchCoach({ posture: p })"
         >{{ t(`muse.poseSketch.posture.${p}`) }}</button>
       </div>
-      <div class="flex flex-wrap gap-1">
+      <div class="flex flex-wrap gap-1.5">
         <button
           v-for="a in ARMS" :key="a" type="button"
-          class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300 hover:border-white/30"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="chipClass(coachState.arms === a)"
           @click="patchCoach({ arms: a })"
         >{{ t(`muse.poseSketch.arms.${a}`) }}</button>
       </div>
-      <div class="flex flex-wrap gap-1">
+      <div class="flex flex-wrap gap-1.5">
         <button
           v-for="s in SIDES" :key="'s'+s" type="button"
-          class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300 hover:border-white/30"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="chipClass(coachState.cameraSide === s)"
           @click="patchCoach({ cameraSide: s })"
         >{{ t(`muse.poseSketch.camera.${s}`) }}</button>
         <button
           v-for="p in PITCHES" :key="'p'+p" type="button"
-          class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300 hover:border-white/30"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="chipClass(coachState.cameraPitch === p)"
           @click="patchCoach({ cameraPitch: p })"
         >{{ t(`muse.poseSketch.camera.${p}`) }}</button>
         <button
           v-for="d in DISTS" :key="'d'+d" type="button"
-          class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300 hover:border-white/30"
+          class="rounded-lg border px-2.5 py-1 text-[10px]"
+          :class="chipClass(coachState.cameraDistance === d)"
           @click="patchCoach({ cameraDistance: d })"
         >{{ t(`muse.poseSketch.camera.${d}`) }}</button>
       </div>
 
       <pre
         v-if="coachPreview"
-        class="max-h-24 overflow-auto whitespace-pre-wrap rounded-md bg-black/30 p-2 text-[9px] leading-relaxed text-sky-100/90"
+        class="max-h-28 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2.5 text-[9px] leading-relaxed text-sky-100/90"
       >{{ coachPreview }}</pre>
 
       <button
         type="button"
-        class="w-full rounded-md border border-[var(--sb-teal)]/50 bg-[var(--sb-teal)]/20 py-1.5 text-[11px] text-[var(--sb-teal)] hover:bg-[var(--sb-teal)]/30"
+        class="w-full rounded-lg border border-[var(--sb-teal)]/50 bg-[var(--sb-teal)]/20 py-2 text-[12px] font-medium text-[var(--sb-teal)] hover:bg-[var(--sb-teal)]/30 active:scale-[0.99]"
         @click="sendCoach"
       >{{ t('muse.poseSketch.coachSend') }}</button>
     </div>

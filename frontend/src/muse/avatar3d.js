@@ -8,7 +8,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { VRMLoaderPlugin, VRMUtils, VRMHumanBoneName } from '@pixiv/three-vrm'
 import { buildPoseSketch } from './poseSketch.js'
 import { cameraEnumsFromShotPosition } from './poseCoach.js'
-import { solveCcdIk } from './vrmIk.js'
+import { solveLimbIk } from './vrmIk.js'
 
 export const DEFAULT_VRM_URL = '/models/pose_avatar.vrm'
 
@@ -397,7 +397,9 @@ export async function createAvatarStage(container, {
   container.appendChild(renderer.domElement)
   Object.assign(renderer.domElement.style, {
     display: 'block', width: '100%', borderRadius: '0.75rem',
+    touchAction: 'none', userSelect: 'none',
   })
+  renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault())
 
   scene.add(new THREE.HemisphereLight(0xfff0f5, 0x1a1a22, 0.95))
   const key = new THREE.DirectionalLight(0xffffff, 1.0)
@@ -474,25 +476,41 @@ export async function createAvatarStage(container, {
 
   const orbit = new OrbitControls(viewCam, renderer.domElement)
   orbit.enableDamping = true
-  orbit.dampingFactor = 0.08
-  orbit.maxPolarAngle = Math.PI * 0.49
+  orbit.dampingFactor = 0.12
+  orbit.enablePan = true
+  orbit.screenSpacePanning = true
+  orbit.rotateSpeed = 0.85
+  orbit.panSpeed = 0.7
+  orbit.zoomSpeed = 0.9
+  orbit.maxPolarAngle = Math.PI * 0.495
   orbit.minDistance = 1.2
   orbit.maxDistance = 12
   orbit.enabled = false
+  // Left = rotate, middle/right = pan (IK uses left on handles)
+  orbit.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN,
+  }
+  orbit.touches = {
+    ONE: THREE.TOUCH.ROTATE,
+    TWO: THREE.TOUCH.DOLLY_PAN,
+  }
 
   const handleRoot = new THREE.Group()
   handleRoot.visible = false
   scene.add(handleRoot)
 
   const IK_SPECS = [
-    { id: 'leftHand', bones: [Bone.LeftUpperArm, Bone.LeftLowerArm], tip: Bone.LeftHand, color: 0x38bdf8, size: 0.055 },
-    { id: 'rightHand', bones: [Bone.RightUpperArm, Bone.RightLowerArm], tip: Bone.RightHand, color: 0x38bdf8, size: 0.055 },
-    { id: 'leftFoot', bones: [Bone.LeftUpperLeg, Bone.LeftLowerLeg], tip: Bone.LeftFoot, color: 0xf472b6, size: 0.06 },
-    { id: 'rightFoot', bones: [Bone.RightUpperLeg, Bone.RightLowerLeg], tip: Bone.RightFoot, color: 0xf472b6, size: 0.06 },
+    { id: 'leftHand', bones: [Bone.LeftUpperArm, Bone.LeftLowerArm], tip: Bone.LeftHand, color: 0x38bdf8, size: 0.05, hit: 0.12, side: 'left', kind: 'arm' },
+    { id: 'rightHand', bones: [Bone.RightUpperArm, Bone.RightLowerArm], tip: Bone.RightHand, color: 0x38bdf8, size: 0.05, hit: 0.12, side: 'right', kind: 'arm' },
+    { id: 'leftFoot', bones: [Bone.LeftUpperLeg, Bone.LeftLowerLeg], tip: Bone.LeftFoot, color: 0xf472b6, size: 0.055, hit: 0.13, side: 'left', kind: 'leg' },
+    { id: 'rightFoot', bones: [Bone.RightUpperLeg, Bone.RightLowerLeg], tip: Bone.RightFoot, color: 0xf472b6, size: 0.055, hit: 0.13, side: 'right', kind: 'leg' },
   ]
 
-  /** @type {{ mesh: THREE.Mesh, id: string, vrm: any, bones: any[], tip: any }[]} */
+  /** @type {{ mesh: THREE.Mesh, hit: THREE.Mesh, id: string, vrm: any, bones: any[], tip: any, side: string, kind: string, baseColor: number }[]} */
   const ikEffectors = []
+  let hoverIk = null
 
   function coachVrm() {
     return coachSubject === 'b' && vrmB ? vrmB : vrmA
@@ -502,56 +520,91 @@ export async function createAvatarStage(container, {
     while (ikEffectors.length) {
       const h = ikEffectors.pop()
       handleRoot.remove(h.mesh)
+      handleRoot.remove(h.hit)
       h.mesh.geometry?.dispose?.()
       h.mesh.material?.dispose?.()
+      h.hit.geometry?.dispose?.()
+      h.hit.material?.dispose?.()
     }
     const v = coachVrm()
     for (const spec of IK_SPECS) {
       const bones = spec.bones.map((n) => bone(v, n)).filter(Boolean)
       const tip = bone(v, spec.tip)
       if (bones.length < 2 || !tip) continue
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(spec.size, 14, 12),
+      const mat = new THREE.MeshBasicMaterial({
+        color: spec.color,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+      })
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(spec.size, 16, 14), mat)
+      // Invisible larger pick target
+      const hit = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.hit, 10, 8),
         new THREE.MeshBasicMaterial({
-          color: spec.color,
-          transparent: true,
-          opacity: 0.9,
-          depthWrite: false,
+          transparent: true, opacity: 0, depthWrite: false, depthTest: false,
         }),
       )
       mesh.userData.ikId = spec.id
+      hit.userData.ikId = spec.id
       tip.getWorldPosition(mesh.position)
+      hit.position.copy(mesh.position)
+      handleRoot.add(hit)
       handleRoot.add(mesh)
-      ikEffectors.push({ mesh, id: spec.id, vrm: v, bones, tip })
+      ikEffectors.push({
+        mesh, hit, id: spec.id, vrm: v, bones, tip,
+        side: spec.side, kind: spec.kind, baseColor: spec.color,
+      })
     }
+  }
+
+  function setIkHighlight(entry, on) {
+    if (!entry) return
+    const mat = entry.mesh.material
+    mat.color.setHex(on ? 0xfde68a : entry.baseColor)
+    mat.opacity = on ? 1 : 0.92
+    entry.mesh.scale.setScalar(on ? 1.25 : 1)
   }
 
   function snapIkToTips() {
     for (const h of ikEffectors) {
       h.tip.updateWorldMatrix(true, false)
       h.tip.getWorldPosition(h.mesh.position)
+      h.hit.position.copy(h.mesh.position)
     }
   }
 
   function syncHandles() {
-    // While dragging an effector, keep mesh where user put it; others follow tips.
     for (const h of ikEffectors) {
-      if (dragKind === 'ik' && dragIk === h) continue
+      if (dragKind === 'ik' && dragIk === h) {
+        h.hit.position.copy(h.mesh.position)
+        continue
+      }
       h.tip.updateWorldMatrix(true, false)
       h.tip.getWorldPosition(h.mesh.position)
+      h.hit.position.copy(h.mesh.position)
     }
   }
 
   function runIk(effector) {
     if (!effector) return
-    solveCcdIk(effector.bones, effector.tip, effector.mesh.position, {
-      iterations: 16,
-      maxAngle: 0.55,
+    const [upper, lower] = effector.bones
+    solveLimbIk(upper, lower, effector.tip, effector.mesh.position, {
+      side: effector.side,
+      kind: effector.kind,
     })
     effector.vrm.humanoid?.update?.()
     effector.vrm.update?.(0)
     customLimbs = true
     if (coachModel) coachModel.customLimbs = true
+  }
+
+  function setCanvasCursor(kind) {
+    const el = renderer.domElement
+    if (kind === 'ik') el.style.cursor = 'grabbing'
+    else if (kind === 'hover') el.style.cursor = 'grab'
+    else if (kind === 'shot') el.style.cursor = 'move'
+    else el.style.cursor = viewMode === 'shot' || coachMode ? 'grab' : 'default'
   }
 
   const raycaster = new THREE.Raycaster()
@@ -739,31 +792,54 @@ export async function createAvatarStage(container, {
     raycaster.setFromCamera(pointerNdc, viewCam)
 
     if (coachMode && handleRoot.visible && ikEffectors.length) {
-      const hits = raycaster.intersectObjects(ikEffectors.map((h) => h.mesh), false)
+      const hits = raycaster.intersectObjects(ikEffectors.map((h) => h.hit), false)
       if (hits.length) {
         dragKind = 'ik'
-        dragIk = ikEffectors.find((h) => h.mesh === hits[0].object) || null
-        orbit.enabled = false
-        viewCam.getWorldDirection(viewDir)
-        dragPlane.setFromNormalAndCoplanarPoint(viewDir.negate(), hits[0].point)
-        lastPointer = { x: ev.clientX, y: ev.clientY }
-        ev.preventDefault()
-        return
+        dragIk = ikEffectors.find((h) => h.hit === hits[0].object || h.mesh === hits[0].object) || null
+        if (dragIk) {
+          setIkHighlight(dragIk, true)
+          orbit.enabled = false
+          viewCam.getWorldDirection(viewDir)
+          dragPlane.setFromNormalAndCoplanarPoint(viewDir.clone().negate(), dragIk.mesh.position)
+          lastPointer = { x: ev.clientX, y: ev.clientY }
+          setCanvasCursor('ik')
+          renderer.domElement.setPointerCapture?.(ev.pointerId)
+          ev.preventDefault()
+          return
+        }
       }
     }
 
-    const gizmoHits = viewMode === 'overview'
+    const gizmoHits = (viewMode === 'overview' && coachMode)
       ? raycaster.intersectObject(shotGizmo.root, true)
       : []
     if (gizmoHits.length) {
       dragKind = 'shot'
       orbit.enabled = false
       lastPointer = { x: ev.clientX, y: ev.clientY }
+      setCanvasCursor('shot')
+      renderer.domElement.setPointerCapture?.(ev.pointerId)
       ev.preventDefault()
     }
   }
 
   function onPointerMove(ev) {
+    // Hover highlight when idle
+    if ((coachMode || viewMode === 'shot') && !dragKind && coachMode && handleRoot.visible) {
+      setPointerNdc(ev)
+      raycaster.setFromCamera(pointerNdc, viewCam)
+      const hits = raycaster.intersectObjects(ikEffectors.map((h) => h.hit), false)
+      const next = hits.length
+        ? ikEffectors.find((h) => h.hit === hits[0].object)
+        : null
+      if (next !== hoverIk) {
+        if (hoverIk) setIkHighlight(hoverIk, false)
+        hoverIk = next
+        if (hoverIk) setIkHighlight(hoverIk, true)
+        setCanvasCursor(hoverIk ? 'hover' : '')
+      }
+    }
+
     if ((!coachMode && viewMode !== 'shot') || !dragKind) return
     const dx = ev.clientX - lastPointer.x
     const dy = ev.clientY - lastPointer.y
@@ -772,8 +848,19 @@ export async function createAvatarStage(container, {
     if (dragKind === 'ik' && dragIk) {
       setPointerNdc(ev)
       raycaster.setFromCamera(pointerNdc, viewCam)
+      // Keep plane facing camera for stable screen-space drag
+      viewCam.getWorldDirection(viewDir)
+      dragPlane.setFromNormalAndCoplanarPoint(viewDir.clone().negate(), dragIk.mesh.position)
       if (raycaster.ray.intersectPlane(dragPlane, dragHit)) {
-        dragIk.mesh.position.copy(dragHit)
+        // Soft clamp: don't yank farther than ~arm/leg reach from shoulder/hip
+        const root = dragIk.bones[0]
+        root.updateWorldMatrix(true, false)
+        const rootPos = new THREE.Vector3().setFromMatrixPosition(root.matrixWorld)
+        const maxR = dragIk.kind === 'arm' ? 0.75 : 0.95
+        const offset = dragHit.clone().sub(rootPos)
+        if (offset.length() > maxR) offset.setLength(maxR)
+        dragIk.mesh.position.copy(rootPos).add(offset)
+        dragIk.hit.position.copy(dragIk.mesh.position)
         runIk(dragIk)
       }
       return
@@ -784,9 +871,9 @@ export async function createAvatarStage(container, {
       const base = shotOverride || shotCameraWorld(model, { duo: Boolean(vrmB) }).position
       if (!shotOverride) shotOverride = base.clone()
       const sph = new THREE.Spherical().setFromVector3(shotOverride)
-      sph.theta -= dx * 0.01
-      sph.phi = THREE.MathUtils.clamp(sph.phi + dy * 0.01, 0.15, Math.PI - 0.2)
-      sph.radius = THREE.MathUtils.clamp(sph.radius, 0.8, 5.5)
+      sph.theta -= dx * 0.012
+      sph.phi = THREE.MathUtils.clamp(sph.phi + dy * 0.012, 0.12, Math.PI - 0.18)
+      sph.radius = THREE.MathUtils.clamp(sph.radius, 0.75, 5.5)
       shotOverride.setFromSpherical(sph)
       if (coachModel) {
         const crouch = ['squatting', 'crouching', 'kneeling'].includes(coachModel.posture)
@@ -798,11 +885,14 @@ export async function createAvatarStage(container, {
     }
   }
 
-  function onPointerUp() {
+  function onPointerUp(ev) {
     if (!coachMode && viewMode !== 'shot') return
+    if (dragIk) setIkHighlight(dragIk, Boolean(hoverIk === dragIk))
     dragKind = null
     dragIk = null
     orbit.enabled = coachMode || viewMode === 'shot'
+    setCanvasCursor(hoverIk ? 'hover' : '')
+    try { renderer.domElement.releasePointerCapture?.(ev.pointerId) } catch { /* */ }
   }
 
   function onWheelShot(ev) {

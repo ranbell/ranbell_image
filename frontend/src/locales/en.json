@@ -1394,7 +1394,7 @@
       "gazeViewer": "looking at lens",
       "coach": "Pose coaching",
       "coachOn": "Coaching…",
-      "coachHint": "Cyan = hand IK / pink = foot IK. Move the cam in overview, check “the picture” in shot view. Drag to move; Shift+wheel for distance.",
+      "coachHint": "Cyan = hands / pink = feet (large grab targets). Left-drag orbit, right-drag pan, pinch zoom. Stage in overview → check the picture in shot view.",
       "coachSend": "Coach: do it like this",
       "viewOverview": "Overview",
       "viewShot": "Shot view",
