@@ -276,6 +276,8 @@ const notebookRows = computed(() => {
   }
   return rows
 })
+/** Muse's open proposal — light chips, never a modal. */
+const openProposal = computed(() => String(session.value?.notebook?.open || '').trim())
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.
 const facetConflicts = computed(() => session.value?.facet_conflicts || [])
@@ -1047,6 +1049,23 @@ async function onChatKey(e) {
                 >
                   {{ t('muse.openDiary') }}
                 </button>
+              </div>
+              <div
+                v-if="openProposal && !chatLocked"
+                class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--sb-muted)]"
+              >
+                <span class="text-[var(--sb-amber)]">{{ t('muse.openChipLabel') }}</span>
+                <span class="truncate max-w-[14rem] text-[var(--sb-faint)]">{{ openProposal }}</span>
+                <button
+                  type="button"
+                  class="sb-btn text-[10px] px-2 py-0.5"
+                  @click="sendChat(t('muse.openChipYes'))"
+                >{{ t('muse.openChipYes') }}</button>
+                <button
+                  type="button"
+                  class="sb-btn text-[10px] px-2 py-0.5 opacity-80"
+                  @click="sendChat(t('muse.openChipNo'))"
+                >{{ t('muse.openChipNo') }}</button>
               </div>
               <div class="flex gap-2">
                 <textarea

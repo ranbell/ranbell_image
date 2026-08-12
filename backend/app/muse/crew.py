@@ -2527,11 +2527,6 @@ def w_actress_duet_prompt(
             "each other's thoughts. Do not overrule this with a closeness the shoot itself hasn't earned."
         ) if tier else "",
         "",
-        "--- 2GIRLS IDENTITY & TAG RULES ---",
-        "- When writing TAGS, ALWAYS include `2girls` or `multiple_girls`.",
-        "- Combine identity tags for BOTH characters cleanly without contradictions (e.g. both hair colours/styles present).",
-        "- Include interaction tags like `looking_at_each_other`, `back-to-back`, `holding_hands`, `standing_side_by_side`, `hug`.",
-        "",
         "--- MUSE A VOICE ---",
         _voice_block(character_a, locale=locale, seed=seed),
         "",
@@ -2551,6 +2546,12 @@ def w_actress_duet_prompt(
         # rewrite never had to say because it was one undivided TAGS/SCENE
         # block covering both Muses at once.
         blocks += [
+            "--- 2GIRLS IDENTITY & TAG RULES ---",
+            "- When writing TAGS, ALWAYS include `2girls` or `multiple_girls`.",
+            "- Combine identity tags for BOTH characters cleanly without contradictions.",
+            "- Include interaction tags like `looking_at_each_other`, `back-to-back`, "
+            "`holding_hands`, `standing_side_by_side`, `hug`.",
+            "",
             DUET_OWNS_THE_FRAME_SCOPED,
             _style_block(lead, base_style),
             w_facet_output_block(
@@ -2559,11 +2560,19 @@ def w_actress_duet_prompt(
         ]
     elif mode == "prep":
         blocks += [
+            "--- 2GIRLS IDENTITY & TAG RULES ---",
+            "- When writing TAGS, ALWAYS include `2girls` or `multiple_girls`.",
+            "- Combine identity tags for BOTH characters cleanly without contradictions.",
+            "- Include interaction tags like `looking_at_each_other`, `back-to-back`, "
+            "`holding_hands`, `standing_side_by_side`, `hug`.",
+            "",
             DUET_OWNS_THE_FRAME,
             _style_block(lead, base_style),
             W_DUET_PREP_OUTPUT,
         ]
     else:
+        # Talk is voices only — TAGS rules stay on prep/scripter so SAY does
+        # not drift into inventory speech.
         blocks += [
             "Nothing is written down yet. The two Muses and Showrunner are bouncing ideas off each other.",
             W_DUET_TALK_OUTPUT,

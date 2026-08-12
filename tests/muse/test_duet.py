@@ -340,12 +340,17 @@ CRAFT_SCENE: Same messy room; white shirt and a long skirt, no pants.
 def test_prep_closing_instruction_is_sensory_readout():
     """Notebook prep asks for a feeling readout, not a TAGS rewrite."""
     prompt = service._duet_user_prompt(
-        {"inputs": {}, "chat": [], "notes": [], "craft": {"prompt": "x"},
-         "mode": "duet", "notebook": {"rev": 1, "wearing": "skirt"}},
+        {"inputs": {}, "chat": [], "notes": [],
+         "craft": {"prompt": "1girl, skirt, masterpiece, best_quality"},
+         "mode": "duet",
+         "notebook": {"rev": 1, "wearing": "skirt", "scene": "room", "beat": "standing"}},
         "スカートにして", prep=True,
     )
     assert "撮影準備の仕上げ" in prompt
     assert "TAGS/SCENE" not in prompt
+    # Notebook path must not hand the TAGS string to Muse for readout.
+    assert "masterpiece" not in prompt
+    assert "装い" in prompt or "skirt" in prompt
 
 
 @pytest.mark.asyncio
@@ -464,12 +469,18 @@ def test_duet_prep_user_prompt_rewrites_against_previous_craft():
         "notes": ["教室じゃなくて放送室", "後ろから"],
         "craft": {"prompt": "classroom, wooden_desk, covering_mouth"},
         "mode": "duet",
-        "notebook": {"rev": 1, "scene": "broadcast room"},
+        "notebook": {
+            "rev": 1, "scene": "broadcast room",
+            "wearing": "shirt", "beat": "sitting at the mic",
+        },
     }
     prompt = service._duet_user_prompt(session, "撮影準備", prep=True)
     assert "変える必要のないところは変えない" not in prompt
     assert "撮影準備の仕上げ" in prompt
-    assert "classroom, wooden_desk" in prompt
+    # Notebook path: feel the shot from the notebook, never TAGS inventory.
+    assert "classroom, wooden_desk" not in prompt
+    assert "broadcast room" in prompt
+    assert "装い" in prompt or "shirt" in prompt
 
 
 @pytest.mark.asyncio

@@ -1795,15 +1795,24 @@ _AFFIRM_RE = re.compile(
     r"採用|それでいこう|その感じ)[!！。\.〜～\s]*$",
     re.I,
 )
+_DISMISS_OPEN_RE = re.compile(
+    r"^(いらない|やめて|なし|不要|いらないよ|スキップ|skip|nope|no)[!！。\.〜～\s]*$",
+    re.I,
+)
 _RECALL_HINT_RE = re.compile(
-    r"(この間|前回|前に|覚えてる|どうだった|あのとき|あの回|ずっと前)",
+    r"(この間|前回|前に|この前|覚えてる|どうだった|あのとき|あの回|ずっと前|"
+    r"またあの感じ|あの感じで)",
 )
 # Cheap gate: skip Scripter on pure chit-chat (plan wait strategy).
+# Affirm words belong ONLY in `_looks_like_affirm` (+ OPEN) — listing them
+# here made bare「うん／いいね」wait on Scripter with nothing to compile.
 _SHOT_HINT_RE = re.compile(
-    r"(帽子|服|衣装|ポーズ|カメラ|煽|ローアングル|ハイアングル|見上げ|見下ろ|"
-    r"ベンチ|座|立|着|脱|外して|かぶ|持って|場所|"
-    r"セーラー|スカート|シャツ|カーディガン|スマホ|ラムネ|いいね|それで|"
-    r"うん|採用|その感じ|撮|画|ショット|構図|アングル|寄り|引き)",
+    r"(帽子|服|衣装|ポーズ|カメラ|煽り?|ローアングル|ハイアングル|"
+    r"見上げ|見下ろ|ベンチ|座って|座らせ|立って|立たせ|"
+    r"着て|着せ|厚着|薄着|脱い|外して|かぶ|持ってて|持たせ|場所|"
+    r"セーラー|スカート|シャツ|カーディガン|コート|マフラー|スマホ|ラムネ|"
+    r"ショット|構図|アングル|寄って|寄りで|引いて|引きで|"
+    r"撮影|撮り直|撮り方|画角|真冬)",
 )
 
 
@@ -1811,8 +1820,19 @@ def _looks_like_affirm(text: str) -> bool:
     return bool(_AFFIRM_RE.match(str(text or "").strip()))
 
 
+def _looks_like_dismiss_open(text: str) -> bool:
+    return bool(_DISMISS_OPEN_RE.match(str(text or "").strip()))
+
+
 def _looks_like_recall(text: str) -> bool:
     return bool(_RECALL_HINT_RE.search(str(text or "")))
+
+
+# Pure chill — do not wake Scripter even on an empty notebook.
+_CHILL_ONLY_RE = re.compile(
+    r"(かき氷|何味|味が|好き|嫌い|どう思う|一休み|休憩|眠い|"
+    r"お腹|おなか|暑い|あつい|あつ[。.！!]|溶ける)",
+)
 
 
 def _needs_scripter(session: dict[str, Any], text: str) -> bool:
@@ -1821,14 +1841,20 @@ def _needs_scripter(session: dict[str, Any], text: str) -> bool:
     if not t:
         return False
     nb = notebook_mod.of(session)
-    if _looks_like_affirm(t) and str(nb.get("open") or "").strip():
+    # Affirm / dismiss OPEN — only when a proposal is pending.
+    if str(nb.get("open") or "").strip() and (
+        _looks_like_affirm(t) or _looks_like_dismiss_open(t)
+    ):
         return True
     if _looks_like_recall(t):
         return True
     if _SHOT_HINT_RE.search(t):
         return True
-    # First shot still empty and theme-ish direction → still script.
+    # First picture still empty: treat a concrete staging line as shot, but
+    # never wake Scripter for food/rest small-talk.
     if not notebook_mod.has_shot(nb) and len(t) >= 12:
+        if _CHILL_ONLY_RE.search(t):
+            return False
         return True
     return False
 
@@ -2069,6 +2095,10 @@ async def _run_duet_scripter(
         # Affirmation should compile even if the model only cleared OPEN.
         if "clear_open" not in patch:
             patch["clear_open"] = True
+    elif _looks_like_dismiss_open(text) and str(nb.get("open") or "").strip():
+        # Soft pass — keep craft, drop the proposal. No compile.
+        patch["clear_open"] = True
+        intent = "casual"
 
     # Solo shoots must not accept partner cards from a confused model.
     # Partner shoots: drop the other Muse's keys when the note only named one.
@@ -2210,15 +2240,30 @@ async def _after_actress_spoke(db, session: dict[str, Any]) -> None:
     await _consume_social_seeds(db, session)
 
 
+def _format_duet_chat_line(session: dict[str, Any], msg: dict[str, Any]) -> list[str]:
+    """One chat message → prompt lines. W-Muse keeps A/B names, not『私』潰し."""
+    if msg.get("role") == "user":
+        return [f"- 総監督: {msg.get('text')}"]
+    turns = [t for t in (msg.get("turns") or []) if str((t or {}).get("text") or "").strip()]
+    if turns:
+        return [
+            f"- {str(t.get('speaker_name') or 'Muse').strip()}: {str(t.get('text') or '').strip()}"
+            for t in turns
+        ]
+    name = str(msg.get("name") or "").strip() or "私"
+    return [f"- {name}: {msg.get('text')}"]
+
+
 def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     """What she is handed. Muse-only context (never the scripter's inputs)."""
     inputs = _inputs(session)
     theme = str(inputs.get("theme") or "").strip()
-    talk = "\n".join(
-        f"- {'総監督' if m.get('role') == 'user' else '私'}: {m.get('text')}"
-        for m in (session.get("chat") or [])[-12:]
-        if m.get("role") in ("user", "muse")
-    )
+    talk_lines: list[str] = []
+    for m in (session.get("chat") or [])[-12:]:
+        if m.get("role") not in ("user", "muse"):
+            continue
+        talk_lines.extend(_format_duet_chat_line(session, m))
+    talk = "\n".join(talk_lines)
     parts = [f"お題（総監督が最初に言ったこと）:\n{theme}" if theme else ""]
     memories = _memory_block(session)
     if memories:
@@ -2250,16 +2295,18 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
             (session.get("character") or {}).get("name_ja")
             or (session.get("character") or {}).get("name") or "私"
         )
-        summary = notebook_mod.summary_for_muse(nb, name_a=name_a)
+        partner = session.get("partner_character") or {}
+        name_b = str(partner.get("name_ja") or partner.get("name") or "")
+        summary = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
         if summary:
             parts.append(
                 "いまのショットノート（会話用の要約。タグではない。"
                 "復唱チェックリストにしない）:\n" + summary
             )
-        standing = notebook_mod.of(session).get("standing") or session.get("standing") or []
+        standing = nb.get("standing") or session.get("standing") or []
         if standing:
             parts.append(
-                "STANDING（守ること）:\n"
+                "守りごと（画に無理に写さない。聞かれたら守る）:\n"
                 + "\n".join(f"- {s}" for s in standing if str(s).strip())
             )
     elif on_facets(session):
@@ -2299,13 +2346,27 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
         )
         return "\n\n".join(p for p in parts if p)
 
-    # Prep on the notebook path is a densify readout, not a second compile.
-    previous = str((session.get("craft") or {}).get("prompt") or "")
-    if previous:
-        parts.append(
-            "いま載っている台本（仕上げのあと、感覚で読み上げる。タグの点呼は禁止）:\n"
-            + previous
+    # Prep on the notebook path: feel the shot from the notebook, never TAGS.
+    if uses_notebook(session):
+        nb = notebook_mod.of(session)
+        name_a = str(
+            (session.get("character") or {}).get("name_ja")
+            or (session.get("character") or {}).get("name") or "私"
         )
+        partner = session.get("partner_character") or {}
+        name_b = str(partner.get("name_ja") or partner.get("name") or "")
+        feel = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
+        if feel:
+            parts.append(
+                "いまのショット（感覚で読み上げる材料。タグの点呼は禁止）:\n" + feel
+            )
+    else:
+        previous = str((session.get("craft") or {}).get("prompt") or "")
+        if previous:
+            parts.append(
+                "いま載っている台本（仕上げのあと、感覚で読み上げる。タグの点呼は禁止）:\n"
+                + previous
+            )
     parts.append(
         "撮影準備の仕上げターンです。画の中身はすでにノートから載っています。"
         "SAY だけで、場所の空気・体の感触・カメラの距離を自分の言葉で伝えて。"
@@ -3319,6 +3380,17 @@ async def densify_craft_if_needed(
     # Notebook path: ask the scripter to thicken from the notebook. A Finisher
     # seat turn that returns only SAY would wipe a live compile — never do that.
     if uses_notebook(session):
+        sid = session.get("session_id") or ""
+        locale = str(_inputs(session).get("locale") or "ja")
+        if sid:
+            events.publish(sid, {
+                "type": "scripter_working",
+                "status": "densify",
+                "message": (
+                    "空気、厚くしてる…" if locale.startswith("ja")
+                    else "Thickening the air…"
+                ),
+            })
         try:
             result = await chain.run_scripter(
                 ollama,
@@ -3344,6 +3416,13 @@ async def densify_craft_if_needed(
         except Exception:
             logger.warning("[muse] notebook densify failed; keeping draft",
                            exc_info=True)
+        if sid:
+            events.publish(sid, {
+                "type": "scripter_done",
+                "intent": "shot",
+                "compiled": not bool(session.get("craft_dirty")),
+                "valid": True,
+            })
         await session_db.save(db, session, publish=False)
         return session
 

@@ -401,3 +401,18 @@ def test_scripter_status_message_is_sensory():
     assert "帽子" in service._scripter_status_message("麦わら帽子かぶって")
     assert "下から" in service._scripter_status_message("煽って撮って")
     assert "Updating" in service._scripter_status_message("hat please", locale="en")
+
+
+def test_needs_scripter_skips_bare_affirm_without_open():
+    s = {"mode": "duet", "notebook": notebook.blank(), "inputs": {}}
+    notebook.apply_patch(s["notebook"], {"scene": "park", "wearing": "hat"})
+    assert service._needs_scripter(s, "いいね") is False
+    assert service._needs_scripter(s, "うん") is False
+    s["notebook"]["open"] = "靴を脱いで"
+    assert service._needs_scripter(s, "いいね") is True
+
+
+def test_needs_scripter_skips_food_chill():
+    s = {"mode": "duet", "notebook": notebook.blank(), "inputs": {}}
+    assert service._needs_scripter(s, "かき氷なら何味がいい？") is False
+    assert service._needs_scripter(s, "夕暮れの堤防で風に当たって") is True
