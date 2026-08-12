@@ -24,12 +24,12 @@ function assert(cond, msg) {
   assert(p.cameraPitch === 'below', `pitch ${p.cameraPitch}`)
   assert(p.gazePitch === 'looking_up', `gaze ${p.gazePitch}`)
   const a = poseAnchors(p)
-  assert(a.yaw < 0, 'side yaw')
-  assert(a.lKnee.z > 0.1, 'crouch knee forward')
+  assert(a.yaw === 0, 'side keeps character facing +Z')
   const cam = new THREE.PerspectiveCamera()
   placeChibiCamera(cam, p)
   assert(cam.position.y < 0, `low cam y=${cam.position.y}`)
   assert(cam.position.x > 0.5, `side cam x=${cam.position.x}`)
+  assert(Math.abs(cam.position.z) < 0.5, `profile cam z=${cam.position.z}`)
 }
 
 {

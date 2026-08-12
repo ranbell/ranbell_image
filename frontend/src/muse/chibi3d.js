@@ -285,9 +285,9 @@ export function poseAnchors(model) {
     head = head.clone().add(v(0, -0.02, -0.02))
   }
 
-  // Character yaw: side = face +X (profile to camera on +X)
+  // Side/behind are handled by the camera, not by spinning the character away
+  // from a useful silhouette (yawing -90 + side-cam was reading as rear-three-quarter).
   let yaw = 0
-  if (side === 'side') yaw = -Math.PI / 2
   if (side === 'behind') yaw = Math.PI
 
   return {
@@ -378,15 +378,15 @@ export function placeChibiCamera(camera, model, { duo = false } = {}) {
   }
 
   if (side === 'side') {
-    x = pitch === 'below' ? 1.55 : 2.0
-    z = pitch === 'below' ? 0.55 : 0.7
+    // True profile: camera on +X, character still faces +Z
+    x = pitch === 'below' ? 1.7 : 2.2
+    z = pitch === 'below' ? 0.15 : 0.25
     if (pitch === 'below' && (posture === 'squatting' || posture === 'crouching')) {
-      // Match reference: low, slightly in front of the profile feet
-      x = 1.35
-      y = -0.55
-      z = 0.85
-      lookY = 0.05
-      fov = 36
+      x = 1.55
+      y = -0.5
+      z = 0.2
+      lookY = 0.08
+      fov = 35
     }
   } else if (side === 'behind') {
     z = -Math.abs(z)
