@@ -1261,7 +1261,7 @@ async function onChatKey(e) {
             </div>
           </div>
 
-          <!-- Cute 3D chibi (Three.js) — posing + camera, no Comfy. SVG fallback inside. -->
+          <!-- VRM on-set preview (Three.js) — posing + camera, no Comfy. SVG fallback inside. -->
           <PoseSketch3D
             v-if="isDuet && (craft.tags || notebookRows.length)"
             ref="poseSketchRef"

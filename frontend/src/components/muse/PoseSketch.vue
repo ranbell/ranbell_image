@@ -1,7 +1,8 @@
 <script setup>
 /**
- * Cute chibi pose sketch from craft.tags + notebook beat/frame.
+ * SVG pose sketch from craft.tags + notebook beat/frame.
  * Camera pitch / side / distance reshape the view — no image model.
+ * (Fallback when WebGL / VRM load fails.)
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

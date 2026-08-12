@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>撮影現場プレビュー — 手配置</title>
+  <style>
+    html, body { margin: 0; background: #1a1a1e; color: #eee; font-family: system-ui, sans-serif; }
+    header { padding: 12px 16px; }
+    h1 { margin: 0; font-size: 16px; color: #fbbf24; }
+    p { margin: 6px 0 0; font-size: 12px; color: #94a3b8; }
+    #stage { width: min(560px, 100vw); margin: 0 auto; min-height: 500px; }
+    .tags { padding: 8px 16px 24px; font-size: 11px; color: #7dd3fc; text-align: center; }
+    #viewbar, #tools { display:flex; gap:8px; justify-content:center; padding:0 16px 8px; flex-wrap:wrap; }
+    button {
+      border:1px solid #475569; border-radius:8px; padding:6px 12px;
+      background:transparent; color:#94a3b8; cursor:pointer; font-size:12px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>撮影現場プレビュー（手配置）</h1>
+    <p>床リングで移動 · 黄玉で向き · 膝スナップはきっかけ、あとは自分で</p>
+  </header>
+  <div id="viewbar">
+    <button data-mode="overview" type="button">全景</button>
+    <button data-mode="shot" type="button">ショット視点</button>
+  </div>
+  <div id="tools">
+    <button id="btn-snap" type="button">膝にスナップ</button>
+    <button id="btn-reset" type="button">配置リセット</button>
+    <button data-who="a" type="button">一人目</button>
+    <button data-who="b" type="button">二人目</button>
+  </div>
+  <div id="stage"></div>
+  <p class="tags">リングドラッグで配置 · 2girls · free placement</p>
+  <script type="module" src="/src/poseDemoMain.js"></script>
+</body>
+</html>

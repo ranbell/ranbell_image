@@ -1,5 +1,5 @@
 /**
- * Map craft.tags (+ notebook beat/frame hints) → a cute chibi pose sketch.
+ * Map craft.tags (+ notebook beat/frame hints) → an SVG pose-sketch model.
  * Camera pitch / side / distance reshape the figure — no image model.
  */
 
@@ -229,8 +229,7 @@ export function buildPoseSketch(tagStr, notebook = {}) {
 function pt(x, y) { return { x, y } }
 
 /**
- * Chibi joint layout in a 100×140 local figure space.
- * Big head, short limbs — cuteness first.
+ * Simplified joint layout in a 100×140 local figure space (SVG fallback).
  */
 export function figureJoints(pose, { partner = false, interact = '' } = {}) {
   const p = pose.posture || 'standing'
@@ -240,7 +239,7 @@ export function figureJoints(pose, { partner = false, interact = '' } = {}) {
   const behind = side === 'behind'
   const profile = side === 'side'
 
-  // Chibi standing: head center ~50,26  r≈16 ; hip higher than adult stick
+  // Standing defaults: head center ~50,26  r≈16 ; hip higher than adult stick
   let head = pt(50, 26)
   let neck = pt(50, 42)
   let hip = pt(50, 68)
@@ -338,7 +337,7 @@ export function figureJoints(pose, { partner = false, interact = '' } = {}) {
     rElbow = pt(62, 60)
   }
 
-  // Gaze nudges the chibi head.
+  // Gaze nudges the head.
   if (gaze === 'looking_up') head = pt(head.x, head.y - 2)
   if (gaze === 'looking_down') head = pt(head.x, head.y + 2)
   if (gaze === 'looking_up' && p !== 'lying') {

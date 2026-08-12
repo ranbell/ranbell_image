@@ -1,6 +1,6 @@
 /**
  * Normal-proportion VRM avatar preview driven by poseSketch tags.
- * Replaces the procedural chibi for conversation pose/camera checks.
+ * Used for conversation pose/camera checks (overview + shot camera).
  */
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
