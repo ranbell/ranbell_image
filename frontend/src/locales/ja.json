@@ -1388,8 +1388,8 @@
     "poseSketch": {
       "title": "ポーズ見取り図",
       "hint": "タグから（SVG）",
-      "title3d": "3Dアバター見取り図",
-      "hint3d": "VRM・ポーズ／カメラ連動",
+      "title3d": "撮影現場プレビュー",
+      "hint3d": "全身＋ショットカメラ（VRM）",
       "loading": "モデルを読み込み中…",
       "gazeViewer": "レンズ目線",
       "posture": {

@@ -1388,8 +1388,8 @@
     "poseSketch": {
       "title": "Pose sketch",
       "hint": "from tags (SVG)",
-      "title3d": "3D avatar sketch",
-      "hint3d": "VRM · pose/camera linked",
+      "title3d": "On-set preview",
+      "hint3d": "Full body + shot camera (VRM)",
       "loading": "Loading model…",
       "gazeViewer": "looking at lens",
       "posture": {

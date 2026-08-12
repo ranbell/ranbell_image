@@ -1,7 +1,11 @@
 #!/usr/bin/env node
-/** Pose + avatar camera contract tests (no WebGL / no VRM file load). */
+/** Pose + shot-camera / set-overview contract tests (no WebGL / no VRM file load). */
 import { buildPoseSketch, hintsFromProse } from '../frontend/src/muse/poseSketch.js'
-import { placeAvatarCamera } from '../frontend/src/muse/avatar3d.js'
+import {
+  placeAvatarCamera,
+  placeSetOverviewCamera,
+  shotCameraWorld,
+} from '../frontend/src/muse/avatar3d.js'
 import * as THREE from '../frontend/node_modules/three/build/three.module.js'
 
 function assert(cond, msg) {
@@ -17,11 +21,23 @@ function assert(cond, msg) {
   assert(p.cameraSide === 'side', `side ${p.cameraSide}`)
   assert(p.cameraPitch === 'below', `pitch ${p.cameraPitch}`)
   assert(p.gazePitch === 'looking_up', `gaze ${p.gazePitch}`)
-  const cam = new THREE.PerspectiveCamera()
-  placeAvatarCamera(cam, p)
-  assert(cam.position.y < 0.3, `low cam y=${cam.position.y}`)
-  assert(cam.position.x > 0.8, `side cam x=${cam.position.x}`)
-  assert(Math.abs(cam.position.z) < 0.8, `profile cam z=${cam.position.z}`)
+
+  // Shot camera (what Comfy should frame) stays low + side profile
+  const shot = shotCameraWorld(p)
+  assert(shot.position.y < 0.35, `low shot y=${shot.position.y}`)
+  assert(shot.position.x > 0.8, `side shot x=${shot.position.x}`)
+  assert(Math.abs(shot.position.z) < 0.9, `profile shot z=${shot.position.z}`)
+
+  // Viewport is set overview: elevated, pulls back so full body + cam fit
+  const overview = new THREE.PerspectiveCamera()
+  placeSetOverviewCamera(overview, p, shot)
+  assert(overview.position.y > 1.2, `overview elev y=${overview.position.y}`)
+  assert(overview.position.length() > 2.5, `overview distance ${overview.position.length()}`)
+
+  // Deprecated wrapper still places overview (not the low shot cam)
+  const legacy = new THREE.PerspectiveCamera()
+  placeAvatarCamera(legacy, p)
+  assert(legacy.position.y > 1.2, `legacy overview y=${legacy.position.y}`)
 }
 
 {
