@@ -50,7 +50,8 @@ export function applyVrmPose(vrm, model) {
   const rLowerArm = bone(vrm, Bone.RightLowerArm)
 
   // Keep feet on the floor — crouch is bone-only, don't sink the rig.
-  const groundY = Number.isFinite(vrm.userData?.groundY) ? vrm.userData.groundY : 0
+  // (VRM instance has no userData; we stash groundY on the scene graph.)
+  const groundY = Number.isFinite(vrm.scene?.userData?.groundY) ? vrm.scene.userData.groundY : 0
   vrm.scene.position.y = posture === 'jumping' ? groundY + 0.2 : groundY
 
   // Default: arms down (avoid T-pose)
@@ -346,21 +347,22 @@ async function loadVrm(url) {
   const gltf = await loader.loadAsync(url)
   const vrm = gltf.userData.vrm
   if (!vrm) throw new Error('VRM missing in glTF userData')
-  VRMUtils.removeUnnecessaryVertices(gltf.scene)
+  try { VRMUtils.removeUnnecessaryVertices(gltf.scene) } catch { /* optional */ }
   try { VRMUtils.combineSkeletons(gltf.scene) } catch { /* optional */ }
   try { VRMUtils.combineMorphs(vrm) } catch { /* optional */ }
-  VRMUtils.rotateVRM0(vrm)
+  try { VRMUtils.rotateVRM0(vrm) } catch { /* optional */ }
   vrm.scene.traverse((obj) => {
     obj.frustumCulled = false
     if (obj.isMesh) {
-      obj.castShadow = true
-      obj.receiveShadow = true
+      obj.castShadow = false
+      obj.receiveShadow = false
     }
   })
-  // Plant feet on the studio floor
+  // Plant feet on the studio floor (store offset on scene — VRM has no userData)
   const box = new THREE.Box3().setFromObject(vrm.scene)
   if (Number.isFinite(box.min.y)) vrm.scene.position.y -= box.min.y
-  vrm.userData.groundY = vrm.scene.position.y
+  if (!vrm.scene.userData) vrm.scene.userData = {}
+  vrm.scene.userData.groundY = vrm.scene.position.y
   return vrm
 }
 
@@ -379,26 +381,29 @@ export async function createAvatarStage(container, {
   scene.background = new THREE.Color(0x1c1c1f)
 
   const viewCam = new THREE.PerspectiveCamera(42, width() / height(), 0.05, 60)
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  const renderer = new THREE.WebGLRenderer({
+    antialias: false,
+    alpha: false,
+    powerPreference: 'low-power',
+    failIfMajorPerformanceCaveat: false,
+  })
+  renderer.setPixelRatio(1)
   renderer.setSize(width(), height())
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  // Soft shadows + high DPR thrash software WebGL; keep preview light.
+  renderer.shadowMap.enabled = false
   container.appendChild(renderer.domElement)
   Object.assign(renderer.domElement.style, {
     display: 'block', width: '100%', borderRadius: '0.75rem',
   })
 
-  scene.add(new THREE.HemisphereLight(0xfff0f5, 0x1a1a22, 0.85))
-  const key = new THREE.DirectionalLight(0xffffff, 1.05)
+  scene.add(new THREE.HemisphereLight(0xfff0f5, 0x1a1a22, 0.95))
+  const key = new THREE.DirectionalLight(0xffffff, 1.0)
   key.position.set(3, 5, 4)
-  key.castShadow = true
-  key.shadow.mapSize.set(1024, 1024)
   const fill = new THREE.DirectionalLight(0xa5f3fc, 0.35)
   fill.position.set(-3, 2.2, -1.2)
   const rim = new THREE.DirectionalLight(0xffc1d5, 0.3)
   rim.position.set(-1.2, 2.5, -3.2)
-  scene.add(key, fill, rim, new THREE.AmbientLight(0xffffff, 0.25))
+  scene.add(key, fill, rim, new THREE.AmbientLight(0xffffff, 0.28))
 
   scene.add(createStudioSet())
   const shotGizmo = createShotCameraGizmo()
@@ -413,14 +418,22 @@ export async function createAvatarStage(container, {
   container.style.position = container.style.position || 'relative'
   container.appendChild(status)
 
-  const vrmA = await loadVrm(modelUrl)
-  scene.add(vrmA.scene)
+  let vrmA
   let vrmB = null
-  if (duo) {
-    vrmB = await loadVrm(modelUrl)
-    vrmB.scene.position.x = 0.55
-    vrmA.scene.position.x = -0.55
-    scene.add(vrmB.scene)
+  try {
+    vrmA = await loadVrm(modelUrl)
+    scene.add(vrmA.scene)
+    if (duo) {
+      vrmB = await loadVrm(modelUrl)
+      vrmB.scene.position.x = 0.55
+      vrmA.scene.position.x = -0.55
+      scene.add(vrmB.scene)
+    }
+  } catch (err) {
+    status.textContent = `読込失敗: ${err?.message || err}`
+    status.style.color = 'rgba(252,165,165,0.95)'
+    renderer.dispose()
+    throw err
   }
 
   status.remove()
