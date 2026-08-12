@@ -59,7 +59,8 @@ class FakeOllama:
         return _stream()
 
     async def generate_text(self, prompt, **kw):
-        """Non-stream helper used by the duet scripter."""
+        """Non-stream helper used by the duet scripter (fmt/schema ignored)."""
+        kw.pop("fmt", None)
         chunks: list[str] = []
         async for event in self.generate_text_stream(prompt, **kw):
             if event.get("type") == "token":

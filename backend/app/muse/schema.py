@@ -61,19 +61,15 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         # Everything the Showrunner has said, kept forever. A note used to live
         # only in the turn that answered it.
         "notes": [],
-        # Working craft the crew is building toward the board / shoot. On the
-        # duet path this is DERIVED from `facets` below — see
-        # `service._reassemble`. Everything downstream (the render, the ledger,
-        # the report, the panel) still reads it and does not know the
-        # difference.
+        # Working craft toward the board / shoot. On duet this is compiled from
+        # `notebook` by the scripter (full replace). Crewed studio still builds
+        # it seat-by-seat. Downstream (render, ledger, panel) always reads craft.
         "craft": {"prompt": "", "pose_intent": "", "tags": "", "scene": ""},
-        # Living shot notebook (plain language). Duet craft is compiled from
-        # this; facets below are legacy / migration only.
+        # Living shot notebook (plain language). Duet source of truth.
         "notebook": notebook.blank(
             partner=bool(str((inputs or {}).get("partner_preset") or "").strip())
         ),
-        # The shot, in parts. Legacy table kept for older sessions and the
-        # crewed-studio adjacent helpers; duet no longer treats it as truth.
+        # Legacy facet table — migration / older helpers only. Not duet truth.
         "facets": facets.blank_table(),
         # The Showrunner's direction, reconciled instead of stacked: one entry
         # per facet, and a new camera order REPLACES the previous camera order.

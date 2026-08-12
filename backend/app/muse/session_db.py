@@ -161,7 +161,7 @@ async def attach_shoot_image(db, session_id: str, image_id: str, meta: dict) -> 
     })
 
 
-async def finish_shoot(db, session_id: str, *, error: str = "") -> None:
+async def finish_shoot(db, session_id: str, *, error: str = "", ollama=None) -> None:
     session = await load(db, session_id)
     if session is None:
         return
@@ -180,7 +180,7 @@ async def finish_shoot(db, session_id: str, *, error: str = "") -> None:
     if shoot.get("images") and not error:
         try:
             from . import service as muse_service
-            await muse_service.record_shoot_continuity(db, session)
+            await muse_service.record_shoot_continuity(db, session, ollama=ollama)
         except Exception:
             logger.warning("[muse] continuity write failed", exc_info=True)
 

@@ -55,9 +55,12 @@ class NotebookOllama(FakeOllama):
         text = "SAY: うん、その感じ。"
         if "studio scripter" in system or "shot notebook" in system:
             self.scripter_prompts.append(str(prompt))
-            text = next(
-                (v for k, v in self.scripts.items() if k in str(prompt)),
-                _scripter_block(intent="casual", vibe="chatting"),
+            # Longest keyword wins so later turns like "また煽って、カーディガン"
+            # do not match an earlier bare "煽って" script.
+            hits = [k for k in self.scripts if k in str(prompt)]
+            key = max(hits, key=len) if hits else ""
+            text = self.scripts.get(key) or _scripter_block(
+                intent="casual", vibe="chatting",
             )
 
         async def _stream():

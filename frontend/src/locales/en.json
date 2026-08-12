@@ -1382,6 +1382,7 @@
     "boardAsk": "Good? Press \"final\" to shoot, or leave a note",
     "shootTitle": "Final",
     "craft": "Current craft (prompt)",
+    "scripterUpdating": "Updating the craft…",
     "notebook": "Shot notebook",
     "notebookHint": "Living source of truth. Clothes, action, and camera are absolute values here; craft is recompiled from this.",
     "notebookOpen": "Open proposal (not locked)",

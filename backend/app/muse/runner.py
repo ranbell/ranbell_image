@@ -91,7 +91,9 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
         await session_db.finish_board(db, session_id, error=error)
 
 
-async def run_shoot_job(reporter, cancel, *, db, comfy, session_id: str) -> dict[str, Any]:
+async def run_shoot_job(
+    reporter, cancel, *, db, comfy, session_id: str, ollama=None,
+) -> dict[str, Any]:
     from ..jobs.render import run_render
     from ..scanner.drafts import PLAYGROUND_SUBDIR
 
@@ -130,6 +132,6 @@ async def run_shoot_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
         error = str(exc)
         raise
     finally:
-        await session_db.finish_shoot(db, session_id, error=error)
+        await session_db.finish_shoot(db, session_id, error=error, ollama=ollama)
 
 

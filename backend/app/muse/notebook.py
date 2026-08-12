@@ -127,6 +127,21 @@ def summary_for_muse(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") 
     return "\n".join(parts)
 
 
+_GAZE_IN_BEAT_RE = re.compile(
+    r"\b(looking_up|looking_down|looking_at_viewer|looking at viewer|"
+    r"looking up|looking down)\b",
+    re.I,
+)
+
+
+def strip_gaze_from_beat(text: str) -> str:
+    """Gaze belongs in FRAME only — drop looking_* phrases from BEAT prose."""
+    cleaned = _GAZE_IN_BEAT_RE.sub("", str(text or ""))
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+,", ",", cleaned)
+    return cleaned.strip(" ,;")
+
+
 def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     """Apply absolute section replacements. Empty string in patch = clear.
     Missing key = unchanged. `standing` is a list (replace whole when provided).
@@ -136,6 +151,8 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         if key not in patch:
             continue
         val = str(patch.get(key) or "").strip()
+        if key in ("beat", "beat_b"):
+            val = strip_gaze_from_beat(val)
         if val != str(nb.get(key) or "").strip():
             nb[key] = val
             changed = True
@@ -223,7 +240,7 @@ def migrate(session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
-# ── Scripter output parse ───────────────────────────────────────────────────
+# ── Scripter output parse / validate ────────────────────────────────────────
 
 _INTENT_RE = re.compile(
     r"(?im)^[\s>*_-]*INTENT\s*[:：]\s*(casual|shot|mixed|recall)\s*$"
@@ -235,8 +252,103 @@ _FIELD_RE = re.compile(
     r")\s*[:：]\s*(.*)$"
 )
 
+VALID_INTENTS = frozenset({"casual", "shot", "mixed", "recall"})
 
-def parse_scripter(raw: str) -> dict[str, Any]:
+# Shallow JSON Schema for Ollama `format` (non-stream scripter).
+SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "intent": {"type": "string", "enum": ["casual", "shot", "mixed", "recall"]},
+        "atmosphere": {"type": "string"},
+        "scene": {"type": "string"},
+        "frame": {"type": "string"},
+        "wearing": {"type": "string"},
+        "beat": {"type": "string"},
+        "wearing_b": {"type": "string"},
+        "beat_b": {"type": "string"},
+        "vibe": {"type": "string"},
+        "open": {"type": "string"},
+        "standing": {"type": "string"},
+        "clear_open": {"type": "boolean"},
+        "unchanged": {"type": "string"},
+        "tags": {"type": "string"},
+        "craft_scene": {"type": "string"},
+    },
+    "required": ["intent"],
+}
+
+
+def _blank_result(raw: str = "") -> dict[str, Any]:
+    return {
+        "intent": "casual",
+        "patch": {},
+        "tags": "",
+        "craft_scene": "",
+        "raw": raw,
+        "valid": False,
+    }
+
+
+def parse_scripter_json(raw: str) -> dict[str, Any] | None:
+    """Parse Ollama JSON-format scripter output. None if not JSON."""
+    import json
+    text = (raw or "").strip()
+    if not text or text[0] not in "{[":
+        # Sometimes models wrap JSON in fences.
+        m = re.search(r"\{[\s\S]*\}", text)
+        if not m:
+            return None
+        text = m.group(0)
+    try:
+        data = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    intent = str(data.get("intent") or "casual").strip().lower()
+    if intent not in VALID_INTENTS:
+        intent = "casual"
+    unchanged = {
+        x.strip().lower()
+        for x in re.split(r"[,，、\s]+", str(data.get("unchanged") or ""))
+        if x.strip() and x.strip().lower() not in ("none", "なし", "-", "")
+    }
+    patch: dict[str, Any] = {}
+    for key in (
+        "atmosphere", "scene", "frame", "wearing", "beat",
+        "wearing_b", "beat_b", "vibe", "open",
+    ):
+        if key in unchanged:
+            continue
+        if key not in data:
+            continue
+        val = str(data.get(key) or "").strip()
+        if val.lower() in ("unchanged", "変更なし", "同じ", "そのまま", "-", "none", "なし"):
+            continue
+        patch[key] = val
+    if "standing" in data and "standing" not in unchanged:
+        val = str(data.get("standing") or "").strip()
+        if val.lower() not in ("none", "なし", "unchanged", "-", "無し", ""):
+            patch["standing"] = val
+    if data.get("clear_open") in (True, "yes", "true", "1", "クリア", "clear", "y"):
+        patch["clear_open"] = True
+    tags = str(data.get("tags") or "").strip()
+    craft_scene = str(data.get("craft_scene") or "").strip()
+    if tags.lower() in ("none", "なし", "-"):
+        tags = ""
+    if craft_scene.lower() in ("none", "なし", "-", "unchanged"):
+        craft_scene = ""
+    return {
+        "intent": intent,
+        "patch": patch,
+        "tags": tags,
+        "craft_scene": craft_scene,
+        "raw": raw,
+        "valid": True,
+    }
+
+
+def parse_scripter_labelled(raw: str) -> dict[str, Any]:
     """Parse labelled scripter output into intent + patch + optional craft."""
     text = raw or ""
     intent = "casual"
@@ -304,10 +416,67 @@ def parse_scripter(raw: str) -> dict[str, Any]:
     if craft_scene.lower() in ("none", "なし", "-", "unchanged"):
         craft_scene = ""
 
+    # Labelled output counts as valid when INTENT was present or we got a patch.
+    valid = bool(m or patch or tags or craft_scene)
     return {
-        "intent": intent,
+        "intent": intent if intent in VALID_INTENTS else "casual",
         "patch": patch,
         "tags": tags,
         "craft_scene": craft_scene,
         "raw": text,
+        "valid": valid,
     }
+
+
+def parse_scripter(raw: str) -> dict[str, Any]:
+    """Parse scripter output — JSON schema first, labelled fallback."""
+    text = raw or ""
+    if not str(text).strip():
+        return _blank_result(text)
+    parsed = parse_scripter_json(text)
+    if parsed is not None:
+        return parsed
+    return parse_scripter_labelled(text)
+
+
+def validate_scripter(result: dict[str, Any]) -> dict[str, Any]:
+    """Validate-first gate. On failure: no craft fields, mark invalid.
+
+    Notebook patch may still be usable when intent/patch look coherent; craft
+    tags/scene are cleared so callers refuse to overwrite live craft.
+    """
+    out = dict(result or {})
+    intent = str(out.get("intent") or "casual").strip().lower()
+    if intent not in VALID_INTENTS:
+        out["intent"] = "casual"
+        out["valid"] = False
+        out["tags"] = ""
+        out["craft_scene"] = ""
+        return out
+    out["intent"] = intent
+    tags = str(out.get("tags") or "").strip()
+    scene = str(out.get("craft_scene") or "").strip()
+    if intent in ("shot", "mixed"):
+        # Must compile something concrete; otherwise keep prior craft.
+        if not tags and not scene:
+            out["valid"] = False
+            out["tags"] = ""
+            out["craft_scene"] = ""
+            return out
+        low = tags.lower().replace(" ", "_")
+        if ("from_below" in low or "low_angle" in low) and "looking_up" in low:
+            out["valid"] = False
+            out["tags"] = ""
+            out["craft_scene"] = ""
+            out["refuse_reason"] = "low_angle_looking_up"
+            return out
+    # Strip gaze from beat patches even if the model ignored the rule.
+    patch = dict(out.get("patch") or {})
+    for key in ("beat", "beat_b"):
+        if key in patch:
+            patch[key] = strip_gaze_from_beat(str(patch.get(key) or ""))
+    out["patch"] = patch
+    out["tags"] = tags
+    out["craft_scene"] = scene
+    out.setdefault("valid", True)
+    return out

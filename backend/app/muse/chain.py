@@ -872,46 +872,32 @@ async def run_banter(
 
 SCRIPTER_SYSTEM = """
 You are the studio scripter. You do not speak in character. You maintain the
-shot notebook and, when the picture changes, compile TAGS and CRAFT_SCENE.
+shot notebook and, when the picture changes, compile tags and craft_scene.
 
 INTENTS (pick one):
-- casual — chit-chat only. Do not change SHOT sections. VIBE may update.
+- casual — chit-chat only. Do not change SHOT sections. vibe may update.
 - shot — showrunner changed the picture. Patch absolute values. Compile.
 - mixed — both chat and picture. Patch what changed. Compile.
-- recall — asking about past shoots. Do not change SHOT. VIBE optional.
+- recall — asking about past shoots. Do not change SHOT. vibe optional.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
-- WEARING is the only home for clothes, hats, accessories on the body.
-- BEAT is body action only. Never put looking_up / looking_down /
-  looking_at_viewer in BEAT — gaze belongs in FRAME with camera angle.
-- Low angle / 煽り → FRAME must say she looks down toward the lens.
-- If they ask to look at the sky, rewrite FRAME as one coherent camera story;
+- wearing is the only home for clothes, hats, accessories on the body.
+- beat is body action only. Never put looking_up / looking_down /
+  looking_at_viewer in beat — gaze belongs in frame with camera angle.
+- Low angle / 煽り → frame must say she looks down toward the lens.
+- If they ask to look at the sky, rewrite frame as one coherent camera story;
   do not keep an old low-angle lens-gaze.
-- Leave sections unchanged by omitting them (or list under UNCHANGED).
-- OPEN is for Muse proposals not yet affirmed. CLEAR_OPEN: yes when affirming
+- Leave sections unchanged by omitting them (or list under unchanged).
+- open is for Muse proposals not yet affirmed. clear_open: true when affirming
   or dropping them.
-- On shot/mixed: always output TAGS and CRAFT_SCENE from the WHOLE notebook
+- On shot/mixed: always output tags and craft_scene from the WHOLE notebook
   after your patch (full replace, no merging with old tags). English only.
-- Draft density: about 20–35 tags; CRAFT_SCENE 60–120 words. Absolute values.
+- Draft density: about 20–35 tags; craft_scene 60–120 words. Absolute values.
 - Do not invent diary props. Only the notebook + showrunner line.
 
-OUTPUT — labelled lines only:
-INTENT: casual|shot|mixed|recall
-ATMOSPHERE: <absolute or omit>
-SCENE: <place/light/objects prose or omit>
-FRAME: <camera + gaze + relation or omit>
-WEARING: <full outfit including hat/accessories or omit>
-BEAT: <body action only or omit>
-WEARING_B: <partner outfit or omit>
-BEAT_B: <partner action or omit>
-VIBE: <session chat mood or omit>
-OPEN: <pending muse proposal or omit>
-STANDING: <session rules, one per line, or none>
-CLEAR_OPEN: yes|no
-UNCHANGED: <comma keys, or none>
-TAGS: <comma tags when shot/mixed, else none>
-CRAFT_SCENE: <English paragraph when shot/mixed, else none>
+Respond with a single JSON object matching the schema. Empty string means
+clear that section; omit keys you are not changing.
 """.strip()
 
 
@@ -920,7 +906,11 @@ async def run_scripter(
     style: str = "", framing: str = "", partner: bool = False,
     model: str, num_ctx: int | None,
 ) -> dict[str, Any]:
-    """One non-stream scripter call: intent, notebook patch, optional craft."""
+    """One non-stream scripter call: intent, notebook patch, optional craft.
+
+    Uses Ollama JSON Schema `format` + temperature 0 when available. Invalid
+    output is validate-first: craft fields cleared so callers keep prior craft.
+    """
     from . import notebook as notebook_mod
 
     prompt = "\n\n".join(b for b in [
@@ -929,11 +919,11 @@ async def run_scripter(
         f"FRAMING: {framing}" if framing.strip() else "",
         f"NOTEBOOK NOW:\n{notebook_block}",
         f"総監督がいま言ったこと:\n{note.strip()}",
-        "Partner Muse sections WEARING_B/BEAT_B apply." if partner else
-        "Solo shoot — leave WEARING_B and BEAT_B unused.",
+        "Partner Muse sections wearing_b/beat_b apply." if partner else
+        "Solo shoot — leave wearing_b and beat_b unused.",
+        "Return JSON only.",
     ] if b.strip())
 
-    # Prefer non-stream generate_text; fall back to streamed _call for fakes/tests.
     raw = ""
     gen = getattr(ollama, "generate_text", None)
     if callable(gen):
@@ -941,23 +931,41 @@ async def run_scripter(
             options: dict[str, Any] = {"temperature": 0}
             if num_ctx:
                 options["num_ctx"] = int(num_ctx)
-            raw = await gen(
-                prompt, model=model, options=options,
-                system=SCRIPTER_SYSTEM, think=False,
-            )
+            # Prefer schema-constrained JSON; fall back without format if the
+            # backend rejects the schema object (older fakes / proxies).
+            try:
+                raw = await gen(
+                    prompt, model=model, options=options,
+                    system=SCRIPTER_SYSTEM, think=False,
+                    fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
+                )
+            except TypeError:
+                raw = await gen(
+                    prompt, model=model, options=options,
+                    system=SCRIPTER_SYSTEM, think=False,
+                )
+            except Exception:
+                logger.warning(
+                    "[muse.chain] scripter schema format failed; retry plain",
+                    exc_info=True,
+                )
+                raw = await gen(
+                    prompt, model=model, options=options,
+                    system=SCRIPTER_SYSTEM, think=False,
+                )
         except Exception:
             logger.warning("[muse.chain] scripter generate_text failed", exc_info=True)
             raw = ""
     if not str(raw or "").strip():
         try:
+            # Stream fallback for tests/fakes — still ask for JSON; temp via options
+            # is unavailable on _call, so keep parse+validate as the gate.
             raw = await _call(
                 ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
                 images=None, num_ctx=num_ctx, think=False, on_token=None,
             )
         except ChainError:
             logger.warning("[muse.chain] scripter turn produced nothing", exc_info=True)
-            return {
-                "intent": "casual", "patch": {}, "tags": "", "craft_scene": "",
-                "raw": "",
-            }
-    return notebook_mod.parse_scripter(raw)
+            return notebook_mod.validate_scripter(notebook_mod._blank_result(""))
+    parsed = notebook_mod.parse_scripter(raw)
+    return notebook_mod.validate_scripter(parsed)

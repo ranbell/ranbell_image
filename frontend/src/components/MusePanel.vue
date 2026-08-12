@@ -38,6 +38,7 @@ const showCast = ref(false)
 const preview = ref('')
 const speaking = ref('')          // muse id currently streaming
 const liveSay = ref('')
+const scripterStatus = ref('')    // live craft update status for duet
 const chatInput = ref('')
 const job = ref(null)
 const elapsed = ref(0)
@@ -127,8 +128,7 @@ const act = computed(() => {
 })
 
 // 主演撮り (lead shoot): one or two Muses with the Showrunner, no crew.
-// and the craft is only written when "①撮影準備" is pressed — its own endpoint
-// (`duetPrep`), same as the test shot and final buttons.
+// Shot notes compile into craft live from chat; ① is densify polish.
 const isDuet = computed(() => session.value?.mode === 'duet')
 
 const canStart = computed(() =>
@@ -158,7 +158,8 @@ const finishHint = computed(() => {
 // wait for the first token, which is precisely the stretch where the model is
 // being loaded and the panel looks frozen.
 const thinking = computed(() =>
-  Boolean(speaking.value) || status.value === 'discussing')
+  Boolean(speaking.value) || Boolean(scripterStatus.value) ||
+  status.value === 'discussing')
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
@@ -388,7 +389,17 @@ function connectStream(id) {
       preview.value = `data:image/jpeg;base64,${evt.image}`
       return
     }
+    if (evt.type === 'scripter_working') {
+      scripterStatus.value = t('muse.scripterUpdating')
+      return
+    }
+    if (evt.type === 'scripter_done') {
+      scripterStatus.value = ''
+      await refresh()
+      return
+    }
     if (evt.type === 'muse_speaking') {
+      scripterStatus.value = ''
       speaking.value = evt.muse_id || ''
       liveSay.value = ''
       return
@@ -923,7 +934,19 @@ async function onChatKey(e) {
                    token. The model is dropped from VRAM before every render, so
                    the load is paid on every turn — and that whole stretch used
                    to be a blank panel with no sign anything was happening. -->
-              <div v-if="thinking" class="flex flex-col items-start gap-1 my-1">
+              <div v-if="scripterStatus && !liveSay" class="flex flex-col items-start gap-1 my-1">
+                <span class="text-[10px] text-[var(--sb-teal)] font-bold">
+                  {{ scripterStatus }}
+                </span>
+                <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
+                            bg-teal-950/30 border border-teal-400/30 text-teal-100">
+                  <span class="dots" :aria-label="scripterStatus">
+                    <span>.</span><span>.</span><span>.</span>
+                  </span>
+                </div>
+              </div>
+              <div v-if="thinking && (liveSay || speaking || (!scripterStatus && status === 'discussing'))"
+                   class="flex flex-col items-start gap-1 my-1">
                 <span class="text-[10px] text-pink-300 font-bold flex items-center gap-1">
                   <span>💖</span>
                   {{ museLabel(museById(speaking)) || t('muse.someone') }}

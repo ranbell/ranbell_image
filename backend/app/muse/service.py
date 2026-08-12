@@ -1749,13 +1749,22 @@ def _memory_block(session: dict[str, Any]) -> str:
     she meets the Showrunner, not to be described. Never handed to the scripter.
     """
     lines = [str(m).strip() for m in (session.get("memories") or []) if str(m).strip()]
-    if not lines:
+    partner = [
+        str(m).strip() for m in (session.get("partner_memories") or []) if str(m).strip()
+    ]
+    if not lines and not partner:
         return ""
-    return "\n".join([
+    parts = [
         "前に総監督と撮ったときのこと（あなたの手元メモ／日記から。覚えている、というだけ。"
         "今日の画に写すものではないし、SCENE に書くものでもない）:",
         *(f"- {m}" for m in lines[:3]),
-    ])
+    ]
+    if partner:
+        parts += [
+            "相手 Muse が覚えていること（短く。画の材料にしない）:",
+            *(f"- {m}" for m in partner[:2]),
+        ]
+    return "\n".join(parts)
 
 
 def _cited_memories_block(session: dict[str, Any]) -> str:
@@ -1892,6 +1901,7 @@ async def _run_duet_scripter(
         if "clear_open" not in patch:
             patch["clear_open"] = True
 
+    # Notebook patch still applies (absolute values). Craft is validate-first.
     notebook_mod.apply_patch(nb, patch)
     session["notebook"] = nb
     session["standing"] = list(nb.get("standing") or [])
@@ -1909,17 +1919,23 @@ async def _run_duet_scripter(
             logger.debug("[muse] recall search failed", exc_info=True)
         intent = "recall" if intent == "casual" else intent
 
+    valid = bool(result.get("valid", True))
     compiled = False
     if intent in ("shot", "mixed"):
         tags = str(result.get("tags") or "")
         scene = str(result.get("craft_scene") or "")
-        if tags or scene:
+        if valid and (tags or scene):
             compiled = _apply_compiled_craft(session, tags, scene)
             if not compiled:
                 session["craft_dirty"] = True
         else:
-            # Notebook moved but compile missing — keep prior craft, mark dirty.
+            # Keep prior craft; notebook already moved. Mark dirty for densify.
             session["craft_dirty"] = True
+            if not valid:
+                logger.info(
+                    "[muse] scripter invalid — craft not overwritten (%s)",
+                    result.get("refuse_reason") or "validate",
+                )
         session.setdefault("notes", []).append(text)
     else:
         session["just_banned"] = []
@@ -1930,6 +1946,7 @@ async def _run_duet_scripter(
         "type": "scripter_done",
         "intent": intent,
         "compiled": compiled,
+        "valid": valid,
         "notebook_rev": int(nb.get("rev") or 0),
     })
     return result
@@ -2517,15 +2534,15 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     return await _duet_talk(db, ollama, session, "", cfg=cfg)
 
 
-async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[str]:
-    """Sticky shoot recaps first, then diary summaries — Muse prompt only."""
-    inputs = _inputs(session)
-    char_id = str(inputs.get("character_id") or "")
-    if not char_id:
+async def _recent_memories_for(
+    db, character_id: str, *, locale: str = "ja", limit: int = 3,
+) -> list[str]:
+    """Sticky shoot recaps first, then diary summaries for one character."""
+    if not character_id:
         return []
     out: list[str] = []
     try:
-        for recap in await presets_db.get_shoot_recaps(db, char_id, limit=limit):
+        for recap in await presets_db.get_shoot_recaps(db, character_id, limit=limit):
             text = memories_db.format_recap_text(recap)
             if text:
                 out.append(text)
@@ -2534,9 +2551,9 @@ async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[
     if len(out) >= limit:
         return out[:limit]
     entries = await presets_db.get_recent_diary_summaries(
-        db, char_id, limit=limit - len(out),
+        db, character_id, limit=limit - len(out),
     )
-    ja = str(inputs.get("locale") or "ja").startswith("ja")
+    ja = locale.startswith("ja")
     for e in entries:
         text = str(
             (e.get("summary_ja") if ja else e.get("summary_en"))
@@ -2545,6 +2562,15 @@ async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[
         if text:
             out.append(text)
     return out[:limit]
+
+
+async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[str]:
+    """Sticky shoot recaps first, then diary summaries — Muse prompt only."""
+    inputs = _inputs(session)
+    return await _recent_memories_for(
+        db, str(inputs.get("character_id") or ""),
+        locale=str(inputs.get("locale") or "ja"), limit=limit,
+    )
 
 
 def _recap_from_snapshot(session: dict[str, Any]) -> dict[str, Any]:
@@ -2588,15 +2614,41 @@ async def record_shoot_continuity(db, session: dict[str, Any], ollama=None) -> N
     except Exception:
         logger.warning("[muse] sticky recap failed", exc_info=True)
         overflow = None
-    if overflow is not None and ollama is not None:
-        try:
-            await memories_db.upsert_summary(
-                db, ollama, character_id=char_id, recap=overflow,
-                session_id=str(overflow.get("session_id") or ""),
-            )
-        except Exception:
-            logger.warning("[muse] embed overflow recap failed", exc_info=True)
+    if overflow is not None:
+        if ollama is not None:
+            try:
+                await memories_db.upsert_summary(
+                    db, ollama, character_id=char_id, recap=overflow,
+                    session_id=str(overflow.get("session_id") or ""),
+                )
+            except Exception:
+                logger.warning("[muse] embed overflow recap failed", exc_info=True)
+                session.setdefault("pending_memory_embeds", []).append(overflow)
+        else:
+            # Shoot job may not carry ollama — flush later from finish_session.
+            session.setdefault("pending_memory_embeds", []).append(overflow)
     session["continuity"] = {"written_at": time.time()}
+    await session_db.save(db, session, publish=False)
+
+
+async def flush_pending_memory_embeds(db, ollama, session: dict[str, Any]) -> None:
+    """Embed overflow recaps queued when the shoot job had no ollama handle."""
+    pending = list(session.get("pending_memory_embeds") or [])
+    if not pending or ollama is None:
+        return
+    char_id = str(_inputs(session).get("character_id") or "")
+    kept: list[dict[str, Any]] = []
+    for recap in pending:
+        try:
+            mid = await memories_db.upsert_summary(
+                db, ollama, character_id=char_id, recap=recap,
+                session_id=str(recap.get("session_id") or ""),
+            )
+            if not mid:
+                kept.append(recap)
+        except Exception:
+            kept.append(recap)
+    session["pending_memory_embeds"] = kept
     await session_db.save(db, session, publish=False)
 
 
@@ -2610,6 +2662,22 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     about.
     """
     session["memories"] = await _recent_memories(db, session)
+    session["partner_memories"] = []
+    # W-Muse: short partner sticky/diary for talk parity (never scripter).
+    try:
+        partner = await _partner_character(db, session)
+        if partner:
+            pid = str(
+                partner.get("character_id")
+                or _inputs(session).get("partner_preset") or ""
+            )
+            session["partner_memories"] = await _recent_memories_for(
+                db, pid,
+                locale=str(_inputs(session).get("locale") or "ja"),
+                limit=2,
+            )
+    except Exception:
+        logger.debug("[muse] partner memories load failed", exc_info=True)
     session["caught"] = {}
     await _load_social_seeds(db, session)
     await _load_handpost_notices(db, session)
@@ -3211,7 +3279,7 @@ async def approve_and_shoot(
         "muse_shoot",
         runner.run_shoot_job,
         meta={"session_id": sid, "step": "shoot"},
-        db=db, comfy=comfy, session_id=sid,
+        db=db, comfy=comfy, session_id=sid, ollama=ollama,
     )
     session_db.log(session, "shoot", f"seed {seed}")
     await session_db.save(db, session)
@@ -3258,6 +3326,11 @@ async def finish_session(
 
         session["status"] = "finished"
         session_db.log(session, "finish", "session wrapped up")
+        # Flush overflow shoot-recap embeds queued without ollama on the render job.
+        try:
+            await flush_pending_memory_embeds(db, ollama, session)
+        except Exception:
+            logger.debug("[muse] pending memory flush failed", exc_info=True)
 
         char_id = str((session.get("inputs") or {}).get("character_id") or "")
         partner_id = ""
