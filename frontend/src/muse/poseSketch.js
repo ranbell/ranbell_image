@@ -249,17 +249,18 @@ export function figureJoints(pose, { partner = false, interact = '' } = {}) {
     rFoot = { x: 66, y: 128 }
     head = { x: 50, y: 30 }
   } else if (p === 'lying') {
-    head = { x: 22, y: 70 }
-    neck = { x: 36, y: 70 }
-    hip = { x: 70, y: 72 }
-    lKnee = { x: 88, y: 64 }
-    rKnee = { x: 88, y: 80 }
-    lFoot = { x: 102, y: 60 }
-    rFoot = { x: 102, y: 84 }
-    lElbow = { x: 48, y: 56 }
-    rElbow = { x: 48, y: 84 }
-    lHand = { x: 42, y: 44 }
-    rHand = { x: 42, y: 96 }
+    // Keep the whole figure inside 0..100 so the head stays attached on-canvas.
+    head = { x: 18, y: 70 }
+    neck = { x: 30, y: 70 }
+    hip = { x: 58, y: 72 }
+    lKnee = { x: 76, y: 62 }
+    rKnee = { x: 76, y: 82 }
+    lFoot = { x: 94, y: 58 }
+    rFoot = { x: 94, y: 86 }
+    lElbow = { x: 40, y: 56 }
+    rElbow = { x: 40, y: 84 }
+    lHand = { x: 36, y: 46 }
+    rHand = { x: 36, y: 94 }
   } else if (p === 'all_fours') {
     head = { x: 28, y: 48 }
     neck = { x: 40, y: 56 }
