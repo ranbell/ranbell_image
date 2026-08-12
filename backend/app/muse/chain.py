@@ -844,7 +844,17 @@ async def run_duet_prep(
         framing=framing, brief=brief, style=style, cast=cast, duet=True,
     )
     if partner_character:
-        turns = identity.parse_duet_speakers(turn.say)
+        name_a = str(
+            (character or {}).get("name_ja")
+            or (character or {}).get("name") or ""
+        )
+        name_b = str(
+            partner_character.get("name_ja")
+            or partner_character.get("name") or ""
+        )
+        turns = identity.parse_duet_speakers(
+            turn.say, name_a=name_a, name_b=name_b,
+        )
         turn = replace(turn, turns=tuple(turns) if turns else None)
     return turn if not blind else replace(turn, blind=True)
 
