@@ -1401,6 +1401,8 @@
       "viewShotHint": "Through-the-lens preview. Drag to reframe.",
       "subjectA": "Subject A",
       "subjectB": "Subject B",
+      "closer": "Closer",
+      "farther": "Farther",
       "arms": {
         "arms_at_sides": "Arms down",
         "arms_up": "Arms up",

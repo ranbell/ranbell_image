@@ -1401,6 +1401,8 @@
       "viewShotHint": "レンズ越しの絵です。ドラッグで画角を動かせます。",
       "subjectA": "一人目",
       "subjectB": "二人目",
+      "closer": "近づける",
+      "farther": "離す",
       "arms": {
         "arms_at_sides": "腕下ろし",
         "arms_up": "腕上げ",

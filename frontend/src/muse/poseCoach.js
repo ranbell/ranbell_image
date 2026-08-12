@@ -122,7 +122,7 @@ export function poseModelToTags(model, { duo = false } = {}) {
 
 /**
  * @param {object} model pose sketch-like model
- * @param {{ duo?: boolean, subject?: 'a'|'b'|'both', customLimbs?: boolean }} opts
+ * @param {{ duo?: boolean, subject?: 'a'|'b'|'both', customLimbs?: boolean, duoSpacing?: number }} opts
  */
 export function buildPoseCoachMessage(model, opts = {}) {
   const duo = Boolean(opts.duo)
@@ -148,12 +148,23 @@ export function buildPoseCoachMessage(model, opts = {}) {
     ? '手足の角度はいまの見取り図に合わせて'
     : ''
 
+  let spacingLine = ''
+  if (duo && Number.isFinite(opts.duoSpacing)) {
+    const g = opts.duoSpacing
+    spacingLine = g < 0.4
+      ? '二人の距離は近め（肩が近い）'
+      : g > 0.75
+        ? '二人の距離は離しめ'
+        : '二人の距離は普通くらい'
+  }
+
   const tags = poseModelToTags(model, { duo })
   const lines = [
     '【ポーズコーチング】',
     `体: ${bodyBits.join('、')}。`,
     `カメラ: ${camBits.join('、')}。`,
   ]
+  if (spacingLine) lines.push(`${spacingLine}。`)
   if (limbs) lines.push(`${limbs}。`)
   lines.push(`タグ目安: ${tags}`)
   lines.push('この見取り図どおりにして。こうしてね。')

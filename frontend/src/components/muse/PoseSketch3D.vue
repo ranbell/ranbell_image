@@ -36,6 +36,7 @@ const coachState = ref({
   cameraPitch: 'eye',
   cameraDistance: 'full',
 })
+const duoGap = ref(0.55)
 let stage = null
 let dead = false
 
@@ -100,10 +101,12 @@ function refreshCoachPreview() {
       cameraDistance: snap.model.cameraDistance || 'full',
     }
   }
+  if (Number.isFinite(snap?.duoSpacing)) duoGap.value = snap.duoSpacing
   coachPreview.value = buildPoseCoachMessage(snap.model, {
     duo: snap.duo || props.duo,
     subject: props.duo ? (snap.subject === 'b' ? 'b' : snap.duo ? 'both' : 'a') : 'a',
     customLimbs: snap.customLimbs,
+    duoSpacing: snap.duoSpacing,
   })
 }
 
@@ -146,6 +149,12 @@ function setSubject(who) {
   }
 }
 
+function nudgeGap(dir) {
+  if (!stage?.nudgeDuoSpacing || !props.duo) return
+  duoGap.value = stage.nudgeDuoSpacing(dir < 0 ? -0.08 : 0.08)
+  refreshCoachPreview()
+}
+
 function sendCoach() {
   if (!stage || !coachOn.value) return
   refreshCoachPreview()
@@ -154,6 +163,7 @@ function sendCoach() {
     duo: snap.duo || props.duo,
     subject: props.duo ? coachSubject.value : 'a',
     customLimbs: snap.customLimbs,
+    duoSpacing: snap.duoSpacing,
   })
   const tags = poseModelToTags(snap.model, { duo: snap.duo || props.duo })
   emit('coach', { message, tags, model: snap.model })
@@ -278,13 +288,25 @@ onBeforeUnmount(() => {
     <div v-if="coachOn" class="space-y-2 px-2.5 pb-2.5 pt-1.5 border-t border-white/5">
       <p class="text-[9px] leading-relaxed text-[var(--sb-muted)]">{{ t('muse.poseSketch.coachHint') }}</p>
 
-      <div v-if="duo" class="flex flex-wrap gap-1.5">
+      <div v-if="duo" class="flex flex-wrap gap-1.5 items-center">
         <button
           v-for="who in ['a', 'b']" :key="who" type="button"
           class="rounded-lg border px-2.5 py-1 text-[10px]"
           :class="coachSubject === who ? 'border-amber-400/70 text-amber-200 bg-amber-400/10' : 'border-white/10 text-gray-400'"
           @click="setSubject(who)"
         >{{ who === 'a' ? t('muse.poseSketch.subjectA') : t('muse.poseSketch.subjectB') }}</button>
+        <span class="text-[9px] text-[var(--sb-faint)] mx-0.5">|</span>
+        <button
+          type="button"
+          class="rounded-lg border border-white/15 px-2.5 py-1 text-[10px] text-gray-300 hover:border-white/40"
+          @click="nudgeGap(-1)"
+        >{{ t('muse.poseSketch.closer') }}</button>
+        <button
+          type="button"
+          class="rounded-lg border border-white/15 px-2.5 py-1 text-[10px] text-gray-300 hover:border-white/40"
+          @click="nudgeGap(1)"
+        >{{ t('muse.poseSketch.farther') }}</button>
+        <span class="text-[9px] text-[var(--sb-faint)]">{{ Math.round(duoGap * 100) }}</span>
       </div>
 
       <div class="flex flex-wrap gap-1.5">

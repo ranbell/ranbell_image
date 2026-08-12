@@ -464,6 +464,8 @@ export async function createAvatarStage(container, {
   let coachSubject = 'a' // 'a' | 'b'
   let customLimbs = false
   let shotOverride = null // THREE.Vector3 | null
+  /** Half-gap between duo subjects (world X). */
+  let duoSpacing = 0.55
   /** @type {'overview' | 'shot'} */
   let viewMode = 'overview'
   let dragKind = null // 'shot' | 'ik' | null
@@ -514,6 +516,17 @@ export async function createAvatarStage(container, {
 
   function coachVrm() {
     return coachSubject === 'b' && vrmB ? vrmB : vrmA
+  }
+
+  function applyDuoSpacing() {
+    if (vrmB) {
+      const g = THREE.MathUtils.clamp(duoSpacing, 0.22, 1.35)
+      duoSpacing = g
+      vrmA.scene.position.x = -g
+      vrmB.scene.position.x = g
+    } else {
+      vrmA.scene.position.x = 0
+    }
   }
 
   function rebuildHandles() {
@@ -732,26 +745,21 @@ export async function createAvatarStage(container, {
             beat: latest.beat, frame: latest.frame, duo: true,
           }))
           applyVrmPose(vrmB, coachModel)
-          vrmB.scene.position.x = 0.55
-          vrmA.scene.position.x = -0.55
+          applyDuoSpacing()
         } else {
           applyVrmPose(vrmA, coachModel)
           if (vrmB) {
             applyVrmPose(vrmB, buildPoseSketch(latest.tags, {
               beat: latest.beatB || latest.beat, frame: latest.frame, duo: true,
             }))
-            vrmB.scene.position.x = 0.55
-            vrmA.scene.position.x = -0.55
+            applyDuoSpacing()
           } else {
             vrmA.scene.position.x = 0
           }
         }
         snapIkToTips()
-      } else if (duo) {
-        vrmA.scene.position.x = -0.55
-        if (vrmB) vrmB.scene.position.x = 0.55
       } else {
-        vrmA.scene.position.x = 0
+        applyDuoSpacing()
       }
     } else {
       applyVrmPose(vrmA, model)
@@ -761,8 +769,7 @@ export async function createAvatarStage(container, {
           frame: latest.frame,
           duo: true,
         }))
-        vrmB.scene.position.x = 0.55
-        vrmA.scene.position.x = -0.55
+        applyDuoSpacing()
       } else {
         vrmA.scene.position.x = 0
       }
@@ -1057,8 +1064,20 @@ export async function createAvatarStage(container, {
         duo: Boolean(vrmB),
         subject: coachSubject,
         customLimbs,
+        duoSpacing,
         shot: shotOverride ? shotOverride.clone() : null,
       }
+    },
+    setDuoSpacing(gap) {
+      duoSpacing = THREE.MathUtils.clamp(Number(gap) || 0.55, 0.22, 1.35)
+      applyDuoSpacing()
+      return duoSpacing
+    },
+    nudgeDuoSpacing(delta = 0.08) {
+      return this.setDuoSpacing(duoSpacing + (Number(delta) || 0))
+    },
+    getDuoSpacing() {
+      return duoSpacing
     },
     dispose() {
       cancelAnimationFrame(raf)
