@@ -571,14 +571,18 @@ export async function createAvatarStage(container, {
     const gyA = Number.isFinite(vrmA.scene.userData?.groundY) ? vrmA.scene.userData.groundY : 0
     const gyB = Number.isFinite(vrmB.scene.userData?.groundY) ? vrmB.scene.userData.groundY : 0
 
-    // Giver sits slightly to +X, facing camera / default
+    // Giver sits slightly to +X
+    vrmA.scene.rotation.order = 'XYZ'
     vrmA.scene.rotation.set(0, baseYA, 0)
-    vrmA.scene.position.set(gap * 0.5, gyA, 0.04)
+    vrmA.scene.position.set(gap * 0.45, gyA, 0)
 
-    // Receiver: tip onto back so head points toward +X (giver)
-    // Standing head=+Y → after rot Z=-90°, head ≈ +X
-    vrmB.scene.rotation.set(0, baseYB, -Math.PI / 2)
-    vrmB.scene.position.set(-gap * 0.25, gyB + 0.1, 0.0)
+    // Receiver lies supine: +90° pitch (head toward -Z in local), then yaw so head faces +X (giver)
+    vrmB.scene.rotation.order = 'YXZ'
+    vrmB.scene.rotation.set(Math.PI / 2, baseYB + Math.PI / 2, 0)
+    // Head is roughly 0.7–0.9m from hips along the body axis after lying
+    vrmB.scene.position.set(-gap * 0.15, gyB + 0.12, 0.05)
+    vrmA.scene.updateMatrixWorld(true)
+    vrmB.scene.updateMatrixWorld(true)
   }
 
   function applyDuoLayout(interact) {
