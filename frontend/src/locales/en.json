@@ -1388,6 +1388,8 @@
     "poseSketch": {
       "title": "Pose sketch",
       "hint": "chibi · camera-aware",
+      "title3d": "3D chibi sketch",
+      "hint3d": "cute figure · camera-linked",
       "gazeViewer": "looking at lens",
       "posture": {
         "standing": "standing",

@@ -1388,6 +1388,8 @@
     "poseSketch": {
       "title": "ポーズ見取り図",
       "hint": "ちび絵・カメラ反映",
+      "title3d": "3Dちび見取り図",
+      "hint3d": "可愛い立体・カメラ連動",
       "gazeViewer": "レンズ目線",
       "posture": {
         "standing": "立ち",

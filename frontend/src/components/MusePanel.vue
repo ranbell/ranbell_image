@@ -9,7 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterGallery from './CharacterGallery.vue'
 import ActressDiaryModal from './muse/ActressDiaryModal.vue'
-import PoseSketch from './muse/PoseSketch.vue'
+import PoseSketch3D from './muse/PoseSketch3D.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -1226,8 +1226,8 @@ async function onChatKey(e) {
             </div>
           </div>
 
-          <!-- Tag-driven stick figure — posing check without Comfy. -->
-          <PoseSketch
+          <!-- Cute 3D chibi (Three.js) — posing + camera, no Comfy. SVG fallback inside. -->
+          <PoseSketch3D
             v-if="isDuet && (craft.tags || notebookRows.length)"
             :tags="String(craft.tags || '')"
             :beat="String(session?.notebook?.beat || '')"
