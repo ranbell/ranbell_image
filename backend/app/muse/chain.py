@@ -58,9 +58,10 @@ async def _call(
     images: list[bytes] | None, num_ctx: int | None,
     think: bool, on_token: TokenCallback | None = None,
 ) -> str:
-    options: dict[str, Any] = {"num_predict": -1}
-    if num_ctx:
-        options["num_ctx"] = int(num_ctx)
+    # Family sampling (Gemma → temp 1.0 / top_k 64 / top_p 0.95). Do not
+    # hardcode temperature — model-card defaults live in llm_options.
+    from ..ai.llm_options import llm_options
+    options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
     kwargs = dict(model=model, options=options, system=system, think=think)
 
     stream = (ollama.generate_vlm_stream(prompt, images, **kwargs) if images
@@ -910,9 +911,12 @@ async def run_scripter(
 ) -> dict[str, Any]:
     """One non-stream scripter call: intent, notebook patch, optional craft.
 
-    Uses Ollama JSON Schema `format` + temperature 0 when available. Invalid
-    output is validate-first: craft fields cleared so callers keep prior craft.
+    Uses Ollama JSON Schema `format` when available. Sampling follows the
+    model card via `llm_options` (Gemma: temperature 1.0 — never force 0).
+    Invalid output is validate-first: craft fields cleared so callers keep
+    prior craft.
     """
+    from ..ai.llm_options import llm_options
     from . import notebook as notebook_mod
 
     prompt = "\n\n".join(b for b in [
@@ -930,9 +934,7 @@ async def run_scripter(
     gen = getattr(ollama, "generate_text", None)
     if callable(gen):
         try:
-            options: dict[str, Any] = {"temperature": 0}
-            if num_ctx:
-                options["num_ctx"] = int(num_ctx)
+            options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
             # Prefer schema-constrained JSON; fall back without format if the
             # backend rejects the schema object (older fakes / proxies).
             try:
@@ -960,8 +962,8 @@ async def run_scripter(
             raw = ""
     if not str(raw or "").strip():
         try:
-            # Stream fallback for tests/fakes — still ask for JSON; temp via options
-            # is unavailable on _call, so keep parse+validate as the gate.
+            # Stream fallback for tests/fakes — still ask for JSON; validation
+            # stays the gate (sampling already via llm_options in _call).
             raw = await _call(
                 ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
                 images=None, num_ctx=num_ctx, think=False, on_token=None,
