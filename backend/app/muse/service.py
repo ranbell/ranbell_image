@@ -24,7 +24,7 @@ from ..spooler.models import JobLane
 from . import brief as brief_mod
 from . import chain, crew, diary as diary_mod, events, facets, identity, runner
 from . import memories_db, notebook as notebook_mod
-from . import session_db
+from . import session_db, vitality
 from . import handpost_db, lounge as lounge_mod, lounge_db
 from .runtime import negative_for as runtime_negative_for
 from .runtime import render_settings
@@ -1755,13 +1755,13 @@ def _memory_block(session: dict[str, Any]) -> str:
     if not lines and not partner:
         return ""
     parts = [
-        "前に総監督と撮ったときのこと（あなたの手元メモ／日記から。覚えている、というだけ。"
-        "今日の画に写すものではないし、SCENE に書くものでもない）:",
+        "前に総監督と撮ったときのこと（手元メモ／日記。細部は直近くらいが濃い。"
+        "今日の画に写すものではない。覚えてない日は、風や温度のたとえでやわらかく）:",
         *(f"- {m}" for m in lines[:3]),
     ]
     if partner:
         parts += [
-            "相手 Muse が覚えていること（短く。画の材料にしない）:",
+            "相手 Muse が覚えていること（短く。掛け合いの距離にだけ。画の材料にしない）:",
             *(f"- {m}" for m in partner[:2]),
         ]
     return "\n".join(parts)
@@ -1784,8 +1784,8 @@ def _cited_memories_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "CITED_MEMORIES（このターンだけ。ここに無い細部は覚えていないと言う。"
-        "捏造しない。今日の画の材料にしない）:",
+        "CITED_MEMORIES（このターンだけ。ここに無い細部は『そこまでは…』とやわらかく。"
+        "事務的な『覚えていません』禁止。捏造しない。今日の画の材料にしない）:",
         *lines,
     ])
 
@@ -1929,7 +1929,7 @@ def _chemistry_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "二人の相性メモ（短く。掛け合いの距離にだけ滲ませる。画の材料にしない）:",
+        "二人の相性メモ（掛け合いの距離・温度にだけ。画の小物や場所には使わない）:",
         *(f"- {m}" for m in lines[:2]),
     ])
 
@@ -2047,6 +2047,8 @@ def _apply_compiled_craft(
         "prompt": str(craft.get("prompt") or ""),
         "muse_id": lead,
     })
+    if vitality.bump_shot_compile(session):
+        session["cleanup_nudge"] = True
     return True
 
 
@@ -2065,15 +2067,28 @@ async def _run_duet_scripter(
     block = notebook_mod.render(nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""))
     sid = session["session_id"]
     locale = str(inputs.get("locale") or "ja")
+    status_msg = _scripter_status_message(text, locale=locale)
+    flash = vitality.notebook_flash_key(text)
     events.publish(sid, {
         "type": "scripter_working",
         "status": "updating",
-        "message": _scripter_status_message(text, locale=locale),
+        "message": status_msg,
+        "flash": flash,
+        "whisper": vitality.silence_whisper(text, locale=locale),
     })
+    note_for_scripter = text
+    if _looks_like_recall(text) or re.search(r"またあの感じ|あの感じで", text):
+        again = vitality.again_that_feel_hint(session)
+        if again:
+            session["again_feel_hint"] = again
+            note_for_scripter = (
+                f"{text}\n\n(AGAIN-THAT-FEEL clue from sticky memory — "
+                f"use only if INTENT is mixed/shot; do not invent props):\n{again}"
+            )
     result = await chain.run_scripter(
         ollama,
         notebook_block=block,
-        note=text,
+        note=note_for_scripter,
         theme=str(inputs.get("theme") or ""),
         style=_style(session),
         framing=_framing(inputs),
@@ -2331,6 +2346,14 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
     if text.strip():
         parts.append(f"総監督がいま言ったこと:\n{text.strip()}")
 
+    partner_on = bool(
+        (session.get("partner_character") or {})
+        or str(inputs.get("partner_preset") or "").strip()
+    )
+    extras = vitality.vitality_talk_extras(session, partner=partner_on)
+    if extras:
+        parts.append(extras)
+
     if not prep:
         parts.append(
             "このターンの話し方:\n"
@@ -2338,8 +2361,9 @@ def _duet_user_prompt(session: dict[str, Any], text: str, *, prep: bool) -> str:
             "- 総監督のいちばん新しい発言が勝つ。"
             "言い直したら前の案は捨てる。\n"
             "- OPEN の提案はセリフで試してよい（未確定のまま）。\n"
-            "- まだ開いている軸だけ、自分から具体案を一つ出す。\n"
-            "- 過去の撮影は渡された記憶だけ。無いものは覚えてないと言う。\n"
+            "- 画が動いたターンは、具体の二択を最大ひとつ"
+            "（例: 靴脱ぐ／つば押さえる）。面接の連問は禁止。\n"
+            "- 過去の撮影は渡された記憶だけ。無い細部は『そこまでは…』とやわらかく。\n"
             "- ボード画像があっても、それは古いテイク。文言の最新指示を優先。\n"
             "- 準備できた・用意して・get ready とは言わない。"
             "英語の見出しやルール名をセリフに出さない。"
@@ -2478,6 +2502,14 @@ async def _duet_talk(
 
     partner_character = await _partner_character(db, session)
     tier = await _duet_tier(db, session, partner_character)
+    vitality.bump_talk_turn(session)
+    session["w_b_leads"] = vitality.should_b_lead(
+        session, partner=bool(partner_character),
+    )
+    # Soft prop-aging hint (Muse voice only).
+    session["prop_age_hint"] = vitality.tick_prop_age(
+        session, notebook_mod.of(session),
+    )
 
     try:
         say, raw_turns, blind = await chain.run_duet_talk(
@@ -2503,6 +2535,13 @@ async def _duet_talk(
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
     session["status"] = "chat"
+    # One-shot flags consumed after the line lands.
+    session["reunion_turn"] = False
+    session["open_faded"] = False
+    session["cleanup_nudge"] = False
+    session["again_feel_hint"] = ""
+    session["prop_age_hint"] = ""
+    session["w_b_leads"] = False
     await _after_actress_spoke(db, session)
     await session_db.save(db, session)
     return session
@@ -2747,6 +2786,14 @@ async def post_duet_chat(
 
     cfg = await get_runtime_config(db)
     if uses_notebook(session):
+        nb = notebook_mod.of(session)
+        # OPEN ignored ~2 turns → fade without craft change.
+        if vitality.tick_open_ignore(
+            session, text, open_text=str(nb.get("open") or ""),
+        ):
+            notebook_mod.apply_patch(nb, {"clear_open": True})
+            session["notebook"] = nb
+            session["open_faded"] = True
         # Pure chit-chat skips Scripter (plan wait strategy). Affirm / recall /
         # shot hints still go through the notebook path.
         if _needs_scripter(session, text):
@@ -2809,8 +2856,19 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     )
     session["craft_dirty"] = False
     session["cited_memories"] = []
+    session["talk_turn_count"] = 0
+    session["shot_compile_count"] = 0
+    session["open_ignore"] = {"text": "", "count": 0}
+    session["prop_age"] = {"fp": "", "turns": 0}
+    session["memory_expect_hint"] = True  # UI: 細部は直近3回
     session.pop("_blind_said", None)
     await _load_actress_memory(db, session)
+    # Reunion warmth when she already has a bond card.
+    bond = session.get("bond") or {}
+    session["reunion_turn"] = bool(
+        str(bond.get("last") or "").strip() or str(bond.get("inside") or "").strip()
+        or (session.get("memories") or [])
+    )
     await session_db.save(db, session)
     session_db.log(session, "duet", "opened")
     return await _duet_talk(db, ollama, session, "", cfg=cfg)
@@ -3646,6 +3704,25 @@ async def finish_session(
 
         session["status"] = "finished"
         session_db.log(session, "finish", "session wrapped up")
+        # Soft coda — confirm bond card is kept (no extra LLM sampling).
+        bond = session.get("bond") or {}
+        last = str(bond.get("last") or "").strip()
+        ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+        coda = (
+            (
+                f"今日の余韻、メモに残しておくね"
+                + (f"（{last[:80]}）" if last else "。")
+            )
+            if ja else
+            (
+                "I'll keep today's distance in the bond card"
+                + (f" ({last[:80]})." if last else ".")
+            )
+        )
+        coda_msg = _chat_append(
+            session, role="system", name="Studio", text=coda, kind="system",
+        )
+        _publish_chat(sid, coda_msg)
         # Flush overflow shoot-recap embeds queued without ollama on the render job.
         try:
             await flush_pending_memory_embeds(db, ollama, session)

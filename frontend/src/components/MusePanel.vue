@@ -39,6 +39,9 @@ const preview = ref('')
 const speaking = ref('')          // muse id currently streaming
 const liveSay = ref('')
 const scripterStatus = ref('')    // live craft update status for duet
+const scripterWhisper = ref('')   // body-line while craft updates (no LLM)
+const notebookFlash = ref('')     // which notebook row to pulse
+const memoryHintSeen = ref(false)
 const chatInput = ref('')
 const job = ref(null)
 const elapsed = ref(0)
@@ -278,6 +281,52 @@ const notebookRows = computed(() => {
 })
 /** Muse's open proposal — light chips, never a modal. */
 const openProposal = computed(() => String(session.value?.notebook?.open || '').trim())
+const taste = computed(() => session.value?.showrunner_taste || {})
+const tasteChips = computed(() => {
+  const out = []
+  const prefers = String(taste.value.prefers || '').trim()
+  const avoids = String(taste.value.avoids || '').trim()
+  if (prefers) {
+    const bit = prefers.split(/[、,/]/)[0].trim().slice(0, 40)
+    if (bit) out.push(isJa.value ? `また${bit}？` : `Again: ${bit}?`)
+  }
+  if (avoids) {
+    const bit = avoids.split(/[、,/]/)[0].trim().slice(0, 40)
+    if (bit) out.push(isJa.value ? `${bit}は避けて` : `Skip ${bit}`)
+  }
+  return out.slice(0, 3)
+})
+const chemistryNotes = computed(() =>
+  (session.value?.chemistry_notes || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 2),
+)
+const showMemoryExpect = computed(() =>
+  Boolean(session.value?.memory_expect_hint) && !memoryHintSeen.value && isDuet.value,
+)
+/** Live W-Muse split while tokens stream (A:/B: prefixes). */
+const liveWTurns = computed(() => {
+  const text = liveSay.value || ''
+  if (!isWMuse.value || (!text.includes(':') && !text.includes('：'))) return null
+  const lines = text.split('\n')
+  const parsed = []
+  let cur = null
+  for (const raw of lines) {
+    const m = raw.match(/^\s*([ABab])\s*[:：]\s*(.*)$/)
+    if (m) {
+      cur = { speaker: m[1].toUpperCase() === 'B'
+        ? (partnerCharacter.value?.name_ja || partnerCharacter.value?.name || 'B')
+        : (character.value?.name_ja || character.value?.name || 'A'),
+        speakerId: m[1].toUpperCase() === 'B'
+          ? partnerCharacter.value?.character_id
+          : character.value?.character_id,
+        content: m[2] || '' }
+      parsed.push(cur)
+    } else if (cur) {
+      cur.content = `${cur.content}\n${raw}`.trim()
+    }
+  }
+  return parsed.length ? parsed : null
+})
+function dismissMemoryHint() { memoryHintSeen.value = true }
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.
 const facetConflicts = computed(() => session.value?.facet_conflicts || [])
@@ -398,15 +447,21 @@ function connectStream(id) {
     }
     if (evt.type === 'scripter_working') {
       scripterStatus.value = String(evt.message || '').trim() || t('muse.scripterUpdating')
+      scripterWhisper.value = String(evt.whisper || '').trim()
+      notebookFlash.value = String(evt.flash || '').trim()
       return
     }
     if (evt.type === 'scripter_done') {
       scripterStatus.value = ''
+      scripterWhisper.value = ''
+      notebookFlash.value = ''
       await refresh()
       return
     }
     if (evt.type === 'muse_speaking') {
       scripterStatus.value = ''
+      scripterWhisper.value = ''
+      notebookFlash.value = ''
       speaking.value = evt.muse_id || ''
       liveSay.value = ''
       return
@@ -945,6 +1000,13 @@ async function onChatKey(e) {
                 <span class="text-[10px] text-[var(--sb-teal)] font-bold">
                   {{ scripterStatus }}
                 </span>
+                <div
+                  v-if="scripterWhisper"
+                  class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
+                         bg-pink-950/30 border border-pink-400/25 text-pink-100/90 italic"
+                >
+                  {{ scripterWhisper }}
+                </div>
                 <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
                             bg-teal-950/30 border border-teal-400/30 text-teal-100">
                   <span class="dots" :aria-label="scripterStatus">
@@ -960,8 +1022,29 @@ async function onChatKey(e) {
                   {{ t('muse.leadThinking') }}
                   <span v-if="elapsed" class="text-pink-400/70 font-mono">{{ clock(elapsed) }}</span>
                 </span>
-                <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
-                            bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md">
+                <template v-if="liveWTurns?.length">
+                  <div
+                    v-for="(sub, sIdx) in liveWTurns" :key="'live-'+sIdx"
+                    class="flex flex-col items-start gap-1 w-full max-w-[90%]"
+                  >
+                    <span class="flex items-center gap-1.5 text-[10px] text-pink-300 font-bold">
+                      <img
+                        v-if="getMessageFace({}, sub.speakerId)"
+                        :src="getMessageFace({}, sub.speakerId)" alt=""
+                        class="w-7 h-7 rounded-full object-cover ring-2 ring-pink-400/80 shadow-md border border-pink-100 shrink-0"
+                      />
+                      <span>🌸 {{ sub.speaker }}</span>
+                    </span>
+                    <div class="rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md whitespace-pre-wrap">
+                      {{ sub.content }}<span v-if="sIdx === liveWTurns.length - 1" class="caret">▍</span>
+                    </div>
+                  </div>
+                </template>
+                <div
+                  v-else
+                  class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
+                            bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md"
+                >
                   <template v-if="liveSay">
                     {{ liveSay }}<span class="caret">▍</span>
                   </template>
@@ -1049,6 +1132,34 @@ async function onChatKey(e) {
                 >
                   {{ t('muse.openDiary') }}
                 </button>
+              </div>
+              <p
+                v-if="showMemoryExpect"
+                class="text-[10px] text-[var(--sb-faint)] flex items-start gap-2"
+              >
+                <span class="flex-1">{{ t('muse.memoryExpectHint') }}</span>
+                <button type="button" class="underline shrink-0" @click="dismissMemoryHint">
+                  {{ t('muse.memoryExpectDismiss') }}
+                </button>
+              </p>
+              <p
+                v-if="chemistryNotes.length && isWMuse"
+                class="text-[10px] text-[var(--sb-muted)]"
+              >
+                {{ t('muse.chemistryHint') }}
+                <span class="text-[var(--sb-faint)]"> — {{ chemistryNotes[0] }}</span>
+              </p>
+              <div
+                v-if="tasteChips.length && !chatLocked"
+                class="flex flex-wrap items-center gap-1.5 text-[10px]"
+              >
+                <span class="text-[var(--sb-faint)]">{{ t('muse.tasteChipLabel') }}</span>
+                <button
+                  v-for="chip in tasteChips" :key="chip"
+                  type="button"
+                  class="sb-btn text-[10px] px-2 py-0.5"
+                  @click="sendChat(chip)"
+                >{{ chip }}</button>
               </div>
               <div
                 v-if="openProposal && !chatLocked"
@@ -1156,8 +1267,11 @@ async function onChatKey(e) {
             <ul class="space-y-1.5">
               <li
                 v-for="row in notebookRows" :key="row.key"
-                class="rounded border border-white/10 px-2 py-1.5"
-                :class="row.key === 'open' ? 'border-[var(--sb-amber)]/40' : ''"
+                class="rounded border border-white/10 px-2 py-1.5 transition-colors duration-500"
+                :class="[
+                  row.key === 'open' ? 'border-[var(--sb-amber)]/40' : '',
+                  notebookFlash === row.key ? 'border-[var(--sb-teal)] bg-teal-950/40' : '',
+                ]"
               >
                 <div class="font-semibold text-gray-300">
                   {{ t(`muse.notebookNames.${row.key}`) }}

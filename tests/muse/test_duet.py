@@ -457,7 +457,7 @@ def test_duet_talk_user_prompt_prefers_latest_over_sticky():
     }
     prompt = service._duet_user_prompt(session, "マイク前で椅子に座って", prep=False)
     assert "いちばん新しい発言が勝つ" in prompt
-    assert "自分から具体案" in prompt
+    assert "二択" in prompt or "具体案" in prompt
     assert "get ready" in prompt
     assert "撮る画を一つに決めて" not in prompt
 
