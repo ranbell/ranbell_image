@@ -2,7 +2,8 @@
 /*
  * Studio lounge — Slack-flavoured feed of wrap shares + pitches + handpost
  * + Look-of-the-week trends. Cute rose/pink tone to match the secret diary.
- * The handpost tab is read-only; pages come from habit jobs / pitch promote.
+ * Read-only for the showrunner: no thread replies, no handpost authoring.
+ * Pages still arrive from habit jobs / pitch promote.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -19,8 +20,6 @@ const threads = ref([])
 const trends = ref([])
 const pages = ref([])
 const selectedId = ref('')
-const replyText = ref('')
-const replying = ref(false)
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const selected = computed(() => threads.value.find(t => t.id === selectedId.value) || null)
@@ -95,26 +94,6 @@ async function load() {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
     loading.value = false
-  }
-}
-
-async function sendReply() {
-  if (!selected.value || !replyText.value.trim()) return
-  replying.value = true
-  try {
-    const updated = await api(`/api/muse/lounge/threads/${selected.value.id}/reply`, {
-      method: 'POST',
-      body: JSON.stringify({ text: replyText.value.trim(), locale: isJa.value ? 'ja' : 'en' }),
-    })
-    replyText.value = ''
-    const idx = threads.value.findIndex(t => t.id === updated.id)
-    if (idx >= 0) threads.value[idx] = updated
-    else await load()
-    emit('toast', { msg: t('muse.lounge.replySent'), type: 'success' })
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
-  } finally {
-    replying.value = false
   }
 }
 
@@ -285,22 +264,10 @@ watch(() => props.show, (v) => {
             </div>
 
             <div
-              v-if="selected"
-              class="shrink-0 border-t border-pink-200/60 bg-white/50 p-3 space-y-2"
+              v-if="selected && selected.kind === 'pitch' && selected.status !== 'promoted'"
+              class="shrink-0 border-t border-pink-200/60 bg-white/50 p-3"
             >
-              <div class="flex gap-2">
-                <input
-                  v-model="replyText"
-                  class="flex-1 rounded-full border border-pink-200 px-3 py-2 text-sm bg-white"
-                  :placeholder="t('muse.lounge.replyPlaceholder')"
-                  @keydown.enter.prevent="sendReply"
-                />
-                <button type="button" class="lounge-btn" :disabled="replying || !replyText.trim()" @click="sendReply">
-                  {{ t('muse.lounge.reply') }}
-                </button>
-              </div>
               <button
-                v-if="selected.kind === 'pitch' && selected.status !== 'promoted'"
                 type="button"
                 class="lounge-btn is-amber w-full"
                 @click="promotePitch"

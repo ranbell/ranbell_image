@@ -384,20 +384,9 @@ async def handpost_list(request: Request, pinned_only: bool = False):
     return {"pages": await handpost_db.list_pages(_db(request), pinned_only=pinned_only)}
 
 
-class LoungeReplyBody(BaseModel):
-    text: str = ""
-    locale: str = "ja"
-
-
-@router.post("/lounge/threads/{thread_id}/reply")
-async def lounge_reply(thread_id: str, body: LoungeReplyBody, request: Request):
-    return await _run(service.reply_lounge_thread(
-        _db(request), thread_id, text=body.text, locale=body.locale or "ja",
-    ))
-
-
 @router.post("/lounge/threads/{thread_id}/promote")
 async def lounge_promote(thread_id: str, request: Request, locale: str = "ja"):
+    """Pin a pitch to the handpost. No freeform showrunner replies on threads."""
     return await _run(service.promote_lounge_pitch(
         _db(request), thread_id, locale=locale or "ja",
     ))

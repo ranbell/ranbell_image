@@ -4523,41 +4523,8 @@ async def run_generate_handpost_habit_job(
     return {"status": "ok", "page_id": page["id"]}
 
 
-async def reply_lounge_thread(
-    db, thread_id: str, *, text: str, locale: str = "ja",
-) -> dict[str, Any]:
-    """Showrunner replies on a lounge thread (pitch or wrap)."""
-    text = (text or "").strip()
-    if not text:
-        raise MuseError("empty reply" if not str(locale).startswith("ja") else "返信が空です。")
-    thread = await lounge_db.get_thread(db, thread_id)
-    if thread is None:
-        raise MuseError("thread not found" if not str(locale).startswith("ja") else "スレが見つかりません。")
-    msg = {
-        "id": str(uuid.uuid4()),
-        "role": "director",
-        "character_id": "",
-        "name_ja": "総監督",
-        "name": "Showrunner",
-        "text_ja": text,
-        "text_en": text,
-        "reaction": "",
-    }
-    updated = await lounge_db.append_message(db, thread_id, msg)
-    if updated is None:
-        raise MuseError("thread not found" if not str(locale).startswith("ja") else "スレが見つかりません。")
-    # Don't clobber "promoted" — a later reply used to revive the promote button.
-    if (
-        str(updated.get("kind") or "") == "pitch"
-        and str(updated.get("status") or "open") == "open"
-    ):
-        updated["status"] = "answered"
-        updated = await lounge_db.save_thread(db, updated)
-    return updated
-
-
 async def promote_lounge_pitch(db, thread_id: str, *, locale: str = "ja") -> dict[str, Any]:
-    """Turn a pitch (+ director reply if any) into a pinned handpost notice."""
+    """Turn a pitch into a pinned handpost notice."""
     thread = await lounge_db.get_thread(db, thread_id)
     if thread is None:
         raise MuseError("thread not found" if not str(locale).startswith("ja") else "スレが見つかりません。")
