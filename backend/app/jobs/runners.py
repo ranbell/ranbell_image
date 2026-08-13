@@ -735,6 +735,24 @@ async def run_is_reference_backfill(
     return {"done": count}
 
 
+async def run_model_name_backfill(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+) -> dict:
+    """Repair pass — ingest already writes model_name for every image.
+
+    It exists because the model dropdown is built from params.Model while the
+    filter matches on model_name; a row where those disagree is listed but never
+    returned. Finding anything to do here means something upstream skipped a
+    write, which is worth looking at rather than silently papering over.
+    """
+    reporter.indeterminate()
+    count = await db.backfill_model_name()
+    return {"done": count}
+
+
 # ── GENERATION lane: ComfyUI generation ───────────────────────────────────────
 
 async def run_generation(

@@ -566,6 +566,16 @@ async def start_is_reference_backfill(request: Request):
     return {"status": "queued", "job_id": job_id}
 
 
+@router.post("/model-name/backfill")
+async def start_model_name_backfill(request: Request):
+    from ..jobs.runners import run_model_name_backfill
+    from ..spooler.models import JobLane
+    spooler = request.app.state.spooler
+    db = request.app.state.db
+    job_id = spooler.submit(JobLane.SYNC, "model_name_backfill", run_model_name_backfill, db=db)
+    return {"status": "queued", "job_id": job_id}
+
+
 # ── Duplicate Detection ───────────────────────────────────────────────────────
 
 @router.get("/duplicates")

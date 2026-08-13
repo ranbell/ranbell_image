@@ -117,8 +117,6 @@ async def lifespan(app: FastAPI):
     _preload_spirits()
     app.state.invoke_session_manager = InvokeSessionManager()
 
-    asyncio.ensure_future(db.backfill_model_name())
-
     await spooler.start()
 
     # On startup: apply pause settings saved in the DB to the spooler
