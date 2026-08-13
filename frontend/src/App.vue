@@ -2617,6 +2617,8 @@ const musePendingCharacterId = ref('')
 // Set alongside it when the Compat Viewer's "start a duet with these two"
 // action fires — read once by MusePanel the same tick `showMuse` flips true.
 const musePendingPartnerId = ref('')
+// Parked studio session (MusePanel stays mounted). Roster shows 「撮影中」.
+const museResume = ref({ available: false, name: '', sessionId: '' })
 
 function startDuetPair({ leadId, partnerId }) {
   showMuseGallery.value = false
@@ -2647,6 +2649,33 @@ function pickMuseCharacter(id) {
   // MusePanel is not v-if'd away — it keeps its session across open/close, so
   // do not bounce `show` expecting a remount.
   showMuse.value = true
+}
+
+function onMuseSessionState(state) {
+  museResume.value = {
+    available: Boolean(state?.available),
+    name: String(state?.name || ''),
+    sessionId: String(state?.sessionId || ''),
+  }
+}
+
+function resumeMuseSession() {
+  selected.value = null
+  showMuseGallery.value = false
+  // Empty pending ids → MusePanel reconnects the parked session as-is.
+  musePendingCharacterId.value = ''
+  musePendingPartnerId.value = ''
+  showMuse.value = true
+}
+
+function onMuseShow(open) {
+  showMuse.value = open
+  if (open) {
+    selected.value = null
+    return
+  }
+  // Accidental ✕: land on the roster with 「撮影中」ready instead of the void.
+  if (museResume.value.available) showMuseGallery.value = true
 }
 
 function openImageBySha(sha256) {
@@ -5250,11 +5279,14 @@ onUnmounted(() => {
       :workflows="workflows"
       :workflow="museGalleryWorkflow"
       :get-jobs-map="getJobsMap"
+      :resume-available="museResume.available && !showMuse"
+      :resume-name="museResume.name"
       @pick="pickMuseCharacter"
       @close="showMuseGallery = false"
       @toast="showToast($event.msg, $event.type)"
       @update:workflow="museGalleryWorkflow = $event"
       @start-duet-pair="startDuetPair"
+      @resume="resumeMuseSession"
     />
 
     <ActressDiaryModal
@@ -5272,7 +5304,8 @@ onUnmounted(() => {
       :get-jobs-map="getJobsMap"
       :initial-character-id="musePendingCharacterId"
       :initial-partner-id="musePendingPartnerId"
-      @update:show="showMuse = $event"
+      @update:show="onMuseShow"
+      @session-state="onMuseSessionState"
       @select-image="openImageBySha($event)"
       @toast="showToast($event.msg, $event.type)"
     />

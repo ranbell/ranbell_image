@@ -39,8 +39,11 @@ const props = defineProps({
   // the page, so what is still running is read from the jobs rather than
   // remembered in a local ref that a reload throws away.
   getJobsMap: { type: Function, default: () => () => new Map() },
+  // Parked Muse studio session (closed by ✕, still in memory) — show Resume.
+  resumeAvailable: { type: Boolean, default: false },
+  resumeName: { type: String, default: '' },
 })
-const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow', 'start-duet-pair'])
+const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow', 'start-duet-pair', 'resume'])
 const { t, locale } = useI18n()
 
 const characters = ref([])
@@ -466,6 +469,16 @@ onUnmounted(() => {
           :class="unreadOnly ? 'is-chip-on-teal' : ''"
           @click="unreadOnly = !unreadOnly"
         >💌 {{ t('characters.unreadOnly') }}</button>
+
+        <button
+          v-if="resumeAvailable"
+          type="button"
+          class="sb-btn !bg-cyan-700/80 !border-cyan-400/50 text-cyan-50 font-semibold animate-pulse"
+          :title="resumeName
+            ? t('characters.resumeShootNamed', { name: resumeName })
+            : t('characters.resumeShoot')"
+          @click="emit('resume')"
+        >🎬 {{ t('characters.resumeShoot') }}</button>
 
         <button class="sb-icon-btn" :title="t('muse.close')" @click="emit('close')">✕</button>
       </header>
