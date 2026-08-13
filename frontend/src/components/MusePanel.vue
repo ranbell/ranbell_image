@@ -40,7 +40,7 @@ const showCast = ref(false)
 const preview = ref('')
 const speaking = ref('')          // muse id currently streaming
 const liveSay = ref('')
-const scripterStatus = ref('')    // live craft update status for duet
+const scripterStatus = ref('')    // live craft update (主演撮り + 制作スタッフ)
 const scripterWhisper = ref('')   // body-line while craft updates (no LLM)
 const notebookFlash = ref('')     // which notebook row to pulse
 const memoryHintSeen = ref(false)
@@ -1417,17 +1417,17 @@ async function onChatKey(e) {
             </ul>
           </details>
 
-          <p
-            v-if="craftDirty || notebookAhead"
-            class="text-[10px] text-[var(--sb-amber)] leading-relaxed"
-          >
-            {{ t('muse.craftDirtyHint') }}
-          </p>
           <details v-if="craft.prompt" class="text-[10px] text-[var(--sb-faint)]">
             <summary class="cursor-pointer">
               {{ t('muse.craft') }}
-              <span v-if="craftDirty" class="ml-1 text-[var(--sb-amber)]">· {{ t('muse.craftDirtyBadge') }}</span>
+              <span v-if="craftDirty || notebookAhead" class="ml-1 text-[var(--sb-amber)]">· {{ t('muse.craftDirtyBadge') }}</span>
             </summary>
+            <p
+              v-if="craftDirty || notebookAhead"
+              class="mt-1 text-[var(--sb-amber)] leading-relaxed"
+            >
+              {{ t('muse.craftDirtyHint') }}
+            </p>
             <p class="whitespace-pre-wrap font-mono mt-1 text-gray-400">{{ craft.prompt }}</p>
           </details>
 

@@ -461,10 +461,10 @@ def test_guard_partner_patch_keeps_both_cards_on_a_partner_shoot():
 
 
 def test_scripter_status_message_is_honest_in_both_locales():
-    """One true line. It used to name what it thought was changing, off a
-    keyword table, and so announced the wrong thing on ordinary phrasing."""
-    assert "台本" in service._scripter_status_message()
-    assert "Updating" in service._scripter_status_message(locale="en")
+    """Soft wait copy — never guesses which row from the showrunner's wording."""
+    assert "合わせ" in service._scripter_status_message()
+    assert "moment" in service._scripter_status_message(locale="en").lower()
+    assert service._scripter_status_message(soft=True) == "…"
 
 
 def test_flash_key_comes_from_the_patch_not_the_showrunners_wording():

@@ -62,4 +62,4 @@ def test_summary_for_muse_is_short():
     })
     text = notebook.summary_for_muse(nb, name_a="あさひ")
     assert "カーディガン" in text
-    assert "提案中" in text
+    assert "Open proposal" in text or "提案中" in text

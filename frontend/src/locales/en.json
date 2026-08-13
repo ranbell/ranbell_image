@@ -1418,7 +1418,7 @@
     "craft": "Current craft (prompt)",
     "craftDirtyBadge": "out of sync",
     "craftDirtyHint": "The notebook moved but craft didn't fully catch up. Use prep or a test shot to densify.",
-    "scripterUpdating": "Updating the craft…",
+    "scripterUpdating": "Just a moment…",
     "poseSketch": {
       "title": "Pose sketch",
       "hint": "from tags (SVG)",

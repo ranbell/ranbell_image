@@ -16,8 +16,15 @@ from typing import Iterable
 from ..tags.body import AGE_TAGS, REFUSED_TAGS
 from ..tags.body import BODY_SLOTS as _BODY_SLOTS
 from ..tags.body import BREAST_TAGS as _BREAST_TAGS
+from ..tags.catalog import HAIR_STYLES as _HAIR_STYLES
 
 logger = logging.getLogger(__name__)
+
+# Hairstyle is session-mutable. Identity still owns hair *colour* / eyes /
+# figure; when the craft names any style from this set, identity styles are
+# dropped so bob_cut does not ride beside ponytail after the showrunner asked
+# for a pony.
+HAIR_STYLE_TAGS: frozenset[str] = frozenset(_HAIR_STYLES)
 
 FRAMINGS: tuple[str, ...] = (
     "auto",
@@ -464,6 +471,16 @@ def style_tags(style: str) -> list[str]:
     return out
 
 
+def craft_hairstyles(tags: str) -> set[str]:
+    """Hairstyle tokens present in a craft/tag bag."""
+    out: set[str] = set()
+    for part in (tags or "").split(","):
+        tag = bare_tag(part)
+        if tag in HAIR_STYLE_TAGS:
+            out.add(tag)
+    return out
+
+
 def assemble_positive(
     identity_tags: Iterable[str] | None,
     tags: str,
@@ -479,17 +496,28 @@ def assemble_positive(
     follows. It used to reach the brief and stop there: the panel's Style box
     was handed to the LLM as a request and never became a tag, so a run asking
     for cute 2D anime rendered at whatever the checkpoint defaults to.
+
+    When ``tags`` name any hairstyle, identity hairstyles are dropped so the
+    session override wins (ponytail must not stack on bob_cut).
     """
     head = identity_list(identity_tags)
+    model_hair = craft_hairstyles(tags)
+    if model_hair:
+        head = [t for t in head if t not in HAIR_STYLE_TAGS]
     lead = [t for t in identity_list(subject) if t not in head]
     banned = conflicting_body_tags(head)
+    # Also refuse other styles once the craft picked one — keeps a second
+    # style from sneaking in via WD14 leftovers in the same bag.
+    if model_hair:
+        banned = set(banned) | (HAIR_STYLE_TAGS - model_hair)
     seen = set(head) | set(lead)
 
     look: list[str] = []
     for tag in style_tags(style):
-        if tag not in seen:
-            seen.add(tag)
-            look.append(tag)
+        if not tag or tag in seen or tag in banned:
+            continue
+        seen.add(tag)
+        look.append(tag)
 
     model_tags: list[str] = []
     for part in (tags or "").split(","):
@@ -499,7 +527,8 @@ def assemble_positive(
         tag = bare_tag(part)
         if not tag or tag in seen or tag in banned:
             continue
-        # Identity owns hair/eyes/figure; do not let the model restate and drift.
+        # Identity owns hair colour / eyes / figure. Hairstyle may come from
+        # craft (above). Do not let the model restate locked colour/figure.
         seen.add(tag)
         model_tags.append(clamp_weight(part.strip()))
     for tag in framing_tags(framing):

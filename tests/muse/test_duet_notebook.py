@@ -43,8 +43,14 @@ def _scripter_block(
 
 def _current_note(prompt: str) -> str:
     """The instruction this scripter turn is answering, minus the transcript."""
-    head, sep, tail = str(prompt).partition("総監督がいま言ったこと:")
-    return tail if sep else head
+    for marker in (
+        "SHOWRUNNER'S LATEST LINE:",
+        "総監督がいま言ったこと:",  # legacy marker
+    ):
+        head, sep, tail = str(prompt).partition(marker)
+        if sep:
+            return tail
+    return str(prompt)
 
 
 class NotebookOllama(FakeOllama):
@@ -310,11 +316,111 @@ async def test_casual_chit_chat_runs_scripter_and_leaves_craft_alone():
     await service.post_duet_chat(db, ollama, s, "麦わら帽子かぶって")
     before = len(ollama.scripter_prompts)
     await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
-    # Called — no keyword gate in front of it any more.
-    assert len(ollama.scripter_prompts) == before + 1
+    # Called — no keyword gate. (VERIFY only runs when casual leaves SHOT still.)
+    assert len(ollama.scripter_prompts) >= before + 1
     # …and it declined to change the picture.
     assert s["scripter_intent"] == "casual"
     assert "straw_hat" in s["craft"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_verify_recovers_casual_misread_of_picture_change():
+    """Empty-patch casual freeze → VERIFY can still compile (no keyword gate)."""
+    db = FakeDb()
+
+    class VerifyOllama(NotebookOllama):
+        def __init__(self):
+            super().__init__(scripts={})
+            self._n = 0
+
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append({**kw, "prompt": prompt})
+            system = str(kw.get("system") or "")
+            if "studio scripter" in system or "shot notebook" in system:
+                self.scripter_prompts.append(str(prompt))
+                self._n += 1
+                if self._n == 1:
+                    # Total freeze: casual, no vibe/open/SHOT — triggers VERIFY.
+                    text = _scripter_block(intent="casual")
+                else:
+                    assert "VERIFY" in str(prompt)
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="sandy beach shoreline",
+                        wearing="cheerleader uniform",
+                        beat="running on wet sand",
+                        frame="eye level",
+                        tags="beach, sand, cheerleader_uniform, running",
+                        craft_scene="Running on the beach.",
+                    )
+            else:
+                text = "SAY: 砂、かかとに入る。"
+
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    ollama = VerifyOllama()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["notebook"] = notebook.blank()
+    notebook.apply_patch(s["notebook"], {
+        "scene": "public park",
+        "wearing": "sailor uniform",
+        "beat": "standing",
+        "frame": "eye level",
+    })
+    s["craft"] = {
+        "tags": "public_park, sailor_collar",
+        "scene": "Park sailor.",
+        "prompt": "public_park, sailor_collar, Park sailor.",
+        "pose_intent": "",
+    }
+    s["notebook_rev_compiled"] = int(s["notebook"].get("rev") or 0)
+    await session_db.save(db, s)
+    await service.post_duet_chat(
+        db, ollama, s, "場所をビーチにして砂浜走ってる感じにしよう",
+    )
+    assert s["scripter_intent"] == "shot"
+    assert "beach" in (s["notebook"].get("scene") or "")
+    assert "beach" in (s["craft"].get("tags") or "")
+    assert len(ollama.scripter_prompts) >= 2
+
+
+@pytest.mark.asyncio
+async def test_vibe_only_casual_skips_verify_and_stays_clean():
+    """Chill chat may update vibe once — no VERIFY tax, craft tags untouched."""
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "セーラー": _scripter_block(
+            intent="shot", scene="park", wearing="sailor uniform",
+            beat="standing", frame="eye level",
+            tags="park, sailor_collar, standing, looking_at_viewer, afternoon_light, "
+                 "maple_tree, bench, soft_smile, wind",
+            craft_scene=(
+                "She stands in a sunlit park in a sailor uniform, weight on one hip, "
+                "maple shade across the collar, a quiet bench behind her, soft afternoon "
+                "air moving the ribbon, camera at eye level as she looks toward the viewer "
+                "with a small unforced smile while the path gravel ticks under her shoes "
+                "and the distant fountain keeps a low hush that belongs to this place alone."
+            ),
+        ),
+        "かき氷": _scripter_block(intent="casual", vibe="wanting shaved ice"),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+    await service.post_duet_chat(db, ollama, s, "セーラーで公園")
+    tags_before = str((s.get("craft") or {}).get("tags") or "")
+    dirty_before = bool(s.get("craft_dirty"))
+    before = len(ollama.scripter_prompts)
+    await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
+    assert len(ollama.scripter_prompts) == before + 1  # no VERIFY
+    assert s["scripter_intent"] == "casual"
+    assert str((s.get("craft") or {}).get("tags") or "") == tags_before
+    # Vibe-only must not newly dirty a clean craft.
+    if not dirty_before:
+        assert s["craft_dirty"] is False
 
 
 @pytest.mark.asyncio
@@ -490,10 +596,10 @@ async def test_scripter_is_handed_the_conversation():
     await service.post_duet_chat(db, ollama, s, "いいね")
 
     last = ollama.scripter_prompts[-1]
-    assert "ここまでの会話" in last
+    assert "CONVERSATION SO FAR" in last or "ここまでの会話" in last
     # Both sides of the exchange the affirm refers back to.
     assert "ベンチに座って" in last
-    assert "総監督: いいね" in last
+    assert "総監督: いいね" in last or "SHOWRUNNER'S LATEST LINE" in last
 
 
 @pytest.mark.asyncio
@@ -658,14 +764,14 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
     ]
     joined_muse = "\n".join(muse_prompts)
     assert "CITED_MEMORIES" in joined_muse or "堤防" in joined_muse
-    assert "関係" in joined_muse
+    assert "BOND" in joined_muse or "関係" in joined_muse
     assert "GROUNDED_TOKENS" in joined_muse
 
-    # Casual turn — the scripter still runs (no gate), and leaves craft alone.
+    # Casual turn — the scripter still runs (no gate).
     before_scripts = len(ollama.scripter_prompts)
     before_tags = str((s.get("craft") or {}).get("tags") or "")
     await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
-    assert len(ollama.scripter_prompts) == before_scripts + 1
+    assert len(ollama.scripter_prompts) >= before_scripts + 1
     assert str((s.get("craft") or {}).get("tags") or "") == before_tags
 
     # Shot + OPEN affirm.

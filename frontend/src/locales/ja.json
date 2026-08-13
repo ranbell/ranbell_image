@@ -1417,8 +1417,8 @@
     "shootTitle": "本番",
     "craft": "いまの台本（プロンプト）",
     "craftDirtyBadge": "未同期",
-    "craftDirtyHint": "ノートは新しいのに台本が追いついていないかも。①撮影準備か試し撮りで空気を厚くすると揃います。",
-    "scripterUpdating": "台本、いま合わせてる…",
+    "craftDirtyHint": "ノートのほうが新しいかも。撮りたくなったら①撮影準備か試し撮りで空気を厚くしてね。",
+    "scripterUpdating": "ちょっと合わせてる…",
     "poseSketch": {
       "title": "ポーズ見取り図",
       "hint": "タグから（SVG）",
