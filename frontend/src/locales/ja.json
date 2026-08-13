@@ -1637,20 +1637,9 @@
       "trendsEmpty": "まだ流行は記録されていません",
       "fromMuse": "きっかけ",
       "arrangements": "みんなのアレンジ",
-      "newPin": "周知を書く",
-      "pinTitle": "タイトル",
-      "pinBodyJa": "本文（日本語）",
-      "pinBodyEn": "本文（英語・任意）",
-      "pinSticky": "ピン留め（次回撮影に短く届ける）",
       "pinned": "ピン",
       "untitled": "無題",
-      "save": "保存",
-      "cancel": "やめる",
-      "edit": "編集",
-      "delete": "削除",
-      "handpostSaved": "手帖に書き留めました",
-      "handpostDeleteConfirm": "このページを削除しますか？",
-      "handpostEmpty": "まだ周知はありません。監督が書けます"
+      "handpostEmpty": "まだ周知はありません。癖メモや提案の周知が集まるとここに並びます"
     }
   },
   "characters": {

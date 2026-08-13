@@ -2,6 +2,7 @@
 /*
  * Studio lounge — Slack-flavoured feed of wrap shares + pitches + handpost
  * + Look-of-the-week trends. Cute rose/pink tone to match the secret diary.
+ * The handpost tab is read-only; pages come from habit jobs / pitch promote.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,8 +19,6 @@ const threads = ref([])
 const trends = ref([])
 const pages = ref([])
 const selectedId = ref('')
-const editing = ref(null)
-const saving = ref(false)
 const replyText = ref('')
 const replying = ref(false)
 
@@ -96,54 +95,6 @@ async function load() {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
     loading.value = false
-  }
-}
-
-function startNewPage() {
-  editing.value = { id: '', title: '', body_ja: '', body_en: '', pinned: true }
-}
-function editPage(p) {
-  editing.value = {
-    id: p.id,
-    title: p.title || '',
-    body_ja: p.body_ja || '',
-    body_en: p.body_en || '',
-    pinned: Boolean(p.pinned),
-  }
-}
-async function savePage() {
-  if (!editing.value) return
-  saving.value = true
-  try {
-    const body = {
-      title: editing.value.title,
-      body_ja: editing.value.body_ja,
-      body_en: editing.value.body_en,
-      pinned: editing.value.pinned,
-    }
-    if (editing.value.id) {
-      await api(`/api/muse/handpost/${editing.value.id}`, {
-        method: 'PATCH', body: JSON.stringify(body),
-      })
-    } else {
-      await api('/api/muse/handpost', { method: 'POST', body: JSON.stringify(body) })
-    }
-    editing.value = null
-    await load()
-    emit('toast', { msg: t('muse.lounge.handpostSaved'), type: 'success' })
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
-  } finally {
-    saving.value = false
-  }
-}
-async function removePage(id) {
-  if (!confirm(t('muse.lounge.handpostDeleteConfirm'))) return
-  try {
-    await api(`/api/muse/handpost/${id}`, { method: 'DELETE' })
-    await load()
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
   }
 }
 
@@ -407,49 +358,9 @@ watch(() => props.show, (v) => {
           </p>
         </div>
 
-        <!-- handpost -->
+        <!-- handpost — read-only. Notices arrive from Muse habits / promoted
+             pitches; the showrunner does not walk into the lounge to author them. -->
         <div v-else class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-          <div class="flex items-center gap-2">
-            <button type="button" class="lounge-btn" @click="startNewPage">
-              ＋ {{ t('muse.lounge.newPin') }}
-            </button>
-          </div>
-
-          <div
-            v-if="editing"
-            class="rounded-2xl border border-pink-200 bg-white/80 p-3 space-y-2 shadow-sm"
-          >
-            <input
-              v-model="editing.title"
-              class="w-full rounded-xl border border-pink-200 px-3 py-2 text-sm"
-              :placeholder="t('muse.lounge.pinTitle')"
-            />
-            <textarea
-              v-model="editing.body_ja"
-              rows="3"
-              class="w-full rounded-xl border border-pink-200 px-3 py-2 text-sm"
-              :placeholder="t('muse.lounge.pinBodyJa')"
-            />
-            <textarea
-              v-model="editing.body_en"
-              rows="2"
-              class="w-full rounded-xl border border-pink-200 px-3 py-2 text-sm"
-              :placeholder="t('muse.lounge.pinBodyEn')"
-            />
-            <label class="flex items-center gap-2 text-xs text-rose-600">
-              <input v-model="editing.pinned" type="checkbox" />
-              {{ t('muse.lounge.pinSticky') }}
-            </label>
-            <div class="flex gap-2">
-              <button type="button" class="lounge-btn" :disabled="saving" @click="savePage">
-                {{ t('muse.lounge.save') }}
-              </button>
-              <button type="button" class="lounge-btn is-ghost" @click="editing = null">
-                {{ t('muse.lounge.cancel') }}
-              </button>
-            </div>
-          </div>
-
           <article
             v-for="p in pages"
             :key="p.id"
@@ -469,14 +380,6 @@ watch(() => props.show, (v) => {
             <p class="mt-1 text-sm whitespace-pre-wrap text-slate-700">
               {{ isJa ? (p.body_ja || p.body_en) : (p.body_en || p.body_ja) }}
             </p>
-            <div class="mt-2 flex gap-2">
-              <button type="button" class="lounge-btn is-ghost" @click="editPage(p)">
-                {{ t('muse.lounge.edit') }}
-              </button>
-              <button type="button" class="lounge-btn is-ghost" @click="removePage(p.id)">
-                {{ t('muse.lounge.delete') }}
-              </button>
-            </div>
           </article>
 
           <p v-if="!pages.length && !loading" class="text-sm text-rose-400 text-center py-12">

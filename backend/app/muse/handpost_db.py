@@ -81,8 +81,8 @@ async def delete_page(db, page_id: str) -> bool:
 
 def _is_generated(page: dict[str, Any]) -> bool:
     """True for pages the studio wrote on its own (habit notes, promoted
-    pitches) — as opposed to a notice the director typed by hand via
-    ``POST /handpost``, which carries neither a source thread nor character."""
+    pitches). Legacy director-typed notices (no source ids, author director)
+    are treated as non-generated so memory erase leaves them alone."""
     return bool(
         page.get("source_character_id") or page.get("source_thread_id")
         or str(page.get("author") or "") != "director"
@@ -95,9 +95,9 @@ async def count_generated_pages(db) -> int:
 
 
 async def purge_generated_pages(db) -> int:
-    """Delete auto-generated handpost pages; hand-written director notices stay.
+    """Delete auto-generated handpost pages; legacy director notices stay.
 
-    Used by the "記憶の消去" admin action — the director's own notes are not
+    Used by the "記憶の消去" admin action — old hand-typed notices are not
     a character's memory, so they are not part of what gets erased.
     """
     ids = [str(p["id"]) for p in await list_pages(db) if _is_generated(p)]

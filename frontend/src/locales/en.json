@@ -1637,20 +1637,9 @@
       "trendsEmpty": "No trends recorded yet",
       "fromMuse": "From",
       "arrangements": "Everyone's take",
-      "newPin": "New notice",
-      "pinTitle": "Title",
-      "pinBodyJa": "Body (Japanese)",
-      "pinBodyEn": "Body (English, optional)",
-      "pinSticky": "Pin (short hint on next shoots)",
       "pinned": "Pinned",
       "untitled": "Untitled",
-      "save": "Save",
-      "cancel": "Cancel",
-      "edit": "Edit",
-      "delete": "Delete",
-      "handpostSaved": "Saved to the handpost",
-      "handpostDeleteConfirm": "Delete this page?",
-      "handpostEmpty": "No notices yet — the showrunner can write one"
+      "handpostEmpty": "No notices yet — habit notes and promoted pitches show up here"
     }
   },
   "characters": {

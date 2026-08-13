@@ -347,20 +347,6 @@ async def list_steps():
 
 # ── Lounge + studio handpost ─────────────────────────────────────────────────
 
-class HandpostBody(BaseModel):
-    title: str = ""
-    body_ja: str = ""
-    body_en: str = ""
-    pinned: bool = False
-
-
-class HandpostPatch(BaseModel):
-    title: str | None = None
-    body_ja: str | None = None
-    body_en: str | None = None
-    pinned: bool | None = None
-
-
 @router.get("/lounge/threads")
 async def lounge_threads(request: Request, limit: int = 40, kind: str = ""):
     from . import lounge_db
@@ -392,42 +378,10 @@ async def lounge_summary(request: Request, since: float = 0.0):
 
 @router.get("/handpost")
 async def handpost_list(request: Request, pinned_only: bool = False):
+    """Read-only list. Pages are written by habit jobs / pitch promote — not
+    by the showrunner typing into the lounge handpost tab."""
     from . import handpost_db
     return {"pages": await handpost_db.list_pages(_db(request), pinned_only=pinned_only)}
-
-
-@router.post("/handpost")
-async def handpost_create(body: HandpostBody, request: Request):
-    from . import handpost_db
-    page = await handpost_db.save_page(_db(request), {
-        "title": body.title,
-        "body_ja": body.body_ja,
-        "body_en": body.body_en,
-        "pinned": body.pinned,
-        "author": "director",
-    })
-    return page
-
-
-@router.patch("/handpost/{page_id}")
-async def handpost_update(page_id: str, body: HandpostPatch, request: Request):
-    from . import handpost_db
-    db = _db(request)
-    existing = await handpost_db.get_page(db, page_id)
-    if existing is None:
-        raise HTTPException(404, "page not found")
-    patch = body.model_dump(exclude_unset=True)
-    existing.update(patch)
-    return await handpost_db.save_page(db, existing)
-
-
-@router.delete("/handpost/{page_id}")
-async def handpost_delete(page_id: str, request: Request):
-    from . import handpost_db
-    ok = await handpost_db.delete_page(_db(request), page_id)
-    if not ok:
-        raise HTTPException(404, "page not found")
-    return {"ok": True}
 
 
 class LoungeReplyBody(BaseModel):
