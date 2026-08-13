@@ -184,8 +184,27 @@ def test_summary_row_is_light():
         "summary", "summary_ja", "charm_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
         "hair_color", "eye_color", "user_created", "diary_unread_count",
+        "shoot_count", "last_shoot_at",
     }
     assert row["tag_count"] > 0
+    assert row["shoot_count"] == 0
+    assert row["last_shoot_at"] == 0.0
+
+
+def test_summary_exposes_lifetime_shoot_count():
+    """Recaps keep only the last few rows; the gallery badge needs the lifetime."""
+    base = {**PRESETS[0], "shoot_count": 9, "last_shoot_at": 1_700_000_000.0,
+            "shoot_recaps": [{"timestamp": 1_700_000_000.0, "when": "park"}]}
+    row = preset_summary(base)
+    assert row["shoot_count"] == 9
+    assert row["last_shoot_at"] == 1_700_000_000.0
+    # Missing counter still surfaces the sticky window so old data is not blank.
+    legacy = preset_summary({**PRESETS[0], "shoot_recaps": [
+        {"timestamp": 10.0, "when": "a"},
+        {"timestamp": 9.0, "when": "b"},
+    ]})
+    assert legacy["shoot_count"] == 2
+    assert legacy["last_shoot_at"] == 10.0
 
 
 def test_bundled_preset_has_an_empty_board():
@@ -643,27 +662,12 @@ def test_the_plan_is_readable_without_a_database():
     assert plan["removed"] == plan["stale"]
 
 
-# ── what the picker filters by ──────────────────────────────────────────────
+# ── what the picker shows ───────────────────────────────────────────────────
 def test_every_trait_reaches_the_picker():
-    """The row used to carry `personality[:5]`. The picker filters and searches
-    on it, so the cap made two of every character's seven traits unfindable —
-    and left ten of the thirty unreachable by any trait chip at all."""
+    """Traits are flavour chips on the card — keep the full personality list so
+    a seven-trait Muse does not look thinner than she is."""
     for preset in PRESETS:
         assert preset_summary(preset)["traits"] == preset["personality"]
-
-
-def test_a_trait_chip_can_reach_most_of_the_roster():
-    """The picker only offers a trait three or more characters share — a trait
-    one character has is a name, not a filter. That threshold is only useful if
-    the shared traits cover most of the roster."""
-    from collections import Counter
-
-    rows = [preset_summary(p) for p in PRESETS]
-    counts = Counter(t for r in rows for t in r["traits"])
-    offered = {t for t, n in counts.items() if n >= 3}
-    reachable = [r for r in rows if set(r["traits"]) & offered]
-    assert len(offered) >= 10, sorted(offered)
-    assert len(reachable) >= len(rows) * 0.8, f"{len(reachable)}/{len(rows)}"
 
 
 def test_every_colour_on_the_roster_has_a_swatch():

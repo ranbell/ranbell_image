@@ -1731,6 +1731,15 @@
     "unreadCount": "未読の日記が{n}件",
     "resumeShoot": "撮影中",
     "resumeShootNamed": "{name} の撮影を再開",
+    "favoriteOn": "お気に入りを外す",
+    "favoriteOff": "お気に入りに入れる",
+    "shootCount": "一緒に撮った回数 {n}",
+    "badge": {
+      "newcomer": "はじめまして",
+      "recent": "最近会った",
+      "regular": "常連",
+      "veteran": "ベテラン"
+    },
     "workflow": "ワークフロー",
     "needWorkflow": "先にワークフローを選んでください",
     "redraw": "描き直す",
