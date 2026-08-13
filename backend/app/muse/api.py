@@ -378,15 +378,6 @@ async def lounge_summary(request: Request, since: float = 0.0):
 
 @router.get("/handpost")
 async def handpost_list(request: Request, pinned_only: bool = False):
-    """Read-only list. Pages are written by habit jobs / pitch promote — not
-    by the showrunner typing into the lounge handpost tab."""
+    """Read-only list. Pages are written by habit jobs — not by the showrunner."""
     from . import handpost_db
     return {"pages": await handpost_db.list_pages(_db(request), pinned_only=pinned_only)}
-
-
-@router.post("/lounge/threads/{thread_id}/promote")
-async def lounge_promote(thread_id: str, request: Request, locale: str = "ja"):
-    """Pin a pitch to the handpost. No freeform showrunner replies on threads."""
-    return await _run(service.promote_lounge_pitch(
-        _db(request), thread_id, locale=locale or "ja",
-    ))

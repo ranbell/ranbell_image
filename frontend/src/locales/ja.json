@@ -1628,15 +1628,13 @@
       "stanceTwist": "私なら",
       "stanceSkip": "パス",
       "myTwist": "アレンジ",
-      "promote": "周知に載せる（手帖ピン）",
-      "promoted": "手帖の周知に載せました",
       "trendsBlurb": "みんなの撮影からこぼれた流行。従わなくていい。私なら…のアレンジも並びます",
       "trendsEmpty": "まだ流行は記録されていません",
       "fromMuse": "きっかけ",
       "arrangements": "みんなのアレンジ",
       "pinned": "ピン",
       "untitled": "無題",
-      "handpostEmpty": "まだ周知はありません。癖メモや提案の周知が集まるとここに並びます"
+      "handpostEmpty": "まだ周知はありません。癖メモが集まるとここに並びます"
     }
   },
   "characters": {

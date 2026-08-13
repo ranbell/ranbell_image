@@ -1628,15 +1628,13 @@
       "stanceTwist": "my take",
       "stanceSkip": "skip",
       "myTwist": "twist",
-      "promote": "Pin to handpost (studio notice)",
-      "promoted": "Pinned to the handpost",
       "trendsBlurb": "Looks spilling out of wraps. No one has to follow — personal twists sit beside them",
       "trendsEmpty": "No trends recorded yet",
       "fromMuse": "From",
       "arrangements": "Everyone's take",
       "pinned": "Pinned",
       "untitled": "Untitled",
-      "handpostEmpty": "No notices yet — habit notes and promoted pitches show up here"
+      "handpostEmpty": "No notices yet — habit notes show up here"
     }
   },
   "characters": {

@@ -2,8 +2,8 @@
 /*
  * Studio lounge — Slack-flavoured feed of wrap shares + pitches + handpost
  * + Look-of-the-week trends. Cute rose/pink tone to match the secret diary.
- * Read-only for the showrunner: no thread replies, no handpost authoring.
- * Pages still arrive from habit jobs / pitch promote.
+ * Fully read-only for the showrunner — peek only, never write or pin.
+ * Handpost pages still arrive from habit jobs.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -94,26 +94,6 @@ async function load() {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
     loading.value = false
-  }
-}
-
-async function promotePitch() {
-  if (!selected.value || selected.value.kind !== 'pitch') return
-  if (selected.value.status === 'promoted') return
-  try {
-    const res = await api(
-      `/api/muse/lounge/threads/${selected.value.id}/promote?locale=${isJa.value ? 'ja' : 'en'}`,
-      { method: 'POST' },
-    )
-    if (res.thread) {
-      const idx = threads.value.findIndex(t => t.id === res.thread.id)
-      if (idx >= 0) threads.value[idx] = res.thread
-    }
-    await load()
-    emit('toast', { msg: t('muse.lounge.promoted'), type: 'success' })
-    tab.value = 'handpost'
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
   }
 }
 
@@ -262,19 +242,6 @@ watch(() => props.show, (v) => {
                 {{ t('muse.lounge.pickThread') }}
               </p>
             </div>
-
-            <div
-              v-if="selected && selected.kind === 'pitch' && selected.status !== 'promoted'"
-              class="shrink-0 border-t border-pink-200/60 bg-white/50 p-3"
-            >
-              <button
-                type="button"
-                class="lounge-btn is-amber w-full"
-                @click="promotePitch"
-              >
-                {{ t('muse.lounge.promote') }}
-              </button>
-            </div>
           </div>
         </div>
 
@@ -325,8 +292,7 @@ watch(() => props.show, (v) => {
           </p>
         </div>
 
-        <!-- handpost — read-only. Notices arrive from Muse habits / promoted
-             pitches; the showrunner does not walk into the lounge to author them. -->
+        <!-- handpost — read-only. Notices arrive from Muse habit jobs. -->
         <div v-else class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
           <article
             v-for="p in pages"
@@ -372,22 +338,5 @@ watch(() => props.show, (v) => {
   background: rgba(251, 207, 232, 0.9);
   border-color: rgba(244, 114, 182, 0.5);
   font-weight: 600;
-}
-.lounge-btn {
-  border-radius: 999px;
-  padding: 0.35rem 0.85rem;
-  font-size: 0.75rem;
-  background: linear-gradient(135deg, #fb7185, #f472b6);
-  color: white;
-  border: none;
-}
-.lounge-btn:disabled { opacity: 0.5; }
-.lounge-btn.is-ghost {
-  background: white;
-  color: #be185d;
-  border: 1px solid rgba(244, 114, 182, 0.35);
-}
-.lounge-btn.is-amber {
-  background: linear-gradient(135deg, #fbbf24, #f472b6);
 }
 </style>
