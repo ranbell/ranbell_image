@@ -15,7 +15,9 @@
  * Three ways through a hundred of them, because they suit different moods:
  * the grid to scan, the deck to browse one at a time, the dossier to read.
  * Filtering is by hair and eye colour as actual colours — glancing rather than
- * reading — with her traits alongside.
+ * reading. Favourites pin to the front; shoot-count and flavour badges sit on
+ * the thumb (traits are flavour on the card, not a filter — they never cover
+ * the whole roster).
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -25,8 +27,12 @@ import LoungePanel from './muse/LoungePanel.vue'
 import {
   colorFamily, colorWord, eyeSwatch, familySwatch, hairSwatch,
 } from './muse/colorSwatch.js'
-import { traitLabel } from './muse/traitLabels.js'
 import { useRenderWatch } from '../composables/useRenderWatch.js'
+
+const FAV_KEY = 'muse.favoriteCharacterIds'
+const RECENT_MS = 7 * 24 * 60 * 60 * 1000
+const REGULAR_SHOOTS = 5
+const VETERAN_SHOOTS = 12
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -48,10 +54,10 @@ const { t, locale } = useI18n()
 
 const characters = ref([])
 const loading = ref(false)
-const activeTraits = ref([])
 const activeHair = ref([])
 const activeEyes = ref([])
 const unreadOnly = ref(false)
+const favorites = ref(loadFavorites())
 const view = ref('grid')          // 'grid' | 'deck'
 const imageDisplayMode = ref('sheet') // 'sheet' | 'portrait' — top-bar one-tap toggle!
 const deckAt = ref(0)
@@ -128,19 +134,31 @@ function cardImage(c) {
 }
 
 
-// Only offer a filter that narrows something. A trait one character has is not
-// a filter, it is a name.
-function options(field, min) {
-  const counts = new Map()
-  for (const c of characters.value) {
-    const values = field === 'traits' ? (c.traits || []) : [c[field]].filter(Boolean)
-    for (const v of values) counts.set(v, (counts.get(v) || 0) + 1)
+function loadFavorites() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FAV_KEY) || '[]')
+    return Array.isArray(raw) ? raw.map(String).filter(Boolean) : []
+  } catch {
+    return []
   }
-  return [...counts.entries()]
-    .filter(([, n]) => n >= min)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([v]) => v)
 }
+function persistFavorites() {
+  localStorage.setItem(FAV_KEY, JSON.stringify(favorites.value))
+}
+function isFavorite(id) {
+  return favorites.value.includes(id)
+}
+function toggleFavorite(id, e) {
+  e?.preventDefault?.()
+  e?.stopPropagation?.()
+  const key = String(id || '')
+  if (!key) return
+  const i = favorites.value.indexOf(key)
+  if (i >= 0) favorites.value.splice(i, 1)
+  else favorites.value.unshift(key)
+  persistFavorites()
+}
+
 // Colours filter by family, not by word. The roster distinguishes `brown`,
 // `dark_brown`, `light_brown` and `chestnut`; a person clicking a brown dot
 // means all four.
@@ -156,18 +174,48 @@ function colorOptions(field, kind) {
 }
 const hairOptions = computed(() => colorOptions('hair_color', 'hair'))
 const eyeOptions = computed(() => colorOptions('eye_color', 'eyes'))
-const traitOptions = computed(() => options('traits', 3).slice(0, 14))
+
+function shootCount(c) {
+  return Math.max(0, Number(c?.shoot_count) || 0)
+}
+function lastShootAt(c) {
+  const n = Number(c?.last_shoot_at) || 0
+  return n > 0 ? n : 0
+}
+function isRecentShoot(c) {
+  const at = lastShootAt(c)
+  if (!at) return false
+  // API stores unix seconds; accept ms just in case.
+  const ms = at > 1e12 ? at : at * 1000
+  return Date.now() - ms <= RECENT_MS
+}
+/** Flavour badge for the thumb — one relationship cue, not a trait taxonomy. */
+function relationBadge(c) {
+  const n = shootCount(c)
+  if (n <= 0) return { key: 'newcomer', icon: '✨' }
+  if (n >= VETERAN_SHOOTS) return { key: 'veteran', icon: '🏆' }
+  if (n >= REGULAR_SHOOTS) return { key: 'regular', icon: '💫' }
+  if (isRecentShoot(c)) return { key: 'recent', icon: '🔥' }
+  return null
+}
 
 const filtered = computed(() => {
-  return characters.value.filter(c => {
+  const fav = new Set(favorites.value)
+  const rows = characters.value.filter(c => {
     if (activeHair.value.length
         && !activeHair.value.includes(colorFamily(c.hair_color, 'hair'))) return false
     if (activeEyes.value.length
         && !activeEyes.value.includes(colorFamily(c.eye_color, 'eyes'))) return false
-    if (activeTraits.value.length
-        && !activeTraits.value.every(x => (c.traits || []).includes(x))) return false
     if (unreadOnly.value && !(c.diary_unread_count > 0)) return false
     return true
+  })
+  return rows.slice().sort((a, b) => {
+    const fa = fav.has(a.id) ? 0 : 1
+    const fb = fav.has(b.id) ? 0 : 1
+    if (fa !== fb) return fa - fb
+    const sc = shootCount(b) - shootCount(a)
+    if (sc) return sc
+    return label(a).localeCompare(label(b), undefined, { sensitivity: 'base' })
   })
 })
 
@@ -183,8 +231,7 @@ const noImageCount = computed(
   () => characters.value.filter(c => !anyImage(c)).length,
 )
 const anyFilter = computed(
-  () => activeHair.value.length || activeEyes.value.length
-    || activeTraits.value.length || unreadOnly.value,
+  () => activeHair.value.length || activeEyes.value.length || unreadOnly.value,
 )
 const current = computed(() => filtered.value[deckAt.value] || null)
 
@@ -200,7 +247,7 @@ function toggle(list, value) {
   deckAt.value = 0
 }
 function clearFilters() {
-  activeHair.value = []; activeEyes.value = []; activeTraits.value = []
+  activeHair.value = []; activeEyes.value = []
   unreadOnly.value = false; deckAt.value = 0
 }
 function step(n) {
@@ -483,7 +530,7 @@ onUnmounted(() => {
         <button class="sb-icon-btn" :title="t('muse.close')" @click="emit('close')">✕</button>
       </header>
 
-      <!-- ── filters: colours you can see, traits you can read ── -->
+      <!-- ── filters: colours you can see (traits are flavour, not a sieve) ── -->
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2 sb-hairline shrink-0">
         <div class="flex items-center gap-1">
           <span class="sb-label mr-1">{{ t('characters.hair') }}</span>
@@ -512,17 +559,6 @@ onUnmounted(() => {
             :title="colorWord(e)"
             @click="toggle(activeEyes, e)"
           />
-        </div>
-        <div class="flex flex-wrap items-center gap-1">
-          <button
-            v-for="trait in traitOptions"
-            :key="trait"
-            type="button"
-            class="sb-chip"
-            :class="activeTraits.includes(trait) ? 'is-chip-on-teal' : ''"
-            :title="traitLabel(trait)"
-            @click="toggle(activeTraits, trait)"
-          >{{ trait }} <span class="opacity-70">({{ traitLabel(trait) }})</span></button>
         </div>
         <button v-if="anyFilter" type="button" class="sb-chip" @click="clearFilters">
           ✕ {{ t('characters.clearFilter') }}
@@ -575,12 +611,46 @@ onUnmounted(() => {
                 loading="lazy"
               />
 
+              <!-- Favourite — top of thumb; checked ones sort to the front -->
+              <button
+                type="button"
+                class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full grid place-items-center
+                       text-base leading-none shadow-md backdrop-blur-sm transition
+                       border border-white/20"
+                :class="isFavorite(c.id)
+                  ? 'bg-amber-400/95 text-amber-950'
+                  : 'bg-black/55 text-amber-100/80 hover:bg-black/70'"
+                :title="isFavorite(c.id)
+                  ? t('characters.favoriteOn')
+                  : t('characters.favoriteOff')"
+                :aria-pressed="isFavorite(c.id)"
+                @click="toggleFavorite(c.id, $event)"
+              >{{ isFavorite(c.id) ? '★' : '☆' }}</button>
+
               <!-- Cute Chosen Badge -->
               <span
                 v-if="c.id === selectedId"
-                class="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[10px] font-bold
+                class="absolute top-11 right-2 px-2.5 py-1 rounded-full text-[10px] font-bold
                        bg-gradient-to-r from-pink-500 to-rose-400 text-white shadow-md animate-pulse"
               >{{ t('characters.chosenBadge') }}</span>
+
+              <!-- Co-shoot count + one relationship flavour badge -->
+              <span
+                class="absolute bottom-2.5 left-2.5 flex flex-col items-start gap-1 pointer-events-none"
+              >
+                <span
+                  v-if="relationBadge(c)"
+                  class="px-1.5 py-0.5 rounded-md text-[9px] font-bold shadow
+                         bg-black/65 text-teal-100 border border-white/15"
+                  :title="t(`characters.badge.${relationBadge(c).key}`)"
+                >{{ relationBadge(c).icon }} {{ t(`characters.badge.${relationBadge(c).key}`) }}</span>
+                <span
+                  v-if="shootCount(c) > 0"
+                  class="min-w-[1.5rem] h-5 px-1.5 rounded-full text-[10px] font-bold
+                         grid place-items-center bg-sky-600/90 text-white shadow"
+                  :title="t('characters.shootCount', { n: shootCount(c) })"
+                >📷 {{ shootCount(c) }}</span>
+              </span>
 
               <!-- Unread diary count — cute pulsing badge -->
               <span
@@ -689,6 +759,37 @@ onUnmounted(() => {
                 <h3 class="sb-display text-lg text-gray-100">{{ label(current) }}</h3>
                 <i class="w-3 h-3 rounded-full border border-white/25"
                    :style="{ background: eyeSwatch(current.eye_color) }"></i>
+                <button
+                  type="button"
+                  class="w-8 h-8 rounded-full grid place-items-center text-base
+                         border border-white/20 shadow"
+                  :class="isFavorite(current.id)
+                    ? 'bg-amber-400/95 text-amber-950'
+                    : 'bg-black/45 text-amber-100/80'"
+                  :title="isFavorite(current.id)
+                    ? t('characters.favoriteOn')
+                    : t('characters.favoriteOff')"
+                  :aria-pressed="isFavorite(current.id)"
+                  @click="toggleFavorite(current.id, $event)"
+                >{{ isFavorite(current.id) ? '★' : '☆' }}</button>
+              </div>
+              <div class="flex flex-wrap gap-1.5 justify-center mt-2">
+                <span
+                  v-if="relationBadge(current)"
+                  class="px-2 py-0.5 rounded-full bg-teal-900/40 border border-teal-500/30
+                         text-[10px] text-teal-100"
+                >{{ relationBadge(current).icon }} {{ t(`characters.badge.${relationBadge(current).key}`) }}</span>
+                <span
+                  v-if="shootCount(current) > 0"
+                  class="px-2 py-0.5 rounded-full bg-sky-900/40 border border-sky-500/30
+                         text-[10px] text-sky-100"
+                  :title="t('characters.shootCount', { n: shootCount(current) })"
+                >📷 {{ t('characters.shootCount', { n: shootCount(current) }) }}</span>
+                <span
+                  v-if="current.diary_unread_count > 0"
+                  class="px-2 py-0.5 rounded-full bg-rose-900/40 border border-rose-500/30
+                         text-[10px] text-rose-100"
+                >💌 {{ t('characters.unreadCount', { n: current.diary_unread_count }) }}</span>
               </div>
               <p class="text-[12px] text-gray-400 mt-1 leading-relaxed">{{ blurb(current) }}</p>
               <div class="flex flex-wrap gap-1 justify-center mt-2">

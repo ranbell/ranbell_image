@@ -287,11 +287,7 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
         "gender": str(preset.get("gender") or ""),
         "subject_tag": str(preset.get("subject_tag") or ""),
-        # All of them, not the first five. The card shows three and the deck
-        # shows the rest, but the picker also filters and searches on this, and
-        # the cap quietly made two of every character's seven traits
-        # unsearchable — enough that only 20 of 30 could be reached by any
-        # trait chip at all.
+        # Flavour chips on the card — not a filter (traits never cover the roster).
         "traits": _strings(preset.get("personality")),
         "title": str(preset.get("title") or ""),
         "title_ja": str(preset.get("title_ja") or preset.get("title") or ""),
@@ -313,6 +309,10 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "diary_unread_count": sum(
             1 for d in (preset.get("diaries") or []) if not d.get("read")
         ),
+        # Lifetime co-shoots (recaps keep only the last few). Fallback to the
+        # sticky window so older rows still show a badge before the next shoot.
+        "shoot_count": _shoot_count(preset),
+        "last_shoot_at": _last_shoot_at(preset),
     }
 
 
@@ -1041,6 +1041,7 @@ async def consume_social_seeds(db, preset_id: str, seed_ids: list[str]) -> None:
 MEMORY_FIELDS: tuple[str, ...] = (
     "diaries", "chemistry", "social_seeds", "shoot_recaps",
     "bond", "showrunner_taste",
+    "shoot_count", "last_shoot_at",
 )
 
 # Sticky detailed shoot recaps kept on the character (older ones go to Qdrant).
@@ -1048,12 +1049,40 @@ MAX_SHOOT_RECAPS = 3
 TASTE_MAX_LINES = 8
 
 
+def _shoot_recap_rows(preset: dict[str, Any]) -> list[dict[str, Any]]:
+    return [r for r in list(preset.get("shoot_recaps") or []) if isinstance(r, dict)]
+
+
+def _shoot_count(preset: dict[str, Any]) -> int:
+    """Lifetime shoots; never less than the sticky recap window we still hold."""
+    try:
+        stored = int(preset.get("shoot_count") or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    return max(0, stored, len(_shoot_recap_rows(preset)))
+
+
+def _last_shoot_at(preset: dict[str, Any]) -> float:
+    try:
+        stored = float(preset.get("last_shoot_at") or 0)
+    except (TypeError, ValueError):
+        stored = 0.0
+    if stored > 0:
+        return stored
+    rows = _shoot_recap_rows(preset)
+    if not rows:
+        return 0.0
+    try:
+        return float(rows[0].get("timestamp") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 async def get_shoot_recaps(db, preset_id: str, limit: int = 3) -> list[dict[str, Any]]:
     preset = await get_preset(db, preset_id)
     if not preset:
         return []
-    rows = [r for r in list(preset.get("shoot_recaps") or []) if isinstance(r, dict)]
-    return rows[:limit]
+    return _shoot_recap_rows(preset)[:limit]
 
 
 async def push_shoot_recap(
@@ -1063,7 +1092,7 @@ async def push_shoot_recap(
     preset = await get_preset(db, preset_id)
     if not preset:
         return None
-    rows = [r for r in list(preset.get("shoot_recaps") or []) if isinstance(r, dict)]
+    rows = _shoot_recap_rows(preset)
     entry = {
         "id": str(recap.get("id") or uuid.uuid4()),
         "timestamp": float(recap.get("timestamp") or time.time()),
@@ -1075,11 +1104,16 @@ async def push_shoot_recap(
     }
     if not any(entry[k] for k in ("when", "feel", "liked", "shot")):
         return None
+    count = _shoot_count(preset) + 1
     rows.insert(0, entry)
     overflow = None
     if len(rows) > MAX_SHOOT_RECAPS:
         overflow = rows.pop()
-    await update_preset(db, preset_id, {"shoot_recaps": rows[:MAX_SHOOT_RECAPS]})
+    await update_preset(db, preset_id, {
+        "shoot_recaps": rows[:MAX_SHOOT_RECAPS],
+        "shoot_count": count,
+        "last_shoot_at": entry["timestamp"],
+    })
     return overflow
 
 
@@ -1180,6 +1214,8 @@ async def plan_memory_erase(db) -> dict[str, Any]:
             return len(val)
         if isinstance(val, dict):
             return 1 if any(str(v).strip() for v in val.values() if not isinstance(v, (int, float))) else 0
+        if isinstance(val, (int, float)):
+            return 1 if float(val) else 0
         return 0
 
     counts = {
@@ -1205,6 +1241,8 @@ async def erase_all_memory_fields(db) -> int:
         for field in MEMORY_FIELDS:
             if field in ("bond", "showrunner_taste"):
                 clear[field] = {}
+            elif field in ("shoot_count", "last_shoot_at"):
+                clear[field] = 0
             else:
                 clear[field] = []
         await update_preset(db, pid, clear)
