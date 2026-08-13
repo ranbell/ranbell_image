@@ -38,10 +38,6 @@ const images = ref([])
 const total = ref(0)
 const nextCursor = ref(null)
 const LIMIT = 100
-// Infinite scroll has no virtualization: every loaded card stays in the array
-// and the DOM. Cap the session's loaded window so a marathon scroll can't grow
-// memory without bound; the user narrows via search/filters past this point.
-const MAX_GALLERY_IMAGES = 2000
 const loading = ref(false)
 const hasMore = ref(true)
 const pendingGalleryRefresh = ref(false)
@@ -253,6 +249,11 @@ const headerActiveJobs = computed(() => {
   return list
 })
 // ── Alignment ─────────────────────────────────────────────────────────────────
+// Written in place. A ref'd Map is already deeply reactive, so `.set()` is
+// tracked and the gallery re-renders only the cards whose key changed; replacing
+// the Map instead changes its identity, which invalidates every card that reads
+// it. With one copy per page fetch that is quadratic in scroll depth — the cost
+// the old MAX_GALLERY_IMAGES cap was really holding back.
 const alignmentCache = ref(new Map())        // sha256 -> record | null
 const alignmentEvaluating = ref(new Map())  // sha256 -> job_id (while queued/running)
 
@@ -265,9 +266,9 @@ async function loadMuseDiaryLink(sha256, characterId) {
   try {
     const r = await fetch(`/api/characters/${characterId}/diaries/by-image/${sha256}`)
     const data = r.ok ? await r.json() : null
-    museDiaryCache.value = new Map(museDiaryCache.value).set(sha256, data?.diary || null)
+    museDiaryCache.value.set(sha256, data?.diary || null)
   } catch {
-    museDiaryCache.value = new Map(museDiaryCache.value).set(sha256, null)
+    museDiaryCache.value.set(sha256, null)
   }
 }
 
@@ -293,9 +294,7 @@ async function fetchAlignmentsForImages(imgs) {
     })
     if (!r.ok) return
     const records = await r.json()  // { sha256: record }
-    const next = new Map(alignmentCache.value)
-    for (const sha256 of uncached) next.set(sha256, records[sha256] ?? null)
-    alignmentCache.value = next
+    for (const sha256 of uncached) alignmentCache.value.set(sha256, records[sha256] ?? null)
   } catch {}
 }
 
@@ -304,9 +303,9 @@ async function loadAlignment(sha256) {
   try {
     const r = await fetch(`/api/alignment/${sha256}`)
     const record = r.ok ? await r.json() : null
-    alignmentCache.value = new Map(alignmentCache.value).set(sha256, record)
+    alignmentCache.value.set(sha256, record)
   } catch {
-    alignmentCache.value = new Map(alignmentCache.value).set(sha256, null)
+    alignmentCache.value.set(sha256, null)
   }
 }
 
@@ -804,7 +803,7 @@ function openImageFromOracle(sha256) {
   showInvoke.value = false
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
-    selected.value = img
+    selectImage(img)
   } else {
     fetch(`/api/images/${sha256}`)
       .then(r => r.ok ? r.json() : null)
@@ -816,7 +815,7 @@ function openImageFromOracle(sha256) {
 function navigateToGraphNode(sha256) {
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
-    selected.value = img
+    selectImage(img)
   } else {
     fetch(`/api/images/${sha256}`)
       .then(r => r.ok ? r.json() : null)
@@ -1464,12 +1463,20 @@ async function fetchImages(reset = false) {
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
       if (showDrafts.value) params.set('include_drafts', 'true')
       if (alignMinFilter.value !== null) params.set('align_min', alignMinFilter.value)
-      if (sliderTimestamp.value && ['newest', 'oldest'].includes(sortOrder.value)) {
+      // Only on the first page: date_seek picks the starting point, and the
+      // cursor carries the position from there. Sending both lets the seek
+      // override the cursor and re-serve the first page forever.
+      if (!nextCursor.value && sliderTimestamp.value
+          && ['newest', 'oldest'].includes(sortOrder.value)) {
         params.set('date_seek', new Date(sliderTimestamp.value).toISOString())
       }
       const res = await fetch(`/api/images?${params}`)
       const data = await res.json()
       if (reset) {
+        // The list is replaced, so the alignment records behind it are dead
+        // weight. Cleared here rather than at the top of the fetch so the cards
+        // on screen keep their badges until the new page actually lands.
+        alignmentCache.value.clear()
         images.value = data.images
         mainEl.value?.scrollTo({ top: 0 })
       } else {
@@ -1478,10 +1485,6 @@ async function fetchImages(reset = false) {
       total.value = data.total
       nextCursor.value = data.next_cursor
       hasMore.value = !!data.next_cursor
-      if (hasMore.value && images.value.length >= MAX_GALLERY_IMAGES) {
-        hasMore.value = false
-        showToast(t('gallery.loadCap', { n: images.value.length }), 'info', 6000)
-      }
       fetchAlignmentsForImages(data.images || [])
       if (data.available_tags?.length) {
         modelFilteredTagSet.value = new Set(data.available_tags)
@@ -1779,16 +1782,14 @@ async function handleJobFinished(job) {
       alignmentEvaluating.value = nextEval
     }
 
-    // Invalidate cache and re-fetch (targets only; full evaluation clears all)
+    // Invalidate cache and re-fetch (targets only; full evaluation clears all).
+    // A full evaluation targets the whole loaded list, so the refetch goes
+    // through the batch endpoint — one request instead of one per image.
     const targets = sha256s.length > 0 ? sha256s : images.value.map(img => img.sha256)
-    const next = new Map(alignmentCache.value)
-    for (const sha256 of targets) next.delete(sha256)
-    alignmentCache.value = next
+    for (const sha256 of targets) alignmentCache.value.delete(sha256)
 
     const targetSet = new Set(targets)
-    for (const img of images.value) {
-      if (targetSet.has(img.sha256)) loadAlignment(img.sha256)
-    }
+    fetchAlignmentsForImages(images.value.filter(img => targetSet.has(img.sha256)))
   }
 }
 
@@ -2105,8 +2106,22 @@ function toggleImageSelection(img) {
   selectedIds.value = next
 }
 
-function onImageClick(img) {
+// Gallery rows carry only what the grid draws. The detail panel wants the rest
+// — prompts, params, raw metadata — so paint the row immediately and fill the
+// full document in behind it. The sha guard keeps a slow response from
+// overwriting a selection the user has already moved past.
+function selectImage(img) {
+  if (!img) return
   selected.value = img
+  const sha = img.sha256
+  fetch(`/api/images/${sha}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(doc => { if (doc && selected.value?.sha256 === sha) selected.value = doc })
+    .catch(() => {})
+}
+
+function onImageClick(img) {
+  selectImage(img)
 }
 
 function onCheckboxClick(e, img) {
@@ -2164,7 +2179,7 @@ function prevImage() {
   const i = selectedIndex.value
   if (i > 0) {
     _markImgPending()
-    selected.value = images.value[i - 1]
+    selectImage(images.value[i - 1])
     if (showLightbox.value) { lbPanX.value = 0; lbPanY.value = 0 }
   }
 }
@@ -2175,13 +2190,13 @@ async function nextImage() {
   if (i < 0) return
   if (i < images.value.length - 1) {
     _markImgPending()
-    selected.value = images.value[i + 1]
+    selectImage(images.value[i + 1])
     if (showLightbox.value) { lbPanX.value = 0; lbPanY.value = 0 }
   } else if (hasMore.value) {
     _markImgPending()
     await fetchImages()
     if (i + 1 < images.value.length) {
-      selected.value = images.value[i + 1]
+      selectImage(images.value[i + 1])
       if (showLightbox.value) {
         lbPanX.value = 0; lbPanY.value = 0
         await nextTick()
@@ -2681,7 +2696,7 @@ function onMuseShow(open) {
 function openImageBySha(sha256) {
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
-    selected.value = img
+    selectImage(img)
     return
   }
   fetch(`/api/images/${sha256}`)

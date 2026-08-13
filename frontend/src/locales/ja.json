@@ -303,7 +303,6 @@
     "rootFolder": "(ルート直下)",
     "imageCount": "{n} 枚",
     "newImagesAvailable": "新しい画像があります — 更新",
-    "loadCap": "表示上限 {n} 枚に達しました。検索やフィルタで絞り込んでください。",
     "showDrafts": "下書きも表示",
     "showDraftsHint": "Muse のボード下書きは既定で一覧から隠れている"
   },

@@ -186,6 +186,7 @@ async def list_images(
             models=dir_model_list or None, star_min=star_min,
             category=category, sha256_ids=align_sha256s,
             exclude_drafts=not include_drafts,
+            gallery_fields=True,
         )
         docs = sort_docs([d for d in all_docs if _in_dir(d)], sort)
         return {"total": len(docs), "next_cursor": None, "images": docs,
@@ -199,11 +200,16 @@ async def list_images(
     is_filter = bool(keyword or inc_list or exc_list or model_list or star_min is not None
                      or category is not None or align_min is not None)
 
-    # date_seek: convert ISO datetime string to synthetic cursor for mtime-based sorts
-    if date_seek and sort in ("newest", "oldest"):
+    # date_seek: convert ISO datetime string to synthetic cursor for mtime-based sorts.
+    #
+    # Only when there is no cursor yet. date_seek names where to *start*, and the
+    # client keeps sending it for as long as the timeline slider is set — so
+    # rebuilding the cursor from it on every request pins the scroll to the seek
+    # point and each "next page" serves the first page again.
+    if date_seek and not cursor and sort in ("newest", "oldest"):
         if re.match(r'^\d{4}-\d{2}-\d{2}', date_seek):
             import base64 as _b64s, json as _jsons
-            cursor = _b64s.b64encode(_jsons.dumps({"start": date_seek, "last_id": ""}).encode()).decode()
+            cursor = _b64s.b64encode(_jsons.dumps({"start": date_seek, "seen": []}).encode()).decode()
 
     # align_desc sort: pre-fetch alignment-ordered sha256 list, paginate with integer cursor
     if sort == "align_desc":
@@ -219,6 +225,7 @@ async def list_images(
                 category=category,
                 sha256_ids=align_sha256s,
                 exclude_drafts=not include_drafts,
+                gallery_fields=True,
             )
             sha_to_doc = {d["sha256"]: d for d in docs}
             # Order by alignment score, then append unscored docs at the end
@@ -303,6 +310,7 @@ async def list_images(
                 models=model_list, keyword=keyword,
                 star_min=star_min, category=category, sha256_ids=align_sha256s,
                 exclude_drafts=not include_drafts,
+                gallery_fields=True,   # only wd14_tags is read off these rows
             )
             page_task = db.scroll_filtered_page(
                 limit=limit, cursor=cursor or None, sort=sort, **filter_kwargs

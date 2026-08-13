@@ -71,21 +71,73 @@ PENDING_FILTER = qm.Filter(must=[
     qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="pending"))
 ])
 
+# What a gallery row actually needs. The full payload averages ~9 KB, of which
+# raw_metadata alone is ~5 KB — none of which the grid draws. The detail panel
+# fetches the whole document per image, so the list stays at ~1 KB a row.
+#
+# wd14_tags is here for the tag-filter sidebar, which derives its vocabulary
+# from the loaded rows when no model filter narrows it; path is what the folder
+# view matches on.
+GALLERY_PAYLOAD_FIELDS = [
+    "sha256", "name", "path", "ext", "size", "mtime",
+    "star_rating", "batch_category", "embedding_status",
+    "is_draft", "is_reference", "wd14_tags",
+]
+GALLERY_PAYLOAD = qm.PayloadSelectorInclude(include=GALLERY_PAYLOAD_FIELDS)
 
-def _decode_scroll_cursor(cursor: str | None) -> tuple[object, str | None]:
-    """Decode a pagination cursor into (start_from, last_id)."""
+
+# Qdrant refuses `offset` together with `order_by`:
+#
+#   Cannot use an `offset` when using `order_by`. The alternative for paging is
+#   to use `order_by.start_from` and a filter to exclude the IDs that you've
+#   already seen for the `order_by.start_from` value
+#
+# — and it returns next_page_offset=None whenever order_by is set, which is why
+# the scroll callers below discard it. So a cursor carries the boundary sort
+# value plus every id already served *at that value*.
+#
+# Remembering only the single last id is what an earlier version did, and it is
+# correct exactly while the sort value is unique. The moment more rows share the
+# boundary value than fit in one page, start_from lands on the same value again,
+# the one excluded id is not enough, and the scroll re-serves the same page
+# forever. A bulk copy that stamps one mtime across a folder is enough to do it.
+def _decode_scroll_cursor(cursor: str | None) -> tuple[object, list[str]]:
+    """Decode a pagination cursor into (start_from, ids already served at it)."""
     if not cursor:
-        return None, None
+        return None, []
     try:
         c = json.loads(base64.b64decode(cursor.encode()))
-        return c.get("start"), c.get("last_id")
+        seen = c.get("seen")
+        if seen is None:
+            # Cursors minted before accumulation carried a single "last_id".
+            last = c.get("last_id")
+            seen = [last] if last else []
+        return c.get("start"), [s for s in seen if s]
     except Exception:
-        return None, None
+        return None, []
 
 
-def _encode_scroll_cursor(sort_key_value: object, sha256: str) -> str:
-    """Encode (sort_field_value, sha256) into a pagination cursor string."""
-    return base64.b64encode(json.dumps({"start": sort_key_value, "last_id": sha256}).encode()).decode()
+def _encode_scroll_cursor(sort_key_value: object, seen_ids: list[str]) -> str:
+    """Encode (sort_field_value, ids already served at that value) into a cursor."""
+    return base64.b64encode(
+        json.dumps({"start": sort_key_value, "seen": seen_ids}).encode()
+    ).decode()
+
+
+def _next_scroll_cursor(
+    docs: list[dict], sort_key: str, prev_start: object, prev_seen: list[str]
+) -> str:
+    """Cursor resuming after `docs`, carrying the boundary run's ids forward.
+
+    The ids accumulate only while the boundary value holds; a page that ends on
+    a new value starts the list over, so the cursor stays small unless the sort
+    value genuinely repeats across pages.
+    """
+    boundary = docs[-1].get(sort_key)
+    seen = [d["sha256"][:32] for d in docs if d.get(sort_key) == boundary]
+    if prev_seen and boundary == prev_start:
+        seen = prev_seen + seen
+    return _encode_scroll_cursor(boundary, seen)
 
 
 def _now_iso() -> str:
@@ -990,45 +1042,38 @@ class QdrantDBClient:
         exclude_drafts: bool = True,
     ) -> tuple[list[dict], str | None]:
         sort_def = _SORT_ORDER_BY.get(sort, _SORT_ORDER_BY["newest"])
-        scroll_filter = self._draft_filter() if exclude_drafts else None
 
-        # Decode cursor: {start: <sort_field_value>, last_id: <sha256>}
-        start_from, last_id = _decode_scroll_cursor(cursor)
+        # Decode cursor: {start: <sort_field_value>, seen: [<id>, ...]}
+        start_from, seen = _decode_scroll_cursor(cursor)
 
         order = qm.OrderBy(
             key=sort_def.key,
             direction=sort_def.direction,
             start_from=start_from,
         )
+        scroll_filter = self._exclude_seen(
+            self._draft_filter() if exclude_drafts else None, seen
+        )
 
-        # When resuming from a cursor, start_from is inclusive so the boundary
-        # item will appear in results. Fetch +2 to still have +1 for has_more
-        # detection after removing the boundary item.
-        fetch_limit = limit + 2 if last_id else limit + 1
         points, _ = await self._qc.scroll(
             collection_name=IMAGES_COLLECTION,
             scroll_filter=scroll_filter,
             order_by=order,
-            limit=fetch_limit,
-            with_payload=True,
+            limit=limit + 1,
+            with_payload=GALLERY_PAYLOAD,
             with_vectors=False,
         )
         docs = [p.payload for p in points]
-
-        # Remove the already-seen boundary item
-        if last_id:
-            docs = [d for d in docs if d.get("sha256") != last_id]
 
         # Use >= limit so that Qdrant under-delivery (high load, returns limit instead of limit+1)
         # doesn't falsely terminate pagination. True end emits one extra empty page.
         has_more = len(docs) >= limit
         docs = docs[:limit]
 
-        if has_more and docs:
-            last = docs[-1]
-            next_cursor = _encode_scroll_cursor(last.get(sort_def.key), last.get("sha256"))
-        else:
-            next_cursor = None
+        next_cursor = (
+            _next_scroll_cursor(docs, sort_def.key, start_from, seen)
+            if has_more and docs else None
+        )
 
         return docs, next_cursor
 
@@ -1039,6 +1084,24 @@ class QdrantDBClient:
     def _draft_filter(self) -> qm.Filter:
         """Filter that hides board sketches — the gallery default."""
         return qm.Filter(must_not=[self._draft_exclude_cond()])
+
+    @staticmethod
+    def _exclude_seen(base: "qm.Filter | None", seen_ids: list[str]) -> "qm.Filter | None":
+        """Add the cursor's already-served ids to a filter's must_not.
+
+        start_from is inclusive, so without this the boundary run comes back on
+        every page.
+        """
+        if not seen_ids:
+            return base
+        cond = qm.HasIdCondition(has_id=[sha256_to_point_id(s) for s in seen_ids])
+        if base is None:
+            return qm.Filter(must_not=[cond])
+        return qm.Filter(
+            must=base.must,
+            should=base.should,
+            must_not=list(base.must_not or []) + [cond],
+        )
 
     def _make_filter(
         self,
@@ -1092,8 +1155,14 @@ class QdrantDBClient:
         category: str | None = None,
         sha256_ids: set[str] | None = None,
         exclude_drafts: bool = True,
+        gallery_fields: bool = False,
     ) -> list[dict]:
-        """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions."""
+        """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions.
+
+        gallery_fields trims each row to what the grid draws — worth passing when
+        the result is headed for the image list, since the full payload holds a
+        whole collection's raw metadata in memory to build one page.
+        """
         scroll_filter = self._make_filter(
             tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
             keyword=keyword, models=models, star_min=star_min,
@@ -1107,7 +1176,7 @@ class QdrantDBClient:
                 scroll_filter=scroll_filter,
                 limit=1000,
                 offset=offset,
-                with_payload=True,
+                with_payload=GALLERY_PAYLOAD if gallery_fields else True,
                 with_vectors=False,
             )
             all_docs.extend(p.payload for p in points)
@@ -1154,32 +1223,29 @@ class QdrantDBClient:
         total = count_result.count
 
         # Decode cursor
-        cursor_start, last_id = _decode_scroll_cursor(cursor)
+        cursor_start, seen = _decode_scroll_cursor(cursor)
 
         order = qm.OrderBy(
             key=sort_def.key,
             direction=sort_def.direction,
             start_from=cursor_start,
         )
-        fetch_limit = limit + 2 if last_id else limit + 1
         points, _ = await self._qc.scroll(
             collection_name=IMAGES_COLLECTION,
-            scroll_filter=scroll_filter,
+            scroll_filter=self._exclude_seen(scroll_filter, seen),
             order_by=order,
-            limit=fetch_limit,
-            with_payload=True,
+            limit=limit + 1,
+            with_payload=GALLERY_PAYLOAD,
             with_vectors=False,
         )
         docs = [p.payload for p in points]
-        if last_id:
-            docs = [d for d in docs if d.get("sha256") != last_id]
         has_more = len(docs) >= limit
         docs = docs[:limit]
 
-        next_cursor = None
-        if has_more and docs:
-            last = docs[-1]
-            next_cursor = _encode_scroll_cursor(last.get(sort_def.key), last.get("sha256"))
+        next_cursor = (
+            _next_scroll_cursor(docs, sort_def.key, cursor_start, seen)
+            if has_more and docs else None
+        )
 
         return docs, next_cursor, total
 
