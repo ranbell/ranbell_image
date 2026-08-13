@@ -140,8 +140,10 @@ async def run_snapshots(db, *, keep: int) -> dict[str, Any]:
                 # what a restore has to be given.
                 made.append(f"{physical}/{desc.name}")
         except Exception as e:
-            # Most often this is the snapshots directory not being writable by
-            # the qdrant container's user — which is silent unless we say so.
+            # Usually the snapshots directory: unmounted, read-only, out of
+            # space, or unwritable under a non-default container user. Whatever
+            # the cause, a backup that silently does not happen is the worst
+            # kind, so this is surfaced rather than logged and forgotten.
             failures[name] = str(e)
             logger.warning("snapshot failed for %s", name, exc_info=True)
             continue

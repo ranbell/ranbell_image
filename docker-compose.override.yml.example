@@ -63,10 +63,11 @@ services:
       # survives losing Qdrant entirely.
       # - /your/backup:/mnt/backup
 
-# Qdrant snapshots are written by the qdrant container, which does not run as
-# root. If ./qdrant_snapshots ends up owned by root the snapshots fail, and a
-# backup that cannot be written is worse than none because it looks like one —
-# so the admin screen reports the failure rather than logging it quietly.
-# Create it with the same owner as ./qdrant_data before the first start:
+# ./qdrant_snapshots needs no setup on a standard install: docker creates the
+# bind-mount source as root:root, and the qdrant image runs as root (its config
+# declares User "0:0"), so it can write there. Same as ./qdrant_data already is.
 #
-#     mkdir -p qdrant_snapshots && chown --reference=qdrant_data qdrant_snapshots
+# It can still fail on a non-standard setup — rootless docker, a `user:` override
+# on the qdrant service, SELinux labelling, a read-only or full filesystem. A
+# backup that cannot be written is worse than none because it looks like one, so
+# the admin screen reports the failure instead of logging it quietly.
