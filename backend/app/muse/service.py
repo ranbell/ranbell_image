@@ -1847,14 +1847,16 @@ def _muse_names(session: dict[str, Any], partner_character: dict | None = None) 
     return name_a, name_b
 
 
-def _scripter_status_message(*, locale: str = "ja") -> str:
+def _scripter_status_message(*, locale: str = "ja", soft: bool = False) -> str:
     """Wait copy while the scripter updates the notebook.
 
-    This used to guess what was being adjusted from the showrunner's wording
-    ("帽子、外してる…") off a keyword table, so it announced the wrong thing
-    whenever the phrasing was ordinary. One honest line beats a specific lie.
+    Soft mode is for casual / VERIFY turns — the picture may not move, so we
+    avoid craft-office wording that makes chit-chat feel like paperwork. The
+    body whisper carries the beat; status stays a light ellipsis.
     """
-    return "台本、いま合わせてる…" if locale.startswith("ja") else "Updating the craft…"
+    if soft:
+        return "…" if locale.startswith("ja") else "…"
+    return "ちょっと合わせてる…" if locale.startswith("ja") else "Just a moment…"
 
 
 def _bond_block(session: dict[str, Any]) -> str:
@@ -2096,12 +2098,14 @@ async def _run_duet_scripter(
     events.publish(sid, {
         "type": "scripter_working",
         "status": "updating",
-        "message": _scripter_status_message(locale=locale),
+        "message": _scripter_status_message(locale=locale, soft=True),
         "whisper": vitality.silence_whisper(locale=locale),
     })
     rev_before = int(nb.get("rev") or 0)
+    open_before = str(nb.get("open") or "").strip()
     prev_wearing = str(nb.get("wearing") or "")
     prev_scene = str(nb.get("scene") or "")
+    had_shot = notebook_mod.has_shot(nb)
 
     # The scripter gets the notebook and the conversation, and nothing else —
     # no diary, no memories, no lounge or studio notices.
@@ -2122,18 +2126,28 @@ async def _run_duet_scripter(
         patch.get("clear_open")
     )
 
-    # Casual with no SHOT edit + a real showrunner line → one VERIFY pass.
-    # Vibe-only updates still count as "no SHOT edit" — that is the frozen
-    # place/outfit failure shape (model chats / vibes while SHOT stays put).
-    # No keyword sniffing: the model re-reads the same conversation.
-    if (
+    # VERIFY only when a picture miss is plausible — not on every chill turn.
+    # (1) OPEN was pending (affirm often comes back as casual).
+    # (2) Notebook already had a shot, casual left SHOT untouched, and the
+    #     patch did not even touch vibe/open — total freeze / ignore.
+    # Pure vibe-chat stays one call so enjoyment isn't double-taxed.
+    patch_meta = bool(str(patch.get("vibe") or "").strip() or str(patch.get("open") or "").strip())
+    needs_verify = (
         intent in ("casual", "")
         and not shot_patched
         and str(text or "").strip()
         and not str(text or "").strip().upper().startswith("DENSIFY")
         and not str(text or "").strip().upper().startswith("VERIFY")
         and not str(text or "").strip().upper().startswith("REPAIR")
-    ):
+        and (bool(open_before) or (had_shot and not patch_meta))
+    )
+    if needs_verify:
+        events.publish(sid, {
+            "type": "scripter_working",
+            "status": "updating",
+            "message": _scripter_status_message(locale=locale, soft=True),
+            "whisper": vitality.silence_whisper(locale=locale),
+        })
         verify = await _call_duet_scripter(
             ollama, session,
             note=f"{chain.SCRIPTER_VERIFY_NOTE}\n\nSHOWRUNNER'S LATEST LINE:\n{text.strip()}",
@@ -2149,16 +2163,26 @@ async def _run_duet_scripter(
             result = verify
             intent = v_intent
             patch = v_patch
+            shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
+                patch.get("clear_open")
+            )
             notebook_mod.apply_patch(nb, patch)
             notebook_moved = int(nb.get("rev") or 0) > rev_before
 
     session["notebook"] = nb
     session["standing"] = list(nb.get("standing") or [])
     session["digest"] = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
+    # Flash only when a SHOT row moved — vibe-only should not pulse the board.
+    flash = vitality.notebook_flash_key(patch) if shot_patched else ""
     events.publish(sid, {
         "type": "scripter_working",
         "status": "updating",
-        "flash": vitality.notebook_flash_key(patch),
+        "flash": flash,
+        "message": (
+            _scripter_status_message(locale=locale, soft=False)
+            if shot_patched or intent in ("shot", "mixed")
+            else _scripter_status_message(locale=locale, soft=True)
+        ),
     })
 
     session["cited_memories"] = []
@@ -2227,7 +2251,11 @@ async def _run_duet_scripter(
         session["just_banned"] = []
         session["just_restored"] = []
 
-    if notebook_moved and not compiled:
+    # Only SHOT drift dirties craft. Vibe/open-only casual must not amber-banner
+    # the chat — that made every chill turn feel like an unsynced script.
+    if shot_patched and not compiled:
+        session["craft_dirty"] = True
+    elif notebook_moved and not compiled and intent in ("shot", "mixed"):
         session["craft_dirty"] = True
 
     session["scripter_intent"] = intent

@@ -325,11 +325,7 @@ async def test_casual_chit_chat_runs_scripter_and_leaves_craft_alone():
 
 @pytest.mark.asyncio
 async def test_verify_recovers_casual_misread_of_picture_change():
-    """First answer casual with no SHOT edit → VERIFY pass can still compile.
-
-    Models the beach failure: Gemma returns casual, notebook stays put, then
-    the structural VERIFY ask (not a keyword gate) gets a proper shot.
-    """
+    """Empty-patch casual freeze → VERIFY can still compile (no keyword gate)."""
     db = FakeDb()
 
     class VerifyOllama(NotebookOllama):
@@ -344,10 +340,8 @@ async def test_verify_recovers_casual_misread_of_picture_change():
                 self.scripter_prompts.append(str(prompt))
                 self._n += 1
                 if self._n == 1:
-                    # Misread: vibe only, no SHOT edit.
-                    text = _scripter_block(
-                        intent="casual", vibe="thinking about the shore",
-                    )
+                    # Total freeze: casual, no vibe/open/SHOT — triggers VERIFY.
+                    text = _scripter_block(intent="casual")
                 else:
                     assert "VERIFY" in str(prompt)
                     text = _scripter_block(
@@ -391,6 +385,42 @@ async def test_verify_recovers_casual_misread_of_picture_change():
     assert "beach" in (s["notebook"].get("scene") or "")
     assert "beach" in (s["craft"].get("tags") or "")
     assert len(ollama.scripter_prompts) >= 2
+
+
+@pytest.mark.asyncio
+async def test_vibe_only_casual_skips_verify_and_stays_clean():
+    """Chill chat may update vibe once — no VERIFY tax, craft tags untouched."""
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "セーラー": _scripter_block(
+            intent="shot", scene="park", wearing="sailor uniform",
+            beat="standing", frame="eye level",
+            tags="park, sailor_collar, standing, looking_at_viewer, afternoon_light, "
+                 "maple_tree, bench, soft_smile, wind",
+            craft_scene=(
+                "She stands in a sunlit park in a sailor uniform, weight on one hip, "
+                "maple shade across the collar, a quiet bench behind her, soft afternoon "
+                "air moving the ribbon, camera at eye level as she looks toward the viewer "
+                "with a small unforced smile while the path gravel ticks under her shoes "
+                "and the distant fountain keeps a low hush that belongs to this place alone."
+            ),
+        ),
+        "かき氷": _scripter_block(intent="casual", vibe="wanting shaved ice"),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+    await service.post_duet_chat(db, ollama, s, "セーラーで公園")
+    tags_before = str((s.get("craft") or {}).get("tags") or "")
+    dirty_before = bool(s.get("craft_dirty"))
+    before = len(ollama.scripter_prompts)
+    await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
+    assert len(ollama.scripter_prompts) == before + 1  # no VERIFY
+    assert s["scripter_intent"] == "casual"
+    assert str((s.get("craft") or {}).get("tags") or "") == tags_before
+    # Vibe-only must not newly dirty a clean craft.
+    if not dirty_before:
+        assert s["craft_dirty"] is False
 
 
 @pytest.mark.asyncio
