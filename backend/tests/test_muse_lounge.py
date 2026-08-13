@@ -107,37 +107,6 @@ def test_normalize_pitch_and_habit():
 
 
 @pytest.mark.asyncio
-async def test_reply_does_not_unpromote_pitch(monkeypatch):
-    from backend.app.muse import lounge_db, service
-
-    thread = {
-        "id": "t1", "kind": "pitch", "status": "promoted",
-        "promoted_page_id": "page1", "messages": [],
-    }
-
-    async def fake_get(_db, tid):
-        return dict(thread)
-
-    async def fake_append(_db, tid, msg):
-        t = dict(thread)
-        t["messages"] = [msg]
-        return t
-
-    saved = {}
-
-    async def fake_save(_db, t):
-        saved["thread"] = t
-        return t
-
-    monkeypatch.setattr(lounge_db, "get_thread", fake_get)
-    monkeypatch.setattr(lounge_db, "append_message", fake_append)
-    monkeypatch.setattr(lounge_db, "save_thread", fake_save)
-    out = await service.reply_lounge_thread(object(), "t1", text="いいね", locale="ja")
-    assert out["status"] == "promoted"
-    assert "thread" not in saved  # status must not be rewritten
-
-
-@pytest.mark.asyncio
 async def test_friends_of_ranks_best_friend_first(monkeypatch):
     class FakeDB:
         pass

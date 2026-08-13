@@ -2,6 +2,8 @@
 /*
  * Studio lounge — Slack-flavoured feed of wrap shares + pitches + handpost
  * + Look-of-the-week trends. Cute rose/pink tone to match the secret diary.
+ * Fully read-only for the showrunner — peek only, never write or pin.
+ * Handpost pages still arrive from habit jobs.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,10 +20,6 @@ const threads = ref([])
 const trends = ref([])
 const pages = ref([])
 const selectedId = ref('')
-const editing = ref(null)
-const saving = ref(false)
-const replyText = ref('')
-const replying = ref(false)
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const selected = computed(() => threads.value.find(t => t.id === selectedId.value) || null)
@@ -96,94 +94,6 @@ async function load() {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
     loading.value = false
-  }
-}
-
-function startNewPage() {
-  editing.value = { id: '', title: '', body_ja: '', body_en: '', pinned: true }
-}
-function editPage(p) {
-  editing.value = {
-    id: p.id,
-    title: p.title || '',
-    body_ja: p.body_ja || '',
-    body_en: p.body_en || '',
-    pinned: Boolean(p.pinned),
-  }
-}
-async function savePage() {
-  if (!editing.value) return
-  saving.value = true
-  try {
-    const body = {
-      title: editing.value.title,
-      body_ja: editing.value.body_ja,
-      body_en: editing.value.body_en,
-      pinned: editing.value.pinned,
-    }
-    if (editing.value.id) {
-      await api(`/api/muse/handpost/${editing.value.id}`, {
-        method: 'PATCH', body: JSON.stringify(body),
-      })
-    } else {
-      await api('/api/muse/handpost', { method: 'POST', body: JSON.stringify(body) })
-    }
-    editing.value = null
-    await load()
-    emit('toast', { msg: t('muse.lounge.handpostSaved'), type: 'success' })
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
-  } finally {
-    saving.value = false
-  }
-}
-async function removePage(id) {
-  if (!confirm(t('muse.lounge.handpostDeleteConfirm'))) return
-  try {
-    await api(`/api/muse/handpost/${id}`, { method: 'DELETE' })
-    await load()
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
-  }
-}
-
-async function sendReply() {
-  if (!selected.value || !replyText.value.trim()) return
-  replying.value = true
-  try {
-    const updated = await api(`/api/muse/lounge/threads/${selected.value.id}/reply`, {
-      method: 'POST',
-      body: JSON.stringify({ text: replyText.value.trim(), locale: isJa.value ? 'ja' : 'en' }),
-    })
-    replyText.value = ''
-    const idx = threads.value.findIndex(t => t.id === updated.id)
-    if (idx >= 0) threads.value[idx] = updated
-    else await load()
-    emit('toast', { msg: t('muse.lounge.replySent'), type: 'success' })
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
-  } finally {
-    replying.value = false
-  }
-}
-
-async function promotePitch() {
-  if (!selected.value || selected.value.kind !== 'pitch') return
-  if (selected.value.status === 'promoted') return
-  try {
-    const res = await api(
-      `/api/muse/lounge/threads/${selected.value.id}/promote?locale=${isJa.value ? 'ja' : 'en'}`,
-      { method: 'POST' },
-    )
-    if (res.thread) {
-      const idx = threads.value.findIndex(t => t.id === res.thread.id)
-      if (idx >= 0) threads.value[idx] = res.thread
-    }
-    await load()
-    emit('toast', { msg: t('muse.lounge.promoted'), type: 'success' })
-    tab.value = 'handpost'
-  } catch (err) {
-    emit('toast', { msg: String(err?.message || err), type: 'error' })
   }
 }
 
@@ -332,31 +242,6 @@ watch(() => props.show, (v) => {
                 {{ t('muse.lounge.pickThread') }}
               </p>
             </div>
-
-            <div
-              v-if="selected"
-              class="shrink-0 border-t border-pink-200/60 bg-white/50 p-3 space-y-2"
-            >
-              <div class="flex gap-2">
-                <input
-                  v-model="replyText"
-                  class="flex-1 rounded-full border border-pink-200 px-3 py-2 text-sm bg-white"
-                  :placeholder="t('muse.lounge.replyPlaceholder')"
-                  @keydown.enter.prevent="sendReply"
-                />
-                <button type="button" class="lounge-btn" :disabled="replying || !replyText.trim()" @click="sendReply">
-                  {{ t('muse.lounge.reply') }}
-                </button>
-              </div>
-              <button
-                v-if="selected.kind === 'pitch' && selected.status !== 'promoted'"
-                type="button"
-                class="lounge-btn is-amber w-full"
-                @click="promotePitch"
-              >
-                {{ t('muse.lounge.promote') }}
-              </button>
-            </div>
           </div>
         </div>
 
@@ -407,49 +292,8 @@ watch(() => props.show, (v) => {
           </p>
         </div>
 
-        <!-- handpost -->
+        <!-- handpost — read-only. Notices arrive from Muse habit jobs. -->
         <div v-else class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-          <div class="flex items-center gap-2">
-            <button type="button" class="lounge-btn" @click="startNewPage">
-              ＋ {{ t('muse.lounge.newPin') }}
-            </button>
-          </div>
-
-          <div
-            v-if="editing"
-            class="rounded-2xl border border-pink-200 bg-white/80 p-3 space-y-2 shadow-sm"
-          >
-            <input
-              v-model="editing.title"
-              class="w-full rounded-xl border border-pink-200 px-3 py-2 text-sm"
-              :placeholder="t('muse.lounge.pinTitle')"
-            />
-            <textarea
-              v-model="editing.body_ja"
-              rows="3"
-              class="w-full rounded-xl border border-pink-200 px-3 py-2 text-sm"
-              :placeholder="t('muse.lounge.pinBodyJa')"
-            />
-            <textarea
-              v-model="editing.body_en"
-              rows="2"
-              class="w-full rounded-xl border border-pink-200 px-3 py-2 text-sm"
-              :placeholder="t('muse.lounge.pinBodyEn')"
-            />
-            <label class="flex items-center gap-2 text-xs text-rose-600">
-              <input v-model="editing.pinned" type="checkbox" />
-              {{ t('muse.lounge.pinSticky') }}
-            </label>
-            <div class="flex gap-2">
-              <button type="button" class="lounge-btn" :disabled="saving" @click="savePage">
-                {{ t('muse.lounge.save') }}
-              </button>
-              <button type="button" class="lounge-btn is-ghost" @click="editing = null">
-                {{ t('muse.lounge.cancel') }}
-              </button>
-            </div>
-          </div>
-
           <article
             v-for="p in pages"
             :key="p.id"
@@ -469,14 +313,6 @@ watch(() => props.show, (v) => {
             <p class="mt-1 text-sm whitespace-pre-wrap text-slate-700">
               {{ isJa ? (p.body_ja || p.body_en) : (p.body_en || p.body_ja) }}
             </p>
-            <div class="mt-2 flex gap-2">
-              <button type="button" class="lounge-btn is-ghost" @click="editPage(p)">
-                {{ t('muse.lounge.edit') }}
-              </button>
-              <button type="button" class="lounge-btn is-ghost" @click="removePage(p.id)">
-                {{ t('muse.lounge.delete') }}
-              </button>
-            </div>
           </article>
 
           <p v-if="!pages.length && !loading" class="text-sm text-rose-400 text-center py-12">
@@ -502,22 +338,5 @@ watch(() => props.show, (v) => {
   background: rgba(251, 207, 232, 0.9);
   border-color: rgba(244, 114, 182, 0.5);
   font-weight: 600;
-}
-.lounge-btn {
-  border-radius: 999px;
-  padding: 0.35rem 0.85rem;
-  font-size: 0.75rem;
-  background: linear-gradient(135deg, #fb7185, #f472b6);
-  color: white;
-  border: none;
-}
-.lounge-btn:disabled { opacity: 0.5; }
-.lounge-btn.is-ghost {
-  background: white;
-  color: #be185d;
-  border: 1px solid rgba(244, 114, 182, 0.35);
-}
-.lounge-btn.is-amber {
-  background: linear-gradient(135deg, #fbbf24, #f472b6);
 }
 </style>
