@@ -885,6 +885,29 @@ async def run_banter(
     return text
 
 
+async def run_table_talk(
+    ollama, *, system: str, user_prompt: str, model: str,
+    num_ctx: int | None,
+    images: list[bytes] | None = None,
+    on_token: TokenCallback | None = None,
+) -> str:
+    """Packed multi-seat banter — raw SPEAKER/SAY text, no craft parse."""
+    if images:
+        raw, _blind = await _call_seeing(
+            ollama, system=system, prompt=user_prompt, model=model,
+            images=images, num_ctx=num_ctx, think=False, on_token=on_token,
+        )
+    else:
+        raw = await _call(
+            ollama, system=system, prompt=user_prompt, model=model,
+            images=None, num_ctx=num_ctx, think=False, on_token=on_token,
+        )
+    text = str(raw or "").strip()
+    if not text:
+        raise ChainError("empty table talk")
+    return text
+
+
 # Being caught reading her diary used to be its own call, made while the panel
 # waited on a read receipt. It is now a block on her next turn's user prompt
 # (`crew.caught_block`) — she brings it up when they next meet, which is both

@@ -1330,7 +1330,8 @@
     "theme": "Theme",
     "themePlaceholder": "Any theme (place, time, action — freeform)",
     "studioHint": "You are the showrunner. The crew debates, puts up an image board, and shoots on your OK.",
-    "crewPreset": "Crew preset",
+    "crewPreset": "Crew formation",
+    "crewPresetHint": "Pick a look, not a chip. Talk is packed; the Scripter owns tags.",
     "presets": {
       "trio": "Small room (lead, director, planner)",
       "quartet": "Small room + camera",
@@ -1343,6 +1344,32 @@
       "calm": "Calm",
       "everyone": "Everyone",
       "custom": "Custom"
+    },
+    "presetLooks": {
+      "trio": "tight room",
+      "quartet": "room + lens",
+      "standard": "full desk",
+      "vivid": "saturated punch",
+      "photoreal": "optics & grain",
+      "flat": "cel & silhouette",
+      "classic": "steady canon",
+      "bold": "opinionated few",
+      "calm": "quiet air",
+      "everyone": "full debate",
+      "custom": "hand-picked"
+    },
+    "presetBlurbs": {
+      "trio": "Planner and beat only — fast talk, Scripter cleans the ledger.",
+      "quartet": "Same small room with a camera seat arguing frame.",
+      "standard": "Balanced floor — busier set dressing, mixed light.",
+      "vivid": "Colour and light lead; louder half of every craft seat.",
+      "photoreal": "Rendered end of the jobs — texture, paint, grain.",
+      "flat": "Animation side — line, cel, clear shapes.",
+      "classic": "Everything that steadies a picture; nothing experimental.",
+      "bold": "Fewest hands, most opinion — subtractive set, harder light.",
+      "calm": "Soft light, muted colour, empty air.",
+      "everyone": "Whole call sheet talks; still one packed turn + Scripter tags.",
+      "custom": "Seats you assembled yourself."
     },
     "workflow": "Workflow",
     "workflowHint": "One workflow draws the board and the final — only steps and cfg differ",

@@ -45,17 +45,28 @@ class FakeOllama:
 
     def generate_text_stream(self, prompt, **kw):
         self.calls.append({**kw, "prompt": prompt})
+        system = str(kw.get("system") or "")
+        # Match the packed moderator prompt only — craft seats mention
+        # "RECENT TABLE TALK" in their system text and must stay craft-shaped.
+        if "moderating a short TABLE TALK" in system:
+            text = (
+                "SPEAKER: wardrobe\n"
+                "SAY: 衣装、いまのまま通します。\n\n"
+                "SPEAKER: actress\n"
+                "SAY: 了解、その空気で待ちます。\n\n"
+                "SPEAKER: lens\n"
+                "SAY: 画角はそのまま寄せます。"
+            )
+        else:
+            text = (
+                "SAY: Director, the beat is locked.\n\n"
+                "TAGS: standing, indoor\n\n"
+                "SCENE: STAGE A PROMPT"
+            )
 
         async def _stream():
             yield {"type": "think", "text": "deliberating"}
-            yield {
-                "type": "token",
-                "text": (
-                    "SAY: Director, the beat is locked.\n\n"
-                    "TAGS: standing, indoor\n\n"
-                    "SCENE: STAGE A PROMPT"
-                ),
-            }
+            yield {"type": "token", "text": text}
         return _stream()
 
     async def generate_text(self, prompt, **kw):
@@ -397,7 +408,7 @@ def test_the_workflows_last_image_is_the_one_worth_keeping():
 
 
 def test_pick_responders_is_fixed_desk_not_keyword_router():
-    """Mood/situation words must not change the cast — VLM reads the note."""
+    """Mood/situation words must not change the cast — packed talk groups only."""
     crew_ids = [
         "beat", "spine", "lens", "wardrobe", "gaffer",
         "actress", "faces", "hook", "finisher",
@@ -407,11 +418,11 @@ def test_pick_responders_is_fixed_desk_not_keyword_router():
     c = service._pick_responders("雰囲気をもっと出して", crew_ids)
     d = service._pick_responders("画角を寄せて", crew_ids)
     assert a == b == c == d
-    # Wardrobe leads: it owns the locked COSTUME, so a note that changes the
-    # clothes has to reach it, and every seat after it reads the new outfit.
+    # One voice per job-family; wardrobe leads; finisher stays off the note path.
     assert a[0] == "wardrobe"
-    assert a[-1] == "finisher"
-    assert len(a) <= 5  # cap craft + finisher for Ollama
+    assert "finisher" not in a
+    assert "actress" in a or "beat" in a
+    assert len(a) <= 3
     # No keyword→muse pattern table — note text must not be inspected.
     import inspect
     src = inspect.getsource(service._pick_responders)
@@ -439,10 +450,11 @@ async def test_showrunner_comment_reruns_a_short_turn():
         m["role"] == "user" and "落ち着いた" in m["text"] for m in session["chat"]
     )
     spoken = [m.get("muse_id") for m in session["chat"][n_chat:] if m.get("role") == "muse"]
-    assert "actress:cast" in spoken
-    assert "finisher:maku" in spoken
+    # Packed table talk — one voice per job-family; finisher stays off the note path.
+    assert any(spoken), spoken
+    assert "finisher:maku" not in spoken
     assert len(session["chat"]) > n_chat
-    # Craft was touched by at least one responder (FakeOllama always rewrites).
+    # Scripter / prior craft still leave a prompt on the session.
     assert session["craft"]["prompt"]
 
 
@@ -523,15 +535,25 @@ class PlanningOllama(FakeOllama):
 
     def generate_text_stream(self, prompt, **kw):
         self.calls.append({**kw, "prompt": prompt})
-        plan = "settle the situation" in (kw.get("system") or "").lower() \
-            or "PLAN (WHERE, WHEN" in (kw.get("system") or "")
-
-        async def _stream():
-            yield {"type": "token", "text": self.PLAN if plan else (
+        system = str(kw.get("system") or "")
+        plan = "settle the situation" in system.lower() \
+            or "PLAN (WHERE, WHEN" in system
+        if "moderating a short TABLE TALK" in system:
+            text = (
+                "SPEAKER: beat:ichibyou\n"
+                "SAY: この場所で一拍、決めます。\n"
+            )
+        elif plan:
+            text = self.PLAN
+        else:
+            text = (
                 "SAY: Director, the beat is locked.\n\n"
                 "TAGS: standing, indoor\n\n"
                 "SCENE: STAGE A PROMPT"
-            )}
+            )
+
+        async def _stream():
+            yield {"type": "token", "text": text}
         return _stream()
 
     def generate_vlm_stream(self, prompt, images, **kw):
@@ -936,11 +958,18 @@ async def test_with_no_renderer_the_whole_table_still_meets_at_once():
 
     assert session["table_stage"] == "full"
     assert session["status"] == "chat"
-    roles = {
+    craft_roles = {
         crew.role_of(m["muse_id"]) for m in session["chat"]
         if m.get("kind") == "craft"
     }
-    assert "gaffer" in roles and "finisher" in roles
+    banter_roles = {
+        crew.role_of(m["muse_id"]) for m in session["chat"]
+        if m.get("kind") == "banter"
+    }
+    # Opening still writes craft; the rest of the floor packs into banter.
+    assert {"wardrobe", "actress", "lens"} <= craft_roles
+    assert banter_roles
+    assert "finisher" not in craft_roles
 
 
 @pytest.mark.asyncio
@@ -959,11 +988,12 @@ async def test_the_first_note_after_the_still_convenes_the_rest_of_the_crew():
     )
 
     assert session["table_stage"] == "full"
-    roles = {
+    banter_roles = {
         crew.role_of(m["muse_id"]) for m in session["chat"]
-        if m.get("kind") == "craft"
+        if m.get("kind") == "banter"
     }
-    assert "gaffer" in roles and "finisher" in roles
+    # Full floor joins via packed table talk (banter), not N craft rewrites.
+    assert banter_roles
     # The note is standing direction from here on, not a remark about one turn.
     assert "もっと狭い部屋で、一人カラオケの感じにして" in session["notes"]
     # It did not sneak a second render in on the way.

@@ -9,7 +9,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import notebook, service, session_db
-from app.muse.chain import MuseTurn
 from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block
 from tests.muse.test_service import FakeDb, FakeOllama
 
@@ -57,7 +56,10 @@ def test_uses_notebook_after_crew_seed():
         "notebook": {},
     }
     assert service.uses_notebook(session) is False
-    service.sync_crew_notebook(session, force_wearing=True, force_scene=True)
+    # Plan-style mirror must not silence the opening craft pass.
+    service.sync_crew_notebook(session, force_scene=True)
+    assert service.uses_notebook(session) is False
+    service.sync_crew_notebook(session, force_wearing=True, force_scene=True, activate=True)
     assert service.uses_notebook(session) is True
     nb = notebook.of(session)
     assert "rooftop" in nb["scene"]
@@ -137,18 +139,19 @@ async def test_crew_note_runs_scripter_compile(monkeypatch):
 
     monkeypatch.setattr(service, "_run_banter", _no_banter)
 
-    async def _fake_muse_turn(*_a, **_k):
-        return MuseTurn(
-            muse_id="actress",
-            say="了解、カーディガンにします。",
-            prompt="",
-            pose_intent="",
-            tags="",
-            scene="",
-            raw="",
-        ), 1
+    async def _fake_table_talk(*_a, **_k):
+        return [
+            {
+                "role": "muse", "muse_id": "wardrobe:shiwa", "name": "衣装",
+                "kind": "banter", "text": "じゃあ赤いカーディガンでいきましょう。",
+            },
+            {
+                "role": "muse", "muse_id": "actress", "name": "花",
+                "kind": "banter", "text": "了解、カーディガンにします。",
+            },
+        ]
 
-    monkeypatch.setattr(service, "_run_muse_turn", _fake_muse_turn)
+    monkeypatch.setattr(service, "_run_crew_table_talk", _fake_table_talk)
 
     out = await service.post_chat(
         db, ollama, None, None, session, "赤いカーディガンにして",
@@ -157,3 +160,33 @@ async def test_crew_note_runs_scripter_compile(monkeypatch):
     tags = str((out.get("craft") or {}).get("tags") or "").lower()
     wearing = notebook.of(out).get("wearing", "").lower()
     assert "cardigan" in tags or "cardigan" in wearing
+
+
+def test_trait_blurb_reflects_busy_vs_simple_background():
+    from app.muse import crew
+    busy = crew.trait_blurb("propshop:takarabako", locale="ja")
+    simple = crew.trait_blurb("propshop:yohaku", locale="ja")
+    assert "情報量" in busy or "物量" in busy
+    assert "余白" in simple or "空ける" in simple
+
+
+def test_parse_table_talk_keeps_speaker_order():
+    raw = (
+        "SPEAKER: wardrobe:shiwa\n"
+        "SAY: コートにします。\n\n"
+        "SPEAKER: actress\n"
+        "SAY: 寒そうだから助かる。\n\n"
+        "SPEAKER: lens:pinto\n"
+        "SAY: 寄りで顔を残します。"
+    )
+    speakers = ["wardrobe:shiwa", "actress", "lens:pinto"]
+    hits = service._parse_table_talk(raw, speakers)
+    assert [m for m, _ in hits] == speakers
+    assert "コート" in hits[0][1]
+
+
+def test_preset_meta_exposed_on_roster():
+    from app.muse import crew
+    roster = crew.public_roster()
+    assert "calm" in roster["preset_meta"]
+    assert roster["preset_meta"]["calm"]["look_ja"]

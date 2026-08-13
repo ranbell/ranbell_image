@@ -58,18 +58,38 @@ const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behin
 const PRESETS = [
   'trio', 'quartet', 'standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'calm', 'everyone',
 ]
-// One accent colour per formation, so the picked one reads at a glance instead
-// of every preset sharing the same teal highlight. `custom` is a status colour,
-// not a pickable preset — see the inert pill next to these buttons.
+// One accent colour per formation. Backend `preset_meta.accent` wins when present.
 const PRESET_COLORS = {
   trio: '#38bdf8', quartet: '#a78bfa', standard: '#2dd4bf', vivid: '#fb7185',
   photoreal: '#fbbf24', flat: '#a3e635', classic: '#fb923c', bold: '#e879f9',
   calm: '#22d3ee', everyone: '#34d399', custom: '#f472b6',
 }
-function presetStyle(p) {
-  if (inputs.value.crew_preset !== p) return {}
-  const c = PRESET_COLORS[p] || PRESET_COLORS.standard
-  return { borderColor: c, color: c, backgroundColor: `${c}22` }
+const presetMeta = computed(() => (
+  session.value?.roster || catalog.value?.roster || {}
+).preset_meta || {})
+function presetAccent(p) {
+  return presetMeta.value?.[p]?.accent || PRESET_COLORS[p] || PRESET_COLORS.standard
+}
+function presetLook(p) {
+  const meta = presetMeta.value?.[p] || {}
+  const fromApi = String(locale.value || '').startsWith('ja') ? meta.look_ja : meta.look_en
+  return fromApi || t(`muse.presetLooks.${p}`)
+}
+function presetBlurb(p) {
+  const meta = presetMeta.value?.[p] || {}
+  const fromApi = String(locale.value || '').startsWith('ja') ? meta.blurb_ja : meta.blurb_en
+  return fromApi || t(`muse.presetBlurbs.${p}`)
+}
+function presetCardStyle(p) {
+  const c = presetAccent(p)
+  const on = inputs.value.crew_preset === p
+  return {
+    borderColor: on ? c : `${c}55`,
+    background: on
+      ? `linear-gradient(135deg, ${c}33 0%, transparent 70%)`
+      : `linear-gradient(160deg, ${c}14 0%, transparent 55%)`,
+    boxShadow: on ? `inset 0 0 0 1px ${c}88` : 'none',
+  }
 }
 
 let eventSource = null
@@ -953,18 +973,28 @@ async function onChatKey(e) {
             </div>
 
             <!-- no crew to cast when it is just the two of you -->
-            <div v-if="!isDuet">
-              <span class="sb-label">{{ t('muse.crewPreset') }}</span>
-              <div class="flex flex-wrap gap-2 mt-1">
-                <button
-                  v-for="p in PRESETS" :key="p" type="button" class="sb-btn text-[10px]"
-                  :style="presetStyle(p)"
-                  @click="setPreset(p)"
-                >{{ t(`muse.presets.${p}`) }}</button>
+            <div v-if="!isDuet" class="space-y-2">
+              <div class="flex items-baseline justify-between gap-2">
+                <span class="sb-label">{{ t('muse.crewPreset') }}</span>
                 <span
-                  class="sb-btn text-[10px] cursor-default select-none"
-                  :style="inputs.crew_preset === 'custom' ? presetStyle('custom') : { opacity: 0.35 }"
+                  v-if="inputs.crew_preset === 'custom'"
+                  class="text-[10px] tracking-wide"
+                  :style="{ color: presetAccent('custom') }"
                 >{{ t('muse.presets.custom') }}</span>
+              </div>
+              <p class="text-[10px] leading-snug text-[var(--sb-faint)]">{{ t('muse.crewPresetHint') }}</p>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  v-for="p in PRESETS" :key="p" type="button"
+                  class="rounded-md border px-2.5 py-2 text-left transition-colors duration-200
+                         hover:brightness-110 focus:outline-none"
+                  :style="presetCardStyle(p)"
+                  @click="setPreset(p)"
+                >
+                  <span class="block text-[9px] uppercase tracking-[0.14em] opacity-70">{{ presetLook(p) }}</span>
+                  <span class="mt-0.5 block text-[11px] font-medium leading-tight">{{ t(`muse.presets.${p}`) }}</span>
+                  <span class="mt-1 block text-[10px] leading-snug opacity-80">{{ presetBlurb(p) }}</span>
+                </button>
               </div>
             </div>
 
@@ -1470,16 +1500,28 @@ async function onChatKey(e) {
       <!-- cast drawer -->
       <section v-if="showCast"
                class="shrink-0 max-h-[40vh] overflow-y-auto border-t border-white/10 p-4 space-y-3">
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="p in PRESETS" :key="p" type="button" class="sb-btn text-[10px]"
-            :style="presetStyle(p)"
-            @click="setPreset(p)"
-          >{{ t(`muse.presets.${p}`) }}</button>
-          <span
-            class="sb-btn text-[10px] cursor-default select-none"
-            :style="inputs.crew_preset === 'custom' ? presetStyle('custom') : { opacity: 0.35 }"
-          >{{ t('muse.presets.custom') }}</span>
+        <div class="space-y-2">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="sb-label">{{ t('muse.crewPreset') }}</span>
+            <span
+              v-if="inputs.crew_preset === 'custom'"
+              class="text-[10px]"
+              :style="{ color: presetAccent('custom') }"
+            >{{ t('muse.presets.custom') }}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <button
+              v-for="p in PRESETS" :key="p" type="button"
+              class="rounded-md border px-2.5 py-2 text-left transition-colors duration-200
+                     hover:brightness-110 focus:outline-none"
+              :style="presetCardStyle(p)"
+              @click="setPreset(p)"
+            >
+              <span class="block text-[9px] uppercase tracking-[0.14em] opacity-70">{{ presetLook(p) }}</span>
+              <span class="mt-0.5 block text-[11px] font-medium leading-tight">{{ t(`muse.presets.${p}`) }}</span>
+              <span class="mt-1 block text-[10px] leading-snug opacity-80">{{ presetBlurb(p) }}</span>
+            </button>
+          </div>
         </div>
         <!-- what this cast is pulling toward -->
         <div v-if="tasteAxes.length" class="rounded border border-white/10 bg-black/30 p-3">

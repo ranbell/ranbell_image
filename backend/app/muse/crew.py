@@ -1256,6 +1256,207 @@ PRESETS: dict[str, list[str]] = {
 
 DEFAULT_PRESET = "standard"
 
+# Formation cards for the booth UI — look story, not just a chip label.
+# `accent` is a hint colour; the panel may override. Scripter still owns TAGS.
+PRESET_META: dict[str, dict[str, str]] = {
+    "trio": {
+        "look_en": "tight room",
+        "look_ja": "密室の少人数",
+        "blurb_en": "Planner and beat only — fast talk, Scripter cleans the ledger.",
+        "blurb_ja": "構成とビートだけ。会話は短く、タグの正本はスクリプター。",
+        "accent": "#38bdf8",
+    },
+    "quartet": {
+        "look_en": "room + lens",
+        "look_ja": "少人数＋レンズ",
+        "blurb_en": "Same small room with a camera seat arguing frame.",
+        "blurb_ja": "少人数に撮影を足す。画角の意見が早く出る編成。",
+        "accent": "#a78bfa",
+    },
+    "standard": {
+        "look_en": "full desk",
+        "look_ja": "標準デスク",
+        "blurb_en": "Balanced floor — busy set dressing, soft-to-hard light mix.",
+        "blurb_ja": "バランス型。美術は厚め、光は役どころで押し引き。",
+        "accent": "#2dd4bf",
+    },
+    "vivid": {
+        "look_en": "saturated punch",
+        "look_ja": "鮮やかパンチ",
+        "blurb_en": "Colour and light lead; louder half of every craft seat.",
+        "blurb_ja": "色と光が先頭。各職の派手側が座る。",
+        "accent": "#fb7185",
+    },
+    "photoreal": {
+        "look_en": "optics & grain",
+        "look_ja": "光学と粒子",
+        "blurb_en": "Rendered end of the jobs — texture, paint, film grain.",
+        "blurb_ja": "質感・塗・粒子。実写寄りの仕上がりを押す。",
+        "accent": "#fbbf24",
+    },
+    "flat": {
+        "look_en": "cel & silhouette",
+        "look_ja": "セルとシルエット",
+        "blurb_en": "Animation side of the room — line, cel, clear shapes.",
+        "blurb_ja": "線とセル。フラットで形が読める絵。",
+        "accent": "#a3e635",
+    },
+    "classic": {
+        "look_en": "steady canon",
+        "look_ja": "王道の安定",
+        "blurb_en": "Everything that steadies a picture; nothing experimental.",
+        "blurb_ja": "安定させる職だけ。実験はしない王道編成。",
+        "accent": "#fb923c",
+    },
+    "bold": {
+        "look_en": "opinionated few",
+        "look_ja": "少数精鋭の実験",
+        "blurb_en": "Fewest hands, most opinion — every seat an experiment.",
+        "blurb_ja": "人数は少なく意見は強い。余白美術と硬めの光。",
+        "accent": "#e879f9",
+    },
+    "calm": {
+        "look_en": "quiet air",
+        "look_ja": "静かな空気",
+        "blurb_en": "Soft light, muted colour, subtractive backgrounds.",
+        "blurb_ja": "柔らかい光と抑えた色。引き算の背景。",
+        "accent": "#22d3ee",
+    },
+    "everyone": {
+        "look_en": "full debate",
+        "look_ja": "フル討論",
+        "blurb_en": "Whole call sheet talks; still one packed turn + Scripter tags.",
+        "blurb_ja": "全員招集でも会話はパック。タグはスクリプターがまとめる。",
+        "accent": "#34d399",
+    },
+}
+
+# Flavor tags → short taste lines for table-talk / prompt swap (busy vs simple bg…).
+_FLAVOR_TRAIT: dict[str, dict[str, str]] = {
+    "detailed_background": {
+        "en": "Prefer busy, readable backgrounds",
+        "ja": "背景は情報量多め",
+    },
+    "cluttered": {
+        "en": "Fill the set with lived-in clutter",
+        "ja": "生活感のある物量を足す",
+    },
+    "minimalist_background": {
+        "en": "Prefer simple negative space",
+        "ja": "背景は余白優先",
+    },
+    "empty_space": {
+        "en": "Leave air; cut stealing props",
+        "ja": "空ける。主題を奪う小物は切る",
+    },
+    "soft_lighting": {
+        "en": "Bias soft diffusion",
+        "ja": "柔らかい拡散光寄り",
+    },
+    "ambient_light": {
+        "en": "Keep light ambient and gentle",
+        "ja": "環境光で撫でる",
+    },
+    "rim_lighting": {
+        "en": "Bias hard rim and contrast",
+        "ja": "リムとコントラスト強め",
+    },
+    "dramatic_shadow": {
+        "en": "Keep shadows decisive",
+        "ja": "影ははっきり",
+    },
+    "depth_of_field": {
+        "en": "Argue for tighter subject isolation",
+        "ja": "被写体分離の寄り",
+    },
+    "wide_shot": {
+        "en": "Argue for wider stage",
+        "ja": "引きのステージを残す",
+    },
+    "cel_shading": {
+        "en": "Keep cel-clear shapes",
+        "ja": "セルで形を読ませる",
+    },
+    "painterly": {
+        "en": "Bias painterly soft edges",
+        "ja": "塗り寄りで輪郭を柔らげる",
+    },
+}
+
+
+def trait_blurb(muse_id: str, *, locale: str = "ja") -> str:
+    """Short taste line for one seat — used in packed table talk rosters."""
+    mid = resolve_member(muse_id)
+    if mid not in MUSES:
+        return ""
+    m = MUSES[mid]
+    ja = str(locale or "ja").lower().startswith("ja")
+    lang = "ja" if ja else "en"
+    parts: list[str] = []
+    for tag in m.get("flavor_tags") or []:
+        row = _FLAVOR_TRAIT.get(str(tag))
+        if not row:
+            continue
+        line = str(row.get(lang) or row.get("en") or "").strip()
+        if line and line not in parts:
+            parts.append(line)
+    taste = m.get("taste") or {}
+    for axis, low, high in TASTE_AXES:
+        try:
+            v = int(taste.get(axis, 0) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            parts.append(f"{high}寄り" if ja else f"leans {high}")
+        elif v < 0:
+            parts.append(f"{low}寄り" if ja else f"leans {low}")
+    return " · ".join(parts[:4])
+
+
+def table_talk_system_prompt(
+    speakers: list[str],
+    *,
+    character: dict[str, Any] | None = None,
+    base_style: str = "",
+    locale: str = "ja",
+) -> str:
+    """One packed turn: several seats speak; Scripter owns TAGS afterward."""
+    _ = character
+    ja = str(locale or "ja").lower().startswith("ja")
+    lines: list[str] = []
+    for sid in speakers:
+        mid = resolve_member(sid)
+        if mid not in MUSES:
+            continue
+        m = MUSES[mid]
+        trait = trait_blurb(mid, locale=locale)
+        who = _who(m)
+        focus = ", ".join(m.get("techniques") or []) or m.get("role") or mid
+        lines.append(
+            f"- SPEAKER id `{mid}` — {who}; focus {focus}"
+            + (f"; taste {trait}" if trait else "")
+        )
+    roster = "\n".join(lines) if lines else "- (empty)"
+    style_line = str(base_style or "").strip()
+    return "\n".join([
+        "You are moderating a short TABLE TALK on a generative-image crew.",
+        "Several seats speak in ONE reply. They organize the conversation —",
+        "they do NOT rewrite TAGS, SCENE, or the prompt.",
+        "A separate Scripter pass will compile craft after this talk.",
+        "",
+        f"Seats in this beat (speak in this order):\n{roster}",
+        f"BASE LOOK: {style_line}" if style_line else "",
+        "",
+        "Output EXACTLY one block per speaker, in the given order:",
+        "SPEAKER: <exact SPEAKER id>",
+        "SAY: <one or two spoken sentences"
+        + (" in natural Japanese>" if ja else " in the showrunner's language>"),
+        "",
+        "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists.",
+        "Do NOT invent wardrobe the Lead has not agreed to.",
+        "Keep each voice distinct; skip empty praise.",
+    ])
+
 
 BANTER_OUTPUT = """
 OUTPUT FORMAT — Exactly one labelled block, nothing else:
@@ -1437,14 +1638,23 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
 
 def _style_block(muse_id: str, base_style: str) -> str:
     """What the room agreed the picture looks like, and this person's share."""
-    if not base_style:
-        return ""
-    lines = [f"BASE LOOK (the whole crew agreed on this — do not fight it): {base_style}"]
+    lines: list[str] = []
+    if base_style:
+        lines.append(
+            f"BASE LOOK (the whole crew agreed on this — do not fight it): {base_style}"
+        )
     flavour = MUSES[muse_id]["flavor_tags"]
     if flavour:
         lines.append(
             "YOUR FLAVOUR (add these to TAGS when the beat allows, never more): "
             + ", ".join(flavour)
+        )
+    # Swappable taste bias from this seat's traits (busy bg vs simple, etc.).
+    taste = trait_blurb(muse_id, locale="en")
+    if taste:
+        lines.append(
+            "YOUR TASTE BIAS (argue toward this in SAY; do not dump as filler "
+            f"tags like masterpiece): {taste}"
         )
     if role_of(muse_id) == "ink":
         lines.append(
@@ -2489,6 +2699,7 @@ def public_roster(
         # Flat list, kept for anything that walked the old shape.
         "muses": [row for r in roles for row in r["people"]],
         "presets": {k: list(v) for k, v in PRESETS.items()},
+        "preset_meta": {k: dict(v) for k, v in PRESET_META.items()},
         "default_preset": DEFAULT_PRESET,
         "taste_axes": [
             {"id": axis, "low": low, "high": high} for axis, low, high in TASTE_AXES
