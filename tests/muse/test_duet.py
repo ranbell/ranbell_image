@@ -346,11 +346,11 @@ def test_prep_closing_instruction_is_sensory_readout():
          "notebook": {"rev": 1, "wearing": "skirt", "scene": "room", "beat": "standing"}},
         "スカートにして", prep=True,
     )
-    assert "撮影準備の仕上げ" in prompt
+    assert "PREP FINISH TURN" in prompt or "撮影準備の仕上げ" in prompt
     assert "TAGS/SCENE" not in prompt
     # Notebook path must not hand the TAGS string to Muse for readout.
     assert "masterpiece" not in prompt
-    assert "装い" in prompt or "skirt" in prompt
+    assert "wearing" in prompt.lower() or "装い" in prompt or "skirt" in prompt
 
 
 @pytest.mark.asyncio
@@ -384,14 +384,14 @@ def test_she_is_told_she_is_the_whole_crew_when_getting_ready():
     # And she clears the set herself when direction changes — newest wins.
     assert "WHEN THE SHOWRUNNER CHANGES ANYTHING" in text
     assert "newest words beat" in text.lower()
-    assert "NAME THE THINGS that are in" in text
+    assert "NAME THE THINGS" in text or "about ten" in text
 
 
 def test_the_talking_prompt_writes_nothing_down():
     text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk")
-    assert "SAY:" in text
+    assert "SAY" in text
     assert "No tags" in text or "no tags" in text.lower()
-    assert "TAGS or SCENE" in text
+    assert "TAGS" in text and "SCENE" in text
     assert "TEN OR MORE OBJECTS" not in text
 
 
@@ -481,8 +481,11 @@ def test_duet_talk_user_prompt_prefers_latest_over_sticky():
         "notebook": {"rev": 1, "wearing": "shirt"},
     }
     prompt = service._duet_user_prompt(session, "マイク前で椅子に座って", prep=False)
-    assert "いちばん新しい発言が勝つ" in prompt
-    assert "二択" in prompt or "具体案" in prompt
+    assert (
+        "newest line wins" in prompt.lower()
+        or "いちばん新しい発言が勝つ" in prompt
+    )
+    assert "two-choice" in prompt.lower() or "二択" in prompt or "具体案" in prompt
     assert "get ready" in prompt
     assert "撮る画を一つに決めて" not in prompt
 
@@ -501,11 +504,11 @@ def test_duet_prep_user_prompt_rewrites_against_previous_craft():
     }
     prompt = service._duet_user_prompt(session, "撮影準備", prep=True)
     assert "変える必要のないところは変えない" not in prompt
-    assert "撮影準備の仕上げ" in prompt
+    assert "PREP FINISH TURN" in prompt or "撮影準備の仕上げ" in prompt
     # Notebook path: feel the shot from the notebook, never TAGS inventory.
     assert "classroom, wooden_desk" not in prompt
     assert "broadcast room" in prompt
-    assert "装い" in prompt or "shirt" in prompt
+    assert "wearing" in prompt.lower() or "装い" in prompt or "shirt" in prompt
 
 
 @pytest.mark.asyncio

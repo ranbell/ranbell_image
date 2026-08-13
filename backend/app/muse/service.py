@@ -638,19 +638,26 @@ def _apply_turn(
     session: dict[str, Any], turn: chain.MuseTurn, *, ms: int = 0,
 ) -> dict[str, Any]:
     craft = session.setdefault("craft", {})
-    # Filter before the ledger reads it, so a seat that keeps reaching for a
-    # refused tag shows up as never having added it rather than as a fight.
-    kept = drop_banned(session, turn.tags)
-    record_ledger(
-        session, muse_id=turn.muse_id,
-        name=_muse_display_name(session, turn.muse_id),
-        before=str(craft.get("tags") or ""), after=kept, ms=ms,
-    )
-    craft["prompt"] = turn.prompt
-    craft["tags"] = kept
-    craft["scene"] = turn.scene
-    if kept != turn.tags:
-        _reassemble(session)
+    # 制作スタッフ + notebook: seats talk; Scripter alone rewrites TAGS/SCENE.
+    # Applying every seat's TAGS was why notes felt like "just chatter" while
+    # craft only gained masterpiece fluff or got wiped by empty parses.
+    talk_only = uses_notebook(session) and not is_duet(session)
+    if not talk_only:
+        # Filter before the ledger reads it, so a seat that keeps reaching for a
+        # refused tag shows up as never having added it rather than as a fight.
+        kept = drop_banned(session, turn.tags)
+        record_ledger(
+            session, muse_id=turn.muse_id,
+            name=_muse_display_name(session, turn.muse_id),
+            before=str(craft.get("tags") or ""), after=kept, ms=ms,
+        )
+        craft["prompt"] = turn.prompt
+        craft["tags"] = kept
+        craft["scene"] = turn.scene
+        if kept != turn.tags:
+            _reassemble(session)
+        if crew.role_of(turn.muse_id) in ("beat", "spine") or not craft.get("pose_intent"):
+            craft["pose_intent"] = turn.pose_intent
     # Wardrobe owns the locked COSTUME in the crewed studio; in a duet she is
     # the only seat, so her own prep turns own it instead. Capture it, take
     # the old outfit out of the craft, make sure the new one is actually in
@@ -673,8 +680,14 @@ def _apply_turn(
         session["costume"] = costume
         if garments:
             strike_dropped_costume(session, prev)
+            # Locked COSTUME must land in craft even when seats are talk-only;
+            # Scripter owns free tags, not the wardrobe coverage slots.
             _ensure_garments(session, garments)
         _rebuild_brief(session)
+        # Keep the living notebook's WEARING in lockstep with Wardrobe so the
+        # crew scripter does not recompile last outfit after a costume change.
+        if not is_duet(session):
+            sync_crew_notebook(session, force_wearing=True)
         craft = session.setdefault("craft", {})
     # Seats can be swapped mid-session. One brought in after the read-through
     # has never seen the script, and answering a note is not a substitute for
@@ -682,19 +695,21 @@ def _apply_turn(
     spoken = session.setdefault("spoken", [])
     if turn.muse_id not in spoken:
         spoken.append(turn.muse_id)
-    if crew.role_of(turn.muse_id) in ("beat", "spine") or not craft.get("pose_intent"):
-        craft["pose_intent"] = turn.pose_intent
     name = _muse_display_name(session, turn.muse_id)
-    say = turn.say or f"（{name}が台本を更新した。）"
+    say = turn.say or (
+        f"（{name}）" if talk_only else f"（{name}が台本を更新した。）"
+    )
     msg = _chat_append(
         session, role="muse", text=say,
-        muse_id=turn.muse_id, name=name, kind="craft",
+        muse_id=turn.muse_id, name=name,
+        kind="banter" if talk_only else "craft",
         turns=_resolve_duet_turns(session, turn.turns),
     )
     _publish_chat(session["session_id"], msg)
-    events.publish(session["session_id"], {
-        "type": "craft_updated", "prompt": turn.prompt, "muse_id": turn.muse_id,
-    })
+    if not talk_only:
+        events.publish(session["session_id"], {
+            "type": "craft_updated", "prompt": turn.prompt, "muse_id": turn.muse_id,
+        })
     return msg
 
 
@@ -926,8 +941,103 @@ def _still_meant(old: str, new_items: list[str]) -> bool:
 
 
 def uses_notebook(session: dict[str, Any]) -> bool:
-    """Duet (主演撮り) keeps the shot in the living notebook, not facets."""
-    return is_duet(session)
+    """Living notebook owns craft compile — 主演撮り always; 制作スタッフ once seeded."""
+    if is_duet(session):
+        return True
+    return bool(session.get("notebook_craft"))
+
+
+def _costume_wearing_line(costume: dict[str, Any] | None) -> str:
+    """Plain wearing line for the notebook, from the locked COSTUME card."""
+    data = costume or {}
+    bits: list[str] = []
+    for key in ("hero", "silhouette", "layers", "garments", "colourway", "fabric"):
+        val = data.get(key)
+        if isinstance(val, (list, tuple)):
+            val = ", ".join(str(v).strip() for v in val if str(v).strip())
+        val = str(val or "").strip()
+        if val:
+            bits.append(val)
+    if not bits:
+        tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()]
+        bits = tags[:6]
+    return "; ".join(bits)[:160]
+
+
+def _plan_scene_line(plan: dict[str, Any] | None) -> str:
+    data = plan or {}
+    bits = [
+        str(data.get(k) or "").strip()
+        for k in ("place", "hour", "light", "action")
+    ]
+    return " · ".join(b for b in bits if b)[:120]
+
+
+def sync_crew_notebook(
+    session: dict[str, Any], *, force_wearing: bool = False, force_scene: bool = False,
+    activate: bool | None = None,
+) -> None:
+    """Mirror PLAN/COSTUME into the living notebook for 制作スタッフ.
+
+    Seats still banter and may draft tags; the scripter (and densify) treat the
+    notebook as absolute shot truth the same way 主演撮り does — so a clothing
+    or place note can actually move the picture instead of fighting CARRY.
+
+    ``activate`` flips ``notebook_craft`` (talk-only seats + scripter-owned TAGS).
+    Plan turns must mirror scene without activating — otherwise the opening
+    wardrobe/lens/actress pass becomes talk-only and never drafts craft.
+    """
+    if is_duet(session):
+        return
+    notebook_mod.migrate(session)
+    nb = notebook_mod.of(session)
+    patch: dict[str, Any] = {}
+    scene_line = _plan_scene_line(session.get("plan"))
+    if scene_line and (force_scene or not str(nb.get("scene") or "").strip()):
+        patch["scene"] = scene_line
+    elif not str(nb.get("scene") or "").strip():
+        craft_scene = str((session.get("craft") or {}).get("scene") or "").strip()
+        if craft_scene:
+            patch["scene"] = craft_scene[:120]
+    wearing_line = _costume_wearing_line(session.get("costume"))
+    if wearing_line and (force_wearing or not str(nb.get("wearing") or "").strip()):
+        patch["wearing"] = wearing_line
+    if not str(nb.get("atmosphere") or "").strip():
+        theme = str(_inputs(session).get("theme") or "").strip()
+        if theme:
+            patch["atmosphere"] = theme[:80]
+    if not str(nb.get("frame") or "").strip():
+        framing = _framing(_inputs(session))
+        if framing and framing != "auto":
+            patch["frame"] = framing.replace("_", " ")
+    if not str(nb.get("beat") or "").strip():
+        pose = str((session.get("craft") or {}).get("pose_intent") or "").strip()
+        if pose:
+            patch["beat"] = pose[:120]
+    if patch:
+        notebook_mod.apply_patch(nb, patch)
+        session["notebook"] = nb
+    if activate is True or (activate is None and session.get("notebook_craft")):
+        session["notebook_craft"] = True
+    name = _muse_display_name(session, "actress") if "actress" in _crew_ids(session) else ""
+    session["digest"] = notebook_mod.summary_for_muse(
+        notebook_mod.of(session), name_a=name or "Lead",
+    )
+
+
+async def _run_crew_scripter(
+    db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Compile crew craft from the notebook after seats have spoken."""
+    sync_crew_notebook(session)
+    if ollama is None:
+        return None
+    try:
+        return await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
+    except Exception:
+        logger.warning("[muse] crew scripter failed; seats' draft kept", exc_info=True)
+        session["craft_dirty"] = True
+        return None
 
 
 def on_facets(session: dict[str, Any]) -> bool:
@@ -1421,6 +1531,8 @@ async def _run_plan_turn(
     session.pop("struck", None)
     struck = strike_dropped_props(session, previous_plan)
     _rebuild_brief(session)
+    if not is_duet(session):
+        sync_crew_notebook(session, force_scene=True)
     if struck:
         locale = str(inputs.get("locale") or "ja")
         tidied = _chat_append(
@@ -1650,6 +1762,10 @@ async def start_table(
     session["costume"] = {}
     session.pop("_blind_said", None)
     session.pop("struck", None)
+    session["notebook"] = notebook_mod.blank(partner=False)
+    session["notebook_craft"] = False
+    session["craft_dirty"] = False
+    session["notebook_rev_compiled"] = 0
     # The table gets the same memory the two-hander does. It reaches her seat
     # only — see `_table_user_prompt`; in the shared brief all eighteen seats
     # would be reading her diary.
@@ -1692,14 +1808,37 @@ async def start_table(
         await _run_plan_turn(db, ollama, session, cfg=cfg)
         await session_db.save(db, session, publish=False)
 
-    seats = (_opening_seats(cast) if still_first
-             else _writing_seats(cast))
+    # Opening craft stays short (wardrobe → lens → actress). The rest of the
+    # floor packs into one table-talk turn; Scripter owns TAGS after that.
+    seats = _opening_seats(cast)
     await _craft_pass(db, ollama, session, cast, seats, cfg=cfg)
+    # Seed the living notebook from PLAN/COSTUME so later notes + densify share
+    # the same shot truth 主演撮り already uses. Activate here — after opening
+    # craft — so seats were still allowed to draft the first TAGS/SCENE.
+    sync_crew_notebook(
+        session, force_wearing=True, force_scene=True, activate=True,
+    )
 
     if still_first:
         session_db.log(session, "table", f"brief · {len(seats)} seats")
         return await request_board(
             db, comfy, spooler, session, ollama=ollama, still=True,
+        )
+
+    rest = _writing_seats(cast, without=OPENING_ROLES)
+    pack = _pack_speakers(rest)
+    if pack:
+        theme = str(_inputs(session).get("theme") or "").strip()
+        talk_msgs = await _run_crew_table_talk(
+            ollama, session, pack,
+            note=theme or "opening pass",
+            screening="", cfg=cfg, images=None,
+        )
+        if any(crew.role_of(m.get("muse_id") or "") == "actress" for m in talk_msgs):
+            await _after_actress_spoke(db, session)
+        await session_db.save(db, session, publish=False)
+        await _run_crew_scripter(
+            db, ollama, session, theme or "opening pass", cfg=cfg,
         )
 
     ask_ja = (
@@ -1749,14 +1888,18 @@ async def run_full_table(
     await session_db.save(db, session, publish=False)
 
     images = await board_images(db, session)
-    await _craft_pass(
-        db, ollama, session, cast, seats, cfg=cfg, images=images,
-        screening=_screening_note(session) if images else "", note=note,
-        # Offset so the banter rota does not restart on the same seats.
-        first_index=len(OPENING_ROLES),
+    screening = _screening_note(session) if images else ""
+    # Packed talk for the rest of the floor — not N craft rewrites.
+    pack = _pack_speakers(seats)
+    talk_msgs = await _run_crew_table_talk(
+        ollama, session, pack or seats[:1],
+        note=note or str(_inputs(session).get("theme") or "full table"),
+        screening=screening, cfg=cfg, images=images,
     )
+    if any(crew.role_of(m.get("muse_id") or "") == "actress" for m in talk_msgs):
+        await _after_actress_spoke(db, session)
     session["table_stage"] = "full"
-    session_db.log(session, "table", f"full · {len(seats)} seats")
+    session_db.log(session, "table", f"full · talk {len(pack or seats[:1])}/{len(seats)}")
     await session_db.save(db, session, publish=False)
     return session
 
@@ -1787,13 +1930,15 @@ def _memory_block(session: dict[str, Any]) -> str:
     if not lines and not partner:
         return ""
     parts = [
-        "前に総監督と撮ったときのこと（手元メモ／日記。細部は直近くらいが濃い。"
-        "今日の画に写すものではない。覚えてない日は、風や温度のたとえでやわらかく）:",
+        "MEMORIES with the Showrunner (sticky notes / diary. Recent detail is "
+        "stronger. NOT material for today's picture. If you don't remember a "
+        "day, answer softly with wind/temperature metaphors — never invent):",
         *(f"- {m}" for m in lines[:3]),
     ]
     if partner:
         parts += [
-            "相手 Muse が覚えていること（短く。掛け合いの距離にだけ。画の材料にしない）:",
+            "Partner Muse memories (short; colour distance in banter only; "
+            "never paint into the shot):",
             *(f"- {m}" for m in partner[:2]),
         ]
     return "\n".join(parts)
@@ -1816,8 +1961,9 @@ def _cited_memories_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "CITED_MEMORIES（このターンだけ。ここに無い細部は『そこまでは…』とやわらかく。"
-        "事務的な『覚えていません』禁止。捏造しない。今日の画の材料にしない）:",
+        "CITED_MEMORIES (this turn only. Soft-miss details not listed here — "
+        "in Japanese SAY use a gentle『そこまでは…』, never a stiff refusal. "
+        "Do not invent. Do not feed today's picture):",
         *lines,
     ])
 
@@ -1844,14 +1990,16 @@ def _muse_names(session: dict[str, Any], partner_character: dict | None = None) 
     return name_a, name_b
 
 
-def _scripter_status_message(*, locale: str = "ja") -> str:
+def _scripter_status_message(*, locale: str = "ja", soft: bool = False) -> str:
     """Wait copy while the scripter updates the notebook.
 
-    This used to guess what was being adjusted from the showrunner's wording
-    ("帽子、外してる…") off a keyword table, so it announced the wrong thing
-    whenever the phrasing was ordinary. One honest line beats a specific lie.
+    Soft mode is for casual / VERIFY turns — the picture may not move, so we
+    avoid craft-office wording that makes chit-chat feel like paperwork. The
+    body whisper carries the beat; status stays a light ellipsis.
     """
-    return "台本、いま合わせてる…" if locale.startswith("ja") else "Updating the craft…"
+    if soft:
+        return "…" if locale.startswith("ja") else "…"
+    return "ちょっと合わせてる…" if locale.startswith("ja") else "Just a moment…"
 
 
 def _bond_block(session: dict[str, Any]) -> str:
@@ -1863,7 +2011,8 @@ def _bond_block(session: dict[str, Any]) -> str:
     if not parts:
         return ""
     return "\n".join([
-        "この総監督との関係（bond。画に写さない。聞かれたらこれで答える）:",
+        "BOND with this Showrunner (do not paint into the shot; answer from "
+        "this if asked):",
         *(f"- {p}" for p in parts),
     ])
 
@@ -1874,15 +2023,15 @@ def _taste_block(session: dict[str, Any]) -> str:
         return ""
     lines = []
     if taste.get("prefers"):
-        lines.append(f"好み: {taste['prefers']}")
+        lines.append(f"prefers: {taste['prefers']}")
     if taste.get("avoids"):
-        lines.append(f"避け: {taste['avoids']}")
+        lines.append(f"avoids: {taste['avoids']}")
     if taste.get("notes"):
-        lines.append(f"メモ: {taste['notes']}")
+        lines.append(f"notes: {taste['notes']}")
     if not lines:
         return ""
     return "\n".join([
-        "総監督の志向（showrunner_taste。画に無理に写さない）:",
+        "SHOWRUNNER_TASTE (do not force into the picture):",
         *lines,
     ])
 
@@ -1892,7 +2041,8 @@ def _chemistry_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "二人の相性メモ（掛け合いの距離・温度にだけ。画の小物や場所には使わない）:",
+        "CHEMISTRY notes (distance/temperature between the two Muses only — "
+        "never props or place):",
         *(f"- {m}" for m in lines[:2]),
     ])
 
@@ -1930,8 +2080,8 @@ def _cited_allow_block(session: dict[str, Any]) -> str:
     if not allow or not (session.get("cited_memories") or session.get("memories")):
         return ""
     return (
-        "GROUNDED_TOKENS（この一覧と CITED/手元以外の固有の場所・小物・出来事は"
-        "『覚えてない』と言う。捏造しない）:\n"
+        "GROUNDED_TOKENS (for named places / props / events outside this list "
+        "and CITED/MEMORIES, soft-miss in Japanese SAY — do not invent):\n"
         + ", ".join(allow[:30])
     )
 
@@ -2015,6 +2165,54 @@ def _apply_compiled_craft(
     return True
 
 
+async def _call_duet_scripter(
+    ollama, session: dict[str, Any], *, note: str, cfg: dict[str, Any],
+    partner: bool, name_a: str, name_b: str,
+) -> dict[str, Any]:
+    """One scripter generate against the current notebook + conversation."""
+    nb = notebook_mod.of(session)
+    inputs = _inputs(session)
+    block = notebook_mod.render(
+        nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""),
+    )
+    return await chain.run_scripter(
+        ollama,
+        notebook_block=block,
+        note=note,
+        transcript=_duet_transcript(session),
+        theme=str(inputs.get("theme") or ""),
+        style=_style(session),
+        framing=_framing(inputs),
+        partner=partner,
+        model=_text_model(inputs),
+        num_ctx=_num_ctx(inputs, cfg),
+    )
+
+
+def _stale_after_compile(
+    *, prev_wearing: str, prev_scene: str, nb: dict[str, Any], tags: str,
+) -> list[str]:
+    """Garment/place tokens dropped from the notebook but still in tags."""
+    stale = notebook_mod.stale_wearing_tags(
+        prev_wearing=prev_wearing,
+        new_wearing=str(nb.get("wearing") or ""),
+        tags=tags,
+    )
+    stale += notebook_mod.stale_wearing_tags(
+        prev_wearing=prev_scene,
+        new_wearing=str(nb.get("scene") or ""),
+        tags=tags,
+    )
+    # Dedup, keep order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in stale:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 async def _run_duet_scripter(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> dict[str, Any]:
@@ -2022,7 +2220,13 @@ async def _run_duet_scripter(
 
     Runs every turn. The scripter is handed the conversation and decides for
     itself whether the picture moved — there is no keyword gate in front of it
-    any more, and no regex behind it second-guessing what it returned.
+    any more. Two structural recoveries remain (still not keyword lists):
+
+    1. VERIFY — if the model answers ``casual`` with no SHOT edit despite a
+       non-empty showrunner line, ask once more to compare the line to
+       NOTEBOOK NOW (place/outfit/affirm misses without a vocab table).
+    2. CONSISTENCY — if a compile leaves garment/place tokens that the new
+       wearing/scene dropped, one repair pass rewrites tags from the notebook.
     """
     notebook_mod.migrate(session)
     nb = notebook_mod.of(session)
@@ -2032,53 +2236,96 @@ async def _run_duet_scripter(
         str(inputs.get("partner_preset") or "").strip()
     )
     name_a, name_b = _muse_names(session, partner_character)
-    block = notebook_mod.render(nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""))
     sid = session["session_id"]
     locale = str(inputs.get("locale") or "ja")
     events.publish(sid, {
         "type": "scripter_working",
         "status": "updating",
-        "message": _scripter_status_message(locale=locale),
+        "message": _scripter_status_message(locale=locale, soft=True),
         "whisper": vitality.silence_whisper(locale=locale),
     })
     rev_before = int(nb.get("rev") or 0)
+    open_before = str(nb.get("open") or "").strip()
+    prev_wearing = str(nb.get("wearing") or "")
+    prev_scene = str(nb.get("scene") or "")
+    had_shot = notebook_mod.has_shot(nb)
+
     # The scripter gets the notebook and the conversation, and nothing else —
-    # no diary, no memories, no lounge or studio notices. A「またあの感じ」clue
-    # from sticky memory used to be appended to the note on recall-looking
-    # lines; it is the Muse's to remember, not the scripter's to paint from.
-    # When she recalls it out loud, it lands in the chat, and the scripter reads
-    # the chat on the next turn — grounded in what she actually said.
-    result = await chain.run_scripter(
-        ollama,
-        notebook_block=block,
-        note=text,
-        transcript=_duet_transcript(session),
-        theme=str(inputs.get("theme") or ""),
-        style=_style(session),
-        framing=_framing(inputs),
-        partner=partner,
-        model=_text_model(inputs),
-        num_ctx=_num_ctx(inputs, cfg),
+    # no diary, no memories, no lounge or studio notices.
+    result = await _call_duet_scripter(
+        ollama, session, note=text, cfg=cfg,
+        partner=partner, name_a=name_a, name_b=name_b,
     )
     intent = str(result.get("intent") or "casual")
-    patch = dict(result.get("patch") or {})
-    # Nothing came back at all — keep craft, let densify try again later.
+    patch = notebook_mod.guard_partner_patch(
+        dict(result.get("patch") or {}), partner=partner,
+    )
     if not str(result.get("raw") or "").strip():
         session["craft_dirty"] = True
 
-    # Solo shoots must not accept partner cards from a confused model.
-    patch = notebook_mod.guard_partner_patch(patch, partner=partner)
-
-    # Notebook patch still applies (absolute values). Craft is validate-first.
     notebook_mod.apply_patch(nb, patch)
+    notebook_moved = int(nb.get("rev") or 0) > rev_before
+    shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
+        patch.get("clear_open")
+    )
+
+    # VERIFY only when a picture miss is plausible — not on every chill turn.
+    # (1) OPEN was pending (affirm often comes back as casual).
+    # (2) Notebook already had a shot, casual left SHOT untouched, and the
+    #     patch did not even touch vibe/open — total freeze / ignore.
+    # Pure vibe-chat stays one call so enjoyment isn't double-taxed.
+    patch_meta = bool(str(patch.get("vibe") or "").strip() or str(patch.get("open") or "").strip())
+    needs_verify = (
+        intent in ("casual", "")
+        and not shot_patched
+        and str(text or "").strip()
+        and not str(text or "").strip().upper().startswith("DENSIFY")
+        and not str(text or "").strip().upper().startswith("VERIFY")
+        and not str(text or "").strip().upper().startswith("REPAIR")
+        and (bool(open_before) or (had_shot and not patch_meta))
+    )
+    if needs_verify:
+        events.publish(sid, {
+            "type": "scripter_working",
+            "status": "updating",
+            "message": _scripter_status_message(locale=locale, soft=True),
+            "whisper": vitality.silence_whisper(locale=locale),
+        })
+        verify = await _call_duet_scripter(
+            ollama, session,
+            note=f"{chain.SCRIPTER_VERIFY_NOTE}\n\nSHOWRUNNER'S LATEST LINE:\n{text.strip()}",
+            cfg=cfg, partner=partner, name_a=name_a, name_b=name_b,
+        )
+        v_intent = str(verify.get("intent") or "casual")
+        v_patch = notebook_mod.guard_partner_patch(
+            dict(verify.get("patch") or {}), partner=partner,
+        )
+        if v_intent in ("shot", "mixed") or any(
+            k in v_patch for k in notebook_mod.SHOT_KEYS
+        ) or v_patch.get("clear_open"):
+            result = verify
+            intent = v_intent
+            patch = v_patch
+            shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
+                patch.get("clear_open")
+            )
+            notebook_mod.apply_patch(nb, patch)
+            notebook_moved = int(nb.get("rev") or 0) > rev_before
+
     session["notebook"] = nb
     session["standing"] = list(nb.get("standing") or [])
     session["digest"] = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
-    notebook_moved = int(nb.get("rev") or 0) > rev_before
+    # Flash only when a SHOT row moved — vibe-only should not pulse the board.
+    flash = vitality.notebook_flash_key(patch) if shot_patched else ""
     events.publish(sid, {
         "type": "scripter_working",
         "status": "updating",
-        "flash": vitality.notebook_flash_key(patch),
+        "flash": flash,
+        "message": (
+            _scripter_status_message(locale=locale, soft=False)
+            if shot_patched or intent in ("shot", "mixed")
+            else _scripter_status_message(locale=locale, soft=True)
+        ),
     })
 
     session["cited_memories"] = []
@@ -2090,7 +2337,6 @@ async def _run_duet_scripter(
             )
         except Exception:
             logger.debug("[muse] recall search failed", exc_info=True)
-        # Muse-side only: something to remember with, never a source for tags.
         session["again_feel_hint"] = vitality.again_that_feel_hint(session)
 
     valid = bool(result.get("valid", True))
@@ -2100,11 +2346,43 @@ async def _run_duet_scripter(
 
     if intent in ("shot", "mixed"):
         if valid and (tags or scene):
+            stale = _stale_after_compile(
+                prev_wearing=prev_wearing, prev_scene=prev_scene,
+                nb=nb, tags=tags,
+            )
+            if stale:
+                logger.info("[muse] stale craft tokens after compile: %s", ", ".join(stale))
+                repair = await _call_duet_scripter(
+                    ollama, session,
+                    note=(
+                        f"{chain.SCRIPTER_CONSISTENCY_NOTE}\n"
+                        f"Stale tokens: {', '.join(stale)}\n\n"
+                        f"SHOWRUNNER'S LATEST LINE:\n{text.strip()}"
+                    ),
+                    cfg=cfg, partner=partner, name_a=name_a, name_b=name_b,
+                )
+                if str(repair.get("intent") or "") in ("shot", "mixed") and repair.get("valid"):
+                    r_patch = notebook_mod.guard_partner_patch(
+                        dict(repair.get("patch") or {}), partner=partner,
+                    )
+                    notebook_mod.apply_patch(nb, r_patch)
+                    session["notebook"] = nb
+                    session["digest"] = notebook_mod.summary_for_muse(
+                        nb, name_a=name_a, name_b=name_b,
+                    )
+                    tags = str(repair.get("tags") or tags)
+                    scene = str(repair.get("craft_scene") or scene)
+                    result = repair
+                    # Re-check; if still stale, keep tags but mark dirty.
+                    if _stale_after_compile(
+                        prev_wearing=prev_wearing, prev_scene=prev_scene,
+                        nb=nb, tags=tags,
+                    ):
+                        session["craft_dirty"] = True
             compiled = _apply_compiled_craft(session, tags, scene)
             if not compiled:
                 session["craft_dirty"] = True
         else:
-            # Keep prior craft; notebook already moved. Mark dirty for densify.
             session["craft_dirty"] = True
             if not valid:
                 logger.info(
@@ -2116,11 +2394,11 @@ async def _run_duet_scripter(
         session["just_banned"] = []
         session["just_restored"] = []
 
-    # The notebook moved on a turn we did not compile (casual / recall, or a
-    # compile that was refused). Craft is now behind the notebook, and silently:
-    # this is how the picture stayed on last week's outfit while every later
-    # turn agreed with the showrunner. Say so, and let densify catch up.
-    if notebook_moved and not compiled:
+    # Only SHOT drift dirties craft. Vibe/open-only casual must not amber-banner
+    # the chat — that made every chill turn feel like an unsynced script.
+    if shot_patched and not compiled:
+        session["craft_dirty"] = True
+    elif notebook_moved and not compiled and intent in ("shot", "mixed"):
         session["craft_dirty"] = True
 
     session["scripter_intent"] = intent
@@ -2142,10 +2420,10 @@ def _social_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "【なかまから聞いたこと（状況が合うときだけ）】",
-        "楽屋で友達と話したことの覚え。お題やシチュエーションが合うときだけ、"
-        "「今回はこれを試そうかな」程度に滲ませてよい。合わなければ無視。"
-        "画の材料に無理に足さない。小道具の単語を増やさない。",
+        "LOUNGE WHISPERS (only when the theme fits):",
+        "Soft tips from friends in the lounge. Hint at most as \"maybe try "
+        "this today\" when it matches; otherwise ignore. Do not force into "
+        "the picture. Do not grow a prop shopping list.",
         *(f"- {m}" for m in lines[:5]),
     ])
 
@@ -2156,7 +2434,7 @@ def _handpost_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "【スタジオ手帖の周知（短く守る。画に無理に写さない）】",
+        "STUDIO HANDPOST (short standing guidance; do not force into the picture):",
         *(f"- {m}" for m in lines[:3]),
     ])
 
@@ -2229,7 +2507,13 @@ def _duet_user_prompt(
     inputs = _inputs(session)
     theme = str(inputs.get("theme") or "").strip()
     talk = _duet_transcript(session)
-    parts = [f"お題（総監督が最初に言ったこと）:\n{theme}" if theme else ""]
+    parts = [
+        "LANGUAGE: Instructions below are in English. "
+        "Your SAY / in-character dialogue MUST be natural Japanese when the "
+        "Showrunner wrote Japanese (no English rule headings inside SAY).",
+    ]
+    if theme:
+        parts.append(f"THEME (Showrunner's opening ask):\n{theme}")
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
@@ -2258,20 +2542,20 @@ def _duet_user_prompt(
         nb = notebook_mod.of(session)
         name_a = str(
             (session.get("character") or {}).get("name_ja")
-            or (session.get("character") or {}).get("name") or "私"
+            or (session.get("character") or {}).get("name") or "Lead"
         )
         partner = session.get("partner_character") or {}
         name_b = str(partner.get("name_ja") or partner.get("name") or "")
         summary = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
         if summary:
             parts.append(
-                "いまのショットノート（会話用の要約。タグではない。"
-                "復唱チェックリストにしない）:\n" + summary
+                "SHOT NOTEBOOK (talk summary only — not tags; do not recite "
+                "as a checklist):\n" + summary
             )
         standing = nb.get("standing") or session.get("standing") or []
         if standing:
             parts.append(
-                "守りごと（画に無理に写さない。聞かれたら守る）:\n"
+                "STANDING ORDERS (honour if asked; do not force into the picture):\n"
                 + "\n".join(f"- {s}" for s in standing if str(s).strip())
             )
     elif on_facets(session):
@@ -2292,9 +2576,9 @@ def _duet_user_prompt(
             parts.append(orders)
 
     if talk:
-        parts.append(f"ここまでの会話:\n{talk}")
+        parts.append(f"CONVERSATION SO FAR:\n{talk}")
     if text.strip():
-        parts.append(f"総監督がいま言ったこと:\n{text.strip()}")
+        parts.append(f"SHOWRUNNER'S LATEST LINE:\n{text.strip()}")
 
     partner_on = bool(
         (session.get("partner_character") or {})
@@ -2306,17 +2590,19 @@ def _duet_user_prompt(
 
     if not prep:
         parts.append(
-            "このターンの話し方:\n"
-            "- 感覚・身体・相手の反応が先。変更点の事務報告は禁止。\n"
-            "- 総監督のいちばん新しい発言が勝つ。"
-            "言い直したら前の案は捨てる。\n"
-            "- OPEN の提案はセリフで試してよい（未確定のまま）。\n"
-            "- 画が動いたターンは、具体の二択を最大ひとつ"
-            "（例: 靴脱ぐ／つば押さえる）。面接の連問は禁止。\n"
-            "- 過去の撮影は渡された記憶だけ。無い細部は『そこまでは…』とやわらかく。\n"
-            "- ボード画像があっても、それは古いテイク。文言の最新指示を優先。\n"
-            "- 準備できた・用意して・get ready とは言わない。"
-            "英語の見出しやルール名をセリフに出さない。"
+            "HOW TO SPEAK THIS TURN:\n"
+            "- Sense and body first; never a change-log of the shot.\n"
+            "- The Showrunner's newest line wins; drop what it replaces.\n"
+            "- You may play-act an OPEN proposal in SAY before it is locked.\n"
+            "- On a picture change, at most ONE concrete two-choice pitch "
+            "(no interview chains).\n"
+            "- Past shoots: only from memories / CITED you were given. "
+            "Missing detail → soft Japanese『そこまでは…』.\n"
+            "- Board images are older takes; the latest text wins.\n"
+            "- Never say you are getting ready / can get ready. "
+            "Never print English section titles inside SAY.\n"
+            "- OUTPUT LANGUAGE: SAY must be natural Japanese when they wrote "
+            "Japanese."
         )
         return "\n\n".join(p for p in parts if p)
 
@@ -2325,26 +2611,27 @@ def _duet_user_prompt(
         nb = notebook_mod.of(session)
         name_a = str(
             (session.get("character") or {}).get("name_ja")
-            or (session.get("character") or {}).get("name") or "私"
+            or (session.get("character") or {}).get("name") or "Lead"
         )
         partner = session.get("partner_character") or {}
         name_b = str(partner.get("name_ja") or partner.get("name") or "")
         feel = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
         if feel:
             parts.append(
-                "いまのショット（感覚で読み上げる材料。タグの点呼は禁止）:\n" + feel
+                "CURRENT SHOT (read it back by feel — no tag roll-call):\n" + feel
             )
     else:
         previous = str((session.get("craft") or {}).get("prompt") or "")
         if previous:
             parts.append(
-                "いま載っている台本（仕上げのあと、感覚で読み上げる。タグの点呼は禁止）:\n"
-                + previous
+                "CURRENT CRAFT (read it back by feel after densify — no tag "
+                "roll-call):\n" + previous
             )
     parts.append(
-        "撮影準備の仕上げターンです。画の中身はすでにノートから載っています。"
-        "SAY だけで、場所の空気・体の感触・カメラの距離を自分の言葉で伝えて。"
-        "小物の在庫読み上げや「変更しました」報告はしない。"
+        "PREP FINISH TURN: the picture already lives in the notebook. "
+        "SAY only — place air, body feel, camera distance in your own words. "
+        "No prop inventory, no \"I changed X\" reports. "
+        "OUTPUT LANGUAGE: SAY must be natural Japanese."
     )
     return "\n\n".join(p for p in parts if p)
 
@@ -3115,6 +3402,7 @@ async def post_chat(
             await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
             await session_db.save(db, session, publish=False)
         session = await run_full_table(db, ollama, session, note=text)
+        await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
         locale = str(_inputs(session).get("locale") or "ja")
         wrap = _chat_append(
             session, role="system", name="Studio",
@@ -3151,49 +3439,22 @@ async def post_chat(
         await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
         await session_db.save(db, session, publish=False)
 
-    # Once a board exists the crew answers while looking at it, which is the
-    # only thing in the loop that can tell them the frame is already too dark or
-    # that the place they wrote never made it into the picture.
+    # Once a board exists the crew answers while looking at it.
     images = await board_images(db, session)
     screening = _screening_note(session) if images else ""
 
-    last_responder = ""
-    last_say = ""
-    for muse_id in responders:
-        turn, ms = await _run_muse_turn(
-            ollama, session, muse_id,
-            _table_user_prompt(
-                session, muse_id=muse_id, note=text, screening=screening,
-            ),
-            cfg=cfg, images=images,
-        )
-        msg = _apply_turn(session, turn, ms=ms)
-        if turn.blind and images:
-            _note_blind(session)
-            images = []
-            screening = ""
-        last_responder = muse_id
-        last_say = str(msg.get("text") or "")
-        if crew.role_of(muse_id) == "actress":
-            await _after_actress_spoke(db, session)
-        await session_db.save(db, session, publish=False)
+    # Packed table talk: similar jobs share one LLM turn (SAY only). Scripter
+    # owns TAGS afterward — no more 5× craft rewrites that wait a minute each.
+    talk_msgs = await _run_crew_table_talk(
+        ollama, session, responders,
+        note=text, screening=screening, cfg=cfg, images=images,
+    )
+    if any(crew.role_of(m.get("muse_id") or "") == "actress" for m in talk_msgs):
+        await _after_actress_spoke(db, session)
+    await session_db.save(db, session, publish=False)
 
-    # One heckle after the note — prefer the actress so personality stays in chat.
-    if last_responder and last_say and _banter_mode(session) != "off":
-        heckler = None
-        if "actress" in cast and "actress" not in responders:
-            heckler = "actress"
-        else:
-            heckler = _pick_banter_reactor(
-                session, cast, current=last_responder,
-                previous=responders[0] if responders else None, index=1,
-            )
-        if heckler and heckler != last_responder:
-            await _run_banter(
-                ollama, session, heckler,
-                about_id=last_responder, about_text=last_say, cfg=cfg,
-            )
-            await session_db.save(db, session, publish=False)
+    # Scripter compiles craft from notebook + this conversation.
+    await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
 
     locale = str(_inputs(session).get("locale") or "ja")
     wrap = _chat_append(
@@ -3213,64 +3474,149 @@ async def post_chat(
     return session
 
 
-# How many never-spoken seats can catch up on one note. The cast is editable at
-# any time, so somebody swapping a preset mid-session could otherwise queue a
-# dozen turns behind one remark.
-MAX_CATCHUP = 4
+# Notes use one packed table-talk call — catch-up stays tiny.
+MAX_CATCHUP = 2
+
+# Similar jobs share one voice slot. One LLM call; Scripter compiles craft.
+_TALK_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("wardrobe",),
+    ("actress", "beat", "spine"),
+    ("lens", "gaffer", "propshop", "faces"),
+)
 
 
 def newcomers(session: dict[str, Any], crew_ids: list[str]) -> list[str]:
-    """Cast members who write craft and have not written any yet, in table order.
-
-    The casting drawer used to be frozen the moment the table opened, so this
-    could not happen. Now that「今日は照明いいや」works mid-session, the reverse is
-    also true: bring lighting back and it has never read the script. Letting it
-    answer a note without a first pass gives an opinion on a scene it has not
-    been told about.
-    """
+    """Cast members who have not spoken yet — at most one catch-up voice."""
     already = set(session.get("spoken") or [])
     return [m for m in _writing_seats(crew_ids) if m not in already][:MAX_CATCHUP]
 
 
-def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
-    """Fixed short desk for every showrunner note.
-
-    Do NOT branch on mood or situation keywords in Python.
-    The note is already injected into the VLM user prompt — specialists read it
-    in dialogue and revise craft. Python only caps turn count for local Ollama.
-    """
-    _ = note  # intentional: routing ignores note text; VLM interprets it
-    # Stable priority. Wardrobe leads, for the same reason it opens the
-    # read-through: dress her, then frame her (OPENING_SEQUENCE). It used to sit
-    # fifth against a cap of four, so on the standard preset the one seat that
-    # owns clothes never answered a note — and COSTUME tells every other seat the
-    # outfit is locked and only the Showrunner may change it. The Showrunner's
-    # note then reached a table with nobody who could act on it: the lock
-    # swallowed the instruction and `strike_dropped_costume` could never fire.
-    #
-    # Lens gives up the seat rather than the desk growing, because the cap is
-    # what keeps a note affordable on local Ollama. The camera is the cheaper
-    # loss — its tags are writable by any seat, while COSTUME is locked to this
-    # one, so nobody else can stand in for Wardrobe.
-    #
-    # Banter-only seats are not here: the Producer answered every note by
-    # restating the beat with `dynamic_composition` on it.
-    priority = tuple(
-        r for r in (
-            "wardrobe", "actress", "beat", "spine", "lens",
-            "faces", "gaffer", "propshop",
-        ) if r not in crew.BANTER_ONLY
-    )
-    ordered = [m for m in (_cast_in_role(crew_ids, r) for r in priority) if m][:4]
-    closer = _cast_in_role(crew_ids, "finisher")
-    if closer:
-        ordered.append(closer)
+def _pack_speakers(crew_ids: list[str]) -> list[str]:
+    """One voice per job-family from the given cast slice."""
+    ordered: list[str] = []
+    for group in _TALK_GROUPS:
+        pick = next(
+            (m for r in group if (m := _cast_in_role(crew_ids, r))),
+            None,
+        )
+        if pick and pick not in ordered:
+            ordered.append(pick)
     if ordered:
         return ordered
-    head = [crew_ids[0]] if crew_ids else []
-    if closer and closer not in head:
-        head.append(closer)
-    return head
+    return [crew_ids[0]] if crew_ids else []
+
+
+def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
+    """One voice per job-family for the packed table-talk turn.
+
+    Do NOT branch on mood keywords. Scripter owns TAGS; seats only talk.
+    Finisher / grade stay off the note path (densify / quality fluff).
+    """
+    _ = note
+    return _pack_speakers(crew_ids)
+
+
+_SPEAKER_BLOCK_RE = re.compile(
+    r"(?im)^SPEAKER\s*:\s*([^\n]+?)\s*$\s*^SAY\s*:\s*(.+?)(?=^SPEAKER\s*:|\Z)",
+    re.S,
+)
+
+
+def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
+    """Parse packed SPEAKER/SAY blocks; fall back to first speaker."""
+    hits: list[tuple[str, str]] = []
+    for mid_raw, say in _SPEAKER_BLOCK_RE.findall(str(raw or "")):
+        token = str(mid_raw or "").strip()
+        text_s = str(say or "").strip()
+        if not text_s:
+            continue
+        match = next(
+            (s for s in speakers if s == token or s.endswith(token) or token in s),
+            None,
+        )
+        if match is None:
+            low = token.lower()
+            match = next(
+                (s for s in speakers if low in s.lower()),
+                speakers[len(hits)] if len(hits) < len(speakers) else None,
+            )
+        if match:
+            clean = text_s
+            if re.search(r"(?im)^(TAGS|SCENE)\s*:", clean):
+                clean = re.split(r"(?im)^(TAGS|SCENE)\s*:", clean)[0].strip()
+            hits.append((match, clean[:600]))
+    if hits:
+        return hits
+    blob = str(raw or "").strip()
+    if blob and speakers:
+        say = blob
+        if re.search(r"(?i)SAY\s*:", blob):
+            say = re.split(r"(?i)SAY\s*:", blob, maxsplit=1)[-1].strip()
+        return [(speakers[0], say[:600])]
+    return []
+
+
+async def _run_crew_table_talk(
+    ollama, session: dict[str, Any], speakers: list[str], *,
+    note: str, screening: str, cfg: dict[str, Any],
+    images: list[bytes] | None = None,
+) -> list[dict[str, Any]]:
+    """One LLM call: similar jobs speak in one packed turn (SAY only)."""
+    if not speakers or ollama is None:
+        return []
+    inputs = _inputs(session)
+    locale = str(inputs.get("locale") or "ja")
+    sid = session["session_id"]
+    roster_lines: list[str] = []
+    for mid in speakers:
+        name = _muse_display_name(session, mid)
+        role = crew.role_of(mid)
+        trait = crew.trait_blurb(mid, locale=locale)
+        roster_lines.append(
+            f"- SPEAKER id `{mid}` — {name} ({role})"
+            + (f" · {trait}" if trait else "")
+        )
+    system = crew.table_talk_system_prompt(
+        speakers, character=session.get("character") or {},
+        base_style=_style(session), locale=locale,
+        preset_id=str(inputs.get("crew_preset") or ""),
+    )
+    parts = [
+        "CAST (speak in this order):\n" + "\n".join(roster_lines),
+        f"BRIEF:\n{str(session.get('brief_lite') or session.get('brief') or '')[:1800]}",
+        f"NOTEBOOK:\n{notebook_mod.render(notebook_mod.of(session))[:1200]}",
+    ]
+    if screening:
+        parts.append(f"SCREENING:\n{screening}")
+    parts.append(f"SHOWRUNNER NOTE:\n{note.strip()}")
+    parts.append("Each speaker reacts in voice. No TAGS. No SCENE. Scripter will compile.")
+    user = "\n\n".join(parts)
+    events.publish(sid, {
+        "type": "muse_speaking",
+        "muse_id": speakers[0],
+        "name": _muse_display_name(session, speakers[0]),
+    })
+    try:
+        raw = await chain.run_table_talk(
+            ollama, system=system, user_prompt=user,
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            images=images,
+        )
+    except Exception:
+        logger.warning("[muse] packed table talk failed", exc_info=True)
+        return []
+    messages: list[dict[str, Any]] = []
+    for mid, say in _parse_table_talk(raw, speakers):
+        spoken = session.setdefault("spoken", [])
+        if mid not in spoken:
+            spoken.append(mid)
+        name = _muse_display_name(session, mid)
+        msg = _chat_append(
+            session, role="muse", text=say, muse_id=mid, name=name, kind="banter",
+        )
+        _publish_chat(sid, msg)
+        messages.append(msg)
+    return messages
 
 
 # ── image board ─────────────────────────────────────────────────────────────
@@ -3449,7 +3795,9 @@ async def densify_craft_if_needed(
                 note=(
                     "DENSIFY: expand TAGS (35–55) and CRAFT_SCENE (140–200 words) "
                     "from the WHOLE notebook. Full replace — do not keep old tags. "
-                    "INTENT: shot. Absolute values."
+                    "INTENT: shot. Absolute values. Do NOT rewrite notebook SHOT "
+                    "fields (scene/atmosphere/frame/wearing/beat) — only tags and "
+                    "craft_scene. English only for tags and craft_scene."
                 ),
                 transcript=_duet_transcript(session),
                 theme=str(_inputs(session).get("theme") or ""),
@@ -3459,6 +3807,9 @@ async def densify_craft_if_needed(
                 model=_text_model(_inputs(session)),
                 num_ctx=_num_ctx(_inputs(session), cfg),
             )
+            # Densify must never rewrite SHOT notebook fields even if the model
+            # returns them — craft_scene holds the long prose.
+            _ = notebook_mod.strip_shot_keys(dict(result.get("patch") or {}))
             tags = str(result.get("tags") or "")
             scene_out = str(result.get("craft_scene") or "")
             densify_ok = False
@@ -3483,7 +3834,10 @@ async def densify_craft_if_needed(
                 "dirty": bool(session.get("craft_dirty")),
             })
         await session_db.save(db, session, publish=False)
-        return session
+        # 主演撮り: notebook densify is the only path. 制作スタッフ: fall through
+        # to Finisher when the scripter densify did not land a compile.
+        if densify_ok or is_duet(session):
+            return session
 
     locale = str(_inputs(session).get("locale") or "ja")
     note = _chat_append(

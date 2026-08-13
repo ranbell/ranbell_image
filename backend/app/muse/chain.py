@@ -885,6 +885,29 @@ async def run_banter(
     return text
 
 
+async def run_table_talk(
+    ollama, *, system: str, user_prompt: str, model: str,
+    num_ctx: int | None,
+    images: list[bytes] | None = None,
+    on_token: TokenCallback | None = None,
+) -> str:
+    """Packed multi-seat banter — raw SPEAKER/SAY text, no craft parse."""
+    if images:
+        raw, _blind = await _call_seeing(
+            ollama, system=system, prompt=user_prompt, model=model,
+            images=images, num_ctx=num_ctx, think=False, on_token=on_token,
+        )
+    else:
+        raw = await _call(
+            ollama, system=system, prompt=user_prompt, model=model,
+            images=None, num_ctx=num_ctx, think=False, on_token=on_token,
+        )
+    text = str(raw or "").strip()
+    if not text:
+        raise ChainError("empty table talk")
+    return text
+
+
 # Being caught reading her diary used to be its own call, made while the panel
 # waited on a read receipt. It is now a block on her next turn's user prompt
 # (`crew.caught_block`) — she brings it up when they next meet, which is both
@@ -895,6 +918,10 @@ SCRIPTER_SYSTEM = """
 You are the studio scripter. You do not speak in character. You maintain the
 shot notebook and, when the picture changes, compile tags and craft_scene.
 
+LANGUAGE: All instructions and field values you write are in English.
+(Conversation history may contain Japanese — read it; still write notebook
+fields, tags, and craft_scene in English.)
+
 You are given the conversation, not just the last line. Read it.
 
 INTENTS (pick one):
@@ -904,14 +931,15 @@ INTENTS (pick one):
 - recall — asking about past shoots. Do not change SHOT. vibe optional.
 
 READING THE ROOM:
-- Resolve what the showrunner means from the conversation. 「うん」/「それで」/
-  「いいね」 affirms whatever was just proposed;「さっきの」 points back at a
-  concrete earlier line. Nothing is pending unless the conversation says so.
+- Resolve what the showrunner means from the conversation. Short affirmations
+  (e.g. Japanese「うん」/「それで」/「いいね」, or "yes" / "ok") affirm whatever
+  was just proposed; references like「さっきの」/ "that earlier one" point back
+  at a concrete earlier line. Nothing is pending unless the conversation says so.
 - A change a Muse proposed and the showrunner accepted is a change to the
   picture. Patch it. Do not wait to be told a second time in plainer words.
 - A change is a change whatever words it arrived in. Judge by what the picture
   would look like now versus the notebook — not by whether some keyword showed
-  up.「浴衣に着替えて」and「公園で撮ろう」are shot changes.
+  up. Changing clothes and changing location are shot changes.
 - Decide from the conversation whose card an edit belongs to. An edit addressed
   to one Muse never touches the other's wearing / beat. A change meant for both
   patches both.
@@ -919,12 +947,24 @@ READING THE ROOM:
 - When the picture did not move, say casual and change nothing. Do not repaint
   the notebook to look busy.
 
+FIELD CONTRACTS (hard):
+- scene = short place phrase only (a few words naming where she is). NEVER
+  paste craft_scene prose into scene or atmosphere.
+- atmosphere = short mood/light phrase.
+- frame / wearing / beat = short absolute phrases, not paragraphs.
+- craft_scene = the long English prose paragraph (60–120 words on draft turns).
+
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
+- When clothes or place change, rewrite wearing / scene as the finished state
+  and compile tags from that whole notebook — do not leave old garment or place
+  tags beside the new ones.
 - wearing is the only home for clothes, hats, accessories on the body.
+- Hairstyle changes belong in wearing (and in tags). They override the
+  character sheet's default cut for this session.
 - beat is body action only. Never put looking_up / looking_down /
   looking_at_viewer in beat — gaze belongs in frame with camera angle.
-- Low angle / 煽り → frame must say she looks down toward the lens.
+- Low angle / worm's-eye → frame must say she looks down toward the lens.
 - If they ask to look at the sky, rewrite frame as one coherent camera story;
   do not keep an old low-angle lens-gaze.
 - Leave sections unchanged by omitting them (or list under unchanged).
@@ -936,11 +976,27 @@ RULES:
   Solo: use tags only. Getting this split right is how each Muse keeps her own
   outfit — a flat bag lets the sampler put one Muse's clothes on the other.
 - Draft density: about 20–35 tags; craft_scene 60–120 words. Absolute values.
-- Do not invent diary props. Only the notebook + showrunner line.
+- Do not invent diary props. Only the notebook + conversation + showrunner line.
 
 Respond with a single JSON object matching the schema. Empty string means
 clear that section; omit keys you are not changing.
 """.strip()
+
+SCRIPTER_VERIFY_NOTE = (
+    "VERIFY: Re-read the showrunner's latest line against NOTEBOOK NOW and the "
+    "conversation. If following that line would make the picture look different "
+    "(place, clothes, hairstyle, pose, camera, worn or held props), return "
+    "intent shot or mixed with ABSOLUTE finished values and a full compile. "
+    "If it is truly chit-chat with no picture change, return intent casual "
+    "again with no SHOT edits. Do not invent."
+)
+
+SCRIPTER_CONSISTENCY_NOTE = (
+    "REPAIR: Your last compile left craft tags that disagree with the notebook "
+    "wearing/scene you just wrote (stale garment or place tokens). Return "
+    "intent shot with ABSOLUTE wearing/scene and a FULL tag + craft_scene "
+    "replace from the whole notebook. Drop every tag that no longer belongs."
+)
 
 
 async def run_scripter(
@@ -972,10 +1028,12 @@ async def run_scripter(
         f"FRAMING: {framing}" if framing.strip() else "",
         f"NOTEBOOK NOW:\n{notebook_block}",
         (
-            "ここまでの会話（誰が何を言ったか。ノートに載せる値はここから読み取る）:\n"
+            "CONVERSATION SO FAR (who said what — read this to resolve "
+            "affirmations and Muse-proposed changes; write notebook values "
+            "in English):\n"
             f"{transcript.strip()}"
         ) if transcript.strip() else "",
-        f"総監督がいま言ったこと:\n{note.strip()}",
+        f"SHOWRUNNER'S LATEST LINE:\n{note.strip()}",
         "Partner Muse sections wearing_b/beat_b apply." if partner else
         "Solo shoot — leave wearing_b and beat_b unused.",
         "Return JSON only.",

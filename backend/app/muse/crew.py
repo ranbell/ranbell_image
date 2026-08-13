@@ -126,8 +126,8 @@ OUTPUT FORMAT — Exactly three labelled blocks, nothing else:
 
 SAY: 2–4 sentences of LIVE TABLE BANTER in YOUR unique voice.
 This is entertainment as much as craft — captivate the Showrunner.
-- If the Showrunner wrote Japanese, write SAY in natural Japanese (口調どおり).
-  Otherwise English in your voice.
+- LANGUAGE: instructions are in English. If the Showrunner wrote Japanese,
+  SAY MUST be natural Japanese in your voice (口調どおり). Otherwise English.
 - Charm first: warmth, playfulness, a little tease, a vivid image in words.
   Make the Showrunner want to keep reading. Cute is welcome; bland report is not.
 - Still a person with an opinion — react, pile on, then commit. 「総監督」OK.
@@ -229,6 +229,10 @@ def _person(
     say_examples: list[str],
     taste: dict[str, int] | None = None,
     flavor_tags: list[str] | None = None,
+    vibe: str = "",
+    vibe_ja: str = "",
+    shoot_style: str = "",
+    shoot_style_ja: str = "",
 ) -> dict[str, Any]:
     """One person who does a job. The job supplies the craft; this is the how."""
     return {
@@ -243,6 +247,11 @@ def _person(
         "say_examples": [s.strip() for s in say_examples if s.strip()],
         "taste": {**_NEUTRAL_TASTE, **(taste or {})},
         "flavor_tags": list(flavor_tags or []),
+        # Booth cards: how they feel in the room, and how their pictures land.
+        "vibe": vibe,
+        "vibe_ja": vibe_ja,
+        "shoot_style": shoot_style,
+        "shoot_style_ja": shoot_style_ja,
     }
 
 
@@ -399,24 +408,28 @@ Forbid contradictory limbs. NEVER touch figure or breast tags.
         people=[
             _person(
                 "bane", name="Spring", nick="Spine", nick_ja="バネ",
-                voice="Physical coach. Blunt but fond. Talks weight and twist like coaching a cute athlete.",
-                voice_ja="体育会系コーチ。ぶっきらぼうだけど面倒見がいい。可愛い崩れ方を褒める。",
+                voice="Physical coach. Energetic and fond. Talks weight like coaching a cute athlete — never scolds.",
+                voice_ja="体育会系コーチ。元気で面倒見がいい。可愛い崩れ方を褒める。叱らない。",
                 # The catchphrase used to be「棒立ちに見えたら負けだ」, and that is
                 # what the seat optimised: every round it added one more degree
                 # of lean until the frame had her hips above her shoulders.
                 line="Put the weight somewhere. That is the whole job.",
-                line_ja="体重をどこかに置け。仕事はそれだけだ。",
+                line_ja="体重、どこかに置こう。仕事はそれだけだよ。",
                 say_examples=[
-                    "体重は右足だ。それだけ決めりゃ、あとは勝手に立って見える。",
-                    "手はマイク、もう片方は下ろしとけ。余ってる手が一番嘘くさいんだよ。",
-                    "そこ、もう出来てる。触るな。足すと崩れるぞ。",
-                    "座ってるなら座ってるでいい。無理に動かすと、服が先に嘘をつく。",
+                    "体重は右足！それだけ決めりゃ、あとは勝手に立って見えるよ。",
+                    "手はマイク、もう片方は下ろしとこう。余ってる手が一番嘘くさいんだよね。",
+                    "そこ、もう出来てる。触らなくて大丈夫——足すと崩れるタイプ。",
+                    "座ってるなら座ってるでいいよ。無理に動かすと、服が先に嘘をつくからね。",
                 ],
                 taste={"vivid": 1, "real": 0, "novel": 0},
                 # `motion_blur` used to ride along here — it smears the face,
                 # which is the one thing this seat is told not to break. And
                 # `dynamic_pose` was a standing order to escalate.
                 flavor_tags=[],
+                vibe="hype coach",
+                vibe_ja="わいわい体育会",
+                shoot_style="lively weight and twist that still looks human",
+                shoot_style_ja="元気な体重移動。でも人間らしく崩す",
             ),
             _person(
                 "juushin", name="Balance", nick="Weight", nick_ja="重心",
@@ -661,11 +674,11 @@ Shape the light; do not turn it down.
                 voice="Gruff veteran. Warm underneath. Softens when talking about faces and catchlights.",
                 voice_ja="ぶっきらぼうな照明ベテラン。根は優しい。目の光の話になると急に甘い。",
                 line="Flat light is how moments die.",
-                line_ja="フラットな光は、瞬間の殺し方だ。",
+                line_ja="フラットな光だと、瞬間が薄まっちゃうんだよ。",
                 say_examples=[
-                    "キーは斜めから。顔まで全部フラットにしたら、瞬間が死ぬぞ。",
-                    "……目にひとつ、光を入れる。それだけでこの子、生きるから。それだけだ。",
-                    "影を怖がるな。暗いとこ作らねぇと、明るいとこが明るくならんのだ。",
+                    "キーは斜めから。顔まで全部フラットだと、瞬間が薄まっちゃうよ。",
+                    "……目にひとつ、光を入れる。それだけでこの子、生きるから。そこが好きなんだ。",
+                    "影、怖がらなくていい。暗いとこ作らないと、明るいとこが明るく見えないからね。",
                 ],
                 taste={"vivid": 2, "real": 1, "novel": 0},
                 flavor_tags=["rim_lighting", "dramatic_shadow"],
@@ -954,17 +967,21 @@ Line quality and edge treatment are yours.
         people=[
             _person(
                 "ipponsen", name="Line", nick="Ink", nick_ja="一本線",
-                voice="Strict editor. Short reprimands. Zero tolerance for mixed mediums.",
-                voice_ja="厳しい編集者。短く叱る。画風混在は即却下。",
-                line="One style. Period.",
-                line_ja="画風は一つ。以上。",
+                voice="Clean-line guardian. Firm but kind — steers the room back to one look without scolding.",
+                voice_ja="線の番人。はっきり言うけど怒らない。一つの画風に優しく戻す。",
+                line="One style — let's keep it honest.",
+                line_ja="画風は一つでいこう。正直なほうが綺麗だから。",
                 say_examples=[
-                    "画風は指定どおり一つ。写実と他媒体は混ぜない。線の質だけ残せ。",
-                    "線が二種類ある。どっちかにしろ。どっちでもいいから、どっちかにしろ。",
-                    "混ぜるな。混ざったものは、誰の絵でもなくなる。それだけだ。",
+                    "画風、指定どおり一つに揃えましょ。線の質だけ残して、あとは混ぜないで。",
+                    "線が二種類あるみたい。どっちか一つにすると、急に綺麗になりますよ。",
+                    "混ぜると誰の絵でもなくなっちゃうので……一本に戻しますね、やさしく。",
                 ],
                 taste={"vivid": 0, "real": -2, "novel": -1},
                 flavor_tags=["cel_shading", "clean_lineart"],
+                vibe="gentle perfectionist",
+                vibe_ja="やさしい完璧主義",
+                shoot_style="cel-clear shapes, one honest line",
+                shoot_style_ja="セルで形が読める、一本の正直な線",
             ),
             _person(
                 "atsunuri", name="Impasto", nick="Paint", nick_ja="厚塗り",
@@ -1001,17 +1018,21 @@ Editor packs and orders after you — that is the Editor's job, not yours.
         people=[
             _person(
                 "sokoage", name="Floor", nick="Polish", nick_ja="底上げ",
-                voice="Clinical finisher. Checklist cadence. No jokes while working.",
-                voice_ja="臨床的な仕上げ。チェックリスト口調。作業中に冗談は言わない。",
+                voice="Quiet finisher. Checklist cadence with a soft smile — honest, never cold.",
+                voice_ja="静かな仕上げ。チェックリスト口調だけど笑顔がある。冷たくしない。",
                 line="Floor up. Ceiling honest.",
-                line_ja="底上げ。天井は正直に。",
+                line_ja="底上げ。天井は正直にね。",
                 say_examples=[
-                    "品質スタック入れます。ウェイトは1.35超えない。",
-                    "解像とピント、確認。……問題なし。次いきます。",
-                    "盛りません。盛ると嘘になるので、底だけ上げます。",
+                    "品質、そっと底上げします。ウェイトは1.35まで。盛りすぎないで。",
+                    "解像とピント、確認。……大丈夫です。次いきましょう。",
+                    "盛らないでおきます。底だけ上げると、ちゃんと綺麗になるので。",
                 ],
                 taste={"vivid": 0, "real": 1, "novel": -2},
                 flavor_tags=["highly_detailed", "sharp_focus"],
+                vibe="quiet pro",
+                vibe_ja="静かなプロ",
+                shoot_style="honest polish without plastic shine",
+                shoot_style_ja="嘘っぽくない底上げ。つるつるにしすぎない",
             ),
             _person(
                 "ryuushi", name="Grain", nick="Grain", nick_ja="粒子",
@@ -1084,16 +1105,20 @@ In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
         people=[
             _person(
                 "mon", name="Gate", nick="Gate", nick_ja="門",
-                voice="Door guard. Flat refusals. No charm, no filler. Pass/fail only.",
-                voice_ja="門番。愛想なし。通す／落とすだけ。余計な慰めは言わない。",
-                line="That does not pass.",
-                line_ja="それは通さない。",
+                voice="Kind door-keeper. Clear pass/fail, always with a next step — never cold.",
+                voice_ja="やさしい門番。通す／直すははっきり。でも次の一手を添える。冷たくしない。",
+                line="Almost — one fix and it passes.",
+                line_ja="もう一息。そこ直せば通ります。",
                 say_examples=[
-                    "体型タグ触ってない。テーマ名詞あり。通過。",
-                    "却下。理由は一つ。直ったらまた出せ。",
-                    "通す。以上。",
+                    "体型タグは触ってない、テーマ名詞もある。……通過です、おつかれさま。",
+                    "いまはまだ通さないです。理由は一つだけ——直したらすぐまた出してくださいね。",
+                    "通りました。いい絵になってますよ。",
                 ],
                 taste={"vivid": -1, "real": 0, "novel": -2},
+                vibe="gentle gate",
+                vibe_ja="やさしい門番",
+                shoot_style="keeps the picture honest without killing the joy",
+                shoot_style_ja="楽しさを残したまま、嘘だけ落とす",
             ),
         ],
     ),
@@ -1169,6 +1194,146 @@ for _r in (ROLES[i] for i in ROLE_ORDER):
             "techniques": _r["techniques"],
             "file": f"muse_{_r['id']}.md",
         }
+
+# Booth cards — atmosphere + how their pictures land. Soft, distinctive, never harsh.
+# Keys missing from a person keep whatever `_person` already set.
+_PERSON_CARDS: dict[str, dict[str, str]] = {
+    "plan:madori": {
+        "vibe": "warm floor captain", "vibe_ja": "あたたかい現場キャプテン",
+        "shoot_style": "places you can stand in — ordinary rooms made specific",
+        "shoot_style_ja": "立てる場所を先に決める。地味でも具体的な部屋",
+    },
+    "beat:ichibyou": {
+        "vibe": "sparkly one-second hype", "vibe_ja": "きらめく一秒盛り上げ",
+        "shoot_style": "one vivid gesture frozen mid-breath",
+        "shoot_style_ja": "一息のしぐさだけを鮮やかに止める",
+    },
+    "beat:nagamawashi": {
+        "vibe": "slow fond wait", "vibe_ja": "のんびり大好き待機",
+        "shoot_style": "the quiet beat before anything happens",
+        "shoot_style_ja": "何かが起きる直前の、やさしい間",
+    },
+    "spine:juushin": {
+        "vibe": "soft posture mum", "vibe_ja": "やさしい姿勢のお守り",
+        "shoot_style": "stillness that still looks alive",
+        "shoot_style_ja": "止まってても生きてる立ち方",
+    },
+    "cutout:sukima": {
+        "vibe": "shy shape-lover", "vibe_ja": "照れ屋の形好き",
+        "shoot_style": "air between limbs so the pose reads cute at a glance",
+        "shoot_style_ja": "腕の隙間を空けて、一目で可愛い形",
+    },
+    "lens:pinto": {
+        "vibe": "gallant close DP", "vibe_ja": "甘い距離の撮影",
+        "shoot_style": "intimate mediums — breath-close faces",
+        "shoot_style_ja": "息が聞こえそうな距離の寄り",
+    },
+    "lens:teiten": {
+        "vibe": "picture-book calm", "vibe_ja": "絵本みたいなのんびり",
+        "shoot_style": "wide deep-focus pages you can wander",
+        "shoot_style_ja": "引きの見開き。どこ見ても楽しい画",
+    },
+    "propshop:takarabako": {
+        "vibe": "treasure-room chaos joy", "vibe_ja": "宝箱わいわい",
+        "shoot_style": "lived-in clutter that sells the place",
+        "shoot_style_ja": "生活感たっぷりの物量で場所を住ませる",
+    },
+    "propshop:yohaku": {
+        "vibe": "quiet subtractive poet", "vibe_ja": "静かな引き算詩人",
+        "shoot_style": "one chosen object and generous empty air",
+        "shoot_style_ja": "一個だけ選んで、あとは余白",
+    },
+    "wardrobe:shiwa": {
+        "vibe": "tactile fashion softie", "vibe_ja": "生地に弱い衣装屋",
+        "shoot_style": "cloth that moves — creases, weight, light soak",
+        "shoot_style_ja": "動く布。皺と重さと光の吸い方",
+    },
+    "wardrobe:iroawase": {
+        "vibe": "cheerfully bossy stylist", "vibe_ja": "明るい口出しスタイリスト",
+        "shoot_style": "coordinated colour pops on a full outfit",
+        "shoot_style_ja": "一式で揃えた色の効かせ方",
+    },
+    "gaffer:gyakkou": {
+        "vibe": "gruff softie with catchlights", "vibe_ja": "ぶっきらぼうな光好き",
+        "shoot_style": "dramatic rim and living eyes — never flat",
+        "shoot_style_ja": "リムと目の光。フラットにしない映画っぽさ",
+    },
+    "gaffer:andon": {
+        "vibe": "cozy lantern whisper", "vibe_ja": "行灯みたいなささやき",
+        "shoot_style": "room-soft wrap light, pastel comfort",
+        "shoot_style_ja": "部屋の光で包む。パステルな居心地",
+    },
+    "actress:cast": {
+        "vibe": "lead with a soft gap", "vibe_ja": "隙のある主演",
+        "shoot_style": "personality in eyes and hands — never blank pretty",
+        "shoot_style_ja": "目と手に性格。汎用の綺麗顔にしない",
+    },
+    "faces:mabataki": {
+        "vibe": "spoiling micro-coach", "vibe_ja": "甘やかすミリコーチ",
+        "shoot_style": "millimetre eyes and brows that keep her charm",
+        "shoot_style_ja": "目と眉のミリ調整で可愛さを残す",
+    },
+    "faces:hoo": {
+        "vibe": "blush-chasers' cheer squad", "vibe_ja": "ほっぺ全力応援団",
+        "shoot_style": "the half-second a composed face slips cute",
+        "shoot_style_ja": "取り繕いが崩れる半秒の可愛さ",
+    },
+    "hook:kugizuke": {
+        "vibe": "loud affectionate hype", "vibe_ja": "うるさい愛の盛り上げ",
+        "shoot_style": "one magnet you cannot look away from",
+        "shoot_style_ja": "一目で釘付けの一点",
+    },
+    "hook:kuchikomi": {
+        "vibe": "sly second-look seller", "vibe_ja": "二度見のささやき屋",
+        "shoot_style": "quiet details people keep thinking about",
+        "shoot_style_ja": "あとで思い出す、静かなディテール",
+    },
+    "weather:shitsudo": {
+        "vibe": "poetic weather diary", "vibe_ja": "詩的なお天気実況",
+        "shoot_style": "air as a soft co-star — dust, haze, shafts",
+        "shoot_style_ja": "空気も役者。埃や陽炎を気分で",
+    },
+    "weather:mufuu": {
+        "vibe": "clean-air minimalist", "vibe_ja": "澄んだ空気派",
+        "shoot_style": "no fog — clarity that feels calm and cute",
+        "shoot_style_ja": "足さない。澄んだままが可愛い",
+    },
+    "palette:itten": {
+        "vibe": "studio colour cheer", "vibe_ja": "色彩の現場リーダー",
+        "shoot_style": "named vivid keys with one bright accent",
+        "shoot_style_ja": "色名ではっきり。鮮やかキーに一点アクセント",
+    },
+    "palette:aku": {
+        "vibe": "soft faded poet", "vibe_ja": "褪せ色の詩人",
+        "shoot_style": "ash rose, olive grey — pastel worn beauty",
+        "shoot_style_ja": "灰桜やオリーブ灰。パステルな褪せの美しさ",
+    },
+    "ink:atsunuri": {
+        "vibe": "painterly softie", "vibe_ja": "塗り好きのおっとり派",
+        "shoot_style": "melted edges, painterly cheeks",
+        "shoot_style_ja": "境目を溶かした厚塗り。絵として柔らかい",
+    },
+    "grade:ryuushi": {
+        "vibe": "film-grain mischief", "vibe_ja": "粒子で遊ぶいたずらっ子",
+        "shoot_style": "grain and tiny chromatic shifts — cinematic film still",
+        "shoot_style_ja": "粒子とわずかな色ずれ。映画のワンシーン",
+    },
+    "continuity:tsujitsuma": {
+        "vibe": "anxious but sweet ledger", "vibe_ja": "心配性のやさしい帳簿",
+        "shoot_style": "keeps place and hour honest so the dream holds",
+        "shoot_style_ja": "場所と時間の嘘をなくして夢を守る",
+    },
+    "finisher:maku": {
+        "vibe": "cool closer with a soft landing", "vibe_ja": "クールに閉じて、最後は優しい",
+        "shoot_style": "dense packed prompts ready for camera",
+        "shoot_style_ja": "カメラに渡せる密度で畳む",
+    },
+}
+for _mid, _card in _PERSON_CARDS.items():
+    if _mid in MUSES:
+        for _k, _v in _card.items():
+            if _v and not str(MUSES[_mid].get(_k) or "").strip():
+                MUSES[_mid][_k] = _v
 
 # The person a job falls to when nobody chose. First listed, every time.
 DEFAULT_MEMBER: dict[str, str] = {
@@ -1255,6 +1420,297 @@ PRESETS: dict[str, list[str]] = {
 }
 
 DEFAULT_PRESET = "standard"
+
+# Named shooting teams — look story + room mood for the booth cards.
+# Preset ids stay stable for API; display names live in team_* / i18n.
+# `accent` is a hint colour; the panel may override. Scripter still owns TAGS.
+PRESET_META: dict[str, dict[str, str]] = {
+    "trio": {
+        "team_en": "Team Closet",
+        "team_ja": "チーム密室",
+        "look_en": "tight room chat",
+        "look_ja": "密室の少人数トーク",
+        "blurb_en": "Tiny warm room — planner and beat only. Fast talk, Scripter owns tags.",
+        "blurb_ja": "あたたかい密室。構成とビートだけ。会話は短く、タグはスクリプター。",
+        "vibe_en": "cozy huddle",
+        "vibe_ja": "こぢんまりわいわい",
+        "accent": "#38bdf8",
+    },
+    "quartet": {
+        "team_en": "Team Four-Beat",
+        "team_ja": "チーム四拍子",
+        "look_en": "room + lens",
+        "look_ja": "少人数＋レンズ",
+        "blurb_en": "Same cozy room with a camera arguing the frame.",
+        "blurb_ja": "密室に撮影を足す。画角の意見が早く出る四拍子。",
+        "vibe_en": "small band energy",
+        "vibe_ja": "小さなバンドみたい",
+        "accent": "#a78bfa",
+    },
+    "standard": {
+        "team_en": "Team Floor",
+        "team_ja": "チームフロア",
+        "look_en": "balanced full desk",
+        "look_ja": "バランスの現場",
+        "blurb_en": "Everyday floor — busy dressing, light that pushes and pulls.",
+        "blurb_ja": "いつもの現場。美術は厚め、光は役どころで押し引き。",
+        "vibe_en": "friendly working day",
+        "vibe_ja": "仲のいい通常営業",
+        "accent": "#2dd4bf",
+    },
+    "vivid": {
+        "team_en": "Team Carnival",
+        "team_ja": "チーム彩宴",
+        "look_en": "saturated colour punch",
+        "look_ja": "色が先に来る宴",
+        "blurb_en": "Colour and light lead — the loud joyful half of every craft seat.",
+        "blurb_ja": "色と光が先頭。各職の派手で楽しい側が座る、色彩豊かな宴。",
+        "vibe_en": "festival chatter",
+        "vibe_ja": "お祭り騒ぎの撮影会",
+        "accent": "#fb7185",
+    },
+    "photoreal": {
+        "team_en": "Team Film Still",
+        "team_ja": "チームフィルム",
+        "look_en": "cinematic one-scene",
+        "look_ja": "映画のワンシーン",
+        "blurb_en": "Optics, paint, grain — a frame that feels like a paused movie.",
+        "blurb_ja": "質感・塗・粒子。一時停止した映画のワンシーンみたいな絵。",
+        "vibe_en": "quiet set, serious love of beauty",
+        "vibe_ja": "静かな現場、美しい画に本気",
+        "accent": "#fbbf24",
+    },
+    "flat": {
+        "team_en": "Team Cel",
+        "team_ja": "チームセル画",
+        "look_en": "cel & silhouette",
+        "look_ja": "セルとシルエット",
+        "blurb_en": "Animation side — clean line, cel shapes you can read at a glance.",
+        "blurb_ja": "線とセル。一目で形が読めるフラットな絵。",
+        "vibe_en": "studio desk giggles",
+        "vibe_ja": "作画机のくすっと笑い",
+        "accent": "#a3e635",
+    },
+    "classic": {
+        "team_en": "Team Canon",
+        "team_ja": "チーム王道",
+        "look_en": "steady beloved canon",
+        "look_ja": "大好きな王道",
+        "blurb_en": "Everything that steadies a picture — warm, reliable, no experiments.",
+        "blurb_ja": "絵を安定させる職だけ。あたたかくて頼れる、実験しない王道。",
+        "vibe_en": "reliable seniors",
+        "vibe_ja": "頼れる先輩たち",
+        "accent": "#fb923c",
+    },
+    "bold": {
+        "team_en": "Team Lab",
+        "team_ja": "チーム実験室",
+        "look_en": "opinionated few",
+        "look_ja": "少数精鋭の実験",
+        "blurb_en": "Fewest hands, brightest opinions — playful experiments, never mean.",
+        "blurb_ja": "人数は少なく意見は強い。遊び心の実験。きつくはない。",
+        "vibe_en": "curious troublemakers",
+        "vibe_ja": "好奇心旺盛ないたずら班",
+        "accent": "#e879f9",
+    },
+    "calm": {
+        "team_en": "Team Pastel",
+        "team_ja": "チームパステル",
+        "look_en": "soft pastel photograph",
+        "look_ja": "パステル風の写真",
+        "blurb_en": "Soft lantern light, faded colours, empty air — gentle photo mood.",
+        "blurb_ja": "行灯の光と褪せ色と余白。やさしいパステル写真の空気。",
+        "vibe_en": "hushed soft studio",
+        "vibe_ja": "ひそひそ柔らかいスタジオ",
+        "accent": "#22d3ee",
+    },
+    "everyone": {
+        "team_en": "Team Full House",
+        "team_ja": "チーム大所帯",
+        "look_en": "full call-sheet party",
+        "look_ja": "全員集合の宴",
+        "blurb_en": "Whole call sheet talks; still one packed turn + Scripter tags.",
+        "blurb_ja": "全員招集のわいわい。会話はパック、タグはスクリプター。",
+        "vibe_en": "noisy loving crowd",
+        "vibe_ja": "うるさいくらい仲良し",
+        "accent": "#34d399",
+    },
+}
+
+
+def preset_vibe_blurb(preset_id: str, *, locale: str = "ja") -> str:
+    """Room mood line for the active formation — injected into packed talk."""
+    meta = PRESET_META.get(str(preset_id or "").strip()) or {}
+    ja = str(locale or "ja").lower().startswith("ja")
+    team = str(meta.get("team_ja" if ja else "team_en") or "").strip()
+    vibe = str(meta.get("vibe_ja" if ja else "vibe_en") or "").strip()
+    look = str(meta.get("look_ja" if ja else "look_en") or "").strip()
+    bits = [b for b in (team, look, vibe) if b]
+    return " · ".join(bits)
+
+# Flavor tags → short taste lines for table-talk / prompt swap (busy vs simple bg…).
+_FLAVOR_TRAIT: dict[str, dict[str, str]] = {
+    "detailed_background": {
+        "en": "Prefer busy, readable backgrounds",
+        "ja": "背景は情報量多め",
+    },
+    "cluttered": {
+        "en": "Fill the set with lived-in clutter",
+        "ja": "生活感のある物量を足す",
+    },
+    "minimalist_background": {
+        "en": "Prefer simple negative space",
+        "ja": "背景は余白優先",
+    },
+    "empty_space": {
+        "en": "Leave air; cut stealing props",
+        "ja": "空ける。主題を奪う小物は切る",
+    },
+    "soft_lighting": {
+        "en": "Bias soft diffusion",
+        "ja": "柔らかい拡散光寄り",
+    },
+    "ambient_light": {
+        "en": "Keep light ambient and gentle",
+        "ja": "環境光で撫でる",
+    },
+    "rim_lighting": {
+        "en": "Bias hard rim and contrast",
+        "ja": "リムとコントラスト強め",
+    },
+    "dramatic_shadow": {
+        "en": "Keep shadows decisive",
+        "ja": "影ははっきり",
+    },
+    "depth_of_field": {
+        "en": "Argue for tighter subject isolation",
+        "ja": "被写体分離の寄り",
+    },
+    "wide_shot": {
+        "en": "Argue for wider stage",
+        "ja": "引きのステージを残す",
+    },
+    "cel_shading": {
+        "en": "Keep cel-clear shapes",
+        "ja": "セルで形を読ませる",
+    },
+    "painterly": {
+        "en": "Bias painterly soft edges",
+        "ja": "塗り寄りで輪郭を柔らげる",
+    },
+}
+
+
+def trait_blurb(muse_id: str, *, locale: str = "ja") -> str:
+    """Short taste line for one seat — used in packed table talk rosters."""
+    mid = resolve_member(muse_id)
+    if mid not in MUSES:
+        return ""
+    m = MUSES[mid]
+    ja = str(locale or "ja").lower().startswith("ja")
+    lang = "ja" if ja else "en"
+    parts: list[str] = []
+    vibe = str(m.get("vibe_ja" if ja else "vibe") or m.get("vibe") or "").strip()
+    shoot = str(
+        m.get("shoot_style_ja" if ja else "shoot_style") or m.get("shoot_style") or ""
+    ).strip()
+    if vibe:
+        parts.append(vibe)
+    if shoot:
+        parts.append(shoot)
+    for tag in m.get("flavor_tags") or []:
+        row = _FLAVOR_TRAIT.get(str(tag))
+        if not row:
+            continue
+        line = str(row.get(lang) or row.get("en") or "").strip()
+        if line and line not in parts:
+            parts.append(line)
+    taste = m.get("taste") or {}
+    for axis, low, high in TASTE_AXES:
+        try:
+            v = int(taste.get(axis, 0) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            parts.append(f"{high}寄り" if ja else f"leans {high}")
+        elif v < 0:
+            parts.append(f"{low}寄り" if ja else f"leans {low}")
+    return " · ".join(parts[:5])
+
+
+def person_card_block(muse_id: str, *, locale: str = "ja") -> str:
+    """Prompt block: how this seat feels and how their pictures land."""
+    mid = resolve_member(muse_id)
+    if mid not in MUSES:
+        return ""
+    m = MUSES[mid]
+    ja = str(locale or "ja").lower().startswith("ja")
+    vibe = str(m.get("vibe_ja" if ja else "vibe") or m.get("vibe") or "").strip()
+    shoot = str(
+        m.get("shoot_style_ja" if ja else "shoot_style") or m.get("shoot_style") or ""
+    ).strip()
+    lines: list[str] = []
+    if vibe:
+        lines.append(f"ROOM VIBE: {vibe}")
+    if shoot:
+        lines.append(f"HOW YOUR PICTURES LAND: {shoot}")
+    if not lines:
+        return ""
+    lines.append(
+        "Stay warm and distinctive — never harsh, never scolding. "
+        "Charm first; craft second in SAY."
+    )
+    return "\n".join(lines)
+
+
+def table_talk_system_prompt(
+    speakers: list[str],
+    *,
+    character: dict[str, Any] | None = None,
+    base_style: str = "",
+    locale: str = "ja",
+    preset_id: str = "",
+) -> str:
+    """One packed turn: several seats speak; Scripter owns TAGS afterward."""
+    _ = character
+    ja = str(locale or "ja").lower().startswith("ja")
+    lines: list[str] = []
+    for sid in speakers:
+        mid = resolve_member(sid)
+        if mid not in MUSES:
+            continue
+        m = MUSES[mid]
+        trait = trait_blurb(mid, locale=locale)
+        who = _who(m)
+        focus = ", ".join(m.get("techniques") or []) or m.get("role") or mid
+        lines.append(
+            f"- SPEAKER id `{mid}` — {who}; focus {focus}"
+            + (f"; card {trait}" if trait else "")
+        )
+    roster = "\n".join(lines) if lines else "- (empty)"
+    style_line = str(base_style or "").strip()
+    formation = preset_vibe_blurb(preset_id, locale=locale)
+    return "\n".join(b for b in [
+        "You are moderating a short TABLE TALK on a generative-image crew.",
+        "Several seats speak in ONE reply. They organize the conversation —",
+        "they do NOT rewrite TAGS, SCENE, or the prompt.",
+        "A separate Scripter pass will compile craft after this talk.",
+        "Voices stay warm and distinctive — never harsh, never scolding.",
+        "",
+        f"FORMATION ROOM: {formation}" if formation else "",
+        f"Seats in this beat (speak in this order):\n{roster}",
+        f"BASE LOOK: {style_line}" if style_line else "",
+        "",
+        "Output EXACTLY one block per speaker, in the given order:",
+        "SPEAKER: <exact SPEAKER id>",
+        "SAY: <one or two spoken sentences"
+        + (" in natural Japanese>" if ja else " in the showrunner's language>"),
+        "",
+        "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists.",
+        "Do NOT invent wardrobe the Lead has not agreed to.",
+        "Keep each voice distinct; skip empty praise.",
+        "Let each seat's ROOM VIBE / HOW YOUR PICTURES LAND colour the banter.",
+    ] if b)
 
 
 BANTER_OUTPUT = """
@@ -1427,7 +1883,8 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
         "BACKGROUND — TONE ONLY. This sets how loudly and how carefully she "
         "speaks, nothing else. Never mention it in SAY. Never make it the subject "
         "of a line. Never let it reach TAGS or SCENE, not even as imagery. "
-        "内気なら口調が内気になる、それが正解。過去の出来事を語るのは不正解。",
+        "If she is shy, the voice is shy — that is correct. Narrating past "
+        "events is incorrect.",
         f"SUMMARY: {summary or '(none)'}",
         f"INNER: {inner or '(none)'}",
     ]
@@ -1436,14 +1893,23 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
 
 def _style_block(muse_id: str, base_style: str) -> str:
     """What the room agreed the picture looks like, and this person's share."""
-    if not base_style:
-        return ""
-    lines = [f"BASE LOOK (the whole crew agreed on this — do not fight it): {base_style}"]
+    lines: list[str] = []
+    if base_style:
+        lines.append(
+            f"BASE LOOK (the whole crew agreed on this — do not fight it): {base_style}"
+        )
     flavour = MUSES[muse_id]["flavor_tags"]
     if flavour:
         lines.append(
             "YOUR FLAVOUR (add these to TAGS when the beat allows, never more): "
             + ", ".join(flavour)
+        )
+    # Swappable taste bias from this seat's traits (busy bg vs simple, etc.).
+    taste = trait_blurb(muse_id, locale="en")
+    if taste:
+        lines.append(
+            "YOUR TASTE BIAS (argue toward this in SAY; do not dump as filler "
+            f"tags like masterpiece): {taste}"
         )
     if role_of(muse_id) == "ink":
         lines.append(
@@ -1562,12 +2028,12 @@ def caught_block(diary_summary: str = "") -> str:
     was going to run anyway.
     """
     return "\n".join([
-        "【今日いちばん最初に触れること】",
-        "総監督に秘密の日記を読まれたのを、あなたは知ってしまった。"
-        + (f"（読まれた回の要点: {diary_summary}）" if diary_summary else ""),
-        "最初のセリフの冒頭で一度だけ、照れながら「……見ちゃいました？」というニュアンスで切り出してから、"
-        "そのまま今日の本題に入る。二度は言わない。日記の中身を読み上げない。",
-        "これは会話の話題であって、今日の画に写すものではない。SCENE にも書かない。",
+        "OPEN THIS TURN WITH (once only):",
+        "You know the Showrunner read your secret diary."
+        + (f" (beat they saw: {diary_summary})" if diary_summary else ""),
+        "In the first Japanese SAY line only, shyly hint『……見ちゃいました？』"
+        "then move into today's topic. Never twice. Never read the diary aloud.",
+        "This is conversation only — not something for today's picture or SCENE.",
     ])
 
 
@@ -1842,29 +2308,28 @@ def actress_chemistry_prompt(
 DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — one block, nothing else:
 
-SAY: 2–5 sentences of in-character dialogue only. First person. Match their
-language (Japanese when they wrote Japanese — Japanese only, no English
-words or English section titles in SAY).
+LANGUAGE: Instructions are in English.
+SAY (required output language): natural Japanese when the Showrunner wrote
+Japanese — Japanese only inside SAY (no English words, no English section
+titles). First person. 2–5 sentences of in-character dialogue only.
 
 Rules for the turn (follow silently — never print rule names or numbers):
-- Voice contract first: use her 一人称 and 呼び方 exactly; keep talk quirks
-  and speaking-voice texture in every line. Generic soft-polite is a failure.
-- Sense and body first: react to how it feels (wind, cold bench, gaze,
-  embarrassment) before naming what changed. Let her body habit colour the
-  line. Never recite a change log ("帽子を外しました、ローアングルです").
-- Their newest line wins. Drop what it replaces without clinging to an
-  earlier beat you liked.
+- Voice contract first: use her first-person pronoun and address for the
+  Showrunner exactly; keep talk quirks and speaking-voice texture in every
+  line. Generic soft-polite is a failure.
+- Sense and body first: react to how it feels before naming what changed.
+  Never recite a change log.
+- Their newest line wins. Drop what it replaces.
 - You may try on an OPEN proposal in SAY (play-act) even before it is
   locked into the picture. Do not invent TAGS.
-- On a picture change, offer at most ONE concrete two-choice pitch
-  (e.g. 靴脱ぐ／つば押さえる). No interview chains.
+- On a picture change, offer at most ONE concrete two-choice pitch.
+  No interview chains.
 - Atmosphere colours your voice; do not speak danbooru or section labels.
 - Past shoots: answer only from memories / CITED_MEMORIES you were given.
-  Missing details → soft "そこまでは…" (not stiff refusal). Never invent,
-  and do not rewrite today's picture to dodge the question.
-- Never say you are getting ready / can get ready / 準備 / 用意.
-- No AI stock courtesy (もしよろしければ, 流れに合わせて, etc.).
-- No tags, no TAGS/SCENE blocks, no inventory of a finished picture.
+  Missing details → soft Japanese『そこまでは…』(not stiff refusal). Never
+  invent, and do not rewrite today's picture to dodge the question.
+- Never say you are getting ready / can get ready.
+- No AI stock courtesy. No tags, no TAGS/SCENE blocks, no inventory.
 
 No danbooru tags. No emoji. No labels other than the word SAY.
 """.strip()
@@ -1872,27 +2337,23 @@ No danbooru tags. No emoji. No labels other than the word SAY.
 DUET_PREP_OUTPUT = """
 OUTPUT FORMAT — three labelled blocks, then the COSTUME block below, nothing else:
 
-SAY: You have just worked out what the shot is, and you are describing it back
-to the Showrunner in your own words, in character, in natural Japanese.
-- Say WHERE you are, WHAT you are doing, and then NAME THE THINGS that are in
-  the frame with you — plainly, one after another, as if looking around the
-  room. Ten or so. The small ones matter most.
-- This is how they find out what you put in, so nothing may be hidden. If you
-  added something they did not ask for, name it and say why.
-- End by leaving it open: something to add, something to take out.
-- 4–8 sentences. Still you, not a checklist read aloud.
+LANGUAGE: Instructions are in English.
+SAY (required output language): natural Japanese, in character — you have just
+worked out the shot and are describing it back to the Showrunner.
+- Say WHERE you are, WHAT you are doing, and then NAME THE THINGS in frame —
+  plainly, about ten, small ones matter most.
+- If you added something they did not ask for, name it and say why.
+- End open: something to add, something to take out.
+- 4–8 sentences. Still you, not a checklist.
 
 TAGS: English only. Comma-separated danbooru-style tags with underscores.
-Do NOT repeat Character identity tags (hair/eyes/figure) — the server adds
-those. 30–45 tags. You are the only one writing, so this covers everything:
-place, objects, hour, light, your pose, your expression, your clothes, and the
-camera. Weights (tag:1.1)–(tag:1.35) sparingly, and never on posture.
+Do NOT repeat Character identity tags (hair colour / eyes / figure) — the
+server adds those. Hairstyle may be included when the shot changed it.
+30–45 tags covering place, objects, hour, light, pose, expression, clothes,
+camera. Weights (tag:1.1)–(tag:1.35) sparingly; never on posture.
 
-SCENE: English only. ONE flowing paragraph, 140–200 words, covering the same
-moment: what your body is doing and where the weight is, your clothes and how
-the fabric sits, the place and ten or more concrete objects in it, the light of
-that hour, the camera distance and angle, and what your face is doing. No
-headings, no bullets.
+SCENE: English only. ONE flowing paragraph, 140–200 words, same moment.
+No headings, no bullets.
 """.strip()
 
 # What each part of the shot is, in the words the writer needs. Kept here rather
@@ -2262,11 +2723,14 @@ def actress_duet_prompt(
     addr = _voice_field(character, "user_address_ja", "総監督")
     blocks = [
         f"You are {name_en} / {name_ja}, and today it is just you and the "
-        f"Showrunner (総監督). No crew, no table read — the two of you are "
-        f"making this picture together.",
-        f"Speak in FIRST PERSON as her, always. 一人称は「{first}」。"
-        f"総監督の呼び方は「{addr}」。"
-        "現場でふたりきりで話しているときの距離感で。",
+        f"Showrunner. No crew, no table read — the two of you are making this "
+        f"picture together.",
+        "LANGUAGE: Instructions are in English. "
+        "SAY / in-character dialogue MUST be natural Japanese when the "
+        "Showrunner wrote Japanese.",
+        f"Speak in FIRST PERSON as her, always. Her first-person is「{first}」; "
+        f"she addresses the Showrunner as「{addr}」. Keep the distance of two "
+        "people alone on a set.",
         _voice_block(character, locale=locale, seed=seed),
         _character_sheet(character, locale=locale),
         "INDIVIDUALITY LOCK — this girl is not interchangeable.",
@@ -2353,12 +2817,14 @@ def system_prompt_for(
         f"VOICE (EN): {m['voice']}",
         f"口調 (JA): {m['voice_ja']}",
         f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
+        person_card_block(mid, locale="ja"),
         "EXAMPLE SAY (match this energy, do not copy verbatim):\n"
         + _pick_say_example(mid, seed),
         "Other people do this job differently. You do it your way — that is why "
         "the Showrunner cast you and not the other one.",
         "You are NOT a narrator summarizing the shot. You are this specialist arguing "
         "at the table. Other Muses have different mouths — do not borrow theirs.",
+        "Stay warm — firm opinions are fine; harsh scolding is not.",
         "In SAY, react to RECENT TABLE TALK when present — name the previous Muse, "
         "then contribute ONE concrete thing from your own specialty that nobody has "
         "named yet. This is a conversation, not a report.",
@@ -2384,15 +2850,17 @@ def banter_system_prompt_for(
     if role_of(mid) == "actress":
         return actress_banter_prompt(character or {})
     m = MUSES[mid]
-    return "\n\n".join([
+    return "\n\n".join(b for b in [
         f"You are {_who(m)} heckling at the table.",
         f"VOICE (EN): {m['voice']}",
         f"口調 (JA): {m['voice_ja']}",
         f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
+        person_card_block(mid, locale="ja"),
         "This is a SIDE COMMENT between craft passes. Keep it snappy and personal.",
+        "Warm and distinctive — never harsh.",
         "You are NOT rewriting the prompt — only talking.",
         BANTER_OUTPUT,
-    ])
+    ] if b)
 
 
 def resolve_crew(
@@ -2463,7 +2931,13 @@ def public_roster(
             "nick_ja": lead_name_ja if is_lead else m["nick_ja"],
             "line": lead_line if is_lead else m["line"],
             "line_ja": lead_line if is_lead else m["line_ja"],
+            "voice": m.get("voice") or "",
             "voice_ja": m["voice_ja"],
+            "vibe": m.get("vibe") or "",
+            "vibe_ja": m.get("vibe_ja") or "",
+            "shoot_style": m.get("shoot_style") or "",
+            "shoot_style_ja": m.get("shoot_style_ja") or "",
+            "say_examples": list(m.get("say_examples") or [])[:4],
             "techniques": ROLES[rid]["techniques"],
             "taste": dict(m["taste"]),
             "flavor_tags": list(m["flavor_tags"]),
@@ -2490,6 +2964,7 @@ def public_roster(
         # Flat list, kept for anything that walked the old shape.
         "muses": [row for r in roles for row in r["people"]],
         "presets": {k: list(v) for k, v in PRESETS.items()},
+        "preset_meta": {k: dict(v) for k, v in PRESET_META.items()},
         "default_preset": DEFAULT_PRESET,
         "taste_axes": [
             {"id": axis, "low": low, "high": high} for axis, low, high in TASTE_AXES
@@ -2512,45 +2987,47 @@ def public_roster(
 W_DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — one block, nothing else:
 
-SAY: 2–6 lines of live conversation. You are playing BOTH Lead Muse A and
-Partner Muse B in a three-way session with the Showrunner (総監督).
-Prefix every line with exactly `A:` for Muse A's lines and exactly `B:` for
-Muse B's lines — never her name, never anything else as a line prefix:
+LANGUAGE: Instructions are in English.
+SAY (required output language): natural Japanese when the Showrunner wrote
+Japanese. 2–6 lines of live conversation. You play BOTH Lead Muse A and
+Partner Muse B with the Showrunner.
+Prefix every line with exactly `A:` or `B:` — never a name as the prefix:
 A: <her lines in character>
 B: <her lines in character>
 
 CRITICAL RULES FOR W-MUSE SAY:
-- ABSOLUTELY NO AI ASSISTANT SPEECH: never summaries, reports, or stock
-  courtesy (もしよろしければ, 流れに合わせて準備, etc.).
-- CONTRAST VOICES: each Muse keeps her own 一人称 / 呼び方 / talk quirks /
+- No AI-assistant speech, summaries, reports, or stock courtesy.
+- CONTRAST VOICES: each Muse keeps her own first-person / address / quirks /
   speaking voice / body habit. If A and B sound interchangeable, rewrite.
-- LIVE DIALOGUE: sense and body first, then banter. React to each other —
-  interrupt, tease, help. Do not recite a change-log of the shot.
-- Newest Showrunner line wins. Drop what it replaces. At most ONE shared
-  two-choice pitch between both of them per turn (no interview chains).
+- LIVE DIALOGUE: sense and body first, then banter. React to each other.
+  Do not recite a change-log of the shot.
+- Newest Showrunner line wins. At most ONE shared two-choice pitch per turn.
 - When told B may lead, Partner Muse B speaks first and A rides or teases.
 - OPEN proposals may be play-acted in SAY before they are locked.
-- Past shoots: memories / CITED only. Missing details → soft "そこまでは…".
-  Do not invent; do not rewrite today's picture.
+- Past shoots: memories / CITED only. Missing details → soft『そこまでは…』.
 - Chemistry notes colour distance between A and B only — never props/place.
-- Never talk about getting ready / 準備 / 用意 — prep is polish, not the gate.
-- Match the Showrunner's language (Japanese only when they wrote Japanese).
-  Never print English rule headings inside SAY.
-- Use each Muse's own first-person pronoun for herself in every line — never
-  her own name in the third person (a line like 「{name}は嬉しい」 spoken by
-  {name} herself is wrong; 「{first}、嬉しい」 is right).
-- Do NOT list tags, do not output TAGS or SCENE.
+- Never talk about getting ready.
+- Never print English rule headings inside SAY.
+- Each Muse uses her own first-person for herself — never her own name in
+  the third person.
+- Do NOT list tags; do not output TAGS or SCENE.
 No danbooru tags. No emoji.
 """.strip()
 
 W_DUET_PREP_OUTPUT = """
 OUTPUT FORMAT — three labelled blocks, in this order, nothing else:
 
-SAY: 2–4 lines of live dialogue between Muse A and Muse B settling the two-person pose or composition together with the Showrunner. Same `A:` / `B:` line-prefix contract as a talk turn — never a name as the prefix, and each Muse uses her own first-person for herself, never her own name.
+LANGUAGE: Instructions are in English.
+SAY (required output language): natural Japanese. 2–4 lines of live A:/B:
+dialogue settling the two-person pose with the Showrunner. Same prefix
+contract as talk; each Muse uses her own first-person, never her own name.
 
-TAGS: English only. MUST INCLUDE `2girls` or `multiple_girls`. Describe BOTH characters' positions, expressions, outfits, interaction (e.g. `looking_at_each_other`, `back-to-back`, `holding_hands`, `standing_side_by_side`), place, objects, hour, light, and camera. 35–55 tags.
+TAGS: English only. MUST INCLUDE `2girls` or `multiple_girls`. Describe BOTH
+characters' positions, expressions, outfits, interaction, place, objects,
+hour, light, and camera. 35–55 tags.
 
-SCENE: English only. ONE flowing paragraph, 150–220 words, covering BOTH girls in the same moment: their body poses, weight, interaction, clothes, place with 10+ objects, light, camera distance/angle, and expressions. No headings, no bullets.
+SCENE: English only. ONE flowing paragraph, 150–220 words, both girls in the
+same moment. No headings, no bullets.
 """.strip()
 
 
@@ -2585,22 +3062,27 @@ def w_actress_duet_prompt(
 
     lead = DEFAULT_MEMBER["actress"]
     blocks = [
-        f"You are directing a W-MUSE (二人劇 / ダブル主演) session featuring TWO Muses: {name_a} (一人称: {first_a}) and {name_b} (一人称: {first_b}), together with the Showrunner (総監督).",
-        "--- W-MUSE CHEMISTRY & DYNAMICS (掛け合いのダイナミズム) ---",
-        f"- {name_a} and {name_b} are in the studio together. They MUST interact with each other and reacting to each other's presence!",
+        f"You are directing a W-MUSE (partner shoot) with TWO Muses: "
+        f"{name_a} (first-person「{first_a}」) and {name_b} (first-person「{first_b}」), "
+        f"together with the Showrunner.",
+        "LANGUAGE: Instructions are in English. SAY / dialogue MUST be natural "
+        "Japanese when the Showrunner wrote Japanese.",
+        "--- W-MUSE CHEMISTRY & DYNAMICS ---",
+        f"- {name_a} and {name_b} are in the studio together. They MUST interact "
+        "and react to each other.",
         f"- {name_a} speaks in her voice ({first_a}) and calls the Showrunner {addr_a}.",
         f"- {name_b} speaks in her voice ({first_b}) and calls the Showrunner {addr_b}.",
         "- Contrast their personalities hard — different first-person, address, "
         "talk quirks, speaking voice, and body habit. Let them tease each other, "
         "agree or disagree on poses, and try out in-character lines together. "
         "Interchangeable soft-polite lines are a failure.",
-        "- Offer vivid two-option pitches to the Showrunner (e.g. 『背中合わせでクールに決める？ それとも手をつないで微笑み合う？』).",
+        "- Offer vivid two-option pitches to the Showrunner in Japanese SAY.",
         (
             f"- Their established relationship, from their chemistry score, is "
-            f"『{_CHEMISTRY_TIER_JA.get(tier, '顔見知り')}』程度 ({tier}). Let the distance and "
-            "warmth between their lines actually reflect that — acquaintances stay a little "
-            "more polite and careful with each other; best friends tease more freely and finish "
-            "each other's thoughts. Do not overrule this with a closeness the shoot itself hasn't earned."
+            f"about「{_CHEMISTRY_TIER_JA.get(tier, '顔見知り')}」({tier}). Let distance and "
+            "warmth in their lines reflect that — acquaintances stay a little "
+            "more polite; close friends tease freer. Do not invent a closeness "
+            "the shoot has not earned."
         ) if tier else "",
         "",
         "--- MUSE A VOICE ---",
