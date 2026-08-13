@@ -5,8 +5,8 @@ as the person the user has in mind? So the prompt is nothing but her own tags
 plus a framing. Anything invented here would be testing the inventor instead of
 the tags.
 
-The **sheet** is the format Chronicle arrived at and it is worth keeping: one
-image showing the same person across four lives — a centre figure with four
+The **sheet** is a format earlier iteration arrived at and it is worth keeping:
+one image showing the same person across four lives — a centre figure with four
 polaroid-framed vignettes around it. A plain ``full_body, standing`` prompt
 produces a shop-mannequin shot that tells you almost nothing, and it comes out
 indistinguishable from the portrait slot. The composite tells you whether she

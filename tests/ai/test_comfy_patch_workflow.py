@@ -166,12 +166,12 @@ def test_patch_load_image_nodes():
         "4": {"class_type": "LoadImageOutput", "inputs": {"image": "out.png"}},
         "5": {"class_type": "Image Load", "inputs": {"image": "custom.png"}},
     }
-    patched, n = client.patch_load_image_nodes(wf, "chronicle_ref.png")
+    patched, n = client.patch_load_image_nodes(wf, "ref_image.png")
     assert n == 4
-    assert patched["1"]["inputs"]["image"] == "chronicle_ref.png"
-    assert patched["3"]["inputs"]["image"] == "chronicle_ref.png"
-    assert patched["4"]["inputs"]["image"] == "chronicle_ref.png"
-    assert patched["5"]["inputs"]["image"] == "chronicle_ref.png"
+    assert patched["1"]["inputs"]["image"] == "ref_image.png"
+    assert patched["3"]["inputs"]["image"] == "ref_image.png"
+    assert patched["4"]["inputs"]["image"] == "ref_image.png"
+    assert patched["5"]["inputs"]["image"] == "ref_image.png"
     assert wf["1"]["inputs"]["image"] == "old.png"  # original untouched
 
 
@@ -182,14 +182,14 @@ def test_upload_image_subfolder_form():
     client = ComfyUIClient()
 
     class _Resp:
-        content = b'{"name":"chronicle_ref.png","subfolder":"input/chr","type":"input"}'
+        content = b'{"name":"ref_image.png","subfolder":"input/chr","type":"input"}'
 
         def raise_for_status(self):
             return None
 
         def json(self):
             return {
-                "name": "chronicle_ref.png",
+                "name": "ref_image.png",
                 "subfolder": "input/chr",
                 "type": "input",
             }
@@ -199,8 +199,8 @@ def test_upload_image_subfolder_form():
             return _Resp()
 
     client._http = _Http()
-    out = asyncio.run(client.upload_image(b"png", "chronicle_ref.png"))
-    assert out == "input/chr/chronicle_ref.png"
+    out = asyncio.run(client.upload_image(b"png", "ref_image.png"))
+    assert out == "input/chr/ref_image.png"
 
 
 def test_append_negative_ignores_a_wired_input():

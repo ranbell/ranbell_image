@@ -1,4 +1,4 @@
-"""Chronicle / scene tags should resolve via frozenset (shared tags.catalog)."""
+"""Scene tags should resolve via frozenset (shared tags.catalog)."""
 from __future__ import annotations
 
 import sys
@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.tags.catalog import TAG_TO_AXIS, get_tag_axis
 
 
-# Tags from cafe / rain-station / rooftop / festival / beach Chronicle sims.
-_CHRONICLE_SCENE_TAGS = {
+# Tags from cafe / rain-station / rooftop / festival / beach scenes.
+_SCENE_TAGS = {
     # cafe
     "cafe": "location",
     "apron": "clothing",
@@ -79,8 +79,8 @@ _CHRONICLE_SCENE_TAGS = {
 }
 
 
-@pytest.mark.parametrize("tag,expected", sorted(_CHRONICLE_SCENE_TAGS.items()))
-def test_chronicle_scene_tags_are_frozenset_classified(tag, expected):
+@pytest.mark.parametrize("tag,expected", sorted(_SCENE_TAGS.items()))
+def test_scene_tags_are_frozenset_classified(tag, expected):
     assert get_tag_axis(tag) == expected, f"{tag} → {get_tag_axis(tag)}"
 
 
