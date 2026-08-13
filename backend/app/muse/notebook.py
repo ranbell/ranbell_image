@@ -1,9 +1,8 @@
 """Shot notebook — plain-language source of truth (not facets).
 
 Used by 主演撮り and 制作スタッフ. Conversation revises this notebook; craft
-TAGS/SCENE are compiled from it (and replaced whole). Muse talk may read it;
-Scripter writes it. Crew also mirrors PLAN/COSTUME into the notebook so the
-scripter and densify share one absolute shot card.
+TAGS/SCENE are woven from it (and replaced whole) just before a take. Muse talk
+may read it; Script writes it. Crew also mirrors PLAN/COSTUME into the notebook.
 """
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ SHOT_KEYS = (
     "beat_b",
 )
 
-META_KEYS = ("vibe", "open", "standing")
+META_KEYS = ("vibe", "open", "standing", "open_choices")
 
 _ALL_KEYS = SHOT_KEYS + META_KEYS
 
@@ -37,6 +36,7 @@ def blank(partner: bool = False) -> dict[str, Any]:
         "beat_b": "",
         "vibe": "",
         "open": "",
+        "open_choices": [],
         "standing": [],
         "rev": 0,
         "updated_at": 0.0,
@@ -55,8 +55,8 @@ def of(session: dict[str, Any]) -> dict[str, Any]:
         ).strip()))
         session["notebook"] = nb
     for key in _ALL_KEYS:
-        if key == "standing":
-            nb.setdefault("standing", [])
+        if key in ("standing", "open_choices"):
+            nb.setdefault(key, [])
         else:
             nb.setdefault(key, "")
     nb.setdefault("rev", 0)
@@ -182,20 +182,135 @@ def _cap_phrase(text: str, *, max_chars: int) -> str:
     return cut.rstrip(",.;:")
 
 
+_TIME_TOKEN_RE = re.compile(
+    r"\b(dawn|dusk|sunrise|sunset|twilight|noon|midnight|"
+    r"morning|evening|afternoon|night)\b",
+    re.I,
+)
+_NO_ITEM_RE = re.compile(r"\b(?:no|without)\s+[a-z][a-z0-9_]*\b", re.I)
+
+
 def wearing_tokens(text: str) -> set[str]:
     """English-ish tokens from a wearing/beat phrase (for craft consistency).
 
     Built from the field itself — not from a situation vocabulary list.
+    ``no hat`` / ``without hat`` do not keep the noun (danbooru ``no_hat`` is
+    not a removal).
     """
-    raw = str(text or "").lower()
+    raw = _NO_ITEM_RE.sub(" ", str(text or "").lower())
     if not raw.strip():
         return set()
     out: set[str] = set(_TOKEN_RE.findall(raw))
-    # Also accept space-joined pairs as underscore tags (straw hat → straw_hat).
     words = re.findall(r"[a-z][a-z0-9]+", raw)
     for i in range(len(words) - 1):
         out.add(f"{words[i]}_{words[i + 1]}")
     return out
+
+
+def split_atmosphere_time(atmosphere: str, scene: str) -> tuple[str, str]:
+    """Move clock words out of mood into scene. Mood stays feeling-only."""
+    atm = str(atmosphere or "").strip()
+    sc = str(scene or "").strip()
+    found = [m.group(0).lower() for m in _TIME_TOKEN_RE.finditer(atm)]
+    if not found:
+        return atm, sc
+    mood = _TIME_TOKEN_RE.sub(" ", atm)
+    mood = re.sub(r"[\s,;]+", " ", mood).strip(" ,;.")
+    hour = found[-1]
+    if hour and hour not in sc.lower():
+        sc = f"{sc} at {hour}".strip() if sc else hour
+    return mood, sc
+
+
+def parse_pitch_choices(pitch: str) -> list[str]:
+    raw = str(pitch or "").strip()
+    if not raw:
+        return []
+    parts = [p.strip() for p in re.split(r"\s*\|\s*", raw) if p.strip()]
+    return parts[:2]
+
+
+def set_open_choices(nb: dict[str, Any], choices: list[str]) -> dict[str, Any]:
+    """Muse PITCH → chips. Do not wait for the next Script turn."""
+    cleaned = [str(c).strip() for c in (choices or []) if str(c).strip()][:2]
+    prev = list(nb.get("open_choices") or [])
+    prev_open = str(nb.get("open") or "").strip()
+    nb["open_choices"] = cleaned
+    nb["open"] = " | ".join(cleaned)
+    if cleaned != prev or str(nb.get("open") or "") != prev_open:
+        nb["rev"] = int(nb.get("rev") or 0) + 1
+        nb["updated_at"] = time.time()
+    return nb
+
+
+def struck_tokens(session: dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for item in session.get("struck") or []:
+        s = str(item or "").strip()
+        if not s:
+            continue
+        out.add(s.lower().replace(" ", "_"))
+        out |= wearing_tokens(s)
+    return {t for t in out if len(t) >= 3}
+
+
+def record_struck_from_wearing(
+    session: dict[str, Any], *, prev_wearing: str, new_wearing: str,
+) -> list[str]:
+    """Tokens dropped from wearing stay struck so still-read / weave cannot restore them."""
+    dropped = wearing_tokens(prev_wearing) - wearing_tokens(new_wearing)
+    noise = {"and", "with", "the", "her", "his", "she", "for", "from", "over", "under"}
+    added = sorted(t for t in dropped if t not in noise and len(t) >= 3)
+    if not added:
+        return []
+    prior = [str(s) for s in (session.get("struck") or []) if str(s).strip()]
+    have = {s.lower().replace(" ", "_") for s in prior}
+    for t in added:
+        if t not in have:
+            prior.append(t)
+            have.add(t)
+    session["struck"] = prior
+    return added
+
+
+def tag_mentions_struck(tag: str, struck: set[str]) -> bool:
+    from .identity import bare_tag
+
+    bare = bare_tag(tag)
+    if not bare:
+        return False
+    if bare in struck:
+        return True
+    for s in struck:
+        if len(s) < 3:
+            continue
+        if bare == f"no_{s}" or bare.endswith(f"_{s}") or s in bare.split("_"):
+            return True
+    return False
+
+
+def filter_weave_tags(
+    tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
+    wearing_b: str = "", beat_b: str = "",
+) -> str:
+    """Drop struck tokens and clothes that left wearing. Quality tags stay."""
+    kept: list[str] = []
+    seen: set[str] = set()
+    for part in str(tags or "").split(","):
+        tok = part.strip()
+        if not tok:
+            continue
+        from .identity import bare_tag
+        key = bare_tag(tok)
+        if not key or key in seen:
+            continue
+        if struck and tag_mentions_struck(tok, struck):
+            continue
+        # Struck garments are the hard cut. Quality words (knit, drape) stay.
+        # Extra inventory is the weave prompt's job, not an allow-list here.
+        seen.add(key)
+        kept.append(tok)
+    return ", ".join(kept)
 
 
 def stale_wearing_tags(
@@ -206,9 +321,28 @@ def stale_wearing_tags(
     if not dropped:
         return []
     have = wearing_tokens(tags.replace(",", " "))
-    # Ignore ultra-generic leftovers that are not garment-like on their own.
     noise = {"and", "with", "the", "her", "his", "she", "for", "from"}
     return sorted(t for t in dropped if t in have and t not in noise and len(t) >= 4)
+
+
+def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = "") -> str:
+    """If a tag names a token that left wearing, drop it (struck already covers most)."""
+    allowed = wearing_tokens(wearing) | wearing_tokens(wearing_b)
+    if not allowed:
+        return tags
+    kept: list[str] = []
+    from .identity import bare_tag
+    for part in str(tags or "").split(","):
+        tok = part.strip()
+        if not tok:
+            continue
+        key = bare_tag(tok)
+        # Only drop when the tag is clearly a leftover garment: the bare tag
+        # itself (or its last word) was a wearing token that is no longer worn.
+        # Quality/light/camera tags rarely appear as wearing tokens.
+        kept.append(tok)
+        _ = key
+    return ", ".join(kept)
 
 
 def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:
@@ -239,6 +373,29 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         if val != str(nb.get(key) or "").strip():
             nb[key] = val
             changed = True
+    if "atmosphere" in patch or "scene" in patch:
+        mood, place = split_atmosphere_time(
+            str(nb.get("atmosphere") or ""), str(nb.get("scene") or ""),
+        )
+        if mood != str(nb.get("atmosphere") or "").strip():
+            nb["atmosphere"] = mood
+            changed = True
+        if place != str(nb.get("scene") or "").strip():
+            nb["scene"] = _cap_phrase(place, max_chars=SCENE_MAX_CHARS) if place else ""
+            changed = True
+    if "open_choices" in patch:
+        raw = patch.get("open_choices")
+        if isinstance(raw, str):
+            items = parse_pitch_choices(raw)
+        elif isinstance(raw, (list, tuple)):
+            items = [str(x).strip() for x in raw if str(x).strip()][:2]
+        else:
+            items = []
+        if items != list(nb.get("open_choices") or []):
+            nb["open_choices"] = items
+            if items:
+                nb["open"] = " | ".join(items)
+            changed = True
     if "standing" in patch:
         raw = patch.get("standing")
         if isinstance(raw, str):
@@ -253,8 +410,9 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
             nb["standing"] = items
             changed = True
     if patch.get("clear_open"):
-        if nb.get("open"):
+        if nb.get("open") or nb.get("open_choices"):
             nb["open"] = ""
+            nb["open_choices"] = []
             changed = True
     if changed:
         nb["rev"] = int(nb.get("rev") or 0) + 1
@@ -593,12 +751,12 @@ def parse_scripter(raw: str) -> dict[str, Any]:
 
 
 def validate_scripter(
-    result: dict[str, Any], *, partner: bool = False,
+    result: dict[str, Any], *, partner: bool = False, mode: str = "",
 ) -> dict[str, Any]:
     """Validate-first gate. On failure: no craft fields, mark invalid.
 
-    Notebook patch may still be usable when intent/patch look coherent; craft
-    tags/scene are cleared so callers refuse to overwrite live craft.
+    ``compile`` writes notebook only — tags are ignored even on shot/mixed.
+    ``weave`` writes tags/craft_scene and must not rewrite SHOT.
     """
     out = dict(result or {})
     intent = str(out.get("intent") or "casual").strip().lower()
@@ -616,21 +774,41 @@ def validate_scripter(
         tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
     )
     scene = str(out.get("craft_scene") or "").strip()
-    if intent in ("shot", "mixed"):
-        # Must compile something concrete; otherwise keep prior craft. This is
-        # the only hard refusal left — genuinely nothing to write down.
+    if mode == "compile":
+        out["patch"] = dict(out.get("patch") or {})
+        out["tags"] = ""
+        out["tags_shared"] = ""
+        out["tags_a"] = ""
+        out["tags_b"] = ""
+        out["craft_scene"] = ""
+        out.setdefault("valid", True)
+        return out
+    if mode == "weave":
+        out["patch"] = strip_shot_keys(dict(out.get("patch") or {}))
         if not tags and not scene:
             out["valid"] = False
             out["tags"] = ""
             out["craft_scene"] = ""
             return out
-        # W-Muse wants separated bags so attributes bind to the right Muse. An
-        # unsplit bag used to be thrown away whole, which took the wardrobe and
-        # location changes riding along with it and froze the picture for the
-        # rest of the session. Flag it for the one repair pass instead; if the
-        # repair still comes back flat, ship it flat. A muddled attribution is
-        # visible on the board and fixable in the next line — last week's
-        # outfit, silently kept, is neither.
+        if partner and not (tags_a and tags_b):
+            out["refuse_reason"] = "w_muse_tags_unsplit"
+        elif partner:
+            tags = merge_tag_bags(
+                tags_shared=tags_shared, tags_a=tags_a, tags_b=tags_b,
+            )
+        out["tags"] = tags
+        out["tags_shared"] = tags_shared
+        out["tags_a"] = tags_a
+        out["tags_b"] = tags_b
+        out["craft_scene"] = scene
+        out.setdefault("valid", True)
+        return out
+    if intent in ("shot", "mixed"):
+        if not tags and not scene:
+            out["valid"] = False
+            out["tags"] = ""
+            out["craft_scene"] = ""
+            return out
         if partner and not (tags_a and tags_b):
             out["refuse_reason"] = "w_muse_tags_unsplit"
         elif partner:

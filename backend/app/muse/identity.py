@@ -290,6 +290,9 @@ def parse_hybrid(raw: str) -> tuple[str, str]:
 
 _DUET_SPEAKER_RE = re.compile(r"(?im)^\s*([AB])\s*[:：]\s*(.*)$")
 _LEADING_SAY_RE = re.compile(r"(?is)^\s*SAY\s*:\s*")
+_TALK_LABEL_RE = re.compile(
+    r"(?im)^\s*(SAY|ASIDE|CARD|PITCH)\s*[:：]\s*(.*)$"
+)
 # Craft / notebook / rule labels that must never appear in chat SAY.
 _SAY_LEAK_LINE_RE = re.compile(
     r"(?im)^\s*(?:[-*>•]\s*)?(?:"
@@ -320,6 +323,36 @@ def _is_leaked_heading_line(line: str) -> bool:
     if len(letters) >= 8 and sum(1 for c in letters if c.isupper()) / len(letters) >= 0.7:
         return True
     return False
+
+
+def parse_talk_blocks(raw: str) -> dict[str, str]:
+    """Split SAY / ASIDE / CARD / PITCH before SAY sanitize.
+
+    CARD stays machine-only (PLACE/HOUR would look like leaked headings).
+    Unlabelled output is treated as SAY.
+    """
+    text = (raw or "").strip()
+    blocks = {"say": "", "aside": "", "card": "", "pitch": ""}
+    if not text:
+        return blocks
+    if not _TALK_LABEL_RE.search(text):
+        blocks["say"] = text
+        return blocks
+    buf: dict[str, list[str]] = {k: [] for k in blocks}
+    current: str | None = None
+    for line in text.splitlines():
+        m = _TALK_LABEL_RE.match(line)
+        if m:
+            current = m.group(1).lower()
+            rest = m.group(2)
+            if rest.strip():
+                buf[current].append(rest)
+            continue
+        if current:
+            buf[current].append(line)
+    for key in blocks:
+        blocks[key] = "\n".join(buf[key]).strip()
+    return blocks
 
 
 def sanitize_muse_say(text: str) -> str:

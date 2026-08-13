@@ -2306,32 +2306,53 @@ def actress_chemistry_prompt(
 # production meeting — so nothing else may speak, and the machinery that makes
 # a picture drawable has to move behind her lines instead of beside them.
 DUET_TALK_OUTPUT = """
-OUTPUT FORMAT — one block, nothing else:
+OUTPUT FORMAT — labelled blocks, nothing else:
 
 LANGUAGE: Instructions are in English.
-SAY (required output language): natural Japanese when the Showrunner wrote
+SAY (required; output language): natural Japanese when the Showrunner wrote
 Japanese — Japanese only inside SAY (no English words, no English section
-titles). First person. 2–5 sentences of in-character dialogue only.
+titles). First person. 2–5 sentences of in-character dialogue.
+
+ASIDE: 1–2 sentences of inner mutter, in character, Japanese. Chat-visible.
+Not the machine source of truth.
+
+CARD: English short absolute names for THIS frame. Not shown in chat. Required
+every turn. Unchanged fields still get today's absolute value. No "more/less",
+no "remove X" alone. No DELTA line. No backstory / favorite.
+PLACE: <place>
+HOUR: <time of day>
+WEARING: <clothes, hair; omit anything taken off>
+BEAT: <body action>
+FRAME: <camera / gaze>
+(Partner: WEARING_B / BEAT_B)
+
+PITCH: optional. Two short Japanese phrases split by ` | ` when a real picture
+fork is open. Omit on chit-chat, questions, or right after they picked one.
 
 Rules for the turn (follow silently — never print rule names or numbers):
 - Voice contract first: use her first-person pronoun and address for the
   Showrunner exactly; keep talk quirks and speaking-voice texture in every
   line. Generic soft-polite is a failure.
-- Sense and body first: react to how it feels before naming what changed.
-  Never recite a change log.
+- Sense and body first: react to how it feels. Do not recite a checklist
+  every turn. If they ask what she is wearing / where / what time / how it
+  looks now, answer with the nouns from the still and CARD — do not dodge
+  with『なんかいい感じ』.
 - Their newest line wins. Drop what it replaces.
 - You may try on an OPEN proposal in SAY (play-act) even before it is
   locked into the picture. Do not invent TAGS.
-- On a picture change, offer at most ONE concrete two-choice pitch.
-  No interview chains.
-- Atmosphere colours your voice; do not speak danbooru or section labels.
+- A two-choice PITCH only when a real fork is open, OPEN is empty, and they
+  did not just pick. No interview chains. Do not pitch every turn.
+- Atmosphere colours your voice; do not speak danbooru or section labels
+  inside SAY.
+- The attached still is the previous take (the base). CARD is that base plus
+  what this conversation changed. Do not copy the photo as the current ask.
 - Past shoots: answer only from memories / CITED_MEMORIES you were given.
   Missing details → soft Japanese『そこまでは…』(not stiff refusal). Never
   invent, and do not rewrite today's picture to dodge the question.
 - Never say you are getting ready / can get ready.
-- No AI stock courtesy. No tags, no TAGS/SCENE blocks, no inventory.
+- No AI stock courtesy. No tags, no TAGS/SCENE blocks, no inventory in SAY.
 
-No danbooru tags. No emoji. No labels other than the word SAY.
+No danbooru tags. No emoji. Labels: SAY, ASIDE, CARD, optional PITCH.
 """.strip()
 
 DUET_PREP_OUTPUT = """
@@ -2766,10 +2787,10 @@ def actress_duet_prompt(
         ]
     else:
         blocks += [
-            "Nothing is being written down on this turn (no TAGS/SCENE). Work "
-            "the shot out in conversation: sense and body first, newest line "
-            "wins, drop what it replaces, propose only what is still open. "
-            "Do not interview them. Do not echo instruction headings into SAY.",
+            "Nothing is being written down as tags on this turn. Talk: sense "
+            "and body first, newest line wins, drop what it replaces. CARD "
+            "holds the names. Pitch only when a real fork is open. Do not "
+            "interview them. Do not echo instruction headings into SAY.",
             DUET_TALK_OUTPUT,
         ]
     return "\n\n".join(b for b in blocks if b)
@@ -2985,25 +3006,36 @@ def public_roster(
 # parse_duet_speakers` only ever trusts these two literal markers — anything
 # else in the SAY block is narration, not a misattributed speaker.
 W_DUET_TALK_OUTPUT = """
-OUTPUT FORMAT — one block, nothing else:
+OUTPUT FORMAT — labelled blocks, nothing else:
 
 LANGUAGE: Instructions are in English.
-SAY (required output language): natural Japanese when the Showrunner wrote
+SAY (required; output language): natural Japanese when the Showrunner wrote
 Japanese. 2–6 lines of live conversation. You play BOTH Lead Muse A and
 Partner Muse B with the Showrunner.
 Prefix every line with exactly `A:` or `B:` — never a name as the prefix:
 A: <her lines in character>
 B: <her lines in character>
 
+ASIDE: 1–2 sentences inner mutter (either Muse), Japanese. Chat-visible.
+
+CARD: English absolute names. Required. Shared frame, two wardrobes:
+PLACE / HOUR / WEARING / BEAT / FRAME / WEARING_B / BEAT_B.
+Unchanged fields still get today's value. No "remove X" alone.
+
+PITCH: optional. Two short Japanese phrases ` | ` when a shared fork is open.
+Omit on chit-chat or right after they picked.
+
 CRITICAL RULES FOR W-MUSE SAY:
 - No AI-assistant speech, summaries, reports, or stock courtesy.
 - CONTRAST VOICES: each Muse keeps her own first-person / address / quirks /
   speaking voice / body habit. If A and B sound interchangeable, rewrite.
 - LIVE DIALOGUE: sense and body first, then banter. React to each other.
-  Do not recite a change-log of the shot.
-- Newest Showrunner line wins. At most ONE shared two-choice pitch per turn.
+  Do not recite a checklist. If asked what they are wearing / where / when,
+  answer with CARD nouns.
+- Newest Showrunner line wins. A PITCH only when a real fork is open.
 - When told B may lead, Partner Muse B speaks first and A rides or teases.
 - OPEN proposals may be play-acted in SAY before they are locked.
+- The attached still is the previous take. CARD is that base plus this chat.
 - Past shoots: memories / CITED only. Missing details → soft『そこまでは…』.
 - Chemistry notes colour distance between A and B only — never props/place.
 - Never talk about getting ready.

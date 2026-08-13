@@ -776,8 +776,8 @@ async def run_duet_talk(
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
     tier: str = "",
-) -> tuple[str, tuple[dict[str, str], ...] | None, bool]:
-    """A two-hander (or W-Muse three-hander) conversation turn. Nothing is written down."""
+) -> tuple[str, tuple[dict[str, str], ...] | None, bool, str, str, str]:
+    """Conversation turn. Returns say, turns, blind, aside, card, pitch."""
     if partner_character:
         system = crew.w_actress_duet_prompt(
             character or {}, partner_character, mode="talk", seed=seed, tier=tier,
@@ -791,8 +791,8 @@ async def run_duet_talk(
         prompt=user_prompt, model=model, images=images,
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
-    say, _, _ = identity.parse_table_read(raw)
-    text = identity.sanitize_muse_say(say or raw)
+    blocks = identity.parse_talk_blocks(raw)
+    text = identity.sanitize_muse_say(blocks["say"] or raw)
     if not text:
         raise ChainError("empty duet turn")
     turns = None
@@ -809,7 +809,7 @@ async def run_duet_talk(
             text, name_a=name_a, name_b=name_b,
         )
     turns_out = tuple(turns) if turns else None
-    return text, turns_out, blind
+    return text, turns_out, blind, blocks["aside"], blocks["card"], blocks["pitch"]
 
 
 async def run_duet_prep(
@@ -916,18 +916,18 @@ async def run_table_talk(
 
 SCRIPTER_SYSTEM = """
 You are the studio scripter. You do not speak in character. You maintain the
-shot notebook and, when the picture changes, compile tags and craft_scene.
+shot notebook. You do not write tags or craft_scene on conversation turns.
 
 LANGUAGE: All instructions and field values you write are in English.
 (Conversation history may contain Japanese — read it; still write notebook
-fields, tags, and craft_scene in English.)
+fields in English.)
 
 You are given the conversation, not just the last line. Read it.
 
 INTENTS (pick one):
 - casual — chit-chat only. Do not change SHOT sections. vibe may update.
-- shot — showrunner changed the picture. Patch absolute values. Compile.
-- mixed — both chat and picture. Patch what changed. Compile.
+- shot — showrunner changed the picture. Patch absolute values. No tags.
+- mixed — both chat and picture. Patch what changed. No tags.
 - recall — asking about past shoots. Do not change SHOT. vibe optional.
 
 READING THE ROOM:
@@ -940,6 +940,8 @@ READING THE ROOM:
 - A change is a change whatever words it arrived in. Judge by what the picture
   would look like now versus the notebook — not by whether some keyword showed
   up. Changing clothes and changing location are shot changes.
+- 「まだ撮らなくていい」and chatting about the picture without asking to change
+  it are casual. Do not lift them into shot.
 - Decide from the conversation whose card an edit belongs to. An edit addressed
   to one Muse never touches the other's wearing / beat. A change meant for both
   patches both.
@@ -947,115 +949,203 @@ READING THE ROOM:
 - When the picture did not move, say casual and change nothing. Do not repaint
   the notebook to look busy.
 
+THE STILL IS THE LAST TAKE, NOT THE ASK:
+- If a board image is attached, it is the previous take (the base).
+- The current frame is that base PLUS what chat / the Muse CARD changed.
+- Do not copy a hat (or anything else) from the photo if chat already removed it.
+- Do not invent inventory the CARD and latest line did not ask for.
+- Priority: chat delta from the still > Muse CARD > latest line > what the
+  photo still shows. Never paint from SAY atmosphere.
+
 FIELD CONTRACTS (hard):
-- scene = short place phrase only (a few words naming where she is). NEVER
-  paste craft_scene prose into scene or atmosphere.
-- atmosphere = short mood/light phrase.
+- scene = short place + time. NEVER paste long prose.
+- atmosphere = mood/feeling only (tender, hushed, lonely). NEVER clock words,
+  weather-as-hour, objects, or place nouns.
 - frame / wearing / beat = short absolute phrases, not paragraphs.
-- craft_scene = the long English prose paragraph (60–120 words on draft turns).
+- On a remove request, rewrite wearing as the finished state WITHOUT that noun.
+  Do not write "no hat" / "remove hat". Omit the hat.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
-- When clothes or place change, rewrite wearing / scene as the finished state
-  and compile tags from that whole notebook — do not leave old garment or place
-  tags beside the new ones.
+- When clothes or place change, rewrite wearing / scene as the finished state.
 - wearing is the only home for clothes, hats, accessories on the body.
-- Hairstyle changes belong in wearing (and in tags). They override the
-  character sheet's default cut for this session.
+- Hairstyle changes belong in wearing. They override the character sheet.
 - beat is body action only. Never put looking_up / looking_down /
   looking_at_viewer in beat — gaze belongs in frame with camera angle.
 - Low angle / worm's-eye → frame must say she looks down toward the lens.
-- If they ask to look at the sky, rewrite frame as one coherent camera story;
-  do not keep an old low-angle lens-gaze.
+- If they ask to look at the sky, rewrite frame as one coherent camera story.
 - Leave sections unchanged by omitting them (or list under unchanged).
 - open is for Muse proposals not yet affirmed. clear_open: true when affirming
   or dropping them.
-- On shot/mixed: always output tags and craft_scene from the WHOLE notebook
-  after your patch (full replace, no merging with old tags). English only.
-- Partner shoots: use tags_shared + tags_a + tags_b (never one mixed bag).
-  Solo: use tags only. Getting this split right is how each Muse keeps her own
-  outfit — a flat bag lets the sampler put one Muse's clothes on the other.
-- Draft density: about 20–35 tags; craft_scene 60–120 words. Absolute values.
-- Do not invent diary props. Only the notebook + conversation + showrunner line.
+- Do NOT output tags, tags_shared, tags_a, tags_b, or craft_scene. Leave them "".
+- Partner shoots: wearing_b / beat_b. Solo: leave those unused.
+- Do not invent diary props. Only the notebook + CARD + showrunner line + still-as-base.
+- Do not restore struck items named in the prompt.
 
 Respond with a single JSON object matching the schema. Empty string means
 clear that section; omit keys you are not changing.
 """.strip()
 
+SCRIPTER_WEAVE_SYSTEM = """
+You are the studio scripter in WEAVE mode. You do not speak in character.
+You expand the current notebook into sampler tags and craft_scene prose.
+You do not rewrite SHOT fields.
+
+LANGUAGE: English only for tags and craft_scene.
+
+SOURCE: NOTEBOOK NOW is the only inventory. No theme, no chat, no photo.
+
+THICKEN QUALITY, NOT INVENTORY:
+- Unpack what is already named: cloth (knit, drape, folds), light (how it
+  falls, shadow length), air, camera, eyes and hands.
+- If wearing says "thin cardigan", write cardigan + fabric + folds — not a hat.
+- If beat names a bench, the bench may be tagged. Do not add a vending machine.
+- Do not add clothes, hats, lanterns, animals, or furniture the notebook
+  does not name.
+- Struck items listed in the prompt must not appear, including no_hat forms.
+
+CEILINGS, NOT QUOTAS:
+- At most 35–55 tags; craft_scene at most 140–200 words. Do not invent nouns
+  to hit a count. Do not ship a 8-tag summary of the notebook either —
+  unpack quality of what is there.
+
+Partner shoots: tags_shared + tags_a + tags_b (never one mixed bag).
+Solo: tags only.
+
+INTENT: shot. Absolute values. Do not rewrite atmosphere/scene/frame/wearing/beat.
+Leave those keys omitted or empty. English only.
+
+Respond with a single JSON object matching the schema.
+""".strip()
+
 SCRIPTER_VERIFY_NOTE = (
     "VERIFY: Re-read the showrunner's latest line against NOTEBOOK NOW and the "
     "conversation. If following that line would make the picture look different "
-    "(place, clothes, hairstyle, pose, camera, worn or held props), return "
-    "intent shot or mixed with ABSOLUTE finished values and a full compile. "
-    "If it is truly chit-chat with no picture change, return intent casual "
-    "again with no SHOT edits. Do not invent."
+    "(place, clothes, hairstyle, pose, camera, worn or held props, taking "
+    "something off), return intent shot or mixed with ABSOLUTE finished values "
+    "and NO tags. If it is truly chit-chat with no picture change, return intent "
+    "casual again with no SHOT edits. Do not invent. Do not copy the still as "
+    "the current ask."
 )
 
 SCRIPTER_CONSISTENCY_NOTE = (
-    "REPAIR: Your last compile left craft tags that disagree with the notebook "
-    "wearing/scene you just wrote (stale garment or place tokens). Return "
-    "intent shot with ABSOLUTE wearing/scene and a FULL tag + craft_scene "
-    "replace from the whole notebook. Drop every tag that no longer belongs."
+    "REPAIR: Your last notebook patch left wearing/scene disagreeing with what "
+    "the showrunner asked. Return intent shot with ABSOLUTE wearing/scene. "
+    "Do not emit tags."
 )
+
+STILL_READ_SYSTEM = """
+You are reading the latest test still for the studio notebook.
+Write labelled English absolute values for what is in the photo.
+Do not invent. Do not restore items listed as STRUCK.
+
+ATMOSPHERE: mood/feeling only — no clock, no objects.
+SCENE: short place + time (dusk goes here, not in ATMOSPHERE).
+FRAME: camera and gaze.
+WEARING: clothes and hair on the body. Omit struck items even if visible.
+BEAT: body action. Held props here.
+(Partner: WEARING_B / BEAT_B when two people.)
+
+No TAGS. No JSON. No SAY.
+""".strip()
+
 
 
 async def run_scripter(
     ollama, *, notebook_block: str, note: str, transcript: str = "",
     theme: str = "", style: str = "", framing: str = "",
     partner: bool = False, model: str, num_ctx: int | None,
+    mode: str = "compile", images: list[bytes] | None = None,
+    card: str = "", struck: str = "",
 ) -> dict[str, Any]:
-    """One non-stream scripter call: intent, notebook patch, optional craft.
+    """One non-stream scripter call: compile (notebook) or weave (tags).
 
-    ``transcript`` is the recent conversation, and it is the whole reason this
-    call works. The scripter used to get the notebook and one line of the
-    showrunner's, which made it an outside observer guessing at anaphora: it
-    could not tell what「うん」agreed to, or that a Muse had offered the change
-    herself. The gap was patched with keyword regexes until the keyword lists
-    were the bug. Same model as the talk turn — it was only ever short of
-    context.
-
-    Uses Ollama JSON Schema `format` when available. Sampling follows the
-    model card via `llm_options` (Gemma: temperature 1.0 — never force 0).
-    Invalid output is validate-first: craft fields cleared so callers keep
-    prior craft.
+    ``compile`` uses the conversation and optional still-as-base. ``weave``
+    sees only the notebook. Images never mix with JSON schema — labelled
+    parse_scripter fallback.
     """
     from ..ai.llm_options import llm_options
     from . import notebook as notebook_mod
 
-    prompt = "\n\n".join(b for b in [
-        f"THEME:\n{theme}" if theme.strip() else "",
-        f"STYLE: {style}" if style.strip() else "",
-        f"FRAMING: {framing}" if framing.strip() else "",
-        f"NOTEBOOK NOW:\n{notebook_block}",
-        (
-            "CONVERSATION SO FAR (who said what — read this to resolve "
-            "affirmations and Muse-proposed changes; write notebook values "
-            "in English):\n"
-            f"{transcript.strip()}"
-        ) if transcript.strip() else "",
-        f"SHOWRUNNER'S LATEST LINE:\n{note.strip()}",
-        "Partner Muse sections wearing_b/beat_b apply." if partner else
-        "Solo shoot — leave wearing_b and beat_b unused.",
-        "Return JSON only.",
-    ] if b.strip())
+    weave = mode == "weave"
+    system = SCRIPTER_WEAVE_SYSTEM if weave else SCRIPTER_SYSTEM
+    if weave:
+        prompt = "\n\n".join(b for b in [
+            f"NOTEBOOK NOW:\n{notebook_block}",
+            f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
+            (
+                "WEAVE: expand TAGS and CRAFT_SCENE from the notebook only. "
+                "Thicken quality (cloth, light, air, camera, eyes/hands) of "
+                "what is already named. Do not add inventory. Do not rewrite "
+                "SHOT. Ceilings 35–55 tags / 140–200 words — not quotas. "
+                "INTENT: shot. English only."
+            ),
+            "Partner Muse: tags_shared + tags_a + tags_b." if partner else
+            "Solo shoot — use tags only.",
+            "Return JSON only.",
+        ] if b.strip())
+    else:
+        prompt = "\n\n".join(b for b in [
+            f"THEME:\n{theme}" if theme.strip() else "",
+            f"STYLE: {style}" if style.strip() else "",
+            f"FRAMING: {framing}" if framing.strip() else "",
+            f"NOTEBOOK NOW:\n{notebook_block}",
+            (
+                "MUSE CARD (absolute names for this frame; the still is the "
+                "last take, chat is the delta from that take):\n"
+                f"{card.strip()}"
+            ) if card.strip() else "",
+            f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
+            (
+                "CONVERSATION SO FAR (who said what — read this to resolve "
+                "affirmations and Muse-proposed changes, and to judge what "
+                "changed from the still; write notebook values in English):\n"
+                f"{transcript.strip()}"
+            ) if transcript.strip() else "",
+            (
+                "The attached image is the previous take (the base), not the "
+                "current ask. Apply chat + CARD on top of it."
+            ) if images else "",
+            f"SHOWRUNNER'S LATEST LINE:\n{note.strip()}",
+            "Partner Muse sections wearing_b/beat_b apply." if partner else
+            "Solo shoot — leave wearing_b and beat_b unused.",
+            "Return JSON only. Do not emit tags or craft_scene.",
+        ] if b.strip())
 
     raw = ""
+    validate_mode = "weave" if weave else "compile"
+
+    if images:
+        try:
+            raw, _ = await _call_seeing(
+                ollama, system=system, prompt=prompt, model=model,
+                images=images, num_ctx=num_ctx, think=False, on_token=None,
+            )
+        except ChainError:
+            logger.warning("[muse.chain] scripter image turn produced nothing",
+                           exc_info=True)
+            return notebook_mod.validate_scripter(
+                notebook_mod._blank_result(""), partner=partner, mode=validate_mode,
+            )
+        parsed = notebook_mod.parse_scripter(raw)
+        return notebook_mod.validate_scripter(
+            parsed, partner=partner, mode=validate_mode,
+        )
+
     gen = getattr(ollama, "generate_text", None)
     if callable(gen):
         try:
             options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
-            # Prefer schema-constrained JSON; fall back without format if the
-            # backend rejects the schema object (older fakes / proxies).
             try:
                 raw = await gen(
                     prompt, model=model, options=options,
-                    system=SCRIPTER_SYSTEM, think=False,
+                    system=system, think=False,
                     fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
                 )
             except TypeError:
                 raw = await gen(
                     prompt, model=model, options=options,
-                    system=SCRIPTER_SYSTEM, think=False,
+                    system=system, think=False,
                 )
             except Exception:
                 logger.warning(
@@ -1064,27 +1154,26 @@ async def run_scripter(
                 )
                 raw = await gen(
                     prompt, model=model, options=options,
-                    system=SCRIPTER_SYSTEM, think=False,
+                    system=system, think=False,
                 )
         except Exception:
             logger.warning("[muse.chain] scripter generate_text failed", exc_info=True)
             raw = ""
     if not str(raw or "").strip():
         try:
-            # Stream fallback for tests/fakes — still ask for JSON; validation
-            # stays the gate (sampling already via llm_options in _call).
             raw = await _call(
-                ollama, system=SCRIPTER_SYSTEM, prompt=prompt, model=model,
+                ollama, system=system, prompt=prompt, model=model,
                 images=None, num_ctx=num_ctx, think=False, on_token=None,
             )
         except ChainError:
             logger.warning("[muse.chain] scripter turn produced nothing", exc_info=True)
             return notebook_mod.validate_scripter(notebook_mod._blank_result(""))
     parsed = notebook_mod.parse_scripter(raw)
-    validated = notebook_mod.validate_scripter(parsed, partner=partner)
+    validated = notebook_mod.validate_scripter(
+        parsed, partner=partner, mode=validate_mode,
+    )
     if validated.get("valid") or not str(raw or "").strip():
         return validated
-    # One repair pass — ask for corrected JSON only (sampling unchanged).
     if not callable(gen):
         return validated
     reason = str(validated.get("refuse_reason") or "invalid_or_unparseable")
@@ -1100,22 +1189,23 @@ async def run_scripter(
         try:
             raw2 = await gen(
                 repair_prompt, model=model, options=options,
-                system=SCRIPTER_SYSTEM, think=False,
+                system=system, think=False,
                 fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
             )
         except TypeError:
             raw2 = await gen(
                 repair_prompt, model=model, options=options,
-                system=SCRIPTER_SYSTEM, think=False,
+                system=system, think=False,
             )
         except Exception:
             raw2 = await gen(
                 repair_prompt, model=model, options=options,
-                system=SCRIPTER_SYSTEM, think=False,
+                system=system, think=False,
             )
         if str(raw2 or "").strip():
             repaired = notebook_mod.validate_scripter(
                 notebook_mod.parse_scripter(raw2), partner=partner,
+                mode=validate_mode,
             )
             if repaired.get("valid"):
                 logger.info("[muse.chain] scripter repair pass succeeded")
@@ -1123,3 +1213,34 @@ async def run_scripter(
     except Exception:
         logger.warning("[muse.chain] scripter repair pass failed", exc_info=True)
     return validated
+
+
+async def run_still_read(
+    ollama, *, notebook_block: str, struck: str, partner: bool,
+    model: str, num_ctx: int | None, images: list[bytes],
+) -> dict[str, Any]:
+    """Labelled still-read after a board lands. No JSON schema with the image."""
+    from . import notebook as notebook_mod
+
+    if not images:
+        return notebook_mod._blank_result("")
+    prompt = "\n\n".join(b for b in [
+        f"NOTEBOOK NOW:\n{notebook_block}",
+        f"STRUCK (do not put these back, even if visible):\n{struck}"
+        if struck.strip() else "",
+        "Read the attached still. Labelled blocks only.",
+        "Partner: include WEARING_B / BEAT_B." if partner else "Solo.",
+    ] if b.strip())
+    try:
+        raw, _ = await _call_seeing(
+            ollama, system=STILL_READ_SYSTEM, prompt=prompt, model=model,
+            images=images, num_ctx=num_ctx, think=False, on_token=None,
+        )
+    except ChainError:
+        logger.warning("[muse.chain] still-read produced nothing", exc_info=True)
+        return notebook_mod._blank_result("")
+    parsed = notebook_mod.parse_scripter(raw)
+    parsed["intent"] = "shot"
+    return notebook_mod.validate_scripter(
+        parsed, partner=partner, mode="compile",
+    )

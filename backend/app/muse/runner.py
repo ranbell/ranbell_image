@@ -81,7 +81,7 @@ def _character_payload_extra(session: dict) -> dict[str, Any]:
     return extra
 
 
-async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict[str, Any]:
+async def run_board_job(reporter, cancel, *, db, comfy, session_id: str, ollama=None) -> dict[str, Any]:
     from ..jobs.render import run_render
     from ..scanner.drafts import PLAYGROUND_SUBDIR
 
@@ -128,6 +128,12 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str) -> dict
         raise
     finally:
         await session_db.finish_board(db, session_id, error=error)
+        if not error and ollama is not None:
+            try:
+                from . import service as muse_service
+                await muse_service.still_read_after_board(db, ollama, session_id)
+            except Exception:
+                logger.warning("[muse] still-read after board failed", exc_info=True)
 
 
 async def run_shoot_job(

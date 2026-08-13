@@ -193,8 +193,19 @@ const chatLocked = computed(() =>
 
 // Nothing can be photographed before she has written a prompt. Both stages said
 // so only by failing after the click; now they say so by not being clickable.
-const hasPrompt = computed(() => Boolean(craft.value.prompt))
-/** Notebook moved but craft compile refused / skipped — densify needed. */
+const hasPrompt = computed(() => {
+  if (craft.value.prompt) return true
+  if (!isDuet.value) return false
+  const nb = session.value?.notebook || {}
+  return Boolean(
+    String(nb.scene || '').trim()
+    || String(nb.wearing || '').trim()
+    || String(nb.beat || '').trim()
+    || String(nb.atmosphere || '').trim()
+    || String(nb.frame || '').trim()
+  )
+})
+/** Notebook moved; tags are woven on Shoot?, not during chat. */
 const craftDirty = computed(() => Boolean(session.value?.craft_dirty))
 const notebookAhead = computed(() => {
   const rev = Number(session.value?.notebook?.rev || 0)
@@ -352,8 +363,15 @@ const notebookRows = computed(() => {
   }
   return rows
 })
-/** Muse's open proposal — light chips, never a modal. */
-const openProposal = computed(() => String(session.value?.notebook?.open || '').trim())
+/** Muse's open fork — chips insert a commit line; they do not send. */
+const openChoices = computed(() => {
+  const nb = session.value?.notebook || {}
+  const listed = (nb.open_choices || []).map(s => String(s || '').trim()).filter(Boolean)
+  if (listed.length) return listed.slice(0, 2)
+  const open = String(nb.open || '').trim()
+  if (!open) return []
+  return open.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean).slice(0, 2)
+})
 const taste = computed(() => session.value?.showrunner_taste || {})
 const tasteChips = computed(() => {
   const out = []
@@ -777,7 +795,17 @@ function stopThinking() {
   liveSay.value = ''
 }
 
-function quick(cmd) { sendChat(cmd) }
+function insertChat(text) {
+  const bit = String(text || '').trim()
+  if (!bit) return
+  chatInput.value = chatInput.value ? `${chatInput.value.trim()} ${bit}` : bit
+}
+
+function insertPitch(phrase) {
+  const p = String(phrase || '').trim()
+  if (!p) return
+  insertChat(`「${p}」がいいな`)
+}
 
 // Prep, test shot and final are buttons on their own endpoints — not words
 // typed into chat for a regex to recognise. Typed text is always creative
@@ -793,7 +821,6 @@ async function runStage(path) {
     scrollChat()
   } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
 }
-const duetPrep = () => runStage('duet/prep')
 const testShot = () => runStage('board')
 const finalShot = () => runStage('approve')
 
@@ -1191,15 +1218,15 @@ async function onChatKey(e) {
             <div class="shrink-0 border-t border-white/10 p-3 space-y-2">
               <div class="flex flex-wrap gap-2">
                 <template v-if="isDuet">
-                  <button class="sb-btn text-[10px]" :disabled="chatLocked"
-                          :title="t('muse.quick.prepTitle')"
-                          @click="duetPrep">
-                    {{ t('muse.quick.prep') }}
-                  </button>
                   <button class="sb-btn text-[10px]" :disabled="chatLocked || !hasPrompt"
                           :title="hasPrompt ? t('muse.quick.testShotTitle') : t('muse.quick.prepFirst')"
                           @click="testShot">
-                    {{ t('muse.quick.testShot') }}
+                    {{ t('muse.quick.shootAsk') }}
+                  </button>
+                  <button class="sb-btn text-[10px]" :disabled="chatLocked"
+                          :title="t('muse.quick.talkMoreTitle')"
+                          @click="sendChat(t('muse.quick.talkMorePrompt'))">
+                    {{ t('muse.quick.talkMore') }}
                   </button>
                   <button
                     class="sb-btn text-[10px] bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200"
@@ -1207,7 +1234,7 @@ async function onChatKey(e) {
                     :title="hasPrompt ? t('muse.quick.finalTitle') : t('muse.quick.prepFirst')"
                     @click="finalShot"
                   >
-                    {{ t('muse.quick.final') }}
+                    {{ t('muse.quick.finalShot') }}
                   </button>
 
                   <template v-if="isWMuse">
@@ -1294,21 +1321,22 @@ async function onChatKey(e) {
                 >{{ chip }}</button>
               </div>
               <div
-                v-if="openProposal && !chatLocked"
+                v-if="openChoices.length && !chatLocked"
                 class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--sb-muted)]"
               >
                 <span class="text-[var(--sb-amber)]">{{ t('muse.openChipLabel') }}</span>
-                <span class="truncate max-w-[14rem] text-[var(--sb-faint)]">{{ openProposal }}</span>
                 <button
+                  v-for="phrase in openChoices" :key="phrase"
                   type="button"
                   class="sb-btn text-[10px] px-2 py-0.5"
-                  @click="sendChat(t('muse.openChipYes'))"
-                >{{ t('muse.openChipYes') }}</button>
+                  @click="insertPitch(phrase)"
+                >{{ phrase }}</button>
                 <button
+                  v-if="isDuet"
                   type="button"
                   class="sb-btn text-[10px] px-2 py-0.5 opacity-80"
-                  @click="sendChat(t('muse.openChipNo'))"
-                >{{ t('muse.openChipNo') }}</button>
+                  @click="sendChat(t('muse.quick.talkMorePrompt'))"
+                >{{ t('muse.quick.talkMore') }}</button>
               </div>
               <div class="flex gap-2">
                 <textarea
@@ -1359,8 +1387,8 @@ async function onChatKey(e) {
             <h4 class="text-[11px] text-[var(--sb-amber)]">
               {{ isDuet ? t('muse.stillTitle') : t('muse.boardTitle') }}
             </h4>
-            <p class="text-[10px] text-[var(--sb-muted)]">
-              {{ isDuet ? t('muse.stillAsk') : t('muse.boardAsk') }}
+            <p v-if="!isDuet" class="text-[10px] text-[var(--sb-muted)]">
+              {{ t('muse.boardAsk') }}
             </p>
             <div class="grid grid-cols-2 gap-2">
               <figure

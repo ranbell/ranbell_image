@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import notebook, service, session_db, vitality
 from tests.muse.test_duet import _duet_session  # noqa: E402
-from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block  # noqa: E402
+from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block, _tags  # noqa: E402
 from tests.muse.test_service import FakeDb, FakeOllama  # noqa: E402
 
 
@@ -19,10 +19,6 @@ def _no_runtime_config(monkeypatch):
     async def _cfg(db):
         return {"ollama_num_ctx": 16000}
     monkeypatch.setattr(service, "get_runtime_config", _cfg)
-
-
-def _tags(s):
-    return str((s.get("craft") or {}).get("tags") or "")
 
 
 @pytest.mark.asyncio
@@ -366,10 +362,9 @@ async def test_invalid_scripter_does_not_overwrite_craft():
     s["mode"] = "duet"
     await session_db.save(db, s)
     await service.post_duet_chat(db, ollama, s, "麦わら帽子")
-    before = _tags(s)
-    assert "straw_hat" in before
+    assert "straw_hat" in _tags(s)
     await service.post_duet_chat(db, ollama, s, "壊す指示で煽りと見上げ同時")
-    assert _tags(s) == before
+    assert not (s.get("craft") or {}).get("tags")
     assert s.get("craft_dirty") is True
 
 

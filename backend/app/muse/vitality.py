@@ -193,4 +193,10 @@ def vitality_talk_extras(session: dict[str, Any], *, partner: bool = False) -> s
             "Recall it through the body in Japanese SAY. Missing detail → "
             "cute soft-miss『そこまでは…』."
         )
+    if session.get("commit_pitch"):
+        parts.append(
+            "COMMIT this turn: they just picked a proposal. First line of SAY "
+            "echoes the choice in character (e.g. じゃあ麦わら帽子でいくね). "
+            "Do not offer a new PITCH this turn."
+        )
     return "\n\n".join(parts)

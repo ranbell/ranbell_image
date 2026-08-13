@@ -78,6 +78,9 @@ class FakeOllama:
                 chunks.append(str(event.get("text") or ""))
         return "".join(chunks)
 
+    def generate_vlm_stream(self, prompt, images, **kw):
+        return self.generate_text_stream(prompt, **kw)
+
     async def embed(self, text, model=None):
         # Deterministic tiny vector for muse_memories tests.
         return [float((sum(ord(c) for c in str(text)) % 97) + 1)] * 8

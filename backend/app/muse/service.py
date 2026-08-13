@@ -476,7 +476,8 @@ async def board_images(db, session: dict[str, Any], *, limit: int = 1) -> list[b
     shots = [
         str(i.get("image_id") or "") for i in (board.get("images") or [])
         if isinstance(i, dict) and i.get("image_id")
-    ][:max(1, int(limit))]
+    ]
+    shots = shots[-max(1, int(limit)):]
     if not shots or board.get("pending"):
         return []
     sid = str(session.get("session_id") or "")
@@ -2152,7 +2153,7 @@ def _apply_compiled_craft(
     session["notebook_rev_compiled"] = int(notebook_mod.of(session).get("rev") or 0)
     lead = crew.DEFAULT_MEMBER["actress"]
     record_ledger(
-        session, muse_id="scripter", name="Scripter",
+        session, muse_id="script", name="Script",
         before=before, after=tags, ms=0,
     )
     events.publish(session["session_id"], {
@@ -2165,9 +2166,29 @@ def _apply_compiled_craft(
     return True
 
 
+def _theme_for_models(session: dict[str, Any]) -> str:
+    """Opening seed only. After the notebook has a shot, do not re-inject theme."""
+    if notebook_mod.has_shot(notebook_mod.of(session)):
+        return ""
+    return str(_inputs(session).get("theme") or "").strip()
+
+
+def _struck_line(session: dict[str, Any]) -> str:
+    items = [str(s).strip() for s in (session.get("struck") or []) if str(s).strip()]
+    return ", ".join(items[:40])
+
+
+_COMMIT_PITCH_RE = re.compile(r"「([^」]{1,80})」がいいな")
+
+
+def _is_commit_pitch(text: str) -> bool:
+    return bool(_COMMIT_PITCH_RE.search(str(text or "")))
+
+
 async def _call_duet_scripter(
     ollama, session: dict[str, Any], *, note: str, cfg: dict[str, Any],
     partner: bool, name_a: str, name_b: str,
+    mode: str = "compile", images: list[bytes] | None = None,
 ) -> dict[str, Any]:
     """One scripter generate against the current notebook + conversation."""
     nb = notebook_mod.of(session)
@@ -2175,59 +2196,30 @@ async def _call_duet_scripter(
     block = notebook_mod.render(
         nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""),
     )
+    vision = images or None
+    model = _vision_model(inputs) if vision else _text_model(inputs)
     return await chain.run_scripter(
         ollama,
         notebook_block=block,
         note=note,
-        transcript=_duet_transcript(session),
-        theme=str(inputs.get("theme") or ""),
+        transcript="" if mode == "weave" else _duet_transcript(session),
+        theme="" if mode == "weave" else _theme_for_models(session),
         style=_style(session),
         framing=_framing(inputs),
         partner=partner,
-        model=_text_model(inputs),
+        model=model,
         num_ctx=_num_ctx(inputs, cfg),
+        mode=mode,
+        images=vision,
+        card="" if mode == "weave" else str(session.get("muse_card") or ""),
+        struck=_struck_line(session),
     )
-
-
-def _stale_after_compile(
-    *, prev_wearing: str, prev_scene: str, nb: dict[str, Any], tags: str,
-) -> list[str]:
-    """Garment/place tokens dropped from the notebook but still in tags."""
-    stale = notebook_mod.stale_wearing_tags(
-        prev_wearing=prev_wearing,
-        new_wearing=str(nb.get("wearing") or ""),
-        tags=tags,
-    )
-    stale += notebook_mod.stale_wearing_tags(
-        prev_wearing=prev_scene,
-        new_wearing=str(nb.get("scene") or ""),
-        tags=tags,
-    )
-    # Dedup, keep order.
-    seen: set[str] = set()
-    out: list[str] = []
-    for t in stale:
-        if t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
 
 
 async def _run_duet_scripter(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """INTENT + absolute notebook patch + optional full craft compile.
-
-    Runs every turn. The scripter is handed the conversation and decides for
-    itself whether the picture moved — there is no keyword gate in front of it
-    any more. Two structural recoveries remain (still not keyword lists):
-
-    1. VERIFY — if the model answers ``casual`` with no SHOT edit despite a
-       non-empty showrunner line, ask once more to compare the line to
-       NOTEBOOK NOW (place/outfit/affirm misses without a vocab table).
-    2. CONSISTENCY — if a compile leaves garment/place tokens that the new
-       wearing/scene dropped, one repair pass rewrites tags from the notebook.
-    """
+    """INTENT + absolute notebook patch. Tags are woven later, at take time."""
     notebook_mod.migrate(session)
     nb = notebook_mod.of(session)
     inputs = _inputs(session)
@@ -2247,14 +2239,14 @@ async def _run_duet_scripter(
     rev_before = int(nb.get("rev") or 0)
     open_before = str(nb.get("open") or "").strip()
     prev_wearing = str(nb.get("wearing") or "")
-    prev_scene = str(nb.get("scene") or "")
+    prev_wearing_b = str(nb.get("wearing_b") or "")
     had_shot = notebook_mod.has_shot(nb)
+    vision_images = await board_images(db, session)
 
-    # The scripter gets the notebook and the conversation, and nothing else —
-    # no diary, no memories, no lounge or studio notices.
     result = await _call_duet_scripter(
         ollama, session, note=text, cfg=cfg,
         partner=partner, name_a=name_a, name_b=name_b,
+        mode="compile", images=vision_images or None,
     )
     intent = str(result.get("intent") or "casual")
     patch = notebook_mod.guard_partner_patch(
@@ -2269,20 +2261,14 @@ async def _run_duet_scripter(
         patch.get("clear_open")
     )
 
-    # VERIFY only when a picture miss is plausible — not on every chill turn.
-    # (1) OPEN was pending (affirm often comes back as casual).
-    # (2) Notebook already had a shot, casual left SHOT untouched, and the
-    #     patch did not even touch vibe/open — total freeze / ignore.
-    # Pure vibe-chat stays one call so enjoyment isn't double-taxed.
-    patch_meta = bool(str(patch.get("vibe") or "").strip() or str(patch.get("open") or "").strip())
     needs_verify = (
         intent in ("casual", "")
         and not shot_patched
         and str(text or "").strip()
-        and not str(text or "").strip().upper().startswith("DENSIFY")
+        and not str(text or "").strip().upper().startswith("WEAVE")
         and not str(text or "").strip().upper().startswith("VERIFY")
         and not str(text or "").strip().upper().startswith("REPAIR")
-        and (bool(open_before) or (had_shot and not patch_meta))
+        and (bool(open_before) or had_shot)
     )
     if needs_verify:
         events.publish(sid, {
@@ -2295,6 +2281,7 @@ async def _run_duet_scripter(
             ollama, session,
             note=f"{chain.SCRIPTER_VERIFY_NOTE}\n\nSHOWRUNNER'S LATEST LINE:\n{text.strip()}",
             cfg=cfg, partner=partner, name_a=name_a, name_b=name_b,
+            mode="compile", images=vision_images or None,
         )
         v_intent = str(verify.get("intent") or "casual")
         v_patch = notebook_mod.guard_partner_patch(
@@ -2312,10 +2299,18 @@ async def _run_duet_scripter(
             notebook_mod.apply_patch(nb, patch)
             notebook_moved = int(nb.get("rev") or 0) > rev_before
 
+    notebook_mod.record_struck_from_wearing(
+        session, prev_wearing=prev_wearing, new_wearing=str(nb.get("wearing") or ""),
+    )
+    if partner:
+        notebook_mod.record_struck_from_wearing(
+            session, prev_wearing=prev_wearing_b,
+            new_wearing=str(nb.get("wearing_b") or ""),
+        )
+
     session["notebook"] = nb
     session["standing"] = list(nb.get("standing") or [])
     session["digest"] = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
-    # Flash only when a SHOT row moved — vibe-only should not pulse the board.
     flash = vitality.notebook_flash_key(patch) if shot_patched else ""
     events.publish(sid, {
         "type": "scripter_working",
@@ -2341,64 +2336,14 @@ async def _run_duet_scripter(
 
     valid = bool(result.get("valid", True))
     compiled = False
-    tags = str(result.get("tags") or "")
-    scene = str(result.get("craft_scene") or "")
 
     if intent in ("shot", "mixed"):
-        if valid and (tags or scene):
-            stale = _stale_after_compile(
-                prev_wearing=prev_wearing, prev_scene=prev_scene,
-                nb=nb, tags=tags,
-            )
-            if stale:
-                logger.info("[muse] stale craft tokens after compile: %s", ", ".join(stale))
-                repair = await _call_duet_scripter(
-                    ollama, session,
-                    note=(
-                        f"{chain.SCRIPTER_CONSISTENCY_NOTE}\n"
-                        f"Stale tokens: {', '.join(stale)}\n\n"
-                        f"SHOWRUNNER'S LATEST LINE:\n{text.strip()}"
-                    ),
-                    cfg=cfg, partner=partner, name_a=name_a, name_b=name_b,
-                )
-                if str(repair.get("intent") or "") in ("shot", "mixed") and repair.get("valid"):
-                    r_patch = notebook_mod.guard_partner_patch(
-                        dict(repair.get("patch") or {}), partner=partner,
-                    )
-                    notebook_mod.apply_patch(nb, r_patch)
-                    session["notebook"] = nb
-                    session["digest"] = notebook_mod.summary_for_muse(
-                        nb, name_a=name_a, name_b=name_b,
-                    )
-                    tags = str(repair.get("tags") or tags)
-                    scene = str(repair.get("craft_scene") or scene)
-                    result = repair
-                    # Re-check; if still stale, keep tags but mark dirty.
-                    if _stale_after_compile(
-                        prev_wearing=prev_wearing, prev_scene=prev_scene,
-                        nb=nb, tags=tags,
-                    ):
-                        session["craft_dirty"] = True
-            compiled = _apply_compiled_craft(session, tags, scene)
-            if not compiled:
-                session["craft_dirty"] = True
-        else:
-            session["craft_dirty"] = True
-            if not valid:
-                logger.info(
-                    "[muse] scripter invalid — craft not overwritten (%s)",
-                    result.get("refuse_reason") or "validate",
-                )
         session.setdefault("notes", []).append(text)
     else:
         session["just_banned"] = []
         session["just_restored"] = []
 
-    # Only SHOT drift dirties craft. Vibe/open-only casual must not amber-banner
-    # the chat — that made every chill turn feel like an unsynced script.
-    if shot_patched and not compiled:
-        session["craft_dirty"] = True
-    elif notebook_moved and not compiled and intent in ("shot", "mixed"):
+    if shot_patched or (notebook_moved and intent in ("shot", "mixed")):
         session["craft_dirty"] = True
 
     session["scripter_intent"] = intent
@@ -2486,16 +2431,29 @@ def _format_duet_chat_line(session: dict[str, Any], msg: dict[str, Any]) -> list
     return [f"- {name}: {msg.get('text')}"]
 
 
-def _duet_transcript(session: dict[str, Any], *, limit: int = 12) -> str:
-    """Recent conversation, speaker-labelled. Read by the Muse and the scripter.
+def _duet_transcript(session: dict[str, Any], *, user_turns: int = 20) -> str:
+    """Recent conversation by Showrunner turns, not raw message count.
 
-    Both sides of the turn need the same view of what was said — the scripter
-    cannot resolve「うん」or a change a Muse offered herself without it.
+    ASIDE (banter) rides with its SAY, so a 12-message window would shrink to
+    ~4 exchanges. Cut from the oldest user line so instructions are not dropped
+    while mutter remains.
     """
+    rows = [
+        m for m in (session.get("chat") or [])
+        if m.get("role") in ("user", "muse")
+    ]
+    if not rows:
+        return ""
+    keep_from = 0
+    users = 0
+    for i in range(len(rows) - 1, -1, -1):
+        if rows[i].get("role") == "user":
+            users += 1
+            if users >= user_turns:
+                keep_from = i
+                break
     lines: list[str] = []
-    for m in (session.get("chat") or [])[-limit:]:
-        if m.get("role") not in ("user", "muse"):
-            continue
+    for m in rows[keep_from:]:
         lines.extend(_format_duet_chat_line(session, m))
     return "\n".join(lines)
 
@@ -2505,7 +2463,7 @@ def _duet_user_prompt(
 ) -> str:
     """What she is handed. Muse-only context (never the scripter's inputs)."""
     inputs = _inputs(session)
-    theme = str(inputs.get("theme") or "").strip()
+    theme = _theme_for_models(session)
     talk = _duet_transcript(session)
     parts = [
         "LANGUAGE: Instructions below are in English. "
@@ -2589,16 +2547,26 @@ def _duet_user_prompt(
         parts.append(extras)
 
     if not prep:
+        card = str(session.get("muse_card") or "").strip()
+        if card:
+            parts.append(
+                "PREVIOUS CARD (machine names last turn; update it):\n" + card
+            )
         parts.append(
             "HOW TO SPEAK THIS TURN:\n"
-            "- Sense and body first; never a change-log of the shot.\n"
+            "- Sense and body first. Do not recite a checklist every turn.\n"
+            "- If they ask what you are wearing / where / what time / how it "
+            "looks now, answer with nouns from the still and CARD. "
+            "Do not dodge with『なんかいい感じ』.\n"
             "- The Showrunner's newest line wins; drop what it replaces.\n"
             "- You may play-act an OPEN proposal in SAY before it is locked.\n"
-            "- On a picture change, at most ONE concrete two-choice pitch "
-            "(no interview chains).\n"
+            "- PITCH only when a real picture fork is open, OPEN is empty, "
+            "and they did not just pick. No interview chains. Not every turn.\n"
             "- Past shoots: only from memories / CITED you were given. "
             "Missing detail → soft Japanese『そこまでは…』.\n"
-            "- Board images are older takes; the latest text wins.\n"
+            "- The attached still is the previous take (the base). CARD is "
+            "that base plus what this conversation changed. Do not copy the "
+            "photo as the current ask.\n"
             "- Never say you are getting ready / can get ready. "
             "Never print English section titles inside SAY.\n"
             "- OUTPUT LANGUAGE: SAY must be natural Japanese when they wrote "
@@ -2751,7 +2719,7 @@ async def _duet_talk(
     )
 
     try:
-        say, raw_turns, blind = await chain.run_duet_talk(
+        say, raw_turns, blind, aside, card, pitch = await chain.run_duet_talk(
             ollama,
             user_prompt=_duet_user_prompt(session, text, prep=prep),
             model=_vision_model(inputs) if vision_images else _text_model(inputs),
@@ -2773,6 +2741,17 @@ async def _duet_talk(
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
+    if aside:
+        mutter = _chat_append(
+            session, role="muse", text=aside, muse_id=lead,
+            name=name, kind="banter",
+        )
+        _publish_chat(sid, mutter)
+    session["muse_card"] = card or session.get("muse_card") or ""
+    choices = notebook_mod.parse_pitch_choices(pitch)
+    if choices and not session.get("commit_pitch"):
+        notebook_mod.set_open_choices(notebook_mod.of(session), choices)
+        session["notebook"] = notebook_mod.of(session)
     session["status"] = "chat"
     # One-shot flags consumed after the line lands.
     session["reunion_turn"] = False
@@ -2781,6 +2760,7 @@ async def _duet_talk(
     session["again_feel_hint"] = ""
     session["prop_age_hint"] = ""
     session["w_b_leads"] = False
+    session["commit_pitch"] = False
     await _after_actress_spoke(db, session)
     await session_db.save(db, session)
     return session
@@ -2929,22 +2909,12 @@ async def _duet_prep_facets(
 async def _duet_prep_notebook(
     db, ollama, session: dict[str, Any], *, cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """①撮影準備 — densify polish + sensory readout. Not the gate for craft."""
+    """Legacy ①撮影準備. Weave only — no readout SAY."""
     notebook_mod.migrate(session)
-    craft = session.get("craft") or {}
-    if not str(craft.get("prompt") or "").strip():
-        # Nothing live yet — ask the scripter once from the notebook/theme.
-        theme = str(_inputs(session).get("theme") or "").strip()
-        seed_note = theme or "お題から撮る画のたたきを組んで"
-        await _run_duet_scripter(db, ollama, session, seed_note, cfg=cfg)
-
-    session["status"] = "discussing"
+    session["status"] = "chat"
+    session = await weave_craft_if_needed(db, ollama, session)
     await session_db.save(db, session)
-    session = await densify_craft_if_needed(db, ollama, session)
-    # Do not force-clear dirty: densify may have failed and left a thin draft.
-
-    # Sensory SAY only — muse must not rewrite tags on prep anymore.
-    return await _duet_talk(db, ollama, session, "", cfg=cfg, prep=True)
+    return session
 
 
 async def _duet_prep(
@@ -3014,44 +2984,33 @@ async def post_duet_chat(
     db, ollama, session: dict[str, Any], text: str,
     images: list[bytes] | None = None,
 ) -> dict[str, Any]:
-    """One turn of the two-hander: scripter updates the notebook, then she talks.
+    """One turn: she talks (CARD), then Script compiles the notebook.
 
-    Board / prep / shoot stay their own buttons. Picture changes compile live —
-    prep is not the gate.
-
-    The scripter runs on every turn. It used to sit behind a keyword gate that
-    skipped it on anything that did not look like a picture change, which is
-    what froze the wardrobe and the location: the turn was dropped before the
-    only component that can write the notebook ever saw it. A casual turn now
-    costs one extra JSON call and the scripter answers `intent: "casual"`.
-
-    ``images`` is accepted and ignored — the VRM direction still is switched off
-    in this version (see ``runner.DIRECTION_STILL_ENABLED``).
+    Tags are woven later, just before a take. ``images`` is accepted and
+    ignored — the VRM direction still is switched off in this version.
     """
     sid = session["session_id"]
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
+    session["commit_pitch"] = _is_commit_pitch(text)
     await session_db.save(db, session)
 
     cfg = await get_runtime_config(db)
+    session = await _duet_talk(db, ollama, session, text, cfg=cfg)
     if uses_notebook(session):
         try:
             await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
         except Exception:
-            logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
+            logger.warning("[muse] scripter failed; muse already talked", exc_info=True)
             session["craft_dirty"] = True
-        # OPEN the scripter neither cleared nor rewrote for ~2 turns → fade.
-        # After the scripter, so an unchanged OPEN is real evidence nobody
-        # engaged with the proposal rather than a guess at the showrunner's words.
         nb = notebook_mod.of(session)
         if vitality.tick_open_ignore(session, open_text=str(nb.get("open") or "")):
             notebook_mod.apply_patch(nb, {"clear_open": True})
             session["notebook"] = nb
             session["open_faded"] = True
         await session_db.save(db, session)
-        return await _duet_talk(db, ollama, session, text, cfg=cfg)
+        return session
 
-    # Legacy non-notebook path (should be rare).
     named, _ = await route_note(db, ollama, session, text, cfg=cfg)
     if not named:
         await take_note(db, ollama, session, text, cfg=cfg)
@@ -3060,7 +3019,7 @@ async def post_duet_chat(
         session["just_banned"] = []
         session["just_restored"] = []
     await session_db.save(db, session)
-    return await _duet_talk(db, ollama, session, text, cfg=cfg)
+    return session
 
 
 async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
@@ -3091,6 +3050,9 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         partner=bool(str(_inputs(session).get("partner_preset") or "").strip())
     )
     session["craft_dirty"] = False
+    session["struck"] = []
+    session["muse_card"] = ""
+    session["commit_pitch"] = False
     session["cited_memories"] = []
     session["talk_turn_count"] = 0
     session["shot_compile_count"] = 0
@@ -3740,12 +3702,152 @@ def _warn_if_craft_behind(session: dict[str, Any]) -> bool:
     return True
 
 
+async def weave_craft_if_needed(
+    db, ollama, session: dict[str, Any],
+) -> dict[str, Any]:
+    """主演撮り: one Script weave from the notebook. No theme, no chat, no still."""
+    if ollama is None or not uses_notebook(session) or not is_duet(session):
+        return session
+    notebook_mod.migrate(session)
+    nb = notebook_mod.of(session)
+    if not notebook_mod.has_shot(nb):
+        return session
+    craft = session.get("craft") or {}
+    dirty = bool(session.get("craft_dirty"))
+    behind = int(nb.get("rev") or 0) > int(session.get("notebook_rev_compiled") or 0)
+    prompt = str(craft.get("prompt") or "")
+    scene = str(craft.get("scene") or "")
+    if not dirty and not behind and prompt and not identity.craft_is_thin(prompt, scene):
+        return session
+
+    cfg = await get_runtime_config(db)
+    sid = session.get("session_id") or ""
+    locale = str(_inputs(session).get("locale") or "ja")
+    if sid:
+        events.publish(sid, {
+            "type": "scripter_working",
+            "status": "weave",
+            "message": (
+                "空気、厚くしてる…" if locale.startswith("ja")
+                else "Thickening the air…"
+            ),
+        })
+    partner_character = await _partner_character(db, session)
+    partner = bool(partner_character) or bool(
+        str(_inputs(session).get("partner_preset") or "").strip()
+    )
+    name_a, name_b = _muse_names(session, partner_character)
+    weave_ok = False
+    try:
+        result = await _call_duet_scripter(
+            ollama, session, note="WEAVE", cfg=cfg,
+            partner=partner, name_a=name_a, name_b=name_b, mode="weave",
+        )
+        tags = notebook_mod.filter_weave_tags(
+            str(result.get("tags") or ""),
+            wearing=str(nb.get("wearing") or ""),
+            scene=str(nb.get("scene") or ""),
+            beat=str(nb.get("beat") or ""),
+            struck=notebook_mod.struck_tokens(session),
+            wearing_b=str(nb.get("wearing_b") or ""),
+            beat_b=str(nb.get("beat_b") or ""),
+        )
+        scene_out = str(result.get("craft_scene") or "")
+        if result.get("valid") and tags and scene_out:
+            if _apply_compiled_craft(session, tags, scene_out):
+                session["craft_dirty"] = False
+                weave_ok = True
+        if not weave_ok:
+            session["craft_dirty"] = True
+    except Exception:
+        logger.warning("[muse] notebook weave failed; keeping draft", exc_info=True)
+        session["craft_dirty"] = True
+        weave_ok = False
+    if sid:
+        events.publish(sid, {
+            "type": "scripter_done",
+            "intent": "shot",
+            "compiled": bool(weave_ok),
+            "valid": bool(weave_ok),
+            "dirty": bool(session.get("craft_dirty")),
+        })
+    await session_db.save(db, session, publish=False)
+    return session
+
+
+async def still_read_after_board(db, ollama, session_id: str) -> None:
+    """Align notebook to the latest still. Struck items stay off."""
+    if ollama is None:
+        return
+    session = await session_db.load(db, session_id)
+    if session is None or not is_duet(session) or not uses_notebook(session):
+        return
+    images = await board_images(db, session)
+    if not images:
+        return
+    rnd = int((session.get("board") or {}).get("round") or 0)
+    if int(session.get("still_read_round") or 0) == rnd:
+        return
+    cfg = await get_runtime_config(db)
+    inputs = _inputs(session)
+    partner_character = await _partner_character(db, session)
+    partner = bool(partner_character) or bool(
+        str(inputs.get("partner_preset") or "").strip()
+    )
+    name_a, name_b = _muse_names(session, partner_character)
+    nb = notebook_mod.of(session)
+    try:
+        result = await chain.run_still_read(
+            ollama,
+            notebook_block=notebook_mod.render(
+                nb, name_a=name_a,
+                name_b=name_b or ("Partner" if partner else ""),
+            ),
+            struck=_struck_line(session),
+            partner=partner,
+            model=_vision_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+            images=images,
+        )
+    except Exception:
+        logger.warning("[muse] still-read failed", exc_info=True)
+        return
+    patch = notebook_mod.guard_partner_patch(
+        dict(result.get("patch") or {}), partner=partner,
+    )
+    prev_wearing = str(nb.get("wearing") or "")
+    notebook_mod.apply_patch(nb, patch)
+    # Photo must not restore struck garments.
+    struck = notebook_mod.struck_tokens(session)
+    if struck:
+        wearing = str(nb.get("wearing") or "")
+        kept = [
+            w for w in re.split(r"[,，、]", wearing)
+            if w.strip() and not (
+                notebook_mod.wearing_tokens(w) & struck
+            )
+        ]
+        if ",".join(x.strip() for x in kept) != wearing:
+            notebook_mod.apply_patch(nb, {"wearing": ", ".join(x.strip() for x in kept)})
+    notebook_mod.record_struck_from_wearing(
+        session, prev_wearing=prev_wearing, new_wearing=str(nb.get("wearing") or ""),
+    )
+    session["notebook"] = nb
+    session["still_read_round"] = rnd
+    session["digest"] = notebook_mod.summary_for_muse(
+        nb, name_a=name_a, name_b=name_b,
+    )
+    await session_db.save(db, session, publish=False)
+
+
 async def densify_craft_if_needed(
     db, ollama, session: dict[str, Any],
 ) -> dict[str, Any]:
     """Run Finisher once when craft is too thin (or notebook-marked dirty)."""
     if ollama is None:
         return session
+    if is_duet(session) and uses_notebook(session):
+        return await weave_craft_if_needed(db, ollama, session)
     # Legacy facet path composes instead of densifying. Notebook-primary duet
     # keeps draft tags/scene from the scripter and thickens via Finisher.
     if on_facets(session) and not uses_notebook(session):
@@ -3881,19 +3983,30 @@ async def request_board(
     """
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
-    if not prompt:
-        # Live compile usually fills this from chat; prep can also seed it.
+    if is_duet(session) and uses_notebook(session):
+        session = await weave_craft_if_needed(db, ollama, session)
+        _warn_if_craft_behind(session)
+        craft = session.get("craft") or {}
+        prompt = str(craft.get("prompt") or "")
+    elif not prompt:
         raise MuseError(_msg(
             session,
             ja="まだ台本がありません。服や場所など画の指示を会話で出してください。",
             en="No script yet — describe the shot in chat (clothes, place, camera).",
         ))
 
-    if not still:
+    if not still and not is_duet(session):
         session = await densify_craft_if_needed(db, ollama, session)
         _warn_if_craft_behind(session)
         craft = session.get("craft") or {}
         prompt = str(craft.get("prompt") or "")
+
+    if not prompt:
+        raise MuseError(_msg(
+            session,
+            ja="まだ台本がありません。服や場所など画の指示を会話で出してください。",
+            en="No script yet — describe the shot in chat (clothes, place, camera).",
+        ))
 
     inputs = _inputs(session)
     sid = session["session_id"]
@@ -3902,25 +4015,26 @@ async def request_board(
 
     await _maybe_unload(ollama, session)
 
-    if still:
-        ask_text = (
-            "当たりを一枚撮ります。少し待ってください。"
-            if locale.startswith("ja") else
-            "Taking one still. One moment."
+    if not is_duet(session):
+        if still:
+            ask_text = (
+                "当たりを一枚撮ります。少し待ってください。"
+                if locale.startswith("ja") else
+                "Taking one still. One moment."
+            )
+        else:
+            ask_text = (
+                "総監督、イメージボード上げます。これでいい？良ければ「③本番」、"
+                "ダメなら指摘ください。"
+                if locale.startswith("ja") else
+                "Showrunner — image board going up. Good? Press \"final\" to shoot, "
+                "or note what to fix."
+            )
+        ask = _chat_append(
+            session, role="muse", muse_id="lens",
+            name=_muse_display_name(session, "lens"), text=ask_text,
         )
-    else:
-        ask_text = (
-            "総監督、イメージボード上げます。これでいい？良ければ「③本番」、"
-            "ダメなら指摘ください。"
-            if locale.startswith("ja") else
-            "Showrunner — image board going up. Good? Press \"final\" to shoot, "
-            "or note what to fix."
-        )
-    ask = _chat_append(
-        session, role="muse", muse_id="lens",
-        name=_muse_display_name(session, "lens"), text=ask_text,
-    )
-    _publish_chat(sid, ask)
+        _publish_chat(sid, ask)
 
     session["board"] = {
         "prompt": prompt,
@@ -3938,8 +4052,7 @@ async def request_board(
         JobLane.GENERATION,
         "muse_board",
         runner.run_board_job,
-        meta={"session_id": sid, "step": "board"},
-        db=db, comfy=comfy, session_id=sid,
+        db=db, comfy=comfy, session_id=sid, ollama=ollama,
     )
     session_db.log(session, "board", f"round {session['board']['round']}")
     await session_db.save(db, session)
@@ -3949,21 +4062,16 @@ async def request_board(
 async def approve_and_shoot(
     db, comfy, spooler, session: dict[str, Any], ollama=None,
 ) -> dict[str, Any]:
+    session = await densify_craft_if_needed(db, ollama, session)
+    _warn_if_craft_behind(session)
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if not prompt:
-        # In 主演撮り an "OK" with no craft used to fall through to another line
-        # of conversation, so pressing the button looked like nothing happened.
         raise MuseError(_msg(
             session,
             ja="まだ台本がありません。服や場所など画の指示を会話で出してください。",
             en="No script yet — describe the shot in chat (clothes, place, camera).",
         ))
-
-    session = await densify_craft_if_needed(db, ollama, session)
-    _warn_if_craft_behind(session)
-    craft = session.get("craft") or {}
-    prompt = str(craft.get("prompt") or "")
 
     inputs = _inputs(session)
     sid = session["session_id"]
