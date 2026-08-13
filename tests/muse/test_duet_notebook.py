@@ -43,8 +43,14 @@ def _scripter_block(
 
 def _current_note(prompt: str) -> str:
     """The instruction this scripter turn is answering, minus the transcript."""
-    head, sep, tail = str(prompt).partition("総監督がいま言ったこと:")
-    return tail if sep else head
+    for marker in (
+        "SHOWRUNNER'S LATEST LINE:",
+        "総監督がいま言ったこと:",  # legacy marker
+    ):
+        head, sep, tail = str(prompt).partition(marker)
+        if sep:
+            return tail
+    return str(prompt)
 
 
 class NotebookOllama(FakeOllama):
@@ -310,11 +316,81 @@ async def test_casual_chit_chat_runs_scripter_and_leaves_craft_alone():
     await service.post_duet_chat(db, ollama, s, "麦わら帽子かぶって")
     before = len(ollama.scripter_prompts)
     await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
-    # Called — no keyword gate in front of it any more.
-    assert len(ollama.scripter_prompts) == before + 1
+    # Called — no keyword gate. (VERIFY only runs when casual leaves SHOT still.)
+    assert len(ollama.scripter_prompts) >= before + 1
     # …and it declined to change the picture.
     assert s["scripter_intent"] == "casual"
     assert "straw_hat" in s["craft"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_verify_recovers_casual_misread_of_picture_change():
+    """First answer casual with no SHOT edit → VERIFY pass can still compile.
+
+    Models the beach failure: Gemma returns casual, notebook stays put, then
+    the structural VERIFY ask (not a keyword gate) gets a proper shot.
+    """
+    db = FakeDb()
+
+    class VerifyOllama(NotebookOllama):
+        def __init__(self):
+            super().__init__(scripts={})
+            self._n = 0
+
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append({**kw, "prompt": prompt})
+            system = str(kw.get("system") or "")
+            if "studio scripter" in system or "shot notebook" in system:
+                self.scripter_prompts.append(str(prompt))
+                self._n += 1
+                if self._n == 1:
+                    # Misread: vibe only, no SHOT edit.
+                    text = _scripter_block(
+                        intent="casual", vibe="thinking about the shore",
+                    )
+                else:
+                    assert "VERIFY" in str(prompt)
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="sandy beach shoreline",
+                        wearing="cheerleader uniform",
+                        beat="running on wet sand",
+                        frame="eye level",
+                        tags="beach, sand, cheerleader_uniform, running",
+                        craft_scene="Running on the beach.",
+                    )
+            else:
+                text = "SAY: 砂、かかとに入る。"
+
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    ollama = VerifyOllama()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["notebook"] = notebook.blank()
+    notebook.apply_patch(s["notebook"], {
+        "scene": "public park",
+        "wearing": "sailor uniform",
+        "beat": "standing",
+        "frame": "eye level",
+    })
+    s["craft"] = {
+        "tags": "public_park, sailor_collar",
+        "scene": "Park sailor.",
+        "prompt": "public_park, sailor_collar, Park sailor.",
+        "pose_intent": "",
+    }
+    s["notebook_rev_compiled"] = int(s["notebook"].get("rev") or 0)
+    await session_db.save(db, s)
+    await service.post_duet_chat(
+        db, ollama, s, "場所をビーチにして砂浜走ってる感じにしよう",
+    )
+    assert s["scripter_intent"] == "shot"
+    assert "beach" in (s["notebook"].get("scene") or "")
+    assert "beach" in (s["craft"].get("tags") or "")
+    assert len(ollama.scripter_prompts) >= 2
 
 
 @pytest.mark.asyncio
@@ -490,10 +566,10 @@ async def test_scripter_is_handed_the_conversation():
     await service.post_duet_chat(db, ollama, s, "いいね")
 
     last = ollama.scripter_prompts[-1]
-    assert "ここまでの会話" in last
+    assert "CONVERSATION SO FAR" in last or "ここまでの会話" in last
     # Both sides of the exchange the affirm refers back to.
     assert "ベンチに座って" in last
-    assert "総監督: いいね" in last
+    assert "総監督: いいね" in last or "SHOWRUNNER'S LATEST LINE" in last
 
 
 @pytest.mark.asyncio
@@ -658,14 +734,14 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
     ]
     joined_muse = "\n".join(muse_prompts)
     assert "CITED_MEMORIES" in joined_muse or "堤防" in joined_muse
-    assert "関係" in joined_muse
+    assert "BOND" in joined_muse or "関係" in joined_muse
     assert "GROUNDED_TOKENS" in joined_muse
 
-    # Casual turn — the scripter still runs (no gate), and leaves craft alone.
+    # Casual turn — the scripter still runs (no gate).
     before_scripts = len(ollama.scripter_prompts)
     before_tags = str((s.get("craft") or {}).get("tags") or "")
     await service.post_duet_chat(db, ollama, s, "かき氷なら何味がいい？")
-    assert len(ollama.scripter_prompts) == before_scripts + 1
+    assert len(ollama.scripter_prompts) >= before_scripts + 1
     assert str((s.get("craft") or {}).get("tags") or "") == before_tags
 
     # Shot + OPEN affirm.

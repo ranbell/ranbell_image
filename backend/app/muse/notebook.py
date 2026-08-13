@@ -97,33 +97,33 @@ def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
 
 
 def summary_for_muse(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
-    """Shorter block for talk context."""
+    """Shorter block for talk context (English labels; values may be EN)."""
     parts: list[str] = []
     for label, key in (
-        ("空気", "atmosphere"),
-        ("場所", "scene"),
-        ("カメラ", "frame"),
+        ("Atmosphere", "atmosphere"),
+        ("Place", "scene"),
+        ("Camera", "frame"),
     ):
         val = str(nb.get(key) or "").strip()
         if val:
             parts.append(f"{label}: {val}")
     w = str(nb.get("wearing") or "").strip()
     b = str(nb.get("beat") or "").strip()
-    who = name_a or "私"
+    who = name_a or "Lead"
     if w or b:
-        parts.append(f"{who}の装い: {w or '（未定）'}")
-        parts.append(f"{who}の動作: {b or '（未定）'}")
+        parts.append(f"{who} wearing: {w or '(unset)'}")
+        parts.append(f"{who} beat: {b or '(unset)'}")
     wb = str(nb.get("wearing_b") or "").strip()
     bb = str(nb.get("beat_b") or "").strip()
     if name_b and (wb or bb):
-        parts.append(f"{name_b}の装い: {wb or '（未定）'}")
-        parts.append(f"{name_b}の動作: {bb or '（未定）'}")
+        parts.append(f"{name_b} wearing: {wb or '(unset)'}")
+        parts.append(f"{name_b} beat: {bb or '(unset)'}")
     vibe = str(nb.get("vibe") or "").strip()
     if vibe:
-        parts.append(f"いまの話: {vibe}")
+        parts.append(f"Vibe: {vibe}")
     open_ = str(nb.get("open") or "").strip()
     if open_:
-        parts.append(f"提案中（未確定）: {open_}")
+        parts.append(f"Open proposal (not locked): {open_}")
     return "\n".join(parts)
 
 
@@ -133,10 +133,32 @@ VIBE_MAX_CHARS = 400
 OPEN_MAX_LINES = 2
 OPEN_MAX_CHARS = 240
 
+# SHOT field contracts — short absolute phrases. Long densify prose belongs
+# only in craft_scene. Polluted SCENE fields were how place changes froze:
+# the model would rewrite tags/craft but leave a 60-word park paragraph in
+# SCENE, and the next turn's Muse digest pulled the shoot back.
+SCENE_MAX_CHARS = 120
+ATMOSPHERE_MAX_CHARS = 100
+FRAME_MAX_CHARS = 160
+WEARING_MAX_CHARS = 240
+BEAT_MAX_CHARS = 240
+
+_SHOT_FIELD_CAPS: dict[str, int] = {
+    "scene": SCENE_MAX_CHARS,
+    "atmosphere": ATMOSPHERE_MAX_CHARS,
+    "frame": FRAME_MAX_CHARS,
+    "wearing": WEARING_MAX_CHARS,
+    "wearing_b": WEARING_MAX_CHARS,
+    "beat": BEAT_MAX_CHARS,
+    "beat_b": BEAT_MAX_CHARS,
+}
+
 # Gaze used to be scrubbed out of BEAT here with a keyword regex. It is a rule
 # in SCRIPTER_SYSTEM now: the scripter reads the conversation and writes the
 # frame as one camera story. A word list cannot tell "見上げる" the pose from
 # "見上げる" the lens, and every phrase it missed shipped anyway.
+
+_TOKEN_RE = re.compile(r"[a-z][a-z0-9_]{2,}")
 
 
 def _cap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
@@ -145,6 +167,56 @@ def _cap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
     if len(body) > max_chars:
         body = body[:max_chars].rstrip()
     return body
+
+
+def _cap_phrase(text: str, *, max_chars: int) -> str:
+    """Keep a short absolute phrase; cut on a word boundary when possible."""
+    body = re.sub(r"\s+", " ", str(text or "").strip())
+    if len(body) <= max_chars:
+        return body
+    cut = body[:max_chars].rstrip()
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(",.;:")
+
+
+def wearing_tokens(text: str) -> set[str]:
+    """English-ish tokens from a wearing/beat phrase (for craft consistency).
+
+    Built from the field itself — not from a situation vocabulary list.
+    """
+    raw = str(text or "").lower()
+    if not raw.strip():
+        return set()
+    out: set[str] = set(_TOKEN_RE.findall(raw))
+    # Also accept space-joined pairs as underscore tags (straw hat → straw_hat).
+    words = re.findall(r"[a-z][a-z0-9]+", raw)
+    for i in range(len(words) - 1):
+        out.add(f"{words[i]}_{words[i + 1]}")
+    return out
+
+
+def stale_wearing_tags(
+    *, prev_wearing: str, new_wearing: str, tags: str,
+) -> list[str]:
+    """Tag tokens dropped from wearing that still appear in the craft bag."""
+    dropped = wearing_tokens(prev_wearing) - wearing_tokens(new_wearing)
+    if not dropped:
+        return []
+    have = wearing_tokens(tags.replace(",", " "))
+    # Ignore ultra-generic leftovers that are not garment-like on their own.
+    noise = {"and", "with", "the", "her", "his", "she", "for", "from"}
+    return sorted(t for t in dropped if t in have and t not in noise and len(t) >= 4)
+
+
+def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:
+    """Densify must thicken tags/craft_scene only — never rewrite SHOT fields."""
+    out = dict(patch or {})
+    for key in SHOT_KEYS:
+        out.pop(key, None)
+    out.pop("standing", None)
+    out.pop("clear_open", None)
+    return out
 
 
 def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -156,6 +228,8 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         if key not in patch:
             continue
         val = str(patch.get(key) or "").strip()
+        if key in _SHOT_FIELD_CAPS and val:
+            val = _cap_phrase(val, max_chars=_SHOT_FIELD_CAPS[key])
         if key == "vibe" and val:
             val = _cap_lines(val, max_lines=VIBE_MAX_LINES, max_chars=VIBE_MAX_CHARS)
         if key == "open" and val:

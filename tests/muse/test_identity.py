@@ -45,6 +45,22 @@ def test_assemble_positive_leads_with_identity_and_appends_framing():
     assert "She waits in the rain." in positive
 
 
+def test_assemble_positive_session_hairstyle_overrides_identity_cut():
+    """Ponytail in craft must displace bob_cut / short_hair from identity."""
+    positive = identity.assemble_positive(
+        ["1girl", "silver_hair", "bob_cut", "short_hair", "blue_eyes"],
+        "cheerleader_uniform, ponytail, high_ponytail, ribbon, looking_at_viewer",
+        "Cheerleader with a high ponytail.",
+        framing="auto",
+        subject=["1girl"],
+    )
+    assert "ponytail" in positive
+    assert "high_ponytail" in positive
+    assert "bob_cut" not in positive
+    assert "short_hair" not in positive
+    assert "silver_hair" in positive  # colour stays locked
+
+
 def test_parse_hybrid_and_prose_fallback():
     tags, scene = identity.parse_hybrid(
         "TAGS: standing, rain\n\nSCENE: She leans on the rail."

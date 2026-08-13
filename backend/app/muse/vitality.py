@@ -72,8 +72,9 @@ def tick_prop_age(session: dict[str, Any], nb: dict[str, Any]) -> str:
     age["turns"] = int(age.get("turns") or 0) + 1
     if age["turns"] in (4, 8):
         return (
-            "同じ小物・装いが続いている。時間の経過を一声だけ滲ませてよい"
-            "（例: ラムネがぬるい、影が長くなった）。画のタグは自分で変えない。"
+            "Same props/outfit have lingered. You may colour one soft beat of "
+            "time passing in Japanese SAY (e.g. a warm bottle, longer shadows). "
+            "Do not change picture tags yourself."
         )
     return ""
 
@@ -147,14 +148,15 @@ def reunion_block(session: dict[str, Any]) -> str:
     inside = str(bond.get("inside") or "").strip()
     if not last and not inside:
         return (
-            "再会の最初の一声: 身体感覚で短く挨拶してよい。"
-            "過去の細部は渡された記憶以外は覚えていない、とやわらかく。"
+            "REUNION opener: greet briefly through body-feel in Japanese SAY. "
+            "Soft-miss past detail outside the memories you were given."
         )
     return "\n".join([
-        "再会の最初の一声（このターンだけ）:",
-        f"- 前回の余韻を身体で一言: {last or inside}",
-        "- 画の指示はまだ触らない。細部の捏造は禁止。",
-        "- 『覚えてない』は事務的にせず、風や温度のたとえでやわらかく。",
+        "REUNION opener (this turn only):",
+        f"- One body-feel beat of last time: {last or inside}",
+        "- Do not touch picture direction yet. Do not invent detail.",
+        "- Soft-miss in Japanese SAY with wind/temperature metaphors, "
+        "never a stiff refusal.",
     ])
 
 
@@ -166,28 +168,29 @@ def vitality_talk_extras(session: dict[str, Any], *, partner: bool = False) -> s
         parts.append(reunion)
     if session.get("open_faded"):
         parts.append(
-            "さっきの未確定提案は自然に引く（粘着しない）。"
-            "新しい小さな提案は一つまで。"
+            "The last unlocked OPEN proposal fades naturally — do not cling. "
+            "At most one new small proposal."
         )
     age = str(session.get("prop_age_hint") or "").strip()
     if age:
         parts.append(age)
     if session.get("cleanup_nudge"):
         parts.append(
-            "ショットがだいぶ積み上がった。古い小物や矛盾しそうな要素を"
-            "一声だけ『しまおっか？』と提案してよい（OPENに載せてよい）。"
-            "勝手に画から消さない。"
+            "Many shots have stacked. You may softly offer in Japanese SAY to "
+            "tidy an old prop or conflict (may go in OPEN). Do not delete from "
+            "the picture yourself."
         )
     if session.get("w_b_leads") and partner:
         parts.append(
-            "このターンは Partner（B）が先に被せてよい。"
-            "A はそれに乗るかからかう。報告の並列読みは禁止。"
+            "This turn Partner (B) may lead first; A rides or teases. "
+            "No parallel report-reading."
         )
     again = str(session.get("again_feel_hint") or "").strip()
     if again:
         parts.append(
-            "総監督が『またあの感じ』系を言っている。"
-            f"手元の手がかり: {again}\n"
-            "それを身体で思い出してよい。無い細部はかわいく『そこまでは…』。"
+            "Showrunner is asking for that earlier feel again.\n"
+            f"Clue in hand: {again}\n"
+            "Recall it through the body in Japanese SAY. Missing detail → "
+            "cute soft-miss『そこまでは…』."
         )
     return "\n\n".join(parts)

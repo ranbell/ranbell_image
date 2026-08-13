@@ -72,7 +72,7 @@ def test_prop_age_hints_on_repeat():
         hint = vitality.tick_prop_age(s, nb)
         if hint:
             break
-    assert "時間" in hint or "小物" in hint
+    assert "time" in hint.lower() or "props" in hint.lower() or "outfit" in hint.lower()
 
 
 def test_b_leads_every_third_talk():
@@ -95,6 +95,6 @@ def test_reunion_and_again_hints():
         "memories": ["堤防で夕焼け"],
     }
     block = vitality.reunion_block(s)
-    assert "再会" in block
+    assert "REUNION" in block
     assert "堤防" in block
     assert "堤防" in vitality.again_that_feel_hint(s)
