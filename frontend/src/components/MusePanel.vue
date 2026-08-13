@@ -4,7 +4,7 @@
  * the craft feels right, put up an image board ("これでいい？"), then OK to shoot.
  * No B/C/D chain; discussion + boards replace pickup.
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import CharacterGallery from './CharacterGallery.vue'
@@ -25,7 +25,7 @@ const props = defineProps({
   // switches straight to duet mode instead of leaving the second seat empty.
   initialPartnerId: { type: String, default: '' },
 })
-const emit = defineEmits(['update:show', 'toast', 'select-image'])
+const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state'])
 const { t, locale } = useI18n()
 
 const session = ref(null)
@@ -48,6 +48,9 @@ const chatInput = ref('')
 const job = ref(null)
 const elapsed = ref(0)
 const chatEl = ref(null)
+// Image-only zoom above the Muse shell — gallery detail sits under --z-panel-muse
+// and used to open behind this screen when a still was clicked.
+const lightboxSrc = ref('')
 const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
 // trio/quartet ("半分の編成") already exist in crew.PRESETS on the backend and
 // were fully translated — they were just never added to this list, so the
@@ -180,6 +183,21 @@ const thinking = computed(() =>
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
+function openLightbox(src) {
+  const url = String(src || '').trim()
+  if (!url) return
+  lightboxSrc.value = url
+}
+function openLightboxSha(sha) {
+  openLightbox(full(sha))
+}
+function closeLightbox() { lightboxSrc.value = '' }
+function onLightboxKey(e) {
+  if (e.key !== 'Escape' || !lightboxSrc.value) return
+  closeLightbox()
+  e.preventDefault()
+  e.stopPropagation()
+}
 function museLabel(m) {
   if (!m) return ''
   return isJa.value ? (m.name_ja || m.name) : m.name
@@ -375,13 +393,41 @@ function fail(err) {
 }
 
 watch(() => props.show, async open => {
-  if (!open) { closeStream(); return }
+  if (!open) {
+    closeLightbox()
+    closeStream()
+    return
+  }
   try {
     if (!catalog.value) catalog.value = await api('/api/muse/catalog')
     await enterWithCharacter(props.initialCharacterId, props.initialPartnerId)
   } catch (err) { fail(err) }
 })
-onBeforeUnmount(closeStream)
+
+// Session stays in this component across ✕; the roster shows 「撮影中」so a
+// mis-tap close can come back without picking someone else and starting over.
+const resumeAvailable = computed(() => Boolean(session.value?.session_id))
+const resumeName = computed(() => {
+  const c = character.value
+  if (!c) return ''
+  return (isJa.value ? c.name_ja : c.name) || c.name || ''
+})
+function publishSessionState() {
+  emit('session-state', {
+    available: resumeAvailable.value,
+    name: resumeName.value,
+    sessionId: session.value?.session_id || '',
+  })
+}
+watch([resumeAvailable, resumeName, () => session.value?.session_id], publishSessionState, {
+  immediate: true,
+})
+
+onMounted(() => window.addEventListener('keydown', onLightboxKey, true))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onLightboxKey, true)
+  closeStream()
+})
 
 // The list screen one layer up already asked "who with" — this only decides
 // whether that answer can land on the session already sitting here, or needs
@@ -435,8 +481,10 @@ async function startSession() {
 }
 
 function discardSession() {
+  closeLightbox()
   closeStream()
   session.value = null
+  publishSessionState()
 }
 
 async function resetSession() {
@@ -444,7 +492,12 @@ async function resetSession() {
   discardSession()
   await startSession()
 }
-function close() { emit('update:show', false) }
+function close() {
+  closeLightbox()
+  // Backdrop / edge clicks must not dismiss — only ✕ (and Reset) leave the
+  // studio. A parked session is reopened from the roster's 「撮影中」button.
+  emit('update:show', false)
+}
 
 function connectStream(id) {
   if (!id || eventSource) return
@@ -744,7 +797,6 @@ async function onChatKey(e) {
   <div
     v-if="show"
     class="muse-root fixed inset-0 flex items-stretch justify-center bg-slate-950/80 backdrop-blur-md p-3"
-    @mousedown.self="close"
   >
     <div class="sb-shell w-full max-w-[1500px] flex flex-col min-h-0 bg-slate-900/90 border-2 border-pink-500/30 rounded-3xl shadow-2xl overflow-hidden">
       <header class="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-pink-500/20 shrink-0 bg-pink-950/20">
@@ -1235,7 +1287,8 @@ async function onChatKey(e) {
         <section class="w-full md:w-[42%] shrink-0 min-h-[40vh] md:min-h-0 flex flex-col p-3 gap-3 overflow-y-auto">
           <div v-if="preview || board.pending || shoot.pending" class="flex flex-col items-center gap-2">
             <img v-if="preview" :src="preview" alt=""
-                 class="max-h-[48vh] rounded-lg border border-white/10 shadow-2xl" />
+                 class="max-h-[48vh] rounded-lg border border-white/10 shadow-2xl cursor-zoom-in"
+                 @click="openLightbox(preview)" />
             <div v-else class="w-full aspect-[3/4] max-h-[48vh] rounded-lg bg-black/40 border border-white/10
                               flex items-center justify-center text-[11px] text-[var(--sb-faint)] animate-pulse">
               {{ job?.progress_text || '…' }}
@@ -1260,8 +1313,9 @@ async function onChatKey(e) {
             <div class="grid grid-cols-2 gap-2">
               <figure
                 v-for="img in boardImages" :key="img.image_id"
-                class="rounded overflow-hidden border border-white/10 cursor-pointer"
-                @click="emit('select-image', img.image_id)"
+                class="rounded overflow-hidden border border-white/10 cursor-zoom-in"
+                :title="t('muse.zoomImage')"
+                @click="openLightboxSha(img.image_id)"
               >
                 <img :src="thumb(img.image_id)" class="w-full block" alt="" />
               </figure>
@@ -1273,8 +1327,9 @@ async function onChatKey(e) {
             <div class="grid grid-cols-2 gap-2">
               <figure
                 v-for="img in shootImages" :key="img.image_id"
-                class="rounded overflow-hidden border border-[var(--sb-teal)]/40 cursor-pointer"
-                @click="emit('select-image', img.image_id)"
+                class="rounded overflow-hidden border border-[var(--sb-teal)]/40 cursor-zoom-in"
+                :title="t('muse.zoomImage')"
+                @click="openLightboxSha(img.image_id)"
               >
                 <img :src="full(img.image_id)" class="w-full block" alt="" />
               </figure>
@@ -1554,6 +1609,31 @@ async function onChatKey(e) {
     />
   </div>
   </Transition>
+
+  <!-- Image-only lightbox above Muse (and above gallery detail). Backdrop click
+       closes the zoom only — never the studio. -->
+  <Teleport to="body">
+    <div
+      v-if="lightboxSrc"
+      class="fixed inset-0 z-[var(--z-panel-media)] bg-black/92 flex items-center justify-center p-3"
+      role="dialog"
+      :aria-label="t('muse.zoomImage')"
+      @mousedown.self="closeLightbox"
+    >
+      <button
+        type="button"
+        class="absolute top-3 right-3 sb-icon-btn !w-10 !h-10 !text-lg bg-black/50"
+        :title="t('muse.close')"
+        @click="closeLightbox"
+      >✕</button>
+      <img
+        :src="lightboxSrc"
+        alt=""
+        class="max-w-full max-h-full object-contain shadow-2xl select-none"
+        @click.stop
+      />
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
