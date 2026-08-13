@@ -3579,6 +3579,7 @@ async def _run_crew_table_talk(
     system = crew.table_talk_system_prompt(
         speakers, character=session.get("character") or {},
         base_style=_style(session), locale=locale,
+        preset_id=str(inputs.get("crew_preset") or ""),
     )
     parts = [
         "CAST (speak in this order):\n" + "\n".join(roster_lines),

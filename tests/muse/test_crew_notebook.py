@@ -190,3 +190,21 @@ def test_preset_meta_exposed_on_roster():
     roster = crew.public_roster()
     assert "calm" in roster["preset_meta"]
     assert roster["preset_meta"]["calm"]["look_ja"]
+    assert roster["preset_meta"]["calm"]["team_ja"] == "チームパステル"
+    assert roster["preset_meta"]["vivid"]["team_ja"] == "チーム彩宴"
+    assert roster["preset_meta"]["photoreal"]["team_ja"] == "チームフィルム"
+
+
+def test_person_cards_expose_vibe_and_shoot_style():
+    from app.muse import crew
+    roster = crew.public_roster()
+    soft = next(m for m in roster["muses"] if m["id"] == "gaffer:andon")
+    assert soft["vibe_ja"]
+    assert "パステル" in soft["shoot_style_ja"] or "包" in soft["shoot_style_ja"]
+    gate = next(m for m in roster["muses"] if m["id"] == "gate:mon")
+    assert "やさしい" in gate["vibe_ja"] or "優しい" in gate["voice_ja"]
+    assert gate["say_examples"]
+    prompt = crew.system_prompt_for("gate:mon")
+    assert "ROOM VIBE" in prompt or "やさしい" in prompt
+    assert "厳しい編集者" not in crew.MUSES["ink:ipponsen"]["voice_ja"]
+    assert "即却下" not in crew.MUSES["ink:ipponsen"]["voice_ja"]

@@ -70,6 +70,11 @@ const presetMeta = computed(() => (
 function presetAccent(p) {
   return presetMeta.value?.[p]?.accent || PRESET_COLORS[p] || PRESET_COLORS.standard
 }
+function presetTeam(p) {
+  const meta = presetMeta.value?.[p] || {}
+  const fromApi = String(locale.value || '').startsWith('ja') ? meta.team_ja : meta.team_en
+  return fromApi || t(`muse.presets.${p}`)
+}
 function presetLook(p) {
   const meta = presetMeta.value?.[p] || {}
   const fromApi = String(locale.value || '').startsWith('ja') ? meta.look_ja : meta.look_en
@@ -79,6 +84,22 @@ function presetBlurb(p) {
   const meta = presetMeta.value?.[p] || {}
   const fromApi = String(locale.value || '').startsWith('ja') ? meta.blurb_ja : meta.blurb_en
   return fromApi || t(`muse.presetBlurbs.${p}`)
+}
+function presetVibe(p) {
+  const meta = presetMeta.value?.[p] || {}
+  return String(locale.value || '').startsWith('ja')
+    ? (meta.vibe_ja || '')
+    : (meta.vibe_en || '')
+}
+const staffDetailId = ref('')
+const staffDetail = computed(() => museById(staffDetailId.value) || null)
+function openStaffDetail(p, e) {
+  e?.stopPropagation?.()
+  staffDetailId.value = staffDetailId.value === p.id ? '' : p.id
+}
+function staffField(p, enKey, jaKey) {
+  if (!p) return ''
+  return isJa.value ? (p[jaKey] || p[enKey] || '') : (p[enKey] || p[jaKey] || '')
 }
 function presetCardStyle(p) {
   const c = presetAccent(p)
@@ -992,7 +1013,8 @@ async function onChatKey(e) {
                   @click="setPreset(p)"
                 >
                   <span class="block text-[9px] uppercase tracking-[0.14em] opacity-70">{{ presetLook(p) }}</span>
-                  <span class="mt-0.5 block text-[11px] font-medium leading-tight">{{ t(`muse.presets.${p}`) }}</span>
+                  <span class="mt-0.5 block text-[12px] font-medium leading-tight">{{ presetTeam(p) }}</span>
+                  <span v-if="presetVibe(p)" class="mt-0.5 block text-[10px] opacity-70">{{ presetVibe(p) }}</span>
                   <span class="mt-1 block text-[10px] leading-snug opacity-80">{{ presetBlurb(p) }}</span>
                 </button>
               </div>
@@ -1518,7 +1540,8 @@ async function onChatKey(e) {
               @click="setPreset(p)"
             >
               <span class="block text-[9px] uppercase tracking-[0.14em] opacity-70">{{ presetLook(p) }}</span>
-              <span class="mt-0.5 block text-[11px] font-medium leading-tight">{{ t(`muse.presets.${p}`) }}</span>
+              <span class="mt-0.5 block text-[12px] font-medium leading-tight">{{ presetTeam(p) }}</span>
+              <span v-if="presetVibe(p)" class="mt-0.5 block text-[10px] opacity-70">{{ presetVibe(p) }}</span>
               <span class="mt-1 block text-[10px] leading-snug opacity-80">{{ presetBlurb(p) }}</span>
             </button>
           </div>
@@ -1562,29 +1585,89 @@ async function onChatKey(e) {
               {{ isJa ? r.name_ja : r.name }}
             </button>
             <div class="flex flex-1 flex-wrap gap-1.5">
-              <button
-                v-for="p in r.people" :key="p.id" type="button"
-                class="rounded border px-2 py-1 text-left text-[10px] transition-colors"
-                :class="crewIds.has(p.id) || r.required
-                  ? 'border-[var(--sb-teal)] text-[var(--sb-teal)] bg-teal-950/20'
-                  : 'border-white/10 text-gray-400 hover:border-white/30'"
-                :disabled="r.required || chatLocked"
-                :title="isJa ? (p.line_ja || p.line) : p.line"
-                @click="pickPerson(r, p)"
-              >
-                <span class="block">「{{ museNick(p) }}」</span>
-                <span v-if="p.taste" class="mt-0.5 flex gap-1 text-[9px] text-[var(--sb-faint)]">
-                  <span v-for="a in tasteAxes" :key="a.id"
-                        :class="p.taste[a.id] ? 'text-[var(--sb-teal)]' : ''">
-                    {{ a.high.slice(0, 2) }}{{ tasteBar(p.taste[a.id]) }}
+              <div v-for="p in r.people" :key="p.id" class="flex items-stretch gap-0.5">
+                <button
+                  type="button"
+                  class="rounded-l border px-2 py-1 text-left text-[10px] transition-colors"
+                  :class="crewIds.has(p.id) || r.required
+                    ? 'border-[var(--sb-teal)] text-[var(--sb-teal)] bg-teal-950/20'
+                    : 'border-white/10 text-gray-400 hover:border-white/30'"
+                  :disabled="r.required || chatLocked"
+                  :title="isJa ? (p.line_ja || p.line) : p.line"
+                  @click="pickPerson(r, p)"
+                >
+                  <span class="block">「{{ museNick(p) }}」</span>
+                  <span v-if="p.taste" class="mt-0.5 flex gap-1 text-[9px] text-[var(--sb-faint)]">
+                    <span v-for="a in tasteAxes" :key="a.id"
+                          :class="p.taste[a.id] ? 'text-[var(--sb-teal)]' : ''">
+                      {{ a.high.slice(0, 2) }}{{ tasteBar(p.taste[a.id]) }}
+                    </span>
                   </span>
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  class="rounded-r border border-l-0 px-1.5 text-[9px] transition-colors"
+                  :class="staffDetailId === p.id
+                    ? 'border-[var(--sb-amber)] text-[var(--sb-amber)] bg-amber-950/20'
+                    : 'border-white/10 text-[var(--sb-faint)] hover:border-white/30'"
+                  :title="t('muse.staffDetail')"
+                  @click="openStaffDetail(p, $event)"
+                >{{ isJa ? '詳' : 'i' }}</button>
+              </div>
             </div>
             <span class="hidden md:block w-56 shrink-0 text-[10px] text-gray-500">
               {{ isJa ? (castPerson(r)?.line_ja || r.people[0].line_ja)
                       : (castPerson(r)?.line || r.people[0].line) }}
             </span>
+          </div>
+        </div>
+
+        <!-- expanded staff card -->
+        <div
+          v-if="staffDetail"
+          class="rounded-md border border-[var(--sb-amber)]/35 bg-gradient-to-br from-amber-950/25 to-transparent p-3 space-y-2"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <span class="sb-label">{{ t('muse.staffDetail') }}</span>
+              <p class="mt-0.5 text-[13px] font-medium text-[var(--sb-amber)]">
+                「{{ museNick(staffDetail) }}」
+                <span class="ml-1 text-[11px] font-normal text-[var(--sb-faint)]">
+                  {{ museLabel(staffDetail) }}
+                </span>
+              </p>
+            </div>
+            <button type="button" class="sb-btn text-[10px]" @click="staffDetailId = ''">
+              {{ t('muse.staffClose') }}
+            </button>
+          </div>
+          <p class="text-[11px] leading-snug text-gray-300">
+            {{ isJa ? (staffDetail.line_ja || staffDetail.line) : (staffDetail.line || staffDetail.line_ja) }}
+          </p>
+          <div v-if="staffField(staffDetail, 'vibe', 'vibe_ja')" class="space-y-0.5">
+            <span class="sb-label">{{ t('muse.staffVibe') }}</span>
+            <p class="text-[11px]">{{ staffField(staffDetail, 'vibe', 'vibe_ja') }}</p>
+          </div>
+          <div v-if="staffField(staffDetail, 'shoot_style', 'shoot_style_ja')" class="space-y-0.5">
+            <span class="sb-label">{{ t('muse.staffShoot') }}</span>
+            <p class="text-[11px] text-[var(--sb-teal)]">
+              {{ staffField(staffDetail, 'shoot_style', 'shoot_style_ja') }}
+            </p>
+          </div>
+          <div v-if="staffField(staffDetail, 'voice', 'voice_ja')" class="space-y-0.5">
+            <span class="sb-label">{{ t('muse.staffVoice') }}</span>
+            <p class="text-[10px] leading-snug text-gray-400">
+              {{ staffField(staffDetail, 'voice', 'voice_ja') }}
+            </p>
+          </div>
+          <div v-if="(staffDetail.say_examples || []).length" class="space-y-1">
+            <span class="sb-label">{{ t('muse.staffExamples') }}</span>
+            <ul class="space-y-1">
+              <li
+                v-for="(ex, i) in staffDetail.say_examples.slice(0, 3)" :key="i"
+                class="rounded border border-white/5 bg-black/20 px-2 py-1 text-[10px] leading-snug text-gray-300"
+              >「{{ ex }}」</li>
+            </ul>
           </div>
         </div>
       </section>
