@@ -965,6 +965,37 @@
       "step1": "1. Data scan — Run a full scan in the AI Management tab to register your image folders.",
       "step2": "2. AI tagging — After scanning, run \"AI Pipeline (all)\" to generate tags and embedding vectors.",
       "step3": "3. Color map — After AI tagging, run the color map backfill in the AI Management tab to enable color search."
+    },
+    "schema": {
+      "title": "Vector width (schema)",
+      "desc": "The width is recorded in Qdrant — that record, not the environment, is what counts. Changing it rebuilds the collection, which takes a while.",
+      "dim": "Embedding width",
+      "dimSmall": "MRL width (truncated)",
+      "applyBtn": "Change width and rebuild",
+      "confirm": "Change the vector width to {dim} / {small}?",
+      "confirmDesc": "Moves {n} images into a new collection. Provenance and ratings come across untouched. Embeddings are rebuilt, so search results are incomplete until that finishes — the app stays usable meanwhile. The old collection is kept, so you can check the new one before removing it.",
+      "started": "Rebuild started. Watch it in the job list.",
+      "running": "Rebuilding…",
+      "restartConfirm": "A rebuild is already running. Changing it now starts again from the beginning.",
+      "restartDesc": "The work done so far is discarded and the rebuild restarts at the new width.",
+      "mismatch": "The collection does not match the recorded schema (it is serving as-is):",
+      "obsoleteEnv": "{vars} are no longer read. Remove them from docker-compose.override.yml."
+    },
+    "backup": {
+      "title": "Backup",
+      "schedule": "Runs daily at {time} ({tz}), keeping {keep} snapshot generations. Also runs automatically before a schema change.",
+      "ledgerInfo": "Lineage ledger: {files} files / about {kb} KB",
+      "notWritable": "Cannot write to the backup directory {dir}: {err}",
+      "importBtn": "Restore provenance and ratings from the ledger",
+      "importDesc": "Fills in what is missing and never replaces a value already in the database, so it is safe to run at any time, including after a scan.",
+      "imported": "Filled {n}, already present {kept}, image not registered {missing}",
+      "restoreTitle": "Restore from a snapshot",
+      "restoreWarn": "Restoring replaces what is currently in that collection. Check what is there first.",
+      "noSnapshots": "No snapshots yet.",
+      "restoreBtn": "Restore",
+      "restoreConfirm": "Restore {collection} from a snapshot?",
+      "restoreConfirmDesc": "{collection} is replaced with its state as of {when}. Anything changed since is lost. Provenance and ratings can be put back from the ledger afterwards.",
+      "restored": "Restored {collection}"
     }
   },
   "colorPick": {

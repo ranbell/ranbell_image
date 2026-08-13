@@ -4,6 +4,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./qdrant_data:/qdrant/storage
+      # Snapshots default to a path inside the container, which means they go
+      # away with the container that wrote them. Mount them so the daily backup
+      # actually survives.
+      - ./qdrant_snapshots:/qdrant/snapshots
     ports:
       - "6333:6333"
     environment:

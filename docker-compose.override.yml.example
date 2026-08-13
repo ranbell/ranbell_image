@@ -15,6 +15,17 @@ services:
       # API authentication token — must match the token stored in the frontend localStorage
       API_TOKEN: RANBELL_IMAGE_API_TOKEN
 
+      # NOTE ON EMBED_DIM / EMBED_DIM_SMALL / EMBED_MODEL
+      #
+      # These are read once, on the first start of an install that has no
+      # schema recorded in Qdrant. From then on the recorded schema is the
+      # source of truth and these are ignored — startup logs them as OBSOLETE
+      # if they disagree, and you can delete them.
+      #
+      # Changing the vector width is done from the admin screen (Schema). It
+      # rebuilds the collection, so it asks for a typed confirmation and runs
+      # as a job you can watch. Editing the numbers here does nothing.
+
       # Ollama (embeddings + text/VLM)
       OLLAMA_URL: http://host.docker.internal:11434
       EMBED_MODEL: embeddinggemma:300m
@@ -44,3 +55,18 @@ services:
 
       # WD14 model directory (required — must match the container-internal path /mnt/models/wd14)
       # - /your/models/wd14:/mnt/models/wd14:ro
+
+      # Backup directory (recommended). The daily backup writes a gzipped JSONL
+      # ledger of the things a rescan cannot rebuild: how each image was made
+      # (genesis / creation_record), its star rating, and the Muse and character
+      # collections. It is small — a few hundred KB — and it is the copy that
+      # survives losing Qdrant entirely.
+      # - /your/backup:/mnt/backup
+
+# Qdrant snapshots are written by the qdrant container, which does not run as
+# root. If ./qdrant_snapshots ends up owned by root the snapshots fail, and a
+# backup that cannot be written is worse than none because it looks like one —
+# so the admin screen reports the failure rather than logging it quietly.
+# Create it with the same owner as ./qdrant_data before the first start:
+#
+#     mkdir -p qdrant_snapshots && chown --reference=qdrant_data qdrant_snapshots

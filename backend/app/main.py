@@ -36,8 +36,12 @@ def _abort(msg: str) -> None:
     sep = "=" * 60
     print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
     print("Fix the config above, then: docker compose restart backend", file=sys.stderr, flush=True)
-    # Block here — HTTP server never starts, container stays alive without restart-looping.
-    time.sleep(float("inf"))
+    # Block here — HTTP server never starts, container stays alive without
+    # restart-looping. `sleep(inf)` raised OverflowError on some platforms
+    # (timestamp out of range for time_t), which crashed the process and put the
+    # container into exactly the restart loop this is here to avoid.
+    while True:
+        time.sleep(3600)
 
 
 def _check_generated_dir(warnings: list[str]) -> None:
@@ -155,6 +159,9 @@ async def lifespan(app: FastAPI):
     from .invoke.oracle_scheduler import run_oracle_scheduler
     app.state.oracle_scheduler_task = asyncio.create_task(run_oracle_scheduler(app))
 
+    from .backup.scheduler import run_backup_scheduler
+    app.state.backup_scheduler_task = asyncio.create_task(run_backup_scheduler(app))
+
     watcher = ImageDirectoryWatcher(
         db, ollama, spooler,
         debounce_seconds=_settings.watch_debounce_seconds,
@@ -166,6 +173,13 @@ async def lifespan(app: FastAPI):
     yield
 
     watcher.stop()
+    for task in (app.state.oracle_scheduler_task, app.state.backup_scheduler_task):
+        task.cancel()
+    await asyncio.gather(
+        app.state.oracle_scheduler_task,
+        app.state.backup_scheduler_task,
+        return_exceptions=True,
+    )
     await spooler.stop()
     await comfy.close()
     await db.close()

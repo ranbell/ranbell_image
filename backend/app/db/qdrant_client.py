@@ -6,6 +6,7 @@ import random
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from qdrant_client import AsyncQdrantClient, models as qm
 
@@ -15,6 +16,29 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 IMAGES_COLLECTION = "images"
+# `images` is an alias pointing at a physical `images_v{N}` collection.
+#
+# Qdrant cannot resize a named vector in place, so a dimension change means
+# building a new collection and moving the data. Doing that by deleting the
+# live collection and re-uploading into it leaves a long window — as long as
+# the upload takes — where the only copy of the data is in the migrating
+# process's memory; anything that stops the process in that window (SIGKILL,
+# OOM, container stop) leaves the collection empty.
+#
+# So a migration builds v{N+1} beside the live one, verifies the count, and
+# moves the alias across in a single atomic call. Nothing in this module
+# deletes a collection that `images` currently resolves to.
+IMAGES_VERSION_PREFIX = "images_v"
+# Colour lives in its own collection. It is a different vector shape on the
+# same points, and it is cheap to rebuild from the image files, so it has no
+# business forcing a schema change on the collection that holds the
+# irreplaceable payload. Same reasoning as CHARACTER_COMPAT_COLLECTION below.
+IMAGES_COLOR_COLLECTION = "images_color"
+# Colour payload that travels with color_vector into IMAGES_COLOR_COLLECTION.
+COLOR_PAYLOAD_KEYS = (
+    "color_lab", "palette_hues", "palette_hex",
+    "avg_saturation", "avg_value", "dominant_hues",
+)
 CONFIG_COLLECTION = "app_config"
 CONFIG_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-000000000001"))
 ALIGNMENT_COLLECTION = "alignment"
@@ -64,12 +88,49 @@ def _encode_scroll_cursor(sort_key_value: object, sha256: str) -> str:
     return base64.b64encode(json.dumps({"start": sort_key_value, "last_id": sha256}).encode()).decode()
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# Schema parameters live in Qdrant, in the app_config point. Startup seeds them
+# once and then reads them; the environment is not consulted again.
+#
+# The alternative — deciding the schema from EMBED_DIM on every boot — makes an
+# environment variable of whichever process happens to connect into a statement
+# about what the shared database ought to be. Every client then believes it is
+# the owner, and a `!=` with no direction resolves one way: rewrite the database
+# to match me.
+SCHEMA_KEY = "schema"
+SCHEMA_FIELDS = ("embed_dim", "embed_dim_small", "embed_model")
+# Env vars that are only read to seed SCHEMA_KEY, and are dead weight afterwards.
+SCHEMA_ENV_NAMES = {
+    "embed_dim": "EMBED_DIM",
+    "embed_dim_small": "EMBED_DIM_SMALL",
+    "embed_model": "EMBED_MODEL",
+}
+
+
 class QdrantDBClient:
     def __init__(self) -> None:
         self._qc = AsyncQdrantClient(url=settings.qdrant_url, timeout=30)
         self.has_mrl = False  # True when embedding_small vector is available
         self._small_dim: int = settings.embed_dim_small  # actual dim used in collection
+        self._embed_dim: int = settings.embed_dim
         self.has_color_vector = False  # True when color_vector (3D L*a*b* Euclid) is available
+        # Filled by start(): what the live collection looks like, whether it
+        # matches the recorded schema, and which env vars are being ignored.
+        self.schema_state: dict = {}
+        self.obsolete_env: list[str] = []
+
+    @property
+    def embed_dim(self) -> int:
+        """Full embedding width, from the schema recorded in Qdrant."""
+        return self._embed_dim
+
+    @property
+    def embed_dim_small(self) -> int:
+        """MRL truncation width, from the schema recorded in Qdrant."""
+        return self._small_dim
 
     async def _wait_for_qdrant(self, timeout: int = 180) -> None:
         """Wait until Qdrant is ready, retrying with backoff."""
@@ -87,258 +148,9 @@ class QdrantDBClient:
                 await asyncio.sleep(min(delay, remaining))
                 delay = min(delay * 1.5, 10.0)
 
-    async def _migrate_small_dim(self, old_dim: int | None) -> None:
-        """Recreate the collection preserving payloads + full embeddings, adding/resizing embedding_small.
+    # ── schema parameters (stored in Qdrant, seeded once) ───────────────────
 
-        old_dim=None means embedding_small did not exist yet (first-time MRL setup).
-        Qdrant does not support adding new named vectors to an existing collection via any API,
-        so collection recreation is the only reliable approach.
-        """
-        new_dim = settings.embed_dim_small
-        if old_dim is None:
-            logger.warning(
-                "embedding_small not found in collection. "
-                "Recreating collection to add MRL vector (%d dims) — this may take a moment.", new_dim,
-            )
-        else:
-            logger.warning(
-                "embedding_small dim mismatch (collection=%d, EMBED_DIM_SMALL=%d). "
-                "Recreating collection to apply new dim — this may take a moment.",
-                old_dim, new_dim,
-            )
-
-        # Read all existing points: payload + full embedding only
-        all_points: list[qm.PointStruct] = []
-        reset_count = 0
-        offset = None
-        while True:
-            pts, next_offset = await self._qc.scroll(
-                IMAGES_COLLECTION,
-                limit=200,
-                with_payload=True,
-                with_vectors=["embedding"],
-                offset=offset,
-            )
-            for p in pts:
-                payload = dict(p.payload or {})
-                emb = p.vector.get("embedding") if isinstance(p.vector, dict) else None
-                vectors: dict = {}
-                if emb and len(emb) == settings.embed_dim:
-                    vectors["embedding"] = emb
-                    vectors["embedding_small"] = emb[:new_dim]
-                else:
-                    # Dimension mismatch or missing — reset to pending so pipeline re-embeds
-                    payload["embedding_status"] = "pending"
-                    payload.pop("wd14_tags", None)
-                    reset_count += 1
-                all_points.append(qm.PointStruct(id=p.id, payload=payload, vector=vectors))
-            if next_offset is None:
-                break
-            offset = next_offset
-        if reset_count:
-            logger.warning("%d points had wrong-dim embeddings and were reset to pending", reset_count)
-
-        logger.info("Read %d points; migrating to new collection (small_dim=%d)", len(all_points), new_dim)
-
-        # Atomic migration: build into a temp collection first so original is safe if upsert fails
-        tmp = f"{IMAGES_COLLECTION}_mrl_tmp"
-        vec_cfg = {
-            "embedding": qm.VectorParams(size=settings.embed_dim, distance=qm.Distance.COSINE, on_disk=True),
-            "embedding_small": qm.VectorParams(size=new_dim, distance=qm.Distance.COSINE, on_disk=True),
-        }
-
-        if await self._qc.collection_exists(tmp):
-            await self._qc.delete_collection(tmp)
-        await self._qc.create_collection(collection_name=tmp, vectors_config=vec_cfg, on_disk_payload=True)
-
-        try:
-            for i in range(0, len(all_points), 200):
-                await self._qc.upsert(tmp, points=all_points[i:i + 200])
-        except Exception:
-            await self._qc.delete_collection(tmp)
-            raise  # original collection is still intact
-
-        # Swap: only now delete original and recreate with migrated data
-        await self._qc.delete_collection(IMAGES_COLLECTION)
-        await self._qc.create_collection(
-            collection_name=IMAGES_COLLECTION, vectors_config=vec_cfg, on_disk_payload=True,
-        )
-        await self._create_images_indexes()
-        for i in range(0, len(all_points), 200):
-            await self._qc.upsert(IMAGES_COLLECTION, points=all_points[i:i + 200])
-        await self._qc.delete_collection(tmp)
-
-        self._small_dim = new_dim
-        self.has_mrl = True
-        logger.info("Migration complete: %d points restored with small_dim=%d", len(all_points), new_dim)
-
-    async def _migrate_color_vector(self) -> None:
-        """Add color_vector (3D Euclidean) to the collection via atomic recreation.
-
-        All existing color payload fields are cleared — the backfill job repopulates them.
-        """
-        logger.warning(
-            "color_vector not found in collection. "
-            "Recreating collection to add color_vector — this may take a moment."
-        )
-
-        all_points: list[qm.PointStruct] = []
-        offset = None
-        while True:
-            pts, next_offset = await self._qc.scroll(
-                IMAGES_COLLECTION,
-                limit=200,
-                with_payload=True,
-                with_vectors=["embedding", "embedding_small"],
-                offset=offset,
-            )
-            for p in pts:
-                payload = dict(p.payload or {})
-                for key in ("dominant_hues", "avg_saturation", "avg_value",
-                            "color_lab", "palette_hues", "palette_hex"):
-                    payload.pop(key, None)
-                vectors: dict = {}
-                emb = p.vector.get("embedding") if isinstance(p.vector, dict) else None
-                small = p.vector.get("embedding_small") if isinstance(p.vector, dict) else None
-                if emb:
-                    vectors["embedding"] = emb
-                if small:
-                    vectors["embedding_small"] = small
-                all_points.append(qm.PointStruct(id=p.id, payload=payload, vector=vectors))
-            if next_offset is None:
-                break
-            offset = next_offset
-
-        logger.info("Read %d points; adding color_vector to collection", len(all_points))
-
-        vec_cfg = {
-            "embedding": qm.VectorParams(size=settings.embed_dim, distance=qm.Distance.COSINE, on_disk=True),
-            "embedding_small": qm.VectorParams(size=self._small_dim, distance=qm.Distance.COSINE, on_disk=True),
-            "color_vector": qm.VectorParams(size=3, distance=qm.Distance.EUCLID, on_disk=True),
-        }
-        tmp = f"{IMAGES_COLLECTION}_color_tmp"
-        if await self._qc.collection_exists(tmp):
-            await self._qc.delete_collection(tmp)
-        await self._qc.create_collection(collection_name=tmp, vectors_config=vec_cfg, on_disk_payload=True)
-
-        try:
-            for i in range(0, len(all_points), 200):
-                await self._qc.upsert(tmp, points=all_points[i:i + 200])
-        except Exception:
-            await self._qc.delete_collection(tmp)
-            raise
-
-        await self._qc.delete_collection(IMAGES_COLLECTION)
-        await self._qc.create_collection(
-            collection_name=IMAGES_COLLECTION, vectors_config=vec_cfg, on_disk_payload=True,
-        )
-        await self._create_images_indexes()
-        for i in range(0, len(all_points), 200):
-            await self._qc.upsert(IMAGES_COLLECTION, points=all_points[i:i + 200])
-        await self._qc.delete_collection(tmp)
-
-        self.has_color_vector = True
-        logger.info("color_vector migration complete: %d points restored", len(all_points))
-
-    async def start(self) -> None:
-        await self._wait_for_qdrant()
-        if not await self._qc.collection_exists(IMAGES_COLLECTION):
-            await self._qc.create_collection(
-                collection_name=IMAGES_COLLECTION,
-                vectors_config={
-                    "embedding": qm.VectorParams(
-                        size=settings.embed_dim,
-                        distance=qm.Distance.COSINE,
-                        on_disk=True,
-                        quantization_config=qm.ScalarQuantization(
-                            scalar=qm.ScalarQuantizationConfig(
-                                type=qm.ScalarType.INT8,
-                                quantile=0.99,
-                                always_ram=True,
-                            )
-                        ),
-                    ),
-                    "embedding_small": qm.VectorParams(
-                        size=settings.embed_dim_small,
-                        distance=qm.Distance.COSINE,
-                        on_disk=True,
-                        quantization_config=qm.ScalarQuantization(
-                            scalar=qm.ScalarQuantizationConfig(
-                                type=qm.ScalarType.INT8,
-                                quantile=0.99,
-                                always_ram=True,
-                            )
-                        ),
-                    ),
-                    "color_vector": qm.VectorParams(
-                        size=3,
-                        distance=qm.Distance.EUCLID,
-                        on_disk=True,
-                    ),
-                },
-                on_disk_payload=True,
-            )
-            await self._create_images_indexes()
-            self.has_mrl = True
-            self.has_color_vector = True
-            logger.info("Created collection: %s (embed_dim=%d, small=%d)",
-                        IMAGES_COLLECTION, settings.embed_dim, settings.embed_dim_small)
-        else:
-            info = await self._qc.get_collection(IMAGES_COLLECTION)
-            existing = info.config.params.vectors
-            has_small = isinstance(existing, dict) and "embedding_small" in existing
-
-            # Log actual collection dims so mismatches are always visible in startup logs
-            if isinstance(existing, dict):
-                dims = {k: v.size for k, v in existing.items()}
-                logger.info("Collection vector dims: %s | EMBED_DIM=%d EMBED_DIM_SMALL=%d",
-                            dims, settings.embed_dim, settings.embed_dim_small)
-
-            # Check if the full embedding dim matches EMBED_DIM
-            actual_embed_dim = (
-                existing["embedding"].size
-                if isinstance(existing, dict) and "embedding" in existing
-                else None
-            )
-            embed_dim_mismatch = actual_embed_dim is not None and actual_embed_dim != settings.embed_dim
-            if embed_dim_mismatch:
-                logger.warning(
-                    "embedding dim mismatch: collection=%d, EMBED_DIM=%d — recreating collection.",
-                    actual_embed_dim, settings.embed_dim,
-                )
-
-            if not has_small or embed_dim_mismatch:
-                # Qdrant does not support adding/resizing named vectors in existing collections —
-                # recreate the collection.
-                await self._migrate_small_dim(
-                    existing["embedding_small"].size if has_small and not embed_dim_mismatch else None
-                )
-            else:
-                actual_small = existing["embedding_small"].size
-                if actual_small != settings.embed_dim_small:
-                    await self._migrate_small_dim(actual_small)
-                else:
-                    self._small_dim = actual_small
-                    self.has_mrl = True
-            logger.info("Collection exists: %s (MRL=%s, small_dim=%d)",
-                        IMAGES_COLLECTION, self.has_mrl, self._small_dim)
-
-            # Check for color_vector named vector (added after initial MRL migration)
-            info2 = await self._qc.get_collection(IMAGES_COLLECTION)
-            existing2 = info2.config.params.vectors
-            has_color = isinstance(existing2, dict) and "color_vector" in existing2
-            if not has_color:
-                await self._migrate_color_vector()
-            else:
-                self.has_color_vector = True
-            logger.info("Collection color_vector=%s", self.has_color_vector)
-            # Apply scalar quantization to existing collections (idempotent)
-            await self._ensure_quantization()
-            # Remove umap_x/y indexes if they exist (no longer needed, slows set_payload)
-            await self._drop_umap_indexes()
-            # Always re-apply indexes — idempotent, ensures new indexes are added to existing collections
-            await self._create_images_indexes()
-
+    async def _ensure_config_collection(self) -> None:
         if not await self._qc.collection_exists(CONFIG_COLLECTION):
             await self._qc.create_collection(
                 collection_name=CONFIG_COLLECTION,
@@ -346,6 +158,522 @@ class QdrantDBClient:
                 on_disk_payload=True,
             )
             logger.info("Created collection: %s", CONFIG_COLLECTION)
+
+    async def _load_or_seed_schema(self) -> dict:
+        """Read the schema from Qdrant, seeding it once if it is not there yet.
+
+        Seeding reads the *live collection*, not the environment. An existing
+        install whose EMBED_DIM disagrees with what its collection actually
+        holds is working fine; seeding from the environment would invent a
+        mismatch and ask that user to migrate for no reason. Reading the
+        collection means the upgrade is a no-op for everyone already running.
+
+        The environment is only consulted when there is no collection to read —
+        a fresh install, where it is the only source there is.
+        """
+        await self._ensure_config_collection()
+        doc = await self.get_config()
+        recorded = doc.get(SCHEMA_KEY)
+        if isinstance(recorded, dict) and all(k in recorded for k in SCHEMA_FIELDS):
+            self._note_obsolete_env(recorded)
+            return recorded
+
+        physical, _ = await self._resolve_images()
+        if physical is not None:
+            info = await self._qc.get_collection(physical)
+            vectors = info.config.params.vectors
+            if isinstance(vectors, dict) and "embedding" in vectors:
+                schema = {
+                    "embed_dim": vectors["embedding"].size,
+                    "embed_dim_small": (
+                        vectors["embedding_small"].size
+                        if "embedding_small" in vectors
+                        else settings.embed_dim_small
+                    ),
+                    "embed_model": settings.embed_model,
+                    "seeded_at": _now_iso(),
+                    "seeded_from": "collection",
+                }
+                await self.put_config({SCHEMA_KEY: schema})
+                logger.info(
+                    "Recorded schema from the live collection: %s. "
+                    "Qdrant is the source of truth for these from now on.", schema,
+                )
+                self._note_obsolete_env(schema)
+                return schema
+
+        # Fresh install: nothing to read but the environment.
+        schema = {
+            "embed_dim": settings.embed_dim,
+            "embed_dim_small": settings.embed_dim_small,
+            "embed_model": settings.embed_model,
+            "seeded_at": _now_iso(),
+            "seeded_from": "env",
+        }
+        await self.put_config({SCHEMA_KEY: schema})
+        written = (await self.get_config()).get(SCHEMA_KEY) or {}
+        if not all(written.get(k) == schema[k] for k in SCHEMA_FIELDS):
+            # The collection is about to be created from these numbers. If they
+            # did not persist, a later boot would read different ones and call
+            # the collection wrong.
+            raise RuntimeError(
+                "could not record the schema in Qdrant before creating the "
+                f"images collection (wrote {schema}, read back {written})"
+            )
+        logger.info("Recorded schema from the environment (fresh install): %s", schema)
+        return schema
+
+    def _note_obsolete_env(self, schema: dict) -> None:
+        """Name the env vars that are set, disagree, and are no longer read."""
+        stale: list[str] = []
+        for field, env_name in SCHEMA_ENV_NAMES.items():
+            if field not in schema:
+                continue
+            if getattr(settings, field, None) != schema[field]:
+                stale.append(env_name)
+                logger.warning(
+                    "OBSOLETE: %s=%s is not used — the schema in Qdrant says %s=%s. "
+                    "Remove %s from docker-compose.override.yml.",
+                    env_name, getattr(settings, field, None),
+                    field, schema[field], env_name,
+                )
+        self.obsolete_env = stale
+
+    # ── images collection: naming, schema, alias ────────────────────────────
+
+    def _images_vectors_config(self, small_dim: int, *, embed_dim: int | None = None) -> dict:
+        """Vector shapes for a newly built images collection.
+
+        No `color_vector` here. Colour has its own collection, and a collection
+        that is only ever built fresh has no reason to carry a shape it does not
+        use — an existing collection keeps its unused definition until a
+        dimension change rebuilds it, at which point it simply does not come
+        across.
+        """
+        quant = qm.ScalarQuantization(
+            scalar=qm.ScalarQuantizationConfig(
+                type=qm.ScalarType.INT8, quantile=0.99, always_ram=True,
+            )
+        )
+        return {
+            "embedding": qm.VectorParams(
+                size=int(embed_dim) if embed_dim else self._embed_dim,
+                distance=qm.Distance.COSINE,
+                on_disk=True, quantization_config=quant,
+            ),
+            "embedding_small": qm.VectorParams(
+                size=small_dim, distance=qm.Distance.COSINE,
+                on_disk=True, quantization_config=quant,
+            ),
+        }
+
+    async def _collection_names(self) -> set[str]:
+        res = await self._qc.get_collections()
+        return {c.name for c in res.collections}
+
+    async def _alias_target(self, alias: str) -> str | None:
+        """Physical collection an alias points at, or None if no such alias."""
+        try:
+            res = await self._qc.get_aliases()
+        except Exception:
+            logger.debug("get_aliases failed", exc_info=True)
+            return None
+        for a in getattr(res, "aliases", None) or []:
+            if getattr(a, "alias_name", None) == alias:
+                return getattr(a, "collection_name", None)
+        return None
+
+    async def _resolve_images(self) -> tuple[str | None, bool]:
+        """Where `images` resolves to right now.
+
+        Returns (physical collection name, is_alias). (None, False) when there
+        is neither an `images` alias nor an `images` collection — a fresh
+        install, or an adoption that died between dropping the old collection
+        and creating the alias.
+        """
+        target = await self._alias_target(IMAGES_COLLECTION)
+        if target:
+            return target, True
+        if IMAGES_COLLECTION in await self._collection_names():
+            return IMAGES_COLLECTION, False
+        return None, False
+
+    @staticmethod
+    def _version_of(name: str) -> int:
+        if not name.startswith(IMAGES_VERSION_PREFIX):
+            return 0
+        tail = name[len(IMAGES_VERSION_PREFIX):]
+        return int(tail) if tail.isdigit() else 0
+
+    async def _next_version_name(self) -> str:
+        names = await self._collection_names()
+        highest = max((self._version_of(n) for n in names), default=0)
+        return f"{IMAGES_VERSION_PREFIX}{highest + 1}"
+
+    async def _point_count(self, collection: str) -> int:
+        res = await self._qc.count(collection_name=collection, exact=True)
+        return int(res.count)
+
+    async def _switch_images_alias(self, target: str) -> None:
+        """Point `images` at `target`. One Qdrant call, applied atomically."""
+        ops: list = []
+        if await self._alias_target(IMAGES_COLLECTION):
+            ops.append(qm.DeleteAliasOperation(
+                delete_alias=qm.DeleteAlias(alias_name=IMAGES_COLLECTION),
+            ))
+        ops.append(qm.CreateAliasOperation(
+            create_alias=qm.CreateAlias(
+                collection_name=target, alias_name=IMAGES_COLLECTION,
+            ),
+        ))
+        await self._qc.update_collection_aliases(change_aliases_operations=ops)
+        logger.info("images alias now points at %s", target)
+
+    # ── rebuild ─────────────────────────────────────────────────────────────
+
+    async def _rebuild_images(
+        self,
+        *,
+        source: str,
+        small_dim: int,
+        transform: Callable[[dict, dict], tuple[dict, dict] | None],
+        with_vectors: list[str],
+        reason: str,
+        embed_dim: int | None = None,
+        cancel=None,
+        reporter=None,
+    ) -> str:
+        """Copy `source` into a new versioned collection, then move the alias.
+
+        The source collection is never deleted here and never modified. If this
+        dies at any point — SIGKILL included — `images` still resolves to the
+        same data it did before, and the half-built target is discarded on the
+        next attempt. That property is the whole reason this function exists.
+
+        ``transform`` receives (payload, vectors) per point and returns the pair
+        to write, or None to keep the point unchanged.
+        """
+        target = await self._next_version_name()
+        full_dim = int(embed_dim) if embed_dim else self._embed_dim
+        logger.warning("images schema migration: %s", reason)
+        logger.warning("building %s from %s (source is left untouched)", target, source)
+
+        if target in await self._collection_names():
+            # Leftover from an attempt that died mid-copy. Not aliased, so no
+            # live data is behind it.
+            await self._qc.delete_collection(target)
+
+        await self._qc.create_collection(
+            collection_name=target,
+            vectors_config=self._images_vectors_config(small_dim, embed_dim=full_dim),
+            on_disk_payload=True,
+        )
+        await self._create_images_indexes(target)
+
+        total = await self._point_count(source)
+        copied = 0
+        batch: list[qm.PointStruct] = []
+        offset = None
+        while True:
+            if cancel is not None:
+                cancel.raise_if_set()
+            pts, next_offset = await self._qc.scroll(
+                source, limit=200, with_payload=True,
+                with_vectors=with_vectors, offset=offset,
+            )
+            for p in pts:
+                payload = dict(p.payload or {})
+                vectors = dict(p.vector) if isinstance(p.vector, dict) else {}
+                changed = transform(payload, vectors)
+                if changed is not None:
+                    payload, vectors = changed
+                batch.append(qm.PointStruct(
+                    id=p.id, payload=payload,
+                    vector={k: v for k, v in vectors.items() if v},
+                ))
+                if len(batch) >= 200:
+                    await self._qc.upsert(target, points=batch)
+                    copied += len(batch)
+                    batch = []
+                    if reporter is not None and total:
+                        reporter.update(
+                            0.1 + 0.85 * min(copied / total, 1.0),
+                            f"{copied}/{total} points",
+                        )
+            if next_offset is None:
+                break
+            offset = next_offset
+        if batch:
+            await self._qc.upsert(target, points=batch)
+            copied += len(batch)
+
+        src_n = await self._point_count(source)
+        dst_n = await self._point_count(target)
+        if dst_n != src_n:
+            # Do not move the alias onto an incomplete copy. The live collection
+            # stays exactly where it was.
+            await self._qc.delete_collection(target)
+            raise RuntimeError(
+                f"images migration aborted: copied {dst_n} of {src_n} points "
+                f"from {source}; '{IMAGES_COLLECTION}' left pointing at {source}"
+            )
+        logger.info("copied %d points into %s", copied, target)
+
+        if source == IMAGES_COLLECTION:
+            # Adoption: `images` is still a real collection, and Qdrant will not
+            # take an alias whose name a collection already holds. This is the
+            # only delete in the module, and by now every point is already in
+            # `target` — a crash between these two calls costs nothing but an
+            # alias, which the next startup recreates (see `_start_images`).
+            await self._qc.delete_collection(IMAGES_COLLECTION)
+        await self._switch_images_alias(target)
+
+        logger.warning(
+            "images migration done. Previous data is still in '%s' — delete it "
+            "by hand once you are satisfied.", source,
+        )
+        return target
+
+    def _transform_small_dim(self, new_dim: int) -> Callable:
+        """Derive embedding_small from the full embedding; reset unusable points."""
+        stats = {"reset": 0}
+
+        def _t(payload: dict, vectors: dict):
+            emb = vectors.get("embedding")
+            if emb and len(emb) == self._embed_dim:
+                return payload, {"embedding": emb, "embedding_small": emb[:new_dim]}
+            payload["embedding_status"] = "pending"
+            payload.pop("wd14_tags", None)
+            stats["reset"] += 1
+            return payload, {}
+
+        _t.stats = stats  # type: ignore[attr-defined]
+        return _t
+
+    @staticmethod
+    def _transform_color(payload: dict, vectors: dict):
+        """Drop stale colour payload — the colour backfill recomputes it."""
+        for key in ("dominant_hues", "avg_saturation", "avg_value",
+                    "color_lab", "palette_hues", "palette_hex"):
+            payload.pop(key, None)
+        return payload, vectors
+
+    async def _start_images(self, schema: dict) -> None:
+        """Bring the images collection up. Detect and report; never migrate.
+
+        Creating a collection that does not exist is not a migration and is not
+        gated — a fresh install still starts on its own. Everything else is
+        recorded in ``schema_state`` and left alone: a dimension change moves
+        every point in the collection, and that belongs behind a deliberate,
+        progress-tracked admin action, not behind whichever process boots next.
+        """
+        small_dim = int(schema["embed_dim_small"])
+        self._embed_dim = int(schema["embed_dim"])
+        self._small_dim = small_dim
+
+        physical, is_alias = await self._resolve_images()
+
+        if physical is None:
+            names = await self._collection_names()
+            orphans = sorted(
+                (n for n in names if self._version_of(n) > 0), key=self._version_of,
+            )
+            if orphans:
+                # A migration died between dropping the old collection and
+                # creating the alias. The data is intact in the newest version;
+                # re-pointing the alias destroys nothing.
+                newest = orphans[-1]
+                logger.warning(
+                    "no 'images' collection or alias, but %s exists — "
+                    "restoring the alias (interrupted migration)", newest,
+                )
+                await self._switch_images_alias(newest)
+                physical, is_alias = newest, True
+            else:
+                target = f"{IMAGES_VERSION_PREFIX}1"
+                await self._qc.create_collection(
+                    collection_name=target,
+                    vectors_config=self._images_vectors_config(small_dim),
+                    on_disk_payload=True,
+                )
+                await self._create_images_indexes(target)
+                await self._switch_images_alias(target)
+                self.has_mrl = True
+                self.schema_state = {
+                    "physical": target, "is_alias": True, "matches": True, "reasons": [],
+                }
+                logger.info("Created collection: %s (embed_dim=%d, small=%d)",
+                            target, self._embed_dim, small_dim)
+                await self._start_images_color(physical=target)
+                return
+
+        info = await self._qc.get_collection(physical)
+        existing = info.config.params.vectors
+        if isinstance(existing, dict):
+            dims = {k: v.size for k, v in existing.items()}
+            logger.info("Collection vector dims: %s | schema embed_dim=%d small=%d",
+                        dims, self._embed_dim, small_dim)
+
+        has_small = isinstance(existing, dict) and "embedding_small" in existing
+        actual_embed_dim = (
+            existing["embedding"].size
+            if isinstance(existing, dict) and "embedding" in existing else None
+        )
+        actual_small = existing["embedding_small"].size if has_small else None
+
+        reasons: list[str] = []
+        if actual_embed_dim is not None and actual_embed_dim != self._embed_dim:
+            reasons.append(
+                f"embedding is {actual_embed_dim}-dim, schema says {self._embed_dim}"
+            )
+        if not has_small:
+            reasons.append(f"embedding_small is missing (schema says {small_dim})")
+        elif actual_small != small_dim:
+            reasons.append(
+                f"embedding_small is {actual_small}-dim, schema says {small_dim}"
+            )
+        self.has_mrl = has_small
+        self.schema_state = {
+            "physical": physical,
+            "is_alias": is_alias,
+            "matches": not reasons,
+            "reasons": reasons,
+            "collection_embed_dim": actual_embed_dim,
+            "collection_embed_dim_small": actual_small,
+        }
+        if reasons:
+            # Serve anyway. Say it once, clearly, and let an operator decide.
+            logger.warning(
+                "images schema differs from the recorded schema — running as-is. "
+                "Fix it from the admin screen (Schema): %s", "; ".join(reasons),
+            )
+        if not is_alias:
+            # Not a fault and not urgent: the collection works exactly as it is.
+            # Adopting the alias only buys a safer *future* dimension change, so
+            # it is mentioned at info level and never nags a working install.
+            logger.info(
+                "'images' is a plain collection. Making it an alias would let a "
+                "future dimension change build beside the live data rather than "
+                "over it; the admin screen offers this.",
+            )
+        logger.info("images -> %s (alias=%s, MRL=%s, small_dim=%d)",
+                    physical, is_alias, self.has_mrl, self._small_dim)
+
+        # Idempotent upkeep. These alter settings and indexes, never content.
+        await self._ensure_quantization(physical)
+        await self._drop_umap_indexes(physical)
+        await self._create_images_indexes(physical)
+        await self._start_images_color(physical=physical)
+
+    # ── colour: its own collection, copied out of images once ───────────────
+
+    async def _start_images_color(self, *, physical: str) -> None:
+        """Make sure colour lives in its own collection.
+
+        Only ever creates and writes ``images_color``. The images collection is
+        not touched — not even to drop the now-unused ``color_vector``
+        definition, which costs three floats a point and can go the next time a
+        dimension change rebuilds the collection anyway. Nothing here can lose
+        a payload, so it runs on startup without asking.
+        """
+        names = await self._collection_names()
+        if IMAGES_COLOR_COLLECTION in names:
+            self.has_color_vector = True
+            return
+
+        info = await self._qc.get_collection(physical)
+        vectors = info.config.params.vectors
+        source_has_color = isinstance(vectors, dict) and "color_vector" in vectors
+
+        await self._qc.create_collection(
+            collection_name=IMAGES_COLOR_COLLECTION,
+            vectors_config={
+                "color_vector": qm.VectorParams(
+                    size=3, distance=qm.Distance.EUCLID, on_disk=True,
+                ),
+            },
+            on_disk_payload=True,
+        )
+        await self._create_color_indexes()
+
+        if not source_has_color:
+            # Nothing to carry over; the colour backfill fills it from the files.
+            self.has_color_vector = True
+            logger.info("Created collection: %s", IMAGES_COLOR_COLLECTION)
+            return
+
+        try:
+            copied = await self._copy_color_out(physical)
+        except Exception:
+            logger.warning(
+                "colour copy into %s failed; dropping it and retrying next boot",
+                IMAGES_COLOR_COLLECTION, exc_info=True,
+            )
+            await self._qc.delete_collection(IMAGES_COLOR_COLLECTION)
+            self.has_color_vector = False
+            return
+
+        self.has_color_vector = True
+        logger.info("Moved colour for %d points into %s (images untouched)",
+                    copied, IMAGES_COLOR_COLLECTION)
+
+    async def _copy_color_out(self, source: str) -> int:
+        """Copy color_vector + colour payload from `source` into images_color."""
+        copied = 0
+        expected = 0
+        batch: list[qm.PointStruct] = []
+        offset = None
+        while True:
+            pts, next_offset = await self._qc.scroll(
+                source, limit=200, with_payload=True,
+                with_vectors=["color_vector"], offset=offset,
+            )
+            for p in pts:
+                vec = (p.vector or {}).get("color_vector") if isinstance(p.vector, dict) else None
+                payload = dict(p.payload or {})
+                colour = {k: payload[k] for k in COLOR_PAYLOAD_KEYS if k in payload}
+                if not vec and not colour:
+                    continue
+                expected += 1
+                batch.append(qm.PointStruct(
+                    id=p.id, payload=colour,
+                    vector={"color_vector": vec} if vec else {},
+                ))
+                if len(batch) >= 200:
+                    await self._qc.upsert(IMAGES_COLOR_COLLECTION, points=batch)
+                    copied += len(batch)
+                    batch = []
+            if next_offset is None:
+                break
+            offset = next_offset
+        if batch:
+            await self._qc.upsert(IMAGES_COLOR_COLLECTION, points=batch)
+            copied += len(batch)
+
+        landed = await self._point_count(IMAGES_COLOR_COLLECTION)
+        if landed != expected:
+            raise RuntimeError(
+                f"colour copy landed {landed} of {expected} points"
+            )
+        return copied
+
+    async def _create_color_indexes(self) -> None:
+        for field, schema_type in (
+            ("palette_hues", qm.PayloadSchemaType.FLOAT),
+            ("palette_hex", qm.PayloadSchemaType.KEYWORD),
+            ("avg_saturation", qm.PayloadSchemaType.FLOAT),
+            ("avg_value", qm.PayloadSchemaType.FLOAT),
+        ):
+            await self._qc.create_payload_index(
+                collection_name=IMAGES_COLOR_COLLECTION,
+                field_name=field, field_schema=schema_type,
+            )
+
+    async def start(self) -> None:
+        await self._wait_for_qdrant()
+        # Schema first: the images collection is created from these numbers.
+        schema = await self._load_or_seed_schema()  # also ensures CONFIG_COLLECTION
+        await self._start_images(schema)
 
         if not await self._qc.collection_exists(ALIGNMENT_COLLECTION):
             await self._qc.create_collection(
@@ -387,7 +715,7 @@ class QdrantDBClient:
         await self.ensure_character_presets_collection()
         try:
             from ..characters.presets import seed_presets_if_empty
-            await seed_presets_if_empty(self, vector_dim=settings.embed_dim)
+            await seed_presets_if_empty(self, vector_dim=self._embed_dim)
         except Exception as exc:
             logger.warning("character presets seed failed: %s", exc)
 
@@ -403,21 +731,21 @@ class QdrantDBClient:
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
 
-    async def _drop_umap_indexes(self) -> None:
+    async def _drop_umap_indexes(self, collection: str = IMAGES_COLLECTION) -> None:
         """Drop umap_x/y payload indexes — presence-only checks don't need indexes."""
         for field in ("umap_x", "umap_y"):
             try:
                 await self._qc.delete_payload_index(
-                    collection_name=IMAGES_COLLECTION,
+                    collection_name=collection,
                     field_name=field,
                 )
                 logger.info("Dropped payload index: %s", field)
             except Exception:
                 pass  # already absent
 
-    async def _ensure_quantization(self) -> None:
+    async def _ensure_quantization(self, collection: str = IMAGES_COLLECTION) -> None:
         """Apply INT8 scalar quantization to embedding vectors if not already set."""
-        info = await self._qc.get_collection(IMAGES_COLLECTION)
+        info = await self._qc.get_collection(collection)
         vec_cfg = info.config.params.vectors
         if not isinstance(vec_cfg, dict):
             return
@@ -440,39 +768,39 @@ class QdrantDBClient:
                 needs_update = True
         if needs_update:
             await self._qc.update_collection(
-                collection_name=IMAGES_COLLECTION,
+                collection_name=collection,
                 vectors_config=vectors_config,
             )
             logger.info("Applied INT8 scalar quantization to: %s", list(vectors_config))
 
-    async def _create_images_indexes(self) -> None:
+    async def _create_images_indexes(self, collection: str = IMAGES_COLLECTION) -> None:
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="mtime",
             field_schema=qm.PayloadSchemaType.DATETIME,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="size",
             field_schema=qm.PayloadSchemaType.INTEGER,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="name",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="embedding_status",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="wd14_tags",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="positive_prompt",
             field_schema=qm.TextIndexParams(
                 type="text",
@@ -482,55 +810,55 @@ class QdrantDBClient:
             ),
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="palette_hues",
             field_schema=qm.PayloadSchemaType.FLOAT,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="palette_hex",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="avg_saturation",
             field_schema=qm.PayloadSchemaType.FLOAT,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="avg_value",
             field_schema=qm.PayloadSchemaType.FLOAT,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="model_name",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         # umap_x / umap_y are only used for existence checks so no index is needed
         # (an index would trigger a rebuild on every set_payload call, slowing UMAP saves)
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="star_rating",
             field_schema=qm.PayloadSchemaType.INTEGER,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="batch_category",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="is_reference",
             field_schema=qm.PayloadSchemaType.BOOL,
         )
         # Board sketches. Every gallery query filters on this, so it must be indexed.
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="is_draft",
             field_schema=qm.PayloadSchemaType.BOOL,
         )
         await self._qc.create_payload_index(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=collection,
             field_name="creation_record.method",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
@@ -542,7 +870,7 @@ class QdrantDBClient:
         )
         for _dim in _EMOTION_DIMS:
             await self._qc.create_payload_index(
-                collection_name=IMAGES_COLLECTION,
+                collection_name=collection,
                 field_name=f"emotion_{_dim}",
                 field_schema=qm.PayloadSchemaType.FLOAT,
             )
@@ -617,16 +945,14 @@ class QdrantDBClient:
 
     async def set_embedding(self, sha256: str, embedding: list[float]) -> None:
         """Store full embedding + MRL-truncated small embedding."""
-        if len(embedding) != settings.embed_dim:
+        if len(embedding) != self._embed_dim:
             raise ValueError(
-                f"EMBED_DIM mismatch: model '{settings.embed_model}' returned {len(embedding)} dimensions "
-                f"but EMBED_DIM={settings.embed_dim} is configured.\n"
-                f"  → Either update EMBED_DIM in .env to {len(embedding)}, or "
-                f"set EMBED_MODEL to a model that outputs {settings.embed_dim} dimensions.\n"
-                f"  → To check the model's actual dimensions: "
-                f"curl -s http://localhost:11434/api/embed "
-                f"-d '{{\"model\":\"{settings.embed_model}\",\"input\":\"test\"}}' | "
-                f"python3 -c \"import sys,json; print(len(json.load(sys.stdin)['embeddings'][0]))\""
+                f"embedding dimension mismatch: the model returned "
+                f"{len(embedding)} dimensions, the collection holds "
+                f"{self._embed_dim}.\n"
+                f"  → Change the embedding model back, or change the dimension "
+                f"from the admin screen (Schema). Editing EMBED_DIM in the "
+                f"environment has no effect — the schema is recorded in Qdrant."
             )
         point_id = sha256_to_point_id(sha256)
         vectors: dict = {"embedding": embedding}
@@ -952,14 +1278,25 @@ class QdrantDBClient:
             result.append(e)
         return sorted(result, key=lambda d: (-d["count"], d["path_rel"]))
 
-    async def set_color_vector(self, sha256: str, lab: list[float]) -> None:
-        """Store the 3D L*a*b* color_vector for a single image point."""
+    async def set_color_vector(
+        self, sha256: str, lab: list[float], payload: dict | None = None,
+    ) -> None:
+        """Store the 3D L*a*b* colour vector for one image, in images_color.
+
+        Upsert rather than update_vectors: the point may not exist in the colour
+        collection yet, and colour is written for images long after they were
+        first registered.
+        """
         if not self.has_color_vector:
             return
-        point_id = sha256_to_point_id(sha256)
-        await self._qc.update_vectors(
-            collection_name=IMAGES_COLLECTION,
-            points=[qm.PointVectors(id=point_id, vector={"color_vector": lab})],
+        colour = {k: v for k, v in (payload or {}).items() if k in COLOR_PAYLOAD_KEYS}
+        await self._qc.upsert(
+            collection_name=IMAGES_COLOR_COLLECTION,
+            points=[qm.PointStruct(
+                id=sha256_to_point_id(sha256),
+                payload=colour,
+                vector={"color_vector": lab},
+            )],
         )
 
     async def search_by_color_vector(
@@ -974,39 +1311,51 @@ class QdrantDBClient:
         exclude_hue_ranges: (lo, hi) degree pairs excluded via palette_hues payload filter.
         score_threshold acts as an upper bound for Euclidean distance.
         """
+        if not self.has_color_vector:
+            return []
         must_not = [
             qm.FieldCondition(key="palette_hues", range=qm.Range(gte=lo, lte=hi))
             for lo, hi in (exclude_hue_ranges or [])
         ]
+        # Colour lives in its own collection; the image payload does not. Match
+        # on colour, then fetch the images by the ids that came back — the point
+        # ids are the same sha256-derived uuids in both collections.
         results = await self._qc.query_points(
-            collection_name=IMAGES_COLLECTION,
+            collection_name=IMAGES_COLOR_COLLECTION,
             query=lab,
             using="color_vector",
             limit=limit,
             score_threshold=distance,
             query_filter=qm.Filter(must_not=must_not) if must_not else None,
+            with_payload=False,
+            with_vectors=False,
+        )
+        if not results.points:
+            return []
+        scores = {r.id: round(r.score, 4) for r in results.points}
+        docs = await self._qc.retrieve(
+            collection_name=IMAGES_COLLECTION,
+            ids=list(scores.keys()),
             with_payload=True,
             with_vectors=False,
         )
-        return [{**r.payload, "_color_distance": round(r.score, 4)} for r in results.points]
+        out = [
+            {**(d.payload or {}), "_color_distance": scores.get(d.id, 0.0)}
+            for d in docs
+        ]
+        out.sort(key=lambda d: d["_color_distance"])
+        return out
 
     async def count_with_color_vector(self) -> int:
-        """Count images whose color_vector is actually synced to Qdrant.
+        """How many images have a colour vector — i.e. points in images_color.
 
-        Proxy: avg_saturation exists (color extraction done) AND color_lab absent
-        (color_lab is removed by backfill after syncing; pipeline-only images retain it).
+        This used to be inferred from payload markers on the images collection
+        ("avg_saturation present and color_lab absent"). With colour in its own
+        collection the question answers itself.
         """
         if not self.has_color_vector:
             return 0
-        result = await self._qc.count(
-            collection_name=IMAGES_COLLECTION,
-            count_filter=qm.Filter(must=[
-                qm.FieldCondition(key="avg_saturation", range=qm.Range(gte=0.0)),
-                qm.IsEmptyCondition(is_empty=qm.PayloadField(key="color_lab")),
-            ]),
-            exact=True,
-        )
-        return result.count
+        return await self._point_count(IMAGES_COLOR_COLLECTION)
 
     async def count_with_color_lab(self) -> int:
         """Count images that have color_lab payload (pipeline-processed, color_vector not yet synced)."""
@@ -1126,14 +1475,17 @@ class QdrantDBClient:
         )
 
     async def set_color_vectors_batch(self, items: list[tuple[str, list[float]]]) -> None:
-        """Bulk-update color_vector for multiple images in a single Qdrant call."""
+        """Bulk-write colour vectors into images_color in a single Qdrant call."""
         if not self.has_color_vector or not items:
             return
         points = [
-            qm.PointVectors(id=sha256_to_point_id(sha256), vector={"color_vector": lab})
+            qm.PointStruct(
+                id=sha256_to_point_id(sha256), payload={},
+                vector={"color_vector": lab},
+            )
             for sha256, lab in items
         ]
-        await self._qc.update_vectors(collection_name=IMAGES_COLLECTION, points=points)
+        await self._qc.upsert(collection_name=IMAGES_COLOR_COLLECTION, points=points)
 
     async def delete_payload_keys_batch(self, sha256s: list[str], keys: list[str]) -> None:
         """Remove payload keys from multiple documents in a single Qdrant call."""
@@ -1218,7 +1570,7 @@ class QdrantDBClient:
             collection_name=CHARACTER_PRESETS_COLLECTION,
             vectors_config={
                 "embedding": qm.VectorParams(
-                    size=settings.embed_dim,
+                    size=self._embed_dim,
                     distance=qm.Distance.COSINE,
                     on_disk=True,
                 ),
@@ -1240,10 +1592,10 @@ class QdrantDBClient:
             collection_name=CHARACTER_COMPAT_COLLECTION,
             vectors_config={
                 "appearance": qm.VectorParams(
-                    size=settings.embed_dim, distance=qm.Distance.COSINE, on_disk=True,
+                    size=self._embed_dim, distance=qm.Distance.COSINE, on_disk=True,
                 ),
                 "personality": qm.VectorParams(
-                    size=settings.embed_dim, distance=qm.Distance.COSINE, on_disk=True,
+                    size=self._embed_dim, distance=qm.Distance.COSINE, on_disk=True,
                 ),
             },
             on_disk_payload=True,
@@ -1336,7 +1688,7 @@ class QdrantDBClient:
             results = await self._qc.query_points(
                 collection_name=IMAGES_COLLECTION,
                 prefetch=[qm.Prefetch(
-                    query=embedding[:settings.embed_dim_small],
+                    query=embedding[:self._small_dim],
                     using="embedding_small",
                     limit=n_results * 20,
                     filter=query_filter,
@@ -1381,7 +1733,7 @@ class QdrantDBClient:
             results = await self._qc.query_points(
                 collection_name=IMAGES_COLLECTION,
                 prefetch=[qm.Prefetch(
-                    query=embedding[:settings.embed_dim_small],
+                    query=embedding[:self._small_dim],
                     using="embedding_small",
                     limit=n_results * 20,
                     filter=query_filter,
@@ -1427,7 +1779,7 @@ class QdrantDBClient:
             results = await self._qc.query_points(
                 collection_name=IMAGES_COLLECTION,
                 prefetch=[qm.Prefetch(
-                    query=vec[:settings.embed_dim_small],
+                    query=vec[:self._small_dim],
                     using="embedding_small",
                     limit=(n_results + 1) * 20,
                     filter=exclude_self,
@@ -1614,7 +1966,7 @@ class QdrantDBClient:
             results = await self._qc.query_points_groups(
                 collection_name=IMAGES_COLLECTION,
                 prefetch=[qm.Prefetch(
-                    query=embedding[:settings.embed_dim_small],
+                    query=embedding[:self._small_dim],
                     using="embedding_small",
                     limit=limit * group_size * 20,
                 )],
@@ -1718,7 +2070,7 @@ class QdrantDBClient:
                     continue
                 to_update.append(qm.PointVectors(
                     id=p.id,
-                    vector={"embedding_small": full[:settings.embed_dim_small]},
+                    vector={"embedding_small": full[:self._small_dim]},
                 ))
             if to_update:
                 await self._qc.update_vectors(IMAGES_COLLECTION, points=to_update)
@@ -2415,7 +2767,7 @@ class QdrantDBClient:
         await self._qc.create_collection(
             collection_name=WD14_VOCAB_COLLECTION,
             vectors_config=qm.VectorParams(
-                size=settings.embed_dim,
+                size=self._embed_dim,
                 distance=qm.Distance.COSINE,
                 quantization_config=qm.ScalarQuantization(
                     scalar=qm.ScalarQuantizationConfig(
@@ -2437,7 +2789,7 @@ class QdrantDBClient:
                 field_name=field,
                 field_schema=schema,
             )
-        logger.info("Created collection: %s (embed_dim=%d)", WD14_VOCAB_COLLECTION, settings.embed_dim)
+        logger.info("Created collection: %s (embed_dim=%d)", WD14_VOCAB_COLLECTION, self._embed_dim)
 
     async def count_wd14_vocab(self) -> int:
         try:

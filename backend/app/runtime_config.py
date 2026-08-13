@@ -45,6 +45,14 @@ _defaults = {
     "invoke_daily_oracle_topic":         "",
     "invoke_daily_oracle_roulette":      False,
     "invoke_daily_oracle_min_free_gb":   5.0,
+    # Daily backup. On by default: the layer that matters most is a few hundred
+    # kilobytes of gzipped JSONL, and someone who has never thought about
+    # backups is exactly who needs it.
+    "backup_enabled":                    True,
+    "backup_time":                       "04:30",
+    "backup_timezone":                   "UTC",
+    "backup_retain_days":                7,     # snapshot generations kept
+    "backup_dir":                        "/mnt/backup",
     # Disk gauge thresholds (used_pct %)
     "disk_caution_pct":                  75,
     "disk_fault_pct":                    90,

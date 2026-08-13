@@ -55,6 +55,11 @@ const adminConfirmInput = ref('')
 const vocabStatus = ref(null)   // {imported: bool, tag_count: int}
 const vocabImporting = ref(false)
 const mrlStatus = ref(null)
+const schemaStatus = ref(null)
+const backupStatus = ref(null)
+const schemaDim = ref(null)
+const schemaDimSmall = ref(null)
+const restoreOpen = ref(false)
 const colorStatus = ref(null)
 const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
@@ -232,6 +237,107 @@ function confirmThen(message, description, action, opts = {}) {
 async function fetchMrlStatus() {
   const r = await fetch('/api/admin/mrl/status')
   if (r.ok) mrlStatus.value = await r.json()
+}
+
+async function fetchSchemaStatus() {
+  const r = await fetch('/api/admin/schema/status')
+  if (!r.ok) return
+  schemaStatus.value = await r.json()
+  const rec = schemaStatus.value.recorded || {}
+  if (!schemaDim.value) schemaDim.value = rec.embed_dim
+  if (!schemaDimSmall.value) schemaDimSmall.value = rec.embed_dim_small
+}
+
+async function fetchBackupStatus() {
+  const r = await fetch('/api/admin/backup/status')
+  if (r.ok) backupStatus.value = await r.json()
+}
+
+/** Change the vector width. Rebuilds the collection, so it asks first. */
+async function applySchema(restart = false) {
+  adminLoading.value = 'schemaApply'
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/admin/schema/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embed_dim: Number(schemaDim.value),
+        embed_dim_small: Number(schemaDimSmall.value),
+        confirm: 'confirm',
+        restart,
+      }),
+    })
+    const data = await r.json()
+    if (r.status === 409) {
+      // Already running. Restarting throws away the work done so far, so the
+      // choice belongs to whoever is watching, not to this function.
+      adminLoading.value = ''
+      confirmThen(
+        data.detail?.message || t('admin.schema.restartConfirm'),
+        t('admin.schema.restartDesc'),
+        () => applySchema(true),
+      )
+      return
+    }
+    if (!r.ok) {
+      adminError.value = data.detail?.message || t('admin.failed')
+      return
+    }
+    adminSuccess.value = t('admin.schema.started')
+    setTimeout(() => { adminSuccess.value = '' }, 4000)
+    await fetchSchemaStatus()
+  } catch (e) {
+    adminError.value = e.message
+  } finally {
+    adminLoading.value = ''
+    adminConfirm.value = null
+    adminConfirmInput.value = ''
+  }
+}
+
+function confirmSchemaApply() {
+  const total = schemaStatus.value?.total_images ?? 0
+  confirmThen(
+    t('admin.schema.confirm', { dim: schemaDim.value, small: schemaDimSmall.value }),
+    t('admin.schema.confirmDesc', { n: total.toLocaleString() }),
+    () => applySchema(false),
+    { requirePhrase: 'confirm' },
+  )
+}
+
+const snapshotCollections = computed(() =>
+  Object.keys(backupStatus.value?.snapshots || {})
+    .filter(k => (backupStatus.value.snapshots[k] || []).length)
+    .sort(),
+)
+
+/** Recover one collection from a snapshot. Replaces everything in it. */
+function confirmRestore(collection, snap) {
+  confirmThen(
+    t('admin.backup.restoreConfirm', { collection }),
+    t('admin.backup.restoreConfirmDesc', {
+      collection,
+      when: (snap.created || snap.name).toString().slice(0, 19),
+    }),
+    () => adminAction('restore', '/api/admin/backup/restore', {
+      body: JSON.stringify({
+        collection, snapshot: snap.name, confirm: 'confirm',
+      }),
+      successMsg: () => t('admin.backup.restored', { collection }),
+      after: fetchBackupStatus,
+    }),
+    { requirePhrase: 'confirm' },
+  )
+}
+
+async function importLineage() {
+  await adminAction('importLineage', '/api/admin/backup/import-lineage', {
+    successMsg: (d) => t('admin.backup.imported', {
+      n: d.restored, kept: d.already_present, missing: d.image_missing,
+    }),
+    after: fetchBackupStatus,
+  })
 }
 
 async function fetchColorStatus() {
@@ -559,6 +665,7 @@ watch(() => props.show, async (val) => {
     await Promise.all([
       fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(),
       fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus(),
+      fetchSchemaStatus(), fetchBackupStatus(),
     ])
   }
 })
@@ -569,6 +676,12 @@ watch(() => props.jobs?.find(j => j.title === 'color_extract')?.state, (state) =
 })
 watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) => {
   if (state) fetchMrlStatus()
+})
+watch(() => props.jobs?.find(j => j.title === 'schema_apply')?.state, (state) => {
+  if (state) { fetchSchemaStatus(); fetchMrlStatus() }
+})
+watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
+  if (state) fetchBackupStatus()
 })
 </script>
 
@@ -1056,6 +1169,124 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                     class="w-full py-2 bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700/40 rounded-lg text-xs text-indigo-300 disabled:opacity-40 transition-colors">
                     {{ $t('admin.mrl.backfillBtn') }}
                   </button>
+                </div>
+
+                <!-- Vector width. Changing it rebuilds the collection, so it is
+                     kept out of the ordinary settings save and asks for a typed
+                     confirmation here. -->
+                <div v-if="schemaStatus" class="bg-gray-800 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h4 class="text-sm text-gray-300">{{ $t('admin.schema.title') }}</h4>
+                    <button @click="fetchSchemaStatus" class="text-xs text-gray-600 hover:text-gray-400">↺</button>
+                  </div>
+                  <p class="text-xs text-gray-500">{{ $t('admin.schema.desc') }}</p>
+
+                  <div v-if="schemaStatus.obsolete_env?.length"
+                    class="text-xs text-yellow-500/90 bg-yellow-900/20 rounded-lg px-3 py-2">
+                    {{ $t('admin.schema.obsoleteEnv', { vars: schemaStatus.obsolete_env.join(', ') }) }}
+                  </div>
+
+                  <div v-if="schemaStatus.collection && !schemaStatus.collection.matches"
+                    class="text-xs text-yellow-500/90 bg-yellow-900/20 rounded-lg px-3 py-2 space-y-1">
+                    <p>{{ $t('admin.schema.mismatch') }}</p>
+                    <ul class="list-disc list-inside text-yellow-600/80">
+                      <li v-for="r in schemaStatus.collection.reasons" :key="r">{{ r }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="schemaStatus.job" class="text-xs text-blue-400 flex items-center gap-2">
+                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    {{ schemaStatus.job.progress_text || $t('admin.schema.running') }}
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <label class="space-y-1">
+                      <span class="text-gray-500">{{ $t('admin.schema.dim') }}</span>
+                      <input v-model.number="schemaDim" type="number" min="1"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 font-mono text-gray-200" />
+                    </label>
+                    <label class="space-y-1">
+                      <span class="text-gray-500">{{ $t('admin.schema.dimSmall') }}</span>
+                      <input v-model.number="schemaDimSmall" type="number" min="1"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 font-mono text-gray-200" />
+                    </label>
+                  </div>
+
+                  <button
+                    @click="confirmSchemaApply"
+                    :disabled="!!adminLoading || !schemaDim || !schemaDimSmall"
+                    class="w-full py-2 bg-red-900/30 hover:bg-red-800/50 border border-red-800/40 rounded-lg text-xs text-red-300 disabled:opacity-40 transition-colors">
+                    {{ $t('admin.schema.applyBtn') }}
+                  </button>
+                </div>
+
+                <!-- Backup. Runs on a schedule and before any schema change;
+                     there is no "run it now" button on purpose. -->
+                <div v-if="backupStatus" class="bg-gray-800 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h4 class="text-sm text-gray-300">{{ $t('admin.backup.title') }}</h4>
+                    <button @click="fetchBackupStatus" class="text-xs text-gray-600 hover:text-gray-400">↺</button>
+                  </div>
+                  <p class="text-xs text-gray-500">
+                    {{ $t('admin.backup.schedule', { time: backupStatus.time, tz: backupStatus.timezone, keep: backupStatus.retain }) }}
+                  </p>
+
+                  <div v-if="!backupStatus.ledger?.writable"
+                    class="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">
+                    {{ $t('admin.backup.notWritable', { dir: backupStatus.dir, err: backupStatus.ledger?.error }) }}
+                  </div>
+                  <div v-else class="text-xs text-gray-400 font-mono">
+                    {{ $t('admin.backup.ledgerInfo', {
+                      files: backupStatus.ledger.files.length,
+                      kb: Math.round((backupStatus.ledger.bytes || 0) / 1024),
+                    }) }}
+                  </div>
+
+                  <button
+                    @click="importLineage"
+                    :disabled="!!adminLoading || !backupStatus.ledger?.files?.length"
+                    class="w-full py-2 bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700/40 rounded-lg text-xs text-indigo-300 disabled:opacity-40 transition-colors">
+                    {{ $t('admin.backup.importBtn') }}
+                  </button>
+                  <p class="text-[11px] text-gray-600">{{ $t('admin.backup.importDesc') }}</p>
+
+                  <!-- Snapshot restore. Replaces a whole collection, so it is
+                       folded away by default and asks for a typed confirmation. -->
+                  <div class="pt-1 border-t border-gray-700/60 space-y-2">
+                    <button @click="restoreOpen = !restoreOpen"
+                      class="w-full flex items-center justify-between text-xs text-gray-500 hover:text-gray-300 py-1">
+                      <span>{{ $t('admin.backup.restoreTitle') }}</span>
+                      <span class="text-[10px]">{{ restoreOpen ? '▲' : '▼' }}</span>
+                    </button>
+
+                    <div v-if="restoreOpen" class="space-y-2">
+                      <p class="text-[11px] text-yellow-600/90">{{ $t('admin.backup.restoreWarn') }}</p>
+
+                      <div v-if="!snapshotCollections.length" class="text-[11px] text-gray-600">
+                        {{ $t('admin.backup.noSnapshots') }}
+                      </div>
+
+                      <div v-for="col in snapshotCollections" :key="col"
+                        class="bg-gray-900/60 rounded-lg p-2.5 space-y-1.5">
+                        <p class="text-[11px] text-gray-400 font-mono">{{ col }}</p>
+                        <div v-for="s in backupStatus.snapshots[col].slice(0, 5)" :key="s.name"
+                          class="flex items-center justify-between gap-2">
+                          <span class="text-[10px] text-gray-500 font-mono truncate" :title="s.name">
+                            {{ (s.created || s.name).toString().slice(0, 19) }}
+                          </span>
+                          <button
+                            @click="confirmRestore(col, s)"
+                            :disabled="!!adminLoading"
+                            class="shrink-0 px-2 py-1 bg-red-900/30 hover:bg-red-800/50 border border-red-800/40 rounded text-[10px] text-red-300 disabled:opacity-40">
+                            {{ $t('admin.backup.restoreBtn') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Color palette backfill -->

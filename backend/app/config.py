@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     comfyui_url: str = "http://host.docker.internal:8188"
     comfyui_workflows_dir: str = "/mnt/comfy/workflows"
 
+    # NOTE: embed_dim / embed_dim_small / embed_model above are read only to
+    # seed the schema recorded in Qdrant, on the first boot of an install that
+    # has none. After that the recorded schema wins and these are ignored;
+    # startup logs them as OBSOLETE when they disagree. Changing dimensions is
+    # an admin-screen operation, because it rewrites every point.
+
     # API authentication
     api_token: str = "RANBELL_IMAGE_API_TOKEN"
 

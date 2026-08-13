@@ -266,7 +266,9 @@ async def run_color_backfill(
                             color_lab = color_data.pop("color_lab", None)
                             await db.set_payload(sha256, color_data)
                             if color_lab and db.has_color_vector:
-                                await db.set_color_vector(sha256, color_lab)
+                                await db.set_color_vector(
+                                    sha256, color_lab, payload=color_data,
+                                )
                         else:
                             logger.warning("color_extractor returned empty for %s — marking failed", sha256)
                             await db.set_payload(sha256, {"avg_saturation": -1.0})
@@ -488,6 +490,110 @@ async def run_mrl_backfill(
     reporter.indeterminate()
     count = await db.backfill_small_embeddings()
     return {"done": count}
+
+
+async def run_backup(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    lineage_only: bool = False,
+) -> dict:
+    """Daily backup: the lineage ledger first, then Qdrant snapshots.
+
+    Ledger first on purpose. It is the layer that survives losing Qdrant, it is
+    cheap, and if the directory turns out to be unwritable the job should say so
+    before spending time on snapshots.
+    """
+    from ..backup.service import run_lineage_backup, run_snapshots
+    from ..runtime_config import get_runtime_config
+
+    cfg = await get_runtime_config(db)
+    root = str(cfg.get("backup_dir") or "/mnt/backup")
+
+    reporter.update(0.1, "lineage ledger")
+    ledger = await run_lineage_backup(db, root)
+    cancel.raise_if_set()
+    if lineage_only:
+        reporter.update(1.0, "done")
+        return {"ledger": ledger}
+
+    reporter.update(0.5, "qdrant snapshots")
+    keep = int(cfg.get("backup_retain_days", 7) or 7)
+    snaps = await run_snapshots(db, keep=keep)
+    reporter.update(1.0, "done")
+    return {"ledger": ledger, "snapshots": snaps}
+
+
+async def run_schema_apply(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama=None,
+    spooler=None,
+    embed_dim: int,
+    embed_dim_small: int,
+) -> dict:
+    """Move the images collection to a new vector width.
+
+    Qdrant cannot resize a vector in place, so this builds a new collection,
+    copies every payload into it, and moves the `images` alias once the counts
+    agree. The old collection is left behind on purpose: matching counts prove
+    the copy was complete, not that it was correct, and that is a judgement for
+    whoever can look at the pictures.
+
+    Vectors are only carried over when they still mean something. A narrower
+    `embedding_small` can be re-derived by truncating the full embedding, but a
+    changed `embed_dim` means a different model, so those points come across
+    marked pending and are re-embedded afterwards — in the background, with the
+    app up.
+    """
+    from ..db.qdrant_client import SCHEMA_KEY
+
+    reporter.indeterminate()
+    state = dict(db.schema_state or {})
+    source = state.get("physical") or "images"
+    same_full_width = int(embed_dim) == int(db.embed_dim)
+
+    reporter.update(0.05, "backing up lineage first")
+    await run_backup(reporter, cancel, db=db, lineage_only=True)
+    cancel.raise_if_set()
+
+    reporter.update(0.1, f"building a {embed_dim}/{embed_dim_small} collection")
+    transform = db._transform_small_dim(embed_dim_small)
+    target = await db._rebuild_images(
+        source=source,
+        small_dim=embed_dim_small,
+        embed_dim=embed_dim,
+        transform=transform,
+        with_vectors=["embedding"] if same_full_width else [],
+        reason=f"dimension change to {embed_dim}/{embed_dim_small}",
+        cancel=cancel,
+        reporter=reporter,
+    )
+
+    doc = await db.get_config()
+    schema = dict(doc.get(SCHEMA_KEY) or {})
+    schema |= {"embed_dim": int(embed_dim), "embed_dim_small": int(embed_dim_small)}
+    await db.put_config({SCHEMA_KEY: schema})
+
+    reset = getattr(transform, "stats", {}).get("reset", 0)
+    if reset and spooler is not None and ollama is not None:
+        # Re-embedding is a separate job so this one can finish and the alias is
+        # already live: searches are incomplete until it lands, never broken.
+        from ..spooler.models import JobLane
+        spooler.submit(
+            JobLane.EMBEDDING, "ai_embedding_after_schema", run_pipeline,
+            db=db, ollama=ollama, spooler=spooler,
+        )
+        logger.info("queued re-embedding for %d points after schema change", reset)
+    elif not reset:
+        # Full embeddings survived; only the truncation needs redoing.
+        await db.backfill_small_embeddings()
+
+    reporter.update(1.0, "done")
+    return {"collection": target, "reembedding": reset}
 
 
 # ── EVALUATION lane: alignment evaluation ─────────────────────────────────────

@@ -240,7 +240,7 @@ async def _tag_doc(
             color_lab = color_data.get("color_lab")
         await db.set_payload(sha256, payload)
         if color_lab and db.has_color_vector:
-            await db.set_color_vector(sha256, color_lab)
+            await db.set_color_vector(sha256, color_lab, payload=color_data)
     finally:
         state.active_save -= 1
 
@@ -353,6 +353,6 @@ async def _process_doc(
             payload["umap_y"] = umap_xy[1]
         await db.set_payload(sha256, payload)
         if color_lab and db.has_color_vector:
-            await db.set_color_vector(sha256, color_lab)
+            await db.set_color_vector(sha256, color_lab, payload=color_data)
     finally:
         state.active_save -= 1
