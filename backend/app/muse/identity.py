@@ -311,6 +311,25 @@ _SAY_LEAK_CUT_RE = re.compile(
     r"(?im)^\s*(?:TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE)\s*[:：]"
 )
 _EN_HEADING_RE = re.compile(r"^[A-Z][A-Z0-9][A-Z0-9 _/&'-]{2,}$")
+# Latin-script stage directions the model tucks in after Japanese SAY.
+_EN_PAREN_RE = re.compile(r"[（(]([^）)]+)[）)]")
+
+
+def _is_english_paren(inner: str) -> bool:
+    letters = [c for c in inner if c.isalpha()]
+    if len(letters) < 8:
+        return False
+    latin = sum(1 for c in letters if c.isascii())
+    return latin / len(letters) >= 0.8
+
+
+def _strip_english_parens(text: str) -> str:
+    def _drop(m: re.Match) -> str:
+        return "" if _is_english_paren(m.group(1)) else m.group(0)
+    out = _EN_PAREN_RE.sub(_drop, text)
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    out = re.sub(r" {2,}", " ", out)
+    return out.strip()
 
 
 def _is_leaked_heading_line(line: str) -> bool:
@@ -360,7 +379,7 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
     return blocks
 
 
-def sanitize_muse_say(text: str) -> str:
+def sanitize_muse_say(text: str, *, locale: str = "ja") -> str:
     """Strip leaked craft labels / English rule headings from Muse chat text.
 
     Talk turns sometimes truncate mid-format (``SAY:…\\nTAGS:…``) or echo
@@ -377,11 +396,14 @@ def sanitize_muse_say(text: str) -> str:
         if _is_leaked_heading_line(line):
             continue
         kept.append(line)
-    return "\n".join(kept).strip()
+    out = "\n".join(kept).strip()
+    if str(locale or "ja").lower().startswith("ja"):
+        out = _strip_english_parens(out)
+    return out
 
 
 def parse_duet_speakers(
-    raw: str, *, name_a: str = "", name_b: str = "",
+    raw: str, *, name_a: str = "", name_b: str = "", locale: str = "ja",
 ) -> list[dict[str, str]] | None:
     """Split a duet SAY block into per-speaker turns.
 
@@ -389,7 +411,7 @@ def parse_duet_speakers(
     names are known, falls back to ``Name:`` lines mapped to A/B — never to
     invented third speakers.
     """
-    text = sanitize_muse_say(raw)
+    text = sanitize_muse_say(raw, locale=locale)
     if not text:
         return None
     turns: list[dict[str, str]] = []

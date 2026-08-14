@@ -63,3 +63,25 @@ def test_summary_for_muse_is_short():
     text = notebook.summary_for_muse(nb, name_a="あさひ")
     assert "カーディガン" in text
     assert "Open proposal" in text or "提案中" in text
+
+
+def test_shot_diff_and_record_rewrite_ring():
+    before = notebook.shot_snapshot({"beat": "sitting", "wearing": "cardigan"})
+    after = notebook.shot_snapshot({"beat": "standing", "wearing": "cardigan"})
+    changed = notebook.shot_diff(before, after)
+    assert changed["beat"]["before"] == "sitting"
+    assert changed["beat"]["after"] == "standing"
+    assert "wearing" not in changed
+
+    session: dict = {}
+    first = notebook.record_rewrite(
+        session, "scripter", before=before, after=after, intent="shot",
+    )
+    assert first is not None
+    assert first["source"] == "scripter"
+    assert session["rewrite_log"][-1]["changed"]["beat"]["after"] == "standing"
+    same = notebook.record_rewrite(
+        session, "scripter", before=after, after=after,
+    )
+    assert same is None
+    assert len(session["rewrite_log"]) == 1

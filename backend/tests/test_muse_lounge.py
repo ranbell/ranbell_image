@@ -129,3 +129,41 @@ async def test_friends_of_ranks_best_friend_first(monkeypatch):
     monkeypatch.setattr(compat, "compat_matrix", fake_matrix)
     friends = await compat.friends_of(FakeDB(), "me", min_tier="close", limit=5)
     assert [f["id"] for f in friends] == ["best", "close"]
+
+
+@pytest.mark.asyncio
+async def test_next_liked_pitch_skips_already_recommended(monkeypatch):
+    async def fake_list(_db, *, limit=100, kind=""):
+        assert kind == "pitch"
+        return [
+            {
+                "id": "old",
+                "kind": "pitch",
+                "author_character_id": "mio",
+                "liked": True,
+                "recommended_at": 1.0,
+                "text_ja": "古い",
+            },
+            {
+                "id": "fresh",
+                "kind": "pitch",
+                "author_character_id": "mio",
+                "liked": True,
+                "recommended_at": 0,
+                "text_ja": "窓辺",
+            },
+            {
+                "id": "other",
+                "kind": "pitch",
+                "author_character_id": "aya",
+                "liked": True,
+                "text_ja": "別の子",
+            },
+        ]
+
+    from backend.app.muse import lounge_db
+    monkeypatch.setattr(lounge_db, "list_threads", fake_list)
+    hit = await lounge_db.next_liked_pitch(object(), "mio")
+    assert hit["id"] == "fresh"
+    none = await lounge_db.next_liked_pitch(object(), "unknown")
+    assert none is None

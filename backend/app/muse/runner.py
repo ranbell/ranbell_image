@@ -140,7 +140,7 @@ async def run_shoot_job(
     reporter, cancel, *, db, comfy, session_id: str, ollama=None,
 ) -> dict[str, Any]:
     from ..jobs.render import run_render
-    from ..scanner.drafts import PLAYGROUND_SUBDIR
+    from ..scanner.drafts import MUSE_SHOOT_SUBDIR
 
     session = await session_db.load(db, session_id)
     if session is None:
@@ -162,7 +162,7 @@ async def run_shoot_job(
             negative=negative_for(session),
             seed=int(shoot.get("seed") or 0) or None,
             batch_count=max(1, int(inputs.get("draft_count", 1))),
-            subdir=PLAYGROUND_SUBDIR,
+            subdir=MUSE_SHOOT_SUBDIR,
             prefix="muse_shoot",
             method="muse_shoot",
             payload_extra={

@@ -62,10 +62,14 @@ async def test_runner_jobs(monkeypatch):
     # 1. Board job
     res = await runner.run_board_job(MagicMock(), MagicMock(), db=db, comfy=fake_comfy, session_id="sess_123")
     assert res["shas"] == ["sha_abc123"]
+    board_kw = mock_render_module.run_render.await_args.kwargs
+    assert board_kw["subdir"] == "playground"
 
     # 2. Shoot job
     res = await runner.run_shoot_job(MagicMock(), MagicMock(), db=db, comfy=fake_comfy, session_id="sess_123")
     assert res["shas"] == ["sha_abc123"]
+    shoot_kw = mock_render_module.run_render.await_args.kwargs
+    assert shoot_kw["subdir"] == "muse"
 
 
 def test_runner_preview_publisher_and_finished_image():

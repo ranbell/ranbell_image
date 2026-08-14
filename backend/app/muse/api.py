@@ -369,6 +369,21 @@ async def lounge_trends(request: Request):
     return {"trends": await lounge_db.get_trends(_db(request))}
 
 
+class LikeBody(BaseModel):
+    liked: bool | None = None
+
+
+@router.post("/lounge/threads/{thread_id}/like")
+async def lounge_like(thread_id: str, request: Request, body: LikeBody = LikeBody()):
+    """Toggle or set liked on a pitch (or any lounge thread)."""
+    from . import lounge_db
+    liked = body.liked
+    row = await lounge_db.set_thread_liked(_db(request), thread_id, liked)
+    if row is None:
+        raise HTTPException(404, "thread not found")
+    return row
+
+
 @router.get("/lounge/summary")
 async def lounge_summary(request: Request, since: float = 0.0):
     """Gallery badge: new threads since last peek + unanswered pitches."""

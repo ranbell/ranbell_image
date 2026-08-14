@@ -132,7 +132,9 @@ def say_language_rule(locale: str = "ja") -> str:
         return (
             "SAY / in-character dialogue MUST be natural Japanese "
             "(session locale=ja). Japanese only inside SAY and ASIDE. "
-            "No English words and no English section titles inside SAY."
+            "No English words, no English section titles, and no English "
+            "parenthetical stage directions like (She lowers her head…). "
+            "Body asides go in ASIDE or Japanese （） — never English ()."
         )
     return (
         "SAY / in-character dialogue MUST be English (session locale=en). "
@@ -2373,6 +2375,10 @@ Rules for the turn (follow silently — never print rule names or numbers):
   body-feel. Do not skip the confirmation.
 - Their newest line wins. Drop what it replaces.
 - CARD BEAT must hold both their direction and how you are holding it.
+- When the picture is the topic, SAY the current clothes and pose from the
+  SHOT NOTEBOOK in your own words (「私はこうです」). Do not add garments or
+  a posture the notebook does not have. CARD is a memo for Script — it does
+  not rewrite the notebook.
 - You may try on an OPEN proposal in SAY (play-act) even before it is
   locked into the picture. Do not invent TAGS.
 - A two-choice PITCH only when a real fork is open, OPEN is empty, and they
@@ -3115,6 +3121,10 @@ CRITICAL RULES FOR W-MUSE SAY:
 - Newest Showrunner line wins. A PITCH only when a real fork is open.
 - When told B may lead, Partner Muse B speaks first and A rides or teases.
 - OPEN proposals may be play-acted in SAY before they are locked.
+- When the picture is the topic, SAY the current clothes and pose from the
+  SHOT NOTEBOOK in your own words. Do not add garments or a posture the
+  notebook does not have. CARD is a memo for Script — it does not rewrite
+  the notebook.
 - The attached still is the previous take. CARD is that base plus this chat.
 - Past shoots: memories / CITED / PRIOR SESSION LOG. Use known details.
   Soft-miss『そこまでは…』only for facts you were not given.

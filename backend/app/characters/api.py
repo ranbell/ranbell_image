@@ -480,7 +480,13 @@ async def _queue_board_slots(
             subdir=CHARACTER_SUBDIR,
             prefix=f"char_{slot}",
             method="character_board",
-            payload_extra={"character_id": character_id, "character_slot": slot},
+            payload_extra={
+                "character_id": character_id,
+                "character_slot": slot,
+                "character_name": str(
+                    preset.get("name_ja") or preset.get("name") or ""
+                ),
+            },
             attach=_attach(slot),
         )
         jobs.append({"slot": slot, "job_id": job_id, "character_id": character_id,

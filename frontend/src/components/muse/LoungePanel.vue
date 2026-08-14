@@ -2,8 +2,8 @@
 /*
  * Studio lounge — Slack-flavoured feed of wrap shares + pitches + handpost
  * + Look-of-the-week trends. Cute rose/pink tone to match the secret diary.
- * Fully read-only for the showrunner — peek only, never write or pin.
- * Handpost pages still arrive from habit jobs.
+ * Wrap feed, trends, and handpost stay peek-only. Pitches in #ideas can be liked
+ * (once, next session with that Muse). Handpost pages still arrive from habit jobs.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -14,8 +14,9 @@ const props = defineProps({
 const emit = defineEmits(['close', 'toast', 'seen'])
 const { t, locale } = useI18n()
 
-const tab = ref('lounge') // 'lounge' | 'trends' | 'handpost'
+const tab = ref('lounge') // 'lounge' | 'ideas' | 'trends' | 'handpost'
 const loading = ref(false)
+const liking = ref(false)
 const threads = ref([])
 const trends = ref([])
 const pages = ref([])
@@ -23,16 +24,20 @@ const selectedId = ref('')
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const selected = computed(() => threads.value.find(t => t.id === selectedId.value) || null)
-const feedThreads = computed(() => {
-  const rows = threads.value.filter(th => th.kind !== 'studio_trends')
-  // Open pitches float to the top — the showrunner should see "どうでしょう？" first.
+const loungeThreads = computed(() => {
+  const rows = threads.value.filter(th => th.kind !== 'studio_trends' && th.kind !== 'pitch')
+  return [...rows].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
+})
+const ideaThreads = computed(() => {
+  const rows = threads.value.filter(th => th.kind === 'pitch')
   return [...rows].sort((a, b) => {
-    const ap = a.kind === 'pitch' && a.status === 'open' ? 0 : 1
-    const bp = b.kind === 'pitch' && b.status === 'open' ? 0 : 1
-    if (ap !== bp) return ap - bp
+    const al = a.liked ? 0 : 1
+    const bl = b.liked ? 0 : 1
+    if (al !== bl) return al - bl
     return Number(b.created_at || 0) - Number(a.created_at || 0)
   })
 })
+const feedThreads = computed(() => (tab.value === 'ideas' ? ideaThreads.value : loungeThreads.value))
 
 function thumb(sha) {
   return sha ? `/api/thumbnails/${sha}.webp` : ''
@@ -87,13 +92,38 @@ async function load() {
     threads.value = th.threads || []
     trends.value = tr.trends || []
     pages.value = hp.pages || []
-    if (!selectedId.value && feedThreads.value.length) {
-      selectedId.value = feedThreads.value[0].id
-    }
+    ensureSelected()
   } catch (err) {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
     loading.value = false
+  }
+}
+
+function ensureSelected() {
+  const rows = feedThreads.value
+  if (!rows.length) {
+    selectedId.value = ''
+    return
+  }
+  if (!rows.some(th => th.id === selectedId.value)) {
+    selectedId.value = rows[0].id
+  }
+}
+
+async function toggleLike(th) {
+  if (!th?.id || liking.value) return
+  liking.value = true
+  try {
+    const row = await api(`/api/muse/lounge/threads/${th.id}/like`, {
+      method: 'POST',
+      body: JSON.stringify({ liked: !th.liked }),
+    })
+    threads.value = threads.value.map(item => (item.id === row.id ? { ...item, ...row } : item))
+  } catch (err) {
+    emit('toast', { msg: String(err?.message || err), type: 'error' })
+  } finally {
+    liking.value = false
   }
 }
 
@@ -103,6 +133,7 @@ watch(() => props.show, (v) => {
     load()
   }
 })
+watch(tab, () => ensureSelected())
 </script>
 
 <template>
@@ -122,6 +153,9 @@ watch(() => props.show, (v) => {
         <button type="button" class="lounge-chan" :class="tab === 'lounge' ? 'is-on' : ''" @click="tab = 'lounge'">
           # {{ t('muse.lounge.channelLounge') }}
         </button>
+        <button type="button" class="lounge-chan" :class="tab === 'ideas' ? 'is-on' : ''" @click="tab = 'ideas'">
+          # {{ t('muse.lounge.channelIdeas') }}
+        </button>
         <button type="button" class="lounge-chan" :class="tab === 'trends' ? 'is-on' : ''" @click="tab = 'trends'">
           # {{ t('muse.lounge.channelTrends') }}
         </button>
@@ -137,6 +171,7 @@ watch(() => props.show, (v) => {
         <header class="flex items-center gap-2 px-4 py-3 border-b border-pink-200/60 bg-white/40">
           <h2 class="text-base font-semibold text-rose-600 tracking-wide">
             {{ tab === 'lounge' ? t('muse.lounge.feedTitle')
+              : tab === 'ideas' ? t('muse.lounge.ideasTitle')
               : tab === 'trends' ? t('muse.lounge.trendsTitle')
               : t('muse.lounge.handpostTitle') }}
           </h2>
@@ -144,8 +179,8 @@ watch(() => props.show, (v) => {
           <button type="button" class="ml-auto sb-icon-btn !text-rose-500" @click="emit('close')">✕</button>
         </header>
 
-        <!-- lounge feed -->
-        <div v-if="tab === 'lounge'" class="flex-1 min-h-0 flex">
+        <!-- lounge feed / showrunner ideas -->
+        <div v-if="tab === 'lounge' || tab === 'ideas'" class="flex-1 min-h-0 flex">
           <div class="w-56 shrink-0 border-r border-pink-100 overflow-y-auto p-2 space-y-1.5 bg-white/30">
             <button
               v-for="th in feedThreads"
@@ -177,18 +212,20 @@ watch(() => props.show, (v) => {
                         : 'bg-pink-200/80 text-pink-700'"
                     >{{ kindBadge(th) }}</span>
                     <span class="text-xs font-medium truncate">{{ nameOf(th) }}</span>
+                    <span v-if="th.liked" class="ml-auto text-[10px]">♥</span>
                   </div>
                   <div class="text-[10px] text-rose-400/80 truncate">{{ textOf(th) }}</div>
                 </div>
               </div>
             </button>
             <p v-if="!feedThreads.length && !loading" class="text-xs text-rose-400 text-center py-8 px-2">
-              {{ t('muse.lounge.empty') }}
+              {{ tab === 'ideas' ? t('muse.lounge.ideasEmpty') : t('muse.lounge.empty') }}
             </p>
           </div>
 
           <div class="flex-1 min-w-0 flex flex-col">
             <div class="flex-1 overflow-y-auto p-4 space-y-3">
+              <p v-if="tab === 'ideas'" class="text-xs text-rose-500/80">{{ t('muse.lounge.ideasBlurb') }}</p>
               <template v-if="selected">
                 <div class="flex items-start gap-3">
                   <img
@@ -214,6 +251,16 @@ watch(() => props.show, (v) => {
                     </div>
                     <div class="text-[10px] text-rose-400">{{ when(selected.created_at) }}</div>
                     <p class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">{{ textOf(selected) }}</p>
+                    <button
+                      v-if="selected.kind === 'pitch'"
+                      type="button"
+                      class="mt-3 text-xs px-3 py-1 rounded-full border"
+                      :class="selected.liked
+                        ? 'bg-rose-400 text-white border-rose-400'
+                        : 'bg-white/80 text-rose-500 border-rose-200 hover:border-rose-400'"
+                      :disabled="liking"
+                      @click="toggleLike(selected)"
+                    >{{ selected.liked ? '♥ ' + t('muse.lounge.liked') : '♡ ' + t('muse.lounge.like') }}</button>
                   </div>
                 </div>
                 <div

@@ -995,6 +995,37 @@ class QdrantDBClient:
             points=qm.PointIdsList(points=[point_id]),
         )
 
+    async def unmark_legacy_muse_shoot_drafts(self) -> int:
+        """Flip old playground/muse_shoot_* payloads off is_draft.
+
+        New finals go to generated/muse/. Heal skips unchanged mtimes, so
+        without this the gallery would keep hiding the old shoots.
+        """
+        flipped = 0
+        offset = None
+        while True:
+            points, next_offset = await self._qc.scroll(
+                collection_name=IMAGES_COLLECTION,
+                scroll_filter=qm.Filter(must=[self._draft_exclude_cond()]),
+                limit=256,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["name", "sha256"]),
+                with_vectors=False,
+            )
+            for p in points:
+                pl = p.payload or {}
+                name = str(pl.get("name") or "")
+                sha = str(pl.get("sha256") or "")
+                if sha and name.startswith("muse_shoot_"):
+                    await self.set_payload(sha, {"is_draft": False})
+                    flipped += 1
+            if next_offset is None:
+                break
+            offset = next_offset
+        if flipped:
+            logger.info("unmarked %d legacy muse_shoot drafts", flipped)
+        return flipped
+
     async def set_embedding(self, sha256: str, embedding: list[float]) -> None:
         """Store full embedding + MRL-truncated small embedding."""
         if len(embedding) != self._embed_dim:

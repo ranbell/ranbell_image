@@ -192,3 +192,16 @@ def test_api_pins_and_releases_one_part_of_the_shot(api_client, monkeypatch):
         "/api/muse/sessions/sess_facet_lock/facets/vibes", json={"locked": True},
     )
     assert res.status_code == 400
+
+
+def test_lounge_like_toggles(api_client, monkeypatch):
+    async def mock_like(_db, thread_id, liked=None):
+        return {"id": thread_id, "kind": "pitch", "liked": True if liked is None else liked}
+
+    monkeypatch.setattr("app.muse.lounge_db.set_thread_liked", mock_like)
+    res = api_client.post("/api/muse/lounge/threads/p1/like", json={"liked": True})
+    assert res.status_code == 200
+    assert res.json()["liked"] is True
+
+    res = api_client.post("/api/muse/lounge/threads/p1/like", json={})
+    assert res.status_code == 200

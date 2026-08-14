@@ -164,6 +164,43 @@ async def delete_all(db) -> int:
     return n
 
 
+async def set_thread_liked(
+    db, thread_id: str, liked: bool | None = None,
+) -> dict[str, Any] | None:
+    """Toggle or set `liked` on a lounge thread (pitches, mainly)."""
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return None
+    next_liked = (not bool(thread.get("liked"))) if liked is None else bool(liked)
+    thread["liked"] = next_liked
+    thread["liked_at"] = time.time() if next_liked else 0.0
+    return await save_thread(db, thread)
+
+
+async def mark_recommended(db, thread_id: str) -> dict[str, Any] | None:
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return None
+    thread["recommended_at"] = time.time()
+    return await save_thread(db, thread)
+
+
+async def next_liked_pitch(db, character_id: str) -> dict[str, Any] | None:
+    """Newest liked pitch for this Muse that has not been recommended yet."""
+    if not character_id:
+        return None
+    rows = await list_threads(db, limit=100, kind="pitch")
+    for th in rows:
+        if str(th.get("author_character_id") or "") != character_id:
+            continue
+        if not th.get("liked"):
+            continue
+        if th.get("recommended_at"):
+            continue
+        return th
+    return None
+
+
 async def append_message(db, thread_id: str, message: dict[str, Any]) -> dict[str, Any] | None:
     thread = await get_thread(db, thread_id)
     if thread is None:

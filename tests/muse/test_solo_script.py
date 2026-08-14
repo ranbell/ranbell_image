@@ -59,7 +59,7 @@ def test_parse_muse_card_and_absorb_pose_only():
     assert "ribbon" not in nb["wearing"]
 
 
-def test_absorb_duet_pose_marks_craft_dirty():
+def test_absorb_duet_pose_helper_still_folds_beat():
     session = {
         "mode": "duet",
         "notebook": notebook.blank(),
@@ -77,6 +77,47 @@ def test_absorb_duet_pose_marks_craft_dirty():
     assert session["notebook"].get("wearing") != "coat"
 
 
+def test_duet_talk_does_not_absorb_card_into_notebook():
+    import inspect
+    src = inspect.getsource(service._duet_talk)
+    assert "_absorb_duet_pose" not in src
+
+
+@pytest.mark.asyncio
+async def test_talk_card_standing_does_not_overwrite_sitting(monkeypatch):
+    async def fake_talk(*_a, **_kw):
+        return (
+            "座ってるよ",
+            None,
+            False,
+            "",
+            "BEAT: standing by the fence\nWEARING: coat",
+            "",
+        )
+
+    async def no_board(*_a, **_kw):
+        return []
+
+    async def noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", no_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    db = FakeDb()
+    ollama = NotebookOllama()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "beat": "sitting on a bench",
+        "wearing": "cardigan",
+    })
+    await service._duet_talk(db, ollama, s, "立って", cfg={"ollama_num_ctx": 16000})
+    assert "sitting" in s["notebook"]["beat"]
+    assert "standing" not in s["notebook"]["beat"].lower()
+    assert "standing" in (s.get("muse_card") or "").lower()
+
+
 def test_scripter_reads_muse_pose_and_recall():
     text = chain.SCRIPTER_SYSTEM.lower()
     assert "card beat" in text
@@ -92,6 +133,8 @@ def test_duet_talk_output_answers_nouns_when_asked():
     assert "card" in text
     assert "aside" in text
     assert "pitch" in text
+    assert "not rewrite the notebook" in text
+    assert "shot notebook" in text
 
 
 def test_wearing_tokens_drop_no_hat():

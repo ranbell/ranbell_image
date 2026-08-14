@@ -58,6 +58,29 @@ def test_parse_talk_blocks_accepts_parenthetical_say_label():
     assert "緊張" in blocks["aside"]
 
 
+def test_sanitize_strips_english_stage_parens_in_ja():
+    raw = "うん…ちょっと待って。(She lowers her head, fingers tightening on the hem.)"
+    out = identity.sanitize_muse_say(raw, locale="ja")
+    assert "lowers her head" not in out
+    assert "うん" in out
+    kept = identity.sanitize_muse_say("少し緊張してる（少し緊張）", locale="ja")
+    assert "少し緊張" in kept
+    short = identity.sanitize_muse_say("了解 (OK)", locale="ja")
+    assert "(OK)" in short or "OK" in short
+
+
+def test_sanitize_keeps_english_parens_in_en_locale():
+    raw = "Wait a second. (She lowers her head.)"
+    out = identity.sanitize_muse_say(raw, locale="en")
+    assert "lowers her head" in out
+    turns = identity.parse_duet_speakers(
+        "A: Wait. (She lowers her head.)\nB: Okay.",
+        locale="en",
+    )
+    assert turns is not None
+    assert "lowers her head" in turns[0]["text"]
+
+
 def test_parse_table_read_truncated_say_tags():
     raw = "SAY: 帽子、外したよ\nTAGS: straw_hat\n"
     say, tags, scene = identity.parse_table_read(raw)

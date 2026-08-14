@@ -28,8 +28,8 @@ import {
   colorFamily, colorWord, eyeSwatch, familySwatch, hairSwatch,
 } from './muse/colorSwatch.js'
 import { useRenderWatch } from '../composables/useRenderWatch.js'
+import { useMuseFavorites } from '../composables/useMuseFavorites.js'
 
-const FAV_KEY = 'muse.favoriteCharacterIds'
 const RECENT_MS = 7 * 24 * 60 * 60 * 1000
 const REGULAR_SHOOTS = 5
 const VETERAN_SHOOTS = 12
@@ -51,13 +51,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow', 'start-duet-pair', 'resume'])
 const { t, locale } = useI18n()
+const { favorites, isFavorite, toggleFavorite: toggleFav, reload: reloadFavorites } = useMuseFavorites()
 
 const characters = ref([])
 const loading = ref(false)
 const activeHair = ref([])
 const activeEyes = ref([])
 const unreadOnly = ref(false)
-const favorites = ref(loadFavorites())
 const view = ref('grid')          // 'grid' | 'deck'
 const imageDisplayMode = ref('sheet') // 'sheet' | 'portrait' — top-bar one-tap toggle!
 const deckAt = ref(0)
@@ -134,29 +134,10 @@ function cardImage(c) {
 }
 
 
-function loadFavorites() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(FAV_KEY) || '[]')
-    return Array.isArray(raw) ? raw.map(String).filter(Boolean) : []
-  } catch {
-    return []
-  }
-}
-function persistFavorites() {
-  localStorage.setItem(FAV_KEY, JSON.stringify(favorites.value))
-}
-function isFavorite(id) {
-  return favorites.value.includes(id)
-}
 function toggleFavorite(id, e) {
   e?.preventDefault?.()
   e?.stopPropagation?.()
-  const key = String(id || '')
-  if (!key) return
-  const i = favorites.value.indexOf(key)
-  if (i >= 0) favorites.value.splice(i, 1)
-  else favorites.value.unshift(key)
-  persistFavorites()
+  toggleFav(id)
 }
 
 // Colours filter by family, not by word. The roster distinguishes `brown`,
@@ -402,6 +383,7 @@ function onKey(e) {
 // samples its own job.
 function openGallery() {
   reload()
+  reloadFavorites()
   deckAt.value = 0
   syncFromJobs()
   fetchCompatStatus()

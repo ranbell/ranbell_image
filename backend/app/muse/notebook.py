@@ -23,6 +23,8 @@ SHOT_KEYS = (
 META_KEYS = ("vibe", "open", "standing", "open_choices")
 
 _ALL_KEYS = SHOT_KEYS + META_KEYS
+REWRITE_LOG_MAX = 12
+_REWRITE_FIELDS = SHOT_KEYS + ("vibe", "open")
 
 
 def blank(partner: bool = False) -> dict[str, Any]:
@@ -353,6 +355,50 @@ def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:
     out.pop("standing", None)
     out.pop("clear_open", None)
     return out
+
+
+def shot_snapshot(nb: dict[str, Any]) -> dict[str, Any]:
+    """Plain values used to diff who rewrote the notebook."""
+    out: dict[str, Any] = {
+        k: str((nb or {}).get(k) or "") for k in _REWRITE_FIELDS
+    }
+    out["standing"] = [
+        str(s).strip() for s in ((nb or {}).get("standing") or []) if str(s).strip()
+    ]
+    return out
+
+
+def shot_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    changed: dict[str, Any] = {}
+    keys = set(before or {}) | set(after or {})
+    for key in keys:
+        old, new = (before or {}).get(key), (after or {}).get(key)
+        if old != new:
+            changed[key] = {"before": old, "after": new}
+    return changed
+
+
+def record_rewrite(
+    session: dict[str, Any], source: str, *,
+    before: dict[str, Any], after: dict[str, Any],
+    intent: str = "", extra: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Append a short rewrite to the session ring. Returns the entry or None."""
+    changed = shot_diff(before, after)
+    if extra:
+        changed.update(extra)
+    if not changed:
+        return None
+    entry = {
+        "at": time.time(),
+        "source": str(source or ""),
+        "intent": str(intent or ""),
+        "changed": changed,
+    }
+    log = list(session.get("rewrite_log") or [])
+    log.append(entry)
+    session["rewrite_log"] = log[-REWRITE_LOG_MAX:]
+    return entry
 
 
 def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:

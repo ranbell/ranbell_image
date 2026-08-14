@@ -50,6 +50,17 @@ const chatEl = ref(null)
 // Image-only zoom above the Muse shell — gallery detail sits under --z-panel-muse
 // and used to open behind this screen when a still was clicked.
 const lightboxSrc = ref('')
+const DEBUG_KEY = 'muse.debug'
+const museDebug = ref(typeof localStorage !== 'undefined' && localStorage.getItem(DEBUG_KEY) === '1')
+function toggleMuseDebug() {
+  museDebug.value = !museDebug.value
+  localStorage.setItem(DEBUG_KEY, museDebug.value ? '1' : '0')
+}
+const rewriteLog = computed(() => session.value?.rewrite_log || [])
+function rewriteWhen(ts) {
+  if (!ts) return ''
+  try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
+}
 const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behind']
 // trio/quartet ("半分の編成") already exist in crew.PRESETS on the backend and
 // were fully translated — they were just never added to this list, so the
@@ -611,6 +622,12 @@ function connectStream(id) {
       preview.value = `data:image/jpeg;base64,${evt.image}`
       return
     }
+    if (evt.type === 'notebook_rewrite') {
+      if (!session.value) return
+      const log = [...(session.value.rewrite_log || []), evt]
+      session.value = { ...session.value, rewrite_log: log.slice(-12) }
+      return
+    }
     if (evt.type === 'scripter_working') {
       // Sent more than once per turn: the opening event carries the status copy,
       // and a later one carries the flash key once the scripter's patch says
@@ -721,8 +738,25 @@ function sampleJob() {
 async function refresh() {
   if (!session.value) return
   try {
-    session.value = await api(`/api/muse/sessions/${session.value.session_id}`)
+    const keep = session.value.rewrite_log || []
+    const next = await api(`/api/muse/sessions/${session.value.session_id}`)
+    next.rewrite_log = mergeRewriteLog(keep, next.rewrite_log)
+    session.value = next
   } catch (err) { fail(err) }
+}
+
+function mergeRewriteLog(a, b) {
+  const rows = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]
+  const seen = new Set()
+  const out = []
+  for (const entry of rows) {
+    const key = `${entry.at}|${entry.source}|${entry.intent}|${JSON.stringify(entry.changed || {})}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(entry)
+  }
+  out.sort((x, y) => Number(x.at || 0) - Number(y.at || 0))
+  return out.slice(-12)
 }
 
 async function scrollChat() {
@@ -933,6 +967,15 @@ async function onChatKey(e) {
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <span class="text-[10px] text-pink-400/70 font-mono">SSE {{ streamLive ? '●' : '○' }}</span>
+          <button
+            type="button"
+            class="text-[10px] px-2 py-0.5 rounded-full border"
+            :class="museDebug
+              ? 'border-amber-400/70 text-amber-200 bg-amber-950/40'
+              : 'border-white/10 text-gray-500 hover:text-gray-300'"
+            :title="t('muse.debugToggle')"
+            @click="toggleMuseDebug"
+          >{{ t('muse.debugToggle') }}</button>
           <button v-if="!isDuet" class="sb-btn" :disabled="busy"
                   @click="showCast = !showCast">{{ t('muse.cast') }}</button>
           <button class="sb-btn" :disabled="busy" @click="showSettings = !showSettings">{{ t('muse.settings') }}</button>
@@ -1513,6 +1556,39 @@ async function onChatKey(e) {
                 <p class="mt-0.5 whitespace-pre-wrap text-[var(--sb-muted)]">{{ row.text }}</p>
               </li>
             </ul>
+          </details>
+
+          <details v-if="museDebug" class="text-[10px] text-amber-200/80" open>
+            <summary class="cursor-pointer text-amber-300/90">{{ t('muse.debugTitle') }}</summary>
+            <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.debugHint') }}</p>
+            <div class="mb-1.5 text-[var(--sb-muted)]">
+              intent: {{ session?.scripter_intent || '—' }}
+            </div>
+            <pre
+              v-if="session?.muse_card"
+              class="whitespace-pre-wrap rounded border border-amber-500/20 bg-black/30 p-2 mb-2 text-[var(--sb-muted)]"
+            >{{ session.muse_card }}</pre>
+            <ul class="space-y-1.5">
+              <li
+                v-for="(entry, i) in rewriteLog"
+                :key="`${entry.at}-${i}`"
+                class="rounded border border-amber-500/20 px-2 py-1.5"
+              >
+                <div class="font-semibold text-amber-200/90">
+                  {{ entry.source }} <span class="font-normal text-[var(--sb-faint)]">{{ rewriteWhen(entry.at) }}</span>
+                  <span v-if="entry.intent" class="ml-1 font-normal">· {{ entry.intent }}</span>
+                </div>
+                <div
+                  v-for="(pair, field) in (entry.changed || {})"
+                  :key="field"
+                  class="mt-0.5 whitespace-pre-wrap text-[var(--sb-muted)]"
+                >
+                  <span class="text-amber-300/80">{{ field }}</span>
+                  {{ ' ' }}{{ pair.before || '∅' }} → {{ pair.after || '∅' }}
+                </div>
+              </li>
+            </ul>
+            <p v-if="!rewriteLog.length" class="text-[var(--sb-faint)]">{{ t('muse.debugEmpty') }}</p>
           </details>
 
           <!-- Legacy facet table (older sessions). -->

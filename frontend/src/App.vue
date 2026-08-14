@@ -10,6 +10,7 @@ import InvokePanel from './components/InvokePanel.vue'
 import MusePanel from './components/MusePanel.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
 import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
+import CharacterDossier from './components/muse/CharacterDossier.vue'
 import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
@@ -257,29 +258,45 @@ const headerActiveJobs = computed(() => {
 const alignmentCache = ref(new Map())        // sha256 -> record | null
 const alignmentEvaluating = ref(new Map())  // sha256 -> job_id (while queued/running)
 
-// ── Muse: diary link on the Creation Record panel ──────────────────────────────
-const museDiaryCache = ref(new Map())        // sha256 -> diary | null
+// ── Muse: diary link + character chips on photo detail ─────────────────────
+const museDiaryCache = ref(new Map())        // `${characterId}:${sha256}` -> diary | null
 const museDiaryModal = ref({ show: false, characterId: '', characterName: '', diaryId: '' })
+const museDossierId = ref('')
 
+function diaryCacheKey(characterId, sha256) {
+  return `${characterId}:${sha256}`
+}
 async function loadMuseDiaryLink(sha256, characterId) {
-  if (!characterId || museDiaryCache.value.has(sha256)) return
+  if (!characterId || !sha256) return
+  const key = diaryCacheKey(characterId, sha256)
+  if (museDiaryCache.value.has(key)) return
   try {
     const r = await fetch(`/api/characters/${characterId}/diaries/by-image/${sha256}`)
     const data = r.ok ? await r.json() : null
-    museDiaryCache.value.set(sha256, data?.diary || null)
+    museDiaryCache.value.set(key, data?.diary || null)
   } catch {
-    museDiaryCache.value.set(sha256, null)
+    museDiaryCache.value.set(key, null)
   }
 }
-
-function openMuseDiaryLink(img) {
-  const diary = museDiaryCache.value.get(img.sha256)
+function museDiaryFor(characterId, sha256) {
+  if (!characterId || !sha256) return null
+  return museDiaryCache.value.get(diaryCacheKey(characterId, sha256)) || null
+}
+function openMuseDiaryLink(img, characterId) {
+  const cid = characterId || img.character_id
+  const diary = museDiaryFor(cid, img.sha256)
+  const name = cid === img.partner_character_id
+    ? (img.partner_character_name || '')
+    : (img.character_name || '')
   museDiaryModal.value = {
     show: true,
-    characterId: img.character_id,
-    characterName: img.character_name || '',
+    characterId: cid,
+    characterName: name,
     diaryId: diary?.id || '',
   }
+}
+function openPhotoCharacter(characterId) {
+  if (characterId) museDossierId.value = characterId
 }
 
 // Batch-fetch alignment for currently displayed images and populate cache (fire-and-forget)
@@ -1358,6 +1375,7 @@ watch(showSimilarityGraph, v => {
 watch(selected, (img) => {
   if (img?.sha256) loadAlignment(img.sha256)
   if (img?.sha256 && img?.character_id) loadMuseDiaryLink(img.sha256, img.character_id)
+  if (img?.sha256 && img?.partner_character_id) loadMuseDiaryLink(img.sha256, img.partner_character_id)
 })
 
 function onGraphCanvasClick(e) {
@@ -2658,6 +2676,8 @@ async function openMuse() {
 }
 
 function pickMuseCharacter(id) {
+  selected.value = null
+  museDossierId.value = ''
   showMuseGallery.value = false
   musePendingCharacterId.value = id
   musePendingPartnerId.value = ''
@@ -4615,6 +4635,38 @@ onUnmounted(() => {
                 <span v-if="selected.star_rating" class="text-xs text-gray-500 ml-2">★{{ selected.star_rating }}</span>
               </div>
 
+              <!-- Muse cast + secret diary -->
+              <div
+                v-if="selected.character_id || selected.partner_character_id"
+                class="flex flex-wrap items-center gap-1.5"
+              >
+                <span class="text-[10px] text-gray-500 uppercase tracking-wide">{{ $t('detail.starring') }}</span>
+                <button
+                  v-if="selected.character_id"
+                  type="button"
+                  class="px-2 py-0.5 rounded-full bg-pink-900/40 text-pink-200 hover:bg-pink-800/60 text-xs"
+                  @click="openPhotoCharacter(selected.character_id)"
+                >{{ selected.character_name || $t('detail.starringLead') }}</button>
+                <button
+                  v-if="museDiaryFor(selected.character_id, selected.sha256)"
+                  type="button"
+                  class="text-pink-400/80 hover:text-pink-300 underline text-[11px]"
+                  @click="openMuseDiaryLink(selected, selected.character_id)"
+                >📖 {{ $t('detail.creationDiaryLink') }}</button>
+                <button
+                  v-if="selected.partner_character_id"
+                  type="button"
+                  class="px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-200 hover:bg-violet-800/60 text-xs"
+                  @click="openPhotoCharacter(selected.partner_character_id)"
+                >{{ selected.partner_character_name || $t('detail.starringPartner') }}</button>
+                <button
+                  v-if="museDiaryFor(selected.partner_character_id, selected.sha256)"
+                  type="button"
+                  class="text-violet-400/80 hover:text-violet-300 underline text-[11px]"
+                  @click="openMuseDiaryLink(selected, selected.partner_character_id)"
+                >📖 {{ $t('detail.creationDiaryLink') }}</button>
+              </div>
+
               <!-- Category badges -->
               <div class="flex flex-wrap gap-1">
                 <span v-if="selected.batch_category === 'AI'"
@@ -4808,17 +4860,6 @@ onUnmounted(() => {
                   </span>
                 </summary>
                 <div class="mt-2 space-y-2">
-                  <!-- Who was cast (Muse-made images only) + a way back to her diary -->
-                  <div v-if="selected.character_name" class="flex items-center gap-2 text-xs">
-                    <span class="text-gray-500">{{ $t('detail.creationCharacter') }}</span>
-                    <span class="text-pink-300 font-semibold">{{ selected.character_name }}</span>
-                    <button
-                      v-if="museDiaryCache.get(selected.sha256)"
-                      type="button"
-                      class="text-pink-400/80 hover:text-pink-300 underline text-[11px]"
-                      @click="openMuseDiaryLink(selected)"
-                    >📖 {{ $t('detail.creationDiaryLink') }}</button>
-                  </div>
                   <!-- Source image thumbnails + weight badges -->
                   <div v-if="selected.creation_record.source_images?.length" class="flex flex-wrap gap-1.5">
                     <div v-for="src in selected.creation_record.source_images" :key="src.sha256"
@@ -5311,6 +5352,18 @@ onUnmounted(() => {
       :open-diary-id="museDiaryModal.diaryId"
       @close="museDiaryModal.show = false"
       @toast="showToast($event.msg, $event.type)"
+    />
+
+    <CharacterDossier
+      v-if="museDossierId"
+      :character-id="museDossierId"
+      :workflows="workflows"
+      :workflow="museGalleryWorkflow"
+      :get-jobs-map="getJobsMap"
+      @close="museDossierId = ''"
+      @pick="museDossierId = ''; pickMuseCharacter($event)"
+      @toast="showToast($event.msg, $event.type)"
+      @update:workflow="museGalleryWorkflow = $event"
     />
 
     <MusePanel

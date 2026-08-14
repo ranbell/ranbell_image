@@ -16,7 +16,11 @@ from pathlib import Path
 from ..config import settings
 
 PLAYGROUND_SUBDIR = "playground"
+# Finished Muse shoots. Not a draft folder — the gallery default includes them.
+MUSE_SHOOT_SUBDIR = "muse"
 DRAFT_SUBDIRS: tuple[str, ...] = (PLAYGROUND_SUBDIR,)
+# Legacy finals were written next to boards as playground/muse_shoot_*.
+_LEGACY_SHOOT_PREFIX = "muse_shoot_"
 
 
 def is_draft_path(path: Path) -> bool:
@@ -25,4 +29,9 @@ def is_draft_path(path: Path) -> bool:
         rel = Path(path).resolve().relative_to(Path(settings.generated_images_dir).resolve())
     except (ValueError, OSError):
         return False
-    return bool(rel.parts) and rel.parts[0] in DRAFT_SUBDIRS
+    if not rel.parts or rel.parts[0] not in DRAFT_SUBDIRS:
+        return False
+    # Old Muse finals sat in playground; keep them out of the draft bucket.
+    if rel.parts[0] == PLAYGROUND_SUBDIR and rel.name.startswith(_LEGACY_SHOOT_PREFIX):
+        return False
+    return True

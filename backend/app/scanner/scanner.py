@@ -77,6 +77,25 @@ class ScanState(BaseModel):
 
 scan_state = ScanState()
 _last_heal_counts: tuple[int, int] | None = None  # (disk_count, db_count)
+_legacy_shoot_reclass_done = False
+
+
+async def _reclassify_legacy_muse_shoots(db: QdrantDBClient) -> None:
+    """Once per process: unhide old playground/muse_shoot_* still marked draft."""
+    global _legacy_shoot_reclass_done
+    if _legacy_shoot_reclass_done:
+        return
+    unmark = getattr(db, "unmark_legacy_muse_shoot_drafts", None)
+    if not callable(unmark):
+        _legacy_shoot_reclass_done = True
+        return
+    try:
+        n = await unmark()
+        _legacy_shoot_reclass_done = True
+        if n:
+            invalidate_image_caches()
+    except Exception:
+        logger.exception("legacy muse_shoot reclass failed")
 
 
 def _sha256_file(path: Path) -> str:
@@ -153,6 +172,8 @@ async def run_heal(db: QdrantDBClient) -> None:
         scan_state.total = len(files)
         disk_count = len(files)
         db_count = await db.total_count()
+
+        await _reclassify_legacy_muse_shoots(db)
 
         if _last_heal_counts == (disk_count, db_count):
             # Disk/Qdrant counts match what they were the last time we checked

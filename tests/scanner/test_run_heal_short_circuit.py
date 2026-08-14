@@ -62,6 +62,7 @@ class FakeDb:
 def _reset_heal_state(monkeypatch):
     # run_heal()/scan_state are module-level singletons; isolate each test.
     monkeypatch.setattr(scanner, "_last_heal_counts", None)
+    monkeypatch.setattr(scanner, "_legacy_shoot_reclass_done", False)
     scanner.scan_state.reset("heal")
     scanner.scan_state.running = False
     monkeypatch.setattr(scanner, "invalidate_image_caches", lambda: None)

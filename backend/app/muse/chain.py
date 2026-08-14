@@ -801,7 +801,7 @@ async def run_duet_talk(
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
     blocks = identity.parse_talk_blocks(raw)
-    text = identity.sanitize_muse_say(blocks["say"] or raw)
+    text = identity.sanitize_muse_say(blocks["say"] or raw, locale=locale)
     if not text:
         raise ChainError("empty duet turn")
     turns = None
@@ -815,10 +815,10 @@ async def run_duet_talk(
             or partner_character.get("name") or ""
         )
         turns = identity.parse_duet_speakers(
-            text, name_a=name_a, name_b=name_b,
+            text, name_a=name_a, name_b=name_b, locale=locale,
         )
     turns_out = tuple(turns) if turns else None
-    aside = identity.sanitize_muse_say(blocks["aside"])
+    aside = identity.sanitize_muse_say(blocks["aside"], locale=locale)
     return text, turns_out, blind, aside, blocks["card"], blocks["pitch"]
 
 

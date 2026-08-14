@@ -786,6 +786,7 @@ def _table_user_prompt(
         for block in (
             _memory_block(session),
             _social_block(session),
+            _pitch_recommend_block(session),
             _handpost_block(session),
             _caught_block(session),
         ):
@@ -2223,7 +2224,8 @@ def _apply_compiled_craft(
         # hard-refuse the known low+up failure mode above.
         pass
     craft = session.setdefault("craft", {})
-    before = str(craft.get("tags") or "")
+    before_tags = str(craft.get("tags") or "")
+    before_scene = str(craft.get("scene") or "")
     craft["tags"] = tags
     craft["scene"] = scene
     craft["pose_intent"] = str((notebook_mod.of(session).get("beat") or ""))[:240]
@@ -2239,8 +2241,20 @@ def _apply_compiled_craft(
     lead = crew.DEFAULT_MEMBER["actress"]
     record_ledger(
         session, muse_id="script", name="Script",
-        before=before, after=tags, ms=0,
+        before=before_tags, after=tags, ms=0,
     )
+    extra: dict[str, Any] = {}
+    if before_tags != tags:
+        extra["tags"] = {"before": before_tags, "after": tags}
+    if before_scene != scene:
+        extra["craft_scene"] = {"before": before_scene, "after": scene}
+    if extra:
+        _note_rewrite(
+            session, "weave",
+            before=notebook_mod.shot_snapshot(notebook_mod.of(session)),
+            after=notebook_mod.shot_snapshot(notebook_mod.of(session)),
+            intent="shot", extra=extra,
+        )
     events.publish(session["session_id"], {
         "type": "craft_updated",
         "prompt": str(craft.get("prompt") or ""),
@@ -2249,6 +2263,22 @@ def _apply_compiled_craft(
     if vitality.bump_shot_compile(session):
         session["cleanup_nudge"] = True
     return True
+
+
+def _note_rewrite(
+    session: dict[str, Any], source: str, *,
+    before: dict[str, Any], after: dict[str, Any],
+    intent: str = "", extra: dict[str, Any] | None = None,
+) -> None:
+    """Ring-buffer + SSE so the debug pane can see who rewrote what."""
+    entry = notebook_mod.record_rewrite(
+        session, source, before=before, after=after, intent=intent, extra=extra,
+    )
+    if not entry:
+        return
+    sid = str(session.get("session_id") or "")
+    if sid:
+        events.publish(sid, {"type": "notebook_rewrite", **entry})
 
 
 def _theme_for_models(session: dict[str, Any]) -> str:
@@ -2340,6 +2370,7 @@ async def _run_duet_scripter(
     if not str(result.get("raw") or "").strip():
         session["craft_dirty"] = True
 
+    before_shot = notebook_mod.shot_snapshot(nb)
     notebook_mod.apply_patch(nb, patch)
     notebook_moved = int(nb.get("rev") or 0) > rev_before
     shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
@@ -2396,6 +2427,10 @@ async def _run_duet_scripter(
     session["notebook"] = nb
     session["standing"] = list(nb.get("standing") or [])
     session["digest"] = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
+    _note_rewrite(
+        session, "scripter",
+        before=before_shot, after=notebook_mod.shot_snapshot(nb), intent=intent,
+    )
     flash = vitality.notebook_flash_key(patch) if shot_patched else ""
     events.publish(sid, {
         "type": "scripter_working",
@@ -2460,6 +2495,18 @@ def _social_block(session: dict[str, Any]) -> str:
     ])
 
 
+def _pitch_recommend_block(session: dict[str, Any]) -> str:
+    rec = session.get("pitch_recommend") or {}
+    text = str(rec.get("text") or "").strip()
+    if not text:
+        return ""
+    return "\n".join([
+        "SHOWRUNNER-LIKED PITCH (one-shot; she may mention wanting this shot.",
+        "Do not force it into the picture unless the conversation goes there.):",
+        f"- {text}",
+    ])
+
+
 def _handpost_block(session: dict[str, Any]) -> str:
     """Pinned studio handpost notices — short standing guidance."""
     lines = [str(m).strip() for m in (session.get("handpost_notices") or []) if str(m).strip()]
@@ -2502,6 +2549,7 @@ async def _after_actress_spoke(db, session: dict[str, Any]) -> None:
     """Spend one-shot memory that rode on the turn that just landed."""
     await _consume_caught(db, session)
     await _consume_social_seeds(db, session)
+    await _consume_pitch_recommend(db, session)
 
 
 def _format_duet_chat_line(session: dict[str, Any], msg: dict[str, Any]) -> list[str]:
@@ -2592,6 +2640,9 @@ def _duet_user_prompt(
     social = _social_block(session)
     if social:
         parts.append(social)
+    liked = _pitch_recommend_block(session)
+    if liked:
+        parts.append(liked)
     handpost = _handpost_block(session)
     if handpost:
         parts.append(handpost)
@@ -2918,13 +2969,8 @@ async def _duet_talk(
         )
         _publish_chat(sid, mutter)
     session["muse_card"] = card or session.get("muse_card") or ""
-    intent_now = str(session.get("scripter_intent") or "").strip().lower()
-    if (
-        uses_notebook(session)
-        and intent_now in ("shot", "mixed")
-        and str(card or "").strip()
-    ):
-        _absorb_duet_pose(session, card)
+    # CARD is a memo for the next scripter turn. It does not write the notebook —
+    # Muse reports the current state in SAY; Script is the only writer.
     choices = notebook_mod.parse_pitch_choices(pitch)
     if choices and not session.get("commit_pitch"):
         notebook_mod.set_open_choices(notebook_mod.of(session), choices)
@@ -3426,6 +3472,7 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     session["caught"] = {}
     await _load_social_seeds(db, session)
     await _load_handpost_notices(db, session)
+    await _load_pitch_recommend(db, session)
     char_id = str(_inputs(session).get("character_id") or "")
     if not char_id:
         return
@@ -3521,6 +3568,50 @@ async def _load_handpost_notices(db, session: dict[str, Any]) -> None:
         session["handpost_notices"] = await handpost_db.pinned_notice_lines(db, ja=ja, limit=3)
     except Exception:
         logger.debug("[muse] could not load handpost notices", exc_info=True)
+
+
+async def _load_pitch_recommend(db, session: dict[str, Any]) -> None:
+    """One liked pitch, once — chat line + prompt block, spent after she speaks."""
+    session["pitch_recommend"] = {}
+    char_id = str(_inputs(session).get("character_id") or "")
+    if not char_id:
+        return
+    try:
+        pitch = await lounge_db.next_liked_pitch(db, char_id)
+    except Exception:
+        logger.debug("[muse] could not load liked pitch", exc_info=True)
+        return
+    if not pitch:
+        return
+    ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+    text = str(
+        (pitch.get("text_ja") if ja else pitch.get("text_en"))
+        or pitch.get("text_ja") or pitch.get("text_en") or ""
+    ).strip()
+    if not text:
+        return
+    session["pitch_recommend"] = {
+        "thread_id": str(pitch.get("id") or ""),
+        "text": text,
+    }
+    line = (
+        f"前にいいねした提案: {text}\nこれ撮ってほしい、かも？"
+        if ja else
+        f"A pitch you liked: {text}\nMaybe shoot this?"
+    )
+    _chat_append(session, role="system", name="Studio", text=line)
+
+
+async def _consume_pitch_recommend(db, session: dict[str, Any]) -> None:
+    rec = session.get("pitch_recommend") or {}
+    tid = str(rec.get("thread_id") or "")
+    session["pitch_recommend"] = {}
+    if not tid:
+        return
+    try:
+        await lounge_db.mark_recommended(db, tid)
+    except Exception:
+        logger.debug("[muse] could not mark pitch recommended", exc_info=True)
 
 
 # ── showrunner message ──────────────────────────────────────────────────────
@@ -4019,6 +4110,7 @@ async def still_read_after_board(db, ollama, session_id: str) -> None:
         dict(result.get("patch") or {}), partner=partner,
     )
     prev_wearing = str(nb.get("wearing") or "")
+    before_shot = notebook_mod.shot_snapshot(nb)
     notebook_mod.apply_patch(nb, patch)
     # Photo must not restore struck garments.
     struck = notebook_mod.struck_tokens(session)
@@ -4039,6 +4131,10 @@ async def still_read_after_board(db, ollama, session_id: str) -> None:
     session["still_read_round"] = rnd
     session["digest"] = notebook_mod.summary_for_muse(
         nb, name_a=name_a, name_b=name_b,
+    )
+    _note_rewrite(
+        session, "still_read",
+        before=before_shot, after=notebook_mod.shot_snapshot(nb), intent="shot",
     )
     await session_db.save(db, session, publish=False)
 
