@@ -107,9 +107,12 @@ async def push_trend(db, item: dict[str, Any]) -> list[dict[str, Any]]:
 async def summary(db, *, since: float = 0.0) -> dict[str, Any]:
     """Unread-ish counts for the gallery badge.
 
-    `since` is the Showrunner's last peek (unix seconds). Threads created after
-    that count as new; open pitches always count so unanswered ideas stay visible.
-    A thread that is both new and an open pitch is counted once.
+    `since` is the Showrunner's last peek (unix seconds); only threads bumped
+    after that count toward the badge. `open_pitches` is reported separately
+    for the panel's amber "still open" ring — it must NOT feed the badge,
+    because nothing ever flips a pitch's status away from "open" (there is no
+    answer/promote/close endpoint), so an open pitch folded into the badge
+    would stay unread forever even after being peeked at.
     """
     threads = await list_threads(db, limit=100)
     since = float(since or 0.0)
@@ -133,7 +136,7 @@ async def summary(db, *, since: float = 0.0) -> dict[str, Any]:
             new_threads += 1
         if is_open_pitch:
             open_pitches += 1
-        if tid and (is_new or is_open_pitch):
+        if tid and is_new:
             badge_ids.add(tid)
     return {
         "new_threads": new_threads,
