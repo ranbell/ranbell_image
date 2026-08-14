@@ -108,12 +108,17 @@ class NotebookOllama(FakeOllama):
         system = str(kw.get("system") or "")
         text = "SAY: うん、その感じ。"
         if "studio scripter" in system or "shot notebook" in system:
-            self.scripter_prompts.append(str(prompt))
+            prompt_s = str(prompt)
+            self.scripter_prompts.append(prompt_s)
             # Match on the current instruction only. The prompt also carries the
             # conversation now, so matching the whole thing would let an earlier
             # turn's keyword answer a later turn. Longest keyword wins within
             # that line so "また煽って、カーディガン" does not match a bare "煽って".
-            hits = [k for k in self.scripts if k in _current_note(str(prompt))]
+            note = _current_note(prompt_s)
+            hits = [k for k in self.scripts if k in note]
+            fold_keys = [k for k in self.scripts if "FOLD" in k]
+            if fold_keys and "FOLD:" in prompt_s:
+                hits = [k for k in fold_keys if k in prompt_s] or fold_keys
             key = max(hits, key=len) if hits else ""
             text = self.scripts.get(key) or _scripter_block(
                 intent="casual", vibe="chatting",

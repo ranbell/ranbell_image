@@ -85,3 +85,19 @@ def test_shot_diff_and_record_rewrite_ring():
     )
     assert same is None
     assert len(session["rewrite_log"]) == 1
+
+
+def test_framing_from_phrase_last_match_wins():
+    from app.muse import identity
+    assert identity.framing_from_phrase("wide full body") == "full_body"
+    assert identity.framing_from_phrase("寄って。顔と上半身") == "upper_body"
+    assert identity.framing_from_phrase("寄って横顔") == "face_closeup"
+    assert identity.framing_from_phrase("eye level") == "auto"
+    pos = identity.assemble_positive(
+        ["1girl"], "cardigan, wide_shot, close_up", "A classroom.",
+        framing="full_body",
+    )
+    low = pos.lower().replace(" ", "_")
+    assert "close_up" not in low
+    assert "full_body" in low
+

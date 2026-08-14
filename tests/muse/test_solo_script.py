@@ -169,9 +169,12 @@ async def test_scripter_fold_adds_uncontradicted_card_action(monkeypatch):
     assert "FOLD:" not in notes
     sources = [e.get("source") for e in (s.get("rewrite_log") or [])]
     assert "scripter_fold" in sources
-    fold_prompts = [p for p in ollama.scripter_prompts if "FOLD:" in _current_note(p)]
+    fold_prompts = [p for p in ollama.scripter_prompts if "FOLD:" in p]
     assert fold_prompts
     assert "The attached image is the previous take" not in fold_prompts[-1]
+    latest = _current_note(fold_prompts[-1]).strip()
+    assert latest.startswith("座って")
+    assert not latest.upper().startswith("FOLD")
 
 
 def test_scripter_reads_muse_pose_and_recall():
@@ -207,6 +210,9 @@ def test_duet_talk_output_answers_nouns_when_asked():
     assert "body action" in text
     assert "posture the notebook does not have" not in text
     assert "how you are holding it" not in text
+    assert "寄ってる" in crew.DUET_TALK_OUTPUT
+    assert "wearing_b" in text
+    assert "aside" in text
 
 
 def test_wearing_tokens_drop_no_hat():
@@ -375,3 +381,386 @@ async def test_weave_drops_struck_and_skips_theme():
     notes = "\n".join(ollama.scripter_prompts)
     assert "THEME" not in notes or "麦わら" not in notes
     assert "CONVERSATION SO FAR" not in notes
+
+
+def test_coerce_plain_phrase_salvages_list_wearing():
+    assert notebook.coerce_plain_phrase(["sailor uniform, cardigan"]) == (
+        "sailor uniform, cardigan"
+    )
+    assert notebook.coerce_plain_phrase("['sailor uniform, cardigan']") == (
+        "sailor uniform, cardigan"
+    )
+    assert notebook.coerce_plain_phrase({"place": "rooftop"}) == ""
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {"wearing": ["sailor uniform", "cardigan"]})
+    assert "sailor uniform" in nb["wearing"]
+    assert "cardigan" in nb["wearing"]
+    notebook.apply_patch(nb, {"vibe": {"mood": "tender"}, "open": "{broken}"})
+    assert nb.get("vibe") == ""
+    assert "{" not in str(nb.get("open") or "")
+
+
+def test_wearing_tokens_do_not_mint_hat_cardigan():
+    toks = notebook.wearing_tokens("straw hat, cardigan")
+    assert "hat" in toks
+    assert "cardigan" in toks
+    assert "hat_cardigan" not in toks
+    assert "straw_hat" in toks
+
+
+def test_drop_leftover_garments_and_crops():
+    tags = notebook.drop_garments_not_in_wearing(
+        "sailor_collar, straw_hat, thin_cardigan, knit, fabric_folds",
+        wearing="sailor uniform, cardigan",
+    )
+    low = tags.lower()
+    assert "straw_hat" not in low
+    assert "cardigan" in low
+    assert "knit" in low
+    zoom = notebook.drop_crops_not_in_frame(
+        "upper_body, close_up, wide_shot, full_body, knit",
+        frame="close, upper body",
+    )
+    zlow = zoom.lower().replace(" ", "_")
+    assert "wide_shot" not in zlow
+    assert "full_body" not in zlow
+    wide = notebook.drop_crops_not_in_frame(
+        "wide_shot, full_body, close_up, face_focus, knit",
+        frame="wide full body",
+    )
+    wlow = wide.lower().replace(" ", "_")
+    assert "close_up" not in wlow
+    assert "wide_shot" in wlow or "full_body" in wlow
+
+
+@pytest.mark.asyncio
+async def test_empty_shot_patch_still_verifies(monkeypatch):
+    """intent=shot with no picture fields must not skip VERIFY."""
+    async def fake_talk(*_a, **_kw):
+        return ("了解", None, False, "", "BEAT: standing\nWEARING: coat", "")
+
+    async def no_board(*_a, **_kw):
+        return []
+
+    async def noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", no_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    monkeypatch.setattr(service, "_fold_muse_after_talk", noop)
+
+    class EmptyShotThenVerify(NotebookOllama):
+        def __init__(self):
+            super().__init__(scripts={})
+            self._n = 0
+
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append({**kw, "prompt": prompt})
+            system = str(kw.get("system") or "")
+            text = "SAY: うん。"
+            if "studio scripter" in system or "shot notebook" in system:
+                self.scripter_prompts.append(str(prompt))
+                self._n += 1
+                if self._n == 1:
+                    text = _scripter_block(intent="shot")
+                else:
+                    assert "VERIFY" in str(prompt)
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="night classroom by the window",
+                        wearing="sailor uniform, cardigan",
+                        beat="standing, holding the hem",
+                        frame="close, upper body",
+                    )
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    db = FakeDb()
+    ollama = EmptyShotThenVerify()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "scene": "school rooftop at dusk",
+        "wearing": "sailor uniform, straw hat",
+        "beat": "sitting on a bench",
+        "frame": "wide full body",
+    })
+    await service.post_duet_chat(db, ollama, s, "カーディガン羽織って立って、寄って")
+    nb = s["notebook"]
+    assert "classroom" in (nb.get("scene") or "").lower() or "night" in (
+        nb.get("scene") or ""
+    ).lower()
+    assert "cardigan" in (nb.get("wearing") or "").lower()
+    assert "standing" in (nb.get("beat") or "").lower()
+    assert "hat" not in notebook.wearing_tokens(nb.get("wearing") or "")
+    assert any("VERIFY" in p for p in ollama.scripter_prompts)
+
+
+@pytest.mark.asyncio
+async def test_fold_cannot_rewrite_wearing_or_frame(monkeypatch):
+    async def fake_talk(*_a, **_kw):
+        return (
+            "裾、握ってるよ",
+            None,
+            False,
+            "",
+            "BEAT: standing, fingers on the hem\nWEARING: coat\nFRAME: close up",
+            "",
+        )
+
+    async def no_board(*_a, **_kw):
+        return []
+
+    async def noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", no_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "座って": _scripter_block(
+            intent="shot", scene="rooftop", wearing="cardigan",
+            beat="sitting on a bench", frame="wide full body",
+        ),
+        "FOLD:": _scripter_block(
+            intent="shot", scene="classroom", wearing="coat",
+            beat="sitting on a bench, fingers on the hem",
+            frame="close up",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await service.post_duet_chat(db, ollama, s, "座って")
+    nb = s["notebook"]
+    assert (nb.get("wearing") or "") == "cardigan"
+    assert "coat" not in (nb.get("wearing") or "").lower()
+    assert "classroom" not in (nb.get("scene") or "").lower()
+    assert "wide" in (nb.get("frame") or "").lower()
+    assert "hem" in (nb.get("beat") or "").lower()
+    assert "sitting" in (nb.get("beat") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_weave_drops_old_place_hour_pose_and_crop():
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "WEAVE": _scripter_block(
+            intent="shot",
+            tags=(
+                "rooftop, dusk, sitting, straw_hat, cardigan, "
+                "wide_shot, full_body, close_up, night_classroom, standing, knit"
+            ),
+            craft_scene="Night classroom, standing in a cardigan. " * 8,
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "wearing": "sailor uniform, cardigan",
+        "scene": "night classroom by the window",
+        "beat": "standing, holding the hem",
+        "frame": "close, upper body",
+    })
+    s["struck"] = ["hat", "straw_hat", "rooftop", "dusk", "sitting", "wide"]
+    s["craft_dirty"] = True
+    s["craft"] = {"prompt": "1girl", "tags": "thin_cardigan", "scene": "x"}
+    await service.weave_craft_if_needed(db, ollama, s)
+    tags = ((s.get("craft") or {}).get("tags") or "").lower().replace(" ", "_")
+    assert "straw_hat" not in tags
+    assert "rooftop" not in tags
+    assert "wide_shot" not in tags
+    assert "full_body" not in tags
+    assert "close_up" in tags or "upper" in tags or "knit" in tags
+
+
+@pytest.mark.asyncio
+async def test_failed_weave_still_scrubs_stale_tags():
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "WEAVE": _scripter_block(intent="shot", tags="", craft_scene=""),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "wearing": "sailor uniform, cardigan",
+        "scene": "night classroom",
+        "beat": "standing",
+        "frame": "close, upper body",
+    })
+    s["struck"] = ["hat", "straw_hat", "sitting", "wide", "wide_shot"]
+    s["craft_dirty"] = True
+    s["craft"] = {
+        "prompt": "1girl, straw_hat, sitting, wide_shot, cardigan",
+        "tags": "straw_hat, sitting, wide_shot, cardigan, knit",
+        "scene": "old rooftop prose",
+    }
+    await service.weave_craft_if_needed(db, ollama, s)
+    tags = ((s.get("craft") or {}).get("tags") or "").lower().replace(" ", "_")
+    prompt = ((s.get("craft") or {}).get("prompt") or "").lower().replace(" ", "_")
+    assert "straw_hat" not in tags
+    assert "wide_shot" not in tags
+    assert "wide_shot" not in prompt
+    assert "cardigan" in tags or "knit" in tags
+
+
+def test_shot_framing_wins_over_panel_dropdown():
+    session = {
+        "inputs": {"framing": "full_body"},
+        "notebook": {
+            "frame": "close, upper body",
+            "rev": 1,
+        },
+        "mode": "duet",
+        "craft": {"tags": "cardigan, wide_shot, close_up", "scene": "classroom"},
+        "character": {},
+    }
+    assert service._shot_framing(session) == "upper_body"
+    service._reassemble(session)
+    prompt = (session["craft"].get("prompt") or "").lower().replace(" ", "_")
+    assert "wide_shot" not in prompt
+    assert "close_up" in prompt or "upper_body" in prompt
+
+
+def test_scripter_forbids_empty_shot_and_dual_crop():
+    text = " ".join(chain.SCRIPTER_SYSTEM.lower().split())
+    assert "empty shot" in text or "empty shot/mixed" in text
+    assert "wide_shot" in text and "close_up" in text
+    weave = " ".join(chain.SCRIPTER_WEAVE_SYSTEM.lower().split())
+    assert "wide_shot" in weave
+    fold = " ".join(chain.SCRIPTER_FOLD_NOTE.lower().split())
+    assert "latest line" in fold
+    assert "do not patch scene" in fold
+
+
+@pytest.mark.asyncio
+async def test_shot_that_restates_scene_still_verifies_clothes(monkeypatch):
+    """intent=shot that only repeats scene must still VERIFY a clothes ask."""
+    async def fake_talk(*_a, **_kw):
+        return ("了解", None, False, "", "BEAT: sitting\nWEARING: cardigan", "")
+
+    async def no_board(*_a, **_kw):
+        return []
+
+    async def noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", no_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    monkeypatch.setattr(service, "_fold_muse_after_talk", noop)
+
+    class RestateThenVerify(NotebookOllama):
+        def __init__(self):
+            super().__init__(scripts={})
+            self._n = 0
+
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append({**kw, "prompt": prompt})
+            system = str(kw.get("system") or "")
+            text = "SAY: うん。"
+            if "studio scripter" in system or "shot notebook" in system:
+                self.scripter_prompts.append(str(prompt))
+                self._n += 1
+                if self._n == 1:
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="rooftop at dusk",
+                        wearing="sailor uniform, straw hat",
+                        beat="sitting on a bench",
+                        frame="wide shot",
+                    )
+                else:
+                    assert "VERIFY" in str(prompt)
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="rooftop at dusk",
+                        wearing="sailor uniform, straw hat, cardigan",
+                        beat="sitting on a bench",
+                        frame="wide shot",
+                    )
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    db = FakeDb()
+    ollama = RestateThenVerify()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "scene": "rooftop at dusk",
+        "wearing": "sailor uniform, straw hat",
+        "beat": "sitting on a bench",
+        "frame": "wide shot",
+    })
+    await service.post_duet_chat(db, ollama, s, "カーディガン羽織って")
+    assert "cardigan" in (s["notebook"].get("wearing") or "").lower()
+    assert any("VERIFY" in p for p in ollama.scripter_prompts)
+
+
+@pytest.mark.asyncio
+async def test_shot_that_only_moves_frame_still_verifies_clothes(monkeypatch):
+    """A crop rewrite must not skip VERIFY when clothes also changed this line."""
+    async def fake_talk(*_a, **_kw):
+        return ("了解", None, False, "", "FRAME: wide\nWEARING: sailor", "")
+
+    async def no_board(*_a, **_kw):
+        return []
+
+    async def noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", no_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    monkeypatch.setattr(service, "_fold_muse_after_talk", noop)
+
+    class FrameThenVerify(NotebookOllama):
+        def __init__(self):
+            super().__init__(scripts={})
+            self._n = 0
+
+        def generate_text_stream(self, prompt, **kw):
+            self.calls.append({**kw, "prompt": prompt})
+            system = str(kw.get("system") or "")
+            text = "SAY: うん。"
+            if "studio scripter" in system or "shot notebook" in system:
+                self.scripter_prompts.append(str(prompt))
+                self._n += 1
+                if self._n == 1:
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="night classroom",
+                        wearing="sailor uniform, cardigan",
+                        beat="standing",
+                        frame="wide full body",
+                    )
+                else:
+                    assert "VERIFY" in str(prompt)
+                    text = _scripter_block(
+                        intent="shot",
+                        scene="night classroom",
+                        wearing="sailor uniform",
+                        beat="standing",
+                        frame="wide full body",
+                    )
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+
+    db = FakeDb()
+    ollama = FrameThenVerify()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "scene": "night classroom",
+        "wearing": "sailor uniform, cardigan",
+        "beat": "standing",
+        "frame": "close, upper body",
+    })
+    await service.post_duet_chat(db, ollama, s, "カーディガン脱いで。引いて全身に戻して")
+    assert "cardigan" not in (s["notebook"].get("wearing") or "").lower()
+    assert any("VERIFY" in p for p in ollama.scripter_prompts)
+

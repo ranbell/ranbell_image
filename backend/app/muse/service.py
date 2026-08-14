@@ -88,6 +88,16 @@ def _framing(inputs: dict[str, Any]) -> str:
     return identity.normalize_framing(str(inputs.get("framing") or "auto"))
 
 
+def _shot_framing(session: dict[str, Any]) -> str:
+    """Notebook FRAME wins over the panel dropdown when it names a crop."""
+    mapped = identity.framing_from_phrase(
+        str(notebook_mod.of(session).get("frame") or ""),
+    )
+    if mapped != "auto":
+        return mapped
+    return _framing(_inputs(session))
+
+
 def _cast(session: dict[str, Any]) -> list[dict[str, Any]]:
     """Everyone in frame. Single Actress or W-Muse pair."""
     character_a = session.get("character") or {}
@@ -1070,7 +1080,7 @@ def _reassemble(session: dict[str, Any]) -> None:
         craft["prompt"] = identity.assemble_positive(
             _identity_tags(session), str(craft.get("tags") or ""),
             str(craft.get("scene") or ""),
-            framing=_framing(_inputs(session)), style=_style(session),
+            framing=_shot_framing(session), style=_style(session),
             subject=identity.subject_tags(_cast(session)),
         )
         return
@@ -2231,7 +2241,7 @@ def _apply_compiled_craft(
     craft["pose_intent"] = str((notebook_mod.of(session).get("beat") or ""))[:240]
     craft["prompt"] = identity.assemble_positive(
         _identity_tags(session), tags, scene,
-        framing=_framing(_inputs(session)), style=_style(session),
+        framing=_shot_framing(session), style=_style(session),
         subject=identity.subject_tags(_cast(session)),
     )
     session["craft_dirty"] = identity.craft_is_thin(
@@ -2304,6 +2314,7 @@ async def _call_duet_scripter(
     ollama, session: dict[str, Any], *, note: str, cfg: dict[str, Any],
     partner: bool, name_a: str, name_b: str,
     mode: str = "compile", images: list[bytes] | None = None,
+    fold: bool = False, verify: bool = False,
 ) -> dict[str, Any]:
     """One scripter generate against the current notebook + conversation."""
     nb = notebook_mod.of(session)
@@ -2320,7 +2331,7 @@ async def _call_duet_scripter(
         transcript="" if mode == "weave" else _duet_transcript(session),
         theme="" if mode == "weave" else _theme_for_models(session),
         style=_style(session),
-        framing=_framing(inputs),
+        framing=_shot_framing(session) if uses_notebook(session) else _framing(inputs),
         partner=partner,
         model=model,
         num_ctx=_num_ctx(inputs, cfg),
@@ -2328,6 +2339,11 @@ async def _call_duet_scripter(
         images=vision,
         card="" if mode == "weave" else str(session.get("muse_card") or ""),
         struck=_struck_line(session),
+        directive=(
+            chain.SCRIPTER_FOLD_NOTE if fold
+            else chain.SCRIPTER_VERIFY_NOTE if verify
+            else ""
+        ),
     )
 
 
@@ -2356,6 +2372,9 @@ async def _run_duet_scripter(
     open_before = str(nb.get("open") or "").strip()
     prev_wearing = str(nb.get("wearing") or "")
     prev_wearing_b = str(nb.get("wearing_b") or "")
+    prev_scene = str(nb.get("scene") or "")
+    prev_beat = str(nb.get("beat") or "")
+    prev_frame = str(nb.get("frame") or "")
     had_shot = notebook_mod.has_shot(nb)
     prev_intent = str(session.get("scripter_intent") or "")
     # Fold must not reread the still — it would re-copy the last take's pose
@@ -2365,7 +2384,7 @@ async def _run_duet_scripter(
     result = await _call_duet_scripter(
         ollama, session, note=text, cfg=cfg,
         partner=partner, name_a=name_a, name_b=name_b,
-        mode="compile", images=vision_images or None,
+        mode="compile", images=vision_images or None, fold=fold,
     )
     intent = str(result.get("intent") or "casual")
     patch = notebook_mod.guard_partner_patch(
@@ -2374,23 +2393,40 @@ async def _run_duet_scripter(
     if not str(result.get("raw") or "").strip():
         session["craft_dirty"] = True
 
+    if fold:
+        patch = {
+            k: v for k, v in patch.items()
+            if k in notebook_mod.FOLD_PATCH_KEYS
+        }
+
     before_shot = notebook_mod.shot_snapshot(nb)
     notebook_mod.apply_patch(nb, patch)
     notebook_moved = int(nb.get("rev") or 0) > rev_before
+    picture_keys = (
+        "scene", "frame", "wearing", "beat", "wearing_b", "beat_b",
+    )
+    after_shot = notebook_mod.shot_snapshot(nb)
+    picture_patched = any(
+        str(after_shot.get(k) or "") != str(before_shot.get(k) or "")
+        for k in picture_keys
+    )
     shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
         patch.get("clear_open")
     )
 
+    _meta_note = str(text or "").strip().upper()
     needs_verify = (
         not fold
-        and intent in ("casual", "")
-        and not shot_patched
         and str(text or "").strip()
-        and not str(text or "").strip().upper().startswith("WEAVE")
-        and not str(text or "").strip().upper().startswith("VERIFY")
-        and not str(text or "").strip().upper().startswith("REPAIR")
-        and not str(text or "").strip().upper().startswith("FOLD")
+        and not _meta_note.startswith("WEAVE")
+        and not _meta_note.startswith("VERIFY")
+        and not _meta_note.startswith("REPAIR")
+        and not _meta_note.startswith("FOLD")
         and (bool(open_before) or had_shot)
+        and (
+            (intent in ("casual", "") and not shot_patched)
+            or intent in ("shot", "mixed")
+        )
     )
     if needs_verify:
         events.publish(sid, {
@@ -2401,9 +2437,9 @@ async def _run_duet_scripter(
         })
         verify = await _call_duet_scripter(
             ollama, session,
-            note=f"{chain.SCRIPTER_VERIFY_NOTE}\n\nSHOWRUNNER'S LATEST LINE:\n{text.strip()}",
+            note=str(text or "").strip(),
             cfg=cfg, partner=partner, name_a=name_a, name_b=name_b,
-            mode="compile", images=vision_images or None,
+            mode="compile", images=vision_images or None, verify=True,
         )
         v_intent = str(verify.get("intent") or "casual")
         v_patch = notebook_mod.guard_partner_patch(
@@ -2428,6 +2464,16 @@ async def _run_duet_scripter(
         notebook_mod.record_struck_from_wearing(
             session, prev_wearing=prev_wearing_b,
             new_wearing=str(nb.get("wearing_b") or ""),
+        )
+    if not fold:
+        notebook_mod.record_struck_tokens(
+            session, prev=prev_scene, new=str(nb.get("scene") or ""), min_len=4,
+        )
+        notebook_mod.record_struck_tokens(
+            session, prev=prev_beat, new=str(nb.get("beat") or ""), min_len=4,
+        )
+        notebook_mod.record_struck_tokens(
+            session, prev=prev_frame, new=str(nb.get("frame") or ""), min_len=4,
         )
 
     session["notebook"] = nb
@@ -3001,13 +3047,16 @@ async def _duet_talk(
     session["commit_pitch"] = False
     await _after_actress_spoke(db, session)
     if uses_notebook(session) and fresh_card:
-        await _fold_muse_after_talk(db, ollama, session, cfg=cfg)
+        await _fold_muse_after_talk(
+            db, ollama, session, cfg=cfg, user_text=text,
+        )
     await session_db.save(db, session)
     return session
 
 
 async def _fold_muse_after_talk(
     db, ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+    user_text: str = "",
 ) -> None:
     """Second scripter pass: fold uncontradicted Muse CARD/SAY action into beat.
 
@@ -3018,9 +3067,10 @@ async def _fold_muse_after_talk(
         return
     if not str(session.get("muse_card") or "").strip():
         return
+    line = str(user_text or "").strip()
     try:
         await _run_duet_scripter(
-            db, ollama, session, chain.SCRIPTER_FOLD_NOTE, cfg=cfg, fold=True,
+            db, ollama, session, line, cfg=cfg, fold=True,
         )
     except Exception:
         logger.warning("[muse] scripter fold failed", exc_info=True)
@@ -4033,6 +4083,25 @@ def _warn_if_craft_behind(session: dict[str, Any]) -> bool:
     return True
 
 
+def _scrub_notebook_craft(session: dict[str, Any]) -> None:
+    """Drop struck / leftover clothes / opposite crop from the craft bag."""
+    nb = notebook_mod.of(session)
+    craft = session.setdefault("craft", {})
+    tags = notebook_mod.scrub_craft_tags(
+        str(craft.get("tags") or ""),
+        wearing=str(nb.get("wearing") or ""),
+        scene=str(nb.get("scene") or ""),
+        beat=str(nb.get("beat") or ""),
+        struck=notebook_mod.struck_tokens(session),
+        wearing_b=str(nb.get("wearing_b") or ""),
+        beat_b=str(nb.get("beat_b") or ""),
+        frame=str(nb.get("frame") or ""),
+    )
+    if tags != str(craft.get("tags") or ""):
+        craft["tags"] = tags
+        _reassemble(session)
+
+
 async def weave_craft_if_needed(
     db, ollama, session: dict[str, Any],
 ) -> dict[str, Any]:
@@ -4049,6 +4118,7 @@ async def weave_craft_if_needed(
     prompt = str(craft.get("prompt") or "")
     scene = str(craft.get("scene") or "")
     if not dirty and not behind and prompt and not identity.craft_is_thin(prompt, scene):
+        _scrub_notebook_craft(session)
         return session
 
     cfg = await get_runtime_config(db)
@@ -4074,7 +4144,7 @@ async def weave_craft_if_needed(
             ollama, session, note="WEAVE", cfg=cfg,
             partner=partner, name_a=name_a, name_b=name_b, mode="weave",
         )
-        tags = notebook_mod.filter_weave_tags(
+        tags = notebook_mod.scrub_craft_tags(
             str(result.get("tags") or ""),
             wearing=str(nb.get("wearing") or ""),
             scene=str(nb.get("scene") or ""),
@@ -4082,6 +4152,7 @@ async def weave_craft_if_needed(
             struck=notebook_mod.struck_tokens(session),
             wearing_b=str(nb.get("wearing_b") or ""),
             beat_b=str(nb.get("beat_b") or ""),
+            frame=str(nb.get("frame") or ""),
         )
         scene_out = str(result.get("craft_scene") or "")
         if result.get("valid") and tags and scene_out:
@@ -4090,10 +4161,12 @@ async def weave_craft_if_needed(
                 weave_ok = True
         if not weave_ok:
             session["craft_dirty"] = True
+            _scrub_notebook_craft(session)
     except Exception:
         logger.warning("[muse] notebook weave failed; keeping draft", exc_info=True)
         session["craft_dirty"] = True
         weave_ok = False
+        _scrub_notebook_craft(session)
     if sid:
         events.publish(sid, {
             "type": "scripter_done",
@@ -4240,7 +4313,7 @@ async def densify_craft_if_needed(
                 transcript=_duet_transcript(session),
                 theme=str(_inputs(session).get("theme") or ""),
                 style=_style(session),
-                framing=_framing(_inputs(session)),
+                framing=_shot_framing(session),
                 partner=partner,
                 model=_text_model(_inputs(session)),
                 num_ctx=_num_ctx(_inputs(session), cfg),

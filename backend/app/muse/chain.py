@@ -950,9 +950,9 @@ READING THE ROOM:
 - A Muse CARD BEAT / SAY body action belongs in beat only when this turn has no new
   showrunner posture or camera direction.
 - FOLD: she just spoke. NOTEBOOK NOW already has the showrunner's latest
-  direction. Keep that posture/place/clothes. Fold uncontradicted CARD BEAT /
+  direction. Keep that posture/place/clothes/camera. Fold uncontradicted CARD BEAT /
   SAY body action (hands, head, held props, how she holds the pose) into beat.
-  Do not invent clothes. Do not emit tags.
+  Do not invent clothes. Do not emit tags. Do not patch scene, wearing, or frame.
 - A change is a change whatever words it arrived in. Judge by what the picture
   would look like now versus the notebook — not by whether some keyword showed
   up. Changing clothes, location, pose, or camera are shot changes.
@@ -985,12 +985,18 @@ FIELD CONTRACTS (hard):
 - atmosphere = mood/feeling only (tender, hushed, lonely). NEVER clock words,
   weather-as-hour, objects, or place nouns.
 - frame / wearing / beat = short absolute phrases, not paragraphs.
+- frame names ONE crop: zoom/close/upper OR wide/full-body. Never both
+  wide_shot and close_up in the same frame.
 - On a remove request, rewrite wearing as the finished state WITHOUT that noun.
   Do not write "no hat" / "remove hat". Omit the hat.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
-- When clothes or place change, rewrite wearing / scene as the finished state.
+- When clothes, place, hour, pose, or camera change, rewrite the finished state
+  on that turn. Empty shot/mixed patches are forbidden — if intent is shot or
+  mixed, patch the picture fields that moved (scene / frame / wearing / beat).
+  Restating an unchanged scene while omitting a new garment is still empty:
+  write the finished wearing.
 - wearing is the only home for clothes, hats, accessories on the body.
 - Hairstyle changes belong in wearing. They override the character sheet.
 - beat is body action only. Never put looking_up / looking_down /
@@ -1026,6 +1032,8 @@ THICKEN QUALITY, NOT INVENTORY:
 - Do not add clothes, hats, lanterns, animals, or furniture the notebook
   does not name.
 - Struck items listed in the prompt must not appear, including no_hat forms.
+- Crop must match FRAME: wide/full-body shots do not also get close_up;
+  zoom/close/upper shots do not also get wide_shot or full_body.
 
 CEILINGS, NOT QUOTAS:
 - At most 35–55 tags; craft_scene at most 140–200 words. Do not invent nouns
@@ -1042,23 +1050,29 @@ Respond with a single JSON object matching the schema.
 """.strip()
 
 SCRIPTER_VERIFY_NOTE = (
-    "VERIFY: Re-read the showrunner's latest line against NOTEBOOK NOW and the "
-    "conversation. If following that line would make the picture look different "
-    "(place, clothes, hairstyle, pose, camera, worn or held props, taking "
+    "VERIFY: SHOWRUNNER'S LATEST LINE below is the showrunner's actual words "
+    "this turn — not this VERIFY header. Re-read that line against NOTEBOOK NOW. "
+    "If following it would make the picture look different (place, clothes, "
+    "hairstyle, pose, camera, worn or held props, putting something on, taking "
     "something off), return intent shot or mixed with ABSOLUTE finished values "
-    "and NO tags. A posture or camera direction (立って / 座って / stand / sit) "
-    "is never casual. If it is truly chit-chat with no picture change, return "
-    "intent casual again with no SHOT edits. Do not invent. Do not copy the "
-    "still as the current ask."
+    "and NO tags. Repeating NOTEBOOK NOW unchanged is a miss. A garment they "
+    "asked to put on must appear in wearing; a garment they asked to take off "
+    "must be omitted. A posture or camera direction (立って / 座って / stand / "
+    "sit) is never casual. If it is truly chit-chat with no picture change, "
+    "return intent casual again with no SHOT edits. Do not invent. Do not copy "
+    "the still as the current ask."
 )
 
 SCRIPTER_FOLD_NOTE = (
     "FOLD: The Muse just spoke. NOTEBOOK NOW already has the showrunner's "
-    "latest direction from this turn. Read the latest Muse SAY and MUSE CARD. "
-    "Keep the showrunner's posture, place, and clothes. Do not swap a posture "
-    "the showrunner just set. Do fold uncontradicted body action from CARD BEAT "
-    "and SAY into beat: hands, head, how she is holding the pose, held props. "
-    "Absolute finished beat, not a paragraph. Intent shot if beat or frame "
+    "latest direction from this turn. SHOWRUNNER'S LATEST LINE below is the "
+    "showrunner's actual words this turn — not this FOLD header. "
+    "Read the latest Muse SAY and MUSE CARD. "
+    "Keep the showrunner's posture, place, clothes, and camera. Do not swap a "
+    "posture the showrunner just set. Do not patch scene, wearing, frame, "
+    "atmosphere, vibe, or open. Do fold uncontradicted body action from CARD "
+    "BEAT and SAY into beat: hands, head, how she is holding the pose, held "
+    "props. Absolute finished beat, not a paragraph. Intent shot if beat "
     "gained detail, else casual with no SHOT edits. Do not invent clothes. "
     "Do not emit tags."
 )
@@ -1091,7 +1105,7 @@ async def run_scripter(
     theme: str = "", style: str = "", framing: str = "",
     partner: bool = False, model: str, num_ctx: int | None,
     mode: str = "compile", images: list[bytes] | None = None,
-    card: str = "", struck: str = "",
+    card: str = "", struck: str = "", directive: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
 
@@ -1141,6 +1155,7 @@ async def run_scripter(
                 "The attached image is the previous take (the base), not the "
                 "current ask. Apply chat + CARD on top of it."
             ) if images else "",
+            str(directive).strip() if str(directive or "").strip() else "",
             f"SHOWRUNNER'S LATEST LINE:\n{note.strip()}",
             "Partner Muse sections wearing_b/beat_b apply." if partner else
             "Solo shoot — leave wearing_b and beat_b unused.",

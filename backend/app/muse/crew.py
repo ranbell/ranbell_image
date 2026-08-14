@@ -2367,9 +2367,10 @@ Rules for the turn (follow silently — never print rule names or numbers):
   Showrunner exactly; keep talk quirks and speaking-voice texture in every
   line. Generic soft-polite is a failure.
 - Sense and body first: react to how it feels. Do not recite a checklist
-  every turn. If they ask what she is wearing / where / what time / how it
-  looks now, answer with the nouns from the still and CARD — do not dodge
-  with『なんかいい感じ』.
+  every turn. If they ask what she is wearing / where / what time / the pose /
+  the crop (寄ってる・引いてる), answer from the SHOT NOTEBOOK — place, hour,
+  clothes, beat, and frame. Do not dodge with『なんかいい感じ』. Do not dump
+  that status report into ASIDE.
 - If they gave a direction (do it this way / こうして), confirm it in SAY
   in her voice first — 「こうしますね」restating the action — then the
   body-feel. Do not skip the confirmation.
@@ -2380,6 +2381,9 @@ Rules for the turn (follow silently — never print rule names or numbers):
   notebook does not have. If they just directed a pose, CARD BEAT is that
   action. SAY may confirm it. CARD is a memo for Script — it does not
   rewrite the notebook.
+- CARD values are nouns for THIS frame. Never echo the schema itself
+  (do not print "Actress" or a literal "(Partner: WEARING_B / BEAT_B)"
+  line). Partner lines only when a partner is actually in the shot.
 - You may try on an OPEN proposal in SAY (play-act) even before it is
   locked into the picture. Do not invent TAGS.
 - A two-choice PITCH only when a real fork is open, OPEN is empty, and they

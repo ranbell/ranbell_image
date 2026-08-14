@@ -192,20 +192,51 @@ _TIME_TOKEN_RE = re.compile(
 _NO_ITEM_RE = re.compile(r"\b(?:no|without)\s+[a-z][a-z0-9_]*\b", re.I)
 
 
+def coerce_plain_phrase(val: Any) -> str:
+    """Notebook fields are short English phrases. Lists join; dicts/reprs drop."""
+    if val is None or isinstance(val, bool):
+        return ""
+    if isinstance(val, dict):
+        return ""
+    if isinstance(val, (list, tuple)):
+        parts = [coerce_plain_phrase(x) for x in val]
+        return ", ".join(p for p in parts if p)
+    text = str(val).strip()
+    if not text:
+        return ""
+    low = text.lower()
+    if low in ("unchanged", "変更なし", "同じ", "そのまま", "-", "none", "なし"):
+        return ""
+    if text.startswith("{") and text.endswith("}"):
+        return ""
+    if text.startswith("[") and text.endswith("]"):
+        inner = text[1:-1].strip()
+        if not inner:
+            return ""
+        if inner.startswith(("'", '"')) and inner.endswith(("'", '"')):
+            return inner[1:-1].strip()
+        bits = [coerce_plain_phrase(p.strip().strip("'\"")) for p in inner.split(",")]
+        return ", ".join(p for p in bits if p)
+    return text
+
+
 def wearing_tokens(text: str) -> set[str]:
     """English-ish tokens from a wearing/beat phrase (for craft consistency).
 
     Built from the field itself — not from a situation vocabulary list.
     ``no hat`` / ``without hat`` do not keep the noun (danbooru ``no_hat`` is
-    not a removal).
+    not a removal). Comma-separated items are tokenised separately so
+    ``straw hat, cardigan`` does not mint ``hat_cardigan``.
     """
-    raw = _NO_ITEM_RE.sub(" ", str(text or "").lower())
-    if not raw.strip():
-        return set()
-    out: set[str] = set(_TOKEN_RE.findall(raw))
-    words = re.findall(r"[a-z][a-z0-9]+", raw)
-    for i in range(len(words) - 1):
-        out.add(f"{words[i]}_{words[i + 1]}")
+    out: set[str] = set()
+    for chunk in re.split(r"[,，、]", str(text or "")):
+        raw = _NO_ITEM_RE.sub(" ", chunk.lower())
+        if not raw.strip():
+            continue
+        out |= set(_TOKEN_RE.findall(raw))
+        words = re.findall(r"[a-z][a-z0-9]+", raw)
+        for i in range(len(words) - 1):
+            out.add(f"{words[i]}_{words[i + 1]}")
     return out
 
 
@@ -256,13 +287,29 @@ def struck_tokens(session: dict[str, Any]) -> set[str]:
     return {t for t in out if len(t) >= 3}
 
 
+_STRUCK_NOISE = {
+    "and", "with", "the", "her", "his", "she", "for", "from", "over", "under",
+    "on", "at", "in", "of", "to", "a", "an",
+}
+
+
 def record_struck_from_wearing(
     session: dict[str, Any], *, prev_wearing: str, new_wearing: str,
 ) -> list[str]:
     """Tokens dropped from wearing stay struck so still-read / weave cannot restore them."""
-    dropped = wearing_tokens(prev_wearing) - wearing_tokens(new_wearing)
-    noise = {"and", "with", "the", "her", "his", "she", "for", "from", "over", "under"}
-    added = sorted(t for t in dropped if t not in noise and len(t) >= 3)
+    return record_struck_tokens(
+        session, prev=prev_wearing, new=new_wearing, min_len=3,
+    )
+
+
+def record_struck_tokens(
+    session: dict[str, Any], *, prev: str, new: str, min_len: int = 3,
+) -> list[str]:
+    """Tokens that left a shot phrase stay struck (clothes, place, hour, pose, crop)."""
+    dropped = wearing_tokens(prev) - wearing_tokens(new)
+    added = sorted(
+        t for t in dropped if t not in _STRUCK_NOISE and len(t) >= min_len
+    )
     if not added:
         return []
     prior = [str(s) for s in (session.get("struck") or []) if str(s).strip()]
@@ -291,11 +338,17 @@ def tag_mentions_struck(tag: str, struck: set[str]) -> bool:
     return False
 
 
+_QUALITY_TAG_KEEP = {
+    "knit", "drape", "folds", "fabric", "grain", "bokeh", "depth",
+    "cinematic", "soft", "light", "shadow", "texture", "skin", "air",
+}
+
+
 def filter_weave_tags(
     tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
-    wearing_b: str = "", beat_b: str = "",
+    wearing_b: str = "", beat_b: str = "", frame: str = "",
 ) -> str:
-    """Drop struck tokens and clothes that left wearing. Quality tags stay."""
+    """Drop struck tokens and shot nouns that left the notebook. Quality tags stay."""
     kept: list[str] = []
     seen: set[str] = set()
     for part in str(tags or "").split(","):
@@ -308,8 +361,6 @@ def filter_weave_tags(
             continue
         if struck and tag_mentions_struck(tok, struck):
             continue
-        # Struck garments are the hard cut. Quality words (knit, drape) stay.
-        # Extra inventory is the weave prompt's job, not an allow-list here.
         seen.add(key)
         kept.append(tok)
     return ", ".join(kept)
@@ -327,11 +378,53 @@ def stale_wearing_tags(
     return sorted(t for t in dropped if t in have and t not in noise and len(t) >= 4)
 
 
+_WIDE_CROP_TAGS = {
+    "wide_shot", "wide_view", "long_shot", "full_body", "establishing_shot",
+}
+_CLOSE_CROP_TAGS = {
+    "close_up", "closeup", "face_focus", "extreme_close-up", "extreme_closeup",
+}
+
+
+def drop_crops_not_in_frame(tags: str, *, frame: str) -> str:
+    """Keep one crop family. Zoom must not keep wide_shot; wide must not keep close_up."""
+    from .identity import bare_tag, framing_from_phrase
+
+    crop = framing_from_phrase(frame)
+    if crop == "auto":
+        have = {bare_tag(p) for p in str(tags or "").split(",") if p.strip()}
+        if have & _WIDE_CROP_TAGS and have & _CLOSE_CROP_TAGS:
+            drop = _WIDE_CROP_TAGS | _CLOSE_CROP_TAGS
+        else:
+            return tags
+    elif crop in ("face_closeup", "upper_body", "from_behind"):
+        drop = set(_WIDE_CROP_TAGS)
+        if crop == "face_closeup":
+            drop.add("full_body")
+    elif crop == "full_body":
+        drop = set(_CLOSE_CROP_TAGS)
+    else:
+        return tags
+    kept: list[str] = []
+    for part in str(tags or "").split(","):
+        tok = part.strip()
+        if not tok:
+            continue
+        if bare_tag(tok) in drop:
+            continue
+        kept.append(tok)
+    return ", ".join(kept)
+
+
 def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = "") -> str:
-    """If a tag names a token that left wearing, drop it (struck already covers most)."""
+    """Drop leftover garment tags whose last token left wearing."""
     allowed = wearing_tokens(wearing) | wearing_tokens(wearing_b)
     if not allowed:
         return tags
+    leftover = {
+        "hat", "cardigan", "coat", "jacket", "hoodie", "cape",
+        "umbrella", "scarf", "glasses", "sunglasses",
+    }
     kept: list[str] = []
     from .identity import bare_tag
     for part in str(tags or "").split(","):
@@ -339,12 +432,27 @@ def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = ""
         if not tok:
             continue
         key = bare_tag(tok)
-        # Only drop when the tag is clearly a leftover garment: the bare tag
-        # itself (or its last word) was a wearing token that is no longer worn.
-        # Quality/light/camera tags rarely appear as wearing tokens.
+        last = key.split("_")[-1] if key else ""
+        if last in _QUALITY_TAG_KEEP:
+            kept.append(tok)
+            continue
+        if last in leftover and last not in allowed and key not in allowed:
+            continue
         kept.append(tok)
-        _ = key
     return ", ".join(kept)
+
+
+def scrub_craft_tags(
+    tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
+    wearing_b: str = "", beat_b: str = "", frame: str = "",
+) -> str:
+    """Struck, leftover garments, and the opposite crop family — keep quality tags."""
+    tags = filter_weave_tags(
+        tags, wearing=wearing, scene=scene, beat=beat, struck=struck,
+        wearing_b=wearing_b, beat_b=beat_b, frame=frame,
+    )
+    tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
+    return drop_crops_not_in_frame(tags, frame=frame)
 
 
 def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:
@@ -409,7 +517,12 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     for key in SHOT_KEYS + ("vibe", "open"):
         if key not in patch:
             continue
-        val = str(patch.get(key) or "").strip()
+        raw = patch.get(key)
+        if isinstance(raw, dict):
+            continue
+        val = coerce_plain_phrase(raw)
+        if val.startswith(("{", "[")):
+            continue
         if key in _SHOT_FIELD_CAPS and val:
             val = _cap_phrase(val, max_chars=_SHOT_FIELD_CAPS[key])
         if key == "vibe" and val:
@@ -477,6 +590,7 @@ _CARD_KEY = {
     "BEAT_B": "beat_b",
 }
 POSE_CARD_KEYS = ("beat", "beat_b")
+FOLD_PATCH_KEYS = ("beat", "beat_b")
 
 
 def parse_muse_card(card: str) -> dict[str, str]:
@@ -707,8 +821,8 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
             continue
         if key not in data:
             continue
-        val = str(data.get(key) or "").strip()
-        if val.lower() in ("unchanged", "変更なし", "同じ", "そのまま", "-", "none", "なし"):
+        val = coerce_plain_phrase(data.get(key))
+        if not val:
             continue
         patch[key] = val
     if "standing" in data and "standing" not in unchanged:

@@ -50,7 +50,7 @@ _FRAMING_NEGATIVE: dict[str, str] = {
     "face_closeup": "full_body, wide_shot, long_shot, multiple_views",
     "from_behind": "looking_at_viewer, eye_contact, frontal_view",
     "upper_body": "extreme_close-up, head_only, full_body, wide_shot",
-    "full_body": "extreme_close-up, face_focus, head_only",
+    "full_body": "extreme_close-up, face_focus, head_only, close_up",
 }
 
 _TAGS_RE = re.compile(
@@ -96,6 +96,29 @@ def parse_framing(value: str) -> str:
             "face_closeup, from_behind"
         )
     return key
+
+
+def framing_from_phrase(frame: str, fallback: str = "auto") -> str:
+    """Map a notebook FRAME phrase to one FRAMINGS key. Last match wins."""
+    text = str(frame or "").strip().lower()
+    if not text:
+        return normalize_framing(fallback)
+    rules = (
+        (r"from[\s_-]?behind|\bbehind\b|後ろ|rear", "from_behind"),
+        (r"face[\s_-]?close|close[\s_-]?up|closeup|face_focus|\bface\b|顔",
+         "face_closeup"),
+        (r"upper[\s_-]?body|cowboy|上半身", "upper_body"),
+        (r"\bzoom\b|寄", "upper_body"),
+        (r"wide|full[\s_-]?body|long[\s_-]?shot|全身|引", "full_body"),
+    )
+    last_pos = -1
+    picked = ""
+    for pat, key in rules:
+        for m in re.finditer(pat, text, re.I):
+            if m.start() >= last_pos:
+                last_pos = m.start()
+                picked = key
+    return picked or normalize_framing(fallback)
 
 
 def framing_tags(framing: str | None) -> list[str]:
@@ -570,6 +593,11 @@ def assemble_positive(
     # style from sneaking in via WD14 leftovers in the same bag.
     if model_hair:
         banned = set(banned) | (HAIR_STYLE_TAGS - model_hair)
+    crop = normalize_framing(framing)
+    if crop and crop != "auto":
+        banned = set(banned) | {
+            bare_tag(p) for p in framing_negative(crop).split(",") if p.strip()
+        }
     seen = set(head) | set(lead)
 
     look: list[str] = []
