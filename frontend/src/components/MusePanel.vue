@@ -952,10 +952,10 @@ async function onChatKey(e) {
           <div v-if="act === 'setup'" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-2xl mx-auto w-full">
             <h3 class="sb-display text-lg text-[var(--sb-amber)]">{{ t('muse.setupTitle') }}</h3>
 
-            <!-- a room full of people, or just her -->
+            <!-- just her (the offer), or a room full of people -->
             <div class="grid grid-cols-2 gap-2">
               <button
-                v-for="m in [{ id: '', k: 'studio' }, { id: 'duet', k: 'duet' }]"
+                v-for="m in [{ id: 'duet', k: 'duet' }, { id: '', k: 'studio' }]"
                 :key="m.k" type="button"
                 class="rounded-lg border p-3 text-left transition-colors"
                 :class="(session?.mode || '') === m.id

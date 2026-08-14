@@ -1309,7 +1309,7 @@
   },
   "muse": {
     "title": "Muse — showrunner studio",
-    "subtitle": "Chat with the crew, check an image board, OK to shoot",
+    "subtitle": "Make the shot with Muse, check a board, OK to shoot",
     "close": "Close",
     "zoomImage": "Enlarge image",
     "reset": "Start over",
@@ -1415,8 +1415,8 @@
       "studio": "Studio",
       "studioHint": "Cast a crew and work it out together",
       "duet": "Lead shoot",
-      "duetHint": "No crew. One or two Muses with you",
-      "duetLong": "No crew. Work it out with one or two Muses — picture notes update the notebook live. \"Shoot?\" takes one still."
+      "duetHint": "Make the shot together with Muse",
+      "duetLong": "You and one or two Muses make the shot together as you talk. Each note lands in the picture. \"Shoot?\" takes one still."
     },
     "quick": {
       "prep": "① Get ready (polish)",
