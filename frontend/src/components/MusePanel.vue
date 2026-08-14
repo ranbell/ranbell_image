@@ -230,7 +230,8 @@ const finishHint = computed(() => {
 // being loaded and the panel looks frozen.
 const thinking = computed(() =>
   Boolean(speaking.value) || Boolean(scripterStatus.value) ||
-  status.value === 'discussing')
+  status.value === 'discussing' || busy.value)
+
 
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function full(sha) { return sha ? `/api/originals/${sha}` : '' }
@@ -441,6 +442,22 @@ const liveWTurns = computed(() => {
   }
   return parsed.length ? parsed : null
 })
+
+const hasLiveTokens = computed(() =>
+  Boolean(displayLiveSay.value || liveWTurns.value?.length))
+
+// Model is working but has not said anything yet. A fake chat bubble here
+// used to look like she spoke; a small presence row is enough to show the
+// wait without sitting in the conversation.
+const waitingOnModel = computed(() => thinking.value && !hasLiveTokens.value)
+
+const waitName = computed(() =>
+  museLabel(museById(speaking.value))
+  || (isJa.value
+    ? (character.value?.name_ja || character.value?.name)
+    : (character.value?.name || character.value?.name_ja))
+  || t('muse.someone'))
+
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.
 const facetConflicts = computed(() => session.value?.facet_conflicts || [])
@@ -680,11 +697,17 @@ function startPoll() {
   let tick = 0
   pollTimer = setInterval(async () => {
     sampleJob()
-    const running = board.value.pending || shoot.value.pending || status.value === 'discussing'
-    if (!running) { tick = 0; return }
+    const rendering = board.value.pending || shoot.value.pending || status.value === 'discussing'
+    const inferring = busy.value || Boolean(scripterStatus.value) || Boolean(speaking.value)
+    if (!rendering && !inferring) {
+      elapsed.value = 0
+      tick = 0
+      startedAt = 0
+      return
+    }
     if (!startedAt) startedAt = Date.now()
     elapsed.value = Math.round((Date.now() - startedAt) / 1000)
-    if (++tick % 3 === 0) await refresh()
+    if (rendering && ++tick % 3 === 0) await refresh()
   }, 1000)
 }
 
@@ -778,13 +801,14 @@ async function startTable() {
   busy.value = true
   startedAt = Date.now()
   elapsed.value = 0
+  scrollChat()
   try {
     // 主演撮り opens on her, not on a table read, so it is a different door.
     session.value = await api(
       `/api/muse/sessions/${session.value.session_id}/${isDuet.value ? 'duet' : 'table'}`,
       { method: 'POST' })
     scrollChat()
-  } catch (err) { fail(err) } finally { busy.value = false }
+  } catch (err) { fail(err) } finally { busy.value = false; stopThinking() }
 }
 
 async function setMode(mode) {
@@ -802,6 +826,8 @@ async function sendChat(text, opts = {}) {
   busy.value = true
   chatInput.value = ''
   startedAt = Date.now()
+  elapsed.value = 0
+  scrollChat()
   try {
     const payload = { text: body }
     session.value = await api(`/api/muse/sessions/${session.value.session_id}/chat`, {
@@ -816,6 +842,10 @@ async function sendChat(text, opts = {}) {
 function stopThinking() {
   speaking.value = ''
   liveSay.value = ''
+  scripterStatus.value = ''
+  scripterWhisper.value = ''
+  elapsed.value = 0
+  startedAt = 0
 }
 
 function insertChat(text) {
@@ -838,6 +868,7 @@ async function runStage(path) {
   busy.value = true
   startedAt = Date.now()
   elapsed.value = 0
+  scrollChat()
   try {
     session.value = await api(
       `/api/muse/sessions/${session.value.session_id}/${path}`, { method: 'POST' })
@@ -1185,36 +1216,26 @@ async function onChatKey(e) {
                 </template>
               </div>
 
-              <!-- Shown from the moment a model is working, not from the first
-                   token. The model is dropped from VRAM before every render, so
-                   the load is paid on every turn — and that whole stretch used
-                   to be a blank panel with no sign anything was happening. -->
-              <div v-if="scripterStatus && !liveSay" class="flex flex-col items-start gap-1 my-1">
-                <span class="text-[10px] text-[var(--sb-teal)] font-bold">
-                  {{ scripterStatus }}
+              <!-- Quiet presence while a model loads. Not a spoken line —
+                   tokens get their own bubble the moment they arrive. -->
+              <div
+                v-if="waitingOnModel"
+                class="flex items-center gap-2 my-1.5 pl-0.5 text-pink-300/80"
+              >
+                <img
+                  v-if="leadFace"
+                  :src="leadFace" alt=""
+                  class="wait-pulse w-6 h-6 rounded-full object-cover shrink-0
+                         ring-1 ring-pink-400/50 border border-pink-100/40"
+                />
+                <span class="text-[10px] font-medium truncate max-w-[10rem]">{{ waitName }}</span>
+                <span class="dots text-[11px]" :aria-label="t('muse.leadThinking')">
+                  <span>.</span><span>.</span><span>.</span>
                 </span>
-                <div
-                  v-if="scripterWhisper"
-                  class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
-                         bg-pink-950/30 border border-pink-400/25 text-pink-100/90 italic"
-                >
-                  {{ scripterWhisper }}
-                </div>
-                <div class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px]
-                            bg-teal-950/30 border border-teal-400/30 text-teal-100">
-                  <span class="dots" :aria-label="scripterStatus">
-                    <span>.</span><span>.</span><span>.</span>
-                  </span>
-                </div>
+                <span v-if="elapsed" class="text-[10px] font-mono text-pink-400/55">{{ clock(elapsed) }}</span>
               </div>
-              <div v-if="thinking && (liveSay || speaking || (!scripterStatus && status === 'discussing'))"
+              <div v-if="hasLiveTokens"
                    class="flex flex-col items-start gap-1 my-1">
-                <span class="text-[10px] text-pink-300 font-bold flex items-center gap-1">
-                  <span>💖</span>
-                  {{ museLabel(museById(speaking)) || t('muse.someone') }}
-                  {{ t('muse.leadThinking') }}
-                  <span v-if="elapsed" class="text-pink-400/70 font-mono">{{ clock(elapsed) }}</span>
-                </span>
                 <template v-if="liveWTurns?.length">
                   <div
                     v-for="(sub, sIdx) in liveWTurns" :key="'live-'+sIdx"
@@ -1233,18 +1254,23 @@ async function onChatKey(e) {
                     </div>
                   </div>
                 </template>
-                <div
-                  v-else
-                  class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
-                            bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md"
-                >
-                  <template v-if="displayLiveSay">
-                    {{ displayLiveSay }}<span class="caret">▍</span>
-                  </template>
-                  <span v-else class="dots" :aria-label="t('muse.leadThinking')">
-                    <span>.</span><span>.</span><span>.</span>
+                <template v-else>
+                  <span class="flex items-center gap-1.5 text-[10px] text-pink-300 font-medium">
+                    <img
+                      v-if="leadFace"
+                      :src="leadFace" alt=""
+                      class="w-6 h-6 rounded-full object-cover shrink-0 ring-2 ring-pink-400/70 border border-pink-100"
+                    />
+                    <span>🌸 {{ waitName }}</span>
+                    <span v-if="elapsed" class="text-pink-400/70 font-mono">{{ clock(elapsed) }}</span>
                   </span>
-                </div>
+                  <div
+                    class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
+                              bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md"
+                  >
+                    {{ displayLiveSay }}<span class="caret">▍</span>
+                  </div>
+                </template>
                 <div
                   v-if="liveAside"
                   class="max-w-[78%] mt-1 pl-2 flex flex-col items-start gap-0.5"
@@ -1388,7 +1414,8 @@ async function onChatKey(e) {
                 </button>
               </div>
               <p class="text-[10px] text-[var(--sb-faint)]">
-                {{ status === 'discussing' ? t('muse.status.discussing') :
+                {{ waitingOnModel || hasLiveTokens ? t('muse.status.chatting') :
+                   status === 'discussing' ? t('muse.status.discussing') :
                    status === 'boarding' ? t('muse.status.boarding') :
                    status === 'awaiting_ok' ? t('muse.status.awaitingOk') :
                    status === 'shooting' ? t('muse.status.shooting') :
@@ -1846,7 +1873,14 @@ async function onChatKey(e) {
 @keyframes caret-blink {
   50% { opacity: 0.2; }
 }
+.wait-pulse {
+  animation: wait-soft 2.4s ease-in-out infinite;
+}
+@keyframes wait-soft {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .dots span, .caret { animation: none; opacity: 1; }
+  .dots span, .caret, .wait-pulse { animation: none; opacity: 1; }
 }
 </style>
