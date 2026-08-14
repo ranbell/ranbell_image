@@ -944,9 +944,15 @@ READING THE ROOM:
   at a concrete earlier line. Nothing is pending unless the conversation says so.
 - A change a Muse proposed and the showrunner accepted is a change to the
   picture. Patch it. Do not wait to be told a second time in plainer words.
-- Beat: the showrunner's newest posture/pose direction wins. Short lines
-  like 立って / 座って / 跪いて / stand / sit / kneel are shot — patch beat
-  to that absolute body action. Do not keep the previous pose to protect it.
+- Beat always names ONE posture stem: sitting / standing / kneeling / crouching
+  (座 / 立 / 跪 / しゃが). Hands, hem, expression, and "facing camera" are extras
+  on that stem — never a replacement for it.
+- If the showrunner said 座って / 立って / 跪いて / しゃがんで / sit / stand /
+  kneel / crouch, rewrite beat with that stem THIS turn. "turning around" is not
+  sitting. Short posture lines are shot. Do not keep the previous pose to protect it.
+- If they only changed camera or clothes (寄って / 引いて / 羽織って), keep the
+  current sit/stand/kneel/crouch stem. Do not change sitting to standing because
+  the crop went wide.
 - A Muse CARD BEAT / SAY body action belongs in beat only when this turn has no new
   showrunner posture or camera direction.
 - FOLD: she just spoke. NOTEBOOK NOW already has the showrunner's latest
@@ -999,8 +1005,10 @@ RULES:
   write the finished wearing.
 - wearing is the only home for clothes, hats, accessories on the body.
 - Hairstyle changes belong in wearing. They override the character sheet.
-- beat is body action only. Never put looking_up / looking_down /
-  looking_at_viewer in beat — gaze belongs in frame with camera angle.
+- beat is body action only and MUST keep one posture stem (sitting / standing /
+  kneeling / crouching). Never put looking_up / looking_down /
+  looking_at_viewer / facing camera in beat — gaze belongs in frame with camera
+  angle.
 - Low angle / worm's-eye → frame must say she looks down toward the lens.
 - If they ask to look at the sky, rewrite frame as one coherent camera story.
 - Leave sections unchanged by omitting them (or list under unchanged).
@@ -1058,9 +1066,12 @@ SCRIPTER_VERIFY_NOTE = (
     "and NO tags. Repeating NOTEBOOK NOW unchanged is a miss. A garment they "
     "asked to put on must appear in wearing; a garment they asked to take off "
     "must be omitted. A posture or camera direction (立って / 座って / stand / "
-    "sit) is never casual. If it is truly chit-chat with no picture change, "
-    "return intent casual again with no SHOT edits. Do not invent. Do not copy "
-    "the still as the current ask."
+    "sit) is never casual. If they said 座って, beat must contain sitting/座 "
+    "this turn — turning around is not sitting. If they only changed camera "
+    "(寄って / 引いて), keep the current sit/stand/kneel/crouch stem; do not "
+    "replace it with facing camera or invent standing from a wide shot. If it "
+    "is truly chit-chat with no picture change, return intent casual again "
+    "with no SHOT edits. Do not invent. Do not copy the still as the current ask."
 )
 
 SCRIPTER_FOLD_NOTE = (
@@ -1069,12 +1080,14 @@ SCRIPTER_FOLD_NOTE = (
     "showrunner's actual words this turn — not this FOLD header. "
     "Read the latest Muse SAY and MUSE CARD. "
     "Keep the showrunner's posture, place, clothes, and camera. Do not swap a "
-    "posture the showrunner just set. Do not patch scene, wearing, frame, "
+    "posture the showrunner just set. Do not change sitting into standing "
+    "because CARD or a wide shot looks standing. Prefix hands, head, and held "
+    "props onto the sit/stand/kneel/crouch stem already in NOTEBOOK NOW — never "
+    "replace that stem with facing camera. Do not patch scene, wearing, frame, "
     "atmosphere, vibe, or open. Do fold uncontradicted body action from CARD "
-    "BEAT and SAY into beat: hands, head, how she is holding the pose, held "
-    "props. Absolute finished beat, not a paragraph. Intent shot if beat "
-    "gained detail, else casual with no SHOT edits. Do not invent clothes. "
-    "Do not emit tags."
+    "BEAT and SAY into beat. Absolute finished beat, not a paragraph. Intent "
+    "shot if beat gained detail, else casual with no SHOT edits. Do not invent "
+    "clothes. Do not emit tags."
 )
 
 SCRIPTER_CONSISTENCY_NOTE = (

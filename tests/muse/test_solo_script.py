@@ -188,6 +188,12 @@ def test_scripter_reads_muse_pose_and_recall():
     assert "never paint scene or wearing from say atmosphere" in text
     assert "fold:" in text
     assert "uncontradicted" in text
+    assert "posture stem" in text
+    assert "sitting" in text and "standing" in text
+    assert "turning around" in text
+    assert "facing camera" in text
+    assert "寄って" in chain.SCRIPTER_SYSTEM
+    assert "引いて" in chain.SCRIPTER_SYSTEM
 
 
 def test_scripter_fold_note_keeps_showrunner_posture():
@@ -196,6 +202,19 @@ def test_scripter_fold_note_keeps_showrunner_posture():
     assert "hands" in note
     assert "do not invent clothes" in note
     assert "do not emit tags" in note
+    assert "sitting into standing" in note
+    assert "facing camera" in note
+    assert "stem already in notebook now" in note
+
+
+def test_scripter_verify_note_keeps_posture_stem():
+    note = " ".join(chain.SCRIPTER_VERIFY_NOTE.lower().split())
+    assert note.startswith("verify:")
+    assert "sitting" in note
+    assert "turning around is not sitting" in note
+    assert "sit/stand/kneel/crouch stem" in note
+    assert "facing camera" in note
+    assert "invent standing" in note
 
 
 def test_duet_talk_output_answers_nouns_when_asked():
