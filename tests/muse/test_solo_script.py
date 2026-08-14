@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import chain, crew, identity, notebook, service
 from tests.muse.test_duet import _duet_session  # noqa: E402
-from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block  # noqa: E402
+from tests.muse.test_duet_notebook import NotebookOllama, _current_note, _scripter_block  # noqa: E402
 from tests.muse.test_service import FakeDb  # noqa: E402
 
 
@@ -118,6 +118,62 @@ async def test_talk_card_standing_does_not_overwrite_sitting(monkeypatch):
     assert "standing" in (s.get("muse_card") or "").lower()
 
 
+@pytest.mark.asyncio
+async def test_scripter_fold_adds_uncontradicted_card_action(monkeypatch):
+    """After Muse speaks, a second compile folds CARD hands into beat.
+
+    The showrunner's sit stays; standing on the CARD does not replace it.
+    Absorb is still not on the talk path.
+    """
+    async def fake_talk(*_a, **_kw):
+        return (
+            "裾、握ってるよ",
+            None,
+            False,
+            "",
+            "BEAT: standing by the fence, fingers on the hem\nWEARING: coat",
+            "",
+        )
+
+    async def no_board(*_a, **_kw):
+        return []
+
+    async def noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", no_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "座って": _scripter_block(
+            intent="shot", scene="rooftop", wearing="cardigan",
+            beat="sitting on a bench", frame="eye level",
+        ),
+        "FOLD:": _scripter_block(
+            intent="shot", scene="rooftop", wearing="cardigan",
+            beat="sitting on a bench, fingers tightening on the hem",
+            frame="eye level",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await service.post_duet_chat(db, ollama, s, "座って")
+    beat = (s["notebook"].get("beat") or "").lower()
+    assert "sitting" in beat
+    assert "hem" in beat
+    assert "standing" not in beat
+    assert (s["notebook"].get("wearing") or "") == "cardigan"
+    assert s.get("scripter_intent") == "shot"
+    notes = "\n".join(s.get("notes") or [])
+    assert "FOLD:" not in notes
+    sources = [e.get("source") for e in (s.get("rewrite_log") or [])]
+    assert "scripter_fold" in sources
+    fold_prompts = [p for p in ollama.scripter_prompts if "FOLD:" in _current_note(p)]
+    assert fold_prompts
+    assert "The attached image is the previous take" not in fold_prompts[-1]
+
+
 def test_scripter_reads_muse_pose_and_recall():
     text = " ".join(chain.SCRIPTER_SYSTEM.lower().split())
     assert "card beat" in text
@@ -127,6 +183,16 @@ def test_scripter_reads_muse_pose_and_recall():
     assert "drop her pose" not in text
     assert "never casual" in text
     assert "never paint scene or wearing from say atmosphere" in text
+    assert "fold:" in text
+    assert "uncontradicted" in text
+
+
+def test_scripter_fold_note_keeps_showrunner_posture():
+    note = " ".join(chain.SCRIPTER_FOLD_NOTE.lower().split())
+    assert note.startswith("fold:")
+    assert "hands" in note
+    assert "do not invent clothes" in note
+    assert "do not emit tags" in note
 
 
 def test_duet_talk_output_answers_nouns_when_asked():

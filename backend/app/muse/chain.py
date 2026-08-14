@@ -949,6 +949,10 @@ READING THE ROOM:
   to that absolute body action. Do not keep the previous pose to protect it.
 - A Muse CARD BEAT / SAY body action belongs in beat only when this turn has no new
   showrunner posture or camera direction.
+- FOLD: she just spoke. NOTEBOOK NOW already has the showrunner's latest
+  direction. Keep that posture/place/clothes. Fold uncontradicted CARD BEAT /
+  SAY body action (hands, head, held props, how she holds the pose) into beat.
+  Do not invent clothes. Do not emit tags.
 - A change is a change whatever words it arrived in. Judge by what the picture
   would look like now versus the notebook — not by whether some keyword showed
   up. Changing clothes, location, pose, or camera are shot changes.
@@ -1046,6 +1050,17 @@ SCRIPTER_VERIFY_NOTE = (
     "is never casual. If it is truly chit-chat with no picture change, return "
     "intent casual again with no SHOT edits. Do not invent. Do not copy the "
     "still as the current ask."
+)
+
+SCRIPTER_FOLD_NOTE = (
+    "FOLD: The Muse just spoke. NOTEBOOK NOW already has the showrunner's "
+    "latest direction from this turn. Read the latest Muse SAY and MUSE CARD. "
+    "Keep the showrunner's posture, place, and clothes. Do not swap a posture "
+    "the showrunner just set. Do fold uncontradicted body action from CARD BEAT "
+    "and SAY into beat: hands, head, how she is holding the pose, held props. "
+    "Absolute finished beat, not a paragraph. Intent shot if beat or frame "
+    "gained detail, else casual with no SHOT edits. Do not invent clothes. "
+    "Do not emit tags."
 )
 
 SCRIPTER_CONSISTENCY_NOTE = (

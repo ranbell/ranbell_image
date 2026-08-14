@@ -2333,6 +2333,7 @@ async def _call_duet_scripter(
 
 async def _run_duet_scripter(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+    fold: bool = False,
 ) -> dict[str, Any]:
     """INTENT + absolute notebook patch. Tags are woven later, at take time."""
     notebook_mod.migrate(session)
@@ -2356,7 +2357,10 @@ async def _run_duet_scripter(
     prev_wearing = str(nb.get("wearing") or "")
     prev_wearing_b = str(nb.get("wearing_b") or "")
     had_shot = notebook_mod.has_shot(nb)
-    vision_images = await board_images(db, session)
+    prev_intent = str(session.get("scripter_intent") or "")
+    # Fold must not reread the still — it would re-copy the last take's pose
+    # over the showrunner's line and the CARD's uncontradicted hands.
+    vision_images = None if fold else await board_images(db, session)
 
     result = await _call_duet_scripter(
         ollama, session, note=text, cfg=cfg,
@@ -2378,12 +2382,14 @@ async def _run_duet_scripter(
     )
 
     needs_verify = (
-        intent in ("casual", "")
+        not fold
+        and intent in ("casual", "")
         and not shot_patched
         and str(text or "").strip()
         and not str(text or "").strip().upper().startswith("WEAVE")
         and not str(text or "").strip().upper().startswith("VERIFY")
         and not str(text or "").strip().upper().startswith("REPAIR")
+        and not str(text or "").strip().upper().startswith("FOLD")
         and (bool(open_before) or had_shot)
     )
     if needs_verify:
@@ -2428,7 +2434,7 @@ async def _run_duet_scripter(
     session["standing"] = list(nb.get("standing") or [])
     session["digest"] = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
     _note_rewrite(
-        session, "scripter",
+        session, "scripter_fold" if fold else "scripter",
         before=before_shot, after=notebook_mod.shot_snapshot(nb), intent=intent,
     )
     flash = vitality.notebook_flash_key(patch) if shot_patched else ""
@@ -2443,35 +2449,40 @@ async def _run_duet_scripter(
         ),
     })
 
-    session["cited_memories"] = []
-    session["prior_session_log"] = ""
-    if intent == "recall":
-        char_id = str(inputs.get("character_id") or "")
-        try:
-            session["cited_memories"] = await memories_db.search(
-                db, ollama, character_id=char_id, query=text, limit=3,
-            )
-        except Exception:
-            logger.debug("[muse] recall search failed", exc_info=True)
-        await _attach_recall_context(db, session, query=text)
-        session["again_feel_hint"] = vitality.again_that_feel_hint(session)
+    if not fold:
+        session["cited_memories"] = []
+        session["prior_session_log"] = ""
+        if intent == "recall":
+            char_id = str(inputs.get("character_id") or "")
+            try:
+                session["cited_memories"] = await memories_db.search(
+                    db, ollama, character_id=char_id, query=text, limit=3,
+                )
+            except Exception:
+                logger.debug("[muse] recall search failed", exc_info=True)
+            await _attach_recall_context(db, session, query=text)
+            session["again_feel_hint"] = vitality.again_that_feel_hint(session)
 
     valid = bool(result.get("valid", True))
     compiled = False
 
-    if intent in ("shot", "mixed"):
-        session.setdefault("notes", []).append(text)
-    else:
-        session["just_banned"] = []
-        session["just_restored"] = []
+    if not fold:
+        if intent in ("shot", "mixed"):
+            session.setdefault("notes", []).append(text)
+        else:
+            session["just_banned"] = []
+            session["just_restored"] = []
 
     if shot_patched or (notebook_moved and intent in ("shot", "mixed")):
         session["craft_dirty"] = True
 
-    session["scripter_intent"] = intent
+    if fold and intent not in ("shot", "mixed") and prev_intent:
+        session["scripter_intent"] = prev_intent
+    else:
+        session["scripter_intent"] = intent
     events.publish(sid, {
         "type": "scripter_done",
-        "intent": intent,
+        "intent": session.get("scripter_intent") or intent,
         "compiled": compiled,
         "valid": valid,
         "dirty": bool(session.get("craft_dirty")),
@@ -2969,9 +2980,12 @@ async def _duet_talk(
             name=name, kind="banter",
         )
         _publish_chat(sid, mutter)
-    session["muse_card"] = card or session.get("muse_card") or ""
-    # CARD is a memo for the next scripter turn. It does not write the notebook —
-    # Muse reports the current state in SAY; Script is the only writer.
+    fresh_card = bool(str(card or "").strip())
+    session["muse_card"] = str(card).strip() if fresh_card else (
+        session.get("muse_card") or ""
+    )
+    # CARD is a memo. Script is the only notebook writer — after she speaks,
+    # a fold pass may add uncontradicted CARD/SAY body action to beat.
     choices = notebook_mod.parse_pitch_choices(pitch)
     if choices and not session.get("commit_pitch"):
         notebook_mod.set_open_choices(notebook_mod.of(session), choices)
@@ -2986,8 +3000,30 @@ async def _duet_talk(
     session["w_b_leads"] = False
     session["commit_pitch"] = False
     await _after_actress_spoke(db, session)
+    if uses_notebook(session) and fresh_card:
+        await _fold_muse_after_talk(db, ollama, session, cfg=cfg)
     await session_db.save(db, session)
     return session
+
+
+async def _fold_muse_after_talk(
+    db, ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> None:
+    """Second scripter pass: fold uncontradicted Muse CARD/SAY action into beat.
+
+    Does not absorb the CARD wholesale. The showrunner's posture/place/clothes
+    from the first compile stay; hands/head/held props may be added.
+    """
+    if str(session.get("scripter_intent") or "") == "recall":
+        return
+    if not str(session.get("muse_card") or "").strip():
+        return
+    try:
+        await _run_duet_scripter(
+            db, ollama, session, chain.SCRIPTER_FOLD_NOTE, cfg=cfg, fold=True,
+        )
+    except Exception:
+        logger.warning("[muse] scripter fold failed", exc_info=True)
 
 
 def _facets_to_write(session: dict[str, Any]) -> list[str]:
