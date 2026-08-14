@@ -291,6 +291,7 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "traits": _strings(preset.get("personality")),
         "title": str(preset.get("title") or ""),
         "title_ja": str(preset.get("title_ja") or preset.get("title") or ""),
+        "charm": str(preset.get("charm") or ""),
         "charm_ja": str(preset.get("charm_ja") or preset.get("charm") or ""),
         "tag_count": sum(len(v or []) for v in tags.values()),
         # What the picker shows. A bundled preset has none until one is drawn.

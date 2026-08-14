@@ -123,7 +123,7 @@ function blurb(c) { return (isJa.value ? c.summary_ja : c.summary) || '' }
 function title(c) { return (isJa.value ? c.title_ja : c.title) || '' }
 // The gap that makes her worth drawing. Shown on the card because it is the
 // line that decides whether you pick her.
-function charm(c) { return c.charm_ja || '' }
+function charm(c) { return (isJa.value ? c.charm_ja : c.charm) || c.charm_ja || '' }
 function thumb(sha) { return sha ? `/api/thumbnails/${sha}.webp` : '' }
 function sheet(c) { return thumb(c.board?.sheet || '') }
 function face(c) { return thumb(c.board?.portrait || '') }
