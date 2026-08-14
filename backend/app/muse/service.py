@@ -2748,7 +2748,8 @@ def _duet_user_prompt(
                 "looks now, answer with nouns from the still and CARD. "
                 "Do not dodge with『なんかいい感じ』.",
                 "- The Showrunner's newest line wins; drop what it replaces.",
-                "- CARD BEAT holds both their direction and how you are holding it.",
+                "- CARD BEAT is the body action they just asked for (absolute). "
+                "A short pose line replaces the old beat.",
                 "- You may play-act an OPEN proposal in SAY before it is locked.",
                 "- PITCH only when a real picture fork is open, OPEN is empty, "
                 "and they did not just pick. No interview chains. Not every turn.",

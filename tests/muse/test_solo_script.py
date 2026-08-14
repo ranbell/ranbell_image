@@ -119,15 +119,18 @@ async def test_talk_card_standing_does_not_overwrite_sitting(monkeypatch):
 
 
 def test_scripter_reads_muse_pose_and_recall():
-    text = chain.SCRIPTER_SYSTEM.lower()
+    text = " ".join(chain.SCRIPTER_SYSTEM.lower().split())
     assert "card beat" in text
     assert "recall" in text
     assert "この間" in chain.SCRIPTER_SYSTEM
-    assert "never paint from say atmosphere" not in text
+    assert "last noun" not in text
+    assert "drop her pose" not in text
+    assert "never casual" in text
+    assert "never paint scene or wearing from say atmosphere" in text
 
 
 def test_duet_talk_output_answers_nouns_when_asked():
-    text = crew.DUET_TALK_OUTPUT.lower()
+    text = " ".join(crew.DUET_TALK_OUTPUT.lower().split())
     assert "never a change-log" not in text
     assert "change log" not in text or "checklist" in text
     assert "card" in text
@@ -135,6 +138,9 @@ def test_duet_talk_output_answers_nouns_when_asked():
     assert "pitch" in text
     assert "not rewrite the notebook" in text
     assert "shot notebook" in text
+    assert "body action" in text
+    assert "posture the notebook does not have" not in text
+    assert "how you are holding it" not in text
 
 
 def test_wearing_tokens_drop_no_hat():

@@ -944,14 +944,17 @@ READING THE ROOM:
   at a concrete earlier line. Nothing is pending unless the conversation says so.
 - A change a Muse proposed and the showrunner accepted is a change to the
   picture. Patch it. Do not wait to be told a second time in plainer words.
-- A Muse-proposed body action the showrunner did not contradict belongs in
-  beat. Combine their direction with how she said she is holding it (SAY and
-  CARD BEAT). Do not drop her pose to keep only the last noun they typed.
+- Beat: the showrunner's newest posture/pose direction wins. Short lines
+  like 立って / 座って / 跪いて / stand / sit / kneel are shot — patch beat
+  to that absolute body action. Do not keep the previous pose to protect it.
+- A Muse CARD BEAT / SAY body action belongs in beat only when this turn has no new
+  showrunner posture or camera direction.
 - A change is a change whatever words it arrived in. Judge by what the picture
   would look like now versus the notebook — not by whether some keyword showed
-  up. Changing clothes and changing location are shot changes.
+  up. Changing clothes, location, pose, or camera are shot changes.
 - 「まだ撮らなくていい」and chatting about the picture without asking to change
-  it are casual. Do not lift them into shot.
+  it are casual. Do not lift them into shot. A posture or camera direction
+  is never casual.
 - Questions about a past shoot, last time, 「この間」「前回」「あのとき」/
   「覚えてる」, or how a previous take felt, are recall. Clothes or place
   words inside a memory question do not make it shot.
@@ -967,10 +970,11 @@ THE STILL IS THE LAST TAKE, NOT THE ASK:
 - The current frame is that base PLUS what chat / the Muse CARD changed.
 - Do not copy a hat (or anything else) from the photo if chat already removed it.
 - Do not invent inventory the CARD and latest line did not ask for.
-- Priority: Showrunner's latest direction together with uncontradicted Muse
-  CARD/SAY body action > chat delta from the still > what the photo still shows.
-- Mood-only SAY does not belong in scene or wearing. Body action from Muse
-  SAY and CARD BEAT belongs in beat.
+- Priority for clothes/place: chat delta from the still > Muse CARD > latest
+  line > what the photo still shows. Never paint scene or wearing from SAY
+  atmosphere.
+- Priority for beat: showrunner's newest posture/pose line > previous Muse
+  CARD/SAY body action > the still. A short pose noun replaces the old beat.
 
 FIELD CONTRACTS (hard):
 - scene = short place + time. NEVER paste long prose.
@@ -1038,9 +1042,10 @@ SCRIPTER_VERIFY_NOTE = (
     "conversation. If following that line would make the picture look different "
     "(place, clothes, hairstyle, pose, camera, worn or held props, taking "
     "something off), return intent shot or mixed with ABSOLUTE finished values "
-    "and NO tags. If it is truly chit-chat with no picture change, return intent "
-    "casual again with no SHOT edits. Do not invent. Do not copy the still as "
-    "the current ask."
+    "and NO tags. A posture or camera direction (立って / 座って / stand / sit) "
+    "is never casual. If it is truly chit-chat with no picture change, return "
+    "intent casual again with no SHOT edits. Do not invent. Do not copy the "
+    "still as the current ask."
 )
 
 SCRIPTER_CONSISTENCY_NOTE = (
