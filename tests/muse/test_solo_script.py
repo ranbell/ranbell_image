@@ -544,6 +544,53 @@ async def test_fold_cannot_rewrite_wearing_or_frame(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_compile_does_not_attach_board_still(monkeypatch):
+    """After a take, compile/VERIFY must not reread the JPEG — the VLM copies it."""
+    seen: list = []
+
+    async def fake_talk(*_a, **_kw):
+        return ("了解", None, False, "", "BEAT: standing\nWEARING: knit", "")
+
+    async def poison_board(*_a, **_kw):
+        return [b"fake-jpeg"]
+
+    async def noop(*_a, **_kw):
+        return None
+
+    real = chain.run_scripter
+
+    async def capture(*a, **kw):
+        seen.append(kw.get("images"))
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(chain, "run_duet_talk", fake_talk)
+    monkeypatch.setattr(service, "board_images", poison_board)
+    monkeypatch.setattr(service, "_after_actress_spoke", noop)
+    monkeypatch.setattr(service, "_fold_muse_after_talk", noop)
+    monkeypatch.setattr(chain, "run_scripter", capture)
+
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "ニット": _scripter_block(
+            intent="shot", scene="night street", wearing="knit",
+            beat="standing", frame="close up",
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["board"] = {"images": [{"image_id": "take1"}], "pending": False}
+    notebook.apply_patch(s["notebook"], {
+        "scene": "night street", "wearing": "coat",
+        "beat": "standing", "frame": "close up",
+    })
+    await service.post_duet_chat(db, ollama, s, "コート脱いでニットだけ")
+    assert seen, "scripter should have run"
+    assert all(not imgs for imgs in seen)
+    assert "knit" in (s["notebook"].get("wearing") or "").lower()
+    assert "coat" not in notebook.wearing_tokens(s["notebook"].get("wearing") or "")
+
+
+@pytest.mark.asyncio
 async def test_weave_drops_old_place_hour_pose_and_crop():
     db = FakeDb()
     ollama = NotebookOllama(scripts={

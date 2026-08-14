@@ -2377,14 +2377,12 @@ async def _run_duet_scripter(
     prev_frame = str(nb.get("frame") or "")
     had_shot = notebook_mod.has_shot(nb)
     prev_intent = str(session.get("scripter_intent") or "")
-    # Fold must not reread the still — it would re-copy the last take's pose
-    # over the showrunner's line and the CARD's uncontradicted hands.
-    vision_images = None if fold else await board_images(db, session)
-
+    # Do not attach the last take. The notebook already holds that state;
+    # a VLM copy of the still restates sailor+hat over 羽織って / 外して / 寄って.
     result = await _call_duet_scripter(
         ollama, session, note=text, cfg=cfg,
         partner=partner, name_a=name_a, name_b=name_b,
-        mode="compile", images=vision_images or None, fold=fold,
+        mode="compile", images=None, fold=fold,
     )
     intent = str(result.get("intent") or "casual")
     patch = notebook_mod.guard_partner_patch(
@@ -2439,7 +2437,7 @@ async def _run_duet_scripter(
             ollama, session,
             note=str(text or "").strip(),
             cfg=cfg, partner=partner, name_a=name_a, name_b=name_b,
-            mode="compile", images=vision_images or None, verify=True,
+            mode="compile", images=None, verify=True,
         )
         v_intent = str(verify.get("intent") or "casual")
         v_patch = notebook_mod.guard_partner_patch(
