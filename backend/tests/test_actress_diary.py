@@ -160,6 +160,26 @@ async def test_find_preset_diary_by_image_reverse_lookup(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_find_preset_diary_by_image_matches_any_take(monkeypatch):
+    """A take can land more than one frame; the Creation Record of the second
+    still has to find the same page."""
+    mock_db = MagicMock()
+    fake_preset_store(monkeypatch, {
+        "id": "c001", "slug": "test_actress", "name": "Test Actress", "diaries": [],
+    })
+    await presets_db.add_preset_diary(mock_db, "c001", {
+        "id": "diary-2", "session_id": "s-2", "character_id": "c001",
+        "image_id": "sha-first",
+        "image_ids": ["sha-first", "sha-second"],
+        "timestamp": time.time(),
+    })
+
+    found = await presets_db.find_preset_diary_by_image(mock_db, "c001", "sha-second")
+    assert found is not None and found["id"] == "diary-2"
+    assert (await presets_db.find_preset_diary_by_image(mock_db, "c001", "sha-first"))["id"] == "diary-2"
+
+
+@pytest.mark.asyncio
 async def test_actress_diary_prompts():
     """Test actress diary system prompt creation for JA and EN."""
     char = {
@@ -180,6 +200,8 @@ async def test_actress_diary_prompts():
         assert label in prompt
     assert "JSON にはしない" in prompt
     assert "総監督の言葉が嬉しい" in prompt
+    assert "引用" in prompt
+    assert "500" in prompt
 
 
 def test_actress_diary_prompt_accepts_raw_preset_with_list_personality():
@@ -206,9 +228,10 @@ def test_caught_block_is_a_line_she_says_not_a_prompt_of_its_own():
     block = muse_crew.caught_block("褒められて照れたこと")
     assert "見ちゃいました？" in block
     assert "褒められて照れたこと" in block
-    assert "一度だけ" in block
-    # Same fence as a memory: a topic, never something the picture must contain.
-    assert "今日の画に写すものではない" in block
+    assert "Never twice" in block
+    assert "not material for today's picture" in block.lower()
+    assert "ASIDE (required this turn)" in block
+    assert "whisper" in block.lower()
 
 
 # ── the parser, which is the whole reason a diary can be trusted on screen ──
@@ -429,9 +452,39 @@ async def test_diary_job_runs_the_way_the_spooler_calls_it(monkeypatch):
     assert entry["content_en"] == "English diary, written out properly."
     assert entry["summary_en"] == "Praised"
     assert entry["image_id"] == "sha-abc"
+    assert entry["image_ids"] == ["sha-abc"]
     assert entry["read"] is False
     # Which shoot it was, so the entry can lead back to it.
     assert entry["session_id"] == "s-1" and entry["character_id"] == "c001"
+
+
+@pytest.mark.asyncio
+async def test_diary_job_keeps_every_shoot_photo(monkeypatch):
+    """A take can land more than one frame; the page has to keep them all."""
+    fake_preset_store(monkeypatch, {"id": "c001", "name_ja": "アリス", "diaries": []})
+    monkeypatch.setattr(
+        muse_chain, "_call",
+        AsyncMock(return_value=(
+            "SUMMARY_JA: 二枚撮った\nSUMMARY_EN: Two takes\n"
+            "CONTENT_JA:\n二枚撮ってもらった。\n"
+            "CONTENT_EN:\nThey took two."
+        )),
+    )
+    db, spooler = FakeDB(), FakeSpooler()
+    session = _session(shoot={
+        "prompt": "1girl, darkroom",
+        "images": [
+            {"image_id": "sha-one"},
+            {"image_id": "sha-two"},
+            {"image_id": "sha-one"},
+        ],
+    })
+    await muse_service.finish_session(db, spooler, session, ollama="OLL")
+    await spooler.calls[0]["func"]("R", "C", **spooler.calls[0]["kwargs"])
+
+    entry = (await presets_db.get_preset_diaries(db, "c001"))[0]
+    assert entry["image_id"] == "sha-one"
+    assert entry["image_ids"] == ["sha-one", "sha-two"]
 
 
 @pytest.mark.asyncio
@@ -549,18 +602,25 @@ async def test_reading_a_diary_that_is_not_there_is_a_404(monkeypatch):
 @pytest.mark.asyncio
 async def test_duet_prompt_carries_her_recent_memories(monkeypatch):
     fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
-        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた"},
-        {"id": "d2", "timestamp": 2.0, "summary_ja": "雨の日に笑った"},
+        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた",
+         "content_ja": "暗室で『その表情いいね』と言われて耳が熱くなった。"},
+        {"id": "d2", "timestamp": 2.0, "summary_ja": "雨の日に笑った",
+         "content_ja": "雨の日、総監督が笑ったから私も笑った。"},
+    ], "shoot_recaps": [
+        {"when": "屋上の夕焼け", "feel": "風が強かった", "liked": "", "shot": "sailor"},
     ]})
     session = _session()
-    session["memories"] = await muse_service._recent_memories(FakeDB(), session)
-    assert session["memories"] == ["雨の日に笑った", "暗室で褒められた"]   # newest first
+    await muse_service._load_actress_memory(FakeDB(), session)
+    assert any("屋上" in m for m in session["memories"])
+    assert any("耳が熱く" in m for m in session["diary_memories"])
 
     prompt = muse_service._duet_user_prompt(session, "はじめよう", prep=False)
-    assert "暗室で褒められた" in prompt
-    assert "今日の画に写すものではない" in prompt     # a memory is not a prop
+    assert "耳が熱く" in prompt
+    assert "NOT material for today's picture" in prompt
+    assert "Do not paint" in prompt or "Do not soft-miss" in prompt
 
     session["memories"] = []
+    session["diary_memories"] = []
     assert "日記から" not in muse_service._duet_user_prompt(session, "x", prep=False)
 
 
@@ -569,18 +629,19 @@ async def test_the_table_gets_her_memory_too_but_only_at_her_seat(monkeypatch):
     """The eighteen-seat table never read her diary at all; putting it in the
     shared brief would hand it to all eighteen."""
     fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
-        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた"},
+        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた",
+         "content_ja": "暗室で褒められて耳が赤くなった。"},
     ]})
     session = _session()
     await muse_service._load_actress_memory(FakeDB(), session)
-    assert session["memories"] == ["暗室で褒められた"]
+    assert any("耳が赤く" in m for m in session["diary_memories"])
 
     lead = muse_crew.DEFAULT_MEMBER["actress"]
     hers = muse_service._table_user_prompt(session, muse_id=lead)
-    assert "暗室で褒められた" in hers
+    assert "耳が赤く" in hers
     other = muse_service._table_user_prompt(session, muse_id="light")
-    assert "暗室で褒められた" not in other
-    assert "暗室で褒められた" not in str(session.get("brief") or "")
+    assert "耳が赤く" not in other
+    assert "耳が赤く" not in str(session.get("brief") or "")
 
 
 @pytest.mark.asyncio

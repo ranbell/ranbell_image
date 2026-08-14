@@ -1925,17 +1925,29 @@ def _memory_block(session: dict[str, Any]) -> str:
     she meets the Showrunner, not to be described. Never handed to the scripter.
     """
     lines = [str(m).strip() for m in (session.get("memories") or []) if str(m).strip()]
+    diaries = [
+        str(m).strip() for m in (session.get("diary_memories") or []) if str(m).strip()
+    ]
     partner = [
         str(m).strip() for m in (session.get("partner_memories") or []) if str(m).strip()
     ]
-    if not lines and not partner:
+    if not lines and not diaries and not partner:
         return ""
-    parts = [
-        "MEMORIES with the Showrunner (sticky notes / diary. Recent detail is "
-        "stronger. NOT material for today's picture. If you don't remember a "
-        "day, answer softly with wind/temperature metaphors — never invent):",
-        *(f"- {m}" for m in lines[:3]),
-    ]
+    parts: list[str] = []
+    if lines:
+        parts += [
+            "MEMORIES with the Showrunner (sticky recaps. Picture facts from "
+            "recent shoots. NOT material for today's picture):",
+            *(f"- {m}" for m in lines[:3]),
+        ]
+    if diaries:
+        parts += [
+            "SECRET DIARY (hers. Colour how she meets the Showrunner. When asked "
+            "about a past shoot, answer from these with specific events and "
+            "feelings. Do not paint into today's picture. Do not soft-miss a "
+            "fact that is written here):",
+            *(f"- {m}" for m in diaries[:3]),
+        ]
     if partner:
         parts += [
             "Partner Muse memories (short; colour distance in banter only; "
@@ -1962,11 +1974,79 @@ def _cited_memories_block(session: dict[str, Any]) -> str:
     if not lines:
         return ""
     return "\n".join([
-        "CITED_MEMORIES (this turn only. Soft-miss details not listed here — "
-        "in Japanese SAY use a gentle『そこまでは…』, never a stiff refusal. "
-        "Do not invent. Do not feed today's picture):",
+        "CITED_MEMORIES (this turn only. Answer from these. Soft-miss only "
+        "details not listed here — in SAY use a gentle『そこまでは…』, never a "
+        "stiff refusal. Do not invent. Do not feed today's picture):",
         *lines,
     ])
+
+
+_PRIOR_LOG_CAP = 4000
+
+
+async def _attach_recall_context(
+    db, session: dict[str, Any], *, query: str = "",
+) -> None:
+    """On recall: cited recaps plus matching diary body and prior session chat.
+
+    Muse-only. Never handed to the scripter.
+    """
+    inputs = _inputs(session)
+    char_id = str(inputs.get("character_id") or "")
+    locale = str(inputs.get("locale") or "ja")
+    ja = locale.startswith("ja")
+    current_sid = str(session.get("session_id") or "")
+    cited_sid = ""
+    for row in session.get("cited_memories") or []:
+        if isinstance(row, dict):
+            cited_sid = str(row.get("session_id") or "")
+            if cited_sid:
+                break
+
+    diary_hit: dict[str, Any] | None = None
+    if char_id:
+        try:
+            diaries = await presets_db.get_preset_diaries(db, char_id)
+        except Exception:
+            logger.debug("[muse] recall diary load failed", exc_info=True)
+            diaries = []
+        sorted_d = sorted(
+            [d for d in diaries if isinstance(d, dict)],
+            key=lambda d: d.get("timestamp") or 0.0,
+            reverse=True,
+        )
+        if cited_sid:
+            diary_hit = next(
+                (d for d in sorted_d if str(d.get("session_id") or "") == cited_sid),
+                None,
+            )
+        if diary_hit is None and sorted_d:
+            diary_hit = sorted_d[0]
+        if diary_hit is not None:
+            body = str(
+                (diary_hit.get("content_ja") if ja else diary_hit.get("content_en"))
+                or diary_hit.get("content")
+                or diary_hit.get("summary_ja") or ""
+            ).strip()
+            if body:
+                session.setdefault("cited_memories", []).append({
+                    "id": str(diary_hit.get("id") or "")[:8],
+                    "when": str(diary_hit.get("theme") or diary_hit.get("summary_ja") or ""),
+                    "text": body[:900],
+                    "session_id": str(diary_hit.get("session_id") or ""),
+                })
+            if not cited_sid:
+                cited_sid = str(diary_hit.get("session_id") or "")
+
+    if cited_sid and cited_sid != current_sid:
+        try:
+            prior = await session_db.load(db, cited_sid)
+        except Exception:
+            logger.debug("[muse] prior session load failed", exc_info=True)
+            prior = None
+        if prior:
+            log = _duet_transcript(prior, user_turns=20)
+            session["prior_session_log"] = log[:_PRIOR_LOG_CAP]
 
 
 # There used to be five keyword regexes here — `_SHOT_HINT_RE`, `_CHILL_ONLY_RE`,
@@ -2051,8 +2131,13 @@ def _chemistry_block(session: dict[str, Any]) -> str:
 def _cited_allowlist(session: dict[str, Any]) -> list[str]:
     """Grounded tokens Muse may treat as remembered facts."""
     blobs: list[str] = []
-    for m in list(session.get("memories") or []) + list(session.get("partner_memories") or []):
+    for m in list(session.get("memories") or []) + list(
+        session.get("diary_memories") or []
+    ) + list(session.get("partner_memories") or []):
         blobs.append(str(m))
+    prior = str(session.get("prior_session_log") or "")
+    if prior:
+        blobs.append(prior)
     for r in session.get("cited_memories") or []:
         if isinstance(r, dict):
             blobs.append(memories_db.format_recap_text(r))
@@ -2082,7 +2167,7 @@ def _cited_allow_block(session: dict[str, Any]) -> str:
         return ""
     return (
         "GROUNDED_TOKENS (for named places / props / events outside this list "
-        "and CITED/MEMORIES, soft-miss in Japanese SAY — do not invent):\n"
+        "and CITED/MEMORIES/DIARY, soft-miss in SAY — do not invent):\n"
         + ", ".join(allow[:30])
     )
 
@@ -2324,6 +2409,7 @@ async def _run_duet_scripter(
     })
 
     session["cited_memories"] = []
+    session["prior_session_log"] = ""
     if intent == "recall":
         char_id = str(inputs.get("character_id") or "")
         try:
@@ -2332,6 +2418,7 @@ async def _run_duet_scripter(
             )
         except Exception:
             logger.debug("[muse] recall search failed", exc_info=True)
+        await _attach_recall_context(db, session, query=text)
         session["again_feel_hint"] = vitality.again_that_feel_hint(session)
 
     valid = bool(result.get("valid", True))
@@ -2459,25 +2546,41 @@ def _duet_transcript(session: dict[str, Any], *, user_turns: int = 20) -> str:
 
 
 def _duet_user_prompt(
-    session: dict[str, Any], text: str, *, prep: bool,
+    session: dict[str, Any], text: str, *, prep: bool, intent: str = "",
 ) -> str:
     """What she is handed. Muse-only context (never the scripter's inputs)."""
     inputs = _inputs(session)
+    locale = str(inputs.get("locale") or "ja")
     theme = _theme_for_models(session)
     talk = _duet_transcript(session)
+    intent = str(intent or session.get("scripter_intent") or "").strip().lower()
+    chat_only = (not prep) and intent in ("casual", "recall")
     parts = [
         "LANGUAGE: Instructions below are in English. "
-        "Your SAY / in-character dialogue MUST be natural Japanese when the "
-        "Showrunner wrote Japanese (no English rule headings inside SAY).",
+        + crew.say_language_rule(locale)
+        + " Never print English rule headings inside SAY.",
     ]
     if theme:
-        parts.append(f"THEME (Showrunner's opening ask):\n{theme}")
+        if chat_only:
+            parts.append(
+                "THEME (today's opening ask — do not steer back to it unless "
+                "they brought the shoot up this turn):\n" + theme
+            )
+        else:
+            parts.append(f"THEME (Showrunner's opening ask):\n{theme}")
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
     cited = _cited_memories_block(session)
     if cited:
         parts.append(cited)
+    prior = str(session.get("prior_session_log") or "").strip()
+    if prior and intent == "recall":
+        parts.append(
+            "PRIOR SESSION LOG (a past shoot they asked about. Answer from "
+            "this in conversation. Do not paint it into today's picture):\n"
+            + prior
+        )
     for block in (
         _bond_block(session),
         _taste_block(session),
@@ -2505,13 +2608,13 @@ def _duet_user_prompt(
         partner = session.get("partner_character") or {}
         name_b = str(partner.get("name_ja") or partner.get("name") or "")
         summary = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
-        if summary:
+        if summary and not chat_only:
             parts.append(
                 "SHOT NOTEBOOK (talk summary only — not tags; do not recite "
                 "as a checklist):\n" + summary
             )
         standing = nb.get("standing") or session.get("standing") or []
-        if standing:
+        if standing and not chat_only:
             parts.append(
                 "STANDING ORDERS (honour if asked; do not force into the picture):\n"
                 + "\n".join(f"- {s}" for s in standing if str(s).strip())
@@ -2548,30 +2651,72 @@ def _duet_user_prompt(
 
     if not prep:
         card = str(session.get("muse_card") or "").strip()
-        if card:
+        if card and not chat_only:
             parts.append(
                 "PREVIOUS CARD (machine names last turn; update it):\n" + card
             )
-        parts.append(
-            "HOW TO SPEAK THIS TURN:\n"
-            "- Sense and body first. Do not recite a checklist every turn.\n"
-            "- If they ask what you are wearing / where / what time / how it "
-            "looks now, answer with nouns from the still and CARD. "
-            "Do not dodge with『なんかいい感じ』.\n"
-            "- The Showrunner's newest line wins; drop what it replaces.\n"
-            "- You may play-act an OPEN proposal in SAY before it is locked.\n"
-            "- PITCH only when a real picture fork is open, OPEN is empty, "
-            "and they did not just pick. No interview chains. Not every turn.\n"
-            "- Past shoots: only from memories / CITED you were given. "
-            "Missing detail → soft Japanese『そこまでは…』.\n"
-            "- The attached still is the previous take (the base). CARD is "
-            "that base plus what this conversation changed. Do not copy the "
-            "photo as the current ask.\n"
-            "- Never say you are getting ready / can get ready. "
-            "Never print English section titles inside SAY.\n"
-            "- OUTPUT LANGUAGE: SAY must be natural Japanese when they wrote "
-            "Japanese."
-        )
+        if chat_only:
+            how = [
+                "HOW TO SPEAK THIS TURN:",
+                "- This is conversation. Answer what they asked. End in "
+                "conversation.",
+                "- Do not name today's place, clothes, pose, or camera unless "
+                "they brought the shoot up this turn.",
+                "- Do not offer a PITCH. Omit CARD unless they asked about "
+                "today's picture.",
+                "- Write ASIDE this turn: a short cute inner mutter (whisper).",
+                "- Past shoots: answer from memories / diary / CITED / PRIOR "
+                "SESSION LOG. Use the details you have. Soft-miss『そこまでは…』"
+                "only for facts you were not given.",
+                "- Never say you are getting ready / can get ready. "
+                "Never print English section titles inside SAY.",
+            ]
+            if not str(text or "").strip():
+                how.append(
+                    "- Opening: greet and talk. Theme is mood, not a shot "
+                    "briefing. If a diary-caught whisper is owed, that comes first."
+                )
+            if intent == "recall":
+                how.append(
+                    "- They asked about a past shoot. Stay on that. Do not "
+                    "return to today's theme or shot forks."
+                )
+            if (session.get("caught") or {}).get("ids"):
+                how.append(
+                    "- Diary-caught whisper takes the opening. Stay on that "
+                    "moment. Do not start a wardrobe briefing."
+                )
+        else:
+            how = [
+                "HOW TO SPEAK THIS TURN:",
+                "- Sense and body first. Do not recite a checklist every turn.",
+                "- If they gave a direction (do it this way / こうして), "
+                "confirm it in SAY first — 「こうしますね」restating the "
+                "action — then the body-feel. Do not skip the confirmation.",
+                "- If they ask what you are wearing / where / what time / how it "
+                "looks now, answer with nouns from the still and CARD. "
+                "Do not dodge with『なんかいい感じ』.",
+                "- The Showrunner's newest line wins; drop what it replaces.",
+                "- CARD BEAT holds both their direction and how you are holding it.",
+                "- You may play-act an OPEN proposal in SAY before it is locked.",
+                "- PITCH only when a real picture fork is open, OPEN is empty, "
+                "and they did not just pick. No interview chains. Not every turn.",
+                "- Past shoots: from memories / CITED / PRIOR SESSION LOG. "
+                "Use known details. Soft-miss『そこまでは…』only for facts you "
+                "were not given.",
+                "- The attached still is the previous take (the base). CARD is "
+                "that base plus what this conversation changed. Do not copy the "
+                "photo as the current ask.",
+                "- Write ASIDE this turn: a short cute inner mutter (whisper).",
+                "- Never say you are getting ready / can get ready. "
+                "Never print English section titles inside SAY.",
+            ]
+            if (session.get("caught") or {}).get("ids"):
+                how.append(
+                    "- Diary-caught whisper (ASIDE + a soft SAY) comes first. "
+                    "Then confirm today's direction if they gave one."
+                )
+        parts.append("\n".join(how))
         return "\n\n".join(p for p in parts if p)
 
     # Prep on the notebook path: feel the shot from the notebook, never TAGS.
@@ -2599,7 +2744,7 @@ def _duet_user_prompt(
         "PREP FINISH TURN: the picture already lives in the notebook. "
         "SAY only — place air, body feel, camera distance in your own words. "
         "No prop inventory, no \"I changed X\" reports. "
-        "OUTPUT LANGUAGE: SAY must be natural Japanese."
+        + crew.say_language_rule(locale)
     )
     return "\n\n".join(p for p in parts if p)
 
@@ -2693,6 +2838,26 @@ def _facet_prep_prompt(
     return "\n\n".join(p for p in parts if p)
 
 
+def _absorb_duet_pose(session: dict[str, Any], card: str) -> None:
+    """Same-turn: fold Muse CARD beat into the notebook Script just compiled.
+
+    Script runs before she talks, so her acted pose would otherwise wait until
+    the next compile — and a ② pressed now would miss it.
+    """
+    nb = notebook_mod.of(session)
+    absorbed = notebook_mod.absorb_muse_card(nb, card)
+    if not absorbed:
+        return
+    session["notebook"] = nb
+    partner = session.get("partner_character") or {}
+    name_a, name_b = _muse_names(session, partner if partner else None)
+    session["digest"] = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
+    session["craft_dirty"] = True
+    craft = session.setdefault("craft", {})
+    if absorbed.get("beat"):
+        craft["pose_intent"] = str(absorbed["beat"])[:240]
+
+
 async def _duet_talk(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
     prep: bool = False,
@@ -2721,7 +2886,10 @@ async def _duet_talk(
     try:
         say, raw_turns, blind, aside, card, pitch = await chain.run_duet_talk(
             ollama,
-            user_prompt=_duet_user_prompt(session, text, prep=prep),
+            user_prompt=_duet_user_prompt(
+                session, text, prep=prep,
+                intent=str(session.get("scripter_intent") or ""),
+            ),
             model=_vision_model(inputs) if vision_images else _text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),
             character=session.get("character") or {},
@@ -2729,6 +2897,8 @@ async def _duet_talk(
             images=vision_images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),
             tier=tier,
+            locale=str(inputs.get("locale") or "ja"),
+            intent=str(session.get("scripter_intent") or ""),
         )
     except chain.ChainError as exc:
         raise MuseError(_msg(
@@ -2748,6 +2918,13 @@ async def _duet_talk(
         )
         _publish_chat(sid, mutter)
     session["muse_card"] = card or session.get("muse_card") or ""
+    intent_now = str(session.get("scripter_intent") or "").strip().lower()
+    if (
+        uses_notebook(session)
+        and intent_now in ("shot", "mixed")
+        and str(card or "").strip()
+    ):
+        _absorb_duet_pose(session, card)
     choices = notebook_mod.parse_pitch_choices(pitch)
     if choices and not session.get("commit_pitch"):
         notebook_mod.set_open_choices(notebook_mod.of(session), choices)
@@ -2984,7 +3161,7 @@ async def post_duet_chat(
     db, ollama, session: dict[str, Any], text: str,
     images: list[bytes] | None = None,
 ) -> dict[str, Any]:
-    """One turn: she talks (CARD), then Script compiles the notebook.
+    """One turn: Script classifies INTENT, then she talks.
 
     Tags are woven later, just before a take. ``images`` is accepted and
     ignored — the VRM direction still is switched off in this version.
@@ -2996,28 +3173,28 @@ async def post_duet_chat(
     await session_db.save(db, session)
 
     cfg = await get_runtime_config(db)
-    session = await _duet_talk(db, ollama, session, text, cfg=cfg)
     if uses_notebook(session):
         try:
             await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
         except Exception:
-            logger.warning("[muse] scripter failed; muse already talked", exc_info=True)
+            logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
             session["craft_dirty"] = True
+            session.setdefault("scripter_intent", "casual")
         nb = notebook_mod.of(session)
         if vitality.tick_open_ignore(session, open_text=str(nb.get("open") or "")):
             notebook_mod.apply_patch(nb, {"clear_open": True})
             session["notebook"] = nb
             session["open_faded"] = True
-        await session_db.save(db, session)
-        return session
-
-    named, _ = await route_note(db, ollama, session, text, cfg=cfg)
-    if not named:
-        await take_note(db, ollama, session, text, cfg=cfg)
     else:
-        session.setdefault("notes", []).append(text)
-        session["just_banned"] = []
-        session["just_restored"] = []
+        named, _ = await route_note(db, ollama, session, text, cfg=cfg)
+        if not named:
+            await take_note(db, ollama, session, text, cfg=cfg)
+        else:
+            session.setdefault("notes", []).append(text)
+            session["just_banned"] = []
+            session["just_restored"] = []
+
+    session = await _duet_talk(db, ollama, session, text, cfg=cfg)
     await session_db.save(db, session)
     return session
 
@@ -3054,11 +3231,11 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["muse_card"] = ""
     session["commit_pitch"] = False
     session["cited_memories"] = []
+    session["prior_session_log"] = ""
     session["talk_turn_count"] = 0
     session["shot_compile_count"] = 0
     session["open_ignore"] = {"text": "", "count": 0}
     session["prop_age"] = {"fp": "", "turns": 0}
-    session["memory_expect_hint"] = True  # UI: 細部は直近3回
     session.pop("_blind_said", None)
     await _load_actress_memory(db, session)
     # Reunion warmth when she already has a bond card.
@@ -3067,6 +3244,8 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         str(bond.get("last") or "").strip() or str(bond.get("inside") or "").strip()
         or (session.get("memories") or [])
     )
+    # Opening is conversation — greet, maybe a diary whisper — not a shot briefing.
+    session["scripter_intent"] = "casual"
     await session_db.save(db, session)
     session_db.log(session, "duet", "opened")
     return await _duet_talk(db, ollama, session, "", cfg=cfg)
@@ -3075,7 +3254,7 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
 async def _recent_memories_for(
     db, character_id: str, *, locale: str = "ja", limit: int = 3,
 ) -> list[str]:
-    """Sticky shoot recaps first, then diary summaries for one character."""
+    """Sticky shoot recaps for one character (picture facts, not diary prose)."""
     if not character_id:
         return []
     out: list[str] = []
@@ -3086,24 +3265,38 @@ async def _recent_memories_for(
                 out.append(text)
     except Exception:
         logger.debug("[muse] shoot_recaps load failed", exc_info=True)
-    if len(out) >= limit:
-        return out[:limit]
-    entries = await presets_db.get_recent_diary_summaries(
-        db, character_id, limit=limit - len(out),
-    )
-    ja = locale.startswith("ja")
+    return out[:limit]
+
+
+async def _recent_diary_bodies(
+    db, character_id: str, *, locale: str = "ja", limit: int = 2,
+) -> list[str]:
+    """Secret-diary prose for conversation recall — Muse prompt only."""
+    if not character_id:
+        return []
+    try:
+        entries = await presets_db.get_recent_diary_summaries(
+            db, character_id, limit=limit,
+        )
+    except Exception:
+        logger.debug("[muse] diary bodies load failed", exc_info=True)
+        return []
+    ja = str(locale).startswith("ja")
+    out: list[str] = []
     for e in entries:
         text = str(
-            (e.get("summary_ja") if ja else e.get("summary_en"))
+            (e.get("content_ja") if ja else e.get("content_en"))
+            or e.get("content")
+            or (e.get("summary_ja") if ja else e.get("summary_en"))
             or e.get("summary") or ""
         ).strip()
         if text:
-            out.append(text)
+            out.append(text[:900])
     return out[:limit]
 
 
 async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[str]:
-    """Sticky shoot recaps first, then diary summaries — Muse prompt only."""
+    """Sticky shoot recaps — Muse prompt only."""
     inputs = _inputs(session)
     return await _recent_memories_for(
         db, str(inputs.get("character_id") or ""),
@@ -3209,7 +3402,9 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     about.
     """
     session["memories"] = await _recent_memories(db, session)
+    session["diary_memories"] = []
     session["partner_memories"] = []
+    session["prior_session_log"] = ""
     session["bond"] = {}
     session["showrunner_taste"] = {}
     session["chemistry_notes"] = []
@@ -3234,6 +3429,14 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     char_id = str(_inputs(session).get("character_id") or "")
     if not char_id:
         return
+    try:
+        session["diary_memories"] = await _recent_diary_bodies(
+            db, char_id,
+            locale=str(_inputs(session).get("locale") or "ja"),
+            limit=2,
+        )
+    except Exception:
+        logger.debug("[muse] diary memories load failed", exc_info=True)
     try:
         session["bond"] = await presets_db.get_bond(db, char_id)
         session["showrunner_taste"] = await presets_db.get_showrunner_taste(
@@ -3503,7 +3706,7 @@ def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
                 speakers[len(hits)] if len(hits) < len(speakers) else None,
             )
         if match:
-            clean = text_s
+            clean = identity.sanitize_muse_say(text_s)
             if re.search(r"(?im)^(TAGS|SCENE)\s*:", clean):
                 clean = re.split(r"(?im)^(TAGS|SCENE)\s*:", clean)[0].strip()
             hits.append((match, clean[:600]))
@@ -3514,7 +3717,7 @@ def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
         say = blob
         if re.search(r"(?i)SAY\s*:", blob):
             say = re.split(r"(?i)SAY\s*:", blob, maxsplit=1)[-1].strip()
-        return [(speakers[0], say[:600])]
+        return [(speakers[0], identity.sanitize_muse_say(say)[:600])]
     return []
 
 
@@ -4335,7 +4538,7 @@ async def run_generate_actress_diary_job(
     # Extract session logs
     chat_list = session.get("chat") or []
     session_log_lines = []
-    for m in chat_list[-15:]:
+    for m in chat_list[-30:]:
         if not isinstance(m, dict):
             continue
         session_log_lines.append(f"{m.get('name')}: {m.get('text')}")
@@ -4343,11 +4546,8 @@ async def run_generate_actress_diary_job(
 
     # Extract photo description from shoot prompt
     photo_desc = str((session.get("shoot") or {}).get("prompt") or "")
-    shot = (session.get("shoot") or {}).get("images") or []
-    if shot and isinstance(shot[0], dict):
-        image_id = str(shot[0].get("image_id") or "")
-    else:
-        image_id = str(shot[0]) if shot else ""
+    image_ids = _shoot_image_ids(session)
+    image_id = image_ids[0] if image_ids else ""
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
@@ -4405,6 +4605,7 @@ async def run_generate_actress_diary_job(
         "content_en": fields["content_en"],
         "content": fields["content_ja"],
         "image_id": image_id,
+        "image_ids": image_ids,
         # Which shoot this was, so the entry can lead back to it.
         "session_id": sid,
         "character_id": character_id,
@@ -4646,11 +4847,29 @@ def _director_highlights(session: dict[str, Any]) -> str:
     return "\n".join(f"- {n}" for n in notes[-8:])
 
 
-def _shoot_image_id(session: dict[str, Any]) -> str:
+def _shoot_image_ids(session: dict[str, Any]) -> list[str]:
+    """Every take from the final shoot, in order, without duplicates.
+
+    A single ③ can land more than one frame (`draft_count`). Older sessions
+    store bare sha strings; newer ones store `{image_id, ...}` dicts.
+    """
     shot = (session.get("shoot") or {}).get("images") or []
-    if shot and isinstance(shot[0], dict):
-        return str(shot[0].get("image_id") or "")
-    return str(shot[0]) if shot else ""
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in shot:
+        if isinstance(item, dict):
+            iid = str(item.get("image_id") or "").strip()
+        else:
+            iid = str(item).strip()
+        if iid and iid not in seen:
+            seen.add(iid)
+            out.append(iid)
+    return out
+
+
+def _shoot_image_id(session: dict[str, Any]) -> str:
+    ids = _shoot_image_ids(session)
+    return ids[0] if ids else ""
 
 
 def _character_for_id(session: dict[str, Any], preset: dict[str, Any], character_id: str) -> dict[str, Any]:

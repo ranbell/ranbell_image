@@ -289,9 +289,11 @@ def parse_hybrid(raw: str) -> tuple[str, str]:
 
 
 _DUET_SPEAKER_RE = re.compile(r"(?im)^\s*([AB])\s*[:：]\s*(.*)$")
-_LEADING_SAY_RE = re.compile(r"(?is)^\s*SAY\s*:\s*")
+_LEADING_SAY_RE = re.compile(
+    r"(?is)^\s*SAY(?:\s*\([^)]*\))?\s*[:：]\s*"
+)
 _TALK_LABEL_RE = re.compile(
-    r"(?im)^\s*(SAY|ASIDE|CARD|PITCH)\s*[:：]\s*(.*)$"
+    r"(?im)^\s*(SAY|ASIDE|CARD|PITCH)(?:\s*\([^)]*\))?\s*[:：]\s*(.*)$"
 )
 # Craft / notebook / rule labels that must never appear in chat SAY.
 _SAY_LEAK_LINE_RE = re.compile(
@@ -299,9 +301,10 @@ _SAY_LEAK_LINE_RE = re.compile(
     r"TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|INTENT|ATMOSPHERE|FRAME|"
     r"WEARING(?:_B)?|BEAT(?:_B)?|VIBE|OPEN|STANDING|CLEAR_OPEN|UNCHANGED|"
     r"COSTUME(?:_B)?|PLACE|HOUR|LIGHT|PROPS|POSE(?:_B)?|EXPRESSION(?:_B)?|"
-    r"CAMERA|OUTPUT\s*FORMAT|CRITICAL\s*RULES|RULES(?:\s+FOR)?|"
+    r"CAMERA|OUTPUT\s*FORMAT|OUTPUT\s*LANGUAGE|(?:THE\s+)?LANGUAGE|"
+    r"CRITICAL\s*RULES|RULES(?:\s+FOR)?|"
     r"2GIRLS|GROUNDED_TOKENS|CITED_MEMORIES|NOTEBOOK(?:\s+NOW)?|"
-    r"DUET_TALK|W_DUET|FORMAT\b"
+    r"DUET_TALK|W_DUET|FORMAT\b|PRIOR\s+SESSION"
     r")\s*[:：].*$"
 )
 _SAY_LEAK_CUT_RE = re.compile(
@@ -314,6 +317,8 @@ def _is_leaked_heading_line(line: str) -> bool:
     if _SAY_LEAK_LINE_RE.match(line):
         return True
     stripped = line.strip().rstrip("：:").strip()
+    if "required output language" in stripped.lower():
+        return True
     if not stripped or " " not in stripped:
         return False
     # Multi-word ALL-CAPS / Title-CASE rule banners (with or without colon).

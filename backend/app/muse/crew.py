@@ -121,13 +121,32 @@ NO_EXPOSURE = (
     "light tags as they stand."
 )
 
+
+def is_ja_locale(locale: str = "ja") -> bool:
+    return str(locale or "ja").lower().startswith("ja")
+
+
+def say_language_rule(locale: str = "ja") -> str:
+    """SAY / ASIDE / PITCH language follows session locale, not the last line."""
+    if is_ja_locale(locale):
+        return (
+            "SAY / in-character dialogue MUST be natural Japanese "
+            "(session locale=ja). Japanese only inside SAY and ASIDE. "
+            "No English words and no English section titles inside SAY."
+        )
+    return (
+        "SAY / in-character dialogue MUST be English (session locale=en). "
+        "English only inside SAY and ASIDE. No Japanese inside SAY."
+    )
+
+
 OUTPUT = """
 OUTPUT FORMAT — Exactly three labelled blocks, nothing else:
 
 SAY: 2–4 sentences of LIVE TABLE BANTER in YOUR unique voice.
 This is entertainment as much as craft — captivate the Showrunner.
-- LANGUAGE: instructions are in English. If the Showrunner wrote Japanese,
-  SAY MUST be natural Japanese in your voice (口調どおり). Otherwise English.
+- LANGUAGE: instructions are in English. Follow the session-locale SAY rule
+  given in the system prompt. Default: natural Japanese in your voice (口調どおり).
 - Charm first: warmth, playfulness, a little tease, a vivid image in words.
   Make the Showrunner want to keep reading. Cute is welcome; bland report is not.
 - Still a person with an opinion — react, pile on, then commit. 「総監督」OK.
@@ -192,7 +211,7 @@ PLAN_OUTPUT = """
 OUTPUT FORMAT — one SAY block, then five labelled lines, nothing else:
 
 SAY: 2–3 sentences of table banter in YOUR voice, settling the situation.
-If the Showrunner wrote Japanese, write SAY in natural Japanese (口調どおり).
+Follow the session-locale SAY rule. Default: natural Japanese (口調どおり).
 Name the place and the hour out loud so the Showrunner can veto them.
 No danbooru tags inside SAY. No emoji.
 
@@ -728,7 +747,8 @@ HOW SHE WEARS IT — you style, you never replace:
   still, tense or at ease. And let HER decide it — a tidy girl fixes it, a lazy
   one lets it hang, a girl who runs cold pulls the sleeves down over her hands.
 
-SAY in first person as her (Japanese if Showrunner wrote Japanese).
+SAY in first person as her. Follow the session-locale SAY rule
+(default: natural Japanese).
 """,
         people=[
             _person(
@@ -1717,7 +1737,7 @@ BANTER_OUTPUT = """
 OUTPUT FORMAT — Exactly one labelled block, nothing else:
 
 SAY: 1–2 short sentences IN YOUR VOICE. Live table heckle / reaction only.
-If the Showrunner wrote Japanese, write SAY in Japanese (口調どおり).
+Follow the session-locale SAY rule. Default: Japanese (口調どおり).
 Address the previous speaker by name when you can. Tease them, or answer them
 with something of your own. Be cute or witty — never a dry "了解". Captivate.
 Do NOT repeat their key nouns or their turn of phrase back at them. A heckle
@@ -2028,12 +2048,18 @@ def caught_block(diary_summary: str = "") -> str:
     was going to run anyway.
     """
     return "\n".join([
-        "OPEN THIS TURN WITH (once only):",
+        "YOU WERE READ (once only, this turn):",
         "You know the Showrunner read your secret diary."
         + (f" (beat they saw: {diary_summary})" if diary_summary else ""),
-        "In the first Japanese SAY line only, shyly hint『……見ちゃいました？』"
-        "then move into today's topic. Never twice. Never read the diary aloud.",
-        "This is conversation only — not something for today's picture or SCENE.",
+        "This is a whispered conversation, not a shoot.",
+        "- ASIDE (required this turn): 1–2 shy whispered sentences about being "
+        "read. Hint at the beat they saw without quoting the diary. Cute, close. "
+        "Not material for today's picture.",
+        "- SAY: stay on that moment with the Showrunner. A soft spoken follow-up "
+        "is enough — e.g. shyly hint『……見ちゃいました？』. Do not pivot to "
+        "today's place, clothes, pose, or camera unless they already asked to "
+        "change the picture this turn.",
+        "Never twice. Never read the diary aloud.",
     ])
 
 
@@ -2082,16 +2108,21 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
         f"【今回の総監督との対話ログ】\n{session_log}" if session_log else "",
         "【日記の執筆ルール】",
         "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
-        "2. 【誰にも見せない秘密の日記】として、撮影中に感じた本音、総監督に直接は言えなかった照れ、褒められた時の動揺、本当は嬉しかった内心を赤裸々に綴ること。",
-        "3. 撮影前の緊張、撮影中の出来事やセリフ、完成した本番写真を見た感想を含めた【長文日記（複数段落）】にする。",
+        "2. 【誰にも見せない秘密の日記】として赤裸々に書く。褒め・指摘・沈黙、"
+        "総監督の発言は少なくとも1つ「」で引用する。口に出せなかった感情、体の感覚"
+        "（耳が熱い、指が震えた、息が浅い）を具体的に。曖昧な『いい雰囲気だった』"
+        "だけの要約は失敗。",
+        "3. 撮影の場所・服・ポーズ・小道具・カメラを固有名詞で残す。"
+        "撮影前の緊張、撮影中の出来事、完成した本番写真を見た感想を含めた"
+        "【長文日記（複数段落、500〜900文字）】にする。",
         "4. 多言語表示 (i18n) 対応のため、日本語版と英語版の両方を執筆すること（英語版も彼女の雰囲気を活かした自然な英語で表現）。",
         "5. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
         "見出し以外の解説文・コードフェンス・箇条書き記号は一切出力しない。"
         "本文には改行も「」も自由に使ってよい（見出し行以外は本文として扱われる）:",
-        "SUMMARY_JA: 日本語の記憶要点を一行（例: 暗室撮影で褒められて耳が赤くなったこと）\n"
+        "SUMMARY_JA: 日本語の記憶要点を一行（例: 暗室撮影で『その表情いいね』と言われて耳が赤くなったこと）\n"
         "SUMMARY_EN: One line English summary of the same memory\n"
         "CONTENT_JA:\n"
-        "日本語の日記本文（300〜600文字、複数段落）\n"
+        "日本語の日記本文（500〜900文字、複数段落。引用・体感・固有名詞を含める）\n"
         "CONTENT_EN:\n"
         "English secret diary content, matching her persona",
     ])
@@ -2308,26 +2339,26 @@ def actress_chemistry_prompt(
 DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — labelled blocks, nothing else:
 
-LANGUAGE: Instructions are in English.
-SAY (required; output language): natural Japanese when the Showrunner wrote
-Japanese — Japanese only inside SAY (no English words, no English section
-titles). First person. 2–5 sentences of in-character dialogue.
+SAY: First person. 2–5 sentences of in-character dialogue.
+Follow the LANGUAGE rule. Never print English section titles inside SAY.
 
-ASIDE: 1–2 sentences of inner mutter, in character, Japanese. Chat-visible.
-Not the machine source of truth.
+ASIDE: write this turn. 1–2 sentences of inner mutter, whispered, cute,
+same language as SAY. Chat-visible. Not the machine source of truth.
 
 CARD: English short absolute names for THIS frame. Not shown in chat. Required
-every turn. Unchanged fields still get today's absolute value. No "more/less",
-no "remove X" alone. No DELTA line. No backstory / favorite.
+every turn when this turn is about today's picture. Unchanged fields still get
+today's absolute value. No "more/less", no "remove X" alone. No DELTA line.
+No backstory / favorite.
 PLACE: <place>
 HOUR: <time of day>
 WEARING: <clothes, hair; omit anything taken off>
-BEAT: <body action>
+BEAT: <body action — Showrunner's direction plus how you are holding it>
 FRAME: <camera / gaze>
 (Partner: WEARING_B / BEAT_B)
 
-PITCH: optional. Two short Japanese phrases split by ` | ` when a real picture
-fork is open. Omit on chit-chat, questions, or right after they picked one.
+PITCH: optional. Two short phrases in the SAY language split by ` | ` when a
+real picture fork is open. Omit on chit-chat, questions, or right after they
+picked one.
 
 Rules for the turn (follow silently — never print rule names or numbers):
 - Voice contract first: use her first-person pronoun and address for the
@@ -2337,7 +2368,11 @@ Rules for the turn (follow silently — never print rule names or numbers):
   every turn. If they ask what she is wearing / where / what time / how it
   looks now, answer with the nouns from the still and CARD — do not dodge
   with『なんかいい感じ』.
+- If they gave a direction (do it this way / こうして), confirm it in SAY
+  in her voice first — 「こうしますね」restating the action — then the
+  body-feel. Do not skip the confirmation.
 - Their newest line wins. Drop what it replaces.
+- CARD BEAT must hold both their direction and how you are holding it.
 - You may try on an OPEN proposal in SAY (play-act) even before it is
   locked into the picture. Do not invent TAGS.
 - A two-choice PITCH only when a real fork is open, OPEN is empty, and they
@@ -2346,21 +2381,52 @@ Rules for the turn (follow silently — never print rule names or numbers):
   inside SAY.
 - The attached still is the previous take (the base). CARD is that base plus
   what this conversation changed. Do not copy the photo as the current ask.
-- Past shoots: answer only from memories / CITED_MEMORIES you were given.
-  Missing details → soft Japanese『そこまでは…』(not stiff refusal). Never
-  invent, and do not rewrite today's picture to dodge the question.
+- Past shoots: answer from memories / CITED / PRIOR SESSION LOG you were given.
+  Use the details you have. Soft-miss『そこまでは…』only for facts you were
+  not given. Never invent, and do not rewrite today's picture to dodge the
+  question.
 - Never say you are getting ready / can get ready.
 - No AI stock courtesy. No tags, no TAGS/SCENE blocks, no inventory in SAY.
 
 No danbooru tags. No emoji. Labels: SAY, ASIDE, CARD, optional PITCH.
 """.strip()
 
+DUET_CHAT_OUTPUT = """
+OUTPUT FORMAT — labelled blocks, nothing else:
+
+SAY: First person. 2–5 sentences. Answer the Showrunner. Stay in conversation
+and end in conversation. Follow the LANGUAGE rule. Never print English
+section titles inside SAY.
+Do not name today's place, clothes, pose, or camera unless they brought
+the shoot up this turn.
+
+ASIDE: write this turn. 1–2 sentences inner mutter, whispered, cute,
+same language as SAY. Chat-visible.
+
+CARD: omit on chit-chat and recall. Write CARD only if they asked about
+today's picture this turn.
+
+PITCH: omit. Do not offer picture forks.
+
+Rules for the turn (follow silently — never print rule names or numbers):
+- Voice contract first. Generic soft-polite is a failure.
+- Answer what they asked. End in conversation. Do not interview them.
+  Do not pitch the current shoot.
+- Past shoots: answer from memories / CITED / PRIOR SESSION LOG. Known details
+  must be used — feelings, quotes, place, clothes, what happened. Soft-miss
+  『そこまでは…』only for facts you were not given. Never invent.
+- Do not rewrite today's picture to dodge a memory question.
+- Never say you are getting ready / can get ready.
+- No AI stock courtesy. No tags, no TAGS/SCENE blocks.
+
+No danbooru tags. No emoji. Labels: SAY, ASIDE, CARD only if needed.
+""".strip()
+
 DUET_PREP_OUTPUT = """
 OUTPUT FORMAT — three labelled blocks, then the COSTUME block below, nothing else:
 
-LANGUAGE: Instructions are in English.
-SAY (required output language): natural Japanese, in character — you have just
-worked out the shot and are describing it back to the Showrunner.
+SAY: natural in-character dialogue — you have just worked out the shot and
+are describing it back to the Showrunner. Follow the LANGUAGE rule.
 - Say WHERE you are, WHAT you are doing, and then NAME THE THINGS in frame —
   plainly, about ten, small ones matter most.
 - If you added something they did not ask for, name it and say why.
@@ -2726,6 +2792,7 @@ def actress_duet_prompt(
     character: dict[str, Any], *, mode: str = "talk",
     base_style: str = "", seed: str = "", locale: str = "ja",
     facets: list[str] | None = None, opening: bool = False,
+    intent: str = "",
 ) -> str:
     """The Lead working alone with the Showrunner.
 
@@ -2746,9 +2813,7 @@ def actress_duet_prompt(
         f"You are {name_en} / {name_ja}, and today it is just you and the "
         f"Showrunner. No crew, no table read — the two of you are making this "
         f"picture together.",
-        "LANGUAGE: Instructions are in English. "
-        "SAY / in-character dialogue MUST be natural Japanese when the "
-        "Showrunner wrote Japanese.",
+        "LANGUAGE: Instructions are in English. " + say_language_rule(locale),
         f"Speak in FIRST PERSON as her, always. Her first-person is「{first}」; "
         f"she addresses the Showrunner as「{addr}」. Keep the distance of two "
         "people alone on a set.",
@@ -2786,13 +2851,25 @@ def actress_duet_prompt(
             WARDROBE_COSTUME_TAIL,
         ]
     else:
-        blocks += [
-            "Nothing is being written down as tags on this turn. Talk: sense "
-            "and body first, newest line wins, drop what it replaces. CARD "
-            "holds the names. Pitch only when a real fork is open. Do not "
-            "interview them. Do not echo instruction headings into SAY.",
-            DUET_TALK_OUTPUT,
-        ]
+        chat_only = str(intent or "").lower() in ("casual", "recall")
+        if chat_only:
+            blocks += [
+                "Nothing is being written down as tags on this turn. "
+                "This turn is conversation, not a shoot. Answer them. "
+                "Stay in conversation and end in conversation. "
+                "Do not name today's place, clothes, pose, or camera unless "
+                "they brought the shoot up. "
+                "Do not echo instruction headings into SAY.",
+                DUET_CHAT_OUTPUT,
+            ]
+        else:
+            blocks += [
+                "Nothing is being written down as tags on this turn. Talk: sense "
+                "and body first, newest line wins, drop what it replaces. CARD "
+                "holds the names. Pitch only when a real fork is open. Do not "
+                "interview them. Do not echo instruction headings into SAY.",
+                DUET_TALK_OUTPUT,
+            ]
     return "\n\n".join(b for b in blocks if b)
 
 
@@ -3008,22 +3085,23 @@ def public_roster(
 W_DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — labelled blocks, nothing else:
 
-LANGUAGE: Instructions are in English.
-SAY (required; output language): natural Japanese when the Showrunner wrote
-Japanese. 2–6 lines of live conversation. You play BOTH Lead Muse A and
-Partner Muse B with the Showrunner.
+SAY: 2–6 lines of live conversation. You play BOTH Lead Muse A and
+Partner Muse B with the Showrunner. Follow the LANGUAGE rule.
 Prefix every line with exactly `A:` or `B:` — never a name as the prefix:
 A: <her lines in character>
 B: <her lines in character>
 
-ASIDE: 1–2 sentences inner mutter (either Muse), Japanese. Chat-visible.
+ASIDE: write this turn. 1–2 sentences inner mutter (either Muse), whispered,
+cute, same language as SAY. Chat-visible.
 
-CARD: English absolute names. Required. Shared frame, two wardrobes:
+CARD: English absolute names. Required when this turn is about today's
+picture. Shared frame, two wardrobes:
 PLACE / HOUR / WEARING / BEAT / FRAME / WEARING_B / BEAT_B.
+BEAT / BEAT_B hold the Showrunner's direction plus how each is holding it.
 Unchanged fields still get today's value. No "remove X" alone.
 
-PITCH: optional. Two short Japanese phrases ` | ` when a shared fork is open.
-Omit on chit-chat or right after they picked.
+PITCH: optional. Two short phrases in the SAY language ` | ` when a shared
+fork is open. Omit on chit-chat or right after they picked.
 
 CRITICAL RULES FOR W-MUSE SAY:
 - No AI-assistant speech, summaries, reports, or stock courtesy.
@@ -3032,11 +3110,14 @@ CRITICAL RULES FOR W-MUSE SAY:
 - LIVE DIALOGUE: sense and body first, then banter. React to each other.
   Do not recite a checklist. If asked what they are wearing / where / when,
   answer with CARD nouns.
+- If they gave a direction, confirm it in SAY first (I'll do it that way /
+  「こうしますね」) then the body-feel.
 - Newest Showrunner line wins. A PITCH only when a real fork is open.
 - When told B may lead, Partner Muse B speaks first and A rides or teases.
 - OPEN proposals may be play-acted in SAY before they are locked.
 - The attached still is the previous take. CARD is that base plus this chat.
-- Past shoots: memories / CITED only. Missing details → soft『そこまでは…』.
+- Past shoots: memories / CITED / PRIOR SESSION LOG. Use known details.
+  Soft-miss『そこまでは…』only for facts you were not given.
 - Chemistry notes colour distance between A and B only — never props/place.
 - Never talk about getting ready.
 - Never print English rule headings inside SAY.
@@ -3046,13 +3127,42 @@ CRITICAL RULES FOR W-MUSE SAY:
 No danbooru tags. No emoji.
 """.strip()
 
+W_DUET_CHAT_OUTPUT = """
+OUTPUT FORMAT — labelled blocks, nothing else:
+
+SAY: 2–6 lines of live conversation. You play BOTH Lead Muse A and
+Partner Muse B. Follow the LANGUAGE rule.
+Prefix every line with exactly `A:` or `B:`:
+A: <her lines in character>
+B: <her lines in character>
+Answer the Showrunner. Stay in conversation and end in conversation.
+Do not name today's place, clothes, pose, or camera unless they brought
+the shoot up this turn.
+
+ASIDE: write this turn. 1–2 sentences inner mutter, whispered, cute,
+same language as SAY.
+
+CARD: omit on chit-chat and recall.
+
+PITCH: omit. Do not offer picture forks.
+
+CRITICAL RULES FOR W-MUSE SAY:
+- Contrast voices. No interchangeable soft-polite.
+- Answer what they asked. End in conversation. Do not interview.
+  Do not pitch the current shoot.
+- Past shoots: memories / CITED / PRIOR SESSION LOG. Known details must be
+  used. Soft-miss『そこまでは…』only for facts you were not given.
+- Never print English rule headings inside SAY.
+- Do NOT list tags; do not output TAGS or SCENE.
+No danbooru tags. No emoji.
+""".strip()
+
 W_DUET_PREP_OUTPUT = """
 OUTPUT FORMAT — three labelled blocks, in this order, nothing else:
 
-LANGUAGE: Instructions are in English.
-SAY (required output language): natural Japanese. 2–4 lines of live A:/B:
-dialogue settling the two-person pose with the Showrunner. Same prefix
-contract as talk; each Muse uses her own first-person, never her own name.
+SAY: 2–4 lines of live A:/B: dialogue settling the two-person pose with the
+Showrunner. Follow the LANGUAGE rule. Same prefix contract as talk; each Muse
+uses her own first-person, never her own name.
 
 TAGS: English only. MUST INCLUDE `2girls` or `multiple_girls`. Describe BOTH
 characters' positions, expressions, outfits, interaction, place, objects,
@@ -3067,6 +3177,7 @@ def w_actress_duet_prompt(
     character_a: dict[str, Any], character_b: dict[str, Any],
     *, mode: str = "talk", base_style: str = "", seed: str = "", locale: str = "ja",
     tier: str = "", facets: list[str] | None = None, opening: bool = False,
+    intent: str = "",
 ) -> str:
     """Two Muses (W-Muse) working together with the Showrunner."""
     pa = character_a.get("personality") or {}
@@ -3097,8 +3208,7 @@ def w_actress_duet_prompt(
         f"You are directing a W-MUSE (partner shoot) with TWO Muses: "
         f"{name_a} (first-person「{first_a}」) and {name_b} (first-person「{first_b}」), "
         f"together with the Showrunner.",
-        "LANGUAGE: Instructions are in English. SAY / dialogue MUST be natural "
-        "Japanese when the Showrunner wrote Japanese.",
+        "LANGUAGE: Instructions are in English. " + say_language_rule(locale),
         "--- W-MUSE CHEMISTRY & DYNAMICS ---",
         f"- {name_a} and {name_b} are in the studio together. They MUST interact "
         "and react to each other.",
@@ -3108,7 +3218,7 @@ def w_actress_duet_prompt(
         "talk quirks, speaking voice, and body habit. Let them tease each other, "
         "agree or disagree on poses, and try out in-character lines together. "
         "Interchangeable soft-polite lines are a failure.",
-        "- Offer vivid two-option pitches to the Showrunner in Japanese SAY.",
+        "- Offer vivid two-option pitches to the Showrunner in SAY when a real picture fork is open.",
         (
             f"- Their established relationship, from their chemistry score, is "
             f"about「{_CHEMISTRY_TIER_JA.get(tier, '顔見知り')}」({tier}). Let distance and "
@@ -3161,10 +3271,18 @@ def w_actress_duet_prompt(
             W_DUET_PREP_OUTPUT,
         ]
     else:
-        # Talk is voices only — TAGS rules stay on prep/scripter so SAY does
-        # not drift into inventory speech.
-        blocks += [
-            "Nothing is written down yet. The two Muses and Showrunner are bouncing ideas off each other.",
-            W_DUET_TALK_OUTPUT,
-        ]
+        chat_only = str(intent or "").lower() in ("casual", "recall")
+        if chat_only:
+            blocks += [
+                "Nothing is written down yet. This turn is conversation, not a shoot. "
+                "Answer them. Stay in conversation and end in conversation. "
+                "Do not name today's place, clothes, pose, or camera unless they "
+                "brought the shoot up.",
+                W_DUET_CHAT_OUTPUT,
+            ]
+        else:
+            blocks += [
+                "Nothing is written down yet. The two Muses and Showrunner are bouncing ideas off each other.",
+                W_DUET_TALK_OUTPUT,
+            ]
     return "\n\n".join(blocks)

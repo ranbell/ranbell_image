@@ -43,7 +43,6 @@ const liveSay = ref('')
 const scripterStatus = ref('')    // live craft update (主演撮り + 制作スタッフ)
 const scripterWhisper = ref('')   // body-line while craft updates (no LLM)
 const notebookFlash = ref('')     // which notebook row to pulse
-const memoryHintSeen = ref(false)
 const chatInput = ref('')
 const job = ref(null)
 const elapsed = ref(0)
@@ -301,18 +300,26 @@ function getMessageFace(m, speakerId) {
 // Never used for anything newly generated — see `m.turns` in the template.
 function parseWMuseLines(text) {
   if (!text || typeof text !== 'string') return null
-  if (!text.includes(':') && !text.includes('：')) return null
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
   const parsed = []
   for (const line of lines) {
-    const match = line.match(/^([^:：]+)[:：]\s*(.+)$/)
+    const match = line.match(/^([AB])\s*[:：]\s*(.*)$/i)
     if (match) {
-      parsed.push({ speaker: match[1].trim(), content: match[2].trim() })
-    } else {
-      parsed.push({ speaker: null, content: line })
+      const who = match[1].toUpperCase()
+      parsed.push({
+        speaker: who === 'B'
+          ? (partnerCharacter.value?.name_ja || partnerCharacter.value?.name || 'B')
+          : (character.value?.name_ja || character.value?.name || 'A'),
+        speakerId: who === 'B'
+          ? partnerCharacter.value?.character_id
+          : character.value?.character_id,
+        content: match[2].trim(),
+      })
+    } else if (parsed.length) {
+      parsed[parsed.length - 1].content += `\n${line}`
     }
   }
-  return parsed.length > 0 ? parsed : null
+  return parsed.length ? parsed : null
 }
 
 // Who put which tag in. Folded newest-first so a tag reads as "whoever last
@@ -390,12 +397,29 @@ const tasteChips = computed(() => {
 const chemistryNotes = computed(() =>
   (session.value?.chemistry_notes || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 2),
 )
-const showMemoryExpect = computed(() =>
-  Boolean(session.value?.memory_expect_hint) && !memoryHintSeen.value && isDuet.value,
-)
+function splitLiveTalk(text) {
+  const raw = String(text || '')
+  const cut = raw.search(/\n\s*(ASIDE|CARD|PITCH)(?:\s*\([^)]*\))?\s*[:：]/i)
+  const head = (cut >= 0 ? raw.slice(0, cut) : raw)
+    .replace(/^\s*SAY(?:\s*\([^)]*\))?\s*[:：]\s*/i, '')
+  let aside = ''
+  if (cut >= 0) {
+    const rest = raw.slice(cut)
+    const m = rest.match(
+      /^\s*ASIDE(?:\s*\([^)]*\))?\s*[:：]\s*([\s\S]*?)(?=\n\s*(?:CARD|PITCH)(?:\s*\([^)]*\))?\s*[:：]|$)/i,
+    )
+    if (m) aside = String(m[1] || '').trim()
+  }
+  return { say: head, aside }
+}
+function stripLiveSayPrefix(text) {
+  return splitLiveTalk(text).say
+}
+const displayLiveSay = computed(() => splitLiveTalk(liveSay.value).say)
+const liveAside = computed(() => splitLiveTalk(liveSay.value).aside)
 /** Live W-Muse split while tokens stream (A:/B: prefixes). */
 const liveWTurns = computed(() => {
-  const text = liveSay.value || ''
+  const text = stripLiveSayPrefix(liveSay.value || '')
   if (!isWMuse.value || (!text.includes(':') && !text.includes('：'))) return null
   const lines = text.split('\n')
   const parsed = []
@@ -417,7 +441,6 @@ const liveWTurns = computed(() => {
   }
   return parsed.length ? parsed : null
 })
-function dismissMemoryHint() { memoryHintSeen.value = true }
 // Two parts of the shot disagreeing, where one of them is pinned. The pinned
 // one wins; this is so the panel can say why the other did not take.
 const facetConflicts = computed(() => session.value?.facet_conflicts || [])
@@ -1099,10 +1122,24 @@ async function onChatKey(e) {
                 class="flex flex-col gap-1 my-1"
                 :class="[
                   m.role === 'user' ? 'items-end' : 'items-start',
-                  m.kind === 'banter' ? 'pl-4' : '',
+                  m.kind === 'banter' ? 'pl-6' : '',
                 ]"
               >
-                <template v-if="m.role !== 'user' && m.role !== 'system' && (m.turns?.length || parseWMuseLines(m.text))">
+                <template v-if="m.kind === 'banter'">
+                  <span class="flex items-center gap-1 text-[10px] text-pink-300/90 font-medium tracking-wide">
+                    <span class="opacity-80">💭</span>
+                    {{ t('muse.secretBanterTitle') }}
+                    <span v-if="m.name" class="text-pink-400/70 font-normal">{{ m.name }}</span>
+                  </span>
+                  <div
+                    class="max-w-[78%] rounded-2xl rounded-tl-sm px-3 py-1.5 text-[11px] italic
+                           bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30
+                           border border-dashed border-pink-400/45 text-pink-200/95
+                           shadow-inner leading-relaxed whitespace-pre-wrap"
+                  >{{ m.text }}</div>
+                </template>
+
+                <template v-else-if="m.role !== 'user' && m.role !== 'system' && (m.turns?.length || parseWMuseLines(m.text))">
                   <div class="flex flex-col gap-2 w-full max-w-[90%]">
                     <div
                       v-for="(sub, sIdx) in (m.turns?.length
@@ -1135,7 +1172,6 @@ async function onChatKey(e) {
                       :class="isDuet ? 'w-9 h-9' : 'w-6 h-6'"
                     />
                     <template v-if="m.role === 'user'">🎬 {{ t('muse.showrunner') }}</template>
-                    <template v-else-if="m.kind === 'banter'">{{ t('muse.secretBanterTitle') }} {{ m.name }}</template>
                     <template v-else>🌸 {{ m.name || 'Studio' }}</template>
                   </span>
                   <div
@@ -1144,9 +1180,7 @@ async function onChatKey(e) {
                       ? 'rounded-2xl rounded-tr-xs px-3.5 py-2 text-[12px] bg-emerald-950/50 border border-emerald-500/40 text-emerald-100 shadow-md'
                       : m.role === 'system'
                         ? 'rounded-xl px-3 py-2 text-[11px] bg-slate-900/60 border border-slate-700/40 text-gray-400'
-                        : m.kind === 'banter'
-                          ? 'rounded-2xl px-3.5 py-2 text-[11px] bg-gradient-to-r from-pink-950/70 to-rose-950/70 border border-pink-400/50 text-pink-200 shadow-lg italic'
-                          : 'rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/80 border border-pink-500/30 text-pink-50 shadow-md'"
+                        : 'rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/80 border border-pink-500/30 text-pink-50 shadow-md'"
                   >{{ m.text }}</div>
                 </template>
               </div>
@@ -1204,12 +1238,24 @@ async function onChatKey(e) {
                   class="max-w-[88%] rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] whitespace-pre-wrap
                             bg-pink-950/40 border border-pink-400/40 text-pink-100 shadow-md"
                 >
-                  <template v-if="liveSay">
-                    {{ liveSay }}<span class="caret">▍</span>
+                  <template v-if="displayLiveSay">
+                    {{ displayLiveSay }}<span class="caret">▍</span>
                   </template>
                   <span v-else class="dots" :aria-label="t('muse.leadThinking')">
                     <span>.</span><span>.</span><span>.</span>
                   </span>
+                </div>
+                <div
+                  v-if="liveAside"
+                  class="max-w-[78%] mt-1 pl-2 flex flex-col items-start gap-0.5"
+                >
+                  <span class="text-[10px] text-pink-300/80">💭 {{ t('muse.secretBanterTitle') }}</span>
+                  <div
+                    class="rounded-2xl rounded-tl-sm px-3 py-1.5 text-[11px] italic
+                           bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30
+                           border border-dashed border-pink-400/45 text-pink-200/95
+                           whitespace-pre-wrap leading-relaxed"
+                  >{{ liveAside }}</div>
                 </div>
               </div>
 
@@ -1292,15 +1338,6 @@ async function onChatKey(e) {
                   {{ t('muse.openDiary') }}
                 </button>
               </div>
-              <p
-                v-if="showMemoryExpect"
-                class="text-[10px] text-[var(--sb-faint)] flex items-start gap-2"
-              >
-                <span class="flex-1">{{ t('muse.memoryExpectHint') }}</span>
-                <button type="button" class="underline shrink-0" @click="dismissMemoryHint">
-                  {{ t('muse.memoryExpectDismiss') }}
-                </button>
-              </p>
               <p
                 v-if="chemistryNotes.length && isWMuse"
                 class="text-[10px] text-[var(--sb-muted)]"

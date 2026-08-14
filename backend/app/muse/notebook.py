@@ -420,6 +420,65 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return nb
 
 
+_CARD_LINE_RE = re.compile(
+    r"(?im)^\s*(PLACE|HOUR|WEARING_B|BEAT_B|WEARING|BEAT|FRAME)\s*[:：]\s*(.*)$"
+)
+_CARD_KEY = {
+    "WEARING": "wearing",
+    "BEAT": "beat",
+    "FRAME": "frame",
+    "WEARING_B": "wearing_b",
+    "BEAT_B": "beat_b",
+}
+POSE_CARD_KEYS = ("beat", "beat_b")
+
+
+def parse_muse_card(card: str) -> dict[str, str]:
+    """Muse CARD labelled fields → notebook keys. PLACE/HOUR are scene, skipped."""
+    out: dict[str, str] = {}
+    key: str | None = None
+    buf: list[str] = []
+
+    def flush() -> None:
+        nonlocal key, buf
+        if key is not None:
+            val = " ".join(x.strip() for x in buf if str(x).strip()).strip()
+            if val:
+                out[key] = val
+        key, buf = None, []
+
+    for line in str(card or "").splitlines():
+        m = _CARD_LINE_RE.match(line)
+        if m:
+            flush()
+            key = _CARD_KEY.get(m.group(1).upper())
+            buf = [m.group(2)]
+            continue
+        if key is not None:
+            buf.append(line)
+    flush()
+    return out
+
+
+def absorb_muse_card(
+    nb: dict[str, Any], card: str, *, keys: tuple[str, ...] = POSE_CARD_KEYS,
+) -> dict[str, str]:
+    """Fold this turn's Muse CARD pose into the notebook.
+
+    Script runs before she talks, so her acted beat would otherwise wait until
+    the next compile. Clothes stay with Script; only body action is absorbed.
+    """
+    parsed = parse_muse_card(card)
+    patch = {
+        k: parsed[k] for k in keys
+        if str(parsed.get(k) or "").strip()
+    }
+    if not patch:
+        return {}
+    apply_patch(nb, patch)
+    return patch
+
+
 # `promote_open` used to fold an affirmed OPEN into the shot here, guessing
 # from a noun list (持|手に|花|缶|傘|…) whether the thing was handheld (→ BEAT)
 # or worn (→ WEARING). The scripter reads the conversation now, sees the

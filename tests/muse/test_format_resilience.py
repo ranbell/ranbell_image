@@ -36,6 +36,28 @@ def test_sanitize_strips_english_rule_headings():
     assert "近づく" in out
 
 
+def test_sanitize_strips_required_output_language_label():
+    raw = (
+        "SAY (required output language): 静かな場所は好き。\n"
+        "LANGUAGE: Instructions are in English.\n"
+        "窓辺がいいかな。"
+    )
+    out = identity.sanitize_muse_say(raw)
+    assert "required output language" not in out.lower()
+    assert "LANGUAGE:" not in out
+    assert "静かな場所" in out
+    assert "窓辺" in out
+
+
+def test_parse_talk_blocks_accepts_parenthetical_say_label():
+    raw = "SAY (required; output language): 図書館、いいね。\nASIDE: 少し緊張してる。\n"
+    blocks = identity.parse_talk_blocks(raw)
+    say = identity.sanitize_muse_say(blocks["say"])
+    assert "図書館" in say
+    assert "required" not in say.lower()
+    assert "緊張" in blocks["aside"]
+
+
 def test_parse_table_read_truncated_say_tags():
     raw = "SAY: 帽子、外したよ\nTAGS: straw_hat\n"
     say, tags, scene = identity.parse_table_read(raw)

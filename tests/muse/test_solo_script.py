@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import crew, identity, notebook, service
+from app.muse import chain, crew, identity, notebook, service
 from tests.muse.test_duet import _duet_session  # noqa: E402
 from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block  # noqa: E402
 from tests.muse.test_service import FakeDb  # noqa: E402
@@ -42,6 +42,47 @@ def test_parse_talk_blocks_keeps_card_out_of_say():
     assert notebook.parse_pitch_choices(blocks["pitch"]) == [
         "麦わら帽子をかぶる", "帽子なし",
     ]
+
+
+def test_parse_muse_card_and_absorb_pose_only():
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {"beat": "standing", "wearing": "sailor uniform"})
+    card = (
+        "WEARING: sailor uniform, ribbon\n"
+        "BEAT: reaching forward, fingers spread\n"
+        "FRAME: eye level\n"
+    )
+    absorbed = notebook.absorb_muse_card(nb, card)
+    assert absorbed["beat"] == "reaching forward, fingers spread"
+    assert "reaching" in nb["beat"]
+    assert nb["wearing"] == "sailor uniform"
+    assert "ribbon" not in nb["wearing"]
+
+
+def test_absorb_duet_pose_marks_craft_dirty():
+    session = {
+        "mode": "duet",
+        "notebook": notebook.blank(),
+        "character": {"name_ja": "みお"},
+        "inputs": {},
+        "craft": {},
+    }
+    notebook.apply_patch(session["notebook"], {"beat": "standing"})
+    service._absorb_duet_pose(
+        session, "BEAT: leaning on the fence, one knee bent\nWEARING: coat",
+    )
+    assert "leaning" in session["notebook"]["beat"]
+    assert session["craft_dirty"] is True
+    assert "leaning" in session["craft"]["pose_intent"]
+    assert session["notebook"].get("wearing") != "coat"
+
+
+def test_scripter_reads_muse_pose_and_recall():
+    text = chain.SCRIPTER_SYSTEM.lower()
+    assert "card beat" in text
+    assert "recall" in text
+    assert "この間" in chain.SCRIPTER_SYSTEM
+    assert "never paint from say atmosphere" not in text
 
 
 def test_duet_talk_output_answers_nouns_when_asked():

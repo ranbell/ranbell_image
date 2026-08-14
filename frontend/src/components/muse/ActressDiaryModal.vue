@@ -21,8 +21,32 @@ const selectedDiary = ref(null)
 // something about it the next time they work together.
 const justCaught = ref(false)
 const zoomed = ref(false)
+const photoIndex = ref(0)
 const dialogEl = ref(null)
 const listEl = ref(null)
+
+function diaryPhotoIds(d) {
+  if (!d) return []
+  const ids = Array.isArray(d.image_ids) ? d.image_ids.map(x => String(x || '').trim()).filter(Boolean) : []
+  const single = String(d.image_id || '').trim()
+  if (single && !ids.includes(single)) ids.push(single)
+  return [...new Set(ids)]
+}
+
+const photoIds = computed(() => diaryPhotoIds(selectedDiary.value))
+const currentPhotoId = computed(() => photoIds.value[photoIndex.value] || '')
+const hasPhotoStack = computed(() => photoIds.value.length > 1)
+
+function prevPhoto() {
+  const n = photoIds.value.length
+  if (n < 2) return
+  photoIndex.value = (photoIndex.value - 1 + n) % n
+}
+function nextPhoto() {
+  const n = photoIds.value.length
+  if (n < 2) return
+  photoIndex.value = (photoIndex.value + 1) % n
+}
 
 // `=== 'en'` missed en-US, and the rest of the panel decides the same question
 // with startsWith('ja'). Both halves are stored, so the toggle is free.
@@ -85,6 +109,7 @@ async function openDiary(diary) {
   selectedDiary.value = diary
   forced.value = ''
   zoomed.value = false
+  photoIndex.value = 0
   justCaught.value = false
   if (!diary || diary.read) return
   try {
@@ -123,10 +148,17 @@ function formatDate(ts) {
   }
 }
 
-// Arrow keys walk the shelf; Escape closes. Neither worked before.
+// Arrow keys walk the shelf (up/down) or flip the photos (left/right).
+// Escape closes. None of those worked before.
 function onKeydown(e) {
   if (!props.show) return
   if (e.key === 'Escape') { emit('close'); return }
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && hasPhotoStack.value) {
+    e.preventDefault()
+    if (e.key === 'ArrowLeft') prevPhoto()
+    else nextPhoto()
+    return
+  }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
   if (!diaries.value.length) return
   e.preventDefault()
@@ -285,8 +317,9 @@ watch(() => props.show, async (val) => {
           </div>
 
           <!-- Polaroid Photo Attachment. The thumbnail carries the page; the
-               original is a click away rather than loaded into a 20rem frame. -->
-          <div v-if="selectedDiary.image_id" class="self-center my-2 group">
+               original is a click away rather than loaded into a 20rem frame.
+               A take can land more than one frame — flip through them. -->
+          <div v-if="photoIds.length" class="self-center my-2 group relative">
             <button
               type="button"
               class="relative block bg-white dark:bg-slate-800 p-3 pb-8 rounded-lg shadow-xl border border-pink-200/50 dark:border-pink-900/50
@@ -298,7 +331,7 @@ watch(() => props.show, async (val) => {
               <div class="absolute -top-3 left-1/2 -translate-x-1/2 w-20 h-6 bg-pink-200/60 dark:bg-pink-700/40 backdrop-blur-xs border-dashed border-pink-300/60 rotate-2 shadow-xs"></div>
 
               <img
-                :src="zoomed ? full(selectedDiary.image_id) : thumb(selectedDiary.image_id)"
+                :src="zoomed ? full(currentPhotoId) : thumb(currentPhotoId)"
                 :alt="getDiarySummary(selectedDiary)"
                 loading="lazy"
                 class="w-full h-auto rounded object-cover aspect-[3/4] bg-pink-100 dark:bg-slate-900"
@@ -307,6 +340,30 @@ watch(() => props.show, async (val) => {
                 {{ t('characters.diary.photoMemory') }}
               </p>
             </button>
+            <div
+              v-if="hasPhotoStack"
+              class="mt-3 flex items-center justify-center gap-3"
+            >
+              <button
+                type="button"
+                class="w-8 h-8 rounded-full bg-pink-200/80 hover:bg-pink-300 text-pink-800
+                       dark:bg-pink-900/80 dark:hover:bg-pink-800 dark:text-pink-100
+                       flex items-center justify-center text-lg font-bold shadow-sm"
+                :aria-label="t('characters.diary.photoPrev')"
+                @click.stop="prevPhoto"
+              >‹</button>
+              <span class="text-[11px] font-medium text-pink-600 dark:text-pink-300 tabular-nums">
+                {{ t('characters.diary.photoIndex', { n: photoIndex + 1, total: photoIds.length }) }}
+              </span>
+              <button
+                type="button"
+                class="w-8 h-8 rounded-full bg-pink-200/80 hover:bg-pink-300 text-pink-800
+                       dark:bg-pink-900/80 dark:hover:bg-pink-800 dark:text-pink-100
+                       flex items-center justify-center text-lg font-bold shadow-sm"
+                :aria-label="t('characters.diary.photoNext')"
+                @click.stop="nextPhoto"
+              >›</button>
+            </div>
           </div>
 
           <!-- Handwritten style Diary Content -->

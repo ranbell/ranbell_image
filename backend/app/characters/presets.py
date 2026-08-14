@@ -831,12 +831,24 @@ async def get_preset_diaries(db, preset_id: str) -> list[dict[str, Any]]:
 MAX_DIARIES = 50
 
 
+def _diary_image_ids(diary: dict[str, Any]) -> list[str]:
+    """Every photo attached to a diary page, oldest entries included.
+
+    New entries store `image_ids`. Older ones only have `image_id`.
+    """
+    ids = [str(x).strip() for x in (diary.get("image_ids") or []) if str(x).strip()]
+    single = str(diary.get("image_id") or "").strip()
+    if single and single not in ids:
+        ids.append(single)
+    return ids
+
+
 async def find_preset_diary_by_image(db, preset_id: str, image_id: str) -> dict[str, Any] | None:
     """Reverse lookup for the Creation Record panel: did this shot get written up?"""
     if not image_id:
         return None
     diaries = await get_preset_diaries(db, preset_id)
-    return next((d for d in diaries if d.get("image_id") == image_id), None)
+    return next((d for d in diaries if image_id in _diary_image_ids(d)), None)
 
 
 async def add_preset_diary(db, preset_id: str, diary: dict[str, Any]) -> dict[str, Any] | None:

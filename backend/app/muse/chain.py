@@ -218,7 +218,9 @@ def parse_plan(raw: str) -> dict[str, Any]:
             out[key] = value
 
     say = text[:matches[0].start()].strip()
-    say = re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
+    say = identity.sanitize_muse_say(
+        re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
+    )
     if say:
         out["say"] = say
     return out
@@ -648,7 +650,9 @@ def parse_facets(
         first_at = min(first_at, len(text))
 
     say = text[:first_at].strip() if out else text.strip()
-    say = re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
+    say = identity.sanitize_muse_say(
+        re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
+    )
     return say, out
 
 
@@ -776,14 +780,19 @@ async def run_duet_talk(
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
     tier: str = "",
+    locale: str = "ja",
+    intent: str = "",
 ) -> tuple[str, tuple[dict[str, str], ...] | None, bool, str, str, str]:
     """Conversation turn. Returns say, turns, blind, aside, card, pitch."""
     if partner_character:
         system = crew.w_actress_duet_prompt(
             character or {}, partner_character, mode="talk", seed=seed, tier=tier,
+            locale=locale, intent=intent,
         )
     else:
-        system = crew.actress_duet_prompt(character or {}, mode="talk", seed=seed)
+        system = crew.actress_duet_prompt(
+            character or {}, mode="talk", seed=seed, locale=locale, intent=intent,
+        )
 
     raw, blind = await _call_seeing(
         ollama,
@@ -809,7 +818,8 @@ async def run_duet_talk(
             text, name_a=name_a, name_b=name_b,
         )
     turns_out = tuple(turns) if turns else None
-    return text, turns_out, blind, blocks["aside"], blocks["card"], blocks["pitch"]
+    aside = identity.sanitize_muse_say(blocks["aside"])
+    return text, turns_out, blind, aside, blocks["card"], blocks["pitch"]
 
 
 async def run_duet_prep(
@@ -876,10 +886,7 @@ async def run_banter(
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
     say, _, _ = identity.parse_table_read(raw)
-    text = (say or raw).strip()
-    # Strip a leading SAY: if the model ignored the parser path.
-    if text.lower().startswith("say:"):
-        text = text[4:].strip()
+    text = identity.sanitize_muse_say(say or raw)
     if not text:
         raise ChainError("empty banter")
     return text
@@ -937,11 +944,17 @@ READING THE ROOM:
   at a concrete earlier line. Nothing is pending unless the conversation says so.
 - A change a Muse proposed and the showrunner accepted is a change to the
   picture. Patch it. Do not wait to be told a second time in plainer words.
+- A Muse-proposed body action the showrunner did not contradict belongs in
+  beat. Combine their direction with how she said she is holding it (SAY and
+  CARD BEAT). Do not drop her pose to keep only the last noun they typed.
 - A change is a change whatever words it arrived in. Judge by what the picture
   would look like now versus the notebook — not by whether some keyword showed
   up. Changing clothes and changing location are shot changes.
 - 「まだ撮らなくていい」and chatting about the picture without asking to change
   it are casual. Do not lift them into shot.
+- Questions about a past shoot, last time, 「この間」「前回」「あのとき」/
+  「覚えてる」, or how a previous take felt, are recall. Clothes or place
+  words inside a memory question do not make it shot.
 - Decide from the conversation whose card an edit belongs to. An edit addressed
   to one Muse never touches the other's wearing / beat. A change meant for both
   patches both.
@@ -954,8 +967,10 @@ THE STILL IS THE LAST TAKE, NOT THE ASK:
 - The current frame is that base PLUS what chat / the Muse CARD changed.
 - Do not copy a hat (or anything else) from the photo if chat already removed it.
 - Do not invent inventory the CARD and latest line did not ask for.
-- Priority: chat delta from the still > Muse CARD > latest line > what the
-  photo still shows. Never paint from SAY atmosphere.
+- Priority: Showrunner's latest direction together with uncontradicted Muse
+  CARD/SAY body action > chat delta from the still > what the photo still shows.
+- Mood-only SAY does not belong in scene or wearing. Body action from Muse
+  SAY and CARD BEAT belongs in beat.
 
 FIELD CONTRACTS (hard):
 - scene = short place + time. NEVER paste long prose.
@@ -1098,8 +1113,8 @@ async def run_scripter(
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (
                 "CONVERSATION SO FAR (who said what — read this to resolve "
-                "affirmations and Muse-proposed changes, and to judge what "
-                "changed from the still; write notebook values in English):\n"
+                "affirmations, Muse-proposed poses, and what changed from the "
+                "still; write notebook values in English):\n"
                 f"{transcript.strip()}"
             ) if transcript.strip() else "",
             (

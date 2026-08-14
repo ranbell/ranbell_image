@@ -490,6 +490,75 @@ def test_duet_talk_user_prompt_prefers_latest_over_sticky():
     assert "two-choice" not in prompt.lower() or "not every turn" in prompt.lower()
 
 
+def test_casual_user_prompt_does_not_steer_to_the_shot():
+    session = {
+        "inputs": {"theme": "図書館", "locale": "ja"},
+        "chat": [
+            {"role": "user", "text": "この間の撮影どうだった？"},
+        ],
+        "mode": "duet",
+        "notebook": {"rev": 1, "scene": "library", "wearing": "uniform"},
+        "scripter_intent": "casual",
+        "diary_memories": ["暗室で『その表情いいね』と言われて耳が熱くなった。"],
+    }
+    prompt = service._duet_user_prompt(
+        session, "この間の撮影どうだった？", prep=False, intent="casual",
+    )
+    assert "conversation" in prompt.lower()
+    assert "end in conversation" in prompt.lower()
+    assert "耳が熱く" in prompt
+    assert "PREVIOUS CARD" not in prompt
+    assert "SHOT NOTEBOOK" not in prompt
+    assert "uniform" not in prompt
+    assert crew.say_language_rule("ja") in prompt
+
+
+def test_recall_user_prompt_keeps_prior_log_and_stays_off_today():
+    session = {
+        "inputs": {"theme": "図書館", "locale": "ja"},
+        "chat": [{"role": "user", "text": "この前の堤防、覚えてる？"}],
+        "mode": "duet",
+        "notebook": {"rev": 1, "scene": "library"},
+        "prior_session_log": "総監督: 堤防で撮ろう\nみお: 風、強かった。",
+        "cited_memories": [{"when": "堤防の夕焼け", "text": "セーラー、風"}],
+    }
+    prompt = service._duet_user_prompt(
+        session, "この前の堤防、覚えてる？", prep=False, intent="recall",
+    )
+    assert "PRIOR SESSION LOG" in prompt
+    assert "堤防で撮ろう" in prompt
+    assert "CITED_MEMORIES" in prompt
+    assert "Stay on that" in prompt or "past shoot" in prompt.lower()
+    assert "end in conversation" in prompt.lower()
+    assert "SHOT NOTEBOOK" not in prompt
+
+
+def test_talk_prompt_chat_intent_drops_required_card():
+    text = crew.actress_duet_prompt({"name_ja": "みお"}, mode="talk", intent="casual")
+    assert "This turn is conversation" in text
+    assert "end in conversation" in text.lower()
+    assert "DUET_CHAT" not in text
+    assert "Required every turn" not in text
+    assert crew.say_language_rule("ja") in text
+    assert "required output language" not in text.lower()
+
+
+def test_shot_user_prompt_confirms_direction_and_keeps_pose_from_both():
+    session = {
+        "inputs": {"theme": "屋上", "locale": "ja"},
+        "chat": [{"role": "user", "text": "手を伸ばして、こうしてね"}],
+        "mode": "duet",
+        "notebook": {"rev": 1, "scene": "rooftop", "beat": "standing"},
+        "scripter_intent": "shot",
+    }
+    prompt = service._duet_user_prompt(
+        session, "手を伸ばして、こうしてね", prep=False, intent="shot",
+    )
+    assert "こうしますね" in prompt
+    assert "CARD BEAT" in prompt
+    assert "SHOT NOTEBOOK" in prompt
+
+
 def test_duet_prep_user_prompt_rewrites_against_previous_craft():
     session = {
         "inputs": {"theme": "放送室"},
