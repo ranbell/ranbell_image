@@ -1685,6 +1685,32 @@ def person_card_block(muse_id: str, *, locale: str = "ja") -> str:
     return "\n".join(lines)
 
 
+# One element of the look, one owner. A seat may write its own slot and no
+# other; nobody may write a slot twice in one beat. This is the crewed
+# studio's answer to the same problem `PLAN.LIGHT` solves for the planner —
+# the notebook has no field for optics, colour, air or finish, so a specialist
+# seat that was talk-only had nowhere to put its craft and the weave never saw
+# it. Garments live in the notebook's WEARING; wardrobe owns only the CLOTH
+# behind them (drape, weave, how it takes light), so clothes keep one owner.
+CRAFT_SLOTS: dict[str, str] = {
+    "gaffer": "LIGHT",
+    "lens": "OPTICS",
+    "palette": "COLOUR",
+    "propshop": "PROPS",
+    "weather": "AIR",
+    "wardrobe": "CLOTH",
+    "faces": "FACE",
+    "cutout": "SHAPE",
+    "ink": "RENDER",
+    "grade": "FINISH",
+}
+
+
+def craft_slot(muse_id: str) -> str:
+    """The one element of the look this seat may write, if any."""
+    return CRAFT_SLOTS.get(role_of(resolve_member(muse_id)), "")
+
+
 def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> str:
     """One speaker's full person card inside the packed table-talk prompt.
 
@@ -1701,6 +1727,7 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> 
     focus = ", ".join(m.get("techniques") or []) or str(m.get("role") or mid)
     trait = trait_blurb(mid, locale=locale)
     example = _pick_say_example(mid, seed)
+    slot = craft_slot(mid)
     return "\n".join(b for b in [
         f"=== SPEAKER {index} — id `{mid}` ===",
         f"WHO: {_who(m)}",
@@ -1710,6 +1737,9 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> 
         person_card_block(mid, locale=locale),
         f"TASTE: {trait}" if trait else "",
         f"YOUR CORNER OF THE PICTURE: {focus}",
+        (
+            f"YOUR CRAFT SLOT: {slot} — you are the only seat that writes it."
+        ) if slot else "",
         ("EXAMPLE SAY (match this energy, do not copy verbatim):\n" + example)
         if example else "",
     ] if b)
@@ -1774,6 +1804,13 @@ def table_talk_system_prompt(
         "SPEAKER: <exact SPEAKER id>",
         "SAY: <one or two spoken sentences"
         + (" in natural Japanese, 口調どおり>" if ja else " in the showrunner's language>"),
+        "CRAFT: <optional, ENGLISH, one short clause for YOUR CRAFT SLOT only — "
+        "the finished state, e.g. `low sun from behind, hard rim on the jaw`. "
+        "Omit the line entirely when your slot did not change this beat.>",
+        "",
+        "CRAFT is not tags and not a sentence about her: it is the one element "
+        "you own, written the way the camera would see it. Never write another "
+        "seat's slot. Never put clothes, pose, place or hour in CRAFT.",
         "",
         "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists. No emoji.",
         "Do NOT invent wardrobe the Lead has not agreed to.",

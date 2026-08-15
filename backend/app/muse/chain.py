@@ -1030,7 +1030,9 @@ You do not rewrite SHOT fields.
 
 LANGUAGE: English only for tags and craft_scene.
 
-SOURCE: NOTEBOOK NOW is the only inventory. No theme, no chat, no photo.
+SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
+quality of that inventory (light, optics, colour, air, cloth, finish) — never
+extra inventory. No theme, no chat, no photo.
 
 THICKEN QUALITY, NOT INVENTORY:
 - Unpack what is already named: cloth (knit, drape, folds), light (how it
@@ -1113,12 +1115,23 @@ No TAGS. No JSON. No SAY.
 
 
 
+CREW_LOOK_NOTE = (
+    "CREW LOOK (the crewed studio only — each line is owned by one seat and is "
+    "the finished state of that element: LIGHT, OPTICS, COLOUR, PROPS, AIR, "
+    "CLOTH, FACE, SHAPE, RENDER, FINISH). Keep these true in tags and prose. "
+    "They are quality of what is already in the shot, not new inventory: they "
+    "never add a garment, a place, a pose or a prop the notebook does not "
+    "name, and they never overrule the notebook when they disagree with it."
+)
+
+
 async def run_scripter(
     ollama, *, notebook_block: str, note: str, transcript: str = "",
     theme: str = "", style: str = "", framing: str = "",
     partner: bool = False, model: str, num_ctx: int | None,
     mode: str = "compile", images: list[bytes] | None = None,
     card: str = "", struck: str = "", directive: str = "",
+    crew_look: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
 
@@ -1134,6 +1147,7 @@ async def run_scripter(
     if weave:
         prompt = "\n\n".join(b for b in [
             f"NOTEBOOK NOW:\n{notebook_block}",
+            f"{CREW_LOOK_NOTE}\n{crew_look.strip()}" if crew_look.strip() else "",
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (
                 "WEAVE: expand TAGS and CRAFT_SCENE from the notebook only. "
@@ -1152,6 +1166,7 @@ async def run_scripter(
             f"STYLE: {style}" if style.strip() else "",
             f"FRAMING: {framing}" if framing.strip() else "",
             f"NOTEBOOK NOW:\n{notebook_block}",
+            f"{CREW_LOOK_NOTE}\n{crew_look.strip()}" if crew_look.strip() else "",
             (
                 "MUSE CARD (absolute names for this frame; the still is the "
                 "last take, chat is the delta from that take):\n"

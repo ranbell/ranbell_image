@@ -173,7 +173,8 @@ def test_trait_blurb_reflects_busy_vs_simple_background():
 def test_parse_table_talk_keeps_speaker_order():
     raw = (
         "SPEAKER: wardrobe:shiwa\n"
-        "SAY: コートにします。\n\n"
+        "SAY: コートにします。\n"
+        "CRAFT: heavy wool melton, deep folds at the elbow\n\n"
         "SPEAKER: actress\n"
         "SAY: 寒そうだから助かる。\n\n"
         "SPEAKER: lens:pinto\n"
@@ -181,8 +182,12 @@ def test_parse_table_talk_keeps_speaker_order():
     )
     speakers = ["wardrobe:shiwa", "actress", "lens:pinto"]
     hits = service._parse_table_talk(raw, speakers)
-    assert [m for m, _ in hits] == speakers
+    assert [m for m, _, _ in hits] == speakers
     assert "コート" in hits[0][1]
+    # The owned craft clause comes out of SAY, not into the chat bubble.
+    assert "melton" in hits[0][2]
+    assert "melton" not in hits[0][1] and "CRAFT" not in hits[0][1]
+    assert hits[1][2] == ""
 
 
 def test_preset_meta_exposed_on_roster():
@@ -456,3 +461,62 @@ async def test_opening_still_keeps_the_seats_craft():
     # …and once a note moves the notebook, the weave is owed again.
     notebook.apply_patch(notebook.of(session), {"wearing": "raincoat"})
     assert int(notebook.of(session).get("rev") or 0) > session["notebook_rev_compiled"]
+
+
+# ── CREW LOOK: 専門席の仕事が weave まで届く ────────────────────────────────
+def test_craft_slots_have_one_owner_each():
+    from app.muse import crew
+    assert crew.craft_slot("gaffer:gyakkou") == "LIGHT"
+    assert crew.craft_slot("lens:pinto") == "OPTICS"
+    # 服そのものはノートの WEARING（所有者は台本）。衣装席は生地だけ。
+    assert crew.craft_slot("wardrobe:shiwa") == "CLOTH"
+    # ポーズは beat が持つので、体の席には枠を与えない。
+    assert crew.craft_slot("beat:ichibyou") == ""
+    assert crew.craft_slot("spine:bane") == ""
+    assert len(set(crew.CRAFT_SLOTS.values())) == len(crew.CRAFT_SLOTS)
+
+
+def test_crew_look_records_owner_and_shows_up_in_the_ledger():
+    session = {
+        "mode": "", "inputs": {"locale": "ja", "crew_ids": ["gaffer:gyakkou"]},
+        "notebook": {}, "craft": {},
+    }
+    service._record_crew_look(
+        session, "gaffer:gyakkou", "low sun from behind, hard rim on the jaw",
+    )
+    service._record_crew_look(session, "lens:pinto", "85mm, shallow, eyes sharp")
+    # 他人の枠は書けない（席に枠がなければ黙って捨てる）
+    service._record_crew_look(session, "beat:ichibyou", "wide_shot, full body")
+
+    look = service.crew_look(session)
+    assert look["LIGHT"].startswith("low sun")
+    assert look["OPTICS"].startswith("85mm")
+    assert "SHAPE" not in look and len(look) == 2
+    block = service.crew_look_block(session)
+    assert "LIGHT: low sun from behind" in block
+    assert [e["muse_id"] for e in session["ledger"]] == [
+        "gaffer:gyakkou", "lens:pinto",
+    ]
+
+
+def test_crew_look_seeds_light_from_the_plan():
+    session = {
+        "mode": "", "inputs": {"theme": "x", "locale": "ja", "crew_ids": ["actress"]},
+        "plan": {"place": "classroom", "hour": "dusk", "light": "backlit, low sun"},
+        "costume": {}, "craft": {}, "notebook": {},
+    }
+    service.sync_crew_notebook(session, force_scene=True)
+    assert service.crew_look(session)["LIGHT"] == "backlit, low sun"
+    # …そして scene は場所と時間だけになる。
+    assert "backlit" not in notebook.of(session)["scene"]
+
+
+def test_struck_items_never_re_enter_through_crew_look():
+    session = {
+        "mode": "", "inputs": {"locale": "ja", "crew_ids": ["propshop:takarabako"]},
+        "notebook": {}, "craft": {}, "struck": ["parasol"],
+    }
+    service._record_crew_look(
+        session, "propshop:takarabako", "a parasol leaning on the bench",
+    )
+    assert "PROPS" not in service.crew_look(session)

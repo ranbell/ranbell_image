@@ -991,14 +991,16 @@ def _costume_wearing_line(costume: dict[str, Any] | None) -> str:
 
 
 def _plan_scene_line(plan: dict[str, Any] | None) -> str:
-    """Where and when (and how it is lit) — never what she is doing.
+    """Where and when. Not how it is lit, and never what she is doing.
 
-    ACTION used to ride along here. scene is what the weave paints the room
-    from, and a clause about her body in it meant the pose was written twice,
-    in two fields, with no rule for which one wins.
+    The scripter's contract is `scene = short place + time`. PLACE, HOUR,
+    LIGHT and ACTION used to be joined into it and cut at 120 characters, so
+    the pose was written in two fields with no rule for which won, and the
+    light was one truncation away from disappearing. ACTION seeds beat; LIGHT
+    is the gaffer's owned slot in CREW LOOK (`crew.CRAFT_SLOTS`).
     """
     data = plan or {}
-    bits = [str(data.get(k) or "").strip() for k in ("place", "hour", "light")]
+    bits = [str(data.get(k) or "").strip() for k in ("place", "hour")]
     return " · ".join(b for b in bits if b)[:120]
 
 
@@ -1028,6 +1030,12 @@ def sync_crew_notebook(
     # migrate returns early and only the legacy carry-overs it still owns run.
     nb = notebook_mod.of(session)
     patch: dict[str, Any] = {}
+    # PLAN.LIGHT is the planner's intent and the gaffer executes it — the seat
+    # that owns LIGHT may rewrite this, nobody else may. Seeding it here is what
+    # keeps the light in the picture on a floor where the gaffer says nothing.
+    light = str((session.get("plan") or {}).get("light") or "").strip()
+    if light and not str(crew_look(session).get("LIGHT") or "").strip():
+        crew_look(session)["LIGHT"] = light[:160]
     scene_line = _plan_scene_line(session.get("plan"))
     if scene_line and (force_scene or not str(nb.get("scene") or "").strip()):
         patch["scene"] = scene_line
@@ -2402,6 +2410,7 @@ async def _call_duet_scripter(
         images=vision,
         card="" if mode == "weave" else str(session.get("muse_card") or ""),
         struck=_struck_line(session),
+        crew_look=crew_look_block(session),
         directive=(
             chain.SCRIPTER_FOLD_NOTE if fold
             else chain.SCRIPTER_VERIFY_NOTE if verify
@@ -3969,9 +3978,24 @@ _SPEAKER_BLOCK_RE = re.compile(
 )
 
 
-def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
-    """Parse packed SPEAKER/SAY blocks; fall back to first speaker."""
-    hits: list[tuple[str, str]] = []
+_CRAFT_LINE_RE = re.compile(r"(?im)^CRAFT\s*:\s*(.+?)\s*$")
+
+
+def _split_craft_line(body: str) -> tuple[str, str]:
+    """Pull the optional owned-craft clause out of one speaker's block."""
+    match = _CRAFT_LINE_RE.search(str(body or ""))
+    if not match:
+        return str(body or "").strip(), ""
+    clause = str(match.group(1) or "").strip()
+    say = _CRAFT_LINE_RE.sub("", str(body or "")).strip()
+    if clause.lower() in ("none", "-", "n/a", "omit", "(omit)"):
+        clause = ""
+    return say, clause[:160]
+
+
+def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str, str]]:
+    """Parse packed SPEAKER/SAY/CRAFT blocks; fall back to first speaker."""
+    hits: list[tuple[str, str, str]] = []
     for mid_raw, say in _SPEAKER_BLOCK_RE.findall(str(raw or "")):
         token = str(mid_raw or "").strip()
         text_s = str(say or "").strip()
@@ -3988,10 +4012,11 @@ def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
                 speakers[len(hits)] if len(hits) < len(speakers) else None,
             )
         if match:
-            clean = identity.sanitize_muse_say(text_s)
+            body, craft_line = _split_craft_line(text_s)
+            clean = identity.sanitize_muse_say(body)
             if re.search(r"(?im)^(TAGS|SCENE)\s*:", clean):
                 clean = re.split(r"(?im)^(TAGS|SCENE)\s*:", clean)[0].strip()
-            hits.append((match, clean[:600]))
+            hits.append((match, clean[:600], craft_line))
     if hits:
         return hits
     blob = str(raw or "").strip()
@@ -3999,8 +4024,55 @@ def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
         say = blob
         if re.search(r"(?i)SAY\s*:", blob):
             say = re.split(r"(?i)SAY\s*:", blob, maxsplit=1)[-1].strip()
-        return [(speakers[0], identity.sanitize_muse_say(say)[:600])]
+        say, craft_line = _split_craft_line(say)
+        return [(speakers[0], identity.sanitize_muse_say(say)[:600], craft_line)]
     return []
+
+
+def crew_look(session: dict[str, Any]) -> dict[str, str]:
+    return session.setdefault("crew_look", {})
+
+
+def _record_crew_look(
+    session: dict[str, Any], muse_id: str, clause: str, *, ms: int = 0,
+) -> None:
+    """One seat rewrites the one element it owns — and the ledger sees it.
+
+    Seats stopped writing TAGS when the crewed studio went notebook-primary,
+    which also stopped `record_ledger`: the 破壊行列 in `GET /api/muse/report`
+    went blank for this room, and that report is how "which seat is worth its
+    wall clock" gets answered. A slot rewrite is the seat's contribution now,
+    so it is what gets recorded.
+    """
+    slot = crew.craft_slot(muse_id)
+    clause = str(clause or "").strip()
+    if not slot or not clause:
+        return
+    struck = notebook_mod.struck_tokens(session)
+    low = clause.lower().replace(" ", "_")
+    if any(tok and tok in low for tok in struck):
+        return
+    look = crew_look(session)
+    before = str(look.get(slot) or "")
+    if before.strip().lower() == clause.lower():
+        return
+    look[slot] = clause
+    record_ledger(
+        session, muse_id=muse_id, name=_muse_display_name(session, muse_id),
+        before=before, after=clause, ms=ms,
+    )
+
+
+def crew_look_block(session: dict[str, Any]) -> str:
+    """The owned craft notes, for the scripter's compile and weave."""
+    if is_duet(session):
+        return ""
+    rows = [
+        f"{slot}: {str(text).strip()}"
+        for slot, text in (session.get("crew_look") or {}).items()
+        if str(text or "").strip()
+    ]
+    return "\n".join(rows)
 
 
 async def _run_crew_lead_turn(
@@ -4089,10 +4161,11 @@ async def _run_crew_table_talk(
         logger.warning("[muse] packed table talk failed", exc_info=True)
         return []
     messages: list[dict[str, Any]] = []
-    for mid, say in _parse_table_talk(raw, speakers):
+    for mid, say, craft_line in _parse_table_talk(raw, speakers):
         spoken = session.setdefault("spoken", [])
         if mid not in spoken:
             spoken.append(mid)
+        _record_crew_look(session, mid, craft_line)
         name = _muse_display_name(session, mid)
         msg = _chat_append(
             session, role="muse", text=say, muse_id=mid, name=name, kind="banter",
