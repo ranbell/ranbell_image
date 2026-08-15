@@ -374,3 +374,19 @@ def test_only_the_showrunner_can_change_the_locked_costume():
     w = crew.system_prompt_for("wardrobe:shiwa")
     assert "ONE outfit" in w
     assert "DELETE the previous garment tags" in w
+
+
+def test_the_ledger_is_a_ceiling_not_a_quota():
+    """物の数を決め打ちで求めると、埋め草にゴミが出る。
+
+    実測: 屋上で `empty soda can` / `discarded_chalk` / `empty_plastic_bottle`、
+    波打ち際で `empty_crusty_soda_can`。場所に要る物は4〜6個なのに10個以上を
+    求めていたので、残りが「生活感のあるゴミ」で埋まっていた。
+    """
+    text = crew.plan_system_prompt()
+    assert "AT MOST twelve" in text
+    assert "a ceiling, never a quota" in text
+    assert "Ten or more" not in text
+    # ゴミは「荒れている場面」だけのもの、と明示されていること。
+    assert "Litter and debris" in text
+    assert "about neglect" in text

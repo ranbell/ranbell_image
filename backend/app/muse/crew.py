@@ -222,10 +222,17 @@ HOUR: <English. Time of day and season.>
 LIGHT: <English. The absolute key and where the light comes from. Never a
        direction of change — no "darker", no "brighter".>
 ACTION: <English. What she is doing right now, one clause.>
-MUST APPEAR: <English. Ten or more comma-separated objects for this place and
-             hour. Plain nouns, underscores fine. OBJECTS IN THE ROOM ONLY —
-             never clothing, never anything she is wearing. No objects from her
-             background — only what the place and the theme imply.>
+MUST APPEAR: <English. The objects this place cannot be itself without, and
+             whatever the theme named. Comma-separated plain nouns, underscores
+             fine. AT MOST twelve — a ceiling, never a quota. Four true ones
+             beat twelve with filler in them.
+             OBJECTS IN THE ROOM ONLY — never clothing, nothing she is wearing.
+             No objects from her background — only what the place and the theme
+             imply. Every object earns its place by making THIS place specific.
+             Litter and debris — cans, bottles, scattered rubbish — belong only
+             where the theme is about neglect. Reached for to fill out a list
+             they end up somewhere they make no sense at all, which is what
+             asking for a fixed number here used to produce.>
 
 Exactly these five labels, one line each, in this order. No other blocks.
 MUST APPEAR is never left out. When nothing about the room changed, write the
@@ -1818,6 +1825,9 @@ def table_talk_system_prompt(
         "- RIGHT of `|`: one short clause in your own professional words. This "
         "is what the picture's prose is written from — it is where the feeling "
         "lives, so do not flatten it into a label.",
+        "Props belong to THIS place and this hour. Clutter is not a substitute "
+        "for specificity: a can, a bottle, scattered rubbish are what a room "
+        "reaches for when it has run out of things that are actually here.",
         "The camera itself is never in the frame. `handheld` and `we push in` "
         "are how you work; as tags they put a camera in her hands. Write the "
         "result instead — `depth_of_field`, `motion_blur`, `from_above`.",

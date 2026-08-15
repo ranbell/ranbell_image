@@ -2392,13 +2392,22 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     # weave took tag-writing over and nothing reconnected the ledger to it:
     # measured live, 「机にマグカップも置いて」put `ceramic_mug` in MUST APPEAR
     # and the woven bag came back with `rising_steam` and no cup.
+    # A ceiling here too. The ledger is meant to be short, but a planner that
+    # padded it once would otherwise force a dozen props into every take from
+    # then on — and the padding is exactly the part that does not belong to
+    # the place — the filler a quota produces, dropped somewhere it makes no
+    # sense at all.
+    restored = 0
     for item in _ledger_items(session.get("plan")):
+        if restored >= 6:
+            break
         key = identity.bare_tag(item)
         if not key or key in have or key in gone:
             continue
         if any(key in t or t in key for t in have):
             continue
         missing.append(key)
+        restored += 1
     # And the tags the seats wrote for the element each of them owns. They are
     # already sampler vocabulary — the whole point of the crew writing them —
     # so a weave that paraphrases them away is dropping the one thing that
