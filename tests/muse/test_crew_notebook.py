@@ -520,16 +520,39 @@ def test_crew_look_without_a_bar_is_all_prose():
     assert service.crew_look_tags(session) == []
 
 
-def test_crew_look_seeds_light_from_the_plan():
+def test_the_plans_light_lands_in_the_notebook():
+    """光はノートの正本フィールドに入る。crew_look は照明席の作り方のほう。
+
+    主演撮りには構成席も照明席も居ないので、`light` が唯一の家になる。
+    """
     session = {
         "mode": "", "inputs": {"theme": "x", "locale": "ja", "crew_ids": ["actress"]},
         "plan": {"place": "classroom", "hour": "dusk", "light": "backlit, low sun"},
         "costume": {}, "craft": {}, "notebook": {},
     }
     service.sync_crew_notebook(session, force_scene=True)
-    assert service.crew_look(session)["LIGHT"] == "backlit, low sun"
-    # …そして scene は場所と時間だけになる。
+    assert notebook.of(session)["light"] == "backlit, low sun"
+    # …そして scene は場所と時間だけ。光は混ざらない。
     assert "backlit" not in notebook.of(session)["scene"]
+    # 二重管理しない: 種は crew_look ではなくノートへ。
+    assert "LIGHT" not in service.crew_look(session)
+
+
+def test_light_is_its_own_field_end_to_end():
+    """「逆光にして」が scene や atmosphere に紛れず、次のターンで消えない。"""
+    session = {"mode": "duet", "inputs": {"locale": "ja"}, "notebook": notebook.blank()}
+    nb = notebook.of(session)
+    notebook.apply_patch(nb, {"scene": "a classroom at dusk", "light": "backlit, hard rim"})
+    assert nb["light"] == "backlit, hard rim"
+    # 別のフィールドを書き換えても光は残る
+    notebook.apply_patch(nb, {"beat": "standing"})
+    assert nb["light"] == "backlit, hard rim"
+    # ノートの表示にも出るので、台本も主演も読める
+    assert "LIGHT:" in notebook.render(nb)
+    # 台本の出力（ラベル / JSON どちらでも）から取り込める
+    assert notebook.parse_scripter(
+        "INTENT: shot\nLIGHT: one lantern at floor level\nCLEAR_OPEN: no"
+    )["patch"]["light"] == "one lantern at floor level"
 
 
 def test_struck_items_never_re_enter_through_crew_look():

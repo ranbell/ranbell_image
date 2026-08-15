@@ -611,3 +611,28 @@ def test_w_actress_duet_prompt():
     assert "みなも" in text
     assert "かほ" in text
     assert "2girls" in crew.w_actress_duet_prompt(char_a, char_b, mode="prep")
+
+
+def test_the_duet_look_is_not_decided_by_a_room_that_is_not_there():
+    """主演撮りに班は居ない。居ない18人の平均で絵のルックが決まっていた。
+
+    `_crew_ids` は crew_ids が空のとき既定プリセットに落ちるので、standard の
+    配役をいじると二人芝居の絵が動く、という結び付き方をしていた。
+    """
+    from app.muse import crew
+
+    def duet(**inputs):
+        return {"mode": "duet", "inputs": {"locale": "ja", **inputs},
+                "notebook": {}, "craft": {}}
+
+    assert service._style(duet()) == crew.NEUTRAL_LOOK
+    assert service._style(duet(look="flat")) == "flat anime cel shading"
+    assert service._style(duet(style="水彩っぽく")) == "水彩っぽく"
+
+    # 班の配役を丸ごと差し替えても、主演撮りは動かない。
+    original = crew.PRESETS["standard"][:]
+    try:
+        crew.PRESETS["standard"] = crew.resolve_crew(preset="photoreal")
+        assert service._style(duet()) == crew.NEUTRAL_LOOK
+    finally:
+        crew.PRESETS["standard"] = original

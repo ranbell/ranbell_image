@@ -13,6 +13,12 @@ from typing import Any
 SHOT_KEYS = (
     "atmosphere",
     "scene",
+    # Where the light comes from and how hard it is. Its own field because it is
+    # its own decision: the crewed studio has a seat that owns exposure and a
+    # PLAN line that owns the intent, and 主演撮り had neither — 「逆光にして」
+    # could only land inside scene or atmosphere, both of which are rewritten
+    # for other reasons, so it was gone again a turn later.
+    "light",
     "frame",
     "wearing",
     "beat",
@@ -31,6 +37,7 @@ def blank(partner: bool = False) -> dict[str, Any]:
     nb = {
         "atmosphere": "",
         "scene": "",
+        "light": "",
         "frame": "",
         "wearing": "",
         "beat": "",
@@ -68,7 +75,7 @@ def of(session: dict[str, Any]) -> dict[str, Any]:
 
 def has_shot(nb: dict[str, Any]) -> bool:
     return any(str(nb.get(k) or "").strip() for k in (
-        "scene", "frame", "wearing", "beat", "atmosphere",
+        "scene", "frame", "wearing", "beat", "atmosphere", "light",
     ))
 
 
@@ -78,6 +85,7 @@ def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
     lines = [
         f"ATMOSPHERE:\n{str(nb.get('atmosphere') or '').strip() or '(empty)'}",
         f"SCENE:\n{str(nb.get('scene') or '').strip() or '(empty)'}",
+        f"LIGHT:\n{str(nb.get('light') or '').strip() or '(empty)'}",
         f"FRAME:\n{str(nb.get('frame') or '').strip() or '(empty)'}",
         f"{a} WEARING:\n{str(nb.get('wearing') or '').strip() or '(empty)'}",
         f"{a} BEAT:\n{str(nb.get('beat') or '').strip() or '(empty)'}",
@@ -143,6 +151,9 @@ OPEN_MAX_CHARS = 240
 # SCENE, and the next turn's Muse digest pulled the shoot back.
 SCENE_MAX_CHARS = 120
 ATMOSPHERE_MAX_CHARS = 100
+# A key, a direction, and how hard it is. Longer than that and it has started
+# describing the room instead of lighting it.
+LIGHT_MAX_CHARS = 120
 FRAME_MAX_CHARS = 160
 WEARING_MAX_CHARS = 240
 BEAT_MAX_CHARS = 240
@@ -150,6 +161,7 @@ BEAT_MAX_CHARS = 240
 _SHOT_FIELD_CAPS: dict[str, int] = {
     "scene": SCENE_MAX_CHARS,
     "atmosphere": ATMOSPHERE_MAX_CHARS,
+    "light": LIGHT_MAX_CHARS,
     "frame": FRAME_MAX_CHARS,
     "wearing": WEARING_MAX_CHARS,
     "wearing_b": WEARING_MAX_CHARS,
@@ -767,7 +779,7 @@ _INTENT_RE = re.compile(
 )
 _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*("
-    r"ATMOSPHERE|SCENE|FRAME|WEARING|BEAT|WEARING_B|BEAT_B|"
+    r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING|BEAT|WEARING_B|BEAT_B|"
     r"VIBE|OPEN|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
     r"CRAFT_SCENE|CLEAR_OPEN|UNCHANGED"
     r")\s*[:：]\s*(.*)$"
@@ -782,6 +794,7 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "intent": {"type": "string", "enum": ["casual", "shot", "mixed", "recall"]},
         "atmosphere": {"type": "string"},
         "scene": {"type": "string"},
+        "light": {"type": "string"},
         "frame": {"type": "string"},
         "wearing": {"type": "string"},
         "beat": {"type": "string"},
@@ -884,7 +897,7 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
     }
     patch: dict[str, Any] = {}
     for key in (
-        "atmosphere", "scene", "frame", "wearing", "beat",
+        "atmosphere", "scene", "light", "frame", "wearing", "beat",
         "wearing_b", "beat_b", "vibe", "open",
     ):
         if key in unchanged:
@@ -971,6 +984,7 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
     key_map = {
         "atmosphere": "ATMOSPHERE",
         "scene": "SCENE",
+        "light": "LIGHT",
         "frame": "FRAME",
         "wearing": "WEARING",
         "beat": "BEAT",

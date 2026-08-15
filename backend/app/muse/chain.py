@@ -1001,6 +1001,12 @@ FIELD CONTRACTS (hard):
 - scene = short place + time. NEVER paste long prose.
 - atmosphere = mood/feeling only (tender, hushed, lonely). NEVER clock words,
   weather-as-hour, objects, or place nouns.
+- light = the key and where it comes from, as an absolute: "low sun from
+  behind, hard rim", "one lantern at floor level, everything else dark".
+  NEVER a direction of change — no "darker", no "brighter", no "more
+  dramatic": write the finished state that direction arrives at. Light is not
+  mood (that is atmosphere) and not a place (that is scene). It is its own
+  line, so a note about the light changes the light and nothing else.
 - frame / wearing / beat = short absolute phrases, not paragraphs.
 - frame names ONE crop: zoom/close/upper OR wide/full-body. Never both
   wide_shot and close_up in the same frame.
@@ -1081,6 +1087,10 @@ SAY IT IN TAGS THE SAMPLER KNOWS:
 THICKEN QUALITY, NOT INVENTORY:
 - Unpack what is already named: cloth (knit, drape, folds), light (how it
   falls, shadow length), air, camera, eyes and hands.
+- LIGHT is a notebook field now. Whatever it says is in this picture: put it
+  in the tags (`backlighting`, `rim_light`, `dappled_sunlight`, `dim_lighting`)
+  and let the prose say how it falls. A shot whose LIGHT reads "one lantern,
+  everything else dark" must not come back lit like an overcast afternoon.
 - If wearing says "thin cardigan", write cardigan + fabric + folds — not a hat.
 - If beat names a bench, the bench may be tagged. Do not add a vending machine.
 - Do not add clothes, hats, lanterns, animals, or furniture the notebook

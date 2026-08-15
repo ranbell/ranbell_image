@@ -117,8 +117,20 @@ def _style(session: dict[str, Any]) -> str:
     the cast decides: a room of lighting, colour and the producer pulls vivid, a
     room of the animation director and the supervisor pulls flat, and swapping
     one person moves the picture. That is the reason to let people pick a crew.
+
+    主演撮り has no cast at all. `_crew_ids` falls back to the default preset
+    when none is stored, so a two-hander's look was being decided by the
+    average taste of eighteen people who are not in the room — and editing the
+    standard roster silently moved every duet's picture. She gets the named
+    look if there is one, and the neutral base otherwise.
     """
     inputs = _inputs(session)
+    if is_duet(session):
+        return (
+            crew.look_style(str(inputs.get("look") or ""))
+            or str(inputs.get("style") or "").strip()
+            or crew.NEUTRAL_LOOK
+        )
     return crew.base_style_for(
         _crew_ids(session), inputs.get("style") or "", inputs.get("look") or "",
     )
@@ -1056,12 +1068,15 @@ def sync_crew_notebook(
     # migrate returns early and only the legacy carry-overs it still owns run.
     nb = notebook_mod.of(session)
     patch: dict[str, Any] = {}
-    # PLAN.LIGHT is the planner's intent and the gaffer executes it — the seat
-    # that owns LIGHT may rewrite this, nobody else may. Seeding it here is what
-    # keeps the light in the picture on a floor where the gaffer says nothing.
+    # The light now has a field of its own, and that is where PLAN's intent
+    # goes. Ownership, so the two do not fight:
+    #   notebook.light   — what the light IS. The showrunner and the planner
+    #                      move it; it is absolute and it survives every turn.
+    #   crew_look.LIGHT  — how the gaffer renders it. Craft, under the
+    #                      notebook, never contradicting it.
     light = str((session.get("plan") or {}).get("light") or "").strip()
-    if light and not str(crew_look(session).get("LIGHT") or "").strip():
-        crew_look(session)["LIGHT"] = light[:160]
+    if light and not str(nb.get("light") or "").strip():
+        patch["light"] = light[:notebook_mod.LIGHT_MAX_CHARS]
     scene_line = _plan_scene_line(session.get("plan"))
     if scene_line and (force_scene or not str(nb.get("scene") or "").strip()):
         patch["scene"] = scene_line

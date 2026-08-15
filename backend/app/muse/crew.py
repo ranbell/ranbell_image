@@ -1852,6 +1852,12 @@ LOOK_SUFFIX_TAGS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The look with nobody in the room: no taste to average, so neither axis tips.
+# 主演撮り uses this — see `service._style`. It is `_BASE_LOOK[(0, 0)]` by
+# construction, not by coincidence, so moving the table moves this with it.
+NEUTRAL_LOOK: str = _BASE_LOOK[(0, 0)]
+
+
 def look_tags(style: str) -> list[str]:
     """A base-look phrase → the tags that render it. Unknown phrases → []."""
     text = str(style or "").strip().lower()
