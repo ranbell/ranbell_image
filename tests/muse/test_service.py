@@ -431,14 +431,21 @@ def test_pick_responders_is_fixed_desk_not_keyword_router():
     # One voice per job-family; wardrobe leads; finisher stays off the note path.
     assert a[0] == "wardrobe"
     assert "finisher" not in a
-    assert "actress" in a or "beat" in a
-    assert len(a) <= 3
+    # The Lead has her own turn; the floor covers the crafts around her.
+    assert "actress" not in a
+    assert "beat" in a
+    # One voice per job-family, all inside a single packed call.
+    assert len(a) <= len(service._TALK_GROUPS)
+    # …and the mouth rotates within a family, so a floor of sixteen is not
+    # three people talking and thirteen watching.
+    rotated = service._pick_responders("服をコートにして", crew_ids, 1)
+    assert rotated != a
+    assert rotated[0] == "wardrobe"  # the family with one seat cannot rotate
     # No keyword→muse pattern table — note text must not be inspected.
     import inspect
     src = inspect.getsource(service._pick_responders)
     assert "re.search" not in src
     assert "pairs" not in src
-    assert "want" not in src
 
 
 @pytest.mark.asyncio

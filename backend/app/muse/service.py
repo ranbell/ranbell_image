@@ -1904,7 +1904,7 @@ async def start_table(
         )
 
     rest = _writing_seats(cast, without=OPENING_ROLES)
-    pack = _pack_speakers(rest)
+    pack = _pack_speakers(rest, int(session.get("crew_talk_index") or 0))
     if pack:
         theme = str(_inputs(session).get("theme") or "").strip()
         # The Lead already spoke in the opening craft pass (OPENING_SEQUENCE),
@@ -1975,7 +1975,7 @@ async def run_full_table(
     ) or _last_lead_say(session)
     await session_db.save(db, session, publish=False)
     # Packed talk for the rest of the floor — not N craft rewrites.
-    pack = _pack_speakers(seats)
+    pack = _pack_speakers(seats, int(session.get("crew_talk_index") or 0))
     await _run_crew_table_talk(
         ollama, session, pack or seats[:1],
         note=note or str(_inputs(session).get("theme") or "full table"),
@@ -3856,9 +3856,10 @@ async def post_chat(
     # go first, and they get the note too — a seat cast halfway through is
     # usually cast *because* of the note.
     fresh = newcomers(session, cast)
+    beat_index = int(session.get("crew_talk_index") or 0)
     responders = [
         m for m in fresh + [
-            r for r in _pick_responders(text, cast) if r not in fresh
+            r for r in _pick_responders(text, cast, beat_index) if r not in fresh
         ]
         # The Lead has her own turn now; a seat listed twice speaks twice.
         if crew.role_of(m) != "actress"
@@ -3934,10 +3935,17 @@ MAX_CATCHUP = 2
 # was through the moderator prompt: no voice block, no memory, no ASIDE, no
 # CARD, and `_after_actress_spoke` never fired. She gets her own turn
 # (`_run_crew_lead_turn`), the same one 主演撮り uses.
+#
+# Four voices, still ONE call: the pack costs a call, not a speaker, so the
+# floor is grouped by what the seats argue about rather than by what fits.
+# Within a group the turn rotates (`_pack_speakers`) — one fixed pick per group
+# meant the gaffer, the palette and the prop shop never spoke on a note, and
+# with CREW LOOK that also means their slot never gets an owner's line.
 _TALK_GROUPS: tuple[tuple[str, ...], ...] = (
     ("wardrobe",),
     ("beat", "spine", "cutout"),
-    ("lens", "gaffer", "propshop", "faces"),
+    ("lens", "gaffer"),
+    ("propshop", "palette", "weather", "faces"),
 )
 
 
@@ -3947,29 +3955,33 @@ def newcomers(session: dict[str, Any], crew_ids: list[str]) -> list[str]:
     return [m for m in _writing_seats(crew_ids) if m not in already][:MAX_CATCHUP]
 
 
-def _pack_speakers(crew_ids: list[str]) -> list[str]:
-    """One voice per job-family from the given cast slice."""
+def _pack_speakers(crew_ids: list[str], index: int = 0) -> list[str]:
+    """One voice per job-family from the given cast slice.
+
+    ``index`` rotates who holds each family's mouth this beat, so a floor of
+    sixteen is not three people talking and thirteen watching.
+    """
     ordered: list[str] = []
     for group in _TALK_GROUPS:
-        pick = next(
-            (m for r in group if (m := _cast_in_role(crew_ids, r))),
-            None,
-        )
-        if pick and pick not in ordered:
+        seated = [m for r in group if (m := _cast_in_role(crew_ids, r))]
+        if not seated:
+            continue
+        pick = seated[int(index) % len(seated)]
+        if pick not in ordered:
             ordered.append(pick)
     if ordered:
         return ordered
     return [crew_ids[0]] if crew_ids else []
 
 
-def _pick_responders(note: str, crew_ids: list[str]) -> list[str]:
+def _pick_responders(note: str, crew_ids: list[str], index: int = 0) -> list[str]:
     """One voice per job-family for the packed table-talk turn.
 
     Do NOT branch on mood keywords. Scripter owns TAGS; seats only talk.
     Finisher / grade stay off the note path (densify / quality fluff).
     """
     _ = note
-    return _pack_speakers(crew_ids)
+    return _pack_speakers(crew_ids, index)
 
 
 _SPEAKER_BLOCK_RE = re.compile(
@@ -4109,6 +4121,7 @@ async def _run_crew_table_talk(
     """One LLM call: similar jobs speak in one packed turn (SAY only)."""
     if not speakers or ollama is None:
         return []
+    session["crew_talk_index"] = int(session.get("crew_talk_index") or 0) + 1
     inputs = _inputs(session)
     locale = str(inputs.get("locale") or "ja")
     sid = session["session_id"]
