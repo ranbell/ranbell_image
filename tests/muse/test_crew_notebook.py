@@ -520,3 +520,94 @@ def test_struck_items_never_re_enter_through_crew_look():
         session, "propshop:takarabako", "a parasol leaning on the bench",
     )
     assert "PROPS" not in service.crew_look(session)
+
+
+# ── struck は「いま写っているもの」を締め出してはいけない ──────────────────
+def test_struck_never_holds_what_the_shot_now_says():
+    """立ち上がった後にまた座れる。struck は追記専用の墓場ではない。"""
+    session = {"mode": "", "inputs": {"locale": "ja"}, "notebook": notebook.blank()}
+    nb = notebook.of(session)
+    notebook.apply_patch(nb, {"beat": "sitting on the bench", "wearing": "sailor uniform, straw hat"})
+    # 立ち上がる → sitting が struck に入る
+    notebook.record_struck_tokens(session, prev="sitting on the bench", new="standing", min_len=4)
+    notebook.apply_patch(nb, {"beat": "standing, holding the hem"})
+    assert "sitting" in notebook.struck_tokens(session)
+    # 帽子を取る → straw_hat も struck
+    notebook.record_struck_from_wearing(
+        session, prev_wearing="sailor uniform, straw hat", new_wearing="sailor uniform",
+    )
+    notebook.apply_patch(nb, {"wearing": "sailor uniform"})
+    assert "straw_hat" in notebook.struck_tokens(session)
+    # また座らせたら、sitting は締め出しから外れる（帽子は外れたまま）
+    notebook.apply_patch(nb, {"beat": "sitting on the floor"})
+    live = notebook.struck_tokens(session)
+    assert "sitting" not in live
+    assert "straw_hat" in live
+    assert "sitting" not in " ".join(notebook.live_struck(session))
+
+
+def test_struck_does_not_mint_grammar_pairs():
+    """文をまたいだ語のペアは物の名前ではない。"""
+    toks = notebook.wearing_tokens(
+        "sitting on the wooden bench while staring at nothing",
+    )
+    assert "wooden_bench" in toks
+    for junk in ("on_the", "the_wooden", "while_staring", "at_nothing", "bench_while"):
+        assert junk not in toks
+
+
+def test_theme_never_seeds_the_mood_field():
+    """テーマは場所も服も含む日本語文。atmosphere は英語の気分だけ。"""
+    session = {
+        "mode": "",
+        "inputs": {"theme": "放課後の教室。セーラー服。", "locale": "ja", "crew_ids": ["actress"]},
+        "plan": {"place": "classroom", "hour": "dusk"},
+        "costume": {"garments": "top=blazer"}, "craft": {}, "notebook": {},
+    }
+    service.sync_crew_notebook(session, force_scene=True, activate=True)
+    assert not str(notebook.of(session).get("atmosphere") or "").strip()
+
+
+def test_only_clothes_are_struck_not_place_or_pose(monkeypatch):
+    """場所や姿勢の語を struck に入れない（入れると次の指示を自分で塞ぐ）。"""
+    import inspect
+    src = inspect.getsource(service._run_duet_scripter)
+    # wearing からの記録は残す。scene/beat/frame からの記録は無い。
+    assert "record_struck_from_wearing" in src
+    assert "prev=prev_scene" not in src
+    assert "prev=prev_beat" not in src
+    assert "prev=prev_frame" not in src
+
+
+def test_weave_cannot_leave_a_worn_garment_out_of_the_tags():
+    """ノートが着せている服は必ずサンプラーまで届く。"""
+    session = {
+        "mode": "", "session_id": "s-1", "inputs": {"locale": "ja", "framing": "auto"},
+        "notebook": notebook.blank(), "craft": {}, "character": {},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "sailor uniform, straw hat, knit cardigan",
+        "beat": "sitting", "scene": "a bench at dusk",
+    })
+    ok = service._apply_compiled_craft(
+        session, "1girl, sailor_uniform, knit_cardigan, sitting, bench", "prose",
+    )
+    assert ok
+    tags = str((session.get("craft") or {}).get("tags") or "")
+    assert "straw_hat" in tags, tags
+    # すでに入っている服を二重に足さない。
+    assert tags.count("knit_cardigan") == 1
+
+
+def test_removed_garment_is_not_put_back_by_coverage():
+    """脱がせた服は復活させない（drop_banned の抜け道を作らない）。"""
+    session = {
+        "mode": "", "inputs": {"locale": "ja"}, "notebook": notebook.blank(),
+        "craft": {}, "character": {}, "banned": ["straw_hat"],
+    }
+    notebook.apply_patch(notebook.of(session), {"wearing": "sailor uniform"})
+    notebook.record_struck_from_wearing(
+        session, prev_wearing="sailor uniform, straw hat",
+        new_wearing="sailor uniform",
+    )
+    assert service._missing_wearing_tags(session, "1girl, sailor_uniform") == []

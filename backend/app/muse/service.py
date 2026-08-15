@@ -1046,10 +1046,12 @@ def sync_crew_notebook(
     wearing_line = _costume_wearing_line(session.get("costume"))
     if wearing_line and (force_wearing or not str(nb.get("wearing") or "").strip()):
         patch["wearing"] = wearing_line
-    if not str(nb.get("atmosphere") or "").strip():
-        theme = str(_inputs(session).get("theme") or "").strip()
-        if theme:
-            patch["atmosphere"] = theme[:80]
+    # atmosphere is mood, in English, and nothing else — no clock, no objects,
+    # no place nouns (`chain.SCRIPTER_SYSTEM` field contracts). The raw theme
+    # was seeded straight into it, so a Japanese line naming a place and a
+    # garment sat in the mood field and went into every weave — measured live,
+    # for four turns, until the scripter happened to rewrite it. The theme
+    # reaches the models on its own (`_theme_for_models`); it is not a mood.
     if not str(nb.get("frame") or "").strip():
         framing = _framing(_inputs(session))
         if framing and framing != "auto":
@@ -2286,6 +2288,36 @@ def _bond_and_taste_from_snapshot(session: dict[str, Any]) -> tuple[dict[str, st
     return bond, taste
 
 
+def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
+    """Garments the notebook says she has on that the woven tags forgot.
+
+    The weave is a full replace built from the notebook, and it drops things:
+    measured live, WEARING read `… , straw_hat` and the woven bag came back
+    with the uniform and no hat, so the take went out bare-headed one turn
+    after the showrunner asked for the hat. The notebook is the shot — every
+    garment in it has to reach the sampler. Struck and refused items are not
+    put back (that is the one way past `drop_banned`; see `_ensure_garments`).
+    """
+    nb = notebook_mod.of(session)
+    have = set(identity.tag_names(tags))
+    have |= {t for tag in have for t in notebook_mod.wearing_tokens(tag)}
+    gone = set(banned_tags(session)) | notebook_mod.struck_tokens(session)
+    missing: list[str] = []
+    # One garment per comma item, the way WEARING is written. Token-by-token
+    # would staple `cream_ribbed` and `ribbed_turtleneck` next to a
+    # `turtleneck_sweater` the weave already had.
+    for item in re.split(r"[,，、;]", str(nb.get("wearing") or "")):
+        tokens = notebook_mod.wearing_tokens(item)
+        if not tokens or tokens & gone:
+            continue
+        if tokens & have:
+            continue
+        tag = re.sub(r"\s+", "_", item.strip().lower()).strip("_")
+        if tag and len(tag) >= 3:
+            missing.append(tag)
+    return missing
+
+
 def _apply_compiled_craft(
     session: dict[str, Any], tags: str, craft_scene: str,
 ) -> bool:
@@ -2307,6 +2339,10 @@ def _apply_compiled_craft(
     craft = session.setdefault("craft", {})
     before_tags = str(craft.get("tags") or "")
     before_scene = str(craft.get("scene") or "")
+    missing = _missing_wearing_tags(session, tags)
+    if missing:
+        logger.info("[muse] weave forgot worn garments: %s", ", ".join(missing))
+        tags = ", ".join([t for t in tags.split(",") if t.strip()] + missing)
     craft["tags"] = tags
     craft["scene"] = scene
     craft["pose_intent"] = str((notebook_mod.of(session).get("beat") or ""))[:240]
@@ -2370,7 +2406,13 @@ def _theme_for_models(session: dict[str, Any]) -> str:
 
 
 def _struck_line(session: dict[str, Any]) -> str:
-    items = [str(s).strip() for s in (session.get("struck") or []) if str(s).strip()]
+    """What the models are told never to restore.
+
+    Pruned against the live notebook: telling the scripter that `sitting` is
+    struck while BEAT reads `sitting on the bench` is a contradiction it has to
+    resolve, and it resolves it by leaving the field alone.
+    """
+    items = [s for s in notebook_mod.live_struck(session) if str(s).strip()]
     return ", ".join(items[:40])
 
 
@@ -2535,16 +2577,20 @@ async def _run_duet_scripter(
             session, prev_wearing=prev_wearing_b,
             new_wearing=str(nb.get("wearing_b") or ""),
         )
-    if not fold:
-        notebook_mod.record_struck_tokens(
-            session, prev=prev_scene, new=str(nb.get("scene") or ""), min_len=4,
-        )
-        notebook_mod.record_struck_tokens(
-            session, prev=prev_beat, new=str(nb.get("beat") or ""), min_len=4,
-        )
-        notebook_mod.record_struck_tokens(
-            session, prev=prev_frame, new=str(nb.get("frame") or ""), min_len=4,
-        )
+    # Only clothes are struck. `struck` means "never restore this", which is
+    # what a garment the showrunner took off needs and what a place, a pose and
+    # a crop must never get: they come and go by nature, and the weave rebuilds
+    # the whole tag bag from the notebook every take anyway, so the live
+    # notebook is already the authority on where she is and what she is doing.
+    #
+    # Measured live: a scene line had absorbed the pose — it read "<place>,
+    # standing by the fence, late afternoon". The next compile shortened that
+    # line, `standing` left scene, and the word went
+    # into struck. From then on the scripter was told never to restore
+    # `standing` — so 「立って」 could not be obeyed, on that turn or any later
+    # one. Props keep their own permanence through the planner's ledger
+    # (`strike_dropped_props`), which strikes by name rather than by token.
+    _ = (prev_scene, prev_beat, prev_frame)
 
     session["notebook"] = nb
     session["standing"] = list(nb.get("standing") or [])

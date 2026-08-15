@@ -236,7 +236,13 @@ def wearing_tokens(text: str) -> set[str]:
         out |= set(_TOKEN_RE.findall(raw))
         words = re.findall(r"[a-z][a-z0-9]+", raw)
         for i in range(len(words) - 1):
-            out.add(f"{words[i]}_{words[i + 1]}")
+            pair = (words[i], words[i + 1])
+            # `straw hat` is a garment; `the metal`, `while staring`, `on the`
+            # are grammar. Pairing across a function word never names a thing,
+            # and these are read back as items that must never return.
+            if pair[0] in _STRUCK_NOISE or pair[1] in _STRUCK_NOISE:
+                continue
+            out.add(f"{pair[0]}_{pair[1]}")
     return out
 
 
@@ -276,7 +282,25 @@ def set_open_choices(nb: dict[str, Any], choices: list[str]) -> dict[str, Any]:
     return nb
 
 
+def shot_tokens(nb: dict[str, Any]) -> set[str]:
+    """Everything the shot currently says, as tokens."""
+    out: set[str] = set()
+    for key in SHOT_KEYS:
+        out |= wearing_tokens(str(nb.get(key) or ""))
+    return out
+
+
 def struck_tokens(session: dict[str, Any]) -> set[str]:
+    """What must not come back — minus whatever the shot now says.
+
+    `struck` is append-only, and it is read as "never restore this". That is
+    right for a garment the showrunner took off and wrong for everything that
+    legitimately comes and goes: stand up and `sitting` is struck, so the next
+    「座って」 is fighting a filter, and `filter_weave_tags` strips the very
+    tag the notebook just asked for. The notebook is the shot — anything it
+    currently names is by definition not struck.
+    """
+    live = shot_tokens(of(session)) if isinstance(session, dict) else set()
     out: set[str] = set()
     for item in session.get("struck") or []:
         s = str(item or "").strip()
@@ -284,12 +308,28 @@ def struck_tokens(session: dict[str, Any]) -> set[str]:
             continue
         out.add(s.lower().replace(" ", "_"))
         out |= wearing_tokens(s)
-    return {t for t in out if len(t) >= 3}
+    return {t for t in out if len(t) >= 3 and t not in live}
+
+
+def live_struck(session: dict[str, Any]) -> list[str]:
+    """The struck list as shown to a model: same pruning, original wording."""
+    live = shot_tokens(of(session)) if isinstance(session, dict) else set()
+    out: list[str] = []
+    for item in session.get("struck") or []:
+        s = str(item or "").strip()
+        if not s:
+            continue
+        key = s.lower().replace(" ", "_")
+        if key in live or (wearing_tokens(s) & live):
+            continue
+        out.append(s)
+    return out
 
 
 _STRUCK_NOISE = {
     "and", "with", "the", "her", "his", "she", "for", "from", "over", "under",
-    "on", "at", "in", "of", "to", "a", "an",
+    "on", "at", "in", "of", "to", "a", "an", "while", "nothing", "into",
+    "onto", "that", "this", "its", "out", "off", "up", "down", "by",
 }
 
 
