@@ -208,3 +208,87 @@ def test_person_cards_expose_vibe_and_shoot_style():
     assert "ROOM VIBE" in prompt or "やさしい" in prompt
     assert "厳しい編集者" not in crew.MUSES["ink:ipponsen"]["voice_ja"]
     assert "即却下" not in crew.MUSES["ink:ipponsen"]["voice_ja"]
+
+
+# ── 掛け合いと主演（f27ef7b の会話パック化で失われたもの） ──────────────────
+def test_pack_never_seats_the_lead():
+    """主演はパックに入らない — 自分のターンを持つ。"""
+    from app.muse import crew
+    cast = crew.resolve_crew(preset="standard")
+    assert any(crew.role_of(m) == "actress" for m in cast), "cast must hold the Lead"
+    pack = service._pack_speakers(cast)
+    assert pack, "the floor still speaks"
+    assert all(crew.role_of(m) != "actress" for m in pack)
+
+
+def test_packed_prompt_carries_each_person_card():
+    """1行ロスターではなく、席ごとの声・口調・例セリフが入る。"""
+    from app.muse import crew
+    speakers = ["wardrobe:shiwa", "spine:bane", "gaffer:gyakkou"]
+    prompt = crew.table_talk_system_prompt(
+        speakers, base_style="anime", locale="ja",
+        preset_id="standard", seed="sess-1", lead_name="花",
+    )
+    for mid in speakers:
+        assert f"`{mid}`" in prompt
+        assert crew.MUSES[mid]["voice_ja"] in prompt
+        assert crew.MUSES[mid]["line_ja"] in prompt
+        assert crew._pick_say_example(mid, "sess-1") in prompt
+    # 反応の契約（名指し・エコー禁止・主演に向けて話す）
+    assert "names the person before them" in prompt
+    assert "echo is not a reaction" in prompt
+    assert "花" in prompt
+
+
+@pytest.mark.asyncio
+async def test_crew_note_gives_the_lead_her_own_voice(monkeypatch):
+    """ノート1回で、主演がSAYと独り言(ASIDE)を出し、班はそれに反応する。"""
+    from app.muse import crew
+
+    class LeadOllama(NotebookOllama):
+        def generate_text_stream(self, prompt, **kw):
+            system = str(kw.get("system") or "")
+            if "ASIDE:" in system:
+                self.calls.append({**kw, "prompt": prompt})
+
+                async def _stream():
+                    yield {"type": "token", "text": (
+                        "SAY: はい、羽織りますね。\n\n"
+                        "ASIDE: ……袖、ちょっと長いかも。\n\n"
+                        "CARD:\nBEAT: sitting, pulling the cardigan closed\n"
+                    )}
+                return _stream()
+            return super().generate_text_stream(prompt, **kw)
+
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["status"] = "chat"
+    session["table_stage"] = "full"
+    session["notebook_craft"] = True
+    session["spoken"] = list(service._crew_ids(session))
+    session["craft"] = {
+        "prompt": "1girl, rooftop", "tags": "1girl, rooftop",
+        "scene": "rooftop", "pose_intent": "waiting",
+    }
+    ollama = LeadOllama()
+    packed: list[list[str]] = []
+
+    async def _fake_table_talk(_ollama, _session, speakers, **kw):
+        packed.append(list(speakers))
+        assert "羽織りますね" in str(kw.get("lead_say") or ""), \
+            "the floor must be handed her actual line"
+        return []
+
+    monkeypatch.setattr(service, "_run_crew_table_talk", _fake_table_talk)
+
+    out = await service.post_chat(
+        db, ollama, None, None, session, "カーディガン羽織って",
+    )
+
+    lead = crew.DEFAULT_MEMBER["actress"]
+    said = [m for m in out["chat"] if m.get("muse_id") == lead]
+    assert any(m.get("kind") != "banter" for m in said), "主演のSAYが無い"
+    assert any(m.get("kind") == "banter" for m in said), "主演の独り言(ASIDE)が無い"
+    assert packed and all(
+        crew.role_of(m) != "actress" for m in packed[0]
+    ), "主演がパックにも入っている（二重発話）"

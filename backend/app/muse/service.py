@@ -1599,6 +1599,18 @@ def _cast_in_role(crew_ids: list[str], role: str) -> str | None:
     return next((m for m in crew_ids if crew.role_of(m) == role), None)
 
 
+def _last_lead_say(session: dict[str, Any]) -> str:
+    """Her most recent spoken line — what the floor is answering."""
+    for msg in reversed(session.get("chat") or []):
+        if (
+            msg.get("role") == "muse"
+            and crew.role_of(str(msg.get("muse_id") or "")) == "actress"
+            and msg.get("kind") != "banter"
+        ):
+            return str(msg.get("text") or "")
+    return ""
+
+
 def _pick_banter_reactor(
     session: dict[str, Any], crew_ids: list[str], *,
     current: str, previous: str | None, index: int,
@@ -1841,13 +1853,14 @@ async def start_table(
     pack = _pack_speakers(rest)
     if pack:
         theme = str(_inputs(session).get("theme") or "").strip()
-        talk_msgs = await _run_crew_table_talk(
+        # The Lead already spoke in the opening craft pass (OPENING_SEQUENCE),
+        # so the rest of the floor answers her line from there.
+        await _run_crew_table_talk(
             ollama, session, pack,
             note=theme or "opening pass",
             screening="", cfg=cfg, images=None,
+            lead_say=_last_lead_say(session),
         )
-        if any(crew.role_of(m.get("muse_id") or "") == "actress" for m in talk_msgs):
-            await _after_actress_spoke(db, session)
         await session_db.save(db, session, publish=False)
         await _run_crew_scripter(
             db, ollama, session, theme or "opening pass", cfg=cfg,
@@ -1901,15 +1914,19 @@ async def run_full_table(
 
     images = await board_images(db, session)
     screening = _screening_note(session) if images else ""
+    # She has seen the still too, and this note is the first thing the whole
+    # floor meets about — she answers it before they start reworking it.
+    lead_say = await _run_crew_lead_turn(
+        db, ollama, session, note, cfg=cfg,
+    ) or _last_lead_say(session)
+    await session_db.save(db, session, publish=False)
     # Packed talk for the rest of the floor — not N craft rewrites.
     pack = _pack_speakers(seats)
-    talk_msgs = await _run_crew_table_talk(
+    await _run_crew_table_talk(
         ollama, session, pack or seats[:1],
         note=note or str(_inputs(session).get("theme") or "full table"),
-        screening=screening, cfg=cfg, images=images,
+        screening=screening, cfg=cfg, images=images, lead_say=lead_say,
     )
-    if any(crew.role_of(m.get("muse_id") or "") == "actress" for m in talk_msgs):
-        await _after_actress_spoke(db, session)
     session["table_stage"] = "full"
     session_db.log(session, "table", f"full · talk {len(pack or seats[:1])}/{len(seats)}")
     await session_db.save(db, session, publish=False)
@@ -2806,8 +2823,16 @@ def _duet_user_prompt(
                 "- CARD BEAT is the body action they just asked for (absolute). "
                 "A short pose line replaces the old beat.",
                 "- You may play-act an OPEN proposal in SAY before it is locked.",
-                "- PITCH only when a real picture fork is open, OPEN is empty, "
-                "and they did not just pick. No interview chains. Not every turn.",
+                # 制作スタッフ: the crew proposes picture forks at the table, so
+                # a PITCH from her here is a second voice asking the same
+                # question in the same turn.
+                (
+                    "- PITCH only when a real picture fork is open, OPEN is empty, "
+                    "and they did not just pick. No interview chains. Not every turn."
+                    if is_duet(session) else
+                    "- Do not offer a PITCH. The crew proposes the forks; you play "
+                    "the moment and answer the Showrunner."
+                ),
                 "- Past shoots: from memories / CITED / PRIOR SESSION LOG. "
                 "Use known details. Soft-miss『そこまでは…』only for facts you "
                 "were not given.",
@@ -2967,9 +2992,16 @@ def _absorb_duet_pose(session: dict[str, Any], card: str) -> None:
 
 async def _duet_talk(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
-    prep: bool = False,
+    prep: bool = False, pitch: bool = True, fold: bool = True,
 ) -> dict[str, Any]:
-    """Conversation only — Muse writes SAY; craft comes from the scripter."""
+    """Conversation only — Muse writes SAY; craft comes from the scripter.
+
+    Also the Lead's turn in 制作スタッフ (`_run_crew_lead_turn`): the crew room
+    wants the same person — voice, memory, ASIDE, CARD — not a seat in a
+    packed roster. There she does not offer picture forks (`pitch=False`; the
+    crew has its own way of proposing), and the fold pass is scheduled by the
+    caller (`fold=False`) so it runs after the whole table has spoken.
+    """
     inputs = _inputs(session)
     sid = session["session_id"]
     lead = crew.DEFAULT_MEMBER["actress"]
@@ -2991,7 +3023,7 @@ async def _duet_talk(
     )
 
     try:
-        say, raw_turns, blind, aside, card, pitch = await chain.run_duet_talk(
+        say, raw_turns, blind, aside, card, raw_pitch = await chain.run_duet_talk(
             ollama,
             user_prompt=_duet_user_prompt(
                 session, text, prep=prep,
@@ -3030,7 +3062,7 @@ async def _duet_talk(
     )
     # CARD is a memo. Script is the only notebook writer — after she speaks,
     # a fold pass may add uncontradicted CARD/SAY body action to beat.
-    choices = notebook_mod.parse_pitch_choices(pitch)
+    choices = notebook_mod.parse_pitch_choices(raw_pitch) if pitch else []
     if choices and not session.get("commit_pitch"):
         notebook_mod.set_open_choices(notebook_mod.of(session), choices)
         session["notebook"] = notebook_mod.of(session)
@@ -3044,7 +3076,7 @@ async def _duet_talk(
     session["w_b_leads"] = False
     session["commit_pitch"] = False
     await _after_actress_spoke(db, session)
-    if uses_notebook(session) and fresh_card:
+    if fold and uses_notebook(session) and fresh_card:
         await _fold_muse_after_talk(
             db, ollama, session, cfg=cfg, user_text=text,
         )
@@ -3766,7 +3798,13 @@ async def post_chat(
     # go first, and they get the note too — a seat cast halfway through is
     # usually cast *because* of the note.
     fresh = newcomers(session, cast)
-    responders = fresh + [m for m in _pick_responders(text, cast) if m not in fresh]
+    responders = [
+        m for m in fresh + [
+            r for r in _pick_responders(text, cast) if r not in fresh
+        ]
+        # The Lead has her own turn now; a seat listed twice speaks twice.
+        if crew.role_of(m) != "actress"
+    ]
     session["status"] = "discussing"
     cfg = await get_runtime_config(db)
     # The note is standing direction from here on, not a remark about one turn —
@@ -3784,14 +3822,17 @@ async def post_chat(
     images = await board_images(db, session)
     screening = _screening_note(session) if images else ""
 
+    # She answers first, in her own voice — then the floor answers her.
+    lead_say = await _run_crew_lead_turn(db, ollama, session, text, cfg=cfg)
+    await session_db.save(db, session, publish=False)
+
     # Packed table talk: similar jobs share one LLM turn (SAY only). Scripter
     # owns TAGS afterward — no more 5× craft rewrites that wait a minute each.
-    talk_msgs = await _run_crew_table_talk(
+    await _run_crew_table_talk(
         ollama, session, responders,
         note=text, screening=screening, cfg=cfg, images=images,
+        lead_say=lead_say,
     )
-    if any(crew.role_of(m.get("muse_id") or "") == "actress" for m in talk_msgs):
-        await _after_actress_spoke(db, session)
     await session_db.save(db, session, publish=False)
 
     # Scripter compiles craft from notebook + this conversation.
@@ -3819,9 +3860,16 @@ async def post_chat(
 MAX_CATCHUP = 2
 
 # Similar jobs share one voice slot. One LLM call; Scripter compiles craft.
+#
+# The Lead is NOT in here. She used to share a slot with beat/spine, and on the
+# standard preset the beat seat is listed first — so the character the whole
+# session is about said nothing on note after note, and when she did speak it
+# was through the moderator prompt: no voice block, no memory, no ASIDE, no
+# CARD, and `_after_actress_spoke` never fired. She gets her own turn
+# (`_run_crew_lead_turn`), the same one 主演撮り uses.
 _TALK_GROUPS: tuple[tuple[str, ...], ...] = (
     ("wardrobe",),
-    ("actress", "beat", "spine"),
+    ("beat", "spine", "cutout"),
     ("lens", "gaffer", "propshop", "faces"),
 )
 
@@ -3897,10 +3945,36 @@ def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str]]:
     return []
 
 
+async def _run_crew_lead_turn(
+    db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
+) -> str:
+    """The Lead answers in her own voice, before the floor reacts to her.
+
+    This is `_duet_talk` — the same call 主演撮り makes — so she arrives with
+    her voice block, her diary and memories, a rotating stance, ASIDE (独り言)
+    and a CARD the scripter can fold. Packing her in with beat/spine is what
+    made her a job title instead of the person the shoot is about.
+    """
+    if ollama is None or not _cast_in_role(_crew_ids(session), "actress"):
+        return ""
+    before = len(session.get("chat") or [])
+    try:
+        await _duet_talk(
+            db, ollama, session, text, cfg=cfg, pitch=False, fold=False,
+        )
+    except MuseError:
+        logger.warning("[muse] crew lead turn failed; crew still talks", exc_info=True)
+        return ""
+    for msg in reversed((session.get("chat") or [])[before:]):
+        if msg.get("role") == "muse" and msg.get("kind") != "banter":
+            return str(msg.get("text") or "")
+    return ""
+
+
 async def _run_crew_table_talk(
     ollama, session: dict[str, Any], speakers: list[str], *,
     note: str, screening: str, cfg: dict[str, Any],
-    images: list[bytes] | None = None,
+    images: list[bytes] | None = None, lead_say: str = "",
 ) -> list[dict[str, Any]]:
     """One LLM call: similar jobs speak in one packed turn (SAY only)."""
     if not speakers or ollama is None:
@@ -3908,6 +3982,8 @@ async def _run_crew_table_talk(
     inputs = _inputs(session)
     locale = str(inputs.get("locale") or "ja")
     sid = session["session_id"]
+    lead_id = _cast_in_role(_crew_ids(session), "actress")
+    lead_name = _muse_display_name(session, lead_id) if lead_id else ""
     roster_lines: list[str] = []
     for mid in speakers:
         name = _muse_display_name(session, mid)
@@ -3921,6 +3997,7 @@ async def _run_crew_table_talk(
         speakers, character=session.get("character") or {},
         base_style=_style(session), locale=locale,
         preset_id=str(inputs.get("crew_preset") or ""),
+        seed=str(sid), lead_name=lead_name,
     )
     parts = [
         "CAST (speak in this order):\n" + "\n".join(roster_lines),
@@ -3930,6 +4007,13 @@ async def _run_crew_table_talk(
     if screening:
         parts.append(f"SCREENING:\n{screening}")
     parts.append(f"SHOWRUNNER NOTE:\n{note.strip()}")
+    # She spoke first this turn. Handing the floor her actual words is what
+    # makes this a table rather than three people talking past her.
+    if lead_say.strip():
+        parts.append(
+            f"{lead_name or 'THE LEAD'} JUST SAID (answer her — agree, tease, or "
+            f"push back; do not repeat her words):\n{lead_say.strip()[:600]}"
+        )
     parts.append("Each speaker reacts in voice. No TAGS. No SCENE. Scripter will compile.")
     user = "\n\n".join(parts)
     events.publish(sid, {

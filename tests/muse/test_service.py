@@ -46,16 +46,23 @@ class FakeOllama:
     def generate_text_stream(self, prompt, **kw):
         self.calls.append({**kw, "prompt": prompt})
         system = str(kw.get("system") or "")
-        # Match the packed moderator prompt only — craft seats mention
+        # Match the packed table prompt only — craft seats mention
         # "RECENT TABLE TALK" in their system text and must stay craft-shaped.
-        if "moderating a short TABLE TALK" in system:
+        if "LIVE TABLE on a photo shoot" in system:
             text = (
                 "SPEAKER: wardrobe\n"
                 "SAY: 衣装、いまのまま通します。\n\n"
-                "SPEAKER: actress\n"
-                "SAY: 了解、その空気で待ちます。\n\n"
+                "SPEAKER: beat\n"
+                "SAY: 衣装さん、その裾なら一拍だけ止めたいです。\n\n"
                 "SPEAKER: lens\n"
                 "SAY: 画角はそのまま寄せます。"
+            )
+        elif "ASIDE:" in system:
+            # The Lead's own turn (`_duet_talk`) — SAY + 独り言 + CARD.
+            text = (
+                "SAY: はい、そうしますね。\n\n"
+                "ASIDE: ……ちょっと、どきどきする。\n\n"
+                "CARD:\nBEAT: sitting, hands on knees\n"
             )
         else:
             text = (
@@ -541,7 +548,7 @@ class PlanningOllama(FakeOllama):
         system = str(kw.get("system") or "")
         plan = "settle the situation" in system.lower() \
             or "PLAN (WHERE, WHEN" in system
-        if "moderating a short TABLE TALK" in system:
+        if "LIVE TABLE on a photo shoot" in system:
             text = (
                 "SPEAKER: beat:ichibyou\n"
                 "SAY: この場所で一拍、決めます。\n"

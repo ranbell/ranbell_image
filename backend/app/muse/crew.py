@@ -1685,6 +1685,36 @@ def person_card_block(muse_id: str, *, locale: str = "ja") -> str:
     return "\n".join(lines)
 
 
+def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> str:
+    """One speaker's full person card inside the packed table-talk prompt.
+
+    A one-line roster (name + techniques) was what the packed turn used to get,
+    and it is why every seat came out sounding the same: the voice, the 口調,
+    the catchphrase and the example line are what make「重心」and「逆光」two
+    different mouths. They are cheap — three cards is a few hundred tokens —
+    and without them the pack is one narrator wearing three name tags.
+    """
+    mid = resolve_member(muse_id)
+    if mid not in MUSES:
+        return ""
+    m = MUSES[mid]
+    focus = ", ".join(m.get("techniques") or []) or str(m.get("role") or mid)
+    trait = trait_blurb(mid, locale=locale)
+    example = _pick_say_example(mid, seed)
+    return "\n".join(b for b in [
+        f"=== SPEAKER {index} — id `{mid}` ===",
+        f"WHO: {_who(m)}",
+        f"VOICE (EN): {m['voice']}",
+        f"口調 (JA): {m['voice_ja']}",
+        f'Catchphrase mindset: "{m["line"]}" / 「{m["line_ja"]}」',
+        person_card_block(mid, locale=locale),
+        f"TASTE: {trait}" if trait else "",
+        f"YOUR CORNER OF THE PICTURE: {focus}",
+        ("EXAMPLE SAY (match this energy, do not copy verbatim):\n" + example)
+        if example else "",
+    ] if b)
+
+
 def table_talk_system_prompt(
     speakers: list[str],
     *,
@@ -1692,46 +1722,62 @@ def table_talk_system_prompt(
     base_style: str = "",
     locale: str = "ja",
     preset_id: str = "",
+    seed: str = "",
+    lead_name: str = "",
 ) -> str:
-    """One packed turn: several seats speak; Scripter owns TAGS afterward."""
+    """One packed turn: several seats speak; Scripter owns TAGS afterward.
+
+    Packed for cost, not for flavour: each seat still arrives with its whole
+    person card, and the reaction contract below is the one `BANTER_OUTPUT`
+    and `system_prompt_for` use — the seats answer each other and the Lead
+    rather than filing three parallel reports.
+    """
     _ = character
     ja = str(locale or "ja").lower().startswith("ja")
-    lines: list[str] = []
-    for sid in speakers:
-        mid = resolve_member(sid)
-        if mid not in MUSES:
-            continue
-        m = MUSES[mid]
-        trait = trait_blurb(mid, locale=locale)
-        who = _who(m)
-        focus = ", ".join(m.get("techniques") or []) or m.get("role") or mid
-        lines.append(
-            f"- SPEAKER id `{mid}` — {who}; focus {focus}"
-            + (f"; card {trait}" if trait else "")
-        )
-    roster = "\n".join(lines) if lines else "- (empty)"
+    cards = [
+        card for i, sid in enumerate(speakers, start=1)
+        if (card := _packed_person_card(sid, i, locale=locale, seed=seed))
+    ]
+    roster = "\n\n".join(cards) if cards else "(empty)"
     style_line = str(base_style or "").strip()
     formation = preset_vibe_blurb(preset_id, locale=locale)
+    lead = str(lead_name or "").strip()
     return "\n".join(b for b in [
-        "You are moderating a short TABLE TALK on a generative-image crew.",
-        "Several seats speak in ONE reply. They organize the conversation —",
-        "they do NOT rewrite TAGS, SCENE, or the prompt.",
-        "A separate Scripter pass will compile craft after this talk.",
-        "Voices stay warm and distinctive — never harsh, never scolding.",
+        "You are running a LIVE TABLE on a photo shoot. In ONE reply you voice "
+        "SEVERAL crew members — different people, different mouths, talking to "
+        "each other in the same room.",
+        "They organize the conversation. They do NOT rewrite TAGS, SCENE, or the "
+        "prompt — a separate Scripter compiles craft after this talk.",
         "",
         f"FORMATION ROOM: {formation}" if formation else "",
-        f"Seats in this beat (speak in this order):\n{roster}",
         f"BASE LOOK: {style_line}" if style_line else "",
+        "",
+        "THE PEOPLE AT THE TABLE (speak in this order):",
+        roster,
+        "",
+        "HOW THEY TALK — this is a conversation, not three reports:",
+        "- Speaker 1 answers the Showrunner's note (and the Lead if she just spoke).",
+        "- Every speaker after that names the person before them and reacts: agree "
+        "and add, tease, or push back — then contribute ONE concrete thing from "
+        "their own corner that nobody has named yet.",
+        (f"- {lead} is the Lead standing in front of the camera. Talk TO her, not "
+         f"about her. Honour what she just said; never flatten her into a generic "
+         f"cute face.") if lead else
+        "- Talk to the Lead in front of the camera, not about her.",
+        "- Do NOT repeat the previous speaker's nouns, metaphors or turn of phrase. "
+        "An echo is not a reaction. If the last speakers all reached for the same "
+        "image, that image is finished — take the part of the picture still missing.",
+        "- No dry「了解」/「承知しました」. No empty praise. Have an opinion, then commit.",
+        "- The LAST speaker closes by answering the Showrunner directly.",
         "",
         "Output EXACTLY one block per speaker, in the given order:",
         "SPEAKER: <exact SPEAKER id>",
         "SAY: <one or two spoken sentences"
-        + (" in natural Japanese>" if ja else " in the showrunner's language>"),
+        + (" in natural Japanese, 口調どおり>" if ja else " in the showrunner's language>"),
         "",
-        "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists.",
+        "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists. No emoji.",
         "Do NOT invent wardrobe the Lead has not agreed to.",
-        "Keep each voice distinct; skip empty praise.",
-        "Let each seat's ROOM VIBE / HOW YOUR PICTURES LAND colour the banter.",
+        "Do NOT invent a new shot — you are reacting to the one on the table.",
     ] if b)
 
 
