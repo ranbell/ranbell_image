@@ -745,3 +745,39 @@ def test_fold_may_write_a_proposal_but_not_the_shot():
     from app.muse import chain
     assert "crew's lines from this turn" in chain.SCRIPTER_FOLD_NOTE
     assert "goes in `open` as a proposal" in chain.SCRIPTER_FOLD_NOTE
+
+
+def test_the_camera_is_not_in_the_picture():
+    """撮影台本の口調がそのまま被写体になるのを止める。
+
+    実セッション: ノートのどこにもカメラが無いのに、タグに `handheld_camera`、
+    散文が「The camera lingers in a close-up on Mio's face」で始まっており、
+    サンプラーは素直に彼女の手にカメラを描いた。
+    """
+    session = {
+        "mode": "", "session_id": "s-4", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(), "craft": {}, "character": {},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "beat": "standing, looking toward the port lights",
+        "wearing": "yellow sundress",
+    })
+    out = service._scrub_invented_tags(
+        session, "close_up, handheld_camera, 各務 みお, yellow_sundress, bokeh",
+    )
+    kept = [t.strip() for t in out.split(",")]
+    assert "handheld_camera" not in kept
+    assert "各務 みお" not in kept          # 日本語の名前はタグではない
+    assert kept == ["close_up", "yellow_sundress", "bokeh"]
+
+    # 総監督が本当にカメラを持たせたときは通す。
+    notebook.apply_patch(notebook.of(session), {"beat": "standing, holding a camera"})
+    assert "handheld_camera" in service._scrub_invented_tags(
+        session, "handheld_camera, close_up",
+    )
+
+
+def test_weave_is_told_the_camera_is_not_a_subject():
+    from app.muse import chain
+    assert "THE CAMERA IS NOT IN THE PICTURE" in chain.SCRIPTER_WEAVE_SYSTEM
+    assert "Never write her name" in chain.SCRIPTER_WEAVE_SYSTEM

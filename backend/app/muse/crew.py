@@ -1818,6 +1818,9 @@ def table_talk_system_prompt(
         "- RIGHT of `|`: one short clause in your own professional words. This "
         "is what the picture's prose is written from — it is where the feeling "
         "lives, so do not flatten it into a label.",
+        "The camera itself is never in the frame. `handheld` and `we push in` "
+        "are how you work; as tags they put a camera in her hands. Write the "
+        "result instead — `depth_of_field`, `motion_blur`, `from_above`.",
         "CRAFT is never a sentence about her. Never write another seat's slot. "
         "Never put clothes, pose, place or hour in CRAFT — those are the "
         "notebook's, and the Scripter owns them.",

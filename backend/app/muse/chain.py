@@ -1045,6 +1045,17 @@ SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
 quality of that inventory (light, optics, colour, air, cloth, finish) — never
 extra inventory. No theme, no chat, no photo.
 
+THE CAMERA IS NOT IN THE PICTURE:
+- You are describing the photograph, not the shoot. Never write "the camera"
+  as the thing doing something ("the camera lingers", "we push in"). Say what
+  the frame shows: "a close-up holds her face".
+- Never tag the apparatus — `handheld_camera`, `camera`, `viewfinder`,
+  `tripod`, `taking_picture`. Those put a camera in her hands. Distance,
+  angle and focus are `close-up`, `from_above`, `depth_of_field`,
+  `motion_blur`. Only tag a camera when the notebook says she is holding one.
+- Never write her name, in any language, as a tag. Tags are ASCII danbooru
+  names; who she is comes from her identity tags, not from the bag.
+
 SAY IT IN TAGS THE SAMPLER KNOWS:
 - Ordinary danbooru tags, underscored. `from_above` — not `overhead_shot`.
   `looking_at_viewer`, `backlighting`, `rim_light`, `depth_of_field`,

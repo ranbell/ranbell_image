@@ -2409,11 +2409,60 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     return missing
 
 
+# The apparatus is not in the picture. These are real danbooru tags and they
+# all mean "there is a camera in this image" — which is what the sampler drew.
+_APPARATUS_TAGS: frozenset[str] = frozenset({
+    "camera", "handheld_camera", "holding_camera", "camera_lens", "viewfinder",
+    "dslr", "film_camera", "instant_camera", "video_camera", "tripod",
+    "taking_picture", "photographing", "camera_flash", "shutter",
+})
+
+
+def _scrub_invented_tags(session: dict[str, Any], tags: str) -> str:
+    """Drop tags the sampler cannot use, and the camera it was never asked for.
+
+    Two things the weave writes because it is thinking like a film crew rather
+    than like a prompt. Measured on a live session whose notebook never
+    mentioned a camera anywhere:
+
+    - `handheld_camera` in the tag bag, and craft_scene opening "The camera
+      lingers in a close-up on Mio's face". To the crew "handheld" and "the
+      camera" describe how the shot is taken; to the sampler they describe an
+      object in the frame, so it put a camera in her hands. The apparatus is
+      only allowed when the notebook actually says she is holding one.
+    - `各務 みお` — the character's Japanese display name, as a tag. Danbooru
+      tags are ASCII; a name in kanji is a token spent on nothing.
+    """
+    nb = notebook_mod.of(session)
+    asked = " ".join(
+        str(nb.get(k) or "") for k in ("beat", "wearing", "beat_b", "wearing_b")
+    ).lower()
+    asked += " " + " ".join(str(x) for x in _ledger_items(session.get("plan")))
+    holds_camera = "camera" in asked
+    kept: list[str] = []
+    dropped: list[str] = []
+    for part in str(tags or "").split(","):
+        tag = part.strip()
+        if not tag:
+            continue
+        key = identity.bare_tag(tag)
+        if any(ord(ch) > 0x2E7F for ch in tag):
+            dropped.append(tag)
+            continue
+        if not holds_camera and key in _APPARATUS_TAGS:
+            dropped.append(tag)
+            continue
+        kept.append(tag)
+    if dropped:
+        logger.info("[muse] scrubbed non-prompt tags: %s", ", ".join(dropped[:12]))
+    return ", ".join(kept)
+
+
 def _apply_compiled_craft(
     session: dict[str, Any], tags: str, craft_scene: str,
 ) -> bool:
     """Full-replace craft from a scripter compile. Returns False if refused."""
-    tags = str(tags or "").strip()
+    tags = _scrub_invented_tags(session, str(tags or "").strip())
     scene = str(craft_scene or "").strip()
     if not tags and not scene:
         return False
