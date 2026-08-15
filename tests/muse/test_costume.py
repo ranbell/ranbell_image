@@ -243,9 +243,11 @@ def test_wardrobe_answers_every_note_and_dresses_her_first():
     dresser = service._cast_in_role(cast, "wardrobe")
     assert dresser and responders[0] == dresser    # dress her, then frame her
     assert len(responders) == len(set(responders))
-    # A cast with no wardrobe seat still answers.
-    trio = crew.resolve_crew(preset="trio")
-    assert service._pick_responders("x", trio)
+    # A cast with no wardrobe seat still answers. Every shipped crew has one
+    # now, so the cast without it is built by hand rather than named.
+    bare = crew.resolve_crew(crew_ids=["plan:madori", "beat:ichibyou"])
+    assert not service._cast_in_role(bare, "wardrobe")
+    assert service._pick_responders("x", bare)
 
 
 # ── the default outfit reaches Wardrobe alone, with its discard rule ────────

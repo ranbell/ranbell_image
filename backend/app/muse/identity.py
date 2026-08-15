@@ -542,10 +542,19 @@ def style_tags(style: str) -> list[str]:
     """The chosen look, as tags the sampler reads.
 
     A style is written for a person ("Cute 2D Anime Style"), so it arrives as a
-    phrase. Split it on commas and let each part stand as its own tag; a phrase
-    with no commas stays one tag with its spaces turned into underscores, which
-    is the shape every other tag in the prompt has.
+    phrase. When the phrase is one of the room's own looks, it has a known set
+    of rendering tags (`crew.LOOK_TAGS`) and those are what goes to the
+    sampler: `vivid anime illustration` as a single underscored token is a word
+    no checkpoint was trained on, and it was the only thing carrying the look.
+
+    Anything the Showrunner typed themselves is not in that table and keeps the
+    old behaviour — split on commas, one tag per part.
     """
+    from .crew import look_tags
+
+    known = look_tags(style)
+    if known:
+        return known
     out: list[str] = []
     for part in str(style or "").split(","):
         tag = _norm(part)

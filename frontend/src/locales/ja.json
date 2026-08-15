@@ -1335,29 +1335,21 @@
     "crewPreset": "撮影班",
     "crewPresetHint": "特色ある撮影班を選ぶ。会話はパック、タグはスクリプターが正本にする。",
     "presets": {
-      "trio": "チーム密室",
-      "quartet": "チーム四拍子",
       "standard": "チームフロア",
       "vivid": "チーム彩宴",
       "photoreal": "チームフィルム",
       "flat": "チームセル画",
-      "classic": "チーム王道",
       "bold": "チーム実験室",
       "calm": "チームパステル",
-      "everyone": "チーム大所帯",
       "custom": "カスタム班"
     },
     "presetLooks": {
-      "trio": "密室の少人数トーク",
-      "quartet": "少人数＋レンズ",
       "standard": "バランスの現場",
       "vivid": "色が先に来る宴",
       "photoreal": "映画のワンシーン",
       "flat": "セルとシルエット",
-      "classic": "大好きな王道",
       "bold": "少数精鋭の実験",
       "calm": "パステル風の写真",
-      "everyone": "全員集合の宴",
       "custom": "手組み"
     },
     "presetBlurbs": {

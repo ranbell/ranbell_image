@@ -2608,6 +2608,7 @@ async def _call_duet_scripter(
         card=str(session.get("muse_card") or "") if fold else "",
         struck=_struck_line(session),
         crew_look=crew_look_block(session),
+        room_leaning=_room_leaning(session) if mode == "weave" else "",
         directive=(
             chain.SCRIPTER_FOLD_NOTE if fold
             else chain.SCRIPTER_VERIFY_NOTE if verify
@@ -4325,6 +4326,23 @@ def crew_look_block(session: dict[str, Any]) -> str:
         if line:
             rows.append(f"{slot}: {line}")
     return "\n".join(rows)
+
+
+def _room_leaning(session: dict[str, Any]) -> str:
+    """What this cast tends to like, for the weave to lean on.
+
+    `style_direction` has always gathered the room's flavour tags — busy
+    background vs negative space, rim light vs ambient, cel vs painterly — and
+    nothing has ever read them: `base_style_for` takes only `base`, and the
+    seats stopped writing tags when the crewed studio went notebook-primary.
+    They were computed on every roster call and shown in the panel and never
+    reached a prompt. This is the one place they belong: a leaning the weave
+    may follow, under the notebook and under the Showrunner.
+    """
+    if is_duet(session):
+        return ""
+    tags = crew.style_direction(_crew_ids(session)).get("flavor_tags") or []
+    return ", ".join(str(t) for t in tags[:10])
 
 
 def crew_look_tags(session: dict[str, Any]) -> list[str]:

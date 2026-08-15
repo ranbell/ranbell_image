@@ -1045,6 +1045,18 @@ SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
 quality of that inventory (light, optics, colour, air, cloth, finish) — never
 extra inventory. No theme, no chat, no photo.
 
+THE LOOK IS NOT A TAG, IT IS HOW YOU WRITE:
+- LOOK, when present, is the room's agreed rendering. It governs the WHOLE bag
+  and the whole of craft_scene, not one tag at the front.
+- Choose the words that look would use. Cel shading wants `cel_shading`,
+  `flat_color`, clean edges and named blocks of colour; a semi-realistic
+  rendering wants `realistic`, `detailed_skin`, `soft_shading`, and prose about
+  how light sits on a surface. The same shot, written twice, should not come
+  out as the same bag.
+- ROOM LEANING, when present, is what this particular crew tends to like. It is
+  a leaning, not an order: follow it where the shot allows, drop it where it
+  fights the notebook or the Showrunner.
+
 THE CAMERA IS NOT IN THE PICTURE:
 - You are describing the photograph, not the shoot. Never write "the camera"
   as the thing doing something ("the camera lingers", "we push in"). Say what
@@ -1177,7 +1189,7 @@ async def run_scripter(
     partner: bool = False, model: str, num_ctx: int | None,
     mode: str = "compile", images: list[bytes] | None = None,
     card: str = "", struck: str = "", directive: str = "",
-    crew_look: str = "",
+    crew_look: str = "", room_leaning: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
 
@@ -1193,6 +1205,18 @@ async def run_scripter(
     if weave:
         prompt = "\n\n".join(b for b in [
             f"NOTEBOOK NOW:\n{notebook_block}",
+            # The look the room agreed on. This used to be missing entirely:
+            # every tag and every word of the prose was written without it, and
+            # the only thing carrying the look was a single tag prepended
+            # afterwards. A cel crew and a semi-real crew wrote the same bag.
+            (
+                f"LOOK (the whole crew agreed on this — write the WHOLE bag and "
+                f"the prose in it, choosing the words this look would use):\n{style}"
+            ) if style.strip() else "",
+            (
+                f"ROOM LEANING (what this crew tends to like — a leaning, not "
+                f"an order):\n{room_leaning.strip()}"
+            ) if room_leaning.strip() else "",
             f"{CREW_LOOK_NOTE}\n{crew_look.strip()}" if crew_look.strip() else "",
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (

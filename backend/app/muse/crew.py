@@ -1387,16 +1387,23 @@ def _crew(*refs: str) -> list[str]:
     return [m for m in (resolve_member(r) for r in refs) if m]
 
 
+# Six crews, one per look. Every one of them a working studio.
+#
+# There were ten, and four of them were not choices. `everyone` matched
+# `standard` seat for seat, look for look, craft slot for craft slot (Jaccard
+# 1.00). `classic` and `calm` produced the identical base look. `trio` held no
+# craft slot at all and `quartet` held one, and neither had a wardrobe seat —
+# they existed to be fast, and packing the table talk into one call took that
+# reason away: a note costs the same number of model calls whether the room
+# holds four people or eighteen. Ten names for six pictures is a menu that
+# makes the Showrunner choose between things that are the same.
+#
+# Every crew now has the planner. Five of them did not, which meant no ledger
+# (MUST APPEAR) and nobody settling place, hour and light — not a taste, a
+# studio missing a function. Crews should differ in what they like, never in
+# whether the room works.
 PRESETS: dict[str, list[str]] = {
     # actress + finisher omitted — always injected by resolve_crew
-    #
-    # The smallest room that still works: someone to settle where and when,
-    # someone to call the moment, and her. Fewer seats is not a lesser version —
-    # every extra seat rewrites the whole script once more, and the objects the
-    # planner listed have to survive all of those rewrites to reach the render.
-    "trio": _crew("plan:madori", "beat:ichibyou"),
-    # Same room with a camera in it.
-    "quartet": _crew("plan:madori", "beat:ichibyou", "lens:pinto"),
     "standard": _crew(
         "plan:madori",
         "beat:ichibyou", "spine:bane", "cutout:sukima", "lens:pinto",
@@ -1406,46 +1413,40 @@ PRESETS: dict[str, list[str]] = {
     ),
     # Colour and light lead, and the loud half of every job takes the seat.
     "vivid": _crew(
+        "plan:madori",
         "beat:ichibyou", "spine:bane", "lens:pinto", "propshop:takarabako",
         "wardrobe:iroawase", "gaffer:gyakkou", "faces:hoo", "hook:kugizuke",
         "weather:shitsudo", "palette:itten", "grade:sokoage",
     ),
     # The rendered end of every job: optics, texture, paint, grain.
     "photoreal": _crew(
+        "plan:madori",
         "beat:nagamawashi", "spine:juushin", "lens:pinto", "propshop:takarabako",
         "wardrobe:shiwa", "gaffer:gyakkou", "faces:mabataki",
         "weather:shitsudo", "ink:atsunuri", "grade:ryuushi",
     ),
     # The animation side of the room: line, cel, silhouette, acting.
     "flat": _crew(
+        "plan:madori",
         "beat:ichibyou", "spine:bane", "cutout:sukima", "faces:hoo",
         "wardrobe:iroawase", "palette:itten", "ink:ipponsen", "gate:mon",
         "lens:teiten",
     ),
-    # Everything that steadies a picture and nothing that experiments.
-    "classic": _crew(
-        "plan:madori",
-        "beat:nagamawashi", "spine:juushin", "cutout:sukima", "lens:teiten",
-        "propshop:takarabako", "wardrobe:shiwa", "gaffer:andon",
-        "faces:mabataki", "hook:kuchikomi", "weather:mufuu", "ink:ipponsen",
-        "grade:sokoage", "continuity:tsujitsuma", "gate:mon",
-    ),
     # Fewest hands, most opinion, every one of them an experiment.
     "bold": _crew(
+        "plan:madori",
         "beat:ichibyou", "spine:bane", "cutout:sukima", "lens:pinto",
         "propshop:yohaku", "gaffer:gyakkou", "faces:hoo", "hook:kugizuke",
         "weather:shitsudo", "grade:ryuushi",
     ),
     # A quiet room. Soft light, muted colour, nothing shouting.
     "calm": _crew(
+        "plan:madori",
         "beat:nagamawashi", "spine:juushin", "cutout:sukima", "lens:teiten",
         "propshop:yohaku", "wardrobe:shiwa", "gaffer:andon", "faces:mabataki",
         "hook:kuchikomi", "weather:mufuu", "palette:aku", "ink:atsunuri",
         "grade:ryuushi", "continuity:tsujitsuma",
     ),
-    "everyone": _crew(*[
-        DEFAULT_MEMBER[r] for r in ROLE_ORDER if r not in ("finisher", "actress")
-    ]),
 }
 
 DEFAULT_PRESET = "standard"
@@ -1454,28 +1455,6 @@ DEFAULT_PRESET = "standard"
 # Preset ids stay stable for API; display names live in team_* / i18n.
 # `accent` is a hint colour; the panel may override. Scripter still owns TAGS.
 PRESET_META: dict[str, dict[str, str]] = {
-    "trio": {
-        "team_en": "Team Closet",
-        "team_ja": "チーム密室",
-        "look_en": "tight room chat",
-        "look_ja": "密室の少人数トーク",
-        "blurb_en": "Tiny warm room — planner and beat only. Fast talk, Scripter owns tags.",
-        "blurb_ja": "あたたかい密室。構成とビートだけ。会話は短く、タグはスクリプター。",
-        "vibe_en": "cozy huddle",
-        "vibe_ja": "こぢんまりわいわい",
-        "accent": "#38bdf8",
-    },
-    "quartet": {
-        "team_en": "Team Four-Beat",
-        "team_ja": "チーム四拍子",
-        "look_en": "room + lens",
-        "look_ja": "少人数＋レンズ",
-        "blurb_en": "Same cozy room with a camera arguing the frame.",
-        "blurb_ja": "密室に撮影を足す。画角の意見が早く出る四拍子。",
-        "vibe_en": "small band energy",
-        "vibe_ja": "小さなバンドみたい",
-        "accent": "#a78bfa",
-    },
     "standard": {
         "team_en": "Team Floor",
         "team_ja": "チームフロア",
@@ -1520,17 +1499,6 @@ PRESET_META: dict[str, dict[str, str]] = {
         "vibe_ja": "作画机のくすっと笑い",
         "accent": "#a3e635",
     },
-    "classic": {
-        "team_en": "Team Canon",
-        "team_ja": "チーム王道",
-        "look_en": "steady beloved canon",
-        "look_ja": "大好きな王道",
-        "blurb_en": "Everything that steadies a picture — warm, reliable, no experiments.",
-        "blurb_ja": "絵を安定させる職だけ。あたたかくて頼れる、実験しない王道。",
-        "vibe_en": "reliable seniors",
-        "vibe_ja": "頼れる先輩たち",
-        "accent": "#fb923c",
-    },
     "bold": {
         "team_en": "Team Lab",
         "team_ja": "チーム実験室",
@@ -1552,17 +1520,6 @@ PRESET_META: dict[str, dict[str, str]] = {
         "vibe_en": "hushed soft studio",
         "vibe_ja": "ひそひそ柔らかいスタジオ",
         "accent": "#22d3ee",
-    },
-    "everyone": {
-        "team_en": "Team Full House",
-        "team_ja": "チーム大所帯",
-        "look_en": "full call-sheet party",
-        "look_ja": "全員集合の宴",
-        "blurb_en": "Whole call sheet talks; still one packed turn + Scripter tags.",
-        "blurb_ja": "全員招集のわいわい。会話はパック、タグはスクリプター。",
-        "vibe_en": "noisy loving crowd",
-        "vibe_ja": "うるさいくらい仲良し",
-        "accent": "#34d399",
     },
 }
 
@@ -1867,6 +1824,50 @@ _BASE_LOOK: dict[tuple[int, int], str] = {
     (1, 0): "semi-realistic rendering",
     (1, 1): "vivid semi-realistic rendering",
 }
+
+# The same nine looks, said in words the sampler was trained on.
+#
+# The phrase above is written for a person. Handed to `identity.style_tags` it
+# became ONE token — `vivid_anime_illustration` — which no checkpoint has ever
+# seen, so the look the whole room agreed on reached the picture as a single
+# dead word. These are the tags that actually move rendering, and because
+# `_BASE_LOOK` is a closed 3×3 table this is a fixed correspondence, not a
+# vocabulary of situations: every cell gets its words, once.
+LOOK_TAGS: dict[str, tuple[str, ...]] = {
+    "muted flat anime cel shading": ("cel_shading", "flat_color", "muted_color"),
+    "flat anime cel shading": ("cel_shading", "flat_color", "anime_coloring"),
+    "vivid flat anime cel shading": ("cel_shading", "flat_color", "vivid_colors"),
+    "muted anime illustration": ("anime_coloring", "muted_color", "soft_shading"),
+    "anime illustration": ("anime_coloring",),
+    "vivid anime illustration": ("anime_coloring", "vivid_colors", "saturated"),
+    "muted semi-realistic rendering": ("realistic", "muted_color", "soft_shading"),
+    "semi-realistic rendering": ("realistic", "detailed_skin", "soft_shading"),
+    "vivid semi-realistic rendering": ("realistic", "detailed_skin", "vivid_colors"),
+}
+
+# The composition suffixes `style_direction` appends carry their own words.
+LOOK_SUFFIX_TAGS: dict[str, tuple[str, ...]] = {
+    "classic composition": ("rule_of_thirds", "centered_composition"),
+    "experimental composition": ("dutch_angle", "unconventional_composition"),
+}
+
+
+def look_tags(style: str) -> list[str]:
+    """A base-look phrase → the tags that render it. Unknown phrases → []."""
+    text = str(style or "").strip().lower()
+    if not text:
+        return []
+    out: list[str] = []
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    head = parts[0] if parts else ""
+    for tag in LOOK_TAGS.get(head, ()):
+        if tag not in out:
+            out.append(tag)
+    for part in parts[1:]:
+        for tag in LOOK_SUFFIX_TAGS.get(part, ()):
+            if tag not in out:
+                out.append(tag)
+    return out
 
 
 def _sign(value: float, *, dead_zone: float = 0.4) -> int:

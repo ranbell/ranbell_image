@@ -124,7 +124,7 @@ async def _ready_session(db, **over):
     session = await service.create_session(db, {
         "theme": "a quiet indoor moment", "character_id": "c1",
         "workflow": "w.json", "model": "m",
-        "crew_preset": "classic",
+        "crew_preset": "calm",
         **over,
     })
     session["character"] = {"identity_tags": ["1girl", "blue_hair"],
@@ -478,12 +478,12 @@ async def test_showrunner_comment_reruns_a_short_turn():
 @pytest.mark.asyncio
 async def test_light_banter_mode_fires_fewer_side_calls_than_full():
     db, ollama_light, ollama_full = FakeDb(), FakeOllama(), FakeOllama()
-    s_light = await _ready_session(db, banter_mode="light", crew_preset="classic")
+    s_light = await _ready_session(db, banter_mode="light", crew_preset="calm")
     s_light = await service.start_table(db, ollama_light, s_light)
     light_banter = sum(1 for m in s_light["chat"] if m.get("kind") == "banter")
 
     db2 = FakeDb()
-    s_full = await _ready_session(db2, banter_mode="full", crew_preset="classic")
+    s_full = await _ready_session(db2, banter_mode="full", crew_preset="calm")
     s_full = await service.start_table(db2, ollama_full, s_full)
     full_banter = sum(1 for m in s_full["chat"] if m.get("kind") == "banter")
 
@@ -602,7 +602,7 @@ def board_file(tmp_path):
 @pytest.mark.asyncio
 async def test_the_planner_settles_the_place_before_anyone_describes_it():
     db, ollama = FakeDb(), PlanningOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
 
     session = await service.start_table(db, ollama, session)
 
@@ -622,7 +622,7 @@ async def test_a_showrunner_note_becomes_standing_direction():
     """The bug this exists for: a note reached only the turn that answered it,
     so the original theme outvoted it on every later call and never rendered."""
     db, spooler, ollama = FakeDb(), FakeSpooler(), PlanningOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
     session = await service.start_table(db, ollama, session)
 
     session = await service.post_chat(
@@ -641,7 +641,7 @@ async def test_a_showrunner_note_becomes_standing_direction():
 @pytest.mark.asyncio
 async def test_a_note_re_settles_the_plan_rather_than_appending_to_it():
     db, spooler, ollama = FakeDb(), FakeSpooler(), PlanningOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
     session = await service.start_table(db, ollama, session)
     plans_before = sum(1 for e in session["timeline"] if e["step"] == "plan")
 
@@ -655,7 +655,7 @@ async def test_a_note_re_settles_the_plan_rather_than_appending_to_it():
 @pytest.mark.asyncio
 async def test_the_crew_is_shown_the_board_when_answering_a_note(board_file):
     db, spooler, ollama = SeeingDb(board_file), FakeSpooler(), PlanningOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
     session = await service.start_table(db, ollama, session)
     session["board"] = {
         "seed": 7, "round": 1, "pending": False,
@@ -678,7 +678,7 @@ async def test_the_crew_is_shown_the_board_when_answering_a_note(board_file):
 @pytest.mark.asyncio
 async def test_no_board_means_no_images_and_no_screening_note():
     db, spooler, ollama = SeeingDb("/nonexistent"), FakeSpooler(), PlanningOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
     session = await service.start_table(db, ollama, session)
     ollama.calls.clear()
 
@@ -693,7 +693,7 @@ async def test_no_board_means_no_images_and_no_screening_note():
 @pytest.mark.asyncio
 async def test_an_unreadable_board_does_not_stop_the_table(board_file):
     db, spooler, ollama = SeeingDb("/nonexistent/board.png"), FakeSpooler(), PlanningOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
     session = await service.start_table(db, ollama, session)
     session["board"] = {
         "seed": 7, "round": 1, "pending": False,
@@ -754,7 +754,7 @@ async def test_a_blind_model_is_reported_rather_than_silently_degraded(board_fil
             return _empty()
 
     db, spooler, ollama = SeeingDb(board_file), FakeSpooler(), BlindOllama()
-    session = await _ready_session(db, crew_preset="trio", banter_mode="off")
+    session = await _ready_session(db, crew_preset="standard", banter_mode="off")
     session = await service.start_table(db, ollama, session)
     session["board"] = {
         "seed": 7, "round": 1, "pending": False,
@@ -771,11 +771,28 @@ async def test_a_blind_model_is_reported_rather_than_silently_degraded(board_fil
     assert session["craft"]["prompt"], "the table kept moving"
 
 
-def test_the_small_room_is_the_lead_the_director_and_the_planner():
+def test_every_crew_is_a_working_studio():
+    """班は味で違うべきで、機能の有無で違うべきではない。
+
+    5班に構成席が無く、台帳（MUST APPEAR）も PLACE/HOUR/LIGHT の決めも丸ごと
+    欠けていた。速さのための小さい班（trio/quartet）は、会話をパックにした時点で
+    「席数がコール数に効かない」ので理由を失った。
+    """
     from app.muse import crew
-    roles = [crew.role_of(i) for i in crew.resolve_crew(preset="trio")]
-    assert roles == ["plan", "beat", "actress", "finisher"]
-    assert crew.role_of(crew.resolve_crew(preset="quartet")[2]) == "lens"
+    assert set(crew.PRESETS) == {
+        "standard", "vivid", "photoreal", "flat", "bold", "calm",
+    }
+    looks = {}
+    for name in crew.PRESETS:
+        ids = crew.resolve_crew(preset=name)
+        roles = [crew.role_of(i) for i in ids]
+        assert "plan" in roles, f"{name} に構成席が無い"
+        assert roles[-1] == "finisher" and "actress" in roles
+        looks[name] = crew.base_style_for(ids, "", "")
+    # 6班6様 — 同じ look の班を2つ置かない（それは選択肢ではない）
+    assert len(set(looks.values())) == len(looks), looks
+    # 消した名前を渡しても壊れない（既存セッションの互換）
+    assert crew.resolve_crew(preset="trio") == crew.resolve_crew(preset="standard")
 
 
 # ── the ledger ──────────────────────────────────────────────────────────────
@@ -1139,7 +1156,7 @@ def test_a_crew_that_has_all_spoken_has_nobody_catching_up():
 
 
 def test_swapping_a_whole_preset_mid_session_does_not_queue_a_dozen_turns():
-    cast = crew.resolve_crew(preset="everyone")
+    cast = crew.resolve_crew(preset="standard")
     session = {"session_id": "s", "inputs": {}, "spoken": []}
     assert len(service.newcomers(session, cast)) == service.MAX_CATCHUP
 

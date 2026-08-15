@@ -1335,29 +1335,21 @@
     "crewPreset": "Shooting team",
     "crewPresetHint": "Pick a named team with a look. Talk is packed; the Scripter owns tags.",
     "presets": {
-      "trio": "Team Closet",
-      "quartet": "Team Four-Beat",
       "standard": "Team Floor",
       "vivid": "Team Carnival",
       "photoreal": "Team Film Still",
       "flat": "Team Cel",
-      "classic": "Team Canon",
       "bold": "Team Lab",
       "calm": "Team Pastel",
-      "everyone": "Team Full House",
       "custom": "Custom crew"
     },
     "presetLooks": {
-      "trio": "tight room chat",
-      "quartet": "room + lens",
       "standard": "balanced full desk",
       "vivid": "saturated colour punch",
       "photoreal": "cinematic one-scene",
       "flat": "cel & silhouette",
-      "classic": "steady beloved canon",
       "bold": "opinionated few",
       "calm": "soft pastel photograph",
-      "everyone": "full call-sheet party",
       "custom": "hand-picked"
     },
     "presetBlurbs": {

@@ -781,3 +781,30 @@ def test_weave_is_told_the_camera_is_not_a_subject():
     from app.muse import chain
     assert "THE CAMERA IS NOT IN THE PICTURE" in chain.SCRIPTER_WEAVE_SYSTEM
     assert "Never write her name" in chain.SCRIPTER_WEAVE_SYSTEM
+
+
+@pytest.mark.asyncio
+async def test_weave_receives_the_look_and_the_room_leaning(monkeypatch):
+    """35〜55語を書く weave が、ルックを知らずに書いていた。"""
+    db = FakeDb()
+    session = await _crew_session(db, crew_preset="flat")
+    session["notebook_craft"] = True
+    notebook.apply_patch(notebook.of(session), {
+        "scene": "a classroom at dusk", "wearing": "sailor uniform", "beat": "sitting",
+    })
+    seen: dict = {}
+
+    async def _run_scripter(_ollama, **kw):
+        seen.update(kw)
+        return {"intent": "shot", "patch": {}, "tags": "1girl, sitting",
+                "craft_scene": "prose", "raw": "ok", "valid": True}
+
+    monkeypatch.setattr(service.chain, "run_scripter", _run_scripter)
+    session["craft_dirty"] = True
+    await service.weave_craft_if_needed(db, FakeOllama(), session)
+
+    assert seen.get("mode") == "weave"
+    assert "flat anime cel shading" in str(seen.get("style") or "")
+    assert str(seen.get("room_leaning") or "").strip(), "班の傾向が渡っていない"
+    # 主演撮りには班の傾向は無い
+    assert service._room_leaning({"mode": "duet", "inputs": {}}) == ""

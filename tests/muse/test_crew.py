@@ -21,7 +21,7 @@ _SITUATION_BANNED = (
 
 
 def test_resolve_crew_always_ends_with_finisher():
-    ids = crew.resolve_crew(preset="classic")
+    ids = crew.resolve_crew(preset="calm")
     roles = [crew.role_of(i) for i in ids]
     assert roles[-1] == "finisher"
     assert "beat" in roles
@@ -157,16 +157,16 @@ def test_swapping_the_crew_moves_the_look():
     flat = crew.style_direction(crew.PRESETS["flat"])
     real = crew.style_direction(crew.PRESETS["photoreal"])
     loud = crew.style_direction(crew.PRESETS["vivid"])
-    classic = crew.style_direction(crew.PRESETS["classic"])
+    quiet = crew.style_direction(crew.PRESETS["calm"])
 
     assert flat["base"] != real["base"]
     assert "flat" in flat["base"]
     assert "semi-realistic" in real["base"]
     assert "vivid" in loud["base"]
-    assert "classic composition" in classic["base"]
+    assert "classic composition" in quiet["base"]
 
     assert flat["scores"]["real"] < real["scores"]["real"]
-    assert loud["scores"]["vivid"] > classic["scores"]["vivid"]
+    assert loud["scores"]["vivid"] > quiet["scores"]["vivid"]
 
 
 def test_a_crew_is_averaged_not_summed():
@@ -390,3 +390,45 @@ def test_the_ledger_is_a_ceiling_not_a_quota():
     # ゴミは「荒れている場面」だけのもの、と明示されていること。
     assert "Litter and debris" in text
     assert "about neglect" in text
+
+
+def test_the_look_reaches_the_sampler_as_words_it_knows():
+    """班が合意したルックが、絵に届く語になっていること。
+
+    `style_tags("vivid anime illustration")` は1個の巨大トークン
+    `vivid_anime_illustration` になっていた。どのチェックポイントも学習して
+    いない語で、しかもそれがルックを運ぶ唯一の経路だった。
+    """
+    from app.muse import identity
+    assert crew.look_tags("flat anime cel shading") == [
+        "cel_shading", "flat_color", "anime_coloring",
+    ]
+    assert identity.style_tags("vivid anime illustration") == [
+        "anime_coloring", "vivid_colors", "saturated",
+    ]
+    # 構図の接尾も語を持つ
+    assert "dutch_angle" in crew.look_tags("anime illustration, experimental composition")
+    assert "rule_of_thirds" in crew.look_tags("anime illustration, classic composition")
+    # 総監督が自分で書いた style は従来どおり（表に無いものは分解するだけ）
+    assert identity.style_tags("水彩っぽく, やわらかい") == ["水彩っぽく", "やわらかい"]
+    # 9セル全部に語がある
+    for phrase in crew._BASE_LOOK.values():
+        assert crew.look_tags(phrase), phrase
+
+
+def test_every_shipped_look_is_distinguishable_in_tags():
+    """6班が同じタグ束を吐くなら、それは6つの選択肢ではない。"""
+    from app.muse import identity
+    bags = {
+        n: frozenset(identity.style_tags(
+            crew.base_style_for(crew.resolve_crew(preset=n), "", "")
+        ))
+        for n in crew.PRESETS
+    }
+    assert len(set(bags.values())) == len(bags), bags
+
+
+def test_the_weave_is_told_the_look_governs_the_whole_bag():
+    from app.muse import chain
+    assert "THE LOOK IS NOT A TAG, IT IS HOW YOU WRITE" in chain.SCRIPTER_WEAVE_SYSTEM
+    assert "ROOM LEANING" in chain.SCRIPTER_WEAVE_SYSTEM
