@@ -2461,7 +2461,13 @@ async def _call_duet_scripter(
         num_ctx=_num_ctx(inputs, cfg),
         mode=mode,
         images=vision,
-        card="" if mode == "weave" else str(session.get("muse_card") or ""),
+        # The CARD is the Muse's memo from the turn BEFORE this line was said.
+        # On a fold it is this turn's card and it is the whole point; on a plain
+        # compile it is one turn stale, and it was outranking the showrunner:
+        # measured live, 「帽子は外して」 and 「コート脱いで」 both left the
+        # garment on, in two different sessions, while the stale CARD still
+        # named it. Compile answers the latest line; fold folds her card.
+        card=str(session.get("muse_card") or "") if fold else "",
         struck=_struck_line(session),
         crew_look=crew_look_block(session),
         directive=(

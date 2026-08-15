@@ -632,3 +632,34 @@ def test_posture_stem_always_reaches_the_tags():
     notebook.apply_patch(notebook.of(session), {"beat": "しゃがんで、日傘は持ったまま"})
     assert notebook.posture_stem("しゃがんで、日傘は持ったまま") == "squatting"
     assert "squatting" in service._missing_wearing_tags(session, "sailor_uniform, parasol")
+
+
+@pytest.mark.asyncio
+async def test_card_reaches_fold_but_never_a_plain_compile(monkeypatch):
+    """1ターン古い CARD は compile に渡さない（脱がせる指示に勝ってしまう）。
+
+    fold のときだけ渡す — そこでは今回の CARD が正本。
+    """
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["notebook_craft"] = True
+    session["muse_card"] = "WEARING: sailor uniform, straw hat\nBEAT: sitting"
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "sailor uniform, straw hat", "beat": "sitting",
+    })
+    cards: list[str] = []
+
+    async def _run_scripter(_ollama, **kw):
+        cards.append(str(kw.get("card") or ""))
+        return {"intent": "casual", "patch": {}, "raw": "ok", "valid": True}
+
+    monkeypatch.setattr(service.chain, "run_scripter", _run_scripter)
+
+    await service._run_duet_scripter(db, FakeOllama(), session, "帽子は外して", cfg={})
+    assert cards and all(c == "" for c in cards), cards
+
+    cards.clear()
+    await service._run_duet_scripter(
+        db, FakeOllama(), session, "帽子は外して", cfg={}, fold=True,
+    )
+    assert cards and any("straw hat" in c for c in cards), cards

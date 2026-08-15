@@ -980,9 +980,11 @@ THE STILL IS THE LAST TAKE, NOT THE ASK:
 - The current frame is that base PLUS what chat / the Muse CARD changed.
 - Do not copy a hat (or anything else) from the photo if chat already removed it.
 - Do not invent inventory the CARD and latest line did not ask for.
-- Priority for clothes/place: chat delta from the still > Muse CARD > latest
-  line > what the photo still shows. Never paint scene or wearing from SAY
-  atmosphere.
+- Priority for clothes/place: the showrunner's LATEST LINE > chat delta from
+  the still > Muse CARD > what the photo still shows. The CARD is her memo from
+  a previous turn: it describes the frame BEFORE this line was said, so it can
+  never keep a garment this line takes off. Never paint scene or wearing from
+  SAY atmosphere.
 - Priority for beat: showrunner's newest posture/pose line > previous Muse
   CARD/SAY body action > the still. A short pose noun replaces the old beat.
 
@@ -1121,7 +1123,11 @@ CREW_LOOK_NOTE = (
     "CLOTH, FACE, SHAPE, RENDER, FINISH). Keep these true in tags and prose. "
     "They are quality of what is already in the shot, not new inventory: they "
     "never add a garment, a place, a pose or a prop the notebook does not "
-    "name, and they never overrule the notebook when they disagree with it."
+    "name, and they never overrule the notebook when they disagree with it. "
+    "Each line is an INTENT, not tag text: say it in ordinary danbooru tags "
+    "the sampler knows (backlighting, rim_light, depth_of_field, film_grain, "
+    "cel_shading, dappled_sunlight…), and put the wording itself in the prose. "
+    "Do not paste a clause in as one long underscored tag."
 )
 
 
