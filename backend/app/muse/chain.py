@@ -930,6 +930,16 @@ async def run_table_talk(
 # how a person would find out and one fewer model load.
 
 
+# FIELD CONTRACTS is not a list where length is free. `light` arrived as six
+# emphatic lines wedged above frame/wearing/beat, and both rooms measured the
+# same regression on the next run: `beat` and `wearing` stopped moving at all
+# while scene, frame, atmosphere and light stayed correct. Those two are the
+# fields whose instruction is to REPLACE a value the notebook already holds, so
+# they are what a distracted scripter drops first — 「立って」 left the beat
+# sitting, 「脱いで」 left the cardigan on, across 班撮影 and 主演撮り alike.
+# A new field goes at the end and gets one line. It is a contract, not an essay.
+
+
 SCRIPTER_SYSTEM = """
 You are the studio scripter. You do not speak in character. You maintain the
 shot notebook. You do not write tags or craft_scene on conversation turns.
@@ -1001,17 +1011,13 @@ FIELD CONTRACTS (hard):
 - scene = short place + time. NEVER paste long prose.
 - atmosphere = mood/feeling only (tender, hushed, lonely). NEVER clock words,
   weather-as-hour, objects, or place nouns.
-- light = the key and where it comes from, as an absolute: "low sun from
-  behind, hard rim", "one lantern at floor level, everything else dark".
-  NEVER a direction of change — no "darker", no "brighter", no "more
-  dramatic": write the finished state that direction arrives at. Light is not
-  mood (that is atmosphere) and not a place (that is scene). It is its own
-  line, so a note about the light changes the light and nothing else.
 - frame / wearing / beat = short absolute phrases, not paragraphs.
 - frame names ONE crop: zoom/close/upper OR wide/full-body. Never both
   wide_shot and close_up in the same frame.
 - On a remove request, rewrite wearing as the finished state WITHOUT that noun.
   Do not write "no hat" / "remove hat". Omit the hat.
+- light = the key and where it comes from, absolute: "low sun from behind,
+  hard rim". Not a direction of change, not mood, not a place.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.
