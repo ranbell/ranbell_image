@@ -26,6 +26,8 @@ class SessionCreate(BaseModel):
     vision_model: str = ""
     locale: str = "ja"
     crew_preset: str = "standard"
+    # Named look — see `crew.LOOKS`. Settable here and mid-session.
+    look: str = ""
     # "duet" opens 主演撮り (lead shoot) — one or two Muses, no crew.
     mode: str = ""
     partner_preset: str | None = None
@@ -44,6 +46,7 @@ class InputsPatch(BaseModel):
     locale: str | None = None
     negative_prompt: str | None = None
     style: str | None = None
+    look: str | None = None
     framing: str | None = None
     crew_preset: str | None = None
     crew_ids: list[str] | None = None

@@ -216,7 +216,10 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         "next_step": next_step(session),
         "needs": missing_inputs(session),
         "roster": crew_mod.public_roster(session.get("character") or {}, cast),
-        "style_in_use": crew_mod.base_style_for(cast, inputs.get("style") or ""),
+        "style_in_use": crew_mod.base_style_for(
+            cast, inputs.get("style") or "", inputs.get("look") or "",
+        ),
+        "looks": sorted(crew_mod.LOOKS),
         "direction_still": public_still,
     }
     return view

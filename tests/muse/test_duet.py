@@ -554,7 +554,11 @@ def test_shot_user_prompt_confirms_direction_and_keeps_pose_from_both():
     prompt = service._duet_user_prompt(
         session, "手を伸ばして、こうしてね", prep=False, intent="shot",
     )
-    assert "こうしますね" in prompt
+    # 指示を受け取ったことは必ず言わせる。ただし言い回しは渡さない —
+    # 「こうしますね」と書いてあった頃は、彼女の発言の26%がその語で始まり、
+    # 3ターン続けて「〜。わかった、こうしますね。」になっていた。
+    assert "say the action back in your own words" in prompt
+    assert "こうしますね" not in prompt
     assert "CARD BEAT" in prompt
     assert "SHOT NOTEBOOK" in prompt
 

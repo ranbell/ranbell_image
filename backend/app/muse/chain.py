@@ -527,6 +527,15 @@ RULES
   REMOVED lists you are given. Never invent, translate, pluralise or reword.
 - Most notes remove nothing. A note that asks for something *different* is not
   a removal unless the old thing plainly cannot stay alongside the new one.
+- A CAMERA note removes NOTHING. 寄って / 引いて / 俯瞰 / 煽って / 「〜だけ
+  見せて」/ zoom in / pull back / show only her hands — these move the frame,
+  not the world. What falls outside the crop is still there, still worn, still
+  lit; it is simply not in shot. Removing it would delete the room she is
+  standing in. The same goes for a note about her expression or her mood.
+- A garment she is wearing comes off ONLY when they say to take it off.
+  "Show me just her hands" is not "take off the sweater".
+- If your answer is getting long, you have misread the note. A refusal names
+  one thing, or a few. A list of a dozen tags is never what was asked.
 - Remove what the Showrunner named, and the tags that are plainly the same
   thing under another name. Nothing else. Do not tidy, do not simplify, do not
   remove things you personally think are wrong.
@@ -1036,6 +1045,16 @@ SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
 quality of that inventory (light, optics, colour, air, cloth, finish) — never
 extra inventory. No theme, no chat, no photo.
 
+SAY IT IN TAGS THE SAMPLER KNOWS:
+- Ordinary danbooru tags, underscored. `from_above` — not `overhead_shot`.
+  `looking_at_viewer`, `backlighting`, `rim_light`, `depth_of_field`,
+  `film_grain`, `cel_shading`, `wet_clothes`, `barefoot`.
+- Do not mint a compound nobody has ever tagged: `window_desk`,
+  `weight_leaning`, `cable-stitch_tension`, `expectant_atmosphere` are words,
+  not tags. If the idea has no tag, say it in craft_scene instead — the prose
+  is where the wording belongs.
+- One idea per tag. A clause with three nouns in it is prose.
+
 THICKEN QUALITY, NOT INVENTORY:
 - Unpack what is already named: cloth (knit, drape, folds), light (how it
   falls, shadow length), air, camera, eyes and hands.
@@ -1079,10 +1098,17 @@ SCRIPTER_VERIFY_NOTE = (
 )
 
 SCRIPTER_FOLD_NOTE = (
-    "FOLD: The Muse just spoke. NOTEBOOK NOW already has the showrunner's "
+    "FOLD: The table just spoke. NOTEBOOK NOW already has the showrunner's "
     "latest direction from this turn. SHOWRUNNER'S LATEST LINE below is the "
     "showrunner's actual words this turn — not this FOLD header. "
-    "Read the latest Muse SAY and MUSE CARD. "
+    "Read the latest Muse SAY and MUSE CARD, and the crew's lines from this "
+    "turn in the conversation. A seat that names a concrete body detail — how "
+    "the weight sits, where the hands go, the beat before she turns — is "
+    "proposing it to you, and it belongs in beat if it does not contradict "
+    "the showrunner. They cannot write the notebook; you can. "
+    "Anything they propose that is NOT body action — a garment, a place, a "
+    "prop, a light, a crop — goes in `open` as a proposal, in a few words, "
+    "for the showrunner to accept or ignore. Never put it in the shot itself. "
     "Keep the showrunner's posture, place, clothes, and camera. Do not swap a "
     "posture the showrunner just set. Do not change sitting into standing "
     "because CARD or a wide shot looks standing. Prefix hands, head, and held "
@@ -1124,10 +1150,13 @@ CREW_LOOK_NOTE = (
     "They are quality of what is already in the shot, not new inventory: they "
     "never add a garment, a place, a pose or a prop the notebook does not "
     "name, and they never overrule the notebook when they disagree with it. "
-    "Each line is an INTENT, not tag text: say it in ordinary danbooru tags "
-    "the sampler knows (backlighting, rim_light, depth_of_field, film_grain, "
-    "cel_shading, dappled_sunlight…), and put the wording itself in the prose. "
-    "Do not paste a clause in as one long underscored tag."
+    "Each line reads `SLOT: tags — what the seat means by them`. The tags "
+    "before the dash are the seat's own and already in the sampler's "
+    "vocabulary: carry them through as written, do not reword them. The words "
+    "after the dash are for the prose — that is where the seat's intent lives, "
+    "so write it into craft_scene rather than pasting it in as one long "
+    "underscored tag. A line with no dash is all intent and no tags: say it in "
+    "tags the sampler knows, or leave it to the prose."
 )
 
 

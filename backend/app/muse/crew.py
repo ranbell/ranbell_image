@@ -1804,13 +1804,23 @@ def table_talk_system_prompt(
         "SPEAKER: <exact SPEAKER id>",
         "SAY: <one or two spoken sentences"
         + (" in natural Japanese, 口調どおり>" if ja else " in the showrunner's language>"),
-        "CRAFT: <optional, ENGLISH, one short clause for YOUR CRAFT SLOT only — "
-        "the finished state, e.g. `low sun from behind, hard rim on the jaw`. "
-        "Omit the line entirely when your slot did not change this beat.>",
+        "CRAFT: <optional, ENGLISH, for YOUR CRAFT SLOT only. Two halves "
+        "split by `|` — tags the sampler knows, then the same thing in words:",
+        "  CRAFT: backlighting, rim_light | low sun from behind, hard rim on the jaw",
+        "  Omit the line entirely when your slot did not change this beat.>",
         "",
-        "CRAFT is not tags and not a sentence about her: it is the one element "
-        "you own, written the way the camera would see it. Never write another "
-        "seat's slot. Never put clothes, pose, place or hour in CRAFT.",
+        "This is the crew's working language: the left half is what the camera "
+        "is set to, the right half is what you mean by it.",
+        "- LEFT of `|`: 1–4 ordinary danbooru tags, underscored, that you are "
+        "confident exist (`from_above`, not `overhead_shot`; `backlighting`, "
+        "not `strong_orange_rim_light_on_hair`). They go to the sampler as you "
+        "write them, so a compound nobody has tagged is a wasted slot.",
+        "- RIGHT of `|`: one short clause in your own professional words. This "
+        "is what the picture's prose is written from — it is where the feeling "
+        "lives, so do not flatten it into a label.",
+        "CRAFT is never a sentence about her. Never write another seat's slot. "
+        "Never put clothes, pose, place or hour in CRAFT — those are the "
+        "notebook's, and the Scripter owns them.",
         "",
         "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists. No emoji.",
         "Do NOT invent wardrobe the Lead has not agreed to.",
@@ -1894,8 +1904,36 @@ def style_direction(crew_ids: list[str] | None = None) -> dict[str, Any]:
     }
 
 
-def base_style_for(crew_ids: list[str] | None, showrunner_style: str = "") -> str:
-    """The Showrunner's word if there is one, otherwise the room's."""
+# Named looks the Showrunner can call for outright, in the same vocabulary the
+# room's own average lands in (`_BASE_LOOK`). The average is a good default and
+# a poor decision: on the sixteen-seat floor it always comes out near the
+# middle — measured live, every one of ten cases rendered `anime illustration`,
+# because vivid seats and flat seats cancel. Naming the look is how the
+# Showrunner stops the room voting on it.
+LOOKS: dict[str, str] = {
+    "vivid": "vivid anime illustration",
+    "flat": "flat anime cel shading",
+    "vivid_flat": "vivid flat anime cel shading",
+    "muted_flat": "muted flat anime cel shading",
+    "soft": "muted anime illustration",
+    "semi_real": "semi-realistic rendering",
+    "vivid_semi_real": "vivid semi-realistic rendering",
+}
+
+
+def look_style(look: str) -> str:
+    """The base-look phrase for a named look, or "" when it is not one."""
+    return LOOKS.get(str(look or "").strip().lower(), "")
+
+
+def base_style_for(
+    crew_ids: list[str] | None, showrunner_style: str = "", look: str = "",
+) -> str:
+    """The Showrunner's look if they named one, their words if they wrote any,
+    otherwise the room's average."""
+    named = look_style(look)
+    if named:
+        return named
     written = str(showrunner_style or "").strip()
     return written or style_direction(crew_ids)["base"]
 

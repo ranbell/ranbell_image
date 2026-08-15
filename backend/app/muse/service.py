@@ -118,7 +118,10 @@ def _style(session: dict[str, Any]) -> str:
     room of the animation director and the supervisor pulls flat, and swapping
     one person moves the picture. That is the reason to let people pick a crew.
     """
-    return crew.base_style_for(_crew_ids(session), _inputs(session).get("style") or "")
+    inputs = _inputs(session)
+    return crew.base_style_for(
+        _crew_ids(session), inputs.get("style") or "", inputs.get("look") or "",
+    )
 
 
 def _text_model(inputs: dict[str, Any]) -> str:
@@ -219,6 +222,7 @@ async def create_session(db, inputs: dict[str, Any] | None = None) -> dict[str, 
 
 
 async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    before_look = str(_inputs(session).get("look") or "")
     inputs = {**_inputs(session), **{k: v for k, v in patch.items() if v is not None}}
     # The mode lives on the session, not in inputs — `is_duet` reads it there and
     # so does the panel, which has to know before anything starts whether to
@@ -260,6 +264,28 @@ async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> di
                 "",
             )
             inputs["crew_preset"] = matched or "custom"
+    # Naming the look is a decision, so it is said out loud. Mid-session it is
+    # the one setting that changes every frame from here on, and a silent
+    # change would read as the room drifting rather than as an instruction.
+    if patch.get("look") is not None and str(patch["look"]).strip() != str(
+        before_look or ""
+    ).strip():
+        phrase = crew.look_style(str(inputs.get("look") or ""))
+        locale = str(inputs.get("locale") or "ja")
+        if session.get("chat") is not None and (phrase or before_look):
+            said = _chat_append(
+                session, role="system", name="Studio",
+                text=(
+                    f"ルックを「{phrase}」にしました。以降このルックで撮ります。"
+                    if locale.startswith("ja") and phrase else
+                    "ルックの指定を外しました。以降は班の好みで決めます。"
+                    if locale.startswith("ja") else
+                    f"Look set to {phrase}. Every frame from here is shot that way."
+                    if phrase else
+                    "Look cleared — the room decides again."
+                ),
+            )
+            _publish_chat(session["session_id"], said)
     session["inputs"] = inputs
     _rebuild_brief(session)
     await session_db.save(db, session)
@@ -1376,6 +1402,57 @@ async def route_note(
     return named, standing
 
 
+# A refusal names one thing, or a few. Past this, the clerk has read a camera
+# note as "everything else is out" — measured live at 25 and 27 tags struck
+# from one line — and a strike is permanent: it filters every later turn and
+# goes into the negative prompt.
+MAX_STRIKE = 6
+
+
+def _sane_strike(session: dict[str, Any], picked: list[str]) -> list[str]:
+    """Drop strikes that contradict the shot, and refuse a runaway list.
+
+    Measured live on 「もう一度寄って。手元だけ見せて。」— a crop instruction —
+    the clerk struck 27 tags including `cafe`, `wooden_table`, `window` and the
+    sweater she was wearing. Those went into the negative prompt, so the
+    sampler spent the rest of the session being told not to draw the room the
+    showrunner was shooting in.
+
+    The notebook is the shot. Nothing it currently names can be struck: if
+    WEARING says she is in a sweater, the sweater is not gone, whatever the
+    clerk read into a note about the crop.
+    """
+    if not picked:
+        return []
+    live = notebook_mod.shot_tokens(notebook_mod.of(session))
+    kept = [
+        t for t in picked
+        if not (notebook_mod.wearing_tokens(t) & live)
+        and identity.bare_tag(t) not in live
+    ]
+    blocked = [t for t in picked if t not in kept]
+    if len(kept) > MAX_STRIKE:
+        logger.info(
+            "[muse] refusing runaway strike (%d tags): %s",
+            len(kept), ", ".join(kept[:12]),
+        )
+        return []
+    # One blocked item is a removal arriving a beat early — the showrunner
+    # said「帽子外して」and the hat is still in WEARING, because the compile
+    # that takes it off has not run yet. Several blocked items is a different
+    # thing: the clerk has listed the frame rather than a refusal, and the
+    # rest of that same read cannot be trusted either.
+    if len(blocked) >= 2:
+        logger.info(
+            "[muse] strike read the whole frame; dropping it: %s",
+            ", ".join(blocked[:12]),
+        )
+        return []
+    if blocked:
+        logger.info("[muse] strike blocked by the notebook: %s", ", ".join(blocked))
+    return kept
+
+
 async def take_note(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> tuple[list[str], list[str]]:
@@ -1405,7 +1482,7 @@ async def take_note(
         except Exception:
             logger.warning("[muse] strike turn failed; nothing removed", exc_info=True)
             picked, back = [], []
-        removed, restored = apply_removals(session, picked, back)
+        removed, restored = apply_removals(session, _sane_strike(session, picked), back)
 
     if removed:
         # The note's own words drop out of the standing orders from the next
@@ -1413,27 +1490,17 @@ async def take_note(
         # the refused noun in front of every seat is what kept them talking
         # about it for the rest of the session.
         session.setdefault("carried_out", []).append(index)
-        locale = str(_inputs(session).get("locale") or "ja")
-        msg = _chat_append(
-            session, role="system", name="Studio",
-            text=(
-                f"（外しました: {'、'.join(removed)}。以降は書き戻されません）"
-                if locale.startswith("ja") else
-                f"(Removed: {', '.join(removed)} — and kept out from here on.)"
-            ),
-        )
-        _publish_chat(session["session_id"], msg)
-    if restored:
-        locale = str(_inputs(session).get("locale") or "ja")
-        msg = _chat_append(
-            session, role="system", name="Studio",
-            text=(
-                f"（戻しました: {'、'.join(restored)}）"
-                if locale.startswith("ja") else
-                f"(Restored: {', '.join(restored)}.)"
-            ),
-        )
-        _publish_chat(session["session_id"], msg)
+    # What was struck is state, not dialogue. Printing it put lines like
+    # 「（外しました: sitting、close-up、profile、steady_gaze、motionless）」 into
+    # a conversation where the showrunner had just said one sentence in
+    # Japanese — the machine talking to itself in front of the room. The panel
+    # reads `struck` / `banned` from the session and can show it as state.
+    if removed or restored:
+        events.publish(session["session_id"], {
+            "type": "struck_changed",
+            "removed": list(removed),
+            "restored": list(restored),
+        })
 
     _rebuild_brief(session)
     return removed, restored
@@ -1602,18 +1669,11 @@ async def _run_plan_turn(
         ).strip().lower()
         sync_crew_notebook(session, force_scene=moved)
     if struck:
-        locale = str(inputs.get("locale") or "ja")
-        tidied = _chat_append(
-            session, role="system", name="Studio",
-            text=(
-                f"（{_muse_display_name(session, mid)}が片付けました: "
-                f"{'、'.join(struck)}）"
-                if locale.startswith("ja") else
-                f"(Struck from the set by "
-                f"{_muse_display_name(session, mid)}: {', '.join(struck)})"
-            ),
-        )
-        _publish_chat(sid, tidied)
+        # State, not dialogue — same reason as `take_note`. A list of tag names
+        # in the chat is the machine talking to itself in front of the room.
+        events.publish(sid, {
+            "type": "struck_changed", "removed": list(struck), "restored": [],
+        })
     if say:
         msg = _chat_append(
             session, role="muse", text=say, muse_id=mid,
@@ -2326,6 +2386,26 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     stem = notebook_mod.posture_stem(str(nb.get("beat") or ""))
     if stem and stem not in have and stem not in gone:
         missing.append(stem)
+    # And the planner's ledger. MUST APPEAR is the one register of objects the
+    # studio has, and it used to be excellent — the design notes record 10–12
+    # of 12 props surviving to the render, back when seats wrote tags. The
+    # weave took tag-writing over and nothing reconnected the ledger to it:
+    # measured live, 「机にマグカップも置いて」put `ceramic_mug` in MUST APPEAR
+    # and the woven bag came back with `rising_steam` and no cup.
+    for item in _ledger_items(session.get("plan")):
+        key = identity.bare_tag(item)
+        if not key or key in have or key in gone:
+            continue
+        if any(key in t or t in key for t in have):
+            continue
+        missing.append(key)
+    # And the tags the seats wrote for the element each of them owns. They are
+    # already sampler vocabulary — the whole point of the crew writing them —
+    # so a weave that paraphrases them away is dropping the one thing that
+    # seat contributed to this frame.
+    for tag in crew_look_tags(session):
+        if tag not in have and tag not in gone and tag not in missing:
+            missing.append(tag)
     return missing
 
 
@@ -2931,9 +3011,15 @@ def _duet_user_prompt(
             how = [
                 "HOW TO SPEAK THIS TURN:",
                 "- Sense and body first. Do not recite a checklist every turn.",
-                "- If they gave a direction (do it this way / こうして), "
-                "confirm it in SAY first — 「こうしますね」restating the "
-                "action — then the body-feel. Do not skip the confirmation.",
+                # Never hand her the words. This line used to name the phrase
+                # 「こうしますね」 and she wrote it back: measured live, 26% of
+                # her lines carried it and three turns in a row opened
+                # 「〜。わかった、こうしますね。」 — the one thing in the room
+                # that reads as a machine rather than a person.
+                "- If they gave a direction, take it in SAY before anything "
+                "else — say the action back in your own words, differently "
+                "each time, so they know it landed. Never reach for the same "
+                "phrasing you used last turn. Then the body-feel.",
                 "- If they ask what you are wearing / where / what time / how it "
                 "looks now, answer with nouns from the still and CARD. "
                 "Do not dodge with『なんかいい感じ』.",
@@ -3969,19 +4055,11 @@ async def post_chat(
     # Fold: her CARD/SAY body action onto the stem the note already set.
     await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
 
-    locale = str(_inputs(session).get("locale") or "ja")
-    wrap = _chat_append(
-        session, role="system",
-        name="Studio",
-        text=(
-            "反映しました。「②試し撮り」でイメージボード、「③本番」で撮影に入れます。"
-            "まだ詰めるなら続けてどうぞ。"
-            if locale.startswith("ja") else
-            "Applied. Use \"test shot\" for a screening, \"final\" to shoot, "
-            "or keep notes coming."
-        ),
-    )
-    _publish_chat(sid, wrap)
+    # No per-note "Applied. Use ②試し撮り…" any more. It fired on every single
+    # note — 21 times in one measured run — and the buttons it points at are on
+    # screen the whole time. The room is a conversation; a floor manager
+    # repeating the same sentence after every line is what made it read like a
+    # form. The panel already shows whether the script is caught up.
     session["status"] = "chat"
     await session_db.save(db, session)
     return session
@@ -4065,7 +4143,7 @@ def _split_craft_line(body: str) -> tuple[str, str]:
     say = _CRAFT_LINE_RE.sub("", str(body or "")).strip()
     if clause.lower() in ("none", "-", "n/a", "omit", "(omit)"):
         clause = ""
-    return say, clause[:160]
+    return say, clause[:280]
 
 
 def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str, str]]:
@@ -4104,8 +4182,29 @@ def _parse_table_talk(raw: str, speakers: list[str]) -> list[tuple[str, str, str
     return []
 
 
-def crew_look(session: dict[str, Any]) -> dict[str, str]:
+def crew_look(session: dict[str, Any]) -> dict[str, Any]:
     return session.setdefault("crew_look", {})
+
+
+def _split_visual_script(clause: str) -> tuple[str, str]:
+    """`backlighting, rim_light | low sun from behind` → (tags, note).
+
+    The crew's shared language: the left half is what the camera is set to and
+    goes to the sampler verbatim, the right half is what they mean by it and
+    goes into the prose. Written as one clause with no `|`, it is all note —
+    which is what the first live run produced, and why the weave had to invent
+    tags for it and minted `silhouette_breathing_room`.
+    """
+    text = str(clause or "").strip()
+    if "|" not in text:
+        return "", text
+    left, _, right = text.partition("|")
+    tags = ", ".join(
+        t for t in (
+            identity.bare_tag(p) for p in left.split(",")
+        ) if t
+    )
+    return tags[:120], right.strip()[:160]
 
 
 def _record_crew_look(
@@ -4127,27 +4226,60 @@ def _record_crew_look(
     low = clause.lower().replace(" ", "_")
     if any(tok and tok in low for tok in struck):
         return
+    tags, note = _split_visual_script(clause)
     look = crew_look(session)
-    before = str(look.get(slot) or "")
-    if before.strip().lower() == clause.lower():
+    prev = look.get(slot)
+    before = str((prev or {}).get("tags") or "") if isinstance(prev, dict) else str(prev or "")
+    entry = {"tags": tags, "note": note}
+    if isinstance(prev, dict) and prev.get("tags") == tags and prev.get("note") == note:
         return
-    look[slot] = clause
+    if not isinstance(prev, dict) and str(prev or "").strip() == clause:
+        return
+    look[slot] = entry
+    # The ledger sees the tags, not the sentence. It is the destruction matrix
+    # (`GET /api/muse/report`) — "which seat dropped which word" only means
+    # something when the entries are words the picture is made of, and a whole
+    # clause stored as one tag made it unreadable.
     record_ledger(
         session, muse_id=muse_id, name=_muse_display_name(session, muse_id),
-        before=before, after=clause, ms=ms,
+        before=before, after=tags or note, ms=ms,
     )
 
 
 def crew_look_block(session: dict[str, Any]) -> str:
-    """The owned craft notes, for the scripter's compile and weave."""
+    """The owned craft notes, for the scripter's compile and weave.
+
+    `LIGHT: backlighting, rim_light — low sun from behind, hard rim on the jaw`
+    — the tags are the seat's own, already in the sampler's vocabulary, and go
+    through as written; the words after the dash are what the prose is built
+    from. Older sessions stored one prose clause and no tags; those still read.
+    """
     if is_duet(session):
         return ""
-    rows = [
-        f"{slot}: {str(text).strip()}"
-        for slot, text in (session.get("crew_look") or {}).items()
-        if str(text or "").strip()
-    ]
+    rows: list[str] = []
+    for slot, value in (session.get("crew_look") or {}).items():
+        if isinstance(value, dict):
+            tags = str(value.get("tags") or "").strip()
+            note = str(value.get("note") or "").strip()
+        else:
+            tags, note = "", str(value or "").strip()
+        line = " — ".join(p for p in (tags, note) if p)
+        if line:
+            rows.append(f"{slot}: {line}")
     return "\n".join(rows)
+
+
+def crew_look_tags(session: dict[str, Any]) -> list[str]:
+    """Every tag the seats wrote for their own element, in slot order."""
+    out: list[str] = []
+    for value in (session.get("crew_look") or {}).values():
+        if not isinstance(value, dict):
+            continue
+        for part in str(value.get("tags") or "").split(","):
+            tag = identity.bare_tag(part)
+            if tag and tag not in out:
+                out.append(tag)
+    return out
 
 
 async def _run_crew_lead_turn(

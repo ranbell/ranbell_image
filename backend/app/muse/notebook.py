@@ -650,7 +650,17 @@ _CARD_KEY = {
     "BEAT_B": "beat_b",
 }
 POSE_CARD_KEYS = ("beat", "beat_b")
-FOLD_PATCH_KEYS = ("beat", "beat_b")
+# A fold may move the body, and it may write down a proposal. Nothing else:
+# the shot itself only changes when the showrunner says so.
+#
+# `open` is here because without it every good idea the room has that is not
+# body action simply dies. Measured live: the choreographer said "keep the
+# weight back, make the pause before she turns", the layout seat asked for air
+# between hair and shoulder — and the field that exists for exactly this
+# ("open is for Muse proposals not yet affirmed") was empty on every turn of
+# every case. A proposal in `open` shows in the panel and lands in the picture
+# the moment the showrunner says「それでいこう」(`clear_open`).
+FOLD_PATCH_KEYS = ("beat", "beat_b", "open")
 
 
 def parse_muse_card(card: str) -> dict[str, str]:

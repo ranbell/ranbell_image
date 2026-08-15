@@ -52,6 +52,11 @@ LLM_DEFAULTS: dict[str, object] = {
     "vision_model": "",
     # Composition bias for every stage. auto lets the theme decide.
     "framing": "auto",
+    # The named look (`crew.LOOKS`): vivid / flat / vivid_flat / muted_flat /
+    # soft / semi_real / vivid_semi_real. Empty means the room decides by the
+    # cast's average taste, which on a full floor always lands near the middle
+    # — name one when the picture should be decisively vivid or decisively cel.
+    "look": "",
     # Drop the LLM from VRAM before each Comfy render. On: a model left resident
     # is still holding the card when ComfyUI wants it, and a full-size latent
     # then has nowhere to go. Setting `keep_alive` on the Ollama side made that

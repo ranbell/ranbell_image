@@ -477,26 +477,47 @@ def test_craft_slots_have_one_owner_each():
 
 
 def test_crew_look_records_owner_and_shows_up_in_the_ledger():
+    """Visual Script: `タグ | 言葉`。タグはサンプラーへ、言葉は散文へ。"""
     session = {
         "mode": "", "inputs": {"locale": "ja", "crew_ids": ["gaffer:gyakkou"]},
         "notebook": {}, "craft": {},
     }
     service._record_crew_look(
-        session, "gaffer:gyakkou", "low sun from behind, hard rim on the jaw",
+        session, "gaffer:gyakkou",
+        "backlighting, rim_light | low sun from behind, hard rim on the jaw",
     )
-    service._record_crew_look(session, "lens:pinto", "85mm, shallow, eyes sharp")
+    service._record_crew_look(
+        session, "lens:pinto", "depth_of_field, blurry_background | 85mm, eyes sharp",
+    )
     # 他人の枠は書けない（席に枠がなければ黙って捨てる）
-    service._record_crew_look(session, "beat:ichibyou", "wide_shot, full body")
+    service._record_crew_look(session, "beat:ichibyou", "wide_shot | full body")
 
     look = service.crew_look(session)
-    assert look["LIGHT"].startswith("low sun")
-    assert look["OPTICS"].startswith("85mm")
+    assert look["LIGHT"]["tags"] == "backlighting, rim_light"
+    assert look["LIGHT"]["note"].startswith("low sun from behind")
     assert "SHAPE" not in look and len(look) == 2
+
     block = service.crew_look_block(session)
-    assert "LIGHT: low sun from behind" in block
-    assert [e["muse_id"] for e in session["ledger"]] == [
-        "gaffer:gyakkou", "lens:pinto",
+    assert "LIGHT: backlighting, rim_light — low sun from behind" in block
+    # 台帳は実タグで残る（破壊行列が読める）
+    entry = next(e for e in session["ledger"] if e["muse_id"] == "gaffer:gyakkou")
+    assert set(entry["added"]) == {"backlighting", "rim_light"}
+    # サンプラーに渡す語として取り出せる
+    assert service.crew_look_tags(session) == [
+        "backlighting", "rim_light", "depth_of_field", "blurry_background",
     ]
+
+
+def test_crew_look_without_a_bar_is_all_prose():
+    """`|` の無い行は意図だけ。タグは名乗っていないので足さない。"""
+    session = {"mode": "", "inputs": {"locale": "ja"}, "notebook": {}, "craft": {}}
+    service._record_crew_look(
+        session, "weather:shitsudo", "hazy golden particles in the evening air",
+    )
+    look = service.crew_look(session)["AIR"]
+    assert look["tags"] == ""
+    assert look["note"].startswith("hazy golden")
+    assert service.crew_look_tags(session) == []
 
 
 def test_crew_look_seeds_light_from_the_plan():
@@ -663,3 +684,64 @@ async def test_card_reaches_fold_but_never_a_plain_compile(monkeypatch):
         db, FakeOllama(), session, "帽子は外して", cfg={}, fold=True,
     )
     assert cards and any("straw hat" in c for c in cards), cards
+
+
+# ── ルックの明示指定・strike の誤爆・提案の経路 ─────────────────────────────
+def test_named_look_beats_the_room_average():
+    """16席の平均は常に無難な真ん中に落ちる。名前で呼べば総監督が決める。"""
+    from app.muse import crew
+    cast = crew.resolve_crew(preset="standard")
+    assert crew.base_style_for(cast, "", "") == "anime illustration"  # 平均の実測値
+    assert crew.base_style_for(cast, "", "vivid") == "vivid anime illustration"
+    assert crew.base_style_for(cast, "", "flat") == "flat anime cel shading"
+    # 総監督が文で書いたものより、名指しのルックが強い。
+    assert crew.base_style_for(cast, "水彩っぽく", "flat") == "flat anime cel shading"
+    # 知らない名前は無視して従来どおり。
+    assert crew.base_style_for(cast, "水彩っぽく", "nonsense") == "水彩っぽく"
+
+
+@pytest.mark.asyncio
+async def test_look_change_is_said_out_loud(monkeypatch):
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["chat"] = []
+    await service.patch_inputs(db, session, {"look": "vivid"})
+    said = [m for m in session["chat"] if m.get("role") == "system"]
+    assert said and "vivid anime illustration" in said[-1]["text"]
+    assert service._style(session) == "vivid anime illustration"
+
+
+def test_a_camera_note_cannot_strike_the_room():
+    """「手元だけ見せて」で27語追放された回の再発防止。"""
+    session = {
+        "mode": "", "session_id": "s-3", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(), "craft": {},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "scene": "a cafe by the window, afternoon",
+        "wearing": "cream cable knit sweater, pleated skirt",
+        "beat": "standing, holding a bag",
+    })
+    picked = [
+        "cafe", "wooden_table", "window", "cream_cable_knit_sweater",
+        "pleated_skirt", "afternoon_sun", "bokeh", "warm_lighting",
+    ]
+    # ノートが「そこにある/着ている」と言うものは落とせない。
+    assert service._sane_strike(session, picked) == []
+    # 大量削除そのものが誤読なので捨てる。
+    assert service._sane_strike(session, [f"prop_{i}" for i in range(9)]) == []
+    # 本物の refusal は通る。
+    assert service._sane_strike(session, ["neon_sign"]) == ["neon_sign"]
+    # 脱がせる指示は compile より先に来るので、1件だけ弾かれるのは正常
+    # （帽子はまだ WEARING にある）。残りはそのまま通す。
+    assert service._sane_strike(
+        session, ["pleated_skirt", "neon_sign"],
+    ) == ["neon_sign"]
+
+
+def test_fold_may_write_a_proposal_but_not_the_shot():
+    """班と主演の「beat 以外の提案」は open に入る。絵そのものは変えない。"""
+    assert notebook.FOLD_PATCH_KEYS == ("beat", "beat_b", "open")
+    from app.muse import chain
+    assert "crew's lines from this turn" in chain.SCRIPTER_FOLD_NOTE
+    assert "goes in `open` as a proposal" in chain.SCRIPTER_FOLD_NOTE
