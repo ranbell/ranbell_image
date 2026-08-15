@@ -611,3 +611,24 @@ def test_removed_garment_is_not_put_back_by_coverage():
         new_wearing="sailor uniform",
     )
     assert service._missing_wearing_tags(session, "1girl, sailor_uniform") == []
+
+
+def test_posture_stem_always_reaches_the_tags():
+    """beat が名乗る姿勢は必ずタグに出る（旧: 「立って」が語ごと消えた）。"""
+    session = {
+        "mode": "", "session_id": "s-2", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(), "craft": {}, "character": {},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "sailor uniform", "beat": "standing, holding the hem of her skirt",
+    })
+    assert "standing" in service._missing_wearing_tags(
+        session, "close_up, sailor_uniform, skirt_hem, trembling_fingertips",
+    )
+    # 既に入っていれば足さない。日本語の beat も拾う。
+    assert "standing" not in service._missing_wearing_tags(
+        session, "standing, sailor_uniform",
+    )
+    notebook.apply_patch(notebook.of(session), {"beat": "しゃがんで、日傘は持ったまま"})
+    assert notebook.posture_stem("しゃがんで、日傘は持ったまま") == "squatting"
+    assert "squatting" in service._missing_wearing_tags(session, "sailor_uniform, parasol")

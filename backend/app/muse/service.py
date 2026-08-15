@@ -2312,9 +2312,20 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
             continue
         if tokens & have:
             continue
-        tag = re.sub(r"\s+", "_", item.strip().lower()).strip("_")
+        tag = re.sub(r"\s+", "_", item.strip().lower())
+        # Whatever ends up here is going to the sampler as a tag, so it may hold
+        # only what a tag holds. A malformed WEARING (a str()ed JSON list, a
+        # trailing quote) must not mint `['sailor_uniform` as a token.
+        tag = re.sub(r"[^a-z0-9_-]", "", tag).strip("_-")
         if tag and len(tag) >= 3:
             missing.append(tag)
+    # The posture is the other thing the notebook says and the weave drops.
+    # Measured live: BEAT read "standing, holding the hem…" and the woven bag
+    # came back with `trembling_fingertips, skirt_hem` and no posture at all —
+    # the one word the showrunner's「立って」was supposed to become.
+    stem = notebook_mod.posture_stem(str(nb.get("beat") or ""))
+    if stem and stem not in have and stem not in gone:
+        missing.append(stem)
     return missing
 
 

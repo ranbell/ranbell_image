@@ -282,6 +282,26 @@ def set_open_choices(nb: dict[str, Any], choices: list[str]) -> dict[str, Any]:
     return nb
 
 
+# The four postures the scripter's beat contract names (`chain.SCRIPTER_SYSTEM`:
+# "Beat always names ONE posture stem"). Not a vocabulary of situations — the
+# closed set the contract is written against, so the tag bag can be held to it.
+POSTURE_STEMS: dict[str, tuple[str, ...]] = {
+    "sitting": ("sitting", "sits", "seated", "sit", "座"),
+    "standing": ("standing", "stands", "stand", "立"),
+    "kneeling": ("kneeling", "kneels", "kneel", "seiza", "跪", "正座"),
+    "squatting": ("crouching", "crouch", "squatting", "squat", "しゃが"),
+}
+
+
+def posture_stem(beat: str) -> str:
+    """The danbooru stem the beat names, or "" when it names none."""
+    text = str(beat or "").lower()
+    for tag, words in POSTURE_STEMS.items():
+        if any(w in text for w in words):
+            return tag
+    return ""
+
+
 def shot_tokens(nb: dict[str, Any]) -> set[str]:
     """Everything the shot currently says, as tokens."""
     out: set[str] = set()
