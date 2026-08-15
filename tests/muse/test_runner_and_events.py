@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.muse import runner, events, runtime
+from app.muse import runner, events, identity, runtime
 
 
 @pytest.mark.asyncio
@@ -43,3 +43,45 @@ def test_runtime_negative_and_settings():
 
     final_set = runtime.render_settings(session["inputs"], draft=False)
     assert final_set["steps"] == 35
+
+
+def test_negative_carries_only_the_box_and_the_refusals():
+    """図の守りはポジティブ側でやる。ネガティブに体型・年齢を積まない。
+
+    主演撮りも班撮影も `runtime.negative_for` の一本道なので、両方に効く。
+    """
+    session = {
+        "inputs": {
+            "negative_prompt": "bad quality, bad anatomy",
+            "framing": "auto",
+        },
+        "character": {"identity_tags": ["1girl", "medium_breasts", "slim"]},
+        "partner_character": {"identity_tags": ["1girl", "large_breasts"]},
+        "banned": ["cleaning_rag"],
+    }
+    neg = runtime.negative_for(session)
+    tokens = {t.strip() for t in neg.split(",") if t.strip()}
+    assert tokens == {"bad quality", "bad anatomy", "cleaning_rag"}
+    # 体型ロックの反対側も、年齢語も入らない。
+    for gone in ("loli", "old", "child", "mature_female", "petite",
+                 "large_breasts", "flat_chest", "muscular", "curvy"):
+        assert gone not in tokens
+
+    # 守りはポジティブ側が持つ：ロックと矛盾する語は positive に入らない。
+    positive = identity.assemble_positive(
+        ["1girl", "medium_breasts", "slim"],
+        "1girl, large_breasts, loli, park, standing",
+        "she waits in the park",
+    )
+    assert "large_breasts" not in positive
+    assert "loli" not in positive
+    assert "park" in positive and "standing" in positive
+
+
+def test_default_negative_does_not_fight_a_plain_background():
+    """白ホリの撮影は simple_background そのものを頼む。既定で撃たない。"""
+    from app.muse.defaults import STYLE_DEFAULTS
+    box = str(STYLE_DEFAULTS["negative_prompt"])
+    assert "simple_background" not in box
+    assert "simple," not in box
+    assert "bad anatomy" in box

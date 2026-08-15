@@ -17,25 +17,23 @@ def negative_for(session: dict[str, Any]) -> str:
     runner kept its own — so anything added to the service version reached no
     render at all. It lives here now because this module is the one both sides
     are allowed to import.
+
+    Two things go in, and nothing else: what the Showrunner wrote in the
+    negative box, and what the Showrunner refused in conversation.
+
+    The figure lock used to be pushed from both sides — every body tag that
+    contradicts the sheet, plus a fixed age list (`mature_female, old, loli,
+    child, petite`), went in on every render. Measured on a live session that
+    was 21 of 35 tokens spent restating a lock that is already absolute on the
+    other side: `identity.assemble_positive` refuses those same tags entry to
+    the POSITIVE prompt, so the sampler is never asked for them in the first
+    place. Keeping a word out is the guard; naming it again in the negative
+    only crowds out the tags that describe the picture.
     """
     inputs = session.get("inputs") or {}
-    tags = [
-        str(t) for t in ((session.get("character") or {}).get("identity_tags") or [])
-        if str(t).strip()
-    ]
-    # A duet locks two identities, but only the lead's ever pushed back against
-    # the sampler inventing a different body/hair/eyes — her partner's tags
-    # went into the positive prompt with no matching negative-side guard at
-    # all, which left her the one more likely to drift.
-    partner_tags = [
-        str(t) for t in ((session.get("partner_character") or {}).get("identity_tags") or [])
-        if str(t).strip()
-    ]
     banned = [str(t) for t in (session.get("banned") or []) if str(t).strip()]
     return identity.merge_negative(
         str(inputs.get("negative_prompt") or ""),
-        identity.opposing_negative(tags),
-        identity.opposing_negative(partner_tags) if partner_tags else "",
         identity.framing_negative(str(inputs.get("framing") or "auto")),
         # What the Showrunner refused. This is the only place in the pipeline
         # where "do not draw this" is a mechanism rather than a request — put it

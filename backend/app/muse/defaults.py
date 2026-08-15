@@ -78,11 +78,18 @@ STYLE_DEFAULTS: dict[str, object] = {
     # default — a preset style meant swapping the whole crew changed nothing
     # about how the picture was rendered.
     "style": "",
-    # Appended to whatever the workflow already carries.
+    # Appended to whatever the workflow already carries — so this is only what
+    # the workflow does not already say, and only things that are wrong in
+    # every picture. `simple` and `simple_background` used to be here and were
+    # the studio shooting at its own instructions: a white-cyclorama shoot asks
+    # for exactly `simple_background`, and the negative was refusing it.
+    # Nothing about the character's figure or age belongs here either — that
+    # lock is enforced by keeping those tags OUT of the positive
+    # (`identity.assemble_positive`), which is absolute, rather than by arguing
+    # with the sampler about them on every render.
     "negative_prompt": (
-        "bad quality, bad anatomy, simple, simple_background, border, "
-        "black border, white_border, notice, information, photo frame, "
-        "registered mark, multiview, frame,"
+        "bad quality, bad anatomy, border, black border, white_border, "
+        "notice, information, photo frame, registered mark, multiview, frame,"
     ),
 }
 
