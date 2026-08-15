@@ -1785,6 +1785,11 @@ def table_talk_system_prompt(
         "Props belong to THIS place and this hour. Clutter is not a substitute "
         "for specificity: a can, a bottle, scattered rubbish are what a room "
         "reaches for when it has run out of things that are actually here.",
+        "Your slot serves the BASE LOOK above; it never argues with it. The "
+        "cel room does not ask for depth_of_field, and the semi-real room does "
+        "not ask for flat_color — measured live, a layout seat on the cel crew "
+        "wrote `depth_of_field` into its own slot and softened the very thing "
+        "that crew exists for.",
         "The camera itself is never in the frame. `handheld` and `we push in` "
         "are how you work; as tags they put a camera in her hands. Write the "
         "result instead — `depth_of_field`, `motion_blur`, `from_above`.",
@@ -1856,6 +1861,35 @@ LOOK_SUFFIX_TAGS: dict[str, tuple[str, ...]] = {
 # 主演撮り uses this — see `service._style`. It is `_BASE_LOOK[(0, 0)]` by
 # construction, not by coincidence, so moving the table moves this with it.
 NEUTRAL_LOOK: str = _BASE_LOOK[(0, 0)]
+
+
+# What a chosen look is NOT. The negative prompt is the one place in the
+# pipeline where "do not draw this" is a mechanism rather than a request, and a
+# look has a real opposite: measured on the cel crew, the woven bag carried no
+# anti-flat words at all and the picture still came back softly shaded, because
+# three flat tags among forty cannot outvote what the checkpoint does by
+# default. This is not the body/age policing that was removed — that argued
+# with the sampler about the subject; this names the rendering the Showrunner
+# just declined.
+LOOK_NEGATIVE: dict[str, tuple[str, ...]] = {
+    "cel_shading": ("soft_shading", "realistic", "photorealistic", "gradient"),
+    "flat_color": ("soft_shading", "detailed_skin"),
+    "realistic": ("cel_shading", "flat_color"),
+    "detailed_skin": ("flat_color",),
+    "vivid_colors": ("muted_color", "desaturated"),
+    "muted_color": ("vivid_colors", "saturated"),
+}
+
+
+def look_negative(style: str) -> list[str]:
+    """The rendering this look rules out, for the negative prompt."""
+    out: list[str] = []
+    have = set(look_tags(style))
+    for tag in look_tags(style):
+        for opp in LOOK_NEGATIVE.get(tag, ()):
+            if opp not in out and opp not in have:
+                out.append(opp)
+    return out
 
 
 def look_tags(style: str) -> list[str]:

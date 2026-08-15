@@ -65,14 +65,19 @@ const FRAMINGS = ['auto', 'full_body', 'upper_body', 'face_closeup', 'from_behin
 // trio/quartet ("半分の編成") already exist in crew.PRESETS on the backend and
 // were fully translated — they were just never added to this list, so the
 // smaller-crew formations were unreachable from the UI.
+// Six crews, one per look. The four that went are not choices the Showrunner
+// should have to make: `everyone` was `standard` seat for seat, `classic` and
+// `calm` rendered the same base look, and `trio`/`quartet` held no craft slot
+// worth the name — and stopped being faster once the table talk packed into
+// one call. Measured over 6 crews x 2 patterns: every surviving pair overlaps
+// by at most 0.29 in tags, far under the 0.60 that would mean "the same crew".
 const PRESETS = [
-  'trio', 'quartet', 'standard', 'vivid', 'photoreal', 'flat', 'classic', 'bold', 'calm', 'everyone',
+  'standard', 'vivid', 'photoreal', 'flat', 'calm', 'bold',
 ]
 // One accent colour per formation. Backend `preset_meta.accent` wins when present.
 const PRESET_COLORS = {
-  trio: '#38bdf8', quartet: '#a78bfa', standard: '#2dd4bf', vivid: '#fb7185',
-  photoreal: '#fbbf24', flat: '#a3e635', classic: '#fb923c', bold: '#e879f9',
-  calm: '#22d3ee', everyone: '#34d399', custom: '#f472b6',
+  standard: '#2dd4bf', vivid: '#fb7185', photoreal: '#fbbf24',
+  flat: '#a3e635', calm: '#22d3ee', bold: '#e879f9', custom: '#f472b6',
 }
 const presetMeta = computed(() => (
   session.value?.roster || catalog.value?.roster || {}
@@ -581,6 +586,9 @@ async function startSession() {
       workflow: suggested.workflow || '',
       locale: isJa.value ? 'ja' : 'en',
       crew_preset: 'standard',
+      // 主演撮り is the room people actually want: one Muse, no table read,
+      // and the crewed studio one toggle away.
+      mode: 'duet',
     }),
   })
   preview.value = ''

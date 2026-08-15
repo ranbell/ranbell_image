@@ -85,3 +85,38 @@ def test_default_negative_does_not_fight_a_plain_background():
     assert "simple_background" not in box
     assert "simple," not in box
     assert "bad anatomy" in box
+
+
+def test_the_chosen_look_rules_its_opposite_out():
+    """セル画を頼んだ班の絵が柔らかいままだった。
+
+    43語中3語の cel_shading では、チェックポイントの既定を押し切れない。
+    体型・年齢の自動注入とは別物 — あれは被写体について言い争っていたが、
+    これは総監督がいま断ったレンダリングを名指しする。
+    """
+    from app.muse import crew
+    flat = {
+        "mode": "", "inputs": {"crew_preset": "flat", "negative_prompt": "bad quality"},
+        "banned": [],
+    }
+    neg = {t.strip() for t in runtime.negative_for(flat).split(",") if t.strip()}
+    assert "soft_shading" in neg and "realistic" in neg
+    assert "cel_shading" not in neg          # 頼んだほうは打ち消さない
+
+    real = {"mode": "", "inputs": {"crew_preset": "photoreal"}, "banned": []}
+    neg2 = {t.strip() for t in runtime.negative_for(real).split(",") if t.strip()}
+    assert "cel_shading" in neg2 and "flat_color" in neg2
+    assert "realistic" not in neg2
+
+    # 中立の班は何も打ち消さない
+    plain = {"mode": "", "inputs": {"crew_preset": "standard"}, "banned": []}
+    assert crew.look_negative(runtime.style_for(plain)) == []
+
+
+def test_style_for_is_one_answer_for_both_halves_of_the_prompt():
+    """ポジとネガが別々にルックを決めると、片方だけ効く事故になる。"""
+    from app.muse import crew, service
+    duet = {"mode": "duet", "inputs": {"look": "flat"}}
+    assert runtime.style_for(duet) == "flat anime cel shading"
+    assert service._style(duet) == runtime.style_for(duet)
+    assert runtime.style_for({"mode": "duet", "inputs": {}}) == crew.NEUTRAL_LOOK

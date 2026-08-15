@@ -27,6 +27,7 @@ from . import memories_db, notebook as notebook_mod
 from . import session_db, vitality
 from . import handpost_db, lounge as lounge_mod, lounge_db
 from .runtime import negative_for as runtime_negative_for
+from .runtime import style_for as runtime_style_for
 from .runtime import render_settings
 from .schema import missing_inputs, new_session
 
@@ -118,22 +119,13 @@ def _style(session: dict[str, Any]) -> str:
     room of the animation director and the supervisor pulls flat, and swapping
     one person moves the picture. That is the reason to let people pick a crew.
 
-    主演撮り has no cast at all. `_crew_ids` falls back to the default preset
-    when none is stored, so a two-hander's look was being decided by the
-    average taste of eighteen people who are not in the room — and editing the
-    standard roster silently moved every duet's picture. She gets the named
-    look if there is one, and the neutral base otherwise.
+    主演撮り has no cast at all, and gets the neutral look instead of the
+    average of eighteen people who are not in the room.
+
+    The body lives in `runtime` because the negative prompt needs the same
+    answer — a look rules a rendering out as well as in.
     """
-    inputs = _inputs(session)
-    if is_duet(session):
-        return (
-            crew.look_style(str(inputs.get("look") or ""))
-            or str(inputs.get("style") or "").strip()
-            or crew.NEUTRAL_LOOK
-        )
-    return crew.base_style_for(
-        _crew_ids(session), inputs.get("style") or "", inputs.get("look") or "",
-    )
+    return runtime_style_for(session)
 
 
 def _text_model(inputs: dict[str, Any]) -> str:

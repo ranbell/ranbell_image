@@ -7,7 +7,32 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import identity
+from . import crew, identity
+
+
+def style_for(session: dict[str, Any]) -> str:
+    """The look everything downstream obeys. `service._style` delegates here.
+
+    It lives beside `negative_for` because the negative needs it too — a look
+    is a choice, and the rendering it rules out belongs on the other side of
+    the prompt.
+    """
+    inputs = session.get("inputs") or {}
+    if str(session.get("mode") or "") == "duet":
+        # No cast to average: 主演撮り has no room. See `crew.NEUTRAL_LOOK`.
+        return (
+            crew.look_style(str(inputs.get("look") or ""))
+            or str(inputs.get("style") or "").strip()
+            or crew.NEUTRAL_LOOK
+        )
+    return crew.base_style_for(
+        crew.resolve_crew(
+            preset=str(inputs.get("crew_preset") or crew.DEFAULT_PRESET),
+            crew_ids=list(inputs.get("crew_ids") or []) or None,
+        ),
+        inputs.get("style") or "",
+        inputs.get("look") or "",
+    )
 
 
 def negative_for(session: dict[str, Any]) -> str:
@@ -35,6 +60,10 @@ def negative_for(session: dict[str, Any]) -> str:
     return identity.merge_negative(
         str(inputs.get("negative_prompt") or ""),
         identity.framing_negative(str(inputs.get("framing") or "auto")),
+        # The rendering the chosen look rules out. Three flat tags among forty
+        # cannot outvote what the checkpoint does by default; naming the
+        # opposite is the half of the prompt where "not this" works.
+        ", ".join(crew.look_negative(style_for(session))),
         # What the Showrunner refused. This is the only place in the pipeline
         # where "do not draw this" is a mechanism rather than a request — put it
         # in the positive prompt and the sampler makes it more likely, not less.

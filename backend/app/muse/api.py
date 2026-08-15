@@ -28,8 +28,10 @@ class SessionCreate(BaseModel):
     crew_preset: str = "standard"
     # Named look — see `crew.LOOKS`. Settable here and mid-session.
     look: str = ""
-    # "duet" opens 主演撮り (lead shoot) — one or two Muses, no crew.
-    mode: str = ""
+    # 主演撮り (lead shoot) — one or two Muses and the Showrunner, no table
+    # read. It is what people open the studio to do, so it is the default; a
+    # client that wants the crewed floor sends `mode: ""` explicitly.
+    mode: str = "duet"
     partner_preset: str | None = None
 
 
