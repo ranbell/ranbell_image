@@ -103,6 +103,41 @@ async function loadDiaries() {
   }
 }
 
+// The shoot behind the page. Fetched on demand and cached per entry: the log
+// is long, and most pages are opened to read what she wrote, not to re-read
+// the room. `session_id` has been stored on every entry all along.
+const logOpen = ref(false)
+const logLoading = ref(false)
+const logLines = ref([])
+const logTheme = ref('')
+const logCache = new Map()
+
+async function toggleLog() {
+  logOpen.value = !logOpen.value
+  const d = selectedDiary.value
+  if (!logOpen.value || !d?.id) return
+  if (logCache.has(d.id)) {
+    const hit = logCache.get(d.id)
+    logLines.value = hit.lines
+    logTheme.value = hit.theme
+    return
+  }
+  logLoading.value = true
+  try {
+    const res = await api(`/api/characters/${props.characterId}/diaries/${d.id}/log`)
+    const hit = { lines: res.lines || [], theme: String(res.theme || '') }
+    logCache.set(d.id, hit)
+    logLines.value = hit.lines
+    logTheme.value = hit.theme
+  } catch (err) {
+    logLines.value = []
+    logTheme.value = ''
+    emit('toast', { msg: String(err?.message || err), type: 'error' })
+  } finally {
+    logLoading.value = false
+  }
+}
+
 // Opening the panel used to open the newest entry, which marked it read before
 // the Showrunner had chosen to read anything. A page is only turned on purpose.
 async function openDiary(diary) {
@@ -111,6 +146,9 @@ async function openDiary(diary) {
   zoomed.value = false
   photoIndex.value = 0
   justCaught.value = false
+  logOpen.value = false
+  logLines.value = []
+  logTheme.value = ''
   if (!diary || diary.read) return
   try {
     await api(`/api/characters/${props.characterId}/diaries/${diary.id}/read`, {
@@ -377,6 +415,55 @@ watch(() => props.show, async (val) => {
             <p v-else class="text-xs text-pink-400 italic">
               {{ t('characters.diary.emptyEntry') }}
             </p>
+          </div>
+
+          <!-- The shoot this page was written about. Folded away by default:
+               the diary is hers, and the log is the room she wrote it in. -->
+          <div v-if="selectedDiary?.session_id" class="rounded-2xl border border-pink-200/50 dark:border-pink-900/50 bg-white/50 dark:bg-slate-800/50 overflow-hidden">
+            <button
+              type="button"
+              class="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left
+                     hover:bg-pink-100/60 dark:hover:bg-pink-900/30 transition-colors"
+              :aria-expanded="logOpen ? 'true' : 'false'"
+              @click="toggleLog"
+            >
+              <span class="text-xs font-semibold text-pink-800 dark:text-pink-200">
+                🎬 {{ t('characters.diary.shootLog') }}
+              </span>
+              <span class="text-[11px] text-pink-500 dark:text-pink-400">
+                {{ logOpen ? '▲' : '▼' }}
+              </span>
+            </button>
+
+            <div v-if="logOpen" class="px-4 pb-4">
+              <p v-if="logLoading" class="text-xs text-pink-500 py-4 text-center motion-safe:animate-pulse">
+                {{ t('characters.diary.shootLogLoading') }}
+              </p>
+              <p v-else-if="!logLines.length" class="text-xs text-pink-400/80 py-4 text-center">
+                {{ t('characters.diary.shootLogGone') }}
+              </p>
+              <div v-else class="flex flex-col gap-1.5 max-h-72 overflow-y-auto pr-1">
+                <p v-if="logTheme" class="text-[11px] text-pink-500 dark:text-pink-400 italic pb-1">
+                  {{ logTheme }}
+                </p>
+                <div
+                  v-for="(line, i) in logLines"
+                  :key="i"
+                  class="text-[12px] leading-relaxed rounded-xl px-3 py-1.5"
+                  :class="{
+                    'bg-emerald-100/70 dark:bg-emerald-900/40 text-emerald-950 dark:text-emerald-100 self-end max-w-[85%]': line.role === 'user',
+                    'bg-pink-100/60 dark:bg-pink-900/30 text-pink-950 dark:text-pink-100': line.role === 'muse' && line.kind !== 'banter',
+                    'bg-rose-50/70 dark:bg-rose-950/30 text-rose-800/90 dark:text-rose-200/90 italic ml-4': line.role === 'muse' && line.kind === 'banter',
+                    'text-pink-500/70 dark:text-pink-400/70 text-[11px] px-1': line.role === 'system'
+                  }"
+                >
+                  <span v-if="line.role !== 'system'" class="font-semibold opacity-80">
+                    {{ line.role === 'user' ? t('characters.diary.shootLogDirector') : line.name }}:
+                  </span>
+                  {{ line.text }}
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- She does not know yet. She will, next time they work together. -->

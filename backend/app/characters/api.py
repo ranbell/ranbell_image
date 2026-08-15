@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -290,6 +291,71 @@ async def find_character_diary_by_image(character_id: str, image_id: str, reques
     if diary is None:
         raise HTTPException(404, "diary not found")
     return {"diary": diary}
+
+
+# Studio lines that were the machine talking to itself: a list of tag names
+# after 外しました / 片付けました. They are not written into chat any more, but
+# every session shot before that still carries them, and a log is read by a
+# person.
+_MACHINE_LINE_RE = re.compile(r"^[（(](?:外しました|戻しました|.*が片付けました)")
+
+
+@router.get("/{character_id}/diaries/{diary_id}/log")
+async def read_diary_shoot_log(character_id: str, diary_id: str, request: Request):
+    """The conversation from the shoot this entry was written about.
+
+    A diary entry has always stored the `session_id` it came from — "so the
+    entry can lead back to it" — and nothing ever led back. Muse sessions are
+    not pruned, so the log is still there; this is the road to it.
+
+    A missing session is not an error: the entry is still hers to read, and
+    the shoot may simply have been cleared. `available` says which it is.
+    """
+    from ..muse import session_db as muse_sessions
+
+    diaries = await presets_db.get_preset_diaries(request.app.state.db, character_id)
+    entry = next((d for d in diaries if str(d.get("id") or "") == str(diary_id)), None)
+    if entry is None:
+        raise HTTPException(404, "diary not found")
+
+    session_id = str(entry.get("session_id") or "")
+    out = {
+        "session_id": session_id,
+        "theme": str(entry.get("theme") or ""),
+        "available": False,
+        "lines": [],
+    }
+    if not session_id:
+        return out
+    try:
+        session = await muse_sessions.load(request.app.state.db, session_id)
+    except Exception:
+        logger.warning("[characters] diary log load failed", exc_info=True)
+        session = None
+    if session is None:
+        return out
+
+    lines = []
+    for msg in session.get("chat") or []:
+        if not isinstance(msg, dict):
+            continue
+        text = str(msg.get("text") or "").strip()
+        role = str(msg.get("role") or "")
+        if not text or role not in ("user", "muse", "system"):
+            continue
+        if role == "system" and _MACHINE_LINE_RE.match(text):
+            continue
+        lines.append({
+            "role": role,
+            "name": str(msg.get("name") or ""),
+            "muse_id": str(msg.get("muse_id") or ""),
+            "kind": str(msg.get("kind") or ""),
+            "text": text,
+        })
+    out["available"] = True
+    out["lines"] = lines
+    out["theme"] = out["theme"] or str((session.get("inputs") or {}).get("theme") or "")
+    return out
 
 
 @router.post("/{character_id}/diaries/{diary_id}/read")

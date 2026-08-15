@@ -1711,7 +1711,11 @@
       "delete": "Throw this entry away",
       "deleteConfirm": "Delete this diary entry? This cannot be undone.",
       "photoZoom": "Enlarge the photo",
-      "willNotice": "…she does not know you read it yet. She may say something next time you shoot together 👀"
+      "willNotice": "…she does not know you read it yet. She may say something next time you shoot together 👀",
+      "shootLog": "Open the shoot log",
+      "shootLogLoading": "Looking for that day's conversation…",
+      "shootLogGone": "The record of this shoot is gone.",
+      "shootLogDirector": "Showrunner"
     },
     "pick": "Pick",
     "board": "Reference board",

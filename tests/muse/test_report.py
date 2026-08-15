@@ -206,3 +206,22 @@ async def test_recent_sessions_are_the_newest_not_an_arbitrary_handful():
 
     assert [r["session_id"] for r in out] == ["s599", "s598", "s597", "s596", "s595"]
     assert db.pages > 1, "must page through the whole collection, not one window"
+
+
+def test_diary_shoot_log_route_exists():
+    """秘密の日記から、その撮影の会話ログへ辿れること。
+
+    日記は最初から `session_id` を持っていた（"so the entry can lead back to
+    it"）のに、辿る道が無かった。
+    """
+    from app.characters import api as characters_api
+    paths = [r.path for r in characters_api.router.routes]
+    assert "/api/characters/{character_id}/diaries/{diary_id}/log" in paths
+
+
+def test_machine_lines_are_kept_out_of_the_shoot_log():
+    """タグ名の羅列は人が読むログに出さない（古いセッションにだけ残っている）。"""
+    from app.characters.api import _MACHINE_LINE_RE
+    assert _MACHINE_LINE_RE.match("（外しました: sitting、close-up。以降は書き戻されません）")
+    assert _MACHINE_LINE_RE.match("（構成「間取り」が片付けました: concrete_blocks）")
+    assert not _MACHINE_LINE_RE.match("全班入ります。スチールを見ながら詰めます。")
