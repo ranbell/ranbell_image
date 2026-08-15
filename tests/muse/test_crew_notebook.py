@@ -292,3 +292,167 @@ async def test_crew_note_gives_the_lead_her_own_voice(monkeypatch):
     assert packed and all(
         crew.role_of(m) != "actress" for m in packed[0]
     ), "主演がパックにも入っている（二重発話）"
+
+
+# ── 追従: ノートの契約と、総監督の一言が先に絵になる順序 ──────────────────
+def test_costume_wearing_line_is_short_absolute_garments():
+    """`top=… / bottom=…` の台帳表記も、素材・色の散文もノートに入れない。"""
+    line = service._costume_wearing_line({
+        "hero": "navy sailor uniform",
+        "silhouette": "a long clean vertical",
+        "layers": "white shirt / navy collar",
+        "garments": "top=white_shirt, navy_collar / bottom=pleated_skirt / feet=loafers",
+        "colourway": "navy 60 / white 30 / red 10",
+        "fabric": "dry cotton twill that takes light flatly",
+    })
+    assert "=" not in line
+    assert "twill" not in line and "60" not in line
+    assert "navy sailor uniform" in line
+    assert "pleated_skirt" in line and "loafers" in line
+    assert len(line) <= 120
+
+
+def test_plan_scene_line_holds_no_body_action():
+    line = service._plan_scene_line({
+        "place": "school rooftop", "hour": "late afternoon",
+        "light": "low sun from the west", "action": "she has just sat down",
+    })
+    assert "school rooftop" in line and "late afternoon" in line
+    assert "sat down" not in line
+
+
+def test_beat_seed_is_a_stem_not_a_paragraph():
+    session = {
+        "mode": "", "inputs": {"theme": "x", "locale": "ja", "crew_ids": ["actress"]},
+        "plan": {"place": "rooftop", "hour": "dusk", "action": "sitting on the bench"},
+        "costume": {"garments": "top=blazer"},
+        "craft": {"pose_intent": (
+            "On the edge of a wooden bench at the school rooftop, she leans "
+            "forward heavily with her chin resting on her crossed arms"
+        )},
+        "notebook": {},
+    }
+    service.sync_crew_notebook(session, activate=True)
+    beat = notebook.of(session)["beat"]
+    assert beat == "sitting on the bench"
+    assert len(beat) <= 80
+
+
+@pytest.mark.asyncio
+async def test_plan_turn_does_not_walk_back_the_live_scene(monkeypatch):
+    """場所が動いていないのに PLAN が scene を上書きしない。"""
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["notebook_craft"] = True
+    session["plan"] = {"place": "rooftop", "hour": "sunset", "light": "gold"}
+    notebook.apply_patch(notebook.of(session), {"scene": "rooftop at blue hour"})
+
+    async def _same_plan(_ollama, **_kw):
+        return {
+            "say": "", "place": "rooftop", "hour": "sunset", "light": "gold",
+            "must_appear": ["bench"],
+        }
+
+    monkeypatch.setattr(service.chain, "run_plan", _same_plan)
+
+    async def _no_images(*_a, **_k):
+        return []
+
+    monkeypatch.setattr(service, "board_images", _no_images)
+    await service._run_plan_turn(db, FakeOllama(), session, cfg={})
+    assert notebook.of(session)["scene"] == "rooftop at blue hour"
+
+
+@pytest.mark.asyncio
+async def test_note_compiles_before_the_room_talks(monkeypatch):
+    """compile(+VERIFY) → 主演 → 班 → fold。喋ってから compile ではない。"""
+    order: list[str] = []
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["status"] = "chat"
+    session["table_stage"] = "full"
+    session["notebook_craft"] = True
+    session["spoken"] = list(service._crew_ids(session))
+    session["craft"] = {"prompt": "1girl", "tags": "1girl", "scene": "x"}
+
+    async def _scripter(_db, _ollama, _session, _text, **_kw):
+        order.append("compile")
+
+    async def _lead(_db, _ollama, _session, _text, **_kw):
+        order.append("lead")
+        return "はい、座りますね。"
+
+    async def _pack(_ollama, _session, _speakers, **_kw):
+        order.append("pack")
+        return []
+
+    async def _fold(_db, _ollama, _session, **_kw):
+        order.append("fold")
+
+    async def _note(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(service, "_run_crew_scripter", _scripter)
+    monkeypatch.setattr(service, "_run_crew_lead_turn", _lead)
+    monkeypatch.setattr(service, "_run_crew_table_talk", _pack)
+    monkeypatch.setattr(service, "_fold_muse_after_talk", _fold)
+    monkeypatch.setattr(service, "take_note", _note)
+    monkeypatch.setattr(service, "_run_plan_turn", _note)
+
+    await service.post_chat(db, FakeOllama(), None, None, session, "座って")
+    assert order == ["compile", "lead", "pack", "fold"]
+
+
+@pytest.mark.asyncio
+async def test_crew_board_weaves_the_notebook_into_tags(monkeypatch):
+    """班撮影でもノートがタグに織られる（旧: 主演撮り限定で、班のタグは固着した）。"""
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["notebook_craft"] = True
+    session["craft"] = {
+        "prompt": "1girl, rooftop, blazer",
+        "tags": "1girl, rooftop, blazer",
+        "scene": "an old opening line",
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "scene": "classroom at dusk",
+        "wearing": "knit cardigan, pleated skirt",
+        "beat": "sitting on the desk",
+        "frame": "close up",
+    })
+    session["notebook_rev_compiled"] = 0
+
+    woven = _scripter_block(
+        intent="shot",
+        tags="1girl, classroom, dusk, knit_cardigan, pleated_skirt, sitting, close_up",
+        craft_scene="She sits on the desk in a knit cardigan as the classroom goes gold.",
+    )
+    ollama = NotebookOllama(scripts={"WEAVE": woven})
+    out = await service.weave_craft_if_needed(db, ollama, session)
+
+    tags = str((out.get("craft") or {}).get("tags") or "").lower()
+    assert "knit_cardigan" in tags and "classroom" in tags
+    assert "blazer" not in tags, "weave must replace the tag bag, not append to it"
+    assert int(out.get("notebook_rev_compiled") or 0) == int(
+        notebook.of(out).get("rev") or 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_opening_still_keeps_the_seats_craft():
+    """読み合わせ直後はノート＝craft の写しなので、開幕の絵を織り直さない。"""
+    db = FakeDb()
+    session = await _crew_session(db)
+    session["craft"] = {
+        "prompt": "1girl, rooftop, blazer", "tags": "1girl, rooftop, blazer",
+        "scene": "She waits on the roof.", "pose_intent": "waiting",
+    }
+    session["plan"] = {"place": "rooftop", "hour": "sunset", "action": "waiting"}
+    session["costume"] = {"garments": "top=blazer / bottom=skirt"}
+    service.sync_crew_notebook(
+        session, force_wearing=True, force_scene=True, activate=True,
+    )
+    assert session["notebook_rev_compiled"] == int(notebook.of(session).get("rev") or 0)
+    # …and once a note moves the notebook, the weave is owed again.
+    notebook.apply_patch(notebook.of(session), {"wearing": "raincoat"})
+    assert int(notebook.of(session).get("rev") or 0) > session["notebook_rev_compiled"]

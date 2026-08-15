@@ -959,29 +959,46 @@ def uses_notebook(session: dict[str, Any]) -> bool:
     return bool(session.get("notebook_craft"))
 
 
+_GARMENT_KEY_RE = re.compile(r"(?i)\b(top|bottom|feet|extras|hero)\s*=\s*")
+
+
 def _costume_wearing_line(costume: dict[str, Any] | None) -> str:
-    """Plain wearing line for the notebook, from the locked COSTUME card."""
+    """Plain wearing line for the notebook, from the locked COSTUME card.
+
+    The notebook contract is "short absolute phrases, not paragraphs", and
+    wearing is the one field a remove request has to rewrite. Handed the whole
+    card — silhouette, colourway, fabric AND the `top=… / bottom=… / feet=…`
+    ledger — the scripter kept editing inside that shape instead of restating
+    the outfit, so a live session's wearing read
+    `top=white_shirt, navy_collar / bottom=pleated_skirt / cardigan;` five
+    turns in. Garments only, keys stripped. The texture and the palette stay
+    in COSTUME for the brief; they are not what the notebook holds.
+    """
     data = costume or {}
     bits: list[str] = []
-    for key in ("hero", "silhouette", "layers", "garments", "colourway", "fabric"):
+    for key in ("hero", "layers", "garments"):
         val = data.get(key)
         if isinstance(val, (list, tuple)):
             val = ", ".join(str(v).strip() for v in val if str(v).strip())
-        val = str(val or "").strip()
-        if val:
-            bits.append(val)
+        val = _GARMENT_KEY_RE.sub("", str(val or "")).replace("/", ",")
+        for piece in val.split(","):
+            piece = piece.strip(" ;.")
+            if piece and piece.lower() not in {b.lower() for b in bits}:
+                bits.append(piece)
     if not bits:
-        tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()]
-        bits = tags[:6]
-    return "; ".join(bits)[:160]
+        bits = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()][:6]
+    return ", ".join(bits)[:120]
 
 
 def _plan_scene_line(plan: dict[str, Any] | None) -> str:
+    """Where and when (and how it is lit) — never what she is doing.
+
+    ACTION used to ride along here. scene is what the weave paints the room
+    from, and a clause about her body in it meant the pose was written twice,
+    in two fields, with no rule for which one wins.
+    """
     data = plan or {}
-    bits = [
-        str(data.get(k) or "").strip()
-        for k in ("place", "hour", "light", "action")
-    ]
+    bits = [str(data.get(k) or "").strip() for k in ("place", "hour", "light")]
     return " · ".join(b for b in bits if b)[:120]
 
 
@@ -1001,7 +1018,14 @@ def sync_crew_notebook(
     """
     if is_duet(session):
         return
-    notebook_mod.migrate(session)
+    # Seed from PLAN/COSTUME BEFORE the legacy facet migration, not after.
+    # `notebook.migrate` fills an empty notebook from the facet table at 400–800
+    # characters a field — the seat's whole POSE sentence lands in beat, the
+    # digest lands in scene. Those are paragraphs in fields the scripter and the
+    # weave both read as short absolute phrases, and a beat that already spends
+    # a sentence describing how she is leaning is one 「座って」 cannot move —
+    # the scripter edits inside it instead. Seeding first makes `has_shot` true, so
+    # migrate returns early and only the legacy carry-overs it still owns run.
     nb = notebook_mod.of(session)
     patch: dict[str, Any] = {}
     scene_line = _plan_scene_line(session.get("plan"))
@@ -1023,14 +1047,29 @@ def sync_crew_notebook(
         if framing and framing != "auto":
             patch["frame"] = framing.replace("_", " ")
     if not str(nb.get("beat") or "").strip():
-        pose = str((session.get("craft") or {}).get("pose_intent") or "").strip()
+        # PLAN's ACTION first: it is one clause by contract. A seat's POSE line
+        # is a whole sentence, and seeded raw it became a paragraph the scripter
+        # edited around instead of replacing —「座って」could not move it.
+        pose = str((session.get("plan") or {}).get("action") or "").strip() or str(
+            (session.get("craft") or {}).get("pose_intent") or ""
+        ).strip()
         if pose:
-            patch["beat"] = pose[:120]
+            patch["beat"] = pose.split(".")[0].strip()[:80]
     if patch:
         notebook_mod.apply_patch(nb, patch)
         session["notebook"] = nb
+    notebook_mod.migrate(session)
     if activate is True or (activate is None and session.get("notebook_craft")):
+        was_off = not session.get("notebook_craft")
         session["notebook_craft"] = True
+        # Switching the room onto the notebook does not invalidate the craft the
+        # opening seats just wrote — the notebook was seeded FROM it. Mark it
+        # compiled at this rev so the first still keeps their tags, and the
+        # weave takes over from the first note that actually moves the shot.
+        if was_off and str((session.get("craft") or {}).get("prompt") or "").strip():
+            session["notebook_rev_compiled"] = int(
+                notebook_mod.of(session).get("rev") or 0
+            )
     name = _muse_display_name(session, "actress") if "actress" in _crew_ids(session) else ""
     session["digest"] = notebook_mod.summary_for_muse(
         notebook_mod.of(session), name_a=name or "Lead",
@@ -1544,7 +1583,14 @@ async def _run_plan_turn(
     struck = strike_dropped_props(session, previous_plan)
     _rebuild_brief(session)
     if not is_duet(session):
-        sync_crew_notebook(session, force_scene=True)
+        # Mirror, do not overwrite. The planner re-states PLACE/HOUR/LIGHT on
+        # every note whether or not it moved, so forcing scene each time walked
+        # the scripter's live scene back to the plan's wording — a note that
+        # only changed the hour reinstated the place it had just left.
+        moved = str((previous_plan or {}).get("place") or "").strip().lower() != str(
+            plan.get("place") or ""
+        ).strip().lower()
+        sync_crew_notebook(session, force_scene=moved)
     if struck:
         locale = str(inputs.get("locale") or "ja")
         tidied = _chat_append(
@@ -3774,8 +3820,11 @@ async def post_chat(
         if _cast_in_role(_crew_ids(session), "plan"):
             await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
             await session_db.save(db, session, publish=False)
-        session = await run_full_table(db, ollama, session, note=text)
+        # The note becomes the shot before the floor discusses it — see the
+        # ordering note in the note path below.
         await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
+        session = await run_full_table(db, ollama, session, note=text)
+        await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
         locale = str(_inputs(session).get("locale") or "ja")
         wrap = _chat_append(
             session, role="system", name="Studio",
@@ -3818,6 +3867,15 @@ async def post_chat(
         await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
         await session_db.save(db, session, publish=False)
 
+    # 主演撮り's order, which is the one that follows direction: the
+    # showrunner's line becomes the shot FIRST (compile, plus a VERIFY pass
+    # when the picture did not appear to move), then the room talks about the
+    # shot it now has, then a fold pass adds the uncontradicted body action she
+    # brought. Talking first and compiling afterwards meant one compile read
+    # the note and three seats' banter as one transcript, and the banter — five
+    # times the word count — is what the picture came out of.
+    await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
+
     # Once a board exists the crew answers while looking at it.
     images = await board_images(db, session)
     screening = _screening_note(session) if images else ""
@@ -3835,8 +3893,8 @@ async def post_chat(
     )
     await session_db.save(db, session, publish=False)
 
-    # Scripter compiles craft from notebook + this conversation.
-    await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
+    # Fold: her CARD/SAY body action onto the stem the note already set.
+    await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
 
     locale = str(_inputs(session).get("locale") or "ja")
     wrap = _chat_append(
@@ -4187,8 +4245,17 @@ def _scrub_notebook_craft(session: dict[str, Any]) -> None:
 async def weave_craft_if_needed(
     db, ollama, session: dict[str, Any],
 ) -> dict[str, Any]:
-    """主演撮り: one Script weave from the notebook. No theme, no chat, no still."""
-    if ollama is None or not uses_notebook(session) or not is_duet(session):
+    """One Script weave from the notebook. No theme, no chat, no still.
+
+    Both rooms. 制作スタッフ was left on the Finisher densify path when it
+    became notebook-primary, and that path cannot land a rewrite: when its
+    compile does not apply it falls back to a Finisher seat turn, and seat
+    turns are talk-only in the crewed studio, so the tags were dropped on the
+    floor. Measured live, `craft.tags` were byte-identical from the opening
+    still to the final shoot while the notebook ran from rev 2 to rev 13 —
+    six showrunner notes, none of which reached the picture.
+    """
+    if ollama is None or not uses_notebook(session):
         return session
     notebook_mod.migrate(session)
     nb = notebook_mod.of(session)
@@ -4334,10 +4401,15 @@ async def still_read_after_board(db, ollama, session_id: str) -> None:
 async def densify_craft_if_needed(
     db, ollama, session: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run Finisher once when craft is too thin (or notebook-marked dirty)."""
+    """Run Finisher once when craft is too thin (or notebook-marked dirty).
+
+    Notebook sessions (both rooms) weave instead: the notebook is the shot, and
+    a weave replaces the tag bag whole. Finisher densify below is the legacy
+    seat-written path only.
+    """
     if ollama is None:
         return session
-    if is_duet(session) and uses_notebook(session):
+    if uses_notebook(session):
         return await weave_craft_if_needed(db, ollama, session)
     # Legacy facet path composes instead of densifying. Notebook-primary duet
     # keeps draft tags/scene from the scripter and thickens via Finisher.
@@ -4474,7 +4546,7 @@ async def request_board(
     """
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
-    if is_duet(session) and uses_notebook(session):
+    if uses_notebook(session):
         session = await weave_craft_if_needed(db, ollama, session)
         _warn_if_craft_behind(session)
         craft = session.get("craft") or {}
@@ -4486,7 +4558,7 @@ async def request_board(
             en="No script yet — describe the shot in chat (clothes, place, camera).",
         ))
 
-    if not still and not is_duet(session):
+    if not still and not uses_notebook(session):
         session = await densify_craft_if_needed(db, ollama, session)
         _warn_if_craft_behind(session)
         craft = session.get("craft") or {}
