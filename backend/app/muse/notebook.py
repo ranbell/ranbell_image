@@ -318,6 +318,69 @@ def posture_stem(beat: str) -> str:
     return ""
 
 
+def _same_garment(a: str, b: str) -> bool:
+    """Two head nouns naming one thing. `dress` and `sundress` are one dress.
+
+    The suffix rule is guarded at four characters so `top` does not swallow
+    `laptop` — and so the shorter head has to be a real garment word before it
+    is allowed to absorb a longer one.
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and long_.endswith(short)
+
+
+def garment_matches(wearing: str, name: str) -> list[str]:
+    """Items in WEARING that the showrunner means by `name`.
+
+    Zero means she is not wearing it. Two means the ask has no single referent
+    — which is the moment to put the question back to the showrunner instead of
+    guessing, because guessing here undresses her wrongly and silently.
+    """
+    head = brief.garment_head(name)
+    if not head:
+        return []
+    out: list[str] = []
+    for item in str(wearing or "").split(","):
+        item = item.strip()
+        if item and _same_garment(brief.garment_head(item), head):
+            out.append(item)
+    return out
+
+
+def beat_without(beat: str, garment: str) -> str:
+    """The same action, minus the part that needs a garment she took off.
+
+    Clothes and action are one thing to everyone except the notebook: BEAT
+    reads `standing, clutching the hem of her skirt`, the skirt comes off, and
+    the hem is still in her hand. The posture stem always survives — losing a
+    garment is not a reason to stop standing.
+    """
+    words = {w for w in re.split(r"[_\s-]+", str(garment or "").lower()) if len(w) > 2}
+    head = brief.garment_head(garment)
+    if head:
+        words.add(head)
+    if not words:
+        return str(beat or "")
+    kept: list[str] = []
+    for clause in str(beat or "").split(","):
+        text = clause.strip()
+        if not text:
+            continue
+        low = text.lower()
+        # A clause that holds the posture is never dropped, even when it also
+        # names the garment: `sitting on her coat` still says she is sitting.
+        if any(w in low for w in words) and not posture_stem(text):
+            continue
+        kept.append(text)
+    if not kept:
+        return posture_stem(beat) or str(beat or "")
+    return ", ".join(kept)
+
+
 def shot_tokens(nb: dict[str, Any]) -> set[str]:
     """Everything the shot currently says, as tokens."""
     out: set[str] = set()
@@ -538,6 +601,7 @@ def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:
         out.pop(key, None)
     out.pop("standing", None)
     out.pop("clear_open", None)
+    out.pop("wearing_drop", None)
     return out
 
 
@@ -653,6 +717,26 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         if nb.get("open") or nb.get("open_choices"):
             nb["open"] = ""
             nb["open_choices"] = []
+            changed = True
+    # Taking something off, said as the one garment rather than as the whole
+    # finished outfit. Restating five remaining items verbatim is the work the
+    # scripter was measured failing to do —「コート脱いで」came back with the
+    # frame rewritten and WEARING untouched, on every removal turn — while the
+    # one word it has to produce here is one it already produces. The
+    # subtraction is ours; only an unambiguous name is applied, and an ask that
+    # matches nothing or matches twice is left for the room to settle.
+    drop = coerce_plain_phrase(patch.get("wearing_drop") or "")
+    if drop:
+        hits = garment_matches(str(nb.get("wearing") or ""), drop)
+        if len(hits) == 1:
+            rest = [
+                item.strip() for item in str(nb.get("wearing") or "").split(",")
+                if item.strip() and item.strip() != hits[0]
+            ]
+            nb["wearing"] = ", ".join(rest)
+            beat = beat_without(str(nb.get("beat") or ""), hits[0])
+            if beat != str(nb.get("beat") or "").strip():
+                nb["beat"] = beat
             changed = True
     if changed:
         nb["rev"] = int(nb.get("rev") or 0) + 1
@@ -788,7 +872,7 @@ _INTENT_RE = re.compile(
 )
 _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*("
-    r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING|BEAT|WEARING_B|BEAT_B|"
+    r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING_DROP|WEARING|BEAT|WEARING_B|BEAT_B|"
     r"VIBE|OPEN|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
     r"CRAFT_SCENE|CLEAR_OPEN|UNCHANGED"
     r")\s*[:：]\s*(.*)$"
@@ -808,6 +892,7 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "wearing": {"type": "string"},
         "beat": {"type": "string"},
         "wearing_b": {"type": "string"},
+        "wearing_drop": {"type": "string"},
         "beat_b": {"type": "string"},
         "vibe": {"type": "string"},
         "open": {"type": "string"},

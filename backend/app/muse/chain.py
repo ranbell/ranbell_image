@@ -1018,6 +1018,8 @@ FIELD CONTRACTS (hard):
   Do not write "no hat" / "remove hat". Omit the hat.
 - light = the key and where it comes from, absolute: "low sun from behind,
   hard rim". Not a direction of change, not mood, not a place.
+- wearing_drop = when something comes OFF, name that ONE garment and nothing
+  else. The studio subtracts it. Do not restate the outfit to remove a piece.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.

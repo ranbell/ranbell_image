@@ -2690,7 +2690,7 @@ async def _run_duet_scripter(
     )
     shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
         patch.get("clear_open")
-    )
+    ) or bool(str(patch.get("wearing_drop") or "").strip())
 
     _meta_note = str(text or "").strip().upper()
     needs_verify = (
@@ -2731,9 +2731,40 @@ async def _run_duet_scripter(
             patch = v_patch
             shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
                 patch.get("clear_open")
-            )
+            ) or bool(str(patch.get("wearing_drop") or "").strip())
             notebook_mod.apply_patch(nb, patch)
             notebook_moved = int(nb.get("rev") or 0) > rev_before
+
+    # A removal the studio could not resolve on its own. Two coats in the
+    # outfit and「コートを脱いで」has no single referent; no coat at all and
+    # they are thinking of a different shoot. Guessing here undresses her
+    # wrongly and says nothing, which is how the coat stayed on for three
+    # turns with no sign anything had gone wrong. Ask, in the room, once.
+    drop_ask = str(patch.get("wearing_drop") or "").strip()
+    if drop_ask:
+        hits = notebook_mod.garment_matches(str(nb.get("wearing") or ""), drop_ask)
+        held = str(nb.get("wearing") or "").strip() or "（なし）"
+        if len(hits) >= 2:
+            _chat_append(
+                session, role="system", name="Studio", kind="system",
+                text=(
+                    f"「{drop_ask}」が {len(hits)} つあります"
+                    f"（{ '、'.join(hits) }）。どれを脱ぎますか？"
+                    if locale.startswith("ja") else
+                    f"There are {len(hits)} of those: {', '.join(hits)}. Which one?"
+                ),
+            )
+        elif not hits and str(nb.get("wearing") or "") == str(
+            before_shot.get("wearing") or ""
+        ):
+            _chat_append(
+                session, role="system", name="Studio", kind="system",
+                text=(
+                    f"「{drop_ask}」は着ていないみたいです。いまは {held}。"
+                    if locale.startswith("ja") else
+                    f"She is not wearing that. Right now: {held}."
+                ),
+            )
 
     notebook_mod.record_struck_from_wearing(
         session, prev_wearing=prev_wearing, new_wearing=str(nb.get("wearing") or ""),
