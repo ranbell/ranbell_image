@@ -1017,7 +1017,10 @@ def _costume_wearing_line(costume: dict[str, Any] | None) -> str:
                 bits.append(piece)
     if not bits:
         bits = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()][:6]
-    return ", ".join(bits)[:120]
+    # HERO, LAYERS and GARMENTS are one outfit at three grains, so joining them
+    # lists the same coat twice under two names — and a request to take off the
+    # coat then has no single referent. See `brief.tidy_wearing`.
+    return brief_mod.tidy_wearing(", ".join(bits))[:120]
 
 
 def _plan_scene_line(plan: dict[str, Any] | None) -> str:

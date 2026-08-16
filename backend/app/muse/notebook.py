@@ -10,6 +10,10 @@ import re
 import time
 from typing import Any
 
+# Garment vocabulary has one owner. `brief` imports `identity` and neither
+# imports this module, so the edge is safe.
+from . import brief
+
 SHOT_KEYS = (
     "atmosphere",
     "scene",
@@ -595,6 +599,11 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         val = coerce_plain_phrase(raw)
         if val.startswith(("{", "[")):
             continue
+        if key in ("wearing", "wearing_b") and val:
+            # The scripter restates the whole outfit on every change, so a
+            # duplicate it inherits is a duplicate it hands back. Tidy here,
+            # at the one door every patch goes through, and both rooms get it.
+            val = brief.tidy_wearing(val)
         if key in _SHOT_FIELD_CAPS and val:
             val = _cap_phrase(val, max_chars=_SHOT_FIELD_CAPS[key])
         if key == "vibe" and val:

@@ -183,6 +183,82 @@ def garment_tags(costume: dict[str, Any] | None) -> list[str]:
     return out
 
 
+# The notebook's wearing line. Measured on twelve of twenty-two live notebooks,
+# the same garment was listed twice under different names — `indigo_yukata` and
+# `yukata`, `navy_blazer` and `blazer`, `charcoal_grey_heavy_coat` and
+# `heavy_wool_coat + dark_tights`. HERO, LAYERS and GARMENTS describe one outfit
+# at three grains, and joining them is what makes the copies. That is what broke
+# 「コートを脱いで」: with two coats in the list, the request has no single
+# referent, and the scripter answered the rest of the line and left wearing
+# alone. Six items is generous — 主演撮り averages 1.8 and undresses correctly.
+WEARING_MAX_ITEMS = 6
+
+_PAREN_RE = re.compile(r"\([^)]*\)")
+_ARTICLE_RE = re.compile(r"(?i)^(?:the|a|an)[_\s]+")
+# `blanket on shoulders` is a blanket, not a pair of shoulders.
+_GARMENT_PREP_RE = re.compile(
+    r"(?i)[_\s](?:on|over|under|around|with|in|beneath|atop)[_\s]",
+)
+
+
+def garment_head(token: str) -> str:
+    """The word that says WHAT this is, with every qualifier stripped.
+
+    In `charcoal_grey_heavy_coat` the rare words are the description and the
+    common one is the thing itself, so the head noun is the identity. The
+    corpus-flavoured version of that idea (an IDF over danbooru) lives in
+    Inspire's vocab bank, which Muse does not use; the last noun gets the same
+    answer on tag-shaped and prose-shaped garments alike, and it is auditable.
+    """
+    text = _PAREN_RE.sub(" ", str(token or "")).strip(" .;,")
+    text = _ARTICLE_RE.sub("", text)
+    text = _GARMENT_PREP_RE.split(text)[0]
+    parts = [p for p in re.split(r"[_\s\-]+", text.lower()) if p]
+    return parts[-1] if parts else ""
+
+
+def tidy_wearing(text: str, *, max_items: int = WEARING_MAX_ITEMS) -> str:
+    """One garment, one name.
+
+    Deliberately knows nothing about tops, bottoms or layers. A dress is one
+    item and a layered outfit is several; nothing here has to tell which is
+    which, which is why it cannot repeat the failure of splitting the outfit
+    into slots. It only ever drops a garment when another garment IN THE SAME
+    LIST has the same head noun — never by matching against a list of bad
+    words — and it never returns an empty outfit.
+    """
+    pieces: list[str] = []
+    # `+` glues two garments into one token (`heavy_wool_coat + dark_tights`),
+    # and the head noun of that token is the tights. Split before reading it.
+    for chunk in re.split(r"[,/;|]|\+", str(text or "")):
+        piece = re.sub(r"\s+", " ", _PAREN_RE.sub(" ", chunk)).strip(" .;,")
+        if piece:
+            pieces.append(piece)
+
+    dressed = [
+        p for p in pieces
+        if bare_tag(p) not in _GARMENT_NONE and p.lower() not in _GARMENT_NONE
+    ]
+    kept: list[str] = []
+    at: dict[str, int] = {}
+    for piece in dressed:
+        head = garment_head(piece)
+        if len(head) < 2:
+            continue
+        seen_at = at.get(head)
+        if seen_at is None:
+            at[head] = len(kept)
+            kept.append(piece)
+        elif len(piece) > len(kept[seen_at]):
+            # Said twice. Keep whichever names it more precisely.
+            kept[seen_at] = piece
+    if not kept and dressed:
+        # Nothing had a readable head noun, but she is dressed. Say so rather
+        # than hand back an empty outfit. `none` alone still means nothing.
+        kept = dressed[:1]
+    return ", ".join(kept[:max_items])
+
+
 def orders_block(
     notes: list[str] | None,
     *,

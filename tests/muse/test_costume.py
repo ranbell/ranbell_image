@@ -268,3 +268,63 @@ def test_the_rail_is_wardrobe_only_and_only_until_the_outfit_is_set():
     assert service._wardrobe_rail(s, "lens:pinto") == ""
     s["costume"] = {"garments": GARMENTS, "tags": ["school_swimsuit"]}
     assert service._wardrobe_rail(s, "wardrobe:shiwa") == ""
+
+
+# ── one garment, one name ──────────────────────────────────────────────────
+# Every string below was lifted out of a live notebook. Twelve of twenty-two
+# ran the same garment twice under two names, which is what made 「脱いで」
+# unanswerable: with two coats listed, the request has no single referent.
+LIVE_WEARING = [
+    (
+        "charcoal_grey_heavy_coat, turtleneck, knit_sweater, "
+        "heavy_wool_coat + dark_tights, off-white_turtleneck, dark_pleated_skirt",
+        ["coat", "turtleneck"],          # one coat, one turtleneck
+    ),
+    ("indigo_yukata, yukata, undergarment (sumizome), covered_by_top, none",
+     ["yukata"]),
+    ("navy_blazer, white_shirt, necktie, blazer, pleated_skirt, loafers",
+     ["blazer"]),
+    ("chunky_grey_cardigan, white_shirt, grey_cardigan + school_skirt, "
+     "grey_cardigan, navy_pleated_skirt",
+     ["cardigan", "skirt"]),
+    ("black_silk_dress, sleeveless_dress, none", ["dress"]),
+]
+
+
+def test_the_outfit_does_not_list_the_same_garment_twice():
+    for raw, heads in LIVE_WEARING:
+        out = brief_mod.tidy_wearing(raw)
+        items = [p.strip() for p in out.split(",") if p.strip()]
+        assert len(items) <= brief_mod.WEARING_MAX_ITEMS
+        for head in heads:
+            named = [i for i in items if brief_mod.garment_head(i) == head]
+            assert len(named) == 1, f"{head!r} listed {len(named)}× in {out!r}"
+        # The junk tokens the wardrobe seat emits are not clothes.
+        assert "none" not in out and "covered_by_top" not in out
+        # `+` glues two garments into one token; unglued, both survive.
+        assert "+" not in out
+
+
+def test_tidying_the_outfit_keeps_the_more_precise_name():
+    # The qualifier is the information. Dropping it to keep the bare noun
+    # would undress her in the picture even though the list still reads full.
+    assert brief_mod.tidy_wearing("indigo_yukata, yukata") == "indigo_yukata"
+    assert brief_mod.tidy_wearing("blazer, navy_blazer") == "navy_blazer"
+
+
+def test_the_outfit_is_never_emptied_by_tidying():
+    # `none` alone still means nothing, but a line of unreadable garments is
+    # not a reason to strip her.
+    assert brief_mod.tidy_wearing("none, covered_by_top") == ""
+    assert brief_mod.tidy_wearing("coat") == "coat"
+    assert brief_mod.tidy_wearing("sailor uniform, straw hat, cardigan") == (
+        "sailor uniform, straw hat, cardigan"
+    )
+
+
+def test_a_garment_worn_on_a_body_part_is_the_garment():
+    # `blanket on shoulders` is a blanket. Reading the last word alone would
+    # file it under shoulders and collide with anything else worn there.
+    assert brief_mod.garment_head("blanket on shoulders") == "blanket"
+    assert brief_mod.garment_head("the_black_silk_dress") == "dress"
+    assert brief_mod.garment_head("undergarment (sumizome)") == "undergarment"
