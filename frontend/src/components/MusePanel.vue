@@ -407,7 +407,9 @@ const chemistryNotes = computed(() =>
 )
 function splitLiveTalk(text) {
   const raw = String(text || '')
-  const cut = raw.search(/\n\s*(ASIDE|CARD|PITCH)(?:\s*\([^)]*\))?\s*[:：]/i)
+  // WEARING is the wardrobe turn's second line. It is tags, and tags streamed
+  // into a chat bubble read as her saying "sailor_fuku, loafers" out loud.
+  const cut = raw.search(/\n\s*(ASIDE|CARD|PITCH|WEARING)(?:\s*\([^)]*\))?\s*[:：]/i)
   const head = (cut >= 0 ? raw.slice(0, cut) : raw)
     .replace(/^\s*SAY(?:\s*\([^)]*\))?\s*[:：]\s*/i, '')
   let aside = ''
