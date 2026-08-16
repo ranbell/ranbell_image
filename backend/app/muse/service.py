@@ -2586,7 +2586,7 @@ async def _call_duet_scripter(
     ollama, session: dict[str, Any], *, note: str, cfg: dict[str, Any],
     partner: bool, name_a: str, name_b: str,
     mode: str = "compile", images: list[bytes] | None = None,
-    fold: bool = False, verify: bool = False,
+    fold: bool = False, verify: bool = False, repair: str = "",
 ) -> dict[str, Any]:
     """One scripter generate against the current notebook + conversation."""
     nb = notebook_mod.of(session)
@@ -2620,7 +2620,8 @@ async def _call_duet_scripter(
         crew_look=crew_look_block(session),
         room_leaning=_room_leaning(session) if mode == "weave" else "",
         directive=(
-            chain.SCRIPTER_FOLD_NOTE if fold
+            repair if repair
+            else chain.SCRIPTER_FOLD_NOTE if fold
             else chain.SCRIPTER_VERIFY_NOTE if verify
             else ""
         ),
@@ -2734,6 +2735,58 @@ async def _run_duet_scripter(
             )
             notebook_mod.apply_patch(nb, patch)
             notebook_moved = int(nb.get("rev") or 0) > rev_before
+
+    # Did the compile answer the whole line? The clerk reads the showrunner's
+    # words on their own and says which fields have to move; that answer is
+    # checked against the patch. Measured, the compile answers some clauses of
+    # a long line and drops the rest — 「セーラーに麦わら帽子。ベンチに座って。
+    # 引きで全身。」came back with the camera rewritten and no hat, and nothing
+    # anywhere said so. One clause is fine; four is where it starts dropping.
+    #
+    # The check is a separate call on purpose. Six lines added to the compile
+    # contract about light stopped `beat` and `wearing` being written at all,
+    # in both rooms, on the very next run — a checker that cannot damage what
+    # it checks is worth more than a stricter contract.
+    if ollama is not None and not fold and intent in ("shot", "mixed"):
+        asked = await chain.classify_fields(
+            ollama, note=str(text or "").strip(),
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+        missing = sorted(asked - set(patch))
+        if missing:
+            logger.info("[muse] repair: line asked for %s, patch had %s",
+                        missing, sorted(set(patch) & set(chain.CLASSIFY_FIELDS)))
+            fix = await _call_duet_scripter(
+                ollama, session, note=str(text or "").strip(), cfg=cfg,
+                partner=partner, name_a=name_a, name_b=name_b,
+                mode="compile", images=None,
+                repair=chain.scripter_repair_note(missing),
+            )
+            fix_patch = notebook_mod.guard_partner_patch(
+                dict(fix.get("patch") or {}), partner=partner,
+            )
+            # Only the fields that were missing. A repair is not a second turn:
+            # anything else it decided to rewrite is not what was asked for.
+            fix_patch = {k: v for k, v in fix_patch.items() if k in missing}
+            if fix_patch:
+                notebook_mod.apply_patch(nb, fix_patch)
+                notebook_moved = int(nb.get("rev") or 0) > rev_before
+                shot_patched = True
+            still = sorted(set(missing) - set(fix_patch))
+            if still:
+                # Twice asked, twice not written. Say so rather than let the
+                # take go out missing what they asked for, with nobody the
+                # wiser — that silence is the actual defect.
+                _chat_append(
+                    session, role="system", name="Studio", kind="system",
+                    text=(
+                        "「" + "、".join(still) + "」が書き取れませんでした。"
+                        "もう一度、そこだけ言ってもらえますか？"
+                        if locale.startswith("ja") else
+                        f"Could not write down: {', '.join(still)}. "
+                        f"Could you say just that part again?"
+                    ),
+                )
 
     # A removal the studio could not resolve on its own. Two coats in the
     # outfit and「コートを脱いで」has no single referent; no coat at all and

@@ -163,3 +163,25 @@ def test_densify_can_never_undress_her():
     assert "wearing_drop" not in notebook.strip_shot_keys(
         {"wearing_drop": "coat", "tags": "1girl"}
     )
+
+
+# ── the clerk's answer is checked against what the compile wrote ───────────
+def test_the_clerk_reads_a_closed_list():
+    from app.muse import chain
+    assert chain.parse_classified_fields("wearing, beat, frame") == {
+        "wearing", "beat", "frame"}
+    assert chain.parse_classified_fields("none") == set()
+    # Anything outside the list is not a field, however confidently said.
+    assert chain.parse_classified_fields("expression, mood, vibes") == set()
+    assert chain.parse_classified_fields("") == set()
+
+
+def test_the_repair_names_what_was_left_out():
+    # "Try again" is a second chance at the same mistake. The fields go in the
+    # note by name, which is the whole difference between this and the version
+    # that sat unused in the file.
+    from app.muse import chain
+    note = chain.scripter_repair_note(["wearing", "beat"])
+    assert "wearing, beat" in note
+    assert note.startswith("REPAIR:")
+    assert "Do not emit tags" in note

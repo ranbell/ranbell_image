@@ -1159,11 +1159,109 @@ SCRIPTER_FOLD_NOTE = (
     "clothes. Do not emit tags."
 )
 
-SCRIPTER_CONSISTENCY_NOTE = (
-    "REPAIR: Your last notebook patch left wearing/scene disagreeing with what "
-    "the showrunner asked. Return intent shot with ABSOLUTE wearing/scene. "
-    "Do not emit tags."
-)
+def scripter_repair_note(missing: Iterable[str]) -> str:
+    """The second ask, naming exactly what the first one left out.
+
+    The clerk below reads the showrunner's line and says which fields have to
+    move; the compile is then checked against that answer. When a field the
+    line asked for is not in the patch, this is what goes back — not "try
+    again", which is what the old unused version amounted to, but the field
+    names themselves. A repair that does not say what is missing is a second
+    chance at the same mistake.
+    """
+    names = ", ".join(str(m) for m in missing if str(m).strip())
+    return (
+        f"REPAIR: your last patch left out {names}. SHOWRUNNER'S LATEST LINE "
+        f"below asked for {names} to change — not this REPAIR header. Return "
+        f"intent shot with ABSOLUTE finished values for {names}, and leave "
+        f"every other field alone. Repeating NOTEBOOK NOW unchanged is a miss. "
+        f"Do not emit tags."
+    )
+
+
+# ── the clerk who only sorts ──────────────────────────────────────────────
+# Measured over 231 live calls per language on the studio's own director lines
+# (`private/muse/crew_lab/classify_gold.yaml`): ja 91% exact with ZERO dropped
+# fields, en 89% with two. That asymmetry is the whole reason this is usable —
+# a field named that did not need to move costs one wasted repair call, and a
+# field NOT named is the silent failure this exists to end. Four earlier
+# wordings are kept in the lab with their numbers; this is the one that scored.
+#
+# It is deliberately NOT part of the compile contract. Adding six lines about
+# light to that contract stopped `beat` and `wearing` being written at all, in
+# both rooms, on the very next run. A checker that cannot damage the thing it
+# checks is worth more than a stricter contract.
+CLASSIFY_FIELDS_SYSTEM = """
+You are the studio's clerk. You do not write the shot and you have no opinions.
+One job: read the director's line and say which parts of the shot it changes.
+
+The parts, and nothing outside this list:
+  wearing  — what is ON her body: clothes, hats, hair, accessories
+  beat     — what her body DOES: sit, stand, kneel, crouch, hands, turning
+  frame    — the CAMERA: how close, the angle, what is inside the crop
+  scene    — WHERE she is and WHAT HOUR it is
+  light    — WHERE the light comes from and HOW HARD it is
+
+How to decide:
+- A line that keeps a part unchanged still names it. "Keep the framing close"
+  changes frame, because frame has to be written down again as it stands.
+- A prop being added or moved is not `wearing` unless she puts it on. A prop
+  she picks up IS `beat`, because her hands change.
+- Naming a place also names the hour when the hour is in the words (夕方 / at
+  night / 朝). That is one part: scene.
+- Chit-chat, praise, and questions about the current state change nothing.
+  Answer exactly: none
+
+Output: the field names, comma separated. Nothing else. No explanation.
+
+Worked examples:
+  「セーラーに麦わら帽子。ベンチに座って。引きで全身。」→ wearing, beat, frame
+  「帽子外して。」                                      → wearing
+  「画角は寄ったまま。」                                → frame
+  「今なに着てる？どこ？」                              → none
+
+Three things that are easy to miss:
+- Feet count. Bare feet, no shoes, taking sandals off — the footwear changed,
+  so that is `wearing`.
+- Her face has no field of its own. An expression, a mood she has to play,
+  being out of breath — put it in `beat` with the rest of what her body does.
+- Small talk and an instruction often arrive in one line. Read the whole line.
+  「いい天気だね。……そうだ、窓を開けて」 still opens the window: that is
+  `scene`. Never answer none just because the line starts as chit-chat.
+""".strip()
+
+CLASSIFY_FIELDS = ("wearing", "beat", "frame", "scene", "light")
+
+
+def parse_classified_fields(raw: str) -> set[str]:
+    """Read the clerk's one line. Anything outside the closed list is dropped."""
+    low = str(raw or "").strip().lower()
+    hit = {f for f in CLASSIFY_FIELDS if f in low}
+    return set() if not hit else hit
+
+
+async def classify_fields(
+    ollama, *, note: str, model: str, num_ctx: int | None,
+) -> set[str]:
+    """Which notebook fields the showrunner's line asks to move.
+
+    Returns an empty set when the line moves nothing, and also when the call
+    fails — a checker that raises would take the whole turn down with it, and
+    the turn is still worth having without the check.
+    """
+    if not str(note or "").strip():
+        return set()
+    try:
+        raw = await _call(
+            ollama, system=CLASSIFY_FIELDS_SYSTEM,
+            prompt=f"DIRECTOR: {note.strip()}\nFIELDS:",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] classify failed; no check this turn",
+                       exc_info=True)
+        return set()
+    return parse_classified_fields(raw)
 
 STILL_READ_SYSTEM = """
 You are reading the latest test still for the studio notebook.
