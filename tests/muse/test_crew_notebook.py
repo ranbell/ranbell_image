@@ -551,7 +551,7 @@ def test_light_is_its_own_field_end_to_end():
     assert "LIGHT:" in notebook.render(nb)
     # 台本の出力（ラベル / JSON どちらでも）から取り込める
     assert notebook.parse_scripter(
-        "INTENT: shot\nLIGHT: one lantern at floor level\nCLEAR_OPEN: no"
+        "INTENT: shot\nLIGHT: one lantern at floor level"
     )["patch"]["light"] == "one lantern at floor level"
 
 
@@ -762,12 +762,17 @@ def test_a_camera_note_cannot_strike_the_room():
     ) == ["neon_sign"]
 
 
-def test_fold_may_write_a_proposal_but_not_the_shot():
-    """班と主演の「beat 以外の提案」は open に入る。絵そのものは変えない。"""
-    assert notebook.FOLD_PATCH_KEYS == ("beat", "beat_b", "open")
+def test_fold_moves_the_body_and_nothing_else():
+    """fold が触れるのは beat だけ。絵そのものは総監督の指示でしか動かない。
+
+    提案欄 `open` は撤去した。390セッションで一度も提案が入らず、入っていた
+    50件は `$$OPEN$$` や `clear_open: true` といったパーサのゴミで、それが
+    台本のプロンプトに戻りパネルにも出ていた。席の提案は chat に残る。
+    """
+    assert notebook.FOLD_PATCH_KEYS == ("beat", "beat_b")
     from app.muse import chain
     assert "crew's lines from this turn" in chain.SCRIPTER_FOLD_NOTE
-    assert "goes in `open` as a proposal" in chain.SCRIPTER_FOLD_NOTE
+    assert "open" not in chain.SCRIPTER_FOLD_NOTE
 
 
 def test_the_camera_is_not_in_the_picture():

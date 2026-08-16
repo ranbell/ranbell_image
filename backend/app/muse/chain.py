@@ -1037,8 +1037,6 @@ RULES:
 - Low angle / worm's-eye → frame must say she looks down toward the lens.
 - If they ask to look at the sky, rewrite frame as one coherent camera story.
 - Leave sections unchanged by omitting them (or list under unchanged).
-- open is for Muse proposals not yet affirmed. clear_open: true when affirming
-  or dropping them.
 - Do NOT output tags, tags_shared, tags_a, tags_b, or craft_scene. Leave them "".
 - Partner shoots: wearing_b / beat_b. Solo: leave those unused.
 - Do not invent diary props. Only the notebook + CARD + showrunner line + still-as-base.
@@ -1148,14 +1146,14 @@ SCRIPTER_FOLD_NOTE = (
     "proposing it to you, and it belongs in beat if it does not contradict "
     "the showrunner. They cannot write the notebook; you can. "
     "Anything they propose that is NOT body action — a garment, a place, a "
-    "prop, a light, a crop — goes in `open` as a proposal, in a few words, "
-    "for the showrunner to accept or ignore. Never put it in the shot itself. "
+    "prop, a light, a crop — stays where they said it, in the conversation, "
+    "for the showrunner to pick up or let go. Never put it in the shot itself. "
     "Keep the showrunner's posture, place, clothes, and camera. Do not swap a "
     "posture the showrunner just set. Do not change sitting into standing "
     "because CARD or a wide shot looks standing. Prefix hands, head, and held "
     "props onto the sit/stand/kneel/crouch stem already in NOTEBOOK NOW — never "
     "replace that stem with facing camera. Do not patch scene, wearing, frame, "
-    "atmosphere, vibe, or open. Do fold uncontradicted body action from CARD "
+    "atmosphere or vibe. Do fold uncontradicted body action from CARD "
     "BEAT and SAY into beat. Absolute finished beat, not a paragraph. Intent "
     "shot if beat gained detail, else casual with no SHOT edits. Do not invent "
     "clothes. Do not emit tags."

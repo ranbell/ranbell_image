@@ -30,11 +30,11 @@ SHOT_KEYS = (
     "beat_b",
 )
 
-META_KEYS = ("vibe", "open", "standing", "open_choices")
+META_KEYS = ("vibe", "standing")
 
 _ALL_KEYS = SHOT_KEYS + META_KEYS
 REWRITE_LOG_MAX = 12
-_REWRITE_FIELDS = SHOT_KEYS + ("vibe", "open")
+_REWRITE_FIELDS = SHOT_KEYS + ("vibe",)
 
 
 def blank(partner: bool = False) -> dict[str, Any]:
@@ -48,8 +48,6 @@ def blank(partner: bool = False) -> dict[str, Any]:
         "wearing_b": "",
         "beat_b": "",
         "vibe": "",
-        "open": "",
-        "open_choices": [],
         "standing": [],
         "rev": 0,
         "updated_at": 0.0,
@@ -68,7 +66,7 @@ def of(session: dict[str, Any]) -> dict[str, Any]:
         ).strip()))
         session["notebook"] = nb
     for key in _ALL_KEYS:
-        if key in ("standing", "open_choices"):
+        if key == "standing":
             nb.setdefault(key, [])
         else:
             nb.setdefault(key, "")
@@ -103,9 +101,6 @@ def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
     vibe = str(nb.get("vibe") or "").strip()
     if vibe:
         lines.append(f"VIBE:\n{vibe}")
-    open_ = str(nb.get("open") or "").strip()
-    if open_:
-        lines.append(f"OPEN:\n{open_}")
     standing = [str(s).strip() for s in (nb.get("standing") or []) if str(s).strip()]
     if standing:
         lines.append("STANDING:\n" + "\n".join(f"- {s}" for s in standing[:5]))
@@ -137,17 +132,12 @@ def summary_for_muse(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") 
     vibe = str(nb.get("vibe") or "").strip()
     if vibe:
         parts.append(f"Vibe: {vibe}")
-    open_ = str(nb.get("open") or "").strip()
-    if open_:
-        parts.append(f"Open proposal (not locked): {open_}")
     return "\n".join(parts)
 
 
-# Longevity caps (plan: VIBE≤5 lines, OPEN≤2, STANDING≤5).
+# Longevity caps (plan: VIBE≤5 lines, STANDING≤5).
 VIBE_MAX_LINES = 5
 VIBE_MAX_CHARS = 400
-OPEN_MAX_LINES = 2
-OPEN_MAX_CHARS = 240
 
 # SHOT field contracts — short absolute phrases. Long densify prose belongs
 # only in craft_scene. Polluted SCENE fields were how place changes froze:
@@ -276,26 +266,6 @@ def split_atmosphere_time(atmosphere: str, scene: str) -> tuple[str, str]:
         sc = f"{sc} at {hour}".strip() if sc else hour
     return mood, sc
 
-
-def parse_pitch_choices(pitch: str) -> list[str]:
-    raw = str(pitch or "").strip()
-    if not raw:
-        return []
-    parts = [p.strip() for p in re.split(r"\s*\|\s*", raw) if p.strip()]
-    return parts[:2]
-
-
-def set_open_choices(nb: dict[str, Any], choices: list[str]) -> dict[str, Any]:
-    """Muse PITCH → chips. Do not wait for the next Script turn."""
-    cleaned = [str(c).strip() for c in (choices or []) if str(c).strip()][:2]
-    prev = list(nb.get("open_choices") or [])
-    prev_open = str(nb.get("open") or "").strip()
-    nb["open_choices"] = cleaned
-    nb["open"] = " | ".join(cleaned)
-    if cleaned != prev or str(nb.get("open") or "") != prev_open:
-        nb["rev"] = int(nb.get("rev") or 0) + 1
-        nb["updated_at"] = time.time()
-    return nb
 
 
 # The four postures the scripter's beat contract names (`chain.SCRIPTER_SYSTEM`:
@@ -600,7 +570,6 @@ def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:
     for key in SHOT_KEYS:
         out.pop(key, None)
     out.pop("standing", None)
-    out.pop("clear_open", None)
     out.pop("wearing_drop", None)
     return out
 
@@ -654,7 +623,7 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     Missing key = unchanged. `standing` is a list (replace whole when provided).
     """
     changed = False
-    for key in SHOT_KEYS + ("vibe", "open"):
+    for key in SHOT_KEYS + ("vibe",):
         if key not in patch:
             continue
         raw = patch.get(key)
@@ -672,8 +641,6 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
             val = _cap_phrase(val, max_chars=_SHOT_FIELD_CAPS[key])
         if key == "vibe" and val:
             val = _cap_lines(val, max_lines=VIBE_MAX_LINES, max_chars=VIBE_MAX_CHARS)
-        if key == "open" and val:
-            val = _cap_lines(val, max_lines=OPEN_MAX_LINES, max_chars=OPEN_MAX_CHARS)
         if val != str(nb.get(key) or "").strip():
             nb[key] = val
             changed = True
@@ -687,19 +654,6 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         if place != str(nb.get("scene") or "").strip():
             nb["scene"] = _cap_phrase(place, max_chars=SCENE_MAX_CHARS) if place else ""
             changed = True
-    if "open_choices" in patch:
-        raw = patch.get("open_choices")
-        if isinstance(raw, str):
-            items = parse_pitch_choices(raw)
-        elif isinstance(raw, (list, tuple)):
-            items = [str(x).strip() for x in raw if str(x).strip()][:2]
-        else:
-            items = []
-        if items != list(nb.get("open_choices") or []):
-            nb["open_choices"] = items
-            if items:
-                nb["open"] = " | ".join(items)
-            changed = True
     if "standing" in patch:
         raw = patch.get("standing")
         if isinstance(raw, str):
@@ -712,11 +666,6 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         items = items[:5]
         if items != list(nb.get("standing") or []):
             nb["standing"] = items
-            changed = True
-    if patch.get("clear_open"):
-        if nb.get("open") or nb.get("open_choices"):
-            nb["open"] = ""
-            nb["open_choices"] = []
             changed = True
     # Taking something off, said as the one garment rather than as the whole
     # finished outfit. Restating five remaining items verbatim is the work the
@@ -755,17 +704,16 @@ _CARD_KEY = {
     "BEAT_B": "beat_b",
 }
 POSE_CARD_KEYS = ("beat", "beat_b")
-# A fold may move the body, and it may write down a proposal. Nothing else:
-# the shot itself only changes when the showrunner says so.
+# A fold may move the body. Nothing else: the shot itself only changes when the
+# showrunner says so.
 #
-# `open` is here because without it every good idea the room has that is not
-# body action simply dies. Measured live: the choreographer said "keep the
-# weight back, make the pause before she turns", the layout seat asked for air
-# between hair and shoulder — and the field that exists for exactly this
-# ("open is for Muse proposals not yet affirmed") was empty on every turn of
-# every case. A proposal in `open` shows in the panel and lands in the picture
-# the moment the showrunner says「それでいこう」(`clear_open`).
-FOLD_PATCH_KEYS = ("beat", "beat_b", "open")
+# `open` used to be here too — a field for the room's proposals, waiting on
+# 「それでいこう」. Across 390 live sessions it never once held a proposal; the
+# 50 non-empty ones held parser debris (`$$OPEN$$`, `clear_open: true`,
+# `false`, `_none_`), which then went back into the scripter prompt and onto
+# the panel. A channel the showrunner cannot name is a channel nobody uses.
+# What a seat proposes stays in the chat, where it is already readable.
+FOLD_PATCH_KEYS = ("beat", "beat_b")
 
 
 def parse_muse_card(card: str) -> dict[str, str]:
@@ -814,7 +762,7 @@ def absorb_muse_card(
     return patch
 
 
-# `promote_open` used to fold an affirmed OPEN into the shot here, guessing
+# `promote_open` used to fold an affirmed proposal into the shot here, guessing
 # from a noun list (持|手に|花|缶|傘|…) whether the thing was handheld (→ BEAT)
 # or worn (→ WEARING). The scripter reads the conversation now, sees the
 # affirmation itself, and writes the absolute value into the right section.
@@ -873,8 +821,8 @@ _INTENT_RE = re.compile(
 _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*("
     r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING_DROP|WEARING|BEAT|WEARING_B|BEAT_B|"
-    r"VIBE|OPEN|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
-    r"CRAFT_SCENE|CLEAR_OPEN|UNCHANGED"
+    r"VIBE|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
+    r"CRAFT_SCENE|UNCHANGED"
     r")\s*[:：]\s*(.*)$"
 )
 
@@ -895,9 +843,7 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "wearing_drop": {"type": "string"},
         "beat_b": {"type": "string"},
         "vibe": {"type": "string"},
-        "open": {"type": "string"},
         "standing": {"type": "string"},
-        "clear_open": {"type": "boolean"},
         "unchanged": {"type": "string"},
         "tags": {"type": "string"},
         "tags_shared": {"type": "string"},
@@ -992,7 +938,7 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
     patch: dict[str, Any] = {}
     for key in (
         "atmosphere", "scene", "light", "frame", "wearing", "beat",
-        "wearing_b", "beat_b", "vibe", "open",
+        "wearing_b", "beat_b", "vibe",
     ):
         if key in unchanged:
             continue
@@ -1006,8 +952,6 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
         val = str(data.get("standing") or "").strip()
         if val.lower() not in ("none", "なし", "unchanged", "-", "無し", ""):
             patch["standing"] = val
-    if data.get("clear_open") in (True, "yes", "true", "1", "クリア", "clear", "y"):
-        patch["clear_open"] = True
     tags = str(data.get("tags") or "").strip()
     tags_shared = str(data.get("tags_shared") or "").strip()
     tags_a = str(data.get("tags_a") or "").strip()
@@ -1085,7 +1029,6 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         "wearing_b": "WEARING_B",
         "beat_b": "BEAT_B",
         "vibe": "VIBE",
-        "open": "OPEN",
     }
     patch: dict[str, Any] = {}
     for dest, src in key_map.items():
@@ -1101,10 +1044,6 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         val = fields["STANDING"]
         if val.lower() not in ("none", "なし", "unchanged", "-", "無し"):
             patch["standing"] = val
-
-    clear = str(fields.get("CLEAR_OPEN") or "").strip().lower()
-    if clear in ("yes", "true", "1", "クリア", "clear", "y"):
-        patch["clear_open"] = True
 
     def _clean_bag(key: str) -> str:
         val = str(fields.get(key) or "").strip()

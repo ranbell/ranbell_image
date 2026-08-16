@@ -79,30 +79,6 @@ def tick_prop_age(session: dict[str, Any], nb: dict[str, Any]) -> str:
     return ""
 
 
-def tick_open_ignore(session: dict[str, Any], *, open_text: str) -> bool:
-    """Return True if OPEN should fade (untouched ~2 turns).
-
-    Call this *after* the scripter has run: the scripter reads the conversation
-    and either clears OPEN, replaces it, or leaves it alone, so an unchanged
-    OPEN is the evidence that nobody engaged with the proposal. This used to
-    sniff the showrunner's line for「いいね|うん|いらない」before the scripter
-    got a say, and reset the counter on any sentence that happened to contain
-    one of those strings.
-    """
-    open_ = str(open_text or "").strip()
-    state = session.setdefault("open_ignore", {"text": "", "count": 0})
-    # Cleared or rewritten by the scripter → it was engaged with. Start over.
-    if not open_ or state.get("text") != open_:
-        state["text"] = open_
-        state["count"] = 0
-        return False
-    state["count"] = int(state.get("count") or 0) + 1
-    if state["count"] >= 2:
-        state["count"] = 0
-        state["text"] = ""
-        return True
-    return False
-
 
 def should_b_lead(session: dict[str, Any], *, partner: bool) -> bool:
     """Every few W-Muse talk turns, let B interrupt first."""
@@ -166,11 +142,6 @@ def vitality_talk_extras(session: dict[str, Any], *, partner: bool = False) -> s
     reunion = reunion_block(session)
     if reunion:
         parts.append(reunion)
-    if session.get("open_faded"):
-        parts.append(
-            "The last unlocked OPEN proposal fades naturally — do not cling. "
-            "At most one new small proposal."
-        )
     age = str(session.get("prop_age_hint") or "").strip()
     if age:
         parts.append(age)

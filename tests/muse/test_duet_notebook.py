@@ -64,7 +64,7 @@ def _tags(s):
 
 def _scripter_block(
     *, intent="shot", atmosphere="", scene="", frame="", wearing="", beat="",
-    vibe="", open_="", tags="", craft_scene="", clear_open="no",
+    vibe="", tags="", craft_scene="",
 ):
     return "\n".join([
         f"INTENT: {intent}",
@@ -74,8 +74,6 @@ def _scripter_block(
         f"WEARING: {wearing}" if wearing else "",
         f"BEAT: {beat}" if beat else "",
         f"VIBE: {vibe}" if vibe else "",
-        f"OPEN: {open_}" if open_ else "",
-        f"CLEAR_OPEN: {clear_open}",
         "STANDING: none",
         "UNCHANGED: none",
         f"TAGS: {tags}" if tags else "TAGS: none",
@@ -578,14 +576,15 @@ async def test_notebook_moving_without_a_compile_marks_craft_dirty():
 
 
 @pytest.mark.asyncio
-async def test_open_affirm_lands_in_craft():
-    """A bare「いいね」against a pending OPEN compiles the proposal in.
+async def test_a_bare_affirm_compiles_what_it_affirmed():
+    """A bare「いいね」lands the thing she just offered, in one turn.
 
     The affirm used to be recognised by regex, folded into the notebook by
     `promote_open` (which guessed handheld-vs-worn off a noun list), and then
-    compiled by a second forced scripter call. The scripter sees the OPEN it
-    wrote and the「いいね」that accepted it in the conversation, and does all
-    three itself in one turn.
+    compiled by a second forced scripter call. The scripter reads the offer and
+    the「いいね」that accepted it in the conversation, and does it all itself.
+    The holding pen those two stages shared (`open`) is gone: 390 live sessions
+    never put a proposal in it.
     """
     db = FakeDb()
     ollama = NotebookOllama(scripts={
@@ -595,7 +594,6 @@ async def test_open_affirm_lands_in_craft():
             wearing="thin cardigan",
             beat="sitting on a bench",
             frame="eye level",
-            open_="落ち葉を一枚だけ手に",
             tags="park, bench, cardigan, sitting",
             craft_scene="Park bench, no leaf yet.",
         ),
@@ -606,7 +604,6 @@ async def test_open_affirm_lands_in_craft():
             beat="sitting on a bench, holding one fallen leaf",
             frame="eye level",
             vibe="happy",
-            clear_open="yes",
             tags="park, bench, cardigan, sitting, leaf",
             craft_scene="Park bench with one leaf in hand.",
         ),
@@ -615,9 +612,8 @@ async def test_open_affirm_lands_in_craft():
     s["mode"] = "duet"
     await session_db.save(db, s)
     await service.post_duet_chat(db, ollama, s, "ベンチに座って薄いカーディガン")
-    assert s["notebook"]["open"]
+    assert "leaf" not in s["notebook"]["beat"]
     await service.post_duet_chat(db, ollama, s, "いいね")
-    assert s["notebook"]["open"] == ""
     assert "leaf" in s["notebook"]["beat"]
     assert "leaf" in _tags(s)
 
@@ -630,7 +626,6 @@ async def test_scripter_is_handed_the_conversation():
         "ベンチ": _scripter_block(
             intent="shot", scene="park bench", wearing="cardigan",
             beat="sitting", frame="eye level",
-            open_="落ち葉を一枚だけ手に",
             tags="park, bench, cardigan, sitting",
             craft_scene="Park bench.",
         ),
@@ -693,7 +688,7 @@ async def test_scripter_exception_keeps_craft_and_muse_talks():
 
 @pytest.mark.asyncio
 async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
-    """再会 → recall → 雑談 → shot → OPEN肯定 のノート正本パス。"""
+    """再会 → recall → 雑談 → shot → 肯定 のノート正本パス。"""
     db = FakeDb()
     bond_store = {
         "distance": "もう顔見知り",
@@ -746,11 +741,11 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
     ollama = NotebookOllama(scripts={
         "この前": (
             "INTENT: recall\nVIBE: remembering the embankment\n"
-            "CLEAR_OPEN: no\nUNCHANGED: none\nTAGS: none\nCRAFT_SCENE: none"
+            "UNCHANGED: none\nTAGS: none\nCRAFT_SCENE: none"
         ),
         "かき氷": (
             "INTENT: casual\nVIBE: chatting about shaved ice\n"
-            "CLEAR_OPEN: no\nUNCHANGED: none\nTAGS: none\nCRAFT_SCENE: none"
+            "UNCHANGED: none\nTAGS: none\nCRAFT_SCENE: none"
         ),
         "屋上": _scripter_block(
             intent="shot",
@@ -758,13 +753,12 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
             frame="eye level, looking at viewer",
             wearing="sailor uniform",
             beat="leaning on the fence",
-            open_="ラムネを片手に",
             tags="rooftop, fence, sailor_collar, leaning, looking_at_viewer",
             craft_scene="Rooftop lean in sailor uniform.",
         ),
-        # The scripter reads the conversation, so it sees its own OPEN and the
-        # 「いいね」 that accepted it, and folds the prop in itself. This used to
-        # take a regex on the affirm plus a second forced COMPILE ONLY call.
+        # The scripter reads the conversation, so it sees what she offered and
+        # the「いいね」that accepted it, and folds the prop in itself. This used
+        # to take a regex on the affirm plus a second forced COMPILE ONLY call.
         "いいね": _scripter_block(
             intent="mixed",
             scene="school rooftop at dusk",
@@ -772,7 +766,6 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
             wearing="sailor uniform",
             beat="leaning on the fence, holding ramune",
             vibe="happy",
-            clear_open="yes",
             tags="rooftop, fence, sailor_collar, leaning, ramune, looking_at_viewer",
             craft_scene="Rooftop lean with ramune.",
         ),
@@ -820,12 +813,11 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
     assert len(ollama.scripter_prompts) >= before_scripts + 1
     assert str((s.get("craft") or {}).get("tags") or "") == before_tags
 
-    # Shot + OPEN affirm.
+    # Shot, then a bare affirm of what she offered in words.
     await service.post_duet_chat(db, ollama, s, "屋上でセーラー、フェンスにもたれて")
     assert "sailor" in s["notebook"]["wearing"] or "sailor" in s["craft"]["tags"]
-    assert s["notebook"]["open"]
+    assert "ramune" not in (s["notebook"].get("beat") or "").lower()
     await service.post_duet_chat(db, ollama, s, "いいね")
-    assert s["notebook"]["open"] == ""
     assert "ramune" in (s["notebook"].get("beat") or "").lower()
 
     # Continuity write after ③ snapshot.

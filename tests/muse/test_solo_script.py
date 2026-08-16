@@ -39,9 +39,10 @@ def test_parse_talk_blocks_keeps_card_out_of_say():
     assert "PLACE" not in say
     assert "thin cardigan" in blocks["card"]
     assert "帽子" in blocks["aside"]
-    assert notebook.parse_pitch_choices(blocks["pitch"]) == [
-        "麦わら帽子をかぶる", "帽子なし",
-    ]
+    # PITCH is still parsed as words she said. It no longer becomes chips:
+    # `open_choices` fed off `open`, which never held a proposal in 390
+    # live sessions and is gone.
+    assert "麦わら帽子をかぶる" in blocks["pitch"]
 
 
 def test_parse_muse_card_and_absorb_pose_only():

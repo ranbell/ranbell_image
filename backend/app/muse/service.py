@@ -2689,8 +2689,8 @@ async def _run_duet_scripter(
         for k in picture_keys
     )
     shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
-        patch.get("clear_open")
-    ) or bool(str(patch.get("wearing_drop") or "").strip())
+        str(patch.get("wearing_drop") or "").strip()
+    )
 
     _meta_note = str(text or "").strip().upper()
     needs_verify = (
@@ -2725,13 +2725,13 @@ async def _run_duet_scripter(
         )
         if v_intent in ("shot", "mixed") or any(
             k in v_patch for k in notebook_mod.SHOT_KEYS
-        ) or v_patch.get("clear_open"):
+        ) or str(v_patch.get("wearing_drop") or "").strip():
             result = verify
             intent = v_intent
             patch = v_patch
             shot_patched = any(k in patch for k in notebook_mod.SHOT_KEYS) or bool(
-                patch.get("clear_open")
-            ) or bool(str(patch.get("wearing_drop") or "").strip())
+                str(patch.get("wearing_drop") or "").strip()
+            )
             notebook_mod.apply_patch(nb, patch)
             notebook_moved = int(nb.get("rev") or 0) > rev_before
 
@@ -3327,7 +3327,7 @@ async def _duet_talk(
     )
 
     try:
-        say, raw_turns, blind, aside, card, raw_pitch = await chain.run_duet_talk(
+        say, raw_turns, blind, aside, card, _pitch_said = await chain.run_duet_talk(
             ollama,
             user_prompt=_duet_user_prompt(
                 session, text, prep=prep,
@@ -3366,14 +3366,9 @@ async def _duet_talk(
     )
     # CARD is a memo. Script is the only notebook writer — after she speaks,
     # a fold pass may add uncontradicted CARD/SAY body action to beat.
-    choices = notebook_mod.parse_pitch_choices(raw_pitch) if pitch else []
-    if choices and not session.get("commit_pitch"):
-        notebook_mod.set_open_choices(notebook_mod.of(session), choices)
-        session["notebook"] = notebook_mod.of(session)
     session["status"] = "chat"
     # One-shot flags consumed after the line lands.
     session["reunion_turn"] = False
-    session["open_faded"] = False
     session["cleanup_nudge"] = False
     session["again_feel_hint"] = ""
     session["prop_age_hint"] = ""
@@ -3647,11 +3642,6 @@ async def post_duet_chat(
             logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
             session["craft_dirty"] = True
             session.setdefault("scripter_intent", "casual")
-        nb = notebook_mod.of(session)
-        if vitality.tick_open_ignore(session, open_text=str(nb.get("open") or "")):
-            notebook_mod.apply_patch(nb, {"clear_open": True})
-            session["notebook"] = nb
-            session["open_faded"] = True
     else:
         named, _ = await route_note(db, ollama, session, text, cfg=cfg)
         if not named:
@@ -3701,7 +3691,6 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["prior_session_log"] = ""
     session["talk_turn_count"] = 0
     session["shot_compile_count"] = 0
-    session["open_ignore"] = {"text": "", "count": 0}
     session["prop_age"] = {"fp": "", "turns": 0}
     session.pop("_blind_said", None)
     await _load_actress_memory(db, session)

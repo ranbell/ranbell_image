@@ -1535,10 +1535,6 @@
     "debugEmpty": "まだ書き換えはありません",
     "notebook": "ショットノート",
     "notebookHint": "会話で更新される画の正本。服・動作・カメラはここに完成形で書かれ、台本はここから組み直されます。",
-    "notebookOpen": "提案中（未確定）",
-    "openChipLabel": "いまの提案",
-    "openChipYes": "いいね",
-    "openChipNo": "いらない",
     "tasteChipLabel": "口癖",
     "chemistryHint": "二人の距離（掛け合い用・画には写さない）",
     "notebookEmpty": "まだ空です",
@@ -1555,8 +1551,8 @@
       "wearing_b": "相手の装い",
       "beat_b": "相手の動作",
       "vibe": "いまの話",
-      "open": "提案中",
-      "standing": "守りごと"
+      "standing": "守りごと",
+      "light": "光"
     },
     "facetLock": "この部分を固定する",
     "facetLocked": "固定中。書き直されません（押すと解除）",

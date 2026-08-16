@@ -9,34 +9,29 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.muse import notebook
 
 
-def test_affirmed_proposal_is_folded_in_by_the_patch():
-    """`promote_open` is gone: the scripter writes the fold as a normal patch.
+def test_an_affirmed_proposal_is_written_as_a_normal_patch():
+    """`promote_open` is gone, and so is the `open` field it fed.
 
-    It used to decide handheld (→ beat) versus worn (→ wearing) from a noun
-    list — 持|手に|花|缶|傘|ラムネ|氷 — which was wrong for anything the list
-    did not name. The scripter reads the conversation, sees the affirmation,
-    and writes absolute values into the right sections itself.
+    Promotion used to decide handheld (→ beat) versus worn (→ wearing) from a
+    noun list — 持|手に|花|缶|傘|ラムネ|氷 — which was wrong for anything the
+    list did not name. Then `open` itself went: across 390 live sessions it
+    never held a proposal, only parser debris. The scripter reads the
+    conversation, sees the affirmation, and writes the sections itself.
     """
     nb = notebook.blank()
-    nb["open"] = "落ち葉を一枚だけ手に"
     nb["wearing"] = "薄いカーディガン"
-    notebook.apply_patch(nb, {
-        "beat": "ベンチに座って、落ち葉を一枚だけ手に",
-        "clear_open": True,
-    })
+    notebook.apply_patch(nb, {"beat": "ベンチに座って、落ち葉を一枚だけ手に"})
     assert "落ち葉" in nb["beat"]
     assert "カーディガン" in nb["wearing"]
-    assert nb["open"] == ""
+    assert "open" not in nb
 
 
-def test_vibe_and_open_are_capped():
+def test_vibe_is_capped():
     nb = notebook.blank()
     notebook.apply_patch(nb, {
         "vibe": "\n".join(f"line{i}" for i in range(12)),
-        "open": "one\ntwo\nthree",
     })
     assert len(nb["vibe"].splitlines()) <= 5
-    assert len(nb["open"].splitlines()) <= 2
 
 
 def test_migrate_seeds_from_digest():
@@ -58,11 +53,10 @@ def test_summary_for_muse_is_short():
         "atmosphere": "切ない夕暮れ",
         "wearing": "薄いカーディガン",
         "beat": "ベンチに座る",
-        "open": "落ち葉",
     })
     text = notebook.summary_for_muse(nb, name_a="あさひ")
     assert "カーディガン" in text
-    assert "Open proposal" in text or "提案中" in text
+    assert "Open proposal" not in text
 
 
 def test_shot_diff_and_record_rewrite_ring():

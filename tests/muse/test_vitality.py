@@ -32,33 +32,7 @@ def test_taste_chips_short():
     assert any("足" in c for c in chips)
 
 
-def test_open_ignore_fades_after_two_untouched_turns():
-    """Called after the scripter: an unchanged OPEN means nobody engaged."""
-    s: dict = {}
-    assert vitality.tick_open_ignore(s, open_text="靴脱ぎ") is False   # proposed
-    assert vitality.tick_open_ignore(s, open_text="靴脱ぎ") is False   # ignored once
-    assert vitality.tick_open_ignore(s, open_text="靴脱ぎ") is True    # and again
 
-
-def test_open_ignore_resets_when_the_scripter_rewrites_the_proposal():
-    """Engagement is the scripter changing OPEN, not the showrunner's wording.
-
-    This used to reset on any line containing いいね / うん / いらない, so a
-    sentence that merely happened to contain one kept a dead proposal alive.
-    """
-    s: dict = {}
-    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
-    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
-    assert vitality.tick_open_ignore(s, open_text="つばを押さえる") is False
-    assert s["open_ignore"]["count"] == 0
-
-
-def test_open_ignore_resets_when_the_proposal_is_cleared():
-    s: dict = {}
-    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
-    vitality.tick_open_ignore(s, open_text="靴脱ぎ")
-    assert vitality.tick_open_ignore(s, open_text="") is False
-    assert s["open_ignore"]["count"] == 0
 
 
 def test_prop_age_hints_on_repeat():

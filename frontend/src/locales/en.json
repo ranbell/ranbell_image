@@ -1535,10 +1535,6 @@
     "debugEmpty": "No rewrites yet",
     "notebook": "Shot notebook",
     "notebookHint": "Living source of truth. Clothes, action, and camera are absolute values here; craft is recompiled from this.",
-    "notebookOpen": "Open proposal (not locked)",
-    "openChipLabel": "Her idea",
-    "openChipYes": "Yes",
-    "openChipNo": "Skip",
     "tasteChipLabel": "Your habits",
     "chemistryHint": "Their distance (for banter — not for the picture)",
     "notebookEmpty": "Empty for now",
@@ -1555,8 +1551,8 @@
       "wearing_b": "Partner wearing",
       "beat_b": "Partner beat",
       "vibe": "Vibe",
-      "open": "Open",
-      "standing": "Standing"
+      "standing": "Standing",
+      "light": "Light"
     },
     "facetLock": "Pin this part",
     "facetLocked": "Pinned — no turn rewrites this (click to release)",

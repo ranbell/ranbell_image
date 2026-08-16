@@ -373,8 +373,8 @@ const facetRows = computed(() => {
     .filter(f => (f.tags || []).length || String(f.nl || '').trim() || f.locked)
 })
 const NOTEBOOK_KEYS = [
-  'atmosphere', 'scene', 'frame', 'wearing', 'beat',
-  'wearing_b', 'beat_b', 'vibe', 'open',
+  'atmosphere', 'scene', 'light', 'frame', 'wearing', 'beat',
+  'wearing_b', 'beat_b', 'vibe',
 ]
 const notebookRows = computed(() => {
   const nb = session.value?.notebook || {}
@@ -386,15 +386,6 @@ const notebookRows = computed(() => {
     rows.push({ key: 'standing', text: standing.map(s => `- ${s}`).join('\n') })
   }
   return rows
-})
-/** Muse's open fork — chips insert a commit line; they do not send. */
-const openChoices = computed(() => {
-  const nb = session.value?.notebook || {}
-  const listed = (nb.open_choices || []).map(s => String(s || '').trim()).filter(Boolean)
-  if (listed.length) return listed.slice(0, 2)
-  const open = String(nb.open || '').trim()
-  if (!open) return []
-  return open.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean).slice(0, 2)
 })
 const taste = computed(() => session.value?.showrunner_taste || {})
 const tasteChips = computed(() => {
@@ -896,11 +887,6 @@ function insertChat(text) {
   chatInput.value = chatInput.value ? `${chatInput.value.trim()} ${bit}` : bit
 }
 
-function insertPitch(phrase) {
-  const p = String(phrase || '').trim()
-  if (!p) return
-  insertChat(`「${p}」がいいな`)
-}
 
 // Prep, test shot and final are buttons on their own endpoints — not words
 // typed into chat for a regex to recognise. Typed text is always creative
@@ -1435,18 +1421,10 @@ async function onChatKey(e) {
                 >{{ chip }}</button>
               </div>
               <div
-                v-if="openChoices.length && !chatLocked"
+                v-if="isDuet && !chatLocked"
                 class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--sb-muted)]"
               >
-                <span class="text-[var(--sb-amber)]">{{ t('muse.openChipLabel') }}</span>
                 <button
-                  v-for="phrase in openChoices" :key="phrase"
-                  type="button"
-                  class="sb-btn text-[10px] px-2 py-0.5"
-                  @click="insertPitch(phrase)"
-                >{{ phrase }}</button>
-                <button
-                  v-if="isDuet"
                   type="button"
                   class="sb-btn text-[10px] px-2 py-0.5 opacity-80"
                   @click="sendChat(t('muse.quick.talkMorePrompt'))"
@@ -1551,15 +1529,11 @@ async function onChatKey(e) {
                 v-for="row in notebookRows" :key="row.key"
                 class="rounded border border-white/10 px-2 py-1.5 transition-colors duration-500"
                 :class="[
-                  row.key === 'open' ? 'border-[var(--sb-amber)]/40' : '',
                   notebookFlash === row.key ? 'border-[var(--sb-teal)] bg-teal-950/40' : '',
                 ]"
               >
                 <div class="font-semibold text-gray-300">
                   {{ t(`muse.notebookNames.${row.key}`) }}
-                  <span v-if="row.key === 'open'" class="ml-1 font-normal text-[var(--sb-amber)]">
-                    {{ t('muse.notebookOpen') }}
-                  </span>
                 </div>
                 <p class="mt-0.5 whitespace-pre-wrap text-[var(--sb-muted)]">{{ row.text }}</p>
               </li>
