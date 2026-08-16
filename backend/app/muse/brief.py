@@ -205,6 +205,19 @@ _SLOT_LABEL_RE = re.compile(
 _GARMENT_PREP_RE = re.compile(
     r"(?i)[_\s](?:on|over|under|around|with|in|beneath|atop)[_\s]",
 )
+# A wardrobe seat that writes prose puts the garment in a sentence: WEARING read
+# `The navy pleated skirt that holds its shape even in motion, White
+# short-sleeve sailor top, navy pleated skirt, …` — the same skirt twice, and
+# the long one's last word is `motion`, so nothing could see they were one
+# garment. The relative clause is description, not a garment; cutting it is what
+# lets the duplicate collapse. Prepositions are NOT cut here (`blanket on
+# shoulders` needs its shoulders — where it sits is part of the picture); only
+# `garment_head` looks past them, and only to read the noun.
+_GARMENT_CLAUSE_RE = re.compile(r"(?i)[_\s](?:that|which|who|whose)[_\s]")
+# `Navy blue collar and trim` — a trailing conjunct is a second thing said in
+# passing, and it moves the head noun off the garment.
+_GARMENT_TAIL_AND_RE = re.compile(r"(?i)[_\s]and[_\s]+[a-z]+$")
+GARMENT_MAX_WORDS = 6
 
 
 def garment_head(token: str) -> str:
@@ -216,11 +229,30 @@ def garment_head(token: str) -> str:
     Inspire's vocab bank, which Muse does not use; the last noun gets the same
     answer on tag-shaped and prose-shaped garments alike, and it is auditable.
     """
-    text = _PAREN_RE.sub(" ", str(token or "")).strip(" .;,")
-    text = _ARTICLE_RE.sub("", text)
+    text = garment_core(token)
     text = _GARMENT_PREP_RE.split(text)[0]
     parts = [p for p in re.split(r"[_\s\-]+", text.lower()) if p]
     return parts[-1] if parts else ""
+
+
+def garment_core(token: str) -> str:
+    """The garment, with the sentence around it removed.
+
+    A wardrobe seat writing prose hands back a whole clause per garment. What
+    is kept is still the seat's own wording — this only takes off the parts
+    that describe rather than name: parentheses, an article, a relative clause,
+    a conjunct trailing off the end, and any run longer than a garment name is.
+    """
+    text = _PAREN_RE.sub(" ", str(token or ""))
+    text = re.sub(r"\s+", " ", text).strip(" .;,")
+    text = _ARTICLE_RE.sub("", text)
+    text = _GARMENT_CLAUSE_RE.split(text)[0]
+    text = _GARMENT_TAIL_AND_RE.sub("", text)
+    words = [w for w in re.split(r"(?<=[^\s_])[\s]+", text) if w]
+    if len(words) > GARMENT_MAX_WORDS:
+        # The head noun sits at the end, so an over-long run keeps its tail.
+        words = words[-GARMENT_MAX_WORDS:]
+    return " ".join(words).strip(" .;,")
 
 
 def tidy_wearing(text: str, *, max_items: int = WEARING_MAX_ITEMS) -> str:
@@ -237,8 +269,8 @@ def tidy_wearing(text: str, *, max_items: int = WEARING_MAX_ITEMS) -> str:
     # `+` glues two garments into one token (`heavy_wool_coat + dark_tights`),
     # and the head noun of that token is the tights. Split before reading it.
     for chunk in re.split(r"[,/;|]|\+", str(text or "")):
-        piece = re.sub(r"\s+", " ", _PAREN_RE.sub(" ", chunk)).strip(" .;,")
-        piece = _SLOT_LABEL_RE.sub("", piece).strip(" .;,")
+        piece = _SLOT_LABEL_RE.sub("", str(chunk or "")).strip(" .;,")
+        piece = garment_core(piece)
         if piece:
             pieces.append(piece)
 

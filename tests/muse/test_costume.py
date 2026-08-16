@@ -351,3 +351,26 @@ def test_clearing_the_outfit_still_clears_it():
     nb["wearing"] = "sailor uniform, cardigan"
     notebook.apply_patch(nb, {"wearing": ""})
     assert nb["wearing"] == ""
+
+
+def test_a_garment_written_as_a_sentence_is_still_one_garment():
+    # Live WEARING, from a wardrobe seat that writes prose:
+    #   The navy pleated skirt that holds its shape even in motion,
+    #   White short-sleeve sailor top, navy pleated skirt, undershirt
+    # Two skirts. The long one's last word is `motion`, so nothing could see
+    # they were the same garment, and 「スカート脱いで」 had two referents.
+    out = brief_mod.tidy_wearing(
+        "The navy pleated skirt that holds its shape even in motion, "
+        "White short-sleeve sailor top, navy pleated skirt, undershirt"
+    )
+    assert out == "navy pleated skirt, White short-sleeve sailor top, undershirt"
+    assert len(notebook.garment_matches(out, "skirt")) == 1
+
+
+def test_where_a_garment_sits_is_kept():
+    # The relative clause is description and goes; a preposition says where the
+    # thing is on her, which is part of the picture and stays.
+    assert brief_mod.garment_core("blanket on shoulders") == "blanket on shoulders"
+    assert brief_mod.garment_core("The stiff collar that never softens") == "stiff collar"
+    assert brief_mod.garment_core("Navy blue collar and trim") == "Navy blue collar"
+    assert brief_mod.garment_core("cardigan") == "cardigan"

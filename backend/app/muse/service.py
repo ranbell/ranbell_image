@@ -2747,11 +2747,30 @@ async def _run_duet_scripter(
     # contract about light stopped `beat` and `wearing` being written at all,
     # in both rooms, on the very next run — a checker that cannot damage what
     # it checks is worth more than a stricter contract.
-    if ollama is not None and not fold and intent in ("shot", "mixed"):
-        asked = await chain.classify_fields(
-            ollama, note=str(text or "").strip(),
-            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+    if ollama is not None and not fold and str(text or "").strip():
+        # Both clerks at once — they read the same line and neither waits on
+        # the other, so the check costs one call's worth of time, not two.
+        asked, kind = await asyncio.gather(
+            chain.classify_fields(
+                ollama, note=str(text or "").strip(),
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            ),
+            chain.classify_intent(
+                ollama, note=str(text or "").strip(),
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            ),
         )
+        # The clerk may RAISE a turn to a shot; it may never demote one. A
+        # direction read as chit-chat writes nothing and says nothing, which is
+        # the failure this is here for. A shot read as chit-chat by the clerk,
+        # meanwhile, would throw away an edit the compile actually made — so
+        # that direction stays shut until it is measured on its own.
+        if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
+            logger.info("[muse] clerk raised intent %r → %r", intent, kind)
+            intent = kind
+    else:
+        asked = set()
+    if asked and intent in ("shot", "mixed"):
         missing = sorted(asked - set(patch))
         if missing:
             logger.info("[muse] repair: line asked for %s, patch had %s",

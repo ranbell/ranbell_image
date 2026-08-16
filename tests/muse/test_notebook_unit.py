@@ -185,3 +185,12 @@ def test_the_repair_names_what_was_left_out():
     assert "wearing, beat" in note
     assert note.startswith("REPAIR:")
     assert "Do not emit tags" in note
+
+
+def test_the_clerk_names_one_kind_of_turn():
+    from app.muse import chain
+    assert chain.parse_classified_intent("shot") == "shot"
+    assert chain.parse_classified_intent("The kind is: casual.") == "casual"
+    # Ordered so `recall` is read before `casual` when a wordy answer holds
+    # both, and "" when it answered with neither.
+    assert chain.parse_classified_intent("unclear") == ""

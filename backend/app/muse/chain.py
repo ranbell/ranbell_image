@@ -1232,6 +1232,58 @@ Three things that are easy to miss:
 
 CLASSIFY_FIELDS = ("wearing", "beat", "frame", "scene", "light")
 
+# The same clerk, asked what KIND of turn this is. The compile decides this
+# today, inside the call that also has to write the shot — a sorting job wedged
+# into a writing job, and the writing is what suffers. Measured on the same
+# corpus: ja 97%, en 95%, against 94%/82% for the first wording. The English
+# gap in that first wording is why this is worth moving at all: 「立って」 and
+# "stand up" have to be read the same way, and they were not.
+CLASSIFY_INTENT_SYSTEM = """
+You are the studio's clerk. Read the director's line and say what KIND of turn
+it is. Exactly one word.
+
+  shot    — it moves the picture (clothes, body, camera, place, light) and
+            says nothing else
+  mixed   — it moves the picture AND speaks to her in the same breath
+            (「疲れてない？…あと髪は下ろしたままで」)
+  casual  — it only speaks to her. Praise, worry, jokes, small talk. The
+            picture does not move
+  recall  — it asks what things are right now, or about a previous shoot.
+            A question is not an instruction
+
+Answer with exactly one word. No explanation, no punctuation.
+""".strip()
+
+CLASSIFY_INTENTS = ("shot", "mixed", "recall", "casual")
+
+
+def parse_classified_intent(raw: str) -> str:
+    """One word from the closed list, or "" when it said something else."""
+    low = str(raw or "").strip().lower()
+    for kind in CLASSIFY_INTENTS:
+        if kind in low:
+            return kind
+    return ""
+
+
+async def classify_intent(
+    ollama, *, note: str, model: str, num_ctx: int | None,
+) -> str:
+    """What kind of turn this is. "" when unreadable — the compile still decides."""
+    if not str(note or "").strip():
+        return ""
+    try:
+        raw = await _call(
+            ollama, system=CLASSIFY_INTENT_SYSTEM,
+            prompt=f"DIRECTOR: {note.strip()}\nKIND:",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] intent clerk failed; compile decides",
+                       exc_info=True)
+        return ""
+    return parse_classified_intent(raw)
+
 
 def parse_classified_fields(raw: str) -> set[str]:
     """Read the clerk's one line. Anything outside the closed list is dropped."""
