@@ -195,6 +195,12 @@ WEARING_MAX_ITEMS = 6
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _ARTICLE_RE = re.compile(r"(?i)^(?:the|a|an)[_\s]+")
+# `bottom=covered_by_top` reached the craft as a literal tag once. The label is
+# stripped where the costume card is read, but the scripter writes this field
+# too, so strip it at the door as well.
+_SLOT_LABEL_RE = re.compile(
+    r"(?i)^\s*(?:" + "|".join(_GARMENT_SLOTS) + r"|hero|layers)\s*[:=]\s*",
+)
 # `blanket on shoulders` is a blanket, not a pair of shoulders.
 _GARMENT_PREP_RE = re.compile(
     r"(?i)[_\s](?:on|over|under|around|with|in|beneath|atop)[_\s]",
@@ -232,12 +238,18 @@ def tidy_wearing(text: str, *, max_items: int = WEARING_MAX_ITEMS) -> str:
     # and the head noun of that token is the tights. Split before reading it.
     for chunk in re.split(r"[,/;|]|\+", str(text or "")):
         piece = re.sub(r"\s+", " ", _PAREN_RE.sub(" ", chunk)).strip(" .;,")
+        piece = _SLOT_LABEL_RE.sub("", piece).strip(" .;,")
         if piece:
             pieces.append(piece)
 
     dressed = [
         p for p in pieces
-        if bare_tag(p) not in _GARMENT_NONE and p.lower() not in _GARMENT_NONE
+        # Single letters are dropped for the same reason `garment_tags` drops
+        # them: `n/a` splits into two of them, and without this the "never
+        # undress her" fallback below hands back a garment named `n`.
+        if len(p) > 1
+        and bare_tag(p) not in _GARMENT_NONE
+        and p.lower() not in _GARMENT_NONE
     ]
     kept: list[str] = []
     at: dict[str, int] = {}

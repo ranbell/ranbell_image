@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import brief as brief_mod
-from app.muse import chain, crew, schema, service
+from app.muse import chain, crew, notebook, schema, service
 
 GARMENTS = "top=school_swimsuit / bottom=covered_by_top / feet=barefoot / extras=goggles"
 
@@ -328,3 +328,26 @@ def test_a_garment_worn_on_a_body_part_is_the_garment():
     assert brief_mod.garment_head("blanket on shoulders") == "blanket"
     assert brief_mod.garment_head("the_black_silk_dress") == "dress"
     assert brief_mod.garment_head("undergarment (sumizome)") == "undergarment"
+
+
+def test_wearing_nothing_is_a_real_answer():
+    # `none` in a slot never meant she is naked — it meant "no separate
+    # garment here", the one-piece case. Nudity is said with words that are
+    # not junk, and those survive untouched.
+    assert brief_mod.tidy_wearing("sundress, bottom=covered_by_top, feet=barefoot") == (
+        "sundress, barefoot"
+    )
+    for said in ("nude", "naked, wet_skin", "bare_shoulders, barefoot"):
+        assert brief_mod.tidy_wearing(said) == said
+    # An outfit that is nothing but slot-filler clears the field rather than
+    # inventing a garment out of the filler. `n/a` splits into two single
+    # letters, and the "never undress her" fallback must not resurrect one.
+    for junk in ("none", "n/a", "none, n/a, covered_by_top"):
+        assert brief_mod.tidy_wearing(junk) == ""
+
+
+def test_clearing_the_outfit_still_clears_it():
+    nb = notebook.blank()
+    nb["wearing"] = "sailor uniform, cardigan"
+    notebook.apply_patch(nb, {"wearing": ""})
+    assert nb["wearing"] == ""
