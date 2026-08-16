@@ -3691,6 +3691,138 @@ async def duet_prep_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]
     return await _duet_prep(db, ollama, session, "", cfg=cfg)
 
 
+def _sync_costume_wearing(session: dict[str, Any], wearing: str) -> None:
+    """Make the COSTUME card say what the notebook says. Both, or neither.
+
+    The card and the notebook hold the same outfit in two shapes, and
+    `sync_crew_notebook` reads the card back into `wearing` through
+    `_costume_wearing_line`. Leaving a stale HERO or LAYERS behind after the
+    wardrobe turn is therefore not a cosmetic mismatch — it is the coat she
+    just took off, waiting to be seeded back in on the next plan turn.
+
+    The prose fields that are ABOUT the clothes rather than a list of them
+    (silhouette, colourway, fabric, condition) are left alone: they are texture
+    for the brief, they name no garment, and nothing reads them as an outfit.
+    """
+    costume = dict(session.get("costume") or {})
+    if not costume:
+        # 主演撮り keeps no card — the notebook is the whole outfit there.
+        return
+    items = [t.strip() for t in str(wearing or "").split(",") if t.strip()]
+    costume["garments"] = ", ".join(items)
+    costume["tags"] = list(items)
+    # LAYERS is the same clothes as prose; HERO is one of them by name.
+    costume["layers"] = ", ".join(items)
+    hero = str(costume.get("hero") or "").strip()
+    if hero and not notebook_mod.garment_matches(", ".join(items), hero):
+        costume["hero"] = items[0] if items else ""
+    session["costume"] = costume
+
+
+async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """「衣装部屋に行ってきて」— the lead restates the whole outfit, absolute.
+
+    Every other route to `wearing` is a delta: the compile reads the line and
+    works out what it does to the notebook. Measured on this studio's own model
+    that lands about four times in five on a one-clause change, less on a long
+    one, and a miss is invisible — the outfit simply stays where it was. This
+    is the button that does not need the delta to land. She goes and changes,
+    comes back, and says the whole outfit over from the conversation.
+
+    In a two-Muse take this is the LEAD's wardrobe only. `wearing_b` belongs to
+    the partner and is not this button's to rewrite.
+    """
+    notebook_mod.migrate(session)
+    sid = session["session_id"]
+    inputs = _inputs(session)
+    locale = str(inputs.get("locale") or "ja")
+    cfg = await get_runtime_config(db)
+    lead = crew.DEFAULT_MEMBER["actress"]
+    nb = notebook_mod.of(session)
+    before_shot = notebook_mod.shot_snapshot(nb)
+    prev_wearing = str(nb.get("wearing") or "")
+    partner_character = await _partner_character(db, session)
+    name_a, name_b = _muse_names(session, partner_character)
+
+    session["status"] = "discussing"
+    await session_db.save(db, session)
+    events.publish(sid, {
+        "type": "muse_speaking", "muse_id": lead,
+        "name": _muse_display_name(session, lead),
+    })
+    system = crew.actress_duet_prompt(
+        session.get("character") or {}, mode="wardrobe",
+        base_style=_style(session), seed=str(sid), locale=locale,
+    )
+    try:
+        say, wearing = await chain.run_wardrobe(
+            ollama, system=system,
+            notebook_wearing=prev_wearing,
+            transcript=_duet_transcript(session),
+            struck=_struck_line(session),
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            on_token=_token_publisher(sid, lead),
+        )
+    except chain.ChainError as exc:
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        raise MuseError(_msg(
+            session,
+            ja="衣装部屋から戻ってこられませんでした。もう一度押してください。",
+            en="She could not get back from the wardrobe. Press it again.",
+        )) from exc
+
+    session["status"] = "chat"
+    tidy = brief_mod.tidy_wearing(wearing)
+    if tidy:
+        notebook_mod.apply_patch(nb, {"wearing": tidy})
+        session["notebook"] = nb
+        notebook_mod.record_struck_from_wearing(
+            session, prev_wearing=prev_wearing,
+            new_wearing=str(nb.get("wearing") or ""),
+        )
+        # This button invites being pressed again — and again, until the outfit
+        # is right. Every press strikes whatever left, so the raw list is the
+        # one thing here that grows without limit. Collapse it to what is still
+        # true (`live_struck` drops anything back in the shot) and keep it
+        # bounded; the models only ever see this pruned form anyway.
+        session["struck"] = notebook_mod.live_struck(session)[-40:]
+        _sync_costume_wearing(session, str(nb.get("wearing") or ""))
+        session["digest"] = notebook_mod.summary_for_muse(
+            nb, name_a=name_a, name_b=name_b,
+        )
+        session["craft_dirty"] = True
+        _note_rewrite(
+            session, "wardrobe", before=before_shot,
+            after=notebook_mod.shot_snapshot(nb), intent="shot",
+        )
+        events.publish(sid, {
+            "type": "scripter_working", "status": "updating", "flash": "wearing",
+            "message": _scripter_status_message(locale=locale, soft=False),
+        })
+    else:
+        # She came back with nothing wearable. Saying so is the whole contract
+        # of this room — the alternative is a button that looks like it worked.
+        _chat_append(
+            session, role="system", name="Studio", kind="system",
+            text=(
+                "衣装が聞き取れませんでした。もう一度押してみてください。"
+                if locale.startswith("ja") else
+                "Could not make out the outfit. Try the button again."
+            ),
+        )
+
+    name = _muse_display_name(session, lead)
+    msg = _chat_append(
+        session, role="muse", muse_id=lead, name=name, kind="craft",
+        text=say or f"（{name}が衣装部屋から戻ってきた。）",
+    )
+    _publish_chat(sid, msg)
+    await _after_actress_spoke(db, session)
+    await session_db.save(db, session)
+    return session
+
+
 async def post_duet_chat(
     db, ollama, session: dict[str, Any], text: str,
     images: list[bytes] | None = None,

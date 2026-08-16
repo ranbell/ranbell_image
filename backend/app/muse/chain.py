@@ -606,6 +606,65 @@ async def run_strike(
     return parse_strike(raw, present, removed)
 
 
+_WARDROBE_LINE_RE = re.compile(r"(?im)^[\s>*_-]*(SAY|WEARING)[\s*_]*[:：]\s*(.*)$")
+
+
+def parse_wardrobe(raw: str) -> tuple[str, str]:
+    """Her line, and the whole outfit — two labelled lines, nothing else.
+
+    The WEARING half is handed straight to `brief.tidy_wearing`, which is the
+    studio's only garment authority: duplicates collapsed by head noun, slot
+    labels and prose stripped, six items at most. Nothing here tries to be a
+    second one.
+    """
+    say = ""
+    wearing = ""
+    for match in _WARDROBE_LINE_RE.finditer(raw or ""):
+        value = match.group(2).strip()
+        if match.group(1).upper() == "SAY":
+            say = say or value
+        else:
+            wearing = wearing or value
+    if not say:
+        # She talked without the label. Better her voice unlabelled than the
+        # room getting silence — the outfit is the half that must parse.
+        say = identity.sanitize_muse_say(
+            _WARDROBE_LINE_RE.sub("", str(raw or "")).strip()
+        )[:400]
+    return identity.sanitize_muse_say(say), wearing
+
+
+async def run_wardrobe(
+    ollama, *, system: str, notebook_wearing: str, transcript: str,
+    struck: str = "", model: str, num_ctx: int | None,
+    on_token: TokenCallback | None = None,
+) -> tuple[str, str]:
+    """衣装部屋 — the whole outfit restated, not edited.
+
+    The compile writes `wearing` as a delta and misses often enough that a
+    garment can sit on her for turns with nobody told (see
+    `crew.WARDROBE_READOUT_OUTPUT`). This is the way out that does not depend
+    on the delta landing: one turn, absolute answer, and the Showrunner can see
+    it and correct it.
+    """
+    prompt = "\n\n".join(b for b in [
+        f"NOTEBOOK WEARING (last written down — may be stale):\n"
+        f"{notebook_wearing.strip() or '(まだ書かれていません)'}",
+        f"TAKEN OFF EARLIER (do not put these back on):\n{struck.strip()}"
+        if struck.strip() else "",
+        (
+            "CONVERSATION SO FAR (this is what actually happened — read the "
+            f"clothing directions out of it):\n{transcript.strip()}"
+        ) if transcript.strip() else "",
+        "いま何を着ていますか。二行で答えてください。",
+    ] if b.strip())
+    raw = await _call(
+        ollama, system=system, prompt=prompt, model=model, images=None,
+        num_ctx=num_ctx, think=False, on_token=on_token,
+    )
+    return parse_wardrobe(raw)
+
+
 # Two lines per part: `CAMERA TAGS: …` and `CAMERA: …`. The TAGS variant has to
 # be tried first or the bare label matches it and swallows the word "TAGS".
 # `ALL_FACETS`, same reasoning as `_ROUTE_LABELS` above — a solo turn's

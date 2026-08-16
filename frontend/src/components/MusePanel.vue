@@ -905,6 +905,12 @@ async function runStage(path) {
 }
 const testShot = () => runStage('board')
 const finalShot = () => runStage('approve')
+// 「衣装部屋に行ってきて」. Every other route to the outfit edits it as a delta
+// off one line of direction; this one has her say the whole thing over. It is
+// the way out of an outfit that stopped moving, so it is expected to be
+// pressed more than once — `chatLocked` is what keeps two presses from
+// overlapping, the same single-flight every other stage button uses.
+const wardrobeRoom = () => runStage('wardrobe')
 
 async function finishSession() {
   if (!session.value || busy.value) return
@@ -1377,6 +1383,18 @@ async function onChatKey(e) {
                     {{ t('muse.quick.final') }}
                   </button>
                 </template>
+
+                <!-- Both rooms. The outfit freezing is not a 主演撮り problem —
+                     it was measured in the crewed studio first. -->
+                <button
+                  type="button"
+                  class="sb-btn text-[10px] border-sky-400/50 bg-sky-950/40 text-sky-200"
+                  :disabled="chatLocked"
+                  :title="t('muse.quick.wardrobeTitle')"
+                  @click="wardrobeRoom"
+                >
+                  {{ t('muse.quick.wardrobe') }}
+                </button>
 
                 <!-- Wrapping is how the diary gets written, so it cannot be a
                      主演撮り privilege: the crewed studio had no way to finish.

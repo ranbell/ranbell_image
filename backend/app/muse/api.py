@@ -253,6 +253,21 @@ async def duet_prep(session_id: str, request: Request):
     ))
 
 
+@router.post("/sessions/{session_id}/wardrobe")
+async def wardrobe(session_id: str, request: Request):
+    """「衣装部屋に行ってきて」— she restates the whole outfit, absolute.
+
+    A button on its own endpoint, like prep and the takes. A phrase typed into
+    chat for a regex to recognise is a phrase the showrunner cannot tell apart
+    from ordinary direction, and it would be the one turn where guessing wrong
+    rewrites the outfit.
+    """
+    session = await _session(request, session_id)
+    return await _run(service.wardrobe_stage(
+        _db(request), _llm(request, session), session,
+    ))
+
+
 @router.post("/sessions/{session_id}/chat")
 async def post_chat(session_id: str, body: ChatMessage, request: Request):
     """Showrunner message — always creative direction, never a stage trigger."""

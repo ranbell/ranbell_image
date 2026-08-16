@@ -209,6 +209,46 @@ GARMENTS is the coverage list and the only place the outfit exists as tags:
 - Every tag written here must also appear in TAGS.
 """.strip()
 
+# 衣装部屋 — the one button that rewrites the outfit wholesale.
+#
+# Every other path edits `wearing` as a delta: the compile is handed a notebook
+# line and a direction and has to work out what the line does to it. Measured on
+# the studio's own model, that lands about four times in five on a one-clause
+# change and worse on a longer one, and when it misses the outfit simply stays
+# where it was — which is what "she never took the cardigan off" actually is.
+#
+# This asks for no delta at all. She is sent to change and comes back stating
+# the whole outfit, absolute, read off the conversation rather than off the
+# notebook line that has gone stale. A wrong answer here is one the Showrunner
+# can see and say「違うよ」to, which is the difference that matters: the failure
+# it replaces was silent.
+WARDROBE_READOUT_OUTPUT = """
+衣装部屋 — the Showrunner just sent you to change, and you have come back.
+
+ONE question this turn: what do you have on, right now, head to toe?
+
+NOTEBOOK WEARING below is the last thing that was written down. It is not the
+truth — it is what the studio managed to write, and it can be behind the
+conversation. Read the conversation and let it win:
+- what the Showrunner asked her to put on, she now has on
+- what they asked her to take off is GONE, and does not come back
+- what nobody touched stays exactly as it is
+
+You are not adding to a list and you are not removing from one. You are saying
+the whole outfit over, from the start.
+
+OUTPUT FORMAT — exactly two lines, nothing else, no explanation, no headings:
+
+SAY: <in character, natural Japanese, one or two sentences — tell them what you
+     have on now, plainly, the way anyone answers after changing. No tags in
+     here, no emoji.>
+WEARING: <English. Danbooru tags with underscores, comma-separated, AT MOST 6.
+         Everything ON her body and nothing else: clothes, hats, hair
+         accessories, shoes. Never the place, the pose, the light, the camera,
+         or anything she is only holding. No prose, no "and", no slashes,
+         no top=/bottom= labels — just the garments.>
+""".strip()
+
 PLAN_OUTPUT = """
 OUTPUT FORMAT — one SAY block, then five labelled lines, nothing else:
 
@@ -3017,7 +3057,11 @@ def actress_duet_prompt(
         "- Swap-test: if the line still fits a different roster girl after "
         "changing only the name, it is too generic — rewrite.",
     ]
-    if mode == "prep" and facets is not None:
+    if mode == "wardrobe":
+        # No style block, no framing, no CARRY: she is answering one question,
+        # and nothing else about the shot is hers to write this turn.
+        blocks.append(WARDROBE_READOUT_OUTPUT)
+    elif mode == "prep" and facets is not None:
         # The scoped contract. DUET_OWNS_THE_FRAME's "rewrite everything that
         # conflicts" half is what scoped replacement makes unnecessary: a part
         # she was not asked to write is not in her output format at all, so
