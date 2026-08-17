@@ -1302,11 +1302,18 @@ class QdrantDBClient:
             muse_stage=muse_stage, muse_session_id=muse_session_id,
         )
 
-        # Approximate total (avoids full collection scan)
+        # Exact. The approximate count is sampled, and sampling is worst
+        # precisely where a gallery filter is most useful — the narrower the
+        # answer, the wronger the estimate. Measured on the live 10,630-image
+        # collection: `star_min=4` reported 0 for a real 1, `tags_include=coat`
+        # 168 for a real 130, and one Muse's photos 2 for a real 176. Every
+        # count here runs behind a filter over indexed payload fields, so this
+        # is a cheap query, and a number nobody can trust is worth less than
+        # no number at all.
         count_result = await self._qc.count(
             collection_name=IMAGES_COLLECTION,
             count_filter=scroll_filter,
-            exact=False,
+            exact=True,
         )
         total = count_result.count
 

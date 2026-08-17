@@ -161,3 +161,35 @@ async def test_a_plain_gallery_request_is_untouched():
     await list_images(_request(db))
     assert db.unfiltered
     assert db.filtered_kwargs is None
+
+
+# ── the count above the grid has to be the real one ─────────────────────────
+
+class _CountingQC:
+    """Records how the count was asked for; scroll returns nothing."""
+
+    def __init__(self):
+        self.exact = None
+
+    async def count(self, **kw):
+        self.exact = kw.get("exact")
+        return SimpleNamespace(count=0)
+
+    async def scroll(self, **kw):
+        return [], None
+
+
+@pytest.mark.asyncio
+async def test_a_filtered_total_is_counted_exactly():
+    """Sampling is worst exactly where a filter is most useful.
+
+    Measured on the live collection (10,630 images): `star_min=4` reported a
+    total of 0 for a real 1, and one Muse's photos reported 2 for a real 176.
+    A grid that says "2" over 176 rows is worse than no number.
+    """
+    db = _db()
+    db._qc = _CountingQC()
+
+    await db.scroll_filtered_page(character_id=MIO, limit=10)
+
+    assert db._qc.exact is True
