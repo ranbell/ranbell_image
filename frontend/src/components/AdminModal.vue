@@ -745,8 +745,18 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
             />
           </div>
           <div class="flex gap-2">
+            <!-- The `!!` around the phrase clause is load-bearing. Without it,
+                 a confirm that needs no phrase leaves `requirePhrase` as '',
+                 the clause evaluates to '' (not false), and `false || ''` is
+                 ''. Vue's includeBooleanAttr counts the empty string as true
+                 for boolean attributes, so `:disabled=""` DISABLES the button —
+                 ten of the thirteen confirmations here could not be executed
+                 at all. The phrase check itself is untouched: with a phrase
+                 set the clause is already a boolean and `!!` changes nothing,
+                 so schema-apply, restore and erase-memory still refuse until
+                 the phrase is typed. -->
             <button @click="adminConfirm.action()"
-              :disabled="!!adminLoading || (adminConfirm.requirePhrase && adminConfirmInput !== adminConfirm.requirePhrase)"
+              :disabled="!!adminLoading || !!(adminConfirm.requirePhrase && adminConfirmInput !== adminConfirm.requirePhrase)"
               class="px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 rounded text-xs text-white font-medium">
               {{ $t('admin.execute') }}
             </button>
