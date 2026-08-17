@@ -271,7 +271,7 @@
   },
   {
     "id": "c003",
-    "version": 0,
+    "version": 1,
     "slug": "reed_clarinet",
     "name": "Nao Isobe",
     "name_ja": "磯部 なお",
@@ -309,7 +309,7 @@
     ],
     "tags": {
       "hair_color": [
-        "brown_hair"
+        "orange_hair"
       ],
       "hair_style": [
         "low_twintails",
@@ -2299,7 +2299,7 @@
   },
   {
     "id": "c018",
-    "version": 0,
+    "version": 1,
     "slug": "clinic_desk",
     "name": "Momo Kirishima",
     "name_ja": "桐島 もも",
@@ -2337,7 +2337,7 @@
     ],
     "tags": {
       "hair_color": [
-        "brown_hair"
+        "blonde_hair"
       ],
       "hair_style": [
         "low_twintails",
@@ -3505,7 +3505,7 @@
   },
   {
     "id": "c027",
-    "version": 0,
+    "version": 1,
     "slug": "bus_stop_wait",
     "name": "Sena Tsukishiro",
     "name_ja": "月城 せな",
@@ -3528,7 +3528,7 @@
       "quietly_fragile"
     ],
     "appearance": {
-      "hair": "a neat grey-brown bob she trims herself to the same length every month",
+      "hair": "grey-brown and long, the ends trimmed level by her own hand on the same day every month",
       "eyes": "on the page, and up at the road at intervals she could tell you exactly",
       "expression": "unbothered and pleasant, with a very specific tell around minute five",
       "body": "seated at the far end of the shelter bench, bag squared on her knees",
@@ -3546,7 +3546,7 @@
         "grey_hair"
       ],
       "hair_style": [
-        "bob_cut",
+        "long_hair",
         "straight_hair"
       ],
       "eyes": [
