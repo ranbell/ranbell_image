@@ -321,6 +321,30 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
     return session
 
 
+async def ensure_character(db, session: dict[str, Any]) -> None:
+    """Resolve the cast from `inputs.character_id` when nobody called the picker.
+
+    Two places read "who is this shoot of" and they used to read different
+    fields. `finish_session` takes `inputs.character_id`, so her diary is filed
+    correctly; the renderer takes `session["character"]`, so with that empty it
+    stamps no cast onto the image and adds no identity tags to the prompt.
+
+    Measured on a real session: the diary landed on 倉田あさひ's page under a
+    photo of a dark-haired girl who is not her, and the same photo could not be
+    found by filtering the gallery for her — the picture had no hair colour of
+    hers in the prompt and no id of hers in its payload. One id was set; the
+    other was not; nothing said so.
+    """
+    if session.get("character") or not str(
+        _inputs(session).get("character_id") or ""
+    ).strip():
+        return
+    try:
+        await pick_character(db, session, str(_inputs(session)["character_id"]))
+    except Exception:
+        logger.warning("[muse] could not resolve the cast from inputs", exc_info=True)
+
+
 async def pick_partner(db, session: dict[str, Any], preset_id: str) -> dict[str, Any]:
     """The second Muse in 主演撮り (lead shoot). Empty string casts nobody.
 
@@ -1903,6 +1927,7 @@ async def start_table(
             en=f"missing: {', '.join(missing)}",
         ))
 
+    await ensure_character(db, session)
     _rebuild_brief(session)
     cfg = await get_runtime_config(db)
     sid = session["session_id"]
@@ -3931,6 +3956,7 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             ja=f"入力が不足しています: {', '.join(missing)}",
             en=f"missing: {', '.join(missing)}",
         ))
+    await ensure_character(db, session)
     _rebuild_brief(session)
     cfg = await get_runtime_config(db)
     session["mode"] = "duet"

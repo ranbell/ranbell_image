@@ -4903,6 +4903,16 @@ onUnmounted(() => {
                   <span>🎨 {{ $t('detail.creationRecord') }}</span>
                   <span class="text-gray-500 font-normal normal-case">
                     {{ $t('detail.creationMethod_' + selected.creation_record.method) }}
+                    <!-- Who it is of, on the summary line. The cast chips below
+                         say it too, but this row is the one you read without
+                         opening anything, and a shoot with no name on it is
+                         how a photo of nobody sat on somebody's page. -->
+                    <template v-if="selected.character_name">
+                      &middot; {{ selected.character_name }}
+                      <template v-if="selected.partner_character_name">
+                        &amp; {{ selected.partner_character_name }}
+                      </template>
+                    </template>
                     &middot;
                     {{ new Date(selected.creation_record.recorded_at).toLocaleDateString() }}
                   </span>
