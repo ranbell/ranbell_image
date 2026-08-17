@@ -113,11 +113,18 @@ def _opposite_hue_ranges(hue_deg: float, arc: float = 60.0) -> list[tuple[float,
 
 @router.get("/images/facets")
 async def get_image_facets(request: Request):
-    """Return unique model names with image counts for use as a filter facet."""
+    """Filter facets: model names, and which Muse is in the picture.
+
+    Both come back in one call because the header loads them together and a
+    second round trip for a handful of rows is not worth the code.
+    """
     db = _db(request)
 
     async def _build():
-        return {"models": await db.scroll_model_facets()}
+        models, characters = await asyncio.gather(
+            db.scroll_model_facets(), db.scroll_character_facets(),
+        )
+        return {"models": models, "characters": characters}
 
     return await _facets_cache.get(_build)
 

@@ -179,6 +179,73 @@ class _CountingQC:
         return [], None
 
 
+# ── the chip row ────────────────────────────────────────────────────────────
+
+class _FacetQC:
+    def __init__(self, payloads):
+        self.payloads = payloads
+        self.scroll_filter = None
+
+    async def scroll(self, **kw):
+        self.scroll_filter = kw.get("scroll_filter")
+        return [SimpleNamespace(payload=p) for p in self.payloads], None
+
+
+def _img(cid, name, stage):
+    return {"character_id": cid, "character_name": name, "muse_stage": stage}
+
+
+@pytest.mark.asyncio
+async def test_each_muse_is_counted_with_her_finals_kept_apart():
+    """The chip has to say the number the click will actually produce.
+
+    With 「試し撮りも」 off the grid shows finals only, so a chip advertising
+    the combined total sends you to a grid a fraction of its size.
+    """
+    db = _db()
+    db._qc = _FacetQC([
+        _img(MIO, "各務 みお", "shoot"),
+        _img(MIO, "各務 みお", "shoot"),
+        _img(MIO, "各務 みお", "board"),
+        _img(MIO, "各務 みお", "still"),
+        _img("asahi", "倉田 あさひ", "board"),
+    ])
+
+    rows = await db.scroll_character_facets()
+
+    mio = next(r for r in rows if r["character_id"] == MIO)
+    assert (mio["name"], mio["shoot"], mio["board"], mio["count"]) == (
+        "各務 みお", 2, 2, 4,
+    ), "a still is a test frame, not a final"
+    assert rows[0]["character_id"] == MIO, "busiest first"
+
+
+@pytest.mark.asyncio
+async def test_an_image_with_no_cast_stamped_on_it_is_not_guessed_at():
+    db = _db()
+    db._qc = _FacetQC([
+        _img(MIO, "各務 みお", "shoot"),
+        {"muse_stage": "shoot"},          # rendered before the cast was stamped
+        {"character_id": "", "muse_stage": "board"},
+    ])
+
+    rows = await db.scroll_character_facets()
+
+    assert len(rows) == 1 and rows[0]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_facet_scroll_only_walks_the_studios_own_renders():
+    """10,630 images, 551 of them ours. Walking the rest is wasted work."""
+    db = _db()
+    db._qc = _FacetQC([])
+
+    await db.scroll_character_facets()
+
+    keys = [getattr(c, "key", "") for c in (db._qc.scroll_filter.must or [])]
+    assert keys == ["muse_stage"]
+
+
 @pytest.mark.asyncio
 async def test_a_filtered_total_is_counted_exactly():
     """Sampling is worst exactly where a filter is most useful.

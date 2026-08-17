@@ -180,6 +180,10 @@ const colorPickLoading = ref(false)
 const colorPickActive = ref(false)          // true when color pick results are displayed
 const modelFacets = ref([])         // [{model, count}, ...] from /api/images/facets
 const modelsExpanded = ref(false)   // show all models vs top 8
+// Which Muse is in the picture. Single-select: 「みおの写真」 is one girl, and
+// a union of two casts is not a question anyone has asked for.
+const characterFacets = ref([])     // [{character_id, name, shoot, board, count}]
+const activeCharacter = ref(null)   // character_id | null
 
 // ── Folder view ───────────────────────────────────────────────────────────────
 const viewMode = ref(localStorage.getItem('viewMode') || 'flat')  // 'flat' | 'folder'
@@ -1437,7 +1441,7 @@ function onGraphCanvasHover(e) {
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const activeTags = computed(() => Object.entries(tagsFilter.value).filter(e => e[1] === 'include').map(e => e[0]))
-const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null)
+const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null || !!activeCharacter.value)
 const effectiveQuery = computed(() => searchQuery.value || activeTags.value[0] || '')
 const selectedCount = computed(() => selectedIds.value.size)
 
@@ -1477,6 +1481,7 @@ async function fetchImages(reset = false) {
       if (includes.length > 1) params.set('tag_logic', tagLogic.value)
       if (activeDir.value !== null) params.set('dir', activeDir.value)
       if (activeModels.value.length) params.set('models', activeModels.value.join(','))
+      if (activeCharacter.value) params.set('character_id', activeCharacter.value)
       if (starFilter.value) params.set('star_min', starFilter.value)
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
       if (showDrafts.value) params.set('include_drafts', 'true')
@@ -1543,7 +1548,11 @@ async function fetchDirs() {
 async function fetchFacets() {
   try {
     const res = await fetch('/api/images/facets')
-    if (res.ok) { const d = await res.json(); modelFacets.value = d.models || [] }
+    if (res.ok) {
+      const d = await res.json()
+      modelFacets.value = d.models || []
+      characterFacets.value = d.characters || []
+    }
   } catch { }
 }
 
@@ -1612,6 +1621,19 @@ function toggleModel(name) {
 function clearModels() {
   activeModels.value = []
   fetchImages(true)
+}
+
+// Clicking the girl you are already looking at goes back to everything —
+// the same gesture the tag chips use, so there is nothing new to learn.
+function toggleCharacter(id) {
+  activeCharacter.value = activeCharacter.value === id ? null : id
+  fetchImages(true)
+}
+
+// Board sketches are drafts, so with 「試し撮りも」 off the grid shows finals
+// only. The chip has to say the number you will actually get.
+function characterCount(c) {
+  return showDrafts.value ? c.count : c.shoot
 }
 
 async function setImageRating(img, n) {
@@ -2089,6 +2111,7 @@ function clearFilter() {
   searchQuery.value = ''
   tagsFilter.value = {}
   activeModels.value = []
+  activeCharacter.value = null
   starFilter.value = null
   categoryFilter.value = 'all'
   alignMinFilter.value = null
@@ -3206,9 +3229,16 @@ onUnmounted(() => {
       </div>
 
       <!-- Active filter bar -->
-      <div v-if="Object.keys(tagsFilter).length || searchQuery || activeModels.length || alignMinFilter !== null"
+      <div v-if="Object.keys(tagsFilter).length || searchQuery || activeModels.length || alignMinFilter !== null || activeCharacter"
         class="flex items-center gap-1.5 px-4 pt-1 pb-1 flex-wrap">
         <span class="text-xs text-gray-500 mr-0.5">{{ $t('header.filter.label') }}</span>
+
+        <!-- who is in the picture -->
+        <span v-if="activeCharacter"
+          class="flex items-center gap-1 px-2 py-0.5 bg-sky-900/60 border border-sky-600/50 rounded-full text-xs text-sky-200">
+          🎬 {{ (characterFacets.find(c => c.character_id === activeCharacter) || {}).name || activeCharacter.slice(0, 8) }}
+          <button @click="toggleCharacter(activeCharacter)" class="text-sky-400 hover:text-white leading-none">✕</button>
+        </span>
 
         <!-- keyword badge -->
         <span v-if="searchQuery"
@@ -3284,6 +3314,24 @@ onUnmounted(() => {
         </div>
         <!-- Collapsible tag list -->
         <div v-show="tagsExpanded" class="mt-2 max-h-52 overflow-y-auto scrollbar-hide flex flex-col gap-2">
+          <!-- Muse section. Every render the studio makes stamps the cast onto
+               the image, so this is the one filter that can answer 「この子の
+               写真を全部」 — and it composes with every other filter here. -->
+          <div v-if="characterFacets.length" class="flex items-start gap-2">
+            <div class="text-[10px] text-sky-400/70 uppercase font-bold w-16 pt-1 shrink-0">Muse</div>
+            <div class="flex flex-wrap gap-1.5 flex-1">
+              <button v-for="c in characterFacets" :key="c.character_id"
+                @click="toggleCharacter(c.character_id)"
+                :class="activeCharacter === c.character_id
+                  ? 'bg-sky-600 border border-sky-500 text-white'
+                  : 'bg-gray-800 border border-transparent text-gray-400 hover:bg-gray-700'"
+                class="flex-shrink-0 px-2.5 py-0.5 rounded-full text-xs transition-colors">
+                {{ c.name || c.character_id.slice(0, 8) }}
+                <span class="opacity-60 text-[10px] ml-1">{{ characterCount(c) }}</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Model section -->
           <div v-if="filteredModels.length" class="flex items-start gap-2">
             <div class="text-[10px] text-amber-500/70 uppercase font-bold w-16 pt-1 shrink-0">Model</div>

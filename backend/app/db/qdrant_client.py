@@ -1368,6 +1368,56 @@ class QdrantDBClient:
             key=lambda x: -x["count"],
         )
 
+    # `muse_stage` is written on every render the studio makes, and on nothing
+    # else — so this is also "is this one of ours".
+    MUSE_STAGES = ("shoot", "board", "still")
+
+    async def scroll_character_facets(self) -> list[dict]:
+        """Each Muse with how many photos she is in, finals counted apart.
+
+        Unlike `scroll_model_facets` this does not walk the collection: the
+        studio's own renders are a small filtered slice of it (551 of 10,630
+        measured), and `muse_stage` is indexed, so the scroll only ever touches
+        those. Names come off the images themselves — the one written at the
+        time of the shoot, which is what the record should say even if a preset
+        is renamed later.
+        """
+        rows: dict[str, dict] = {}
+        offset = None
+        while True:
+            points, next_offset = await self._qc.scroll(
+                collection_name=IMAGES_COLLECTION,
+                scroll_filter=qm.Filter(must=[qm.FieldCondition(
+                    key="muse_stage", match=qm.MatchAny(any=list(self.MUSE_STAGES)),
+                )]),
+                limit=1000,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(
+                    include=["character_id", "character_name", "muse_stage"],
+                ),
+                with_vectors=False,
+            )
+            for p in points:
+                payload = p.payload or {}
+                cid = str(payload.get("character_id") or "").strip()
+                if not cid:
+                    # Rendered before the cast was stamped onto the image. It
+                    # cannot be attributed and must not be guessed at.
+                    continue
+                row = rows.setdefault(cid, {
+                    "character_id": cid, "name": "", "shoot": 0, "board": 0,
+                })
+                name = str(payload.get("character_name") or "").strip()
+                if name:
+                    row["name"] = name
+                key = "shoot" if payload.get("muse_stage") == "shoot" else "board"
+                row[key] += 1
+            if next_offset is None:
+                break
+            offset = next_offset
+        out = [{**r, "count": r["shoot"] + r["board"]} for r in rows.values()]
+        return sorted(out, key=lambda x: -x["count"])
+
     async def get_mtime_range(self) -> tuple[str | None, str | None]:
         """Return (min_mtime, max_mtime) ISO strings across all images."""
         asc_order  = qm.OrderBy(key="mtime", direction=qm.Direction.ASC)
