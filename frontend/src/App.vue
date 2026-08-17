@@ -1630,10 +1630,10 @@ function toggleCharacter(id) {
   fetchImages(true)
 }
 
-// Board sketches are drafts, so with 「試し撮りも」 off the grid shows finals
-// only. The chip has to say the number you will actually get.
+// The chip has to say the number the click will actually produce, so it
+// follows the same toggle the grid does.
 function characterCount(c) {
-  return showDrafts.value ? c.count : c.shoot
+  return showDrafts.value ? c.count : c.visible
 }
 
 async function setImageRating(img, n) {

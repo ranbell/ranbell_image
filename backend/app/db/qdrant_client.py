@@ -1368,32 +1368,37 @@ class QdrantDBClient:
             key=lambda x: -x["count"],
         )
 
-    # `muse_stage` is written on every render the studio makes, and on nothing
-    # else — so this is also "is this one of ours".
-    MUSE_STAGES = ("shoot", "board", "still")
-
     async def scroll_character_facets(self) -> list[dict]:
-        """Each Muse with how many photos she is in, finals counted apart.
+        """Each girl, with exactly the two numbers the filter chip needs.
 
-        Unlike `scroll_model_facets` this does not walk the collection: the
-        studio's own renders are a small filtered slice of it (551 of 10,630
-        measured), and `muse_stage` is indexed, so the scroll only ever touches
-        those. Names come off the images themselves — the one written at the
-        time of the shoot, which is what the record should say even if a preset
-        is renamed later.
+        Counted by `character_id`, which is what the gallery filter matches on.
+        An earlier version counted by `muse_stage` instead and quietly lost her
+        character sheet and portraits — they carry her id but were never part
+        of a shoot, so the chip said 23 over a grid of 27. The chip and the
+        grid have to be answering the same question.
+
+        `visible` is the count with board sketches hidden, which is the
+        gallery's default; `count` is everything. The two map onto the
+        「試し撮りも」 toggle, so whichever way it is set the chip is right.
+
+        Unlike `scroll_model_facets` this does not walk the collection: images
+        with a cast are a small slice of it (measured 700-odd of 10,630) and
+        `character_id` is indexed. Names come off the images themselves — the
+        one written at the time, which is what a record should say even after
+        the preset is renamed.
         """
         rows: dict[str, dict] = {}
         offset = None
         while True:
             points, next_offset = await self._qc.scroll(
                 collection_name=IMAGES_COLLECTION,
-                scroll_filter=qm.Filter(must=[qm.FieldCondition(
-                    key="muse_stage", match=qm.MatchAny(any=list(self.MUSE_STAGES)),
+                scroll_filter=qm.Filter(must_not=[qm.IsEmptyCondition(
+                    is_empty=qm.PayloadField(key="character_id"),
                 )]),
                 limit=1000,
                 offset=offset,
                 with_payload=qm.PayloadSelectorInclude(
-                    include=["character_id", "character_name", "muse_stage"],
+                    include=["character_id", "character_name", "is_draft"],
                 ),
                 with_vectors=False,
             )
@@ -1405,18 +1410,18 @@ class QdrantDBClient:
                     # cannot be attributed and must not be guessed at.
                     continue
                 row = rows.setdefault(cid, {
-                    "character_id": cid, "name": "", "shoot": 0, "board": 0,
+                    "character_id": cid, "name": "", "visible": 0, "count": 0,
                 })
                 name = str(payload.get("character_name") or "").strip()
                 if name:
                     row["name"] = name
-                key = "shoot" if payload.get("muse_stage") == "shoot" else "board"
-                row[key] += 1
+                row["count"] += 1
+                if payload.get("is_draft") is not True:
+                    row["visible"] += 1
             if next_offset is None:
                 break
             offset = next_offset
-        out = [{**r, "count": r["shoot"] + r["board"]} for r in rows.values()]
-        return sorted(out, key=lambda x: -x["count"])
+        return sorted(rows.values(), key=lambda x: -x["count"])
 
     async def get_mtime_range(self) -> tuple[str | None, str | None]:
         """Return (min_mtime, max_mtime) ISO strings across all images."""

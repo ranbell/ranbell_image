@@ -191,42 +191,56 @@ class _FacetQC:
         return [SimpleNamespace(payload=p) for p in self.payloads], None
 
 
-def _img(cid, name, stage):
-    return {"character_id": cid, "character_name": name, "muse_stage": stage}
+def _img(cid, name, draft=False):
+    return {"character_id": cid, "character_name": name, "is_draft": draft}
 
 
 @pytest.mark.asyncio
-async def test_each_muse_is_counted_with_her_finals_kept_apart():
-    """The chip has to say the number the click will actually produce.
-
-    With 「試し撮りも」 off the grid shows finals only, so a chip advertising
-    the combined total sends you to a grid a fraction of its size.
-    """
+async def test_the_chip_counts_what_the_click_will_show():
+    """Two numbers, one per position of the 「試し撮りも」 toggle."""
     db = _db()
     db._qc = _FacetQC([
-        _img(MIO, "各務 みお", "shoot"),
-        _img(MIO, "各務 みお", "shoot"),
-        _img(MIO, "各務 みお", "board"),
-        _img(MIO, "各務 みお", "still"),
-        _img("asahi", "倉田 あさひ", "board"),
+        _img(MIO, "各務 みお"),
+        _img(MIO, "各務 みお"),
+        _img(MIO, "各務 みお", draft=True),
+        _img(MIO, "各務 みお", draft=True),
+        _img("asahi", "倉田 あさひ", draft=True),
     ])
 
     rows = await db.scroll_character_facets()
 
     mio = next(r for r in rows if r["character_id"] == MIO)
-    assert (mio["name"], mio["shoot"], mio["board"], mio["count"]) == (
-        "各務 みお", 2, 2, 4,
-    ), "a still is a test frame, not a final"
+    assert (mio["name"], mio["visible"], mio["count"]) == ("各務 みお", 2, 4)
     assert rows[0]["character_id"] == MIO, "busiest first"
+
+
+@pytest.mark.asyncio
+async def test_her_character_sheet_is_hers_too():
+    """Measured live: the chip said 23 over a grid of 27.
+
+    A character sheet and her portraits carry her id but were never part of a
+    shoot. Counting by `muse_stage` dropped them while the grid — which
+    matches on `character_id` — kept them, so the chip and the grid were
+    answering two different questions.
+    """
+    db = _db()
+    db._qc = _FacetQC([
+        _img(MIO, "各務 みお"),                            # a final take
+        {"character_id": MIO, "character_name": "各務 みお"},  # char_sheet_*
+    ])
+
+    rows = await db.scroll_character_facets()
+
+    assert rows[0]["count"] == 2 and rows[0]["visible"] == 2
 
 
 @pytest.mark.asyncio
 async def test_an_image_with_no_cast_stamped_on_it_is_not_guessed_at():
     db = _db()
     db._qc = _FacetQC([
-        _img(MIO, "各務 みお", "shoot"),
-        {"muse_stage": "shoot"},          # rendered before the cast was stamped
-        {"character_id": "", "muse_stage": "board"},
+        _img(MIO, "各務 みお"),
+        {"is_draft": False},              # rendered before the cast was stamped
+        {"character_id": "", "is_draft": False},
     ])
 
     rows = await db.scroll_character_facets()
@@ -235,15 +249,15 @@ async def test_an_image_with_no_cast_stamped_on_it_is_not_guessed_at():
 
 
 @pytest.mark.asyncio
-async def test_the_facet_scroll_only_walks_the_studios_own_renders():
-    """10,630 images, 551 of them ours. Walking the rest is wasted work."""
+async def test_the_facet_scroll_only_walks_images_that_have_a_cast():
+    """10,630 images, 700-odd with a girl on them. The rest is wasted work."""
     db = _db()
     db._qc = _FacetQC([])
 
     await db.scroll_character_facets()
 
-    keys = [getattr(c, "key", "") for c in (db._qc.scroll_filter.must or [])]
-    assert keys == ["muse_stage"]
+    empties = db._qc.scroll_filter.must_not or []
+    assert [c.is_empty.key for c in empties] == ["character_id"]
 
 
 @pytest.mark.asyncio
