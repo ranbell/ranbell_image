@@ -38,6 +38,13 @@ logger = logging.getLogger(__name__)
 # before either has written `queued_at`.
 _finish_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 
+# Finished ③ takes kept beside the current one, so the diary gets every photo
+# of the day rather than the last. A ceiling, not a quota — the longest real
+# session measured pressed ③ four times, and the session document is a payload
+# in Qdrant, so this is not somewhere to let a list grow forever.
+_SHOOT_ARCHIVE_MAX = 24
+
+
 class MuseError(Exception):
     """A step could not run. The message goes straight to the user."""
 
@@ -1908,6 +1915,7 @@ async def start_table(
     session["spoken"] = []
     session["board"] = {}
     session["shoot"] = {}
+    session["shoots"] = []
     session["plan"] = {}
     session["costume"] = {}
     session.pop("_blind_said", None)
@@ -2679,6 +2687,10 @@ async def _run_duet_scripter(
         }
 
     before_shot = notebook_mod.shot_snapshot(nb)
+    if not fold:
+        # A notice belongs to one turn. Left standing it would be settled
+        # against a later turn's notebook and apologise for the wrong line.
+        session.pop("repair_notice", None)
     notebook_mod.apply_patch(nb, patch)
     notebook_moved = int(nb.get("rev") or 0) > rev_before
     picture_keys = (
@@ -2793,19 +2805,23 @@ async def _run_duet_scripter(
                 shot_patched = True
             still = sorted(set(missing) - set(fix_patch))
             if still:
-                # Twice asked, twice not written. Say so rather than let the
-                # take go out missing what they asked for, with nobody the
-                # wiser — that silence is the actual defect.
-                _chat_append(
-                    session, role="system", name="Studio", kind="system",
-                    text=(
-                        "「" + "、".join(still) + "」が書き取れませんでした。"
-                        "もう一度、そこだけ言ってもらえますか？"
-                        if locale.startswith("ja") else
-                        f"Could not write down: {', '.join(still)}. "
-                        f"Could you say just that part again?"
-                    ),
-                )
+                # Twice asked, twice not written — but not said out loud yet.
+                # The turn is not over: the Muse still has to speak, and the
+                # fold pass afterwards folds her CARD into beat. Measured on a
+                # real session, that fold wrote the missing beat 44 seconds
+                # AFTER the studio had already apologised for not having it:
+                #
+                #   02:34:10 Studio 「beat が書き取れませんでした」
+                #   02:34:54 scripter_fold → beat gains "waving one hand ..."
+                #
+                # So the notice is parked here and settled in
+                # `_settle_repair_notice`, once the whole turn has had its go.
+                session["repair_notice"] = {
+                    "fields": still,
+                    "before": {
+                        k: str(before_shot.get(k) or "") for k in still
+                    },
+                }
 
     # A removal the studio could not resolve on its own. Two coats in the
     # outfit and「コートを脱いで」has no single referent; no coat at all and
@@ -3451,8 +3467,48 @@ async def _duet_talk(
         await _fold_muse_after_talk(
             db, ollama, session, cfg=cfg, user_text=text,
         )
+    else:
+        # No fold this turn, but the turn is still over — a parked notice has
+        # to be settled here or it is silently dropped on the next line.
+        _settle_repair_notice(session)
     await session_db.save(db, session)
     return session
+
+
+def _settle_repair_notice(session: dict[str, Any]) -> None:
+    """Say what the whole turn failed to write — after the whole turn.
+
+    The compile and its repair both run before the Muse has spoken, and the
+    fold that follows her line is a third chance at `beat`. Apologising at the
+    repair meant apologising for something the turn went on to get right; this
+    checks the notebook as it actually stands and only speaks for the fields
+    that really did not move.
+    """
+    notice = session.pop("repair_notice", None)
+    if not isinstance(notice, dict):
+        return
+    nb = notebook_mod.of(session)
+    before = notice.get("before") or {}
+    still = [
+        f for f in (notice.get("fields") or [])
+        if str(nb.get(f) or "") == str(before.get(f) or "")
+    ]
+    if not still:
+        logger.info("[muse] repair notice withdrawn — the turn wrote %s after all",
+                    notice.get("fields"))
+        return
+    locale = str(_inputs(session).get("locale") or "ja")
+    msg = _chat_append(
+        session, role="system", name="Studio", kind="system",
+        text=(
+            "「" + "、".join(still) + "」が書き取れませんでした。"
+            "もう一度、そこだけ言ってもらえますか？"
+            if locale.startswith("ja") else
+            f"Could not write down: {', '.join(still)}. "
+            f"Could you say just that part again?"
+        ),
+    )
+    _publish_chat(str(session.get("session_id") or ""), msg)
 
 
 async def _fold_muse_after_talk(
@@ -3463,18 +3519,24 @@ async def _fold_muse_after_talk(
 
     Does not absorb the CARD wholesale. The showrunner's posture/place/clothes
     from the first compile stay; hands/head/held props may be added.
+
+    This is also the end of the turn, so it is where a parked repair notice is
+    settled — including on the paths that return early without folding.
     """
-    if str(session.get("scripter_intent") or "") == "recall":
-        return
-    if not str(session.get("muse_card") or "").strip():
-        return
-    line = str(user_text or "").strip()
     try:
-        await _run_duet_scripter(
-            db, ollama, session, line, cfg=cfg, fold=True,
-        )
-    except Exception:
-        logger.warning("[muse] scripter fold failed", exc_info=True)
+        if str(session.get("scripter_intent") or "") == "recall":
+            return
+        if not str(session.get("muse_card") or "").strip():
+            return
+        line = str(user_text or "").strip()
+        try:
+            await _run_duet_scripter(
+                db, ollama, session, line, cfg=cfg, fold=True,
+            )
+        except Exception:
+            logger.warning("[muse] scripter fold failed", exc_info=True)
+    finally:
+        _settle_repair_notice(session)
 
 
 def _facets_to_write(session: dict[str, Any]) -> list[str]:
@@ -3881,6 +3943,7 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["spoken"] = []
     session["board"] = {}
     session["shoot"] = {}
+    session["shoots"] = []
     session["plan"] = {}
     session["costume"] = {}
     session["notes"] = []
@@ -5189,6 +5252,26 @@ async def request_board(
             name=_muse_display_name(session, "lens"), text=ask_text,
         )
         _publish_chat(sid, ask)
+    else:
+        # 主演撮り has no camera seat to say this, so for a long time it said
+        # nothing at all — measured on a real session: eight test shots, eight
+        # timeline entries, and not one line in the chat. Reading that log back
+        # you see 「承認を受け付けました」 four times with no sign a board was
+        # ever asked for, and the two-to-four minute silences (the showrunner
+        # waiting on a render, then looking at it) are unexplained. The final
+        # shoot has always written its own line here; the test shot must too,
+        # or the log is not a record of the shoot.
+        ask = _chat_append(
+            session, role="system", name="Studio", kind="system",
+            text=(
+                ("当たりを一枚撮ります。少し待ってください。"
+                 if still else "試し撮りを1枚撮ります。")
+                if locale.startswith("ja") else
+                ("Taking one still. One moment."
+                 if still else "Taking a test shot.")
+            ),
+        )
+        _publish_chat(sid, ask)
 
     session["board"] = {
         "prompt": prompt,
@@ -5258,6 +5341,22 @@ async def approve_and_shoot(
         "craft_tags": str(craft.get("tags") or ""),
         "craft_scene": str(craft.get("scene") or ""),
     }
+
+    # One session can hold several ③ presses — measured live, four of them —
+    # and `shoot` is one take, replaced each time. Everything downstream (the
+    # diary above all) then saw only the last one, so three finished photos
+    # went nowhere. Keep the finished take before it is replaced; `shoot`
+    # stays "the take being made right now" and nothing else has to change.
+    done = session.get("shoot") or {}
+    if done.get("images"):
+        takes = list(session.get("shoots") or [])
+        takes.append({
+            "prompt": str(done.get("prompt") or ""),
+            "seed": done.get("seed"),
+            "images": list(done.get("images") or []),
+            "at": time.time(),
+        })
+        session["shoots"] = takes[-_SHOOT_ARCHIVE_MAX:]
 
     session["shoot"] = {
         "prompt": prompt,
@@ -5497,8 +5596,13 @@ async def run_generate_actress_diary_job(
 
     # Extract photo description from shoot prompt
     photo_desc = str((session.get("shoot") or {}).get("prompt") or "")
-    image_ids = _shoot_image_ids(session)
-    image_id = image_ids[0] if image_ids else ""
+    # Every ③ of the session, not just the last one. `image_id` stays the take
+    # they finished on — that is the cover of the page — while `image_ids` is
+    # what makes each of the day's photos find its way back here
+    # (`presets.find_preset_diary_by_image`).
+    image_ids = all_shoot_image_ids(session)
+    latest = _shoot_image_ids(session)
+    image_id = (latest or image_ids or [""])[0]
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
@@ -5798,12 +5902,45 @@ def _director_highlights(session: dict[str, Any]) -> str:
     return "\n".join(f"- {n}" for n in notes[-8:])
 
 
-def _shoot_image_ids(session: dict[str, Any]) -> list[str]:
-    """Every take from the final shoot, in order, without duplicates.
+def _image_ids_of(shoot: dict[str, Any] | None) -> list[str]:
+    """Image ids out of one take's `images`, in order, without duplicates.
 
     A single ③ can land more than one frame (`draft_count`). Older sessions
     store bare sha strings; newer ones store `{image_id, ...}` dicts.
     """
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in (shoot or {}).get("images") or []:
+        if isinstance(item, dict):
+            iid = str(item.get("image_id") or "").strip()
+        else:
+            iid = str(item).strip()
+        if iid and iid not in seen:
+            seen.add(iid)
+            out.append(iid)
+    return out
+
+
+def all_shoot_image_ids(session: dict[str, Any]) -> list[str]:
+    """Every final photo this session took, oldest press first.
+
+    `shoot` is only the take being made right now; the ones before it live in
+    `shoots` (see `approve_and_shoot`). The diary is the reason this exists —
+    it recorded one photo per session no matter how many the showrunner shot,
+    and the rest were unreachable from her page.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for take in list(session.get("shoots") or []) + [session.get("shoot") or {}]:
+        for iid in _image_ids_of(take if isinstance(take, dict) else {}):
+            if iid not in seen:
+                seen.add(iid)
+                out.append(iid)
+    return out
+
+
+def _shoot_image_ids(session: dict[str, Any]) -> list[str]:
+    """The current take's frames. Earlier takes: `all_shoot_image_ids`."""
     shot = (session.get("shoot") or {}).get("images") or []
     out: list[str] = []
     seen: set[str] = set()

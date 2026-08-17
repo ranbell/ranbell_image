@@ -110,7 +110,8 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "spoken": [],
         "chat": [],           # [{id, role, muse_id, name, text, at}]
         "board": {},          # image board round
-        "shoot": {},          # final images after OK
+        "shoot": {},          # the final take being made right now
+        "shoots": [],         # finished takes before it — every ③ of the day
         # Legacy keys kept empty so older clients/tests do not explode.
         "draft": {},
         "selected": [],
