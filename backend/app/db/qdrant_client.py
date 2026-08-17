@@ -82,6 +82,9 @@ GALLERY_PAYLOAD_FIELDS = [
     "sha256", "name", "path", "ext", "size", "mtime",
     "star_rating", "batch_category", "embedding_status",
     "is_draft", "is_reference", "wd14_tags",
+    # Who is in it. The grid cannot label a row it was never handed, so a
+    # filtered-by-Muse gallery had no way to show whose photo it was looking at.
+    "character_id", "character_name", "muse_stage",
 ]
 GALLERY_PAYLOAD = qm.PayloadSelectorInclude(include=GALLERY_PAYLOAD_FIELDS)
 
@@ -914,6 +917,19 @@ class QdrantDBClient:
             field_name="creation_record.method",
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
+        # Who is in the picture, and which shoot it came from. The renderer has
+        # written all four onto every Muse image since `_character_payload_extra`
+        # (muse/runner.py) — they were simply never indexed, so "every photo of
+        # her" was not a query anyone could ask.
+        for _muse_field in (
+            "character_id", "partner_character_id",
+            "muse_stage", "muse_session_id",
+        ):
+            await self._qc.create_payload_index(
+                collection_name=collection,
+                field_name=_muse_field,
+                field_schema=qm.PayloadSchemaType.KEYWORD,
+            )
         # Emotion dimension indexes (12 flat float keys: emotion_loneliness, etc.)
         _EMOTION_DIMS = (
             "loneliness", "nostalgia", "ephemeral", "melancholy",
@@ -1146,12 +1162,41 @@ class QdrantDBClient:
         category: str | None = None,
         sha256_ids: set[str] | None = None,
         exclude_drafts: bool = True,
+        character_id: str | None = None,
+        include_partner: bool = False,
+        muse_stage: str | None = None,
+        muse_session_id: str | None = None,
     ) -> qm.Filter | None:
         """Build a Qdrant Filter from common image query parameters."""
         must: list = []
         must_not: list = []
         if exclude_drafts:
             must_not.append(self._draft_exclude_cond())
+        if character_id:
+            lead = qm.FieldCondition(
+                key="character_id", match=qm.MatchValue(value=character_id),
+            )
+            if include_partner:
+                # A two-Muse take stores the second girl under her own key, so
+                # asking only about `character_id` hides every frame she was
+                # cast into as the partner. Nested filter = OR inside the AND.
+                must.append(qm.Filter(should=[
+                    lead,
+                    qm.FieldCondition(
+                        key="partner_character_id",
+                        match=qm.MatchValue(value=character_id),
+                    ),
+                ]))
+            else:
+                must.append(lead)
+        if muse_stage:
+            must.append(qm.FieldCondition(
+                key="muse_stage", match=qm.MatchValue(value=muse_stage),
+            ))
+        if muse_session_id:
+            must.append(qm.FieldCondition(
+                key="muse_session_id", match=qm.MatchValue(value=muse_session_id),
+            ))
         if tags_include:
             if tag_logic == "or":
                 must.append(qm.FieldCondition(key="wd14_tags", match=qm.MatchAny(any=tags_include)))
@@ -1187,6 +1232,10 @@ class QdrantDBClient:
         sha256_ids: set[str] | None = None,
         exclude_drafts: bool = True,
         gallery_fields: bool = False,
+        character_id: str | None = None,
+        include_partner: bool = False,
+        muse_stage: str | None = None,
+        muse_session_id: str | None = None,
     ) -> list[dict]:
         """Fetch all documents, optionally pre-filtered by tag/keyword/model conditions.
 
@@ -1198,6 +1247,8 @@ class QdrantDBClient:
             tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
             keyword=keyword, models=models, star_min=star_min,
             category=category, sha256_ids=sha256_ids, exclude_drafts=exclude_drafts,
+            character_id=character_id, include_partner=include_partner,
+            muse_stage=muse_stage, muse_session_id=muse_session_id,
         )
         all_docs: list[dict] = []
         offset = None
@@ -1231,6 +1282,10 @@ class QdrantDBClient:
         category: str | None = None,
         sha256_ids: set[str] | None = None,
         exclude_drafts: bool = True,
+        character_id: str | None = None,
+        include_partner: bool = False,
+        muse_stage: str | None = None,
+        muse_session_id: str | None = None,
     ) -> tuple[list[dict], str | None, int]:
         """Fetch one page of filtered results using order_by cursor pagination.
 
@@ -1243,6 +1298,8 @@ class QdrantDBClient:
             tags_include=tags_include, tags_exclude=tags_exclude, tag_logic=tag_logic,
             keyword=keyword, models=models, star_min=star_min,
             category=category, sha256_ids=sha256_ids, exclude_drafts=exclude_drafts,
+            character_id=character_id, include_partner=include_partner,
+            muse_stage=muse_stage, muse_session_id=muse_session_id,
         )
 
         # Approximate total (avoids full collection scan)

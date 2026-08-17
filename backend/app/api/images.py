@@ -151,6 +151,14 @@ async def list_images(
     align_min: float | None = None, # 0.0-1.0 — minimum alignment score filter
     date_seek: str = "",           # ISO datetime string — seek to date position (overrides cursor)
     include_drafts: bool = False,  # Muse board sketches are hidden unless asked for
+    # Whose photos. Every Muse render already carries these (muse/runner.py
+    # `_character_payload_extra`); they ride the same filter path as tags and
+    # stars so "her photos" composes with every search the gallery already has
+    # rather than becoming a second, poorer search of its own.
+    character_id: str = "",
+    include_partner: bool = False,  # also frames she was cast into as the second Muse
+    muse_stage: str = "",           # "shoot" | "board" | "still"
+    muse_session_id: str = "",      # one shoot
 ):
     import base64 as _b64
 
@@ -187,6 +195,10 @@ async def list_images(
             category=category, sha256_ids=align_sha256s,
             exclude_drafts=not include_drafts,
             gallery_fields=True,
+            character_id=character_id or None,
+            include_partner=include_partner,
+            muse_stage=muse_stage or None,
+            muse_session_id=muse_session_id or None,
         )
         docs = sort_docs([d for d in all_docs if _in_dir(d)], sort)
         return {"total": len(docs), "next_cursor": None, "images": docs,
@@ -197,8 +209,10 @@ async def list_images(
     keyword = q.strip() or None
     model_list = [m.strip() for m in models.split(",") if m.strip()] if models else []
 
+    muse_stage = muse_stage if muse_stage in ("shoot", "board", "still") else ""
     is_filter = bool(keyword or inc_list or exc_list or model_list or star_min is not None
-                     or category is not None or align_min is not None)
+                     or category is not None or align_min is not None
+                     or character_id or muse_stage or muse_session_id)
 
     # date_seek: convert ISO datetime string to synthetic cursor for mtime-based sorts.
     #
@@ -226,6 +240,10 @@ async def list_images(
                 sha256_ids=align_sha256s,
                 exclude_drafts=not include_drafts,
                 gallery_fields=True,
+                character_id=character_id or None,
+                include_partner=include_partner,
+                muse_stage=muse_stage or None,
+                muse_session_id=muse_session_id or None,
             )
             sha_to_doc = {d["sha256"]: d for d in docs}
             # Order by alignment score, then append unscored docs at the end
@@ -287,6 +305,10 @@ async def list_images(
             "keyword": keyword or "",
             "models": model_list,
             "sort": sort,
+            "character_id": character_id or "",
+            "include_partner": include_partner,
+            "muse_stage": muse_stage or "",
+            "muse_session_id": muse_session_id or "",
         }
 
         # Use order_by cursor pagination (one page at a time, no full-load).
@@ -301,6 +323,10 @@ async def list_images(
             category=category,
             sha256_ids=align_sha256s,
             exclude_drafts=not include_drafts,
+            character_id=character_id or None,
+            include_partner=include_partner,
+            muse_stage=muse_stage or None,
+            muse_session_id=muse_session_id or None,
         )
 
         available_tags: list[str] = []
