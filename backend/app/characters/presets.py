@@ -881,6 +881,58 @@ async def add_preset_diary(db, preset_id: str, diary: dict[str, Any]) -> dict[st
     return diary
 
 
+async def backfill_diary_photos(db, *, limit: int = 24) -> dict[str, Any]:
+    """Give the pages already written back the photos they never got.
+
+    Every diary filed before `shoots` existed recorded only the take the
+    showrunner happened to finish on — one measured session shot eight final
+    photos over four ③ presses and its page carries two. The photos were never
+    lost; each one stores its own `muse_session_id`, so the shoot can be asked
+    of the images and the page repaired in place.
+
+    Read-only for any page it cannot improve: a diary keeps the ids it has, and
+    gains only what the image store can prove belongs to the same shoot.
+    """
+    scanned = 0
+    repaired = 0
+    added = 0
+    # `list_presets` returns light rows for the picker — the diaries are only on
+    # the full payload, so each one has to be fetched.
+    for row in await list_presets(db):
+        pid = str(row.get("id") or "")
+        preset = await get_preset(db, pid) if pid else None
+        diaries = list((preset or {}).get("diaries") or [])
+        if not pid or not diaries:
+            continue
+        changed = False
+        for diary in diaries:
+            sid = str(diary.get("session_id") or "")
+            if not sid:
+                continue
+            scanned += 1
+            have = _diary_image_ids(diary)
+            docs = await db.scroll_all(
+                muse_session_id=sid, muse_stage="shoot",
+                exclude_drafts=True, gallery_fields=True,
+            )
+            found = [
+                str(d.get("sha256") or "")
+                for d in sorted(docs, key=lambda d: str(d.get("mtime") or ""))
+                if d.get("sha256")
+            ]
+            merged = (found + [i for i in have if i not in set(found)])[:limit]
+            if merged and merged != have:
+                diary["image_ids"] = merged
+                # The cover stays whatever the page already showed.
+                diary.setdefault("image_id", merged[-1])
+                repaired += 1
+                added += max(0, len(merged) - len(have))
+                changed = True
+        if changed:
+            await update_preset(db, pid, {"diaries": diaries})
+    return {"scanned": scanned, "repaired": repaired, "photos_added": added}
+
+
 async def delete_preset_diary(db, preset_id: str, diary_id: str) -> bool:
     """Remove one entry. True when something was actually removed."""
     preset = await get_preset(db, preset_id)

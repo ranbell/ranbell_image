@@ -116,6 +116,71 @@ async def test_a_second_final_press_keeps_the_first_photo():
     ]
 
 
+# ── 2b. the photos are asked of the photos, not of the session ──────────────
+
+class _PhotoDb:
+    """Stands in for the image store: rows carry their own shoot id."""
+
+    def __init__(self, rows, fail=False):
+        self.rows = rows
+        self.fail = fail
+        self.kwargs: dict | None = None
+
+    async def scroll_all(self, **kw):
+        self.kwargs = kw
+        if self.fail:
+            raise RuntimeError("qdrant is having a day")
+        return [
+            r for r in self.rows
+            if r.get("muse_session_id") == kw.get("muse_session_id")
+        ]
+
+
+def _row(sha, mtime, sid="s1"):
+    return {"sha256": sha, "mtime": mtime, "muse_session_id": sid}
+
+
+@pytest.mark.asyncio
+async def test_a_shoot_that_predates_the_archive_still_finds_its_photos():
+    """The measured case: four ③ presses, eight photos, a page holding two.
+
+    Nothing archived those takes at the time, so the session cannot answer —
+    but each photo stored its own `muse_session_id` and can.
+    """
+    db = _PhotoDb([
+        _row("aaa", "2026-08-16T17:18:43Z"),
+        _row("bbb", "2026-08-16T17:19:27Z"),
+        _row("ccc", "2026-08-16T17:37:01Z"),
+        _row("ddd", "2026-08-16T17:37:44Z"),
+        _row("zzz", "2026-08-16T18:00:00Z", sid="other"),
+    ])
+    session = {  # only the last take survived on the session, as it used to
+        "session_id": "s1",
+        "shoot": {"images": [{"image_id": "ccc"}, {"image_id": "ddd"}]},
+    }
+
+    got = await service.shoot_photos_of_session(db, session)
+
+    assert got == ["aaa", "bbb", "ccc", "ddd"], "oldest press first"
+    assert db.kwargs["muse_stage"] == "shoot", "board sketches are not the shoot"
+
+
+@pytest.mark.asyncio
+async def test_a_photo_the_image_store_has_not_seen_yet_is_not_dropped():
+    db = _PhotoDb([_row("aaa", "2026-08-16T17:18:43Z")])
+    session = {"session_id": "s1", "shoot": {"images": [{"image_id": "fresh"}]}}
+
+    assert await service.shoot_photos_of_session(db, session) == ["aaa", "fresh"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_lookup_falls_back_to_what_the_session_knows():
+    db = _PhotoDb([], fail=True)
+    session = {"session_id": "s1", "shoot": {"images": [{"image_id": "ccc"}]}}
+
+    assert await service.shoot_photos_of_session(db, session) == ["ccc"]
+
+
 # ── 3. the notice waits for the whole turn ──────────────────────────────────
 
 def _parked(session, *, field: str, before: str) -> None:

@@ -493,6 +493,19 @@ async def character_compat_matrix(request: Request):
     return await compat_matrix(request.app.state.db)
 
 
+@router.post("/diaries/backfill-photos")
+async def backfill_diary_photos(request: Request):
+    """Reattach every final photo of a shoot to the diary page it belongs to.
+
+    Pages written before the session kept its finished takes carry only the
+    take the showrunner stopped on. The photos themselves know which shoot they
+    came from, so nothing was lost — it just had to be asked for. Runs inline:
+    it is a payload rewrite over a few dozen pages, not a render.
+    """
+    from ..characters import presets as presets_db
+    return await presets_db.backfill_diary_photos(request.app.state.db)
+
+
 @router.post("/character-compat/backfill")
 async def start_character_compat_backfill(request: Request):
     """Embed every character still missing appearance/personality vectors."""

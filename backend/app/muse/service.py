@@ -5600,7 +5600,7 @@ async def run_generate_actress_diary_job(
     # they finished on — that is the cover of the page — while `image_ids` is
     # what makes each of the day's photos find its way back here
     # (`presets.find_preset_diary_by_image`).
-    image_ids = all_shoot_image_ids(session)
+    image_ids = await shoot_photos_of_session(db, session)
     latest = _shoot_image_ids(session)
     image_id = (latest or image_ids or [""])[0]
 
@@ -5937,6 +5937,46 @@ def all_shoot_image_ids(session: dict[str, Any]) -> list[str]:
                 seen.add(iid)
                 out.append(iid)
     return out
+
+
+async def shoot_photos_of_session(
+    db, session: dict[str, Any], *, limit: int = _SHOOT_ARCHIVE_MAX,
+) -> list[str]:
+    """Every final photo of one shoot — asked of the photos, not the session.
+
+    The session document only ever held the take being made at that moment, so
+    a session that pressed ③ four times kept two of its eight photos and the
+    other six were unreachable. `shoots` fixes that going forward, and this
+    fixes it for every shoot that already happened: each rendered image carries
+    `muse_session_id` and `muse_stage` in its own payload
+    (`muse/runner.py::_character_payload_extra`), so the images can be asked
+    directly and the answer is right for sessions that finished long before
+    anything archived a take.
+
+    Falls back to what the session knows if the query cannot run — a diary with
+    the last take's photos beats a diary with none.
+    """
+    known = all_shoot_image_ids(session)
+    sid = str(session.get("session_id") or "")
+    if not sid or db is None:
+        return known[:limit]
+    try:
+        docs = await db.scroll_all(
+            muse_session_id=sid, muse_stage="shoot",
+            exclude_drafts=True, gallery_fields=True,
+        )
+    except Exception:
+        logger.warning("[muse] could not read this shoot's photos", exc_info=True)
+        return known[:limit]
+    found = [
+        str(d.get("sha256") or "")
+        for d in sorted(docs, key=lambda d: str(d.get("mtime") or ""))
+        if d.get("sha256")
+    ]
+    # Order by when they were taken; anything the session knows about that the
+    # image store has not caught up on goes on the end rather than being lost.
+    out = found + [i for i in known if i not in set(found)]
+    return out[:limit]
 
 
 def _shoot_image_ids(session: dict[str, Any]) -> list[str]:
