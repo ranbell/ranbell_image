@@ -112,6 +112,9 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "board": {},          # image board round
         "shoot": {},          # the final take being made right now
         "shoots": [],         # finished takes before it — every ③ of the day
+        # Drawn on the first render and held for the rest of the shoot, so the
+        # only thing that changes between two takes is the script.
+        "seed": 0,
         # Legacy keys kept empty so older clients/tests do not explode.
         "draft": {},
         "selected": [],

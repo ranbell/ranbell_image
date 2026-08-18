@@ -44,6 +44,11 @@ _finish_locks: dict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 # in Qdrant, so this is not somewhere to let a list grow forever.
 _SHOOT_ARCHIVE_MAX = 24
 
+# How many tags she may disown in one look. Her own contract tells her that
+# naming more than two or three means she misread the list; this is the same
+# sentence as a number, so a review that ignores it cannot empty the bag.
+_WEAVE_REVIEW_MAX = 4
+
 
 class MuseError(Exception):
     """A step could not run. The message goes straight to the user."""
@@ -682,6 +687,26 @@ def record_ledger(
     }
     session.setdefault("ledger", []).append(entry)
     return entry
+
+
+def session_seed(session: dict[str, Any]) -> int:
+    """One seed for the whole shoot — drawn once, then never again.
+
+    Every ② used to draw a fresh random seed, so two test shots of the same
+    script were two different pictures. Measured on a live session: the weave
+    was frozen for nine boards, the prompt did not change by one byte, and the
+    picture changed every time anyway. The showrunner was reading those
+    differences as the studio answering his direction. They were noise.
+
+    A shoot is a series of takes of one picture. Holding the seed is what makes
+    「引きにして」 and 「もっと暗く」 legible at all — the only thing that moves
+    between two takes should be the words.
+    """
+    seed = int(session.get("seed") or 0)
+    if not seed:
+        seed = random.randint(0, (1 << 64) - 1)
+        session["seed"] = seed
+    return seed
 
 
 def banned_tags(session: dict[str, Any]) -> list[str]:
@@ -1941,6 +1966,9 @@ async def start_table(
     session["board"] = {}
     session["shoot"] = {}
     session["shoots"] = []
+    # A fresh read-through is a fresh picture, so it gets a fresh seed. Held
+    # from the first render onward — see `session_seed`.
+    session["seed"] = 0
     session["plan"] = {}
     session["costume"] = {}
     session.pop("_blind_said", None)
@@ -2518,16 +2546,22 @@ def _apply_compiled_craft(
     scene = str(craft_scene or "").strip()
     if not tags and not scene:
         return False
-    # Refuse obviously broken gaze+angle stacks that mean the model merged
-    # instead of rewriting FRAME as one story.
-    low = tags.lower().replace(" ", "_")
-    if ("from_below" in low or "low_angle" in low) and "looking_up" in low:
-        logger.info("[muse] refusing compile with low-angle + looking_up")
-        return False
-    if ("from_above" in low or "high_angle" in low) and "looking_down" in low:
-        # looking_down can be ok with high angle sometimes; keep soft — only
-        # hard-refuse the known low+up failure mode above.
-        pass
+    # There used to be a gate here that refused the whole compile when the bag
+    # held `low_angle` (or `from_below`) together with `looking_up`, on the
+    # theory that the model had merged two ideas instead of rewriting FRAME as
+    # one story. The theory was wrong, and it cost a whole session to find out.
+    #
+    # 「上からじゃなくてローアングル気味にしようか。顔はもう少し撮りたいな」 —
+    # the camera low, and the pianist tilting her face up into the last of the
+    # resonance. That is a real shot, and the two tags together are how you ask
+    # for it. The gate threw away nine weaves in a row for it: the expression,
+    # the shadows and the atmosphere all went out with the pair, and the
+    # showrunner directed for fifty minutes into a script that could not move.
+    #
+    # Gone entirely, not softened. Everything else on this path drops the tag
+    # it dislikes and passes the rest; a gaze that really is wrong for the
+    # angle is something the room can see and say, and now the Muse gets a look
+    # at the bag before it is used.
     craft = session.setdefault("craft", {})
     before_tags = str(craft.get("tags") or "")
     before_scene = str(craft.get("scene") or "")
@@ -2652,6 +2686,10 @@ async def _call_duet_scripter(
         struck=_struck_line(session),
         crew_look=crew_look_block(session),
         room_leaning=_room_leaning(session) if mode == "weave" else "",
+        # Only the weave. A compile is answering the showrunner's newest line,
+        # and handing it her voice as well is how a stale self-description
+        # outranked him before (see `card` above).
+        muse_says=_last_lead_say(session) if mode == "weave" else "",
         directive=(
             repair if repair
             else chain.SCRIPTER_FOLD_NOTE if fold
@@ -3970,6 +4008,9 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["board"] = {}
     session["shoot"] = {}
     session["shoots"] = []
+    # A fresh read-through is a fresh picture, so it gets a fresh seed. Held
+    # from the first render onward — see `session_seed`.
+    session["seed"] = 0
     session["plan"] = {}
     session["costume"] = {}
     session["notes"] = []
@@ -4985,6 +5026,10 @@ async def weave_craft_if_needed(
         )
         scene_out = str(result.get("craft_scene") or "")
         if result.get("valid") and tags and scene_out:
+            tags = await _muse_reviews_weave(
+                ollama, session, tags, cfg=cfg, name_a=name_a, name_b=name_b,
+                partner=partner,
+            )
             if _apply_compiled_craft(session, tags, scene_out):
                 session["craft_dirty"] = False
                 weave_ok = True
@@ -5006,6 +5051,58 @@ async def weave_craft_if_needed(
         })
     await session_db.save(db, session, publish=False)
     return session
+
+
+async def _muse_reviews_weave(
+    ollama, session: dict[str, Any], tags: str, *, cfg: dict[str, Any],
+    name_a: str, name_b: str, partner: bool,
+) -> str:
+    """Let her look at the bag before the render, and drop what she disowns.
+
+    She is the orchestrator of this shoot; the weave is a worker. Until now the
+    worker had the last word and she never saw its output at all — the tags
+    went from the notebook to the sampler with nobody in the picture checking
+    that they described her.
+
+    Subtractive only, and closed to the tags already present, so the worst a
+    bad review can do is make the bag slightly smaller. Never raises: a review
+    that fails leaves the bag exactly as the weave wrote it.
+    """
+    inputs = _inputs(session)
+    nb = notebook_mod.of(session)
+    try:
+        wrong = await chain.run_weave_review(
+            ollama,
+            system=crew.actress_duet_prompt(
+                session.get("character") or {}, mode="review",
+                locale=str(inputs.get("locale") or "ja"),
+                seed=str(session.get("session_id") or ""),
+            ),
+            tags=tags,
+            notebook_block=notebook_mod.render(
+                nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""),
+            ),
+            muse_says=_last_lead_say(session),
+            model=_text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.warning("[muse] weave review failed; bag kept", exc_info=True)
+        return tags
+    if not wrong:
+        return tags
+    # A review that wants to gut the bag has misread it, not found ten faults.
+    if len(wrong) > _WEAVE_REVIEW_MAX:
+        logger.info("[muse] weave review named %d tags; ignoring", len(wrong))
+        return tags
+    gone = {identity.bare_tag(t) for t in wrong}
+    kept = ", ".join(
+        p.strip() for p in tags.split(",")
+        if p.strip() and identity.bare_tag(p) not in gone
+    )
+    logger.info("[muse] she disowned %s", ", ".join(wrong))
+    session["weave_review"] = list(wrong)
+    return kept or tags
 
 
 async def still_read_after_board(db, ollama, session_id: str) -> None:
@@ -5253,7 +5350,7 @@ async def request_board(
 
     inputs = _inputs(session)
     sid = session["session_id"]
-    seed = random.randint(0, (1 << 64) - 1)
+    seed = session_seed(session)
     locale = str(inputs.get("locale") or "ja")
 
     await _maybe_unload(ollama, session)
@@ -5338,7 +5435,7 @@ async def approve_and_shoot(
 
     inputs = _inputs(session)
     sid = session["session_id"]
-    seed = int((session.get("board") or {}).get("seed") or 0) or random.randint(0, (1 << 64) - 1)
+    seed = int((session.get("board") or {}).get("seed") or 0) or session_seed(session)
     locale = str(inputs.get("locale") or "ja")
 
     await _maybe_unload(ollama, session)

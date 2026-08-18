@@ -3061,6 +3061,12 @@ def actress_duet_prompt(
         # No style block, no framing, no CARRY: she is answering one question,
         # and nothing else about the shot is hers to write this turn.
         blocks.append(WARDROBE_READOUT_OUTPUT)
+    elif mode == "review":
+        # She looks at the tag bag before the render. Her voice is what makes
+        # her the right reader — she knows where her own weight is — but the
+        # answer is one machine line, so the output contract comes from
+        # `chain.WEAVE_REVIEW_SYSTEM` and nothing here adds to it.
+        pass
     elif mode == "prep" and facets is not None:
         # The scoped contract. DUET_OWNS_THE_FRAME's "rewrite everything that
         # conflicts" half is what scoped replacement makes unnecessary: a part

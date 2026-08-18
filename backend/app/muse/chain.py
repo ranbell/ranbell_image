@@ -606,6 +606,103 @@ async def run_strike(
     return parse_strike(raw, present, removed)
 
 
+# ── the Muse looks at the bag before it is used ───────────────────────────
+# She is the one standing in the picture, and until now she never saw the tags
+# that describe it. `still_read` lets her read the still AFTER it is taken;
+# this is the same pair of eyes one step earlier, on the words rather than the
+# image — the one place a wrong tag can still be caught for free.
+#
+# She may only name tags that are already in the bag. That is the whole safety
+# property: a wrong answer can make the bag smaller, never stranger. The same
+# closed-vocabulary shape as `STRIKE_SYSTEM` above, for the same reason.
+#
+# Deliberately NOT a rewrite. The retired B/C/D chain let a later pass restate
+# the picture and it drifted every time; here the model's only power is to
+# point, and the subtraction is done by code.
+WEAVE_REVIEW_SYSTEM = """
+You are the actress. You are standing in this shot. In a moment the camera
+department will build the picture from the tag list below.
+
+One job: read the list against what you are actually wearing and doing, and
+name any tag that is plainly NOT true of you right now.
+
+RULES
+- Answer ONLY with tags copied EXACTLY from the TAGS list. Never invent,
+  translate, pluralise or reword. A tag you did not copy exactly is ignored.
+- Name a tag only when it contradicts the notebook or your own words — a
+  garment you are not wearing, an action you are not doing, a place you are
+  not in.
+- Quality, light, mood, camera and composition words are NOT yours to judge.
+  Leave them alone even if you would have chosen differently.
+- A low camera and a lifted face are not a contradiction. Neither are a wide
+  shot and a small gesture. Two things can be true at once.
+- Naming nothing is the normal answer and a complete answer. Most lists are
+  fine. If you are naming more than two or three, you have misread the list.
+
+OUTPUT FORMAT — exactly one line, nothing else, no explanation:
+
+WRONG: <comma-separated tags copied from TAGS, or the word none>
+""".strip()
+
+_WEAVE_REVIEW_RE = re.compile(r"(?im)^[\s>*_-]*WRONG[\s*_]*[:：]\s*(.*)$")
+
+
+def parse_weave_review(raw: str, tags: str) -> list[str]:
+    """Tags she pointed at — kept only when they are really in the bag.
+
+    Closing the vocabulary here is what makes this safe to run on every take:
+    anything she says that is not already in `tags` falls on the floor, so the
+    worst a bad answer can do is nothing.
+    """
+    present = {}
+    for part in str(tags or "").split(","):
+        tag = part.strip()
+        if tag:
+            present.setdefault(identity.bare_tag(tag), tag)
+    out: list[str] = []
+    for match in _WEAVE_REVIEW_RE.finditer(raw or ""):
+        for part in match.group(1).split(","):
+            key = identity.bare_tag(part)
+            if key and key in present and present[key] not in out:
+                out.append(present[key])
+    return out
+
+
+async def run_weave_review(
+    ollama, *, system: str, tags: str, notebook_block: str, muse_says: str,
+    model: str, num_ctx: int | None,
+) -> list[str]:
+    """Show her the bag before the render. She points; the caller subtracts.
+
+    ``system`` is her voice — who is looking. The output contract is appended
+    here rather than passed in, so there is one copy of it and the caller
+    cannot ship a review with no shape to its answer.
+    """
+    if not str(tags or "").strip():
+        return []
+    system = (
+        f"{system.strip()}\n\n{WEAVE_REVIEW_SYSTEM}"
+        if str(system or "").strip() else WEAVE_REVIEW_SYSTEM
+    )
+    prompt = "\n\n".join(b for b in [
+        f"NOTEBOOK NOW (what the shot is):\n{notebook_block}",
+        f"WHAT YOU JUST SAID:\n{muse_says.strip()[:600]}" if muse_says.strip() else "",
+        f"TAGS:\n{tags}",
+        "どれか、いまのあなたに当てはまらないものはある？ 一行で答えて。",
+    ] if b.strip())
+    try:
+        raw = await _call(
+            ollama, system=system, prompt=prompt, model=model, images=None,
+            num_ctx=num_ctx, think=False,
+        )
+    except ChainError:
+        # She could not look this time. The bag goes through as written — a
+        # review that cannot run is not a reason to hold up the take.
+        logger.warning("[muse.chain] weave review produced nothing", exc_info=True)
+        return []
+    return parse_weave_review(raw, tags)
+
+
 _WARDROBE_LINE_RE = re.compile(r"(?im)^[\s>*_-]*(SAY|WEARING)[\s*_]*[:：]\s*(.*)$")
 
 
@@ -1414,7 +1511,7 @@ async def run_scripter(
     partner: bool = False, model: str, num_ctx: int | None,
     mode: str = "compile", images: list[bytes] | None = None,
     card: str = "", struck: str = "", directive: str = "",
-    crew_look: str = "", room_leaning: str = "",
+    crew_look: str = "", room_leaning: str = "", muse_says: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
 
@@ -1442,6 +1539,18 @@ async def run_scripter(
                 f"ROOM LEANING (what this crew tends to like — a leaning, not "
                 f"an order):\n{room_leaning.strip()}"
             ) if room_leaning.strip() else "",
+            # She is the one standing in it. Every turn she says, in her own
+            # words, what she has on and what she is about to do — and until
+            # now that went to the floor and never to the person writing the
+            # tags. The notebook is the shot's authority; this is the same
+            # shot, described by the only one who can feel where her weight is.
+            # Read it to resolve what the notebook says tersely; where the two
+            # disagree about WHAT the shot is, the notebook wins.
+            (
+                f"WHAT SHE SAYS SHE IS DOING (her own words, this turn — read "
+                f"it to understand the notebook, not to overrule it):\n"
+                f"{muse_says.strip()[:600]}"
+            ) if muse_says.strip() else "",
             f"{CREW_LOOK_NOTE}\n{crew_look.strip()}" if crew_look.strip() else "",
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (
