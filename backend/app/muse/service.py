@@ -541,6 +541,27 @@ def decode_chat_images(
     return out
 
 
+async def images_by_sha(db, shas: list[str]) -> list[bytes]:
+    """Load stored images small enough to hand to a VLM. Unreadable ones vanish.
+
+    Never raises: a picture that cannot be loaded is a reason to carry on
+    without it, never a reason to fail the turn that wanted to look.
+    """
+    out: list[bytes] = []
+    for sha in [s for s in shas if str(s or "").strip()]:
+        try:
+            docs = await db.get_by_sha256s([sha])
+            path = Path(str((docs or [{}])[0].get("path") or ""))
+            if not path.is_file():
+                continue
+            out.append(await asyncio.to_thread(
+                lambda p=path: _downscale(p.read_bytes()),
+            ))
+        except Exception:
+            logger.debug("[muse] image %s unreadable", str(sha)[:8], exc_info=True)
+    return out
+
+
 async def board_images(db, session: dict[str, Any], *, limit: int = 1) -> list[bytes]:
     """The board the crew is being asked about, small enough to hand to a VLM.
 
@@ -2387,8 +2408,13 @@ def _cited_allow_block(session: dict[str, Any]) -> str:
     )
 
 
-def _bond_and_taste_from_snapshot(session: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
-    """Deterministic continuity cards from the ③ snapshot (no extra LLM)."""
+def _bond_from_snapshot(session: dict[str, Any]) -> dict[str, str]:
+    """What the last take was, in one line. Deterministic, no LLM.
+
+    This is memory of the picture — where they were, what she had on, how it
+    was framed — and a snapshot is exactly the right source for it. What she
+    LEARNED is a different question and lives in `_learned_taste`.
+    """
     snap = session.get("continuity_snapshot") or {}
     nb = snap.get("notebook") or {}
     when = str(nb.get("atmosphere") or nb.get("scene") or snap.get("theme") or "").strip()
@@ -2401,22 +2427,41 @@ def _bond_and_taste_from_snapshot(session: dict[str, Any]) -> tuple[dict[str, st
         "inside": (vibe or "撮影の空気を共有している")[:240],
         "last": " / ".join(p for p in (when, wearing, frame) if p)[:240],
     }
-    prefers = []
-    avoids = []
-    if "足" in " ".join(str(s) for s in (session.get("standing") or [])):
-        avoids.append("足を映す")
-    if open_:
-        prefers.append(open_[:80])
-    if "low" in frame.lower() or "煽" in frame or "下" in frame:
-        prefers.append("ローアングルの近い距離")
-    if wearing:
-        prefers.append(wearing[:80])
-    taste = {
-        "prefers": "、".join(prefers[:4]) or "自然な空気",
-        "avoids": "、".join(avoids[:4]),
-        "notes": "雑談から入ることが多い" if vibe else "",
-    }
-    return bond, taste
+    # The taste half used to be derived here too, from the same snapshot: the
+    # word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 and
+    # whatever she happened to be wearing became a preference. That is a
+    # description of the take, not a thing learned from it, and it read none of
+    # what the showrunner actually said. `_learned_taste` asks his words now.
+    _ = (open_, wearing, frame)
+    return bond
+
+
+async def _learned_taste(
+    ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> dict[str, str]:
+    """What she takes into the next shoot — read off what he said, not what he shot.
+
+    Praise is what to do more of; a correction is what to fix. Both live in his
+    words. Empty when he said nothing evaluative: a shoot that taught nothing
+    should teach nothing, and a card filled in anyway turns the next session
+    into a rerun of this one.
+    """
+    notes = _director_highlights(session)
+    if ollama is None or not notes.strip():
+        return {}
+    inputs = _inputs(session)
+    try:
+        return await chain.run_showrunner_taste(
+            ollama,
+            system=crew.showrunner_taste_prompt(
+                notes=notes, session_log=_session_chat_log(session, limit=20),
+            ),
+            model=_text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.warning("[muse] taste turn failed", exc_info=True)
+        return {}
 
 
 def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
@@ -4158,16 +4203,42 @@ async def record_shoot_continuity(db, session: dict[str, Any], ollama=None) -> N
             # Shoot job may not carry ollama — flush later from finish_session.
             session.setdefault("pending_memory_embeds", []).append(overflow)
     # Short Muse-only continuity cards — not scripter inputs.
+    written: dict[str, Any] = {}
     try:
-        bond, taste = _bond_and_taste_from_snapshot(session)
-        session["bond"] = await presets_db.update_bond(db, char_id, bond)
-        session["showrunner_taste"] = await presets_db.update_showrunner_taste(
-            db, char_id, taste,
+        written["bond"] = await presets_db.update_bond(
+            db, char_id, _bond_from_snapshot(session),
         )
+        # Only overwrite what she learned when this shoot actually taught her
+        # something. A silent shoot must not wipe the card she was carrying.
+        taste = await _learned_taste(ollama, session, cfg=await get_runtime_config(db))
+        if any(str(v or "").strip() for v in taste.values()):
+            written["showrunner_taste"] = await presets_db.update_showrunner_taste(
+                db, char_id, taste,
+            )
     except Exception:
         logger.warning("[muse] bond/taste write failed", exc_info=True)
-    session["continuity"] = {"written_at": time.time()}
-    await session_db.save(db, session, publish=False)
+    written["continuity"] = {"written_at": time.time()}
+    session.update(written)
+    # This runs in the render job, after `finish_shoot` has already published
+    # `status: done` — so the showrunner is free to type the moment the take
+    # lands, and their turn loads, edits and saves the session while this is
+    # still working. Saving the copy loaded before their line would erase it;
+    # saving after it, as this used to, threw away everything they just said —
+    # or, measured on a real run, lost this write instead and left her carrying
+    # the last session's clothes as what she had learned.
+    #
+    # Merge under the session's own lock: re-read, lay only these keys on top,
+    # write back. Whatever else the turn changed stays changed.
+    async with _finish_locks[str(session.get("session_id") or "")]:
+        fresh = await session_db.load(db, str(session.get("session_id") or ""))
+        if fresh is None:
+            await session_db.save(db, session, publish=False)
+            return
+        fresh.update(written)
+        for key in ("memories", "pending_memory_embeds"):
+            if session.get(key) is not None:
+                fresh[key] = session[key]
+        await session_db.save(db, fresh, publish=False)
 
 
 async def flush_pending_memory_embeds(db, ollama, session: dict[str, Any]) -> None:
@@ -5730,8 +5801,6 @@ async def run_generate_actress_diary_job(
         session_log_lines.append(f"{m.get('name')}: {m.get('text')}")
     session_log = "\n".join(session_log_lines)
 
-    # Extract photo description from shoot prompt
-    photo_desc = str((session.get("shoot") or {}).get("prompt") or "")
     # Every ③ of the session, not just the last one. `image_id` stays the take
     # they finished on — that is the cover of the page — while `image_ids` is
     # what makes each of the day's photos find its way back here
@@ -5739,6 +5808,14 @@ async def run_generate_actress_diary_job(
     image_ids = await shoot_photos_of_session(db, session)
     latest = _shoot_image_ids(session)
     image_id = (latest or image_ids or [""])[0]
+    # Her contract asks her to end the entry on 「完成した本番写真を見た感想」.
+    # What she was handed for that was the shoot's tag list, so she was writing
+    # her impression of a photograph she had not seen — and on a session where
+    # the render never received the direction, she described an expression that
+    # was in no part of the prompt. She had no way to know. Show her the photo.
+    photo_desc = await _read_the_photo(
+        db, ollama, session, image_id, model=model, num_ctx=num_ctx,
+    )
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
@@ -5944,6 +6021,52 @@ _CHEMISTRY_ASKS: tuple[str, ...] = (
     "1行目は必ず `SUMMARY_JA: ` で始め、続けて SUMMARY_EN / CONTENT_JA / CONTENT_EN。"
     "JSON にしない。コードフェンスも使わない。",
 )
+
+
+async def _read_the_photo(
+    db, ollama, session: dict[str, Any], image_id: str, *,
+    model: str = "", num_ctx: int | None = None,
+) -> str:
+    """What is actually in the finished photograph, for her to write about.
+
+    Falls back to the shoot's prompt — which is what this always used to be —
+    when there is no photo, no vision model, or the read fails. A page written
+    from the tag list is worse than one written from the picture and far better
+    than none.
+    """
+    prompt_desc = str((session.get("shoot") or {}).get("prompt") or "")
+    if ollama is None or not image_id:
+        return prompt_desc
+    images = await images_by_sha(db, [image_id])
+    if not images:
+        return prompt_desc
+    inputs = _inputs(session)
+    try:
+        raw, blind = await chain._call_seeing(
+            ollama,
+            system=(
+                "You are looking at one photograph. Say what is in it, plainly "
+                "and concretely, in 3–5 English sentences: where she is, what "
+                "she is wearing, what her body is doing, and — this above all "
+                "— what her face is doing. Describe only what the picture "
+                "shows. Do not guess at intent, do not praise it, do not "
+                "mention prompts or tags."
+            ),
+            prompt="Describe this photograph.",
+            model=_vision_model(inputs) or model,
+            images=images,
+            num_ctx=num_ctx,
+            think=False,
+        )
+    except Exception:
+        logger.warning("[muse] could not read the finished photo", exc_info=True)
+        return prompt_desc
+    if blind or not str(raw or "").strip():
+        # A model that cannot see returns nothing rather than erroring — the
+        # trap this codebase has hit before. Treat silence as "did not look".
+        logger.info("[muse] the diary's photo read came back blind")
+        return prompt_desc
+    return str(raw).strip()
 
 
 def _report(reporter, progress: float, message: str) -> None:

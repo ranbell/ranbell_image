@@ -2465,6 +2465,44 @@ def showrunner_habit_prompt(
     ] if x)
 
 
+def showrunner_taste_prompt(*, notes: str = "", session_log: str = "") -> str:
+    """What she takes from this shoot into the next one.
+
+    This card used to be derived from the notebook snapshot with no model at
+    all: if `frame` contained the word "low" she learned 「ローアングルの近い
+    距離」, and the clothes she happened to end in became a preference. It read
+    none of what the showrunner actually said. Measured on a live session where
+    he said 「もっと凄みが欲しい」「震えはいらない」「顔がまだ無表情」 four
+    times over, what she learned was 「ローアングルの近い距離、school uniform,
+    blazer…」 — the shot, not the direction.
+
+    Praise is what to do more of. A correction is what to fix. Both are in his
+    words and nowhere else, so this reads his words.
+    """
+    return "\n\n".join(x for x in [
+        "あなたはスタジオの記録係です。今回の撮影で総監督が口にした"
+        "**評価**を読み、次の撮影に持ち越す短いメモを書きます。",
+        f"【総監督の指示メモ】\n{notes}" if notes else "",
+        f"【会話の断片】\n{session_log}" if session_log else "",
+        "【ルール】",
+        "1. **褒められた点は PREFERS へ。** 「いいね」「よかった」「それだ」と"
+        "言われた具体的な中身を、次も再現できる言い方で書く。",
+        "2. **直された点・足りないと言われた点は AVOIDS と NOTES へ。**"
+        "「〜はいらない」「まだ足りない」「〜すぎる」は、次に直すべきこと。"
+        "AVOIDS は「やらないこと」、NOTES は「気をつけること」。",
+        "3. **撮った内容そのものを書かない。** 場所・衣装・画角の羅列は"
+        "この回の事実であって、学びではない。学びは『総監督が何を良いと"
+        "したか』だけ。",
+        "4. 評価が無かった項目は空でよい。空は正常な答え。"
+        "無理に埋めると、次の撮影が今回の焼き直しになる。",
+        "5. 各行は短く。全部で8行を超えない。",
+        "6. 出力は見出しだけ、この順で:",
+        "PREFERS: 褒められたこと（1行1つ、無ければ空）\n"
+        "AVOIDS: 直すよう言われたこと（1行1つ、無ければ空）\n"
+        "NOTES: 気をつけること（1行1つ、無ければ空）",
+    ] if x)
+
+
 def lounge_reactions_prompt(
     author: dict[str, Any],
     post_text_ja: str,

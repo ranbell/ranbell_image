@@ -846,7 +846,14 @@ def test_cited_allowlist_extracts_grounded_tokens():
     assert "セーラー" in joined or "公園" in joined
 
 
-def test_bond_and_taste_from_snapshot_are_short():
+def test_bond_remembers_the_take_and_says_nothing_about_taste():
+    """Bond is memory of the picture. What she LEARNED is a separate question.
+
+    The taste card used to be derived from this same snapshot — the word "low"
+    in `frame` taught her 「ローアングルの近い距離」 and the clothes she ended
+    in became a preference. That describes the take, not anything the
+    showrunner said about it. See `_learned_taste`.
+    """
     s = {
         "continuity_snapshot": {
             "theme": "屋上",
@@ -860,10 +867,10 @@ def test_bond_and_taste_from_snapshot_are_short():
         },
         "standing": ["足は映さない"],
     }
-    bond, taste = service._bond_and_taste_from_snapshot(s)
-    assert bond["last"]
-    assert "ローアングル" in taste["prefers"] or "セーラー" in taste["prefers"]
-    assert "足" in taste["avoids"]
+    bond = service._bond_from_snapshot(s)
+    assert "夕暮れの屋上" in bond["last"]
+    assert "セーラー" in bond["last"]
+    assert bond["inside"] == "少し照れてる"
 
 
 @pytest.mark.asyncio

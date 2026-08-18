@@ -703,6 +703,47 @@ async def run_weave_review(
     return parse_weave_review(raw, tags)
 
 
+_TASTE_LINE_RE = re.compile(
+    r"(?ims)^[\s>*_-]*(PREFERS|AVOIDS|NOTES)[\s*_]*[:：][ \t]*(.*?)"
+    r"(?=^[\s>*_-]*(?:PREFERS|AVOIDS|NOTES)[\s*_]*[:：]|\Z)"
+)
+
+
+def parse_showrunner_taste(raw: str) -> dict[str, str]:
+    """Three labelled blocks → the card `update_showrunner_taste` stores.
+
+    Empty is a real answer here: a shoot where the showrunner said nothing
+    evaluative should teach nothing, and inventing a preference is how the next
+    session becomes a rerun of this one.
+    """
+    out = {"prefers": "", "avoids": "", "notes": ""}
+    for match in _TASTE_LINE_RE.finditer(raw or ""):
+        key = match.group(1).lower()
+        lines = [
+            ln.strip(" 　-・*") for ln in str(match.group(2) or "").splitlines()
+        ]
+        kept = [ln for ln in lines if ln and ln.lower() not in ("none", "なし", "-")]
+        if kept and not out[key]:
+            out[key] = "\n".join(kept)
+    return out
+
+
+async def run_showrunner_taste(
+    ollama, *, system: str, model: str, num_ctx: int | None,
+) -> dict[str, str]:
+    """What she carries into the next shoot. Empty on any failure."""
+    try:
+        raw = await _call(
+            ollama, system=system,
+            prompt="今回の撮影から次に持ち越すことを、3つの見出しで書いて。",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except ChainError:
+        logger.warning("[muse.chain] taste turn produced nothing", exc_info=True)
+        return {}
+    return parse_showrunner_taste(raw)
+
+
 _WARDROBE_LINE_RE = re.compile(r"(?im)^[\s>*_-]*(SAY|WEARING)[\s*_]*[:：]\s*(.*)$")
 
 
