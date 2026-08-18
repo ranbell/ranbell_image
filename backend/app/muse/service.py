@@ -5089,6 +5089,11 @@ async def _muse_reviews_weave(
     except Exception:
         logger.warning("[muse] weave review failed; bag kept", exc_info=True)
         return tags
+    # Written every time, including empty. Left only on the turns she spoke,
+    # this reads as her having disowned something on a take where she said the
+    # bag was fine — the panel and the debug pane would both be quoting a
+    # review that is two takes old.
+    session["weave_review"] = list(wrong)
     if not wrong:
         return tags
     # A review that wants to gut the bag has misread it, not found ten faults.
@@ -5101,7 +5106,6 @@ async def _muse_reviews_weave(
         if p.strip() and identity.bare_tag(p) not in gone
     )
     logger.info("[muse] she disowned %s", ", ".join(wrong))
-    session["weave_review"] = list(wrong)
     return kept or tags
 
 

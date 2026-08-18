@@ -150,6 +150,21 @@ async def test_what_she_disowns_leaves_the_bag():
 
 
 @pytest.mark.asyncio
+async def test_a_quiet_review_clears_the_last_one():
+    """Caught live: the field only ever grew, so a take where she said nothing
+    still showed the tag she disowned two takes ago."""
+    session = _session()
+    session["weave_review"] = ["looking_down"]
+
+    await service._muse_reviews_weave(
+        _ReviewOllama("WRONG: none"), session, "sailor_fuku, sitting",
+        cfg={}, name_a="各務 みお", name_b="", partner=False,
+    )
+
+    assert session["weave_review"] == []
+
+
+@pytest.mark.asyncio
 async def test_a_review_that_wants_to_gut_the_bag_is_ignored():
     """Her own contract says two or three; a dozen means she misread it."""
     bag = "a_one, b_two, c_three, d_four, e_five, f_six, g_seven"
