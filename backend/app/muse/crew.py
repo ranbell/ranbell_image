@@ -2465,41 +2465,56 @@ def showrunner_habit_prompt(
     ] if x)
 
 
-def showrunner_taste_prompt(*, notes: str = "", session_log: str = "") -> str:
-    """What she takes from this shoot into the next one.
+def showrunner_taste_prompt(
+    *, exchanges: str = "", scene: str = "", muse_name: str = "",
+) -> str:
+    """What she takes from this shoot into the next — written from where she stood.
 
-    This card used to be derived from the notebook snapshot with no model at
-    all: if `frame` contained the word "low" she learned 「ローアングルの近い
-    距離」, and the clothes she happened to end in became a preference. It read
-    none of what the showrunner actually said. Measured on a live session where
-    he said 「もっと凄みが欲しい」「震えはいらない」「顔がまだ無表情」 four
-    times over, what she learned was 「ローアングルの近い距離、school uniform,
-    blazer…」 — the shot, not the direction.
+    Two wrong shapes came before this one.
 
-    Praise is what to do more of. A correction is what to fix. Both are in his
-    words and nowhere else, so this reads his words.
+    First it was derived from the notebook snapshot with no model at all: the
+    word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 and
+    the clothes she happened to end in became a preference. That is a
+    description of the take, not anything learned from it.
+
+    Then it read his lines on their own — and that is still wrong, because a
+    line on its own has no content. 「いいよ、今の良かった」 says nothing
+    unless you know what she had just done. And 「震えはいらない」 is not a
+    rule: it was said to one quiet scene where she had her fingertips shaking,
+    and carried forward as a standing preference it would break the next shoot
+    that wants a tremble.
+
+    So the unit is the pair — what she played, and what he said to it — and the
+    scene it happened in is part of the lesson, not decoration. She is the one
+    writing it, about her own acting, because she is the only one who knows
+    what she was reaching for.
     """
+    who = muse_name or "あなた"
     return "\n\n".join(x for x in [
-        "あなたはスタジオの記録係です。今回の撮影で総監督が口にした"
-        "**評価**を読み、次の撮影に持ち越す短いメモを書きます。",
-        f"【総監督の指示メモ】\n{notes}" if notes else "",
-        f"【会話の断片】\n{session_log}" if session_log else "",
-        "【ルール】",
-        "1. **褒められた点は PREFERS へ。** 「いいね」「よかった」「それだ」と"
-        "言われた具体的な中身を、次も再現できる言い方で書く。",
-        "2. **直された点・足りないと言われた点は AVOIDS と NOTES へ。**"
-        "「〜はいらない」「まだ足りない」「〜すぎる」は、次に直すべきこと。"
-        "AVOIDS は「やらないこと」、NOTES は「気をつけること」。",
-        "3. **撮った内容そのものを書かない。** 場所・衣装・画角の羅列は"
-        "この回の事実であって、学びではない。学びは『総監督が何を良いと"
-        "したか』だけ。",
-        "4. 評価が無かった項目は空でよい。空は正常な答え。"
-        "無理に埋めると、次の撮影が今回の焼き直しになる。",
+        f"あなたは女優『{who}』本人です。今日の撮影を振り返って、"
+        "**自分の芝居に対して総監督が何と言ったか**を書き留めます。"
+        "次の撮影で同じ手が使えるように。",
+        f"【今日の場面・役どころ】\n{scene}" if scene else "",
+        f"【今日のやりとり】\n{exchanges}" if exchanges else "",
+        "【書き方】",
+        "1. **「いいね」「よかった」だけの言葉にも中身がある。**"
+        "その直前に自分が何をしていたかを書いて、初めて意味になる。"
+        "「〜したら『いいね』と言われた」の形で書く。",
+        "2. **直された点も同じ。** どんな場面の、どういう芝居に対して"
+        "言われたのかまで書く。場面を外すと、次の撮影で使えない"
+        "一般則になってしまう。\n"
+        "   × 「震えはいらない」\n"
+        "   ○ 「静かな場面で指先を震わせたら『それはいらない、目で訴えて』"
+        "と言われた」",
+        "3. **撮った内容そのものは学びではない。** 場所・衣装・画角の羅列は"
+        "今日の事実であって、次に持っていくものではない。",
+        "4. 総監督が何も言わなかったことは書かない。**空は正常な答え。**"
+        "無理に埋めると、次の撮影が今日の焼き直しになる。",
         "5. 各行は短く。全部で8行を超えない。",
         "6. 出力は見出しだけ、この順で:",
-        "PREFERS: 褒められたこと（1行1つ、無ければ空）\n"
-        "AVOIDS: 直すよう言われたこと（1行1つ、無ければ空）\n"
-        "NOTES: 気をつけること（1行1つ、無ければ空）",
+        "PREFERS: 効いた芝居（場面ごと。1行1つ、無ければ空）\n"
+        "AVOIDS: 効かなかった芝居（場面ごと。1行1つ、無ければ空）\n"
+        "NOTES: 気づいたこと（1行1つ、無ければ空）",
     ] if x)
 
 

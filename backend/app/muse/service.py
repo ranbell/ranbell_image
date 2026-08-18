@@ -2446,15 +2446,23 @@ async def _learned_taste(
     should teach nothing, and a card filled in anyway turns the next session
     into a rerun of this one.
     """
-    notes = _director_highlights(session)
-    if ollama is None or not notes.strip():
+    exchanges = _director_exchanges(session)
+    if ollama is None or not exchanges.strip():
         return {}
     inputs = _inputs(session)
+    snap = (session.get("continuity_snapshot") or {}).get("notebook") or {}
+    scene = " / ".join(p for p in (
+        str(snap.get("scene") or "").strip(),
+        str(snap.get("atmosphere") or "").strip(),
+        str(snap.get("beat") or "").strip()[:80],
+    ) if p)
+    char = session.get("character") or {}
     try:
         return await chain.run_showrunner_taste(
             ollama,
             system=crew.showrunner_taste_prompt(
-                notes=notes, session_log=_session_chat_log(session, limit=20),
+                exchanges=exchanges, scene=scene,
+                muse_name=str(char.get("name_ja") or char.get("name") or ""),
             ),
             model=_text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),
@@ -6154,6 +6162,52 @@ def _session_chat_log(session: dict[str, Any], *, limit: int = 15) -> str:
             continue
         lines.append(f"{m.get('name')}: {m.get('text')}")
     return "\n".join(lines)
+
+
+def _director_exchanges(session: dict[str, Any], *, limit: int = 14) -> str:
+    """Each thing the showrunner said, with what she was doing when he said it.
+
+    A bare 「いいね」 carries nothing on its own — it means something only
+    against the beat she had just described. And a correction is not a rule:
+    「震えはいらない」 was said to one quiet scene where she had her fingertips
+    shaking, and carried forward as a standing preference it would break the
+    next shoot that needs a tremble.
+
+    So the pair is the unit, not the line. Her contract makes her restate a
+    direction in her own words before she plays it, which means the reply that
+    follows each of his lines already says what she was about to do — the
+    pairing needs no extra call, only the order it already happened in.
+    """
+    rows = [
+        m for m in (session.get("chat") or [])
+        if isinstance(m, dict) and m.get("role") in ("user", "muse")
+        and m.get("kind") != "banter" and str(m.get("text") or "").strip()
+    ]
+    out: list[str] = []
+    for i, msg in enumerate(rows):
+        if msg.get("role") != "user":
+            continue
+        # Praise points backwards and a direction points forwards, so both
+        # sides are shown. 「いいね」 at the end of a shoot has all of its
+        # meaning in the line before it and none of its own.
+        before = next(
+            (str(r.get("text") or "").strip() for r in reversed(rows[:i])
+             if r.get("role") == "muse"),
+            "",
+        )
+        after = next(
+            (str(r.get("text") or "").strip() for r in rows[i + 1:i + 3]
+             if r.get("role") == "muse"),
+            "",
+        )
+        block = []
+        if before:
+            block.append(f"（直前の私: {before[:160]}）")
+        block.append(f"総監督: {str(msg.get('text') or '').strip()[:200]}")
+        if after:
+            block.append(f"私: {after[:160]}")
+        out.append("\n".join(block))
+    return "\n\n".join(out[-max(1, int(limit)):])
 
 
 def _director_highlights(session: dict[str, Any]) -> str:

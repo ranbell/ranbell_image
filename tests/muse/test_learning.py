@@ -52,11 +52,61 @@ def test_unreadable_output_is_empty_not_garbage():
     }
 
 
-def test_the_contract_forbids_learning_the_take_itself():
-    contract = crew.showrunner_taste_prompt(notes="x")
-    assert "褒められた点は PREFERS" in contract
-    assert "撮った内容そのものを書かない" in contract
+def test_the_contract_asks_for_the_pair_not_the_line():
+    """A line on its own has no content.
+
+    「いいよ、今の良かった」 means nothing unless you know what she had just
+    done, and 「震えはいらない」 is not a rule — it was said to one quiet scene
+    where her fingertips were shaking. Carried forward as a standing
+    preference it would break the next shoot that wants a tremble.
+    """
+    contract = crew.showrunner_taste_prompt(exchanges="x", scene="音楽室")
+
+    assert "自分の芝居に対して総監督が何と言ったか" in contract
+    assert "その直前に自分が何をしていたか" in contract
+    assert "場面を外すと" in contract
+    assert "震えはいらない" in contract, "the counter-example is the lesson"
     assert "空は正常な答え" in contract
+
+
+def test_praise_is_shown_what_it_was_praising():
+    """「いいね」 at the end of a shoot carries its meaning in the line before."""
+    session = {"chat": [
+        {"role": "muse", "kind": "craft", "name": "みお",
+         "text": "震えに頼らず、瞳の力で……やってみますね。"},
+        {"role": "user", "name": "総監督", "text": "いいね、感情入ってきたよ"},
+    ]}
+
+    block = service._director_exchanges(session)
+
+    assert "直前の私" in block
+    assert "瞳の力" in block, "praise with nothing to point at teaches nothing"
+
+
+def test_a_direction_is_shown_what_she_did_with_it():
+    session = {"chat": [
+        {"role": "user", "name": "総監督", "text": "今にも泣き出しそうな顔にして。"},
+        {"role": "muse", "kind": "craft", "name": "みお",
+         "text": "指先を震わせて、こらえる感じにしてみます。"},
+    ]}
+
+    block = service._director_exchanges(session)
+
+    assert "泣き出しそう" in block and "指先を震わせて" in block
+
+
+def test_her_muttering_is_not_an_answer():
+    """ASIDE is inner voice, not what she played."""
+    session = {"chat": [
+        {"role": "user", "name": "総監督", "text": "もっと重く。"},
+        {"role": "muse", "kind": "banter", "name": "みお", "text": "（うぅ、難しい）"},
+        {"role": "muse", "kind": "craft", "name": "みお", "text": "重く、ですね。"},
+    ]}
+
+    block = service._director_exchanges(session)
+
+    assert "重く、ですね" in block
+    assert "難しい" not in block
 
 
 class _TasteOllama:
@@ -74,23 +124,36 @@ class _TasteOllama:
 
 
 @pytest.mark.asyncio
-async def test_his_words_are_what_she_is_given():
+async def test_she_is_given_the_pairs_and_the_scene():
     session = {
         "session_id": "s1", "inputs": {"locale": "ja"},
-        "notes": ["もっと凄みが欲しい", "震えはいらない"],
-        "chat": [],
+        "character": {"name_ja": "各務 みお"},
+        "continuity_snapshot": {"notebook": {
+            "scene": "音楽室、夕暮れ", "atmosphere": "lonely",
+            "beat": "sitting at the piano",
+        }},
+        "chat": [
+            {"role": "user", "name": "総監督", "text": "震えはいらないんだよ"},
+            {"role": "muse", "kind": "craft", "name": "みお",
+             "text": "瞳の力で訴えてみますね"},
+        ],
     }
-    ollama = _TasteOllama("PREFERS:\nAVOIDS: 指先の震え\nNOTES: 凄みを求められる")
+    ollama = _TasteOllama(
+        "PREFERS: 静かな場面で瞳だけで訴えたら「いいね」と言われた\nAVOIDS:\nNOTES:"
+    )
 
     got = await service._learned_taste(ollama, session, cfg={})
 
-    assert "凄み" in ollama.seen and "震え" in ollama.seen
-    assert "震え" in got["avoids"]
+    assert "震えはいらない" in ollama.seen, "his line"
+    assert "瞳の力で訴えて" in ollama.seen, "what she played against it"
+    assert "音楽室" in ollama.seen, "the scene it happened in"
+    assert "各務 みお" in ollama.seen, "she is the one writing it"
+    assert "瞳だけで訴えた" in got["prefers"]
 
 
 @pytest.mark.asyncio
-async def test_a_shoot_with_no_direction_notes_is_not_asked():
-    session = {"session_id": "s1", "inputs": {}, "notes": [], "chat": []}
+async def test_a_shoot_where_he_said_nothing_is_not_asked():
+    session = {"session_id": "s1", "inputs": {}, "chat": []}
     ollama = _TasteOllama("PREFERS: something")
 
     assert await service._learned_taste(ollama, session, cfg={}) == {}
