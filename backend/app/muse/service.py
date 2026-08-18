@@ -2970,14 +2970,39 @@ async def _run_duet_scripter(
                 ),
             )
 
-    notebook_mod.record_struck_from_wearing(
-        session, prev_wearing=prev_wearing, new_wearing=str(nb.get("wearing") or ""),
-    )
-    if partner:
+    # Struck means "never restore this", and it used to be written on EVERY
+    # turn from whatever words happened to leave `wearing`. `wearing` is
+    # rewritten whole by each compile, so a rephrase banished words nobody had
+    # asked to remove. Measured on a live session where the showrunner said
+    # only 「ちょっとおしゃれ目の服できてくれる？」 and never asked her to take
+    # anything off:
+    #
+    #   struck: outfit, stylish, stylish_outfit, white, white_blouse, blouse,
+    #           stylish_blouse
+    #   wearing: blue skirt, bob cut hair          ← no top at all
+    #
+    # and because the match walks word parts, a banished `white` then blocked
+    # white_shirt, white_dress, white_skirt and white_hair as well. Nothing
+    # could put a top back on her, in that session, ever.
+    #
+    # So it is written only when the showrunner actually took something off —
+    # `wearing_drop` resolving to exactly one garment. Everything else is a
+    # rewording, and a rewording must not ban a word. What keeps a removed coat
+    # out of the next take is the notebook itself: the weave builds the bag
+    # from `wearing`, and `notebook.drop_garments_not_in_wearing` drops what is
+    # no longer in it. That check needs no memory and cannot accumulate.
+    if drop_ask and len(notebook_mod.garment_matches(
+        str(before_shot.get("wearing") or ""), drop_ask,
+    )) == 1:
         notebook_mod.record_struck_from_wearing(
-            session, prev_wearing=prev_wearing_b,
-            new_wearing=str(nb.get("wearing_b") or ""),
+            session, prev_wearing=prev_wearing,
+            new_wearing=str(nb.get("wearing") or ""),
         )
+        if partner:
+            notebook_mod.record_struck_from_wearing(
+                session, prev_wearing=prev_wearing_b,
+                new_wearing=str(nb.get("wearing_b") or ""),
+            )
     # Only clothes are struck. `struck` means "never restore this", which is
     # what a garment the showrunner took off needs and what a place, a pose and
     # a crop must never get: they come and go by nature, and the weave rebuilds
@@ -3964,15 +3989,34 @@ async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     if tidy:
         notebook_mod.apply_patch(nb, {"wearing": tidy})
         session["notebook"] = nb
-        notebook_mod.record_struck_from_wearing(
-            session, prev_wearing=prev_wearing,
-            new_wearing=str(nb.get("wearing") or ""),
-        )
-        # This button invites being pressed again — and again, until the outfit
-        # is right. Every press strikes whatever left, so the raw list is the
-        # one thing here that grows without limit. Collapse it to what is still
-        # true (`live_struck` drops anything back in the shot) and keep it
-        # bounded; the models only ever see this pruned form anyway.
+        # This button is the way out of a wardrobe that has gone wrong, so it
+        # banishes nothing and un-banishes what she says she has on. A session
+        # was measured where `blouse` and `white` had been struck by a rephrase
+        # nobody asked for: she could name a white blouse here all day and the
+        # weave would drop it back out again. Pressing 衣装部屋 has to be able
+        # to fix that, or there is no way to fix it at all.
+        # Freed by exactly the rule that blocks: if a struck entry would keep
+        # one of the garments she just named out of the bag, it goes. Using the
+        # same test in both directions is what closes the gap — a ban that
+        # blocks by word part has to be liftable by word part too.
+        worn_items = [
+            w.strip() for w in re.split(r"[,，、]", str(nb.get("wearing") or ""))
+            if w.strip()
+        ]
+        freed = [
+            s for s in (session.get("struck") or [])
+            if any(
+                notebook_mod.tag_mentions_struck(
+                    w, {str(s).lower().replace(" ", "_")},
+                )
+                for w in worn_items
+            )
+        ]
+        if freed:
+            logger.info("[muse] wardrobe un-struck %s", ", ".join(map(str, freed)))
+            session["struck"] = [
+                s for s in (session.get("struck") or []) if s not in freed
+            ]
         session["struck"] = notebook_mod.live_struck(session)[-40:]
         _sync_costume_wearing(session, str(nb.get("wearing") or ""))
         session["digest"] = notebook_mod.summary_for_muse(
@@ -4181,16 +4225,27 @@ def _recap_from_snapshot(session: dict[str, Any]) -> dict[str, Any]:
 
 
 async def record_shoot_continuity(db, session: dict[str, Any], ollama=None) -> None:
-    """After a successful ③ take: sticky recap + embed overflow into muse_memories."""
+    """After a successful ③ take: sticky recap + embed overflow into muse_memories.
+
+    Everything she keeps from a shoot is written here, and twice now a live run
+    has ended with `continuity: None` — nothing kept, no error surfaced. The
+    guards below each have a reason and each returns silently, so the first job
+    is being able to tell which one fired.
+    """
+    sid = str(session.get("session_id") or "")
     if not uses_notebook(session) and not session.get("continuity_snapshot"):
         # Still record a light recap for duet even if snapshot missing.
         if not is_duet(session):
+            logger.info("[muse] continuity skipped (%s): no notebook, no snapshot", sid[:8])
             return
     char_id = str(_inputs(session).get("character_id") or "")
     if not char_id:
+        logger.info("[muse] continuity skipped (%s): nobody cast", sid[:8])
         return
     if (session.get("continuity") or {}).get("written_at"):
+        logger.info("[muse] continuity skipped (%s): already written", sid[:8])
         return
+    logger.info("[muse] continuity starting (%s)", sid[:8])
     recap = _recap_from_snapshot(session)
     try:
         overflow = await presets_db.push_shoot_recap(db, char_id, recap)
@@ -5252,9 +5307,11 @@ async def still_read_after_board(db, ollama, session_id: str) -> None:
         ]
         if ",".join(x.strip() for x in kept) != wearing:
             notebook_mod.apply_patch(nb, {"wearing": ", ".join(x.strip() for x in kept)})
-    notebook_mod.record_struck_from_wearing(
-        session, prev_wearing=prev_wearing, new_wearing=str(nb.get("wearing") or ""),
-    )
+    # Nothing is banished here. Reading a photograph is not the showrunner
+    # taking a garment off her, and this path used to strike whatever the
+    # still-read happened to word differently — the same rephrase-becomes-a-ban
+    # defect as the compile above, one step further from anyone's intent.
+    _ = prev_wearing
     session["notebook"] = nb
     session["still_read_round"] = rnd
     session["digest"] = notebook_mod.summary_for_muse(

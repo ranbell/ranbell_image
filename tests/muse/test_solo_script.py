@@ -352,6 +352,7 @@ async def test_talk_then_compile_uses_card_not_tags():
         "帽子外して": _scripter_block(
             intent="shot",
             wearing="thin cardigan",
+            wearing_drop="straw hat",
             scene="rooftop at dusk",
             beat="sitting",
             frame="eye level",

@@ -101,8 +101,14 @@ async def test_the_whole_outfit_is_replaced_and_the_coat_stays_off():
     wearing = str(notebook.of(session).get("wearing") or "")
     assert "coat" not in wearing
     assert "sailor_fuku" in wearing and "loafers" in wearing
-    # Struck is what stops the weave and the still-read putting it back on.
-    assert any("coat" in str(s) for s in session.get("struck") or [])
+    # What keeps the coat out of the next take is the notebook, not a memory of
+    # the removal: the weave builds the bag from `wearing`, and
+    # `drop_garments_not_in_wearing` drops what is no longer in it. Banishing
+    # words here is what turned a rewording into a permanent ban.
+    bag = notebook.drop_garments_not_in_wearing(
+        "sailor_fuku, coat, loafers", wearing=wearing,
+    )
+    assert "coat" not in bag
     assert session["status"] == "chat"
 
 
@@ -189,6 +195,29 @@ def test_a_room_with_no_card_is_not_given_one():
 # ── pressed again, and again ────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+async def test_the_button_frees_a_garment_someone_banished():
+    """It is the way out of a wardrobe that has gone wrong, so it un-banishes.
+
+    Measured live: a rephrase nobody asked for had struck `blouse` and `white`,
+    and because the match walks word parts that also blocked white_shirt,
+    white_dress and white_hair. She could name a white blouse here all day and
+    the weave would drop it straight back out.
+    """
+    db = FakeDb()
+    session = await _wardrobe_session(db, "sailor_fuku")
+    session["struck"] = ["blouse", "white", "empty_can"]
+    ollama = WardrobeOllama(
+        "SAY: 白いブラウスに着替えたよ。\nWEARING: white_blouse, navy_skirt"
+    )
+
+    session = await service.wardrobe_stage(db, ollama, session)
+
+    struck = [str(s) for s in session.get("struck") or []]
+    assert "blouse" not in struck and "white" not in struck
+    assert "empty_can" in struck, "only what she is now wearing is freed"
+
+
+@pytest.mark.asyncio
 async def test_repeated_presses_do_not_grow_struck_without_limit():
     """The button invites being pressed until the outfit is right."""
     db = FakeDb()
@@ -205,15 +234,12 @@ async def test_repeated_presses_do_not_grow_struck_without_limit():
         )
 
     struck = [str(s) for s in session.get("struck") or []]
-    assert struck, "removals still have to be recorded"
     assert len(struck) <= 40
-    # Anything back on her body is not struck — the coat went off, came back on
-    # the third press, and must not be on the never-restore list afterwards.
-    # A struck list that only grows is what makes 「やっぱりコート着て」
+    # Nothing she is wearing may be on the never-restore list, however many
+    # times the button is pressed. That is what made 「やっぱりコート着て」
     # impossible to obey after a removal.
     worn = str(notebook.of(session).get("wearing") or "")
     assert not any(s in worn for s in struck)
-    assert "cardigan" in struck
 
 
 # ── the prompt she is given ─────────────────────────────────────────────────

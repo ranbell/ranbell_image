@@ -1025,6 +1025,11 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         "light": "LIGHT",
         "frame": "FRAME",
         "wearing": "WEARING",
+        # The label was in `_FIELD_RE` and in the JSON schema but never in this
+        # table, so a scripter that answered the contract in labelled form —
+        # every turn that carries an image, and every JSON parse that falls
+        # back — had its removal silently dropped on the floor.
+        "wearing_drop": "WEARING_DROP",
         "beat": "BEAT",
         "wearing_b": "WEARING_B",
         "beat_b": "BEAT_B",

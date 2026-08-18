@@ -64,14 +64,19 @@ def _tags(s):
 
 def _scripter_block(
     *, intent="shot", atmosphere="", scene="", frame="", wearing="", beat="",
-    vibe="", tags="", craft_scene="",
+    vibe="", tags="", craft_scene="", wearing_drop="",
 ):
+    """One scripter reply. `wearing_drop` is part of the contract, not an extra:
+    「wearing_drop = when something comes OFF, name that ONE garment」. A fake
+    that rewrites WEARING without it is modelling a scripter that broke its own
+    contract, which is not what a removal test should be asserting against."""
     return "\n".join([
         f"INTENT: {intent}",
         f"ATMOSPHERE: {atmosphere}" if atmosphere else "",
         f"SCENE: {scene}" if scene else "",
         f"FRAME: {frame}" if frame else "",
         f"WEARING: {wearing}" if wearing else "",
+        f"WEARING_DROP: {wearing_drop}" if wearing_drop else "",
         f"BEAT: {beat}" if beat else "",
         f"VIBE: {vibe}" if vibe else "",
         "STANDING: none",
