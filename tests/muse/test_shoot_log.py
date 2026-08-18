@@ -203,7 +203,15 @@ def test_the_notice_is_withdrawn_when_the_fold_writes_the_field():
     assert "repair_notice" not in session
 
 
-def test_the_notice_is_said_when_the_field_really_did_not_move():
+def test_the_notice_is_recorded_when_the_field_really_did_not_move():
+    """It goes to the panel, not the room.
+
+    This used to interrupt with 「もう一度、そこだけ言ってもらえますか？」.
+    Measured live, three of those went out in one run and two were fixed by the
+    very next thing the system did — so it was breaking the room to ask for
+    something that was not needed. The signal is what made this debuggable, so
+    it stays; only the voice goes.
+    """
     session = {"session_id": "s1", "inputs": {"locale": "ja"}}
     nb = notebook.of(session)
     notebook.apply_patch(nb, {"beat": "standing by the fence"})
@@ -212,8 +220,10 @@ def test_the_notice_is_said_when_the_field_really_did_not_move():
 
     service._settle_repair_notice(session)
 
-    lines = _system_lines(session)
-    assert lines and "beat" in lines[0] and "書き取れませんでした" in lines[0]
+    assert not _system_lines(session), "no studio voice in the room"
+    entry = (session.get("rewrite_log") or [])[-1]
+    assert entry["source"] == "repair_missed"
+    assert "beat" in (entry.get("changed") or {})
     assert "repair_notice" not in session
 
 
@@ -230,12 +240,13 @@ def test_only_the_fields_that_stayed_put_are_named():
 
     service._settle_repair_notice(session)
 
-    lines = _system_lines(session)
-    assert lines and "beat" in lines[0]
-    assert "wearing" not in lines[0]
+    changed = (session.get("rewrite_log") or [])[-1].get("changed") or {}
+    assert "beat" in changed
+    assert "wearing" not in changed
 
 
-def test_settling_an_empty_notice_says_nothing():
+def test_settling_an_empty_notice_records_nothing():
     session = {"session_id": "s1", "inputs": {"locale": "ja"}}
     service._settle_repair_notice(session)
     assert not _system_lines(session)
+    assert not session.get("rewrite_log")

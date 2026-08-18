@@ -911,12 +911,14 @@ async def test_densify_catches_up_when_the_notebook_ran_ahead():
 
 
 @pytest.mark.asyncio
-async def test_a_failed_densify_is_said_out_loud_not_swallowed():
+async def test_a_failed_densify_is_recorded_not_swallowed():
     """Both render buttons used to clear `craft_dirty` unconditionally.
 
     That happened straight after densify, whether or not densify had worked, so
     a failed compile went out on the previous prompt with the warning wiped and
-    nobody told. Keep the flag and say it in chat.
+    nobody told. The flag is still kept and the miss is still recorded — but in
+    the rewrite log the debug pane reads, not as a studio voice interrupting
+    the room to ask the showrunner to repeat himself.
     """
     from tests.muse.test_service import FakeComfy, FakeSpooler
 
@@ -938,12 +940,15 @@ async def test_a_failed_densify_is_said_out_loud_not_swallowed():
     s = await service.request_board(db, FakeComfy(), spooler, s, ollama=ollama)
 
     assert s["craft_dirty"] is True
-    # It still shoots — with the old prompt, and having said so.
+    # It still shoots — with the old prompt, and having recorded that it did.
     assert len(spooler.jobs) == 1
+    assert any(
+        e.get("source") == "craft_behind" for e in (s.get("rewrite_log") or [])
+    ), "a swallowed miss is the defect; the panel has to be able to see it"
     said = "\n".join(
         str(m.get("text") or "") for m in s["chat"] if m.get("role") == "system"
     )
-    assert "追いついていません" in said
+    assert "追いついていません" not in said, "the room is not where this belongs"
 
 
 @pytest.mark.asyncio

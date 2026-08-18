@@ -3539,13 +3539,26 @@ async def _duet_talk(
 
 
 def _settle_repair_notice(session: dict[str, Any]) -> None:
-    """Say what the whole turn failed to write — after the whole turn.
+    """Record what the whole turn failed to write — in the panel, not the room.
 
     The compile and its repair both run before the Muse has spoken, and the
-    fold that follows her line is a third chance at `beat`. Apologising at the
-    repair meant apologising for something the turn went on to get right; this
-    checks the notebook as it actually stands and only speaks for the fields
-    that really did not move.
+    fold that follows her line is a third chance at `beat`, so the check waits
+    for the whole turn and only counts fields that really did not move.
+
+    This used to say so in chat — 「『beat』が書き取れませんでした。もう一度、
+    そこだけ言ってもらえますか？」 — and that was wrong twice over. It broke
+    the room: the showrunner is directing an actress, and a studio voice
+    interrupting to ask him to repeat himself is not part of the picture they
+    are making together. And it was often simply untrue. Measured on a live
+    run, three of these went out and two of them were fixed by the very next
+    thing the system did:
+
+        「カーディガン羽織って」 → apology → the next turn wrote `cardigan`
+        「カーディガン脱いで」   → apology → the wardrobe button struck it
+
+    The signal itself is worth keeping — it is what made this debuggable at
+    all — so it goes to the rewrite log, which the debug pane already renders
+    live (`MusePanel.vue`'s `rewriteLog`). Nothing reaches the chat.
     """
     notice = session.pop("repair_notice", None)
     if not isinstance(notice, dict):
@@ -3560,18 +3573,14 @@ def _settle_repair_notice(session: dict[str, Any]) -> None:
         logger.info("[muse] repair notice withdrawn — the turn wrote %s after all",
                     notice.get("fields"))
         return
-    locale = str(_inputs(session).get("locale") or "ja")
-    msg = _chat_append(
-        session, role="system", name="Studio", kind="system",
-        text=(
-            "「" + "、".join(still) + "」が書き取れませんでした。"
-            "もう一度、そこだけ言ってもらえますか？"
-            if locale.startswith("ja") else
-            f"Could not write down: {', '.join(still)}. "
-            f"Could you say just that part again?"
-        ),
+    logger.info("[muse] the turn never wrote %s", ", ".join(still))
+    _note_rewrite(
+        session, "repair_missed",
+        before=notebook_mod.shot_snapshot(nb),
+        after=notebook_mod.shot_snapshot(nb),
+        extra={f: {"before": str(before.get(f) or ""), "after": "(未着手)"}
+               for f in still},
     )
-    _publish_chat(str(session.get("session_id") or ""), msg)
 
 
 async def _fold_muse_after_talk(
@@ -4920,27 +4929,27 @@ async def compose_scene_if_needed(
 
 
 def _warn_if_craft_behind(session: dict[str, Any]) -> bool:
-    """Say so in chat when we are about to render a script that did not catch up.
+    """Record that we are about to render a script that did not catch up.
 
-    Both render buttons used to set ``craft_dirty = False`` unconditionally right
-    after densify, whether or not densify had succeeded. A failed compile was
-    swallowed: the flag went clean, the UI warning disappeared, and the shot went
-    out on the previous prompt with nobody told. Leave the flag alone and say it.
+    Both render buttons used to set ``craft_dirty = False`` unconditionally
+    right after densify, whether or not densify had succeeded. A failed compile
+    was swallowed: the flag went clean, the warning disappeared, and the shot
+    went out on the previous prompt with nobody told. The flag is still left
+    alone and the miss is still recorded — but in the instrument panel, not in
+    the room. See `_settle_repair_notice` for why it left the chat.
     """
     if not bool(session.get("craft_dirty")):
         return False
-    note = _chat_append(
-        session, role="system", name="Studio",
-        text=_msg(
-            session,
-            ja=("台本がノートに追いついていません。いまの絵は少し前の指示のままかも。"
-                "気になったら、変えたいところをもう一度言ってください。"),
-            en=("The script has not caught up with the notebook — this frame may "
-                "still be from an earlier instruction. Say the change again if it "
-                "matters."),
-        ),
+    nb = notebook_mod.of(session)
+    _note_rewrite(
+        session, "craft_behind",
+        before=notebook_mod.shot_snapshot(nb),
+        after=notebook_mod.shot_snapshot(nb),
+        extra={"craft": {
+            "before": "notebook rev " + str(nb.get("rev") or 0),
+            "after": "compiled rev " + str(session.get("notebook_rev_compiled") or 0),
+        }},
     )
-    _publish_chat(session["session_id"], note)
     return True
 
 
