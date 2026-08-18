@@ -744,6 +744,59 @@ async def run_showrunner_taste(
     return parse_showrunner_taste(raw)
 
 
+def _restate_line_re(field: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"(?im)^[\s>*_-]*(SAY|{re.escape(field.upper())})[\s*_]*[:：]\s*(.*)$"
+    )
+
+
+def parse_restate(raw: str, field: str) -> tuple[str, str]:
+    """Her line, and the one field said over. Same shape as `parse_wardrobe`."""
+    say = ""
+    value = ""
+    for match in _restate_line_re(field).finditer(raw or ""):
+        got = match.group(2).strip()
+        if match.group(1).upper() == "SAY":
+            say = say or got
+        else:
+            value = value or got
+    if not say:
+        say = identity.sanitize_muse_say(
+            _restate_line_re(field).sub("", str(raw or "")).strip()
+        )[:400]
+    return identity.sanitize_muse_say(say), value
+
+
+async def run_restate(
+    ollama, *, system: str, field: str, current: str, transcript: str,
+    note: str = "", model: str, num_ctx: int | None,
+    on_token: TokenCallback | None = None,
+) -> tuple[str, str]:
+    """One part of the shot, said over from the start rather than edited.
+
+    A delta needs the field to still be movable. Measured live, a `beat` that
+    had accreted three clauses did not change across four repairs while the
+    showrunner asked three times for the same thing — the compile kept editing
+    inside it. Changing the shape of the question is what gets past that; it is
+    the same move 衣装部屋 makes for the outfit, and it worked there.
+    """
+    prompt = "\n\n".join(b for b in [
+        f"NOTEBOOK {field.upper()} (last written down — may be stale):\n"
+        f"{current.strip() or '(まだ書かれていません)'}",
+        f"WHAT THE SHOWRUNNER JUST ASKED:\n{note.strip()}" if note.strip() else "",
+        (
+            "CONVERSATION SO FAR (this is what actually happened — read it "
+            f"out of this):\n{transcript.strip()}"
+        ) if transcript.strip() else "",
+        "二行で答えてください。",
+    ] if b.strip())
+    raw = await _call(
+        ollama, system=system, prompt=prompt, model=model, images=None,
+        num_ctx=num_ctx, think=False, on_token=on_token,
+    )
+    return parse_restate(raw, field)
+
+
 _WARDROBE_LINE_RE = re.compile(r"(?im)^[\s>*_-]*(SAY|WEARING)[\s*_]*[:：]\s*(.*)$")
 
 
@@ -770,6 +823,87 @@ def parse_wardrobe(raw: str) -> tuple[str, str]:
             _WARDROBE_LINE_RE.sub("", str(raw or "")).strip()
         )[:400]
     return identity.sanitize_muse_say(say), wearing
+
+
+# ── she reads the notebook, and says which parts are wrong ────────────────
+# The compile writes every field as a delta off one line of direction, and when
+# a field has accreted it stops being movable: measured live, a beat that read
+# `sitting, eating cake, looking at cake` did not change once across four
+# repairs while the showrunner asked three times for her to look at the camera.
+# The notebook said `frame: close-up, facing camera` at the same time. Nothing
+# in the machinery could see the contradiction; she can.
+#
+# Closed vocabulary again — the answer is field names, and a name that is not a
+# field falls on the floor. She cannot invent a slot, only point at one.
+NOTEBOOK_REVIEW_SYSTEM = """
+You have just spoken. Below is the shot notebook as the studio wrote it down.
+
+One job: say which parts of it no longer match what is actually happening —
+what the Showrunner asked for, and what you just said you were doing.
+
+The parts, and nothing outside this list:
+  scene    — where you are and what time it is
+  light    — the key and where it comes from
+  frame    — the camera, and where your eyes are pointed
+  wearing  — what is ON your body
+  beat     — what your body is DOING
+
+RULES
+- Answer ONLY with names from that list. Anything else is ignored.
+- Name a part when it CONTRADICTS the direction or your own words — the
+  Showrunner asked you to look at the camera and the beat still has you
+  looking at the cake; they asked you to stand and it still says sitting.
+- A part that is merely thin, or worded differently from how you would word
+  it, is NOT wrong. Do not name it.
+- The Showrunner's latest line is the authority. If the notebook matches what
+  they just asked for, it is right, even if you would have chosen otherwise.
+- Naming nothing is the normal answer and a complete answer. Most turns are
+  fine. Naming more than two is almost always a misreading.
+
+OUTPUT FORMAT — exactly one line, nothing else, no explanation:
+
+REWRITE: <comma-separated part names, or the word none>
+""".strip()
+
+_NOTEBOOK_REVIEW_RE = re.compile(r"(?im)^[\s>*_-]*REWRITE[\s*_]*[:：]\s*(.*)$")
+
+# What she may ask to have rewritten. `atmosphere` is deliberately absent: it is
+# mood, the one field nobody is directing turn by turn, and letting her reopen
+# it every turn would make the shoot wander.
+RESTATE_FIELDS = ("scene", "light", "frame", "wearing", "beat")
+
+
+def parse_notebook_review(raw: str) -> list[str]:
+    """The parts she says are wrong — field names only, in notebook order."""
+    named: set[str] = set()
+    for match in _NOTEBOOK_REVIEW_RE.finditer(raw or ""):
+        for part in match.group(1).split(","):
+            key = part.strip().lower().replace(" ", "_")
+            if key in RESTATE_FIELDS:
+                named.add(key)
+    return [f for f in RESTATE_FIELDS if f in named]
+
+
+async def run_notebook_review(
+    ollama, *, system: str, notebook_block: str, muse_says: str, note: str,
+    model: str, num_ctx: int | None,
+) -> list[str]:
+    """Ask her which parts of the notebook are wrong. Empty on any failure."""
+    prompt = "\n\n".join(b for b in [
+        f"SHOT NOTEBOOK:\n{notebook_block}",
+        f"WHAT THE SHOWRUNNER JUST ASKED:\n{note.strip()}" if note.strip() else "",
+        f"WHAT YOU JUST SAID:\n{muse_says.strip()[:600]}" if muse_says.strip() else "",
+        "食い違っている欄はある？ 一行で答えて。",
+    ] if b.strip())
+    try:
+        raw = await _call(
+            ollama, system=f"{system.strip()}\n\n{NOTEBOOK_REVIEW_SYSTEM}",
+            prompt=prompt, model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except ChainError:
+        logger.warning("[muse.chain] notebook review produced nothing", exc_info=True)
+        return []
+    return parse_notebook_review(raw)
 
 
 async def run_wardrobe(

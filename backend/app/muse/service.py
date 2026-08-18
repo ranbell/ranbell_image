@@ -49,6 +49,12 @@ _SHOOT_ARCHIVE_MAX = 24
 # sentence as a number, so a review that ignores it cannot empty the bag.
 _WEAVE_REVIEW_MAX = 4
 
+# How many parts of the notebook she may have said over in one turn. Her own
+# contract tells her that naming more than two is almost always a misreading;
+# this is the same sentence as a number, so a review that ignores it cannot
+# rewrite half the shot at once.
+_RESTATE_MAX = 2
+
 
 class MuseError(Exception):
     """A step could not run. The message goes straight to the user."""
@@ -3616,6 +3622,96 @@ async def _duet_talk(
     return session
 
 
+async def _muse_checks_the_notebook(
+    db, ollama, session: dict[str, Any], *, cfg: dict[str, Any], note: str,
+) -> None:
+    """She reads the notebook at the end of her turn and says what is wrong.
+
+    Every field is written as a delta off one line of direction, and a field
+    that has accreted stops being movable — the compile edits inside it instead
+    of replacing it. Measured live: `beat` read
+    `sitting, eating cake, looking at cake` while `frame` read
+    `close-up, facing camera`, the showrunner asked three separate times for
+    her to look at the camera, four repairs fired, and the notebook did not
+    change once. `looking_at_cake` was still in the tag bag on the last take.
+
+    Nothing in the machinery could see that contradiction. She can — she is the
+    one doing it. So she names the parts that are wrong (closed vocabulary: a
+    name that is not a field falls on the floor) and each one is then said over
+    from the start rather than edited, which is the move 衣装部屋 makes for the
+    outfit and the only thing that has been measured to get past a stuck field.
+
+    Silent by design. She has just spoken; a second line from her explaining
+    that the studio wrote it down wrong is not part of the picture they are
+    making. The panel sees it in the rewrite log.
+    """
+    if ollama is None or not uses_notebook(session):
+        return
+    if str(session.get("scripter_intent") or "") not in ("shot", "mixed"):
+        return
+    inputs = _inputs(session)
+    partner_character = await _partner_character(db, session)
+    partner = bool(partner_character)
+    name_a, name_b = _muse_names(session, partner_character)
+    nb = notebook_mod.of(session)
+    voice = crew.actress_duet_prompt(
+        session.get("character") or {}, mode="review",
+        locale=str(inputs.get("locale") or "ja"),
+        seed=str(session.get("session_id") or ""),
+    )
+    block = notebook_mod.render(
+        nb, name_a=name_a, name_b=name_b or ("Partner" if partner else ""),
+    )
+    try:
+        named = await chain.run_notebook_review(
+            ollama, system=voice, notebook_block=block,
+            muse_says=_last_lead_say(session), note=note,
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.warning("[muse] notebook review failed", exc_info=True)
+        return
+    if not named:
+        return
+    # Her own contract says naming more than two is almost always a misreading.
+    # Rewriting half the notebook on one turn is how a shoot loses its place.
+    named = named[:_RESTATE_MAX]
+    before_shot = notebook_mod.shot_snapshot(nb)
+    for field in named:
+        try:
+            _, value = await chain.run_restate(
+                ollama,
+                system=crew.actress_duet_prompt(
+                    session.get("character") or {}, mode=f"restate:{field}",
+                    locale=str(inputs.get("locale") or "ja"),
+                    seed=str(session.get("session_id") or ""),
+                ),
+                field=field,
+                current=str(nb.get(field) or ""),
+                transcript=_duet_transcript(session),
+                note=note,
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            )
+        except Exception:
+            logger.warning("[muse] restate %s failed", field, exc_info=True)
+            continue
+        if not str(value or "").strip():
+            continue
+        notebook_mod.apply_patch(nb, {field: value})
+    after_shot = notebook_mod.shot_snapshot(nb)
+    if after_shot == before_shot:
+        return
+    session["notebook"] = nb
+    session["craft_dirty"] = True
+    session["digest"] = notebook_mod.summary_for_muse(
+        nb, name_a=name_a, name_b=name_b,
+    )
+    logger.info("[muse] she said over %s", ", ".join(named))
+    _note_rewrite(
+        session, "restate", before=before_shot, after=after_shot, intent="shot",
+    )
+
+
 def _settle_repair_notice(session: dict[str, Any]) -> None:
     """Record what the whole turn failed to write — in the panel, not the room.
 
@@ -3686,6 +3782,11 @@ async def _fold_muse_after_talk(
         except Exception:
             logger.warning("[muse] scripter fold failed", exc_info=True)
     finally:
+        # The fold is the last writer of the turn, so this is where the
+        # notebook has settled and she can be asked whether it is right.
+        await _muse_checks_the_notebook(
+            db, ollama, session, cfg=cfg, note=str(user_text or ""),
+        )
         _settle_repair_notice(session)
 
 

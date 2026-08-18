@@ -249,6 +249,71 @@ WEARING: <English. Danbooru tags with underscores, comma-separated, AT MOST 6.
          no top=/bottom= labels — just the garments.>
 """.strip()
 
+# One field, said over from the start. 衣装部屋 was the first of these and the
+# only one for a while; the rest of the notebook has the same failure — a field
+# that has accreted stops being movable by a delta, and no amount of asking
+# again in the same shape gets it back.
+#
+# What each field is allowed to hold is copied from the scripter's own contract
+# rather than reworded, so a restatement cannot legalise something a compile
+# could not write.
+_RESTATE_FIELDS: dict[str, tuple[str, str]] = {
+    "scene": (
+        "どこにいて、何時ごろか",
+        "<English. A short absolute phrase: one specific place, and the time of "
+        "day. Not the light, not what she is doing, not the camera.>",
+    ),
+    "light": (
+        "光がどこから来ていて、どれくらい強いか",
+        "<English. The key and where it comes from, absolute: 'low sun from "
+        "behind, hard rim'. Never a direction of change — no 'darker', no "
+        "'brighter'. Not the mood, not the place.>",
+    ),
+    "frame": (
+        "カメラの位置と、あなたの視線",
+        "<English. The camera and where your eyes are pointed, as one story: "
+        "'wide shot, looking straight into the lens'. Crop plus gaze, nothing "
+        "about your hands or your clothes.>",
+    ),
+    "wearing": (
+        "身につけているもの",
+        "<English. Danbooru tags with underscores, comma-separated, AT MOST 6. "
+        "Everything ON her body and nothing else. No prose, no slashes, no "
+        "top=/bottom= labels.>",
+    ),
+    "beat": (
+        "体が何をしているか",
+        "<English. ONE posture stem — sitting / standing / kneeling / crouching "
+        "— plus what the hands and the weight are doing. Short absolute phrase, "
+        "not a paragraph. Not where you are looking; that is the frame.>",
+    ),
+}
+
+
+def restate_output(field: str) -> str:
+    """The contract for saying one part of the shot over from the start."""
+    label, shape = _RESTATE_FIELDS[field]
+    return f"""
+書き直し — この一つの欄だけ、はじめから言い直します。
+
+いま答えるのは **{label}** だけです。
+
+NOTEBOOK 欄の値は、スタジオが書き取れた分であって真実ではありません。
+会話のほうが正しいので、そちらを読んで:
+- 総監督が求めたことは、もうそうなっている
+- 総監督がやめさせたことは、もう無い
+- 誰も触っていないことは、そのまま
+
+足したり引いたりするのではありません。**はじめから言い直します。**
+
+OUTPUT FORMAT — exactly two lines, nothing else, no explanation, no headings:
+
+SAY: <in character, natural Japanese, one short sentence — say it back to them
+     the way you would out loud. No tags in here, no emoji.>
+{field.upper()}: {shape}
+""".strip()
+
+
 PLAN_OUTPUT = """
 OUTPUT FORMAT — one SAY block, then five labelled lines, nothing else:
 
@@ -3114,6 +3179,9 @@ def actress_duet_prompt(
         # No style block, no framing, no CARRY: she is answering one question,
         # and nothing else about the shot is hers to write this turn.
         blocks.append(WARDROBE_READOUT_OUTPUT)
+    elif mode.startswith("restate:"):
+        # Same shape as 衣装部屋, one field at a time. `restate:beat` etc.
+        blocks.append(restate_output(mode.split(":", 1)[1]))
     elif mode == "review":
         # She looks at the tag bag before the render. Her voice is what makes
         # her the right reader — she knows where her own weight is — but the
