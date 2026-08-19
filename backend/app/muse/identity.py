@@ -644,9 +644,23 @@ def word_count(text: str) -> int:
 
 
 def craft_is_thin(
-    prompt: str, scene: str = "", *, min_total: int = 160, min_scene: int = 100,
+    prompt: str, scene: str = "", *, min_total: int = 130, min_scene: int = 100,
 ) -> bool:
-    """True when the assembled craft is too short for a rich render."""
+    """True when the assembled craft is too short for a rich render.
+
+    `min_total` was 160 and sat in the middle of what a healthy weave actually
+    produces. Measured 2026-08-19 on the weave pack (30 runs) plus four real
+    sessions:
+
+        threshold   caught the broken   false alarms
+            160          2/2            12/24 pack, 2/4 real
+            130          2/2             0/24 pack, 0/4 real
+
+    Good output ran 145–182 words; the two genuinely broken weaves came back
+    at 12 and 32. The gap is wide, so the old number was flagging half of
+    healthy work as behind — which set `craft_dirty`, spent another compile,
+    and buried the signal for the times it was real.
+    """
     scene_words = word_count(scene) if scene.strip() else 0
     # If scene was already folded into prompt, count the whole positive.
     total = word_count(prompt)
