@@ -1611,8 +1611,6 @@ SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
 quality of that inventory (light, optics, colour, air, cloth, finish) — never
 extra inventory. No theme, no chat, no photo.
 
-{_CONTRACTS}
-
 Read each field for what it owns. The gaze is FRAME's — if BEAT still carries
 an old one, FRAME is the one that is current, because that is the field the
 showrunner's directions are written into. Do not put both in the bag: a bag

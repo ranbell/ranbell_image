@@ -852,12 +852,22 @@ def test_everyone_who_touches_the_notebook_reads_the_same_contract():
     """
     marker = "WHAT EACH PART OF THE NOTEBOOK IS"
     for name in (
-        "SCRIPTER_SYSTEM",          # writes the notebook, every turn
-        "SCRIPTER_WEAVE_SYSTEM",    # reads it, every render
+        "SCRIPTER_SYSTEM",          # 旧・比較用に残してある
         "STILL_READ_SYSTEM",        # writes it from a photo
         "NOTEBOOK_REVIEW_SYSTEM",   # she checks it
     ):
         assert marker in getattr(chain, name), name
+    assert marker in chain.build_scripter_system(), "compile が読む契約"
+
+    # weave には渡さない。**読む側には効かなかった。** weave パック
+    # (6試験 x 5回) で測ると、契約を抜いたほうが良い:
+    #
+    #     契約あり 5,228字  28/30   w3 の空応答 3/15
+    #     契約抜き 4,157字  30/30   w3 の空応答 0/15
+    #
+    # 欄が何であるかは書く側の問題で、読む側は値さえ読めればよい。1,071字を
+    # 毎レンダー載せたうえ、たまに応答ごと潰していた。
+    assert marker not in chain.SCRIPTER_WEAVE_SYSTEM
 
 
 def test_only_frame_owns_the_gaze():
