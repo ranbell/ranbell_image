@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Iterable
 from typing import Any
 
 # Garment vocabulary has one owner. `brief` imports `identity` and neither
@@ -727,11 +728,23 @@ def record_rewrite(
     session: dict[str, Any], source: str, *,
     before: dict[str, Any], after: dict[str, Any],
     intent: str = "", extra: dict[str, Any] | None = None,
+    why: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
-    """Append a short rewrite to the session ring. Returns the entry or None."""
+    """Append a short rewrite to the session ring. Returns the entry or None.
+
+    ``why`` carries one line per field explaining why it was written that way.
+    It rides along with the diff so the instrument panel shows the decision next
+    to its result — the showrunner can see 「カメラ見て」 landing in FRAME and
+    read the sentence that put it there, instead of inferring it from a value
+    that changed.
+    """
     changed = shot_diff(before, after)
     if extra:
         changed.update(extra)
+    for key, reason in (why or {}).items():
+        pair = changed.get(key)
+        if isinstance(pair, dict) and reason:
+            pair["why"] = reason
     if not changed:
         return None
     entry = {
@@ -946,13 +959,19 @@ def migrate(session: dict[str, Any]) -> dict[str, Any]:
 _INTENT_RE = re.compile(
     r"(?im)^[\s>*_-]*INTENT\s*[:：]\s*(casual|shot|mixed|recall)\s*$"
 )
+# WHY_* は本体より先に並べる。`WHY_FRAME` を `FRAME` として拾わせないため。
 _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*("
+    r"WHY_ATMOSPHERE|WHY_SCENE|WHY_LIGHT|WHY_FRAME|WHY_WEARING_B|WHY_WEARING|"
+    r"WHY_BEAT_B|WHY_BEAT|"
     r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING_DROP|WEARING|BEAT|WEARING_B|BEAT_B|"
     r"VIBE|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
     r"CRAFT_SCENE|UNCHANGED"
     r")\s*[:：]\s*(.*)$"
 )
+
+# 理由は一行。長い説明はノートを汚すだけで、読む側の役に立たない。
+WHY_MAX_CHARS = 180
 
 VALID_INTENTS = frozenset({"casual", "shot", "mixed", "recall"})
 
@@ -978,6 +997,13 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "tags_a": {"type": "string"},
         "tags_b": {"type": "string"},
         "craft_scene": {"type": "string"},
+        # なぜその欄をそう書いたか、欄ごとに一行。総監督が判断を読めるように
+        # なると同時に、書く側が自分の選択を言葉にすることになる。視線が
+        # ターンによって frame にも beat にも行っていた 8/19 の実測が発端。
+        "why": {
+            "type": "object",
+            "properties": {k: {"type": "string"} for k in SHOT_KEYS},
+        },
     },
     "required": ["intent"],
 }
@@ -1019,10 +1045,29 @@ def guard_partner_patch(
     return patch
 
 
+def clean_why(raw: Any, patch: dict[str, Any] | None = None) -> dict[str, str]:
+    """One short line per field, and only for fields this patch actually wrote.
+
+    A reason for a field nobody touched is noise in the instrument panel, and
+    a reason long enough to be a paragraph is a second notebook.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in SHOT_KEYS:
+        if patch is not None and key not in patch:
+            continue
+        text = " ".join(str(raw.get(key) or "").split())
+        if text and text.lower() not in ("none", "なし", "-", "unchanged"):
+            out[key] = text[:WHY_MAX_CHARS]
+    return out
+
+
 def _blank_result(raw: str = "") -> dict[str, Any]:
     return {
         "intent": "casual",
         "patch": {},
+        "why": {},
         "tags": "",
         "craft_scene": "",
         "raw": raw,
@@ -1106,6 +1151,7 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
     return {
         "intent": intent,
         "patch": patch,
+        "why": clean_why(data.get("why"), patch),
         "tags": merged,
         "tags_shared": tags_shared,
         "tags_a": tags_a,
@@ -1163,6 +1209,10 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         "beat_b": "BEAT_B",
         "vibe": "VIBE",
     }
+    why_raw = {
+        key: fields.get(f"WHY_{key.upper()}", "")
+        for key in SHOT_KEYS
+    }
     patch: dict[str, Any] = {}
     for dest, src in key_map.items():
         if dest in unchanged or src.lower() in unchanged:
@@ -1198,6 +1248,7 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
     return {
         "intent": intent if intent in VALID_INTENTS else "casual",
         "patch": patch,
+        "why": clean_why(why_raw, patch),
         "tags": merged,
         "tags_shared": tags_shared,
         "tags_a": tags_a,

@@ -887,7 +887,62 @@ def test_the_restate_shape_is_not_a_second_copy_of_the_contract():
         ("beat", "NOT where you are looking: that is the frame."),
         ("wearing", "A held prop is not worn; that belongs in beat."),
     ):
-        shape = crew.restate_output(field).splitlines()[-1]
-        assert phrase in shape, field
+        # The value line, not the WHY line that now follows it.
+        prompt = crew.restate_output(field)
+        assert phrase in prompt, field
         # …and the format-only tail is still appended, not lost.
     assert "AT MOST 6" in crew.restate_output("wearing")
+
+
+# ── なぜその欄をそう書いたか ──────────────────────────────────────────────
+
+def test_the_scripter_is_asked_to_say_why_it_wrote_each_field():
+    text = chain.SCRIPTER_SYSTEM
+    assert "SAY WHY, FIELD BY FIELD" in text
+    assert "WHY_FRAME" in text
+    # The reason has to point at what was said, not read the value back.
+    assert "Point at what was said" in text
+    assert "why" in notebook.SCRIPTER_FORMAT_SCHEMA["properties"]
+
+
+def test_a_reason_is_parsed_from_json_and_from_labels_alike():
+    """Both paths, because the labelled one runs on every turn with an image."""
+    labelled = notebook.parse_scripter(
+        "INTENT: shot\n"
+        "FRAME: medium shot, looking into the lens\n"
+        "WHY_FRAME: 『カメラ目線で』と言われたので視線を frame に置いた\n"
+    )
+    assert labelled["patch"]["frame"].startswith("medium shot")
+    assert "カメラ目線" in labelled["why"]["frame"]
+
+    as_json = notebook.parse_scripter(
+        '{"intent":"shot","frame":"medium shot, looking into the lens",'
+        '"why":{"frame":"asked for eye contact"}}'
+    )
+    assert as_json["why"]["frame"] == "asked for eye contact"
+
+
+def test_a_reason_for_a_field_nobody_wrote_is_dropped():
+    """A decision that never landed must not show up as if it had."""
+    assert notebook.clean_why({"frame": "x", "beat": "y"}, {"frame": "v"}) == {
+        "frame": "x",
+    }
+
+    session: dict = {}
+    entry = notebook.record_rewrite(
+        session, "scripter",
+        before={"frame": "a", "beat": "b"},
+        after={"frame": "z", "beat": "b"},
+        why={"frame": "moved the gaze", "beat": "never landed"},
+    )
+    assert entry["changed"]["frame"]["why"] == "moved the gaze"
+    assert "beat" not in entry["changed"]
+
+
+def test_the_reason_is_one_line_not_a_second_notebook():
+    long = "あ" * 400
+    assert len(notebook.clean_why({"beat": long}, {"beat": "v"})["beat"]) == (
+        notebook.WHY_MAX_CHARS
+    )
+    # Newlines collapse — the panel renders one line per field.
+    assert notebook.clean_why({"beat": "one\ntwo"}, {"beat": "v"})["beat"] == "one two"

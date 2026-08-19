@@ -61,17 +61,29 @@ def test_the_contract_tells_her_when_not_to_speak():
 
 # ── one part, said over ─────────────────────────────────────────────────────
 
-def test_a_restatement_reads_back_as_two_lines():
-    say, value = chain.parse_restate(
-        "SAY: カメラのほう見ますね。\nFRAME: wide shot, looking into the lens",
+def test_a_restatement_reads_back_as_three_lines():
+    say, value, why = chain.parse_restate(
+        "SAY: カメラのほう見ますね。\nFRAME: wide shot, looking into the lens\n"
+        "WHY_FRAME: 『カメラ目線で』と言われたので視線を frame に置いた",
         "frame",
     )
     assert say == "カメラのほう見ますね。"
     assert value == "wide shot, looking into the lens"
+    # The reason rides along so the showrunner can see where his line landed.
+    assert "カメラ目線" in why
+
+
+def test_a_restatement_without_a_reason_still_lands():
+    """The value is the deliverable; the reason is instrumentation."""
+    say, value, why = chain.parse_restate(
+        "SAY: はい。\nFRAME: wide shot, looking into the lens", "frame",
+    )
+    assert value == "wide shot, looking into the lens"
+    assert why == ""
 
 
 def test_her_voice_survives_a_missing_label():
-    say, value = chain.parse_restate(
+    say, value, _ = chain.parse_restate(
         "座り直しました。\nBEAT: sitting, hands in lap", "beat",
     )
     assert "座り直し" in say

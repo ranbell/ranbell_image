@@ -1587,6 +1587,12 @@ async function onChatKey(e) {
                 >
                   <span class="text-amber-300/80">{{ field }}</span>
                   {{ ' ' }}{{ pair.before || '∅' }} → {{ pair.after || '∅' }}
+                  <!-- Why it was written that way. Without this the panel shows
+                       that a direction landed somewhere, but never whether it
+                       landed where it was meant to. -->
+                  <div v-if="pair.why" class="pl-3 text-[var(--sb-faint)] italic">
+                    ↳ {{ pair.why }}
+                  </div>
                 </div>
               </li>
             </ul>

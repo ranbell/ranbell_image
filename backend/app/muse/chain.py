@@ -753,33 +753,39 @@ async def run_showrunner_taste(
 
 
 def _restate_line_re(field: str) -> re.Pattern[str]:
+    # WHY first: `WHY_FRAME` must not be read as `FRAME`.
     return re.compile(
-        rf"(?im)^[\s>*_-]*(SAY|{re.escape(field.upper())})[\s*_]*[:：]\s*(.*)$"
+        rf"(?im)^[\s>*_-]*(WHY_{re.escape(field.upper())}|SAY|"
+        rf"{re.escape(field.upper())})[\s*_]*[:：]\s*(.*)$"
     )
 
 
-def parse_restate(raw: str, field: str) -> tuple[str, str]:
-    """Her line, and the one field said over. Same shape as `parse_wardrobe`."""
+def parse_restate(raw: str, field: str) -> tuple[str, str, str]:
+    """Her line, the one field said over, and why she put it that way."""
     say = ""
     value = ""
+    why = ""
     for match in _restate_line_re(field).finditer(raw or ""):
         got = match.group(2).strip()
-        if match.group(1).upper() == "SAY":
+        label = match.group(1).upper()
+        if label == "SAY":
             say = say or got
+        elif label.startswith("WHY_"):
+            why = why or got
         else:
             value = value or got
     if not say:
         say = identity.sanitize_muse_say(
             _restate_line_re(field).sub("", str(raw or "")).strip()
         )[:400]
-    return identity.sanitize_muse_say(say), value
+    return identity.sanitize_muse_say(say), value, why[:notebook_mod.WHY_MAX_CHARS]
 
 
 async def run_restate(
     ollama, *, system: str, field: str, current: str, transcript: str,
     note: str = "", model: str, num_ctx: int | None,
     on_token: TokenCallback | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """One part of the shot, said over from the start rather than edited.
 
     A delta needs the field to still be movable. Measured live, a `beat` that
@@ -796,7 +802,7 @@ async def run_restate(
             "CONVERSATION SO FAR (this is what actually happened — read it "
             f"out of this):\n{transcript.strip()}"
         ) if transcript.strip() else "",
-        "二行で答えてください。",
+        "三行で答えてください。",
     ] if b.strip())
     raw = await _call(
         ollama, system=system, prompt=prompt, model=model, images=None,
@@ -1355,6 +1361,22 @@ FIELD CONTRACTS (hard):
   Do not write "no hat" / "remove hat". Omit the hat.
 - wearing_drop = when something comes OFF, name that ONE garment and nothing
   else. The studio subtracts it. Do not restate the outfit to remove a piece.
+
+SAY WHY, FIELD BY FIELD:
+- For every field you write this turn, give a one-line reason: what in the
+  conversation put that value there. Japanese or English, whichever says it
+  plainest. One line. Never a reason for a field you did not write.
+- Point at what was said, not at what you wrote. "彼が『カメラ見て』と言ったので
+  視線を FRAME に移した" is a reason. "FRAME is now a medium shot" is not — it
+  just reads the value back.
+- Two readers need this. The showrunner is watching to see WHERE his direction
+  landed: he says 「カメラ見て」 and the picture does not move, and he cannot
+  tell whether he was not heard, or was heard and written into a field the
+  render does not read from. The reason tells him which.
+- And it is for you. A field you cannot give a reason for is one you probably
+  should not be rewriting this turn. Writing the reason first is the check.
+- In JSON: the `why` object, keyed by field name. In labelled form:
+  `WHY_FRAME:` / `WHY_BEAT:` lines beside the values.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.

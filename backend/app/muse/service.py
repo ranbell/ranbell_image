@@ -2671,10 +2671,12 @@ def _note_rewrite(
     session: dict[str, Any], source: str, *,
     before: dict[str, Any], after: dict[str, Any],
     intent: str = "", extra: dict[str, Any] | None = None,
+    why: dict[str, str] | None = None,
 ) -> None:
-    """Ring-buffer + SSE so the debug pane can see who rewrote what."""
+    """Ring-buffer + SSE so the debug pane can see who rewrote what, and why."""
     entry = notebook_mod.record_rewrite(
         session, source, before=before, after=after, intent=intent, extra=extra,
+        why=why,
     )
     if not entry:
         return
@@ -2799,6 +2801,12 @@ async def _run_duet_scripter(
     patch = notebook_mod.guard_partner_patch(
         dict(result.get("patch") or {}), partner=partner,
     )
+    # Why each field was written the way it was. Rides with the diff into the
+    # instrument panel so the showrunner reads the decision, not just its
+    # result — and so the scripter has to put its own choice into words before
+    # making it. Measured 8/19: 「カメラ目線で」 went to FRAME on one turn and
+    # 「本に視線を戻して」 went to BEAT on the next, with nothing to say why.
+    why = dict(notebook_mod.clean_why(result.get("why"), patch))
     if not str(result.get("raw") or "").strip():
         session["craft_dirty"] = True
 
@@ -2922,6 +2930,9 @@ async def _run_duet_scripter(
             # anything else it decided to rewrite is not what was asked for.
             fix_patch = {k: v for k, v in fix_patch.items() if k in missing}
             if fix_patch:
+                # The repair's reasons are the ones that count for these
+                # fields: the first pass did not write them at all.
+                why.update(notebook_mod.clean_why(fix.get("why"), fix_patch))
                 notebook_mod.apply_patch(nb, fix_patch)
                 notebook_moved = int(nb.get("rev") or 0) > rev_before
                 shot_patched = True
@@ -3030,6 +3041,7 @@ async def _run_duet_scripter(
     _note_rewrite(
         session, "scripter_fold" if fold else "scripter",
         before=before_shot, after=notebook_mod.shot_snapshot(nb), intent=intent,
+        why=why,
     )
     flash = vitality.notebook_flash_key(patch) if shot_patched else ""
     events.publish(sid, {
@@ -3677,9 +3689,10 @@ async def _muse_checks_the_notebook(
     # Rewriting half the notebook on one turn is how a shoot loses its place.
     named = named[:_RESTATE_MAX]
     before_shot = notebook_mod.shot_snapshot(nb)
+    said_why: dict[str, str] = {}
     for field in named:
         try:
-            _, value = await chain.run_restate(
+            _, value, why_line = await chain.run_restate(
                 ollama,
                 system=crew.actress_duet_prompt(
                     session.get("character") or {}, mode=f"restate:{field}",
@@ -3697,6 +3710,8 @@ async def _muse_checks_the_notebook(
             continue
         if not str(value or "").strip():
             continue
+        if str(why_line or "").strip():
+            said_why[field] = str(why_line).strip()
         notebook_mod.apply_patch(nb, {field: value})
     after_shot = notebook_mod.shot_snapshot(nb)
     if after_shot == before_shot:
@@ -3709,6 +3724,7 @@ async def _muse_checks_the_notebook(
     logger.info("[muse] she said over %s", ", ".join(named))
     _note_rewrite(
         session, "restate", before=before_shot, after=after_shot, intent="shot",
+        why=said_why,
     )
 
 

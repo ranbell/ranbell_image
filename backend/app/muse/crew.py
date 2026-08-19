@@ -307,11 +307,14 @@ NOTEBOOK 欄の値は、スタジオが書き取れた分であって真実で�
 
 足したり引いたりするのではありません。**はじめから言い直します。**
 
-OUTPUT FORMAT — exactly two lines, nothing else, no explanation, no headings:
+OUTPUT FORMAT — exactly three lines, nothing else, no headings:
 
 SAY: <in character, natural Japanese, one short sentence — say it back to them
      the way you would out loud. No tags in here, no emoji.>
 {field.upper()}: {shape}
+WHY_{field.upper()}: <一行。会話の何をどう読んでこの値にしたのか。値を読み返す
+     のではなく、根拠になった発言を指すこと。総監督は自分の指示がどこに着いたか
+     を見ている。あなたにとっても、理由が言えない書き直しは要らない書き直し。>
 """.strip()
 
 
