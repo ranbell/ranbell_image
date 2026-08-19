@@ -1032,3 +1032,31 @@ def test_intent_is_not_bought_at_the_notebook_s_expense():
     assert "intent" in chain.SCRIPTER_BLOCKS          # 残してある
     assert "intent" not in chain.SCRIPTER_BUILD_DEFAULT
     assert "shot" in chain.CLASSIFY_INTENT_SYSTEM     # clerk が持っている
+
+
+def test_a_proposal_goes_to_her_and_never_to_the_notebook():
+    """The scripter may notice; she decides whether it is worth saying.
+
+    Measured on t21「おいしそう？」: with nowhere to put it, the scripter gave
+    her a pastry nobody had asked for, 5/5. With `PROPOSE:` it stopped writing
+    into the field — but a proposal that only reaches a log is not a proposal.
+    It goes to the one person in the room who can judge whether it belongs.
+    """
+    session = {
+        "propose": "a lamp on the table nobody has asked for",
+        "inputs": {"locale": "ja"}, "notebook": {}, "chat": [],
+    }
+    prompt = service._duet_user_prompt(session, "いいね", prep=False, intent="casual")
+    assert "THE STUDIO NOTICED" in prompt
+    assert "a lamp on the table" in prompt
+    assert "Yours to raise or let go" in prompt
+
+    # And nothing about it reaches the shot itself.
+    parsed = notebook.parse_scripter("INTENT: casual\nPROPOSE: a lamp on the table")
+    assert parsed["patch"] == {}
+
+
+def test_a_quiet_turn_says_nothing_about_proposals():
+    session = {"inputs": {"locale": "ja"}, "notebook": {}, "chat": []}
+    prompt = service._duet_user_prompt(session, "いいね", prep=False, intent="casual")
+    assert "THE STUDIO NOTICED" not in prompt

@@ -2807,6 +2807,11 @@ async def _run_duet_scripter(
     # making it. Measured 8/19: 「カメラ目線で」 went to FRAME on one turn and
     # 「本に視線を戻して」 went to BEAT on the next, with nothing to say why.
     why = dict(notebook_mod.clean_why(result.get("why"), patch))
+    # What the scripter would add but has no business deciding. It goes to her,
+    # not into the notebook — she is the one in the room, and whether it is
+    # worth raising is hers to judge. Replaced every turn: a proposal is about
+    # the line that was just said, and stale ones would haunt the shoot.
+    session["propose"] = notebook_mod.clean_propose(result.get("propose"))
     if not str(result.get("raw") or "").strip():
         session["craft_dirty"] = True
 
@@ -3269,6 +3274,16 @@ def _duet_user_prompt(
             )
         else:
             parts.append(f"THEME (Showrunner's opening ask):\n{theme}")
+    noticed = str(session.get("propose") or "").strip()
+    if noticed:
+        parts.append(
+            "THE STUDIO NOTICED (not in the notebook, and nobody has decided "
+            "it — the scripter wrote it down while reading the room):\n"
+            f"{noticed}\n"
+            "Yours to raise or let go. If it belongs in the picture you are "
+            "making, say it in your own words and let the Showrunner decide. "
+            "If it does not, drop it — nobody needs to hear it was considered."
+        )
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
