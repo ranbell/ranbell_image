@@ -966,7 +966,7 @@ _FIELD_RE = re.compile(
     r"WHY_BEAT_B|WHY_BEAT|"
     r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING_DROP|WEARING|BEAT|WEARING_B|BEAT_B|"
     r"VIBE|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
-    r"CRAFT_SCENE|UNCHANGED"
+    r"CRAFT_SCENE|UNCHANGED|PROPOSE"
     r")\s*[:：]\s*(.*)$"
 )
 
@@ -1016,6 +1016,12 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         #
         # 理由はラベル形式の `WHY_*` と言い直し（`parse_restate`）で採る。
         # そちらは値と同じ行の並びに出るので、置き換えが起きない。
+        #
+        # `propose` は別物。**欄に書けない物の置き場**であって、欄の代わりに
+        # 書ける物ではないので、仕事を食う関係にない。決まっていない物を
+        # 思いついたときの行き場が無いと、モデルはそれを beat に押し込む
+        # （t21「おいしそう？」で手にパンを持たせた）。
+        "propose": {"type": "string"},
     },
     "required": ["intent"],
 }
@@ -1075,11 +1081,32 @@ def clean_why(raw: Any, patch: dict[str, Any] | None = None) -> dict[str, str]:
     return out
 
 
+PROPOSE_MAX_CHARS = 200
+
+
+def clean_propose(raw: Any) -> str:
+    """One line the scripter offers but must not write into the notebook.
+
+    Without somewhere to put it, a model that thinks the shot wants something
+    puts it in a field instead — measured on t21「おいしそう？」, where every
+    run of five gave her a pastry or a cup nobody had asked for. The channel
+    costs one line and keeps the decision in the room.
+    """
+    text = " ".join(str(raw or "").split())
+    # The model sometimes repeats the label inside the value it hands back.
+    while text.upper().startswith("PROPOSE"):
+        text = text.split(":", 1)[1].strip() if ":" in text else ""
+    if not text or text.lower() in ("none", "なし", "-", "(none)"):
+        return ""
+    return text[:PROPOSE_MAX_CHARS]
+
+
 def _blank_result(raw: str = "") -> dict[str, Any]:
     return {
         "intent": "casual",
         "patch": {},
         "why": {},
+        "propose": "",
         "tags": "",
         "craft_scene": "",
         "raw": raw,
@@ -1164,6 +1191,7 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
         "intent": intent,
         "patch": patch,
         "why": clean_why(data.get("why"), patch),
+        "propose": clean_propose(data.get("propose")),
         "tags": merged,
         "tags_shared": tags_shared,
         "tags_a": tags_a,
@@ -1261,6 +1289,7 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         "intent": intent if intent in VALID_INTENTS else "casual",
         "patch": patch,
         "why": clean_why(why_raw, patch),
+        "propose": clean_propose(fields.get("PROPOSE")),
         "tags": merged,
         "tags_shared": tags_shared,
         "tags_a": tags_a,

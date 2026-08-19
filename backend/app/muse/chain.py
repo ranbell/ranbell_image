@@ -1282,6 +1282,201 @@ async def run_table_talk(
 # A new field goes at the end and gets one line. It is a contract, not an essay.
 
 
+# ── 積み上げ式の compile 契約 ──────────────────────────────────────────
+#
+# 下の `SCRIPTER_SYSTEM`（8,281字）は残してある。捨てないのは比較のため。
+# 標準30試験パック（`private/muse/crew_lab/gold_30.yaml`・30本 × 5回）で
+# 二つを同条件で測ると:
+#
+#     SCRIPTER_SYSTEM  8,281字   52.7%
+#     base だけ          568字   70.0%
+#
+# 短いほうが 17 ポイント勝つ。区分で見ると差の出方がはっきりしている:
+#
+#     画を動かさない（雑談・褒め・質問）   100% / 100%   ← 差が無い
+#     姿勢を動かす                       60% /  16%
+#     服を動かす                         56% /  24%
+#
+# **動かさないことは 568 字でもできる。33個の禁止は要らなかった。**
+# 長いほうは「値の欄に説明を書く」（`// 監督が…と指示したため`）が 11 回、
+# `shot` と言って何も書かないのが 48/120。短いほうは 0 回と 1/55。
+#
+# なので足すのは、短いほうが実際に落とした試験を直す分だけにする。
+# ブロックは消さずに名前で持ち、既定リストを変えるだけで戻せるようにする。
+
+SCRIPTER_BASE = """
+You keep the shot notebook for a photo shoot.
+
+The director talks to the actress. When what he says changes the picture, you
+write the notebook fields over with their new finished values.
+
+ATMOSPHERE  the mood
+SCENE       the place and the time of day
+LIGHT       the key and where it comes from
+FRAME       the camera, and where her eyes are pointed
+WEARING     what is on her body
+BEAT        what her body is doing — not where she is looking
+
+Answer with the fields you changed, one per line, English values:
+
+  FRAME: ...
+  BEAT: ...
+
+Nothing changed? Answer: NONE
+""".strip()
+
+# t4 / t5 / t26 はどれも同じ形で落ちた。新しい細部だけを書いて、姿勢が消える:
+#     「手は膝の上に置いて」  → beat: "hands resting on knees"
+#     「カップを持って」      → beat: "holding a cup with both hands"
+#     「うん、それで」        → beat: "leaning elbows on the windowsill"
+# 立っているのか座っているのか分からない beat は、絵にならない。
+SCRIPTER_STEM = """
+BEAT always says which posture she is in — sitting, standing, kneeling,
+crouching — even when the direction is only about her hands. Hands, weight and
+anything she is holding are written on top of that posture, never instead of it.
+""".strip()
+
+# t7 / t28。「本に視線を戻して」「窓の外を見て」は動作のように聞こえるので
+# BEAT に入る。カメラを見る側は通るのに、離れる側で落ちる。
+SCRIPTER_GAZE = """
+Where she looks is FRAME, whichever way it points — into the lens, down at
+what she is holding, off toward the horizon. A direction about her eyes
+rewrites FRAME and leaves BEAT to her body.
+""".strip()
+
+# t16 / t17。「教室に移ろう」「夕方にして」で patch が空になった。
+SCRIPTER_SCENE = """
+SCENE carries both the place and the hour. Moving her somewhere else, or
+changing the time of day, rewrites SCENE — those are changes to the picture,
+not small talk. The hour lives there and not in ATMOSPHERE, which is feeling
+only.
+""".strip()
+
+# t14。素の契約は欄の一覧を持たないので、存在しない `wearing_b` を作った。
+SCRIPTER_SOLO = """
+There is one actress unless you are told otherwise. WEARING and BEAT are hers;
+there are no other people's fields to fill in. What she wears includes her
+hair — a hairstyle change is written in WEARING.
+""".strip()
+
+# `stem` を足した代償として出た穴。t21「おいしそう？」で 0/5:
+#     beat: "sitting by the window, hands cradling a cup"
+#     beat: "hands holding a pastry near her face"
+# ノートに食べ物は一言も無い。「手も書け」と言われたので手に何か持たせた。
+#
+# 最初これを禁止（「決まっていないものは書くな」）で塞ごうとしたが、総監督に
+# 止められた:
+#
+#   > gemma が必要だと思ったのに、行き場がなかったということでは？
+#   > 守らなかったといえばそうだけど、gemma の能力を奪っているといえるのでは?
+#   > 該当しないけど提案したいっていうのを作らないといけない。それを受け入れる
+#   > かどうかをオーケストレータが判断するのが自然だね。
+#
+# そのとおりで、**この考え方は既にこのコードベースにある**。班の席については
+# `SCRIPTER_FOLD_NOTE` が「body action でない提案は会話に置いたままにして、
+# 総監督が拾うか流すかを決める」と書いている。席には提案の経路があるのに、
+# scripter には無かった。禁止ではなく、置き場を作る。
+SCRIPTER_PROPOSE = """
+Sometimes the shot suggests something nobody has decided yet — an object the
+talk keeps circling, something she would plausibly be holding, a light that
+would make the moment. That is worth saying. It is not yours to put in the
+notebook.
+
+Write it on a PROPOSE line instead. The notebook keeps only what has been
+decided; PROPOSE is where you offer what you would add. The director picks it
+up or lets it go.
+
+You will notice this most when a line only makes sense with something the
+notebook does not have — he asks how it tastes and nothing has been written
+down for her to be eating. That gap is a PROPOSE. Say NONE for the notebook
+and offer the thing; do not quietly write it into a field to make the line
+fit.
+
+  PROPOSE: <one short line, English, in the room's own terms>
+
+One line, or leave it out. Proposing costs nothing; writing it into a field
+takes the decision away from the room.
+""".strip()
+
+# **既定には入れていない。** t16「教室に移ろう」が 1〜2/5 だったときに足した
+# が、`propose` の橋渡し（「ノートに無い物が前提の一言は提案であって欄では
+# ない」）を入れたあと測り直したら、**decide 無しで t16 は 5/5 一発**だった。
+#
+# 落ちた試験ごとに規則を足すのは、規模が小さいだけで「ルールで絞る」と同じ。
+# 総監督に止められた:
+#
+#   > くれぐれも条件を満たさないからと言ってルールで絞らないように。
+#   > 会話をしながら修復されたり監督が間違い指摘して戻せるならそれでいい。
+#
+# 残してあるのは、要ると分かったときに既定へ足せるようにするため。
+SCRIPTER_DECIDE = """
+The director does not ask permission. When he says 「教室に移ろう」「夕方に
+して」「立ち上がって」, he has decided — write the finished value this turn,
+however softly he put it. Waiting for him to say it again in firmer words is
+how a shoot stalls.
+
+A question is still a question, and talk about the picture is still talk. What
+makes a line a direction is that the picture would look different afterwards.
+""".strip()
+
+# **既定には入れていない。** intent は本番が20箇所で読む大事な答えだが、
+# ここに置くと欄を書く仕事が落ちる。30本 × 5回で測った:
+#
+#     6ブロック（このブロック無し）  intent 68%   ノート 96.0%
+#     + このブロック                 intent 93%   ノート 86.7%
+#
+# 服の区分が 88% → 48%。**上がった試験は一つも無い。**
+#
+# 同じことは前にも学ばれていて、`service.py` の clerk 呼び出しの上に書いて
+# ある:「compile の契約に光の話を6行足したら、次の走行で beat と wearing が
+# 両方の部屋で書かれなくなった。**壊しうる契約より、壊せない検査のほうが
+# 価値がある**」。
+#
+# intent は別の道で採る:
+#   - `classify_intent`（専用の clerk・毎ターン走っている・小さい呼び出し）
+#   - patch が欄を動かしたかどうか（実測 92%・プロンプト増加ゼロ）
+SCRIPTER_INTENT = """
+Say what kind of turn this was, so the room knows what to do next:
+
+  shot    he changed the picture
+  mixed   he changed the picture and was also just talking
+  casual  talk only — nothing about the picture moved
+  recall  he is asking about an earlier shoot, not the one you are in
+
+This is not a label on his words, it is what the picture did. A softly worded
+line that leaves her standing somewhere new is `shot`. A question about how
+last week's take felt is `recall`, even when it names clothes or a place.
+""".strip()
+
+SCRIPTER_BLOCKS: dict[str, str] = {
+    "base": SCRIPTER_BASE,
+    "intent": SCRIPTER_INTENT,
+    "stem": SCRIPTER_STEM,
+    "gaze": SCRIPTER_GAZE,
+    "scene": SCRIPTER_SCENE,
+    "solo": SCRIPTER_SOLO,
+    "decide": SCRIPTER_DECIDE,
+    "propose": SCRIPTER_PROPOSE,
+}
+
+# 既定。測って決めた順に足してある。落としたものは上に残るので戻せる。
+# 標準30試験パック（30本 × 5回・言い直し込み）で 96.0%。
+# 詰まり（言い直しても入らない）は 6/150 = 4.0%。
+SCRIPTER_BUILD_DEFAULT = ("base", "stem", "gaze", "scene", "solo", "propose")
+
+
+def build_scripter_system(names: Iterable[str] | None = None) -> str:
+    """Compose the compile contract from named blocks.
+
+    Kept separate from `SCRIPTER_SYSTEM` so the two can be measured against
+    each other on the same pack rather than swapped on a hunch.
+    """
+    keys = list(names) if names is not None else list(SCRIPTER_BUILD_DEFAULT)
+    return "\n\n".join(
+        SCRIPTER_BLOCKS[k] for k in keys if SCRIPTER_BLOCKS.get(k)
+    )
+
+
 SCRIPTER_SYSTEM = f"""
 You are the studio scripter. You do not speak in character. You maintain the
 shot notebook. You do not write tags or craft_scene on conversation turns.
@@ -1732,7 +1927,10 @@ async def run_scripter(
     from . import notebook as notebook_mod
 
     weave = mode == "weave"
-    system = SCRIPTER_WEAVE_SYSTEM if weave else SCRIPTER_SYSTEM
+    # compile は積み上げ式の契約（`SCRIPTER_BLOCKS`）を使う。`SCRIPTER_SYSTEM`
+    # は消していない — 戻したいときは `SCRIPTER_BUILD_DEFAULT` を空にするか、
+    # ここを差し替えるだけ。weave はまだ手つかず（5,228字）。
+    system = SCRIPTER_WEAVE_SYSTEM if weave else build_scripter_system()
     if weave:
         prompt = "\n\n".join(b for b in [
             f"NOTEBOOK NOW:\n{notebook_block}",

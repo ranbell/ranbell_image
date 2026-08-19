@@ -968,3 +968,67 @@ def test_the_reason_is_one_line_not_a_second_notebook():
     )
     # Newlines collapse — the panel renders one line per field.
     assert notebook.clean_why({"beat": "one\ntwo"}, {"beat": "v"})["beat"] == "one two"
+
+
+# ── compile が実際に使う契約 ──────────────────────────────────────────────
+
+def test_compile_runs_on_the_built_contract_not_the_old_one():
+    """`SCRIPTER_SYSTEM` は残してあるが、compile はもう読んでいない。
+
+    標準30試験パック（30本 × 5回・言い直し込み）で同条件比較:
+
+        SCRIPTER_SYSTEM  8,281字   52.7%（1回判定）
+        積み上げ          2,327字   96.0%（詰まり 4.0%）
+
+    区分で見ると差の出方がはっきりする。動かさない仕事はどちらも 100% で、
+    差がつくのは動かす側 — 姿勢 16%→100%、服 24%→88%。禁止33／肯定6 の
+    指示は「動かさない」を完璧にして「動かす」を壊していた。
+    """
+    import inspect
+    src = inspect.getsource(chain.run_scripter)
+    assert "build_scripter_system()" in src
+    assert "else SCRIPTER_SYSTEM" not in src
+    # 旧版は捨てない。戻せることがこの入れ替えの前提。
+    assert len(chain.SCRIPTER_SYSTEM) > 8000
+
+
+def test_the_built_contract_says_what_each_field_is_and_forbids_almost_nothing():
+    built = chain.build_scripter_system()
+    assert len(built) < 3000
+
+    # 外枠 — 欄が何であるか。
+    for phrase in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):
+        assert phrase in built
+    assert "not where she is looking" in built.lower()   # 視線は FRAME
+    assert "posture" in built.lower()                     # beat は姿勢を言う
+
+    # 中身は任せる。禁止で埋めない — それが 8,281字が負けた理由。
+    lowered = built.lower()
+    bans = lowered.count("do not") + lowered.count("never") + lowered.count("must not")
+    assert bans <= 3, f"禁止が {bans} 個。旧版は 33 個で 52.7% だった"
+
+
+def test_a_proposal_has_somewhere_to_go():
+    """行き場が無いと、思いついたものを欄に押し込む。
+
+    t21「おいしそう？」で、ノートに食べ物が無いのに 5/5 で手にパンを持たせた。
+    禁止で塞ぐのではなく `PROPOSE:` を作ったら 5/5 で通るようになった。
+    """
+    assert "PROPOSE" in chain.build_scripter_system()
+    parsed = notebook.parse_scripter(
+        "INTENT: casual\nPROPOSE: something the room has not decided yet"
+    )
+    assert parsed["patch"] == {}, "提案がノートに入ってはいけない"
+    assert parsed["propose"].startswith("something")
+
+
+def test_intent_is_not_bought_at_the_notebook_s_expense():
+    """intent の説明はブロックとして持つが、既定には入れない。
+
+    足すと intent は 68%→93% になるが、ノートが 96.0%→86.7% に落ちる
+    （服の区分は 88%→48%、上がった試験はゼロ）。intent は別の道で採る —
+    `classify_intent` の clerk と、patch が欄を動かしたかどうか（実測 92%）。
+    """
+    assert "intent" in chain.SCRIPTER_BLOCKS          # 残してある
+    assert "intent" not in chain.SCRIPTER_BUILD_DEFAULT
+    assert "shot" in chain.CLASSIFY_INTENT_SYSTEM     # clerk が持っている

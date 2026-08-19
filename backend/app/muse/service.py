@@ -2910,6 +2910,18 @@ async def _run_duet_scripter(
         if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
             logger.info("[muse] clerk raised intent %r → %r", intent, kind)
             intent = kind
+
+    # The patch itself is the last word on whether this turn moved the picture.
+    # A compile that rewrote `beat` and then labelled the turn `recall` would
+    # otherwise leave `chat_only` true: the notebook changes, the Muse talks
+    # about something else, and no render is asked for.
+    #
+    # Measured on the 30-pack (30 x 5): the scripter's own label is right 68%
+    # of the time when the contract does not spend words explaining the four
+    # intents, and 92% when it is simply derived from what was written.
+    # Explaining them in the contract does buy 93% — and costs the notebook
+    # itself, 96.0% down to 86.7%. This raises only, exactly like the clerk
+    # above: a turn that wrote a shot field is a shot.
     else:
         asked = set()
     if asked and intent in ("shot", "mixed"):
@@ -3078,6 +3090,30 @@ async def _run_duet_scripter(
         else:
             session["just_banned"] = []
             session["just_restored"] = []
+
+    # The patch itself is the last word on whether the picture moved. A compile
+    # that rewrote `beat` and then labelled the turn `recall` would otherwise
+    # leave `chat_only` true: the notebook changes, the Muse talks about
+    # something else, and no render is asked for.
+    #
+    # Measured on the 30-pack (30 x 5): the scripter's own label is right 68%
+    # of the time when the contract does not spend words on the four intents,
+    # and 92% when it is simply derived from what was written. Explaining them
+    # in the contract does buy 93% — and costs the notebook, 96.0% down to
+    # 86.7%. So it is derived here instead, raising only, exactly like the
+    # clerk above.
+    #
+    # This sits AFTER the standing note is filed on purpose. What becomes a
+    # standing order is the room's judgement of the line, not a consequence of
+    # which fields happened to move. `atmosphere` is left out for the same
+    # reason: mood shifts on ordinary chat without anyone asking for a take.
+    if patch and intent not in ("shot", "mixed"):
+        moved = [k for k in ("scene", "light", "frame", "wearing", "beat",
+                             "wearing_b", "beat_b") if k in patch]
+        if moved:
+            logger.info("[muse] patch raised intent %r → shot (%s)",
+                        intent, ", ".join(moved))
+            intent = "shot"
 
     if shot_patched or (notebook_moved and intent in ("shot", "mixed")):
         session["craft_dirty"] = True
