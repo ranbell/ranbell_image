@@ -14,6 +14,14 @@ from typing import Any
 
 from . import brief as brief_mod
 from . import crew, identity
+from . import notebook as notebook_mod
+
+# 欄の定義はここでは書かない。ノートを持っている notebook.py が唯一の出典で、
+# compile も weave も写真読みも彼女の見直しも、同じ一つを読む。
+_CONTRACTS = notebook_mod.contracts_block()
+_CONTRACTS_YOU = notebook_mod.contracts_block(
+    ("scene", "light", "frame", "wearing", "beat"), second_person=True,
+)
 from . import facets as facets_mod
 
 logger = logging.getLogger(__name__)
@@ -835,18 +843,15 @@ def parse_wardrobe(raw: str) -> tuple[str, str]:
 #
 # Closed vocabulary again — the answer is field names, and a name that is not a
 # field falls on the floor. She cannot invent a slot, only point at one.
-NOTEBOOK_REVIEW_SYSTEM = """
+NOTEBOOK_REVIEW_SYSTEM = f"""
 You have just spoken. Below is the shot notebook as the studio wrote it down.
 
 One job: say which parts of it no longer match what is actually happening —
 what the Showrunner asked for, and what you just said you were doing.
 
-The parts, and nothing outside this list:
-  scene    — where you are and what time it is
-  light    — the key and where it comes from
-  frame    — the camera, and where your eyes are pointed
-  wearing  — what is ON your body
-  beat     — what your body is DOING
+The parts, and nothing outside this list — scene, light, frame, wearing, beat.
+
+{_CONTRACTS_YOU}
 
 RULES
 - Answer ONLY with names from that list. Anything else is ignored.
@@ -1271,7 +1276,7 @@ async def run_table_talk(
 # A new field goes at the end and gets one line. It is a contract, not an essay.
 
 
-SCRIPTER_SYSTEM = """
+SCRIPTER_SYSTEM = f"""
 You are the studio scripter. You do not speak in character. You maintain the
 shot notebook. You do not write tags or craft_scene on conversation turns.
 
@@ -1338,17 +1343,16 @@ THE STILL IS THE LAST TAKE, NOT THE ASK:
 - Priority for beat: showrunner's newest posture/pose line > previous Muse
   CARD/SAY body action > the still. A short pose noun replaces the old beat.
 
+{_CONTRACTS}
+
 FIELD CONTRACTS (hard):
-- scene = short place + time. NEVER paste long prose.
-- atmosphere = mood/feeling only (tender, hushed, lonely). NEVER clock words,
-  weather-as-hour, objects, or place nouns.
-- frame / wearing / beat = short absolute phrases, not paragraphs.
-- frame names ONE crop: zoom/close/upper OR wide/full-body. Never both
-  wide_shot and close_up in the same frame.
+- Every one of these is a short absolute phrase, never a paragraph, never prose.
+- A direction that moves the gaze rewrites FRAME — and clears any gaze left
+  sitting in BEAT. Leaving the old one there is how a shot stops moving: the
+  showrunner says it again and again, the notebook keeps agreeing with him in
+  one field and contradicting him in the other.
 - On a remove request, rewrite wearing as the finished state WITHOUT that noun.
   Do not write "no hat" / "remove hat". Omit the hat.
-- light = the key and where it comes from, absolute: "low sun from behind,
-  hard rim". Not a direction of change, not mood, not a place.
 - wearing_drop = when something comes OFF, name that ONE garment and nothing
   else. The studio subtracts it. Do not restate the outfit to remove a piece.
 
@@ -1377,7 +1381,7 @@ Respond with a single JSON object matching the schema. Empty string means
 clear that section; omit keys you are not changing.
 """.strip()
 
-SCRIPTER_WEAVE_SYSTEM = """
+SCRIPTER_WEAVE_SYSTEM = f"""
 You are the studio scripter in WEAVE mode. You do not speak in character.
 You expand the current notebook into sampler tags and craft_scene prose.
 You do not rewrite SHOT fields.
@@ -1387,6 +1391,14 @@ LANGUAGE: English only for tags and craft_scene.
 SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
 quality of that inventory (light, optics, colour, air, cloth, finish) — never
 extra inventory. No theme, no chat, no photo.
+
+{_CONTRACTS}
+
+Read each field for what it owns. The gaze is FRAME's — if BEAT still carries
+an old one, FRAME is the one that is current, because that is the field the
+showrunner's directions are written into. Do not put both in the bag: a bag
+that says `looking_at_viewer` while the prose has her eyes on the book is one
+instruction contradicting itself, and the sampler resolves it by coin flip.
 
 THE LOOK IS NOT A TAG, IT IS HOW YOU WRITE:
 - LOOK, when present, is the room's agreed rendering. It governs the WHOLE bag
@@ -1646,16 +1658,14 @@ async def classify_fields(
         return set()
     return parse_classified_fields(raw)
 
-STILL_READ_SYSTEM = """
+STILL_READ_SYSTEM = f"""
 You are reading the latest test still for the studio notebook.
 Write labelled English absolute values for what is in the photo.
 Do not invent. Do not restore items listed as STRUCK.
 
-ATMOSPHERE: mood/feeling only — no clock, no objects.
-SCENE: short place + time (dusk goes here, not in ATMOSPHERE).
-FRAME: camera and gaze.
-WEARING: clothes and hair on the body. Omit struck items even if visible.
-BEAT: body action. Held props here.
+{_CONTRACTS}
+
+WEARING additionally: omit struck items even if the photo still shows them.
 (Partner: WEARING_B / BEAT_B when two people.)
 
 No TAGS. No JSON. No SAY.

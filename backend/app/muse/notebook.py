@@ -81,6 +81,99 @@ def has_shot(nb: dict[str, Any]) -> bool:
     ))
 
 
+# ── 欄の契約 ────────────────────────────────────────────────────────────
+# **ノートに触る全員が、同じ一つの定義を読む。** 8/19 に測って分かったことは、
+# 定義が無かったのではなく **3通りに割れていて、一番正確なものが誰にも見えて
+# いなかった** ということだった:
+#
+#   彼女 (DUET_TALK_OUTPUT)     FRAME: <camera / gaze>
+#   compile (SCRIPTER_SYSTEM)   frame names ONE crop      ← 視線の記述が無い
+#   写真読み (STILL_READ)       FRAME: camera and gaze
+#   言い直し (_RESTATE_FIELDS)  …Crop plus gaze. Not where you are looking;
+#                               that is the frame.        ← 正確。だが restate
+#                                                            のターンでしか出ない
+#
+# ノートを毎ターン書いているのは compile で、そこには視線の帰属が書かれて
+# いなかった。だから「カメラ見て」が frame に入り、beat の `looking at cake`
+# は残り、weave は具体的なほう（beat）を採った。総監督は3回言い直した。
+#
+# 直し方は新しい規則を足すことではない。**一番正確な版を唯一の出典にして、
+# 読む側にも書く側にも同じものを見せる。**
+FIELD_CONTRACTS: dict[str, str] = {
+    "atmosphere": (
+        "the mood, and only the mood. No clock, no weather-as-hour, no "
+        "objects, no place nouns."
+    ),
+    "scene": (
+        "one specific place and the time of day. Not the light, not what she "
+        "is doing, not the camera."
+    ),
+    "light": (
+        "the key and where it comes from, absolute: 'low sun from behind, "
+        "hard rim'. Never a direction of change — no 'darker', no 'brighter'. "
+        "Not the mood, not the place."
+    ),
+    "frame": (
+        "the camera and where her eyes are pointed, as one story: 'wide shot, "
+        "looking straight into the lens'. ONE crop — zoom/close/upper OR "
+        "wide/full-body, never both `wide_shot` and `close_up` in the same "
+        "frame — plus the gaze. Nothing about her hands or her clothes."
+    ),
+    "wearing": (
+        "everything ON her body and nothing else — clothes, hair, "
+        "accessories. A held prop is not worn; that belongs in beat."
+    ),
+    "beat": (
+        "ONE posture stem — sitting / standing / kneeling / crouching — plus "
+        "what the hands and the weight are doing, and anything she is holding. "
+        "NOT where she is looking: that is the frame."
+    ),
+}
+
+_CONTRACT_ORDER = ("atmosphere", "scene", "light", "frame", "wearing", "beat")
+
+
+# Some of these prompts speak TO her, so the same contract has to be sayable in
+# the second person. One source, two renderings — never two texts to keep in
+# step, which is the state that produced the disagreement in the first place.
+_TO_HER = (
+    ("where her eyes are pointed", "where your eyes are pointed"),
+    ("where she is looking", "where you are looking"),
+    ("what she is doing", "what you are doing"),
+    ("she is holding", "you are holding"),
+    ("ON her body", "ON your body"),
+    ("her hands or her clothes", "your hands or your clothes"),
+    ("the hands and the weight", "your hands and your weight"),
+)
+
+
+def contracts_block(
+    keys: Iterable[str] | None = None, *, second_person: bool = False,
+) -> str:
+    """The field contracts, worded once, for any prompt that reads or writes.
+
+    Handed to compile, weave, the still-read and her own review alike. When two
+    seats disagree about which field owns the gaze, the shot stops moving and
+    nobody reports an error — the direction simply lands in a field the
+    renderer does not read, and the showrunner repeats himself into a room
+    that has already written his words down somewhere useless.
+    """
+    names = list(keys) if keys else list(_CONTRACT_ORDER)
+    lines = [
+        "WHAT EACH PART OF THE NOTEBOOK IS "
+        "(one definition, the same for everyone who reads or writes it):",
+    ]
+    for key in names:
+        text = FIELD_CONTRACTS.get(key)
+        if not text:
+            continue
+        if second_person:
+            for a, b in _TO_HER:
+                text = text.replace(a, b)
+        lines.append(f"- {key.upper()} — {text}")
+    return "\n".join(lines)
+
+
 def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
     """Human / model facing dump."""
     a = name_a or "Muse A"

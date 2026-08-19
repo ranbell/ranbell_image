@@ -19,6 +19,7 @@ from typing import Any
 # The parts of the shot. This module writes the copy that tells a Muse what each
 # part is; `facets` owns what the parts are and the rules that keep them apart.
 from .facets import FACET_LABELS
+from .notebook import FIELD_CONTRACTS, contracts_block
 
 # Job order. Dependency order, not importance — the editor always closes.
 ROLE_ORDER: tuple[str, ...] = (
@@ -257,42 +258,42 @@ WEARING: <English. Danbooru tags with underscores, comma-separated, AT MOST 6.
 # What each field is allowed to hold is copied from the scripter's own contract
 # rather than reworded, so a restatement cannot legalise something a compile
 # could not write.
-_RESTATE_FIELDS: dict[str, tuple[str, str]] = {
-    "scene": (
-        "どこにいて、何時ごろか",
-        "<English. A short absolute phrase: one specific place, and the time of "
-        "day. Not the light, not what she is doing, not the camera.>",
-    ),
-    "light": (
-        "光がどこから来ていて、どれくらい強いか",
-        "<English. The key and where it comes from, absolute: 'low sun from "
-        "behind, hard rim'. Never a direction of change — no 'darker', no "
-        "'brighter'. Not the mood, not the place.>",
-    ),
-    "frame": (
-        "カメラの位置と、あなたの視線",
-        "<English. The camera and where your eyes are pointed, as one story: "
-        "'wide shot, looking straight into the lens'. Crop plus gaze, nothing "
-        "about your hands or your clothes.>",
-    ),
+# 日本語のラベルと、欄ごとの**書式**だけをここに置く。欄が何であるかは
+# `notebook.FIELD_CONTRACTS` が唯一の出典で、ここでは書き直さない。同じ定義を
+# 二箇所に置いたことが、視線がどこにも定着しなかった原因だった。
+_RESTATE_LABELS: dict[str, tuple[str, str]] = {
+    "scene": ("どこにいて、何時ごろか", ""),
+    "light": ("光がどこから来ていて、どれくらい強いか", ""),
+    "frame": ("カメラの位置と、あなたの視線", ""),
     "wearing": (
         "身につけているもの",
-        "<English. Danbooru tags with underscores, comma-separated, AT MOST 6. "
-        "Everything ON her body and nothing else. No prose, no slashes, no "
-        "top=/bottom= labels.>",
+        " Danbooru tags with underscores, comma-separated, AT MOST 6. "
+        "No prose, no slashes, no top=/bottom= labels.",
     ),
-    "beat": (
-        "体が何をしているか",
-        "<English. ONE posture stem — sitting / standing / kneeling / crouching "
-        "— plus what the hands and the weight are doing. Short absolute phrase, "
-        "not a paragraph. Not where you are looking; that is the frame.>",
-    ),
+    "beat": ("体が何をしているか", " Short absolute phrase, not a paragraph."),
 }
+
+
+def _restate_shape(field: str) -> str:
+    contract = FIELD_CONTRACTS.get(field, "")
+    for a, b in (
+        ("where her eyes are pointed", "where your eyes are pointed"),
+        ("where she is looking", "where you are looking"),
+        ("what she is doing", "what you are doing"),
+        ("she is holding", "you are holding"),
+        ("ON her body", "ON your body"),
+        ("her hands or her clothes", "your hands or your clothes"),
+        ("the hands and the weight", "your hands and your weight"),
+    ):
+        contract = contract.replace(a, b)
+    tail = _RESTATE_LABELS[field][1]
+    return f"<English. {contract[:1].upper()}{contract[1:]}{tail}>"
 
 
 def restate_output(field: str) -> str:
     """The contract for saying one part of the shot over from the start."""
-    label, shape = _RESTATE_FIELDS[field]
+    label = _RESTATE_LABELS[field][0]
+    shape = _restate_shape(field)
     return f"""
 書き直し — この一つの欄だけ、はじめから言い直します。
 
@@ -2687,8 +2688,9 @@ No backstory / favorite.
 PLACE: <place>
 HOUR: <time of day>
 WEARING: <clothes, hair; omit anything taken off>
-BEAT: <body action>
-FRAME: <camera / gaze>
+BEAT: <what your body is doing — one posture stem plus hands and weight, and
+      anything you are holding. NOT where you are looking.>
+FRAME: <the camera and where your eyes are pointed. One crop plus the gaze.>
 (Partner: WEARING_B / BEAT_B)
 
 PITCH: optional. Two short phrases in the SAY language split by ` | ` when a

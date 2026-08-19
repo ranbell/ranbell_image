@@ -832,3 +832,62 @@ async def test_shot_that_only_moves_frame_still_verifies_clothes(monkeypatch):
     assert "cardigan" not in (s["notebook"].get("wearing") or "").lower()
     assert any("VERIFY" in p for p in ollama.scripter_prompts)
 
+
+
+# ── 欄の契約は一つ ───────────────────────────────────────────────────────
+
+def test_everyone_who_touches_the_notebook_reads_the_same_contract():
+    """One definition, handed to every seat that reads or writes the notebook.
+
+    Measured 2026-08-19: the definition of `frame` existed in four places and
+    disagreed. compile — the one that writes the notebook every turn — said
+    only "ONE crop" and never mentioned the gaze at all, while the accurate
+    version ("Crop plus gaze. Not where you are looking; that is the frame.")
+    was reachable from exactly one call site, the restate turn.
+
+    So the showrunner's 「カメラ見て」 landed in `frame`, the old gaze stayed in
+    `beat`, and weave — never told which field owns it — took the concrete one.
+    He said it three times, the last time as a raw danbooru tag, and the board
+    did not move. Nobody was wrong; nothing agreed.
+    """
+    marker = "WHAT EACH PART OF THE NOTEBOOK IS"
+    for name in (
+        "SCRIPTER_SYSTEM",          # writes the notebook, every turn
+        "SCRIPTER_WEAVE_SYSTEM",    # reads it, every render
+        "STILL_READ_SYSTEM",        # writes it from a photo
+        "NOTEBOOK_REVIEW_SYSTEM",   # she checks it
+    ):
+        assert marker in getattr(chain, name), name
+
+
+def test_only_frame_owns_the_gaze():
+    """Two fields claiming the gaze is what froze the board — hold the split."""
+    assert "NOT where she is looking: that is the frame." in (
+        notebook.FIELD_CONTRACTS["beat"]
+    )
+    assert "where her eyes are pointed" in notebook.FIELD_CONTRACTS["frame"]
+
+    # And the split survives into the prompts, in both voices.
+    third = notebook.contracts_block()
+    second = notebook.contracts_block(second_person=True)
+    assert "NOT where she is looking" in third
+    assert "NOT where you are looking" in second
+    assert "where your eyes are pointed" in second
+
+
+def test_the_restate_shape_is_not_a_second_copy_of_the_contract():
+    """crew's restate must quote the one source, not carry its own wording.
+
+    It used to hold its own English text in `_RESTATE_FIELDS`. That copy was
+    the accurate one, which is exactly why the drift went unnoticed — the good
+    wording sat where almost nothing could read it.
+    """
+    for field, phrase in (
+        ("frame", "where your eyes are pointed"),
+        ("beat", "NOT where you are looking: that is the frame."),
+        ("wearing", "A held prop is not worn; that belongs in beat."),
+    ):
+        shape = crew.restate_output(field).splitlines()[-1]
+        assert phrase in shape, field
+        # …and the format-only tail is still appended, not lost.
+    assert "AT MOST 6" in crew.restate_output("wearing")
