@@ -1665,10 +1665,18 @@ THICKEN QUALITY, NOT INVENTORY:
 - Crop must match FRAME: wide/full-body shots do not also get close_up;
   zoom/close/upper shots do not also get wide_shot or full_body.
 
-CEILINGS, NOT QUOTAS:
-- At most 35–55 tags; craft_scene at most 140–200 words. Do not invent nouns
-  to hit a count. Do not ship a 8-tag summary of the notebook either —
-  unpack quality of what is there.
+HOW MUCH TO WRITE:
+- Tags: 35–55 is the room, not a target. Do not invent nouns to hit a count.
+- craft_scene: **180 words is the floor, 260 the ceiling.** This used to read
+  "at most 140–200 words", which is only a ceiling — and the prose came back
+  at a median of 126, under even the low end. The picture was thinner for it.
+- The prose is where the picture gets its detail. Tags name what is there;
+  the sentences say how it looks — how the cloth falls and catches light,
+  what the air in the room is doing, where the shadows land, what her face is
+  doing, how her weight sits. Every one of those is a thing the image model
+  can draw and will not draw if nobody says it.
+- Write about what the notebook already names. Length comes from looking
+  harder at the same shot, never from adding things to it.
 
 Partner shoots: tags_shared + tags_a + tags_b (never one mixed bag).
 Solo: tags only.

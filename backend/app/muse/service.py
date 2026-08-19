@@ -2862,6 +2862,20 @@ async def _run_duet_scripter(
         and not _meta_note.startswith("REPAIR")
         and not _meta_note.startswith("FOLD")
         and (bool(open_before) or had_shot)
+        # ここを「画が動かなかったときだけ」に絞ろうとして、戻した。
+        # `test_shot_that_only_moves_frame_still_verifies_clothes` が捕まえた:
+        #
+        #     ノート  wearing: sailor uniform, cardigan / frame: close, upper
+        #     監督    「カーディガン脱いで。引いて全身に戻して」
+        #     1回目   frame は直したが cardigan を残した ← shot_patched は True
+        #     VERIFY  cardigan を落とした
+        #
+        # **repair とは役割が違う。** repair は clerk が名指しした欄が書かれた
+        # かどうかしか見ないので、「書かれたが中身が違う」を拾えない。二つに
+        # 分かれた指示の片方だけを実行する形は、この回だけが網になる。
+        #
+        # 呼び出しの本数を減らしたいのは事実（実撮影で後半が 90 秒超）。ただ
+        # 減らすならここではない。
         and (
             (intent in ("casual", "") and not shot_patched)
             or intent in ("shot", "mixed")

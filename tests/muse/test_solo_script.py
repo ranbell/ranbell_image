@@ -915,7 +915,12 @@ def test_the_restate_shape_is_not_a_second_copy_of_the_contract():
         prompt = crew.restate_output(field)
         assert phrase in prompt, field
         # …and the format-only tail is still appended, not lost.
-    assert "AT MOST 6" in crew.restate_output("wearing")
+    # 上限は外した。実撮影で「衣装はそのままで」と言われたターンの言い直しが
+    # 数を守るために `hair ornament` を落とした。書式の指示は残っている。
+    w = crew.restate_output("wearing")
+    assert "AT MOST" not in w
+    assert "a garment left out is a garment she loses" in w
+    assert "underscores" in w
 
 
 # ── なぜその欄をそう書いたか ──────────────────────────────────────────────

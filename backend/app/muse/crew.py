@@ -243,11 +243,13 @@ OUTPUT FORMAT — exactly two lines, nothing else, no explanation, no headings:
 SAY: <in character, natural Japanese, one or two sentences — tell them what you
      have on now, plainly, the way anyone answers after changing. No tags in
      here, no emoji.>
-WEARING: <English. Danbooru tags with underscores, comma-separated, AT MOST 6.
-         Everything ON her body and nothing else: clothes, hats, hair
-         accessories, shoes. Never the place, the pose, the light, the camera,
-         or anything she is only holding. No prose, no "and", no slashes,
-         no top=/bottom= labels — just the garments.>
+WEARING: <English. Danbooru tags with underscores, comma-separated.
+         **Everything ON her body — name all of it.** Clothes, hats, hair
+         accessories, gloves, shoes. A costume can easily run past ten pieces;
+         list them. Do not trim to keep the line short: a garment you leave
+         out is a garment she loses. Never the place, the pose, the light, the
+         camera, or anything she is only holding. No prose, no "and", no
+         slashes, no top=/bottom= labels — just the garments.>
 """.strip()
 
 # One field, said over from the start. 衣装部屋 was the first of these and the
@@ -267,7 +269,16 @@ _RESTATE_LABELS: dict[str, tuple[str, str]] = {
     "frame": ("カメラの位置と、あなたの視線", ""),
     "wearing": (
         "身につけているもの",
-        " Danbooru tags with underscores, comma-separated, AT MOST 6. "
+        # 上限を書いていたら、上限を守るために装備が消えた。実撮影
+        # （コミケ・2026-08-20）で、監督が「衣装はそのままで」と言った
+        # ターンの言い直しが
+        #     pink frilly costume, hair ornament, ribbon, frills
+        #   → pink_frilly_costume, ribbon, frills
+        # と `hair ornament` を落とした。理由には「衣装を維持したため」と
+        # 書いてあった。**数を守って中身を失っている。**
+        " Danbooru tags with underscores, comma-separated. Name everything "
+        "she has on — a costume can easily run past ten pieces. Do not trim "
+        "to keep it short: a garment left out is a garment she loses. "
         "No prose, no slashes, no top=/bottom= labels.",
     ),
     "beat": ("体が何をしているか", " Short absolute phrase, not a paragraph."),
