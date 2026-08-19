@@ -252,3 +252,48 @@ def test_the_wardrobe_turn_asks_for_two_lines_and_no_shot():
     # Nothing else about the shot is hers this turn.
     assert "TAGS:" not in system
     assert "COSTUME:" not in system
+
+
+# ── striking one garment must not poison the whole session ──────────────────
+
+def test_a_struck_modifier_does_not_ban_everything_that_shares_the_word():
+    """Taking off a white blouse must leave her white shirt — and her hair.
+
+    Measured on a real session (cake, 2026-08-19): the struck list came back
+    ``['outfit', 'stylish', 'stylish_outfit', 'white', 'white_blouse',
+    'blouse', 'stylish_blouse']`` because `wearing_tokens` splits a garment
+    phrase into its words. The old matcher then tested every component, so a
+    struck `white` blocked `white_shirt`, `white_socks` and `white_hair` for
+    the rest of the shoot. A modifier is not the thing that came off.
+    """
+    session: dict = {}
+    notebook.record_struck_from_wearing(
+        session, prev_wearing="stylish white blouse, blue skirt",
+        new_wearing="blue skirt",
+    )
+    struck = {str(s) for s in session["struck"]}
+    # The explosion itself is unchanged — it is the matcher that must be sane.
+    assert "white" in struck and "blouse" in struck
+
+    # The garment that came off, and things named after it, stay out.
+    assert notebook.tag_mentions_struck("white_blouse", struck)
+    assert notebook.tag_mentions_struck("blouse", struck)
+    assert notebook.tag_mentions_struck("silk_blouse", struck)
+
+    # Everything else that merely shares a word comes back.
+    for tag in ("white_shirt", "white_socks", "white_hair", "white_dress"):
+        assert not notebook.tag_mentions_struck(tag, struck), tag
+
+
+def test_the_wardrobe_lifts_modifiers_the_block_rule_would_never_reach():
+    """Freeing is generous on purpose — the two directions are not symmetric.
+
+    Blocking wide is destructive and freeing wide is recoverable, so the button
+    matches on any word part. Without this, `white` and `stylish` would stay
+    struck forever: no head-noun rule can reach a modifier.
+    """
+    assert notebook.garment_lifts_struck("white blouse", "white")
+    assert notebook.garment_lifts_struck("white blouse", "blouse")
+    assert notebook.garment_lifts_struck("stylish white blouse", "stylish")
+    # Still not a free-for-all: an unrelated garment lifts nothing.
+    assert not notebook.garment_lifts_struck("blue skirt", "blouse")

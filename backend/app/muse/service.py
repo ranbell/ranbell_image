@@ -4096,10 +4096,12 @@ async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         # nobody asked for: she could name a white blouse here all day and the
         # weave would drop it back out again. Pressing 衣装部屋 has to be able
         # to fix that, or there is no way to fix it at all.
-        # Freed by exactly the rule that blocks: if a struck entry would keep
-        # one of the garments she just named out of the bag, it goes. Using the
-        # same test in both directions is what closes the gap — a ban that
-        # blocks by word part has to be liftable by word part too.
+        # Freed generously, on any word part. This is deliberately NOT the rule
+        # that blocks (`tag_mentions_struck`, which only matches a head noun):
+        # blocking wide is destructive, freeing wide is recoverable. Striking a
+        # "stylish white blouse" leaves `white` and `stylish` struck, and no
+        # narrow rule would ever lift those — which is the stuck state this
+        # button exists to undo.
         worn_items = [
             w.strip() for w in re.split(r"[,，、]", str(nb.get("wearing") or ""))
             if w.strip()
@@ -4107,9 +4109,7 @@ async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         freed = [
             s for s in (session.get("struck") or [])
             if any(
-                notebook_mod.tag_mentions_struck(
-                    w, {str(s).lower().replace(" ", "_")},
-                )
+                notebook_mod.garment_lifts_struck(w, str(s))
                 for w in worn_items
             )
         ]

@@ -442,9 +442,44 @@ def tag_mentions_struck(tag: str, struck: set[str]) -> bool:
     for s in struck:
         if len(s) < 3:
             continue
-        if bare == f"no_{s}" or bare.endswith(f"_{s}") or s in bare.split("_"):
+        # The struck word has to BE the tag, or be its head noun — the last
+        # component. English compounds put the head on the right, so `blouse`
+        # rules out `white_blouse`, and `hat` rules out `straw_hat`.
+        #
+        # Matching any component (`s in bare.split("_")`) was the old rule and
+        # it poisoned whole sessions. `wearing_tokens` splits a garment phrase
+        # into its words, so taking off one "stylish white blouse" struck
+        # `blouse`, `white` AND `stylish` — and struck `white` then blocked
+        # `white_shirt`, `white_socks`, and her `white_hair`. A modifier is not
+        # the thing that was removed.
+        if bare == f"no_{s}" or bare.endswith(f"_{s}"):
             return True
     return False
+
+
+def garment_lifts_struck(garment: str, struck_token: str) -> bool:
+    """Does naming this garment lift this struck entry? Deliberately generous.
+
+    The mirror of :func:`tag_mentions_struck`, and **not the same rule** — the
+    two directions are not symmetric:
+
+    * blocking is destructive, so it matches narrowly (head noun only);
+    * freeing is recoverable, so it matches on any word part.
+
+    Taking off a "stylish white blouse" strikes `blouse`, `white`, `stylish`.
+    Blocking on `white` would rule out `white_shirt` and her `white_hair`, so
+    it must not. But once she is dressed in a `white blouse` again, every one
+    of those entries should go — including the modifiers, which no narrow rule
+    would ever reach. Leaving `white` struck forever is the failure the
+    wardrobe button exists to undo.
+    """
+    from .identity import bare_tag
+
+    bare = bare_tag(garment) or str(garment or "").strip().lower().replace(" ", "_")
+    s = str(struck_token or "").strip().lower().replace(" ", "_")
+    if not bare or len(s) < 3:
+        return False
+    return bare == s or bare.endswith(f"_{s}") or s in bare.split("_")
 
 
 _QUALITY_TAG_KEEP = {
