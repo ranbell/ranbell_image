@@ -2751,10 +2751,23 @@ async def _call_duet_scripter(
         # and handing it her voice as well is how a stale self-description
         # outranked him before (see `card` above).
         muse_says=_last_lead_say(session) if mode == "weave" else "",
+        # VERIFY はもう note を載せない。**同じ一言をもう一度読むだけの
+        # ターンには、説明が要らなかった。** 4ケース × 5回:
+        #
+        #     note あり 1,004字  20/20
+        #     最小の一言           18/20
+        #     note なし          20/20
+        #
+        # 中途半端に「もう一度読め」と言う条件が一番悪い。契約が 2,327字に
+        # なって、note がやっていた仕事（脱がせ方・姿勢ステム・視線の帰属）
+        # は既に契約側にある。
+        #
+        # FOLD は逆で、note を外すと 95% → 75% に落ちる。折り込みは彼女の
+        # カードという別の材料を扱う特殊なターンなので、**何をする回なのか**
+        # を言わないと成立しない（手を足すのに 3/5 失敗した）。
         directive=(
             repair if repair
             else chain.SCRIPTER_FOLD_NOTE if fold
-            else chain.SCRIPTER_VERIFY_NOTE if verify
             else ""
         ),
     )

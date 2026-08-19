@@ -393,7 +393,8 @@ async def test_verify_recovers_casual_misread_of_picture_change():
                     # Total freeze: casual, no vibe/open/SHOT — triggers VERIFY.
                     text = _scripter_block(intent="casual")
                 else:
-                    assert "VERIFY" in str(prompt)
+                    # 2回目は note を載せない（測って外した）。この回であることは
+                    # 呼び出しの順番で分かる。
                     text = _scripter_block(
                         intent="shot",
                         scene="sandy beach shoreline",

@@ -486,7 +486,8 @@ async def test_empty_shot_patch_still_verifies(monkeypatch):
                 if self._n == 1:
                     text = _scripter_block(intent="shot")
                 else:
-                    assert "VERIFY" in str(prompt)
+                    # 2回目は note を載せない（測って外した）。この回であることは
+                    # 呼び出しの順番で分かる。
                     text = _scripter_block(
                         intent="shot",
                         scene="night classroom by the window",
@@ -516,7 +517,9 @@ async def test_empty_shot_patch_still_verifies(monkeypatch):
     assert "cardigan" in (nb.get("wearing") or "").lower()
     assert "standing" in (nb.get("beat") or "").lower()
     assert "hat" not in notebook.wearing_tokens(nb.get("wearing") or "")
-    assert any("VERIFY" in p for p in ollama.scripter_prompts)
+    # 2回目が走ったこと自体を見る。VERIFY note は測って外した
+    # （note あり 20/20 / note なし 20/20・4ケース × 5回）。
+    assert len(ollama.scripter_prompts) >= 2
 
 
 @pytest.mark.asyncio
@@ -741,7 +744,8 @@ async def test_shot_that_restates_scene_still_verifies_clothes(monkeypatch):
                         frame="wide shot",
                     )
                 else:
-                    assert "VERIFY" in str(prompt)
+                    # 2回目は note を載せない（測って外した）。この回であることは
+                    # 呼び出しの順番で分かる。
                     text = _scripter_block(
                         intent="shot",
                         scene="rooftop at dusk",
@@ -765,7 +769,9 @@ async def test_shot_that_restates_scene_still_verifies_clothes(monkeypatch):
     })
     await service.post_duet_chat(db, ollama, s, "カーディガン羽織って")
     assert "cardigan" in (s["notebook"].get("wearing") or "").lower()
-    assert any("VERIFY" in p for p in ollama.scripter_prompts)
+    # 2回目が走ったこと自体を見る。VERIFY note は測って外した
+    # （note あり 20/20 / note なし 20/20・4ケース × 5回）。
+    assert len(ollama.scripter_prompts) >= 2
 
 
 @pytest.mark.asyncio
@@ -806,7 +812,8 @@ async def test_shot_that_only_moves_frame_still_verifies_clothes(monkeypatch):
                         frame="wide full body",
                     )
                 else:
-                    assert "VERIFY" in str(prompt)
+                    # 2回目は note を載せない（測って外した）。この回であることは
+                    # 呼び出しの順番で分かる。
                     text = _scripter_block(
                         intent="shot",
                         scene="night classroom",
@@ -830,7 +837,9 @@ async def test_shot_that_only_moves_frame_still_verifies_clothes(monkeypatch):
     })
     await service.post_duet_chat(db, ollama, s, "カーディガン脱いで。引いて全身に戻して")
     assert "cardigan" not in (s["notebook"].get("wearing") or "").lower()
-    assert any("VERIFY" in p for p in ollama.scripter_prompts)
+    # 2回目が走ったこと自体を見る。VERIFY note は測って外した
+    # （note あり 20/20 / note なし 20/20・4ケース × 5回）。
+    assert len(ollama.scripter_prompts) >= 2
 
 
 
@@ -1075,3 +1084,23 @@ def test_a_quiet_turn_says_nothing_about_proposals():
     session = {"inputs": {"locale": "ja"}, "notebook": {}, "chat": []}
     prompt = service._duet_user_prompt(session, "いいね", prep=False, intent="casual")
     assert "THE STUDIO NOTICED" not in prompt
+
+
+def test_the_verify_pass_carries_no_note_and_the_fold_pass_does():
+    """測って決めた非対称。どちらも4ケース × 5回。
+
+        VERIFY   note あり 20/20   最小 18/20   note なし 20/20
+        FOLD     note あり 19/20   最小 18/20   note なし 15/20
+
+    VERIFY は同じ一言をもう一度読むだけなので、説明が要らない。中途半端に
+    「もう一度読め」と言う条件が一番悪かった。FOLD は彼女のカードという別の
+    材料を扱う回なので、何をする回なのかを言わないと折り込み自体ができない
+    （手を足すのに 3/5 失敗した）。
+
+    `SCRIPTER_VERIFY_NOTE` は消していない。要ると分かれば戻すだけ。
+    """
+    import inspect
+    src = inspect.getsource(service._call_duet_scripter)
+    assert "SCRIPTER_FOLD_NOTE if fold" in src
+    assert "SCRIPTER_VERIFY_NOTE" not in src.split("directive=")[1][:400]
+    assert len(chain.SCRIPTER_VERIFY_NOTE) > 900   # 残してある
