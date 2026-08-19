@@ -997,13 +997,25 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "tags_a": {"type": "string"},
         "tags_b": {"type": "string"},
         "craft_scene": {"type": "string"},
-        # なぜその欄をそう書いたか、欄ごとに一行。総監督が判断を読めるように
-        # なると同時に、書く側が自分の選択を言葉にすることになる。視線が
-        # ターンによって frame にも beat にも行っていた 8/19 の実測が発端。
-        "why": {
-            "type": "object",
-            "properties": {k: {"type": "string"} for k in SHOT_KEYS},
-        },
+        # `why` はここに置いてはいけない。**理由の枠が仕事の枠を食う。**
+        # 8/19 に実測（`private/muse/crew_lab/why_regression.py`）:
+        #
+        #     why あり  欄を書いた 0/9
+        #     why なし  欄を書いた 9/9
+        #
+        # 出てきたのはこういう応答だった:
+        #
+        #     {"intent":"shot",
+        #      "why":{"beat":"「ベンチに座って」という指示に基づき
+        #             posture stem を sitting に設定。"}}
+        #
+        # beat を sitting にしたと**説明して、beat を書いていない**。仕事を
+        # 記述することが仕事の代わりになっている。言い方を強めた条件
+        # （「値が仕事、理由はその註」）でも 0/9 で、**言葉では直らない**。
+        # 枠があること自体が原因。
+        #
+        # 理由はラベル形式の `WHY_*` と言い直し（`parse_restate`）で採る。
+        # そちらは値と同じ行の並びに出るので、置き換えが起きない。
     },
     "required": ["intent"],
 }

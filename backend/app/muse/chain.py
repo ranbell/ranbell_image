@@ -1375,8 +1375,10 @@ SAY WHY, FIELD BY FIELD:
   render does not read from. The reason tells him which.
 - And it is for you. A field you cannot give a reason for is one you probably
   should not be rewriting this turn. Writing the reason first is the check.
-- In JSON: the `why` object, keyed by field name. In labelled form:
-  `WHY_FRAME:` / `WHY_BEAT:` lines beside the values.
+- Write it as a `WHY_FRAME:` / `WHY_BEAT:` line beside the value it explains.
+- The value is the work; the reason is a note on the work. A reason for a field
+  whose value you did not write is a turn that did nothing — the notebook is
+  unchanged and the showrunner has to say his line again.
 
 RULES:
 - Write ABSOLUTE finished values, never "more" / "less" / "remove X" alone.

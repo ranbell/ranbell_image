@@ -902,7 +902,29 @@ def test_the_scripter_is_asked_to_say_why_it_wrote_each_field():
     assert "WHY_FRAME" in text
     # The reason has to point at what was said, not read the value back.
     assert "Point at what was said" in text
-    assert "why" in notebook.SCRIPTER_FORMAT_SCHEMA["properties"]
+
+
+def test_why_is_never_a_slot_in_the_json_schema():
+    """A reason slot in the schema eats the job it was supposed to annotate.
+
+    Measured 8/19 against the live model, three cases x three runs each:
+
+        why in the schema   wrote a field 0/9
+        why out of it       wrote a field 9/9
+
+    The model answered `{"intent":"shot","why":{"beat":"…set posture stem to
+    sitting"}}` — describing the edit instead of making it. Strengthening the
+    wording ("the value IS the work") did not move it: still 0/9. The slot
+    itself is the cause, so the reason is collected from labelled `WHY_*`
+    lines, which sit in the same list as the values and cannot replace them.
+    """
+    assert "why" not in notebook.SCRIPTER_FORMAT_SCHEMA["properties"]
+    # …but the parser still reads one when the model offers it.
+    parsed = notebook.parse_scripter(
+        "INTENT: shot\nBEAT: sitting\nWHY_BEAT: 座ってと言われた"
+    )
+    assert parsed["patch"]["beat"] == "sitting"
+    assert parsed["why"]["beat"] == "座ってと言われた"
 
 
 def test_a_reason_is_parsed_from_json_and_from_labels_alike():
