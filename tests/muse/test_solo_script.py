@@ -857,7 +857,12 @@ def test_everyone_who_touches_the_notebook_reads_the_same_contract():
         "NOTEBOOK_REVIEW_SYSTEM",   # she checks it
     ):
         assert marker in getattr(chain, name), name
-    assert marker in chain.build_scripter_system(), "compile が読む契約"
+    # compile が実際に読む契約は `SCRIPTER_BLOCKS` の組み立てで、共通ブロック
+    # の見出しは持たない。持っているべきは**中身**のほう。
+    built = chain.build_scripter_system()
+    for field in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):
+        assert field in built, field
+    assert "not where she is looking" in built.lower()
 
     # weave には渡さない。**読む側には効かなかった。** weave パック
     # (6試験 x 5回) で測ると、契約を抜いたほうが良い:
