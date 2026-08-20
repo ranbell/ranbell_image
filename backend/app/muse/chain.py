@@ -1379,9 +1379,14 @@ hair — a hairstyle change is written in WEARING.
 # scripter には無かった。禁止ではなく、置き場を作る。
 SCRIPTER_PROPOSE = """
 Sometimes the shot suggests something nobody has decided yet — an object the
-talk keeps circling, something she would plausibly be holding, a light that
-would make the moment. That is worth saying. It is not yours to put in the
-notebook.
+talk keeps circling, a light that would make the moment. That is worth saying.
+It is not yours to put in the notebook.
+
+**What the director says is not a proposal. He said it; it is decided.** That
+holds when he brings in something the notebook never had — a cup, a lamp, a
+sudden movement. New does not mean undecided. The line is not what the thing
+is, it is whose thought it came from: his words go into the fields, and
+PROPOSE is only ever for what occurred to you.
 
 Write it on a PROPOSE line instead. The notebook keeps only what has been
 decided; PROPOSE is where you offer what you would add. The director picks it
