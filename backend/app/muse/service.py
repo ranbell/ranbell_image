@@ -5694,6 +5694,17 @@ async def request_board(
 
     inputs = _inputs(session)
     sid = session["session_id"]
+    # 同じ台本でもう一度押したら、引き直す。シードを撮影の間ずっと保持する
+    # のは「二つのテイクの差が言葉だけになる」ためで、**台本が動いていない
+    # ときにまで同じ絵を返す理由は無い**。総監督が実撮影で踏んだ:
+    # プロンプトが変わらないと再撮影ができない。
+    #
+    # 判定は台本の一致だけ。画が気に入らなくて押し直したのか、言い直した
+    # 結果を見たいのかは、台本が動いたかどうかで分かる。
+    prev = session.get("board") or {}
+    if prev.get("images") and str(prev.get("prompt") or "") == prompt:
+        logger.info("[muse] same script, same seed — rerolling")
+        session["seed"] = 0
     seed = session_seed(session)
     locale = str(inputs.get("locale") or "ja")
 

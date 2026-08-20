@@ -1109,3 +1109,21 @@ def test_the_verify_pass_carries_no_note_and_the_fold_pass_does():
     assert "SCRIPTER_FOLD_NOTE if fold" in src
     assert "SCRIPTER_VERIFY_NOTE" not in src.split("directive=")[1][:400]
     assert len(chain.SCRIPTER_VERIFY_NOTE) > 900   # 残してある
+
+
+def test_pressing_render_again_on_an_unchanged_script_rerolls_the_seed():
+    """台本が動いていないのに同じ絵を返しても、誰の役にも立たない。
+
+    シードを撮影の間ずっと保持するのは「二つのテイクの差が言葉だけになる」
+    ため（`session_seed` の由来）。だが総監督が実撮影で踏んだとおり、**台本
+    が一字も動いていないときは再撮影そのものができなくなる**。
+
+    判定は台本の一致だけで足りる。言い直した結果を見たいのか、同じ画を撮り
+    直したいのかは、台本が動いたかどうかに出る。
+    """
+    import inspect
+    src = inspect.getsource(service.request_board)
+    assert 'str(prev.get("prompt") or "") == prompt' in src
+    assert 'session["seed"] = 0' in src
+    # 引き直しの条件は「前の一枚が実際に出ている」こと。取り消した回は数えない。
+    assert 'prev.get("images")' in src
