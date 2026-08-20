@@ -23,6 +23,18 @@ SHOT_KEYS = (
     # PLAN line that owns the intent, and 主演撮り had neither — 「逆光にして」
     # could only land inside scene or atmosphere, both of which are rewritten
     # for other reasons, so it was gone again a turn later.
+    # 彼女以外に画面に写っているもの。背後の建物、周りのエキストラ、置かれた
+    # 小道具。**現場ではこれを BG と呼ぶ**（Background の略で、無線に乗る）。
+    #
+    # 無かった間、監督が「後ろにあの建物」「周りに他のレイヤーさん」と何度
+    # 言っても、置き場が無いので絵から消えていた。実撮影（コミケ）では監督が
+    # 場所を4回言い、撮影3本のうち2本に建物も人混みも入らなかった。
+    #
+    # 名前は測って決めた。7本 × 10回で `set` `backdrop` `scenery` はどれも
+    # 届かず、`BG` だけが届いた（44% → 68%）。`backdrop` はこのライブラリに
+    # 1枚も無い語で、`set_dressing` も `extras` も `mob` も 0 枚。
+    # **現場で実際に使われている語だけが通った。**
+    "bg",
     "light",
     "frame",
     "wearing",
@@ -48,6 +60,7 @@ def blank(partner: bool = False) -> dict[str, Any]:
     nb = {
         "atmosphere": "",
         "scene": "",
+        "bg": "",
         "light": "",
         "frame": "",
         "wearing": "",
@@ -115,6 +128,13 @@ FIELD_CONTRACTS: dict[str, str] = {
         "one specific place and the time of day. Not the light, not what she "
         "is doing, not the camera."
     ),
+    "bg": (
+        "what is in the picture besides her — the background actors (the "
+        "extras, the crowd), the buildings, the set dressing. On set this is "
+        "called BG. Not what she wears and not what she is holding: those are "
+        "hers. How blurred it is is not here either — that is depth of field, "
+        "and it belongs to FRAME with the rest of the camera."
+    ),
     "light": (
         "the key and where it comes from, absolute: 'low sun from behind, "
         "hard rim'. Never a direction of change — no 'darker', no 'brighter'. "
@@ -137,7 +157,9 @@ FIELD_CONTRACTS: dict[str, str] = {
     ),
 }
 
-_CONTRACT_ORDER = ("atmosphere", "scene", "light", "frame", "wearing", "beat")
+_CONTRACT_ORDER = (
+    "atmosphere", "scene", "bg", "light", "frame", "wearing", "beat",
+)
 
 
 # Some of these prompts speak TO her, so the same contract has to be sayable in
@@ -187,6 +209,7 @@ def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
     lines = [
         f"ATMOSPHERE:\n{str(nb.get('atmosphere') or '').strip() or '(empty)'}",
         f"SCENE:\n{str(nb.get('scene') or '').strip() or '(empty)'}",
+        f"BG:\n{str(nb.get('bg') or '').strip() or '(empty)'}",
         f"LIGHT:\n{str(nb.get('light') or '').strip() or '(empty)'}",
         f"FRAME:\n{str(nb.get('frame') or '').strip() or '(empty)'}",
         f"{a} WEARING:\n{str(nb.get('wearing') or '').strip() or '(empty)'}",
@@ -252,8 +275,11 @@ FRAME_MAX_CHARS = 160
 WEARING_MAX_CHARS = 240
 BEAT_MAX_CHARS = 240
 
+BG_MAX_CHARS = 240
+
 _SHOT_FIELD_CAPS: dict[str, int] = {
     "scene": SCENE_MAX_CHARS,
+    "bg": BG_MAX_CHARS,
     "atmosphere": ATMOSPHERE_MAX_CHARS,
     "light": LIGHT_MAX_CHARS,
     "frame": FRAME_MAX_CHARS,
@@ -994,6 +1020,7 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "intent": {"type": "string", "enum": ["casual", "shot", "mixed", "recall"]},
         "atmosphere": {"type": "string"},
         "scene": {"type": "string"},
+        "bg": {"type": "string"},
         "light": {"type": "string"},
         "frame": {"type": "string"},
         "wearing": {"type": "string"},
@@ -1273,22 +1300,12 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         if x.strip() and x.strip().lower() not in ("none", "なし", "-")
     }
 
-    key_map = {
-        "atmosphere": "ATMOSPHERE",
-        "scene": "SCENE",
-        "light": "LIGHT",
-        "frame": "FRAME",
-        "wearing": "WEARING",
-        # The label was in `_FIELD_RE` and in the JSON schema but never in this
-        # table, so a scripter that answered the contract in labelled form —
-        # every turn that carries an image, and every JSON parse that falls
-        # back — had its removal silently dropped on the floor.
-        "wearing_drop": "WEARING_DROP",
-        "beat": "BEAT",
-        "wearing_b": "WEARING_B",
-        "beat_b": "BEAT_B",
-        "vibe": "VIBE",
-    }
+    # `SHOT_KEYS` が唯一の出典。ここに書き忘れると値が黙って捨てられる —
+    # `wearing_drop` が実際にそうなっていて、ラベル形式で答えたターン（画像が
+    # 付く回と、JSON パースが落ちた回の全部）で脱衣が床に落ちていた。
+    key_map = {k: k.upper() for k in SHOT_KEYS}
+    key_map["wearing_drop"] = "WEARING_DROP"
+    key_map["vibe"] = "VIBE"
     why_raw = {
         key: fields.get(f"WHY_{key.upper()}", "")
         for key in SHOT_KEYS

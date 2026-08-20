@@ -1181,3 +1181,44 @@ def test_the_rewrite_log_keeps_a_whole_shoot():
     assert len(log) == notebook.REWRITE_LOG_MAX
     # 古いほうから捨てる。最後の一件は最新であること。
     assert log[-1]["changed"]["beat"]["after"] == "pose 80"
+
+
+def test_the_notebook_has_somewhere_for_what_is_behind_her():
+    """BG —— 彼女以外に画面に写っているもの。無いと絵から消える。
+
+    実撮影（コミケ・2026-08-20）で監督は場所を4回、背景を3回頼んだのに、
+    撮影3本のうち2本に建物も人混みも入らなかった。6欄のどこにも置き場が
+    無かったから。
+
+    名前は測って決めた（7本 × 10回）。`set` `backdrop` `scenery` はどれも
+    届かず、現場の略語 `BG` だけが届いた（44% → 68%）。`backdrop` は
+    このライブラリに1枚も無い語で、`set_dressing` も `extras` も `mob` も
+    0 枚。**現場で実際に使われている語だけが通った。**
+    """
+    assert "bg" in notebook.SHOT_KEYS
+    assert "bg" in notebook.blank()
+    assert "BG:" in notebook.render(notebook.blank())
+    assert "bg" in notebook.scripter_format_schema(False)["properties"]
+    assert notebook._FIELD_RE.match("BG: a crowd of cosplayers")
+    assert notebook.parse_scripter(
+        '{"intent":"shot","bg":"a crowd"}')["patch"] == {"bg": "a crowd"}
+
+    contract = notebook.FIELD_CONTRACTS["bg"]
+    assert "background actors" in contract      # 人はエキストラ
+    assert "set dressing" in contract           # 物は飾り込み
+    # ボケはカメラの話。ここに入れない（現場では Shallow DoF）。
+    assert "depth of field" in contract and "FRAME" in contract
+
+
+def test_the_label_table_comes_from_shot_keys():
+    """欄名の出典は一つ。書き忘れると値が黙って捨てられる。
+
+    `wearing_drop` が実際にそうなっていた —— `_FIELD_RE` と JSON schema には
+    あるのに `key_map` に無くて、ラベル形式で答えたターン（画像が付く回と、
+    JSON パースが落ちた回の全部）で脱衣が床に落ちていた。
+    """
+    parsed = notebook.parse_scripter(
+        "INTENT: shot\nBG: a crowd of cosplayers\nWEARING_DROP: coat"
+    )
+    assert parsed["patch"]["bg"] == "a crowd of cosplayers"
+    assert parsed["patch"]["wearing_drop"] == "coat"

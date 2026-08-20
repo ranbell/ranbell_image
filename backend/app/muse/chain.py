@@ -1312,6 +1312,7 @@ write the notebook fields over with their new finished values.
 
 ATMOSPHERE  the mood
 SCENE       the place and the time of day
+BG          what is in the picture besides her
 LIGHT       the key and where it comes from
 FRAME       the camera, and where her eyes are pointed
 WEARING     what is on her body
