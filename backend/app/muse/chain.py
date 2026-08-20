@@ -1317,12 +1317,13 @@ FRAME       the camera, and where her eyes are pointed
 WEARING     what is on her body
 BEAT        what her body is doing — not where she is looking
 
-Answer with the fields you changed, one per line, English values:
+Return one JSON object holding only the fields you changed, with English
+values. A field you leave out is a field that stays as it is — that is how you
+say "unchanged", and the only way. Never write "NONE", "(empty)", "unchanged"
+or the field's own name into a value; those are not values, and the notebook
+will hold them as if they were.
 
-  FRAME: ...
-  BEAT: ...
-
-Nothing changed? Answer: NONE
+Changed nothing at all? Return the object with no fields in it.
 """.strip()
 
 # t4 / t5 / t26 はどれも同じ形で落ちた。新しい細部だけを書いて、姿勢が消える:
@@ -1448,6 +1449,45 @@ line that leaves her standing somewhere new is `shot`. A question about how
 last week's take felt is `recall`, even when it names clothes or a place.
 """.strip()
 
+# intent のうち、**こちらで判定できないのは recall だけ**。
+#
+# shot / mixed / casual は「欄にペンが入ったか」で分かる —— patch を見れば
+# 済むので、`_run_duet_scripter` が導出している。だが recall は欄が動かない
+# 点で casual と区別がつかない。**空という結果が二つの意味を持つ。**
+#
+# 記録係と話して出た整理（`private/muse/crew_lab/talks/`）:
+#
+#   > 「どの欄にもペンが入っていない」という状態には、「過去への参照」と
+#   > 「単なる雑談」という二つの異なる意味が混在している。JSON の中身だけを
+#   > 見ている側からすれば、どちらも空の結果としてしか現れない。
+#   > …指示書に追加すべきなのは、空欄の状態に二つの意味があること、
+#   > そしてそのうちの一方をどう識別するかだけ。
+#
+# **これも既定には入れていない。足して測ったら効かなかった。**
+#
+#   recall なし   intent はほぼ recall、ただし書式は安定
+#   recall あり   intent はほぼ recall、そのうえ書式が崩れた
+#                 （「教室に移ろう」で scene を書かず propose に逃がす、
+#                   空文字を並べる）
+#
+# 4つのうち1つだけ名前を挙げて説明したので、**`recall` の存在感が上がって
+# 引き寄せた**のだと思われる。4つ全部を説明した版も外している（intent は
+# 68→93% に上がるが、ノートが 96→86.7%、服の欄は 88→48%）。
+#
+# 本人の弁:「意味の解釈に全力を出しすぎて、服の情報が背景に追いやられた」。
+# 総監督の見立て:「彼の言うように依頼が重すぎるかもね」。
+#
+# intent は書かせない。shot/casual は patch から導き（`_run_duet_scripter`）、
+# recall は `classify_intent` の clerk が別の小さい呼び出しで拾う（実測 3/3）。
+# **会話で正しい整理に辿り着いても、それを指示書に足すのが得とは限らない。**
+SCRIPTER_RECALL = """
+One of the four is not something the room can work out for itself. `recall` is
+the director asking about an earlier shoot —「この間のやつ覚えてる？」
+「前回どうだった？」— not about the picture in front of you. Nothing in the
+notebook moves, which is exactly what small talk looks like too, so say
+`recall` and the room knows to look back instead of just chatting.
+""".strip()
+
 SCRIPTER_BLOCKS: dict[str, str] = {
     "base": SCRIPTER_BASE,
     "intent": SCRIPTER_INTENT,
@@ -1456,6 +1496,7 @@ SCRIPTER_BLOCKS: dict[str, str] = {
     "scene": SCRIPTER_SCENE,
     "solo": SCRIPTER_SOLO,
     "decide": SCRIPTER_DECIDE,
+    "recall": SCRIPTER_RECALL,
     "propose": SCRIPTER_PROPOSE,
 }
 
@@ -2002,8 +2043,12 @@ async def run_scripter(
             ) if images else "",
             str(directive).strip() if str(directive or "").strip() else "",
             f"SHOWRUNNER'S LATEST LINE:\n{note.strip()}",
-            "Partner Muse sections wearing_b/beat_b apply." if partner else
-            "Solo shoot — leave wearing_b and beat_b unused.",
+            # ソロのときは何も言わない。`scripter_format_schema(partner)` が
+            # `wearing_b` / `beat_b` を渡していないので、**使うなと言う相手が
+            # いない**。無い欄について注意されると、モデルはその欄を探す:
+            # 実際に「"bg": "NONE/Unchanged value check: Not mentioned…"」と
+            # 値の代わりに存在確認を書いた回があった。
+            "Partner Muse sections wearing_b/beat_b apply." if partner else "",
             "Return JSON only. Do not emit tags or craft_scene.",
         ] if b.strip())
 
@@ -2035,7 +2080,7 @@ async def run_scripter(
                 raw = await gen(
                     prompt, model=model, options=options,
                     system=system, think=False,
-                    fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
+                    fmt=notebook_mod.scripter_format_schema(partner),
                 )
             except TypeError:
                 raw = await gen(
@@ -2085,7 +2130,7 @@ async def run_scripter(
             raw2 = await gen(
                 repair_prompt, model=model, options=options,
                 system=system, think=False,
-                fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA,
+                fmt=notebook_mod.scripter_format_schema(partner),
             )
         except TypeError:
             raw2 = await gen(

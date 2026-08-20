@@ -1127,3 +1127,31 @@ def test_pressing_render_again_on_an_unchanged_script_rerolls_the_seed():
     assert 'session["seed"] = 0' in src
     # 引き直しの条件は「前の一枚が実際に出ている」こと。取り消した回は数えない。
     assert 'prev.get("images")' in src
+
+
+def test_a_solo_shoot_has_no_partner_fields_to_write_into():
+    """相手役の欄が空いていると、彼女の服がそこに入って消える。
+
+    実測（「カーディガン羽織って。」・ソロ・10回）:
+
+        wearing に入った          6
+        wearing_b に入って消えた   2   ← 服が着られないまま次のターンへ
+        出力が崩れた / 空          2
+
+    `guard_partner_patch` は書かれた**後**に落とすので、中身は失われる。
+    契約は既に「女優は一人」と言っているが、それでは止まらなかった。
+    **欄そのものを渡さない。** 無い鍵には書けない。
+    """
+    solo = notebook.scripter_format_schema(False)["properties"]
+    duo = notebook.scripter_format_schema(True)["properties"]
+    for key in ("wearing_b", "beat_b"):
+        assert key not in solo, key
+        assert key in duo, key
+    # 本人の欄はどちらにもある。
+    for key in ("wearing", "beat", "frame", "scene"):
+        assert key in solo and key in duo, key
+
+    import inspect
+    src = inspect.getsource(chain.run_scripter)
+    assert "scripter_format_schema(partner)" in src
+    assert "fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA" not in src

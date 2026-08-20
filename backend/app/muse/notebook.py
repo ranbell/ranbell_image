@@ -959,15 +959,21 @@ def migrate(session: dict[str, Any]) -> dict[str, Any]:
 _INTENT_RE = re.compile(
     r"(?im)^[\s>*_-]*INTENT\s*[:：]\s*(casual|shot|mixed|recall)\s*$"
 )
-# WHY_* は本体より先に並べる。`WHY_FRAME` を `FRAME` として拾わせないため。
+def _label_alternation() -> str:
+    """ラベルの選択肢を `SHOT_KEYS` から組む。欄名の出典を一つにするため。
+
+    長いラベルを先に並べる: `WHY_FRAME` が `FRAME` として、`WEARING_DROP` が
+    `WEARING` として読まれると、値が別の欄に入る。
+    """
+    names = [f"WHY_{k.upper()}" for k in SHOT_KEYS]
+    names += [k.upper() for k in SHOT_KEYS] + ["WEARING_DROP"]
+    names += ["VIBE", "STANDING", "TAGS_SHARED", "TAGS_A", "TAGS_B", "TAGS",
+              "CRAFT_SCENE", "UNCHANGED", "PROPOSE"]
+    return "|".join(sorted(set(names), key=lambda s: (-len(s), s)))
+
+
 _FIELD_RE = re.compile(
-    r"(?im)^[\s>*_-]*("
-    r"WHY_ATMOSPHERE|WHY_SCENE|WHY_LIGHT|WHY_FRAME|WHY_WEARING_B|WHY_WEARING|"
-    r"WHY_BEAT_B|WHY_BEAT|"
-    r"ATMOSPHERE|SCENE|LIGHT|FRAME|WEARING_DROP|WEARING|BEAT|WEARING_B|BEAT_B|"
-    r"VIBE|STANDING|TAGS|TAGS_SHARED|TAGS_A|TAGS_B|"
-    r"CRAFT_SCENE|UNCHANGED|PROPOSE"
-    r")\s*[:：]\s*(.*)$"
+    r"(?im)^[\s>*_-]*(" + _label_alternation() + r")\s*[:：]\s*(.*)$"
 )
 
 # 理由は一行。長い説明はノートを汚すだけで、読む側の役に立たない。
@@ -1025,6 +1031,34 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
     },
     "required": ["intent"],
 }
+
+
+_PARTNER_ONLY = ("wearing_b", "beat_b")
+
+
+def scripter_format_schema(partner: bool = False) -> dict[str, Any]:
+    """The output shape, without the partner's fields on a solo shoot.
+
+    `guard_partner_patch` already drops `wearing_b` / `beat_b` when nobody is
+    standing there — but it drops them **after** they are written, so whatever
+    went in is lost. Measured on 「カーディガン羽織って。」 (10 runs, solo):
+
+        wearing に入った          6
+        wearing_b に入って消えた   2   ← 服が着られないまま次のターンへ
+        出力が崩れた / 空          2
+
+    Two fields to hand the same garment to is two places to put it. The
+    contract already says there is one actress; saying it again did not stop
+    this. Taking the field away does — you cannot write into a key the schema
+    does not have.
+    """
+    schema = {"type": SCRIPTER_FORMAT_SCHEMA["type"],
+              "properties": dict(SCRIPTER_FORMAT_SCHEMA["properties"]),
+              "required": list(SCRIPTER_FORMAT_SCHEMA["required"])}
+    if not partner:
+        for key in _PARTNER_ONLY:
+            schema["properties"].pop(key, None)
+    return schema
 
 
 def merge_tag_bags(
@@ -1148,10 +1182,10 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
         if x.strip() and x.strip().lower() not in ("none", "なし", "-", "")
     }
     patch: dict[str, Any] = {}
-    for key in (
-        "atmosphere", "scene", "light", "frame", "wearing", "beat",
-        "wearing_b", "beat_b", "vibe",
-    ):
+    # 欄の名前は `SHOT_KEYS` が唯一の出典。ここにベタ書きしていたせいで、
+    # 欄を増やす実験のたびに3箇所（ここ・`_FIELD_RE`・`SCRIPTER_BASE`）を
+    # 別々に直す必要があった。契約を1箇所にまとめたときと同じ形の重複。
+    for key in SHOT_KEYS + ("vibe",):
         if key in unchanged:
             continue
         if key not in data:
