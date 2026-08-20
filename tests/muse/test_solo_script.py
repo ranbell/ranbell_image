@@ -1155,3 +1155,23 @@ def test_a_solo_shoot_has_no_partner_fields_to_write_into():
     src = inspect.getsource(chain.run_scripter)
     assert "scripter_format_schema(partner)" in src
     assert "fmt=notebook_mod.SCRIPTER_FORMAT_SCHEMA" not in src
+
+
+def test_the_rewrite_log_keeps_a_whole_shoot():
+    """12 だと実撮影の前半が消える。分析に使う記録は撮影1本ぶん残す。
+
+    コミケの回（2026-08-20）は監督の発言が21ターンあったのに、記録は直近12件
+    だけで、「場所がいつ入ったか」を追えなかった。言い直しと fold を含めると
+    1撮影で 50 件前後になる。
+    """
+    assert notebook.REWRITE_LOG_MAX >= 50
+
+    session: dict = {}
+    for i in range(80):
+        notebook.record_rewrite(
+            session, "scripter",
+            before={"beat": f"pose {i}"}, after={"beat": f"pose {i + 1}"})
+    log = session["rewrite_log"]
+    assert len(log) == notebook.REWRITE_LOG_MAX
+    # 古いほうから捨てる。最後の一件は最新であること。
+    assert log[-1]["changed"]["beat"]["after"] == "pose 80"

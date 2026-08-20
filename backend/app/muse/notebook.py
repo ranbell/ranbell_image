@@ -34,7 +34,13 @@ SHOT_KEYS = (
 META_KEYS = ("vibe", "standing")
 
 _ALL_KEYS = SHOT_KEYS + META_KEYS
-REWRITE_LOG_MAX = 12
+# 撮影1本ぶんが残る長さ。12 だと実撮影の前半が消えていた —— コミケの回は
+# 監督の発言が 21 ターンあったのに直近12件しか残らず、「場所がいつ入ったか」
+# を追えなかった（言い直しや fold を含めると 1 撮影で 50 件前後になる）。
+#
+# 計器パネルの表示は 12 のまま（`MusePanel.vue`）。**直近が見たい画面と、
+# 後から追う記録では要る長さが違う。**
+REWRITE_LOG_MAX = 60
 _REWRITE_FIELDS = SHOT_KEYS + ("vibe",)
 
 
