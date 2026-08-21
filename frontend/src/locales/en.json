@@ -1678,7 +1678,8 @@
     "staffShoot": "Pictures they chase",
     "staffVoice": "Voice",
     "staffExamples": "Sample energy",
-    "staffClose": "Close"
+    "staffClose": "Close",
+    "struckFromContext": "Left out of the conversation from here on"
   },
   "characters": {
     "title": "Characters",

@@ -1678,7 +1678,8 @@
     "staffShoot": "こんな絵を撮るよ",
     "staffVoice": "口調",
     "staffExamples": "セリフの気配",
-    "staffClose": "閉じる"
+    "staffClose": "閉じる",
+    "struckFromContext": "この発言は以降の会話に含めません"
   },
   "characters": {
     "title": "キャラクター",

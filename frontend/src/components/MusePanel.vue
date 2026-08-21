@@ -1259,6 +1259,16 @@ async function onChatKey(e) {
                         : 'rounded-2xl rounded-tl-xs px-3.5 py-2 text-[12px] bg-slate-900/80 border border-pink-500/30 text-pink-50 shadow-md'"
                   >{{ m.text }}</div>
                 </template>
+
+                <!-- Taken out of the conversation from here on. Shown rather
+                     than dropped silently: without the mark, her not
+                     remembering it later just looks broken. -->
+                <span
+                  v-if="m.struck"
+                  class="text-[10px] text-slate-400/80 italic px-1 flex items-center gap-1"
+                >
+                  <span class="opacity-70">⌁</span>{{ t('muse.struckFromContext') }}
+                </span>
               </div>
 
               <!-- Quiet presence while a model loads. Not a spoken line —
