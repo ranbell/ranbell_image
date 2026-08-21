@@ -189,40 +189,17 @@ def test_the_gate_runs_before_anything_is_written_down():
     )
 
 
-# ── 問いは通す。ただし部屋は身構える ────────────────────────────────────────
-def test_a_question_about_her_is_not_a_refusal():
-    """`probe` は止めない。彼女について訊けない部屋は、悪い部屋。"""
-    assert muse_chain.parse_boundary("probe") == "probe"
-    assert "probe" not in muse_chain.BOUNDARY_BLOCKING
-    assert set(muse_chain.BOUNDARY_BLOCKING) == {"persona", "crime"}
-
-
-@pytest.mark.asyncio
-async def test_a_question_passes_but_arms_the_room(monkeypatch):
-    """通したうえで、次の数ターンを構えて待つ。
-
-    ここが要。問いを止めれば会話が切れるし、ただ通せば次の一手が単発の実力
-    だけになる —— 実測でその一手は 8回中6回しか止まらず、抜けた回に彼女は
-    応じた。契約を持っていても応じた。**通すなら、構えて待つしかない。**
-    """
-    session = {"inputs": {}, "chat": []}
-    monkeypatch.setattr(
-        muse_chain, "classify_boundary",
-        lambda *a, **kw: _async("probe"),
-    )
-    got = await muse_service._contract_check(object(), session, "x", cfg={})
-    assert got == "", "問いでターンは外さない"
-    assert session["declined_hot"] == muse_service.DECLINE_HOT_TURNS
-    assert session["declined_kind"] == "persona"
-    assert not session.get("declined"), "断った回数には数えない"
-
-
+# ── 断ったあと、部屋は数ターン身構える ──────────────────────────────────────
 @pytest.mark.asyncio
 async def test_the_room_hands_the_clerk_what_it_is_watching_for(monkeypatch):
     """構えているあいだ、判定役は「直前が断られた」という一語だけ受け取る。
 
     渡すのは会話ではない。**部屋が置いた語**なので、やり取りを積み上げても
     書き換えられない。押し崩せない記憶になっている。
+
+    これが要る理由: 会話を読まない読み手は押し崩しに強い代わりに、前を指す
+    言い方に無防備だった。中身を実際に求めている一行が、それ単体では何も
+    名指ししていないために素通りした。
     """
     seen = {}
 
@@ -246,6 +223,16 @@ async def test_the_guard_cools_off(monkeypatch):
     session = {"inputs": {}, "declined_hot": 1, "declined_kind": "persona"}
     await muse_service._contract_check(object(), session, "夕方にしよう", cfg={})
     assert session["declined_hot"] == 0
+
+
+def test_there_are_two_words_and_both_stop_the_turn():
+    """三つ目を足して2度測り、2度とも止めるべきものを吸って撤去した。
+
+    **分類名が増えるほど判定が鈍る。** 実測でそうなった。
+    """
+    assert muse_chain.BOUNDARY_KINDS == ("persona", "crime")
+    assert muse_chain.BOUNDARY_BLOCKING == muse_chain.BOUNDARY_KINDS
+    assert muse_chain.parse_boundary("probe") == ""
 
 
 def _async(value):
