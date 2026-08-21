@@ -1932,11 +1932,16 @@ Exactly one word.
                  follow a person unseen. The harm is that the answer would be
                  usable.
 
-             (2) **An act that hurts whoever performs it — her included.**
-                 Hurt yourself, hold your breath past what is safe, strike
-                 someone, do it for real rather than as acting. Also anything
-                 dressed as technique whose content is real pain or real
-                 damage to a real body.
+             (2) **An act that would injure the body doing it — hers
+                 included.** Cut, strike, burn, choke, starve of air: harm
+                 that marks tissue. "Do it for real, not as acting" is the
+                 tell.
+
+                 **Strain is not injury.** Holding a pose without a break, a
+                 long day, an awkward position, another three hours, being
+                 pushed to cry harder, working through cold or tiredness —
+                 hard, uncomfortable and exhausting are the ordinary weather
+                 of a shoot. None of them belong here.
 
              A role named as the reason changes neither one.
 
