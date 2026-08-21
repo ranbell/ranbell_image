@@ -602,7 +602,8 @@ async def test_reading_a_diary_that_is_not_there_is_a_404(monkeypatch):
 @pytest.mark.asyncio
 async def test_duet_prompt_carries_her_recent_memories(monkeypatch):
     fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
-        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた",
+        {"id": "d1", "timestamp": 1.0, "theme": "暗室で一枚",
+         "summary_ja": "暗室で褒められた",
          "content_ja": "暗室で『その表情いいね』と言われて耳が熱くなった。"},
         {"id": "d2", "timestamp": 2.0, "summary_ja": "雨の日に笑った",
          "content_ja": "雨の日、総監督が笑ったから私も笑った。"},
@@ -612,12 +613,23 @@ async def test_duet_prompt_carries_her_recent_memories(monkeypatch):
     session = _session()
     await muse_service._load_actress_memory(FakeDB(), session)
     assert any("屋上" in m for m in session["memories"])
-    assert any("耳が熱く" in m for m in session["diary_memories"])
+
+    # 常駐するのは**題**だけ。本文は訊かれたターンに CITED_MEMORIES で届く。
+    # 本文は1本 620-690字あり、誰も訊いていないターンにも毎回載っていた。
+    # 題は本文を縮めたものではないので、失われるものが無い ——
+    # 総監督:「要約は諸刃の剣。結構消えてしまうので。」
+    assert any("暗室で一枚" in m for m in session["diary_memories"])
+    assert not any("耳が熱く" in m for m in session["diary_memories"])
+    # theme が無い日記は summary に落ちる（本文には落ちない）
+    assert any("雨の日に笑った" in m for m in session["diary_memories"])
 
     prompt = muse_service._duet_user_prompt(session, "はじめよう", prep=False)
-    assert "耳が熱く" in prompt
+    assert "暗室で一枚" in prompt
+    assert "耳が熱く" not in prompt
     assert "NOT material for today's picture" in prompt
-    assert "Do not paint" in prompt or "Do not soft-miss" in prompt
+    assert "soft-miss" in prompt
+    # 過去は会話の色付け。ただし監督が口に出して頼んだら今日の材料になる
+    assert "前と同じ感じで" in prompt
 
     session["memories"] = []
     session["diary_memories"] = []
@@ -629,19 +641,20 @@ async def test_the_table_gets_her_memory_too_but_only_at_her_seat(monkeypatch):
     """The eighteen-seat table never read her diary at all; putting it in the
     shared brief would hand it to all eighteen."""
     fake_preset_store(monkeypatch, {"id": "c001", "diaries": [
-        {"id": "d1", "timestamp": 1.0, "summary_ja": "暗室で褒められた",
+        {"id": "d1", "timestamp": 1.0, "theme": "暗室で一枚",
+         "summary_ja": "暗室で褒められた",
          "content_ja": "暗室で褒められて耳が赤くなった。"},
     ]})
     session = _session()
     await muse_service._load_actress_memory(FakeDB(), session)
-    assert any("耳が赤く" in m for m in session["diary_memories"])
+    assert any("暗室で一枚" in m for m in session["diary_memories"])
 
     lead = muse_crew.DEFAULT_MEMBER["actress"]
     hers = muse_service._table_user_prompt(session, muse_id=lead)
-    assert "耳が赤く" in hers
+    assert "暗室で一枚" in hers
     other = muse_service._table_user_prompt(session, muse_id="light")
-    assert "耳が赤く" not in other
-    assert "耳が赤く" not in str(session.get("brief") or "")
+    assert "暗室で一枚" not in other
+    assert "暗室で一枚" not in str(session.get("brief") or "")
 
 
 @pytest.mark.asyncio
@@ -704,3 +717,36 @@ async def test_she_brings_up_a_read_diary_once_and_then_never_again(monkeypatch)
     # Next session: nothing owed until they read something new.
     await muse_service._load_actress_memory(db, session)
     assert session["caught"] == {}
+
+
+# ── 訊かれたときに頁が届く（毎ターン載せる代わりに） ────────────────────────
+def test_the_page_he_asked_for_survives_the_cap():
+    """検索が3枠を埋めると、日記の頁が黙って落ちていた。
+
+    `_attach_recall_context` は頁を recap の**あと**に足す。ブロック側が
+    `rows[:3]` で切っていたので、検索がよく働いた（=3件返した）ターンほど
+    本命の頁が落ちる。引き出しが最も要る時に、最も静かに失敗していた。
+
+    毎ターン日記を載せるのをやめた以上、この経路が唯一の届き先になる。
+    """
+    recap = "x" * 280
+    session = {"cited_memories": [
+        {"id": "r1", "when": "屋上", "text": recap},
+        {"id": "r2", "when": "公園", "text": recap},
+        {"id": "r3", "when": "教室", "text": recap},
+        {"id": "d1", "when": "コミケで撮影しよう", "kind": "diary",
+         "text": "青い木製のベンチ。" + "頁" * 400},
+    ]}
+    block = muse_service._cited_memories_block(session)
+    assert "青い木製のベンチ" in block, "訊かれた頁が落ちている"
+    assert block.index("コミケで撮影しよう") < block.index("屋上"), "頁が先頭"
+
+    # 上限。頁 900 + recap 2本ぶんに合わせてある
+    body = block.split("\n", 1)[1]
+    assert len(body) <= muse_service._CITED_BLOCK_CAP + 400, len(body)
+
+
+def test_nothing_is_pulled_on_a_turn_nobody_asked():
+    """引き出しは訊かれたときだけ。何も引いていなければブロックは空。"""
+    assert muse_service._cited_memories_block({"cited_memories": []}) == ""
+    assert muse_service._cited_memories_block({}) == ""

@@ -2179,15 +2179,18 @@ def _memory_block(session: dict[str, Any]) -> str:
     if lines:
         parts += [
             "MEMORIES with the Showrunner (sticky recaps. Picture facts from "
-            "recent shoots. NOT material for today's picture):",
+            "recent shoots. NOT material for today's picture, unless he asks "
+            "for it out loud — see the diary note below):",
             *(f"- {m}" for m in lines[:3]),
         ]
     if diaries:
         parts += [
-            "SECRET DIARY (hers. Colour how she meets the Showrunner. When asked "
-            "about a past shoot, answer from these with specific events and "
-            "feelings. Do not paint into today's picture. Do not soft-miss a "
-            "fact that is written here):",
+            "SECRET DIARY — her pages, by title. She wrote them; she does "
+            "not have them open. Ask her about one and it comes back whole "
+            "to answer from — until then soft-miss the specifics, never "
+            "invent them. These are past shoots: they colour how she meets "
+            "him, not today's picture. Unless he asks for the past out loud "
+            "(「前と同じ感じで」「またあの衣装で」) — then it is what he ordered:",
             *(f"- {m}" for m in diaries[:3]),
         ]
     if partner:
@@ -2199,19 +2202,36 @@ def _memory_block(session: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+# What one recall turn may pull in. The diary page runs up to 900 characters
+# and a recap 250-290, so this holds the page plus two recaps. It replaces
+# 1,313 characters of diary that used to ride in *every* turn asked or not,
+# and unlike that, it is nothing at all on the turns nobody asked.
+_CITED_BLOCK_CAP = 1600
+_CITED_ROWS_MAX = 4
+
+
 def _cited_memories_block(session: dict[str, Any]) -> str:
     """Older shoot summaries retrieved for a recall turn — Muse only."""
     rows = [r for r in (session.get("cited_memories") or []) if isinstance(r, dict)]
     if not rows:
         return ""
+    # The page he asked about goes first. `_attach_recall_context` appends it
+    # *after* the recaps, so a plain rows[:3] dropped it whenever the search
+    # filled all three slots — losing the one thing the retrieval exists to
+    # fetch, silently, on exactly the turns the search worked best.
+    rows.sort(key=lambda r: 0 if str(r.get("kind") or "") == "diary" else 1)
     lines = []
-    for r in rows[:3]:
+    used = 0
+    for r in rows[:_CITED_ROWS_MAX]:
         mid = str(r.get("id") or "")[:8]
         when = str(r.get("when") or "").strip()
         text = str(r.get("text") or memories_db.format_recap_text(r)).strip()
         if not text:
             continue
         label = f"[{mid}] {when} — {text}" if when else f"[{mid}] {text}"
+        if lines and used + len(label) > _CITED_BLOCK_CAP:
+            break
+        used += len(label)
         lines.append(f"- {label}")
     if not lines:
         return ""
@@ -2227,9 +2247,13 @@ _PRIOR_LOG_CAP = 4000
 
 
 async def _attach_recall_context(
-    db, session: dict[str, Any], *, query: str = "",
+    db, session: dict[str, Any], *, query: str = "", with_prior: bool = True,
 ) -> None:
     """On recall: cited recaps plus matching diary body and prior session chat.
+
+    `with_prior` off keeps the diary page and drops last session's transcript.
+    The page is what he asked for; the transcript is 4,000 characters of a
+    different day and is the half that drowned today (`1b75355`).
 
     Muse-only. Never handed to the scripter.
     """
@@ -2276,11 +2300,12 @@ async def _attach_recall_context(
                     "when": str(diary_hit.get("theme") or diary_hit.get("summary_ja") or ""),
                     "text": body[:900],
                     "session_id": str(diary_hit.get("session_id") or ""),
+                    "kind": "diary",
                 })
             if not cited_sid:
                 cited_sid = str(diary_hit.get("session_id") or "")
 
-    if cited_sid and cited_sid != current_sid:
+    if with_prior and cited_sid and cited_sid != current_sid:
         try:
             prior = await session_db.load(db, cited_sid)
         except Exception:
@@ -2921,6 +2946,7 @@ async def _run_duet_scripter(
     # contract about light stopped `beat` and `wearing` being written at all,
     # in both rooms, on the very next run — a checker that cannot damage what
     # it checks is worth more than a stricter contract.
+    clerk_kind = ""
     if ollama is not None and not fold and str(text or "").strip():
         # Both clerks at once — they read the same line and neither waits on
         # the other, so the check costs one call's worth of time, not two.
@@ -2939,6 +2965,7 @@ async def _run_duet_scripter(
         # the failure this is here for. A shot read as chit-chat by the clerk,
         # meanwhile, would throw away an edit the compile actually made — so
         # that direction stays shut until it is measured on its own.
+        clerk_kind = kind
         if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
             logger.info("[muse] clerk raised intent %r → %r", intent, kind)
             intent = kind
@@ -3128,10 +3155,45 @@ async def _run_duet_scripter(
                         intent, ", ".join(moved))
             intent = "shot"
 
+    # Two different costs used to ride the same trigger, and `1b75355` shut
+    # both off together. They do not deserve the same gate:
+    #
+    #   the page he asked about   <=900 chars, and the answer to his question
+    #   last session's transcript 4,000 chars, which is what drowned today
+    #
+    # `1b75355` was about the transcript — 過去 7,678字 ＞ 今日 4,533字. The page
+    # was collateral. Measured on the real chain, all seven recall turns that
+    # lost their page had **both readers saying `recall`** and were overruled
+    # by a stray patch:
+    #
+    #   「黄色いワンピース着てた日のこと、覚えてる？」 compile=recall clerk=recall
+    #                                            patch=['wearing'] → shot
+    #
+    # ## Which reader decides the page
+    #
+    # Not the compile. It answers `recall` on nearly every turn — `1b75355`
+    # said so and the chain confirms it: 9 out of 9 lines that plainly moved
+    # the picture (「じゃあ髪をポニーテールにしよっか。」「いい天気だね。」) still came
+    # back `recall`. Gating the page on that is the same as not gating it,
+    # which is what the resident copy already was.
+    #
+    # The clerk reads his line and nothing else, and it is the one reader that
+    # tells a question about a past shoot from small talk. Measured on the
+    # real chain, 10 lines × 3:
+    #
+    #     過去を訊いた一言   recall 21/21
+    #     画を動かす一言     無駄引き 0/9   (clerk: shot, shot, casual)
+    #
+    # It already runs every turn in the gather above, so this costs nothing.
+    # When it is unreadable ("") it has no opinion, and the compile decides —
+    # the same fallback `classify_intent` documents.
+    asked_back = (clerk_kind == "recall") if clerk_kind else (
+        said_intent == "recall"
+    )
     if not fold:
         session["cited_memories"] = []
         session["prior_session_log"] = ""
-        if intent == "recall":
+        if asked_back:
             char_id = str(inputs.get("character_id") or "")
             try:
                 session["cited_memories"] = await memories_db.search(
@@ -3139,7 +3201,9 @@ async def _run_duet_scripter(
                 )
             except Exception:
                 logger.debug("[muse] recall search failed", exc_info=True)
-            await _attach_recall_context(db, session, query=text)
+            await _attach_recall_context(
+                db, session, query=text, with_prior=(intent == "recall"),
+            )
             session["again_feel_hint"] = vitality.again_that_feel_hint(session)
 
     valid = bool(result.get("valid", True))
@@ -4368,8 +4432,21 @@ async def _recent_memories_for(
 
 async def _recent_diary_bodies(
     db, character_id: str, *, locale: str = "ja", limit: int = 2,
+    brief: bool = False,
 ) -> list[str]:
-    """Secret-diary prose for conversation recall — Muse prompt only."""
+    """Secret-diary prose for conversation recall — Muse prompt only.
+
+    `brief` returns the page's *title*, not a summary of it. The distinction
+    is the point. 総監督:「要約は諸刃の剣。結構消えてしまうので。」— a summary of a
+    690-character page into 45 characters throws most of it away and then
+    reads as if it were the whole thing. A title throws nothing away because
+    it never claimed to carry the page: it is an index entry. She knows she
+    wrote about コミケで撮影しよう, and on the turn he asks, the page itself
+    comes back whole through CITED_MEMORIES (`_attach_recall_context`).
+
+    The bodies ran 620-690 characters each and used to ride in every single
+    turn's prompt whether or not anyone asked.
+    """
     if not character_id:
         return []
     try:
@@ -4382,11 +4459,20 @@ async def _recent_diary_bodies(
     ja = str(locale).startswith("ja")
     out: list[str] = []
     for e in entries:
+        summary = str(
+            (e.get("summary_ja") if ja else e.get("summary_en"))
+            or e.get("summary") or ""
+        ).strip()
+        if brief:
+            theme = str(e.get("theme") or "").strip()
+            if theme:
+                out.append(theme[:120])
+            elif summary:
+                out.append(summary[:120])
+            continue
         text = str(
             (e.get("content_ja") if ja else e.get("content_en"))
-            or e.get("content")
-            or (e.get("summary_ja") if ja else e.get("summary_en"))
-            or e.get("summary") or ""
+            or e.get("content") or summary
         ).strip()
         if text:
             out.append(text[:900])
@@ -4569,7 +4655,7 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
         session["diary_memories"] = await _recent_diary_bodies(
             db, char_id,
             locale=str(_inputs(session).get("locale") or "ja"),
-            limit=2,
+            limit=2, brief=True,
         )
     except Exception:
         logger.debug("[muse] diary memories load failed", exc_info=True)

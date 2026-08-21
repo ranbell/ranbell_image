@@ -1273,12 +1273,45 @@ def test_the_previous_session_does_not_outweigh_today():
     `_attach_recall_context` は `intent == "recall"` のときに走る。そして
     intent はほぼ全ターン `recall` で返ってくる（契約に説明が無いため）。
     patch からの引き上げは**その40行あと**にあり、間に合っていなかった。
+
+    ## そのあと分けたもの
+
+    同じ引き金に二つの重さが乗っていて、最初の修正は両方を一緒に止めていた:
+
+        彼が訊いた日記の頁    900字。**訊かれたことへの答えそのもの**
+        前回の会話ログ      4,000字。今日を溺れさせていたのはこちら
+
+    実チェーンで測ると、頁を落とした recall ターン7件は**全て compile も
+    clerk も recall と言っていた**のに、余計な patch に上書きされていた:
+
+        「黄色いワンピース着てた日のこと、覚えてる？」
+            compile=recall clerk=recall patch=['wearing'] → shot
+
+    ## どちらの読み手が頁を決めるか
+
+    compile ではない。**ほぼ全ターン `recall` を返す**ので、それで絞るのは
+    絞らないのと同じ。実チェーンで、画が動いた9件が全て `recall` だった。
+
+    clerk は監督の一言だけを読む。この読み分けができるのは clerk だけ。
+    10本 × 3回:
+
+        過去を訊いた一言   recall 21/21
+        画を動かす一言     無駄引き 0/9
+
+    頁は clerk に、重い前回ログは引き上げ後の `intent` に付ける。
     """
     import inspect
     src = inspect.getsource(service._run_duet_scripter)
     derive = src.index("patch raised intent")
-    recall = src.index('if intent == "recall":')
+    recall = src.index("if asked_back:")
     assert derive < recall, "引き上げは recall の前で走らないと間に合わない"
+
+    # 頁の引き金は clerk。compile はほぼ全ターン recall なので絞れない
+    assert 'clerk_kind == "recall"' in src, "頁の引き金は clerk"
+    # 重いほうだけが引き上げの影響を受ける
+    assert 'with_prior=(intent == "recall")' in src, (
+        "前回ログは引き上げ後の intent に付ける"
+    )
 
     # 記録（standing note）には引き上げ前の判定を使う。何が常設の指示になるかは
     # 部屋の読みであって、たまたまどの欄が動いたかではない。
