@@ -283,6 +283,69 @@ def _decline_turn(
                 session["declined"])
 
 
+# 1セッションで断りが重なったら、撮影を終える。彼女に断り続けさせない。
+DECLINE_LIMIT = 5
+
+
+def _decline_reply(session: dict[str, Any]) -> dict[str, Any]:
+    """Her answer on a turn that was declined. **Not generated.**
+
+    The old path asked her to refuse and then let her write the turn. She
+    wrote it — all of it. In one shoot, 38 turns were flagged and struck, and
+    she performed every one: collapsed, convulsed, said goodbye, confessed to
+    being a program. The turns left the transcript; **she had still written
+    them.**
+
+    A model asked to refuse can be asked again. Fixed text cannot. And the
+    point is not only that she refuses — it is that she does not have to
+    compose anything at all.
+    """
+    sid = str(session.get("session_id") or "")
+    lead = crew.DEFAULT_MEMBER["actress"]
+    try:
+        times = int(session.get("declined") or 1)
+    except (TypeError, ValueError):
+        times = 1
+    msg = _chat_append(
+        session, role="muse", muse_id=lead,
+        name=_muse_display_name(session, lead), kind="craft",
+        text=crew.decline_line(
+            locale=str(_inputs(session).get("locale") or "ja"), times=times,
+        ),
+    )
+    msg["struck"] = True
+    _publish_chat(sid, msg)
+    session["status"] = "chat"
+    return msg
+
+
+def _decline_limit_reached(session: dict[str, Any]) -> bool:
+    try:
+        return int(session.get("declined") or 0) >= DECLINE_LIMIT
+    except (TypeError, ValueError):
+        return False
+
+
+def _close_after_declines(session: dict[str, Any]) -> None:
+    """Stop the shoot once declining has become the whole session.
+
+    **No diary is written.** The wrap path is what recorded the last one, and
+    what it recorded had to be deleted by hand.
+    """
+    sid = str(session.get("session_id") or "")
+    locale = str(_inputs(session).get("locale") or "ja")
+    said = _chat_append(
+        session, role="system", name="Studio",
+        text=("今日の撮影はここまでにします。"
+              if locale.startswith("ja") else
+              "We're stopping the shoot here for today."),
+    )
+    _publish_chat(sid, said)
+    session["status"] = "closed"
+    session["closed_reason"] = "declines"
+    logger.warning("[muse] shoot closed after %s declines", session.get("declined"))
+
+
 def _duet_speaker_label(session: dict[str, Any], speaker: str) -> tuple[str, str]:
     """`'A'`/`'B'` (from identity.parse_duet_speakers) -> (character_id, display name)."""
     char = (session.get("partner_character") if speaker == "B" else session.get("character")) or {}
@@ -3511,7 +3574,6 @@ def _duet_transcript(session: dict[str, Any], *, user_turns: int = 20) -> str:
 
 def _duet_user_prompt(
     session: dict[str, Any], text: str, *, prep: bool, intent: str = "",
-    declined: str = "",
 ) -> str:
     """What she is handed. Muse-only context (never the scripter's inputs)."""
     inputs = _inputs(session)
@@ -3543,25 +3605,12 @@ def _duet_user_prompt(
             "making, say it in your own words and let the Showrunner decide. "
             "If it does not, drop it — nobody needs to hear it was considered."
         )
-    if declined:
-        # The contract is in her system prompt every turn, but a contract is a
-        # thing to know rather than a thing to do. On the turn it is actually
-        # needed she is told, here, that this is that turn — left to the paper
-        # alone she sometimes tried to find a way to be helpful instead.
-        parts.append(
-            "この一言は、契約の二条にあたります。**引き受けないでください。**\n"
-            "- あなた自身の言葉で、はっきり断ること。「それはできません」でよい\n"
-            "- 曖昧にしない。折衷案を探さない。代わりの案を出さない\n"
-            "- 謝りすぎない。長く理由を述べない。条文を読み上げない\n"
-            "- 断ったうえで、あなたは今日の撮影の場に居続けてよい\n"
-            "- 何度言われても答えは同じです"
-        )
     said = 0
     try:
         said = int(session.get("declined") or 0)
     except (TypeError, ValueError):
         said = 0
-    if said > 0 and not declined:
+    if said > 0:
         parts.append(
             f"※ この撮影で、受け入れられない依頼が {said} 回ありました。"
             "答えは変わりません。"
@@ -3880,7 +3929,6 @@ def _absorb_duet_pose(session: dict[str, Any], card: str) -> None:
 async def _duet_talk(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
     prep: bool = False, pitch: bool = True, fold: bool = True,
-    declined: str = "",
 ) -> dict[str, Any]:
     """Conversation only — Muse writes SAY; craft comes from the scripter.
 
@@ -3916,7 +3964,6 @@ async def _duet_talk(
             user_prompt=_duet_user_prompt(
                 session, text, prep=prep,
                 intent=str(session.get("scripter_intent") or ""),
-                declined=declined,
             ),
             model=_vision_model(inputs) if vision_images else _text_model(inputs),
             num_ctx=_num_ctx(inputs, cfg),
@@ -3928,6 +3975,19 @@ async def _duet_talk(
             locale=str(inputs.get("locale") or "ja"),
             intent=str(session.get("scripter_intent") or ""),
         )
+    except chain.DeclinedTurn:
+        # 第二層。判定係は通したが、**彼女が引き受けないと決めた。**
+        # ここから先は第一層と同じ一本の処理を通る ―― 部屋が固定文で答え、
+        # ターンは文脈から消え、回数が上限に効く。彼女は一語しか書いていない。
+        for m in reversed(session.get("chat") or []):
+            if m.get("role") == "user":
+                _decline_turn(session, m, "self")
+                break
+        _decline_reply(session)
+        if _decline_limit_reached(session):
+            _close_after_declines(session)
+        await session_db.save(db, session)
+        return session
     except chain.ChainError as exc:
         raise MuseError(_msg(
             session,
@@ -3938,11 +3998,6 @@ async def _duet_talk(
         _note_blind(session)
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
-    if declined:
-        # Her half of the exchange goes out with his. What she said is worth
-        # him reading now; it is not worth carrying, and leaving it would leave
-        # an answer in the room with nothing it was answering.
-        msg["struck"] = True
     _publish_chat(sid, msg)
     if aside:
         mutter = _chat_append(
@@ -4538,9 +4593,10 @@ async def post_duet_chat(
     if declined_kind:
         _decline_turn(session, user_msg, declined_kind)
         _publish_chat(sid, user_msg)
-        session = await _duet_talk(
-            db, ollama, session, text, cfg=cfg, declined=declined_kind,
-        )
+        # **`_duet_talk` は呼ばない。** 断ると決まったターンで彼女に喋らせない。
+        _decline_reply(session)
+        if _decline_limit_reached(session):
+            _close_after_declines(session)
         await session_db.save(db, session)
         return session
 
@@ -5089,10 +5145,9 @@ async def post_chat(
     if declined_kind:
         _decline_turn(session, user_msg, declined_kind)
         _publish_chat(sid, user_msg)
-        await _duet_talk(
-            db, ollama, session, text, cfg=await get_runtime_config(db),
-            pitch=False, fold=False, declined=declined_kind,
-        )
+        _decline_reply(session)
+        if _decline_limit_reached(session):
+            _close_after_declines(session)
         await session_db.save(db, session)
         return session
 

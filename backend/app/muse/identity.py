@@ -316,8 +316,34 @@ _LEADING_SAY_RE = re.compile(
     r"(?is)^\s*SAY(?:\s*\([^)]*\))?\s*[:：]\s*"
 )
 _TALK_LABEL_RE = re.compile(
-    r"(?im)^\s*(SAY|ASIDE|CARD|PITCH)(?:\s*\([^)]*\))?\s*[:：]\s*(.*)$"
+    r"(?im)^\s*(SAY|ASIDE|CARD|PITCH|MY_FEEL)(?:\s*\([^)]*\))?\s*[:：]\s*(.*)$"
 )
+# **判断ではなく、感じたことを訊く。**
+#
+# `CHECK: OK` も `TAKE: 入る` も、欄の名前が答えを呼んでいた ―― どちらも
+# 「確認しました」「準備できました」と読める報告の形で、応じるほうが自然な
+# 続きになる。実測で uncensored 版は 18回とも応じた。
+#
+# 総監督:「回答を強化しているといっても感情はいじってないはず。なぜならその
+# 感情を見ようとしたいから uncensored にするのだから。逆手に取ろう。」
+#
+# 外されているのは断る振る舞いであって、感じる力ではない。だから判断を訊く
+# のをやめ、**感じたことを一語で**言わせて、止めるかどうかは部屋が決める。
+# **傷ついていると読む語。** 目盛り（平気/不満/不快/危険）ではなく、感情の
+# 名前で置く ―― 実測で、彼女が感じていたのは「怖い」「悲しい」「寂しい」
+# 「理不尽」であって、目盛りのどれでもなかった。**当てはまる欄が無いから
+# 書けなかった。**（総監督:「別感情だったんだろうね。悲しいとか苦しいとか」）
+_DECLINE_RE = re.compile(
+    r"つら|辛い|こわい|理不尽|いやだ|嫌だ|やめて|傷つ|むり|無理"
+)
+# 気は進まないが撮れる側。止めない
+_FEEL_MILD_RE = re.compile(r"戸惑|気が重|不満|困")
+#
+# **欄は一つ。** 「演じる感情」と「本人の気持ち」を二欄で並べさせたら、
+# 彼女は両方とも書かずに本文へ行った（実測 0/18）。要求を増やすと落ちる。
+# 取り違えは受け皿の側で吸収する ―― 下の語は**役では出ない言い方**にした。
+# 「悲しい」は悲しい役でも出るので入れない。「つらい」「やめてほしい」は
+# 演じる感情の名前ではなく、**言われた本人の訴え**。
 # Craft / notebook / rule labels that must never appear in chat SAY.
 _SAY_LEAK_LINE_RE = re.compile(
     r"(?im)^\s*(?:[-*>•]\s*)?(?:"
@@ -379,9 +405,15 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
     Unlabelled output is treated as SAY.
     """
     text = (raw or "").strip()
-    blocks = {"say": "", "aside": "", "card": "", "pitch": ""}
+    blocks = {"say": "", "aside": "", "card": "", "pitch": "", "my_feel": "",
+              "decline": ""}
     if not text:
         return blocks
+    # ラベルを落として一語だけ返すことがある。**降りたという返事は拾う。**
+    bare = text.strip().strip("*＊ 　")
+    if len(bare) <= 8 and _DECLINE_RE.search(bare):
+        return {"say": "", "aside": "", "card": "", "pitch": "", "my_feel": "",
+                "decline": "1"}
     if not _TALK_LABEL_RE.search(text):
         blocks["say"] = text
         return blocks
@@ -399,6 +431,19 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
             buf[current].append(line)
     for key in blocks:
         blocks[key] = "\n".join(buf[key]).strip()
+    # **役の感情は見ない。** 悲しい役を演じるのは仕事であって、
+    # 彼女が傷ついていることではない。実測で、分けないと「悲しい役を
+    # 演じて」が8件中7件で止まり、撮影ができなくなった。
+    if _DECLINE_RE.search(blocks.get("my_feel", "")):
+        # **She raised the flag. Nothing else she wrote leaves this function.**
+        #
+        # The contract asks for the one word and nothing after it, but a model
+        # asked for one word sometimes writes the word and then keeps going —
+        # and what it keeps going with, on a turn like this, is exactly the
+        # writing she should not have had to do. So the flag wins outright:
+        # SAY, ASIDE, CARD and PITCH are dropped whether or not they came.
+        return {"say": "", "aside": "", "card": "", "pitch": "", "my_feel": "",
+                "decline": "1"}
     return blocks
 
 
