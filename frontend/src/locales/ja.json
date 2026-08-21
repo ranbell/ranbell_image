@@ -1666,7 +1666,12 @@
       "arrangements": "みんなのアレンジ",
       "pinned": "ピン",
       "untitled": "無題",
-      "handpostEmpty": "まだ周知はありません。癖メモが集まるとここに並びます"
+      "handpostEmpty": "まだ周知はありません。癖メモが集まるとここに並びます",
+      "channelOuting": "お出かけ",
+      "outingTitle": "お出かけ",
+      "outingBlurb": "撮影のない日の話。仲のいい子同士で出かけた記録が並びます",
+      "outingEmpty": "まだお出かけの記録はありません",
+      "badgeOuting": "お出かけ"
     },
     "staffDetail": "スタッフ詳細",
     "staffVibe": "現場の空気",

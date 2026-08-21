@@ -17,6 +17,92 @@ _SHARE_TEMPLATES = (
     "vibe",        # 空気・場所のぼやき
 )
 
+# What they got up to when there was no camera. Everyday things — the point is
+# that it is not work, so nothing here is a shoot, a costume or a location.
+#
+# The hints say what *happened*, not where. Muse copy that names a place has a
+# way of turning up in the picture, which is what
+# `test_production_muse_copy_has_no_situation_specific_anchors` is guarding —
+# and a small moment is better writing than a venue anyway.
+_OUTINGS = (
+    ("パンケーキ", "話題の店に並んだら、思ったより待たされた"),
+    ("ごはん", "遅い時間に、二人でラーメンを食べた"),
+    ("買い物", "服を見に行って、結局どちらも何も買わなかった"),
+    ("遊園地", "絶叫系に乗ったら、片方だけずっと叫んでいた"),
+    ("旅行", "一泊の温泉。帰りの電車の時間を間違えた"),
+    ("散歩", "あてもなく歩いて、気づいたら遠くまで来ていた"),
+    ("映画", "終わったあと、感想が見事に食い違った"),
+    ("水族館", "クラゲの前から動かない子がいた"),
+    ("勉強", "課題を持ち寄ったのに、ほとんど喋って終わった"),
+    ("猫", "近所の猫に会いに行ったら、逃げられた"),
+    ("花火", "遠くの音だけ聞こえて、結局よく見えなかった"),
+    ("だらだら", "どちらかの部屋で、何をするでもなく")
+)
+
+
+def pick_outing() -> tuple[str, str]:
+    """お題を一つ。同じ話が続かないよう、毎回引き直す。"""
+    return random.choice(_OUTINGS)
+
+
+def outing_occasions() -> tuple[str, ...]:
+    return tuple(name for name, _ in _OUTINGS)
+
+
+def normalize_outing(
+    parsed: dict[str, str],
+    cast: list[dict[str, Any]],
+    *,
+    max_turns: int = 6,
+) -> list[dict[str, Any]]:
+    """`TURN_N_*` を掛け合いに変える。話者は cast の並びを回る。
+
+    `normalize_reactions` が `REACTOR_N_*` を友達に割り当てているのと同じ手口。
+    一度の呼び出しで全員ぶん書かせるので、人数が増えても呼び出しは増えない。
+    """
+    out: list[dict[str, Any]] = []
+    if not cast:
+        return out
+    for i in range(1, max_turns + 1):
+        text_ja = (parsed.get(f"TURN_{i}_JA") or parsed.get(f"T{i}_JA") or "").strip()
+        if not text_ja:
+            continue
+        text_en = (parsed.get(f"TURN_{i}_EN") or parsed.get(f"T{i}_EN") or "").strip()
+        who = (parsed.get(f"TURN_{i}_WHO") or parsed.get(f"T{i}_WHO") or "").strip()
+        speaker = next(
+            (c for c in cast if who and str(c.get("name_ja") or "") in who),
+            cast[(i - 1) % len(cast)],
+        )
+        out.append({
+            "id": "",
+            "turn": len(out),
+            "character_id": str(speaker.get("character_id") or speaker.get("id") or ""),
+            "name_ja": str(speaker.get("name_ja") or ""),
+            "name": str(speaker.get("name") or speaker.get("name_ja") or ""),
+            "text_ja": text_ja,
+            "text_en": text_en or text_ja,
+            "reaction": (parsed.get(f"TURN_{i}_REACTION") or "").strip()[:8],
+        })
+    return out
+
+
+def outing_summary_line(thread: dict[str, Any]) -> str:
+    """楽屋の一件を、彼女の手元に残る一行にする。
+
+    要約ではなく**指し先**。いつ・誰と・何を、それだけ。中身が読みたければ
+    楽屋にスレッドがある。総監督:「要約は諸刃の剣。結構消えてしまうので。」
+    """
+    when = str(thread.get("when_ja") or "").strip()
+    occasion = str(thread.get("occasion") or "").strip()
+    names = [
+        str(c.get("name_ja") or "").strip()
+        for c in (thread.get("cast") or []) if isinstance(c, dict)
+    ]
+    with_who = "と".join([n for n in names if n][1:]) or "みんな"
+    bits = [b for b in (when, f"{with_who}と{occasion}" if occasion else with_who) if b]
+    return "、".join(bits)[:80]
+
+
 # Traits that make a Muse more likely to pitch an idea to the showrunner.
 _PITCHY_TRAITS = (
     "curious", "creative", "bold", "proactive", "talkative", "mischievous",

@@ -1666,7 +1666,12 @@
       "arrangements": "Everyone's take",
       "pinned": "Pinned",
       "untitled": "Untitled",
-      "handpostEmpty": "No notices yet — habit notes show up here"
+      "handpostEmpty": "No notices yet — habit notes show up here",
+      "channelOuting": "Days Off",
+      "outingTitle": "Days Off",
+      "outingBlurb": "What they got up to away from the studio, with the friends they are closest to",
+      "outingEmpty": "No days off written up yet",
+      "badgeOuting": "day off"
     },
     "staffDetail": "Staff detail",
     "staffVibe": "Room vibe",

@@ -14,7 +14,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'toast', 'seen'])
 const { t, locale } = useI18n()
 
-const tab = ref('lounge') // 'lounge' | 'ideas' | 'trends' | 'handpost'
+const tab = ref('lounge') // 'lounge' | 'ideas' | 'outing' | 'trends' | 'handpost'
 const loading = ref(false)
 const liking = ref(false)
 const threads = ref([])
@@ -25,7 +25,14 @@ const selectedId = ref('')
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const selected = computed(() => threads.value.find(t => t.id === selectedId.value) || null)
 const loungeThreads = computed(() => {
-  const rows = threads.value.filter(th => th.kind !== 'studio_trends' && th.kind !== 'pitch')
+  const rows = threads.value.filter(
+    th => th.kind !== 'studio_trends' && th.kind !== 'pitch' && th.kind !== 'outing',
+  )
+  return [...rows].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
+})
+// お出かけは撮影の話ではないので、撮影後のひとことと同じ流れに混ぜない
+const outingThreads = computed(() => {
+  const rows = threads.value.filter(th => th.kind === 'outing')
   return [...rows].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
 })
 const ideaThreads = computed(() => {
@@ -37,7 +44,11 @@ const ideaThreads = computed(() => {
     return Number(b.created_at || 0) - Number(a.created_at || 0)
   })
 })
-const feedThreads = computed(() => (tab.value === 'ideas' ? ideaThreads.value : loungeThreads.value))
+const feedThreads = computed(() => {
+  if (tab.value === 'ideas') return ideaThreads.value
+  if (tab.value === 'outing') return outingThreads.value
+  return loungeThreads.value
+})
 
 function thumb(sha) {
   return sha ? `/api/thumbnails/${sha}.webp` : ''
@@ -62,6 +73,7 @@ function when(ts) {
 }
 function kindBadge(th) {
   if (th?.kind === 'pitch') return t('muse.lounge.badgePitch')
+  if (th?.kind === 'outing') return t('muse.lounge.badgeOuting')
   if (th?.kind === 'wrap_share') return t('muse.lounge.badgeWrap')
   return ''
 }
@@ -156,6 +168,9 @@ watch(tab, () => ensureSelected())
         <button type="button" class="lounge-chan" :class="tab === 'ideas' ? 'is-on' : ''" @click="tab = 'ideas'">
           # {{ t('muse.lounge.channelIdeas') }}
         </button>
+        <button type="button" class="lounge-chan" :class="tab === 'outing' ? 'is-on' : ''" @click="tab = 'outing'">
+          # {{ t('muse.lounge.channelOuting') }}
+        </button>
         <button type="button" class="lounge-chan" :class="tab === 'trends' ? 'is-on' : ''" @click="tab = 'trends'">
           # {{ t('muse.lounge.channelTrends') }}
         </button>
@@ -171,6 +186,7 @@ watch(tab, () => ensureSelected())
         <header class="flex items-center gap-2 px-4 py-3 border-b border-pink-200/60 bg-white/40">
           <h2 class="text-base font-semibold text-rose-600 tracking-wide">
             {{ tab === 'lounge' ? t('muse.lounge.feedTitle')
+              : tab === 'outing' ? t('muse.lounge.outingTitle')
               : tab === 'ideas' ? t('muse.lounge.ideasTitle')
               : tab === 'trends' ? t('muse.lounge.trendsTitle')
               : t('muse.lounge.handpostTitle') }}
@@ -180,7 +196,7 @@ watch(tab, () => ensureSelected())
         </header>
 
         <!-- lounge feed / showrunner ideas -->
-        <div v-if="tab === 'lounge' || tab === 'ideas'" class="flex-1 min-h-0 flex">
+        <div v-if="tab === 'lounge' || tab === 'ideas' || tab === 'outing'" class="flex-1 min-h-0 flex">
           <div class="w-56 shrink-0 border-r border-pink-100 overflow-y-auto p-2 space-y-1.5 bg-white/30">
             <button
               v-for="th in feedThreads"
@@ -219,13 +235,16 @@ watch(tab, () => ensureSelected())
               </div>
             </button>
             <p v-if="!feedThreads.length && !loading" class="text-xs text-rose-400 text-center py-8 px-2">
-              {{ tab === 'ideas' ? t('muse.lounge.ideasEmpty') : t('muse.lounge.empty') }}
+              {{ tab === 'ideas' ? t('muse.lounge.ideasEmpty')
+                : tab === 'outing' ? t('muse.lounge.outingEmpty')
+                : t('muse.lounge.empty') }}
             </p>
           </div>
 
           <div class="flex-1 min-w-0 flex flex-col">
             <div class="flex-1 overflow-y-auto p-4 space-y-3">
               <p v-if="tab === 'ideas'" class="text-xs text-rose-500/80">{{ t('muse.lounge.ideasBlurb') }}</p>
+              <p v-else-if="tab === 'outing'" class="text-xs text-rose-500/80">{{ t('muse.lounge.outingBlurb') }}</p>
               <template v-if="selected">
                 <div class="flex items-start gap-3">
                   <img
@@ -250,6 +269,12 @@ watch(tab, () => ensureSelected())
                       >{{ t('muse.lounge.statusPromoted') }}</span>
                     </div>
                     <div class="text-[10px] text-rose-400">{{ when(selected.created_at) }}</div>
+                    <div v-if="selected.kind === 'outing'" class="text-[11px] text-rose-500/90 mt-0.5">
+                      {{ [selected.when_ja, selected.occasion].filter(Boolean).join(' · ') }}
+                      <span v-if="(selected.cast || []).length" class="text-rose-400/80">
+                        — {{ (selected.cast || []).map(c => (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja))).filter(Boolean).join('、') }}
+                      </span>
+                    </div>
                     <p class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">{{ textOf(selected) }}</p>
                     <button
                       v-if="selected.kind === 'pitch'"

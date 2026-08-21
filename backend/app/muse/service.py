@@ -2173,7 +2173,10 @@ def _memory_block(session: dict[str, Any]) -> str:
     partner = [
         str(m).strip() for m in (session.get("partner_memories") or []) if str(m).strip()
     ]
-    if not lines and not diaries and not partner:
+    circle = [
+        str(m).strip() for m in (session.get("circle") or []) if str(m).strip()
+    ]
+    if not lines and not diaries and not partner and not circle:
         return ""
     parts: list[str] = []
     if lines:
@@ -2199,6 +2202,13 @@ def _memory_block(session: dict[str, Any]) -> str:
             "never paint into the shot):",
             *(f"- {m}" for m in partner[:2]),
         ]
+    if circle:
+        parts += [
+            "HER CIRCLE — days off with her friends, away from the studio. "
+            "Not material for today's picture. She has a life outside these "
+            "walls and these are the people in it:",
+            *(f"- {m}" for m in circle[:CIRCLE_MAX_LINES]),
+        ]
     return "\n".join(parts)
 
 
@@ -2208,6 +2218,34 @@ def _memory_block(session: dict[str, Any]) -> str:
 # and unlike that, it is nothing at all on the turns nobody asked.
 _CITED_BLOCK_CAP = 1600
 _CITED_ROWS_MAX = 4
+
+
+# セッション中に自分から友達の話に触れてよい回数。
+CIRCLE_MENTION_MAX = 2
+
+
+def _circle_note(session: dict[str, Any]) -> str:
+    """When she may bring her friends up on her own.
+
+    Not a probability and not a schedule — a reason, and one limit. Told to do
+    it every turn she would work it into everything; told only to answer when
+    asked, the days off may as well not have happened.
+    """
+    if not (session.get("circle") or []):
+        return ""
+    try:
+        said = int(session.get("circle_mentions") or 0)
+    except (TypeError, ValueError):
+        said = 0
+    if said >= CIRCLE_MENTION_MAX:
+        return ""
+    return (
+        "HER CIRCLE, on bringing it up: she has time outside the studio, and if "
+        "the talk drifts near it she may mention it herself, lightly — 「この前"
+        "ゆかりちゃんと行ったところなんです」. It is small talk, not a story. Not "
+        "every turn, and never on top of him working out a shot: when he is "
+        "deciding the picture, that is what she is doing too."
+    )
 
 
 def _cited_memories_block(session: dict[str, Any]) -> str:
@@ -3301,8 +3339,32 @@ async def _consume_caught(db, session: dict[str, Any]) -> None:
             logger.warning("[muse] could not mark diaries acknowledged", exc_info=True)
 
 
+def _count_circle_mention(session: dict[str, Any]) -> None:
+    """Did she just bring a friend up? Two per session and the note goes away.
+
+    Counted from what she actually said rather than from a die roll, so a
+    session where it never came up naturally keeps its full allowance.
+    """
+    names = [str(n) for n in (session.get("circle_names") or []) if str(n).strip()]
+    if not names:
+        return
+    said = ""
+    for m in reversed(session.get("chat") or []):
+        if isinstance(m, dict) and str(m.get("role") or "") != "user":
+            said = str(m.get("text") or "")
+            break
+    if not said:
+        return
+    if any(n in said or n.split()[-1] in said for n in names):
+        try:
+            session["circle_mentions"] = int(session.get("circle_mentions") or 0) + 1
+        except (TypeError, ValueError):
+            session["circle_mentions"] = 1
+
+
 async def _after_actress_spoke(db, session: dict[str, Any]) -> None:
     """Spend one-shot memory that rode on the turn that just landed."""
+    _count_circle_mention(session)
     await _consume_caught(db, session)
     await _consume_social_seeds(db, session)
     await _consume_pitch_recommend(db, session)
@@ -3385,6 +3447,9 @@ def _duet_user_prompt(
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
+    circle_note = _circle_note(session)
+    if circle_note:
+        parts.append(circle_note)
     cited = _cited_memories_block(session)
     if cited:
         parts.append(cited)
@@ -4645,6 +4710,7 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
     except Exception:
         logger.debug("[muse] partner memories load failed", exc_info=True)
     session["caught"] = {}
+    await _load_circle(db, session)
     await _load_social_seeds(db, session)
     await _load_handpost_notices(db, session)
     await _load_pitch_recommend(db, session)
@@ -4685,6 +4751,55 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
             or newest.get("summary") or ""
         ).strip(),
     }
+
+
+# 常駐する量の上限。今日 2,468字 → 1,373字 に削ったばかりで、ここはすぐ
+# 膨らむ。**要約ではなく指し先**にする（`lounge.outing_summary_line`）。
+CIRCLE_MAX_LINES = 2
+CIRCLE_MAX_CHARS = 150
+
+
+async def _load_circle(db, session: dict[str, Any]) -> None:
+    """Who she has been out with lately — two short lines, kept all session.
+
+    Unlike `social_seeds`, these are not spent after her first turn. A friend
+    she saw last Sunday did not stop existing because she has already spoken
+    once; the seeds are a tip to try in one shot, this is just who is around.
+    """
+    session["circle"] = []
+    char_id = str(_inputs(session).get("character_id") or "")
+    if not char_id:
+        return
+    try:
+        rows = await lounge_db.list_threads(db, limit=20, kind="outing")
+    except Exception:
+        logger.debug("[muse] could not read the outing feed", exc_info=True)
+        return
+    lines: list[str] = []
+    names: set[str] = set()
+    used = 0
+    for row in rows:
+        cast_ids = {
+            str(c.get("character_id") or "")
+            for c in (row.get("cast") or []) if isinstance(c, dict)
+        }
+        if char_id not in cast_ids:
+            continue
+        line = lounge_mod.outing_summary_line(row)
+        if not line or used + len(line) > CIRCLE_MAX_CHARS:
+            continue
+        lines.append(line)
+        used += len(line)
+        names.update(
+            str(c.get("name_ja") or "").strip()
+            for c in (row.get("cast") or [])
+            if isinstance(c, dict) and str(c.get("character_id") or "") != char_id
+        )
+        if len(lines) >= CIRCLE_MAX_LINES:
+            break
+    session["circle"] = lines
+    session["circle_names"] = sorted(n for n in names if n)
+    session["circle_mentions"] = 0
 
 
 async def _load_social_seeds(db, session: dict[str, Any]) -> None:
@@ -6074,6 +6189,21 @@ async def finish_session(
                     num_ctx=num_ctx,
                     spooler=spooler,
                 )
+                # A day off with her friends, every few shoots. The job decides
+                # for itself whether one is due (`_outing_is_due`) and skips
+                # otherwise, so this stays one submit with no state out here.
+                # It takes no session and no photo — see the job.
+                spooler.submit(
+                    JobLane.PROMPT,
+                    "generate_outing",
+                    run_generate_outing_job,
+                    meta={"session_id": sid, "character_id": cid},
+                    db=db,
+                    ollama=ollama,
+                    character_id=cid,
+                    model=model,
+                    num_ctx=num_ctx,
+                )
             # Pitch / habit are independent of share succeeding — queue them
             # for the lead only so a failed wrap post does not silence ideas.
             lead_id = char_id
@@ -6774,6 +6904,131 @@ async def run_generate_lounge_share_job(
             num_ctx=num_ctx,
         )
     _report(reporter, 1.0, "楽屋に投稿しました")
+    return {"status": "ok", "thread_id": thread["id"]}
+
+
+# 何回撮ったら一件ぶん進むか。彼女たちの生活は撮影より遅く流れる。
+OUTING_EVERY_SHOOTS = 3
+
+
+async def _outing_is_due(db, character_id: str) -> bool:
+    """前の一件から撮影が `OUTING_EVERY_SHOOTS` 回ぶん進んだか。
+
+    数え方は preset の `shoot_count`（通算撮影回数・既にある）と、直近の
+    `outing` スレッドが持つ `shoot_count` の差。**preset に欄を足さない。**
+    """
+    preset = await presets_db.get_preset(db, character_id) or {}
+    try:
+        now = int(preset.get("shoot_count") or 0)
+    except (TypeError, ValueError):
+        now = 0
+    if now < 1:
+        return False
+    try:
+        rows = await lounge_db.list_threads(db, limit=40, kind="outing")
+    except Exception:
+        logger.debug("[muse] could not read the outing feed", exc_info=True)
+        return False
+    mine = [
+        r for r in rows
+        if character_id in {
+            str(c.get("character_id") or "")
+            for c in (r.get("cast") or []) if isinstance(c, dict)
+        }
+    ]
+    if not mine:
+        return True
+    try:
+        last = int(mine[0].get("shoot_count") or 0)
+    except (TypeError, ValueError):
+        last = 0
+    return (now - last) >= OUTING_EVERY_SHOOTS
+
+
+async def run_generate_outing_job(
+    reporter, cancel, *, db, ollama, character_id: str,
+    model: str = "", num_ctx: int | None = None,
+):
+    """A day off with the friends she is closest to, written for the feed.
+
+    Nothing about the studio goes in — no session log, no photo, no theme. The
+    other lounge posts all take those, and take them into the writing: even the
+    friend-facing wrap post comes out as a report about the shoot. This one is
+    handed the people and an everyday occasion, and nothing else, so what comes
+    back is the part of her life the camera was not there for.
+    """
+    _report(reporter, 0.1, "お出かけの話を書いています")
+    if not await _outing_is_due(db, character_id):
+        return {"status": "skipped", "reason": "not due"}
+
+    friends = await compat_mod.friends_of(db, character_id, min_tier="close", limit=2)
+    if not friends:
+        friends = await compat_mod.friends_of(
+            db, character_id, min_tier="acquaintance", limit=2,
+        )
+    if not friends:
+        return {"status": "skipped", "reason": "no friends"}
+
+    preset = await presets_db.get_preset(db, character_id) or {}
+    cast = [{
+        "character_id": character_id,
+        "name_ja": str(preset.get("name_ja") or preset.get("name") or ""),
+        "name": str(preset.get("name") or preset.get("name_ja") or ""),
+        "voice_ja": str(preset.get("voice_ja") or ""),
+        "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
+    }]
+    for f in friends[:2]:
+        fid = str(f.get("id") or "")
+        fp = await presets_db.get_preset(db, fid) or {}
+        cast.append({
+            "character_id": fid,
+            "name_ja": str(f.get("name_ja") or fp.get("name_ja") or ""),
+            "name": str(f.get("name") or fp.get("name") or ""),
+            "voice_ja": str(fp.get("voice_ja") or ""),
+            "summary_ja": str(fp.get("summary_ja") or fp.get("summary") or ""),
+        })
+
+    occasion, hint = lounge_mod.pick_outing()
+    system = crew.outing_prompt(cast, occasion=occasion, hint=hint)
+    _report(reporter, 0.5, "お出かけの話を書いています")
+    try:
+        raw = await chain._call(
+            ollama, system=system, prompt="書き込みをお願いします。",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception as exc:
+        logger.warning("[muse] outing generation failed: %s", exc)
+        return {"status": "failed", "reason": str(exc)}
+
+    parsed = lounge_mod.parse_labelled(raw)
+    messages = lounge_mod.normalize_outing(parsed, cast)
+    if not messages:
+        return {"status": "failed", "reason": "unreadable outing output"}
+    for m in messages:
+        m["id"] = str(uuid.uuid4())
+
+    try:
+        shoot_count = int(preset.get("shoot_count") or 0)
+    except (TypeError, ValueError):
+        shoot_count = 0
+    thread = {
+        "id": str(uuid.uuid4()),
+        "kind": "outing",
+        "author_character_id": character_id,
+        "author_role": "muse",
+        "author_name_ja": cast[0]["name_ja"],
+        "author_name": cast[0]["name"],
+        "occasion": occasion,
+        "when_ja": str(parsed.get("WHEN_JA") or "この前"),
+        "cast": [{k: c[k] for k in ("character_id", "name_ja", "name")} for c in cast],
+        "shoot_count": shoot_count,
+        "text_ja": messages[0]["text_ja"],
+        "text_en": messages[0]["text_en"],
+        "messages": messages,
+        "created_at": time.time(),
+    }
+    await lounge_db.save_thread(db, thread)
+    _report(reporter, 1.0, "お出かけの話を書きました")
     return {"status": "ok", "thread_id": thread["id"]}
 
 

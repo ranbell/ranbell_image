@@ -2484,6 +2484,51 @@ def lounge_share_prompt(
     ] if x)
 
 
+def outing_prompt(
+    cast: list[dict[str, Any]],
+    *,
+    occasion: str = "",
+    hint: str = "",
+    when_ja: str = "",
+) -> str:
+    """撮影の外で、仲のいい子同士が出かけた日の短い掛け合い。
+
+    楽屋の他の投稿と違って、**撮影の材料を一切受け取らない**。session_log も
+    photo_desc も渡さない。渡せば必ずその話になるので、渡さない。
+
+    一度の呼び出しで全員ぶん書かせる（`normalize_outing` が `TURN_N_*` を
+    話者に割る）。人数が増えても呼び出しは増えない。
+    """
+    who = "、".join(
+        f"『{str(c.get('name_ja') or '')}』" for c in cast if c.get("name_ja")
+    )
+    voices = "\n".join(
+        f"- {c.get('name_ja')}: {str(c.get('voice_ja') or c.get('summary_ja') or '')[:80]}"
+        for c in cast if c.get("name_ja")
+    )
+    return "\n\n".join(x for x in [
+        f"スタジオの【お出かけ】チャンネルに、{who} が"
+        "先日の出来事を短く書き込みます。あなたは全員ぶんを書いてください。",
+        f"【それぞれの口調】\n{voices}" if voices else "",
+        f"【いつ】{when_ja}" if when_ja else "",
+        f"【何をした】{occasion}" + (f"（{hint}）" if hint else ""),
+        "【ルール】",
+        "1. **仕事の話ではない。** 撮影・衣装・カメラ・ポーズ・スタジオの"
+        "出来事は書かない。休みの日の他愛のない話にする。",
+        "2. 総監督の名前は出さなくてよい。出すとしても、その日の出来事は"
+        "仕事の外のこととして書く。",
+        "3. 秘密の日記のような重い本音は書かない。友達に見せる軽さで。",
+        "4. 4〜6発言。1発言 40〜80字。相手の発言に返す形にする。",
+        "5. システムの言葉や「私はAI」は出さない。",
+        "6. 出力は下の見出しだけ。JSON やコードフェンスは禁止:",
+        "WHEN_JA: いつの話か一言（例: この前の日曜）\n"
+        "TURN_1_WHO: 発言者の名前\n"
+        "TURN_1_JA: 発言（日本語）\n"
+        "TURN_1_EN: English version\n"
+        "TURN_2_WHO: …（同じ形で TURN_6 まで。使わない番号は書かない）",
+    ] if x)
+
+
 def lounge_pitch_prompt(
     character: dict[str, Any],
     *,

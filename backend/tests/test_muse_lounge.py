@@ -167,3 +167,159 @@ async def test_next_liked_pitch_skips_already_recommended(monkeypatch):
     assert hit["id"] == "fresh"
     none = await lounge_db.next_liked_pitch(object(), "unknown")
     assert none is None
+
+
+# ── お出かけ ────────────────────────────────────────────────────────────────
+def test_normalize_outing_maps_speakers():
+    """一度の呼び出しで全員ぶん。人数が増えても呼び出しは増えない。"""
+    cast = [
+        {"character_id": "a", "name_ja": "各務 みお", "name": "Mio"},
+        {"character_id": "b", "name_ja": "ゆかり", "name": "Yukari"},
+    ]
+    raw = """
+WHEN_JA: この前の日曜
+TURN_1_WHO: 各務 みお
+TURN_1_JA: 並んだのに、結局座れたの一番奥の席だった
+TURN_1_EN: We queued and still got the worst table
+TURN_2_WHO: ゆかり
+TURN_2_JA: あそこ、次はもっと早く行こうね
+TURN_2_EN: Next time we go earlier
+"""
+    msgs = lounge.normalize_outing(lounge.parse_labelled(raw), cast)
+    assert [m["name_ja"] for m in msgs] == ["各務 みお", "ゆかり"]
+    assert [m["character_id"] for m in msgs] == ["a", "b"]
+    assert msgs[0]["turn"] == 0 and msgs[1]["turn"] == 1
+
+
+def test_normalize_outing_falls_back_to_cast_order():
+    """話者名が書かれなくても、並びで割り当てる。空にはしない。"""
+    cast = [{"character_id": "a", "name_ja": "みお"}, {"character_id": "b", "name_ja": "あおい"}]
+    msgs = lounge.normalize_outing(
+        lounge.parse_labelled("TURN_1_JA: いこっか\nTURN_2_JA: いこいこ"), cast,
+    )
+    assert [m["character_id"] for m in msgs] == ["a", "b"]
+    assert all(m["text_en"] for m in msgs), "英語が空なら日本語で埋める"
+
+
+def test_outing_summary_line_is_a_pointer_not_a_summary():
+    """彼女の手元に残るのは**指し先**。中身は楽屋のスレッドにある。
+
+    総監督:「要約は諸刃の剣。結構消えてしまうので。」690字を45字に縮めると
+    ほとんど捨てたうえで、全部あるかのように読める。いつ・誰と・何を、だけ。
+    """
+    line = lounge.outing_summary_line({
+        "when_ja": "この前の日曜", "occasion": "パンケーキ",
+        "cast": [{"name_ja": "みお"}, {"name_ja": "ゆかり"}],
+    })
+    assert "ゆかり" in line and "パンケーキ" in line and "この前の日曜" in line
+    assert "みお" not in line, "本人の名前は要らない"
+    assert len(line) <= 80
+
+
+def test_the_occasions_are_never_about_work():
+    """撮影・衣装・カメラの語が入っていたら、休みの日の話にならない。"""
+    blob = " ".join(f"{a} {b}" for a, b in lounge._OUTINGS)
+    for word in ("撮影", "カメラ", "レンズ", "衣装", "ポーズ", "スタジオ", "監督"):
+        assert word not in blob, word
+
+
+# ── 彼女の手元に残る分 ──────────────────────────────────────────────────────
+from backend.app.muse import service as muse_service  # noqa: E402
+
+
+def test_the_circle_block_stays_small():
+    """常駐は上限つき。**ここは軽量化の対象にしない代わりに、最初から小さく。**
+
+    2026-08-21 に常駐を 2,468字 → 1,373字 に削ったばかりで、この手の欄は
+    放っておくとすぐ膨らむ。要約ではなく指し先にしてあるのはそのため。
+    """
+    session = {"circle": [
+        "この前の日曜、ゆかりとパンケーキ",
+        "先週、あおいと買い物",
+        "先月、みんなと旅行",
+    ]}
+    block = muse_service._memory_block(session)
+    assert "ゆかり" in block and "あおい" in block
+    assert "旅行" not in block, f"{muse_service.CIRCLE_MAX_LINES}行まで"
+    assert muse_service.CIRCLE_MAX_CHARS <= 150
+
+
+def test_she_may_bring_her_friends_up_but_only_so_often():
+    """禁じずに理由を渡し、上限だけ置く。数えるのは**実際に言った時**。
+
+    毎ターン言えとするとくどくなる。訊かれた時だけとすると、休みの日が
+    無かったのと同じになる。
+    """
+    session = {
+        "circle": ["この前の日曜、ゆかりとパンケーキ"],
+        "circle_names": ["ゆかり"], "circle_mentions": 0,
+        "chat": [{"role": "muse", "text": "……この前、ゆかりちゃんと行ったんです。"}],
+    }
+    assert muse_service._circle_note(session), "最初は出る"
+
+    muse_service._count_circle_mention(session)
+    assert session["circle_mentions"] == 1
+
+    # 触れていないターンは数えない ―― 使わなかった分は残る
+    session["chat"].append({"role": "muse", "text": "はい、そこに座りますね。"})
+    muse_service._count_circle_mention(session)
+    assert session["circle_mentions"] == 1
+
+    session["circle_mentions"] = muse_service.CIRCLE_MENTION_MAX
+    assert not muse_service._circle_note(session), "上限で黙る"
+
+
+def test_no_circle_no_note():
+    """お出かけの記録が無ければ、プロンプトは一文字も増えない。"""
+    assert muse_service._circle_note({"circle": []}) == ""
+    assert muse_service._memory_block({"circle": []}) == ""
+
+
+@pytest.mark.asyncio
+async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
+    """彼女たちの生活は撮影より遅く流れる。毎回は書かない。
+
+    回数は preset の `shoot_count`（既にある・`push_shoot_recap` が進める）と、
+    直近の一件が持つ `shoot_count` の差で見る。**preset に欄を足さない。**
+    """
+    from backend.app.muse import service as svc
+
+    preset = {"shoot_count": 13}
+    threads: list[dict] = []
+    monkeypatch.setattr(svc.presets_db, "get_preset",
+                        lambda db, cid: _async(preset))
+    monkeypatch.setattr(svc.lounge_db, "list_threads",
+                        lambda db, **kw: _async(list(threads)))
+
+    # 一度も無ければ、まず一件
+    assert await svc._outing_is_due(None, "mio") is True
+
+    threads.append({"kind": "outing", "shoot_count": 13,
+                    "cast": [{"character_id": "mio"}]})
+    assert await svc._outing_is_due(None, "mio") is False, "直後は要らない"
+
+    preset["shoot_count"] = 13 + svc.OUTING_EVERY_SHOOTS - 1
+    assert await svc._outing_is_due(None, "mio") is False
+
+    preset["shoot_count"] = 13 + svc.OUTING_EVERY_SHOOTS
+    assert await svc._outing_is_due(None, "mio") is True
+
+    # 他の子の記録では自分の番は進まない
+    threads[0]["cast"] = [{"character_id": "someone-else"}]
+    assert await svc._outing_is_due(None, "mio") is True
+
+
+@pytest.mark.asyncio
+async def test_no_shoots_yet_means_no_day_off(monkeypatch):
+    """撮ったことのない子に、思い出だけ先にある状態を作らない。"""
+    from backend.app.muse import service as svc
+    monkeypatch.setattr(svc.presets_db, "get_preset",
+                        lambda db, cid: _async({"shoot_count": 0}))
+    monkeypatch.setattr(svc.lounge_db, "list_threads", lambda db, **kw: _async([]))
+    assert await svc._outing_is_due(None, "newcomer") is False
+
+
+def _async(value):
+    async def _run():
+        return value
+    return _run()
