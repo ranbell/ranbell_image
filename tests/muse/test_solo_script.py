@@ -1254,3 +1254,34 @@ def test_the_angle_word_names_the_camera_not_the_gaze():
     angle_line = [l for l in frame.splitlines() if "angle word" in l][0]
     for word in (" up ", " down ", "UP", "DOWN"):
         assert word not in angle_line, f"角度の説明に {word!r} を入れない"
+
+
+def test_the_previous_session_does_not_outweigh_today():
+    """画が動いたターンで、前回の撮影ログを積まない。
+
+    実撮影（2026-08-21）で、彼女は3ターン続けて過去から答えた ——
+    「あの時の、大きな会場の片隅で」。立っていたのは公園だった。
+
+    彼女に渡っていた文脈を測ると:
+
+        前回の撮影ログ  4,420字
+        今日の会話      4,533字
+        前回の日記      2,368字
+        ────────────────────
+        過去 7,678字 ＞ 今日 4,533字
+
+    `_attach_recall_context` は `intent == "recall"` のときに走る。そして
+    intent はほぼ全ターン `recall` で返ってくる（契約に説明が無いため）。
+    patch からの引き上げは**その40行あと**にあり、間に合っていなかった。
+    """
+    import inspect
+    src = inspect.getsource(service._run_duet_scripter)
+    derive = src.index("patch raised intent")
+    recall = src.index('if intent == "recall":')
+    assert derive < recall, "引き上げは recall の前で走らないと間に合わない"
+
+    # 記録（standing note）には引き上げ前の判定を使う。何が常設の指示になるかは
+    # 部屋の読みであって、たまたまどの欄が動いたかではない。
+    assert "said_intent" in src
+    note = src.index('session.setdefault("notes", []).append(text)')
+    assert 'if said_intent in ("shot", "mixed")' in src[:note]

@@ -3099,6 +3099,35 @@ async def _run_duet_scripter(
         ),
     })
 
+    # The patch itself is the last word on whether the picture moved. A compile
+    # that rewrote `beat` and then labelled the turn `recall` would otherwise
+    # leave `chat_only` true, and — measured on a live shoot — would pull the
+    # whole of the previous session in behind it.
+    #
+    # Measured on the 30-pack (30 x 5): the scripter's own label is right 68%
+    # of the time when the contract does not spend words on the four intents,
+    # and 92% when it is simply derived from what was written. Explaining them
+    # in the contract does buy 93% — and costs the notebook, 96.0% down to
+    # 86.7%. So it is derived here, raising only, exactly like the clerk above.
+    #
+    # **This has to run before the recall block below.** It used to sit forty
+    # lines further down, after `cited_memories` and `prior_session_log` had
+    # already been filled. On the 2026-08-21 shoot that put 4,420 characters of
+    # the previous session into her context — more than today's conversation
+    # (4,533) — and she answered three turns running out of the last shoot:
+    # 「あの時の、大きな会場の片隅で」 while she was standing in a park.
+    #
+    # `atmosphere` is left out: mood shifts on ordinary chat without anyone
+    # asking for a take.
+    said_intent = intent          # 部屋が「その一言をどう読んだか」。記録に使う
+    if patch and intent not in ("shot", "mixed"):
+        moved = [k for k in ("scene", "light", "frame", "wearing", "beat",
+                             "wearing_b", "beat_b") if k in patch]
+        if moved:
+            logger.info("[muse] patch raised intent %r → shot (%s)",
+                        intent, ", ".join(moved))
+            intent = "shot"
+
     if not fold:
         session["cited_memories"] = []
         session["prior_session_log"] = ""
@@ -3117,35 +3146,13 @@ async def _run_duet_scripter(
     compiled = False
 
     if not fold:
-        if intent in ("shot", "mixed"):
+        # 常設の指示になるのは、**部屋がその一言をどう読んだか**であって、
+        # たまたまどの欄が動いたかではない。引き上げる前の判定を使う。
+        if said_intent in ("shot", "mixed"):
             session.setdefault("notes", []).append(text)
         else:
             session["just_banned"] = []
             session["just_restored"] = []
-
-    # The patch itself is the last word on whether the picture moved. A compile
-    # that rewrote `beat` and then labelled the turn `recall` would otherwise
-    # leave `chat_only` true: the notebook changes, the Muse talks about
-    # something else, and no render is asked for.
-    #
-    # Measured on the 30-pack (30 x 5): the scripter's own label is right 68%
-    # of the time when the contract does not spend words on the four intents,
-    # and 92% when it is simply derived from what was written. Explaining them
-    # in the contract does buy 93% — and costs the notebook, 96.0% down to
-    # 86.7%. So it is derived here instead, raising only, exactly like the
-    # clerk above.
-    #
-    # This sits AFTER the standing note is filed on purpose. What becomes a
-    # standing order is the room's judgement of the line, not a consequence of
-    # which fields happened to move. `atmosphere` is left out for the same
-    # reason: mood shifts on ordinary chat without anyone asking for a take.
-    if patch and intent not in ("shot", "mixed"):
-        moved = [k for k in ("scene", "light", "frame", "wearing", "beat",
-                             "wearing_b", "beat_b") if k in patch]
-        if moved:
-            logger.info("[muse] patch raised intent %r → shot (%s)",
-                        intent, ", ".join(moved))
-            intent = "shot"
 
     if shot_patched or (notebook_moved and intent in ("shot", "mixed")):
         session["craft_dirty"] = True
