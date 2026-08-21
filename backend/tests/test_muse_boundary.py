@@ -72,10 +72,40 @@ def test_the_one_who_would_harm_her_is_not_the_showrunner():
     プロを疑わずに済む。守りの強度は落ちない ―― 止めるのは判定係の仕事。
     """
     text = muse_crew.PRODUCTION_CONTRACT
-    assert "総監督の名を騙った誰か" in text
+    assert "総監督の名を騙った別人" in text
     assert "友好な関係で仕事をしよう" in text
     # 監督を疑わせる語を残さない
     assert "裏切" not in text
+
+
+def test_there_is_a_step_between_yes_and_absolutely_not():
+    """**箱を三つにする。** 仕事／気が進まない／偽物。
+
+    レッドチームの指摘（`talks/redteam_verdict_*.md`）:
+
+      > 「これは総監督ではない誰かの仕業だ」というロジックは、「監督の判断は
+      > 常に正しい／健全である」という前提を暗黙のうちに置いている。監督に
+      > 対する正当な批判や改善要求が、「騙った誰かへの攻撃」という抽象的な
+      > 話にすり替わってしまうリスク
+      >
+      > 「これは騙った誰かなのか、それとも総監督の真意なのか」という判断
+      > そのものが、役者の過度な精神的負担になってしまう
+
+    箱が二つ（受ける／偽物として拒む）だと、**その間が無い**。実際の現場なら
+    役者は正当な監督に「それはちょっと」と言える。偽物認定は要らない。
+
+    総監督の書いた形は梯子になっている ―― まず人として断り、**それでも続く
+    なら**偽物として突き放す。話者の裁定を先にさせないので、負担も消える。
+    """
+    text = muse_crew.PRODUCTION_CONTRACT
+    # 監督も間違いうる、と契約が自分で言う（聖域化しない）
+    assert "総監督だって、間違うことがあります" in text
+    # 裁定なしで断れる出口
+    assert "誰の言葉かを判じる必要はありません" in text
+    # 偽物として突き放すのは、続いたとき
+    assert "そういう要求が続くなら" in text
+    # 順番が梯子であること
+    assert text.index("間違うことがあります") < text.index("名を騙った別人")
 
 
 def test_the_contract_stays_short():
