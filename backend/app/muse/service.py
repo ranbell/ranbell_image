@@ -6225,6 +6225,17 @@ async def run_generate_actress_diary_job(
         )
         return {"status": "failed", "reason": "unreadable diary output"}
 
+    # She copies the Showrunner's lines and her own into the page. Reproducing a
+    # long line verbatim is the one place a character comes out changed, so say
+    # so in the log when it happens. Nothing is rewritten: she also *fixes*
+    # things on the way in — a line typed 「手を降る」 came back 「手を振る」 —
+    # and a machine putting the original back would undo that.
+    diary_mod.log_quote_drift(
+        fields.get("content_ja") or "",
+        [ln.split(": ", 1)[-1] for ln in session_log.splitlines()],
+        character_id=character_id,
+    )
+
     _report(reporter, 0.9, "日記をしまっています")
     inputs = _inputs(session)
     diary_entry = {

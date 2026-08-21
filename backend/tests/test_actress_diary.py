@@ -750,3 +750,58 @@ def test_nothing_is_pulled_on_a_turn_nobody_asked():
     """引き出しは訊かれたときだけ。何も引いていなければブロックは空。"""
     assert muse_service._cited_memories_block({"cited_memories": []}) == ""
     assert muse_service._cited_memories_block({}) == ""
+
+
+# ── 写した引用がずれていないか（見るだけ・直さない） ────────────────────────
+def test_a_copied_line_that_came_out_changed_is_reported():
+    """実物（2026-08-21）。同じ日記の前半では「マイク」と書けていた。
+
+    92本の測定で崩れたのは全て逐語の引用の中で、自分の言葉で書いている所では
+    一度も崩れなかった。**書き写しの最中だけ壊れる。**
+    """
+    # 実際のログの一行そのまま。**短く刈り込まない** —— 前後がついた長い行に
+    # 対して短い引用を当てるのがこの網の仕事で、刈ると被覆率が 0.78 に落ちて
+    # 通らなくなる。閾値 0.80 は実データで決めたので、こちらを実物に合わせる。
+    log = [
+        "……あの、本当の私って……うーん、そうですね……。きっと、マイクの前で"
+        "用意した言葉じゃなくて、もっと、こう……ふにゃふにゃしてて、弱虫な、"
+        "そんな感じ、かな……？　あ、でも、今の私は……ちゃんと、ここ（胸）に"
+        "届いてるなって思えるくらいには、強くなれてるはずです。",
+    ]
+    page = (
+        "マイクの前ならあんなに動じないのに、レンズ越しは慣れません。\n"
+        "「きっと、マインの前で用意した言葉じゃなくて、もっと、こう……"
+        "ふにゃふにゃしてて、弱虫な、そんな感じ、かな……？」"
+    )
+    hits = muse_diary.quote_drift(page, log)
+    assert len(hits) == 1, hits
+    assert hits[0]["drift"] == ["ク→ン"]
+    assert hits[0]["cover"] >= 0.9
+
+
+def test_the_page_she_fixed_is_left_alone():
+    """彼女はこちらの誤字を直すことがある。**それを誤りと数えない。**
+
+    ログ「手を降るシーンにしよう」が、日記では「手を振る」になっていた。
+    直す側に回ると、この仕事を潰す。だから見つけたと言うだけで直さない。
+    """
+    log = ["じゃあここでお別れにしようか。バイバイ。って手を降るシーンにしよう。"]
+    page = "「バイバイ、って手を振るシーンにしよう」って言われて、現実に戻された。"
+    hits = muse_diary.quote_drift(page, log)
+    assert hits, "気づくことは気づく"
+    # 直す関数を生やさない。報告の形だけ
+    assert not hasattr(muse_diary, "repair_quote_drift")
+
+
+def test_a_quote_inside_a_quote_is_not_a_slip():
+    """引用の中の引用は『』に変わる。正しい書き換えなので黙る。"""
+    log = ["みおちゃんの、日記の中の「本当の私」ってどんな私？"]
+    page = "「みおちゃんの、日記の中の『本当の私』ってどんな私？」と聞かれた。"
+    assert muse_diary.quote_drift(page, log) == []
+
+
+def test_her_own_words_are_not_measured_against_the_log():
+    """写していない文は対象外。似ているだけの地の文を誤りと数えない。"""
+    log = ["カメラってこっちね。私を見てね。"]
+    page = "カメラを見るのは、やっぱり少し怖い。総監督さんの声だけが頼りだった。"
+    assert muse_diary.quote_drift(page, log) == []

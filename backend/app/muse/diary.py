@@ -254,3 +254,97 @@ def _stub(en: str, ja: str) -> bool:
     if not en or not ja:
         return not en
     return len(en) < 40 and len(en) < len(ja) * 0.25
+
+
+# ── 引用が書き写しでずれていないか（見るだけ・直さない） ────────────────────
+
+_QUOTE_RE = re.compile(r"「([^」]{12,})」")
+_BRACKETS = frozenset("「」『』\"'“”")
+# 引用の中の引用は『』に変わる。これは正しい書き換えで、ずれではない。
+_DRIFT_COVER = 0.80
+_DRIFT_SPAN = 4
+
+
+def quote_drift(text: str, sources: list[str]) -> list[dict[str, Any]]:
+    """日記が写した「」が、元の発言から1〜2文字ずれていないか。
+
+    実物（2026-08-21）:
+
+        対話ログ  「きっと、マイクの前で用意した言葉じゃなくて、もっと、こう…」
+        日記      「きっと、マインの前で用意した言葉じゃなくて、もっと、こう…」
+
+    **同じ日記の前半では「マイク」と書けている。** 語を知らないのではなく、
+    長い引用を書き写している最中にずれる。92本の測定で、崩れたのは全て
+    逐語の引用の中。自分の言葉で書いている所では一度も崩れなかった。
+
+    ## 直さないこと
+
+    彼女は逆に、こちらの誤字を直すことがある —— ログ「手を降るシーン」が
+    日記では「手を振るシーン」になっていた。機械で原文に戻すと、それを潰す。
+    **見つけたと言うだけにして、直すかどうかは人が決める。**
+
+    ## 測って決めた三つ
+
+    - **全体の一致率では測れない。** 日記は台詞だけを切り取るので、前置きの
+      ついたログ行と比べると一致率が 0.71 に落ちる。実際それで取り逃した。
+      見るのは*引用のどれだけがログで説明できるか*（被覆率 0.80 以上）
+    - 報告するのは**両側4字以下の置換だけ**。前置きの削除は書き写しの
+      ずれではないので黙る
+    - **括弧だけの違いは黙る。** `「`→`『` は正しい入れ子
+
+    片仮名の1文字違いを語単位で探す網も試したが、`ポーズ` を（ログにたまたま
+    `ポーン` があるだけで）誤りと数え、`マフィ`（2文字ずれ）と `マいて`
+    （平仮名混じり）を取り逃した。**引用というまとまりで見るほうが正しい。**
+    """
+    import difflib
+
+    # A line she is copying can be the whole turn or just the 「」 inside it —
+    # 「バイバイ。って手を降るシーンにしよう」 was said inside a longer sentence.
+    # Both shapes go in the haystack.
+    src: list[str] = []
+    for line in sources or []:
+        line = str(line or "").strip()
+        if len(line) >= 12:
+            src.append(line)
+        src += [q for q in _QUOTE_RE.findall(line) if len(q) >= 12]
+    if not src or not text:
+        return []
+    out: list[dict[str, Any]] = []
+    for m in _QUOTE_RE.finditer(text):
+        quote = m.group(1)
+        best, cover = "", 0.0
+        for line in src:
+            sm = difflib.SequenceMatcher(None, line, quote, autojunk=False)
+            got = sum(b.size for b in sm.get_matching_blocks()) / max(1, len(quote))
+            if got > cover:
+                best, cover = line, got
+        if not (_DRIFT_COVER <= cover < 1.0):
+            continue
+        drift: list[str] = []
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+                None, best, quote, autojunk=False).get_opcodes():
+            if tag != "replace" or (i2 - i1) > _DRIFT_SPAN or (j2 - j1) > _DRIFT_SPAN:
+                continue
+            was, now = best[i1:i2], quote[j1:j2]
+            if set(was) <= _BRACKETS and set(now) <= _BRACKETS:
+                continue
+            drift.append(f"{was}→{now}")
+        if drift:
+            out.append({"quote": quote[:60], "cover": round(cover, 3),
+                        "drift": drift})
+    return out
+
+
+def log_quote_drift(text: str, sources: list[str], *, character_id: str = "") -> int:
+    """Say so in the log when a copied line came out changed. Returns the count."""
+    try:
+        hits = quote_drift(text, sources)
+    except Exception:
+        logger.debug("[muse.diary] quote drift check failed", exc_info=True)
+        return 0
+    for h in hits:
+        logger.warning(
+            "[muse.diary] quote drift %s cover=%.3f char=%s 「%s」",
+            h["drift"], h["cover"], character_id[:8], h["quote"],
+        )
+    return len(hits)
