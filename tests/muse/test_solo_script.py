@@ -1222,3 +1222,35 @@ def test_the_label_table_comes_from_shot_keys():
     )
     assert parsed["patch"]["bg"] == "a crowd of cosplayers"
     assert parsed["patch"]["wearing_drop"] == "coat"
+
+
+def test_the_angle_word_names_the_camera_not_the_gaze():
+    """`up` / `down` を説明に入れると、その語が取り違えの材料になる。
+
+    実撮影（ブランコ・2026-08-21）で、監督の「カメラを少し上から」を compile は
+    `high-angle` と正しく書き、直後の言い直しが `low-angle` に化けさせた。
+    残っていた理由の欄:
+
+      「カメラが高い位置にあるんですね」という理解と…指示通りの構図
+      （被写体を見上げるアングル）に彼女が合わせようとしていることを読み取った
+
+    **カメラの位置は分かっていて、語だけが逆。** 監督は次のターンで
+    「from above っていうんだよ。ローアングルじゃないよ」と訂正している。
+
+    直すのに3つ測った（言い直し・実会話つき・各8回）:
+
+        「カメラの高さと視線は逆になる」と説明     0/8
+        カメラの位置だけに絞る                    7/8
+        位置だけ＋「彼女は逆を向くことが多い」     0/8
+
+    説明に `up` / `down` が一語でも入ると総崩れする。**取り違えを説明しようと
+    すると、説明に使う語が取り違えの材料になる。**
+    """
+    frame = notebook.FIELD_CONTRACTS["frame"]
+    assert "where the camera stands" in frame
+    assert "high_angle" in frame and "low_angle" in frame
+
+    # 角度の説明に視線の向きを持ち込まない。ここが崩れると 0/8 に戻る。
+    angle_line = [l for l in frame.splitlines() if "angle word" in l][0]
+    for word in (" up ", " down ", "UP", "DOWN"):
+        assert word not in angle_line, f"角度の説明に {word!r} を入れない"

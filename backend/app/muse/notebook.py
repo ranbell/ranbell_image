@@ -18,11 +18,6 @@ from . import brief
 SHOT_KEYS = (
     "atmosphere",
     "scene",
-    # Where the light comes from and how hard it is. Its own field because it is
-    # its own decision: the crewed studio has a seat that owns exposure and a
-    # PLAN line that owns the intent, and 主演撮り had neither — 「逆光にして」
-    # could only land inside scene or atmosphere, both of which are rewritten
-    # for other reasons, so it was gone again a turn later.
     # 彼女以外に画面に写っているもの。背後の建物、周りのエキストラ、置かれた
     # 小道具。**現場ではこれを BG と呼ぶ**（Background の略で、無線に乗る）。
     #
@@ -35,6 +30,11 @@ SHOT_KEYS = (
     # 1枚も無い語で、`set_dressing` も `extras` も `mob` も 0 枚。
     # **現場で実際に使われている語だけが通った。**
     "bg",
+    # Where the light comes from and how hard it is. Its own field because it is
+    # its own decision: the crewed studio has a seat that owns exposure and a
+    # PLAN line that owns the intent, and 主演撮り had neither — 「逆光にして」
+    # could only land inside scene or atmosphere, both of which are rewritten
+    # for other reasons, so it was gone again a turn later.
     "light",
     "frame",
     "wearing",
@@ -144,7 +144,30 @@ FIELD_CONTRACTS: dict[str, str] = {
         "the camera and where her eyes are pointed, as one story: 'wide shot, "
         "looking straight into the lens'. ONE crop — zoom/close/upper OR "
         "wide/full-body, never both `wide_shot` and `close_up` in the same "
-        "frame — plus the gaze. Nothing about her hands or her clothes."
+        "frame — plus the gaze. Nothing about her hands or her clothes.\n"
+        # 実撮影（ブランコ・2026-08-21）で、監督が「カメラを少し上から」と
+        # 言ったターンを compile は `high-angle` と正しく書き、その直後の
+        # 言い直しが `low-angle` に化けさせた。理由の欄にはこう残っていた:
+        #
+        #   「カメラが高い位置にあるんですね」という理解と…指示通りの構図
+        #   （被写体を見上げるアングル）に彼女が合わせようとしていることを読み取った
+        #
+        # **カメラの位置は正しく分かっていて、語だけが逆。** 監督は次のターンで
+        # 「from above っていうんだよ。ローアングルじゃないよ」と訂正している。
+        #
+        # 直すとき、最初は「カメラの高さと視線は逆になる」と説明を書いた。
+        # 8回中5回しか保たず、会話に彼女の「上目遣いすぎかな？」が入ると 0/8。
+        # 本人の弁:「`she looks UP into it` という記述が、逆にノイズになっている。
+        # **Up/Down という単語が視覚的フックになっている**以上、徹底的に排除する」。
+        #
+        #   視線も書く（up/down を含む）      0/8
+        #   位置だけに絞る                    7/8   ← これ
+        #   位置だけ＋「逆を向くことが多い」    0/8
+        #
+        # **取り違えを説明しようとすると、説明に使う語が取り違えの材料になる。**
+        "  The angle word names where the camera stands, never where she "
+        "looks. Camera above her: `high_angle`. Camera below her: "
+        "`low_angle`. Her eyes have no vote in it."
     ),
     "wearing": (
         "everything ON her body and nothing else — clothes, hair, "
