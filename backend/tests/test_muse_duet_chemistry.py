@@ -90,6 +90,16 @@ def _duet_session(**over):
 
 
 # ── finish_session queues one job per actor in a duet ───────────────────────
+def diaries(spooler):
+    """spool された**日記のジョブだけ**。
+
+    総数で縛ると、撮影の後ろで走る別のジョブ（お出かけの生成など）が増える
+    たびに落ちる ―― 実際に6件が落ちた。数えたいのは日記なので、日記で数える。
+    """
+    return [c for c in spooler.calls
+            if c["title"] == "generate_actress_diary"]
+
+
 @pytest.mark.asyncio
 async def test_finish_session_duet_spools_two_diary_jobs(monkeypatch):
     fake_multi_preset_store(monkeypatch, {
@@ -100,10 +110,10 @@ async def test_finish_session_duet_spools_two_diary_jobs(monkeypatch):
     session = await muse_service.finish_session(db, spooler, _duet_session(), ollama="OLL")
 
     assert session["status"] == "finished"
-    assert len(spooler.calls) == 2
-    ids = {c["kwargs"]["character_id"] for c in spooler.calls}
+    assert len(diaries(spooler)) == 2
+    ids = {c["kwargs"]["character_id"] for c in diaries(spooler)}
     assert ids == {"c001", "c002"}
-    for c in spooler.calls:
+    for c in diaries(spooler):
         assert c["func"] is muse_service.run_generate_actress_diary_job
         assert c["kwargs"]["spooler"] is spooler
     assert session["diary"]["entries"].keys() == {"c001", "c002"}
@@ -118,7 +128,7 @@ async def test_wrapping_a_duet_twice_still_writes_one_diary_each(monkeypatch):
     session = _duet_session()
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
-    assert len(spooler.calls) == 2
+    assert len(diaries(spooler)) == 2
 
 
 # ── the second landing diary queues chemistry, exactly once ────────────────
@@ -143,7 +153,7 @@ async def test_second_duet_diary_landing_queues_chemistry(monkeypatch):
     db, spooler = FakeDB({"vlm_model": "cfg-model"}), FakeSpooler()
     session = _duet_session()
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
-    diary_calls = list(spooler.calls)
+    diary_calls = diaries(spooler)
     assert len(diary_calls) == 2
 
     for call in diary_calls:

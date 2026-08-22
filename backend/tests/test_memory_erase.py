@@ -71,9 +71,13 @@ async def test_plan_memory_erase_counts_without_changing_anything():
 
     plan = await presets.plan_memory_erase(db)
 
+    # **消える欄が増えたら、ここも増える。** 数えている欄そのものが増えたので
+    # あって、消え方が変わったわけではない ―― 撮影回数や好みも記憶のうち。
     assert plan == {
         "characters": 3, "affected": 2,
         "diaries": 2, "chemistry": 1, "social_seeds": 1,
+        "bond": 0, "shoot_count": 0, "shoot_recaps": 0,
+        "last_shoot_at": 0, "showrunner_taste": 0,
     }
     # Nothing was written.
     assert db._qc.set_payload_calls == []

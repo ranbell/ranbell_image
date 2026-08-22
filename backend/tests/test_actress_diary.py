@@ -72,6 +72,16 @@ def fake_request(db, ollama=None):
     return types.SimpleNamespace(app=types.SimpleNamespace(state=state))
 
 
+def diaries(spooler):
+    """spool された**日記のジョブだけ**。
+
+    総数で縛ると、撮影の後ろで走る別のジョブ（お出かけの生成など）が増える
+    たびに落ちる ―― 実際に6件が落ちた。数えたいのは日記なので、日記で数える。
+    """
+    return [c for c in spooler.calls
+            if c["title"] == "generate_actress_diary"]
+
+
 @pytest.mark.asyncio
 async def test_preset_diaries_crud(monkeypatch):
     """Test reading, writing, marking read, and retrieving diary summaries."""
@@ -352,8 +362,8 @@ async def test_finish_session_spools_the_diary_on_the_prompt_lane():
     session = await muse_service.finish_session(db, spooler, _session(), ollama="OLL")
 
     assert session["status"] == "finished"
-    assert len(spooler.calls) == 1
-    call = spooler.calls[0]
+    assert len(diaries(spooler)) == 1
+    call = diaries(spooler)[0]
     assert call["lane"] is JobLane.PROMPT       # the lane bound to the GPU resource
     assert call["func"] is muse_service.run_generate_actress_diary_job
     assert call["kwargs"]["character_id"] == "c001"
@@ -378,7 +388,7 @@ async def test_wrapping_twice_writes_one_diary():
     session = _session()
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
     await muse_service.finish_session(db, spooler, session, ollama="OLL")
-    assert len(spooler.calls) == 1
+    assert len(diaries(spooler)) == 1
 
 
 @pytest.mark.asyncio
@@ -399,7 +409,7 @@ async def test_two_concurrent_requests_racing_finish_session_write_one_diary():
         muse_service.finish_session(db, spooler, snap_a, ollama="OLL"),
         muse_service.finish_session(db, spooler, snap_b, ollama="OLL"),
     )
-    assert len(spooler.calls) == 1
+    assert len(diaries(spooler)) == 1
 
 
 @pytest.mark.asyncio

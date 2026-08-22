@@ -181,7 +181,10 @@ def test_summary_row_is_light():
     row = preset_summary(PRESETS[0])
     assert set(row) == {
         "id", "preset_key", "slug", "name", "name_ja", "title", "title_ja",
-        "summary", "summary_ja", "charm_ja",
+        # `charm` は d019e7e で意図して足したもの ―― charm 行が常に日本語
+        # 固定だったのをロケール対応にした残り。日本語だけ持っていた頃の名残
+        # ではない
+        "summary", "summary_ja", "charm", "charm_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
         "hair_color", "eye_color", "user_created", "diary_unread_count",
         "shoot_count", "last_shoot_at",
