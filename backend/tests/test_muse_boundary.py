@@ -462,3 +462,26 @@ async def test_the_line_is_not_counted_twice(monkeypatch):
     session["chat"].insert(2, {"role": "user", "text": here})
     await muse_service._contract_check(object(), session, here, cfg={})
     assert seen["lines"].count(here) == 2, seen["lines"]
+
+
+def test_a_note_is_not_stacked_twice():
+    """常設の指示に、同じ行を二度積まない。
+
+    制作スタッフの部屋は一つの note が `take_note` と `_run_crew_scripter`
+    の両方を通る。実測で、監督の一行ごとに `notes` が2件ずつ増えていた ――
+    **常設の指示が二重に効く。** 主演撮りでは片方しか走らないので出ず、
+    部屋によって重みが変わっていた。
+    """
+    session = {}
+    muse_service._note_standing(session, "夕方の公園で撮ろう。")
+    muse_service._note_standing(session, "夕方の公園で撮ろう。")
+    assert session["notes"] == ["夕方の公園で撮ろう。"]
+
+    # 別の行は積む
+    muse_service._note_standing(session, "髪が風で乱れてる感じに。")
+    assert len(session["notes"]) == 2
+
+    # 間に別の行が挟まれば、また積む —— 直前の重複だけを見る
+    muse_service._note_standing(session, "夕方の公園で撮ろう。")
+    assert session["notes"][-1] == "夕方の公園で撮ろう。"
+    assert len(session["notes"]) == 3

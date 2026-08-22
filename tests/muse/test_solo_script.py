@@ -1316,5 +1316,5 @@ def test_the_previous_session_does_not_outweigh_today():
     # 記録（standing note）には引き上げ前の判定を使う。何が常設の指示になるかは
     # 部屋の読みであって、たまたまどの欄が動いたかではない。
     assert "said_intent" in src
-    note = src.index('session.setdefault("notes", []).append(text)')
+    note = src.index("_note_standing(session, text)")
     assert 'if said_intent in ("shot", "mixed")' in src[:note]

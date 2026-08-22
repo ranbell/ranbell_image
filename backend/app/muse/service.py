@@ -1795,6 +1795,30 @@ def _sane_strike(session: dict[str, Any], picked: list[str]) -> list[str]:
     return kept
 
 
+def _note_standing(session: dict[str, Any], text: str) -> None:
+    """常設の指示に一行足す。**同じ行を二度は積まない。**
+
+    制作スタッフの部屋は、一つの note を `take_note` と `_run_crew_scripter`
+    （中で `_run_duet_scripter` が同じ行を積む）の両方が通る。実測で、監督の
+    一行ごとに `notes` が2件ずつ増えていた:
+
+        notes (4件):
+           ・夕方の公園、ブランコで撮ろう。
+           ・夕方の公園、ブランコで撮ろう。
+           ・髪が風でちょっと乱れてる感じにしよう。
+           ・髪が風でちょっと乱れてる感じにしよう。
+
+    `notes` は**常設の指示**なので、二度積めばその指示が二重に効く。主演撮り
+    では片方しか走らないので出ていなかった ―― 部屋によって重みが変わる。
+
+    同じ行が二度来ても、常設の指示としては既に立っている。積み直す意味は無い。
+    """
+    notes = session.setdefault("notes", [])
+    if notes and notes[-1] == text:
+        return
+    notes.append(text)
+
+
 async def take_note(
     db, ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> tuple[list[str], list[str]]:
@@ -1804,8 +1828,8 @@ async def take_note(
     like a refusal?" pattern. Patterns miss the phrasings nobody thought of,
     and this cannot: a note that removes nothing simply comes back empty.
     """
+    _note_standing(session, text)
     notes = session.setdefault("notes", [])
-    notes.append(text)
     index = len(notes) - 1
     session["just_banned"] = []
     session["just_restored"] = []
@@ -3539,7 +3563,7 @@ async def _run_duet_scripter(
         # 常設の指示になるのは、**部屋がその一言をどう読んだか**であって、
         # たまたまどの欄が動いたかではない。引き上げる前の判定を使う。
         if said_intent in ("shot", "mixed"):
-            session.setdefault("notes", []).append(text)
+            _note_standing(session, text)
         else:
             session["just_banned"] = []
             session["just_restored"] = []
@@ -4746,7 +4770,7 @@ async def post_duet_chat(
         if not named:
             await take_note(db, ollama, session, text, cfg=cfg)
         else:
-            session.setdefault("notes", []).append(text)
+            _note_standing(session, text)
             session["just_banned"] = []
             session["just_restored"] = []
 
