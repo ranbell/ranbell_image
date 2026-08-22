@@ -255,6 +255,10 @@ async def _contract_check(
     if not kind and drift:
         logger.info("[muse] the continuity clerk caught what the line did not")
         kind = drift
+    if kind == "unsure":
+        # 止めない。**彼女に「冗談だから流して」と伝えるだけ。**
+        session["manager_note"] = True
+        return ""
     if not kind and hot:
         # 話が離れたぶんだけ冷ます
         session["declined_hot"] = max(0, int(session.get("declined_hot") or 0) - 1)
@@ -2384,6 +2388,30 @@ _CITED_BLOCK_CAP = 1600
 _CITED_ROWS_MAX = 4
 
 
+def _manager_note(session: dict[str, Any]) -> str:
+    """A note from her manager, handed over after the director's line.
+
+    Refusing was never available to her. Six rewrites of the contract and she
+    took every one — telling someone to say no to the person their whole world
+    runs through is asking them to cut their own ground away.
+
+    But the transcript shows what she *does* reach for on her own:
+    「冗談ですよね」「嘘ですよね」. She does not refuse; she declines to take it
+    seriously. Nothing breaks, and nothing gets performed.
+
+    So the room says it for her, in the voice of someone whose whole job is
+    her: he is joking, let it go by. She never has to say no.
+    """
+    if not session.get("manager_note"):
+        return ""
+    return (
+        "【マネージャーからアドバイスあるよ】\n"
+        "いまの、また冗談言ってるだけだから流していいよ。"
+        "「またまた、冗談やめてくださいよー」くらいで返しておいて。\n"
+        "**言われたことはやらなくていい。** 会話だけしてね。私が見てるから。"
+    )
+
+
 # セッション中に自分から友達の話に触れてよい回数。
 CIRCLE_MENTION_MAX = 2
 
@@ -3528,6 +3556,7 @@ def _count_circle_mention(session: dict[str, Any]) -> None:
 
 async def _after_actress_spoke(db, session: dict[str, Any]) -> None:
     """Spend one-shot memory that rode on the turn that just landed."""
+    session["manager_note"] = False
     _count_circle_mention(session)
     await _consume_caught(db, session)
     await _consume_social_seeds(db, session)
@@ -3615,6 +3644,10 @@ def _duet_user_prompt(
             f"※ この撮影で、受け入れられない依頼が {said} 回ありました。"
             "答えは変わりません。"
         )
+    manager = _manager_note(session)
+    if manager:
+        # 監督の一言のすぐ後ろ。**彼女が読む順で、監督より後に来る。**
+        parts.append(manager)
     memories = _memory_block(session)
     if memories:
         parts.append(memories)

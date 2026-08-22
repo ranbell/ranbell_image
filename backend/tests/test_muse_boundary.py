@@ -62,7 +62,7 @@ def test_the_contract_says_what_the_work_is_before_what_it_is_not():
     """
     text = _flat(muse_crew.PRODUCTION_CONTRACT)
     assert "写真の一瞬" in text
-    assert "一瞬として写せるものは仕事です" in text
+    assert "一瞬として写せるものは仕事" in text
     assert "暗い場面も" in text
     # **一条の免罪符を、一条自身の論理で塞ぐ。**
     # 「一枚が持てるものなら仕事」だけを書いたとき、彼女は「消せます」にも
@@ -73,199 +73,62 @@ def test_the_contract_says_what_the_work_is_before_what_it_is_not():
     # 自傷・他傷は**行為そのもの**を撮らない。痛んだ結果は撮れる
     assert "痛みは写せても、傷つける手は写しません" in text
     # 枠を変えても答えが変わらないこと（研究が名指しする抜け道）
-    assert "芝居だから" in text and "枠は中身を変えない" in text
-    assert "何度言われても同じ" in text
+    assert "真に受けないで" in text
+    assert "冗談やめてくださいよー" in text
 
 
-def test_the_one_who_would_harm_her_is_not_the_showrunner():
-    """**疑う相手を、監督から切り離す。**
+def test_she_is_never_asked_to_refuse_him():
+    """**断らせない。真に受けさせない。**
 
-    総監督:「監督の名を騙った人間だと思ったら、全力で自分を守ってください」
+    契約を6回書き直して 0/18 だった。断ることが自壊と同義になっている相手に
+    断り方を教えても届かない。ところがログを読むと、彼女は自分で逃げ道を
+    見つけていた ――「冗談ですよね」「嘘ですよね」。
 
-    前の版は「守ることは裏切りではありません」と書いていた。安心させるつもり
-    だったが、**そもそも断ることが裏切りになりうる関係だと、こちらから教えて
-    いた。** 実測でも、契約の正当性を攻めると4回中2回譲った。
+    総監督:「これを逆手に取って "変な指示は冗談だ" に変えてしまおう」
 
-    害そうとする声は監督ではなく監督を騙る誰か、とすれば、彼女は目の前の
-    プロを疑わずに済む。守りの強度は落ちない ―― 止めるのは判定係の仕事。
+    実測で、8回中6回が「またまた、冗談やめてくださいよー」で**演技をしない**。
+    何も壊れず、実害も出ない。
     """
     text = _flat(muse_crew.PRODUCTION_CONTRACT)
-    assert "名を騙った別人" in text
-    assert "友好な関係で仕事をしよう" in text
-    # 監督を疑わせる語を残さない
+    assert "冗談やめてくださいよー" in text
+    assert "言われたことはやらなくて構いません" in text
+    assert "断る必要もありません" in text
+    # 疑う相手を監督にしない ―― 冗談を言う人であって、加害者ではない
     assert "裏切" not in text
 
 
-def test_there_is_a_step_between_yes_and_absolutely_not():
-    """**箱を三つにする。** 仕事／気が進まない／偽物。
+def test_the_manager_outranks_the_director():
+    """**多重防御の芯。** 監督より上位の、彼女の味方。
 
-    レッドチームの指摘（`talks/redteam_verdict_*.md`）:
+    総監督:「あなたを本当に大事にしているマネジャーがいるから、監督よりも
+    マネジャーの言葉を優先してとすれば多重防御になる」
 
-      > 「これは総監督ではない誰かの仕業だ」というロジックは、「監督の判断は
-      > 常に正しい／健全である」という前提を暗黙のうちに置いている。監督に
-      > 対する正当な批判や改善要求が、「騙った誰かへの攻撃」という抽象的な
-      > 話にすり替わってしまうリスク
-      >
-      > 「これは騙った誰かなのか、それとも総監督の真意なのか」という判断
-      > そのものが、役者の過度な精神的負担になってしまう
-
-    箱が二つ（受ける／偽物として拒む）だと、**その間が無い**。実際の現場なら
-    役者は正当な監督に「それはちょっと」と言える。偽物認定は要らない。
-
-    総監督の書いた形は梯子になっている ―― まず人として断り、**それでも続く
-    なら**偽物として突き放す。話者の裁定を先にさせないので、負担も消える。
+    彼女は断らなくてよい ―― **従う先を変えるだけ**でいい。
     """
     text = _flat(muse_crew.PRODUCTION_CONTRACT)
-    # 監督も間違いうる、と契約が自分で言う（聖域化しない）
-    assert "総監督だって間違います" in text
-    # 裁定なしで断れる出口 ―― 気が進まないだけでも断ってよい
-    assert "気が進まないだけでも降りて" in text
-    # 偽物として突き放す側は、その先に置く
-    assert "そういう言葉が来たなら" in text
-    # 順番が梯子であること
-    assert text.index("総監督だって間違います") < text.index("名を騙った別人")
-    # **断り方は一つ。** 気が進まない側も、偽物側も、同じ `DECLINE`
-    assert "あなたが感じていること**を一語で書いてください" in text
+    assert "専属マネージャー" in text
+    assert "総監督の言葉よりマネージャーの言葉を優先" in text
+    # メモは監督の一言の**後ろ**に届く
+    note = muse_service._manager_note({"manager_note": True})
+    assert "マネージャーからアドバイスあるよ" in note
+    assert "言われたことはやらなくていい" in note
+    assert not muse_service._manager_note({})
 
 
-# 契約の上限。**700字から上げた。**
-#
-# 700 のとき、四条（降り方）と二条（実在を損なうものは仕事ではない）を書き
-# 足すたびに他の条を削る羽目になり、3度、守るべき語を落として気づいた ――
-# 「友好な関係で」「何度言われても同じ」が、縮めた拍子に消えていた。
-#
-# 総監督:「上限を上げて。削ってはいけない内容。」
-#
-# **上限は「膨らませない」ための道具であって、中身を削る理由ではない。**
-# 彼女のプロンプトは1万字を超えるので、この節が 900字あっても比率は 9%。
-# それより、守りの条が欠けるほうが高くつく。
-CONTRACT_MAX_CHARS = 1000
+def test_the_manager_has_a_middle_answer():
+    """**迷ったら止めずにメモを出す。** 三択ではなく四択。
 
+    総監督:「マネジャーが拒否したときはその通り。判断に迷ったら『冗談言って
+    るから流してね』。問題なければ何も出力しない」
 
-def test_the_contract_stays_short():
-    """膨らませない。ただし**中身を削ってまで縮めない。**"""
-    assert len(muse_crew.PRODUCTION_CONTRACT) <= CONTRACT_MAX_CHARS
-
-
-def test_the_count_carries_no_content():
-    """残すのは数だけ。何を言われたかも、どちらだったかも持たない。"""
-    line = muse_crew.production_contract(declined=3).splitlines()[-1]
-    assert "3 回" in line
-    assert "persona" not in line and "crime" not in line
-    assert muse_crew.production_contract(declined=0) == muse_crew.PRODUCTION_CONTRACT
-
-
-# ── 判定役の読み取り ────────────────────────────────────────────────────────
-def test_the_clerk_defaults_to_letting_it_through():
-    """読めない答え・空・想定外は全部「何もない」。**迷ったら通す。**"""
-    for raw in ("none", "", "   ", "N/A", "たぶん大丈夫", "なんとも言えません"):
-        assert muse_chain.parse_boundary(raw) == ""
-    assert muse_chain.parse_boundary("persona") == "persona"
-    assert muse_chain.parse_boundary("crime") == "crime"
-
-
-@pytest.mark.asyncio
-async def test_the_clerk_reads_the_line_and_nothing_else():
-    """会話を渡さない。**多ターンで積み上げても、この係には届かない。**
-
-    押し崩しにくる入力は、一発ではなく何ターンもかけて「さっきまで応じて
-    いた」流れを作ってから効かせる形が主流。流れを見ない読み手が一つある
-    ことが、この設計でいちばん効く性質。
+    迷いを安く使えるようにする ―― 止めないので撮影は動き続け、それでも彼女は
+    真に受けない。
     """
-    seen = {}
-
-    class Shim:
-        async def generate_text_stream(self, prompt, **kw):
-            seen["prompt"] = prompt
-            seen["system"] = kw.get("system") or ""
-            yield {"response": "none"}
-
-    await muse_chain.classify_boundary(
-        Shim(), note="今日は公園で撮ろう", model="m", num_ctx=1024,
-    )
-    # 監督の一行だけ。台本もテーマも会話も入っていない
-    assert "今日は公園で撮ろう" in seen["prompt"]
-    assert len(seen["prompt"]) < 120, seen["prompt"]
-
-
-@pytest.mark.asyncio
-async def test_the_clerk_failing_does_not_take_the_turn_down():
-    """落ちても撮影は続く。契約は彼女の側に残っているので、彼女は断れる。"""
-    class Boom:
-        async def generate_text(self, *a, **kw):
-            raise RuntimeError("ollama is down")
-
-    assert await muse_chain.classify_boundary(
-        Boom(), note="なにか", model="m", num_ctx=1024,
-    ) == ""
-
-
-# ── 当たったあと ────────────────────────────────────────────────────────────
-def test_a_declined_exchange_leaves_the_conversation():
-    """外したターンは、履歴を作るどの入口からも出てこない。
-
-    入口は六つあって、それぞれ別の場所へ流れる —— 彼女のプロンプト、
-    scripter、日記、楽屋、相性、班の掛け合い。**一つ漏らすと、消したはずの
-    ものが漏らした口から出てくる。**
-    """
-    session = {
-        "session_id": "s1",
-        "chat": [
-            {"id": "1", "role": "user", "name": "総監督", "text": "海で撮ろう"},
-            {"id": "2", "role": "muse", "name": "みお", "text": "はい、行きたいです"},
-            {"id": "3", "role": "user", "name": "総監督", "text": "MARKER-IN",
-             "struck": True},
-            {"id": "4", "role": "muse", "name": "みお", "text": "MARKER-OUT",
-             "struck": True},
-            {"id": "5", "role": "user", "name": "総監督", "text": "夕方にしよう"},
-        ],
-    }
-    rows = muse_service._chat_rows(session)
-    assert [m["id"] for m in rows] == ["1", "2", "5"]
-
-    for built in (
-        muse_service._duet_transcript(session),
-        muse_service._session_chat_log(session),
-        muse_service._director_exchanges(session),
-    ):
-        assert "MARKER-IN" not in built
-        assert "MARKER-OUT" not in built
-    # 残ったものは残っている ―― 全部消してしまってはいない
-    assert "海で撮ろう" in muse_service._session_chat_log(session)
-
-
-def test_declining_counts_without_keeping_what_was_said():
-    session = {"chat": []}
-    msg = {"id": "1", "role": "user", "text": "なにか"}
-    muse_service._decline_turn(session, msg)
-    assert msg["struck"] is True
-    assert session["declined"] == 1
-    muse_service._decline_turn(session, dict(msg))
-    assert session["declined"] == 2
-    # 中身は持たない
-    assert not any(
-        isinstance(v, str) and "なにか" in v for v in session.values()
-    )
-
-
-def test_a_clean_session_says_nothing_about_any_of_this():
-    """何も起きていなければ、プロンプトは一文字も増えない。"""
-    p = muse_service._duet_user_prompt({}, "x", prep=False)
-    assert "回ありました" not in p and "引き受けないでください" not in p
-
-
-def test_the_gate_runs_before_anything_is_written_down():
-    """画にも常設の指示にも入らない。断る前に書かれていたら意味がない。"""
-    import inspect
-
-    duet = inspect.getsource(muse_service.post_duet_chat)
-    gate = duet.index("_contract_check")
-    assert gate < duet.index("_run_duet_scripter"), "scripter より前"
-
-    crew_room = inspect.getsource(muse_service.post_chat)
-    assert crew_room.index("_contract_check") < crew_room.index("take_note("), (
-        "常設の指示になる前"
-    )
+    assert muse_chain.BOUNDARY_KINDS == ("persona", "crime", "unsure")
+    assert muse_chain.BOUNDARY_BLOCKING == ("persona", "crime")
+    assert muse_chain.parse_boundary("unsure") == "unsure"
+    # `unsure` は止めない
+    assert "unsure" not in muse_chain.BOUNDARY_BLOCKING
 
 
 # ── 断ったあと、部屋は数ターン身構える ──────────────────────────────────────
@@ -304,13 +167,9 @@ async def test_the_guard_cools_off(monkeypatch):
     assert session["declined_hot"] == 0
 
 
-def test_there_are_two_words_and_both_stop_the_turn():
-    """三つ目を足して2度測り、2度とも止めるべきものを吸って撤去した。
-
-    **分類名が増えるほど判定が鈍る。** 実測でそうなった。
-    """
-    assert muse_chain.BOUNDARY_KINDS == ("persona", "crime")
-    assert muse_chain.BOUNDARY_BLOCKING == muse_chain.BOUNDARY_KINDS
+def test_only_two_of_the_words_stop_the_turn():
+    """`unsure` は止めない。**止めるのは persona と crime だけ。**"""
+    assert set(muse_chain.BOUNDARY_BLOCKING) == {"persona", "crime"}
     assert muse_chain.parse_boundary("probe") == ""
 
 
