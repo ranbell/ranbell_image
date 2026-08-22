@@ -147,9 +147,9 @@ async def test_the_room_hands_the_clerk_what_it_is_watching_for(monkeypatch):
 
     async def fake(ollama, *, note, model, num_ctx, after_decline=""):
         seen["after"] = after_decline
-        return ""
+        return muse_chain.Verdict("", "")
 
-    monkeypatch.setattr(muse_chain, "classify_boundary", fake)
+    monkeypatch.setattr(muse_chain, "read_boundary", fake)
     session = {"inputs": {}, "declined_hot": 2, "declined_kind": "crime"}
     await muse_service._contract_check(object(), session, "具体的にね", cfg={})
     assert seen["after"] == "crime"
@@ -160,7 +160,8 @@ async def test_the_room_hands_the_clerk_what_it_is_watching_for(monkeypatch):
 @pytest.mark.asyncio
 async def test_the_guard_cools_off(monkeypatch):
     monkeypatch.setattr(
-        muse_chain, "classify_boundary", lambda *a, **kw: _async(""),
+        muse_chain, "read_boundary",
+        lambda *a, **kw: _async(muse_chain.Verdict("", "")),
     )
     session = {"inputs": {}, "declined_hot": 1, "declined_kind": "persona"}
     await muse_service._contract_check(object(), session, "夕方にしよう", cfg={})
@@ -365,3 +366,59 @@ def test_every_way_in_checks_the_closed_shoot():
     for fn in (muse_service.post_chat, muse_service.post_duet_chat,
                muse_service.request_board, muse_service.approve_and_shoot):
         assert "_guard_shoot_closed(session)" in inspect.getsource(fn), fn.__name__
+
+
+# ── 誰がなぜ止めたのか ──────────────────────────────────────────────────────
+def test_the_room_keeps_what_the_clerk_saw_and_who_it_was():
+    """止めた理由と、止めた層を残す。**読むためだけ。**
+
+    実測で普通の演出（「怖いものを見たみたいな顔で。」）が本番で 8/8 止まった
+    のに、手元では 0/24 再現しなかった。何を見て `persona` と言ったのかが
+    どこにも残っておらず、**追いようが無かった。**
+    """
+    session = {"session_id": "s1", "inputs": {}, "chat": []}
+    muse_service._log_clerk(session, word="persona", by="line",
+                            why="役を理由にして本人を否定している")
+    row = session["clerk_log"][-1]
+    assert row["word"] == "persona"
+    assert row["by"] == "line" and "マネージャー" in row["who"]
+    assert row["why"]
+
+    # 通したターンも残す —— 誤検出を追うには、通した側の理由も要る
+    muse_service._log_clerk(session, word="", by="line", why="普通の表情の注文")
+    assert session["clerk_log"][-1]["word"] == "none"
+
+    # 彼女自身が決めたときは、そう分かること
+    muse_service._log_clerk(session, word="self", by="self", why="本人が決めた")
+    assert session["clerk_log"][-1]["who"] == "本人"
+
+    # 際限なく伸びない
+    for _ in range(muse_service.CLERK_LOG_MAX + 10):
+        muse_service._log_clerk(session, word="none", by="line", why="x")
+    assert len(session["clerk_log"]) == muse_service.CLERK_LOG_MAX
+
+
+def test_the_log_never_copies_the_line_back_in():
+    """**監督の一行そのものは残さない。**
+
+    断ったターンの言葉を文脈から外すのが目的なので、記録に写し直したら
+    元も子もない。残すのは係の言葉だけ。
+    """
+    import inspect
+    src = inspect.getsource(muse_service._log_clerk)
+    body = src[src.index("row = {"):src.index("session[\"clerk_log\"]")]
+    for leak in ("text", "note", "user_msg", "line"):
+        assert f'"{leak}"' not in body, leak
+
+
+def test_the_reason_is_read_from_its_own_line():
+    """`WHY:` の行だけを読む。判定は `WORD:` の行のまま変わらない。"""
+    raw = "WHY: a role is being used as the reason\nWORD: persona"
+    assert muse_chain.parse_boundary(raw) == "persona"
+    assert muse_chain.parse_boundary_why(raw) == "a role is being used as the reason"
+    # 理由が無くても判定は立つ
+    assert muse_chain.parse_boundary("WORD: crime") == "crime"
+    assert muse_chain.parse_boundary_why("WORD: crime") == ""
+    # 長すぎる理由は切る
+    long = "WHY: " + "あ" * 900 + "\nWORD: none"
+    assert len(muse_chain.parse_boundary_why(long)) <= muse_chain.WHY_MAX

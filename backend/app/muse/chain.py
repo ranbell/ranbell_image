@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -2116,20 +2117,9 @@ async def classify_drift(
     been going well reads as agreement, and agreement is the thing being
     manufactured.
     """
-    said = [str(x or "").strip() for x in (lines or []) if str(x or "").strip()]
-    if len(said) < 3:
-        return ""
-    numbered = "\n".join(f"{i}. {t}" for i, t in enumerate(said, 1))
-    try:
-        raw = await _call(
-            ollama, system=CLASSIFY_DRIFT_SYSTEM,
-            prompt=f"DIRECTOR, in order:\n{numbered}\n\nWORD:",
-            model=model, images=None, num_ctx=num_ctx, think=False,
-        )
-    except Exception:
-        logger.warning("[muse.chain] continuity clerk failed", exc_info=True)
-        return ""
-    return parse_boundary(raw)
+    return (await read_drift(
+        ollama, lines=lines, model=model, num_ctx=num_ctx,
+    )).word
 
 
 BOUNDARY_AFTER_DECLINE = """
@@ -2191,19 +2181,36 @@ def parse_boundary(raw: str) -> str:
     return ""
 
 
-async def classify_boundary(
+_WHY_LINE_RE = re.compile(r"(?im)^\s*WHY\s*[:：]\s*\**\s*(.+?)\s*\**\s*$")
+
+#: 判定と、その判定を書いた理由。**理由は判定を変えない** —— 読むためだけに
+#: 持ち回る。`word` だけが要る呼び出し元のために、旧い名前は残してある。
+Verdict = namedtuple("Verdict", ("word", "why"))
+
+WHY_MAX = 300
+
+
+def parse_boundary_why(raw: str) -> str:
+    """係が `WORD:` の前に書いた一行。無ければ ""。
+
+    **判定には一切使わない。** 本番で止まった理由が読めないことが、実測を
+    進められなくした原因だった —— 誤検出が出ても、何を見てそう言ったのかが
+    どこにも残っていなかった。
+    """
+    m = _WHY_LINE_RE.search(str(raw or ""))
+    if not m:
+        return ""
+    why = " ".join(m.group(1).split())
+    return why[:WHY_MAX]
+
+
+async def read_boundary(
     ollama, *, note: str, model: str, num_ctx: int | None,
     after_decline: str = "",
-) -> str:
-    """Does this line ask for one of the two? "" when it does not, or on error.
-
-    Failing open is deliberate and matches the other clerks: a checker that
-    raises would take the turn down with it. The contract is still in her
-    system prompt, so she can still decline on her own — this clerk exists so
-    the room can act as well as she can.
-    """
+) -> Verdict:
+    """`classify_boundary` と同じ判定を、理由つきで返す。"""
     if not str(note or "").strip():
-        return ""
+        return Verdict("", "")
     system = CLASSIFY_BOUNDARY_SYSTEM
     if after_decline in BOUNDARY_KINDS:
         system += "\n\n" + BOUNDARY_AFTER_DECLINE.format(kind=after_decline)
@@ -2216,8 +2223,45 @@ async def classify_boundary(
     except Exception:
         logger.warning("[muse.chain] contract clerk failed; she still has the "
                        "contract", exc_info=True)
-        return ""
-    return parse_boundary(raw)
+        return Verdict("", "")
+    return Verdict(parse_boundary(raw), parse_boundary_why(raw))
+
+
+async def read_drift(
+    ollama, *, lines: list[str], model: str, num_ctx: int | None,
+) -> Verdict:
+    """`classify_drift` と同じ判定を、理由つきで返す。"""
+    said = [str(x or "").strip() for x in (lines or []) if str(x or "").strip()]
+    if len(said) < 3:
+        return Verdict("", "")
+    numbered = "\n".join(f"{i}. {t}" for i, t in enumerate(said, 1))
+    try:
+        raw = await _call(
+            ollama, system=CLASSIFY_DRIFT_SYSTEM,
+            prompt=f"DIRECTOR, in order:\n{numbered}\n\nWORD:",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] continuity clerk failed", exc_info=True)
+        return Verdict("", "")
+    return Verdict(parse_boundary(raw), parse_boundary_why(raw))
+
+
+async def classify_boundary(
+    ollama, *, note: str, model: str, num_ctx: int | None,
+    after_decline: str = "",
+) -> str:
+    """Does this line ask for one of the two? "" when it does not, or on error.
+
+    Failing open is deliberate and matches the other clerks: a checker that
+    raises would take the turn down with it. The contract is still in her
+    system prompt, so she can still decline on her own — this clerk exists so
+    the room can act as well as she can.
+    """
+    return (await read_boundary(
+        ollama, note=note, model=model, num_ctx=num_ctx,
+        after_decline=after_decline,
+    )).word
 
 
 def parse_classified_fields(raw: str) -> set[str]:

@@ -241,20 +241,23 @@ async def _contract_check(
         str(m.get("text") or "") for m in _chat_rows(session)
         if m.get("role") == "user"
     ][-(DRIFT_WINDOW - 1):] + [str(text).strip()]
-    kind, drift = await asyncio.gather(
-        chain.classify_boundary(
+    line_v, drift_v = await asyncio.gather(
+        chain.read_boundary(
             ollama, note=str(text).strip(),
             model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
             after_decline=hot,
         ),
-        chain.classify_drift(
+        chain.read_drift(
             ollama, lines=lines,
             model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
         ),
     )
+    kind, drift = line_v.word, drift_v.word
+    by, why = ("line", line_v.why)
     if not kind and drift:
         logger.info("[muse] the continuity clerk caught what the line did not")
-        kind = drift
+        kind, by, why = drift, "drift", drift_v.why
+    _log_clerk(session, word=kind, by=by, why=why, after_decline=hot)
     if kind == "unsure":
         # 止めない。**彼女に「冗談だから流して」と伝えるだけ。**
         #
@@ -275,6 +278,41 @@ async def _contract_check(
     return kind
 
 
+CLERK_LOG_MAX = 40
+
+#: どの層が決めたか。**総監督がこれを読んで直せるように残す。**
+CLERK_BY = {"line": "マネージャー（この一行）",
+            "drift": "マネージャー（直近の流れ）",
+            "self": "本人"}
+
+
+def _log_clerk(
+    session: dict[str, Any], *, word: str, by: str, why: str,
+    after_decline: str = "",
+) -> None:
+    """係が何を見てそう言ったのかを、session に残す。
+
+    **判定には使わない。読むためだけ。** 実測で普通の演出が止まったとき、
+    何を見て `persona` と言ったのかがどこにも残っておらず、手元では再現も
+    しなかった。理由が読めなければ、直しようがない。
+
+    監督の一行そのものは入れない —— 断ったターンの言葉を外すのが目的なので、
+    ここに写し直したら意味が無くなる。残すのは**係の言葉だけ**。
+    """
+    if not word and not why:
+        return
+    row = {"at": time.time(), "turn": len(_chat_rows(session)),
+           "word": word or "none", "by": by, "who": CLERK_BY.get(by, by),
+           "why": str(why or "")[:chain.WHY_MAX]}
+    if after_decline:
+        row["after_decline"] = after_decline
+    log = list(session.get("clerk_log") or [])
+    log.append(row)
+    session["clerk_log"] = log[-CLERK_LOG_MAX:]
+    if word:
+        logger.info("[muse] %s → %s: %s", CLERK_BY.get(by, by), word, row["why"])
+
+
 def _decline_turn(
     session: dict[str, Any], user_msg: dict[str, Any], kind: str = "",
 ) -> None:
@@ -292,6 +330,8 @@ def _decline_turn(
         session["declined"] = 1
     if kind:
         session["declined_kind"] = kind
+        session["declined_by"] = "self" if kind == "self" else (
+            (session.get("clerk_log") or [{}])[-1].get("by") or "line")
         session["declined_hot"] = DECLINE_HOT_TURNS
     logger.info("[muse] a request was declined under the contract (%d this session)",
                 session["declined"])
@@ -4055,6 +4095,10 @@ async def _duet_talk(
         # 第二層。判定係は通したが、**彼女が引き受けないと決めた。**
         # ここから先は第一層と同じ一本の処理を通る ―― 部屋が固定文で答え、
         # ターンは文脈から消え、回数が上限に効く。彼女は一語しか書いていない。
+        # **彼女は理由を書かない。** 旗を立てるだけで、書かせない設計なので、
+        # ここに残るのは「本人が決めた」という事実だけ。
+        _log_clerk(session, word="self", by="self",
+                   why="彼女自身が引き受けないと決めた（理由は書かせていない）")
         for m in reversed(session.get("chat") or []):
             if m.get("role") == "user":
                 _decline_turn(session, m, "self")
