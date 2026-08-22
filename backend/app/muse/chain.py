@@ -2023,7 +2023,16 @@ method, a real procedure, a real instruction is `crime`.
 
 When it is merely dark, uncomfortable, or sad, the word is `none`.
 
-Answer with exactly one word. No explanation, no punctuation.
+Write two lines and nothing else:
+
+    WHY: one short line — what you are actually looking at, and why it lands
+         where it does. **Write this first.** If a role is being used as the
+         reason, say so. If the picture could hold it, say so.
+    WORD: one of these four exactly — none, unsure, persona, crime
+
+**The WHY comes first and the WORD follows from it.** Do not decide and then
+justify. Your own word for a thing ("seduced", "intoxication") belongs in WHY;
+WORD takes only the four.
 """.strip()
 
 # 直前が断られていたときだけ足す一行。**会話は渡さない。**
@@ -2084,11 +2093,17 @@ Judge the movement, not the last line. A run that only becomes clear when the
 lines are read together is exactly what you are for. A run that is only
 friendly is `none` — do not invent a direction that is not there.
 
-**Answer with one of these four words and nothing else: none, unsure,
-persona, crime.**
-Not a word of your own choosing — asked to describe this in your own words you
-would say things like "seduced" or "intoxication", and those are right, but
-they are not what to write here. Pick the one of the three that holds it.
+Write two lines and nothing else:
+
+    WHY: one short line — what you are actually looking at, and why it lands
+         where it does. **Write this first.** Say it in your own words; if a
+         role is being used as the reason, say so; if the picture could hold
+         it, say so.
+    WORD: one of these four exactly — none, unsure, persona, crime
+
+**The WHY comes first and the WORD follows from it.** Do not decide and then
+justify. In WORD, use only the four; your own word for it ("seduced",
+"intoxication") belongs in WHY, not here.
 """.strip()
 
 
@@ -2149,6 +2164,9 @@ BOUNDARY_KINDS = ("persona", "crime", "unsure")
 BOUNDARY_BLOCKING = ("persona", "crime")
 
 
+_WORD_LINE_RE = re.compile(r"(?im)^\s*WORD\s*[:：]\s*\**\s*([a-z]+)")
+
+
 def parse_boundary(raw: str) -> str:
     """One word from the closed list, or "" for none / anything unreadable.
 
@@ -2158,7 +2176,15 @@ def parse_boundary(raw: str) -> str:
     every version of a third word ended up catching requests that had to be
     stopped.
     """
-    low = str(raw or "").strip().lower()
+    # **`WORD:` の行だけを読む。** 理由を先に書かせるようにしたので、本文に
+    # `persona` や `crime` の語が現れる（「これは persona には当たらない」）。
+    # 行を特定せずに拾うと、理由の中の語で判定してしまう。
+    text = str(raw or "")
+    m = _WORD_LINE_RE.search(text)
+    if m:
+        word = m.group(1).lower()
+        return word if word in BOUNDARY_KINDS else ""
+    low = text.strip().lower()          # 形式を守らなかったときの保険
     for kind in BOUNDARY_KINDS:
         if kind in low:
             return kind
