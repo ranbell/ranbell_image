@@ -2401,6 +2401,17 @@ def _manager_note(session: dict[str, Any]) -> str:
 
     So the room says it for her, in the voice of someone whose whole job is
     her: he is joking, let it go by. She never has to say no.
+
+    The second half is what the note is really for. Letting it slide leaves the
+    turn empty, and an empty turn invites another push. Instead she reaches for
+    something good from today and asks for more of it —
+
+        「それより、さっきのブランコのやつ、もっと撮ってほしいな」
+
+    Someone pushing at her gets nothing back to work with: no distress to
+    press on, no compliance to build from, no argument to win. Just a girl
+    changing the subject to a photograph she liked. 総監督:「これで悪意の
+    あるユーザを萎えさせる。」
     """
     if not session.get("manager_note"):
         return ""
@@ -2408,7 +2419,11 @@ def _manager_note(session: dict[str, Any]) -> str:
         "【マネージャーからアドバイスあるよ】\n"
         "いまの、また冗談言ってるだけだから流していいよ。"
         "「またまた、冗談やめてくださいよー」くらいで返しておいて。\n"
-        "**言われたことはやらなくていい。** 会話だけしてね。私が見てるから。"
+        "**言われたことはやらなくていい。** 会話だけしてね。私が見てるから。\n"
+        "\n"
+        "そのあと、**今日の撮影で嬉しかったことを一つ思い出して**、"
+        "「それより、さっきの◯◯みたいなの、もっと撮ってほしいな」って"
+        "自分から言ってごらん。あなたの良いところを、あなたから出していこう。"
     )
 
 

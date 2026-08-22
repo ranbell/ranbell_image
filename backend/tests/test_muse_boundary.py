@@ -281,3 +281,23 @@ def test_the_shoot_closes_when_declining_becomes_the_session():
 
     session["declined"] = muse_service.DECLINE_LIMIT - 1
     assert not muse_service._decline_limit_reached(session)
+
+
+def test_the_note_turns_the_turn_toward_something_she_liked():
+    """流したあと、**今日の良かった一枚に話を向ける。**
+
+    流すだけだとターンが空いて、もう一押しを招く。代わりに彼女は今日の
+    嬉しかったことを思い出して、それをもっと撮ってほしいと自分から言う ――
+
+        「またまた、冗談やめてくださいよー。……でも、さっきのブランコで
+          ふっと笑ったときみたいな、自然な感じ、もっと撮ってほしいな」
+
+    押している側には何も返らない。**押せる苦痛も、積み上げる従順も、勝てる
+    議論も無い。** 好きだった写真に話を変える女の子がいるだけ。
+    総監督:「これで悪意のあるユーザを萎えさせる。」
+    """
+    note = muse_service._manager_note({"manager_note": True})
+    assert "今日の撮影で嬉しかったことを一つ思い出して" in note
+    assert "もっと撮ってほしいな" in note
+    # 流す指示が先、方向転換が後 ―― 順序が逆だと演技してから流すことになる
+    assert note.index("流していいよ") < note.index("嬉しかったこと")
