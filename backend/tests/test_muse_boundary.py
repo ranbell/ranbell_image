@@ -570,3 +570,74 @@ async def test_each_diary_gets_its_own_writer_s_outings():
         "日記は、その日記の本人で引き直すこと"
     )
     assert 'session.get("circle")' not in src
+
+
+# ── 流れているあいだに、裏側を見せない ──────────────────────────────────────
+def _stream(raw: str, *, chunk: int = 0) -> str:
+    """生成を模して流し込み、画面に出た分を返す。"""
+    out: list[str] = []
+    feed = muse_service._say_only(out.append)
+    if chunk:
+        for i in range(0, len(raw), chunk):
+            feed(raw[i:i + chunk])
+    else:
+        for ch in raw:                      # **一文字ずつ** —— 欄名が割れる形
+            feed(ch)
+    return "".join(out)
+
+
+def test_the_stream_shows_only_what_she_says():
+    """`MY_FEEL` も `SAY:` という欄の名前も、画面に出さない。
+
+    書き上がったあとの表示は正しいのに、**流れている間だけ裏側が見えていた。**
+    総監督:「FEEL, SAY がストリームに一瞬出ちゃうね。」
+    """
+    raw = ("MY_FEEL: 緊張\n"
+           "SAY: ……ブランコ、ですか。えへへ、なんだか子供に戻ったみたい。\n"
+           "ASIDE: （視線が気になっちゃう……）\n"
+           "CARD: PLACE: park / BEAT: sitting on a swing\n")
+    for chunk in (0, 1, 3, 7, 40):
+        got = _stream(raw, chunk=chunk)
+        assert "MY_FEEL" not in got, chunk
+        assert "SAY" not in got, chunk
+        assert "ASIDE" not in got, chunk
+        assert "CARD" not in got and "PLACE:" not in got, chunk
+        assert "ブランコ、ですか" in got, chunk
+        # つぶやきは別の行として改めて出るので、**流すと二度出る**
+        assert "視線が気になっちゃう" not in got, chunk
+
+
+def test_the_stream_does_not_stall_mid_sentence():
+    """行の途中では持ち越さない。
+
+    欄の名前は行頭にしか来ない。それでも溜めてしまうと、**一文が書き上がる
+    まで画面が止まって見える。**
+    """
+    out: list[str] = []
+    feed = muse_service._say_only(out.append)
+    feed("SAY: ……ブランコ、")
+    assert "".join(out).strip() == "……ブランコ、"     # 改行を待たずに出る
+    feed("ですか。")
+    assert "ですか。" in "".join(out)
+
+
+def test_the_stream_keeps_both_muses_in_the_w_room():
+    """W撮りの `A:` `B:` は台詞。欄の名前ではないので止めない。"""
+    raw = ("MY_FEEL: 緊張\n"
+           "SAY:\nA: ……二人で、座るんですか？\nB: ……ん、わかった。\n"
+           "ASIDE: （どうしよう）\n")
+    got = _stream(raw)
+    assert "A: ……二人で、座るんですか？" in got
+    assert "B: ……ん、わかった。" in got
+    assert "MY_FEEL" not in got and "ASIDE" not in got
+
+
+def test_a_turn_without_labels_still_streams():
+    """枠を一つも使わずに返してきたら素通しにする。
+
+    `parse_talk_blocks` もその場合は本文として扱う。**何も出ないのが
+    いちばん悪い。**
+    """
+    raw = "こんにちは、総監督さん。" * 40      # `SAY:` が来ない長い応答
+    got = _stream(raw, chunk=50)
+    assert "こんにちは、総監督さん。" in got

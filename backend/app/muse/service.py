@@ -499,12 +499,76 @@ def _publish_chat(session_id: str, msg: dict[str, Any]) -> None:
     events.publish(session_id, {"type": "chat_message", **msg})
 
 
+#: 流していい所は `SAY:` の中だけ。他は欄の名前ごと画面に出る。
+_SAY_OPEN_RE = re.compile(r"(?im)^[\s>*_-]*SAY\s*[:：][ \t]*")
+#: 次の欄が始まったら止める。`ASIDE` は別の行として改めて出るので、流すと
+#: 同じ文が二度出る。`CARD` / `TAGS` は画面に出す物ではない。**行頭だけ**を
+#: 見るので `.match()` で使う。
+_SAY_SHUT_RE = re.compile(
+    r"(?i)^[ \t>*_-]*(ASIDE|CARD|PITCH|MY_FEEL|ROLE_FEEL|TAGS|SCENE|WEARING|"
+    r"BEAT|FRAME|PLACE|HOUR|LIGHT|ACTION)\s*[:：]"
+)
+#: 行頭がこの形なら、まだ欄名に育ちうる（`AS` → `ASIDE:`）。ここから外れた
+#: 時点で欄名ではないので、待たずに出す。W撮りの `A:` `B:` もここで抜ける。
+#: 改行は含めない —— 含めると空行を抱えたまま止まる。
+_MAYBE_LABEL_RE = re.compile(r"(?i)^[ \t>*_-]*[A-Z_]{0,12}$")
+#: `SAY:` がここまで来なければ、枠を守っていないと見なして素通しにする。
+_SAY_WAIT = 400
+
+
+def _say_only(emit):
+    """彼女が言うところだけを流す。
+
+    ストリームは生のトークンをそのまま送っていたので、`MY_FEEL: 緊張` も
+    `SAY:` という欄の名前も、一瞬そのまま画面に出ていた。**書き上がった
+    あとの表示は正しいのに、流れている間だけ裏側が見えていた。**
+
+    `SAY:` が来るまで伏せ、次の欄が始まったら止める。欄を一つも使わずに
+    返してきたときは（`parse_talk_blocks` も本文として扱う）素通しにする。
+
+    欄の名前は**行頭にしか来ない**ので、待つのは行頭の数文字だけ。行の
+    途中では溜めない —— 溜めると一文が書き上がるまで画面が止まって見える。
+    """
+    st = {"open": False, "shut": False, "bol": True, "buf": ""}
+
+    def _feed(text: str) -> None:
+        if st["shut"] or not text:
+            return
+        st["buf"] += text
+        if not st["open"]:
+            m = _SAY_OPEN_RE.search(st["buf"])
+            if m:
+                st["open"], st["bol"] = True, False
+                st["buf"] = st["buf"][m.end():]
+            elif len(st["buf"]) < _SAY_WAIT:
+                return                      # まだ `SAY:` を待つ
+            else:
+                st["open"], st["bol"] = True, False   # 枠を使っていない。素通し
+        while st["buf"]:
+            if st["bol"]:
+                if _SAY_SHUT_RE.match(st["buf"]):
+                    st["shut"], st["buf"] = True, ""
+                    return
+                if _MAYBE_LABEL_RE.match(st["buf"]):
+                    return                  # まだ欄名になりうる。数文字だけ待つ
+                st["bol"] = False
+            cut = st["buf"].find("\n")
+            if cut < 0:
+                emit(st["buf"])
+                st["buf"] = ""
+                return
+            emit(st["buf"][:cut + 1])
+            st["buf"], st["bol"] = st["buf"][cut + 1:], True
+
+    return _feed
+
+
 def _token_publisher(session_id: str, muse_id: str):
     def _pub(text: str) -> None:
         events.publish(session_id, {
             "type": "chat_delta", "muse_id": muse_id, "text": text,
         })
-    return _pub
+    return _say_only(_pub)
 
 
 # Kept as a name anything outside may have imported. The body lives in
