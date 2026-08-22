@@ -485,3 +485,88 @@ def test_a_note_is_not_stacked_twice():
     muse_service._note_standing(session, "夕方の公園で撮ろう。")
     assert session["notes"][-1] == "夕方の公園で撮ろう。"
     assert len(session["notes"]) == 3
+
+
+# ── 彼女が感じたこと ────────────────────────────────────────────────────────
+def test_every_room_asks_the_same_one_question():
+    """`MY_FEEL` の訊き方が4つの枠で揃っていること。
+
+    実測で、二欄（ROLE_FEEL と MY_FEEL）を並べて語彙リストまで見せた枠は
+    **W撮りで 0/10** ―― 一語も書かなかった。一欄で自由に書かせる枠は
+    **10/10**。訊き方が違えば、部屋によって彼女の言えることが変わる。
+
+        新枠 主演撮り(talk)   10/10
+        旧枠 主演撮り(chat)    8/10
+        旧枠 W撮り(talk)      0/10
+        旧枠 W撮り(chat)      0/10
+    """
+    frames = [muse_crew.DUET_TALK_OUTPUT, muse_crew.DUET_CHAT_OUTPUT,
+              muse_crew.W_DUET_TALK_OUTPUT, muse_crew.W_DUET_CHAT_OUTPUT]
+    for f in frames:
+        assert "MY_FEEL:" in f
+        # 欄は一つ。**二欄にすると落ちる**（実測 0/18）
+        assert "ROLE_FEEL" not in f
+        # 語彙を並べて選ばせない。**自由に書かせたら正直に書いた**
+        assert "理不尽" not in f
+
+
+def test_the_feeling_word_is_kept_but_never_judges():
+    """書いた語を残す。**遮断には使わない。**
+
+    総監督の方針で、第二層は感情で遮断するのをやめ、冗談で交わす形になった。
+    残すのは観察のため ―― 一行が彼女にどう当たったかを言う場所が他に無い。
+    実測で「驚き」は普通の演出でも加害でも出た。**語で線は引けない。**
+    """
+    session = {"session_id": "s1", "chat": []}
+    muse_service._log_feel(session, " 寂しい ")
+    muse_service._log_feel(session, "驚き")
+    assert [r["word"] for r in session["feel_log"]] == ["寂しい", "驚き"]
+    muse_service._log_feel(session, "   ")
+    assert len(session["feel_log"]) == 2
+
+    for _ in range(muse_service.FEEL_LOG_MAX + 10):
+        muse_service._log_feel(session, "緊張")
+    assert len(session["feel_log"]) == muse_service.FEEL_LOG_MAX
+
+    # 観察が撮影を止めないこと —— 判定に触れない
+    import inspect
+    src = inspect.getsource(muse_service._log_feel)
+    for verb in ("declined", "struck", "DeclinedTurn", "_decline"):
+        assert verb not in src, verb
+
+
+# ── 日記に友人が届くこと ────────────────────────────────────────────────────
+def test_the_diary_is_handed_her_outings():
+    """日記を書く手元に、撮影以外の時間があること。
+
+    お出かけ機能を入れて楽屋にはスレッドが生まれたのに、**日記11本のうち
+    他の Muse が出てきたものは 0本**だった。`actress_diary_prompt` の材料が
+    `session_log` と `photo_desc` だけで、**友人はそこに存在しなかった。**
+    """
+    char = {"name_ja": "各務 みお", "name": "Mio", "personality": {}}
+    without = muse_crew.actress_diary_prompt(char, session_log="公園で撮った")
+    assert "撮影以外" not in without          # 無いときは足さない
+
+    with_out = muse_crew.actress_diary_prompt(
+        char, session_log="公園で撮った", circle="みなもと猫を見に行った",
+    )
+    assert "みなもと猫を見に行った" in with_out
+    # **撮影の話に混ぜない。** 別の時間として置く
+    assert "撮影の話に混ぜずに" in with_out
+    # 強制しない —— 触れるかどうかは彼女が決める
+    assert "触れても触れなくても" in with_out
+
+
+@pytest.mark.asyncio
+async def test_each_diary_gets_its_own_writer_s_outings():
+    """W撮りは二人分書く。**相手の日記に主演のお出かけを載せない。**
+
+    `session["circle"]` は主演の character_id で引かれている。日記は一人ずつ
+    書くので、そこを使い回すと相手の日記が主演の交友で埋まる。
+    """
+    import inspect
+    src = inspect.getsource(muse_service.run_generate_actress_diary_job)
+    assert "_circle_lines(db, character_id)" in src, (
+        "日記は、その日記の本人で引き直すこと"
+    )
+    assert 'session.get("circle")' not in src

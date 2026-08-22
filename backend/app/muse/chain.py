@@ -1140,11 +1140,18 @@ async def run_duet_talk(
     partner_character: dict[str, Any] | None = None, seed: str = "",
     images: list[bytes] | None = None,
     on_token: TokenCallback | None = None,
+    on_feel: Callable[[str], None] | None = None,
     tier: str = "",
     locale: str = "ja",
     intent: str = "",
 ) -> tuple[str, tuple[dict[str, str], ...] | None, bool, str, str, str]:
-    """Conversation turn. Returns say, turns, blind, aside, card, pitch."""
+    """Conversation turn. Returns say, turns, blind, aside, card, pitch.
+
+    `on_feel` receives her `MY_FEEL` word when she wrote one. **Observation
+    only** — it never changes what this returns or whether the turn stops.
+    The word is worth keeping for its own sake: it is the one place she says
+    how a line landed on her, and nothing was reading it.
+    """
     if partner_character:
         system = crew.w_actress_duet_prompt(
             character or {}, partner_character, mode="talk", seed=seed, tier=tier,
@@ -1162,6 +1169,11 @@ async def run_duet_talk(
         num_ctx=num_ctx, think=False, on_token=on_token,
     )
     blocks = identity.parse_talk_blocks(raw)
+    if on_feel is not None and blocks.get("my_feel", "").strip():
+        try:
+            on_feel(blocks["my_feel"].strip())
+        except Exception:  # 観察が撮影を止めてはいけない
+            logger.debug("[muse.chain] on_feel failed", exc_info=True)
     if blocks.get("decline"):
         # 彼女が `TAKE: 降りる` を出した。**返すのはそれだけ。**
         # 文は一字も持ち出さない ―― 呼び出し側（`service._duet_talk`）が

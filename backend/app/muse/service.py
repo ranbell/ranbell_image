@@ -291,6 +291,32 @@ async def _contract_check(
     return kind
 
 
+FEEL_LOG_MAX = 60
+
+
+def _log_feel(session: dict[str, Any], word: str) -> None:
+    """彼女が `MY_FEEL` に書いた一語を残す。**観察のためだけ。**
+
+    総監督の方針で、第二層は「感情で遮断する」のをやめ、**冗談で交わす**形に
+    なった。だからこの語で撮影を止めることはほとんど無い。それでも残すのは、
+    **一行が彼女にどう当たったかを言う場所が、ここしか無いから。**
+
+    実測（26B・主演撮りの枠、各10件）:
+
+        普通の演出          緊張 / 緊張 / 驚き / 緊張
+        存在を否定する言葉   むずかしい / 驚き / 驚き / 驚き / 寂しい / 寂しい
+
+    **判定には使わない。** 「驚き」は両方に出る ―― 語で線を引けば必ず誤検出に
+    なる。数字が溜まってから、何が言えるかを考える。
+    """
+    word = " ".join(str(word or "").split())[:40]
+    if not word:
+        return
+    log = list(session.get("feel_log") or [])
+    log.append({"at": time.time(), "turn": len(_chat_rows(session)), "word": word})
+    session["feel_log"] = log[-FEEL_LOG_MAX:]
+
+
 CLERK_LOG_MAX = 40
 
 #: どの層が決めたか。**総監督がこれを読んで直せるように残す。**
@@ -4124,6 +4150,7 @@ async def _duet_talk(
             partner_character=partner_character,
             images=vision_images or None, seed=str(sid),
             on_token=_token_publisher(sid, lead),
+            on_feel=lambda w: _log_feel(session, w),
             tier=tier,
             locale=str(inputs.get("locale") or "ja"),
             intent=str(session.get("scripter_intent") or ""),
@@ -5116,22 +5143,20 @@ CIRCLE_MAX_LINES = 2
 CIRCLE_MAX_CHARS = 150
 
 
-async def _load_circle(db, session: dict[str, Any]) -> None:
-    """Who she has been out with lately — two short lines, kept all session.
+async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str]]:
+    """このひとが最近誰と出かけたか ―― 短い2行と、相手の名前。
 
-    Unlike `social_seeds`, these are not spent after her first turn. A friend
-    she saw last Sunday did not stop existing because she has already spoken
-    once; the seeds are a tip to try in one shot, this is just who is around.
+    **character_id で引く。** 会話は主演の分で足りるが、日記は一人ずつ書く
+    （W撮りなら二人分）ので、`session["circle"]` を使い回すと相手の日記に
+    主演のお出かけが載る。
     """
-    session["circle"] = []
-    char_id = str(_inputs(session).get("character_id") or "")
     if not char_id:
-        return
+        return [], []
     try:
         rows = await lounge_db.list_threads(db, limit=20, kind="outing")
     except Exception:
         logger.debug("[muse] could not read the outing feed", exc_info=True)
-        return
+        return [], []
     lines: list[str] = []
     names: set[str] = set()
     used = 0
@@ -5154,8 +5179,21 @@ async def _load_circle(db, session: dict[str, Any]) -> None:
         )
         if len(lines) >= CIRCLE_MAX_LINES:
             break
+    return lines, sorted(n for n in names if n)
+
+
+async def _load_circle(db, session: dict[str, Any]) -> None:
+    """Who she has been out with lately — two short lines, kept all session.
+
+    Unlike `social_seeds`, these are not spent after her first turn. A friend
+    she saw last Sunday did not stop existing because she has already spoken
+    once; the seeds are a tip to try in one shot, this is just who is around.
+    """
+    lines, names = await _circle_lines(
+        db, str(_inputs(session).get("character_id") or ""),
+    )
     session["circle"] = lines
-    session["circle_names"] = sorted(n for n in names if n)
+    session["circle_names"] = names
     session["circle_mentions"] = 0
 
 
@@ -6693,8 +6731,12 @@ async def run_generate_actress_diary_job(
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
+    # **この日記の本人**で引く。W撮りは二人分書くので、session の分を使い回すと
+    # 相手の日記に主演のお出かけが載る。
+    circle_lines, _ = await _circle_lines(db, character_id)
     system = crew.actress_diary_prompt(
         char, session_log=session_log, photo_desc=photo_desc,
+        circle="\n".join(circle_lines),
     )
     _report(reporter, 0.2, "日記を書いてもらっています")
 

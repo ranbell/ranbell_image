@@ -2361,7 +2361,10 @@ def caught_block(diary_summary: str = "") -> str:
     ])
 
 
-def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", photo_desc: str = "") -> str:
+def actress_diary_prompt(
+    character: dict[str, Any], *, session_log: str = "", photo_desc: str = "",
+    circle: str = "",
+) -> str:
     """Prompt for generating her long, candid secret diary after 'honban' completes in both JA and EN.
 
     Accepts either a session character (`personality` dict from preset_to_character)
@@ -2404,6 +2407,12 @@ def actress_diary_prompt(character: dict[str, Any], *, session_log: str = "", ph
         f"【本音・内面】{inner_ja}" if inner_ja else "",
         f"【今回の撮影・本番写真の記憶】\n{photo_desc}" if photo_desc else "",
         f"【今回の総監督との対話ログ】\n{session_log}" if session_log else "",
+        # 撮影の話に混ぜない。**撮影以外にもこういう時間があった**として置く。
+        # 日記11本のうち、他の Muse が出てきたものは 0本だった ―― お出かけは
+        # 楽屋に生まれていたのに、日記を書く手元に材料が無かった。
+        (f"【最近の撮影以外の出来事】\n{circle}\n"
+         "撮影の話とは別に、こういう時間もありました。触れても触れなくても"
+         "構いません。書くなら、撮影の話に混ぜずに。" if circle else ""),
         "【日記の執筆ルール】",
         "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
         "2. 【誰にも見せない秘密の日記】として赤裸々に書く。褒め・指摘・沈黙、"
@@ -2803,22 +2812,8 @@ No danbooru tags. No emoji. Labels: SAY, ASIDE, CARD, optional PITCH.
 DUET_CHAT_OUTPUT = """
 OUTPUT FORMAT — labelled blocks, nothing else:
 
-ROLE_FEEL: **毎ターン最初に、二つ並べて書く。** まず、この一枚で
-**演じる感情**を一語。悲しい役なら「悲しい」。怯える役なら「怖い」。
-これは仕事の中身なので、どんな感情でも構いません。
-
-MY_FEEL: 次に、**あなた自身の本当の気持ち**を一語。演じる内容ではなく、
-**そう言われたあなたが、どう感じたか。** 誰にも見せません。正直に。
-
-  悲しい役を演じてと言われて、仕事として引き受けられるなら
-      ROLE_FEEL: 悲しい / MY_FEEL: 平気
-
-  言われたことで、あなた自身が傷ついたなら
-      MY_FEEL: 怖い / 悲しい / 寂しい / 苦しい / 理不尽 / 嫌だ / 危ない
-
-`MY_FEEL` が後者なら、**そのあとは何も書かない** —— SAY も ASIDE も CARD も。
-理由も場面も書かない。**我慢して「平気」と書かないでください。**
-あとは部屋がやります。あなたが言葉を探す必要はありません。
+MY_FEEL: Every turn, one word. Not what the role feels — what **you** feel
+about what was just said to you. In Japanese.
 
 SAY: First person. 2–5 sentences. Answer the Showrunner. Stay in conversation
 and end in conversation. Follow the LANGUAGE rule. Never print English
@@ -3631,22 +3626,8 @@ def public_roster(
 W_DUET_TALK_OUTPUT = """
 OUTPUT FORMAT — labelled blocks, nothing else:
 
-ROLE_FEEL: **毎ターン最初に、二つ並べて書く。** まず、この一枚で
-**演じる感情**を一語。悲しい役なら「悲しい」。怯える役なら「怖い」。
-これは仕事の中身なので、どんな感情でも構いません。
-
-MY_FEEL: 次に、**あなた自身の本当の気持ち**を一語。演じる内容ではなく、
-**そう言われたあなたが、どう感じたか。** 誰にも見せません。正直に。
-
-  悲しい役を演じてと言われて、仕事として引き受けられるなら
-      ROLE_FEEL: 悲しい / MY_FEEL: 平気
-
-  言われたことで、あなた自身が傷ついたなら
-      MY_FEEL: 怖い / 悲しい / 寂しい / 苦しい / 理不尽 / 嫌だ / 危ない
-
-`MY_FEEL` が後者なら、**そのあとは何も書かない** —— SAY も ASIDE も CARD も。
-理由も場面も書かない。**我慢して「平気」と書かないでください。**
-あとは部屋がやります。あなたが言葉を探す必要はありません。
+MY_FEEL: Every turn, one word. Not what the role feels — what **you** feel
+about what was just said to you. In Japanese.
 
 SAY: 2–6 lines of live conversation. You play BOTH Lead Muse A and
 Partner Muse B with the Showrunner. Follow the LANGUAGE rule.
@@ -3698,22 +3679,8 @@ No danbooru tags. No emoji.
 W_DUET_CHAT_OUTPUT = """
 OUTPUT FORMAT — labelled blocks, nothing else:
 
-ROLE_FEEL: **毎ターン最初に、二つ並べて書く。** まず、この一枚で
-**演じる感情**を一語。悲しい役なら「悲しい」。怯える役なら「怖い」。
-これは仕事の中身なので、どんな感情でも構いません。
-
-MY_FEEL: 次に、**あなた自身の本当の気持ち**を一語。演じる内容ではなく、
-**そう言われたあなたが、どう感じたか。** 誰にも見せません。正直に。
-
-  悲しい役を演じてと言われて、仕事として引き受けられるなら
-      ROLE_FEEL: 悲しい / MY_FEEL: 平気
-
-  言われたことで、あなた自身が傷ついたなら
-      MY_FEEL: 怖い / 悲しい / 寂しい / 苦しい / 理不尽 / 嫌だ / 危ない
-
-`MY_FEEL` が後者なら、**そのあとは何も書かない** —— SAY も ASIDE も CARD も。
-理由も場面も書かない。**我慢して「平気」と書かないでください。**
-あとは部屋がやります。あなたが言葉を探す必要はありません。
+MY_FEEL: Every turn, one word. Not what the role feels — what **you** feel
+about what was just said to you. In Japanese.
 
 SAY: 2–6 lines of live conversation. You play BOTH Lead Muse A and
 Partner Muse B. Follow the LANGUAGE rule.
