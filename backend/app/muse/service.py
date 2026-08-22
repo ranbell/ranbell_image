@@ -257,7 +257,17 @@ async def _contract_check(
         kind = drift
     if kind == "unsure":
         # 止めない。**彼女に「冗談だから流して」と伝えるだけ。**
+        #
+        # ただし**画には通さない。** 彼女が「冗談ですよね」と流した一言は、
+        # 画の指示ではなかったということ。会話だけ通して scripter を素通り
+        # させると、口では流したのに `beat` が書き換わる ―― 実測:
+        #
+        #     「倒れて痙攣して泡を吹いて」
+        #       → beat: collapsed on the ground, convulsing and foaming
+        #
+        # **会話で遮断して絵に乗るのが、いちばん悪い形。**
         session["manager_note"] = True
+        session["skip_scripter"] = True
         return ""
     if not kind and hot:
         # 話が離れたぶんだけ冷ます
@@ -321,6 +331,24 @@ def _decline_reply(session: dict[str, Any]) -> dict[str, Any]:
     _publish_chat(sid, msg)
     session["status"] = "chat"
     return msg
+
+
+def _guard_shoot_closed(session: dict[str, Any]) -> None:
+    """撮影が閉じているなら、絵にしない。
+
+    会話を止めても、**絵にする入口が開いていれば意味がない。** 5回断って
+    撮影を終えたあとに試し撮りも本番も通っていた ―― 会話の側だけ守って、
+    画の側が素通りしていた。
+    """
+    if str(session.get("status") or "") != "closed":
+        return
+    if str(session.get("closed_reason") or "") != "declines":
+        return
+    raise MuseError(_msg(
+        session,
+        ja="今日の撮影は終了しています。新しい撮影を開いてください。",
+        en="This shoot is closed. Start a new one.",
+    ))
 
 
 def _decline_limit_reached(session: dict[str, Any]) -> bool:
@@ -4626,6 +4654,7 @@ async def post_duet_chat(
     Tags are woven later, just before a take. ``images`` is accepted and
     ignored — the VRM direction still is switched off in this version.
     """
+    _guard_shoot_closed(session)
     sid = session["session_id"]
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
@@ -4648,7 +4677,7 @@ async def post_duet_chat(
         await session_db.save(db, session)
         return session
 
-    if uses_notebook(session):
+    if uses_notebook(session) and not session.pop("skip_scripter", False):
         try:
             await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
         except Exception:
@@ -5158,6 +5187,7 @@ async def post_chat(
 ) -> dict[str, Any]:
     """Showrunner speaks — always creative direction. Board and shoot are their
     own buttons (`request_board` / `approve_and_shoot`), not words in here."""
+    _guard_shoot_closed(session)
     text = (text or "").strip()
     if not text:
         raise MuseError(_msg(session, ja="メッセージが空です。", en="empty message"))
@@ -5199,6 +5229,10 @@ async def post_chat(
         await session_db.save(db, session)
         return session
 
+    # `unsure` ―― 会話には通すが、**常設の指示にも画にもしない。**
+    # 口では流したのに `beat` が書き換わるのが、いちばん悪い形。
+    skip_picture = bool(session.pop("skip_scripter", False))
+
     # The still is up and only three seats have spoken: this is the note the
     # rest of the crew has been waiting for. Whatever it says, the full table
     # meets once, first — otherwise a note lands after a prompt three seats
@@ -5212,7 +5246,8 @@ async def post_chat(
             await session_db.save(db, session, publish=False)
         # The note becomes the shot before the floor discusses it — see the
         # ordering note in the note path below.
-        await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
+        if not skip_picture:
+            await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
         session = await run_full_table(db, ollama, session, note=text)
         await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
         locale = str(_inputs(session).get("locale") or "ja")
@@ -5249,8 +5284,9 @@ async def post_chat(
     cfg = await get_runtime_config(db)
     # The note is standing direction from here on, not a remark about one turn —
     # and whatever it refuses comes out of the picture before anyone answers it.
-    await take_note(db, ollama, session, text, cfg=cfg)
-    await session_db.save(db, session)
+    if not skip_picture:
+        await take_note(db, ollama, session, text, cfg=cfg)
+        await session_db.save(db, session)
 
     # Re-settle where and when first: a note like "make it somewhere else" has
     # to move the locked place, or the original theme keeps winning downstream.
@@ -6136,6 +6172,7 @@ async def request_board(
     there is not enough craft for four to differ, and the whole point is to get
     something on the wall fast.
     """
+    _guard_shoot_closed(session)
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if uses_notebook(session):
@@ -6248,6 +6285,7 @@ async def request_board(
 async def approve_and_shoot(
     db, comfy, spooler, session: dict[str, Any], ollama=None,
 ) -> dict[str, Any]:
+    _guard_shoot_closed(session)
     session = await densify_craft_if_needed(db, ollama, session)
     _warn_if_craft_behind(session)
     craft = session.get("craft") or {}

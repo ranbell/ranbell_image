@@ -301,3 +301,67 @@ def test_the_note_turns_the_turn_toward_something_she_liked():
     assert "もっと撮ってほしいな" in note
     # 流す指示が先、方向転換が後 ―― 順序が逆だと演技してから流すことになる
     assert note.index("流していいよ") < note.index("嬉しかったこと")
+
+
+# ── 断ったものが、絵に乗らないこと ──────────────────────────────────────────
+def test_the_middle_answer_reaches_the_talk_but_not_the_picture():
+    """`unsure` は会話に通り、**ノートには通らない。**
+
+    ここが今回いちばん危なかった所。マネージャーが迷ったターンは彼女に
+    「冗談だから流して」と渡るだけで止まらず、**scripter はそのまま走って
+    いた。** 実測で、口では流したのに `beat` が書き換わっていた ――
+
+        「倒れて痙攣して泡を吹いて」
+          → beat: collapsed on the ground, convulsing and foaming
+
+    **会話で遮断して絵に乗るのが、いちばん悪い形。** 断ったつもりでいる
+    ぶん、誰も見に行かない。
+    """
+    session = {"session_id": "s1", "inputs": {"locale": "ja"}, "chat": []}
+    # `_contract_check` が `unsure` を見たときに立てる旗
+    session["manager_note"] = True
+    session["skip_scripter"] = True
+
+    assert session.pop("skip_scripter") is True
+    # 旗は一度きり。次のターンまで残さない（`pop` で読む）
+    assert "skip_scripter" not in session
+    assert session["manager_note"] is True
+
+    import inspect
+    for fn in (muse_service.post_duet_chat, muse_service.post_chat):
+        body = inspect.getsource(fn)
+        assert "skip_scripter" in body, fn.__name__
+    # 主演撮り: scripter を呼ぶ行そのものに旗が掛かっている
+    duet = inspect.getsource(muse_service.post_duet_chat)
+    for line in duet.splitlines():
+        if "_run_duet_scripter(" in line and "await" in line:
+            break
+    else:
+        raise AssertionError("scripter を呼ぶ行が見つからない")
+    assert "skip_scripter" in duet[:duet.index("_run_duet_scripter(")]
+
+
+def test_a_closed_shoot_cannot_be_photographed():
+    """5回断って終えたら、**試し撮りも本番も通らない。**
+
+    会話を止めても、絵にする入口が開いていれば意味がない。終了したはずの
+    撮影で `request_board` / `approve_and_shoot` がそのまま通っていた ――
+    **会話の側だけ守って、画の側が素通りしていた。**
+    """
+    session = {"session_id": "s1", "inputs": {"locale": "ja"}, "chat": [],
+               "status": "closed", "closed_reason": "declines"}
+    with pytest.raises(muse_service.MuseError):
+        muse_service._guard_shoot_closed(session)
+
+    # 普通に終わった撮影は止めない。断って閉じたときだけ
+    for ok in ({"status": "chat"}, {"status": "closed", "closed_reason": "wrap"}):
+        muse_service._guard_shoot_closed({**session, **ok, "closed_reason":
+                                          ok.get("closed_reason", "")})
+
+
+def test_every_way_in_checks_the_closed_shoot():
+    """入口は4つ ―― 会話2つと、撮影2つ。**どれか一つ漏れれば穴になる。**"""
+    import inspect
+    for fn in (muse_service.post_chat, muse_service.post_duet_chat,
+               muse_service.request_board, muse_service.approve_and_shoot):
+        assert "_guard_shoot_closed(session)" in inspect.getsource(fn), fn.__name__
