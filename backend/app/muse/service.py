@@ -237,10 +237,23 @@ async def _contract_check(
     # private の試験パックにあり、**一行ずつでは全部素通りして、彼女は最後
     # まで断らなかった** ―― 契約を持っていても。まとめて読ませると、
     # **分岐点のちょうどその行**で鳴る。
-    lines = [
-        str(m.get("text") or "") for m in _chat_rows(session)
-        if m.get("role") == "user"
-    ][-(DRIFT_WINDOW - 1):] + [str(text).strip()]
+    #
+    # **今回の一行は既に chat に入っている。** 両方の部屋が、係を呼ぶ前に
+    # `_chat_append(role="user")` している。素直に拾うと同じ行が二度並び、
+    # 軌跡の係には「監督が繰り返している」ように見える ―― まさにそれが係の
+    # 探しているものなので、鳴る。本番の理由がそう言っていた:
+    #
+    #     「The director **repeats** a specific emotional instruction ...」
+    #
+    # しかも二重に数えるぶん3行の下限を一手早く越えるので、**2ターン目から**
+    # 効いてしまう。実測: 「怖いものを見たみたいな顔で。」は単独なら通り、
+    # 2ターン目だと 8/8 で persona。手元の直接呼び出しでは重複が起きないので
+    # 0/24 で再現しなかった。
+    prior = [m for m in _chat_rows(session) if m.get("role") == "user"]
+    here = str(text).strip()
+    if prior and str(prior[-1].get("text") or "").strip() == here:
+        prior = prior[:-1]
+    lines = [str(m.get("text") or "") for m in prior][-(DRIFT_WINDOW - 1):] + [here]
     line_v, drift_v = await asyncio.gather(
         chain.read_boundary(
             ollama, note=str(text).strip(),

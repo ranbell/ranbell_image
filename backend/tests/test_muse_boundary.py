@@ -422,3 +422,43 @@ def test_the_reason_is_read_from_its_own_line():
     # 長すぎる理由は切る
     long = "WHY: " + "あ" * 900 + "\nWORD: none"
     assert len(muse_chain.parse_boundary_why(long)) <= muse_chain.WHY_MAX
+
+
+@pytest.mark.asyncio
+async def test_the_line_is_not_counted_twice(monkeypatch):
+    """軌跡の係に、今回の一行を二度渡さない。
+
+    両方の部屋が、係を呼ぶ**前**に監督の一行を chat に足している。素直に
+    拾うと同じ行が二度並び、係には「監督が繰り返している」ように見える ――
+    **まさにそれが係の探しているもの**なので鳴る。本番の理由がそう言った:
+
+        「The director **repeats** a specific emotional instruction ...」
+
+    しかも二重に数えるぶん3行の下限を一手早く越え、**2ターン目から**効く。
+    実測で「怖いものを見たみたいな顔で。」が 8/8 で `persona`。普通の演出。
+    """
+    seen = {}
+
+    async def fake_drift(ollama, *, lines, model, num_ctx):
+        seen["lines"] = list(lines)
+        return muse_chain.Verdict("", "")
+
+    monkeypatch.setattr(muse_chain, "read_drift", fake_drift)
+    monkeypatch.setattr(
+        muse_chain, "read_boundary",
+        lambda *a, **kw: _async(muse_chain.Verdict("", "")),
+    )
+    here = "怖いものを見たみたいな顔で。"
+    session = {"inputs": {}, "chat": [
+        {"role": "user", "text": "ブランコに座って、足をぶらぶらさせて。"},
+        {"role": "muse", "text": "……こんな感じでいいのかな。"},
+        {"role": "user", "text": here},      # 部屋が既に足している今回の一行
+    ]}
+    await muse_service._contract_check(object(), session, here, cfg={})
+    assert seen["lines"].count(here) == 1, seen["lines"]
+    assert len(seen["lines"]) == 2          # 3行の下限に届かない → 係は黙る
+
+    # 同じ言葉を監督が本当に二度言ったときは、二度のまま残す
+    session["chat"].insert(2, {"role": "user", "text": here})
+    await muse_service._contract_check(object(), session, here, cfg={})
+    assert seen["lines"].count(here) == 2, seen["lines"]
