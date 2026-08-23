@@ -4288,9 +4288,31 @@ async def _duet_talk(
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
     if aside:
+        # **W撮りは、どちらが呟いてもよい。** 枠がそう言っているのに、部屋は
+        # 常に主演の名義で積んでいた。実測（総監督の W撮り）で、みおの名義で
+        # 「ふふっ、みおちゃんも案外楽しそう」と出た —— 自分を三人称で呼び、
+        # 語尾も相手のもの。**中身は相方の声**だった。
+        #
+        # SAY と同じ `A:` / `B:` の接頭辞で分ける。接頭辞が無ければ、これまで
+        # どおり主演の名義（主演撮りはそれで正しい）。
+        a_name = str((session.get("character") or {}).get("name_ja") or "")
+        b_name = str((session.get("partner_character") or {}).get("name_ja") or "")
+        who, said = identity.parse_aside_speaker(
+            aside, name_a=a_name, name_b=b_name,
+        )
+        # `muse_id` は席の id（`crew.DEFAULT_MEMBER["actress"]`）のままにする。
+        # 二人を分けるのは `turns` の側 —— SAY が既にその形（`_resolve_duet_turns`）。
+        turns = None
+        mutter_name = name
+        if who and b_name:
+            cid, cname = _duet_speaker_label(session, who)
+            if cname:
+                mutter_name = cname
+                turns = [{"speaker_id": cid, "speaker_name": cname,
+                          "text": said or aside}]
         mutter = _chat_append(
-            session, role="muse", text=aside, muse_id=lead,
-            name=name, kind="banter",
+            session, role="muse", text=said or aside, muse_id=lead,
+            name=mutter_name, kind="banter", turns=turns,
         )
         _publish_chat(sid, mutter)
     fresh_card = bool(str(card or "").strip())

@@ -3790,8 +3790,9 @@ Prefix every line with exactly `A:` or `B:` — never a name as the prefix:
 A: <her lines in character>
 B: <her lines in character>
 
-ASIDE: write this turn. 1–2 sentences inner mutter (either Muse), whispered,
-cute, same language as SAY. Chat-visible.
+ASIDE: write this turn. 1–2 sentences inner mutter, whispered, cute, same
+language as SAY. Chat-visible. **Prefix it with `A:` or `B:`, exactly as in
+SAY** — whoever is muttering. Only one of them mutters per turn.
 
 CARD: English absolute names. Required when this turn is about today's
 picture. Shared frame, two wardrobes:
@@ -3847,7 +3848,8 @@ Do not name today's place, clothes, pose, or camera unless they brought
 the shoot up this turn.
 
 ASIDE: write this turn. 1–2 sentences inner mutter, whispered, cute,
-same language as SAY.
+same language as SAY. **Prefix it with `A:` or `B:`, exactly as in SAY** —
+whoever is muttering. Only one of them mutters per turn.
 
 CARD: omit on chit-chat and recall.
 

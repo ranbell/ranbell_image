@@ -470,6 +470,41 @@ def sanitize_muse_say(text: str, *, locale: str = "ja") -> str:
     return out
 
 
+_ASIDE_WHO_RE = re.compile(r"(?is)^\s*[*_>\-]*\s*([AB])\s*[:：]\s*(.*)$")
+
+
+def parse_aside_speaker(
+    aside: str, *, name_a: str = "", name_b: str = "",
+) -> tuple[str, str]:
+    """`("A"|"B"|"", つぶやき本文)`。接頭辞が無ければ話者は ""。
+
+    W撮りのつぶやきは**どちらが呟いてもよい**のに、部屋は常に主演の名義で
+    積んでいた。実測（総監督の W撮り）で、みおの名義でこう出た:
+
+        （ふふっ、**みおちゃんも**案外楽しそう。さっきまでの沈んだ顔、
+          どこに行っちゃったのかしら。）
+
+    自分のことを三人称で呼び、語尾も相手のもの ―― **中身はすみれの声**
+    だった。SAY は `A:` / `B:` で分けているので、つぶやきも同じ形に揃える。
+
+    接頭辞が無いとき（主演撮り、または守らなかったとき）は "" を返し、
+    呼び出し側がこれまでどおり主演の名義にする。
+    """
+    m = _ASIDE_WHO_RE.match(str(aside or "").strip())
+    if m:
+        return m.group(1).upper(), m.group(2).strip()
+    # 名前で書いてきた場合も拾う（`parse_duet_speakers` と同じ手口）
+    for who, nm in (("A", name_a), ("B", name_b)):
+        nm = str(nm or "").strip()
+        if not nm:
+            continue
+        head = re.match(rf"(?is)^\s*{re.escape(nm)}\s*[:：]\s*(.*)$",
+                        str(aside or "").strip())
+        if head:
+            return who, head.group(1).strip()
+    return "", str(aside or "").strip()
+
+
 def parse_duet_speakers(
     raw: str, *, name_a: str = "", name_b: str = "", locale: str = "ja",
 ) -> list[dict[str, str]] | None:

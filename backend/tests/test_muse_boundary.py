@@ -874,3 +874,44 @@ def test_wrapping_up_archives_the_last_take():
     assert "_archive_take(session)" in src
     # 撮影のたびにも積む（一度の撮影で ③ は何度も押される）
     assert "_archive_take(session)" in inspect.getsource(muse_service.approve_and_shoot)
+
+
+# ── W撮りで、つぶやきの主が入れ替わる ──────────────────────────────────────
+def test_the_whisper_belongs_to_whoever_muttered():
+    """W撮りのつぶやきを、常に主演の名義で積んでいた。
+
+    実測（総監督の W撮り）。**みおの名義**でこう出た:
+
+        （ふふっ、**みおちゃんも**案外楽しそう。さっきまでの沈んだ顔、
+          どこに行っちゃったのかしら。）
+
+    自分を三人称で呼び、語尾も相手のもの ―― **中身は相方の声**だった。
+    枠は「どちらが呟いてもよい」と言っているのに、部屋が聞いていなかった。
+    SAY と同じ `A:` / `B:` で分ける。
+    """
+    from backend.app.muse import identity as muse_identity
+    a, b = "各務 みお", "平岡 すみれ"
+    assert muse_identity.parse_aside_speaker(
+        "B: （ふふっ、みおちゃんも案外楽しそう。）", name_a=a, name_b=b,
+    ) == ("B", "（ふふっ、みおちゃんも案外楽しそう。）")
+    assert muse_identity.parse_aside_speaker(
+        "A: （視線が気になっちゃう……）", name_a=a, name_b=b,
+    )[0] == "A"
+    # 名前で書いてきても拾う
+    assert muse_identity.parse_aside_speaker(
+        f"{b}: （楽しそう。）", name_a=a, name_b=b,
+    )[0] == "B"
+    # **接頭辞が無ければ主演のまま。** 主演撮りはそれで正しい
+    who, said = muse_identity.parse_aside_speaker("（接頭辞なし）", name_a=a, name_b=b)
+    assert who == "" and said == "（接頭辞なし）"
+
+
+def test_both_w_frames_ask_who_is_muttering():
+    """W撮りの二つの枠が、どちらも接頭辞を求めること。"""
+    for frame in (muse_crew.W_DUET_TALK_OUTPUT, muse_crew.W_DUET_CHAT_OUTPUT):
+        aside = frame[frame.index("ASIDE:"):]
+        assert "`A:` or `B:`" in aside[:400], frame[:40]
+    # 主演撮りの枠には求めない —— 一人しかいない
+    for frame in (muse_crew.DUET_TALK_OUTPUT, muse_crew.DUET_CHAT_OUTPUT):
+        aside = frame[frame.index("ASIDE:"):]
+        assert "`A:` or `B:`" not in aside[:400]
