@@ -185,6 +185,9 @@ def test_summary_row_is_light():
         # 固定だったのをロケール対応にした残り。日本語だけ持っていた頃の名残
         # ではない
         "summary", "summary_ja", "charm", "charm_ja",
+        # **全員が成人。** 一覧の行にも年齢と仕事を出す —— 未成年と取られる
+        # 余地を、シートの文章だけでなくデータの側でも塞ぐ
+        "age", "occupation", "occupation_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
         "hair_color", "eye_color", "user_created", "diary_unread_count",
         "shoot_count", "last_shoot_at",

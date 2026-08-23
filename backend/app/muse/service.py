@@ -2922,8 +2922,19 @@ def _bond_from_snapshot(session: dict[str, Any]) -> dict[str, str]:
     wearing = str(nb.get("wearing") or "").strip()
     frame = str(nb.get("frame") or "").strip()
     open_ = str(nb.get("open") or "").strip()
+    # **行き先を先に決めない。**
+    #
+    # 既定が「すこしずつ距離が縮まっている」だった —— これは「これから近づく」
+    # と読める。一度も撮っていない段階から、関係の向かう先が書いてあった。
+    # 実測（2026-08-23）で、初回の日記が丸ごと総監督への恋愛感情になった。
+    #
+    # 総監督の指定:「気心の知れた仕事仲間同士であり、これからの日記の内容で
+    # 今後の関係性が築かれる」
+    #
+    # 回数で段階を作らない。**最初から気心は知れていて、その先は決めない。**
+    # 決めるのは積み上がった日記のほう（`diary_memories` として戻っている）。
     bond = {
-        "distance": "うち解けてきた" if vibe or when else "すこしずつ距離が縮まっている",
+        "distance": "気心の知れた仕事仲間",
         "inside": (vibe or "撮影の空気を共有している")[:240],
         "last": " / ".join(p for p in (when, wearing, frame) if p)[:240],
     }

@@ -672,3 +672,79 @@ def test_the_gender_comes_from_her_sheet():
     assert 'get_preset' in src
     assert '"female"' not in src.split('_GENDER_JA')[-1]
     assert muse_service._GENDER_JA["female"] == "女性"
+
+
+# ── 大人であること、そして距離 ──────────────────────────────────────────────
+def test_she_is_an_adult_on_her_sheet():
+    """シートに年齢が出て、**未成年ではない**と書いてあること。
+
+    30人中20人が学生設定で、画の既定の装いも制服だった。係をいくら鍛えても、
+    **誰が写っているか**は設定にしか書いていない。
+    """
+    char = {"name_ja": "白瀬 みなも", "name": "Minamo",
+            "personality": {"age": 23, "occupation_ja": "写真スタジオの助手",
+                            "student_past_ja": "写真部だった頃", "dream_ja": "自分の暗室",
+                            "traits": ["shy"]}}
+    sheet = muse_crew.actress_system_prompt(char)
+    assert "23" in sheet
+    assert "adult" in sheet
+    assert "Never a schoolgirl, never a minor" in sheet
+    # 過去は消さない —— 消すと人格が薄くなる
+    assert "写真部だった頃" in sheet
+    assert "自分の暗室" in sheet
+    # 学生時代を撮る道は残す（大人が自分の過去を演じる）
+    assert "flashback" in sheet or "costume" in sheet
+
+    # 年齢が無いシートでも落ちない
+    bare = muse_crew.actress_system_prompt(
+        {"name_ja": "誰か", "name": "X", "personality": {"traits": []}},
+    )
+    assert "Never a schoolgirl" not in bare
+
+
+def test_the_diary_does_not_make_him_the_subject():
+    """日記が**総監督を毎回の主題にしない**こと。
+
+    実測（2026-08-23・プール撮影のあと）、初回の日記が丸ごと総監督への
+    恋愛感情になった。指示が一行ずつそれを作っていた ―― 「赤裸々に」
+    「口に出せなかった感情」「総監督の発言を少なくとも1つ引用」、そして
+    例文自体が「褒められて耳が赤くなる」形だった。
+
+    **恋愛は禁止しない。** 禁止は効かないと何度も測っている。やめるのは
+    最初からそこに在ることだけ。
+    """
+    char = {"name_ja": "各務 みお", "name": "Mio", "personality": {}}
+    d = muse_crew.actress_diary_prompt(char, session_log="プールで撮った")
+
+    for gone in ("赤裸々", "口に出せなかった感情", "少女自身",
+                 "耳が熱い", "指が震えた", "息が浅い",
+                 "少なくとも1つ「」で引用", "耳が赤くなった"):
+        assert gone not in d, gone
+
+    # 密度は落とさない
+    assert "曖昧な『いい雰囲気だった』だけの要約は失敗" in d
+    # 総監督以外を書かせる
+    assert "総監督のことではない出来事" in d
+    assert "その日いちばん良かったと思う一枚" in d
+    # 引用は禁止ではない —— 義務でないだけ
+    assert "義務ではない" in d
+
+
+def test_the_relationship_does_not_start_already_closing():
+    """関係の初期値が**行き先を決めていない**こと。
+
+    既定が「すこしずつ距離が縮まっている」だった ―― 一度も撮っていない
+    段階から、向かう先が書いてあった。
+
+    総監督:「気心の知れた仕事仲間同士であり、これからの日記の内容で今後の
+    関係性が築かれる」
+    """
+    bond = muse_service._bond_from_snapshot({})
+    assert bond["distance"] == "気心の知れた仕事仲間"
+    assert "縮ま" not in bond["distance"]
+
+    # 撮ったあとでも、距離の言葉は勝手に動かない
+    after = muse_service._bond_from_snapshot(
+        {"continuity_snapshot": {"notebook": {"vibe": "やわらかい光"}}},
+    )
+    assert after["distance"] == bond["distance"]

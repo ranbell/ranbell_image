@@ -210,6 +210,19 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     # UI shows.
     personality = {
         "traits": _strings(preset.get("personality")),
+        # 成人であること、いまいる場所、そして**学生時代の記憶**と**将来の夢**。
+        # 過去は消さずに本人の記憶へ移してある —— 消すと人格が薄くなる。
+        "age": int(preset.get("age") or 0) or None,
+        "occupation": str(preset.get("occupation") or ""),
+        "occupation_ja": str(
+            preset.get("occupation_ja") or preset.get("occupation") or ""
+        ),
+        "student_past": str(preset.get("student_past") or ""),
+        "student_past_ja": str(
+            preset.get("student_past_ja") or preset.get("student_past") or ""
+        ),
+        "dream": str(preset.get("dream") or ""),
+        "dream_ja": str(preset.get("dream_ja") or preset.get("dream") or ""),
         "summary": str(preset.get("summary") or ""),
         "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
         "inner": _strings(preset.get("inner")),
@@ -286,6 +299,13 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "summary": str(preset.get("summary") or ""),
         "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
         "gender": str(preset.get("gender") or ""),
+        # **全員が成人。** 学生設定のままだと、未成年と取られる余地が構造的に
+        # 残る。年齢は数字で持つ —— 職業の書きぶりだけだと曖昧さが残るため。
+        "age": int(preset.get("age") or 0) or None,
+        "occupation": str(preset.get("occupation") or ""),
+        "occupation_ja": str(
+            preset.get("occupation_ja") or preset.get("occupation") or ""
+        ),
         "subject_tag": str(preset.get("subject_tag") or ""),
         # Flavour chips on the card — not a filter (traits never cover the roster).
         "traits": _strings(preset.get("personality")),

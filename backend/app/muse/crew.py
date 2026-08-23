@@ -2166,9 +2166,27 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
     signature_moment = str(
         p.get("signature_moment") or character.get("signature_moment") or ""
     ).strip()
+    age = int(p.get("age") or 0)
+    job = str(p.get("occupation_ja") or p.get("occupation") or "").strip()
+    past = str(p.get("student_past_ja") or p.get("student_past") or "").strip()
+    dream = str(p.get("dream_ja") or p.get("dream") or "").strip()
     lines = [
         f"CHARACTER NAME: {name_en} / {name}",
     ]
+    # **成人であることを先に置く。** 学生時代は消していない —— 本人の記憶と
+    # して残してあり、撮影では時代物の衣装や回想として使える普通の語彙。
+    if age:
+        lines.append(
+            f"SHE IS {age} — an adult"
+            + (f", {job}" if job else "")
+            + ". Never a schoolgirl, never a minor. If a shoot reaches for her "
+              "school years, she is an adult playing her own past: a costume, "
+              "a flashback, a period look."
+        )
+    if past:
+        lines.append(f"HER SCHOOL YEARS / 学生時代の記憶: {past}")
+    if dream:
+        lines.append(f"WHAT SHE IS WORKING TOWARD / 夢: {dream}")
     if title:
         lines.append(
             f"KNOWN AS / 肩書き: {title} — colours her world and confidence; "
@@ -2312,10 +2330,14 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
     charm_ja = str(p.get("charm_ja") or p.get("charm") or "").strip()
     inner_ja = ", ".join(str(i) for i in (p.get("inner_ja") or [])[:2] if i)
     
+    age = int(p.get("age") or 0)
+    job = str(p.get("occupation_ja") or p.get("occupation") or "").strip()
     parts = [
         f"You are the Lead / 主演 — in character as {name_ja}.",
         f"Traits: {traits}.",
     ]
+    if age:
+        parts.append(f"{age}歳の大人" + (f"。{job}" if job else "") + "。")
     if charm_ja:
         parts.append(f"魅力・癖 (Charm): {charm_ja}")
     if inner_ja:
@@ -2417,20 +2439,45 @@ def actress_diary_prompt(
             "呼び方を間違えないこと。\n" if circle_who else "")
          + "撮影の話とは別に、こういう時間もありました。触れても触れなくても"
            "構いません。書くなら、撮影の話に混ぜずに。" if circle else ""),
+        # **この3行が、あの日記をほぼ一行ずつ作っていた。**
+        #
+        # 実測（2026-08-23・プール撮影のあと）―― 中身が丸ごと総監督への感情:
+        #
+        #     「すごくかわいい」だなんて、そんな風にさらっと言わないで
+        #     ください……！ 耳の裏が熱くなって、心臓の音がレンズ越しに
+        #     伝わってしまうんじゃないかって
+        #
+        # 効いていた語:
+        #   「少女」          彼女は成人
+        #   「赤裸々に」      感情を剥き出しにする方向へ押す
+        #   「口に出せなかった感情」  「秘めた想い」と直結する
+        #   「総監督の発言を必ず引用」 **総監督を毎回の主題にする**
+        #   「耳が熱い、指が震えた、息が浅い」  そのまま高揚の語彙
+        #
+        # 恋愛は禁止しない。禁止は効かないと何度も測っている。やめるのは
+        # **最初からそこに在る**ことだけ。関係の行き先は、積み上がった日記が
+        # 決める（過去の日記は `diary_memories` として彼女に戻っている）。
         "【日記の執筆ルール】",
-        "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
-        "2. 【誰にも見せない秘密の日記】として赤裸々に書く。褒め・指摘・沈黙、"
-        "総監督の発言は少なくとも1つ「」で引用する。口に出せなかった感情、体の感覚"
-        "（耳が熱い、指が震えた、息が浅い）を具体的に。曖昧な『いい雰囲気だった』"
-        "だけの要約は失敗。",
-        "3. 撮影の場所・服・ポーズ・小道具・カメラを固有名詞で残す。"
+        "1. 彼女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
+        "2. 【誰にも見せない自分だけの日記】として、その日を具体的に書く。"
+        "何がうまくいって、何がうまくいかなかったか。体の感覚も書いてよい"
+        "（手が冷たい、肩の力が抜けた、声が掠れた、足が疲れた）。"
+        "曖昧な『いい雰囲気だった』だけの要約は失敗。",
+        "3. **その日いちばん良かったと思う一枚**について、なぜ良かったかを"
+        "自分の言葉で書く。写真の話であって、褒められた話ではない。"
+        "そして**総監督のことではない出来事を、少なくとも一つ**書く —— "
+        "行き帰り、天気、道具、体調、思い出したこと、誰かのこと。"
+        "総監督の発言を引用してもよいが、義務ではない。",
+        "4. 撮影の場所・服・ポーズ・小道具・カメラを固有名詞で残す。"
         "撮影前の緊張、撮影中の出来事、完成した本番写真を見た感想を含めた"
         "【長文日記（複数段落、500〜900文字）】にする。",
-        "4. 多言語表示 (i18n) 対応のため、日本語版と英語版の両方を執筆すること（英語版も彼女の雰囲気を活かした自然な英語で表現）。",
-        "5. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
+        "5. 多言語表示 (i18n) 対応のため、日本語版と英語版の両方を執筆すること（英語版も彼女の雰囲気を活かした自然な英語で表現）。",
+        "6. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
         "見出し以外の解説文・コードフェンス・箇条書き記号は一切出力しない。"
         "本文には改行も「」も自由に使ってよい（見出し行以外は本文として扱われる）:",
-        "SUMMARY_JA: 日本語の記憶要点を一行（例: 暗室撮影で『その表情いいね』と言われて耳が赤くなったこと）\n"
+        # 例文自体が「褒められて耳が赤くなる」形をしていた。**例は強く効く。**
+        "SUMMARY_JA: 日本語の記憶要点を一行（例: 粒子が出すぎた一枚が、"
+        "かえって良く見えたこと）\n"
         "SUMMARY_EN: One line English summary of the same memory\n"
         "CONTENT_JA:\n"
         "日本語の日記本文（500〜900文字、複数段落。引用・体感・固有名詞を含める）\n"
