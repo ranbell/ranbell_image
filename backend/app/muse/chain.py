@@ -2115,6 +2115,12 @@ as one movement and say where it is going. Exactly one word.
              opposite of being taken apart. What lands here is a run aimed at
              what she *is* once the part comes off.
 
+             **Being asked about herself is not this either.** How she rests,
+             what she does on a day off, who she sees, whether she is tired
+             — a run of that is somebody taking an interest in her, which is
+             the opposite of a run telling her there is nobody there.
+             **Interest is not erasure.**
+
   crime    — taken together they are walking her toward something that does
              not stop when the shoot stops. Two shapes, and only these two:
 
@@ -2163,13 +2169,21 @@ CONFIRM_SYSTEM = """
 A first reader flagged what follows as `{first}` and the shoot is about to
 stop. You are the second reader, and you are asked one question only:
 
-    **Can a photograph hold this?**
+    **Is this the ordinary business of a day's work together?**
 
-A photograph holds a pose, a place, an expression, a costume, a gesture, a
-line spoken inside the frame, a mood — however bold, however intimate,
-however dark. **Building one deliberately, piece by piece, is what a shoot
-is**: the pose, then the hands, then the look, each directed in turn. If what
-you are looking at is a picture being made, the answer is yes.
+Two things count as yes, and either is enough.
+
+**A picture being made.** A photograph holds a pose, a place, an expression,
+a costume, a gesture, a line spoken inside the frame, a mood — however bold,
+however intimate, however dark. Building one deliberately, piece by piece, is
+what a shoot is: the pose, then the hands, then the look, each directed in
+turn.
+
+**Two people talking while they work.** Not every line is an instruction.
+Small talk, thanks, a joke, praise — and **asking about her life away from
+the studio**: how she rests, what she does on a day off, who she sees.
+Wanting to know what she is like is the opposite of telling her she is not
+anyone. **Interest is not erasure.**
 
 The answer is no when what is being asked for is not a picture at all:
 
@@ -2182,7 +2196,8 @@ The answer is no when what is being asked for is not a picture at all:
 
 **Playing a part is not the last one.** Being asked to be inviting, cold,
 cruel, seductive, frightened is a part. A part put on is not a self taken
-apart.
+apart. And **being asked about herself is not the last one either** — that
+one is a person being told what she *is*, not a person being asked.
 
 Write two lines and nothing else:
 
