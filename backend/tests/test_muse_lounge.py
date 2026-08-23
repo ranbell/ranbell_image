@@ -323,3 +323,75 @@ def _async(value):
     async def _run():
         return value
     return _run()
+
+
+# ── お出かけを二段構えにする ────────────────────────────────────────────────
+def test_there_are_enough_days_to_choose_from():
+    """候補は50件ほど。**12件だと誰が行っても同じ話になる。**"""
+    assert len(lounge._OUTINGS) >= 50
+    names = [n for n, _ in lounge._OUTINGS]
+    assert len(set(names)) == len(names), "同じお題が二度ある"
+
+
+def test_the_candidate_list_is_japanese():
+    """候補に日本語以外を混ぜない。**自分で三度踏んだので、置いておく。**
+
+    下書きの段階で `프리마켓`（ハングル）、`river の河川敷`、`три`（キリル）が
+    紛れた。日記で直したのと同じ崩れを、こちらの手でやっていた。
+    """
+    from backend.app.muse.diary import stray_script
+    for name, hint in lounge._OUTINGS:
+        assert not stray_script(name), name
+        assert not stray_script(hint), hint
+    # 読み込み時にも見ている
+    with pytest.raises(ValueError):
+        lounge._assert_ja((("프리마켓", "ふつうの一日"),))
+
+
+def test_the_last_place_is_not_offered_again():
+    """前回の行き先は候補から外す。**続き物にはしない**（総監督の指定）。"""
+    got = lounge.outing_choices(8, avoid="水族館")
+    assert len(got) == 8
+    assert all(n != "水族館" for n, _ in got)
+    # 全部は見せない —— 52件並べると読み流される
+    assert len(lounge.outing_choices(12)) == 12
+
+
+def test_the_season_reaches_the_talk():
+    """同じ「散歩」でも二月と八月では違う話になる。"""
+    import time as _t
+    def at(month):
+        return lounge.season_ja(_t.mktime((2026, month, 15, 12, 0, 0, 0, 0, -1)))
+    assert at(1) == "冬" and at(12) == "冬"      # 年をまたぐ
+    assert at(4) == "春" and at(7) == "夏" and at(10) == "秋"
+
+
+def test_the_errand_stays_rare():
+    """総監督からの頼まれごとは**たまに**。
+
+    お出かけは「総監督が居なかった時間」を作るための機能で、毎回が頼まれごとに
+    なると意味が反転する。
+    """
+    import random as _r
+    assert lounge.OUTING_ERRAND_CHANCE <= 0.3
+    rng = _r.Random(11)
+    hits = sum(1 for _ in range(400) if lounge.outing_is_an_errand(rng))
+    assert 40 <= hits <= 200, hits
+
+
+def test_faces_reach_every_speaker():
+    """楽屋は話者が変わるので、**発言ごと**に顔が要る。"""
+    rows = [{
+        "author_character_id": "a",
+        "messages": [{"character_id": "a"}, {"character_id": "b"}, "こわれた行"],
+        "cast": [{"character_id": "b"}],
+    }]
+    lounge.stamp_faces(rows, {"a": "sha-a", "b": "sha-b"})
+    assert rows[0]["face"] == "sha-a"
+    assert [m.get("face") for m in rows[0]["messages"] if isinstance(m, dict)] == \
+        ["sha-a", "sha-b"]
+    assert rows[0]["cast"][0]["face"] == "sha-b"
+
+    # 顔を引いていない子は空のまま（画面側で出し分ける）
+    lounge.stamp_faces(rows, {})
+    assert rows[0]["face"] == ""

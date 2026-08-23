@@ -15,6 +15,8 @@ const emit = defineEmits(['close', 'diary-read', 'toast'])
 const { t, locale } = useI18n()
 
 const diaries = ref([])
+// 書いた本人の顔。名前の横に出す（払い出しに載ってくる）
+const face = ref('')
 const loading = ref(false)
 const selectedDiary = ref(null)
 // Set when an unread entry is opened: she does not know yet, and will say
@@ -96,6 +98,7 @@ async function loadDiaries() {
   try {
     const res = await api(`/api/characters/${props.characterId}/diaries`)
     diaries.value = res.diaries || []
+    face.value = res.face || ''
   } catch (err) {
     emit('toast', { msg: String(err?.message || err), type: 'error' })
   } finally {
@@ -255,7 +258,14 @@ watch(() => props.show, async (val) => {
       <!-- Left Sidebar: Diary List -->
       <aside class="w-full md:w-80 border-b md:border-b-0 md:border-r border-pink-200/60 dark:border-pink-800/40 p-4 flex flex-col gap-3 shrink-0 bg-pink-100/40 dark:bg-pink-950/30">
         <div class="flex items-center gap-2 px-1 py-1">
-          <span class="text-2xl">📖</span>
+          <!-- 顔があれば顔、無ければこれまでどおり本のかたち -->
+          <img
+            v-if="face"
+            :src="thumb(face)"
+            class="w-9 h-9 rounded-full object-cover ring-2 ring-pink-200 dark:ring-pink-800 shrink-0"
+            alt=""
+          />
+          <span v-else class="text-2xl">📖</span>
           <div>
             <h3 id="diary-title" class="font-bold text-pink-900 dark:text-pink-200 text-base tracking-wide">
               {{ t('characters.diary.title', { name: characterName || t('muse.defaultActressName') }) }}

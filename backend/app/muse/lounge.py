@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import time
 import re
 from typing import Any
 
@@ -24,6 +25,14 @@ _SHARE_TEMPLATES = (
 # way of turning up in the picture, which is what
 # `test_production_muse_copy_has_no_situation_specific_anchors` is guarding —
 # and a small moment is better writing than a venue anyway.
+# 一段目（相談）に見せる候補。**行き先ではなく「どんな一日か」**の粒度で
+# 揃える —— 添えた一言が会話の種になるので、その形は崩さない。
+#
+# ここから選ばせるが、**話の流れで別のことになってもよい**と伝える。骨組みで
+# あって台本ではない。
+#
+# **日本語だけで書く。** 下書きの段階で `프리마켓` と `river の河川敷` が
+# 紛れた —— 日記で直したのと同じ崩れを、こちらでやった。`_assert_ja` で見る。
 _OUTINGS = (
     ("パンケーキ", "話題の店に並んだら、思ったより待たされた"),
     ("ごはん", "遅い時間に、二人でラーメンを食べた"),
@@ -36,13 +45,103 @@ _OUTINGS = (
     ("勉強", "課題を持ち寄ったのに、ほとんど喋って終わった"),
     ("猫", "近所の猫に会いに行ったら、逃げられた"),
     ("花火", "遠くの音だけ聞こえて、結局よく見えなかった"),
-    ("だらだら", "どちらかの部屋で、何をするでもなく")
+    ("だらだら", "どちらかの部屋で、何をするでもなく"),
+    ("動物園", "目当ての動物が、ずっと寝ていた"),
+    ("温室", "湿気で眼鏡が真っ白になって、何も見えなくなった"),
+    ("古本屋", "一人だけ、閉店まで動かなかった"),
+    ("神社", "階段を数えながら登って、途中で分からなくなった"),
+    ("海", "電車で行ったのに、足首まで濡らして帰ってきた"),
+    ("河川敷", "座る場所を決めるのに、ずいぶん歩いた"),
+    ("展望台", "曇っていて、遠くはほとんど見えなかった"),
+    ("図書館", "同じ机で、別々の本を読んで終わった"),
+    ("銭湯", "湯あたりして、休憩所で長いこと伸びていた"),
+    ("陶芸", "同じ形を作ったつもりが、全然違うものになった"),
+    ("ボウリング", "後半になるほど、二人とも下手になっていった"),
+    ("カラオケ", "採点が思いのほか辛くて、むきになった"),
+    ("ゲームセンター", "取れるまでやると言い張った子がいた"),
+    ("プラネタリウム", "始まって十分で寝ていた"),
+    ("美術館", "一枚の絵の前で、意見が割れた"),
+    ("写真展", "帰りに同じ絵はがきを二人とも買っていた"),
+    ("食べ歩き", "商店街で、最初の一軒で満腹になった"),
+    ("コンビニ", "新商品を全部買って、少しずつ分け合った"),
+    ("朝ごはん", "早起きして出たのに、店がまだ開いていなかった"),
+    ("朝市", "何を買うか決めずに行って、荷物が増えすぎた"),
+    ("夜のドライブ", "曲を決めるのに、着くまでかかった"),
+    ("隣の県", "高速バスで行って、何もせず帰ってきた"),
+    ("誰かの実家", "犬に懐かれた子と、警戒された子がいた"),
+    ("ホームセンター", "買う予定のないものを、ずっと見ていた"),
+    ("百円ショップ", "気づいたら籠がいっぱいになっていた"),
+    ("家具屋", "ソファに座ったまま、しばらく立てなかった"),
+    ("文房具屋", "同じペンを何度も試し書きしていた"),
+    ("レコード屋", "ジャケットだけ見て、一枚も聴かなかった"),
+    ("楽器屋", "触っていいものと、そうでないものが分からなかった"),
+    ("風の強い日", "髪も話も、何度も途切れた"),
+    ("花見", "場所を取るのが遅くて、隅のほうになった"),
+    ("紅葉", "写真を撮る役が、ずっと同じ子だった"),
+    ("初詣", "おみくじの結果で、その日の空気が決まった"),
+    ("雪", "見に行ったのに、着いたら止んでいた"),
+    ("台風", "外に出られず、片方の家でずっと喋っていた"),
+    ("停電", "暗い部屋で、なぜか声が小さくなった"),
+    ("寄り道", "まっすぐ帰るはずが、もう一軒だけ寄った"),
+    ("病み上がり", "無理はしない約束で、近所を一周だけした"),
+    ("誕生日", "祝われるほうが、いちばん落ち着かなかった"),
+    ("引っ越しの手伝い", "運ぶより、荷物を開けるほうに時間がかかった"),
 )
+
+
+def _assert_ja(rows: tuple[tuple[str, str], ...]) -> None:
+    """候補に日本語以外が紛れていないか。**自分で踏んだので、置いておく。**"""
+    from .diary import stray_script
+    for name, hint in rows:
+        stray = stray_script(name) or stray_script(hint)
+        if stray:
+            raise ValueError(f"お出かけの候補に日本語以外が混ざっている: {stray!r}")
+
+
+_assert_ja(_OUTINGS)
 
 
 def pick_outing() -> tuple[str, str]:
     """お題を一つ。同じ話が続かないよう、毎回引き直す。"""
     return random.choice(_OUTINGS)
+
+
+def outing_choices(n: int = 12, *, avoid: str = "") -> tuple[tuple[str, str], ...]:
+    """相談に見せる候補。**全部は見せない** —— 52件並べると読み流される。
+
+    `avoid` は前回の行き先。同じ所が続かないよう、候補から外す。
+    """
+    pool = [o for o in _OUTINGS if not avoid or o[0] != avoid]
+    return tuple(random.sample(pool, min(max(1, n), len(pool))))
+
+
+#: 総監督から「友達とスナップ撮ってきて」と頼まれる割合。
+#:
+#: **低く保つ。** お出かけは「総監督が居なかった時間」を作るための機能で、
+#: 毎回が頼まれごとになると意味が反転する。四回に一回くらい。
+OUTING_ERRAND_CHANCE = 0.25
+
+
+def outing_is_an_errand(rng: random.Random | None = None) -> bool:
+    """今日のお出かけは、総監督からの頼まれごとつきか。"""
+    return (rng or random).random() < OUTING_ERRAND_CHANCE
+
+
+#: 月から季節。**同じ「散歩」でも二月と八月では違う話になる。**
+_SEASON_JA = (
+    (12, 2, "冬"), (3, 5, "春"), (6, 8, "夏"), (9, 11, "秋"),
+)
+
+
+def season_ja(when: float | None = None) -> str:
+    """いまの季節を一語。`outing_prompt` の `when_ja` に入れる。"""
+    month = time.localtime(when if when is not None else time.time()).tm_mon
+    for lo, hi, name in _SEASON_JA:
+        if lo <= hi and lo <= month <= hi:
+            return name
+        if lo > hi and (month >= lo or month <= hi):   # 12〜2月をまたぐ
+            return name
+    return ""
 
 
 def outing_occasions() -> tuple[str, ...]:
@@ -84,6 +183,26 @@ def normalize_outing(
             "reaction": (parsed.get(f"TURN_{i}_REACTION") or "").strip()[:8],
         })
     return out
+
+
+def stamp_faces(rows: list[dict[str, Any]], faces: dict[str, str]) -> None:
+    """スレッドと各発言に、話す人の顔を貼る。**その場で書き換える。**
+
+    楽屋は誰の発言かで話者が変わるので、**発言ごと**に要る。画面側は既に
+    `thumb(sha)` を持っているので、sha が届けば出せる。
+
+    顔が無いキャラ（board を引いていない）は空のまま —— 画面側で出し分ける。
+    """
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row["face"] = faces.get(str(row.get("author_character_id") or ""), "")
+        for m in row.get("messages") or []:
+            if isinstance(m, dict):
+                m["face"] = faces.get(str(m.get("character_id") or ""), "")
+        for c in row.get("cast") or []:
+            if isinstance(c, dict):
+                c["face"] = faces.get(str(c.get("character_id") or ""), "")
 
 
 def outing_summary_line(thread: dict[str, Any]) -> str:

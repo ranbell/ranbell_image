@@ -218,6 +218,14 @@ watch(tab, () => ensureSelected())
                   class="w-8 h-8 rounded-lg object-cover ring-1 ring-pink-200"
                   alt=""
                 />
+                <!-- 写真が無い投稿は、書いた人の顔を出す。顔が無い子もいるので
+                     どちらも無ければ何も置かない（枠だけ残ると崩れて見える） -->
+                <img
+                  v-else-if="th.face"
+                  :src="thumb(th.face)"
+                  class="w-8 h-8 rounded-full object-cover ring-1 ring-pink-200"
+                  alt=""
+                />
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1">
                     <span
@@ -297,6 +305,12 @@ watch(tab, () => ensureSelected())
                     : 'bg-white/70 border-pink-100'"
                 >
                   <div class="flex items-center gap-1.5 text-xs font-medium text-rose-500">
+                    <img
+                      v-if="m.face"
+                      :src="thumb(m.face)"
+                      class="w-5 h-5 rounded-full object-cover ring-1 ring-pink-200"
+                      alt=""
+                    />
                     <span v-if="m.reaction">{{ m.reaction }}</span>
                     <span>{{ isJa ? (m.name_ja || m.name) : (m.name || m.name_ja) }}</span>
                     <span

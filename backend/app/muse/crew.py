@@ -2561,12 +2561,86 @@ def lounge_share_prompt(
     ] if x)
 
 
+def _outing_sheet(c: dict[str, Any]) -> str:
+    """相談と語りに渡す一人分。**好き嫌いが要る** —— そこで意見が割れる。
+
+    `student_past` は渡さない。学生時代の話は日記の側の材料で、お出かけに
+    出すと年齢の線がぼやける。
+    """
+    name = str(c.get("name_ja") or "")
+    age = int(c.get("age") or 0)
+    job = str(c.get("occupation_ja") or "")
+    head = f"『{name}』" + (f"{age}歳" if age else "") + (f"・{job}" if job else "")
+    bits = [head]
+    for label, key, cap in (("口調", "voice_ja", 70), ("好き", "likes", 60),
+                            ("苦手", "dislikes", 60), ("夢", "dream_ja", 50)):
+        v = c.get(key)
+        v = "、".join(str(x) for x in v[:3]) if isinstance(v, list) else str(v or "")
+        if v.strip():
+            bits.append(f"  {label}: {v.strip()[:cap]}")
+    return "\n".join(bits)
+
+
+def outing_plan_prompt(
+    cast: list[dict[str, Any]],
+    *,
+    choices: list[tuple[str, str]] | tuple[tuple[str, str], ...] = (),
+    last_time: str = "",
+    season_ja: str = "",
+    errand: bool = False,
+) -> str:
+    """**まだ出かけていない。** 休みが合って、どこへ行くかを相談している所。
+
+    性格を二度効かせるための一段目 —— ここで「その人なら何を選ぶか」が出る。
+    実測（みなも／あかり／すず）で、深夜のコンビニのあかりが人混みを嫌がり、
+    暗室のみなもが眩しくない所を推し、書道のすずが「はらいが美しくできない」
+    と断った。**全部それぞれの設定から出ている。**
+
+    `errand` のときは、総監督から写真を頼まれた日。**行き先の相談は変わらず
+    自分たちでする** —— 頼まれたのは撮ることであって、どこへ行くかではない。
+    """
+    who = "\n".join(_outing_sheet(c) for c in cast if c.get("name_ja"))
+    menu = "\n".join(f"- {n}（{h}）" for n, h in choices)
+    return "\n\n".join(x for x in [
+        "仲のいい三人の会話を書きます。**まだ出かけていません。**"
+        "休みが合ったので、どこへ行くかを相談しているところです。",
+        f"【三人】\n{who}",
+        f"【いまの季節】{season_ja}" if season_ja else "",
+        f"【前回みんなで行った所】{last_time}（同じ所には行かない）" if last_time else "",
+        (f"【候補】この中から選んでも、話の流れで別のことになってもいい:\n{menu}"
+         if menu else ""),
+        ("【今日はもう一つある】総監督から「どこか行くなら、友達とスナップを"
+         "撮ってきて」と頼まれている。断る話ではなく、どこで撮ろうかという話。"
+         if errand else ""),
+        "【ルール】",
+        "1. **それぞれの好き嫌いが出ること。** 誰かが乗り気で、誰かが渋る。"
+        "全員が同じ意見にならない。最後は折り合いがつく。",
+        # 実測: 内向きな三人だと、候補が52あっても「静かな屋内」に5/5で寄った。
+        # 苦手なほうへ踏み出す回があっていい ―― 友達とはそういうもの。
+        "2. **いつも安全なほうを選ばない。** 誰かが苦手なことに付き合う回、"
+        "外に出る回、賑やかな所へ行く回があっていい。渋りながら行くのも話になる。",
+        "3. 仕事（撮影・スタジオ・カメラ・衣装）の話はしない。"
+        + ("ただし頼まれごとの相談だけは別。" if errand else ""),
+        "4. 四〜六発言。1発言 40〜80字。相手の発言に返す形にする。",
+        "5. 出力は下の見出しだけ。JSON やコードフェンスは禁止:",
+        "TURN_1_WHO: 発言者の名前\n"
+        "TURN_1_JA: 発言（日本語）\n"
+        "TURN_2_WHO: …（同じ形で TURN_6 まで。使わない番号は書かない）\n"
+        "PLAN_PICK: 候補の中から選んだものの名前をそのまま一語で"
+        "（候補以外になったなら、その一語）\n"
+        "PLAN_JA: 相談の結果、何をすることになったかを一行で",
+    ] if x)
+
+
 def outing_prompt(
     cast: list[dict[str, Any]],
     *,
     occasion: str = "",
     hint: str = "",
     when_ja: str = "",
+    plan_ja: str = "",
+    planned_talk: str = "",
+    errand: bool = False,
 ) -> str:
     """撮影の外で、仲のいい子同士が出かけた日の短い掛け合い。
 
@@ -2579,16 +2653,21 @@ def outing_prompt(
     who = "、".join(
         f"『{str(c.get('name_ja') or '')}』" for c in cast if c.get("name_ja")
     )
-    voices = "\n".join(
-        f"- {c.get('name_ja')}: {str(c.get('voice_ja') or c.get('summary_ja') or '')[:80]}"
-        for c in cast if c.get("name_ja")
-    )
+    voices = "\n".join(_outing_sheet(c) for c in cast if c.get("name_ja"))
     return "\n\n".join(x for x in [
         f"スタジオの【お出かけ】チャンネルに、{who} が"
         "先日の出来事を短く書き込みます。あなたは全員ぶんを書いてください。",
-        f"【それぞれの口調】\n{voices}" if voices else "",
+        f"【三人】\n{voices}" if voices else "",
         f"【いつ】{when_ja}" if when_ja else "",
-        f"【何をした】{occasion}" + (f"（{hint}）" if hint else ""),
+        (f"【決めたこと】{plan_ja}" if plan_ja else
+         f"【何をした】{occasion}" + (f"（{hint}）" if hint else "")),
+        (f"【決めたときのやりとり】\n{planned_talk[:600]}" if planned_talk else ""),
+        ("【総監督からの頼まれごと】友達とスナップを撮ってくること。"
+         "撮った話は出してよいが、**仕事の撮影の話にはしない**。"
+         if errand else ""),
+        # 計画どおりにいかない所が、話の芯になる（実測）
+        ("【大事なこと】**計画どおりにいかなかった部分がある。** そこを書く。"
+         if plan_ja else ""),
         "【ルール】",
         "1. **仕事の話ではない。** 撮影・衣装・カメラ・ポーズ・スタジオの"
         "出来事は書かない。休みの日の他愛のない話にする。",

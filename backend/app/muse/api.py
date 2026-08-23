@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from starlette.responses import StreamingResponse
 
-from . import crew, events, identity, report, service, session_db
+from . import crew, events, identity, lounge, report, service, session_db
 from .catalog import build_muse_catalog
 from .schema import STEPS, public_view
 
@@ -367,10 +367,28 @@ async def list_steps():
 
 # ── Lounge + studio handpost ─────────────────────────────────────────────────
 
+async def _faces(request: Request) -> dict[str, str]:
+    """`{character_id: 顔の sha}`。**一覧を一度だけ引く。**
+
+    楽屋には何人も出てくるので、一人ずつ preset を引くと件数ぶん往復する。
+    """
+    from ..characters import presets as presets_db
+    out: dict[str, str] = {}
+    try:
+        for p in await presets_db.list_presets(_db(request)):
+            sha = str((p.get("board") or {}).get("portrait") or "")
+            if sha:
+                out[str(p.get("id") or "")] = sha
+    except Exception:
+        pass                      # 顔が出ないだけ。楽屋は読めるほうが大事
+    return out
+
+
 @router.get("/lounge/threads")
 async def lounge_threads(request: Request, limit: int = 40, kind: str = ""):
     from . import lounge_db
     rows = await lounge_db.list_threads(_db(request), limit=limit, kind=kind)
+    lounge.stamp_faces(rows, await _faces(request))
     return {"threads": rows}
 
 
@@ -380,6 +398,7 @@ async def lounge_thread(thread_id: str, request: Request):
     row = await lounge_db.get_thread(_db(request), thread_id)
     if row is None:
         raise HTTPException(404, "thread not found")
+    lounge.stamp_faces([row], await _faces(request))
     return row
 
 

@@ -274,11 +274,15 @@ async def delete_character(character_id: str, request: Request):
 @router.get("/{character_id}/diaries")
 async def list_character_diaries(character_id: str, request: Request):
     """Newest first — the panel opens on the top entry."""
-    if await presets_db.get_preset(request.app.state.db, character_id) is None:
+    preset = await presets_db.get_preset(request.app.state.db, character_id)
+    if preset is None:
         raise HTTPException(404, "character not found")
     diaries = await presets_db.get_preset_diaries(request.app.state.db, character_id)
     diaries.sort(key=lambda d: d.get("timestamp") or 0.0, reverse=True)
-    return {"diaries": diaries}
+    # 書いた本人の顔。日記は一人ぶんなので一度引けば足りる —— 画面側は
+    # `thumb(sha)` を既に持っているので、sha が届けば名前の横に出せる。
+    return {"diaries": diaries,
+            "face": str((preset.get("board") or {}).get("portrait") or "")}
 
 
 @router.get("/{character_id}/diaries/by-image/{image_id}")

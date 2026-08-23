@@ -7552,31 +7552,93 @@ async def run_generate_outing_job(
     if not friends:
         return {"status": "skipped", "reason": "no friends"}
 
+    def _member(preset: dict[str, Any], cid: str, fallback: dict | None = None) -> dict:
+        """一人分の材料。**好き嫌いが要る** —— そこで意見が割れる。
+
+        `voice_ja` を読んでいたが、**preset にその欄は存在しない**。常に空で
+        紹介文に落ちていたので、口調（`talk_quirks`）が一度も渡っていなかった。
+        だから誰が出かけても同じ調子の会話になっていた。
+        """
+        f = fallback or {}
+        pref = preset.get("preferences") or {}
+        return {
+            "character_id": cid,
+            "name_ja": str(f.get("name_ja") or preset.get("name_ja")
+                           or preset.get("name") or ""),
+            "name": str(f.get("name") or preset.get("name")
+                        or preset.get("name_ja") or ""),
+            "voice_ja": str(preset.get("talk_quirks") or ""),
+            "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
+            "age": int(preset.get("age") or 0) or None,
+            "occupation_ja": str(preset.get("occupation_ja")
+                                 or preset.get("occupation") or ""),
+            "likes": [str(x) for x in (pref.get("likes") or [])][:3],
+            "dislikes": [str(x) for x in (pref.get("dislikes") or [])][:3],
+            "dream_ja": str(preset.get("dream_ja") or preset.get("dream") or ""),
+        }
+
     preset = await presets_db.get_preset(db, character_id) or {}
-    cast = [{
-        "character_id": character_id,
-        "name_ja": str(preset.get("name_ja") or preset.get("name") or ""),
-        "name": str(preset.get("name") or preset.get("name_ja") or ""),
-        "voice_ja": str(preset.get("voice_ja") or ""),
-        "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
-    }]
+    cast = [_member(preset, character_id)]
     for f in friends[:2]:
         fid = str(f.get("id") or "")
-        fp = await presets_db.get_preset(db, fid) or {}
-        cast.append({
-            "character_id": fid,
-            "name_ja": str(f.get("name_ja") or fp.get("name_ja") or ""),
-            "name": str(f.get("name") or fp.get("name") or ""),
-            "voice_ja": str(fp.get("voice_ja") or ""),
-            "summary_ja": str(fp.get("summary_ja") or fp.get("summary") or ""),
-        })
+        cast.append(_member(await presets_db.get_preset(db, fid) or {}, fid, f))
 
-    occasion, hint = lounge_mod.pick_outing()
-    system = crew.outing_prompt(cast, occasion=occasion, hint=hint)
+    # 前回どこへ行ったか。**一行だけ** —— 続き物にはしない（総監督の指定）。
+    last_time = ""
+    try:
+        for row in await lounge_db.list_threads(db, limit=40, kind="outing"):
+            if any(str(c.get("character_id") or "") == character_id
+                   for c in (row.get("cast") or []) if isinstance(c, dict)):
+                last_time = str(row.get("occasion") or "")
+                break
+    except Exception:
+        logger.debug("[muse] could not read the last outing", exc_info=True)
+
+    season = lounge_mod.season_ja()
+    errand = lounge_mod.outing_is_an_errand()
+    choices = lounge_mod.outing_choices(12, avoid=last_time)
+
+    # **一段目 —— どこへ行くかを相談する。** 性格がここで一度効く。
+    plan_ja, planned_talk = "", ""
+    try:
+        planned_talk = await chain._call(
+            ollama,
+            system=crew.outing_plan_prompt(
+                cast, choices=choices, last_time=last_time,
+                season_ja=season, errand=errand,
+            ),
+            prompt="相談をお願いします。",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+        picked = ""
+        for line in planned_talk.splitlines():
+            head = line.strip().upper()
+            if head.startswith("PLAN_JA"):
+                plan_ja = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+            elif head.startswith("PLAN_PICK"):
+                picked = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+    except Exception:
+        picked = ""
+        logger.warning("[muse] the planning turn failed; falling back to a topic",
+                       exc_info=True)
+
+    # 相談が読めなければ、これまでどおり抽選のお題で書く
+    occasion, hint = (choices[0] if choices else lounge_mod.pick_outing())
+    # **お題は一語で残す。** `PLAN_JA` は「三人で美術館へ行くことになった」の
+    # ような文なので、そのまま `occasion` にすると次回の「前回の行き先」とも
+    # 照合できず、一覧にも長い文が並ぶ。選んだ候補の名前を使う。
+    if picked:
+        occasion = picked[:16]
+        hint = next((h for n, h in choices if n == picked), "")
     _report(reporter, 0.5, "お出かけの話を書いています")
     try:
         raw = await chain._call(
-            ollama, system=system, prompt="書き込みをお願いします。",
+            ollama,
+            system=crew.outing_prompt(
+                cast, occasion=occasion, hint=hint, when_ja=season,
+                plan_ja=plan_ja, planned_talk=planned_talk, errand=errand,
+            ),
+            prompt="書き込みをお願いします。",
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
     except Exception as exc:
@@ -7602,6 +7664,9 @@ async def run_generate_outing_job(
         "author_name_ja": cast[0]["name_ja"],
         "author_name": cast[0]["name"],
         "occasion": occasion,
+        "plan_ja": plan_ja,
+        "errand": errand,
+        "season_ja": season,
         "when_ja": str(parsed.get("WHEN_JA") or "この前"),
         "cast": [{k: c[k] for k in ("character_id", "name_ja", "name")} for c in cast],
         "shoot_count": shoot_count,
