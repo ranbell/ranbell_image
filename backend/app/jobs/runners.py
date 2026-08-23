@@ -820,7 +820,9 @@ async def run_generation(
     )
 
     # submit to ComfyUI
-    prompt_id = await comfy.queue_prompt(patched)
+    # 描画ごとに別の clientId（やり直しで前の socket が落ちるため）
+    client_id = comfy.new_client_id()
+    prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
     reporter.update(0.0, "Waiting in ComfyUI queue...")
 
     # cancel handler: delete from queue if not yet started, interrupt if running
@@ -842,7 +844,7 @@ async def run_generation(
     saved_sha256s: list[str] = []
     saved_filenames: set[str] = set()
 
-    async for event in comfy.stream_progress(prompt_id):
+    async for event in comfy.stream_progress(prompt_id, client_id=client_id):
         cancel.raise_if_set()
         queued = False
 
@@ -2041,7 +2043,9 @@ async def run_invoke_image_generate(
     try:
         wf = comfy.load_workflow(workflow_name)
         patched = comfy.patch_workflow(wf, positive.strip(), negative.strip(), "", "", 1, seed=seed)
-        prompt_id = await comfy.queue_prompt(patched)
+        # 描画ごとに別の clientId（やり直しで前の socket が落ちるため）
+        client_id = comfy.new_client_id()
+        prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
     except Exception as e:
         logger.warning("[invoke] image_generate ComfyUI setup failed (%s): %s", spirit_name, e)
         await session_manager.on_spirit_error(session_id, spirit_name, f"ComfyUI setup error: {e}")
@@ -2067,7 +2071,7 @@ async def run_invoke_image_generate(
     sha256: str | None = None
 
     try:
-        async for event in comfy.stream_progress(prompt_id):
+        async for event in comfy.stream_progress(prompt_id, client_id=client_id):
             cancel.raise_if_set()
             queued = False
 

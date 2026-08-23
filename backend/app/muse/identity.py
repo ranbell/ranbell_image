@@ -591,6 +591,13 @@ _COUNT_TAGS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: 人数を言う語すべて。**人数は cast から導くもの**なので、他の経路から
+#: 入ってきたものは落とす（`solo` を含む）。
+ALL_COUNT_TAGS: frozenset[str] = frozenset(
+    [t for scale in _COUNT_TAGS.values() for t in scale] + ["solo"]
+)
+
+
 def subject_tags(cast: Iterable[dict] | None) -> list[str]:
     """How many people are in frame, derived from who was actually cast.
 
@@ -695,6 +702,11 @@ def assemble_positive(
             continue
         seen.add(tag)
         look.append(tag)
+
+    # **人数は cast が決める。** 台本係が書いたタグにも人数が混じることが
+    # あり、W撮りで `2girls, …, 1girl, …` と矛盾したまま焼けていた（実測）。
+    # `1girl` は片方を消す方向に働く。人数を言う語は、ここで全部落とす。
+    banned = set(banned) | (ALL_COUNT_TAGS - set(lead))
 
     model_tags: list[str] = []
     for part in (tags or "").split(","):

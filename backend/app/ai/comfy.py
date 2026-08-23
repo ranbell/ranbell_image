@@ -585,7 +585,9 @@ class ComfyUIClient:
         r.raise_for_status()
         return r.content
 
-    async def queue_prompt(self, workflow: dict, *, preview: bool = False) -> str:
+    async def queue_prompt(
+        self, workflow: dict, *, preview: bool = False, client_id: str = "",
+    ) -> str:
         """Queue a graph. ``preview`` turns on in-flight latent previews.
 
         ComfyUI takes the preview method **per prompt**, not per server — the web
@@ -594,15 +596,30 @@ class ComfyUIClient:
         It is opt-in because the frames are one JPEG per sampler step and only
         Muse, which lets you watch a draft form and abort it, has any use for them.
         """
-        body: dict = {"prompt": workflow, "client_id": self.client_id}
+        # **描画ごとに別の clientId。** 一つを共有していたので、撮影を
+        # 「やり直し」で続けると、前の描画がまだ生きているうちに同じ
+        # clientId で二本目の websocket が開き、ComfyUI 側が古いほうを
+        # 落としてストリーミングが途切れていた。
+        #
+        # プレビューの取り違えも同じ根 —— プレビューのフレームは
+        # `prompt_id` を持たないので、`stream_progress` は「この
+        # クライアントがいま待っているもの」とみなすしかない。
+        # **clientId を分ければ、その仮定が本当になる。**
+        body: dict = {"prompt": workflow, "client_id": client_id or self.client_id}
         if preview:
             body["extra_data"] = {"preview_method": "auto"}
         r = await self._http.post(f"{settings.comfyui_url}/prompt", json=body)
         r.raise_for_status()
         return r.json()["prompt_id"]
 
+    @staticmethod
+    def new_client_id() -> str:
+        """一回の描画ぶんの clientId。"""
+        return str(uuid.uuid4())
+
     async def stream_progress(
         self, prompt_id: str, *, idle_timeout: float = STREAM_IDLE_TIMEOUT,
+        client_id: str = "",
     ) -> AsyncGenerator[dict, None]:
         try:
             import websockets  # type: ignore
@@ -615,7 +632,9 @@ class ComfyUIClient:
             .replace("http://", "ws://")
             .replace("https://", "wss://")
         )
-        ws_url = f"{ws_url}/ws?clientId={self.client_id}"
+        # `queue_prompt` に渡したのと**同じ**clientId で待つこと。違うと
+        # ComfyUI はこちらへ何も送らない。
+        ws_url = f"{ws_url}/ws?clientId={client_id or self.client_id}"
 
         import time
         last_progress_time = 0.0

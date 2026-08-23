@@ -915,3 +915,31 @@ def test_both_w_frames_ask_who_is_muttering():
     for frame in (muse_crew.DUET_TALK_OUTPUT, muse_crew.DUET_CHAT_OUTPUT):
         aside = frame[frame.index("ASIDE:"):]
         assert "`A:` or `B:`" not in aside[:400]
+
+
+def test_the_cast_decides_how_many_people_are_in_frame():
+    """台本係が書いた人数タグを落とす。
+
+    W撮りの実測プロンプト（総監督のセッション）:
+
+        2girls, silver_hair, …, anime_illustration, **1girl**, medium_shot, …
+
+    `2girls` と `1girl` が同居していた。人数は cast から導く決まりなのに、
+    台本係のタグ経由で別の人数が入り、**片方を消す方向に働いていた。**
+    """
+    from backend.app.muse import identity as muse_identity
+    got = muse_identity.assemble_positive(
+        ["silver_hair", "blue_eyes", "blonde_hair", "green_eyes"],
+        "1girl, solo, medium_shot, summer_dress", "",
+        subject=["2girls"],
+    )
+    assert got.startswith("2girls")
+    parts = [p.strip() for p in got.split(",")]
+    assert "1girl" not in parts and "solo" not in parts
+    assert "medium_shot" in parts        # 他のタグは残る
+
+    # 主演撮りでは、cast が出した 1girl / solo は当然残る
+    solo = muse_identity.assemble_positive(
+        ["silver_hair"], "smiling", "", subject=["1girl", "solo"],
+    )
+    assert solo.startswith("1girl, solo")

@@ -105,7 +105,12 @@ async def run_render(
         append_negative=True,
     )
 
-    prompt_id = await comfy.queue_prompt(patched, preview=preview is not None)
+    # **この描画だけの clientId。** 一つを共有していたので、やり直しで
+    # 二本目が同じ id で繋がり、ComfyUI が古いほうを落としていた。
+    client_id = comfy.new_client_id()
+    prompt_id = await comfy.queue_prompt(
+        patched, preview=preview is not None, client_id=client_id,
+    )
     reporter.update(0.0, "Waiting in ComfyUI queue...")
 
     queued = True
@@ -162,7 +167,7 @@ async def run_render(
 
     last_preview = 0.0
 
-    async for event in comfy.stream_progress(prompt_id):
+    async for event in comfy.stream_progress(prompt_id, client_id=client_id):
         cancel.raise_if_set()
         queued = False
         if event["type"] == "comfy_progress":

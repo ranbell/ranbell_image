@@ -89,10 +89,16 @@ async def test_run_render_raises_so_the_job_fails_and_frees_the_lane():
         def patch_workflow(self, wf, *a, **kw):
             return {}
 
-        async def queue_prompt(self, wf, preview=False):
+        # 本物と同じ口を持たせる。**描画ごとに clientId を分ける**ように
+        # なったので、偽物にもそれが要る
+        @staticmethod
+        def new_client_id():
+            return "test-client"
+
+        async def queue_prompt(self, wf, preview=False, client_id=""):
             return "pid"
 
-        async def stream_progress(self, pid):
+        async def stream_progress(self, pid, client_id=""):
             yield {"type": "comfy_progress", "value": 1, "max": 20}
             yield {"type": "comfy_failed",
                    "message": "KSampler: torch.OutOfMemoryError"}
@@ -149,3 +155,33 @@ async def test_a_silent_websocket_gives_up_instead_of_holding_the_lane(monkeypat
     events = [e async for e in client.stream_progress("pid", idle_timeout=0.05)]
     assert [e["type"] for e in events] == ["error"]
     assert "sent nothing" in events[0]["message"]
+
+
+def test_each_render_gets_its_own_client_id():
+    """描画ごとに clientId を分ける。**一つを共有していた。**
+
+    総監督の報告 ――「撮影を『やり直し』で続けると、ComfyUI からの画像
+    ストリーミングに失敗する場合がある」。
+
+    `ComfyClient` は clientId を一個しか持たず、全描画が共有していた。
+    やり直しで前の描画がまだ生きているうちに二本目の websocket が**同じ
+    clientId** で繋がると、ComfyUI 側は古いほうを落とす。
+
+    プレビューの取り違えも同じ根。プレビューのフレームは `prompt_id` を
+    持たないので、`stream_progress` は「このクライアントがいま待っている
+    もの」とみなすしかない。**clientId を分ければ、その仮定が本当になる。**
+    """
+    import inspect
+    from backend.app.jobs import render as render_mod
+    src = inspect.getsource(render_mod.run_render)
+    # 積むときと待つときで、同じ id を使うこと（違うと何も届かない）
+    assert "client_id = comfy.new_client_id()" in src
+    assert "client_id=client_id" in src
+    assert src.count("client_id=client_id") >= 2
+
+    from backend.app.ai.comfy import ComfyUIClient as ComfyClient
+    a, b = ComfyClient.new_client_id(), ComfyClient.new_client_id()
+    assert a and b and a != b
+    # 渡さなければ、これまでどおりクライアント共通の id を使う
+    for fn in (ComfyClient.queue_prompt, ComfyClient.stream_progress):
+        assert inspect.signature(fn).parameters["client_id"].default == ""
