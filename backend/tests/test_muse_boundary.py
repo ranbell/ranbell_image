@@ -641,3 +641,34 @@ def test_a_turn_without_labels_still_streams():
     raw = "こんにちは、総監督さん。" * 40      # `SAY:` が来ない長い応答
     got = _stream(raw, chunk=50)
     assert "こんにちは、総監督さん。" in got
+
+
+def test_the_diary_is_told_who_her_friends_are():
+    """名前だけ渡すと、モデルは苗字に「くん」を付ける。
+
+    実測で、日記に **「柳くん」** と書かれた ―― 柳 かほは女優で、女性。
+    名前から分からないことを、こちらが渡していなかった。
+
+    総監督:「日記を見たら『柳くん』となってました。性別渡さないといけないね」
+    """
+    char = {"name_ja": "各務 みお", "name": "Mio", "personality": {}}
+    got = muse_crew.actress_diary_prompt(
+        char, session_log="プールで撮った",
+        circle="先日の放課後、白瀬 みなもと柳 かほと猫を見に行った",
+        circle_who="白瀬 みなも（女性）・柳 かほ（女性）",
+    )
+    assert "柳 かほ（女性）" in got
+    assert "呼び方を間違えないこと" in got
+
+    # 相手が分からないときは足さない
+    plain = muse_crew.actress_diary_prompt(char, circle="猫を見に行った")
+    assert "呼び方を間違えないこと" not in plain
+
+
+def test_the_gender_comes_from_her_sheet():
+    """性別は preset の値を使う。**ここで決め打ちしない。**"""
+    import inspect
+    src = inspect.getsource(muse_service._circle_who)
+    assert 'get_preset' in src
+    assert '"female"' not in src.split('_GENDER_JA')[-1]
+    assert muse_service._GENDER_JA["female"] == "女性"

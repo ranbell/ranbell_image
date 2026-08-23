@@ -2363,7 +2363,7 @@ def caught_block(diary_summary: str = "") -> str:
 
 def actress_diary_prompt(
     character: dict[str, Any], *, session_log: str = "", photo_desc: str = "",
-    circle: str = "",
+    circle: str = "", circle_who: str = "",
 ) -> str:
     """Prompt for generating her long, candid secret diary after 'honban' completes in both JA and EN.
 
@@ -2411,8 +2411,12 @@ def actress_diary_prompt(
         # 日記11本のうち、他の Muse が出てきたものは 0本だった ―― お出かけは
         # 楽屋に生まれていたのに、日記を書く手元に材料が無かった。
         (f"【最近の撮影以外の出来事】\n{circle}\n"
-         "撮影の話とは別に、こういう時間もありました。触れても触れなくても"
-         "構いません。書くなら、撮影の話に混ぜずに。" if circle else ""),
+         # 名前だけ渡すと、モデルは苗字に「くん」を付ける。実測で
+         # **「柳くん」** と書かれた ―― 柳 かほは女優で、女性。
+         + (f"一緒にいたのは同じ事務所の仲間です（{circle_who}）。"
+            "呼び方を間違えないこと。\n" if circle_who else "")
+         + "撮影の話とは別に、こういう時間もありました。触れても触れなくても"
+           "構いません。書くなら、撮影の話に混ぜずに。" if circle else ""),
         "【日記の執筆ルール】",
         "1. 少女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
         "2. 【誰にも見せない秘密の日記】として赤裸々に書く。褒め・指摘・沈黙、"

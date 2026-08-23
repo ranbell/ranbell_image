@@ -2566,11 +2566,14 @@ def _memory_block(session: dict[str, Any]) -> str:
             *(f"- {m}" for m in partner[:2]),
         ]
     if circle:
+        who = str(session.get("circle_who") or "").strip()
         parts += [
             "HER CIRCLE — days off with her friends, away from the studio. "
             "Not material for today's picture. She has a life outside these "
             "walls and these are the people in it:",
             *(f"- {m}" for m in circle[:CIRCLE_MAX_LINES]),
+            # 名前だけだと、モデルは苗字に「くん」を付ける（実測）
+            *([f"- (they are: {who})"] if who else []),
         ]
     return "\n".join(parts)
 
@@ -5207,7 +5210,33 @@ CIRCLE_MAX_LINES = 2
 CIRCLE_MAX_CHARS = 150
 
 
-async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str]]:
+_GENDER_JA = {"female": "女性", "male": "男性"}
+
+
+async def _circle_who(db, names_by_id: dict[str, str]) -> str:
+    """一緒に出かけた相手が誰なのか ―― 名前と、性別。
+
+    名前だけ渡すと、モデルは苗字に「くん」を付ける。実測で、日記に
+    **「柳くん」** と書かれた ―― 柳 かほは女優で、女性。名前からは分からない
+    ことを、こちらが渡していなかった。
+
+    総監督:「日記を見たら『柳くん』となってました。性別渡さないといけないね」
+
+    preset に載っている値をそのまま使う。ここで決め打ちしない。
+    """
+    out: list[str] = []
+    for cid, name in names_by_id.items():
+        g = ""
+        try:
+            preset = await presets_db.get_preset(db, cid)
+            g = _GENDER_JA.get(str((preset or {}).get("gender") or ""), "")
+        except Exception:
+            logger.debug("[muse] could not read a friend's sheet", exc_info=True)
+        out.append(f"{name}（{g}）" if g else name)
+    return "・".join(out)
+
+
+async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str], str]:
     """このひとが最近誰と出かけたか ―― 短い2行と、相手の名前。
 
     **character_id で引く。** 会話は主演の分で足りるが、日記は一人ずつ書く
@@ -5215,14 +5244,14 @@ async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str]]:
     主演のお出かけが載る。
     """
     if not char_id:
-        return [], []
+        return [], [], ""
     try:
         rows = await lounge_db.list_threads(db, limit=20, kind="outing")
     except Exception:
         logger.debug("[muse] could not read the outing feed", exc_info=True)
-        return [], []
+        return [], [], ""
     lines: list[str] = []
-    names: set[str] = set()
+    names: dict[str, str] = {}          # character_id -> 表示名
     used = 0
     for row in rows:
         cast_ids = {
@@ -5236,14 +5265,16 @@ async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str]]:
             continue
         lines.append(line)
         used += len(line)
-        names.update(
-            str(c.get("name_ja") or "").strip()
-            for c in (row.get("cast") or [])
-            if isinstance(c, dict) and str(c.get("character_id") or "") != char_id
-        )
+        for c in (row.get("cast") or []):
+            if not isinstance(c, dict):
+                continue
+            cid = str(c.get("character_id") or "")
+            nm = str(c.get("name_ja") or "").strip()
+            if cid and nm and cid != char_id:
+                names[cid] = nm
         if len(lines) >= CIRCLE_MAX_LINES:
             break
-    return lines, sorted(n for n in names if n)
+    return lines, sorted(names.values()), await _circle_who(db, names)
 
 
 async def _load_circle(db, session: dict[str, Any]) -> None:
@@ -5253,11 +5284,12 @@ async def _load_circle(db, session: dict[str, Any]) -> None:
     she saw last Sunday did not stop existing because she has already spoken
     once; the seeds are a tip to try in one shot, this is just who is around.
     """
-    lines, names = await _circle_lines(
+    lines, names, who = await _circle_lines(
         db, str(_inputs(session).get("character_id") or ""),
     )
     session["circle"] = lines
     session["circle_names"] = names
+    session["circle_who"] = who
     session["circle_mentions"] = 0
 
 
@@ -6797,10 +6829,10 @@ async def run_generate_actress_diary_job(
     # is the system side; the user turn only has to ask for the thing.
     # **この日記の本人**で引く。W撮りは二人分書くので、session の分を使い回すと
     # 相手の日記に主演のお出かけが載る。
-    circle_lines, _ = await _circle_lines(db, character_id)
+    circle_lines, _, circle_who = await _circle_lines(db, character_id)
     system = crew.actress_diary_prompt(
         char, session_log=session_log, photo_desc=photo_desc,
-        circle="\n".join(circle_lines),
+        circle="\n".join(circle_lines), circle_who=circle_who,
     )
     _report(reporter, 0.2, "日記を書いてもらっています")
 
