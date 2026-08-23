@@ -839,3 +839,38 @@ def test_the_snapshot_only_happens_on_an_errand():
     assert "errand" in guard
     # 道具が無い環境（試験や、描画の口が閉じている時）では静かに飛ばす
     assert "spooler is not None" in guard and "comfy is not None" in guard
+
+
+# ── 撮った枚数が記録に残ること ──────────────────────────────────────────────
+def test_the_last_take_is_not_left_behind():
+    """セッション最後の一枚が、履歴に入ること。
+
+    `approve_and_shoot` は**次の③のときに前の一枚を積む**作りなので、そのままだと
+    最後の一枚は次が無くて `shoot` に取り残される。実測（2026-08-24・4枚撮った
+    回）で `shoots` が3件しかなかった。
+
+    日記は `shoots + [shoot]` と両方見ていたので気づかなかった ――
+    **日記だけが正しく、記録の側が欠けていた。**
+    """
+    session = {"shoots": [{"prompt": "a", "images": [{"image_id": "x"}]}],
+               "shoot": {"prompt": "b", "images": [{"image_id": "y"}]}}
+    assert muse_service._archive_take(session) is True
+    assert [t["prompt"] for t in session["shoots"]] == ["a", "b"]
+
+    # **二度積まない。** 撮影のたびと終了時の両方から呼ばれる
+    assert muse_service._archive_take(session) is False
+    assert len(session["shoots"]) == 2
+
+    # まだ焼けていない一枚は積まない
+    pending = {"shoots": [], "shoot": {"prompt": "c", "images": [], "pending": True}}
+    assert muse_service._archive_take(pending) is False
+    assert pending["shoots"] == []
+
+
+def test_wrapping_up_archives_the_last_take():
+    """撮影を終える時にも積む —— そこが最後の機会。"""
+    import inspect
+    src = inspect.getsource(muse_service.finish_session)
+    assert "_archive_take(session)" in src
+    # 撮影のたびにも積む（一度の撮影で ③ は何度も押される）
+    assert "_archive_take(session)" in inspect.getsource(muse_service.approve_and_shoot)

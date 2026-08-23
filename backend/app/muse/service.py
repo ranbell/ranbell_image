@@ -6534,6 +6534,34 @@ async def request_board(
     return session
 
 
+def _archive_take(session: dict[str, Any]) -> bool:
+    """焼き上がった一枚を履歴へ移す。**もう入っていれば何もしない。**
+
+    一度の撮影で ③ は何度も押される（実測で四回）。`shoot` は「いま作っている
+    一枚」で毎回上書きされるので、押すたびに前の一枚をここへ積む。
+
+    ただしそれだけだと、**セッションの最後の一枚は次が無いので永遠に `shoot`
+    に取り残される。** 実測（2026-08-24・4枚撮った回）で `shoots` が3件しか
+    なかった。日記は `shoots + [shoot]` と両方見ていたので気づかなかった ——
+    **日記だけが正しく、記録の側が欠けていた。** 撮影を終える時にも呼ぶ。
+    """
+    done = session.get("shoot") or {}
+    images = list(done.get("images") or [])
+    if not images:
+        return False
+    takes = list(session.get("shoots") or [])
+    if takes and _image_ids_of(takes[-1]) == _image_ids_of(done):
+        return False                      # 二度積まない
+    takes.append({
+        "prompt": str(done.get("prompt") or ""),
+        "seed": done.get("seed"),
+        "images": images,
+        "at": time.time(),
+    })
+    session["shoots"] = takes[-_SHOOT_ARCHIVE_MAX:]
+    return True
+
+
 async def approve_and_shoot(
     db, comfy, spooler, session: dict[str, Any], ollama=None,
 ) -> dict[str, Any]:
@@ -6581,21 +6609,7 @@ async def approve_and_shoot(
         "craft_scene": str(craft.get("scene") or ""),
     }
 
-    # One session can hold several ③ presses — measured live, four of them —
-    # and `shoot` is one take, replaced each time. Everything downstream (the
-    # diary above all) then saw only the last one, so three finished photos
-    # went nowhere. Keep the finished take before it is replaced; `shoot`
-    # stays "the take being made right now" and nothing else has to change.
-    done = session.get("shoot") or {}
-    if done.get("images"):
-        takes = list(session.get("shoots") or [])
-        takes.append({
-            "prompt": str(done.get("prompt") or ""),
-            "seed": done.get("seed"),
-            "images": list(done.get("images") or []),
-            "at": time.time(),
-        })
-        session["shoots"] = takes[-_SHOOT_ARCHIVE_MAX:]
+    _archive_take(session)
 
     session["shoot"] = {
         "prompt": prompt,
@@ -6658,6 +6672,10 @@ async def finish_session(
             ))
 
         session["status"] = "finished"
+        # **最後の一枚を履歴に入れる。** `approve_and_shoot` は次の③のときに
+        # 前の一枚を積むので、そのままだと最後の一枚が `shoot` に取り残される。
+        if _archive_take(session):
+            session_db.log(session, "shoot", "last take archived")
         session_db.log(session, "finish", "session wrapped up")
         # Soft coda — confirm bond card is kept (no extra LLM sampling).
         bond = session.get("bond") or {}
