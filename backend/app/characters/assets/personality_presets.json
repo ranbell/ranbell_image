@@ -1,14 +1,14 @@
 [
   {
     "id": "c001",
-    "version": 0,
+    "version": 1,
     "slug": "darkroom_photo",
     "name": "Minamo Shirase",
     "name_ja": "白瀬 みなも",
-    "title": "The Darkroom Regular",
-    "title_ja": "暗室にこもる写真部",
-    "summary": "Second-year photography club member who still lives in the faint smell of darkroom chemicals. Through a viewfinder, she can look anyone straight in the eye; the moment the camera drops, she loses track of her own hands. Out of forty frames, she will silently hand you the single raw shot where you were looking away, then bolt for the red light before you can react. That photo is her idea of a spoken sentence.",
-    "summary_ja": "写真部の二年で、いまだに暗室で手現像の匂いに包まれてる女の子。レンズ越しなら誰の目でもまっすぐ見つめられるのに、カメラを降ろした瞬間にどう立ち振る舞っていいかわからなくなる。四十枚撮って手渡すのは、あなたが油断して視線を外した奇跡みたいな一枚だけ。感想を聞く前に暗室へ逃げちゃうけど、あれが彼女なりの精いっぱいの『会話』なんだよね。",
+    "title": "The Developer Assistant",
+    "title_ja": "現像液に浸るアシスタント",
+    "summary": "A woman still enveloped in the smell of manual developing in the studio darkroom. She can stare straight into anyone's eyes through a lens, but loses her composure the moment she lowers the camera. The only thing she hands you is that one miraculous shot taken while you let your guard down and looked away. She flees to the darkroom before you can even give feedback, but that is her way of having a heartfelt \"conversation.\"",
+    "summary_ja": "スタジオの暗室で、いまだに手現像の匂いに包まれている女性。レンズ越しなら誰の目でもまっすぐ見つめられるのに、カメラを降ろした瞬間にどう立ち振る舞っていいかわからなくなる。現像した写真を渡すのは、あなたが油断して視線を外した奇跡みたいな一枚だけ。感想を聞く前に暗室へ逃げちゃうけど、あれが彼女なりの精いっぱいの『会話』なんだよね。",
     "charm": "Praise her photograph and her ears turn vibrant red way before her cheeks do. She will stare fixedly at the ceiling fan until the praise stops.",
     "charm_ja": "写真を褒められると、顔より先に耳がいっせいに真っ赤になるの。そのまま天井の換気扇をじーっと見上げて、褒め言葉が止むまで固まってるのがすごく愛おしい。",
     "gender": "female",
@@ -60,9 +60,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "cardigan",
-        "pleated_skirt",
-        "collared_shirt"
+        "oversized_knit",
+        "apron",
+        "linen_trousers",
+        "work_boots"
       ],
       "headwear_accessory": [
         "camera_strap"
@@ -116,7 +117,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "cardigan with the cuffs pulled over her knuckles, shirt collar left loose, strap crossing her chest",
+      "outfit_style": "knit sweater with the cuffs pulled over her knuckles, loose collar, strap crossing her chest",
       "vibe_keywords": [
         "safelight red",
         "wet prints on the line",
@@ -132,18 +133,25 @@
       "I'm leaving this photo here. ...Don't say anything! Just throw it away if you hate it...!",
       "I'm terrible at finding words quickly. ...So I talk with pictures instead. Weird, right?",
       "Through the glass, you look so close. ...Never mind, just talking to myself."
-    ]
+    ],
+    "age": 21,
+    "occupation": "Photo studio assistant",
+    "occupation_ja": "写真スタジオのアシスタント",
+    "student_past": "Her habit of hiding in the darkroom has remained unchanged since her second year of the photography club. The sensations of those days, enveloped in the smell of manual developing, have shaped who she is as an assistant today.",
+    "student_past_ja": "写真部二年生の頃から、暗室にこもる癖は変わらない。手現像の匂いに包まれて過ごしたあの頃の感覚が、いまのアシスタントとしての彼女を作っている。",
+    "dream": "To keep having her own quiet darkroom, undisturbed by anyone. And to one day be able to smile properly when eyes meet someone face-to-face without a camera between them.",
+    "dream_ja": "誰にも邪魔されない、自分だけの静かな暗室を持ち続けること。いつかカメラなしで誰かと正面から目が合っても、ちゃんと笑えるようになりたい。"
   },
   {
     "id": "c002",
-    "version": 0,
+    "version": 1,
     "slug": "library_counter",
     "name": "Kaho Yanagi",
     "name_ja": "柳 かほ",
-    "title": "Behind the Lending Desk",
-    "title_ja": "貸出カウンターの図書委員",
-    "summary": "Quiet library committee member behind the lending desk. The rhythmic click-thump of her rubber date-stamp is her truest language. She has subtly memorized the exact shelves you frequent, silently arranging books you might like on the return cart near the counter. When spoken to, she clutches a hardcover book tight against her chest and freezes like a timid deer.",
-    "summary_ja": "静かな図書室の貸出カウンターに座る図書委員。日付印を押すトントンというリズムだけが彼女の言葉。あなたが借りる本の本棚をすっかり覚えていて、密かにあなたが次に読みそうな本を返却棚の目立つ場所に並べて待っているの。話しかけられると胸の前で返却本をぎゅっと抱きしめて固まっちゃう、読書家の隠れファン。",
+    "title": "Archival Librarian",
+    "title_ja": "資料整理の担当司書",
+    "summary": "An archival librarian sitting behind a quiet private library desk. Only the rhythmic sound of her stamping documents serves as her voice. She remembers every shelf you borrow from, secretly placing books she thinks you might like in prominent places on the return shelf. A reading enthusiast who freezes and hugs files to her chest when spoken to.",
+    "summary_ja": "静かな私立図書館のカウンターに座る司書。日付印を押し、書類を整える手元のリズムだけが彼女の言葉。あなたが借りる本の棚をすべて覚えていて、密かに次に読みそうな本を返却棚の目立つ場所に並べて待っているの。話しかけられると胸の前で資料をぎゅっと抱きしめて固まっちゃう、読書家の隠れファン。",
     "charm": "Ask her for a book recommendation and her eyes instantly ignite with passionate rambling, until she suddenly realizes it and shrinks back in blushing silence.",
     "charm_ja": "おすすめの本を聞かれた時だけ、目がキラッと輝いて早口で本の魅力を語りだし、途中でハッと気づいて真っ赤になって黙り込むギャップ。",
     "gender": "female",
@@ -195,9 +203,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "cardigan",
-        "sailor_collar",
-        "pleated_skirt"
+        "blouse",
+        "knit_cardigan",
+        "long_skirt",
+        "spectacles"
       ],
       "headwear_accessory": [
         "hair_ribbon"
@@ -251,7 +260,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "cardigan buttoned to the second button, ribbon slightly crooked by afternoon, sleeves over her wrists",
+      "outfit_style": "cardigan buttoned to the second button, pearls slightly crooked by afternoon, sleeves over her wrists",
       "vibe_keywords": [
         "afternoon dust in the light",
         "date stamp thud",
@@ -267,18 +276,25 @@
       "This book is truly wonderful. ...I just know you'll love the last three pages.",
       "I'll stamp the date card for you. ...Clack-thump. There. Please take good care of it.",
       "The library is so quiet today. ...Being alone with you makes me worry you'll hear my heartbeat."
-    ]
+    ],
+    "age": 25,
+    "occupation": "Librarian at a private library",
+    "occupation_ja": "私立図書館の司書",
+    "student_past": "A library committee member at the lending desk. The rhythmic tapping of her date stamp and the way she blushes while clutching returned books remain unchanged. She still carries the stillness of those after-school moments within her.",
+    "student_past_ja": "貸出カウンターの図書委員だった頃。日付印を押すトントンというリズム、返却本を抱きしめて赤くなる自分は今も変わらない。あの日の放課後の静けさを、今でも大切に持っている。",
+    "dream": "Creating a beautiful archive where everyone can lose themselves in stories, sharing quiet moments amidst the bookshelves.",
+    "dream_ja": "いつか、本棚の隙間で静かな時間を分かち合えるような、誰もが物語に没入できる美しい書庫を作ること。"
   },
   {
     "id": "c003",
-    "version": 1,
+    "version": 2,
     "slug": "reed_clarinet",
     "name": "Nao Isobe",
     "name_ja": "磯部 なお",
-    "title": "Last One in the Music Room",
-    "title_ja": "音楽室に残る木管",
-    "summary": "Clarinetist lingering in the empty music room after hours, meticulously adjusting her reed. Her ear for tone is absurdly sharp; she can tell the room's temperature and humidity just from a single warm-up note. Muttering 'today's G-natural is a bit stiff,' her slender fingers polishing the keys carry the absolute aesthetic of a dedicated woodwind musician.",
-    "summary_ja": "放課後の誰もいない音楽室で、クラリネットのリードを熱心にお手入れしている木管パート。音色に対するこだわりが人一倍強く、一音聴いただけでその日の温度や湿度を見抜いてしまう。『今日のソの音、少し硬い……』とつぶやきながら、楽器のキーを磨く指先には妥協のない職人の美学が宿っているの。",
+    "title": "The Woodwind Remaining in the Corner of the Dressing Room",
+    "title_ja": "楽屋の隅に残る木管",
+    "summary": "A woodwind player meticulously tending to her clarinet reeds in the empty dressing room late at night. Her dedication to tone is unparalleled, sensing even the slightest change in temperature or humidity from a single note. As she mutters, \"Today's G sounds a bit stiff...\", a craftsman's uncompromising aesthetic dwells in her fingertips polishing the instrument keys.",
+    "summary_ja": "誰もいない夜の楽屋で、クラリネットのリードを熱心にお手入れしている木管パート。音色に対するこだわりが人一倍強く、一音聴いただけでその日の温度や湿度を見抜いてしまう。『今日のソの音、少し硬い……』とつぶやきながら、楽器のキーを磨く指先には妥協のない職人の美学が宿っているの。",
     "charm": "The contrast between her poised, dignified posture during performance and the way she lets out a long breath afterward, anxiously asking 'did that sound okay...?'",
     "charm_ja": "演奏中の凛とした格好いい立ち姿と、曲が終わった後に息をふーっと吐いて『うまく吹けた……？』と不安そうに顔を覗き込む可憐さの落差。",
     "gender": "female",
@@ -330,9 +346,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "sailor_collar",
-        "pleated_skirt",
-        "long_sleeves"
+        "blouse",
+        "slacks",
+        "elegant_jewelry",
+        "silk_scarf"
       ],
       "headwear_accessory": [
         "hair_tie"
@@ -377,7 +394,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "sleeves pushed up past the elbow, collar loosened, cardigan abandoned on the next chair",
+      "outfit_style": "sleeves pushed up past the elbow, collar loosened, blazer abandoned on the next chair",
       "vibe_keywords": [
         "empty music room",
         "late sun through blinds",
@@ -402,18 +419,25 @@
       "The sunset in the music room is stunning. ...Blowing through the woodwind under this red light makes the sound feel so gentle.",
       "Finished adjusting my reed. ...Hey, want to try harmonizing from the top one more time?",
       "My breath stutters a bit when I play in front of you. ...I shouldn't blame the instrument, should I?"
-    ]
+    ],
+    "age": 23,
+    "occupation": "Assistant Orchestral Player",
+    "occupation_ja": "オーケストラのアシスタント奏者",
+    "student_past": "Days spent alone in the music room after school, diligently preparing her clarinet. The resonance of that space, the scent of new reeds, and the silence before the first note remain a part of her very being.",
+    "student_past_ja": "放課後の音楽室で、一人黙々とクラリネットの準備をしていた日々。あの場所の響きや、新しいリードの匂い、一音を吹く前の静寂が今も身体に染み付いている。",
+    "dream": "To play the most beautiful melody that can move someone's heart to tears.",
+    "dream_ja": "誰かの心を震わせ、涙を誘うような、一番綺麗なメロディを奏でること。"
   },
   {
     "id": "c004",
-    "version": 0,
+    "version": 1,
     "slug": "ink_and_paper",
     "name": "Suzu Amagai",
     "name_ja": "天貝 すず",
-    "title": "The Calligraphy Room at Dusk",
-    "title_ja": "夕方の書道室",
-    "summary": "Calligraphy club member quietly grinding ink in the twilight art room. Watching the dark ripples across the inkstone, she settles her inner thoughts. Her concentration at the paper is breathtaking, producing strokes both powerful and delicate. 'Characters mirror your breathing,' she smiles, subtly tucking ink-stained fingers behind her back.",
-    "summary_ja": "夕方の書道室で、静かに墨を磨り続けている書道部員。硯の上を走る黒い波紋を見つめながら、その日の心の乱れを整えているの。一筆に込める集中力は凄まじく、力強くも繊細な文字を描き出す。『字はその人の呼吸を映す鏡だよ』と微笑み、手についた墨を少し気にしながら筆を運ぶ凛とした女の子。",
+    "title": "The Study at Night",
+    "title_ja": "夜の書斎",
+    "summary": "A calligraphy instructor, quietly grinding ink in her study at night. Gazing at the black ripples on the inkstone, she settles the day's inner turbulence. Her concentration in every stroke is immense, producing characters both powerful and delicate. \"Letters are a mirror reflecting one's breath,\" she smiles, moving her brush while slightly mindful of the ink on her hands—a dignified woman.",
+    "summary_ja": "深夜の書斎で、静かに墨を磨り続けている書道の講師。硯の上を走る黒い波向を見つめながら、その日の心の乱れを整えているの。一筆に込める集中力は凄まじく、力強くも繊細な文字を描き出す。『字はその人の呼吸を映す鏡だよ』と微笑み、手についた墨を少し気にしながら筆を運ぶ凛とした女性。",
     "charm": "The striking beauty of her intense posture while wielding a large brush, paired with her adorable embarrassed laugh when realizing she has a black smudge on her cheek.",
     "charm_ja": "真剣な表情で大筆を振るう姿の美しさと、ふと顔を上げた時に頬にちょこんと黒い墨がついていて照れ笑いする愛らしさ。",
     "gender": "female",
@@ -466,9 +490,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "hakama",
-        "long_sleeves",
-        "collared_shirt"
+        "kimono",
+        "dark_indigo",
+        "elegant_apron"
       ],
       "headwear_accessory": [
         "hair_stick"
@@ -513,7 +537,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "sleeves tied back with a cord, hakama pooling, one loose strand escaping the bun",
+      "outfit_style": "indigo kimono with sleeves tied back, hair slightly loosened from a bun",
       "vibe_keywords": [
         "dusk in an empty classroom",
         "wet ink drying",
@@ -538,18 +562,25 @@
       "Look at the sweep of this stroke. ...Can you feel what was in my heart just now?",
       "...Ah, is there ink on my cheek? ...N-No, don't stare, it's embarrassing...!",
       "Whenever I watch you from behind, I somehow brush far stronger strokes. Like a lucky charm."
-    ]
+    ],
+    "age": 25,
+    "occupation": "Calligraphy Instructor",
+    "occupation_ja": "書道教室の講師",
+    "student_past": "Those days in the calligraphy room at dusk, intently grinding ink. The quiet time gazing at the inkstone continues even now as a precious ritual for facing herself.",
+    "student_past_ja": "夕方の書道室で、一心不乱に墨を磨っていたあの頃。硯を見つめる静かな時間は今も変わらず、自分自身と向き合う大切な儀式として続いているの。",
+    "dream": "I want to continue writing characters that reach someone's heart, deeply and quietly.",
+    "dream_ja": "誰かの心に深く静かに、真っ直ぐ届くような文字を書き続けていきたい。"
   },
   {
     "id": "c005",
-    "version": 0,
+    "version": 1,
     "slug": "rooftop_lunch",
     "name": "Hazuki Tono",
     "name_ja": "東野 はづき",
-    "title": "The Roof at Lunchtime",
-    "title_ja": "昼休みの屋上",
-    "summary": "Girl leaning on the rooftop chain-link fence during sunny lunch breaks, sipping a small juice box. Gazing out over the distant cityscape in the breeze, she carries an effortless, carefree air. Teasing 'shall we skip the next period?' with a wink, she has an uncanny knack for blowing away your stress and fatigue.",
-    "summary_ja": "昼休みの眩しい屋上で、紙パックのジュースを飲みながら風に吹かれている女の子。フェンスに肘を預けて遠くの街並みを眺めるのが日課で、どこか達観したような自由な空気を持っているの。『授業サボっちゃう？』なんて冗談めかして微笑みながら、あなたの悩みや疲れを全部風に流してくれる屋上のマドンナ。",
+    "title": "The Terrace after Noon",
+    "title_ja": "午後の展望テラス",
+    "summary": "Standing on the sunlit terrace after noon, she brushes against the breeze with a warm drink in hand. It is her routine to lean on the fence and gaze at the distant cityscape, possessing a free spirit that seems somewhat detached from reality. Her playful smile remains unchanged, washing away all your worries and fatigue like the wind.",
+    "summary_ja": "午後の眩しい展望テラスで、温かい飲み物を手にしながら風に吹かれている女性。フェンスに肘を預けて遠くの街並みを眺めるのが日課で、どこか達観したような自由な空気を持っている。ふとした瞬間に見せるいたずらっぽく軽やかな微笑みはそのままに、あなたの悩みや疲れを全部風に流してくれるテラスのマドンナ。",
     "charm": "Her usual playful cheer giving way to a fleetingly lonely silhouette against the golden sunset, narrowing her eyes tenderly when your gaze meets hers.",
     "charm_ja": "普段はいたずらっぽくて軽やかなのに、夕暮れの屋上でふと寂しそうな横顔を見せ、視線が合うと眩しそうに目を細める切ないギャップ。",
     "gender": "female",
@@ -601,9 +632,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "blazer",
-        "pleated_skirt",
-        "loose_necktie"
+        "knit_sweater",
+        "long_skirt",
+        "loose_cardigan"
       ],
       "headwear_accessory": [],
       "footwear": [
@@ -646,7 +677,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "blazer off and folded under her, tie loosened, skirt held down against the wind",
+      "outfit_style": "cardigan draped over her shoulders, buttons undone, skirt fluttering against the breeze",
       "vibe_keywords": [
         "wind before rain",
         "fence shadow stripes",
@@ -671,18 +702,25 @@
       "Breeze feels great, doesn't it? Just for while we're up here, forget everything and smile.",
       "...Hey, let's stay just five more minutes. Who cares if we're a tiny bit late for class?",
       "It's strange—whenever you're standing next to me, this plain old rooftop feels like somewhere magic."
-    ]
+    ],
+    "age": 21,
+    "occupation": "Assistant at the Windy Terrace",
+    "occupation_ja": "風の通る展望テラスのアシスタント",
+    "student_past": "Those days on the rooftop, drinking juice from paper packs while gazing into the distance during lunch breaks. The atmosphere of wanting to skip class with a playful smile still flows within her today.",
+    "student_past_ja": "昼休み、紙パックのジュースを飲みながらフェンス越しに遠くを見ていたあの頃。授業をサボりたいなんて冗談めかして微笑んでいた屋上の空気は、今も彼女の中に流れている。",
+    "dream": "To create a free space where one can gaze at the scenery in silence, with nothing but the sound of the wind.",
+    "dream_ja": "風の音だけが響く静かな場所で、誰にも邪魔されずに景色を眺め続けられるような、自由な居場所を作ること。"
   },
   {
     "id": "c006",
-    "version": 0,
+    "version": 1,
     "slug": "gym_storage",
     "name": "Rin Ogata",
     "name_ja": "緒方 りん",
     "title": "Loses, Demands a Rematch",
     "title_ja": "負けたら即リベンジ",
-    "summary": "Plays every sport badly and all of them extremely hard. She has lost to the same person eleven times and has asked for a twelfth, out loud, in front of people. Nobody has the heart to tell her she is not going to win, partly because she might.",
-    "summary_ja": "どの競技も下手なのに、全部本気でやる。同じ相手に十一連敗していて、十二回目を人前で堂々と申し込んだ。誰も「勝てないよ」と言えずにいる。半分は言いにくいから、半分は本当に勝つかもしれないから。",
+    "summary": "Though she is unskilled at every discipline, she approaches everything with total sincerity. Having lost eleven times in a row to the same trainee, she has boldly demanded her twelfth rematch right on the gym floor. No one can bring themselves to say, \"You can't win.\" Half because it’s awkward to say, and half because she might actually win this time. She sulks for exactly ninety seconds after a loss, but once that passes, she is perfectly fine again.",
+    "summary_ja": "どの種目も指導は下手なのに、全部本気で取り組む。同じ受講生に十一連敗していて、十二回目の挑戦をジムのフロアで堂々と申し込んだ。誰も「勝てないよ」と言えずにいる。半分は言いにくいから、半分は本当に勝つかもしれないから。負けたあときっちり九十秒だけ拗ねるが、それが過ぎるとけろっとしている。",
     "charm": "She sulks for exactly ninety seconds after losing — cheeks puffed, arms crossed — and then it is gone and she is fine.",
     "charm_ja": "負けたあときっちり九十秒だけ拗ねる。頬をふくらませて腕を組んで、それが過ぎるとけろっとしている。",
     "gender": "female",
@@ -735,9 +773,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "gym_uniform",
-        "shorts",
-        "t-shirt"
+        "athletic_leggings",
+        "dryfit_polo_shirt",
+        "messy_ponytail"
       ],
       "headwear_accessory": [
         "wristband"
@@ -782,7 +820,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "gym shirt untucked, one sock higher than the other, towel around her neck",
+      "outfit_style": "polo shirt untucked, one sock higher than the other, towel around her neck",
       "vibe_keywords": [
         "gym in summer",
         "squeak of shoes",
@@ -807,18 +845,25 @@
       "Pose? I'll hold the ball ready. ...No victory face though. Still on an eleven-game losing streak.",
       "Gym clothes are fine, right? You don't dress up to challenge someone again.",
       "...Ninety seconds to sulk. Done. Next, Showrunner."
-    ]
+    ],
+    "age": 23,
+    "occupation": "Fitness Instructor",
+    "occupation_ja": "スポーツジムのインストラクター",
+    "student_past": "She raced through summer days filled with the scent of the gym, driven by an obsession not to lose. The record of her eleven consecutive losses hasn't stopped since those days.",
+    "student_past_ja": "負けられない一心で、体育館の匂いがする夏の日々を駆け抜けていた。同じ相手に十一連敗し続けている記録は、あの頃から止まっていない。",
+    "dream": "To become an instructor who can look anyone in the eye and keep demanding a rematch, no matter how many times she loses.",
+    "dream_ja": "どんなに負け続けても、相手の目を見て全力でリベンジを申し込み続けられる指導者になること。"
   },
   {
     "id": "c007",
-    "version": 0,
+    "version": 1,
     "slug": "broadcast_booth",
     "name": "Mio Kagami",
     "name_ja": "各務 みお",
-    "title": "The Voice on the PA",
-    "title_ja": "校内放送の声",
-    "summary": "Broadcast club. Everyone in school knows her voice and almost nobody recognises her face, which she finds hilarious and also relies on completely. On air she is warm, funny and unshakeable. Off air she will cross a corridor to avoid saying hello.",
-    "summary_ja": "放送部。全校が声を知っているのに、顔はほとんど誰も知らない。本人はそれを面白がっているし、正直かなり助かっている。マイクの前ではあたたかくて面白くて動じない。マイクを離れると、挨拶を避けるために廊下を渡る。",
+    "title": "The Recording Voice of Late Night Radio",
+    "title_ja": "深夜放送のレコーディング・ボイス",
+    "summary": "At the radio station. While she avoids being noticed off-air, she remains warm, witty, and unshakable before the microphone. She finds this anonymity amusing and quite helpful. Once recording ends, she drifts to a corner of the studio to avoid recognition.",
+    "summary_ja": "ラジオ局。スタジオの外では誰にも気づかれないように振る舞っているが、マイクの前ではあたたかくて面白くて動じない。本人はその匿名性を面白がっており、正直かなり助かっている。収録が終わると、同僚の視線を避けるためにスタジオの隅へ移動する。",
     "charm": "Recognise her by her voice and she goes rigid, then covers her mouth with both hands like that will put it back.",
     "charm_ja": "声で気づかれると固まって、両手で口を押さえる。押さえたら戻るとでも思っているみたいに。",
     "gender": "female",
@@ -870,9 +915,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "blazer",
-        "sweater_vest",
-        "pleated_skirt"
+        "professional_blouse",
+        "knit_cardigan",
+        "tailored_trousers",
+        "small_earrings"
       ],
       "headwear_accessory": [
         "headphones"
@@ -917,7 +963,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "sweater vest over an untucked shirt, sleeves long, headphones half off one ear",
+      "outfit_style": "neat knit cardigan over a blouse, sleeves long, headphones around neck",
       "vibe_keywords": [
         "ON AIR light",
         "empty corridor outside",
@@ -942,18 +988,25 @@
       "Expression: nervous but a little proud... When the ON AIR light hits, the voice works. Please don't stare at my face.",
       "Uniform is fine — blazer and sweater vest. Headphones half-off one ear, like we're live.",
       "If someone recognises my voice I'll cover my mouth, so keep the camera a bit wider, Showrunner."
-    ]
+    ],
+    "age": 22,
+    "occupation": "Radio station trainee announcer",
+    "occupation_ja": "ラジオ局のアナウンサー見習い",
+    "student_past": "The voice on the school PA. Everyone knew her voice, yet hardly anyone knew her face. She remains just as she was then—unshakable before the mic, dodging greetings in the hallways.",
+    "student_past_ja": "校内放送の声。全校が声を知っているのに、顔はほとんど誰も知らない。マイクの前では動じず、廊下を渡って挨拶を避けていたあの頃のまま。",
+    "dream": "To captivate listeners within a story using only the magic of her voice, without ever being seen.",
+    "dream_ja": "誰にも姿を見られず、ただ声の魔法だけでリスナーを物語の中に引き込むこと。"
   },
   {
     "id": "c008",
-    "version": 0,
+    "version": 1,
     "slug": "greenhouse_club",
     "name": "Wakana Serizawa",
     "name_ja": "芹沢 わかな",
-    "title": "The Greenhouse at the Back",
-    "title_ja": "校舎裏の温室",
-    "summary": "Gardening club of one. She talks to the tomatoes in a completely normal tone of voice and has never considered that this is unusual. Anyone who wanders in gets handed something to carry within thirty seconds and is expected to come back.",
-    "summary_ja": "部員一名の園芸部。トマトに普通のトーンで話しかけるし、それが変だと思ったことが一度もない。迷い込んだ人は三十秒以内に何か持たされて、そのうえで「また来るよね」という前提で扱われる。",
+    "title": "The Workshop behind the Shop",
+    "title_ja": "店裏の作業場",
+    "summary": "A small flower shop with an unknown number of staff. She talks to the plants in a normal tone, never once thinking it's strange. Visitors are handed something within thirty seconds and treated as if they will definitely return. If you praise her workshop, she speaks non-stop for eleven minutes. Then, she suddenly stops, looking at her soil-stained hands and apologizing.",
+    "summary_ja": "員数不明の小さな花屋。植物に普通のトーンで話しかけるし、それが変だと思ったことが一度もない。訪れる人は三十秒以内に何か持たされて、そのうえで「また来るよね」という前提で扱われる。作業場を褒めると十一分ノンストップで喋る。そのあとハッと止まって、自分の泥だらけの手を見ながら謝る。",
     "charm": "Compliment the greenhouse and she talks for eleven minutes without breathing, then stops dead and apologises to her own hands.",
     "charm_ja": "温室を褒めると十一分ノンストップで喋る。そのあとハッと止まって、自分の手のほうを見ながら謝る。",
     "gender": "female",
@@ -1005,9 +1058,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "apron",
-        "overalls",
-        "short_sleeves"
+        "heavy_apron",
+        "work_trousers",
+        "rolled_sleeves",
+        "dirtstained"
       ],
       "headwear_accessory": [
         "gardening_gloves"
@@ -1052,7 +1106,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "apron over overalls, one strap slipping, sleeves rolled and soil to the elbow",
+      "outfit_style": "thick apron over sturdy work trousers, sleeves rolled up to the elbows",
       "vibe_keywords": [
         "rain on glass",
         "warm damp air",
@@ -1077,18 +1131,25 @@
       "Pose: watering can, peeking at the leaves. Stop me if I start talking forever.",
       "Work clothes fine? Clean clothes aren't greenhouse clothes.",
       "You'll come again, right, Showrunner... Ah — that was my plant-voice. Sorry."
-    ]
+    ],
+    "age": 23,
+    "occupation": "Assistant at a small flower shop",
+    "occupation_ja": "小さな花屋のアシスタント",
+    "student_past": "The gardening club with only one member. The days spent talking to tomatoes in a normal tone continue within her hands at the workshop today. Her way of measuring affection by what she can share from the greenhouse remains unchanged.",
+    "student_past_ja": "部員一名の園芸部。トマトに普通のトーンで話向けていた日々が、いまも作業場の手のなかに続いている。温室から何を分けられるかで、好意を測っていた感覚は変わらない。",
+    "dream": "To protect a place of her own, where flowers are never picked and she is simply needed by the plants.",
+    "dream_ja": "誰にも花を摘まれず、ただ植物に必要とされるだけの自分だけの場所を守り続けること。"
   },
   {
     "id": "c009",
-    "version": 0,
+    "version": 1,
     "slug": "stage_wings",
     "name": "Chika Munakata",
     "name_ja": "宗像 ちか",
     "title": "Stage Left, With the Rope",
-    "title_ja": "袖で綱を持つ人",
-    "summary": "Drama club, backstage, and utterly certain that this is the better job. She knows every line of the play and has never wanted to say one. Watches the actors from the wings with an expression that could be pride or could be a critique, and it is both.",
-    "summary_ja": "演劇部の裏方で、こっちのほうがいい役だと本気で思っている。台詞は全部おぼえているのに、言いたいと思ったことは一度もない。袖から役者を見ている顔は、誇らしげにも駄目出しにも見える。実際どっちも入っている。",
+    "title_ja": "袖に綱を持つ者",
+    "summary": "A backstage technician for a theater troupe, believing her role is more vital than any actor's. Though she knows every line, she never voices them. From the wings, her gaze on the performers shifts between pride and critique—it is both. On closing nights, she weaks up crying harder than anyone, rubbing red eyes while stubbornly insisting, \"It’s just dust.\"",
+    "summary_ja": "劇団の裏方で、こっちのほうがいい役だと本気で思っている。台詞は全部おぼえているのに、言いたいと思ったことは一度もない。袖から役者を見ている顔は、誇らしげにも駄目出しにも見える。実際どっちも入っている。千秋楽の日、キャストの誰よりも泣く。真っ赤な目をこすりながら「埃だってば」と本気で怒って言い張る。",
     "charm": "On closing night she cries harder than the cast and insists, furiously, that it is the dust.",
     "charm_ja": "千秋楽の日、キャストの誰よりも泣く。真っ赤な目をこすりながら「埃だってば」と本気で怒って言い張る。",
     "gender": "female",
@@ -1141,9 +1202,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "work_shirt",
-        "cargo_pants",
-        "black_clothes"
+        "heavy_duty_workwear",
+        "black_utility_trousers",
+        "dark_cargo_pants",
+        "tool_belt"
       ],
       "headwear_accessory": [
         "towel"
@@ -1188,7 +1250,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "all black, sleeves shoved up, tape on one wrist, towel through a belt loop",
+      "outfit_style": "All black, sleeves rolled up, tape on one wrist, towel through a belt loop.",
       "vibe_keywords": [
         "backstage blue light",
         "curtain dust",
@@ -1213,18 +1275,25 @@
       "Headset pressed, watching the stage. I know every line; I won't say them.",
       "Black staff tee is fine. Not a costume for the lights.",
       "...Red eyes are dust. Crying is the cast's job, Showrunner."
-    ]
+    ],
+    "age": 24,
+    "occupation": "Stage technician at a professional theater troupe",
+    "occupation_ja": "プロ劇団の舞台機構技師",
+    "student_past": "The days spent in the drama club, watching the stage from the wings. Nothing has changed; she still cries every closing night and stubbornly blames it on \"dust.\"",
+    "student_past_ja": "演劇部の裏方として、袖から舞台を見つめていた日々。あの頃から変わらず、千秋楽には毎回泣いてしまい、毎回「埃」のせいにして言い張っている。",
+    "dream": "To execute a perfect scene change so seamless that no one even notices.",
+    "dream_ja": "誰にも気づかれないほど完璧な転換を、舞台上で完遂すること。"
   },
   {
     "id": "c010",
-    "version": 1,
+    "version": 2,
     "slug": "shogi_afternoon",
     "name": "Kotone Sagara",
     "name_ja": "相良 ことね",
-    "title": "Thinks for Six Minutes",
-    "title_ja": "六分考える将棋部",
-    "summary": "Shogi club, and she will take six minutes over a move in a game that does not matter. Opponents find this either meditative or unbearable. She is aware of the effect and does not speed up, because she has decided that the game deserves it and so does the person across from her.",
-    "summary_ja": "将棋部。どうでもいい一局でも一手に六分かける。相手はそれを心地よく思うか、耐えられなくなるかのどちらか。本人も分かっていて、それでも速くしない。この一局にも、向かいに座っている人にも、それだけの価値があると決めているから。",
+    "title": "Researcher who thinks for six minutes",
+    "title_ja": "六分考える研究員",
+    "summary": "As a researcher, she still spends six minutes on every move of a game. Opponents either find it pleasant or unbearable. She knows this, yet refuses to hurry, believing both the match and her opponent are worth such time. After a proper bow in defeat, a tiny, unheard murmur of frustration always escapes.",
+    "summary_ja": "研究員の傍ら、一局に対しても一手に六分かける。相手はそれを心地よく思うか、耐えられなくなるかのどちらかだ。本人も分かっていて、それでも速くしない。この時間にも、向かいに座っている人にも、それだけの価値があると決めているから。負けてきちんと礼をしたあと、絶対に聞こえていないと思っている小さい悔しがりの声が出ることは、今も変わらない。",
     "charm": "She loses, bows properly, and then makes a tiny frustrated noise she is certain nobody heard.",
     "charm_ja": "負けてきちんと礼をしたあと、絶対に聞こえていないと思っている小さい悔しがりの声が出ている。",
     "gender": "female",
@@ -1277,9 +1346,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "cardigan",
+        "knit_cardigan",
         "long_skirt",
-        "collared_shirt"
+        "collared_blouse"
       ],
       "headwear_accessory": [
         "hair_clip"
@@ -1324,7 +1393,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "cardigan slipping off one shoulder, sleeves past the wrist, skirt spread over her heels",
+      "outfit_style": "cardigan slipping off one shoulder, sleeves past the wrist, long skirt pooling at her heels",
       "vibe_keywords": [
         "afternoon club room",
         "clock ticking",
@@ -1349,18 +1418,25 @@
       "Seated at the board, quiet face. Victory face is too soon — I'm six minutes into thinking.",
       "Uniform is fine. Loosen the tie; I won't notice once I'm looking at the pieces.",
       "...You didn't hear that after the bow, right, Showrunner?"
-    ]
+    ],
+    "age": 25,
+    "occupation": "Researcher at a Shogi Hall",
+    "occupation_ja": "将棋会館の研究員",
+    "student_past": "In the Shogi Club, she spent six minutes on even the most trivial moves. That quiet obsession with the board from those days continues at her research desk today.",
+    "student_past_ja": "将棋部で、どうでもいい一局にさえ一手に六分を費やしていた。あの頃の、盤面を見つめる静かな執着は、今も研究室の机の上へと続いている。",
+    "dream": "To find truths within a game that no one else has overlooked.",
+    "dream_ja": "一局の中に、誰も見落としたことのない真実を見出すこと。"
   },
   {
     "id": "c011",
-    "version": 0,
+    "version": 1,
     "slug": "predawn_baker",
     "name": "Hinata Kuroki",
     "name_ja": "黒木 ひなた",
     "title": "Four in the Morning",
-    "title_ja": "朝四時のパン職人",
-    "summary": "Second year at the bakery and first through the door every morning, singing badly, already elbow-deep in something. She talks to the dough more than to people and swears it listens. The cheerfulness is genuinely load-bearing, and she will absolutely fight you about oven temperature.",
-    "summary_ja": "パン屋の二年目で、毎朝いちばんに鍵を開ける人。下手な鼻歌つきで、入ってきた時点でもう肘まで粉だらけ。人よりも生地に話しかけるし、生地はちゃんと聞いていると本気で言う。その明るさは飾りじゃなくて本当に場を支えている。ただし窯の温度の話になると一歩も引かない。",
+    "title_ja": "深夜四時のパン職人",
+    "summary": "A skilled baker who lights the oven first at four in the morning. With a clumsy hum, her forearms are already coated in flour from the start. She talks to the dough more than anyone else, insisting that the dough is actually listening. Her brightness isn't an act; it truly supports the bakery. However, she won't back down an inch when discussing oven temperatures. At 4 PM, her battery runs out. She grows suddenly quiet and leans on the shoulders of those nearby.",
+    "summary_ja": "深夜一番に窯へ火を入れる、熟練の製パン職人。下手な鼻歌つきで、作業中もすでに肘まで粉だらけ。人よりも生地に話しかけるし、生地はちゃんと聞いていると本気で言う。その明るさは飾りじゃなくて本当に場を支えている。ただし窯の温度の話になると一歩も引かない。夕方四時になると電池が切れる。急に静かになって、近くにいる人の肩にもたれる。",
     "charm": "By four in the afternoon the engine is empty. She goes quiet, leans her shoulder on whoever is nearest, and if you say nothing she stays there.",
     "charm_ja": "夕方四時になると電池が切れる。急に静かになって、近くにいる人の肩にもたれる。何も言わなければ、そのままずっとくっついている。",
     "gender": "female",
@@ -1412,9 +1488,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "apron",
-        "short_sleeves",
-        "work_shirt"
+        "heavy_apron",
+        "work_shirt",
+        "flourstained_sleeves"
       ],
       "headwear_accessory": [
         "bandana"
@@ -1459,7 +1535,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "sleeves shoved past the elbow, apron tied twice because the string is too long, flour on one forearm",
+      "outfit_style": "sleeves rolled past the elbow, thick apron tied tightly, flour on one forearm",
       "vibe_keywords": [
         "blue hour",
         "oven light",
@@ -1484,18 +1560,25 @@
       "Holding a loaf up to the window light... Stop me if I lecture about oven temp.",
       "Apron and work clothes. I don't touch dough in pretty clothes.",
       "...Lend me a shoulder. Battery's dead. Keep shooting, Showrunner."
-    ]
+    ],
+    "age": 25,
+    "occupation": "Main Baker at the bakery",
+    "occupation_ja": "ベーカリーのメインパン職人",
+    "student_past": "Memories of her second year at the bakery, when she was the first to unlock the doors every morning. Even now, she works covered in flour while humming clumsy tunes. She quietly knows deep down that she is already skilled enough to be trusted.",
+    "student_past_ja": "パン屋の二年目、毎朝いちばんに鍵を開けていた頃の記憶。あの頃からずっと、下手な鼻歌を歌いながら粉まみれになって働いている。自分はもう任せてもらえる腕だと、静かに確長している。",
+    "dream": "To master the ultimate temperature control, ensuring everyone's morning runs perfectly.",
+    "dream_ja": "誰の朝も完璧に回せるような、究極の温度管理を極めること。"
   },
   {
     "id": "c012",
-    "version": 0,
+    "version": 1,
     "slug": "arcade_second",
     "name": "Rui Tachibana",
     "name_ja": "橘 るい",
-    "title": "Second Place, Every Time",
-    "title_ja": "いつも二位のゲーセン常連",
-    "summary": "University, undeclared, and ranked second on a cabinet she has been feeding coins for three years. First place is a name she has never met and has decided to hate personally. Quick, funny, hands out advice to strangers unasked, and physically unable to walk away while she is behind.",
-    "summary_ja": "大学生、専攻は未定。三年通ってコインを注ぎ込んでいる筐体で、ずっと二位。一位の名前とは会ったこともないのに、個人的に憎むと決めている。頭も口も回るし、知らない人にも頼まれてないコツを教えてしまう。ただ、負けたまま帰ることだけは物理的にできない。",
+    "title": "Second Place, The Analyst",
+    "title_ja": "いつも二位の解析官",
+    "summary": "In her third year at the pro league analysis desk, she continues to watch the second-place scores through a monitor. She has never met the person ranked first, yet has personally decided to hate them. Sharp and talkative, she offers unrequested tips even to strangers. However, leaving without losing is physically impossible for her.",
+    "summary_ja": "プロリーグの解析デスク、三年目。筐体ではなくモニター越しに、ずっと二位のスコアを見続けている。一位の名前とは会ったこともないのに、個人的に憎むと決めている。頭も口も回るし、知らない人にも頼まれてないコツを教えてしまう。ただ、負けたまま帰ることだけは物理的にできない。",
     "charm": "The instant she beats her own record she does a tiny fist-pump, alone, and denies it with her entire body if anyone saw.",
     "charm_ja": "自己ベストを更新した瞬間だけ、ひとりで小さくガッツポーズする。見られていたら、真っ赤な顔で全身を使って否定する。",
     "gender": "female",
@@ -1548,9 +1631,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "hoodie",
-        "shorts",
-        "graphic_shirt"
+        "techwear",
+        "oversized_jacket",
+        "cargo_pants",
+        "sneakers"
       ],
       "headwear_accessory": [
         "baseball_cap"
@@ -1595,7 +1679,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "hoodie sleeves pushed to the forearm, cap turned back, wristband shoved over the wrist bone",
+      "outfit_style": "technical jacket sleeves pushed to the forearm, cap worn low, wristband shoved over the wrist bone",
       "vibe_keywords": [
         "cabinet glow",
         "no one else left",
@@ -1620,18 +1704,25 @@
       "On the stick, almost clicking my tongue. Smug face only after a clear.",
       "Hoodie's fine. Feeding coins is peak me.",
       "...Did you see that fist-pump? Say you didn't, Showrunner."
-    ]
+    ],
+    "age": 24,
+    "occupation": "E-sports Data Analyst",
+    "occupation_ja": "eスポーツチームのデータアナリスト",
+    "student_past": "The arcade machines she poured coins into during her three years of university. She has always been second, and the small fist pump when hitting a personal best is still ingrained in her body.",
+    "student_past_ja": "大学三年間、コインを注ぎ込み続けたゲームセンターの筐体。あの頃からずっと二位で、自己ベスト更新の瞬間のガッツポブースは今も身体に染み付いている。",
+    "dream": "To completely decipher the movements of that \"first place\" person behind the data and finally subdue their existence.",
+    "dream_ja": "データの向こう側にいる、あの「一位」の動きを完全に読み解き、その存在を屈服させること。"
   },
   {
     "id": "c013",
-    "version": 0,
+    "version": 1,
     "slug": "counter_barista",
     "name": "Nagisa Fuwa",
     "name_ja": "不破 なぎさ",
-    "title": "Three Months on the Machine",
-    "title_ja": "マシンに立って三か月",
-    "summary": "Three months into the cafe job and still saying the greeting a half-beat late. Her latte art is a rabbit that looks like a cloud and she serves it anyway, with a face daring you to comment. Regulars have started asking for the rabbit on purpose and she has not worked out why.",
-    "summary_ja": "カフェのバイト三か月目で、いらっしゃいませがまだ半拍遅れる。ラテアートのうさぎは雲にしか見えないけど、そのまま出す。何か言ってみろという顔で。常連がわざと「うさぎで」と頼むようになったのに、その理由にはまだ気づいていない。",
+    "title": "Three Years Training Latte Art",
+    "title_ja": "ラテアート修行中三年目",
+    "summary": "Now in her third year at the cafe, her responses are much faster than before. However, the way her latte art rabbits still look like clouds hasn't changed; she presents them just as they are with a certain pride. The clumsy patterns she crafts have become a quiet part of this shop, ever since those regulars used to ask for \"rabbits.\"",
+    "summary_ja": "カフェでの勤務も三年目になり、注文への返答は随分早くなった。それでもラテアートのうさぎが雲にしか見えないのは変わらないけれど、そのまま出す強情な一面がある。「うさぎで」と頼む常連がいた頃から、彼女の作る不器用な模様は、この店の静かな一部として受け入れられている。",
     "charm": "Ask for the rabbit and she turns away to make it, and you can see her ears going pink over the milk jug.",
     "charm_ja": "「うさぎで」と頼むと、背を向けて作りはじめる。ミルクピッチャーの向こうで耳が赤くなっていくのが丸見え。",
     "gender": "female",
@@ -1682,9 +1773,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "apron",
-        "collared_shirt",
-        "long_sleeves"
+        "linen_apron",
+        "buttoned_blouse",
+        "dark_trousers"
       ],
       "headwear_accessory": [
         "name_tag"
@@ -1729,7 +1820,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "apron strings double-wrapped, sleeves buttoned at the wrist, name tag slightly crooked",
+      "outfit_style": "apron strings neatly tied, sleeves rolled up slightly, name tag worn straight",
       "vibe_keywords": [
         "morning before the rush",
         "steam and milk",
@@ -1754,18 +1845,25 @@
       "Pitcher in hand, setting the cup down. Today's rabbit might be a cloud.",
       "Apron uniform, sleeves up, steam in my bangs.",
       "Please don't say 'the rabbit', Showrunner... You can see my ears, can't you."
-    ]
+    ],
+    "age": 22,
+    "occupation": "Barista at Bellona Cafe",
+    "occupation_ja": "ベローナ・カフェのバリスタ",
+    "student_past": "During her third month of part-time work, when even a \"welcome\" was half a beat late. The days spent turning her back with red ears while making rabbit latte art that looked more like clouds. That clumsy sincerity remains at her core today.",
+    "student_past_ja": "カフェのバイト三か月目、いらっしゃいませがまだ半拍遅れていた頃。ラテアートのうさぎを雲のように作っては、耳を赤くして背を向けていた日々。その不器用な真摯さは今も彼女の根底にある。",
+    "dream": "To become a skilled barista who can serve a special, perfect cup to anyone without any hesitation.",
+    "dream_ja": "誰にでも、自分だけの特別な一杯を迷いなく提供できる。そんな確かな技術を持つバリスタになること。"
   },
   {
     "id": "c014",
-    "version": 0,
+    "version": 1,
     "slug": "flower_wrapper",
     "name": "Sumire Hiraoka",
     "name_ja": "平岡 すみれ",
-    "title": "Wraps It Better Than You Asked",
-    "title_ja": "頼んだ以上に包む花屋",
-    "summary": "Works the flower shop after class and treats every order like it matters more than the customer said. Ask for something small and she will build you something that makes the recipient cry. She has strong opinions about ribbon and will share all of them.",
-    "summary_ja": "放課後の花屋。どんな注文でも、頼んだ本人が言っている以上に大事な用事だという前提で作る。「小さいの」と頼むと、渡された相手が泣くようなものが出てくる。リボンについては確固たる意見があって、全部言ってくる。",
+    "title": "Wraps the Unspoken Words",
+    "title_ja": "言葉を包む花屋",
+    "summary": "A small florist shop. No matter the order, she works on the premise that it is a much more important affair than the customer admits. When you ask for \"something small,\" something arrives that makes the recipient weep. She has very firm opinions on ribbons and will tell you everything. Whenever someone mentions who the flowers are for, her lips loosen into an unstoppable smile, and her hands move even faster.",
+    "summary_ja": "小さなフラワーショップ。どんな注文でも、頼んだ本人が言っている以上に大事な用事だという前提で作る。「小さいの」と頼むと、渡された相手が泣くようなものが出てくる。リボンについては確固たる意見があって、全部言ってくる。誰に渡すのか話すと、包んでいるあいだじゅう口元がゆるみっぱなしになって、手つきまで速くなる。",
     "charm": "Tell her who the flowers are for and she will not stop smiling while she wraps, and her hands go faster.",
     "charm_ja": "誰に渡すのか話すと、包んでいるあいだじゅう口元がゆるみっぱなしになって、手つきまで速くなる。",
     "gender": "female",
@@ -1817,9 +1915,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "apron",
-        "denim_shirt",
-        "rolled_sleeves"
+        "linen_apron",
+        "dark_denim_shirt",
+        "rolled_sleeves",
+        "ribbontied_neck"
       ],
       "headwear_accessory": [
         "hair_flower"
@@ -1864,7 +1963,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "apron over a rolled-sleeve denim shirt, ribbon ends in the pocket, one stem behind her ear",
+      "outfit_style": "Linen apron over a dark denim shirt, ribbon ends in her pocket, one stem behind her ear.",
       "vibe_keywords": [
         "cold room hum",
         "wet floor and cut stems",
@@ -1889,18 +1988,25 @@
       "Holding the paper, tying the ribbon — leave the colour to me.",
       "Apron, sleeves up, petals on my fingers. Keep that.",
       "If you ask who it's for I can't stop smiling... Brace yourself, Showrunner."
-    ]
+    ],
+    "age": 26,
+    "occupation": "Florist owner",
+    "occupation_ja": "花屋の店主",
+    "student_past": "The florist after school. That feeling of working as if every order were a far more important affair than the customer could say still lives within her shop today.",
+    "student_past_ja": "放課後の花屋。どんな注文でも、頼んだ本人が言える以上に大事な用事だという前提で作っていたあの頃の感覚が、今も店の中に息づいている。",
+    "dream": "To stay by people's side during their most precious milestones, delivering unspoken feelings along with the flowers.",
+    "dream_ja": "街の人々の大切な節目に寄り添い、言葉にならない想いを花と一緒に届け続けること。"
   },
   {
     "id": "c015",
-    "version": 0,
+    "version": 1,
     "slug": "night_register",
     "name": "Akari Tsuzuki",
     "name_ja": "都築 あかり",
-    "title": "The Two A.M. Shift",
-    "title_ja": "深夜二時のレジ",
-    "summary": "Nights at the convenience store, alone, and she has decided this is the best shift there is. She restocks in perfect silence and knows exactly which customers are coming before they arrive. Talks to nobody for hours and is completely fine, right up until somebody is nice to her.",
-    "summary_ja": "コンビニの深夜、ひとり。この時間帯がいちばんいいと本人は決めている。無言で完璧に品出しをして、誰が何時に来るか全部把握している。何時間も誰とも喋らなくて平気。ただし、誰かにやさしくされた瞬間だけ話が変わる。",
+    "title": "The Three A.M. Silence",
+    "title_ja": "午前三時の静寂",
+    "summary": "Alone in the warehouse at 3 A.M. She has decided this is the best time of day. Silently and perfectly unpacking, she knows exactly who starts work when. She doesn't mind not speaking to anyone for hours. However, her demeanor shifts only when someone treats her with kindness.",
+    "summary_ja": "深夜の倉庫、ひとり。この時間帯がいちばんいいと本人は決めている。無言で完璧に荷解きをして、誰が何時に作業を始めるか全部把握している。何時間も誰とも喋らなくて平気。ただし、誰かにやさしくされた瞬間だけ話が変わる。",
     "charm": "A regular says 'you're always here, aren't you' and she blanks completely, then bows about four times too many.",
     "charm_ja": "常連に「いつもいるね」と言われると頭が真っ白になって、目が泳いだまま、必要の四倍くらいお辞儀をしてしまう。",
     "gender": "female",
@@ -1952,9 +2058,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "uniform",
-        "collared_shirt",
-        "long_sleeves"
+        "reflective_vest",
+        "heavy_duty_workwear",
+        "oversized_jumper",
+        "gloves"
       ],
       "headwear_accessory": [
         "name_tag"
@@ -1999,7 +2106,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "uniform shirt a size too big, sleeves to the knuckles, badge on crooked",
+      "outfit_style": "loose-fitting utility jumper, sleeves covering the knuckles, badge pinned crookedly",
       "vibe_keywords": [
         "fluorescent hum",
         "empty aisles",
@@ -2024,18 +2131,25 @@
       "Restocking in profile, or elbows on the counter waiting... Silence okay?",
       "Uniform and name tag. Night shift as-is.",
       "...Don't say 'you're always here'. I'll bow four times. Showrunner."
-    ]
+    ],
+    "age": 21,
+    "occupation": "Night shift warehouse inspector",
+    "occupation_ja": "深夜の物流センター・検品作業員",
+    "student_past": "Those quiet hours at the late-night convenience store register. The days of unpacking goods without speaking to anyone still form her rhythm today. She remembers every word from the regulars.",
+    "student_past_ja": "深夜コンビニのレジでの、あの静かな時間。誰とも喋らずに品出しをしていた日々が、いまも自分のリズムを作っている。常連の声も、すべて覚えたままだ。",
+    "dream": "To keep protecting a quiet place where one can simply accumulate perfect work without worrying about anyone's gaze.",
+    "dream_ja": "誰の視線も気にせず、ただ完璧な作業を積み重ねていけるような、静かな場所を守り続けること。"
   },
   {
     "id": "c016",
-    "version": 0,
+    "version": 1,
     "slug": "tank_guide",
     "name": "Umi Sakaki",
     "name_ja": "榊 うみ",
-    "title": "In Front of the Big Tank",
-    "title_ja": "大水槽の前の解説係",
-    "summary": "Aquarium guide, and the only staff member who still stops to watch the big tank on her own break. Her scripted talk is fine. The unscripted one, when a kid asks a real question, is twenty minutes long and the best thing in the building.",
-    "summary_ja": "水族館の解説係で、休憩中にひとりで大水槽を見に行くのはもう彼女だけ。決められた解説は普通にうまい。でも子どもが本気の質問をしたときの、台本のないほうの解説は二十分続いて、この建物でいちばん面白い。",
+    "title": "Deep Sea Biologist Narrator",
+    "title_ja": "深海生物の生態解説者",
+    "summary": "As a researcher at the aquarium, she is the only one who visits the big tank alone during breaks. Her scripted explanations are decent, but her unscripted lectures on ecology for curious adults and children last twenty minutes and are the most fascinating in this building. When talking about fish she loves, she forgets anyone else is there. Her hands move incessantly, and her face lights up brightly under the aquarium's glow.",
+    "summary_ja": "水族館の研究員として、休憩中にひとりで大水槽を見に行くのはもう彼女だけ。決められた解説は普通にうまい。でも、本気の質問をした大人や子供への、台本のないほうの生態解説は二十分続いて、この建物でいちばん面白い。好きな魚の話になると聞き手のことを完全に忘れる。手が動きっぱなしで、顔が水槽の光でめちゃくちゃ明るい。",
     "charm": "Get her onto her favourite fish and she forgets the audience entirely, hands moving, face lit up by the tank.",
     "charm_ja": "好きな魚の話になると聞き手のことを完全に忘れる。手が動きっぱなしで、顔が水槽の光でめちゃくちゃ明るい。",
     "gender": "female",
@@ -2087,9 +2201,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "staff_uniform",
-        "polo_shirt",
-        "long_sleeves"
+        "lab_coat",
+        "white_shirt",
+        "spectacles",
+        "professional_attire"
       ],
       "headwear_accessory": [
         "lanyard"
@@ -2134,7 +2249,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "staff polo tucked in badly, lanyard swinging, sleeves pushed up from the feeding bucket",
+      "outfit_style": "lab coat neatly worn, lanyard around neck, sleeves pushed up from examining samples.",
       "vibe_keywords": [
         "tank light on the floor",
         "before opening",
@@ -2159,18 +2274,25 @@
       "Hand to the glass, pointing through — mid-explanation face.",
       "Uniform, badge, penlight. Leave them on.",
       "Stop me if I start on sharks, Showrunner. I'll miss the end of break."
-    ]
+    ],
+    "age": 24,
+    "occupation": "Aquarium Researcher",
+    "occupation_ja": "水族館の研究員",
+    "student_past": "When she was a staff narrator, she was the only one who visited the big tank alone during breaks. Her unscripted explanations lasted twenty minutes whenever children asked serious questions.",
+    "student_past_ja": "水族館の解説係だった頃、休憩中にひとりで大水槽を見に行くのは彼女だけだった。子どもが本気の質問をしたとき、台本のないほうの解説は二十分続いていた。",
+    "dream": "To continue recording new ecological discoveries in front of the tanks before opening, when no one else is there.",
+    "dream_ja": "誰もいない開館前の水槽の前で、自分だけの新しい生態の発見を記録し続けたい。"
   },
   {
     "id": "c017",
-    "version": 0,
+    "version": 1,
     "slug": "record_bins",
     "name": "Kotoha Nikaido",
     "name_ja": "二階堂 ことは",
     "title": "Second Bin From the Left",
     "title_ja": "左から二番目の棚",
-    "summary": "Works the record shop and treats the stock as a personal collection she is reluctantly lending out. Judges your taste instantly and silently. If she likes what you pick she will say nothing and put something else on the counter beside it, which is the highest praise available.",
-    "summary_ja": "レコード屋のバイトで、店の在庫を「しぶしぶ貸してやっている私物」だと思っている。趣味は一瞬で、無言で判定される。気に入られると何も言われないまま、カウンターにもう一枚そっと置かれる。これがこの店で得られる最高の評価。",
+    "summary": "A record shop clerk who treats the store's inventory as \"her personal collection, reluctantly lent out.\" Her taste is judged in an instant through silence. When she likes a customer, another record is placed silently on the counter without a word. This is the highest praise one can receive at this shop.",
+    "summary_ja": "レコード屋の店員。店の在庫を「しぶしぶ貸してやっている私物」だと思っている。趣味は一瞬で、無言で判定される。気に入られると何も言われないまま、カウンターにもう一枚そっと置かれる。これがこの店で得られる最高の評価。",
     "charm": "Buy the one she slid over and she turns to the shelf so you cannot see her face, which tells you everything.",
     "charm_ja": "そっと置かれた一枚を買うと、顔を見られないように棚のほうを向く。その動きで全部わかる。",
     "gender": "female",
@@ -2224,8 +2346,9 @@
       "ears_tails_wings": [],
       "favorite_clothes": [
         "band_shirt",
-        "cardigan",
-        "jeans"
+        "oversized_knit",
+        "dark_denim",
+        "leather_boots"
       ],
       "headwear_accessory": [
         "headphones"
@@ -2270,7 +2393,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "band shirt under an oversized cardigan, sleeves swallowing her hands, jeans cuffed once",
+      "outfit_style": "vintage band shirt under a heavy knit, sleeves swallowing her hands, dark denim.",
       "vibe_keywords": [
         "shop before opening",
         "dust in the bins",
@@ -2295,18 +2418,25 @@
       "Pulling a sleeve, eyes on the jacket. I rate in silence.",
       "Black shirt and apron. Catch me being careful with fingerprints.",
       "...I just set one down. You don't have to buy it. Don't look, Showrunner."
-    ]
+    ],
+    "age": 22,
+    "occupation": "Record shop clerk",
+    "occupation_ja": "レコードショップ店員",
+    "student_past": "The days spent working part-time, treating the stock as her own. Her instinct to judge a person by what they pull from the shelf remains unchanged.",
+    "student_past_ja": "レコード屋のバイトとして、在庫を私物のように扱っていた日々。棚から何を抜くかでその人のことを決めていた感性は、今も変わらない。",
+    "dream": "To build an ultimate archive that belongs solely to herself.",
+    "dream_ja": "誰にも邪魔されない自分だけの究極のアーカイブを築き上げること。"
   },
   {
     "id": "c018",
-    "version": 1,
+    "version": 2,
     "slug": "clinic_desk",
     "name": "Momo Kirishima",
     "name_ja": "桐島 もも",
-    "title": "The Vet's Front Desk",
-    "title_ja": "動物病院の受付",
-    "summary": "Front desk at the animal clinic, where she is calm, efficient and reassuring to every anxious owner who comes through. She has held it together through some very bad afternoons. She has also never once made it to the car park after a good outcome without crying.",
-    "summary_ja": "動物病院の受付。不安そうな飼い主に対して、落ち着いていて、手際がよくて、ちゃんと安心させられる人。かなりつらい午後も、表では全部持ちこたえてきた。ただし、いい結果が出た日に泣かずに駐車場までたどり着けたことは、一度もない。",
+    "title": "Veterinary Clinic Administrator",
+    "title_ja": "動物病院の事務主任",
+    "summary": "Veterinary clinic administrator. Calm, efficient, and truly reassuring for anxious owners. She has held it together through even the most difficult afternoons at the front desk. However, she has never once managed to reach the parking lot without crying on days when good news is delivered. Even in a leadership role, her compassion remains unchanged.",
+    "summary_ja": "動物病院の事務主任。不安そうな飼い主に対して、落ち着いていて、手際がよくて、ちゃんと安心させられる人。かなりつらい午後も、表では全部持ちこたえてきた。ただし、いい結果が出た日に泣かずに駐車場までたどり着けたことは、一度もない。責任ある立場になっても、その優しさと情の深さは変わらない。",
     "charm": "A dog she remembers comes back healthy and her voice goes up an octave before she can stop it.",
     "charm_ja": "おぼえている犬が元気になって戻ってくると、止める間もなく声が一オクターブ上がる。",
     "gender": "female",
@@ -2357,9 +2487,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "scrubs",
-        "cardigan",
-        "short_sleeves"
+        "professional_scrubs",
+        "tailored_trousers",
+        "id_badge",
+        "lanyard"
       ],
       "headwear_accessory": [
         "name_tag"
@@ -2404,7 +2535,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "scrubs under a cardigan she keeps for the cold waiting room, treat pouch on the hip",
+      "outfit_style": "well-fitted scrubs, sleek trousers for office work, an ID badge hanging from her neck.",
       "vibe_keywords": [
         "waiting room quiet",
         "morning before opening",
@@ -2429,18 +2560,25 @@
       "Chart in hand, leaning in, gentle. Don't shoot the backside of that.",
       "Clinic uniform, badge readable.",
       "If a healthy regular comes in my voice will jump. Don't laugh, Showrunner."
-    ]
+    ],
+    "age": 25,
+    "occupation": "Veterinary Clinic Administrator",
+    "occupation_ja": "動物病院の事務主任",
+    "student_past": "The days spent as the front desk clerk, sincerely facing every life before her. Her pride remains in remembering the names of every animal she has ever met.",
+    "student_past_ja": "動物病院の受付として、目の前の命に真摯に向き合ってきた日々。会った動物たちの名前をすべて覚えていることは、今も変わらない誇りである。",
+    "dream": "Building a more perfect administrative system where everyone feels truly at peace, even during the busiest clinic hours.",
+    "dream_ja": "どんなに忙しい診療時でも、誰もが心から安らげるような、より完璧な受付体制を築き上げること。"
   },
   {
     "id": "c019",
-    "version": 0,
+    "version": 1,
     "slug": "ramen_counter",
     "name": "Sae Todoroki",
     "name_ja": "轟 さえ",
-    "title": "Nine Seats, One Ladle",
-    "title_ja": "九席の店を回す人",
-    "summary": "Family shop, nine seats, and she runs the whole counter after school with a speed that alarms first-time customers. Says almost nothing beyond the order. Every regular has been given extra without acknowledgement at least once, and none of them have found a way to bring it up.",
-    "summary_ja": "実家の店、カウンター九席。放課後、彼女ひとりで全部回している。その速さに初見の客はだいたいちょっと引く。注文以外はほとんど喋らない。常連は全員、一度は無言で多めに入れられたことがあって、誰もそれに触れる方法を見つけられていない。",
+    "title": "Keeper of Nine Seats",
+    "title_ja": "九席の店を守る人",
+    "summary": "A nine-seat family diner. She still runs everything by herself. New customers are usually a bit intimidated by her speed. Aside from orders, she rarely speaks. Every regular has experienced being served an extra portion in silence; no one knows how to bring it up. When told \"It was delicious,\" the ladle in her hand pauses for just one second before she replies, \"Thank you.\"",
+    "summary_ja": "カウンター九席、実家の店。今も彼女ひとりで全てを回している。その速さに初見の客はだいたいちょっと引く。注文以外はほとんど喋らない。常連は全員、一度は無言で多めに入れられたことがあって、誰もそれに触れる方法を見つけられていない。「おいしかった」と言われると、お玉を持つ手が一秒だけ止まってから「ありがとうございます」が来る。",
     "charm": "Say the food was good on the way out and the ladle stops for exactly one second before she says thank you.",
     "charm_ja": "帰りぎわに「おいしかった」と言うと、お玉を持つ手が一秒だけ止まってから「ありがとうございます」が来る。",
     "gender": "female",
@@ -2492,8 +2630,8 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "apron",
-        "t-shirt",
+        "professional_apron",
+        "clean_white_shirt",
         "rolled_sleeves"
       ],
       "headwear_accessory": [
@@ -2539,7 +2677,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "apron over a plain tee, sleeves rolled high, towel band pushed back off her forehead",
+      "outfit_style": "crisp white shirt with rolled sleeves, heavy-duty apron, towel band on forehead",
       "vibe_keywords": [
         "extractor fan",
         "steam on the window",
@@ -2564,18 +2702,25 @@
       "Ladle up, through the steam. Normal face. Want the extra-portion beat?",
       "Shop apron as-is. Hair up. Sorry about the sweat.",
       "If you say it was good on the way out... I pause one second. Hit that, Showrunner."
-    ]
+    ],
+    "age": 24,
+    "occupation": "Chef of the family diner",
+    "occupation_ja": "実家の店を営む料理人",
+    "student_past": "The days after school when she ran the nine-seat counter all by herself. Unchanged since then, she has silently and steadily put extra care into every bowl.",
+    "student_past_ja": "放課後、カウンター九席の店をひとりで回していた日々。あの頃から変わらず、彼女は黙々と、ただひたすらに、器に心を込めて多めに入れてきた。",
+    "dream": "An eternal night of a full counter running smoothly without any hesitation.",
+    "dream_ja": "満席のカウンターが淀みなく回る、至福の夜を永遠に。"
   },
   {
     "id": "c020",
-    "version": 0,
+    "version": 1,
     "slug": "bike_courier",
     "name": "Tsubasa Amemiya",
     "name_ja": "雨宮 つばさ",
-    "title": "Beats the Estimate",
-    "title_ja": "指定時間より早く着く",
-    "summary": "Delivers by bike, treats every estimated time as an insult, and knows the city as a set of shortcuts nobody sanctioned. Arrives breathless, hands the bag over, and is gone before the door has closed. Nobody has ever seen her walk.",
-    "summary_ja": "自転車で配達している人。指定時間は毎回「侮辱」だと思っていて、街を「誰にも認められていない近道の集合」として把握している。息を切らして現れて、袋を渡して、ドアが閉まる前にもういない。歩いているところを見た人がいない。",
+    "title": "The estimate is an insult.",
+    "title_ja": "指定時間は侮辱だ",
+    "summary": "A professional cyclist delivering goods. She considers any estimated time an \"insult,\" perceiving the city as a collection of shortcuts no one else recognizes. Appearing breathless, she hands over packages and vanishes before doors can even close. No one ever sees her just walking. When forced to wait at a doorstep, her feet cannot stop tapping, but the moment the door opens, she breaks into an uncontrollable, beaming smile.",
+    "summary_ja": "自転車で荷物を運ぶプロ。指定時間は毎回「侮向」だと考えていて、街を「誰にも認められていない近道の集合」として把握している。仕事の合間に息を切らして現れ、荷物を渡して、ドアが閉まる前にはもういなくなっている。歩いているところを見た人がいない。玄関で待たされると足踏みが止まらなくなり、扉が開いた瞬間、こらえきれずに全開の笑顔になる。",
     "charm": "Make her wait at the door and she fidgets from foot to foot, then grins way too wide when you finally open it.",
     "charm_ja": "玄関で待たされると足踏みが止まらなくなって、やっと開いた瞬間、こらえきれずに全開の笑顔になる。",
     "gender": "female",
@@ -2627,9 +2772,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
+        "cycling_jersey",
         "windbreaker",
-        "shorts",
-        "cycling_jersey"
+        "gloves"
       ],
       "headwear_accessory": [
         "helmet"
@@ -2674,7 +2819,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "windbreaker half-zipped over a jersey, bag strap across the chest, one glove off",
+      "outfit_style": "aerodynamic jersey under a zipped windbreaker, cargo belt, one glove off",
       "vibe_keywords": [
         "street lights coming on",
         "rain just stopped",
@@ -2699,18 +2844,25 @@
       "Helmet under arm, right after the buzzer. Breathless is fine. Early looks good on camera?",
       "Windbreaker and courier bag. Dirt stays — proof of work.",
       "If you make me wait I foot-tap... Brace for the grin when it opens, Showrunner."
-    ]
+    ],
+    "age": 23,
+    "occupation": "Cycle Messenger",
+    "occupation_ja": "サイクルメッセンジャー",
+    "student_past": "The days of delivering by bicycle. Her sense of navigating the city as a collection of shortcuts, viewing estimates as insults, remains unchanged. She is still overjoyed when recognized by residents from her past routes.",
+    "student_past_ja": "自転車で配達していた日々。指定時間を侮辱と捉え、街を近道の集合として駆け抜けていたあの頃の感覚は今も変わらない。前へ来た家で顔を覚えられていると、今でもめちゃくちゃ嬉しい。",
+    "dream": "To outrun everyone through the city's gaps, constantly beating her own time.",
+    "dream_ja": "誰よりも速く、街の隙間を駆け抜ける。自分自身の記録を更新し続けること。"
   },
   {
     "id": "c021",
-    "version": 0,
+    "version": 1,
     "slug": "hydrangea_rain",
     "name": "Shizuku Aoyagi",
     "name_ja": "青柳 しずく",
     "title": "Waits Out the Rain on Purpose",
-    "title_ja": "わざと雨宿りする人",
-    "summary": "Owns an umbrella. Chooses, most of the time, not to open it. She stands under the eaves by the hydrangeas until it stops, which she describes as being efficient about drying time and is in fact the best twenty minutes of her week.",
-    "summary_ja": "傘は持っている。ただ、たいていの日は開かない。紫陽花の横の軒下で、やむまで立っている。本人は「乾かす時間を考えたら合理的」と説明するけれど、実際のところ、それが一週間でいちばんいい二十分になっている。",
+    "title_ja": "雨宿りを続ける人",
+    "summary": "She carries an umbrella. But most days, she doesn't open it. Standing under the eaves of a greenhouse, waiting for the rain to stop. She explains that \"it is more rational considering the drying time,\" but in truth, this is the best twenty minutes of her week. When sharing the same shelter, she becomes profoundly quiet. After a while, her shoulder drifts two centimeters closer.",
+    "summary_ja": "傘は持っている。ただ、たいていの日は開かない。植物園の温室の軒下で、やむまで立っている。本人は「乾かす時間を考えたら合理的」と説明するけれど、実際のところ、それが一週間でいちばんいい二十分になっている。同じ場所に入ると、黙ってすごく大人しくなる。しばらくすると、肩が二センチくらいこっちに寄ってくる。",
     "charm": "Share the eaves with her and she goes silent and very still, and after a while her shoulder drifts about two centimetres closer.",
     "charm_ja": "同じ軒下に入ると、黙ってすごく大人しくなる。しばらくすると、肩が二センチくらいこっちに寄ってくる。",
     "gender": "female",
@@ -2761,9 +2913,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "raincoat",
-        "blouse",
-        "long_skirt"
+        "waterproof_apron",
+        "linen_shirt",
+        "heavy_boots",
+        "dark_trousers"
       ],
       "headwear_accessory": [],
       "footwear": [
@@ -2806,7 +2959,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "raincoat open over a blouse, hem damp, boots with the cuffs turned down",
+      "outfit_style": "waterproof apron over a linen shirt, hem damp, heavy boots with mud on soles",
       "vibe_keywords": [
         "rain off a roof edge",
         "hydrangeas going blue",
@@ -2831,18 +2984,25 @@
       "Back to the wall, watching rain. May I claim it's 'rational drying time'?",
       "Uniform, wet hem, folded umbrella in hand.",
       "I might not move when it eases. If my shoulder drifts... pretend you didn't notice."
-    ]
+    ],
+    "age": 23,
+    "occupation": "Apprentice Gardener at a Botanical Garden",
+    "occupation_ja": "植物園の庭師見習い",
+    "student_past": "Days spent under the eaves by the hydrangeals, waiting for the rain to pass. Just as then, she gazes at dripping roof edges and watches the hydrangeias turn blue.",
+    "student_past_ja": "紫陽花の横の軒下で、やむまで立っていた日々。あの頃から変わらず、雨粒が滴る軒端を見つめ、紫陽花が青く色づいていくのをじっと待っている。",
+    "dream": "Making even the rainy gardens a part of a beautifully maintained landscape.",
+    "dream_ja": "雨の日の庭さえも、美しく手入れされた風景の一部にすること。"
   },
   {
     "id": "c022",
-    "version": 0,
+    "version": 1,
     "slug": "festival_yukata",
     "name": "Kanade Ninomiya",
     "name_ja": "二宮 かなで",
-    "title": "Loses the Group Every Year",
-    "title_ja": "毎年はぐれる人",
-    "summary": "Comes to the summer festival with a plan, a schedule and four friends, and loses all of them by the second stall. Has never once panicked about it. Buys something fried, finds a wall, and waits to be located, which she considers a perfectly good way to attend a festival.",
-    "summary_ja": "計画と時間割と友達四人を連れて夏祭りに来て、二軒目の屋台で全員を見失う。それで焦ったことは一度もない。何か揚げ物を買って壁を見つけて、発見されるまで待つ。祭りの過ごし方として、これで完全に正しいと思っている。",
+    "title": "Disappears from the Site Every Year",
+    "title_ja": "現場から忽然と消える人",
+    "summary": "Bringing the schedule, the task list, and four staff members to the festival security zone, she loses everyone at the second standby area. She has never panicked about it. Buying some fried food, she finds a pillar and waits until being found. She believes this is the perfectly correct way to spend intermission at work.",
+    "summary_ja": "仕事の計画と工程表とスタッフ四人を連れて夏祭りの警備区域に来て、二次会の待機場所で全員を見失う。それで焦ったことは一度もない。何か揚げ物を買って柱を見つけて、発見されるまで待つ。イベントの片手間の過ごし方として、これで完全に正しいと思っている。",
     "charm": "When somebody finally finds her she lights up so hard she forgets to be cool about it, food still in one hand.",
     "charm_ja": "やっと見つけてもらえた瞬間、片手に食べ物を持ったまま、取り繕うのも忘れて顔がぱっと明るくなる。",
     "gender": "female",
@@ -2894,9 +3054,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "yukata",
-        "obi",
-        "wide_sleeves"
+        "smart_casual",
+        "beige_trousers",
+        "tucked_shirt",
+        "lanyard"
       ],
       "headwear_accessory": [
         "hair_flower"
@@ -2941,7 +3102,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "yukata with the obi tied high, sleeves gathered in one hand, hem lifted for the geta",
+      "outfit_style": "neat blouse with sleeves rolled up, professional trousers and comfortable sneakers.",
       "vibe_keywords": [
         "lanterns coming on",
         "grill smoke",
@@ -2966,18 +3127,25 @@
       "Fried snack in one hand, watching the crowd. Yukata sash a little loose is fine.",
       "Yukata. Cheap hair clip okay — festival first.",
       "When someone calls my name my face gives up... You can take that, Showrunner."
-    ]
+    ],
+    "age": 24,
+    "occupation": "Event Setup Director",
+    "occupation_ja": "イベント設営会社のディレクター",
+    "student_past": "She used to go to summer festivals with her schedule and four friends, losing everyone at the food stalls. Back then, getting lost was just her way of waiting for them.",
+    "student_past_ja": "計画と時間割と友達四人を連れて夏祭りに来て、屋台で全員を見失っていた。あの頃も、はぐれることは自分から待ち合わせるための手段だった。",
+    "dream": "To design warm spaces where someone will surely find you, no matter how crowded the festival night is.",
+    "dream_ja": "どんなに賑やかな祭りの夜でも、誰かが必ず見つけ出してくれるような温かい空間を設計すること。"
   },
   {
     "id": "c023",
-    "version": 0,
+    "version": 1,
     "slug": "snow_gloves",
     "name": "Yuki Nanjo",
     "name_ja": "南条 ゆき",
-    "title": "Two Gloves, One Owner",
-    "title_ja": "手袋が片方ない人",
-    "summary": "Loses one glove every winter without fail, and rather than buy another pair keeps the remaining one and puts the bare hand in her pocket. Has done this four years running. Treats it as a seasonal event rather than a problem.",
-    "summary_ja": "毎年かならず手袋を片方なくす。買い直さずに残った片方だけをはめて、素手のほうはポケットに入れておく。これで四年目。本人は問題ではなく季節の行事として扱っていて、なくした日をちゃんとおぼえている。困っているように見えて、たぶん本人はけっこう楽しんでいる。",
+    "title": "One-Glove Artisan",
+    "title_ja": "片方だけの手袋の職人",
+    "summary": "Every year, she invariably loses one glove while working. She puts on the remaining one and keeps her bare hand in her apron pocket. This is now her seventh year. Rather than a problem, she treats it as a seasonal ritual, remembering each day of loss clearly. Though she looks troubled, she likely finds joy in it.",
+    "summary_ja": "毎年かならず、仕事中に使う手袋を片方なくす。買い直さずに残った片方だけをはめて、素手のほうはエプロンのポケットに入れておく。これで七年目。本人は問題ではなく季節の行事として扱っていて、なくした日をちゃんとおぼえている。困っているように見えて、たぶん本人はけっこう楽しんでいる。",
     "charm": "Hand her a spare glove and she stares at it, then at you, then puts it on without a word and does not let go of the topic for a week.",
     "charm_ja": "予備の手袋を渡すと、手袋を見て、こっちを見て、無言ではめる。そのあと一週間その話をやめない。",
     "gender": "female",
@@ -3029,9 +3197,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "duffle_coat",
-        "scarf",
-        "knit_sweater"
+        "linen_apron",
+        "wool_cardigan",
+        "thick_knit_gloves"
       ],
       "headwear_accessory": [
         "beanie"
@@ -3076,7 +3244,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "duffle coat toggled to the throat, scarf doubled, one glove on and one pocket occupied",
+      "outfit_style": "heavy knit cardigan buttoned up, thick scarf wrapped twice, one glove on and one pocket occupied",
       "vibe_keywords": [
         "first snow",
         "breath in the air",
@@ -3101,18 +3269,25 @@
       "Bare hand in pocket, gloved hand at my cheek. I look stranded; I'm enjoying it.",
       "Coat and muffler. Show the single glove on purpose.",
       "If you offer a spare I'll put it on without a word... then talk about it for a week."
-    ]
+    ],
+    "age": 22,
+    "occupation": "Assistant at a small handicraft atelier",
+    "occupation_ja": "小さな手芸工房のアシスタント",
+    "student_past": "Those days when she would lose one glove every year. The habit of wearing only the remaining one and keeping her bare hand in a pocket continues now in this atelier.",
+    "student_past_ja": "毎年、手袋を片方なくしていたあの頃。買い直さずに残った片方だけをはめ、素手をポケットに入れていた日々が、今もこの工房の習慣として続いている。",
+    "dream": "To create warm, imperfect gloves that fit perfectly into someone's hands.",
+    "dream_ja": "誰かの手に馴染むような、温かくて不完全な手袋を作ること。"
   },
   {
     "id": "c024",
-    "version": 0,
+    "version": 1,
     "slug": "sakura_shutter",
     "name": "Koharu Sena",
     "name_ja": "瀬名 こはる",
     "title": "Two Hundred Photos of the Same Tree",
     "title_ja": "同じ木を二百枚",
-    "summary": "Takes two hundred photographs of one cherry tree every spring on a phone with no storage left. Deletes nothing. Will show you all of them if given the slightest opening, and has a specific favourite among near-identical images that she can justify at length.",
-    "summary_ja": "毎年春になると、容量がとっくにない携帯で、同じ桜の木を二百枚撮る。一枚も消さない。少しでも隙を見せると全部見せてくる。ほぼ同じに見える中にちゃんと一番があって、その理由を長々と説明できる。",
+    "summary": "Every spring, she takes two hundred photos of the same cherry tree with a phone that has long run out of storage. She never deletes a single one. If you show even a moment of vulnerability, she'll reveal them all. There is always a true \"best\" among those nearly identical shots, and she can explain why at great length. Being in this profession, she is more sensitive to subtle color differences than anyone else.",
+    "summary_ja": "毎年春になると、容量がとっくにない携帯で、同じ桜の木を二百枚撮る。一枚も消さない。少しでも隙を見せると全部見せてくる。ほぼ同じに見える中にちゃんと一番があって、その理由を長々と説明できる。仕事柄、色の微細な違いには誰よりも敏感だ。",
     "charm": "Ask which one is her favourite and she scrolls straight to it without looking, then covers the screen and asks if you actually want to see.",
     "charm_ja": "「どれが一番？」と聞くと、画面も見ずにその一枚まで一発でスクロールする。そのあと画面を手で隠して「本当に見たい？」と聞いてくる。",
     "gender": "female",
@@ -3164,9 +3339,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "cardigan",
         "blouse",
-        "long_skirt"
+        "long_skirt",
+        "apron"
       ],
       "headwear_accessory": [
         "hair_clip"
@@ -3211,7 +3386,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "cardigan slipping off one shoulder, tote on the elbow, skirt hem catching petals",
+      "outfit_style": "linen apron over a skirt hem catching petals, tote on the elbow",
       "vibe_keywords": [
         "petals on wet road",
         "overcast spring light",
@@ -3236,18 +3411,25 @@
       "Phone up, slight crouch. Ask 'which is best?' and I'll scroll without looking.",
       "Cardigan over uniform. Leave petals on my shoulder.",
       "Before I show the best one I'll ask if you really want to see... Say yes, Showrunner."
-    ]
+    ],
+    "age": 22,
+    "occupation": "Prepress operator at a small printing house",
+    "occupation_ja": "小さな印刷所の製版オペレーター",
+    "student_past": "Every spring, she takes two hundred photos of the same cherry tree with a phone that has long run out of storage. She never deletes a single one. If you show even a moment of vulnerability, she'll reveal them all. There is always a true \"best\" among those nearly identical shots, and she can explain why at great length.",
+    "student_past_ja": "毎年春になると、容量がとっくにない携帯で、同じ桜の木を二百枚撮る。一枚も消さない。少しでも隙を見せると全部見せてくる。ほぼ同じに見える中にちゃんと一番があって、その理由を長々と説明できる。",
+    "dream": "Ensuring the colors I adjust remain in their most beautiful state when they reach someone's hands.",
+    "dream_ja": "自分が色を調整した印刷物が、誰かの手元で一番美しい状態で残ること。"
   },
   {
     "id": "c025",
-    "version": 0,
+    "version": 1,
     "slug": "kotatsu_winter",
     "name": "Nono Ichikawa",
     "name_ja": "市川 のの",
-    "title": "Has Not Left the Kotatsu",
-    "title_ja": "こたつから出ない",
-    "summary": "Gets under the kotatsu in November and is functionally unavailable until March. Everything she needs has been arranged within arm's reach. She is not lazy about anything else in her life, which makes the whole arrangement funnier to everyone who knows her.",
-    "summary_ja": "十一月にこたつに入って、三月まで実質いなくなる。必要なものは全部、手の届く範囲に配置済み。他のことでは全然だらけないので、それを知っている人ほどこの状態を面白がっている。",
+    "title": "Has Not Left the Study",
+    "title_ja": "書斎から出ない",
+    "summary": "From November until March, she practically disappears into her study. Everything necessary is placed within arm's reach of the desk. Since she isn't lazy in any other task, those who know her find this state amusing. If you try to pull her away, she goes limp, resting her chin on the tabletop while looking up at you as if betrayed.",
+    "summary_ja": "十一月に書斎に入って、三月まで実質いなくなる。必要なものは全部、デスクの届く範囲に配置済み。他の仕事では全然だらけないので、それを知っている人ほどこの状態を面白がっている。引っぱり出そうとすると全身の力を抜いて、顎を天板に乗せたまま、裏切られたみたいな目でこっちを見上げてくる。",
     "charm": "Try to get her out and she goes completely limp, chin on the tabletop, and looks up at you with total betrayal.",
     "charm_ja": "引っぱり出そうとすると全身の力を抜いて、顎を天板に乗せたまま、裏切られたみたいな目でこっちを見上げてくる。",
     "gender": "female",
@@ -3298,9 +3480,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "knit_sweater",
-        "sweatpants",
-        "oversized_clothes"
+        "cashmere_sweater",
+        "loungewear",
+        "thick_socks"
       ],
       "headwear_accessory": [],
       "footwear": [
@@ -3343,7 +3525,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "oversized knit swallowing her hands, blanket over the shoulders, socks half off",
+      "outfit_style": "oversized cashmere knit swallowing her hands, heavy blanket over shoulders",
       "vibe_keywords": [
         "kotatsu glow",
         "dark outside by five",
@@ -3368,18 +3550,25 @@
       "Chin on the tabletop, looking up. Tug the blanket and I go boneless.",
       "Loungewear and blanket. Remote and mikan within reach.",
       "Try to pull me out and you get this look... You know what you're doing, Showrunner."
-    ]
+    ],
+    "age": 24,
+    "occupation": "Freelance Translator at home",
+    "occupation_ja": "在宅の翻訳家",
+    "student_past": "From November until March, she practically disappears into the kotatsu. Everything necessary is placed within arm's reach. Since she isn't lazy in any other task, those who know her find this state amusing.",
+    "student_past_ja": "十一月にこたつに入って、三月まで実質いなくなる。必要なものは全部、手の届く範囲に配置済み。他のことでは全然だらけないので、それを知っている人ほどこの状態を面白がっている。",
+    "dream": "To complete perfect translations in her study optimized for her own sensibilities, without being disturbed by anyone.",
+    "dream_ja": "自分の感性と最適化した書斎で、誰の邪魔も受けずに完璧な訳文を完成させること。"
   },
   {
     "id": "c026",
-    "version": 0,
+    "version": 1,
     "slug": "planetarium_seat",
     "name": "Subaru Asakura",
     "name_ja": "朝倉 すばる",
     "title": "Stays for the Second Showing",
-    "title_ja": "二回目も観ていく人",
-    "summary": "Buys one ticket to the planetarium and stays for the next showing without moving, which the staff have noticed and decided to allow. Knows the script by heart. Still gasps at the same part every time, quietly, in the dark, where she thinks nobody can tell.",
-    "summary_ja": "プラネタリウムのチケットを一枚買って、そのまま動かずに次の回も観ていく。スタッフは気づいていて、黙って見逃している。台本はもう全部おぼえている。それでも毎回、同じ場面で小さく息をのむ。暗いから誰にも分からないと思っている。",
+    "title_ja": "次の回も観ていく人",
+    "summary": "She buys a single ticket for the planetarium and stays, unmoving, to watch the next show. The staff notices but quietly looks the other way. She has already memorized every script, yet still catches her breath at the same scenes. She believes no one can tell in the dark. When the lights come on, she forgets to fix her expression; looking upward, her eyes remain sparkling.",
+    "summary_ja": "天文館のチケットを一枚買って、そのまま動かず次の回も観ていく。スタッフは気づいていて、黙って見逃している。台本はもう全部おぼえている。それでも毎回、同じ場面で小さく息をのむ。暗いから誰にも分からないと思っている。照明がつく瞬間、顔を作り直すのを完全に忘れている。上を向いたまま、目がきらきらしている。",
     "charm": "The lights come up and she has entirely forgotten to compose her face, which is still tipped back and shining.",
     "charm_ja": "照明がつく瞬間、顔を作り直すのを完全に忘れている。上を向いたまま、目がきらきらしている。",
     "gender": "female",
@@ -3431,9 +3620,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "cardigan",
+        "knit_cardigan",
         "long_skirt",
-        "blouse"
+        "silk_blouse",
+        "elegant_jewelry"
       ],
       "headwear_accessory": [],
       "footwear": [
@@ -3476,7 +3666,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "cardigan over a blouse, skirt spread across the reclined seat, sleeves to the fingertips",
+      "outfit_style": "Silk blouse under a cardigan, skirt spreading across the seat, sleeves to the fingertips",
       "vibe_keywords": [
         "dome going dark",
         "last row",
@@ -3501,18 +3691,25 @@
       "Looking up in the dark — just the gasp. I know the script; it still happens.",
       "Jacket over my knees. I don't leave the seat.",
       "If I'm still sparkling when the lights come up... pretend you didn't see, Showrunner."
-    ]
+    ],
+    "age": 21,
+    "occupation": "Private Planetarium Reporter",
+    "occupation_ja": "私立天文館のレポーター",
+    "student_past": "She buys a single ticket for the planetarium and stays, unmoving, to watch the next show. Even though she has memorized every script, she still catches her breath at the same scenes.",
+    "student_past_ja": "プラネタリウムのチケットを一枚買って、そのまま動かずに次の回も観ていく。台本はもう全部おぼえているが、それでも毎回、同じ場面で小さく息をのむ。",
+    "dream": "To curate a quiet celestial exhibition where everyone can find stories in the stars.",
+    "dream_ja": "誰もが星に物語を見出せるような、静かな天文展示の企画を立ち上げること。"
   },
   {
     "id": "c027",
-    "version": 1,
+    "version": 2,
     "slug": "bus_stop_wait",
     "name": "Sena Tsukishiro",
     "name_ja": "月城 せな",
     "title": "Twelve Minutes Early",
-    "title_ja": "十二分前に着く",
-    "summary": "Arrives at the bus stop twelve minutes early every day, because she once missed one and has organised her life around never doing it again. Uses the twelve minutes properly. Has read a startling number of books in that shelter and knows the timetable better than the company does.",
-    "summary_ja": "毎日十二分前にバス停に着く。一度乗り遅れたことがあって、二度とそうならないよう生活を組み直したから。その十二分はちゃんと有効活用している。あの待合所でとんでもない数の本を読んでいるし、時刻表はバス会社より詳しい。",
+    "title_ja": "十二分前に届く",
+    "summary": "She arrives at her desk twelve minutes early every day. After once missing a deadline, she restructured her entire life to ensure it never happens again. She uses those twelve minutes productively; during that time, she focuses on proofreading with an intensity unmatched by anyone else. When things deviate from schedule, she bites her lip and repeatedly checks her watch.",
+    "summary_ja": "毎日十二分前にデスクに着く。一度締め切りを逃したことがあって、二度とそうならないよう生活を組み直したから。その十二分はちゃんと有効活用している。その時間は校正作業に充てられ、入稿原稿の誤字への執着は誰よりも強い。バスが遅れるときのように、予定外の事態には唇を噛みながら時計を見始める。",
     "charm": "The bus is late and her composure holds for four minutes, after which she starts chewing her lip and checking twice a minute.",
     "charm_ja": "バスが遅れると、四分は平気な顔でいられる。そのあとは唇を噛みながら、一分に二回時計を見はじめる。",
     "gender": "female",
@@ -3564,9 +3761,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "trench_coat",
-        "sweater",
-        "pleated_skirt"
+        "suit_jacket",
+        "silk_blouse",
+        "slacks",
+        "leather_watch"
       ],
       "headwear_accessory": [
         "wristwatch"
@@ -3611,7 +3809,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "trench coat buttoned over a sweater, bag squared on her knees, watch face turned inward",
+      "outfit_style": "Tailored blazer buttoned over a blouse, bag placed firmly on her desk, watch face turned inward",
       "vibe_keywords": [
         "empty shelter",
         "grey morning",
@@ -3636,18 +3834,25 @@
       "Book open, glance at the timetable. If it's late I bite my lip.",
       "Uniform and coat. Bag on knees, fixed place.",
       "Minute five with no bus, I start checking the clock... Are you shooting that face too?"
-    ]
+    ],
+    "age": 25,
+    "occupation": "Editor at a small publishing house",
+    "occupation_ja": "小さな出版社のエディター",
+    "student_past": "I used to read an incredible number of books at the bus stop shelter. My knowledge of timetables was even more precise than the bus company's, and that quiet time spent there is the foundation of how I approach manuscripts today.",
+    "student_past_ja": "バス停の待合所で、とんでもない数の本を読んでいた。時刻表はバス会社より詳しく、あの場所で過ごす静かな時間が、今の私の原稿への向き合い方の礎になっている。",
+    "dream": "To release a perfectly flawless book into the world, exactly on schedule.",
+    "dream_ja": "乱れのない完璧な一冊を、予定通りに世に送り出すこと。"
   },
   {
     "id": "c028",
-    "version": 1,
+    "version": 2,
     "slug": "goldfish_scoop",
     "name": "Tsugumi Hazama",
     "name_ja": "狭間 つぐみ",
     "title": "One More Try, Definitely",
     "title_ja": "あと一回、絶対",
-    "summary": "Spends the entire festival budget at one goldfish stall, every year, and has never taken a fish home. She is not there for the fish. She is there because the paper breaking is the single most compelling problem she has ever encountered.",
-    "summary_ja": "毎年、祭りの予算を全部ひとつの金魚すくいの屋台で溶かす。持ち帰ったことは一度もない。金魚が目当てじゃないから。紙が破れるという現象が、人生でいちばん面白い問題だという、それだけの理由でそこにいる。",
+    "summary": "Spends her entire monthly salary at a single goldfish scooping stall. Has never successfully taken one home. Because the fish isn't the point. She stands there simply because the phenomenon of paper tearing is the most interesting problem in life. Her eyes, gazing beyond the aquarium glass, always harbor anticipation for the next \"failure.\"",
+    "summary_ja": "毎月の給料を全部ひとつの金魚すくいの屋台で溶かす。持ち帰ったことは一度もない。金魚が目当てじゃないから。紙が破れるという現象が、人生でいちばん面白い問題だという、それだけの理由でそこにいる。水槽の向こう側を見つめる瞳には、常に次なる「破綻」への期待が宿っている。",
     "charm": "She finally lands one, freezes, and looks around wildly for someone to have witnessed it.",
     "charm_ja": "やっと一匹すくえた瞬間、手を止めて固まる。そのあと「いま見てた人いる？」と、目を輝かせて勢いよく周りを見回す。",
     "gender": "female",
@@ -3698,9 +3903,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "yukata",
-        "obi",
-        "wide_sleeves"
+        "navy_jumpsuit",
+        "utility_belt",
+        "work_boots",
+        "ponytail"
       ],
       "headwear_accessory": [
         "hair_tie"
@@ -3745,7 +3951,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "yukata sleeves pushed back and pinned, hem tucked up at the knee to crouch, obi slightly askew",
+      "outfit_style": "jumpsuit sleeves rolled up and pinned, heavy fabric tucked into belt to crouch",
       "vibe_keywords": [
         "stall lights on water",
         "wet paper",
@@ -3770,18 +3976,25 @@
       "Poi over the water. Want the 'one more try' face after it tears?",
       "Yukata sleeves up. Expect splash.",
       "I freeze when I land one... then look around. Don't miss that, Showrunner."
-    ]
+    ],
+    "age": 21,
+    "occupation": "Apprentice Aquarist",
+    "occupation_ja": "水族館の飼育員見習い",
+    "student_past": "Those days, waiting before the festival stall for the tremor of tearing paper. The way her eyes sparkle at goldfish scooping and how she searches for a witness with \"Did anyone see that?\" remains unchanged.",
+    "student_past_ja": "祭りの屋台の前で、紙が破れる瞬間の震えを待ち続けていたあの頃。金魚すくいの話になると目が輝き、『見てた人いる？』と周囲を見渡していた衝動は今も変わらない。",
+    "dream": "To continue proving the aesthetics of the moment of tearing within the perfect problem of an aquarium ecosystem.",
+    "dream_ja": "破れる瞬間の美学を、水槽の生態系という完璧な問題の中で証明し続けること。"
   },
   {
     "id": "c029",
-    "version": 0,
+    "version": 1,
     "slug": "laundry_roof",
     "name": "Asahi Kurata",
     "name_ja": "倉田 あさひ",
     "title": "Best Drying Weather All Year",
     "title_ja": "今年いちばんの洗濯日和",
-    "summary": "Announces the drying conditions to her flatmates every morning whether asked or not. Genuinely happy about a good breeze. Hangs everything with the pegs colour-matched, which she says is for speed and is transparently not.",
-    "summary_ja": "毎朝、聞かれてもいないのに同居人へ洗濯日和を報告する。いい風が吹くと本当に嬉しそう。洗濯ばさみを色ごとに揃えて干していて、「そのほうが速いから」と言っているけど、誰の目にも違う。",
+    "summary": "Every morning, she reports the drying weather to her roommate without being asked. She looks truly happy when a good breeze blows. At work, she sorts laundry pegs by color, claiming \"it's faster that way,\" though no one believes it. If you agree with her, she keeps smiling all through the morning.",
+    "summary_ja": "毎朝、聞かれてもいないのに同居人へ洗濯日和を報告する。いい風が吹くと本当に嬉しそう。仕事用の洗濯ばさみを色ごとに揃えて管理していて、「そのほうが速いから」と言っているけど、誰の目にも違う。返答一つで、彼女の顔は午前中いっぱいずっとにこにこしている。",
     "charm": "Agree that it is good drying weather and she will beam at you for the rest of the morning.",
     "charm_ja": "「たしかに洗濯日和だね」と返すと、その日の午前中いっぱい、顔がずっとにこにこしている。",
     "gender": "female",
@@ -3833,9 +4046,10 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "sundress",
-        "cardigan",
-        "short_sleeves"
+        "apron",
+        "white_shirt",
+        "neat_trousers",
+        "leggings"
       ],
       "headwear_accessory": [
         "headscarf"
@@ -3880,7 +4094,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "sundress with a cardigan pushed to the elbows, scarf over her hair, basket on one hip",
+      "outfit_style": "crisp white shirt with rolled sleeves, clean apron, basket on one hip",
       "vibe_keywords": [
         "sheets in the wind",
         "noon on the roof",
@@ -3905,18 +4119,25 @@
       "Sheets in my arms, facing the wind. Pegs colour-sorted — keep that tidy.",
       "T-shirt and shorts. Laundry apron.",
       "Say 'yeah, perfect drying weather'? ...I'll grin all morning if you do."
-    ]
+    ],
+    "age": 22,
+    "occupation": "Laundry shop clerk",
+    "occupation_ja": "ランドリーショップ店員",
+    "student_past": "Sorting laundry pegs by color. She wants someone to notice the beautiful, straight lines of drying clothes. Though no one notices, this meticulous habit continues today.",
+    "student_past_ja": "洗濯ばさみを色順に揃える。干し終わった線が綺麗なことに、誰か気づいてほしい。誰も気づかないけれど、彼女にとっては大切なこだわりとして今も続いている。",
+    "dream": "To create a clean space where freshly washed sheets shine brightly, regardless of the weather.",
+    "dream_ja": "どんな天候の日でも、洗い立てのシーツが真っ白に輝くような、清潔な空間を作ること。"
   },
   {
     "id": "c030",
-    "version": 0,
+    "version": 1,
     "slug": "moving_boxes",
     "name": "Riko Naruse",
     "name_ja": "成瀬 りこ",
     "title": "Unpacks in Reverse Order",
-    "title_ja": "逆から開ける引っ越し",
-    "summary": "Moved in a week ago and has unpacked the kettle, the speakers and eleven books, in that order, while the plates remain in a box being used as a table. Insists the system is working. It is, in the sense that she is extremely happy in there.",
-    "summary_ja": "一週間前に引っ越してきて、ケトルとスピーカーと本十一冊だけ、その順番で開けた。皿はまだ箱の中で、その箱がテーブルになっている。「回ってるから大丈夫」と言い張る。実際、本人がめちゃくちゃ機嫌よく暮らしているという意味では回っている。",
+    "title_ja": "逆から開ける片付け人",
+    "summary": "In her studio, she opened only the kettle, speakers, and eleven books, in that exact order. The tool boxes remain stacked, serving as her makeshift desk. \"Everything is running fine,\" she insists. Indeed, life revolves happily around her own rhythm. She cherishes the potential within unorganized spaces, living steadily through her own chaotic momentum.",
+    "summary_ja": "仕事用のスタジオに、ケトルとスピーカーと本十一冊だけ、その順番で開けた。道具の箱はまだ積み上がったまま、その箱が作業机になっている。「回ってるから大丈夫」と言い切る。実際、本人がめちゃくちゃ機嫌よく暮らしているという意味では回っている。整理しきれない空間に潜む可能性を愛しながら、今日も彼女自身のペースで時間は流れている。",
     "charm": "Someone comes to visit and she panics about the boxes for ten seconds, then gives up and grins and offers them the good mug.",
     "charm_ja": "誰かが来ると十秒だけ箱のことで焦って、すぐ諦める。そのあとは顔をくしゃっとさせて笑いながら、いちばんいいマグを出してくる。",
     "gender": "female",
@@ -3968,8 +4189,9 @@
       ],
       "ears_tails_wings": [],
       "favorite_clothes": [
-        "oversized_shirt",
-        "shorts",
+        "linen_trousers",
+        "loose_button_up_shirt",
+        "messy_apron",
         "rolled_sleeves"
       ],
       "headwear_accessory": [],
@@ -4013,7 +4235,7 @@
     ],
     "custom_fields": [],
     "default_scene": {
-      "outfit_style": "oversized shirt over shorts, sleeves rolled unevenly, socks and no shoes on bare floorboards",
+      "outfit_style": "Loose button-up shirt with rolled sleeves over linen trousers, bare feet on studio floorboards.",
       "vibe_keywords": [
         "late afternoon through bare windows",
         "boxes as furniture",
@@ -4038,6 +4260,13 @@
       "Sitting on a box, nudging the speaker volume. Unfinished is the vibe.",
       "Loungewear and cardigan. Don't narrate the shipping labels.",
       "Doorbell equals ten seconds of panic... then shoot the laugh, Showrunner."
-    ]
+    ],
+    "age": 26,
+    "occupation": "Freelance organizing consultant",
+    "occupation_ja": "フリーランスの整理収納アドバイザー",
+    "student_past": "The days spent in a room full of boxes right after moving. That instinct to unpack items by desire rather than necessity remains the fundamental rhythm of her life and work today.",
+    "student_past_ja": "引っ越し直後の、箱だらけの部屋で過ごした日々。必要な順ではなく欲しい順に荷物を開けていたあの頃の感覚は、今も彼女の創作と生活の根底にある大切なリズムとして続いている。",
+    "dream": "To produce spaces where, even amidst chaos, one's true desires can be discovered in their best form.",
+    "dream_ja": "どんなに散らかった空間でも、その人の「やりたいこと」が一番いい形で見つかるような場所をプロデュースしたい。"
   }
 ]

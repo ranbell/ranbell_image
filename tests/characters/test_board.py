@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 from app.characters.board import (
     _ACTIVE_HINTS,
     _is_a_gaze,
+    _shows_the_legs,
     centre_pose,
     plan_sheet,
     SLOT_SIZE,
@@ -128,8 +129,10 @@ def test_portrait_drops_only_the_wardrobe_that_shows_the_legs():
     half still needs clothes — dropping the wardrobe wholesale came back
     bare-shouldered."""
     positive, _ = _portrait()
-    lower = [t for t in CHARACTER["outfit_tags"]
-             if any(h in t for h in ("skirt", "shoes", "loafers", "socks", "pantyhose"))]
+    # **本体と同じ判定を使う。** 手書きの語リストを持っていたら、みなもが
+    # 制服（pleated_skirt）から大人の服（linen_trousers, work_boots）に
+    # 変わった時点で、下半身の服を「上半身」と数えて落ちた
+    lower = [t for t in CHARACTER["outfit_tags"] if _shows_the_legs(str(t))]
     upper = [t for t in CHARACTER["outfit_tags"] if t not in lower]
     assert lower, "the fixture character should own something below the waist"
     for tag in lower:
