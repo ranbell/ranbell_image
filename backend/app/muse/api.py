@@ -301,7 +301,10 @@ async def approve(session_id: str, request: Request):
 async def finish_session(session_id: str, request: Request):
     session = await _session(request, session_id)
     return await _run(service.finish_session(
-        _db(request), request.app.state.spooler, session, ollama=_llm(request, session)
+        _db(request), request.app.state.spooler, session,
+        ollama=_llm(request, session),
+        # 頼まれごとの回にスナップを一枚焼くので、描画の口も渡す
+        comfy=request.app.state.comfy,
     ))
 
 

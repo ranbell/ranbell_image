@@ -395,3 +395,32 @@ def test_faces_reach_every_speaker():
     # 顔を引いていない子は空のまま（画面側で出し分ける）
     lounge.stamp_faces(rows, {})
     assert rows[0]["face"] == ""
+
+
+def test_the_snapshot_is_not_a_studio_shot():
+    """スナップは**撮影のカットではない**。寄りも決めポーズも作らない。"""
+    got = lounge.snapshot_prompt(
+        [{"subject_tag": "1girl"}] * 3,
+        identity_tags=[["silver_hair"], ["black_hair"], ["brown_hair"]],
+        occasion=lounge.outing_place_en("古本屋"),
+    )
+    assert got.startswith("3girls")            # 人数は cast から derive
+    assert "old bookstore" in got
+    assert "candid photo" in got and "snapshot" in got
+    # スタジオの語彙は入れない
+    for studio in ("cowboy_shot", "close-up", "professional lighting", "posing"):
+        assert studio not in got
+    # 同じタグを二度並べない
+    parts = [p.strip() for p in got.split(",")]
+    assert len(parts) == len(set(parts))
+
+
+def test_every_day_out_has_somewhere_to_photograph():
+    """52件すべてに、画に入れられる場所がある。
+
+    日本語のお題（「古本屋」）はそのままではタグに向かないので、英語の場所を
+    別に持つ。抜けていれば場所を入れないだけだが、**全部埋めておく**。
+    """
+    missing = [n for n, _ in lounge._OUTINGS if not lounge.outing_place_en(n)]
+    assert not missing, missing
+    assert lounge.outing_place_en("知らないお題") == ""

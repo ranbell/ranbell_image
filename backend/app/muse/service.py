@@ -6629,7 +6629,7 @@ def _has_shot(session: dict[str, Any]) -> bool:
 
 
 async def finish_session(
-    db, spooler, session: dict[str, Any], ollama=None
+    db, spooler, session: dict[str, Any], ollama=None, comfy=None
 ) -> dict[str, Any]:
     """Wrap up session, mark as finished, and queue background post-shoot secret diary job.
 
@@ -6756,6 +6756,15 @@ async def finish_session(
                     character_id=cid,
                     model=model,
                     num_ctx=num_ctx,
+                    # 頼まれごとの回に一枚焼くので、**引き金になったこの撮影の
+                    # ワークフローと画の設定**を持たせる（総監督の指定）。
+                    spooler=spooler,
+                    comfy=comfy,
+                    workflow=str(_inputs(session).get("workflow") or ""),
+                    shot={k: _inputs(session).get(k) for k in (
+                        "width", "height", "final_steps", "final_cfg",
+                        "negative_prompt",
+                    )},
                 )
             # Pitch / habit are independent of share succeeding — queue them
             # for the lead only so a failed wrap post does not silence ideas.
@@ -7531,6 +7540,7 @@ async def _outing_is_due(db, character_id: str) -> bool:
 async def run_generate_outing_job(
     reporter, cancel, *, db, ollama, character_id: str,
     model: str = "", num_ctx: int | None = None,
+    spooler=None, comfy=None, workflow: str = "", shot: dict[str, Any] | None = None,
 ):
     """A day off with the friends she is closest to, written for the feed.
 
@@ -7676,8 +7686,83 @@ async def run_generate_outing_job(
         "created_at": time.time(),
     }
     await lounge_db.save_thread(db, thread)
+
+    # **頼まれごとの回だけ、一枚焼く。**
+    #
+    # 総監督から「友達とスナップ撮ってきて」と頼まれた日。撮影のカットでは
+    # ないので、寄りも決めポーズも作らない —— 友達が撮った一枚に見えればいい。
+    #
+    # 画のワークフローは**引き金になったセッションのもの**を使う（総監督の
+    # 指定）。描画は必ず `JobLane.GENERATION` を通す —— スケジューラの外で
+    # 描くと、カードが埋まっている最中に載って落ちる。
+    if errand and spooler is not None and comfy is not None and workflow:
+        try:
+            await _spool_outing_snapshot(
+                db, spooler, comfy, thread, cast,
+                workflow=workflow, occasion=occasion, shot=shot or {},
+            )
+        except Exception:
+            logger.warning("[muse] the outing snapshot could not be queued",
+                           exc_info=True)
+
     _report(reporter, 1.0, "お出かけの話を書きました")
     return {"status": "ok", "thread_id": thread["id"]}
+
+
+async def _spool_outing_snapshot(
+    db, spooler, comfy, thread: dict[str, Any], cast: list[dict[str, Any]],
+    *, workflow: str, occasion: str, shot: dict[str, Any],
+) -> None:
+    """その日のスナップを一枚。**焼けたらスレッドに貼る。**
+
+    セッションを持たないので、キャラのボードと同じ道
+    （`jobs.render.run_render`）を使う。**新しい描画経路は作らない。**
+    """
+    from ..jobs.render import run_render
+
+    members, tags = [], []
+    for c in cast:
+        preset = await presets_db.get_preset(db, str(c.get("character_id") or ""))
+        if not preset:
+            continue
+        char = presets_db.preset_to_character(preset)
+        members.append({"subject_tag": preset.get("subject_tag") or "1girl"})
+        tags.append([str(t) for t in (char.get("identity_tags") or [])])
+    if not members:
+        return
+
+    positive = lounge_mod.snapshot_prompt(
+        members, identity_tags=tags,
+        occasion=lounge_mod.outing_place_en(occasion),
+    )
+    thread_id = str(thread.get("id") or "")
+
+    async def _attach(sha256: str, _meta: dict) -> None:
+        row = await lounge_db.get_thread(db, thread_id)
+        if row is None:
+            return
+        row["image_id"] = sha256
+        await lounge_db.save_thread(db, row)
+
+    spooler.submit(
+        JobLane.GENERATION,
+        "outing_snapshot",
+        run_render,
+        meta={"thread_id": thread_id},
+        db=db, comfy=comfy,
+        workflow_name=workflow,
+        positive=positive,
+        negative=str(shot.get("negative_prompt") or ""),
+        width=int(shot.get("width") or 0) or None,
+        height=int(shot.get("height") or 0) or None,
+        steps=int(shot.get("final_steps") or 0) or None,
+        cfg=float(shot.get("final_cfg") or 0) or None,
+        prefix="outing_snap",
+        method="outing_snapshot",
+        payload_extra={"thread_id": thread_id, "kind": "outing"},
+        attach=_attach,
+    )
+    logger.info("[muse] an outing snapshot is queued for %s", thread_id)
 
 
 async def run_generate_lounge_reactions_job(

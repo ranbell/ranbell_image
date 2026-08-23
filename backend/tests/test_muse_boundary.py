@@ -806,3 +806,36 @@ def test_a_stray_script_is_seen_but_prose_is_never_repaired():
     ask = muse_service._DIARY_ASK_STRAY.format(stray="니까")
     assert "니까" in ask
     assert "読み取れませんでした" not in ask
+
+
+def test_the_outing_snapshot_goes_through_the_scheduler():
+    """スナップも**必ずジョブスケジューラを通す**。
+
+    スケジューラの外で描くと、カードが埋まっている最中に載って落ちる。
+    ここは絶対 —— 新しい描画経路も作らない（キャラのボードと同じ
+    `jobs.render.run_render` を使う）。
+    """
+    import inspect
+    src = inspect.getsource(muse_service._spool_outing_snapshot)
+    assert "JobLane.GENERATION" in src
+    assert "run_render" in src
+    # ComfyUI を直に叩いていないこと
+    for direct in ("comfy.submit", "comfy.queue", "await comfy(", "httpx"):
+        assert direct not in src, direct
+    # 引き金セッションのワークフローを使う（総監督の指定）
+    assert "workflow_name=workflow" in src
+
+
+def test_the_snapshot_only_happens_on_an_errand():
+    """頼まれごとの回だけ焼く。**毎回だと意味が反転する。**
+
+    お出かけは「総監督が居なかった時間」を作るための機能。毎回が頼まれごとに
+    なると、彼女たちの休みの日まで総監督のものになる。
+    """
+    import inspect
+    src = inspect.getsource(muse_service.run_generate_outing_job)
+    at = src.index("_spool_outing_snapshot")
+    guard = src[src.rindex("if ", 0, at):at]
+    assert "errand" in guard
+    # 道具が無い環境（試験や、描画の口が閉じている時）では静かに飛ばす
+    assert "spooler is not None" in guard and "comfy is not None" in guard

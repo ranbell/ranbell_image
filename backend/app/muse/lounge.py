@@ -89,6 +89,69 @@ _OUTINGS = (
 )
 
 
+#: お題 → 画のための場所（英語）。**日本語のお題はタグに向かない。**
+#: 抜けていれば場所を入れないだけ —— 三人が写っていれば写真にはなる。
+_OUTING_PLACE = {
+    'パンケーキ': 'cafe',
+    'ごはん': 'ramen shop',
+    '買い物': 'clothing store',
+    '遊園地': 'amusement park',
+    '旅行': 'hot spring inn',
+    '散歩': 'street',
+    '映画': 'movie theater',
+    '水族館': 'aquarium',
+    '勉強': 'cafe table',
+    '猫': 'alley',
+    '花火': 'summer festival',
+    'だらだら': 'bedroom',
+    '動物園': 'zoo',
+    '温室': 'greenhouse',
+    '古本屋': 'old bookstore',
+    '神社': 'shrine stairs',
+    '海': 'shoreline',
+    '河川敷': 'riverbank',
+    '展望台': 'observation deck',
+    '図書館': 'library',
+    '銭湯': 'bathhouse entrance',
+    '陶芸': 'pottery studio',
+    'ボウリング': 'bowling alley',
+    'カラオケ': 'karaoke room',
+    'ゲームセンター': 'arcade',
+    'プラネタリウム': 'planetarium',
+    '美術館': 'art museum',
+    '写真展': 'gallery',
+    '食べ歩き': 'shopping street',
+    'コンビニ': 'convenience store',
+    '朝ごはん': 'morning diner',
+    '朝市': 'morning market',
+    '夜のドライブ': 'car at night',
+    '隣の県': 'bus stop',
+    '誰かの実家': 'living room',
+    'ホームセンター': 'hardware store',
+    '百円ショップ': 'variety store',
+    '家具屋': 'furniture store',
+    '文房具屋': 'stationery shop',
+    'レコード屋': 'record shop',
+    '楽器屋': 'music store',
+    '風の強い日': 'windy street',
+    '花見': 'cherry blossoms',
+    '紅葉': 'autumn leaves',
+    '初詣': 'shrine',
+    '雪': 'snowy street',
+    '台風': 'window rain',
+    '停電': 'dark room candle',
+    '寄り道': 'evening street',
+    '病み上がり': 'quiet neighborhood',
+    '誕生日': 'cafe table',
+    '引っ越しの手伝い': 'cardboard boxes',
+}
+
+
+def outing_place_en(occasion: str) -> str:
+    """お題に対応する、画に入れられる場所。無ければ ""。"""
+    return _OUTING_PLACE.get(str(occasion or "").strip(), "")
+
+
 def _assert_ja(rows: tuple[tuple[str, str], ...]) -> None:
     """候補に日本語以外が紛れていないか。**自分で踏んだので、置いておく。**"""
     from .diary import stray_script
@@ -183,6 +246,39 @@ def normalize_outing(
             "reaction": (parsed.get(f"TURN_{i}_REACTION") or "").strip()[:8],
         })
     return out
+
+
+#: スナップの画。**撮影のカットではない**ので、寄りも決めポーズも作らない。
+#: 友達が撮った一枚に見えるだけの語で足りる。
+_SNAP_LOOK = (
+    "candid photo, snapshot, casual, standing together, looking at viewer, "
+    "natural light, slight motion blur, amateur photography, outdoors"
+)
+
+
+def snapshot_prompt(
+    cast: list[dict[str, Any]], *, identity_tags: list[list[str]],
+    occasion: str = "",
+) -> str:
+    """友達同士で撮った一枚。**その日の行き先が背景になる。**
+
+    撮影のプロンプトとは別物 —— スタジオの語彙（衣装指定、決めポーズ、
+    ライティング）は入れない。休みの日にスマホで撮った写真に見えればいい。
+    """
+    from . import identity as identity_mod
+    parts: list[str] = list(identity_mod.subject_tags(cast))
+    for tags in identity_tags:
+        parts += [t for t in tags if t]
+    if occasion:
+        parts.append(occasion)
+    parts.append(_SNAP_LOOK)
+    seen: dict[str, None] = {}
+    for t in parts:
+        for one in str(t).split(","):
+            one = one.strip()
+            if one:
+                seen.setdefault(one, None)
+    return ", ".join(seen)
 
 
 def stamp_faces(rows: list[dict[str, Any]], faces: dict[str, str]) -> None:
