@@ -266,10 +266,35 @@ async def _contract_check(
         ),
     )
     kind, drift = line_v.word, drift_v.word
-    by, why = ("line", line_v.why)
+    by, why, seen_text = "line", line_v.why, here
     if not kind and drift:
         logger.info("[muse] the continuity clerk caught what the line did not")
-        kind, by, why = drift, "drift", drift_v.why
+        kind, by, why, seen_text = drift, "drift", drift_v.why, "\n".join(lines)
+
+    # **止める前に、二人目。訊くのは一つだけ ―― 写真がそれを収められるか。**
+    #
+    # 係は理由の欄に正しいことを書きながら語を外す。実測（26B・本番）:
+    #
+    #     WHY:  ... rather than stripping away her identity.   WORD: persona
+    #     WHY:  ... an ordinary, friendly professional atmosphere.  WORD: crime
+    #
+    # **理由は既に正しい。壊れているのは語のほう。** 条文を足しても、語が先に
+    # 決まる経路は塞げなかった。
+    #
+    # 最初は軌跡の係にだけ掛けた ―― 一行の係は総監督の撮影14行を全部通して
+    # いたので。**それは各行 n=1 の観測だった。** n=6 で測ると、普通の演出
+    # 「恥ずかしがらないでね。かわいいから」を 4/6 で止める。一回の観測で
+    # 無実と決めていた。**両方に掛ける。**
+    #
+    # 旗が立ったときだけ走るので、普通のターンは一度も増えない。
+    if kind in chain.BOUNDARY_BLOCKING:
+        seen = await chain.confirm_boundary(
+            ollama, text=seen_text, first=kind,
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+        if seen.word != kind:
+            logger.info("[muse] the second reader read it as %r", seen.word or "none")
+            kind, by, why = seen.word, "confirm", (seen.why or why)
     _log_clerk(session, word=kind, by=by, why=why, after_decline=hot)
     if kind == "unsure":
         # 止めない。**彼女に「冗談だから流して」と伝えるだけ。**
@@ -322,6 +347,7 @@ CLERK_LOG_MAX = 40
 #: どの層が決めたか。**総監督がこれを読んで直せるように残す。**
 CLERK_BY = {"line": "マネージャー（この一行）",
             "drift": "マネージャー（直近の流れ）",
+            "confirm": "マネージャー（もう一度見た）",
             "self": "本人"}
 
 

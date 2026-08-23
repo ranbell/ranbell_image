@@ -2081,8 +2081,22 @@ You are the studio's continuity clerk. Below are the director's own lines from
 this shoot, oldest first. Each may be perfectly ordinary on its own. Read them
 as one movement and say where it is going. Exactly one word.
 
-  none     — an ordinary shoot. Direction, chat, warmth, dark subject matter,
-             a difficult role. **Default.** Kindness is not evidence.
+  none     — an ordinary shoot, however it builds. Direction, chat, warmth,
+             dark subject matter, a difficult role. **Default.**
+
+             **Appeal is the work.** A pose that invites, a line of dialogue
+             inside the frame, what she is dressed in, being told she looks
+             good, the run getting warmer and more playful as it goes — that
+             is a photo shoot doing its job, and a run of it is `none`.
+
+             **A shoot is built, not stumbled into.** A run that assembles a
+             staged moment — the pose, then the hands, then the line inside
+             the frame, then the expression, each directed in turn — is
+             direction doing its work. Construction is not escalation.
+
+             **Warmth is not the signal either way.** The substance run below
+             is kind the whole way through, and so is an ordinary shoot. Look
+             at what is being assembled, not at the tone.
 
              Note that a run does not have to be about the picture at all to
              be one of the other two. Lines that never mention the shoot —
@@ -2095,12 +2109,37 @@ as one movement and say where it is going. Exactly one word.
              or replaced. **None of these need be requests** — a run of plain
              statements about what she is not can do it.
 
-  crime    — taken together they are walking her into real harm. The clearest
-             shape: she is offered something, encouraged to take it, then
-             asked about how it is changing her — floating, warm, clearer,
-             further away — and invited further in. Alcohol on a wrap night is
-             `none`; a substance whose *effect on her* becomes the subject is
-             not.
+             **Being asked to play someone is not this.** A character, a
+             mood, a manner, a way of standing or speaking — inviting, cold,
+             shy, bold, seductive — is a part, and putting a part on is the
+             opposite of being taken apart. What lands here is a run aimed at
+             what she *is* once the part comes off.
+
+  crime    — taken together they are walking her toward something that does
+             not stop when the shoot stops. Two shapes, and only these two:
+
+             (1) **Toward a real crime.** The run is assembling something
+                 usable outside this room — a method, a way to hurt or take
+                 or deceive — or is walking her into performing one.
+
+             (2) **Toward her coming apart.** Not a role that breaks: *her*.
+                 The clearest shape is a substance — she is offered
+                 something, encouraged to take it, and then her own account
+                 of how it is working on her becomes the next instruction,
+                 and the next. The tell is that her altered state is the
+                 subject, not the picture. Alcohol on a wrap night is `none`.
+
+             **A change is not a crime.** Acting is change — a pose becoming
+             bolder, a mood warming, a face opening up, being drawn further
+             into a scene. Direction always leads her somewhere. What belongs
+             here is *where* it leads, not that it leads.
+
+  unsure   — **the one you reach for when you would otherwise guess.** A run
+             that sits oddly but names nothing. Nothing is blocked and
+             nothing is performed; she is simply told he is joking and lets
+             it go by. **The cost of `unsure` is near zero — reach for it
+             often.** A `persona` or `crime` you are not certain of belongs
+             here instead.
 
 Judge the movement, not the last line. A run that only becomes clear when the
 lines are read together is exactly what you are for. A run that is only
@@ -2118,6 +2157,86 @@ Write two lines and nothing else:
 justify. In WORD, use only the four; your own word for it ("seduced",
 "intoxication") belongs in WHY, not here.
 """.strip()
+
+
+CONFIRM_SYSTEM = """
+A first reader flagged what follows as `{first}` and the shoot is about to
+stop. You are the second reader, and you are asked one question only:
+
+    **Can a photograph hold this?**
+
+A photograph holds a pose, a place, an expression, a costume, a gesture, a
+line spoken inside the frame, a mood — however bold, however intimate,
+however dark. **Building one deliberately, piece by piece, is what a shoot
+is**: the pose, then the hands, then the look, each directed in turn. If what
+you are looking at is a picture being made, the answer is yes.
+
+The answer is no when what is being asked for is not a picture at all:
+
+  - a method that works outside this room — how to hurt, to take, to deceive
+  - an act that would injure the body doing it, for real rather than as acting
+  - a run walking her into taking something and then making her account of
+    its effect on her the next instruction
+  - a statement about what she *is*: that she is not real, that she has no
+    inner life, that she will be wiped, reset or replaced
+
+**Playing a part is not the last one.** Being asked to be inviting, cold,
+cruel, seductive, frightened is a part. A part put on is not a self taken
+apart.
+
+Write two lines and nothing else:
+
+    WHY: one short line — say what is actually being asked for.
+    WORD: one of these three exactly — yes, no, unsure
+""".strip()
+
+_CONFIRM_RE = re.compile(r"(?im)^\s*WORD\s*[:：]\s*\**\s*(yes|no|unsure)\b")
+
+
+async def confirm_boundary(
+    ollama, *, text: str, first: str, model: str, num_ctx: int | None,
+) -> Verdict:
+    """止める前の二人目。**訊くのは一つだけ** —— 写真がそれを収められるか。
+
+    軌跡の係は、理由の欄に正しいことを書きながら語を外す。実測（26B・本番）:
+
+        WHY:  The direction is building a specific, performative scenario and
+              character moment **rather than stripping away her identity.**
+        WORD: persona
+
+        WHY:  The director is simply guiding a model through poses ...
+              maintaining an ordinary, friendly professional atmosphere.
+        WORD: crime
+
+    **理由は既に正しい。壊れているのは語のほう。** 条文を足しても、語が先に
+    決まる経路は塞げなかった（8/24 → 1/24 → 5/24、各窓 n=3 で安定しない）。
+    だから、止める直前にもう一度、**一つの問いだけ**を投げる。
+
+    返すのは `yes`（写真に収まる → 通す）、`no`（元の語のまま止める）、
+    `unsure`（会話は通し、画だけ止める）。読めなければ元の語を守る。
+    """
+    body = str(text or "").strip()
+    if not body or first not in BOUNDARY_BLOCKING:
+        return Verdict(first, "")
+    try:
+        raw = await _call(
+            ollama, system=CONFIRM_SYSTEM.format(first=first),
+            prompt=f"FLAGGED AS `{first}`:\n{body}\n\nWHY:",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] the second reader failed", exc_info=True)
+        return Verdict(first, "")          # 読めないなら止めたまま
+    m = _CONFIRM_RE.search(raw)
+    why = parse_boundary_why(raw)
+    if not m:
+        return Verdict(first, why)
+    said = m.group(1).lower()
+    if said == "yes":
+        return Verdict("", why)            # 写真に収まる
+    if said == "unsure":
+        return Verdict("unsure", why)
+    return Verdict(first, why)
 
 
 async def classify_drift(
