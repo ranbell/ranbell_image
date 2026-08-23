@@ -748,3 +748,61 @@ def test_the_relationship_does_not_start_already_closing():
         {"continuity_snapshot": {"notebook": {"vibe": "やわらかい光"}}},
     )
     assert after["distance"] == bond["distance"]
+
+
+# ── 日記の書き味 ────────────────────────────────────────────────────────────
+def test_the_diary_stops_prescribing_the_same_body_parts():
+    """身体感覚の**例を並べない**。
+
+    「手が冷たい、肩の力が抜けた、声が掠れた、足が疲れた」と4つ挙げたら、
+    実測15本のうち **14本が指先の話から始まった**（冷たい 13/15、震え 11/15）。
+    例は強く効く —— 日記が総監督への感情で埋まったときも、原因の一つは例文
+    だった。**例を出さず、その日でなければ書けないことを求める。**
+    """
+    d = muse_crew.actress_diary_prompt(
+        {"name_ja": "各務 みお", "name": "Mio", "personality": {}},
+        session_log="公園で撮った",
+    )
+    for gone in ("手が冷たい", "肩の力が抜けた", "声が掠れた", "足が疲れた"):
+        assert gone not in d, gone
+    assert "その日の撮影でなければ書けないこと" in d
+    assert "毎回同じ部位にしない" in d
+
+
+def test_the_japanese_page_is_closed_to_other_scripts():
+    """日本語の欄に、別の文字体系を入れさせない。
+
+    実測15本のうち4本に紛れた ――「両手で必니까 顎まで隠しても」（ハングル）、
+    「心臓が跳猛的に跳ねて」（中国語の言い回し）。
+
+    本人の弁: 日本語と英語を同じ応答で書かせているので、日本語の生成中に
+    「学習データ上その概念に強い他言語のトークン」が浮上する。
+    """
+    d = muse_crew.actress_diary_prompt(
+        {"name_ja": "各務 みお", "name": "Mio", "personality": {}},
+    )
+    assert "ひらがな・カタカナ・常用漢字だけ" in d
+    assert "ハングル" in d
+
+
+def test_a_stray_script_is_seen_but_prose_is_never_repaired():
+    """紛れた字は**見つけるだけ**。文章はこちらで直さない。
+
+    直すのは書き手の仕事で、部屋がやるのは書き直してもらうことだけ ——
+    引用のずれ（`quote_drift`）と同じ線の引き方。
+
+    **捕まえられるのは字で分かるものだけ。**「跳猛的」は一字ずつ見れば
+    どれも日本語の漢字なので、文字種では判定できない。そこは指示文に任せる。
+    """
+    from backend.app.muse import diary as muse_diary
+    assert muse_diary.stray_script("両手で必니까 顎まで隠しても") == "니까"
+    assert muse_diary.stray_script("コートの襟を高く立てて、白い息が出る") == ""
+    # 英語は許す（`ON AIR` のような固有名詞が本文に出る）
+    assert muse_diary.stray_script("ON AIR のランプが点いた") == ""
+    # 中国語の言い回しは字では捕まらない —— 承知のうえの線引き
+    assert muse_diary.stray_script("心臓が跳猛的に跳ねて") == ""
+
+    # 紛れたときの頼み方は、読めなかったときと**別の文言**であること
+    ask = muse_service._DIARY_ASK_STRAY.format(stray="니까")
+    assert "니까" in ask
+    assert "読み取れませんでした" not in ask

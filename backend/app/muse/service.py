@@ -6874,10 +6874,13 @@ async def run_generate_actress_diary_job(
     _report(reporter, 0.2, "日記を書いてもらっています")
 
     fields: dict[str, str] = {}
+    stray_seen = ""
     for attempt, ask in enumerate(_DIARY_ASKS):
         raise_if_cancelled = getattr(cancel, "raise_if_set", None)
         if raise_if_cancelled is not None:
             raise_if_cancelled()
+        if stray_seen:
+            ask = _DIARY_ASK_STRAY.format(stray=stray_seen)
         try:
             raw_resp = await chain._call(
                 ollama, system=system, prompt=ask,
@@ -6892,13 +6895,30 @@ async def run_generate_actress_diary_job(
         fields = diary_mod.normalize(
             diary_mod.parse_diary(raw_resp), fallback_ja="本番撮影の思い出",
         )
-        if fields.get("content_ja"):
+        # **別の文字体系が紛れていたら、書き直してもらう。** 実測（15本）で
+        # 4本に出た。指示文でも欄ごとに言語を閉じたが、本人が「学習データ上
+        # その概念に強い他言語のトークンが浮上する」と言うとおり、指示だけでは
+        # 残る。**最後の一回なら、紛れたまま残す** —— 一字の混入より、日記が
+        # 無いほうが損失が大きい。
+        stray = diary_mod.stray_script(fields.get("content_ja") or "")
+        last = attempt >= len(_DIARY_ASKS) - 1
+        if fields.get("content_ja") and (not stray or last):
+            if stray:
+                logger.warning(
+                    "[muse] a stray script stayed in her diary: %r", stray,
+                )
             break
-        # One retry, with the contract restated. The diary is a background job
-        # on a model that is already resident, so trying twice is cheap — and
-        # what the old code did instead was save the broken response as her
-        # writing, which is how a JSON object ended up on the page.
-        logger.info("[muse] diary output unusable (attempt %d), retrying", attempt + 1)
+        if stray:
+            stray_seen = stray
+            logger.info("[muse] stray script %r (attempt %d), asking again",
+                        stray, attempt + 1)
+        else:
+            # One retry, with the contract restated. The diary is a background
+            # job on a model that is already resident, so trying twice is cheap
+            # — and what the old code did instead was save the broken response
+            # as her writing, which is how a JSON object ended up on the page.
+            logger.info("[muse] diary output unusable (attempt %d), retrying",
+                        attempt + 1)
         _report(reporter, 0.5, "書き直してもらっています")
 
     if not fields.get("content_ja"):
@@ -6974,6 +6994,16 @@ _DIARY_ASKS: tuple[str, ...] = (
     "さっきの出力は読み取れませんでした。もう一度、日記だけを書いてください。"
     "1行目は必ず `SUMMARY_JA: ` で始め、続けて SUMMARY_EN / CONTENT_JA / CONTENT_EN。"
     "JSON にしない。コードフェンスも使わない。",
+)
+
+#: 文字体系が紛れたときの頼み方。**用件が違うので、言い方も変える。**
+#: 「読み取れませんでした」と言われても、書き手には何を直せばいいか分からない。
+_DIARY_ASK_STRAY = (
+    "さっきの日記に、日本語ではない文字が混ざっていました（{stray}）。"
+    "同じ日記をもう一度書いてください。**`SUMMARY_JA` と `CONTENT_JA` は、"
+    "ひらがな・カタカナ・常用漢字だけ**で書くこと。ハングルや、中国語だけの"
+    "漢字を一字も混ぜないでください。英語は `*_EN` の欄にだけ書きます。"
+    "見出しは SUMMARY_JA / SUMMARY_EN / CONTENT_JA / CONTENT_EN の4つだけ。"
 )
 
 
