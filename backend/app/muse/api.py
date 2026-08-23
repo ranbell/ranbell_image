@@ -437,4 +437,16 @@ async def lounge_summary(request: Request, since: float = 0.0):
 async def handpost_list(request: Request, pinned_only: bool = False):
     """Read-only list. Pages are written by habit jobs — not by the showrunner."""
     from . import handpost_db
-    return {"pages": await handpost_db.list_pages(_db(request), pinned_only=pinned_only)}
+    pages = await handpost_db.list_pages(_db(request), pinned_only=pinned_only)
+    # **既に保存された頁も、ここで切る。** 書く側は直したが、壊れたまま
+    # 残っている頁は新しいものが来るまで表示され続ける（実測 4頁中2頁）。
+    # 保存し直しはしない —— 読むたびに整えるだけで足りる。
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        ja, spilled = lounge.split_trailing_english(page.get("body_ja") or "")
+        if spilled:
+            page["body_ja"] = ja
+            if not str(page.get("body_en") or "").strip() or                     "English" in str(page.get("body_en") or ""):
+                page["body_en"] = spilled
+    return {"pages": pages}

@@ -424,3 +424,76 @@ def test_every_day_out_has_somewhere_to_photograph():
     missing = [n for n, _ in lounge._OUTINGS if not lounge.outing_place_en(n)]
     assert not missing, missing
     assert lounge.outing_place_en("知らないお題") == ""
+
+
+# ── 手帖に英語が漏れる ──────────────────────────────────────────────────────
+def test_the_english_half_does_not_land_in_the_japanese_page():
+    """出力例の値を真似た行が、日本語の本文に流れ込んでいた。
+
+    本番の手帖 4頁中2頁（総監督が UI で発見）:
+
+        body_ja: 監督は雨の後の静けさ……こだわりますね。
+                 English body: The Director loves the stillness after the rain…
+
+    指示の最終行が `BODY_EN: English body` で、**モデルが値ごと真似た**。
+    `_LABEL_RE` は大文字の語しかラベルと見ないので `English body:` は境界に
+    ならず、直前の `BODY_JA` に落ちた。そのうえ `BODY_EN` が空のままなので
+    「英語が無ければ日本語で埋める」が働き、**両方の欄が同じ塊**になった。
+    """
+    raw = (
+        "TITLE_JA: 雨上がりの、少し寂しい空気感\n"
+        "TITLE_EN: The Quiet Air After Rain\n"
+        "BODY_JA: 監督は雨の後の静けさにこだわりますね。\n"
+        "English body: The Director loves the stillness after the rain."
+    )
+    got = lounge.normalize_habit(lounge.parse_labelled(raw))
+    assert "English" not in got["body_ja"]
+    assert got["body_ja"] == "監督は雨の後の静けさにこだわりますね。"
+    # こぼれた英語は捨てずに、空だった英語の欄へ回す
+    assert got["body_en"].startswith("The Director loves")
+
+
+def test_a_healthy_page_is_left_alone():
+    """壊れていない出力は触らない。"""
+    raw = ("TITLE_JA: ページの中の静寂\nTITLE_EN: Silence in the Pages\n"
+           "BODY_JA: 密やかな暗がりを好むようです。\n"
+           "BODY_EN: The Director favors shadowed moments.")
+    got = lounge.normalize_habit(lounge.parse_labelled(raw))
+    assert got["body_ja"] == "密やかな暗がりを好むようです。"
+    assert got["body_en"] == "The Director favors shadowed moments."
+
+
+def test_the_word_english_in_prose_is_not_a_boundary():
+    """本文に `English` と出てきても、ラベルの形でなければ切らない。"""
+    got = lounge.normalize_habit({"BODY_JA": "English の教科書の話をしていた。"})
+    assert got["body_ja"] == "English の教科書の話をしていた。"
+    ja, spilled = lounge.split_trailing_english("英語版はありません。")
+    assert ja == "英語版はありません。" and spilled == ""
+
+
+def test_the_output_contract_does_not_show_an_english_value():
+    """**例の値を英語で書かない。** 書くと、その値ごと真似られる。
+
+    日記の身体感覚（指先 14/15）でも、`MY_FEEL` の語彙リスト（W撮り 0/10）でも
+    同じことが起きた。**例は「こう書け」ではなく「これを書け」として効く。**
+    """
+    from backend.app.muse import crew as muse_crew
+    got = muse_crew.showrunner_habit_prompt(
+        notes="夕方の公園で撮ろう", muse_name="各務 みお",
+    )
+    assert "BODY_EN: English body" not in got
+    assert "同じ本文を英語で" in got
+
+
+def test_pages_already_saved_are_cleaned_when_read():
+    """既に保存されている頁も、読むときに整える。
+
+    書く側を直しても、**壊れたまま残っている頁は新しいものが来るまで
+    表示され続ける**（総監督が見たのは 4頁中2頁）。保存し直しはしない ——
+    読むたびに切るだけで足りる。
+    """
+    import inspect
+    from backend.app.muse import api as muse_api
+    src = inspect.getsource(muse_api.handpost_list)
+    assert "split_trailing_english" in src
+    assert "body_ja" in src and "body_en" in src

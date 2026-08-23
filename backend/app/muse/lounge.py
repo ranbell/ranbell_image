@@ -405,11 +405,34 @@ def normalize_pitch(parsed: dict[str, str], *, fallback_ja: str = "") -> dict[st
     return {"text_ja": text_ja, "text_en": text_en}
 
 
+#: 本文の途中から生えた「英語版」を切る。**知らないラベルも境界として扱う。**
+#:
+#: モデルが出力例の値（`English body`）を真似て `English body: ...` と書き、
+#: `_LABEL_RE`（大文字の語しか見ない）を通り抜けて日本語の本文に流れ込んだ。
+#: 実測 4頁中2頁。今週これで四度目の同じ形なので、読む側でも受け止める。
+_TRAILING_EN_RE = re.compile(
+    r"(?im)^[ \t]*(english[ _]?(body|version|text)?|en)[ \t]*[:：][ \t]*",
+)
+
+
+def split_trailing_english(text: str) -> tuple[str, str]:
+    """`(日本語, こぼれた英語)`。境界が無ければ英語側は ""。"""
+    m = _TRAILING_EN_RE.search(str(text or ""))
+    if not m:
+        return str(text or "").strip(), ""
+    return text[:m.start()].strip(), text[m.end():].strip()
+
+
 def normalize_habit(parsed: dict[str, str]) -> dict[str, str]:
-    title = (parsed.get("TITLE_JA") or parsed.get("TITLE") or "").strip()
-    title_en = (parsed.get("TITLE_EN") or title).strip()
-    body_ja = (parsed.get("BODY_JA") or parsed.get("TEXT_JA") or "").strip()
-    body_en = (parsed.get("BODY_EN") or parsed.get("TEXT_EN") or "").strip()
+    # **先に切る。** 英語の欄が空のときは日本語で埋める作りなので、切る前に
+    # 埋めると、こぼれた英語を含んだ塊が両方の欄に入る（実測でそうなった）。
+    title, spilled_title = split_trailing_english(
+        parsed.get("TITLE_JA") or parsed.get("TITLE") or "")
+    body_ja, spilled_body = split_trailing_english(
+        parsed.get("BODY_JA") or parsed.get("TEXT_JA") or "")
+    title_en = (parsed.get("TITLE_EN") or spilled_title or title).strip()
+    body_en = (parsed.get("BODY_EN") or parsed.get("TEXT_EN")
+               or spilled_body or "").strip()
     if not body_en and body_ja:
         body_en = body_ja
     if not title and body_ja:
