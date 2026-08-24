@@ -862,7 +862,7 @@ def test_each_muse_wears_only_her_own_side_of_the_notebook():
         "wearing": "professional blouse, knit cardigan",
         "wearing_b": "linen apron, dark denim shirt",
     })
-    mine, hers = service._worn_sides(
+    mine, hers = service._sides(
         session,
         "2girls, professional_blouse, knit_cardigan, linen_apron, "
         "dark_denim_shirt, indoors, window_light",
@@ -884,7 +884,7 @@ def test_a_garment_they_both_wear_belongs_to_neither_line():
         "wearing": "linen apron, knit cardigan",
         "wearing_b": "linen apron, dark denim shirt",
     })
-    mine, hers = service._worn_sides(
+    mine, hers = service._sides(
         session, "2girls, linen_apron, knit_cardigan, dark_denim_shirt",
     )
     assert "linen_apron" not in mine + hers
@@ -898,4 +898,82 @@ def test_a_solo_shoot_never_splits_a_wardrobe():
         "notebook": notebook.blank(), "craft": {}, "character": {},
     }
     notebook.apply_patch(notebook.of(session), {"wearing": "sailor uniform"})
-    assert service._worn_sides(session, "1girl, sailor_uniform") == []
+    assert service._sides(session, "1girl, sailor_uniform") == []
+
+
+def _w_session(**over) -> dict:
+    session = {
+        "mode": "", "session_id": "s-sides", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(partner=True), "craft": {},
+        "character": {"name": "Mio Kagami"},
+        "partner_character": {"name": "Sumire Hiraoka"},
+    }
+    session.update(over)
+    return session
+
+
+def test_the_weave_own_split_is_what_places_a_tag():
+    """weave は誰のものか書いている。手帖の語照合より、そちらが先。"""
+    session = _w_session(craft={
+        "tags_a": "blue_dress, sitting, hands_on_chest",
+        "tags_b": "black_dress, standing, behind_another",
+    })
+    mine, hers = service._sides(
+        session,
+        "2girls, blue_dress, sitting, hands_on_chest, black_dress, standing, "
+        "behind_another, harbor",
+    )
+    assert mine == ["blue_dress", "sitting", "hands_on_chest"]
+    assert hers == ["black_dress", "standing", "behind_another"]
+
+
+def test_a_tag_in_both_bags_belongs_to_the_picture():
+    session = _w_session(craft={
+        "tags_a": "blue_dress, smiling", "tags_b": "black_dress, smiling",
+    })
+    mine, hers = service._sides(session, "blue_dress, black_dress, smiling")
+    assert "smiling" not in mine + hers
+    assert mine == ["blue_dress"] and hers == ["black_dress"]
+
+
+def test_an_unsplit_weave_falls_back_to_the_two_wardrobes():
+    session = _w_session(craft={"tags_a": "", "tags_b": ""})
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "professional blouse", "wearing_b": "linen apron",
+    })
+    mine, hers = service._sides(
+        session, "professional_blouse, linen_apron, indoors",
+    )
+    assert mine == ["professional_blouse"]
+    assert hers == ["linen_apron"]
+
+
+def test_one_garment_under_three_names_is_cut_back_to_one():
+    """実測（2026-08-25）: gown / blue_dress / sleeveless_dress が同時に並んだ。"""
+    session = _w_session()
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "blue sleeveless gown, earrings",
+        "wearing_b": "black cocktail dress",
+    })
+    tags, sides = service._drop_garment_aliases(
+        session,
+        "2girls, gown, blue_dress, sleeveless_dress, earrings, black_dress, sitting",
+        ("gown, blue_dress, sleeveless_dress, earrings, sitting", "black_dress"),
+    )
+    assert "blue_dress" not in tags and "sleeveless_dress" not in tags
+    assert "gown" in tags and "earrings" in tags
+    # すみれの黒は名前が合っているので残る。振り分けからも消えていない。
+    assert "black_dress" in tags and sides[1] == "black_dress"
+
+
+def test_an_unsplit_bag_keeps_a_name_the_other_wardrobe_owns():
+    """どちらの服か決められない回は、消しにいかない。"""
+    session = _w_session()
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "blue sleeveless gown",
+        "wearing_b": "black cocktail dress",
+    })
+    tags, _ = service._drop_garment_aliases(
+        session, "2girls, gown, blue_dress, black_dress", ("", ""),
+    )
+    assert "blue_dress" in tags

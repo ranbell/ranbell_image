@@ -1732,6 +1732,11 @@ THICKEN QUALITY, NOT INVENTORY:
   and let the prose say how it falls. A shot whose LIGHT reads "one lantern,
   everything else dark" must not come back lit like an overcast afternoon.
 - If wearing says "thin cardigan", write cardigan + fabric + folds — not a hat.
+- **ONE NAME PER GARMENT.** Call it what the notebook calls it — the same noun,
+  in the tags AND in the prose, once. A gown stays a gown; writing `gown` in one
+  place and `blue_dress` in another does not describe it twice, it puts two
+  garments in the picture, and with two people in frame the spare one is worn by
+  whoever is nearest. Colour and cut belong on that one noun, not on a second.
 - If beat names a bench, the bench may be tagged. Do not add a vending machine.
 - Do not add clothes, hats, lanterns, animals, or furniture the notebook
   does not name.

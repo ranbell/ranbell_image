@@ -102,22 +102,26 @@ def _identity_tags(session: dict[str, Any]) -> list[str]:
     return tags_a
 
 
-def _worn_sides(session: dict[str, Any], tags: str) -> list[list[str]]:
-    """Which of the woven tags each Muse is actually wearing.
+def _weave_sides(result: dict[str, Any]) -> tuple[str, str]:
+    """The weave's own `tags_a` / `tags_b`, as they came back."""
+    return (
+        str((result or {}).get("tags_a") or ""),
+        str((result or {}).get("tags_b") or ""),
+    )
 
-    The notebook is the only place that knows: WEARING is hers and WEARING_B is
-    the partner's, and they stay apart all the way to the page a person reads.
-    They stopped being apart at the sampler — the weave hands back one bag, and
-    `linen_apron` sitting beside `professional_blouse` says only that both are
-    somewhere in the picture. Which is how the apron ends up on the wrong girl.
+
+def _wardrobe_sides(session: dict[str, Any], tags: str) -> list[list[str]]:
+    """Ownership read out of the notebook's two wardrobes.
+
+    The fallback. WEARING is hers and WEARING_B is the partner's, and they stay
+    apart all the way to the page a person reads — so when the weave did not
+    split its bag (a compile turn, a partner section it left empty), the words
+    in the two wardrobes are still enough to place the clothes.
 
     Read conservatively. A tag is hers only when her wardrobe names it and the
     other's does not: a shirt they both have on, or a tag from the place rather
-    than a person, stays in the frame-wide run where it always was. Nothing is
-    added here and nothing is dropped — tags only move.
+    than a person, stays in the frame-wide run.
     """
-    if not (session.get("partner_character") or {}):
-        return []
     nb = notebook_mod.of(session)
     mine = notebook_mod.wearing_tokens(str(nb.get("wearing") or ""))
     hers = notebook_mod.wearing_tokens(str(nb.get("wearing_b") or ""))
@@ -136,6 +140,35 @@ def _worn_sides(session: dict[str, Any], tags: str) -> list[list[str]]:
         elif b and not a:
             sides[1].append(tag)
     return sides
+
+
+def _sides(session: dict[str, Any], tags: str) -> list[list[str]]:
+    """Which of the woven tags belong to which Muse.
+
+    A flat bag says `blue_dress` and `black_dress` are both somewhere in the
+    picture and never whose is whose, and the sampler hands them out however it
+    likes. Measured on a real W take: one gown arrived under three names and
+    two of them floated free of both girls.
+
+    The weave already answers this — it writes `tags_a` and `tags_b` — so the
+    first source is what it said. The wardrobes are the fallback for turns that
+    came back unsplit. A tag both of them own, or one that belongs to the place
+    rather than a person, stays in the frame-wide run: nothing is added here and
+    nothing is dropped, tags only move.
+    """
+    if not (session.get("partner_character") or {}):
+        return []
+    craft = session.get("craft") or {}
+    bags = [
+        [identity.bare_tag(t) for t in str(craft.get(k) or "").split(",")
+         if identity.bare_tag(t)]
+        for k in ("tags_a", "tags_b")
+    ]
+    if not (bags[0] and bags[1]):
+        return _wardrobe_sides(session, tags)
+    mine, hers = set(bags[0]), set(bags[1])
+    shared = mine & hers
+    return [[t for t in bag if t not in shared] for bag in bags]
 
 
 def _framing(inputs: dict[str, Any]) -> str:
@@ -1650,7 +1683,7 @@ def _reassemble(session: dict[str, Any]) -> None:
             str(craft.get("scene") or ""),
             framing=_shot_framing(session), style=_style(session),
             subject=identity.subject_tags(_cast(session)), cast=_cast(session),
-            worn=_worn_sides(session, str(craft.get("tags") or "")),
+            own=_sides(session, str(craft.get("tags") or "")),
         )
         return
     table = facets.table_of(session) if on_facets(session) else None
@@ -1676,7 +1709,7 @@ def _reassemble(session: dict[str, Any]) -> None:
         str(craft.get("scene") or ""),
         framing=_framing(_inputs(session)), style=_style(session),
         subject=identity.subject_tags(_cast(session)), cast=_cast(session),
-        worn=_worn_sides(session, str(craft.get("tags") or "")),
+        own=_sides(session, str(craft.get("tags") or "")),
     )
 
 
@@ -2411,7 +2444,8 @@ async def start_table(
     sid = session["session_id"]
     session["status"] = "discussing"
     session["chat"] = []
-    session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
+    session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": "",
+                        "tags_a": "", "tags_b": ""}
     session["ledger"] = []
     session["banned"] = []
     session["carried_out"] = []
@@ -3147,10 +3181,68 @@ def _scrub_invented_tags(session: dict[str, Any], tags: str) -> str:
     return ", ".join(kept)
 
 
+def _drop_garment_aliases(
+    session: dict[str, Any], tags: str, sides: tuple[str, str],
+) -> tuple[str, tuple[str, str]]:
+    """One garment, one name — read against the wardrobe that owns it.
+
+    The weave renames what it is given: WEARING said `blue sleeveless gown` and
+    the bag came back carrying `gown`, `blue_dress` and `sleeveless_dress` at
+    once. Three names is three garments to the sampler, and the spare two go to
+    whichever girl is nearest.
+
+    Each wardrobe is read on its own (`notebook.garment_aliases`), because the
+    other Muse's clothes are not renames of hers. On a solo shoot there is one
+    wardrobe and one bag.
+    """
+    nb = notebook_mod.of(session)
+    w_a, w_b = str(nb.get("wearing") or ""), str(nb.get("wearing_b") or "")
+    if not (session.get("partner_character") or {}):
+        gone = notebook_mod.garment_aliases(tags, w_a)
+    elif sides[0] and sides[1]:
+        gone = (
+            notebook_mod.garment_aliases(sides[0], w_a)
+            | notebook_mod.garment_aliases(sides[1], w_b)
+        )
+    else:
+        # 分かれずに戻ってきた回。どちらの服なのか決められないので、
+        # **どちらの手帖も名乗っていない名前だけ**を落とす。すみれの
+        # `black cocktail dress` があるうちは、`blue_dress` は残る —— 誤って
+        # 相方の服を消すより、別名が一つ残るほうがまだ軽い。
+        heads = notebook_mod.wardrobe_heads(w_a) | notebook_mod.wardrobe_heads(w_b)
+        gone = {
+            t for t in (
+                notebook_mod.garment_aliases(tags, w_a)
+                | notebook_mod.garment_aliases(tags, w_b)
+            )
+            if brief_mod.garment_head(t) not in heads
+        }
+    if not gone:
+        return tags, sides
+
+    def _without(bag: str) -> str:
+        return ", ".join(
+            p.strip() for p in str(bag or "").split(",")
+            if p.strip() and identity.bare_tag(p) not in gone
+        )
+
+    logger.info("[muse] one garment under several names: %s", ", ".join(sorted(gone)))
+    return _without(tags), (_without(sides[0]), _without(sides[1]))
+
+
 def _apply_compiled_craft(
     session: dict[str, Any], tags: str, craft_scene: str,
+    *, sides: tuple[str, str] = ("", ""),
 ) -> bool:
-    """Full-replace craft from a scripter compile. Returns False if refused."""
+    """Full-replace craft from a scripter compile. Returns False if refused.
+
+    ``sides`` is the weave's own `tags_a` / `tags_b` — **who each tag is for**,
+    written by the model that wrote the tags. It was being merged into one bag
+    and thrown away one line later, which left the assemble guessing ownership
+    from wardrobe wording. It is kept on craft because craft is the shot every
+    later read (render, report, panel, a re-render from an approved take) works
+    from, and a guess made twice can disagree with itself.
+    """
     tags = _scrub_invented_tags(session, str(tags or "").strip())
     scene = str(craft_scene or "").strip()
     if not tags and not scene:
@@ -3174,18 +3266,20 @@ def _apply_compiled_craft(
     craft = session.setdefault("craft", {})
     before_tags = str(craft.get("tags") or "")
     before_scene = str(craft.get("scene") or "")
+    tags, sides = _drop_garment_aliases(session, tags, sides)
     missing = _missing_wearing_tags(session, tags)
     if missing:
         logger.info("[muse] weave forgot worn garments: %s", ", ".join(missing))
         tags = ", ".join([t for t in tags.split(",") if t.strip()] + missing)
     craft["tags"] = tags
     craft["scene"] = scene
+    craft["tags_a"], craft["tags_b"] = str(sides[0] or ""), str(sides[1] or "")
     craft["pose_intent"] = str((notebook_mod.of(session).get("beat") or ""))[:240]
     craft["prompt"] = identity.assemble_positive(
         _identity_tags(session), tags, scene,
         framing=_shot_framing(session), style=_style(session),
         subject=identity.subject_tags(_cast(session)), cast=_cast(session),
-        worn=_worn_sides(session, tags),
+        own=_sides(session, tags),
     )
     session["craft_dirty"] = identity.craft_is_thin(
         str(craft.get("prompt") or ""), scene,
@@ -3390,7 +3484,16 @@ async def _run_duet_scripter(
         # A notice belongs to one turn. Left standing it would be settled
         # against a later turn's notebook and apologise for the wrong line.
         session.pop("repair_notice", None)
+        # 前のターンの折り込みは、前のターンのもの。compile が上書きする前に
+        # 戻す —— 戻したうえで、この patch が書けば書いたものが残る。
+        let_go = notebook_mod.undo_fold(nb)
+        if let_go:
+            logger.info("[muse] last turn's folded gesture let go: %s",
+                        ", ".join(let_go))
+    fold_before = {k: str(nb.get(k) or "") for k in notebook_mod.FOLD_PATCH_KEYS}
     notebook_mod.apply_patch(nb, patch)
+    if fold:
+        notebook_mod.record_fold(nb, fold_before)
     notebook_moved = int(nb.get("rev") or 0) > rev_before
     picture_keys = (
         "scene", "frame", "wearing", "beat", "wearing_b", "beat_b",
@@ -4993,7 +5096,8 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session["mode"] = "duet"
     session["status"] = "discussing"
     session["chat"] = []
-    session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": ""}
+    session["craft"] = {"prompt": "", "pose_intent": "", "tags": "", "scene": "",
+                        "tags_a": "", "tags_b": ""}
     session["ledger"] = []
     session["banned"] = []
     session["carried_out"] = []
@@ -6195,7 +6299,9 @@ async def weave_craft_if_needed(
                 ollama, session, tags, cfg=cfg, name_a=name_a, name_b=name_b,
                 partner=partner,
             )
-            if _apply_compiled_craft(session, tags, scene_out):
+            if _apply_compiled_craft(
+                session, tags, scene_out, sides=_weave_sides(result),
+            ):
                 session["craft_dirty"] = False
                 weave_ok = True
         if not weave_ok:
@@ -6428,7 +6534,9 @@ async def densify_craft_if_needed(
             densify_ok = False
             # Full compile only — never KEEP prior tags beside a partial densify.
             if result.get("valid") and tags and scene_out:
-                if _apply_compiled_craft(session, tags, scene_out):
+                if _apply_compiled_craft(
+                    session, tags, scene_out, sides=_weave_sides(result),
+                ):
                     session["craft_dirty"] = False
                     densify_ok = True
             if not densify_ok:

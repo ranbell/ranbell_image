@@ -449,7 +449,7 @@ def test_a_garment_lands_on_the_girl_who_is_wearing_it():
     out = _duet_positive(
         [MIO, SUMIRE],
         tags="professional_blouse, linen_apron, indoors, window_light",
-        worn=[["professional_blouse"], ["linen_apron"]],
+        own=[["professional_blouse"], ["linen_apron"]],
     )
     assert "Mio is silver_hair, bob_cut, blue_eyes, flat_chest, slim, professional_blouse," in out
     assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts, linen_apron," in out
@@ -462,7 +462,7 @@ def test_a_garment_lands_on_the_girl_who_is_wearing_it():
 
 def test_a_garment_the_weave_never_wrote_is_not_minted_by_the_split():
     out = _duet_positive(
-        [MIO, SUMIRE], tags="indoors", worn=[["straw_hat"], []],
+        [MIO, SUMIRE], tags="indoors", own=[["straw_hat"], []],
     )
     assert "straw_hat" not in out
 
@@ -471,7 +471,7 @@ def test_the_wardrobe_split_is_ignored_when_the_names_do_not_hold():
     nameless = {"name": "各務 みお", "identity_tags": MIO["identity_tags"]}
     out = _duet_positive(
         [nameless, SUMIRE], tags="professional_blouse, linen_apron",
-        worn=[["professional_blouse"], ["linen_apron"]],
+        own=[["professional_blouse"], ["linen_apron"]],
     )
     assert "\n" not in out
     assert "professional_blouse, linen_apron" in out
@@ -484,3 +484,43 @@ def test_a_quoted_text_tag_reaches_the_sampler_as_written():
         subject=["1girl", "solo"],
     )
     assert 'text "OPEN"' in out
+
+
+# ── 髪型と、髪の様子 ────────────────────────────────────────────────
+def test_every_hair_word_is_either_a_cut_or_a_description():
+    """`axis_hair` に語が増えたら、どちらか名乗るまで試験が落ちる。"""
+    both = identity.HAIR_CUT_TAGS | identity.HAIR_DESCRIPTION_TAGS
+    assert both == identity.HAIR_STYLE_TAGS
+    assert not (identity.HAIR_CUT_TAGS & identity.HAIR_DESCRIPTION_TAGS)
+
+
+def test_hair_moving_in_the_wind_does_not_unseat_a_bob():
+    """実測（2026-08-25）: `floating_hair` が立つとボブが消えていた。"""
+    out = _duet_positive([MIO, SUMIRE], tags="floating_hair, standing")
+    assert "Mio is silver_hair, bob_cut, blue_eyes, flat_chest, slim," in out
+    assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts," in out
+    assert "floating_hair" in out
+
+
+def test_a_cut_asked_of_one_girl_leaves_the_other_hers():
+    out = _duet_positive(
+        [MIO, SUMIRE], tags="ponytail, standing", own=[["ponytail"], []],
+    )
+    assert "Mio is silver_hair, blue_eyes, flat_chest, slim, ponytail," in out
+    assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts," in out
+
+
+def test_a_cut_nobody_owns_still_belongs_to_the_picture():
+    """画全体の側に置かれた髪型は、二人ともに掛かる。"""
+    out = _duet_positive([MIO, SUMIRE], tags="ponytail, standing")
+    assert "bob_cut" not in out
+    assert "long_hair" not in out
+    assert "ponytail" in out
+
+
+def test_a_description_is_not_a_cut_on_a_solo_shoot_either():
+    out = identity.assemble_positive(
+        MIO["identity_tags"], "floating_hair, standing", "A quiet room.",
+        subject=identity.subject_tags([MIO]),
+    )
+    assert "bob_cut" in out and "floating_hair" in out

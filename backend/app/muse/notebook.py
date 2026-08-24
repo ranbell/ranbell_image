@@ -14,6 +14,7 @@ from typing import Any
 # Garment vocabulary has one owner. `brief` imports `identity` and neither
 # imports this module, so the edge is safe.
 from . import brief
+from ..tags import catalog as tag_catalog
 
 SHOT_KEYS = (
     "atmosphere",
@@ -735,6 +736,57 @@ def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = ""
     return ", ".join(kept)
 
 
+def wardrobe_heads(wearing: str) -> set[str]:
+    """The head noun of every item she has on — what her clothes ARE."""
+    return {
+        brief.garment_head(i)
+        for i in re.split(r"[,，、;]", str(wearing or "")) if i.strip()
+    } - {""}
+
+
+def garment_aliases(tags: str, wearing: str) -> set[str]:
+    """Tags that rename a garment her wardrobe has already named.
+
+    One garment under three names, measured on a live W take: WEARING read
+    `blue sleeveless gown` and the woven bag came back with `gown`,
+    `blue_dress` **and** `sleeveless_dress`. To the sampler that is three
+    garments, and with two people in frame the two spare ones land on whoever
+    is nearest — which is how the black dress and the blue one swapped girls.
+
+    A tag is a rename when all three hold: it is clothing, it borrows a word
+    from one of her wardrobe items, and its head noun is not the head noun of
+    anything she has on. `black_dress` beside `black cocktail dress` keeps the
+    head noun and stays. `blue_dress` beside `blue sleeveless gown` does not.
+
+    Scope is one person's wardrobe. Handed both girls' bags at once this would
+    read the other's clothes as her renames.
+    """
+    items = [i.strip() for i in re.split(r"[,，、;]", str(wearing or "")) if i.strip()]
+    if not items:
+        return set()
+    from .identity import bare_tag
+
+    heads = wardrobe_heads(wearing)
+    words: set[str] = set()
+    for item in items:
+        words |= {w for w in re.split(r"[_\s-]+", item.lower()) if w}
+    words -= heads
+    if not words:
+        return set()
+    out: set[str] = set()
+    for part in str(tags or "").split(","):
+        tag = bare_tag(part)
+        # Only clothing is considered, so `blue_sky` beside a blue gown is not
+        # read as her dress under another name.
+        if not tag or tag_catalog.get_tag_axis(tag) != "clothing":
+            continue
+        if brief.garment_head(tag) in heads:
+            continue
+        if {w for w in tag.split("_") if w} & words:
+            out.add(tag)
+    return out
+
+
 def scrub_craft_tags(
     tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
     wearing_b: str = "", beat_b: str = "", frame: str = "",
@@ -828,6 +880,10 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         val = coerce_plain_phrase(raw)
         if val.startswith(("{", "[")):
             continue
+        # 別の欄のラベルが混ざっていたら、そこで切る。`cut_at_label` は下で
+        # 定義している（ラベルの出典 `_label_alternation` の隣に置きたいので）。
+        if val:
+            val = cut_at_label(val)
         if key in ("wearing", "wearing_b") and val:
             # The scripter restates the whole outfit on every change, so a
             # duplicate it inherits is a duplicate it hands back. Tidy here,
@@ -912,6 +968,62 @@ POSE_CARD_KEYS = ("beat", "beat_b")
 FOLD_PATCH_KEYS = ("beat", "beat_b")
 
 
+# 折り込みが何を足したかの控え。SHOT_KEYS ではない —— 画の一部ではなく、
+# 帳簿。`shot_snapshot` にも `render` にも出ない。
+FOLD_UNDO_KEY = "fold_undo"
+
+
+def record_fold(nb: dict[str, Any], before: dict[str, Any]) -> None:
+    """Note what this fold added, so the next turn can let it go."""
+    undo = {}
+    for key in FOLD_PATCH_KEYS:
+        was, now = str(before.get(key) or ""), str(nb.get(key) or "")
+        if was != now:
+            undo[key] = {"before": was, "after": now}
+    if undo:
+        nb[FOLD_UNDO_KEY] = undo
+    else:
+        nb.pop(FOLD_UNDO_KEY, None)
+
+
+def undo_fold(nb: dict[str, Any]) -> list[str]:
+    """Let the last turn's folded gesture go. Returns the fields put back.
+
+    **The way in belonged to her and there was no way out.** A body detail she
+    named — trembling hands, a shoulder turned — is folded into beat so the
+    take right after she says it has her acting in it. That is the point of the
+    fold and it stays. What was missing is the other half: beat records no
+    author, so a gesture she mentioned once weighed the same as a posture the
+    showrunner set, and stayed for the rest of the shoot. Worse, `struck_tokens`
+    drops anything the notebook currently names from the struck list, so the one
+    way to remove a word was disabled by the field that kept producing it.
+    Measured live: a Muse trembled in every frame of a session and no direction
+    could stop her.
+
+    So a fold lasts one turn. If the value is still exactly what the fold left,
+    it goes back to what it was before; if anyone has written over it since —
+    the showrunner, a restate, a later compile — that value is theirs and is
+    left alone. The showrunner's posture survives because it is what the fold
+    was written on top of.
+    """
+    undo = nb.pop(FOLD_UNDO_KEY, None)
+    if not isinstance(undo, dict):
+        return []
+    out: list[str] = []
+    for key in FOLD_PATCH_KEYS:
+        pair = undo.get(key)
+        if not isinstance(pair, dict):
+            continue
+        if str(nb.get(key) or "") != str(pair.get("after") or ""):
+            continue
+        nb[key] = str(pair.get("before") or "")
+        out.append(key)
+    if out:
+        nb["rev"] = int(nb.get("rev") or 0) + 1
+        nb["updated_at"] = time.time()
+    return out
+
+
 def parse_muse_card(card: str) -> dict[str, str]:
     """Muse CARD labelled fields → notebook keys. PLACE/HOUR are scene, skipped."""
     out: dict[str, str] = {}
@@ -954,7 +1066,9 @@ def absorb_muse_card(
     }
     if not patch:
         return {}
+    before = {k: str(nb.get(k) or "") for k in FOLD_PATCH_KEYS}
     apply_patch(nb, patch)
+    record_fold(nb, before)
     return patch
 
 
@@ -1030,6 +1144,35 @@ def _label_alternation() -> str:
 _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*(" + _label_alternation() + r")\s*[:：]\s*(.*)$"
 )
+
+# **ラベルは、行頭でなくても境界。** `_FIELD_RE` は行頭しか見ないので、名前が
+# 一つ前に挟まっただけで境界でなくなる。手帖は自分の頁を `各務 みお WEARING:`
+# と名前を頭に付けて書く（`render`）ので、それが読み返されると後続が丸ごと
+# 直前の欄に積まれた。実測では frame が頁の残り全部を飲んでいた:
+#
+#   frame: medium shot, looking straight into lens 各務 みお WEARING: blue
+#          sleeveless gown, earrings 各務 みお BEAT: sitting, … 平岡 すみれ WEARING_B
+#
+# 大文字だけを見る。手帖が書き出す形がそれで、英語の地の文には出ない綴り。
+_LABEL_RUN_RE = re.compile(r"\b(?:" + _label_alternation() + r")\s*[:：]")
+# 切ったあと末尾に残る名前。欄は短い英語の句（`coerce_plain_phrase`）なので、
+# 末尾の非 ASCII の連なりは名前の残骸とみなしてよい。
+_TRAILING_NAME_RE = re.compile(r"[\s,、，:：]*(?:[^\x00-\x7F]+\s*)+$")
+
+
+def cut_at_label(text: str) -> str:
+    """One field's value, cut where the next field's label begins.
+
+    A value never contains another field. Whatever follows a label belongs to
+    that label, and this is the one place that can say so without knowing which
+    field it is looking at.
+    """
+    body = str(text or "")
+    found = _LABEL_RUN_RE.search(body)
+    if not found:
+        return body.strip()
+    return _TRAILING_NAME_RE.sub("", body[:found.start()]).strip()
+
 
 # 理由は一行。長い説明はノートを汚すだけで、読む側の役に立たない。
 WHY_MAX_CHARS = 180

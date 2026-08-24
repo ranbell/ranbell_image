@@ -450,3 +450,9 @@ def test_the_lettering_rule_carries_no_word_a_shot_could_copy():
     import re
     quoted = re.findall(r'text "([^"]*)"', crew.LETTERING)
     assert quoted == ["<exactly the words they asked for>"], quoted
+
+
+def test_the_weave_is_told_to_call_a_garment_one_name():
+    """gown を dress と言い換えると、二人しかいない画に服が三着になる。"""
+    from app.muse import chain
+    assert "ONE NAME PER GARMENT" in chain.SCRIPTER_WEAVE_SYSTEM

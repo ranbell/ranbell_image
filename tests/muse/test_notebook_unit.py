@@ -194,3 +194,90 @@ def test_the_clerk_names_one_kind_of_turn():
     # Ordered so `recall` is read before `casual` when a wordy answer holds
     # both, and "" when it answered with neither.
     assert chain.parse_classified_intent("unclear") == ""
+
+
+# ── ラベルは、行頭でなくても境界 ──────────────────────────────────
+def test_a_field_never_swallows_the_next_field():
+    """実測（2026-08-25）: frame が手帖の頁の残り全部を飲んでいた。"""
+    leak = (
+        "medium shot, looking straight into lens 各務 みお WEARING: blue "
+        "sleeveless gown, earrings 各務 みお BEAT: sitting, hands pressed "
+        "against her chest 平岡 すみれ WEARING_B"
+    )
+    nb = notebook.blank(partner=True)
+    notebook.apply_patch(nb, {"frame": leak})
+    assert nb["frame"] == "medium shot, looking straight into lens"
+
+
+def test_an_ordinary_value_passes_through_untouched():
+    for plain in (
+        "medium shot, looking straight into lens",
+        "sitting, hands pressed against her chest as she leans forward",
+        "dim light from distant buildings and flickering lanterns",
+    ):
+        assert notebook.cut_at_label(plain) == plain
+
+
+# ── 一つの服に、一つの名前 ────────────────────────────────────────
+def test_the_weave_renaming_a_gown_a_dress_is_one_garment_not_three():
+    gone = notebook.garment_aliases(
+        "gown, blue_dress, sleeveless_dress, earrings, sitting, blue_sky",
+        "blue sleeveless gown, earrings",
+    )
+    assert gone == {"blue_dress", "sleeveless_dress"}
+
+
+def test_a_shortened_name_that_keeps_the_head_noun_stays():
+    assert notebook.garment_aliases(
+        "black_dress, cocktail_dress", "black cocktail dress",
+    ) == set()
+
+
+def test_only_clothing_is_read_as_a_rename():
+    """`blue_sky` は青いガウンの別名ではない。"""
+    assert "blue_sky" not in notebook.garment_aliases(
+        "blue_sky, blue_water, standing", "blue sleeveless gown",
+    )
+
+
+# ── 折り込みは、そのターンのもの ──────────────────────────────────
+def _folded(beat_before: str, card: str) -> dict:
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {"beat": beat_before})
+    notebook.absorb_muse_card(nb, card)
+    return nb
+
+
+def test_her_gesture_reaches_the_take_and_then_lets_go():
+    """震えが止まらなかった件。入口は残し、出口を作る。"""
+    nb = _folded(
+        "sitting, hands on her knees",
+        "BEAT: sitting, trembling hands pressed against her chest",
+    )
+    assert "trembling" in nb["beat"]
+
+    assert notebook.undo_fold(nb) == ["beat"]
+    assert nb["beat"] == "sitting, hands on her knees"
+    # 総監督が置いた姿勢は残る。
+    assert "sitting" in nb["beat"]
+
+
+def test_a_value_written_after_the_fold_is_not_taken_back():
+    nb = _folded("sitting, hands on her knees", "BEAT: sitting, trembling hands")
+    notebook.apply_patch(nb, {"beat": "standing, arms at her sides"})
+    assert notebook.undo_fold(nb) == []
+    assert nb["beat"] == "standing, arms at her sides"
+
+
+def test_letting_go_twice_does_nothing_the_second_time():
+    nb = _folded("sitting", "BEAT: sitting, trembling hands")
+    notebook.undo_fold(nb)
+    assert notebook.undo_fold(nb) == []
+    assert nb["beat"] == "sitting"
+
+
+def test_a_fold_that_changed_nothing_leaves_nothing_to_let_go():
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {"beat": "sitting"})
+    notebook.absorb_muse_card(nb, "BEAT: sitting")
+    assert notebook.undo_fold(nb) == []

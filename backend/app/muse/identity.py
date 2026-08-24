@@ -21,10 +21,44 @@ from ..tags.catalog import HAIR_STYLES as _HAIR_STYLES
 logger = logging.getLogger(__name__)
 
 # Hairstyle is session-mutable. Identity still owns hair *colour* / eyes /
-# figure; when the craft names any style from this set, identity styles are
-# dropped so bob_cut does not ride beside ponytail after the showrunner asked
-# for a pony.
+# figure; when the craft names a cut, identity styles are dropped so bob_cut
+# does not ride beside ponytail after the showrunner asked for a pony.
 HAIR_STYLE_TAGS: frozenset[str] = frozenset(_HAIR_STYLES)
+
+# **A cut is not the same kind of word as a description of hair.** The override
+# above used to fire on anything in `axis_hair`, and that axis holds both. So a
+# weave writing `floating_hair` because her hair moves in the wind — which it
+# does most turns — silently dropped the character's `bob_cut` and banned every
+# other cut, leaving nobody to say how her hair is cut at all. Measured live on
+# a W take: the lead lost her bob, and one girl's hair word took the other
+# girl's cut with it.
+#
+# Split rather than shortened: a cut still overrides a cut. What changed is
+# that a description no longer counts as one. Both halves are written out and
+# `test_identity` holds them to `axis_hair`, so a tag added to the JSON fails
+# the suite until somebody says which kind it is — deriving one half would let
+# a new word be misfiled in silence.
+HAIR_DESCRIPTION_TAGS: frozenset[str] = frozenset({
+    "ahoge",
+    "bangs", "blunt_bangs", "braided_bangs", "parted_bangs", "swept_bangs",
+    "floating_hair", "flipped_hair", "hair_spread_out",
+    "hair_between_eyes", "hair_intakes", "hair_over_eyes", "hair_over_one_eye",
+    "hair_over_shoulder",
+    "messy_hair", "wet_hair",
+})
+
+HAIR_CUT_TAGS: frozenset[str] = frozenset({
+    "bob_cut", "pixie_cut", "hime_cut", "wolf_cut", "undercut",
+    "ponytail", "high_ponytail", "low_ponytail", "side_ponytail", "sidetail",
+    "twintails", "twin_tails", "low_twintails", "short_twintails",
+    "double_bun", "hair_bun",
+    "braid", "braided_hair", "french_braid", "side_braid", "crown_braid",
+    "drill_hair", "twin_drills",
+    "one_side_up", "two_side_up",
+    "short_hair", "medium_hair", "long_hair", "very_long_hair",
+    "absurdly_long_hair", "hair_past_shoulders", "hair_past_waist",
+    "straight_hair", "curly_hair", "wavy_hair",
+})
 
 FRAMINGS: tuple[str, ...] = (
     "auto",
@@ -664,10 +698,13 @@ def name_list(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def named_identity(
-    cast: Iterable[dict] | None, *, drop_styles: bool = False,
-) -> list[tuple[str, list[str]]]:
+def named_identity(cast: Iterable[dict] | None) -> list[tuple[str, list[str]]]:
     """Each person in frame with her own locked tags, kept apart from the rest.
+
+    Everything locked, cuts included. Whether a cut gives way to one the craft
+    asked for is decided per person by the caller, which is the only place that
+    knows whose tags are whose — a pony asked of one of them is not a reason to
+    take the other's braid.
 
     Returns nothing for a single subject: there is no one to be confused with,
     and the flat form is what every measurement so far was taken against.
@@ -684,8 +721,6 @@ def named_identity(
             t for t in identity_list(member.get("identity_tags"))
             if t not in ALL_COUNT_TAGS
         ]
-        if drop_styles:
-            tags = [t for t in tags if t not in HAIR_STYLE_TAGS]
         if not tags:
             return []
         blocks.append((handle, tags))
@@ -718,11 +753,15 @@ def style_tags(style: str) -> list[str]:
 
 
 def craft_hairstyles(tags: str) -> set[str]:
-    """Hairstyle tokens present in a craft/tag bag."""
+    """Cuts named in a craft/tag bag — the words that replace a locked style.
+
+    Descriptions of hair are deliberately not here. `floating_hair` says how it
+    is moving, not how it is cut, and it must not unseat a bob.
+    """
     out: set[str] = set()
     for part in (tags or "").split(","):
         tag = bare_tag(part)
-        if tag in HAIR_STYLE_TAGS:
+        if tag in HAIR_CUT_TAGS:
             out.add(tag)
     return out
 
@@ -736,7 +775,7 @@ def assemble_positive(
     style: str = "",
     subject: Iterable[str] | None = None,
     cast: Iterable[dict] | None = None,
-    worn: Iterable[Iterable[str]] | None = None,
+    own: Iterable[Iterable[str]] | None = None,
 ) -> str:
     """Final Comfy positive: subject, identity, style, model tags, framing, prose.
 
@@ -750,14 +789,15 @@ def assemble_positive(
     Same tags, same order — what is added is who owns which. The flat form said
     only that two hair colours and two eye colours were somewhere in the
     picture, and the sampler regularly gave the wrong pair to the wrong girl.
-    ``worn`` binds clothes the same way, one list per person in cast order::
+    ``own`` binds the rest of the shot the same way, one list per person in
+    cast order — not only clothes but whatever the caller could place: pose,
+    expression, what her hands are doing::
 
-        Mio is silver_hair, blue_eyes, flat_chest, professional_blouse,
-        Sumire is blonde_hair, green_eyes, medium_breasts, linen_apron,
+        Mio is silver_hair, blue_eyes, flat_chest, blue_dress, sitting,
+        Sumire is blonde_hair, green_eyes, medium_breasts, black_dress, standing,
 
-    Only garments the caller could tell apart get moved; anything both of them
-    wear, or that belongs to nobody, stays in the frame-wide run below with the
-    place, the light and the camera.
+    Anything both of them own, or that belongs to nobody, stays in the
+    frame-wide run below with the place, the light and the camera.
 
     Style sits directly after identity because it colours everything that
     follows. It used to reach the brief and stop there: the panel's Style box
@@ -770,13 +810,13 @@ def assemble_positive(
     head = identity_list(identity_tags)
     model_hair = craft_hairstyles(tags)
     if model_hair:
-        head = [t for t in head if t not in HAIR_STYLE_TAGS]
+        head = [t for t in head if t not in HAIR_CUT_TAGS]
     lead = [t for t in identity_list(subject) if t not in head]
     banned = conflicting_body_tags(head)
     # Also refuse other styles once the craft picked one — keeps a second
     # style from sneaking in via WD14 leftovers in the same bag.
     if model_hair:
-        banned = set(banned) | (HAIR_STYLE_TAGS - model_hair)
+        banned = set(banned) | (HAIR_CUT_TAGS - model_hair)
     crop = normalize_framing(framing)
     if crop and crop != "auto":
         banned = set(banned) | {
@@ -813,16 +853,19 @@ def assemble_positive(
             seen.add(tag)
             model_tags.append(tag)
 
-    named = named_identity(cast, drop_styles=bool(model_hair))
+    # Built without the cut override: with two people in frame it is not one
+    # decision. `drop_styles` below is decided per person, from her own tags —
+    # a pony asked of one of them is not a reason to take the other's braid.
+    named = named_identity(cast)
     if named:
-        # Garments move onto their owner's line, keeping the form the seat
+        # A person's own tags move onto her line, keeping the form the seat
         # wrote them in. Only tags that actually survived to `model_tags` are
         # eligible: a garment the showrunner struck, or one a locked figure
         # refuses, must not come back through this door.
         available = {bare_tag(part): part for part in model_tags}
         placed: set[str] = set()
         owned: list[list[str]] = []
-        wardrobes = list(worn or []) + [[]] * len(named)
+        wardrobes = list(own or []) + [[]] * len(named)
         for (_, locked), mine in zip(named, wardrobes):
             got: list[str] = []
             for part in mine or []:
@@ -833,8 +876,17 @@ def assemble_positive(
                 got.append(available[tag])
             owned.append(got)
         if placed:
-            named = [(n, t + w) for (n, t), w in zip(named, owned)]
             model_tags = [p for p in model_tags if bare_tag(p) not in placed]
+        # A cut nobody owns belongs to the picture, so it still overrides both
+        # of them — that is what the frame-wide run means. A cut on one girl's
+        # line overrides hers alone.
+        loose_hair = craft_hairstyles(", ".join(model_tags))
+        rebuilt: list[tuple[str, list[str]]] = []
+        for (name, locked), got in zip(named, owned):
+            if loose_hair or craft_hairstyles(", ".join(got)):
+                locked = [t for t in locked if t not in HAIR_CUT_TAGS]
+            rebuilt.append((name, locked + got))
+        named = rebuilt
         # `lead` is empty whenever the count tag is already inside the flat
         # identity list (it is, on the duet path — `_identity_tags` puts
         # `2girls` at the front), and the flat list is not printed in this
