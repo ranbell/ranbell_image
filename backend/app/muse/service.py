@@ -79,17 +79,16 @@ def _msg(session: dict[str, Any], *, ja: str, en: str) -> str:
 
 
 def _identity_tags(session: dict[str, Any]) -> list[str]:
-    # Each character's tags stay contiguous (A fully before B) — that much
-    # this already did. What it does not do, and what a flat comma-joined tag
-    # stream cannot do on its own, is bind an attribute to a subject: two
-    # different hair-colour tokens sitting next to each other with nothing
-    # marking the boundary is a known cause of cross-binding on a 2-subject
-    # render. A1111-style `BREAK` chunking would fix this properly, but that
-    # depends on the live ComfyUI graph actually honouring it — no workflow
-    # JSON ships in this repo to check against (they live on the render host),
-    # so it is not safe to bake in unverified. `runtime.negative_for` at least
-    # gives the partner the same opposing-negative protection the lead always
-    # had, which was a real asymmetry and a real (if partial) fix.
+    # The union of everyone's locked tags, in cast order. This is what the
+    # assemble reads to know which tags identity owns — what the model may not
+    # restate, and which body tags contradict a locked figure.
+    #
+    # It is deliberately *not* how the two of them reach the picture any more.
+    # A flat run of tags says two hair colours and two eye colours are in the
+    # frame and never says whose is whose, which is the measured cause of the
+    # eyes swapping sides on a W shoot. `identity.assemble_positive` takes the
+    # cast as well and writes a named line per person; this list stays flat
+    # because dedup and the conflict checks want one bag, not two.
     character_a = session.get("character") or {}
     partner_character = session.get("partner_character") or {}
     tags_a = [str(t) for t in (character_a.get("identity_tags") or []) if str(t).strip()]
@@ -1614,7 +1613,7 @@ def _reassemble(session: dict[str, Any]) -> None:
             _identity_tags(session), str(craft.get("tags") or ""),
             str(craft.get("scene") or ""),
             framing=_shot_framing(session), style=_style(session),
-            subject=identity.subject_tags(_cast(session)),
+            subject=identity.subject_tags(_cast(session)), cast=_cast(session),
         )
         return
     table = facets.table_of(session) if on_facets(session) else None
@@ -1639,7 +1638,7 @@ def _reassemble(session: dict[str, Any]) -> None:
         _identity_tags(session), str(craft.get("tags") or ""),
         str(craft.get("scene") or ""),
         framing=_framing(_inputs(session)), style=_style(session),
-        subject=identity.subject_tags(_cast(session)),
+        subject=identity.subject_tags(_cast(session)), cast=_cast(session),
     )
 
 
@@ -3139,7 +3138,7 @@ def _apply_compiled_craft(
     craft["prompt"] = identity.assemble_positive(
         _identity_tags(session), tags, scene,
         framing=_shot_framing(session), style=_style(session),
-        subject=identity.subject_tags(_cast(session)),
+        subject=identity.subject_tags(_cast(session)), cast=_cast(session),
     )
     session["craft_dirty"] = identity.craft_is_thin(
         str(craft.get("prompt") or ""), scene,

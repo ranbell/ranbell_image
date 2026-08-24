@@ -116,7 +116,7 @@ def _finish_turn(
     say, tags, scene = identity.parse_table_read(raw)
     positive = identity.assemble_positive(
         identity_tags, tags, scene, framing=framing, style=style,
-        subject=identity.subject_tags(cast),
+        subject=identity.subject_tags(cast), cast=cast,
     )
     identity.warn_reference_leak(brief, positive)
     if not positive.strip():

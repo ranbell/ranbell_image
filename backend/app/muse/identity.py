@@ -625,6 +625,73 @@ def subject_tags(cast: Iterable[dict] | None) -> list[str]:
     return out
 
 
+#: 名前は latin 一語。`Mio` は通るが `各務 みお` は通らない。
+_HANDLE_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
+
+
+def subject_handles(cast: Iterable[dict] | None) -> list[str]:
+    """One latin given name per person in frame — or nothing at all.
+
+    A flat comma-joined tag stream says *what* is in the picture and never
+    whose it is. `silver_hair, blue_eyes, blonde_hair, green_eyes` hands the
+    sampler four attributes and two people and leaves the pairing to chance,
+    which is the measured cause of the eye colour swapping sides on a 2-subject
+    render. The fix is to name the owner of each attribute, so the name has to
+    be one latin word, present for everyone in frame, and unique. When it is
+    not, the caller keeps the flat form: binding half a frame is worse than
+    binding none of it.
+    """
+    members = [c for c in (cast or []) if isinstance(c, dict)]
+    out: list[str] = []
+    for member in members:
+        source = str(
+            member.get("name")
+            or (member.get("personality") or {}).get("preset_name") or ""
+        )
+        found = _HANDLE_RE.search(source)
+        if not found:
+            return []
+        out.append(found.group(0))
+    if len(set(out)) != len(out):
+        return []
+    return out
+
+
+def name_list(names: list[str]) -> str:
+    """`Mio and Sumire` — the cast line, in the order they were cast."""
+    if len(names) < 2:
+        return ", ".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def named_identity(
+    cast: Iterable[dict] | None, *, drop_styles: bool = False,
+) -> list[tuple[str, list[str]]]:
+    """Each person in frame with her own locked tags, kept apart from the rest.
+
+    Returns nothing for a single subject: there is no one to be confused with,
+    and the flat form is what every measurement so far was taken against.
+    """
+    members = [c for c in (cast or []) if isinstance(c, dict)]
+    if len(members) < 2:
+        return []
+    handles = subject_handles(members)
+    if not handles:
+        return []
+    blocks: list[tuple[str, list[str]]] = []
+    for handle, member in zip(handles, members):
+        tags = [
+            t for t in identity_list(member.get("identity_tags"))
+            if t not in ALL_COUNT_TAGS
+        ]
+        if drop_styles:
+            tags = [t for t in tags if t not in HAIR_STYLE_TAGS]
+        if not tags:
+            return []
+        blocks.append((handle, tags))
+    return blocks
+
+
 def style_tags(style: str) -> list[str]:
     """The chosen look, as tags the sampler reads.
 
@@ -668,8 +735,23 @@ def assemble_positive(
     framing: str | None = "auto",
     style: str = "",
     subject: Iterable[str] | None = None,
+    cast: Iterable[dict] | None = None,
 ) -> str:
     """Final Comfy positive: subject, identity, style, model tags, framing, prose.
+
+    With two or more people in frame, ``cast`` switches the identity head from
+    one flat run of tags to a named line each::
+
+        2girls, Mio and Sumire,
+        Mio is silver_hair, bob_cut, blue_eyes, flat_chest,
+        Sumire is blonde_hair, long_hair, green_eyes, medium_breasts,
+
+    Same tags, same order — what is added is who owns which. The flat form said
+    only that two hair colours and two eye colours were somewhere in the
+    picture, and the sampler regularly gave the wrong pair to the wrong girl.
+    Everything after the head (style, model tags, prose) is unchanged and still
+    belongs to the frame as a whole, so a garment named there can still land on
+    either of them.
 
     Style sits directly after identity because it colours everything that
     follows. It used to reach the brief and stop there: the panel's Style box
@@ -724,6 +806,23 @@ def assemble_positive(
         if tag not in seen:
             seen.add(tag)
             model_tags.append(tag)
+
+    named = named_identity(cast, drop_styles=bool(model_hair))
+    if named:
+        # `lead` is empty whenever the count tag is already inside the flat
+        # identity list (it is, on the duet path — `_identity_tags` puts
+        # `2girls` at the front), and the flat list is not printed in this
+        # branch. Take the count from whichever of the two actually has it.
+        counts = identity_list(subject) or [t for t in head if t in ALL_COUNT_TAGS]
+        opening = ", ".join(counts + [name_list([n for n, _ in named])]) + ","
+        head_lines = [f"{n} is " + ", ".join(t) + "," for n, t in named]
+        rest = [", ".join(c) for c in (look, model_tags) if c]
+        if (scene or "").strip():
+            rest.append(scene.strip())
+        lines = [opening, *head_lines]
+        if rest:
+            lines.append(", ".join(rest))
+        return "\n".join(lines)
 
     chunks = [", ".join(c) for c in (lead, head, look, model_tags) if c]
     if (scene or "").strip():

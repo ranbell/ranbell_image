@@ -355,3 +355,91 @@ def test_sane_prose_passes_ordinary_sentences_with_a_few_commas():
 def test_sane_prose_passes_through_empty():
     assert identity.sane_prose("") == ""
     assert identity.sane_prose(None) == ""
+
+
+# ── 二人を名前で結ぶ ────────────────────────────────────────────────
+MIO = {
+    "name": "Mio Kagami",
+    "identity_tags": ["silver_hair", "bob_cut", "blue_eyes", "flat_chest", "slim"],
+    "subject_tag": "1girl",
+}
+SUMIRE = {
+    "name": "Sumire Hiraoka",
+    "identity_tags": ["blonde_hair", "long_hair", "green_eyes", "medium_breasts"],
+    "subject_tag": "1girl",
+}
+
+
+def _duet_positive(cast, tags="standing, indoors", scene="A quiet room.", **kw):
+    flat = ["2girls"] + [
+        t for c in cast for t in c["identity_tags"] if t not in ("1girl", "solo")
+    ]
+    return identity.assemble_positive(
+        flat, tags, scene, subject=identity.subject_tags(cast), cast=cast, **kw
+    )
+
+
+def test_each_girl_owns_her_own_eyes_on_a_two_subject_render():
+    out = _duet_positive([MIO, SUMIRE])
+    assert "Mio is silver_hair, bob_cut, blue_eyes, flat_chest, slim," in out
+    assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts," in out
+    # The flat run that never said whose was whose must be gone.
+    assert "blue_eyes, flat_chest, slim, blonde_hair" not in out
+
+
+def test_the_count_and_the_cast_open_the_prompt():
+    assert _duet_positive([MIO, SUMIRE]).startswith("2girls, Mio and Sumire,\n")
+
+
+def test_a_shared_tag_is_written_for_both_rather_than_deduplicated():
+    both = dict(SUMIRE, identity_tags=[*SUMIRE["identity_tags"], "slim"])
+    out = _duet_positive([MIO, both])
+    assert out.count("slim") == 2
+
+
+def test_the_frame_still_carries_style_craft_and_prose_after_the_names():
+    out = _duet_positive(
+        [MIO, SUMIRE], tags="standing, window_light", scene="Late afternoon.",
+        style="Cute 2D Anime Style", framing="upper_body",
+    )
+    tail = out.rsplit("\n", 1)[-1]
+    for part in ("cute_2d_anime_style", "window_light", "upper_body", "Late afternoon."):
+        assert part in tail
+
+
+def test_a_solo_shoot_keeps_the_flat_form_it_was_measured_on():
+    out = identity.assemble_positive(
+        MIO["identity_tags"], "standing", "A quiet room.",
+        subject=identity.subject_tags([MIO]), cast=[MIO],
+    )
+    assert "\n" not in out
+    assert out.startswith("1girl, solo, silver_hair,")
+
+
+def test_a_cast_without_a_latin_name_falls_back_to_the_flat_form():
+    nameless = {"name": "各務 みお", "identity_tags": MIO["identity_tags"]}
+    out = _duet_positive([nameless, SUMIRE])
+    assert "\n" not in out
+    assert " is " not in out
+
+
+def test_two_girls_sharing_a_given_name_fall_back_rather_than_bind_half():
+    twin = dict(SUMIRE, name="Mio Hiraoka")
+    out = _duet_positive([MIO, twin])
+    assert "\n" not in out
+
+
+def test_the_session_hairstyle_still_wins_over_both_locked_ones():
+    out = _duet_positive([MIO, SUMIRE], tags="ponytail, standing")
+    assert "bob_cut" not in out
+    assert "long_hair" not in out
+    assert "ponytail" in out
+    # Colour, eyes and figure are still bound to their owner.
+    assert "Mio is silver_hair, blue_eyes, flat_chest, slim," in out
+
+
+def test_a_stray_count_tag_never_reaches_a_named_line():
+    counted = dict(MIO, identity_tags=["1girl", *MIO["identity_tags"]])
+    out = _duet_positive([counted, SUMIRE])
+    assert "1girl" not in out
+    assert out.startswith("2girls, Mio and Sumire,")
