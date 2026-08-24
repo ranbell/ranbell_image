@@ -736,6 +736,7 @@ def assemble_positive(
     style: str = "",
     subject: Iterable[str] | None = None,
     cast: Iterable[dict] | None = None,
+    worn: Iterable[Iterable[str]] | None = None,
 ) -> str:
     """Final Comfy positive: subject, identity, style, model tags, framing, prose.
 
@@ -749,9 +750,14 @@ def assemble_positive(
     Same tags, same order — what is added is who owns which. The flat form said
     only that two hair colours and two eye colours were somewhere in the
     picture, and the sampler regularly gave the wrong pair to the wrong girl.
-    Everything after the head (style, model tags, prose) is unchanged and still
-    belongs to the frame as a whole, so a garment named there can still land on
-    either of them.
+    ``worn`` binds clothes the same way, one list per person in cast order::
+
+        Mio is silver_hair, blue_eyes, flat_chest, professional_blouse,
+        Sumire is blonde_hair, green_eyes, medium_breasts, linen_apron,
+
+    Only garments the caller could tell apart get moved; anything both of them
+    wear, or that belongs to nobody, stays in the frame-wide run below with the
+    place, the light and the camera.
 
     Style sits directly after identity because it colours everything that
     follows. It used to reach the brief and stop there: the panel's Style box
@@ -809,6 +815,26 @@ def assemble_positive(
 
     named = named_identity(cast, drop_styles=bool(model_hair))
     if named:
+        # Garments move onto their owner's line, keeping the form the seat
+        # wrote them in. Only tags that actually survived to `model_tags` are
+        # eligible: a garment the showrunner struck, or one a locked figure
+        # refuses, must not come back through this door.
+        available = {bare_tag(part): part for part in model_tags}
+        placed: set[str] = set()
+        owned: list[list[str]] = []
+        wardrobes = list(worn or []) + [[]] * len(named)
+        for (_, locked), mine in zip(named, wardrobes):
+            got: list[str] = []
+            for part in mine or []:
+                tag = bare_tag(part)
+                if not tag or tag in placed or tag in locked or tag not in available:
+                    continue
+                placed.add(tag)
+                got.append(available[tag])
+            owned.append(got)
+        if placed:
+            named = [(n, t + w) for (n, t), w in zip(named, owned)]
+            model_tags = [p for p in model_tags if bare_tag(p) not in placed]
         # `lead` is empty whenever the count tag is already inside the flat
         # identity list (it is, on the duet path — `_identity_tags` puts
         # `2girls` at the front), and the flat list is not printed in this

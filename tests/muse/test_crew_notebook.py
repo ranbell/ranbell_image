@@ -836,3 +836,66 @@ async def test_weave_receives_the_look_and_the_room_leaning(monkeypatch):
     assert str(seen.get("room_leaning") or "").strip(), "班の傾向が渡っていない"
     # 主演撮りには班の傾向は無い
     assert service._room_leaning({"mode": "duet", "inputs": {}}) == ""
+
+
+def test_the_partner_wardrobe_is_restored_too():
+    """相方の服も戻す（旧: WEARING_B だけ weave に落とされたまま）。"""
+    session = {
+        "mode": "", "session_id": "s-w", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(partner=True), "craft": {},
+        "character": {}, "partner_character": {"name": "Sumire Hiraoka"},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "professional blouse", "wearing_b": "linen apron",
+    })
+    missing = service._missing_wearing_tags(session, "2girls, professional_blouse")
+    assert "linen_apron" in missing
+
+
+def test_each_muse_wears_only_her_own_side_of_the_notebook():
+    session = {
+        "mode": "", "session_id": "s-w2", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(partner=True), "craft": {},
+        "character": {}, "partner_character": {"name": "Sumire Hiraoka"},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "professional blouse, knit cardigan",
+        "wearing_b": "linen apron, dark denim shirt",
+    })
+    mine, hers = service._worn_sides(
+        session,
+        "2girls, professional_blouse, knit_cardigan, linen_apron, "
+        "dark_denim_shirt, indoors, window_light",
+    )
+    assert mine == ["professional_blouse", "knit_cardigan"]
+    assert hers == ["linen_apron", "dark_denim_shirt"]
+    # 場所と光は誰のものでもない。動かさない。
+    assert "indoors" not in mine + hers
+    assert "window_light" not in mine + hers
+
+
+def test_a_garment_they_both_wear_belongs_to_neither_line():
+    session = {
+        "mode": "", "session_id": "s-w3", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(partner=True), "craft": {},
+        "character": {}, "partner_character": {"name": "Sumire Hiraoka"},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "linen apron, knit cardigan",
+        "wearing_b": "linen apron, dark denim shirt",
+    })
+    mine, hers = service._worn_sides(
+        session, "2girls, linen_apron, knit_cardigan, dark_denim_shirt",
+    )
+    assert "linen_apron" not in mine + hers
+    assert mine == ["knit_cardigan"]
+    assert hers == ["dark_denim_shirt"]
+
+
+def test_a_solo_shoot_never_splits_a_wardrobe():
+    session = {
+        "mode": "", "session_id": "s-solo", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(), "craft": {}, "character": {},
+    }
+    notebook.apply_patch(notebook.of(session), {"wearing": "sailor uniform"})
+    assert service._worn_sides(session, "1girl, sailor_uniform") == []

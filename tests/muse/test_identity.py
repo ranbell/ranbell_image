@@ -443,3 +443,44 @@ def test_a_stray_count_tag_never_reaches_a_named_line():
     out = _duet_positive([counted, SUMIRE])
     assert "1girl" not in out
     assert out.startswith("2girls, Mio and Sumire,")
+
+
+def test_a_garment_lands_on_the_girl_who_is_wearing_it():
+    out = _duet_positive(
+        [MIO, SUMIRE],
+        tags="professional_blouse, linen_apron, indoors, window_light",
+        worn=[["professional_blouse"], ["linen_apron"]],
+    )
+    assert "Mio is silver_hair, bob_cut, blue_eyes, flat_chest, slim, professional_blouse," in out
+    assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts, linen_apron," in out
+    # 動かしただけ。画全体の側に二度出てはいけない。
+    assert out.count("professional_blouse") == 1
+    assert out.count("linen_apron") == 1
+    # 場所と光は誰のものでもないので、そのまま下に残る。
+    assert out.rsplit("\n", 1)[-1].startswith("indoors, window_light")
+
+
+def test_a_garment_the_weave_never_wrote_is_not_minted_by_the_split():
+    out = _duet_positive(
+        [MIO, SUMIRE], tags="indoors", worn=[["straw_hat"], []],
+    )
+    assert "straw_hat" not in out
+
+
+def test_the_wardrobe_split_is_ignored_when_the_names_do_not_hold():
+    nameless = {"name": "各務 みお", "identity_tags": MIO["identity_tags"]}
+    out = _duet_positive(
+        [nameless, SUMIRE], tags="professional_blouse, linen_apron",
+        worn=[["professional_blouse"], ["linen_apron"]],
+    )
+    assert "\n" not in out
+    assert "professional_blouse, linen_apron" in out
+
+
+def test_a_quoted_text_tag_reaches_the_sampler_as_written():
+    """`text "OPEN"` は看板の文字。大文字も引用符もそのまま通す。"""
+    out = identity.assemble_positive(
+        ["silver_hair"], 'handheld_sign, text "OPEN", standing', "A quiet room.",
+        subject=["1girl", "solo"],
+    )
+    assert 'text "OPEN"' in out

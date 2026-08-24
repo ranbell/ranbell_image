@@ -432,3 +432,21 @@ def test_the_weave_is_told_the_look_governs_the_whole_bag():
     from app.muse import chain
     assert "THE LOOK IS NOT A TAG, IT IS HOW YOU WRITE" in chain.SCRIPTER_WEAVE_SYSTEM
     assert "ROOM LEANING" in chain.SCRIPTER_WEAVE_SYSTEM
+
+
+def test_every_seat_that_writes_tags_is_told_how_to_write_lettering():
+    """看板の文字の書き方は、TAGS を書く席すべてに届く。"""
+    for frame in (
+        crew.OUTPUT, crew.DUET_OWNS_THE_FRAME, crew.DUET_OWNS_THE_FRAME_SCOPED,
+    ):
+        assert "WORDS IN THE PICTURE" in frame
+        assert 'text "' in frame
+        # 既定は「書かない」。頼まれた時だけ。
+        assert "There is no lettering by default" in frame
+
+
+def test_the_lettering_rule_carries_no_word_a_shot_could_copy():
+    """例に挙げた語はそのまま撮影に出てくる。引用符の中は雛形だけにする。"""
+    import re
+    quoted = re.findall(r'text "([^"]*)"', crew.LETTERING)
+    assert quoted == ["<exactly the words they asked for>"], quoted

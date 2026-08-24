@@ -143,6 +143,31 @@ def say_language_rule(locale: str = "ja") -> str:
     )
 
 
+# 文字を焼く記法。`text "…"` の中身がそのまま看板やプレートに出る。書ける
+# 場所を増やすより、書ける条件を狭く言うほうが効く —— 例に挙げた語はその
+# まま撮影に出てくるので、引用符の中は総監督が言った言葉だけ、と明示する。
+LETTERING = """
+WORDS IN THE PICTURE
+Only when the Showrunner asked for something written — a sign, a plate, a
+banner, a name tag, a book cover. There is no lettering by default, and a shot
+nobody asked words for gets none.
+
+Write the exact words in double quotes after `text`, as one tag:
+
+    text "<exactly the words they asked for>"
+
+- Name the surface too (`handheld_sign`, `sign`, `name_tag`, `banner`,
+  `poster`) so the words have somewhere to sit.
+- ONE of these per picture. Two signs and neither of them comes out readable.
+- Latin letters and digits only. Japanese inside the quotes comes back as
+  broken shapes — if that is what they asked for, say so in SAY and either
+  write the reading in Latin letters or leave the surface blank.
+- Short is legible. A few words, never a sentence.
+- Never carry a word out of these instructions into a shot. The quotes hold
+  what the Showrunner asked for and nothing else.
+""".strip()
+
+
 OUTPUT = """
 OUTPUT FORMAT — Exactly three labelled blocks, nothing else:
 
@@ -177,7 +202,7 @@ No headings, no bullets inside SCENE.
 
 Across TAGS+SCENE the finished craft should feel ~200+ words of picture.
 No preamble, no alternatives — one version only.
-""".strip()
+""".strip() + "\n\n" + LETTERING
 
 # Wardrobe alone appends this after SCENE. Parsed off the turn (chain._strip_
 # costume) into the LOCKED COSTUME block every later seat re-reads. SCENE still
@@ -3243,7 +3268,7 @@ Their newest words beat the previous craft and beat any board image you are
 shown (the board is an old take). Rewrite place, objects, clothes, camera,
 and pose that conflict. Keep only what still belongs. Say out loud in SAY
 what you are dropping. A room you have left does not keep its furniture.
-""".strip()
+""".strip() + "\n\n" + LETTERING
 
 
 # The same craft standards, for a turn that writes the shot in parts. What is
@@ -3281,7 +3306,7 @@ THE PARTS YOU WERE NOT ASKED FOR
 They are already settled and they are not yours this turn. Do not restate them,
 do not improve them, do not carry them into another part's tags. A board image
 you are shown is an old take and is not the shot; the parts above it are.
-""".strip()
+""".strip() + "\n\n" + LETTERING
 
 
 def _voice_field(character: dict[str, Any], key: str, default: str = "") -> str:

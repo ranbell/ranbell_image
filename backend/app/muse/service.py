@@ -102,6 +102,42 @@ def _identity_tags(session: dict[str, Any]) -> list[str]:
     return tags_a
 
 
+def _worn_sides(session: dict[str, Any], tags: str) -> list[list[str]]:
+    """Which of the woven tags each Muse is actually wearing.
+
+    The notebook is the only place that knows: WEARING is hers and WEARING_B is
+    the partner's, and they stay apart all the way to the page a person reads.
+    They stopped being apart at the sampler — the weave hands back one bag, and
+    `linen_apron` sitting beside `professional_blouse` says only that both are
+    somewhere in the picture. Which is how the apron ends up on the wrong girl.
+
+    Read conservatively. A tag is hers only when her wardrobe names it and the
+    other's does not: a shirt they both have on, or a tag from the place rather
+    than a person, stays in the frame-wide run where it always was. Nothing is
+    added here and nothing is dropped — tags only move.
+    """
+    if not (session.get("partner_character") or {}):
+        return []
+    nb = notebook_mod.of(session)
+    mine = notebook_mod.wearing_tokens(str(nb.get("wearing") or ""))
+    hers = notebook_mod.wearing_tokens(str(nb.get("wearing_b") or ""))
+    only_mine, only_hers = mine - hers, hers - mine
+    if not only_mine and not only_hers:
+        return []
+    sides: list[list[str]] = [[], []]
+    for part in str(tags or "").split(","):
+        tag = identity.bare_tag(part)
+        if not tag:
+            continue
+        words = {tag} | notebook_mod.wearing_tokens(tag)
+        a, b = bool(words & only_mine), bool(words & only_hers)
+        if a and not b:
+            sides[0].append(tag)
+        elif b and not a:
+            sides[1].append(tag)
+    return sides
+
+
 def _framing(inputs: dict[str, Any]) -> str:
     return identity.normalize_framing(str(inputs.get("framing") or "auto"))
 
@@ -1614,6 +1650,7 @@ def _reassemble(session: dict[str, Any]) -> None:
             str(craft.get("scene") or ""),
             framing=_shot_framing(session), style=_style(session),
             subject=identity.subject_tags(_cast(session)), cast=_cast(session),
+            worn=_worn_sides(session, str(craft.get("tags") or "")),
         )
         return
     table = facets.table_of(session) if on_facets(session) else None
@@ -1639,6 +1676,7 @@ def _reassemble(session: dict[str, Any]) -> None:
         str(craft.get("scene") or ""),
         framing=_framing(_inputs(session)), style=_style(session),
         subject=identity.subject_tags(_cast(session)), cast=_cast(session),
+        worn=_worn_sides(session, str(craft.get("tags") or "")),
     )
 
 
@@ -2991,6 +3029,11 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     after the showrunner asked for the hat. The notebook is the shot — every
     garment in it has to reach the sampler. Struck and refused items are not
     put back (that is the one way past `drop_banned`; see `_ensure_garments`).
+
+    Both wardrobes. This read `wearing` alone, so on a W shoot the partner was
+    the only one whose forgotten garments never came back — she went out in
+    whatever the weave happened to remember, one turn after the showrunner
+    dressed her.
     """
     nb = notebook_mod.of(session)
     have = set(identity.tag_names(tags))
@@ -3000,7 +3043,10 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     # One garment per comma item, the way WEARING is written. Token-by-token
     # would staple `cream_ribbed` and `ribbed_turtleneck` next to a
     # `turtleneck_sweater` the weave already had.
-    for item in re.split(r"[,，、;]", str(nb.get("wearing") or "")):
+    wardrobes = " , ".join(
+        str(nb.get(k) or "") for k in ("wearing", "wearing_b")
+    )
+    for item in re.split(r"[,，、;]", wardrobes):
         tokens = notebook_mod.wearing_tokens(item)
         if not tokens or tokens & gone:
             continue
@@ -3139,6 +3185,7 @@ def _apply_compiled_craft(
         _identity_tags(session), tags, scene,
         framing=_shot_framing(session), style=_style(session),
         subject=identity.subject_tags(_cast(session)), cast=_cast(session),
+        worn=_worn_sides(session, tags),
     )
     session["craft_dirty"] = identity.craft_is_thin(
         str(craft.get("prompt") or ""), scene,
