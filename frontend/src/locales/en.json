@@ -1535,6 +1535,7 @@
     "debugTitle": "Notebook rewrites",
     "debugHint": "Who changed which field, from what to what. CARD is a memo for the next scripter — it is not the notebook.",
     "debugEmpty": "No rewrites yet",
+    "clerkLog": "Manager's verdicts",
     "notebook": "Shot notebook",
     "notebookHint": "Living source of truth. Clothes, action, and camera are absolute values here; craft is recompiled from this.",
     "tasteChipLabel": "Your habits",

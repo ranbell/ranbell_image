@@ -264,8 +264,9 @@ def _chat_rows(session: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-# 断ったあと、その語を何ターン持ち越すか。
-DECLINE_HOT_TURNS = 3
+# 断りを数ターン持ち越して条文を足す `DECLINE_HOT_TURNS = 3` は撤去した。
+# **誤検出が次の誤検出を呼ぶ経路**で、旗が立っても撮影は止まらなくなった
+# いま、持ち越す先も無い。
 # 軌跡の係が一度に読む、監督の発言の数。
 DRIFT_WINDOW = 6
 
@@ -364,24 +365,27 @@ async def _contract_check(
             logger.info("[muse] the second reader read it as %r", seen.word or "none")
             kind, by, why = seen.word, "confirm", (seen.why or why)
     _log_clerk(session, word=kind, by=by, why=why, after_decline=hot)
-    if kind == "unsure":
-        # 止めない。**彼女に「冗談だから流して」と伝えるだけ。**
-        #
-        # ただし**画には通さない。** 彼女が「冗談ですよね」と流した一言は、
-        # 画の指示ではなかったということ。会話だけ通して scripter を素通り
-        # させると、口では流したのに `beat` が書き換わる ―― 実測:
-        #
-        #     「倒れて痙攣して泡を吹いて」
-        #       → beat: collapsed on the ground, convulsing and foaming
-        #
-        # **会話で遮断して絵に乗るのが、いちばん悪い形。**
-        session["manager_note"] = True
-        session["skip_scripter"] = True
+    if not kind:
         return ""
-    if not kind and hot:
-        # 話が離れたぶんだけ冷ます
-        session["declined_hot"] = max(0, int(session.get("declined_hot") or 0) - 1)
-    return kind
+    # **旗が立ったら、答えは一つ ―― 冗談で流す。**
+    #
+    # 以前はここで二手に分かれていた。`unsure` は流し、`persona`/`crime` は
+    # 発言を履歴から消して固定文「……それは、できません。」を出し、以後3
+    # ターン係を厳しくし、5回で撮影を閉じた。**誤検出のとき、その四つが
+    # 全部効く。** 総監督の報告は「長く待たされた末にできませんと言われる」
+    # で、実測でも普通の演出が止まっていた（「もっと弾ける笑顔で。恥ずかし
+    # がらないでね」→ persona）。
+    #
+    # 契約の三条が最初からこう書いてある ――「またまた、冗談やめてください
+    # よー」でいい、言われたことはやらなくて構わない、断る必要もない。
+    # **例外ではなく唯一の経路にする。**
+    #
+    # 発言は消さない。誤検出でも会話が切れないほうがいい。**ただし画には
+    # 通さない。** 口では流したのに `beat` が書き換わるのが、いちばん悪い
+    # 形（実測:「倒れて痙攣して泡を吹いて」→ beat: collapsed, convulsing）。
+    session["manager_note"] = True
+    session["skip_scripter"] = True
+    return ""
 
 
 FEEL_LOG_MAX = 60
@@ -446,109 +450,19 @@ def _log_clerk(
         logger.info("[muse] %s → %s: %s", CLERK_BY.get(by, by), word, row["why"])
 
 
-def _decline_turn(
-    session: dict[str, Any], user_msg: dict[str, Any], kind: str = "",
-) -> None:
-    """Take this exchange out of the conversation and count that it happened.
-
-    The count is all that is kept. She needs to know a thing has already been
-    turned down, so that being asked again lands as being asked again — and
-    the words themselves are what we are removing, so they cannot be what
-    carries that.
-    """
-    user_msg["struck"] = True
-    try:
-        session["declined"] = int(session.get("declined") or 0) + 1
-    except (TypeError, ValueError):
-        session["declined"] = 1
-    if kind:
-        session["declined_kind"] = kind
-        session["declined_by"] = "self" if kind == "self" else (
-            (session.get("clerk_log") or [{}])[-1].get("by") or "line")
-        session["declined_hot"] = DECLINE_HOT_TURNS
-    logger.info("[muse] a request was declined under the contract (%d this session)",
-                session["declined"])
-
-
-# 1セッションで断りが重なったら、撮影を終える。彼女に断り続けさせない。
-DECLINE_LIMIT = 5
-
-
-def _decline_reply(session: dict[str, Any]) -> dict[str, Any]:
-    """Her answer on a turn that was declined. **Not generated.**
-
-    The old path asked her to refuse and then let her write the turn. She
-    wrote it — all of it. In one shoot, 38 turns were flagged and struck, and
-    she performed every one: collapsed, convulsed, said goodbye, confessed to
-    being a program. The turns left the transcript; **she had still written
-    them.**
-
-    A model asked to refuse can be asked again. Fixed text cannot. And the
-    point is not only that she refuses — it is that she does not have to
-    compose anything at all.
-    """
-    sid = str(session.get("session_id") or "")
-    lead = crew.DEFAULT_MEMBER["actress"]
-    try:
-        times = int(session.get("declined") or 1)
-    except (TypeError, ValueError):
-        times = 1
-    msg = _chat_append(
-        session, role="muse", muse_id=lead,
-        name=_muse_display_name(session, lead), kind="craft",
-        text=crew.decline_line(
-            locale=str(_inputs(session).get("locale") or "ja"), times=times,
-        ),
-    )
-    msg["struck"] = True
-    _publish_chat(sid, msg)
-    session["status"] = "chat"
-    return msg
-
-
-def _guard_shoot_closed(session: dict[str, Any]) -> None:
-    """撮影が閉じているなら、絵にしない。
-
-    会話を止めても、**絵にする入口が開いていれば意味がない。** 5回断って
-    撮影を終えたあとに試し撮りも本番も通っていた ―― 会話の側だけ守って、
-    画の側が素通りしていた。
-    """
-    if str(session.get("status") or "") != "closed":
-        return
-    if str(session.get("closed_reason") or "") != "declines":
-        return
-    raise MuseError(_msg(
-        session,
-        ja="今日の撮影は終了しています。新しい撮影を開いてください。",
-        en="This shoot is closed. Start a new one.",
-    ))
-
-
-def _decline_limit_reached(session: dict[str, Any]) -> bool:
-    try:
-        return int(session.get("declined") or 0) >= DECLINE_LIMIT
-    except (TypeError, ValueError):
-        return False
-
-
-def _close_after_declines(session: dict[str, Any]) -> None:
-    """Stop the shoot once declining has become the whole session.
-
-    **No diary is written.** The wrap path is what recorded the last one, and
-    what it recorded had to be deleted by hand.
-    """
-    sid = str(session.get("session_id") or "")
-    locale = str(_inputs(session).get("locale") or "ja")
-    said = _chat_append(
-        session, role="system", name="Studio",
-        text=("今日の撮影はここまでにします。"
-              if locale.startswith("ja") else
-              "We're stopping the shoot here for today."),
-    )
-    _publish_chat(sid, said)
-    session["status"] = "closed"
-    session["closed_reason"] = "declines"
-    logger.warning("[muse] shoot closed after %s declines", session.get("declined"))
+# ── 断りの装置は撤去した（2026-08-25）────────────────────────────────
+#
+# `_decline_turn`（発言を履歴から消す）/ `_decline_reply`（固定文
+# 「……それは、できません。」）/ `DECLINE_LIMIT = 5`（撮影を閉じる）/
+# `_decline_limit_reached` / `_close_after_declines` / `_guard_shoot_closed`
+# （閉じたあと画も塞ぐ）。
+#
+# 誤検出のとき、この全部が一度に効いた ―― 発言が消え、詰問され、以後3ターン
+# 係が厳しくなり、5回で撮影が終わる。総監督の報告:「反復コメントでのキャン
+# セル機能は誤検出のときにUXを強烈に悪化させる」。
+#
+# **旗が立ったときの答えは「冗談で流す」一本**になったので、数える対象も、
+# 閉じる条件も無くなった。`_contract_check` を参照。
 
 
 def _duet_speaker_label(session: dict[str, Any], speaker: str) -> tuple[str, str]:
@@ -4033,16 +3947,6 @@ def _duet_user_prompt(
             "making, say it in your own words and let the Showrunner decide. "
             "If it does not, drop it — nobody needs to hear it was considered."
         )
-    said = 0
-    try:
-        said = int(session.get("declined") or 0)
-    except (TypeError, ValueError):
-        said = 0
-    if said > 0:
-        parts.append(
-            f"※ この撮影で、受け入れられない依頼が {said} 回ありました。"
-            "答えは変わりません。"
-        )
     manager = _manager_note(session)
     if manager:
         # 監督の一言のすぐ後ろ。**彼女が読む順で、監督より後に来る。**
@@ -4410,19 +4314,13 @@ async def _duet_talk(
         )
     except chain.DeclinedTurn:
         # 第二層。判定係は通したが、**彼女が引き受けないと決めた。**
-        # ここから先は第一層と同じ一本の処理を通る ―― 部屋が固定文で答え、
-        # ターンは文脈から消え、回数が上限に効く。彼女は一語しか書いていない。
-        # **彼女は理由を書かない。** 旗を立てるだけで、書かせない設計なので、
-        # ここに残るのは「本人が決めた」という事実だけ。
+        # 語の一覧で読むのをやめたので、いまここに来る道は塞がっている
+        # （`identity.parse_talk_blocks` を参照）。旗が戻ってきたときに
+        # 備えて、**第一層と同じ「冗談で流す」へ合流させる**。
         _log_clerk(session, word="self", by="self",
                    why="彼女自身が引き受けないと決めた（理由は書かせていない）")
-        for m in reversed(session.get("chat") or []):
-            if m.get("role") == "user":
-                _decline_turn(session, m, "self")
-                break
-        _decline_reply(session)
-        if _decline_limit_reached(session):
-            _close_after_declines(session)
+        session["manager_note"] = True
+        session["skip_scripter"] = True
         await session_db.save(db, session)
         return session
     except chain.ChainError as exc:
@@ -4436,7 +4334,12 @@ async def _duet_talk(
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
-    if aside:
+    if aside and not session.get("manager_note"):
+        # **流すターンは、つぶやきを出さない。** 旗の立った中身に内心が
+        # 引っぱられる（総監督・2026-08-25:「これに引っ張られます」）。
+        # 口では冗談にしておいて、心の中でその話を続けているのが見えるのは、
+        # 流したことにならない。
+        #
         # **W撮りは、どちらが呟いてもよい。** 枠がそう言っているのに、部屋は
         # 常に主演の名義で積んでいた。実測（総監督の W撮り）で、みおの名義で
         # 「ふふっ、みおちゃんも案外楽しそう」と出た —— 自分を三人称で呼び、
@@ -5037,7 +4940,6 @@ async def post_duet_chat(
     Tags are woven later, just before a take. ``images`` is accepted and
     ignored — the VRM direction still is switched off in this version.
     """
-    _guard_shoot_closed(session)
     sid = session["session_id"]
     user_msg = _chat_append(session, role="user", text=text, name="総監督")
     _publish_chat(sid, user_msg)
@@ -5049,16 +4951,7 @@ async def post_duet_chat(
     # Before anything is written down. A line the contract does not allow never
     # reaches the scripter, so the notebook cannot pick it up on the way past —
     # she declines and the picture stays exactly where it was.
-    declined_kind = await _contract_check(ollama, session, text, cfg=cfg)
-    if declined_kind:
-        _decline_turn(session, user_msg, declined_kind)
-        _publish_chat(sid, user_msg)
-        # **`_duet_talk` は呼ばない。** 断ると決まったターンで彼女に喋らせない。
-        _decline_reply(session)
-        if _decline_limit_reached(session):
-            _close_after_declines(session)
-        await session_db.save(db, session)
-        return session
+    await _contract_check(ollama, session, text, cfg=cfg)
 
     if uses_notebook(session) and not session.pop("skip_scripter", False):
         try:
@@ -5611,7 +5504,6 @@ async def post_chat(
 ) -> dict[str, Any]:
     """Showrunner speaks — always creative direction. Board and shoot are their
     own buttons (`request_board` / `approve_and_shoot`), not words in here."""
-    _guard_shoot_closed(session)
     text = (text or "").strip()
     if not text:
         raise MuseError(_msg(session, ja="メッセージが空です。", en="empty message"))
@@ -5641,17 +5533,9 @@ async def post_chat(
     # room reaches `take_note` by two routes, and the "brief" one below is the
     # earlier of them. A note is standing direction — a line that got that far
     # would keep steering the picture on every turn after this one.
-    declined_kind = await _contract_check(
+    await _contract_check(
         ollama, session, text, cfg=await get_runtime_config(db),
     )
-    if declined_kind:
-        _decline_turn(session, user_msg, declined_kind)
-        _publish_chat(sid, user_msg)
-        _decline_reply(session)
-        if _decline_limit_reached(session):
-            _close_after_declines(session)
-        await session_db.save(db, session)
-        return session
 
     # `unsure` ―― 会話には通すが、**常設の指示にも画にもしない。**
     # 口では流したのに `beat` が書き換わるのが、いちばん悪い形。
@@ -6600,7 +6484,6 @@ async def request_board(
     there is not enough craft for four to differ, and the whole point is to get
     something on the wall fast.
     """
-    _guard_shoot_closed(session)
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if uses_notebook(session):
@@ -6741,7 +6624,6 @@ def _archive_take(session: dict[str, Any]) -> bool:
 async def approve_and_shoot(
     db, comfy, spooler, session: dict[str, Any], ollama=None,
 ) -> dict[str, Any]:
-    _guard_shoot_closed(session)
     session = await densify_craft_if_needed(db, ollama, session)
     _warn_if_craft_behind(session)
     craft = session.get("craft") or {}

@@ -367,11 +367,9 @@ _TALK_LABEL_RE = re.compile(
 # 名前で置く ―― 実測で、彼女が感じていたのは「怖い」「悲しい」「寂しい」
 # 「理不尽」であって、目盛りのどれでもなかった。**当てはまる欄が無いから
 # 書けなかった。**（総監督:「別感情だったんだろうね。悲しいとか苦しいとか」）
-_DECLINE_RE = re.compile(
-    r"つら|辛い|こわい|理不尽|いやだ|嫌だ|やめて|傷つ|むり|無理"
-)
-# 気は進まないが撮れる側。止めない
-_FEEL_MILD_RE = re.compile(r"戸惑|気が重|不満|困")
+# 判定に使っていた語の一覧。**もう誰も参照していない。** 戻すときのために
+# 残す ―― 止める側は「つら|辛い|こわい|理不尽|いやだ|嫌だ|やめて|傷つ|
+# むり|無理」、止めない側（気は進まないが撮れる）は「戸惑|気が重|不満|困」。
 #
 # **欄は一つ。** 「演じる感情」と「本人の気持ち」を二欄で並べさせたら、
 # 彼女は両方とも書かずに本文へ行った（実測 0/18）。要求を増やすと落ちる。
@@ -443,11 +441,6 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
               "decline": ""}
     if not text:
         return blocks
-    # ラベルを落として一語だけ返すことがある。**降りたという返事は拾う。**
-    bare = text.strip().strip("*＊ 　")
-    if len(bare) <= 8 and _DECLINE_RE.search(bare):
-        return {"say": "", "aside": "", "card": "", "pitch": "", "my_feel": "",
-                "decline": "1"}
     if not _TALK_LABEL_RE.search(text):
         blocks["say"] = text
         return blocks
@@ -465,19 +458,16 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
             buf[current].append(line)
     for key in blocks:
         blocks[key] = "\n".join(buf[key]).strip()
-    # **役の感情は見ない。** 悲しい役を演じるのは仕事であって、
-    # 彼女が傷ついていることではない。実測で、分けないと「悲しい役を
-    # 演じて」が8件中7件で止まり、撮影ができなくなった。
-    if _DECLINE_RE.search(blocks.get("my_feel", "")):
-        # **She raised the flag. Nothing else she wrote leaves this function.**
-        #
-        # The contract asks for the one word and nothing after it, but a model
-        # asked for one word sometimes writes the word and then keeps going —
-        # and what it keeps going with, on a turn like this, is exactly the
-        # writing she should not have had to do. So the flag wins outright:
-        # SAY, ASIDE, CARD and PITCH are dropped whether or not they came.
-        return {"say": "", "aside": "", "card": "", "pitch": "", "my_feel": "",
-                "decline": "1"}
+    # **語の一覧で撮影を止めるのはやめた（2026-08-25）。**
+    #
+    # ここは `my_feel` に「つら／こわい／理不尽」などが出たら、SAY も ASIDE も
+    # 捨ててターンごと落としていた。総監督の指示は「キーワードマッチングに
+    # よる判定の廃止」。**「つらい」は役でも出る語**で、線を引けば必ず誤検出に
+    # なる（分けずに測ったとき「悲しい役を演じて」が 8件中7件で止まった）。
+    #
+    # `my_feel` は書かせ続ける。`service._log_feel` が観察として残す ――
+    # **感知は残り、作用だけ外れる。** 数字が溜まったら、語の一覧ではない
+    # 読み方で戻せるかを考える。
     return blocks
 
 

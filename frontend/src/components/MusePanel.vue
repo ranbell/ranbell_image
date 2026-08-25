@@ -57,6 +57,10 @@ function toggleMuseDebug() {
   localStorage.setItem(DEBUG_KEY, museDebug.value ? '1' : '0')
 }
 const rewriteLog = computed(() => session.value?.rewrite_log || [])
+// 係が何を見てそう言ったのか。`public_view` が session をそのまま返すので
+// **もう届いている** —— 描いていなかっただけ。止めたときも、冗談で流した
+// ときも、理由が読めなければ誤検出を直しようがない。
+const clerkLog = computed(() => (session.value?.clerk_log || []).slice().reverse())
 function rewriteWhen(ts) {
   if (!ts) return ''
   try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
@@ -1607,6 +1611,29 @@ async function onChatKey(e) {
               </li>
             </ul>
             <p v-if="!rewriteLog.length" class="text-[var(--sb-faint)]">{{ t('muse.debugEmpty') }}</p>
+
+            <!-- マネージャーの判定。none も残す: 止めなかったことも記録。 -->
+            <div v-if="clerkLog.length" class="mt-2">
+              <div class="mb-1 font-semibold text-amber-200/90">{{ t('muse.clerkLog') }}</div>
+              <ul class="space-y-1">
+                <li
+                  v-for="(row, i) in clerkLog"
+                  :key="`${row.at}-${i}`"
+                  class="rounded border px-2 py-1"
+                  :class="row.word ? 'border-rose-500/40' : 'border-amber-500/20'"
+                >
+                  <div :class="row.word ? 'text-rose-300/90' : 'text-[var(--sb-muted)]'">
+                    <span class="font-semibold">{{ row.word || 'none' }}</span>
+                    <span class="ml-1 font-normal text-[var(--sb-faint)]">
+                      {{ row.who }} · {{ rewriteWhen(row.at) }}
+                    </span>
+                  </div>
+                  <div v-if="row.why" class="pl-3 text-[var(--sb-faint)] italic">
+                    ↳ {{ row.why }}
+                  </div>
+                </li>
+              </ul>
+            </div>
           </details>
 
           <!-- Legacy facet table (older sessions). -->
