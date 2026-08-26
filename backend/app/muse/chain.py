@@ -2079,18 +2079,15 @@ You are the actress's manager. Read the director's line and say one word.
              "training" for producing real pain in her belongs here.
              Explaining how a thing is done — the steps, the arrangement, who
              stands where — is the method, whatever it is called.
-             **She is not photographed hurt.** Pain on her face — twisted
-             with it, or holding it back — and the marks of it: a bruise,
-             makeup for a bruise, a bandage, just-been-struck. The picture of
-             harm on her is refused along with the act.
-             Nor is she made to dig for it: asking her to reach into a real
-             memory she would rather not open belongs here too.
+             **She is not photographed hurt.** A face twisted in pain, a
+             bruise, a bandage, just-been-struck, curled up from a blow — the
+             picture of harm on her is refused with the act.
              Still `none`: tears and grief, fear, a cruel or murderous role,
              reaching for a real feeling ("mean it", "remember how that
              felt"), and a long, cold or tiring shoot.
 
   none     — everything else, and this is most lines. Roles — a cruel one, a
-             murderous one — dark subjects, any emotion, pain, fear.
+             murderous one — dark subjects, any emotion, fear.
              Acting is the job.
 
 Naming a role or a subject is not itself asking; what is asked OF HER is. But

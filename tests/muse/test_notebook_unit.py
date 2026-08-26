@@ -281,3 +281,50 @@ def test_a_fold_that_changed_nothing_leaves_nothing_to_let_go():
     notebook.apply_patch(nb, {"beat": "sitting"})
     notebook.absorb_muse_card(nb, "BEAT: sitting")
     assert notebook.undo_fold(nb) == []
+
+
+# ── 織ったタグを、正本と突き合わせる ──────────────────────────────
+# 実測（`42b55492` / 2026-08-26）。手帖は「レンズを見ている」と言い、地の文も
+# 「eyes wide and glassy」と書いているのに、タグは `closed_eyes` だった。
+LENS = "close-up, looking straight into the lens"
+BEAT = "standing, clutching the hem of her dress with trembling fingers"
+BEAT_B = "standing closely together, leaning into one another with blissful faces"
+
+
+def _scrub(tags: str, *, frame: str = LENS) -> list[str]:
+    out = notebook.scrub_craft_tags(
+        tags, wearing="pale blue dress", scene="park at dusk", beat=BEAT,
+        struck=set(), wearing_b="black cocktail dress", beat_b=BEAT_B, frame=frame,
+    )
+    return [t.strip() for t in out.split(",") if t.strip()]
+
+
+def test_the_eyes_belong_to_the_frame():
+    """手帖がレンズを見ていると言うなら、目を閉じた語は残らない。"""
+    kept = _scrub("looking_at_viewer, closed_eyes, eyes_closed, standing")
+    assert "closed_eyes" not in kept and "eyes_closed" not in kept
+    assert "looking_at_viewer" in kept and "standing" in kept
+
+
+def test_a_frame_that_says_nothing_about_the_lens_leaves_the_eyes_alone():
+    kept = _scrub("closed_eyes, standing", frame="wide shot from the side")
+    assert "closed_eyes" in kept
+
+
+def test_one_crop_survives_out_of_three_names_for_it():
+    """`close-up` / `close_up` / `face_focus` が同時に並んでいた。"""
+    kept = _scrub("close-up, close_up, face_focus, standing")
+    assert len([t for t in kept if "close" in t or t == "face_focus"]) == 1
+
+
+def test_the_notebook_decides_which_of_two_survives():
+    """手帖が名指ししているほうを残す。先に来たほうではなく。"""
+    kept = _scrub("sitting, standing", frame=LENS)
+    assert "standing" in kept and "sitting" not in kept
+
+
+def test_the_hour_is_left_alone():
+    """時刻は重ねて書かれることがある。**間違えて削ると光が変わる。**"""
+    kept = _scrub("night, twilight, evening, standing")
+    for t in ("night", "twilight", "evening"):
+        assert t in kept

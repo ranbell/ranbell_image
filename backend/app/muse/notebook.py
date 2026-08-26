@@ -787,6 +787,77 @@ def garment_aliases(tags: str, wearing: str) -> set[str]:
     return out
 
 
+# 手帖が「レンズを見ている」と言っている形。視線は frame のものだと
+# `FIELD_CONTRACTS` が明言しているのに、その所有権がタグに効いていなかった。
+_EYES_ON_LENS_RE = re.compile(
+    r"(?i)looking_?at_?viewer|into the lens|at the lens|at the camera|"
+    r"eye contact|カメラ目線|レンズを見|こっちを見"
+)
+
+# 一つに絞ってよい枠だけ。**時刻（`time_of_day`）と部屋は入れない** ——
+# `night, twilight, evening` のような重ねは weave が意図して書くことがあり、
+# どれを残すかを間違えると光が変わる。ここは狭く始める。
+_ONE_ONLY_SLOTS = (
+    "camera_distance", "camera_pitch", "camera_side",
+    "gaze_target", "gaze_pitch", "eyes", "posture",
+)
+
+
+def drop_tags_that_fight_the_notebook(
+    tags: str, *, frame: str, beat: str, beat_b: str = "",
+) -> str:
+    """織ったタグのうち、正本と正面から食い違うものを落とす。
+
+    **突き合わせる所がどこにも無かった。** `scrub_craft_tags` は手帖の欄を
+    六つ受け取っているのに、実際に見ていたのは struck と wearing と切り取り
+    だけで、`scene` `beat` `beat_b` は未使用だった。結果（実測 `42b55492`）:
+
+        手帖 frame  close-up, looking straight into the lens
+        タグ        closed_eyes, eyes_closed
+        地の文      Her gaze remains fixed forward, eyes wide and glassy
+
+    **同じプロンプトの中で、タグと地の文が逆を向いていた。** 切り取りも
+    `close-up` / `close_up` / `face_focus` の三つが並んでいた。
+
+    二つだけやる:
+
+    1. **視線は frame のもの。** レンズを見ていると書いてあるなら、目を
+       閉じた語は残さない
+    2. **一つの枠に一語だけ。** `tags.conflict` の slot をそのまま使い、
+       **手帖が名指ししているほうを残す**（どちらも名指しが無ければ先頭）
+    """
+    from ..tags import conflict
+    from .identity import bare_tag
+
+    said = " ".join(x for x in (frame, beat, beat_b) if x).lower()
+    eyes_on_lens = bool(_EYES_ON_LENS_RE.search(frame or ""))
+
+    kept: list[str] = []
+    taken: dict[str, str] = {}          # slot -> 残した bare tag
+    for part in str(tags or "").split(","):
+        tok = part.strip()
+        if not tok:
+            continue
+        key = bare_tag(tok)
+        if eyes_on_lens and key in conflict.SLOTS["eyes"] and "closed" in key:
+            continue
+        slot = conflict.slot_of(key)
+        if slot in _ONE_ONLY_SLOTS:
+            first = taken.get(slot)
+            if first is None:
+                taken[slot] = key
+            elif key != first:
+                # 手帖が名指ししているほうが勝つ。していなければ先に来たほう
+                mine, theirs = key.replace("_", " "), first.replace("_", " ")
+                if mine in said and theirs not in said:
+                    kept = [k for k in kept if bare_tag(k) != first]
+                    taken[slot] = key
+                else:
+                    continue
+        kept.append(tok)
+    return ", ".join(kept)
+
+
 def scrub_craft_tags(
     tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
     wearing_b: str = "", beat_b: str = "", frame: str = "",
@@ -797,7 +868,10 @@ def scrub_craft_tags(
         wearing_b=wearing_b, beat_b=beat_b, frame=frame,
     )
     tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
-    return drop_crops_not_in_frame(tags, frame=frame)
+    tags = drop_crops_not_in_frame(tags, frame=frame)
+    return drop_tags_that_fight_the_notebook(
+        tags, frame=frame, beat=beat, beat_b=beat_b,
+    )
 
 
 def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:

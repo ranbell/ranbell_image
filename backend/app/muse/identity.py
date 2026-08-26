@@ -617,8 +617,12 @@ _COUNT_TAGS: dict[str, tuple[str, ...]] = {
 
 #: 人数を言う語すべて。**人数は cast から導くもの**なので、他の経路から
 #: 入ってきたものは落とす（`solo` を含む）。
+#:
+#: `solo_focus` もここ。人数そのものではないが「主題は一人」と言う語で、
+#: 実測（`42b55492`）で **`2girls` と並んで焼かれていた** —— 二人いる画に
+#: 「一人に寄れ」を同時に渡していた。手帖のどこにも書かれていない語。
 ALL_COUNT_TAGS: frozenset[str] = frozenset(
-    [t for scale in _COUNT_TAGS.values() for t in scale] + ["solo"]
+    [t for scale in _COUNT_TAGS.values() for t in scale] + ["solo", "solo_focus"]
 )
 
 
@@ -838,10 +842,23 @@ def assemble_positive(
         # craft (above). Do not let the model restate locked colour/figure.
         seen.add(tag)
         model_tags.append(clamp_weight(part.strip()))
+    # **同じ語を、綴り違いで二度足さない。** `_FRAMING_TAGS` は `face_closeup`
+    # を `close_up` と綴るが、craft は `close-up` と書く。`seen` の完全一致では
+    # 止まらず、**一つの切り取りが二つの名前で**焼かれていた（実測 `42b55492`
+    # の `close-up, close_up`）。
+    #
+    # 見るのは綴りだけ。**枠（`conflict.slot_of`）で見ると広すぎる** ――
+    # craft の `wide_shot` が枠を埋め、パネルで選んだ `full_body` が消えた。
+    # 画角はパネルのもので、譲らせてはいけない。
+    def _spelling(tag: str) -> str:
+        return tag.replace("-", "").replace("_", "")
+
+    spelled = {_spelling(bare_tag(p)) for p in (*lead, *head, *look, *model_tags)}
     for tag in framing_tags(framing):
-        if tag not in seen:
-            seen.add(tag)
-            model_tags.append(tag)
+        if tag in seen or _spelling(tag) in spelled:
+            continue
+        seen.add(tag)
+        model_tags.append(tag)
 
     # Built without the cut override: with two people in frame it is not one
     # decision. `drop_styles` below is decided per person, from her own tags —

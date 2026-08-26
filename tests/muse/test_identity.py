@@ -524,3 +524,22 @@ def test_a_description_is_not_a_cut_on_a_solo_shoot_either():
         subject=identity.subject_tags([MIO]),
     )
     assert "bob_cut" in out and "floating_hair" in out
+
+
+def test_the_panel_framing_is_not_added_twice_under_another_spelling():
+    """実測（`42b55492`）: craft の `close-up` と画角の `close_up` が両方焼かれた。"""
+    out = identity.assemble_positive(
+        ["silver_hair"], "close-up, standing", "A quiet room.",
+        framing="face_closeup", subject=["1girl", "solo"],
+    )
+    assert "close-up" in out
+    assert "close_up" not in out.replace("close-up", "")
+
+
+def test_the_panel_framing_still_lands_beside_a_different_crop_word():
+    """綴り違いだけを見る。**枠で見ると画角が消える** —— 一度そう壊した。"""
+    out = identity.assemble_positive(
+        ["silver_hair"], "wide_shot, standing", "A classroom.",
+        framing="full_body", subject=["1girl", "solo"],
+    )
+    assert "full_body" in out

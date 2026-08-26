@@ -977,3 +977,37 @@ def test_an_unsplit_bag_keeps_a_name_the_other_wardrobe_owns():
         session, "2girls, gown, blue_dress, black_dress", ("", ""),
     )
     assert "blue_dress" in tags
+
+
+# ── 総監督が OK を出した絵で撮る ──────────────────────────────────
+def test_the_shot_uses_the_prompt_the_board_was_drawn_with():
+    """**見た絵と撮る絵を一致させる。**
+
+    実測（`42b55492`）: `still_read_after_board` が写真を読んで手帖を書き換え、
+    rev が 45 に対しコンパイル済みが 44。本番は「遅れている」と判断して織り
+    直し、**総監督が OK を出したボードとは違う指示で撮っていた**。種のほうは
+    ボードから引き継いでいたので、同じ賽で違う指示という最悪の形だった。
+    """
+    session = {
+        "board": {"prompt": "2girls, Mio and Sumire, …", "seed": 7,
+                  "images": ["img-1"], "pending": False, "round": 9},
+        "craft": {"prompt": "織り直したあとの、別の指示"},
+    }
+    assert service._approved_prompt(session) == "2girls, Mio and Sumire, …"
+
+
+def test_a_board_still_rendering_is_not_something_to_shoot():
+    for board in ({"prompt": "x", "pending": True, "images": []},
+                  {"prompt": "x", "images": []},
+                  {}):
+        assert service._approved_prompt({"board": board}) == ""
+
+
+def test_the_photo_is_not_read_back_into_the_notebook():
+    """写真読みの配線を外した。**手帖は会話で書かれるのが正本。**"""
+    import inspect
+
+    from app.muse import runner as muse_runner
+    src = inspect.getsource(muse_runner)
+    code = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
+    assert "still_read_after_board" not in code

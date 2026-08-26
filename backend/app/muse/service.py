@@ -1063,6 +1063,26 @@ def record_ledger(
     return entry
 
 
+STAGE_LOG_MAX = 40
+
+
+def _stage(session: dict[str, Any], name: str, started: float) -> None:
+    """一段いくらかかったかを残す。**判定には使わない。読むためだけ。**
+
+    会話1ターンは実測 24〜38秒。直接測れた呼び出しは前段 2.0 + compile 2.8 +
+    彼女 10.0 の**約15秒**で、残りがどこに消えているか分からなかった。
+    分からないまま削ると、今日のように**全体の8%を削るために半日**使う。
+
+    `ledger` の `ms` と同じ考え方だが、あちらは席がタグに何をしたかの記録で、
+    ここは**壁時計**。デバッグ枠に出す（`clerk_log` と同じ場所）。
+    """
+    ms = int((time.monotonic() - started) * 1000)
+    log = list(session.get("stage_ms") or [])
+    log.append({"at": time.time(), "stage": name, "ms": ms})
+    session["stage_ms"] = log[-STAGE_LOG_MAX:]
+    logger.info("[muse] %s took %dms", name, ms)
+
+
 def session_seed(session: dict[str, Any]) -> int:
     """One seed for the whole shoot — drawn once, then never again.
 
@@ -4383,9 +4403,11 @@ async def _duet_talk(
     session["commit_pitch"] = False
     await _after_actress_spoke(db, session)
     if fold and uses_notebook(session) and fresh_card:
+        began = time.monotonic()
         await _fold_muse_after_talk(
             db, ollama, session, cfg=cfg, user_text=text,
         )
+        _stage(session, "折り込み", began)
     else:
         # No fold this turn, but the turn is still over — a parked notice has
         # to be settled here or it is silently dropped on the next line.
@@ -4951,8 +4973,11 @@ async def post_duet_chat(
     # Before anything is written down. A line the contract does not allow never
     # reaches the scripter, so the notebook cannot pick it up on the way past —
     # she declines and the picture stays exactly where it was.
+    began = time.monotonic()
     await _contract_check(ollama, session, text, cfg=cfg)
+    _stage(session, "前段", began)
 
+    began = time.monotonic()
     if uses_notebook(session) and not session.pop("skip_scripter", False):
         try:
             await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
@@ -4960,6 +4985,7 @@ async def post_duet_chat(
             logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
             session["craft_dirty"] = True
             session.setdefault("scripter_intent", "casual")
+        _stage(session, "台本 compile", began)
     else:
         named, _ = await route_note(db, ollama, session, text, cfg=cfg)
         if not named:
@@ -4968,9 +4994,15 @@ async def post_duet_chat(
             _note_standing(session, text)
             session["just_banned"] = []
             session["just_restored"] = []
+        _stage(session, "note", began)
 
+    began = time.monotonic()
     session = await _duet_talk(db, ollama, session, text, cfg=cfg)
+    _stage(session, "彼女 talk", began)
+
+    began = time.monotonic()
     await session_db.save(db, session)
+    _stage(session, "保存", began)
     return session
 
 
@@ -6265,7 +6297,13 @@ async def _muse_reviews_weave(
 
 
 async def still_read_after_board(db, ollama, session_id: str) -> None:
-    """Align notebook to the latest still. Struck items stay off."""
+    """Align notebook to the latest still. Struck items stay off.
+
+    **繋がっていない（2026-08-26）。** `runner.run_board_job` から外した ——
+    理由はそちらのコメントに書いてある（VRAM 読み込み 30秒超／本番の織り直しを
+    誘発／掃除済みの frame を汚し直す）。**残してあるのは戻せるようにするため**で、
+    呼ぶ側を復活させれば動く。
+    """
     if ollama is None:
         return
     session = await session_db.load(db, session_id)
@@ -6487,7 +6525,9 @@ async def request_board(
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
     if uses_notebook(session):
+        began = time.monotonic()
         session = await weave_craft_if_needed(db, ollama, session)
+        _stage(session, "weave", began)
         _warn_if_craft_behind(session)
         craft = session.get("craft") or {}
         prompt = str(craft.get("prompt") or "")
@@ -6621,13 +6661,36 @@ def _archive_take(session: dict[str, Any]) -> bool:
     return True
 
 
+def _approved_prompt(session: dict[str, Any]) -> str:
+    """What the board they just said yes to was drawn with.
+
+    **The picture the showrunner approved is the picture we take.** This used
+    to re-weave first, and the weave read a notebook that had moved since the
+    board — `still_read_after_board` rewrote it from the photograph on the way
+    past, so the notebook was one revision ahead every single time. Measured on
+    a live session: `notebook rev 45 / compiled 44 / board round 9`.
+
+    The seed was already carried over from the board for exactly this reason
+    (see below). Carrying the seed and not the words is the worst of both: the
+    same roll of the dice against a different set of instructions.
+
+    A board that never rendered, or a session that goes straight to the final
+    without one, falls through to the craft as before.
+    """
+    board = session.get("board") or {}
+    if board.get("pending") or not board.get("images"):
+        return ""
+    return str(board.get("prompt") or "")
+
+
 async def approve_and_shoot(
     db, comfy, spooler, session: dict[str, Any], ollama=None,
 ) -> dict[str, Any]:
-    session = await densify_craft_if_needed(db, ollama, session)
-    _warn_if_craft_behind(session)
-    craft = session.get("craft") or {}
-    prompt = str(craft.get("prompt") or "")
+    prompt = _approved_prompt(session)
+    if not prompt:
+        session = await densify_craft_if_needed(db, ollama, session)
+        _warn_if_craft_behind(session)
+        prompt = str((session.get("craft") or {}).get("prompt") or "")
     if not prompt:
         raise MuseError(_msg(
             session,
@@ -6635,6 +6698,7 @@ async def approve_and_shoot(
             en="No script yet — describe the shot in chat (clothes, place, camera).",
         ))
 
+    craft = session.get("craft") or {}
     inputs = _inputs(session)
     sid = session["session_id"]
     seed = int((session.get("board") or {}).get("seed") or 0) or session_seed(session)

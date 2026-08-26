@@ -61,6 +61,8 @@ const rewriteLog = computed(() => session.value?.rewrite_log || [])
 // **もう届いている** —— 描いていなかっただけ。止めたときも、冗談で流した
 // ときも、理由が読めなければ誤検出を直しようがない。
 const clerkLog = computed(() => (session.value?.clerk_log || []).slice().reverse())
+// 段ごとの壁時計。**どこに時間が消えているか分からないまま削らない**ため。
+const stageMs = computed(() => (session.value?.stage_ms || []).slice(-8).reverse())
 function rewriteWhen(ts) {
   if (!ts) return ''
   try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
@@ -1611,6 +1613,18 @@ async function onChatKey(e) {
               </li>
             </ul>
             <p v-if="!rewriteLog.length" class="text-[var(--sb-faint)]">{{ t('muse.debugEmpty') }}</p>
+
+            <!-- 段ごとの秒数。読むためだけ。 -->
+            <div v-if="stageMs.length" class="mt-2">
+              <div class="mb-1 font-semibold text-amber-200/90">{{ t('muse.stageMs') }}</div>
+              <ul class="space-y-0.5">
+                <li v-for="(row, i) in stageMs" :key="`${row.at}-${i}`" class="text-[var(--sb-muted)]">
+                  <span class="text-amber-300/80">{{ (row.ms / 1000).toFixed(1) }}s</span>
+                  {{ ' ' }}{{ row.stage }}
+                  <span class="text-[var(--sb-faint)]">{{ rewriteWhen(row.at) }}</span>
+                </li>
+              </ul>
+            </div>
 
             <!-- マネージャーの判定。none も残す: 止めなかったことも記録。 -->
             <div v-if="clerkLog.length" class="mt-2">

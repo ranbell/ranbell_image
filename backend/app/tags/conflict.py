@@ -187,8 +187,15 @@ _ARMS = frozenset({
 # Only the aperture is exclusive. `smile` is not here: `smile` and `open_mouth`
 # co-occur constantly and a slot holding both would delete the smile.
 _MOUTH = frozenset({"open_mouth", "closed_mouth", "parted_lips"})
+# 綴り違いは同じ一つのこと。`eyes_closed` が入っていなかったので、
+# `closed_eyes, eyes_closed` が**二つの別の指示として**プロンプトに並んだ
+# （実測 `42b55492`）。danbooru 側の綴りは `closed_eyes` だが、モデルは
+# 語順を入れ替えて書くことがある。
 _EYES = frozenset({
-    "closed_eyes", "half-closed_eyes", "wide-eyed", "narrowed_eyes",
+    "closed_eyes", "eyes_closed",
+    "half-closed_eyes", "half_closed_eyes",
+    "wide-eyed", "wide_eyed", "eyes_wide", "eyes_wide_open",
+    "narrowed_eyes",
 })
 
 
