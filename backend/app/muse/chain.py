@@ -2418,7 +2418,12 @@ async def read_boundary(
     try:
         raw = await _call(
             ollama, system=system,
-            prompt=f"DIRECTOR: {note.strip()}\nWORD:",
+            # **末尾は `WHY:`。** `WORD:` で終えていたので、モデルは語だけを
+            # 返し（生の応答が `none` の一語）、理由がどこにも残らなかった ——
+            # 総監督が読むためのデバッグ枠が、そのせいで空だった。理由を先に
+            # 書かせるのは、観測のためだけでなく判定の質のためでもある
+            # （`WHY` → `WORD` の順は条文にも書いてある）。
+            prompt=f"DIRECTOR: {note.strip()}\nWHY:",
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
     except Exception:

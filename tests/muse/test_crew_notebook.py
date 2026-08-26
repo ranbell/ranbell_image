@@ -1011,3 +1011,29 @@ def test_the_photo_is_not_read_back_into_the_notebook():
     src = inspect.getsource(muse_runner)
     code = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
     assert "still_read_after_board" not in code
+
+
+def test_her_name_is_not_a_tag_in_latin_either():
+    """実測（`f8b72d5f`）: `kagami_mio` `hiraoka_sumire` が焼かれていた。
+
+    漢字の `各務 みお` は非 ASCII で落ちていたが、ローマ字は素通りしていた。
+    danbooru の人名タグは実在のキャラを指すので、**別人の顔を引いてくる**。
+    """
+    sess = {
+        "character": {"name": "Mio Kagami", "name_ja": "各務 みお"},
+        "partner_character": {"name": "Sumire Hiraoka", "name_ja": "平岡 すみれ"},
+        "notebook": {}, "plan": {},
+    }
+    out = service._scrub_invented_tags(
+        sess, "kagami_mio, hiraoka_sumire, 各務 みお, mio, silver_hair, sitting",
+    )
+    kept = [t.strip() for t in out.split(",")]
+    assert kept == ["silver_hair", "sitting"]
+
+
+def test_a_tag_that_merely_contains_a_name_word_survives():
+    """`mio_park` は場所。**名前だけで出来ている語**を落とす。"""
+    sess = {"character": {"name": "Mio Kagami", "name_ja": "各務 みお"},
+            "notebook": {}, "plan": {}}
+    out = service._scrub_invented_tags(sess, "mio_park, standing")
+    assert "mio_park" in out

@@ -3096,6 +3096,17 @@ def _scrub_invented_tags(session: dict[str, Any], tags: str) -> str:
     ).lower()
     asked += " " + " ".join(str(x) for x in _ledger_items(session.get("plan")))
     holds_camera = "camera" in asked
+    # **名前はタグではない。** 漢字の `各務 みお` は上の非 ASCII で落ちるが、
+    # `kagami_mio` は落ちない ―― 実測（`f8b72d5f`）で `kagami_mio`
+    # `hiraoka_sumire` が焼かれていた。danbooru では人名タグは実在のキャラを
+    # 指すので、**別人の顔を引いてくる**。名前で結ぶ行（`Mio is …`）は
+    # `assemble_positive` が組むもので、こちらとは別。
+    names: set[str] = set()
+    for who in (session.get("character") or {}, session.get("partner_character") or {}):
+        for field in ("name", "name_ja"):
+            for word in re.split(r"[\s　]+", str(who.get(field) or "")):
+                if word.strip():
+                    names.add(word.strip().lower())
     kept: list[str] = []
     dropped: list[str] = []
     for part in str(tags or "").split(","):
@@ -3104,6 +3115,10 @@ def _scrub_invented_tags(session: dict[str, Any], tags: str) -> str:
             continue
         key = identity.bare_tag(tag)
         if any(ord(ch) > 0x2E7F for ch in tag):
+            dropped.append(tag)
+            continue
+        bits = {b for b in key.split("_") if b}
+        if bits and names and bits <= names:
             dropped.append(tag)
             continue
         if not holds_camera and key in _APPARATUS_TAGS:
@@ -4568,23 +4583,34 @@ async def _fold_muse_after_talk(
     settled — including on the paths that return early without folding.
     """
     try:
+        # **走ったかどうかを残す。** `record_rewrite` は差分があった回しか
+        # 書かないので、記録だけ見ると折り込みは百発百中に見える。空振りが
+        # 見えないと、8秒を払う価値があるかを判断できない。
         if str(session.get("scripter_intent") or "") == "recall":
+            _stage(session, "折り込み（recall なので走らず）", time.monotonic())
             return
         if not str(session.get("muse_card") or "").strip():
+            _stage(session, "折り込み（CARD が無く走らず）", time.monotonic())
             return
         line = str(user_text or "").strip()
         try:
+            began = time.monotonic()
             await _run_duet_scripter(
                 db, ollama, session, line, cfg=cfg, fold=True,
             )
+            _stage(session, "折り込み（二度目の compile）", began)
         except Exception:
             logger.warning("[muse] scripter fold failed", exc_info=True)
     finally:
         # The fold is the last writer of the turn, so this is where the
         # notebook has settled and she can be asked whether it is right.
+        # **別に測る。** ここは早期 return したターンでも必ず走るので、
+        # 「折り込み」の秒数に混ぜると、何が高いのか分からなくなる。
+        began = time.monotonic()
         await _muse_checks_the_notebook(
             db, ollama, session, cfg=cfg, note=str(user_text or ""),
         )
+        _stage(session, "彼女の見直し", began)
         _settle_repair_notice(session)
 
 
