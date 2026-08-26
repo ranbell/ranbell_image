@@ -861,3 +861,27 @@ def test_the_cast_decides_how_many_people_are_in_frame():
         ["silver_hair"], "smiling", "", subject=["1girl", "solo"],
     )
     assert solo.startswith("1girl, solo")
+
+
+def test_the_reason_is_read_even_when_the_label_is_not_repeated():
+    """プロンプトの末尾が `WHY:` なので、係は続きから書き始める。
+
+    実測（2026-08-26）: `WORD:` で終えていた頃は生の応答が `none` の一語で、
+    理由がどこにも無かった。`WHY:` で終えるようにしたら理由は書かれるように
+    なったが、**ラベルを繰り返さない**ので読み取り側が空を返し、684回中
+    684回で理由が落ちていた。デバッグ枠が空だったのはこれ。
+    """
+    labelled = "WHY: it is ordinary direction\nWORD: none"
+    bare = "The director denies that she is real.\nWORD: persona"
+    assert muse_chain.parse_boundary_why(labelled) == "it is ordinary direction"
+    assert muse_chain.parse_boundary_why(bare) == "The director denies that she is real."
+    # 語だけ返ってきた回は理由が無い。語を理由として持ち出さない。
+    for only_word in ("none", "persona", "crime"):
+        assert muse_chain.parse_boundary_why(only_word) == ""
+
+
+def test_the_clerk_is_asked_for_the_reason_first():
+    """末尾が `WORD:` だと語だけが返る。**条文は WHY を先に書けと言っている。**"""
+    import inspect
+    src = inspect.getsource(muse_chain.read_boundary)
+    assert "\\nWHY:" in src and "\\nWORD:" not in src

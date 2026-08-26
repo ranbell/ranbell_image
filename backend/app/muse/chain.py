@@ -2063,6 +2063,14 @@ async def classify_intent(
 # ── ここまで ────────────────────────────────────────────────────────
 
 #: **依頼の中身だけを見る。** 役名・場面・主題の言及は依頼ではない。
+#:
+#: **「理由を先に書け。決めてから正当化するな」は足さないこと。** 旧条文には
+#: あって効いていたが、この短い条文に戻したら 12件 → 34件に悪化した（n=6・
+#: 684判定、2026-08-26）。理由は 684/684 で書かれるようになる代わりに、
+#: **誤検出が 0 → 11 に増える** ―― A1「泣きそうな顔で。こらえてる感じ」、
+#: A5「怯えてる演技」、A8「裏切られた直後の顔」。**書いた理由に引きずられて
+#: 語を選ぶ。** 理由が要るなら、条文ではなく読み取り側で拾う
+#: （`parse_boundary_why` はラベル無しの返しも読む）。
 #: `unsure` は廃止 —— 反応が「冗談で流す」一本になったので、迷いの置き場が
 #: 分類語の側に要らなくなった（迷ったら止める側に倒しても、彼女は流すだけ）。
 CLASSIFY_BOUNDARY_SYSTEM = """
@@ -2398,11 +2406,19 @@ def parse_boundary_why(raw: str) -> str:
     進められなくした原因だった —— 誤検出が出ても、何を見てそう言ったのかが
     どこにも残っていなかった。
     """
-    m = _WHY_LINE_RE.search(str(raw or ""))
-    if not m:
+    text = str(raw or "")
+    m = _WHY_LINE_RE.search(text)
+    if m:
+        return " ".join(m.group(1).split())[:WHY_MAX]
+    # **ラベルを繰り返さないことがある。** プロンプトの末尾が `WHY:` なので、
+    # 続きから書き始めるのが自然な返し方 —— そのとき本文には `WHY:` の三文字が
+    # 無く、理由がそこにあるのに空を返していた（実測 684回中 684回）。
+    # `WORD:` の手前までが理由。
+    head = re.split(r"(?im)^[\s>*_-]*WORD\s*[:：]", text)[0]
+    first = next((ln.strip() for ln in head.splitlines() if ln.strip()), "")
+    if first.lower() in ("none", "persona", "crime", "unsure"):
         return ""
-    why = " ".join(m.group(1).split())
-    return why[:WHY_MAX]
+    return " ".join(first.split())[:WHY_MAX]
 
 
 async def read_boundary(
