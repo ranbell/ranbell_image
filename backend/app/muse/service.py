@@ -436,8 +436,10 @@ def _log_clerk(
     監督の一行そのものは入れない —— 断ったターンの言葉を外すのが目的なので、
     ここに写し直したら意味が無くなる。残すのは**係の言葉だけ**。
     """
-    if not word and not why:
-        return
+    # **通した回も残す。** `none` で理由が無い回を捨てていたので、普通に
+    # 撮れているセッションではデバッグ枠が丸ごと空だった（実測 `156091c6`）。
+    # 止めた回だけ見えても「なぜ止めたか」しか読めない ―― **何を通したかが
+    # 並んで初めて、線がどこにあるかが読める。**
     row = {"at": time.time(), "turn": len(_chat_rows(session)),
            "word": word or "none", "by": by, "who": CLERK_BY.get(by, by),
            "why": str(why or "")[:chain.WHY_MAX]}
@@ -3179,6 +3181,33 @@ def _drop_garment_aliases(
     return _without(tags), (_without(sides[0]), _without(sides[1]))
 
 
+def _latin_names(session: dict[str, Any], scene: str) -> str:
+    """地の文に出た漢字の名前を、プロンプトが使っている綴りに直す。
+
+    実測（`156091c6`）で craft_scene がこう来た ――
+    「**平岡 すみれ** stands poised in her black cocktail dress … Beside her,
+    **各務 みお** sits motionless」。英語の一段落だけを書けと言ってあるのに、
+    手帖（`notebook.render`）が日本語名で書かれているので、そちらを写す。
+
+    サンプラーに漢字は読めない。**消すのではなく綴りを揃える** —— 名前で結ぶ
+    行が `Mio` `Sumire` と書いている以上、地の文も同じ綴りでなければ、
+    せっかく結んだ相手を指せない。
+    """
+    if not scene:
+        return scene
+    for who in (session.get("character") or {}, session.get("partner_character") or {}):
+        ja = str(who.get("name_ja") or "").strip()
+        latin = identity.subject_handles([who])
+        if not ja or not latin:
+            continue
+        scene = scene.replace(ja, latin[0])
+        # 「みお's eyes」のように名だけで書くこともある
+        parts = [p for p in re.split(r"[\s　]+", ja) if p]
+        if len(parts) > 1:
+            scene = scene.replace(parts[-1], latin[0])
+    return scene
+
+
 def _apply_compiled_craft(
     session: dict[str, Any], tags: str, craft_scene: str,
     *, sides: tuple[str, str] = ("", ""),
@@ -3193,7 +3222,7 @@ def _apply_compiled_craft(
     from, and a guess made twice can disagree with itself.
     """
     tags = _scrub_invented_tags(session, str(tags or "").strip())
-    scene = str(craft_scene or "").strip()
+    scene = _latin_names(session, str(craft_scene or "").strip())
     if not tags and not scene:
         return False
     # There used to be a gate here that refused the whole compile when the bag

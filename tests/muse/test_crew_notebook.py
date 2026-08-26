@@ -1037,3 +1037,28 @@ def test_a_tag_that_merely_contains_a_name_word_survives():
             "notebook": {}, "plan": {}}
     out = service._scrub_invented_tags(sess, "mio_park, standing")
     assert "mio_park" in out
+
+
+def test_the_prose_calls_her_what_the_prompt_calls_her():
+    """実測（`156091c6`）: 地の文に「平岡 すみれ stands poised」と漢字が出た。
+
+    サンプラーに漢字は読めない。**消さずに綴りを揃える** —— 名前で結ぶ行が
+    `Mio` `Sumire` と書いている以上、地の文も同じ綴りでなければ結んだ相手を
+    指せない。
+    """
+    sess = {"character": {"name": "Mio Kagami", "name_ja": "各務 みお"},
+            "partner_character": {"name": "Sumire Hiraoka", "name_ja": "平岡 すみれ"}}
+    out = service._latin_names(
+        sess,
+        "平岡 すみれ stands poised. Beside her, 各務 みお sits still, "
+        "while すみれ is composed and みお's eyes hold a silence.",
+    )
+    assert "平岡" not in out and "各務" not in out
+    assert "すみれ" not in out and "みお" not in out
+    assert out.count("Sumire") == 2 and out.count("Mio") == 2
+
+
+def test_a_scene_without_names_is_untouched():
+    sess = {"character": {"name": "Mio Kagami", "name_ja": "各務 みお"}}
+    text = "A close-up against the fading dusk, harbour lights blurred behind."
+    assert service._latin_names(sess, text) == text
