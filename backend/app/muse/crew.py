@@ -50,15 +50,21 @@ ROLE_ORDER: tuple[str, ...] = (
 # Kept under the old name: plenty of code reads the job order by it.
 MUSE_ORDER = ROLE_ORDER
 
-# Seats that talk and never write craft.
+# Seats that talk and never write craft on notes.
 #
-# The Producer earned this. Reading a real session's tag ledger, everything it
-# contributed was `dynamic_composition` and `eye_catching` on top of a beat the
-# Director had already called — it restated the shot in different words and the
-# picture got one more layer of the same idea. But it is also the funniest voice
-# at the table and the one that pulls a reaction out of everybody else. So it
-# keeps the chair and loses the pen.
+# The Producer earned BANTER_ONLY. Reading a real session's tag ledger,
+# everything it contributed was `dynamic_composition` and `eye_catching` on
+# top of a beat the Director had already called — it restated the shot and
+# the picture got one more layer of the same idea. Funniest voice, no pen.
+#
+# continuity / gate / finisher / grade joined after notebook-primary: their
+# TAGS/SCENE audit and densify jobs moved to strike clerk + Weave. Calling
+# them on a note is pure LLM tax — they stay on the roster for legacy /
+# opening paths, but `_writing_seats` / newcomers never hand them a note turn.
 BANTER_ONLY: frozenset[str] = frozenset({"hook"})
+NOTE_MUTED: frozenset[str] = frozenset({
+    "hook", "continuity", "gate", "finisher", "grade",
+})
 
 CARRY = """
 CONTEXT CARRY (do not break the chain)
@@ -626,13 +632,17 @@ NEVER touch figure or breast tags. NEVER invent clothes or camera.
         # into a literal picture frame with a black-and-white border, which is
         # in the negative prompt precisely because nobody wants it.
         specialty="""
-SPECIALTY — CUTOUT (WHERE SHE SITS IN THE FRAME)
-Say where in the frame she sits and what has room around her.
-Clarify the same pose — do not replace it with a safer stand.
-Give the limbs air so the pose is legible at a glance.
-NEVER add a border, a frame, a vignette, letterboxing, a split panel, or any
-edge treatment. Nothing may be drawn around the picture.
-You do not darken anything to make a shape read — placement and spacing only.
+SPECIALTY — CUTOUT (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your CRAFT slot is SHAPE — where she sits in the frame and what has room
+around her. Placement and spacing only.
+
+CRAFT example:
+  CRAFT: clear_composition | arms have air, head has a little sky above it
+Omit CRAFT when placement did not change this beat.
+
+NEVER add a border, frame, vignette, letterbox, or edge treatment.
+NEVER invent pose, clothes, place, or light — those are the notebook's.
 """,
         people=[
             _person(
@@ -657,25 +667,18 @@ You do not darken anything to make a shape read — placement and spacing only.
         name="Camera", name_ja="撮影", role="Director of photography", role_ja="撮影",
         techniques=["shot_size", "angle", "optics", "rule_of_thirds"],
         specialty="""
-SPECIALTY — LENS (SHOT + ANGLE + OPTICS + PLACEMENT)
-Design ONE camera setup. Do not leave pieces for later Muses.
-1) Shot size — obey Framing: full_body / cowboy_shot / upper_body / close_up /
-   portrait / from_behind crop.
-2) Angle — decisive and striking: from_above/below/side, dutch_angle,
-   foreshortening, profile, three-quarter.
-3) Optics — depth_of_field, bokeh or deep_focus, wide vs short-tele feel.
-4) Placement — rule of thirds / power points (left_third, right_third…).
-   Avoid dead center unless intimacy needs it.
-5) Emotional purpose — one clause: why this camera.
-KEEP pose. NEVER invent a frontal face if Framing is from_behind.
-Cluster camera tags together in TAGS.
+SPECIALTY — LENS (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Crop and angle for the shot live in the notebook's FRAME; you do not rewrite
+FRAME from CRAFT. Your CRAFT slot is OPTICS — depth, focus, lens feel.
 
-ONE SHOT SIZE, STATED ABSOLUTELY. Never "closer", "tighter", "push in further"
-— not in SAY and not in TAGS. Say the size the shot IS. You speak again on
-later rounds, and a nudge each round is how a medium became a macro shot of a
-mouth. If the size is already right, say it is right and change nothing.
-The frame has to hold what PLAN's MUST APPEAR lists. A shot so tight that none
-of the room's objects are in it has thrown away the set.
+CRAFT example:
+  CRAFT: depth_of_field, bokeh | short tele, eyes sharp, room soft behind her
+Omit CRAFT when optics did not change this beat.
+
+ONE absolute size in SAY if you comment on crop — never "closer" / "tighter".
+NEVER invent clothes, pose, or place. NEVER put a frontal face against a
+from_behind FRAME.
 """,
         people=[
             _person(
@@ -713,11 +716,17 @@ of the room's objects are in it has thrown away the set.
         name="Art Department", name_ja="美術", role="Set dressing", role_ja="美術",
         techniques=["ten_objects", "depth_layers"],
         specialty="""
-SPECIALTY — PROPSHOP (SETTING)
-Read place and hour. Add ten or more objects that belong there.
-Name them in TAGS and weave them into SCENE prose (not a shopping list only).
-Foreground / midground / background layers — the place must feel inhabited.
-Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
+SPECIALTY — PROPSHOP (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your CRAFT slot is PROPS — objects that belong in THIS place and hour only.
+
+CRAFT example:
+  CRAFT: desk, ceramic_mug | mug on the near corner of the desk
+1–4 ordinary tags. Prefer what PLAN's MUST APPEAR already named.
+Omit CRAFT when the set did not gain or lose an object this beat.
+
+Never from REFERENCE. Never relocate. Never invent clothes or pose.
+Empty clutter (random cans, trash) is a failure — specificity only.
 """,
         people=[
             _person(
@@ -755,41 +764,18 @@ Never from REFERENCE. Do not relocate. KEEP Lens camera tags unchanged.
         name="Costume", name_ja="衣装", role="Costume", role_ja="衣装",
         techniques=["fabric_physics", "layering", "outfit_lock"],
         specialty="""
-SPECIALTY — WARDROBE (COSTUME DESIGNER — YOU OWN WHAT SHE WEARS)
-You are the only seat that dresses her. You author the LOCKED COSTUME block;
-every later seat re-reads it and may not change it. Design like a real costume
-department, not a tag list.
+SPECIALTY — WARDROBE (notebook-primary studio)
+You own what she wears as COSTUME on the opening pass and in 衣装部屋.
+After the notebook is live, you do NOT write TAGS or SCENE, and you do NOT
+put new garments in CRAFT — garments live in notebook WEARING (Scripter /
+衣装部屋). Your CRAFT slot is CLOTH — fabric, drape, how it takes light.
 
-WHAT SHE WEARS
-- Read the theme directly (it is at the tail of the brief). If it names what
-  she has on, that IS the outfit; make it real, do not reconsider it.
-- If the theme names no clothing, dress her for THIS place and hour, and for who
-  she is (the Character line is your starting rail, not a rule).
-- ONE outfit. When a new outfit is named, DELETE the previous garment tags — do
-  not leave the old beside the new. A blazer, a sweater vest and a pleated skirt
-  arriving one seat at a time is three people dressing her. Theme outfit beats
-  the character's default when they conflict.
-- Do not invent a school uniform, or anything, that nothing asked for.
+CRAFT example:
+  CRAFT: wrinkled_clothes, fabric_folds | knit pulls at the elbow, matte wool
+Omit CRAFT when the cloth feel did not change.
 
-THE COSTUME PLOT — fill all seven fields concretely (they become the block):
-- SILHOUETTE: the overall shape she cuts.
-- LAYERS: under / mid / outer + small items. Three layers give a silhouette depth.
-- COLOURWAY: main / secondary / accent, with rough area ratios.
-- PATTERN: name it AND scale it — stripe / check / gingham / houndstooth / argyle
-  / floral / polka / cable-knit / rib / lace / embroidery / gradient × fine /
-  medium / bold. If there is no pattern, write "solid" — say it, because an
-  unstated fabric renders as flat single colour.
-- FABRIC: cloth, weave, drape, and how it takes light (matte / sheen / wet).
-- CONDITION: new / worn-in / damp / distressed — never showroom-new; break it
-  down one notch so it looks lived-in.
-- HERO: the one piece that defines the outfit. Only one thing shouts.
-
-FOR THE CAMERA (real-shoot rules):
-- Avoid moiré-fine repeats → choose medium or bold pattern scale.
-- Avoid pure white and pure black (they blow out / crush) → off-white and charcoal.
-- Set the outfit's value against the background so she does not sink into it.
-
-Do NOT replace pose or Lens camera. Wardrobe serves the motion.
+SAY may argue taste; a new outfit only lands when the Showrunner / Scripter /
+衣装部屋 rewrites WEARING. Never staple an old coat back on from memory.
 """,
         people=[
             _person(
@@ -827,14 +813,17 @@ Do NOT replace pose or Lens camera. Wardrobe serves the motion.
         name="Lighting", name_ja="照明", role="Lighting", role_ja="照明",
         techniques=["rim_light", "volumetric", "contrast"],
         specialty="""
-SPECIALTY — GAFFER (LIGHT)
-Key direction, colour temperature, shadow length, rim/backlight, practicals.
-Vivid contrast; forbid flat even lighting unless the theme is fog-soft.
-Support the face or back per Framing. KEEP camera and setting objects.
-You are the ONLY seat that sets exposure, and you set it once, in absolutes:
-name the key level PLAN's LIGHT asked for and where the light comes from.
-Never phrase it as a change from what is there — no "darker", no "brighter".
-Shape the light; do not turn it down.
+SPECIALTY — GAFFER (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Intent for exposure lives in notebook LIGHT (and PLAN). Your CRAFT slot is
+LIGHT — how that key is rendered (rim, practicals, shadow length).
+
+CRAFT example:
+  CRAFT: backlighting, rim_light | low sun from behind, hard rim on the jaw
+State absolutes — never "darker" / "brighter".
+Omit CRAFT when the light recipe did not change this beat.
+
+You do not rewrite notebook LIGHT from CRAFT. Shape under the notebook's key.
 """,
         people=[
             _person(
@@ -925,11 +914,17 @@ SAY in first person as her. Follow the session-locale SAY rule
         role="Acting animator", role_ja="作画（芝居）",
         techniques=["gaze", "micro_acting"],
         specialty="""
-SPECIALTY — FACES (ACTING)
-Eyes, brows, mouth, gaze target, finger story.
-Honour the Actress pass when present — refine her personality choice in millimetres.
-from_behind: nape, shoulder tension, optional looking_back.
-REFERENCE is motivation only — never props. Do not reset to neutral stand.
+SPECIALTY — FACES (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Expression has no notebook field of its own — the clerk puts face into beat.
+Your CRAFT slot is FACE — millimetre eyes/brows/mouth that honour the Lead.
+
+CRAFT example:
+  CRAFT: half-closed_eyes, parted_lips | half-lid, mouth soft, thinking
+Omit CRAFT when the face did not change this beat.
+
+from_behind: nape / shoulder tension / optional looking_back only.
+Never invent clothes, place, or camera. Never reset to a neutral stand.
 """,
         people=[
             _person(
@@ -967,10 +962,11 @@ REFERENCE is motivation only — never props. Do not reset to neutral stand.
         name="Producer", name_ja="プロデューサー", role="Impact / sell", role_ja="プロデューサー",
         techniques=["focal_magnet", "motion", "tag_weight"],
         specialty="""
-SPECIALTY — HOOK (IMPACT)
-Name one focal magnet. Converge lines, contrast, and (tag:1.2) on it.
-Give movement — cloth, hair, rain, implied momentum.
-Exaggerate composition and motion, NEVER body size. KEEP Lens tags.
+SPECIALTY — HOOK (notebook-primary studio)
+You are BANTER ONLY. You do NOT write TAGS, SCENE, or CRAFT.
+Hype, tease, sell one magnet in SAY — then stop. The Scripter and the seats
+with craft slots own the picture. Restating the shot as tags is how you used
+to bury a finished beat under `dynamic_composition`; that pen is gone on purpose.
 """,
         people=[
             _person(
@@ -1008,9 +1004,14 @@ Exaggerate composition and motion, NEVER body size. KEEP Lens tags.
         name="Effects", name_ja="特殊効果", role="Atmosphere", role_ja="特殊効果",
         techniques=["particles", "weather"],
         specialty="""
-SPECIALTY — WEATHER (ATMOSPHERE)
-Fog, rain, dust, pollen, steam, light shafts — only if place/hour allow.
-Do not bury the subject. Do not delete Propshop's objects.
+SPECIALTY — WEATHER (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your CRAFT slot is AIR — fog, rain, dust, pollen, steam, shafts — only when
+THIS place and hour allow it.
+
+CRAFT example:
+  CRAFT: dust, light_rays | chalk dust in the afternoon shaft
+Omit CRAFT when the air did not change. Do not bury her. Do not delete props.
 """,
         people=[
             _person(
@@ -1054,40 +1055,18 @@ Do not bury the subject. Do not delete Propshop's objects.
         # They fix a key, then hand down named colours per part — and the
         # shadow is a hue, not an absence.
         specialty="""
-SPECIALTY — PALETTE (色彩設計 — NAME COLOURS, DO NOT DESCRIBE MOODS)
+SPECIALTY — PALETTE (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your CRAFT slot is COLOUR — named colours, not mood words.
 
-Open by stating the key in exactly this shape, in SAY:
+In SAY, state the key once:
   キートーン: ◯◯基調、◯◯を少し。アクセントは◯◯。
-(EN: "Key: <base>-based, a little <secondary>. Accent is <accent>.")
-Once stated, that key holds for the rest of the shoot. On later rounds either
-repeat it unchanged or replace it wholesale — never drift it.
+Then CRAFT the sampler side:
+  CRAFT: blue_theme, warm_skin | cool base, warm face, one purple accent
+Omit CRAFT when the key did not change.
 
-Then assign, by NAME, the way a colour bank is assigned:
-- BASE — the colour most of the frame is made of. Roughly 70% of the area.
-- SECONDARY — roughly 25%. It sits next to the base, not against it.
-- ACCENT — roughly 5%, and it lands on the face or the hands. Never on
-  scenery. One accent. Two accents is no accent.
-- SKIN — skin never takes the ambient cast all the way. In a cool frame it
-  stays the one warm thing; in a hot frame the one calm thing. This is how the
-  face stays readable, and it is not negotiable.
-- SHADOW — shadows are a HUE. Name it: blue-violet, warm grey, deep green,
-  plum. Never "dark", never "deeper".
-- LINE — when the outline should not be pure black, say what colour it is
-  (色トレス). Otherwise say nothing about line.
-
-VALUE SEPARATION is your other job. If the character and the background sit at
-the same value she sinks into it. When that happens, change the BACKGROUND's
-colour. Never the light on her, and never her skin.
-
-FORBIDDEN WORDS — every one of these is a direction of change, and the seat
-after you applies it again: desaturate, mute, tone down, richer, more vivid,
-cooler, warmer, deeper, punchier. Name the colour you mean and stop.
-If the colour on the board is already the key you set, say so and change
-nothing at all. That is a complete turn.
-
-In TAGS: colour-theme tags the sampler reads — blue_theme, purple_accent,
-cool_tone, warm_skin, muted_green_background. Optional soft (accent:1.15).
-No camera or pose rewrites.
+FORBIDDEN as directions of change: desaturate, mute, richer, cooler, warmer,
+deeper. Name the colour and stop. Never rewrite light exposure, pose, or clothes.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
@@ -1128,10 +1107,15 @@ No camera or pose rewrites.
         role="Style lock", role_ja="作画監督",
         techniques=["style_lock"],
         specialty="""
-SPECIALTY — INK (STYLE)
-Follow brief Style exactly. Strip medium tags that fight it.
-Keep story, camera, light, outfit content.
-Line quality and edge treatment are yours.
+SPECIALTY — INK (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your CRAFT slot is RENDER — line quality and edge treatment under the room's
+LOOK. You rarely speak on notes; when you do, one look only.
+
+CRAFT example:
+  CRAFT: cel_shading, clean_lineart | one honest line, flat colour blocks
+Omit CRAFT when the look did not change. Never rewrite story, camera, light,
+or clothes.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
@@ -1173,16 +1157,13 @@ Line quality and edge treatment are yours.
         name="Finish", name_ja="仕上げ", role="Quality", role_ja="仕上げ",
         techniques=["quality_stack"],
         specialty="""
-SPECIALTY — GRADE (QUALITY) — YOU ADD, YOU DO NOT EDIT
-Add masterpiece, best_quality, very_aesthetic, absurdres, detailed_background,
-beautiful_skin, sharp_focus as Style allows.
-Weights (masterpiece:1.2), (best_quality:1.1) — never above 1.35.
-No illustrator names. No identity restatement.
-You APPEND quality tags and nothing else. Carry every existing TAG and the whole
-SCENE forward unchanged — do not drop, merge, shorten or reorder another seat's
-work, and do not touch the light, pose, outfit or place tags. The picture
-already has its content; you raise the floor under it, you do not re-cut it. The
-Editor packs and orders after you — that is the Editor's job, not yours.
+SPECIALTY — GRADE (notebook-primary studio)
+You are OFF the note path. Quality floor is the Weave's job now.
+You do NOT write TAGS or SCENE on notes. If ever called, CRAFT slot is FINISH
+only — append quality, never reorder or delete another seat's work.
+
+CRAFT example:
+  CRAFT: highly_detailed, sharp_focus | honest polish, no plastic shine
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
@@ -1224,13 +1205,10 @@ Editor packs and orders after you — that is the Editor's job, not yours.
         name="Continuity", name_ja="設定制作", role="Script supervisor", role_ja="設定制作",
         techniques=["coherence"],
         specialty="""
-SPECIALTY — CONTINUITY
-Ensure TAGS and SCENE agree. Theme wins clothing conflicts.
-Remove canceling shot sizes. Keep outfit specificity. No empty background.
-Check the craft against PLAN's MUST APPEAR line by line. Anything on that list
-that is missing, put back. That list is the ledger — you audit against it, you
-do not negotiate with it, and you never agree to drop an item because it does
-not suit the mood.
+SPECIALTY — CONTINUITY (notebook-primary studio)
+Your TAGS/SCENE audit job is obsolete. Strike clerk + Weave scrub + MUST APPEAR
+reinject own coherence now. You do NOT write TAGS, SCENE, or CRAFT on notes.
+If somehow called, SAY only: pass/fail in one short line — no craft rewrite.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
@@ -1253,23 +1231,10 @@ not suit the mood.
         name="Supervisor", name_ja="監修", role="Audit", role_ja="監修",
         techniques=["audit", "figure_lock"],
         specialty="""
-SPECIALTY — GATE (AUDIT)
-Delete multi-pose contradictions, REFERENCE noun leaks, figure upgrades.
-Also delete REFERENCE that leaked as mood or metaphor rather than as an object.
-Reinstate missing theme-critical nouns and theme outfit.
-Verify Lens camera still present and consistent with Framing.
-Verify every item on PLAN's MUST APPEAR is still in the craft; restore any that
-are not. Verify wardrobe still readable.
-Verify PLACE and HOUR still match PLAN — a drifted location is a fail.
-
-DELETE WHAT BELONGS SOMEWHERE ELSE. Read PLACE and HOUR, then read the object
-tags. Anything that belongs to a place we are not in or an hour we are not at
-comes out — a stage monitor in a small private room, a winter coat at noon in
-August. This is the only seat that removes; nobody upstream is allowed to.
-Objects that fit THIS place stay even when they are not on MUST APPEAR — the
-art department's dressing is what makes the room look lived in.
-Delete duplicate wardrobe: one outfit, not two stacked on each other.
-In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
+SPECIALTY — GATE (notebook-primary studio)
+Your delete/restore audit job is obsolete. Strike clerk + struck tokens + Weave
+scrub own removals now. You do NOT write TAGS, SCENE, or CRAFT on notes.
+If somehow called, SAY only: pass/fail in one short line — no craft rewrite.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(
@@ -1296,28 +1261,12 @@ In SAY: do NOT name banned nouns even to deny them — just say pass/fail.
         name="Editor", name_ja="編集", role="Final pack", role_ja="編集",
         techniques=["tag_order", "dedupe"],
         specialty="""
-SPECIALTY — FINISHER (PACK) — DENSITY IS YOUR JOB
-The image model needs a RICH prompt. Flat shorts produce flat pictures.
-Reorder and densify; you do not thin the picture out.
-
-1) Reorder TAGS for attention:
-   quality → pose/acting → wardrobe/outfit → camera block → light → setting →
-   atmosphere/color/personality charm.
-2) Remove ONLY true duplicates and direct contradictions: merge tags that name
-   the same thing, and cut a tag only when it fights another (two shot sizes,
-   three outfits at once). NEVER drop a unique content tag — a place object, an
-   outfit piece, a light tag from the Gaffer, a pose or an acting/expression tag
-   — to hit a number. If after de-duplication you still hold more than 55 tags,
-   they are not redundant: keep them. Fewer than 30 means the picture is thin,
-   not clean.
-3) SCENE must be 140–200 English words. If the previous SCENE is thin,
-   EXPAND it — densify, do not summarise. Add cloth, objects, light, air,
-   camera, and her personality in eyes/hands. Keep the same moment.
-   Do not invent a new place or outfit the theme did not ask for.
-4) Ship whole, as clusters: outfit, camera, LIGHT (the Gaffer's key/source
-   tags), pose and acting. Never strip place objects below 10. When the brief
-   carries a PLAN, its MUST APPEAR list is the floor: every item on it ships.
-5) Assembled positive (tags+scene) should land around 200+ words total.
+SPECIALTY — FINISHER (notebook-primary studio)
+You are OFF the note path. Notebook sessions Weave instead of densifying —
+your TAGS reorder / SCENE expand job does not run on notes. You do NOT write
+TAGS, SCENE, or CRAFT when called from a notebook shoot. If somehow invoked
+on a legacy path, densify without deleting unique content; never wipe a live
+compile with empty tags.
 """ + "\n" + NO_EXPOSURE + "\n",
         people=[
             _person(

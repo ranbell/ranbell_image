@@ -98,6 +98,57 @@ def _current_note(prompt: str) -> str:
     return str(prompt)
 
 
+def _fake_clerk_reply(system: str, prompt: str) -> str | None:
+    """Heuristic clerk answers for FakeOllama subclasses (fields / intent)."""
+    system_l = str(system or "").lower()
+    if "studio's clerk" not in system_l and "studios clerk" not in system_l:
+        return None
+    prompt_s = str(prompt or "")
+    note = prompt_s
+    for marker in ("DIRECTOR:", "DIRECTOR, in order:"):
+        if marker in prompt_s:
+            note = prompt_s.split(marker, 1)[-1]
+            break
+    note_l = note.lower()
+    fields: list[str] = []
+    if any(k in note for k in (
+        "着", "脱", "帽子", "服", "セーラー", "コート", "羽織", "外し", "制服",
+        "カーディガン", "麦わら", "uniform", "hat", "wear", "cardigan", "coat",
+        "dress", "jacket", "shirt", "blouse",
+    )):
+        fields.append("wearing")
+    if any(k in note for k in (
+        "座", "立", "走", "手", "ポーズ", "しゃが", "持", "もた",
+        "sit", "stand", "run", "hold", "kneel", "lean", "wave", "pose",
+    )):
+        fields.append("beat")
+    if any(k in note for k in (
+        "寄", "引", "画角", "全身", "アップ", "カメラ", "アングル",
+        "close", "wide", "frame", "angle", "zoom", "full body", "upper",
+    )):
+        fields.append("frame")
+    if any(k in note for k in (
+        "場所", "公園", "ビーチ", "教室", "屋上", "夕方", "夜", "朝", "窓",
+        "beach", "park", "rooftop", "classroom", "night", "dusk", "scene",
+        "砂浜",
+    )):
+        fields.append("scene")
+    if any(k in note for k in ("光", "逆光", "照明", "light", "backlight")):
+        fields.append("light")
+    if any(k in note for k in ("後ろ", "背景", "bg", "building", "crowd", "建物")):
+        fields.append("bg")
+
+    if "fields:" in prompt_s.lower() or "which parts of the shot" in system_l:
+        return ", ".join(fields) if fields else "none"
+    if "kind of turn" in system_l or prompt_s.rstrip().endswith("WORD:"):
+        if fields:
+            return "shot"
+        if any(k in note_l for k in ("？", "?", "なに", "何", "いま", "今", "recall")):
+            return "recall"
+        return "casual"
+    return None
+
+
 class NotebookOllama(FakeOllama):
     """Keyword → scripter labelled block; Muse always says a short SAY."""
 
@@ -109,23 +160,27 @@ class NotebookOllama(FakeOllama):
     def generate_text_stream(self, prompt, **kw):
         self.calls.append({**kw, "prompt": prompt})
         system = str(kw.get("system") or "")
-        text = "SAY: うん、その感じ。"
-        if "studio scripter" in system or "shot notebook" in system:
-            prompt_s = str(prompt)
-            self.scripter_prompts.append(prompt_s)
-            # Match on the current instruction only. The prompt also carries the
-            # conversation now, so matching the whole thing would let an earlier
-            # turn's keyword answer a later turn. Longest keyword wins within
-            # that line so "また煽って、カーディガン" does not match a bare "煽って".
-            note = _current_note(prompt_s)
-            hits = [k for k in self.scripts if k in note]
-            fold_keys = [k for k in self.scripts if "FOLD" in k]
-            if fold_keys and "FOLD:" in prompt_s:
-                hits = [k for k in fold_keys if k in prompt_s] or fold_keys
-            key = max(hits, key=len) if hits else ""
-            text = self.scripts.get(key) or _scripter_block(
-                intent="casual", vibe="chatting",
-            )
+        clerk = _fake_clerk_reply(system, str(prompt))
+        if clerk is not None:
+            text = clerk
+        else:
+            text = "SAY: うん、その感じ。"
+            if "studio scripter" in system or "shot notebook" in system:
+                prompt_s = str(prompt)
+                self.scripter_prompts.append(prompt_s)
+                # Match on the current instruction only. The prompt also carries the
+                # conversation now, so matching the whole thing would let an earlier
+                # turn's keyword answer a later turn. Longest keyword wins within
+                # that line so "また煽って、カーディガン" does not match a bare "煽って".
+                note = _current_note(prompt_s)
+                hits = [k for k in self.scripts if k in note]
+                fold_keys = [k for k in self.scripts if "FOLD" in k]
+                if fold_keys and "FOLD:" in prompt_s:
+                    hits = [k for k in fold_keys if k in prompt_s] or fold_keys
+                key = max(hits, key=len) if hits else ""
+                text = self.scripts.get(key) or _scripter_block(
+                    intent="casual", vibe="chatting",
+                )
 
         async def _stream():
             yield {"type": "token", "text": text}
@@ -386,7 +441,10 @@ async def test_verify_recovers_casual_misread_of_picture_change():
         def generate_text_stream(self, prompt, **kw):
             self.calls.append({**kw, "prompt": prompt})
             system = str(kw.get("system") or "")
-            if "studio scripter" in system or "shot notebook" in system:
+            clerk = _fake_clerk_reply(system, str(prompt))
+            if clerk is not None:
+                text = clerk
+            elif "studio scripter" in system or "shot notebook" in system:
                 self.scripter_prompts.append(str(prompt))
                 self._n += 1
                 if self._n == 1:

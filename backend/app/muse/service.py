@@ -1614,6 +1614,19 @@ def _reassemble(session: dict[str, Any]) -> None:
     """
     craft = session.setdefault("craft", {})
     if uses_notebook(session) and int((session.get("notebook") or {}).get("rev") or 0) > 0:
+        # Crop / wardrobe conflict lives in scrub; assemble only injects framing.
+        nb = notebook_mod.of(session)
+        craft["tags"] = notebook_mod.scrub_craft_tags(
+            str(craft.get("tags") or ""),
+            wearing=str(nb.get("wearing") or ""),
+            scene=str(nb.get("scene") or ""),
+            beat=str(nb.get("beat") or ""),
+            struck=notebook_mod.struck_tokens(session),
+            wearing_b=str(nb.get("wearing_b") or ""),
+            beat_b=str(nb.get("beat_b") or ""),
+            frame=str(nb.get("frame") or ""),
+            banned=set(banned_tags(session)),
+        )
         craft["prompt"] = identity.assemble_positive(
             _identity_tags(session), str(craft.get("tags") or ""),
             str(craft.get("scene") or ""),
@@ -1946,9 +1959,9 @@ async def take_note(
 ) -> tuple[list[str], list[str]]:
     """Record a Showrunner note, and carry out whatever it refuses.
 
-    The strike turn runs on every note rather than behind a "does this look
-    like a refusal?" pattern. Patterns miss the phrasings nobody thought of,
-    and this cannot: a note that removes nothing simply comes back empty.
+    Strike runs only when the note looks like undress / delete / restore
+    language — a light gate, not a second LLM. Notes that only move pose or
+    place skip the tax; a miss still has compile `wearing_drop` + scrub.
     """
     _note_standing(session, text)
     notes = session.setdefault("notes", [])
@@ -1958,7 +1971,7 @@ async def take_note(
 
     removed: list[str] = []
     restored: list[str] = []
-    if ollama is not None:
+    if ollama is not None and _note_looks_like_strike(text):
         inputs = _inputs(session)
         try:
             picked, back = await chain.run_strike(
@@ -1992,6 +2005,20 @@ async def take_note(
 
     _rebuild_brief(session)
     return removed, restored
+
+
+_STRIKE_NOTE_RE = re.compile(
+    r"(?i)"
+    r"(?:脱[いがせ]|外[しす]|取[りっ]?[除っ]|消[しす]|捨[て]|やめ[てる]|禁止|"
+    r"いらない|はず[しす]|抜[いき]|戻[しす]|なし|使わ|今後一切|"
+    r"\b(?:take\s*off|remove|drop|ban|without|no\s+more|get\s+rid|"
+    r"strike|restore|put\s+back|bring\s+back|don'?t\s+use|do\s+not\s+use)\b)"
+)
+
+
+def _note_looks_like_strike(text: str) -> bool:
+    """Cheap gate: undress / delete / restore wording before spending an LLM."""
+    return bool(_STRIKE_NOTE_RE.search(str(text or "")))
 
 
 def strike_dropped_props(
@@ -2334,11 +2361,16 @@ async def _craft_pass(
 
 def _writing_seats(cast: list[str], *, only: tuple[str, ...] = (),
                    without: tuple[str, ...] = ()) -> list[str]:
-    """Cast members who hold a pen, in table order."""
+    """Cast members who hold a pen on notes, in table order.
+
+    ``NOTE_MUTED`` seats stay on the roster but never take a note turn —
+    their TAGS/audit/densify jobs moved to strike + Weave under notebook-primary.
+    """
+    muted = getattr(crew, "NOTE_MUTED", None) or crew.BANTER_ONLY
     out = []
     for mid in cast:
         role = crew.role_of(mid)
-        if role == "plan" or role in crew.BANTER_ONLY or role in without:
+        if role == "plan" or role in muted or role in without:
             continue
         if only and role not in only:
             continue
@@ -2991,44 +3023,17 @@ async def _learned_taste(
 
 
 def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
-    """Garments the notebook says she has on that the woven tags forgot.
+    """Non-wardrobe restores the weave forgot — posture, ledger, crew_look.
 
-    The weave is a full replace built from the notebook, and it drops things:
-    measured live, WEARING read `… , straw_hat` and the woven bag came back
-    with the uniform and no hat, so the take went out bare-headed one turn
-    after the showrunner asked for the hat. The notebook is the shot — every
-    garment in it has to reach the sampler. Struck and refused items are not
-    put back (that is the one way past `drop_banned`; see `_ensure_garments`).
-
-    Both wardrobes. This read `wearing` alone, so on a W shoot the partner was
-    the only one whose forgotten garments never came back — she went out in
-    whatever the weave happened to remember, one turn after the showrunner
-    dressed her.
+    Forgotten garments live in ``notebook.reconcile_wardrobe_tags`` (one pass
+    shared with scrub). This only reinjects the other notebook authorities
+    that used to share the same helper and would otherwise double-look wearing.
     """
     nb = notebook_mod.of(session)
     have = set(identity.tag_names(tags))
     have |= {t for tag in have for t in notebook_mod.wearing_tokens(tag)}
     gone = set(banned_tags(session)) | notebook_mod.struck_tokens(session)
     missing: list[str] = []
-    # One garment per comma item, the way WEARING is written. Token-by-token
-    # would staple `cream_ribbed` and `ribbed_turtleneck` next to a
-    # `turtleneck_sweater` the weave already had.
-    wardrobes = " , ".join(
-        str(nb.get(k) or "") for k in ("wearing", "wearing_b")
-    )
-    for item in re.split(r"[,，、;]", wardrobes):
-        tokens = notebook_mod.wearing_tokens(item)
-        if not tokens or tokens & gone:
-            continue
-        if tokens & have:
-            continue
-        tag = re.sub(r"\s+", "_", item.strip().lower())
-        # Whatever ends up here is going to the sampler as a tag, so it may hold
-        # only what a tag holds. A malformed WEARING (a str()ed JSON list, a
-        # trailing quote) must not mint `['sailor_uniform` as a token.
-        tag = re.sub(r"[^a-z0-9_-]", "", tag).strip("_-")
-        if tag and len(tag) >= 3:
-            missing.append(tag)
     # The posture is the other thing the notebook says and the weave drops.
     # Measured live: BEAT read "standing, holding the hem…" and the woven bag
     # came back with `trembling_fingertips, skirt_hem` and no posture at all —
@@ -3135,50 +3140,17 @@ def _scrub_invented_tags(session: dict[str, Any], tags: str) -> str:
 def _drop_garment_aliases(
     session: dict[str, Any], tags: str, sides: tuple[str, str],
 ) -> tuple[str, tuple[str, str]]:
-    """One garment, one name — read against the wardrobe that owns it.
-
-    The weave renames what it is given: WEARING said `blue sleeveless gown` and
-    the bag came back carrying `gown`, `blue_dress` and `sleeveless_dress` at
-    once. Three names is three garments to the sampler, and the spare two go to
-    whichever girl is nearest.
-
-    Each wardrobe is read on its own (`notebook.garment_aliases`), because the
-    other Muse's clothes are not renames of hers. On a solo shoot there is one
-    wardrobe and one bag.
-    """
+    """Thin wrapper — wardrobe reconcile owns aliases + leftovers + inject."""
     nb = notebook_mod.of(session)
-    w_a, w_b = str(nb.get("wearing") or ""), str(nb.get("wearing_b") or "")
-    if not (session.get("partner_character") or {}):
-        gone = notebook_mod.garment_aliases(tags, w_a)
-    elif sides[0] and sides[1]:
-        gone = (
-            notebook_mod.garment_aliases(sides[0], w_a)
-            | notebook_mod.garment_aliases(sides[1], w_b)
-        )
-    else:
-        # 分かれずに戻ってきた回。どちらの服なのか決められないので、
-        # **どちらの手帖も名乗っていない名前だけ**を落とす。すみれの
-        # `black cocktail dress` があるうちは、`blue_dress` は残る —— 誤って
-        # 相方の服を消すより、別名が一つ残るほうがまだ軽い。
-        heads = notebook_mod.wardrobe_heads(w_a) | notebook_mod.wardrobe_heads(w_b)
-        gone = {
-            t for t in (
-                notebook_mod.garment_aliases(tags, w_a)
-                | notebook_mod.garment_aliases(tags, w_b)
-            )
-            if brief_mod.garment_head(t) not in heads
-        }
-    if not gone:
-        return tags, sides
-
-    def _without(bag: str) -> str:
-        return ", ".join(
-            p.strip() for p in str(bag or "").split(",")
-            if p.strip() and identity.bare_tag(p) not in gone
-        )
-
-    logger.info("[muse] one garment under several names: %s", ", ".join(sorted(gone)))
-    return _without(tags), (_without(sides[0]), _without(sides[1]))
+    return notebook_mod.reconcile_wardrobe_tags(
+        tags,
+        wearing=str(nb.get("wearing") or ""),
+        wearing_b=str(nb.get("wearing_b") or ""),
+        struck=notebook_mod.struck_tokens(session),
+        banned=set(banned_tags(session)),
+        sides=sides,
+        partner=bool(session.get("partner_character") or {}),
+    )
 
 
 def _latin_names(session: dict[str, Any], scene: str) -> str:
@@ -3244,10 +3216,21 @@ def _apply_compiled_craft(
     craft = session.setdefault("craft", {})
     before_tags = str(craft.get("tags") or "")
     before_scene = str(craft.get("scene") or "")
-    tags, sides = _drop_garment_aliases(session, tags, sides)
+    # One wardrobe pass (struck/banned → aliases → leftovers → inject), shared
+    # with scrub. Posture / ledger / crew_look reinject stay beside it.
+    nb_wardrobe = notebook_mod.of(session)
+    tags, sides = notebook_mod.reconcile_wardrobe_tags(
+        tags,
+        wearing=str(nb_wardrobe.get("wearing") or ""),
+        wearing_b=str(nb_wardrobe.get("wearing_b") or ""),
+        struck=notebook_mod.struck_tokens(session),
+        banned=set(banned_tags(session)),
+        sides=sides,
+        partner=bool(session.get("partner_character") or {}),
+    )
     missing = _missing_wearing_tags(session, tags)
     if missing:
-        logger.info("[muse] weave forgot worn garments: %s", ", ".join(missing))
+        logger.info("[muse] weave forgot notebook authorities: %s", ", ".join(missing))
         tags = ", ".join([t for t in tags.split(",") if t.strip()] + missing)
     # Showrunner beat must lead the prose the sampler reads — weave padding
     # about air must never leave posture as an afterthought (or absent).
@@ -3493,7 +3476,31 @@ async def _run_duet_scripter(
         str(patch.get("wearing_drop") or "").strip()
     )
 
+    # Clerk first — VERIFY uses its answer. Fields + intent in one gather so
+    # the check still costs one call's latency, not two.
+    clerk_kind = ""
+    asked: set[str] = set()
+    if ollama is not None and not fold and str(text or "").strip():
+        asked, kind = await asyncio.gather(
+            chain.classify_fields(
+                ollama, note=str(text or "").strip(),
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            ),
+            chain.classify_intent(
+                ollama, note=str(text or "").strip(),
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            ),
+        )
+        # The clerk may RAISE a turn to a shot; it may never demote one.
+        clerk_kind = kind
+        if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
+            logger.info("[muse] clerk raised intent %r → %r", intent, kind)
+            intent = kind
+
     _meta_note = str(text or "").strip().upper()
+    # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes
+    # didn't). Casual with clerk=`none` skips — chit-chat that named no field
+    # should not buy a second compile.
     needs_verify = (
         not fold
         and str(text or "").strip()
@@ -3502,20 +3509,7 @@ async def _run_duet_scripter(
         and not _meta_note.startswith("REPAIR")
         and not _meta_note.startswith("FOLD")
         and (bool(open_before) or had_shot)
-        # ここを「画が動かなかったときだけ」に絞ろうとして、戻した。
-        # `test_shot_that_only_moves_frame_still_verifies_clothes` が捕まえた:
-        #
-        #     ノート  wearing: sailor uniform, cardigan / frame: close, upper
-        #     監督    「カーディガン脱いで。引いて全身に戻して」
-        #     1回目   frame は直したが cardigan を残した ← shot_patched は True
-        #     VERIFY  cardigan を落とした
-        #
-        # **repair とは役割が違う。** repair は clerk が名指しした欄が書かれた
-        # かどうかしか見ないので、「書かれたが中身が違う」を拾えない。二つに
-        # 分かれた指示の片方だけを実行する形は、この回だけが網になる。
-        #
-        # 呼び出しの本数を減らしたいのは事実（実撮影で後半が 90 秒超）。ただ
-        # 減らすならここではない。
+        and not (intent in ("casual", "") and not asked)
         and (
             (intent in ("casual", "") and not shot_patched)
             or intent in ("shot", "mixed")
@@ -3550,54 +3544,8 @@ async def _run_duet_scripter(
             notebook_mod.apply_patch(nb, patch)
             notebook_moved = int(nb.get("rev") or 0) > rev_before
 
-    # Did the compile answer the whole line? The clerk reads the showrunner's
-    # words on their own and says which fields have to move; that answer is
-    # checked against the patch. Measured, the compile answers some clauses of
-    # a long line and drops the rest — 「セーラーに麦わら帽子。ベンチに座って。
-    # 引きで全身。」came back with the camera rewritten and no hat, and nothing
-    # anywhere said so. One clause is fine; four is where it starts dropping.
-    #
-    # The check is a separate call on purpose. Six lines added to the compile
-    # contract about light stopped `beat` and `wearing` being written at all,
-    # in both rooms, on the very next run — a checker that cannot damage what
-    # it checks is worth more than a stricter contract.
-    clerk_kind = ""
-    if ollama is not None and not fold and str(text or "").strip():
-        # Both clerks at once — they read the same line and neither waits on
-        # the other, so the check costs one call's worth of time, not two.
-        asked, kind = await asyncio.gather(
-            chain.classify_fields(
-                ollama, note=str(text or "").strip(),
-                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
-            ),
-            chain.classify_intent(
-                ollama, note=str(text or "").strip(),
-                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
-            ),
-        )
-        # The clerk may RAISE a turn to a shot; it may never demote one. A
-        # direction read as chit-chat writes nothing and says nothing, which is
-        # the failure this is here for. A shot read as chit-chat by the clerk,
-        # meanwhile, would throw away an edit the compile actually made — so
-        # that direction stays shut until it is measured on its own.
-        clerk_kind = kind
-        if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
-            logger.info("[muse] clerk raised intent %r → %r", intent, kind)
-            intent = kind
-
-    # The patch itself is the last word on whether this turn moved the picture.
-    # A compile that rewrote `beat` and then labelled the turn `recall` would
-    # otherwise leave `chat_only` true: the notebook changes, the Muse talks
-    # about something else, and no render is asked for.
-    #
-    # Measured on the 30-pack (30 x 5): the scripter's own label is right 68%
-    # of the time when the contract does not spend words explaining the four
-    # intents, and 92% when it is simply derived from what was written.
-    # Explaining them in the contract does buy 93% — and costs the notebook
-    # itself, 96.0% down to 86.7%. This raises only, exactly like the clerk
-    # above: a turn that wrote a shot field is a shot.
-    else:
-        asked = set()
+    # Did the compile answer the whole line? Clerk already named the fields;
+    # repair only runs when a shot/mixed turn still misses them.
     if asked and intent in ("shot", "mixed"):
         missing = sorted(asked - set(patch))
         if missing:
@@ -6314,15 +6262,21 @@ async def _muse_reviews_weave(
 ) -> str:
     """Let her look at the bag before the render, and drop what she disowns.
 
-    She is the orchestrator of this shoot; the weave is a worker. Until now the
-    worker had the last word and she never saw its output at all — the tags
-    went from the notebook to the sampler with nobody in the picture checking
-    that they described her.
-
-    Subtractive only, and closed to the tags already present, so the worst a
-    bad review can do is make the bag slightly smaller. Never raises: a review
-    that fails leaves the bag exactly as the weave wrote it.
+    Subtractive only, and closed to the tags already present. Skipped when the
+    bag is already dense and shares nothing with struck — a second LLM every
+    weave was tax without a miss to catch.
     """
+    bag = str(tags or "").strip()
+    if not bag:
+        session["weave_review"] = []
+        return tags
+    struck = notebook_mod.struck_tokens(session)
+    have = {identity.bare_tag(p) for p in bag.split(",") if p.strip()}
+    thin = identity.craft_is_thin(bag, "")
+    overlaps_struck = bool(have & struck) if struck else False
+    if not thin and not overlaps_struck:
+        session["weave_review"] = []
+        return tags
     inputs = _inputs(session)
     nb = notebook_mod.of(session)
     try:
@@ -6445,22 +6399,17 @@ async def still_read_after_board(db, ollama, session_id: str) -> None:
 async def densify_craft_if_needed(
     db, ollama, session: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run Finisher once when craft is too thin (or notebook-marked dirty).
+    """Thicken craft before render.
 
-    Notebook sessions (both rooms) weave instead: the notebook is the shot, and
-    a weave replaces the tag bag whole. Finisher densify below is the legacy
-    seat-written path only.
+    Notebook sessions (both rooms) weave — Finisher densify is legacy
+    seat-written craft only. The old notebook densify scripter body under this
+    function was unreachable after the weave redirect and is gone on purpose.
     """
     if ollama is None:
         return session
     if uses_notebook(session):
-        # Notebook sessions weave. The Finisher densify body below is legacy
-        # seat-written craft only — unreachable here on purpose. Weave owns
-        # the bag so specialist tags are not wiped by an editor pass.
         return await weave_craft_if_needed(db, ollama, session)
-    # Legacy facet path composes instead of densifying. Notebook-primary duet
-    # keeps draft tags/scene from the scripter and thickens via Finisher.
-    if on_facets(session) and not uses_notebook(session):
+    if on_facets(session):
         return await compose_scene_if_needed(db, ollama, session)
     craft = session.get("craft") or {}
     prompt = str(craft.get("prompt") or "")
@@ -6468,90 +6417,12 @@ async def densify_craft_if_needed(
     if not prompt:
         return session
     dirty = bool(session.get("craft_dirty"))
-    # The notebook running ahead of the last compile is the same condition the
-    # UI already warns on (`notebookAhead` in MusePanel.vue). It was not checked
-    # here, so a turn that moved the notebook without compiling rendered the
-    # previous prompt — the outfit and the location from several turns ago.
     behind = int(notebook_mod.of(session).get("rev") or 0) > int(
         session.get("notebook_rev_compiled") or 0
     )
     if not dirty and not behind and not identity.craft_is_thin(prompt, scene):
         return session
     cfg = await get_runtime_config(db)
-    # Notebook path: ask the scripter to thicken from the notebook. A Finisher
-    # seat turn that returns only SAY would wipe a live compile — never do that.
-    if uses_notebook(session):
-        sid = session.get("session_id") or ""
-        locale = str(_inputs(session).get("locale") or "ja")
-        if sid:
-            events.publish(sid, {
-                "type": "scripter_working",
-                "status": "densify",
-                "message": (
-                    "空気、厚くしてる…" if locale.startswith("ja")
-                    else "Thickening the air…"
-                ),
-            })
-        partner_character = await _partner_character(db, session)
-        partner = bool(partner_character) or bool(
-            str(_inputs(session).get("partner_preset") or "").strip()
-        )
-        name_a, name_b = _muse_names(session, partner_character)
-        try:
-            result = await chain.run_scripter(
-                ollama,
-                notebook_block=notebook_mod.render(
-                    notebook_mod.of(session), name_a=name_a,
-                    name_b=name_b or ("Partner" if partner else ""),
-                ),
-                note=(
-                    "DENSIFY: expand TAGS (35–55) and CRAFT_SCENE (140–200 words) "
-                    "from the WHOLE notebook. Full replace — do not keep old tags. "
-                    "INTENT: shot. Absolute values. Do NOT rewrite notebook SHOT "
-                    "fields (scene/atmosphere/frame/wearing/beat) — only tags and "
-                    "craft_scene. English only for tags and craft_scene."
-                ),
-                transcript=_duet_transcript(session),
-                theme=str(_inputs(session).get("theme") or ""),
-                style=_style(session),
-                framing=_shot_framing(session),
-                partner=partner,
-                model=_text_model(_inputs(session)),
-                num_ctx=_num_ctx(_inputs(session), cfg),
-            )
-            # Densify must never rewrite SHOT notebook fields even if the model
-            # returns them — craft_scene holds the long prose.
-            _ = notebook_mod.strip_shot_keys(dict(result.get("patch") or {}))
-            tags = str(result.get("tags") or "")
-            scene_out = str(result.get("craft_scene") or "")
-            densify_ok = False
-            # Full compile only — never KEEP prior tags beside a partial densify.
-            if result.get("valid") and tags and scene_out:
-                if _apply_compiled_craft(
-                    session, tags, scene_out, sides=_weave_sides(result),
-                ):
-                    session["craft_dirty"] = False
-                    densify_ok = True
-            if not densify_ok:
-                session["craft_dirty"] = True
-        except Exception:
-            logger.warning("[muse] notebook densify failed; keeping draft",
-                           exc_info=True)
-            session["craft_dirty"] = True
-            densify_ok = False
-        if sid:
-            events.publish(sid, {
-                "type": "scripter_done",
-                "intent": "shot",
-                "compiled": bool(densify_ok),
-                "valid": bool(densify_ok),
-                "dirty": bool(session.get("craft_dirty")),
-            })
-        await session_db.save(db, session, publish=False)
-        # 主演撮り: notebook densify is the only path. 制作スタッフ: fall through
-        # to Finisher when the scripter densify did not land a compile.
-        if densify_ok or is_duet(session):
-            return session
 
     locale = str(_inputs(session).get("locale") or "ja")
     note = _chat_append(

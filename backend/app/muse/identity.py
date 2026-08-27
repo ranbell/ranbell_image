@@ -811,11 +811,11 @@ def assemble_positive(
     # style from sneaking in via WD14 leftovers in the same bag.
     if model_hair:
         banned = set(banned) | (HAIR_CUT_TAGS - model_hair)
-    crop = normalize_framing(framing)
-    if crop and crop != "auto":
-        banned = set(banned) | {
-            bare_tag(p) for p in framing_negative(crop).split(",") if p.strip()
-        }
+    # Opposite-crop bans used to live here AND in scrub. Two judges meant a
+    # framing tag the notebook named could vanish with no clear winner.
+    # Conflict drop is scrub-only (`drop_crops_not_in_frame`); assemble only
+    # injects the panel / notebook framing tags below. Negatives for the
+    # sampler still come from `runtime.negative_for` → `framing_negative`.
     seen = set(head) | set(lead)
 
     look: list[str] = []

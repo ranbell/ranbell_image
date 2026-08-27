@@ -782,6 +782,89 @@ def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = ""
     return ", ".join(kept)
 
 
+def _missing_wearing_items(
+    tags: str, *, wearing: str, wearing_b: str = "",
+    struck: set[str] | None = None, banned: set[str] | None = None,
+) -> list[str]:
+    """Garment heads the notebook names that the bag forgot."""
+    from .identity import tag_names
+
+    have = set(tag_names(tags))
+    have |= {t for tag in have for t in wearing_tokens(tag)}
+    gone = set(struck or ()) | {
+        str(t).strip().lower().replace(" ", "_") for t in (banned or ()) if str(t).strip()
+    }
+    missing: list[str] = []
+    wardrobes = " , ".join(x for x in (wearing, wearing_b) if x)
+    for item in re.split(r"[,，、;]", wardrobes):
+        tokens = wearing_tokens(item)
+        if not tokens or tokens & gone:
+            continue
+        if tokens & have:
+            continue
+        tag = re.sub(r"\s+", "_", item.strip().lower())
+        tag = re.sub(r"[^a-z0-9_-]", "", tag).strip("_-")
+        if tag and len(tag) >= 3:
+            missing.append(tag)
+            have.add(tag)
+            have |= tokens
+    return missing
+
+
+def reconcile_wardrobe_tags(
+    tags: str, *, wearing: str, wearing_b: str = "",
+    struck: set[str] | None = None, banned: set[str] | None = None,
+    sides: tuple[str, str] = ("", ""),
+    partner: bool = False,
+) -> tuple[str, tuple[str, str]]:
+    """One wardrobe pass: refuse → aliases → leftovers → inject forgotten clothes.
+
+    Scrub and `_apply_compiled_craft` used to run these as three separate looks
+    at the same wearing line; the bag drifted between them. One function, one
+    order, both callers.
+    """
+    from .identity import bare_tag
+
+    struck = set(struck or ())
+    banned_set = set(banned or ())
+    tags = filter_weave_tags(
+        tags, wearing=wearing, scene="", beat="", struck=struck,
+        wearing_b=wearing_b, beat_b="", frame="", banned=banned_set,
+    )
+    side_a, side_b = str(sides[0] or ""), str(sides[1] or "")
+
+    if not partner:
+        gone = garment_aliases(tags, wearing)
+    elif side_a and side_b:
+        gone = garment_aliases(side_a, wearing) | garment_aliases(side_b, wearing_b)
+    else:
+        heads = wardrobe_heads(wearing) | wardrobe_heads(wearing_b)
+        gone = {
+            t for t in (garment_aliases(tags, wearing) | garment_aliases(tags, wearing_b))
+            if brief.garment_head(t) not in heads
+        }
+
+    def _without(bag: str) -> str:
+        return ", ".join(
+            p.strip() for p in str(bag or "").split(",")
+            if p.strip() and bare_tag(p) not in gone
+        )
+
+    if gone:
+        tags = _without(tags)
+        side_a, side_b = _without(side_a), _without(side_b)
+
+    tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
+    missing = _missing_wearing_items(
+        tags, wearing=wearing, wearing_b=wearing_b,
+        struck=struck, banned=banned_set,
+    )
+    if missing:
+        parts = [p.strip() for p in tags.split(",") if p.strip()]
+        tags = ", ".join(parts + missing)
+    return tags, (side_a, side_b)
+
+
 def wardrobe_heads(wearing: str) -> set[str]:
     """The head noun of every item she has on — what her clothes ARE."""
     return {
@@ -909,12 +992,17 @@ def scrub_craft_tags(
     wearing_b: str = "", beat_b: str = "", frame: str = "",
     banned: set[str] | None = None,
 ) -> str:
-    """Struck, banned, leftover garments, and the opposite crop family."""
-    tags = filter_weave_tags(
-        tags, wearing=wearing, scene=scene, beat=beat, struck=struck,
-        wearing_b=wearing_b, beat_b=beat_b, frame=frame, banned=banned,
+    """Wardrobe reconcile, opposite crop family, and notebook-fight drops.
+
+    Struck / banned / aliases / leftovers / forgotten wearing share one pass
+    (``reconcile_wardrobe_tags``). Crop conflict lives only here — assemble
+    injects framing tags and does not re-ban the opposite family.
+    """
+    _ = (scene,)  # kept on the signature for callers that pass the whole shot
+    tags, _ = reconcile_wardrobe_tags(
+        tags, wearing=wearing, wearing_b=wearing_b,
+        struck=struck, banned=banned,
     )
-    tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
     tags = drop_crops_not_in_frame(tags, frame=frame)
     return drop_tags_that_fight_the_notebook(
         tags, frame=frame, beat=beat, beat_b=beat_b,

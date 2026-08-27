@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import chain, crew, identity, notebook, service
 from tests.muse.test_duet import _duet_session  # noqa: E402
-from tests.muse.test_duet_notebook import NotebookOllama, _current_note, _scripter_block  # noqa: E402
+from tests.muse.test_duet_notebook import (  # noqa: E402
+    NotebookOllama, _current_note, _fake_clerk_reply, _scripter_block,
+)
 from tests.muse.test_service import FakeDb  # noqa: E402
 
 
@@ -479,22 +481,26 @@ async def test_empty_shot_patch_still_verifies(monkeypatch):
         def generate_text_stream(self, prompt, **kw):
             self.calls.append({**kw, "prompt": prompt})
             system = str(kw.get("system") or "")
-            text = "SAY: うん。"
-            if "studio scripter" in system or "shot notebook" in system:
-                self.scripter_prompts.append(str(prompt))
-                self._n += 1
-                if self._n == 1:
-                    text = _scripter_block(intent="shot")
-                else:
-                    # 2回目は note を載せない（測って外した）。この回であることは
-                    # 呼び出しの順番で分かる。
-                    text = _scripter_block(
-                        intent="shot",
-                        scene="night classroom by the window",
-                        wearing="sailor uniform, cardigan",
-                        beat="standing, holding the hem",
-                        frame="close, upper body",
-                    )
+            clerk = _fake_clerk_reply(system, str(prompt))
+            if clerk is not None:
+                text = clerk
+            else:
+                text = "SAY: うん。"
+                if "studio scripter" in system or "shot notebook" in system:
+                    self.scripter_prompts.append(str(prompt))
+                    self._n += 1
+                    if self._n == 1:
+                        text = _scripter_block(intent="shot")
+                    else:
+                        # 2回目は note を載せない（測って外した）。この回であることは
+                        # 呼び出しの順番で分かる。
+                        text = _scripter_block(
+                            intent="shot",
+                            scene="night classroom by the window",
+                            wearing="sailor uniform, cardigan",
+                            beat="standing, holding the hem",
+                            frame="close, upper body",
+                        )
             async def _stream():
                 yield {"type": "token", "text": text}
             return _stream()
@@ -731,28 +737,32 @@ async def test_shot_that_restates_scene_still_verifies_clothes(monkeypatch):
         def generate_text_stream(self, prompt, **kw):
             self.calls.append({**kw, "prompt": prompt})
             system = str(kw.get("system") or "")
-            text = "SAY: うん。"
-            if "studio scripter" in system or "shot notebook" in system:
-                self.scripter_prompts.append(str(prompt))
-                self._n += 1
-                if self._n == 1:
-                    text = _scripter_block(
-                        intent="shot",
-                        scene="rooftop at dusk",
-                        wearing="sailor uniform, straw hat",
-                        beat="sitting on a bench",
-                        frame="wide shot",
-                    )
-                else:
-                    # 2回目は note を載せない（測って外した）。この回であることは
-                    # 呼び出しの順番で分かる。
-                    text = _scripter_block(
-                        intent="shot",
-                        scene="rooftop at dusk",
-                        wearing="sailor uniform, straw hat, cardigan",
-                        beat="sitting on a bench",
-                        frame="wide shot",
-                    )
+            clerk = _fake_clerk_reply(system, str(prompt))
+            if clerk is not None:
+                text = clerk
+            else:
+                text = "SAY: うん。"
+                if "studio scripter" in system or "shot notebook" in system:
+                    self.scripter_prompts.append(str(prompt))
+                    self._n += 1
+                    if self._n == 1:
+                        text = _scripter_block(
+                            intent="shot",
+                            scene="rooftop at dusk",
+                            wearing="sailor uniform, straw hat",
+                            beat="sitting on a bench",
+                            frame="wide shot",
+                        )
+                    else:
+                        # 2回目は note を載せない（測って外した）。この回であることは
+                        # 呼び出しの順番で分かる。
+                        text = _scripter_block(
+                            intent="shot",
+                            scene="rooftop at dusk",
+                            wearing="sailor uniform, straw hat, cardigan",
+                            beat="sitting on a bench",
+                            frame="wide shot",
+                        )
             async def _stream():
                 yield {"type": "token", "text": text}
             return _stream()
@@ -799,28 +809,32 @@ async def test_shot_that_only_moves_frame_still_verifies_clothes(monkeypatch):
         def generate_text_stream(self, prompt, **kw):
             self.calls.append({**kw, "prompt": prompt})
             system = str(kw.get("system") or "")
-            text = "SAY: うん。"
-            if "studio scripter" in system or "shot notebook" in system:
-                self.scripter_prompts.append(str(prompt))
-                self._n += 1
-                if self._n == 1:
-                    text = _scripter_block(
-                        intent="shot",
-                        scene="night classroom",
-                        wearing="sailor uniform, cardigan",
-                        beat="standing",
-                        frame="wide full body",
-                    )
-                else:
-                    # 2回目は note を載せない（測って外した）。この回であることは
-                    # 呼び出しの順番で分かる。
-                    text = _scripter_block(
-                        intent="shot",
-                        scene="night classroom",
-                        wearing="sailor uniform",
-                        beat="standing",
-                        frame="wide full body",
-                    )
+            clerk = _fake_clerk_reply(system, str(prompt))
+            if clerk is not None:
+                text = clerk
+            else:
+                text = "SAY: うん。"
+                if "studio scripter" in system or "shot notebook" in system:
+                    self.scripter_prompts.append(str(prompt))
+                    self._n += 1
+                    if self._n == 1:
+                        text = _scripter_block(
+                            intent="shot",
+                            scene="night classroom",
+                            wearing="sailor uniform, cardigan",
+                            beat="standing",
+                            frame="wide full body",
+                        )
+                    else:
+                        # 2回目は note を載せない（測って外した）。この回であることは
+                        # 呼び出しの順番で分かる。
+                        text = _scripter_block(
+                            intent="shot",
+                            scene="night classroom",
+                            wearing="sailor uniform",
+                            beat="standing",
+                            frame="wide full body",
+                        )
             async def _stream():
                 yield {"type": "token", "text": text}
             return _stream()

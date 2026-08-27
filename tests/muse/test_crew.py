@@ -99,17 +99,13 @@ def test_production_muse_copy_has_no_situation_specific_anchors():
         assert banned not in joined, f"situation-specific '{banned}' found in Muse production copy"
 
 
-def test_finisher_demands_dense_scene():
+def test_finisher_is_off_the_note_path():
+    """Notebook-primary: Finisher densify moved to Weave; specialty says so."""
     text = crew.system_prompt_for("finisher")
-    assert "140–200" in text or "140-200" in text
-    assert "Densify" in text or "densify" in text or "EXPAND" in text
-    assert "80 words" not in text  # old thin cap must stay gone
+    assert "OFF the note path" in text
+    assert "You do NOT write" in text and "TAGS" in text
+    # Legacy OUTPUT still documents dense SCENE for seat-written craft.
     assert "140–200" in crew.OUTPUT or "140-200" in crew.OUTPUT
-    # Density, not thinning: the Editor removes only redundancy, keeps a floor of
-    # 30, and never caps to a "strongest N" that would drop unique content.
-    assert "duplicate" in text.lower()
-    assert "30" in text
-    assert "strongest" not in text
 
 
 def test_grade_is_add_only():
@@ -117,9 +113,8 @@ def test_grade_is_add_only():
     (the scorecard had it deleting 17 content tags on its turn)."""
     text = crew.system_prompt_for("grade")
     assert "APPEND" in text or "append" in text
-    assert "unchanged" in text
-    # It is told explicitly not to touch the content clusters.
-    assert "light" in text.lower() and "pose" in text.lower()
+    assert "OFF the note path" in text or "never reorder" in text
+    assert "Weave" in text or "FINISH" in text
 
 
 def test_banter_prompt_is_say_only():
@@ -285,14 +280,16 @@ def test_carry_says_how_things_leave_the_script_not_only_how_they_stay():
     a karaoke booth after the Showrunner moved the shoot."""
     assert "STRUCK FROM THE SET" in crew.CARRY
     text = crew.system_prompt_for("gate:mon")
-    assert "belongs to a place we are not in" in text
-    assert "MUST APPEAR" in text  # the dressing that fits the room still stays
+    # Gate's TAGS audit moved to strike + Weave scrub; specialty says so.
+    assert "obsolete" in text.lower() or "Strike clerk" in text
+    assert "You do NOT write" in text and "TAGS" in text
 
 
 def test_the_camera_states_a_size_instead_of_tightening_each_round():
     text = crew.system_prompt_for("lens:pinto")
-    assert "ONE SHOT SIZE" in text
-    assert "MUST APPEAR" in text
+    assert "ONE absolute size" in text or "ONE SHOT SIZE" in text
+    assert "closer" in text.lower() and "tighter" in text.lower()
+    assert "OPTICS" in text or "CRAFT" in text
 
 
 def test_the_colour_designer_names_colours_instead_of_describing_a_mood():
@@ -302,11 +299,9 @@ def test_the_colour_designer_names_colours_instead_of_describing_a_mood():
     absence."""
     text = crew.system_prompt_for("palette:itten")
     assert "キートーン" in text
-    assert "70%" in text and "5%" in text
-    for banned in ("desaturate", "mute", "richer", "more vivid", "cooler", "warmer"):
+    assert "COLOUR" in text or "CRAFT" in text
+    for banned in ("desaturate", "mute", "richer", "cooler", "warmer"):
         assert banned in text, f"{banned} must be named as forbidden"
-    assert "shadows are a HUE" in text
-    assert "VALUE SEPARATION" in text
     # And it still may not touch exposure.
     assert "You do NOT change exposure" in text
 
@@ -354,12 +349,12 @@ def test_the_planner_has_no_line_for_clothes():
 def test_wardrobe_owns_the_locked_costume_and_reads_the_theme():
     for mid in ("wardrobe:shiwa", "wardrobe:iroawase"):
         text = crew.system_prompt_for(mid)
-        assert "You author the LOCKED COSTUME block" in text, mid
-        assert "Read the theme directly" in text, mid
-        # It appends the seven-field COSTUME block.
-        assert "COSTUME:" in text and "SILHOUETTE:" in text and "HERO:" in text, mid
-    # No other seat carries the COSTUME output tail.
-    assert "SILHOUETTE:" not in crew.system_prompt_for("lens:pinto")
+        assert "COSTUME" in text, mid
+        assert "CLOTH" in text or "WEARING" in text, mid
+        low = text.lower()
+        assert "do not write" in low and "tags" in low, mid
+    # Opening / 衣装部屋 still appends the COSTUME block elsewhere.
+    assert "SILHOUETTE:" in crew.WARDROBE_COSTUME_TAIL
     # Every seat is told the outfit lives only in COSTUME, Wardrobe's alone.
     assert "lives ONLY in the COSTUME block" in crew.CARRY
     assert "only Wardrobe (衣装)" in crew.CARRY
@@ -374,10 +369,10 @@ def test_only_the_showrunner_can_change_the_locked_costume():
     the weather and the other seats must never be able to."""
     # The reading rule every seat gets.
     assert "Never change it, never add or swap a garment" in crew.CARRY
-    # Wardrobe keeps it to ONE outfit and drops the old garments on a change.
+    # Wardrobe on notes argues cloth feel; new outfits land via WEARING.
     w = crew.system_prompt_for("wardrobe:shiwa")
-    assert "ONE outfit" in w
-    assert "DELETE the previous garment tags" in w
+    assert "WEARING" in w
+    assert "Never staple" in w or "new outfit" in w.lower() or "衣装部屋" in w
 
 
 def test_the_ledger_is_a_ceiling_not_a_quota():

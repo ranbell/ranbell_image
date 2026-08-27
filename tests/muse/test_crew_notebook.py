@@ -666,7 +666,13 @@ def test_removed_garment_is_not_put_back_by_coverage():
         session, prev_wearing="sailor uniform, straw hat",
         new_wearing="sailor uniform",
     )
-    assert service._missing_wearing_tags(session, "1girl, sailor_uniform") == []
+    tags, _ = notebook.reconcile_wardrobe_tags(
+        "1girl, sailor_uniform",
+        wearing="sailor uniform",
+        struck=notebook.struck_tokens(session),
+        banned={"straw_hat"},
+    )
+    assert "straw_hat" not in tags
 
 
 def test_posture_stem_always_reaches_the_tags():
@@ -860,8 +866,12 @@ def test_the_partner_wardrobe_is_restored_too():
     notebook.apply_patch(notebook.of(session), {
         "wearing": "professional blouse", "wearing_b": "linen apron",
     })
-    missing = service._missing_wearing_tags(session, "2girls, professional_blouse")
-    assert "linen_apron" in missing
+    tags, _ = notebook.reconcile_wardrobe_tags(
+        "2girls, professional_blouse",
+        wearing="professional blouse", wearing_b="linen apron",
+        partner=True,
+    )
+    assert "linen_apron" in tags
 
 
 def test_each_muse_wears_only_her_own_side_of_the_notebook():

@@ -118,8 +118,14 @@ def test_framing_from_phrase_last_match_wins():
     assert identity.framing_from_phrase("寄って。顔と上半身") == "upper_body"
     assert identity.framing_from_phrase("寄って横顔") == "face_closeup"
     assert identity.framing_from_phrase("eye level") == "auto"
+    # Crop conflict is scrub's job; assemble only injects framing tags.
+    scrubbed = notebook.scrub_craft_tags(
+        "cardigan, wide_shot, close_up",
+        wearing="cardigan", scene="classroom", beat="standing",
+        struck=set(), frame="wide full body",
+    )
     pos = identity.assemble_positive(
-        ["1girl"], "cardigan, wide_shot, close_up", "A classroom.",
+        ["1girl"], scrubbed, "A classroom.",
         framing="full_body",
     )
     low = pos.lower().replace(" ", "_")
