@@ -98,7 +98,7 @@ def of(session: dict[str, Any]) -> dict[str, Any]:
 
 def has_shot(nb: dict[str, Any]) -> bool:
     return any(str(nb.get(k) or "").strip() for k in (
-        "scene", "frame", "wearing", "beat", "atmosphere", "light",
+        "scene", "bg", "frame", "wearing", "beat", "atmosphere", "light",
     ))
 
 
@@ -260,6 +260,8 @@ def summary_for_muse(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") 
     for label, key in (
         ("Atmosphere", "atmosphere"),
         ("Place", "scene"),
+        ("BG", "bg"),
+        ("Light", "light"),
         ("Camera", "frame"),
     ):
         val = str(nb.get(key) or "").strip()
@@ -436,6 +438,38 @@ def posture_stem(beat: str) -> str:
         if any(w in text for w in words):
             return tag
     return ""
+
+
+def ensure_beat_leads_scene(
+    scene: str, *, beat: str, beat_b: str = "",
+) -> str:
+    """If craft_scene forgot the notebook beat, put the body first.
+
+    Why: Weave was rewarded for long air/cloth prose and often buried or
+    omitted the Showrunner's posture. pose_intent stored the beat but never
+    reached Comfy — only craft_scene did. This is the hard floor: the beat
+    the notebook already named must open the prose the sampler reads.
+    """
+    body = str(scene or "").strip()
+    leads: list[str] = []
+    for raw in (beat, beat_b):
+        phrase = coerce_plain_phrase(raw)
+        if not phrase:
+            continue
+        stem = posture_stem(phrase)
+        low = body.lower()
+        # Already present as stem or as a clear substring of the beat phrase.
+        if stem and stem in low:
+            continue
+        key = phrase.lower()
+        if len(key) >= 8 and key[:40] in low:
+            continue
+        # One short English lead-in the sampler can act on.
+        leads.append(phrase.rstrip(".") + ".")
+    if not leads:
+        return body
+    head = " ".join(leads)
+    return f"{head} {body}".strip() if body else head
 
 
 def _same_garment(a: str, b: str) -> bool:
@@ -641,8 +675,18 @@ _QUALITY_TAG_KEEP = {
 def filter_weave_tags(
     tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
     wearing_b: str = "", beat_b: str = "", frame: str = "",
+    banned: set[str] | None = None,
 ) -> str:
-    """Drop struck tokens and shot nouns that left the notebook. Quality tags stay."""
+    """Drop struck / banned tokens. Shot nouns are reconciled by sibling filters.
+
+    ``wearing`` / ``scene`` / ``beat`` / ``frame`` stay on the signature so
+    callers can pass the whole notebook context in one place; garment, crop,
+    and notebook-fight passes live in ``scrub_craft_tags``. Banned used to be
+    enforced only on seat turns — weave could write a refused tag straight
+    back into the bag the Showrunner had already struck from the picture.
+    """
+    _ = (wearing, scene, beat, wearing_b, beat_b, frame)
+    refuse = {str(t).strip() for t in (banned or ()) if str(t).strip()}
     kept: list[str] = []
     seen: set[str] = set()
     for part in str(tags or "").split(","):
@@ -654,6 +698,8 @@ def filter_weave_tags(
         if not key or key in seen:
             continue
         if struck and tag_mentions_struck(tok, struck):
+            continue
+        if key in refuse:
             continue
         seen.add(key)
         kept.append(tok)
@@ -861,11 +907,12 @@ def drop_tags_that_fight_the_notebook(
 def scrub_craft_tags(
     tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
     wearing_b: str = "", beat_b: str = "", frame: str = "",
+    banned: set[str] | None = None,
 ) -> str:
-    """Struck, leftover garments, and the opposite crop family — keep quality tags."""
+    """Struck, banned, leftover garments, and the opposite crop family."""
     tags = filter_weave_tags(
         tags, wearing=wearing, scene=scene, beat=beat, struck=struck,
-        wearing_b=wearing_b, beat_b=beat_b, frame=frame,
+        wearing_b=wearing_b, beat_b=beat_b, frame=frame, banned=banned,
     )
     tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
     tags = drop_crops_not_in_frame(tags, frame=frame)

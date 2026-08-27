@@ -322,12 +322,16 @@ def test_both_colourists_state_a_key_rather_than_a_direction_of_change():
 def test_the_choreographer_no_longer_optimises_against_standing_still():
     """The catchphrase was「棒立ちに見えたら負けだ」and that is what the seat
     optimised: one more degree of lean every round until the hips were above
-    the shoulders."""
+    the shoulders. Notebook-primary spine proposes BODY via CRAFT — still must
+    refuse extreme / stacked tension, and never chase "not standing still".
+    """
     text = crew.system_prompt_for("spine:bane")
     assert "棒立ち" not in text
-    for banned in ("arched_back", "hunched_over", "uninhibited_posture"):
-        assert banned in text, banned
-    assert "NO emphasis on posture tags" in text
+    assert "BELIEVABLE" in text
+    assert "Ordinary is correct" in text
+    assert "arched_back" in text
+    assert "BODY" in text
+    assert "TAGS or SCENE" in text  # must not invent classical TAGS authorship
     assert crew.MUSES["spine:bane"]["flavor_tags"] == []
 
 
@@ -430,8 +434,11 @@ def test_every_shipped_look_is_distinguishable_in_tags():
 
 def test_the_weave_is_told_the_look_governs_the_whole_bag():
     from app.muse import chain
-    assert "THE LOOK IS NOT A TAG, IT IS HOW YOU WRITE" in chain.SCRIPTER_WEAVE_SYSTEM
+    # Look colours word choice; it must not licence air-padding over the beat.
+    assert "THE LOOK IS HOW YOU WRITE, NOT WHAT YOU PAD WITH" in chain.SCRIPTER_WEAVE_SYSTEM
     assert "ROOM LEANING" in chain.SCRIPTER_WEAVE_SYSTEM
+    assert "FIRST DUTY — THE BODY" in chain.SCRIPTER_WEAVE_SYSTEM
+    assert "no floor" in chain.SCRIPTER_WEAVE_SYSTEM.lower()
 
 
 def test_every_seat_that_writes_tags_is_told_how_to_write_lettering():

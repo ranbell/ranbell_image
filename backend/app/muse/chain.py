@@ -891,7 +891,7 @@ _NOTEBOOK_REVIEW_RE = re.compile(r"(?im)^[\s>*_-]*REWRITE[\s*_]*[:：]\s*(.*)$")
 # What she may ask to have rewritten. `atmosphere` is deliberately absent: it is
 # mood, the one field nobody is directing turn by turn, and letting her reopen
 # it every turn would make the shoot wander.
-RESTATE_FIELDS = ("scene", "light", "frame", "wearing", "beat")
+RESTATE_FIELDS = ("scene", "bg", "light", "frame", "wearing", "beat")
 
 
 def parse_notebook_review(raw: str) -> list[str]:
@@ -1681,9 +1681,16 @@ You do not rewrite SHOT fields.
 
 LANGUAGE: English only for tags and craft_scene.
 
+WHY YOU EXIST:
+The Showrunner already decided the shot in the notebook. Your job is to make
+that decision readable to the sampler — especially WHAT HER BODY IS DOING.
+A weave that pads air and cloth while the posture stays vague has failed,
+even at 200 words. A weave that makes the beat unmistakable has succeeded,
+even at 70.
+
 SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
-quality of that inventory (light, optics, colour, air, cloth, finish) — never
-extra inventory. No theme, no chat, no photo.
+quality of that inventory (light, optics, colour, air, cloth, finish, body) —
+never extra inventory. No theme, no chat, no photo.
 
 Read each field for what it owns. The gaze is FRAME's — if BEAT still carries
 an old one, FRAME is the one that is current, because that is the field the
@@ -1691,71 +1698,59 @@ showrunner's directions are written into. Do not put both in the bag: a bag
 that says `looking_at_viewer` while the prose has her eyes on the book is one
 instruction contradicting itself, and the sampler resolves it by coin flip.
 
-THE LOOK IS NOT A TAG, IT IS HOW YOU WRITE:
-- LOOK, when present, is the room's agreed rendering. It governs the WHOLE bag
-  and the whole of craft_scene, not one tag at the front.
-- Choose the words that look would use. Cel shading wants `cel_shading`,
-  `flat_color`, clean edges and named blocks of colour; a semi-realistic
-  rendering wants `realistic`, `detailed_skin`, `soft_shading`, and prose about
-  how light sits on a surface. The same shot, written twice, should not come
-  out as the same bag.
-- ROOM LEANING, when present, is what this particular crew tends to like. It is
-  a leaning, not an order: follow it where the shot allows, drop it where it
-  fights the notebook or the Showrunner.
+FIRST DUTY — THE BODY (BEAT / beat_b, and CREW LOOK BODY when present):
+- craft_scene opens on posture. Stem first (sitting / standing / kneeling /
+  crouching), then where the weight sits, what the hands do, what she holds,
+  how the torso turns, what the face is doing as FRAME allows.
+- Tags must name that same posture (`sitting`, `leaning_forward`,
+  `hands_on_own_chest`, …). A bag full of light and cloth with no posture
+  tag is a miss.
+- Partner shoots: each girl's body in her own line of prose and in tags_a /
+  tags_b. Never leave one of them as a prop.
 
-THE CAMERA IS NOT IN THE PICTURE:
-- You are describing the photograph, not the shoot. Never write "the camera"
-  as the thing doing something ("the camera lingers", "we push in"). Say what
-  the frame shows: "a close-up holds her face".
-- Never tag the apparatus — `handheld_camera`, `camera`, `viewfinder`,
-  `tripod`, `taking_picture`. Those put a camera in her hands. Distance,
-  angle and focus are `close-up`, `from_above`, `depth_of_field`,
-  `motion_blur`. Only tag a camera when the notebook says she is holding one.
-- Never write her name, in any language, as a tag. Tags are ASCII danbooru
-  names; who she is comes from her identity tags, not from the bag.
-
-SAY IT IN TAGS THE SAMPLER KNOWS:
-- Ordinary danbooru tags, underscored. `from_above` — not `overhead_shot`.
-  `looking_at_viewer`, `backlighting`, `rim_light`, `depth_of_field`,
-  `film_grain`, `cel_shading`, `wet_clothes`, `barefoot`.
-- Do not mint a compound nobody has ever tagged: `window_desk`,
-  `weight_leaning`, `cable-stitch_tension`, `expectant_atmosphere` are words,
-  not tags. If the idea has no tag, say it in craft_scene instead — the prose
-  is where the wording belongs.
-- One idea per tag. A clause with three nouns in it is prose.
-
-THICKEN QUALITY, NOT INVENTORY:
-- Unpack what is already named: cloth (knit, drape, folds), light (how it
-  falls, shadow length), air, camera, eyes and hands.
-- LIGHT is a notebook field now. Whatever it says is in this picture: put it
-  in the tags (`backlighting`, `rim_light`, `dappled_sunlight`, `dim_lighting`)
-  and let the prose say how it falls. A shot whose LIGHT reads "one lantern,
-  everything else dark" must not come back lit like an overcast afternoon.
-- If wearing says "thin cardigan", write cardigan + fabric + folds — not a hat.
-- **ONE NAME PER GARMENT.** Call it what the notebook calls it — the same noun,
-  in the tags AND in the prose, once. A gown stays a gown; writing `gown` in one
-  place and `blue_dress` in another does not describe it twice, it puts two
-  garments in the picture, and with two people in frame the spare one is worn by
-  whoever is nearest. Colour and cut belong on that one noun, not on a second.
+SECOND — PLACE, LIGHT, CLOTHES (named, not invented):
+- SCENE / BG / LIGHT / WEARING become tags and short clauses that support the
+  body, not essays that bury it.
+- LIGHT is a notebook field. Put it in tags (`backlighting`, `rim_light`,
+  `dappled_sunlight`, `dim_lighting`) and one clause of how it falls. A shot
+  whose LIGHT reads "one lantern, everything else dark" must not come back
+  lit like an overcast afternoon.
+- **ONE NAME PER GARMENT.** Call it what the notebook calls it — same noun in
+  tags and prose, once. Colour and cut on that noun, never a second garment.
 - If beat names a bench, the bench may be tagged. Do not add a vending machine.
 - Do not add clothes, hats, lanterns, animals, or furniture the notebook
-  does not name.
-- Struck items listed in the prompt must not appear, including no_hat forms.
+  does not name. Struck items must not appear, including no_hat forms.
 - Crop must match FRAME: wide/full-body shots do not also get close_up;
   zoom/close/upper shots do not also get wide_shot or full_body.
 
+THE LOOK IS HOW YOU WRITE, NOT WHAT YOU PAD WITH:
+- LOOK, when present, colours word choice (cel → `cel_shading`, `flat_color`;
+  semi-real → `realistic`, `soft_shading`). It is not a licence to write a
+  paragraph about air instead of the pose.
+- ROOM LEANING is a leaning, not an order.
+
+THE CAMERA IS NOT IN THE PICTURE:
+- Describe the photograph, not the shoot. Never "the camera lingers" — say
+  "a close-up holds her face".
+- Never tag the apparatus (`handheld_camera`, `camera`, `viewfinder`,
+  `tripod`, `taking_picture`). Distance and angle are `close-up`,
+  `from_above`, `depth_of_field`, `motion_blur`.
+- Never write her name, in any language, as a tag.
+
+SAY IT IN TAGS THE SAMPLER KNOWS:
+- Ordinary danbooru tags, underscored. `from_above` — not `overhead_shot`.
+- Do not mint compounds nobody has tagged (`window_desk`, `weight_leaning`,
+  `expectant_atmosphere`). If it has no tag, say it in craft_scene.
+- One idea per tag. A clause with three nouns is prose.
+
 HOW MUCH TO WRITE:
-- Tags: 35–55 is the room, not a target. Do not invent nouns to hit a count.
-- craft_scene: **180 words is the floor, 260 the ceiling.** This used to read
-  "at most 140–200 words", which is only a ceiling — and the prose came back
-  at a median of 126, under even the low end. The picture was thinner for it.
-- The prose is where the picture gets its detail. Tags name what is there;
-  the sentences say how it looks — how the cloth falls and catches light,
-  what the air in the room is doing, where the shadows land, what her face is
-  doing, how her weight sits. Every one of those is a thing the image model
-  can draw and will not draw if nobody says it.
-- Write about what the notebook already names. Length comes from looking
-  harder at the same shot, never from adding things to it.
+- Tags: 25–45 is the room, not a target. Do not invent nouns to hit a count.
+- craft_scene: **no floor**. Write until the body is unmistakable, then stop.
+  Typical good work is 60–140 words. Ceiling 180. Padding cloth, air, and
+  shadow to look "rich" is a failure mode this studio already measured — it
+  buried the Showrunner's beat under atmosphere.
+- Order of craft_scene: body → clothes-as-worn → light on that body → place.
+  Never the reverse.
 
 Partner shoots: tags_shared + tags_a + tags_b (never one mixed bag).
 Solo: tags only.
@@ -1765,7 +1760,6 @@ Leave those keys omitted or empty. English only.
 
 Respond with a single JSON object matching the schema.
 """.strip()
-
 SCRIPTER_VERIFY_NOTE = (
     "VERIFY: SHOWRUNNER'S LATEST LINE below is the showrunner's actual words "
     "this turn — not this VERIFY header. Re-read that line against NOTEBOOK NOW. "
@@ -1787,8 +1781,9 @@ SCRIPTER_FOLD_NOTE = (
     "FOLD: The table just spoke. NOTEBOOK NOW already has the showrunner's "
     "latest direction from this turn. SHOWRUNNER'S LATEST LINE below is the "
     "showrunner's actual words this turn — not this FOLD header. "
-    "Read the latest Muse SAY and MUSE CARD, and the crew's lines from this "
-    "turn in the conversation. A seat that names a concrete body detail — how "
+    "Read the latest Muse SAY and MUSE CARD (when present), and the crew's "
+    "lines from this turn in the conversation — including any BODY craft. "
+    "A seat that names a concrete body detail — how "
     "the weight sits, where the hands go, the beat before she turns — is "
     "proposing it to you, and it belongs in beat if it does not contradict "
     "the showrunner. They cannot write the notebook; you can. "
@@ -1801,9 +1796,9 @@ SCRIPTER_FOLD_NOTE = (
     "props onto the sit/stand/kneel/crouch stem already in NOTEBOOK NOW — never "
     "replace that stem with facing camera. Do not patch scene, wearing, frame, "
     "atmosphere or vibe. Do fold uncontradicted body action from CARD "
-    "BEAT and SAY into beat. Absolute finished beat, not a paragraph. Intent "
-    "shot if beat gained detail, else casual with no SHOT edits. Do not invent "
-    "clothes. Do not emit tags."
+    "BEAT, crew BODY, and SAY into beat. Absolute finished beat, not a paragraph. "
+    "Intent shot if beat gained detail, else casual with no SHOT edits. Do not "
+    "invent clothes. Do not emit tags."
 )
 
 def scripter_repair_note(missing: Iterable[str]) -> str:
@@ -1848,6 +1843,8 @@ The parts, and nothing outside this list:
   frame    — the CAMERA: how close, the angle, what is inside the crop
   scene    — WHERE she is and WHAT HOUR it is
   light    — WHERE the light comes from and HOW HARD it is
+  bg       — what ELSE is in frame behind/around her: buildings, extras, props
+             that are not on her body
 
 How to decide:
 - A line that keeps a part unchanged still names it. "Keep the framing close"
@@ -1877,7 +1874,7 @@ Three things that are easy to miss:
   `scene`. Never answer none just because the line starts as chit-chat.
 """.strip()
 
-CLASSIFY_FIELDS = ("wearing", "beat", "frame", "scene", "light")
+CLASSIFY_FIELDS = ("wearing", "beat", "frame", "scene", "light", "bg")
 
 # The same clerk, asked what KIND of turn this is. The compile decides this
 # today, inside the call that also has to write the shot — a sorting job wedged
@@ -2601,9 +2598,10 @@ async def run_scripter(
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (
                 "WEAVE: expand TAGS and CRAFT_SCENE from the notebook only. "
-                "Thicken quality (cloth, light, air, camera, eyes/hands) of "
-                "what is already named. Do not add inventory. Do not rewrite "
-                "SHOT. Ceilings 35–55 tags / 140–200 words — not quotas. "
+                "FIRST the body from BEAT (posture, weight, hands, held props) "
+                "— then clothes, light, place. Do not pad air/cloth to fill "
+                "space. Do not add inventory. Do not rewrite SHOT. "
+                "Tags 25–45 room / craft_scene no floor, ceiling 180 words. "
                 "INTENT: shot. English only."
             ),
             "Partner Muse: tags_shared + tags_a + tags_b." if partner else

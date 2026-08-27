@@ -3249,10 +3249,18 @@ def _apply_compiled_craft(
     if missing:
         logger.info("[muse] weave forgot worn garments: %s", ", ".join(missing))
         tags = ", ".join([t for t in tags.split(",") if t.strip()] + missing)
+    # Showrunner beat must lead the prose the sampler reads — weave padding
+    # about air must never leave posture as an afterthought (or absent).
+    nb_now = notebook_mod.of(session)
+    scene = notebook_mod.ensure_beat_leads_scene(
+        scene,
+        beat=str(nb_now.get("beat") or ""),
+        beat_b=str(nb_now.get("beat_b") or ""),
+    )
     craft["tags"] = tags
     craft["scene"] = scene
     craft["tags_a"], craft["tags_b"] = str(sides[0] or ""), str(sides[1] or "")
-    craft["pose_intent"] = str((notebook_mod.of(session).get("beat") or ""))[:240]
+    craft["pose_intent"] = str((nb_now.get("beat") or ""))[:240]
     craft["prompt"] = identity.assemble_positive(
         _identity_tags(session), tags, scene,
         framing=_shot_framing(session), style=_style(session),
@@ -3755,7 +3763,7 @@ async def _run_duet_scripter(
     # asking for a take.
     said_intent = intent          # 部屋が「その一言をどう読んだか」。記録に使う
     if patch and intent not in ("shot", "mixed"):
-        moved = [k for k in ("scene", "light", "frame", "wearing", "beat",
+        moved = [k for k in ("scene", "bg", "light", "frame", "wearing", "beat",
                              "wearing_b", "beat_b") if k in patch]
         if moved:
             logger.info("[muse] patch raised intent %r → shot (%s)",
@@ -4618,9 +4626,12 @@ async def _fold_muse_after_talk(
         if str(session.get("scripter_intent") or "") == "recall":
             _stage(session, "折り込み（recall なので走らず）", time.monotonic())
             return
-        if not str(session.get("muse_card") or "").strip():
-            _stage(session, "折り込み（CARD が無く走らず）", time.monotonic())
-            return
+        # CARD used to gate the whole fold. When the Lead skipped CARD, every
+        # body proposal from 演出/振付 in SAY died in chat — the Showrunner
+        # heard the room commit to a posture and the notebook never moved.
+        # Fold already forbids inventing clothes/place/crop and keeps the
+        # first compile's stem; an empty fold is cheap, a skipped fold loses
+        # the beat the room just named.
         line = str(user_text or "").strip()
         try:
             began = time.monotonic()
@@ -6185,7 +6196,7 @@ def _warn_if_craft_behind(session: dict[str, Any]) -> bool:
 
 
 def _scrub_notebook_craft(session: dict[str, Any]) -> None:
-    """Drop struck / leftover clothes / opposite crop from the craft bag."""
+    """Drop struck / banned / leftover clothes / opposite crop from the craft bag."""
     nb = notebook_mod.of(session)
     craft = session.setdefault("craft", {})
     tags = notebook_mod.scrub_craft_tags(
@@ -6197,6 +6208,7 @@ def _scrub_notebook_craft(session: dict[str, Any]) -> None:
         wearing_b=str(nb.get("wearing_b") or ""),
         beat_b=str(nb.get("beat_b") or ""),
         frame=str(nb.get("frame") or ""),
+        banned=set(banned_tags(session)),
     )
     if tags != str(craft.get("tags") or ""):
         craft["tags"] = tags
@@ -6263,6 +6275,7 @@ async def weave_craft_if_needed(
             wearing_b=str(nb.get("wearing_b") or ""),
             beat_b=str(nb.get("beat_b") or ""),
             frame=str(nb.get("frame") or ""),
+            banned=set(banned_tags(session)),
         )
         scene_out = str(result.get("craft_scene") or "")
         if result.get("valid") and tags and scene_out:
@@ -6441,6 +6454,9 @@ async def densify_craft_if_needed(
     if ollama is None:
         return session
     if uses_notebook(session):
+        # Notebook sessions weave. The Finisher densify body below is legacy
+        # seat-written craft only — unreachable here on purpose. Weave owns
+        # the bag so specialist tags are not wiped by an editor pass.
         return await weave_craft_if_needed(db, ollama, session)
     # Legacy facet path composes instead of densifying. Notebook-primary duet
     # keeps draft tags/scene from the scripter and thickens via Finisher.
@@ -6778,7 +6794,7 @@ async def approve_and_shoot(
         "theme": str(inputs.get("theme") or ""),
         "notebook": {
             k: nb.get(k) for k in (
-                "atmosphere", "scene", "frame", "wearing", "beat",
+                "atmosphere", "scene", "bg", "light", "frame", "wearing", "beat",
                 "wearing_b", "beat_b", "vibe", "open",
             )
         } if nb else {},

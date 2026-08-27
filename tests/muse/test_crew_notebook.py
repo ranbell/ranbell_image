@@ -470,10 +470,14 @@ def test_craft_slots_have_one_owner_each():
     assert crew.craft_slot("lens:pinto") == "OPTICS"
     # 服そのものはノートの WEARING（所有者は台本）。衣装席は生地だけ。
     assert crew.craft_slot("wardrobe:shiwa") == "CLOTH"
-    # ポーズは beat が持つので、体の席には枠を与えない。
-    assert crew.craft_slot("beat:ichibyou") == ""
-    assert crew.craft_slot("spine:bane") == ""
-    assert len(set(crew.CRAFT_SLOTS.values())) == len(crew.CRAFT_SLOTS)
+    # ポーズはノートの BEAT が正本。演出/振付は BODY スロットで weave まで届ける
+    # （talk group で口は一人なので同じ鍵を共有してよい）。
+    assert crew.craft_slot("beat:ichibyou") == "BODY"
+    assert crew.craft_slot("spine:bane") == "BODY"
+    owned = list(crew.CRAFT_SLOTS.values())
+    # BODY だけ beat+spine で共有。他は一人一枠。
+    assert owned.count("BODY") == 2
+    assert len(set(owned)) == len(owned) - 1
 
 
 def test_crew_look_records_owner_and_shows_up_in_the_ledger():
@@ -489,13 +493,20 @@ def test_crew_look_records_owner_and_shows_up_in_the_ledger():
     service._record_crew_look(
         session, "lens:pinto", "depth_of_field, blurry_background | 85mm, eyes sharp",
     )
-    # 他人の枠は書けない（席に枠がなければ黙って捨てる）
-    service._record_crew_look(session, "beat:ichibyou", "wide_shot | full body")
+    # 演出は BODY を書ける。ポーズが weave まで届くための枠。
+    service._record_crew_look(
+        session, "beat:ichibyou",
+        "sitting, hands_on_lap | sitting, weight left, hands in lap",
+    )
+    # 枠の無い席の CRAFT は黙って捨てる
+    service._record_crew_look(session, "hook:kugizuke", "wide_shot | full body")
 
     look = service.crew_look(session)
     assert look["LIGHT"]["tags"] == "backlighting, rim_light"
     assert look["LIGHT"]["note"].startswith("low sun from behind")
-    assert "SHAPE" not in look and len(look) == 2
+    assert look["BODY"]["tags"] == "sitting, hands_on_lap"
+    assert "SHAPE" not in look and "hook" not in str(look).lower()
+    assert len(look) == 3
 
     block = service.crew_look_block(session)
     assert "LIGHT: backlighting, rim_light — low sun from behind" in block
@@ -505,6 +516,7 @@ def test_crew_look_records_owner_and_shows_up_in_the_ledger():
     # サンプラーに渡す語として取り出せる
     assert service.crew_look_tags(session) == [
         "backlighting", "rim_light", "depth_of_field", "blurry_background",
+        "sitting", "hands_on_lap",
     ]
 
 

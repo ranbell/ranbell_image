@@ -13,8 +13,8 @@ from typing import Any
 # about to move and what she would murmur about it — a keyword table that was
 # wrong whenever the wording was ordinary. The whisper is a plain hold now, and
 # the flash key comes from the patch the scripter actually returned.
-_ROW_PRIORITY = ("wearing", "wearing_b", "scene", "beat", "beat_b", "frame",
-                 "atmosphere")
+_ROW_PRIORITY = ("wearing", "wearing_b", "scene", "bg", "beat", "beat_b", "frame",
+                 "light", "atmosphere")
 
 
 def silence_whisper(*, locale: str = "ja") -> str:

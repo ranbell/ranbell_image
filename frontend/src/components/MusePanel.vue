@@ -379,7 +379,7 @@ const facetRows = computed(() => {
     .filter(f => (f.tags || []).length || String(f.nl || '').trim() || f.locked)
 })
 const NOTEBOOK_KEYS = [
-  'atmosphere', 'scene', 'light', 'frame', 'wearing', 'beat',
+  'atmosphere', 'scene', 'bg', 'light', 'frame', 'wearing', 'beat',
   'wearing_b', 'beat_b', 'vibe',
 ]
 const notebookRows = computed(() => {

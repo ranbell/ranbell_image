@@ -53,10 +53,41 @@ def test_summary_for_muse_is_short():
         "atmosphere": "切ない夕暮れ",
         "wearing": "薄いカーディガン",
         "beat": "ベンチに座る",
+        "bg": "駅の改札の人混み",
+        "light": "逆光のリム",
     })
     text = notebook.summary_for_muse(nb, name_a="あさひ")
     assert "カーディガン" in text
+    assert "改札" in text or "BG:" in text
     assert "Open proposal" not in text
+
+
+def test_ensure_beat_leads_scene_puts_posture_first():
+    """Weave air-padding must not leave the Showrunner's beat off the prose."""
+    scene = (
+        "Golden hour softens the classroom air; dust hangs in the shafts of "
+        "light and the chalk shelf gleams faintly along the back wall."
+    )
+    out = notebook.ensure_beat_leads_scene(
+        scene, beat="sitting on the desk, hands on knees",
+    )
+    assert out.lower().startswith("sitting")
+    assert "hands on knees" in out.lower()
+    # Already present — do not double.
+    again = notebook.ensure_beat_leads_scene(
+        out, beat="sitting on the desk, hands on knees",
+    )
+    assert again.count("sitting") == out.count("sitting")
+
+
+def test_filter_weave_tags_drops_banned_as_well_as_struck():
+    kept = notebook.filter_weave_tags(
+        "sitting, bucket, smile",
+        wearing="sailor", scene="rooftop", beat="sitting",
+        struck={"hat"}, banned={"bucket"},
+    )
+    assert "sitting" in kept and "smile" in kept
+    assert "bucket" not in kept
 
 
 def test_shot_diff_and_record_rewrite_ring():

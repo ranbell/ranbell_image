@@ -116,9 +116,21 @@ def test_parse_table_read_keeps_say_separate_from_craft():
 
 def test_craft_is_thin_flags_short_scene():
     assert identity.craft_is_thin("1girl, smile", "She sits.")
+    # Exact pose prose at ~70 words is finished work — not a miss that should
+    # force another weave of air-and-cloth padding.
+    pose_scene = (
+        "She sits on the bench, weight on her left hip, both hands folded in "
+        "her lap, shoulders soft, chin slightly down as she looks toward the "
+        "lens. The sailor collar rests flat against her chest; one loafer toes "
+        "the gravel under the seat while the other foot hangs free, heel lifted. "
+        "Her spine is quiet, not arched, and the afternoon light catches only "
+        "the edge of her cheek."
+    )
+    pose_prompt = "1girl, sitting, hands_on_lap, sailor_collar, " + pose_scene
+    assert identity.word_count(pose_scene) >= 35
+    assert not identity.craft_is_thin(pose_prompt, pose_scene)
     rich_scene = " ".join(["word"] * 160)
     rich_prompt = "1girl, aqua_hair, sitting, window, " + rich_scene
-    assert identity.word_count(rich_prompt) >= 160
     assert not identity.craft_is_thin(rich_prompt, rich_scene)
 
 

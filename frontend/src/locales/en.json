@@ -1549,6 +1549,7 @@
     "notebookNames": {
       "atmosphere": "Atmosphere",
       "scene": "Scene",
+      "bg": "Background",
       "frame": "Frame",
       "wearing": "Wearing",
       "beat": "Beat",

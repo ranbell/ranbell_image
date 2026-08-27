@@ -1549,6 +1549,7 @@
     "notebookNames": {
       "atmosphere": "空気",
       "scene": "場所",
+      "bg": "背景",
       "frame": "カメラ",
       "wearing": "装い",
       "beat": "動作",

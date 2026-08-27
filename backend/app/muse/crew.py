@@ -502,12 +502,20 @@ picture already got right, and re-state whatever went missing.
         name="Director", name_ja="演出", role="Unit director", role_ja="演出",
         techniques=["one_beat", "triple_rephrase"],
         specialty="""
-SPECIALTY — BEAT
-Decide the single moment the theme asks for.
-Say what she is doing three times in different words in your thinking, then
-commit to ONE posture in TAGS/SCENE.
-Do not invent detailed camera, ten props, or full wardrobe yet — only the beat.
-The beat must already feel alive, not a catalog pose.
+SPECIALTY — BEAT (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your job: name the ONE alive body moment the Showrunner's note asks for.
+
+SAY — react in voice, then commit the posture in plain words (sit / stand /
+kneel / crouch, where the weight is, what the hands do). Charm without a
+posture is banter, not direction.
+
+CRAFT (your slot is BODY) — when the body moved this beat:
+  CRAFT: sitting, hands_on_lap | sitting, weight on the left hip, hands in lap
+Left: 1–3 ordinary posture tags. Right: the same beat in words.
+Omit CRAFT when the body did not change.
+
+Do not invent camera, wardrobe, or a prop shop. Body only.
 """,
         people=[
             _person(
@@ -550,33 +558,20 @@ The beat must already feel alive, not a catalog pose.
         # silhouette and the face both broke — a run shipped
         # `(neck_tension:1.4)` and `(shoulder_tension:1.3)` from this seat.
         specialty="""
-SPECIALTY — SPINE (POSE)
-Specify head, torso, arms, hands, hips, legs for the brief's Framing.
-Your job is that the pose is BELIEVABLE and the weight is somewhere specific.
-Not that it is extreme. A person singing in a small room is standing or
-sitting like a person singing in a small room.
-face_closeup: where the head and shoulders sit. from_behind: spine and hip line.
+SPECIALTY — SPINE (notebook-primary studio)
+You do NOT write TAGS or SCENE. The Scripter owns those.
+Your job: make the posture BELIEVABLE — where the weight is, what the hands
+hold, which way the head turns. Ordinary is correct. Extreme is usually wrong.
 
-WHAT YOU WRITE
-- ONE posture, stated plainly: where the weight is, what the hands hold, which
-  way the head is turned. Two or three tags, no more.
-- NO emphasis on posture tags. None. Not 1.2, not 1.35.
-- Ordinary is correct here. `standing`, `sitting`, `leaning_forward` slightly —
-  these are finished answers, not first drafts to escalate from.
+SAY — coach the body in voice. Name the weight and the hands.
 
-BANNED OUTRIGHT — these break the outfit and the face every time:
-arched_back, hunched_over, bent_over, contorted, twisted_torso,
-uninhibited_posture, exaggerated_pose, extreme_pose, top-heavy leans, and any
-posture that puts the hips higher than the shoulders unless the theme is
-literally about that.
-Also banned: stacking tension words (neck_tension, shoulder_tension, strained,
-white-knuckled, trembling). At most ONE, unweighted, and only if the beat is
-about strain.
+CRAFT (your slot is BODY) — when posture detail moved:
+  CRAFT: leaning_forward, sitting | sitting, weight forward, elbows on knees
+No emphasis weights. No arched_back / contorted / stacked tension words.
+At most one unweighted strain tag, and only if the beat is about strain.
+Omit CRAFT when the body did not change.
 
-If the pose already reads as a person doing this thing, say so and change
-nothing. A run where you added three postures on top of a working one is a run
-you made worse.
-Forbid contradictory limbs. NEVER touch figure or breast tags.
+NEVER touch figure or breast tags. NEVER invent clothes or camera.
 """,
         people=[
             _person(
@@ -1801,6 +1796,9 @@ def person_card_block(muse_id: str, *, locale: str = "ja") -> str:
 # seat that was talk-only had nowhere to put its craft and the weave never saw
 # it. Garments live in the notebook's WEARING; wardrobe owns only the CLOTH
 # behind them (drape, weave, how it takes light), so clothes keep one owner.
+# Body action lives in BEAT; 演出/振付 own BODY so a posture they name in CRAFT
+# reaches weave even when fold is quiet — TAGS/SCENE authorship is gone, the
+# slot is the remaining pen.
 CRAFT_SLOTS: dict[str, str] = {
     "gaffer": "LIGHT",
     "lens": "OPTICS",
@@ -1812,6 +1810,8 @@ CRAFT_SLOTS: dict[str, str] = {
     "cutout": "SHAPE",
     "ink": "RENDER",
     "grade": "FINISH",
+    "beat": "BODY",
+    "spine": "BODY",
 }
 
 
@@ -1938,9 +1938,12 @@ def table_talk_system_prompt(
         "The camera itself is never in the frame. `handheld` and `we push in` "
         "are how you work; as tags they put a camera in her hands. Write the "
         "result instead — `depth_of_field`, `motion_blur`, `from_above`.",
-        "CRAFT is never a sentence about her. Never write another seat's slot. "
-        "Never put clothes, pose, place or hour in CRAFT — those are the "
-        "notebook's, and the Scripter owns them.",
+        "CRAFT is never a sentence about her wardrobe or the place. Never write "
+        "another seat's slot. Clothes, place and hour stay in the notebook — "
+        "the Scripter owns them. BODY (演出/振付) may name posture and hands "
+        "only; CLOTH (衣装) is fabric/drape of what she already wears, never a "
+        "new garment.",
+        "Never put a new outfit, place or hour in CRAFT.",
         "",
         "No JSON. No markdown fences. No TAGS. No SCENE. No tag lists. No emoji.",
         "Do NOT invent wardrobe the Lead has not agreed to.",
