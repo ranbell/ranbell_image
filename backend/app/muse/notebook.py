@@ -855,13 +855,46 @@ def reconcile_wardrobe_tags(
         side_a, side_b = _without(side_a), _without(side_b)
 
     tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
-    missing = _missing_wearing_items(
-        tags, wearing=wearing, wearing_b=wearing_b,
-        struck=struck, banned=banned_set,
-    )
+    # **二人いるときは、側ごとに見る。** `_missing_wearing_items` の
+    # 「もうある」判定は語のかぶりで見るので、みおが `light_blue_dress` を着て
+    # いると、すみれの `pale blue dress` は `dress`／`blue` が既出という理由で
+    # 「足りている」と判定される —— **二着目は絶対に戻らない。**
+    #
+    # 実測（`94b4fc9f`・2026-08-28）: 総監督が「すみれちゃんは黒のカクテル
+    # ドレス」と言った次のテイクで、すみれの行が
+    # `Sumire is blonde_hair, braid, long_hair, green_eyes, medium_breasts, slim,`
+    # ——**服がひとつも無い**まま出た。これは一度直してあった不具合で、旧
+    # `_missing_wearing_tags` の docstring が「相方だけ忘れた服が戻らない」と
+    # 記録している。ここへ移すときに、その教訓が落ちた。
+    if partner and (side_a.strip() or side_b.strip()):
+        def _fresh(side: str, items: list[str]) -> list[str]:
+            """既にその人が着ている部位は足さない —— 一着一名。
+
+            `black_dress` が居るところへ `black_cocktail_dress` を足すと、
+            サンプラーには黒い服が二着に見える。
+            """
+            from .identity import tag_names
+
+            worn = {brief.garment_head(t) for t in tag_names(side)}
+            return [t for t in items if brief.garment_head(t) not in worn]
+
+        miss_a = _fresh(side_a, _missing_wearing_items(
+            side_a, wearing=wearing, struck=struck, banned=banned_set))
+        miss_b = _fresh(side_b, _missing_wearing_items(
+            side_b, wearing=wearing_b, struck=struck, banned=banned_set))
+        if miss_a:
+            side_a = ", ".join([p.strip() for p in side_a.split(",") if p.strip()] + miss_a)
+        if miss_b:
+            side_b = ", ".join([p.strip() for p in side_b.split(",") if p.strip()] + miss_b)
+        missing = miss_a + [m for m in miss_b if m not in miss_a]
+    else:
+        missing = _missing_wearing_items(
+            tags, wearing=wearing, wearing_b=wearing_b,
+            struck=struck, banned=banned_set,
+        )
     if missing:
         parts = [p.strip() for p in tags.split(",") if p.strip()]
-        tags = ", ".join(parts + missing)
+        tags = ", ".join(parts + [m for m in missing if m not in parts])
     return tags, (side_a, side_b)
 
 

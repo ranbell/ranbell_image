@@ -1060,3 +1060,33 @@ async def test_w_muse_flat_tag_bag_still_moves_the_picture():
     assert "yukata" in s["notebook"]["wearing"]
     assert "yukata" in s["notebook"]["wearing_b"]
     assert "classroom" not in (s["notebook"].get("scene") or "").lower()
+
+
+def test_the_partner_gets_her_own_forgotten_dress_back():
+    """実測（`94b4fc9f`・2026-08-28）: すみれが服ひとつ無しで出た。
+
+    「もうある」判定は語のかぶりで見るので、みおが `light_blue_dress` を着て
+    いると、すみれの `black cocktail dress` は `dress` が既出という理由で
+    足りていると判定される —— **二着目が絶対に戻らない。**
+
+    これは一度直してあった不具合。旧 `_missing_wearing_tags` の docstring が
+    「相方だけ忘れた服が戻らない」と記録していた。
+    """
+    bag = ("anime_illustration, close-up, park, dusk, standing, "
+           "light_blue_dress, silk_fabric")
+    out, (side_a, side_b) = notebook.reconcile_wardrobe_tags(
+        bag, wearing="light_blue_dress, silk_fabric",
+        wearing_b="black cocktail dress",
+        sides=("standing, light_blue_dress, silk_fabric", "shrugging"),
+        partner=True,
+    )
+    assert "black_cocktail_dress" in out
+    assert "black_cocktail_dress" in side_b      # 彼女の側に付く
+    assert "black_cocktail_dress" not in side_a  # 主演には付かない
+
+
+def test_the_lead_still_gets_hers_back_on_a_solo():
+    bag = "anime_illustration, close-up, park, standing"
+    out, _ = notebook.reconcile_wardrobe_tags(
+        bag, wearing="straw_hat", sides=("", ""), partner=False)
+    assert "straw_hat" in out
