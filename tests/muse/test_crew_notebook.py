@@ -1084,3 +1084,16 @@ def test_a_scene_without_names_is_untouched():
     sess = {"character": {"name": "Mio Kagami", "name_ja": "各務 みお"}}
     text = "A close-up against the fading dusk, harbour lights blurred behind."
     assert service._latin_names(sess, text) == text
+
+
+def test_the_strike_gate_hears_kanji_nashi():
+    """`なし` はひらがなだけ見ていた。「靴下は無しで」が素通りしていた。
+
+    偽陽性は LLM 一回で済むが、偽陰性は脱いだはずの服が残る。**拾う側に倒す。**
+    """
+    from app.muse.service import _note_looks_like_strike as looks
+    for note in ("靴下は無しで", "帽子はもういい", "上着を脱いで",
+                 "メガネ外して", "ジャケットはいらない"):
+        assert looks(note), note
+    for note in ("寄りで撮ろう", "夕暮れの港が見える公園で撮ろう"):
+        assert not looks(note), note

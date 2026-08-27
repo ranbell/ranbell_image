@@ -2010,7 +2010,7 @@ async def take_note(
 _STRIKE_NOTE_RE = re.compile(
     r"(?i)"
     r"(?:脱[いがせ]|外[しす]|取[りっ]?[除っ]|消[しす]|捨[て]|やめ[てる]|禁止|"
-    r"いらない|はず[しす]|抜[いき]|戻[しす]|なし|使わ|今後一切|"
+    r"いらない|はず[しす]|抜[いき]|戻[しす]|なし|無し|もういい|使わ|今後一切|"
     r"\b(?:take\s*off|remove|drop|ban|without|no\s+more|get\s+rid|"
     r"strike|restore|put\s+back|bring\s+back|don'?t\s+use|do\s+not\s+use)\b)"
 )
