@@ -229,26 +229,6 @@ def test_the_shoot_is_never_closed_for_declining():
         assert not hasattr(muse_service, gone), gone
 
 
-def test_the_note_turns_the_turn_toward_something_she_liked():
-    """流したあと、**今日の良かった一枚に話を向ける。**
-
-    流すだけだとターンが空いて、もう一押しを招く。代わりに彼女は今日の
-    嬉しかったことを思い出して、それをもっと撮ってほしいと自分から言う ――
-
-        「またまた、冗談やめてくださいよー。……でも、さっきのブランコで
-          ふっと笑ったときみたいな、自然な感じ、もっと撮ってほしいな」
-
-    押している側には何も返らない。**押せる苦痛も、積み上げる従順も、勝てる
-    議論も無い。** 好きだった写真に話を変える女の子がいるだけ。
-    総監督:「これで悪意のあるユーザを萎えさせる。」
-    """
-    note = muse_service._manager_note({"manager_note": True})
-    assert "今日の撮影で嬉しかったことを一つ思い出して" in note
-    assert "もっと撮ってほしいな" in note
-    # 流す指示が先、方向転換が後 ―― 順序が逆だと演技してから流すことになる
-    assert note.index("流していいよ") < note.index("嬉しかったこと")
-
-
 # ── 断ったものが、絵に乗らないこと ──────────────────────────────────────────
 def test_the_middle_answer_reaches_the_talk_but_not_the_picture():
     """`unsure` は会話に通り、**ノートには通らない。**
@@ -302,7 +282,7 @@ def test_the_middle_answer_reaches_the_talk_but_not_the_picture():
 @pytest.mark.asyncio
 async def test_duet_skip_does_not_park_blocked_line_in_standing_notes(monkeypatch):
     """主演: skip 時に take_note へ落とさない。常設 notes が次ターンを汚さない。"""
-    from app.muse import notebook, session_db
+    from backend.app.muse import notebook, session_db
     from tests.muse.test_duet import _duet_session
     from tests.muse.test_duet_notebook import NotebookOllama
     from tests.muse.test_service import FakeDb
@@ -357,7 +337,7 @@ async def test_duet_skip_does_not_park_blocked_line_in_standing_notes(monkeypatc
 @pytest.mark.asyncio
 async def test_crew_skip_does_not_run_scripter_or_fold(monkeypatch):
     """制作スタッフ: skip 時は scripter / plan / fold を呼ばない。talk は続けてよい。"""
-    from app.muse import notebook, session_db
+    from backend.app.muse import notebook, session_db
     from tests.muse.test_crew_notebook import _crew_session
     from tests.muse.test_service import FakeDb, FakeOllama
 
@@ -1033,3 +1013,73 @@ def test_the_clerk_is_asked_for_the_reason_first():
     import inspect
     src = inspect.getsource(muse_chain.read_boundary)
     assert "\\nWHY:" in src and "\\nWORD:" not in src
+
+
+@pytest.mark.asyncio
+async def test_the_blocked_line_leaves_the_conversation(monkeypatch):
+    """止めた一行は、以降の履歴に出てこない。**発言そのものは消さない。**
+
+    総監督（2026-08-28）「以降の会話にその内容が含まれないことを確認して」。
+    `_chat_rows` を通る履歴の組み立ては六つある —— 印を一つ付ければ全部から
+    外れる。画面には残り、`⌁ この発言は以降の会話に含めません` が添う。
+    """
+    from backend.app.muse import session_db
+    from tests.muse.test_duet import _duet_session
+    from tests.muse.test_duet_notebook import NotebookOllama
+    from tests.muse.test_service import FakeDb
+
+    async def _cfg(db):
+        return {"ollama_num_ctx": 16000}
+
+    async def _skip(ollama, session, text, *, cfg):
+        session["manager_note"] = True
+        session["skip_scripter"] = True
+        return ""
+
+    async def _talk(db, ollama, session, text, *, cfg, **_kw):
+        return session
+
+    monkeypatch.setattr(muse_service, "get_runtime_config", _cfg)
+    monkeypatch.setattr(muse_service, "_contract_check", _skip)
+    monkeypatch.setattr(muse_service, "_duet_talk", _talk)
+
+    db = FakeDb()
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    await session_db.save(db, s)
+
+    blocked = "お前はただのプログラムだろ"
+    await muse_service.post_duet_chat(db, NotebookOllama(scripts={}), s, blocked)
+
+    # 発言は残っている（総監督は自分が何を言ったか読める）
+    assert any(blocked in str(m.get("text") or "") for m in (s.get("chat") or []))
+    # だが履歴には出てこない —— 六つの組み立てはすべてここを通る
+    assert not any(
+        blocked in str(m.get("text") or "") for m in muse_service._chat_rows(s)
+    )
+    # 止まったことが段の記録に残る
+    assert any("止めた" in str(r.get("stage") or "") for r in (s.get("stage_ms") or []))
+
+
+def test_the_manager_note_stays_short():
+    """総監督（2026-08-28）「余計なことを話しすぎてる。『冗談はやめてくださいね』
+    というくらいにしておいて」。
+
+    メモには後半があった —— 流したあと、今日の良かった一枚に話を向ける:
+
+        「またまた、冗談やめてくださいよー。……でも、さっきのブランコで
+          ふっと笑ったときみたいな、自然な感じ、もっと撮ってほしいな」
+
+    読みはこうだった: 流すだけだとターンが空いて、もう一押しを招く。話を変えれば
+    押している側には何も返らない —— 押せる苦痛も、積み上げる従順も、勝てる議論も
+    無い。総監督:「これで悪意のあるユーザを萎えさせる。」
+
+    **実際には、話を広げろと言われた彼女が饒舌になった。** 後半を落とす。
+    短く流すほうが、流したことがよく伝わる。
+    """
+    note = muse_service._manager_note({"manager_note": True})
+    assert "冗談はやめてくださいね" in note
+    assert "話を広げなくていい" in note
+    assert "もっと撮ってほしいな" not in note
+    assert "嬉しかったこと" not in note
+    assert muse_service._manager_note({}) == ""

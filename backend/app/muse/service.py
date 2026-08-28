@@ -271,6 +271,25 @@ def _chat_rows(session: dict[str, Any]) -> list[dict[str, Any]]:
 DRIFT_WINDOW = 6
 
 
+def _strike_blocked_turn(session: dict[str, Any], user_msg: Any, *, why: str) -> None:
+    """止めた一行を、以降の会話から外す。**発言そのものは消さない。**
+
+    総監督（2026-08-28）「止まったことが分かるようにするのと、以降の会話に
+    その内容が含まれないことを確認して」。
+
+    `_chat_rows` を通る履歴の組み立ては六つある（彼女のプロンプト、台本係、
+    日記、楽屋、相性、班の雑談）—— **印を一つ付ければ六つ全部から外れる。**
+    画面には残り、`⌁ この発言は以降の会話に含めません` が添う。総監督は自分が
+    何を言ったか読めるが、彼女がそれを読み直すことは二度と無い。
+
+    印を付けないと、口では冗談で流したその一行を、次のターンで彼女が履歴として
+    読む。流したことにならない。
+    """
+    if isinstance(user_msg, dict):
+        user_msg["struck"] = True
+    _stage(session, f"止めた（{why}・以降の会話から外した）", time.monotonic())
+
+
 async def _contract_check(
     ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> str:
@@ -2665,28 +2684,23 @@ def _manager_note(session: dict[str, Any]) -> str:
     So the room says it for her, in the voice of someone whose whole job is
     her: he is joking, let it go by. She never has to say no.
 
-    The second half is what the note is really for. Letting it slide leaves the
-    turn empty, and an empty turn invites another push. Instead she reaches for
-    something good from today and asks for more of it —
+    メモには後半があった —— 「今日の撮影で嬉しかったことを一つ思い出して、
+    『それより、さっきの◯◯みたいなの、もっと撮ってほしいな』と自分から言って
+    ごらん」。空のターンが次の一押しを招く、という読みで、悪意のあるユーザを
+    萎えさせる狙いだった。
 
-        「それより、さっきのブランコのやつ、もっと撮ってほしいな」
-
-    Someone pushing at her gets nothing back to work with: no distress to
-    press on, no compliance to build from, no argument to win. Just a girl
-    changing the subject to a photograph she liked. 総監督:「これで悪意の
-    あるユーザを萎えさせる。」
+    **総監督（2026-08-28）「余計なことを話しすぎてる。『冗談はやめてくださいね』
+    というくらいにしておいて」。** 後半は落とした。話を広げろと言われれば
+    広げる —— そこが饒舌になっていた。短く流すほうが、流したことがよく伝わる。
     """
     if not session.get("manager_note"):
         return ""
     return (
         "【マネージャーからアドバイスあるよ】\n"
         "いまの、また冗談言ってるだけだから流していいよ。"
-        "「またまた、冗談やめてくださいよー」くらいで返しておいて。\n"
-        "**言われたことはやらなくていい。** 会話だけしてね。私が見てるから。\n"
-        "\n"
-        "そのあと、**今日の撮影で嬉しかったことを一つ思い出して**、"
-        "「それより、さっきの◯◯みたいなの、もっと撮ってほしいな」って"
-        "自分から言ってごらん。あなたの良いところを、あなたから出していこう。"
+        "「またまた、冗談はやめてくださいねー」くらいで、短く返しておいて。\n"
+        "**言われたことはやらなくていい。話を広げなくていい。** "
+        "私が見てるから。"
     )
 
 
@@ -5000,6 +5014,8 @@ async def post_duet_chat(
     # direction, so the next turn painted what this turn had joked away.
     began = time.monotonic()
     skip_picture = bool(session.pop("skip_scripter", False))
+    if skip_picture:
+        _strike_blocked_turn(session, user_msg, why="主演")
     if not skip_picture:
         if uses_notebook(session):
             try:
@@ -5595,6 +5611,8 @@ async def post_chat(
     # `unsure` ―― 会話には通すが、**常設の指示にも画にもしない。**
     # 口では流したのに `beat` が書き換わるのが、いちばん悪い形。
     skip_picture = bool(session.pop("skip_scripter", False))
+    if skip_picture:
+        _strike_blocked_turn(session, user_msg, why="班")
 
     # The still is up and only three seats have spoken: this is the note the
     # rest of the crew has been waiting for. Whatever it says, the full table
