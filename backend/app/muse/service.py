@@ -3524,6 +3524,17 @@ async def _run_duet_scripter(
         if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
             logger.info("[muse] clerk raised intent %r → %r", intent, kind)
             intent = kind
+        # **名指しを残す。** これまで `asked` は VERIFY の門と修復に使われて
+        # 捨てられていた —— つまり**書いたあとの答え合わせ**にしか使われて
+        # いない。実測（`78d7ce72`・場面を5回動かす）で、係は5回とも `scene`
+        # だけを名指しして**全部正解**、取りこぼしはゼロだった。同じターンに
+        # 手帖は `beat` を 5/5、`frame` を 2/5 動かしている ——
+        # **係のほうが指示を正しく追えている。**
+        #
+        # **キーの有無で「係が走らなかった」と「係が none と言った」を分ける。**
+        # 折り込み（`fold=True`）では係を呼ばないので、空を書くと門が全部
+        # 閉じてしまう。
+        session["asked_fields"] = sorted(asked)
 
     _meta_note = str(text or "").strip().upper()
     # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes
@@ -4447,6 +4458,46 @@ async def _duet_talk(
     return session
 
 
+def _only_what_was_asked(
+    session: dict[str, Any], nb: dict[str, Any], named: list[str],
+) -> list[str]:
+    """見直しが書いてよい欄に絞る。**書いてある欄を、頼まれずに書き換えない。**
+
+    実測（`78d7ce72`・2026-08-28）。総監督は5ターンとも場所しか言っていない
+    のに、見直しが `frame` を 2回・`beat` を 3回書き換えた。しかも根拠が
+    **彼女自身の独り言**だった:
+
+        frame: close-up, looking straight into the lens
+            → upper shot, looking slightly away from the lens
+        理由: 「全部見えちゃう気がして」という本人の不安な独白に基づき…
+
+    三ターンで「まっすぐ見る」から「目を逸らす」へ。**総監督はどちらも指示
+    していない。** 同じ形を前にも測っている（`1834bb18`: 画角しか言っていない
+    ターンで `wearing` が `sleeveless dress, …, barefoot` に化け、最終の手帖
+    まで残った）。
+
+    **空欄を埋める働きは残す。** 見直しが役に立った回は、`frame` が空だった
+    ときと `beat` に姿勢を運んだときで、どちらも初めて書く仕事だった。害が
+    出たのは全部「既に書いてある欄の書き換え」のほう。
+
+    係が走らなかったターンは従来どおり通す —— **一度だけ読んで消す**ので、
+    前のターンの名指しが残って効くことはない。
+    """
+    asked = session.pop("asked_fields", None)
+    if asked is None:                       # 係が走らなかった。従来どおり
+        return named
+    allow = set(asked)
+    keep = [f for f in named
+            if f in allow or not str(nb.get(f) or "").strip()]
+    dropped = [f for f in named if f not in keep]
+    if dropped:
+        logger.info("[muse] restate not asked for %s (line named %s)",
+                    ", ".join(dropped), ", ".join(sorted(allow)) or "none")
+        _stage(session, f"見直し（頼まれていない欄を外した: {','.join(dropped)}）",
+               time.monotonic())
+    return keep
+
+
 async def _muse_checks_the_notebook(
     db, ollama, session: dict[str, Any], *, cfg: dict[str, Any], note: str,
 ) -> None:
@@ -4501,6 +4552,9 @@ async def _muse_checks_the_notebook(
     # Her own contract says naming more than two is almost always a misreading.
     # Rewriting half the notebook on one turn is how a shoot loses its place.
     named = named[:_RESTATE_MAX]
+    named = _only_what_was_asked(session, nb, named)
+    if not named:
+        return
     before_shot = notebook_mod.shot_snapshot(nb)
     said_why: dict[str, str] = {}
     for field in named:

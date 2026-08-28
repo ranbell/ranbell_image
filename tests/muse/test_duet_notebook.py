@@ -1090,3 +1090,56 @@ def test_the_lead_still_gets_hers_back_on_a_solo():
     out, _ = notebook.reconcile_wardrobe_tags(
         bag, wearing="straw_hat", sides=("", ""), partner=False)
     assert "straw_hat" in out
+
+
+def _nb_with(**fields):
+    nb = notebook.blank()
+    notebook.apply_patch(nb, dict(fields))
+    return nb
+
+
+def test_the_review_may_not_rewrite_a_field_nobody_asked_about():
+    """実測（`78d7ce72`・2026-08-28）: 総監督は5ターンとも場所しか言っていない
+    のに、見直しが `frame` を 2回・`beat` を 3回書き換えた。
+
+    根拠は**彼女自身の独り言**だった ——「全部見えちゃう気がして」で
+    `close-up, looking straight into the lens` を `upper shot, looking
+    slightly away` に。総監督はどちらも指示していない。
+    """
+    nb = _nb_with(scene="a park at dusk", frame="close-up", beat="standing")
+    session = {"asked_fields": ["scene"]}
+    keep = service._only_what_was_asked(session, nb, ["frame", "beat"])
+    assert keep == []
+    # 止めたことが見えること
+    assert any("見直し" in str(r.get("stage") or "")
+               for r in (session.get("stage_ms") or []))
+
+
+def test_the_review_may_still_fill_a_field_nobody_has_written():
+    """**空欄を埋める働きは残す。**
+
+    見直しが役に立った回は `frame` が空だったときと `beat` に姿勢を運んだとき
+    で、どちらも初めて書く仕事だった。害が出たのは書き換えのほうだけ。
+    """
+    nb = _nb_with(scene="a park at dusk", beat="standing")
+    session = {"asked_fields": ["scene"]}
+    assert service._only_what_was_asked(session, nb, ["frame"]) == ["frame"]
+    assert service._only_what_was_asked({"asked_fields": ["scene"]}, nb,
+                                        ["scene"]) == ["scene"]
+
+
+def test_a_turn_the_clerk_did_not_read_is_left_alone():
+    """係が走らなかったターンは従来どおり。**空集合と取り違えない。**"""
+    nb = _nb_with(frame="close-up", beat="standing")
+    assert service._only_what_was_asked({}, nb, ["frame", "beat"]) == \
+        ["frame", "beat"]
+    # 名指しが空（係は走ったが none）なら、書いてある欄は守られる
+    assert service._only_what_was_asked({"asked_fields": []}, nb, ["frame"]) == []
+
+
+def test_the_naming_is_read_once_and_dropped():
+    """一度読んだら消す —— 前のターンの名指しが残って効かないように。"""
+    session = {"asked_fields": ["scene"]}
+    nb = _nb_with(scene="a park", frame="close-up")
+    service._only_what_was_asked(session, nb, ["scene"])
+    assert "asked_fields" not in session
