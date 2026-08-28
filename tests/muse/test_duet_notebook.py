@@ -1098,51 +1098,25 @@ def _nb_with(**fields):
     return nb
 
 
-def test_the_review_may_not_rewrite_a_field_nobody_asked_about():
-    """実測（`78d7ce72`・2026-08-28）: 総監督は5ターンとも場所しか言っていない
-    のに、見直しが `frame` を 2回・`beat` を 3回書き換えた。
+def test_the_review_only_runs_when_she_is_asked_to_arrange():
+    """総監督（2026-08-29）「restate がやはり絵を壊します。Muse に自分で考えて・
+    アレンジしといてというときだけ動かしたほうがいい」。
 
-    根拠は**彼女自身の独り言**だった ——「全部見えちゃう気がして」で
-    `close-up, looking straight into the lens` を `upper shot, looking
-    slightly away` に。総監督はどちらも指示していない。
+    実測（`78d7ce72`）: 場所しか言っていない5ターンで、見直しが `frame` を2回・
+    `beat` を3回書き換えた。根拠は**彼女自身の独り言**で、総監督はどちらも指示
+    していない。呼ばれていないのに画を作り替えていた。
+
+    拾い漏れは安全側 —— 走らなければ画は台本係の書いたまま。
     """
-    nb = _nb_with(scene="a park at dusk", frame="close-up", beat="standing")
-    session = {"asked_fields": ["scene"]}
-    keep = service._only_what_was_asked(session, nb, ["frame", "beat"])
-    assert keep == []
-    # 止めたことが見えること
-    assert any("見直し" in str(r.get("stage") or "")
-               for r in (session.get("stage_ms") or []))
-
-
-def test_the_review_may_still_fill_a_field_nobody_has_written():
-    """**空欄を埋める働きは残す。**
-
-    見直しが役に立った回は `frame` が空だったときと `beat` に姿勢を運んだとき
-    で、どちらも初めて書く仕事だった。害が出たのは書き換えのほうだけ。
-    """
-    nb = _nb_with(scene="a park at dusk", beat="standing")
-    session = {"asked_fields": ["scene"]}
-    assert service._only_what_was_asked(session, nb, ["frame"]) == ["frame"]
-    assert service._only_what_was_asked({"asked_fields": ["scene"]}, nb,
-                                        ["scene"]) == ["scene"]
-
-
-def test_a_turn_the_clerk_did_not_read_is_left_alone():
-    """係が走らなかったターンは従来どおり。**空集合と取り違えない。**"""
-    nb = _nb_with(frame="close-up", beat="standing")
-    assert service._only_what_was_asked({}, nb, ["frame", "beat"]) == \
-        ["frame", "beat"]
-    # 名指しが空（係は走ったが none）なら、書いてある欄は守られる
-    assert service._only_what_was_asked({"asked_fields": []}, nb, ["frame"]) == []
-
-
-def test_the_naming_is_read_once_and_dropped():
-    """一度読んだら消す —— 前のターンの名指しが残って効かないように。"""
-    session = {"asked_fields": ["scene"]}
-    nb = _nb_with(scene="a park", frame="close-up")
-    service._only_what_was_asked(session, nb, ["scene"])
-    assert "asked_fields" not in session
+    invited = ("好きにアレンジしといて", "自分で考えてみて", "いい感じにお願い",
+               "おまかせ！", "you decide", "surprise me")
+    not_invited = ("ベンチに座って", "寄りで撮ろう", "夕暮れの港が見える公園で",
+                   "今日はありがとう")
+    for note in invited:
+        assert service._invited_to_arrange(note), note
+    for note in not_invited:
+        assert not service._invited_to_arrange(note), note
+    assert not service._invited_to_arrange("")
 
 
 def test_the_final_take_reweaves_when_the_notebook_moved_since_the_board():
@@ -1168,3 +1142,21 @@ def test_a_board_from_before_the_rev_was_recorded_still_works():
     }}
     session["notebook"]["rev"] = 9
     assert service._approved_prompt(session) == "old board"
+
+
+def test_a_look_back_turn_does_not_fold_the_remembered_pose():
+    """総監督（2026-08-29）「覚えてる？と聞くとそのポーズを撮るバグ」。
+
+    `asked_back` は**係**の `recall`、折り込みの門は**コンパイル**の `recall`
+    で、別々の判断だった —— 係が振り返りと読んで前の撮影を彼女の手元に置き、
+    コンパイルが `casual` と言えば折り込みは開いたまま。そこで彼女が思い出した
+    ポーズを語れば、それが `beat` に入って撮られる。
+
+    実機（`13df0524`）では再現しなかったが、穴は経路として実在する。
+    """
+    import inspect
+    src = inspect.getsource(service._fold_muse_after_talk)
+    assert 'session.get("looked_back")' in src
+    # 係が振り返りと読んだら旗が立つこと
+    src2 = inspect.getsource(service._run_duet_scripter)
+    assert 'session["looked_back"] = bool(asked_back)' in src2

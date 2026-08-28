@@ -163,7 +163,7 @@ async def test_the_stuck_beat_is_said_over(monkeypatch):
     ollama = _TurnOllama("REWRITE: beat", {"beat": "sitting, eating cake"})
 
     await service._muse_checks_the_notebook(
-        None, ollama, session, cfg={}, note="ケーキ見ないでカメラ見てね",
+        None, ollama, session, cfg={}, note="ケーキ見ないでカメラ見てね。あとは好きにアレンジして",
     )
 
     assert notebook.of(session)["beat"] == "sitting, eating cake"
@@ -236,7 +236,7 @@ async def test_an_empty_restatement_changes_nothing(monkeypatch):
     ollama = _TurnOllama("REWRITE: beat", {"beat": ""})
 
     await service._muse_checks_the_notebook(
-        None, ollama, session, cfg={}, note="カメラ見て",
+        None, ollama, session, cfg={}, note="カメラ見て。あとはいい感じにお願い",
     )
 
     assert notebook.of(session)["beat"] == "sitting, eating cake, looking at cake"
@@ -254,10 +254,28 @@ async def test_she_says_nothing_in_the_room(monkeypatch):
     ollama = _TurnOllama("REWRITE: beat", {"beat": "sitting, eating cake"})
 
     await service._muse_checks_the_notebook(
-        None, ollama, session, cfg={}, note="カメラ見て",
+        None, ollama, session, cfg={}, note="カメラ見て。あとはいい感じにお願い",
     )
 
     assert not session["chat"]
     assert any(
         e.get("source") == "restate" for e in (session.get("rewrite_log") or [])
     ), "the panel still has to be able to see it"
+
+
+@pytest.mark.asyncio
+async def test_the_review_does_not_run_unless_she_is_asked_to_arrange():
+    """**呼ばれたときだけ。** 総監督（2026-08-29）の指示。
+
+    上の試験が示すとおり、詰まった欄を動かす機構としては効く —— だから機構は
+    残す。走る条件だけを絞った。頼まれていない回に動くと、実測（`78d7ce72`）の
+    ように画角と姿勢を勝手に作り替える。
+    """
+    session = _cake_session()
+    before = dict(notebook.of(session))
+    ollama = _TurnOllama("REWRITE: beat", {"beat": "standing, hands at sides"})
+    await service._muse_checks_the_notebook(
+        None, ollama, session, cfg={}, note="カメラ見て",
+    )
+    assert dict(notebook.of(session)) == before
+    assert ollama.asked == [], "呼ばれていないのに言い直しが走った"

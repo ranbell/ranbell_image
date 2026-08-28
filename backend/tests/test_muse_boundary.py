@@ -1158,3 +1158,22 @@ def test_recall_is_only_about_earlier_shoots():
     assert "EARLIER shoot" in text
     assert "これからどうしたい" in text
     assert "asks what things are right now, or about a previous shoot" not in text
+
+
+def test_a_bare_block_label_never_reaches_her_bubble():
+    """総監督（2026-08-29）「Muse つぶやき最後に CARD と表示されるバグ」。
+
+    ラベルの正規表現はコロンを要求するので、モデルが `CARD` とだけ書いて切れた
+    行を拾えず、`_is_leaked_heading_line` は「空白の無い一語」を素通りさせる
+    —— **その二つの隙間から末尾に出ていた。**
+    """
+    from backend.app.muse import identity as muse_identity
+
+    got = muse_identity.sanitize_muse_say("SAY: ……ちょっと緊張しちゃうな。\nCARD")
+    assert got == "……ちょっと緊張しちゃうな。"
+    for label in ("CARD", "SAY", "ASIDE", "PITCH", "MY_FEEL", "TAGS", "SCENE"):
+        assert muse_identity.sanitize_muse_say(f"SAY: うん。\n{label}") == "うん。"
+    # 彼女の言葉は残る
+    assert muse_identity.sanitize_muse_say("SAY: カード") == "カード"
+    assert muse_identity.sanitize_muse_say("SAY: そうだね\nありがとう") == \
+        "そうだね\nありがとう"

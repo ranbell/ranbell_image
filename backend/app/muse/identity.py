@@ -388,6 +388,15 @@ _SAY_LEAK_LINE_RE = re.compile(
     r"DUET_TALK|W_DUET|FORMAT\b|PRIOR\s+SESSION"
     r")\s*[:：].*$"
 )
+#: **ラベルだけの行。** `_SAY_LEAK_LINE_RE` はコロンを要求するので、
+#: モデルが `CARD` とだけ書いて切れた行を拾えなかった —— そして
+#: `_is_leaked_heading_line` は「空白の無い一語」を素通りさせるので、
+#: **つぶやきの末尾に `CARD` が出ていた**（総監督の報告・2026-08-29）。
+#: 閉じた語の一覧なので、単独で立っていれば彼女の言葉ではない。
+_BARE_BLOCK_LABEL_RE = re.compile(
+    r"(?i)^(?:SAY|ASIDE|CARD|PITCH|MY_FEEL|DECLINE|"
+    r"TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|INTENT)$"
+)
 _SAY_LEAK_CUT_RE = re.compile(
     r"(?im)^\s*(?:TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE)\s*[:：]"
 )
@@ -418,6 +427,10 @@ def _is_leaked_heading_line(line: str) -> bool:
         return True
     stripped = line.strip().rstrip("：:").strip()
     if "required output language" in stripped.lower():
+        return True
+    # **一語でもラベルなら落とす。** 下の「空白が無ければ素通り」は、彼女の
+    # 短い一言を守るためのもの。ラベルは閉じた一覧なので先に抜く。
+    if _BARE_BLOCK_LABEL_RE.match(stripped):
         return True
     if not stripped or " " not in stripped:
         return False

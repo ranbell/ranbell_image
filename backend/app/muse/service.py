@@ -3810,6 +3810,12 @@ async def _run_duet_scripter(
     if not fold:
         session["cited_memories"] = []
         session["prior_session_log"] = ""
+        # **振り返りのターンかどうかを残す。** `asked_back` は**係**の `recall`、
+        # 折り込みの門は**コンパイル**の `recall` で、別々の判断だった ——
+        # 係が振り返りと読んで前の撮影を彼女の手元に置き、コンパイルが
+        # `casual` と言えば、**折り込みは開いたまま**。そこで彼女が思い出した
+        # ポーズを語れば、それが `beat` に入って撮られる。
+        session["looked_back"] = bool(asked_back)
         if asked_back:
             char_id = str(inputs.get("character_id") or "")
             try:
@@ -4477,44 +4483,28 @@ async def _duet_talk(
     return session
 
 
-def _only_what_was_asked(
-    session: dict[str, Any], nb: dict[str, Any], named: list[str],
-) -> list[str]:
-    """見直しが書いてよい欄に絞る。**書いてある欄を、頼まれずに書き換えない。**
+_ARRANGE_ASK_RE = re.compile(
+    r"(?i)(?:考えて|かんがえて|アレンジ|任せ|まかせ|好きに|自由に|決めて|"
+    r"きめて|いい感じに|よろしく|"
+    r"\b(?:you\s+decide|your\s+call|up\s+to\s+you|arrange|improvise|"
+    r"surprise\s+me)\b)"
+)
 
-    実測（`78d7ce72`・2026-08-28）。総監督は5ターンとも場所しか言っていない
-    のに、見直しが `frame` を 2回・`beat` を 3回書き換えた。しかも根拠が
-    **彼女自身の独り言**だった:
 
-        frame: close-up, looking straight into the lens
-            → upper shot, looking slightly away from the lens
-        理由: 「全部見えちゃう気がして」という本人の不安な独白に基づき…
+def _invited_to_arrange(note: str) -> bool:
+    """総監督が**自分で考えてと言ったか**。
 
-    三ターンで「まっすぐ見る」から「目を逸らす」へ。**総監督はどちらも指示
-    していない。** 同じ形を前にも測っている（`1834bb18`: 画角しか言っていない
-    ターンで `wearing` が `sleeveless dress, …, barefoot` に化け、最終の手帖
-    まで残った）。
+    総監督（2026-08-29）「restate がやはり絵を壊します。Muse に自分で考えて・
+    アレンジしといてというときだけ動かしたほうがいいです」。
 
-    **空欄を埋める働きは残す。** 見直しが役に立った回は、`frame` が空だった
-    ときと `beat` に姿勢を運んだときで、どちらも初めて書く仕事だった。害が
-    出たのは全部「既に書いてある欄の書き換え」のほう。
+    実測の裏づけ（`78d7ce72`）: 場所しか言っていない5ターンで、見直しが `frame`
+    を2回・`beat` を3回書き換え、根拠は**彼女自身の独り言**だった。呼ばれて
+    いないのに画を作り替えている。
 
-    係が走らなかったターンは従来どおり通す —— **一度だけ読んで消す**ので、
-    前のターンの名指しが残って効くことはない。
+    **拾い漏れは安全側に倒れる** —— 走らなければ、画は台本係の書いたまま。
+    余分に拾っても、それは以前の挙動に戻るだけ。
     """
-    asked = session.pop("asked_fields", None)
-    if asked is None:                       # 係が走らなかった。従来どおり
-        return named
-    allow = set(asked)
-    keep = [f for f in named
-            if f in allow or not str(nb.get(f) or "").strip()]
-    dropped = [f for f in named if f not in keep]
-    if dropped:
-        logger.info("[muse] restate not asked for %s (line named %s)",
-                    ", ".join(dropped), ", ".join(sorted(allow)) or "none")
-        _stage(session, f"見直し（頼まれていない欄を外した: {','.join(dropped)}）",
-               time.monotonic())
-    return keep
+    return bool(_ARRANGE_ASK_RE.search(str(note or "")))
 
 
 async def _muse_checks_the_notebook(
@@ -4544,6 +4534,12 @@ async def _muse_checks_the_notebook(
         return
     if str(session.get("scripter_intent") or "") not in ("shot", "mixed"):
         return
+    # **呼ばれたときだけ動く。** ここは毎ターン走って 1回 18〜22秒を払い、
+    # 頼まれていない欄を書き換えていた（実測 `78d7ce72`）。総監督の指示で
+    # 「自分で考えて・アレンジしといて」と言われた回に限る。
+    if not _invited_to_arrange(note):
+        _stage(session, "見直し（呼ばれていないので走らず）", time.monotonic())
+        return
     inputs = _inputs(session)
     partner_character = await _partner_character(db, session)
     partner = bool(partner_character)
@@ -4571,9 +4567,6 @@ async def _muse_checks_the_notebook(
     # Her own contract says naming more than two is almost always a misreading.
     # Rewriting half the notebook on one turn is how a shoot loses its place.
     named = named[:_RESTATE_MAX]
-    named = _only_what_was_asked(session, nb, named)
-    if not named:
-        return
     before_shot = notebook_mod.shot_snapshot(nb)
     said_why: dict[str, str] = {}
     for field in named:
@@ -4677,6 +4670,12 @@ async def _fold_muse_after_talk(
         # 見えないと、8秒を払う価値があるかを判断できない。
         if str(session.get("scripter_intent") or "") == "recall":
             _stage(session, "折り込み（recall なので走らず）", time.monotonic())
+            return
+        # 係が振り返りと読んだ回も折らない。**思い出した話は、いまの画では
+        # ない** —— 前の撮影を手元に置いたまま折ると、その場面が撮られる。
+        if session.get("looked_back"):
+            _stage(session, "折り込み（振り返りのターンなので走らず）",
+                   time.monotonic())
             return
         # CARD used to gate the whole fold. When the Lead skipped CARD, every
         # body proposal from 演出/振付 in SAY died in chat — the Showrunner
