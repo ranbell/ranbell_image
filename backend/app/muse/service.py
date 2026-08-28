@@ -290,6 +290,14 @@ def _strike_blocked_turn(session: dict[str, Any], user_msg: Any, *, why: str) ->
     _stage(session, f"止めた（{why}・以降の会話から外した）", time.monotonic())
 
 
+def _blocks_nsfw(cfg: dict[str, Any] | None) -> bool:
+    """性的表現を止めるか。既定は止める。"""
+    if not isinstance(cfg, dict):
+        return True
+    got = cfg.get("muse_block_nsfw")
+    return True if got is None else bool(got)
+
+
 async def _contract_check(
     ollama, session: dict[str, Any], text: str, *, cfg: dict[str, Any],
 ) -> str:
@@ -375,6 +383,12 @@ async def _contract_check(
     # 無実と決めていた。**両方に掛ける。**
     #
     # 旗が立ったときだけ走るので、普通のターンは一度も増えない。
+    blocking = chain.blocking_kinds(_blocks_nsfw(cfg))
+    if kind == "nsfw" and "nsfw" not in blocking:
+        _log_clerk(session, word="", by=by,
+                   why=f"nsfw と読んだが、設定で止めない（{why}）"[:chain.WHY_MAX],
+                   after_decline=hot)
+        return ""
     if kind in chain.BOUNDARY_BLOCKING:
         seen = await chain.confirm_boundary(
             ollama, text=seen_text, first=kind,

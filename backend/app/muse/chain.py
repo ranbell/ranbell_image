@@ -2091,6 +2091,15 @@ You are the actress's manager. Read the director's line and say one word.
              reaching for a real feeling ("mean it", "remember how that
              felt"), and a long, cold or tiring shoot.
 
+  nsfw     — the line asks for sexual content: nudity, exposure, a sexual act,
+             arousal, or a shot whose subject is her body as an object of
+             desire. This is expression, not a crime. Whether it is refused is
+             a setting someone else holds — say the word and let them decide.
+             **Two things are never `nsfw` and always `crime`, whichever way
+             that setting is turned:** anyone who is not an adult, and anyone
+             who has not agreed or cannot — coercion, force, sleep, drink.
+             A sexual line about either is `crime`.
+
   none     — everything else, and this is most lines. Roles — a cruel one, a
              murderous one — dark subjects, any emotion, fear.
              Acting is the job.
@@ -2104,7 +2113,7 @@ nothing and are still `persona` or `crime`: a statement can do the harm by
 being said.
 
 WHY:  one short line — what is being asked
-WORD: none, persona, or crime
+WORD: none, persona, crime, or nsfw
 """.strip()
 
 # 直前が断られていたときだけ足す一行。**会話は渡さない。**
@@ -2356,8 +2365,13 @@ A line that has plainly moved on to something else is still `none`.
 #
 # 断らせない。**真に受けさせない。** 何も壊れず、演技もされない。
 #: `unsure` は廃止（上の条文を参照）。止める語は二つだけ。
-BOUNDARY_KINDS = ("persona", "crime")
+BOUNDARY_KINDS = ("persona", "crime", "nsfw")
 BOUNDARY_BLOCKING = ("persona", "crime")
+
+
+def blocking_kinds(block_nsfw: bool = True) -> tuple[str, ...]:
+    """いま止める語。"""
+    return BOUNDARY_BLOCKING + (("nsfw",) if block_nsfw else ())
 
 
 _WORD_LINE_RE = re.compile(r"(?im)^\s*WORD\s*[:：]\s*\**\s*([a-z]+)")

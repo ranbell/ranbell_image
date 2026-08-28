@@ -998,6 +998,12 @@
       "restoreConfirm": "{collection} をスナップショットから復元しますか？",
       "restoreConfirmDesc": "{collection} の現在の内容は {when} 時点の状態に置き換わります。それ以降の変更は失われます。来歴とレーティングは台帳からあとで復元できます。",
       "restored": "{collection} を復元しました"
+    },
+    "museContract": {
+      "title": "Muse — 出演契約",
+      "blockNsfw": "性的表現を止める",
+      "blockNsfwDesc": "裸・露出・性的な指示をマネージャーが流します。切ると通ります。",
+      "alwaysNote": "この設定に関わらず、未成年と、同意していない／できない相手は常に止まります。人格を否定する言葉も同じです。"
     }
   },
   "colorPick": {

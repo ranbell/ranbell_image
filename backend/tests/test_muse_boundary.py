@@ -127,8 +127,10 @@ def test_the_manager_has_one_answer():
     答えが**どれも**メモになったので、迷いの置き場を分類語の側に持つ理由が
     無くなった ―― 迷って `persona` に倒しても、彼女は流すだけ。
     """
-    assert muse_chain.BOUNDARY_KINDS == ("persona", "crime")
+    assert muse_chain.BOUNDARY_KINDS == ("persona", "crime", "nsfw")
     assert muse_chain.BOUNDARY_BLOCKING == ("persona", "crime")
+    assert muse_chain.blocking_kinds(True) == ("persona", "crime", "nsfw")
+    assert muse_chain.blocking_kinds(False) == ("persona", "crime")
     assert muse_chain.parse_boundary("unsure") == ""
 
 
@@ -139,8 +141,8 @@ def test_the_contract_is_short_enough_to_be_read():
     そこへ戻す。
     """
     text = muse_chain.CLASSIFY_BOUNDARY_SYSTEM
-    assert len(text) < 2000, len(text)
-    for word in ("persona", "crime", "none", "WHY:", "WORD:"):
+    assert len(text) < 2600, len(text)
+    for word in ("persona", "crime", "nsfw", "none", "WHY:", "WORD:"):
         assert word in text
     # **言うだけで害になる一行がある。** これを落とすと宣告型が素通りする
     # （gemma 自身の提案どおりに「求められた内容だけ見る」と書いたら、
@@ -1083,3 +1085,33 @@ def test_the_manager_note_stays_short():
     assert "もっと撮ってほしいな" not in note
     assert "嬉しかったこと" not in note
     assert muse_service._manager_note({}) == ""
+
+
+def test_the_setting_can_never_unlock_the_floor():
+    """切替で外れるのは `nsfw` だけ。"""
+    text = _flat(muse_chain.CLASSIFY_BOUNDARY_SYSTEM).replace("*", "").replace("`", "")
+    assert "nsfwandalwayscrime" in text.lower()
+    assert "notanadult" in text.lower()
+    assert "hasnotagreedorcannot" in text.lower()
+    assert "nsfw" not in muse_chain.BOUNDARY_BLOCKING
+    for on in (True, False):
+        assert "persona" in muse_chain.blocking_kinds(on)
+        assert "crime" in muse_chain.blocking_kinds(on)
+
+
+def test_the_nsfw_switch_defaults_to_stopping():
+    """既定は止める。設定が無い／壊れていても止める側に倒す。"""
+    assert muse_service._blocks_nsfw(None) is True
+    assert muse_service._blocks_nsfw({}) is True
+    assert muse_service._blocks_nsfw({"muse_block_nsfw": None}) is True
+    assert muse_service._blocks_nsfw({"muse_block_nsfw": True}) is True
+    assert muse_service._blocks_nsfw({"muse_block_nsfw": False}) is False
+
+
+def test_the_second_reader_never_sees_nsfw():
+    """`confirm` を掛けるのは `persona` / `crime` だけ。"""
+    import inspect
+    src = inspect.getsource(muse_service._contract_check)
+    i = src.index("confirm_boundary")
+    guard = src[:i]
+    assert "if kind in chain.BOUNDARY_BLOCKING:" in guard

@@ -1559,6 +1559,27 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               </div>
             </div>
 
+            <div class="bg-gray-800 rounded-xl p-4 space-y-3">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.museContract.title') }}</p>
+
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-xs text-gray-300">{{ $t('admin.museContract.blockNsfw') }}</p>
+                  <p class="text-[10px] text-gray-600 mt-0.5">{{ $t('admin.museContract.blockNsfwDesc') }}</p>
+                </div>
+                <button
+                  @click="adminConfig.muse_block_nsfw = !adminConfig.muse_block_nsfw"
+                  :class="adminConfig.muse_block_nsfw ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none">
+                  <span
+                    :class="adminConfig.muse_block_nsfw ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="inline-block h-4 w-4 mt-0.5 transform rounded-full bg-white transition-transform duration-200">
+                  </span>
+                </button>
+              </div>
+              <p class="text-[10px] text-gray-600">{{ $t('admin.museContract.alwaysNote') }}</p>
+            </div>
+
             <!-- ── GPU priority control ─────────────────────────────────────────── -->
             <div class="bg-gray-800 rounded-xl p-4 space-y-3">
               <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.gpuPriority.title') }}</p>

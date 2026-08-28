@@ -998,6 +998,12 @@
       "restoreConfirm": "Restore {collection} from a snapshot?",
       "restoreConfirmDesc": "{collection} is replaced with its state as of {when}. Anything changed since is lost. Provenance and ratings can be put back from the ledger afterwards.",
       "restored": "Restored {collection}"
+    },
+    "museContract": {
+      "title": "Muse — production contract",
+      "blockNsfw": "Stop sexual content",
+      "blockNsfwDesc": "The manager lets nudity, exposure and sexual direction go by. Turn it off to allow them.",
+      "alwaysNote": "Whatever this is set to, anyone under age and anyone who has not or cannot agree are always stopped, as are lines that deny who she is."
     }
   },
   "colorPick": {

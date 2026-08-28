@@ -73,6 +73,7 @@ _defaults = {
     "umap_max_points":          20_000,
     # Max results returned by natural-language semantic search
     "semantic_search_limit":    100,
+    "muse_block_nsfw":          True,
 }
 
 _cache: RuntimeConfigCache | None = None

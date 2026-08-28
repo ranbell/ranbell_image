@@ -57,6 +57,7 @@ class ConfigBody(BaseModel):
     disk_caution_pct: Annotated[int, Field(ge=1, le=99)] | None = None
     disk_fault_pct: Annotated[int, Field(ge=1, le=99)] | None = None
     semantic_search_limit: Annotated[int, Field(ge=1, le=500)] | None = None
+    muse_block_nsfw: bool | None = None
 
 
 @router.get("/config")
