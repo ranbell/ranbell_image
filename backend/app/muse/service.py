@@ -166,9 +166,51 @@ def _sides(session: dict[str, Any], tags: str) -> list[list[str]]:
     ]
     if not (bags[0] and bags[1]):
         return _wardrobe_sides(session, tags)
+    bags = _unswap(session, bags)
     mine, hers = set(bags[0]), set(bags[1])
     shared = mine & hers
     return [[t for t in bag if t not in shared] for bag in bags]
+
+
+def _unswap(session: dict[str, Any], bags: list[list[str]]) -> list[list[str]]:
+    """weave が二人を取り違えていたら、袋ごと入れ替えて戻す。
+
+    総監督（2026-08-29）「w-muse の際にキャラが反転するコトが多い」。
+
+    **どのモデルにも「A が誰か」を教えていない。** weave は `tags_a` /
+    `tags_b` と書けと言われるだけで、コンパイルは `wearing_b` / `beat_b` と
+    言われるだけ。唯一の手がかりは手帖ブロックの並び順（`Mio WEARING:` →
+    `Sumire WEARING:`）で、**「一つ目が A だろう」という推測**に預けている。
+    推測なので毎回は当たらない。
+
+    条文を直すのが第一層。ここは第二層で、**モデルが守らなくても効く**。
+    手帖の二つの衣装は正本なので、袋がどちらの服を持っているかで読み直せる。
+
+    保守的に読む —— 片方の衣装**だけ**が名指しする語しか数えない。両方が着て
+    いる服も、場所の語も証拠にならない。**交差して読んだほうが証拠が多いとき
+    だけ**入れ替える。同点なら動かさない。
+    """
+    nb = notebook_mod.of(session)
+    mine = notebook_mod.wearing_tokens(str(nb.get("wearing") or ""))
+    hers = notebook_mod.wearing_tokens(str(nb.get("wearing_b") or ""))
+    only_mine, only_hers = mine - hers, hers - mine
+    if not (only_mine and only_hers):
+        return bags
+
+    def _hits(bag: list[str], marks: set[str]) -> int:
+        return sum(
+            1 for t in bag
+            if ({t} | notebook_mod.wearing_tokens(t)) & marks
+        )
+
+    straight = _hits(bags[0], only_mine) + _hits(bags[1], only_hers)
+    crossed = _hits(bags[0], only_hers) + _hits(bags[1], only_mine)
+    if crossed > straight:
+        logger.info("[muse] the weave swapped the two Muses (%s > %s); "
+                    "putting the bags back", crossed, straight)
+        _stage(session, "二人が入れ替わっていたので戻した", time.monotonic())
+        return [bags[1], bags[0]]
+    return bags
 
 
 def _framing(inputs: dict[str, Any]) -> str:
@@ -3381,6 +3423,10 @@ async def _call_duet_scripter(
     return await chain.run_scripter(
         ollama,
         notebook_block=block,
+        # **手帖と同じ名前を渡す。** ブロックは名前で書くのに、返させるのは
+        # `tags_a` / `wearing_b` という文字で、結び目が無かった。
+        name_a=name_a,
+        name_b=name_b or ("Partner" if partner else ""),
         note=note,
         transcript="" if mode == "weave" else _duet_transcript(session),
         theme="" if mode == "weave" else _theme_for_models(session),

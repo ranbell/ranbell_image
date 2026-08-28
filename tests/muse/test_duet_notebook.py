@@ -1160,3 +1160,63 @@ def test_a_look_back_turn_does_not_fold_the_remembered_pose():
     # 係が振り返りと読んだら旗が立つこと
     src2 = inspect.getsource(service._run_duet_scripter)
     assert 'session["looked_back"] = bool(asked_back)' in src2
+
+
+def _w_sides_session(wearing, wearing_b, tags_a, tags_b):
+    session = {
+        "partner_character": {"name": "Sumire"},
+        "notebook": notebook.blank(),
+        "craft": {"tags_a": tags_a, "tags_b": tags_b},
+        "stage_ms": [],
+    }
+    notebook.apply_patch(session["notebook"],
+                         {"wearing": wearing, "wearing_b": wearing_b})
+    return session
+
+
+_A_WEAR = "light_blue_dress, blue_ribbon"
+_B_WEAR = "black_cocktail_dress, pearl_necklace"
+_BAG = ("light_blue_dress, blue_ribbon, black_cocktail_dress, "
+        "pearl_necklace, park")
+
+
+def test_a_swapped_weave_is_put_back():
+    """総監督（2026-08-29）「w-muse の際にキャラが反転するコトが多い」。
+
+    **どのモデルにも「A が誰か」を教えていなかった。** weave は `tags_a` /
+    `tags_b` と書けと言われるだけで、唯一の手がかりは手帖ブロックの並び順。
+    推測に預けているので毎回は当たらない。手帖の二つの衣装は正本なので、
+    袋がどちらの服を持っているかで読み直せる。
+    """
+    session = _w_sides_session(_A_WEAR, _B_WEAR, _B_WEAR, _A_WEAR)
+    sides = service._sides(session, _BAG)
+    assert "light_blue_dress" in sides[0] and "blue_ribbon" in sides[0]
+    assert "black_cocktail_dress" in sides[1]
+    assert any("入れ替わ" in str(r.get("stage") or "")
+               for r in session["stage_ms"]), "戻したことが記録に残っていない"
+
+
+def test_a_correct_weave_is_left_alone():
+    session = _w_sides_session(_A_WEAR, _B_WEAR, _A_WEAR, _B_WEAR)
+    sides = service._sides(session, _BAG)
+    assert "light_blue_dress" in sides[0]
+    assert "black_cocktail_dress" in sides[1]
+    assert session["stage_ms"] == [], "触らなくてよい袋を入れ替えた"
+
+
+def test_two_muses_in_the_same_dress_are_never_swapped():
+    """証拠が無いときは動かさない。**同点でも動かさない。**"""
+    session = _w_sides_session("blue_dress", "blue_dress",
+                               "blue_dress", "blue_dress")
+    service._sides(session, "blue_dress")
+    assert session["stage_ms"] == []
+
+
+def test_both_prompts_say_which_letter_is_which_muse():
+    """第一層 —— 文字と名前を結ぶ一行。相方がいるときだけ出す。"""
+    from app.muse.chain import _who_is_who
+    assert _who_is_who("Mio", "Sumire", letters=True) == \
+        "tags_a is Mio's. tags_b is Sumire's. Never cross them."
+    assert "WEARING_B / BEAT_B are Sumire's" in \
+        _who_is_who("Mio", "Sumire", letters=False)
+    assert _who_is_who("Mio", "", letters=True) == ""

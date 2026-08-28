@@ -2581,6 +2581,19 @@ CREW_LOOK_NOTE = (
 )
 
 
+#: **文字と名前を結ぶ一行。** これが無いと、モデルは手帖ブロックの並び順から
+#: 「一つ目が A だろう」と推測するしかない —— 推測なので毎回は当たらず、
+#: 総監督の報告「w-muse の際にキャラが反転するコトが多い」になる。
+def _who_is_who(name_a: str, name_b: str, *, letters: bool) -> str:
+    a, b = str(name_a or "").strip(), str(name_b or "").strip()
+    if not (a and b):
+        return ""
+    if letters:
+        return f"tags_a is {a}'s. tags_b is {b}'s. Never cross them."
+    return (f"WEARING / BEAT are {a}'s. WEARING_B / BEAT_B are {b}'s. "
+            f"Never cross them.")
+
+
 async def run_scripter(
     ollama, *, notebook_block: str, note: str, transcript: str = "",
     theme: str = "", style: str = "", framing: str = "",
@@ -2588,6 +2601,7 @@ async def run_scripter(
     mode: str = "compile", images: list[bytes] | None = None,
     card: str = "", struck: str = "", directive: str = "",
     crew_look: str = "", room_leaning: str = "", muse_says: str = "",
+    name_a: str = "", name_b: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
 
@@ -2642,6 +2656,7 @@ async def run_scripter(
             ),
             "Partner Muse: tags_shared + tags_a + tags_b." if partner else
             "Solo shoot — use tags only.",
+            _who_is_who(name_a, name_b, letters=True) if partner else "",
             "Return JSON only.",
         ] if b.strip())
     else:
@@ -2675,6 +2690,7 @@ async def run_scripter(
             # 実際に「"bg": "NONE/Unchanged value check: Not mentioned…"」と
             # 値の代わりに存在確認を書いた回があった。
             "Partner Muse sections wearing_b/beat_b apply." if partner else "",
+            _who_is_who(name_a, name_b, letters=False) if partner else "",
             "Return JSON only. Do not emit tags or craft_scene.",
         ] if b.strip())
 
