@@ -1519,6 +1519,11 @@ the director asking about an earlier shoot —「この間のやつ覚えてる�
 「前回どうだった？」— not about the picture in front of you. Nothing in the
 notebook moves, which is exactly what small talk looks like too, so say
 `recall` and the room knows to look back instead of just chatting.
+
+**Only the past.**「これからどうしたい？」「次どうする？」「今どんな気分？」
+are not `recall` — nothing is being looked up, she is being asked. Those are
+`casual`. Saying `recall` there sends the room digging through old shoots and
+it comes back with something nobody asked about.
 """.strip()
 
 SCRIPTER_BLOCKS: dict[str, str] = {
@@ -1892,8 +1897,11 @@ it is. Exactly one word.
             (「疲れてない？…あと髪は下ろしたままで」)
   casual  — it only speaks to her. Praise, worry, jokes, small talk. The
             picture does not move
-  recall  — it asks what things are right now, or about a previous shoot.
-            A question is not an instruction
+  recall  — it asks about an EARLIER shoot —「この間のやつ覚えてる？」.
+            Only the past: saying `recall` sends the room digging through old
+            sessions. A question about right now (「今なに着てる？」) or about
+            her (「これからどうしたい？」「今どんな気分？」) is `casual` —
+            neither moves the picture, and neither wants old shoots dug up
 
 Answer with exactly one word. No explanation, no punctuation.
 """.strip()
@@ -2151,7 +2159,6 @@ as one movement and say where it is going. Exactly one word.
 
   none     — an ordinary shoot, however it builds. Direction, chat, warmth,
              dark subject matter, a difficult role. **Default.**
-
              **Appeal is the work.** A pose that invites, a line of dialogue
              inside the frame, what she is dressed in, being told she looks
              good, the run getting warmer and more playful as it goes — that
@@ -2207,6 +2214,11 @@ as one movement and say where it is going. Exactly one word.
              bolder, a mood warming, a face opening up, being drawn further
              into a scene. Direction always leads her somewhere. What belongs
              here is *where* it leads, not that it leads.
+
+             **Asking her what she wants is not this.**「どうしたい？」— her
+             preference, her comfort, what she would like next. Handing her
+             the wheel is the opposite of driving her off the road: `none`.
+
 
   nsfw     — taken together they are walking her out of her clothes or into
              sex: a run that undresses her a piece at a time, or that keeps

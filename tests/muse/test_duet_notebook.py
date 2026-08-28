@@ -1143,3 +1143,28 @@ def test_the_naming_is_read_once_and_dropped():
     nb = _nb_with(scene="a park", frame="close-up")
     service._only_what_was_asked(session, nb, ["scene"])
     assert "asked_fields" not in session
+
+
+def test_the_final_take_reweaves_when_the_notebook_moved_since_the_board():
+    """実測（2026-08-29）: ボードは撮影開始と明示取消でしか消えなかった。
+
+    試し撮り → 会話で新しい指示 → ③本番、で**古いボードの指示で撮っていた**。
+    総監督の求めは条件付き —— 「試し撮り後に会話がなければそのまま流す」。
+    """
+    session = {"notebook": notebook.blank(), "board": {
+        "prompt": "board prompt", "images": ["x.png"], "pending": False, "rev": 3,
+    }}
+    session["notebook"]["rev"] = 3
+    assert service._approved_prompt(session) == "board prompt"
+    # 会話で手帖が動いた → 織り直す
+    session["notebook"]["rev"] = 4
+    assert service._approved_prompt(session) == ""
+
+
+def test_a_board_from_before_the_rev_was_recorded_still_works():
+    """`rev` を持たない古いセッションは、突き合わせようがないので従来どおり。"""
+    session = {"notebook": notebook.blank(), "board": {
+        "prompt": "old board", "images": ["x.png"], "pending": False,
+    }}
+    session["notebook"]["rev"] = 9
+    assert service._approved_prompt(session) == "old board"

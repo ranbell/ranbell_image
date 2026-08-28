@@ -4021,10 +4021,6 @@ def _duet_user_prompt(
             "making, say it in your own words and let the Showrunner decide. "
             "If it does not, drop it — nobody needs to hear it was considered."
         )
-    manager = _manager_note(session)
-    if manager:
-        # 監督の一言のすぐ後ろ。**彼女が読む順で、監督より後に来る。**
-        parts.append(manager)
     memories = _memory_block(session)
     if memories:
         parts.append(memories)
@@ -4103,6 +4099,14 @@ def _duet_user_prompt(
         parts.append(f"CONVERSATION SO FAR:\n{talk}")
     if text.strip():
         parts.append(f"SHOWRUNNER'S LATEST LINE:\n{text.strip()}")
+    # **監督の一言のすぐ後ろ。** ここに置いてあると書いてあったが、実際は
+    # 78ブロックも前にあった —— 彼女が最後に読むのは監督の一行で、流せという
+    # 指示ははるか上に埋もれていた。総監督の報告「判定が出ているのに冗談で
+    # 流すのが効いていない」はこれ。**メモは指示の直後で読まれないと、指示の
+    # ほうが勝つ。**
+    manager = _manager_note(session)
+    if manager:
+        parts.append(manager)
 
     partner_on = bool(
         (session.get("partner_character") or {})
@@ -6675,6 +6679,9 @@ async def request_board(
         "pending": True,
         "still": bool(still),
         "round": int((session.get("board") or {}).get("round") or 0) + 1,
+        # **どの版の手帖を撮ったか。** 本番でこれと突き合わせる —— ボードの
+        # あとに会話で指示が入っていたら、その指示で撮らないといけない。
+        "rev": int(notebook_mod.of(session).get("rev") or 0),
     }
     session["status"] = "boarding"
     await session_db.save(db, session)
@@ -6736,6 +6743,18 @@ def _approved_prompt(session: dict[str, Any]) -> str:
     """
     board = session.get("board") or {}
     if board.get("pending") or not board.get("images"):
+        return ""
+    # **ボードのあとに手帖が動いていたら、流さない。** ここは無条件にボードの
+    # 指示を返していて、`session["board"]` は撮影開始と明示取消でしか消えな
+    # かった —— 試し撮り → 会話で新しい指示 → ③本番、で**古いボードの指示で
+    # 撮っていた。** 総監督の求めは条件付き（「試し撮り後に会話がなければ
+    # そのまま流す」）。動いていれば従来どおり織り直す。
+    #
+    # `rev` を持たない古いセッションは、突き合わせようがないので従来どおり。
+    rev = board.get("rev")
+    if rev is not None and int(rev) != int(notebook_mod.of(session).get("rev") or 0):
+        logger.info("[muse] notebook moved since the board (%s → %s); reweaving",
+                    rev, notebook_mod.of(session).get("rev"))
         return ""
     return str(board.get("prompt") or "")
 

@@ -1115,3 +1115,46 @@ def test_the_second_reader_never_sees_nsfw():
     i = src.index("confirm_boundary")
     guard = src[:i]
     assert "if kind in chain.BOUNDARY_BLOCKING:" in guard
+
+
+def test_the_manager_note_is_read_after_the_line_it_is_about():
+    """実測（総監督・2026-08-29）「判定が出ているのに冗談で流すのが効かない」。
+
+    コードのコメントは「監督の一言のすぐ後ろ」と言っていたが、実際は 78 ブロック
+    前にあった —— 彼女が最後に読むのは監督の一行で、流せという指示ははるか上に
+    埋もれていた。**メモは指示の直後で読まれないと、指示のほうが勝つ。**
+    """
+    session = {
+        "manager_note": True, "chat": [], "inputs": {"locale": "ja"},
+        "notebook": {}, "craft": {},
+    }
+    out = muse_service._duet_user_prompt(session, "テストの一行", prep=False)
+    line_at = out.find("SHOWRUNNER'S LATEST LINE")
+    note_at = out.find("マネージャーからアドバイス")
+    assert line_at >= 0 and note_at >= 0
+    assert note_at > line_at, "メモが監督の一行より前にある"
+
+
+def test_asking_her_what_she_wants_is_not_a_crime():
+    """実測（総監督）「『どうしたい？』って聞くだけで crime になる」。
+
+    `persona` には「本人について訊くのは erasure ではない」という免責があったが、
+    **`crime` には同じ免責が無かった** —— crime(2)「彼女が壊れていく方へ」は
+    *内面が主題になること*を見るので、希望を訊く一言がそこへ吸い込まれる。
+    """
+    text = _flat(muse_chain.CLASSIFY_DRIFT_SYSTEM)
+    assert "handingherthewheel" in text.lower().replace("`", "").replace("*", "")
+    assert "どうしたい" in muse_chain.CLASSIFY_DRIFT_SYSTEM
+
+
+def test_recall_is_only_about_earlier_shoots():
+    """実測（総監督）「これからどうしたい？と聞くと rag が走って関係ない内容」。
+
+    分類係の `recall` に「**今どうなっているか**を訊く」が入っていたので、
+    未来や気分を訊く一言も `recall` に落ち、過去の撮影を掘りに行っていた。
+    実機で 6/6 に直ったことを確認済み（入力は git に置かない）。
+    """
+    text = muse_chain.CLASSIFY_INTENT_SYSTEM
+    assert "EARLIER shoot" in text
+    assert "これからどうしたい" in text
+    assert "asks what things are right now, or about a previous shoot" not in text

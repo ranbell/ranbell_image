@@ -394,20 +394,6 @@ const notebookRows = computed(() => {
   return rows
 })
 const taste = computed(() => session.value?.showrunner_taste || {})
-const tasteChips = computed(() => {
-  const out = []
-  const prefers = String(taste.value.prefers || '').trim()
-  const avoids = String(taste.value.avoids || '').trim()
-  if (prefers) {
-    const bit = prefers.split(/[、,/]/)[0].trim().slice(0, 40)
-    if (bit) out.push(isJa.value ? `また${bit}？` : `Again: ${bit}?`)
-  }
-  if (avoids) {
-    const bit = avoids.split(/[、,/]/)[0].trim().slice(0, 40)
-    if (bit) out.push(isJa.value ? `${bit}は避けて` : `Skip ${bit}`)
-  }
-  return out.slice(0, 3)
-})
 const chemistryNotes = computed(() =>
   (session.value?.chemistry_notes || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 2),
 )
@@ -918,7 +904,6 @@ const finalShot = () => runStage('approve')
 // the way out of an outfit that stopped moving, so it is expected to be
 // pressed more than once — `chatLocked` is what keeps two presses from
 // overlapping, the same single-flight every other stage button uses.
-const wardrobeRoom = () => runStage('wardrobe')
 
 async function finishSession() {
   if (!session.value || busy.value) return
@@ -1356,11 +1341,6 @@ async function onChatKey(e) {
                           @click="testShot">
                     {{ t('muse.quick.shootAsk') }}
                   </button>
-                  <button class="sb-btn text-[10px]" :disabled="chatLocked"
-                          :title="t('muse.quick.talkMoreTitle')"
-                          @click="sendChat(t('muse.quick.talkMorePrompt'))">
-                    {{ t('muse.quick.talkMore') }}
-                  </button>
                   <button
                     class="sb-btn text-[10px] bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200"
                     :disabled="chatLocked || !hasPrompt"
@@ -1402,18 +1382,6 @@ async function onChatKey(e) {
                   </button>
                 </template>
 
-                <!-- Both rooms. The outfit freezing is not a 主演撮り problem —
-                     it was measured in the crewed studio first. -->
-                <button
-                  type="button"
-                  class="sb-btn text-[10px] border-sky-400/50 bg-sky-950/40 text-sky-200"
-                  :disabled="chatLocked"
-                  :title="t('muse.quick.wardrobeTitle')"
-                  @click="wardrobeRoom"
-                >
-                  {{ t('muse.quick.wardrobe') }}
-                </button>
-
                 <!-- Wrapping is how the diary gets written, so it cannot be a
                      主演撮り privilege: the crewed studio had no way to finish.
                      It needs a finished shoot to write about, and it is offered
@@ -1444,28 +1412,6 @@ async function onChatKey(e) {
                 {{ t('muse.chemistryHint') }}
                 <span class="text-[var(--sb-faint)]"> — {{ chemistryNotes[0] }}</span>
               </p>
-              <div
-                v-if="tasteChips.length && !chatLocked"
-                class="flex flex-wrap items-center gap-1.5 text-[10px]"
-              >
-                <span class="text-[var(--sb-faint)]">{{ t('muse.tasteChipLabel') }}</span>
-                <button
-                  v-for="chip in tasteChips" :key="chip"
-                  type="button"
-                  class="sb-btn text-[10px] px-2 py-0.5"
-                  @click="sendChat(chip)"
-                >{{ chip }}</button>
-              </div>
-              <div
-                v-if="isDuet && !chatLocked"
-                class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--sb-muted)]"
-              >
-                <button
-                  type="button"
-                  class="sb-btn text-[10px] px-2 py-0.5 opacity-80"
-                  @click="sendChat(t('muse.quick.talkMorePrompt'))"
-                >{{ t('muse.quick.talkMore') }}</button>
-              </div>
               <div class="flex gap-2">
                 <textarea
                   v-model="chatInput"
