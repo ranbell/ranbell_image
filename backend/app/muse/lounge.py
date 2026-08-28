@@ -250,27 +250,81 @@ def normalize_outing(
 
 #: スナップの画。**撮影のカットではない**ので、寄りも決めポーズも作らない。
 #: 友達が撮った一枚に見えるだけの語で足りる。
+#: **休みの日の服。** これが無いと、サンプラーが埋める —— 人数が複数・屋外・
+#: 服の指定なし、という並びだと、行き先に関わらず同じ既定へ寄っていた
+#: （総監督の報告・2026-08-29）。季節の一語だけ入れて、あとは決めすぎない。
+#: 季節 → (屋外, 屋内)。**屋内では上着を脱ぐ。** 図書館でマフラーを巻いて
+#: いる絵は、それだけで嘘になる。
+_SNAP_WEAR = {
+    "春": ("casual clothes, long_sleeves, cardigan",
+           "casual clothes, long_sleeves"),
+    "夏": ("casual clothes, short_sleeves, summer_clothes",
+           "casual clothes, short_sleeves"),
+    "秋": ("casual clothes, long_sleeves, jacket",
+           "casual clothes, long_sleeves"),
+    "冬": ("casual clothes, coat, scarf, winter_clothes",
+           "casual clothes, sweater, long_sleeves"),
+}
+_SNAP_WEAR_DEFAULT = ("casual clothes, street_clothes",
+                      "casual clothes, street_clothes")
+
+#: 屋内の行き先。`outdoors` を固定で入れていたので、屋内の行き先でも屋外の
+#: 絵になっていた —— そして屋外＋複数＋服なしが、上の既定を強めていた。
+_INDOOR_PLACES = frozenset({
+    "aquarium", "arcade", "art museum", "bedroom", "bowling alley", "cafe",
+    "cafe table", "car at night", "cardboard boxes", "clothing store",
+    "convenience store", "dark room candle", "furniture store", "gallery",
+    "greenhouse", "hardware store", "hot spring inn", "karaoke room",
+    "library", "living room", "morning diner", "movie theater", "music store",
+    "old bookstore", "planetarium", "pottery studio", "ramen shop",
+    "record shop", "stationery shop", "variety store", "window rain",
+})
+
+#: **集合写真にしない。** もとは `standing together, looking at viewer` で、
+#: それは並んでレンズを見る絵 —— 総監督「集合写真みたいになってなんだか変」。
+#: 遊んでいる最中を撮る。毎回同じにならないよう、その日の一つを引く。
+_SNAP_MOMENT = (
+    "walking together, talking, laughing",
+    "leaning in to look at something together, smiling",
+    "one looking back at the others, mid-step",
+    "sitting side by side, heads turned to each other",
+    "pointing at something off-frame, following her gaze",
+    "mid-laugh, hair moving, not posed",
+)
+
 _SNAP_LOOK = (
-    "candid photo, snapshot, casual, standing together, looking at viewer, "
-    "natural light, slight motion blur, amateur photography, outdoors"
+    "candid photo, snapshot, casual, natural light, slight motion blur, "
+    "amateur photography"
 )
 
 
 def snapshot_prompt(
     cast: list[dict[str, Any]], *, identity_tags: list[list[str]],
-    occasion: str = "",
+    occasion: str = "", season: str = "",
+    rng: random.Random | None = None,
 ) -> str:
     """友達同士で撮った一枚。**その日の行き先が背景になる。**
 
     撮影のプロンプトとは別物 —— スタジオの語彙（衣装指定、決めポーズ、
     ライティング）は入れない。休みの日にスマホで撮った写真に見えればいい。
+
+    ただし**服は要る**。書かなければサンプラーが埋め、行き先に関わらず同じ
+    既定へ寄っていた。季節の一語だけ置く。
+
+    そして**並ばせない**。`standing together, looking at viewer` は集合写真
+    そのもので、遊んでいる写真にはならなかった。
     """
     from . import identity as identity_mod
     parts: list[str] = list(identity_mod.subject_tags(cast))
     for tags in identity_tags:
         parts += [t for t in tags if t]
+    inside = bool(occasion) and occasion in _INDOOR_PLACES
+    wear = _SNAP_WEAR.get(str(season or "").strip(), _SNAP_WEAR_DEFAULT)
+    parts.append(wear[1] if inside else wear[0])
     if occasion:
         parts.append(occasion)
+    parts.append("indoors" if inside else "outdoors")
+    parts.append((rng or random).choice(_SNAP_MOMENT))
     parts.append(_SNAP_LOOK)
     seen: dict[str, None] = {}
     for t in parts:

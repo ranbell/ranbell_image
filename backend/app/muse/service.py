@@ -7995,6 +7995,7 @@ async def _spool_outing_snapshot(
     positive = lounge_mod.snapshot_prompt(
         members, identity_tags=tags,
         occasion=lounge_mod.outing_place_en(occasion),
+        season=lounge_mod.season_ja(),
     )
     thread_id = str(thread.get("id") or "")
 
