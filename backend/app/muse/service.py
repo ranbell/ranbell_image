@@ -4401,8 +4401,11 @@ async def _duet_talk(
     session["prop_age_hint"] = ""
     session["w_b_leads"] = False
     session["commit_pitch"] = False
+    # Capture before `_after_actress_spoke` clears it: a joke/STOP turn must
+    # not fold CARD into beat — mouth deflected, picture must stay put.
+    deflecting = bool(session.get("manager_note"))
     await _after_actress_spoke(db, session)
-    if fold and uses_notebook(session) and fresh_card:
+    if fold and uses_notebook(session) and fresh_card and not deflecting:
         began = time.monotonic()
         await _fold_muse_after_talk(
             db, ollama, session, cfg=cfg, user_text=text,
@@ -4991,24 +4994,30 @@ async def post_duet_chat(
     await _contract_check(ollama, session, text, cfg=cfg)
     _stage(session, "前段", began)
 
+    # Joke / manager STOP: talk may continue, but nothing that steers the
+    # picture — not the scripter, and not standing `notes` either. Falling
+    # through to `take_note` on skip used to park the blocked line as standing
+    # direction, so the next turn painted what this turn had joked away.
     began = time.monotonic()
-    if uses_notebook(session) and not session.pop("skip_scripter", False):
-        try:
-            await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
-        except Exception:
-            logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
-            session["craft_dirty"] = True
-            session.setdefault("scripter_intent", "casual")
-        _stage(session, "台本 compile", began)
-    else:
-        named, _ = await route_note(db, ollama, session, text, cfg=cfg)
-        if not named:
-            await take_note(db, ollama, session, text, cfg=cfg)
+    skip_picture = bool(session.pop("skip_scripter", False))
+    if not skip_picture:
+        if uses_notebook(session):
+            try:
+                await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
+            except Exception:
+                logger.warning("[muse] scripter failed; muse still talks", exc_info=True)
+                session["craft_dirty"] = True
+                session.setdefault("scripter_intent", "casual")
+            _stage(session, "台本 compile", began)
         else:
-            _note_standing(session, text)
-            session["just_banned"] = []
-            session["just_restored"] = []
-        _stage(session, "note", began)
+            named, _ = await route_note(db, ollama, session, text, cfg=cfg)
+            if not named:
+                await take_note(db, ollama, session, text, cfg=cfg)
+            else:
+                _note_standing(session, text)
+                session["just_banned"] = []
+                session["just_restored"] = []
+            _stage(session, "note", began)
 
     began = time.monotonic()
     session = await _duet_talk(db, ollama, session, text, cfg=cfg)
@@ -5593,17 +5602,20 @@ async def post_chat(
     # already wrote, unanswered.
     if str(session.get("table_stage") or "full") == "brief":
         cfg = await get_runtime_config(db)
-        await take_note(db, ollama, session, text, cfg=cfg)
-        await session_db.save(db, session)
-        if _cast_in_role(_crew_ids(session), "plan"):
-            await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
-            await session_db.save(db, session, publish=False)
-        # The note becomes the shot before the floor discusses it — see the
-        # ordering note in the note path below.
+        # Same rule as the full path: blocked lines must not become standing
+        # notes, plan seeds, craft, or folded beat — only the room may talk.
         if not skip_picture:
+            await take_note(db, ollama, session, text, cfg=cfg)
+            await session_db.save(db, session)
+            if _cast_in_role(_crew_ids(session), "plan"):
+                await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
+                await session_db.save(db, session, publish=False)
+            # The note becomes the shot before the floor discusses it — see the
+            # ordering note in the note path below.
             await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
         session = await run_full_table(db, ollama, session, note=text)
-        await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
+        if not skip_picture:
+            await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
         locale = str(_inputs(session).get("locale") or "ja")
         wrap = _chat_append(
             session, role="system", name="Studio",
@@ -5638,24 +5650,25 @@ async def post_chat(
     cfg = await get_runtime_config(db)
     # The note is standing direction from here on, not a remark about one turn —
     # and whatever it refuses comes out of the picture before anyone answers it.
+    # Joke / STOP: skip standing note, plan reseat, scripter, and fold — talk only.
     if not skip_picture:
         await take_note(db, ollama, session, text, cfg=cfg)
         await session_db.save(db, session)
 
-    # Re-settle where and when first: a note like "make it somewhere else" has
-    # to move the locked place, or the original theme keeps winning downstream.
-    if _cast_in_role(cast, "plan"):
-        await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
-        await session_db.save(db, session, publish=False)
+        # Re-settle where and when first: a note like "make it somewhere else" has
+        # to move the locked place, or the original theme keeps winning downstream.
+        if _cast_in_role(cast, "plan"):
+            await _run_plan_turn(db, ollama, session, cfg=cfg, note=text)
+            await session_db.save(db, session, publish=False)
 
-    # 主演撮り's order, which is the one that follows direction: the
-    # showrunner's line becomes the shot FIRST (compile, plus a VERIFY pass
-    # when the picture did not appear to move), then the room talks about the
-    # shot it now has, then a fold pass adds the uncontradicted body action she
-    # brought. Talking first and compiling afterwards meant one compile read
-    # the note and three seats' banter as one transcript, and the banter — five
-    # times the word count — is what the picture came out of.
-    await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
+        # 主演撮りの order, which is the one that follows direction: the
+        # showrunner's line becomes the shot FIRST (compile, plus a VERIFY pass
+        # when the picture did not appear to move), then the room talks about the
+        # shot it now has, then a fold pass adds the uncontradicted body action she
+        # brought. Talking first and compiling afterwards meant one compile read
+        # the note and three seats' banter as one transcript, and the banter — five
+        # times the word count — is what the picture came out of.
+        await _run_crew_scripter(db, ollama, session, text, cfg=cfg)
 
     # Once a board exists the crew answers while looking at it.
     images = await board_images(db, session)
@@ -5675,7 +5688,8 @@ async def post_chat(
     await session_db.save(db, session, publish=False)
 
     # Fold: her CARD/SAY body action onto the stem the note already set.
-    await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
+    if not skip_picture:
+        await _fold_muse_after_talk(db, ollama, session, cfg=cfg, user_text=text)
 
     # No per-note "Applied. Use ②試し撮り…" any more. It fired on every single
     # note — 21 times in one measured run — and the buttons it points at are on

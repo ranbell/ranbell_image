@@ -279,12 +279,160 @@ def test_the_middle_answer_reaches_the_talk_but_not_the_picture():
         assert "skip_scripter" in body, fn.__name__
     # 主演撮り: scripter を呼ぶ行そのものに旗が掛かっている
     duet = inspect.getsource(muse_service.post_duet_chat)
-    for line in duet.splitlines():
-        if "_run_duet_scripter(" in line and "await" in line:
-            break
-    else:
-        raise AssertionError("scripter を呼ぶ行が見つからない")
-    assert "skip_scripter" in duet[:duet.index("_run_duet_scripter(")]
+    assert "skip_picture" in duet
+    assert duet.index("skip_picture") < duet.index("_run_duet_scripter(")
+    # skip 時に take_note へ落とさない（常設 notes 汚染の抜け穴）
+    skip_block = duet[duet.index("skip_picture"):duet.index("_duet_talk(")]
+    assert "take_note" in skip_block
+    assert "if not skip_picture" in skip_block
+
+    # 制作スタッフ: 班 scripter / plan / fold も skip_picture の内側
+    crew = inspect.getsource(muse_service.post_chat)
+    assert "skip_picture" in crew
+    full = crew[crew.index('table_stage") or "full"'):]
+    assert full.count("if not skip_picture:") >= 2
+    # post_chat 内の await _run_crew_scripter はすべて skip ガード配下
+    # （関数本体の字下げより深い）
+    for line in full.splitlines():
+        if "await _run_crew_scripter(" in line:
+            assert line.startswith("        "), line
+            assert not line.startswith("    await "), line
+
+
+@pytest.mark.asyncio
+async def test_duet_skip_does_not_park_blocked_line_in_standing_notes(monkeypatch):
+    """主演: skip 時に take_note へ落とさない。常設 notes が次ターンを汚さない。"""
+    from app.muse import notebook, session_db
+    from tests.muse.test_duet import _duet_session
+    from tests.muse.test_duet_notebook import NotebookOllama
+    from tests.muse.test_service import FakeDb
+
+    async def _cfg(db):
+        return {"ollama_num_ctx": 16000}
+
+    monkeypatch.setattr(muse_service, "get_runtime_config", _cfg)
+
+    async def _skip_check(ollama, session, text, *, cfg):
+        session["manager_note"] = True
+        session["skip_scripter"] = True
+        return ""
+
+    monkeypatch.setattr(muse_service, "_contract_check", _skip_check)
+
+    scripter_calls = []
+
+    async def _no_scripter(*_a, **_kw):
+        scripter_calls.append(1)
+        raise AssertionError("scripter must not run on skip")
+
+    monkeypatch.setattr(muse_service, "_run_duet_scripter", _no_scripter)
+
+    async def _talk(db, ollama, session, text, *, cfg, **_kw):
+        return session
+
+    monkeypatch.setattr(muse_service, "_duet_talk", _talk)
+
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={})
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "scene": "park at dusk",
+        "wearing": "sailor uniform",
+        "beat": "standing",
+        "frame": "eye level",
+    })
+    before = notebook.shot_snapshot(s["notebook"])
+    s["notes"] = []
+    await session_db.save(db, s)
+
+    await muse_service.post_duet_chat(
+        db, ollama, s, "この指示は絵に通してはいけない一行",
+    )
+    assert scripter_calls == []
+    assert s.get("notes") == []
+    assert notebook.shot_snapshot(s["notebook"]) == before
+
+
+@pytest.mark.asyncio
+async def test_crew_skip_does_not_run_scripter_or_fold(monkeypatch):
+    """制作スタッフ: skip 時は scripter / plan / fold を呼ばない。talk は続けてよい。"""
+    from app.muse import notebook, session_db
+    from tests.muse.test_crew_notebook import _crew_session
+    from tests.muse.test_service import FakeDb, FakeOllama
+
+    async def _cfg(db):
+        return {"ollama_num_ctx": 16000}
+
+    monkeypatch.setattr(muse_service, "get_runtime_config", _cfg)
+
+    async def _skip_check(ollama, session, text, *, cfg):
+        session["manager_note"] = True
+        session["skip_scripter"] = True
+        return ""
+
+    monkeypatch.setattr(muse_service, "_contract_check", _skip_check)
+
+    hits = {"scripter": 0, "plan": 0, "fold": 0, "take_note": 0}
+
+    async def _count_scripter(*_a, **_kw):
+        hits["scripter"] += 1
+
+    async def _count_plan(*_a, **_kw):
+        hits["plan"] += 1
+
+    async def _count_fold(*_a, **_kw):
+        hits["fold"] += 1
+
+    async def _count_note(*_a, **_kw):
+        hits["take_note"] += 1
+
+    monkeypatch.setattr(muse_service, "_run_crew_scripter", _count_scripter)
+    monkeypatch.setattr(muse_service, "_run_plan_turn", _count_plan)
+    monkeypatch.setattr(muse_service, "_fold_muse_after_talk", _count_fold)
+    monkeypatch.setattr(muse_service, "take_note", _count_note)
+
+    async def _lead(*_a, **_kw):
+        return "またまたー"
+
+    async def _table(*_a, **_kw):
+        return None
+
+    async def _no_board(*_a, **_kw):
+        return []
+
+    monkeypatch.setattr(muse_service, "_run_crew_lead_turn", _lead)
+    monkeypatch.setattr(muse_service, "_run_crew_table_talk", _table)
+    monkeypatch.setattr(muse_service, "board_images", _no_board)
+
+    db = FakeDb()
+    ollama = FakeOllama()
+    s = await _crew_session(db)
+    s["table_stage"] = "full"
+    s["craft"] = {"prompt": "1girl, standing", "tags": "standing", "scene": "park"}
+    notebook.apply_patch(notebook.of(s), {
+        "scene": "rooftop at dusk",
+        "wearing": "sailor uniform",
+        "beat": "standing",
+        "frame": "wide",
+    })
+    before = notebook.shot_snapshot(notebook.of(s))
+    await session_db.save(db, s)
+
+    await muse_service.post_chat(
+        db, ollama, None, None, s, "この指示は絵に通してはいけない一行",
+    )
+    assert hits == {"scripter": 0, "plan": 0, "fold": 0, "take_note": 0}
+    assert notebook.shot_snapshot(notebook.of(s)) == before
+
+
+def test_duet_fold_skips_when_deflecting():
+    """冗談ターンの CARD を beat に折り込まない（manager_note を fold 前に読む）。"""
+    import inspect
+    src = inspect.getsource(muse_service._duet_talk)
+    assert "deflecting" in src
+    assert "not deflecting" in src
+    assert src.index("deflecting") < src.index("_fold_muse_after_talk")
 
 
 def test_the_room_keeps_what_the_clerk_saw_and_who_it_was():
