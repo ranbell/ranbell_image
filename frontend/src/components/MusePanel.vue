@@ -1581,6 +1581,9 @@ async function onChatKey(e) {
             <p class="mt-1 mb-1.5 text-[var(--sb-muted)]">{{ t('muse.debugHint') }}</p>
             <div class="mb-1.5 text-[var(--sb-muted)]">
               intent: {{ session?.scripter_intent || '—' }}
+              <span v-if="session?.picture_stopped" class="ml-2 text-amber-300">
+                ⌁ {{ t('muse.pictureStopped') }}
+              </span>
             </div>
             <pre
               v-if="session?.muse_card"

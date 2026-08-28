@@ -1688,7 +1688,8 @@
     "staffVoice": "Voice",
     "staffExamples": "Sample energy",
     "staffClose": "Close",
-    "struckFromContext": "Left out of the conversation from here on"
+    "struckFromContext": "Left out of the conversation from here on",
+    "pictureStopped": "This turn did not move the picture"
   },
   "characters": {
     "title": "Characters",

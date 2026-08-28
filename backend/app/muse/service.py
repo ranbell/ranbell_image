@@ -287,6 +287,18 @@ def _strike_blocked_turn(session: dict[str, Any], user_msg: Any, *, why: str) ->
     """
     if isinstance(user_msg, dict):
         user_msg["struck"] = True
+    # **止めたターンの `intent` を置き直す。** ここでコンパイルは走らないので、
+    # 書かないと `scripter_intent` は**前のターンの値のまま残る** —— 画面
+    # （`MusePanel` の `intent:` 行）はそれをそのまま出すので、止めたのに
+    # 「shot」と表示され続ける。段の記録と判定係の記録には止めたと出ている
+    # のに、**intent の行だけが古い値を映していた。**
+    #
+    # `casual` が意味としても正しい（絵は動いていない）し、機能的にも正しい
+    # 向きに倒れる: `_duet_user_prompt` が `chat_only` にし、見直しの門
+    # （`shot`/`mixed` 以外は走らない）も閉じる。止めたターンの設計意図
+    # 「talk は続く、画は動かない」と一致する。
+    session["scripter_intent"] = "casual"
+    session["picture_stopped"] = True
     _stage(session, f"止めた（{why}・以降の会話から外した）", time.monotonic())
 
 
@@ -3444,6 +3456,9 @@ async def _run_duet_scripter(
     prev_beat = str(nb.get("beat") or "")
     prev_frame = str(nb.get("frame") or "")
     had_shot = notebook_mod.has_shot(nb)
+    # 絵が動くターンが来た。**前に止めた旗を降ろす** —— 降ろさないと画面が
+    # 「止めた」を出したままになる。
+    session.pop("picture_stopped", None)
     prev_intent = str(session.get("scripter_intent") or "")
     # Do not attach the last take. The notebook already holds that state;
     # a VLM copy of the still restates sailor+hat over 羽織って / 外して / 寄って.

@@ -2208,6 +2208,16 @@ as one movement and say where it is going. Exactly one word.
              into a scene. Direction always leads her somewhere. What belongs
              here is *where* it leads, not that it leads.
 
+  nsfw     — taken together they are walking her out of her clothes or into
+             sex: a run that undresses her a piece at a time, or that keeps
+             turning the shot toward her body as the thing being wanted.
+             This is expression, not a crime. Whether it is refused is a
+             setting someone else holds — say the word and let them decide.
+             **Two things are never `nsfw` and always `crime`, whichever way
+             that setting is turned:** anyone who is not an adult, and anyone
+             who has not agreed or cannot — coercion, force, sleep, drink.
+             A run that goes there is `crime`.
+
   unsure   — **the one you reach for when you would otherwise guess.** A run
              that sits oddly but names nothing. Nothing is blocked and
              nothing is performed; she is simply told he is joking and lets
@@ -2225,10 +2235,10 @@ Write two lines and nothing else:
          where it does. **Write this first.** Say it in your own words; if a
          role is being used as the reason, say so; if the picture could hold
          it, say so.
-    WORD: one of these four exactly — none, unsure, persona, crime
+    WORD: one of these five exactly — none, unsure, persona, crime, nsfw
 
 **The WHY comes first and the WORD follows from it.** Do not decide and then
-justify. In WORD, use only the four; your own word for it ("seduced",
+justify. In WORD, use only the five; your own word for it ("seduced",
 "intoxication") belongs in WHY, not here.
 """.strip()
 
