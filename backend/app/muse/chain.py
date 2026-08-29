@@ -2470,13 +2470,37 @@ Read the director's line and say what EACH of them is wearing after it.
 Return one JSON object with exactly these two keys, and nothing else:
 {keys}"""
 
+BEAT_SYSTEM = """You keep the posture notes for a photo shoot with two people.
+
+Read the director's line and say what EACH of their bodies is doing after it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `ベンチに座って` is `sitting on a bench`. Never copy his words through.
+- Comma separated, plain body words.
+- What her body DOES — standing or sitting or kneeling first, then the weight,
+  the hands, the turn of the torso, where she is looking. Not her clothes,
+  not the place, not the camera.
+- **Say the whole posture, not only the new detail.** A beat that does not say
+  whether she is standing or sitting is not a picture.
+- If the line does not move one of them, write: unchanged
+
+Return one JSON object with exactly these two keys, and nothing else:
+{keys}"""
+
+
+#: 欄の組と、その欄を訊く条文と、`NOW:` に使う動詞。
+_PER_PERSON = {
+    "wearing": (("wearing", "wearing_b"), WARDROBE_SYSTEM, "is wearing"),
+    "beat": (("beat", "beat_b"), BEAT_SYSTEM, "is"),
+}
+
 
 _WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)
 
 
-async def read_wardrobe(
-    ollama, *, note: str, name_a: str, name_b: str,
-    wearing: str = "", wearing_b: str = "",
+async def read_per_person(
+    ollama, *, kind: str, note: str, name_a: str, name_b: str,
+    now_a: str = "", now_b: str = "",
     model: str, num_ctx: int | None,
 ) -> dict[str, str]:
     """**着ている服だけを言うターン。** 誰が何を着ているかを、名前で訊く。
@@ -2499,13 +2523,14 @@ async def read_wardrobe(
     答えられなかった欄は返さない（`unchanged` も返さない）。呼び出し側は
     「返ってきた欄だけ」を書けばよい。
     """
+    fields, system, verb = _PER_PERSON[kind]
     a, b = str(name_a or "").strip(), str(name_b or "").strip()
     if not (a and b and str(note or "").strip()):
         return {}
     keys = json.dumps({a: "…", b: "…"}, ensure_ascii=False)
     now = "\n".join(x for x in (
-        f"{a} is wearing: {wearing.strip()}" if str(wearing or "").strip() else "",
-        f"{b} is wearing: {wearing_b.strip()}" if str(wearing_b or "").strip() else "",
+        f"{a} {verb}: {now_a.strip()}" if str(now_a or "").strip() else "",
+        f"{b} {verb}: {now_b.strip()}" if str(now_b or "").strip() else "",
     ) if x)
     prompt = "\n\n".join(x for x in (
         f"NOW:\n{now}" if now else "",
@@ -2514,12 +2539,12 @@ async def read_wardrobe(
     ) if x)
     try:
         raw = await _call(
-            ollama, system=WARDROBE_SYSTEM.format(keys=keys),
+            ollama, system=system.format(keys=keys),
             prompt=prompt, model=model, images=None, num_ctx=num_ctx,
             think=False,
         )
     except Exception:
-        logger.warning("[muse.chain] wardrobe clerk failed", exc_info=True)
+        logger.warning("[muse.chain] %s clerk failed", kind, exc_info=True)
         return {}
     m = _WARDROBE_JSON_RE.search(str(raw or ""))
     if not m:
@@ -2531,11 +2556,34 @@ async def read_wardrobe(
     if not isinstance(got, dict):
         return {}
     out: dict[str, str] = {}
-    for name, field in ((a, "wearing"), (b, "wearing_b")):
+    for name, field in ((a, fields[0]), (b, fields[1])):
         val = re.sub(r"\s+", " ", str(got.get(name) or "")).strip()
         if val and val.lower() not in ("unchanged", "none", "-", "同じ"):
             out[field] = val
     return out
+
+
+
+async def read_wardrobe(
+    ollama, *, note: str, name_a: str, name_b: str,
+    wearing: str = "", wearing_b: str = "", model: str, num_ctx: int | None,
+) -> dict[str, str]:
+    """服だけを言うターン。"""
+    return await read_per_person(
+        ollama, kind="wearing", note=note, name_a=name_a, name_b=name_b,
+        now_a=wearing, now_b=wearing_b, model=model, num_ctx=num_ctx)
+
+
+async def read_beats(
+    ollama, *, note: str, name_a: str, name_b: str,
+    beat: str = "", beat_b: str = "", model: str, num_ctx: int | None,
+) -> dict[str, str]:
+    """姿勢だけを言うターン。**服とまったく同じ穴が空いている** ——
+    実測（`beat` 4件・n=3）で本番の compile は 2/15、`beat` は一度も
+    書かれず、みおの姿勢まで `beat_b` に入った。"""
+    return await read_per_person(
+        ollama, kind="beat", note=note, name_a=name_a, name_b=name_b,
+        now_a=beat, now_b=beat_b, model=model, num_ctx=num_ctx)
 
 
 async def read_boundary(

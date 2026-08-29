@@ -1265,6 +1265,35 @@ def test_the_wardrobe_clerk_maps_names_to_the_two_fields():
     assert _ask('{"だれか": "x"}') == {}
 
 
+def test_the_pose_clerk_uses_the_same_road():
+    """姿勢も服とまったく同じ穴だった。
+
+    実測（4件・n=3）で本番の compile は **2/15**、`beat` は一度も書かれず、
+    みおの姿勢まで `beat_b` に入った。名前で訊くと **20/25**（落ちた1件も
+    取り違えではなく、「しゃがんで」を `kneeling` と訳しただけ）。
+    """
+    import asyncio
+
+    class _Ollama:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def generate_text_stream(self, prompt, **kw):
+            async def _stream():
+                yield {"type": "token", "text": self.reply}
+            return _stream()
+
+    got = asyncio.run(chain.read_beats(
+        _Ollama('{"各務 みお": "sitting on a bench", "平岡 すみれ": "standing behind her"}'),
+        note="みおちゃんはベンチに座って。すみれちゃんは後ろに立ってて。",
+        name_a="各務 みお", name_b="平岡 すみれ", model="m", num_ctx=1024))
+    assert got == {"beat": "sitting on a bench",
+                   "beat_b": "standing behind her"}
+    # 欄の組が服とぶつからないこと
+    assert chain._PER_PERSON["beat"][0] == ("beat", "beat_b")
+    assert chain._PER_PERSON["wearing"][0] == ("wearing", "wearing_b")
+
+
 def test_the_wardrobe_clerk_needs_two_names():
     """ソロでは呼ばない。名前が片方しか無ければ何も返さない。"""
     import asyncio

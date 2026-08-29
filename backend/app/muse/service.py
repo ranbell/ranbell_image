@@ -3606,31 +3606,37 @@ async def _run_duet_scripter(
         #
         # 返ってくるのは**名前をキーにした JSON** なので、欄への振り分けは
         # こちらで決める —— モデルに `_b` という文字を選ばせない。
-        if partner and "wearing" in asked:
-            began_w = time.monotonic()
-            worn = await chain.read_wardrobe(
-                ollama, note=str(text or "").strip(),
+        # **姿勢も同じ穴だった。** 実測（4件・n=3）で本番の compile は 2/15、
+        # `beat` は一度も書かれず、みおの姿勢まで `beat_b` に入った。名前で
+        # 訊くと 20/25（落ちた1件も取り違えではなく訳語のぶれ）。
+        per_person: dict[str, str] = {}
+        for kind in ("wearing", "beat"):
+            if not (partner and kind in asked):
+                continue
+            began_k = time.monotonic()
+            per_person.update(await chain.read_per_person(
+                ollama, kind=kind, note=str(text or "").strip(),
                 name_a=name_a, name_b=name_b,
-                wearing=str(nb.get("wearing") or ""),
-                wearing_b=str(nb.get("wearing_b") or ""),
+                now_a=str(nb.get(kind) or ""),
+                now_b=str(nb.get(f"{kind}_b") or ""),
                 model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            ))
+            _stage(session, f"{kind} 係（名前で訊く）", began_k)
+        if per_person:
+            logger.info("[muse] per-person clerk: %s",
+                        ", ".join(f"{k}={v[:40]}" for k, v in per_person.items()))
+            # **compile の書いたものより、こちらが正しい。** 上の
+            # `apply_patch` は既に走っているので、ここで自分で当て、派生した
+            # 値も取り直す。
+            patch.update(per_person)
+            notebook_mod.apply_patch(nb, per_person)
+            notebook_moved = int(nb.get("rev") or 0) > rev_before
+            after_shot = notebook_mod.shot_snapshot(nb)
+            picture_patched = any(
+                str(after_shot.get(k) or "") != str(before_shot.get(k) or "")
+                for k in picture_keys
             )
-            _stage(session, "衣装係（名前で訊く）", began_w)
-            if worn:
-                logger.info("[muse] wardrobe clerk: %s",
-                            ", ".join(f"{k}={v[:40]}" for k, v in worn.items()))
-                # **compile の書いた服より、こちらが正しい。** 上の
-                # `apply_patch` は既に走っているので、ここで自分で当て、
-                # 派生した値も取り直す。
-                patch.update(worn)
-                notebook_mod.apply_patch(nb, worn)
-                notebook_moved = int(nb.get("rev") or 0) > rev_before
-                after_shot = notebook_mod.shot_snapshot(nb)
-                picture_patched = any(
-                    str(after_shot.get(k) or "") != str(before_shot.get(k) or "")
-                    for k in picture_keys
-                )
-                shot_patched = True
+            shot_patched = True
 
     _meta_note = str(text or "").strip().upper()
     # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes
