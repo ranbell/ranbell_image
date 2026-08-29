@@ -285,9 +285,10 @@
                     @click="resumeJob(job.id)"
                     :title="t('controlRoom.resume')"
                   >▶</button>
-                  <!-- Cancel -->
+                  <!-- Cancel. 待ち行列のものも止められる（`spooler.cancel`
+                       は QUEUED を扱えるのに、ボタンだけ出ていなかった）。 -->
                   <button
-                    v-if="['running', 'paused'].includes(job.state)"
+                    v-if="['running', 'paused', 'queued'].includes(job.state)"
                     class="cr-cancel-btn"
                     @click="$emit('cancel', job.id)"
                     :title="t('controlRoom.cancel')"
@@ -298,6 +299,14 @@
                     class="cr-retry-btn"
                     @click="$emit('retry', job.id)"
                   >retry</button>
+                  <!-- 失敗したものを片付ける。止めるものはもう無いので、
+                       これは取り消しではなく片付け（サーバ側で dismiss）。 -->
+                  <button
+                    v-if="['failed', 'cancelled', 'succeeded'].includes(job.state)"
+                    class="cr-cancel-btn"
+                    @click="$emit('cancel', job.id)"
+                    :title="t('controlRoom.dismiss')"
+                  >✕</button>
                   <span v-else-if="job.state === 'cancelling'" class="cr-job-status">cancelling…</span>
                 </div>
               </div>

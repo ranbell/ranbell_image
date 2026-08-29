@@ -237,6 +237,22 @@ class JobSpooler:
     # ── Task groups ────────────────────────────────────────────────────────────
     # A group is any set of jobs sharing the same meta["group_id"].
 
+    def dismiss(self, job_id: str) -> bool:
+        """終わったジョブを履歴から片付ける。**走っているものには効かない。**
+
+        失敗したジョブは `_registry` に居ないので `cancel` が届かず、画面から
+        消す手段が無かった（総監督「job キャンセルがエラー時だけない」）。
+        止めるものはもう無いので、これは取り消しではなく**片付け**。
+        """
+        if self._registry.get(job_id) is not None:
+            return False          # まだ動いている —— `cancel` の領分
+        for i, job in enumerate(self._history):
+            if job.id == job_id:
+                del self._history[i]
+                self._push_event("job_dismissed", job)
+                return True
+        return False
+
     async def cancel_group(self, group_id: str) -> int:
         """Cancel all active (queued/held/running) jobs of the group."""
         job_ids = [
@@ -264,8 +280,22 @@ class JobSpooler:
 
     # ── Retry ──────────────────────────────────────────────────────────────────
 
-    def retry(self, job_id: str) -> str:
+    def _find(self, job_id: str) -> Job | None:
+        """走っているものと、終わったもの、どちらからでも引く。
+
+        **終わったジョブは `_registry` から消えて `_history` へ移る**
+        （`_move_to_history` —— 履歴が source of truth）。`retry` は
+        `_registry` しか見ていなかったので、**失敗したジョブの再実行は
+        定義上いつも 404 だった**。画面は履歴から一覧を出しているので、
+        押せるのに必ず失敗する、という食い違いになっていた。
+        """
         job = self._registry.get(job_id)
+        if job is not None:
+            return job
+        return next((j for j in self._history if j.id == job_id), None)
+
+    def retry(self, job_id: str) -> str:
+        job = self._find(job_id)
         if job is None:
             raise KeyError(f"Job {job_id!r} not found")
         if job.state not in (JobState.FAILED, JobState.CANCELLED):

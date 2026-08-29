@@ -47,11 +47,28 @@ async def list_jobs(request: Request):
 
 @router.post("/{job_id}/cancel")
 async def cancel_job(job_id: str, request: Request):
+    """走っているジョブを止める。**終わったものは `dismiss` へ。**
+
+    失敗したジョブは `_registry` に居ない（履歴が source of truth）ので、
+    ここでは 404 になる。止めるものがもう無いのだから、要るのは取り消しでは
+    なく片付け —— それが下の `dismiss`。
+    """
     spooler = request.app.state.spooler
     ok = await spooler.cancel(job_id)
     if not ok:
+        if spooler.dismiss(job_id):
+            return {"status": "dismissed", "job_id": job_id}
         raise HTTPException(404, f"Job {job_id!r} not found or not cancellable")
     return {"status": "cancel_requested", "job_id": job_id}
+
+
+@router.delete("/{job_id}")
+async def dismiss_job(job_id: str, request: Request):
+    """終わったジョブを履歴から消す（画面の×）。"""
+    spooler = request.app.state.spooler
+    if not spooler.dismiss(job_id):
+        raise HTTPException(404, f"Job {job_id!r} not found or still running")
+    return {"status": "dismissed", "job_id": job_id}
 
 
 class ReorderBody(BaseModel):

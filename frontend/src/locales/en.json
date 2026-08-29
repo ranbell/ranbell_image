@@ -1071,7 +1071,8 @@
     "gpuGuardTooltip": "Auto-paused to protect the GPU while Generation / Prompt Engine is active. Resumes automatically.",
     "heldTooltip": "Waiting at the pause gate — proceeds automatically when the lane resumes.",
     "slotsTooltip": "Max concurrent requests (semaphore capacity)",
-    "cpuLaneTooltip": "CPU-only lane — keeps running during GPU guard"
+    "cpuLaneTooltip": "CPU-only lane — keeps running during GPU guard",
+    "dismiss": "Dismiss"
   },
   "jobTitle": {
     "scan_heal": "Healing Scan",
