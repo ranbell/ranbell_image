@@ -181,6 +181,55 @@ def personality_text_from_preset(preset: dict[str, Any], *, locale: str = "ja") 
     return "\n".join(b for b in bits if b)
 
 
+#: 衣装セットの並び順。**`signature` が代表服** —— 紹介ページと参照ボードが
+#: 見ているのはこれで、既存の `favorite_clothes` + `footwear` と同じ。
+WARDROBE_KEYS = ("signature", "work", "casual_a", "casual_b")
+_WARDROBE_NAMES_JA = {
+    "signature": "いつもの", "work": "お仕事",
+    "casual_a": "休みの日", "casual_b": "少しよそ行き",
+}
+
+
+def wardrobe_sets(preset: dict[str, Any], *,
+                  outfit: list[str], props: list[str]) -> list[dict[str, Any]]:
+    """その子が持っている服。**`signature` は必ず在る。**
+
+    総監督（2026-08-29）「default の衣装や持ち物がないので、会話開始後に
+    いきなりおかしな状態に陥ることがあります」。手帖の `wearing` は空で
+    始まるので、**服が無い状態から「脱いで」と言われて宙に浮いていた。**
+
+    `wardrobe` を持たないプリセットは、いまの `favorite_clothes` +
+    `footwear` から `signature` を一件だけ組む —— 書き終わるまでも、将来の
+    新しい子でも壊れない。**代表服は変わらない。**
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in (preset.get("wardrobe") or []):
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or "").strip()
+        tags = [soft_normalize_tag(str(t)) for t in (row.get("tags") or []) if str(t).strip()]
+        tags = [t for t in tags if t]
+        if not key or key in seen or not tags:
+            continue
+        seen.add(key)
+        out.append({
+            "key": key,
+            "name_ja": str(row.get("name_ja") or _WARDROBE_NAMES_JA.get(key) or key),
+            "tags": tags,
+            "props": [soft_normalize_tag(str(t)) for t in (row.get("props") or [])
+                      if str(t).strip()],
+        })
+    if "signature" not in seen and outfit:
+        out.insert(0, {
+            "key": "signature", "name_ja": _WARDROBE_NAMES_JA["signature"],
+            "tags": list(outfit), "props": list(props),
+        })
+    out.sort(key=lambda r: (WARDROBE_KEYS.index(r["key"])
+                            if r["key"] in WARDROBE_KEYS else len(WARDROBE_KEYS)))
+    return out
+
+
 def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     """Deterministic preset → character fields (no LLM)."""
     # `subject_tag` is deliberately NOT part of identity. It says how many people
@@ -266,6 +315,7 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
         "subject_tag": subject,
         "outfit_tags": outfit,
         "prop_tags": props,
+        "wardrobe_sets": wardrobe_sets(preset, outfit=outfit, props=props),
         "signature_prop": signature,
         "name": str(preset.get("name") or ""),
         "name_ja": str(preset.get("name_ja") or preset.get("name") or ""),

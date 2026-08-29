@@ -140,7 +140,63 @@
     "student_past": "Her habit of hiding in the darkroom has remained unchanged since her second year of the photography club. The sensations of those days, enveloped in the smell of manual developing, have shaped who she is as an assistant today.",
     "student_past_ja": "写真部二年生の頃から、暗室にこもる癖は変わらない。手現像の匂いに包まれて過ごしたあの頃の感覚が、いまのアシスタントとしての彼女を作っている。",
     "dream": "To keep having her own quiet darkroom, undisturbed by anyone. And to one day be able to smile properly when eyes meet someone face-to-face without a camera between them.",
-    "dream_ja": "誰にも邪魔されない、自分だけの静かな暗室を持ち続けること。いつかカメラなしで誰かと正面から目が合っても、ちゃんと笑えるようになりたい。"
+    "dream_ja": "誰にも邪魔されない、自分だけの静かな暗室を持ち続けること。いつかカメラなしで誰かと正面から目が合っても、ちゃんと笑えるようになりたい。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "oversized_knit",
+          "apron",
+          "linen_trousers",
+          "work_boots",
+          "loafers"
+        ],
+        "props": [
+          "film_camera"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "oversized_knit",
+          "apron",
+          "linen_trousers",
+          "work_boots"
+        ],
+        "props": [
+          "film_camera",
+          "lens_cap"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "grey_hoodie",
+          "wide_leg_jeans",
+          "white_t-shirt",
+          "sneakers"
+        ],
+        "props": [
+          "camera_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "cream_knit_dress",
+          "brown_belt",
+          "beret",
+          "ankle_boots"
+        ],
+        "props": [
+          "leather_shoulder_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c002",
@@ -283,7 +339,63 @@
     "student_past": "A library committee member at the lending desk. The rhythmic tapping of her date stamp and the way she blushes while clutching returned books remain unchanged. She still carries the stillness of those after-school moments within her.",
     "student_past_ja": "貸出カウンターの図書委員だった頃。日付印を押すトントンというリズム、返却本を抱きしめて赤くなる自分は今も変わらない。あの日の放課後の静けさを、今でも大切に持っている。",
     "dream": "Creating a beautiful archive where everyone can lose themselves in stories, sharing quiet moments amidst the bookshelves.",
-    "dream_ja": "いつか、本棚の隙間で静かな時間を分かち合えるような、誰もが物語に没入できる美しい書庫を作ること。"
+    "dream_ja": "いつか、本棚の隙間で静かな時間を分かち合えるような、誰もが物語に没入できる美しい書庫を作ること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "blouse",
+          "knit_cardigan",
+          "long_skirt",
+          "spectacles",
+          "loafers"
+        ],
+        "props": [
+          "date_stamp"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "blouse",
+          "knit_cardigan",
+          "long_skirt",
+          "spectacles",
+          "loafers"
+        ],
+        "props": [
+          "index_cards"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "striped_shirt",
+          "denim_overalls",
+          "hair_ribbon",
+          "canvas_sneakers"
+        ],
+        "props": [
+          "book_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "navy_dress",
+          "white_collar",
+          "knit_cardigan",
+          "mary_janes"
+        ],
+        "props": [
+          "small_handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c003",
@@ -426,7 +538,63 @@
     "student_past": "Days spent alone in the music room after school, diligently preparing her clarinet. The resonance of that space, the scent of new reeds, and the silence before the first note remain a part of her very being.",
     "student_past_ja": "放課後の音楽室で、一人黙々とクラリネットの準備をしていた日々。あの場所の響きや、新しいリードの匂い、一音を吹く前の静寂が今も身体に染み付いている。",
     "dream": "To play the most beautiful melody that can move someone's heart to tears.",
-    "dream_ja": "誰かの心を震わせ、涙を誘うような、一番綺麗なメロディを奏でること。"
+    "dream_ja": "誰かの心を震わせ、涙を誘うような、一番綺麗なメロディを奏でること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "blouse",
+          "slacks",
+          "elegant_jewelry",
+          "silk_scarf",
+          "indoor_shoes"
+        ],
+        "props": [
+          "clarinet"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "blouse",
+          "slacks",
+          "silk_scarf",
+          "elegant_jewelry",
+          "indoor_shoes"
+        ],
+        "props": [
+          "clarinet_case"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "ribbed_turtleneck",
+          "corduroy_skirt",
+          "black_tights",
+          "loafers"
+        ],
+        "props": [
+          "shoulder_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "black_blouse",
+          "pleated_skirt",
+          "pearl_earrings",
+          "heeled_boots"
+        ],
+        "props": [
+          "structured_handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c004",
@@ -569,7 +737,61 @@
     "student_past": "Those days in the calligraphy room at dusk, intently grinding ink. The quiet time gazing at the inkstone continues even now as a precious ritual for facing herself.",
     "student_past_ja": "夕方の書道室で、一心不乱に墨を磨っていたあの頃。硯を見つめる静かな時間は今も変わらず、自分自身と向き合う大切な儀式として続いているの。",
     "dream": "I want to continue writing characters that reach someone's heart, deeply and quietly.",
-    "dream_ja": "誰かの心に深く静かに、真っ直ぐ届くような文字を書き続けていきたい。"
+    "dream_ja": "誰かの心に深く静かに、真っ直ぐ届くような文字を書き続けていきたい。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "kimono",
+          "dark_indigo",
+          "elegant_apron",
+          "tabi"
+        ],
+        "props": [
+          "calligraphy_brush"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "kimono",
+          "dark_indigo",
+          "elegant_apron",
+          "tabi"
+        ],
+        "props": [
+          "calligraphy_brush"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "linen_shirt",
+          "wide_leg_trousers",
+          "hair_stick",
+          "sandals"
+        ],
+        "props": [
+          "cloth_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "summer_kimono",
+          "obi",
+          "hair_ornament",
+          "geta"
+        ],
+        "props": [
+          "drawstring_pouch"
+        ]
+      }
+    ]
   },
   {
     "id": "c005",
@@ -709,7 +931,61 @@
     "student_past": "Those days on the rooftop, drinking juice from paper packs while gazing into the distance during lunch breaks. The atmosphere of wanting to skip class with a playful smile still flows within her today.",
     "student_past_ja": "昼休み、紙パックのジュースを飲みながらフェンス越しに遠くを見ていたあの頃。授業をサボりたいなんて冗談めかして微笑んでいた屋上の空気は、今も彼女の中に流れている。",
     "dream": "To create a free space where one can gaze at the scenery in silence, with nothing but the sound of the wind.",
-    "dream_ja": "風の音だけが響く静かな場所で、誰にも邪魔されずに景色を眺め続けられるような、自由な居場所を作ること。"
+    "dream_ja": "風の音だけが響く静かな場所で、誰にも邪魔されずに景色を眺め続けられるような、自由な居場所を作ること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "knit_sweater",
+          "long_skirt",
+          "loose_cardigan",
+          "loafers"
+        ],
+        "props": [
+          "juice_box"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "knit_sweater",
+          "long_skirt",
+          "loose_cardigan",
+          "loafers"
+        ],
+        "props": [
+          "name_tag"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "oversized_shirt",
+          "denim_shorts",
+          "knee_socks",
+          "sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "floral_dress",
+          "denim_jacket",
+          "straw_hat",
+          "sandals"
+        ],
+        "props": [
+          "woven_basket_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c006",
@@ -852,7 +1128,61 @@
     "student_past": "She raced through summer days filled with the scent of the gym, driven by an obsession not to lose. The record of her eleven consecutive losses hasn't stopped since those days.",
     "student_past_ja": "負けられない一心で、体育館の匂いがする夏の日々を駆け抜けていた。同じ相手に十一連敗し続けている記録は、あの頃から止まっていない。",
     "dream": "To become an instructor who can look anyone in the eye and keep demanding a rematch, no matter how many times she loses.",
-    "dream_ja": "どんなに負け続けても、相手の目を見て全力でリベンジを申し込み続けられる指導者になること。"
+    "dream_ja": "どんなに負け続けても、相手の目を見て全力でリベンジを申し込み続けられる指導者になること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "athletic_leggings",
+          "dryfit_polo_shirt",
+          "messy_ponytail",
+          "sneakers"
+        ],
+        "props": [
+          "sports_towel"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "athletic_leggings",
+          "dryfit_polo_shirt",
+          "wristband",
+          "sneakers"
+        ],
+        "props": [
+          "sports_towel"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "cropped_hoodie",
+          "track_pants",
+          "cap",
+          "sneakers"
+        ],
+        "props": [
+          "gym_duffel_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "red_knit_top",
+          "black_skirt",
+          "bomber_jacket",
+          "white_sneakers"
+        ],
+        "props": [
+          "crossbody_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c007",
@@ -995,7 +1325,64 @@
     "student_past": "The voice on the school PA. Everyone knew her voice, yet hardly anyone knew her face. She remains just as she was then—unshakable before the mic, dodging greetings in the hallways.",
     "student_past_ja": "校内放送の声。全校が声を知っているのに、顔はほとんど誰も知らない。マイクの前では動じず、廊下を渡って挨拶を避けていたあの頃のまま。",
     "dream": "To captivate listeners within a story using only the magic of her voice, without ever being seen.",
-    "dream_ja": "誰にも姿を見られず、ただ声の魔法だけでリスナーを物語の中に引き込むこと。"
+    "dream_ja": "誰にも姿を見られず、ただ声の魔法だけでリスナーを物語の中に引き込むこと。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "professional_blouse",
+          "knit_cardigan",
+          "tailored_trousers",
+          "small_earrings",
+          "loafers"
+        ],
+        "props": [
+          "headphones"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "professional_blouse",
+          "knit_cardigan",
+          "tailored_trousers",
+          "small_earrings",
+          "loafers"
+        ],
+        "props": [
+          "headphones",
+          "script_folder"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "oversized_hoodie",
+          "denim_skirt",
+          "black_tights",
+          "sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "light_blue_dress",
+          "knit_cardigan",
+          "small_earrings",
+          "strap_shoes"
+        ],
+        "props": [
+          "shoulder_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c008",
@@ -1138,7 +1525,63 @@
     "student_past": "The gardening club with only one member. The days spent talking to tomatoes in a normal tone continue within her hands at the workshop today. Her way of measuring affection by what she can share from the greenhouse remains unchanged.",
     "student_past_ja": "部員一名の園芸部。トマトに普通のトーンで話向けていた日々が、いまも作業場の手のなかに続いている。温室から何を分けられるかで、好意を測っていた感覚は変わらない。",
     "dream": "To protect a place of her own, where flowers are never picked and she is simply needed by the plants.",
-    "dream_ja": "誰にも花を摘まれず、ただ植物に必要とされるだけの自分だけの場所を守り続けること。"
+    "dream_ja": "誰にも花を摘まれず、ただ植物に必要とされるだけの自分だけの場所を守り続けること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "heavy_apron",
+          "work_trousers",
+          "rolled_sleeves",
+          "dirtstained",
+          "rubber_boots"
+        ],
+        "props": [
+          "watering_can"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "heavy_apron",
+          "work_trousers",
+          "rolled_sleeves",
+          "rubber_boots"
+        ],
+        "props": [
+          "watering_can",
+          "twine"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "green_sweatshirt",
+          "cargo_pants",
+          "side_braid",
+          "sneakers"
+        ],
+        "props": [
+          "backpack"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "olive_wrap_dress",
+          "cardigan",
+          "gold_hoop_earrings",
+          "flat_sandals"
+        ],
+        "props": [
+          "leather_tote_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c009",
@@ -1282,7 +1725,62 @@
     "student_past": "The days spent in the drama club, watching the stage from the wings. Nothing has changed; she still cries every closing night and stubbornly blames it on \"dust.\"",
     "student_past_ja": "演劇部の裏方として、袖から舞台を見つめていた日々。あの頃から変わらず、千秋楽には毎回泣いてしまい、毎回「埃」のせいにして言い張っている。",
     "dream": "To execute a perfect scene change so seamless that no one even notices.",
-    "dream_ja": "誰にも気づかれないほど完璧な転換を、舞台上で完遂すること。"
+    "dream_ja": "誰にも気づかれないほど完璧な転換を、舞台上で完遂すること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "heavy_duty_workwear",
+          "black_utility_trousers",
+          "dark_cargo_pants",
+          "tool_belt",
+          "work_shoes"
+        ],
+        "props": [
+          "rope"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "heavy_duty_workwear",
+          "black_utility_trousers",
+          "tool_belt",
+          "work_shoes"
+        ],
+        "props": [
+          "headlamp"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "black_t-shirt",
+          "dark_jeans",
+          "flannel_shirt",
+          "boots"
+        ],
+        "props": [
+          "messenger_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "black_shirt",
+          "leather_jacket",
+          "slim_trousers",
+          "chelsea_boots"
+        ],
+        "props": [
+          "small_backpack"
+        ]
+      }
+    ]
   },
   {
     "id": "c010",
@@ -1425,7 +1923,61 @@
     "student_past": "In the Shogi Club, she spent six minutes on even the most trivial moves. That quiet obsession with the board from those days continues at her research desk today.",
     "student_past_ja": "将棋部で、どうでもいい一局にさえ一手に六分を費やしていた。あの頃の、盤面を見つめる静かな執着は、今も研究室の机の上へと続いている。",
     "dream": "To find truths within a game that no one else has overlooked.",
-    "dream_ja": "一局の中に、誰も見落としたことのない真実を見出すこと。"
+    "dream_ja": "一局の中に、誰も見落としたことのない真実を見出すこと。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "knit_cardigan",
+          "long_skirt",
+          "collared_blouse",
+          "indoor_shoes"
+        ],
+        "props": [
+          "shogi_piece"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "collared_blouse",
+          "knit_cardigan",
+          "long_skirt",
+          "indoor_shoes"
+        ],
+        "props": [
+          "notebook"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "white_turtleneck",
+          "grey_wide_trousers",
+          "long_coat",
+          "loafers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "pale_grey_dress",
+          "silver_necklace",
+          "long_coat",
+          "low_heels"
+        ],
+        "props": [
+          "clutch_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c011",
@@ -1567,7 +2119,61 @@
     "student_past": "Memories of her second year at the bakery, when she was the first to unlock the doors every morning. Even now, she works covered in flour while humming clumsy tunes. She quietly knows deep down that she is already skilled enough to be trusted.",
     "student_past_ja": "パン屋の二年目、毎朝いちばんに鍵を開けていた頃の記憶。あの頃からずっと、下手な鼻歌を歌いながら粉まみれになって働いている。自分はもう任せてもらえる腕だと、静かに確長している。",
     "dream": "To master the ultimate temperature control, ensuring everyone's morning runs perfectly.",
-    "dream_ja": "誰の朝も完璧に回せるような、究極の温度管理を極めること。"
+    "dream_ja": "誰の朝も完璧に回せるような、究極の温度管理を極めること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "heavy_apron",
+          "work_shirt",
+          "flourstained_sleeves",
+          "work_shoes"
+        ],
+        "props": [
+          "dough_scraper"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "heavy_apron",
+          "work_shirt",
+          "rolled_sleeves",
+          "work_shoes"
+        ],
+        "props": [
+          "bakers_scraper"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "yellow_t-shirt",
+          "denim_overalls",
+          "ponytail",
+          "sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "gingham_dress",
+          "cardigan",
+          "hair_clip",
+          "mary_janes"
+        ],
+        "props": [
+          "basket_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c012",
@@ -1711,7 +2317,61 @@
     "student_past": "The arcade machines she poured coins into during her three years of university. She has always been second, and the small fist pump when hitting a personal best is still ingrained in her body.",
     "student_past_ja": "大学三年間、コインを注ぎ込み続けたゲームセンターの筐体。あの頃からずっと二位で、自己ベスト更新の瞬間のガッツポブースは今も身体に染み付いている。",
     "dream": "To completely decipher the movements of that \"first place\" person behind the data and finally subdue their existence.",
-    "dream_ja": "データの向こう側にいる、あの「一位」の動きを完全に読み解き、その存在を屈服させること。"
+    "dream_ja": "データの向こう側にいる、あの「一位」の動きを完全に読み解き、その存在を屈服させること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "techwear",
+          "oversized_jacket",
+          "cargo_pants",
+          "sneakers"
+        ],
+        "props": [
+          "coin_purse"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "techwear",
+          "oversized_jacket",
+          "cargo_pants",
+          "sneakers"
+        ],
+        "props": [
+          "laptop_bag"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "graphic_t-shirt",
+          "wide_cargo_pants",
+          "zip_hoodie",
+          "chunky_sneakers"
+        ],
+        "props": [
+          "sling_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "black_slip_dress",
+          "oversized_blazer",
+          "silver_earrings",
+          "platform_boots"
+        ],
+        "props": [
+          "mini_shoulder_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c013",
@@ -1852,7 +2512,61 @@
     "student_past": "During her third month of part-time work, when even a \"welcome\" was half a beat late. The days spent turning her back with red ears while making rabbit latte art that looked more like clouds. That clumsy sincerity remains at her core today.",
     "student_past_ja": "カフェのバイト三か月目、いらっしゃいませがまだ半拍遅れていた頃。ラテアートのうさぎを雲のように作っては、耳を赤くして背を向けていた日々。その不器用な真摯さは今も彼女の根底にある。",
     "dream": "To become a skilled barista who can serve a special, perfect cup to anyone without any hesitation.",
-    "dream_ja": "誰にでも、自分だけの特別な一杯を迷いなく提供できる。そんな確かな技術を持つバリスタになること。"
+    "dream_ja": "誰にでも、自分だけの特別な一杯を迷いなく提供できる。そんな確かな技術を持つバリスタになること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "linen_apron",
+          "buttoned_blouse",
+          "dark_trousers",
+          "work_shoes"
+        ],
+        "props": [
+          "milk_pitcher"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "linen_apron",
+          "buttoned_blouse",
+          "dark_trousers",
+          "work_shoes"
+        ],
+        "props": [
+          "milk_pitcher"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "pink_cardigan",
+          "white_blouse",
+          "denim_skirt",
+          "loafers"
+        ],
+        "props": [
+          "small_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "cream_dress",
+          "ribbon_belt",
+          "beret",
+          "strap_shoes"
+        ],
+        "props": [
+          "handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c014",
@@ -1995,7 +2709,62 @@
     "student_past": "The florist after school. That feeling of working as if every order were a far more important affair than the customer could say still lives within her shop today.",
     "student_past_ja": "放課後の花屋。どんな注文でも、頼んだ本人が言える以上に大事な用事だという前提で作っていたあの頃の感覚が、今も店の中に息づいている。",
     "dream": "To stay by people's side during their most precious milestones, delivering unspoken feelings along with the flowers.",
-    "dream_ja": "街の人々の大切な節目に寄り添い、言葉にならない想いを花と一緒に届け続けること。"
+    "dream_ja": "街の人々の大切な節目に寄り添い、言葉にならない想いを花と一緒に届け続けること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "linen_apron",
+          "dark_denim_shirt",
+          "rolled_sleeves",
+          "ribbontied_neck",
+          "clogs"
+        ],
+        "props": [
+          "ribbon_spool"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "denim_apron",
+          "rolled_sleeves",
+          "work_trousers",
+          "rubber_boots"
+        ],
+        "props": [
+          "florist_scissors",
+          "twine"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "linen_blouse",
+          "wide_leg_trousers",
+          "straw_hat",
+          "sandals"
+        ],
+        "props": [
+          "woven_basket"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "black_cocktail_dress",
+          "pearl_necklace",
+          "heels"
+        ],
+        "props": [
+          "clutch_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c015",
@@ -2138,7 +2907,62 @@
     "student_past": "Those quiet hours at the late-night convenience store register. The days of unpacking goods without speaking to anyone still form her rhythm today. She remembers every word from the regulars.",
     "student_past_ja": "深夜コンビニのレジでの、あの静かな時間。誰とも喋らずに品出しをしていた日々が、いまも自分のリズムを作っている。常連の声も、すべて覚えたままだ。",
     "dream": "To keep protecting a quiet place where one can simply accumulate perfect work without worrying about anyone's gaze.",
-    "dream_ja": "誰の視線も気にせず、ただ完璧な作業を積み重ねていけるような、静かな場所を守り続けること。"
+    "dream_ja": "誰の視線も気にせず、ただ完璧な作業を積み重ねていけるような、静かな場所を守り続けること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "reflective_vest",
+          "heavy_duty_workwear",
+          "oversized_jumper",
+          "gloves",
+          "work_shoes"
+        ],
+        "props": [
+          "price_gun"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "reflective_vest",
+          "heavy_duty_workwear",
+          "oversized_jumper",
+          "work_shoes"
+        ],
+        "props": [
+          "barcode_scanner"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "black_hoodie",
+          "sweatpants",
+          "messy_hair",
+          "sneakers"
+        ],
+        "props": [
+          "drawstring_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "charcoal_knit_dress",
+          "long_coat",
+          "hoop_earrings",
+          "ankle_boots"
+        ],
+        "props": [
+          "shoulder_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c016",
@@ -2281,7 +3105,62 @@
     "student_past": "When she was a staff narrator, she was the only one who visited the big tank alone during breaks. Her unscripted explanations lasted twenty minutes whenever children asked serious questions.",
     "student_past_ja": "水族館の解説係だった頃、休憩中にひとりで大水槽を見に行くのは彼女だけだった。子どもが本気の質問をしたとき、台本のないほうの解説は二十分続いていた。",
     "dream": "To continue recording new ecological discoveries in front of the tanks before opening, when no one else is there.",
-    "dream_ja": "誰もいない開館前の水槽の前で、自分だけの新しい生態の発見を記録し続けたい。"
+    "dream_ja": "誰もいない開館前の水槽の前で、自分だけの新しい生態の発見を記録し続けたい。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "lab_coat",
+          "white_shirt",
+          "spectacles",
+          "professional_attire",
+          "sneakers"
+        ],
+        "props": [
+          "pointer_stick"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "lab_coat",
+          "white_shirt",
+          "spectacles",
+          "sneakers"
+        ],
+        "props": [
+          "clipboard"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "blue_striped_shirt",
+          "denim_skirt",
+          "hair_clip",
+          "canvas_sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "aqua_sundress",
+          "white_cardigan",
+          "shell_necklace",
+          "sandals"
+        ],
+        "props": [
+          "straw_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c017",
@@ -2425,7 +3304,62 @@
     "student_past": "The days spent working part-time, treating the stock as her own. Her instinct to judge a person by what they pull from the shelf remains unchanged.",
     "student_past_ja": "レコード屋のバイトとして、在庫を私物のように扱っていた日々。棚から何を抜くかでその人のことを決めていた感性は、今も変わらない。",
     "dream": "To build an ultimate archive that belongs solely to herself.",
-    "dream_ja": "誰にも邪魔されない自分だけの究極のアーカイブを築き上げること。"
+    "dream_ja": "誰にも邪魔されない自分だけの究極のアーカイブを築き上げること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "band_shirt",
+          "oversized_knit",
+          "dark_denim",
+          "leather_boots",
+          "boots"
+        ],
+        "props": [
+          "vinyl_record"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "band_shirt",
+          "oversized_knit",
+          "dark_denim",
+          "leather_boots"
+        ],
+        "props": [
+          "record_sleeve"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "vintage_band_t-shirt",
+          "leather_jacket",
+          "black_jeans",
+          "boots"
+        ],
+        "props": [
+          "messenger_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "purple_shirt",
+          "corduroy_trousers",
+          "chain_necklace",
+          "chelsea_boots"
+        ],
+        "props": [
+          "record_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c018",
@@ -2567,7 +3501,62 @@
     "student_past": "The days spent as the front desk clerk, sincerely facing every life before her. Her pride remains in remembering the names of every animal she has ever met.",
     "student_past_ja": "動物病院の受付として、目の前の命に真摯に向き合ってきた日々。会った動物たちの名前をすべて覚えていることは、今も変わらない誇りである。",
     "dream": "Building a more perfect administrative system where everyone feels truly at peace, even during the busiest clinic hours.",
-    "dream_ja": "どんなに忙しい診療時でも、誰もが心から安らげるような、より完璧な受付体制を築き上げること。"
+    "dream_ja": "どんなに忙しい診療時でも、誰もが心から安らげるような、より完璧な受付体制を築き上げること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "professional_scrubs",
+          "tailored_trousers",
+          "id_badge",
+          "lanyard",
+          "work_shoes"
+        ],
+        "props": [
+          "clipboard"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "professional_scrubs",
+          "tailored_trousers",
+          "id_badge",
+          "work_shoes"
+        ],
+        "props": [
+          "lanyard"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "peach_sweater",
+          "pleated_skirt",
+          "knee_socks",
+          "loafers"
+        ],
+        "props": [
+          "small_backpack"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "blush_dress",
+          "trench_coat",
+          "pearl_earrings",
+          "low_heels"
+        ],
+        "props": [
+          "handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c019",
@@ -2709,7 +3698,61 @@
     "student_past": "The days after school when she ran the nine-seat counter all by herself. Unchanged since then, she has silently and steadily put extra care into every bowl.",
     "student_past_ja": "放課後、カウンター九席の店をひとりで回していた日々。あの頃から変わらず、彼女は黙々と、ただひたすらに、器に心を込めて多めに入れてきた。",
     "dream": "An eternal night of a full counter running smoothly without any hesitation.",
-    "dream_ja": "満席のカウンターが淀みなく回る、至福の夜を永遠に。"
+    "dream_ja": "満席のカウンターが淀みなく回る、至福の夜を永遠に。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "professional_apron",
+          "clean_white_shirt",
+          "rolled_sleeves",
+          "work_shoes"
+        ],
+        "props": [
+          "ladle"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "professional_apron",
+          "clean_white_shirt",
+          "rolled_sleeves",
+          "work_shoes"
+        ],
+        "props": [
+          "kitchen_towel"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "navy_t-shirt",
+          "chino_trousers",
+          "work_jacket",
+          "sneakers"
+        ],
+        "props": [
+          "shopping_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "dark_grey_shirt_dress",
+          "leather_belt",
+          "silver_watch",
+          "ankle_boots"
+        ],
+        "props": [
+          "leather_tote_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c020",
@@ -2851,7 +3894,61 @@
     "student_past": "The days of delivering by bicycle. Her sense of navigating the city as a collection of shortcuts, viewing estimates as insults, remains unchanged. She is still overjoyed when recognized by residents from her past routes.",
     "student_past_ja": "自転車で配達していた日々。指定時間を侮辱と捉え、街を近道の集合として駆け抜けていたあの頃の感覚は今も変わらない。前へ来た家で顔を覚えられていると、今でもめちゃくちゃ嬉しい。",
     "dream": "To outrun everyone through the city's gaps, constantly beating her own time.",
-    "dream_ja": "誰よりも速く、街の隙間を駆け抜ける。自分自身の記録を更新し続けること。"
+    "dream_ja": "誰よりも速く、街の隙間を駆け抜ける。自分自身の記録を更新し続けること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "cycling_jersey",
+          "windbreaker",
+          "gloves",
+          "sneakers"
+        ],
+        "props": [
+          "messenger_bag"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "cycling_jersey",
+          "windbreaker",
+          "gloves",
+          "sneakers"
+        ],
+        "props": [
+          "courier_bag"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "orange_windbreaker",
+          "bike_shorts",
+          "cap",
+          "running_shoes"
+        ],
+        "props": [
+          "sling_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "white_shirt",
+          "denim_jacket",
+          "slim_jeans",
+          "white_sneakers"
+        ],
+        "props": [
+          "crossbody_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c021",
@@ -2991,7 +4088,62 @@
     "student_past": "Days spent under the eaves by the hydrangeals, waiting for the rain to pass. Just as then, she gazes at dripping roof edges and watches the hydrangeias turn blue.",
     "student_past_ja": "紫陽花の横の軒下で、やむまで立っていた日々。あの頃から変わらず、雨粒が滴る軒端を見つめ、紫陽花が青く色づいていくのをじっと待っている。",
     "dream": "Making even the rainy gardens a part of a beautifully maintained landscape.",
-    "dream_ja": "雨の日の庭さえも、美しく手入れされた風景の一部にすること。"
+    "dream_ja": "雨の日の庭さえも、美しく手入れされた風景の一部にすること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "waterproof_apron",
+          "linen_shirt",
+          "heavy_boots",
+          "dark_trousers",
+          "rain_boots"
+        ],
+        "props": [
+          "folded_umbrella"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "waterproof_apron",
+          "linen_shirt",
+          "dark_trousers",
+          "rain_boots"
+        ],
+        "props": [
+          "pruning_shears"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "blue_linen_shirt",
+          "denim_overalls",
+          "sun_hat",
+          "canvas_shoes"
+        ],
+        "props": [
+          "garden_basket"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "sky_blue_dress",
+          "knit_shawl",
+          "flower_hairpin",
+          "flat_sandals"
+        ],
+        "props": [
+          "woven_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c022",
@@ -3134,7 +4286,63 @@
     "student_past": "She used to go to summer festivals with her schedule and four friends, losing everyone at the food stalls. Back then, getting lost was just her way of waiting for them.",
     "student_past_ja": "計画と時間割と友達四人を連れて夏祭りに来て、屋台で全員を見失っていた。あの頃も、はぐれることは自分から待ち合わせるための手段だった。",
     "dream": "To design warm spaces where someone will surely find you, no matter how crowded the festival night is.",
-    "dream_ja": "どんなに賑やかな祭りの夜でも、誰かが必ず見つけ出してくれるような温かい空間を設計すること。"
+    "dream_ja": "どんなに賑やかな祭りの夜でも、誰かが必ず見つけ出してくれるような温かい空間を設計すること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "smart_casual",
+          "beige_trousers",
+          "tucked_shirt",
+          "lanyard",
+          "geta"
+        ],
+        "props": [
+          "paper_fan"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "smart_casual",
+          "beige_trousers",
+          "tucked_shirt",
+          "work_shoes"
+        ],
+        "props": [
+          "lanyard",
+          "walkie_talkie"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "oversized_shirt",
+          "black_leggings",
+          "baseball_cap",
+          "sneakers"
+        ],
+        "props": [
+          "tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "beige_jumpsuit",
+          "long_necklace",
+          "tailored_coat",
+          "loafers"
+        ],
+        "props": [
+          "leather_handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c023",
@@ -3276,7 +4484,61 @@
     "student_past": "Those days when she would lose one glove every year. The habit of wearing only the remaining one and keeping her bare hand in a pocket continues now in this atelier.",
     "student_past_ja": "毎年、手袋を片方なくしていたあの頃。買い直さずに残った片方だけをはめ、素手をポケットに入れていた日々が、今もこの工房の習慣として続いている。",
     "dream": "To create warm, imperfect gloves that fit perfectly into someone's hands.",
-    "dream_ja": "誰かの手に馴染むような、温かくて不完全な手袋を作ること。"
+    "dream_ja": "誰かの手に馴染むような、温かくて不完全な手袋を作ること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "linen_apron",
+          "wool_cardigan",
+          "thick_knit_gloves",
+          "snow_boots"
+        ],
+        "props": [
+          "single_glove"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "linen_apron",
+          "wool_cardigan",
+          "thick_knit_gloves",
+          "snow_boots"
+        ],
+        "props": [
+          "pincushion"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "chunky_knit_sweater",
+          "corduroy_skirt",
+          "wool_tights",
+          "boots"
+        ],
+        "props": [
+          "knitting_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "white_knit_dress",
+          "fur_trimmed_coat",
+          "knit_beret",
+          "ankle_boots"
+        ],
+        "props": [
+          "small_shoulder_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c024",
@@ -3418,7 +4680,61 @@
     "student_past": "Every spring, she takes two hundred photos of the same cherry tree with a phone that has long run out of storage. She never deletes a single one. If you show even a moment of vulnerability, she'll reveal them all. There is always a true \"best\" among those nearly identical shots, and she can explain why at great length.",
     "student_past_ja": "毎年春になると、容量がとっくにない携帯で、同じ桜の木を二百枚撮る。一枚も消さない。少しでも隙を見せると全部見せてくる。ほぼ同じに見える中にちゃんと一番があって、その理由を長々と説明できる。",
     "dream": "Ensuring the colors I adjust remain in their most beautiful state when they reach someone's hands.",
-    "dream_ja": "自分が色を調整した印刷物が、誰かの手元で一番美しい状態で残ること。"
+    "dream_ja": "自分が色を調整した印刷物が、誰かの手元で一番美しい状態で残ること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "blouse",
+          "long_skirt",
+          "apron",
+          "flats"
+        ],
+        "props": [
+          "phone"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "blouse",
+          "long_skirt",
+          "apron",
+          "flats"
+        ],
+        "props": [
+          "ink_rag"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "pink_cardigan",
+          "white_t-shirt",
+          "denim_skirt",
+          "canvas_sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "rose_dress",
+          "lace_collar",
+          "hair_ribbon",
+          "mary_janes"
+        ],
+        "props": [
+          "small_handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c025",
@@ -3557,7 +4873,60 @@
     "student_past": "From November until March, she practically disappears into the kotatsu. Everything necessary is placed within arm's reach. Since she isn't lazy in any other task, those who know her find this state amusing.",
     "student_past_ja": "十一月にこたつに入って、三月まで実質いなくなる。必要なものは全部、手の届く範囲に配置済み。他のことでは全然だらけないので、それを知っている人ほどこの状態を面白がっている。",
     "dream": "To complete perfect translations in her study optimized for her own sensibilities, without being disturbed by anyone.",
-    "dream_ja": "自分の感性と最適化した書斎で、誰の邪魔も受けずに完璧な訳文を完成させること。"
+    "dream_ja": "自分の感性と最適化した書斎で、誰の邪魔も受けずに完璧な訳文を完成させること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "cashmere_sweater",
+          "loungewear",
+          "thick_socks",
+          "socks"
+        ],
+        "props": [
+          "mikan"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "cashmere_sweater",
+          "loungewear",
+          "thick_socks"
+        ],
+        "props": [
+          "reading_glasses"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "oversized_cardigan",
+          "pyjama_shirt",
+          "wool_socks",
+          "slippers"
+        ],
+        "props": [
+          "book_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "brown_knit_dress",
+          "long_coat",
+          "thin_scarf",
+          "loafers"
+        ],
+        "props": [
+          "leather_shoulder_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c026",
@@ -3698,7 +5067,63 @@
     "student_past": "She buys a single ticket for the planetarium and stays, unmoving, to watch the next show. Even though she has memorized every script, she still catches her breath at the same scenes.",
     "student_past_ja": "プラネタリウムのチケットを一枚買って、そのまま動かずに次の回も観ていく。台本はもう全部おぼえているが、それでも毎回、同じ場面で小さく息をのむ。",
     "dream": "To curate a quiet celestial exhibition where everyone can find stories in the stars.",
-    "dream_ja": "誰もが星に物語を見出せるような、静かな天文展示の企画を立ち上げること。"
+    "dream_ja": "誰もが星に物語を見出せるような、静かな天文展示の企画を立ち上げること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "knit_cardigan",
+          "long_skirt",
+          "silk_blouse",
+          "elegant_jewelry",
+          "flats"
+        ],
+        "props": [
+          "ticket_stub"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "silk_blouse",
+          "knit_cardigan",
+          "long_skirt",
+          "elegant_jewelry",
+          "flats"
+        ],
+        "props": [
+          "pointer"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "navy_sweater",
+          "wide_leg_trousers",
+          "star_hairpin",
+          "loafers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "midnight_blue_dress",
+          "silver_necklace",
+          "long_coat",
+          "low_heels"
+        ],
+        "props": [
+          "velvet_clutch"
+        ]
+      }
+    ]
   },
   {
     "id": "c027",
@@ -3841,7 +5266,63 @@
     "student_past": "I used to read an incredible number of books at the bus stop shelter. My knowledge of timetables was even more precise than the bus company's, and that quiet time spent there is the foundation of how I approach manuscripts today.",
     "student_past_ja": "バス停の待合所で、とんでもない数の本を読んでいた。時刻表はバス会社より詳しく、あの場所で過ごす静かな時間が、今の私の原稿への向き合い方の礎になっている。",
     "dream": "To release a perfectly flawless book into the world, exactly on schedule.",
-    "dream_ja": "乱れのない完璧な一冊を、予定通りに世に送り出すこと。"
+    "dream_ja": "乱れのない完璧な一冊を、予定通りに世に送り出すこと。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "suit_jacket",
+          "silk_blouse",
+          "slacks",
+          "leather_watch",
+          "loafers"
+        ],
+        "props": [
+          "paperback"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "suit_jacket",
+          "silk_blouse",
+          "slacks",
+          "leather_watch",
+          "loafers"
+        ],
+        "props": [
+          "document_bag"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "grey_sweatshirt",
+          "straight_jeans",
+          "round_glasses",
+          "sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "black_turtleneck",
+          "camel_coat",
+          "slim_trousers",
+          "ankle_boots"
+        ],
+        "props": [
+          "structured_handbag"
+        ]
+      }
+    ]
   },
   {
     "id": "c028",
@@ -3983,7 +5464,62 @@
     "student_past": "Those days, waiting before the festival stall for the tremor of tearing paper. The way her eyes sparkle at goldfish scooping and how she searches for a witness with \"Did anyone see that?\" remains unchanged.",
     "student_past_ja": "祭りの屋台の前で、紙が破れる瞬間の震えを待ち続けていたあの頃。金魚すくいの話になると目が輝き、『見てた人いる？』と周囲を見渡していた衝動は今も変わらない。",
     "dream": "To continue proving the aesthetics of the moment of tearing within the perfect problem of an aquarium ecosystem.",
-    "dream_ja": "破れる瞬間の美学を、水槽の生態系という完璧な問題の中で証明し続けること。"
+    "dream_ja": "破れる瞬間の美学を、水槽の生態系という完璧な問題の中で証明し続けること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "navy_jumpsuit",
+          "utility_belt",
+          "work_boots",
+          "ponytail",
+          "geta"
+        ],
+        "props": [
+          "paper_scoop"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "navy_jumpsuit",
+          "utility_belt",
+          "work_boots",
+          "ponytail"
+        ],
+        "props": [
+          "feed_bucket"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "red_hoodie",
+          "denim_shorts",
+          "knee_socks",
+          "sneakers"
+        ],
+        "props": [
+          "backpack"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "coral_dress",
+          "denim_jacket",
+          "fish_hairpin",
+          "canvas_shoes"
+        ],
+        "props": [
+          "crossbody_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c029",
@@ -4126,7 +5662,62 @@
     "student_past": "Sorting laundry pegs by color. She wants someone to notice the beautiful, straight lines of drying clothes. Though no one notices, this meticulous habit continues today.",
     "student_past_ja": "洗濯ばさみを色順に揃える。干し終わった線が綺麗なことに、誰か気づいてほしい。誰も気づかないけれど、彼女にとっては大切なこだわりとして今も続いている。",
     "dream": "To create a clean space where freshly washed sheets shine brightly, regardless of the weather.",
-    "dream_ja": "どんな天候の日でも、洗い立てのシーツが真っ白に輝くような、清潔な空間を作ること。"
+    "dream_ja": "どんな天候の日でも、洗い立てのシーツが真っ白に輝くような、清潔な空間を作ること。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "apron",
+          "white_shirt",
+          "neat_trousers",
+          "leggings",
+          "sandals"
+        ],
+        "props": [
+          "laundry_peg"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "apron",
+          "white_shirt",
+          "neat_trousers",
+          "sandals"
+        ],
+        "props": [
+          "laundry_basket"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "mint_cardigan",
+          "white_blouse",
+          "pleated_skirt",
+          "loafers"
+        ],
+        "props": [
+          "small_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "pale_green_dress",
+          "white_belt",
+          "sun_hat",
+          "strap_shoes"
+        ],
+        "props": [
+          "straw_bag"
+        ]
+      }
+    ]
   },
   {
     "id": "c030",
@@ -4267,6 +5858,61 @@
     "student_past": "The days spent in a room full of boxes right after moving. That instinct to unpack items by desire rather than necessity remains the fundamental rhythm of her life and work today.",
     "student_past_ja": "引っ越し直後の、箱だらけの部屋で過ごした日々。必要な順ではなく欲しい順に荷物を開けていたあの頃の感覚は、今も彼女の創作と生活の根底にある大切なリズムとして続いている。",
     "dream": "To produce spaces where, even amidst chaos, one's true desires can be discovered in their best form.",
-    "dream_ja": "どんなに散らかった空間でも、その人の「やりたいこと」が一番いい形で見つかるような場所をプロデュースしたい。"
+    "dream_ja": "どんなに散らかった空間でも、その人の「やりたいこと」が一番いい形で見つかるような場所をプロデュースしたい。",
+    "wardrobe": [
+      {
+        "key": "signature",
+        "name_ja": "いつもの",
+        "tags": [
+          "linen_trousers",
+          "loose_button_up_shirt",
+          "messy_apron",
+          "rolled_sleeves",
+          "socks"
+        ],
+        "props": [
+          "cardboard_box"
+        ]
+      },
+      {
+        "key": "work",
+        "name_ja": "お仕事",
+        "tags": [
+          "loose_button_up_shirt",
+          "linen_trousers",
+          "rolled_sleeves",
+          "socks"
+        ],
+        "props": [
+          "label_maker"
+        ]
+      },
+      {
+        "key": "casual_a",
+        "name_ja": "休みの日",
+        "tags": [
+          "beige_hoodie",
+          "wide_leg_jeans",
+          "hair_clip",
+          "sneakers"
+        ],
+        "props": [
+          "canvas_tote_bag"
+        ]
+      },
+      {
+        "key": "casual_b",
+        "name_ja": "少しよそ行き",
+        "tags": [
+          "camel_knit_dress",
+          "long_cardigan",
+          "gold_earrings",
+          "ankle_boots"
+        ],
+        "props": [
+          "leather_tote_bag"
+        ]
+      }
+    ]
   }
 ]
