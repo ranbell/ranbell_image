@@ -34,14 +34,39 @@ _EVALUATION_BLOCKING_LANES: frozenset[JobLane] = _PRIORITY_TRIGGER_LANES | froze
 _TIER2_MANAGED_LANES: frozenset[JobLane] = frozenset([JobLane.EVALUATION])
 
 
+#: 資源が居ないだけの失敗。**待てば直る**ので、失敗にせず戻す。
+#: ComfyUI が落ちているときに上がってくるのは `httpx.ConnectError`
+#: （メッセージが「All connection attempts failed」）であって
+#: `ResourceUnreachable` ではない —— あちらは health 監視が既に落ちていると
+#: 判っているときだけ。**両方を拾う。**
+def _is_unreachable(exc: BaseException) -> bool:
+    if isinstance(exc, ResourceUnreachable):
+        return True
+    try:
+        import httpx
+    except ImportError:
+        return False
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout,
+                            httpx.ReadError, httpx.RemoteProtocolError))
+
+
+#: 何度まで戻すか。**永遠には粘らない** —— 資源が本当に死んでいるなら、
+#: いつかは失敗として見せないと、ジョブが黙って居座り続ける。
+REQUEUE_MAX = 20
+
+
 class JobSpooler:
     def __init__(
         self,
         resources: dict[str, Resource],
         lane_resource: dict[JobLane, str | None],
+        requeue_delay: float = 10.0,
     ) -> None:
         self._resources = resources
         self._lane_resource = lane_resource
+        #: 資源が落ちているとき、次に試すまでの間。短すぎると復帰前に
+        #: 上限（`REQUEUE_MAX`）を使い切る
+        self._requeue_delay = requeue_delay
         self._disk_paths: dict[str, str] = {}
         self._disk_caution_pct: int = 75
         self._disk_fault_pct: int = 90
@@ -634,16 +659,37 @@ class JobSpooler:
                 job.progress = 1.0
             except JobCancelled:
                 job.state = JobState.CANCELLED
-            except ResourceUnreachable as exc:
-                job.state = JobState.FAILED
-                job.error = str(exc)
-                logger.warning("Job %s failed: %s", job.id, exc)
             except asyncio.CancelledError:
                 job.state = JobState.CANCELLED
             except Exception as exc:
+                # **資源が居ないだけなら、失敗にせず待たせる。** 総監督
+                # 「spooler なので異常時は待機してその後流せるのがやっぱり
+                # 必要」。ComfyUI が落ちて `muse_board` が
+                # `All connection attempts failed` で倒れた場面がこれ。
+                # 復帰は `monitor_remote_resources` が既に検知している ——
+                # **復帰は分かっているのに、落ちている間のジョブを捨てて
+                # いた。**
+                if _is_unreachable(exc) and job.requeues < REQUEUE_MAX:
+                    job.requeues += 1
+                    job.state = JobState.QUEUED
+                    job.error = str(exc)
+                    job.started_at = None
+                    self._job_pause_events.pop(job.id, None)
+                    logger.info("Job %s waiting for %s (%s/%s): %s",
+                                job.id, lane.value, job.requeues,
+                                REQUEUE_MAX, exc)
+                    self._push_event("job_updated", job)
+                    await asyncio.sleep(self._requeue_delay)
+                    self._lane_queues[lane].append(job.id)
+                    self._lane_work_ev[lane].set()
+                    continue
                 job.state = JobState.FAILED
                 job.error = str(exc)
-                logger.exception("Job %s failed with exception", job.id)
+                if _is_unreachable(exc):
+                    logger.warning("Job %s gave up waiting for %s: %s",
+                                   job.id, lane.value, exc)
+                else:
+                    logger.exception("Job %s failed with exception", job.id)
             finally:
                 self._job_pause_events.pop(job.id, None)
 

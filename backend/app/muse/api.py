@@ -222,7 +222,7 @@ async def pick_partner(session_id: str, body: PartnerPick, request: Request):
     she spoke, which read as the pick having failed.
     """
     session = await _session(request, session_id)
-    return await _run(service.pick_partner(_db(request), _ollama(request), session, body.partner_preset or ""))
+    return await _run(service.pick_partner(_db(request), _llm(request, session), session, body.partner_preset or ""))
 
 
 @router.post("/sessions/{session_id}/table")

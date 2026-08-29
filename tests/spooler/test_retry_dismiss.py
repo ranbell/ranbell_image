@@ -108,3 +108,79 @@ async def test_dismiss_is_unknown_for_a_job_that_never_existed():
     assert sp.dismiss("no-such-job") is False
     with pytest.raises(KeyError):
         sp.retry("no-such-job")
+
+
+@pytest.mark.asyncio
+async def test_a_job_waits_while_the_resource_is_down():
+    """総監督（2026-08-29）「spooler なので異常時は待機してその後流せるのが
+    やっぱり必要」。
+
+    ComfyUI が落ちて `muse_board` が `All connection attempts failed` で
+    倒れた場面。復帰は `monitor_remote_resources` が既に検知している ——
+    **復帰は分かっているのに、落ちている間のジョブを捨てていた。**
+    """
+    import httpx
+
+    sp = _spooler()
+    sp._requeue_delay = 0.01
+    await sp.start()
+    try:
+        tries: list[int] = []
+
+        async def _flaky(reporter, cancel, **kwargs):
+            tries.append(1)
+            if len(tries) < 3:            # 二回落ちて、三回目で繋がる
+                raise httpx.ConnectError("All connection attempts failed")
+            return "ok"
+
+        jid = sp.submit(lane=JobLane.GENERATION, title="muse_board", func=_flaky)
+        await _run_until_done(sp, jid)
+        job = sp._find(jid)
+        assert job.state is JobState.SUCCEEDED, "待たずに失敗した"
+        assert job.requeues == 2, job.requeues
+        assert len(tries) == 3
+    finally:
+        await sp.stop()
+
+
+@pytest.mark.asyncio
+async def test_waiting_does_not_go_on_for_ever():
+    """**永遠には粘らない。** 本当に死んでいるなら、いつかは失敗として見せる。"""
+    import httpx
+
+    from app.spooler import spooler as spooler_mod
+
+    sp = _spooler()
+    sp._requeue_delay = 0.0
+    await sp.start()
+    limit = spooler_mod.REQUEUE_MAX
+    try:
+        async def _dead(reporter, cancel, **kwargs):
+            raise httpx.ConnectError("All connection attempts failed")
+
+        jid = sp.submit(lane=JobLane.GENERATION, title="muse_board", func=_dead)
+        await _run_until_done(sp, jid, limit=10.0)
+        job = sp._find(jid)
+        assert job.state is JobState.FAILED
+        assert job.requeues == limit
+    finally:
+        await sp.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_bug_fails_at_once():
+    """**壊れたジョブは待たせない。** 待つのは資源が居ないときだけ。"""
+    sp = _spooler()
+    sp._requeue_delay = 0.0
+    await sp.start()
+    try:
+        async def _bug(reporter, cancel, **kwargs):
+            raise ValueError("workflow not found")
+
+        jid = sp.submit(lane=JobLane.GENERATION, title="muse_board", func=_bug)
+        await _run_until_done(sp, jid)
+        job = sp._find(jid)
+        assert job.state is JobState.FAILED
+        assert job.requeues == 0, "普通の不具合で待ってしまっている"
+    finally:
+        await sp.stop()

@@ -56,6 +56,8 @@ class Job:
     result: Any = None
     error: str | None = None
     meta: dict = field(default_factory=dict)
+    #: 資源が落ちていて待たせた回数。**失敗ではない** —— 戻して待つたびに増える
+    requeues: int = 0
 
     _cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     _task: asyncio.Task | None = field(default=None, repr=False)
