@@ -1391,3 +1391,31 @@ def test_nothing_to_wear_writes_nothing():
     session = _dress_session([])
     nb = _dress(session, '{"各務 みお": "casual_a"}')
     assert not str(nb.get("wearing") or "").strip()
+
+
+def test_the_partner_is_dressed_for_the_same_day():
+    """実測（実機・2026-08-29）: すみれが休日でも仕事着で 3/3。
+
+    `_theme_for_models` は「手帖に何か書かれたら主題を返さない」作りなので、
+    **開始時に一人目を着せたその瞬間に空になる**。相方が入るときには渡すものが
+    無く、条文の「場所も時刻も分からなければ `signature`」がそのまま効いて
+    いた。着替えの判断に要るのは、いつ・どこ、だけ。
+    """
+    import asyncio
+
+    seen: dict[str, str] = {}
+
+    class _Spy:
+        def generate_text_stream(self, prompt, **kw):
+            seen["prompt"] = str(prompt)
+
+            async def _stream():
+                yield {"type": "token", "text": '{"平岡 すみれ": "casual_b"}'}
+            return _stream()
+
+    session = _dress_session(_SETS_A, _SETS_B, wearing="hoodie")
+    session["inputs"]["theme"] = "休みの日、二人で近所の公園をぶらぶら"
+    # 一人目は既に着ている（開始時に着せた状態）。手帖には書かれている
+    asyncio.run(service._dress_the_cast(None, _Spy(), session, cfg={}))
+    assert "近所の公園" in seen.get("prompt", ""), "主題が渡っていない"
+    assert notebook.of(session)["wearing_b"] == "black_dress, clutch"

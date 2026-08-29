@@ -5271,9 +5271,15 @@ async def _dress_the_cast(db, ollama, session: dict[str, Any], *,
         slots[name] = (field, sets)
     if not people:
         return
+    # **主題そのものを渡す。** `_theme_for_models` は「手帖に何か書かれたら
+    # 主題を返さない」作りなので、開始時にこちらが一人目を着せた**その瞬間**に
+    # 空になる —— 相方が入るときには渡すものが無く、条文の「場所も時刻も
+    # 分からなければ `signature`」がそのまま効いていた（実測: すみれが
+    # 休日でも仕事着で 3/3）。着替えの判断に要るのは、いつ・どこ、だけ。
     began = time.monotonic()
     picked = await chain.read_wardrobe_choice(
-        ollama, brief=_theme_for_models(session), people=people,
+        ollama, brief=str(_inputs(session).get("theme") or "").strip(),
+        people=people,
         model=_text_model(_inputs(session)), num_ctx=_num_ctx(_inputs(session), cfg),
     )
     patch: dict[str, str] = {}
