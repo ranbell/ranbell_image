@@ -903,8 +903,16 @@ def mint_phrase_tag(phrase: str) -> str:
     return tag if len(tag) >= 3 else ""
 
 
-def strip_clothing_tags(tags: str) -> str:
-    """Drop every clothing tag. Notebook wearing is re-minted afterwards."""
+# Weave may keep these axes on the authority path. Clothes / place / time /
+# hair / unknowns are not reconciled by keyword — they are dropped and the
+# notebook phrases are written back.
+_WEAVE_SUPPORT_AXES = frozenset({
+    "action", "emotion", "parts", "style", "always_fixed",
+})
+
+
+def keep_weave_support_tags(tags: str) -> str:
+    """Keep only non-authority weave tags (pose, face, crop, style, …)."""
     kept: list[str] = []
     from .identity import bare_tag
     for part in str(tags or "").split(","):
@@ -912,18 +920,15 @@ def strip_clothing_tags(tags: str) -> str:
         if not tok:
             continue
         key = bare_tag(tok)
-        last = key.split("_")[-1] if key else ""
-        if last in _QUALITY_TAG_KEEP:
+        if not key:
+            continue
+        if tag_catalog.get_tag_axis(key) in _WEAVE_SUPPORT_AXES:
             kept.append(tok)
-            continue
-        if _looks_like_clothing_tag(key):
-            continue
-        kept.append(tok)
     return ", ".join(kept)
 
 
-def strip_place_tags(tags: str) -> str:
-    """Drop location / time tags. Notebook SCENE/BG/LIGHT are re-minted afterwards."""
+def strip_clothing_axis_tags(tags: str) -> str:
+    """Drop catalog clothing tags only — scrub must not touch hour / place."""
     kept: list[str] = []
     from .identity import bare_tag
     for part in str(tags or "").split(","):
@@ -931,8 +936,12 @@ def strip_place_tags(tags: str) -> str:
         if not tok:
             continue
         key = bare_tag(tok)
-        axis = tag_catalog.get_tag_axis(key) if key else None
-        if axis in ("location", "time_weather"):
+        if not key:
+            continue
+        axis = tag_catalog.get_tag_axis(key)
+        if axis == "clothing":
+            continue
+        if any(key.endswith(s) for s in tag_catalog.CLOTHING_SUFFIXES):
             continue
         kept.append(tok)
     return ", ".join(kept)
@@ -941,7 +950,7 @@ def strip_place_tags(tags: str) -> str:
 def notebook_wearing_tags(
     wearing: str, *, struck: set[str] | None = None, banned: set[str] | None = None,
 ) -> list[str]:
-    """Mint tags from each WEARING item — the notebook is the outfit."""
+    """Mint one tag per WEARING item — the notebook phrase is the outfit name."""
     gone = set(struck or ()) | {
         str(t).strip().lower().replace(" ", "_") for t in (banned or ()) if str(t).strip()
     }
@@ -950,9 +959,6 @@ def notebook_wearing_tags(
     for item in re.split(r"[,，、;]", str(wearing or "")):
         item = item.strip()
         if not item:
-            continue
-        tokens = wearing_tokens(item)
-        if tokens & gone:
             continue
         tag = mint_phrase_tag(item)
         if not tag or tag in seen or tag in gone:
@@ -966,28 +972,23 @@ def notebook_place_tags(
     *, scene: str = "", bg: str = "", light: str = "",
     struck: set[str] | None = None, banned: set[str] | None = None,
 ) -> list[str]:
-    """Mint place/light tags from notebook phrases — not by matching the bag."""
+    """Mint one tag per notebook place/light phrase — no keyword splitting."""
     gone = set(struck or ()) | {
         str(t).strip().lower().replace(" ", "_") for t in (banned or ()) if str(t).strip()
     }
     out: list[str] = []
     seen: set[str] = set()
-
-    def _add(tag: str) -> None:
-        if tag and tag not in seen and tag not in gone:
-            out.append(tag)
-            seen.add(tag)
-
-    for phrase, cap in (
-        (coerce_plain_phrase(scene), PLACE_SCENE_TAG_CAP),
-        (coerce_plain_phrase(bg), PLACE_BG_TAG_CAP),
-        (coerce_plain_phrase(light), PLACE_SCENE_TAG_CAP),
+    for phrase in (
+        coerce_plain_phrase(scene),
+        coerce_plain_phrase(bg),
+        coerce_plain_phrase(light),
     ):
         if not phrase:
             continue
-        _add(mint_phrase_tag(phrase))
-        for tag in place_field_tags(phrase, cap=cap):
-            _add(tag)
+        tag = mint_phrase_tag(phrase)
+        if tag and tag not in seen and tag not in gone:
+            out.append(tag)
+            seen.add(tag)
     return out
 
 
@@ -995,14 +996,13 @@ def apply_notebook_authority_tags(
     tags: str, nb: dict[str, Any], *,
     struck: set[str] | None = None, banned: set[str] | None = None,
 ) -> str:
-    """Weave keeps body/camera/quality; clothes and place come only from the notebook.
+    """Weave keeps pose/crop/style; clothes and place come only from the notebook.
 
-    Keyword reconciliation against the bag has a ceiling — different names for
-    the same garment, shared colours, soft place nouns. The notebook already
-    holds the finished absolute values, so those fields are stripped from the
-    weave bag and written back from the notebook.
+    The notebook already holds finished absolute values. Do not reconcile them
+    against the weave bag by keyword — drop non-support weave tags and write
+    the notebook phrases back as tags.
     """
-    bag = strip_place_tags(strip_clothing_tags(tags))
+    bag = keep_weave_support_tags(tags)
     parts = [p.strip() for p in bag.split(",") if p.strip()]
     seen = {p.lower().replace(" ", "_") for p in parts}
     for tag in (
@@ -1062,13 +1062,8 @@ def craft_scene_from_notebook(nb: dict[str, Any]) -> str:
 
 
 def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = "") -> str:
-    """Compatibility wrapper — clothing is stripped; notebook items are re-minted by callers.
-
-    Prefer ``apply_notebook_authority_tags`` / ``reconcile_wardrobe_tags``. Kept so
-    older tests and the wardrobe button path can still drop leftovers by
-    stripping every clothing tag that is not minted from the current wearing.
-    """
-    bag = strip_clothing_tags(tags)
+    """Scrub path: drop catalog clothing, re-mint notebook wearing. Hours stay."""
+    bag = strip_clothing_axis_tags(tags)
     minted = notebook_wearing_tags(wearing) + notebook_wearing_tags(wearing_b)
     if not minted:
         return bag
@@ -1079,31 +1074,6 @@ def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = ""
             parts.append(tag)
             have.add(tag)
     return ", ".join(parts)
-
-
-# Accessory / base-outfit heads used when classifying a tag as clothing without
-# a catalog axis (``serafuku``, ``loafers``).
-_GARMENT_HEAD_DROP = {
-    "hat", "cardigan", "coat", "jacket", "hoodie", "cape",
-    "umbrella", "scarf", "glasses", "sunglasses",
-    "uniform", "serafuku", "fuku", "dress", "blouse", "shirt",
-    "skirt", "sweater", "vest", "apron", "kimono", "yukata",
-    "gown", "romper", "onesie", "bikini", "swimsuit",
-    "collar", "necktie", "ribbon", "bow", "bowtie",
-    "shoes", "boots", "loafers", "socks", "stockings",
-    "gloves", "panties", "bra", "lingerie", "tights",
-}
-
-
-def _looks_like_clothing_tag(key: str) -> bool:
-    if not key:
-        return False
-    if tag_catalog.get_tag_axis(key) == "clothing":
-        return True
-    last = key.split("_")[-1]
-    if last in _GARMENT_HEAD_DROP:
-        return True
-    return any(key.endswith(s) for s in tag_catalog.CLOTHING_SUFFIXES)
 
 
 def _missing_wearing_items(
@@ -1187,11 +1157,11 @@ def reconcile_wardrobe_tags(
         tags = _without(tags)
         side_a, side_b = _without(side_a), _without(side_b)
 
-    # Do not match weave clothes against the notebook by keyword — strip every
-    # clothing tag and write the notebook wardrobe back.
-    tags = strip_clothing_tags(tags)
+    # Scrub path: drop catalog clothing only (hours/places stay), mint wearing.
+    # Full authority replace (keep_weave_support_tags) lives in apply_notebook_*.
+    tags = strip_clothing_axis_tags(tags)
     if partner:
-        side_a, side_b = strip_clothing_tags(side_a), strip_clothing_tags(side_b)
+        side_a, side_b = strip_clothing_axis_tags(side_a), strip_clothing_axis_tags(side_b)
     # **二人いるときは、側ごとに見る。** `_missing_wearing_items` の
     # 「もうある」判定は語のかぶりで見るので、みおが `light_blue_dress` を着て
     # いると、すみれの `pale blue dress` は `dress`／`blue` が既出という理由で

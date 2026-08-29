@@ -441,14 +441,16 @@ def test_wearing_tokens_do_not_mint_hat_cardigan():
 
 def test_drop_leftover_garments_and_crops():
     tags = notebook.drop_garments_not_in_wearing(
-        "sailor_collar, straw_hat, thin_cardigan, knit, fabric_folds",
+        "sailor_collar, straw_hat, thin_cardigan, knit, fabric_folds, standing",
         wearing="sailor uniform, cardigan",
     )
-    low = tags.lower()
+    low = tags.lower().replace(" ", "_")
+    # Catalog clothing is dropped; notebook phrases are minted back.
     assert "straw_hat" not in low
-    assert "sailor_uniform" in low or "sailor" in low
+    assert "sailor_collar" not in low
+    assert "sailor_uniform" in low
     assert "cardigan" in low
-    assert "knit" in low
+    assert "standing" in low
     zoom = notebook.drop_crops_not_in_frame(
         "upper_body, close_up, wide_shot, full_body, knit",
         frame="close, upper body",
@@ -485,10 +487,11 @@ def test_notebook_authority_replaces_weave_clothes_and_place():
     assert "rooftop" not in low
     assert "white_shirt" in low
     assert "blue_skirt" in low
-    assert "classroom" in low
-    assert "cosplayers" in low or "crowd" in low
+    assert "night_classroom_by_the_window" in low
+    assert "a_crowd_of_cosplayers" in low
     assert "standing" in low
-    assert "knit" in low
+    assert "close_up" in low
+    assert "knit" not in low
 
     prose = notebook.craft_scene_from_notebook(nb)
     plow = prose.lower()

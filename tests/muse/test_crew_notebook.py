@@ -697,7 +697,7 @@ def test_posture_stem_always_reaches_the_tags():
 
 
 def test_place_from_the_notebook_always_reaches_the_tags():
-    """SCENE/BG は手帖から直接タグになる（突き合わせではない）。"""
+    """SCENE/BG は手帖フレーズから直接タグになる。"""
     session = {
         "mode": "", "session_id": "s-place", "inputs": {"locale": "ja"},
         "notebook": notebook.blank(), "craft": {}, "character": {},
@@ -713,8 +713,8 @@ def test_place_from_the_notebook_always_reaches_the_tags():
         notebook.of(session), struck=set(), banned=set(),
     )
     joined = bag.lower().replace(" ", "_")
-    assert "classroom" in joined or "night_classroom" in joined
-    assert "cosplayers" in joined or "crowd" in joined
+    assert "night_classroom_by_the_window" in joined
+    assert "a_crowd_of_cosplayers" in joined
     assert "rooftop" not in joined
     assert "sailor_uniform" in joined
 
