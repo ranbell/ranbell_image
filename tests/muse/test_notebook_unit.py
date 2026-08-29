@@ -102,6 +102,24 @@ def test_ensure_place_in_scene_appends_when_weave_forgot_the_place():
     assert again.count("cosplayers") == out.count("cosplayers")
 
 
+def test_craft_scene_from_notebook_is_the_authority():
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {
+        "beat": "standing by the window",
+        "wearing": "white shirt, blue skirt",
+        "scene": "night classroom",
+        "bg": "a crowd of cosplayers",
+        "light": "side sun",
+    })
+    prose = notebook.craft_scene_from_notebook(nb)
+    low = prose.lower()
+    assert "standing by the window" in low
+    assert "white shirt" in low
+    assert "night classroom" in low
+    assert "cosplayers" in low
+    assert "side sun" in low
+
+
 def test_missing_place_tags_reinject_what_the_bag_forgot():
     nb = notebook.blank()
     notebook.apply_patch(nb, {

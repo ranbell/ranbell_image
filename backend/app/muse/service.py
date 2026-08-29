@@ -3172,12 +3172,7 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     for tag in crew_look_tags(session):
         if tag not in have and tag not in gone and tag not in missing:
             missing.append(tag)
-    # Place / BG — body-first weave drops them the way it drops posture.
-    # Notebook already decided; reinject what the bag forgot.
-    covered = have | set(missing)
-    for key in notebook_mod.missing_place_tags(nb, have=covered, gone=gone):
-        if key not in missing:
-            missing.append(key)
+    # Place / BG are applied wholesale in apply_notebook_authority_tags.
     return missing
 
 
@@ -3302,9 +3297,11 @@ def _apply_compiled_craft(
     from, and a guess made twice can disagree with itself.
     """
     tags = _scrub_invented_tags(session, str(tags or "").strip())
-    scene = _latin_names(session, str(craft_scene or "").strip())
-    if not tags and not scene:
-        return False
+    if not tags and not str(craft_scene or "").strip():
+        # Notebook-built prose may still rescue an empty weave body.
+        nb_probe = notebook_mod.of(session)
+        if not notebook_mod.craft_scene_from_notebook(nb_probe):
+            return False
     # There used to be a gate here that refused the whole compile when the bag
     # held `low_angle` (or `from_below`) together with `looking_up`, on the
     # theory that the model had merged two ideas instead of rewriting FRAME as
@@ -3324,8 +3321,7 @@ def _apply_compiled_craft(
     craft = session.setdefault("craft", {})
     before_tags = str(craft.get("tags") or "")
     before_scene = str(craft.get("scene") or "")
-    # One wardrobe pass (struck/banned → aliases → leftovers → inject), shared
-    # with scrub. Posture / ledger / crew_look reinject stay beside it.
+    # One wardrobe pass (struck/banned → aliases → strip clothes → mint notebook).
     nb_wardrobe = notebook_mod.of(session)
     tags, sides = notebook_mod.reconcile_wardrobe_tags(
         tags,
@@ -3336,32 +3332,22 @@ def _apply_compiled_craft(
         sides=sides,
         partner=bool(session.get("partner_character") or {}),
     )
+    # Clothes and place: notebook absolute values, not keyword match against weave.
+    tags = notebook_mod.apply_notebook_authority_tags(
+        tags, nb_wardrobe,
+        struck=notebook_mod.struck_tokens(session),
+        banned=set(banned_tags(session)),
+    )
     missing = _missing_wearing_tags(session, tags)
     if missing:
         logger.info("[muse] weave forgot notebook authorities: %s", ", ".join(missing))
         tags = ", ".join([t for t in tags.split(",") if t.strip()] + missing)
-    # Showrunner beat must lead the prose the sampler reads — weave padding
-    # about air must never leave posture as an afterthought (or absent).
     nb_now = notebook_mod.of(session)
-    scene = notebook_mod.ensure_beat_leads_scene(
-        scene,
-        beat=str(nb_now.get("beat") or ""),
-        beat_b=str(nb_now.get("beat_b") or ""),
-    )
-    # Clothes before place (weave contract order). Scrub stale outfits the
-    # weave still wrote, then put the notebook wardrobe in if it is missing.
-    scene = notebook_mod.ensure_wearing_in_scene(
-        scene,
-        wearing=str(nb_now.get("wearing") or ""),
-        wearing_b=str(nb_now.get("wearing_b") or ""),
-    )
-    # Place trails the body. Without this, a body-first weave leaves
-    # classroom in the notebook and rooftop in the prompt.
-    scene = notebook_mod.ensure_place_in_scene(
-        scene,
-        scene=str(nb_now.get("scene") or ""),
-        bg=str(nb_now.get("bg") or ""),
-    )
+    # craft_scene is built from the notebook. Weave prose was the path that
+    # put old clothes and places back after the notebook had already moved.
+    scene = _latin_names(session, notebook_mod.craft_scene_from_notebook(nb_now))
+    if not tags and not scene:
+        return False
     craft["tags"] = tags
     craft["scene"] = scene
     craft["tags_a"], craft["tags_b"] = str(sides[0] or ""), str(sides[1] or "")

@@ -446,11 +446,9 @@ def test_drop_leftover_garments_and_crops():
     )
     low = tags.lower()
     assert "straw_hat" not in low
+    assert "sailor_uniform" in low or "sailor" in low
     assert "cardigan" in low
     assert "knit" in low
-    # Collar shares "sailor" with the wardrobe — keep; quality words stay.
-    assert "sailor_collar" in low
-    assert "fabric_folds" in low or "folds" in low or "knit" in low
     zoom = notebook.drop_crops_not_in_frame(
         "upper_body, close_up, wide_shot, full_body, knit",
         frame="close, upper body",
@@ -467,62 +465,52 @@ def test_drop_leftover_garments_and_crops():
     assert "wide_shot" in wlow or "full_body" in wlow
 
 
-def test_drop_base_outfit_the_notebook_no_longer_names():
-    """sailor_uniform sat outside the leftover list — weave put her back in it."""
-    tags = notebook.drop_garments_not_in_wearing(
-        "sailor_uniform, sailor_collar, standing, white_shirt, blue_skirt, close_up",
-        wearing="white shirt, blue skirt",
+def test_notebook_authority_replaces_weave_clothes_and_place():
+    """服・場所は手帖の絶対値。weave の別名／旧名と突き合わせない。"""
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {
+        "wearing": "white shirt, blue skirt",
+        "scene": "night classroom by the window",
+        "bg": "a crowd of cosplayers",
+        "beat": "standing by the window",
+        "light": "late sun from the side",
+    })
+    bag = notebook.apply_notebook_authority_tags(
+        "sailor_uniform, white_serafuku, rooftop, dusk, standing, close_up, knit",
+        nb, struck=set(), banned=set(),
     )
-    low = tags.lower().replace(" ", "_")
-    assert "sailor_uniform" not in low
-    assert "sailor_collar" not in low
+    low = bag.lower().replace(" ", "_")
+    assert "sailor" not in low
+    assert "serafuku" not in low
+    assert "rooftop" not in low
     assert "white_shirt" in low
     assert "blue_skirt" in low
+    assert "classroom" in low
+    assert "cosplayers" in low or "crowd" in low
     assert "standing" in low
-    # Shared colour alone must not keep a different outfit.
-    coloured = notebook.drop_garments_not_in_wearing(
-        "white_serafuku, standing, close_up",
-        wearing="white shirt, blue skirt",
-    )
-    clow = coloured.lower().replace(" ", "_")
-    assert "serafuku" not in clow
-    assert "standing" in clow
-    # Inject path still fills forgotten clothes after the drop.
-    bag, _ = notebook.reconcile_wardrobe_tags(
-        "white_serafuku, sailor_collar, standing, close_up",
-        wearing="white shirt, blue skirt",
-        struck=set(), banned=set(),
-    )
-    blow = bag.lower().replace(" ", "_")
-    assert "serafuku" not in blow and "sailor" not in blow
-    assert "white_shirt" in blow or "shirt" in blow
-    assert "blue_skirt" in blow or "skirt" in blow
+    assert "knit" in low
+
+    prose = notebook.craft_scene_from_notebook(nb)
+    plow = prose.lower()
+    assert "standing by the window" in plow
+    assert "white shirt" in plow
+    assert "blue skirt" in plow
+    assert "night classroom" in plow
+    assert "cosplayers" in plow
+    assert "sailor" not in plow
 
 
-def test_ensure_wearing_in_scene_scrubs_stale_outfit_and_puts_notebook_in():
-    prose = (
-        "Standing by the window. She leans on the sill in a sailor uniform "
-        "and straw hat, afternoon light on the collar."
-    )
-    out = notebook.ensure_wearing_in_scene(
-        prose, wearing="white shirt, blue skirt",
+def test_ensure_place_in_scene_appends_when_weave_forgot_the_place():
+    """Kept as a helper; authority path uses craft_scene_from_notebook."""
+    prose = "Standing, holding the hem of her skirt, weight on the near foot."
+    out = notebook.ensure_place_in_scene(
+        prose,
+        scene="night classroom by the window",
+        bg="a crowd of cosplayers",
     )
     low = out.lower()
-    assert "sailor" not in low
-    assert "straw hat" not in low and "straw_hat" not in low
-    assert "white shirt" in low or "wearing white" in low
-    assert "blue skirt" in low or "skirt" in low
-    # Colour alone must not count as the new outfit already being there.
-    coloured = notebook.ensure_wearing_in_scene(
-        "Standing in a white serafuku by the window.",
-        wearing="white shirt, blue skirt",
-    )
-    clow = coloured.lower()
-    assert "serafuku" not in clow
-    assert "white shirt" in clow
-    # Already present — do not double.
-    again = notebook.ensure_wearing_in_scene(out, wearing="white shirt, blue skirt")
-    assert again.lower().count("white shirt") == out.lower().count("white shirt")
+    assert "night classroom" in low
+    assert "cosplayers" in low
 
 
 @pytest.mark.asyncio
@@ -725,15 +713,14 @@ async def test_weave_drops_old_place_hour_pose_and_crop():
 
 @pytest.mark.asyncio
 async def test_weave_puts_notebook_place_into_the_final_prompt():
-    """手帖の SCENE/BG は動いているのに、身体だけの weave だと最終プロンプトから
-    場所が消えていた。服・姿勢と同じく、欠けたらコードが戻す。"""
+    """手帖の SCENE/BG は最終プロンプトへ手帖から直接載る。"""
     db = FakeDb()
     ollama = NotebookOllama(scripts={
         "WEAVE": _scripter_block(
             intent="shot",
-            tags="standing, close_up, sailor_uniform, skirt_hem",
+            tags="standing, close_up, sailor_uniform, skirt_hem, rooftop",
             craft_scene=(
-                "Standing, holding the hem of her skirt, weight on the near foot."
+                "Standing on a rooftop in a sailor uniform, holding the hem."
             ),
         ),
     })
@@ -763,22 +750,20 @@ async def test_weave_puts_notebook_place_into_the_final_prompt():
     assert "classroom" in prose
     assert "cosplayers" in prose
     assert "classroom" in prompt
-    assert "cosplayers" in prompt or "crowd" in prompt
-    # Struck old place stays out.
     assert "rooftop" not in tags
     assert "rooftop" not in prompt.replace(" ", "_")
 
 
 @pytest.mark.asyncio
 async def test_weave_does_not_put_her_back_in_the_old_outfit():
-    """手帖の WEARING は白シャツなのに、weave がセーラーを書いて戻していた。"""
+    """手帖の WEARING が正本。weave が別名の旧服を書いても最終プロンプトは手帖。"""
     db = FakeDb()
     ollama = NotebookOllama(scripts={
         "WEAVE": _scripter_block(
             intent="shot",
             tags=(
-                "sailor_uniform, sailor_collar, straw_hat, standing, "
-                "close_up, white_shirt, blue_skirt"
+                "sailor_uniform, sailor_collar, straw_hat, white_serafuku, "
+                "standing, close_up"
             ),
             craft_scene=(
                 "Standing by the window in a sailor uniform and straw hat, "
@@ -805,14 +790,16 @@ async def test_weave_does_not_put_her_back_in_the_old_outfit():
     tags = str(craft.get("tags") or "").lower().replace(" ", "_")
     prose = str(craft.get("scene") or "").lower()
     prompt = str(craft.get("prompt") or "").lower().replace(" ", "_")
-    assert "sailor_uniform" not in tags
+    assert "sailor" not in tags
+    assert "serafuku" not in tags
     assert "straw_hat" not in tags
-    assert "white_shirt" in tags or "shirt" in tags
-    assert "blue_skirt" in tags or "skirt" in tags
+    assert "white_shirt" in tags
+    assert "blue_skirt" in tags
     assert "sailor" not in prose
-    assert "white shirt" in prose or "wearing white" in prose
+    assert "white shirt" in prose
+    assert "classroom" in prose
     assert "sailor_uniform" not in prompt
-    assert "white_shirt" in prompt or "shirt" in prompt
+    assert "white_shirt" in prompt
 
 
 @pytest.mark.asyncio

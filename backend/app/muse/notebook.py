@@ -896,20 +896,15 @@ def drop_crops_not_in_frame(tags: str, *, frame: str) -> str:
     return ", ".join(kept)
 
 
-def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = "") -> str:
-    """Drop garment tags the notebook no longer authorizes.
+def mint_phrase_tag(phrase: str) -> str:
+    """One notebook phrase → one snake_case tag. No guessing against the bag."""
+    tag = re.sub(r"\s+", "_", str(phrase or "").strip().lower())
+    tag = re.sub(r"[^a-z0-9_-]", "", tag).strip("_-")
+    return tag if len(tag) >= 3 else ""
 
-    The old leftover list only caught accessories (hat / coat / cardigan…).
-    Base outfits like ``sailor_uniform`` sat outside it, so a weave that still
-    remembered the sailor put her back in it while WEARING already said white
-    shirt — notebook right, prompt wrong. Clothing-axis tags (and the same
-    accessory heads) whose head or tokens the wardrobe does not name are
-    dropped; quality words (``knit``, ``folds``) stay.
-    """
-    allowed = wearing_tokens(wearing) | wearing_tokens(wearing_b)
-    heads = wardrobe_heads(wearing) | wardrobe_heads(wearing_b)
-    if not allowed and not heads:
-        return tags
+
+def strip_clothing_tags(tags: str) -> str:
+    """Drop every clothing tag. Notebook wearing is re-minted afterwards."""
     kept: list[str] = []
     from .identity import bare_tag
     for part in str(tags or "").split(","):
@@ -921,17 +916,173 @@ def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = ""
         if last in _QUALITY_TAG_KEEP:
             kept.append(tok)
             continue
-        if _tag_authorized_by_wearing(key, allowed=allowed, heads=heads):
-            kept.append(tok)
-            continue
         if _looks_like_clothing_tag(key):
             continue
         kept.append(tok)
     return ", ".join(kept)
 
 
-# Accessory heads the original leftover list named, plus base-outfit heads the
-# clothing axis sometimes misses (``serafuku``, ``loafers``).
+def strip_place_tags(tags: str) -> str:
+    """Drop location / time tags. Notebook SCENE/BG/LIGHT are re-minted afterwards."""
+    kept: list[str] = []
+    from .identity import bare_tag
+    for part in str(tags or "").split(","):
+        tok = part.strip()
+        if not tok:
+            continue
+        key = bare_tag(tok)
+        axis = tag_catalog.get_tag_axis(key) if key else None
+        if axis in ("location", "time_weather"):
+            continue
+        kept.append(tok)
+    return ", ".join(kept)
+
+
+def notebook_wearing_tags(
+    wearing: str, *, struck: set[str] | None = None, banned: set[str] | None = None,
+) -> list[str]:
+    """Mint tags from each WEARING item — the notebook is the outfit."""
+    gone = set(struck or ()) | {
+        str(t).strip().lower().replace(" ", "_") for t in (banned or ()) if str(t).strip()
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in re.split(r"[,，、;]", str(wearing or "")):
+        item = item.strip()
+        if not item:
+            continue
+        tokens = wearing_tokens(item)
+        if tokens & gone:
+            continue
+        tag = mint_phrase_tag(item)
+        if not tag or tag in seen or tag in gone:
+            continue
+        out.append(tag)
+        seen.add(tag)
+    return out
+
+
+def notebook_place_tags(
+    *, scene: str = "", bg: str = "", light: str = "",
+    struck: set[str] | None = None, banned: set[str] | None = None,
+) -> list[str]:
+    """Mint place/light tags from notebook phrases — not by matching the bag."""
+    gone = set(struck or ()) | {
+        str(t).strip().lower().replace(" ", "_") for t in (banned or ()) if str(t).strip()
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(tag: str) -> None:
+        if tag and tag not in seen and tag not in gone:
+            out.append(tag)
+            seen.add(tag)
+
+    for phrase, cap in (
+        (coerce_plain_phrase(scene), PLACE_SCENE_TAG_CAP),
+        (coerce_plain_phrase(bg), PLACE_BG_TAG_CAP),
+        (coerce_plain_phrase(light), PLACE_SCENE_TAG_CAP),
+    ):
+        if not phrase:
+            continue
+        _add(mint_phrase_tag(phrase))
+        for tag in place_field_tags(phrase, cap=cap):
+            _add(tag)
+    return out
+
+
+def apply_notebook_authority_tags(
+    tags: str, nb: dict[str, Any], *,
+    struck: set[str] | None = None, banned: set[str] | None = None,
+) -> str:
+    """Weave keeps body/camera/quality; clothes and place come only from the notebook.
+
+    Keyword reconciliation against the bag has a ceiling — different names for
+    the same garment, shared colours, soft place nouns. The notebook already
+    holds the finished absolute values, so those fields are stripped from the
+    weave bag and written back from the notebook.
+    """
+    bag = strip_place_tags(strip_clothing_tags(tags))
+    parts = [p.strip() for p in bag.split(",") if p.strip()]
+    seen = {p.lower().replace(" ", "_") for p in parts}
+    for tag in (
+        notebook_wearing_tags(
+            str((nb or {}).get("wearing") or ""), struck=struck, banned=banned,
+        )
+        + notebook_wearing_tags(
+            str((nb or {}).get("wearing_b") or ""), struck=struck, banned=banned,
+        )
+        + notebook_place_tags(
+            scene=str((nb or {}).get("scene") or ""),
+            bg=str((nb or {}).get("bg") or ""),
+            light=str((nb or {}).get("light") or ""),
+            struck=struck, banned=banned,
+        )
+    ):
+        if tag not in seen:
+            parts.append(tag)
+            seen.add(tag)
+    return ", ".join(parts)
+
+
+def craft_scene_from_notebook(nb: dict[str, Any]) -> str:
+    """Build craft_scene from notebook fields alone (body → clothes → light → place).
+
+    Weave prose is not the authority for clothes or place — it was the path
+    that put the old sailor back after WEARING had moved. The notebook already
+    has the finished values; say them.
+    """
+    parts: list[str] = []
+    for key in ("beat", "beat_b"):
+        phrase = coerce_plain_phrase((nb or {}).get(key))
+        if phrase:
+            parts.append(phrase.rstrip(".") + ".")
+    for key, lead in (("expression", ""), ("expression_b", "Partner: ")):
+        phrase = coerce_plain_phrase((nb or {}).get(key))
+        if phrase:
+            parts.append(f"{lead}{phrase.rstrip('.')}." if lead else phrase.rstrip(".") + ".")
+    wearing = coerce_plain_phrase((nb or {}).get("wearing"))
+    if wearing:
+        parts.append(f"Wearing {_cap_phrase(wearing, max_chars=WEARING_MAX_CHARS).rstrip('.')}.")
+    wearing_b = coerce_plain_phrase((nb or {}).get("wearing_b"))
+    if wearing_b:
+        parts.append(
+            f"Partner wearing {_cap_phrase(wearing_b, max_chars=WEARING_MAX_CHARS).rstrip('.')}."
+        )
+    light = coerce_plain_phrase((nb or {}).get("light"))
+    if light:
+        parts.append(_cap_phrase(light, max_chars=LIGHT_MAX_CHARS).rstrip(".") + ".")
+    scene = coerce_plain_phrase((nb or {}).get("scene"))
+    if scene:
+        parts.append(_cap_phrase(scene, max_chars=SCENE_MAX_CHARS).rstrip(".") + ".")
+    bg = coerce_plain_phrase((nb or {}).get("bg"))
+    if bg:
+        parts.append(_cap_phrase(bg, max_chars=PLACE_BG_PROSE_CHARS).rstrip(".") + ".")
+    return " ".join(parts)
+
+
+def drop_garments_not_in_wearing(tags: str, *, wearing: str, wearing_b: str = "") -> str:
+    """Compatibility wrapper — clothing is stripped; notebook items are re-minted by callers.
+
+    Prefer ``apply_notebook_authority_tags`` / ``reconcile_wardrobe_tags``. Kept so
+    older tests and the wardrobe button path can still drop leftovers by
+    stripping every clothing tag that is not minted from the current wearing.
+    """
+    bag = strip_clothing_tags(tags)
+    minted = notebook_wearing_tags(wearing) + notebook_wearing_tags(wearing_b)
+    if not minted:
+        return bag
+    parts = [p.strip() for p in bag.split(",") if p.strip()]
+    have = {p.lower().replace(" ", "_") for p in parts}
+    for tag in minted:
+        if tag not in have:
+            parts.append(tag)
+            have.add(tag)
+    return ", ".join(parts)
+
+
+# Accessory / base-outfit heads used when classifying a tag as clothing without
+# a catalog axis (``serafuku``, ``loafers``).
 _GARMENT_HEAD_DROP = {
     "hat", "cardigan", "coat", "jacket", "hoodie", "cape",
     "umbrella", "scarf", "glasses", "sunglasses",
@@ -944,51 +1095,6 @@ _GARMENT_HEAD_DROP = {
 }
 
 
-def _tag_authorized_by_wearing(
-    key: str, *, allowed: set[str], heads: set[str],
-) -> bool:
-    """True when the tag is the notebook's garment — by identity, not by colour.
-
-    Sharing ``white`` between ``white_shirt`` and ``white_serafuku`` used to
-    keep the sailor after WEARING moved to a shirt. The head noun is what the
-    garment IS; modifiers are not permission to keep a different outfit.
-    """
-    if not key:
-        return False
-    if key in allowed:
-        return True
-    head = brief.garment_head(key)
-    if head and (
-        head in heads or any(_same_garment(head, h) for h in heads)
-    ):
-        return True
-    # Outfit-bound accessories (sailor_collar beside sailor uniform): keep
-    # when a wardrobe token names the same outfit stem, not when a colour
-    # alone matches.
-    if head in _OUTFIT_ACCESSORY_HEADS:
-        parts = {
-            p for p in key.split("_")
-            if p and p not in _STRUCK_NOISE and p not in _COLOUR_MODIFIERS
-        }
-        if parts & {
-            a for a in allowed
-            if a not in _COLOUR_MODIFIERS and a not in _STRUCK_NOISE
-        }:
-            return True
-    return False
-
-
-# Collar / necktie ride with an outfit. Colour words must not unlock them.
-_OUTFIT_ACCESSORY_HEADS = {
-    "collar", "necktie", "ribbon", "bow", "bowtie",
-}
-_COLOUR_MODIFIERS = {
-    "white", "black", "blue", "red", "green", "yellow", "pink", "purple",
-    "orange", "brown", "grey", "gray", "beige", "navy", "cream", "gold",
-    "silver", "dark", "light", "pale", "deep", "bright", "pastel",
-}
-
-
 def _looks_like_clothing_tag(key: str) -> bool:
     if not key:
         return False
@@ -998,101 +1104,6 @@ def _looks_like_clothing_tag(key: str) -> bool:
     if last in _GARMENT_HEAD_DROP:
         return True
     return any(key.endswith(s) for s in tag_catalog.CLOTHING_SUFFIXES)
-
-
-def _wearing_mentioned(phrase: str, prose: str) -> bool:
-    """True when craft_scene already names the wardrobe's garment heads."""
-    body = str(prose or "")
-    low = body.lower()
-    low_us = low.replace(" ", "_")
-    text = coerce_plain_phrase(phrase)
-    if not text:
-        return True
-    if text.lower() in low:
-        return True
-    items = [i.strip() for i in re.split(r"[,，、;]", text) if i.strip()]
-    if not items:
-        return True
-    # Every wardrobe item must show up by head noun (or full phrase) — a shared
-    # colour alone is not "wearing the shirt".
-    for item in items:
-        if item.lower() in low:
-            continue
-        head = brief.garment_head(item)
-        if head and (head in low_us or re.search(rf"(?i)\b{re.escape(head)}\b", low)):
-            continue
-        compound = re.sub(r"\s+", "_", item.lower())
-        if compound in low_us or item.lower() in low:
-            continue
-        return False
-    return True
-
-
-def _scrub_unauthorized_clothes_prose(
-    prose: str, *, wearing: str, wearing_b: str = "",
-) -> str:
-    """Remove garment phrases the notebook no longer authorizes from craft_scene."""
-    text = str(prose or "").strip()
-    if not text:
-        return text
-    allowed = wearing_tokens(wearing) | wearing_tokens(wearing_b)
-    heads = wardrobe_heads(wearing) | wardrobe_heads(wearing_b)
-    if not allowed and not heads:
-        return text
-    forms = [
-        tok for tok in sorted(wearing_tokens(text), key=len, reverse=True)
-        if (("_" in tok or len(tok) >= 5)
-            and _looks_like_clothing_tag(tok)
-            and not _tag_authorized_by_wearing(tok, allowed=allowed, heads=heads))
-    ]
-    for tok in forms:
-        for form in {tok, tok.replace("_", " ")}:
-            text = re.sub(rf"(?i)\b{re.escape(form)}\b", " ", text)
-    text = re.sub(r"\s{2,}", " ", text)
-    text = re.sub(r"\s+([,.;:])", r"\1", text)
-    # "in a sailor uniform by the window" → "in a  by the window" → drop the empty prep.
-    text = re.sub(
-        r"(?i)\b(?:in|wearing|with)\s+an?\s+"
-        r"(?=(?:by|and|under|near|at|on|beside|with|in)\b|[.,;]|$)",
-        " ",
-        text,
-    )
-    text = re.sub(r"\s{2,}", " ", text)
-    return text.strip(" ,.;")
-
-
-def ensure_wearing_in_scene(
-    craft_scene: str, *, wearing: str, wearing_b: str = "",
-) -> str:
-    """Scrub stale outfits from craft_scene, then put the notebook wardrobe in.
-
-    Weave often keeps writing the sailor after WEARING moved to a shirt.
-    Tags are reconciled by ``drop_garments_not_in_wearing``; prose needs the
-    same floor — drop what the notebook no longer names, then append what it
-    does. Clothes sit before place in the weave contract order.
-    """
-    body = _scrub_unauthorized_clothes_prose(
-        str(craft_scene or "").strip(),
-        wearing=wearing, wearing_b=wearing_b,
-    )
-    tails: list[str] = []
-    mine = coerce_plain_phrase(wearing)
-    if mine and not _wearing_mentioned(mine, body):
-        short = _cap_phrase(mine, max_chars=WEARING_MAX_CHARS)
-        if short:
-            tails.append(f"Wearing {short.rstrip('.')}.")
-    hers = coerce_plain_phrase(wearing_b)
-    pending = " ".join(tails)
-    if hers and not _wearing_mentioned(hers, body) and not _wearing_mentioned(
-        hers, pending,
-    ):
-        short = _cap_phrase(hers, max_chars=WEARING_MAX_CHARS)
-        if short:
-            tails.append(f"Partner wearing {short.rstrip('.')}.")
-    if not tails:
-        return body
-    tail = " ".join(tails)
-    return f"{body} {tail}".strip() if body else tail
 
 
 def _missing_wearing_items(
@@ -1176,7 +1187,11 @@ def reconcile_wardrobe_tags(
         tags = _without(tags)
         side_a, side_b = _without(side_a), _without(side_b)
 
-    tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
+    # Do not match weave clothes against the notebook by keyword — strip every
+    # clothing tag and write the notebook wardrobe back.
+    tags = strip_clothing_tags(tags)
+    if partner:
+        side_a, side_b = strip_clothing_tags(side_a), strip_clothing_tags(side_b)
     # **二人いるときは、側ごとに見る。** `_missing_wearing_items` の
     # 「もうある」判定は語のかぶりで見るので、みおが `light_blue_dress` を着て
     # いると、すみれの `pale blue dress` は `dress`／`blue` が既出という理由で
@@ -1200,23 +1215,28 @@ def reconcile_wardrobe_tags(
             worn = {brief.garment_head(t) for t in tag_names(side)}
             return [t for t in items if brief.garment_head(t) not in worn]
 
-        miss_a = _fresh(side_a, _missing_wearing_items(
-            side_a, wearing=wearing, struck=struck, banned=banned_set))
-        miss_b = _fresh(side_b, _missing_wearing_items(
-            side_b, wearing=wearing_b, struck=struck, banned=banned_set))
+        miss_a = _fresh(side_a, notebook_wearing_tags(
+            wearing, struck=struck, banned=banned_set))
+        miss_b = _fresh(side_b, notebook_wearing_tags(
+            wearing_b, struck=struck, banned=banned_set))
         if miss_a:
             side_a = ", ".join([p.strip() for p in side_a.split(",") if p.strip()] + miss_a)
         if miss_b:
             side_b = ", ".join([p.strip() for p in side_b.split(",") if p.strip()] + miss_b)
         missing = miss_a + [m for m in miss_b if m not in miss_a]
     else:
-        missing = _missing_wearing_items(
-            tags, wearing=wearing, wearing_b=wearing_b,
-            struck=struck, banned=banned_set,
+        missing = notebook_wearing_tags(
+            wearing, struck=struck, banned=banned_set,
         )
+        for tag in notebook_wearing_tags(
+            wearing_b, struck=struck, banned=banned_set,
+        ):
+            if tag not in missing:
+                missing.append(tag)
     if missing:
         parts = [p.strip() for p in tags.split(",") if p.strip()]
-        tags = ", ".join(parts + [m for m in missing if m not in parts])
+        have = {p.lower().replace(" ", "_") for p in parts}
+        tags = ", ".join(parts + [m for m in missing if m not in have])
     return tags, (side_a, side_b)
 
 
