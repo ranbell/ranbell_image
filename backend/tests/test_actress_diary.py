@@ -681,14 +681,14 @@ async def test_casting_a_partner_fills_the_card_on_the_click(monkeypatch):
 
     monkeypatch.setattr(presets_db, "get_preset", fake_get_preset)
     db = FakeDB()
-    session = await muse_service.pick_partner(db, _session(), "c002")
+    session = await muse_service.pick_partner(db, None, _session(), "c002")
     assert session["inputs"]["partner_preset"] == "c002"
     assert session["partner_character"]["name_ja"] == "ベル"
 
     with pytest.raises(muse_service.MuseError):        # the lead is not her own partner
-        await muse_service.pick_partner(db, session, "c001")
+        await muse_service.pick_partner(db, None, session, "c001")
 
-    cleared = await muse_service.pick_partner(db, session, "")
+    cleared = await muse_service.pick_partner(db, None, session, "")
     assert cleared["inputs"]["partner_preset"] == ""
     assert await muse_service._partner_character(db, cleared) is None
 

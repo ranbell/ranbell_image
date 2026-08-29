@@ -1303,3 +1303,91 @@ def test_the_wardrobe_clerk_needs_two_names():
                             name_b="", model="m", num_ctx=1024)
     )
     assert got == {}
+
+
+def _dress_session(sets_a, sets_b=None, wearing="", wearing_b=""):
+    session = {
+        "session_id": "s1", "mode": "duet", "inputs": {"locale": "ja"},
+        "character": {"name_ja": "各務 みお", "wardrobe_sets": sets_a},
+        "notebook": notebook.blank(), "craft": {}, "stage_ms": [],
+    }
+    if sets_b is not None:
+        session["partner_character"] = {"name_ja": "平岡 すみれ",
+                                        "character_id": "p",
+                                        "wardrobe_sets": sets_b}
+        session["inputs"]["partner_preset"] = "p"
+    patch = {k: v for k, v in (("wearing", wearing), ("wearing_b", wearing_b)) if v}
+    if patch:
+        notebook.apply_patch(session["notebook"], patch)
+    return session
+
+
+_SETS_A = [
+    {"key": "signature", "name_ja": "いつもの", "tags": ["blouse"], "props": ["pen"]},
+    {"key": "casual_a", "name_ja": "休みの日", "tags": ["hoodie"], "props": ["tote_bag"]},
+]
+_SETS_B = [
+    {"key": "signature", "name_ja": "いつもの", "tags": ["apron"], "props": ["shears"]},
+    {"key": "casual_b", "name_ja": "よそ行き", "tags": ["black_dress"], "props": ["clutch"]},
+]
+
+
+class _PickOllama:
+    def __init__(self, reply):
+        self.reply = reply
+
+    def generate_text_stream(self, prompt, **kw):
+        async def _stream():
+            yield {"type": "token", "text": self.reply}
+        return _stream()
+
+
+def _dress(session, reply):
+    import asyncio
+    asyncio.run(service._dress_the_cast(
+        None, _PickOllama(reply), session, cfg={},
+    ))
+    return notebook.of(session)
+
+
+def test_she_arrives_wearing_something():
+    """総監督（2026-08-29）「default の衣装や持ち物がないので、会話開始後に
+    いきなりおかしな状態に陥ることがあります」。
+
+    **鍵だけ返させて、語はプリセットから展開する** —— 訳語のぶれも、勝手な
+    一着も出ない。小物も身につけるものとして一緒に入る。
+    """
+    session = _dress_session(_SETS_A, _SETS_B)
+    nb = _dress(session, '{"各務 みお": "casual_a", "平岡 すみれ": "casual_b"}')
+    assert nb["wearing"] == "hoodie, tote_bag"
+    assert nb["wearing_b"] == "black_dress, clutch"
+
+
+def test_an_unknown_key_falls_back_to_the_signature():
+    """持っていない鍵は捨てる。**モデルに服を作らせない。**"""
+    session = _dress_session(_SETS_A, _SETS_B)
+    nb = _dress(session, '{"各務 みお": "pyjamas", "平岡 すみれ": "???"}')
+    assert nb["wearing"] == "blouse, pen"
+    assert nb["wearing_b"] == "apron, shears"
+
+
+def test_clothes_already_written_are_left_alone():
+    """総監督が主題で服を指定していたら、そちらが先に入っている。**触らない。**"""
+    session = _dress_session(_SETS_A, _SETS_B, wearing="sailor uniform")
+    nb = _dress(session, '{"平岡 すみれ": "casual_b"}')
+    assert nb["wearing"] == "sailor uniform"
+    assert nb["wearing_b"] == "black_dress, clutch"
+
+
+def test_a_solo_shoot_dresses_the_one_person():
+    session = _dress_session(_SETS_A)
+    nb = _dress(session, '{"各務 みお": "casual_a"}')
+    assert nb["wearing"] == "hoodie, tote_bag"
+    assert not str(nb.get("wearing_b") or "").strip()
+
+
+def test_nothing_to_wear_writes_nothing():
+    """服を持っていない子には、勝手な一着を生やさない。"""
+    session = _dress_session([])
+    nb = _dress(session, '{"各務 みお": "casual_a"}')
+    assert not str(nb.get("wearing") or "").strip()

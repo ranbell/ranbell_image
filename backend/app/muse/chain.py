@@ -2586,6 +2586,80 @@ async def read_beats(
         now_a=beat, now_b=beat_b, model=model, num_ctx=num_ctx)
 
 
+WARDROBE_PICK_SYSTEM = """You are the wardrobe room for a photo shoot.
+
+Each person below owns a few outfits. Read what today's shoot is and say which
+one each of them should arrive in.
+
+- Pick by the place, the hour and the season. Work clothes for a shoot at her
+  work; everyday clothes for a day out; the dressed-up one for an evening or
+  somewhere smart.
+- **Answer with the key only** — one of the keys listed for that person.
+  Never invent a key. Never describe the clothes.
+- When nothing in the brief says where or when, answer `signature`.
+
+Return one JSON object with exactly these keys, and nothing else:
+{keys}"""
+
+
+async def read_wardrobe_choice(
+    ollama, *, brief: str, people: list[tuple[str, list[dict[str, Any]]]],
+    model: str, num_ctx: int | None,
+) -> dict[str, str]:
+    """今日はどれを着てくるか。**返させるのは鍵だけ。**
+
+    総監督（2026-08-29）「監督に呼ばれたときはその中から選んできてくれる
+    形式にしましょう」。
+
+    **服の語はモデルに書かせない** —— 鍵だけ返させて、こちらでプリセットから
+    展開する。訳語のぶれも、勝手な一着も出ない。名前をキーにするのは
+    `read_per_person` と同じ道で、二人いても取り違えない（実測 25/25。
+    片方だけ切り出すと 18/25 に落ちるので、**必ずまとめて訊く**）。
+
+    読めなかった鍵、そのキャラが持っていない鍵は捨てて `signature` に倒す。
+    """
+    rows = [(str(n).strip(), sets) for n, sets in people if str(n).strip() and sets]
+    if not rows:
+        return {}
+    keys = json.dumps({n: "…" for n, _ in rows}, ensure_ascii=False)
+    lines = []
+    for name, sets in rows:
+        got = ", ".join(
+            f"{s.get('key')} ({', '.join(str(t) for t in (s.get('tags') or [])[:4])})"
+            for s in sets if s.get("key")
+        )
+        lines.append(f"{name} — {got}")
+    prompt = "\n\n".join(x for x in (
+        f"TODAY'S SHOOT:\n{str(brief or '').strip()}" if str(brief or "").strip() else "",
+        "WHAT THEY OWN:\n" + "\n".join(lines),
+        "JSON:",
+    ) if x)
+    try:
+        raw = await _call(
+            ollama, system=WARDROBE_PICK_SYSTEM.format(keys=keys),
+            prompt=prompt, model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] wardrobe pick failed", exc_info=True)
+        return {}
+    m = _WARDROBE_JSON_RE.search(str(raw or ""))
+    got: dict[str, Any] = {}
+    if m:
+        try:
+            parsed = json.loads(m.group(0))
+            got = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            got = {}
+    out: dict[str, str] = {}
+    for name, sets in rows:
+        owned = {str(x.get("key")) for x in sets if x.get("key")}
+        key = str(got.get(name) or "").strip().lower()
+        out[name] = key if key in owned else (
+            "signature" if "signature" in owned else sorted(owned)[0]
+        )
+    return out
+
+
 async def read_boundary(
     ollama, *, note: str, model: str, num_ctx: int | None,
     after_decline: str = "",

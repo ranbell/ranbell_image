@@ -792,7 +792,7 @@ async def ensure_character(db, session: dict[str, Any]) -> None:
         logger.warning("[muse] could not resolve the cast from inputs", exc_info=True)
 
 
-async def pick_partner(db, session: dict[str, Any], preset_id: str) -> dict[str, Any]:
+async def pick_partner(db, ollama, session: dict[str, Any], preset_id: str) -> dict[str, Any]:
     """The second Muse in 主演撮り (lead shoot). Empty string casts nobody.
 
     Resolved here rather than on her first line. Storing only the id meant the
@@ -823,6 +823,8 @@ async def pick_partner(db, session: dict[str, Any], preset_id: str) -> dict[str,
     }
     session["inputs"] = {**_inputs(session), "partner_preset": preset_id}
     session_db.log(session, "partner", session["partner_character"].get("name", ""))
+    # 途中から入った子も、手ぶらでは来ない。
+    await _dress_the_cast(db, ollama, session, cfg=await get_runtime_config(db))
     await session_db.save(db, session)
     return session
 
@@ -5218,6 +5220,59 @@ async def post_duet_chat(
     return session
 
 
+async def _dress_the_cast(db, ollama, session: dict[str, Any], *,
+                         cfg: dict[str, Any]) -> None:
+    """撮影を開けたら、今日の一着を着てきてもらう。
+
+    総監督（2026-08-29）「default の衣装や持ち物がないので、会話開始後に
+    いきなりおかしな状態に陥ることがあります」。手帖の `wearing` は空で
+    始まるので、**服が無い状態から「脱いで」と言われて宙に浮いていた。**
+
+    **鍵だけ返させて、語はプリセットから展開する** —— 訳語のぶれも、勝手な
+    一着も出ない。二人いてもまとめて名前で訊く（片方だけ切り出すと取り違える。
+    実測 18/25 対 25/25）。
+
+    **既に書かれている欄は触らない。** 総監督が主題で服を指定していたら、
+    そちらが先に入っている。
+    """
+    if ollama is None or not uses_notebook(session):
+        return
+    nb = notebook_mod.of(session)
+    partner_character = await _partner_character(db, session)
+    name_a, name_b = _muse_names(session, partner_character)
+    people: list[tuple[str, list[dict[str, Any]]]] = []
+    slots: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+    for name, who, field in (
+        (name_a, session.get("character") or {}, "wearing"),
+        (name_b, partner_character or {}, "wearing_b"),
+    ):
+        sets = list(who.get("wardrobe_sets") or [])
+        if not (name and sets) or str(nb.get(field) or "").strip():
+            continue
+        people.append((name, sets))
+        slots[name] = (field, sets)
+    if not people:
+        return
+    began = time.monotonic()
+    picked = await chain.read_wardrobe_choice(
+        ollama, brief=_theme_for_models(session), people=people,
+        model=_text_model(_inputs(session)), num_ctx=_num_ctx(_inputs(session), cfg),
+    )
+    patch: dict[str, str] = {}
+    for name, (field, sets) in slots.items():
+        key = picked.get(name) or "signature"
+        row = next((x for x in sets if str(x.get("key")) == key), sets[0])
+        # 小物も身につけるもの。バッグは持ち物であって、画の中では衣装の一部
+        worn = [str(t) for t in (row.get("tags") or []) if str(t).strip()]
+        worn += [str(t) for t in (row.get("props") or []) if str(t).strip()]
+        if worn:
+            patch[field] = ", ".join(worn)
+            logger.info("[muse] %s arrives in %r", name, key)
+    if patch:
+        notebook_mod.apply_patch(nb, patch)
+        _stage(session, "衣装部屋（今日の一着）", began)
+
+
 async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     """Open the two-hander. She speaks first, about the theme, and that is all."""
     missing = [m for m in missing_inputs(session) if m != "workflow"]
@@ -5270,6 +5325,7 @@ async def start_duet(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     )
     # Opening is conversation — greet, maybe a diary whisper — not a shot briefing.
     session["scripter_intent"] = "casual"
+    await _dress_the_cast(db, ollama, session, cfg=cfg)
     await session_db.save(db, session)
     session_db.log(session, "duet", "opened")
     return await _duet_talk(db, ollama, session, "", cfg=cfg)
