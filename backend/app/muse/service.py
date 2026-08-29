@@ -3596,6 +3596,41 @@ async def _run_duet_scripter(
         # 折り込み（`fold=True`）では係を呼ばないので、空を書くと門が全部
         # 閉じてしまう。
         session["asked_fields"] = sorted(asked)
+        # **服だけを言うターン。** 二人いる回で、指示が服に触れたときだけ。
+        #
+        # 本番の compile（8,774字）は W で服の欄を取り違える —— 実測で
+        # 2/20、しかも `wearing` が一度も書かれなかった（`ccde3c75`: みおの
+        # ドレスが `wearing_b` に入り、主演の欄は最後まで空）。同じ問いを
+        # **小さく絞って名前で訊く**と 25/25 になる。形が壊れているのではなく、
+        # 大きな条文の中で埋もれている。
+        #
+        # 返ってくるのは**名前をキーにした JSON** なので、欄への振り分けは
+        # こちらで決める —— モデルに `_b` という文字を選ばせない。
+        if partner and "wearing" in asked:
+            began_w = time.monotonic()
+            worn = await chain.read_wardrobe(
+                ollama, note=str(text or "").strip(),
+                name_a=name_a, name_b=name_b,
+                wearing=str(nb.get("wearing") or ""),
+                wearing_b=str(nb.get("wearing_b") or ""),
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            )
+            _stage(session, "衣装係（名前で訊く）", began_w)
+            if worn:
+                logger.info("[muse] wardrobe clerk: %s",
+                            ", ".join(f"{k}={v[:40]}" for k, v in worn.items()))
+                # **compile の書いた服より、こちらが正しい。** 上の
+                # `apply_patch` は既に走っているので、ここで自分で当て、
+                # 派生した値も取り直す。
+                patch.update(worn)
+                notebook_mod.apply_patch(nb, worn)
+                notebook_moved = int(nb.get("rev") or 0) > rev_before
+                after_shot = notebook_mod.shot_snapshot(nb)
+                picture_patched = any(
+                    str(after_shot.get(k) or "") != str(before_shot.get(k) or "")
+                    for k in picture_keys
+                )
+                shot_patched = True
 
     _meta_note = str(text or "").strip().upper()
     # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes

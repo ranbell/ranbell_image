@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import notebook, service, session_db
+from app.muse import chain, notebook, service, session_db
 from tests.muse.test_duet import _duet_session  # noqa: E402
 from tests.muse.test_service import FakeDb, FakeOllama  # noqa: E402
 
@@ -1220,3 +1220,57 @@ def test_both_prompts_say_which_letter_is_which_muse():
     assert "WEARING_B / BEAT_B are Sumire's" in \
         _who_is_who("Mio", "Sumire", letters=False)
     assert _who_is_who("Mio", "", letters=True) == ""
+
+
+def test_the_wardrobe_clerk_maps_names_to_the_two_fields():
+    """**服だけを言うターン。** 総監督（2026-08-29）の案。
+
+    本番の compile（8,774字）は W で服の欄を取り違える —— 実測 2/20 で、
+    `wearing` が一度も書かれなかった（`ccde3c75`）。同じ問いを小さく絞って
+    **名前で**訊くと 25/25。形が壊れているのではなく、大きな条文の中で
+    埋もれている。
+
+    返りは名前をキーにした JSON。**欄への振り分けはこちらで決める** ——
+    モデルに `_b` という文字を選ばせない。
+    """
+    import asyncio
+
+    class _Ollama:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def generate_text_stream(self, prompt, **kw):
+            async def _stream():
+                yield {"type": "token", "text": self.reply}
+            return _stream()
+
+    def _ask(reply):
+        return asyncio.run(
+            chain.read_wardrobe(
+                _Ollama(reply), note="みおちゃんは赤いセーターで。",
+                name_a="各務 みお", name_b="平岡 すみれ",
+                model="m", num_ctx=1024,
+            )
+        )
+
+    got = _ask('{"各務 みお": "red sweater, jeans", "平岡 すみれ": "unchanged"}')
+    assert got == {"wearing": "red sweater, jeans"}
+
+    # 両方
+    got = _ask('{"各務 みお": "red sweater", "平岡 すみれ": "white blouse"}')
+    assert got == {"wearing": "red sweater", "wearing_b": "white blouse"}
+
+    # 読めない返しは何も書かない —— 空を書いて服を消さない
+    assert _ask("すみません、わかりません") == {}
+    assert _ask('{"だれか": "x"}') == {}
+
+
+def test_the_wardrobe_clerk_needs_two_names():
+    """ソロでは呼ばない。名前が片方しか無ければ何も返さない。"""
+    import asyncio
+
+    got = asyncio.run(
+        chain.read_wardrobe(None, note="赤いセーター", name_a="みお",
+                            name_b="", model="m", num_ctx=1024)
+    )
+    assert got == {}

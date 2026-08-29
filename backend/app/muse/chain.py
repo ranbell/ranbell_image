@@ -5,6 +5,7 @@ chats; the crew answers until they ask for a board or the showrunner says OK.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections import namedtuple
@@ -2452,6 +2453,89 @@ def parse_boundary_why(raw: str) -> str:
     if first.lower() in ("none", "persona", "crime", "unsure"):
         return ""
     return " ".join(first.split())[:WHY_MAX]
+
+
+WARDROBE_SYSTEM = """You keep the wardrobe notes for a photo shoot with two people.
+
+Read the director's line and say what EACH of them is wearing after it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `淡い青のドレス` is `light blue dress`. Never copy his words through.
+- Comma separated, plain garment words.
+- Only what is ON her body — clothes, hair, accessories. Not the place, not
+  the pose, not what she is holding.
+- Everything she still has on, not only the new piece. Say the whole outfit.
+- If the line does not change what one of them has on, write: unchanged
+
+Return one JSON object with exactly these two keys, and nothing else:
+{keys}"""
+
+
+_WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)
+
+
+async def read_wardrobe(
+    ollama, *, note: str, name_a: str, name_b: str,
+    wearing: str = "", wearing_b: str = "",
+    model: str, num_ctx: int | None,
+) -> dict[str, str]:
+    """**着ている服だけを言うターン。** 誰が何を着ているかを、名前で訊く。
+
+    総監督（2026-08-29）「A,B それぞれが何を着ているか llm に言わせてみて。
+    これが出力できれば処理するだけですね」。
+
+    実測でこうなった（同じ5件・n=5）:
+
+        小さく絞って名前で訊く   25/25
+        小さく絞って欄で訊く     25/25   （文脈を厚くしても保った）
+        名前ごとに一問ずつ       18/25   ← 一人だけ切り出すと、文中の唯一の
+                                          服をその人に着せてしまう
+        本番の compile（8,774字） 2/20   ← `wearing` が一度も書かれない
+
+    **形が壊れているのではなく、大きな条文の中で埋もれている。** 服だけを
+    訊けば通る。返ってくるのは名前をキーにした JSON なので、欄への振り分けは
+    こちらで決める —— **モデルに文字を選ばせない。**
+
+    答えられなかった欄は返さない（`unchanged` も返さない）。呼び出し側は
+    「返ってきた欄だけ」を書けばよい。
+    """
+    a, b = str(name_a or "").strip(), str(name_b or "").strip()
+    if not (a and b and str(note or "").strip()):
+        return {}
+    keys = json.dumps({a: "…", b: "…"}, ensure_ascii=False)
+    now = "\n".join(x for x in (
+        f"{a} is wearing: {wearing.strip()}" if str(wearing or "").strip() else "",
+        f"{b} is wearing: {wearing_b.strip()}" if str(wearing_b or "").strip() else "",
+    ) if x)
+    prompt = "\n\n".join(x for x in (
+        f"NOW:\n{now}" if now else "",
+        f"DIRECTOR: {note.strip()}",
+        "JSON:",
+    ) if x)
+    try:
+        raw = await _call(
+            ollama, system=WARDROBE_SYSTEM.format(keys=keys),
+            prompt=prompt, model=model, images=None, num_ctx=num_ctx,
+            think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] wardrobe clerk failed", exc_info=True)
+        return {}
+    m = _WARDROBE_JSON_RE.search(str(raw or ""))
+    if not m:
+        return {}
+    try:
+        got = json.loads(m.group(0))
+    except Exception:
+        return {}
+    if not isinstance(got, dict):
+        return {}
+    out: dict[str, str] = {}
+    for name, field in ((a, "wearing"), (b, "wearing_b")):
+        val = re.sub(r"\s+", " ", str(got.get(name) or "")).strip()
+        if val and val.lower() not in ("unchanged", "none", "-", "同じ"):
+            out[field] = val
+    return out
 
 
 async def read_boundary(
