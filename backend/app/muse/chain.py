@@ -2591,9 +2591,13 @@ WARDROBE_PICK_SYSTEM = """You are the wardrobe room for a photo shoot.
 Each person below owns a few outfits. Read what today's shoot is and say which
 one each of them should arrive in.
 
-- Pick by the place, the hour and the season. Work clothes for a shoot at her
-  work; everyday clothes for a day out; the dressed-up one for an evening or
-  somewhere smart.
+- Pick by the place, the hour and the season.
+  - At her own workplace, or when the brief says she is working → her work
+    clothes.
+  - Out on a day off, at home, running errands → her everyday clothes.
+  - **Evening, or anywhere people dress for** — a bar, a restaurant, a party,
+    a concert, a hotel — → the dressed-up one. An evening out is not a day
+    off, and it is never a work shift.
 - **Answer with the key only** — one of the keys listed for that person.
   Never invent a key. Never describe the clothes.
 - When nothing in the brief says where or when, answer `signature`.
