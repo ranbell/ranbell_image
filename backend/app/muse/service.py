@@ -3172,6 +3172,12 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     for tag in crew_look_tags(session):
         if tag not in have and tag not in gone and tag not in missing:
             missing.append(tag)
+    # Place / BG — body-first weave drops them the way it drops posture.
+    # Notebook already decided; reinject what the bag forgot.
+    covered = have | set(missing)
+    for key in notebook_mod.missing_place_tags(nb, have=covered, gone=gone):
+        if key not in missing:
+            missing.append(key)
     return missing
 
 
@@ -3341,6 +3347,13 @@ def _apply_compiled_craft(
         scene,
         beat=str(nb_now.get("beat") or ""),
         beat_b=str(nb_now.get("beat_b") or ""),
+    )
+    # Place trails the body (weave contract order). Without this, a body-first
+    # weave leaves classroom in the notebook and rooftop in the prompt.
+    scene = notebook_mod.ensure_place_in_scene(
+        scene,
+        scene=str(nb_now.get("scene") or ""),
+        bg=str(nb_now.get("bg") or ""),
     )
     craft["tags"] = tags
     craft["scene"] = scene

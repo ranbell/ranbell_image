@@ -510,6 +510,108 @@ def ensure_beat_leads_scene(
     return f"{head} {body}".strip() if body else head
 
 
+# Caps on reinjected place tags. Weave is body-first and drops SCENE/BG; the
+# code puts a short reminder back. A planner that padded BG once must not force
+# a dozen set-dressing nouns into every bag from then on.
+PLACE_SCENE_TAG_CAP = 3
+PLACE_BG_TAG_CAP = 4
+PLACE_BG_PROSE_CHARS = 80
+
+
+def place_field_tags(text: str, *, cap: int) -> list[str]:
+    """Ordered danbooru-ish tags from a SCENE/BG phrase, capped.
+
+    Compounds first (`night_classroom`) — they name the place — then longer
+    singles. Grammar noise from ``wearing_tokens`` is already filtered; a
+    single that is already inside a chosen compound is skipped so the bag does
+    not say both `night_classroom` and `classroom`.
+    """
+    toks = {
+        t for t in wearing_tokens(text)
+        if t not in _STRUCK_NOISE and len(t) >= 3
+    }
+    compounds = sorted((t for t in toks if "_" in t), key=len, reverse=True)
+    singles = sorted(
+        (t for t in toks if "_" not in t and len(t) >= 4),
+        key=len, reverse=True,
+    )
+    out: list[str] = []
+    for tag in compounds + singles:
+        if len(out) >= cap:
+            break
+        if any(tag in kept or kept in tag for kept in out):
+            continue
+        out.append(tag)
+    return out
+
+
+def missing_place_tags(
+    nb: dict[str, Any], *, have: set[str], gone: set[str],
+    scene_cap: int = PLACE_SCENE_TAG_CAP,
+    bg_cap: int = PLACE_BG_TAG_CAP,
+) -> list[str]:
+    """SCENE/BG tokens the weave bag forgot — same job as posture reinject."""
+    covered = set(have or ())
+    missing: list[str] = []
+    for field, cap in (("scene", scene_cap), ("bg", bg_cap)):
+        for key in place_field_tags(str((nb or {}).get(field) or ""), cap=cap):
+            if key in gone or key in covered:
+                continue
+            if any(key in t or t in key for t in covered):
+                continue
+            missing.append(key)
+            covered.add(key)
+    return missing
+
+
+def _place_mentioned(phrase: str, prose: str) -> bool:
+    """True when craft_scene already carries the place the notebook named."""
+    body = str(prose or "")
+    low = body.lower()
+    low_us = low.replace(" ", "_")
+    text = coerce_plain_phrase(phrase)
+    if not text:
+        return True
+    if text.lower() in low:
+        return True
+    tags = place_field_tags(text, cap=max(PLACE_SCENE_TAG_CAP, PLACE_BG_TAG_CAP))
+    if not tags:
+        return False
+    return any(
+        t in low_us or t.replace("_", " ") in low
+        for t in tags
+    )
+
+
+def ensure_place_in_scene(
+    craft_scene: str, *, scene: str, bg: str = "",
+) -> str:
+    """If craft_scene forgot the notebook place, put it at the end.
+
+    Beat leads (``ensure_beat_leads_scene``); place trails — that is the weave
+    contract order (body → clothes → light → place). Without this floor, a
+    body-first weave leaves the sampler with the old rooftop while the
+    notebook already says classroom.
+    """
+    body = str(craft_scene or "").strip()
+    tails: list[str] = []
+    place = coerce_plain_phrase(scene)
+    if place and not _place_mentioned(place, body):
+        tails.append(place.rstrip(".") + ".")
+    extras = coerce_plain_phrase(bg)
+    pending = " ".join(tails)
+    if extras and not _place_mentioned(extras, body) and not _place_mentioned(
+        extras, pending,
+    ):
+        short = _cap_phrase(extras, max_chars=PLACE_BG_PROSE_CHARS)
+        if short:
+            tails.append(short.rstrip(".") + ".")
+    if not tails:
+        return body
+    tail = " ".join(tails)
+    return f"{body} {tail}".strip() if body else tail
+
+
 def _same_garment(a: str, b: str) -> bool:
     """Two head nouns naming one thing. `dress` and `sundress` are one dress.
 

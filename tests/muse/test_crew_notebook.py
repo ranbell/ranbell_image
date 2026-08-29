@@ -696,6 +696,35 @@ def test_posture_stem_always_reaches_the_tags():
     assert "squatting" in service._missing_wearing_tags(session, "sailor_uniform, parasol")
 
 
+def test_place_from_the_notebook_always_reaches_the_tags():
+    """SCENE/BG が名乗る場所は必ずタグに出る（旧: 身体だけの weave で消えた）。"""
+    session = {
+        "mode": "", "session_id": "s-place", "inputs": {"locale": "ja"},
+        "notebook": notebook.blank(), "craft": {}, "character": {},
+    }
+    notebook.apply_patch(notebook.of(session), {
+        "wearing": "sailor uniform",
+        "beat": "standing",
+        "scene": "night classroom by the window",
+        "bg": "a crowd of cosplayers",
+    })
+    missed = service._missing_wearing_tags(
+        session, "close_up, sailor_uniform, standing, skirt_hem",
+    )
+    joined = " ".join(missed)
+    assert "classroom" in joined or "night_classroom" in joined
+    assert "cosplayers" in joined or "crowd" in joined
+    assert "standing" not in missed
+    # 既に入っていれば足さない。struck の旧場所は戻さない。
+    session["struck"] = ["rooftop"]
+    covered = service._missing_wearing_tags(
+        session, "standing, night_classroom, cosplayers, sailor_uniform",
+    )
+    assert "night_classroom" not in covered
+    assert "cosplayers" not in covered
+    assert "rooftop" not in covered
+
+
 @pytest.mark.asyncio
 async def test_card_reaches_fold_but_never_a_plain_compile(monkeypatch):
     """1ターン古い CARD は compile に渡さない（脱がせる指示に勝ってしまう）。

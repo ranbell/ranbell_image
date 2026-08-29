@@ -663,6 +663,52 @@ async def test_weave_drops_old_place_hour_pose_and_crop():
 
 
 @pytest.mark.asyncio
+async def test_weave_puts_notebook_place_into_the_final_prompt():
+    """手帖の SCENE/BG は動いているのに、身体だけの weave だと最終プロンプトから
+    場所が消えていた。服・姿勢と同じく、欠けたらコードが戻す。"""
+    db = FakeDb()
+    ollama = NotebookOllama(scripts={
+        "WEAVE": _scripter_block(
+            intent="shot",
+            tags="standing, close_up, sailor_uniform, skirt_hem",
+            craft_scene=(
+                "Standing, holding the hem of her skirt, weight on the near foot."
+            ),
+        ),
+    })
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "wearing": "sailor uniform",
+        "scene": "night classroom by the window",
+        "bg": "a crowd of cosplayers",
+        "beat": "standing, holding the hem",
+        "frame": "close, upper body",
+    })
+    s["struck"] = ["rooftop", "dusk"]
+    s["craft_dirty"] = True
+    s["craft"] = {
+        "prompt": "1girl, rooftop, dusk",
+        "tags": "rooftop, dusk, standing",
+        "scene": "On a rooftop at dusk.",
+    }
+    await service.weave_craft_if_needed(db, ollama, s)
+    craft = s.get("craft") or {}
+    tags = str(craft.get("tags") or "").lower().replace(" ", "_")
+    prose = str(craft.get("scene") or "").lower()
+    prompt = str(craft.get("prompt") or "").lower()
+    assert "classroom" in tags or "night_classroom" in tags
+    assert "cosplayers" in tags or "crowd" in tags
+    assert "classroom" in prose
+    assert "cosplayers" in prose
+    assert "classroom" in prompt
+    assert "cosplayers" in prompt or "crowd" in prompt
+    # Struck old place stays out.
+    assert "rooftop" not in tags
+    assert "rooftop" not in prompt.replace(" ", "_")
+
+
+@pytest.mark.asyncio
 async def test_failed_weave_still_scrubs_stale_tags():
     db = FakeDb()
     ollama = NotebookOllama(scripts={

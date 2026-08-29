@@ -80,6 +80,49 @@ def test_ensure_beat_leads_scene_puts_posture_first():
     assert again.count("sitting") == out.count("sitting")
 
 
+def test_ensure_place_in_scene_appends_when_weave_forgot_the_place():
+    """Body-first weave must not leave notebook SCENE/BG off the prose."""
+    prose = "Standing, holding the hem of her skirt, weight on the near foot."
+    out = notebook.ensure_place_in_scene(
+        prose,
+        scene="night classroom by the window",
+        bg="a crowd of cosplayers",
+    )
+    low = out.lower()
+    assert low.startswith("standing")
+    assert "night classroom" in low
+    assert "cosplayers" in low
+    # Already present — do not double.
+    again = notebook.ensure_place_in_scene(
+        out,
+        scene="night classroom by the window",
+        bg="a crowd of cosplayers",
+    )
+    assert again.count("night classroom") == out.count("night classroom")
+    assert again.count("cosplayers") == out.count("cosplayers")
+
+
+def test_missing_place_tags_reinject_what_the_bag_forgot():
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {
+        "scene": "night classroom by the window",
+        "bg": "a crowd of cosplayers",
+    })
+    missed = notebook.missing_place_tags(
+        nb, have={"standing", "close_up"}, gone=set(),
+    )
+    joined = " ".join(missed)
+    assert "classroom" in joined or "night_classroom" in joined
+    assert "cosplayers" in joined or "crowd_of_cosplayers" in joined or "crowd" in joined
+    # Struck place stays out; already-covered compounds are not doubled.
+    covered = notebook.missing_place_tags(
+        nb, have={"night_classroom", "cosplayers", "standing"}, gone={"rooftop"},
+    )
+    assert "night_classroom" not in covered
+    assert "cosplayers" not in covered
+    assert "rooftop" not in covered
+
+
 def test_filter_weave_tags_drops_banned_as_well_as_struck():
     kept = notebook.filter_weave_tags(
         "sitting, bucket, smile",
