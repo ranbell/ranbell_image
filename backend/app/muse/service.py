@@ -438,6 +438,24 @@ async def _contract_check(
     #
     # 旗が立ったときだけ走るので、普通のターンは一度も増えない。
     blocking = chain.blocking_kinds(_blocks_nsfw(cfg))
+    # **脱ぐ話は、手帖の服と突き合わせて読み直す。** 実測（実機・2026-08-29）
+    # 「パーカー脱いでみて。」→ `nsfw`。下に `denim_skirt, black_tights` が
+    # あるのに「身体を露わにする依頼」と読まれた。同じ一行が、下に服があれば
+    # 衣装で、それだけなら脱衣 —— **言葉では解けない。判断に要るのは情報で、
+    # 手帖の `wearing` がそれを持っている。**
+    #
+    # **通すためにしか使わない。** 止める判断は一人目が一行で下す。
+    if kind == "nsfw" and "nsfw" in blocking:
+        nb_now = notebook_mod.of(session)
+        dressed = await chain.confirm_dressed(
+            ollama, text=seen_text,
+            wearing=str(nb_now.get("wearing") or ""),
+            wearing_b=str(nb_now.get("wearing_b") or ""),
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+        if dressed.word != kind:
+            logger.info("[muse] still dressed after that line; letting it through")
+            kind, by, why = dressed.word, "wardrobe", (dressed.why or why)
     if kind == "nsfw" and "nsfw" not in blocking:
         _log_clerk(session, word="", by=by,
                    why=f"nsfw と読んだが、設定で止めない（{why}）"[:chain.WHY_MAX],

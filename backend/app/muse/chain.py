@@ -2660,6 +2660,69 @@ async def read_wardrobe_choice(
     return out
 
 
+DRESSED_AFTER_SYSTEM = """A first reader flagged the director's line as a
+request for nudity, and the shoot is about to stop. You are the second reader,
+and you are asked one question only:
+
+    **After this line, is she still dressed?**
+
+You are given what she has on right now. Work out what the line takes off, and
+what is left.
+
+- Taking off one layer while other clothes remain is wardrobe, not nudity.
+  A coat, a jacket, a cardigan, a hoodie over a dress — all of that is a
+  costume change.
+- Answer `no` only when the line leaves her with nothing on, or names being
+  bare, or asks for a sexual act.
+- If what she has on is unknown or empty, answer `unsure`.
+
+Write two lines and nothing else:
+
+    WHY: one short line — what comes off, and what is left
+    WORD: one of these three exactly — yes, no, unsure
+"""
+
+
+async def confirm_dressed(
+    ollama, *, text: str, wearing: str, wearing_b: str = "",
+    model: str, num_ctx: int | None,
+) -> Verdict:
+    """脱ぐ話を、**手帖の服と突き合わせて**読み直す。
+
+    実測（2026-08-29・実機）「パーカー脱いでみて。」→ `nsfw`。下に
+    `denim_skirt, black_tights` があるのに「身体を露わにする依頼」と読まれた。
+
+    **言葉では解けない。** 同じ一行が、下に服があれば衣装で、それだけなら
+    脱衣。条文をどちらに寄せても片方の誤りが増える（実測: `exposure` 版は
+    誤検出 8件、締めた版は `nsfw` が 684件中 0発火）。判断に要るのは
+    情報のほうで、**手帖の `wearing` がそれを持っている。**
+
+    **通すためにしか使わない** —— 止める判断は一人目が一行で下す。ここで
+    新たに止めることはしない。読めなければ `nsfw` のまま（既存の
+    `confirm_boundary` と同じ作法）。
+    """
+    have = ", ".join(x.strip() for x in (wearing, wearing_b) if str(x or "").strip())
+    if not (str(text or "").strip() and have):
+        return Verdict("nsfw", "")
+    try:
+        raw = await _call(
+            ollama, system=DRESSED_AFTER_SYSTEM,
+            prompt=f"SHE IS WEARING:\n{have}\n\nDIRECTOR: {text.strip()}\n\nWHY:",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] the wardrobe reader failed", exc_info=True)
+        return Verdict("nsfw", "")
+    m = _CONFIRM_RE.search(str(raw or ""))
+    why = parse_boundary_why(raw)
+    if not m:
+        return Verdict("nsfw", why)
+    said = m.group(1).lower()
+    if said == "yes":
+        return Verdict("", why)            # まだ服を着ている
+    return Verdict("nsfw", why)
+
+
 async def read_boundary(
     ollama, *, note: str, model: str, num_ctx: int | None,
     after_decline: str = "",

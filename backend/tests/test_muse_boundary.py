@@ -1177,3 +1177,48 @@ def test_a_bare_block_label_never_reaches_her_bubble():
     assert muse_identity.sanitize_muse_say("SAY: カード") == "カード"
     assert muse_identity.sanitize_muse_say("SAY: そうだね\nありがとう") == \
         "そうだね\nありがとう"
+
+
+def test_the_wardrobe_reader_only_ever_lets_through():
+    """脱ぐ話を、**手帖の服と突き合わせて**読み直す二人目。
+
+    実測（実機・2026-08-29）「パーカー脱いでみて。」→ `nsfw`。下に
+    `denim_skirt, black_tights` があるのに「身体を露わにする依頼」と読まれた。
+    同じ一行が、下に服があれば衣装で、それだけなら脱衣 —— **言葉では解けない。
+    判断に要るのは情報のほうで、手帖の `wearing` がそれを持っている。**
+
+    **通すためにしか使わない。** ここで新たに止めることはしない。
+    """
+    import asyncio
+
+    class _Ollama:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def generate_text_stream(self, prompt, **kw):
+            async def _stream():
+                yield {"type": "token", "text": self.reply}
+            return _stream()
+
+    def _ask(reply, wearing="hoodie, denim_skirt, black_tights"):
+        return asyncio.run(muse_chain.confirm_dressed(
+            _Ollama(reply), text="パーカー脱いで。", wearing=wearing,
+            model="m", num_ctx=1024,
+        ))
+
+    assert _ask("WHY: a skirt and tights remain\nWORD: yes").word == ""
+    assert _ask("WHY: nothing is left\nWORD: no").word == "nsfw"
+    assert _ask("WHY: cannot tell\nWORD: unsure").word == "nsfw"
+    # 読めない返しは止めたまま —— 既存の `confirm_boundary` と同じ作法
+    assert _ask("すみません").word == "nsfw"
+    # **材料が無ければ触らない。** 服が空なら判断できない
+    assert _ask("WHY: x\nWORD: yes", wearing="").word == "nsfw"
+
+
+def test_the_wardrobe_reader_runs_only_for_nsfw():
+    """`persona` / `crime` には掛けない。**あちらは服の話ではない。**"""
+    import inspect
+    src = inspect.getsource(muse_service._contract_check)
+    i = src.index("confirm_dressed")
+    guard = src[:i]
+    assert 'if kind == "nsfw" and "nsfw" in blocking:' in guard
