@@ -74,3 +74,30 @@ def test_written_sets_are_ordered_and_named():
         for row in sets:
             assert row["name_ja"], preset.get("name_ja")
             assert row["tags"], (preset.get("name_ja"), row["key"])
+
+
+def test_every_preset_is_new_enough_to_reach_qdrant():
+    """**`version` を上げないと Qdrant に届かない。**
+
+    `sync_muse_presets_from_asset` は `preset_version(seed) > stored` の
+    ときだけ書き込む。総監督（2026-08-29）「json の各項目の rev 上げてくれて
+    る？ qdrant 上のデータが更新されないよ」—— 衣装セットを 30人ぶん書いた
+    のに、そのままでは一件も反映されなかった。
+
+    **アセットを編集したら `version` を上げる。** ここは「衣装セットを持つ子は
+    version 2 以上」という形で、その手順を落としたことに気づけるようにする。
+    """
+    from app.characters.presets import preset_version
+
+    stale = [
+        str(p.get("name_ja") or p.get("name"))
+        for p in _presets()
+        if p.get("wardrobe") and preset_version(p) < 2
+    ]
+    assert not stale, f"wardrobe を書いたのに version が上がっていない: {stale}"
+
+
+def test_versions_are_readable_numbers():
+    for preset in _presets():
+        from app.characters.presets import preset_version
+        assert preset_version(preset) >= 1, preset.get("name_ja")
