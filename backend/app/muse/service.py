@@ -3348,8 +3348,15 @@ def _apply_compiled_craft(
         beat=str(nb_now.get("beat") or ""),
         beat_b=str(nb_now.get("beat_b") or ""),
     )
-    # Place trails the body (weave contract order). Without this, a body-first
-    # weave leaves classroom in the notebook and rooftop in the prompt.
+    # Clothes before place (weave contract order). Scrub stale outfits the
+    # weave still wrote, then put the notebook wardrobe in if it is missing.
+    scene = notebook_mod.ensure_wearing_in_scene(
+        scene,
+        wearing=str(nb_now.get("wearing") or ""),
+        wearing_b=str(nb_now.get("wearing_b") or ""),
+    )
+    # Place trails the body. Without this, a body-first weave leaves
+    # classroom in the notebook and rooftop in the prompt.
     scene = notebook_mod.ensure_place_in_scene(
         scene,
         scene=str(nb_now.get("scene") or ""),
