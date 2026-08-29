@@ -4784,12 +4784,29 @@ async def _fold_muse_after_talk(
             _stage(session, "折り込み（振り返りのターンなので走らず）",
                    time.monotonic())
             return
-        # CARD used to gate the whole fold. When the Lead skipped CARD, every
-        # body proposal from 演出/振付 in SAY died in chat — the Showrunner
-        # heard the room commit to a posture and the notebook never moved.
-        # Fold already forbids inventing clothes/place/crop and keeps the
-        # first compile's stem; an empty fold is cheap, a skipped fold loses
-        # the beat the room just named.
+        # **姿勢が空のときだけ折る。** 総監督（2026-08-29）「muse が自分で
+        # 2回めに修正するターンですが、初回の精度が上がってきたので、あまり
+        # 意味をなさなくなってきています」。実測がそのとおりだった:
+        #
+        #     6ターン走って、折り込みが書いたのは 1回。**残ったのは 0回。**
+        #     台本係     書いた 6  残った 3
+        #     折り込み   書いた 1  残った 0
+        #
+        # しかもその 1回は `beat` が**空だった**ときの穴埋めで、折り込み本来の
+        # 仕事（部屋が決めた身体を乗せる）ではなかった。前の走行では逆に、
+        # 足した一語を次の台本係が丸ごと削って元に戻している（93→156→93字。
+        # LLM 二回・約19秒で正味ゼロ）。
+        #
+        # **救済だけ残して、上書き合戦をやめる。** 空欄を埋める働きは実測で
+        # 効いていたので、そこだけ通す。
+        nb_now = notebook_mod.of(session)
+        has_partner = bool(str(_inputs(session).get("partner_preset") or "").strip())
+        if str(nb_now.get("beat") or "").strip() and (
+            not has_partner or str(nb_now.get("beat_b") or "").strip()
+        ):
+            _stage(session, "折り込み（姿勢が埋まっているので走らず）",
+                   time.monotonic())
+            return
         line = str(user_text or "").strip()
         try:
             began = time.monotonic()

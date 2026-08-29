@@ -1419,3 +1419,30 @@ def test_the_partner_is_dressed_for_the_same_day():
     asyncio.run(service._dress_the_cast(None, _Spy(), session, cfg={}))
     assert "近所の公園" in seen.get("prompt", ""), "主題が渡っていない"
     assert notebook.of(session)["wearing_b"] == "black_dress, clutch"
+
+
+def test_the_fold_leaves_a_filled_beat_alone():
+    """**姿勢が埋まっていたら、二度目は走らない。**
+
+    総監督（2026-08-29）「初回の精度が上がってきたので、あまり意味をなさなく
+    なっています」。実測（6ターン）—— 折り込みが書いたのは 1回、**残ったのは
+    0回**。台本係は 6回書いて 3回残った。前の走行では、足した一語を次の台本係が
+    丸ごと削って元に戻していた（LLM 二回・約19秒で正味ゼロ）。
+
+    救済（空欄を埋める）だけ残して、上書き合戦をやめた。
+    """
+    import inspect
+    src = inspect.getsource(service._fold_muse_after_talk)
+    assert "折り込み（姿勢が埋まっているので走らず）" in src
+    # 相方がいるときは、二人とも埋まっていて初めて止まる
+    assert 'nb_now.get("beat_b")' in src
+
+
+def test_the_fold_still_runs_when_a_posture_slot_is_empty():
+    """救済は残す。実測でも、折り込みが役に立った唯一の回は空欄埋めだった。"""
+    import inspect
+    src = inspect.getsource(service._fold_muse_after_talk)
+    i = src.index("折り込み（姿勢が埋まっているので走らず）")
+    guard = src[:i]
+    # 「埋まっている」ときだけ return する形（空なら通す）であること
+    assert 'if str(nb_now.get("beat") or "").strip() and (' in guard

@@ -123,10 +123,19 @@ async def test_talk_card_standing_does_not_overwrite_sitting(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_scripter_fold_adds_uncontradicted_card_action(monkeypatch):
-    """After Muse speaks, a second compile folds CARD hands into beat.
+    """**姿勢が空のときだけ折る。** 総監督（2026-08-29）「muse が自分で2回めに
+    修正するターンですが、初回の精度が上がってきたので、あまり意味をなさなく
+    なっています」。
 
-    The showrunner's sit stays; standing on the CARD does not replace it.
-    Absorb is still not on the talk path.
+    実測（6ターン）がそのとおりだった —— 折り込みが書いたのは 1回、**残ったのは
+    0回**（台本係は 6回書いて 3回残った）。しかもその 1回は `beat` が空だった
+    ときの穴埋めで、折り込み本来の仕事ではなかった。前の走行では逆に、足した
+    一語を次の台本係が丸ごと削って元に戻している（93→156→93字。LLM 二回・
+    約19秒で正味ゼロ）。
+
+    **救済だけ残して、上書き合戦をやめた。** ここで見るのは救済のほう ——
+    `beat` が空なら、部屋が決めた身振りが入る。埋まっているときに足す働きは
+    **意図的に落とした**（下の試験で縛る）。
     """
     async def fake_talk(*_a, **_kw):
         return (
@@ -149,13 +158,14 @@ async def test_scripter_fold_adds_uncontradicted_card_action(monkeypatch):
     monkeypatch.setattr(service, "_after_actress_spoke", noop)
     db = FakeDb()
     ollama = NotebookOllama(scripts={
+        # **台本係が姿勢を取りこぼした回。** ここが折り込みの残る仕事
         "座って": _scripter_block(
             intent="shot", scene="rooftop", wearing="cardigan",
-            beat="sitting on a bench", frame="eye level",
+            beat="", frame="eye level",
         ),
         "FOLD:": _scripter_block(
             intent="shot", scene="rooftop", wearing="cardigan",
-            beat="sitting on a bench, fingers tightening on the hem",
+            beat="standing by the fence, fingers on the hem",
             frame="eye level",
         ),
     })
@@ -163,9 +173,7 @@ async def test_scripter_fold_adds_uncontradicted_card_action(monkeypatch):
     s["mode"] = "duet"
     await service.post_duet_chat(db, ollama, s, "座って")
     beat = (s["notebook"].get("beat") or "").lower()
-    assert "sitting" in beat
-    assert "hem" in beat
-    assert "standing" not in beat
+    assert "hem" in beat, "空の姿勢が埋まらなかった"
     assert (s["notebook"].get("wearing") or "") == "cardigan"
     assert s.get("scripter_intent") == "shot"
     notes = "\n".join(s.get("notes") or [])
@@ -551,9 +559,10 @@ async def test_fold_cannot_rewrite_wearing_or_frame(monkeypatch):
     monkeypatch.setattr(service, "_after_actress_spoke", noop)
     db = FakeDb()
     ollama = NotebookOllama(scripts={
+        # **姿勢を空にして折り込みを通す。** 埋まっていれば走らない
         "座って": _scripter_block(
             intent="shot", scene="rooftop", wearing="cardigan",
-            beat="sitting on a bench", frame="wide full body",
+            beat="", frame="wide full body",
         ),
         "FOLD:": _scripter_block(
             intent="shot", scene="classroom", wearing="coat",
