@@ -365,3 +365,27 @@ def test_the_hour_is_left_alone():
     kept = _scrub("night, twilight, evening, standing")
     for t in ("night", "twilight", "evening"):
         assert t in kept
+
+
+def test_two_muses_get_a_letter_beside_the_name():
+    """実測（`61db2bd6`）: 折り込みが `beat_b: standing behind A` と書いた。
+
+    見出しは名前なのに欄の名前は `WEARING` / `WEARING_B` という文字なので、
+    モデルは相手を「A」と呼ぶ。`A` はタグにならないので画には出ないが、指示
+    としては汚れ。総監督「最初に `Mio (Actress A)` と書けばいいだけでしょう」。
+    実機で 9回中 0回に落ちた。
+    """
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {"beat": "standing", "beat_b": "standing"})
+    block = notebook.render(nb, name_a="各務 みお", name_b="平岡 すみれ")
+    assert "各務 みお (Actress A) BEAT:" in block
+    assert "平岡 すみれ (Actress B) BEAT:" in block
+
+
+def test_a_solo_shoot_has_no_letters():
+    """一人しかいないなら、文字を添える相手がいない。"""
+    nb = notebook.blank()
+    notebook.apply_patch(nb, {"beat": "standing"})
+    block = notebook.render(nb, name_a="各務 みお")
+    assert "各務 みお BEAT:" in block
+    assert "Actress A" not in block

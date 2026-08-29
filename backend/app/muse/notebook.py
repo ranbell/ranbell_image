@@ -228,8 +228,19 @@ def contracts_block(
 
 
 def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
-    """Human / model facing dump."""
+    """Human / model facing dump.
+
+    **名前に文字を添える。** 相方がいるとき、見出しは名前で書くのに欄の名前は
+    `WEARING` / `WEARING_B` という文字なので、モデルは相手を「A」と呼んだ ——
+    実測（`61db2bd6`）で折り込みが `beat_b: standing behind A` と書いた。
+    `A` はタグにならないので画には出ないが、指示としては汚れ。
+    総監督「最初に `Mio (Actress A)` と書けばいいだけでしょう」。
+    """
+    two = bool(name_b or str(nb.get("wearing_b") or "").strip()
+               or str(nb.get("beat_b") or "").strip())
     a = name_a or "Muse A"
+    if two:
+        a = f"{a} (Actress A)"
     lines = [
         f"ATMOSPHERE:\n{str(nb.get('atmosphere') or '').strip() or '(empty)'}",
         f"SCENE:\n{str(nb.get('scene') or '').strip() or '(empty)'}",
@@ -239,8 +250,8 @@ def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
         f"{a} WEARING:\n{str(nb.get('wearing') or '').strip() or '(empty)'}",
         f"{a} BEAT:\n{str(nb.get('beat') or '').strip() or '(empty)'}",
     ]
-    if name_b or str(nb.get("wearing_b") or "").strip() or str(nb.get("beat_b") or "").strip():
-        b = name_b or "Muse B"
+    if two:
+        b = f"{name_b or 'Muse B'} (Actress B)"
         lines += [
             f"{b} WEARING:\n{str(nb.get('wearing_b') or '').strip() or '(empty)'}",
             f"{b} BEAT:\n{str(nb.get('beat_b') or '').strip() or '(empty)'}",
