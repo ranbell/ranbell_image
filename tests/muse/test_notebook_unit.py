@@ -209,7 +209,10 @@ def test_the_clerk_reads_a_closed_list():
         "wearing", "beat", "frame"}
     assert chain.parse_classified_fields("none") == set()
     # Anything outside the list is not a field, however confidently said.
-    assert chain.parse_classified_fields("expression, mood, vibes") == set()
+    # （`expression` は 2026-08-30 に欄になった。閉じた一覧であること自体は
+    #   変わらないので、例を欄でない語に差し替えた）
+    assert chain.parse_classified_fields("mood, vibes, feeling") == set()
+    assert chain.parse_classified_fields("expression") == {"expression"}
     assert chain.parse_classified_fields("") == set()
 
 

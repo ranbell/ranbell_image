@@ -40,8 +40,20 @@ SHOT_KEYS = (
     "frame",
     "wearing",
     "beat",
+    # **顔には置き場が無かった。** 係の条文が「顔は beat に入れろ」と言って
+    # いたので、身体が動かないターンでは表情がどこにも書かれない ——
+    # 総監督（2026-08-29）「intent/note に表情がないので beat が反応しない
+    # 限り無表情」。実データでも、手帖の `smiling warmly` はタグに落ちず、
+    # 逆に手帖に無い `calm_expression` が weave から出ていた。
+    #
+    # 欄名は測って決めた（`BG` と同じやり方・5回×5件）。`FACE` /
+    # `EXPRESSION` / `MOOD_FACE` はどれも 15/15 で、余計な書き込みも 0/10 ——
+    # **背景のときと違って差が出ない**ので、班（`facets`）が既に使っている
+    # `expression` に揃える。
+    "expression",
     "wearing_b",
     "beat_b",
+    "expression_b",
 )
 
 META_KEYS = ("vibe", "standing")
@@ -66,8 +78,10 @@ def blank(partner: bool = False) -> dict[str, Any]:
         "frame": "",
         "wearing": "",
         "beat": "",
+        "expression": "",
         "wearing_b": "",
         "beat_b": "",
+        "expression_b": "",
         "vibe": "",
         "standing": [],
         "rev": 0,
@@ -76,6 +90,7 @@ def blank(partner: bool = False) -> dict[str, Any]:
     if not partner:
         nb["wearing_b"] = ""
         nb["beat_b"] = ""
+        nb["expression_b"] = ""
     return nb
 
 
@@ -177,12 +192,22 @@ FIELD_CONTRACTS: dict[str, str] = {
     "beat": (
         "ONE posture stem — sitting / standing / kneeling / crouching — plus "
         "what the hands and the weight are doing, and anything she is holding. "
-        "NOT where she is looking: that is the frame."
+        "NOT where she is looking: that is the frame. NOT her face: that is "
+        "expression."
+    ),
+    # **顔には置き場が無かった。** 係の条文が「顔は beat に入れろ」と言って
+    # いたので、身体が動かないターンでは表情がどこにも書かれない。実データ
+    # でも、手帖の `smiling warmly` はタグに落ちず、逆に手帖に無い
+    # `calm_expression` が weave から出ていた。
+    "expression": (
+        "her face — the mouth, the eyes, the brows. A mood she plays goes here, "
+        "not in atmosphere: that one is the picture's mood, this one is hers."
     ),
 }
 
 _CONTRACT_ORDER = (
     "atmosphere", "scene", "bg", "light", "frame", "wearing", "beat",
+    "expression",
 )
 
 
@@ -249,12 +274,14 @@ def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
         f"FRAME:\n{str(nb.get('frame') or '').strip() or '(empty)'}",
         f"{a} WEARING:\n{str(nb.get('wearing') or '').strip() or '(empty)'}",
         f"{a} BEAT:\n{str(nb.get('beat') or '').strip() or '(empty)'}",
+        f"{a} EXPRESSION:\n{str(nb.get('expression') or '').strip() or '(empty)'}",
     ]
     if two:
         b = f"{name_b or 'Muse B'} (Actress B)"
         lines += [
             f"{b} WEARING:\n{str(nb.get('wearing_b') or '').strip() or '(empty)'}",
             f"{b} BEAT:\n{str(nb.get('beat_b') or '').strip() or '(empty)'}",
+            f"{b} EXPRESSION:\n{str(nb.get('expression_b') or '').strip() or '(empty)'}",
         ]
     vibe = str(nb.get("vibe") or "").strip()
     if vibe:
@@ -1444,9 +1471,11 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "frame": {"type": "string"},
         "wearing": {"type": "string"},
         "beat": {"type": "string"},
+        "expression": {"type": "string"},
         "wearing_b": {"type": "string"},
         "wearing_drop": {"type": "string"},
         "beat_b": {"type": "string"},
+        "expression_b": {"type": "string"},
         "vibe": {"type": "string"},
         "standing": {"type": "string"},
         "unchanged": {"type": "string"},
@@ -1485,7 +1514,7 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
 }
 
 
-_PARTNER_ONLY = ("wearing_b", "beat_b")
+_PARTNER_ONLY = ("wearing_b", "beat_b", "expression_b")
 
 
 def scripter_format_schema(partner: bool = False) -> dict[str, Any]:

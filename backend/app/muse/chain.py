@@ -892,7 +892,7 @@ _NOTEBOOK_REVIEW_RE = re.compile(r"(?im)^[\s>*_-]*REWRITE[\s*_]*[:：]\s*(.*)$")
 # What she may ask to have rewritten. `atmosphere` is deliberately absent: it is
 # mood, the one field nobody is directing turn by turn, and letting her reopen
 # it every turn would make the shoot wander.
-RESTATE_FIELDS = ("scene", "bg", "light", "frame", "wearing", "beat")
+RESTATE_FIELDS = ("scene", "bg", "light", "frame", "wearing", "beat", "expression")
 
 
 def parse_notebook_review(raw: str) -> list[str]:
@@ -1344,7 +1344,8 @@ BG          what is in the picture besides her
 LIGHT       the key and where it comes from
 FRAME       the camera, and where her eyes are pointed
 WEARING     what is on her body
-BEAT        what her body is doing — not where she is looking
+BEAT        what her body is doing — not where she is looking, not her face
+EXPRESSION  her face: mouth, eyes, brows
 
 Return one JSON object holding only the fields you changed, with English
 values. A field you leave out is a field that stays as it is — that is how you
@@ -1672,7 +1673,7 @@ RULES:
 - If they ask to look at the sky, rewrite frame as one coherent camera story.
 - Leave sections unchanged by omitting them (or list under unchanged).
 - Do NOT output tags, tags_shared, tags_a, tags_b, or craft_scene. Leave them "".
-- Partner shoots: wearing_b / beat_b. Solo: leave those unused.
+- Partner shoots: wearing_b / beat_b / expression_b. Solo: leave those unused.
 - Do not invent diary props. Only the notebook + CARD + showrunner line + still-as-base.
 - Do not restore struck items named in the prompt.
 
@@ -1704,7 +1705,11 @@ showrunner's directions are written into. Do not put both in the bag: a bag
 that says `looking_at_viewer` while the prose has her eyes on the book is one
 instruction contradicting itself, and the sampler resolves it by coin flip.
 
-FIRST DUTY — THE BODY (BEAT / beat_b, and CREW LOOK BODY when present):
+FIRST DUTY — THE BODY (BEAT / beat_b) AND THE FACE (EXPRESSION /
+expression_b), and CREW LOOK BODY when present:
+  **Her face is a field now, and it must reach the tags.** Whatever EXPRESSION
+  says — `smile`, `blush`, `parted_lips`, `teary_eyes`, `frown` — goes in the
+  bag. A bag with no face tag is a blank stare.
 - craft_scene opens on posture. Stem first (sitting / standing / kneeling /
   crouching), then where the weight sits, what the hands do, what she holds,
   how the torso turns, what the face is doing as FRAME allows.
@@ -1846,6 +1851,8 @@ One job: read the director's line and say which parts of the shot it changes.
 The parts, and nothing outside this list:
   wearing  — what is ON her body: clothes, hats, hair, accessories
   beat     — what her body DOES: sit, stand, kneel, crouch, hands, turning
+  expression — what her FACE does: the mouth, the eyes, the brows, a mood she
+             has to play
   frame    — the CAMERA: how close, the angle, what is inside the crop
   scene    — WHERE she is and WHAT HOUR it is
   light    — WHERE the light comes from and HOW HARD it is
@@ -1873,14 +1880,16 @@ Worked examples:
 Three things that are easy to miss:
 - Feet count. Bare feet, no shoes, taking sandals off — the footwear changed,
   so that is `wearing`.
-- Her face has no field of its own. An expression, a mood she has to play,
-  being out of breath — put it in `beat` with the rest of what her body does.
+- **Her face has its own field now.** An expression, a mood she has to play —
+  that is `expression`, not `beat`. Being out of breath is the body, so that
+  stays in `beat`. A line that moves both names both.
 - Small talk and an instruction often arrive in one line. Read the whole line.
   「いい天気だね。……そうだ、窓を開けて」 still opens the window: that is
   `scene`. Never answer none just because the line starts as chit-chat.
 """.strip()
 
-CLASSIFY_FIELDS = ("wearing", "beat", "frame", "scene", "light", "bg")
+CLASSIFY_FIELDS = ("wearing", "beat", "expression", "frame", "scene",
+                   "light", "bg")
 
 # The same clerk, asked what KIND of turn this is. The compile decides this
 # today, inside the call that also has to write the shot — a sorting job wedged
@@ -2962,7 +2971,7 @@ async def run_scripter(
             # いない**。無い欄について注意されると、モデルはその欄を探す:
             # 実際に「"bg": "NONE/Unchanged value check: Not mentioned…"」と
             # 値の代わりに存在確認を書いた回があった。
-            "Partner Muse sections wearing_b/beat_b apply." if partner else "",
+            "Partner Muse sections wearing_b/beat_b/expression_b apply." if partner else "",
             _who_is_who(name_a, name_b, letters=False) if partner else "",
             "Return JSON only. Do not emit tags or craft_scene.",
         ] if b.strip())
