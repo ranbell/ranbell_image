@@ -947,14 +947,46 @@ _GARMENT_HEAD_DROP = {
 def _tag_authorized_by_wearing(
     key: str, *, allowed: set[str], heads: set[str],
 ) -> bool:
+    """True when the tag is the notebook's garment — by identity, not by colour.
+
+    Sharing ``white`` between ``white_shirt`` and ``white_serafuku`` used to
+    keep the sailor after WEARING moved to a shirt. The head noun is what the
+    garment IS; modifiers are not permission to keep a different outfit.
+    """
     if not key:
         return False
-    if key in allowed or brief.garment_head(key) in heads:
+    if key in allowed:
         return True
-    parts = {p for p in key.split("_") if p and p not in _STRUCK_NOISE}
-    if parts & allowed:
+    head = brief.garment_head(key)
+    if head and (
+        head in heads or any(_same_garment(head, h) for h in heads)
+    ):
         return True
-    return any(key in a or a in key for a in allowed if len(a) >= 4)
+    # Outfit-bound accessories (sailor_collar beside sailor uniform): keep
+    # when a wardrobe token names the same outfit stem, not when a colour
+    # alone matches.
+    if head in _OUTFIT_ACCESSORY_HEADS:
+        parts = {
+            p for p in key.split("_")
+            if p and p not in _STRUCK_NOISE and p not in _COLOUR_MODIFIERS
+        }
+        if parts & {
+            a for a in allowed
+            if a not in _COLOUR_MODIFIERS and a not in _STRUCK_NOISE
+        }:
+            return True
+    return False
+
+
+# Collar / necktie ride with an outfit. Colour words must not unlock them.
+_OUTFIT_ACCESSORY_HEADS = {
+    "collar", "necktie", "ribbon", "bow", "bowtie",
+}
+_COLOUR_MODIFIERS = {
+    "white", "black", "blue", "red", "green", "yellow", "pink", "purple",
+    "orange", "brown", "grey", "gray", "beige", "navy", "cream", "gold",
+    "silver", "dark", "light", "pale", "deep", "bright", "pastel",
+}
 
 
 def _looks_like_clothing_tag(key: str) -> bool:
@@ -969,7 +1001,7 @@ def _looks_like_clothing_tag(key: str) -> bool:
 
 
 def _wearing_mentioned(phrase: str, prose: str) -> bool:
-    """True when craft_scene already carries the wardrobe the notebook named."""
+    """True when craft_scene already names the wardrobe's garment heads."""
     body = str(prose or "")
     low = body.lower()
     low_us = low.replace(" ", "_")
@@ -978,18 +1010,22 @@ def _wearing_mentioned(phrase: str, prose: str) -> bool:
         return True
     if text.lower() in low:
         return True
-    for item in re.split(r"[,，、;]", text):
-        item = item.strip()
-        if not item:
-            continue
-        toks = place_field_tags(item, cap=3) or [
-            t for t in wearing_tokens(item) if "_" in t or len(t) >= 4
-        ]
-        if any(t in low_us or t.replace("_", " ") in low for t in toks):
-            return True
+    items = [i.strip() for i in re.split(r"[,，、;]", text) if i.strip()]
+    if not items:
+        return True
+    # Every wardrobe item must show up by head noun (or full phrase) — a shared
+    # colour alone is not "wearing the shirt".
+    for item in items:
         if item.lower() in low:
-            return True
-    return False
+            continue
+        head = brief.garment_head(item)
+        if head and (head in low_us or re.search(rf"(?i)\b{re.escape(head)}\b", low)):
+            continue
+        compound = re.sub(r"\s+", "_", item.lower())
+        if compound in low_us or item.lower() in low:
+            continue
+        return False
+    return True
 
 
 def _scrub_unauthorized_clothes_prose(
@@ -1014,7 +1050,14 @@ def _scrub_unauthorized_clothes_prose(
             text = re.sub(rf"(?i)\b{re.escape(form)}\b", " ", text)
     text = re.sub(r"\s{2,}", " ", text)
     text = re.sub(r"\s+([,.;:])", r"\1", text)
-    text = re.sub(r"(?i)\b(?:in|wearing|with)\s+a?\s*[.,;]", " ", text)
+    # "in a sailor uniform by the window" → "in a  by the window" → drop the empty prep.
+    text = re.sub(
+        r"(?i)\b(?:in|wearing|with)\s+an?\s+"
+        r"(?=(?:by|and|under|near|at|on|beside|with|in)\b|[.,;]|$)",
+        " ",
+        text,
+    )
+    text = re.sub(r"\s{2,}", " ", text)
     return text.strip(" ,.;")
 
 
@@ -1061,6 +1104,7 @@ def _missing_wearing_items(
 
     have = set(tag_names(tags))
     have |= {t for tag in have for t in wearing_tokens(tag)}
+    have_heads = {brief.garment_head(t) for t in have} - {""}
     gone = set(struck or ()) | {
         str(t).strip().lower().replace(" ", "_") for t in (banned or ()) if str(t).strip()
     }
@@ -1070,7 +1114,13 @@ def _missing_wearing_items(
         tokens = wearing_tokens(item)
         if not tokens or tokens & gone:
             continue
-        if tokens & have:
+        item_head = brief.garment_head(item)
+        # Covered only when the same garment (head) is already in the bag —
+        # sharing ``white`` with a leftover serafuku must not skip the shirt.
+        if item_head and (
+            item_head in have_heads
+            or any(_same_garment(item_head, h) for h in have_heads)
+        ):
             continue
         tag = re.sub(r"\s+", "_", item.strip().lower())
         tag = re.sub(r"[^a-z0-9_-]", "", tag).strip("_-")
@@ -1078,6 +1128,8 @@ def _missing_wearing_items(
             missing.append(tag)
             have.add(tag)
             have |= tokens
+            if item_head:
+                have_heads.add(item_head)
     return missing
 
 

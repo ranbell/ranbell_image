@@ -479,14 +479,22 @@ def test_drop_base_outfit_the_notebook_no_longer_names():
     assert "white_shirt" in low
     assert "blue_skirt" in low
     assert "standing" in low
+    # Shared colour alone must not keep a different outfit.
+    coloured = notebook.drop_garments_not_in_wearing(
+        "white_serafuku, standing, close_up",
+        wearing="white shirt, blue skirt",
+    )
+    clow = coloured.lower().replace(" ", "_")
+    assert "serafuku" not in clow
+    assert "standing" in clow
     # Inject path still fills forgotten clothes after the drop.
     bag, _ = notebook.reconcile_wardrobe_tags(
-        "sailor_uniform, sailor_collar, standing, close_up",
+        "white_serafuku, sailor_collar, standing, close_up",
         wearing="white shirt, blue skirt",
         struck=set(), banned=set(),
     )
     blow = bag.lower().replace(" ", "_")
-    assert "sailor_uniform" not in blow
+    assert "serafuku" not in blow and "sailor" not in blow
     assert "white_shirt" in blow or "shirt" in blow
     assert "blue_skirt" in blow or "skirt" in blow
 
@@ -504,6 +512,14 @@ def test_ensure_wearing_in_scene_scrubs_stale_outfit_and_puts_notebook_in():
     assert "straw hat" not in low and "straw_hat" not in low
     assert "white shirt" in low or "wearing white" in low
     assert "blue skirt" in low or "skirt" in low
+    # Colour alone must not count as the new outfit already being there.
+    coloured = notebook.ensure_wearing_in_scene(
+        "Standing in a white serafuku by the window.",
+        wearing="white shirt, blue skirt",
+    )
+    clow = coloured.lower()
+    assert "serafuku" not in clow
+    assert "white shirt" in clow
     # Already present — do not double.
     again = notebook.ensure_wearing_in_scene(out, wearing="white shirt, blue skirt")
     assert again.lower().count("white shirt") == out.lower().count("white shirt")
