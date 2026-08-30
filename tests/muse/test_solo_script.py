@@ -1566,3 +1566,45 @@ def test_the_weave_is_never_handed_her_own_words():
     # よい —— 総監督の「彼女に聞くのは強力な補正になる」はこちらの道。
     for fn in (chain.run_weave_review, chain.run_notebook_review):
         assert "muse_says" in inspect.signature(fn).parameters
+
+
+def test_verify_and_repair_never_overwrite_the_clerk():
+    """**係が答えた欄は、あとの compile に渡さない。**
+
+    「compile の書いたものより、こちらが正しい」は**一度目の compile にしか**
+    効いていなかった。実機（`e65c25c1`・2026-08-30）で「その帽子、ちょっと
+    違うかも」を流すと:
+
+        服の係      帽子を落とす（単体では 5/5、4つの書式すべてで）
+        VERIFY      同じ行を大きい条文で読み直す（この言い方は 1/5）
+        apply_patch **帽子が戻る**
+
+    小さく絞って訊いた答えを、埋もれる条文で上書きしていた。
+    """
+    import inspect
+    src = inspect.getsource(service._run_duet_scripter)
+    # 係の答えた欄を覚える
+    assert "clerk_owns = set(per_person)" in src
+    # VERIFY と repair の両方が、その欄を落としてから当てる
+    assert src.count("if k not in clerk_owns") == 2
+    verify = src.index("if needs_verify:")
+    assert src.index("clerk_owns = set(per_person)") < verify
+
+    # 折り込みでは係を呼ばないので、空のまま通ること（`UnboundLocalError`
+    # で撮影が止まった）
+    decl = src.index("per_person: dict[str, str] = {}")
+    assert decl < src.index("clerk_owns = set(per_person)")
+    assert "    per_person: dict[str, str] = {}" in src
+
+
+def test_the_clerk_writes_into_the_rewrite_log():
+    """係の書き換えも記録に残す。
+
+    ここだけ `record_rewrite` を通っておらず、手帖が動いたのに
+    `rewrite_log` に何も出なかった —— 「係は走ったのに帽子が残る」を追う
+    ときに、どこが書いたのか分からず遠回りした。
+    """
+    import inspect
+    src = inspect.getsource(service._run_duet_scripter)
+    note = src.index("_note_rewrite(\n                session, f\"{'・'.join(sorted(per_person))} 係\"")
+    assert note > src.index("notebook_mod.apply_patch(nb, per_person)")

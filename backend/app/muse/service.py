@@ -3759,6 +3759,8 @@ async def _run_duet_scripter(
     # the check still costs one call's latency, not two.
     clerk_kind = ""
     asked: set[str] = set()
+    # 係が答えた欄。**折り込みでは係を呼ばない**ので、そのときは空のまま。
+    per_person: dict[str, str] = {}
     if ollama is not None and not fold and str(text or "").strip():
         asked, kind = await asyncio.gather(
             chain.classify_fields(
@@ -3799,7 +3801,6 @@ async def _run_duet_scripter(
         # **姿勢も同じ穴だった。** 実測（4件・n=3）で本番の compile は 2/15、
         # `beat` は一度も書かれず、みおの姿勢まで `beat_b` に入った。名前で
         # 訊くと 20/25（落ちた1件も取り違えではなく訳語のぶれ）。
-        per_person: dict[str, str] = {}
         for kind in ("wearing", "beat"):
             # **一人でも訊く。** ここは `partner` を条件にしていたので、
             # 主演一人の撮影では服の係が一度も走らなかった。総監督
@@ -3836,7 +3837,18 @@ async def _run_duet_scripter(
             # `apply_patch` は既に走っているので、ここで自分で当て、派生した
             # 値も取り直す。
             patch.update(per_person)
+            before_clerk = notebook_mod.shot_snapshot(nb)
             notebook_mod.apply_patch(nb, per_person)
+            # **係の書き換えも記録に残す。** ここだけ `record_rewrite` を
+            # 通っておらず、手帖が動いたのに `rewrite_log` に何も出なかった
+            # —— 実機（`e65c25c1`）で「係は走ったのに帽子が残る」を追う
+            # ときに、どこが書いたのか分からず遠回りした。
+            _note_rewrite(
+                session, f"{'・'.join(sorted(per_person))} 係",
+                before=before_clerk,
+                after=notebook_mod.shot_snapshot(nb),
+                intent=intent,
+            )
             notebook_moved = int(nb.get("rev") or 0) > rev_before
             after_shot = notebook_mod.shot_snapshot(nb)
             picture_patched = any(
@@ -3844,6 +3856,20 @@ async def _run_duet_scripter(
                 for k in picture_keys
             )
             shot_patched = True
+
+    # **係が答えた欄は、ここから先の compile に渡さない。**
+    #
+    # 「compile の書いたものより、こちらが正しい」は一度目の compile にしか
+    # 効いていなかった。実機（`e65c25c1`・2026-08-30）で「その帽子、ちょっと
+    # 違うかも」を流すと:
+    #
+    #     服の係      帽子を落とす（単体では 5/5、4つの書式すべてで）
+    #     VERIFY      同じ行を大きい条文で読み直す（この言い方は 1/5）
+    #     apply_patch **帽子が戻る**
+    #
+    # 小さく絞って訊いた答えを、埋もれる条文で上書きしていた。VERIFY と
+    # repair は**係が答えなかった欄だけ**を直す。
+    clerk_owns = set(per_person)
 
     _meta_note = str(text or "").strip().upper()
     # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes
@@ -3880,6 +3906,7 @@ async def _run_duet_scripter(
         v_patch = notebook_mod.guard_partner_patch(
             dict(verify.get("patch") or {}), partner=partner,
         )
+        v_patch = {k: v for k, v in v_patch.items() if k not in clerk_owns}
         if v_intent in ("shot", "mixed") or any(
             k in v_patch for k in notebook_mod.SHOT_KEYS
         ) or str(v_patch.get("wearing_drop") or "").strip():
@@ -3908,6 +3935,8 @@ async def _run_duet_scripter(
             fix_patch = notebook_mod.guard_partner_patch(
                 dict(fix.get("patch") or {}), partner=partner,
             )
+            fix_patch = {k: v for k, v in fix_patch.items()
+                         if k not in clerk_owns}
             # Only the fields that were missing. A repair is not a second turn:
             # anything else it decided to rewrite is not what was asked for.
             fix_patch = {k: v for k, v in fix_patch.items() if k in missing}
