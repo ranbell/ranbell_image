@@ -1192,6 +1192,85 @@ def _stage(session: dict[str, Any], name: str, started: float) -> None:
     logger.info("[muse] %s took %dms", name, ms)
 
 
+#: 三層を並べた記録の長さ。撮影1本ぶん残る。
+TURN_TRACE_MAX = 40
+
+
+def _turn_trace(
+    session: dict[str, Any], *, line: str, asked: set[str] | None,
+    before: dict[str, str], after: dict[str, str],
+) -> None:
+    """**1ターン＝1行。監督の一言・係の名指し・手帖の差分を横に並べる。**
+
+    総監督（2026-08-30）「現状のアーキテクチャの複雑さによりメンテがこのように
+    複雑化している。シンプル化もしくは可観測性による透明化を」。
+
+    いま「なぜコートが戻ったか」を答えるには `rewrite_log` と `stage_ms` と
+    `craft` と `notebook` を別々に読む必要がある。**総監督に見えないのも同じ
+    理由。** 三層を一行にまとめて、そのターンで何が起きたかを読めるようにする。
+
+    絵に載った語（三層目）は weave のあとにしか分からないので、ここでは
+    **監督の一行 → 係の名指し → 手帖**まで。`_trace_picture` が続きを足す。
+
+    **判定には使わない。読むためだけ。**
+    """
+    fields = tuple(notebook_mod.SHOT_KEYS)
+    moved = {
+        k: {"before": before.get(k, ""), "after": after.get(k, "")}
+        for k in fields
+        if str(before.get(k) or "").strip() != str(after.get(k) or "").strip()
+    }
+    named = sorted(asked or ())
+    # **名指しされたのに動かなかった欄。** 総監督の「会話では移動したのに絵が
+    # 動かない」は、いま何も起きないので札も出ない —— ここで見えるようにする。
+    missed = [f for f in named if f in fields and f not in moved]
+    row = {
+        "at": time.time(),
+        "turn": len(_chat_rows(session)),
+        "line": str(line or "")[:120],
+        "asked": named,
+        "moved": {k: f"{v['before'][:40]} → {v['after'][:40]}" for k, v in moved.items()},
+        "missed": missed,
+    }
+    log = list(session.get("turn_trace") or [])
+    log.append(row)
+    session["turn_trace"] = log[-TURN_TRACE_MAX:]
+    if missed:
+        logger.info("[muse] asked for %s but the notebook did not move",
+                    ", ".join(missed))
+
+
+def _trace_picture(session: dict[str, Any], *, tags: str, scene: str) -> None:
+    """三層目 —— **絵に載った語のうち、手帖が知らないもの。**
+
+    手帖は正しいのに古い服・古い場所が最終プロンプトに残る、というのが総監督の
+    報告。タグは突き合わせているが**散文には検査が一段も無い**ので、そこから
+    素通りする。まず**数える**（直すのは数字を見てから）。
+    """
+    log = list(session.get("turn_trace") or [])
+    if not log:
+        return
+    nb = notebook_mod.of(session)
+    known = " ".join(
+        str(nb.get(k) or "") for k in notebook_mod.SHOT_KEYS
+    ).lower().replace("_", " ")
+    stray: list[str] = []
+    for part in str(tags or "").split(","):
+        tok = identity.bare_tag(part)
+        if not tok:
+            continue
+        if tok.replace("_", " ") not in known:
+            stray.append(tok)
+    log[-1]["picture"] = {
+        "stray_tags": stray[:20],
+        "scene_chars": len(str(scene or "")),
+    }
+    session["turn_trace"] = log
+    if stray:
+        logger.info("[muse] %d tags in the picture the notebook never named: %s",
+                    len(stray), ", ".join(stray[:8]))
+
+
 def session_seed(session: dict[str, Any]) -> int:
     """One seed for the whole shoot — drawn once, then never again.
 
@@ -3955,6 +4034,10 @@ async def _run_duet_scripter(
         session["scripter_intent"] = prev_intent
     else:
         session["scripter_intent"] = intent
+    # **1ターン＝1行。** 折り込みは同じターンの二度目なので数えない。
+    if not fold:
+        _turn_trace(session, line=str(text or ""), asked=asked,
+                    before=before_shot, after=notebook_mod.shot_snapshot(nb))
     events.publish(sid, {
         "type": "scripter_done",
         "intent": session.get("scripter_intent") or intent,
@@ -6538,6 +6621,13 @@ async def weave_craft_if_needed(
             ):
                 session["craft_dirty"] = False
                 weave_ok = True
+                # 三層目 —— **絵に載った語のうち、手帖が知らないもの。**
+                craft_now = session.get("craft") or {}
+                _trace_picture(
+                    session,
+                    tags=str(craft_now.get("tags") or ""),
+                    scene=str(craft_now.get("scene") or ""),
+                )
         if not weave_ok:
             session["craft_dirty"] = True
             _scrub_notebook_craft(session)

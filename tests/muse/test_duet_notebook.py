@@ -1446,3 +1446,55 @@ def test_the_fold_still_runs_when_a_posture_slot_is_empty():
     guard = src[:i]
     # 「埋まっている」ときだけ return する形（空なら通す）であること
     assert 'if str(nb_now.get("beat") or "").strip() and (' in guard
+
+
+def test_one_turn_one_row_shows_all_three_layers():
+    """総監督（2026-08-30）「シンプル化もしくは可観測性による透明化を」。
+
+    「なぜコートが戻ったか」を答えるのに `rewrite_log` と `stage_ms` と
+    `craft` と `notebook` を別々に読む必要があった。**総監督に見えないのも
+    同じ理由。** 三層を一行に並べる。
+    """
+    session = {"chat": [], "notebook": notebook.blank(), "craft": {}}
+    before = notebook.shot_snapshot(session["notebook"])
+    notebook.apply_patch(session["notebook"],
+                         {"scene": "a park at dusk", "wearing": "white blouse"})
+    after = notebook.shot_snapshot(session["notebook"])
+    service._turn_trace(
+        session, line="白いブラウスで、公園に移動して",
+        asked={"wearing", "scene", "frame"}, before=before, after=after,
+    )
+    row = session["turn_trace"][-1]
+    assert row["asked"] == ["frame", "scene", "wearing"]
+    assert set(row["moved"]) == {"scene", "wearing"}
+    # **名指しされたのに動かなかった欄。** 総監督の「会話では移動したのに
+    # 絵が動かない」は、いま何も起きないので札も出なかった
+    assert row["missed"] == ["frame"]
+
+
+def test_the_picture_layer_names_what_the_notebook_never_said():
+    """古い服・古い場所が最終プロンプトに残る、というのが総監督の報告。
+
+    タグは突き合わせているが**散文には検査が一段も無い**ので、そこから素通り
+    する。**まず数える。** 直すのは数字を見てから。
+    """
+    session = {"chat": [], "notebook": notebook.blank(), "craft": {}}
+    notebook.apply_patch(session["notebook"],
+                         {"scene": "a park at dusk", "wearing": "white blouse"})
+    service._turn_trace(session, line="x", asked=set(),
+                        before={}, after=notebook.shot_snapshot(session["notebook"]))
+    service._trace_picture(
+        session, tags="white_blouse, park, sailor_uniform, rooftop", scene="x" * 90)
+    stray = session["turn_trace"][-1]["picture"]["stray_tags"]
+    assert "sailor_uniform" in stray and "rooftop" in stray
+    assert "white_blouse" not in stray and "park" not in stray
+
+
+def test_the_trace_is_a_ring_and_never_judges():
+    """撮影1本ぶん残る。**判定には使わない。読むためだけ。**"""
+    session = {"chat": [], "notebook": notebook.blank()}
+    for i in range(service.TURN_TRACE_MAX + 5):
+        service._turn_trace(session, line=f"line{i}", asked=set(),
+                            before={}, after={})
+    assert len(session["turn_trace"]) == service.TURN_TRACE_MAX
+    assert session["turn_trace"][-1]["line"] == f"line{service.TURN_TRACE_MAX + 4}"
