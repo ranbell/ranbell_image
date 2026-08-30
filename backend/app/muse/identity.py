@@ -242,12 +242,27 @@ def _drop_unbalanced_brackets(text: str) -> str:
     return s.strip()
 
 
+def _strip_edge_underscores(text: str) -> str:
+    """`_anime_illustration` / `__` / `__n/a__` —— JSON の残りかす。
+
+    **本物のタグは `_` では始まらないし、終わらない。** 実測（2026-08-30）で
+    weave が配列ごと文字列にして返す回があり、板のプロンプトに `_solo`
+    `__n/a__` `_anime_illustration` がそのまま載った。`bare_tag` は比べる用の
+    値からしか落とさないので、サンプラーへ行く生の文字に残る。
+
+    語の一覧ではなく、**縁のアンダースコア**だけを見る。中の `_` は
+    danbooru の区切りなので触らない。全部が `_` だった語は空になり、
+    `clamp_weights` が落とす。
+    """
+    return str(text or "").strip().strip("_").strip()
+
+
 def clamp_weight(part: str, cap: float = MAX_TAG_WEIGHT) -> str:
     """One tag, with any emphasis above the cap brought back down to it."""
     body, weight = split_weight(part)
-    text = _drop_unbalanced_brackets(
+    text = _strip_edge_underscores(_drop_unbalanced_brackets(
         _strip_backslash_underscore(str(part or "").strip()),
-    )
+    ))
     if weight is None or weight <= cap:
         return text
     return f"({body}:{cap:g})"

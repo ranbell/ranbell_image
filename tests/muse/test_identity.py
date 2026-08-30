@@ -577,3 +577,25 @@ def test_balanced_emphasis_is_left_alone():
     """釣り合っている括弧は総監督か係が書いたもの。触らない。"""
     for text in ("(silver_hair:1.2)", "[bokeh]", "(soft)", "((deep))", "plain_tag"):
         assert identity.clamp_weight(text) == text
+
+
+def test_edge_underscores_from_json_never_reach_the_sampler():
+    """`_anime_illustration` / `__` / `_solo` —— weave が配列ごと文字列にした残骸。
+
+    実測（2026-08-30・`011e3553` ほか）で板のプロンプトに載った。`bare_tag`
+    は比べる用の値からしか落とさないので、サンプラーへ行く生の文字に残る。
+    **本物のタグは `_` で始まらないし、終わらない。**
+    """
+    assert identity.clamp_weight("_anime_illustration") == "anime_illustration"
+    assert identity.clamp_weight("_solo") == "solo"
+    # 全部が `_` の語は空になり、袋から落ちる
+    assert identity.clamp_weight("__") == ""
+    got = identity.clamp_weights("_anime_illustration, sitting, __, straw_hat")
+    assert got == "anime_illustration, sitting, straw_hat"
+
+
+def test_underscores_inside_a_tag_are_left_alone():
+    """中の `_` は danbooru の区切り。縁だけを見る。"""
+    for text in ("straw_hat", "black_tights", "looking_at_viewer",
+                 "(silver_hair:1.2)", "[bokeh]"):
+        assert identity.clamp_weight(text) == text
