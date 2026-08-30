@@ -1668,3 +1668,84 @@ def test_a_deflected_joke_never_becomes_her_choice():
     call = src.index("await _carry_out_her_choice(")
     guard = src.rindex("if not deflecting:", 0, call)
     assert call - guard < 400, "`deflecting` の門の内側に無い"
+
+
+@pytest.mark.asyncio
+async def test_her_choice_never_blanks_a_field_that_was_filled():
+    """**彼女の一言で、埋まっていた欄が空になることはない。**
+
+    `apply_patch` の「空＝消す」は総監督が消せるようにするための仕様。消せる
+    のは総監督であって、答えた本人ではない。
+
+    実機（`f0a36ce2`・2026-08-30）で起きた。「じゃあポーズはどうする？」に:
+
+        「本から視線を外して、少しだけカメラの方を……あ、やっぱり、
+         見つかっちゃったことに驚いてるような、ちょっと戸惑った顔がいいかな」
+
+    「見つかっちゃったこと」を振り返りと読まれ、intent=recall で `beat` が
+    空になった —— 直前のターンで埋まったばかりの姿勢が消え、絵からも場所と
+    姿勢が消えた。
+    """
+    db = FakeDb()
+
+    async def _blanks_everything(*_a, **_kw):
+        # 彼女の答えを recall と誤読して、欄を空で塗る compile
+        s = _kw.get("session") if "session" in _kw else _a[2]
+        notebook.apply_patch(notebook.of(s), {"beat": "", "scene": ""})
+        return None
+
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["invited"] = True
+    notebook.apply_patch(s["notebook"], {
+        "scene": "park, daytime",
+        "beat": "sitting on a bench, holding a book",
+    })
+    s["chat"] = [{"role": "muse", "muse_id": "actress:cast",
+                  "text": "じゃあ、本を読んでる途中みたいな感じで。"}]
+
+    import app.muse.service as svc
+    real = svc._run_duet_scripter
+    svc._run_duet_scripter = _blanks_everything
+    try:
+        await svc._carry_out_her_choice(db, object(), s, cfg={})
+    finally:
+        svc._run_duet_scripter = real
+
+    nb = notebook.of(s)
+    assert nb.get("beat") == "sitting on a bench, holding a book"
+    assert nb.get("scene") == "park, daytime"
+
+
+@pytest.mark.asyncio
+async def test_her_choice_is_not_a_look_back_at_an_old_shoot():
+    """彼女の答えを `recall` と誤読しても、部屋を過去へ掘りに行かせない。
+
+    渡したのは「いまどうしたいか」の答え。こちらが立てた覚えのない振り返りは
+    下ろす。
+    """
+    db = FakeDb()
+
+    async def _says_recall(*_a, **_kw):
+        s = _kw.get("session") if "session" in _kw else _a[2]
+        s["looked_back"] = True
+        s["scripter_intent"] = "recall"
+        return None
+
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    s["invited"] = True
+    notebook.apply_patch(s["notebook"], {"scene": "park, daytime"})
+    s["chat"] = [{"role": "muse", "muse_id": "actress:cast",
+                  "text": "さっき見つかっちゃったみたいな顔がいいかな。"}]
+
+    import app.muse.service as svc
+    real = svc._run_duet_scripter
+    svc._run_duet_scripter = _says_recall
+    try:
+        await svc._carry_out_her_choice(db, object(), s, cfg={})
+    finally:
+        svc._run_duet_scripter = real
+
+    assert not s.get("looked_back")
+    assert s.get("scripter_intent") != "recall"

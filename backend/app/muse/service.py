@@ -5026,6 +5026,9 @@ async def _carry_out_her_choice(
     line = _last_lead_say(session).strip()
     if not line:
         return
+    nb = notebook_mod.of(session)
+    before = notebook_mod.shot_snapshot(nb)
+    was_recall = bool(session.get("looked_back"))
     began = time.monotonic()
     try:
         await _run_duet_scripter(
@@ -5036,6 +5039,38 @@ async def _carry_out_her_choice(
         logger.warning("[muse] her own choice did not compile", exc_info=True)
         _stage(session, "彼女の選択（読めず）", began)
         return
+
+    # **彼女の一言で、埋まっていた欄が空になることはない。**
+    #
+    # `apply_patch` の「空＝消す」は総監督が消せるようにするための仕様で、
+    # そこは触らない。消せるのは総監督であって、答えた本人ではない。
+    #
+    # 実機（`f0a36ce2`・2026-08-30）で実際に起きた。「じゃあポーズはどう
+    # する？」に彼女はこう答えている:
+    #
+    #     「本から視線を外して、少しだけカメラの方を……あ、やっぱり、
+    #      見つかっちゃったことに驚いてるような、ちょっと戸惑った顔がいいかな」
+    #
+    # 「見つかっちゃったこと」を振り返りと読まれ、intent=recall で
+    # **`beat` が空になった** —— 直前のターンで埋まったばかりの姿勢が消え、
+    # 絵からも場所と姿勢が消えた。
+    nb = notebook_mod.of(session)
+    restored = [
+        k for k in notebook_mod.SHOT_KEYS
+        if str(before.get(k) or "").strip()
+        and not str(nb.get(k) or "").strip()
+    ]
+    if restored:
+        notebook_mod.apply_patch(nb, {k: str(before.get(k) or "") for k in restored})
+        logger.info("[muse] her choice would have blanked %s; kept",
+                    ", ".join(restored))
+    # **彼女の答えは、前の撮影の話ではない。** 誤って `recall` と読まれると
+    # 部屋が過去のセッションを掘りに行く。渡したのは「いまどうしたいか」の
+    # 答えなので、こちらが立てた覚えのない振り返りは下ろす。
+    if session.get("looked_back") and not was_recall:
+        session["looked_back"] = False
+        if str(session.get("scripter_intent") or "") == "recall":
+            session["scripter_intent"] = "casual"
     _stage(session, "彼女の選択を指示として読む", began)
 
 
