@@ -1528,6 +1528,24 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
 _PARTNER_ONLY = ("wearing_b", "beat_b", "expression_b")
 
 
+#: 出力の鍵はあるのに、compile の契約が**一言も説明していない**欄。
+#:
+#: 総監督（2026-08-31）「場所が `scene` で拾われず、**守ること**でホールド
+#: されています」。「あそこへ行こう」と場所を移す一行が `scene` ではなく
+#: `standing`（守りごと —— 撮影ぜんぶに効く常設の指示）に入っていた。
+#:
+#: 契約 3,019字に STANDING の説明は無い。**説明の無い鍵は、行き場に困った値
+#: の捨て場になる。** これは記録済みの事故と同じ形で、`_PARTNER_ONLY` を
+#: ソロで外した理由がそれだった —— 「二つの置き場があると、そこへ書ける。
+#: 鍵を消せば書けない」。
+#:
+#: 常設の指示は制作スタッフの router（`chain.run_route`）が書く。あちらは
+#: 「STANDING: <one rule for the whole session, or the word none>」と条文で
+#: 説明があり、`session["standing"]` から手帖へ渡る道も別にある
+#: （`sync_crew_notebook`）。**compile が書く道だけを閉じる。**
+_NOT_THE_COMPILES: tuple[str, ...] = ("standing",)
+
+
 def scripter_format_schema(partner: bool = False) -> dict[str, Any]:
     """The output shape, without the partner's fields on a solo shoot.
 
@@ -1550,6 +1568,8 @@ def scripter_format_schema(partner: bool = False) -> dict[str, Any]:
     if not partner:
         for key in _PARTNER_ONLY:
             schema["properties"].pop(key, None)
+    for key in _NOT_THE_COMPILES:
+        schema["properties"].pop(key, None)
     return schema
 
 

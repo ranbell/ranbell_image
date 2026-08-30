@@ -392,3 +392,38 @@ def test_a_solo_shoot_has_no_letters():
     block = notebook.render(nb, name_a="各務 みお")
     assert "各務 みお BEAT:" in block
     assert "Actress A" not in block
+
+
+def test_the_compile_cannot_write_a_field_its_contract_never_explains():
+    """説明の無い鍵は、行き場に困った値の捨て場になる。
+
+    総監督（2026-08-31）「場所が `scene` で拾われず、**守ること**でホールド
+    されています」。場所を移す一行が `standing`（守りごと —— 撮影ぜんぶに
+    効く常設の指示）に入っていた。
+
+    出力スキーマには `standing` の鍵があるのに、compile の契約（3,019字）に
+    STANDING の説明が一行も無い。同じ事故は記録済みで、`wearing_b` をソロの
+    スキーマから外した理由がそれだった —— **鍵を消せば書けない。**
+    """
+    from app.muse import chain
+
+    assert "STANDING" not in chain.build_scripter_system()
+    for partner in (False, True):
+        keys = notebook.scripter_format_schema(partner)["properties"]
+        assert "standing" not in keys
+    # 元のスキーマには残す —— 制作スタッフの router は条文で説明したうえで
+    # 書く（`STANDING: <one rule for the whole session…>`）。閉じたのは
+    # compile が書く道だけ。
+    assert "standing" in notebook.SCRIPTER_FORMAT_SCHEMA["properties"]
+    assert "STANDING" in chain.route_system()
+
+
+def test_a_standing_order_still_reaches_the_notebook_from_the_router():
+    """常設の指示の道は塞がない。`session["standing"]` は手帖へ渡る。
+
+    書くのは制作スタッフの router（`chain.run_route`）で、compile ではない。
+    """
+    session = {"session_id": "s", "notebook": notebook.blank(),
+               "standing": ["足は絶対に映さない"], "craft": {}}
+    notebook.migrate(session)
+    assert session["notebook"].get("standing") == ["足は絶対に映さない"]
