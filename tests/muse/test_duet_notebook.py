@@ -1341,20 +1341,29 @@ def test_the_wardrobe_clerk_also_works_alone():
         name_a="各務 みお", name_b="", model="m", num_ctx=1024)) == {}
 
 
-def test_the_pose_clerk_stays_on_two_people_until_it_is_measured():
-    """姿勢の一人ぶんは**まだ測っていない**ので走らせない。
+def test_every_field_clerk_that_runs_alone_has_been_measured():
+    """一人ぶんの条文がある欄＝**測ってある**欄。
 
-    服は 45/45 の裏づけがある。姿勢に同じ裏づけは無く、測る前に道を開ける
-    のはこの現場のやり方ではない。`_PER_PERSON` の一人ぶん条文が空である
-    ことが、そのまま「まだ」を意味する。
+    実測（9件×5回・`ask_field_clerks.py`・2026-08-31）:
+
+        wearing  45/45 対 36/45
+        beat     45/45 対 32/45   ← 「立って。」は compile 1/5
+        scene    45/45 対 24/45   ← 場所を移す一行は compile 0〜1/5
+
+    一人ぶんの条文が空である欄は「まだ測っていない」という意味なので、
+    走らせない。
     """
     import asyncio
 
-    assert chain._PER_PERSON["beat"][2] == ""
-    assert chain._PER_PERSON["wearing"][2] != ""
-    # 一人で呼んでも、模型に触らずに空を返す（`None` でも落ちない）。
-    assert asyncio.run(chain.read_beats(
-        None, note="ベンチに座って。", name_a="各務 みお", name_b="",
+    for kind in ("wearing", "beat", "scene"):
+        assert chain._PER_PERSON[kind][2], f"{kind} に一人ぶんの条文が無い"
+    # 場所は二人で共有するので、名前で分ける問いにならない —— 二人ぶんの
+    # 条文は持たない。
+    assert chain._PER_PERSON["scene"][1] == ""
+    assert chain._PER_PERSON["beat"][1] != ""
+    # 読めなければ何も書かない（`None` でも落ちない）。
+    assert asyncio.run(chain.read_per_person(
+        None, kind="scene", note="", name_a="各務 みお", name_b="",
         model="m", num_ctx=1024)) == {}
 
 

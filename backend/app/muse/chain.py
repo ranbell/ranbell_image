@@ -2528,6 +2528,42 @@ Return one JSON object with exactly these two keys, and nothing else:
 {keys}"""
 
 
+BEAT_SOLO_SYSTEM = """You keep the posture notes for a photo shoot.
+
+Read the director's line and say what her body is doing AFTER it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `ベンチに座って` is `sitting on a bench`. Never copy his words through.
+- Comma separated, plain body words.
+- **Say which posture she is in first** — standing or sitting or kneeling or
+  crouching — then the weight, the hands, the turn of the torso. A beat that
+  does not say whether she is standing or sitting is not a picture.
+- Not her clothes, not the place, not the camera, not her face.
+- If the line does not move her body, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
+SCENE_SOLO_SYSTEM = """You keep the location notes for a photo shoot.
+
+Read the director's line and say WHERE she is and WHAT HOUR it is AFTER it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `図書室` is `a school library`. Never copy his words through.
+- One short phrase: the place, then the hour.
+- **This field carries BOTH the place and the hour.** Moving her somewhere
+  else rewrites it; so does changing the time of day on its own — 「夕方に
+  しよう」 keeps the place and rewrites the hour.
+- **Rewrite the whole line** — do not append the new place to the old one.
+  Where she is now, at what hour, is the only answer.
+- Not her clothes, not her body, not the camera, not the light.
+- If the line changes neither the place nor the hour, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
 WARDROBE_SOLO_SYSTEM = """You keep the wardrobe notes for a photo shoot.
 
 Read the director's line and say what she has on AFTER it.
@@ -2557,10 +2593,28 @@ Return one JSON object with exactly this key, and nothing else:
 #: 「帽子、今日は合わないね」0/5。総監督（2026-08-30）「キーワードが出てきた
 #: ら発動ってなってるのでは？　文脈を見て**今持っているのは手放したか**の
 #: 判定がいる」。文面を判定するのをやめて、状態を訊く。
+#: 実測（9件×5回・`ask_field_clerks.py`・2026-08-31）。総監督が挙げた実例が
+#: そのまま出た:
+#:
+#:     beat                     係      compile
+#:       立って。               5/5      1/5
+#:       そろそろ立とうか。       5/5      2/5
+#:       座らないで、立ったままで。 5/5      2/5
+#:                             45/45    32/45
+#:
+#:     scene
+#:       別の階へ行こう。        5/5      1/5
+#:       上から撮りたいな、上の階とか。5/5    0/5
+#:       階段の踊り場はどう？      5/5      0/5
+#:                             45/45    24/45
+#:
+#: `scene` は一人ぶんしか無い —— 場所は二人で共有するので、名前で分ける
+#: 問いにならない。
 _PER_PERSON = {
     "wearing": (("wearing", "wearing_b"), WARDROBE_SYSTEM,
                 WARDROBE_SOLO_SYSTEM, "is wearing"),
-    "beat": (("beat", "beat_b"), BEAT_SYSTEM, "", "is"),
+    "beat": (("beat", "beat_b"), BEAT_SYSTEM, BEAT_SOLO_SYSTEM, "is"),
+    "scene": (("scene", ""), "", SCENE_SOLO_SYSTEM, "is at"),
 }
 
 
@@ -2569,7 +2623,7 @@ _WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)
 
 async def read_per_person(
     ollama, *, kind: str, note: str, name_a: str, name_b: str,
-    now_a: str = "", now_b: str = "",
+    now_a: str = "", now_b: str = "", her_say: str = "",
     model: str, num_ctx: int | None,
 ) -> dict[str, str]:
     """**着ている服だけを言うターン。** 誰が何を着ているかを、名前で訊く。
@@ -2596,10 +2650,17 @@ async def read_per_person(
     a, b = str(name_a or "").strip(), str(name_b or "").strip()
     if not (a and str(note or "").strip()):
         return {}
+    # 場所（`scene`）には二人ぶんの条文が無い —— 場所は二人で共有するので、
+    # 名前で分ける問いにならない。W でも一人ぶんの道を通す。
+    if not system:
+        b = ""
     if not b:
         # **一人でも訊く。** ここは長らく二人のときしか走らなかった
         # （`a and b` が無いと即 return）。二人で 25/25 だった問いが、
-        # 一人の撮影では一度も使われていない。実測で 45/45 対 36/45。
+        # 一人の撮影では一度も使われていなかった（実測 45/45 対 36/45）。
+        #
+        # 一人ぶんの条文が無い欄は、**まだ測っていない**という意味なので
+        # 走らせない。
         if not solo_system:
             return {}
         system = solo_system
@@ -2612,6 +2673,11 @@ async def read_per_person(
     prompt = "\n\n".join(x for x in (
         f"NOW:\n{now}" if now else "",
         f"DIRECTOR: {note.strip()}",
+        # **彼女の返事も材料。** 総監督が「ポーズを変えてみて」と中身を言わず
+        # に渡し、彼女が「後ろにのけぞって、星を探すみたいに手を伸ばして」と
+        # 具体で答える —— その具体はどこにも書き取られていなかった。
+        # 実測でこの型は 5/5（`ask_field_clerks.py`）。
+        f"{a} ANSWERED: {her_say.strip()[:400]}" if her_say.strip() else "",
         "JSON:",
     ) if x)
     try:

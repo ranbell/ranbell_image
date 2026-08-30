@@ -3978,6 +3978,9 @@ async def _run_duet_scripter(
                 # `_settle_repair_notice`, once the whole turn has had its go.
                 session["repair_notice"] = {
                     "fields": still,
+                    # **監督の一行も預ける。** ターンの終わりに欄ごとの係へ
+                    # 渡す材料になる（`_settle_repair_notice`）。
+                    "note": str(text or "").strip(),
                     "before": {
                         k: str(before_shot.get(k) or "") for k in still
                     },
@@ -4826,7 +4829,7 @@ async def _duet_talk(
     else:
         # No fold this turn, but the turn is still over — a parked notice has
         # to be settled here or it is silently dropped on the next line.
-        _settle_repair_notice(session)
+        await _settle_repair_notice(db, ollama, session, cfg=cfg)
     await session_db.save(db, session)
     return session
 
@@ -4955,27 +4958,97 @@ async def _muse_checks_the_notebook(
     )
 
 
-def _settle_repair_notice(session: dict[str, Any]) -> None:
-    """Record what the whole turn failed to write — in the panel, not the room.
+async def _ask_the_field_clerks(
+    db, ollama, session: dict[str, Any], fields: list[str], *,
+    note: str, cfg: dict[str, Any],
+) -> list[str]:
+    """書かれなかった欄を、**その欄だけ**訊いて埋める。書けた欄を返す。
 
-    The compile and its repair both run before the Muse has spoken, and the
-    fold that follows her line is a third chance at `beat`, so the check waits
-    for the whole turn and only counts fields that really did not move.
+    総監督（2026-08-31）「座っている状態から**立って**という指示を…未着手に
+    してしまって邪魔してます」「**室内から別の階へ行こう**　も検知されません」。
 
-    This used to say so in chat — 「『beat』が書き取れませんでした。もう一度、
-    そこだけ言ってもらえますか？」 — and that was wrong twice over. It broke
-    the room: the showrunner is directing an actress, and a studio voice
-    interrupting to ask him to repeat himself is not part of the picture they
-    are making together. And it was often simply untrue. Measured on a live
-    run, three of these went out and two of them were fixed by the very next
-    thing the system did:
+    契約には両方きちんと書いてある。守られないのは、この現場でずっと出ている
+    形 —— **大きい条文の中で埋もれる**。小さく絞って訊けば通る
+    （9件×5回・`ask_field_clerks.py`・2026-08-31）:
 
-        「カーディガン羽織って」 → apology → the next turn wrote `cardigan`
-        「カーディガン脱いで」   → apology → the wardrobe button struck it
+        wearing  45/45 対 36/45
+        beat     45/45 対 32/45   ← 「立って。」は compile 1/5
+        scene    45/45 対 24/45   ← 場所を移す一行は compile 0〜1/5
 
-    The signal itself is worth keeping — it is what made this debuggable at
-    all — so it goes to the rewrite log, which the debug pane already renders
-    live (`MusePanel.vue`'s `rewriteLog`). Nothing reaches the chat.
+    **彼女の返事も材料に渡す。** 総監督が「ポーズを変えてみて」と中身を言わず
+    に渡し、彼女が「後ろにのけぞって、星を探すみたいに手を伸ばして」と具体で
+    答えたとき、その具体はどこにも書き取られていなかった。同じ台で 5/5。
+
+    走るのは**書かれなかった欄だけ**なので、うまくいっているターンには何も
+    足さない。読めなければ何も書かない —— 拾い漏れは言い直せば済む。
+    """
+    if ollama is None or not fields:
+        return []
+    inputs = _inputs(session)
+    partner_character = session.get("partner_character") or {}
+    name_a, name_b = _muse_names(session, partner_character)
+    partner = bool(partner_character) or bool(
+        str(inputs.get("partner_preset") or "").strip()
+    )
+    nb = notebook_mod.of(session)
+    her_say = _last_lead_say(session)
+    kinds = [k for k in ("wearing", "beat", "scene") if k in fields]
+    if not kinds:
+        return []
+
+    wrote: list[str] = []
+    for kind in kinds:
+        began = time.monotonic()
+        pair = chain._PER_PERSON[kind][0]
+        try:
+            got = await chain.read_per_person(
+                ollama, kind=kind, note=note,
+                name_a=name_a, name_b=name_b if partner else "",
+                now_a=str(nb.get(pair[0]) or ""),
+                now_b=str(nb.get(pair[1]) or "") if pair[1] else "",
+                her_say=her_say,
+                model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+            )
+        except Exception:
+            logger.warning("[muse] %s clerk failed at the end of the turn",
+                           kind, exc_info=True)
+            _stage(session, f"{kind} 係（拾えず）", began)
+            continue
+        # **空で上書きしない。** 消せるのは総監督であって、係ではない。
+        got = {k: v for k, v in got.items() if str(v or "").strip()}
+        if not got:
+            _stage(session, f"{kind} 係（何も言わず）", began)
+            continue
+        before = notebook_mod.shot_snapshot(nb)
+        notebook_mod.apply_patch(nb, got)
+        _note_rewrite(
+            session, f"{kind} 係（書かれなかった欄を拾う）",
+            before=before, after=notebook_mod.shot_snapshot(nb),
+            intent="shot",
+        )
+        wrote.extend(k for k in got if k in fields)
+        _stage(session, f"{kind} 係（拾った）", began)
+        logger.info("[muse] end-of-turn %s clerk wrote %s", kind, sorted(got))
+    return wrote
+
+
+async def _settle_repair_notice(
+    db, ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> None:
+    """ターンの終わりに、名指しされたのに書かれなかった欄を片づける。
+
+    **「未着手」は正しい札だった。邪魔だったのは、その札が出たあとに何も
+    起きないこと。** 総監督（2026-08-31）「repair missed が未着手にして
+    しまって邪魔してます」——彼女はその同じターンに答えを言っているのに、
+    それを読む段が無かった。
+
+    ここで欄ごとの係に訊く（`_ask_the_field_clerks`）。**それでも残ったもの
+    だけ**を記録する。
+
+    元の記録の理由はそのまま生きている: これは部屋には出さない。総監督は
+    女優を演出しているのであって、スタジオの声が割り込んで言い直しを求める
+    のは、二人が作っている画の一部ではない。記録は `rewrite_log` に行き、
+    デバッグ面（`MusePanel.vue` の `rewriteLog`）が読む。
     """
     notice = session.pop("repair_notice", None)
     if not isinstance(notice, dict):
@@ -4990,6 +5063,16 @@ def _settle_repair_notice(session: dict[str, Any]) -> None:
         logger.info("[muse] repair notice withdrawn — the turn wrote %s after all",
                     notice.get("fields"))
         return
+
+    picked = await _ask_the_field_clerks(
+        db, ollama, session, still,
+        note=str(notice.get("note") or ""), cfg=cfg,
+    )
+    still = [f for f in still if f not in picked]
+    if not still:
+        logger.info("[muse] the end-of-turn clerks wrote %s", sorted(picked))
+        return
+
     logger.info("[muse] the turn never wrote %s", ", ".join(still))
     _note_rewrite(
         session, "repair_missed",
@@ -5141,7 +5224,7 @@ async def _fold_muse_after_talk(
             db, ollama, session, cfg=cfg, note=str(user_text or ""),
         )
         _stage(session, "彼女の見直し", began)
-        _settle_repair_notice(session)
+        await _settle_repair_notice(db, ollama, session, cfg=cfg)
 
 
 def _facets_to_write(session: dict[str, Any]) -> list[str]:

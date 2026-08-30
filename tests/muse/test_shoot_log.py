@@ -13,6 +13,8 @@ Three defects found by reading a real 73-line 主演撮り session off the serve
 """
 from __future__ import annotations
 
+import asyncio
+
 import sys
 from pathlib import Path
 
@@ -197,7 +199,8 @@ def test_the_notice_is_withdrawn_when_the_fold_writes_the_field():
 
     notebook.apply_patch(nb, {"beat": "standing by the fence, waving one hand"})
 
-    service._settle_repair_notice(session)
+    # 係を呼ばない道（`ollama=None`）—— 記録の振る舞いだけを見る。
+    asyncio.run(service._settle_repair_notice(None, None, session, cfg={}))
 
     assert not _system_lines(session), "nothing failed, so nothing to apologise for"
     assert "repair_notice" not in session
@@ -218,7 +221,8 @@ def test_the_notice_is_recorded_when_the_field_really_did_not_move():
     session["notebook"] = nb
     _parked(session, field="beat", before="standing by the fence")
 
-    service._settle_repair_notice(session)
+    # 係を呼ばない道（`ollama=None`）—— 記録の振る舞いだけを見る。
+    asyncio.run(service._settle_repair_notice(None, None, session, cfg={}))
 
     assert not _system_lines(session), "no studio voice in the room"
     entry = (session.get("rewrite_log") or [])[-1]
@@ -238,7 +242,8 @@ def test_only_the_fields_that_stayed_put_are_named():
     }
     notebook.apply_patch(nb, {"wearing": "sailor_fuku, cardigan"})
 
-    service._settle_repair_notice(session)
+    # 係を呼ばない道（`ollama=None`）—— 記録の振る舞いだけを見る。
+    asyncio.run(service._settle_repair_notice(None, None, session, cfg={}))
 
     changed = (session.get("rewrite_log") or [])[-1].get("changed") or {}
     assert "beat" in changed
@@ -247,6 +252,102 @@ def test_only_the_fields_that_stayed_put_are_named():
 
 def test_settling_an_empty_notice_records_nothing():
     session = {"session_id": "s1", "inputs": {"locale": "ja"}}
-    service._settle_repair_notice(session)
+    # 係を呼ばない道（`ollama=None`）—— 記録の振る舞いだけを見る。
+    asyncio.run(service._settle_repair_notice(None, None, session, cfg={}))
     assert not _system_lines(session)
     assert not session.get("rewrite_log")
+
+
+class _FieldClerk:
+    """欄ごとの係だけを演じる模型。台本係の道は通らない。"""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.prompts: list[str] = []
+
+    def generate_text_stream(self, prompt, **kw):
+        self.prompts.append(str(prompt))
+
+        async def _stream():
+            yield {"type": "token", "text": self.reply}
+        return _stream()
+
+
+def _notice_session(field: str, now: str) -> dict:
+    session = {"session_id": "s1", "inputs": {"locale": "ja"},
+               "character": {"name_ja": "各務 みお"}, "chat": []}
+    nb = notebook.of(session)
+    notebook.apply_patch(nb, {field: now})
+    session["notebook"] = nb
+    session["repair_notice"] = {
+        "fields": [field], "note": "立って。", "before": {field: now},
+    }
+    return session
+
+
+def test_the_end_of_turn_clerk_writes_the_field_the_turn_never_wrote():
+    """**「未着手」は正しい札。邪魔だったのは、そのあと何も起きないこと。**
+
+    総監督（2026-08-31）「座っている状態から立ってという指示を…repair missed
+    が未着手にしてしまって邪魔してます」。
+
+    実測（9件×5回・`ask_field_clerks.py`）で「立って。」は本番の compile が
+    1/5、欄だけを訊く係が 5/5。
+    """
+    session = _notice_session("beat", "sitting on a chair, hands on the desk")
+    oc = _FieldClerk('{"各務 みお": "standing, weight on both feet, hands at her sides"}')
+
+    asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
+
+    assert "standing" in (notebook.of(session).get("beat") or "")
+    # 拾えたので「未着手」は記録しない。
+    sources = [e.get("source") for e in (session.get("rewrite_log") or [])]
+    assert "repair_missed" not in sources
+    assert any("係" in str(s) for s in sources)
+
+
+def test_her_answer_is_material_for_the_end_of_turn_clerk():
+    """総監督が中身を言わず、彼女が具体で答えた回。
+
+    「ポーズを変えてみて」に「後ろにのけぞって、星を探すみたいに手を伸ばして」
+    —— その具体はどこにも書き取られていなかった。
+    """
+    session = _notice_session("beat", "standing, hands at her sides")
+    session["repair_notice"]["note"] = "ポーズを変えてみて。"
+    session["chat"] = [{
+        "role": "muse", "muse_id": "actress:cast",
+        "text": "こうして、少しだけ後ろにのけぞって、星を探すみたいに手を伸ばしてみるのはどうかな？",
+    }]
+    oc = _FieldClerk('{"各務 みお": "standing, arching back, one arm reaching up"}')
+
+    asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
+
+    assert "arching" in (notebook.of(session).get("beat") or "")
+    # 彼女の返事が係に渡っていること。
+    assert "ANSWERED" in oc.prompts[0]
+    assert "のけぞって" in oc.prompts[0]
+
+
+def test_the_end_of_turn_clerk_never_blanks_a_field():
+    """空で上書きしない。**消せるのは総監督であって、係ではない。**"""
+    session = _notice_session("beat", "sitting on a chair")
+    oc = _FieldClerk('{"各務 みお": ""}')
+
+    asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
+
+    assert notebook.of(session).get("beat") == "sitting on a chair"
+    # 拾えなかったので「未着手」が残る。
+    assert (session["rewrite_log"][-1]).get("source") == "repair_missed"
+
+
+def test_a_field_with_no_clerk_is_still_recorded_as_missed():
+    """係のいない欄（`light` など）は、いままでどおり記録だけ。"""
+    session = _notice_session("light", "soft daylight")
+    session["repair_notice"]["note"] = "もっと硬い光で。"
+    oc = _FieldClerk('{"各務 みお": "hard rim light"}')
+
+    asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
+
+    assert notebook.of(session).get("light") == "soft daylight"
+    assert (session["rewrite_log"][-1]).get("source") == "repair_missed"
+    assert not oc.prompts, "係のいない欄で模型を呼んではいけない"
