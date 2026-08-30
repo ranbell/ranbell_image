@@ -1240,6 +1240,26 @@ def _turn_trace(
                     ", ".join(missed))
 
 
+def _trace_weave_refused(session: dict[str, Any], why: str) -> None:
+    """**絵が動かなかったターンにも、行を残す。**
+
+    weave が使えないと `_scrub_notebook_craft` に落ちて、**前のターンの craft が
+    そのまま残る**。手帖は新しいのに絵は古い —— 総監督の「会話では移動したのに
+    絵が動かない」はこの状態で、いままで何の記録も残らなかった（実測 `71929513`
+    では `weave_review` も `warnings` も空のまま板が出た）。
+
+    **判定には使わない。読むためだけ。**
+    """
+    log = list(session.get("turn_trace") or [])
+    if not log:
+        return
+    pic = dict(log[-1].get("picture") or {})
+    pic["weave_refused"] = str(why or "")
+    log[-1]["picture"] = pic
+    session["turn_trace"] = log
+    logger.info("[muse] the picture did not move this turn (%s)", why)
+
+
 def _trace_picture(session: dict[str, Any], *, tags: str, scene: str) -> None:
     """三層目 —— **絵に載った語のうち、手帖が知らないもの。**
 
@@ -6594,11 +6614,29 @@ async def weave_craft_if_needed(
     )
     name_a, name_b = _muse_names(session, partner_character)
     weave_ok = False
+    refused = ""
     try:
         result = await _call_duet_scripter(
             ollama, session, note="WEAVE", cfg=cfg,
             partner=partner, name_a=name_a, name_b=name_b, mode="weave",
         )
+        # **一度だけ引き直す。** 諦めると `_scrub_notebook_craft` が走り、
+        # **前のターンの craft がそのまま残る** —— 会話では場所が変わったのに
+        # 絵が古いまま、という総監督の報告の正体がこれ。引き直しは 8〜30秒で、
+        # 古い絵を一枚出すより安い。
+        refused = notebook_mod.weave_refusal(
+            str(result.get("tags") or ""), str(result.get("craft_scene") or ""),
+        )
+        if refused:
+            logger.warning("[muse] weave came back %s; drawing again", refused)
+            result = await _call_duet_scripter(
+                ollama, session, note="WEAVE", cfg=cfg,
+                partner=partner, name_a=name_a, name_b=name_b, mode="weave",
+            )
+            refused = notebook_mod.weave_refusal(
+                str(result.get("tags") or ""),
+                str(result.get("craft_scene") or ""),
+            )
         tags = notebook_mod.scrub_craft_tags(
             str(result.get("tags") or ""),
             wearing=str(nb.get("wearing") or ""),
@@ -6611,7 +6649,7 @@ async def weave_craft_if_needed(
             banned=set(banned_tags(session)),
         )
         scene_out = str(result.get("craft_scene") or "")
-        if result.get("valid") and tags and scene_out:
+        if result.get("valid") and tags and scene_out and not refused:
             tags = await _muse_reviews_weave(
                 ollama, session, tags, cfg=cfg, name_a=name_a, name_b=name_b,
                 partner=partner,
@@ -6628,13 +6666,24 @@ async def weave_craft_if_needed(
                     tags=str(craft_now.get("tags") or ""),
                     scene=str(craft_now.get("scene") or ""),
                 )
+                # **同じ床で、出来上がったほうを測る。** 上の入口ゲートが
+                # 使っているのと同一の式 —— 新しい床を足さずに、次のターンまで
+                # 待たずに、いま組み上がった一本を見る。
+                if identity.craft_is_thin(
+                    str(craft_now.get("prompt") or ""),
+                    str(craft_now.get("scene") or ""),
+                ):
+                    refused = "no_prose"
+                    weave_ok = False
         if not weave_ok:
             session["craft_dirty"] = True
+            _trace_weave_refused(session, refused or "unusable")
             _scrub_notebook_craft(session)
     except Exception:
         logger.warning("[muse] notebook weave failed; keeping draft", exc_info=True)
         session["craft_dirty"] = True
         weave_ok = False
+        _trace_weave_refused(session, "error")
         _scrub_notebook_craft(session)
     if sid:
         events.publish(sid, {

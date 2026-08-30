@@ -1345,3 +1345,112 @@ def test_the_previous_session_does_not_outweigh_today():
     assert "said_intent" in src
     note = src.index("_note_standing(session, text)")
     assert 'if said_intent in ("shot", "mixed")' in src[:note]
+
+
+class _WeaveTwice(NotebookOllama):
+    """A weave room that hands back the blank form first, a picture second.
+
+    実測（2026-08-30・`71929513`）でモデルが `__tags` / `___craft_scene` を
+    そのまま返し、**空でなければ通す**門をすり抜けて板が出た。
+    """
+
+    def __init__(self, replies):
+        super().__init__(scripts={})
+        self.replies = list(replies)
+        self.weaves = 0
+
+    def generate_text_stream(self, prompt, **kw):
+        system = str(kw.get("system") or "")
+        if _fake_clerk_reply(system, str(prompt)) is None and (
+            "studio scripter" in system or "shot notebook" in system
+        ):
+            i = min(self.weaves, len(self.replies) - 1)
+            self.weaves += 1
+            text = self.replies[i]
+
+            async def _stream():
+                yield {"type": "token", "text": text}
+            return _stream()
+        return super().generate_text_stream(prompt, **kw)
+
+
+_ECHO = _scripter_block(
+    intent="shot", tags="__tags", craft_scene="___craft_scene",
+)
+_REAL = _scripter_block(
+    intent="shot",
+    tags="sitting, elbows_on_desk, classroom, window_side, white_blouse",
+    craft_scene=(
+        "She sits at the desk with both elbows planted on the wood, leaning "
+        "forward so her weight rests on her forearms. Daylight from the "
+        "window side of the classroom falls across the white blouse and "
+        "catches the edge of her jaw as she looks into the lens."
+    ),
+)
+
+
+async def _weave_session(db):
+    s = await _duet_session(db)
+    s["mode"] = "duet"
+    notebook.apply_patch(s["notebook"], {
+        "wearing": "white blouse",
+        "scene": "classroom, window side, daytime",
+        "beat": "sitting, elbows on the desk",
+        "frame": "medium shot, looking at the viewer",
+    })
+    s["craft_dirty"] = True
+    s["craft"] = {"prompt": "1girl", "tags": "rooftop", "scene": "x"}
+    s["turn_trace"] = [{"line": "場所も変えよう。教室の窓際で。",
+                        "asked": ["scene"], "moved": {}, "missed": []}]
+    return s
+
+
+@pytest.mark.asyncio
+async def test_weave_that_echoes_the_schema_is_drawn_again():
+    """雛形をそのまま返した回は使わず、引き直す。
+
+    諦めると `_scrub_notebook_craft` に落ちて**前のターンの craft が残る** ——
+    会話では教室に移ったのに絵は屋上のまま、という報告の正体。
+    """
+    db = FakeDb()
+    ollama = _WeaveTwice([_ECHO, _REAL])
+    s = await _weave_session(db)
+    await service.weave_craft_if_needed(db, ollama, s)
+
+    craft = s.get("craft") or {}
+    assert "__tags" not in str(craft.get("tags") or "")
+    assert "craft_scene" not in str(craft.get("scene") or "")
+    assert "classroom" in str(craft.get("prompt") or "").lower()
+    assert not s.get("craft_dirty")
+
+
+@pytest.mark.asyncio
+async def test_weave_that_stays_broken_leaves_a_line_in_the_trace():
+    """二度とも壊れたら、**絵が動かなかったことを記録に残す。**
+
+    実測ではここで `weave_review` も `warnings` も空のまま板が出ていた。
+    """
+    db = FakeDb()
+    ollama = _WeaveTwice([_ECHO, _ECHO])
+    s = await _weave_session(db)
+    await service.weave_craft_if_needed(db, ollama, s)
+
+    assert "__tags" not in str((s.get("craft") or {}).get("tags") or "")
+    assert s.get("craft_dirty")
+    picture = (s["turn_trace"][-1].get("picture") or {})
+    assert picture.get("weave_refused") == "schema_echo"
+
+
+def test_weave_refusal_does_not_fire_on_ordinary_picture_words():
+    """`scene` `light` `frame` `beat` `standing` はどれも絵の語として正しい。
+
+    欄名との一致だけで弾いた版は、既存の試験
+    `test_weave_drops_old_place_hour_pose_and_crop` を落とした。本物のタグは
+    `_` では始まらない —— そこだけを見る。
+    """
+    assert not notebook.weave_refusal(
+        "standing, looking_at_viewer, scene_light, classroom",
+        "She is standing by the window, the light across her frame.",
+    )
+    assert notebook.weave_refusal("__tags", "___craft_scene") == "schema_echo"
+    assert notebook.weave_refusal("tags", "craft_scene") == "schema_echo"

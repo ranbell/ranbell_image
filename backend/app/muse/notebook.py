@@ -1542,6 +1542,57 @@ def scripter_format_schema(partner: bool = False) -> dict[str, Any]:
     return schema
 
 
+def weave_refusal(tags: str, scene: str) -> str:
+    """Why this weave cannot be used — `""` when it is usable.
+
+    The weave gate only ever asked **「空でなければ通す」**. Measured live
+    (2026-08-30, session `71929513`): a board went to the sampler holding
+
+        tags        __tags, white_blouse, headphones, hair_down, sitting
+        craft_scene sitting, elbows on the desk. ___craft_scene
+
+    —— the model had echoed **the schema's own field names** instead of
+    writing a picture. Both were non-empty, so the gate passed them. The
+    place (`classroom, window side`) never reached the prompt, there was no
+    prose at all, and nothing was recorded: `weave_review` and `warnings`
+    were both empty. The clothes only survived because the wardrobe pass
+    injects them back from WEARING, which is what made the board look
+    plausible enough to ship.
+
+    Empty is not the only way a weave comes back broken. This catches the
+    one way that is unambiguous: **a value that is one of this schema's own
+    keys.** The key list is derived from `SCRIPTER_FORMAT_SCHEMA`, not
+    written by hand — this is not a vocabulary rule, it is the model handing
+    the blank form back.
+
+    Thinness is judged separately, by the caller, with the same
+    `craft_is_thin` it already uses to decide whether to re-weave. Two
+    floors in two places is how the thing being measured drifts from the
+    thing shipped.
+    """
+    from .identity import bare_tag
+
+    keys = {str(k).strip().lower()
+            for k in (SCRIPTER_FORMAT_SCHEMA.get("properties") or {})}
+
+    def _echoes(value: str) -> bool:
+        # **丸ごと欄名だけ**、または `__tags` のように**先頭にアンダースコア**の
+        # ついた欄名。鍵名との一致だけでは広すぎる —— `scene` `light` `frame`
+        # `beat` `standing` はどれも絵の語として正しく、`standing` を欄名と
+        # 見なした版は既存の試験を一本落とした。本物のタグは `_` では始まらない。
+        if str(value or "").strip().lower() in keys:
+            return True
+        for part in str(value or "").replace(".", ",").split(","):
+            tok = bare_tag(part)
+            if tok.startswith("_") and tok.strip("_").lower() in keys:
+                return True
+        return False
+
+    if _echoes(tags) or _echoes(scene):
+        return "schema_echo"
+    return ""
+
+
 def merge_tag_bags(
     *, tags: str = "", tags_shared: str = "", tags_a: str = "", tags_b: str = "",
 ) -> str:
