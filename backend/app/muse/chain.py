@@ -2882,7 +2882,7 @@ async def run_scripter(
     partner: bool = False, model: str, num_ctx: int | None,
     mode: str = "compile", images: list[bytes] | None = None,
     card: str = "", struck: str = "", directive: str = "",
-    crew_look: str = "", room_leaning: str = "", muse_says: str = "",
+    crew_look: str = "", room_leaning: str = "",
     name_a: str = "", name_b: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
@@ -2914,18 +2914,29 @@ async def run_scripter(
                 f"ROOM LEANING (what this crew tends to like — a leaning, not "
                 f"an order):\n{room_leaning.strip()}"
             ) if room_leaning.strip() else "",
-            # She is the one standing in it. Every turn she says, in her own
-            # words, what she has on and what she is about to do — and until
-            # now that went to the floor and never to the person writing the
-            # tags. The notebook is the shot's authority; this is the same
-            # shot, described by the only one who can feel where her weight is.
-            # Read it to resolve what the notebook says tersely; where the two
-            # disagree about WHAT the shot is, the notebook wins.
-            (
-                f"WHAT SHE SAYS SHE IS DOING (her own words, this turn — read "
-                f"it to understand the notebook, not to overrule it):\n"
-                f"{muse_says.strip()[:600]}"
-            ) if muse_says.strip() else "",
+            # **彼女の言葉は weave に渡さない。** 「手帖が勝つ」と書き添えても
+            # 勝たなかった —— 実測（2026-08-30・`f56e19c6`）。総監督が
+            # 「その帽子は外して」と言い、手帖から帽子が消えた次のターンに、
+            # 彼女はこう言う:
+            #
+            #     「帽子、脱ぐんですか……。わかった、こうして……。
+            #      （手元で麦わら帽子をゆっくりと下ろす）……」
+            #
+            # ト書きは**いま起きていること**として書かれるので、weave はそれを
+            # 絵にする。手帖に帽子が無い状態で同じ行を渡して 8回:
+            #
+            #     muse_says あり  帽子が絵に出た 7/8
+            #     muse_says なし                0/8
+            #
+            # 「She slowly lowers a straw hat toward her hands」—— 総監督が
+            # 外させた帽子が、散文から素通りして絵に戻る。**タグは突き合わせて
+            # いるが散文には検査が一段も無い**ので、ここが主経路だった。
+            #
+            # 同じ失敗は compile 側で既に記録されている（`card` を渡さない
+            # 理由）。渡さないのが答えで、言い聞かせるのではない。
+            #
+            # 散文の質はほとんど動かない（4場面×5回・`weave_says.py`）:
+            # 薄い散文 0/20 → 2/20、語数 61 → 55。取り違えのほうが重い。
             f"{CREW_LOOK_NOTE}\n{crew_look.strip()}" if crew_look.strip() else "",
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (

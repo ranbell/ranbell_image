@@ -1538,3 +1538,31 @@ def test_a_refusal_takes_the_garment_out_of_the_notebook_too():
     wearing = str(notebook.of(s).get("wearing") or "")
     assert "goggles" not in wearing
     assert "blouse" in wearing and "cardigan" in wearing
+
+
+def test_the_weave_is_never_handed_her_own_words():
+    """weave は手帖だけを読む。**彼女の台詞は渡さない。**
+
+    実測（2026-08-30・`f56e19c6`）。総監督が「その帽子は外して」と言い、手帖
+    から帽子が消えた次のターンに彼女はこう言う:
+
+        「帽子、脱ぐんですか……。わかった、こうして……。
+         （手元で麦わら帽子をゆっくりと下ろす）……」
+
+    ト書きは**いま起きていること**として書かれるので、weave はそれを絵にする。
+    手帖に帽子が無い状態で同じ行を渡して8回:
+
+        muse_says あり  帽子が絵に出た 7/8
+        muse_says なし                0/8
+
+    「手帖が勝つ」と条文に書き添えても勝たなかった。渡さないのが答え。
+    """
+    import inspect
+    assert "muse_says" not in inspect.signature(chain.run_scripter).parameters
+    src = inspect.getsource(service._call_duet_scripter)
+    assert "muse_says" not in src
+
+    # **彼女が自分の手帖と袋を見直す係は別物。** そちらは自分の言葉を読んで
+    # よい —— 総監督の「彼女に聞くのは強力な補正になる」はこちらの道。
+    for fn in (chain.run_weave_review, chain.run_notebook_review):
+        assert "muse_says" in inspect.signature(fn).parameters

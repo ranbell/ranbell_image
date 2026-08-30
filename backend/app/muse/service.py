@@ -3641,10 +3641,6 @@ async def _call_duet_scripter(
         struck=_struck_line(session),
         crew_look=crew_look_block(session),
         room_leaning=_room_leaning(session) if mode == "weave" else "",
-        # Only the weave. A compile is answering the showrunner's newest line,
-        # and handing it her voice as well is how a stale self-description
-        # outranked him before (see `card` above).
-        muse_says=_last_lead_say(session) if mode == "weave" else "",
         # VERIFY はもう note を載せない。**同じ一言をもう一度読むだけの
         # ターンには、説明が要らなかった。** 4ケース × 5回:
         #
