@@ -599,3 +599,25 @@ def test_underscores_inside_a_tag_are_left_alone():
     for text in ("straw_hat", "black_tights", "looking_at_viewer",
                  "(silver_hair:1.2)", "[bokeh]"):
         assert identity.clamp_weight(text) == text
+
+
+def test_a_tag_with_a_double_underscore_is_broken_beyond_saving():
+    """danbooru のタグに二重アンダースコアは無い。空白は一つの `_` になる。
+
+    実測で出たもの（2026-08-30）: `__tags` `___craft_scene` `__` `__n/a__`
+    `lra__ anime_illustration`。weave が JSON を壊した回の残骸で、語そのもの
+    が壊れているので助からない。
+    """
+    for junk in ("lra__ anime_illustration", "__n/a__", "__",
+                 "__tags", "___craft_scene"):
+        assert identity.clamp_weight(junk) == ""
+    got = identity.clamp_weights(
+        "lra__ anime_illustration, medium_shot, __n/a__, park_bench",
+    )
+    assert got == "medium_shot, park_bench"
+
+
+def test_a_single_edge_underscore_only_loses_the_underscore():
+    """一重なら語は無事。**落とすのは壊れている語だけ。**"""
+    assert identity.clamp_weight("_anime_illustration") == "anime_illustration"
+    assert identity.clamp_weight("_solo") == "solo"

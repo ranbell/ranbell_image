@@ -260,9 +260,20 @@ def _strip_edge_underscores(text: str) -> str:
 def clamp_weight(part: str, cap: float = MAX_TAG_WEIGHT) -> str:
     """One tag, with any emphasis above the cap brought back down to it."""
     body, weight = split_weight(part)
-    text = _strip_edge_underscores(_drop_unbalanced_brackets(
+    text = _drop_unbalanced_brackets(
         _strip_backslash_underscore(str(part or "").strip()),
-    ))
+    )
+    # **danbooru のタグに二重アンダースコアは無い。** 空白は一つの `_` に
+    # 正規化されるので、`__` を含む語は JSON の壊れ方であって語ではない。
+    # 実測で出たもの（2026-08-30）: `__tags` `___craft_scene` `__` `__n/a__`
+    # `lra__ anime_illustration`。**縁を剥がす前に見る** —— 先に剥がすと
+    # `__n/a__` が `n/a` として生き残る。
+    #
+    # 一重の `_solo` `_anime_illustration` は語そのものは無事なので、下の
+    # `_strip_edge_underscores` が助ける。落とすのは壊れている語だけ。
+    if "__" in text:
+        return ""
+    text = _strip_edge_underscores(text)
     if weight is None or weight <= cap:
         return text
     return f"({body}:{cap:g})"
