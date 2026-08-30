@@ -1454,3 +1454,43 @@ def test_weave_refusal_does_not_fire_on_ordinary_picture_words():
     )
     assert notebook.weave_refusal("__tags", "___craft_scene") == "schema_echo"
     assert notebook.weave_refusal("tags", "craft_scene") == "schema_echo"
+
+
+def test_frame_owns_the_crop_without_a_word_list():
+    """画角の家族の一覧（10語）を外しても、旧が守っていたものは全部守る。
+
+    保存済みの weave 出力 30本では旧と 30/30 一致。ここに置くのは、食い違う
+    袋を作ったときに**旧が取りこぼしていた**二つ。
+    """
+    # FRAME は上半身。旧は `close_up` を残していた —— 顔寄りが生き残る。
+    got = notebook.drop_crops_not_in_frame(
+        "close_up, wide_shot, full_body, sitting, from_above",
+        frame="close, upper body",
+    )
+    assert "close_up" not in got
+    assert "wide_shot" not in got and "full_body" not in got
+    # アングルは画角ではない。触らない。
+    assert "from_above" in got and "sitting" in got
+
+    # FRAME が何も言わない矛盾。旧は両方落として**画角がひとつも無い絵**に
+    # した。先に来たほうを残す —— 矛盾は出さず、情報も捨てない。
+    got = notebook.drop_crops_not_in_frame("wide_shot, close_up, sitting", frame="")
+    assert "wide_shot" in got and "close_up" not in got
+
+    # `establishing_shot` は Muse 側の一覧にだけあった。画角の別名は
+    # `framing_from_phrase` に一本化した。
+    got = notebook.drop_crops_not_in_frame(
+        "establishing_shot, upper_body, desk", frame="close, upper body",
+    )
+    assert "establishing_shot" not in got and "upper_body" in got
+    assert identity.framing_from_phrase("establishing shot") == "full_body"
+
+
+def test_the_crop_word_lists_are_gone():
+    """`_WIDE_CROP_TAGS` / `_CLOSE_CROP_TAGS` は戻さない。
+
+    穴を塞ぐたびに語が増えるのがこの現場の硬直の正体で、画角は
+    `framing_from_phrase` という**既にある一つの出どころ**で足りる。
+    """
+    assert not hasattr(notebook, "_WIDE_CROP_TAGS")
+    assert not hasattr(notebook, "_CLOSE_CROP_TAGS")

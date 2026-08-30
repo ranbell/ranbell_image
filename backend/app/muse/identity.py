@@ -143,7 +143,10 @@ def framing_from_phrase(frame: str, fallback: str = "auto") -> str:
          "face_closeup"),
         (r"upper[\s_-]?body|cowboy|上半身", "upper_body"),
         (r"\bzoom\b|寄", "upper_body"),
-        (r"wide|full[\s_-]?body|long[\s_-]?shot|全身|引", "full_body"),
+        # `establishing` はここが唯一の出どころ。以前は Muse 側の
+        # `_WIDE_CROP_TAGS` にだけ書かれていて、FRAME に「establishing shot」と
+        # 書いても画角として読まれなかった。画角の別名は一箇所に置く。
+        (r"wide|full[\s_-]?body|long[\s_-]?shot|establishing|全身|引", "full_body"),
     )
     last_pos = -1
     picked = ""

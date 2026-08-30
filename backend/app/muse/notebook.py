@@ -756,40 +756,51 @@ def stale_wearing_tags(
     return sorted(t for t in dropped if t in have and t not in noise and len(t) >= 4)
 
 
-_WIDE_CROP_TAGS = {
-    "wide_shot", "wide_view", "long_shot", "full_body", "establishing_shot",
-}
-_CLOSE_CROP_TAGS = {
-    "close_up", "closeup", "face_focus", "extreme_close-up", "extreme_closeup",
-}
-
-
 def drop_crops_not_in_frame(tags: str, *, frame: str) -> str:
-    """Keep one crop family. Zoom must not keep wide_shot; wide must not keep close_up."""
+    """One crop per picture, and FRAME owns which one.
+
+    **手書きの家族を二つ外した。** ここには `_WIDE_CROP_TAGS`（5語）と
+    `_CLOSE_CROP_TAGS`（5語）があり、「どちらの家族か」を知らないと働けな
+    かった。総監督（2026-08-30）「見つけた語の一覧を全部外す」。
+
+    「これは画角のタグか」は `framing_from_phrase` 自身が答える —— 手書きの
+    10語すべてを覆い、アングル（`from_above` `dutch_angle` `pov` `profile`）
+    には `auto` を返す。画角の別名の出どころは一箇所だけになった。
+
+    保存済みの weave 出力 30本で**旧と 30/30 一致**。食い違う袋を作って比べ
+    ると、変わるのは三箇所で、うち二つは旧のほうが取りこぼしていた:
+
+        FRAME `close, upper body` / 袋 `close_up, wide_shot, full_body`
+            旧 `close_up` を残す —— FRAME は上半身なのに顔寄りが生き残る
+            新 三つとも落とし、`assemble_positive` が FRAME から鋳造し直す
+
+        FRAME 空 / 袋 `wide_shot, close_up`
+            旧 両方落とす —— **画角がひとつも無い絵**になる
+            新 先に来たほうを残す（矛盾は出さず、情報も捨てない）
+
+        FRAME `close, upper body` / 袋 `establishing_shot, upper_body`
+            旧 落とす／新は素通り —— だったので `establishing` を
+            `framing_from_phrase` に教えた。FRAME に「establishing shot」と
+            書いたときにも読めるようになる（以前は読めなかった）
+    """
     from .identity import bare_tag, framing_from_phrase
 
     crop = framing_from_phrase(frame)
-    if crop == "auto":
-        have = {bare_tag(p) for p in str(tags or "").split(",") if p.strip()}
-        if have & _WIDE_CROP_TAGS and have & _CLOSE_CROP_TAGS:
-            drop = _WIDE_CROP_TAGS | _CLOSE_CROP_TAGS
-        else:
-            return tags
-    elif crop in ("face_closeup", "upper_body", "from_behind"):
-        drop = set(_WIDE_CROP_TAGS)
-        if crop == "face_closeup":
-            drop.add("full_body")
-    elif crop == "full_body":
-        drop = set(_CLOSE_CROP_TAGS)
-    else:
-        return tags
     kept: list[str] = []
+    first = ""
     for part in str(tags or "").split(","):
         tok = part.strip()
         if not tok:
             continue
-        if bare_tag(tok) in drop:
-            continue
+        mine = framing_from_phrase(bare_tag(tok))
+        if mine != "auto":
+            if crop != "auto":
+                if mine != crop:
+                    continue
+            elif first and mine != first:
+                continue
+            else:
+                first = first or mine
         kept.append(tok)
     return ", ".join(kept)
 
