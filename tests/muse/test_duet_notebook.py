@@ -1490,6 +1490,27 @@ def test_the_picture_layer_names_what_the_notebook_never_said():
     assert "white_blouse" not in stray and "park" not in stray
 
 
+def test_the_picture_layer_does_not_call_the_notebook_its_own_stranger():
+    """手帖から素直に生まれた語を「知らない語」に数えない。
+
+    実機（`4639e26f`）で BEAT `sitting, elbows on the desk` の
+    `elbows_on_desk` と SCENE `classroom, near the window` の `near_window`
+    が両方とも並んだ —— **「the」が挟まるだけ**で部分一致が外れる。表記ゆれの
+    たびに穴が開くのは、この現場が語の一覧を増やし続けてきたのと同じ理由。
+    """
+    session = {"chat": [], "notebook": notebook.blank(), "craft": {}}
+    notebook.apply_patch(session["notebook"], {
+        "scene": "classroom, near the window",
+        "beat": "sitting, elbows on the desk",
+    })
+    service._turn_trace(session, line="x", asked=set(),
+                        before={}, after=notebook.shot_snapshot(session["notebook"]))
+    service._trace_picture(
+        session, tags="elbows_on_desk, near_window, rooftop", scene="x" * 90)
+    stray = session["turn_trace"][-1]["picture"]["stray_tags"]
+    assert stray == ["rooftop"]
+
+
 def test_the_trace_is_a_ring_and_never_judges():
     """撮影1本ぶん残る。**判定には使わない。読むためだけ。**"""
     session = {"chat": [], "notebook": notebook.blank()}

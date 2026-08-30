@@ -1271,15 +1271,23 @@ def _trace_picture(session: dict[str, Any], *, tags: str, scene: str) -> None:
     if not log:
         return
     nb = notebook_mod.of(session)
-    known = " ".join(
-        str(nb.get(k) or "") for k in notebook_mod.SHOT_KEYS
-    ).lower().replace("_", " ")
+    # **語の集合で見る。** 部分一致で見た最初の版は、手帖から素直に生まれた
+    # 語まで「知らない語」に数えた —— BEAT `sitting, elbows on the desk` から
+    # の `elbows_on_desk` も、SCENE `classroom, near the window` からの
+    # `near_window` も、**「the」が挟まるだけ**で外れる。表記ゆれのたびに穴が
+    # 開くのは、この現場が語の一覧を増やし続けてきたのと同じ理由。
+    known = {
+        w for w in " ".join(
+            str(nb.get(k) or "") for k in notebook_mod.SHOT_KEYS
+        ).lower().replace("_", " ").replace(",", " ").split() if w
+    }
     stray: list[str] = []
     for part in str(tags or "").split(","):
         tok = identity.bare_tag(part)
         if not tok:
             continue
-        if tok.replace("_", " ") not in known:
+        words = [w for w in tok.lower().replace("_", " ").split() if w]
+        if words and not all(w in known for w in words):
             stray.append(tok)
     log[-1]["picture"] = {
         "stray_tags": stray[:20],
