@@ -3801,7 +3801,24 @@ async def _run_duet_scripter(
         # 訊くと 20/25（落ちた1件も取り違えではなく訳語のぶれ）。
         per_person: dict[str, str] = {}
         for kind in ("wearing", "beat"):
-            if not (partner and kind in asked):
+            # **一人でも訊く。** ここは `partner` を条件にしていたので、
+            # 主演一人の撮影では服の係が一度も走らなかった。総監督
+            # （2026-08-30）「キーワードが出てきたら発動ってなってるので
+            # は？　文脈を見て**今持っているのは手放したか**の判定がいる」。
+            #
+            # 実測（9件×5回・`ask_solo_wear.py`）:
+            #
+            #     服だけを訊く      45/45
+            #     本番の compile    36/45
+            #
+            # 落ちたのは遠回しな外し方だけ —— 「その帽子、ちょっと違うかも」
+            # 1/5、「帽子、今日は合わないね」0/5。どちらも
+            # `_STRIKE_NOTE_RE` にも当たらない言い方で、いままで**どこにも
+            # 引っかからなかった**。
+            #
+            # 姿勢（`beat`）はまだ一人ぶんを測っていないので走らない
+            # （`_PER_PERSON` の一人ぶん条文が空 → 係が即座に空を返す）。
+            if kind not in asked:
                 continue
             began_k = time.monotonic()
             per_person.update(await chain.read_per_person(

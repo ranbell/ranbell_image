@@ -2497,10 +2497,39 @@ Return one JSON object with exactly these two keys, and nothing else:
 {keys}"""
 
 
-#: 欄の組と、その欄を訊く条文と、`NOW:` に使う動詞。
+WARDROBE_SOLO_SYSTEM = """You keep the wardrobe notes for a photo shoot.
+
+Read the director's line and say what she has on AFTER it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `淡い青のドレス` is `light blue dress`. Never copy his words through.
+- Comma separated, plain garment words.
+- Only what is ON her body — clothes, hair, accessories. Not the place, not
+  the pose, not what she is holding.
+- **Everything she still has on, not only what changed.** Say the whole
+  outfit. If something came off, simply leave it out.
+- If the line does not change what she has on, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
+#: 欄の組・二人ぶんの条文・**一人ぶんの条文**・`NOW:` に使う動詞。
+#:
+#: 一人ぶんが空の欄は、一人のときは走らない —— まだ測っていないから。
+#: 服は測ってある（9件×5回、`ask_solo_wear.py`）:
+#:
+#:     服だけを訊く      45/45
+#:     本番の compile    36/45
+#:
+#: 落ちたのは遠回しな外し方だけだった —— 「その帽子、ちょっと違うかも」1/5、
+#: 「帽子、今日は合わないね」0/5。総監督（2026-08-30）「キーワードが出てきた
+#: ら発動ってなってるのでは？　文脈を見て**今持っているのは手放したか**の
+#: 判定がいる」。文面を判定するのをやめて、状態を訊く。
 _PER_PERSON = {
-    "wearing": (("wearing", "wearing_b"), WARDROBE_SYSTEM, "is wearing"),
-    "beat": (("beat", "beat_b"), BEAT_SYSTEM, "is"),
+    "wearing": (("wearing", "wearing_b"), WARDROBE_SYSTEM,
+                WARDROBE_SOLO_SYSTEM, "is wearing"),
+    "beat": (("beat", "beat_b"), BEAT_SYSTEM, "", "is"),
 }
 
 
@@ -2532,14 +2561,22 @@ async def read_per_person(
     答えられなかった欄は返さない（`unchanged` も返さない）。呼び出し側は
     「返ってきた欄だけ」を書けばよい。
     """
-    fields, system, verb = _PER_PERSON[kind]
+    fields, system, solo_system, verb = _PER_PERSON[kind]
     a, b = str(name_a or "").strip(), str(name_b or "").strip()
-    if not (a and b and str(note or "").strip()):
+    if not (a and str(note or "").strip()):
         return {}
-    keys = json.dumps({a: "…", b: "…"}, ensure_ascii=False)
+    if not b:
+        # **一人でも訊く。** ここは長らく二人のときしか走らなかった
+        # （`a and b` が無いと即 return）。二人で 25/25 だった問いが、
+        # 一人の撮影では一度も使われていない。実測で 45/45 対 36/45。
+        if not solo_system:
+            return {}
+        system = solo_system
+    keys = json.dumps({a: "…"} if not b else {a: "…", b: "…"},
+                      ensure_ascii=False)
     now = "\n".join(x for x in (
         f"{a} {verb}: {now_a.strip()}" if str(now_a or "").strip() else "",
-        f"{b} {verb}: {now_b.strip()}" if str(now_b or "").strip() else "",
+        f"{b} {verb}: {now_b.strip()}" if b and str(now_b or "").strip() else "",
     ) if x)
     prompt = "\n\n".join(x for x in (
         f"NOW:\n{now}" if now else "",
@@ -2565,7 +2602,8 @@ async def read_per_person(
     if not isinstance(got, dict):
         return {}
     out: dict[str, str] = {}
-    for name, field in ((a, fields[0]), (b, fields[1])):
+    pairs = [(a, fields[0])] + ([(b, fields[1])] if b else [])
+    for name, field in pairs:
         val = re.sub(r"\s+", " ", str(got.get(name) or "")).strip()
         if val and val.lower() not in ("unchanged", "none", "-", "同じ"):
             out[field] = val

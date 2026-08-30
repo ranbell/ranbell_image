@@ -1294,15 +1294,68 @@ def test_the_pose_clerk_uses_the_same_road():
     assert chain._PER_PERSON["wearing"][0] == ("wearing", "wearing_b")
 
 
-def test_the_wardrobe_clerk_needs_two_names():
-    """ソロでは呼ばない。名前が片方しか無ければ何も返さない。"""
+def test_the_wardrobe_clerk_also_works_alone():
+    """**一人でも訊く。** 長らく二人のときしか走らなかった係。
+
+    総監督（2026-08-30）「キーワードが出てきたら発動ってなってるのでは？
+    文脈を見て**今持っているのは手放したか**の判定がいる」。
+
+    実測（9件×5回・`ask_solo_wear.py`。いま着ているのは麦わら帽子ほか5点）:
+
+        服だけを訊く      45/45
+        本番の compile    36/45
+
+    落ちたのは遠回しな外し方だけ —— 「その帽子、ちょっと違うかも」1/5、
+    「帽子、今日は合わないね」0/5。どちらも `_STRIKE_NOTE_RE` にも当たらず、
+    **どこにも引っかからなかった**言い方。
+    """
     import asyncio
 
-    got = asyncio.run(
-        chain.read_wardrobe(None, note="赤いセーター", name_a="みお",
-                            name_b="", model="m", num_ctx=1024)
-    )
-    assert got == {}
+    class _Ollama:
+        def __init__(self, reply):
+            self.reply = reply
+            self.prompts: list[str] = []
+
+        def generate_text_stream(self, prompt, **kw):
+            self.prompts.append(str(prompt))
+
+            async def _stream():
+                yield {"type": "token", "text": self.reply}
+            return _stream()
+
+    oc = _Ollama('{"各務 みお": "oversized hoodie, denim skirt, sneakers"}')
+    got = asyncio.run(chain.read_wardrobe(
+        oc, note="その帽子、ちょっと違うかも。", name_a="各務 みお", name_b="",
+        wearing="straw hat, oversized hoodie, denim skirt, sneakers",
+        model="m", num_ctx=1024))
+    # 帽子だけが落ちて、残りはそのまま —— 「全部言う」条文の効き目。
+    assert got == {"wearing": "oversized hoodie, denim skirt, sneakers"}
+    # 相方の欄には触らない。
+    assert "wearing_b" not in got
+    # 一人ぶんの問いに、いない相方の名前を出さない。
+    assert "平岡" not in oc.prompts[0]
+
+    # 読めない返しは何も書かない —— 空を書いて服を消さない。
+    assert asyncio.run(chain.read_wardrobe(
+        _Ollama("すみません、わかりません"), note="x",
+        name_a="各務 みお", name_b="", model="m", num_ctx=1024)) == {}
+
+
+def test_the_pose_clerk_stays_on_two_people_until_it_is_measured():
+    """姿勢の一人ぶんは**まだ測っていない**ので走らせない。
+
+    服は 45/45 の裏づけがある。姿勢に同じ裏づけは無く、測る前に道を開ける
+    のはこの現場のやり方ではない。`_PER_PERSON` の一人ぶん条文が空である
+    ことが、そのまま「まだ」を意味する。
+    """
+    import asyncio
+
+    assert chain._PER_PERSON["beat"][2] == ""
+    assert chain._PER_PERSON["wearing"][2] != ""
+    # 一人で呼んでも、模型に触らずに空を返す（`None` でも落ちない）。
+    assert asyncio.run(chain.read_beats(
+        None, note="ベンチに座って。", name_a="各務 みお", name_b="",
+        model="m", num_ctx=1024)) == {}
 
 
 def _dress_session(sets_a, sets_b=None, wearing="", wearing_b=""):
