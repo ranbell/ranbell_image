@@ -1710,6 +1710,12 @@ expression_b), and CREW LOOK BODY when present:
   **Her face is a field now, and it must reach the tags.** Whatever EXPRESSION
   says — `smile`, `blush`, `parted_lips`, `teary_eyes`, `frown` — goes in the
   bag. A bag with no face tag is a blank stare.
+  **An empty EXPRESSION does not erase a face.** A notebook written before that
+  field existed — and any turn where the compile put the face on the posture —
+  carries it in BEAT: `sitting at the piano, hands trembling, face on the verge
+  of tears`. Render that face, from wherever the notebook keeps it. The gaze
+  rule above swaps a stale value for the current one; an empty field is not
+  something to swap to, and dropping is not swapping.
 - craft_scene opens on posture. Stem first (sitting / standing / kneeling /
   crouching), then where the weight sits, what the hands do, what she holds,
   how the torso turns, what the face is doing as FRAME allows.

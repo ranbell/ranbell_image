@@ -250,3 +250,31 @@ def test_an_outfit_line_left_out_is_not_a_parse_failure():
     )
     assert "wearing" not in plan
     assert plan["place"] == "A hallway."
+
+
+def test_an_empty_expression_does_not_erase_a_face_the_beat_still_carries():
+    """表情の欄を作った副作用 —— **顔が絵から消えた。**
+
+    実測（30本パック・2026-08-31）。手帖は
+    `beat: sitting at the piano, hands trembling, face on the verge of tears`
+    と書いているのに:
+
+        8/28（欄ができる前）「Her face is caught in a moment of quiet
+                            breakdown … eyes brimming with tears」crying あり
+        8/31（欄ができた後）「Her hands tremble against the keys … She wears a
+                            school uniform」  ← 顔が消え、服で埋めている
+
+    契約の「視線は FRAME が現行」は**入れ替え**なので成立する —— FRAME は
+    ほぼ常に埋まっている。表情の欄は空のことが多く（欄より前の撮影は全部）、
+    入れ替え先が無いので**落とすだけ**になっていた。
+
+    一行足して、その試験は 0/5 → 3/5、崩れた回を除いた合格は 70% → 88%。
+    """
+    from app.muse import chain
+
+    text = chain.SCRIPTER_WEAVE_SYSTEM
+    assert "An empty EXPRESSION does not erase a face" in text
+    # 視線の規則（入れ替え）は残す —— あちらは実測で効いている。
+    assert "The gaze is FRAME's" in text
+    # 顔の規則は、視線の規則より**後**に置く（例外は原則のあとに読ませる）。
+    assert text.index("The gaze is FRAME's") < text.index("does not erase a face")
