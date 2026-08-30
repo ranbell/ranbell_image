@@ -555,3 +555,25 @@ def test_the_panel_framing_still_lands_beside_a_different_crop_word():
         framing="full_body", subject=["1girl", "solo"],
     )
     assert "full_body" in out
+
+
+def test_a_json_leftover_bracket_never_reaches_the_sampler():
+    """実測（`2acfdbe2`）で `anime_illustration]` が板のプロンプトに載った。
+
+    weave が JSON の配列ごと文字列にして返した回。`bare_tag` は正しく
+    `anime_illustration` を返すが、**サンプラーへ行く生の文字**のほうに `]` が
+    残る。`[...]` は強調の構文なので、片割れはその語の重みを変える。
+    """
+    assert identity.clamp_weight("anime_illustration]") == "anime_illustration"
+    assert identity.clamp_weight("[solo") == "solo"
+    got = identity.clamp_weights(
+        "[solo, close-up, oversized_hoodie, anime_illustration], denim_skirt",
+    )
+    assert "]" not in got and "[" not in got
+    assert "anime_illustration" in got and "denim_skirt" in got
+
+
+def test_balanced_emphasis_is_left_alone():
+    """釣り合っている括弧は総監督か係が書いたもの。触らない。"""
+    for text in ("(silver_hair:1.2)", "[bokeh]", "(soft)", "((deep))", "plain_tag"):
+        assert identity.clamp_weight(text) == text

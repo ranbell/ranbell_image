@@ -220,10 +220,34 @@ def bare_tag(part: str) -> str:
     return _norm(split_weight(part)[0])
 
 
+def _drop_unbalanced_brackets(text: str) -> str:
+    """Brackets with no partner in this tag — a JSON leftover, not emphasis.
+
+    実測（`2acfdbe2`・2026-08-30）で板のプロンプトに `anime_illustration]` が
+    載った。weave が JSON の配列ごと文字列にして返した回で、`split_weight` は
+    **比べる用の値**からしか括弧を落とさない（`bare_tag` は正しく
+    `anime_illustration` を返していた）ので、サンプラーへ行く生の文字のほうに
+    `]` が残る。
+
+    `[...]` も `(...)` もプロンプトでは**強調の構文**なので、片方だけ残ると
+    その語の重みが変わる。**釣り合っているものは触らない** —— 相方のいない
+    片割れだけを落とす。語の一覧ではなく、括弧が合っているかどうかだけを見る。
+    """
+    s = str(text or "")
+    for open_ch, close_ch in (("(", ")"), ("[", "]")):
+        while s.count(open_ch) > s.count(close_ch):
+            s = s.replace(open_ch, "", 1)
+        while s.count(close_ch) > s.count(open_ch):
+            s = "".join(s.rsplit(close_ch, 1))
+    return s.strip()
+
+
 def clamp_weight(part: str, cap: float = MAX_TAG_WEIGHT) -> str:
     """One tag, with any emphasis above the cap brought back down to it."""
     body, weight = split_weight(part)
-    text = _strip_backslash_underscore(str(part or "").strip())
+    text = _drop_unbalanced_brackets(
+        _strip_backslash_underscore(str(part or "").strip()),
+    )
     if weight is None or weight <= cap:
         return text
     return f"({body}:{cap:g})"
