@@ -1494,3 +1494,47 @@ def test_the_crop_word_lists_are_gone():
     """
     assert not hasattr(notebook, "_WIDE_CROP_TAGS")
     assert not hasattr(notebook, "_CLOSE_CROP_TAGS")
+
+
+def test_a_ban_steps_aside_when_the_notebook_names_it_again():
+    """一度禁止した語に、手帖が戻ってこられる。
+
+    `live_struck` は模型に見せる追放を手帖で剪定していたのに、執行側の
+    `drop_banned` は剪定していなかった。実測（2026-08-30）:
+
+        手帖が「daytime」と言っている状態で
+           live_struck  []          ← 模型には「禁止」と伝わらない
+           drop_banned  daytime を落とす
+
+    weave は毎ターン書き、毎ターン黙って消される。**絵は昼に戻れない。**
+    """
+    s = {"session_id": "x", "notebook": notebook.blank(), "craft": {},
+         "banned": ["daytime"], "struck": ["daytime"]}
+    notebook.apply_patch(s["notebook"], {"scene": "park, night"})
+    # 手帖が夜のうちは、禁止は立っている。
+    assert service.banned_now(s) == ["daytime"]
+    assert "daytime" not in service.drop_banned(s, "daytime, park")
+
+    # 総監督が昼に戻した。手帖がそう言った以上、絵も戻る。
+    notebook.apply_patch(s["notebook"], {"scene": "park, daytime"})
+    assert service.banned_now(s) == []
+    assert "daytime" in service.drop_banned(s, "daytime, park")
+    # 帳簿は消えていない —— 手帖がまた離れれば、また効く。
+    assert service.banned_tags(s) == ["daytime"]
+
+
+def test_a_refusal_takes_the_garment_out_of_the_notebook_too():
+    """禁止だけ立てて WEARING を置き去りにしない。
+
+    手帖が「着ている」と言い、絵から消える —— この食い違いがそのまま次の
+    ターンへ渡ると「脱いだ服が戻る」に化ける。手帖がまだ着ていると言って
+    いるのだから、戻るのは当然だった。
+    """
+    s = {"session_id": "x", "notebook": notebook.blank(), "craft": {"tags": ""},
+         "banned": [], "struck": []}
+    notebook.apply_patch(s["notebook"],
+                         {"wearing": "white blouse, knit cardigan, goggles"})
+    service.apply_removals(s, ["goggles"], [])
+    wearing = str(notebook.of(s).get("wearing") or "")
+    assert "goggles" not in wearing
+    assert "blouse" in wearing and "cardigan" in wearing

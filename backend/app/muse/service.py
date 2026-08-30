@@ -1324,6 +1324,40 @@ def banned_tags(session: dict[str, Any]) -> list[str]:
     return [str(t) for t in (session.get("banned") or []) if str(t).strip()]
 
 
+def banned_now(session: dict[str, Any]) -> list[str]:
+    """禁止のうち、**いま手帖が名指ししていないもの**だけ。
+
+    `live_struck` は模型に見せる追放を手帖で剪定するのに、執行側の
+    `drop_banned` は剪定していなかった。二つの仕組みが食い違っていて、
+    実測（2026-08-30）でこうなる:
+
+        手帖が「daytime」と言っている状態で
+           live_struck  []          ← 模型には「禁止」と伝わらない
+           drop_banned  daytime を落とす
+
+    一度でも `daytime` を禁止すると、**後から手帖が昼に戻っても絵は戻れ
+    ない。** weave は毎ターン書き、毎ターン黙って消される。総監督の
+    「場所が入れ替わらない」の一形態。
+
+    原則は `_sane_strike` に既に書いてある —— *The notebook is the shot.
+    Nothing it currently names can be struck.* 従っていたのは表示側だけ
+    だった。ここで執行側を揃える。
+
+    **総監督の拒否を弱めるものではない。** 禁止は立ち続ける —— 手帖が
+    その語を名指しし直したときだけ引っ込む。そして手帖にそれが載るのは、
+    総監督がそう言ったときだけ。
+
+    帳簿（`banned_tags`）はそのまま。足し引きの勘定は生の状態で行う
+    （`apply_removals` が「もう禁止されているか」を数え違える）。
+    """
+    live = notebook_mod.shot_tokens(notebook_mod.of(session))
+    return [
+        t for t in banned_tags(session)
+        if not (notebook_mod.wearing_tokens(t) & live)
+        and identity.bare_tag(t) not in live
+    ]
+
+
 def drop_banned(session: dict[str, Any], tags: str) -> str:
     """Strip anything the Showrunner has refused, whoever just wrote it.
 
@@ -1332,7 +1366,7 @@ def drop_banned(session: dict[str, Any], tags: str) -> str:
     alive in the conversation for the rest of the session. A filter needs to
     say nothing at all.
     """
-    gone = set(banned_tags(session))
+    gone = set(banned_now(session))
     if not gone or not str(tags or "").strip():
         return tags
     return ", ".join(
@@ -1839,7 +1873,7 @@ def _reassemble(session: dict[str, Any]) -> None:
             wearing_b=str(nb.get("wearing_b") or ""),
             beat_b=str(nb.get("beat_b") or ""),
             frame=str(nb.get("frame") or ""),
-            banned=set(banned_tags(session)),
+            banned=set(banned_now(session)),
         )
         craft["prompt"] = identity.assemble_positive(
             _identity_tags(session), str(craft.get("tags") or ""),
@@ -1896,7 +1930,7 @@ def _ensure_garments(session: dict[str, Any], garments: list[str]) -> list[str]:
     to go.
     """
     craft = session.setdefault("craft", {})
-    gone = set(banned_tags(session))
+    gone = set(banned_now(session))
     have = set(identity.tag_names(str(craft.get("tags") or "")))
     missing = [t for t in garments if t not in have and t not in gone]
     if not missing:
@@ -1905,6 +1939,29 @@ def _ensure_garments(session: dict[str, Any], garments: list[str]) -> list[str]:
     craft["tags"] = ", ".join(parts + missing)
     _reassemble(session)
     return missing
+
+
+def _undress_notebook(session: dict[str, Any], gone: list[str]) -> None:
+    """禁止された服を WEARING からも外す —— 手帖と絵を同じ話にする。
+
+    実測（`test_costume`）: 衣装係が WEARING に `goggles` を書き、総監督が
+    「ゴーグル外して」と言う。禁止は立つが WEARING は `goggles` のまま。
+    **手帖は着ていると言い、絵からは消える。**
+
+    どちらか一方だけを見ている限り気づけない食い違いで、そのまま次の
+    ターンへ渡ると「脱いだ服が戻る」に化ける —— 手帖がまだ着ていると
+    言っているのだから、戻るのは当然だった。
+    """
+    nb = notebook_mod.of(session)
+    for field in ("wearing", "wearing_b"):
+        line = str(nb.get(field) or "")
+        if not line.strip():
+            continue
+        for tag in gone:
+            for name in notebook_mod.garment_matches(line, tag):
+                line = notebook_mod.beat_without(line, name)
+        if line.strip() != str(nb.get(field) or "").strip():
+            notebook_mod.apply_patch(nb, {field: line.strip()})
 
 
 def apply_removals(
@@ -1940,6 +1997,16 @@ def apply_removals(
     # nobody after them needs the noun at all.
     session["just_banned"] = list(added)
     session["just_restored"] = list(freed)
+    # **手帖からも脱がせる。** 禁止だけ立てて WEARING を置き去りにすると、
+    # 手帖は着ていると言い、絵からは消える —— 二つの記録が食い違ったまま
+    # 残る。`banned_now` が手帖に従うようになったので、この食い違いは
+    # 「禁止が効かない」として現れる（`test_costume` が実際に落ちた）。
+    #
+    # 手帖側で脱がせるのは `notebook.beat_without` / `garment_matches` の
+    # 仕事で、台本係の `wearing_drop` が走る道と同じもの。ここは、係が
+    # 先に refusal を読んだときの取りこぼしを埋める。
+    if added:
+        _undress_notebook(session, added)
 
     craft = session.setdefault("craft", {})
     before = str(craft.get("tags") or "")
@@ -3241,7 +3308,7 @@ def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     nb = notebook_mod.of(session)
     have = set(identity.tag_names(tags))
     have |= {t for tag in have for t in notebook_mod.wearing_tokens(tag)}
-    gone = set(banned_tags(session)) | notebook_mod.struck_tokens(session)
+    gone = set(banned_now(session)) | notebook_mod.struck_tokens(session)
     missing: list[str] = []
     # The posture is the other thing the notebook says and the weave drops.
     # Measured live: BEAT read "standing, holding the hem…" and the woven bag
@@ -3356,7 +3423,7 @@ def _drop_garment_aliases(
         wearing=str(nb.get("wearing") or ""),
         wearing_b=str(nb.get("wearing_b") or ""),
         struck=notebook_mod.struck_tokens(session),
-        banned=set(banned_tags(session)),
+        banned=set(banned_now(session)),
         sides=sides,
         partner=bool(session.get("partner_character") or {}),
     )
@@ -3433,7 +3500,7 @@ def _apply_compiled_craft(
         wearing=str(nb_wardrobe.get("wearing") or ""),
         wearing_b=str(nb_wardrobe.get("wearing_b") or ""),
         struck=notebook_mod.struck_tokens(session),
-        banned=set(banned_tags(session)),
+        banned=set(banned_now(session)),
         sides=sides,
         partner=bool(session.get("partner_character") or {}),
     )
@@ -6521,7 +6588,7 @@ async def compose_scene_if_needed(
         return session
 
     usable, _ = facets.warn_invented_nouns(
-        table, scene, banned=banned_tags(session),
+        table, scene, banned=banned_now(session),
         extra=[_style(session), str((session.get("character") or {}).get("name") or "")],
     )
     if scene and usable:
@@ -6569,7 +6636,7 @@ def _scrub_notebook_craft(session: dict[str, Any]) -> None:
         wearing_b=str(nb.get("wearing_b") or ""),
         beat_b=str(nb.get("beat_b") or ""),
         frame=str(nb.get("frame") or ""),
-        banned=set(banned_tags(session)),
+        banned=set(banned_now(session)),
     )
     if tags != str(craft.get("tags") or ""):
         craft["tags"] = tags
@@ -6654,7 +6721,7 @@ async def weave_craft_if_needed(
             wearing_b=str(nb.get("wearing_b") or ""),
             beat_b=str(nb.get("beat_b") or ""),
             frame=str(nb.get("frame") or ""),
-            banned=set(banned_tags(session)),
+            banned=set(banned_now(session)),
         )
         scene_out = str(result.get("craft_scene") or "")
         if result.get("valid") and tags and scene_out and not refused:
