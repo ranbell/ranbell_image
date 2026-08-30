@@ -3772,6 +3772,22 @@ async def _run_duet_scripter(
                 model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
             ),
         )
+        # **総監督が決定を彼女に渡したターン。** `scripter_intent` には
+        # 流さない —— 下流は四語を前提にしている。合図として置くだけ。
+        #
+        # 総監督（2026-08-30）「『どうしたい』『したいことしてみて』などの
+        # 自主的な行動を求められた場合、**自らの希望する行動をとっていい**
+        # ことにしないといけない。これがないと、どうしようどうしようと何も
+        # 決まらない状態となり、回答の判断が難しくなる」。
+        #
+        # 契約の六条だけでは足りなかった（実測 `ask_decide.py`：具体
+        # 9/15 対 9/15、迷い 5/15 → 3/15）。「決めていい」は伝わるが
+        # 「決めなさい」までは押せない —— 大きい条文に足すと埋もれる、
+        # という今日ずっと出ている形。
+        #
+        # **新しい正規表現は足さない。** 意図の係は毎ターン既に走っている
+        # ので、そこに一語増やせば呼び出しは増えない（実測 30/30）。
+        session["invited"] = kind == "invite"
         # The clerk may RAISE a turn to a shot; it may never demote one.
         clerk_kind = kind
         if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):
@@ -4796,6 +4812,11 @@ async def _duet_talk(
     # not fold CARD into beat — mouth deflected, picture must stay put.
     deflecting = bool(session.get("manager_note"))
     await _after_actress_spoke(db, session)
+    # **彼女が決めた回は、その決定を先に手帖へ通す。** 折り込みより前 ——
+    # 折り込みは姿勢しか足さないので、場所や服を選んだ回はここで拾わないと
+    # 落ちる。冗談をかわした回（`deflecting`）は走らせない。
+    if not deflecting:
+        await _carry_out_her_choice(db, ollama, session, cfg=cfg)
     if fold and uses_notebook(session) and fresh_card and not deflecting:
         began = time.monotonic()
         await _fold_muse_after_talk(
@@ -4977,6 +4998,45 @@ def _settle_repair_notice(session: dict[str, Any]) -> None:
         extra={f: {"before": str(before.get(f) or ""), "after": "(未着手)"}
                for f in still},
     )
+
+
+async def _carry_out_her_choice(
+    db, ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> None:
+    """総監督が決定を渡したターン —— **彼女の一行を、その回の指示として読む。**
+
+    総監督（2026-08-30）「『どうしたい』『したいことしてみて』などの自主的な
+    行動を求められた場合、**自らの希望する行動をとっていい**ことにしないと
+    いけない。これがないと、どうしようどうしようと何も決まらない状態となり、
+    回答の判断が難しくなる」。
+
+    順番がそのまま原因だった。台本係は**彼女が話す前**に走るので、
+    「どうしたい？」の回に手帖へ書けるものは何も無い。そのあと彼女が
+    「公園のベンチに座って、寂しそうな顔を撮ってください」と**決めても、
+    それを読む段が無い。** 折り込みは `scene` も `wearing` も書かない契約
+    なので、ここの受け皿にはならない。
+
+    だから彼女の答えを、もう一度 compile に通す。**彼女がその回の監督。**
+
+    走るのは `invite` と読まれた回だけ（実測 30/30・`ask_invite.py`）。
+    彼女が何も決めなければ、条文が casual を返して手帖は動かない。
+    """
+    if not session.get("invited") or not uses_notebook(session):
+        return
+    line = _last_lead_say(session).strip()
+    if not line:
+        return
+    began = time.monotonic()
+    try:
+        await _run_duet_scripter(
+            db, ollama, session, line, cfg=cfg,
+            repair=chain.SCRIPTER_INVITE_NOTE,
+        )
+    except Exception:
+        logger.warning("[muse] her own choice did not compile", exc_info=True)
+        _stage(session, "彼女の選択（読めず）", began)
+        return
+    _stage(session, "彼女の選択を指示として読む", began)
 
 
 async def _fold_muse_after_talk(

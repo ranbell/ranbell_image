@@ -1608,3 +1608,63 @@ def test_the_clerk_writes_into_the_rewrite_log():
     src = inspect.getsource(service._run_duet_scripter)
     note = src.index("_note_rewrite(\n                session, f\"{'・'.join(sorted(per_person))} 係\"")
     assert note > src.index("notebook_mod.apply_patch(nb, per_person)")
+
+
+def test_an_invitation_is_a_signal_not_an_intent():
+    """`invite` は**合図**であって、手帖の意図ではない。
+
+    下流は `shot`/`mixed`/`casual`/`recall` の四語を前提にしている。総監督が
+    決定を彼女に渡した回を名指しするためだけに在るので、`scripter_intent`
+    には流さない。
+
+    実測（14件×5回・`ask_invite.py`）:
+
+        いまの係     40/70   ← 「どうしたい？」系6件は 0/5、casual に落ちる
+        invite 入り  69/70   ← invite は 30/30、他の種類も崩れない
+    """
+    assert "invite" in chain.CLASSIFY_INTENTS
+    assert chain.parse_classified_intent("invite") == "invite"
+
+    import inspect
+    src = inspect.getsource(service._run_duet_scripter)
+    assert 'session["invited"] = kind == "invite"' in src
+    # `intent` を上げるのは shot/mixed だけ —— invite は素通りさせる。
+    assert 'if kind in ("shot", "mixed") and intent not in ("shot", "mixed"):' in src
+
+
+def test_her_choice_is_read_as_the_direction_for_that_turn():
+    """決定を渡された回は、**彼女の一行がその回の指示**になる。
+
+    順番がそのまま原因だった。台本係は彼女が話す前に走るので、「どうしたい？」
+    の回に手帖へ書けるものは無い。そのあと彼女が決めても、それを読む段が
+    無かった。折り込みは `scene` も `wearing` も書かない契約なので受け皿に
+    ならない。
+    """
+    import inspect
+    src = inspect.getsource(service._carry_out_her_choice)
+    # 走るのは invite の回だけ
+    assert 'if not session.get("invited")' in src
+    # 彼女の一行を渡す
+    assert "_last_lead_say(session)" in src
+    # 彼女が何も言わなければ何もしない
+    assert "if not line:" in src
+    # 折り込みより前に走る（折り込みは姿勢しか足さない）
+    outer = inspect.getsource(service._duet_talk) if hasattr(service, "_duet_talk") else ""
+    del outer
+    src2 = inspect.getsource(service)
+    call = src2.index("await _carry_out_her_choice(")
+    fold = src2.index("if fold and uses_notebook(session) and fresh_card")
+    assert call < fold, "折り込みより後だと、場所と服の選択が落ちる"
+
+
+def test_a_deflected_joke_never_becomes_her_choice():
+    """冗談をかわした回は走らせない。
+
+    契約の三条で「またまた、冗談やめてくださいよー」と流した回に、その一言を
+    指示として読むと、かわしたはずの内容が画になる。
+    """
+    import inspect
+    src = inspect.getsource(service)
+    call = src.index("await _carry_out_her_choice(")
+    guard = src.rindex("if not deflecting:", 0, call)
+    assert call - guard < 400, "`deflecting` の門の内側に無い"

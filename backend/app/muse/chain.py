@@ -1812,6 +1812,17 @@ SCRIPTER_FOLD_NOTE = (
     "invent clothes. Do not emit tags."
 )
 
+SCRIPTER_INVITE_NOTE = (
+    "HER CALL: the showrunner handed this turn to her — he asked what SHE "
+    "wants. SHOWRUNNER'S LATEST LINE below is HER OWN answer, not his "
+    "direction. Treat it as the direction for this turn: write the fields she "
+    "actually chose, in her words, as absolute finished values. She may choose "
+    "the place, the clothes, the posture, the camera — whatever she named. "
+    "Leave every field she did not name alone. If she named nothing concrete, "
+    "return intent casual and patch nothing."
+)
+
+
 def scripter_repair_note(missing: Iterable[str]) -> str:
     """The second ask, naming exactly what the first one left out.
 
@@ -1905,18 +1916,32 @@ it is. Exactly one word.
             says nothing else
   mixed   — it moves the picture AND speaks to her in the same breath
             (「疲れてない？…あと髪は下ろしたままで」)
+  invite  — he hands the choice to her:「どうしたい？」「好きにして」
+            「任せる」「決めていいよ」. He is asking for HER decision instead
+            of making one. He may narrow it (「ポーズどうする？」) — still
+            `invite`
   casual  — it only speaks to her. Praise, worry, jokes, small talk. The
-            picture does not move
+            picture does not move and he is not asking her to move it
   recall  — it asks about an EARLIER shoot —「この間のやつ覚えてる？」.
             Only the past: saying `recall` sends the room digging through old
             sessions. A question about right now (「今なに着てる？」) or about
-            her (「これからどうしたい？」「今どんな気分？」) is `casual` —
-            neither moves the picture, and neither wants old shoots dug up
+            how she feels (「今どんな気分？」) is `casual`
 
 Answer with exactly one word. No explanation, no punctuation.
 """.strip()
 
-CLASSIFY_INTENTS = ("shot", "mixed", "recall", "casual")
+# **`invite` は手帖の意図ではなく、合図。** `scripter_intent` には流さない
+# （下流が `shot`/`mixed`/`casual`/`recall` の四語を前提にしている）。
+# 総監督が決定を彼女に渡したターンを名指しするためだけに在る。
+#
+# 実測（14件×5回・`ask_invite.py`）:
+#
+#     いまの係     40/70   ← 「どうしたい？」系6件は 0/5、casual に落ちる
+#     invite 入り  69/70   ← invite は 30/30、他の種類も崩れない
+#
+# 唯一の揺れは「どうしよっか、この光。もう少し落とそう。」の 4/5 で、
+# これは実際に紛らわしい行（訊いているようで、そのまま指示している）。
+CLASSIFY_INTENTS = ("shot", "mixed", "invite", "recall", "casual")
 
 
 def parse_classified_intent(raw: str) -> str:

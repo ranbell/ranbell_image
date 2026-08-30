@@ -213,3 +213,40 @@ async def test_a_note_removes_the_prop_and_the_next_seat_cannot_put_it_back():
     service._apply_turn(session, turn)
     assert "cleaning_rag" not in session["craft"]["tags"]
     assert "bucket" in session["craft"]["tags"]
+
+
+def test_the_contract_lets_her_decide_when_she_is_asked_to():
+    """出演契約に「**選んでよい**」がある。
+
+    総監督（2026-08-30）「『どうしたい』『したいことしてみて』などの自主的な
+    行動を求められた場合、**自らの希望する行動をとっていい**ことにしないと
+    いけない。これがないと、どうしようどうしようと何も決まらない状態となり、
+    回答の判断が難しくなる」。
+
+    契約には「降りてよい」（五条）はあったが「選んでよい」は無かった。断る
+    権利だけがあって、選ぶ権利が無い。
+
+    実測（`ask_decide.py`・5件×3回）では条項だけでは足りない —— 具体
+    9/15 対 9/15、迷い 5/15 → 3/15。「決めていい」は伝わるが「決めなさい」
+    までは押せない。中身は変わった:
+
+        条項なし 「総監督の好きなように指示してください。」
+        条項あり 「公園のベンチに座って、ふとした瞬間の、
+                 どこか寂しそうな顔を撮ってください。」
+
+    害は無く、押しの強い提案が出る側に振れるので入れる。**訊かれたターンだけ
+    彼女に決めさせる**仕組みは別に組む。
+    """
+    from app.muse import crew
+
+    contract = crew.production_contract()
+    assert "選ばないことは、答えではありません" in contract
+    # **迷いは禁じない。** 彼女らしさはそこにあるので、消すと別人になる。
+    assert "迷いを見せるのは一言まで" in contract
+    # **訊かれた範囲で。** ポーズを訊かれて撮影ごと動かさない。
+    assert "訊かれた範囲で" in contract
+    # 決められない理由はたいてい「間違えたらどうしよう」。
+    assert "あとで総監督が" in contract and "直せます" in contract
+    # 断る権利（五条）は残っている —— 選ぶ権利はその隣であって、代わりでは
+    # ない。
+    assert "降りてよい" in contract

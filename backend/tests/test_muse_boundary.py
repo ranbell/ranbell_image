@@ -1156,7 +1156,16 @@ def test_recall_is_only_about_earlier_shoots():
     """
     text = muse_chain.CLASSIFY_INTENT_SYSTEM
     assert "EARLIER shoot" in text
-    assert "これからどうしたい" in text
+    # **守りは `invite` に移った。** 「これからどうしたい？」を `recall` から
+    # 守るために条文へ名指しで書いていたが、いまはその一言そのものが
+    # `invite`（総監督が決定を彼女に渡した回）の見本になっている。実機で
+    # 5/5 が `invite`、`recall` はゼロ（2026-08-30）。
+    assert "どうしたい？" in text
+    invite = text.index("invite")
+    recall = text.index("recall")
+    assert invite < text.index("どうしたい？") < recall, "見本が recall 側にある"
+    # 気分と現在は、いまも `casual`（実測 5/5）。
+    assert "今どんな気分？" in text and "casual" in text
     assert "asks what things are right now, or about a previous shoot" not in text
 
 
