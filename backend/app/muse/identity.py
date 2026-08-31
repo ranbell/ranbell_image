@@ -826,6 +826,59 @@ def craft_hairstyles(tags: str) -> set[str]:
     return out
 
 
+def prose_without_cast_names(scene: str, cast: Iterable[dict] | None) -> str:
+    """一人の撮影では、散文からキャラ名を落とす。
+
+    人名タグを落とす門は既にある（`_scrub_invented_tags`）—— 記録の理由は
+    「danbooru では人名タグは実在のキャラを指すので、**別人の顔を引いてくる**」。
+    塞いであったのはタグ側だけで、**散文は素通り**だった。
+
+    weave の言い聞かせを 1,257字落としたら（`aefe230`）その穴が露出した。
+    実測（30本パック）:
+
+        8/28  散文に名前 1/30
+        8/31  刈る前     0/30
+        8/31  刈った後   5/30   ← 最終プロンプトにも 5/30 で載る
+            「…, crying, tears, Mio sits slumped at the piano, …」
+
+    **二人の撮影では落とさない。** そこでは名前が仕事をしている ——
+    「Mio leans on Sumire's shoulder」から名前を抜くと、誰が誰か分からなく
+    なる。一人のときは何も指しておらず、サンプラーが読む余計な語でしかない。
+
+    名前は `she` に置き換える（消すと主語の無い文が残る）。
+    """
+    people = [c for c in (cast or []) if c]
+    if len(people) != 1:
+        return scene
+    text = str(scene or "")
+    words: set[str] = set()
+    for field in ("name", "name_ja"):
+        full = str(people[0].get(field) or "").strip()
+        if len(full) >= 2:
+            # **姓名まとめての形を先に。** 分けて見るだけだと `各務 みお` が
+            # 二度置き換わって `She her sits` になる。長い順に当てるので、
+            # まとまりが先に消える。
+            words.add(full)
+        for word in re.split(r"[\s　]+", full):
+            word = word.strip()
+            if len(word) >= 2:
+                words.add(word)
+    def _swap(m: re.Match[str]) -> str:
+        # **文頭なら主格、それ以外は目的格。** 素朴に `she` へ替えると
+        # 「A wide shot looks down toward the lens at she」になる。
+        head = text[:m.start()].rstrip()
+        if not head or head.endswith((".", "!", "?")):
+            return "She"
+        return "her"
+
+    for word in sorted(words, key=len, reverse=True):
+        # 姓と名のあいだの空白は、どんな空きでも当たるようにする。
+        body = r"\s+".join(re.escape(part) for part in word.split())
+        text = re.sub(rf"(?<![A-Za-z]){body}(?:'s)?(?![A-Za-z])",
+                      _swap, text, flags=re.I)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
 def assemble_positive(
     identity_tags: Iterable[str] | None,
     tags: str,
@@ -867,6 +920,7 @@ def assemble_positive(
     When ``tags`` name any hairstyle, identity hairstyles are dropped so the
     session override wins (ponytail must not stack on bob_cut).
     """
+    scene = prose_without_cast_names(scene, cast)
     head = identity_list(identity_tags)
     model_hair = craft_hairstyles(tags)
     if model_hair:

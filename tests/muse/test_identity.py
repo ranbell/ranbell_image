@@ -621,3 +621,58 @@ def test_a_single_edge_underscore_only_loses_the_underscore():
     """一重なら語は無事。**落とすのは壊れている語だけ。**"""
     assert identity.clamp_weight("_anime_illustration") == "anime_illustration"
     assert identity.clamp_weight("_solo") == "solo"
+
+
+def test_a_solo_shoot_never_sends_her_name_to_the_sampler():
+    """人名タグを落とす門はあったが、**散文は素通り**だった。
+
+    記録の理由（`_scrub_invented_tags`）は「danbooru では人名タグは実在の
+    キャラを指すので、別人の顔を引いてくる」。weave の言い聞かせを 1,257字
+    落としたら（`aefe230`）その穴が露出した。実測（30本パック）:
+
+        8/28  散文に名前 1/30
+        刈る前 0/30
+        刈った後 5/30   ← 最終プロンプトにも 5/30
+            「…, crying, tears, Mio sits slumped at the piano, …」
+
+    実機でも出た（`0e069f17`）:「Mio stands straight with her weight…」
+
+    **文頭なら主格、それ以外は目的格。** 素朴に `she` へ替えると
+    「toward the lens at she」になる。
+    """
+    mio = [{"name": "Mio Kagami", "name_ja": "各務 みお"}]
+    f = identity.prose_without_cast_names
+    assert f("Mio sits at the piano. Kagami looks down.", mio) == (
+        "She sits at the piano. She looks down.")
+    assert f("a wide shot at Mio, who sits hunched.", mio) == (
+        "a wide shot at her, who sits hunched.")
+    assert f("Light falls across Mio's shoulders.", mio) == (
+        "Light falls across her shoulders.")
+    # 姓名まとめての形。分けて見るだけだと `She her` になる。
+    assert f("Mio Kagami stands at the rail.", mio) == "She stands at the rail."
+    assert f("各務 みお sits by the window.", mio) == "She sits by the window."
+    # 名前を含む別の語は巻き込まない。
+    assert f("A medium shot. Miori waves.", mio) == "A medium shot. Miori waves."
+
+
+def test_two_people_keep_their_names_in_the_prose():
+    """**二人の撮影では落とさない。** そこでは名前が仕事をしている。
+
+    「Mio leans on Sumire's shoulder」から名前を抜くと、誰が誰か分からなく
+    なる。一人のときは何も指しておらず、サンプラーが読む余計な語でしかない。
+    """
+    two = [{"name": "Mio Kagami"}, {"name": "Sumire Hiraoka"}]
+    got = identity.prose_without_cast_names("Mio leans on Sumire's shoulder.", two)
+    assert got == "Mio leans on Sumire's shoulder."
+
+
+def test_the_name_is_stripped_on_the_way_into_the_prompt():
+    """門は `assemble_positive` に置く —— 板も試し撮りも同じ道を通る。"""
+    out = identity.assemble_positive(
+        ["silver_hair"], "standing, rooftop",
+        "Mio stands at the rail, her hands loose at her sides.",
+        framing="auto", style="anime_coloring", subject=["1girl", "solo"],
+        cast=[{"name": "Mio Kagami", "name_ja": "各務 みお"}],
+    )
+    assert "Mio" not in out
+    assert "She stands at the rail" in out
