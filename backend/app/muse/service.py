@@ -3596,8 +3596,11 @@ def _apply_compiled_craft(
         subject=identity.subject_tags(_cast(session)), cast=_cast(session),
         own=own,
     )
-    _route_note(session, "10 assemble_positive", before=tags,
-                after=str(craft.get("prompt") or ""),
+    # **袋は袋として記録する。** 最初の版は組み上がったプロンプト全体を
+    # `after` に渡していたので、散文が読点で刻まれてタグとして記録された
+    # （`weight_shifting_slightly_towards_the_spray._sitting_on_a_bench`）。
+    # 記録が実物と違うのは、記録として一番まずい。
+    _route_note(session, "10 assemble_positive",
                 scene_before=scene, scene_after=str(craft.get("prompt") or ""))
     session["craft_dirty"] = identity.craft_is_thin(
         str(craft.get("prompt") or ""), scene,
