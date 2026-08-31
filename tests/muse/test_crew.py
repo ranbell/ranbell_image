@@ -432,7 +432,15 @@ def test_the_weave_is_told_the_look_governs_the_whole_bag():
     # Look colours word choice; it must not licence air-padding over the beat.
     assert "THE LOOK IS HOW YOU WRITE, NOT WHAT YOU PAD WITH" in chain.SCRIPTER_WEAVE_SYSTEM
     assert "ROOM LEANING" in chain.SCRIPTER_WEAVE_SYSTEM
-    assert "FIRST DUTY — THE BODY" in chain.SCRIPTER_WEAVE_SYSTEM
+    # 「FIRST DUTY —— 身体と顔」（1,257字）は落とした。実測で、**言わない
+    # ほうが身体も顔も書けている**（30本×5回を三周・2026-08-31）:
+    #
+    #     そのまま     26/30  語数 50
+    #     丸ごと落とす  30/30  語数 62   ← 6試験すべて 5/5
+    #
+    # 身体が先に来る割合は 28/30 → 27/30 で変わらない —— 言わなくても守られ
+    # ている。守りは `partner` へ移した（下の試験が見張る）。
+    assert "FIRST DUTY" not in chain.SCRIPTER_WEAVE_SYSTEM
     assert "no floor" in chain.SCRIPTER_WEAVE_SYSTEM.lower()
 
 

@@ -252,32 +252,42 @@ def test_an_outfit_line_left_out_is_not_a_parse_failure():
     assert plan["place"] == "A hallway."
 
 
-def test_an_empty_expression_does_not_erase_a_face_the_beat_still_carries():
-    """表情の欄を作った副作用 —— **顔が絵から消えた。**
+def test_the_first_duty_block_is_gone_and_the_partner_guard_survived():
+    """1,257字の「FIRST DUTY —— 身体と顔」を落とした。
 
-    実測（30本パック・2026-08-31）。手帖は
-    `beat: sitting at the piano, hands trembling, face on the verge of tears`
-    と書いているのに:
+    表情の欄を作った副作用で顔が絵から消え（`231983f`）、そこに一行足して
+    直した。**その一行ごと、段落を丸ごと落としたほうが良かった。**
 
-        8/28（欄ができる前）「Her face is caught in a moment of quiet
-                            breakdown … eyes brimming with tears」crying あり
-        8/31（欄ができた後）「Her hands tremble against the keys … She wears a
-                            school uniform」  ← 顔が消え、服で埋めている
+    実測（30本パック・n=5 を三周・2026-08-31）:
 
-    契約の「視線は FRAME が現行」は**入れ替え**なので成立する —— FRAME は
-    ほぼ常に埋まっている。表情の欄は空のことが多く（欄より前の撮影は全部）、
-    入れ替え先が無いので**落とすだけ**になっていた。
+                     合格     崩れ  語数
+        そのまま     26/30     1    50
+        丸ごと落とす  30/30     0    62   ← 6試験すべて 5/5
+        削る（350字） 29/30     0    51   ← 合格は上がるが語数が戻らない
 
-    一行足して、その試験は 0/5 → 3/5、崩れた回を除いた合格は 70% → 88%。
+    削る版が語数を戻せないので、効いていたのは中身ではなく**長さ**。
+    泣きそうな顔の試験（w2）の散文は、落としたほうが良くなった:
+
+        そのまま     4/5  46語
+        丸ごと落とす  5/5  62語
+          「Her face is caught in a moment of near-collapse, eyes welling
+           on the verge of tears」
+
+    **二人の守りだけは数字で落とせない** —— 30本パックは一人の撮影しかなく、
+    「片方を小道具にしない」は一度も試されていない。`partner` へ移した。
     """
     from app.muse import chain
 
     text = chain.SCRIPTER_WEAVE_SYSTEM
-    assert "An empty EXPRESSION does not erase a face" in text
-    # 視線の規則（入れ替え）は残す —— あちらは実測で効いている。
+    assert "FIRST DUTY" not in text
+    assert chain.WEAVE_BLOCKS["body"] == ""
+    # 測れないものは捨てない。
+    assert "Never leave one of them as a prop" in text
+    assert "Never leave one of them as a prop" in chain.WEAVE_BLOCKS["partner"]
+    # 視線の規則（入れ替え）は別の段落なので残っている —— 実測で効いている。
     assert "The gaze is FRAME's" in text
-    # 顔の規則は、視線の規則より**後**に置く（例外は原則のあとに読ませる）。
-    assert text.index("The gaze is FRAME's") < text.index("does not erase a face")
+    # 5,075 → 3,894字。
+    assert len(text) < 4200
 
 
 def test_the_weave_contract_is_built_from_named_blocks():

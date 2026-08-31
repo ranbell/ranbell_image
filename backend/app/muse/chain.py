@@ -1703,25 +1703,35 @@ an old one, FRAME is the one that is current, because that is the field the
 showrunner's directions are written into. Do not put both in the bag: a bag
 that says `looking_at_viewer` while the prose has her eyes on the book is one
 instruction contradicting itself, and the sampler resolves it by coin flip.""",
-    'body': """FIRST DUTY — THE BODY (BEAT / beat_b) AND THE FACE (EXPRESSION /
-expression_b), and CREW LOOK BODY when present:
-  **Her face is a field now, and it must reach the tags.** Whatever EXPRESSION
-  says — `smile`, `blush`, `parted_lips`, `teary_eyes`, `frown` — goes in the
-  bag. A bag with no face tag is a blank stare.
-  **An empty EXPRESSION does not erase a face.** A notebook written before that
-  field existed — and any turn where the compile put the face on the posture —
-  carries it in BEAT: `sitting at the piano, hands trembling, face on the verge
-  of tears`. Render that face, from wherever the notebook keeps it. The gaze
-  rule above swaps a stale value for the current one; an empty field is not
-  something to swap to, and dropping is not swapping.
-- craft_scene opens on posture. Stem first (sitting / standing / kneeling /
-  crouching), then where the weight sits, what the hands do, what she holds,
-  how the torso turns, what the face is doing as FRAME allows.
-- Tags must name that same posture (`sitting`, `leaning_forward`,
-  `hands_on_own_chest`, …). A bag full of light and cloth with no posture
-  tag is a miss.
-- Partner shoots: each girl's body in her own line of prose and in tags_a /
-  tags_b. Never leave one of them as a prop.""",
+    # **落とした段落。** 1,257字あった「FIRST DUTY —— 身体と顔」。
+    #
+    # 実測（30本パック・n=5 を三周・2026-08-31）:
+    #
+    #                  合格     崩れ  語数
+    #     そのまま     26/30     1    50
+    #     丸ごと落とす  30/30     0    62   ← 6試験すべて 5/5
+    #     削る（350字） 29/30     0    51   ← 合格は上がるが語数が戻らない
+    #
+    # **顔を必ず書けと 1,257字かけて言うのをやめたら、顔がよく書けるように
+    # なった。** 泣きそうな顔の試験（w2）の散文:
+    #
+    #     そのまま     4/5  46語
+    #     丸ごと落とす  5/5  62語
+    #       「Her face is caught in a moment of near-collapse, eyes welling
+    #        on the verge of tears」
+    #
+    # 削る版が語数を戻せないことから、効いていたのは中身ではなく**長さ**。
+    # compile を 8,281 → 2,327字にしたとき 52.7% → 96% になったのと同じ形。
+    #
+    # 中身のうち二つは他所へ移した:
+    #   - 二人の撮影の規則 → `partner`（パックは一人の撮影しかなく、数字で
+    #     落とせない —— 「測っていないから落ちなかった」を「要らない」と
+    #     読み違えないため）
+    #   - 顔の規則 → **どこにも移していない。** 無いほうが顔が書けている
+    #     （`231983f` で足した一行も、ここで役目を終えた）
+    #
+    # 空にして残す。戻したいときは `WEAVE_BLOCKS['body']` に文字を入れるだけ。
+    'body': "",
     'place': """SECOND — PLACE, LIGHT, CLOTHES (named, not invented):
 - SCENE / BG / LIGHT / WEARING become tags and short clauses that support the
   body, not essays that bury it.
@@ -1762,6 +1772,7 @@ expression_b), and CREW LOOK BODY when present:
 - Order of craft_scene: body → clothes-as-worn → light on that body → place.
   Never the reverse.""",
     'partner': """Partner shoots: tags_shared + tags_a + tags_b (never one mixed bag).
+Each girl's body in her own line of prose. Never leave one of them as a prop.
 Solo: tags only.""",
     'intent': """INTENT: shot. Absolute values. Do not rewrite atmosphere/scene/frame/wearing/beat.
 Leave those keys omitted or empty. English only.""",
