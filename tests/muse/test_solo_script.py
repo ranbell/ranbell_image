@@ -1749,3 +1749,51 @@ async def test_her_choice_is_not_a_look_back_at_an_old_shoot():
 
     assert not s.get("looked_back")
     assert s.get("scripter_intent") != "recall"
+
+
+def test_the_route_recorder_changes_nothing_it_only_writes_it_down():
+    """**記録を足しただけ。** 同じ手帖から同じプロンプトが出る。
+
+    総監督（2026-08-31）「まずは観測して事実だけを回収して。今は何も決めない」。
+    挙動を変えていないことを、ここで証明する。
+    """
+    # 段の内訳を頼んでも、`scrub_craft_tags` の答えは変わらない。
+    args = dict(wearing="blouse, skirt", scene="", beat="sitting",
+                struck=set(), frame="close, upper body")
+    tags = "sitting, white_socks, straw_hat, park, wide_shot, close_up"
+    steps: list = []
+    assert notebook.scrub_craft_tags(tags, **args) == notebook.scrub_craft_tags(
+        tags, trace=steps, **args)
+    # 頼んだときだけ、段ごとの出入りが積まれる。
+    assert [s["hop"] for s in steps] == [
+        "2a reconcile_wardrobe_tags",
+        "2b drop_crops_not_in_frame",
+        "2c drop_tags_that_fight_the_notebook",
+    ]
+    assert "straw_hat" in steps[0]["dropped"]
+    assert "wide_shot" in steps[1]["dropped"]
+
+
+def test_the_route_keeps_only_the_latest_picture():
+    """読むのは「いまの一枚がどう作られたか」。前の走りは丸ごと捨てる。"""
+    s: dict = {}
+    service._route_note(s, "1 weave（生）", before="", after="sitting, socks")
+    service._route_note(s, "2 scrub_craft_tags", before="sitting, socks",
+                        after="sitting")
+    assert [r["hop"] for r in s["craft_route"]] == ["1 weave（生）", "2 scrub_craft_tags"]
+    assert s["craft_route"][1]["dropped"] == ["socks"]
+
+    # 次の一枚。前の走りは残さない。
+    service._route_note(s, "1 weave（生）", before="", after="standing")
+    assert [r["hop"] for r in s["craft_route"]] == ["1 weave（生）"]
+
+
+def test_every_hop_from_the_notebook_to_the_picture_is_recorded():
+    """十段すべてに記録がある。**抜けた段があると、そこが盲点になる。**"""
+    import inspect
+    src = inspect.getsource(service)
+    for hop in ("1 weave（生）", "2 scrub_craft_tags", "3 彼女の見直し",
+                "4 _scrub_invented_tags", "5 _latin_names",
+                "6 reconcile_wardrobe_tags", "7 _missing_wearing_tags",
+                "8 ensure_beat_leads_scene", "9 _sides", "10 assemble_positive"):
+        assert f'"{hop}' in src, f"{hop} の記録が無い"

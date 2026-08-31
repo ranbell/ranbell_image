@@ -1069,26 +1069,54 @@ def drop_tags_that_fight_the_notebook(
     return ", ".join(kept)
 
 
+def tag_delta(before: str, after: str) -> tuple[list[str], list[str]]:
+    """(入った語, 消えた語)。**記録のためだけ。** 判定には使わない。"""
+    from .identity import bare_tag
+
+    was = [bare_tag(p) for p in str(before or "").split(",") if p.strip()]
+    now = [bare_tag(p) for p in str(after or "").split(",") if p.strip()]
+    gone = [t for t in was if t and t not in now]
+    came = [t for t in now if t and t not in was]
+    return came, gone
+
+
 def scrub_craft_tags(
     tags: str, *, wearing: str, scene: str, beat: str, struck: set[str],
     wearing_b: str = "", beat_b: str = "", frame: str = "",
     banned: set[str] | None = None,
+    trace: list[dict[str, Any]] | None = None,
 ) -> str:
     """Wardrobe reconcile, opposite crop family, and notebook-fight drops.
 
     Struck / banned / aliases / leftovers / forgotten wearing share one pass
     (``reconcile_wardrobe_tags``). Crop conflict lives only here — assemble
     injects framing tags and does not re-ban the opposite family.
+
+    ``trace`` は**記録のためだけ**の受け皿。渡すと、内部の三段がそれぞれ何を
+    落として何を足したかを積む。渡さなければ何も変わらない —— 総監督
+    （2026-08-31）「どのルートでどう壊したかを明らかにしないといけない」。
     """
     _ = (scene,)  # kept on the signature for callers that pass the whole shot
+
+    def _step(name: str, was: str, now: str) -> str:
+        if trace is not None:
+            came, gone = tag_delta(was, now)
+            trace.append({"hop": name, "added": came, "dropped": gone})
+        return now
+
+    step = tags
     tags, _ = reconcile_wardrobe_tags(
         tags, wearing=wearing, wearing_b=wearing_b,
         struck=struck, banned=banned,
     )
+    step = _step("2a reconcile_wardrobe_tags", step, tags)
     tags = drop_crops_not_in_frame(tags, frame=frame)
-    return drop_tags_that_fight_the_notebook(
+    step = _step("2b drop_crops_not_in_frame", step, tags)
+    tags = drop_tags_that_fight_the_notebook(
         tags, frame=frame, beat=beat, beat_b=beat_b,
     )
+    _step("2c drop_tags_that_fight_the_notebook", step, tags)
+    return tags
 
 
 def strip_shot_keys(patch: dict[str, Any]) -> dict[str, Any]:

@@ -1240,6 +1240,59 @@ def _turn_trace(
                     ", ".join(missed))
 
 
+CRAFT_ROUTE_MAX = 24
+
+
+def _route_note(
+    session: dict[str, Any], hop: str, *,
+    before: str = "", after: str = "",
+    scene_before: str | None = None, scene_after: str | None = None,
+    sides: tuple[str, str] | None = None,
+    extra: list[dict[str, Any]] | None = None,
+) -> None:
+    """絵になるまでの一段を、そのまま記録する。**判定には使わない。**
+
+    総監督（2026-08-31）「どのルートでどう壊したかを明らかにしないといけない」。
+
+    手帖から絵まで**十段**ある。記録されていたのは入口と出口の一組だけで
+    （`_apply_compiled_craft` の末尾の `before_tags → tags`）、途中で何が
+    消えて何が戻ったかは残らなかった。「靴下脱いでが効かない」を追おうにも、
+    落としたのがどの段で、戻したのがどの段かが分からない。
+
+    語そのものは持たず、**入った語と消えた語**だけを積む（撮影一本ぶん
+    抱えても軽い）。散文は語数と頭だけ。
+    """
+    row: dict[str, Any] = {"hop": hop}
+    if before or after:
+        came, gone = notebook_mod.tag_delta(before, after)
+        if came:
+            row["added"] = came[:24]
+        if gone:
+            row["dropped"] = gone[:24]
+        row["n"] = len([p for p in str(after or "").split(",") if p.strip()])
+    if scene_before is not None or scene_after is not None:
+        b, a = str(scene_before or ""), str(scene_after or "")
+        if b.strip() != a.strip():
+            row["scene"] = {
+                "was": len(b.split()), "now": len(a.split()),
+                "head": a.strip()[:70],
+            }
+    if sides is not None:
+        row["sides"] = [
+            len([p for p in str(sides[0] or "").split(",") if p.strip()]),
+            len([p for p in str(sides[1] or "").split(",") if p.strip()]),
+        ]
+    if extra:
+        row["steps"] = extra
+    log = list(session.get("craft_route") or [])
+    # 新しい走りは `1 ` で始まる段から。前の走りは丸ごと捨てる —— 読むのは
+    # 「いまの一枚がどう作られたか」なので。
+    if hop.startswith("1 "):
+        log = []
+    log.append(row)
+    session["craft_route"] = log[-CRAFT_ROUTE_MAX:]
+
+
 def _trace_weave_refused(session: dict[str, Any], why: str) -> None:
     """**絵が動かなかったターンにも、行を残す。**
 
@@ -3469,8 +3522,12 @@ def _apply_compiled_craft(
     later read (render, report, panel, a re-render from an approved take) works
     from, and a guess made twice can disagree with itself.
     """
-    tags = _scrub_invented_tags(session, str(tags or "").strip())
-    scene = _latin_names(session, str(craft_scene or "").strip())
+    in_tags, in_scene = str(tags or "").strip(), str(craft_scene or "").strip()
+    tags = _scrub_invented_tags(session, in_tags)
+    _route_note(session, "4 _scrub_invented_tags", before=in_tags, after=tags)
+    scene = _latin_names(session, in_scene)
+    _route_note(session, "5 _latin_names",
+                scene_before=in_scene, scene_after=scene)
     if not tags and not scene:
         return False
     # There used to be a gate here that refused the whole compile when the bag
@@ -3495,6 +3552,7 @@ def _apply_compiled_craft(
     # One wardrobe pass (struck/banned → aliases → leftovers → inject), shared
     # with scrub. Posture / ledger / crew_look reinject stay beside it.
     nb_wardrobe = notebook_mod.of(session)
+    before_reconcile = tags
     tags, sides = notebook_mod.reconcile_wardrobe_tags(
         tags,
         wearing=str(nb_wardrobe.get("wearing") or ""),
@@ -3504,28 +3562,43 @@ def _apply_compiled_craft(
         sides=sides,
         partner=bool(session.get("partner_character") or {}),
     )
+    _route_note(session, "6 reconcile_wardrobe_tags",
+                before=before_reconcile, after=tags, sides=sides)
+    before_missing = tags
     missing = _missing_wearing_tags(session, tags)
     if missing:
         logger.info("[muse] weave forgot notebook authorities: %s", ", ".join(missing))
         tags = ", ".join([t for t in tags.split(",") if t.strip()] + missing)
+    _route_note(session, "7 _missing_wearing_tags",
+                before=before_missing, after=tags)
     # Showrunner beat must lead the prose the sampler reads — weave padding
     # about air must never leave posture as an afterthought (or absent).
     nb_now = notebook_mod.of(session)
+    before_lead = scene
     scene = notebook_mod.ensure_beat_leads_scene(
         scene,
         beat=str(nb_now.get("beat") or ""),
         beat_b=str(nb_now.get("beat_b") or ""),
     )
+    _route_note(session, "8 ensure_beat_leads_scene",
+                scene_before=before_lead, scene_after=scene)
     craft["tags"] = tags
     craft["scene"] = scene
     craft["tags_a"], craft["tags_b"] = str(sides[0] or ""), str(sides[1] or "")
     craft["pose_intent"] = str((nb_now.get("beat") or ""))[:240]
+    own = _sides(session, tags)
+    _route_note(session, "9 _sides（持ち主の振り分け）",
+                sides=(", ".join(own[0]) if own else "",
+                       ", ".join(own[1]) if len(own) > 1 else ""))
     craft["prompt"] = identity.assemble_positive(
         _identity_tags(session), tags, scene,
         framing=_shot_framing(session), style=_style(session),
         subject=identity.subject_tags(_cast(session)), cast=_cast(session),
-        own=_sides(session, tags),
+        own=own,
     )
+    _route_note(session, "10 assemble_positive", before=tags,
+                after=str(craft.get("prompt") or ""),
+                scene_before=scene, scene_after=str(craft.get("prompt") or ""))
     session["craft_dirty"] = identity.craft_is_thin(
         str(craft.get("prompt") or ""), scene,
     )
@@ -6964,8 +7037,13 @@ async def weave_craft_if_needed(
                 str(result.get("tags") or ""),
                 str(result.get("craft_scene") or ""),
             )
+        raw_tags = str(result.get("tags") or "")
+        _route_note(session, "1 weave（生）", before="", after=raw_tags,
+                    scene_before="", scene_after=str(result.get("craft_scene") or ""),
+                    sides=_weave_sides(result))
+        scrub_steps: list[dict[str, Any]] = []
         tags = notebook_mod.scrub_craft_tags(
-            str(result.get("tags") or ""),
+            raw_tags,
             wearing=str(nb.get("wearing") or ""),
             scene=str(nb.get("scene") or ""),
             beat=str(nb.get("beat") or ""),
@@ -6974,13 +7052,19 @@ async def weave_craft_if_needed(
             beat_b=str(nb.get("beat_b") or ""),
             frame=str(nb.get("frame") or ""),
             banned=set(banned_now(session)),
+            trace=scrub_steps,
         )
+        _route_note(session, "2 scrub_craft_tags", before=raw_tags, after=tags,
+                    extra=scrub_steps)
         scene_out = str(result.get("craft_scene") or "")
         if result.get("valid") and tags and scene_out and not refused:
+            before_review = tags
             tags = await _muse_reviews_weave(
                 ollama, session, tags, cfg=cfg, name_a=name_a, name_b=name_b,
                 partner=partner,
             )
+            _route_note(session, "3 彼女の見直し",
+                        before=before_review, after=tags)
             if _apply_compiled_craft(
                 session, tags, scene_out, sides=_weave_sides(result),
             ):
