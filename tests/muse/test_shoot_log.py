@@ -351,3 +351,43 @@ def test_a_field_with_no_clerk_is_still_recorded_as_missed():
     assert notebook.of(session).get("light") == "soft daylight"
     assert (session["rewrite_log"][-1]).get("source") == "repair_missed"
     assert not oc.prompts, "係のいない欄で模型を呼んではいけない"
+
+
+def test_the_trace_does_not_lie_after_the_clerk_rescues_a_field():
+    """拾った欄は、そのターンの行から「動かなかった」を外す。
+
+    `_turn_trace` はターンの途中（彼女が話す前）で書かれ、拾う段はその後に
+    走る。実機（`02556fd6`・2026-08-31）で「ポーズを変えてみて。」の行に
+    `動かなかった: ['beat']` と出たまま、`beat` は
+    `standing, weight on one leg, hands gripping a railing` になっていた。
+
+    **記録が安全網なので、記録のほうが古いのは一番まずい。**
+    """
+    session = _notice_session("beat", "standing, hands at her sides")
+    session["repair_notice"]["note"] = "ポーズを変えてみて。"
+    session["turn_trace"] = [{
+        "line": "ポーズを変えてみて。", "asked": ["beat"],
+        "moved": {}, "missed": ["beat"],
+    }]
+    oc = _FieldClerk('{"各務 みお": "standing, weight on one leg, hands on a railing"}')
+
+    asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
+
+    row = session["turn_trace"][-1]
+    assert row["missed"] == []
+    assert "beat" in row["moved"]
+    assert "係が拾った" in row["moved"]["beat"]
+
+
+def test_a_field_the_clerk_could_not_rescue_stays_named_in_the_trace():
+    """拾えなかった欄は「動かなかった」のまま残す。"""
+    session = _notice_session("beat", "sitting on a chair")
+    session["turn_trace"] = [{
+        "line": "立って。", "asked": ["beat"], "moved": {}, "missed": ["beat"],
+    }]
+    oc = _FieldClerk("すみません、わかりません")
+
+    asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
+
+    assert session["turn_trace"][-1]["missed"] == ["beat"]
+    assert (session["rewrite_log"][-1]).get("source") == "repair_missed"

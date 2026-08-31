@@ -4958,6 +4958,37 @@ async def _muse_checks_the_notebook(
     )
 
 
+def _trace_rescue(
+    session: dict[str, Any], before: dict[str, str], after: dict[str, str],
+) -> None:
+    """拾った欄を、そのターンの行に書き足す。
+
+    `_turn_trace` はターンの途中（彼女が話す前）で書かれ、拾う段はその後に
+    走る。直さないと**記録が嘘をつく** —— 実機（`02556fd6`・2026-08-31）で
+    「ポーズを変えてみて。」の行に `動かなかった: ['beat']` と出たまま、
+    `beat` は `standing, weight on one leg, hands gripping a railing` に
+    なっていた。
+
+    記録が安全網なので、記録のほうが古いのは一番まずい。
+    """
+    log = list(session.get("turn_trace") or [])
+    if not log:
+        return
+    row = log[-1]
+    moved = dict(row.get("moved") or {})
+    missed = list(row.get("missed") or [])
+    for key in notebook_mod.SHOT_KEYS:
+        b, a = str(before.get(key) or ""), str(after.get(key) or "")
+        if b.strip() == a.strip():
+            continue
+        moved[key] = f"{b[:40]} → {a[:40]}（係が拾った）"
+        if key in missed:
+            missed.remove(key)
+    row["moved"] = moved
+    row["missed"] = missed
+    session["turn_trace"] = log
+
+
 async def _ask_the_field_clerks(
     db, ollama, session: dict[str, Any], fields: list[str], *,
     note: str, cfg: dict[str, Any],
@@ -5027,6 +5058,7 @@ async def _ask_the_field_clerks(
             intent="shot",
         )
         wrote.extend(k for k in got if k in fields)
+        _trace_rescue(session, before, notebook_mod.shot_snapshot(nb))
         _stage(session, f"{kind} 係（拾った）", began)
         logger.info("[muse] end-of-turn %s clerk wrote %s", kind, sorted(got))
     return wrote
