@@ -676,3 +676,111 @@ def test_the_name_is_stripped_on_the_way_into_the_prompt():
     )
     assert "Mio" not in out
     assert "She stands at the rail" in out
+
+
+def _pair_cast():
+    return [
+        {"name": "Subaru", "identity_tags": ["navy_hair", "very_long_hair", "tall"]},
+        {"name": "Mio", "identity_tags": ["silver_hair", "bob_cut", "slim"]},
+    ]
+
+
+def _pair_notebook():
+    from app.muse import notebook
+
+    nb = notebook.blank(partner=True)
+    notebook.apply_patch(nb, {
+        "atmosphere": "uncertain",
+        "scene": "poolside, night",
+        "bg": "sunbed, beach parasol",
+        "wearing": "black tank top",
+        "beat": "sitting, weight on both hands, torso straight, looking ahead",
+        "wearing_b": "turquoise one-piece dress, small_earrings, headphones",
+        "beat_b": "sitting, clutching headphones with one hand",
+    })
+    return nb
+
+
+def test_two_people_can_share_a_posture():
+    """**同じ語が両方の行に出てよい。** 二人とも座っているなら二人とも座る。
+
+    実測（`8c48e8cb`）で、二人とも `beat: sitting` の回に**どちらの行にも
+    姿勢が無かった** —— `assemble_positive` の `placed` が全体で一つなので、
+    同じ語は一人しか持てず、共有の並びへ落ちていた:
+
+        Subaru is …, straight_posture, hands_on_ground,   ← sitting なし
+        Mio is    …, turquoise_one-piece, headphones,     ← sitting なし
+        …, looking_at_viewer, sitting, sitting, …         ← 誰のものでもない
+
+    箱から組めば取り合いが起きない。
+    """
+    from app.muse import notebook
+
+    nb = _pair_notebook()
+    out = identity.assemble_from_boxes(
+        cast=_pair_cast(), people=notebook.mint_person_box(nb, partner=True),
+        frame_wide=notebook.frame_wide_phrases(nb),
+        style="anime_coloring", framing="auto", scene="They sit together.",
+    )
+    lines = {l.split(":")[0].strip(): l for l in out.splitlines() if ":" in l}
+    assert "sitting" in lines["Subaru"]
+    assert "sitting" in lines["Mio"]
+
+
+def test_each_persons_own_action_survives():
+    """相方だけの動作が、相方の行に残る。"""
+    from app.muse import notebook
+
+    nb = _pair_notebook()
+    out = identity.assemble_from_boxes(
+        cast=_pair_cast(), people=notebook.mint_person_box(nb, partner=True),
+        frame_wide=notebook.frame_wide_phrases(nb),
+        style="anime_coloring", framing="auto", scene="They sit together.",
+    )
+    for line in out.splitlines():
+        if line.startswith("Mio:"):
+            assert "clutching headphones" in line
+        if line.startswith("Subaru:"):
+            assert "weight on both hands" in line
+            assert "clutching headphones" not in line, "相方の動作が主演の行に"
+
+
+def test_static_traits_and_actions_live_on_different_lines():
+    """総監督（2026-08-31）「髪型などの静的特性は先頭部でよいが、その他の
+    感情や行動は**別枠にしないといけない**」。
+    """
+    from app.muse import notebook
+
+    nb = _pair_notebook()
+    out = identity.assemble_from_boxes(
+        cast=_pair_cast(), people=notebook.mint_person_box(nb, partner=True),
+        frame_wide=notebook.frame_wide_phrases(nb),
+        style="anime_coloring", framing="auto", scene="They sit together.",
+    )
+    static = next(l for l in out.splitlines() if l.startswith("Subaru is "))
+    dynamic = next(l for l in out.splitlines() if l.startswith("Subaru: "))
+    assert "navy_hair" in static and "sitting" not in static
+    assert "sitting" in dynamic and "navy_hair" not in dynamic
+    # 位置＝優先度。動的な枠は場面より前。
+    body = out.splitlines()
+    assert body.index(dynamic) < next(
+        i for i, l in enumerate(body) if l.startswith("poolside"))
+
+
+def test_the_notebook_phrase_keeps_all_of_its_words():
+    """句を一語に潰さない。**末尾の名詞が落ちるのが「衣装が変わる」の正体。**"""
+    from app.muse import notebook
+
+    box = notebook.mint_person_box(_pair_notebook(), partner=True)[1]
+    assert "turquoise one-piece dress" in box["wearing"]
+
+
+def test_a_face_word_is_always_there():
+    """総監督「二人いるときは感情も管理しないと無表情になる。**箱がないと
+    書いてくれない**」。手帖が空でも `atmosphere` から一語引く。
+    """
+    from app.muse import notebook
+
+    boxes = notebook.mint_person_box(_pair_notebook(), partner=True)
+    assert all(b["face"] for b in boxes)
+    assert boxes[0]["face"] == ["uncertain"]

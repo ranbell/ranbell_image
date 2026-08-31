@@ -1069,6 +1069,93 @@ def drop_tags_that_fight_the_notebook(
     return ", ".join(kept)
 
 
+#: 人ごとの箱の中身。**手帖の欄と一対一**。
+PERSON_BOX_FIELDS = ("wearing", "beat", "face")
+
+
+def _phrases(text: str, *, gone: set[str] | None = None) -> list[str]:
+    """読点で割って、掃除するだけ。**一語に潰さない。**
+
+    手帖は既に読点区切りの句を持っている（`turquoise one-piece dress,
+    small_earrings`）。これを一語に潰すと `turquoise_one-piece_dress` という
+    **誰も知らない語**になる。実測（`8c48e8cb`）で weave が同じことをして、
+    句の末尾の名詞が絵から落ちた —— 総監督「衣装がコロコロ変わる。
+    プロンプト側の緻密さの欠如」。
+
+    この現場の実測は「自然文のほうが画質が圧倒的に高い」。句は句のまま出す。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in re.split(r"[,，、;]", str(text or "")):
+        item = re.sub(r"\s+", " ", raw).strip().strip(".")
+        if not item:
+            continue
+        key = item.lower().replace(" ", "_")
+        if key in seen:
+            continue
+        if gone and (key in gone or wearing_tokens(item) & gone):
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def mint_person_box(
+    nb: dict[str, Any], *, partner: bool = False,
+    struck: set[str] | None = None, banned: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """手帖から、人ごとの箱を鋳造する。**LLM を通さない。**
+
+    総監督（2026-08-31）「それぞれに専属ワードローブ・専属ポーズを付けたほうが
+    いいのでは」「A/B の動作は最後まで保持しないといけない。**weave に解釈
+    させると壊れる**」。
+
+    手帖は最初から人ごと（`wearing`/`wearing_b`、`beat`/`beat_b`、
+    `expression`/`expression_b`）なのに、craft で平らな一つの袋に混ぜ、最後に
+    持ち主を推測し直していた。十段の記録（`db6a1f7`）で出た五つの壊れは、
+    すべてその帰結:
+
+        2c  一枠一語の規則が、二人ぶんの姿勢の片方を捨てる
+        10  `placed` が全体で一つなので、**同じ語は一人しか持てない**
+        3   彼女の見直しが、平らな袋を見て相方の動作を落とす
+        8   無名詞の断片を散文の頭に貼る
+        1   weave が手帖の句から語を落として書く
+
+    **混ぜなければ、どれも起きない。**
+
+    表情は空でも一語入れる —— 総監督「二人いるときは感情も管理しないと
+    無表情になりがち。**箱がないと書いてくれない**ので」。手帖の
+    `atmosphere` を引き当てにする。
+    """
+    gone = {str(t).strip().lower().replace(" ", "_") for t in (struck or ())}
+    gone |= {str(t).strip().lower().replace(" ", "_") for t in (banned or ())}
+    gone = {g for g in gone if g}
+    mood = _phrases(str((nb or {}).get("atmosphere") or ""))[:1]
+    people: list[dict[str, Any]] = []
+    sides = [("wearing", "beat", "expression")]
+    if partner:
+        sides.append(("wearing_b", "beat_b", "expression_b"))
+    for wear_k, beat_k, face_k in sides:
+        face = _phrases(str((nb or {}).get(face_k) or ""))
+        people.append({
+            "wearing": _phrases(str((nb or {}).get(wear_k) or ""), gone=gone),
+            "beat": _phrases(str((nb or {}).get(beat_k) or "")),
+            # **空でも一語。箱があれば書かれる。**
+            "face": face or mood,
+        })
+    return people
+
+
+def frame_wide_phrases(nb: dict[str, Any]) -> list[str]:
+    """人に属さないもの —— 場所・背景・光。カメラは `assemble_positive` が足す。"""
+    out: list[str] = []
+    for key in ("scene", "bg", "light"):
+        for phrase in _phrases(str((nb or {}).get(key) or "")):
+            if phrase not in out:
+                out.append(phrase)
+    return out
+
+
 def tag_delta(before: str, after: str) -> tuple[list[str], list[str]]:
     """(入った語, 消えた語)。**記録のためだけ。** 判定には使わない。"""
     from .identity import bare_tag

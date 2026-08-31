@@ -1795,5 +1795,6 @@ def test_every_hop_from_the_notebook_to_the_picture_is_recorded():
     for hop in ("1 weave（生）", "2 scrub_craft_tags", "3 彼女の見直し",
                 "4 _scrub_invented_tags", "5 _latin_names",
                 "6 reconcile_wardrobe_tags", "7 _missing_wearing_tags",
-                "8 ensure_beat_leads_scene", "9 _sides", "10 assemble_positive"):
+                "8 ensure_beat_leads_scene", "9 人ごとの箱",
+                "10 assemble_positive"):
         assert f'"{hop}' in src, f"{hop} の記録が無い"

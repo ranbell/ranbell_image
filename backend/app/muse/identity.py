@@ -879,6 +879,62 @@ def prose_without_cast_names(scene: str, cast: Iterable[dict] | None) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
+def assemble_from_boxes(
+    *, cast: Iterable[dict] | None, people: list[dict], frame_wide: list[str],
+    style: str = "", framing: str | None = "auto", scene: str = "",
+) -> str:
+    """人ごとの箱から、そのまま組む。**取り合いをしない。**
+
+    総監督（2026-08-31）「髪型などの**静的特性は先頭部でよい**が、その他の
+    感情や行動は**別枠にしないといけない**」「priority はプロンプト内の位置」。
+
+    いままでは静的と動的が同じ行に混ざり、しかも `placed` が全体で一つだった
+    ので、**二人が同じ姿勢のとき片方しか座れなかった**（実測 `8c48e8cb`）:
+
+        Subaru is navy_hair, …, sitting, …      ← 先に来たほうが総取り
+        Mio is silver_hair, …, （姿勢なし）
+
+    ここでは箱に入っているものはその人の行に出る。**同じ語が両方に出てよい。**
+    二人とも `sitting` なら二人とも座る。
+
+    並びは位置＝優先度で決める:
+
+        2girls, Subaru and Mio,
+        Subaru is <静的>,
+        Mio is <静的>,
+        Subaru: <姿勢・服・表情>,      ← 名前のすぐ後ろ。後ろへ落とさない
+        Mio: <姿勢・服・表情>,
+        <場所・背景・光・画角・ルック>,
+        <散文>
+    """
+    named = named_identity(cast)
+    if not named or not people:
+        return ""
+    lead = ", ".join(
+        identity_list(subject_tags(cast)) + [name_list([n for n, _ in named])]
+    ) + ","
+    lines = [lead]
+    # ① 静的だけ。髪・目・体つき —— 撮影のあいだ動かないもの。
+    for name, locked in named:
+        lines.append(f"{name} is " + ", ".join(locked) + ",")
+    # ② 動的。**人ごとの別枠**。姿勢 → 服 → 表情の順で、姿勢が先頭に来る。
+    for (name, _), box in zip(named, people):
+        run = list(box.get("beat") or [])
+        run += [w for w in (box.get("wearing") or []) if w not in run]
+        run += [f for f in (box.get("face") or []) if f not in run]
+        if run:
+            lines.append(f"{name}: " + ", ".join(run) + ",")
+    # ③ 誰のものでもないもの。
+    rest = list(frame_wide) + framing_tags(framing) + style_tags(style)
+    seen: set[str] = set()
+    rest = [r for r in rest if r and not (r.lower() in seen or seen.add(r.lower()))]
+    if rest:
+        lines.append(", ".join(rest) + ("," if (scene or "").strip() else ""))
+    if (scene or "").strip():
+        lines.append(scene.strip())
+    return "\n".join(lines)
+
+
 def assemble_positive(
     identity_tags: Iterable[str] | None,
     tags: str,

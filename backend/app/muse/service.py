@@ -3575,27 +3575,66 @@ def _apply_compiled_craft(
     # about air must never leave posture as an afterthought (or absent).
     nb_now = notebook_mod.of(session)
     before_lead = scene
-    scene = notebook_mod.ensure_beat_leads_scene(
-        scene,
-        beat=str(nb_now.get("beat") or ""),
-        beat_b=str(nb_now.get("beat_b") or ""),
-    )
+    partner_now = bool(session.get("partner_character") or {})
+    # **無名詞の貼り付けをやめる。** `ensure_beat_leads_scene` は手帖の
+    # `beat` と `beat_b` を散文の頭にそのまま前置していた —— 誰のことか
+    # 書かれないまま。実測（`8c48e8cb`）:
+    #
+    #     sitting, weight on both hands, torso straight, looking ahead.
+    #     sitting, clutching headphones with one hand.
+    #     Subaru sits with a straight torso, … Mio sits on a bench, …
+    #
+    # **同じ内容が三回**（共有のタグ・無名詞の断片・weave の散文）。総監督
+    # 「最終的なプロンプトを見ても意味が分からない」。人ごとの箱が姿勢を
+    # 名前つきで持つようになったので、前置は二重にしかならない。
+    #
+    # **一人の撮影では、いままでどおり前置する。** `named_identity` は一人の
+    # ときに名前の行を作らない（「there is no one to be confused with, and the
+    # flat form is what every measurement so far was taken against」）ので、
+    # 箱の道も一人では使わない。姿勢が散文から落ちると行き場がなくなる。
+    if len(_cast(session)) < 2:
+        scene = notebook_mod.ensure_beat_leads_scene(
+            scene,
+            beat=str(nb_now.get("beat") or ""),
+            beat_b=str(nb_now.get("beat_b") or ""),
+        )
     _route_note(session, "8 ensure_beat_leads_scene",
                 scene_before=before_lead, scene_after=scene)
     craft["tags"] = tags
     craft["scene"] = scene
     craft["tags_a"], craft["tags_b"] = str(sides[0] or ""), str(sides[1] or "")
     craft["pose_intent"] = str((nb_now.get("beat") or ""))[:240]
-    own = _sides(session, tags)
-    _route_note(session, "9 _sides（持ち主の振り分け）",
-                sides=(", ".join(own[0]) if own else "",
-                       ", ".join(own[1]) if len(own) > 1 else ""))
-    craft["prompt"] = identity.assemble_positive(
-        _identity_tags(session), tags, scene,
-        framing=_shot_framing(session), style=_style(session),
-        subject=identity.subject_tags(_cast(session)), cast=_cast(session),
-        own=own,
+    # **人ごとの箱から組む。** 手帖は最初から人ごとなのに、craft で平らに
+    # 混ぜて最後に持ち主を推測し直していた —— 十段の記録で出た五つの壊れは
+    # すべてその帰結（`notebook.mint_person_box` の説明に一覧がある）。
+    #
+    # 総監督（2026-08-31）「A/B の動作は最後まで保持しないといけない」
+    # 「静的特性は先頭部でよいが、感情や行動は別枠にしないといけない」。
+    cast = _cast(session)
+    boxes = notebook_mod.mint_person_box(
+        nb_now, partner=bool(session.get("partner_character") or {}),
+        struck=notebook_mod.struck_tokens(session),
+        banned=set(banned_now(session)),
     )
+    from_boxes = identity.assemble_from_boxes(
+        cast=cast, people=boxes,
+        frame_wide=notebook_mod.frame_wide_phrases(nb_now),
+        style=_style(session), framing=_shot_framing(session), scene=scene,
+    )
+    _route_note(session, "9 人ごとの箱",
+                sides=(", ".join(boxes[0].get("beat") or []) if boxes else "",
+                       ", ".join(boxes[1].get("beat") or []) if len(boxes) > 1 else ""))
+    if from_boxes and len(cast) >= 2:
+        craft["people"] = boxes
+        craft["prompt"] = from_boxes
+    else:
+        own = _sides(session, tags)
+        craft["prompt"] = identity.assemble_positive(
+            _identity_tags(session), tags, scene,
+            framing=_shot_framing(session), style=_style(session),
+            subject=identity.subject_tags(cast), cast=cast,
+            own=own,
+        )
     # **袋は袋として記録する。** 最初の版は組み上がったプロンプト全体を
     # `after` に渡していたので、散文が読点で刻まれてタグとして記録された
     # （`weight_shifting_slightly_towards_the_spray._sitting_on_a_bench`）。
