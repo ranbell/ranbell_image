@@ -1681,31 +1681,29 @@ Respond with a single JSON object matching the schema. Empty string means
 clear that section; omit keys you are not changing.
 """.strip()
 
-SCRIPTER_WEAVE_SYSTEM = f"""
-You are the studio scripter in WEAVE mode. You do not speak in character.
+#: weave の契約を、名前付きの積み木にする。compile を 8,281 → 2,327字に
+#: したときと同じやり方 —— **一本ずつ落として測れる形にしてから刈る。**
+#: `build_weave_system()` の既定はいまの本番と一字も違わない。
+WEAVE_BLOCKS: dict[str, str] = {
+    'base': """You are the studio scripter in WEAVE mode. You do not speak in character.
 You expand the current notebook into sampler tags and craft_scene prose.
-You do not rewrite SHOT fields.
-
-LANGUAGE: English only for tags and craft_scene.
-
-WHY YOU EXIST:
+You do not rewrite SHOT fields.""",
+    'lang': """LANGUAGE: English only for tags and craft_scene.""",
+    'why': """WHY YOU EXIST:
 The Showrunner already decided the shot in the notebook. Your job is to make
 that decision readable to the sampler — especially WHAT HER BODY IS DOING.
 A weave that pads air and cloth while the posture stays vague has failed,
 even at 200 words. A weave that makes the beat unmistakable has succeeded,
-even at 70.
-
-SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
+even at 70.""",
+    'source': """SOURCE: NOTEBOOK NOW is the only inventory. CREW LOOK, when present, is the
 quality of that inventory (light, optics, colour, air, cloth, finish, body) —
-never extra inventory. No theme, no chat, no photo.
-
-Read each field for what it owns. The gaze is FRAME's — if BEAT still carries
+never extra inventory. No theme, no chat, no photo.""",
+    'owns': """Read each field for what it owns. The gaze is FRAME's — if BEAT still carries
 an old one, FRAME is the one that is current, because that is the field the
 showrunner's directions are written into. Do not put both in the bag: a bag
 that says `looking_at_viewer` while the prose has her eyes on the book is one
-instruction contradicting itself, and the sampler resolves it by coin flip.
-
-FIRST DUTY — THE BODY (BEAT / beat_b) AND THE FACE (EXPRESSION /
+instruction contradicting itself, and the sampler resolves it by coin flip.""",
+    'body': """FIRST DUTY — THE BODY (BEAT / beat_b) AND THE FACE (EXPRESSION /
 expression_b), and CREW LOOK BODY when present:
   **Her face is a field now, and it must reach the tags.** Whatever EXPRESSION
   says — `smile`, `blush`, `parted_lips`, `teary_eyes`, `frown` — goes in the
@@ -1723,9 +1721,8 @@ expression_b), and CREW LOOK BODY when present:
   `hands_on_own_chest`, …). A bag full of light and cloth with no posture
   tag is a miss.
 - Partner shoots: each girl's body in her own line of prose and in tags_a /
-  tags_b. Never leave one of them as a prop.
-
-SECOND — PLACE, LIGHT, CLOTHES (named, not invented):
+  tags_b. Never leave one of them as a prop.""",
+    'place': """SECOND — PLACE, LIGHT, CLOTHES (named, not invented):
 - SCENE / BG / LIGHT / WEARING become tags and short clauses that support the
   body, not essays that bury it.
 - LIGHT is a notebook field. Put it in tags (`backlighting`, `rim_light`,
@@ -1738,45 +1735,57 @@ SECOND — PLACE, LIGHT, CLOTHES (named, not invented):
 - Do not add clothes, hats, lanterns, animals, or furniture the notebook
   does not name. Struck items must not appear, including no_hat forms.
 - Crop must match FRAME: wide/full-body shots do not also get close_up;
-  zoom/close/upper shots do not also get wide_shot or full_body.
-
-THE LOOK IS HOW YOU WRITE, NOT WHAT YOU PAD WITH:
+  zoom/close/upper shots do not also get wide_shot or full_body.""",
+    'look': """THE LOOK IS HOW YOU WRITE, NOT WHAT YOU PAD WITH:
 - LOOK, when present, colours word choice (cel → `cel_shading`, `flat_color`;
   semi-real → `realistic`, `soft_shading`). It is not a licence to write a
   paragraph about air instead of the pose.
-- ROOM LEANING is a leaning, not an order.
-
-THE CAMERA IS NOT IN THE PICTURE:
+- ROOM LEANING is a leaning, not an order.""",
+    'camera': """THE CAMERA IS NOT IN THE PICTURE:
 - Describe the photograph, not the shoot. Never "the camera lingers" — say
   "a close-up holds her face".
 - Never tag the apparatus (`handheld_camera`, `camera`, `viewfinder`,
   `tripod`, `taking_picture`). Distance and angle are `close-up`,
   `from_above`, `depth_of_field`, `motion_blur`.
-- Never write her name, in any language, as a tag.
-
-SAY IT IN TAGS THE SAMPLER KNOWS:
+- Never write her name, in any language, as a tag.""",
+    'tags': """SAY IT IN TAGS THE SAMPLER KNOWS:
 - Ordinary danbooru tags, underscored. `from_above` — not `overhead_shot`.
 - Do not mint compounds nobody has tagged (`window_desk`, `weight_leaning`,
   `expectant_atmosphere`). If it has no tag, say it in craft_scene.
-- One idea per tag. A clause with three nouns is prose.
-
-HOW MUCH TO WRITE:
+- One idea per tag. A clause with three nouns is prose.""",
+    'amount': """HOW MUCH TO WRITE:
 - Tags: 25–45 is the room, not a target. Do not invent nouns to hit a count.
 - craft_scene: **no floor**. Write until the body is unmistakable, then stop.
   Typical good work is 60–140 words. Ceiling 180. Padding cloth, air, and
   shadow to look "rich" is a failure mode this studio already measured — it
   buried the Showrunner's beat under atmosphere.
 - Order of craft_scene: body → clothes-as-worn → light on that body → place.
-  Never the reverse.
+  Never the reverse.""",
+    'partner': """Partner shoots: tags_shared + tags_a + tags_b (never one mixed bag).
+Solo: tags only.""",
+    'intent': """INTENT: shot. Absolute values. Do not rewrite atmosphere/scene/frame/wearing/beat.
+Leave those keys omitted or empty. English only.""",
+    'json': """Respond with a single JSON object matching the schema.""",
+}
 
-Partner shoots: tags_shared + tags_a + tags_b (never one mixed bag).
-Solo: tags only.
+WEAVE_BUILD_DEFAULT: tuple[str, ...] = (
+    'base', 'lang', 'why', 'source', 'owns', 'body', 'place', 'look', 'camera', 'tags', 'amount', 'partner', 'intent', 'json',
+)
 
-INTENT: shot. Absolute values. Do not rewrite atmosphere/scene/frame/wearing/beat.
-Leave those keys omitted or empty. English only.
 
-Respond with a single JSON object matching the schema.
-""".strip()
+def build_weave_system(names: Iterable[str] | None = None) -> str:
+    """Compose the weave contract from named blocks.
+
+    同じ土俵で比べるためのもの。積み木にしただけで、既定の並びは
+    いままでの本番と一字も違わない。
+    """
+    keys = list(names) if names is not None else list(WEAVE_BUILD_DEFAULT)
+    return "\n\n".join(
+        WEAVE_BLOCKS[k] for k in keys if WEAVE_BLOCKS.get(k)
+    )
+
+
+SCRIPTER_WEAVE_SYSTEM = build_weave_system()
 SCRIPTER_VERIFY_NOTE = (
     "VERIFY: SHOWRUNNER'S LATEST LINE below is the showrunner's actual words "
     "this turn — not this VERIFY header. Re-read that line against NOTEBOOK NOW. "

@@ -278,3 +278,30 @@ def test_an_empty_expression_does_not_erase_a_face_the_beat_still_carries():
     assert "The gaze is FRAME's" in text
     # 顔の規則は、視線の規則より**後**に置く（例外は原則のあとに読ませる）。
     assert text.index("The gaze is FRAME's") < text.index("does not erase a face")
+
+
+def test_the_weave_contract_is_built_from_named_blocks():
+    """weave の契約を、compile と同じ**名前付きの積み木**にした。
+
+    compile は 8,281字 52.7% → 2,327字 96%。**weave はまだ一度も刈っていない**
+    （5,075字）。そして実測で、契約が伸びると崩れが増える形がまた出ている:
+
+        8/28（4,629字）  崩れ 1/30   語数 58   合格 29/29
+        8/31（5,075字）  崩れ 6/30   語数 50   合格 21/24
+
+    刈る前に**一本ずつ落として測れる形**にする。既定の並びは、いままでの
+    本番と一字も違わない（`weave_ablate.py` が段落を落として比べる）。
+    """
+    from app.muse import chain
+
+    assert chain.build_weave_system() == chain.SCRIPTER_WEAVE_SYSTEM
+    # 積み木を全部つなぐと、既定と同じもの。取りこぼしも重複も無い。
+    assert set(chain.WEAVE_BUILD_DEFAULT) == set(chain.WEAVE_BLOCKS)
+    assert len(chain.WEAVE_BUILD_DEFAULT) == len(chain.WEAVE_BLOCKS)
+    # 一本落とせば、その字数ぶんだけ短くなる。
+    without = chain.build_weave_system(
+        [k for k in chain.WEAVE_BUILD_DEFAULT if k != "amount"],
+    )
+    assert len(without) == len(chain.SCRIPTER_WEAVE_SYSTEM) - len(
+        chain.WEAVE_BLOCKS["amount"]) - 2
+    assert "HOW MUCH TO WRITE" not in without
