@@ -767,8 +767,8 @@ async def test_dialogue_path_reunion_recall_chat_shot_affirm(monkeypatch):
     async def _taste(db, cid):
         return dict(taste_store)
 
-    async def _chem(db, cid, limit=2):
-        return ["息が合いやすい"]
+    async def _chem(db, cid, limit=2, partner_id=None):
+        return ["息が合いやすい"] if partner_id or True else []
 
     async def _set_bond(db, cid, bond):
         bond_store.update(bond)
