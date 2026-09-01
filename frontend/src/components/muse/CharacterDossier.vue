@@ -68,11 +68,12 @@ const firstPerson = computed(() => (isJa.value ? preset.value?.first_person_ja :
 const userAddress = computed(() => (isJa.value ? preset.value?.user_address_ja : (preset.value?.user_address_en || preset.value?.user_address_ja)) || '')
 const talkQuirks = computed(() => (isJa.value ? preset.value?.talk_quirks : (preset.value?.talk_quirks_en || preset.value?.talk_quirks)) || '')
 const sayExamples = computed(() => (isJa.value ? preset.value?.duet_say_examples : (preset.value?.duet_say_examples_en || preset.value?.duet_say_examples)) || [])
-// Newest first — a chemistry note from a shoot two months ago is less
-// interesting than what just happened.
+// Newest first. One note per partner on disk; many partners still overflow
+// the dossier sidebar, so the section folds when there are more than a few.
 const chemistry = computed(
   () => [...(preset.value?.chemistry || [])].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)),
 )
+const chemistryFolded = computed(() => chemistry.value.length > 3)
 function chemistryPartnerName(rec) {
   return (isJa.value ? rec.partner_name_ja : (rec.partner_name || rec.partner_name_ja)) || ''
 }
@@ -337,45 +338,55 @@ watch(() => props.characterId, load, { immediate: true })
             </div>
           </section>
 
-          <!-- Chemistry — a duet's relationship note, read from her diary
-               against her partner's. Hover a card to see which diary entries
-               it came from. -->
+          <!-- Chemistry — one note per partner. Fold when many so 30 partners
+               do not blow out the sidebar. -->
           <section v-if="chemistry.length" class="space-y-1.5">
-            <p class="sb-label text-rose-300 font-semibold flex items-center gap-1">
-              <span>💞</span> {{ t('characters.chemistry') }}
-            </p>
-            <div class="space-y-1.5">
-              <div
-                v-for="rec in chemistry"
-                :key="rec.id"
-                class="group relative p-2 rounded bg-rose-950/30 border border-rose-500/20
-                       text-[11px] text-rose-100/90 leading-snug cursor-default"
+            <details class="group" :open="!chemistryFolded">
+              <summary
+                class="sb-label text-rose-300 font-semibold flex items-center gap-1
+                       cursor-pointer list-none [&::-webkit-details-marker]:hidden"
               >
-                <div class="flex items-center gap-1.5 mb-1">
-                  <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-500/80 text-white">
-                    {{ t(`characters.chemistryTier.${rec.tier || 'acquaintance'}`) }}
-                  </span>
-                  <span v-if="chemistryPartnerName(rec)" class="text-rose-300/70 text-[10px]">
-                    {{ chemistryPartnerName(rec) }}
-                  </span>
-                </div>
-                <p>{{ chemistryText(rec) }}</p>
-
+                <span class="text-[10px] text-rose-300/50 group-open:rotate-90 transition-transform">▸</span>
+                <span>💞</span> {{ t('characters.chemistry') }}
+                <span class="text-rose-300/60 font-normal">· {{ chemistry.length }}</span>
+                <span
+                  v-if="chemistryFolded"
+                  class="ml-auto text-[10px] font-normal text-rose-300/70"
+                >{{ t('characters.chemistryMore', { n: chemistry.length }) }}</span>
+              </summary>
+              <div class="mt-1.5 space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
                 <div
-                  v-if="(rec.sources || []).length"
-                  class="hidden group-hover:block absolute z-10 left-0 top-full mt-1 w-64 p-2
-                         rounded-lg bg-black/95 border border-rose-500/30 shadow-xl
-                         text-[10px] text-gray-300 space-y-1.5"
+                  v-for="rec in chemistry"
+                  :key="rec.id"
+                  class="group/card relative p-2 rounded bg-rose-950/30 border border-rose-500/20
+                         text-[11px] text-rose-100/90 leading-snug cursor-default"
                 >
-                  <p class="text-rose-300 font-semibold">{{ t('characters.chemistrySources') }}</p>
-                  <p
-                    v-for="src in rec.sources"
-                    :key="src.diary_id"
-                    class="border-l-2 border-rose-500/40 pl-1.5"
-                  >{{ sourceSummary(src) }}</p>
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-500/80 text-white">
+                      {{ t(`characters.chemistryTier.${rec.tier || 'acquaintance'}`) }}
+                    </span>
+                    <span v-if="chemistryPartnerName(rec)" class="text-rose-300/70 text-[10px]">
+                      {{ chemistryPartnerName(rec) }}
+                    </span>
+                  </div>
+                  <p>{{ chemistryText(rec) }}</p>
+
+                  <div
+                    v-if="(rec.sources || []).length"
+                    class="hidden group-hover/card:block absolute z-10 left-0 top-full mt-1 w-64 p-2
+                           rounded-lg bg-black/95 border border-rose-500/30 shadow-xl
+                           text-[10px] text-gray-300 space-y-1.5"
+                  >
+                    <p class="text-rose-300 font-semibold">{{ t('characters.chemistrySources') }}</p>
+                    <p
+                      v-for="src in rec.sources"
+                      :key="src.diary_id"
+                      class="border-l-2 border-rose-500/40 pl-1.5"
+                    >{{ sourceSummary(src) }}</p>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
           </section>
 
           <section v-if="inner.length" class="space-y-1">

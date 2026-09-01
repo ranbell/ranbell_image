@@ -1733,6 +1733,7 @@
     "propTags": "小物",
     "chemistry": "相性",
     "chemistrySources": "影響を与えた日記",
+    "chemistryMore": "タップで開く（{n}）",
     "chemistryTier": {
       "acquaintance": "顔見知り",
       "close": "仲良し",

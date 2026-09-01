@@ -843,6 +843,17 @@ async def pick_partner(db, ollama, session: dict[str, Any], preset_id: str) -> d
     session_db.log(session, "partner", session["partner_character"].get("name", ""))
     # 途中から入った子も、手ぶらでは来ない。
     await _dress_the_cast(db, ollama, session, cfg=await get_runtime_config(db))
+    # Partner just changed — reload the one chemistry note for THIS pair.
+    lead_id = str(_inputs(session).get("character_id") or "").strip()
+    if lead_id:
+        try:
+            session["chemistry_notes"] = await presets_db.get_recent_chemistry_notes(
+                db, lead_id, limit=1, partner_id=preset_id,
+            )
+        except Exception:
+            logger.debug("[muse] chemistry reload on partner pick failed",
+                         exc_info=True)
+            session["chemistry_notes"] = []
     await session_db.save(db, session)
     return session
 
@@ -6237,8 +6248,15 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
         session["showrunner_taste"] = await presets_db.get_showrunner_taste(
             db, char_id,
         )
+        partner = session.get("partner_character") or {}
+        partner_id = str(
+            partner.get("character_id")
+            or _inputs(session).get("partner_preset")
+            or ""
+        ).strip()
+        # Same partner only — never another Muse's leftover note.
         session["chemistry_notes"] = await presets_db.get_recent_chemistry_notes(
-            db, char_id, limit=2,
+            db, char_id, limit=1, partner_id=partner_id or None,
         )
     except Exception:
         logger.debug("[muse] bond/taste/chemistry load failed", exc_info=True)

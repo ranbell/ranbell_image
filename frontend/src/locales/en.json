@@ -1733,6 +1733,7 @@
     "propTags": "Props",
     "chemistry": "Chemistry",
     "chemistrySources": "From these diary entries",
+    "chemistryMore": "Tap to open ({n})",
     "chemistryTier": {
       "acquaintance": "Acquaintance",
       "close": "Close",
