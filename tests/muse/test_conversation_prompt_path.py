@@ -391,3 +391,32 @@ def test_the_gaze_belongs_to_each_person_now():
     assert "looking toward the distance" in lines["Sumire"]
     assert "looking toward the distance" not in lines["Mio"]
     assert "focus on Mio" in out
+
+
+def test_a_person_is_never_background():
+    """「すみれちゃんは背景で」は**カメラの話**であって、背景の欄ではない。
+
+    実機（`47cb5f1c`・2026-09-01）で焦点は正しく動いたが、`bg` にこれが
+    残った:
+
+        frame: long shot, focus on both        ← 正しい
+        bg   : **Mio close up, Sumire in background**
+
+    「みおちゃんに寄って。すみれちゃんは背景でいいよ」の**「背景で」を背景の
+    欄への指示と読んだ**。引きに戻したあとも `Mio close up` がプロンプトに
+    残り、焦点の指示と正面から矛盾していた。
+
+    実測（4件×5回・係を直接叩く）:
+
+        みおちゃんに寄って。すみれちゃんは背景でいいよ  書いた 0/5  ✓
+        今度はすみれちゃんに焦点を。みおちゃんはぼかして 書いた 0/5  ✓
+        背景に噴水を入れて                       書いた 5/5  ✓
+        後ろにベンチをもう一つ置こう                書いた 5/5  ✓
+    """
+    from app.muse import chain
+
+    bg = chain._PER_PERSON["bg"][2]
+    assert "never background" in bg.lower()
+    assert "FRAME" in bg, "行き先を言わないと、どこへ書けばよいか分からない"
+    # 本当の背景の仕事は残っている。
+    assert "buildings behind her" in bg or "what ELSE is in the picture" in bg

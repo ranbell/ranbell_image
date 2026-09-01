@@ -2596,6 +2596,9 @@ buildings behind her, extras around her, props on the set — AFTER it.
 - Not the place name itself (that is SCENE), not the light, not her clothes,
   not her pose, not the mood of the picture.
 - **Rewrite the whole line** for what is in frame now. Do not append.
+- **The two of them are never background.** 「すみれちゃんは背景で」「ぼかして」
+  「もう一人に寄って」 — that is the camera deciding who is sharp, and it
+  belongs to FRAME. Say `unchanged` here.
 - If the line does not change what is behind or around her, write: unchanged
 
 Return one JSON object with exactly this key, and nothing else:
