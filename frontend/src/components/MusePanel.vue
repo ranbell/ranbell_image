@@ -395,7 +395,7 @@ const notebookRows = computed(() => {
 })
 const taste = computed(() => session.value?.showrunner_taste || {})
 const chemistryNotes = computed(() =>
-  (session.value?.chemistry_notes || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 2),
+  (session.value?.chemistry_notes || []).map(s => String(s || '').trim()).filter(Boolean).slice(0, 1),
 )
 function splitLiveTalk(text) {
   const raw = String(text || '')

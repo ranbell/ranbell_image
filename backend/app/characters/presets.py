@@ -1017,8 +1017,9 @@ async def delete_preset_diary(db, preset_id: str, diary_id: str) -> bool:
 
 
 # ── Chemistry (Qdrant payload, mirrors diaries) ──────────────────────────────
-# Generated far less often than diaries — one per duet shoot at most, and only
-# once both actors' diaries have landed — so the cap is smaller.
+# One living note per partner pair. Cap is a safety net when a lead has shot
+# with many different Muses — older *partners* rotate out, not older takes of
+# the same pair (those are replaced one-for-one below).
 MAX_CHEMISTRY = 30
 
 
@@ -1027,7 +1028,11 @@ async def add_chemistry_record(
 ) -> None:
     """Store one chemistry entry on both characters — same content, each side's
     copy pointing at the other as `partner_character_id` (plus her name, so the
-    dossier can label the entry with no cross-fetch)."""
+    dossier can label the entry with no cross-fetch).
+
+    **同一ペアは前回1件だけ。** 同じ相手との新しいメモが来たら古い方を消し、
+    置き換える。30人ローテでも「今の相手の前回」が押し出されないようにする。
+    """
     presets_by_id = {
         cid: await get_preset(db, cid) for cid in (char_a_id, char_b_id)
     }
@@ -1036,7 +1041,13 @@ async def add_chemistry_record(
         if not preset:
             continue
         partner_preset = presets_by_id.get(partner_id) or {}
-        records = list(preset.get("chemistry") or [])
+        pid = str(partner_id or "")
+        # Drop any prior note for this same partner — keep only the latest take.
+        records = [
+            r for r in list(preset.get("chemistry") or [])
+            if isinstance(r, dict)
+            and str(r.get("partner_character_id") or "") != pid
+        ]
         records.append({
             **base_record,
             "partner_character_id": partner_id,
@@ -1047,6 +1058,7 @@ async def add_chemistry_record(
             records.sort(key=lambda r: r.get("timestamp") or 0.0)
             records = records[-MAX_CHEMISTRY:]
         await update_preset(db, owner_id, {"chemistry": records})
+        presets_by_id[owner_id] = {**preset, "chemistry": records}
 
 
 async def mark_diary_read(db, preset_id: str, diary_id: str) -> dict[str, Any] | None:
@@ -1319,22 +1331,34 @@ async def update_showrunner_taste(
 
 
 async def get_recent_chemistry_notes(
-    db, preset_id: str, limit: int = 2,
+    db, preset_id: str, limit: int = 1, *, partner_id: str | None = None,
 ) -> list[str]:
-    """Short prose from stored chemistry — Muse talk only."""
+    """Short prose from stored chemistry — Muse talk only.
+
+    **同一の相手だけで呼ぶ。** ``partner_id`` が無いときは掛け合いに載せない
+    （別の相手の古いメモを誤って渡さない）。同一ペアは保存側で1件なので、
+    通常は最新＝唯一のメモが1件返る。
+    """
     preset = await get_preset(db, preset_id)
     if not preset:
         return []
+    want = str(partner_id or "").strip()
+    if not want:
+        return []
+    rows = [
+        r for r in list(preset.get("chemistry") or [])
+        if isinstance(r, dict)
+        and str(r.get("partner_character_id") or "") == want
+    ]
+    rows.sort(key=lambda r: r.get("timestamp") or 0.0, reverse=True)
     out: list[str] = []
-    for row in list(preset.get("chemistry") or [])[: max(0, limit * 2)]:
-        if not isinstance(row, dict):
-            continue
+    for row in rows:
         text = str(
             row.get("summary_ja") or row.get("summary") or row.get("note") or ""
         ).strip()
         if text:
             out.append(text[:200])
-        if len(out) >= limit:
+        if len(out) >= max(0, limit):
             break
     return out
 
