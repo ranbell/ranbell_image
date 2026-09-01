@@ -897,7 +897,20 @@ def test_everyone_who_touches_the_notebook_reads_the_same_contract():
     built = chain.build_scripter_system()
     for field in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):
         assert field in built, field
-    assert "not where she is looking" in built.lower()
+    # **視線の持ち主が変わった。** かつては FRAME、いまは BEAT ——
+    # 総監督（2026-09-01）「視点は Muse A/B がどこを向いているのかなので、
+    # 自ずと beat に入る。**焦点はカメラワーク**」。
+    #
+    # 実機（`c9d83e6e`）で「すみれは後ろを向いて、みおはこっち見て」が
+    # `frame` 一本に潰れ、片方が消えていた。**二人は別々の所を見るので、
+    # 共有の一欄では二つの答えを持てない。**
+    #
+    # この試験の値打ちは「全員が同じ定義を読む」こと。定義が移ったなら、
+    # **移った先で一致していること**を見る。
+    low = built.lower()
+    assert "eyes are beat's" in low
+    assert "focus on" in low, "焦点の置き場が FRAME に無い"
+    assert "not where she is looking" not in low, "古い定義が残っている"
 
     # weave には渡さない。**読む側には効かなかった。** weave パック
     # (6試験 x 5回) で測ると、契約を抜いたほうが良い:
@@ -1053,12 +1066,20 @@ def test_the_built_contract_says_what_each_field_is_and_forbids_almost_nothing()
     # `expression` を欄として足したぶん（55字）で 3,000 を越えたので、そのぶん
     # だけ上げた。**新しい欄一つぶんであって、条文が太ったのではない** ——
     # 8,281字版が 52.7% だった教訓は生きている。
-    assert len(built) < 3050
+    #
+    # 焦点（カメラがどちらに寄るか）に持ち場を作ったぶん、もう一段上げた
+    # （総監督 2026-09-01「視点は beat に入る。**焦点はカメラワーク** ——
+    # `focus to …` とか `long shot` とかはこの箱」）。足したのは箱一つで、
+    # 説明を太らせたのではない —— `gaze` と `stem` の重複はそのぶん畳んだ。
+    assert len(built) < 3100
 
     # 外枠 — 欄が何であるか。
     for phrase in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):
         assert phrase in built
-    assert "not where she is looking" in built.lower()   # 視線は FRAME
+    # **視線は BEAT。** 二人は別々の所を見るので、共有の一欄では持てない。
+    assert "eyes are beat's" in built.lower()
+    # **焦点は FRAME。** カメラの箱。
+    assert "focus on" in built.lower()
     assert "posture" in built.lower()                     # beat は姿勢を言う
 
     # 中身は任せる。禁止で埋めない — それが 8,281字が負けた理由。

@@ -328,3 +328,66 @@ def test_an_unchanged_marker_never_reaches_the_picture():
         _Ollama('{"各務 みお": "unchanged"}'),
         kind="scene", note="いい感じ。", name_a="各務 みお", name_b="",
         model="m", num_ctx=1024)) == {}
+
+
+def test_the_camera_box_reaches_the_picture():
+    """**焦点はカメラワークの箱。** 書ける箱にしても、届かなければ意味がない。
+
+    総監督（2026-09-01）「視点は Muse A/B がどこを向いているのかなので、
+    自ずと beat に入るかな。**焦点はカメラワークがいいかも。`focus to …` とか
+    `long shot` とかはこの箱**かと」。
+
+    `frame` の文面はどこにも出ていなかった —— 絵に載っていたのは
+    `framing_tags` が正規化した一語（`full_body` など）だけ。手帖に
+    `focus on Mio` と書いても届かない。
+
+    **共有面の先頭に置く。** 総監督「priority はプロンプト内の位置」で、
+    どちらに寄るかは場所や光より先に効いてほしい。
+    """
+    from app.muse import notebook
+
+    nb = notebook.blank(partner=True)
+    notebook.apply_patch(nb, {
+        "frame": "medium shot, focus on Mio",
+        "scene": "a park bench, afternoon",
+        "bg": "trees",
+        "light": "soft daylight",
+        "atmosphere": "quiet",
+    })
+    wide = notebook.frame_wide_phrases(nb)
+    assert "focus on Mio" in wide
+    # カメラが先。場所より前に置く。
+    assert wide.index("medium shot") < wide.index("a park bench")
+
+
+def test_the_gaze_belongs_to_each_person_now():
+    """視線は人ごとの箱（`beat`）に入る。**共有の一欄では二つの答えを持てない。**
+
+    実機（`c9d83e6e`）で「すみれちゃんは後ろを向いて、遠くを見てて。
+    みおちゃんはこっち見て」が `frame` 一本に潰れ、片方が消えた。
+    """
+    from app.muse import chain, identity, notebook
+
+    low = chain.build_scripter_system().lower()
+    assert "eyes are beat's" in low
+    assert "focus on" in low
+
+    nb = notebook.blank(partner=True)
+    notebook.apply_patch(nb, {
+        "beat": "sitting, looking at the camera",
+        "beat_b": "standing, looking toward the distance",
+        "wearing": "white blouse", "wearing_b": "knit cardigan",
+        "frame": "medium shot, focus on Mio",
+    })
+    cast = [{"name": "Mio", "identity_tags": ["silver_hair", "bob_cut"]},
+            {"name": "Sumire", "identity_tags": ["blonde_hair", "braid"]}]
+    out = identity.assemble_from_boxes(
+        cast=cast, people=notebook.mint_person_box(nb, partner=True),
+        frame_wide=notebook.frame_wide_phrases(nb),
+        style="anime_coloring", framing="auto", scene="",
+    )
+    lines = {l.split(":")[0].strip(): l for l in out.splitlines() if ":" in l}
+    assert "looking at the camera" in lines["Mio"]
+    assert "looking toward the distance" in lines["Sumire"]
+    assert "looking toward the distance" not in lines["Mio"]
+    assert "focus on Mio" in out

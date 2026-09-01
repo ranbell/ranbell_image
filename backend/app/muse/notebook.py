@@ -1147,14 +1147,23 @@ def mint_person_box(
 
 
 def frame_wide_phrases(nb: dict[str, Any]) -> list[str]:
-    """人に属さないもの —— 場所・背景・光・雰囲気。カメラは framing_tags が足す。
+    """人に属さないもの —— カメラ・場所・背景・光・雰囲気。
 
     ``atmosphere`` は手帖にあるのに共有面へ載せていなかった。表情の空欄
     フォールバックにしか使われず、mood が craft_scene 言い換えに逃げる主因に
     なっていた（総監督「なんか違う」）。
+
+    **``frame`` も届いていなかった。** 出ていたのは `framing_tags` が正規化
+    した一語（`full_body` など）だけで、手帖に書いた文面そのものは絵に載って
+    いない。総監督（2026-09-01）「焦点はカメラワークがいいかも。
+    `focus to …` とか `long shot` とかはこの箱かと」—— **書ける箱にしても、
+    届かなければ意味がない。**
+
+    先頭に置く。総監督「priority はプロンプト内の位置」で、二人のうち
+    どちらに寄るかは場所や光より先に効いてほしい。
     """
     out: list[str] = []
-    for key in ("scene", "bg", "light", "atmosphere"):
+    for key in ("frame", "scene", "bg", "light", "atmosphere"):
         for phrase in _phrases(str((nb or {}).get(key) or "")):
             if phrase not in out:
                 out.append(phrase)

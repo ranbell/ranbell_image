@@ -1342,9 +1342,9 @@ ATMOSPHERE  the mood
 SCENE       the place and the time of day
 BG          what is in the picture besides her
 LIGHT       the key and where it comes from
-FRAME       the camera, and where her eyes are pointed
+FRAME       the camera: how close, the angle, who it is focused on
 WEARING     what is on her body
-BEAT        what her body is doing — not where she is looking, not her face
+BEAT        what her body does, eyes included — not her face
 EXPRESSION  her face: mouth, eyes, brows
 
 Return one JSON object holding only the fields you changed, with English
@@ -1362,17 +1362,19 @@ Changed nothing at all? Return the object with no fields in it.
 #     「うん、それで」        → beat: "leaning elbows on the windowsill"
 # 立っているのか座っているのか分からない beat は、絵にならない。
 SCRIPTER_STEM = """
-BEAT always says which posture she is in — sitting, standing, kneeling,
-crouching — even when the direction is only about her hands. Hands, weight and
-anything she is holding are written on top of that posture, never instead of it.
+BEAT always names the posture — sitting, standing, kneeling, crouching — even
+when the direction is only about her hands. Hands, weight, what she holds and
+where she looks are written on top of that posture, never instead of it.
 """.strip()
 
 # t7 / t28。「本に視線を戻して」「窓の外を見て」は動作のように聞こえるので
 # BEAT に入る。カメラを見る側は通るのに、離れる側で落ちる。
 SCRIPTER_GAZE = """
-Where she looks is FRAME, whichever way it points — into the lens, down at
-what she is holding, off toward the horizon. A direction about her eyes
-rewrites FRAME and leaves BEAT to her body.
+Her eyes are BEAT's, with the rest of her body. **Two people look at
+different things; one shared field cannot hold two answers.**
+
+FRAME is the camera alone: how close, the angle, and which of them it is
+focused on — `focus on <name>`, `long shot`, `from above`.
 """.strip()
 
 # t16 / t17。「教室に移ろう」「夕方にして」で patch が空になった。
