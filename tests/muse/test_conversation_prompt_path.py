@@ -420,3 +420,62 @@ def test_a_person_is_never_background():
     assert "FRAME" in bg, "行き先を言わないと、どこへ書けばよいか分からない"
     # 本当の背景の仕事は残っている。
     assert "buildings behind her" in bg or "what ELSE is in the picture" in bg
+
+
+def test_each_person_is_written_as_one_run():
+    """**一人ぶんを一続きに書く。** 交互に並べると体型が混ざる。
+
+    実機（`d2a56ace`・2026-09-02）の並びと、その絵:
+
+        Mio is …, flat_chest, slim,
+        Subaru is …, large_breasts, tall,
+        Mio: lying on the bench, …
+        Subaru: standing near the bench, …
+
+    **人が二回ずつ交互に出る**ので、どこからどこまでが一人ぶんか見失う。
+    絵ではみおがすばるの胸を引き受け、すばるの姿勢（立つ）も座りに化けた。
+    総監督「Mio danbooru / Mio 散文 / Subaru danbooru / Subaru 散文 と
+    したほうがいいかも」。
+    """
+    from app.muse import identity, notebook
+
+    nb = notebook.blank(partner=True)
+    notebook.apply_patch(nb, {
+        "wearing": "professional_blouse, tailored_trousers",
+        "beat": "lying on the bench, hands supporting head",
+        "wearing_b": "knit_cardigan, long_skirt",
+        "beat_b": "standing near the bench",
+        "scene": "a park, daytime",
+    })
+    cast = [
+        {"name": "Mio", "identity_tags": ["silver_hair", "flat_chest", "slim"]},
+        {"name": "Subaru", "identity_tags": ["navy_hair", "large_breasts", "tall"]},
+    ]
+    out = identity.assemble_from_boxes(
+        cast=cast, people=notebook.mint_person_box(nb, partner=True),
+        frame_wide=notebook.frame_wide_phrases(nb),
+        style="anime_coloring", framing="auto", scene="They share the bench.",
+    )
+    rows = [l for l in out.splitlines() if l.startswith(("Mio", "Subaru"))]
+    # みおの二行が続き、そのあとすばるの二行。**交互にしない。**
+    assert rows[0].startswith("Mio is ")
+    assert rows[1].startswith("Mio: ")
+    assert rows[2].startswith("Subaru is ")
+    assert rows[3].startswith("Subaru: ")
+    # 体つきは自分の行にだけ。
+    assert "flat_chest" in rows[0] and "flat_chest" not in rows[2]
+    assert "large_breasts" in rows[2] and "large_breasts" not in rows[0]
+
+
+def test_the_compile_is_told_a_person_is_never_background():
+    """人が背景の欄に入る。係には言ってあったが、**compile には言っていなかった**。
+
+    実機（`d2a56ace`）で `bg: two people, park trees`。総監督の報告
+    「背景に『すばる』という文言が入った」と同じ形。
+    """
+    from app.muse import chain
+
+    built = chain.build_scripter_system()
+    assert "never a person" in built
+    # 係のほうも変わっていないこと。
+    assert "never background" in chain._PER_PERSON["bg"][2].lower()

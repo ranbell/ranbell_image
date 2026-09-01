@@ -922,11 +922,22 @@ def assemble_from_boxes(
         identity_list(subject_tags(cast)) + [name_list([n for n, _ in named])]
     ) + ","
     lines = [lead]
-    # ① 静的だけ。髪・目・体つき —— 撮影のあいだ動かないもの。
-    for name, locked in named:
+    # **一人ぶんを一続きに書く。** 静的（髪・目・体つき）のすぐ下に、その人の
+    # 動的（姿勢・服・表情）を置く。
+    #
+    # 交互に並べた版は実機で体型が混ざった（`d2a56ace`・2026-09-02）:
+    #
+    #     Mio is …, flat_chest, slim,
+    #     Subaru is …, large_breasts, tall,
+    #     Mio: lying on the bench, …
+    #     Subaru: standing near the bench, …
+    #
+    # **人が二回ずつ交互に出る**ので、どこからどこまでが一人ぶんか見失う。
+    # 絵ではみおがすばるの胸を引き受け、すばるの姿勢（立つ）も座りに化けた。
+    # 総監督「Mio danbooru / Mio 散文 / Subaru danbooru / Subaru 散文 と
+    # したほうがいいかも」。
+    for (name, locked), box in zip(named, people):
         lines.append(f"{name} is " + ", ".join(locked) + ",")
-    # ② 動的。**人ごとの別枠**。姿勢 → 服 → 表情の順で、姿勢が先頭に来る。
-    for (name, _), box in zip(named, people):
         run = list(box.get("beat") or [])
         run += [w for w in (box.get("wearing") or []) if w not in run]
         run += [f for f in (box.get("face") or []) if f not in run]
