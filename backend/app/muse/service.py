@@ -3978,9 +3978,16 @@ async def _run_duet_scripter(
                 name_a=name_a, name_b=name_b,
                 now_a=str(nb.get(pair[0]) or ""),
                 now_b=str(nb.get(pair[1]) or "") if pair[1] else "",
-                her_say=_last_lead_say(session) if kind in (
-                    "beat", "expression",
-                ) else "",
+                # **ここでは彼女の言葉を渡さない。** 台本係は**彼女が話す前**に
+                # 走るので、`_last_lead_say` が返すのは前のターンの言葉 ——
+                # 定義上いつも古い。実機（`0fa9dbb1`）で「立って。」に対し
+                # compile が正しく `standing` と書いたあと、係が前のターンの
+                # 「座って本を読んで」を読んで `sitting` に戻した。
+                #
+                # 同じ汚染は weave で測ってある（7/8 対 0/8・`1564313`）。
+                # **ターン末の拾う段では正しい** —— あちらは彼女が話し終えて
+                # いるので、その回の答えが入っている。
+                her_say="",
                 model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
             ))
             _stage(session, f"{kind} 係（名前で訊く）", began_k)

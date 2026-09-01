@@ -273,3 +273,58 @@ def test_the_prose_keeps_its_paragraph_breaks():
     })
     body = "She sits on the bench.\n\nHer partner stands beside her."
     assert notebook.fight_craft_scene(nb, body) == body
+
+
+def test_the_mid_turn_clerk_is_not_handed_her_previous_line():
+    """**台本係は彼女が話す前に走る。** だから `_last_lead_say` は必ず古い。
+
+    実機（`0fa9dbb1`・2026-09-01）で「立って。」に対し compile が正しく
+    `standing` と書いたあと、姿勢の係が**前のターンの「座って本を読んで」**を
+    読んで `sitting` に戻した:
+
+        [beat 係] beat: 'standing, hands holding a book'
+                     -> 'sitting, weight on left hip, hands resting…'
+
+    同じ汚染は weave で測ってある（7/8 対 0/8・`1564313`）。
+    **ターン末の拾う段では正しい** —— あちらは彼女が話し終えている。
+    """
+    import inspect
+    from app.muse import service
+
+    mid = inspect.getsource(service._run_duet_scripter)
+    i = mid.index("per_person.update(await chain.read_per_person(")
+    assert 'her_say=""' in mid[i:i + 900], "途中の係に古い言葉を渡している"
+
+    end = inspect.getsource(service._ask_the_field_clerks)
+    assert "her_say=her_say" in end, "拾う段では彼女の答えを渡すべき"
+
+
+def test_an_unchanged_marker_never_reaches_the_picture():
+    """合図が値に混ざる回がある。丸ごと一致だけ見る版は通してしまう。
+
+    実機で場所の係が「その場所, unchanged」と返し、`unchanged` がそのまま
+    絵に載った。
+    """
+    import asyncio
+    from app.muse import chain
+
+    class _Ollama:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def generate_text_stream(self, prompt, **kw):
+            async def _stream():
+                yield {"type": "token", "text": self.reply}
+            return _stream()
+
+    got = asyncio.run(chain.read_per_person(
+        _Ollama('{"各務 みお": "the school gate, unchanged"}'),
+        kind="scene", note="校門の前に行こう。", name_a="各務 みお", name_b="",
+        model="m", num_ctx=1024))
+    assert got == {"scene": "the school gate"}
+
+    # 丸ごと合図なら、いままでどおり何も書かない。
+    assert asyncio.run(chain.read_per_person(
+        _Ollama('{"各務 みお": "unchanged"}'),
+        kind="scene", note="いい感じ。", name_a="各務 みお", name_b="",
+        model="m", num_ctx=1024)) == {}

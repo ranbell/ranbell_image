@@ -2809,6 +2809,11 @@ async def read_per_person(
     pairs = [(a, fields[0])] + ([(b, fields[1])] if b else [])
     for name, field in pairs:
         val = re.sub(r"\s+", " ", str(got.get(name) or "")).strip()
+        # **合図が値に混ざる回がある。** 実機（`0fa9dbb1`）で場所の係が
+        # 「その場所, unchanged」と返し、`unchanged` がそのまま絵に載った。
+        # 丸ごと一致だけ見る版は、混ざった回を通してしまう。
+        val = re.sub(r"[,、]?\s*(unchanged|none|同じ)\s*[.。]?$", "", val,
+                     flags=re.I).strip().strip(",、")
         if val and val.lower() not in ("unchanged", "none", "-", "同じ"):
             out[field] = val
     return out
