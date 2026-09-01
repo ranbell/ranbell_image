@@ -63,6 +63,18 @@ const rewriteLog = computed(() => session.value?.rewrite_log || [])
 const clerkLog = computed(() => (session.value?.clerk_log || []).slice().reverse())
 // 段ごとの壁時計。**どこに時間が消えているか分からないまま削らない**ため。
 const stageMs = computed(() => (session.value?.stage_ms || []).slice(-8).reverse())
+const pipeline = computed(() => session.value?.pipeline || null)
+const pipelineStages = computed(() => pipeline.value?.stages || [])
+const pipelineDivergences = computed(() => pipeline.value?.divergences || [])
+const craftRoute = computed(() => session.value?.craft_route || [])
+const turnTrace = computed(() => (session.value?.turn_trace || []).slice(-6).reverse())
+function pipelineStatusClass(status) {
+  if (status === 'ok' || status === 'frozen') return 'border-emerald-500/40 text-emerald-200/90'
+  if (status === 'missed' || status === 'stale' || status === 'refused' || status === 'diverged') {
+    return 'border-rose-500/40 text-rose-200/90'
+  }
+  return 'border-amber-500/20 text-[var(--sb-muted)]'
+}
 function rewriteWhen(ts) {
   if (!ts) return ''
   try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
@@ -1531,6 +1543,77 @@ async function onChatKey(e) {
                 ⌁ {{ t('muse.pictureStopped') }}
               </span>
             </div>
+
+            <!-- classify → clerks → notebook → weave → … → board -->
+            <div v-if="pipelineStages.length" class="mb-2">
+              <div class="mb-1 font-semibold text-amber-200/90">{{ t('muse.pipelineTitle') }}</div>
+              <p class="mb-1.5 text-[var(--sb-faint)]">{{ t('muse.pipelineHint') }}</p>
+              <ol class="flex flex-wrap gap-1">
+                <li
+                  v-for="stage in pipelineStages"
+                  :key="stage.id"
+                  class="rounded border px-1.5 py-1 min-w-[4.5rem]"
+                  :class="pipelineStatusClass(stage.status)"
+                  :title="JSON.stringify(stage)"
+                >
+                  <div class="font-semibold">{{ stage.id }}</div>
+                  <div class="text-[9px] opacity-80">{{ stage.status }}</div>
+                </li>
+              </ol>
+              <ul v-if="pipelineDivergences.length" class="mt-1.5 space-y-0.5">
+                <li
+                  v-for="(d, i) in pipelineDivergences"
+                  :key="`${d.field}-${i}`"
+                  class="text-rose-300/90"
+                >
+                  ⌁ {{ d.field }} · {{ d.detail }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="turnTrace.length" class="mb-2">
+              <div class="mb-1 font-semibold text-amber-200/90">{{ t('muse.turnTrace') }}</div>
+              <ul class="space-y-1">
+                <li
+                  v-for="(row, i) in turnTrace"
+                  :key="`${row.at}-${i}`"
+                  class="rounded border border-amber-500/20 px-2 py-1"
+                >
+                  <div class="text-amber-200/90">{{ row.line || '—' }}</div>
+                  <div class="text-[var(--sb-faint)]">
+                    asked: {{ (row.asked || []).join(', ') || '—' }}
+                    · missed: {{ (row.missed || []).join(', ') || '—' }}
+                  </div>
+                  <div
+                    v-for="(delta, field) in (row.moved || {})"
+                    :key="field"
+                    class="text-[var(--sb-muted)]"
+                  >
+                    {{ field }}: {{ delta }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="craftRoute.length" class="mb-2">
+              <div class="mb-1 font-semibold text-amber-200/90">{{ t('muse.craftRoute') }}</div>
+              <ul class="space-y-0.5">
+                <li
+                  v-for="(hop, i) in craftRoute"
+                  :key="`${hop.hop}-${i}`"
+                  class="text-[var(--sb-muted)]"
+                >
+                  <span class="text-amber-300/80">{{ hop.hop }}</span>
+                  <span v-if="(hop.dropped || []).length" class="ml-1 text-rose-300/80">
+                    −{{ hop.dropped.slice(0, 6).join(', ') }}
+                  </span>
+                  <span v-if="(hop.added || []).length" class="ml-1 text-emerald-300/80">
+                    +{{ hop.added.slice(0, 6).join(', ') }}
+                  </span>
+                </li>
+              </ul>
+            </div>
+
             <pre
               v-if="session?.muse_card"
               class="whitespace-pre-wrap rounded border border-amber-500/20 bg-black/30 p-2 mb-2 text-[var(--sb-muted)]"

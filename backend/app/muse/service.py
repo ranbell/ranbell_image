@@ -1911,7 +1911,7 @@ def _reassemble(session: dict[str, Any]) -> None:
     model call: the panel can show what was just asked for the moment it lands.
 
     On the notebook path, craft tags/scene are owned by the scripter compile —
-    only the positive string is refreshed from those fields.
+    the positive is rebuilt from person boxes (same final authority as weave).
     """
     craft = session.setdefault("craft", {})
     if uses_notebook(session) and int((session.get("notebook") or {}).get("rev") or 0) > 0:
@@ -1928,13 +1928,34 @@ def _reassemble(session: dict[str, Any]) -> None:
             frame=str(nb.get("frame") or ""),
             banned=set(banned_now(session)),
         )
-        craft["prompt"] = identity.assemble_positive(
-            _identity_tags(session), str(craft.get("tags") or ""),
-            str(craft.get("scene") or ""),
-            framing=_shot_framing(session), style=_style(session),
-            subject=identity.subject_tags(_cast(session)), cast=_cast(session),
-            own=_sides(session, str(craft.get("tags") or "")),
+        scene = notebook_mod.fight_craft_scene(
+            nb, str(craft.get("scene") or ""),
         )
+        craft["scene"] = scene
+        cast = _cast(session)
+        # Always re-mint from notebook so scrubbed tags cannot flatten W.
+        boxes = notebook_mod.mint_person_box(
+            nb, partner=bool(session.get("partner_character") or {}),
+            struck=notebook_mod.struck_tokens(session),
+            banned=set(banned_now(session)),
+        )
+        from_boxes = identity.assemble_from_boxes(
+            cast=cast, people=boxes,
+            frame_wide=notebook_mod.frame_wide_phrases(nb),
+            style=_style(session), framing=_shot_framing(session),
+            scene=scene,
+        )
+        if from_boxes:
+            craft["people"] = boxes
+            craft["prompt"] = from_boxes
+        else:
+            craft["prompt"] = identity.assemble_positive(
+                _identity_tags(session), str(craft.get("tags") or ""),
+                scene,
+                framing=_shot_framing(session), style=_style(session),
+                subject=identity.subject_tags(cast), cast=cast,
+                own=_sides(session, str(craft.get("tags") or "")),
+            )
         return
     table = facets.table_of(session) if on_facets(session) else None
     # An empty table is not an empty shot — it is a shot nobody has written into
@@ -3575,41 +3596,19 @@ def _apply_compiled_craft(
     # about air must never leave posture as an afterthought (or absent).
     nb_now = notebook_mod.of(session)
     before_lead = scene
-    partner_now = bool(session.get("partner_character") or {})
-    # **無名詞の貼り付けをやめる。** `ensure_beat_leads_scene` は手帖の
-    # `beat` と `beat_b` を散文の頭にそのまま前置していた —— 誰のことか
-    # 書かれないまま。実測（`8c48e8cb`）:
-    #
-    #     sitting, weight on both hands, torso straight, looking ahead.
-    #     sitting, clutching headphones with one hand.
-    #     Subaru sits with a straight torso, … Mio sits on a bench, …
-    #
-    # **同じ内容が三回**（共有のタグ・無名詞の断片・weave の散文）。総監督
-    # 「最終的なプロンプトを見ても意味が分からない」。人ごとの箱が姿勢を
-    # 名前つきで持つようになったので、前置は二重にしかならない。
-    #
-    # **一人の撮影では、いままでどおり前置する。** `named_identity` は一人の
-    # ときに名前の行を作らない（「there is no one to be confused with, and the
-    # flat form is what every measurement so far was taken against」）ので、
-    # 箱の道も一人では使わない。姿勢が散文から落ちると行き場がなくなる。
-    if len(_cast(session)) < 2:
-        scene = notebook_mod.ensure_beat_leads_scene(
-            scene,
-            beat=str(nb_now.get("beat") or ""),
-            beat_b=str(nb_now.get("beat_b") or ""),
-        )
-    _route_note(session, "8 ensure_beat_leads_scene",
+    # **散文を手帖と闘わせる。** タグは突き合わせているが散文は素通りだった。
+    # 未知語が多い craft_scene は落とし、boxes／共有面に任せる。
+    scene = notebook_mod.fight_craft_scene(nb_now, scene)
+    _route_note(session, "8 craft_scene_notebook_fight",
                 scene_before=before_lead, scene_after=scene)
+    # Solo beat lead only when prose survived and boxes path is unavailable.
+    # Prefer person boxes for everyone (including solo); beat lead is fallback.
     craft["tags"] = tags
     craft["scene"] = scene
     craft["tags_a"], craft["tags_b"] = str(sides[0] or ""), str(sides[1] or "")
     craft["pose_intent"] = str((nb_now.get("beat") or ""))[:240]
-    # **人ごとの箱から組む。** 手帖は最初から人ごとなのに、craft で平らに
-    # 混ぜて最後に持ち主を推測し直していた —— 十段の記録で出た五つの壊れは
-    # すべてその帰結（`notebook.mint_person_box` の説明に一覧がある）。
-    #
-    # 総監督（2026-08-31）「A/B の動作は最後まで保持しないといけない」
-    # 「静的特性は先頭部でよいが、感情や行動は別枠にしないといけない」。
+    # **人ごとの箱から組む。** solo / W 共通。flat assemble_positive は
+    # boxes が組めないときだけの薄いフォールバック。
     cast = _cast(session)
     boxes = notebook_mod.mint_person_box(
         nb_now, partner=bool(session.get("partner_character") or {}),
@@ -3624,10 +3623,18 @@ def _apply_compiled_craft(
     _route_note(session, "9 人ごとの箱",
                 sides=(", ".join(boxes[0].get("beat") or []) if boxes else "",
                        ", ".join(boxes[1].get("beat") or []) if len(boxes) > 1 else ""))
-    if from_boxes and len(cast) >= 2:
+    if from_boxes:
         craft["people"] = boxes
         craft["prompt"] = from_boxes
     else:
+        # Fallback: solo without latin handle / empty cast — keep historical path.
+        if len(cast) < 2 and scene:
+            scene = notebook_mod.ensure_beat_leads_scene(
+                scene,
+                beat=str(nb_now.get("beat") or ""),
+                beat_b=str(nb_now.get("beat_b") or ""),
+            )
+            craft["scene"] = scene
         own = _sides(session, tags)
         craft["prompt"] = identity.assemble_positive(
             _identity_tags(session), tags, scene,
@@ -3639,7 +3646,7 @@ def _apply_compiled_craft(
     # `after` に渡していたので、散文が読点で刻まれてタグとして記録された
     # （`weight_shifting_slightly_towards_the_spray._sitting_on_a_bench`）。
     # 記録が実物と違うのは、記録として一番まずい。
-    _route_note(session, "10 assemble_positive",
+    _route_note(session, "10 assemble",
                 scene_before=scene, scene_after=str(craft.get("prompt") or ""))
     session["craft_dirty"] = identity.craft_is_thin(
         str(craft.get("prompt") or ""), scene,
@@ -3932,7 +3939,8 @@ async def _run_duet_scripter(
         # **姿勢も同じ穴だった。** 実測（4件・n=3）で本番の compile は 2/15、
         # `beat` は一度も書かれず、みおの姿勢まで `beat_b` に入った。名前で
         # 訊くと 20/25（落ちた1件も取り違えではなく訳語のぶれ）。
-        for kind in ("wearing", "beat"):
+        for kind in ("wearing", "beat", "expression", "scene", "bg", "light",
+                     "atmosphere"):
             # **一人でも訊く。** ここは `partner` を条件にしていたので、
             # 主演一人の撮影では服の係が一度も走らなかった。総監督
             # （2026-08-30）「キーワードが出てきたら発動ってなってるので
@@ -3948,16 +3956,20 @@ async def _run_duet_scripter(
             # `_STRIKE_NOTE_RE` にも当たらない言い方で、いままで**どこにも
             # 引っかからなかった**。
             #
-            # 姿勢（`beat`）はまだ一人ぶんを測っていないので走らない
-            # （`_PER_PERSON` の一人ぶん条文が空 → 係が即座に空を返す）。
+            # 雰囲気・BG・光・表情も同じ型。大きい条文に埋もれる欄は、
+            # 小さく絞った係だけが通る（箱が無いと LLM は無視する）。
             if kind not in asked:
                 continue
             began_k = time.monotonic()
+            pair = chain._PER_PERSON[kind][0]
             per_person.update(await chain.read_per_person(
                 ollama, kind=kind, note=str(text or "").strip(),
                 name_a=name_a, name_b=name_b,
-                now_a=str(nb.get(kind) or ""),
-                now_b=str(nb.get(f"{kind}_b") or ""),
+                now_a=str(nb.get(pair[0]) or ""),
+                now_b=str(nb.get(pair[1]) or "") if pair[1] else "",
+                her_say=_last_lead_say(session) if kind in (
+                    "beat", "expression",
+                ) else "",
                 model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
             ))
             _stage(session, f"{kind} 係（名前で訊く）", began_k)
@@ -4001,6 +4013,13 @@ async def _run_duet_scripter(
     # 小さく絞って訊いた答えを、埋もれる条文で上書きしていた。VERIFY と
     # repair は**係が答えなかった欄だけ**を直す。
     clerk_owns = set(per_person)
+    # **一度目＋係で既に埋まった SHOT は VERIFY に渡さない。**
+    # 係が落とした帽子を VERIFY の大きい条文が戻す実測（`e65c25c1`）と同型を
+    # 止める。空の欄だけ VERIFY／repair が埋めてよい。
+    settled_shot = {
+        k for k in notebook_mod.SHOT_KEYS
+        if str(nb.get(k) or "").strip()
+    }
 
     _meta_note = str(text or "").strip().upper()
     # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes
@@ -4037,7 +4056,14 @@ async def _run_duet_scripter(
         v_patch = notebook_mod.guard_partner_patch(
             dict(verify.get("patch") or {}), partner=partner,
         )
-        v_patch = {k: v for k, v in v_patch.items() if k not in clerk_owns}
+        v_patch = {
+            k: v for k, v in v_patch.items()
+            if k not in clerk_owns
+            and (
+                k == "wearing_drop"
+                or k not in settled_shot
+            )
+        }
         if v_intent in ("shot", "mixed") or any(
             k in v_patch for k in notebook_mod.SHOT_KEYS
         ) or str(v_patch.get("wearing_drop") or "").strip():
@@ -4067,7 +4093,7 @@ async def _run_duet_scripter(
                 dict(fix.get("patch") or {}), partner=partner,
             )
             fix_patch = {k: v for k, v in fix_patch.items()
-                         if k not in clerk_owns}
+                         if k not in clerk_owns and k not in settled_shot}
             # Only the fields that were missing. A repair is not a second turn:
             # anything else it decided to rewrite is not what was asked for.
             fix_patch = {k: v for k, v in fix_patch.items() if k in missing}
@@ -5138,7 +5164,7 @@ async def _ask_the_field_clerks(
     )
     nb = notebook_mod.of(session)
     her_say = _last_lead_say(session)
-    kinds = [k for k in ("wearing", "beat", "scene") if k in fields]
+    kinds = [k for k in chain.FIELD_CLERK_KINDS if k in fields]
     if not kinds:
         return []
 
@@ -5152,7 +5178,7 @@ async def _ask_the_field_clerks(
                 name_a=name_a, name_b=name_b if partner else "",
                 now_a=str(nb.get(pair[0]) or ""),
                 now_b=str(nb.get(pair[1]) or "") if pair[1] else "",
-                her_say=her_say,
+                her_say=her_say if kind in ("beat", "expression") else "",
                 model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
             )
         except Exception:
@@ -5161,7 +5187,11 @@ async def _ask_the_field_clerks(
             _stage(session, f"{kind} 係（拾えず）", began)
             continue
         # **空で上書きしない。** 消せるのは総監督であって、係ではない。
-        got = {k: v for k, v in got.items() if str(v or "").strip()}
+        # 非空の確定欄も触らない（VERIFY と同型の破壊を係側でも止める）。
+        got = {
+            k: v for k, v in got.items()
+            if str(v or "").strip() and not str(nb.get(k) or "").strip()
+        }
         if not got:
             _stage(session, f"{kind} 係（何も言わず）", began)
             continue

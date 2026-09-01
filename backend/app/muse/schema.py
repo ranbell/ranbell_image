@@ -11,6 +11,7 @@ import uuid
 from typing import Any
 
 from . import crew, facets, notebook
+from . import pipeline_view as pipeline_view_mod
 from .defaults import ALL_DEFAULTS
 
 # Re-exported so callers have one obvious place to reach for it. Duet now
@@ -225,5 +226,8 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         ),
         "looks": sorted(crew_mod.LOOKS),
         "direction_still": public_still,
+        # Aggregate classify→…→board for MusePanel + external Claude eval.
+        # Raw turn_trace / craft_route / rewrite_log remain on **session.
+        "pipeline": pipeline_view_mod.build_pipeline_view(session),
     }
     return view

@@ -1147,13 +1147,66 @@ def mint_person_box(
 
 
 def frame_wide_phrases(nb: dict[str, Any]) -> list[str]:
-    """人に属さないもの —— 場所・背景・光。カメラは `assemble_positive` が足す。"""
+    """人に属さないもの —— 場所・背景・光・雰囲気。カメラは framing_tags が足す。
+
+    ``atmosphere`` は手帖にあるのに共有面へ載せていなかった。表情の空欄
+    フォールバックにしか使われず、mood が craft_scene 言い換えに逃げる主因に
+    なっていた（総監督「なんか違う」）。
+    """
     out: list[str] = []
-    for key in ("scene", "bg", "light"):
+    for key in ("scene", "bg", "light", "atmosphere"):
         for phrase in _phrases(str((nb or {}).get(key) or "")):
             if phrase not in out:
                 out.append(phrase)
     return out
+
+
+def fight_craft_scene(nb: dict[str, Any], scene: str) -> str:
+    """Weave 散文を手帖 SHOT と突き合わせ、知らない衝突語が多いと落とす。
+
+    タグは notebook-fight があるが、散文は検査なしで最終末尾に付いていた
+    （``_trace_picture`` のコメントどおり）。手帖が正しいのに古い服・場所が
+    最終に残る主因。
+
+    方針: 手帖の語集合に対し、散文の内容語のうち未知の割合が高いときは
+    散文を空にして boxes／共有面だけに任せる。軽微ならそのまま通す。
+    """
+    body = str(scene or "").strip()
+    if not body:
+        return ""
+    known: set[str] = set()
+    for key in SHOT_KEYS:
+        for tok in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", str((nb or {}).get(key) or "").lower()):
+            known.add(tok.replace("-", "_"))
+            known.add(tok.replace("_", ""))
+    # Stopwords that never prove notebook ownership.
+    stop = {
+        "the", "and", "with", "her", "his", "she", "he", "they", "them",
+        "a", "an", "of", "in", "on", "at", "to", "for", "from", "into",
+        "over", "under", "near", "as", "is", "are", "was", "were", "be",
+        "been", "being", "this", "that", "these", "those", "very", "soft",
+        "slightly", "gently", "quietly", "light", "dark", "warm", "cool",
+    }
+    words = [
+        w.replace("-", "_")
+        for w in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", body.lower())
+        if w.lower() not in stop
+    ]
+    if not words:
+        return body
+    unknown = 0
+    for w in words:
+        stem = w.replace("_", "")
+        if w in known or stem in known:
+            continue
+        # Soft match: notebook phrase contains the token.
+        if any(w in k or k in w or stem in k.replace("_", "") for k in known):
+            continue
+        unknown += 1
+    # More than half the content words fight the notebook → drop prose.
+    if unknown * 2 > len(words):
+        return ""
+    return body
 
 
 def tag_delta(before: str, after: str) -> tuple[list[str], list[str]]:

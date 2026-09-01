@@ -1926,7 +1926,7 @@ Three things that are easy to miss:
 """.strip()
 
 CLASSIFY_FIELDS = ("wearing", "beat", "expression", "frame", "scene",
-                   "light", "bg")
+                   "light", "bg", "atmosphere")
 
 # The same clerk, asked what KIND of turn this is. The compile decides this
 # today, inside the call that also has to write the shot — a sorting job wedged
@@ -2584,6 +2584,83 @@ Return one JSON object with exactly this key, and nothing else:
 {keys}"""
 
 
+BG_SOLO_SYSTEM = """You keep the background notes for a photo shoot.
+
+Read the director's line and say what ELSE is in the picture besides her —
+buildings behind her, extras around her, props on the set — AFTER it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+- Comma separated short phrases. What is visible besides her.
+- Not the place name itself (that is SCENE), not the light, not her clothes,
+  not her pose, not the mood of the picture.
+- **Rewrite the whole line** for what is in frame now. Do not append.
+- If the line does not change what is behind or around her, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
+LIGHT_SOLO_SYSTEM = """You keep the lighting notes for a photo shoot.
+
+Read the director's line and say WHERE the key light comes from and how hard
+it is AFTER it.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `逆光` is `backlit`. Never copy his words through.
+- One short phrase: the key and where it comes from.
+- Not the mood, not the place, not her clothes, not her pose.
+- **Rewrite the whole line.** Do not append.
+- If the line does not change the light, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
+ATMOSPHERE_SOLO_SYSTEM = """You keep the mood notes for a photo shoot.
+
+Read the director's line and say the MOOD of the picture AFTER it — feeling
+only. Not the clock, not the weather-as-hour, not the place.
+
+- **English only.** The director writes in Japanese; you answer in English.
+  `静かな空気` is `quiet, still`. Never copy his words through.
+- One short phrase: mood only.
+- Not her facial expression (that is EXPRESSION), not the light, not the place.
+- **Rewrite the whole line.** Do not append.
+- If the line does not change the mood, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
+EXPRESSION_SYSTEM = """You keep the face notes for two people in one photo.
+
+Read the director's line (and her answer if any) and say what EACH face is
+doing AFTER it — mouth, eyes, brows. A mood she plays goes here, not the
+picture's atmosphere.
+
+- **English only.** The director writes in Japanese; you answer in English.
+- One short phrase per person.
+- Not her body pose (that is BEAT), not the picture mood (that is ATMOSPHERE).
+- If the line does not change a person's face, that value is: unchanged
+
+Return one JSON object with exactly these keys, and nothing else:
+{keys}"""
+
+
+EXPRESSION_SOLO_SYSTEM = """You keep the face notes for a photo shoot.
+
+Read the director's line (and her answer if any) and say what her face is
+doing AFTER it — mouth, eyes, brows.
+
+- **English only.** The director writes in Japanese; you answer in English.
+- One short phrase.
+- Not her body pose, not the picture mood, not the light.
+- If the line does not change her face, write: unchanged
+
+Return one JSON object with exactly this key, and nothing else:
+{keys}"""
+
+
 WARDROBE_SOLO_SYSTEM = """You keep the wardrobe notes for a photo shoot.
 
 Read the director's line and say what she has on AFTER it.
@@ -2634,8 +2711,18 @@ _PER_PERSON = {
     "wearing": (("wearing", "wearing_b"), WARDROBE_SYSTEM,
                 WARDROBE_SOLO_SYSTEM, "is wearing"),
     "beat": (("beat", "beat_b"), BEAT_SYSTEM, BEAT_SOLO_SYSTEM, "is"),
+    "expression": (("expression", "expression_b"), EXPRESSION_SYSTEM,
+                   EXPRESSION_SOLO_SYSTEM, "looks"),
     "scene": (("scene", ""), "", SCENE_SOLO_SYSTEM, "is at"),
+    "bg": (("bg", ""), "", BG_SOLO_SYSTEM, "has behind her"),
+    "light": (("light", ""), "", LIGHT_SOLO_SYSTEM, "is lit by"),
+    "atmosphere": (("atmosphere", ""), "", ATMOSPHERE_SOLO_SYSTEM, "feels"),
 }
+
+# Shared (one-field) clerks plus per-person clerks the end-of-turn rescue may call.
+FIELD_CLERK_KINDS = (
+    "wearing", "beat", "expression", "scene", "bg", "light", "atmosphere",
+)
 
 
 _WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)

@@ -758,7 +758,9 @@ def name_list(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def named_identity(cast: Iterable[dict] | None) -> list[tuple[str, list[str]]]:
+def named_identity(
+    cast: Iterable[dict] | None, *, solo: bool = False,
+) -> list[tuple[str, list[str]]]:
     """Each person in frame with her own locked tags, kept apart from the rest.
 
     Everything locked, cuts included. Whether a cut gives way to one the craft
@@ -766,11 +768,14 @@ def named_identity(cast: Iterable[dict] | None) -> list[tuple[str, list[str]]]:
     knows whose tags are whose — a pony asked of one of them is not a reason to
     take the other's braid.
 
-    Returns nothing for a single subject: there is no one to be confused with,
-    and the flat form is what every measurement so far was taken against.
+    Returns nothing for a single subject unless ``solo=True``: the flat
+    ``assemble_positive`` path keeps historical measurements; the person-box
+    path needs one named row for solo too.
     """
     members = [c for c in (cast or []) if isinstance(c, dict)]
-    if len(members) < 2:
+    if len(members) < 1:
+        return []
+    if len(members) < 2 and not solo:
         return []
     handles = subject_handles(members)
     if not handles:
@@ -907,9 +912,12 @@ def assemble_from_boxes(
         <場所・背景・光・画角・ルック>,
         <散文>
     """
-    named = named_identity(cast)
+    # solo=True: 一人でも箱経路を使う（flat bag 最終をやめる）。
+    named = named_identity(cast, solo=True)
     if not named or not people:
         return ""
+    # One box per named person; extra boxes are ignored, missing → skip dynamic.
+    people = list(people)[: len(named)]
     lead = ", ".join(
         identity_list(subject_tags(cast)) + [name_list([n for n, _ in named])]
     ) + ","
