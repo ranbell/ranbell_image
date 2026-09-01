@@ -3975,6 +3975,7 @@ async def _run_duet_scripter(
             pair = chain._PER_PERSON[kind][0]
             per_person.update(await chain.read_per_person(
                 ollama, kind=kind, note=str(text or "").strip(),
+                cast=_cast(session),
                 name_a=name_a, name_b=name_b,
                 now_a=str(nb.get(pair[0]) or ""),
                 now_b=str(nb.get(pair[1]) or "") if pair[1] else "",
@@ -5218,7 +5219,7 @@ async def _ask_the_field_clerks(
         pair = chain._PER_PERSON[kind][0]
         try:
             got = await chain.read_per_person(
-                ollama, kind=kind, note=note,
+                ollama, kind=kind, note=note, cast=_cast(session),
                 name_a=name_a, name_b=name_b if partner else "",
                 now_a=str(nb.get(pair[0]) or ""),
                 now_b=str(nb.get(pair[1]) or "") if pair[1] else "",

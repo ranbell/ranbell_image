@@ -487,3 +487,49 @@ def test_the_compile_is_told_a_person_is_never_background():
     assert "never a person" in built
     # 係のほうにも同じ境目があること（言い方は `715b2b2` で種類ベースに変えた）。
     assert "Never write a person here" in chain._PER_PERSON["bg"][2]
+
+
+def test_a_japanese_name_never_leaves_the_clerk():
+    """係の出口で、名前をラテン表記へ差し替える。
+
+    実機（`2088299b`・2026-09-02）で姿勢の係がこう書いた:
+
+        beat_b: standing near the fountain, finger poking **みお's** cheek
+
+    そのまま絵のプロンプトへ載る。人名タグを落とす門は前からあるが
+    （`_scrub_invented_tags`）、**あれはタグ側だけで、欄の文面は素通り**
+    だった。
+
+    **条文には足していない。** 「名前はラテン表記で」と書き足して測ったが、
+    条文あり／なし・門あり／なしの三通りとも **0/30** で差が出なかった ——
+    実機で一度出たものが、同じ行を30回叩いても再現しない稀な事象。
+    **効果の測れない条文は入れない**（この現場の 8,281字 → 2,327字 の教訓）。
+
+    門は決定的に効く。確率ではなく保証。
+    """
+    from app.muse.chain import latin_names_in
+
+    cast = [{"name": "Mio Kagami", "name_ja": "各務 みお"},
+            {"name": "Subaru Asakura", "name_ja": "朝倉 すばる"}]
+    assert latin_names_in("finger poking みお's cheek", cast) == (
+        "finger poking Mio's cheek")
+    # 姓だけ・名だけでも差し替える —— 実機に出たのは「みお」だった。
+    assert latin_names_in("leaning toward 各務 みお, looking at 朝倉 すばる", cast) == (
+        "leaning toward Mio, looking at Subaru")
+    # 名前が無い文は触らない。
+    plain = "sitting on a bench, hands in lap"
+    assert latin_names_in(plain, cast) == plain
+    # 相方がいなければ何もしない（ラテン表記が揃わない回も含む）。
+    assert latin_names_in("finger poking みお's cheek", None) == (
+        "finger poking みお's cheek")
+
+
+def test_both_clerk_call_sites_pass_the_cast():
+    """門は**係を呼ぶ二箇所とも**通す。片方だけだと、そこから漏れる。"""
+    import inspect
+    from app.muse import service
+
+    for fn in (service._run_duet_scripter, service._ask_the_field_clerks):
+        src = inspect.getsource(fn)
+        i = src.index("chain.read_per_person(")
+        assert "cast=_cast(session)" in src[i:i + 500], fn.__name__

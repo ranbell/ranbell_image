@@ -2737,9 +2737,46 @@ FIELD_CLERK_KINDS = (
 _WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)
 
 
+def latin_names_in(text: str, people: Iterable[dict] | None) -> str:
+    """値に混ざった日本語の名前を、ラテン表記へ差し替える。
+
+    **条文だけでは漏れる。** 係には「English only」と言ってあり、渡す JSON の
+    鍵は日本語名なので、目の前に日本語の名前がある状態で書かせている。実機
+    （`2088299b`・2026-09-02）で:
+
+        beat_b: standing near the fountain, finger poking **みお's** cheek
+
+    そのまま絵のプロンプトへ載る。人名タグを落とす門は前からあるが、あれは
+    タグ側だけで、欄の文面は素通りだった。
+
+    **ラテン表記は既にある** —— `identity.subject_handles` が名前行のために
+    出している同じもの。門でも同じ名前を使うので、行と欄で表記がぶれない。
+    """
+    from .identity import subject_handles
+
+    body = str(text or "")
+    members = [c for c in (people or []) if isinstance(c, dict)]
+    handles = subject_handles(members)
+    if not (body.strip() and handles):
+        return body
+    for member, handle in zip(members, handles):
+        for field in ("name_ja", "name"):
+            full = str(member.get(field) or "").strip()
+            if not full or full == handle:
+                continue
+            for part in [full] + re.split(r"[\s　]+", full):
+                part = part.strip()
+                # **姓だけ・名だけでも差し替える。** 実機に出たのは「みお」で、
+                # 「各務 みお」ではなかった。
+                if len(part) >= 2 and part in body:
+                    body = body.replace(part, handle)
+    return body
+
+
 async def read_per_person(
     ollama, *, kind: str, note: str, name_a: str, name_b: str,
     now_a: str = "", now_b: str = "", her_say: str = "",
+    cast: Iterable[dict] | None = None,
     model: str, num_ctx: int | None,
 ) -> dict[str, str]:
     """**着ている服だけを言うターン。** 誰が何を着ているかを、名前で訊く。
@@ -2823,6 +2860,9 @@ async def read_per_person(
         # 丸ごと一致だけ見る版は、混ざった回を通してしまう。
         val = re.sub(r"[,、]?\s*(unchanged|none|同じ)\s*[.。]?$", "", val,
                      flags=re.I).strip().strip(",、")
+        # **名前はラテン表記へ。** 条文だけでは漏れる —— 渡す鍵が日本語名
+        # なので、目の前に日本語がある状態で書かせている。
+        val = latin_names_in(val, cast)
         if val and val.lower() not in ("unchanged", "none", "-", "同じ"):
             out[field] = val
     return out
