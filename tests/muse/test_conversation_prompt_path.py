@@ -416,7 +416,15 @@ def test_a_person_is_never_background():
     from app.muse import chain
 
     bg = chain._PER_PERSON["bg"][2]
-    assert "never background" in bg.lower()
+    # **名指しではなく種類で断つ。** 「すばるちゃんは背景で」には効いていたが、
+    # 「**二人を小さく捉えて**、木々を多めに」——カメラと背景が同じ一行に
+    # 入った回——で 4/5 が `two people, park trees` を書いた（実機
+    # `98ab63a5`・2026-09-02）。名前を挙げる言い方だけを塞いでいた。
+    #
+    # 実測（5件×5回）で、人が入るのは全件 0/5。「木々を多めに」は
+    # `many trees` だけを書く。
+    assert "Never write a person here" in bg
+    assert "two people" in bg, "言い換えを列挙しないと `two people` が通る"
     assert "FRAME" in bg, "行き先を言わないと、どこへ書けばよいか分からない"
     # 本当の背景の仕事は残っている。
     assert "buildings behind her" in bg or "what ELSE is in the picture" in bg

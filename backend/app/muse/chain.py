@@ -2596,9 +2596,13 @@ buildings behind her, extras around her, props on the set — AFTER it.
 - Not the place name itself (that is SCENE), not the light, not her clothes,
   not her pose, not the mood of the picture.
 - **Rewrite the whole line** for what is in frame now. Do not append.
-- **The two of them are never background.** 「すみれちゃんは背景で」「ぼかして」
-  「もう一人に寄って」 — that is the camera deciding who is sharp, and it
-  belongs to FRAME. Say `unchanged` here.
+- **Never write a person here. Not by name, not as `two people`, not as
+  `a girl`.** Who is in the picture, how big they are in it, and which of them
+  is sharp — all of that is the camera's (FRAME). This field is only the things
+  around them: trees, a fountain, a fence, a sign.
+  「二人を小さく」「すみれちゃんは背景で」「ぼかして」 — none of it lands here.
+  A line that mixes the two ——「二人を小さく捉えて、木を多めに」—— gives you
+  only `many trees`.
 - If the line does not change what is behind or around her, write: unchanged
 
 Return one JSON object with exactly this key, and nothing else:
