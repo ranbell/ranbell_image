@@ -485,5 +485,5 @@ def test_the_compile_is_told_a_person_is_never_background():
 
     built = chain.build_scripter_system()
     assert "never a person" in built
-    # 係のほうも変わっていないこと。
-    assert "never background" in chain._PER_PERSON["bg"][2].lower()
+    # 係のほうにも同じ境目があること（言い方は `715b2b2` で種類ベースに変えた）。
+    assert "Never write a person here" in chain._PER_PERSON["bg"][2]
