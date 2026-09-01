@@ -525,9 +525,12 @@ async def test_empty_shot_patch_still_verifies(monkeypatch):
     })
     await service.post_duet_chat(db, ollama, s, "カーディガン羽織って立って、寄って")
     nb = s["notebook"]
-    assert "classroom" in (nb.get("scene") or "").lower() or "night" in (
-        nb.get("scene") or ""
-    ).lower()
+    # **場所は頼まれていない。** 二度目の compile が勝手に夜の教室へ移そうと
+    # したのを門が止める —— 実機（`c9d83e6e`）で「靴下脱いで」のターンに
+    # 相方の姿勢が戻された、あれと同じ形（`settled_shot`）。
+    assert "rooftop" in (nb.get("scene") or "").lower()
+    # 頼まれた欄は通る。
+    assert "cardigan" in (nb.get("wearing") or "").lower()
     assert "cardigan" in (nb.get("wearing") or "").lower()
     assert "standing" in (nb.get("beat") or "").lower()
     assert "hat" not in notebook.wearing_tokens(nb.get("wearing") or "")
@@ -1795,6 +1798,6 @@ def test_every_hop_from_the_notebook_to_the_picture_is_recorded():
     for hop in ("1 weave（生）", "2 scrub_craft_tags", "3 彼女の見直し",
                 "4 _scrub_invented_tags", "5 _latin_names",
                 "6 reconcile_wardrobe_tags", "7 _missing_wearing_tags",
-                "8 ensure_beat_leads_scene", "9 人ごとの箱",
-                "10 assemble_positive"):
+                "8 craft_scene_notebook_fight", "9 人ごとの箱",
+                "10 assemble"):
         assert f'"{hop}' in src, f"{hop} の記録が無い"

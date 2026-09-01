@@ -341,14 +341,22 @@ def test_the_end_of_turn_clerk_never_blanks_a_field():
 
 
 def test_a_field_with_no_clerk_is_still_recorded_as_missed():
-    """係のいない欄（`light` など）は、いままでどおり記録だけ。"""
-    session = _notice_session("light", "soft daylight")
-    session["repair_notice"]["note"] = "もっと硬い光で。"
-    oc = _FieldClerk('{"各務 みお": "hard rim light"}')
+    """係のいない欄は、いままでどおり記録だけ。
+
+    `light` には係が付いた（PR #32 で `atmosphere`/`bg`/`light`/`expression`
+    へ拡張 —— 総監督「箱がないと書いてくれない」）。係のいない欄として
+    `frame` を使う。
+    """
+    from app.muse import chain
+
+    assert "frame" not in chain.FIELD_CLERK_KINDS
+    session = _notice_session("frame", "medium shot, looking at the viewer")
+    session["repair_notice"]["note"] = "もっと寄って。"
+    oc = _FieldClerk('{"各務 みお": "close-up on her face"}')
 
     asyncio.run(service._settle_repair_notice(None, oc, session, cfg={}))
 
-    assert notebook.of(session).get("light") == "soft daylight"
+    assert notebook.of(session).get("frame") == "medium shot, looking at the viewer"
     assert (session["rewrite_log"][-1]).get("source") == "repair_missed"
     assert not oc.prompts, "係のいない欄で模型を呼んではいけない"
 

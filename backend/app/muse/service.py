@@ -4016,10 +4016,36 @@ async def _run_duet_scripter(
     # **一度目＋係で既に埋まった SHOT は VERIFY に渡さない。**
     # 係が落とした帽子を VERIFY の大きい条文が戻す実測（`e65c25c1`）と同型を
     # 止める。空の欄だけ VERIFY／repair が埋めてよい。
+    # **誰も頼んでいない欄は、二度目の compile に触らせない。**
+    #
+    # 実機（`c9d83e6e`・2026-08-31）で「みおちゃん、靴下脱いでもらえる？」の
+    # ターンに:
+    #
+    #     係が名指し   ['wearing']
+    #     実際に動いた  wearing_b（相方の服）と beat_b（相方の姿勢）
+    #     動かなかった  wearing（頼まれた欄）
+    #
+    #     [scripter] intent=mixed
+    #        beat_b: 'standing, weight shifted…' → 'sitting on a bench…'
+    #
+    # 相方の姿勢が、無関係なターンで戻された。`clerk_owns` は「係が答えた欄」
+    # しか守らないので、係が触っていない欄は素通りだった。
+    #
+    # **境目は「埋まっているか」ではなく「誰かが頼んだか」。** 埋まっている
+    # だけで塞ぐと、総監督自身の指示まで止まる —— 「カーディガン脱いで。
+    # 引いて全身に戻して」で一度目が `frame` しか動かさず、VERIFY が
+    # `wearing` を直そうとしても `wearing` は非空なので弾かれ、**脱げない**
+    # （`test_shot_that_only_moves_frame_still_verifies_clothes`）。
+    #
+    # 係が名指しした欄は、総監督が動かしてほしいと言った欄。そこは通す。
+    # **係が何も名指ししなかったターンでは、この門を閉めない。** 係が落ちた
+    # 回に `asked` は空で来る（`asked_fields` のキーの有無でしか「走らなかった」
+    # と「none と言った」を区別できない）。空を「誰も頼んでいない」と読むと、
+    # 係が落ちただけで VERIFY が全面的に止まり、**黙って何も直せなくなる**。
     settled_shot = {
         k for k in notebook_mod.SHOT_KEYS
-        if str(nb.get(k) or "").strip()
-    }
+        if str(nb.get(k) or "").strip() and k not in asked
+    } if asked else set()
 
     _meta_note = str(text or "").strip().upper()
     # VERIFY stays wide for shot/mixed (split directions: frame moved, clothes
@@ -5187,11 +5213,23 @@ async def _ask_the_field_clerks(
             _stage(session, f"{kind} 係（拾えず）", began)
             continue
         # **空で上書きしない。** 消せるのは総監督であって、係ではない。
-        # 非空の確定欄も触らない（VERIFY と同型の破壊を係側でも止める）。
-        got = {
-            k: v for k, v in got.items()
-            if str(v or "").strip() and not str(nb.get(k) or "").strip()
-        }
+        # **空で上書きしない。** 消せるのは総監督であって、係ではない。
+        #
+        # ここに「非空の欄は触らない」を足してはいけない。この段が走るのは
+        # **名指しされたのに動かなかった欄**だけで、そういう欄は前の値が
+        # 入ったまま —— **定義上いつも非空**。足すと段が常に空振りする。
+        #
+        # 実測（`ask_field_clerks.py`）:
+        #
+        #     「立って。」   本番の compile 1/5   欄だけを訊く係 5/5
+        #
+        # `beat` は `sitting…` で非空。係が `standing` と正しく答えても
+        # 捨てられ、実機で 4/4 通った「立って」「別の階へ行こう」が死ぬ。
+        #
+        # VERIFY への規制（`settled_shot`）はそのままでよい。**入口が違う** ——
+        # あちらは「頼まれていない欄を勝手に書き換える」を止めるもの、
+        # こちらは「頼まれた欄を書けなかったので拾う」もの。
+        got = {k: v for k, v in got.items() if str(v or "").strip()}
         if not got:
             _stage(session, f"{kind} 係（何も言わず）", began)
             continue

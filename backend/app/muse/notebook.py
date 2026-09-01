@@ -1161,52 +1161,74 @@ def frame_wide_phrases(nb: dict[str, Any]) -> list[str]:
     return out
 
 
-def fight_craft_scene(nb: dict[str, Any], scene: str) -> str:
-    """Weave 散文を手帖 SHOT と突き合わせ、知らない衝突語が多いと落とす。
+def fight_craft_scene(
+    nb: dict[str, Any], scene: str, *, struck: set[str] | None = None,
+) -> str:
+    """散文のうち、**手帖と正面から矛盾する文だけ**落とす。
 
-    タグは notebook-fight があるが、散文は検査なしで最終末尾に付いていた
-    （``_trace_picture`` のコメントどおり）。手帖が正しいのに古い服・場所が
-    最終に残る主因。
+    タグには突き合わせが六段あるのに、散文は検査なしで最終末尾に付いていた。
+    実害は記録されている（`1564313`）—— 総監督が外した帽子が、彼女の言葉から
+    散文へ入り、絵に戻った。
 
-    方針: 手帖の語集合に対し、散文の内容語のうち未知の割合が高いときは
-    散文を空にして boxes／共有面だけに任せる。軽微ならそのまま通す。
+    **物差しは「未知語の割合」ではない。** 最初の版は内容語の過半数が手帖に
+    無ければ散文ごと捨てたが、実データ13本で測ると **4本（31%）が落ち、
+    しかも良い散文**だった:
+
+        「A wide shot shows her sitting on a park bench, her weight settled
+         back against the wood. Her hands rest loosely…」   未知 52% → 落とす
+
+    `bench` `weight` `wood` は手帖にあるのに、`shows` `settled` `loosely`
+    `wide` が未知に数えられる。**散文は手帖に無い言葉で書くもの**なので、
+    その物差しは散文そのものを否定する。
+
+    見るのは**着ていない服が名指しされている文**だけ。「服らしい語」は
+    カタログ（共有資産）が答える —— 語の一覧を新しく作らない。落とすのも
+    文単位。散文ごと捨てると深みが消える（語数 58 → 50 の一件で学んだ）。
     """
     body = str(scene or "").strip()
     if not body:
         return ""
-    known: set[str] = set()
+    # **手帖のどこかにある語は許す。** `bench` も `desk` も `window` も
+    # カタログでは「場所」だが、`beat` や `bg` が名指ししていれば正しい語。
+    licensed: set[str] = set()
     for key in SHOT_KEYS:
-        for tok in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", str((nb or {}).get(key) or "").lower()):
-            known.add(tok.replace("-", "_"))
-            known.add(tok.replace("_", ""))
-    # Stopwords that never prove notebook ownership.
-    stop = {
-        "the", "and", "with", "her", "his", "she", "he", "they", "them",
-        "a", "an", "of", "in", "on", "at", "to", "for", "from", "into",
-        "over", "under", "near", "as", "is", "are", "was", "were", "be",
-        "been", "being", "this", "that", "these", "those", "very", "soft",
-        "slightly", "gently", "quietly", "light", "dark", "warm", "cool",
-    }
-    words = [
-        w.replace("-", "_")
-        for w in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", body.lower())
-        if w.lower() not in stop
-    ]
-    if not words:
-        return body
-    unknown = 0
-    for w in words:
-        stem = w.replace("_", "")
-        if w in known or stem in known:
+        text = str((nb or {}).get(key) or "")
+        licensed |= wearing_tokens(text)
+        for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text):
+            licensed.add(word.lower())
+            # **結合語を割る。** 手帖は `oversized_hoodie` と持ち、散文は
+            # `hoodie` と書く。割らないと**同じ服なのに未許可**になり、
+            # 実データ13本のうち9本で服の文が落ちた。
+            for part in re.split(r"[_-]+", word.lower()):
+                if len(part) >= 3:
+                    licensed.add(part)
+    gone = {str(t).strip().lower().replace(" ", "_") for t in (struck or ()) if str(t).strip()}
+
+    def _owned_axis(word: str) -> bool:
+        """服か場所 —— **手帖が持ち主の二軸**だけ見る。他は散文の自由。"""
+        key = word.lower()
+        if tag_catalog.get_tag_axis(key) in ("clothing", "location"):
+            return True
+        return any(key.endswith(s) for s in tag_catalog.CLOTHING_SUFFIXES)
+
+    # **原文の区切りをそのまま返す。** 文で割って空白でつなぎ直すと、段落の
+    # 改行が空白に潰れる —— 二人の撮影では、その改行が二人の描写を分けている。
+    # 落とすときだけ切り取る。
+    pieces = re.split(r"((?<=[.!?])\s+)", body)
+    kept: list[str] = []
+    for i in range(0, len(pieces), 2):
+        sentence = pieces[i]
+        sep = pieces[i + 1] if i + 1 < len(pieces) else ""
+        words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", sentence)]
+        bad = [
+            w for w in words
+            if (w in gone) or (_owned_axis(w) and w not in licensed)
+        ]
+        if bad:
+            # 落とした事実は `craft_route` の段8に残る（散文の語数が動く）。
             continue
-        # Soft match: notebook phrase contains the token.
-        if any(w in k or k in w or stem in k.replace("_", "") for k in known):
-            continue
-        unknown += 1
-    # More than half the content words fight the notebook → drop prose.
-    if unknown * 2 > len(words):
-        return ""
-    return body
+        kept.append(sentence + sep)
+    return "".join(kept).strip()
 
 
 def tag_delta(before: str, after: str) -> tuple[list[str], list[str]]:
