@@ -2015,6 +2015,49 @@ def _sign(value: float, *, dead_zone: float = 0.4) -> int:
     return 0
 
 
+#: **主演撮りの絵作り。** クルーがいない撮影で `CREW LOOK` に入る既定の6枠。
+#:
+#: 主演撮りは質の層が丸ごと切れていた —— `crew_look_block` と `_room_leaning`
+#: がどちらも `if is_duet(session): return ""` で、weave が書けるのは手帖の
+#: 言い換えだけになる。実撮影 `3c76c97b` のタグ24語のうち質の語は3語で、その
+#: 3語も組み立てで落ちていた。
+#:
+#: **語彙は発明させない。** 26B は質のタグを自力で書けず、例を外すと造語に
+#: 落ちる（`dim_glow` `soft_knit` `heavy_weave` `still_air`）。ここに並ぶのは
+#: `style_direction` が既に計算している flavor_tags —— クルー無しでも返り、
+#: パネルに出ていて、**プロンプトには一度も届いていなかった**もの。
+#:
+#: **実測**（実撮影の手帖・weave を n=10・手帖に無い語の数）:
+#:
+#:     空（いままで）              10.3    散文  84.8語   beat 4.3/8
+#:     この表を箱へ                36.4    散文 100.7語   beat 4.4/8   ← 66%通る
+#:     語彙を渡して係に選ばせる      21.2    散文  87.3語   beat 4.8/8
+#:     場面に合わせて手書き          23.4    散文 100.9語   beat 3.7/8
+#:
+#: **係は要らない。** LLM ホップ 0、+1.6秒で、手書きより通る（純度が高いほど
+#: 通る —— 注釈の散文はタグとして通らない）。beat は減らず、FRAME 衝突 0/10。
+#:
+#: **外した5語:** `dynamic_angle` `clear_composition` `cluttered`
+#: `dynamic_composition` `eye_catching` —— 構図の語で、手帖の FRAME と喧嘩する。
+#: 残りは光・光学・布・肌・空気・仕上げで、**どれも中身を足さない**。
+SOLO_LOOK_SLOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("LIGHT", ("rim_lighting", "dramatic_shadow", "volumetric_lighting")),
+    ("OPTICS", ("depth_of_field", "bokeh", "sharp_focus")),
+    ("CLOTH", ("detailed_clothes", "fabric_texture")),
+    ("FACE", ("detailed_face", "expressive_eyes")),
+    ("AIR", ("light_particles", "detailed_background")),
+    ("RENDER", ("cel_shading", "clean_lineart", "clear_color_key",
+                "highly_detailed")),
+)
+
+
+def solo_look_block() -> str:
+    """The default CREW LOOK for a shoot with no crew. Tags only, no notes."""
+    return "\n".join(
+        f"{slot}: {', '.join(tags)}" for slot, tags in SOLO_LOOK_SLOTS
+    )
+
+
 def style_direction(crew_ids: list[str] | None = None) -> dict[str, Any]:
     """What look this cast pulls toward, and the tags that say so.
 

@@ -3143,7 +3143,7 @@ No TAGS. No JSON. No SAY.
 
 
 CREW_LOOK_NOTE = (
-    "CREW LOOK (the crewed studio only — each line is owned by one seat and is "
+    "CREW LOOK (each line is "
     "the finished state of that element: LIGHT, OPTICS, COLOUR, PROPS, AIR, "
     "CLOTH, FACE, SHAPE, RENDER, FINISH). Keep these true in tags and prose. "
     "They are quality of what is already in the shot, not new inventory: they "

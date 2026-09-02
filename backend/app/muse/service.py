@@ -6816,9 +6816,14 @@ def crew_look_block(session: dict[str, Any]) -> str:
     — the tags are the seat's own, already in the sampler's vocabulary, and go
     through as written; the words after the dash are what the prose is built
     from. Older sessions stored one prose clause and no tags; those still read.
+
+    **主演撮りは既定の表を返す（2026-09-03）。** ここは長く `return ""` で、
+    質の層が丸ごと無かった —— weave が書けるのは手帖の言い換えだけになり、
+    実撮影のタグ24語のうち質の語は3語だった。席がいないだけで、絵作りが
+    要らないわけではない。`crew.SOLO_LOOK_SLOTS` に理由と実測がある。
     """
     if is_duet(session):
-        return ""
+        return crew.solo_look_block()
     rows: list[str] = []
     for slot, value in (session.get("crew_look") or {}).items():
         if isinstance(value, dict):

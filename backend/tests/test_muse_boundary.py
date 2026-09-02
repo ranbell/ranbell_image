@@ -1327,3 +1327,54 @@ def test_the_contract_holds_no_rank():
     assert "暗い場面も" in contract
     # 対等であって、警戒ではない —— 総監督を疑う相手にはしない
     assert "裏切" not in contract
+
+
+def test_the_solo_shoot_gets_a_look():
+    """**主演撮りにも絵作りを渡す（2026-09-03）。**
+
+    `crew_look_block` は長く duet で `return ""` を返していて、質の層が丸ごと
+    無かった。実撮影 `3c76c97b` のタグ24語のうち質の語は3語（`dim_lighting`
+    `blurry_background` `anime_illustration`）で、**その3語も組み立てで落ちて
+    いた**。散文は手帖の言い換えにしかならない。
+
+    総監督:「改修前はこれくらい太らせることに成功していたので、ちょっと粘って
+    もいいかとは思ってます」
+
+    **語彙は発明させない。** 26B は質のタグを自力で書けず、例を外すと造語に
+    落ちる（`dim_glow` `soft_knit` `heavy_weave` `still_air`）。並ぶのは
+    `style_direction` が既に計算していた flavor_tags —— パネルに出ていて、
+    プロンプトには一度も届いていなかったもの。
+
+    実測（実撮影の手帖・weave を n=10・手帖に無い語の数）:
+
+        空（いままで）              10.3    散文  84.8語   beat 4.3/8
+        この表を箱へ                36.4    散文 100.7語   beat 4.4/8
+        語彙を渡して係に選ばせる      21.2    散文  87.3語   beat 4.8/8
+        場面に合わせて手書き          23.4    散文 100.9語   beat 3.7/8
+
+    **係は要らない。** LLM ホップ 0、+1.6秒で、手書きより通る。beat は減らず、
+    FRAME 衝突 0/10。
+    """
+    from app.muse import crew, service as muse_service
+
+    block = muse_service.crew_look_block({"mode": "duet"})
+    assert block, "主演撮りの箱が空のままになっている"
+    for slot in ("LIGHT", "OPTICS", "CLOTH", "FACE", "AIR", "RENDER"):
+        assert f"{slot}: " in block
+    # **構図の語は入れない。** 手帖の FRAME と喧嘩する
+    for fights in ("dynamic_angle", "clear_composition", "cluttered",
+                   "dynamic_composition", "eye_catching"):
+        assert fights not in block
+    # 光・光学・布・肌・空気・仕上げ —— どれも中身を足さない
+    for quality in ("rim_lighting", "depth_of_field", "bokeh",
+                    "fabric_texture", "cel_shading"):
+        assert quality in block
+    # **クルー撮影は変えない。** 席が書いたものだけが入る
+    assert muse_service.crew_look_block({"mode": "crew"}) == ""
+    # 名乗りを事実に合わせた —— 席のいない撮影でも同じ紙が読める
+    assert "the crewed studio only" not in chain_note()
+
+
+def chain_note() -> str:
+    from app.muse import chain
+    return chain.CREW_LOOK_NOTE
