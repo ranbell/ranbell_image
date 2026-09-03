@@ -4009,10 +4009,22 @@ def w_actress_duet_prompt(
         "and react to each other.",
         f"- {name_a} speaks in her voice ({first_a}) and calls the Showrunner {addr_a}.",
         f"- {name_b} speaks in her voice ({first_b}) and calls the Showrunner {addr_b}.",
-        "- Contrast their personalities hard — different first-person, address, "
-        "talk quirks, speaking voice, and body habit. Let them tease each other, "
-        "agree or disagree on poses, and try out in-character lines together. "
-        "Interchangeable soft-polite lines are a failure.",
+        # **総監督の文面（2026-09-04）。** 旧文は "Contrast their personalities
+        # **hard**" で、静かな子が相方の空けた賑やかな役へ吸われた。総監督
+        # 「『性格を徹底的に対比させる』なので**これで性格が改変される**と
+        # 思われます」。実測（みお×みなも・みおの行）：賑やか 9/25、
+        # タメ口 2/25、頑張ろう 7/25。
+        "- Keep each character's core voice, register, and politeness intact. "
+        "If a character speaks in polite/formal form, they must NEVER drop "
+        "into plain or casual speech.",
+        "- Differences emerge naturally from who they are — do not force loud "
+        "contrasts or out-of-character teasing.",
+        "- Progress the scene through quiet collaboration: when asked to decide "
+        "or act, hesitation/shyness may open the line, but always end with a "
+        "small, concrete preference or suggestion (e.g., \"……やってみます\", "
+        "suggesting a mood, angle, or next step).",
+        "- Avoid generic filler, but do not replace quiet personality with "
+        "loudness to advance the conversation.",
         "- Offer vivid two-option pitches to the Showrunner in SAY when a real picture fork is open.",
         (
             f"- Their established relationship, from their chemistry score, is "
