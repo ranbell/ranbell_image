@@ -1954,7 +1954,7 @@ def _reassemble(session: dict[str, Any]) -> None:
             cast=cast, people=boxes,
             frame_wide=notebook_mod.frame_wide_phrases(nb),
             style=_style(session), framing=_shot_framing(session),
-            scene=scene,
+            scene=scene, support=_support_tags(session),
         )
         if from_boxes:
             craft["people"] = boxes
@@ -3383,6 +3383,28 @@ async def _learned_taste(
         return {}
 
 
+def _support_tags(session: dict[str, Any]) -> list[str]:
+    """誰のものでもない質の語 —— 光・光学・布・肌・空気・仕上げ。
+
+    **再注入は `craft["tags"]` にしか効いていなかった（2026-09-04）。**
+    `_missing_wearing_tags` が絵作りのタグを戻しても、`assemble_from_boxes`
+    は `tags` を見ずに箱と `frame_wide` から組むので、**そこで全部落ちる**。
+    実機 `68d1daa5`：weave は既定表16語を全部書いたのに、プロンプトに残った
+    のは散文に紛れた3語だけだった。
+
+    箱の docstring が置き場を書いている ——「both of them own, or that
+    **belongs to nobody**, stays in the frame-wide run」。質の語は誰のもの
+    でもないので、人の箱と取り合いにならない。
+    """
+    gone = set(banned_now(session)) | notebook_mod.struck_tokens(session)
+    out: list[str] = []
+    for tag in crew_look_tags(session):
+        key = identity.bare_tag(tag)
+        if key and key not in gone and key not in out:
+            out.append(key)
+    return out
+
+
 def _missing_wearing_tags(session: dict[str, Any], tags: str) -> list[str]:
     """Non-wardrobe restores the weave forgot — posture, ledger, crew_look.
 
@@ -3630,6 +3652,7 @@ def _apply_compiled_craft(
         cast=cast, people=boxes,
         frame_wide=notebook_mod.frame_wide_phrases(nb_now),
         style=_style(session), framing=_shot_framing(session), scene=scene,
+        support=_support_tags(session),
     )
     _route_note(session, "9 人ごとの箱",
                 sides=(", ".join(boxes[0].get("beat") or []) if boxes else "",
@@ -6855,7 +6878,13 @@ def _room_leaning(session: dict[str, Any]) -> str:
 
 
 def crew_look_tags(session: dict[str, Any]) -> list[str]:
-    """Every tag the seats wrote for their own element, in slot order."""
+    """Every tag the seats wrote for their own element, in slot order.
+
+    **主演撮りは既定の表を返す（2026-09-04）。** 席がいない撮影でも絵作りは
+    要る —— `crew_look_block` と同じ理由で、同じ表から読む。
+    """
+    if is_duet(session):
+        return [t for _slot, tags in crew.SOLO_LOOK_SLOTS for t in tags]
     out: list[str] = []
     for value in (session.get("crew_look") or {}).values():
         if not isinstance(value, dict):

@@ -21,6 +21,7 @@ if str(root_dir) not in sys.path:
 
 from backend.app.muse import chain as muse_chain
 from backend.app.muse import crew as muse_crew
+from backend.app.muse import identity as muse_identity
 from backend.app.muse import service as muse_service
 
 
@@ -1355,8 +1356,6 @@ def test_the_solo_shoot_gets_a_look():
     **係は要らない。** LLM ホップ 0、+1.6秒で、手書きより通る。beat は減らず、
     FRAME 衝突 0/10。
     """
-    from app.muse import crew, service as muse_service
-
     block = muse_service.crew_look_block({"mode": "duet"})
     assert block, "主演撮りの箱が空のままになっている"
     for slot in ("LIGHT", "OPTICS", "CLOTH", "FACE", "AIR", "RENDER"):
@@ -1369,12 +1368,65 @@ def test_the_solo_shoot_gets_a_look():
     for quality in ("rim_lighting", "depth_of_field", "bokeh",
                     "fabric_texture", "cel_shading"):
         assert quality in block
+    assert muse_crew.SOLO_LOOK_SLOTS
     # **クルー撮影は変えない。** 席が書いたものだけが入る
     assert muse_service.crew_look_block({"mode": "crew"}) == ""
     # 名乗りを事実に合わせた —— 席のいない撮影でも同じ紙が読める
-    assert "the crewed studio only" not in chain_note()
+    assert "the crewed studio only" not in muse_chain.CREW_LOOK_NOTE
 
 
-def chain_note() -> str:
-    from app.muse import chain
-    return chain.CREW_LOOK_NOTE
+def test_quality_tags_survive_the_assembly():
+    """**絵作りのタグが、組み立てで落ちていた（2026-09-04）。**
+
+    `f069cde` で weave は既定表を書くようになった。実機 `68d1daa5` の
+    `craft.tags` には16語が全部入っている。ところが最終プロンプトに残ったのは
+    散文に紛れた3語（`rim_lighting` `dramatic_shadow` `light_particles`）だけ
+    だった。
+
+    原因は再注入の宛先。`_missing_wearing_tags` は `craft["tags"]` を直すが、
+    `assemble_from_boxes` は `tags` を見ずに箱と `frame_wide` から組む。
+    **戻した語が届く先が無かった。**
+
+    箱の docstring が置き場を書いている ——「both of them own, or that
+    **belongs to nobody**, stays in the frame-wide run」。質の語は誰のもの
+    でもないので、人の箱と取り合いにならない。位置＝優先度なので**最後**に置く。
+    """
+    cast = [{"name_ja": "各務 みお", "name": "Mio",
+             "identity_tags": ["silver_hair", "blue_eyes"]}]
+    boxes = [{"beat": ["sitting"], "wearing": ["blouse"], "face": ["smiling"]}]
+    out = muse_identity.assemble_from_boxes(
+        cast=cast, people=boxes, frame_wide=["a school library at sunset"],
+        style="", framing="auto", scene="She sits by the window.",
+        support=["rim_lighting", "depth_of_field", "cel_shading"],
+    )
+    assert "rim_lighting" in out and "depth_of_field" in out
+    # **最後に置く。** 場所より後ろ、散文より前
+    assert out.index("a school library") < out.index("rim_lighting")
+    assert out.index("rim_lighting") < out.index("She sits by the window")
+    # 支えが無いときは何も足さない
+    bare = muse_identity.assemble_from_boxes(
+        cast=cast, people=boxes, frame_wide=["a school library at sunset"],
+        style="", framing="auto", scene="", support=None,
+    )
+    assert "rim_lighting" not in bare
+
+
+def test_japanese_names_stop_at_the_prompt():
+    """**`frame` は人ごとの係を通らない（2026-09-04）。**
+
+    `46f4593` で係の出口に門を置いたが、実機 `68d1daa5` の手帖は
+
+        frame: focus on 各務 みお
+
+    で、そのまま絵のプロンプトへ載った。欄ごとに門を足すときりが無いので、
+    **絵へ出る一点**（`assemble_from_boxes`）で見る。
+    """
+    cast = [{"name_ja": "各務 みお", "name": "Mio",
+             "identity_tags": ["silver_hair", "blue_eyes"]}]
+    out = muse_identity.assemble_from_boxes(
+        cast=cast, people=[{"beat": ["sitting"], "wearing": [], "face": []}],
+        frame_wide=["focus on 各務 みお, looking away"],
+        style="", framing="auto", scene="各務 みお sits by the window.",
+    )
+    assert "各務" not in out and "みお" not in out
+    assert "focus on Mio" in out

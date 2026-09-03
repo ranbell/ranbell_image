@@ -884,9 +884,44 @@ def prose_without_cast_names(scene: str, cast: Iterable[dict] | None) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
+def latin_names(text: str, people: Iterable[dict] | None) -> str:
+    """値に混ざった日本語の名前を、ラテン表記へ差し替える。
+
+    **条文だけでは漏れる。** 係には「English only」と言ってあり、渡す JSON の
+    鍵は日本語名なので、目の前に日本語の名前がある状態で書かせている。実機
+    （`2088299b`・2026-09-02）で:
+
+        beat_b: standing near the fountain, finger poking **みお's** cheek
+
+    そのまま絵のプロンプトへ載る。人名タグを落とす門は前からあるが、あれは
+    タグ側だけで、欄の文面は素通りだった。
+
+    **ラテン表記は既にある** —— `identity.subject_handles` が名前行のために
+    出している同じもの。門でも同じ名前を使うので、行と欄で表記がぶれない。
+    """
+    body = str(text or "")
+    members = [c for c in (people or []) if isinstance(c, dict)]
+    handles = subject_handles(members)
+    if not (body.strip() and handles):
+        return body
+    for member, handle in zip(members, handles):
+        for field in ("name_ja", "name"):
+            full = str(member.get(field) or "").strip()
+            if not full or full == handle:
+                continue
+            for part in [full] + re.split(r"[\s　]+", full):
+                part = part.strip()
+                # **姓だけ・名だけでも差し替える。** 実機に出たのは「みお」で、
+                # 「各務 みお」ではなかった。
+                if len(part) >= 2 and part in body:
+                    body = body.replace(part, handle)
+    return body
+
+
 def assemble_from_boxes(
     *, cast: Iterable[dict] | None, people: list[dict], frame_wide: list[str],
     style: str = "", framing: str | None = "auto", scene: str = "",
+    support: Iterable[str] | None = None,
 ) -> str:
     """人ごとの箱から、そのまま組む。**取り合いをしない。**
 
@@ -916,6 +951,13 @@ def assemble_from_boxes(
     named = named_identity(cast, solo=True)
     if not named or not people:
         return ""
+    # **日本語の名前は、ここで最後に止める。** 人ごとの係の出口には門があるが、
+    # `frame` はそこを通らない —— 実機 `68d1daa5` で `focus on 各務 みお` が
+    # プロンプトまで届いた。欄ごとに門を足すのではなく、**絵へ出る一点**で見る。
+    members = [c for c in (cast or []) if isinstance(c, dict)]
+
+    def _latin(text: str) -> str:
+        return latin_names(text, members)
     # One box per named person; extra boxes are ignored, missing → skip dynamic.
     people = list(people)[: len(named)]
     lead = ", ".join(
@@ -942,15 +984,18 @@ def assemble_from_boxes(
         run += [w for w in (box.get("wearing") or []) if w not in run]
         run += [f for f in (box.get("face") or []) if f not in run]
         if run:
-            lines.append(f"{name}: " + ", ".join(run) + ",")
-    # ③ 誰のものでもないもの。
-    rest = list(frame_wide) + framing_tags(framing) + style_tags(style)
+            lines.append(f"{name}: " + _latin(", ".join(run)) + ",")
+    # ③ 誰のものでもないもの。**質の語は最後。** 位置＝優先度なので、場所と
+    # 画角より後ろ ―― 絵作りは中身を足さず、既にあるものの見え方だけを言う。
+    rest = ([_latin(f) for f in frame_wide] + framing_tags(framing)
+            + style_tags(style)
+            + [str(t) for t in (support or []) if str(t).strip()])
     seen: set[str] = set()
     rest = [r for r in rest if r and not (r.lower() in seen or seen.add(r.lower()))]
     if rest:
         lines.append(", ".join(rest) + ("," if (scene or "").strip() else ""))
     if (scene or "").strip():
-        lines.append(scene.strip())
+        lines.append(_latin(scene.strip()))
     return "\n".join(lines)
 
 

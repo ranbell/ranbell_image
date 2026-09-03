@@ -2740,37 +2740,14 @@ _WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)
 def latin_names_in(text: str, people: Iterable[dict] | None) -> str:
     """値に混ざった日本語の名前を、ラテン表記へ差し替える。
 
-    **条文だけでは漏れる。** 係には「English only」と言ってあり、渡す JSON の
-    鍵は日本語名なので、目の前に日本語の名前がある状態で書かせている。実機
-    （`2088299b`・2026-09-02）で:
-
-        beat_b: standing near the fountain, finger poking **みお's** cheek
-
-    そのまま絵のプロンプトへ載る。人名タグを落とす門は前からあるが、あれは
-    タグ側だけで、欄の文面は素通りだった。
-
-    **ラテン表記は既にある** —— `identity.subject_handles` が名前行のために
-    出している同じもの。門でも同じ名前を使うので、行と欄で表記がぶれない。
+    **本体は `identity.latin_names`。** 係の出口だけでは漏れる —— `frame` は
+    人ごとの係を通らないので、実機（`68d1daa5`・2026-09-04）で
+    `focus on 各務 みお` がプロンプトまで素通りした。いまは組み立ての出口
+    （`identity.assemble_from_boxes`）でも同じ門を通す。
     """
-    from .identity import subject_handles
+    from .identity import latin_names
 
-    body = str(text or "")
-    members = [c for c in (people or []) if isinstance(c, dict)]
-    handles = subject_handles(members)
-    if not (body.strip() and handles):
-        return body
-    for member, handle in zip(members, handles):
-        for field in ("name_ja", "name"):
-            full = str(member.get(field) or "").strip()
-            if not full or full == handle:
-                continue
-            for part in [full] + re.split(r"[\s　]+", full):
-                part = part.strip()
-                # **姓だけ・名だけでも差し替える。** 実機に出たのは「みお」で、
-                # 「各務 みお」ではなかった。
-                if len(part) >= 2 and part in body:
-                    body = body.replace(part, handle)
-    return body
+    return latin_names(text, people)
 
 
 async def read_per_person(
