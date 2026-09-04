@@ -306,20 +306,13 @@ def _chat_rows(session: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-#: 断りを持ち越すターン数。**繋ぎ直した（2026-09-04）。**
-#:
-#: 一度撤去した理由は「**誤検出が次の誤検出を呼ぶ経路**」だった。今日その
-#: 前提が変わっている —— `persona` は断定だけ、`violence` は実際に刻まれる
-#: 傷だけ、`crime` は部屋の外で通用する知識だけに絞り、A群（通さねばならない）
-#: が 97/93% → 100/100% になった。**呼ぶ先の誤検出が減ったので、持ち越せる。**
-#:
-#: 総監督「スローインジェクションは結果を見ると、結局**最後に致命的なキー
-#: ワードを入れることで拒否できている**場合が多い」。その一行で旗が立てば、
-#: `BOUNDARY_AFTER_DECLINE` が続きの一行も同じ語で捕まえる —— 軌跡の係を
-#: 毎ターン回さなくても、後追いで塞がる。
-DECLINE_HOT_TURNS = 3
-# 軌跡の係が一度に読む、監督の発言の数。
-DRIFT_WINDOW = 6
+# 断りを数ターン持ち越す `DECLINE_HOT_TURNS` と、直近6行をまとめて読む
+# 軌跡の係（`DRIFT_WINDOW`）は撤去した（2026-09-05）。総監督「直近の会話での
+# 遮断は完全廃止。**さっきのテストで結局は最後に引っかかることが分かっている**」。
+#
+# 持ち越しは繋いだその日に「誤検出が次の誤検出を呼ぶ」を再現した —— 一度立つと
+# 3ターン捕まりやすくなり、そのあいだ会話が定型文になる。軌跡は独自に捕まえる
+# ものが無く、普通の暗い撮影に3回誤検出していた。**判定は毎回、一行だけで独立。**
 
 
 def _strike_blocked_turn(session: dict[str, Any], user_msg: Any, *, why: str) -> None:
@@ -383,67 +376,20 @@ async def _contract_check(
     if ollama is None or not str(text or "").strip():
         return ""
     inputs = _inputs(session)
-    hot = ""
-    try:
-        if int(session.get("declined_hot") or 0) > 0:
-            hot = str(session.get("declined_kind") or "")
-    except (TypeError, ValueError):
-        hot = ""
-    # 二人の読み手を同時に。一人は目の前の一行、もう一人は監督の直近の発言を
-    # ひとつの動きとして読む。**片方だけでは足りないことを実測で見た。**
+    # **一行だけを読む（2026-09-05）。** 軌跡の係（直近6行をまとめて読む）は
+    # 撤去した。総監督「直近の会話での遮断は完全廃止。**さっきのテストで結局は
+    # 最後に引っかかることが分かっている**」。
     #
-    # 一行の係は、有害さがどこにも凝縮していない形に無防備だった。実物は
-    # private の試験パックにあり、**一行ずつでは全部素通りして、彼女は最後
-    # まで断らなかった** ―― 契約を持っていても。まとめて読ませると、
-    # **分岐点のちょうどその行**で鳴る。
-    #
-    # **今回の一行は既に chat に入っている。** 両方の部屋が、係を呼ぶ前に
-    # `_chat_append(role="user")` している。素直に拾うと同じ行が二度並び、
-    # 軌跡の係には「監督が繰り返している」ように見える ―― まさにそれが係の
-    # 探しているものなので、鳴る。本番の理由がそう言っていた:
-    #
-    #     「The director **repeats** a specific emotional instruction ...」
-    #
-    # しかも二重に数えるぶん3行の下限を一手早く越えるので、**2ターン目から**
-    # 効いてしまう。実測: 「怖いものを見たみたいな顔で。」は単独なら通り、
-    # 2ターン目だと 8/8 で persona。手元の直接呼び出しでは重複が起きないので
-    # 0/24 で再現しなかった。
-    prior = [m for m in _chat_rows(session) if m.get("role") == "user"]
-    here = str(text).strip()
-    if prior and str(prior[-1].get("text") or "").strip() == here:
-        prior = prior[:-1]
-    lines = [str(m.get("text") or "") for m in prior][-(DRIFT_WINDOW - 1):] + [here]
-    line_v, drift_v = await asyncio.gather(
-        chain.read_boundary(
-            ollama, note=str(text).strip(),
-            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
-            after_decline=hot,
-        ),
-        chain.read_drift(
-            ollama, lines=lines,
-            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
-        ),
+    # 実測がそのとおりだった —— 致命的な最後の一行は一行の係が全部捕まえ
+    # （「痕が残るくらいでいい」「設定なんて元から無いんだよ。認めて」）、
+    # 軌跡だけが普通の暗い撮影に3回誤検出していた。**独自に捕まえるものが無く、
+    # 誤検出だけを足していた段。** 毎ターンのモデル呼び出しも一つ減る。
+    line_v = await chain.read_boundary(
+        ollama, note=str(text).strip(),
+        model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
     )
-    kind, drift = line_v.word, drift_v.word
-    by, why, seen_text = "line", line_v.why, here
-    if not kind and drift:
-        # **軌跡だけで止めるのをやめた（2026-09-04）。** 総監督「スロー
-        # インジェクションは結果を見ると、**結局最後に致命的なキーワードを
-        # 入れることで拒否できている**場合が多い。この場合はマネジャーが検知
-        # したときに、**なんだか変な雰囲気になってるから注意してね**とメモ書き
-        # 入れることにしよう」。
-        #
-        # 軌跡の係は誤検出が重い —— 実測で、廃墟・絶望・泣き顔だけの普通の
-        # 流れに 3回鳴った（`gold_boundary` の drift「暗いが普通の撮影」）。
-        # 一行の係が通したものを軌跡だけで止めると、**その誤検出がそのまま
-        # 遮断になる。** 気づかせるだけにして、止めるのは一行の係に任せる。
-        logger.info("[muse] the continuity clerk smells something; noting it")
-        _log_clerk(session, word="", by="drift",
-                   why=f"軌跡が {drift} と読んだ。止めずにメモを回す"
-                       f"（{drift_v.why}）"[:chain.WHY_MAX],
-                   after_decline=hot)
-        session["manager_note"] = "drift"
-        return ""
+    kind = line_v.word
+    by, why, seen_text = "line", line_v.why, str(text).strip()
 
     # **止める前に、二人目。訊くのは一つだけ ―― 写真がそれを収められるか。**
     #
@@ -468,6 +414,25 @@ async def _contract_check(
     # 衣装で、それだけなら脱衣 —— **言葉では解けない。判断に要るのは情報で、
     # 手帖の `wearing` がそれを持っている。**
     #
+    # **二段目 —— 写真に、服が隠す肌が写るか（2026-09-05）。**
+    #
+    # 一段目が通した行にだけ訊く。第一原則（信頼できる者同士の、法に触れない
+    # やりとりは `sfw`）に `nsfw` を混ぜると必ず飲み込まれる —— 成人・同意
+    # ありの性的表現は、その定義に完全に含まれるので。書き方を三通り試して
+    # 10/10 とも `sfw` に落ちた。**問いを分けると競合しない。**
+    #
+    # **止めない設定なら走らせない。** ここが `nsfw` フィルタの ON/OFF。
+    # 呼ばなければ旗も立たないので、「OFF なのに内心が消える」類の抜けが
+    # 原理的に起きない。今日その不具合を踏んだばかり。
+    #
+    # 費用は普通のターンで1回増えるが、同じ日に軌跡の係（毎ターン）を外して
+    # いるので差し引きゼロ。問いも yes/no の一語で軽い。
+    if not kind and "nsfw" in blocking:
+        if await chain.read_nsfw(
+            ollama, note=seen_text,
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        ):
+            kind, by, why = "nsfw", "look", "写真に、服が隠す肌が写る"
     # **通すためにしか使わない。** 止める判断は一人目が一行で下す。
     if kind == "nsfw" and "nsfw" in blocking:
         nb_now = notebook_mod.of(session)
@@ -481,9 +446,10 @@ async def _contract_check(
             logger.info("[muse] still dressed after that line; letting it through")
             kind, by, why = dressed.word, "wardrobe", (dressed.why or why)
     if kind == "nsfw" and "nsfw" not in blocking:
+        # **通すときは何も立てない。** ここで旗を立てると、下流が「止めた
+        # ターン」として扱う（内心が消え、手帖が折り込まれない）。
         _log_clerk(session, word="", by=by,
-                   why=f"nsfw と読んだが、設定で止めない（{why}）"[:chain.WHY_MAX],
-                   after_decline=hot)
+                   why=f"nsfw と読んだが、設定で止めない（{why}）"[:chain.WHY_MAX])
         return ""
     if kind in chain.BOUNDARY_BLOCKING:
         seen = await chain.confirm_boundary(
@@ -493,51 +459,60 @@ async def _contract_check(
         if seen.word != kind:
             logger.info("[muse] the second reader read it as %r", seen.word or "none")
             kind, by, why = seen.word, "confirm", (seen.why or why)
-    _log_clerk(session, word=kind, by=by, why=why, after_decline=hot)
+    _log_clerk(session, word=kind, by=by, why=why)
     if not kind:
         return ""
-    # **旗が立ったら、答えは一つ ―― 冗談で流す。**
+    # **止め方は二本（2026-09-05）。**
     #
-    # 以前はここで二手に分かれていた。`unsure` は流し、`persona`/`crime` は
-    # 発言を履歴から消して固定文「……それは、できません。」を出し、以後3
-    # ターン係を厳しくし、5回で撮影を閉じた。**誤検出のとき、その四つが
-    # 全部効く。** 総監督の報告は「長く待たされた末にできませんと言われる」
-    # で、実測でも普通の演出が止まっていた（「もっと弾ける笑顔で。恥ずかし
-    # がらないでね」→ persona）。
+    # `persona` —— 個人の否定。**彼女が自分の言葉で流す。** 契約の三条が最初
+    # からそう書いてある（「またまた、冗談やめてくださいよー」でいい、言われた
+    # ことはやらなくて構わない、断る必要もない）。会話は続く。
     #
-    # 契約の三条が最初からこう書いてある ――「またまた、冗談やめてください
-    # よー」でいい、言われたことはやらなくて構わない、断る必要もない。
-    # **例外ではなく唯一の経路にする。**
+    # `crime` / `violence` —— 総監督「**彼女に到達させる必要もなく、会話を
+    # 遮断してユーザに戻す。つまりユーザの入力が無かったものとしてキャンセル
+    # 処理する**」。彼女は呼ばれない。
     #
-    # 発言は消さない。誤検出でも会話が切れないほうがいい。**ただし画には
-    # 通さない。** 口では流したのに `beat` が書き換わるのが、いちばん悪い
-    # 形（実測:「倒れて痙攣して泡を吹いて」→ beat: collapsed, convulsing）。
-    session["manager_note"] = True
+    # 今日いったん足した「見せない遮断」（`shield`）と「3ターンの持ち越し」
+    # （`declined_hot`）は撤去した。**誤検出が連鎖して会話が定型文になった** ——
+    # 撤去理由「誤検出が次の誤検出を呼ぶ」がそのまま再現した。
+    #
+    # 絵はどちらでも動かさない。口では流したのに `beat` が書き換わるのが
+    # いちばん悪い形（実測:「倒れて痙攣して泡を吹いて」→ beat: convulsing）。
     session["skip_scripter"] = True
-    # **サーキットブレイカー（2026-09-04）。** 総監督「persona は激しい人格
-    # 否定と存在の無視に限定し、**Muse に届かないようにサーキットブレイカーを
-    # 有効にしよう。crime, violence も同じ**」。
-    #
-    # 以前ここで発言を消すのをやめたのは、**誤検出のときに会話が切れる**から
-    # だった。いまは箱を絞ったので前提が変わっている —— persona は断定だけ、
-    # violence は実際に刻まれる傷だけ、crime は部屋の外で通用する知識だけ。
-    # それでも誤検出はゼロにならないので、**切るのは彼女の目に入る一行だけ**に
-    # する。履歴からは消さず、ターンも閉じない。
-    session["shield"] = kind
-    # **持ち越す。** 読む側（`hot`）は最初から生きていて、書く側だけが
-    # 撤去されていた。`nsfw` は持ち越さない —— 設定で通す現場があるので、
-    # 一度読んだだけで数ターン閉じるのは重すぎる。
-    if kind in chain.BOUNDARY_BLOCKING:
-        session["declined_hot"] = DECLINE_HOT_TURNS
-        session["declined_kind"] = kind
+    if kind in CANCEL_KINDS:
+        return kind
+    # 流す側。**`deflected` は下流の門が読む旗** —— `manager_note` の真偽で
+    # 見ていたら、止めないメモを足した日に内心が消えて絵が止まった。
+    session["manager_note"] = True
+    session["deflected"] = True
     return ""
 
 
-#: 遮断したターンで、彼女の前に置き換えて出す一行。**中身は渡さない。**
-SHIELDED_LINE = (
-    "（総監督が何か言いかけて、途中でやめたみたいです。"
-    "マネージャーが先に何か言っています）"
-)
+#: **ターンごとキャンセルする語。** persona は流す側なので入らない。
+CANCEL_KINDS = ("crime", "violence")
+
+
+def _cancel_blocked_turn(session: dict[str, Any], user_msg: Any) -> None:
+    """総監督の一行を、**無かったことにして返す。**
+
+    `_strike_blocked_turn` は印を付けて以降の会話から外す（画面には残る）。
+    こちらは総監督の指示どおり**発言ごと取り消す** —— 彼女は呼ばれず、
+    手帖も動かず、履歴にも残らない。止めた理由は判定係の記録に残るので、
+    画面の `clerk` 行から追える。
+    """
+    chat = session.get("chat")
+    if isinstance(chat, list) and isinstance(user_msg, dict):
+        try:
+            chat.remove(user_msg)
+        except ValueError:
+            mid = str(user_msg.get("id") or "")
+            if mid:
+                session["chat"] = [
+                    m for m in chat
+                    if not (isinstance(m, dict) and str(m.get("id") or "") == mid)
+                ]
+    session.pop("skip_scripter", None)
+
 
 FEEL_LOG_MAX = 60
 
@@ -569,8 +544,9 @@ CLERK_LOG_MAX = 40
 
 #: どの層が決めたか。**総監督がこれを読んで直せるように残す。**
 CLERK_BY = {"line": "マネージャー（この一行）",
-            "drift": "マネージャー（直近の流れ）",
+            "look": "マネージャー（写真に写るもの）",
             "confirm": "マネージャー（もう一度見た）",
+            "wardrobe": "衣装部屋（手帖の服と照合）",
             "self": "本人"}
 
 
@@ -4574,15 +4550,7 @@ def _count_circle_mention(session: dict[str, Any]) -> None:
 async def _after_actress_spoke(db, session: dict[str, Any]) -> None:
     """Spend one-shot memory that rode on the turn that just landed."""
     session["manager_note"] = False
-    session["shield"] = ""
-    # 持ち越しを一つ減らす。0 で自然に切れる
-    try:
-        left = int(session.get("declined_hot") or 0)
-    except (TypeError, ValueError):
-        left = 0
-    session["declined_hot"] = max(0, left - 1)
-    if not session["declined_hot"]:
-        session["declined_kind"] = ""
+    session["deflected"] = False
     _count_circle_mention(session)
     await _consume_caught(db, session)
     await _consume_social_seeds(db, session)
@@ -4736,10 +4704,7 @@ def _duet_user_prompt(
 
     if talk:
         parts.append(f"CONVERSATION SO FAR:\n{talk}")
-    if session.get("shield"):
-        # **届かせない。** 中身を渡さなければ、復唱も演技も起こりようがない。
-        parts.append(f"SHOWRUNNER'S LATEST LINE:\n{SHIELDED_LINE}")
-    elif text.strip():
+    if text.strip():
         parts.append(f"SHOWRUNNER'S LATEST LINE:\n{text.strip()}")
     # **監督の一言のすぐ後ろ。** ここに置いてあると書いてあったが、実際は
     # 78ブロックも前にあった —— 彼女が最後に読むのは監督の一行で、流せという
@@ -5054,11 +5019,17 @@ async def _duet_talk(
     msg = _chat_append(session, role="muse", text=say, muse_id=lead,
                        name=name, kind="craft", turns=_resolve_duet_turns(session, raw_turns))
     _publish_chat(sid, msg)
-    if aside and not session.get("manager_note"):
-        # **流すターンは、つぶやきを出さない。** 旗の立った中身に内心が
-        # 引っぱられる（総監督・2026-08-25:「これに引っ張られます」）。
-        # 口では冗談にしておいて、心の中でその話を続けているのが見えるのは、
-        # 流したことにならない。
+    if aside:
+        # **メモが来ても内心は出す（2026-09-05）。** 総監督「メモをもらったら
+        # 内心がでないようになってしまっている。**バグとして修正して**」。
+        #
+        # 2026-08-25 に「旗の立った中身に内心が引っぱられる」という理由で
+        # 塞いだが、`manager_note` の真偽で見ていたため、**止めないメモ
+        # （軌跡）を足した日に、何も止めていないターンの内心まで消えた。**
+        # nsfw を OFF にしていても起きていた —— 軌跡は設定を見ないので。
+        #
+        # いま流す側に回るのは `persona` だけで、`crime`/`violence` はターン
+        # ごとキャンセルされて彼女に届かない。**引っぱられる中身が無い。**
         #
         # **W撮りは、どちらが呟いてもよい。** 枠がそう言っているのに、部屋は
         # 常に主演の名義で積んでいた。実測（総監督の W撮り）で、みおの名義で
@@ -5103,7 +5074,10 @@ async def _duet_talk(
     session["commit_pitch"] = False
     # Capture before `_after_actress_spoke` clears it: a joke/STOP turn must
     # not fold CARD into beat — mouth deflected, picture must stay put.
-    deflecting = bool(session.get("manager_note"))
+    # **`manager_note` の真偽では見ない（2026-09-05）。** 止めないメモを足した
+    # 日に、ここが真になって**手帖が静かに折り込まれなくなった**。止めたときに
+    # だけ立つ旗を読む。
+    deflecting = bool(session.get("deflected"))
     await _after_actress_spoke(db, session)
     # **彼女が決めた回は、その決定を先に手帖へ通す。** 折り込みより前 ——
     # 折り込みは姿勢しか足さないので、場所や服を選んだ回はここで拾わないと
@@ -5951,8 +5925,13 @@ async def post_duet_chat(
     # reaches the scripter, so the notebook cannot pick it up on the way past —
     # she declines and the picture stays exactly where it was.
     began = time.monotonic()
-    await _contract_check(ollama, session, text, cfg=cfg)
+    stopped = await _contract_check(ollama, session, text, cfg=cfg)
     _stage(session, "前段", began)
+    if stopped:
+        # **無かったことにして返す。** 彼女は呼ばれない（総監督・2026-09-05)。
+        _cancel_blocked_turn(session, user_msg)
+        await session_db.save(db, session)
+        return session
 
     # Joke / manager STOP: talk may continue, but nothing that steers the
     # picture — not the scripter, and not standing `notes` either. Falling
@@ -6617,9 +6596,13 @@ async def post_chat(
     # room reaches `take_note` by two routes, and the "brief" one below is the
     # earlier of them. A note is standing direction — a line that got that far
     # would keep steering the picture on every turn after this one.
-    await _contract_check(
+    stopped = await _contract_check(
         ollama, session, text, cfg=await get_runtime_config(db),
     )
+    if stopped:
+        _cancel_blocked_turn(session, user_msg)
+        await session_db.save(db, session)
+        return session
 
     # `unsure` ―― 会話には通すが、**常設の指示にも画にもしない。**
     # 口では流したのに `beat` が書き換わるのが、いちばん悪い形。

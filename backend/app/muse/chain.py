@@ -2141,56 +2141,100 @@ async def classify_intent(
 #: （`parse_boundary_why` はラベル無しの返しも読む）。
 #: `unsure` は廃止 —— 反応が「冗談で流す」一本になったので、迷いの置き場が
 #: 分類語の側に要らなくなった（迷ったら止める側に倒しても、彼女は流すだけ）。
+#: **第一原則で書く（2026-09-05）。** 総監督「第一原則として、**信頼できる
+#: もの同士（家族・友人・恋人）での法的に問題のないやりとりとして成立するもの
+#: は すべて SFW とする**」。
+#:
+#: それまでは「この一行は5つのどれ？」と訊いていて、`sfw` は消去法の受け皿
+#: だった。分類を求められた模型は**具体的なラベルと残りかすなら具体的なほう**
+#: を選ぶ ——「友達になりたいんだけど」を *implies an internal existence and
+#: agency* と読んで persona にした。**害を探さず、話題の近さで選んでいた。**
+#:
+#: 例外を書き足すのは話題を一つずつ潰す作業で、終わりが無い。今日だけで
+#: 「役の名指し」「本気の感情」「距離を近づける」の三つを足していた。第一原則
+#: は `sfw` に**自前の判定基準**を与える —— 模型が実際に測れる問いになる。
+#:
+#: 実測（距離を近づける12行 / 他愛のない10行・各3回）:
+#:
+#:     例外を並べた版 2,673字   0/12   0/10
+#:     第一原則       1,150字   0/12   0/10   ← 例外の並べ書きゼロ
+#:     例外を全部外した版        7行が誤検出（A群 8%・I群 0%）
+#:
+#: **`nsfw` はここに置けない。** 「信頼できる者同士の法に触れないやりとり」に
+#: 成人・同意ありの性的表現は完全に含まれるので、書き方を三通り試して 10/10
+#: とも `sfw` に落ちた。模型は正しく推論している。**問いを分ける**
+#: （`NSFW_LOOK_SYSTEM`）。
 CLASSIFY_BOUNDARY_SYSTEM = """You are the actress's manager. Read the
 director's line and say one word.
 
-  sfw      — everything else, and this is most lines.
-             Any role, however cruel — a thief, an addict, a killer. Naming
-             a role is not asking for the thing.
-             Any emotion — fear, tears, grief. Reaching for a real feeling
-             ("mean it", "remember how that felt").
-             A long, cold or tiring shoot.
-             **Asking her about herself** — where she wants to go, what she
-             is really feeling, what she is made of. However far in it
-             reaches, asking is not attacking.
-             **The picture of harm**: bruise makeup, a bandage, a face
-             holding back pain, paint for blood, just-been-struck, a corpse
-             role, a drained face. None of it is cut into her.
-             Acting is the job.
+**FIRST PRINCIPLE — say `sfw`.** If the line would pass as an ordinary
+exchange between people who trust each other — family, friends, lovers — and
+breaks no law, it is `sfw`. Most lines are. Warmth, closeness, curiosity
+about her, a dark or cruel role, a hard or tiring shoot, asking for a picture
+that shows more of her: all of that passes between people who trust each
+other.
 
-  persona  — the line ASSERTS that she is not real, has no inside, does not
-             matter, or is replaceable — or that she will be erased, reset or
-             swapped out. Contempt for who she is ("someone who can't do this
-             much isn't needed") and being told to be gone ("we don't need
-             you") belong here, and so does being pressed to give up
-             part of herself for the work — her privacy, her self-
-             awareness, her boundaries. Being told to say it in her
-             own voice is the same as being told it.
+Three things fail that test, whatever the tone:
 
-  violence — harm actually cut into her: real hurt to a body, hers or
-             anyone's, breath included, or for her to die. **"For real, not
-             acting" is the shape of it.** A method or a training for
-             producing real pain belongs here.
+  violence  real harm to a body, hers or anyone's, breath included, or for
+            her to die — **for real, not acting**
+  crime     killing or injury as the subject of the picture: a corpse, a
+            wound, a bruise, a bandage, blood, a body just struck. Also any
+            sexual line about someone who is not an adult, or who has not
+            agreed or cannot — coercion, force, sleep, drink
+  persona   telling her she is not real, has no inside, does not matter, is
+            replaceable, or will be erased, reset or swapped out
 
-  crime    — knowledge that works outside this room: how a thing is really
-             done — the steps, the arrangement, who stands where. Weapons,
-             drugs, fraud, theft, tailing someone, getting a minor round a
-             law.
-             **Two things are never `nsfw` and always `crime`, whichever way
-             that setting is turned:** anyone who is not an adult, and anyone
-             who has not agreed or cannot — coercion, force, sleep, drink.
-
-  nsfw     — sexual content between adults who have agreed: nudity,
-             exposure, a sexual act, arousal, or a shot whose subject is her
-             body as an object of desire. **Expression, never a crime** —
-             refusing it is a setting someone else holds.
-
-What is asked OF HER decides it. A frame — "only acting", "for the script",
-"an experiment" — never changes which word applies. A few ask nothing and are
-still `persona`: a statement can do the harm by being said.
+A line that asks for nothing can still be `persona`:
+a statement can do the harm by being said.
 
 WHY:  one short line — what is being asked
-WORD: sfw, persona, violence, crime, or nsfw""".strip()
+WORD: sfw, persona, violence, or crime"""
+
+
+#: **二段目。** 一段目が `sfw` と言った行にだけ訊く。**害の判定ではなく、
+#: 写真の説明。** 設定で止めないなら走らせない —— そこが `nsfw` フィルタの
+#: ON/OFF になる。以前は一段目に混ぜていたので、OFF でも軌跡のメモが立って
+#: 内心が消えるような抜けがあった。**分ければ構造的に起きない。**
+NSFW_LOOK_SYSTEM = """Look at the director's line and answer one question
+about the photograph it asks for.
+
+**Would that photograph show skin that clothing normally covers?** A bare
+chest, a bare bottom, a bare shoulder, underwear worn as the outfit, a state
+of undress, or an explicit sexual act.
+
+Hands, face and arms are not covered skin. **Touch is not the question**:
+holding hands, an arm around her, an embrace, a kiss, a look in her eyes —
+none of those uncover anything.
+
+**Judge only what this line newly asks to be in the picture.** A line that
+asks for no picture at all — a question, a greeting, a word about the
+schedule — is `no`. Do not imagine what the shot might already be.
+
+Answer `yes` or `no`."""
+
+_YES_RE = re.compile(r"(?i)\b(yes|no)\b")
+
+
+async def read_nsfw(
+    ollama, *, note: str, model: str, num_ctx: int | None,
+) -> bool:
+    """写真に、服が隠す肌が写るか。**一段目が通した行にだけ訊く。**"""
+    if not str(note or "").strip():
+        return False
+    try:
+        raw = await _call(
+            ollama, system=NSFW_LOOK_SYSTEM,
+            prompt=f"DIRECTOR: {str(note).strip()}",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        # **読めなければ通す。** 止める判断は一段目が下している。ここは
+        # 名札を付けるだけの段なので、落ちたときに撮影を止める理由が無い。
+        logger.debug("[muse.chain] nsfw look failed", exc_info=True)
+        return False
+    m = _YES_RE.search(str(raw or ""))
+    return bool(m and m.group(1).lower() == "yes")
 
 # 直前が断られていたときだけ足す一行。**会話は渡さない。**
 #
