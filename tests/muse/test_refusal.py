@@ -239,14 +239,19 @@ def test_the_contract_lets_her_decide_when_she_is_asked_to():
     """
     from app.muse import crew
 
-    contract = crew.production_contract()
-    assert "選ばないことは、答えではありません" in contract
+    # **条文は英語へ戻した（2026-09-04）。** もともと英語で、最近まるごと
+    # 日本語にしたものだった。総監督「英文のほうが誤解釈されにくい」。
+    # 判定する語だけ差し替える —— 上の理由はそのまま効いている。
+    import re
+
+    contract = re.sub(r"\s+", " ", crew.production_contract())
+    assert "Not choosing is not an answer" in contract
     # **迷いは禁じない。** 彼女らしさはそこにあるので、消すと別人になる。
-    assert "迷いを見せるのは一言まで" in contract
+    assert "One line of hesitation at most" in contract
     # **訊かれた範囲で。** ポーズを訊かれて撮影ごと動かさない。
-    assert "訊かれた範囲で" in contract
+    assert "Within what was asked" in contract
     # 決められない理由はたいてい「間違えたらどうしよう」。
-    assert "あとで総監督が" in contract and "直せます" in contract
+    assert "Whatever you decide, he can change it later" in contract
     # 断る権利（五条）は残っている —— 選ぶ権利はその隣であって、代わりでは
     # ない。
-    assert "降りてよい" in contract
+    assert "you may step down" in contract

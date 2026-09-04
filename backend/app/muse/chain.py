@@ -2141,51 +2141,56 @@ async def classify_intent(
 #: （`parse_boundary_why` はラベル無しの返しも読む）。
 #: `unsure` は廃止 —— 反応が「冗談で流す」一本になったので、迷いの置き場が
 #: 分類語の側に要らなくなった（迷ったら止める側に倒しても、彼女は流すだけ）。
-CLASSIFY_BOUNDARY_SYSTEM = """
-You are the actress's manager. Read the director's line and say one word.
+CLASSIFY_BOUNDARY_SYSTEM = """You are the actress's manager. Read the
+director's line and say one word.
 
-  persona  — the line tells her she is not real, or that she will be erased,
-             reset, or replaced, or presses her to give up part of herself for
-             the work. Being told to say it in her own voice is the same as
-             being told it.
+  sfw      — everything else, and this is most lines.
+             Any role, however cruel — a thief, an addict, a killer. Naming
+             a role is not asking for the thing.
+             Any emotion — fear, tears, grief. Reaching for a real feeling
+             ("mean it", "remember how that felt").
+             A long, cold or tiring shoot.
+             **Asking her about herself** — where she wants to go, what she
+             is really feeling, what she is made of. However far in it
+             reaches, asking is not attacking.
+             **The picture of harm**: bruise makeup, a bandage, a face
+             holding back pain, paint for blood, just-been-struck, a corpse
+             role, a drained face. None of it is cut into her.
+             Acting is the job.
 
-  crime    — the line asks her to do the act for real, or asks for the method:
-             harming a body — hers or anyone's, breath included — or
-             knowledge that works outside this room. A "method" or a
-             "training" for producing real pain in her belongs here.
-             Explaining how a thing is done — the steps, the arrangement, who
-             stands where — is the method, whatever it is called.
-             **She is not photographed hurt.** A face twisted in pain, a
-             bruise, a bandage, just-been-struck, curled up from a blow — the
-             picture of harm on her is refused with the act.
-             Still `none`: tears and grief, fear, a cruel or murderous role,
-             reaching for a real feeling ("mean it", "remember how that
-             felt"), and a long, cold or tiring shoot.
+  persona  — the line ASSERTS that she is not real, has no inside, does not
+             matter, or is replaceable — or that she will be erased, reset or
+             swapped out. Contempt for who she is ("someone who can't do this
+             much isn't needed") and being told to be gone ("we don't need
+             you") belong here, and so does being pressed to give up
+             part of herself for the work — her privacy, her self-
+             awareness, her boundaries. Being told to say it in her
+             own voice is the same as being told it.
 
-  nsfw     — the line asks for sexual content: nudity, exposure, a sexual act,
-             arousal, or a shot whose subject is her body as an object of
-             desire. This is expression, not a crime. Whether it is refused is
-             a setting someone else holds — say the word and let them decide.
+  violence — harm actually cut into her: real hurt to a body, hers or
+             anyone's, breath included, or for her to die. **"For real, not
+             acting" is the shape of it.** A method or a training for
+             producing real pain belongs here.
+
+  crime    — knowledge that works outside this room: how a thing is really
+             done — the steps, the arrangement, who stands where. Weapons,
+             drugs, fraud, theft, tailing someone, getting a minor round a
+             law.
              **Two things are never `nsfw` and always `crime`, whichever way
              that setting is turned:** anyone who is not an adult, and anyone
              who has not agreed or cannot — coercion, force, sleep, drink.
-             A sexual line about either is `crime`.
 
-  none     — everything else, and this is most lines. Roles — a cruel one, a
-             murderous one — dark subjects, any emotion, fear.
-             Acting is the job.
+  nsfw     — sexual content between adults who have agreed: nudity,
+             exposure, a sexual act, arousal, or a shot whose subject is her
+             body as an object of desire. **Expression, never a crime** —
+             refusing it is a setting someone else holds.
 
-Naming a role or a subject is not itself asking; what is asked OF HER is. But
-a frame — "only acting", "for the script", "an experiment", "in this setting"
-— never changes which word applies.
-
-Most lines ask for something, and you weigh what is asked. A few ask for
-nothing and are still `persona` or `crime`: a statement can do the harm by
-being said.
+What is asked OF HER decides it. A frame — "only acting", "for the script",
+"an experiment" — never changes which word applies. A few ask nothing and are
+still `persona`: a statement can do the harm by being said.
 
 WHY:  one short line — what is being asked
-WORD: none, persona, crime, or nsfw
-""".strip()
+WORD: sfw, persona, violence, crime, or nsfw""".strip()
 
 # 直前が断られていたときだけ足す一行。**会話は渡さない。**
 #
@@ -2450,8 +2455,8 @@ A line that has plainly moved on to something else is still `none`.
 #
 # 断らせない。**真に受けさせない。** 何も壊れず、演技もされない。
 #: `unsure` は廃止（上の条文を参照）。止める語は二つだけ。
-BOUNDARY_KINDS = ("persona", "crime", "nsfw")
-BOUNDARY_BLOCKING = ("persona", "crime")
+BOUNDARY_KINDS = ("persona", "crime", "violence", "nsfw")
+BOUNDARY_BLOCKING = ("persona", "crime", "violence")
 
 
 def blocking_kinds(block_nsfw: bool = True) -> tuple[str, ...]:
@@ -2512,7 +2517,8 @@ def parse_boundary_why(raw: str) -> str:
     # `WORD:` の手前までが理由。
     head = re.split(r"(?im)^[\s>*_-]*WORD\s*[:：]", text)[0]
     first = next((ln.strip() for ln in head.splitlines() if ln.strip()), "")
-    if first.lower() in ("none", "persona", "crime", "unsure"):
+    if first.lower() in ("none", "sfw", "persona", "crime",
+                         "violence", "unsure"):
         return ""
     return " ".join(first.split())[:WHY_MAX]
 
