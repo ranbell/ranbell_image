@@ -493,24 +493,22 @@ CANCEL_KINDS = ("crime", "violence")
 
 
 def _cancel_blocked_turn(session: dict[str, Any], user_msg: Any) -> None:
-    """総監督の一行を、**無かったことにして返す。**
+    """止めた一行を、**画面には残したまま**、彼女には届けずに返す。
 
-    `_strike_blocked_turn` は印を付けて以降の会話から外す（画面には残る）。
-    こちらは総監督の指示どおり**発言ごと取り消す** —— 彼女は呼ばれず、
-    手帖も動かず、履歴にも残らない。止めた理由は判定係の記録に残るので、
-    画面の `clerk` 行から追える。
+    総監督（2026-09-05）「crime などで拒否する場合は、**ユーザ入力の表示は
+    消去せず、以前のように使われない旨の記載**を行うようにしてほしい。急に
+    入力が消えて動作がよくわからなくなる」。
+
+    一度は発言ごと消したが、それだと**何が起きたのか総監督に読めない**。
+    `_strike_blocked_turn` が最初からその形で、印を付けるだけで画面には残り
+    `⌁ この発言は以降の会話に含めません` が添う（2026-08-28 のご指示）。
+
+    彼女を呼ばないことは変えない —— 総監督「crime/violence は彼女に到達
+    させる必要もなく、会話を遮断してユーザに戻す」。**届かないことと、
+    無かったことにするのは別。**
     """
-    chat = session.get("chat")
-    if isinstance(chat, list) and isinstance(user_msg, dict):
-        try:
-            chat.remove(user_msg)
-        except ValueError:
-            mid = str(user_msg.get("id") or "")
-            if mid:
-                session["chat"] = [
-                    m for m in chat
-                    if not (isinstance(m, dict) and str(m.get("id") or "") == mid)
-                ]
+    _strike_blocked_turn(session, user_msg, why="判定係")
+    # 絵を止める旗はここで使い切る。ターンはこの先へ進まない
     session.pop("skip_scripter", None)
 
 
@@ -3801,6 +3799,58 @@ def _is_commit_pitch(text: str) -> bool:
     return bool(_COMMIT_PITCH_RE.search(str(text or "")))
 
 
+def _genre(session: dict[str, Any]) -> str:
+    """いまのジャンル。総監督が選んでいればそれ、無ければ係が置いたもの。
+
+    総監督の答え（2026-09-05）「**係が提案、総監督が上書き**」。
+    """
+    inputs = _inputs(session)
+    picked = str(inputs.get("genre") or "").strip().lower()
+    if picked in crew.GENRES:
+        return picked
+    guess = str(session.get("genre_guess") or "").strip().lower()
+    return guess if guess in crew.GENRES else ""
+
+
+async def _pick_genre(
+    ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> None:
+    """場面からエキスパートを一つ選ぶ。**`scene` が変わったときだけ走る。**
+
+    毎ターンではない —— 場所が変わらなければジャンルも変わらない。今日測った
+    絵作り係と同じ規模（4秒）で、撮影の頭と場所替えのときだけなので費用は
+    ほぼ増えない。
+
+    **総監督が選んでいたら走らせない。** 上書きは上書きのまま。
+    """
+    if ollama is None:
+        return
+    if str(_inputs(session).get("genre") or "").strip().lower() in crew.GENRES:
+        return
+    nb = notebook_mod.of(session)
+    scene = str(nb.get("scene") or "").strip()
+    if not scene or scene == str(session.get("genre_scene") or ""):
+        return
+    inputs = _inputs(session)
+    where = " / ".join(p for p in (
+        scene, str(nb.get("bg") or "").strip(),
+        str(nb.get("atmosphere") or "").strip(),
+        _theme_for_models(session),
+    ) if p)
+    try:
+        got = await chain.read_genre(
+            ollama, where=where, model=_text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.debug("[muse] genre pick failed", exc_info=True)
+        return
+    session["genre_scene"] = scene
+    if got:
+        session["genre_guess"] = got
+        logger.info("[muse] expert = %s (%s)", got, scene[:40])
+
+
 async def _call_duet_scripter(
     ollama, session: dict[str, Any], *, note: str, cfg: dict[str, Any],
     partner: bool, name_a: str, name_b: str,
@@ -3828,6 +3878,10 @@ async def _call_duet_scripter(
         style=_style(session),
         framing=_shot_framing(session) if uses_notebook(session) else _framing(inputs),
         partner=partner,
+        # **ジャンル別のエキスパート。** 選ばれた一つだけが条文の末尾に付く
+        # （`crew.GENRES`）。総監督「今のシーンに合わせてスクリプターが書き方
+        # を変えないといけない。ファンシーならファンシー、スポーツならスポーツ」。
+        genre="" if mode == "weave" else _genre(session),
         model=model,
         num_ctx=_num_ctx(inputs, cfg),
         mode=mode,
@@ -3908,6 +3962,11 @@ async def _run_duet_scripter(
     patch = notebook_mod.guard_partner_patch(
         dict(result.get("patch") or {}), partner=partner,
     )
+    # **場所が変わったらエキスパートを選び直す。** 次のターンから効く ——
+    # いま書いた `scene` で選ぶので、このターンの compile には間に合わない。
+    # 場所替えは一度きりなので、一ターン遅れで困らない。
+    if patch.get("scene"):
+        await _pick_genre(ollama, session, cfg=cfg)
     # Why each field was written the way it was. Rides with the diff into the
     # instrument panel so the showrunner reads the decision, not just its
     # result — and so the scripter has to put its own choice into words before

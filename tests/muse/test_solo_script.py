@@ -1054,7 +1054,7 @@ def test_compile_runs_on_the_built_contract_not_the_old_one():
     """
     import inspect
     src = inspect.getsource(chain.run_scripter)
-    assert "build_scripter_system()" in src
+    assert "build_scripter_system(genre=genre)" in src
     assert "else SCRIPTER_SYSTEM" not in src
     # 旧版は捨てない。戻せることがこの入れ替えの前提。
     assert len(chain.SCRIPTER_SYSTEM) > 8000
@@ -1071,7 +1071,15 @@ def test_the_built_contract_says_what_each_field_is_and_forbids_almost_nothing()
     # （総監督 2026-09-01「視点は beat に入る。**焦点はカメラワーク** ——
     # `focus to …` とか `long shot` とかはこの箱」）。足したのは箱一つで、
     # 説明を太らせたのではない —— `gaze` と `stem` の重複はそのぶん畳んだ。
-    assert len(built) < 3100
+    # ジャンル別のエキスパート（`crew.GENRES`）は**箱ひとつぶん**。選ばれた
+    # 一つだけが末尾に付く（約290字）。前例どおり、箱を足したぶんだけ上げる。
+    #
+    # **土台はむしろ痩せた** —— `PROPOSE` が同じ趣旨を三度書いていたので畳み、
+    # 3,264 → 2,829字。エキスパート付きで約3,120字なので、旧上限からの増分は
+    # 20字ほどで、**その中に丸ごと一つの箱が入っている**。
+    assert len(built) < 3200
+    for genre in crew.GENRES:
+        assert len(chain.build_scripter_system(genre=genre)) < 3200, genre
 
     # 外枠 — 欄が何であるか。
     for phrase in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):

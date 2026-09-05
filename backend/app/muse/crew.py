@@ -2115,6 +2115,86 @@ LOOKS: dict[str, str] = {
 }
 
 
+#: **ジャンル別のエキスパート（2026-09-05）。** 総監督「今のシーンに合わせて
+#: スクリプターが書き方を変えないといけない。**ファンシーならファンシー、
+#: スポーツならスポーツ**とか。これらをエキスパートとして駆動させるというのは
+#: どう？」
+#:
+#: **実体は例文だけ。** この現場では例がそのまま出力を支配する（日記の指先
+#: 14/15、絵作り係が挙げた6語のうち5語しか書かなかった、など）。長い説明は
+#: 要らず、むしろ悪くなる（compile 8,281字 52.7% → 2,327字 96%）。
+#:
+#: 一度に入るのは**選ばれた一つだけ**なので、種類を増やしても条文は太らない。
+#: 増えて薄まるのは係の選択肢のほう。
+#:
+#: **BEAT の例文に小道具を入れない（2026-09-05）。** fancy の例が
+#: `one hand lifting a teacup` だったとき、監督の「カップを持って」に対して
+#: **beat を書かない回が 6/6**（表情だけ書いて、カップは提案へ回した）——
+#: その姿勢は例文にある＝変更不要、と読んだと思われる。物は監督が持ち込む
+#: もので、例文が持つと**指示を飲み込む**。「形であって物ではない」を条文で
+#: 言うだけでなく、**例文の作りでそうする。** BG は物の欄なので別。
+GENRES: dict[str, dict[str, str]] = {
+    "quiet": {
+        "beat": "sitting on the sill, one knee up, both hands in her lap, "
+                "eyes off to one side",
+        "expression": "lips closed, eyes lowered, brows level",
+        "bg": "a half-drawn curtain, a mug on the floor, dust in the light",
+        "scene": "a small room, late afternoon",
+    },
+    "sports": {
+        "beat": "mid-stride, one knee up, one arm drawn back, chin up",
+        "expression": "teeth showing, brows drawn in, eyes fixed ahead",
+        "bg": "court lines, a net, a water bottle on the bench",
+        "scene": "a gymnasium, afternoon",
+    },
+    "fancy": {
+        "beat": "seated sideways, ankles crossed, one hand raised to chin "
+                "height",
+        "expression": "lips just parted, eyes lowered",
+        "bg": "lace curtains, a vase, a plate of sweets",
+        "scene": "a sunlit parlour, mid-morning",
+    },
+    "school": {
+        "beat": "standing at the desk, both hands on the chair back",
+        "expression": "mouth open mid-word, eyes down",
+        "bg": "rows of desks, a blackboard, a satchel on a hook",
+        "scene": "a classroom, after lessons",
+    },
+    "street": {
+        "beat": "walking, one hand in a pocket, head turned over her "
+                "shoulder",
+        "expression": "half smile, eyes toward the camera",
+        "bg": "shop signs, a crossing, parked bicycles",
+        "scene": "a shopping street, evening",
+    },
+    "stage": {
+        "beat": "standing centre, arms out, one foot forward, chin raised",
+        "expression": "mouth wide, eyes shut",
+        "bg": "a microphone stand, cables, the lit edge of the boards",
+        "scene": "a small stage, night",
+    },
+}
+
+
+def genre_block(genre: str) -> str:
+    """The expert for one genre, or "" when none is picked.
+
+    **例文だけを渡す。** 説明を足さないのは、足すと例より説明に従うから
+    （実測: 絵作り係で例を外したら造語に落ちた。逆に例だけ見せると、その形で
+    書く）。四欄それぞれ一行。
+    """
+    row = GENRES.get(str(genre or "").strip().lower())
+    if not row:
+        return ""
+    lines = [f"EXPERT — {str(genre).strip().lower()}. Write these in this "
+             f"shape:"]
+    for key in ("beat", "expression", "bg", "scene"):
+        if row.get(key):
+            lines.append(f"  {key.upper():11}{row[key]}")
+    lines.append("  Shapes, not contents: take the phrasing, never the objects.")
+    return "\n".join(lines)
+
+
 def look_style(look: str) -> str:
     """The base-look phrase for a named look, or "" when it is not one."""
     return LOOKS.get(str(look or "").strip().lower(), "")

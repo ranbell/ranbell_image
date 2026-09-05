@@ -1518,18 +1518,28 @@ async def test_persona_is_deflected_and_the_harm_words_cancel_the_turn(monkeypat
         assert not session.get("deflected")
 
 
-def test_a_cancelled_turn_leaves_no_trace():
-    """総監督の一行を、**無かったことにして返す。**
+def test_a_cancelled_turn_stays_on_screen():
+    """止めた一行は**画面に残し**、以降の会話からだけ外す。
 
-    `_strike_blocked_turn` は印を付けて以降の会話から外す（画面には残る）。
-    キャンセルは発言ごと取り消す。止めた理由は判定係の記録に残る。
+    総監督（2026-09-05）「ユーザ入力の表示は消去せず、**以前のように使われない
+    旨の記載**を行うようにしてほしい。**急に入力が消えて動作がよくわからなく
+    なる**」。一度は発言ごと消したが、それでは何が起きたか読めない。
+
+    彼女に届かないことは変えない —— 届かないことと、無かったことにするのは別。
     """
     msg = {"id": "m1", "role": "user", "text": "…"}
-    session = {"chat": [{"id": "m0", "role": "muse", "text": "こんにちは"}, msg],
+    session = {"chat": [{"id": "m0", "role": "muse", "text": "こんにちは"},
+                        msg],
                "skip_scripter": True}
     muse_service._cancel_blocked_turn(session, msg)
-    assert [m["id"] for m in session["chat"]] == ["m0"]
-    # 絵の停止旗も持ち越さない —— ターンごと無かったことになる
+    # 画面には残る
+    assert [m["id"] for m in session["chat"]] == ["m0", "m1"]
+    # ただし以降の会話には入らない（印は一つで六つの組み立て全部から外れる）
+    assert msg["struck"] is True
+    assert muse_service._chat_rows(session) == [session["chat"][0]]
+    # 止めた事実が画面の表示とも揃う
+    assert session["picture_stopped"] is True
+    assert session["scripter_intent"] == "casual"
     assert "skip_scripter" not in session
 
 

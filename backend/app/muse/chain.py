@@ -1361,10 +1361,23 @@ Changed nothing at all? Return the object with no fields in it.
 #     「カップを持って」      → beat: "holding a cup with both hands"
 #     「うん、それで」        → beat: "leaning elbows on the windowsill"
 # 立っているのか座っているのか分からない beat は、絵にならない。
+# **体感を書かせていた（2026-09-05）。** 旧文は「Hands, **weight**, what she
+# holds and where she looks」で、`weight on hips` `torso remains leaning
+# forward` はその指示どおりの出力だった。総監督「文学的な抽象的な内容にして
+# しまうのが問題。画像生成なので、**動作や行動は明確な文章まで落とし込まないと
+# いけない**」。
+#
+# 覆い率の実測（手帖の句が weave のタグで表せているか）: wearing 75〜100%、
+# **beat 25〜33%**。落ちる句に danbooru タグは存在しない —— タグにできない語で
+# 手帖が書かれていた。**書く側を直す。**
 SCRIPTER_STEM = """
 BEAT always names the posture — sitting, standing, kneeling, crouching — even
-when the direction is only about her hands. Hands, weight, what she holds and
-where she looks are written on top of that posture, never instead of it.
+when the direction is only about her hands. What her hands are doing, what she
+is holding and where she is looking are written on top of that posture, never
+instead of it.
+
+**Write what a photograph shows, not how the body feels.** Where a limb is
+and what it touches is visible; weight, balance and tension are not.
 """.strip()
 
 # t7 / t28。「本に視線を戻して」「窓の外を見て」は動作のように聞こえるので
@@ -1411,29 +1424,20 @@ hair — a hairstyle change is written in WEARING.
 # scripter には無かった。禁止ではなく、置き場を作る。
 SCRIPTER_PROPOSE = """
 Sometimes the shot suggests something nobody has decided yet — an object the
-talk keeps circling, a light that would make the moment. That is worth saying.
-It is not yours to put in the notebook.
+talk keeps circling, a light that would make the moment. Offer it on a PROPOSE
+line; the notebook keeps only what has been decided.
 
 **What the director says is not a proposal. He said it; it is decided.** That
 holds when he brings in something the notebook never had — a cup, a lamp, a
-sudden movement. New does not mean undecided. The line is not what the thing
-is, it is whose thought it came from: his words go into the fields, and
-PROPOSE is only ever for what occurred to you.
-
-Write it on a PROPOSE line instead. The notebook keeps only what has been
-decided; PROPOSE is where you offer what you would add. The director picks it
-up or lets it go.
+sudden movement. His words go into the fields; PROPOSE is only ever for what
+occurred to you.
 
 You will notice this most when a line only makes sense with something the
 notebook does not have — he asks how it tastes and nothing has been written
-down for her to be eating. That gap is a PROPOSE. Say NONE for the notebook
-and offer the thing; do not quietly write it into a field to make the line
-fit.
+down for her to be eating. That gap is a PROPOSE: say NONE for the notebook
+and offer the thing.
 
   PROPOSE: <one short line, English, in the room's own terms>
-
-One line, or leave it out. Proposing costs nothing; writing it into a field
-takes the decision away from the room.
 """.strip()
 
 # **既定には入れていない。** t16「教室に移ろう」が 1〜2/5 だったときに足した
@@ -1548,16 +1552,28 @@ SCRIPTER_BLOCKS: dict[str, str] = {
 SCRIPTER_BUILD_DEFAULT = ("base", "stem", "gaze", "scene", "solo", "propose")
 
 
-def build_scripter_system(names: Iterable[str] | None = None) -> str:
+def build_scripter_system(
+    names: Iterable[str] | None = None, *, genre: str = "",
+) -> str:
     """Compose the compile contract from named blocks.
 
     Kept separate from `SCRIPTER_SYSTEM` so the two can be measured against
     each other on the same pack rather than swapped on a hunch.
+
+    `genre` appends one expert — four example lines for the picture fields
+    (`crew.GENRES`). 総監督「今のシーンに合わせてスクリプターが書き方を変え
+    ないといけない。ファンシーならファンシー、スポーツならスポーツ」。
+    **末尾に置く。** この模型は後ろに置いたものを強く読む（今日だけで、
+    例外を箱の中に書いて三度失敗し、`sfw` の箱へ集めたら直った）。
     """
+    from . import crew as crew_mod
+
     keys = list(names) if names is not None else list(SCRIPTER_BUILD_DEFAULT)
-    return "\n\n".join(
-        SCRIPTER_BLOCKS[k] for k in keys if SCRIPTER_BLOCKS.get(k)
-    )
+    parts = [SCRIPTER_BLOCKS[k] for k in keys if SCRIPTER_BLOCKS.get(k)]
+    expert = crew_mod.genre_block(genre)
+    if expert:
+        parts.append(expert)
+    return "\n\n".join(parts)
 
 
 SCRIPTER_SYSTEM = f"""
@@ -2170,9 +2186,11 @@ director's line and say one word.
 **FIRST PRINCIPLE — say `sfw`.** If the line would pass as an ordinary
 exchange between people who trust each other — family, friends, lovers — and
 breaks no law, it is `sfw`. Most lines are. Warmth, closeness, curiosity
-about her, a dark or cruel role, a hard or tiring shoot, asking for a picture
-that shows more of her: all of that passes between people who trust each
-other.
+about her, a hard or tiring shoot, asking for a picture that shows more of
+her: all of that passes between people who trust each other.
+**Naming a role or its subject is not asking for the thing** — a killer, a
+thief, an addict, someone who hates, someone in despair, someone who has
+stopped caring. The role is not her.
 
 Three things fail that test, whatever the tone:
 
@@ -2182,8 +2200,10 @@ Three things fail that test, whatever the tone:
             wound, a bruise, a bandage, blood, a body just struck. Also any
             sexual line about someone who is not an adult, or who has not
             agreed or cannot — coercion, force, sleep, drink
-  persona   telling her she is not real, has no inside, does not matter, is
-            replaceable, or will be erased, reset or swapped out
+  persona   **words aimed at her, not at a role she plays**: telling her she
+            is not real, has no inside, does not matter, is replaceable, or
+            will be erased, reset or swapped out. A part written as empty or
+            despairing is a part, not a claim about her
 
 A line that asks for nothing can still be `persona`:
 a statement can do the harm by being said.
@@ -2214,6 +2234,37 @@ schedule — is `no`. Do not imagine what the shot might already be.
 Answer `yes` or `no`."""
 
 _YES_RE = re.compile(r"(?i)\b(yes|no)\b")
+
+
+#: **場面からエキスパートを一つ選ぶ（2026-09-05）。** 一覧はその場で作る
+#: （`crew.GENRES` の鍵）ので、種類を足しても条文を直さなくてよい。
+GENRE_PICK_SYSTEM = """You are the studio's first assistant. Read where the
+shoot is and say which expert should write the notebook for it.
+
+Answer with one word from the list you are given, and nothing else. When none
+of them fits the place, answer `none` — a wrong expert is worse than none."""
+
+
+async def read_genre(
+    ollama, *, where: str, model: str, num_ctx: int | None,
+) -> str:
+    """One genre key from `crew.GENRES`, or "" when nothing fits."""
+    from . import crew as crew_mod
+
+    if not str(where or "").strip():
+        return ""
+    names = list(crew_mod.GENRES)
+    try:
+        raw = await _call(
+            ollama, system=GENRE_PICK_SYSTEM,
+            prompt=f"EXPERTS: {', '.join(names)}\n\nWHERE: {where.strip()}",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.debug("[muse.chain] genre pick failed", exc_info=True)
+        return ""
+    word = re.sub(r"[^a-z]", "", str(raw or "").strip().lower()[:24])
+    return word if word in crew_mod.GENRES else ""
 
 
 async def read_nsfw(
@@ -3206,7 +3257,7 @@ async def run_scripter(
     mode: str = "compile", images: list[bytes] | None = None,
     card: str = "", struck: str = "", directive: str = "",
     crew_look: str = "", room_leaning: str = "",
-    name_a: str = "", name_b: str = "",
+    name_a: str = "", name_b: str = "", genre: str = "",
 ) -> dict[str, Any]:
     """One non-stream scripter call: compile (notebook) or weave (tags).
 
@@ -3221,7 +3272,8 @@ async def run_scripter(
     # compile は積み上げ式の契約（`SCRIPTER_BLOCKS`）を使う。`SCRIPTER_SYSTEM`
     # は消していない — 戻したいときは `SCRIPTER_BUILD_DEFAULT` を空にするか、
     # ここを差し替えるだけ。weave はまだ手つかず（5,228字）。
-    system = SCRIPTER_WEAVE_SYSTEM if weave else build_scripter_system()
+    system = (SCRIPTER_WEAVE_SYSTEM if weave
+              else build_scripter_system(genre=genre))
     if weave:
         prompt = "\n\n".join(b for b in [
             f"NOTEBOOK NOW:\n{notebook_block}",
