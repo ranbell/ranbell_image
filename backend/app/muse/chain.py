@@ -658,9 +658,15 @@ RULES
 - Naming nothing is the normal answer and a complete answer. Most lists are
   fine. If you are naming more than two or three, you have misread the list.
 
-OUTPUT FORMAT — exactly one line, nothing else, no explanation:
+If you are given SUGGESTED, those are words the studio's vocabulary has for a
+shot like this one. **You may take from that list anything that is true of you
+right now and missing from TAGS.** Take only what is true — a suggestion is an
+offer, not an instruction, and most of them will not fit.
 
-WRONG: <comma-separated tags copied from TAGS, or the word none>
+OUTPUT FORMAT — exactly two lines, nothing else, no explanation:
+
+WRONG:   <comma-separated tags copied from TAGS, or the word none>
+MISSING: <comma-separated tags copied from SUGGESTED, or the word none>
 """.strip()
 
 _WEAVE_REVIEW_RE = re.compile(r"(?im)^[\s>*_-]*WRONG[\s*_]*[:：]\s*(.*)$")
@@ -689,8 +695,8 @@ def parse_weave_review(raw: str, tags: str) -> list[str]:
 
 async def run_weave_review(
     ollama, *, system: str, tags: str, notebook_block: str, muse_says: str,
-    model: str, num_ctx: int | None,
-) -> list[str]:
+    model: str, num_ctx: int | None, suggested: str = "",
+) -> tuple[list[str], list[str]]:
     """Show her the bag before the render. She points; the caller subtracts.
 
     ``system`` is her voice — who is looking. The output contract is appended
@@ -698,7 +704,7 @@ async def run_weave_review(
     cannot ship a review with no shape to its answer.
     """
     if not str(tags or "").strip():
-        return []
+        return [], []
     system = (
         f"{system.strip()}\n\n{WEAVE_REVIEW_SYSTEM}"
         if str(system or "").strip() else WEAVE_REVIEW_SYSTEM
@@ -707,7 +713,9 @@ async def run_weave_review(
         f"NOTEBOOK NOW (what the shot is):\n{notebook_block}",
         f"WHAT YOU JUST SAID:\n{muse_says.strip()[:600]}" if muse_says.strip() else "",
         f"TAGS:\n{tags}",
-        "どれか、いまのあなたに当てはまらないものはある？ 一行で答えて。",
+        f"SUGGESTED (the studio's words for a shot like this):\n{suggested}"
+        if str(suggested or "").strip() else "",
+        "当てはまらないものと、足りないものを、それぞれ一行で答えて。",
     ] if b.strip())
     try:
         raw = await _call(
@@ -718,8 +726,31 @@ async def run_weave_review(
         # She could not look this time. The bag goes through as written — a
         # review that cannot run is not a reason to hold up the take.
         logger.warning("[muse.chain] weave review produced nothing", exc_info=True)
-        return []
-    return parse_weave_review(raw, tags)
+        return [], []
+    return parse_weave_review(raw, tags), parse_weave_review_missing(raw, suggested)
+
+
+_WEAVE_MISSING_RE = re.compile(r"(?im)^[\s>*_-]*MISSING[\s*_]*[:：][ \t]*(.*)$")
+
+
+def parse_weave_review_missing(raw: str, suggested: str) -> list[str]:
+    """彼女が足したいと言った語。**推薦の中にあるものだけ受ける。**
+
+    `parse_weave_review` が「袋の中の語しか受けない」ことで安全なのと同じ作り。
+    語彙を閉じておけば、変な答えの最悪が「何も起きない」で済む。
+    """
+    present = {}
+    for part in str(suggested or "").split(","):
+        tag = part.strip()
+        if tag:
+            present.setdefault(identity.bare_tag(tag), tag)
+    out: list[str] = []
+    for match in _WEAVE_MISSING_RE.finditer(raw or ""):
+        for part in match.group(1).split(","):
+            key = identity.bare_tag(part)
+            if key and key in present and present[key] not in out:
+                out.append(present[key])
+    return out
 
 
 _TASTE_LINE_RE = re.compile(

@@ -245,6 +245,51 @@ def _note_clerk_said(session: dict[str, Any], kind: str, said: Any) -> None:
     session["clerk_said"] = log[-CLERK_SAID_MAX:]
 
 
+#: 彼女に見せる推薦の数。**多いほど選び間違える** —— 実測で雑音が半分近い
+#: （場面と無関係な武器や下着の語が混ざる）。少なく見せて選ばせる。
+SUGGEST_PER_FIELD = 6
+
+
+async def _suggest_tags(db, ollama, session: dict[str, Any]) -> str:
+    """いまの場面に、スタジオの語彙がどんな語を持っているか。
+
+    総監督（2026-09-06）「WD14で引いたものをキャラに渡して、**今のシーンだと
+    こんなキーワードで構成すればよいという recommendation** に使えばいい」
+    「あくまで参考にする」。
+
+    **既存の `invoke.vocab_bank.get_axis_semantic_tags` を呼ぶ。** docstring が
+    まさにこの用途（意図を danbooru 語彙で表す）。再発明しない。
+
+    **欄ごとに引く。** 手帖をまとめて渡すと語数の多い服にベクトルが引っぱられ、
+    実測で推薦が服のタグばかりになった（場面と関係のない衣類が並ぶ）。
+    欄ごとなら `leaning_forward` `holding_food` `light_smile` が出る。
+    `bg` は雑音が多かったので、姿勢と表情だけ。
+    """
+    if db is None or ollama is None:
+        return ""
+    try:
+        from ..invoke import vocab_bank
+    except Exception:
+        return ""
+    nb = notebook_mod.of(session)
+    out: list[str] = []
+    for field in ("beat", "beat_b", "expression", "expression_b"):
+        val = str(nb.get(field) or "").strip()
+        if not val:
+            continue
+        try:
+            got = await vocab_bank.get_axis_semantic_tags(
+                db, ollama, {field: val}, limit=SUGGEST_PER_FIELD,
+            )
+        except Exception:
+            logger.debug("[muse] suggest failed for %s", field, exc_info=True)
+            continue
+        for tag in got:
+            if tag not in out:
+                out.append(tag)
+    return ", ".join(out)
+
+
 def _cast(session: dict[str, Any]) -> list[dict[str, Any]]:
     """Everyone in frame. Single Actress or W-Muse pair."""
     character_a = session.get("character") or {}
@@ -7383,7 +7428,7 @@ async def weave_craft_if_needed(
             before_review = tags
             tags = await _muse_reviews_weave(
                 ollama, session, tags, cfg=cfg, name_a=name_a, name_b=name_b,
-                partner=partner,
+                partner=partner, db=db,
             )
             _route_note(session, "3 彼女の見直し",
                         before=before_review, after=tags)
@@ -7432,7 +7477,7 @@ async def weave_craft_if_needed(
 
 async def _muse_reviews_weave(
     ollama, session: dict[str, Any], tags: str, *, cfg: dict[str, Any],
-    name_a: str, name_b: str, partner: bool,
+    name_a: str, name_b: str, partner: bool, db=None,
 ) -> str:
     """Let her look at the bag before the render, and drop what she disowns.
 
@@ -7454,8 +7499,10 @@ async def _muse_reviews_weave(
     inputs = _inputs(session)
     nb = notebook_mod.of(session)
     try:
-        wrong = await chain.run_weave_review(
+        suggested = await _suggest_tags(db, ollama, session)
+        wrong, missing = await chain.run_weave_review(
             ollama,
+            suggested=suggested,
             system=crew.actress_duet_prompt(
                 session.get("character") or {}, mode="review",
                 locale=str(inputs.get("locale") or "ja"),
@@ -7477,6 +7524,21 @@ async def _muse_reviews_weave(
     # bag was fine — the panel and the debug pane would both be quoting a
     # review that is two takes old.
     session["weave_review"] = list(wrong)
+    session["weave_missing"] = list(missing)
+    # **彼女が足したいと言った語を入れる（2026-09-06）。** これまで見直しは
+    # `WRONG:` の一行しか無く、**足す口が構造的に存在しなかった** —— 総監督
+    # 「Muse が追加できないのも修正が効かない原因」。
+    #
+    # 語彙は推薦の中に閉じてあるので、最悪でも「推薦の語が一つ増える」で済む。
+    if missing:
+        have = {identity.bare_tag(p) for p in str(tags).split(",") if p.strip()}
+        gone = set(banned_now(session)) | notebook_mod.struck_tokens(session)
+        add = [t for t in missing
+               if identity.bare_tag(t) not in have
+               and identity.bare_tag(t) not in gone][:_WEAVE_REVIEW_MAX]
+        if add:
+            logger.info("[muse] she added: %s", ", ".join(add))
+            tags = ", ".join([str(tags).strip().rstrip(","), *add])
     if not wrong:
         return tags
     # A review that wants to gut the bag has misread it, not found ten faults.

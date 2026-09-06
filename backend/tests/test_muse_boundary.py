@@ -1625,3 +1625,35 @@ def test_a_hairstyle_does_not_compete_with_the_outfit():
     assert len([p for p in worn.split(",") if p.strip()]) == 6
     # 髪は一つだけ
     assert brief.tidy_wearing("blouse, bob_cut, ponytail") == "blouse, bob_cut"
+
+
+def test_she_can_add_but_only_from_what_was_offered():
+    """**見直しに足す口を開けた（2026-09-06）。**
+
+    総監督「Muse が追加できないのも修正が効かない原因」。それまで見直しは
+    `WRONG:` の一行しか無く、**足す口が構造的に存在しなかった。**
+
+    安全は `WRONG:` と同じ作り —— 語彙を閉じる。`WRONG:` が袋の中の語しか
+    受けないのと同じで、`MISSING:` は**推薦の中の語しか受けない**。最悪でも
+    「推薦の語が一つ増える」で済む。
+
+    実測（実際に出た雑音つきの推薦を渡して 5回）:
+
+        渡した  … holding_sword, cleavage, oral, one-piece_swimsuit …
+        取った  leaning_forward, cup, smile   ← 5回とも。雑音はゼロ
+
+    `leaning_forward` は、私が「タグにできない」と判断した
+    `torso remains leaning forward` の等価物。**彼女が自分で拾った。**
+    """
+    from app.muse import chain as c
+
+    sug = "leaning_forward, cup, smile, holding_sword, cleavage"
+    assert c.parse_weave_review_missing(
+        "MISSING: leaning_forward, cup", sug) == ["leaning_forward", "cup"]
+    # 推薦に無い語は受けない —— 発明させない
+    assert c.parse_weave_review_missing("MISSING: dragon, tiara", sug) == []
+    assert c.parse_weave_review_missing("MISSING: none", sug) == []
+    # 外す側は袋に閉じたまま
+    bag = "sailor_fuku, straw_hat, sitting"
+    assert c.parse_weave_review("WRONG: straw_hat", bag) == ["straw_hat"]
+    assert c.parse_weave_review("WRONG: leaning_forward", bag) == []
