@@ -1999,8 +1999,14 @@ def on_facets(session: dict[str, Any]) -> bool:
     return is_duet(session)
 
 
-def _reassemble(session: dict[str, Any]) -> None:
+def _reassemble(session: dict[str, Any], *, force: bool = False) -> None:
     """Rebuild the Comfy positive from the current shot.
+
+    **シンプルモードでは走らない（`force` を除く）。** あちらの正本は
+    プロンプトそのもので、手帖は開幕のまま置いてある。ここが走ると
+    **開幕のプリセット衣装で組み直される** —— 呼び元は八つあるので、
+    一つずつ塞ぐのではなく出口で止める。`force` は最初の一本を手帖から
+    起こすときだけ（`_simple_craft`）。
 
     On the facet path the tags and the prose are *derived* — the facet table is
     the shot and `craft` is the view of it that the render, the ledger, the
@@ -2012,6 +2018,8 @@ def _reassemble(session: dict[str, Any]) -> None:
     On the notebook path, craft tags/scene are owned by the scripter compile —
     the positive is rebuilt from person boxes (same final authority as weave).
     """
+    if simple_mode(session) and not force:
+        return
     craft = session.setdefault("craft", {})
     if uses_notebook(session) and int((session.get("notebook") or {}).get("rev") or 0) > 0:
         # Crop / wardrobe conflict lives in scrub; assemble only injects framing.
@@ -4811,11 +4819,25 @@ def _duet_user_prompt(
         )
         partner = session.get("partner_character") or {}
         name_b = str(partner.get("name_ja") or partner.get("name") or "")
-        summary = notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
+        # **シンプルでは手帖を見せない（2026-09-06）。** 総監督のターンから
+        # compile を外したのに、ここは手帖のままだった —— 彼女は毎ターン
+        # 「wearing: <開幕のプリセット衣装>」を**いまの状態**として読まされ、
+        # 感情が動いた回にそこへ寄りかかって言葉にする。その台詞を書き直す側が
+        # 読むので、**プリセットの衣装が絵に戻る**（実機・総監督報告）。
+        #
+        # シンプルの正本はプロンプトなので、その読み下し（`NOW:`）を渡す。
+        now_line = str((session.get("craft") or {}).get("now") or "").strip()
+        summary = (
+            now_line if simple_mode(session)
+            else notebook_mod.summary_for_muse(nb, name_a=name_a, name_b=name_b)
+        )
         if summary and not chat_only:
             parts.append(
-                "SHOT NOTEBOOK (talk summary only — not tags; do not recite "
-                "as a checklist):\n" + summary
+                ("THE SHOT AS IT STANDS (what the picture is right now. The "
+                 "notebook is not in use — this is the whole of it):\n"
+                 if simple_mode(session) else
+                 "SHOT NOTEBOOK (talk summary only — not tags; do not recite "
+                 "as a checklist):\n") + summary
             )
         standing = nb.get("standing") or session.get("standing") or []
         if standing and not chat_only:
@@ -5220,6 +5242,12 @@ async def _duet_talk(
     # **彼女が決めた回は、その決定を先に手帖へ通す。** 折り込みより前 ——
     # 折り込みは姿勢しか足さないので、場所や服を選んだ回はここで拾わないと
     # 落ちる。冗談をかわした回（`deflecting`）は走らせない。
+    # **シンプルでは彼女のターンからも段を外す。** ここを残していたので、
+    # 手帖だけが彼女の一言で動き、総監督の指示は入らないまま食い違った。
+    # 彼女が決めたことは会話に出ているので、書き直す側がそのまま読む。
+    # （`_carry_out_her_choice` は自分で降りる。ここは折り込みだけ止める）
+    if simple_mode(session):
+        fold = False
     if not deflecting:
         await _carry_out_her_choice(db, ollama, session, cfg=cfg)
     if fold and uses_notebook(session) and fresh_card and not deflecting:
@@ -5555,6 +5583,10 @@ async def _carry_out_her_choice(
     彼女が何も決めなければ、条文が casual を返して手帖は動かない。
     """
     if not session.get("invited") or not uses_notebook(session):
+        return
+    # シンプルでは手帖を動かさない —— 彼女の決定は会話に出ており、
+    # 書き直す側がそれを読む。手帖だけが動くと、総監督の指示と食い違う。
+    if simple_mode(session):
         return
     line = _last_lead_say(session).strip()
     if not line:
@@ -7501,6 +7533,14 @@ async def _simple_craft(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     prompt_now = str(craft.get("prompt") or "")
     if prompt_now and not session.get("craft_dirty"):
         return session
+    if not prompt_now:
+        # **最初の一本は手帖から起こす。** 開幕の衣装（`_dress_the_cast` が
+        # 着せた今日の一着）は会話に全部は出ていない。無から書かせると
+        # 発明する。二本目からは、この一本を直していくだけ。
+        notebook_mod.migrate(session)
+        if notebook_mod.has_shot(notebook_mod.of(session)):
+            _reassemble(session, force=True)
+            prompt_now = str(craft.get("prompt") or "")
     cfg = await get_runtime_config(db)
     inputs = _inputs(session)
     sid = session.get("session_id") or ""

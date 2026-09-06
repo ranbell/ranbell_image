@@ -190,3 +190,51 @@ async def test_off_by_default_the_old_path_is_untouched():
     session = await service.start_duet(db, ollama, session)
     session = await service.post_duet_chat(db, ollama, session, "座って")
     assert ollama.rewrites == 0
+
+
+@pytest.mark.asyncio
+async def test_she_is_shown_the_shot_as_it_stands_not_the_stale_notebook():
+    """**プリセットの衣装が戻った件（実機・総監督報告）。**
+
+    総監督のターンから compile を外したのに、彼女のプロンプトは手帖のまま
+    だった。彼女は毎ターン「wearing: <開幕のプリセット衣装>」を*いまの状態*
+    として読まされ、感情の動いた回にそれを口にする —— その台詞を書き直す側が
+    読むので、絵がプリセットへ戻る。
+    """
+    db = FakeDb()
+    session = await _duet_session(db, simple=True)
+    session["notebook"] = {"rev": 3, "scene": "a studio", "wearing": "school_uniform",
+                           "beat": "standing"}
+    session["craft"] = {"prompt": "1girl, solo, Mio,\nMio: sitting, hoodie,",
+                        "now": "彼女はパーカーで座っている。"}
+    got = service._duet_user_prompt(session, "そのままで", prep=False, intent="shot")
+
+    assert "彼女はパーカーで座っている。" in got
+    assert "school_uniform" not in got
+    assert "SHOT NOTEBOOK" not in got
+
+
+@pytest.mark.asyncio
+async def test_nothing_rebuilds_the_prompt_from_the_frozen_notebook():
+    """手帖から組み直す道は八つある。**出口で止める。**"""
+    db = FakeDb()
+    session = await _duet_session(db, simple=True)
+    session["notebook"] = {"rev": 3, "scene": "a studio", "wearing": "school_uniform",
+                           "beat": "standing"}
+    session["craft"] = {"prompt": "1girl, solo, Mio,\nMio: sitting, hoodie,"}
+    service._reassemble(session)
+    assert session["craft"]["prompt"] == "1girl, solo, Mio,\nMio: sitting, hoodie,"
+    # 最初の一本を起こすときだけは通す。
+    service._reassemble(session, force=True)
+    assert "school_uniform" in session["craft"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_her_own_turn_does_not_move_the_notebook_either():
+    db = FakeDb()
+    session = await _duet_session(db, simple=True)
+    session["invited"] = True
+    session["chat"] = [{"role": "muse", "muse_id": "actress", "text": "白いワンピにします"}]
+    before = dict(session.get("notebook") or {})
+    await service._carry_out_her_choice(db, RewriteOllama("x"), session, cfg={})
+    assert dict(session.get("notebook") or {}) == before
