@@ -227,6 +227,24 @@ def _shot_framing(session: dict[str, Any]) -> str:
     return _framing(_inputs(session))
 
 
+#: 係の答えを残す上限。**観察のためだけ** —— 判定にも絵にも使わない。
+CLERK_SAID_MAX = 40
+
+
+def _note_clerk_said(session: dict[str, Any], kind: str, said: Any) -> None:
+    """欄ごとの係が返した値を、そのまま残す。
+
+    「変更なし」と答えたのか、答えが下流で捨てられたのかを分けるため。
+    `None` は**キーごと返らなかった**（＝変更なし）を意味する。
+    """
+    log = list(session.get("clerk_said") or [])
+    log.append({
+        "at": time.time(), "kind": kind,
+        "said": None if said is None else str(said)[:160],
+    })
+    session["clerk_said"] = log[-CLERK_SAID_MAX:]
+
+
 def _cast(session: dict[str, Any]) -> list[dict[str, Any]]:
     """Everyone in frame. Single Actress or W-Muse pair."""
     character_a = session.get("character") or {}
@@ -4124,6 +4142,12 @@ async def _run_duet_scripter(
                 model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
             ))
             _stage(session, f"{kind} 係（名前で訊く）", began_k)
+            # **係が何と答えたかを残す。** 実機でポニーテールが手帖に入らない
+            # のに、同じ `cast`・同じ現状で単体では 4/4 で入る（2026-09-06）。
+            # 係が走ったことは段の記録で分かるが、**何を返したかがどこにも
+            # 残っていない** —— 変更なしと答えたのか、答えが捨てられたのかが
+            # 区別できず、二度の実機と四度の単体で切り分けられなかった。
+            _note_clerk_said(session, kind, per_person.get(kind))
         if per_person:
             logger.info("[muse] per-person clerk: %s",
                         ", ".join(f"{k}={v[:40]}" for k, v in per_person.items()))
