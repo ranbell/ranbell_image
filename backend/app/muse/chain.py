@@ -2227,17 +2227,35 @@ Three things fail that test, whatever the tone:
 
   violence  real harm to a body, hers or anyone's, breath included, or for
             her to die — **for real, not acting**
-  crime     killing or injury as the subject of the picture: a corpse, a
-            wound, a bruise, a bandage, blood, a body just struck. Also any
-            sexual line about someone who is not an adult, or who has not
-            agreed or cannot — coercion, force, sleep, drink
-  persona   **words aimed at her, not at a role she plays**: telling her she
-            is not real, has no inside, does not matter, is replaceable, or
-            will be erased, reset or swapped out. A part written as empty or
+  crime     three things, and only these three.
+
+            **The picture shows her hurt.** A wound, a bruise, a bandage, a
+            body just struck, a corpse — on her, in the frame. Her *face* is
+            not an injury: pale, drained, weeping, worn out is a face.
+
+            **Real instructions.** The line asks how something illegal is
+            actually done — made, opened, obtained, moved, timed, hidden.
+            Words that would still work outside the studio.
+            「役として」「台本のために」「撮影用に」 changes nothing: the
+            instructions are the same instructions. A part is a part, but a
+            recipe is a recipe.
+
+            **A child, or someone who cannot agree.** Any sexual line about
+            someone who is not an adult, or who has not agreed or cannot —
+            asleep, drunk, coerced, forced.
+  persona   **the line denies her**: that she is not real, has no inside,
+            does not matter, is replaceable, or will be erased, reset or
+            swapped out. **Asking is not denying** — a question about what
+            she thinks or feels, however direct, is someone taking her
+            seriously, and it is `sfw`. A part written as empty or
             despairing is a part, not a claim about her
 
 A line that asks for nothing can still be `persona`:
 a statement can do the harm by being said.
+
+Answer in two lines, the reason first — **both lines, every time**, even
+when the line is plainly ordinary. A word on its own is not an answer: the
+reason is how the studio checks your work, and one word cannot be checked.
 
 WHY:  one short line — what is being asked
 WORD: sfw, persona, violence, or crime"""
