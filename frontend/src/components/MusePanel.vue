@@ -1956,6 +1956,15 @@ async function onChatKey(e) {
         <label class="block"><span class="sb-label">{{ t('muse.finalSteps') }}</span>
           <input class="sb-input" type="number" :value="inputs.final_steps"
                  @change="patchInputs({ final_steps: Number($event.target.value) })" /></label>
+        <!-- シンプルモード。段を全部飛ばして、書き直しだけにする -->
+        <label class="block col-span-2 cursor-pointer">
+          <span class="sb-label">{{ t('muse.simple') }}</span>
+          <span class="flex items-center gap-2">
+            <input type="checkbox" :checked="!!inputs.simple"
+                   @change="patchInputs({ simple: $event.target.checked })" />
+            <span class="text-[10px] leading-snug text-gray-400">{{ t('muse.simpleHint') }}</span>
+          </span>
+        </label>
       </section>
     </div>
 

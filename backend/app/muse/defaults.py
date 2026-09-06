@@ -64,6 +64,10 @@ LLM_DEFAULTS: dict[str, object] = {
     # the unload, so pinning the model defeats it. Turn this off only for a card
     # big enough to hold a checkpoint and the model at the same time.
     "unload_vlm": True,
+    # **シンプルモード。** on にすると、会話のたびに状況を整理して前回の
+    # プロンプトを直すだけになる（compile も欄ごとの係も weave も通らない）。
+    # 既定は off —— 今の経路と並べて比べられる状態を残すため。
+    "simple": False,
     # Cast preset for the table-read crew (see muse.crew.PRESETS).
     "crew_preset": "standard",
     # Banter between craft passes. light = Ollama-friendly (fewer side calls);

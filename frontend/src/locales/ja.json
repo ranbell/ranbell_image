@@ -1390,6 +1390,8 @@
       "face_closeup": "顔アップ",
       "from_behind": "後ろ姿"
     },
+    "simple": "シンプルモード",
+    "simpleHint": "会話ごとに状況を整理して、前回のプロンプトを直すだけ。手帖は使わない",
     "style": "画風",
     "negative": "ネガティブ",
     "size": "解像度",

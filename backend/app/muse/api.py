@@ -60,6 +60,7 @@ class InputsPatch(BaseModel):
     final_steps: int | None = Field(default=None, ge=1, le=100)
     final_cfg: float | None = Field(default=None, ge=0.0, le=30.0)
     unload_vlm: bool | None = None
+    simple: bool | None = None
     banter_mode: str | None = None
     num_ctx: int | None = Field(default=None, ge=2048, le=131072)
     wd14_threshold: float | None = Field(default=None, ge=0.05, le=0.9)

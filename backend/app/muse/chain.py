@@ -2298,6 +2298,96 @@ async def read_genre(
     return word if word in crew_mod.GENRES else ""
 
 
+#: **シンプルモード（2026-09-06）。** 総監督「一気にシンプルにして、Muse に
+#: 会話の度に、**現在の状況を整理して、今どのような状況になっているかを把握。
+#: その後その状況に合うように前回のプロンプトを修正する**というシンプルモード
+#: を設けて、切り替えられるようにして」「関数で防ぐというのは理屈は分かるし
+#: テストを行って成果は出してきたが、**監督の指示がダイレクトにプロンプトに
+#: 伝わらないのであれば意味がない**」。
+#:
+#: いまの道は compile → 欄ごとの係 → VERIFY → weave → 10ホップ → 組み立て。
+#: 段ごとに正しくしても**段と段のあいだで正本が食い違う**と絵に出る。実例:
+#: 「パーカーを脱いで」で `wearing` からは消えるのに `beat` の
+#: `hands in her hoodie pocket` が残る（純関数だけで再現済み）。
+#:
+#: **パーカーの例をそのまま条文に置く。** この模型は説明より例に従う ——
+#: 今日だけで四度確かめた（判定係の例外、絵作りの語彙、髪型、持ち物）。
+SIMPLE_REWRITE_SYSTEM = """You keep the picture for a photo shoot, the simple
+way. Each turn you do two things, in this order.
+
+**1. Say what the shot is now.** One or two plain lines. What she is wearing,
+what she is doing, where she is. Read the conversation and settle it in your
+own words before you touch anything.
+
+**2. Rewrite the prompt so it matches.** Start from PROMPT NOW and change only
+what the conversation changed. Everything else stays word for word — same
+order, same wording. You are editing, not writing a new one.
+
+**When something comes off or is put down, take out everything that needed
+it.** The hoodie comes off, so `hands in her hoodie pocket` goes too — she
+cannot have her hands in a pocket that is no longer there. Leave her posture:
+she is still standing. The same holds for a cup set down, a book closed, a hat
+removed.
+
+**Take out only what was named.** Moving is not putting things down: given
+`sitting, holding_book, reading` and told 立って, the answer is `standing,
+holding_book, reading` — the book did not go anywhere, and nobody asked her to
+close it. Only a line that says so takes it out of her hands.
+
+- **LOCKED is copied exactly.** It is who she is — hair colour, eyes, build.
+  It never changes, whatever is said.
+- Never write a word from STRUCK.
+- Tags for what she is, wears and does — ordinary danbooru words, underscored,
+  the ones a sampler knows. Plain prose for the rest of the picture.
+- The showrunner's latest line wins over everything already in the prompt.
+
+OUTPUT — exactly this shape, nothing else:
+
+NOW: <one or two lines, plain words>
+PROMPT: <the whole prompt, ready to render>"""
+
+_NOW_RE = re.compile(r"(?im)^[\s>*_-]*NOW[\s*_]*[:：][ \t]*(.*)$")
+_PROMPT_RE = re.compile(r"(?is)^[\s>*_-]*PROMPT[\s*_]*[:：][ \t]*(.*)$", re.M)
+
+
+def parse_simple_rewrite(raw: str) -> tuple[str, str]:
+    """`NOW:` の一行と、`PROMPT:` 以降の全文。読めなければ ("", "")。"""
+    text = str(raw or "")
+    m = _PROMPT_RE.search(text)
+    if not m:
+        return "", ""
+    prompt = text[m.start(1):].strip()
+    now = ""
+    n = _NOW_RE.search(text[: m.start()])
+    if n:
+        now = " ".join(n.group(1).split())[:240]
+    return now, prompt
+
+
+async def run_simple_rewrite(
+    ollama, *, prompt_now: str, conversation: str, locked: str,
+    struck: str, model: str, num_ctx: int | None,
+) -> tuple[str, str]:
+    """一回の会話につき、一回の書き直し。返すのは (いまの状況, プロンプト)。"""
+    body = "\n\n".join(b for b in [
+        f"LOCKED (copy this line exactly):\n{locked.strip()}" if locked.strip() else "",
+        f"PROMPT NOW:\n{prompt_now.strip()}" if prompt_now.strip() else
+        "PROMPT NOW:\n(none yet — write the first one)",
+        f"CONVERSATION:\n{conversation.strip()}" if conversation.strip() else "",
+        f"STRUCK (never write these):\n{struck.strip()}" if struck.strip() else "",
+        "NOW:",
+    ] if b)
+    try:
+        raw = await _call(
+            ollama, system=SIMPLE_REWRITE_SYSTEM, prompt=body,
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] simple rewrite failed", exc_info=True)
+        return "", ""
+    return parse_simple_rewrite(raw)
+
+
 async def read_nsfw(
     ollama, *, note: str, model: str, num_ctx: int | None,
 ) -> bool:

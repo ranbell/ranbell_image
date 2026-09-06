@@ -1390,6 +1390,8 @@
       "face_closeup": "Face close-up",
       "from_behind": "From behind"
     },
+    "simple": "Simple mode",
+    "simpleHint": "Each turn: read the room, then rewrite the last prompt. The notebook is not used",
     "style": "Style",
     "negative": "Negative",
     "size": "Size",

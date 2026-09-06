@@ -249,6 +249,11 @@ def _note_clerk_said(session: dict[str, Any], kind: str, said: Any) -> None:
 #: （場面と無関係な武器や下着の語が混ざる）。少なく見せて選ばせる。
 SUGGEST_PER_FIELD = 6
 
+#: シンプルモードで書き直す人に見せる会話の長さ（総監督の発言・回数）。
+#: 「ただし**会話は直近のもの**だけね」（2026-09-06）。長く渡すと、いま脱いだ
+#: はずの服が二つ前の行から戻ってくる。
+SIMPLE_TURNS = 4
+
 
 async def _suggest_tags(db, ollama, session: dict[str, Any]) -> str:
     """いまの場面に、スタジオの語彙がどんな語を持っているか。
@@ -6075,7 +6080,13 @@ async def post_duet_chat(
     if skip_picture:
         _strike_blocked_turn(session, user_msg, why="主演")
     if not skip_picture:
-        if uses_notebook(session):
+        if simple_mode(session):
+            # **段を踏まない。** 書き直しは撮る直前に一度だけ走る
+            # （`_simple_craft`）。ここでは「直せ」と印を立てるだけ。
+            await _simple_note(db, ollama, session, text, cfg=cfg)
+            session["craft_dirty"] = True
+            _stage(session, "シンプル（段を踏まない）", began)
+        elif uses_notebook(session):
             try:
                 await _run_duet_scripter(db, ollama, session, text, cfg=cfg)
             except Exception:
@@ -7315,6 +7326,235 @@ def _warn_if_craft_behind(session: dict[str, Any]) -> bool:
     return True
 
 
+# ── シンプルモード（2026-09-06） ──────────────────────────────────────────
+#
+# 総監督「一気にシンプルにして、Muse に会話の度に、**現在の状況を整理して、今
+# どのような状況になっているかを把握。その後その状況に合うように前回のプロン
+# プトを修正する**というシンプルモードを設けて、切り替えられるようにして」
+# 「関数で防ぐというのは理屈は分かるしテストを行って成果は出してきたが、
+# **監督の指示がダイレクトにプロンプトに伝わらないのであれば意味がない**」。
+#
+# ここは段を挟まない。compile も欄ごとの係も VERIFY も weave も箱も通らず、
+# **一回の会話に一回の書き直し**だけ。手帖は更新しない。
+#
+# 関数で守るのは三つだけ:
+#   1. 識別行（髪・目・体つき）を写し直す —— 会話で変わらないので
+#   2. 打ち消し・禁止の語を出力から落とす —— 「使わないで」は効かねばならない
+#   3. 画角・ルック・質の語を末尾に足す —— 位置＝優先度なので最後
+
+
+def simple_mode(session: dict[str, Any]) -> bool:
+    """シンプルモードか。既定は off —— 今の経路と並べて比べられる状態を残す。"""
+    return bool(_inputs(session).get("simple"))
+
+
+#: **結ぶのも、識別の切り方と同居できない。** 十ターンの積み上げで
+#: `tied_up_hair` が `bob_cut` の隣に出た（2026-09-06）。共有の
+#: `HAIR_CUT_TAGS` は `axis_hair` と一対一に保つ約束（`test_identity`）なので、
+#: ここだけの足しにする。
+_SIMPLE_HAIR_UP = frozenset({
+    "tied_up_hair", "hair_up", "half_updo", "updo", "hair_tie",
+})
+
+_SIMPLE_IS_RE = re.compile(r"^([A-Za-z][\w.'-]*) is (.+?),?$")
+_SIMPLE_RUN_RE = re.compile(r"^([A-Za-z][\w.'-]*): (.+?),?$")
+
+
+def _looks_like_identity_line(content: str) -> bool:
+    """`Mio is silver_hair, blue_eyes,` は識別。`Mio is leaning against the
+    wall` は散文。**語数で分ける** —— 識別はタグ、散文は文。
+
+    ここを見ずに `<名前> is …` を全部落としていた版は、散文の一行を黙って
+    捨てる。書いた本人の言葉が消えるのが、この件で一番避けたいこと。
+    """
+    parts = [p.strip() for p in content.split(",") if p.strip()]
+    return bool(parts) and all(len(p.split()) <= 2 for p in parts)
+
+
+def _simple_locked(session: dict[str, Any]) -> str:
+    """動かせない行 —— 頭の人数と、一人ずつの静的特性。"""
+    cast = _cast(session)
+    named = identity.named_identity(cast, solo=True)
+    if not named:
+        # 名前（ラテン表記の handle）が無いキャストもある。**そのときも識別は
+        # 固定する** —— 平らな一行に落とすだけ。ここを "" で返すと、髪も目も
+        # 書き直す人の言い値になる。
+        flat = identity.identity_list(
+            list(identity.subject_tags(cast)) + _identity_tags(session)
+        )
+        return ", ".join(flat) + "," if flat else ""
+    lead = ", ".join(
+        identity.identity_list(identity.subject_tags(cast))
+        + [identity.name_list([n for n, _ in named])]
+    ) + ","
+    return "\n".join(
+        [lead] + [f"{n} is " + ", ".join(t) + "," for n, t in named]
+    )
+
+
+def _simple_pin(prompt: str, locked: str) -> str:
+    """モデルが書いた識別行を捨て、こちらの識別行を置き直す。
+
+    髪の**切り方**だけは譲る。会話で `ponytail` と言われたのに識別側の
+    `bob_cut` が並ぶと、実機で両方が出た（2026-09-06・箱の経路で確認）。
+    **人ごとに見る** —— 片方に結んでと言われたことは、もう片方の三つ編みを
+    落とす理由にならない。
+    """
+    body = [ln.strip() for ln in str(prompt or "").split("\n") if ln.strip()]
+    if not locked.strip():
+        return "\n".join(body)
+    head = [ln.strip() for ln in locked.strip().split("\n") if ln.strip()]
+    lead_tags = {identity.bare_tag(t) for t in head[0].split(",") if t.strip()}
+    names = [m.group(1) for m in (_SIMPLE_IS_RE.match(h) for h in head[1:]) if m]
+    kept: list[str] = []
+    for line in body:
+        m = _SIMPLE_IS_RE.match(line)
+        if m and _looks_like_identity_line(m.group(2)) and (
+            not names or m.group(1) in names
+        ):
+            continue
+        tags = {identity.bare_tag(t) for t in line.split(",") if t.strip()}
+        if tags and tags <= lead_tags:
+            continue
+        kept.append(line)
+    out_head: list[str] = [head[0]]
+    for h in head[1:]:
+        m = _SIMPLE_IS_RE.match(h)
+        if not m:
+            out_head.append(h)
+            continue
+        name, locked_tags = m.group(1), [t.strip() for t in m.group(2).split(",")]
+        said: set[str] = set()
+        for line in kept:
+            r = _SIMPLE_RUN_RE.match(line)
+            if r and r.group(1) == name:
+                said |= {identity.bare_tag(t) for t in r.group(2).split(",")}
+        cuts = identity.HAIR_CUT_TAGS | _SIMPLE_HAIR_UP
+        if said & cuts:
+            locked_tags = [
+                t for t in locked_tags if identity.bare_tag(t) not in cuts
+            ]
+        out_head.append(f"{name} is " + ", ".join(t for t in locked_tags if t) + ",")
+    return "\n".join(out_head + kept)
+
+
+def _simple_scrub(session: dict[str, Any], prompt: str) -> str:
+    """打ち消しと禁止を、出来上がった一本から落とす。"""
+    gone = {
+        identity.bare_tag(t)
+        for t in set(banned_now(session)) | notebook_mod.struck_tokens(session)
+    }
+    gone.discard("")
+    if not gone:
+        return prompt
+    out: list[str] = []
+    for line in prompt.split("\n"):
+        tail = "," if line.rstrip().endswith(",") else ""
+        kept = [
+            p.strip() for p in line.split(",")
+            if p.strip() and identity.bare_tag(p) not in gone
+        ]
+        if kept:
+            out.append(", ".join(kept) + tail)
+    return "\n".join(out)
+
+
+def _simple_tail(session: dict[str, Any], prompt: str) -> str:
+    """画角・ルック・質の語。**末尾に、足りないものだけ。**"""
+    want = (identity.framing_tags(_shot_framing(session))
+            + identity.style_tags(_style(session))
+            + [str(t) for t in _support_tags(session) if str(t).strip()])
+    have = {identity.bare_tag(t) for t in prompt.replace("\n", ",").split(",") if t.strip()}
+    add = [t for t in want if t and identity.bare_tag(t) not in have]
+    if not add:
+        return prompt
+    return prompt.rstrip().rstrip(",") + ",\n" + ", ".join(add) + ","
+
+
+async def _simple_note(db, ollama, session: dict[str, Any], text: str, *,
+                       cfg: dict[str, Any]) -> None:
+    """シンプルでも「◯◯は使わないで」は効かせる。
+
+    書き直す本人にも STRUCK として渡すが、**否定はサンプラーに渡すのが本筋**
+    （`apply_removals` の docstring）。軽い正規表現の門なので、普通のターンでは
+    LLM は増えない。
+    """
+    if ollama is None or not _note_looks_like_strike(text):
+        return
+    inputs = _inputs(session)
+    try:
+        picked, back = await chain.run_strike(
+            ollama, note=text,
+            tags=identity.tag_names(str((session.get("craft") or {}).get("prompt") or "")),
+            removed=banned_tags(session),
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.warning("[muse] simple strike failed; nothing removed", exc_info=True)
+        return
+    apply_removals(session, _sane_strike(session, picked), back)
+
+
+async def _simple_craft(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """いまの状況を言い、前回のプロンプトをその状況に合うように直す。"""
+    craft = session.setdefault("craft", {})
+    prompt_now = str(craft.get("prompt") or "")
+    if prompt_now and not session.get("craft_dirty"):
+        return session
+    cfg = await get_runtime_config(db)
+    inputs = _inputs(session)
+    sid = session.get("session_id") or ""
+    locale = str(inputs.get("locale") or "ja")
+    if sid:
+        events.publish(sid, {
+            "type": "scripter_working", "status": "weave",
+            "message": ("いまの様子、まとめてる…" if locale.startswith("ja")
+                        else "Reading the room…"),
+        })
+    locked = _simple_locked(session)
+    struck = ", ".join(sorted(
+        set(banned_now(session)) | notebook_mod.struck_tokens(session)
+    ))
+    began = time.monotonic()
+    now, prompt = await chain.run_simple_rewrite(
+        ollama,
+        prompt_now=prompt_now,
+        conversation=_duet_transcript(session, user_turns=SIMPLE_TURNS),
+        locked=locked, struck=struck,
+        model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+    )
+    ok = bool(prompt.strip())
+    if ok:
+        before = prompt_now
+        prompt = _simple_tail(session, _simple_scrub(session, _simple_pin(prompt, locked)))
+        craft["prompt"] = prompt
+        craft["now"] = now
+        # **手帖の値は載せない。** シンプルでは正本がここ（プロンプト）なので、
+        # 古い `tags` / `scene` を残すと画面が使われていない側を映す。
+        craft["tags"] = ""
+        craft["scene"] = ""
+        session["craft_dirty"] = False
+        session["notebook_rev_compiled"] = int(notebook_mod.of(session).get("rev") or 0)
+        if now:
+            session["digest"] = now
+        _route_note(session, "シンプル 書き直し", before=before, after=prompt)
+        events.publish(sid, {
+            "type": "craft_updated", "prompt": prompt,
+            "muse_id": crew.DEFAULT_MEMBER["actress"],
+        })
+    else:
+        session["craft_dirty"] = True
+        logger.warning("[muse] simple rewrite came back empty; keeping the last prompt")
+    _stage(session, "シンプル 書き直し" + ("" if ok else "（読めず）"), began)
+    if sid:
+        events.publish(sid, {
+            "type": "scripter_done", "intent": "shot",
+            "compiled": ok, "valid": ok, "dirty": bool(session.get("craft_dirty")),
+        })
+    await session_db.save(db, session, publish=False)
+    return session
+
+
 def _scrub_notebook_craft(session: dict[str, Any]) -> None:
     """Drop struck / banned / leftover clothes / opposite crop from the craft bag."""
     nb = notebook_mod.of(session)
@@ -7350,6 +7590,8 @@ async def weave_craft_if_needed(
     """
     if ollama is None or not uses_notebook(session):
         return session
+    if simple_mode(session):
+        return await _simple_craft(db, ollama, session)
     notebook_mod.migrate(session)
     nb = notebook_mod.of(session)
     if not notebook_mod.has_shot(nb):
