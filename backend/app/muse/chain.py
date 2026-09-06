@@ -1838,8 +1838,8 @@ SCRIPTER_FOLD_NOTE = (
     "showrunner's actual words this turn — not this FOLD header. "
     "Read the latest Muse SAY and MUSE CARD (when present), and the crew's "
     "lines from this turn in the conversation — including any BODY craft. "
-    "A seat that names a concrete body detail — how "
-    "the weight sits, where the hands go, the beat before she turns — is "
+    "A seat that names a concrete body detail — where "
+    "the hands go, which way she faces, the beat before she turns — is "
     "proposing it to you, and it belongs in beat if it does not contradict "
     "the showrunner. They cannot write the notebook; you can. "
     "Anything they propose that is NOT body action — a garment, a place, a "
@@ -2627,6 +2627,8 @@ Read the director's line and say what EACH of them is wearing after it.
 - Comma separated, plain garment words.
 - Only what is ON her body — clothes, hair, accessories. Not the place, not
   the pose, not what she is holding.
+- **A hairstyle is worn.** `髪を結んで` is `ponytail`, `おろして` is
+  `hair_down`, `三つ編みにして` is `braid`. Write the new one, drop the old.
 - Everything she still has on, not only the new piece. Say the whole outfit.
 - If the line does not change what one of them has on, write: unchanged
 
@@ -2640,11 +2642,16 @@ Read the director's line and say what EACH of their bodies is doing after it.
 - **English only.** The director writes in Japanese; you answer in English.
   `ベンチに座って` is `sitting on a bench`. Never copy his words through.
 - Comma separated, plain body words.
-- What her body DOES — standing or sitting or kneeling first, then the weight,
-  the hands, the turn of the torso, where she is looking. Not her clothes,
-  not the place, not the camera.
+- What her body DOES — standing or sitting or kneeling first, then the hands,
+  the turn of the torso, where she is looking. Not her clothes, not the place,
+  not the camera.
+- **Write what a photograph shows, not how the body feels.** Where a limb is
+  and what it touches is visible; weight, balance and tension are not.
 - **Say the whole posture, not only the new detail.** A beat that does not say
   whether she is standing or sitting is not a picture.
+- **Keep what she is holding.** Given `sitting, holding a mug` and told
+  `立って`, the answer is `standing, holding a mug` — the mug did not go
+  anywhere. Only a line that puts it down takes it out.
 - If the line does not move one of them, write: unchanged
 
 Return one JSON object with exactly these two keys, and nothing else:
@@ -2659,8 +2666,13 @@ Read the director's line and say what her body is doing AFTER it.
   `ベンチに座って` is `sitting on a bench`. Never copy his words through.
 - Comma separated, plain body words.
 - **Say which posture she is in first** — standing or sitting or kneeling or
-  crouching — then the weight, the hands, the turn of the torso. A beat that
-  does not say whether she is standing or sitting is not a picture.
+  crouching — then the hands and the turn of the torso. A beat that does not
+  say whether she is standing or sitting is not a picture.
+- **Keep what she is holding.** Given `sitting, holding a mug` and told
+  `立って`, the answer is `standing, holding a mug` — the mug did not go
+  anywhere. Only a line that puts it down takes it out.
+- **Write what a photograph shows, not how the body feels.** Where a limb is
+  and what it touches is visible; weight, balance and tension are not.
 - Not her clothes, not the place, not the camera, not her face.
 - If the line does not move her body, write: unchanged
 
@@ -2780,6 +2792,8 @@ Read the director's line and say what she has on AFTER it.
 - Comma separated, plain garment words.
 - Only what is ON her body — clothes, hair, accessories. Not the place, not
   the pose, not what she is holding.
+- **A hairstyle is worn.** `髪を結んで` is `ponytail`, `おろして` is
+  `hair_down`, `三つ編みにして` is `braid`. Write the new one, drop the old.
 - **Everything she still has on, not only what changed.** Say the whole
   outfit. If something came off, simply leave it out.
 - If the line does not change what she has on, write: unchanged
@@ -3316,7 +3330,7 @@ async def run_scripter(
             f"STRUCK (do not restore):\n{struck}" if struck.strip() else "",
             (
                 "WEAVE: expand TAGS and CRAFT_SCENE from the notebook only. "
-                "FIRST the body from BEAT (posture, weight, hands, held props) "
+                "FIRST the body from BEAT (posture, hands, held props) "
                 "— then clothes, light, place. Do not pad air/cloth to fill "
                 "space. Do not add inventory. Do not rewrite SHOT. "
                 "Tags 25–45 room / craft_scene no floor, ceiling 180 words. "

@@ -1356,6 +1356,24 @@ def record_rewrite(
     return entry
 
 
+#: **値に紛れた `unchanged` を落とす。** 条文は名指しで禁じているのに、実機で
+#: `beat: sitting, unchanged, hands on the desk` が出た（2026-09-06）。欄まるごと
+#: なら「変更なし」として既に扱われるが、**句の一つとして混ざると絵に流れる。**
+_NOT_A_VALUE = frozenset({
+    "unchanged", "none", "(none)", "empty", "(empty)", "n/a", "-", "--",
+    "same", "no change", "as before",
+})
+
+
+def drop_non_values(text: str) -> str:
+    """句のならびから、値でない語を落とす。空になったら空文字。"""
+    kept = [
+        p.strip() for p in str(text or "").split(",")
+        if p.strip() and p.strip().lower() not in _NOT_A_VALUE
+    ]
+    return ", ".join(kept)
+
+
 def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     """Apply absolute section replacements. Empty string in patch = clear.
     Missing key = unchanged. `standing` is a list (replace whole when provided).
@@ -1374,6 +1392,10 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         # 定義している（ラベルの出典 `_label_alternation` の隣に置きたいので）。
         if val:
             val = cut_at_label(val)
+        # **句に紛れた「変更なし」を落とす。** 欄まるごとなら上で弾かれるが、
+        # 実機で `beat: sitting, unchanged, hands on the desk` が絵まで流れた。
+        if val:
+            val = drop_non_values(val)
         if key in ("wearing", "wearing_b") and val:
             # The scripter restates the whole outfit on every change, so a
             # duplicate it inherits is a duplicate it hands back. Tidy here,

@@ -3813,7 +3813,7 @@ def _genre(session: dict[str, Any]) -> str:
 
 
 async def _pick_genre(
-    ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+    ollama, session: dict[str, Any], *, cfg: dict[str, Any], scene: str = "",
 ) -> None:
     """場面からエキスパートを一つ選ぶ。**`scene` が変わったときだけ走る。**
 
@@ -3828,7 +3828,7 @@ async def _pick_genre(
     if str(_inputs(session).get("genre") or "").strip().lower() in crew.GENRES:
         return
     nb = notebook_mod.of(session)
-    scene = str(nb.get("scene") or "").strip()
+    scene = (scene or str(nb.get("scene") or "")).strip()
     if not scene or scene == str(session.get("genre_scene") or ""):
         return
     inputs = _inputs(session)
@@ -3963,10 +3963,15 @@ async def _run_duet_scripter(
         dict(result.get("patch") or {}), partner=partner,
     )
     # **場所が変わったらエキスパートを選び直す。** 次のターンから効く ——
-    # いま書いた `scene` で選ぶので、このターンの compile には間に合わない。
     # 場所替えは一度きりなので、一ターン遅れで困らない。
+    #
+    # **patch の場面を渡す。** ここではまだ手帖に書き戻していないので、
+    # `notebook_mod.of(session)` は前の場所を返す —— 実機で体育館へ移った
+    # ターンに `quiet` が選ばれ、しかも古い場所を記録して二度と選び直さな
+    # かった（2026-09-06）。
     if patch.get("scene"):
-        await _pick_genre(ollama, session, cfg=cfg)
+        await _pick_genre(ollama, session, cfg=cfg,
+                          scene=str(patch.get("scene") or ""))
     # Why each field was written the way it was. Rides with the diff into the
     # instrument panel so the showrunner reads the decision, not just its
     # result — and so the scripter has to put its own choice into words before

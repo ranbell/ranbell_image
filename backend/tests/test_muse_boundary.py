@@ -1568,3 +1568,29 @@ async def test_nsfw_let_through_raises_no_flag(monkeypatch):
     assert not session.get("manager_note")
     assert not session.get("deflected")
     assert not session.get("skip_scripter")
+
+
+def test_a_non_value_never_reaches_the_picture():
+    """**「変更なし」が句に紛れる（2026-09-06）。**
+
+    条文は名指しで禁じている（"Never write NONE, (empty), unchanged … into a
+    value"）のに、実機の e2e で絵まで流れた:
+
+        beat: sitting, **unchanged**, hands on the desk
+
+    欄まるごとなら「変更なし」として上で弾かれる。**句の一つとして混ざると
+    素通りする** —— 弾く場所が欄の粒度にしか無かった。
+    """
+    from app.muse import notebook as nb_mod
+
+    assert nb_mod.drop_non_values(
+        "sitting, unchanged, hands on the desk") == "sitting, hands on the desk"
+    assert nb_mod.drop_non_values("unchanged") == ""
+    assert nb_mod.drop_non_values("sitting, none, -, hands up") == "sitting, hands up"
+    # 本物の値は落とさない
+    assert nb_mod.drop_non_values(
+        "standing, hands at sides") == "standing, hands at sides"
+
+    nb = {"beat": "standing"}
+    nb_mod.apply_patch(nb, {"beat": "sitting, unchanged, hands on the desk"})
+    assert nb["beat"] == "sitting, hands on the desk"
