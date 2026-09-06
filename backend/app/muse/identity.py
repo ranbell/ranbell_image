@@ -979,10 +979,20 @@ def assemble_from_boxes(
     # 総監督「Mio danbooru / Mio 散文 / Subaru danbooru / Subaru 散文 と
     # したほうがいいかも」。
     for (name, locked), box in zip(named, people):
-        lines.append(f"{name} is " + ", ".join(locked) + ",")
         run = list(box.get("beat") or [])
         run += [w for w in (box.get("wearing") or []) if w not in run]
         run += [f for f in (box.get("face") or []) if f not in run]
+        # **髪型を言われたら、識別の側の切り方を落とす（2026-09-06）。**
+        # 平らな経路には最初からある規則（`bob_cut` が `ponytail` の隣に
+        # 並ばないように）。箱の経路には無く、実機で両方が出た:
+        #
+        #     Mio is silver_hair, **bob_cut**, short_hair, …
+        #     Mio: standing, …, **ponytail**, …
+        #
+        # 髪の**色**は識別のもの。切り方だけを譲る。
+        if any(bare_tag(t) in HAIR_CUT_TAGS for t in run):
+            locked = [t for t in locked if bare_tag(t) not in HAIR_CUT_TAGS]
+        lines.append(f"{name} is " + ", ".join(locked) + ",")
         if run:
             lines.append(f"{name}: " + _latin(", ".join(run)) + ",")
     # ③ 誰のものでもないもの。**質の語は最後。** 位置＝優先度なので、場所と

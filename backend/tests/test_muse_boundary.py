@@ -1618,11 +1618,18 @@ def test_a_hairstyle_does_not_compete_with_the_outfit():
     full = ("professional_blouse, knit_cardigan, tailored_trousers, "
             "small_earrings, loafers, headphones, ponytail")
     assert "ponytail" in brief.tidy_wearing(full)
-    # 服の上限は効いたまま
-    worn = brief.tidy_wearing(
-        "a1_shirt, b2_skirt, c3_coat, d4_hat, e5_socks, f6_boots, g7_scarf")
-    assert "g7_scarf" not in worn
-    assert len([p for p in worn.split(",") if p.strip()]) == 6
+    # 服の上限は効いたまま（6 → 10 に上げた。理由は `brief.WEARING_MAX_ITEMS`）
+    many = ", ".join(f"{c}_shirt" for c in "abcdefghijkl")   # 頭名詞が同じ
+    assert len([p for p in brief.tidy_wearing(many).split(",") if p.strip()]) == 1
+    worn = brief.tidy_wearing(", ".join([
+        "a_shirt", "b_skirt", "c_coat", "d_hat", "e_socks", "f_boots",
+        "g_scarf", "h_gloves", "i_belt", "j_ribbon", "k_apron"]))
+    assert len([p for p in worn.split(",") if p.strip()]) == brief.WEARING_MAX_ITEMS
+    assert "k_apron" not in worn
+    # **実撮影は毎回ちょうど6品だった。** 7つ目が黙って落ちるのが問題だった
+    six = ("professional_blouse, knit_cardigan, tailored_trousers, "
+           "small_earrings, loafers, headphones")
+    assert "scarf" in brief.tidy_wearing(six + ", scarf")
     # 髪は一つだけ
     assert brief.tidy_wearing("blouse, bob_cut, ponytail") == "blouse, bob_cut"
 
@@ -1657,3 +1664,36 @@ def test_she_can_add_but_only_from_what_was_offered():
     bag = "sailor_fuku, straw_hat, sitting"
     assert c.parse_weave_review("WRONG: straw_hat", bag) == ["straw_hat"]
     assert c.parse_weave_review("WRONG: leaning_forward", bag) == []
+
+
+def test_a_named_hairstyle_drops_the_identity_cut_in_the_box_path():
+    """**髪型を言われたら、識別の側の切り方を落とす（2026-09-06）。**
+
+    平らな経路には最初からある規則（`identity.py` の冒頭に理由つきで書いて
+    ある —— `bob_cut` が `ponytail` の隣に並ばないように）。**箱の経路には
+    無く**、髪型が手帖から通るようになった日に実機で両方が出た:
+
+        Mio is silver_hair, **bob_cut**, short_hair, …
+        Mio: standing, …, **ponytail**, …
+
+    髪の**色**は識別のもの。切り方だけを譲る。
+    """
+    from app.muse import identity as ident
+
+    cast = [{"name": "Mio", "identity_tags": [
+        "silver_hair", "bob_cut", "short_hair", "blue_eyes", "slim"]}]
+    got = ident.assemble_from_boxes(
+        cast=cast, frame_wide=[], style="",
+        people=[{"beat": ["standing"], "wearing": ["knit_cardigan", "ponytail"],
+                 "face": []}],
+    )
+    assert "ponytail" in got
+    assert "bob_cut" not in got and "short_hair" not in got
+    # 髪の色は残る —— 譲るのは切り方だけ
+    assert "silver_hair" in got
+    # 髪型を言われなければ、識別のままでいる
+    kept = ident.assemble_from_boxes(
+        cast=cast, frame_wide=[], style="",
+        people=[{"beat": ["standing"], "wearing": ["knit_cardigan"], "face": []}],
+    )
+    assert "bob_cut" in kept

@@ -190,8 +190,22 @@ def garment_tags(costume: dict[str, Any] | None) -> list[str]:
 # at three grains, and joining them is what makes the copies. That is what broke
 # 「コートを脱いで」: with two coats in the list, the request has no single
 # referent, and the scripter answered the rest of the line and left wearing
-# alone. Six items is generous — 主演撮り averages 1.8 and undresses correctly.
-WEARING_MAX_ITEMS = 6
+# alone.
+#
+# **6 → 10（2026-09-06）。** 「六品は余裕がある —— 主演撮りの平均は 1.8」で
+# 決めた数字だったが、**その前提が古い**。実測した実撮影3件はすべて**ちょうど
+# 6品**で、衣装のプリセットが枠を使い切っている:
+#
+#     professional_blouse, knit_cardigan, tailored_trousers,
+#     small_earrings, loafers, headphones
+#
+# そこへ「マフラーを巻いて」と言うと、**7つ目が黙って落ちた**（scarf / beret /
+# wool_coat すべて 0）。同じ日に髪型で踏んだ穴が、服の側に残っていた。
+#
+# **重複を止めているのは頭名詞での排除のほう**で、品数はその二重の網。字数の
+# 上限（`_SHOT_FIELD_CAPS["wearing"]` = 240）が本当の歯止めで、10品でも約150字
+# なので収まる。
+WEARING_MAX_ITEMS = 10
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _ARTICLE_RE = re.compile(r"(?i)^(?:the|a|an)[_\s]+")
