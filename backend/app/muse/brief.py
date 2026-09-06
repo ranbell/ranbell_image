@@ -300,7 +300,21 @@ def tidy_wearing(text: str, *, max_items: int = WEARING_MAX_ITEMS) -> str:
         # Nothing had a readable head noun, but she is dressed. Say so rather
         # than hand back an empty outfit. `none` alone still means nothing.
         kept = dressed[:1]
-    return ", ".join(kept[:max_items])
+    # **髪型は服の枠を奪わない（2026-09-06）。** 上限は着るものの数を抑える
+    # ためのもので、髪はそこに並ぶものではない。実機で「髪を結んで。ポニー
+    # テールにして。」が三度とも消えた —— 係は `ponytail` を正しく返していた
+    # のに、それが**七番目**だったので上限で切られていた。
+    #
+    # **一つだけ通す。** 二つ通すと `bob_cut` と `ponytail` が並ぶ。順番は
+    # そのまま（先に出たほうが新しい指定）。
+    from .identity import HAIR_CUT_TAGS
+
+    def _is_hair(piece: str) -> bool:
+        return bare_tag(piece) in HAIR_CUT_TAGS
+
+    hair = [p for p in kept if _is_hair(p)][:1]
+    worn = [p for p in kept if not _is_hair(p)][:max_items]
+    return ", ".join(worn + hair)
 
 
 def orders_block(

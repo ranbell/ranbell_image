@@ -1594,3 +1594,34 @@ def test_a_non_value_never_reaches_the_picture():
     nb = {"beat": "standing"}
     nb_mod.apply_patch(nb, {"beat": "sitting, unchanged, hands on the desk"})
     assert nb["beat"] == "sitting, hands on the desk"
+
+
+def test_a_hairstyle_does_not_compete_with_the_outfit():
+    """**髪型が服の上限で切られていた（2026-09-06）。**
+
+    実機の e2e で「髪を結んで。ポニーテールにして。」が三度とも手帖に入らな
+    かった。単体では衣装部屋が 4/4、compile が 3/3 で `ponytail` を書くのに。
+
+    係の答えを記録に残して決着した:
+
+        係が返した値   … loafers, headphones, **ponytail**
+        最終の手帖     … loafers, headphones
+
+    `tidy_wearing` の `WEARING_MAX_ITEMS = 6` で、**七番目だったので切られて
+    いた。** 上限は着るものの数を抑えるためのもので、髪はそこに並ぶものでは
+    ない。
+
+    **一つだけ通す** —— 二つ通すと `bob_cut` と `ponytail` が並ぶ。
+    """
+    from app.muse import brief
+
+    full = ("professional_blouse, knit_cardigan, tailored_trousers, "
+            "small_earrings, loafers, headphones, ponytail")
+    assert "ponytail" in brief.tidy_wearing(full)
+    # 服の上限は効いたまま
+    worn = brief.tidy_wearing(
+        "a1_shirt, b2_skirt, c3_coat, d4_hat, e5_socks, f6_boots, g7_scarf")
+    assert "g7_scarf" not in worn
+    assert len([p for p in worn.split(",") if p.strip()]) == 6
+    # 髪は一つだけ
+    assert brief.tidy_wearing("blouse, bob_cut, ponytail") == "blouse, bob_cut"
