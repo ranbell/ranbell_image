@@ -67,6 +67,9 @@ COMMENT: <one short spoken line in HER voice: admit the miss and that YOU will f
 REPAIR: <JSON object with ledger keys to fix — absolute English phrases, only wrong fields>
 
 Rules:
+- CRITICAL: Pay close attention to the previous conversation.
+  Changes, additions, or removals of the pose, outfit, and background are ONLY allowed
+  if explicitly requested. Otherwise, always retain the exact pose, outfit, and background from the previous turn.
 - Clothes and place are independent.
 - REPAIR only when OK: no. Empty {} is not allowed when OK: no if the director named a picture change.
 - Do not invent unrelated wardrobe. Fix only what the director asked.
