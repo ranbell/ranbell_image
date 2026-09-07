@@ -254,6 +254,9 @@ function rowChips(row) {
   if (Array.isArray(chips) && chips.length) return chips
   return []
 }
+function isBanterRow(row) {
+  return (row?.meta?.kind || row?.kind) === 'banter'
+}
 function isChangeRow(row) {
   const kind = row?.meta?.kind
   return kind === 'ledger_change' || kind === 'ledger_missed'
@@ -261,6 +264,7 @@ function isChangeRow(row) {
 }
 function rowKindLabel(row, t) {
   const kind = row?.meta?.kind
+  if (kind === 'banter') return t('museRefine.asideTitle')
   if (kind === 'ledger_change' || kind === 'ledger_missed') return t('museRefine.shotChange')
   if (kind === 'verify_ok') return t('museRefine.verifyOk')
   if (kind === 'verify_repair' || kind === 'verify_repaired') return t('museRefine.verifyRepair')
@@ -346,7 +350,9 @@ function rowKindLabel(row, t) {
                 class="rounded-lg px-2.5 py-2"
                 :class="row.role === 'user'
                   ? 'bg-teal-950/40 text-teal-50'
-                  : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
+                  : isBanterRow(row)
+                    ? 'ml-4 border border-dashed border-pink-400/45 bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30 text-[11px] italic text-pink-200/95'
+                    : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
                     ? 'border border-emerald-800/40 bg-emerald-950/25 text-emerald-50'
                     : row.meta?.kind === 'verify_repair'
                       ? 'border border-orange-800/40 bg-orange-950/25 text-orange-50'
@@ -359,13 +365,17 @@ function rowKindLabel(row, t) {
                       : 'bg-gray-900 text-gray-100'"
               >
                 <div class="mb-0.5 flex flex-wrap items-center gap-1.5">
-                  <span class="text-[10px] uppercase tracking-wide text-gray-500">
-                    {{ rowKindLabel(row, t) }}
+                  <span
+                    class="text-[10px] uppercase tracking-wide"
+                    :class="isBanterRow(row) ? 'text-pink-300/90 font-medium' : 'text-gray-500'"
+                  >
+                    <template v-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
+                    <template v-else>{{ rowKindLabel(row, t) }}</template>
                   </span>
                   <span
                     v-for="chip in rowChips(row)"
                     :key="chip.key"
-                    class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] leading-none"
+                    class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] leading-none not-italic"
                     :class="chip.key === 'missed'
                       ? 'border-amber-600/60 bg-amber-900/50 text-amber-100'
                       : chip.key === 'repair'

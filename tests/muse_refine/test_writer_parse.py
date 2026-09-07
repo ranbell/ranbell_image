@@ -5,18 +5,21 @@ from app.muse_refine.writer import parse_actress, parse_verify
 
 
 def test_parse_actress_say_only():
-    say, prop = parse_actress("SAY: 了解、屋上で撮ろう。")
+    say, aside, prop = parse_actress("SAY: 了解、屋上で撮ろう。")
     assert "屋上" in say
+    assert aside == ""
     assert prop == {}
 
 
-def test_parse_actress_with_propose():
+def test_parse_actress_with_aside_and_propose():
     raw = (
         'SAY: 白いシャツにして屋上はどう？\n'
+        'ASIDE: ドキドキする…ちゃんと似合うかな。\n'
         'PROPOSE: {"wearing": "white shirt", "scene": "rooftop"}'
     )
-    say, prop = parse_actress(raw)
+    say, aside, prop = parse_actress(raw)
     assert "シャツ" in say or "屋上" in say
+    assert "ドキドキ" in aside
     assert prop["wearing"] == "white shirt"
     assert prop["scene"] == "rooftop"
 

@@ -411,7 +411,7 @@ async def chat(
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
     t0 = time.monotonic()
-    say, propose = await writer.actress_turn(
+    say, aside, propose = await writer.actress_turn(
         ollama,
         model=model,
         locale=locale,
@@ -427,12 +427,29 @@ async def chat(
     debug_mod.note(
         session, "actress",
         detail=(say or "")[:240],
+        aside=(aside or "")[:240],
         propose=propose or {},
     )
-    _append_chat(session, role="assistant", name=name, text=say)
+    _append_chat(
+        session, role="assistant", name=name, text=say,
+        meta={"kind": "say"},
+    )
     events.publish(session["session_id"], {
         "type": "chat", "role": "assistant", "name": name, "text": say,
     })
+    if aside:
+        _append_chat(
+            session,
+            role="assistant",
+            name=name,
+            text=aside,
+            meta={"kind": "banter"},
+        )
+        events.publish(session["session_id"], {
+            "type": "chat", "role": "assistant", "name": name,
+            "text": aside, "kind": "banter",
+        })
+        debug_mod.note(session, "aside", detail=aside[:240])
 
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)
@@ -448,18 +465,22 @@ async def chat(
         )
         chat = list(session.get("chat") or [])
         for i in range(len(chat) - 1, -1, -1):
-            if chat[i].get("role") == "assistant":
-                meta = dict(chat[i].get("meta") or {})
-                fields = ledger_mod.changed_fields(before_p, led) or ledger_mod.patch_fields(propose)
-                meta.update({
-                    "fields": fields,
-                    "chips": ledger_mod.chips_for(fields, locale=locale),
-                    "propose": propose,
-                    "source": "muse",
-                })
-                chat[i] = {**chat[i], "meta": meta}
-                session["chat"] = chat
-                break
+            if chat[i].get("role") != "assistant":
+                continue
+            # Prefer the SAY row, not the ASIDE (banter) that follows it.
+            if (chat[i].get("meta") or {}).get("kind") == "banter":
+                continue
+            meta = dict(chat[i].get("meta") or {})
+            fields = ledger_mod.changed_fields(before_p, led) or ledger_mod.patch_fields(propose)
+            meta.update({
+                "fields": fields,
+                "chips": ledger_mod.chips_for(fields, locale=locale),
+                "propose": propose,
+                "source": "muse",
+            })
+            chat[i] = {**chat[i], "meta": meta}
+            session["chat"] = chat
+            break
         t0 = time.monotonic()
         await assemble.rebuild_craft(db, ollama, session)
         debug_mod.stage(session, "assemble_after_propose", t0)

@@ -1823,6 +1823,7 @@
     "pickCharacter": "キャラを選ぶ",
     "nowEmpty": "まだ画は未設定",
     "nowAuthority": "ここが正本。会話の雰囲気より優先します",
+    "asideTitle": "内心",
     "shotChange": "画の更新",
     "verifyOk": "確認",
     "verifyRepair": "自己修復",

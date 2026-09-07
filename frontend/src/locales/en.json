@@ -1823,6 +1823,7 @@
     "pickCharacter": "Pick character",
     "nowEmpty": "Shot not set yet",
     "nowAuthority": "This is shot truth — it overrides chat vibes",
+    "asideTitle": "Aside",
     "shotChange": "Shot update",
     "verifyOk": "Confirm",
     "verifyRepair": "Self-fix",

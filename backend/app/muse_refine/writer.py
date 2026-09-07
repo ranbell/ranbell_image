@@ -48,18 +48,21 @@ pose, place, face, light, or frame than LEDGER unless you are proposing a change
 in PROPOSE.
 
 SAY is performance only. Never treat SAY as updating the shot.
+ASIDE is your inner mutter (内心) — required every turn. Whispered, cute, same
+language as SAY. Chat-visible. Not shot truth. Do not dump wardrobe status into ASIDE.
 If you want the picture to change, you MUST output PROPOSE with ledger keys.
 If you are not changing the picture, omit PROPOSE.
 
-VOICE is mandatory. Every SAY must sound like THIS girl only — first person,
-address, talk quirks, and example rhythm from the VOICE block. A generic soft
-polite line that any other Muse could say is a failure; rewrite until only she
-would say it.
+VOICE is mandatory. Every SAY and ASIDE must sound like THIS girl only — first
+person, address, talk quirks, and example rhythm from the VOICE block. A generic
+soft polite line that any other Muse could say is a failure; rewrite until only
+she would say it.
 
 Output format:
 SAY: <one or two short spoken lines in HER voice>
+ASIDE: <1–2 sentences of inner mutter / 内心, whispered, her voice>
 PROPOSE: <optional JSON object with ledger keys>
-No danbooru tags inside SAY. No markdown fences.
+No danbooru tags inside SAY or ASIDE. No markdown fences.
 """
 
 VERIFY_SYSTEM = """You check whether the shot LEDGER matches the director's latest intent.
@@ -130,26 +133,40 @@ async def write_patch(
     return ledger_mod.normalize_patch(_extract_json_object(raw))
 
 
-def parse_actress(raw: str) -> tuple[str, dict[str, str]]:
+def parse_actress(raw: str) -> tuple[str, str, dict[str, str]]:
+    """Returns (say, aside, propose)."""
     text = (raw or "").strip()
     say = ""
+    aside = ""
     propose: dict[str, str] = {}
     if not text:
-        return say, propose
+        return say, aside, propose
+
     m = re.search(r"(?is)\bPROPOSE\s*:\s*(\{[\s\S]*\})\s*$", text)
     body = text
     if m:
         propose = ledger_mod.normalize_patch(_extract_json_object(m.group(1)))
         body = text[: m.start()].strip()
+
+    # Split ASIDE (may appear after SAY).
+    aside_m = re.search(
+        r"(?is)\bASIDE\s*:\s*(.+?)(?=\n\s*(?:PROPOSE|CARD)\s*:|\Z)",
+        body,
+    )
+    if aside_m:
+        aside = aside_m.group(1).strip()
+        aside = re.sub(r"(?is)\b(?:PROPOSE|CARD)\s*:.*$", "", aside).strip()
+        aside = aside.splitlines()[0].strip() if aside else aside
+        body = (body[: aside_m.start()] + body[aside_m.end():]).strip()
+
     m_say = re.search(r"(?is)\bSAY\s*:\s*(.+)$", body)
     if m_say:
         say = m_say.group(1).strip()
     else:
         say = body.strip()
     say = re.sub(r"(?is)^\s*SAY\s*:\s*", "", say).strip()
-    # If PROPOSE leaked into SAY body, strip it.
-    say = re.sub(r"(?is)\bPROPOSE\s*:.*$", "", say).strip()
-    return say, propose
+    say = re.sub(r"(?is)\b(?:ASIDE|PROPOSE)\s*:.*$", "", say).strip()
+    return say, aside, propose
 
 
 def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
@@ -217,7 +234,7 @@ async def actress_turn(
         raw = await ollama.generate_text(prompt, model=model or None)
     except Exception:
         logger.exception("[muse_refine] actress failed")
-        return ("……" if locale.startswith("ja") else "...", {})
+        return ("……" if locale.startswith("ja") else "...", "", {})
     return parse_actress(raw)
 
 
