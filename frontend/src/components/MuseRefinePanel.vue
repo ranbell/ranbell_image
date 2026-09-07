@@ -63,7 +63,27 @@ const diaryState = computed(() => session.value?.diary || {})
 const diaryDone = computed(() => diaryState.value.status === 'ok')
 const diaryWriting = computed(() => diaryState.value.status === 'writing')
 const againFeelAvailable = computed(() => !!session.value?.again_feel_available)
-const restateFields = ['wearing', 'beat', 'expression', 'scene', 'light', 'frame', 'atmosphere', 'look']
+const restateFields = [
+  'wearing', 'beat', 'expression', 'scene', 'light', 'bg', 'frame',
+  'lettering', 'atmosphere', 'look',
+]
+const stickyFields = new Set(['atmosphere', 'look', 'lettering'])
+const ledgerRows = computed(() => {
+  const led = ledger.value || {}
+  const rows = [
+    'wearing', 'beat', 'expression', 'scene', 'light', 'bg', 'frame',
+    'lettering', 'atmosphere', 'look',
+  ]
+  if (partner.value?.character_id) {
+    rows.push('wearing_b', 'beat_b')
+  }
+  return rows.map((key) => ({
+    key,
+    label: t(`museRefine.fields.${key}`),
+    value: led[key] || '',
+    sticky: stickyFields.has(key),
+  }))
+})
 
 async function api(path, opts = {}) {
   const resp = await fetch(path, {
@@ -507,6 +527,35 @@ function isStruckRow(row) {
                 {{ craft.now || t('museRefine.nowEmpty') }}
               </p>
               <p class="mt-0.5 text-[10px] text-gray-500">{{ t('museRefine.nowAuthority') }}</p>
+              <div
+                v-if="ledger.atmosphere || ledger.look || ledger.lettering"
+                class="mt-1.5 flex flex-wrap gap-1.5"
+              >
+                <span
+                  v-if="ledger.atmosphere"
+                  class="inline-flex max-w-full items-center gap-1 rounded-full border border-violet-700/50 bg-violet-950/50 px-2 py-0.5 text-[10px] text-violet-100"
+                  :title="t('museRefine.fields.atmosphere')"
+                >
+                  <span class="shrink-0 opacity-70">🌫</span>
+                  <span class="truncate">{{ ledger.atmosphere }}</span>
+                </span>
+                <span
+                  v-if="ledger.look"
+                  class="inline-flex max-w-full items-center gap-1 rounded-full border border-fuchsia-700/50 bg-fuchsia-950/50 px-2 py-0.5 text-[10px] text-fuchsia-100"
+                  :title="t('museRefine.fields.look')"
+                >
+                  <span class="shrink-0 opacity-70">🎨</span>
+                  <span class="truncate">{{ ledger.look }}</span>
+                </span>
+                <span
+                  v-if="ledger.lettering"
+                  class="inline-flex max-w-full items-center gap-1 rounded-full border border-sky-700/50 bg-sky-950/50 px-2 py-0.5 text-[10px] text-sky-100"
+                  :title="t('museRefine.fields.lettering')"
+                >
+                  <span class="shrink-0 opacity-70">🔤</span>
+                  <span class="truncate">{{ ledger.lettering }}</span>
+                </span>
+              </div>
               <p v-if="bond.last" class="mt-1 text-[10px] text-rose-200/70">
                 {{ t('museRefine.bondHint') }}: {{ bond.last }}
               </p>
@@ -627,20 +676,20 @@ function isStruckRow(row) {
           <section class="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
             <div class="rounded-xl border border-teal-950/50 bg-gray-950/60 p-3">
               <div class="mb-2 text-xs font-medium text-teal-200/90">{{ t('museRefine.ledger') }}</div>
-              <dl class="grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-1 text-[11px]">
-                <dt class="text-gray-500">wearing</dt><dd class="text-gray-200">{{ ledger.wearing || '—' }}</dd>
-                <dt class="text-gray-500">beat</dt><dd class="text-gray-200">{{ ledger.beat || '—' }}</dd>
-                <dt class="text-gray-500">expression</dt><dd class="text-gray-200">{{ ledger.expression || '—' }}</dd>
-                <dt class="text-gray-500">scene</dt><dd class="text-gray-200">{{ ledger.scene || '—' }}</dd>
-                <dt class="text-gray-500">light</dt><dd class="text-gray-200">{{ ledger.light || '—' }}</dd>
-                <dt class="text-gray-500">bg</dt><dd class="text-gray-200">{{ ledger.bg || '—' }}</dd>
-                <dt class="text-gray-500">frame</dt><dd class="text-gray-200">{{ ledger.frame || '—' }}</dd>
-                <dt class="text-gray-500">lettering</dt><dd class="text-gray-200">{{ ledger.lettering || '—' }}</dd>
-                <dt class="text-gray-500">atmosphere</dt><dd class="text-gray-200">{{ ledger.atmosphere || '—' }}</dd>
-                <dt class="text-gray-500">look</dt><dd class="text-gray-200">{{ ledger.look || '—' }}</dd>
-                <template v-if="partner.character_id">
-                  <dt class="text-gray-500">wearing_b</dt><dd class="text-gray-200">{{ ledger.wearing_b || '—' }}</dd>
-                  <dt class="text-gray-500">beat_b</dt><dd class="text-gray-200">{{ ledger.beat_b || '—' }}</dd>
+              <p class="mb-2 text-[10px] text-gray-500">{{ t('museRefine.ledgerStickyHint') }}</p>
+              <dl class="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 text-[11px]">
+                <template v-for="row in ledgerRows" :key="row.key">
+                  <dt
+                    class="truncate"
+                    :class="row.sticky ? 'text-violet-300/90' : 'text-gray-500'"
+                    :title="row.key"
+                  >{{ row.label }}</dt>
+                  <dd
+                    class="break-words"
+                    :class="row.sticky && row.value
+                      ? 'text-violet-100'
+                      : 'text-gray-200'"
+                  >{{ row.value || '—' }}</dd>
                 </template>
               </dl>
               <div v-if="standing.length" class="mt-2 border-t border-teal-950/40 pt-2">
@@ -669,10 +718,13 @@ function isStruckRow(row) {
                   v-for="f in restateFields"
                   :key="f"
                   type="button"
-                  class="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-300 hover:border-teal-700"
+                  class="rounded border px-1.5 py-0.5 text-[10px] hover:border-teal-700"
+                  :class="stickyFields.has(f)
+                    ? 'border-violet-700/60 bg-violet-950/40 text-violet-100'
+                    : 'border-gray-700 bg-gray-900 text-gray-300'"
                   :disabled="busy"
                   @click="restateField(f)"
-                >{{ f }}</button>
+                >{{ t(`museRefine.fields.${f}`) }}</button>
               </div>
             </div>
 
