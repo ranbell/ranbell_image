@@ -55,6 +55,22 @@ const rewriteLog = computed(() => [...(session.value?.rewrite_log || [])].slice(
 const pipeline = computed(() => session.value?.pipeline || null)
 const pipelineStages = computed(() => pipeline.value?.stages || [])
 const pipelineDivergences = computed(() => pipeline.value?.divergences || [])
+const visibleConsequences = computed(() => {
+  const fromCraft = craft.value?.visible_consequences
+  if (fromCraft && (fromCraft.tags?.length || fromCraft.causes?.length || fromCraft.hints?.length)) {
+    return fromCraft
+  }
+  return pipeline.value?.visible_consequences || null
+})
+const hasVisibleConsequences = computed(() => {
+  const v = visibleConsequences.value
+  if (!v) return false
+  return Boolean(
+    (v.causes && v.causes.length)
+    || (v.tags && v.tags.length)
+    || (v.hints && v.hints.length),
+  )
+})
 function pipelineStatusClass(status) {
   if (status === 'ok' || status === 'frozen') return 'border-emerald-500/40 text-emerald-200/90'
   if (status === 'pending') return 'border-amber-500/40 text-amber-200/90'
@@ -1189,6 +1205,18 @@ function isStruckRow(row) {
               <p v-if="craft.support_tags" class="mt-2 text-[10px] text-gray-500">
                 support: {{ craft.support_tags }}
               </p>
+              <div
+                v-if="museDebug && hasVisibleConsequences"
+                class="mt-2 rounded border border-sky-800/40 bg-sky-950/20 px-2 py-1.5 text-[10px] text-sky-100/85"
+              >
+                <div class="font-medium text-sky-200/90">{{ t('museRefine.visibleTitle') }}</div>
+                <div v-if="(visibleConsequences.causes || []).length">
+                  {{ t('museRefine.visibleCauses') }}{{ (visibleConsequences.causes || []).join(' · ') }}
+                </div>
+                <div v-if="(visibleConsequences.tags || []).length">
+                  {{ t('museRefine.visibleTags') }}{{ (visibleConsequences.tags || []).join(', ') }}
+                </div>
+              </div>
             </div>
 
             <div v-if="showSettings" class="space-y-2 rounded-xl border border-gray-800 bg-gray-950 p-3 text-xs">
@@ -1218,6 +1246,43 @@ function isStruckRow(row) {
               <summary class="cursor-pointer text-amber-200">{{ t('museRefine.debugTitle') }}</summary>
               <p class="mt-1 mb-2 text-amber-100/50">{{ t('museRefine.debugHint') }}</p>
 
+              <div
+                v-if="hasVisibleConsequences"
+                class="mb-3 rounded border border-sky-800/50 bg-sky-950/30 px-2 py-2"
+              >
+                <div class="mb-1 font-semibold text-sky-200/95">{{ t('museRefine.visibleTitle') }}</div>
+                <p class="mb-1.5 text-sky-100/50">{{ t('museRefine.visibleHint') }}</p>
+                <div v-if="(visibleConsequences.causes || []).length" class="mb-1">
+                  <span class="text-sky-300/80">{{ t('museRefine.visibleCauses') }}</span>
+                  <span class="text-sky-100">{{ (visibleConsequences.causes || []).join(' · ') }}</span>
+                </div>
+                <div v-if="(visibleConsequences.tags || []).length" class="mb-1">
+                  <span class="text-sky-300/80">{{ t('museRefine.visibleTags') }}</span>
+                  <span class="text-emerald-200/90">{{ (visibleConsequences.tags || []).join(', ') }}</span>
+                </div>
+                <div class="mb-1 text-sky-100/70">
+                  {{ t('museRefine.visibleDensify') }}:
+                  <span :class="visibleConsequences.densified ? 'text-emerald-300/90' : 'text-amber-100/60'">
+                    {{ visibleConsequences.densified
+                      ? t('museRefine.visibleDensifyYes')
+                      : t('museRefine.visibleDensifyNo') }}
+                  </span>
+                  <span
+                    v-if="visibleConsequences.densify_reason"
+                    class="text-sky-100/40"
+                  > · {{ visibleConsequences.densify_reason }}</span>
+                </div>
+                <ul v-if="(visibleConsequences.hints || []).length" class="mt-1 space-y-0.5">
+                  <li
+                    v-for="(h, i) in (visibleConsequences.hints || [])"
+                    :key="`vc-${i}`"
+                    class="whitespace-pre-wrap text-sky-100/75"
+                  >→ {{ h }}</li>
+                </ul>
+                <p class="mt-1.5 text-sky-100/40">{{ t('museRefine.visibleCraftOnly') }}</p>
+              </div>
+              <p v-else-if="museDebug" class="mb-3 text-amber-100/40">{{ t('museRefine.visibleEmpty') }}</p>
+
               <div v-if="pipelineStages.length" class="mb-3">
                 <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.pipelineTitle') }}</div>
                 <p class="mb-1.5 text-amber-100/50">{{ t('museRefine.pipelineHint') }}</p>
@@ -1231,6 +1296,10 @@ function isStruckRow(row) {
                   >
                     <div class="font-semibold">{{ stage.id }}</div>
                     <div class="text-[9px] opacity-80">{{ stage.status }}</div>
+                    <div
+                      v-if="stage.id === 'assemble' && (stage.visible_tags || []).length"
+                      class="mt-0.5 text-[9px] text-sky-200/80"
+                    >{{ (stage.visible_tags || []).slice(0, 4).join(', ') }}</div>
                   </li>
                 </ol>
                 <ul v-if="pipelineDivergences.length" class="mt-1.5 space-y-0.5">
@@ -1322,6 +1391,14 @@ function isStruckRow(row) {
                     <span class="text-amber-300/90">{{ row.kind }}</span>
                     <span class="text-amber-100/40"> {{ rewriteWhen(row.at) }}</span>
                     — {{ row.detail }}
+                    <div
+                      v-if="row.kind === 'visible_consequences' && (row.causes || []).length"
+                      class="pl-2 text-sky-200/80"
+                    >causes: {{ (row.causes || []).join(', ') }}</div>
+                    <div
+                      v-if="row.kind === 'visible_consequences' && (row.tags || []).length"
+                      class="pl-2 text-emerald-200/80"
+                    >tags: {{ (row.tags || []).join(', ') }}</div>
                   </li>
                 </ul>
               </div>

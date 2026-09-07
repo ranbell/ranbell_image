@@ -81,6 +81,8 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "picked_wd14": craft.get("picked_wd14", ""),
             "quality_tags": craft.get("quality_tags", ""),
             "support_tags": craft.get("support_tags", ""),
+            # Debug: state → photo-visible beats (craft-only, never ledger).
+            "visible_consequences": dict(craft.get("visible_consequences") or {}),
         },
         "chat": list(session.get("chat") or [])[-40:],
         "standing": list(session.get("standing") or [])[-8:],

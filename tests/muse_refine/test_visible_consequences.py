@@ -15,6 +15,8 @@ def test_wind_behind_implies_nape_and_floating_hair():
     assert "floating_hair" in cues["tags"]
     assert "nape" in cues["tags"]
     assert "from_behind" in cues["tags"]
+    assert "wind" in cues["causes"]
+    assert "from_behind" in cues["causes"]
     assert cues["needs_dense"]
     assert any("nape" in h.lower() for h in cues["hints"])
 

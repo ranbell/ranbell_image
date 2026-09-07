@@ -112,6 +112,19 @@ def build_pipeline_view(session: dict[str, Any]) -> dict[str, Any]:
     prompt = str(craft.get("prompt") or "").strip()
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     filled = [k for k in ledger_mod.LEDGER_KEYS if str(led.get(k) or "").strip()]
+    visible = dict(craft.get("visible_consequences") or {})
+    if not visible:
+        # Fall back to last refine_log note so debug still works mid-turn.
+        vc_note = _last_note(session, "visible_consequences")
+        if vc_note:
+            visible = {
+                "causes": list(vc_note.get("causes") or []),
+                "tags": list(vc_note.get("tags") or []),
+                "hints": list(vc_note.get("hints") or []),
+                "densified": bool(vc_note.get("densified")),
+                "densify_reason": str(vc_note.get("densify_reason") or ""),
+                "craft_only": True,
+            }
 
     board_fp = str(board.get("ledger_fp") or "")
     cur_fp = "|".join(str(led.get(k) or "") for k in ledger_mod.LEDGER_KEYS)
@@ -175,8 +188,11 @@ def build_pipeline_view(session: dict[str, Any]) -> dict[str, Any]:
             "chars": len(prompt),
             "ms": (_last_stage(
                 session, "assemble_pre_actress", "assemble_after_propose",
-                "assemble_after_repair",
+                "assemble_after_repair", "prose_densify",
             ) or {}).get("ms"),
+            "visible_causes": list(visible.get("causes") or [])[:12],
+            "visible_tags": list(visible.get("tags") or [])[:20],
+            "densified": bool(visible.get("densified")),
         },
         {
             "id": "actress",
@@ -197,4 +213,13 @@ def build_pipeline_view(session: dict[str, Any]) -> dict[str, Any]:
         "at": time.time(),
         "stages": ordered,
         "divergences": _divergences(session),
+        # Explicit block so debug clients need not dig assemble stage / craft.
+        "visible_consequences": {
+            "causes": list(visible.get("causes") or [])[:12],
+            "tags": list(visible.get("tags") or [])[:20],
+            "hints": list(visible.get("hints") or [])[:4],
+            "densified": bool(visible.get("densified")),
+            "densify_reason": str(visible.get("densify_reason") or ""),
+            "craft_only": True,
+        },
     }

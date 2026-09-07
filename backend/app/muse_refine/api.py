@@ -143,9 +143,11 @@ async def session_debug(session_id: str, request: Request):
         "craft": {
             "now": (view.get("craft") or {}).get("now"),
             "prompt": (view.get("craft") or {}).get("prompt"),
+            "scene": (view.get("craft") or {}).get("scene"),
             "wd14_suggestions": (view.get("craft") or {}).get("wd14_suggestions"),
             "picked_wd14": (view.get("craft") or {}).get("picked_wd14"),
             "quality_tags": (view.get("craft") or {}).get("quality_tags"),
+            "visible_consequences": (view.get("craft") or {}).get("visible_consequences") or {},
         },
         "refine_ledger": view.get("refine_ledger") or {},
     }

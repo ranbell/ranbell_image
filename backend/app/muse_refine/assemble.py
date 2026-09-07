@@ -325,7 +325,11 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
     open_collar = bool(_OPEN_COLLAR_RE.search(text) or _OPEN_COLLAR_RE.search(wearing))
     hands_face = bool(_HANDS_FACE_RE.search(text))
 
+    # Human-readable causes for debug pane (why these consequences fired).
+    causes: list[str] = []
+
     if wind:
+        causes.append("wind")
         tags.append("floating_hair")
         if behind or side or look_back:
             tags.append("nape")
@@ -341,10 +345,12 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
             )
 
     if behind:
+        causes.append("from_behind")
         if "nape" not in tags:
             tags.append("nape")
         tags.append("from_behind")
         if look_back:
+            causes.append("looking_back")
             tags.append("looking_back")
             hints.append(
                 "Seen from behind, shoulders and nape lead; she glances back so "
@@ -357,6 +363,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
             )
 
     if wet:
+        causes.append("wet")
         if "wet_hair" not in tags:
             tags.append("wet_skin" if not wind else "wet_hair")
         hints.append(
@@ -366,6 +373,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if sitting:
+        causes.append("sitting")
         tags.append("sitting")
         hints.append(
             "Seated weight settles through hips and thighs; cloth folds gather "
@@ -373,6 +381,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if arms_up:
+        causes.append("arms_up")
         tags.append("arms_up")
         hints.append(
             "Raised arms lift the ribcage and pull fabric taut under the arms "
@@ -380,6 +389,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if backlight:
+        causes.append("backlight")
         tags.append("backlighting")
         tags.append("rim_light")
         hints.append(
@@ -389,6 +399,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if holding:
+        causes.append("holding")
         tags.append("holding")
         hints.append(
             "Fingers wrap the held object with visible knuckles and nail edges; "
@@ -396,6 +407,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if look_down and not behind:
+        causes.append("looking_down")
         tags.append("looking_down")
         hints.append(
             "Her gaze drops; eyelids and lashes catch the light, chin tucks, "
@@ -403,6 +415,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if look_up and not behind:
+        causes.append("looking_up")
         tags.append("looking_up")
         hints.append(
             "Chin lifts and the underside of her jaw and throat open to the "
@@ -410,6 +423,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if running:
+        causes.append("running")
         tags.append("running")
         hints.append(
             "Forward motion pulls hair and hems back; one foot plants while "
@@ -417,6 +431,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if lying:
+        causes.append("lying")
         tags.append("lying")
         hints.append(
             "Body weight presses cheek or shoulder into the surface; hair "
@@ -425,6 +440,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if pockets:
+        causes.append("hands_in_pockets")
         tags.append("hands_in_pockets")
         hints.append(
             "Hands buried in pockets pull the fabric taut at the hips and "
@@ -432,6 +448,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if leaning:
+        causes.append("leaning")
         tags.append("leaning")
         hints.append(
             "Weight rests on forearms or a shoulder against the support; cloth "
@@ -439,6 +456,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if tears:
+        causes.append("tears")
         tags.append("tearing_up")
         hints.append(
             "Eyes gloss and lower lids swell; a wet track catches light on the "
@@ -446,6 +464,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if low_angle:
+        causes.append("low_angle")
         tags.append("from_below")
         hints.append(
             "Low camera emphasizes jawline, throat, and the underside of sleeves "
@@ -453,6 +472,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if high_angle:
+        causes.append("high_angle")
         tags.append("from_above")
         hints.append(
             "High camera shows the crown of her head, shoulder tops, and the "
@@ -460,6 +480,7 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if open_collar:
+        causes.append("open_collar")
         tags.append("collarbone")
         hints.append(
             "An open collar lays the collarbones and the soft hollow at her "
@@ -467,13 +488,14 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
         )
 
     if hands_face:
+        causes.append("hands_on_face")
         tags.append("covering_face")
         hints.append(
             "Hands occlude part of the face; light slips through finger gaps "
             "onto an eye or cheek while palms cast soft shadows."
         )
 
-    # Dedupe tags preserving order
+    # Dedupe tags / causes preserving order
     seen: set[str] = set()
     uniq_tags: list[str] = []
     for t in tags:
@@ -482,11 +504,19 @@ def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
             continue
         seen.add(low)
         uniq_tags.append(t)
+    seen_c: set[str] = set()
+    uniq_causes: list[str] = []
+    for c in causes:
+        if c in seen_c:
+            continue
+        seen_c.add(c)
+        uniq_causes.append(c)
 
     # Keep enough hints for densify, but cap spam in the base prose path.
     return {
         "tags": uniq_tags,
         "hints": hints[:4],
+        "causes": uniq_causes,
         "needs_dense": bool(uniq_tags or hints),
     }
 
@@ -948,6 +978,8 @@ async def rebuild_craft(
     want_dense = bool(inputs.get("enhance_quality")) or bool(
         (led.get("atmosphere") or "").strip() or (led.get("look") or "").strip()
     ) or bool(cues.get("needs_dense"))
+    densified = False
+    densify_reason = ""
     if want_dense and ollama is not None and prose:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")
@@ -956,14 +988,38 @@ async def rebuild_craft(
         )
         debug_mod.stage(session, "prose_densify", t0)
         if denser and denser != prose:
-            debug_mod.note(session, "prose_densify", detail=denser[:240])
+            densified = True
+            densify_reason = (
+                "visible_consequences" if cues.get("needs_dense")
+                else ("enhance_quality" if inputs.get("enhance_quality") else "atmosphere_or_look")
+            )
+            debug_mod.note(
+                session, "prose_densify",
+                detail=denser[:240],
+                reason=densify_reason,
+            )
             prose = denser
-    if cues.get("tags") or cues.get("hints"):
+    visible_payload = {
+        "causes": list(cues.get("causes") or [])[:12],
+        "tags": list(cues.get("tags") or [])[:20],
+        "hints": list(cues.get("hints") or [])[:4],
+        "densified": densified,
+        "densify_reason": densify_reason,
+        # Reminder for debug readers: never written back into ledger.
+        "craft_only": True,
+    }
+    if cues.get("tags") or cues.get("hints") or cues.get("causes"):
+        cause_s = ", ".join(visible_payload["causes"]) or "(none)"
+        tag_s = ", ".join(visible_payload["tags"]) or "(none)"
         debug_mod.note(
             session, "visible_consequences",
-            detail=", ".join(cues.get("tags") or [])[:120],
-            tags=list(cues.get("tags") or [])[:20],
-            hints=list(cues.get("hints") or [])[:3],
+            detail=f"causes=[{cause_s}] → tags=[{tag_s}]",
+            causes=visible_payload["causes"],
+            tags=visible_payload["tags"],
+            hints=visible_payload["hints"],
+            densified=densified,
+            densify_reason=densify_reason,
+            craft_only=True,
         )
     prompt = assemble_prompt(
         session, led,
@@ -982,6 +1038,7 @@ async def rebuild_craft(
     craft["picked_wd14"] = ", ".join(picked_wd14)
     craft["quality_tags"] = ", ".join(quality_tags)
     craft["support_tags"] = ", ".join(chosen)
+    craft["visible_consequences"] = visible_payload
     session["craft"] = craft
     session["refine_ledger"] = led
     return session
