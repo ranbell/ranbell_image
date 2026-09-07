@@ -6,6 +6,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
+import ActressDiaryModal from './muse/ActressDiaryModal.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -29,6 +30,8 @@ function toggleDebug() {
 const chatInput = ref('')
 const chatEl = ref(null)
 const preview = ref('')
+const showDiary = ref(false)
+const themeDraft = ref('')
 let es = null
 let pollTimer = null
 
@@ -53,6 +56,14 @@ const partner = computed(() => session.value?.partner_character || {})
 const standing = computed(() => session.value?.standing || [])
 const lastPitch = computed(() => session.value?.last_pitch || [])
 const bond = computed(() => session.value?.bond || {})
+const banned = computed(() => session.value?.banned || [])
+const tasteChips = computed(() => session.value?.taste_chips || [])
+const opened = computed(() => !!session.value?.opened)
+const diaryState = computed(() => session.value?.diary || {})
+const diaryDone = computed(() => diaryState.value.status === 'ok')
+const diaryWriting = computed(() => diaryState.value.status === 'writing')
+const againFeelAvailable = computed(() => !!session.value?.again_feel_available)
+const restateFields = ['wearing', 'beat', 'expression', 'scene', 'light', 'frame']
 
 async function api(path, opts = {}) {
   const resp = await fetch(path, {
@@ -155,6 +166,64 @@ async function sendPitch(opt) {
   await sendChat()
 }
 
+async function insertChip(text) {
+  chatInput.value = text
+  await sendChat()
+}
+
+async function openSession() {
+  if (!session.value?.session_id || busy.value) return
+  if (!inputs.value.character_id) {
+    fail(new Error(t('museRefine.needCharacter')))
+    return
+  }
+  busy.value = true
+  try {
+    if (themeDraft.value.trim() && themeDraft.value.trim() !== (inputs.value.theme || '')) {
+      await patchInputs({ theme: themeDraft.value.trim() })
+    }
+    session.value = await api(
+      `/api/muse-refine/sessions/${session.value.session_id}/open`,
+      { method: 'POST' },
+    )
+    await scrollChat()
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function restoreBanned(tag) {
+  if (!session.value?.session_id || busy.value) return
+  busy.value = true
+  try {
+    session.value = await api(
+      `/api/muse-refine/sessions/${session.value.session_id}/banned/restore`,
+      { method: 'POST', body: JSON.stringify({ tag }) },
+    )
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function restateField(field) {
+  if (!session.value?.session_id || busy.value) return
+  busy.value = true
+  try {
+    session.value = await api(
+      `/api/muse-refine/sessions/${session.value.session_id}/restate`,
+      { method: 'POST', body: JSON.stringify({ field }) },
+    )
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function finishSession() {
   if (!session.value?.session_id || busy.value) return
   if (!shootImages.value.length) {
@@ -174,6 +243,18 @@ async function finishSession() {
   } finally {
     busy.value = false
   }
+}
+
+function faceForRow(row) {
+  const id = row?.meta?.speaker_id
+  if (id && id === partner.value?.character_id) {
+    return partner.value?.board?.portrait || partner.value?.board?.sheet || ''
+  }
+  const c = session.value?.character || {}
+  return c.board?.portrait || c.board?.sheet || ''
+}
+function thumb(sha) {
+  return sha ? `/api/thumbnails/${sha}.webp` : ''
 }
 
 async function sendChat() {
@@ -268,6 +349,10 @@ function stopPoll() {
   }
 }
 
+watch(() => session.value?.inputs?.theme, (theme) => {
+  if (theme != null && !themeDraft.value) themeDraft.value = String(theme)
+})
+
 watch(() => props.show, async (open) => {
   if (!open) {
     closeStream()
@@ -290,10 +375,6 @@ onBeforeUnmount(() => {
   closeStream()
   stopPoll()
 })
-
-function thumb(sha) {
-  return sha ? `/api/thumbnails/${sha}.webp` : ''
-}
 
 function rowChips(row) {
   const chips = row?.meta?.chips
@@ -318,7 +399,11 @@ function rowKindLabel(row, t) {
   if (kind === 'standing') return t('museRefine.standing')
   if (kind === 'contract') return t('museRefine.contract')
   if (kind === 'wardrobe') return t('museRefine.wardrobe')
+  if (kind === 'theme') return t('museRefine.theme')
   return row.name || row.role
+}
+function isStruckRow(row) {
+  return !!(row?.meta?.struck)
 }
 </script>
 
@@ -402,6 +487,22 @@ function rowKindLabel(row, t) {
                 </select>
                 <span class="text-[10px] font-medium uppercase tracking-wide text-teal-500/80">NOW</span>
               </div>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  v-model="themeDraft"
+                  type="text"
+                  class="min-w-0 flex-1 rounded-md border border-teal-900/40 bg-teal-950/30 px-2 py-1 text-[11px] text-teal-50 outline-none focus:border-teal-600"
+                  :placeholder="t('museRefine.themePlaceholder')"
+                  :disabled="busy"
+                  @change="patchInputs({ theme: themeDraft.trim() })"
+                />
+                <button
+                  type="button"
+                  class="rounded-lg bg-rose-800/80 px-2.5 py-1 text-[11px] font-medium text-rose-50 hover:bg-rose-700 disabled:opacity-40"
+                  :disabled="busy || !inputs.character_id"
+                  @click="openSession"
+                >{{ opened ? t('museRefine.reopen') : t('museRefine.open') }}</button>
+              </div>
               <p class="mt-1 text-[11px] leading-snug text-teal-100/80">
                 {{ craft.now || t('museRefine.nowEmpty') }}
               </p>
@@ -416,30 +517,45 @@ function rowKindLabel(row, t) {
                 v-for="(row, i) in chat"
                 :key="i"
                 class="rounded-lg px-2.5 py-2"
-                :class="row.role === 'user'
-                  ? 'bg-teal-950/40 text-teal-50'
-                  : isBanterRow(row)
-                    ? 'ml-4 border border-dashed border-pink-400/45 bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30 text-[11px] italic text-pink-200/95'
-                    : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
-                    ? 'border border-emerald-800/40 bg-emerald-950/25 text-emerald-50'
-                    : row.meta?.kind === 'verify_repair'
-                      ? 'border border-orange-800/40 bg-orange-950/25 text-orange-50'
-                      : isChangeRow(row)
-                    ? (row.meta?.kind === 'ledger_missed'
-                      ? 'border border-amber-700/50 bg-amber-950/30 text-[11px] text-amber-100'
-                      : 'border border-teal-800/40 bg-teal-950/20 text-[11px] text-teal-100')
-                    : row.role === 'system'
-                      ? 'bg-gray-900/80 text-[11px] text-gray-400'
-                      : 'bg-gray-900 text-gray-100'"
+                :class="[
+                  row.role === 'user'
+                    ? (isStruckRow(row)
+                      ? 'bg-gray-900/50 text-gray-500 line-through decoration-amber-700/80'
+                      : 'bg-teal-950/40 text-teal-50')
+                    : isBanterRow(row)
+                      ? 'ml-4 border border-dashed border-pink-400/45 bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30 text-[11px] italic text-pink-200/95'
+                      : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
+                      ? 'border border-emerald-800/40 bg-emerald-950/25 text-emerald-50'
+                      : row.meta?.kind === 'verify_repair'
+                        ? 'border border-orange-800/40 bg-orange-950/25 text-orange-50'
+                        : isChangeRow(row)
+                      ? (row.meta?.kind === 'ledger_missed'
+                        ? 'border border-amber-700/50 bg-amber-950/30 text-[11px] text-amber-100'
+                        : 'border border-teal-800/40 bg-teal-950/20 text-[11px] text-teal-100')
+                      : row.role === 'system'
+                        ? 'bg-gray-900/80 text-[11px] text-gray-400'
+                        : 'bg-gray-900 text-gray-100',
+                ]"
               >
                 <div class="mb-0.5 flex flex-wrap items-center gap-1.5">
+                  <img
+                    v-if="row.role === 'assistant' && faceForRow(row)"
+                    :src="thumb(faceForRow(row))"
+                    class="h-5 w-5 rounded-full object-cover"
+                    alt=""
+                  />
                   <span
                     class="text-[10px] uppercase tracking-wide"
                     :class="isBanterRow(row) ? 'text-pink-300/90 font-medium' : 'text-gray-500'"
                   >
                     <template v-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
+                    <template v-else-if="row.meta?.speaker">{{ row.name }} · {{ row.meta.speaker }}</template>
                     <template v-else>{{ rowKindLabel(row, t) }}</template>
                   </span>
+                  <span
+                    v-if="isStruckRow(row)"
+                    class="rounded-full border border-amber-700/50 bg-amber-950/40 px-1.5 py-0.5 text-[10px] text-amber-200"
+                  >{{ t('museRefine.struck') }}</span>
                   <span
                     v-for="chip in rowChips(row)"
                     :key="chip.key"
@@ -465,7 +581,22 @@ function rowKindLabel(row, t) {
             </div>
 
             <form class="flex flex-col gap-2 border-t border-teal-950/40 p-3" @submit.prevent="sendChat">
-              <div v-if="lastPitch.length" class="flex flex-wrap gap-1.5">
+              <div v-if="tasteChips.length || againFeelAvailable || lastPitch.length" class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="chip in tasteChips"
+                  :key="`taste-${chip}`"
+                  type="button"
+                  class="rounded-full border border-sky-800/50 bg-sky-950/40 px-2.5 py-1 text-[11px] text-sky-100 hover:bg-sky-900/50"
+                  :disabled="busy"
+                  @click="insertChip(chip)"
+                >{{ chip }}</button>
+                <button
+                  v-if="againFeelAvailable"
+                  type="button"
+                  class="rounded-full border border-rose-800/50 bg-rose-950/40 px-2.5 py-1 text-[11px] text-rose-100 hover:bg-rose-900/50"
+                  :disabled="busy"
+                  @click="insertChip(t('museRefine.againFeelSend'))"
+                >{{ t('museRefine.againFeel') }}</button>
                 <button
                   v-for="opt in lastPitch"
                   :key="opt"
@@ -514,6 +645,31 @@ function rowKindLabel(row, t) {
                 <ul class="space-y-0.5 text-[11px] text-amber-100/80">
                   <li v-for="(s, i) in standing" :key="i">· {{ s }}</li>
                 </ul>
+              </div>
+              <div v-if="banned.length" class="mt-2 border-t border-teal-950/40 pt-2">
+                <div class="mb-1 text-[10px] uppercase tracking-wide text-red-200/70">{{ t('museRefine.banned') }}</div>
+                <div class="flex flex-wrap gap-1">
+                  <button
+                    v-for="tag in banned"
+                    :key="tag"
+                    type="button"
+                    class="rounded-full border border-red-800/50 bg-red-950/40 px-2 py-0.5 text-[10px] text-red-100 hover:bg-red-900/50"
+                    :disabled="busy"
+                    :title="t('museRefine.restoreBanned')"
+                    @click="restoreBanned(tag)"
+                  >✕ {{ tag }}</button>
+                </div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1 border-t border-teal-950/40 pt-2">
+                <span class="w-full text-[10px] text-gray-500">{{ t('museRefine.restate') }}</span>
+                <button
+                  v-for="f in restateFields"
+                  :key="f"
+                  type="button"
+                  class="rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 text-[10px] text-gray-300 hover:border-teal-700"
+                  :disabled="busy"
+                  @click="restateField(f)"
+                >{{ f }}</button>
               </div>
             </div>
 
@@ -595,9 +751,15 @@ function rowKindLabel(row, t) {
               <button
                 type="button"
                 class="rounded-lg bg-rose-900/70 px-3 py-2 text-xs font-medium hover:bg-rose-800 disabled:opacity-40"
-                :disabled="busy || !shootImages.length"
+                :disabled="busy || !shootImages.length || diaryWriting"
                 @click="finishSession"
-              >{{ t('museRefine.finish') }}</button>
+              >{{ diaryWriting ? t('museRefine.diaryWriting') : diaryDone ? t('museRefine.diaryDone') : t('museRefine.finish') }}</button>
+              <button
+                v-if="diaryDone && inputs.character_id"
+                type="button"
+                class="rounded-lg bg-pink-900/70 px-3 py-2 text-xs font-medium hover:bg-pink-800"
+                @click="showDiary = true"
+              >{{ t('museRefine.openDiary') }}</button>
             </div>
             <p v-if="craft.prompt && !boardReady" class="text-[10px] text-gray-500">
               {{ t('museRefine.approveNeedsBoard') }}
@@ -703,4 +865,13 @@ function rowKindLabel(row, t) {
       </div>
     </div>
   </Teleport>
+
+  <ActressDiaryModal
+    v-if="showDiary && inputs.character_id"
+    :show="showDiary"
+    :character-id="inputs.character_id"
+    :character-name="session?.character?.name || ''"
+    @close="showDiary = false"
+    @toast="emit('toast', $event)"
+  />
 </template>

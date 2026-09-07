@@ -155,6 +155,53 @@ async def pick_partner(session_id: str, body: PartnerPick, request: Request):
     return service.public_view(session)
 
 
+class RestoreBody(BaseModel):
+    tag: str
+
+
+class RestateBody(BaseModel):
+    field: str
+
+
+@router.post("/sessions/{session_id}/open")
+async def open_session(session_id: str, request: Request):
+    """Opening beat — she speaks first (theme / reunion / dress)."""
+    session = await _session(request, session_id)
+    try:
+        session = await service.open_session(
+            _db(request), _ollama(request), session,
+        )
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
+@router.post("/sessions/{session_id}/banned/restore")
+async def restore_banned(session_id: str, body: RestoreBody, request: Request):
+    session = await _session(request, session_id)
+    try:
+        session = service.restore_banned(session, body.tag)
+        from ..muse import session_db
+        from . import assemble
+        session = await assemble.rebuild_craft(_db(request), _ollama(request), session)
+        await session_db.save(_db(request), session)
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
+@router.post("/sessions/{session_id}/restate")
+async def restate(session_id: str, body: RestateBody, request: Request):
+    session = await _session(request, session_id)
+    try:
+        session = await service.restate_field(
+            _db(request), _ollama(request), session, body.field,
+        )
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
 @router.put("/sessions/{session_id}/standing")
 async def put_standing(session_id: str, body: StandingBody, request: Request):
     session = await _session(request, session_id)

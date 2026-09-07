@@ -195,12 +195,21 @@ def actress_system(
 
     mem = memory_prompt_blocks(session)
     vit = vitality_extras(session, ledger)
+    opening = ""
+    if str(session.get("scripter_intent") or "") == "casual" or not session.get("opened"):
+        opening = (
+            "OPENING / CASUAL TURN: greet through body-feel and voice. "
+            "Do not invent a full shot briefing. Soft-miss past detail you lack. "
+            "Omit PROPOSE unless they already named a picture change. "
+            "If REUNION is set, that beats a stock hello."
+        )
     parts = [
         base,
         ENTERTAINMENT_CRAFT,
         REFINE_OUTPUT,
         mem,
         vit,
+        opening,
         "SHOT TRUTH FOR THIS STUDIO (absolute — overrides chat vibes):\n"
         f"LEDGER:\n{ledger}\nNOW:\n{now}\n"
         "SAY may confirm these in her words. ASIDE must not inventory them. "

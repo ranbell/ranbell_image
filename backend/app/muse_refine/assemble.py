@@ -13,6 +13,7 @@ from typing import Any, Iterable
 from ..muse import identity
 from . import debug as debug_mod
 from . import ledger as ledger_mod
+from . import talk
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ def assemble_prompt(
     partner = session.get("partner_character") or {}
     identity_tags = list(char.get("identity_tags") or [])
     bag = ledger_tag_bag(ledger)
+    bag = talk.filter_banned_tags(session, bag)
     if partner and str(partner.get("character_id") or "").strip():
         # W-Muse: keep both girls visible without dumping partner wardrobe into lead.
         if not any(t.lower() in {"2girls", "multiple_girls"} for t in identity_tags + bag):
@@ -274,7 +276,7 @@ async def rebuild_craft(
             tags=wd14[:40],
         )
 
-    base_bag = ledger_tag_bag(led)
+    base_bag = talk.filter_banned_tags(session, ledger_tag_bag(led))
     if bool(inputs.get("enhance_quality")) and ollama is not None:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")

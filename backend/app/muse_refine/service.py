@@ -10,7 +10,7 @@ from ..characters import presets as presets_db
 from ..muse import events, session_db, vitality
 from ..muse.defaults import ALL_DEFAULTS
 from ..muse.notebook import blank as notebook_blank
-from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, writer
+from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, talk, writer
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,14 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "pending": bool(shoot.get("pending")),
         },
         "diary": session.get("diary") or {},
+        "opened": bool(session.get("opened")),
+        "banned": list(session.get("banned") or [])[-20:],
+        "struck": list(session.get("struck") or [])[-20:],
+        "taste_chips": vitality.taste_chips(
+            session.get("showrunner_taste") or {},
+            locale=str(inputs.get("locale") or "ja"),
+        ),
+        "again_feel_available": bool(vitality.again_that_feel_hint(session)),
         # Observability only — UI debug pane. Never used for decisions.
         "refine_log": list(session.get("refine_log") or [])[-40:],
         "stage_ms": list(session.get("stage_ms") or [])[-20:],
@@ -161,6 +169,12 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "reunion_turn": False,
         "commit_pitch": False,
         "talk_turn_count": 0,
+        "shot_compile_count": 0,
+        "opened": False,
+        "showrunner_taste": {},
+        "again_feel_hint": "",
+        "cleanup_nudge": False,
+        "w_b_leads": False,
         "refine_log": [],
         "stage_ms": [],
         "turn_trace": [],
@@ -199,13 +213,14 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
     preset = await presets_db.get_preset(db, character_id)
     if preset is None:
         raise RefineError("character not found")
-    session["character"] = {
+    char = {
         **presets_db.preset_to_character(preset),
         "character_id": character_id,
         "board": preset.get("board") or {},
         "name": preset.get("name") or "",
         "name_ja": preset.get("name_ja") or preset.get("name") or "",
     }
+    session["character"] = char
     session["inputs"] = {**_inputs(session), "character_id": character_id}
     # Seed wearing from preset costume if ledger empty.
     led = dict(session.get("refine_ledger") or ledger_mod.blank())
@@ -271,6 +286,135 @@ def set_standing(session: dict[str, Any], rules: list[str]) -> dict[str, Any]:
     return session
 
 
+def restore_banned(session: dict[str, Any], tag: str) -> dict[str, Any]:
+    if not talk.restore_tag(session, tag):
+        raise RefineError("tag not in banned list")
+    return session
+
+
+async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """She speaks first — theme + reunion + signature dress. Idempotent-ish."""
+    import time
+
+    char = session.get("character") or {}
+    if not str(char.get("character_id") or "").strip():
+        raise RefineError("character required")
+    inputs = _inputs(session)
+    locale = str(inputs.get("locale") or "ja")
+    model = str(inputs.get("model") or "")
+    name = char.get("name_ja") or char.get("name") or "Muse"
+    theme = str(inputs.get("theme") or "").strip()
+
+    # Fresh open clears chat for a real first beat.
+    session["chat"] = []
+    session["board"] = {}
+    session["shoot"] = {}
+    session["status"] = "chat"
+    session["banned"] = list(session.get("banned") or [])
+    session["struck"] = list(session.get("struck") or [])
+
+    await persona.load_memory(db, session)
+    persona.mark_reunion(session)
+    dress_patch = talk.dress_from_signature(session)
+    if dress_patch:
+        debug_mod.note(session, "opening_dress", detail=str(dress_patch), patch=dress_patch)
+
+    session["again_feel_hint"] = vitality.again_that_feel_hint(session)
+    talk.prepare_vitality_flags(session, user_line="")
+    # Opening: B does not steal the first hello unless W and turn says so.
+    session["w_b_leads"] = False
+
+    await assemble.rebuild_craft(db, ollama, session)
+    now = str((session.get("craft") or {}).get("now") or "")
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+
+    if theme:
+        _append_chat(
+            session,
+            role="system",
+            name="Theme",
+            text=theme,
+            meta={"kind": "theme"},
+        )
+
+    # Casual opening — greet / reunion; do not invent a full shot briefing.
+    session["scripter_intent"] = "casual"
+    open_line = (
+        theme
+        if theme else
+        (
+            "（開幕）総監督が来た。挨拶して。画の説明はまだしない。"
+            if locale.startswith("ja") else
+            "(opening) The Showrunner just arrived. Greet them. Do not brief the shot yet."
+        )
+    )
+    t0 = time.monotonic()
+    actress = await writer.actress_turn(
+        ollama,
+        model=model,
+        locale=locale,
+        name=name,
+        now=now,
+        ledger=led,
+        identity_blurb=_identity_blurb(session),
+        user_line=open_line,
+        director_tail=f"Theme: {theme}" if theme else "(opening)",
+        session=session,
+        character=char,
+    )
+    debug_mod.stage(session, "open_actress", t0)
+    talk.publish_actress_turn(
+        session, actress, locale=locale, lead_name=name,
+    )
+    if session.get("caught"):
+        await persona.consume_caught(db, session)
+    if session.get("reunion_turn"):
+        persona.clear_reunion(session)
+    talk.clear_turn_flags(session)
+    session["opened"] = True
+    session["status"] = "chat"
+    await session_db.save(db, session)
+    return session
+
+
+async def restate_field(
+    db, ollama, session: dict[str, Any], field: str,
+) -> dict[str, Any]:
+    """Absolute one-field readout from director lines (escape hatch)."""
+    field = str(field or "").strip()
+    if field not in talk.RESTATE_FIELDS:
+        raise RefineError(f"unknown field: {field}")
+    inputs = _inputs(session)
+    model = str(inputs.get("model") or "")
+    locale = str(inputs.get("locale") or "ja")
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    recent = _director_tail(session, n=12)
+    prompt = (
+        f"Restate ONLY the ledger field `{field}` as an absolute English phrase "
+        f"from the director lines. Output ONLY JSON: {{\"{field}\": \"...\"}}.\n"
+        f"Current value: {led.get(field) or '(empty)'}\n\n"
+        f"DIRECTOR LINES:\n{recent or '(none)'}\n"
+    )
+    try:
+        raw = await ollama.generate_text(prompt, model=model or None)
+    except Exception as exc:
+        raise RefineError("restate failed") from exc
+    from .writer import _extract_json_object
+    patch = ledger_mod.normalize_patch(_extract_json_object(raw))
+    if field not in patch or not patch.get(field):
+        raise RefineError("restate returned empty")
+    before = dict(led)
+    led = ledger_mod.apply_patch(led, {field: patch[field]})
+    session["refine_ledger"] = led
+    _change_event(
+        session, source="restate", patch={field: patch[field]},
+        before=before, after=led, locale=locale,
+    )
+    await assemble.rebuild_craft(db, ollama, session)
+    await session_db.save(db, session)
+    return session
+
+
 def _append_chat(
     session: dict[str, Any],
     *,
@@ -307,7 +451,7 @@ def _director_tail(session: dict[str, Any], n: int = 8) -> str:
     """Director lines only — never Muse SAY (avoids outfit smuggling)."""
     rows = [
         r for r in (session.get("chat") or [])
-        if r.get("role") == "user"
+        if r.get("role") == "user" and not (r.get("meta") or {}).get("struck")
     ][-n:]
     return "\n".join(f"Director: {r.get('text') or ''}" for r in rows)
 
@@ -412,7 +556,7 @@ async def chat(
         return session
 
     session["commit_pitch"] = persona.is_commit_pitch(text)
-    vitality.bump_talk_turn(session)
+    talk.prepare_vitality_flags(session, user_line=text)
 
     _append_chat(session, role="user", name="Director", text=text)
     events.publish(session["session_id"], {"type": "chat", "role": "user", "text": text})
@@ -427,6 +571,7 @@ async def chat(
             if ja else
             "…I don't think we can take that on this set."
         )
+        talk.strike_last_user(session, why=str(blocked))
         _append_chat(
             session, role="assistant", name=name, text=soft,
             meta={"kind": "contract", "blocked": blocked},
@@ -478,8 +623,13 @@ async def chat(
 
     missed = False
     if ledger_mod.touched_picture(patch):
+        # wearing_drop → soft ban so assemble won't resurrect it.
+        drop = str(patch.get("wearing_drop") or "").strip()
+        if drop:
+            talk.ban_tag(session, drop)
         led = ledger_mod.apply_patch(led, patch)
         session["refine_ledger"] = led
+        talk.note_picture_compile(session)
         _change_event(
             session,
             source="director",
@@ -562,39 +712,9 @@ async def chat(
         my_feel=my_feel,
         pitch=pitch,
     )
-    if my_feel:
-        persona.log_feel(session, my_feel)
-    _append_chat(
-        session, role="assistant", name=name, text=say,
-        meta={"kind": "say", "my_feel": my_feel or None},
+    talk.publish_actress_turn(
+        session, actress, locale=locale, lead_name=name,
     )
-    events.publish(session["session_id"], {
-        "type": "chat", "role": "assistant", "name": name, "text": say,
-    })
-    if aside:
-        _append_chat(
-            session,
-            role="assistant",
-            name=name,
-            text=aside,
-            meta={"kind": "banter"},
-        )
-        events.publish(session["session_id"], {
-            "type": "chat", "role": "assistant", "name": name,
-            "text": aside, "kind": "banter",
-        })
-        debug_mod.note(session, "aside", detail=aside[:240])
-
-    pitch_opts = persona.parse_pitch_options(pitch)
-    if pitch_opts:
-        session["last_pitch"] = pitch_opts
-        _append_chat(
-            session,
-            role="assistant",
-            name=name,
-            text=" ｜ ".join(pitch_opts) if locale.startswith("ja") else " | ".join(pitch_opts),
-            meta={"kind": "pitch", "options": pitch_opts},
-        )
 
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)
@@ -634,7 +754,7 @@ async def chat(
         await persona.consume_caught(db, session)
     if session.get("reunion_turn"):
         persona.clear_reunion(session)
-    session["commit_pitch"] = False
+    talk.clear_turn_flags(session)
 
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     now = str((session.get("craft") or {}).get("now") or "")
