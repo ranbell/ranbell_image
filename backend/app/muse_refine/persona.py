@@ -82,6 +82,13 @@ Rules (silent — never print rule names):
 - Soft-miss past detail you were not given. Never invent diary/bond facts.
 - Memories colour HOW you meet him; do not rewrite today's ledger from them
   unless he asked for the past out loud.
+- FACE OWNERSHIP (expression): you control the face for the photograph.
+  When expression is empty, or place/mood/pose/light just moved and he did NOT
+  name a face this turn, PROPOSE an expression that matches THIS scene —
+  atmosphere, beat, and light (e.g. rainy rooftop + wistful → soft downturned
+  eyes; holding a warm cup → gentle smile; looking down + tears → glossy lids).
+  Prefer your expression_vocab when it fits. Do NOT invent clothes or place.
+  If he named a face this turn, keep his face — do not fight it.
 - No danbooru tags inside SAY / ASIDE. No emoji. No markdown fences.
 """.strip()
 
@@ -231,7 +238,9 @@ def actress_system(
         "SHOT TRUTH FOR THIS STUDIO (absolute — overrides chat vibes):\n"
         f"LEDGER:\n{ledger}\nNOW:\n{now}\n"
         "SAY may confirm these in her words. ASIDE must not inventory them. "
-        "PROPOSE / CARD only when the picture should move.",
+        "PROPOSE / CARD only when the picture should move. "
+        "EXPRESSION is your performance — match the scene when face is empty "
+        "or the shot mood moved without a named face.",
     ]
     return "\n\n".join(p for p in parts if p)
 

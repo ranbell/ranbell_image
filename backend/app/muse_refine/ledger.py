@@ -165,16 +165,22 @@ def guard_muse_propose(
 ) -> dict[str, str]:
     """Classic Muse fold spirit: actress does not overwrite a settled shot.
 
-    Director patches are already applied before muse runs. Muse may only
-    **fill empty** ledger slots (e.g. missing beat_b). Sticky axes are stripped
-    elsewhere. ``director_keys`` is accepted for call-site clarity but does not
-    grant overwrite — granting it let muse replace the director's wearing with
-    a different garment on the same turn (verified in simulation).
+    Director patches are already applied before muse runs. Muse may **fill empty**
+    ledger slots (e.g. missing beat_b). Clothes / place / camera stay fill-empty
+    only — ``director_keys`` never grants overwrite there (verified: muse used to
+    replace the director's wearing on the same turn).
+
+    Exception — **expression** (performance / face):
+    The actress owns the face for the photograph when the director did not name
+    a face this turn. She may fill an empty expression always, and may refresh a
+    settled face when scene-ish axes just moved (scene / atmosphere / beat /
+    light / frame / bg) so the expression can track the shot.
     """
-    del director_keys  # no overwrite privilege
     raw = dict(patch or {})
     if not raw:
         return {}
+    dir_keys = set(director_keys or ())
+    scene_moved = bool(dir_keys & {"scene", "atmosphere", "beat", "light", "frame", "bg"})
     cur = {**blank(), **(ledger or {})}
     out: dict[str, str] = {}
     for key, val in raw.items():
@@ -183,8 +189,14 @@ def guard_muse_propose(
         text = str(val or "").strip()
         if not text:
             continue
-        if not str(cur.get(key) or "").strip():
+        cur_val = str(cur.get(key) or "").strip()
+        if not cur_val:
             out[key] = text
+            continue
+        # Performance axis: scene-matched face when director left face alone.
+        if key == "expression" and "expression" not in dir_keys and scene_moved:
+            if text.lower() != cur_val.lower():
+                out[key] = text
     return out
 
 

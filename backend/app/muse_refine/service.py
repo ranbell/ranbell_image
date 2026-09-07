@@ -775,13 +775,35 @@ async def chat(
         session, actress, locale=locale, lead_name=name,
     )
 
-    # Muse propose: sticky blocked; settled clothes/place not overwritten
-    # (classic Muse fold only fills empty beat — same spirit).
+    # Muse propose: clothes/place fill-empty only; expression may refresh when
+    # scene-ish axes moved and the director did not name a face this turn.
+    raw_propose = dict(propose or {})
     propose = ledger_mod.scrub_patch(propose, led, allow_clear=set())
     propose = ledger_mod.guard_sticky_writes(propose, allowed=set())
+    director_keys = set(patch.keys()) | director_sticky
     propose = ledger_mod.guard_muse_propose(
-        propose, led, director_keys=set(patch.keys()) | director_sticky,
+        propose, led, director_keys=director_keys,
     )
+    dropped_face = ""
+    if str(raw_propose.get("expression") or "").strip():
+        kept = str(propose.get("expression") or "").strip()
+        wanted = str(raw_propose.get("expression") or "").strip()
+        if wanted and not kept and wanted.lower() != str(led.get("expression") or "").strip().lower():
+            dropped_face = wanted
+    if "expression" in propose or dropped_face:
+        debug_mod.note(
+            session, "actress_expression",
+            detail=(
+                f"accepted={propose.get('expression') or '∅'}"
+                + (f"; dropped={dropped_face}" if dropped_face else "")
+            ),
+            accepted=str(propose.get("expression") or ""),
+            dropped=dropped_face,
+            director_named_face=("expression" in director_keys),
+            scene_moved=bool(
+                director_keys & {"scene", "atmosphere", "beat", "light", "frame", "bg"}
+            ),
+        )
 
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)

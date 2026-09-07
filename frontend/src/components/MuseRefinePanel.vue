@@ -1399,6 +1399,16 @@ function isStruckRow(row) {
                       v-if="row.kind === 'visible_consequences' && (row.tags || []).length"
                       class="pl-2 text-emerald-200/80"
                     >tags: {{ (row.tags || []).join(', ') }}</div>
+                    <div
+                      v-if="row.kind === 'actress_expression'"
+                      class="pl-2 text-fuchsia-200/85"
+                    >
+                      face:
+                      <span v-if="row.accepted" class="text-emerald-200/90">✓ {{ row.accepted }}</span>
+                      <span v-else-if="row.dropped" class="text-rose-200/80">✗ {{ row.dropped }}</span>
+                      <span v-if="row.director_named_face" class="text-amber-100/50"> · director face</span>
+                      <span v-else-if="row.scene_moved" class="text-amber-100/50"> · scene moved</span>
+                    </div>
                   </li>
                 </ul>
               </div>

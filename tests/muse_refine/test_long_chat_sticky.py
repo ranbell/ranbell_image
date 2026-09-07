@@ -174,6 +174,50 @@ def test_guard_muse_propose_never_overwrites_director_same_turn():
     assert guarded == {}
 
 
+def test_guard_muse_propose_expression_fill_empty():
+    led = _base_led()
+    led = ledger.apply_patch(led, {"expression": ""})
+    guarded = ledger.guard_muse_propose(
+        {"expression": "wistful soft eyes"},
+        led,
+        director_keys={"scene", "atmosphere"},
+    )
+    assert guarded.get("expression") == "wistful soft eyes"
+
+
+def test_guard_muse_propose_expression_refreshes_when_scene_moves():
+    """Actress owns face when mood/place moved and director did not name face."""
+    led = _base_led()  # expression = gentle smile
+    guarded = ledger.guard_muse_propose(
+        {"expression": "wistful downturned eyes"},
+        led,
+        director_keys={"atmosphere", "scene"},
+    )
+    assert guarded.get("expression") == "wistful downturned eyes"
+
+
+def test_guard_muse_propose_expression_keeps_director_named_face():
+    led = _base_led()
+    led = ledger.apply_patch(led, {"expression": "angry glare"})
+    guarded = ledger.guard_muse_propose(
+        {"expression": "cute smile"},
+        led,
+        director_keys={"expression", "beat"},
+    )
+    assert "expression" not in guarded
+
+
+def test_guard_muse_propose_expression_no_refresh_on_banter():
+    """Settled face stays when director did not move scene-ish axes."""
+    led = _base_led()
+    guarded = ledger.guard_muse_propose(
+        {"expression": "teasing grin"},
+        led,
+        director_keys=set(),
+    )
+    assert "expression" not in guarded
+
+
 def test_look_reset_keeps_atmosphere():
     led = _base_led()
     cue = talk.cue_atmosphere_look("画風リセット")
