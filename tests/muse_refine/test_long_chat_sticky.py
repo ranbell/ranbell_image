@@ -162,15 +162,16 @@ def test_guard_muse_propose_fill_empty_only():
     assert guarded.get("beat_b") == "standing aside"  # was empty
 
 
-def test_guard_muse_propose_reinforces_director():
+def test_guard_muse_propose_never_overwrites_director_same_turn():
+    """Regression: director_keys must NOT let muse replace red dress with armor."""
     led = _base_led()
+    led = ledger.apply_patch(led, {"wearing": "red dress"})
     guarded = ledger.guard_muse_propose(
-        {"wearing": "red dress", "scene": "rooftop"},
+        {"wearing": "black armor", "scene": "mars"},
         led,
-        director_keys={"wearing"},
+        director_keys={"wearing", "scene"},
     )
-    assert guarded["wearing"] == "red dress"
-    assert "scene" not in guarded  # settled, director did not touch
+    assert guarded == {}
 
 
 def test_look_reset_keeps_atmosphere():

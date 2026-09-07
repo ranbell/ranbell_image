@@ -165,24 +165,23 @@ def guard_muse_propose(
 ) -> dict[str, str]:
     """Classic Muse fold spirit: actress does not overwrite a settled shot.
 
-    - Sticky axes never come from muse (use ``guard_sticky_writes`` first).
-    - Non-sticky: fill **empty** ledger slots only, or reinforce keys the
-      director already touched this turn. Never clobber settled wearing/scene.
+    Director patches are already applied before muse runs. Muse may only
+    **fill empty** ledger slots (e.g. missing beat_b). Sticky axes are stripped
+    elsewhere. ``director_keys`` is accepted for call-site clarity but does not
+    grant overwrite — granting it let muse replace the director's wearing with
+    a different garment on the same turn (verified in simulation).
     """
+    del director_keys  # no overwrite privilege
     raw = dict(patch or {})
     if not raw:
         return {}
     cur = {**blank(), **(ledger or {})}
-    touched = set(director_keys or ())
     out: dict[str, str] = {}
     for key, val in raw.items():
         if key in STICKY_KEYS or key == "wearing_drop":
             continue
         text = str(val or "").strip()
         if not text:
-            continue
-        if key in touched:
-            out[key] = text
             continue
         if not str(cur.get(key) or "").strip():
             out[key] = text
