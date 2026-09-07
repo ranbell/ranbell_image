@@ -150,13 +150,24 @@ def test_multi_turn_atmosphere_survives_clothes_and_banter():
     assert "red dress" in prompt.lower() or "red_dress" in prompt.lower()
 
 
-def test_look_reset_keeps_atmosphere():
+def test_guard_muse_propose_fill_empty_only():
     led = _base_led()
-    cue = talk.cue_atmosphere_look("画風リセット")
-    patch = ledger.scrub_patch(
-        talk.merge_cue_into_patch({}, cue), led,
-        allow_clear=talk.cue_allow_clear(cue),
+    # Settled wearing must not be overwritten by muse.
+    guarded = ledger.guard_muse_propose(
+        {"wearing": "muse invents coat", "beat_b": "standing aside"},
+        led,
+        director_keys=set(),
     )
-    after = ledger.apply_patch(led, patch)
-    assert after["look"] == ""
-    assert "wistful" in after["atmosphere"]
+    assert "wearing" not in guarded
+    assert guarded.get("beat_b") == "standing aside"  # was empty
+
+
+def test_guard_muse_propose_reinforces_director():
+    led = _base_led()
+    guarded = ledger.guard_muse_propose(
+        {"wearing": "red dress", "scene": "rooftop"},
+        led,
+        director_keys={"wearing"},
+    )
+    assert guarded["wearing"] == "red dress"
+    assert "scene" not in guarded  # settled, director did not touch

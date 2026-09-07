@@ -88,7 +88,8 @@ Rules (silent — never print rule names):
 _CARD_FIELD_MAP = {
     "PLACE": "scene",
     "SCENE": "scene",
-    "HOUR": "light",
+    # HOUR is intentionally omitted — classic Muse keeps time inside scene;
+    # mapping HOUR→light hijacked the lighting axis.
     "LIGHT": "light",
     "WEARING": "wearing",
     "BEAT": "beat",
@@ -108,7 +109,7 @@ _CARD_FIELD_MAP = {
 }
 
 _CARD_LINE_RE = re.compile(
-    r"(?im)^\s*(PLACE|SCENE|HOUR|LIGHT|WEARING_B|WEARING|BEAT_B|BEAT|"
+    r"(?im)^\s*(PLACE|SCENE|LIGHT|WEARING_B|WEARING|BEAT_B|BEAT|"
     r"EXPRESSION|FACE|FRAME|BG|BACKGROUND|LETTERING|TEXT|"
     r"ATMOSPHERE|MOOD|LOOK|STYLE)\s*[:：]\s*(.+?)\s*$"
 )
@@ -295,9 +296,6 @@ def card_to_patch(card: str) -> dict[str, str]:
         key = _CARD_FIELD_MAP.get(m.group(1).upper())
         val = (m.group(2) or "").strip()
         if key and val and val.lower() not in {"(empty)", "empty", "-", "—"}:
-            # HOUR alone is weak as light — prefix softly.
-            if m.group(1).upper() == "HOUR" and key == "light":
-                val = f"{val} light" if "light" not in val.lower() else val
             out[key] = val
     return out
 

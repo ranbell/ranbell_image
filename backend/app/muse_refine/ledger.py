@@ -157,6 +157,38 @@ def guard_sticky_writes(
     return out
 
 
+def guard_muse_propose(
+    patch: dict[str, str] | None,
+    ledger: dict[str, str] | None,
+    *,
+    director_keys: set[str] | frozenset[str] | None = None,
+) -> dict[str, str]:
+    """Classic Muse fold spirit: actress does not overwrite a settled shot.
+
+    - Sticky axes never come from muse (use ``guard_sticky_writes`` first).
+    - Non-sticky: fill **empty** ledger slots only, or reinforce keys the
+      director already touched this turn. Never clobber settled wearing/scene.
+    """
+    raw = dict(patch or {})
+    if not raw:
+        return {}
+    cur = {**blank(), **(ledger or {})}
+    touched = set(director_keys or ())
+    out: dict[str, str] = {}
+    for key, val in raw.items():
+        if key in STICKY_KEYS or key == "wearing_drop":
+            continue
+        text = str(val or "").strip()
+        if not text:
+            continue
+        if key in touched:
+            out[key] = text
+            continue
+        if not str(cur.get(key) or "").strip():
+            out[key] = text
+    return out
+
+
 def changed_fields(before: dict[str, str], after: dict[str, str]) -> list[str]:
     out: list[str] = []
     for key in LEDGER_KEYS:
@@ -218,6 +250,8 @@ def now_line(ledger: dict[str, str], *, locale: str = "ja") -> str:
             bits.append(f"雰囲気: {atm}")
         if look := (ledger.get("look") or "").strip():
             bits.append(f"画風: {look}")
+        if letter := (ledger.get("lettering") or "").strip():
+            bits.append(f"文字: {letter}")
         return " / ".join(bits) if bits else "（まだ画は決まっていない）"
     if wearing:
         bits.append(f"wearing {wearing}")
@@ -237,6 +271,8 @@ def now_line(ledger: dict[str, str], *, locale: str = "ja") -> str:
         bits.append(f"mood {atm}")
     if look := (ledger.get("look") or "").strip():
         bits.append(f"look {look}")
+    if letter := (ledger.get("lettering") or "").strip():
+        bits.append(f'lettering "{letter}"')
     return "; ".join(bits) if bits else "(shot not set yet)"
 
 
