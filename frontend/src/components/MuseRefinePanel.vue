@@ -815,6 +815,44 @@ function isStruckRow(row) {
                   @click="sendPitch(opt)"
                 >「{{ opt }}」</button>
               </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-lg border border-pink-500/40 bg-pink-950/40 px-2.5 py-1.5 text-[10px] font-medium text-pink-100 hover:bg-pink-900/50 disabled:opacity-40"
+                  :disabled="busy || comfyOffline || !craft.prompt"
+                  :title="craft.prompt ? t('museRefine.boardTitle') : t('museRefine.prepFirst')"
+                  @click="runStage('board')"
+                >{{ t('museRefine.board') }}</button>
+                <button
+                  type="button"
+                  class="rounded-lg border border-amber-500/50 bg-amber-950/40 px-2.5 py-1.5 text-[10px] font-medium text-amber-200 hover:bg-amber-900/60 disabled:opacity-40"
+                  :disabled="busy || comfyOffline || !craft.prompt || !boardReady"
+                  :title="boardReady ? t('museRefine.approveTitle') : t('museRefine.approveNeedsBoard')"
+                  @click="runStage('approve')"
+                >{{ t('museRefine.approve') }}</button>
+                <button
+                  type="button"
+                  class="rounded-lg border border-slate-600/50 bg-slate-900/60 px-2.5 py-1.5 text-[10px] text-gray-300 hover:bg-slate-800 disabled:opacity-40"
+                  :disabled="busy || !inputs.character_id"
+                  @click="runStage('wardrobe')"
+                >{{ t('museRefine.wardrobe') }}</button>
+                <button
+                  type="button"
+                  class="ml-auto rounded-lg border border-rose-500/50 bg-rose-950/40 px-2.5 py-1.5 text-[10px] font-medium text-rose-200 hover:bg-rose-900/60 disabled:opacity-40"
+                  :disabled="busy || !shootImages.length || diaryWriting"
+                  :title="shootImages.length ? '' : t('museRefine.finishNeedsShoot')"
+                  @click="finishSession"
+                >{{ diaryWriting ? t('museRefine.diaryWriting') : diaryDone ? t('museRefine.diaryDone') : t('museRefine.finish') }}</button>
+                <button
+                  v-if="diaryDone && inputs.character_id"
+                  type="button"
+                  class="rounded-lg border border-pink-500/50 bg-pink-950/40 px-2.5 py-1.5 text-[10px] text-pink-200 hover:bg-pink-900/60"
+                  @click="showDiary = true"
+                >{{ t('museRefine.openDiary') }}</button>
+              </div>
+              <p v-if="craft.prompt && !boardReady" class="text-[10px] text-gray-500">
+                {{ t('museRefine.approveNeedsBoard') }}
+              </p>
               <div class="flex gap-2">
                 <input
                   v-model="chatInput"
@@ -942,43 +980,6 @@ function isStruckRow(row) {
                 support: {{ craft.support_tags }}
               </p>
             </div>
-
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="rounded-lg bg-pink-700/80 px-3 py-2 text-xs font-medium hover:bg-pink-600 disabled:opacity-40"
-                :disabled="busy || comfyOffline || !craft.prompt"
-                @click="runStage('board')"
-              >{{ t('museRefine.board') }}</button>
-              <button
-                type="button"
-                class="rounded-lg bg-cyan-800/80 px-3 py-2 text-xs font-medium hover:bg-cyan-700 disabled:opacity-40"
-                :disabled="busy || comfyOffline || !craft.prompt || !boardReady"
-                :title="boardReady ? '' : t('museRefine.approveNeedsBoard')"
-                @click="runStage('approve')"
-              >{{ t('museRefine.approve') }}</button>
-              <button
-                type="button"
-                class="rounded-lg bg-gray-800 px-3 py-2 text-xs font-medium hover:bg-gray-700 disabled:opacity-40"
-                :disabled="busy || !inputs.character_id"
-                @click="runStage('wardrobe')"
-              >{{ t('museRefine.wardrobe') }}</button>
-              <button
-                type="button"
-                class="rounded-lg bg-rose-900/70 px-3 py-2 text-xs font-medium hover:bg-rose-800 disabled:opacity-40"
-                :disabled="busy || !shootImages.length || diaryWriting"
-                @click="finishSession"
-              >{{ diaryWriting ? t('museRefine.diaryWriting') : diaryDone ? t('museRefine.diaryDone') : t('museRefine.finish') }}</button>
-              <button
-                v-if="diaryDone && inputs.character_id"
-                type="button"
-                class="rounded-lg bg-pink-900/70 px-3 py-2 text-xs font-medium hover:bg-pink-800"
-                @click="showDiary = true"
-              >{{ t('museRefine.openDiary') }}</button>
-            </div>
-            <p v-if="craft.prompt && !boardReady" class="text-[10px] text-gray-500">
-              {{ t('museRefine.approveNeedsBoard') }}
-            </p>
 
             <div v-if="preview" class="overflow-hidden rounded-xl border border-pink-500/20">
               <img :src="preview" alt="preview" class="max-h-56 w-full object-contain bg-black" />
