@@ -17,7 +17,10 @@ Keys allowed: wearing, beat, expression, scene, light, bg, frame,
 wearing_b, beat_b, lettering, atmosphere, look, wearing_drop.
 Rules:
 - Absolute phrases in English (danbooru-friendly words ok).
-- Include ONLY fields the latest line actually changes.
+- Carefully read the latest conversation, and update only the fields that have
+  changed from the previous state to reflect the latest status.
+  Carefully evaluate the conversation context to decide if any fields 
+  need to be added or cleared.
 - Clothes and place are independent: changing clothes must not clear scene.
 - Changing place must not undress her.
 - wearing_drop: one garment name to remove, only when asked to take something off.
@@ -26,11 +29,12 @@ Rules:
   unless the director explicitly asked to reset/clear that axis.
 - atmosphere: mood / air (wistful, tense, cozy…). Only when they ask to change mood.
 - look: art direction / render. Only when they ask to change art style.
-- lettering: short Latin words for a sign only when they asked for text in frame.
-- beat / frame: write what a photograph shows. If wind blows her hair, say so in
-  beat (hair blowing in the wind). If the view is from behind, put from behind
-  in frame. Do NOT invent garments — leave visible consequences like nape to
-  the assemble pass unless the director named them.
+- lettering: short Latin words with double quotation for a sign only when they asked for text in frame.
+- beat / frame: Describe everything that needs to be visible in the photograph
+  using clear terms (danbooru tags). Additionally, be sure to list
+  anything not explicitly stated that must naturally appear in the image
+  (e.g., if the wind blows and her hair sweeps aside,
+  the nape of the neck becomes visible).
 - If the line is only emotion / banter / acknowledgement with NO picture or
   mood/look change, return {}.
 - Multiple fields in one line → include all of them in one object.
