@@ -8,6 +8,7 @@ import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
 import MusePanel from './components/MusePanel.vue'
+import MuseRefinePanel from './components/MuseRefinePanel.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
 import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
 import CharacterDossier from './components/muse/CharacterDossier.vue'
@@ -2664,6 +2665,7 @@ const showInvoke = ref(false)
 // shoot with is chosen before the shooting screen exists at all. Picking one
 // there is what actually opens MusePanel (`pickMuseCharacter`, below).
 const showMuse = ref(false)
+const showMuseRefine = ref(false)
 const showMuseGallery = ref(false)
 const museGalleryWorkflow = ref('')
 // What the roster screen decided, read by MusePanel once on the tick `showMuse`
@@ -3052,6 +3054,11 @@ onUnmounted(() => {
             :title="$t('header.museTitle')"
             class="px-3 py-1.5 bg-cyan-900/70 hover:bg-cyan-800/80 border border-cyan-600/40 hover:border-cyan-500/60 rounded-lg text-xs font-medium text-cyan-200 transition-colors whitespace-nowrap">
             {{ $t('header.muse') }}
+          </button>
+          <button @click="showMuseRefine = true"
+            :title="$t('header.museRefineTitle')"
+            class="px-3 py-1.5 bg-teal-900/70 hover:bg-teal-800/80 border border-teal-600/40 hover:border-teal-500/60 rounded-lg text-xs font-medium text-teal-200 transition-colors whitespace-nowrap">
+            {{ $t('header.museRefine') }}
           </button>
           <button @click="triggerScan" :disabled="scanState?.state === 'running'"
             class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
@@ -5432,6 +5439,15 @@ onUnmounted(() => {
       :initial-partner-id="musePendingPartnerId"
       @update:show="onMuseShow"
       @session-state="onMuseSessionState"
+      @select-image="openImageBySha($event)"
+      @toast="showToast($event.msg, $event.type)"
+    />
+
+    <MuseRefinePanel
+      :show="showMuseRefine"
+      :comfyOffline="comfyOffline"
+      :get-jobs-map="getJobsMap"
+      @update:show="showMuseRefine = $event"
       @select-image="openImageBySha($event)"
       @toast="showToast($event.msg, $event.type)"
     />
