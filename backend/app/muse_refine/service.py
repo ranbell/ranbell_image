@@ -863,6 +863,10 @@ async def chat(
         user_line=text,
         ledger=led,
         now=now,
+        # ターン前の台帳と直近の流れ。条文の「前ターンを保て」は、これが
+        # 無いと比べようがない（`before` はこの関数の最初から手元にある）。
+        before=before,
+        recent=director_recent,
         force_repair_hint=missed,
         character=char,
         session=session,

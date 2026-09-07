@@ -52,7 +52,9 @@ Output ONLY JSON.
 
 VERIFY_SYSTEM = """You check whether the shot LEDGER matches the director's latest intent.
 
-Compare DIRECTOR line to LEDGER. Ignore pure emotion/banter — those need no picture change.
+Compare the DIRECTOR line to LEDGER NOW. LEDGER BEFORE THIS TURN is the shot as
+it stood before the line; RECENT DIRECTOR LINES is what led up to it. Ignore
+pure emotion/banter — those need no picture change.
 
 COMMENT must be spoken IN CHARACTER using the VOICE / character contract (first
 person, address, talk quirks, example rhythm). Generic announcer lines like
@@ -283,11 +285,30 @@ async def verify_and_repair(
     user_line: str,
     ledger: dict[str, str],
     now: str,
+    before: dict[str, str] | None = None,
+    recent: str = "",
     force_repair_hint: bool = False,
     character: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, str]]:
-    """After the turn: confirm intent match, or return a self-repair patch."""
+    """After the turn: confirm intent match, or return a self-repair patch.
+
+    **`before` と `recent` を渡す（2026-09-08）。** 条文には「明示的に言われない
+    限り、前ターンの姿勢・服・背景をそのまま保て」と書いてあるのに、**前ターンが
+    入力に無かった** —— 渡していたのは「監督の一行」と「今の台帳」と「今の台帳の
+    読み下し」で、三つのうち二つが同じもの。比較対象が無いので、この規則は
+    原理的に効かない。
+
+    実測（26B・通し2回）でその通りになっていた:
+
+        writer  beat: sitting on floor, **legs tucked to the side**   ← 正しい
+        verify  OK: no 「指示を読み間違えちゃいました」
+        台帳    beat: sitting on floor, **legs spread to the side**   ← 別の姿勢
+
+    `before` は `chat()` の中に最初からあった。`recent` は writer には渡って
+    いたが、verify には無く、「顔だけこっちに向けて」のような**部分指定**を
+    判断する材料が無かった。
+    """
     lang = "Japanese" if locale.startswith("ja") else "English"
     sess = session or {"character": character or {}}
     if character and not sess.get("character"):
@@ -310,8 +331,12 @@ async def verify_and_repair(
         f"{hint}\n"
         f"{voice}\n\n"
         f"{persona.ENTERTAINMENT_CRAFT}\n\n"
-        f"DIRECTOR:\n{user_line.strip()}\n\n"
-        f"LEDGER:\n{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
+        f"RECENT DIRECTOR LINES:\n{recent.strip() or '(none)'}\n\n"
+        f"DIRECTOR (latest):\n{user_line.strip()}\n\n"
+        f"LEDGER BEFORE THIS TURN:\n"
+        f"{json.dumps(before or {}, ensure_ascii=False, indent=2)}\n\n"
+        f"LEDGER NOW (after this turn):\n"
+        f"{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
         f"NOW:\n{now}\n"
     )
     try:
