@@ -89,6 +89,32 @@ def test_assemble_prompt_includes_ledger(monkeypatch):
     assert "blue_hair" in low or "1girl" in low
     assert "white" in low or "shirt" in low
     assert "cafe" in low or "sitting" in low
+    # Thick prose reinforcement (not just "cafe. soft light").
+    assert "wearing" in low or "she is wearing" in low
+    assert "keep exactly" in low
+
+
+def test_scene_prose_locks_all_axes():
+    led = {
+        "wearing": "white shirt, blue skirt",
+        "beat": "standing, leaning on railing",
+        "expression": "soft smile, blush",
+        "scene": "rooftop at dusk",
+        "light": "warm evening light",
+        "bg": "city skyline",
+        "frame": "medium shot, looking at viewer",
+        "wearing_b": "",
+        "beat_b": "",
+    }
+    prose = assemble.scene_prose(led)
+    low = prose.lower()
+    assert "rooftop" in low
+    assert "white shirt" in low
+    assert "leaning" in low
+    assert "soft smile" in low
+    assert "medium shot" in low
+    assert "keep exactly" in low
+    assert len(prose) > 80
 
 
 def test_assemble_without_support_ignores_raw_wd14_bag():
