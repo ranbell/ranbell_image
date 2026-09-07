@@ -52,10 +52,22 @@ async def load(db, session_id: str) -> dict[str, Any] | None:
 # handful — a report over "the last five sessions" was five sessions picked at
 # random, which is worse than useless when the whole point is a trend.
 _SCROLL_PAGE = 256
-_LIST_FIELDS = ["session_id", "status", "inputs", "created_at"]
+#: **`studio` を載せる（2026-09-07）。** Muse Refine が同じコレクションに座った
+#: ので、どちらのスタジオの回かを一覧の段階で見分ける必要がある。`character` は
+#: 載せない —— 一覧を重くしないため（名前が要る側が自分の分だけ load する）。
+_LIST_FIELDS = ["session_id", "status", "inputs", "created_at", "studio"]
 
 
-async def list_recent(db, *, limit: int = 20) -> list[dict[str, Any]]:
+async def list_recent(
+    db, *, limit: int = 20, studio: str | None = None,
+) -> list[dict[str, Any]]:
+    """最近のセッション。`studio` でスタジオを選ぶ。
+
+    `None` は全部（既定・これまでどおり）、`""` は classic Muse だけ、
+    `"muse_refine"` は Refine だけ。**混ざったままにできない** ―― classic の
+    一覧から Refine のセッションを開くと、手帖の無いセッションを classic の
+    経路が読むことになり、席の成績レポートも数字が薄まる。
+    """
     rows: list[dict[str, Any]] = []
     offset = None
     while True:
@@ -73,11 +85,15 @@ async def list_recent(db, *, limit: int = 20) -> list[dict[str, Any]]:
                 "status": (p.payload or {}).get("status", ""),
                 "theme": ((p.payload or {}).get("inputs") or {}).get("theme", ""),
                 "created_at": (p.payload or {}).get("created_at", 0.0),
+                "studio": str((p.payload or {}).get("studio") or ""),
             }
             for p in points
         )
         if offset is None or not points:
             break
+    if studio is not None:
+        want = str(studio)
+        rows = [r for r in rows if r.get("studio") == want]
     rows.sort(key=lambda r: r.get("created_at") or 0.0, reverse=True)
     return rows[:max(1, int(limit))]
 

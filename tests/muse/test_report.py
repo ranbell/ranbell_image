@@ -208,6 +208,34 @@ async def test_recent_sessions_are_the_newest_not_an_arbitrary_handful():
     assert db.pages > 1, "must page through the whole collection, not one window"
 
 
+@pytest.mark.asyncio
+async def test_the_two_studios_do_not_show_up_in_each_others_lists():
+    """**Muse Refine は同じコレクションに座っている（2026-09-07）。**
+
+    絞らないと、classic の一覧から Refine のセッションが開けてしまう ——
+    手帖を持たないセッションを classic の経路が読むことになる。席の成績
+    レポートにも混ざって数字が薄まる。
+    """
+    from app.muse import session_db
+
+    db = _ScrollDb([
+        {"session_id": "m1", "status": "chat", "created_at": 2.0,
+         "inputs": {"theme": "classic"}},
+        {"session_id": "r1", "status": "chat", "created_at": 1.0,
+         "inputs": {"theme": "refine"}, "studio": "muse_refine"},
+    ])
+
+    classic = await session_db.list_recent(db, limit=10, studio="")
+    assert [r["session_id"] for r in classic] == ["m1"]
+
+    refine = await session_db.list_recent(db, limit=10, studio="muse_refine")
+    assert [r["session_id"] for r in refine] == ["r1"]
+
+    # 既定は全部 —— 呼び元がスタジオを言わないうちは、これまでと同じ。
+    both = await session_db.list_recent(db, limit=10)
+    assert [r["session_id"] for r in both] == ["m1", "r1"]
+
+
 def test_diary_shoot_log_route_exists():
     """秘密の日記から、その撮影の会話ログへ辿れること。
 

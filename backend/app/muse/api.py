@@ -164,7 +164,13 @@ async def roster():
 
 @router.get("/sessions")
 async def list_sessions(request: Request, limit: int = 20):
-    return {"sessions": await session_db.list_recent(_db(request), limit=limit)}
+    # classic のセッションだけ。Muse Refine は同じコレクションに座っているが
+    # 別のスタジオで、手帖を持たない —— ここから開けてはいけない。
+    return {
+        "sessions": await session_db.list_recent(
+            _db(request), limit=limit, studio="",
+        )
+    }
 
 
 @router.post("/sessions")
@@ -349,7 +355,10 @@ async def crew_report(request: Request, limit: int = 40):
     at 0% because it had a bad round — so this walks the recent ones and sums.
     """
     db = _db(request)
-    rows = await session_db.list_recent(db, limit=max(1, min(int(limit), 200)))
+    # 席の成績なので classic の回だけを数える。Refine には席が無い。
+    rows = await session_db.list_recent(
+        db, limit=max(1, min(int(limit), 200)), studio="",
+    )
     sessions = []
     for row in rows:
         loaded = await session_db.load(db, row["session_id"])

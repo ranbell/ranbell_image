@@ -1241,16 +1241,17 @@ async def finish_session(db, request, session: dict[str, Any]) -> dict[str, Any]
 
 
 async def list_refine_sessions(db, *, limit: int = 20) -> list[dict[str, Any]]:
-    rows = await session_db.list_recent(db, limit=max(limit * 3, 40))
-    # list_recent does not include studio; load lightly by id filter via scroll
-    # is heavy — instead retrieve payloads for candidates.
+    # **studio は一覧が持つ（2026-09-07）。** 以前はここで全セッションを一つずつ
+    # load してから classic の分を捨てていた —— Muse の回まで読んでいた。
+    # `list_recent` が絞るので、load するのは自分の分だけ（名前を出すため）。
+    rows = await session_db.list_recent(db, limit=limit, studio=STUDIO)
     out: list[dict[str, Any]] = []
     for row in rows:
         sid = row.get("session_id")
         if not sid:
             continue
         full = await session_db.load(db, sid)
-        if not full or str(full.get("studio") or "") != STUDIO:
+        if not full:
             continue
         out.append({
             "session_id": sid,
