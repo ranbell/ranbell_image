@@ -739,9 +739,9 @@ async def chat(
         session, actress, locale=locale, lead_name=name,
     )
 
-    # Muse may not invent mood/look/lettering rewrites; empty clears scrubbed.
+    # Muse may never invent or rewrite mood/look/lettering — director path owns sticky.
     propose = ledger_mod.scrub_patch(propose, led, allow_clear=set())
-    propose = ledger_mod.guard_sticky_writes(propose, allowed=director_sticky)
+    propose = ledger_mod.guard_sticky_writes(propose, allowed=set())
 
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)

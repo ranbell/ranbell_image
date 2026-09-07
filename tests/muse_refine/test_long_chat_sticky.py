@@ -83,15 +83,23 @@ def test_multi_turn_atmosphere_survives_clothes_and_banter():
         "scene": "park",
         "light": "sunset",
     })
-    # Turn 2: emo
+    # Turn 2: emo (director only)
     cue = talk.cue_atmosphere_look("もうちょっとエモく、切ない感じで")
     patch = ledger.scrub_patch(
         talk.merge_cue_into_patch({}, cue), led,
         allow_clear=talk.cue_allow_clear(cue),
     )
     led = ledger.apply_patch(led, patch)
+    # Muse tries to overwrite sticky on the same turn — blocked
+    muse = ledger.guard_sticky_writes(
+        {"atmosphere": "HALLUCINATED cozy", "expression": "grin"},
+        allowed=set(),
+    )
+    led = ledger.apply_patch(led, muse)
     emo = led["atmosphere"]
     assert "wistful" in emo or "melanchol" in emo
+    assert "HALLUCINATED" not in emo
+    assert led["expression"] == "grin"
 
     # Turn 3: clothes only (writer would send wearing; maybe hallucinate empty mood)
     clothes = ledger.scrub_patch(
@@ -99,16 +107,15 @@ def test_multi_turn_atmosphere_survives_clothes_and_banter():
         led,
         allow_clear=set(),
     )
-    # Muse invents new mood — blocked
-    muse = ledger.guard_sticky_writes(
-        {"atmosphere": "cozy, warm", "expression": "grin"},
-        allowed=set(clothes),  # director did not touch sticky
-    )
     led = ledger.apply_patch(led, clothes)
-    led = ledger.apply_patch(led, muse)
+    led = ledger.apply_patch(
+        led,
+        ledger.guard_sticky_writes(
+            {"atmosphere": "cozy, warm"}, allowed=set(),
+        ),
+    )
     assert led["wearing"] == "red dress"
     assert led["atmosphere"] == emo
-    assert led["expression"] == "grin"
 
     # Turn 4: banter must not cue-fire
     assert talk.cue_atmosphere_look("今日もありがとう、好きだよ") == {}
@@ -120,8 +127,14 @@ def test_multi_turn_atmosphere_survives_clothes_and_banter():
         allow_clear=talk.cue_allow_clear(cue2),
     )
     led = ledger.apply_patch(led, patch2)
+    # Muse again blocked
+    led = ledger.apply_patch(
+        led,
+        ledger.guard_sticky_writes({"look": "HALLUCINATED oil"}, allowed=set()),
+    )
     assert led["atmosphere"] == emo
     assert "cel" in led["look"] or "lineart" in led["look"]
+    assert "HALLUCINATED" not in led["look"]
 
     # Prompt still carries sticky mood
     session = {
