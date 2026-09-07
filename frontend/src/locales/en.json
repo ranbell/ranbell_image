@@ -1824,6 +1824,8 @@
     "nowEmpty": "Shot not set yet",
     "nowAuthority": "This is shot truth — it overrides chat vibes",
     "shotChange": "Shot update",
+    "verifyOk": "Confirm",
+    "verifyRepair": "Self-fix",
     "chatHint": "Direct clothes, place, and pose. Changed fields show as icons.",
     "chatPlaceholder": "e.g. white shirt on the rooftop",
     "send": "Send",

@@ -444,6 +444,150 @@ async def chat(
         await assemble.rebuild_craft(db, ollama, session)
         debug_mod.stage(session, "assemble_after_propose", t0)
 
+    # After conversation: confirm director intent, or self-repair the ledger.
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    now = str((session.get("craft") or {}).get("now") or "")
+    t0 = time.monotonic()
+    ok, comment, repair = await writer.verify_and_repair(
+        ollama,
+        model=model,
+        locale=locale,
+        name=name,
+        user_line=text,
+        ledger=led,
+        now=now,
+        force_repair_hint=missed,
+    )
+    debug_mod.stage(session, "verify", t0)
+    debug_mod.note(
+        session, "verify",
+        detail=(comment or "")[:240],
+        ok=ok,
+        repair=repair or {},
+    )
+
+    if ok:
+        confirm = comment or (
+            "うん、この画で合ってる。"
+            if locale.startswith("ja") else
+            "Yeah — this shot matches."
+        )
+        _append_chat(
+            session,
+            role="assistant",
+            name=name,
+            text=confirm,
+            meta={
+                "kind": "verify_ok",
+                "chips": [{
+                    "key": "ok",
+                    "icon": "✅",
+                    "label": "確認" if locale.startswith("ja") else "OK",
+                }],
+            },
+        )
+        events.publish(session["session_id"], {
+            "type": "chat", "role": "assistant", "name": name, "text": confirm,
+        })
+    else:
+        fix_line = comment or (
+            "ずれてる。自分で直すね。"
+            if locale.startswith("ja") else
+            "That's off — I'll fix it myself."
+        )
+        _append_chat(
+            session,
+            role="assistant",
+            name=name,
+            text=fix_line,
+            meta={
+                "kind": "verify_repair",
+                "chips": [{
+                    "key": "repair",
+                    "icon": "🔧",
+                    "label": "自己修復" if locale.startswith("ja") else "Self-fix",
+                }],
+            },
+        )
+        events.publish(session["session_id"], {
+            "type": "chat", "role": "assistant", "name": name, "text": fix_line,
+        })
+
+        # If verify refused to repair but we know the line was a picture miss,
+        # fall back to one more writer pass as the repair.
+        if not ledger_mod.touched_picture(repair) and (
+            missed or ledger_mod.looks_like_picture_line(text)
+        ):
+            t0 = time.monotonic()
+            repair = await writer.write_patch(
+                ollama,
+                model=model,
+                user_line=text,
+                ledger=led,
+                recent=director_recent,
+                retry=True,
+            )
+            debug_mod.stage(session, "verify_repair_writer", t0)
+            debug_mod.note(session, "verify_repair_fallback", detail=str(repair), patch=repair)
+
+        if ledger_mod.touched_picture(repair):
+            before_r = dict(led)
+            led = ledger_mod.apply_patch(led, repair)
+            session["refine_ledger"] = led
+            _change_event(
+                session,
+                source="self_repair",
+                patch=repair,
+                before=before_r,
+                after=led,
+                locale=locale,
+            )
+            t0 = time.monotonic()
+            await assemble.rebuild_craft(db, ollama, session)
+            debug_mod.stage(session, "assemble_after_repair", t0)
+            done = (
+                "直した。いまの画はこれ。"
+                if locale.startswith("ja") else
+                "Fixed. This is the shot now."
+            )
+            _append_chat(
+                session,
+                role="assistant",
+                name=name,
+                text=done,
+                meta={
+                    "kind": "verify_repaired",
+                    "chips": [{
+                        "key": "ok",
+                        "icon": "✅",
+                        "label": "修復済" if locale.startswith("ja") else "Fixed",
+                    }],
+                    "fields": ledger_mod.changed_fields(before_r, led),
+                },
+            )
+            events.publish(session["session_id"], {
+                "type": "chat", "role": "assistant", "name": name, "text": done,
+            })
+        else:
+            _append_chat(
+                session,
+                role="system",
+                name="Shot",
+                text=(
+                    "自己修復できなかった — 指示をもう一度お願いします"
+                    if locale.startswith("ja") else
+                    "Self-repair could not land — please restate the direction"
+                ),
+                meta={
+                    "kind": "ledger_missed",
+                    "chips": [{
+                        "key": "missed",
+                        "icon": "⚠",
+                        "label": "未反映" if locale.startswith("ja") else "Missed",
+                    }],
+                },
+            )
+
     craft = session.get("craft") or {}
     after = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     debug_mod.turn_trace(
@@ -459,6 +603,7 @@ async def chat(
     )
     if missed:
         debug_mod.note(session, "turn_missed_picture", detail="heuristic picture line, empty patch")
+    debug_mod.note(session, "verify_result", detail="ok" if ok else "repaired", ok=ok)
 
     session["status"] = "chat"
     await session_db.save(db, session)

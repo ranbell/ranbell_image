@@ -1824,6 +1824,8 @@
     "nowEmpty": "まだ画は未設定",
     "nowAuthority": "ここが正本。会話の雰囲気より優先します",
     "shotChange": "画の更新",
+    "verifyOk": "確認",
+    "verifyRepair": "自己修復",
     "chatHint": "服・場所・ポーズを指示してください。変わった欄はアイコンで出ます。",
     "chatPlaceholder": "例: 白いシャツで屋上に立って",
     "send": "送る",

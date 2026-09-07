@@ -255,7 +255,16 @@ function rowChips(row) {
   return []
 }
 function isChangeRow(row) {
-  return row?.meta?.kind === 'ledger_change' || row?.meta?.kind === 'ledger_missed'
+  const kind = row?.meta?.kind
+  return kind === 'ledger_change' || kind === 'ledger_missed'
+    || kind === 'verify_ok' || kind === 'verify_repair' || kind === 'verify_repaired'
+}
+function rowKindLabel(row, t) {
+  const kind = row?.meta?.kind
+  if (kind === 'ledger_change' || kind === 'ledger_missed') return t('museRefine.shotChange')
+  if (kind === 'verify_ok') return t('museRefine.verifyOk')
+  if (kind === 'verify_repair' || kind === 'verify_repaired') return t('museRefine.verifyRepair')
+  return row.name || row.role
 }
 </script>
 
@@ -337,7 +346,11 @@ function isChangeRow(row) {
                 class="rounded-lg px-2.5 py-2"
                 :class="row.role === 'user'
                   ? 'bg-teal-950/40 text-teal-50'
-                  : isChangeRow(row)
+                  : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
+                    ? 'border border-emerald-800/40 bg-emerald-950/25 text-emerald-50'
+                    : row.meta?.kind === 'verify_repair'
+                      ? 'border border-orange-800/40 bg-orange-950/25 text-orange-50'
+                      : isChangeRow(row)
                     ? (row.meta?.kind === 'ledger_missed'
                       ? 'border border-amber-700/50 bg-amber-950/30 text-[11px] text-amber-100'
                       : 'border border-teal-800/40 bg-teal-950/20 text-[11px] text-teal-100')
@@ -347,7 +360,7 @@ function isChangeRow(row) {
               >
                 <div class="mb-0.5 flex flex-wrap items-center gap-1.5">
                   <span class="text-[10px] uppercase tracking-wide text-gray-500">
-                    {{ isChangeRow(row) ? t('museRefine.shotChange') : (row.name || row.role) }}
+                    {{ rowKindLabel(row, t) }}
                   </span>
                   <span
                     v-for="chip in rowChips(row)"
@@ -355,7 +368,11 @@ function isChangeRow(row) {
                     class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] leading-none"
                     :class="chip.key === 'missed'
                       ? 'border-amber-600/60 bg-amber-900/50 text-amber-100'
-                      : 'border-teal-600/50 bg-teal-900/60 text-teal-50'"
+                      : chip.key === 'repair'
+                        ? 'border-orange-600/60 bg-orange-900/40 text-orange-100'
+                        : chip.key === 'ok'
+                          ? 'border-emerald-600/60 bg-emerald-900/40 text-emerald-100'
+                          : 'border-teal-600/50 bg-teal-900/60 text-teal-50'"
                     :title="chip.key"
                   >
                     <span aria-hidden="true">{{ chip.icon }}</span>
