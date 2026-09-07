@@ -20,6 +20,12 @@ const catalog = ref(null)
 const characterList = ref([])
 const busy = ref(false)
 const showSettings = ref(false)
+const DEBUG_KEY = 'museRefine.debug'
+const museDebug = ref(typeof localStorage !== 'undefined' && localStorage.getItem(DEBUG_KEY) === '1')
+function toggleDebug() {
+  museDebug.value = !museDebug.value
+  localStorage.setItem(DEBUG_KEY, museDebug.value ? '1' : '0')
+}
 const chatInput = ref('')
 const chatEl = ref(null)
 const preview = ref('')
@@ -31,6 +37,9 @@ const inputs = computed(() => session.value?.inputs || {})
 const ledger = computed(() => session.value?.refine_ledger || {})
 const craft = computed(() => session.value?.craft || {})
 const chat = computed(() => session.value?.chat || [])
+const refineLog = computed(() => [...(session.value?.refine_log || [])].slice().reverse())
+const stageMs = computed(() => [...(session.value?.stage_ms || [])].slice(-12).reverse())
+const turnTrace = computed(() => [...(session.value?.turn_trace || [])].slice().reverse())
 const characters = computed(() => characterList.value)
 const workflows = computed(() => {
   const list = catalog.value?.comfyui?.workflows || catalog.value?.workflows || []
@@ -260,6 +269,13 @@ function thumb(sha) {
           </div>
           <button
             type="button"
+            class="rounded-lg px-2.5 py-1.5 text-xs"
+            :class="museDebug ? 'bg-amber-900/70 text-amber-100' : 'bg-gray-800 hover:bg-gray-700'"
+            :title="t('museRefine.debugToggle')"
+            @click="toggleDebug"
+          >{{ t('museRefine.debugToggle') }}</button>
+          <button
+            type="button"
             class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700"
             :disabled="busy"
             @click="showSettings = !showSettings"
@@ -383,6 +399,15 @@ function thumb(sha) {
                   <span class="text-gray-500">{{ t('museRefine.enhanceQualityHint') }}</span>
                 </span>
               </label>
+              <p v-if="craft.wd14_suggestions" class="mt-2 text-[10px] text-amber-200/70">
+                WD14 {{ t('museRefine.wd14Ref') }}: {{ craft.wd14_suggestions }}
+              </p>
+              <p v-if="craft.picked_wd14" class="text-[10px] text-emerald-300/80">
+                {{ t('museRefine.wd14Picked') }}: {{ craft.picked_wd14 }}
+              </p>
+              <p v-if="craft.quality_tags" class="text-[10px] text-sky-300/80">
+                {{ t('museRefine.qualityTags') }}: {{ craft.quality_tags }}
+              </p>
             </div>
 
             <div class="rounded-xl border border-teal-950/50 bg-gray-950/60 p-3">
@@ -446,6 +471,63 @@ function thumb(sha) {
                 </select>
               </label>
             </div>
+
+            <details v-if="museDebug" class="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 text-[10px] text-amber-100/90" open>
+              <summary class="cursor-pointer text-amber-200">{{ t('museRefine.debugTitle') }}</summary>
+              <p class="mt-1 mb-2 text-amber-100/50">{{ t('museRefine.debugHint') }}</p>
+
+              <div v-if="turnTrace.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.turnTrace') }}</div>
+                <ul class="space-y-1.5">
+                  <li
+                    v-for="(row, i) in turnTrace"
+                    :key="`${row.at}-${i}`"
+                    class="rounded border border-amber-800/40 px-2 py-1.5"
+                  >
+                    <div class="text-amber-100">{{ row.line || '—' }}</div>
+                    <div class="text-amber-100/50">patch: {{ JSON.stringify(row.patch || {}) }}</div>
+                    <div class="text-amber-100/50">propose: {{ JSON.stringify(row.propose || {}) }}</div>
+                    <div
+                      v-for="(delta, field) in (row.moved || {})"
+                      :key="field"
+                      class="text-emerald-200/80"
+                    >{{ field }}: {{ delta }}</div>
+                    <div v-if="(row.wd14_suggestions || []).length" class="text-amber-200/60">
+                      wd14 ref: {{ (row.wd14_suggestions || []).slice(0, 12).join(', ') }}
+                    </div>
+                    <div v-if="(row.picked_wd14 || []).length" class="text-emerald-300/80">
+                      wd14 picked: {{ (row.picked_wd14 || []).join(', ') }}
+                    </div>
+                    <div v-if="(row.quality_tags || []).length" class="text-sky-300/80">
+                      quality: {{ (row.quality_tags || []).join(', ') }}
+                    </div>
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="stageMs.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.stageMs') }}</div>
+                <ul class="space-y-0.5">
+                  <li v-for="(s, i) in stageMs" :key="`${s.at}-${i}`" class="text-amber-100/70">
+                    {{ s.stage }} · {{ s.ms }}ms
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="refineLog.length">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.refineLog') }}</div>
+                <ul class="max-h-48 space-y-1 overflow-y-auto">
+                  <li
+                    v-for="(row, i) in refineLog"
+                    :key="`${row.at}-${i}`"
+                    class="rounded border border-amber-900/30 px-2 py-1 text-amber-100/70"
+                  >
+                    <span class="text-amber-300/90">{{ row.kind }}</span>
+                    — {{ row.detail }}
+                  </li>
+                </ul>
+              </div>
+            </details>
           </section>
         </div>
       </div>

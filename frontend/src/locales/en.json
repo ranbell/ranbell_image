@@ -1829,13 +1829,22 @@
     "options": "Options",
     "rebuild": "Rebuild prompt",
     "useWd14": "Reference WD14 tags",
-    "useWd14Hint": "Inject nearby vocab-bank tags without overriding clothes/place authority",
+    "useWd14Hint": "Vector neighbours are noisy — never auto-injected; quality pass may pick from a closed list",
     "enhanceQuality": "Enhance atmosphere & quality",
-    "enhanceQualityHint": "Add light, mood, and quality tags — not just mechanical action",
+    "enhanceQualityHint": "Add light/mood/quality tags; with WD14 on, only useful picks from suggestions",
+    "wd14Ref": "reference (not injected)",
+    "wd14Picked": "picked from WD14",
+    "qualityTags": "quality tags",
     "prompt": "Generation prompt",
     "board": "Board",
     "shoot": "Final",
     "workflow": "Workflow",
-    "model": "LLM"
+    "model": "LLM",
+    "debugToggle": "Debug",
+    "debugTitle": "Observability (read-only)",
+    "debugHint": "Writer patches, Muse proposals, WD14 reference/picks, and stage timings",
+    "turnTrace": "Turn trace",
+    "stageMs": "Stage timing",
+    "refineLog": "Event log"
   }
 }

@@ -61,6 +61,15 @@ def test_merge_support_keeps_authority_first():
     assert merged.count("white_shirt") == 1
 
 
+def test_split_picked_vs_free():
+    picked, free = assemble._split_picked_vs_free(
+        ["leaning_forward", "soft_lighting", "holding_sword"],
+        ["leaning_forward", "holding_sword", "noise_tag"],
+    )
+    assert picked == ["leaning_forward", "holding_sword"]
+    assert free == ["soft_lighting"]
+
+
 def test_assemble_prompt_includes_ledger(monkeypatch):
     session = {
         "character": {"identity_tags": ["1girl", "blue_hair"], "character_id": "x"},
@@ -80,3 +89,24 @@ def test_assemble_prompt_includes_ledger(monkeypatch):
     assert "blue_hair" in low or "1girl" in low
     assert "white" in low or "shirt" in low
     assert "cafe" in low or "sitting" in low
+
+
+def test_assemble_without_support_ignores_raw_wd14_bag():
+    """WD14 neighbour dumps must not enter via support unless explicitly chosen."""
+    session = {
+        "character": {"identity_tags": ["1girl"], "character_id": "x"},
+        "inputs": {"framing": "auto", "style": ""},
+    }
+    led = {
+        "wearing": "hoodie",
+        "beat": "standing",
+        "expression": "",
+        "scene": "street",
+        "light": "",
+        "bg": "",
+        "frame": "",
+    }
+    # No support_tags → noisy WD14 list stays out of the prompt.
+    prompt = assemble.assemble_prompt(session, led, support_tags=None)
+    assert "holding_sword" not in prompt.lower()
+    assert "hoodie" in prompt.lower() or "street" in prompt.lower()

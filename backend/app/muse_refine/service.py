@@ -10,7 +10,7 @@ from ..characters import presets_db
 from ..muse import events, session_db
 from ..muse.defaults import ALL_DEFAULTS
 from ..muse.notebook import blank as notebook_blank
-from . import assemble, ledger as ledger_mod, writer
+from . import assemble, debug as debug_mod, ledger as ledger_mod, writer
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,9 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "now": craft.get("now", ""),
             "tags": craft.get("tags", ""),
             "scene": craft.get("scene", ""),
+            "wd14_suggestions": craft.get("wd14_suggestions", ""),
+            "picked_wd14": craft.get("picked_wd14", ""),
+            "quality_tags": craft.get("quality_tags", ""),
             "support_tags": craft.get("support_tags", ""),
         },
         "chat": list(session.get("chat") or [])[-40:],
@@ -78,6 +81,10 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "status": (session.get("shoot") or {}).get("status", ""),
             "error": (session.get("shoot") or {}).get("error", ""),
         },
+        # Observability only — UI debug pane. Never used for decisions.
+        "refine_log": list(session.get("refine_log") or [])[-40:],
+        "stage_ms": list(session.get("stage_ms") or [])[-20:],
+        "turn_trace": list(session.get("turn_trace") or [])[-12:],
     }
 
 
@@ -105,7 +112,11 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "inputs": merged,
         "character": {},
         "refine_ledger": ledger_mod.blank(),
-        "craft": {"prompt": "", "now": "", "tags": "", "scene": "", "support_tags": ""},
+        "craft": {
+            "prompt": "", "now": "", "tags": "", "scene": "",
+            "wd14_suggestions": "", "picked_wd14": "", "quality_tags": "",
+            "support_tags": "",
+        },
         # Keep a blank notebook so muse.session_db.load → notebook.migrate is safe
         # when board/shoot runner reloads the row.
         "notebook": notebook_blank(partner=False),
@@ -116,6 +127,9 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "struck": [],
         "notes": [],
         "standing": [],
+        "refine_log": [],
+        "stage_ms": [],
+        "turn_trace": [],
     }
 
 
@@ -217,6 +231,8 @@ async def chat(
     session: dict[str, Any],
     message: str,
 ) -> dict[str, Any]:
+    import time
+
     text = (message or "").strip()
     if not text:
         raise RefineError("empty message")
@@ -225,11 +241,14 @@ async def chat(
     locale = str(inputs.get("locale") or "ja")
     char = session.get("character") or {}
     name = char.get("name_ja") or char.get("name") or "Muse"
+    before = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
     _append_chat(session, role="user", name="Director", text=text)
     events.publish(session["session_id"], {"type": "chat", "role": "user", "text": text})
+    debug_mod.note(session, "director_line", detail=text[:240])
 
-    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    led = dict(before)
+    t0 = time.monotonic()
     patch = await writer.write_patch(
         ollama,
         model=model,
@@ -237,6 +256,9 @@ async def chat(
         ledger=led,
         recent=_chat_tail(session),
     )
+    debug_mod.stage(session, "writer", t0)
+    debug_mod.note(session, "writer_patch", detail=str(patch), patch=patch)
+
     if ledger_mod.touched_picture(patch):
         led = ledger_mod.apply_patch(led, patch)
         session["refine_ledger"] = led
@@ -248,10 +270,12 @@ async def chat(
             meta={"patch": patch},
         )
 
-    # Refresh NOW before actress speaks.
+    t0 = time.monotonic()
     await assemble.rebuild_craft(db, ollama, session)
+    debug_mod.stage(session, "assemble_pre_actress", t0)
     now = str((session.get("craft") or {}).get("now") or "")
 
+    t0 = time.monotonic()
     say, propose = await writer.actress_turn(
         ollama,
         model=model,
@@ -260,6 +284,12 @@ async def chat(
         now=now,
         user_line=text,
         chat_tail=_chat_tail(session),
+    )
+    debug_mod.stage(session, "actress", t0)
+    debug_mod.note(
+        session, "actress",
+        detail=(say or "")[:240],
+        propose=propose or {},
     )
     _append_chat(session, role="assistant", name=name, text=say)
     events.publish(session["session_id"], {
@@ -279,7 +309,23 @@ async def chat(
             text=f"muse propose {propose}",
             meta={"patch": propose, "source": "muse"},
         )
+        t0 = time.monotonic()
         await assemble.rebuild_craft(db, ollama, session)
+        debug_mod.stage(session, "assemble_after_propose", t0)
+
+    craft = session.get("craft") or {}
+    after = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    debug_mod.turn_trace(
+        session,
+        line=text,
+        patch=patch,
+        propose=propose,
+        before=before,
+        after=after,
+        wd14=[t for t in str(craft.get("wd14_suggestions") or "").split(",") if t.strip()],
+        picked_wd14=[t for t in str(craft.get("picked_wd14") or "").split(",") if t.strip()],
+        quality=[t for t in str(craft.get("quality_tags") or "").split(",") if t.strip()],
+    )
 
     session["status"] = "chat"
     await session_db.save(db, session)

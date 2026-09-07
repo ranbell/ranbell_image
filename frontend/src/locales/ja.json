@@ -1829,13 +1829,22 @@
     "options": "オプション",
     "rebuild": "プロンプト再生成",
     "useWd14": "WD14タグを参考にする",
-    "useWd14Hint": "語彙バンクから近いタグを参考注入（服・場所の正本は上書きしない）",
+    "useWd14Hint": "ベクトル近傍は雑音も含む。プロンプトへ自動注入せず、品質強化時に閉じた候補から選ぶだけ",
     "enhanceQuality": "雰囲気・品質を高める",
-    "enhanceQualityHint": "光・空気感・画質タグを追加。動作だけの味気ないプロンプトを補う",
+    "enhanceQualityHint": "光・空気感・画質タグを追加。WD14オン時は候補から有用なものだけ採用",
+    "wd14Ref": "参考（未注入）",
+    "wd14Picked": "WD14から採用",
+    "qualityTags": "品質タグ",
     "prompt": "生成プロンプト",
     "board": "② 板を出す",
     "shoot": "③ 本番",
     "workflow": "ワークフロー",
-    "model": "LLM"
+    "model": "LLM",
+    "debugToggle": "デバッグ",
+    "debugTitle": "観測（判定には使わない）",
+    "debugHint": "writerパッチ・Muse提案・WD14参考／採用・段の所要時間を並べます",
+    "turnTrace": "ターン追跡",
+    "stageMs": "段の時間",
+    "refineLog": "イベントログ"
   }
 }
