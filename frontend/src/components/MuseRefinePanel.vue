@@ -48,6 +48,11 @@ const workflows = computed(() => {
 const models = computed(() => catalog.value?.llm?.models || [])
 const boardImages = computed(() => session.value?.board?.images || [])
 const shootImages = computed(() => session.value?.shoot?.images || [])
+const boardReady = computed(() => !!session.value?.board?.ready)
+const partner = computed(() => session.value?.partner_character || {})
+const standing = computed(() => session.value?.standing || [])
+const lastPitch = computed(() => session.value?.last_pitch || [])
+const bond = computed(() => session.value?.bond || {})
 
 async function api(path, opts = {}) {
   const resp = await fetch(path, {
@@ -123,6 +128,47 @@ async function pickCharacter(id) {
       `/api/muse-refine/sessions/${session.value.session_id}/character`,
       { method: 'POST', body: JSON.stringify({ character_id: id }) },
     )
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function pickPartner(id) {
+  if (!session.value?.session_id) return
+  busy.value = true
+  try {
+    session.value = await api(
+      `/api/muse-refine/sessions/${session.value.session_id}/partner`,
+      { method: 'POST', body: JSON.stringify({ partner_preset: id || '' }) },
+    )
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function sendPitch(opt) {
+  chatInput.value = `「${opt}」がいいな`
+  await sendChat()
+}
+
+async function finishSession() {
+  if (!session.value?.session_id || busy.value) return
+  if (!shootImages.value.length) {
+    fail(new Error(t('museRefine.finishNeedsShoot')))
+    return
+  }
+  if (!window.confirm(t('museRefine.finishConfirm'))) return
+  busy.value = true
+  try {
+    session.value = await api(
+      `/api/muse-refine/sessions/${session.value.session_id}/finish`,
+      { method: 'POST' },
+    )
+    emit('toast', { msg: t('museRefine.finishToast'), type: 'info' })
   } catch (err) {
     fail(err)
   } finally {
@@ -268,6 +314,10 @@ function rowKindLabel(row, t) {
   if (kind === 'ledger_change' || kind === 'ledger_missed') return t('museRefine.shotChange')
   if (kind === 'verify_ok') return t('museRefine.verifyOk')
   if (kind === 'verify_repair' || kind === 'verify_repaired') return t('museRefine.verifyRepair')
+  if (kind === 'pitch') return t('museRefine.pitch')
+  if (kind === 'standing') return t('museRefine.standing')
+  if (kind === 'contract') return t('museRefine.contract')
+  if (kind === 'wardrobe') return t('museRefine.wardrobe')
   return row.name || row.role
 }
 </script>
@@ -319,9 +369,9 @@ function rowKindLabel(row, t) {
           <!-- Chat + ledger -->
           <section class="flex min-h-0 flex-col border-r border-teal-950/40">
             <div class="border-b border-teal-950/30 px-3 py-2">
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <select
-                  class="max-w-[12rem] truncate rounded-md border border-teal-900/50 bg-teal-950/40 px-2 py-1 text-xs text-teal-100"
+                  class="max-w-[10rem] truncate rounded-md border border-teal-900/50 bg-teal-950/40 px-2 py-1 text-xs text-teal-100"
                   :value="inputs.character_id || ''"
                   :disabled="busy"
                   @change="pickCharacter($event.target.value)"
@@ -335,12 +385,30 @@ function rowKindLabel(row, t) {
                     {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
                   </option>
                 </select>
+                <select
+                  class="max-w-[10rem] truncate rounded-md border border-fuchsia-900/40 bg-fuchsia-950/30 px-2 py-1 text-xs text-fuchsia-100"
+                  :value="inputs.partner_preset || ''"
+                  :disabled="busy || !inputs.character_id"
+                  @change="pickPartner($event.target.value)"
+                >
+                  <option value="">{{ t('museRefine.noPartner') }}</option>
+                  <option
+                    v-for="c in characters.filter(x => x.id !== inputs.character_id)"
+                    :key="`p-${c.id}`"
+                    :value="c.id"
+                  >
+                    {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
+                  </option>
+                </select>
                 <span class="text-[10px] font-medium uppercase tracking-wide text-teal-500/80">NOW</span>
               </div>
               <p class="mt-1 text-[11px] leading-snug text-teal-100/80">
                 {{ craft.now || t('museRefine.nowEmpty') }}
               </p>
               <p class="mt-0.5 text-[10px] text-gray-500">{{ t('museRefine.nowAuthority') }}</p>
+              <p v-if="bond.last" class="mt-1 text-[10px] text-rose-200/70">
+                {{ t('museRefine.bondHint') }}: {{ bond.last }}
+              </p>
             </div>
 
             <div ref="chatEl" class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3 text-sm">
@@ -396,19 +464,31 @@ function rowKindLabel(row, t) {
               <p v-if="!chat.length" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
             </div>
 
-            <form class="flex gap-2 border-t border-teal-950/40 p-3" @submit.prevent="sendChat">
-              <input
-                v-model="chatInput"
-                type="text"
-                class="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-teal-600"
-                :placeholder="t('museRefine.chatPlaceholder')"
-                :disabled="busy || !session"
-              />
-              <button
-                type="submit"
-                class="rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-40"
-                :disabled="busy || !chatInput.trim()"
-              >{{ t('museRefine.send') }}</button>
+            <form class="flex flex-col gap-2 border-t border-teal-950/40 p-3" @submit.prevent="sendChat">
+              <div v-if="lastPitch.length" class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="opt in lastPitch"
+                  :key="opt"
+                  type="button"
+                  class="rounded-full border border-violet-700/50 bg-violet-950/40 px-2.5 py-1 text-[11px] text-violet-100 hover:bg-violet-900/50"
+                  :disabled="busy"
+                  @click="sendPitch(opt)"
+                >「{{ opt }}」</button>
+              </div>
+              <div class="flex gap-2">
+                <input
+                  v-model="chatInput"
+                  type="text"
+                  class="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-teal-600"
+                  :placeholder="t('museRefine.chatPlaceholder')"
+                  :disabled="busy || !session"
+                />
+                <button
+                  type="submit"
+                  class="rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-40"
+                  :disabled="busy || !chatInput.trim()"
+                >{{ t('museRefine.send') }}</button>
+              </div>
             </form>
           </section>
 
@@ -419,10 +499,22 @@ function rowKindLabel(row, t) {
               <dl class="grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-1 text-[11px]">
                 <dt class="text-gray-500">wearing</dt><dd class="text-gray-200">{{ ledger.wearing || '—' }}</dd>
                 <dt class="text-gray-500">beat</dt><dd class="text-gray-200">{{ ledger.beat || '—' }}</dd>
+                <dt class="text-gray-500">expression</dt><dd class="text-gray-200">{{ ledger.expression || '—' }}</dd>
                 <dt class="text-gray-500">scene</dt><dd class="text-gray-200">{{ ledger.scene || '—' }}</dd>
                 <dt class="text-gray-500">light</dt><dd class="text-gray-200">{{ ledger.light || '—' }}</dd>
                 <dt class="text-gray-500">bg</dt><dd class="text-gray-200">{{ ledger.bg || '—' }}</dd>
+                <dt class="text-gray-500">frame</dt><dd class="text-gray-200">{{ ledger.frame || '—' }}</dd>
+                <template v-if="partner.character_id">
+                  <dt class="text-gray-500">wearing_b</dt><dd class="text-gray-200">{{ ledger.wearing_b || '—' }}</dd>
+                  <dt class="text-gray-500">beat_b</dt><dd class="text-gray-200">{{ ledger.beat_b || '—' }}</dd>
+                </template>
               </dl>
+              <div v-if="standing.length" class="mt-2 border-t border-teal-950/40 pt-2">
+                <div class="mb-1 text-[10px] uppercase tracking-wide text-amber-200/70">{{ t('museRefine.standing') }}</div>
+                <ul class="space-y-0.5 text-[11px] text-amber-100/80">
+                  <li v-for="(s, i) in standing" :key="i">· {{ s }}</li>
+                </ul>
+              </div>
             </div>
 
             <div class="rounded-xl border border-teal-950/50 bg-gray-950/60 p-3">
@@ -490,10 +582,26 @@ function rowKindLabel(row, t) {
               <button
                 type="button"
                 class="rounded-lg bg-cyan-800/80 px-3 py-2 text-xs font-medium hover:bg-cyan-700 disabled:opacity-40"
-                :disabled="busy || comfyOffline || !craft.prompt"
-                @click="runStage('shoot')"
-              >{{ t('museRefine.shoot') }}</button>
+                :disabled="busy || comfyOffline || !craft.prompt || !boardReady"
+                :title="boardReady ? '' : t('museRefine.approveNeedsBoard')"
+                @click="runStage('approve')"
+              >{{ t('museRefine.approve') }}</button>
+              <button
+                type="button"
+                class="rounded-lg bg-gray-800 px-3 py-2 text-xs font-medium hover:bg-gray-700 disabled:opacity-40"
+                :disabled="busy || !inputs.character_id"
+                @click="runStage('wardrobe')"
+              >{{ t('museRefine.wardrobe') }}</button>
+              <button
+                type="button"
+                class="rounded-lg bg-rose-900/70 px-3 py-2 text-xs font-medium hover:bg-rose-800 disabled:opacity-40"
+                :disabled="busy || !shootImages.length"
+                @click="finishSession"
+              >{{ t('museRefine.finish') }}</button>
             </div>
+            <p v-if="craft.prompt && !boardReady" class="text-[10px] text-gray-500">
+              {{ t('museRefine.approveNeedsBoard') }}
+            </p>
 
             <div v-if="preview" class="overflow-hidden rounded-xl border border-teal-950/50">
               <img :src="preview" alt="preview" class="max-h-56 w-full object-contain bg-black" />

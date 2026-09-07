@@ -15,6 +15,8 @@ LEDGER_KEYS: tuple[str, ...] = (
     "light",
     "bg",
     "frame",
+    "wearing_b",
+    "beat_b",
 )
 
 DROP_KEYS: tuple[str, ...] = ("wearing_drop",)
@@ -28,6 +30,8 @@ FIELD_CHIPS: dict[str, dict[str, str]] = {
     "light": {"icon": "💡", "ja": "光", "en": "Light"},
     "bg": {"icon": "🏞", "ja": "背景", "en": "BG"},
     "frame": {"icon": "📷", "ja": "構図", "en": "Frame"},
+    "wearing_b": {"icon": "👗", "ja": "相方服", "en": "Partner clothes"},
+    "beat_b": {"icon": "🤝", "ja": "相方姿勢", "en": "Partner pose"},
     "wearing_drop": {"icon": "🗑", "ja": "脱ぐ", "en": "Drop"},
 }
 

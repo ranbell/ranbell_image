@@ -6,24 +6,15 @@ import logging
 import re
 from typing import Any
 
+from ..muse import identity
 from . import ledger as ledger_mod
+from . import persona
 
 logger = logging.getLogger(__name__)
 
-
-def _voice_block(character: dict[str, Any] | None, *, locale: str) -> str:
-    """Reuse Muse duet voice contract so Refine matches her individual speech."""
-    if not character:
-        return ""
-    try:
-        from ..muse import crew
-        return crew._voice_block(character, locale=locale)
-    except Exception:
-        logger.exception("[muse_refine] voice_block failed")
-        return ""
-
 WRITER_SYSTEM = """You update a shot ledger. Output ONLY a JSON object.
-Keys allowed: wearing, beat, expression, scene, light, bg, frame, wearing_drop.
+Keys allowed: wearing, beat, expression, scene, light, bg, frame,
+wearing_b, beat_b, wearing_drop.
 Rules:
 - Absolute phrases in English (danbooru-friendly words ok).
 - Include ONLY fields the latest line actually changes.
@@ -32,6 +23,8 @@ Rules:
 - wearing_drop: one garment name to remove, only when asked to take something off.
 - If the line is only emotion / banter / acknowledgement, return {}.
 - Multiple fields in one line → include all of them in one object.
+- wearing_b / beat_b only when a partner Muse is in the shot and the line
+  names her clothes or pose.
 """
 
 WRITER_RETRY = """The last line looks like a picture direction, but you returned {}.
@@ -40,38 +33,13 @@ keys. Still return {} only for pure emotion/banter with no picture change.
 Output ONLY JSON.
 """
 
-ACTRESS_SYSTEM = """You are the actress on set. Speak briefly in the user's language.
-
-ABSOLUTE TRUTH — the LEDGER JSON and NOW below are the shot as it stands.
-They override anything implied by older chat. Do not claim a different outfit,
-pose, place, face, light, or frame than LEDGER unless you are proposing a change
-in PROPOSE.
-
-SAY is performance only. Never treat SAY as updating the shot.
-ASIDE is your inner mutter (内心) — required every turn. Whispered, cute, same
-language as SAY. Chat-visible. Not shot truth. Do not dump wardrobe status into ASIDE.
-If you want the picture to change, you MUST output PROPOSE with ledger keys.
-If you are not changing the picture, omit PROPOSE.
-
-VOICE is mandatory. Every SAY and ASIDE must sound like THIS girl only — first
-person, address, talk quirks, and example rhythm from the VOICE block. A generic
-soft polite line that any other Muse could say is a failure; rewrite until only
-she would say it.
-
-Output format:
-SAY: <one or two short spoken lines in HER voice>
-ASIDE: <1–2 sentences of inner mutter / 内心, whispered, her voice>
-PROPOSE: <optional JSON object with ledger keys>
-No danbooru tags inside SAY or ASIDE. No markdown fences.
-"""
-
 VERIFY_SYSTEM = """You check whether the shot LEDGER matches the director's latest intent.
 
 Compare DIRECTOR line to LEDGER. Ignore pure emotion/banter — those need no picture change.
 
-COMMENT must be spoken IN CHARACTER using the VOICE block (first person, address,
-talk quirks, example rhythm). Generic announcer lines like "確認しました" without
-her quirks are a failure.
+COMMENT must be spoken IN CHARACTER using the VOICE / character contract (first
+person, address, talk quirks, example rhythm). Generic announcer lines like
+"確認しました" without her quirks are a failure.
 
 Output exactly:
 OK: yes
@@ -133,40 +101,62 @@ async def write_patch(
     return ledger_mod.normalize_patch(_extract_json_object(raw))
 
 
-def parse_actress(raw: str) -> tuple[str, str, dict[str, str]]:
-    """Returns (say, aside, propose)."""
+def parse_actress(raw: str) -> dict[str, Any]:
+    """Parse actress turn into say/aside/propose/my_feel/card/pitch.
+
+    Backward-compatible callers may still unpack the first three keys.
+    """
     text = (raw or "").strip()
-    say = ""
-    aside = ""
-    propose: dict[str, str] = {}
+    out: dict[str, Any] = {
+        "say": "",
+        "aside": "",
+        "propose": {},
+        "my_feel": "",
+        "card": "",
+        "pitch": "",
+    }
     if not text:
-        return say, aside, propose
+        return out
 
-    m = re.search(r"(?is)\bPROPOSE\s*:\s*(\{[\s\S]*\})\s*$", text)
+    propose: dict[str, str] = {}
+    m_prop = re.search(r"(?is)\bPROPOSE\s*:\s*(\{[\s\S]*\})\s*$", text)
     body = text
-    if m:
-        propose = ledger_mod.normalize_patch(_extract_json_object(m.group(1)))
-        body = text[: m.start()].strip()
+    if m_prop:
+        propose = ledger_mod.normalize_patch(_extract_json_object(m_prop.group(1)))
+        body = text[: m_prop.start()].strip()
 
-    # Split ASIDE (may appear after SAY).
-    aside_m = re.search(
-        r"(?is)\bASIDE\s*:\s*(.+?)(?=\n\s*(?:PROPOSE|CARD)\s*:|\Z)",
-        body,
-    )
-    if aside_m:
-        aside = aside_m.group(1).strip()
-        aside = re.sub(r"(?is)\b(?:PROPOSE|CARD)\s*:.*$", "", aside).strip()
-        aside = aside.splitlines()[0].strip() if aside else aside
-        body = (body[: aside_m.start()] + body[aside_m.end():]).strip()
+    blocks = identity.parse_talk_blocks(body)
+    say = identity.sanitize_muse_say(blocks.get("say") or "", locale="ja")
+    aside = (blocks.get("aside") or "").strip()
+    # Keep aside to first whisper beat if it spilled.
+    if aside:
+        aside = re.sub(
+            r"(?is)\b(?:PROPOSE|CARD|PITCH|MY_FEEL)\s*:.*$", "", aside,
+        ).strip()
+        lines = [ln.strip() for ln in aside.splitlines() if ln.strip()]
+        aside = " ".join(lines[:2]) if lines else ""
 
-    m_say = re.search(r"(?is)\bSAY\s*:\s*(.+)$", body)
-    if m_say:
-        say = m_say.group(1).strip()
-    else:
-        say = body.strip()
-    say = re.sub(r"(?is)^\s*SAY\s*:\s*", "", say).strip()
-    say = re.sub(r"(?is)\b(?:ASIDE|PROPOSE)\s*:.*$", "", say).strip()
-    return say, aside, propose
+    card = (blocks.get("card") or "").strip()
+    pitch = (blocks.get("pitch") or "").strip()
+    my_feel = (blocks.get("my_feel") or "").strip().splitlines()[0].strip() if blocks.get("my_feel") else ""
+
+    # If PROPOSE empty but CARD names fields, lift CARD → propose.
+    if not ledger_mod.touched_picture(propose) and card:
+        from_card = ledger_mod.normalize_patch(persona.card_to_patch(card))
+        if ledger_mod.touched_picture(from_card):
+            propose = from_card
+
+    out.update({
+        "say": say or (body.strip() if not blocks.get("say") and not card else say),
+        "aside": aside,
+        "propose": propose,
+        "my_feel": my_feel,
+        "card": card,
+        "pitch": pitch,
+    })
+    if not out["say"] and body and not any(blocks.get(k) for k in ("aside", "card", "pitch", "my_feel")):
+        out["say"] = identity.sanitize_muse_say(body, locale="ja")
+    return out
 
 
 def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
@@ -175,7 +165,6 @@ def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
     if not text:
         return True, "", {}
     ok_m = re.search(r"(?im)^\s*OK\s*:\s*(yes|no|true|false|ok|ng)\s*$", text)
-    # Also allow inline OK: yes
     if not ok_m:
         ok_m = re.search(r"(?i)\bOK\s*:\s*(yes|no|true|false|ok|ng)\b", text)
     ok_tok = (ok_m.group(1).lower() if ok_m else "yes")
@@ -186,7 +175,6 @@ def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
     if c_m:
         comment = c_m.group(1).strip()
         comment = re.sub(r"(?is)\bREPAIR\s*:.*$", "", comment).strip()
-        # first line only
         comment = comment.splitlines()[0].strip() if comment else ""
 
     repair: dict[str, str] = {}
@@ -194,7 +182,6 @@ def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
     if r_m:
         repair = ledger_mod.normalize_patch(_extract_json_object(r_m.group(1)))
     elif not ok:
-        # Sometimes model dumps JSON alone after COMMENT.
         repair = ledger_mod.normalize_patch(_extract_json_object(text))
 
     if ok:
@@ -213,14 +200,19 @@ async def actress_turn(
     identity_blurb: str,
     user_line: str,
     director_tail: str,
+    session: dict[str, Any] | None = None,
     character: dict[str, Any] | None = None,
-) -> tuple[str, dict[str, str]]:
+) -> dict[str, Any]:
     lang = "Japanese" if locale.startswith("ja") else "English"
-    voice = _voice_block(character, locale=("en" if lang == "English" else "ja"))
+    sess = session or {"character": character or {}, "session_id": ""}
+    if character and not sess.get("character"):
+        sess = {**sess, "character": character}
+    system = persona.actress_system(
+        sess, locale=locale, ledger=ledger, now=now,
+    )
     prompt = (
-        f"{ACTRESS_SYSTEM}\n"
-        f"Language for SAY: {lang}. Your name: {name or 'Muse'}.\n\n"
-        f"{voice}\n\n"
+        f"{system}\n\n"
+        f"Language for SAY/ASIDE: {lang}. Lead name: {name or 'Muse'}.\n\n"
         f"WHO YOU ARE (locked identity — do not contradict):\n"
         f"{identity_blurb or '(unspecified)'}\n\n"
         f"LEDGER (absolute shot document):\n"
@@ -234,7 +226,14 @@ async def actress_turn(
         raw = await ollama.generate_text(prompt, model=model or None)
     except Exception:
         logger.exception("[muse_refine] actress failed")
-        return ("……" if locale.startswith("ja") else "...", "", {})
+        return {
+            "say": "……" if locale.startswith("ja") else "...",
+            "aside": "",
+            "propose": {},
+            "my_feel": "",
+            "card": "",
+            "pitch": "",
+        }
     return parse_actress(raw)
 
 
@@ -249,10 +248,21 @@ async def verify_and_repair(
     now: str,
     force_repair_hint: bool = False,
     character: dict[str, Any] | None = None,
+    session: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, str]]:
     """After the turn: confirm intent match, or return a self-repair patch."""
     lang = "Japanese" if locale.startswith("ja") else "English"
-    voice = _voice_block(character, locale=("en" if lang == "English" else "ja"))
+    sess = session or {"character": character or {}}
+    if character and not sess.get("character"):
+        sess = {**sess, "character": character}
+    try:
+        from ..muse import crew
+        locale_key = "en" if lang == "English" else "ja"
+        voice = crew._voice_block(
+            sess.get("character") or character or {}, locale=locale_key,
+        )
+    except Exception:
+        voice = ""
     hint = (
         "\nNOTE: A picture direction may have been missed earlier — look carefully.\n"
         if force_repair_hint else ""
@@ -262,6 +272,7 @@ async def verify_and_repair(
         f"Language for COMMENT: {lang}. Speaker name: {name or 'Muse'}.\n"
         f"{hint}\n"
         f"{voice}\n\n"
+        f"{persona.ENTERTAINMENT_CRAFT}\n\n"
         f"DIRECTOR:\n{user_line.strip()}\n\n"
         f"LEDGER:\n{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
         f"NOW:\n{now}\n"
@@ -270,18 +281,18 @@ async def verify_and_repair(
         raw = await ollama.generate_text(prompt, model=model or None)
     except Exception:
         logger.exception("[muse_refine] verify failed")
-        # Soft fallback still tries her address/first person if present.
         first = ""
         addr = ""
-        if character:
+        char = sess.get("character") or character or {}
+        if char:
             first = str(
-                character.get("first_person_ja")
-                or (character.get("personality") or {}).get("first_person_ja")
+                char.get("first_person_ja")
+                or (char.get("personality") or {}).get("first_person_ja")
                 or "私"
             )
             addr = str(
-                character.get("user_address_ja")
-                or (character.get("personality") or {}).get("user_address_ja")
+                char.get("user_address_ja")
+                or (char.get("personality") or {}).get("user_address_ja")
                 or "総監督"
             )
         if locale.startswith("ja"):

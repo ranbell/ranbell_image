@@ -6,11 +6,11 @@ import time
 import uuid
 from typing import Any
 
-from ..characters import presets_db
-from ..muse import events, session_db
+from ..characters import presets as presets_db
+from ..muse import events, session_db, vitality
 from ..muse.defaults import ALL_DEFAULTS
 from ..muse.notebook import blank as notebook_blank
-from . import assemble, debug as debug_mod, ledger as ledger_mod, writer
+from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, writer
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,11 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
     inputs = _inputs(session)
     craft = session.get("craft") or {}
     char = session.get("character") or {}
+    partner = session.get("partner_character") or {}
+    board = session.get("board") or {}
+    shoot = session.get("shoot") or {}
+    bond = session.get("bond") or {}
+    board_ready = bool(board.get("images")) and not board.get("pending")
     return {
         "session_id": session.get("session_id"),
         "studio": STUDIO,
@@ -41,6 +46,7 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         "inputs": {
             "theme": inputs.get("theme", ""),
             "character_id": inputs.get("character_id", ""),
+            "partner_preset": inputs.get("partner_preset", ""),
             "workflow": inputs.get("workflow", ""),
             "model": inputs.get("model", ""),
             "locale": inputs.get("locale", "ja"),
@@ -58,7 +64,13 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         "character": {
             "character_id": char.get("character_id", ""),
             "name": char.get("name_ja") or char.get("name") or "",
+            "board": char.get("board") or {},
         },
+        "partner_character": {
+            "character_id": partner.get("character_id", ""),
+            "name": partner.get("name_ja") or partner.get("name") or "",
+            "board": partner.get("board") or {},
+        } if partner else {},
         "refine_ledger": session.get("refine_ledger") or ledger_mod.blank(),
         "craft": {
             "prompt": craft.get("prompt", ""),
@@ -71,16 +83,27 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "support_tags": craft.get("support_tags", ""),
         },
         "chat": list(session.get("chat") or [])[-40:],
+        "standing": list(session.get("standing") or [])[-8:],
+        "last_pitch": list(session.get("last_pitch") or [])[:2],
+        "feel_log": list(session.get("feel_log") or [])[-8:],
+        "bond": {
+            "last": str(bond.get("last") or "")[:120],
+            "inside": str(bond.get("inside") or "")[:120],
+        },
         "board": {
-            "images": list((session.get("board") or {}).get("images") or [])[-4:],
-            "status": (session.get("board") or {}).get("status", ""),
-            "error": (session.get("board") or {}).get("error", ""),
+            "images": list(board.get("images") or [])[-4:],
+            "status": board.get("status", ""),
+            "error": board.get("error", ""),
+            "pending": bool(board.get("pending")),
+            "ready": board_ready,
         },
         "shoot": {
-            "images": list((session.get("shoot") or {}).get("images") or [])[-4:],
-            "status": (session.get("shoot") or {}).get("status", ""),
-            "error": (session.get("shoot") or {}).get("error", ""),
+            "images": list(shoot.get("images") or [])[-4:],
+            "status": shoot.get("status", ""),
+            "error": shoot.get("error", ""),
+            "pending": bool(shoot.get("pending")),
         },
+        "diary": session.get("diary") or {},
         # Observability only — UI debug pane. Never used for decisions.
         "refine_log": list(session.get("refine_log") or [])[-40:],
         "stage_ms": list(session.get("stage_ms") or [])[-20:],
@@ -111,6 +134,7 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "mode": "duet",
         "inputs": merged,
         "character": {},
+        "partner_character": {},
         "refine_ledger": ledger_mod.blank(),
         "craft": {
             "prompt": "", "now": "", "tags": "", "scene": "",
@@ -127,6 +151,16 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "struck": [],
         "notes": [],
         "standing": [],
+        "memories": [],
+        "diary_memories": [],
+        "bond": {},
+        "caught": {},
+        "feel_log": [],
+        "last_pitch": [],
+        "prop_age": {"fp": "", "turns": 0},
+        "reunion_turn": False,
+        "commit_pitch": False,
+        "talk_turn_count": 0,
         "refine_log": [],
         "stage_ms": [],
         "turn_trace": [],
@@ -177,21 +211,63 @@ async def pick_character(db, session: dict[str, Any], character_id: str) -> dict
     led = dict(session.get("refine_ledger") or ledger_mod.blank())
     if not (led.get("wearing") or "").strip():
         costume = (preset.get("board") or {}).get("wearing") or ""
-        # Common preset fields.
-        wearing = (
-            costume
-            or preset.get("wearing")
-            or ""
-        )
-        if not wearing:
-            tags = preset.get("identity_tags") or []
-            # Do not dump identity into wearing.
-            wearing = ""
+        wearing = costume or preset.get("wearing") or ""
         if wearing:
             led["wearing"] = str(wearing).strip()
             session["refine_ledger"] = led
+    await persona.load_memory(db, session)
+    persona.mark_reunion(session)
     await assemble.rebuild_craft(db, None, session)
     await session_db.save(db, session)
+    return session
+
+
+async def pick_partner(db, session: dict[str, Any], partner_id: str) -> dict[str, Any]:
+    """Cast / clear W-Muse partner. Empty string clears."""
+    partner_id = (partner_id or "").strip()
+    if not partner_id:
+        session["partner_character"] = {}
+        session["inputs"] = {**_inputs(session), "partner_preset": ""}
+        session.pop("duet_tier", None)
+        await assemble.rebuild_craft(db, None, session)
+        await session_db.save(db, session)
+        return session
+    lead_id = str(_inputs(session).get("character_id") or "")
+    if partner_id == lead_id:
+        raise RefineError("partner must differ from lead")
+    preset = await presets_db.get_preset(db, partner_id)
+    if preset is None:
+        raise RefineError("character not found")
+    session["partner_character"] = {
+        **presets_db.preset_to_character(preset),
+        "character_id": partner_id,
+        "board": preset.get("board") or {},
+        "name": preset.get("name") or "",
+        "name_ja": preset.get("name_ja") or preset.get("name") or "",
+    }
+    session["inputs"] = {**_inputs(session), "partner_preset": partner_id}
+    # Chemistry tier for W-Muse prompt colour.
+    try:
+        from ..characters import compat as compat_mod
+        if lead_id:
+            compat = await compat_mod.compatibility(db, lead_id, partner_id)
+            session["duet_tier"] = {
+                "partner_id": partner_id,
+                "tier": str(compat.get("tier") or ""),
+            }
+            session["chemistry_notes"] = await presets_db.get_recent_chemistry_notes(
+                db, lead_id, limit=1, partner_id=partner_id,
+            )
+    except Exception:
+        logger.debug("[muse_refine] partner chemistry load failed", exc_info=True)
+    await assemble.rebuild_craft(db, None, session)
+    await session_db.save(db, session)
+    return session
+
+
+def set_standing(session: dict[str, Any], rules: list[str]) -> dict[str, Any]:
+    cleaned = [str(s).strip()[:120] for s in (rules or []) if str(s).strip()]
+    session["standing"] = cleaned[-12:]
     return session
 
 
@@ -319,9 +395,57 @@ async def chat(
     name = char.get("name_ja") or char.get("name") or "Muse"
     before = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
+    # Explicit standing order line — store and acknowledge without picture write.
+    standing_rule = persona.note_standing(session, text)
+    if standing_rule:
+        _append_chat(session, role="user", name="Director", text=text)
+        ack = (
+            f"常設に入れたよ：「{standing_rule}」"
+            if locale.startswith("ja") else
+            f"Standing order noted: “{standing_rule}”"
+        )
+        _append_chat(
+            session, role="assistant", name=name, text=ack,
+            meta={"kind": "standing"},
+        )
+        await session_db.save(db, session)
+        return session
+
+    session["commit_pitch"] = persona.is_commit_pitch(text)
+    vitality.bump_talk_turn(session)
+
     _append_chat(session, role="user", name="Director", text=text)
     events.publish(session["session_id"], {"type": "chat", "role": "user", "text": text})
     debug_mod.note(session, "director_line", detail=text[:240])
+
+    # Contract clerk — block crime/violence (and nsfw when configured) before her.
+    blocked = await persona.contract_check_with_db(db, ollama, session, text)
+    if blocked:
+        ja = locale.startswith("ja")
+        soft = (
+            "……それは、この撮影ではやれないみたい。"
+            if ja else
+            "…I don't think we can take that on this set."
+        )
+        _append_chat(
+            session, role="assistant", name=name, text=soft,
+            meta={"kind": "contract", "blocked": blocked},
+        )
+        _append_chat(
+            session,
+            role="system",
+            name="Studio",
+            text=(
+                "この発言は以降の会話に含めません"
+                if ja else
+                "This line is struck from further conversation"
+            ),
+            meta={"kind": "struck", "blocked": blocked},
+        )
+        debug_mod.note(session, "contract_block", detail=str(blocked))
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        return session
 
     led = dict(before)
     director_recent = _director_tail(session)
@@ -411,7 +535,7 @@ async def chat(
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
     t0 = time.monotonic()
-    say, aside, propose = await writer.actress_turn(
+    actress = await writer.actress_turn(
         ollama,
         model=model,
         locale=locale,
@@ -421,18 +545,28 @@ async def chat(
         identity_blurb=_identity_blurb(session),
         user_line=text,
         director_tail=director_recent,
+        session=session,
         character=char,
     )
     debug_mod.stage(session, "actress", t0)
+    say = actress.get("say") or ""
+    aside = actress.get("aside") or ""
+    propose = actress.get("propose") or {}
+    my_feel = actress.get("my_feel") or ""
+    pitch = actress.get("pitch") or ""
     debug_mod.note(
         session, "actress",
         detail=(say or "")[:240],
         aside=(aside or "")[:240],
         propose=propose or {},
+        my_feel=my_feel,
+        pitch=pitch,
     )
+    if my_feel:
+        persona.log_feel(session, my_feel)
     _append_chat(
         session, role="assistant", name=name, text=say,
-        meta={"kind": "say"},
+        meta={"kind": "say", "my_feel": my_feel or None},
     )
     events.publish(session["session_id"], {
         "type": "chat", "role": "assistant", "name": name, "text": say,
@@ -451,6 +585,17 @@ async def chat(
         })
         debug_mod.note(session, "aside", detail=aside[:240])
 
+    pitch_opts = persona.parse_pitch_options(pitch)
+    if pitch_opts:
+        session["last_pitch"] = pitch_opts
+        _append_chat(
+            session,
+            role="assistant",
+            name=name,
+            text=" ｜ ".join(pitch_opts) if locale.startswith("ja") else " | ".join(pitch_opts),
+            meta={"kind": "pitch", "options": pitch_opts},
+        )
+
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)
         led = ledger_mod.apply_patch(led, propose)
@@ -467,7 +612,6 @@ async def chat(
         for i in range(len(chat) - 1, -1, -1):
             if chat[i].get("role") != "assistant":
                 continue
-            # Prefer the SAY row, not the ASIDE (banter) that follows it.
             if (chat[i].get("meta") or {}).get("kind") == "banter":
                 continue
             meta = dict(chat[i].get("meta") or {})
@@ -485,6 +629,13 @@ async def chat(
         await assemble.rebuild_craft(db, ollama, session)
         debug_mod.stage(session, "assemble_after_propose", t0)
 
+    # Diary-read catch fires once, then consume so it never loops.
+    if session.get("caught"):
+        await persona.consume_caught(db, session)
+    if session.get("reunion_turn"):
+        persona.clear_reunion(session)
+    session["commit_pitch"] = False
+
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     now = str((session.get("craft") or {}).get("now") or "")
     t0 = time.monotonic()
@@ -498,6 +649,7 @@ async def chat(
         now=now,
         force_repair_hint=missed,
         character=char,
+        session=session,
     )
     debug_mod.stage(session, "verify", t0)
     debug_mod.note(
@@ -643,6 +795,79 @@ async def rebuild(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
+async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
+    """Approve board → final shoot. Requires a finished board (OK gate)."""
+    from ..muse import runner
+    from ..spooler.models import JobLane
+
+    board = session.get("board") or {}
+    if board.get("pending"):
+        raise RefineError(
+            "板の生成が終わるまで待ってください"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Wait for the board to finish rendering"
+        )
+    if not board.get("images"):
+        raise RefineError(
+            "先に板を出してから本番へ（板→OK→本番）"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Run a board first, then approve for final shoot"
+        )
+
+    # Prefer the approved board prompt when ledger has not moved since board.
+    board_prompt = str(board.get("prompt") or "").strip()
+    board_fp = str(board.get("ledger_fp") or "")
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    cur_fp = "|".join(str(led.get(k) or "") for k in ledger_mod.LEDGER_KEYS)
+    if board_prompt and board_fp and board_fp == cur_fp:
+        prompt = board_prompt
+    else:
+        await assemble.rebuild_craft(db, request.app.state.ollama, session)
+        prompt = str((session.get("craft") or {}).get("prompt") or "").strip()
+    if not prompt:
+        raise RefineError("prompt is empty")
+    if not _inputs(session).get("workflow"):
+        raise RefineError("workflow required")
+
+    locale = str(_inputs(session).get("locale") or "ja")
+    _append_chat(
+        session,
+        role="system",
+        name="Studio",
+        text=(
+            "承認を受け付けました。本番撮影に入ります。"
+            if locale.startswith("ja") else
+            "Approved. Going to final shoot."
+        ),
+        meta={"kind": "approve"},
+    )
+
+    session["shoot"] = {
+        "prompt": prompt,
+        "status": "queued",
+        "error": "",
+        "images": [],
+        "pending": True,
+        "seed": int(board.get("seed") or 0),
+        "job_id": "",
+    }
+    session["status"] = "shooting"
+    await session_db.save(db, session)
+
+    spooler = request.app.state.spooler
+    session["shoot"]["job_id"] = spooler.submit(
+        JobLane.GENERATION,
+        "muse_refine_shoot",
+        runner.run_shoot_job,
+        db=db,
+        comfy=request.app.state.comfy,
+        session_id=session["session_id"],
+        ollama=request.app.state.ollama,
+    )
+    await session_db.save(db, session)
+    return session
+
+
 async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     """Enqueue a board render using muse runner (prompt from refine craft)."""
     from ..muse import runner
@@ -654,6 +879,7 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
         raise RefineError("prompt is empty")
     if not _inputs(session).get("workflow"):
         raise RefineError("workflow required")
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     session["board"] = {
         "prompt": prompt,
         "status": "queued",
@@ -662,6 +888,7 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
         "pending": True,
         "seed": 0,
         "job_id": "",
+        "ledger_fp": "|".join(str(led.get(k) or "") for k in ledger_mod.LEDGER_KEYS),
         "round": int((session.get("board") or {}).get("round") or 0) + 1,
     }
     session["status"] = "boarding"
@@ -681,40 +908,100 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
-async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
-    from ..muse import runner
-    from ..spooler.models import JobLane
+async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """Absolute wardrobe readout → ledger.wearing (escape hatch)."""
+    from ..muse import chain, brief as brief_mod, crew
 
-    await assemble.rebuild_craft(db, request.app.state.ollama, session)
-    prompt = str((session.get("craft") or {}).get("prompt") or "").strip()
-    if not prompt:
-        raise RefineError("prompt is empty")
-    if not _inputs(session).get("workflow"):
-        raise RefineError("workflow required")
-    session["shoot"] = {
-        "prompt": prompt,
-        "status": "queued",
-        "error": "",
-        "images": [],
-        "pending": True,
-        "seed": 0,
-        "job_id": "",
-    }
-    session["status"] = "shooting"
-    await session_db.save(db, session)
-
-    spooler = request.app.state.spooler
-    session["shoot"]["job_id"] = spooler.submit(
-        JobLane.GENERATION,
-        "muse_refine_shoot",
-        runner.run_shoot_job,
-        db=db,
-        comfy=request.app.state.comfy,
-        session_id=session["session_id"],
-        ollama=request.app.state.ollama,
+    inputs = _inputs(session)
+    locale = str(inputs.get("locale") or "ja")
+    model = str(inputs.get("model") or "")
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    prev = str(led.get("wearing") or "")
+    char = session.get("character") or {}
+    name = char.get("name_ja") or char.get("name") or "Muse"
+    system = crew.actress_duet_prompt(
+        char, mode="wardrobe", locale=("en" if locale.startswith("en") else "ja"),
+        seed=str(session.get("session_id") or ""),
     )
+    transcript = _director_tail(session, n=12)
+    try:
+        say, wearing = await chain.run_wardrobe(
+            ollama,
+            system=system,
+            notebook_wearing=prev,
+            transcript=transcript,
+            struck="",
+            model=model or None,
+            num_ctx=None,
+        )
+    except Exception as exc:
+        raise RefineError(
+            "衣装部屋から戻ってこられませんでした"
+            if locale.startswith("ja") else
+            "Wardrobe readout failed"
+        ) from exc
+    tidy = brief_mod.tidy_wearing(wearing) if hasattr(brief_mod, "tidy_wearing") else str(wearing or "").strip()
+    if tidy:
+        before = dict(led)
+        led = ledger_mod.apply_patch(led, {"wearing": tidy})
+        session["refine_ledger"] = led
+        _change_event(
+            session, source="wardrobe", patch={"wearing": tidy},
+            before=before, after=led, locale=locale,
+        )
+        await assemble.rebuild_craft(db, ollama, session)
+    if say:
+        _append_chat(session, role="assistant", name=name, text=say, meta={"kind": "wardrobe"})
+    session["status"] = "chat"
     await session_db.save(db, session)
     return session
+
+
+async def finish_session(db, request, session: dict[str, Any]) -> dict[str, Any]:
+    """Wrap after final shoot — diary hook via Muse finish_session when possible."""
+    shoot = session.get("shoot") or {}
+    if not shoot.get("images"):
+        raise RefineError(
+            "本番撮影が終わってから終了してください。"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Finish the final shoot before wrapping up."
+        )
+    locale = str(_inputs(session).get("locale") or "ja")
+    bond = session.get("bond") or {}
+    last = str(bond.get("last") or "").strip()
+    coda = (
+        (
+            "今日の余韻、メモに残しておくね"
+            + (f"（{last[:80]}）" if last else "。")
+        )
+        if locale.startswith("ja") else
+        (
+            "I'll keep today's distance in the bond card"
+            + (f" ({last[:80]})." if last else ".")
+        )
+    )
+    _append_chat(
+        session, role="system", name="Studio", text=coda, meta={"kind": "finish"},
+    )
+    # Prefer Muse diary pipeline when available.
+    try:
+        from ..muse import service as muse_service
+        session["studio"] = STUDIO  # keep identity
+        # Temporarily mark so Muse finish accepts shoot images.
+        return await muse_service.finish_session(
+            db,
+            request.app.state.spooler,
+            session,
+            ollama=request.app.state.ollama,
+            comfy=request.app.state.comfy,
+        )
+    except Exception as exc:
+        # Soft fallback — still mark finished without diary job.
+        logger.warning("[muse_refine] finish via muse failed: %s", exc)
+        session["status"] = "finished"
+        session["diary"] = {"status": "skipped", "reason": "refine_fallback"}
+        await session_db.save(db, session)
+        return session
 
 
 async def list_refine_sessions(db, *, limit: int = 20) -> list[dict[str, Any]]:

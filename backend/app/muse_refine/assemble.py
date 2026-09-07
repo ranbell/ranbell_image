@@ -45,7 +45,10 @@ def _phrase_to_tags(phrase: str) -> list[str]:
 
 def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
     bag: list[str] = []
-    for key in ("wearing", "beat", "expression", "scene", "light", "bg", "frame"):
+    for key in (
+        "wearing", "beat", "expression", "scene", "light", "bg", "frame",
+        "wearing_b", "beat_b",
+    ):
         bag.extend(_phrase_to_tags(ledger.get(key) or ""))
     seen: set[str] = set()
     out: list[str] = []
@@ -218,21 +221,32 @@ def assemble_prompt(
 ) -> str:
     """Identity-first positive from ledger (+ optional *chosen* support tags)."""
     char = session.get("character") or {}
+    partner = session.get("partner_character") or {}
     identity_tags = list(char.get("identity_tags") or [])
     bag = ledger_tag_bag(ledger)
+    if partner and str(partner.get("character_id") or "").strip():
+        # W-Muse: keep both girls visible without dumping partner wardrobe into lead.
+        if not any(t.lower() in {"2girls", "multiple_girls"} for t in identity_tags + bag):
+            bag = ["2girls", *bag]
+        for t in list(partner.get("identity_tags") or [])[:8]:
+            if str(t).strip() and str(t).strip().lower() not in {
+                x.lower() for x in identity_tags
+            }:
+                bag.append(str(t).strip())
     if support_tags:
         bag = merge_support_tags(bag, support_tags, authority=bag)
     tags = ", ".join(bag)
     scene = scene_prose(ledger)
     framing = str((session.get("inputs") or {}).get("framing") or "auto")
     style = str((session.get("inputs") or {}).get("style") or "")
+    cast = [c for c in (char, partner) if c and str(c.get("character_id") or "").strip()]
     return identity.assemble_positive(
         identity_tags,
         tags,
         scene,
         framing=framing,
         style=style,
-        cast=[char] if char else None,
+        cast=cast or ([char] if char else None),
     )
 
 

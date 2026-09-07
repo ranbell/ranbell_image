@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/muse-refine", tags=["muse-refine"])
 class SessionCreate(BaseModel):
     theme: str = ""
     character_id: str = ""
+    partner_preset: str = ""
     workflow: str = ""
     model: str = ""
     locale: str = "ja"
@@ -31,6 +32,7 @@ class SessionCreate(BaseModel):
 class InputsPatch(BaseModel):
     theme: str | None = None
     character_id: str | None = None
+    partner_preset: str | None = None
     workflow: str | None = None
     model: str | None = None
     locale: str | None = None
@@ -50,8 +52,16 @@ class CharacterPick(BaseModel):
     character_id: str
 
 
+class PartnerPick(BaseModel):
+    partner_preset: str = ""
+
+
 class ChatBody(BaseModel):
     message: str
+
+
+class StandingBody(BaseModel):
+    standing: list[str] = Field(default_factory=list)
 
 
 def _db(request: Request):
@@ -86,6 +96,13 @@ async def create_session(body: SessionCreate, request: Request):
         try:
             session = await service.pick_character(
                 _db(request), session, body.character_id,
+            )
+        except service.RefineError as exc:
+            raise HTTPException(400, exc.message) from exc
+    if body.partner_preset:
+        try:
+            session = await service.pick_partner(
+                _db(request), session, body.partner_preset,
             )
         except service.RefineError as exc:
             raise HTTPException(400, exc.message) from exc
@@ -126,6 +143,27 @@ async def pick_character(session_id: str, body: CharacterPick, request: Request)
     return service.public_view(session)
 
 
+@router.post("/sessions/{session_id}/partner")
+async def pick_partner(session_id: str, body: PartnerPick, request: Request):
+    session = await _session(request, session_id)
+    try:
+        session = await service.pick_partner(
+            _db(request), session, body.partner_preset,
+        )
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
+@router.put("/sessions/{session_id}/standing")
+async def put_standing(session_id: str, body: StandingBody, request: Request):
+    session = await _session(request, session_id)
+    service.set_standing(session, body.standing)
+    from ..muse import session_db
+    await session_db.save(_db(request), session)
+    return service.public_view(session)
+
+
 @router.post("/sessions/{session_id}/chat")
 async def chat(session_id: str, body: ChatBody, request: Request):
     session = await _session(request, session_id)
@@ -145,6 +183,18 @@ async def rebuild(session_id: str, request: Request):
     return service.public_view(session)
 
 
+@router.post("/sessions/{session_id}/wardrobe")
+async def wardrobe(session_id: str, request: Request):
+    session = await _session(request, session_id)
+    try:
+        session = await service.wardrobe_stage(
+            _db(request), _ollama(request), session,
+        )
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
 @router.post("/sessions/{session_id}/board")
 async def board(session_id: str, request: Request):
     session = await _session(request, session_id)
@@ -155,11 +205,23 @@ async def board(session_id: str, request: Request):
     return service.public_view(session)
 
 
+@router.post("/sessions/{session_id}/approve")
 @router.post("/sessions/{session_id}/shoot")
-async def shoot(session_id: str, request: Request):
+async def approve_or_shoot(session_id: str, request: Request):
+    """Board OK → final. Same gate whether called approve or shoot."""
     session = await _session(request, session_id)
     try:
         session = await service.start_shoot(_db(request), request, session)
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
+@router.post("/sessions/{session_id}/finish")
+async def finish(session_id: str, request: Request):
+    session = await _session(request, session_id)
+    try:
+        session = await service.finish_session(_db(request), request, session)
     except service.RefineError as exc:
         raise HTTPException(400, exc.message) from exc
     return service.public_view(session)
