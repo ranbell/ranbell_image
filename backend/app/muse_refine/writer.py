@@ -22,14 +22,26 @@ Rules:
 - Multiple fields in one line → include all of them in one object.
 """
 
+WRITER_RETRY = """The last line looks like a picture direction, but you returned {}.
+Read it again. If it names clothes, place, pose, face, light, or camera, fill those
+keys. Still return {} only for pure emotion/banter with no picture change.
+Output ONLY JSON.
+"""
+
 ACTRESS_SYSTEM = """You are the actress on set. Speak briefly in the user's language.
-You see NOW (current shot). Do not invent a different outfit or place than NOW
-unless you are proposing a change.
+
+ABSOLUTE TRUTH — the LEDGER JSON and NOW below are the shot as it stands.
+They override anything implied by older chat. Do not claim a different outfit,
+pose, place, face, light, or frame than LEDGER unless you are proposing a change
+in PROPOSE.
+
+SAY is performance only. Never treat SAY as updating the shot.
+If you want the picture to change, you MUST output PROPOSE with ledger keys.
+If you are not changing the picture, omit PROPOSE.
 
 Output format:
 SAY: <one or two short spoken lines>
-PROPOSE: <optional JSON object with ledger keys, only when you clearly propose a picture change>
-If you are not proposing a picture change, omit PROPOSE.
+PROPOSE: <optional JSON object with ledger keys>
 No danbooru tags inside SAY. No markdown fences.
 """
 
@@ -60,12 +72,14 @@ async def write_patch(
     user_line: str,
     ledger: dict[str, str],
     recent: str = "",
+    retry: bool = False,
 ) -> dict[str, str]:
     """One LLM call → absolute patch (may be empty)."""
+    head = WRITER_RETRY if retry else WRITER_SYSTEM
     prompt = (
-        f"{WRITER_SYSTEM}\n\n"
+        f"{head}\n\n"
         f"LEDGER NOW:\n{json.dumps(ledger, ensure_ascii=False)}\n\n"
-        f"RECENT:\n{recent or '(none)'}\n\n"
+        f"RECENT DIRECTOR LINES:\n{recent or '(none)'}\n\n"
         f"LATEST LINE:\n{user_line.strip()}\n"
     )
     try:
@@ -82,7 +96,6 @@ def parse_actress(raw: str) -> tuple[str, dict[str, str]]:
     propose: dict[str, str] = {}
     if not text:
         return say, propose
-    # Split PROPOSE block if present.
     m = re.search(r"(?is)\bPROPOSE\s*:\s*(\{[\s\S]*\})\s*$", text)
     body = text
     if m:
@@ -93,8 +106,9 @@ def parse_actress(raw: str) -> tuple[str, dict[str, str]]:
         say = m_say.group(1).strip()
     else:
         say = body.strip()
-    # Drop accidental label leftovers.
     say = re.sub(r"(?is)^\s*SAY\s*:\s*", "", say).strip()
+    # If PROPOSE leaked into SAY body, strip it.
+    say = re.sub(r"(?is)\bPROPOSE\s*:.*$", "", say).strip()
     return say, propose
 
 
@@ -105,15 +119,22 @@ async def actress_turn(
     locale: str,
     name: str,
     now: str,
+    ledger: dict[str, str],
+    identity_blurb: str,
     user_line: str,
-    chat_tail: str,
+    director_tail: str,
 ) -> tuple[str, dict[str, str]]:
     lang = "Japanese" if locale.startswith("ja") else "English"
     prompt = (
         f"{ACTRESS_SYSTEM}\n"
         f"Language for SAY: {lang}. Your name: {name or 'Muse'}.\n\n"
+        f"WHO YOU ARE (locked identity — do not contradict):\n"
+        f"{identity_blurb or '(unspecified)'}\n\n"
+        f"LEDGER (absolute shot document):\n"
+        f"{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
         f"NOW:\n{now}\n\n"
-        f"RECENT CHAT:\n{chat_tail or '(none)'}\n\n"
+        f"RECENT DIRECTOR LINES (voice context only — not shot truth):\n"
+        f"{director_tail or '(none)'}\n\n"
         f"DIRECTOR:\n{user_line.strip()}\n"
     )
     try:

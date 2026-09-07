@@ -248,6 +248,15 @@ onBeforeUnmount(() => {
 function thumb(sha) {
   return sha ? `/api/thumbnails/${sha}.webp` : ''
 }
+
+function rowChips(row) {
+  const chips = row?.meta?.chips
+  if (Array.isArray(chips) && chips.length) return chips
+  return []
+}
+function isChangeRow(row) {
+  return row?.meta?.kind === 'ledger_change' || row?.meta?.kind === 'ledger_missed'
+}
 </script>
 
 <template>
@@ -296,23 +305,29 @@ function thumb(sha) {
         <div class="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1.1fr_0.9fr]">
           <!-- Chat + ledger -->
           <section class="flex min-h-0 flex-col border-r border-teal-950/40">
-            <div class="flex items-center gap-2 border-b border-teal-950/30 px-3 py-2">
-              <select
-                class="max-w-[12rem] truncate rounded-md border border-teal-900/50 bg-teal-950/40 px-2 py-1 text-xs text-teal-100"
-                :value="inputs.character_id || ''"
-                :disabled="busy"
-                @change="pickCharacter($event.target.value)"
-              >
-                <option value="">{{ t('museRefine.pickCharacter') }}</option>
-                  <option
-                  v-for="c in characters"
-                  :key="c.id"
-                  :value="c.id"
+            <div class="border-b border-teal-950/30 px-3 py-2">
+              <div class="flex items-center gap-2">
+                <select
+                  class="max-w-[12rem] truncate rounded-md border border-teal-900/50 bg-teal-950/40 px-2 py-1 text-xs text-teal-100"
+                  :value="inputs.character_id || ''"
+                  :disabled="busy"
+                  @change="pickCharacter($event.target.value)"
                 >
-                  {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
-                </option>
-              </select>
-              <span class="truncate text-[11px] text-gray-500">{{ craft.now || t('museRefine.nowEmpty') }}</span>
+                  <option value="">{{ t('museRefine.pickCharacter') }}</option>
+                  <option
+                    v-for="c in characters"
+                    :key="c.id"
+                    :value="c.id"
+                  >
+                    {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
+                  </option>
+                </select>
+                <span class="text-[10px] font-medium uppercase tracking-wide text-teal-500/80">NOW</span>
+              </div>
+              <p class="mt-1 text-[11px] leading-snug text-teal-100/80">
+                {{ craft.now || t('museRefine.nowEmpty') }}
+              </p>
+              <p class="mt-0.5 text-[10px] text-gray-500">{{ t('museRefine.nowAuthority') }}</p>
             </div>
 
             <div ref="chatEl" class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3 text-sm">
@@ -322,14 +337,34 @@ function thumb(sha) {
                 class="rounded-lg px-2.5 py-2"
                 :class="row.role === 'user'
                   ? 'bg-teal-950/40 text-teal-50'
-                  : row.role === 'system'
-                    ? 'bg-gray-900/80 text-[11px] text-gray-400'
-                    : 'bg-gray-900 text-gray-100'"
+                  : isChangeRow(row)
+                    ? (row.meta?.kind === 'ledger_missed'
+                      ? 'border border-amber-700/50 bg-amber-950/30 text-[11px] text-amber-100'
+                      : 'border border-teal-800/40 bg-teal-950/20 text-[11px] text-teal-100')
+                    : row.role === 'system'
+                      ? 'bg-gray-900/80 text-[11px] text-gray-400'
+                      : 'bg-gray-900 text-gray-100'"
               >
-                <div class="mb-0.5 text-[10px] uppercase tracking-wide text-gray-500">
-                  {{ row.name || row.role }}
+                <div class="mb-0.5 flex flex-wrap items-center gap-1.5">
+                  <span class="text-[10px] uppercase tracking-wide text-gray-500">
+                    {{ isChangeRow(row) ? t('museRefine.shotChange') : (row.name || row.role) }}
+                  </span>
+                  <span
+                    v-for="chip in rowChips(row)"
+                    :key="chip.key"
+                    class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] leading-none"
+                    :class="chip.key === 'missed'
+                      ? 'border-amber-600/60 bg-amber-900/50 text-amber-100'
+                      : 'border-teal-600/50 bg-teal-900/60 text-teal-50'"
+                    :title="chip.key"
+                  >
+                    <span aria-hidden="true">{{ chip.icon }}</span>
+                    <span>{{ chip.label }}</span>
+                  </span>
                 </div>
-                <div class="whitespace-pre-wrap leading-relaxed">{{ row.text }}</div>
+                <div v-if="!isChangeRow(row) || row.text" class="whitespace-pre-wrap leading-relaxed">
+                  {{ row.text }}
+                </div>
               </div>
               <p v-if="!chat.length" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
             </div>

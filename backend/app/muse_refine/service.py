@@ -216,13 +216,69 @@ def _append_chat(
     return row
 
 
-def _chat_tail(session: dict[str, Any], n: int = 6) -> str:
-    rows = list(session.get("chat") or [])[-n:]
-    lines = []
-    for r in rows:
-        who = r.get("name") or r.get("role") or ""
-        lines.append(f"{who}: {r.get('text') or ''}")
-    return "\n".join(lines)
+def _patch_last_user_meta(session: dict[str, Any], **fields: Any) -> None:
+    chat = list(session.get("chat") or [])
+    for i in range(len(chat) - 1, -1, -1):
+        if chat[i].get("role") == "user":
+            meta = dict(chat[i].get("meta") or {})
+            meta.update({k: v for k, v in fields.items() if v is not None})
+            chat[i] = {**chat[i], "meta": meta}
+            session["chat"] = chat
+            return
+
+
+def _director_tail(session: dict[str, Any], n: int = 8) -> str:
+    """Director lines only — never Muse SAY (avoids outfit smuggling)."""
+    rows = [
+        r for r in (session.get("chat") or [])
+        if r.get("role") == "user"
+    ][-n:]
+    return "\n".join(f"Director: {r.get('text') or ''}" for r in rows)
+
+
+def _identity_blurb(session: dict[str, Any]) -> str:
+    char = session.get("character") or {}
+    tags = [str(t) for t in (char.get("identity_tags") or []) if str(t).strip()]
+    name = char.get("name_ja") or char.get("name") or ""
+    # Keep short — locked look, not wardrobe.
+    head = ", ".join(tags[:12])
+    if name and head:
+        return f"{name}: {head}"
+    return head or name or ""
+
+
+def _change_event(
+    session: dict[str, Any],
+    *,
+    source: str,
+    patch: dict[str, str],
+    before: dict[str, str],
+    after: dict[str, str],
+    locale: str,
+) -> None:
+    fields = ledger_mod.changed_fields(before, after) or ledger_mod.patch_fields(patch)
+    chips = ledger_mod.chips_for(fields, locale=locale)
+    if not chips and not patch:
+        return
+    detail_bits = []
+    for key in fields:
+        if key == "wearing_drop":
+            detail_bits.append(f"-{patch.get('wearing_drop')}")
+        else:
+            detail_bits.append(f"{key}={after.get(key) or patch.get(key) or ''}")
+    _append_chat(
+        session,
+        role="system",
+        name="Shot",
+        text=" · ".join(detail_bits) if detail_bits else source,
+        meta={
+            "kind": "ledger_change",
+            "source": source,
+            "fields": fields,
+            "chips": chips,
+            "patch": patch,
+        },
+    )
 
 
 async def chat(
@@ -248,32 +304,91 @@ async def chat(
     debug_mod.note(session, "director_line", detail=text[:240])
 
     led = dict(before)
+    director_recent = _director_tail(session)
     t0 = time.monotonic()
     patch = await writer.write_patch(
         ollama,
         model=model,
         user_line=text,
         ledger=led,
-        recent=_chat_tail(session),
+        recent=director_recent,
     )
     debug_mod.stage(session, "writer", t0)
-    debug_mod.note(session, "writer_patch", detail=str(patch), patch=patch)
 
+    retried = False
+    if not ledger_mod.touched_picture(patch) and ledger_mod.looks_like_picture_line(text):
+        retried = True
+        t0 = time.monotonic()
+        patch = await writer.write_patch(
+            ollama,
+            model=model,
+            user_line=text,
+            ledger=led,
+            recent=director_recent,
+            retry=True,
+        )
+        debug_mod.stage(session, "writer_retry", t0)
+        debug_mod.note(session, "writer_retry", detail=str(patch), patch=patch)
+
+    debug_mod.note(session, "writer_patch", detail=str(patch), patch=patch, retried=retried)
+
+    missed = False
     if ledger_mod.touched_picture(patch):
         led = ledger_mod.apply_patch(led, patch)
         session["refine_ledger"] = led
+        _change_event(
+            session,
+            source="director",
+            patch=patch,
+            before=before,
+            after=led,
+            locale=locale,
+        )
+        _patch_last_user_meta(
+            session,
+            fields=ledger_mod.changed_fields(before, led) or ledger_mod.patch_fields(patch),
+            chips=ledger_mod.chips_for(
+                ledger_mod.changed_fields(before, led) or ledger_mod.patch_fields(patch),
+                locale=locale,
+            ),
+            patch=patch,
+        )
+    elif ledger_mod.looks_like_picture_line(text):
+        missed = True
+        _patch_last_user_meta(
+            session,
+            missed_picture=True,
+            chips=[{
+                "key": "missed",
+                "icon": "⚠",
+                "label": "未反映" if locale.startswith("ja") else "Missed",
+            }],
+        )
         _append_chat(
             session,
             role="system",
-            name="Ledger",
-            text=f"patch {patch}",
-            meta={"patch": patch},
+            name="Shot",
+            text=(
+                "画の指示っぽいが ledger に載らなかった（要やり直し）"
+                if locale.startswith("ja") else
+                "Looked like a picture note but ledger did not move"
+            ),
+            meta={
+                "kind": "ledger_missed",
+                "chips": [{
+                    "key": "missed",
+                    "icon": "⚠",
+                    "label": "未反映" if locale.startswith("ja") else "Missed",
+                }],
+            },
         )
+        debug_mod.note(session, "writer_missed", detail=text[:240])
 
     t0 = time.monotonic()
     await assemble.rebuild_craft(db, ollama, session)
     debug_mod.stage(session, "assemble_pre_actress", t0)
     now = str((session.get("craft") or {}).get("now") or "")
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
     t0 = time.monotonic()
     say, propose = await writer.actress_turn(
@@ -282,8 +397,10 @@ async def chat(
         locale=locale,
         name=name,
         now=now,
+        ledger=led,
+        identity_blurb=_identity_blurb(session),
         user_line=text,
-        chat_tail=_chat_tail(session),
+        director_tail=director_recent,
     )
     debug_mod.stage(session, "actress", t0)
     debug_mod.note(
@@ -297,18 +414,32 @@ async def chat(
     })
 
     if ledger_mod.touched_picture(propose):
-        led = ledger_mod.apply_patch(
-            {**ledger_mod.blank(), **(session.get("refine_ledger") or {})},
-            propose,
-        )
+        before_p = dict(led)
+        led = ledger_mod.apply_patch(led, propose)
         session["refine_ledger"] = led
-        _append_chat(
+        _change_event(
             session,
-            role="system",
-            name="Ledger",
-            text=f"muse propose {propose}",
-            meta={"patch": propose, "source": "muse"},
+            source="muse",
+            patch=propose,
+            before=before_p,
+            after=led,
+            locale=locale,
         )
+        # Mark the assistant row with propose chips.
+        chat = list(session.get("chat") or [])
+        for i in range(len(chat) - 1, -1, -1):
+            if chat[i].get("role") == "assistant":
+                meta = dict(chat[i].get("meta") or {})
+                fields = ledger_mod.changed_fields(before_p, led) or ledger_mod.patch_fields(propose)
+                meta.update({
+                    "fields": fields,
+                    "chips": ledger_mod.chips_for(fields, locale=locale),
+                    "propose": propose,
+                    "source": "muse",
+                })
+                chat[i] = {**chat[i], "meta": meta}
+                session["chat"] = chat
+                break
         t0 = time.monotonic()
         await assemble.rebuild_craft(db, ollama, session)
         debug_mod.stage(session, "assemble_after_propose", t0)
@@ -326,6 +457,8 @@ async def chat(
         picked_wd14=[t for t in str(craft.get("picked_wd14") or "").split(",") if t.strip()],
         quality=[t for t in str(craft.get("quality_tags") or "").split(",") if t.strip()],
     )
+    if missed:
+        debug_mod.note(session, "turn_missed_picture", detail="heuristic picture line, empty patch")
 
     session["status"] = "chat"
     await session_db.save(db, session)
