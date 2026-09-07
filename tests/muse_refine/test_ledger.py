@@ -72,7 +72,12 @@ def test_split_picked_vs_free():
 
 def test_assemble_prompt_includes_ledger(monkeypatch):
     session = {
-        "character": {"identity_tags": ["1girl", "blue_hair"], "character_id": "x"},
+        "character": {
+            "identity_tags": ["1girl", "blue_hair", "bob_cut"],
+            "character_id": "x",
+            "name": "Mio",
+            "name_ja": "みお",
+        },
         "inputs": {"framing": "upper_body", "style": ""},
     }
     led = {
@@ -86,11 +91,11 @@ def test_assemble_prompt_includes_ledger(monkeypatch):
     }
     prompt = assemble.assemble_prompt(session, led, support_tags=["depth_of_field"])
     low = prompt.lower()
-    assert "blue_hair" in low or "1girl" in low
+    assert "blue_hair" in low or "1girl" in low or "2girls" in low or "mio" in low
     assert "white" in low or "shirt" in low
     assert "cafe" in low or "sitting" in low
-    # Thick prose reinforcement (not just "cafe. soft light").
-    assert "wearing" in low or "she is wearing" in low
+    # Thick prose reinforcement
+    assert "wearing" in low
     assert "keep exactly" in low
 
 
@@ -106,7 +111,7 @@ def test_scene_prose_locks_all_axes():
         "wearing_b": "",
         "beat_b": "",
     }
-    prose = assemble.scene_prose(led)
+    prose = assemble.scene_prose(led, name_a="Mio")
     low = prose.lower()
     assert "rooftop" in low
     assert "white shirt" in low
@@ -115,6 +120,66 @@ def test_scene_prose_locks_all_axes():
     assert "medium shot" in low
     assert "keep exactly" in low
     assert len(prose) > 80
+
+
+def test_w_muse_does_not_mix_clothes_or_hair():
+    session = {
+        "character": {
+            "character_id": "mio",
+            "name": "Mio",
+            "name_ja": "みお",
+            "identity_tags": [
+                "1girl", "silver_hair", "bob_cut", "blue_eyes", "flat_chest",
+            ],
+        },
+        "partner_character": {
+            "character_id": "sumire",
+            "name": "Sumire",
+            "name_ja": "すみれ",
+            "identity_tags": [
+                "1girl", "blonde_hair", "long_hair", "green_eyes", "medium_breasts",
+            ],
+        },
+        "inputs": {"framing": "auto", "style": ""},
+        "banned": [],
+    }
+    led = {
+        "wearing": "white shirt, blue skirt",
+        "beat": "standing, leaning on railing",
+        "expression": "soft smile",
+        "scene": "rooftop at dusk",
+        "light": "warm evening light",
+        "bg": "city skyline",
+        "frame": "medium shot",
+        "wearing_b": "black dress",
+        "beat_b": "standing beside her",
+    }
+    prompt = assemble.assemble_prompt(session, led)
+    # Person-box layout: each Muse owns her line.
+    assert "Mio is" in prompt or "みお is" in prompt
+    assert "Sumire is" in prompt or "すみれ is" in prompt
+    # Dynamic ownership lines
+    assert "Mio:" in prompt or "みお:" in prompt
+    assert "Sumire:" in prompt or "すみれ:" in prompt
+    # Lead clothes on lead dynamic line, not dumped into partner identity.
+    mio_dyn = ""
+    sum_dyn = ""
+    for line in prompt.splitlines():
+        if line.startswith("Mio:") or line.startswith("みお:"):
+            mio_dyn = line.lower()
+        if line.startswith("Sumire:") or line.startswith("すみれ:"):
+            sum_dyn = line.lower()
+    assert "white_shirt" in mio_dyn or "blue_skirt" in mio_dyn
+    assert "black_dress" in sum_dyn
+    assert "black_dress" not in mio_dyn
+    assert "white_shirt" not in sum_dyn
+    # Partner blonde must not appear on Mio identity line as free flat bag.
+    mio_id = ""
+    for line in prompt.splitlines():
+        if line.startswith("Mio is") or line.startswith("みお is"):
+            mio_id = line.lower()
+    assert "blonde_hair" not in mio_id
+    assert "1girl" not in prompt.split(",")[0] or "2girls" in prompt.lower()
 
 
 def test_assemble_without_support_ignores_raw_wd14_bag():

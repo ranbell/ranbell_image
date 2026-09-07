@@ -62,12 +62,19 @@ def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
     return out
 
 
-def scene_prose(ledger: dict[str, str], *, partner: bool = False) -> str:
+def scene_prose(
+    ledger: dict[str, str],
+    *,
+    partner: bool = False,
+    name_a: str = "",
+    name_b: str = "",
+) -> str:
     """Thick English SCENE paragraph — locks every ledger axis into prose.
 
     Tags alone drift; this paragraph is the firm reinforcement that restates
     clothes, pose, face, place, light, and camera as one readable moment.
     Deterministic: no invention beyond ledger phrases.
+    Ownership stays split: lead clothes/pose never attributed to the partner.
     """
     wearing = (ledger.get("wearing") or "").strip()
     beat = (ledger.get("beat") or "").strip()
@@ -78,6 +85,8 @@ def scene_prose(ledger: dict[str, str], *, partner: bool = False) -> str:
     frame = (ledger.get("frame") or "").strip()
     wearing_b = (ledger.get("wearing_b") or "").strip()
     beat_b = (ledger.get("beat_b") or "").strip()
+    lead = (name_a or "She").strip() or "She"
+    other = (name_b or "Her partner").strip() or "Her partner"
 
     if not any((wearing, beat, expression, scene, light, bg, frame, wearing_b, beat_b)):
         return ""
@@ -92,7 +101,7 @@ def scene_prose(ledger: dict[str, str], *, partner: bool = False) -> str:
         else:
             stage_bits.append(f"at {scene}")
     if bg and bg.lower() not in (scene or "").lower():
-        stage_bits.append(f"with {bg} behind her")
+        stage_bits.append(f"with {bg} behind them" if partner else f"with {bg} behind her")
     if light:
         if any(w in light.lower() for w in ("light", "sun", "glow", "lamp", "neon")):
             stage_bits.append(f"under {light}")
@@ -101,35 +110,42 @@ def scene_prose(ledger: dict[str, str], *, partner: bool = False) -> str:
     if stage_bits:
         parts.append("The shot is set " + ", ".join(stage_bits) + ".")
     else:
-        parts.append("The shot holds her in frame.")
+        parts.append("The shot holds them in frame." if partner else "The shot holds her in frame.")
 
     if wearing:
-        parts.append(f"She is wearing {wearing}.")
+        parts.append(f"{lead} is wearing {wearing}.")
     if beat:
-        # Avoid double "standing" opener clash — still absolute.
-        parts.append(f"Her body: {beat}.")
+        parts.append(f"{lead}'s body: {beat}.")
     if expression:
-        parts.append(f"Her face: {expression}.")
-    if frame:
-        parts.append(f"Camera: {frame}.")
+        parts.append(f"{lead}'s face: {expression}.")
 
     if partner or wearing_b or beat_b:
         if wearing_b:
-            parts.append(f"Her partner wears {wearing_b}.")
+            parts.append(f"{other} is wearing {wearing_b}.")
         if beat_b:
-            parts.append(f"Her partner's body: {beat_b}.")
-        parts.append("Both share the same moment and place; do not split the scene.")
+            parts.append(f"{other}'s body: {beat_b}.")
+        parts.append(
+            f"Do not swap clothes or hairstyles between {lead} and {other}. "
+            "Both share the same place and moment."
+        )
 
-    # Closing lock — short restatement so the sampler hears it twice.
+    if frame:
+        parts.append(f"Camera: {frame}.")
+
+    # Closing lock — short restatement so the sampler hears ownership twice.
     lock: list[str] = []
     if wearing:
-        lock.append(wearing)
+        lock.append(f"{lead}: {wearing}")
     if beat:
-        lock.append(beat)
+        lock.append(f"{lead} body {beat}")
+    if wearing_b:
+        lock.append(f"{other}: {wearing_b}")
+    if beat_b:
+        lock.append(f"{other} body {beat_b}")
     if scene:
         lock.append(scene)
     if expression:
-        lock.append(expression)
+        lock.append(f"{lead} face {expression}")
     if frame:
         lock.append(frame)
     if lock:
@@ -138,10 +154,128 @@ def scene_prose(ledger: dict[str, str], *, partner: bool = False) -> str:
     return " ".join(parts)
 
 
+def _person_box(
+    session: dict[str, Any],
+    *,
+    wearing: str,
+    beat: str,
+    expression: str = "",
+) -> dict[str, list[str]]:
+    """One Muse's dynamic tags — clothes / pose / face only."""
+    wear = talk.filter_banned_tags(session, _phrase_to_tags(wearing))
+    pose = _phrase_to_tags(beat)
+    face = _phrase_to_tags(expression)
+    return {"wearing": wear, "beat": pose, "face": face}
+
+
+def _frame_wide_tags(ledger: dict[str, str]) -> list[str]:
+    """Shared picture tags — place / light / bg / camera. Never clothes or hair."""
+    bag: list[str] = []
+    for key in ("scene", "light", "bg", "frame"):
+        bag.extend(_phrase_to_tags(ledger.get(key) or ""))
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in bag:
+        low = t.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(t)
+    return out
+
+
+def assemble_prompt(
+    session: dict[str, Any],
+    ledger: dict[str, str],
+    *,
+    support_tags: list[str] | None = None,
+    scene_override: str | None = None,
+) -> str:
+    """Identity-first positive with per-person ownership (Muse box path).
+
+    Lead clothes/pose/face never share a flat bag with the partner's — same
+    rule as classic Muse ``assemble_from_boxes`` so hair and outfits do not swap.
+    """
+    char = session.get("character") or {}
+    partner = session.get("partner_character") or {}
+    has_partner = bool(partner and str(partner.get("character_id") or "").strip())
+    name_a = str(char.get("name_ja") or char.get("name") or "Lead")
+    name_b = str(partner.get("name_ja") or partner.get("name") or "Partner")
+    framing = str((session.get("inputs") or {}).get("framing") or "auto")
+    style = str((session.get("inputs") or {}).get("style") or "")
+    prose = (
+        scene_override if scene_override is not None
+        else scene_prose(
+            ledger, partner=has_partner, name_a=name_a, name_b=name_b,
+        )
+    )
+    support = talk.filter_banned_tags(
+        session,
+        [str(t).strip().replace(" ", "_") for t in (support_tags or []) if str(t).strip()],
+    )
+
+    cast = [char]
+    people = [
+        _person_box(
+            session,
+            wearing=str(ledger.get("wearing") or ""),
+            beat=str(ledger.get("beat") or ""),
+            expression=str(ledger.get("expression") or ""),
+        ),
+    ]
+    if has_partner:
+        cast.append(partner)
+        people.append(
+            _person_box(
+                session,
+                wearing=str(ledger.get("wearing_b") or ""),
+                beat=str(ledger.get("beat_b") or ""),
+                expression="",  # no expression_b — do not copy lead's face onto B
+            ),
+        )
+
+    boxed = identity.assemble_from_boxes(
+        cast=cast,
+        people=people,
+        frame_wide=_frame_wide_tags(ledger),
+        style=style,
+        framing=framing,
+        scene=prose,
+        support=support,
+    )
+    if boxed:
+        return boxed
+
+    # Fallback (no usable identity tags): flat path, still without mixing bags.
+    identity_tags = [
+        t for t in (char.get("identity_tags") or [])
+        if str(t).strip() and str(t).strip().lower() not in {"1girl", "solo"}
+    ]
+    bag = talk.filter_banned_tags(
+        session,
+        _phrase_to_tags(str(ledger.get("wearing") or ""))
+        + _phrase_to_tags(str(ledger.get("beat") or ""))
+        + _phrase_to_tags(str(ledger.get("expression") or ""))
+        + _frame_wide_tags(ledger),
+    )
+    if support:
+        bag = merge_support_tags(bag, support, authority=bag)
+    return identity.assemble_positive(
+        ["1girl", *identity_tags] if identity_tags else ["1girl"],
+        ", ".join(bag),
+        prose,
+        framing=framing,
+        style=style,
+        cast=[char] if char else None,
+    )
+
+
 _PROSE_DENSIFY = """You densify a shot SCENE paragraph for image generation.
 Keep EVERY fact from LEDGER and BASE PROSE unchanged — clothes, pose, face,
 place, light, background, camera. Do not rename garments. Do not move the place.
 Do not invent props that fight the ledger.
+If two people are present, NEVER swap clothes, hairstyles, or body traits
+between them — keep each person's ownership exact.
 Expand into 2–4 flowing English sentences (about 60–140 words) that reinforce
 the same moment with sensory glue (air, temperature, weight, gaze) only.
 Output the paragraph only. No labels. No tags. No markdown.
@@ -336,47 +470,6 @@ async def quality_enrich(
     return [], parts
 
 
-def assemble_prompt(
-    session: dict[str, Any],
-    ledger: dict[str, str],
-    *,
-    support_tags: list[str] | None = None,
-    scene_override: str | None = None,
-) -> str:
-    """Identity-first positive from ledger (+ optional *chosen* support tags)."""
-    char = session.get("character") or {}
-    partner = session.get("partner_character") or {}
-    identity_tags = list(char.get("identity_tags") or [])
-    bag = ledger_tag_bag(ledger)
-    bag = talk.filter_banned_tags(session, bag)
-    has_partner = bool(partner and str(partner.get("character_id") or "").strip())
-    if has_partner:
-        # W-Muse: keep both girls visible without dumping partner wardrobe into lead.
-        if not any(t.lower() in {"2girls", "multiple_girls"} for t in identity_tags + bag):
-            bag = ["2girls", *bag]
-        for t in list(partner.get("identity_tags") or [])[:8]:
-            if str(t).strip() and str(t).strip().lower() not in {
-                x.lower() for x in identity_tags
-            }:
-                bag.append(str(t).strip())
-    if support_tags:
-        bag = merge_support_tags(bag, support_tags, authority=bag)
-    tags = ", ".join(bag)
-    scene = (scene_override if scene_override is not None
-             else scene_prose(ledger, partner=has_partner))
-    framing = str((session.get("inputs") or {}).get("framing") or "auto")
-    style = str((session.get("inputs") or {}).get("style") or "")
-    cast = [c for c in (char, partner) if c and str(c.get("character_id") or "").strip()]
-    return identity.assemble_positive(
-        identity_tags,
-        tags,
-        scene,
-        framing=framing,
-        style=style,
-        cast=cast or ([char] if char else None),
-    )
-
-
 async def rebuild_craft(
     db,
     ollama,
@@ -429,10 +522,14 @@ async def rebuild_craft(
         )
 
     chosen = list(picked_wd14) + list(quality_tags)
-    has_partner = bool(
-        (session.get("partner_character") or {}).get("character_id")
+    partner = session.get("partner_character") or {}
+    has_partner = bool(partner.get("character_id"))
+    char = session.get("character") or {}
+    name_a = str(char.get("name_ja") or char.get("name") or "Lead")
+    name_b = str(partner.get("name_ja") or partner.get("name") or "Partner")
+    prose = scene_prose(
+        led, partner=has_partner, name_a=name_a, name_b=name_b,
     )
-    prose = scene_prose(led, partner=has_partner)
     if bool(inputs.get("enhance_quality")) and ollama is not None and prose:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")
