@@ -96,12 +96,14 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "error": board.get("error", ""),
             "pending": bool(board.get("pending")),
             "ready": board_ready,
+            "job_id": str(board.get("job_id") or ""),
         },
         "shoot": {
             "images": list(shoot.get("images") or [])[-4:],
             "status": shoot.get("status", ""),
             "error": shoot.get("error", ""),
             "pending": bool(shoot.get("pending")),
+            "job_id": str(shoot.get("job_id") or ""),
         },
         "diary": session.get("diary") or {},
         "opened": bool(session.get("opened")),
@@ -970,15 +972,21 @@ async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
     board = session.get("board") or {}
     if board.get("pending"):
         raise RefineError(
-            "板の生成が終わるまで待ってください"
+            "試し撮りの生成が終わるまで待ってください"
             if str(_inputs(session).get("locale") or "ja").startswith("ja") else
-            "Wait for the board to finish rendering"
+            "Wait for the test shot to finish rendering"
+        )
+    if (session.get("shoot") or {}).get("pending"):
+        raise RefineError(
+            "本番の生成が終わるまで待ってください"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Wait for the final shoot to finish rendering"
         )
     if not board.get("images"):
         raise RefineError(
-            "先に板を出してから本番へ（板→OK→本番）"
+            "先に試し撮りしてから本番へ"
             if str(_inputs(session).get("locale") or "ja").startswith("ja") else
-            "Run a board first, then approve for final shoot"
+            "Run a test shot first, then approve for final shoot"
         )
 
     # Prefer the approved board prompt when ledger has not moved since board.
@@ -1039,6 +1047,21 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     """Enqueue a board render using muse runner (prompt from refine craft)."""
     from ..muse import runner
     from ..spooler.models import JobLane
+
+    board = session.get("board") or {}
+    if board.get("pending"):
+        raise RefineError(
+            "試し撮りの生成が終わるまで待ってください"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Wait for the test shot to finish rendering"
+        )
+    shoot = session.get("shoot") or {}
+    if shoot.get("pending"):
+        raise RefineError(
+            "本番の生成が終わるまで待ってください"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Wait for the final shoot to finish rendering"
+        )
 
     await assemble.rebuild_craft(db, request.app.state.ollama, session)
     prompt = str((session.get("craft") or {}).get("prompt") or "").strip()

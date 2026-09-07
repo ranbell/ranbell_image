@@ -40,7 +40,30 @@ def test_shoot_requires_board():
     with pytest.raises(service.RefineError) as ei:
         import asyncio
         asyncio.run(service.start_shoot(None, Req(), session))
-    assert "板" in ei.value.message
+    assert "試し撮り" in ei.value.message
+
+
+def test_public_view_exposes_board_shoot_job_ids():
+    session = service.new_session()
+    session["board"] = {
+        "images": [{"image_id": "a"}],
+        "pending": False,
+        "job_id": "job-board-1",
+        "error": "",
+        "status": "ready",
+    }
+    session["shoot"] = {
+        "images": [],
+        "pending": True,
+        "job_id": "job-shoot-2",
+        "error": "",
+        "status": "queued",
+    }
+    view = service.public_view(session)
+    assert view["board"]["job_id"] == "job-board-1"
+    assert view["board"]["ready"] is True
+    assert view["shoot"]["job_id"] == "job-shoot-2"
+    assert view["shoot"]["pending"] is True
 
 
 def test_public_view_exposes_partner_and_standing():

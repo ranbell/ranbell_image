@@ -30,6 +30,8 @@ function toggleDebug() {
 const chatInput = ref('')
 const chatEl = ref(null)
 const preview = ref('')
+const job = ref(null)
+const lightboxSrc = ref('')
 const showDiary = ref(false)
 const themeDraft = ref('')
 const streamLive = ref(false)
@@ -58,6 +60,9 @@ const models = computed(() => catalog.value?.llm?.models || [])
 const boardImages = computed(() => session.value?.board?.images || [])
 const shootImages = computed(() => session.value?.shoot?.images || [])
 const boardReady = computed(() => !!session.value?.board?.ready)
+const boardError = computed(() => String(session.value?.board?.error || '').trim())
+const shootError = computed(() => String(session.value?.shoot?.error || '').trim())
+const sessionStatus = computed(() => String(session.value?.status || ''))
 const partner = computed(() => session.value?.partner_character || {})
 const standing = computed(() => session.value?.standing || [])
 const lastPitch = computed(() => session.value?.last_pitch || [])
@@ -72,6 +77,32 @@ const againFeelAvailable = computed(() => !!session.value?.again_feel_available)
 
 function thumb(sha) {
   return sha ? `/api/thumbnails/${sha}.webp` : ''
+}
+function full(sha) {
+  return sha ? `/api/originals/${sha}` : ''
+}
+function openLightbox(src) {
+  const url = String(src || '').trim()
+  if (!url) return
+  lightboxSrc.value = url
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', onLightboxKey)
+  }
+}
+function openLightboxSha(sha) {
+  openLightbox(full(sha))
+}
+function closeLightbox() {
+  lightboxSrc.value = ''
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', onLightboxKey)
+  }
+}
+function onLightboxKey(e) {
+  if (e.key !== 'Escape' || !lightboxSrc.value) return
+  closeLightbox()
+  e.preventDefault()
+  e.stopPropagation()
 }
 
 const leadCharacter = computed(() => session.value?.character || {})
@@ -88,7 +119,20 @@ const waitName = computed(() =>
 )
 const boardPending = computed(() => !!session.value?.board?.pending)
 const shootPending = computed(() => !!session.value?.shoot?.pending)
+const renderLocked = computed(() => busy.value || boardPending.value || shootPending.value)
+const chatLocked = computed(() => renderLocked.value || speaking.value)
 const waitingOnModel = computed(() => busy.value || speaking.value)
+const statusLabel = computed(() => {
+  if (waitingOnModel.value) return t('museRefine.status.chatting')
+  const st = sessionStatus.value
+  if (st === 'boarding' || boardPending.value) return t('museRefine.status.boarding')
+  if (st === 'awaiting_ok') return t('museRefine.status.awaitingOk')
+  if (st === 'shooting' || shootPending.value) return t('museRefine.status.shooting')
+  if (st === 'done') return t('museRefine.status.done')
+  if (st === 'finished') return t('museRefine.status.finished')
+  if (opened.value) return t('museRefine.status.chat')
+  return t('museRefine.status.idle')
+})
 function clock(sec) {
   const s = Math.max(0, Number(sec) || 0)
   const m = Math.floor(s / 60)
@@ -131,6 +175,7 @@ function fail(err) {
   emit('toast', { msg: String(err?.message || err), type: 'error' })
 }
 function close() {
+  closeLightbox()
   emit('update:show', false)
 }
 
@@ -144,6 +189,11 @@ async function ensureCatalog() {
 
 async function startFresh(characterId = '') {
   busy.value = true
+  preview.value = ''
+  job.value = null
+  elapsed.value = 0
+  startedAt = 0
+  speaking.value = false
   try {
     await ensureCatalog()
     const body = {
@@ -321,7 +371,7 @@ function isSayRow(row) {
 
 async function sendChat() {
   const msg = chatInput.value.trim()
-  if (!msg || !session.value?.session_id || busy.value) return
+  if (!msg || !session.value?.session_id || chatLocked.value) return
   chatInput.value = ''
   busy.value = true
   speaking.value = true
@@ -358,13 +408,22 @@ async function rebuild() {
 }
 
 async function runStage(path) {
-  if (!session.value?.session_id || busy.value) return
+  if (!session.value?.session_id || busy.value || renderLocked.value) return
+  if (path === 'board' || path === 'approve') {
+    if (props.comfyOffline) return
+  }
   busy.value = true
+  if (path === 'board' || path === 'approve') {
+    preview.value = ''
+    job.value = null
+    if (!startedAt) startedAt = Date.now()
+  }
   try {
     session.value = await api(
       `/api/muse-refine/sessions/${session.value.session_id}/${path}`,
       { method: 'POST' },
     )
+    sampleJob()
   } catch (err) {
     fail(err)
   } finally {
@@ -403,6 +462,8 @@ function openStream(id) {
     if (!data?.type || data.type === 'hello' || data.type === 'ping') return
     if (data.type === 'preview' && data.image) {
       preview.value = `data:image/jpeg;base64,${data.image}`
+      if (!startedAt) startedAt = Date.now()
+      sampleJob()
       return
     }
     if (data.type === 'muse_speaking') {
@@ -413,6 +474,15 @@ function openStream(id) {
     if (data.type === 'chat' || data.type === 'chat_message') {
       speaking.value = false
       scheduleRefresh(true)
+      return
+    }
+    if (data.type === 'diary_status') {
+      scheduleRefresh()
+      if (data.status === 'ok') {
+        emit('toast', { msg: t('museRefine.diaryReady'), type: 'info' })
+      } else if (data.status === 'failed') {
+        emit('toast', { msg: t('museRefine.diaryFailed'), type: 'error' })
+      }
       return
     }
     if (
@@ -452,27 +522,38 @@ async function refresh() {
   if (!session.value?.session_id) return
   try {
     session.value = await api(`/api/muse-refine/sessions/${session.value.session_id}`)
+    sampleJob()
   } catch { /* ignore */ }
+}
+function sampleJob() {
+  const map = props.getJobsMap?.()
+  if (!map?.get) { job.value = null; return }
+  const id = session.value?.shoot?.job_id || session.value?.board?.job_id
+  job.value = id ? (map.get(id) || null) : null
 }
 function startPoll() {
   if (pollTimer) return
   let tick = 0
   pollTimer = setInterval(async () => {
     if (typeof document !== 'undefined' && document.hidden) return
+    sampleJob()
     const rendering = boardPending.value || shootPending.value
     const inferring = busy.value || speaking.value
     // SSE is primary; poll only while work is in flight or the stream dropped.
     if (!rendering && !inferring && streamLive.value) {
-      elapsed.value = 0
-      tick = 0
-      startedAt = 0
+      if (!waitingOnModel.value) {
+        elapsed.value = 0
+        tick = 0
+        startedAt = 0
+      }
       return
     }
     if (!startedAt && (rendering || inferring)) startedAt = Date.now()
     if (startedAt) elapsed.value = Math.round((Date.now() - startedAt) / 1000)
-    // ~3s refresh while rendering; slower (~6s) fallback when SSE is down.
+    // While rendering, refresh every ~3s (or ~6s if SSE dropped) for pending/images.
     const every = streamLive.value ? 3 : 6
-    if (++tick % every === 0) await refresh()
+    tick += 1
+    if ((rendering || !streamLive.value) && tick % every === 0) await refresh()
   }, 1000)
 }
 function stopPoll() {
@@ -501,6 +582,7 @@ watch(() => props.show, async (open) => {
 })
 
 onBeforeUnmount(() => {
+  closeLightbox()
   closeStream()
   stopPoll()
 })
@@ -823,27 +905,27 @@ function isStruckRow(row) {
                 <button
                   type="button"
                   class="rounded-lg border border-pink-500/40 bg-pink-950/40 px-2.5 py-1.5 text-[10px] font-medium text-pink-100 hover:bg-pink-900/50 disabled:opacity-40"
-                  :disabled="busy || comfyOffline || !craft.prompt"
-                  :title="craft.prompt ? t('museRefine.boardTitle') : t('museRefine.prepFirst')"
+                  :disabled="chatLocked || comfyOffline || !craft.prompt"
+                  :title="craft.prompt ? t('museRefine.boardHint') : t('museRefine.prepFirst')"
                   @click="runStage('board')"
                 >{{ t('museRefine.board') }}</button>
                 <button
                   type="button"
                   class="rounded-lg border border-amber-500/50 bg-amber-950/40 px-2.5 py-1.5 text-[10px] font-medium text-amber-200 hover:bg-amber-900/60 disabled:opacity-40"
-                  :disabled="busy || comfyOffline || !craft.prompt || !boardReady"
+                  :disabled="chatLocked || comfyOffline || !craft.prompt || !boardReady"
                   :title="boardReady ? t('museRefine.approveTitle') : t('museRefine.approveNeedsBoard')"
                   @click="runStage('approve')"
                 >{{ t('museRefine.approve') }}</button>
                 <button
                   type="button"
                   class="rounded-lg border border-slate-600/50 bg-slate-900/60 px-2.5 py-1.5 text-[10px] text-gray-300 hover:bg-slate-800 disabled:opacity-40"
-                  :disabled="busy || !inputs.character_id"
+                  :disabled="chatLocked || !inputs.character_id"
                   @click="runStage('wardrobe')"
                 >{{ t('museRefine.wardrobe') }}</button>
                 <button
                   type="button"
                   class="ml-auto rounded-lg border border-rose-500/50 bg-rose-950/40 px-2.5 py-1.5 text-[10px] font-medium text-rose-200 hover:bg-rose-900/60 disabled:opacity-40"
-                  :disabled="busy || !shootImages.length || diaryWriting"
+                  :disabled="chatLocked || !shootImages.length || diaryWriting"
                   :title="shootImages.length ? '' : t('museRefine.finishNeedsShoot')"
                   @click="finishSession"
                 >{{ diaryWriting ? t('museRefine.diaryWriting') : diaryDone ? t('museRefine.diaryDone') : t('museRefine.finish') }}</button>
@@ -863,19 +945,92 @@ function isStruckRow(row) {
                   type="text"
                   class="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-pink-500"
                   :placeholder="t('museRefine.chatPlaceholder')"
-                  :disabled="busy || !session"
+                  :disabled="chatLocked || !session"
                 />
                 <button
                   type="submit"
                   class="rounded-lg bg-pink-600 px-3 py-2 text-sm font-medium text-white hover:bg-pink-500 disabled:opacity-40"
-                  :disabled="busy || !chatInput.trim()"
+                  :disabled="chatLocked || !chatInput.trim()"
                 >{{ t('museRefine.send') }}</button>
               </div>
+              <p class="text-[10px] text-gray-500">
+                {{ statusLabel }}
+                <span v-if="elapsed"> · {{ t('museRefine.elapsed', { s: clock(elapsed) }) }}</span>
+              </p>
             </form>
           </section>
 
           <!-- Prompt / options / images -->
           <section class="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
+            <!-- live preview + galleries (Muse-aligned) -->
+            <div
+              v-if="preview || boardPending || shootPending"
+              class="flex flex-col items-center gap-2"
+            >
+              <img
+                v-if="preview"
+                :src="preview"
+                alt=""
+                class="max-h-[42vh] w-full cursor-zoom-in rounded-lg border border-pink-500/20 bg-black object-contain shadow-2xl"
+                :title="t('museRefine.zoomImage')"
+                @click="openLightbox(preview)"
+              />
+              <div
+                v-else
+                class="flex aspect-[3/4] max-h-[42vh] w-full animate-pulse items-center justify-center rounded-lg border border-pink-500/20 bg-black/40 text-[11px] text-gray-500"
+              >
+                {{ job?.progress_text || t('museRefine.renderWait') }}
+              </div>
+              <div class="h-1 w-full overflow-hidden rounded bg-white/10">
+                <div
+                  class="h-full bg-pink-500/80 transition-all"
+                  :style="{ width: `${Math.round((job?.progress || 0) * 100)}%` }"
+                />
+              </div>
+            </div>
+
+            <p v-if="boardError" class="text-[11px] text-amber-300/90">{{ boardError }}</p>
+            <p v-if="shootError" class="text-[11px] text-red-300/90">{{ shootError }}</p>
+
+            <div v-if="boardImages.length" class="space-y-2">
+              <h4 class="text-[11px] font-medium text-amber-200/90">{{ t('museRefine.imagesBoardTitle') }}</h4>
+              <p class="text-[10px] text-gray-500">{{ t('museRefine.imagesBoardAsk') }}</p>
+              <div class="grid grid-cols-2 gap-2">
+                <figure
+                  v-for="img in boardImages"
+                  :key="img.image_id || img.sha256 || img"
+                  class="cursor-zoom-in overflow-hidden rounded border border-white/10"
+                  :title="t('museRefine.zoomImage')"
+                  @click="openLightboxSha(img.image_id || img.sha256 || img)"
+                >
+                  <img
+                    :src="thumb(img.image_id || img.sha256 || img)"
+                    class="block w-full"
+                    alt=""
+                  />
+                </figure>
+              </div>
+            </div>
+
+            <div v-if="shootImages.length" class="space-y-2">
+              <h4 class="text-[11px] font-medium text-amber-200/90">{{ t('museRefine.imagesShootTitle') }}</h4>
+              <div class="grid grid-cols-2 gap-2">
+                <figure
+                  v-for="img in shootImages"
+                  :key="img.image_id || img.sha256 || img"
+                  class="cursor-zoom-in overflow-hidden rounded border border-pink-500/40"
+                  :title="t('museRefine.zoomImage')"
+                  @click="openLightboxSha(img.image_id || img.sha256 || img)"
+                >
+                  <img
+                    :src="full(img.image_id || img.sha256 || img)"
+                    class="block w-full"
+                    alt=""
+                  />
+                </figure>
+              </div>
+            </div>
+
             <div class="rounded-xl border border-pink-500/20 bg-gray-950/60 p-3">
               <div class="mb-2 text-xs font-medium text-pink-200/90">{{ t('museRefine.ledger') }}</div>
               <p class="mb-2 text-[10px] text-gray-500">{{ t('museRefine.ledgerStickyHint') }}</p>
@@ -985,22 +1140,6 @@ function isStruckRow(row) {
               </p>
             </div>
 
-            <div v-if="preview" class="overflow-hidden rounded-xl border border-pink-500/20">
-              <img :src="preview" alt="preview" class="max-h-56 w-full object-contain bg-black" />
-            </div>
-
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="img in [...boardImages, ...shootImages]"
-                :key="img.image_id || img.sha256 || img"
-                type="button"
-                class="h-16 w-16 overflow-hidden rounded-md border border-gray-800"
-                @click="emit('select-image', img.image_id || img.sha256 || img)"
-              >
-                <img :src="thumb(img.image_id || img.sha256 || img)" class="h-full w-full object-cover" alt="" />
-              </button>
-            </div>
-
             <div v-if="showSettings" class="space-y-2 rounded-xl border border-gray-800 bg-gray-950 p-3 text-xs">
               <label class="block">
                 <span class="mb-1 block text-gray-500">{{ t('museRefine.workflow') }}</span>
@@ -1094,6 +1233,31 @@ function isStruckRow(row) {
     @close="showDiary = false"
     @toast="emit('toast', $event)"
   />
+
+  <Teleport to="body">
+    <div
+      v-if="lightboxSrc"
+      class="fixed inset-0 z-[var(--z-panel-media)] flex items-center justify-center bg-black/92 p-3"
+      role="dialog"
+      :aria-label="t('museRefine.zoomImage')"
+      tabindex="0"
+      @mousedown.self="closeLightbox"
+      @keydown="onLightboxKey"
+    >
+      <button
+        type="button"
+        class="absolute right-3 top-3 rounded-full bg-black/50 px-3 py-1.5 text-lg text-gray-200 hover:bg-black/70"
+        :title="t('museRefine.close')"
+        @click="closeLightbox"
+      >✕</button>
+      <img
+        :src="lightboxSrc"
+        alt=""
+        class="max-h-full max-w-full select-none object-contain shadow-2xl"
+        @click.stop
+      />
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
