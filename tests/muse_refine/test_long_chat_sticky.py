@@ -171,3 +171,15 @@ def test_guard_muse_propose_reinforces_director():
     )
     assert guarded["wearing"] == "red dress"
     assert "scene" not in guarded  # settled, director did not touch
+
+
+def test_look_reset_keeps_atmosphere():
+    led = _base_led()
+    cue = talk.cue_atmosphere_look("画風リセット")
+    patch = ledger.scrub_patch(
+        talk.merge_cue_into_patch({}, cue), led,
+        allow_clear=talk.cue_allow_clear(cue),
+    )
+    after = ledger.apply_patch(led, patch)
+    assert after["look"] == ""
+    assert "wistful" in after["atmosphere"]
