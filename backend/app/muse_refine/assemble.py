@@ -749,7 +749,14 @@ async def densify_scene_prose(
         f"BASE PROSE:\n{base_prose}\n"
     )
     try:
-        raw = await ollama.generate_text(prompt, model=model or None)
+        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
+        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
+        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
+        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
+        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        raw = await ollama.generate_text(
+            prompt, model=model or None, think=False,
+        )
     except Exception:
         logger.exception("[muse_refine] prose densify failed")
         return base_prose
@@ -895,7 +902,14 @@ async def quality_enrich(
         f"BASE TAGS:\n{', '.join(base_tags)}\n"
     )
     try:
-        raw = await ollama.generate_text(prompt, model=model or None)
+        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
+        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
+        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
+        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
+        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        raw = await ollama.generate_text(
+            prompt, model=model or None, think=False,
+        )
     except Exception:
         logger.exception("[muse_refine] quality enrich failed")
         return [], []

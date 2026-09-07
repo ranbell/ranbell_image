@@ -110,7 +110,14 @@ async def write_patch(
         f"LATEST LINE:\n{user_line.strip()}\n"
     )
     try:
-        raw = await ollama.generate_text(prompt, model=model or None)
+        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
+        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
+        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
+        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
+        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        raw = await ollama.generate_text(
+            prompt, model=model or None, think=False,
+        )
     except Exception:
         logger.exception("[muse_refine] writer failed")
         return {}
@@ -239,7 +246,14 @@ async def actress_turn(
         f"DIRECTOR:\n{user_line.strip()}\n"
     )
     try:
-        raw = await ollama.generate_text(prompt, model=model or None)
+        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
+        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
+        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
+        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
+        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        raw = await ollama.generate_text(
+            prompt, model=model or None, think=False,
+        )
     except Exception:
         logger.exception("[muse_refine] actress failed")
         return {
@@ -294,7 +308,14 @@ async def verify_and_repair(
         f"NOW:\n{now}\n"
     )
     try:
-        raw = await ollama.generate_text(prompt, model=model or None)
+        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
+        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
+        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
+        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
+        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        raw = await ollama.generate_text(
+            prompt, model=model or None, think=False,
+        )
     except Exception:
         logger.exception("[muse_refine] verify failed")
         first = ""

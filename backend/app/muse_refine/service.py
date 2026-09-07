@@ -412,7 +412,14 @@ async def restate_field(
         f"DIRECTOR LINES:\n{recent or '(none)'}\n"
     )
     try:
-        raw = await ollama.generate_text(prompt, model=model or None)
+        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
+        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
+        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
+        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
+        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        raw = await ollama.generate_text(
+            prompt, model=model or None, think=False,
+        )
     except Exception as exc:
         raise RefineError("restate failed") from exc
     from .writer import _extract_json_object
@@ -1075,6 +1082,18 @@ async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
     session["status"] = "shooting"
     await session_db.save(db, session)
 
+    # **描画の直前に LLM を VRAM から落とす（Muse と同じ）。**
+    #
+    # 一つ上で `rebuild_craft` がモデルを使っているので、ここで返さないと
+    # 26B が ~13GB を握ったまま ComfyUI が latent を置きにいく —— 16GB の
+    # カードでは置けずにコケる（総監督の実測）。Muse は board / shoot の
+    # 両方でこの一行を踏んでいて、Refine だけが踏んでいなかった。
+    #
+    # 既定は `unload_vlm: True`（`ALL_DEFAULTS` から来る）。切り替えの意味も
+    # 判定も Muse と同じものを使う —— 二つ目の実装を持たない。
+    from ..muse import service as muse_service
+    await muse_service._maybe_unload(request.app.state.ollama, session)
+
     spooler = request.app.state.spooler
     session["shoot"]["job_id"] = spooler.submit(
         JobLane.GENERATION,
@@ -1129,6 +1148,18 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     }
     session["status"] = "boarding"
     await session_db.save(db, session)
+
+    # **描画の直前に LLM を VRAM から落とす（Muse と同じ）。**
+    #
+    # 一つ上で `rebuild_craft` がモデルを使っているので、ここで返さないと
+    # 26B が ~13GB を握ったまま ComfyUI が latent を置きにいく —— 16GB の
+    # カードでは置けずにコケる（総監督の実測）。Muse は board / shoot の
+    # 両方でこの一行を踏んでいて、Refine だけが踏んでいなかった。
+    #
+    # 既定は `unload_vlm: True`（`ALL_DEFAULTS` から来る）。切り替えの意味も
+    # 判定も Muse と同じものを使う —— 二つ目の実装を持たない。
+    from ..muse import service as muse_service
+    await muse_service._maybe_unload(request.app.state.ollama, session)
 
     spooler = request.app.state.spooler
     session["board"]["job_id"] = spooler.submit(
