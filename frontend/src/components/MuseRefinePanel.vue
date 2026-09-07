@@ -571,35 +571,39 @@ function isStruckRow(row) {
             </h2>
             <p class="truncate text-[11px] text-gray-500">{{ t('museRefine.subtitle') }}</p>
           </div>
-          <span
-            class="shrink-0 font-mono text-[10px]"
-            :class="streamLive ? 'text-pink-400/80' : 'text-gray-500'"
-            :title="t('museRefine.streamHint')"
-          >SSE {{ streamLive ? '●' : '○' }}</span>
-          <button
-            type="button"
-            class="rounded-lg px-2.5 py-1.5 text-xs"
-            :class="museDebug ? 'bg-amber-900/70 text-amber-100' : 'bg-gray-800 hover:bg-gray-700'"
-            :title="t('museRefine.debugToggle')"
-            @click="toggleDebug"
-          >{{ t('museRefine.debugToggle') }}</button>
-          <button
-            type="button"
-            class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700"
-            :disabled="busy"
-            @click="showSettings = !showSettings"
-          >{{ t('museRefine.settings') }}</button>
-          <button
-            type="button"
-            class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700"
-            :disabled="busy"
-            @click="startFresh()"
-          >{{ t('museRefine.reset') }}</button>
-          <button
-            type="button"
-            class="rounded-full px-2 py-1 text-gray-400 hover:bg-pink-950/60 hover:text-white"
-            @click="close"
-          >✕</button>
+          <div class="flex shrink-0 items-center gap-2">
+            <span
+              class="font-mono text-[10px]"
+              :class="streamLive ? 'text-pink-400/70' : 'text-gray-500'"
+              :title="t('museRefine.streamHint')"
+            >SSE {{ streamLive ? '●' : '○' }}</span>
+            <button
+              type="button"
+              class="rounded-full border px-2 py-0.5 text-[10px]"
+              :class="museDebug
+                ? 'border-amber-400/70 bg-amber-950/40 text-amber-200'
+                : 'border-white/10 text-gray-500 hover:text-gray-300'"
+              :title="t('museRefine.debugToggle')"
+              @click="toggleDebug"
+            >{{ t('museRefine.debugToggle') }}</button>
+            <button
+              type="button"
+              class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700 disabled:opacity-40"
+              :disabled="busy"
+              @click="showSettings = !showSettings"
+            >{{ t('museRefine.settings') }}</button>
+            <button
+              type="button"
+              class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700 disabled:opacity-40"
+              :disabled="busy"
+              @click="startFresh()"
+            >{{ t('museRefine.reset') }}</button>
+            <button
+              type="button"
+              class="rounded-full px-2 py-1 text-gray-400 hover:bg-pink-950/60 hover:text-white"
+              @click="close"
+            >✕</button>
+          </div>
         </header>
 
         <div class="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1.1fr_0.9fr]">
