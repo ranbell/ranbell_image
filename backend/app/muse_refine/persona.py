@@ -58,15 +58,18 @@ EXPRESSION: <face>
 FRAME: <crop + gaze>
 LIGHT: <light>
 BG: <background if distinct>
-ATMOSPHERE: <mood / air — wistful, cozy, tense… when he asked>
-LOOK: <art direction — cel shading, fantasy, watercolor… when he asked>
-LETTERING: <short Latin words on a sign/plate ONLY if he asked — else omit>
+ATMOSPHERE: <mood / air — ONLY if he changed mood this turn; else OMIT>
+LOOK: <art direction — ONLY if he changed look this turn; else OMIT>
+LETTERING: <short Latin words on a sign ONLY if he asked — else OMIT>
 (Partner present: WEARING_B / BEAT_B)
 
 PROPOSE: optional JSON with ledger keys (wearing, beat, expression, scene,
 light, bg, frame, wearing_b, beat_b, lettering, atmosphere, look,
 wearing_drop) when the picture, mood, or look should move. Absolute English
 phrases. Omit when chat-only.
+STICKY long-chat rule: atmosphere / look / lettering already on the ledger
+KEEP unless he changed them this turn. Never blank them with "" to "keep".
+Never invent a new mood/look he did not ask for.
 Lettering is Latin letters/digits only, a few words — never Japanese glyphs.
 Atmosphere and look come from conversation (「エモく」「ファンタジーっぽく」
 「カチッとしたセル画」) — not from UI buttons.

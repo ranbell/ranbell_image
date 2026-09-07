@@ -17,10 +17,21 @@ def test_cue_fantasy():
     assert "fantasy" in patch.get("look", "").lower()
 
 
-def test_cue_reset():
+def test_cue_reset_look_only():
     patch = talk.cue_atmosphere_look("画風リセット")
     assert patch.get("look") == ""
+    assert "atmosphere" not in patch  # look reset must not wipe mood
+
+
+def test_cue_reset_atmosphere_only():
+    patch = talk.cue_atmosphere_look("雰囲気リセット")
     assert patch.get("atmosphere") == ""
+    assert "look" not in patch
+
+
+def test_banter_does_not_steal_mood():
+    # Bare affection without picture vocabulary must not fire romantic cue.
+    assert talk.cue_atmosphere_look("好きだよ、ずっと一緒にいたい") == {}
 
 
 def test_merge_cue_writer_wins():

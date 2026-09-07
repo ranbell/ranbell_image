@@ -22,6 +22,14 @@ LEDGER_KEYS: tuple[str, ...] = (
     "look",  # art direction / render — cel, fantasy, watercolor… (not UI buttons)
 )
 
+# Survive long chats: LLMs love to "helpfully" clear or rewrite these.
+# Empty string only clears when the director explicitly allows it (reset cue).
+STICKY_KEYS: frozenset[str] = frozenset({"atmosphere", "look", "lettering"})
+
+# All shot axes resist accidental empty clears from writer / muse / repair.
+RESIST_EMPTY_CLEAR: frozenset[str] = frozenset(LEDGER_KEYS)
+
+
 DROP_KEYS: tuple[str, ...] = ("wearing_drop",)
 
 # UI chips — short label + icon glyph (not used for model judgment).
@@ -80,7 +88,7 @@ def normalize_patch(raw: dict[str, Any] | None) -> dict[str, str]:
 
 
 def apply_patch(ledger: dict[str, str], patch: dict[str, str]) -> dict[str, str]:
-    """Absolute merge. Empty string clears the field."""
+    """Absolute merge. Empty string clears the field when present in patch."""
     next_ledger = {**blank(), **{k: str(ledger.get(k) or "") for k in LEDGER_KEYS}}
     drop = str(patch.get("wearing_drop") or "").strip().lower()
     if drop:
@@ -93,6 +101,60 @@ def apply_patch(ledger: dict[str, str], patch: dict[str, str]) -> dict[str, str]
             continue
         next_ledger[key] = str(patch[key]).strip()
     return next_ledger
+
+
+def scrub_patch(
+    patch: dict[str, str] | None,
+    ledger: dict[str, str] | None,
+    *,
+    allow_clear: set[str] | frozenset[str] | None = None,
+) -> dict[str, str]:
+    """Drop accidental empty clears so long chats keep clothes / mood / look.
+
+    Empty string still clears when ``allow_clear`` names the key (explicit reset).
+    """
+    raw = normalize_patch(patch)
+    if not raw:
+        return {}
+    allow = set(allow_clear or ())
+    cur = {**blank(), **(ledger or {})}
+    out: dict[str, str] = {}
+    for key, val in raw.items():
+        if key == "wearing_drop":
+            if val:
+                out[key] = val
+            continue
+        if (
+            val == ""
+            and key in RESIST_EMPTY_CLEAR
+            and str(cur.get(key) or "").strip()
+            and key not in allow
+        ):
+            continue
+        out[key] = val
+    return out
+
+
+def guard_sticky_writes(
+    patch: dict[str, str] | None,
+    *,
+    allowed: set[str] | frozenset[str] | None = None,
+) -> dict[str, str]:
+    """Muse/repair may not invent atmosphere/look/lettering changes.
+
+    Only keys the director (writer + cue) touched this turn may rewrite sticky
+    fields. Omitting a sticky key always keeps the previous value.
+    """
+    raw = dict(patch or {})
+    if not raw:
+        return {}
+    allow = set(allowed or ())
+    out: dict[str, str] = {}
+    for key, val in raw.items():
+        if key in STICKY_KEYS and key not in allow:
+            continue
+        out[key] = val
+    return out
 
 
 def changed_fields(before: dict[str, str], after: dict[str, str]) -> list[str]:

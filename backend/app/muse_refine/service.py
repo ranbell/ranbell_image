@@ -447,7 +447,7 @@ def _patch_last_user_meta(session: dict[str, Any], **fields: Any) -> None:
             return
 
 
-def _director_tail(session: dict[str, Any], n: int = 8) -> str:
+def _director_tail(session: dict[str, Any], n: int = 16) -> str:
     """Director lines only — never Muse SAY (avoids outfit smuggling)."""
     rows = [
         r for r in (session.get("chat") or [])
@@ -632,9 +632,17 @@ async def chat(
 
     # Conversation cues for mood / art direction (no UI buttons).
     cue = talk.cue_atmosphere_look(text)
+    allow_clear = talk.cue_allow_clear(cue)
     if cue:
         patch = talk.merge_cue_into_patch(patch, cue)
         debug_mod.note(session, "atm_look_cue", detail=str(cue), patch=patch)
+
+    # Long-chat durability: drop accidental empty clears; track director sticky touches.
+    patch = ledger_mod.scrub_patch(patch, led, allow_clear=allow_clear)
+    director_sticky = {
+        k for k in ledger_mod.STICKY_KEYS
+        if k in patch
+    }
 
     missed = False
     if ledger_mod.touched_picture(patch):
@@ -730,6 +738,10 @@ async def chat(
     talk.publish_actress_turn(
         session, actress, locale=locale, lead_name=name,
     )
+
+    # Muse may not invent mood/look/lettering rewrites; empty clears scrubbed.
+    propose = ledger_mod.scrub_patch(propose, led, allow_clear=set())
+    propose = ledger_mod.guard_sticky_writes(propose, allowed=director_sticky)
 
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)
@@ -847,6 +859,12 @@ async def chat(
             )
             debug_mod.stage(session, "verify_repair_writer", t0)
             debug_mod.note(session, "verify_repair_fallback", detail=str(repair), patch=repair)
+
+        repair = ledger_mod.scrub_patch(repair, led, allow_clear=allow_clear)
+        # Repair may fix sticky only if the director touched that axis this turn.
+        repair = ledger_mod.guard_sticky_writes(
+            repair, allowed=director_sticky | allow_clear,
+        )
 
         if ledger_mod.touched_picture(repair):
             before_r = dict(led)

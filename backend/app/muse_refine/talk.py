@@ -254,12 +254,31 @@ RESTATE_FIELDS = (
     "wearing_b", "beat_b", "atmosphere", "look", "lettering",
 )
 
+# Gate: mood/look cues only when the line is about the picture, not banter.
+_ATM_LOOK_GATE = re.compile(
+    r"("
+    r"絵|画|ショット|写真|雰囲気|空気|ムード|画風|タッチ|塗り|質感|"
+    r"感じで|っぽ|にして|でお願い|でいこう|にしてほしい|にしてくれ|"
+    r"エモ|切ない|ほのぼの|ファンタジー|セル|水彩|厚塗り|キラキラ|"
+    r"リセット|クリア|"
+    r"style|mood|look|atmosphere|render|fantasy|watercolor|cel\b|anime\s*screenshot|"
+    r"painterly|gothic|cozy|wistful|melanchol|romantic\s*mood|reset\s+(look|mood|style)"
+    r")",
+    re.I,
+)
+
 # Conversation → atmosphere / look (no UI buttons). First match wins per key;
 # later rules can still fill the other key. Absolute English for the ledger.
 _ATM_LOOK_RULES: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
-    # Clear / reset
-    (re.compile(r"(画風|雰囲気|ムード|タッチ).*(リセット|なし|戻|クリア)|reset\s+(look|mood|style)", re.I),
+    # Clear / reset — separate axes when possible
+    (re.compile(r"雰囲気.*(リセット|なし|戻|クリア)|ムード.*(リセット|クリア)|reset\s+mood|clear\s+atmosphere", re.I),
+     {"atmosphere": ""}),
+    (re.compile(r"画風.*(リセット|なし|戻|クリア)|タッチ.*(リセット|クリア)|reset\s+(look|style)|clear\s+look", re.I),
+     {"look": ""}),
+    (re.compile(r"(画風|雰囲気|ムード|タッチ).*(全部|どちらも|両方).*(リセット|クリア)|全部リセット|reset\s+all\s+(look|mood|style)", re.I),
      {"atmosphere": "", "look": ""}),
+    (re.compile(r"(文字|看板|レタリング).*(消|抜|なし|クリア|リセット)|clear\s+lettering|no\s+text\s+in\s+(frame|image)", re.I),
+     {"lettering": ""}),
     # Look / render
     (re.compile(r"(カチッ|かっちり|クリーン|くっきり|セル画|セル塗り|シャープな線|clean\s*line|cel[\s-]?shad)", re.I),
      {"look": "anime screenshot, cel shading, clean lineart, flat color, sharp lines"}),
@@ -283,18 +302,18 @@ _ATM_LOOK_RULES: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
      {"look": "sci-fi illustration, neon accents, sleek tech"}),
     (re.compile(r"(レトロ|昭和|90年代|90s\s*anime|retro\s*anime)", re.I),
      {"look": "1990s anime style, retro anime screencap, soft film grain"}),
-    # Atmosphere / mood (emo)
+    # Atmosphere / mood (emo) — avoid bare 恋 / 癒 that fire on banter
     (re.compile(r"(エモ|切ない|寂しい|物憂|哀愁|melanchol|wistful|bittersweet|泣きそう)", re.I),
      {"atmosphere": "wistful, melancholic, tender ache, soft focus, emotional"}),
-    (re.compile(r"(ほのぼの|あったか|優しい空気|cozy|warm\s*and\s*gentle|癒)", re.I),
+    (re.compile(r"(ほのぼの|あったかい空気|優しい空気|癒し系|癒やされる空気|cozy|warm\s*and\s*gentle)", re.I),
      {"atmosphere": "cozy, warm, gentle, soft air, comforting"}),
     (re.compile(r"(緊張|ピンと|ピリ|tense|suspense|緊迫)", re.I),
      {"atmosphere": "tense, taut silence, sharp focus"}),
-    (re.compile(r"(ロマンチック|恋|甘い|romantic|intimate\s*mood)", re.I),
+    (re.compile(r"(ロマンチック|甘い空気|恋の空気|romantic\s*mood|intimate\s*mood)", re.I),
      {"atmosphere": "romantic, intimate, soft blush in the air"}),
     (re.compile(r"(派手|キラキラ|きらめ|華やか|sparkle|glitter|耀)", re.I),
      {"atmosphere": "sparkling, glittering light, lively shimmer"}),
-    (re.compile(r"(静か|しっとり|静謐|quiet|still\s*air|閑)", re.I),
+    (re.compile(r"(静か|しっとり|静謐|quiet\s*mood|still\s*air|閑)", re.I),
      {"atmosphere": "quiet, still air, hushed, contemplative"}),
     (re.compile(r"(夢|夢幻|幻想的|dreamy|ethereal|霞)", re.I),
      {"atmosphere": "dreamy, ethereal haze, soft glow"}),
@@ -304,16 +323,22 @@ _ATM_LOOK_RULES: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
 
 
 def cue_atmosphere_look(text: str) -> dict[str, str]:
-    """Map director chat → atmosphere/look ledger fields (conversation only)."""
+    """Map director chat → atmosphere/look/lettering (conversation only).
+
+    Banter without picture/mood vocabulary does not fire — protects sticky mood
+    across long chats.
+    """
     raw = str(text or "").strip()
     if not raw:
+        return {}
+    if not _ATM_LOOK_GATE.search(raw):
         return {}
     out: dict[str, str] = {}
     for pat, patch in _ATM_LOOK_RULES:
         if not pat.search(raw):
             continue
         for key, val in patch.items():
-            # First concrete fill wins; explicit clear ("") always applies.
+            # Explicit clear ("") always applies; first concrete fill wins.
             if key in out and out[key] and val:
                 continue
             out[key] = val
@@ -326,10 +351,10 @@ def merge_cue_into_patch(patch: dict[str, str], cue: dict[str, str]) -> dict[str
     for key, val in (cue or {}).items():
         if key not in merged:
             merged[key] = val
-            continue
-        # Explicit clear from cue when writer omitted the key entirely — already handled.
-        # If writer set a non-empty value, keep writer.
-        if not str(merged.get(key) or "").strip() and val == "":
-            merged[key] = ""
     return merged
+
+
+def cue_allow_clear(cue: dict[str, str] | None) -> set[str]:
+    """Keys the director explicitly cleared this turn."""
+    return {k for k, v in (cue or {}).items() if v == ""}
 

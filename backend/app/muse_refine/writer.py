@@ -21,10 +21,11 @@ Rules:
 - Clothes and place are independent: changing clothes must not clear scene.
 - Changing place must not undress her.
 - wearing_drop: one garment name to remove, only when asked to take something off.
-- atmosphere: mood / air of the picture (wistful, tense, cozy, sparkling…).
-  Fill when the director asks for エモい / 切ない / ほのぼの / romantic / etc.
-- look: art direction / render (cel shading, fantasy illustration, watercolor…).
-  Fill when they ask for カチッと / ファンタジー / 水彩 / key visual / etc.
+- STICKY (long chat): atmosphere, look, lettering PERSIST across turns.
+  Omit those keys to KEEP the current value. NEVER send "" to clear them
+  unless the director explicitly asked to reset/clear that axis.
+- atmosphere: mood / air (wistful, tense, cozy…). Only when they ask to change mood.
+- look: art direction / render. Only when they ask to change art style.
 - lettering: short Latin words for a sign only when they asked for text in frame.
 - If the line is only emotion / banter / acknowledgement with NO picture or
   mood/look change, return {}.
@@ -36,6 +37,7 @@ Rules:
 WRITER_RETRY = """The last line looks like a picture or mood/look direction, but you returned {}.
 Read it again. If it names clothes, place, pose, face, light, camera,
 atmosphere (mood), or look (art style), fill those keys.
+Do NOT blank sticky atmosphere/look/lettering to "keep" them — omit the key.
 Still return {} only for pure emotion/banter with no picture/mood/look change.
 Output ONLY JSON.
 """
@@ -60,6 +62,9 @@ Rules:
 - Clothes and place are independent.
 - REPAIR only when OK: no. Empty {} is not allowed when OK: no if the director named a picture change.
 - Do not invent unrelated wardrobe. Fix only what the director asked.
+- STICKY: do not clear or rewrite atmosphere / look / lettering in REPAIR
+  unless the director's latest line asked to change that axis.
+- Do not blank wearing/scene/beat with "" — omit keys you are not fixing.
 - COMMENT: no danbooru tags, no system jargon.
 """
 
