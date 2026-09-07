@@ -57,7 +57,8 @@ const pipelineStages = computed(() => pipeline.value?.stages || [])
 const pipelineDivergences = computed(() => pipeline.value?.divergences || [])
 function pipelineStatusClass(status) {
   if (status === 'ok' || status === 'frozen') return 'border-emerald-500/40 text-emerald-200/90'
-  if (status === 'missed' || status === 'stale' || status === 'refused' || status === 'diverged' || status === 'pending') {
+  if (status === 'pending') return 'border-amber-500/40 text-amber-200/90'
+  if (status === 'missed' || status === 'stale' || status === 'refused' || status === 'diverged') {
     return 'border-rose-500/40 text-rose-200/90'
   }
   return 'border-amber-500/20 text-amber-100/60'
@@ -69,8 +70,15 @@ function rewriteWhen(ts) {
 function mergeRewriteLog(keep, next) {
   const byAt = new Map()
   for (const row of [...(keep || []), ...(next || [])]) {
-    const key = `${row?.at}|${row?.source}|${JSON.stringify(row?.changed || {})}`
-    byAt.set(key, row)
+    if (!row || typeof row !== 'object') continue
+    const cleaned = {
+      at: row.at,
+      source: row.source || '',
+      intent: row.intent || '',
+      changed: row.changed || {},
+    }
+    const key = `${cleaned.at}|${cleaned.source}|${cleaned.intent}|${JSON.stringify(cleaned.changed)}`
+    byAt.set(key, cleaned)
   }
   return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
 }
@@ -142,8 +150,8 @@ const waitName = computed(() =>
 )
 const boardPending = computed(() => !!session.value?.board?.pending)
 const shootPending = computed(() => !!session.value?.shoot?.pending)
-const renderLocked = computed(() => busy.value || boardPending.value || shootPending.value)
-const chatLocked = computed(() => renderLocked.value || speaking.value)
+const renderLocked = computed(() => boardPending.value || shootPending.value)
+const chatLocked = computed(() => busy.value || renderLocked.value || speaking.value)
 const waitingOnModel = computed(() => busy.value || speaking.value)
 const statusLabel = computed(() => {
   if (waitingOnModel.value) return t('museRefine.status.chatting')
@@ -324,7 +332,7 @@ async function openSession() {
 }
 
 async function restoreBanned(tag) {
-  if (!session.value?.session_id || busy.value) return
+  if (!session.value?.session_id || chatLocked.value) return
   busy.value = true
   try {
     session.value = await api(
@@ -339,7 +347,7 @@ async function restoreBanned(tag) {
 }
 
 async function restateField(field) {
-  if (!session.value?.session_id || busy.value) return
+  if (!session.value?.session_id || chatLocked.value) return
   busy.value = true
   try {
     session.value = await api(
@@ -416,7 +424,7 @@ async function sendChat() {
 }
 
 async function rebuild() {
-  if (!session.value?.session_id || busy.value) return
+  if (!session.value?.session_id || chatLocked.value) return
   busy.value = true
   try {
     session.value = await api(
@@ -461,13 +469,18 @@ async function scrollChat() {
 
 function scheduleRefresh(scroll = false) {
   // Coalesce bursty SSE (preview + session_updated + chat) into one GET.
+  // Never pull while a local mutation owns the session — mid-turn chat events
+  // publish before the final save and would overwrite the POST result.
+  if (busy.value) return
   refreshQueued = true
   if (refreshTimer) return
   refreshTimer = setTimeout(async () => {
     refreshTimer = null
     if (!refreshQueued) return
     refreshQueued = false
-    await refresh()
+    if (busy.value) return
+    const prevUpdated = Number(session.value?.updated_at || 0)
+    await refresh({ minUpdatedAt: prevUpdated })
     if (scroll) await scrollChat()
   }, 350)
 }
@@ -501,7 +514,8 @@ function openStream(id) {
       return
     }
     if (data.type === 'chat' || data.type === 'chat_message') {
-      speaking.value = false
+      // Local sendChat owns speaking/busy until POST returns.
+      if (!busy.value) speaking.value = false
       scheduleRefresh(true)
       return
     }
@@ -524,7 +538,7 @@ function openStream(id) {
       if (data.type === 'board_ready' || data.type === 'shoot_attached') {
         preview.value = ''
       }
-      speaking.value = false
+      if (!busy.value) speaking.value = false
       scheduleRefresh(true)
       return
     }
@@ -547,11 +561,18 @@ function closeStream() {
   }
   refreshQueued = false
 }
-async function refresh() {
+async function refresh(opts = {}) {
   if (!session.value?.session_id) return
+  if (busy.value && opts.allowBusy !== true) return
   try {
     const keep = session.value.rewrite_log || []
+    const prevUpdated = Number(session.value?.updated_at || 0)
+    const minUpdatedAt = Number(opts.minUpdatedAt || 0)
     const next = await api(`/api/muse-refine/sessions/${session.value.session_id}`)
+    // Drop stale GETs that raced a newer local POST / SSE save.
+    const nextUpdated = Number(next?.updated_at || 0)
+    if (minUpdatedAt && nextUpdated && nextUpdated < minUpdatedAt) return
+    if (nextUpdated && prevUpdated && nextUpdated < prevUpdated && !opts.allowBusy) return
     next.rewrite_log = mergeRewriteLog(keep, next.rewrite_log)
     session.value = next
     sampleJob()
@@ -571,21 +592,19 @@ function startPoll() {
     sampleJob()
     const rendering = boardPending.value || shootPending.value
     const inferring = busy.value || speaking.value
-    // SSE is primary; poll only while work is in flight or the stream dropped.
-    if (!rendering && !inferring && streamLive.value) {
-      if (!waitingOnModel.value) {
-        elapsed.value = 0
-        tick = 0
-        startedAt = 0
-      }
+    // Match Muse: when idle, do not poll — even if SSE dropped.
+    if (!rendering && !inferring) {
+      elapsed.value = 0
+      tick = 0
+      startedAt = 0
       return
     }
-    if (!startedAt && (rendering || inferring)) startedAt = Date.now()
-    if (startedAt) elapsed.value = Math.round((Date.now() - startedAt) / 1000)
-    // While rendering, refresh every ~3s (or ~6s if SSE dropped) for pending/images.
+    if (!startedAt) startedAt = Date.now()
+    elapsed.value = Math.round((Date.now() - startedAt) / 1000)
+    // While rendering, refresh every ~3s (or ~6s if SSE dropped).
     const every = streamLive.value ? 3 : 6
     tick += 1
-    if ((rendering || !streamLive.value) && tick % every === 0) await refresh()
+    if (rendering && tick % every === 0) await refresh({ allowBusy: true })
   }, 1000)
 }
 function stopPoll() {
@@ -728,7 +747,7 @@ function isStruckRow(row) {
                 <select
                   class="max-w-[10rem] truncate rounded-md border border-pink-500/30 bg-pink-950/30 px-2 py-1 text-xs text-pink-100"
                   :value="inputs.character_id || ''"
-                  :disabled="busy"
+                  :disabled="chatLocked"
                   @change="pickCharacter($event.target.value)"
                 >
                   <option value="">{{ t('museRefine.pickCharacter') }}</option>
@@ -743,7 +762,7 @@ function isStruckRow(row) {
                 <select
                   class="max-w-[10rem] truncate rounded-md border border-fuchsia-900/40 bg-fuchsia-950/30 px-2 py-1 text-xs text-fuchsia-100"
                   :value="inputs.partner_preset || ''"
-                  :disabled="busy || !inputs.character_id"
+                  :disabled="chatLocked || !inputs.character_id"
                   @change="pickPartner($event.target.value)"
                 >
                   <option value="">{{ t('museRefine.noPartner') }}</option>
@@ -763,13 +782,13 @@ function isStruckRow(row) {
                   type="text"
                   class="min-w-0 flex-1 rounded-md border border-pink-500/20 bg-pink-950/25 px-2 py-1 text-[11px] text-pink-50 outline-none focus:border-pink-500"
                   :placeholder="t('museRefine.themePlaceholder')"
-                  :disabled="busy"
+                  :disabled="chatLocked"
                   @change="patchInputs({ theme: themeDraft.trim() })"
                 />
                 <button
                   type="button"
                   class="rounded-lg bg-rose-800/80 px-2.5 py-1 text-[11px] font-medium text-rose-50 hover:bg-rose-700 disabled:opacity-40"
-                  :disabled="busy || !inputs.character_id"
+                  :disabled="chatLocked || !inputs.character_id"
                   @click="openSession"
                 >{{ opened ? t('museRefine.reopen') : t('museRefine.open') }}</button>
               </div>
@@ -913,23 +932,23 @@ function isStruckRow(row) {
                   v-for="chip in tasteChips"
                   :key="`taste-${chip}`"
                   type="button"
-                  class="rounded-full border border-sky-800/50 bg-sky-950/40 px-2.5 py-1 text-[11px] text-sky-100 hover:bg-sky-900/50"
-                  :disabled="busy"
+                  class="rounded-full border border-sky-800/50 bg-sky-950/40 px-2.5 py-1 text-[11px] text-sky-100 hover:bg-sky-900/50 disabled:opacity-40"
+                  :disabled="chatLocked"
                   @click="insertChip(chip)"
                 >{{ chip }}</button>
                 <button
                   v-if="againFeelAvailable"
                   type="button"
-                  class="rounded-full border border-rose-800/50 bg-rose-950/40 px-2.5 py-1 text-[11px] text-rose-100 hover:bg-rose-900/50"
-                  :disabled="busy"
+                  class="rounded-full border border-rose-800/50 bg-rose-950/40 px-2.5 py-1 text-[11px] text-rose-100 hover:bg-rose-900/50 disabled:opacity-40"
+                  :disabled="chatLocked"
                   @click="insertChip(t('museRefine.againFeelSend'))"
                 >{{ t('museRefine.againFeel') }}</button>
                 <button
                   v-for="opt in lastPitch"
                   :key="opt"
                   type="button"
-                  class="rounded-full border border-violet-700/50 bg-violet-950/40 px-2.5 py-1 text-[11px] text-violet-100 hover:bg-violet-900/50"
-                  :disabled="busy"
+                  class="rounded-full border border-violet-700/50 bg-violet-950/40 px-2.5 py-1 text-[11px] text-violet-100 hover:bg-violet-900/50 disabled:opacity-40"
+                  :disabled="chatLocked"
                   @click="sendPitch(opt)"
                 >「{{ opt }}」</button>
               </div>
@@ -1094,8 +1113,8 @@ function isStruckRow(row) {
                     v-for="tag in banned"
                     :key="tag"
                     type="button"
-                    class="rounded-full border border-red-800/50 bg-red-950/40 px-2 py-0.5 text-[10px] text-red-100 hover:bg-red-900/50"
-                    :disabled="busy"
+                    class="rounded-full border border-red-800/50 bg-red-950/40 px-2 py-0.5 text-[10px] text-red-100 hover:bg-red-900/50 disabled:opacity-40"
+                    :disabled="chatLocked"
                     :title="t('museRefine.restoreBanned')"
                     @click="restoreBanned(tag)"
                   >✕ {{ tag }}</button>
@@ -1111,7 +1130,7 @@ function isStruckRow(row) {
                   :class="stickyFields.has(f)
                     ? 'border-violet-700/60 bg-violet-950/40 text-violet-100'
                     : 'border-gray-700 bg-gray-900 text-gray-300'"
-                  :disabled="busy"
+                  :disabled="chatLocked"
                   @click="restateField(f)"
                 >{{ t(`museRefine.fields.${f}`) }}</button>
               </div>
@@ -1122,8 +1141,8 @@ function isStruckRow(row) {
                 <span class="text-xs font-medium text-pink-200/90">{{ t('museRefine.options') }}</span>
                 <button
                   type="button"
-                  class="text-[11px] text-pink-300/80 hover:text-pink-200"
-                  :disabled="busy"
+                  class="text-[11px] text-pink-300/80 hover:text-pink-200 disabled:opacity-40"
+                  :disabled="chatLocked"
                   @click="rebuild"
                 >{{ t('museRefine.rebuild') }}</button>
               </div>

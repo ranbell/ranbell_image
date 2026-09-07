@@ -201,6 +201,10 @@ async def load_refine(db, session_id: str) -> dict[str, Any]:
     # Ensure ledger key exists after migrate.
     session.setdefault("refine_ledger", ledger_mod.blank())
     session.setdefault("craft", {})
+    session.setdefault("rewrite_log", [])
+    session.setdefault("refine_log", [])
+    session.setdefault("stage_ms", [])
+    session.setdefault("turn_trace", [])
     return session
 
 
@@ -486,13 +490,15 @@ def _change_event(
     after: dict[str, str],
     locale: str,
 ) -> None:
-    fields = ledger_mod.changed_fields(before, after) or ledger_mod.patch_fields(patch)
-    chips = ledger_mod.chips_for(fields, locale=locale)
-    debug_mod.record_rewrite(
+    # Only real before→after diffs count. A repeated patch with no ledger move
+    # must not spam Shot chat or look like a rewrite.
+    fields = ledger_mod.changed_fields(before, after)
+    entry = debug_mod.record_rewrite(
         session, source, before=before, after=after, intent=source,
     )
-    if not chips and not patch:
+    if not entry or not fields:
         return
+    chips = ledger_mod.chips_for(fields, locale=locale)
     detail_bits = []
     for key in fields:
         if key == "wearing_drop":
@@ -559,10 +565,20 @@ async def chat(
     letter_phrases, text_for_writer = anima_mod.extract_lettering(text)
     if letter_phrases:
         led0 = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+        before_letter = dict(led0)
         led0["lettering"] = letter_phrases[0]
         session["refine_ledger"] = led0
+        _change_event(
+            session,
+            source="lettering",
+            patch={"lettering": letter_phrases[0]},
+            before=before_letter,
+            after=led0,
+            locale=locale,
+        )
         if text_for_writer.strip():
             text = text_for_writer
+        before = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     if standing_rule:
         _append_chat(session, role="user", name="Director", text=text)
         ack = (

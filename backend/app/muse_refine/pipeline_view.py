@@ -49,7 +49,11 @@ def _last_stage(session: dict[str, Any], *names: str) -> dict[str, Any] | None:
 
 
 def _divergences(session: dict[str, Any]) -> list[dict[str, str]]:
-    """Ledger phrases that never reached craft.prompt / board.prompt."""
+    """Ledger shot phrases that never reached craft.prompt / board.prompt.
+
+    Sticky mood/look/lettering densify into other words and false-alarm often —
+    exclude them (classic Muse also skips lettering-like noise).
+    """
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     craft = session.get("craft") or {}
     board = session.get("board") or {}
@@ -57,8 +61,11 @@ def _divergences(session: dict[str, Any]) -> list[dict[str, str]]:
     board_prompt = str(board.get("prompt") or "")
     prompt_tok = _tokens(prompt)
     board_tok = _tokens(board_prompt) if board_prompt else set()
+    skip = set(getattr(ledger_mod, "STICKY_KEYS", ()) or ()) | {"lettering"}
     out: list[dict[str, str]] = []
     for key in ledger_mod.LEDGER_KEYS:
+        if key in skip:
+            continue
         raw = str(led.get(key) or "").strip()
         if not raw:
             continue
@@ -87,6 +94,12 @@ def build_pipeline_view(session: dict[str, Any]) -> dict[str, Any]:
     moved = dict(last_trace.get("moved") or {})
     patch = dict(last_trace.get("patch") or {})
     propose = dict(last_trace.get("propose") or {})
+    rewrite = list(session.get("rewrite_log") or [])
+    rewrite_sources = {str(e.get("source") or "") for e in rewrite[-12:]}
+    rewrite_fields: list[str] = []
+    for e in rewrite[-12:]:
+        changed = e.get("changed") or {}
+        rewrite_fields.extend(str(k) for k in changed)
 
     writer_note = _last_note(session, "writer_patch", "writer_retry")
     cue_note = _last_note(session, "atm_look_cue")
@@ -118,30 +131,33 @@ def build_pipeline_view(session: dict[str, Any]) -> dict[str, Any]:
     elif verify_note and str(verify_note.get("detail") or "") in {"ok", "repaired"}:
         verify_ok = str(verify_note.get("detail")) == "ok"
 
+    writer_ok = bool(patch or writer_note) or bool(
+        rewrite_sources & {"writer", "director", "self_repair", "muse", "lettering", "restate", "wardrobe"}
+    )
     stages: list[dict[str, Any]] = [
         {
             "id": "writer",
             "status": (
-                "missed" if missed_note and not patch
-                else ("ok" if patch or writer_note else "empty")
+                "missed" if missed_note and not patch and not rewrite_fields
+                else ("ok" if writer_ok else "empty")
             ),
-            "keys": sorted(patch.keys()),
+            "keys": sorted(set(list(patch.keys()) + rewrite_fields)),
             "ms": (_last_stage(session, "writer", "writer_retry") or {}).get("ms"),
         },
         {
             "id": "cue",
-            "status": "ok" if cue_note else "empty",
+            "status": "ok" if cue_note or ("lettering" in rewrite_sources) else "empty",
             "detail": str((cue_note or {}).get("detail") or "")[:120],
         },
         {
             "id": "ledger",
-            "status": "ok" if filled else "empty",
+            "status": "ok" if filled or rewrite_fields else "empty",
             "filled": filled,
-            "moved": sorted(moved.keys()),
+            "moved": sorted(set(list(moved.keys()) + rewrite_fields)),
         },
         {
             "id": "muse_propose",
-            "status": "ok" if propose else "empty",
+            "status": "ok" if propose or ("muse" in rewrite_sources) else "empty",
             "keys": sorted(propose.keys()),
         },
         {

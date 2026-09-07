@@ -107,7 +107,6 @@ def record_rewrite(
     session["rewrite_log"] = log[-REWRITE_LOG_MAX:]
     sid = str(session.get("session_id") or "")
     if sid:
-        # Same event name Muse uses so external tools / habits transfer.
+        # Muse-compatible event name for external debug clients / panel habits.
         events.publish(sid, {"type": "notebook_rewrite", **entry})
-        events.publish(sid, {"type": "ledger_rewrite", **entry})
     return entry

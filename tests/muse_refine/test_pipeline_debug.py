@@ -69,3 +69,63 @@ def test_change_event_writes_rewrite_log():
     )
     assert session["rewrite_log"]
     assert session["rewrite_log"][-1]["changed"]["wearing"]["after"] == "red dress"
+
+
+def test_change_event_noop_does_not_spam_chat():
+    from app.muse_refine import ledger as ledger_mod
+    session = service.new_session({"locale": "ja"})
+    session["session_id"] = "dbg-noop"
+    led = {**ledger_mod.blank(), "wearing": "hoodie"}
+    session["chat"] = []
+    session["rewrite_log"] = []
+    service._change_event(
+        session,
+        source="writer",
+        patch={"wearing": "hoodie"},
+        before=led,
+        after=led,
+        locale="ja",
+    )
+    assert session["rewrite_log"] == []
+    assert not any((c.get("meta") or {}).get("kind") == "ledger_change" for c in session["chat"])
+
+
+def test_lettering_records_rewrite_log():
+    from app.muse_refine import anima as anima_mod
+    from app.muse_refine import ledger as ledger_mod
+
+    session = service.new_session({"locale": "ja"})
+    session["session_id"] = "dbg-letter"
+    session["refine_ledger"] = ledger_mod.blank()
+    phrases, _ = anima_mod.extract_lettering('看板に「OPEN」と書いて')
+    assert phrases
+    before = dict(session["refine_ledger"])
+    after = {**before, "lettering": phrases[0]}
+    session["refine_ledger"] = after
+    service._change_event(
+        session,
+        source="lettering",
+        patch={"lettering": phrases[0]},
+        before=before,
+        after=after,
+        locale="ja",
+    )
+    assert session["refine_ledger"]["lettering"] == phrases[0]
+    assert any(
+        "lettering" in (e.get("changed") or {})
+        for e in (session.get("rewrite_log") or [])
+    )
+
+
+def test_pipeline_marks_ok_from_rewrite_log_alone():
+    session = service.new_session()
+    session["rewrite_log"] = [{
+        "at": 1,
+        "source": "restate",
+        "intent": "restate",
+        "changed": {"beat": {"before": "", "after": "standing"}},
+    }]
+    pipe = pipeline_view.build_pipeline_view(session)
+    by_id = {s["id"]: s for s in pipe["stages"]}
+    assert by_id["writer"]["status"] == "ok"
+    assert by_id["ledger"]["status"] == "ok"
