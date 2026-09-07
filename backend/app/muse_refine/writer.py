@@ -10,6 +10,18 @@ from . import ledger as ledger_mod
 
 logger = logging.getLogger(__name__)
 
+
+def _voice_block(character: dict[str, Any] | None, *, locale: str) -> str:
+    """Reuse Muse duet voice contract so Refine matches her individual speech."""
+    if not character:
+        return ""
+    try:
+        from ..muse import crew
+        return crew._voice_block(character, locale=locale)
+    except Exception:
+        logger.exception("[muse_refine] voice_block failed")
+        return ""
+
 WRITER_SYSTEM = """You update a shot ledger. Output ONLY a JSON object.
 Keys allowed: wearing, beat, expression, scene, light, bg, frame, wearing_drop.
 Rules:
@@ -39,8 +51,13 @@ SAY is performance only. Never treat SAY as updating the shot.
 If you want the picture to change, you MUST output PROPOSE with ledger keys.
 If you are not changing the picture, omit PROPOSE.
 
+VOICE is mandatory. Every SAY must sound like THIS girl only — first person,
+address, talk quirks, and example rhythm from the VOICE block. A generic soft
+polite line that any other Muse could say is a failure; rewrite until only she
+would say it.
+
 Output format:
-SAY: <one or two short spoken lines>
+SAY: <one or two short spoken lines in HER voice>
 PROPOSE: <optional JSON object with ledger keys>
 No danbooru tags inside SAY. No markdown fences.
 """
@@ -49,19 +66,23 @@ VERIFY_SYSTEM = """You check whether the shot LEDGER matches the director's late
 
 Compare DIRECTOR line to LEDGER. Ignore pure emotion/banter — those need no picture change.
 
+COMMENT must be spoken IN CHARACTER using the VOICE block (first person, address,
+talk quirks, example rhythm). Generic announcer lines like "確認しました" without
+her quirks are a failure.
+
 Output exactly:
 OK: yes
-COMMENT: <one short spoken line in the requested language confirming the shot is right>
+COMMENT: <one short spoken line in HER voice confirming the shot is right>
 or
 OK: no
-COMMENT: <one short spoken line: admit the miss and that you will fix it yourself>
+COMMENT: <one short spoken line in HER voice: admit the miss and that YOU will fix it>
 REPAIR: <JSON object with ledger keys to fix — absolute English phrases, only wrong fields>
 
 Rules:
 - Clothes and place are independent.
 - REPAIR only when OK: no. Empty {} is not allowed when OK: no if the director named a picture change.
 - Do not invent unrelated wardrobe. Fix only what the director asked.
-- COMMENT is in-character, one sentence, no danbooru tags.
+- COMMENT: no danbooru tags, no system jargon.
 """
 
 
@@ -175,11 +196,14 @@ async def actress_turn(
     identity_blurb: str,
     user_line: str,
     director_tail: str,
+    character: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, str]]:
     lang = "Japanese" if locale.startswith("ja") else "English"
+    voice = _voice_block(character, locale=("en" if lang == "English" else "ja"))
     prompt = (
         f"{ACTRESS_SYSTEM}\n"
         f"Language for SAY: {lang}. Your name: {name or 'Muse'}.\n\n"
+        f"{voice}\n\n"
         f"WHO YOU ARE (locked identity — do not contradict):\n"
         f"{identity_blurb or '(unspecified)'}\n\n"
         f"LEDGER (absolute shot document):\n"
@@ -207,9 +231,11 @@ async def verify_and_repair(
     ledger: dict[str, str],
     now: str,
     force_repair_hint: bool = False,
+    character: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, str]]:
     """After the turn: confirm intent match, or return a self-repair patch."""
     lang = "Japanese" if locale.startswith("ja") else "English"
+    voice = _voice_block(character, locale=("en" if lang == "English" else "ja"))
     hint = (
         "\nNOTE: A picture direction may have been missed earlier — look carefully.\n"
         if force_repair_hint else ""
@@ -218,6 +244,7 @@ async def verify_and_repair(
         f"{VERIFY_SYSTEM}\n"
         f"Language for COMMENT: {lang}. Speaker name: {name or 'Muse'}.\n"
         f"{hint}\n"
+        f"{voice}\n\n"
         f"DIRECTOR:\n{user_line.strip()}\n\n"
         f"LEDGER:\n{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
         f"NOW:\n{now}\n"
@@ -226,10 +253,23 @@ async def verify_and_repair(
         raw = await ollama.generate_text(prompt, model=model or None)
     except Exception:
         logger.exception("[muse_refine] verify failed")
-        fallback = (
-            "うん、この画で合ってる。"
-            if locale.startswith("ja") else
-            "Yeah — this shot matches."
-        )
+        # Soft fallback still tries her address/first person if present.
+        first = ""
+        addr = ""
+        if character:
+            first = str(
+                character.get("first_person_ja")
+                or (character.get("personality") or {}).get("first_person_ja")
+                or "私"
+            )
+            addr = str(
+                character.get("user_address_ja")
+                or (character.get("personality") or {}).get("user_address_ja")
+                or "総監督"
+            )
+        if locale.startswith("ja"):
+            fallback = f"{first}、この画で合ってると思うよ、{addr}。"
+        else:
+            fallback = "Yeah — this shot matches."
         return True, fallback, {}
     return parse_verify(raw)

@@ -281,6 +281,26 @@ def _change_event(
     )
 
 
+def _voice_fallback(session: dict[str, Any], *, kind: str, locale: str) -> str:
+    """Last-resort lines still use her first person / address when possible."""
+    char = session.get("character") or {}
+    p = char.get("personality") or {}
+    ja = locale.startswith("ja")
+    first = str(char.get("first_person_ja") or p.get("first_person_ja") or ("私" if ja else "I"))
+    addr = str(char.get("user_address_ja") or p.get("user_address_ja") or ("総監督" if ja else "Showrunner"))
+    if not ja:
+        if kind == "ok":
+            return f"Yeah, {addr} — this shot matches."
+        if kind == "repair":
+            return f"That's off. I'll fix it myself, {addr}."
+        return f"Fixed. This is the shot now, {addr}."
+    if kind == "ok":
+        return f"{first}、この画で合ってると思う…{addr}。"
+    if kind == "repair":
+        return f"んっ、ずれてる。{first}が直すね、{addr}。"
+    return f"直したよ、{addr}。いまの画はこれ。"
+
+
 async def chat(
     db,
     ollama,
@@ -401,6 +421,7 @@ async def chat(
         identity_blurb=_identity_blurb(session),
         user_line=text,
         director_tail=director_recent,
+        character=char,
     )
     debug_mod.stage(session, "actress", t0)
     debug_mod.note(
@@ -425,7 +446,6 @@ async def chat(
             after=led,
             locale=locale,
         )
-        # Mark the assistant row with propose chips.
         chat = list(session.get("chat") or [])
         for i in range(len(chat) - 1, -1, -1):
             if chat[i].get("role") == "assistant":
@@ -444,7 +464,6 @@ async def chat(
         await assemble.rebuild_craft(db, ollama, session)
         debug_mod.stage(session, "assemble_after_propose", t0)
 
-    # After conversation: confirm director intent, or self-repair the ledger.
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     now = str((session.get("craft") or {}).get("now") or "")
     t0 = time.monotonic()
@@ -457,6 +476,7 @@ async def chat(
         ledger=led,
         now=now,
         force_repair_hint=missed,
+        character=char,
     )
     debug_mod.stage(session, "verify", t0)
     debug_mod.note(
@@ -467,11 +487,7 @@ async def chat(
     )
 
     if ok:
-        confirm = comment or (
-            "うん、この画で合ってる。"
-            if locale.startswith("ja") else
-            "Yeah — this shot matches."
-        )
+        confirm = comment or _voice_fallback(session, kind="ok", locale=locale)
         _append_chat(
             session,
             role="assistant",
@@ -490,11 +506,7 @@ async def chat(
             "type": "chat", "role": "assistant", "name": name, "text": confirm,
         })
     else:
-        fix_line = comment or (
-            "ずれてる。自分で直すね。"
-            if locale.startswith("ja") else
-            "That's off — I'll fix it myself."
-        )
+        fix_line = comment or _voice_fallback(session, kind="repair", locale=locale)
         _append_chat(
             session,
             role="assistant",
@@ -513,8 +525,6 @@ async def chat(
             "type": "chat", "role": "assistant", "name": name, "text": fix_line,
         })
 
-        # If verify refused to repair but we know the line was a picture miss,
-        # fall back to one more writer pass as the repair.
         if not ledger_mod.touched_picture(repair) and (
             missed or ledger_mod.looks_like_picture_line(text)
         ):
@@ -545,11 +555,7 @@ async def chat(
             t0 = time.monotonic()
             await assemble.rebuild_craft(db, ollama, session)
             debug_mod.stage(session, "assemble_after_repair", t0)
-            done = (
-                "直した。いまの画はこれ。"
-                if locale.startswith("ja") else
-                "Fixed. This is the shot now."
-            )
+            done = _voice_fallback(session, kind="fixed", locale=locale)
             _append_chat(
                 session,
                 role="assistant",
