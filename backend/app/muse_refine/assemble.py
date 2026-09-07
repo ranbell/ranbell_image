@@ -165,7 +165,134 @@ def scene_prose(
     if frame:
         parts.append(f"Camera stays {frame}.")
 
+    # Deterministic visible consequences (craft-only — never written back to ledger).
+    cues = visible_consequence_cues(ledger)
+    for hint in cues.get("hints") or []:
+        parts.append(hint)
+
     return " ".join(parts)
+
+
+# Physical state → what the camera would actually see (craft-only expansion).
+_WIND_RE = re.compile(
+    r"\b(wind|breeze|gust|blown|blowing|floating\s*hair|hair\s*(?:blown|blowing|streaming|whipping))\b"
+    r"|風|靡|なび|そよ風|強風",
+    re.I,
+)
+_BEHIND_RE = re.compile(
+    r"\b(from\s*behind|rear\s*view|back\s*view|from\s*the\s*back|seen\s*from\s*behind|"
+    r"back\s*to\s*(?:the\s*)?(?:camera|viewer)|facing\s*away)\b"
+    r"|後ろ|背面|うしろ|後ろ姿|背中向|背面から",
+    re.I,
+)
+_LOOK_BACK_RE = re.compile(
+    r"\b(looking\s*back|looks?\s*back|over\s*(?:her|the)\s*shoulder|"
+    r"glance\s*back|turned\s*(?:her\s*)?head)\b"
+    r"|振り返|振り向き|肩越し|後ろを見",
+    re.I,
+)
+_SIDE_RE = re.compile(
+    r"\b(from\s*side|side\s*view|profile|three[- ]?quarter)\b"
+    r"|横顔|横から|横向き|プロフィール",
+    re.I,
+)
+_WET_RE = re.compile(
+    r"\b(rain|wet|soaked|drenched|sweat(?:y|ing)?)\b"
+    r"|雨|濡れ|びしょ|汗",
+    re.I,
+)
+_SIT_RE = re.compile(
+    r"\b(sitting|seated|crouch(?:ing|ed)?|kneel(?:ing|ed)?)\b"
+    r"|座|しゃが|膝立ち|跪",
+    re.I,
+)
+
+
+def _ledger_sight_text(ledger: dict[str, str]) -> str:
+    return " ".join(
+        str(ledger.get(k) or "")
+        for k in (
+            "beat", "beat_b", "expression", "atmosphere", "frame",
+            "light", "scene", "bg", "wearing",
+        )
+    )
+
+
+def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
+    """Infer camera-visible effects from ledger state — craft-only, not ledger writes.
+
+    Example: wind-blown hair → floating hair motion and often a visible nape when
+    the view is rear/side; from_behind → nape / shoulder line rather than a full face.
+    """
+    text = _ledger_sight_text(ledger)
+    tags: list[str] = []
+    hints: list[str] = []
+    wind = bool(_WIND_RE.search(text))
+    behind = bool(_BEHIND_RE.search(text) or _BEHIND_RE.search(str(ledger.get("frame") or "")))
+    look_back = bool(_LOOK_BACK_RE.search(text))
+    side = bool(_SIDE_RE.search(text))
+    wet = bool(_WET_RE.search(text))
+    sitting = bool(_SIT_RE.search(text))
+
+    if wind:
+        tags.append("floating_hair")
+        if behind or side or look_back:
+            tags.append("nape")
+            hints.append(
+                "Wind pulls her hair forward and aside, so the nape of her neck "
+                "and the line of her throat stay visible — strands stream across "
+                "her shoulders without inventing a new haircut."
+            )
+        else:
+            hints.append(
+                "Wind lifts and streams her hair; flyaways catch the light and "
+                "brush her cheeks and collar — motion you can see, not a new style."
+            )
+
+    if behind:
+        if "nape" not in tags:
+            tags.append("nape")
+        tags.append("from_behind")
+        if look_back:
+            tags.append("looking_back")
+            hints.append(
+                "Seen from behind, her shoulders and nape lead the frame; she "
+                "glances back over one shoulder so only a sliver of her face returns."
+            )
+        elif not any("from behind" in h.lower() or "Seen from behind" in h for h in hints):
+            hints.append(
+                "The camera reads her from behind — shoulder blades, nape, and "
+                "the fall of her hair — not a frontal portrait."
+            )
+
+    if wet and not wind:
+        tags.append("wet_hair")
+        hints.append(
+            "Damp strands cling along her neck and temples; fabric darkens where "
+            "it touches skin — wetness as a visible surface, not new clothes."
+        )
+
+    if sitting and ("lap" in text.lower() or "膝" in text):
+        hints.append(
+            "Seated weight settles through her hips and thighs; folds gather at "
+            "the knees and the seat edge where cloth meets the surface."
+        )
+
+    # Dedupe tags preserving order
+    seen: set[str] = set()
+    uniq_tags: list[str] = []
+    for t in tags:
+        low = t.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        uniq_tags.append(t)
+
+    return {
+        "tags": uniq_tags,
+        "hints": hints[:3],
+        "needs_dense": bool(uniq_tags or hints or wind or behind),
+    }
 
 
 def _person_box(
@@ -174,10 +301,15 @@ def _person_box(
     wearing: str,
     beat: str,
     expression: str = "",
+    extra_beat_tags: list[str] | None = None,
 ) -> dict[str, list[str]]:
     """One Muse's dynamic tags — clothes / pose / face only."""
     wear = talk.filter_banned_tags(session, _phrase_to_tags(wearing))
     pose = _phrase_to_tags(beat)
+    for t in extra_beat_tags or []:
+        tag = str(t or "").strip().replace(" ", "_")
+        if tag and tag.lower() not in {p.lower() for p in pose}:
+            pose.append(tag)
     face = _phrase_to_tags(expression)
     return {"wearing": wear, "beat": pose, "face": face}
 
@@ -247,12 +379,17 @@ def assemble_prompt(
     quality_tags, atmosphere = anima.split_quality_support(raw_support)
 
     cast = [char]
+    cues = visible_consequence_cues(ledger)
+    # Consequence tags ride the lead beat box (hair/body visibility), never
+    # the shared frame-wide mood bag — ownership stays with the actress.
+    lead_extra = list(cues.get("tags") or [])
     people = [
         _person_box(
             session,
             wearing=str(ledger.get("wearing") or ""),
             beat=str(ledger.get("beat") or ""),
             expression=str(ledger.get("expression") or ""),
+            extra_beat_tags=lead_extra,
         ),
     ]
     if has_partner:
@@ -317,6 +454,20 @@ If two people are present, NEVER swap clothes, hairstyles, or body traits
 between them — keep each person's ownership exact.
 Lean into ATMOSPHERE and LOOK when present: sensory mood and render medium
 (cel, fantasy glow, watercolor bleed, etc.) without adding new wardrobe.
+
+VISIBLE CONSEQUENCES (required when state implies them):
+Read beat / atmosphere / frame / light as a photograph — name what the camera
+would actually SEE because of that state, not abstract feelings alone.
+Examples:
+- Hair blown by wind → streaming strands AND often a visible nape / neck line
+  when the view is rear, side, or looking-back (do not invent a new haircut).
+- from_behind / rear view → nape, shoulder blades, hair fall — not a frontal face
+  unless looking_back is already in the ledger.
+- Wet / rain → clinging strands, darkened fabric where it touches skin.
+- Seated weight → cloth folds at knees/hips where body meets the seat.
+Do NOT invent new garments, places, or props. Do NOT write consequences back as
+new ledger fields — only render them in the prose.
+
 Write 3–5 flowing English sentences (about 90–180 words). Name each person,
 then their appearance — do not list bare names alone.
 Do NOT restate the same fact three times. Do NOT dump a "Keep exactly" list.
@@ -331,9 +482,22 @@ async def densify_scene_prose(
     ledger: dict[str, str],
     base_prose: str,
 ) -> str:
-    """Optional LLM thicken — ledger facts stay absolute."""
+    """Optional LLM thicken — ledger facts stay absolute; consequences are craft-only."""
     if not base_prose.strip() or ollama is None:
         return base_prose
+    cues = visible_consequence_cues(ledger)
+    hint_block = ""
+    if cues.get("hints") or cues.get("tags"):
+        hint_block = (
+            "\nVISIBLE HINTS (must appear naturally if compatible with ledger):\n"
+            + "\n".join(f"- {h}" for h in (cues.get("hints") or []))
+            + (
+                "\n- Prefer sampler cues already implied: "
+                + ", ".join(cues.get("tags") or [])
+                if cues.get("tags") else ""
+            )
+            + "\n"
+        )
     prompt = (
         f"{_PROSE_DENSIFY}\n\n"
         f"LEDGER:\n"
@@ -348,7 +512,8 @@ async def densify_scene_prose(
         f"beat_b: {ledger.get('beat_b')}\n"
         f"lettering: {ledger.get('lettering')}\n"
         f"atmosphere: {ledger.get('atmosphere')}\n"
-        f"look: {ledger.get('look')}\n\n"
+        f"look: {ledger.get('look')}\n"
+        f"{hint_block}\n"
         f"BASE PROSE:\n{base_prose}\n"
     )
     try:
@@ -575,10 +740,12 @@ async def rebuild_craft(
     prose = scene_prose(
         led, partner=has_partner, name_a=name_a, name_b=name_b,
     )
-    # Densify when quality is on OR conversation set mood/look (no style buttons).
+    cues = visible_consequence_cues(led)
+    # Densify when quality/mood/look is on, OR when state implies visible
+    # physical consequences (wind, rear view, etc.).
     want_dense = bool(inputs.get("enhance_quality")) or bool(
         (led.get("atmosphere") or "").strip() or (led.get("look") or "").strip()
-    )
+    ) or bool(cues.get("needs_dense"))
     if want_dense and ollama is not None and prose:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")
@@ -589,6 +756,13 @@ async def rebuild_craft(
         if denser and denser != prose:
             debug_mod.note(session, "prose_densify", detail=denser[:240])
             prose = denser
+    if cues.get("tags") or cues.get("hints"):
+        debug_mod.note(
+            session, "visible_consequences",
+            detail=", ".join(cues.get("tags") or [])[:120],
+            tags=list(cues.get("tags") or [])[:20],
+            hints=list(cues.get("hints") or [])[:3],
+        )
     prompt = assemble_prompt(
         session, led,
         support_tags=chosen or None,

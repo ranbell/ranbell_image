@@ -27,6 +27,10 @@ Rules:
 - atmosphere: mood / air (wistful, tense, cozy…). Only when they ask to change mood.
 - look: art direction / render. Only when they ask to change art style.
 - lettering: short Latin words for a sign only when they asked for text in frame.
+- beat / frame: write what a photograph shows. If wind blows her hair, say so in
+  beat (hair blowing in the wind). If the view is from behind, put from behind
+  in frame. Do NOT invent garments — leave visible consequences like nape to
+  the assemble pass unless the director named them.
 - If the line is only emotion / banter / acknowledgement with NO picture or
   mood/look change, return {}.
 - Multiple fields in one line → include all of them in one object.
