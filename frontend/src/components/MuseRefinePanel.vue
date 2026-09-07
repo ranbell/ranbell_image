@@ -63,7 +63,7 @@ const diaryState = computed(() => session.value?.diary || {})
 const diaryDone = computed(() => diaryState.value.status === 'ok')
 const diaryWriting = computed(() => diaryState.value.status === 'writing')
 const againFeelAvailable = computed(() => !!session.value?.again_feel_available)
-const restateFields = ['wearing', 'beat', 'expression', 'scene', 'light', 'frame']
+const restateFields = ['wearing', 'beat', 'expression', 'scene', 'light', 'frame', 'atmosphere', 'look']
 
 async function api(path, opts = {}) {
   const resp = await fetch(path, {
@@ -636,6 +636,8 @@ function isStruckRow(row) {
                 <dt class="text-gray-500">bg</dt><dd class="text-gray-200">{{ ledger.bg || '—' }}</dd>
                 <dt class="text-gray-500">frame</dt><dd class="text-gray-200">{{ ledger.frame || '—' }}</dd>
                 <dt class="text-gray-500">lettering</dt><dd class="text-gray-200">{{ ledger.lettering || '—' }}</dd>
+                <dt class="text-gray-500">atmosphere</dt><dd class="text-gray-200">{{ ledger.atmosphere || '—' }}</dd>
+                <dt class="text-gray-500">look</dt><dd class="text-gray-200">{{ ledger.look || '—' }}</dd>
                 <template v-if="partner.character_id">
                   <dt class="text-gray-500">wearing_b</dt><dd class="text-gray-200">{{ ledger.wearing_b || '—' }}</dd>
                   <dt class="text-gray-500">beat_b</dt><dd class="text-gray-200">{{ ledger.beat_b || '—' }}</dd>

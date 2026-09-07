@@ -51,7 +51,7 @@ def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
     bag: list[str] = []
     for key in (
         "wearing", "beat", "expression", "scene", "light", "bg", "frame",
-        "wearing_b", "beat_b",
+        "wearing_b", "beat_b", "atmosphere", "look",
     ):
         bag.extend(_phrase_to_tags(ledger.get(key) or ""))
     seen: set[str] = set()
@@ -72,12 +72,10 @@ def scene_prose(
     name_a: str = "",
     name_b: str = "",
 ) -> str:
-    """Thick English SCENE paragraph — locks every ledger axis into prose.
+    """Cinematic English SCENE paragraph for Anima (tags + longer NL).
 
-    Tags alone drift; this paragraph is the firm reinforcement that restates
-    clothes, pose, face, place, light, and camera as one readable moment.
-    Deterministic: no invention beyond ledger phrases.
     Ownership stays split: lead clothes/pose never attributed to the partner.
+    Atmosphere / look thicken mood and render without triple-locking facts.
     """
     wearing = (ledger.get("wearing") or "").strip()
     beat = (ledger.get("beat") or "").strip()
@@ -88,56 +86,84 @@ def scene_prose(
     frame = (ledger.get("frame") or "").strip()
     wearing_b = (ledger.get("wearing_b") or "").strip()
     beat_b = (ledger.get("beat_b") or "").strip()
+    atmosphere = (ledger.get("atmosphere") or "").strip()
+    look = (ledger.get("look") or "").strip()
     lead = (name_a or "She").strip() or "She"
     other = (name_b or "Her partner").strip() or "Her partner"
 
-    if not any((wearing, beat, expression, scene, light, bg, frame, wearing_b, beat_b)):
+    if not any((
+        wearing, beat, expression, scene, light, bg, frame,
+        wearing_b, beat_b, atmosphere, look,
+    )):
         return ""
 
     parts: list[str] = []
 
-    # Place + light + background as the stage (no pose assumption).
-    stage_bits: list[str] = []
+    # Opening stage — one flowing sentence when possible.
+    stage: list[str] = []
     if scene:
         if scene.lower().startswith(("at ", "in ", "on ", "inside ", "outside ")):
-            stage_bits.append(scene)
+            stage.append(scene)
         else:
-            stage_bits.append(f"at {scene}")
+            stage.append(f"at {scene}")
     if bg and bg.lower() not in (scene or "").lower():
-        stage_bits.append(f"with {bg} behind them" if partner else f"with {bg} behind her")
+        stage.append(
+            f"{bg} stretching behind them" if partner else f"{bg} stretching behind her"
+        )
     if light:
-        if any(w in light.lower() for w in ("light", "sun", "glow", "lamp", "neon")):
-            stage_bits.append(f"under {light}")
+        if any(w in light.lower() for w in ("light", "sun", "glow", "lamp", "neon", "rim")):
+            stage.append(f"bathed in {light}")
         else:
-            stage_bits.append(f"lit by {light}")
-    if stage_bits:
-        parts.append("The shot is set " + ", ".join(stage_bits) + ".")
+            stage.append(f"lit by {light}")
+    if stage:
+        parts.append("The frame opens " + ", ".join(stage) + ".")
     else:
-        parts.append("The shot holds them in frame." if partner else "The shot holds her in frame.")
-
-    if wearing:
-        parts.append(f"{lead} is wearing {wearing}.")
-    if beat:
-        parts.append(f"{lead}'s body: {beat}.")
-    if expression:
-        parts.append(f"{lead}'s face: {expression}.")
-
-    if partner or wearing_b or beat_b:
-        if wearing_b:
-            parts.append(f"{other} is wearing {wearing_b}.")
-        if beat_b:
-            parts.append(f"{other}'s body: {beat_b}.")
         parts.append(
-            f"Do not swap clothes or hairstyles between {lead} and {other}. "
-            "Both share the same place and moment."
+            "The frame holds them in a quiet beat."
+            if partner else
+            "The frame holds her in a quiet beat."
         )
 
-    if frame:
-        parts.append(f"Camera: {frame}.")
+    # Lead — clothes + body + face as readable prose (not telegraphic labels).
+    lead_bits: list[str] = []
+    if wearing:
+        lead_bits.append(f"wearing {wearing}")
+    if beat:
+        lead_bits.append(beat)
+    if expression:
+        lead_bits.append(f"with {expression} on her face")
+    if lead_bits:
+        # Prefer named subject for Anima multi-char guidance.
+        if wearing and beat and expression:
+            parts.append(
+                f"{lead} is {lead_bits[0]}, {lead_bits[1]}, {lead_bits[2]}."
+            )
+        elif wearing and beat:
+            parts.append(f"{lead} is {lead_bits[0]}, {lead_bits[1]}.")
+        else:
+            parts.append(f"{lead} is " + ", ".join(lead_bits) + ".")
 
-    # Anima / Qwen: do NOT restate the same facts a third time ("Keep exactly"
-    # used to triple-lock and the community guide flags 3× concept repeats).
-    # Ownership already lives once in tags + once in the sentences above.
+    if partner or wearing_b or beat_b:
+        other_bits: list[str] = []
+        if wearing_b:
+            other_bits.append(f"wearing {wearing_b}")
+        if beat_b:
+            other_bits.append(beat_b)
+        if other_bits:
+            parts.append(f"{other} is " + ", ".join(other_bits) + ".")
+        parts.append(
+            f"Do not swap clothes or hairstyles between {lead} and {other}; "
+            "they share one place and one moment."
+        )
+
+    if atmosphere:
+        parts.append(
+            f"The air feels {atmosphere} — mood first, not a new wardrobe."
+        )
+    if look:
+        parts.append(f"Render the picture as {look}.")
+    if frame:
+        parts.append(f"Camera stays {frame}.")
 
     return " ".join(parts)
 
@@ -157,9 +183,9 @@ def _person_box(
 
 
 def _frame_wide_tags(ledger: dict[str, str]) -> list[str]:
-    """Shared picture tags — place / light / bg / camera. Never clothes or hair."""
+    """Shared picture tags — place / light / bg / camera / mood. Never clothes or hair."""
     bag: list[str] = []
-    for key in ("scene", "light", "bg", "frame"):
+    for key in ("scene", "light", "bg", "frame", "atmosphere"):
         bag.extend(_phrase_to_tags(ledger.get(key) or ""))
     seen: set[str] = set()
     out: list[str] = []
@@ -170,6 +196,16 @@ def _frame_wide_tags(ledger: dict[str, str]) -> list[str]:
         seen.add(low)
         out.append(t)
     return out
+
+
+def _combined_style(session: dict[str, Any], ledger: dict[str, str]) -> str:
+    """Panel style input + conversation-driven look (look wins as append)."""
+    inputs = session.get("inputs") or {}
+    base = str(inputs.get("style") or "").strip()
+    look = str(ledger.get("look") or "").strip()
+    if base and look:
+        return f"{base}, {look}"
+    return look or base
 
 
 def assemble_prompt(
@@ -193,7 +229,7 @@ def assemble_prompt(
     name_b = str(partner.get("name_ja") or partner.get("name") or "Partner")
     inputs = session.get("inputs") or {}
     framing = str(inputs.get("framing") or "auto")
-    style = str(inputs.get("style") or "")
+    style = _combined_style(session, ledger)
     quality_on = (
         bool(enhance_quality) if enhance_quality is not None
         else bool(inputs.get("enhance_quality"))
@@ -275,11 +311,13 @@ def assemble_prompt(
 
 _PROSE_DENSIFY = """You densify a shot SCENE paragraph for Anima / FLUX-natural.
 Keep EVERY fact from LEDGER and BASE PROSE unchanged — clothes, pose, face,
-place, light, background, camera. Do not rename garments. Do not move the place.
-Do not invent props that fight the ledger.
+place, light, background, camera, atmosphere, look. Do not rename garments.
+Do not move the place. Do not invent props that fight the ledger.
 If two people are present, NEVER swap clothes, hairstyles, or body traits
 between them — keep each person's ownership exact.
-Write 2–4 flowing English sentences (about 60–140 words). Name each person,
+Lean into ATMOSPHERE and LOOK when present: sensory mood and render medium
+(cel, fantasy glow, watercolor bleed, etc.) without adding new wardrobe.
+Write 3–5 flowing English sentences (about 90–180 words). Name each person,
 then their appearance — do not list bare names alone.
 Do NOT restate the same fact three times. Do NOT dump a "Keep exactly" list.
 No (tag:weight). No comma-tag lists. Output the paragraph only.
@@ -308,7 +346,9 @@ async def densify_scene_prose(
         f"frame: {ledger.get('frame')}\n"
         f"wearing_b: {ledger.get('wearing_b')}\n"
         f"beat_b: {ledger.get('beat_b')}\n"
-        f"lettering: {ledger.get('lettering')}\n\n"
+        f"lettering: {ledger.get('lettering')}\n"
+        f"atmosphere: {ledger.get('atmosphere')}\n"
+        f"look: {ledger.get('look')}\n\n"
         f"BASE PROSE:\n{base_prose}\n"
     )
     try:
@@ -535,7 +575,11 @@ async def rebuild_craft(
     prose = scene_prose(
         led, partner=has_partner, name_a=name_a, name_b=name_b,
     )
-    if bool(inputs.get("enhance_quality")) and ollama is not None and prose:
+    # Densify when quality is on OR conversation set mood/look (no style buttons).
+    want_dense = bool(inputs.get("enhance_quality")) or bool(
+        (led.get("atmosphere") or "").strip() or (led.get("look") or "").strip()
+    )
+    if want_dense and ollama is not None and prose:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")
         denser = await densify_scene_prose(

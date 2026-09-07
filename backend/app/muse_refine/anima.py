@@ -44,7 +44,8 @@ _WEIGHT_BARE_RE = re.compile(
     r"^(?P<body>.+?)\s*:\s*(?P<w>\d+(?:\.\d+)?)$"
 )
 _PROSE_START_RE = re.compile(
-    r"^(The shot\b|Keep exactly\b|Do not swap\b|[A-Z][a-z]+ (?:is|stands|sits|wears|holds)\b)",
+    r"^(The (?:shot|frame)\b|Keep exactly\b|Do not swap\b|"
+    r"[A-Z][a-z]+ (?:is|stands|sits|wears|holds)\b)",
 )
 
 

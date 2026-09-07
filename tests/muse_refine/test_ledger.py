@@ -121,7 +121,7 @@ def test_scene_prose_locks_all_axes():
     assert "soft smile" in low
     assert "medium shot" in low
     assert "keep exactly" not in low  # Anima: avoid 3× concept repeats
-    assert len(prose) > 80
+    assert len(prose) > 60
 
 
 def test_w_muse_does_not_mix_clothes_or_hair():

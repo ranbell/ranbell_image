@@ -251,5 +251,85 @@ def publish_actress_turn(
 
 RESTATE_FIELDS = (
     "wearing", "beat", "expression", "scene", "light", "bg", "frame",
-    "wearing_b", "beat_b",
+    "wearing_b", "beat_b", "atmosphere", "look", "lettering",
 )
+
+# Conversation → atmosphere / look (no UI buttons). First match wins per key;
+# later rules can still fill the other key. Absolute English for the ledger.
+_ATM_LOOK_RULES: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
+    # Clear / reset
+    (re.compile(r"(画風|雰囲気|ムード|タッチ).*(リセット|なし|戻|クリア)|reset\s+(look|mood|style)", re.I),
+     {"atmosphere": "", "look": ""}),
+    # Look / render
+    (re.compile(r"(カチッ|かっちり|クリーン|くっきり|セル画|セル塗り|シャープな線|clean\s*line|cel[\s-]?shad)", re.I),
+     {"look": "anime screenshot, cel shading, clean lineart, flat color, sharp lines"}),
+    (re.compile(r"(劇場版|キービジュ|key\s*visual|劇伴っぽ|cinematic\s*anime)", re.I),
+     {"look": "anime key visual, dramatic lighting, polished anime illustration, depth of field"}),
+    (re.compile(r"(水彩|water\s*colou?r|にじみ)", re.I),
+     {"look": "watercolor, soft edges, paper texture, delicate washes"}),
+    (re.compile(r"(厚塗り|油絵|oil\s*paint|painterly)", re.I),
+     {"look": "painterly, oil painting, thick brush strokes, rich texture"}),
+    (re.compile(r"(ラフ|スケッチ|線画|rough\s*sketch|line\s*art\s*only)", re.I),
+     {"look": "sketch, lineart, rough lines, unfinished"}),
+    (re.compile(r"(ピクセル|ドット|pixel\s*art)", re.I),
+     {"look": "pixel art, limited palette"}),
+    (re.compile(r"(暗(い)?ファンタジー|ダークファンタジー|dark\s*fantasy|ゴシック)", re.I),
+     {"look": "dark fantasy illustration, gothic, ornate shadows",
+      "atmosphere": "ominous, heavy air, quiet dread"}),
+    (re.compile(r"(ファンタジー|魔法|魔導|ファンタジーっぽ|fantasy)", re.I),
+     {"look": "fantasy illustration, magical aura, glowing particles, ornate detail",
+      "atmosphere": "wondrous, hush of magic, soft sparkle in the air"}),
+    (re.compile(r"(SF|近未来|サイバー|cyberpunk|sci-?fi)", re.I),
+     {"look": "sci-fi illustration, neon accents, sleek tech"}),
+    (re.compile(r"(レトロ|昭和|90年代|90s\s*anime|retro\s*anime)", re.I),
+     {"look": "1990s anime style, retro anime screencap, soft film grain"}),
+    # Atmosphere / mood (emo)
+    (re.compile(r"(エモ|切ない|寂しい|物憂|哀愁|melanchol|wistful|bittersweet|泣きそう)", re.I),
+     {"atmosphere": "wistful, melancholic, tender ache, soft focus, emotional"}),
+    (re.compile(r"(ほのぼの|あったか|優しい空気|cozy|warm\s*and\s*gentle|癒)", re.I),
+     {"atmosphere": "cozy, warm, gentle, soft air, comforting"}),
+    (re.compile(r"(緊張|ピンと|ピリ|tense|suspense|緊迫)", re.I),
+     {"atmosphere": "tense, taut silence, sharp focus"}),
+    (re.compile(r"(ロマンチック|恋|甘い|romantic|intimate\s*mood)", re.I),
+     {"atmosphere": "romantic, intimate, soft blush in the air"}),
+    (re.compile(r"(派手|キラキラ|きらめ|華やか|sparkle|glitter|耀)", re.I),
+     {"atmosphere": "sparkling, glittering light, lively shimmer"}),
+    (re.compile(r"(静か|しっとり|静謐|quiet|still\s*air|閑)", re.I),
+     {"atmosphere": "quiet, still air, hushed, contemplative"}),
+    (re.compile(r"(夢|夢幻|幻想的|dreamy|ethereal|霞)", re.I),
+     {"atmosphere": "dreamy, ethereal haze, soft glow"}),
+    (re.compile(r"(荒涼|寂しい景色|lonely\s*landscape|empty\s*air)", re.I),
+     {"atmosphere": "lonely, empty air, distant"}),
+)
+
+
+def cue_atmosphere_look(text: str) -> dict[str, str]:
+    """Map director chat → atmosphere/look ledger fields (conversation only)."""
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    for pat, patch in _ATM_LOOK_RULES:
+        if not pat.search(raw):
+            continue
+        for key, val in patch.items():
+            # First concrete fill wins; explicit clear ("") always applies.
+            if key in out and out[key] and val:
+                continue
+            out[key] = val
+    return out
+
+
+def merge_cue_into_patch(patch: dict[str, str], cue: dict[str, str]) -> dict[str, str]:
+    """Writer wins on conflict; cue fills gaps (and allows explicit clears)."""
+    merged = dict(patch or {})
+    for key, val in (cue or {}).items():
+        if key not in merged:
+            merged[key] = val
+            continue
+        # Explicit clear from cue when writer omitted the key entirely — already handled.
+        # If writer set a non-empty value, keep writer.
+        if not str(merged.get(key) or "").strip() and val == "":
+            merged[key] = ""
+    return merged
+

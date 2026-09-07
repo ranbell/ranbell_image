@@ -630,6 +630,12 @@ async def chat(
 
     debug_mod.note(session, "writer_patch", detail=str(patch), patch=patch, retried=retried)
 
+    # Conversation cues for mood / art direction (no UI buttons).
+    cue = talk.cue_atmosphere_look(text)
+    if cue:
+        patch = talk.merge_cue_into_patch(patch, cue)
+        debug_mod.note(session, "atm_look_cue", detail=str(cue), patch=patch)
+
     missed = False
     if ledger_mod.touched_picture(patch):
         # wearing_drop → soft ban so assemble won't resurrect it.

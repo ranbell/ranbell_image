@@ -18,6 +18,8 @@ LEDGER_KEYS: tuple[str, ...] = (
     "wearing_b",
     "beat_b",
     "lettering",  # short Latin words for Anima text "…" / text_on_image
+    "atmosphere",  # mood / air — conversation-driven (wistful, tense, cozy…)
+    "look",  # art direction / render — cel, fantasy, watercolor… (not UI buttons)
 )
 
 DROP_KEYS: tuple[str, ...] = ("wearing_drop",)
@@ -34,6 +36,8 @@ FIELD_CHIPS: dict[str, dict[str, str]] = {
     "wearing_b": {"icon": "👗", "ja": "相方服", "en": "Partner clothes"},
     "beat_b": {"icon": "🤝", "ja": "相方姿勢", "en": "Partner pose"},
     "lettering": {"icon": "🔤", "ja": "文字", "en": "Lettering"},
+    "atmosphere": {"icon": "🌫", "ja": "雰囲気", "en": "Mood"},
+    "look": {"icon": "🎨", "ja": "画風", "en": "Look"},
     "wearing_drop": {"icon": "🗑", "ja": "脱ぐ", "en": "Drop"},
 }
 
@@ -44,9 +48,10 @@ _PICTURE_CUES = re.compile(
     r"立|座|跪|寝|ポーズ|姿勢|表情|笑|泣|"
     r"場所|屋上|教室|公園|海|部屋|背景|光|照明|カメラ|構図|寄|引き|"
     r"看板|文字|テキスト|ボード|"
+    r"雰囲気|空気|ムード|画風|タッチ|塗り|ファンタジー|エモ|セル|"
     r"wear|shirt|skirt|dress|uniform|hoodie|coat|hat|pose|stand|sit|"
     r"rooftop|classroom|park|beach|room|background|light|camera|frame|outfit|"
-    r"sign|banner|lettering|textboard"
+    r"sign|banner|lettering|textboard|atmosphere|mood|fantasy|watercolor|cel"
     r")",
     re.I,
 )
@@ -147,6 +152,10 @@ def now_line(ledger: dict[str, str], *, locale: str = "ja") -> str:
             bits.append(f"光: {light}")
         if frame:
             bits.append(f"構図: {frame}")
+        if atm := (ledger.get("atmosphere") or "").strip():
+            bits.append(f"雰囲気: {atm}")
+        if look := (ledger.get("look") or "").strip():
+            bits.append(f"画風: {look}")
         return " / ".join(bits) if bits else "（まだ画は決まっていない）"
     if wearing:
         bits.append(f"wearing {wearing}")
@@ -162,6 +171,10 @@ def now_line(ledger: dict[str, str], *, locale: str = "ja") -> str:
         bits.append(f"light {light}")
     if frame:
         bits.append(f"frame {frame}")
+    if atm := (ledger.get("atmosphere") or "").strip():
+        bits.append(f"mood {atm}")
+    if look := (ledger.get("look") or "").strip():
+        bits.append(f"look {look}")
     return "; ".join(bits) if bits else "(shot not set yet)"
 
 

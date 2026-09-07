@@ -14,22 +14,29 @@ logger = logging.getLogger(__name__)
 
 WRITER_SYSTEM = """You update a shot ledger. Output ONLY a JSON object.
 Keys allowed: wearing, beat, expression, scene, light, bg, frame,
-wearing_b, beat_b, wearing_drop.
+wearing_b, beat_b, lettering, atmosphere, look, wearing_drop.
 Rules:
 - Absolute phrases in English (danbooru-friendly words ok).
 - Include ONLY fields the latest line actually changes.
 - Clothes and place are independent: changing clothes must not clear scene.
 - Changing place must not undress her.
 - wearing_drop: one garment name to remove, only when asked to take something off.
-- If the line is only emotion / banter / acknowledgement, return {}.
+- atmosphere: mood / air of the picture (wistful, tense, cozy, sparkling…).
+  Fill when the director asks for エモい / 切ない / ほのぼの / romantic / etc.
+- look: art direction / render (cel shading, fantasy illustration, watercolor…).
+  Fill when they ask for カチッと / ファンタジー / 水彩 / key visual / etc.
+- lettering: short Latin words for a sign only when they asked for text in frame.
+- If the line is only emotion / banter / acknowledgement with NO picture or
+  mood/look change, return {}.
 - Multiple fields in one line → include all of them in one object.
 - wearing_b / beat_b only when a partner Muse is in the shot and the line
   names her clothes or pose.
 """
 
-WRITER_RETRY = """The last line looks like a picture direction, but you returned {}.
-Read it again. If it names clothes, place, pose, face, light, or camera, fill those
-keys. Still return {} only for pure emotion/banter with no picture change.
+WRITER_RETRY = """The last line looks like a picture or mood/look direction, but you returned {}.
+Read it again. If it names clothes, place, pose, face, light, camera,
+atmosphere (mood), or look (art style), fill those keys.
+Still return {} only for pure emotion/banter with no picture/mood/look change.
 Output ONLY JSON.
 """
 

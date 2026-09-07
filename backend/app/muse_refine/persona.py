@@ -58,13 +58,18 @@ EXPRESSION: <face>
 FRAME: <crop + gaze>
 LIGHT: <light>
 BG: <background if distinct>
+ATMOSPHERE: <mood / air — wistful, cozy, tense… when he asked>
+LOOK: <art direction — cel shading, fantasy, watercolor… when he asked>
 LETTERING: <short Latin words on a sign/plate ONLY if he asked — else omit>
 (Partner present: WEARING_B / BEAT_B)
 
 PROPOSE: optional JSON with ledger keys (wearing, beat, expression, scene,
-light, bg, frame, wearing_b, beat_b, lettering, wearing_drop) when the
-picture should move. Absolute English phrases. Omit when chat-only.
+light, bg, frame, wearing_b, beat_b, lettering, atmosphere, look,
+wearing_drop) when the picture, mood, or look should move. Absolute English
+phrases. Omit when chat-only.
 Lettering is Latin letters/digits only, a few words — never Japanese glyphs.
+Atmosphere and look come from conversation (「エモく」「ファンタジーっぽく」
+「カチッとしたセル画」) — not from UI buttons.
 
 PITCH: optional. Two short phrases in the SAY language split by ` | `
 when a real fork is open. Omit on chit-chat or right after they picked one.
@@ -93,11 +98,16 @@ _CARD_FIELD_MAP = {
     "BEAT_B": "beat_b",
     "LETTERING": "lettering",
     "TEXT": "lettering",
+    "ATMOSPHERE": "atmosphere",
+    "MOOD": "atmosphere",
+    "LOOK": "look",
+    "STYLE": "look",
 }
 
 _CARD_LINE_RE = re.compile(
     r"(?im)^\s*(PLACE|SCENE|HOUR|LIGHT|WEARING_B|WEARING|BEAT_B|BEAT|"
-    r"EXPRESSION|FACE|FRAME|BG|BACKGROUND|LETTERING|TEXT)\s*[:：]\s*(.+?)\s*$"
+    r"EXPRESSION|FACE|FRAME|BG|BACKGROUND|LETTERING|TEXT|"
+    r"ATMOSPHERE|MOOD|LOOK|STYLE)\s*[:：]\s*(.+?)\s*$"
 )
 
 
