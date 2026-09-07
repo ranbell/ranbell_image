@@ -348,6 +348,11 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             "(opening) The Showrunner just arrived. Greet them. Do not brief the shot yet."
         )
     )
+    events.publish(session["session_id"], {
+        "type": "muse_speaking",
+        "muse_id": str(char.get("character_id") or ""),
+        "name": name,
+    })
     t0 = time.monotonic()
     actress = await writer.actress_turn(
         ollama,
@@ -707,6 +712,11 @@ async def chat(
     now = str((session.get("craft") or {}).get("now") or "")
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
+    events.publish(session["session_id"], {
+        "type": "muse_speaking",
+        "muse_id": str(char.get("character_id") or ""),
+        "name": name,
+    })
     t0 = time.monotonic()
     actress = await writer.actress_turn(
         ollama,

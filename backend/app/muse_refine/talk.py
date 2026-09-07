@@ -207,12 +207,19 @@ def publish_actress_turn(
                 "type": "chat", "role": "assistant", "name": cname, "text": text,
             })
     else:
+        lead_cid = str(lead.get("character_id") or "")
         _append_chat(
             session, role="assistant", name=lead_name, text=say,
-            meta={"kind": "say", "my_feel": my_feel or None},
+            meta={
+                "kind": "say",
+                "speaker": "A",
+                "speaker_id": lead_cid or None,
+                "my_feel": my_feel or None,
+            },
         )
         events.publish(sid, {
             "type": "chat", "role": "assistant", "name": lead_name, "text": say,
+            "speaker_id": lead_cid or None,
         })
 
     if aside:
@@ -225,16 +232,26 @@ def publish_actress_turn(
         except Exception:
             body = aside
         aside_name = name_b if speaker == "B" else lead_name
+        aside_cid = (
+            str(partner.get("character_id") or "")
+            if speaker == "B"
+            else str(lead.get("character_id") or "")
+        )
         _append_chat(
             session,
             role="assistant",
             name=aside_name,
             text=body or aside,
-            meta={"kind": "banter", "speaker": speaker or "A"},
+            meta={
+                "kind": "banter",
+                "speaker": speaker or "A",
+                "speaker_id": aside_cid or None,
+            },
         )
         events.publish(sid, {
             "type": "chat", "role": "assistant", "name": aside_name,
             "text": body or aside, "kind": "banter",
+            "speaker_id": aside_cid or None,
         })
 
     pitch_opts = persona.parse_pitch_options(pitch)

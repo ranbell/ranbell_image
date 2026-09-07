@@ -1846,6 +1846,9 @@
     "chatHint": "Direct clothes, place, pose — and mood/look in chat (“more wistful”, “clean cel look”, “fantasy air”). Press Open so she greets first.",
     "chatPlaceholder": "e.g. white shirt on the rooftop; wistful mood / clean cel shading",
     "send": "Send",
+    "director": "Showrunner",
+    "thinking": "Thinking",
+    "streamHint": "SSE link (previews and session updates)",
     "ledger": "Ledger",
     "ledgerStickyHint": "Violet rows (mood / look / lettering) stick across clothes and place changes",
     "fields": {

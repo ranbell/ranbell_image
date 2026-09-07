@@ -32,8 +32,14 @@ const chatEl = ref(null)
 const preview = ref('')
 const showDiary = ref(false)
 const themeDraft = ref('')
+const streamLive = ref(false)
+const speaking = ref(false)
 let es = null
 let pollTimer = null
+let refreshTimer = null
+let refreshQueued = false
+let startedAt = 0
+const elapsed = ref(0)
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
 const inputs = computed(() => session.value?.inputs || {})
@@ -63,6 +69,32 @@ const diaryState = computed(() => session.value?.diary || {})
 const diaryDone = computed(() => diaryState.value.status === 'ok')
 const diaryWriting = computed(() => diaryState.value.status === 'writing')
 const againFeelAvailable = computed(() => !!session.value?.again_feel_available)
+
+function thumb(sha) {
+  return sha ? `/api/thumbnails/${sha}.webp` : ''
+}
+
+const leadCharacter = computed(() => session.value?.character || {})
+const leadFaceSha = computed(() =>
+  leadCharacter.value?.board?.portrait || leadCharacter.value?.board?.sheet || '',
+)
+const partnerFaceSha = computed(() =>
+  partner.value?.board?.portrait || partner.value?.board?.sheet || '',
+)
+const leadFace = computed(() => thumb(leadFaceSha.value))
+const partnerFace = computed(() => thumb(partnerFaceSha.value))
+const waitName = computed(() =>
+  leadCharacter.value?.name_ja || leadCharacter.value?.name || 'Muse',
+)
+const boardPending = computed(() => !!session.value?.board?.pending)
+const shootPending = computed(() => !!session.value?.shoot?.pending)
+const waitingOnModel = computed(() => busy.value || speaking.value)
+function clock(sec) {
+  const s = Math.max(0, Number(sec) || 0)
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return m ? `${m}:${String(r).padStart(2, '0')}` : `${r}s`
+}
 const restateFields = [
   'wearing', 'beat', 'expression', 'scene', 'light', 'bg', 'frame',
   'lettering', 'atmosphere', 'look',
@@ -127,7 +159,6 @@ async function startFresh(characterId = '') {
       body: JSON.stringify(body),
     })
     openStream(session.value.session_id)
-    startPoll()
   } catch (err) {
     fail(err)
   } finally {
@@ -198,6 +229,8 @@ async function openSession() {
     return
   }
   busy.value = true
+  speaking.value = true
+  if (!startedAt) startedAt = Date.now()
   try {
     if (themeDraft.value.trim() && themeDraft.value.trim() !== (inputs.value.theme || '')) {
       await patchInputs({ theme: themeDraft.value.trim() })
@@ -211,6 +244,9 @@ async function openSession() {
     fail(err)
   } finally {
     busy.value = false
+    speaking.value = false
+    startedAt = 0
+    elapsed.value = 0
   }
 }
 
@@ -265,16 +301,22 @@ async function finishSession() {
   }
 }
 
-function faceForRow(row) {
+function faceShaForRow(row) {
   const id = row?.meta?.speaker_id
-  if (id && id === partner.value?.character_id) {
-    return partner.value?.board?.portrait || partner.value?.board?.sheet || ''
+  if (id && id === partner.value?.character_id) return partnerFaceSha.value
+  if (row?.role === 'assistant' || row?.meta?.kind === 'say' || row?.meta?.kind === 'banter') {
+    if (id && id === leadCharacter.value?.character_id) return leadFaceSha.value
+    if (row?.meta?.speaker === 'B') return partnerFaceSha.value
+    return leadFaceSha.value
   }
-  const c = session.value?.character || {}
-  return c.board?.portrait || c.board?.sheet || ''
+  return ''
 }
-function thumb(sha) {
-  return sha ? `/api/thumbnails/${sha}.webp` : ''
+function faceForRow(row) {
+  return thumb(faceShaForRow(row))
+}
+function isSayRow(row) {
+  const kind = row?.meta?.kind
+  return row?.role === 'assistant' && (!kind || kind === 'say')
 }
 
 async function sendChat() {
@@ -282,6 +324,8 @@ async function sendChat() {
   if (!msg || !session.value?.session_id || busy.value) return
   chatInput.value = ''
   busy.value = true
+  speaking.value = true
+  if (!startedAt) startedAt = Date.now()
   try {
     session.value = await api(
       `/api/muse-refine/sessions/${session.value.session_id}/chat`,
@@ -292,6 +336,9 @@ async function sendChat() {
     fail(err)
   } finally {
     busy.value = false
+    speaking.value = false
+    startedAt = 0
+    elapsed.value = 0
   }
 }
 
@@ -330,27 +377,76 @@ async function scrollChat() {
   if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight
 }
 
+function scheduleRefresh(scroll = false) {
+  // Coalesce bursty SSE (preview + session_updated + chat) into one GET.
+  refreshQueued = true
+  if (refreshTimer) return
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null
+    if (!refreshQueued) return
+    refreshQueued = false
+    await refresh()
+    if (scroll) await scrollChat()
+  }, 350)
+}
+
 function openStream(id) {
   closeStream()
   if (!id) return
   es = new EventSource(
     `/api/muse-refine/sessions/${id}/stream?token=${encodeURIComponent(getToken())}`,
   )
+  es.onopen = () => { streamLive.value = true }
   es.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data)
-      if (data.type === 'preview' && data.image) {
-        preview.value = `data:image/jpeg;base64,${data.image}`
+    let data = null
+    try { data = JSON.parse(ev.data) } catch { return }
+    if (!data?.type || data.type === 'hello' || data.type === 'ping') return
+    if (data.type === 'preview' && data.image) {
+      preview.value = `data:image/jpeg;base64,${data.image}`
+      return
+    }
+    if (data.type === 'muse_speaking') {
+      speaking.value = true
+      if (!startedAt) startedAt = Date.now()
+      return
+    }
+    if (data.type === 'chat' || data.type === 'chat_message') {
+      speaking.value = false
+      scheduleRefresh(true)
+      return
+    }
+    if (
+      data.type === 'session_updated'
+      || data.type === 'board_ready'
+      || data.type === 'board_attached'
+      || data.type === 'shoot_attached'
+      || data.type === 'craft_updated'
+    ) {
+      if (data.type === 'board_ready' || data.type === 'shoot_attached') {
+        preview.value = ''
       }
-      if (data.type === 'session_updated') refresh()
-    } catch { /* ignore */ }
+      speaking.value = false
+      scheduleRefresh(true)
+      return
+    }
+    scheduleRefresh()
   }
+  es.onerror = () => { streamLive.value = false }
+  startPoll()
 }
 function closeStream() {
   if (es) {
     es.close()
     es = null
   }
+  streamLive.value = false
+  speaking.value = false
+  stopPoll()
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+  refreshQueued = false
 }
 async function refresh() {
   if (!session.value?.session_id) return
@@ -359,8 +455,25 @@ async function refresh() {
   } catch { /* ignore */ }
 }
 function startPoll() {
-  stopPoll()
-  pollTimer = setInterval(refresh, 4000)
+  if (pollTimer) return
+  let tick = 0
+  pollTimer = setInterval(async () => {
+    if (typeof document !== 'undefined' && document.hidden) return
+    const rendering = boardPending.value || shootPending.value
+    const inferring = busy.value || speaking.value
+    // SSE is primary; poll only while work is in flight or the stream dropped.
+    if (!rendering && !inferring && streamLive.value) {
+      elapsed.value = 0
+      tick = 0
+      startedAt = 0
+      return
+    }
+    if (!startedAt && (rendering || inferring)) startedAt = Date.now()
+    if (startedAt) elapsed.value = Math.round((Date.now() - startedAt) / 1000)
+    // ~3s refresh while rendering; slower (~6s) fallback when SSE is down.
+    const every = streamLive.value ? 3 : 6
+    if (++tick % every === 0) await refresh()
+  }, 1000)
 }
 function stopPoll() {
   if (pollTimer) {
@@ -376,16 +489,12 @@ watch(() => session.value?.inputs?.theme, (theme) => {
 watch(() => props.show, async (open) => {
   if (!open) {
     closeStream()
-    stopPoll()
     return
   }
   try {
     await ensureCatalog()
     if (!session.value) await startFresh()
-    else {
-      openStream(session.value.session_id)
-      startPoll()
-    }
+    else openStream(session.value.session_id)
   } catch (err) {
     fail(err)
   }
@@ -435,15 +544,38 @@ function isStruckRow(row) {
       @keydown.esc.stop="close"
     >
       <div
-        class="flex h-full w-full max-w-5xl flex-col border-l border-teal-900/50 bg-[#0b1214] text-gray-100 shadow-2xl"
+        class="flex h-full w-full max-w-5xl flex-col border-l border-pink-500/30 bg-slate-900/95 text-gray-100 shadow-2xl"
       >
-        <header class="flex items-center gap-2 border-b border-teal-900/40 px-4 py-3">
+        <header class="flex items-center gap-2 border-b border-pink-500/20 bg-pink-950/20 px-4 py-3">
+          <div class="flex shrink-0 items-center -space-x-2">
+            <img
+              v-if="leadFace"
+              :src="leadFace"
+              alt=""
+              class="h-9 w-9 rounded-full object-cover ring-2 ring-pink-400/80 border border-pink-100 shadow-md"
+            />
+            <img
+              v-if="partnerFace"
+              :src="partnerFace"
+              alt=""
+              class="h-9 w-9 rounded-full object-cover ring-2 ring-purple-400/80 border border-pink-100 shadow-md"
+            />
+            <span
+              v-else-if="!leadFace"
+              class="grid h-9 w-9 place-items-center rounded-full bg-pink-950/50 text-pink-300 ring-1 ring-pink-500/40"
+            >🌸</span>
+          </div>
           <div class="min-w-0 flex-1">
-            <h2 class="text-base font-semibold tracking-wide text-teal-200">
+            <h2 class="text-base font-semibold tracking-wide text-pink-200">
               {{ t('museRefine.title') }}
             </h2>
             <p class="truncate text-[11px] text-gray-500">{{ t('museRefine.subtitle') }}</p>
           </div>
+          <span
+            class="shrink-0 font-mono text-[10px]"
+            :class="streamLive ? 'text-pink-400/80' : 'text-gray-500'"
+            :title="t('museRefine.streamHint')"
+          >SSE {{ streamLive ? '●' : '○' }}</span>
           <button
             type="button"
             class="rounded-lg px-2.5 py-1.5 text-xs"
@@ -465,18 +597,18 @@ function isStruckRow(row) {
           >{{ t('museRefine.reset') }}</button>
           <button
             type="button"
-            class="rounded-full px-2 py-1 text-gray-400 hover:bg-teal-950/60 hover:text-white"
+            class="rounded-full px-2 py-1 text-gray-400 hover:bg-pink-950/60 hover:text-white"
             @click="close"
           >✕</button>
         </header>
 
         <div class="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1.1fr_0.9fr]">
           <!-- Chat + ledger -->
-          <section class="flex min-h-0 flex-col border-r border-teal-950/40">
-            <div class="border-b border-teal-950/30 px-3 py-2">
+          <section class="flex min-h-0 flex-col border-r border-pink-500/15">
+            <div class="border-b border-pink-500/15 px-3 py-2">
               <div class="flex flex-wrap items-center gap-2">
                 <select
-                  class="max-w-[10rem] truncate rounded-md border border-teal-900/50 bg-teal-950/40 px-2 py-1 text-xs text-teal-100"
+                  class="max-w-[10rem] truncate rounded-md border border-pink-500/30 bg-pink-950/30 px-2 py-1 text-xs text-pink-100"
                   :value="inputs.character_id || ''"
                   :disabled="busy"
                   @change="pickCharacter($event.target.value)"
@@ -505,13 +637,13 @@ function isStruckRow(row) {
                     {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
                   </option>
                 </select>
-                <span class="text-[10px] font-medium uppercase tracking-wide text-teal-500/80">NOW</span>
+                <span class="text-[10px] font-medium uppercase tracking-wide text-pink-400/80">NOW</span>
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <input
                   v-model="themeDraft"
                   type="text"
-                  class="min-w-0 flex-1 rounded-md border border-teal-900/40 bg-teal-950/30 px-2 py-1 text-[11px] text-teal-50 outline-none focus:border-teal-600"
+                  class="min-w-0 flex-1 rounded-md border border-pink-500/20 bg-pink-950/25 px-2 py-1 text-[11px] text-pink-50 outline-none focus:border-pink-500"
                   :placeholder="t('museRefine.themePlaceholder')"
                   :disabled="busy"
                   @change="patchInputs({ theme: themeDraft.trim() })"
@@ -523,7 +655,7 @@ function isStruckRow(row) {
                   @click="openSession"
                 >{{ opened ? t('museRefine.reopen') : t('museRefine.open') }}</button>
               </div>
-              <p class="mt-1 text-[11px] leading-snug text-teal-100/80">
+              <p class="mt-1 text-[11px] leading-snug text-pink-100/80">
                 {{ craft.now || t('museRefine.nowEmpty') }}
               </p>
               <p class="mt-0.5 text-[10px] text-gray-500">{{ t('museRefine.nowAuthority') }}</p>
@@ -561,46 +693,28 @@ function isStruckRow(row) {
               </p>
             </div>
 
-            <div ref="chatEl" class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3 text-sm">
+            <div ref="chatEl" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 text-sm">
               <div
                 v-for="(row, i) in chat"
                 :key="i"
-                class="rounded-lg px-2.5 py-2"
-                :class="[
-                  row.role === 'user'
-                    ? (isStruckRow(row)
-                      ? 'bg-gray-900/50 text-gray-500 line-through decoration-amber-700/80'
-                      : 'bg-teal-950/40 text-teal-50')
-                    : isBanterRow(row)
-                      ? 'ml-4 border border-dashed border-pink-400/45 bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30 text-[11px] italic text-pink-200/95'
-                      : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
-                      ? 'border border-emerald-800/40 bg-emerald-950/25 text-emerald-50'
-                      : row.meta?.kind === 'verify_repair'
-                        ? 'border border-orange-800/40 bg-orange-950/25 text-orange-50'
-                        : isChangeRow(row)
-                      ? (row.meta?.kind === 'ledger_missed'
-                        ? 'border border-amber-700/50 bg-amber-950/30 text-[11px] text-amber-100'
-                        : 'border border-teal-800/40 bg-teal-950/20 text-[11px] text-teal-100')
-                      : row.role === 'system'
-                        ? 'bg-gray-900/80 text-[11px] text-gray-400'
-                        : 'bg-gray-900 text-gray-100',
-                ]"
+                class="flex flex-col gap-1"
+                :class="row.role === 'user' ? 'items-end' : 'items-start'"
               >
-                <div class="mb-0.5 flex flex-wrap items-center gap-1.5">
+                <span
+                  v-if="row.role !== 'user'"
+                  class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium"
+                  :class="isBanterRow(row) ? 'text-pink-300/90' : 'text-pink-300/80'"
+                >
                   <img
-                    v-if="row.role === 'assistant' && faceForRow(row)"
-                    :src="thumb(faceForRow(row))"
-                    class="h-5 w-5 rounded-full object-cover"
+                    v-if="faceForRow(row) && (isSayRow(row) || isBanterRow(row) || row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repair' || row.meta?.kind === 'verify_repaired' || row.meta?.kind === 'pitch' || row.meta?.kind === 'standing' || row.meta?.kind === 'contract')"
+                    :src="faceForRow(row)"
                     alt=""
+                    class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
-                  <span
-                    class="text-[10px] uppercase tracking-wide"
-                    :class="isBanterRow(row) ? 'text-pink-300/90 font-medium' : 'text-gray-500'"
-                  >
-                    <template v-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
-                    <template v-else-if="row.meta?.speaker">{{ row.name }} · {{ row.meta.speaker }}</template>
-                    <template v-else>{{ rowKindLabel(row, t) }}</template>
-                  </span>
+                  <template v-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
+                  <template v-else-if="isSayRow(row)">🌸 {{ row.name || waitName }}</template>
+                  <template v-else-if="row.meta?.speaker">🌸 {{ row.name }} · {{ row.meta.speaker }}</template>
+                  <template v-else>{{ rowKindLabel(row, t) }}</template>
                   <span
                     v-if="isStruckRow(row)"
                     class="rounded-full border border-amber-700/50 bg-amber-950/40 px-1.5 py-0.5 text-[10px] text-amber-200"
@@ -615,21 +729,67 @@ function isStruckRow(row) {
                         ? 'border-orange-600/60 bg-orange-900/40 text-orange-100'
                         : chip.key === 'ok'
                           ? 'border-emerald-600/60 bg-emerald-900/40 text-emerald-100'
-                          : 'border-teal-600/50 bg-teal-900/60 text-teal-50'"
+                          : 'border-pink-500/40 bg-pink-900/50 text-pink-50'"
                     :title="chip.key"
                   >
                     <span aria-hidden="true">{{ chip.icon }}</span>
                     <span>{{ chip.label }}</span>
                   </span>
-                </div>
-                <div v-if="!isChangeRow(row) || row.text" class="whitespace-pre-wrap leading-relaxed">
-                  {{ row.text }}
-                </div>
+                </span>
+                <span
+                  v-else
+                  class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium text-emerald-300/80"
+                >
+                  🎬 {{ t('museRefine.director') }}
+                  <span
+                    v-if="isStruckRow(row)"
+                    class="rounded-full border border-amber-700/50 bg-amber-950/40 px-1.5 py-0.5 text-[10px] text-amber-200"
+                  >{{ t('museRefine.struck') }}</span>
+                </span>
+                <div
+                  v-if="!isChangeRow(row) || row.text"
+                  class="max-w-[90%] whitespace-pre-wrap leading-relaxed shadow-sm"
+                  :class="[
+                    row.role === 'user'
+                      ? (isStruckRow(row)
+                        ? 'rounded-2xl rounded-tr-sm border border-gray-700/50 bg-gray-900/50 px-3.5 py-2 text-[12px] text-gray-500 line-through decoration-amber-700/80'
+                        : 'rounded-2xl rounded-tr-sm border border-emerald-500/40 bg-emerald-950/50 px-3.5 py-2 text-[12px] text-emerald-100')
+                      : isBanterRow(row)
+                        ? 'ml-1 rounded-2xl rounded-tl-sm border border-dashed border-pink-400/45 bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30 px-3 py-1.5 text-[11px] italic text-pink-200/95'
+                        : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
+                          ? 'rounded-2xl rounded-tl-sm border border-emerald-800/40 bg-emerald-950/25 px-3.5 py-2 text-[12px] text-emerald-50'
+                          : row.meta?.kind === 'verify_repair'
+                            ? 'rounded-2xl rounded-tl-sm border border-orange-800/40 bg-orange-950/25 px-3.5 py-2 text-[12px] text-orange-50'
+                            : isChangeRow(row)
+                              ? (row.meta?.kind === 'ledger_missed'
+                                ? 'rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-100'
+                                : 'rounded-xl border border-pink-500/25 bg-pink-950/20 px-3 py-2 text-[11px] text-pink-100')
+                              : row.role === 'system'
+                                ? 'rounded-xl border border-slate-700/40 bg-slate-900/60 px-3 py-2 text-[11px] text-gray-400'
+                                : 'rounded-2xl rounded-tl-sm border border-pink-500/30 bg-slate-900/80 px-3.5 py-2 text-[12px] text-pink-50',
+                  ]"
+                >{{ row.text }}</div>
               </div>
-              <p v-if="!chat.length" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
+              <div
+                v-if="waitingOnModel"
+                class="my-1.5 flex items-center gap-2 pl-0.5 text-pink-300/80"
+              >
+                <img
+                  v-if="leadFace"
+                  :src="leadFace"
+                  alt=""
+                  class="h-6 w-6 shrink-0 rounded-full object-cover border border-pink-100/40 ring-1 ring-pink-400/50 refine-wait-pulse"
+                />
+                <span class="max-w-[10rem] truncate text-[10px] font-medium">{{ waitName }}</span>
+                <span class="refine-dots text-[11px]" :aria-label="t('museRefine.thinking')">
+                  <span>.</span><span>.</span><span>.</span>
+                </span>
+                <span v-if="elapsed" class="font-mono text-[10px] text-pink-400/55">{{ clock(elapsed) }}</span>
+              </div>
+              <p v-if="!chat.length && !waitingOnModel" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
             </div>
 
-            <form class="flex flex-col gap-2 border-t border-teal-950/40 p-3" @submit.prevent="sendChat">
+            <form class="flex flex-col gap-2 border-t border-pink-500/15 p-3" @submit.prevent="sendChat">
               <div v-if="tasteChips.length || againFeelAvailable || lastPitch.length" class="flex flex-wrap gap-1.5">
                 <button
                   v-for="chip in tasteChips"
@@ -659,13 +819,13 @@ function isStruckRow(row) {
                 <input
                   v-model="chatInput"
                   type="text"
-                  class="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-teal-600"
+                  class="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-pink-500"
                   :placeholder="t('museRefine.chatPlaceholder')"
                   :disabled="busy || !session"
                 />
                 <button
                   type="submit"
-                  class="rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-40"
+                  class="rounded-lg bg-pink-600 px-3 py-2 text-sm font-medium text-white hover:bg-pink-500 disabled:opacity-40"
                   :disabled="busy || !chatInput.trim()"
                 >{{ t('museRefine.send') }}</button>
               </div>
@@ -674,8 +834,8 @@ function isStruckRow(row) {
 
           <!-- Prompt / options / images -->
           <section class="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
-            <div class="rounded-xl border border-teal-950/50 bg-gray-950/60 p-3">
-              <div class="mb-2 text-xs font-medium text-teal-200/90">{{ t('museRefine.ledger') }}</div>
+            <div class="rounded-xl border border-pink-500/20 bg-gray-950/60 p-3">
+              <div class="mb-2 text-xs font-medium text-pink-200/90">{{ t('museRefine.ledger') }}</div>
               <p class="mb-2 text-[10px] text-gray-500">{{ t('museRefine.ledgerStickyHint') }}</p>
               <dl class="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 text-[11px]">
                 <template v-for="row in ledgerRows" :key="row.key">
@@ -692,13 +852,13 @@ function isStruckRow(row) {
                   >{{ row.value || '—' }}</dd>
                 </template>
               </dl>
-              <div v-if="standing.length" class="mt-2 border-t border-teal-950/40 pt-2">
+              <div v-if="standing.length" class="mt-2 border-t border-pink-500/15 pt-2">
                 <div class="mb-1 text-[10px] uppercase tracking-wide text-amber-200/70">{{ t('museRefine.standing') }}</div>
                 <ul class="space-y-0.5 text-[11px] text-amber-100/80">
                   <li v-for="(s, i) in standing" :key="i">· {{ s }}</li>
                 </ul>
               </div>
-              <div v-if="banned.length" class="mt-2 border-t border-teal-950/40 pt-2">
+              <div v-if="banned.length" class="mt-2 border-t border-pink-500/15 pt-2">
                 <div class="mb-1 text-[10px] uppercase tracking-wide text-red-200/70">{{ t('museRefine.banned') }}</div>
                 <div class="flex flex-wrap gap-1">
                   <button
@@ -712,13 +872,13 @@ function isStruckRow(row) {
                   >✕ {{ tag }}</button>
                 </div>
               </div>
-              <div class="mt-2 flex flex-wrap gap-1 border-t border-teal-950/40 pt-2">
+              <div class="mt-2 flex flex-wrap gap-1 border-t border-pink-500/15 pt-2">
                 <span class="w-full text-[10px] text-gray-500">{{ t('museRefine.restate') }}</span>
                 <button
                   v-for="f in restateFields"
                   :key="f"
                   type="button"
-                  class="rounded border px-1.5 py-0.5 text-[10px] hover:border-teal-700"
+                  class="rounded border px-1.5 py-0.5 text-[10px] hover:border-pink-500/50"
                   :class="stickyFields.has(f)
                     ? 'border-violet-700/60 bg-violet-950/40 text-violet-100'
                     : 'border-gray-700 bg-gray-900 text-gray-300'"
@@ -728,12 +888,12 @@ function isStruckRow(row) {
               </div>
             </div>
 
-            <div class="rounded-xl border border-teal-950/50 bg-gray-950/60 p-3">
+            <div class="rounded-xl border border-pink-500/20 bg-gray-950/60 p-3">
               <div class="mb-2 flex items-center justify-between gap-2">
-                <span class="text-xs font-medium text-teal-200/90">{{ t('museRefine.options') }}</span>
+                <span class="text-xs font-medium text-pink-200/90">{{ t('museRefine.options') }}</span>
                 <button
                   type="button"
-                  class="text-[11px] text-teal-300/80 hover:text-teal-200"
+                  class="text-[11px] text-pink-300/80 hover:text-pink-200"
                   :disabled="busy"
                   @click="rebuild"
                 >{{ t('museRefine.rebuild') }}</button>
@@ -775,8 +935,8 @@ function isStruckRow(row) {
               </p>
             </div>
 
-            <div class="rounded-xl border border-teal-950/50 bg-gray-950/60 p-3">
-              <div class="mb-1 text-xs font-medium text-teal-200/90">{{ t('museRefine.prompt') }}</div>
+            <div class="rounded-xl border border-pink-500/20 bg-gray-950/60 p-3">
+              <div class="mb-1 text-xs font-medium text-pink-200/90">{{ t('museRefine.prompt') }}</div>
               <pre class="max-h-40 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-gray-300">{{ craft.prompt || '—' }}</pre>
               <p v-if="craft.support_tags" class="mt-2 text-[10px] text-gray-500">
                 support: {{ craft.support_tags }}
@@ -786,7 +946,7 @@ function isStruckRow(row) {
             <div class="flex flex-wrap gap-2">
               <button
                 type="button"
-                class="rounded-lg bg-teal-800/80 px-3 py-2 text-xs font-medium hover:bg-teal-700 disabled:opacity-40"
+                class="rounded-lg bg-pink-700/80 px-3 py-2 text-xs font-medium hover:bg-pink-600 disabled:opacity-40"
                 :disabled="busy || comfyOffline || !craft.prompt"
                 @click="runStage('board')"
               >{{ t('museRefine.board') }}</button>
@@ -820,7 +980,7 @@ function isStruckRow(row) {
               {{ t('museRefine.approveNeedsBoard') }}
             </p>
 
-            <div v-if="preview" class="overflow-hidden rounded-xl border border-teal-950/50">
+            <div v-if="preview" class="overflow-hidden rounded-xl border border-pink-500/20">
               <img :src="preview" alt="preview" class="max-h-56 w-full object-contain bg-black" />
             </div>
 
@@ -930,3 +1090,27 @@ function isStruckRow(row) {
     @toast="emit('toast', $event)"
   />
 </template>
+
+<style scoped>
+.refine-dots span {
+  display: inline-block;
+  animation: refine-dot-bounce 1.2s ease-in-out infinite;
+  opacity: 0.35;
+}
+.refine-dots span:nth-child(2) { animation-delay: 0.16s; }
+.refine-dots span:nth-child(3) { animation-delay: 0.32s; }
+.refine-wait-pulse {
+  animation: refine-wait-soft 1.6s ease-in-out infinite;
+}
+@keyframes refine-dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-2px); opacity: 1; }
+}
+@keyframes refine-wait-soft {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .refine-dots span, .refine-wait-pulse { animation: none; opacity: 1; }
+}
+</style>
