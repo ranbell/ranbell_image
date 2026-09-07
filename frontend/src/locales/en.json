@@ -631,7 +631,9 @@
       "lastError": "Last error:"
     },
     "muse": "Muse",
-    "museTitle": "Build an image board from a theme and a character"
+    "museTitle": "Build an image board from a theme and a character",
+    "museRefine": "Muse Refine",
+    "museRefineTitle": "Independent ledger studio — separate from classic Muse"
   },
   "about": {
     "tagline": "Local AI-powered image management and generation.\nSemantic search, similarity search, and prompt refinement pipeline.",
@@ -1812,5 +1814,28 @@
     "charm": "Hidden charm",
     "knownFor": "Known for",
     "stopN": "Stop ({n})"
+  },
+  "museRefine": {
+    "title": "Muse Refine",
+    "subtitle": "Independent ledger studio — separate from classic Muse",
+    "settings": "Settings",
+    "reset": "New",
+    "pickCharacter": "Pick character",
+    "nowEmpty": "Shot not set yet",
+    "chatHint": "Direct clothes, place, and pose. Simultaneous changes land in one patch.",
+    "chatPlaceholder": "e.g. white shirt on the rooftop",
+    "send": "Send",
+    "ledger": "Ledger",
+    "options": "Options",
+    "rebuild": "Rebuild prompt",
+    "useWd14": "Reference WD14 tags",
+    "useWd14Hint": "Inject nearby vocab-bank tags without overriding clothes/place authority",
+    "enhanceQuality": "Enhance atmosphere & quality",
+    "enhanceQualityHint": "Add light, mood, and quality tags — not just mechanical action",
+    "prompt": "Generation prompt",
+    "board": "Board",
+    "shoot": "Final",
+    "workflow": "Workflow",
+    "model": "LLM"
   }
 }

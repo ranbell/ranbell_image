@@ -631,7 +631,9 @@
       "lastError": "最終エラー:"
     },
     "muse": "Muse",
-    "museTitle": "お題とキャラからイメージボードを作る"
+    "museTitle": "お題とキャラからイメージボードを作る",
+    "museRefine": "Muse Refine",
+    "museRefineTitle": "独立の台本スタジオ（ledger）。既存 Muse とは別経路"
   },
   "about": {
     "tagline": "ローカル AI で動く画像管理・生成システム。\n意味検索・類似検索・錬成パイプラインを統合。",
@@ -1812,5 +1814,28 @@
     "charm": "隠れた魅力",
     "knownFor": "肩書き",
     "stopN": "止める ({n})"
+  },
+  "museRefine": {
+    "title": "Muse Refine",
+    "subtitle": "既存 Muse とは別の台本スタジオ。ledger が正本です",
+    "settings": "設定",
+    "reset": "新規",
+    "pickCharacter": "キャラを選ぶ",
+    "nowEmpty": "まだ画は未設定",
+    "chatHint": "服・場所・ポーズを指示してください。同時指定も1回で追従します。",
+    "chatPlaceholder": "例: 白いシャツで屋上に立って",
+    "send": "送る",
+    "ledger": "台本（ledger）",
+    "options": "オプション",
+    "rebuild": "プロンプト再生成",
+    "useWd14": "WD14タグを参考にする",
+    "useWd14Hint": "語彙バンクから近いタグを参考注入（服・場所の正本は上書きしない）",
+    "enhanceQuality": "雰囲気・品質を高める",
+    "enhanceQualityHint": "光・空気感・画質タグを追加。動作だけの味気ないプロンプトを補う",
+    "prompt": "生成プロンプト",
+    "board": "② 板を出す",
+    "shoot": "③ 本番",
+    "workflow": "ワークフロー",
+    "model": "LLM"
   }
 }
