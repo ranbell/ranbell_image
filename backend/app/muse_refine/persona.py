@@ -58,11 +58,13 @@ EXPRESSION: <face>
 FRAME: <crop + gaze>
 LIGHT: <light>
 BG: <background if distinct>
+LETTERING: <short Latin words on a sign/plate ONLY if he asked — else omit>
 (Partner present: WEARING_B / BEAT_B)
 
 PROPOSE: optional JSON with ledger keys (wearing, beat, expression, scene,
-light, bg, frame, wearing_b, beat_b, wearing_drop) when the picture should
-move. Absolute English phrases. Omit when chat-only.
+light, bg, frame, wearing_b, beat_b, lettering, wearing_drop) when the
+picture should move. Absolute English phrases. Omit when chat-only.
+Lettering is Latin letters/digits only, a few words — never Japanese glyphs.
 
 PITCH: optional. Two short phrases in the SAY language split by ` | `
 when a real fork is open. Omit on chit-chat or right after they picked one.
@@ -89,11 +91,13 @@ _CARD_FIELD_MAP = {
     "BACKGROUND": "bg",
     "WEARING_B": "wearing_b",
     "BEAT_B": "beat_b",
+    "LETTERING": "lettering",
+    "TEXT": "lettering",
 }
 
 _CARD_LINE_RE = re.compile(
     r"(?im)^\s*(PLACE|SCENE|HOUR|LIGHT|WEARING_B|WEARING|BEAT_B|BEAT|"
-    r"EXPRESSION|FACE|FRAME|BG|BACKGROUND)\s*[:：]\s*(.+?)\s*$"
+    r"EXPRESSION|FACE|FRAME|BG|BACKGROUND|LETTERING|TEXT)\s*[:：]\s*(.+?)\s*$"
 )
 
 

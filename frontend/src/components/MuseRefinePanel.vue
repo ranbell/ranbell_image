@@ -635,6 +635,7 @@ function isStruckRow(row) {
                 <dt class="text-gray-500">light</dt><dd class="text-gray-200">{{ ledger.light || '—' }}</dd>
                 <dt class="text-gray-500">bg</dt><dd class="text-gray-200">{{ ledger.bg || '—' }}</dd>
                 <dt class="text-gray-500">frame</dt><dd class="text-gray-200">{{ ledger.frame || '—' }}</dd>
+                <dt class="text-gray-500">lettering</dt><dd class="text-gray-200">{{ ledger.lettering || '—' }}</dd>
                 <template v-if="partner.character_id">
                   <dt class="text-gray-500">wearing_b</dt><dd class="text-gray-200">{{ ledger.wearing_b || '—' }}</dd>
                   <dt class="text-gray-500">beat_b</dt><dd class="text-gray-200">{{ ledger.beat_b || '—' }}</dd>

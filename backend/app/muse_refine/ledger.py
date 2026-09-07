@@ -17,6 +17,7 @@ LEDGER_KEYS: tuple[str, ...] = (
     "frame",
     "wearing_b",
     "beat_b",
+    "lettering",  # short Latin words for Anima text "…" / text_on_image
 )
 
 DROP_KEYS: tuple[str, ...] = ("wearing_drop",)
@@ -32,6 +33,7 @@ FIELD_CHIPS: dict[str, dict[str, str]] = {
     "frame": {"icon": "📷", "ja": "構図", "en": "Frame"},
     "wearing_b": {"icon": "👗", "ja": "相方服", "en": "Partner clothes"},
     "beat_b": {"icon": "🤝", "ja": "相方姿勢", "en": "Partner pose"},
+    "lettering": {"icon": "🔤", "ja": "文字", "en": "Lettering"},
     "wearing_drop": {"icon": "🗑", "ja": "脱ぐ", "en": "Drop"},
 }
 
@@ -41,8 +43,10 @@ _PICTURE_CUES = re.compile(
     r"着|服|シャツ|スカート|ワンピース|制服|パーカー|コート|帽子|靴|脱|"
     r"立|座|跪|寝|ポーズ|姿勢|表情|笑|泣|"
     r"場所|屋上|教室|公園|海|部屋|背景|光|照明|カメラ|構図|寄|引き|"
+    r"看板|文字|テキスト|ボード|"
     r"wear|shirt|skirt|dress|uniform|hoodie|coat|hat|pose|stand|sit|"
-    r"rooftop|classroom|park|beach|room|background|light|camera|frame|outfit"
+    r"rooftop|classroom|park|beach|room|background|light|camera|frame|outfit|"
+    r"sign|banner|lettering|textboard"
     r")",
     re.I,
 )

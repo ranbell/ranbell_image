@@ -11,6 +11,7 @@ import re
 from typing import Any, Iterable
 
 from ..muse import identity
+from . import anima
 from . import debug as debug_mod
 from . import ledger as ledger_mod
 from . import talk
@@ -20,15 +21,17 @@ logger = logging.getLogger(__name__)
 _QUALITY_SYSTEM = """You enrich an image-generation prompt's atmosphere ONLY.
 Keep every fact about clothes, pose, and place from LEDGER unchanged.
 Add mood, air, color temperature, subtle environmental detail, and quality
-boosters as comma-separated danbooru-style tags (underscores ok).
+boosters as comma-separated tags (spaces preferred — Anima style).
 Do NOT rename garments. Do NOT move the location. Do NOT change the pose stem.
+Do NOT use (tag:weight) emphasis. Do NOT repeat LEDGER facts.
 
 If SUGGESTED is present, those words are a closed vocabulary from the studio
 WD14 bank (vector neighbours — often noisy). You may pick useful ones from
 SUGGESTED only. Never invent clothes/place words that fight LEDGER.
 You may also add ordinary quality/atmosphere tags not in SUGGESTED
-(masterpiece, soft_lighting, depth_of_field, etc.) as long as they do not
-change clothes, pose, or place.
+(masterpiece, best quality, soft lighting, depth of field, etc.) as long as
+they do not change clothes, pose, or place. Prefer "masterpiece, best quality"
+over score_* tags.
 
 Output ONE line of tags only. No labels. No prose.
 """
@@ -132,24 +135,9 @@ def scene_prose(
     if frame:
         parts.append(f"Camera: {frame}.")
 
-    # Closing lock — short restatement so the sampler hears ownership twice.
-    lock: list[str] = []
-    if wearing:
-        lock.append(f"{lead}: {wearing}")
-    if beat:
-        lock.append(f"{lead} body {beat}")
-    if wearing_b:
-        lock.append(f"{other}: {wearing_b}")
-    if beat_b:
-        lock.append(f"{other} body {beat_b}")
-    if scene:
-        lock.append(scene)
-    if expression:
-        lock.append(f"{lead} face {expression}")
-    if frame:
-        lock.append(frame)
-    if lock:
-        parts.append("Keep exactly: " + "; ".join(lock) + ".")
+    # Anima / Qwen: do NOT restate the same facts a third time ("Keep exactly"
+    # used to triple-lock and the community guide flags 3× concept repeats).
+    # Ownership already lives once in tags + once in the sentences above.
 
     return " ".join(parts)
 
@@ -190,29 +178,37 @@ def assemble_prompt(
     *,
     support_tags: list[str] | None = None,
     scene_override: str | None = None,
+    enhance_quality: bool | None = None,
 ) -> str:
     """Identity-first positive with per-person ownership (Muse box path).
 
     Lead clothes/pose/face never share a flat bag with the partner's — same
     rule as classic Muse ``assemble_from_boxes`` so hair and outfits do not swap.
+    Final string is Anima-hygiened (spaces, quality prefix, blank-line prose).
     """
     char = session.get("character") or {}
     partner = session.get("partner_character") or {}
     has_partner = bool(partner and str(partner.get("character_id") or "").strip())
     name_a = str(char.get("name_ja") or char.get("name") or "Lead")
     name_b = str(partner.get("name_ja") or partner.get("name") or "Partner")
-    framing = str((session.get("inputs") or {}).get("framing") or "auto")
-    style = str((session.get("inputs") or {}).get("style") or "")
+    inputs = session.get("inputs") or {}
+    framing = str(inputs.get("framing") or "auto")
+    style = str(inputs.get("style") or "")
+    quality_on = (
+        bool(enhance_quality) if enhance_quality is not None
+        else bool(inputs.get("enhance_quality"))
+    )
     prose = (
         scene_override if scene_override is not None
         else scene_prose(
             ledger, partner=has_partner, name_a=name_a, name_b=name_b,
         )
     )
-    support = talk.filter_banned_tags(
+    raw_support = talk.filter_banned_tags(
         session,
         [str(t).strip().replace(" ", "_") for t in (support_tags or []) if str(t).strip()],
     )
+    quality_tags, atmosphere = anima.split_quality_support(raw_support)
 
     cast = [char]
     people = [
@@ -241,44 +237,52 @@ def assemble_prompt(
         style=style,
         framing=framing,
         scene=prose,
-        support=support,
+        support=atmosphere,
     )
-    if boxed:
-        return boxed
+    if not boxed:
+        # Fallback (no usable identity tags): flat path, still without mixing bags.
+        identity_tags = [
+            t for t in (char.get("identity_tags") or [])
+            if str(t).strip() and str(t).strip().lower() not in {"1girl", "solo"}
+        ]
+        bag = talk.filter_banned_tags(
+            session,
+            _phrase_to_tags(str(ledger.get("wearing") or ""))
+            + _phrase_to_tags(str(ledger.get("beat") or ""))
+            + _phrase_to_tags(str(ledger.get("expression") or ""))
+            + _frame_wide_tags(ledger),
+        )
+        if atmosphere:
+            bag = merge_support_tags(bag, atmosphere, authority=bag)
+        boxed = identity.assemble_positive(
+            ["1girl", *identity_tags] if identity_tags else ["1girl"],
+            ", ".join(bag),
+            prose,
+            framing=framing,
+            style=style,
+            cast=[char] if char else None,
+        )
 
-    # Fallback (no usable identity tags): flat path, still without mixing bags.
-    identity_tags = [
-        t for t in (char.get("identity_tags") or [])
-        if str(t).strip() and str(t).strip().lower() not in {"1girl", "solo"}
-    ]
-    bag = talk.filter_banned_tags(
-        session,
-        _phrase_to_tags(str(ledger.get("wearing") or ""))
-        + _phrase_to_tags(str(ledger.get("beat") or ""))
-        + _phrase_to_tags(str(ledger.get("expression") or ""))
-        + _frame_wide_tags(ledger),
+    lettering_raw = str(ledger.get("lettering") or "").strip()
+    lettering = [lettering_raw] if lettering_raw else []
+    return anima.format_for_anima(
+        boxed or "",
+        quality_tags=quality_tags,
+        lettering=lettering,
+        enhance_quality=quality_on,
     )
-    if support:
-        bag = merge_support_tags(bag, support, authority=bag)
-    return identity.assemble_positive(
-        ["1girl", *identity_tags] if identity_tags else ["1girl"],
-        ", ".join(bag),
-        prose,
-        framing=framing,
-        style=style,
-        cast=[char] if char else None,
-    )
 
 
-_PROSE_DENSIFY = """You densify a shot SCENE paragraph for image generation.
+_PROSE_DENSIFY = """You densify a shot SCENE paragraph for Anima / FLUX-natural.
 Keep EVERY fact from LEDGER and BASE PROSE unchanged — clothes, pose, face,
 place, light, background, camera. Do not rename garments. Do not move the place.
 Do not invent props that fight the ledger.
 If two people are present, NEVER swap clothes, hairstyles, or body traits
 between them — keep each person's ownership exact.
-Expand into 2–4 flowing English sentences (about 60–140 words) that reinforce
-the same moment with sensory glue (air, temperature, weight, gaze) only.
-Output the paragraph only. No labels. No tags. No markdown.
+Write 2–4 flowing English sentences (about 60–140 words). Name each person,
+then their appearance — do not list bare names alone.
+Do NOT restate the same fact three times. Do NOT dump a "Keep exactly" list.
+No (tag:weight). No comma-tag lists. Output the paragraph only.
 """
 
 
@@ -303,7 +307,8 @@ async def densify_scene_prose(
         f"bg: {ledger.get('bg')}\n"
         f"frame: {ledger.get('frame')}\n"
         f"wearing_b: {ledger.get('wearing_b')}\n"
-        f"beat_b: {ledger.get('beat_b')}\n\n"
+        f"beat_b: {ledger.get('beat_b')}\n"
+        f"lettering: {ledger.get('lettering')}\n\n"
         f"BASE PROSE:\n{base_prose}\n"
     )
     try:
@@ -541,7 +546,10 @@ async def rebuild_craft(
             debug_mod.note(session, "prose_densify", detail=denser[:240])
             prose = denser
     prompt = assemble_prompt(
-        session, led, support_tags=chosen or None, scene_override=prose,
+        session, led,
+        support_tags=chosen or None,
+        scene_override=prose,
+        enhance_quality=bool(inputs.get("enhance_quality")),
     )
     locale = str(inputs.get("locale") or "ja")
     craft = dict(session.get("craft") or {})

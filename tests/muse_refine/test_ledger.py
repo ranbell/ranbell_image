@@ -96,7 +96,9 @@ def test_assemble_prompt_includes_ledger(monkeypatch):
     assert "cafe" in low or "sitting" in low
     # Thick prose reinforcement
     assert "wearing" in low
-    assert "keep exactly" in low
+    # Anima hygiene: spaces preferred; no triple Keep-exactly lock
+    assert "keep exactly" not in low
+    assert "blue hair" in low or "blue_hair" in low or "1girl" in low
 
 
 def test_scene_prose_locks_all_axes():
@@ -118,7 +120,7 @@ def test_scene_prose_locks_all_axes():
     assert "leaning" in low
     assert "soft smile" in low
     assert "medium shot" in low
-    assert "keep exactly" in low
+    assert "keep exactly" not in low  # Anima: avoid 3× concept repeats
     assert len(prose) > 80
 
 
@@ -169,10 +171,10 @@ def test_w_muse_does_not_mix_clothes_or_hair():
             mio_dyn = line.lower()
         if line.startswith("Sumire:") or line.startswith("すみれ:"):
             sum_dyn = line.lower()
-    assert "white_shirt" in mio_dyn or "blue_skirt" in mio_dyn
-    assert "black_dress" in sum_dyn
-    assert "black_dress" not in mio_dyn
-    assert "white_shirt" not in sum_dyn
+    assert "white shirt" in mio_dyn or "white_shirt" in mio_dyn or "blue skirt" in mio_dyn or "blue_skirt" in mio_dyn
+    assert "black dress" in sum_dyn or "black_dress" in sum_dyn
+    assert "black dress" not in mio_dyn and "black_dress" not in mio_dyn
+    assert "white shirt" not in sum_dyn and "white_shirt" not in sum_dyn
     # Partner blonde must not appear on Mio identity line as free flat bag.
     mio_id = ""
     for line in prompt.splitlines():

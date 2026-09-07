@@ -541,6 +541,15 @@ async def chat(
 
     # Explicit standing order line — store and acknowledge without picture write.
     standing_rule = persona.note_standing(session, text)
+    # Anima in-image lettering — pull before the writer so VLM isn't asked to invent glyphs.
+    from . import anima as anima_mod
+    letter_phrases, text_for_writer = anima_mod.extract_lettering(text)
+    if letter_phrases:
+        led0 = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+        led0["lettering"] = letter_phrases[0]
+        session["refine_ledger"] = led0
+        if text_for_writer.strip():
+            text = text_for_writer
     if standing_rule:
         _append_chat(session, role="user", name="Director", text=text)
         ack = (
