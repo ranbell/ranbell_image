@@ -1914,7 +1914,11 @@
     "model": "LLM",
     "debugToggle": "デバッグ",
     "debugTitle": "観測（判定には使わない）",
-    "debugHint": "writerパッチ・Muse提案・WD14参考／採用・段の所要時間を並べます",
+    "debugHint": "writerパッチ・Muse提案・WD14参考／採用・段の所要時間を並べます。API: GET .../pipeline と .../debug",
+    "debugEmpty": "まだ書き換えはありません",
+    "pipelineTitle": "処理パイプライン",
+    "pipelineHint": "writer → cue → ledger → muse_propose → verify → assemble → actress → board。ずれは下に出ます。",
+    "rewriteLog": "ledger の書き換え",
     "turnTrace": "ターン追跡",
     "stageMs": "段の時間",
     "refineLog": "イベントログ"

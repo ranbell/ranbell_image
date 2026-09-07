@@ -114,6 +114,43 @@ async def get_session(session_id: str, request: Request):
     return service.public_view(await _session(request, session_id))
 
 
+@router.get("/sessions/{session_id}/pipeline")
+async def session_pipeline(session_id: str, request: Request):
+    """Debug / eval: classify-style stage summary for this refine session.
+
+    Same payload as ``public_view.pipeline`` — exposed as its own route so
+    external tools (and Muse-style debug clients) can hit it without the full
+    session body.
+    """
+    from . import pipeline_view
+    session = await _session(request, session_id)
+    return pipeline_view.build_pipeline_view(session)
+
+
+@router.get("/sessions/{session_id}/debug")
+async def session_debug(session_id: str, request: Request):
+    """Debug bundle: pipeline + rewrite/turn/stage/refine logs only."""
+    session = await _session(request, session_id)
+    view = service.public_view(session)
+    return {
+        "session_id": view.get("session_id"),
+        "status": view.get("status"),
+        "pipeline": view.get("pipeline"),
+        "rewrite_log": view.get("rewrite_log") or [],
+        "turn_trace": view.get("turn_trace") or [],
+        "stage_ms": view.get("stage_ms") or [],
+        "refine_log": view.get("refine_log") or [],
+        "craft": {
+            "now": (view.get("craft") or {}).get("now"),
+            "prompt": (view.get("craft") or {}).get("prompt"),
+            "wd14_suggestions": (view.get("craft") or {}).get("wd14_suggestions"),
+            "picked_wd14": (view.get("craft") or {}).get("picked_wd14"),
+            "quality_tags": (view.get("craft") or {}).get("quality_tags"),
+        },
+        "refine_ledger": view.get("refine_ledger") or {},
+    }
+
+
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, request: Request):
     from ..muse import session_db

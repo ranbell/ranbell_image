@@ -4,9 +4,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from ..muse import events
+
 REFINE_LOG_MAX = 80
 STAGE_LOG_MAX = 40
 TURN_TRACE_MAX = 40
+REWRITE_LOG_MAX = 80
 
 
 def note(
@@ -67,3 +70,44 @@ def turn_trace(
     log = list(session.get("turn_trace") or [])
     log.append(row)
     session["turn_trace"] = log[-TURN_TRACE_MAX:]
+
+
+def record_rewrite(
+    session: dict[str, Any],
+    source: str,
+    *,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    intent: str = "",
+    why: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
+    """Append a Muse-shaped rewrite_log entry and publish SSE for the debug pane."""
+    changed: dict[str, dict[str, str]] = {}
+    keys = set(before or {}) | set(after or {})
+    for key in sorted(keys):
+        b = str((before or {}).get(key) or "")
+        a = str((after or {}).get(key) or "")
+        if b == a:
+            continue
+        pair: dict[str, str] = {"before": b, "after": a}
+        reason = str((why or {}).get(key) or "").strip()
+        if reason:
+            pair["why"] = reason
+        changed[str(key)] = pair
+    if not changed:
+        return None
+    entry = {
+        "at": time.time(),
+        "source": str(source or ""),
+        "intent": str(intent or ""),
+        "changed": changed,
+    }
+    log = list(session.get("rewrite_log") or [])
+    log.append(entry)
+    session["rewrite_log"] = log[-REWRITE_LOG_MAX:]
+    sid = str(session.get("session_id") or "")
+    if sid:
+        # Same event name Muse uses so external tools / habits transfer.
+        events.publish(sid, {"type": "notebook_rewrite", **entry})
+        events.publish(sid, {"type": "ledger_rewrite", **entry})
+    return entry

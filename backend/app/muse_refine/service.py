@@ -10,7 +10,7 @@ from ..characters import presets as presets_db
 from ..muse import events, session_db, vitality
 from ..muse.defaults import ALL_DEFAULTS
 from ..muse.notebook import blank as notebook_blank
-from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, talk, writer
+from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, pipeline_view, talk, writer
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +114,12 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             locale=str(inputs.get("locale") or "ja"),
         ),
         "again_feel_available": bool(vitality.again_that_feel_hint(session)),
-        # Observability only — UI debug pane. Never used for decisions.
+        # Observability only — UI debug pane / external eval. Never used for decisions.
         "refine_log": list(session.get("refine_log") or [])[-40:],
         "stage_ms": list(session.get("stage_ms") or [])[-20:],
         "turn_trace": list(session.get("turn_trace") or [])[-12:],
+        "rewrite_log": list(session.get("rewrite_log") or [])[-24:],
+        "pipeline": pipeline_view.build_pipeline_view(session),
     }
 
 
@@ -180,6 +182,7 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "refine_log": [],
         "stage_ms": [],
         "turn_trace": [],
+        "rewrite_log": [],
     }
 
 
@@ -485,6 +488,9 @@ def _change_event(
 ) -> None:
     fields = ledger_mod.changed_fields(before, after) or ledger_mod.patch_fields(patch)
     chips = ledger_mod.chips_for(fields, locale=locale)
+    debug_mod.record_rewrite(
+        session, source, before=before, after=after, intent=source,
+    )
     if not chips and not patch:
         return
     detail_bits = []

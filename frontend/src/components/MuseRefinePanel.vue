@@ -51,6 +51,29 @@ const chat = computed(() => session.value?.chat || [])
 const refineLog = computed(() => [...(session.value?.refine_log || [])].slice().reverse())
 const stageMs = computed(() => [...(session.value?.stage_ms || [])].slice(-12).reverse())
 const turnTrace = computed(() => [...(session.value?.turn_trace || [])].slice().reverse())
+const rewriteLog = computed(() => [...(session.value?.rewrite_log || [])].slice().reverse())
+const pipeline = computed(() => session.value?.pipeline || null)
+const pipelineStages = computed(() => pipeline.value?.stages || [])
+const pipelineDivergences = computed(() => pipeline.value?.divergences || [])
+function pipelineStatusClass(status) {
+  if (status === 'ok' || status === 'frozen') return 'border-emerald-500/40 text-emerald-200/90'
+  if (status === 'missed' || status === 'stale' || status === 'refused' || status === 'diverged' || status === 'pending') {
+    return 'border-rose-500/40 text-rose-200/90'
+  }
+  return 'border-amber-500/20 text-amber-100/60'
+}
+function rewriteWhen(ts) {
+  if (!ts) return ''
+  try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
+}
+function mergeRewriteLog(keep, next) {
+  const byAt = new Map()
+  for (const row of [...(keep || []), ...(next || [])]) {
+    const key = `${row?.at}|${row?.source}|${JSON.stringify(row?.changed || {})}`
+    byAt.set(key, row)
+  }
+  return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
+}
 const characters = computed(() => characterList.value)
 const workflows = computed(() => {
   const list = catalog.value?.comfyui?.workflows || catalog.value?.workflows || []
@@ -471,6 +494,12 @@ function openStream(id) {
       if (!startedAt) startedAt = Date.now()
       return
     }
+    if (data.type === 'notebook_rewrite' || data.type === 'ledger_rewrite') {
+      if (!session.value) return
+      const log = mergeRewriteLog(session.value.rewrite_log || [], [data])
+      session.value = { ...session.value, rewrite_log: log }
+      return
+    }
     if (data.type === 'chat' || data.type === 'chat_message') {
       speaking.value = false
       scheduleRefresh(true)
@@ -521,7 +550,10 @@ function closeStream() {
 async function refresh() {
   if (!session.value?.session_id) return
   try {
-    session.value = await api(`/api/muse-refine/sessions/${session.value.session_id}`)
+    const keep = session.value.rewrite_log || []
+    const next = await api(`/api/muse-refine/sessions/${session.value.session_id}`)
+    next.rewrite_log = mergeRewriteLog(keep, next.rewrite_log)
+    session.value = next
     sampleJob()
   } catch { /* ignore */ }
 }
@@ -1167,6 +1199,59 @@ function isStruckRow(row) {
               <summary class="cursor-pointer text-amber-200">{{ t('museRefine.debugTitle') }}</summary>
               <p class="mt-1 mb-2 text-amber-100/50">{{ t('museRefine.debugHint') }}</p>
 
+              <div v-if="pipelineStages.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.pipelineTitle') }}</div>
+                <p class="mb-1.5 text-amber-100/50">{{ t('museRefine.pipelineHint') }}</p>
+                <ol class="flex flex-wrap gap-1">
+                  <li
+                    v-for="stage in pipelineStages"
+                    :key="stage.id"
+                    class="min-w-[4.5rem] rounded border px-1.5 py-1"
+                    :class="pipelineStatusClass(stage.status)"
+                    :title="JSON.stringify(stage)"
+                  >
+                    <div class="font-semibold">{{ stage.id }}</div>
+                    <div class="text-[9px] opacity-80">{{ stage.status }}</div>
+                  </li>
+                </ol>
+                <ul v-if="pipelineDivergences.length" class="mt-1.5 space-y-0.5">
+                  <li
+                    v-for="(d, i) in pipelineDivergences"
+                    :key="`${d.field}-${i}`"
+                    class="text-rose-300/90"
+                  >
+                    ⌁ {{ d.field }} · {{ d.detail }}
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="rewriteLog.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.rewriteLog') }}</div>
+                <ul class="space-y-1.5">
+                  <li
+                    v-for="(entry, i) in rewriteLog"
+                    :key="`${entry.at}-${i}`"
+                    class="rounded border border-amber-800/40 px-2 py-1.5"
+                  >
+                    <div class="font-semibold text-amber-200/90">
+                      {{ entry.source }}
+                      <span class="font-normal text-amber-100/50">{{ rewriteWhen(entry.at) }}</span>
+                      <span v-if="entry.intent" class="ml-1 font-normal">· {{ entry.intent }}</span>
+                    </div>
+                    <div
+                      v-for="(pair, field) in (entry.changed || {})"
+                      :key="field"
+                      class="mt-0.5 whitespace-pre-wrap text-amber-100/70"
+                    >
+                      <span class="text-amber-300/80">{{ field }}</span>
+                      {{ ' ' }}{{ pair.before || '∅' }} → {{ pair.after || '∅' }}
+                      <div v-if="pair.why" class="pl-3 italic text-amber-100/50">↳ {{ pair.why }}</div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+              <p v-else class="mb-3 text-amber-100/50">{{ t('museRefine.debugEmpty') }}</p>
+
               <div v-if="turnTrace.length" class="mb-3">
                 <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.turnTrace') }}</div>
                 <ul class="space-y-1.5">
@@ -1200,7 +1285,9 @@ function isStruckRow(row) {
                 <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.stageMs') }}</div>
                 <ul class="space-y-0.5">
                   <li v-for="(s, i) in stageMs" :key="`${s.at}-${i}`" class="text-amber-100/70">
-                    {{ s.stage }} · {{ s.ms }}ms
+                    <span class="text-amber-300/80">{{ ((s.ms || 0) / 1000).toFixed(1) }}s</span>
+                    {{ ' ' }}{{ s.stage }}
+                    <span class="text-amber-100/40">{{ rewriteWhen(s.at) }}</span>
                   </li>
                 </ul>
               </div>
@@ -1214,6 +1301,7 @@ function isStruckRow(row) {
                     class="rounded border border-amber-900/30 px-2 py-1 text-amber-100/70"
                   >
                     <span class="text-amber-300/90">{{ row.kind }}</span>
+                    <span class="text-amber-100/40"> {{ rewriteWhen(row.at) }}</span>
                     — {{ row.detail }}
                   </li>
                 </ul>

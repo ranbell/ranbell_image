@@ -1914,7 +1914,11 @@
     "model": "LLM",
     "debugToggle": "Debug",
     "debugTitle": "Observability (read-only)",
-    "debugHint": "Writer patches, Muse proposals, WD14 reference/picks, and stage timings",
+    "debugHint": "Writer patches, Muse proposals, WD14 reference/picks, and stage timings. API: GET .../pipeline and .../debug",
+    "debugEmpty": "No rewrites yet",
+    "pipelineTitle": "Pipeline",
+    "pipelineHint": "writer → cue → ledger → muse_propose → verify → assemble → actress → board. Divergences listed below.",
+    "rewriteLog": "Ledger rewrites",
     "turnTrace": "Turn trace",
     "stageMs": "Stage timing",
     "refineLog": "Event log"
