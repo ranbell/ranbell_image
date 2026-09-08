@@ -812,6 +812,26 @@ async def chat(
             ),
         )
 
+    # **彼女が服を選んだ回は、そう記録する（2026-09-09）。** 総監督
+    # 「埋めてよいが、記録に残す」「彼女自体がこうしたいと思った内容をちゃんと
+    # 反映できるようにしたい」。`wearing` は空欄のときだけ通る（fill-empty・
+    # `guard_muse_propose`）ので、通ったということは**誰も服を着せていない場面
+    # で彼女が決めた**ということ。デバッグ枠に出さないと、総監督からは
+    # 「指示がないのに着替えた」としか見えない。
+    if str(propose.get("wearing") or "").strip():
+        chose = str(propose["wearing"]).strip()
+        lifted = [
+            b for b in (session.get("banned") or [])
+            if talk.word_hit(str(b), chose)
+        ]
+        debug_mod.note(
+            session, "actress_wardrobe",
+            detail=chose[:240] + (f"（禁止を解いた: {', '.join(lifted)}）" if lifted else ""),
+            accepted=chose,
+            lifted_ban=lifted,
+            was_empty=True,
+        )
+
     if ledger_mod.touched_picture(propose):
         before_p = dict(led)
         led = ledger_mod.apply_patch(led, propose)

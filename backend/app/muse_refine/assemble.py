@@ -529,8 +529,15 @@ def _person_box(
     expression: str = "",
     extra_beat_tags: list[str] | None = None,
 ) -> dict[str, list[str]]:
-    """One Muse's dynamic tags — clothes / pose / face only."""
-    wear = talk.filter_banned_tags(session, _phrase_to_tags(wearing))
+    """One Muse's dynamic tags — clothes / pose / face only.
+
+    **禁止は台帳と突き合わせる（2026-09-09）。** 台帳がいま着ていると言って
+    いる服は、たとえ一度脱いだ服でも絵に出す（`talk.live_banned`）。ここを
+    素通しにしていたので「台帳は着ている、絵は着ていない」が起きていた。
+    """
+    wear = talk.filter_banned_tags(
+        session, _phrase_to_tags(wearing), ledger={"wearing": wearing},
+    )
     pose = _phrase_to_tags(beat)
     for t in extra_beat_tags or []:
         tag = str(t or "").strip().replace(" ", "_")
@@ -601,6 +608,7 @@ def assemble_prompt(
     raw_support = talk.filter_banned_tags(
         session,
         [str(t).strip().replace(" ", "_") for t in (support_tags or []) if str(t).strip()],
+        ledger=ledger,
     )
     quality_tags, atmosphere = anima.split_quality_support(raw_support)
 
@@ -646,7 +654,8 @@ def assemble_prompt(
         ]
         bag = talk.filter_banned_tags(
             session,
-            _phrase_to_tags(str(ledger.get("wearing") or ""))
+            ledger=ledger,
+            tags=_phrase_to_tags(str(ledger.get("wearing") or ""))
             + _phrase_to_tags(str(ledger.get("beat") or ""))
             + _phrase_to_tags(str(ledger.get("expression") or ""))
             + _frame_wide_tags(ledger),
@@ -950,7 +959,7 @@ async def rebuild_craft(
             tags=wd14[:40],
         )
 
-    base_bag = talk.filter_banned_tags(session, ledger_tag_bag(led))
+    base_bag = talk.filter_banned_tags(session, ledger_tag_bag(led), ledger=led)
     if bool(inputs.get("enhance_quality")) and ollama is not None:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")

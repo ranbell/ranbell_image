@@ -92,9 +92,14 @@ def apply_patch(ledger: dict[str, str], patch: dict[str, str]) -> dict[str, str]
     next_ledger = {**blank(), **{k: str(ledger.get(k) or "") for k in LEDGER_KEYS}}
     drop = str(patch.get("wearing_drop") or "").strip().lower()
     if drop:
+        # **語の境目で照合する（2026-09-09）。** 部分一致だと `shirt` を脱いだ
+        # ときに `skirt` まで消えた（実測・純関数）。`talk.word_hit` が唯一の
+        # 規則で、禁止フィルタと同じものを使う。
+        from .talk import word_hit
+
         wearing = next_ledger.get("wearing") or ""
         parts = [p.strip() for p in wearing.replace(";", ",").split(",") if p.strip()]
-        kept = [p for p in parts if drop not in p.lower()]
+        kept = [p for p in parts if not word_hit(drop, p)]
         next_ledger["wearing"] = ", ".join(kept)
     for key in LEDGER_KEYS:
         if key not in patch:

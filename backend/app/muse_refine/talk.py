@@ -97,19 +97,63 @@ def restore_tag(session: dict[str, Any], tag: str) -> bool:
     return len(after) < len(before)
 
 
-def filter_banned_tags(session: dict[str, Any], tags: list[str]) -> list[str]:
-    gone = {str(t).strip().lower() for t in (session.get("banned") or []) if str(t).strip()}
+def word_hit(needle: str, haystack: str) -> bool:
+    """`needle` が `haystack` に**語として**出るか。
+
+    **部分一致をやめる（2026-09-09）。** 実測（純関数だけで再現）:
+
+        'shirt' を脱ぐ → 'white shirt, t-shirt, skirt, shirt dress' が 'skirt' だけに
+        'top' を禁止   → tank_top / rooftop / laptop / stopwatch まで消える
+
+    `shirt` は `white shirt` と `shirt dress` に当たってほしい。`skirt` や
+    `rooftop` には当たってほしくない。**語の境目で見る**とその通りになる。
+
+    アンダースコアと空白は同じもの扱い —— `white_shirt` と `white shirt` は
+    同じ服（昨日の採点でこちらが踏んだ穴でもある）。
+    """
+    n = re.sub(r"[\s_]+", " ", str(needle or "").strip().lower())
+    h = re.sub(r"[\s_]+", " ", str(haystack or "").strip().lower())
+    if not n or not h:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])", h) is not None
+
+
+def live_banned(session: dict[str, Any], ledger: dict[str, str] | None = None) -> list[str]:
+    """禁止のうち、**いま台帳が名指ししていないもの**だけ。
+
+    現行 Muse が 2026-08-30 に同じ欠陥を直している（`muse.service.banned_now`）
+    —— 「一度でも禁止すると、後から手帖が戻っても絵は戻れない。weave は毎ターン
+    書き、毎ターン黙って消される」。Refine にはこの剪定が無く、実測（純関数）で
+    そのまま出た:
+
+        カーディガンを脱ぐ    wearing='' ／ banned=['cardigan']
+        台帳が着直す          wearing='cardigan, white shirt'
+        絵                    ['white_shirt', 'skirt']   ← カーディガンだけ落ちる
+
+    総監督の報告「**指示がないのに服の脱着が繰り返される**」の後半がこれ。
+    台帳は着ていると言い、絵は着ていない。監督が言い直すたびに繰り返す。
+
+    **禁止を弱めるものではない。** 禁止は立ち続け、台帳がその服を名指しし直した
+    ときだけ引っ込む（総監督の判断・2026-09-09「Muse と同じ規則」）。
+    """
+    gone = [str(t).strip() for t in (session.get("banned") or []) if str(t).strip()]
+    if not gone or not ledger:
+        return gone
+    worn = " , ".join(
+        str(ledger.get(k) or "") for k in ("wearing", "wearing_b")
+    )
+    return [g for g in gone if not word_hit(g, worn)]
+
+
+def filter_banned_tags(
+    session: dict[str, Any], tags: list[str],
+    *, ledger: dict[str, str] | None = None,
+) -> list[str]:
+    """禁止された語を落とす。`ledger` を渡すと、台帳が着ているものは残る。"""
+    gone = [g.lower() for g in live_banned(session, ledger)]
     if not gone:
         return tags
-    out: list[str] = []
-    for tag in tags:
-        low = tag.lower()
-        if low in gone:
-            continue
-        if any(g and g in low for g in gone):
-            continue
-        out.append(tag)
-    return out
+    return [t for t in tags if not any(word_hit(g, t) for g in gone)]
 
 
 def strike_last_user(session: dict[str, Any], *, why: str = "") -> None:
