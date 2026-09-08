@@ -24,6 +24,10 @@ Rules:
 - Clothes and place are independent: changing clothes must not clear scene.
 - Changing place must not undress her.
 - wearing_drop: one garment name to remove, only when asked to take something off.
+  **The beat often still names it** — `hands in her hoodie pocket`,
+  `holding the hem of her cardigan`, `hands in her coat sleeves`. Rewrite
+  beat in the SAME patch, or the garment stays in the picture: she cannot
+  have her hands in a pocket that is no longer there.
 - STICKY (long chat): atmosphere, look, lettering PERSIST across turns.
   Omit those keys to KEEP the current value. NEVER send "" to clear them
   unless the director explicitly asked to reset/clear that axis.
@@ -109,12 +113,22 @@ async def write_patch(
     ledger: dict[str, str],
     recent: str = "",
     retry: bool = False,
+    partner: bool = False,
+    name_a: str = "",
+    name_b: str = "",
 ) -> dict[str, str]:
-    """One LLM call → absolute patch (may be empty)."""
+    """One LLM call → absolute patch (may be empty).
+
+    **人数を示す（2026-09-09）。** 総監督「一人しかいないときに muse_b の tag
+    を編集してしまう。1人か2人の区別の説明が足りていない」。台帳から二人目の
+    欄を落とし（`ledger.for_model`）、一行で人数を言う（`ledger.cast_line`）。
+    """
     head = WRITER_RETRY if retry else WRITER_SYSTEM
     prompt = (
         f"{head}\n\n"
-        f"LEDGER NOW:\n{json.dumps(ledger, ensure_ascii=False)}\n\n"
+        f"{ledger_mod.cast_line(partner=partner, name_a=name_a, name_b=name_b)}\n\n"
+        f"LEDGER NOW:\n"
+        f"{json.dumps(ledger_mod.for_model(ledger, partner=partner), ensure_ascii=False)}\n\n"
         f"RECENT DIRECTOR LINES:\n{recent or '(none)'}\n\n"
         f"LATEST LINE:\n{user_line.strip()}\n"
     )
@@ -234,6 +248,8 @@ async def actress_turn(
     director_tail: str,
     session: dict[str, Any] | None = None,
     character: dict[str, Any] | None = None,
+    partner: bool = False,
+    name_b: str = "",
 ) -> dict[str, Any]:
     lang = "Japanese" if locale.startswith("ja") else "English"
     sess = session or {"character": character or {}, "session_id": ""}
@@ -247,8 +263,9 @@ async def actress_turn(
         f"Language for SAY/ASIDE: {lang}. Lead name: {name or 'Muse'}.\n\n"
         f"WHO YOU ARE (locked identity — do not contradict):\n"
         f"{identity_blurb or '(unspecified)'}\n\n"
+        f"{ledger_mod.cast_line(partner=partner, name_a=name, name_b=name_b)}\n\n"
         f"LEDGER (absolute shot document):\n"
-        f"{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(ledger_mod.for_model(ledger, partner=partner), ensure_ascii=False, indent=2)}\n\n"
         f"NOW:\n{now}\n\n"
         f"RECENT DIRECTOR LINES (voice context only — not shot truth):\n"
         f"{director_tail or '(none)'}\n\n"
@@ -287,6 +304,8 @@ async def verify_and_repair(
     now: str,
     before: dict[str, str] | None = None,
     recent: str = "",
+    partner: bool = False,
+    name_b: str = "",
     force_repair_hint: bool = False,
     character: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
@@ -331,12 +350,13 @@ async def verify_and_repair(
         f"{hint}\n"
         f"{voice}\n\n"
         f"{persona.ENTERTAINMENT_CRAFT}\n\n"
+        f"{ledger_mod.cast_line(partner=partner, name_a=name, name_b=name_b)}\n\n"
         f"RECENT DIRECTOR LINES:\n{recent.strip() or '(none)'}\n\n"
         f"DIRECTOR (latest):\n{user_line.strip()}\n\n"
         f"LEDGER BEFORE THIS TURN:\n"
-        f"{json.dumps(before or {}, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(ledger_mod.for_model(before or {}, partner=partner), ensure_ascii=False, indent=2)}\n\n"
         f"LEDGER NOW (after this turn):\n"
-        f"{json.dumps(ledger, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(ledger_mod.for_model(ledger, partner=partner), ensure_ascii=False, indent=2)}\n\n"
         f"NOW:\n{now}\n"
     )
     try:

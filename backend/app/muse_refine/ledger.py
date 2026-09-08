@@ -237,6 +237,42 @@ def chips_for(fields: list[str], *, locale: str = "ja") -> list[dict[str, str]]:
     return chips
 
 
+#: 二人目の欄。一人しかいない撮影では**見せない**。
+PARTNER_KEYS: tuple[str, ...] = ("wearing_b", "beat_b")
+
+
+def for_model(ledger: dict[str, str], *, partner: bool) -> dict[str, str]:
+    """模型に見せる台帳。**一人のときは二人目の欄を落とす。**
+
+    総監督（2026-09-09）「一人しかいないときに muse_b の tag を編集して
+    しまう。**1人か2人の区別の説明が足りていない**」。
+
+    条文には「partner Muse が居るときだけ `wearing_b` / `beat_b` を書く」と
+    最初から書いてあった。足りなかったのは**居るかどうかを伝えること** ——
+    `blank()` が全欄を埋めるので、模型には常に二人目の欄が空で見えていた。
+    空欄は「埋めろ」に見える。
+
+    **箱を出さなければ入れられない。** 条文に一行足すより、欄そのものを
+    消すほうが強い（この現場では逆向きの実測が何度もある —— 箱を作ると
+    入れてくれる）。呼び出し側は `cast_line()` で人数も一行で言う。
+    """
+    out = {k: v for k, v in (ledger or {}).items()
+           if partner or k not in PARTNER_KEYS}
+    return out
+
+
+def cast_line(*, partner: bool, name_a: str = "", name_b: str = "") -> str:
+    """人数を一行で。台帳から欄を消すだけでなく、言葉でも言う。"""
+    a = (name_a or "the lead").strip()
+    if not partner:
+        return (
+            f"CAST: solo — {a} is the only person in frame. There is no second "
+            "person: never write wearing_b or beat_b."
+        )
+    b = (name_b or "the partner").strip()
+    return f"CAST: two in frame — {a} and {b}. wearing_b / beat_b are {b}'s."
+
+
 def now_line(ledger: dict[str, str], *, locale: str = "ja") -> str:
     """Plain-language NOW — all shot axes the actress must respect."""
     wearing = (ledger.get("wearing") or "").strip()

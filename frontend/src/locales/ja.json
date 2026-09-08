@@ -1908,7 +1908,7 @@
     "diaryReady": "日記ができました",
     "diaryFailed": "日記の作成に失敗しました",
     "finishNeedsShoot": "本番撮影が終わってから終了してください",
-    "finishConfirm": "撮影を終えて日記を書かせますか？",
+    "finishConfirm": "撮影を終えて、日記を書いてもらいますか？",
     "finishToast": "余韻を残して締めました",
     "workflow": "ワークフロー",
     "model": "LLM",

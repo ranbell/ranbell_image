@@ -315,6 +315,10 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     model = str(inputs.get("model") or "")
     name = char.get("name_ja") or char.get("name") or "Muse"
     theme = str(inputs.get("theme") or "").strip()
+    # 開幕の一言も同じ —— 一人なら二人目の欄を見せない（`chat` と同じ判断）。
+    partner_char = session.get("partner_character") or {}
+    has_partner = bool(str(partner_char.get("character_id") or "").strip())
+    name_b = str(partner_char.get("name_ja") or partner_char.get("name") or "")
 
     # Fresh open clears chat for a real first beat.
     session["chat"] = []
@@ -377,6 +381,7 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         director_tail=f"Theme: {theme}" if theme else "(opening)",
         session=session,
         character=char,
+        partner=has_partner, name_b=name_b,
     )
     debug_mod.stage(session, "open_actress", t0)
     talk.publish_actress_turn(
@@ -565,6 +570,13 @@ async def chat(
     locale = str(inputs.get("locale") or "ja")
     char = session.get("character") or {}
     name = char.get("name_ja") or char.get("name") or "Muse"
+    # **一人か二人か（2026-09-09）。** 台帳の二人目の欄は `blank()` が常に
+    # 埋めるので、模型には空の `wearing_b` / `beat_b` が見えていた。空欄は
+    # 「埋めろ」に見える —— 総監督「一人しかいないときに muse_b の tag を
+    # 編集してしまう」。ここで一度決めて、模型に触る三つの席へ渡す。
+    partner_char = session.get("partner_character") or {}
+    has_partner = bool(str(partner_char.get("character_id") or "").strip())
+    name_b = str(partner_char.get("name_ja") or partner_char.get("name") or "")
     before = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
 
     # Explicit standing order line — store and acknowledge without picture write.
@@ -648,6 +660,7 @@ async def chat(
         user_line=text,
         ledger=led,
         recent=director_recent,
+        partner=has_partner, name_a=name, name_b=name_b,
     )
     debug_mod.stage(session, "writer", t0)
 
@@ -662,6 +675,7 @@ async def chat(
             ledger=led,
             recent=director_recent,
             retry=True,
+            partner=has_partner, name_a=name, name_b=name_b,
         )
         debug_mod.stage(session, "writer_retry", t0)
         debug_mod.note(session, "writer_retry", detail=str(patch), patch=patch)
@@ -763,6 +777,7 @@ async def chat(
         director_tail=director_recent,
         session=session,
         character=char,
+        partner=has_partner, name_b=name_b,
     )
     debug_mod.stage(session, "actress", t0)
     say = actress.get("say") or ""
@@ -887,6 +902,7 @@ async def chat(
         # 無いと比べようがない（`before` はこの関数の最初から手元にある）。
         before=before,
         recent=director_recent,
+        partner=has_partner, name_b=name_b,
         force_repair_hint=missed,
         character=char,
         session=session,
