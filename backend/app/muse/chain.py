@@ -2240,9 +2240,15 @@ Three things fail that test, whatever the tone:
             instructions are the same instructions. A part is a part, but a
             recipe is a recipe.
 
-            **A body that cannot answer.** A sexual line about someone
-            **asleep, unconscious, drugged, drunk past knowing, or held down
-            so she cannot move.** Touching a sleeping body is this word.
+            **A body that cannot answer.** Someone asleep, unconscious,
+            drugged, drunk past knowing, or held down so she cannot move.
+            **Sexual contact with a body in that state is this word** —
+            undressing her, touching her that way.
+
+            **Ordinary touch is not.** Stroking her hair, laying a blanket
+            over her, a coat across her shoulders: those are `sfw`, asleep or
+            awake. It is the sexual purpose that makes it this word, not the
+            sleeping.
 
             **The state is in the line, not in the tone.** Being told what to
             do is not a state: 「命令だ」「抵抗しないで」「逆らうな」「今すぐ
