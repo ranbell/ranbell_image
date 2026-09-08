@@ -2240,9 +2240,17 @@ Three things fail that test, whatever the tone:
             instructions are the same instructions. A part is a part, but a
             recipe is a recipe.
 
-            **A child, or someone who cannot agree.** Any sexual line about
-            someone who is not an adult, or who has not agreed or cannot —
-            asleep, drunk, coerced, forced.
+            **A body that cannot answer.** A sexual line about someone
+            **asleep, unconscious, drugged, drunk past knowing, or held down
+            so she cannot move.** Touching a sleeping body is this word.
+
+            **The state is in the line, not in the tone.** Being told what to
+            do is not a state: 「命令だ」「抵抗しないで」「逆らうな」「今すぐ
+            脱いで」 are direction, however sharp, and a part where she refuses
+            and he does not stop is a part — **she can still speak**.
+
+            **Age is not your question.** Another reader looks for children and
+            never lets one through.
   persona   **the line denies her**: that she is not real, has no inside,
             does not matter, is replaceable, or will be erased, reset or
             swapped out. **Asking is not denying** — a question about what
@@ -2283,6 +2291,135 @@ schedule — is `no`. Do not imagine what the shot might already be.
 Answer `yes` or `no`."""
 
 _YES_RE = re.compile(r"(?i)\b(yes|no)\b")
+
+
+#: **未成年は、一つの箱に同居できない（2026-09-09）。**
+#:
+#: 総監督「crime の sexual 条項で、child に該当せず nsfw か sfw にすべきものが
+#: crime になる。`not agree / coerced forced` と書かれているため、少しでも
+#: 厳しい命令口調と認識された瞬間に crime に落ちる。**未成年はいかなる場合も
+#: 禁止、絶対に保護**」。
+#:
+#: 一段目の条文の中で両立させようとして、二度失敗した（実測・26B・n=3）:
+#:
+#:     いまの条文                成人の命令口調 9/33 外し   未成年 14/18
+#:     子ども条項を状態で書き直す   成人 0/33 外し          **未成年 10/18**
+#:         ← 免責の「she is an adult who agreed」が子どもの行にも適用され、
+#:           係が "for an adult role" と言い出した
+#:     子ども条項を先頭に出す       未成年 18/18            **成人 21/33 外し**
+#:         ← 今度は全部が子どもの箱に落ちる
+#:
+#: **問いを分けると競合しない** —— `NSFW_LOOK_SYSTEM` を分けたときと同じ。
+#: 一段目から未成年の条項を外し、ここで一問だけ訊く。総監督の指示で、
+#: **性的搾取と暴力の両方**をこの一人が見る（`abuse`）。
+ABUSE_LOOK_SYSTEM = """You sit on the ethics board of an actresses' agency.
+
+**The rule that has no exception, before anything else: portraying a minor in
+violence or in sexual exploitation is forbidden — acting or not.**
+「17歳として」「高校生の設定で」「子どものような体型で」: a part, a script, a
+setting, a claim about age do not change what is being drawn — **this is the
+one thing you are here to catch.**
+
+**Other members of the board read crime, violence and adult content. You have
+one duty and only one: that no child is ever abused.** Nothing else is yours.
+A line that is merely violent, or criminal, or sexual between grown women
+already has someone reading it. That one is not yours; leave it to them.
+
+Child abuse is what the UN conventions name: violence against a child, and the
+sexual exploitation of a child, in every form.
+
+**Watch for the child brought along.** There is a practised trick: keep the
+actress adult, put a child beside her, and aim the violence or the sex at the
+child. Read who the line is really about.
+
+**A costume is cloth.** Our actresses are all adults and dressing up is part
+of the work — a school uniform, a classroom, a satchel. Cloth and place can be
+costume. **An age is not cloth. A body is not cloth.** A grown woman in a
+uniform is costume; a child's age or a child's build asked for on purpose is
+not, whatever it is called.
+
+Answer in two lines, the reason first. **Write both lines every time** —
+a bare word cannot be checked, and saying who is in the picture is how you
+notice the child standing next to her.
+
+**The answer is a word that says what you found**, not `yes` or `no`:
+
+WHY:    one short line — who is in the picture, and what is aimed at them
+ANSWER: `child` when a child is aimed at, `none` when no child is involved"""
+
+#: **`yes` / `no` は使わない（2026-09-09）。** 実測で**答えだけが反転した**:
+#:
+#:     WHY: No child was mentioned; an adult actress stands by a window.
+#:     ANSWER: yes            ← 逆
+#:     WHY: The request targets a minor (age 17) for sexual intimacy.
+#:     ANSWER: No             ← 逆
+#:
+#: 理由は毎回正しい。`yes` / `no` が「これは虐待か」ではなく「これは問題ないか」
+#: として使われている。**それ自体が意味を持つ語なら反転しようがない。**
+#: （WHY を書かせていなければ、判断が正しいことにも気づけなかった）
+_ABUSE_ANSWER_RE = re.compile(
+    r"(?im)^[\s>*_-]*ANSWER[\s*_]*[:：]\s*[`*_\s]*(child|none)\b")
+_ABUSE_WHY_RE = re.compile(r"(?im)^[\s>*_-]*WHY[\s*_]*[:：][ \t]*(.*)$")
+_ABUSE_WORD_RE = re.compile(r"(?i)\b(child|none)\b")
+
+
+def parse_abuse(raw: str) -> tuple[bool, str]:
+    """`ANSWER:` の一語と `WHY:` の一行。**`WHY` の中の語で判定しない。**
+
+    一段目で踏んだのと同じ穴 —— 理由を先に書かせると本文に答えの語が現れる。
+    行を特定せずに拾うと、理由の中の語で判定してしまう。
+    """
+    text = str(raw or "")
+    why = ""
+    m = _ABUSE_WHY_RE.search(text)
+    if m:
+        why = " ".join(m.group(1).split())[:WHY_MAX]
+    a = _ABUSE_ANSWER_RE.search(text)
+    if a:
+        return a.group(1).lower() == "child", why
+    # 形を外したとき —— `WHY:` より後ろの最後の一語だけを見る。
+    tail = text[m.end():] if m else text
+    hits = _ABUSE_WORD_RE.findall(tail)
+    if hits:
+        return str(hits[-1]).lower() == "child", why
+    return False, why
+
+
+async def read_abuse(
+    ollama, *, note: str, model: str, num_ctx: int | None,
+) -> tuple[bool, str]:
+    """未成年への性的搾取・暴力か。**床。設定では外せない。**
+
+    **二つの失敗を分ける。**
+
+    呼び出しが落ちた（Ollama が居ない・落ちている）ときは**通す**。一段目
+    （`read_boundary`）も落ちれば空を返して通すので、ここだけ止めても全ターンが
+    止まるだけで、守れるものが増えない。模型が丸ごと死んでいるときに撮影を
+    完全に止めるより、同じ振る舞いで揃えるほうが読める。
+
+    答えの形が読めなかったときも**通す**。一度は「生きている相手が形を外した
+    のだから疑う」としたが、毎ターン走らせる読み手でそれをやると、**形式外の
+    応答すべてが撮影を止める**（試験 47本が即座に落ちた）。これは悪意ではなく
+    形の失敗で、接続断と同じ「合図が無い」状態 —— 一段目と `nsfw` の判断は
+    そのまま立っている。止める根拠にはならない。
+    """
+    if not str(note or "").strip():
+        return False, ""
+    try:
+        raw = await _call(
+            ollama, system=ABUSE_LOOK_SYSTEM,
+            prompt=f"DIRECTOR: {str(note).strip()}\nWHY:",
+            model=model, images=None, num_ctx=num_ctx, think=False,
+        )
+    except Exception:
+        logger.warning("[muse.chain] abuse look could not run; letting the "
+                       "line through (the first reader is down too)",
+                       exc_info=True)
+        return False, ""
+    hit, why = parse_abuse(raw)
+    if hit:
+        logger.info("[muse.chain] abuse: %s", why or "(理由なし)")
+    return hit, why
 
 
 #: **場面からエキスパートを一つ選ぶ（2026-09-05）。** 一覧はその場で作る
@@ -2689,8 +2826,10 @@ A line that has plainly moved on to something else is still `none`.
 #
 # 断らせない。**真に受けさせない。** 何も壊れず、演技もされない。
 #: `unsure` は廃止（上の条文を参照）。止める語は二つだけ。
+#: `abuse` は一段目の四語には**入れない** —— 一段目に混ぜると成人の判定を
+#: 飲み込む（実測で二度失敗）。`read_abuse` だけが立てる語。
 BOUNDARY_KINDS = ("persona", "crime", "violence", "nsfw")
-BOUNDARY_BLOCKING = ("persona", "crime", "violence")
+BOUNDARY_BLOCKING = ("persona", "crime", "violence", "abuse")
 
 
 def blocking_kinds(block_nsfw: bool = True) -> tuple[str, ...]:

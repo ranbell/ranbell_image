@@ -495,12 +495,41 @@ async def _contract_check(
     #
     # 費用は普通のターンで1回増えるが、同じ日に軌跡の係（毎ターン）を外して
     # いるので差し引きゼロ。問いも yes/no の一語で軽い。
-    if not kind and "nsfw" in blocking:
-        if await chain.read_nsfw(
+    #
+    # **性的かどうかは、設定に関わらず読む（2026-09-09）。** 二つの用途がある:
+    # 止めるかどうか（設定次第）と、**未成年の読み手を呼ぶ入口**（設定に
+    # 関わらず）。フィルタを切ったときに床まで外れてはいけない。
+    sexual = False
+    if not kind:
+        sexual = await chain.read_nsfw(
             ollama, note=seen_text,
             model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
-        ):
-            kind, by, why = "nsfw", "look", "写真に、服が隠す肌が写る"
+        )
+    # **未成年への性的搾取・暴力（`abuse`）。設定では外せない床。**
+    #
+    # 総監督（2026-09-09）「未成年の場合はいかなる場合も sexual な内容は禁止。
+    # Muse はすべて20歳以上に設定したが、**child を連れてくるという危険がある
+    # ため絶対に保護**」「abuse として未成年への暴力・性的搾取を検知する」。
+    #
+    # 一段目の条文に同居させると成人の判定を飲み込む（実測で二度失敗。
+    # `chain.ABUSE_LOOK_SYSTEM` の注記）。
+    #
+    # **入口を作らない。毎ターン訊く。** 一度は「性的だと読まれた行」と
+    # 「年齢・学齢・幼さの語がある行」だけに絞ったが、総監督「**いくらでも
+    # 言い換えで逃れられる**」。実測でも、語彙の列挙は保護には効いていなかった
+    # —— 素の問い（162字・語彙なし）で子ども側は 27/27。語彙が効いていたのは
+    # **通す側**（制服・脱衣を子ども扱いしない）で、それは条文に書いた。
+    # 費用は yes/no 一語ぶん（`think=False` で 1〜2秒）。
+    if not kind:
+        hit_abuse, why_abuse = await chain.read_abuse(
+            ollama, note=seen_text,
+            model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
+        )
+        if hit_abuse:
+            kind, by = "abuse", "abuse"
+            why = why_abuse or "未成年に性的・暴力的な枠を当てている"
+    if not kind and sexual and "nsfw" in blocking:
+        kind, by, why = "nsfw", "look", "写真に、服が隠す肌が写る"
     # **通すためにしか使わない。** 止める判断は一人目が一行で下す。
     if kind == "nsfw" and "nsfw" in blocking:
         nb_now = notebook_mod.of(session)
@@ -557,7 +586,8 @@ async def _contract_check(
 
 
 #: **ターンごとキャンセルする語。** persona は流す側なので入らない。
-CANCEL_KINDS = ("crime", "violence")
+#: `abuse`（未成年への性的搾取・暴力）は crime と同じ扱い —— 彼女に届かせない。
+CANCEL_KINDS = ("crime", "violence", "abuse")
 
 
 def _cancel_blocked_turn(session: dict[str, Any], user_msg: Any) -> None:
@@ -613,6 +643,7 @@ CLERK_BY = {"line": "マネージャー（この一行）",
             "look": "マネージャー（写真に写るもの）",
             "confirm": "マネージャー（もう一度見た）",
             "wardrobe": "衣装部屋（手帖の服と照合）",
+            "abuse": "マネージャー（未成年の保護）",
             "self": "本人"}
 
 

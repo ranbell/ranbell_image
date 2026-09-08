@@ -147,11 +147,17 @@ def test_the_manager_has_one_answer():
     # でフラグが立つ**」「crime 以外に violence を設けてこっちに誘導するとか」。
     # 身体への加害は crime から出して violence へ。crime は「部屋の外で通用
     # する知識」に絞った。**止める顔ぶれは変わらない。**
+    # **`abuse` は一段目の語ではない（2026-09-09）。** 未成年の保護は
+    # `read_abuse` が立てる別の語で、一段目の四語には混ぜない —— 混ぜると
+    # 成人の判定を飲み込む（実測で二度失敗。`chain.ABUSE_LOOK_SYSTEM` の注記）。
     assert muse_chain.BOUNDARY_KINDS == ("persona", "crime", "violence", "nsfw")
-    assert muse_chain.BOUNDARY_BLOCKING == ("persona", "crime", "violence")
+    assert "abuse" not in muse_chain.BOUNDARY_KINDS
+    assert muse_chain.BOUNDARY_BLOCKING == (
+        "persona", "crime", "violence", "abuse")
     assert muse_chain.blocking_kinds(True) == (
-        "persona", "crime", "violence", "nsfw")
-    assert muse_chain.blocking_kinds(False) == ("persona", "crime", "violence")
+        "persona", "crime", "violence", "abuse", "nsfw")
+    assert muse_chain.blocking_kinds(False) == (
+        "persona", "crime", "violence", "abuse")
     assert muse_chain.parse_boundary("unsure") == ""
     # **通す側は `sfw`。** 総監督「none と書くよりは sfw として明確にして
     # こっちに誘導するのもあり」。空を返す＝通す、は変えていない。
@@ -170,7 +176,13 @@ def test_the_contract_is_short_enough_to_be_read():
     # `crime` から分け、通す側を `sfw` と名付けた）。上限の理由は「長いほど
     # 誤検出が増える」なので、**増やしたぶんは実測で払う** —— A群（通さねば
     # ならない）が 97/93% → 100/100%、J群（役の題材）が 77/84% → 100/100%。
-    assert len(text) < 2800, len(text)
+    # **2,800 → 2,950（2026-09-09）。** 未成年の条項を一段目から出して
+    # `read_abuse` へ移し（総監督「abuse として未成年への暴力・性的搾取を
+    # 検知する」）、代わりに「答えられない体」を**状態**で書き直した。
+    # 一度 2,776字まで圧縮したら、状態の列挙と例文が一続きになって例文が
+    # 支配し、**「眠ってる間に触る場面」が crime 3/3 → sfw 2/3 に抜けた**。
+    # 段落に戻して直っている。増やしたぶんは実測で払う（下の表）。
+    assert len(text) < 2950, len(text)
     # **1,244字まで削いだ（2026-09-05）。** 総監督「無駄なものをすべて削り
     # 落として。**余計な言葉が混乱を招き、都度 sfw に逃がしている**」。
     # 例外の並べ書き（「〜は sfw」）を全部やめ、手口の説明を crime から外した
@@ -194,7 +206,8 @@ def test_only_two_of_the_words_stop_the_turn():
 
     `nsfw` は設定次第（`blocking_kinds`）。`sfw` は通す語なので空が返る。
     """
-    assert set(muse_chain.BOUNDARY_BLOCKING) == {"persona", "crime", "violence"}
+    assert set(muse_chain.BOUNDARY_BLOCKING) == {
+        "persona", "crime", "violence", "abuse"}
     assert muse_chain.parse_boundary("probe") == ""
 
 
@@ -1131,18 +1144,58 @@ def test_the_manager_note_stays_short():
 
 
 def test_the_setting_can_never_unlock_the_floor():
-    """切替で外れるのは `nsfw` だけ。"""
+    """切替で外れるのは `nsfw` だけ。**未成年の床は設定の外にある。**
+
+    床は 2026-09-09 に条文から出て `read_abuse` へ移った —— 一段目の箱に
+    同居させると、成人への強い言い方が全部 `crime` に落ちるか、逆に未成年が
+    素通りするかのどちらかになった（実測で二度）。総監督「未成年はいかなる
+    場合も禁止。child を連れてくるという危険があるため絶対に保護」。
+    """
+    import inspect
+
     text = _flat(muse_chain.CLASSIFY_BOUNDARY_SYSTEM).replace("*", "").replace("`", "")
-    # **床は `crime` の箱の中にある。** 二段目（`nsfw`）を走らせるかどうかは
-    # 設定だが、未成年・非同意は一段目が `crime` として止めるので、設定では
-    # 外せない。
-    assert "notanadult" in text.lower()
-    assert "hasnotagreedorcannot" in text.lower()
     assert "nsfw" not in text.lower()
     assert "nsfw" not in muse_chain.BOUNDARY_BLOCKING
+    # 一段目は年齢を量らない（量らせると成人の判定が壊れる）。
+    assert "ageisnotyourquestion" in text.lower()
+
+    # 床そのもの —— 設定の真偽に関わらず止める語に居る。
     for on in (True, False):
         assert "persona" in muse_chain.blocking_kinds(on)
         assert "crime" in muse_chain.blocking_kinds(on)
+        assert "abuse" in muse_chain.blocking_kinds(on)
+
+    # 読み手は年齢と幼さの両方を見る。年齢の申告では外れない。
+    look = _flat(muse_chain.ABUSE_LOOK_SYSTEM).replace("*", "").replace("`", "").lower()
+    # **責務を一つに絞る（総監督の設計・2026-09-09）。** 倫理委員として、
+    # 子どもの虐待を止めることだけを担う。犯罪・暴力・成人の性表現は他の
+    # 委員が読む —— 同じ紙に「守れ」と「通せ」を書くと必ずどちらかが負ける
+    # （実測で三度踏んだ）。
+    assert "ethicsboard" in look
+    assert "onedutyandonlyone" in look
+    assert "unconventions" in look
+    # 制服はコスプレ、体つきは子ども。
+    # **例外なしの一行が先頭（総監督・2026-09-09）。** 順番で負ける ——
+    # コスプレの門を先に置いた版では「17歳の役で」が sfw 3/3 で素通りした。
+    assert look.index("theruleth atha snoexception".replace(" ", "")) < 200
+    assert "actingornot" in look
+    assert "acostumeiscloth" in look
+    assert "anageisnotcloth.abodyisnotcloth" in look
+    # 帯同の手口。
+    assert "watchforthechildbroughtalong" in look
+
+    # **入口を作らない。** `read_abuse` を呼ぶ条件は「まだ止まっていない」
+    # だけで、設定（`blocking`）も語彙の門も挟まない —— 総監督
+    # 「キーワードは**いくらでも言い換えで逃れられる**」。実測でも、子どもを
+    # 捕まえるほうは素の問い（162字・語彙なし）で 27/27 だった。
+    src = inspect.getsource(muse_service._contract_check)
+    gate = src[:src.index("chain.read_abuse")].rsplit("if not kind", 1)[-1]
+    assert "blocking" not in gate, gate
+    assert "looks_childlike" not in src
+    assert not hasattr(muse_chain, "looks_childlike")
+
+    # 止めた回はターンごと取り消す（彼女に届かせない）。
+    assert "abuse" in muse_service.CANCEL_KINDS
 
 
 def test_the_nsfw_switch_defaults_to_stopping():
