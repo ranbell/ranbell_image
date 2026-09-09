@@ -785,57 +785,6 @@ async def densify_scene_prose(
     return text[:900]
 
 
-async def fetch_wd14_suggestions(
-    db,
-    ollama,
-    ledger: dict[str, str],
-    *,
-    limit_per_axis: int = 8,
-) -> list[str]:
-    """Reference-only WD14 vocab near beat/expression/scene. May be noisy."""
-    try:
-        from ..invoke import vocab_bank
-    except Exception:
-        logger.exception("[muse_refine] vocab_bank import failed")
-        return []
-
-    axes: dict[str, str] = {}
-    if (ledger.get("beat") or "").strip():
-        axes["pose"] = ledger["beat"]
-    if (ledger.get("expression") or "").strip():
-        axes["expression"] = ledger["expression"]
-    if (ledger.get("scene") or "").strip():
-        axes["scene"] = ledger["scene"]
-    if (ledger.get("light") or "").strip():
-        axes["lighting"] = ledger["light"]
-    if not axes:
-        topic = " ".join(
-            p for p in (
-                ledger.get("wearing"),
-                ledger.get("beat"),
-                ledger.get("scene"),
-            ) if p
-        ).strip()
-        if not topic:
-            return []
-        try:
-            return list(await vocab_bank.get_topic_tags(
-                db, ollama, topic, limit=limit_per_axis * 2,
-            ))[: limit_per_axis * 2]
-        except Exception:
-            logger.exception("[muse_refine] get_topic_tags failed")
-            return []
-
-    try:
-        tags = await vocab_bank.get_axis_semantic_tags(
-            db, ollama, axes, limit=limit_per_axis,
-        )
-        return list(tags or [])
-    except Exception:
-        logger.exception("[muse_refine] get_axis_semantic_tags failed")
-        return []
-
-
 def merge_support_tags(
     base: list[str],
     support: Iterable[str],
@@ -867,38 +816,22 @@ def merge_support_tags(
     return out
 
 
-def _split_picked_vs_free(
-    parts: list[str],
-    suggested: list[str],
-) -> tuple[list[str], list[str]]:
-    """When SUGGESTED was given, tags in that set are picks; others are free atmosphere."""
-    sug = {s.lower() for s in suggested}
-    picked: list[str] = []
-    free: list[str] = []
-    for p in parts:
-        if p.lower() in sug:
-            picked.append(p)
-        else:
-            free.append(p)
-    return picked, free
-
-
 async def quality_enrich(
     ollama,
     *,
     model: str,
     ledger: dict[str, str],
     base_tags: list[str],
-    suggested: list[str] | None = None,
-) -> tuple[list[str], list[str]]:
-    """Returns (picked_from_suggested, free_quality_tags)."""
-    sug = [str(s).strip() for s in (suggested or []) if str(s).strip()]
-    sug_block = (
-        f"SUGGESTED (closed vocab — pick useful only, ignore noise):\n"
-        f"{', '.join(sug)}\n\n"
-        if sug else
-        "SUGGESTED: (none)\n\n"
-    )
+) -> list[str]:
+    """絵作りの語を足す。**WD14 は使わない（2026-09-09）。**
+
+    総監督「muse refine の WD14 ですが、やっぱり以前検討した通り、**不要な単語が
+    大量に検出される**ため、機能を削除して」。語彙の近傍は場面と関係のない服や
+    小道具を連れてくる —— classic 側で欄ごとに引き直しても雑音が半分近かった。
+
+    （classic Muse の推薦 `service._suggest_tags` は残す。あちらは欄ごとに引いて
+    彼女に渡し、彼女が落とす形で、そちらは実測で 5/5 きれいだった）
+    """
     prompt = (
         f"{_QUALITY_SYSTEM}\n\n"
         f"LEDGER:\n"
@@ -907,7 +840,6 @@ async def quality_enrich(
         f"scene: {ledger.get('scene')}\n"
         f"light: {ledger.get('light')}\n"
         f"bg: {ledger.get('bg')}\n\n"
-        f"{sug_block}"
         f"BASE TAGS:\n{', '.join(base_tags)}\n"
     )
     try:
@@ -921,7 +853,7 @@ async def quality_enrich(
         )
     except Exception:
         logger.exception("[muse_refine] quality enrich failed")
-        return [], []
+        return []
     line = (raw or "").strip().splitlines()[0] if raw else ""
     parts = [p.strip().replace(" ", "_") for p in line.split(",") if p.strip()]
     auth_phrases = {
@@ -929,10 +861,7 @@ async def quality_enrich(
         for k in ("wearing", "beat", "scene", "bg")
         if (ledger.get(k) or "").strip()
     }
-    parts = [p for p in parts if p.lower() not in auth_phrases]
-    if sug:
-        return _split_picked_vs_free(parts, sug)
-    return [], parts
+    return [p for p in parts if p.lower() not in auth_phrases]
 
 
 async def rebuild_craft(
@@ -940,53 +869,31 @@ async def rebuild_craft(
     ollama,
     session: dict[str, Any],
 ) -> dict[str, Any]:
-    """Refresh craft from ledger. WD14 hits stay reference-only unless picked."""
+    """Refresh craft from ledger.
+
+    **WD14 は外した（2026-09-09）** —— 総監督「不要な単語が大量に検出される」。
+    """
     import time
 
     inputs = session.get("inputs") or {}
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
-    wd14: list[str] = []
-    picked_wd14: list[str] = []
     quality_tags: list[str] = []
-
-    if bool(inputs.get("use_wd14")) and ollama is not None:
-        t0 = time.monotonic()
-        wd14 = await fetch_wd14_suggestions(db, ollama, led)
-        debug_mod.stage(session, "wd14_suggest", t0)
-        debug_mod.note(
-            session, "wd14_suggestions",
-            detail=f"{len(wd14)} refs (not auto-injected)",
-            tags=wd14[:40],
-        )
 
     base_bag = talk.filter_banned_tags(session, ledger_tag_bag(led), ledger=led)
     if bool(inputs.get("enhance_quality")) and ollama is not None:
         t0 = time.monotonic()
         model = str(inputs.get("model") or "")
-        # Pass WD14 only as closed SUGGESTED — never dump the whole neighbour set.
-        picked_wd14, quality_tags = await quality_enrich(
-            ollama,
-            model=model,
-            ledger=led,
-            base_tags=base_bag,
-            suggested=wd14 if bool(inputs.get("use_wd14")) else None,
+        quality_tags = await quality_enrich(
+            ollama, model=model, ledger=led, base_tags=base_bag,
         )
         debug_mod.stage(session, "quality_enrich", t0)
         debug_mod.note(
             session, "quality_enrich",
-            detail="picked from SUGGESTED + free atmosphere",
-            picked_wd14=picked_wd14[:40],
+            detail="free atmosphere tags",
             quality_tags=quality_tags[:40],
         )
-    elif bool(inputs.get("use_wd14")) and wd14:
-        # WD14 alone: reference display only — do not inject into the prompt.
-        debug_mod.note(
-            session, "wd14_reference_only",
-            detail="use_wd14 on, enhance_quality off → suggestions not injected",
-            tags=wd14[:40],
-        )
 
-    chosen = list(picked_wd14) + list(quality_tags)
+    chosen = list(quality_tags)
     partner = session.get("partner_character") or {}
     has_partner = bool(partner.get("character_id"))
     char = session.get("character") or {}
@@ -1057,8 +964,6 @@ async def rebuild_craft(
     craft["tags"] = ", ".join(ledger_tag_bag(led))
     craft["scene"] = prose
     # Keep names clear in the panel / debug.
-    craft["wd14_suggestions"] = ", ".join(wd14)
-    craft["picked_wd14"] = ", ".join(picked_wd14)
     craft["quality_tags"] = ", ".join(quality_tags)
     craft["support_tags"] = ", ".join(chosen)
     craft["visible_consequences"] = visible_payload

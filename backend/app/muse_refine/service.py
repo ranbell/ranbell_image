@@ -56,7 +56,6 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "draft_count": inputs.get("draft_count", 1),
             "draft_steps": inputs.get("draft_steps", 20),
             "final_steps": inputs.get("final_steps", 30),
-            "use_wd14": bool(inputs.get("use_wd14")),
             "enhance_quality": bool(inputs.get("enhance_quality")),
             "width": inputs.get("width"),
             "height": inputs.get("height"),
@@ -77,8 +76,6 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "now": craft.get("now", ""),
             "tags": craft.get("tags", ""),
             "scene": craft.get("scene", ""),
-            "wd14_suggestions": craft.get("wd14_suggestions", ""),
-            "picked_wd14": craft.get("picked_wd14", ""),
             "quality_tags": craft.get("quality_tags", ""),
             "support_tags": craft.get("support_tags", ""),
             # Debug: state → photo-visible beats (craft-only, never ledger).
@@ -133,11 +130,9 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "workflow": "",
         "model": "",
         "locale": "ja",
-        "use_wd14": False,
         "enhance_quality": False,
     }
     merged = {**base, **(inputs or {})}
-    merged["use_wd14"] = bool(merged.get("use_wd14"))
     merged["enhance_quality"] = bool(merged.get("enhance_quality"))
     return {
         "session_id": str(uuid.uuid4()),
@@ -152,8 +147,7 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "refine_ledger": ledger_mod.blank(),
         "craft": {
             "prompt": "", "now": "", "tags": "", "scene": "",
-            "wd14_suggestions": "", "picked_wd14": "", "quality_tags": "",
-            "support_tags": "",
+            "quality_tags": "", "support_tags": "",
         },
         # Keep a blank notebook so muse.session_db.load → notebook.migrate is safe
         # when board/shoot runner reloads the row.
@@ -212,7 +206,7 @@ async def load_refine(db, session_id: str) -> dict[str, Any]:
 
 async def patch_inputs(db, session: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items() if v is not None}
-    for flag in ("use_wd14", "enhance_quality"):
+    for flag in ("enhance_quality",):
         if flag in clean:
             clean[flag] = bool(clean[flag])
     session["inputs"] = {**_inputs(session), **clean}
@@ -1038,8 +1032,6 @@ async def chat(
         propose=propose,
         before=before,
         after=after,
-        wd14=[t for t in str(craft.get("wd14_suggestions") or "").split(",") if t.strip()],
-        picked_wd14=[t for t in str(craft.get("picked_wd14") or "").split(",") if t.strip()],
         quality=[t for t in str(craft.get("quality_tags") or "").split(",") if t.strip()],
     )
     if missed:

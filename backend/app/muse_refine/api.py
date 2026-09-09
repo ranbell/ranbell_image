@@ -25,7 +25,6 @@ class SessionCreate(BaseModel):
     workflow: str = ""
     model: str = ""
     locale: str = "ja"
-    use_wd14: bool = False
     enhance_quality: bool = False
 
 
@@ -44,7 +43,6 @@ class InputsPatch(BaseModel):
     final_steps: int | None = Field(default=None, ge=1, le=100)
     width: int | None = Field(default=None, ge=256, le=2048)
     height: int | None = Field(default=None, ge=256, le=2048)
-    use_wd14: bool | None = None
     enhance_quality: bool | None = None
 
 
@@ -144,8 +142,6 @@ async def session_debug(session_id: str, request: Request):
             "now": (view.get("craft") or {}).get("now"),
             "prompt": (view.get("craft") or {}).get("prompt"),
             "scene": (view.get("craft") or {}).get("scene"),
-            "wd14_suggestions": (view.get("craft") or {}).get("wd14_suggestions"),
-            "picked_wd14": (view.get("craft") or {}).get("picked_wd14"),
             "quality_tags": (view.get("craft") or {}).get("quality_tags"),
             "visible_consequences": (view.get("craft") or {}).get("visible_consequences") or {},
         },

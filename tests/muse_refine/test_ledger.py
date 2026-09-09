@@ -61,13 +61,21 @@ def test_merge_support_keeps_authority_first():
     assert merged.count("white_shirt") == 1
 
 
-def test_split_picked_vs_free():
-    picked, free = assemble._split_picked_vs_free(
-        ["leaning_forward", "soft_lighting", "holding_sword"],
-        ["leaning_forward", "holding_sword", "noise_tag"],
-    )
-    assert picked == ["leaning_forward", "holding_sword"]
-    assert free == ["soft_lighting"]
+def test_wd14_is_gone_from_refine():
+    """**WD14 は外した（2026-09-09）。** 総監督「やっぱり以前検討した通り、
+    不要な単語が大量に検出されるため、機能を削除して」。
+
+    classic 側の推薦（`muse.service._suggest_tags`）は残る —— あちらは欄ごとに
+    引いて彼女に渡し、彼女が落とす形で、実測で 5/5 きれいだった。
+    """
+    import inspect
+
+    assert not hasattr(assemble, "fetch_wd14_suggestions")
+    assert not hasattr(assemble, "_split_picked_vs_free")
+    src = inspect.getsource(assemble)
+    assert "use_wd14" not in src
+    # 絵作りの語（`enhance_quality`）は残す —— こちらは語彙の近傍ではない。
+    assert hasattr(assemble, "quality_enrich")
 
 
 def test_assemble_prompt_includes_ledger(monkeypatch):
@@ -184,8 +192,8 @@ def test_w_muse_does_not_mix_clothes_or_hair():
     assert "1girl" not in prompt.split(",")[0] or "2girls" in prompt.lower()
 
 
-def test_assemble_without_support_ignores_raw_wd14_bag():
-    """WD14 neighbour dumps must not enter via support unless explicitly chosen."""
+def test_assemble_without_support_ignores_a_raw_tag_bag():
+    """支えのタグを渡さない限り、袋の語は勝手に入らない。"""
     session = {
         "character": {"identity_tags": ["1girl"], "character_id": "x"},
         "inputs": {"framing": "auto", "style": ""},

@@ -247,7 +247,6 @@ async function startFresh(characterId = '') {
       locale: isJa.value ? 'ja' : 'en',
       model: models.value[0] || '',
       workflow: workflows.value[0] || '',
-      use_wd14: false,
       enhance_quality: false,
     }
     if (characterId) body.character_id = characterId
@@ -1162,19 +1161,7 @@ function isStruckRow(row) {
                   @click="rebuild"
                 >{{ t('museRefine.rebuild') }}</button>
               </div>
-              <label class="mb-2 flex items-start gap-2 text-[11px] text-gray-300">
-                <input
-                  type="checkbox"
-                  class="mt-0.5"
-                  :checked="!!inputs.use_wd14"
-                  :disabled="busy"
-                  @change="patchInputs({ use_wd14: $event.target.checked })"
-                />
-                <span>
-                  <span class="block text-gray-100">{{ t('museRefine.useWd14') }}</span>
-                  <span class="text-gray-500">{{ t('museRefine.useWd14Hint') }}</span>
-                </span>
-              </label>
+              
               <label class="flex items-start gap-2 text-[11px] text-gray-300">
                 <input
                   type="checkbox"
@@ -1188,12 +1175,6 @@ function isStruckRow(row) {
                   <span class="text-gray-500">{{ t('museRefine.enhanceQualityHint') }}</span>
                 </span>
               </label>
-              <p v-if="craft.wd14_suggestions" class="mt-2 text-[10px] text-amber-200/70">
-                WD14 {{ t('museRefine.wd14Ref') }}: {{ craft.wd14_suggestions }}
-              </p>
-              <p v-if="craft.picked_wd14" class="text-[10px] text-emerald-300/80">
-                {{ t('museRefine.wd14Picked') }}: {{ craft.picked_wd14 }}
-              </p>
               <p v-if="craft.quality_tags" class="text-[10px] text-sky-300/80">
                 {{ t('museRefine.qualityTags') }}: {{ craft.quality_tags }}
               </p>
@@ -1356,12 +1337,6 @@ function isStruckRow(row) {
                       :key="field"
                       class="text-emerald-200/80"
                     >{{ field }}: {{ delta }}</div>
-                    <div v-if="(row.wd14_suggestions || []).length" class="text-amber-200/60">
-                      wd14 ref: {{ (row.wd14_suggestions || []).slice(0, 12).join(', ') }}
-                    </div>
-                    <div v-if="(row.picked_wd14 || []).length" class="text-emerald-300/80">
-                      wd14 picked: {{ (row.picked_wd14 || []).join(', ') }}
-                    </div>
                     <div v-if="(row.quality_tags || []).length" class="text-sky-300/80">
                       quality: {{ (row.quality_tags || []).join(', ') }}
                     </div>

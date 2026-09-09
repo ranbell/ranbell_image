@@ -45,8 +45,6 @@ def turn_trace(
     propose: dict[str, str] | None = None,
     before: dict[str, str] | None = None,
     after: dict[str, str] | None = None,
-    wd14: list[str] | None = None,
-    picked_wd14: list[str] | None = None,
     quality: list[str] | None = None,
 ) -> None:
     moved: dict[str, str] = {}
@@ -63,8 +61,6 @@ def turn_trace(
         "patch": patch or {},
         "propose": propose or {},
         "moved": moved,
-        "wd14_suggestions": list(wd14 or [])[:40],
-        "picked_wd14": list(picked_wd14 or [])[:40],
         "quality_tags": list(quality or [])[:40],
     }
     log = list(session.get("turn_trace") or [])
