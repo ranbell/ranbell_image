@@ -155,16 +155,15 @@ def scene_prose(
         lead_bits.append(beat)
     if expression:
         lead_bits.append(f"with {expression} on her face")
+    lead_line = ""
     if lead_bits:
         # Prefer named subject for Anima multi-char guidance.
         if wearing and beat and expression:
-            parts.append(
-                f"{lead} is {lead_bits[0]}, {lead_bits[1]}, {lead_bits[2]}."
-            )
+            lead_line = f"{lead} is {lead_bits[0]}, {lead_bits[1]}, {lead_bits[2]}."
         elif wearing and beat:
-            parts.append(f"{lead} is {lead_bits[0]}, {lead_bits[1]}.")
+            lead_line = f"{lead} is {lead_bits[0]}, {lead_bits[1]}."
         else:
-            parts.append(f"{lead} is " + ", ".join(lead_bits) + ".")
+            lead_line = f"{lead} is " + ", ".join(lead_bits) + "."
 
     if partner or wearing_b or beat_b or expression_b:
         other_bits: list[str] = []
@@ -174,20 +173,40 @@ def scene_prose(
             other_bits.append(beat_b)
         if expression_b:
             other_bits.append(f"with {expression_b} on her face")
-        if other_bits:
-            parts.append(f"{other} is " + ", ".join(other_bits) + ".")
+        other_line = (
+            f"{other} is " + ", ".join(other_bits) + "." if other_bits else ""
+        )
+        # **散文も左→右の順で読ませる。** タグの並びと同じ理由 —— 先に出た
+        # ほうが左だと読まれるので、言葉と喧嘩させない。
+        two = [lead_line, other_line]
+        if identity.LEAD_SIDE == "right":
+            two.reverse()
+        parts.extend(x for x in two if x)
         # **どちらがどちら側かを言う（2026-09-10）。** 総監督「best practice で
         # 右と左って指示するといいらしい。それぞれがどっちにいるかを決めて、
         # かき分けてみよう」。監督が既に場所を言っている回は口を出さない。
         if not _sides_named(ledger):
+            # この一文も左→右で読ませる。
+            l_name, l_side = (
+                (other, identity.side_of(lead=False)[0])
+                if identity.LEAD_SIDE == "right" else
+                (lead, identity.side_of(lead=True)[0])
+            )
+            r_name, r_side = (
+                (lead, identity.side_of(lead=True)[0])
+                if identity.LEAD_SIDE == "right" else
+                (other, identity.side_of(lead=False)[0])
+            )
             parts.append(
-                f"{lead} stands {identity.side_of(lead=True)[0]} of the frame; "
-                f"{other} {identity.side_of(lead=False)[0]}."
+                f"{l_name} stands {l_side} of the frame; {r_name} {r_side}."
             )
         parts.append(
             f"Do not swap clothes, hairstyles or bodies between {lead} and "
             f"{other}; they share one place and one moment."
         )
+
+    elif lead_line:
+        parts.append(lead_line)
 
     if atmosphere:
         parts.append(
@@ -332,6 +351,24 @@ def assemble_prompt(
                 side=side_b,
             ),
         )
+
+    # **読み順と立ち位置を揃える（2026-09-10）。** 総監督「プロンプトはあって
+    # いそうなのに画像は反転していることが多い」。
+    #
+    # 名前の並びそのものが位置の合図になる —— 頭の `2girls, Mio and Asahi,` と
+    # 人ごとの箱の順で「先に出たほうが左」と読まれる。主演を右にした日から、
+    # **並び（Mio が先＝左）と言葉（Mio: on the right）が喧嘩していた**:
+    #
+    #     2girls, Mio and Asahi,          ← 並びは Mio が左と言っている
+    #     Mio: on the right, …            ← 言葉は右と言っている
+    #
+    # ComfyUI 側に反転はない（実行済みグラフを確認・flip 系ノード無し）。
+    # 喧嘩をやめさせる —— **左にいるほうを先に書く。** どちら側にしても揃う。
+    if has_partner and side_a and side_b:
+        left_word = identity.SIDE_WORDS["left"][0]
+        if side_b == left_word:
+            cast = [cast[1], cast[0]]
+            people = [people[1], people[0]]
 
     boxed = identity.assemble_from_boxes(
         cast=cast,

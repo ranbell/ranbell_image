@@ -240,7 +240,7 @@ def publish_actress_turn(
             events.publish(sid, {
                 "type": "chat", "role": "assistant", "name": cname, "text": text,
             })
-    else:
+    elif say.strip():
         lead_cid = str(lead.get("character_id") or "")
         _append_chat(
             session, role="assistant", name=lead_name, text=say,
@@ -255,6 +255,22 @@ def publish_actress_turn(
             "type": "chat", "role": "assistant", "name": lead_name, "text": say,
             "speaker_id": lead_cid or None,
         })
+    else:
+        # **無言の吹き出しを出さない（2026-09-10）。** 総監督「処理に失敗して
+        # 無言になってますね」。台詞が空でも行だけ積んでいたので、画面には
+        # 名前と空の吹き出しが残っていた。内心（ASIDE）は別の行として出るので、
+        # ここは黙って見送り、**何が起きたかは記録に残す。**
+        raw = str(actress.get("raw") or "")
+        logger.warning("[muse_refine] actress turn produced no SAY: %r", raw[:200])
+        try:
+            from . import debug as debug_mod
+            debug_mod.note(
+                session, "actress_said_nothing",
+                detail="台詞が空だったので吹き出しを積まなかった（内心は出る）",
+                raw=raw[:400] or None,
+            )
+        except Exception:
+            logger.debug("[muse_refine] could not note the silent turn", exc_info=True)
 
     if aside:
         # W-aside may be prefixed A:/B:

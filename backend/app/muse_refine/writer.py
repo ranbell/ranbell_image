@@ -303,18 +303,28 @@ async def actress_turn(
         blind = False
         raw = await _say(ollama, prompt, model=model, options=opts,
                          on_token=on_token, images=images)
-        # **絵を読めないモデルは、断らずに黙って空を返す（2026-09-10）。**
-        # そのままだと「今日は口数が少ないな」にしか見えない。一度だけ絵抜きで
-        # 撮り直し、旗を立てて呼び出し側に言わせる。classic の `_call_seeing`
-        # と同じ作法。
-        if images and not (raw or "").strip():
+        out = parse_actress(raw)
+        # **絵を見せた回に黙ったら、絵抜きで一度だけ撮り直す。**
+        #
+        # 2026-09-10 の一段目は「返事が丸ごと空」だけを見ていた。実機
+        # （`cdf8d4f7` 23:45:56）で落ちたのはその手前 —— 板を見せた回に
+        # **ASIDE だけ返って SAY が空**で、内心は出たのに台詞が無言の吹き出しに
+        # なった。読めないモデルは黙るが、読めるモデルも**書式を落とす**ことが
+        # ある。見るのは「彼女が喋ったか」であって、返事の長さではない。
+        if images and not str(out.get("say") or "").strip():
             logger.warning(
-                "[muse_refine] %s returned nothing for an image turn — "
+                "[muse_refine] %s said nothing for an image turn — "
                 "retrying blind", model,
             )
             blind = True
             raw = await _say(ollama, prompt, model=model, options=opts,
                              on_token=on_token, images=None)
+            out = parse_actress(raw)
+        # **黙った回は、返ってきたものを残す。** 実機で無言になったとき、
+        # 記録にあったのは「空だった」だけで、模型が何を返したのか分からな
+        # かった。次に起きたときに読めるように、生の返事を持ち帰る。
+        if not str(out.get("say") or "").strip():
+            out["raw"] = (raw or "")[:400]
     except Exception:
         logger.exception("[muse_refine] actress failed")
         return {
@@ -326,7 +336,7 @@ async def actress_turn(
             "pitch": "",
             "blind": False,
         }
-    return {**parse_actress(raw), "blind": blind}
+    return {**out, "blind": blind}
 
 
 async def _say(

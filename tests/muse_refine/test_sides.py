@@ -86,7 +86,12 @@ def test_japanese_side_words_count_too():
 
 def test_the_prose_says_who_is_where():
     got = assemble.scene_prose(BASE, partner=True, name_a="Mio", name_b="Asahi")
-    assert f"Mio stands {LEAD_EN} of the frame; Asahi {PART_EN}." in got
+    # 左→右の順で読ませるので、左にいるほうが先に出る。
+    left_name, right_name = (
+        ("Asahi", "Mio") if identity.LEAD_SIDE == "right" else ("Mio", "Asahi")
+    )
+    left_en, right_en = identity.SIDE_WORDS["left"][0], identity.SIDE_WORDS["right"][0]
+    assert f"{left_name} stands {left_en} of the frame; {right_name} {right_en}." in got
 
 
 def test_the_prose_stays_quiet_for_one_person():

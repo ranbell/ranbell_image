@@ -88,7 +88,12 @@ def test_the_diary_and_the_picture_agree():
     prose = assemble.scene_prose(led, partner=True, name_a="Mio", name_b="Asahi")
     en_lead, en_part = identity.side_of(lead=True)[0], identity.side_of(lead=False)[0]
     # 絵で主演が置かれた側と、日記で本人に伝える側が一致すること
-    assert f"Mio stands {en_lead} of the frame; Asahi {en_part}." in prose
+    left_name, right_name = (
+        ("Asahi", "Mio") if identity.LEAD_SIDE == "right" else ("Mio", "Asahi")
+    )
+    left_en, right_en = identity.SIDE_WORDS["left"][0], identity.SIDE_WORDS["right"][0]
+    assert f"{left_name} stands {left_en} of the frame; {right_name} {right_en}." in prose
+    assert en_lead and en_part
     assert f"あなたは**{LEAD_JA}**の" in muse_service._which_one_is_me(sess, "a", DESC)
     assert f"あなたは**{PART_JA}**の" in muse_service._which_one_is_me(sess, "b", DESC)
 
