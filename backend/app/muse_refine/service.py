@@ -79,8 +79,9 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "scene": craft.get("scene", ""),
             "quality_tags": craft.get("quality_tags", ""),
             "support_tags": craft.get("support_tags", ""),
-            # Debug: state → photo-visible beats (craft-only, never ledger).
-            "visible_consequences": dict(craft.get("visible_consequences") or {}),
+            # 会話のターンでは散文とタグの組み上げを撮る時まで待つ（`touch_craft`）。
+            # 画面はこの旗を見て「試し撮りで組み直します」と出す。
+            "stale": bool(craft.get("stale")),
         },
         "chat": list(session.get("chat") or [])[-40:],
         "standing": list(session.get("standing") or [])[-8:],
@@ -113,7 +114,6 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             session.get("showrunner_taste") or {},
             locale=str(inputs.get("locale") or "ja"),
         ),
-        "again_feel_available": bool(vitality.again_that_feel_hint(session)),
         # Observability only — UI debug pane / external eval. Never used for decisions.
         "refine_log": list(session.get("refine_log") or [])[-40:],
         "stage_ms": list(session.get("stage_ms") or [])[-20:],
@@ -173,7 +173,6 @@ def new_session(inputs: dict[str, Any] | None = None) -> dict[str, Any]:
         "shot_compile_count": 0,
         "opened": False,
         "showrunner_taste": {},
-        "again_feel_hint": "",
         "cleanup_nudge": False,
         "w_b_leads": False,
         "refine_log": [],
@@ -345,7 +344,9 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     if dress_patch:
         debug_mod.note(session, "opening_dress", detail=str(dress_patch), patch=dress_patch)
 
-    session["again_feel_hint"] = vitality.again_that_feel_hint(session)
+    # **「またあの感じ」は Refine では出さない（2026-09-10）。** 総監督
+    # 「前回の内容からの提案は削除して時間短縮」。`vitality.again_that_feel_hint`
+    # 自体は classic Muse が使うので残してある。
     talk.prepare_vitality_flags(session, user_line="")
     # Opening: B does not steal the first hello unless W and turn says so.
     session["w_b_leads"] = False
@@ -517,34 +518,54 @@ def _change_event(
     after: dict[str, str],
     locale: str,
 ) -> None:
-    # Only real before→after diffs count. A repeated patch with no ledger move
-    # must not spam Shot chat or look like a rewrite.
-    fields = ledger_mod.changed_fields(before, after)
-    entry = debug_mod.record_rewrite(
+    """台帳が動いたことを**記録に**残す。会話欄には出さない。（2026-09-10）
+
+    総監督「会話部分の情報が多いので、画の更新などの情報は表示しなくていいかな。
+    ログで見えるので」。
+
+    以前はここで `kind: "ledger_change"` の行を会話に積んでいた。`record_rewrite`
+    が書き換え記録と `ledger_rewrite` の SSE を出すので、`/debug` と `/pipeline`
+    には今まで通り残る。会話の側は、彼女の台詞に付く 🖼 のアイコン
+    （`_mark_turn_shot`）で足りる。
+
+    **消したのは `ledger_change` だけ。** `ledger_missed`（絵の指示に見えるのに
+    台帳が動かなかった回）は言い直しの合図なので、今まで通り会話に出す。
+
+    `patch` と `locale` は呼び出し側の形をそのままにしてある —— 会話に戻したく
+    なったときに、呼ぶ側を触らずに済むように。
+    """
+    debug_mod.record_rewrite(
         session, source, before=before, after=after, intent=source,
     )
-    if not entry or not fields:
-        return
-    chips = ledger_mod.chips_for(fields, locale=locale)
-    detail_bits = []
-    for key in fields:
-        if key == "wearing_drop":
-            detail_bits.append(f"-{patch.get('wearing_drop')}")
-        else:
-            detail_bits.append(f"{key}={after.get(key) or patch.get(key) or ''}")
-    _append_chat(
-        session,
-        role="system",
-        name="Shot",
-        text=" · ".join(detail_bits) if detail_bits else source,
-        meta={
-            "kind": "ledger_change",
-            "source": source,
-            "fields": fields,
-            "chips": chips,
-            "patch": patch,
-        },
-    )
+
+
+def _mark_turn_shot(
+    session: dict[str, Any], *, mark: int, before: dict[str, str],
+) -> None:
+    """この回が画を動かしたかを、彼女の台詞の行に押す。（2026-09-10）
+
+    総監督「会話オンリーか画像プロンプト生成かはアイコンで分かるように」。
+
+    `mark` はターンの頭で控えた `len(chat)`。そこから後ろの `say` の行にだけ
+    押す —— 内心（banter）や提案（pitch）は喋りの続きなので、印は台詞に一つ。
+
+    **古い行には触らない。** 押していない行は `meta.shot` を持たないので、
+    画面は何も出さない（`=== true` / `=== false` で見る）。
+    """
+    after = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    shot = bool(ledger_mod.changed_fields(before, after))
+    chat = list(session.get("chat") or [])
+    touched = False
+    for i in range(max(0, mark), len(chat)):
+        row = chat[i]
+        if row.get("role") != "assistant":
+            continue
+        if (row.get("meta") or {}).get("kind") != "say":
+            continue
+        chat[i] = {**row, "meta": {**(row.get("meta") or {}), "shot": shot}}
+        touched = True
+    if touched:
+        session["chat"] = chat
 
 
 def _voice_fallback(session: dict[str, Any], *, kind: str, locale: str) -> str:
@@ -629,6 +650,12 @@ async def chat(
 
     session["commit_pitch"] = persona.is_commit_pitch(text)
     talk.prepare_vitality_flags(session, user_line=text)
+
+    # **この回が「喋っただけ」か「画を動かした」か（2026-09-10）。** 総監督
+    # 「会話オンリーか画像プロンプト生成かはアイコンで分かるように」。彼女の
+    # 台詞は propose や自己修復より前に積まれるので、その場では決まらない。
+    # ここで印をつける位置だけ控えて、ターンの終わりに `_mark_turn_shot` で押す。
+    turn_mark = len(session.get("chat") or [])
 
     _append_chat(session, role="user", name="Director", text=text)
     events.publish(session["session_id"], {"type": "chat", "role": "user", "text": text})
@@ -768,15 +795,27 @@ async def chat(
         )
         debug_mod.note(session, "writer_missed", detail=text[:240])
 
-    t0 = time.monotonic()
-    await assemble.rebuild_craft(db, ollama, session)
-    debug_mod.stage(session, "assemble_pre_actress", t0)
+    # **会話の途中で絵を組み直さない（2026-09-10）。** 総監督「撮影に入らない
+    # ときの会話のみの回答はもっと早くしてほしい」。ここで組んだ散文とタグを
+    # 使うのは試し撮りと本番だけで、そちらは自前で `rebuild_craft` を呼ぶ。
+    # 女優が要るのは `now` の一行だけなので、模型を使わずに更新する。
+    assemble.touch_craft(session)
     now = str((session.get("craft") or {}).get("now") or "")
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    # 監督の一行がどこまで台帳を動かしたか、ここで確定する。以降で動くのは
+    # 彼女自身の propose と自己修復なので、再判定の要否はここで測る。
+    after_director = dict(led)
 
+    lead_cid = str(char.get("character_id") or "")
+    try:
+        from ..muse import service as muse_service
+        on_token = muse_service._token_publisher(session["session_id"], lead_cid)
+    except Exception:
+        logger.debug("[muse_refine] token publisher unavailable", exc_info=True)
+        on_token = None
     events.publish(session["session_id"], {
         "type": "muse_speaking",
-        "muse_id": str(char.get("character_id") or ""),
+        "muse_id": lead_cid,
         "name": name,
     })
     t0 = time.monotonic()
@@ -794,6 +833,10 @@ async def chat(
         character=char,
         partner=has_partner, name_b=name_b,
         num_ctx=refine_num_ctx(session),
+        # `_say_only` が `SAY:` の中だけを通す —— 欄の名前も `MY_FEEL:` も
+        # 画面に出さない。Refine の欄名は classic の `_SAY_SHUT_RE` に
+        # 全部入っている（SAY / ASIDE / CARD / PITCH / MY_FEEL）。
+        on_token=on_token,
     )
     debug_mod.stage(session, "actress", t0)
     say = actress.get("say") or ""
@@ -892,9 +935,7 @@ async def chat(
             chat[i] = {**chat[i], "meta": meta}
             session["chat"] = chat
             break
-        t0 = time.monotonic()
-        await assemble.rebuild_craft(db, ollama, session)
-        debug_mod.stage(session, "assemble_after_propose", t0)
+        assemble.touch_craft(session)
 
     # Diary-read catch fires once, then consume so it never loops.
     if session.get("caught"):
@@ -915,12 +956,18 @@ async def chat(
     #
     # **取りこぼしの穴は開けない。** `missed`（絵の指示に見えるのに writer が
     # 何も書かなかった回）は、まさに verify に拾ってほしい回なので走らせる。
-    moved_now = ledger_mod.changed_fields(before, led)
-    if not moved_now and not missed:
+    # **測るのは「監督が動かしたぶん」だけ（2026-09-10）。** `before` と今の
+    # 台帳を比べると、彼女が表情を一語足しただけの回まで「動いた」になり、
+    # 実測 5.9〜6.8秒の再判定が毎回走っていた。verify の仕事は台帳が**監督の**
+    # 意図と合っているかなので、監督が絵の話をしていない回には比べる相手が
+    # いない。彼女の propose は `guard_muse_propose` が空欄埋めに限っている。
+    moved_by_director = ledger_mod.changed_fields(before, after_director)
+    if not moved_by_director and not missed:
         debug_mod.note(
             session, "verify_skipped",
-            detail="台帳が動かず、絵の指示にも見えないので再判定は走らせない",
+            detail="監督は台帳を動かしておらず、絵の指示にも見えないので再判定は走らせない",
         )
+        _mark_turn_shot(session, mark=turn_mark, before=before)
         session["status"] = "chat"
         await session_db.save(db, session)
         return session
@@ -1024,9 +1071,7 @@ async def chat(
                 after=led,
                 locale=locale,
             )
-            t0 = time.monotonic()
-            await assemble.rebuild_craft(db, ollama, session)
-            debug_mod.stage(session, "assemble_after_repair", t0)
+            assemble.touch_craft(session)
             done = _voice_fallback(session, kind="fixed", locale=locale)
             _append_chat(
                 session,
@@ -1081,6 +1126,7 @@ async def chat(
         debug_mod.note(session, "turn_missed_picture", detail="heuristic picture line, empty patch")
     debug_mod.note(session, "verify_result", detail="ok" if ok else "repaired", ok=ok)
 
+    _mark_turn_shot(session, mark=turn_mark, before=before)
     session["status"] = "chat"
     await session_db.save(db, session)
     return session
@@ -1247,55 +1293,6 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
         session_id=session["session_id"],
         ollama=request.app.state.ollama,
     )
-    await session_db.save(db, session)
-    return session
-
-
-async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    """Absolute wardrobe readout → ledger.wearing (escape hatch)."""
-    from ..muse import chain, brief as brief_mod, crew
-
-    inputs = _inputs(session)
-    locale = str(inputs.get("locale") or "ja")
-    model = str(inputs.get("model") or "")
-    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
-    prev = str(led.get("wearing") or "")
-    char = session.get("character") or {}
-    name = char.get("name_ja") or char.get("name") or "Muse"
-    system = crew.actress_duet_prompt(
-        char, mode="wardrobe", locale=("en" if locale.startswith("en") else "ja"),
-        seed=str(session.get("session_id") or ""),
-    )
-    transcript = _director_tail(session, n=12)
-    try:
-        say, wearing = await chain.run_wardrobe(
-            ollama,
-            system=system,
-            notebook_wearing=prev,
-            transcript=transcript,
-            struck="",
-            model=model or None,
-            num_ctx=refine_num_ctx(session),
-        )
-    except Exception as exc:
-        raise RefineError(
-            "衣装部屋から戻ってこられませんでした"
-            if locale.startswith("ja") else
-            "Wardrobe readout failed"
-        ) from exc
-    tidy = brief_mod.tidy_wearing(wearing) if hasattr(brief_mod, "tidy_wearing") else str(wearing or "").strip()
-    if tidy:
-        before = dict(led)
-        led = ledger_mod.apply_patch(led, {"wearing": tidy})
-        session["refine_ledger"] = led
-        _change_event(
-            session, source="wardrobe", patch={"wearing": tidy},
-            before=before, after=led, locale=locale,
-        )
-        await assemble.rebuild_craft(db, ollama, session)
-    if say:
-        _append_chat(session, role="assistant", name=name, text=say, meta={"kind": "wardrobe"})
-    session["status"] = "chat"
     await session_db.save(db, session)
     return session
 

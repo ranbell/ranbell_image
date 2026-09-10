@@ -21,12 +21,6 @@ const catalog = ref(null)
 const characterList = ref([])
 const busy = ref(false)
 const showSettings = ref(false)
-const DEBUG_KEY = 'museRefine.debug'
-const museDebug = ref(typeof localStorage !== 'undefined' && localStorage.getItem(DEBUG_KEY) === '1')
-function toggleDebug() {
-  museDebug.value = !museDebug.value
-  localStorage.setItem(DEBUG_KEY, museDebug.value ? '1' : '0')
-}
 const chatInput = ref('')
 const chatEl = ref(null)
 const preview = ref('')
@@ -36,6 +30,8 @@ const showDiary = ref(false)
 const themeDraft = ref('')
 const streamLive = ref(false)
 const speaking = ref(false)
+// 彼女が喋っている最中の、まだ確定していない一行（`chat_delta`）。
+const liveSay = ref('')
 let es = null
 let pollTimer = null
 let refreshTimer = null
@@ -48,56 +44,9 @@ const inputs = computed(() => session.value?.inputs || {})
 const ledger = computed(() => session.value?.refine_ledger || {})
 const craft = computed(() => session.value?.craft || {})
 const chat = computed(() => session.value?.chat || [])
-const refineLog = computed(() => [...(session.value?.refine_log || [])].slice().reverse())
-const stageMs = computed(() => [...(session.value?.stage_ms || [])].slice(-12).reverse())
-const turnTrace = computed(() => [...(session.value?.turn_trace || [])].slice().reverse())
-const rewriteLog = computed(() => [...(session.value?.rewrite_log || [])].slice().reverse())
-const pipeline = computed(() => session.value?.pipeline || null)
-const pipelineStages = computed(() => pipeline.value?.stages || [])
-const pipelineDivergences = computed(() => pipeline.value?.divergences || [])
-const visibleConsequences = computed(() => {
-  const fromCraft = craft.value?.visible_consequences
-  if (fromCraft && (fromCraft.tags?.length || fromCraft.causes?.length || fromCraft.hints?.length)) {
-    return fromCraft
-  }
-  return pipeline.value?.visible_consequences || null
-})
-const hasVisibleConsequences = computed(() => {
-  const v = visibleConsequences.value
-  if (!v) return false
-  return Boolean(
-    (v.causes && v.causes.length)
-    || (v.tags && v.tags.length)
-    || (v.hints && v.hints.length),
-  )
-})
-function pipelineStatusClass(status) {
-  if (status === 'ok' || status === 'frozen') return 'border-emerald-500/40 text-emerald-200/90'
-  if (status === 'pending') return 'border-amber-500/40 text-amber-200/90'
-  if (status === 'missed' || status === 'stale' || status === 'refused' || status === 'diverged') {
-    return 'border-rose-500/40 text-rose-200/90'
-  }
-  return 'border-amber-500/20 text-amber-100/60'
-}
-function rewriteWhen(ts) {
-  if (!ts) return ''
-  try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
-}
-function mergeRewriteLog(keep, next) {
-  const byAt = new Map()
-  for (const row of [...(keep || []), ...(next || [])]) {
-    if (!row || typeof row !== 'object') continue
-    const cleaned = {
-      at: row.at,
-      source: row.source || '',
-      intent: row.intent || '',
-      changed: row.changed || {},
-    }
-    const key = `${cleaned.at}|${cleaned.source}|${cleaned.intent}|${JSON.stringify(cleaned.changed)}`
-    byAt.set(key, cleaned)
-  }
-  return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
-}
+// 「観測」の枠は外した（2026-09-10）。総監督「あまり有効に働かないので削除。
+// キーワードベースでほとんど使われていない」。記録そのものは残っているので、
+// 見るときは API から —— GET /api/muse-refine/sessions/{id}/debug と .../pipeline。
 const characters = computed(() => characterList.value)
 const workflows = computed(() => {
   const list = catalog.value?.comfyui?.workflows || catalog.value?.workflows || []
@@ -117,10 +66,11 @@ const bond = computed(() => session.value?.bond || {})
 const banned = computed(() => session.value?.banned || [])
 const tasteChips = computed(() => session.value?.taste_chips || [])
 const opened = computed(() => !!session.value?.opened)
+// 会話のターンでは散文とタグの組み上げを撮る時まで待つ（裏の `touch_craft`）。
+const craftStale = computed(() => !!craft.value?.stale)
 const diaryState = computed(() => session.value?.diary || {})
 const diaryDone = computed(() => diaryState.value.status === 'ok')
 const diaryWriting = computed(() => diaryState.value.status === 'writing')
-const againFeelAvailable = computed(() => !!session.value?.again_feel_available)
 
 function thumb(sha) {
   return sha ? `/api/thumbnails/${sha}.webp` : ''
@@ -414,6 +364,20 @@ function isSayRow(row) {
   const kind = row?.meta?.kind
   return row?.role === 'assistant' && (!kind || kind === 'say')
 }
+// この回が画を動かしたか（🖼）、喋っただけか（💬）。
+// **押していない古い行には何も出さない** —— `undefined` は third state。
+function turnIcon(row) {
+  const shot = row?.meta?.shot
+  if (shot === true) return '🖼'
+  if (shot === false) return '💬'
+  return ''
+}
+function turnIconTitle(row, t) {
+  const shot = row?.meta?.shot
+  if (shot === true) return t('museRefine.turnShot')
+  if (shot === false) return t('museRefine.turnTalk')
+  return ''
+}
 
 async function sendChat() {
   const msg = chatInput.value.trim()
@@ -519,7 +483,17 @@ function openStream(id) {
     }
     if (data.type === 'muse_speaking') {
       speaking.value = true
+      liveSay.value = ''
       if (!startedAt) startedAt = Date.now()
+      return
+    }
+    // **彼女が喋っているところを流す（2026-09-10）。** 総監督「会話が
+    // ストリーミングされないので、待ち時間をやっぱり感じてしまう」。
+    // 裏が `_say_only` を通しているので、ここに来るのは SAY の中身だけ。
+    if (data.type === 'chat_delta') {
+      speaking.value = true
+      liveSay.value += data.text || ''
+      scrollChat()
       return
     }
     if (data.type === 'notebook_rewrite' || data.type === 'ledger_rewrite') {
@@ -529,6 +503,8 @@ function openStream(id) {
       return
     }
     if (data.type === 'chat' || data.type === 'chat_message') {
+      // 確定した行が来たら、流れていた下書きは役目を終える。
+      liveSay.value = ''
       // Local sendChat owns speaking/busy until POST returns.
       if (!busy.value) speaking.value = false
       scheduleRefresh(true)
@@ -553,6 +529,7 @@ function openStream(id) {
       if (data.type === 'board_ready' || data.type === 'shoot_attached') {
         preview.value = ''
       }
+      liveSay.value = ''
       if (!busy.value) speaking.value = false
       scheduleRefresh(true)
       return
@@ -675,7 +652,6 @@ function rowKindLabel(row, t) {
   if (kind === 'pitch') return t('museRefine.pitch')
   if (kind === 'standing') return t('museRefine.standing')
   if (kind === 'contract') return t('museRefine.contract')
-  if (kind === 'wardrobe') return t('museRefine.wardrobe')
   if (kind === 'theme') return t('museRefine.theme')
   return row.name || row.role
 }
@@ -725,15 +701,6 @@ function isStruckRow(row) {
               :class="streamLive ? 'text-pink-400/70' : 'text-gray-500'"
               :title="t('museRefine.streamHint')"
             >SSE {{ streamLive ? '●' : '○' }}</span>
-            <button
-              type="button"
-              class="rounded-full border px-2 py-0.5 text-[10px]"
-              :class="museDebug
-                ? 'border-amber-400/70 bg-amber-950/40 text-amber-200'
-                : 'border-white/10 text-gray-500 hover:text-gray-300'"
-              :title="t('museRefine.debugToggle')"
-              @click="toggleDebug"
-            >{{ t('museRefine.debugToggle') }}</button>
             <button
               type="button"
               class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700 disabled:opacity-40"
@@ -864,8 +831,18 @@ function isStruckRow(row) {
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
                   <template v-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
-                  <template v-else-if="isSayRow(row)">🌸 {{ row.name || waitName }}</template>
+                  <template v-else-if="isSayRow(row)">
+                    🌸 {{ row.name || waitName }}
+                    <span
+                      v-if="turnIcon(row)"
+                      class="opacity-70"
+                      :title="turnIconTitle(row, t)"
+                    >{{ turnIcon(row) }}</span>
+                  </template>
                   <template v-else-if="row.meta?.speaker">🌸 {{ row.name }} · {{ row.meta.speaker }}</template>
+                  <template v-else-if="row.meta?.kind === 'pitch'">
+                    💡 {{ t('museRefine.pitchTitle') }}
+                  </template>
                   <template v-else>{{ rowKindLabel(row, t) }}</template>
                   <span
                     v-if="isStruckRow(row)"
@@ -898,8 +875,31 @@ function isStruckRow(row) {
                     class="rounded-full border border-amber-700/50 bg-amber-950/40 px-1.5 py-0.5 text-[10px] text-amber-200"
                   >{{ t('museRefine.struck') }}</span>
                 </span>
+                <!--
+                  **提案は押せる形で出す（2026-09-10）。** 総監督「Muse からの
+                  提案はあってもいいけど、もう少し分かりやすく」。これまでは
+                  `A ｜ B` というただの文字列で、押せるボタンは入力欄の上に
+                  離れて置いてあった。行そのものを提案カードにする。
+                  入力欄の上の列は残す —— 提案が上に流れたときの受け皿。
+                -->
                 <div
-                  v-if="!isChangeRow(row) || row.text"
+                  v-if="row.meta?.kind === 'pitch' && (row.meta?.options || []).length"
+                  class="max-w-[90%] rounded-2xl rounded-tl-sm border border-violet-500/40 bg-violet-950/30 px-3 py-2.5 shadow-sm"
+                >
+                  <p class="mb-1.5 text-[10px] text-violet-200/70">{{ t('museRefine.pitchHint') }}</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button
+                      v-for="opt in row.meta.options"
+                      :key="`${i}-${opt}`"
+                      type="button"
+                      class="rounded-full border border-violet-600/60 bg-violet-900/50 px-3 py-1.5 text-[12px] text-violet-50 hover:bg-violet-800/60 disabled:opacity-40"
+                      :disabled="chatLocked"
+                      @click="sendPitch(opt)"
+                    >「{{ opt }}」</button>
+                  </div>
+                </div>
+                <div
+                  v-else-if="!isChangeRow(row) || row.text"
                   class="max-w-[90%] whitespace-pre-wrap leading-relaxed shadow-sm"
                   :class="[
                     row.role === 'user'
@@ -938,11 +938,31 @@ function isStruckRow(row) {
                 </span>
                 <span v-if="elapsed" class="font-mono text-[10px] text-pink-400/55">{{ clock(elapsed) }}</span>
               </div>
+              <!--
+                流れてきている途中の一行。確定した行が届いたら消える。
+                入力を読む時間（実測 18秒）は無言のままだが、そこから先は
+                文字が出る。見た目は確定した台詞と同じにして、途切れて
+                見えないようにする。
+              -->
+              <div v-if="liveSay" class="flex flex-col items-start gap-1">
+                <span class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium text-pink-300/80">
+                  <img
+                    v-if="leadFace"
+                    :src="leadFace"
+                    alt=""
+                    class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
+                  />
+                  🌸 {{ waitName }}
+                </span>
+                <div
+                  class="max-w-[90%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-pink-500/30 bg-slate-900/80 px-3.5 py-2 text-[12px] leading-relaxed text-pink-50 shadow-sm"
+                >{{ liveSay }}<span class="refine-caret">▌</span></div>
+              </div>
               <p v-if="!chat.length && !waitingOnModel" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
             </div>
 
             <form class="flex flex-col gap-2 border-t border-pink-500/15 p-3" @submit.prevent="sendChat">
-              <div v-if="tasteChips.length || againFeelAvailable || lastPitch.length" class="flex flex-wrap gap-1.5">
+              <div v-if="tasteChips.length || lastPitch.length" class="flex flex-wrap gap-1.5">
                 <button
                   v-for="chip in tasteChips"
                   :key="`taste-${chip}`"
@@ -951,13 +971,6 @@ function isStruckRow(row) {
                   :disabled="chatLocked"
                   @click="insertChip(chip)"
                 >{{ chip }}</button>
-                <button
-                  v-if="againFeelAvailable"
-                  type="button"
-                  class="rounded-full border border-rose-800/50 bg-rose-950/40 px-2.5 py-1 text-[11px] text-rose-100 hover:bg-rose-900/50 disabled:opacity-40"
-                  :disabled="chatLocked"
-                  @click="insertChip(t('museRefine.againFeelSend'))"
-                >{{ t('museRefine.againFeel') }}</button>
                 <button
                   v-for="opt in lastPitch"
                   :key="opt"
@@ -982,12 +995,6 @@ function isStruckRow(row) {
                   :title="boardReady ? t('museRefine.approveTitle') : t('museRefine.approveNeedsBoard')"
                   @click="runStage('approve')"
                 >{{ t('museRefine.approve') }}</button>
-                <button
-                  type="button"
-                  class="rounded-lg border border-slate-600/50 bg-slate-900/60 px-2.5 py-1.5 text-[10px] text-gray-300 hover:bg-slate-800 disabled:opacity-40"
-                  :disabled="chatLocked || !inputs.character_id"
-                  @click="runStage('wardrobe')"
-                >{{ t('museRefine.wardrobe') }}</button>
                 <button
                   type="button"
                   class="ml-auto rounded-lg border border-rose-500/50 bg-rose-950/40 px-2.5 py-1.5 text-[10px] font-medium text-rose-200 hover:bg-rose-900/60 disabled:opacity-40"
@@ -1186,18 +1193,13 @@ function isStruckRow(row) {
               <p v-if="craft.support_tags" class="mt-2 text-[10px] text-gray-500">
                 support: {{ craft.support_tags }}
               </p>
-              <div
-                v-if="museDebug && hasVisibleConsequences"
-                class="mt-2 rounded border border-sky-800/40 bg-sky-950/20 px-2 py-1.5 text-[10px] text-sky-100/85"
-              >
-                <div class="font-medium text-sky-200/90">{{ t('museRefine.visibleTitle') }}</div>
-                <div v-if="(visibleConsequences.causes || []).length">
-                  {{ t('museRefine.visibleCauses') }}{{ (visibleConsequences.causes || []).join(' · ') }}
-                </div>
-                <div v-if="(visibleConsequences.tags || []).length">
-                  {{ t('museRefine.visibleTags') }}{{ (visibleConsequences.tags || []).join(', ') }}
-                </div>
-              </div>
+              <!--
+                会話のターンでは散文とタグの組み上げを撮る時まで待つ。台帳と
+                NOW 行は毎ターン動くので、正本が古く見えることはない。
+              -->
+              <p v-if="craftStale" class="mt-2 text-[10px] text-amber-200/60">
+                {{ t('museRefine.craftStale') }}
+              </p>
             </div>
 
             <div v-if="showSettings" class="space-y-2 rounded-xl border border-gray-800 bg-gray-950 p-3 text-xs">
@@ -1223,171 +1225,6 @@ function isStruckRow(row) {
               </label>
             </div>
 
-            <details v-if="museDebug" class="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 text-[10px] text-amber-100/90" open>
-              <summary class="cursor-pointer text-amber-200">{{ t('museRefine.debugTitle') }}</summary>
-              <p class="mt-1 mb-2 text-amber-100/50">{{ t('museRefine.debugHint') }}</p>
-
-              <div
-                v-if="hasVisibleConsequences"
-                class="mb-3 rounded border border-sky-800/50 bg-sky-950/30 px-2 py-2"
-              >
-                <div class="mb-1 font-semibold text-sky-200/95">{{ t('museRefine.visibleTitle') }}</div>
-                <p class="mb-1.5 text-sky-100/50">{{ t('museRefine.visibleHint') }}</p>
-                <div v-if="(visibleConsequences.causes || []).length" class="mb-1">
-                  <span class="text-sky-300/80">{{ t('museRefine.visibleCauses') }}</span>
-                  <span class="text-sky-100">{{ (visibleConsequences.causes || []).join(' · ') }}</span>
-                </div>
-                <div v-if="(visibleConsequences.tags || []).length" class="mb-1">
-                  <span class="text-sky-300/80">{{ t('museRefine.visibleTags') }}</span>
-                  <span class="text-emerald-200/90">{{ (visibleConsequences.tags || []).join(', ') }}</span>
-                </div>
-                <div class="mb-1 text-sky-100/70">
-                  {{ t('museRefine.visibleDensify') }}:
-                  <span :class="visibleConsequences.densified ? 'text-emerald-300/90' : 'text-amber-100/60'">
-                    {{ visibleConsequences.densified
-                      ? t('museRefine.visibleDensifyYes')
-                      : t('museRefine.visibleDensifyNo') }}
-                  </span>
-                  <span
-                    v-if="visibleConsequences.densify_reason"
-                    class="text-sky-100/40"
-                  > · {{ visibleConsequences.densify_reason }}</span>
-                </div>
-                <ul v-if="(visibleConsequences.hints || []).length" class="mt-1 space-y-0.5">
-                  <li
-                    v-for="(h, i) in (visibleConsequences.hints || [])"
-                    :key="`vc-${i}`"
-                    class="whitespace-pre-wrap text-sky-100/75"
-                  >→ {{ h }}</li>
-                </ul>
-                <p class="mt-1.5 text-sky-100/40">{{ t('museRefine.visibleCraftOnly') }}</p>
-              </div>
-              <p v-else-if="museDebug" class="mb-3 text-amber-100/40">{{ t('museRefine.visibleEmpty') }}</p>
-
-              <div v-if="pipelineStages.length" class="mb-3">
-                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.pipelineTitle') }}</div>
-                <p class="mb-1.5 text-amber-100/50">{{ t('museRefine.pipelineHint') }}</p>
-                <ol class="flex flex-wrap gap-1">
-                  <li
-                    v-for="stage in pipelineStages"
-                    :key="stage.id"
-                    class="min-w-[4.5rem] rounded border px-1.5 py-1"
-                    :class="pipelineStatusClass(stage.status)"
-                    :title="JSON.stringify(stage)"
-                  >
-                    <div class="font-semibold">{{ stage.id }}</div>
-                    <div class="text-[9px] opacity-80">{{ stage.status }}</div>
-                    <div
-                      v-if="stage.id === 'assemble' && (stage.visible_tags || []).length"
-                      class="mt-0.5 text-[9px] text-sky-200/80"
-                    >{{ (stage.visible_tags || []).slice(0, 4).join(', ') }}</div>
-                  </li>
-                </ol>
-                <ul v-if="pipelineDivergences.length" class="mt-1.5 space-y-0.5">
-                  <li
-                    v-for="(d, i) in pipelineDivergences"
-                    :key="`${d.field}-${i}`"
-                    class="text-rose-300/90"
-                  >
-                    ⌁ {{ d.field }} · {{ d.detail }}
-                  </li>
-                </ul>
-              </div>
-
-              <div v-if="rewriteLog.length" class="mb-3">
-                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.rewriteLog') }}</div>
-                <ul class="space-y-1.5">
-                  <li
-                    v-for="(entry, i) in rewriteLog"
-                    :key="`${entry.at}-${i}`"
-                    class="rounded border border-amber-800/40 px-2 py-1.5"
-                  >
-                    <div class="font-semibold text-amber-200/90">
-                      {{ entry.source }}
-                      <span class="font-normal text-amber-100/50">{{ rewriteWhen(entry.at) }}</span>
-                      <span v-if="entry.intent" class="ml-1 font-normal">· {{ entry.intent }}</span>
-                    </div>
-                    <div
-                      v-for="(pair, field) in (entry.changed || {})"
-                      :key="field"
-                      class="mt-0.5 whitespace-pre-wrap text-amber-100/70"
-                    >
-                      <span class="text-amber-300/80">{{ field }}</span>
-                      {{ ' ' }}{{ pair.before || '∅' }} → {{ pair.after || '∅' }}
-                      <div v-if="pair.why" class="pl-3 italic text-amber-100/50">↳ {{ pair.why }}</div>
-                    </div>
-                  </li>
-                </ul>
-              </div>
-              <p v-else class="mb-3 text-amber-100/50">{{ t('museRefine.debugEmpty') }}</p>
-
-              <div v-if="turnTrace.length" class="mb-3">
-                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.turnTrace') }}</div>
-                <ul class="space-y-1.5">
-                  <li
-                    v-for="(row, i) in turnTrace"
-                    :key="`${row.at}-${i}`"
-                    class="rounded border border-amber-800/40 px-2 py-1.5"
-                  >
-                    <div class="text-amber-100">{{ row.line || '—' }}</div>
-                    <div class="text-amber-100/50">patch: {{ JSON.stringify(row.patch || {}) }}</div>
-                    <div class="text-amber-100/50">propose: {{ JSON.stringify(row.propose || {}) }}</div>
-                    <div
-                      v-for="(delta, field) in (row.moved || {})"
-                      :key="field"
-                      class="text-emerald-200/80"
-                    >{{ field }}: {{ delta }}</div>
-                    <div v-if="(row.quality_tags || []).length" class="text-sky-300/80">
-                      quality: {{ (row.quality_tags || []).join(', ') }}
-                    </div>
-                  </li>
-                </ul>
-              </div>
-
-              <div v-if="stageMs.length" class="mb-3">
-                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.stageMs') }}</div>
-                <ul class="space-y-0.5">
-                  <li v-for="(s, i) in stageMs" :key="`${s.at}-${i}`" class="text-amber-100/70">
-                    <span class="text-amber-300/80">{{ ((s.ms || 0) / 1000).toFixed(1) }}s</span>
-                    {{ ' ' }}{{ s.stage }}
-                    <span class="text-amber-100/40">{{ rewriteWhen(s.at) }}</span>
-                  </li>
-                </ul>
-              </div>
-
-              <div v-if="refineLog.length">
-                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.refineLog') }}</div>
-                <ul class="max-h-48 space-y-1 overflow-y-auto">
-                  <li
-                    v-for="(row, i) in refineLog"
-                    :key="`${row.at}-${i}`"
-                    class="rounded border border-amber-900/30 px-2 py-1 text-amber-100/70"
-                  >
-                    <span class="text-amber-300/90">{{ row.kind }}</span>
-                    <span class="text-amber-100/40"> {{ rewriteWhen(row.at) }}</span>
-                    — {{ row.detail }}
-                    <div
-                      v-if="row.kind === 'visible_consequences' && (row.causes || []).length"
-                      class="pl-2 text-sky-200/80"
-                    >causes: {{ (row.causes || []).join(', ') }}</div>
-                    <div
-                      v-if="row.kind === 'visible_consequences' && (row.tags || []).length"
-                      class="pl-2 text-emerald-200/80"
-                    >tags: {{ (row.tags || []).join(', ') }}</div>
-                    <div
-                      v-if="row.kind === 'actress_expression'"
-                      class="pl-2 text-fuchsia-200/85"
-                    >
-                      face:
-                      <span v-if="row.accepted" class="text-emerald-200/90">✓ {{ row.accepted }}</span>
-                      <span v-else-if="row.dropped" class="text-rose-200/80">✗ {{ row.dropped }}</span>
-                      <span v-if="row.director_named_face" class="text-amber-100/50"> · director face</span>
-                      <span v-else-if="row.scene_moved" class="text-amber-100/50"> · scene moved</span>
-                    </div>
-                  </li>
-                </ul>
-              </div>
-            </details>
           </section>
         </div>
       </div>
@@ -1440,6 +1277,11 @@ function isStruckRow(row) {
 .refine-wait-pulse {
   animation: refine-wait-soft 1.6s ease-in-out infinite;
 }
+/* 流れている行の末尾。まだ書いている途中だと分かるように。 */
+.refine-caret {
+  animation: refine-caret-blink 1s step-end infinite;
+  opacity: 0.6;
+}
 @keyframes refine-dot-bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
   40% { transform: translateY(-2px); opacity: 1; }
@@ -1448,7 +1290,11 @@ function isStruckRow(row) {
   0%, 100% { opacity: 0.7; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.04); }
 }
+@keyframes refine-caret-blink {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .refine-dots span, .refine-wait-pulse { animation: none; opacity: 1; }
+  .refine-dots span, .refine-wait-pulse, .refine-caret { animation: none; opacity: 1; }
 }
 </style>

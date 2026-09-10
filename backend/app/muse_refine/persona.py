@@ -262,8 +262,13 @@ def actress_system(
         mem,
         vit,
         opening,
+        # **台帳と NOW は一箇所だけ（2026-09-10）。** ここと
+        # `writer.actress_turn` の尾に二度入っていて、実測で 688字を余計に
+        # 読ませていた（≈229tok・約0.8秒／ターン）。実体は writer 側の JSON に
+        # 置く —— そちらは `ledger.for_model` を通っていて、一人のときに
+        # 二人目の欄が出ない始末までできている。
         "SHOT TRUTH FOR THIS STUDIO (absolute — overrides chat vibes):\n"
-        f"LEDGER:\n{ledger}\nNOW:\n{now}\n"
+        "The LEDGER and NOW below this contract are that truth. "
         "SAY may confirm these in her words. ASIDE must not inventory them. "
         "PROPOSE / CARD only when the picture should move. "
         "EXPRESSION is your performance — match the scene when face is empty "

@@ -47,11 +47,16 @@ def test_ban_and_filter_tags():
     assert talk.filter_banned_tags(session, ["hat"]) == ["hat"]
 
 
-def test_again_feel_flag():
+def test_again_feel_is_not_refines_business():
+    """**「またあの感じ」は Refine では拾わない。**（2026-09-10）
+
+    総監督「前回の内容からの提案は削除して時間短縮」。`vitality` 側の関数は
+    classic Muse が使うので残っている —— 消したのは Refine からの呼び出し。
+    """
     session = new_session()
     session["memories"] = ["屋上の風が冷たかった"]
     talk.prepare_vitality_flags(session, user_line="またあの感じでお願い")
-    assert "屋上" in (session.get("again_feel_hint") or "")
+    assert not session.get("again_feel_hint")
 
 
 def test_public_view_taste_and_banned():

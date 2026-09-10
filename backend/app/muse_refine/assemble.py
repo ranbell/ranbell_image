@@ -166,360 +166,7 @@ def scene_prose(
     if frame:
         parts.append(f"Camera stays {frame}.")
 
-    # Deterministic visible consequences (craft-only — never written back to ledger).
-    cues = visible_consequence_cues(ledger)
-    for hint in cues.get("hints") or []:
-        parts.append(hint)
-
     return " ".join(parts)
-
-
-# Physical state → what the camera would actually see (craft-only expansion).
-# Not hair-only: any beat / light / frame / cloth state that forces a visible result.
-_WIND_RE = re.compile(
-    r"\b(wind|breeze|gust|blown|blowing|floating\s*hair|hair\s*(?:blown|blowing|streaming|whipping))\b"
-    r"|風|靡|なび|そよ風|強風",
-    re.I,
-)
-_BEHIND_RE = re.compile(
-    r"\b(from\s*behind|rear\s*view|back\s*view|from\s*the\s*back|seen\s*from\s*behind|"
-    r"back\s*to\s*(?:the\s*)?(?:camera|viewer)|facing\s*away)\b"
-    r"|後ろ|背面|うしろ|後ろ姿|背中向|背面から",
-    re.I,
-)
-_LOOK_BACK_RE = re.compile(
-    r"\b(looking\s*back|looks?\s*back|over\s*(?:her|the)\s*shoulder|"
-    r"glance\s*back|turned\s*(?:her\s*)?head)\b"
-    r"|振り返|振り向き|肩越し|後ろを見",
-    re.I,
-)
-_SIDE_RE = re.compile(
-    r"\b(from\s*side|side\s*view|profile|three[- ]?quarter)\b"
-    r"|横顔|横から|横向き|プロフィール",
-    re.I,
-)
-_WET_RE = re.compile(
-    r"\b(rain|wet|soaked|drenched|sweat(?:y|ing)?)\b"
-    r"|雨|濡れ|びしょ|汗",
-    re.I,
-)
-_SIT_RE = re.compile(
-    r"\b(sitting|seated|crouch(?:ing|ed)?|kneel(?:ing|ed)?|squatt(?:ing|ed)?)\b"
-    r"|座|しゃが|膝立ち|跪|うずくま",
-    re.I,
-)
-_ARMS_UP_RE = re.compile(
-    r"\b(arms?\s*(?:raised|up|overhead|above)|reaching\s*(?:up|overhead)|"
-    r"stretch(?:ing|ed)?\s*(?:up|overhead)|hands?\s*(?:above|over)\s*(?:her\s*)?head)\b"
-    r"|両手[を]?[上あ]|腕[を]?[上あ]|手を挙げ|伸びを|頭の上",
-    re.I,
-)
-_BACKLIGHT_RE = re.compile(
-    r"\b(backlight(?:ing|ed)?|rim\s*light|contre[- ]?jour|silhouette|"
-    r"light\s*from\s*behind|sun\s*from\s*behind)\b"
-    r"|逆光|リムライト|シルエット|後ろから.*光|光が.*後ろ",
-    re.I,
-)
-_HOLD_RE = re.compile(
-    r"\b(holding|holds?|gripping|clutching|carrying|cradling)\b"
-    r"|持っ|握|抱え|抱えて|つまんで",
-    re.I,
-)
-_LOOK_DOWN_RE = re.compile(
-    r"\b(looking\s*down|eyes?\s*down|gaze\s*down|head\s*bowed|chin\s*down)\b"
-    r"|うつむ|俯|下を見|視線を下|顎を引",
-    re.I,
-)
-_LOOK_UP_RE = re.compile(
-    r"\b(looking\s*up|eyes?\s*up|gaze\s*up|chin\s*up|head\s*tilted\s*back)\b"
-    r"|見上げ|空を見|上を見|あおむ|顎を上げ",
-    re.I,
-)
-_RUN_RE = re.compile(
-    r"\b(runn(?:ing|ing)|dash(?:ing|ed)|sprint(?:ing|ed)|hurry(?:ing)?|"
-    r"walk(?:ing)?\s*fast|in\s*motion)\b"
-    r"|走|駆け|ダッシュ|急いで歩",
-    re.I,
-)
-_LIE_RE = re.compile(
-    r"\b(lying|lie\s*down|on\s*(?:her\s*)?(?:back|side|stomach)|reclining|asleep|sleeping)\b"
-    r"|横た|寝そべ|うつ伏せ|仰向け|眠|寝て",
-    re.I,
-)
-_POCKET_RE = re.compile(
-    r"\b(hands?\s*in\s*(?:her\s*)?pockets?|pocket(?:ed)?\s*hands?)\b"
-    r"|ポケットに手|手をポケット",
-    re.I,
-)
-_LEAN_RE = re.compile(
-    r"\b(lean(?:ing|ed)|propp(?:ing|ed)|elbows?\s*on|resting\s*(?:on|against))\b"
-    r"|もたれ|寄りかか|肘[を]?つ|凭",
-    re.I,
-)
-_TEAR_RE = re.compile(
-    r"\b(tear(?:s|ful|ing)?|crying|weep(?:ing)?|welled|welling)\b"
-    r"|涙|泣|うるん|目が潤",
-    re.I,
-)
-_LOW_ANGLE_RE = re.compile(
-    r"\b(low\s*angle|worm'?s?\s*eye|from\s*below|looking\s*up\s*at\s*her)\b"
-    r"|ローアングル|下から|あおり",
-    re.I,
-)
-_HIGH_ANGLE_RE = re.compile(
-    r"\b(high\s*angle|bird'?s?\s*eye|from\s*above|top[- ]?down|overhead\s*shot)\b"
-    r"|ハイアングル|上から|俯瞰",
-    re.I,
-)
-_OPEN_COLLAR_RE = re.compile(
-    r"\b(open\s*collar|unbuttoned|loose\s*collar|collar\s*open|shirt\s*open)\b"
-    r"|襟元[を]?開け|ボタン[を]?外|はだけ|胸元",
-    re.I,
-)
-_HANDS_FACE_RE = re.compile(
-    r"\b(hands?\s*(?:on|covering|over)\s*(?:her\s*)?(?:face|mouth|cheeks?|eyes?)|"
-    r"covering\s*(?:her\s*)?(?:face|mouth)|facepalm)\b"
-    r"|顔を覆|口を押さ|頬に手|目を覆",
-    re.I,
-)
-
-
-def _ledger_sight_text(ledger: dict[str, str]) -> str:
-    return " ".join(
-        str(ledger.get(k) or "")
-        for k in (
-            "beat", "beat_b", "expression", "atmosphere", "frame",
-            "light", "scene", "bg", "wearing", "wearing_b",
-        )
-    )
-
-
-def visible_consequence_cues(ledger: dict[str, str]) -> dict[str, Any]:
-    """Infer camera-visible effects from ledger state — craft-only, not ledger writes.
-
-    Broad physical consequences (cloth, weight, light, grip, gaze, weather…),
-    not limited to hair. Never invents garments or places.
-    """
-    text = _ledger_sight_text(ledger)
-    wearing = str(ledger.get("wearing") or "")
-    tags: list[str] = []
-    hints: list[str] = []
-
-    wind = bool(_WIND_RE.search(text))
-    behind = bool(_BEHIND_RE.search(text) or _BEHIND_RE.search(str(ledger.get("frame") or "")))
-    look_back = bool(_LOOK_BACK_RE.search(text))
-    side = bool(_SIDE_RE.search(text))
-    wet = bool(_WET_RE.search(text))
-    sitting = bool(_SIT_RE.search(text))
-    arms_up = bool(_ARMS_UP_RE.search(text))
-    backlight = bool(_BACKLIGHT_RE.search(text))
-    holding = bool(_HOLD_RE.search(text))
-    look_down = bool(_LOOK_DOWN_RE.search(text))
-    look_up = bool(_LOOK_UP_RE.search(text))
-    running = bool(_RUN_RE.search(text))
-    lying = bool(_LIE_RE.search(text))
-    pockets = bool(_POCKET_RE.search(text))
-    leaning = bool(_LEAN_RE.search(text))
-    tears = bool(_TEAR_RE.search(text))
-    low_angle = bool(_LOW_ANGLE_RE.search(text))
-    high_angle = bool(_HIGH_ANGLE_RE.search(text))
-    open_collar = bool(_OPEN_COLLAR_RE.search(text) or _OPEN_COLLAR_RE.search(wearing))
-    hands_face = bool(_HANDS_FACE_RE.search(text))
-
-    # Human-readable causes for debug pane (why these consequences fired).
-    causes: list[str] = []
-
-    if wind:
-        causes.append("wind")
-        tags.append("floating_hair")
-        if behind or side or look_back:
-            tags.append("nape")
-            hints.append(
-                "Wind pulls her hair forward and aside, so the nape and the line "
-                "of her throat stay visible; cloth edges lift and flutter with "
-                "the same gust — motion you can see, not a new outfit."
-            )
-        else:
-            hints.append(
-                "Wind streams her hair and lifts loose cloth hems and sleeves; "
-                "flyaways and fabric edges move together in the same air."
-            )
-
-    if behind:
-        causes.append("from_behind")
-        if "nape" not in tags:
-            tags.append("nape")
-        tags.append("from_behind")
-        if look_back:
-            causes.append("looking_back")
-            tags.append("looking_back")
-            hints.append(
-                "Seen from behind, shoulders and nape lead; she glances back so "
-                "only a sliver of cheek and eye returns to the lens."
-            )
-        elif not any("from behind" in h.lower() or "Seen from behind" in h for h in hints):
-            hints.append(
-                "Rear view: shoulder blades, nape, and the fall of cloth down her "
-                "back — not a frontal portrait."
-            )
-
-    if wet:
-        causes.append("wet")
-        if "wet_hair" not in tags:
-            tags.append("wet_skin" if not wind else "wet_hair")
-        hints.append(
-            "Moisture darkens fabric where it clings; skin and cloth share the "
-            "same damp sheen along collarbones and sleeves — wet as surface, "
-            "not a costume change."
-        )
-
-    if sitting:
-        causes.append("sitting")
-        tags.append("sitting")
-        hints.append(
-            "Seated weight settles through hips and thighs; cloth folds gather "
-            "at the knees and where her body meets the seat edge."
-        )
-
-    if arms_up:
-        causes.append("arms_up")
-        tags.append("arms_up")
-        hints.append(
-            "Raised arms lift the ribcage and pull fabric taut under the arms "
-            "and across the waist; the hem rides a little higher with the stretch."
-        )
-
-    if backlight:
-        causes.append("backlight")
-        tags.append("backlighting")
-        tags.append("rim_light")
-        hints.append(
-            "Light from behind rims her outline — hair fringe, cheek edge, and "
-            "the thin translucency at sleeve or skirt edges — while the face "
-            "falls softer into shade."
-        )
-
-    if holding:
-        causes.append("holding")
-        tags.append("holding")
-        hints.append(
-            "Fingers wrap the held object with visible knuckles and nail edges; "
-            "forearms tense slightly and the prop casts a small shadow on her palm."
-        )
-
-    if look_down and not behind:
-        causes.append("looking_down")
-        tags.append("looking_down")
-        hints.append(
-            "Her gaze drops; eyelids and lashes catch the light, chin tucks, "
-            "and the upper cheeks and brow ridge come forward in the frame."
-        )
-
-    if look_up and not behind:
-        causes.append("looking_up")
-        tags.append("looking_up")
-        hints.append(
-            "Chin lifts and the underside of her jaw and throat open to the "
-            "light; eyes catch highlights from above."
-        )
-
-    if running:
-        causes.append("running")
-        tags.append("running")
-        hints.append(
-            "Forward motion pulls hair and hems back; one foot plants while "
-            "cloth trails a half-beat behind the body."
-        )
-
-    if lying:
-        causes.append("lying")
-        tags.append("lying")
-        hints.append(
-            "Body weight presses cheek or shoulder into the surface; hair "
-            "spreads where it meets the bed or floor, and cloth pools in the "
-            "hollows under her side."
-        )
-
-    if pockets:
-        causes.append("hands_in_pockets")
-        tags.append("hands_in_pockets")
-        hints.append(
-            "Hands buried in pockets pull the fabric taut at the hips and "
-            "wrists; shoulders ease forward a little with the buried weight."
-        )
-
-    if leaning:
-        causes.append("leaning")
-        tags.append("leaning")
-        hints.append(
-            "Weight rests on forearms or a shoulder against the support; cloth "
-            "compresses at the contact line and the free side of her body hangs looser."
-        )
-
-    if tears:
-        causes.append("tears")
-        tags.append("tearing_up")
-        hints.append(
-            "Eyes gloss and lower lids swell; a wet track catches light on the "
-            "cheek without renaming her expression into something else."
-        )
-
-    if low_angle:
-        causes.append("low_angle")
-        tags.append("from_below")
-        hints.append(
-            "Low camera emphasizes jawline, throat, and the underside of sleeves "
-            "or skirt — she reads taller against the ceiling of the frame."
-        )
-
-    if high_angle:
-        causes.append("high_angle")
-        tags.append("from_above")
-        hints.append(
-            "High camera shows the crown of her head, shoulder tops, and the "
-            "pattern of folds across her back and lap."
-        )
-
-    if open_collar:
-        causes.append("open_collar")
-        tags.append("collarbone")
-        hints.append(
-            "An open collar lays the collarbones and the soft hollow at her "
-            "throat bare — skin tone against the shirt edge, not a new garment."
-        )
-
-    if hands_face:
-        causes.append("hands_on_face")
-        tags.append("covering_face")
-        hints.append(
-            "Hands occlude part of the face; light slips through finger gaps "
-            "onto an eye or cheek while palms cast soft shadows."
-        )
-
-    # Dedupe tags / causes preserving order
-    seen: set[str] = set()
-    uniq_tags: list[str] = []
-    for t in tags:
-        low = t.lower()
-        if low in seen:
-            continue
-        seen.add(low)
-        uniq_tags.append(t)
-    seen_c: set[str] = set()
-    uniq_causes: list[str] = []
-    for c in causes:
-        if c in seen_c:
-            continue
-        seen_c.add(c)
-        uniq_causes.append(c)
-
-    # Keep enough hints for densify, but cap spam in the base prose path.
-    return {
-        "tags": uniq_tags,
-        "hints": hints[:4],
-        "causes": uniq_causes,
-        "needs_dense": bool(uniq_tags or hints),
-    }
 
 
 def _person_box(
@@ -614,10 +261,7 @@ def assemble_prompt(
     quality_tags, atmosphere = anima.split_quality_support(raw_support)
 
     cast = [char]
-    cues = visible_consequence_cues(ledger)
-    # Consequence tags ride the lead beat box (hair/body visibility), never
-    # the shared frame-wide mood bag — ownership stays with the actress.
-    lead_extra = list(cues.get("tags") or [])
+    lead_extra: list[str] = []
     people = [
         _person_box(
             session,
@@ -728,19 +372,7 @@ async def densify_scene_prose(
     """Optional LLM thicken — ledger facts stay absolute; consequences are craft-only."""
     if not base_prose.strip() or ollama is None:
         return base_prose
-    cues = visible_consequence_cues(ledger)
     hint_block = ""
-    if cues.get("hints") or cues.get("tags"):
-        hint_block = (
-            "\nVISIBLE HINTS (must appear naturally if compatible with ledger):\n"
-            + "\n".join(f"- {h}" for h in (cues.get("hints") or []))
-            + (
-                "\n- Prefer sampler cues already implied: "
-                + ", ".join(cues.get("tags") or [])
-                if cues.get("tags") else ""
-            )
-            + "\n"
-        )
     prompt = (
         f"{_PROSE_DENSIFY}\n\n"
         f"LEDGER:\n"
@@ -909,12 +541,13 @@ async def rebuild_craft(
     prose = scene_prose(
         led, partner=has_partner, name_a=name_a, name_b=name_b,
     )
-    cues = visible_consequence_cues(led)
-    # Densify when quality/mood/look is on, OR when state implies visible
-    # physical consequences (wind, rear view, etc.).
+    # **「観測」は外した（2026-09-10）。** 総監督「観測という機能はあまり有効に
+    # 働かないので削除。キーワードベースでほとんど使われていない」。風・後ろ姿を
+    # 正規表現で拾って散文とタグに足していた仕掛け（`visible_consequence_cues`）
+    # ごと落とした。densify を起こす条件も、その分だけ素直になる。
     want_dense = bool(inputs.get("enhance_quality")) or bool(
         (led.get("atmosphere") or "").strip() or (led.get("look") or "").strip()
-    ) or bool(cues.get("needs_dense"))
+    )
     densified = False
     densify_reason = ""
     if want_dense and ollama is not None and prose:
@@ -928,8 +561,7 @@ async def rebuild_craft(
         if denser and denser != prose:
             densified = True
             densify_reason = (
-                "visible_consequences" if cues.get("needs_dense")
-                else ("enhance_quality" if inputs.get("enhance_quality") else "atmosphere_or_look")
+                "enhance_quality" if inputs.get("enhance_quality") else "atmosphere_or_look"
             )
             debug_mod.note(
                 session, "prose_densify",
@@ -937,28 +569,6 @@ async def rebuild_craft(
                 reason=densify_reason,
             )
             prose = denser
-    visible_payload = {
-        "causes": list(cues.get("causes") or [])[:12],
-        "tags": list(cues.get("tags") or [])[:20],
-        "hints": list(cues.get("hints") or [])[:4],
-        "densified": densified,
-        "densify_reason": densify_reason,
-        # Reminder for debug readers: never written back into ledger.
-        "craft_only": True,
-    }
-    if cues.get("tags") or cues.get("hints") or cues.get("causes"):
-        cause_s = ", ".join(visible_payload["causes"]) or "(none)"
-        tag_s = ", ".join(visible_payload["tags"]) or "(none)"
-        debug_mod.note(
-            session, "visible_consequences",
-            detail=f"causes=[{cause_s}] → tags=[{tag_s}]",
-            causes=visible_payload["causes"],
-            tags=visible_payload["tags"],
-            hints=visible_payload["hints"],
-            densified=densified,
-            densify_reason=densify_reason,
-            craft_only=True,
-        )
     prompt = assemble_prompt(
         session, led,
         support_tags=chosen or None,
@@ -974,7 +584,42 @@ async def rebuild_craft(
     # Keep names clear in the panel / debug.
     craft["quality_tags"] = ", ".join(quality_tags)
     craft["support_tags"] = ", ".join(chosen)
-    craft["visible_consequences"] = visible_payload
+    # 撮る直前に組み直したので、もう古くない（`touch_craft` の旗を降ろす）。
+    craft["stale"] = False
+    session["craft"] = craft
+    session["refine_ledger"] = led
+    return session
+
+
+def touch_craft(session: dict[str, Any]) -> dict[str, Any]:
+    """会話のターン用の、**模型を使わない** craft 更新。（2026-09-10）
+
+    総監督「撮影に入らないときの会話のみの回答はもっと早くしてほしい」。
+
+    実機の記録（`stage_ms`）を読むと、会話だけの一手にこれだけ乗っていた:
+
+        writer                4.45s   台帳を書く（要る）
+        quality_enrich        4.42s   ┐ `rebuild_craft` の中身。どちらも模型
+        prose_densify         6.93s   ┘
+        actress              21.93s   彼女が喋る（要る）
+        assemble_after_propose 9.55s  彼女が表情を足したので、また組み直し
+        verify                6.81s
+        ──────────────────────────── 合計 ≈54秒
+
+    組み上げた `craft["prompt"]` を使うのは**試し撮りと本番だけ**で、そちらは
+    もう自前で `rebuild_craft` を呼んでいる。会話の途中で組む理由がない。
+
+    ここでやるのは純関数だけ —— `now`（正本の一行）と `tags`。**台帳が正本**
+    なので、画面の台帳欄と NOW 行は今まで通り毎ターン動く。散文とタグの
+    組み上げだけが撮る時まで待つ。`stale` はそれを画面に言うための旗。
+    """
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    inputs = session.get("inputs") or {}
+    locale = str(inputs.get("locale") or "ja")
+    craft = dict(session.get("craft") or {})
+    craft["now"] = ledger_mod.now_line(led, locale=locale)
+    craft["tags"] = ", ".join(talk.filter_banned_tags(session, ledger_tag_bag(led), ledger=led))
+    craft["stale"] = True
     session["craft"] = craft
     session["refine_ledger"] = led
     return session

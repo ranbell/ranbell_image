@@ -34,6 +34,10 @@ Rules:
 - atmosphere: mood / air (wistful, tense, cozy…). Only when they ask to change mood.
 - look: art direction / render. Only when they ask to change art style.
 - lettering: short Latin words with double quotation for a sign only when they asked for text in frame.
+- bg: what is actually behind her. Not a single word — name the things that
+  are there: `laundry machines, folded towels, coin slot panel`,
+  `hanging ferns, misted glass, watering can`. Place several items when the
+  place has several. Those two are only the shape — name what THIS place has.
 - beat / frame: Describe everything that needs to be visible in the photograph
   using clear terms (danbooru tags). Additionally, be sure to list
   anything not explicitly stated that must naturally appear in the image
@@ -253,6 +257,7 @@ async def actress_turn(
     character: dict[str, Any] | None = None,
     partner: bool = False,
     name_b: str = "",
+    on_token=None,
 ) -> dict[str, Any]:
     lang = "Japanese" if locale.startswith("ja") else "English"
     sess = session or {"character": character or {}, "session_id": ""}
@@ -280,10 +285,28 @@ async def actress_turn(
         # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
         # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
-        raw = await ollama.generate_text(
-            prompt, model=model or None, think=False,
-            options={"num_ctx": num_ctx} if num_ctx else None,
-        )
+        #
+        # **流す（2026-09-10）。** 総監督「会話がストリーミングされないので、
+        # 待ち時間をやっぱり感じてしまう」。この段は実測 20.3秒で、その 18.1秒
+        # はプロンプトを読む時間。総時間は変わらないが、無言で終わりを待つのと
+        # 途中から文字が出るのとでは待たされ方が違う。classic は既にこうしている。
+        opts = {"num_ctx": num_ctx} if num_ctx else None
+        if on_token is None:
+            raw = await ollama.generate_text(
+                prompt, model=model or None, think=False, options=opts,
+            )
+        else:
+            parts: list[str] = []
+            async for event in ollama.generate_text_stream(
+                prompt, model=model or None, think=False, options=opts,
+            ):
+                if event.get("type") == "token" and event.get("text"):
+                    parts.append(event["text"])
+                    try:
+                        on_token(event["text"])
+                    except Exception:
+                        logger.debug("[muse_refine] on_token failed", exc_info=True)
+            raw = "".join(parts)
     except Exception:
         logger.exception("[muse_refine] actress failed")
         return {

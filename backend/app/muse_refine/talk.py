@@ -10,11 +10,6 @@ from . import ledger as ledger_mod
 
 logger = logging.getLogger(__name__)
 
-_AGAIN_FEEL_RE = re.compile(
-    r"(またあの感じ|あの感じでもう一度|again\s+that\s+feel|that\s+same\s+feel)",
-    re.I,
-)
-
 
 def dress_from_signature(session: dict[str, Any]) -> dict[str, str]:
     """Seed ledger wearing / wearing_b from signature wardrobe sets (no LLM)."""
@@ -59,11 +54,8 @@ def prepare_vitality_flags(session: dict[str, Any], *, user_line: str = "") -> N
     )
     vitality.bump_talk_turn(session)
     session["w_b_leads"] = vitality.should_b_lead(session, partner=partner)
-    if _AGAIN_FEEL_RE.search(str(user_line or "")):
-        session["again_feel_hint"] = vitality.again_that_feel_hint(session)
-    elif not session.get("again_feel_hint"):
-        # Keep empty unless explicitly asked; open() may seed once.
-        pass
+    # **「またあの感じ」は Refine では拾わない（2026-09-10）。** 総監督
+    # 「前回の内容からの提案は削除して時間短縮」。classic Muse には残っている。
 
 
 def note_picture_compile(session: dict[str, Any]) -> None:
@@ -75,8 +67,6 @@ def clear_turn_flags(session: dict[str, Any]) -> None:
     session["commit_pitch"] = False
     session["cleanup_nudge"] = False
     session["w_b_leads"] = False
-    # again_feel is one-shot after she answered
-    session["again_feel_hint"] = ""
 
 
 def ban_tag(session: dict[str, Any], tag: str) -> None:

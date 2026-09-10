@@ -143,7 +143,6 @@ async def session_debug(session_id: str, request: Request):
             "prompt": (view.get("craft") or {}).get("prompt"),
             "scene": (view.get("craft") or {}).get("scene"),
             "quality_tags": (view.get("craft") or {}).get("quality_tags"),
-            "visible_consequences": (view.get("craft") or {}).get("visible_consequences") or {},
         },
         "refine_ledger": view.get("refine_ledger") or {},
     }
@@ -262,18 +261,6 @@ async def chat(session_id: str, body: ChatBody, request: Request):
 async def rebuild(session_id: str, request: Request):
     session = await _session(request, session_id)
     session = await service.rebuild(_db(request), _ollama(request), session)
-    return service.public_view(session)
-
-
-@router.post("/sessions/{session_id}/wardrobe")
-async def wardrobe(session_id: str, request: Request):
-    session = await _session(request, session_id)
-    try:
-        session = await service.wardrobe_stage(
-            _db(request), _ollama(request), session,
-        )
-    except service.RefineError as exc:
-        raise HTTPException(400, exc.message) from exc
     return service.public_view(session)
 
 
