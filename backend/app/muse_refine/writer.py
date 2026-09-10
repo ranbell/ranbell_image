@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 WRITER_SYSTEM = """You update a shot ledger. Output ONLY a JSON object.
 Keys allowed: wearing, beat, expression, scene, light, bg, frame,
-wearing_b, beat_b, lettering, atmosphere, look, wearing_drop.
+wearing_b, beat_b, expression_b, lettering, atmosphere, look, wearing_drop.
 Rules:
 - Absolute phrases in English (danbooru-friendly words ok).
 - Carefully read the latest conversation, and update only the fields that have
@@ -46,8 +46,16 @@ Rules:
 - If the line is only emotion / banter / acknowledgement with NO picture or
   mood/look change, return {}.
 - Multiple fields in one line → include all of them in one object.
-- wearing_b / beat_b only when a partner Muse is in the shot and the line
-  names her clothes or pose.
+- wearing_b / beat_b / expression_b are the SECOND person's, and exist only
+  when a partner Muse is in the shot. They are hers, never the lead's.
+- TWO IN FRAME — **split a line that names them.** Whatever follows a name
+  belongs to HER alone; never copy it onto the other. The CAST line above says
+  which name is the lead (plain fields) and which is the partner (_b fields):
+    「<partner> は身を乗り出して、<lead> はトレイを持ち直して」
+      beat:   adjusting her grip on the tray      ← lead only
+      beat_b: leaning forward                     ← partner only
+  Give them the SAME value only when the line actually says 「二人とも」 /
+  "both" / "each of you".
 """
 
 WRITER_RETRY = """The last line looks like a picture or mood/look direction, but you returned {}.

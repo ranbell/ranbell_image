@@ -61,11 +61,11 @@ BG: <background if distinct>
 ATMOSPHERE: <mood / air — ONLY if he changed mood this turn; else OMIT>
 LOOK: <art direction — ONLY if he changed look this turn; else OMIT>
 LETTERING: <short Latin words on a sign ONLY if he asked — else OMIT>
-(Partner present: WEARING_B / BEAT_B)
+(Partner present: WEARING_B / BEAT_B / EXPRESSION_B — the partner's, not yours)
 
 PROPOSE: optional JSON with ledger keys (wearing, beat, expression, scene,
-light, bg, frame, wearing_b, beat_b, lettering, atmosphere, look,
-wearing_drop) when the picture, mood, or look should move. Absolute English
+light, bg, frame, wearing_b, beat_b, expression_b, lettering, atmosphere,
+look, wearing_drop) when the picture, mood, or look should move. Absolute English
 phrases. Omit when chat-only.
 STICKY long-chat rule: atmosphere / look / lettering already on the ledger
 KEEP unless he changed them this turn. Never blank them with "" to "keep".
@@ -107,6 +107,8 @@ _CARD_FIELD_MAP = {
     "BACKGROUND": "bg",
     "WEARING_B": "wearing_b",
     "BEAT_B": "beat_b",
+    "EXPRESSION_B": "expression_b",
+    "FACE_B": "expression_b",
     "LETTERING": "lettering",
     "TEXT": "lettering",
     "ATMOSPHERE": "atmosphere",
@@ -117,7 +119,7 @@ _CARD_FIELD_MAP = {
 
 _CARD_LINE_RE = re.compile(
     r"(?im)^\s*(PLACE|SCENE|LIGHT|WEARING_B|WEARING|BEAT_B|BEAT|"
-    r"EXPRESSION|FACE|FRAME|BG|BACKGROUND|LETTERING|TEXT|"
+    r"EXPRESSION_B|EXPRESSION|FACE_B|FACE|FRAME|BG|BACKGROUND|LETTERING|TEXT|"
     r"ATMOSPHERE|MOOD|LOOK|STYLE)\s*[:：]\s*(.+?)\s*$"
 )
 
@@ -206,6 +208,61 @@ def _without_classic_output(base: str) -> str:
     return text[:i].rstrip() if i > 0 else text
 
 
+def _first_person(who: dict[str, Any], fallback: str) -> str:
+    p = who.get("personality") or {}
+    return str(
+        who.get("first_person_ja") or p.get("first_person_ja") or fallback
+    ).strip() or fallback
+
+
+def w_output_block(
+    lead: dict[str, Any], partner: dict[str, Any], *, locale: str,
+) -> str:
+    """W撮りのときだけ足す出力の形。**一人のときは一度も呼ばない。**（2026-09-10）
+
+    総監督「Muse Refine で2人で会話しているときに会話分離ができてないですね。
+    Muse Classic を参考に修正お願い」「内心を話すときもどちらかランダムで」。
+
+    実機（`83d31174`）では全25行が主演名義の1行に潰れ、本文に私（みお）と
+    アタシ（あさひ）が同居していた。分ける側（`identity.parse_duet_speakers`）は
+    最初から呼ばれていて、**接頭辞を書けという指示だけが届いていなかった** ——
+    それは classic の出力書式の末尾にしか無く、`_without_classic_output` が
+    落としている（残す 7,588字に該当行 0本／落とす 2,718字に 4本）。
+
+    **落とした 2,718字を戻さない。** 戻すと `OUTPUT FORMAT` が二つ・`MY_FEEL`
+    が四つ並ぶ状態に逆戻りする（それを直したのが `_without_classic_output`）。
+    ここでは Refine の書式に合わせて、W に要る規則だけを書く。
+
+    声の条文（`--- MUSE A VOICE ---` / `--- MUSE B VOICE ---` と各々の一人称）は
+    残っている側に入っているので、ここでは繰り返さず**名指しで結びつける**だけ。
+    """
+    a = str(lead.get("name_ja") or lead.get("name") or "A").strip()
+    b = str(partner.get("name_ja") or partner.get("name") or "B").strip()
+    ja = str(locale).startswith("ja")
+    fp_a = _first_person(lead, "私" if ja else "I")
+    fp_b = _first_person(partner, "私" if ja else "I")
+    return f"""
+W-MUSE (two in frame) — this REPLACES the solo shape of SAY / ASIDE above.
+
+SAY: 2–6 lines of live conversation. You play BOTH {a} and {b}.
+Prefix EVERY line with exactly `A:` or `B:` — never a name as the prefix:
+A: <{a}'s line in her own voice>
+B: <{b}'s line in her own voice>
+
+ASIDE: **only ONE of them mutters this turn** — whoever the turn belongs to.
+One line, prefixed `A:` or `B:` exactly as in SAY. Never both.
+
+- A is {a}（一人称「{fp_a}」）. B is {b}（一人称「{fp_b}」）.
+  Each uses her OWN first person for herself and NEVER says her own name in
+  the third person. Do not put {fp_b} in A's mouth, or {fp_a} in B's.
+- CONTRAST VOICES: if A's line and B's line could be swapped without anyone
+  noticing, rewrite both.
+- They talk to each other, not only to the Showrunner. React, tease, ride.
+- CARD / PROPOSE stay ONE shared frame with two wardrobes:
+  WEARING_B / BEAT_B / EXPRESSION_B are {b}'s, never {a}'s.
+""".strip()
+
+
 def actress_system(
     session: dict[str, Any],
     *,
@@ -218,8 +275,11 @@ def actress_system(
     partner = session.get("partner_character") or {}
     locale_key = "en" if str(locale).startswith("en") else "ja"
     seed = str(session.get("session_id") or "")
+    # **門はここ一つ。** `muse.service.is_duet` は `mode` しか見ず、実機では
+    # 一人の回も `mode: duet`（全109件中85件が相方なし）。相方の実体で切る。
+    has_partner = bool(partner and str(partner.get("character_id") or "").strip())
     try:
-        if partner and str(partner.get("character_id") or "").strip():
+        if has_partner:
             tier = str((session.get("duet_tier") or {}).get("tier") or "")
             base = crew.w_actress_duet_prompt(
                 char, partner, mode="talk", locale=locale_key,
@@ -259,6 +319,9 @@ def actress_system(
         base,
         ENTERTAINMENT_CRAFT,
         REFINE_OUTPUT,
+        # 二人のときだけ、SAY / ASIDE の形を W 用に差し替える。**一人のときは
+        # 空文字なので `parts` から落ちて、条文は一字も変わらない。**
+        w_output_block(char, partner, locale=locale) if has_partner else "",
         mem,
         vit,
         opening,

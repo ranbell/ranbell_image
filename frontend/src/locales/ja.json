@@ -1861,7 +1861,8 @@
       "atmosphere": "雰囲気",
       "look": "画風",
       "wearing_b": "相方服",
-      "beat_b": "相方姿勢"
+      "beat_b": "相方姿勢",
+      "expression_b": "相方表情"
     },
     "options": "オプション",
     "rebuild": "プロンプト再生成",

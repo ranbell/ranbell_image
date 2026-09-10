@@ -17,6 +17,10 @@ LEDGER_KEYS: tuple[str, ...] = (
     "frame",
     "wearing_b",
     "beat_b",
+    # **相方にも顔を（2026-09-10）。** 総監督のW撮りで、絵に相方の表情が一切
+    # 入っていなかった（`Mio: … bright smile` に対し `Asahi:` は顔無し）。
+    # classic のノートには最初から `expression_b` がある。
+    "expression_b",
     "lettering",  # short Latin words for Anima text "…" / text_on_image
     "atmosphere",  # mood / air — conversation-driven (wistful, tense, cozy…)
     "look",  # art direction / render — cel, fantasy, watercolor… (not UI buttons)
@@ -43,6 +47,7 @@ FIELD_CHIPS: dict[str, dict[str, str]] = {
     "frame": {"icon": "📷", "ja": "構図", "en": "Frame"},
     "wearing_b": {"icon": "👗", "ja": "相方服", "en": "Partner clothes"},
     "beat_b": {"icon": "🤝", "ja": "相方姿勢", "en": "Partner pose"},
+    "expression_b": {"icon": "🙂", "ja": "相方表情", "en": "Partner face"},
     "lettering": {"icon": "🔤", "ja": "文字", "en": "Lettering"},
     "atmosphere": {"icon": "🌫", "ja": "雰囲気", "en": "Mood"},
     "look": {"icon": "🎨", "ja": "画風", "en": "Look"},
@@ -180,6 +185,12 @@ def guard_muse_propose(
     a face this turn. She may fill an empty expression always, and may refresh a
     settled face when scene-ish axes just moved (scene / atmosphere / beat /
     light / frame / bg) so the expression can track the shot.
+
+    **W撮りでは顔は二つある（2026-09-10）。** 彼女は二人ぶんを演じているので、
+    `expression_b` も同じ演技の軸として扱う —— 相方の顔だけ台帳に据え置かれる
+    と、場面が動いても相方の表情が置き去りになる。監督がその回に顔を名指し
+    したかどうかも、欄ごとに見る（`expression` を指定した回に `expression_b`
+    まで凍らせない）。
     """
     raw = dict(patch or {})
     if not raw:
@@ -199,7 +210,8 @@ def guard_muse_propose(
             out[key] = text
             continue
         # Performance axis: scene-matched face when director left face alone.
-        if key == "expression" and "expression" not in dir_keys and scene_moved:
+        # 顔は二つある（W撮り）。欄ごとに、監督がその欄を触ったかで見る。
+        if key in ("expression", "expression_b") and key not in dir_keys and scene_moved:
             if text.lower() != cur_val.lower():
                 out[key] = text
     return out
@@ -238,7 +250,7 @@ def chips_for(fields: list[str], *, locale: str = "ja") -> list[dict[str, str]]:
 
 
 #: 二人目の欄。一人しかいない撮影では**見せない**。
-PARTNER_KEYS: tuple[str, ...] = ("wearing_b", "beat_b")
+PARTNER_KEYS: tuple[str, ...] = ("wearing_b", "beat_b", "expression_b")
 
 
 def for_model(ledger: dict[str, str], *, partner: bool) -> dict[str, str]:
@@ -267,10 +279,13 @@ def cast_line(*, partner: bool, name_a: str = "", name_b: str = "") -> str:
     if not partner:
         return (
             f"CAST: solo — {a} is the only person in frame. There is no second "
-            "person: never write wearing_b or beat_b."
+            "person: never write wearing_b, beat_b or expression_b."
         )
     b = (name_b or "the partner").strip()
-    return f"CAST: two in frame — {a} and {b}. wearing_b / beat_b are {b}'s."
+    return (
+        f"CAST: two in frame — {a} and {b}. "
+        f"wearing_b / beat_b / expression_b are {b}'s, never {a}'s."
+    )
 
 
 def now_line(ledger: dict[str, str], *, locale: str = "ja") -> str:

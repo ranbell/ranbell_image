@@ -1861,7 +1861,8 @@
       "atmosphere": "Mood",
       "look": "Look",
       "wearing_b": "Partner clothes",
-      "beat_b": "Partner pose"
+      "beat_b": "Partner pose",
+      "expression_b": "Partner face"
     },
     "options": "Options",
     "rebuild": "Rebuild prompt",

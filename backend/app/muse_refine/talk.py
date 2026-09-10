@@ -302,7 +302,7 @@ def publish_actress_turn(
 
 RESTATE_FIELDS = (
     "wearing", "beat", "expression", "scene", "light", "bg", "frame",
-    "wearing_b", "beat_b", "atmosphere", "look", "lettering",
+    "wearing_b", "beat_b", "expression_b", "atmosphere", "look", "lettering",
 )
 
 # Gate: mood/look cues only when the line is about the picture, not banter.

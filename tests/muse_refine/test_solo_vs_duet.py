@@ -39,11 +39,18 @@ def test_a_duet_keeps_them():
 def test_the_cast_line_says_which_it_is():
     solo = L.cast_line(partner=False, name_a="Mio")
     assert "solo" in solo and "Mio" in solo
+    # 一人のときは二人目の欄を**書くな**と言う（`expression_b` も 2026-09-10 から）
     assert "never write wearing_b" in solo
+    for key in ("wearing_b", "beat_b", "expression_b"):
+        assert key in solo, key
 
     duet = L.cast_line(partner=True, name_a="Mio", name_b="Sumire")
     assert "Mio" in duet and "Sumire" in duet
-    assert "never" not in duet
+    # 二人のときは**禁じない** —— 誰のものかを言う。
+    assert "never write" not in duet
+    assert "Sumire's" in duet
+    for key in ("wearing_b", "beat_b", "expression_b"):
+        assert key in duet, key
 
 
 def test_every_ledger_shown_to_a_model_goes_through_for_model():

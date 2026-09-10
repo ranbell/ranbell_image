@@ -52,7 +52,7 @@ def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
     bag: list[str] = []
     for key in (
         "wearing", "beat", "expression", "scene", "light", "bg", "frame",
-        "wearing_b", "beat_b", "atmosphere", "look",
+        "wearing_b", "beat_b", "expression_b", "atmosphere", "look",
     ):
         bag.extend(_phrase_to_tags(ledger.get(key) or ""))
     seen: set[str] = set()
@@ -64,6 +64,27 @@ def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
         seen.add(low)
         out.append(t)
     return out
+
+
+#: 二人のときの立ち位置。**対にして一箇所**にしておくと、上下に替えたく
+#: なったとき（総監督「もしくは top / bottom かな」）ここ一行で替えられる。
+_SIDES: tuple[str, str] = ("on the left", "on the right")
+
+#: 監督が既に立ち位置を言っている回の目印。片方だけ既定を足すと二人とも同じ
+#: 側になるので、**一つでも見つけたら既定を一つも足さない**。
+_SIDE_NAMED_RE = re.compile(
+    r"\b(left|right|leftmost|rightmost|foreground|background|behind|front)\b"
+    r"|左|右|奥|手前|後ろ|背後|上段|下段",
+    re.I,
+)
+
+
+def _sides_named(ledger: dict[str, str]) -> bool:
+    """監督の指示に立ち位置が入っているか。入っていればそちらが勝つ。"""
+    return any(
+        _SIDE_NAMED_RE.search(str(ledger.get(k) or ""))
+        for k in ("beat", "beat_b", "frame")
+    )
 
 
 def scene_prose(
@@ -87,6 +108,7 @@ def scene_prose(
     frame = (ledger.get("frame") or "").strip()
     wearing_b = (ledger.get("wearing_b") or "").strip()
     beat_b = (ledger.get("beat_b") or "").strip()
+    expression_b = (ledger.get("expression_b") or "").strip()
     atmosphere = (ledger.get("atmosphere") or "").strip()
     look = (ledger.get("look") or "").strip()
     lead = (name_a or "She").strip() or "She"
@@ -94,7 +116,7 @@ def scene_prose(
 
     if not any((
         wearing, beat, expression, scene, light, bg, frame,
-        wearing_b, beat_b, atmosphere, look,
+        wearing_b, beat_b, expression_b, atmosphere, look,
     )):
         return ""
 
@@ -144,17 +166,27 @@ def scene_prose(
         else:
             parts.append(f"{lead} is " + ", ".join(lead_bits) + ".")
 
-    if partner or wearing_b or beat_b:
+    if partner or wearing_b or beat_b or expression_b:
         other_bits: list[str] = []
         if wearing_b:
             other_bits.append(f"wearing {wearing_b}")
         if beat_b:
             other_bits.append(beat_b)
+        if expression_b:
+            other_bits.append(f"with {expression_b} on her face")
         if other_bits:
             parts.append(f"{other} is " + ", ".join(other_bits) + ".")
+        # **どちらがどちら側かを言う（2026-09-10）。** 総監督「best practice で
+        # 右と左って指示するといいらしい。それぞれがどっちにいるかを決めて、
+        # かき分けてみよう」。監督が既に場所を言っている回は口を出さない。
+        if not _sides_named(ledger):
+            left, right = _SIDES
+            parts.append(
+                f"{lead} stands {left} of the frame; {other} {right}."
+            )
         parts.append(
-            f"Do not swap clothes or hairstyles between {lead} and {other}; "
-            "they share one place and one moment."
+            f"Do not swap clothes, hairstyles or bodies between {lead} and "
+            f"{other}; they share one place and one moment."
         )
 
     if atmosphere:
@@ -176,6 +208,7 @@ def _person_box(
     beat: str,
     expression: str = "",
     extra_beat_tags: list[str] | None = None,
+    side: str = "",
 ) -> dict[str, list[str]]:
     """One Muse's dynamic tags — clothes / pose / face only.
 
@@ -187,6 +220,10 @@ def _person_box(
         session, _phrase_to_tags(wearing), ledger={"wearing": wearing},
     )
     pose = _phrase_to_tags(beat)
+    # **立ち位置は先頭に。** `assemble_from_boxes` は箱の中身を並んだ順に
+    # 書き出し、位置＝優先度。後ろに付けると効きが落ちる。
+    if side:
+        pose.insert(0, side.replace(" ", "_"))
     for t in extra_beat_tags or []:
         tag = str(t or "").strip().replace(" ", "_")
         if tag and tag.lower() not in {p.lower() for p in pose}:
@@ -262,6 +299,13 @@ def assemble_prompt(
 
     cast = [char]
     lead_extra: list[str] = []
+    # **二人のときだけ、立ち位置を決めて書き分ける（2026-09-10）。** 総監督
+    # 「best practice で右と左って指示するといいらしい」。監督が既に場所を
+    # 言っている回は、そちらが勝つので既定を**一つも**足さない —— 片方だけ
+    # 足すと二人とも同じ側になる。**一人のときは常に空。**
+    side_a, side_b = ("", "")
+    if has_partner and not _sides_named(ledger):
+        side_a, side_b = _SIDES
     people = [
         _person_box(
             session,
@@ -269,6 +313,7 @@ def assemble_prompt(
             beat=str(ledger.get("beat") or ""),
             expression=str(ledger.get("expression") or ""),
             extra_beat_tags=lead_extra,
+            side=side_a,
         ),
     ]
     if has_partner:
@@ -276,9 +321,14 @@ def assemble_prompt(
         people.append(
             _person_box(
                 session,
+                # **相方にも顔を（2026-09-10）。** ここは長らく空文字だった
+                # ——「主演の顔を B に写さないため」という理由だったが、台帳に
+                # `expression_b` が無かったので、相方は**顔が一語も入らない
+                # まま**撮られていた。欄ができたので、彼女自身の顔を渡す。
                 wearing=str(ledger.get("wearing_b") or ""),
                 beat=str(ledger.get("beat_b") or ""),
-                expression="",  # no expression_b — do not copy lead's face onto B
+                expression=str(ledger.get("expression_b") or ""),
+                side=side_b,
             ),
         )
 

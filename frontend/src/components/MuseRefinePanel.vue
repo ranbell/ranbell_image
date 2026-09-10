@@ -38,6 +38,11 @@ const streamLive = ref(false)
 const speaking = ref(false)
 // 彼女が喋っている最中の、まだ確定していない一行（`chat_delta`）。
 const liveSay = ref('')
+// W撮りでは `A:` / `B:` が行頭に付いてくる（誰の台詞かの目印）。**確定した行は
+// 名前で分かれて出る**ので、流れている間だけの目印は画面に出さない。
+const liveText = computed(() =>
+  liveSay.value.replace(/^[ \t]*[AB][:：][ \t]*/gm, ''),
+)
 let es = null
 let pollTimer = null
 let refreshTimer = null
@@ -191,8 +196,9 @@ const ledgerRows = computed(() => {
     'wearing', 'beat', 'expression', 'scene', 'light', 'bg', 'frame',
     'lettering', 'atmosphere', 'look',
   ]
+  // 相方の欄は相方が居るときだけ。台帳側も `PARTNER_KEYS` で同じ切り方をする。
   if (partner.value?.character_id) {
-    rows.push('wearing_b', 'beat_b')
+    rows.push('wearing_b', 'beat_b', 'expression_b')
   }
   return rows.map((key) => ({
     key,
@@ -1030,7 +1036,7 @@ function isStruckRow(row) {
                 </span>
                 <div
                   class="max-w-[90%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-pink-500/30 bg-slate-900/80 px-3.5 py-2 text-[12px] leading-relaxed text-pink-50 shadow-sm"
-                >{{ liveSay }}<span class="refine-caret">▌</span></div>
+                >{{ liveText }}<span class="refine-caret">▌</span></div>
               </div>
               <p v-if="!chat.length && !waitingOnModel" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
             </div>

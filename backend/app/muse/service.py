@@ -8516,6 +8516,7 @@ async def run_generate_actress_diary_job(
     photo_desc = await _read_the_photo(
         db, ollama, session, image_id, model=model, num_ctx=num_ctx,
     )
+    photo_desc = _which_one_is_me(session, character_id, photo_desc)
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
@@ -8768,6 +8769,48 @@ _CHEMISTRY_ASKS: tuple[str, ...] = (
 )
 
 
+def _which_one_is_me(
+    session: dict[str, Any], character_id: str, photo_desc: str,
+) -> str:
+    """二人写っている絵で、**どちらが自分か**を一行で言う。（2026-09-10）
+
+    総監督「日記も混濁しています」。実機（`83d31174`）で二人の日記が食い違った:
+
+        みおの日記   「ピンクの、あさひさんとは対照的なリボン」
+        あさひの日記 「アタシは赤色のリボン…みおちゃんは金色のリボン」
+
+    どちらも絵を見て書いている（発明ではない）。同じ一つの写真の説明が二人に
+    渡るのに、**自分がどちらかを教わっていない**ので、各々が推測している。
+
+    立ち位置は絵を組むときと同じ並び（主演＝左）。見分けの語は識別タグの頭から
+    取る —— 髪色と髪型が入っているので、左右と合わせれば取り違えようがない。
+
+    一人の撮影では**何も足さない**（`photo_desc` をそのまま返す）。
+    """
+    partner = session.get("partner_character") or {}
+    if not str(partner.get("character_id") or "").strip():
+        return photo_desc
+    desc = str(photo_desc or "").strip()
+    if not desc:
+        return photo_desc
+    lead = session.get("character") or {}
+    me_is_lead = str(lead.get("character_id") or "") == str(character_id)
+    me, other = (lead, partner) if me_is_lead else (partner, lead)
+    side, other_side = ("左", "右") if me_is_lead else ("右", "左")
+
+    def _mark(who: dict[str, Any]) -> str:
+        tags = [str(t).strip() for t in (who.get("identity_tags") or []) if str(t).strip()]
+        return "・".join(tags[:2])
+
+    other_name = str(other.get("name_ja") or other.get("name") or "").strip()
+    head = (
+        f"【この写真の中のあなた】二人写っています。あなたは**{side}**の"
+        f"（{_mark(me)}）ほう。{other_side}にいるのは{other_name}（{_mark(other)}）。"
+        f"{other_name}の服や髪を、自分のものとして書かないこと。"
+    )
+    return f"{head}\n\n{desc}"
+
+
 async def _read_the_photo(
     db, ollama, session: dict[str, Any], image_id: str, *,
     model: str = "", num_ctx: int | None = None,
@@ -8786,17 +8829,41 @@ async def _read_the_photo(
     if not images:
         return prompt_desc
     inputs = _inputs(session)
+    # **二人写っているなら、二人ぶんで読む（2026-09-10）。** 総監督「日記も
+    # 混濁しています」。この読みは一人ぶんの文面（where **she** is, what
+    # **she** is wearing…）で、二人の絵に当てると混ざった一つの説明が返る。
+    # しかもその一つが**二人ぶんの日記の両方**に渡るので、実機（`83d31174`）で
+    # 二人がリボンの色を食い違って書いた。どちらも絵を見て言っているのに、
+    # **どっちが自分かを教わっていない。**
+    #
+    # 門は相方の実体。`is_duet` は `mode` しか見ず、実機の109件中85件は
+    # `mode: duet` でも相方が居ない —— 一人の撮影まで W 扱いになる。
+    partner_seen = session.get("partner_character") or {}
+    two_in_frame = bool(str(partner_seen.get("character_id") or "").strip())
+    if two_in_frame:
+        see = (
+            "You are looking at one photograph with TWO girls in it. Describe "
+            "them SEPARATELY, the one on the left first, then the one on the "
+            "right, in 3–5 English sentences each: what she is wearing, what "
+            "her body is doing, and — this above all — what her face is doing. "
+            "Say which side each is on, and keep their clothes, hair and "
+            "bodies apart — do not attribute one girl's dress or ribbon to the "
+            "other. Describe only what the picture shows. Do not guess at "
+            "intent, do not praise it, do not mention prompts or tags."
+        )
+    else:
+        see = (
+            "You are looking at one photograph. Say what is in it, plainly "
+            "and concretely, in 3–5 English sentences: where she is, what "
+            "she is wearing, what her body is doing, and — this above all "
+            "— what her face is doing. Describe only what the picture "
+            "shows. Do not guess at intent, do not praise it, do not "
+            "mention prompts or tags."
+        )
     try:
         raw, blind = await chain._call_seeing(
             ollama,
-            system=(
-                "You are looking at one photograph. Say what is in it, plainly "
-                "and concretely, in 3–5 English sentences: where she is, what "
-                "she is wearing, what her body is doing, and — this above all "
-                "— what her face is doing. Describe only what the picture "
-                "shows. Do not guess at intent, do not praise it, do not "
-                "mention prompts or tags."
-            ),
+            system=see,
             prompt="Describe this photograph.",
             model=_vision_model(inputs) or model,
             images=images,
