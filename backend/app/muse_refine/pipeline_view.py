@@ -27,10 +27,24 @@ _STAGE_IDS = (
 
 
 def _tokens(text: str) -> set[str]:
-    return {
-        t.replace("-", "_")
-        for t in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", str(text or "").lower())
-    }
+    """照合用の語。**下線でも空白でも同じ語になるように割る。**（2026-09-10）
+
+    総監督「ずっと missing と出ているけど理由は？」。値は絵に入っていた ——
+    突き合わせ方が揃っていなかっただけ:
+
+        台帳          casual_clothes            ← writer は danbooru 風に書く
+        craft.prompt  casual clothes            ← `anima.format_for_anima` が
+                                                   最後に下線を空白へ戻す
+        重なり        （無し）→ 「missing」
+
+    繋がったままの語（`casual_clothes`）と、割った語（`casual` / `clothes`）の
+    **両方**を返す。完全一致も、書き方の違いも、どちらも拾える。
+    """
+    out: set[str] = set()
+    for t in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", str(text or "").lower()):
+        out.add(t.replace("-", "_"))
+        out.update(w for w in re.split(r"[_-]+", t) if len(w) >= 3)
+    return out
 
 
 def _last_note(session: dict[str, Any], *kinds: str) -> dict[str, Any] | None:
@@ -57,7 +71,12 @@ def _divergences(session: dict[str, Any]) -> list[dict[str, str]]:
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     craft = session.get("craft") or {}
     board = session.get("board") or {}
-    prompt = str(craft.get("prompt") or "")
+    # **会話中のプロンプトは一手ぶん古い（2026-09-10）。** 会話のターンでは
+    # 散文とタグの組み上げを撮る時まで待つ（`assemble.touch_craft`）ので、
+    # 監督がいま動かした欄は、まだ `craft.prompt` に載っていなくて当たり前。
+    # ここで「missing」と言うと、毎ターン嘘の警告が並ぶ。撮る直前に組み直され、
+    # `stale` が下りてから比べる。
+    prompt = "" if craft.get("stale") else str(craft.get("prompt") or "")
     board_prompt = str(board.get("prompt") or "")
     prompt_tok = _tokens(prompt)
     board_tok = _tokens(board_prompt) if board_prompt else set()
