@@ -353,8 +353,10 @@ async def verify_and_repair(
         f"{VERIFY_SYSTEM}\n"
         f"Language for COMMENT: {lang}. Speaker name: {name or 'Muse'}.\n"
         f"{hint}\n"
+        # **声だけでよい（2026-09-10）。** COMMENT を彼女の口で書かせるのが
+        # 目的なので、`ENTERTAINMENT_CRAFT`（どう愛らしく振る舞うか・1,417字）
+        # は判定に要らない。毎ターン約1.5秒を読んでいた。
         f"{voice}\n\n"
-        f"{persona.ENTERTAINMENT_CRAFT}\n\n"
         f"{ledger_mod.cast_line(partner=partner, name_a=name, name_b=name_b)}\n\n"
         f"RECENT DIRECTOR LINES:\n{recent.strip() or '(none)'}\n\n"
         f"DIRECTOR (latest):\n{user_line.strip()}\n\n"

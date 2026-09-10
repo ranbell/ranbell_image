@@ -191,6 +191,21 @@ def vitality_extras(session: dict[str, Any], ledger: dict[str, str]) -> str:
     return "\n\n".join(bits)
 
 
+#: classic の女優条文が末尾に持つ出力書式の始まり。ここから後ろを落とす。
+_CLASSIC_OUTPUT_MARK = "OUTPUT FORMAT — labelled blocks, nothing else:"
+
+
+def _without_classic_output(base: str) -> str:
+    """classic 側の出力書式を落とす。**声と人格と契約はそのまま残す。**
+
+    見つからなければ何もしない —— classic 側の文言が変わっても、黙って
+    人格まで削らないため。
+    """
+    text = str(base or "")
+    i = text.find(_CLASSIC_OUTPUT_MARK)
+    return text[:i].rstrip() if i > 0 else text
+
+
 def actress_system(
     session: dict[str, Any],
     *,
@@ -217,6 +232,18 @@ def actress_system(
     except Exception:
         logger.exception("[muse_refine] actress prompt failed")
         base = crew._voice_block(char, locale=locale_key)
+
+    # **書式は一つでいい（2026-09-10）。** classic の女優条文は自前の出力書式
+    # （SAY / ASIDE / CARD / PITCH / MY_FEEL）を末尾に持っていて、その上に
+    # `REFINE_OUTPUT` を重ねていた。実測で `OUTPUT FORMAT` が2回、`MY_FEEL`
+    # が4回、`PITCH:` が3回入っていた。
+    #
+    # 入力は 300 tok/s しか出ない（LLM が VRAM に 7.4GB しか載らない）ので、
+    # 3,540字＝約1,180tok＝**毎ターン約4秒**を二度読みに払っていた。
+    #
+    # 読む側にも良くない —— 二つの書式が並ぶと、どちらに従うか決めさせる
+    # ことになる。Refine が解釈するのは `REFINE_OUTPUT` のほうだけ。
+    base = _without_classic_output(base)
 
     mem = memory_prompt_blocks(session)
     vit = vitality_extras(session, ledger)
