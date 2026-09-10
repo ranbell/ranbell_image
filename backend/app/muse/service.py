@@ -8796,7 +8796,10 @@ def _which_one_is_me(
     lead = session.get("character") or {}
     me_is_lead = str(lead.get("character_id") or "") == str(character_id)
     me, other = (lead, partner) if me_is_lead else (partner, lead)
-    side, other_side = ("左", "右") if me_is_lead else ("右", "左")
+    # 立ち位置は絵と同じ正本から取る（`identity.LEAD_SIDE`）。ここで別に
+    # 持つと、片方を変えたときにご本人の記憶と絵が食い違う。
+    side = identity.side_of(lead=me_is_lead)[1]
+    other_side = identity.side_of(lead=not me_is_lead)[1]
 
     def _mark(who: dict[str, Any]) -> str:
         tags = [str(t).strip() for t in (who.get("identity_tags") or []) if str(t).strip()]

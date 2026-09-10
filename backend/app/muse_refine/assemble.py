@@ -66,9 +66,9 @@ def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
     return out
 
 
-#: 二人のときの立ち位置。**対にして一箇所**にしておくと、上下に替えたく
-#: なったとき（総監督「もしくは top / bottom かな」）ここ一行で替えられる。
-_SIDES: tuple[str, str] = ("on the left", "on the right")
+# 二人のときの立ち位置は `identity.LEAD_SIDE` が正本。日記に「あなたは○のほう」
+# と渡す側（`muse.service._which_one_is_me`）も同じ値を読む —— 別々に持つと、
+# 絵とご本人の記憶が食い違う。
 
 #: 監督が既に立ち位置を言っている回の目印。片方だけ既定を足すと二人とも同じ
 #: 側になるので、**一つでも見つけたら既定を一つも足さない**。
@@ -180,9 +180,9 @@ def scene_prose(
         # 右と左って指示するといいらしい。それぞれがどっちにいるかを決めて、
         # かき分けてみよう」。監督が既に場所を言っている回は口を出さない。
         if not _sides_named(ledger):
-            left, right = _SIDES
             parts.append(
-                f"{lead} stands {left} of the frame; {other} {right}."
+                f"{lead} stands {identity.side_of(lead=True)[0]} of the frame; "
+                f"{other} {identity.side_of(lead=False)[0]}."
             )
         parts.append(
             f"Do not swap clothes, hairstyles or bodies between {lead} and "
@@ -305,7 +305,8 @@ def assemble_prompt(
     # 足すと二人とも同じ側になる。**一人のときは常に空。**
     side_a, side_b = ("", "")
     if has_partner and not _sides_named(ledger):
-        side_a, side_b = _SIDES
+        side_a = identity.side_of(lead=True)[0]
+        side_b = identity.side_of(lead=False)[0]
     people = [
         _person_box(
             session,

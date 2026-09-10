@@ -21,7 +21,11 @@ import inspect
 
 import pytest
 
-from app.muse import service as muse_service
+from app.muse import identity, service as muse_service
+
+#: 主演／相方がどちら側か。**直書きしない**（`identity.LEAD_SIDE` を替えたら追従）。
+LEAD_JA = identity.side_of(lead=True)[1]
+PART_JA = identity.side_of(lead=False)[1]
 
 
 def _code(fn) -> str:
@@ -52,22 +56,41 @@ def test_one_person_gets_nothing_added():
     assert muse_service._which_one_is_me(s, "a", DESC) == DESC
 
 
-def test_the_lead_is_told_she_is_on_the_left():
+def test_the_lead_is_told_which_side_she_is_on():
     s = {"character": dict(A), "partner_character": dict(B)}
     got = muse_service._which_one_is_me(s, "a", DESC)
     head = got.splitlines()[0]
-    assert "左" in head
+    # 「あなたは**○**の」の ○ が主演の側であること（相手の側と取り違えない）
+    assert f"あなたは**{LEAD_JA}**の" in head
+    assert f"{PART_JA}にいるのは" in head
     assert "silver_hair" in head
     assert "倉田 あさひ" in head
     assert got.endswith(DESC)
 
 
-def test_the_partner_is_told_she_is_on_the_right():
+def test_the_partner_is_told_the_other_side():
     s = {"character": dict(A), "partner_character": dict(B)}
     got = muse_service._which_one_is_me(s, "b", DESC).splitlines()[0]
-    assert "右" in got
+    assert f"あなたは**{PART_JA}**の" in got
+    assert f"{LEAD_JA}にいるのは" in got
     assert "light_green_hair" in got
     assert "各務 みお" in got
+
+
+def test_the_diary_and_the_picture_agree():
+    """**同じ正本を読む。** 別々に持つと、絵とご本人の記憶が食い違う。"""
+    from app.muse_refine import assemble, ledger as L
+
+    led = {**L.blank(), "wearing": "maid outfit", "beat": "holding tray",
+           "scene": "cafe", "wearing_b": "maid outfit", "beat_b": "holding menu"}
+    sess = {"session_id": "s", "character": dict(A), "partner_character": dict(B),
+            "inputs": {"locale": "ja"}, "refine_ledger": led, "banned": []}
+    prose = assemble.scene_prose(led, partner=True, name_a="Mio", name_b="Asahi")
+    en_lead, en_part = identity.side_of(lead=True)[0], identity.side_of(lead=False)[0]
+    # 絵で主演が置かれた側と、日記で本人に伝える側が一致すること
+    assert f"Mio stands {en_lead} of the frame; Asahi {en_part}." in prose
+    assert f"あなたは**{LEAD_JA}**の" in muse_service._which_one_is_me(sess, "a", DESC)
+    assert f"あなたは**{PART_JA}**の" in muse_service._which_one_is_me(sess, "b", DESC)
 
 
 def test_each_is_told_not_to_borrow_the_other():

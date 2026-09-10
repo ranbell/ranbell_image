@@ -918,6 +918,31 @@ def latin_names(text: str, people: Iterable[dict] | None) -> str:
     return body
 
 
+#: 二人写すときの立ち位置。**主演がどちら側か**をここ一つで決める。
+#:
+#: 総監督（2026-09-10）「主演を右にすることはできる？」。
+#:
+#: **絵と日記が同じ値を読む。** 絵の側（`muse_refine.assemble`）と、日記に
+#: 「この写真であなたは○のほう」と渡す側（`muse.service._which_one_is_me`）が
+#: 別々に持っていると、片方を変えたときに**ご本人の記憶と絵が食い違う** ——
+#: 二人の日記がリボンの色を食い違えたのと同じ壊れ方をする。
+#:
+#: 左右を入れ替えるならここ一行。上下にするなら `SIDE_WORDS` を差し替える。
+LEAD_SIDE: str = "right"
+
+#: 立ち位置の言い方（絵に渡す英語 / 日記に渡す日本語）。
+SIDE_WORDS: dict[str, tuple[str, str]] = {
+    "left": ("on the left", "左"),
+    "right": ("on the right", "右"),
+}
+
+
+def side_of(*, lead: bool) -> tuple[str, str]:
+    """(絵に書く英語, 日記に書く日本語)。`lead=False` は相方の側。"""
+    key = LEAD_SIDE if lead else ("left" if LEAD_SIDE == "right" else "right")
+    return SIDE_WORDS[key]
+
+
 def assemble_from_boxes(
     *, cast: Iterable[dict] | None, people: list[dict], frame_wide: list[str],
     style: str = "", framing: str | None = "auto", scene: str = "",
