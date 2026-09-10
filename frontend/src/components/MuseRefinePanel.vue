@@ -496,10 +496,9 @@ function openStream(id) {
       scrollChat()
       return
     }
+    // 台帳の書き換えは記録用の合図。画面に出す先が無くなったので握って終わる
+    // —— ここで GET を呼ぶと、後から来る chat / session_updated と二重になる。
     if (data.type === 'notebook_rewrite' || data.type === 'ledger_rewrite') {
-      if (!session.value) return
-      const log = mergeRewriteLog(session.value.rewrite_log || [], [data])
-      session.value = { ...session.value, rewrite_log: log }
       return
     }
     if (data.type === 'chat' || data.type === 'chat_message') {
@@ -557,7 +556,6 @@ async function refresh(opts = {}) {
   if (!session.value?.session_id) return
   if (busy.value && opts.allowBusy !== true) return
   try {
-    const keep = session.value.rewrite_log || []
     const prevUpdated = Number(session.value?.updated_at || 0)
     const minUpdatedAt = Number(opts.minUpdatedAt || 0)
     const next = await api(`/api/muse-refine/sessions/${session.value.session_id}`)
@@ -565,10 +563,15 @@ async function refresh(opts = {}) {
     const nextUpdated = Number(next?.updated_at || 0)
     if (minUpdatedAt && nextUpdated && nextUpdated < minUpdatedAt) return
     if (nextUpdated && prevUpdated && nextUpdated < prevUpdated && !opts.allowBusy) return
-    next.rewrite_log = mergeRewriteLog(keep, next.rewrite_log)
     session.value = next
     sampleJob()
-  } catch { /* ignore */ }
+  } catch (err) {
+    // **黙って落ちない（2026-09-10）。** ここが握り潰していたせいで、
+    // `mergeRewriteLog` の定義を消して呼び出しを残した事故が実機まで届いた。
+    // セッションが二度と更新されず、`board.pending` が下りずに入力が固まった。
+    // 画面は今まで通り邪魔しない（GET の失敗はよくある）が、痕跡は残す。
+    console.error('[muse-refine] refresh failed', err)
+  }
 }
 function sampleJob() {
   const map = props.getJobsMap?.()

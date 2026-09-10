@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3100",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "node scripts/check_undefined.mjs src/**/*.vue src/*.vue"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.3.2",
