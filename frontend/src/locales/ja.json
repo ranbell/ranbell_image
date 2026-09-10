@@ -1909,6 +1909,16 @@
     "turnTalk": "会話だけの回",
     "pitchTitle": "Muse からの提案",
     "pitchHint": "どちらか押すと、そのまま伝わります",
-    "craftStale": "試し撮りのときに組み直します"
+    "craftStale": "試し撮りのときに組み直します",
+    "debugToggle": "デバッグ",
+    "debugTitle": "観測（判定には使わない）",
+    "debugHint": "処理パイプライン・ledger の書き換え・ターン追跡・段の所要時間・イベントログ。API: GET .../pipeline と .../debug",
+    "debugEmpty": "まだ書き換えはありません",
+    "pipelineTitle": "処理パイプライン",
+    "pipelineHint": "writer → cue → ledger → muse_propose → verify → assemble → actress → board。ずれは下に出ます。",
+    "rewriteLog": "ledger の書き換え",
+    "turnTrace": "ターン追跡",
+    "stageMs": "段の時間",
+    "refineLog": "イベントログ"
   }
 }

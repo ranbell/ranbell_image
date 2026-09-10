@@ -21,6 +21,12 @@ const catalog = ref(null)
 const characterList = ref([])
 const busy = ref(false)
 const showSettings = ref(false)
+const DEBUG_KEY = 'museRefine.debug'
+const museDebug = ref(typeof localStorage !== 'undefined' && localStorage.getItem(DEBUG_KEY) === '1')
+function toggleDebug() {
+  museDebug.value = !museDebug.value
+  try { localStorage.setItem(DEBUG_KEY, museDebug.value ? '1' : '0') } catch { /* private window */ }
+}
 const chatInput = ref('')
 const chatEl = ref(null)
 const preview = ref('')
@@ -44,9 +50,47 @@ const inputs = computed(() => session.value?.inputs || {})
 const ledger = computed(() => session.value?.refine_ledger || {})
 const craft = computed(() => session.value?.craft || {})
 const chat = computed(() => session.value?.chat || [])
-// 「観測」の枠は外した（2026-09-10）。総監督「あまり有効に働かないので削除。
-// キーワードベースでほとんど使われていない」。記録そのものは残っているので、
-// 見るときは API から —— GET /api/muse-refine/sessions/{id}/debug と .../pipeline。
+// 右のデバッグ枠が読むもの。**判定には使わない。**
+//
+// 削除したのは「可視結果」だけ（総監督「観測という機能はあまり有効に働かない
+// ので削除。キーワードベースでほとんど使われていない」）—— 風・後ろ姿を正規
+// 表現で拾って散文に足していた `visible_consequence_cues` は裏ごと落とした。
+// 枠そのものと、書き換え・段の時間・イベントログは残す。会話欄から「画の更新」
+// を落としたぶん、**行き先はここしかない**。
+const refineLog = computed(() => [...(session.value?.refine_log || [])].slice().reverse())
+const stageMs = computed(() => [...(session.value?.stage_ms || [])].slice(-12).reverse())
+const turnTrace = computed(() => [...(session.value?.turn_trace || [])].slice().reverse())
+const rewriteLog = computed(() => [...(session.value?.rewrite_log || [])].slice().reverse())
+const pipeline = computed(() => session.value?.pipeline || null)
+const pipelineStages = computed(() => pipeline.value?.stages || [])
+const pipelineDivergences = computed(() => pipeline.value?.divergences || [])
+function pipelineStatusClass(status) {
+  if (status === 'ok' || status === 'frozen') return 'border-emerald-500/40 text-emerald-200/90'
+  if (status === 'pending') return 'border-amber-500/40 text-amber-200/90'
+  if (status === 'missed' || status === 'stale' || status === 'refused' || status === 'diverged') {
+    return 'border-rose-500/40 text-rose-200/90'
+  }
+  return 'border-amber-500/20 text-amber-100/60'
+}
+function rewriteWhen(ts) {
+  if (!ts) return ''
+  try { return new Date(Number(ts) * 1000).toLocaleTimeString() } catch { return '' }
+}
+function mergeRewriteLog(keep, next) {
+  const byAt = new Map()
+  for (const row of [...(keep || []), ...(next || [])]) {
+    if (!row || typeof row !== 'object') continue
+    const cleaned = {
+      at: row.at,
+      source: row.source || '',
+      intent: row.intent || '',
+      changed: row.changed || {},
+    }
+    const key = `${cleaned.at}|${cleaned.source}|${cleaned.intent}|${JSON.stringify(cleaned.changed)}`
+    byAt.set(key, cleaned)
+  }
+  return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
+}
 const characters = computed(() => characterList.value)
 const workflows = computed(() => {
   const list = catalog.value?.comfyui?.workflows || catalog.value?.workflows || []
@@ -496,9 +540,10 @@ function openStream(id) {
       scrollChat()
       return
     }
-    // 台帳の書き換えは記録用の合図。画面に出す先が無くなったので握って終わる
-    // —— ここで GET を呼ぶと、後から来る chat / session_updated と二重になる。
     if (data.type === 'notebook_rewrite' || data.type === 'ledger_rewrite') {
+      if (!session.value) return
+      const log = mergeRewriteLog(session.value.rewrite_log || [], [data])
+      session.value = { ...session.value, rewrite_log: log }
       return
     }
     if (data.type === 'chat' || data.type === 'chat_message') {
@@ -556,6 +601,7 @@ async function refresh(opts = {}) {
   if (!session.value?.session_id) return
   if (busy.value && opts.allowBusy !== true) return
   try {
+    const keep = session.value.rewrite_log || []
     const prevUpdated = Number(session.value?.updated_at || 0)
     const minUpdatedAt = Number(opts.minUpdatedAt || 0)
     const next = await api(`/api/muse-refine/sessions/${session.value.session_id}`)
@@ -563,6 +609,7 @@ async function refresh(opts = {}) {
     const nextUpdated = Number(next?.updated_at || 0)
     if (minUpdatedAt && nextUpdated && nextUpdated < minUpdatedAt) return
     if (nextUpdated && prevUpdated && nextUpdated < prevUpdated && !opts.allowBusy) return
+    next.rewrite_log = mergeRewriteLog(keep, next.rewrite_log)
     session.value = next
     sampleJob()
   } catch (err) {
@@ -704,6 +751,15 @@ function isStruckRow(row) {
               :class="streamLive ? 'text-pink-400/70' : 'text-gray-500'"
               :title="t('museRefine.streamHint')"
             >SSE {{ streamLive ? '●' : '○' }}</span>
+            <button
+              type="button"
+              class="rounded-full border px-2 py-0.5 text-[10px]"
+              :class="museDebug
+                ? 'border-amber-400/70 bg-amber-950/40 text-amber-200'
+                : 'border-white/10 text-gray-500 hover:text-gray-300'"
+              :title="t('museRefine.debugToggle')"
+              @click="toggleDebug"
+            >{{ t('museRefine.debugToggle') }}</button>
             <button
               type="button"
               class="rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs hover:bg-gray-700 disabled:opacity-40"
@@ -1228,6 +1284,122 @@ function isStruckRow(row) {
               </label>
             </div>
 
+            <details v-if="museDebug" class="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 text-[10px] text-amber-100/90" open>
+              <summary class="cursor-pointer text-amber-200">{{ t('museRefine.debugTitle') }}</summary>
+              <p class="mt-1 mb-2 text-amber-100/50">{{ t('museRefine.debugHint') }}</p>
+
+              <div v-if="pipelineStages.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.pipelineTitle') }}</div>
+                <p class="mb-1.5 text-amber-100/50">{{ t('museRefine.pipelineHint') }}</p>
+                <ol class="flex flex-wrap gap-1">
+                  <li
+                    v-for="stage in pipelineStages"
+                    :key="stage.id"
+                    class="min-w-[4.5rem] rounded border px-1.5 py-1"
+                    :class="pipelineStatusClass(stage.status)"
+                    :title="JSON.stringify(stage)"
+                  >
+                    <div class="font-semibold">{{ stage.id }}</div>
+                    <div class="text-[9px] opacity-80">{{ stage.status }}</div>
+                  </li>
+                </ol>
+                <ul v-if="pipelineDivergences.length" class="mt-1.5 space-y-0.5">
+                  <li
+                    v-for="(d, i) in pipelineDivergences"
+                    :key="`${d.field}-${i}`"
+                    class="text-rose-300/90"
+                  >
+                    ⌁ {{ d.field }} · {{ d.detail }}
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="rewriteLog.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.rewriteLog') }}</div>
+                <ul class="space-y-1.5">
+                  <li
+                    v-for="(entry, i) in rewriteLog"
+                    :key="`${entry.at}-${i}`"
+                    class="rounded border border-amber-800/40 px-2 py-1.5"
+                  >
+                    <div class="font-semibold text-amber-200/90">
+                      {{ entry.source }}
+                      <span class="font-normal text-amber-100/50">{{ rewriteWhen(entry.at) }}</span>
+                      <span v-if="entry.intent" class="ml-1 font-normal">· {{ entry.intent }}</span>
+                    </div>
+                    <div
+                      v-for="(pair, field) in (entry.changed || {})"
+                      :key="field"
+                      class="mt-0.5 whitespace-pre-wrap text-amber-100/70"
+                    >
+                      <span class="text-amber-300/80">{{ field }}</span>
+                      {{ ' ' }}{{ pair.before || '∅' }} → {{ pair.after || '∅' }}
+                      <div v-if="pair.why" class="pl-3 italic text-amber-100/50">↳ {{ pair.why }}</div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+              <p v-else class="mb-3 text-amber-100/50">{{ t('museRefine.debugEmpty') }}</p>
+
+              <div v-if="turnTrace.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.turnTrace') }}</div>
+                <ul class="space-y-1.5">
+                  <li
+                    v-for="(row, i) in turnTrace"
+                    :key="`${row.at}-${i}`"
+                    class="rounded border border-amber-800/40 px-2 py-1.5"
+                  >
+                    <div class="text-amber-100">{{ row.line || '—' }}</div>
+                    <div class="text-amber-100/50">patch: {{ JSON.stringify(row.patch || {}) }}</div>
+                    <div class="text-amber-100/50">propose: {{ JSON.stringify(row.propose || {}) }}</div>
+                    <div
+                      v-for="(delta, field) in (row.moved || {})"
+                      :key="field"
+                      class="text-emerald-200/80"
+                    >{{ field }}: {{ delta }}</div>
+                    <div v-if="(row.quality_tags || []).length" class="text-sky-300/80">
+                      quality: {{ (row.quality_tags || []).join(', ') }}
+                    </div>
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="stageMs.length" class="mb-3">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.stageMs') }}</div>
+                <ul class="space-y-0.5">
+                  <li v-for="(s, i) in stageMs" :key="`${s.at}-${i}`" class="text-amber-100/70">
+                    <span class="text-amber-300/80">{{ ((s.ms || 0) / 1000).toFixed(1) }}s</span>
+                    {{ ' ' }}{{ s.stage }}
+                    <span class="text-amber-100/40">{{ rewriteWhen(s.at) }}</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="refineLog.length">
+                <div class="mb-1 font-semibold text-amber-200/90">{{ t('museRefine.refineLog') }}</div>
+                <ul class="max-h-48 space-y-1 overflow-y-auto">
+                  <li
+                    v-for="(row, i) in refineLog"
+                    :key="`${row.at}-${i}`"
+                    class="rounded border border-amber-900/30 px-2 py-1 text-amber-100/70"
+                  >
+                    <span class="text-amber-300/90">{{ row.kind }}</span>
+                    <span class="text-amber-100/40"> {{ rewriteWhen(row.at) }}</span>
+                    — {{ row.detail }}
+                    <div
+                      v-if="row.kind === 'actress_expression'"
+                      class="pl-2 text-fuchsia-200/85"
+                    >
+                      face:
+                      <span v-if="row.accepted" class="text-emerald-200/90">✓ {{ row.accepted }}</span>
+                      <span v-else-if="row.dropped" class="text-rose-200/80">✗ {{ row.dropped }}</span>
+                      <span v-if="row.director_named_face" class="text-amber-100/50"> · director face</span>
+                      <span v-else-if="row.scene_moved" class="text-amber-100/50"> · scene moved</span>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </details>
           </section>
         </div>
       </div>

@@ -1909,6 +1909,16 @@
     "turnTalk": "Talk only",
     "pitchTitle": "Muse suggests",
     "pitchHint": "Tap one and it goes straight through",
-    "craftStale": "Rebuilt when you take the test shot"
+    "craftStale": "Rebuilt when you take the test shot",
+    "debugToggle": "Debug",
+    "debugTitle": "Observation (never used for decisions)",
+    "debugHint": "Pipeline, ledger rewrites, turn trace, stage timings, event log. API: GET .../pipeline and .../debug",
+    "debugEmpty": "No rewrites yet",
+    "pipelineTitle": "Pipeline",
+    "pipelineHint": "writer → cue → ledger → muse_propose → verify → assemble → actress → board. Divergences show below.",
+    "rewriteLog": "Ledger rewrites",
+    "turnTrace": "Turn trace",
+    "stageMs": "Stage timings",
+    "refineLog": "Event log"
   }
 }
