@@ -905,6 +905,26 @@ async def chat(
 
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     now = str((session.get("craft") or {}).get("now") or "")
+
+    # **絵が動いていない回は、再判定に訊くことがない（2026-09-10）。**
+    #
+    # verify の仕事は「台帳が監督の意図と合っているか」。台帳が一つも動かず、
+    # 監督の一行も絵の話に見えないターン（「今日はありがとう」）では、比べる
+    # 相手がいない。それでも毎回走らせて 2,797字を読ませ、彼女の声で一言
+    # 書かせていた —— 入力だけで約4秒。
+    #
+    # **取りこぼしの穴は開けない。** `missed`（絵の指示に見えるのに writer が
+    # 何も書かなかった回）は、まさに verify に拾ってほしい回なので走らせる。
+    moved_now = ledger_mod.changed_fields(before, led)
+    if not moved_now and not missed:
+        debug_mod.note(
+            session, "verify_skipped",
+            detail="台帳が動かず、絵の指示にも見えないので再判定は走らせない",
+        )
+        session["status"] = "chat"
+        await session_db.save(db, session)
+        return session
+
     t0 = time.monotonic()
     ok, comment, repair = await writer.verify_and_repair(
         ollama,
