@@ -568,6 +568,62 @@ def _mark_turn_shot(
         session["chat"] = chat
 
 
+#: 癖メモが読むのは末尾8件（`muse.service._director_highlights`）。**溜めない。**
+_NOTES_MAX = 24
+
+
+def _keep_note(session: dict[str, Any], text: str) -> None:
+    """絵を動かした監督の一行を控える。（2026-09-10）
+
+    総監督「癖メモかけるようにしよう」。
+
+    スタジオ手帖の癖メモは classic の `finish_session` が出すが、二つの門が
+    どちらも `session["notes"]` を読む —— `lounge.should_write_habit` と、
+    書く側の `muse.service._director_highlights`。**Refine は常設の指示を
+    `standing` に入れていて `notes` を一度も埋めていなかった**ので、一度も
+    出ていなかった。
+
+    入れるのは**絵を動かした一行だけ**。「かわいいよ」のような会話だけの回は
+    癖の材料にならないし、条文（`crew.showrunner_habit_prompt`）が求めている
+    のも「総監督の指示メモ」。同じ行が続けて来たら積み直さない（classic の
+    `_add_note` と同じ）。
+    """
+    line = " ".join(str(text or "").split()).strip()
+    if not line:
+        return
+    notes = list(session.get("notes") or [])
+    if notes and notes[-1] == line:
+        return
+    notes.append(line)
+    session["notes"] = notes[-_NOTES_MAX:]
+
+
+def _note_blind(session: dict[str, Any], *, locale: str) -> None:
+    """絵が模型に届かなかったことを、口に出して言う。（2026-09-10）
+
+    絵を読めないモデルは**断らずに空を返す**。黙って絵抜きに落ちると、
+    総監督からは「今日は口数が少ないな」にしか見えない。一度だけ言う。
+
+    classic の `muse.service._note_blind` と同じ文言・同じ作法。
+    """
+    if session.get("_blind_said"):
+        return
+    session["_blind_said"] = True
+    _append_chat(
+        session,
+        role="system",
+        name="Studio",
+        text=(
+            "このモデルは絵を読めないようなので、試し撮りは渡さずテキストだけで進めます。"
+            "vision_model に画像を読めるモデルを指定すると、彼女が実際の絵を見て話せます。"
+            if locale.startswith("ja") else
+            "This model could not read the test shot — continuing on text alone. "
+            "Set vision_model to an image-capable model so she can see it."
+        ),
+    )
+    debug_mod.note(session, "actress_blind", detail="絵が読めないので絵抜きで撮り直した")
+
+
 def _voice_fallback(session: dict[str, Any], *, kind: str, locale: str) -> str:
     """Last-resort lines still use her first person / address when possible."""
     char = session.get("character") or {}
@@ -740,6 +796,7 @@ async def chat(
 
     missed = False
     if ledger_mod.touched_picture(patch):
+        _keep_note(session, text)
         # wearing_drop → soft ban so assemble won't resurrect it.
         drop = str(patch.get("wearing_drop") or "").strip()
         if drop:
@@ -813,6 +870,22 @@ async def chat(
     except Exception:
         logger.debug("[muse_refine] token publisher unavailable", exc_info=True)
         on_token = None
+
+    # **試し撮りのあとは、彼女に絵を見せる（2026-09-10）。** 総監督
+    # 「試し撮りしたあとは Muse が画像見るようにしよう」。
+    #
+    # 台帳は「こう撮ってほしい」で、絵は「こう撮れた」。台帳しか見えないと、
+    # 撮れた絵そのものについて話せない —— classic は試し撮り以降、毎ターン板を
+    # 渡している（`board_images` → `run_duet_talk`）。同じものを使う（縮小も
+    # 読み込みもあちらが見ていて、板が無い・生成中・読めないときは空が返る）。
+    board_shots: list[bytes] = []
+    try:
+        from ..muse import service as muse_service
+        board_shots = await muse_service.board_images(db, session)
+    except Exception:
+        logger.debug("[muse_refine] board image unavailable", exc_info=True)
+    # 絵を渡す回だけ、絵を読めるモデルに換える（空欄なら model と同じ）。
+    say_model = (str(inputs.get("vision_model") or "") or model) if board_shots else model
     events.publish(session["session_id"], {
         "type": "muse_speaking",
         "muse_id": lead_cid,
@@ -821,7 +894,7 @@ async def chat(
     t0 = time.monotonic()
     actress = await writer.actress_turn(
         ollama,
-        model=model,
+        model=say_model,
         locale=locale,
         name=name,
         now=now,
@@ -837,8 +910,17 @@ async def chat(
         # 画面に出さない。Refine の欄名は classic の `_SAY_SHUT_RE` に
         # 全部入っている（SAY / ASIDE / CARD / PITCH / MY_FEEL）。
         on_token=on_token,
+        images=board_shots or None,
     )
     debug_mod.stage(session, "actress", t0)
+    if board_shots:
+        if actress.get("blind"):
+            _note_blind(session, locale=locale)
+        else:
+            debug_mod.note(
+                session, "actress_saw_board",
+                detail=f"試し撮り {len(board_shots)}枚を見せた（{say_model}）",
+            )
     say = actress.get("say") or ""
     aside = actress.get("aside") or ""
     propose = actress.get("propose") or {}
@@ -1323,6 +1405,25 @@ async def finish_session(db, request, session: dict[str, Any]) -> dict[str, Any]
     _append_chat(
         session, role="system", name="Studio", text=coda, meta={"kind": "finish"},
     )
+    # **何を楽屋に投げたか、後から分かるようにする（2026-09-10）。** 総監督
+    # 「これなかなか各タイミングが分かりにくいのが難点」。日記・報告・お出かけ・
+    # 提案・癖メモは `muse.service.finish_session` が spooler に積むので、Refine
+    # からは見えないまま終わっていた。少なくとも**材料が揃っていたか**は残す。
+    try:
+        notes = [str(n).strip() for n in (session.get("notes") or []) if str(n).strip()]
+        debug_mod.note(
+            session, "wrap_handover",
+            detail=(
+                f"監督の指示メモ {len(notes)}件"
+                + ("（癖メモの目が出れば書かれる・18%）" if notes
+                   else "（**0件なので癖メモは出ない**）")
+            ),
+            notes=notes[-8:],
+            habit_possible=bool(notes),
+        )
+    except Exception:
+        logger.debug("[muse_refine] wrap handover note failed", exc_info=True)
+
     # Prefer Muse diary pipeline when available.
     try:
         from ..muse import service as muse_service

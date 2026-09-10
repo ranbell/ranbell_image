@@ -1919,6 +1919,10 @@
     "rewriteLog": "Ledger rewrites",
     "turnTrace": "Turn trace",
     "stageMs": "Stage timings",
-    "refineLog": "Event log"
+    "refineLog": "Event log",
+    "loungeShared": "A wrap post landed in the lounge 💬",
+    "loungeReacted": "Friends reacted in the lounge 💕",
+    "loungePitch": "An idea landed in the lounge 💡",
+    "loungeHabit": "A habit note was added to the handpost 📓"
   }
 }

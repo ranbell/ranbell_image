@@ -554,6 +554,21 @@ function openStream(id) {
       scheduleRefresh(true)
       return
     }
+    // **楽屋に何が届いたか、その場で言う（2026-09-10）。** 総監督「これなかなか
+    // 各タイミングが分かりにくいのが難点」。撮影を終えると日記・報告・提案・
+    // 癖メモが裏で走るが、Refine はこの合図を拾っていなかったので、
+    // 画面上は何も起きていないように見えていた。**種類ごとに言い分ける。**
+    // （お出かけだけは合図を出さないので、ここには出ない）
+    if (data.type === 'lounge_status') {
+      const msg = {
+        shared: t('museRefine.loungeShared'),
+        reacted: t('museRefine.loungeReacted'),
+        pitch: t('museRefine.loungePitch'),
+        habit: t('museRefine.loungeHabit'),
+      }[String(data.status || '')]
+      if (msg) emit('toast', { msg, type: 'info' })
+      return
+    }
     if (data.type === 'diary_status') {
       scheduleRefresh()
       if (data.status === 'ok') {

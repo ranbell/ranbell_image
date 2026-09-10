@@ -258,6 +258,7 @@ async def actress_turn(
     partner: bool = False,
     name_b: str = "",
     on_token=None,
+    images: list[bytes] | None = None,
 ) -> dict[str, Any]:
     lang = "Japanese" if locale.startswith("ja") else "English"
     sess = session or {"character": character or {}, "session_id": ""}
@@ -291,22 +292,21 @@ async def actress_turn(
         # はプロンプトを読む時間。総時間は変わらないが、無言で終わりを待つのと
         # 途中から文字が出るのとでは待たされ方が違う。classic は既にこうしている。
         opts = {"num_ctx": num_ctx} if num_ctx else None
-        if on_token is None:
-            raw = await ollama.generate_text(
-                prompt, model=model or None, think=False, options=opts,
+        blind = False
+        raw = await _say(ollama, prompt, model=model, options=opts,
+                         on_token=on_token, images=images)
+        # **絵を読めないモデルは、断らずに黙って空を返す（2026-09-10）。**
+        # そのままだと「今日は口数が少ないな」にしか見えない。一度だけ絵抜きで
+        # 撮り直し、旗を立てて呼び出し側に言わせる。classic の `_call_seeing`
+        # と同じ作法。
+        if images and not (raw or "").strip():
+            logger.warning(
+                "[muse_refine] %s returned nothing for an image turn — "
+                "retrying blind", model,
             )
-        else:
-            parts: list[str] = []
-            async for event in ollama.generate_text_stream(
-                prompt, model=model or None, think=False, options=opts,
-            ):
-                if event.get("type") == "token" and event.get("text"):
-                    parts.append(event["text"])
-                    try:
-                        on_token(event["text"])
-                    except Exception:
-                        logger.debug("[muse_refine] on_token failed", exc_info=True)
-            raw = "".join(parts)
+            blind = True
+            raw = await _say(ollama, prompt, model=model, options=opts,
+                             on_token=on_token, images=None)
     except Exception:
         logger.exception("[muse_refine] actress failed")
         return {
@@ -316,8 +316,47 @@ async def actress_turn(
             "my_feel": "",
             "card": "",
             "pitch": "",
+            "blind": False,
         }
-    return parse_actress(raw)
+    return {**parse_actress(raw), "blind": blind}
+
+
+async def _say(
+    ollama, prompt: str, *, model: str, options: dict | None,
+    on_token=None, images: list[bytes] | None = None,
+) -> str:
+    """一回だけ喋らせる。絵があれば絵つき、流す先があれば流す。
+
+    **`think=False` と `options` は四つとも直に書く。** 束ねて `**kw` で渡すと
+    `test_think_is_off` と `test_num_ctx` の走査（AST）が確かめられなくなる ——
+    黙って既定の thinking に戻る道を作らないための試験なので、見える形で渡す。
+    """
+    if on_token is None:
+        if images:
+            return await ollama.generate_vlm(
+                prompt, images, model=model or None, think=False, options=options,
+            )
+        return await ollama.generate_text(
+            prompt, model=model or None, think=False, options=options,
+        )
+    stream = (
+        ollama.generate_vlm_stream(
+            prompt, images, model=model or None, think=False, options=options,
+        )
+        if images else
+        ollama.generate_text_stream(
+            prompt, model=model or None, think=False, options=options,
+        )
+    )
+    parts: list[str] = []
+    async for event in stream:
+        if event.get("type") == "token" and event.get("text"):
+            parts.append(event["text"])
+            try:
+                on_token(event["text"])
+            except Exception:
+                logger.debug("[muse_refine] on_token failed", exc_info=True)
+    return "".join(parts)
 
 
 async def verify_and_repair(

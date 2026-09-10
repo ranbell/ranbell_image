@@ -1919,6 +1919,10 @@
     "rewriteLog": "ledger の書き換え",
     "turnTrace": "ターン追跡",
     "stageMs": "段の時間",
-    "refineLog": "イベントログ"
+    "refineLog": "イベントログ",
+    "loungeShared": "楽屋に報告が届きました 💬",
+    "loungeReacted": "楽屋にみんなの反応が届きました 💕",
+    "loungePitch": "楽屋に提案が届きました 💡",
+    "loungeHabit": "スタジオ手帖に癖メモが増えました 📓"
   }
 }
