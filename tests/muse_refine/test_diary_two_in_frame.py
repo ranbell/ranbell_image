@@ -60,21 +60,29 @@ def test_the_lead_is_told_which_side_she_is_on():
     s = {"character": dict(A), "partner_character": dict(B)}
     got = muse_service._which_one_is_me(s, "a", DESC)
     head = got.splitlines()[0]
-    # 「あなたは**○**の」の ○ が主演の側であること（相手の側と取り違えない）
-    assert f"あなたは**{LEAD_JA}**の" in head
-    assert f"{PART_JA}にいるのは" in head
-    assert "silver_hair" in head
-    assert "倉田 あさひ" in head
+    assert f"あなたは{LEAD_JA}" in head
+    assert f"倉田 あさひは{PART_JA}" in head
     assert got.endswith(DESC)
 
 
 def test_the_partner_is_told_the_other_side():
     s = {"character": dict(A), "partner_character": dict(B)}
     got = muse_service._which_one_is_me(s, "b", DESC).splitlines()[0]
-    assert f"あなたは**{PART_JA}**の" in got
-    assert f"{LEAD_JA}にいるのは" in got
-    assert "light_green_hair" in got
-    assert "各務 みお" in got
+    assert f"あなたは{PART_JA}" in got
+    assert f"各務 みおは{LEAD_JA}" in got
+
+
+def test_the_hint_says_it_is_not_material_to_copy():
+    """総監督「日記の記載も写真の中身を細かく説明するようになってしまいました」。
+
+    一段目は見分けの語（silver_hair・bob_cut）まで渡していて、日記がそれを
+    そのまま書き起こした。手がかりであることを言い添え、語そのものは渡さない。
+    """
+    s = {"character": dict(A), "partner_character": dict(B)}
+    got = muse_service._which_one_is_me(s, "a", DESC)
+    assert "書き写さない" in got
+    assert "silver_hair" not in got
+    assert "bob_cut" not in got
 
 
 def test_the_diary_and_the_picture_agree():
@@ -94,8 +102,8 @@ def test_the_diary_and_the_picture_agree():
     left_en, right_en = identity.SIDE_WORDS["left"][0], identity.SIDE_WORDS["right"][0]
     assert f"{left_name} stands {left_en} of the frame; {right_name} {right_en}." in prose
     assert en_lead and en_part
-    assert f"あなたは**{LEAD_JA}**の" in muse_service._which_one_is_me(sess, "a", DESC)
-    assert f"あなたは**{PART_JA}**の" in muse_service._which_one_is_me(sess, "b", DESC)
+    assert f"あなたは{LEAD_JA}" in muse_service._which_one_is_me(sess, "a", DESC)
+    assert f"あなたは{PART_JA}" in muse_service._which_one_is_me(sess, "b", DESC)
 
 
 def test_each_is_told_not_to_borrow_the_other():
@@ -153,8 +161,9 @@ async def test_two_in_frame_are_read_separately(monkeypatch):
         _ImageDb(), seeing, _shot_session(partner=True), "aaa",
     )
     assert "TWO girls" in seeing.system
-    assert "SEPARATELY" in seeing.system
     assert "left" in seeing.system and "right" in seeing.system
+    # **短く。** 目録にならないよう、一人ぶんの読みと同じ分量に収める。
+    assert "ONE short English sentence each" in seeing.system
 
 
 @pytest.mark.asyncio

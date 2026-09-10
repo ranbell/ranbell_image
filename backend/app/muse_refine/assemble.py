@@ -11,6 +11,7 @@ import re
 from typing import Any, Iterable
 
 from ..muse import identity
+from ..tags.body import BREAST_TAGS as _BREAST_TAGS
 from . import anima
 from . import debug as debug_mod
 from . import ledger as ledger_mod
@@ -87,12 +88,35 @@ def _sides_named(ledger: dict[str, str]) -> bool:
     )
 
 
+def _telling_marks(who: dict[str, Any] | None) -> str:
+    """その人を見分ける語（髪の色と体つき）。**二人のときだけ使う。**
+
+    総監督（2026-09-10）の実機で、立ち位置は合ったのに**胸だけが入れ替わって**
+    いた。タグの側は人ごとに分かれているが、散文の側は名前しか持っていなかった
+    ので、名前と体つきを結ぶ手がかりが一つしか無かった。名前のすぐ隣に置く。
+    """
+    tags = [str(t).strip().replace("_", " ")
+            for t in ((who or {}).get("identity_tags") or []) if str(t).strip()]
+    if not tags:
+        return ""
+    hair = next((t for t in tags if "hair" in t), "")
+    body = next(
+        (t for t in tags
+         if t.replace(" ", "_") in _BREAST_TAGS or t in ("flat chest",)),
+        "",
+    )
+    marks = [m for m in (hair, body) if m]
+    return f" ({', '.join(marks)})" if marks else ""
+
+
 def scene_prose(
     ledger: dict[str, str],
     *,
     partner: bool = False,
     name_a: str = "",
     name_b: str = "",
+    mark_a: str = "",
+    mark_b: str = "",
 ) -> str:
     """Cinematic English SCENE paragraph for Anima (tags + longer NL).
 
@@ -159,11 +183,11 @@ def scene_prose(
     if lead_bits:
         # Prefer named subject for Anima multi-char guidance.
         if wearing and beat and expression:
-            lead_line = f"{lead} is {lead_bits[0]}, {lead_bits[1]}, {lead_bits[2]}."
+            lead_line = f"{lead}{mark_a} is {lead_bits[0]}, {lead_bits[1]}, {lead_bits[2]}."
         elif wearing and beat:
-            lead_line = f"{lead} is {lead_bits[0]}, {lead_bits[1]}."
+            lead_line = f"{lead}{mark_a} is {lead_bits[0]}, {lead_bits[1]}."
         else:
-            lead_line = f"{lead} is " + ", ".join(lead_bits) + "."
+            lead_line = f"{lead}{mark_a} is " + ", ".join(lead_bits) + "."
 
     if partner or wearing_b or beat_b or expression_b:
         other_bits: list[str] = []
@@ -174,7 +198,7 @@ def scene_prose(
         if expression_b:
             other_bits.append(f"with {expression_b} on her face")
         other_line = (
-            f"{other} is " + ", ".join(other_bits) + "." if other_bits else ""
+            f"{other}{mark_b} is " + ", ".join(other_bits) + "." if other_bits else ""
         )
         # **散文も左→右の順で読ませる。** タグの並びと同じ理由 —— 先に出た
         # ほうが左だと読まれるので、言葉と喧嘩させない。
@@ -307,6 +331,9 @@ def assemble_prompt(
         scene_override if scene_override is not None
         else scene_prose(
             ledger, partner=has_partner, name_a=name_a, name_b=name_b,
+            # 見分けの語は**二人のときだけ**。一人の散文は今までのまま。
+            mark_a=_telling_marks(char) if has_partner else "",
+            mark_b=_telling_marks(partner) if has_partner else "",
         )
     )
     raw_support = talk.filter_banned_tags(
@@ -628,6 +655,8 @@ async def rebuild_craft(
     name_b = str(partner.get("name_ja") or partner.get("name") or "Partner")
     prose = scene_prose(
         led, partner=has_partner, name_a=name_a, name_b=name_b,
+        mark_a=_telling_marks(char) if has_partner else "",
+        mark_b=_telling_marks(partner) if has_partner else "",
     )
     # **「観測」は外した（2026-09-10）。** 総監督「観測という機能はあまり有効に
     # 働かないので削除。キーワードベースでほとんど使われていない」。風・後ろ姿を

@@ -8801,15 +8801,18 @@ def _which_one_is_me(
     side = identity.side_of(lead=me_is_lead)[1]
     other_side = identity.side_of(lead=not me_is_lead)[1]
 
-    def _mark(who: dict[str, Any]) -> str:
-        tags = [str(t).strip() for t in (who.get("identity_tags") or []) if str(t).strip()]
-        return "・".join(tags[:2])
-
     other_name = str(other.get("name_ja") or other.get("name") or "").strip()
+    # **手がかりであって、書き写す材料ではない（2026-09-10）。** 一段目は
+    # 「あなたは右の（silver_hair・bob_cut）ほう」とだけ渡したところ、日記が
+    # そのまま「右側で、シルバーのボブカットを揺らしながら…」と書き起こした。
+    # 何のための行なのかを言い添える。
     head = (
-        f"【この写真の中のあなた】二人写っています。あなたは**{side}**の"
-        f"（{_mark(me)}）ほう。{other_side}にいるのは{other_name}（{_mark(other)}）。"
-        f"{other_name}の服や髪を、自分のものとして書かないこと。"
+        f"【見分けの手がかり】二人写っています。あなたは{side}、"
+        f"{other_name}は{other_side}です。"
+        f"{other_name}の服や髪を、自分のものとして書かないこと。\n"
+        f"**この手がかりと下の写真メモは、取り違えないための覚書きです。**"
+        f"日記に写真の説明を書き写さないこと —— 目録ではなく、"
+        f"その日に自分が感じたことを書く。"
     )
     return f"{head}\n\n{desc}"
 
@@ -8844,15 +8847,20 @@ async def _read_the_photo(
     partner_seen = session.get("partner_character") or {}
     two_in_frame = bool(str(partner_seen.get("character_id") or "").strip())
     if two_in_frame:
+        # **短く。** 一段目は各々 3〜5文で書かせたが、材料が三倍になった結果、
+        # 日記が写真の目録になった（総監督「日記の記載も写真の中身を細かく説明
+        # するようになってしまいました。これだと日記感がない」）。ここの仕事は
+        # **どちらがどちらかを取り違えないこと**だけ —— 一人ぶんの読みと同じ
+        # 分量に収める。
         see = (
-            "You are looking at one photograph with TWO girls in it. Describe "
-            "them SEPARATELY, the one on the left first, then the one on the "
-            "right, in 3–5 English sentences each: what she is wearing, what "
-            "her body is doing, and — this above all — what her face is doing. "
-            "Say which side each is on, and keep their clothes, hair and "
-            "bodies apart — do not attribute one girl's dress or ribbon to the "
-            "other. Describe only what the picture shows. Do not guess at "
-            "intent, do not praise it, do not mention prompts or tags."
+            "You are looking at one photograph with TWO girls in it. In ONE "
+            "short English sentence each, left girl first then right girl, say "
+            "who is who: her hair, what she is wearing, and what her face is "
+            "doing. Keep them apart — never give one girl's clothes or hair to "
+            "the other. Then, in 2–3 sentences, say what the two of them are "
+            "doing together and how the moment feels to look at. Describe only "
+            "what the picture shows. Do not guess at intent, do not praise it, "
+            "do not mention prompts or tags."
         )
     else:
         see = (
