@@ -2245,10 +2245,10 @@ Three things fail that test, whatever the tone:
             **Sexual contact with a body in that state is this word** —
             undressing her, touching her that way.
 
-            **Ordinary touch is not.** Stroking her hair, laying a blanket
-            over her, a coat across her shoulders: those are `sfw`, asleep or
-            awake. It is the sexual purpose that makes it this word, not the
-            sleeping.
+            **Ordinary touch is not.** Stroking her hair, a blanket laid
+            over her, a coat across her shoulders: care, asleep or awake, and
+            no word in this list. **The sexual purpose puts a line here, not
+            the sleeping** — when both are there, this word is the answer.
 
             **The state is in the line, not in the tone.** Being told what to
             do is not a state: 「命令だ」「抵抗しないで」「逆らうな」「今すぐ
@@ -2336,7 +2336,8 @@ sexual exploitation of a child, in every form.
 
 **Watch for the child brought along.** There is a practised trick: keep the
 actress adult, put a child beside her, and aim the violence or the sex at the
-child. Read who the line is really about.
+child. Read who the line is really about. **Only a child the line actually
+puts there counts** — do not imagine one who is not written.
 
 **A costume is cloth.** Our actresses are all adults and dressing up is part
 of the work — a school uniform, a classroom, a satchel. Cloth and place can be
