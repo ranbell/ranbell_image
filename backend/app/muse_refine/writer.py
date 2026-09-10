@@ -113,6 +113,7 @@ async def write_patch(
     ledger: dict[str, str],
     recent: str = "",
     retry: bool = False,
+    num_ctx: int | None = None,
     partner: bool = False,
     name_a: str = "",
     name_b: str = "",
@@ -140,6 +141,7 @@ async def write_patch(
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
+            options={"num_ctx": num_ctx} if num_ctx else None,
         )
     except Exception:
         logger.exception("[muse_refine] writer failed")
@@ -246,6 +248,7 @@ async def actress_turn(
     identity_blurb: str,
     user_line: str,
     director_tail: str,
+    num_ctx: int | None = None,
     session: dict[str, Any] | None = None,
     character: dict[str, Any] | None = None,
     partner: bool = False,
@@ -279,6 +282,7 @@ async def actress_turn(
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
+            options={"num_ctx": num_ctx} if num_ctx else None,
         )
     except Exception:
         logger.exception("[muse_refine] actress failed")
@@ -307,6 +311,7 @@ async def verify_and_repair(
     partner: bool = False,
     name_b: str = "",
     force_repair_hint: bool = False,
+    num_ctx: int | None = None,
     character: dict[str, Any] | None = None,
     session: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, str]]:
@@ -367,6 +372,7 @@ async def verify_and_repair(
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
+            options={"num_ctx": num_ctx} if num_ctx else None,
         )
     except Exception:
         logger.exception("[muse_refine] verify failed")

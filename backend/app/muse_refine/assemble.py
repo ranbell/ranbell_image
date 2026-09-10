@@ -14,6 +14,7 @@ from ..muse import identity
 from . import anima
 from . import debug as debug_mod
 from . import ledger as ledger_mod
+from .ctx import refine_num_ctx
 from . import talk
 
 logger = logging.getLogger(__name__)
@@ -722,6 +723,7 @@ async def densify_scene_prose(
     model: str,
     ledger: dict[str, str],
     base_prose: str,
+    num_ctx: int | None = None,
 ) -> str:
     """Optional LLM thicken — ledger facts stay absolute; consequences are craft-only."""
     if not base_prose.strip() or ollama is None:
@@ -765,6 +767,7 @@ async def densify_scene_prose(
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
+            options={"num_ctx": num_ctx} if num_ctx else None,
         )
     except Exception:
         logger.exception("[muse_refine] prose densify failed")
@@ -822,6 +825,7 @@ async def quality_enrich(
     model: str,
     ledger: dict[str, str],
     base_tags: list[str],
+    num_ctx: int | None = None,
 ) -> list[str]:
     """絵作りの語を足す。**WD14 は使わない（2026-09-09）。**
 
@@ -850,6 +854,7 @@ async def quality_enrich(
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
+            options={"num_ctx": num_ctx} if num_ctx else None,
         )
     except Exception:
         logger.exception("[muse_refine] quality enrich failed")
@@ -877,6 +882,7 @@ async def rebuild_craft(
 
     inputs = session.get("inputs") or {}
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    num_ctx = refine_num_ctx(session)
     quality_tags: list[str] = []
 
     base_bag = talk.filter_banned_tags(session, ledger_tag_bag(led), ledger=led)
@@ -885,6 +891,7 @@ async def rebuild_craft(
         model = str(inputs.get("model") or "")
         quality_tags = await quality_enrich(
             ollama, model=model, ledger=led, base_tags=base_bag,
+            num_ctx=num_ctx,
         )
         debug_mod.stage(session, "quality_enrich", t0)
         debug_mod.note(
@@ -915,6 +922,7 @@ async def rebuild_craft(
         model = str(inputs.get("model") or "")
         denser = await densify_scene_prose(
             ollama, model=model, ledger=led, base_prose=prose,
+            num_ctx=num_ctx,
         )
         debug_mod.stage(session, "prose_densify", t0)
         if denser and denser != prose:

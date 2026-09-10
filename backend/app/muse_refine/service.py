@@ -11,6 +11,7 @@ from ..muse import events, session_db, vitality
 from ..muse.defaults import ALL_DEFAULTS
 from ..muse.notebook import blank as notebook_blank
 from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, pipeline_view, talk, writer
+from .ctx import refine_num_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +298,18 @@ def restore_banned(session: dict[str, Any], tag: str) -> dict[str, Any]:
     return session
 
 
+async def _load_runtime_cfg(db, session: dict[str, Any]) -> dict[str, Any]:
+    """実行時設定をセッションに積む。**文脈長を判定係と揃えるため。**"""
+    try:
+        from ..runtime_config import get_runtime_config
+        cfg = await get_runtime_config(db)
+    except Exception:
+        logger.debug("[muse_refine] runtime config unavailable", exc_info=True)
+        return {}
+    session["_runtime_cfg"] = cfg
+    return cfg
+
+
 async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     """She speaks first — theme + reunion + signature dress. Idempotent-ish."""
     import time
@@ -309,6 +322,10 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     model = str(inputs.get("model") or "")
     name = char.get("name_ja") or char.get("name") or "Muse"
     theme = str(inputs.get("theme") or "").strip()
+    # **文脈長を最初のターンから揃える。** 判定係（`persona.contract_check_with_db`）
+    # が `_runtime_cfg` を積むのは会話が始まってからで、開幕だけ既定値のまま
+    # 走ると、そこで一度モデルを読み直す（実測 11〜24秒）。
+    await _load_runtime_cfg(db, session)
     # 開幕の一言も同じ —— 一人なら二人目の欄を見せない（`chat` と同じ判断）。
     partner_char = session.get("partner_character") or {}
     has_partner = bool(str(partner_char.get("character_id") or "").strip())
@@ -376,6 +393,7 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
         session=session,
         character=char,
         partner=has_partner, name_b=name_b,
+        num_ctx=refine_num_ctx(session),
     )
     debug_mod.stage(session, "open_actress", t0)
     talk.publish_actress_turn(
@@ -418,6 +436,7 @@ async def restate_field(
         # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
+            options={"num_ctx": refine_num_ctx(session)},
         )
     except Exception as exc:
         raise RefineError("restate failed") from exc
@@ -655,6 +674,7 @@ async def chat(
         ledger=led,
         recent=director_recent,
         partner=has_partner, name_a=name, name_b=name_b,
+        num_ctx=refine_num_ctx(session),
     )
     debug_mod.stage(session, "writer", t0)
 
@@ -670,6 +690,7 @@ async def chat(
             recent=director_recent,
             retry=True,
             partner=has_partner, name_a=name, name_b=name_b,
+            num_ctx=refine_num_ctx(session),
         )
         debug_mod.stage(session, "writer_retry", t0)
         debug_mod.note(session, "writer_retry", detail=str(patch), patch=patch)
@@ -772,6 +793,7 @@ async def chat(
         session=session,
         character=char,
         partner=has_partner, name_b=name_b,
+        num_ctx=refine_num_ctx(session),
     )
     debug_mod.stage(session, "actress", t0)
     say = actress.get("say") or ""
@@ -897,6 +919,7 @@ async def chat(
         before=before,
         recent=director_recent,
         partner=has_partner, name_b=name_b,
+        num_ctx=refine_num_ctx(session),
         force_repair_hint=missed,
         character=char,
         session=session,
@@ -1160,6 +1183,7 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
             "Wait for the final shoot to finish rendering"
         )
 
+    await _load_runtime_cfg(db, session)
     await assemble.rebuild_craft(db, request.app.state.ollama, session)
     prompt = str((session.get("craft") or {}).get("prompt") or "").strip()
     if not prompt:
@@ -1231,7 +1255,7 @@ async def wardrobe_stage(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             transcript=transcript,
             struck="",
             model=model or None,
-            num_ctx=None,
+            num_ctx=refine_num_ctx(session),
         )
     except Exception as exc:
         raise RefineError(
