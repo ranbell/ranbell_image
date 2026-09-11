@@ -145,9 +145,10 @@ async def write_patch(
     # プロンプトが一字動く（無い箱の説明を読ませることになる）。
     crew_block = (
         "\n" + crew_craft.strip() + "\n"
-        "Each of those lines is a seat that OWNS that field — take their\n"
-        "absolute values, they are the specialists. Override a seat only when\n"
-        "the director's latest line contradicts her.\n"
+        "Those seats are the specialists for their fields. **Fold their detail\n"
+        "INTO the field, keeping what is already there** — they shape under the\n"
+        "key, they do not replace it. Drop a seat's note only when the\n"
+        "director's latest line contradicts her.\n"
         if str(crew_craft or "").strip() else ""
     )
     prompt = (

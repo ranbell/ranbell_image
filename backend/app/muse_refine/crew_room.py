@@ -68,6 +68,28 @@ MUTED: frozenset[str] = frozenset(
 
 _CRAFT_LINE_RE = re.compile(r"(?im)^CRAFT\s*:\s*(.+?)\s*$")
 
+#: 席の出力書式。**classic の条文の末尾を上書きする。**（2026-09-11）
+#:
+#: `crew.system_prompt_for` は職能文（「TAGS と SCENE は書くな、君の CRAFT slot は
+#: LIGHT だ」）のすぐ後ろに classic の `OUTPUT`（SAY / TAGS / SCENE の三ブロック）
+#: を足す。条文の中で矛盾していて、**最後に読んだ側が勝つ** —— 実機で衣装の席が
+#: TAGS を35語並べて返してきた（`CRAFT:` は一行も無し）。
+#:
+#: 手帖が正本の studio では、この矛盾は classic 側の別の経路で解けていた。
+#: Refine は自分の書式を**いちばん後ろに**足して解く。女優の条文（`REFINE_OUTPUT`）
+#: と W撮りの `w_output_block` でもう二度使っている手。
+SEAT_OUTPUT = """
+OUTPUT FORMAT — this REPLACES any format above. Two lines, nothing else:
+
+SAY: 1–3 sentences of live table talk in YOUR voice. React to the floor, then
+commit ONE concrete thing from your own specialty. No danbooru tags in SAY.
+**Never write a TAGS: or SCENE: block — the Scripter owns the shot document.**
+
+CRAFT: <danbooru tags> | <short prose>
+Your slot only. Absolute values — never "darker" / "softer" / "more".
+Omit the whole CRAFT line when your slot should not move this turn.
+""".strip()
+
 
 #: 班が開いているセッションの印。**総監督が明示的に開けたときだけ立つ。**
 TABLE_OPEN = "crew_open"
@@ -247,7 +269,7 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
             muse_id, character=session.get("character") or {},
             base_style=str((session.get("inputs") or {}).get("look") or ""),
             seed=sid,
-        ),
+        ) + "\n\n" + SEAT_OUTPUT,
         prompt=prompt,
         model=model,
         images=None,
@@ -373,7 +395,13 @@ def craft_block(floor: list[dict[str, Any]]) -> str:
         by_field.setdefault(field, []).append(f"{row['name']}（{row['role']}）: {craft}")
     if not by_field:
         return ""
-    lines = ["THE CREW SPOKE — each seat owns one field. Absolute values already:"]
+    lines = [
+        "THE CREW SPOKE. Each line is the seat that owns that field, saying how "
+        "its craft should READ. **They shape under the key; they do not replace "
+        "it.** Keep what the director already put in the field and fold the "
+        "seat's detail in beside it — a wardrobe note about fabric never "
+        "removes the garment, a gaffer note never removes the director's hour.",
+    ]
     for field in ledger_mod.LEDGER_KEYS:
         if field in by_field:
             lines.append(f"  {field}:")
