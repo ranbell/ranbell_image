@@ -74,8 +74,45 @@ def blank() -> dict[str, str]:
     return {k: "" for k in LEDGER_KEYS}
 
 
+#: 欄の値の頭に付いてくるラベル。**台帳の値が、欄の名前で始まってはいけない。**
+#:
+#: 実機（2026-09-11）で `wearing` にこう着いた:
+#:
+#:     wearing: "BEAT: standing by the railing, silhouette against the sun"
+#:     bg:      "ATMOSPHERE:"
+#:
+#: 出どころは一つではない —— 女優の CARD（`persona.card_to_patch`）も、班の席の
+#: CRAFT も、writer の JSON も、どれもラベルを頭に付けてくることがある。
+#: **入口は `normalize_patch` 一つ**なので、ここで落とす。
+_LABEL_HEAD_RE = re.compile(
+    r"^\s*(?:PLACE|HOUR|SCENE|WEARING(?:_B)?|BEAT(?:_B)?|EXPRESSION(?:_B)?|"
+    r"FACE(?:_B)?|FRAME|LIGHT|BG|BACKGROUND|ATMOSPHERE|MOOD|LOOK|STYLE|"
+    r"LETTERING|TEXT|CLOTH|BODY|OPTICS|COLOUR|PROPS|AIR|SHAPE|RENDER|FINISH|"
+    r"TAGS|CRAFT)\s*[:：]\s*",
+    re.I,
+)
+
+
+def strip_field_label(value: str) -> str:
+    """値の頭から欄名を剥がす。重なっていても剥がす（`WEARING: BEAT: …`）。
+
+    **欄名に似ているだけの語は残す** —— `atmospheric, dusty` はコロンが無いので
+    触らない。剥がした結果が空になったら、その値は捨てられる（呼び出し側で）。
+    """
+    text = str(value or "")
+    for _ in range(4):
+        stripped = _LABEL_HEAD_RE.sub("", text, count=1)
+        if stripped == text:
+            break
+        text = stripped
+    return text.strip()
+
+
 def normalize_patch(raw: dict[str, Any] | None) -> dict[str, str]:
-    """Keep only known keys; coerce to stripped strings."""
+    """Keep only known keys; coerce to stripped strings.
+
+    値の頭に付いた欄名もここで落とす —— 台帳への入口はここ一つ。
+    """
     out: dict[str, str] = {}
     if not isinstance(raw, dict):
         return out
@@ -85,7 +122,7 @@ def normalize_patch(raw: dict[str, Any] | None) -> dict[str, str]:
         val = raw.get(key)
         if val is None:
             continue
-        text = str(val).strip()
+        text = strip_field_label(str(val).strip())
         if key == "wearing_drop" and not text:
             continue
         out[key] = text

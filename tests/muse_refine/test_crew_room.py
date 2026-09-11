@@ -207,3 +207,38 @@ def test_an_empty_craft_makes_no_line():
 
 def test_the_seat_contract_forbids_labels_too():
     assert "No field label inside CRAFT" in C.SEAT_OUTPUT
+
+
+def test_the_ledger_door_strips_labels_whoever_knocked():
+    """**台帳の値が、欄の名前で始まってはいけない。**（2026-09-11）
+
+    出どころは一つではなかった —— 班の席の CRAFT だけでなく、女優の CARD
+    （`persona.card_to_patch`）も writer の JSON も、ラベルを頭に付けてくる。
+    実機で `wearing: "BEAT: standing by the railing…"` が残り続けたのは、
+    班の経路だけを塞いでいたから。**入口は `normalize_patch` 一つ。**
+    """
+    from app.muse_refine import persona
+
+    got = L.normalize_patch({"wearing": "BEAT: standing by the railing", "bg": "ATMOSPHERE:"})
+    assert got["wearing"] == "standing by the railing"
+    assert got["bg"] == ""                                  # 空は scrub が捨てる
+
+    # 女優の CARD 経由でも同じ
+    card = L.normalize_patch(persona.card_to_patch("WEARING: BEAT: standing, silhouette"))
+    assert card["wearing"] == "standing, silhouette"
+
+
+def test_a_value_that_merely_looks_like_a_label_survives():
+    got = L.normalize_patch({
+        "atmosphere": "atmospheric, dusty",
+        "scene": "cafe: the corner table",
+    })
+    assert got["atmosphere"] == "atmospheric, dusty"
+    assert got["scene"] == "cafe: the corner table"
+
+
+def test_there_is_only_one_label_stripper():
+    """二つ持つと必ずずれる。班は台帳のものを使う。"""
+    import inspect
+    assert not hasattr(C, "_LABEL_HEAD_RE")
+    assert "ledger_mod.strip_field_label" in inspect.getsource(C.craft_tags)
